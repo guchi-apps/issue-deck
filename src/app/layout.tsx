@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
+// Murechoは@fontsourceパッケージ（npm経由でフォントファイル本体を配布）で自己ホストする。
+// next/font/googleのCJKフォントはこの開発環境から fonts.gstatic.com に到達できずビルドが失敗するため使わない。
+import "@fontsource/murecho/400.css";
+import "@fontsource/murecho/500.css";
+import "@fontsource/murecho/600.css";
+import "@fontsource/murecho/700.css";
 import "./globals.css";
 
-// 日本語の本文フォントはOS標準フォントのスタック（globals.cssの--font-sans）を使う。
-// Google Fonts経由のCJKフォントはこの開発環境から fonts.gstatic.com に到達できず
-// ビルドが失敗するため採用しない。
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],

@@ -47,11 +47,11 @@
 }
 
 :root {
-  /* Google Fonts(fonts.gstatic.com)がこの開発環境から到達不可のため、
-     ネットワーク不要なOS標準フォントのスタックを採用。各OSの高品質な日本語フォントを優先する。 */
+  /* Murecho（@fontsourceで自己ホスト、layout.tsxでCSSをimport）を優先し、
+     読み込み前後や万一の欠字時はOS標準の日本語フォントにフォールバックする。 */
   --font-sans-stack:
-    "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Segoe UI",
-    Roboto, "Noto Sans JP", "Helvetica Neue", Arial, system-ui, -apple-system,
+    "Murecho", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic",
+    "Segoe UI", Roboto, "Noto Sans JP", "Helvetica Neue", Arial, system-ui, -apple-system,
     BlinkMacSystemFont, sans-serif;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
