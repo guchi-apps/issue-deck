@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// --- NextAuth.js / Auth.js v5 ---
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+
+  githubUserId Int     @unique
+  githubLogin  String  @unique
+  githubName   String?
+  avatarUrl    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  userInstallations UserInstallation[]
+}
+
+// --- GitHub App 連携 ---
+
+enum AccountType {
+  USER
+  ORGANIZATION
+}
+
+enum RepositorySelection {
+  ALL
+  SELECTED
+}
+
+// GitHub App のインストール単位（個人アカウント or Organization ごとに1件）
+model GithubInstallation {
+  id                    String              @id @default(cuid())
+  installationId        Int                 @unique
+  accountId             Int
+  accountLogin          String
+  accountType           AccountType
+  repositorySelection   RepositorySelection
+  suspendedAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userInstallations UserInstallation[]
+  repositories      Repository[]
+
+  @@index([accountLogin])
+}
+
+// ログインユーザーとGitHub Appインストールの紐付け（同一インストールに複数ユーザーがアクセスできる場合を考慮）
+model UserInstallation {
+  id             String   @id @default(cuid())
+  userId         String
+  installationId String
+  role           String?
+
+  createdAt DateTime @default(now())
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, installationId])
+}
+
+model Repository {
+  id                   String   @id @default(cuid())
+  githubRepositoryId   Int      @unique
+  installationId       String
+  ownerLogin           String
+  name                 String
+  fullName             String
+  private              Boolean
+  htmlUrl              String
+  archived             Boolean  @default(false)
+  defaultBranch        String
+  lastSyncedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@index([installationId])
+  @@unique([installationId, fullName])
+}
