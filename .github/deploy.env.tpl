@@ -16,7 +16,7 @@ MIGRATE_DB_PASSWORD=op://apps/DB/migrate-password
 
 NEXT_PUBLIC_SUPABASE_URL=op://apps/Supabase/project-url
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=op://apps/Supabase/publishable-key
-SUPABASE_SERVICE_ROLE_KEY=op://apps/Supabase/service-role-key
+SUPABASE_SERVICE_ROLE_KEY=op://apps/Supabase/secret-key
 
 GITHUB_APP_ID=op://apps/issue-deck/github-app-id
 GITHUB_APP_PRIVATE_KEY_BASE64=op://apps/issue-deck/github-app-private-key-base64
