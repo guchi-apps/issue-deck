@@ -1,6 +1,5 @@
 const path = require("node:path");
 
-// 本番ポートはデプロイ着手時（M7想定）に vps リポジトリのアプリ一覧を確認のうえ確定する。
 module.exports = {
   apps: [
     {
@@ -19,7 +18,7 @@ module.exports = {
       },
       env_production: {
         NODE_ENV: "production",
-        PORT: process.env.PORT,
+        PORT: process.env.PORT || 3111,
       },
     },
   ],
