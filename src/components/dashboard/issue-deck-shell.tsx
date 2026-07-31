@@ -16,12 +16,16 @@ import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-rep
 import { MobileViewIssuesScreen } from "@/components/dashboard/mobile/mobile-view-issues-screen";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
+import { useIssueFilters } from "@/hooks/use-issue-filters";
 import type { FetchIssuesError } from "@/lib/github/fetch-dashboard-issues";
 import {
+  applyIssueFilters,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
   filterIssuesByView,
+  getAssigneeOptions,
+  sortIssues,
 } from "@/lib/issue-stats";
 import { navViews } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
@@ -48,33 +52,61 @@ export function IssueDeckShell({
   issues,
   fetchErrors,
 }: IssueDeckShellProps) {
-  const [activeView, setActiveView] = useState<NavViewId>("all");
+  const { filters, setFilter, toggleLabel } = useIssueFilters();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
   const [errorBannerDismissed, setErrorBannerDismissed] = useState(false);
 
   const currentUserLogin = currentUser?.login ?? null;
 
+  // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
+  // サイドバーの件数表示はこれを基準にする。
+  const topbarFilteredIssues = useMemo(
+    () => applyIssueFilters(issues, filters),
+    [issues, filters],
+  );
+
   const filteredIssues = useMemo(
-    () => filterIssuesByView(issues, activeView, currentUserLogin),
-    [issues, activeView, currentUserLogin],
+    () =>
+      sortIssues(
+        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin),
+        filters.sort,
+      ),
+    [topbarFilteredIssues, filters.view, filters.sort, currentUserLogin],
   );
+
+  // モバイル側はキーワード検索のみTopBarと状態を共有する（リポジトリ/状態/ラベル/担当者の
+  // 詳細フィルターはPCのTopBarに閉じる）。
+  const mobileIssues = useMemo(
+    () =>
+      applyIssueFilters(issues, {
+        q: filters.q,
+        repo: null,
+        state: null,
+        labels: [],
+        assignee: null,
+      }),
+    [issues, filters.q],
+  );
+
   const navCounts = useMemo(
-    () => computeNavCounts(issues, currentUserLogin),
-    [issues, currentUserLogin],
+    () => computeNavCounts(topbarFilteredIssues, currentUserLogin),
+    [topbarFilteredIssues, currentUserLogin],
   );
-  const overviewStats = useMemo(() => computeOverviewStats(issues, currentUserLogin), [
-    issues,
-    currentUserLogin,
-  ]);
+  const overviewStats = useMemo(
+    () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),
+    [topbarFilteredIssues, currentUserLogin],
+  );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
+  const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
   function handleSelectView(view: NavViewId) {
-    setActiveView(view);
+    setFilter("view", view);
     setSelectedIssue(null);
   }
 
   function handleMobileSelectView(view: NavViewId) {
+    setFilter("view", view);
     setMobileScreen({ kind: "view", view });
   }
 
@@ -104,7 +136,15 @@ export function IssueDeckShell({
 
   return (
     <div className="flex h-dvh flex-col">
-      <TopBar currentUser={currentUser} />
+      <TopBar
+        currentUser={currentUser}
+        filters={filters}
+        setFilter={setFilter}
+        toggleLabel={toggleLabel}
+        repositories={repositories}
+        labelSummary={labelSummary}
+        assigneeOptions={assigneeOptions}
+      />
 
       {fetchErrors.length > 0 && !errorBannerDismissed && (
         <div className="flex items-center justify-between gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
@@ -124,23 +164,22 @@ export function IssueDeckShell({
           <div className="flex-1 overflow-hidden">
             {mobileScreen.kind === "home" && (
               <MobileHomeScreen
-                activeView={activeView}
-                onSelectView={(view) => {
-                  setActiveView(view);
-                  handleMobileSelectView(view);
-                }}
+                activeView={filters.view}
+                onSelectView={handleMobileSelectView}
                 navCounts={navCounts}
                 repositories={repositories}
                 onSelectRepository={handleMobileSelectRepository}
                 labelSummary={labelSummary}
                 overviewStats={overviewStats}
+                searchValue={filters.q}
+                onSearchChange={(value) => setFilter("q", value)}
               />
             )}
 
             {mobileScreen.kind === "view" && (
               <MobileViewIssuesScreen
                 title={navViews.find((view) => view.id === mobileScreen.view)?.label ?? ""}
-                issues={filterIssuesByView(issues, mobileScreen.view, currentUserLogin)}
+                issues={filterIssuesByView(mobileIssues, mobileScreen.view, currentUserLogin)}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
@@ -150,7 +189,7 @@ export function IssueDeckShell({
             {mobileScreen.kind === "repo" && (
               <MobileRepoIssuesScreen
                 repository={mobileScreen.repository}
-                issues={issues}
+                issues={mobileIssues}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
@@ -173,7 +212,7 @@ export function IssueDeckShell({
 
         {/* PC: 左カラム（ナビゲーション） */}
         <SidebarNav
-          activeView={activeView}
+          activeView={filters.view}
           onSelectView={handleSelectView}
           navCounts={navCounts}
           repositories={repositories}
@@ -183,10 +222,11 @@ export function IssueDeckShell({
 
         {/* PC: 中央カラム（Issue一覧） */}
         <IssueList
-          title={navViews.find((view) => view.id === activeView)?.label ?? ""}
+          title={navViews.find((view) => view.id === filters.view)?.label ?? ""}
           issues={filteredIssues}
           selectedIssueId={selectedIssue?.id ?? null}
           onSelectIssue={setSelectedIssue}
+          showSearch={false}
           className="hidden w-96 shrink-0 border-r md:flex"
         />
 

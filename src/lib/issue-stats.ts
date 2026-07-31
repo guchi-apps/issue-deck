@@ -1,6 +1,8 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
+import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
+const RECENT_WINDOW_MS = DAY_MS * 7;
 
 export function filterIssuesByView(
   issues: Issue[],
@@ -16,13 +18,57 @@ export function filterIssuesByView(
       // お気に入り登録機能は未実装のため常に空。
       return [];
     case "recent":
-      return [...issues].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      return issues.filter(
+        (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
       );
     case "all":
     default:
       return issues;
   }
+}
+
+export function applyIssueFilters(
+  issues: Issue[],
+  filters: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee">,
+): Issue[] {
+  const keyword = filters.q.trim().toLowerCase();
+
+  return issues.filter((issue) => {
+    if (keyword) {
+      const haystack = `${issue.title}\n${issue.body}`.toLowerCase();
+      if (!haystack.includes(keyword)) return false;
+    }
+    if (filters.repo && issue.repositoryFullName !== filters.repo) return false;
+    if (filters.state && issue.state !== filters.state) return false;
+    if (filters.labels.length > 0) {
+      const issueLabelNames = new Set(issue.labels.map((label) => label.name));
+      if (!filters.labels.every((name) => issueLabelNames.has(name))) return false;
+    }
+    if (filters.assignee) {
+      if (filters.assignee === "unassigned") {
+        if (issue.assignee) return false;
+      } else if (issue.assignee?.login !== filters.assignee) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+export function sortIssues(issues: Issue[], sort: IssueSort): Issue[] {
+  const key: keyof Pick<Issue, "updatedAt" | "createdAt"> =
+    sort === "created" ? "createdAt" : "updatedAt";
+  return [...issues].sort(
+    (a, b) => new Date(b[key]).getTime() - new Date(a[key]).getTime(),
+  );
+}
+
+export function getAssigneeOptions(issues: Issue[]): string[] {
+  const logins = new Set<string>();
+  for (const issue of issues) {
+    if (issue.assignee) logins.add(issue.assignee.login);
+  }
+  return [...logins].sort();
 }
 
 export function computeNavCounts(

@@ -20,6 +20,8 @@ type MobileHomeScreenProps = {
   onSelectRepository: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
   overviewStats: OverviewStat[];
+  searchValue: string;
+  onSearchChange: (value: string) => void;
 };
 
 export function MobileHomeScreen({
@@ -30,6 +32,8 @@ export function MobileHomeScreen({
   onSelectRepository,
   labelSummary,
   overviewStats,
+  searchValue,
+  onSearchChange,
 }: MobileHomeScreenProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -69,7 +73,12 @@ export function MobileHomeScreen({
       <div className="p-4">
         <div className="relative">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Issueを検索..." className="pl-8" />
+          <Input
+            placeholder="Issueを検索..."
+            className="pl-8"
+            value={searchValue}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
         </div>
       </div>
 
