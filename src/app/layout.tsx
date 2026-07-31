@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
 // Murechoは@fontsourceパッケージ（npm経由でフォントファイル本体を配布）で自己ホストする。
 // next/font/googleのCJKフォントはこの開発環境から fonts.gstatic.com に到達できずビルドが失敗するため使わない。
@@ -16,6 +16,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "IssueDeck",
   description: "複数のGitHubリポジトリのIssueを横断して確認・整理できるWebアプリ",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 export default function RootLayout({
