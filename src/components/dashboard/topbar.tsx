@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Bell, ChevronDown, LayoutDashboard, Search } from "lucide-react";
+import { ChevronDown, LayoutDashboard, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +53,11 @@ export function TopBar({
     ? (repositories.find((repo) => repo.fullName === filters.repo)?.name ?? filters.repo)
     : "リポジトリ";
   const stateLabel =
-    filters.state === "open" ? "状態: Open" : filters.state === "closed" ? "状態: Closed" : "状態";
+    filters.state === "open"
+      ? "状態: Open"
+      : filters.state === "closed"
+        ? "状態: Closed"
+        : "状態: すべて";
   const labelsLabel = filters.labels.length > 0 ? `ラベル (${filters.labels.length})` : "ラベル";
   const assigneeLabel = filters.assignee
     ? filters.assignee === "unassigned"
@@ -111,12 +115,15 @@ export function TopBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent>
             <DropdownMenuRadioGroup
-              value={filters.state ?? ""}
+              value={filters.state}
               onValueChange={(value) =>
-                setFilter("state", value === "open" || value === "closed" ? value : null)
+                setFilter(
+                  "state",
+                  value === "open" || value === "closed" ? value : "all",
+                )
               }
             >
-              <DropdownMenuRadioItem value="">すべて</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="all">すべて</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="open">Open</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="closed">Closed</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
@@ -189,13 +196,6 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <Button variant="ghost" size="icon" className="relative" aria-label="通知">
-        <Bell />
-        <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
-          3
-        </span>
-      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

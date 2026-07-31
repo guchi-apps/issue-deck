@@ -39,7 +39,7 @@ export function applyIssueFilters(
       if (!haystack.includes(keyword)) return false;
     }
     if (filters.repo && issue.repositoryFullName !== filters.repo) return false;
-    if (filters.state && issue.state !== filters.state) return false;
+    if (filters.state !== "all" && issue.state !== filters.state) return false;
     if (filters.labels.length > 0) {
       const issueLabelNames = new Set(issue.labels.map((label) => label.name));
       if (!filters.labels.every((name) => issueLabelNames.has(name))) return false;

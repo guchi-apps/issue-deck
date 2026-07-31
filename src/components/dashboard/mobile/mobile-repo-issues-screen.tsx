@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, ChevronDown, FolderGit2, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowLeft, FolderGit2, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
+import {
+  MobileIssueFilterSheet,
+  type MobileIssueLocalFilters,
+} from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import { applyIssueFilters, computeLabelSummary, getAssigneeOptions, sortIssues } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
-import { cn } from "@/lib/utils";
-import type { IssueState, Issue } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileRepoIssuesScreenProps = {
@@ -24,11 +28,32 @@ export function MobileRepoIssuesScreen({
   onSelectIssue,
   onBack,
 }: MobileRepoIssuesScreenProps) {
-  const [stateFilter, setStateFilter] = useState<IssueState>("open");
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
+    state: "open",
+    labels: [],
+    assignee: null,
+    sort: "updated",
+  });
 
-  const repoIssues = issues.filter(
-    (issue) => issue.repositoryFullName === repository.fullName && issue.state === stateFilter,
+  const repoIssues = useMemo(
+    () => issues.filter((issue) => issue.repositoryFullName === repository.fullName),
+    [issues, repository.fullName],
   );
+
+  const displayedIssues = useMemo(() => {
+    const filtered = applyIssueFilters(repoIssues, {
+      q: "",
+      repo: null,
+      state: localFilters.state,
+      labels: localFilters.labels,
+      assignee: localFilters.assignee,
+    });
+    return sortIssues(filtered, localFilters.sort);
+  }, [repoIssues, localFilters]);
+
+  const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
+  const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
   const color = getRepoColor(repository.fullName);
 
   return (
@@ -56,7 +81,12 @@ export function MobileRepoIssuesScreen({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="rounded-md border p-1.5">
+          <button
+            type="button"
+            onClick={() => setFilterSheetOpen(true)}
+            className="rounded-md border p-1.5"
+            aria-label="絞り込み・並び替え"
+          >
             <SlidersHorizontal className="size-4" />
           </button>
           <button type="button" className="rounded-md border p-1.5">
@@ -65,45 +95,23 @@ export function MobileRepoIssuesScreen({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto border-b p-3">
-        <button
-          type="button"
-          onClick={() => setStateFilter("open")}
-          className={cn(
-            "rounded-full border px-3 py-1 text-xs whitespace-nowrap",
-            stateFilter === "open" && "border-primary bg-primary/10 text-primary",
-          )}
-        >
-          オープン
-        </button>
-        <button
-          type="button"
-          onClick={() => setStateFilter("closed")}
-          className={cn(
-            "rounded-full border px-3 py-1 text-xs whitespace-nowrap",
-            stateFilter === "closed" && "border-primary bg-primary/10 text-primary",
-          )}
-        >
-          クローズ
-        </button>
-        <button type="button" className="flex items-center gap-1 rounded-full border px-3 py-1 text-xs whitespace-nowrap">
-          ラベル
-          <ChevronDown className="size-3" />
-        </button>
-        <button type="button" className="flex items-center gap-1 rounded-full border px-3 py-1 text-xs whitespace-nowrap">
-          担当者
-          <ChevronDown className="size-3" />
-        </button>
-      </div>
-
       <IssueList
         title={repository.name}
-        issues={repoIssues}
+        issues={displayedIssues}
         selectedIssueId={selectedIssueId}
         onSelectIssue={onSelectIssue}
         showSearch={false}
         showHeader={false}
         className="flex-1"
+      />
+
+      <MobileIssueFilterSheet
+        open={filterSheetOpen}
+        onOpenChange={setFilterSheetOpen}
+        filters={localFilters}
+        onChange={setLocalFilters}
+        labelOptions={labelSummary}
+        assigneeOptions={assigneeOptions}
       />
     </div>
   );

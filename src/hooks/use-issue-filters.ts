@@ -6,7 +6,7 @@ import { useCallback, useMemo } from "react";
 import type { NavViewId } from "@/types/issue";
 
 export type IssueSort = "updated" | "created";
-export type IssueStateFilter = "open" | "closed" | null;
+export type IssueStateFilter = "all" | "open" | "closed";
 
 export type IssueFilters = {
   view: NavViewId;
@@ -22,7 +22,7 @@ const DEFAULT_FILTERS: IssueFilters = {
   view: "all",
   q: "",
   repo: null,
-  state: null,
+  state: "open",
   labels: [],
   assignee: null,
   sort: "updated",
@@ -53,7 +53,10 @@ export function useIssueFilters() {
       view: isNavViewId(viewParam) ? viewParam : DEFAULT_FILTERS.view,
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repo: searchParams.get("repo"),
-      state: stateParam === "open" || stateParam === "closed" ? stateParam : null,
+      state:
+        stateParam === "open" || stateParam === "closed" || stateParam === "all"
+          ? stateParam
+          : DEFAULT_FILTERS.state,
       labels: labelsParam ? labelsParam.split(",").filter(Boolean) : [],
       assignee: searchParams.get("assignee"),
       sort: sortParam === "created" ? "created" : DEFAULT_FILTERS.sort,

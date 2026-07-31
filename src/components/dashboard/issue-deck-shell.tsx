@@ -12,8 +12,10 @@ import {
 } from "@/components/dashboard/mobile-bottom-nav";
 import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
+import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
-import { MobileViewIssuesScreen } from "@/components/dashboard/mobile/mobile-view-issues-screen";
+import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
@@ -34,10 +36,11 @@ import type { CurrentUser } from "@/types/user";
 
 type MobileScreen =
   | { kind: "home" }
-  | { kind: "view"; view: NavViewId }
-  | { kind: "repo"; repository: ConnectedRepository }
-  | { kind: "issue"; issue: Issue; back: MobileScreen }
-  | { kind: "placeholder"; tab: MobileBottomNavTab; label: string };
+  | { kind: "issues" }
+  | { kind: "repos" }
+  | { kind: "settings" }
+  | { kind: "repo-detail"; repository: ConnectedRepository; back: MobileScreen }
+  | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
@@ -75,20 +78,6 @@ export function IssueDeckShell({
     [topbarFilteredIssues, filters.view, filters.sort, currentUserLogin],
   );
 
-  // モバイル側はキーワード検索のみTopBarと状態を共有する（リポジトリ/状態/ラベル/担当者の
-  // 詳細フィルターはPCのTopBarに閉じる）。
-  const mobileIssues = useMemo(
-    () =>
-      applyIssueFilters(issues, {
-        q: filters.q,
-        repo: null,
-        state: null,
-        labels: [],
-        assignee: null,
-      }),
-    [issues, filters.q],
-  );
-
   const navCounts = useMemo(
     () => computeNavCounts(topbarFilteredIssues, currentUserLogin),
     [topbarFilteredIssues, currentUserLogin],
@@ -105,34 +94,28 @@ export function IssueDeckShell({
     setSelectedIssue(null);
   }
 
-  function handleMobileSelectView(view: NavViewId) {
-    setFilter("view", view);
-    setMobileScreen({ kind: "view", view });
-  }
-
   function handleMobileSelectRepository(repository: ConnectedRepository) {
-    setMobileScreen({ kind: "repo", repository });
+    setMobileScreen((prev) => ({ kind: "repo-detail", repository, back: prev }));
   }
 
   function handleMobileSelectIssue(issue: Issue) {
-    setMobileScreen((prev) => ({ kind: "issue", issue, back: prev }));
+    setMobileScreen((prev) => ({ kind: "issue-detail", issue, back: prev }));
   }
 
   function handleMobileBack() {
-    setMobileScreen((prev) => (prev.kind === "issue" ? prev.back : { kind: "home" }));
+    setMobileScreen((prev) =>
+      prev.kind === "issue-detail" || prev.kind === "repo-detail" ? prev.back : { kind: "home" },
+    );
   }
 
   function handleBottomNavSelect(tab: MobileBottomNavTab) {
-    if (tab === "home" || tab === "repos") {
-      setMobileScreen({ kind: "home" });
-      return;
-    }
-    const label = tab === "notifications" ? "通知" : "設定";
-    setMobileScreen({ kind: "placeholder", tab, label });
+    setMobileScreen({ kind: tab });
   }
 
   const activeBottomNavTab: MobileBottomNavTab =
-    mobileScreen.kind === "placeholder" ? mobileScreen.tab : "home";
+    mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
+      ? "home"
+      : mobileScreen.kind;
 
   return (
     <div className="flex h-dvh flex-col">
@@ -159,51 +142,47 @@ export function IssueDeckShell({
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
-        {/* スマホ: 画面遷移型 */}
+        {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
         <div className="flex flex-1 flex-col overflow-hidden md:hidden">
           <div className="flex-1 overflow-hidden">
             {mobileScreen.kind === "home" && (
-              <MobileHomeScreen
-                activeView={filters.view}
-                onSelectView={handleMobileSelectView}
-                navCounts={navCounts}
+              <MobileHomeScreen labelSummary={labelSummary} overviewStats={overviewStats} />
+            )}
+
+            {mobileScreen.kind === "issues" && (
+              <MobileIssuesScreen
+                issues={issues}
+                currentUserLogin={currentUserLogin}
+                labelSummary={labelSummary}
+                assigneeOptions={assigneeOptions}
+                selectedIssueId={null}
+                onSelectIssue={handleMobileSelectIssue}
+              />
+            )}
+
+            {mobileScreen.kind === "repos" && (
+              <MobileReposScreen
                 repositories={repositories}
                 onSelectRepository={handleMobileSelectRepository}
-                labelSummary={labelSummary}
-                overviewStats={overviewStats}
-                searchValue={filters.q}
-                onSearchChange={(value) => setFilter("q", value)}
               />
             )}
 
-            {mobileScreen.kind === "view" && (
-              <MobileViewIssuesScreen
-                title={navViews.find((view) => view.id === mobileScreen.view)?.label ?? ""}
-                issues={filterIssuesByView(mobileIssues, mobileScreen.view, currentUserLogin)}
-                selectedIssueId={null}
-                onSelectIssue={handleMobileSelectIssue}
-                onBack={handleMobileBack}
-              />
+            {mobileScreen.kind === "settings" && (
+              <MobileSettingsScreen currentUser={currentUser} />
             )}
 
-            {mobileScreen.kind === "repo" && (
+            {mobileScreen.kind === "repo-detail" && (
               <MobileRepoIssuesScreen
                 repository={mobileScreen.repository}
-                issues={mobileIssues}
+                issues={issues}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
               />
             )}
 
-            {mobileScreen.kind === "issue" && (
+            {mobileScreen.kind === "issue-detail" && (
               <MobileIssueDetail issue={mobileScreen.issue} onBack={handleMobileBack} />
-            )}
-
-            {mobileScreen.kind === "placeholder" && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                {mobileScreen.label}は準備中です
-              </div>
             )}
           </div>
 
@@ -216,6 +195,7 @@ export function IssueDeckShell({
           onSelectView={handleSelectView}
           navCounts={navCounts}
           repositories={repositories}
+          onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
           labelSummary={labelSummary}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
