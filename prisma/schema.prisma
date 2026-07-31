@@ -89,7 +89,55 @@ model Repository {
   updatedAt DateTime @updatedAt
 
   installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  issues       Issue[]
 
   @@index([installationId])
   @@unique([installationId, fullName])
+}
+
+// --- Issueキャッシュ（M6: Webhookで差分反映） ---
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+model Issue {
+  id              String     @id @default(cuid())
+  githubIssueId   BigInt     @unique
+  repositoryId    String
+  number          Int
+  title           String     @db.Text
+  body            String?    @db.Text
+  state           IssueState
+  htmlUrl         String
+  authorLogin     String
+  assigneeLogin   String?
+  commentCount    Int        @default(0)
+  milestoneTitle  String?
+  milestoneOpen   Int?
+  milestoneClosed Int?
+  githubCreatedAt DateTime
+  githubUpdatedAt DateTime
+  syncedAt        DateTime   @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repository Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels     IssueLabel[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId])
+}
+
+model IssueLabel {
+  id      String @id @default(cuid())
+  issueId String
+  name    String
+  color   String
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, name])
 }

@@ -1,7 +1,7 @@
 import { IssueDeckShell } from "@/components/dashboard/issue-deck-shell";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { fetchDashboardIssues } from "@/lib/github/fetch-dashboard-issues";
+import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 
 export default async function DashboardPage() {
   const currentUser = await getCurrentUser();
@@ -14,10 +14,14 @@ export default async function DashboardPage() {
       })
     : [];
 
-  const { issues, errors } =
-    repositories.length > 0
-      ? await fetchDashboardIssues(repositories)
-      : { issues: [], errors: [] };
+  const issueRows = currentUser
+    ? await db.issue.findMany({
+        where: { repository: { installation: { userInstallations: { some: { userId: currentUser.id } } } } },
+        include: { labels: true, repository: true },
+      })
+    : [];
+
+  const issues = issueRows.map((row) => dbIssueToDisplayIssue(row.repository.fullName, row));
 
   return (
     <IssueDeckShell
@@ -33,7 +37,6 @@ export default async function DashboardPage() {
         private: repo.private,
       }))}
       issues={issues}
-      fetchErrors={errors}
     />
   );
 }

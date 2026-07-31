@@ -1,6 +1,10 @@
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { GithubApiComment, GithubApiIssue } from "@/lib/github/issues-api";
 import type { Issue, IssueComment, IssueLabel } from "@/types/issue";
+import type {
+  Issue as DbIssue,
+  IssueLabel as DbIssueLabel,
+} from "@prisma/client";
 
 function mapLabel(label: { name: string; color: string } | string): IssueLabel {
   if (typeof label === "string") {
@@ -39,6 +43,39 @@ export function mapIssue(repositoryFullName: string, raw: GithubApiIssue): Issue
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
     htmlUrl: raw.html_url,
+  };
+}
+
+export function dbIssueToDisplayIssue(
+  repositoryFullName: string,
+  row: DbIssue & { labels: DbIssueLabel[] },
+): Issue {
+  const milestone =
+    row.milestoneTitle && row.milestoneOpen !== null && row.milestoneClosed !== null
+      ? {
+          name: row.milestoneTitle,
+          progressPercent:
+            row.milestoneOpen + row.milestoneClosed === 0
+              ? 0
+              : Math.round((row.milestoneClosed / (row.milestoneOpen + row.milestoneClosed)) * 100),
+        }
+      : null;
+
+  return {
+    id: String(row.githubIssueId),
+    number: row.number,
+    title: row.title,
+    body: row.body ?? "",
+    state: row.state === "OPEN" ? "open" : "closed",
+    repositoryFullName,
+    author: { login: row.authorLogin },
+    assignee: row.assigneeLogin ? { login: row.assigneeLogin } : null,
+    labels: row.labels.map((label) => ({ name: label.name, color: `#${label.color}` })),
+    milestone,
+    commentCount: row.commentCount,
+    createdAt: row.githubCreatedAt.toISOString(),
+    updatedAt: row.githubUpdatedAt.toISOString(),
+    htmlUrl: row.htmlUrl,
   };
 }
 

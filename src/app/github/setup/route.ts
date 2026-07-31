@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth-user";
 import { getAppJwt, getInstallationToken } from "@/lib/github/app-auth";
+import { syncRepositoryIssues } from "@/lib/github/sync-issues";
 import { getRequestOrigin } from "@/lib/request-origin";
 import type { AccountType, RepositorySelection } from "@prisma/client";
 
@@ -123,8 +124,8 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  await db.$transaction([
-    ...repositories.map((repo) =>
+  const savedRepositories = await Promise.all(
+    repositories.map((repo) =>
       db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
@@ -151,19 +152,35 @@ export async function GET(request: NextRequest) {
         },
       }),
     ),
-    db.repository.deleteMany({
-      where: {
-        installationId: githubInstallation.id,
-        githubRepositoryId: { notIn: repositories.map((repo) => repo.id) },
-      },
-    }),
-  ]);
+  );
+
+  await db.repository.deleteMany({
+    where: {
+      installationId: githubInstallation.id,
+      githubRepositoryId: { notIn: repositories.map((repo) => repo.id) },
+    },
+  });
 
   await db.userInstallation.upsert({
     where: { userId_installationId: { userId, installationId: githubInstallation.id } },
     create: { userId, installationId: githubInstallation.id },
     update: {},
   });
+
+  // Issueキャッシュも同期する（インストール直後・リポジトリ選択変更直後に反映されるように）。
+  // 全リポジトリを並列実行するとMariaDBへの書き込みが競合しデッドロックするため、1件ずつ順番に処理する。
+  for (const repo of savedRepositories) {
+    try {
+      await syncRepositoryIssues({
+        id: repo.id,
+        ownerLogin: repo.ownerLogin,
+        name: repo.name,
+        installation: { installationId },
+      });
+    } catch (error) {
+      console.error(`[github/setup] failed to sync issues for ${repo.fullName}`, error);
+    }
+  }
 
   return NextResponse.redirect(`${origin}/dashboard`);
 }

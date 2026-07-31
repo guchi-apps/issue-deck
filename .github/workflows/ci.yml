@@ -49,3 +49,4 @@ jobs:
           GITHUB_APP_ID: "123456"
           GITHUB_APP_PRIVATE_KEY_BASE64: Y2ktcGxhY2Vob2xkZXI=
           NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder
+          GITHUB_WEBHOOK_SECRET: ci-placeholder

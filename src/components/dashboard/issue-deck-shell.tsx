@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
 
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -19,7 +18,6 @@ import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-setti
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
-import type { FetchIssuesError } from "@/lib/github/fetch-dashboard-issues";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -46,19 +44,16 @@ type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
-  fetchErrors: FetchIssuesError[];
 };
 
 export function IssueDeckShell({
   currentUser,
   repositories,
   issues,
-  fetchErrors,
 }: IssueDeckShellProps) {
   const { filters, setFilter, toggleLabel } = useIssueFilters();
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
-  const [errorBannerDismissed, setErrorBannerDismissed] = useState(false);
 
   const currentUserLogin = currentUser?.login ?? null;
 
@@ -128,18 +123,6 @@ export function IssueDeckShell({
         labelSummary={labelSummary}
         assigneeOptions={assigneeOptions}
       />
-
-      {fetchErrors.length > 0 && !errorBannerDismissed && (
-        <div className="flex items-center justify-between gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
-          <span>
-            {fetchErrors.length}件のリポジトリでIssue取得に失敗しました（
-            {fetchErrors.map((e) => e.repo).join(", ")}）
-          </span>
-          <button type="button" onClick={() => setErrorBannerDismissed(true)}>
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
