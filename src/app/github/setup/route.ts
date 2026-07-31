@@ -84,6 +84,11 @@ export async function GET(request: NextRequest) {
   const origin = getRequestOrigin(request);
   const { searchParams } = new URL(request.url);
   const installationIdParam = searchParams.get("installation_id");
+  const setupAction = searchParams.get("setup_action");
+
+  if (setupAction === "request") {
+    return NextResponse.redirect(`${origin}/github/setup/pending`);
+  }
 
   if (!installationIdParam) {
     return NextResponse.redirect(`${origin}/dashboard`);

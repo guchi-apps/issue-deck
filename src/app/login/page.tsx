@@ -3,6 +3,7 @@ import { LayoutDashboard } from "lucide-react";
 
 import { GithubLoginButton } from "@/components/auth/github-login-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 
 export default function LoginPage() {
   return (
@@ -25,6 +26,15 @@ export default function LoginPage() {
           </Suspense>
         </CardContent>
       </Card>
+
+      <div className="flex gap-4 text-xs text-muted-foreground">
+        <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">
+          利用規約
+        </a>
+        <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">
+          プライバシーポリシー
+        </a>
+      </div>
     </div>
   );
 }

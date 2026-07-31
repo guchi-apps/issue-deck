@@ -1,11 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { useState } from "react";
+import { LogOut, Mail, ShieldCheck, Trash2 } from "lucide-react";
 
+import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
+import { useAccountActions } from "@/hooks/use-account-actions";
+import { CONTACT_EMAIL, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
@@ -13,14 +15,8 @@ type MobileSettingsScreenProps = {
 };
 
 export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps) {
-  const router = useRouter();
-
-  async function handleLogout() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
+  const { handleLogout, handleDeleteAccount } = useAccountActions();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -45,7 +41,43 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
           <LogOut />
           ログアウト
         </Button>
+
+        <Button variant="outline" className="justify-start" asChild>
+          <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
+            <ShieldCheck />
+            利用規約
+          </a>
+        </Button>
+
+        <Button variant="outline" className="justify-start" asChild>
+          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+            <ShieldCheck />
+            プライバシーポリシー
+          </a>
+        </Button>
+
+        <Button variant="outline" className="justify-start" asChild>
+          <a href={`mailto:${CONTACT_EMAIL}`}>
+            <Mail />
+            お問い合わせ
+          </a>
+        </Button>
+
+        <Button
+          variant="destructive"
+          className="justify-start"
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          <Trash2 />
+          アカウントを削除
+        </Button>
       </div>
+
+      <DeleteAccountDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={handleDeleteAccount}
+      />
     </div>
   );
 }

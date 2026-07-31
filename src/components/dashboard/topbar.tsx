@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { ChevronDown, LayoutDashboard, Search } from "lucide-react";
 
+import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,12 +12,14 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { useAccountActions } from "@/hooks/use-account-actions";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import { createClient } from "@/lib/supabase/client";
+import { CONTACT_EMAIL, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { LabelSummary } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -40,14 +43,8 @@ export function TopBar({
   labelSummary,
   assigneeOptions,
 }: TopBarProps) {
-  const router = useRouter();
-
-  async function handleLogout() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
+  const { handleLogout, handleDeleteAccount } = useAccountActions();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const repoLabel = filters.repo
     ? (repositories.find((repo) => repo.fullName === filters.repo)?.name ?? filters.repo)
@@ -210,9 +207,39 @@ export function TopBar({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem disabled>{currentUser?.name ?? currentUser?.login}</DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleLogout}>ログアウト</DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
+              利用規約
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+              プライバシーポリシー
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={`mailto:${CONTACT_EMAIL}`}>お問い合わせ</a>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={(e) => {
+              e.preventDefault();
+              setDeleteDialogOpen(true);
+            }}
+          >
+            アカウントを削除
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <DeleteAccountDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={handleDeleteAccount}
+      />
     </header>
   );
 }
