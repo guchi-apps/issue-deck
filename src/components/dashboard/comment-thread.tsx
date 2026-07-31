@@ -1,5 +1,6 @@
 import { MoreHorizontal, ThumbsUp } from "lucide-react";
 
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { IssueComment } from "@/types/issue";
@@ -45,7 +46,7 @@ export function CommentThread({ comments, isLoading, error }: CommentThreadProps
               </div>
               <MoreHorizontal className="size-4 text-muted-foreground" />
             </div>
-            <p className="mt-1 text-sm leading-relaxed">{comment.body}</p>
+            <MarkdownBody content={comment.body} className="mt-1" />
             {comment.reactionCount > 0 && (
               <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
                 <ThumbsUp className="size-3" />
