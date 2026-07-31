@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -15,50 +16,58 @@ import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-rep
 import { MobileViewIssuesScreen } from "@/components/dashboard/mobile/mobile-view-issues-screen";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
-import { CURRENT_USER_LOGIN, mockIssues, navViews } from "@/lib/mock-data";
-import type { MockIssue, NavViewId } from "@/types/issue";
+import type { FetchIssuesError } from "@/lib/github/fetch-dashboard-issues";
+import {
+  computeLabelSummary,
+  computeNavCounts,
+  computeOverviewStats,
+  filterIssuesByView,
+} from "@/lib/issue-stats";
+import { navViews } from "@/lib/nav-views";
+import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
-
-function filterIssuesByView(issues: MockIssue[], view: NavViewId): MockIssue[] {
-  switch (view) {
-    case "assigned":
-      return issues.filter((issue) => issue.assignee?.login === CURRENT_USER_LOGIN);
-    case "created":
-      return issues.filter((issue) => issue.author.login === CURRENT_USER_LOGIN);
-    case "favorites":
-      return issues.slice(0, 1);
-    case "recent":
-      return [...issues].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      );
-    case "all":
-    default:
-      return issues;
-  }
-}
 
 type MobileScreen =
   | { kind: "home" }
   | { kind: "view"; view: NavViewId }
   | { kind: "repo"; repository: ConnectedRepository }
-  | { kind: "issue"; issue: MockIssue; back: MobileScreen }
+  | { kind: "issue"; issue: Issue; back: MobileScreen }
   | { kind: "placeholder"; tab: MobileBottomNavTab; label: string };
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
+  issues: Issue[];
+  fetchErrors: FetchIssuesError[];
 };
 
-export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProps) {
+export function IssueDeckShell({
+  currentUser,
+  repositories,
+  issues,
+  fetchErrors,
+}: IssueDeckShellProps) {
   const [activeView, setActiveView] = useState<NavViewId>("all");
-  const [selectedIssue, setSelectedIssue] = useState<MockIssue | null>(null);
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
+  const [errorBannerDismissed, setErrorBannerDismissed] = useState(false);
+
+  const currentUserLogin = currentUser?.login ?? null;
 
   const filteredIssues = useMemo(
-    () => filterIssuesByView(mockIssues, activeView),
-    [activeView],
+    () => filterIssuesByView(issues, activeView, currentUserLogin),
+    [issues, activeView, currentUserLogin],
   );
+  const navCounts = useMemo(
+    () => computeNavCounts(issues, currentUserLogin),
+    [issues, currentUserLogin],
+  );
+  const overviewStats = useMemo(() => computeOverviewStats(issues, currentUserLogin), [
+    issues,
+    currentUserLogin,
+  ]);
+  const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
 
   function handleSelectView(view: NavViewId) {
     setActiveView(view);
@@ -73,7 +82,7 @@ export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProp
     setMobileScreen({ kind: "repo", repository });
   }
 
-  function handleMobileSelectIssue(issue: MockIssue) {
+  function handleMobileSelectIssue(issue: Issue) {
     setMobileScreen((prev) => ({ kind: "issue", issue, back: prev }));
   }
 
@@ -97,6 +106,18 @@ export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProp
     <div className="flex h-dvh flex-col">
       <TopBar currentUser={currentUser} />
 
+      {fetchErrors.length > 0 && !errorBannerDismissed && (
+        <div className="flex items-center justify-between gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          <span>
+            {fetchErrors.length}件のリポジトリでIssue取得に失敗しました（
+            {fetchErrors.map((e) => e.repo).join(", ")}）
+          </span>
+          <button type="button" onClick={() => setErrorBannerDismissed(true)}>
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         {/* スマホ: 画面遷移型 */}
         <div className="flex flex-1 flex-col overflow-hidden md:hidden">
@@ -108,15 +129,18 @@ export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProp
                   setActiveView(view);
                   handleMobileSelectView(view);
                 }}
+                navCounts={navCounts}
                 repositories={repositories}
                 onSelectRepository={handleMobileSelectRepository}
+                labelSummary={labelSummary}
+                overviewStats={overviewStats}
               />
             )}
 
             {mobileScreen.kind === "view" && (
               <MobileViewIssuesScreen
                 title={navViews.find((view) => view.id === mobileScreen.view)?.label ?? ""}
-                issues={filterIssuesByView(mockIssues, mobileScreen.view)}
+                issues={filterIssuesByView(issues, mobileScreen.view, currentUserLogin)}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
@@ -126,7 +150,7 @@ export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProp
             {mobileScreen.kind === "repo" && (
               <MobileRepoIssuesScreen
                 repository={mobileScreen.repository}
-                issues={mockIssues}
+                issues={issues}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
@@ -151,7 +175,9 @@ export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProp
         <SidebarNav
           activeView={activeView}
           onSelectView={handleSelectView}
+          navCounts={navCounts}
           repositories={repositories}
+          labelSummary={labelSummary}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 

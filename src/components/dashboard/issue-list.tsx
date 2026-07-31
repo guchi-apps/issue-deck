@@ -5,13 +5,13 @@ import { MessageSquare, Star } from "lucide-react";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { MockIssue } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 
 type IssueListProps = {
   title: string;
-  issues: MockIssue[];
+  issues: Issue[];
   selectedIssueId: string | null;
-  onSelectIssue: (issue: MockIssue) => void;
+  onSelectIssue: (issue: Issue) => void;
   className?: string;
   showSearch?: boolean;
   showHeader?: boolean;

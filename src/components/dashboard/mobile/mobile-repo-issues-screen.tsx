@@ -6,14 +6,14 @@ import { ArrowLeft, ChevronDown, FolderGit2, MoreHorizontal, SlidersHorizontal }
 import { IssueList } from "@/components/dashboard/issue-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { IssueState, MockIssue } from "@/types/issue";
+import type { IssueState, Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileRepoIssuesScreenProps = {
   repository: ConnectedRepository;
-  issues: MockIssue[];
+  issues: Issue[];
   selectedIssueId: string | null;
-  onSelectIssue: (issue: MockIssue) => void;
+  onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
 };
 

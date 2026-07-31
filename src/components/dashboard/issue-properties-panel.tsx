@@ -2,10 +2,10 @@ import { ChevronDown, Eye, FolderGit2, Plus } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Progress } from "@/components/ui/progress";
-import type { MockIssue } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 
 type IssuePropertiesPanelProps = {
-  issue: MockIssue;
+  issue: Issue;
 };
 
 export function IssuePropertiesPanel({ issue }: IssuePropertiesPanelProps) {
@@ -74,26 +74,6 @@ export function IssuePropertiesPanel({ issue }: IssuePropertiesPanelProps) {
           <ChevronDown className="size-3" />
         </button>
       </section>
-
-      {issue.activity.length > 0 && (
-        <section>
-          <h3 className="mb-2 text-xs font-semibold text-muted-foreground">アクティビティ</h3>
-          <ul className="flex flex-col gap-2 text-xs">
-            {issue.activity.map((activity) => (
-              <li key={activity.id} className="flex items-center justify-between gap-2">
-                <span className="truncate text-muted-foreground">
-                  <span className="font-medium text-foreground">{activity.actorLogin}</span>
-                  {activity.description}
-                </span>
-                <span className="shrink-0 text-muted-foreground">{activity.createdAtLabel}</span>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="mt-2 text-xs text-primary hover:underline">
-            すべてのアクティビティを表示
-          </button>
-        </section>
-      )}
     </div>
   );
 }

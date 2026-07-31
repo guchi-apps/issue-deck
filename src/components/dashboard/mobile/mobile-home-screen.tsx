@@ -8,23 +8,28 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
-import { mockLabelSummary, overviewStats } from "@/lib/mock-data";
 import { getRepoColor } from "@/lib/repo-color";
-import type { NavViewId } from "@/types/issue";
+import type { LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileHomeScreenProps = {
   activeView: NavViewId;
   onSelectView: (view: NavViewId) => void;
+  navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
+  labelSummary: LabelSummary[];
+  overviewStats: OverviewStat[];
 };
 
 export function MobileHomeScreen({
   activeView,
   onSelectView,
+  navCounts,
   repositories,
   onSelectRepository,
+  labelSummary,
+  overviewStats,
 }: MobileHomeScreenProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -49,11 +54,13 @@ export function MobileHomeScreen({
               onSelectView(view);
               setMenuOpen(false);
             }}
+            navCounts={navCounts}
             repositories={repositories}
             onSelectRepository={(repo) => {
               onSelectRepository(repo);
               setMenuOpen(false);
             }}
+            labelSummary={labelSummary}
             className="flex"
           />
         </SheetContent>
@@ -73,7 +80,9 @@ export function MobileHomeScreen({
             <Card key={stat.label} className="gap-1 p-3">
               <p className="text-[11px] text-muted-foreground">{stat.label}</p>
               <p className="text-lg font-semibold">{stat.value}</p>
-              <p className="text-[10px] text-muted-foreground">{stat.diffLabel}</p>
+              {stat.diffLabel && (
+                <p className="text-[10px] text-muted-foreground">{stat.diffLabel}</p>
+              )}
             </Card>
           ))}
         </div>
@@ -127,7 +136,7 @@ export function MobileHomeScreen({
       <div className="mt-6 px-4 pb-4">
         <h2 className="mb-2 text-sm font-semibold">ラベル</h2>
         <ul className="flex flex-col gap-1">
-          {mockLabelSummary.map((label) => (
+          {labelSummary.map((label) => (
             <li key={label.name} className="flex items-center justify-between px-2 py-1.5 text-sm">
               <span className="flex items-center gap-2">
                 <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />

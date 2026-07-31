@@ -1,13 +1,33 @@
 import { MoreHorizontal, ThumbsUp } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
-import type { MockComment } from "@/types/issue";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { IssueComment } from "@/types/issue";
 
 type CommentThreadProps = {
-  comments: MockComment[];
+  comments: IssueComment[];
+  isLoading?: boolean;
+  error?: string | null;
 };
 
-export function CommentThread({ comments }: CommentThreadProps) {
+export function CommentThread({ comments, isLoading, error }: CommentThreadProps) {
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-4">
+        {[0, 1].map((i) => (
+          <div key={i} className="flex gap-2">
+            <Skeleton className="mt-0.5 size-7 shrink-0 rounded-full" />
+            <Skeleton className="h-16 flex-1 rounded-lg" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p className="text-sm text-destructive">コメントの取得に失敗しました: {error}</p>;
+  }
+
   if (comments.length === 0) {
     return <p className="text-sm text-muted-foreground">まだコメントはありません</p>;
   }

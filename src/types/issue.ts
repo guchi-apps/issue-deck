@@ -1,64 +1,45 @@
 export type IssueState = "open" | "closed";
 
-export type MockUser = {
+export type GithubUser = {
   login: string;
 };
 
-export type MockRepository = {
-  id: string;
-  fullName: string;
-  name: string;
-  private: boolean;
-  color: string;
-  openIssueCount: number;
-  lastActivityLabel: string;
-};
-
-export type MockIssueLabel = {
+export type IssueLabel = {
   name: string;
   color: string;
 };
 
-export type MockLabelSummary = {
+export type LabelSummary = {
   name: string;
   color: string;
   count: number;
 };
 
-export type MockComment = {
+export type IssueComment = {
   id: string;
-  author: MockUser;
+  author: GithubUser;
   createdAtLabel: string;
   body: string;
   reactionCount: number;
 };
 
-export type MockActivity = {
-  id: string;
-  actorLogin: string;
-  description: string;
-  createdAtLabel: string;
-};
-
-export type MockMilestone = {
+export type IssueMilestone = {
   name: string;
   progressPercent: number;
 };
 
-export type MockIssue = {
+export type Issue = {
   id: string;
   number: number;
   title: string;
   body: string;
   state: IssueState;
   repositoryFullName: string;
-  author: MockUser;
-  assignee: MockUser | null;
-  labels: MockIssueLabel[];
-  milestone: MockMilestone | null;
+  author: GithubUser;
+  assignee: GithubUser | null;
+  labels: IssueLabel[];
+  milestone: IssueMilestone | null;
   commentCount: number;
-  comments: MockComment[];
-  activity: MockActivity[];
   createdAt: string;
   updatedAt: string;
   htmlUrl: string;

@@ -5,22 +5,18 @@ import { ArrowLeft, FolderGit2, MoreHorizontal, Plus, Share2 } from "lucide-reac
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
-import type { MockIssue } from "@/types/issue";
-
-function formatRelativeDate(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffHours <= 0) return "たった今";
-  if (diffHours < 24) return `${diffHours}時間前`;
-  return `${Math.floor(diffHours / 24)}日前`;
-}
+import { formatRelativeDate } from "@/lib/format-relative-date";
+import { useIssueComments } from "@/hooks/use-issue-comments";
+import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
-  issue: MockIssue;
+  issue: Issue;
   onBack: () => void;
 };
 
 export function MobileIssueDetail({ issue, onBack }: MobileIssueDetailProps) {
+  const { comments, isLoading, error } = useIssueComments(issue);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b p-4">
@@ -101,7 +97,7 @@ export function MobileIssueDetail({ issue, onBack }: MobileIssueDetailProps) {
           <h2 className="mb-3 text-sm font-semibold">
             コメント <span className="text-muted-foreground">{issue.commentCount}</span>
           </h2>
-          <CommentThread comments={issue.comments} />
+          <CommentThread comments={comments} isLoading={isLoading} error={error} />
         </div>
       </div>
 

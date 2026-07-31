@@ -4,17 +4,19 @@ import { CheckCircle2, FolderGit2, ListChecks, Plus, SlidersHorizontal, Star } f
 import type { LucideIcon } from "lucide-react";
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
-import { mockLabelSummary, navCounts, navViews } from "@/lib/mock-data";
+import { navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
-import type { NavViewId } from "@/types/issue";
+import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import { cn } from "@/lib/utils";
 
 type SidebarNavProps = {
   activeView: NavViewId;
   onSelectView: (view: NavViewId) => void;
+  navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
   onSelectRepository?: (repository: ConnectedRepository) => void;
+  labelSummary: LabelSummary[];
   className?: string;
 };
 
@@ -29,8 +31,10 @@ const viewIcons: Record<NavViewId, LucideIcon> = {
 export function SidebarNav({
   activeView,
   onSelectView,
+  navCounts,
   repositories,
   onSelectRepository,
+  labelSummary,
   className,
 }: SidebarNavProps) {
   return (
@@ -114,7 +118,7 @@ export function SidebarNav({
       <div>
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">ラベル</h2>
         <ul className="flex flex-col gap-0.5">
-          {mockLabelSummary.map((label) => (
+          {labelSummary.map((label) => (
             <li key={label.name}>
               <button
                 type="button"

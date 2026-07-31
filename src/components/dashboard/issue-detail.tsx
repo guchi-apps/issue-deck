@@ -8,13 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import type { MockIssue } from "@/types/issue";
+import { useIssueComments } from "@/hooks/use-issue-comments";
+import type { Issue } from "@/types/issue";
 
 type IssueDetailProps = {
-  issue: MockIssue | null;
+  issue: Issue | null;
 };
 
 export function IssueDetail({ issue }: IssueDetailProps) {
+  const { comments, isLoading, error } = useIssueComments(issue);
+
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -88,7 +91,7 @@ export function IssueDetail({ issue }: IssueDetailProps) {
               コメント <span className="text-muted-foreground">{issue.commentCount}</span>
             </h2>
           </div>
-          <CommentThread comments={issue.comments} />
+          <CommentThread comments={comments} isLoading={isLoading} error={error} />
 
           <div className="mt-4 flex items-center gap-2">
             <Input placeholder="コメントを追加..." />

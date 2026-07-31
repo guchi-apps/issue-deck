@@ -3,13 +3,13 @@
 import { ArrowLeft } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
-import type { MockIssue } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 
 type MobileViewIssuesScreenProps = {
   title: string;
-  issues: MockIssue[];
+  issues: Issue[];
   selectedIssueId: string | null;
-  onSelectIssue: (issue: MockIssue) => void;
+  onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
 };
 
