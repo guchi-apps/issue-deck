@@ -4,11 +4,13 @@ import { useState } from "react";
 import { ArrowLeft, ChevronDown, FolderGit2, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
+import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { IssueState, MockIssue, MockRepository } from "@/types/issue";
+import type { IssueState, MockIssue } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 
 type MobileRepoIssuesScreenProps = {
-  repository: MockRepository;
+  repository: ConnectedRepository;
   issues: MockIssue[];
   selectedIssueId: string | null;
   onSelectIssue: (issue: MockIssue) => void;
@@ -27,6 +29,7 @@ export function MobileRepoIssuesScreen({
   const repoIssues = issues.filter(
     (issue) => issue.repositoryFullName === repository.fullName && issue.state === stateFilter,
   );
+  const color = getRepoColor(repository.fullName);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -41,14 +44,14 @@ export function MobileRepoIssuesScreen({
         <div className="flex items-center gap-2">
           <span
             className="flex size-9 items-center justify-center rounded"
-            style={{ backgroundColor: `${repository.color}20`, color: repository.color }}
+            style={{ backgroundColor: `${color}20`, color }}
           >
             <FolderGit2 className="size-4" />
           </span>
           <div>
             <h1 className="text-base font-semibold">{repository.name}</h1>
             <p className="text-xs text-muted-foreground">
-              オープンIssue {repository.openIssueCount}件
+              {repository.private ? "Private" : "Public"}
             </p>
           </div>
         </div>

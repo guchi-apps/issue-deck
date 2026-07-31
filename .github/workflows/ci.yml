@@ -46,3 +46,6 @@ jobs:
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
           NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+          GITHUB_APP_ID: "123456"
+          GITHUB_APP_PRIVATE_KEY_BASE64: Y2ktcGxhY2Vob2xkZXI=
+          NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder

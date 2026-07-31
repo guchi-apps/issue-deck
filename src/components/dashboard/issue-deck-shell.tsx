@@ -16,7 +16,8 @@ import { MobileViewIssuesScreen } from "@/components/dashboard/mobile/mobile-vie
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { CURRENT_USER_LOGIN, mockIssues, navViews } from "@/lib/mock-data";
-import type { MockIssue, MockRepository, NavViewId } from "@/types/issue";
+import type { MockIssue, NavViewId } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 function filterIssuesByView(issues: MockIssue[], view: NavViewId): MockIssue[] {
@@ -40,15 +41,16 @@ function filterIssuesByView(issues: MockIssue[], view: NavViewId): MockIssue[] {
 type MobileScreen =
   | { kind: "home" }
   | { kind: "view"; view: NavViewId }
-  | { kind: "repo"; repository: MockRepository }
+  | { kind: "repo"; repository: ConnectedRepository }
   | { kind: "issue"; issue: MockIssue; back: MobileScreen }
   | { kind: "placeholder"; tab: MobileBottomNavTab; label: string };
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
+  repositories: ConnectedRepository[];
 };
 
-export function IssueDeckShell({ currentUser }: IssueDeckShellProps) {
+export function IssueDeckShell({ currentUser, repositories }: IssueDeckShellProps) {
   const [activeView, setActiveView] = useState<NavViewId>("all");
   const [selectedIssue, setSelectedIssue] = useState<MockIssue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
@@ -67,7 +69,7 @@ export function IssueDeckShell({ currentUser }: IssueDeckShellProps) {
     setMobileScreen({ kind: "view", view });
   }
 
-  function handleMobileSelectRepository(repository: MockRepository) {
+  function handleMobileSelectRepository(repository: ConnectedRepository) {
     setMobileScreen({ kind: "repo", repository });
   }
 
@@ -106,6 +108,7 @@ export function IssueDeckShell({ currentUser }: IssueDeckShellProps) {
                   setActiveView(view);
                   handleMobileSelectView(view);
                 }}
+                repositories={repositories}
                 onSelectRepository={handleMobileSelectRepository}
               />
             )}
@@ -148,6 +151,7 @@ export function IssueDeckShell({ currentUser }: IssueDeckShellProps) {
         <SidebarNav
           activeView={activeView}
           onSelectView={handleSelectView}
+          repositories={repositories}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 

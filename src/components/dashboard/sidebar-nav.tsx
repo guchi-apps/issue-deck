@@ -3,14 +3,18 @@
 import { CheckCircle2, FolderGit2, ListChecks, Plus, SlidersHorizontal, Star } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { mockLabelSummary, mockRepositories, navCounts, navViews } from "@/lib/mock-data";
-import type { MockRepository, NavViewId } from "@/types/issue";
+import { getGithubAppInstallUrl } from "@/lib/github/install-url";
+import { mockLabelSummary, navCounts, navViews } from "@/lib/mock-data";
+import { getRepoColor } from "@/lib/repo-color";
+import type { NavViewId } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 import { cn } from "@/lib/utils";
 
 type SidebarNavProps = {
   activeView: NavViewId;
   onSelectView: (view: NavViewId) => void;
-  onSelectRepository?: (repository: MockRepository) => void;
+  repositories: ConnectedRepository[];
+  onSelectRepository?: (repository: ConnectedRepository) => void;
   className?: string;
 };
 
@@ -25,6 +29,7 @@ const viewIcons: Record<NavViewId, LucideIcon> = {
 export function SidebarNav({
   activeView,
   onSelectView,
+  repositories,
   onSelectRepository,
   className,
 }: SidebarNavProps) {
@@ -60,35 +65,50 @@ export function SidebarNav({
       <div>
         <div className="mb-2 flex items-center justify-between px-2">
           <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
-          <button type="button" className="text-muted-foreground hover:text-foreground">
+          <a
+            href={getGithubAppInstallUrl()}
+            className="text-muted-foreground hover:text-foreground"
+            title="GitHub Appをインストールしてリポジトリを追加"
+          >
             <Plus className="size-3.5" />
-          </button>
+          </a>
         </div>
-        <ul className="flex flex-col gap-0.5">
-          {mockRepositories.map((repo) => (
-            <li key={repo.id}>
-              <button
-                type="button"
-                onClick={() => onSelectRepository?.(repo)}
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <span
-                    className="flex size-5 shrink-0 items-center justify-center rounded"
-                    style={{ backgroundColor: `${repo.color}20`, color: repo.color }}
+        {repositories.length === 0 ? (
+          <div className="px-2 text-xs text-muted-foreground">
+            まだリポジトリと連携していません。
+            <a href={getGithubAppInstallUrl()} className="ml-1 text-primary hover:underline">
+              GitHub Appをインストール
+            </a>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {repositories.map((repo) => {
+              const color = getRepoColor(repo.fullName);
+              return (
+                <li key={repo.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectRepository?.(repo)}
+                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
                   >
-                    <FolderGit2 className="size-3" />
-                  </span>
-                  <span className="truncate">{repo.name}</span>
-                </span>
-                <span className="text-xs text-muted-foreground">{repo.openIssueCount}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="mt-1 px-2 text-xs text-primary hover:underline">
-          すべてのリポジトリを見る
-        </button>
+                    <span className="flex items-center gap-2 truncate">
+                      <span
+                        className="flex size-5 shrink-0 items-center justify-center rounded"
+                        style={{ backgroundColor: `${color}20`, color }}
+                      >
+                        <FolderGit2 className="size-3" />
+                      </span>
+                      <span className="truncate">{repo.name}</span>
+                    </span>
+                    {repo.private && (
+                      <span className="text-xs text-muted-foreground">Private</span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <div>
