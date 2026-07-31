@@ -16,6 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "IssueDeck",
   description: "複数のGitHubリポジトリのIssueを横断して確認・整理できるWebアプリ",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "IssueDeck",
+  },
 };
 
 export const viewport: Viewport = {
