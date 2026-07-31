@@ -3,6 +3,7 @@
 import { ArrowLeft, FolderGit2, MoreHorizontal, Plus, Share2 } from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -90,7 +91,7 @@ export function MobileIssueDetail({ issue, onBack }: MobileIssueDetailProps) {
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{issue.body}</p>
+          <MarkdownBody content={issue.body} />
         </div>
 
         <div>
