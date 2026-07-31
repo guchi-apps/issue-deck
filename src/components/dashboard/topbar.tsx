@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Bell, ChevronDown, LayoutDashboard, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { CURRENT_USER_LOGIN } from "@/lib/mock-data";
+import { createClient } from "@/lib/supabase/client";
+import type { CurrentUser } from "@/types/user";
 
 const filters = [
   { label: "リポジトリ" },
@@ -21,7 +23,20 @@ const filters = [
   { label: "並び順: 更新日" },
 ];
 
-export function TopBar() {
+type TopBarProps = {
+  currentUser: CurrentUser | null;
+};
+
+export function TopBar({ currentUser }: TopBarProps) {
+  const router = useRouter();
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
       <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
@@ -47,7 +62,7 @@ export function TopBar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem disabled>M2以降で実装予定</DropdownMenuItem>
+              <DropdownMenuItem disabled>M5以降で実装予定</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ))}
@@ -63,13 +78,17 @@ export function TopBar() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className="flex items-center gap-1 rounded-md p-1 hover:bg-accent">
-            <UserAvatar login={CURRENT_USER_LOGIN} className="size-7" />
+            <UserAvatar
+              login={currentUser?.login ?? "?"}
+              image={currentUser?.image}
+              className="size-7"
+            />
             <ChevronDown className="size-3 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled>{CURRENT_USER_LOGIN}</DropdownMenuItem>
-          <DropdownMenuItem disabled>ログアウト（M2以降）</DropdownMenuItem>
+          <DropdownMenuItem disabled>{currentUser?.name ?? currentUser?.login}</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleLogout}>ログアウト</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

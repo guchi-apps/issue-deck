@@ -17,6 +17,7 @@ import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { CURRENT_USER_LOGIN, mockIssues, navViews } from "@/lib/mock-data";
 import type { MockIssue, MockRepository, NavViewId } from "@/types/issue";
+import type { CurrentUser } from "@/types/user";
 
 function filterIssuesByView(issues: MockIssue[], view: NavViewId): MockIssue[] {
   switch (view) {
@@ -43,7 +44,11 @@ type MobileScreen =
   | { kind: "issue"; issue: MockIssue; back: MobileScreen }
   | { kind: "placeholder"; tab: MobileBottomNavTab; label: string };
 
-export function IssueDeckShell() {
+type IssueDeckShellProps = {
+  currentUser: CurrentUser | null;
+};
+
+export function IssueDeckShell({ currentUser }: IssueDeckShellProps) {
   const [activeView, setActiveView] = useState<NavViewId>("all");
   const [selectedIssue, setSelectedIssue] = useState<MockIssue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
@@ -88,7 +93,7 @@ export function IssueDeckShell() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <TopBar />
+      <TopBar currentUser={currentUser} />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         {/* スマホ: 画面遷移型 */}

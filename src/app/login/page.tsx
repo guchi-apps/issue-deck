@@ -1,7 +1,7 @@
-import Link from "next/link";
-import { LogIn, LayoutDashboard } from "lucide-react";
+import { Suspense } from "react";
+import { LayoutDashboard } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { GithubLoginButton } from "@/components/auth/github-login-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
@@ -20,13 +20,9 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* GitHub App連携によるログインはM2で実装。M1ではモック遷移のみ */}
-          <Button asChild className="w-full">
-            <Link href="/dashboard">
-              <LogIn />
-              GitHubで始める
-            </Link>
-          </Button>
+          <Suspense fallback={null}>
+            <GithubLoginButton />
+          </Suspense>
         </CardContent>
       </Card>
     </div>

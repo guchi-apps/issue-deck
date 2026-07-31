@@ -7,59 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- NextAuth.js / Auth.js v5 ---
-
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
+// --- 認証 ---
+// セッション管理はSupabase Auth側で行うため、Account/Session/VerificationTokenは持たない。
+// SupabaseのユーザーID（auth.users.id）を外部キーとして紐付ける。
 
 model User {
-  id            String    @id @default(cuid())
-  email         String?   @unique
-  emailVerified DateTime?
-
-  githubUserId Int     @unique
-  githubLogin  String  @unique
-  githubName   String?
-  avatarUrl    String?
+  id             String  @id @default(cuid())
+  supabaseUserId String  @unique
+  githubUserId   Int     @unique
+  githubLogin    String  @unique
+  name           String?
+  email          String?
+  image          String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts        Account[]
-  sessions        Session[]
   userInstallations UserInstallation[]
 }
 
