@@ -1,0 +1,94 @@
+name: Claude Code Review (develop向けPR)
+
+# develop向けPRの作成・更新時にClaude Codeによる自動レビューを実行し、
+# PRへレビューコメントを投稿する(docs/multi-agent-workflow.md Phase3)。
+# マージやラベル状態遷移(03.d:marge等)は行わない。自動マージ不可カテゴリを
+# 検知した場合のみ、対応Issueへ00.check-userラベルを付与する。
+#
+# 対応issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
+# (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
+# を避けるため env 経由でのみ参照し、run: 本文に直接展開しない
+# (.github/workflows/issue-labels.yml と同じ方針)。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - develop
+
+jobs:
+  claude-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 対応Issue番号を特定する
+        id: issue
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            echo "number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: '--allowedTools Bash(gh issue edit:*)'
+          prompt: |
+            develop向けPull Request（${{ github.repository }}/pull/${{ github.event.pull_request.number }}）を自動レビューしてください。
+
+            ## 対応Issue
+            対応Issue番号: ${{ steps.issue.outputs.number }}
+            （空欄の場合はブランチ名がissue-<番号>の命名規約に従っていないため、Issue番号は不明として扱ってください）
+
+            ## 確認すること
+            - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
+            - Issue外の変更が混入していないか
+            - コード品質・セキュリティ上の問題がないか（OWASP Top10等の観点を含む）
+            - CI結果に問題がないか（`gh pr checks`で確認。まだ実行中の場合はその旨のみ記載する）
+
+            ## 自動マージ不可カテゴリの判定
+            以下のいずれかに該当する変更が含まれる場合は「自動マージ不可」と判定してください。
+            - 認証・認可
+            - DBスキーマ変更・マイグレーション
+            - 本番環境の設定
+            - GitHub Actionsやデプロイ設定
+            - Secretsや環境変数
+            - 課金・決済
+            - 大規模な依存関係の更新
+
+            判定方法:
+            - 一次判定（機械的）: `git diff --name-only origin/develop...HEAD` のパスが `prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`・`package.json`の依存メジャーバージョン変更等に該当するか
+            - 二次判定（意味的）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
+
+            該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を実行してください。
+            `gh issue edit <対応Issue番号> --add-label "00.check-user"`
+
+            ## 出力
+            レビュー結果は日本語で、以下の内容を含めてPRへのコメントとして投稿してください。
+            - 総評（LGTM / 要修正 / 要確認 のいずれか）
+            - 気になった点（あれば具体的なファイル・行を示す）
+            - 自動マージ不可カテゴリに該当するかどうかとその理由
+
+            ## 禁止事項
+            - PRのマージ・承認（Approve）は行わない
+            - ラベル `03.d:marge` 等の状態遷移ラベルの付け替えは行わない（`00.check-user`の付与のみ許可）
+            - コードの直接修正は行わない（レビューコメントの投稿のみ）
