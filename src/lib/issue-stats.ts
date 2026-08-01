@@ -79,7 +79,9 @@ export function computeNavCounts(
     assigned: issues.filter((issue) => issue.assignee?.login === currentUserLogin).length,
     created: issues.filter((issue) => issue.author.login === currentUserLogin).length,
     favorites: issues.filter((issue) => issue.favorite).length,
-    recent: issues.length,
+    recent: issues.filter(
+      (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
+    ).length,
   };
 }
 

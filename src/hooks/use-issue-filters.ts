@@ -28,6 +28,25 @@ const DEFAULT_FILTERS: IssueFilters = {
   sort: "created",
 };
 
+function applyFilterParam<K extends keyof IssueFilters>(
+  params: URLSearchParams,
+  key: K,
+  value: IssueFilters[K],
+) {
+  if (
+    value === null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0) ||
+    value === DEFAULT_FILTERS[key]
+  ) {
+    params.delete(key);
+  } else if (Array.isArray(value)) {
+    params.set(key, value.join(","));
+  } else {
+    params.set(key, String(value));
+  }
+}
+
 function isNavViewId(value: string | null): value is NavViewId {
   return (
     value === "all" ||
@@ -66,20 +85,21 @@ export function useIssueFilters() {
   const setFilter = useCallback(
     <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => {
       const params = new URLSearchParams(searchParams.toString());
+      applyFilterParam(params, key, value);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
 
-      if (
-        value === null ||
-        value === "" ||
-        (Array.isArray(value) && value.length === 0) ||
-        value === DEFAULT_FILTERS[key]
-      ) {
-        params.delete(key);
-      } else if (Array.isArray(value)) {
-        params.set(key, value.join(","));
-      } else {
-        params.set(key, String(value));
+  // 複数フィルターを1回のURL更新でまとめて反映する。setFilterを連続呼び出しすると
+  // 各呼び出しが同じ古いsearchParamsを基点にrouter.replaceし合い、最後の呼び出し以外の
+  // 変更が失われるため、一括更新が必要な場合はこちらを使う。
+  const setFilters = useCallback(
+    (updates: Partial<IssueFilters>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const key of Object.keys(updates) as (keyof IssueFilters)[]) {
+        applyFilterParam(params, key, updates[key] as IssueFilters[typeof key]);
       }
-
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
     [router, pathname, searchParams],
@@ -95,5 +115,5 @@ export function useIssueFilters() {
     [filters.labels, setFilter],
   );
 
-  return { filters, setFilter, toggleLabel };
+  return { filters, setFilter, setFilters, toggleLabel };
 }
