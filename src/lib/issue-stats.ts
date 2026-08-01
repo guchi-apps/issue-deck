@@ -104,6 +104,35 @@ export function computeOverviewStats(
   ];
 }
 
+// ポーリング等で取得した最新のIssue一覧を、内容が変わっていないIssueについては
+// 直前のオブジェクト参照を再利用してマージする。これにより、ポーリングのたびに
+// 全Issueのオブジェクト参照が入れ替わることで発生する不要な再レンダリング・副作用の
+// 再実行（コメント欄の一瞬の再読み込み表示など）を防ぐ。
+export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue[] {
+  const prevById = new Map(prevIssues.map((issue) => [issue.id, issue] as const));
+  return nextIssues.map((issue) => {
+    const prevIssue = prevById.get(issue.id);
+    return prevIssue && isIssueContentEqual(prevIssue, issue) ? prevIssue : issue;
+  });
+}
+
+function isIssueContentEqual(a: Issue, b: Issue): boolean {
+  return (
+    a.title === b.title &&
+    a.body === b.body &&
+    a.state === b.state &&
+    a.commentCount === b.commentCount &&
+    a.updatedAt === b.updatedAt &&
+    a.favorite === b.favorite &&
+    a.htmlUrl === b.htmlUrl &&
+    a.assignee?.login === b.assignee?.login &&
+    a.milestone?.name === b.milestone?.name &&
+    a.milestone?.progressPercent === b.milestone?.progressPercent &&
+    a.labels.length === b.labels.length &&
+    a.labels.every((label, i) => label.name === b.labels[i]?.name && label.color === b.labels[i]?.color)
+  );
+}
+
 export function computeLabelSummary(issues: Issue[]): LabelSummary[] {
   const summaryByName = new Map<string, LabelSummary>();
 
