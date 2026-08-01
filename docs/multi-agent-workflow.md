@@ -42,6 +42,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
 - 開発サーバー（`pnpm dev`）のポートは`start-issue.sh`/`.ps1`が`.env.local`に`PORT=4000 + Issue番号`を自動設定する（例: issue-46 → 4046）。複数Issueのworktreeで同時に`pnpm dev`を起動しても衝突せず、developへマージする前に人間がブラウザ（`http://localhost:<ポート>`）で直接画面を確認できる。実装エージェントは画面に関わる変更のPRで、このURLを「確認方法」に記載する。
+- `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
 
 ## 実装前の「計画フェーズ」要否をIssueラベルでトグルする
 
@@ -67,7 +68,16 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-`07.m:marge`・`09.main`、およびそれに対応するdevelop→mainのリリースフロー自体はまだ未設計・未実装（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。develop→mainのリリースは現状、既存の手動運用（バージョンアップコミット・PR、git-github-jaスキル参照）のまま。
+develop→mainのリリースフロー自体（バージョンアップコミット・PR作成等）は現状、既存の手動運用（git-github-jaスキル参照）のまま（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。ただし上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+
+### GitHub Actionsによるラベル遷移の自動化
+
+`.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
+
+- `01.wip`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
+- `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
+
+issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）から行う。この規約に従わないブランチ・PRは対象外（何もしない）。
 
 ## 開発環境プレビュー要否をIssueラベルでトグルする
 
@@ -95,7 +105,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 Issueごとに独立したClaude Codeセッションとして起動する。
 
 責務:
-- GitHub Issueの内容を取得する
+- GitHub Issueの内容を取得する。取得したら**忘れずに`01.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
 - 最新の`develop`からIssue専用ブランチ（`issue-<番号>`）を作成する
 - Git worktreeで作業フォルダを分離する
 - `21.plan-required`ラベルが付いていれば、実装前にPlan modeで計画を提示し承認を得る
@@ -159,9 +169,10 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 
 1. **Phase 1**: `start-issue.sh`/`.ps1` — worktree・ブランチ・Claude Code起動のコマンド化
 2. **Phase 2**: `start-reviewer.sh`/`.ps1` — レビュー・統合セッション起動のコマンド化
-3. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
-4. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
-5. **Phase 5**: Issueラベル/`@claude`コメントを起点に実装からPR作成まで自動化
+3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.wip`〜`09.main`）のGitHub Actionsによる自動化
+4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
+5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
+6. **Phase 5**: Issueラベル/`@claude`コメントを起点に実装からPR作成まで自動化
 
 各Phaseは前段が安定稼働してから着手する。
 
@@ -171,6 +182,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `scripts/prompts/implementation-agent.md`（Phase1）
 - `scripts/start-reviewer.sh` / `scripts/start-reviewer.ps1`（Phase2）
 - `scripts/prompts/review-agent.md`（Phase2）
+- `.github/workflows/issue-labels.yml`（Phase2.5、作成済み）
 - `.github/workflows/claude-review-develop.yml`（Phase3）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5）
 - リスク判定ロジック（Phase4。既存の`00.check-user`ラベル自動付与としてActions内に実装）
