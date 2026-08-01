@@ -26,9 +26,9 @@ const components: Components = {
     // eslint-disable-next-line @next/next/no-img-element
     <img {...props} className="max-w-full rounded-md border" loading="lazy" alt={props.alt ?? ""} />
   ),
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="mb-2 list-disc pl-5 last:mb-0">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-2 list-decimal pl-5 last:mb-0">{children}</ol>,
+  p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
   blockquote: ({ children }) => (
     <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground last:mb-0">
       {children}
@@ -62,7 +62,7 @@ type MarkdownBodyProps = {
 
 export function MarkdownBody({ content, className, repositoryFullName }: MarkdownBodyProps) {
   return (
-    <div className={cn("text-sm leading-relaxed break-words", className)}>
+    <div className={cn("text-[0.9375rem] leading-[1.9] break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[
