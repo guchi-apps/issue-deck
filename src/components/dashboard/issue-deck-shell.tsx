@@ -21,6 +21,7 @@ import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
+import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -34,14 +35,6 @@ import { navViews } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
-
-type MobileScreen =
-  | { kind: "home" }
-  | { kind: "issues" }
-  | { kind: "repos" }
-  | { kind: "settings" }
-  | { kind: "repo-detail"; repository: ConnectedRepository; back: MobileScreen }
-  | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
@@ -58,7 +51,10 @@ export function IssueDeckShell({
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
-  const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
+  const { mobileScreen, selectTab, selectRepository, selectIssue, goBack } = useMobileScreen(
+    issues,
+    repositories,
+  );
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -78,9 +74,6 @@ export function IssueDeckShell({
   function handleIssueUpdated(issue: Issue) {
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
     setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
-    setMobileScreen((prev) =>
-      prev.kind === "issue-detail" && prev.issue.id === issue.id ? { ...prev, issue } : prev,
-    );
   }
 
   useIssuePolling((polledIssues) => {
@@ -88,11 +81,6 @@ export function IssueDeckShell({
     setSelectedIssue((prev) => {
       if (!prev) return prev;
       return polledIssues.find((issue) => issue.id === prev.id) ?? prev;
-    });
-    setMobileScreen((prev) => {
-      if (prev.kind !== "issue-detail") return prev;
-      const updated = polledIssues.find((issue) => issue.id === prev.issue.id);
-      return updated ? { ...prev, issue: updated } : prev;
     });
   });
 
@@ -128,24 +116,6 @@ export function IssueDeckShell({
     setSelectedIssue(null);
   }
 
-  function handleMobileSelectRepository(repository: ConnectedRepository) {
-    setMobileScreen((prev) => ({ kind: "repo-detail", repository, back: prev }));
-  }
-
-  function handleMobileSelectIssue(issue: Issue) {
-    setMobileScreen((prev) => ({ kind: "issue-detail", issue, back: prev }));
-  }
-
-  function handleMobileBack() {
-    setMobileScreen((prev) =>
-      prev.kind === "issue-detail" || prev.kind === "repo-detail" ? prev.back : { kind: "home" },
-    );
-  }
-
-  function handleBottomNavSelect(tab: MobileBottomNavTab) {
-    setMobileScreen({ kind: tab });
-  }
-
   async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
     setRepositories((prev) =>
       prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden } : repo)),
@@ -173,11 +143,6 @@ export function IssueDeckShell({
       );
       setSelectedIssue((prev) =>
         prev && prev.id === issue.id ? { ...prev, favorite: target } : prev,
-      );
-      setMobileScreen((prev) =>
-        prev.kind === "issue-detail" && prev.issue.id === issue.id
-          ? { ...prev, issue: { ...prev.issue, favorite: target } }
-          : prev,
       );
     }
 
@@ -229,16 +194,13 @@ export function IssueDeckShell({
                 labelSummary={labelSummary}
                 assigneeOptions={assigneeOptions}
                 selectedIssueId={null}
-                onSelectIssue={handleMobileSelectIssue}
+                onSelectIssue={selectIssue}
                 onCreateIssue={() => openCreateDialog()}
               />
             )}
 
             {mobileScreen.kind === "repos" && (
-              <MobileReposScreen
-                repositories={repositories}
-                onSelectRepository={handleMobileSelectRepository}
-              />
+              <MobileReposScreen repositories={repositories} onSelectRepository={selectRepository} />
             )}
 
             {mobileScreen.kind === "settings" && (
@@ -250,8 +212,8 @@ export function IssueDeckShell({
                 repository={mobileScreen.repository}
                 issues={issues}
                 selectedIssueId={null}
-                onSelectIssue={handleMobileSelectIssue}
-                onBack={handleMobileBack}
+                onSelectIssue={selectIssue}
+                onBack={goBack}
                 onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
               />
             )}
@@ -259,7 +221,7 @@ export function IssueDeckShell({
             {mobileScreen.kind === "issue-detail" && (
               <MobileIssueDetail
                 issue={mobileScreen.issue}
-                onBack={handleMobileBack}
+                onBack={goBack}
                 onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
                 onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
@@ -267,7 +229,7 @@ export function IssueDeckShell({
             )}
           </div>
 
-          <MobileBottomNav active={activeBottomNavTab} onSelect={handleBottomNavSelect} />
+          <MobileBottomNav active={activeBottomNavTab} onSelect={selectTab} />
         </div>
 
         {/* PC: 左カラム（ナビゲーション） */}
@@ -308,7 +270,7 @@ export function IssueDeckShell({
         </div>
         {selectedIssue && (
           <div className="hidden w-72 shrink-0 border-l xl:block">
-            <IssuePropertiesPanel issue={selectedIssue} />
+            <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
           </div>
         )}
       </div>

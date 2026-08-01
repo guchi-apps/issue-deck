@@ -25,6 +25,10 @@ function mapLabelId(label: { id: number } | string): bigint | null {
   return typeof label === "string" ? null : BigInt(label.id);
 }
 
+function mapLabelDescription(label: { description: string | null } | string): string | null {
+  return typeof label === "string" ? null : label.description;
+}
+
 function toIssueState(state: "open" | "closed"): IssueState {
   return state === "open" ? "OPEN" : "CLOSED";
 }
@@ -72,9 +76,14 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
           issueId: issue.id,
           name: mapLabelName(label),
           color: mapLabelColor(label),
+          description: mapLabelDescription(label),
           githubLabelId: mapLabelId(label),
         },
-        update: { color: mapLabelColor(label), githubLabelId: mapLabelId(label) },
+        update: {
+          color: mapLabelColor(label),
+          description: mapLabelDescription(label),
+          githubLabelId: mapLabelId(label),
+        },
       }),
     ),
     db.issueLabel.deleteMany({
