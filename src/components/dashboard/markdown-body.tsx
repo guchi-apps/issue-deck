@@ -4,6 +4,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
 import { cn } from "@/lib/utils";
 
 const sanitizeSchema = {
@@ -56,14 +57,19 @@ const components: Components = {
 type MarkdownBodyProps = {
   content: string;
   className?: string;
+  repositoryFullName?: string;
 };
 
-export function MarkdownBody({ content, className }: MarkdownBodyProps) {
+export function MarkdownBody({ content, className, repositoryFullName }: MarkdownBodyProps) {
   return (
     <div className={cn("text-sm leading-relaxed break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        rehypePlugins={[
+          rehypeRaw,
+          [rehypeLinkifyIssueRefs, { repositoryFullName }],
+          [rehypeSanitize, sanitizeSchema],
+        ]}
         components={components}
       >
         {content}

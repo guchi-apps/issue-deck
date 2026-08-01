@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import type { Issue } from "@/types/issue";
 
@@ -20,14 +20,19 @@ type EditIssueDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   issue: Issue | null;
+  issues: Issue[];
   onUpdated: (issue: Issue) => void;
 };
 
-export function EditIssueDialog({ open, onOpenChange, issue, onUpdated }: EditIssueDialogProps) {
+export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }: EditIssueDialogProps) {
   const { updateIssue, isSubmitting, error, setError } = useIssueMutations();
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const issueSuggestions = useMemo(
+    () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
+    [issues, issue],
+  );
 
   useEffect(() => {
     if (!open || !issue) return;
@@ -77,10 +82,11 @@ export function EditIssueDialog({ open, onOpenChange, issue, onUpdated }: EditIs
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-issue-body">本文</Label>
-            <Textarea
+            <MentionTextarea
               id="edit-issue-body"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
+              issueSuggestions={issueSuggestions}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
