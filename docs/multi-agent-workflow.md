@@ -54,7 +54,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 - 「承認待ち」を表す専用ラベル `00.check-user`（ユーザーの確認・指示が必要）を計画承認待ちの合図としても使う。
 - 実行形態による承認方法の違い:
   - **ローカル実行（人間が横にいる）**: Claude Code本来のPlan mode（`EnterPlanMode`→提示→`ExitPlanMode`で承認）がそのまま使える。起動スクリプトは「`21.plan-required`が付いているので実装前に必ずPlan modeで計画提示すること」という一文をプロンプトに含めるだけでよい。
-  - **GitHub Actions実行（無人）**: 対話的な承認者がその場にいないため二段階に分ける。①エージェントが計画をPRドラフト or Issueコメントとして投稿し`00.check-user`を付与して停止 → ②人間がコメント/ラベル操作で承認 → ③再起動されたエージェントが実装を再開する。②→③の具体的な再起動トリガーは未確定（該当フェーズ設計時に詰める）。
+  - **GitHub Actions実行（無人）**: 対話的な承認者がその場にいないため二段階に分ける。①エージェントが計画をPRドラフト or Issueコメントとして投稿し`00.check-user`を付与して停止 → ②人間がコメント/ラベル操作で承認 → ③再起動されたエージェントが実装を再開する。②→③の具体的な再起動トリガーはPhase5で確定した（`00.check-user`ラベルを人間が外すことを承認とみなす。詳細は「Phase 5」節を参照）。
 
 ## Issueラベルの状態遷移
 
@@ -184,14 +184,67 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `scripts/prompts/review-agent.md`（Phase2）
 - `.github/workflows/issue-labels.yml`（Phase2.5、作成済み）
 - `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
-- `.github/workflows/claude-issue-dispatch.yml`（Phase5）
+- `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
+- GitHubラベル`20.auto-implement`の新規作成（Phase5、作成済み）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
+
+## Phase 5: Issueラベル/@claudeコメント起点の完全自動化
+
+`.github/workflows/claude-issue-dispatch.yml`で実装済み。ローカルの`scripts/start-issue.sh`が行っている
+作業（issue-<番号>ブランチ作成・実装・develop向けPR作成）をGitHub Actions上で無人実行する。
+
+### トリガー
+
+- Issueへのラベル`20.auto-implement`付与（新規作成したラベル）
+- Issueへの`@claude`コメント
+
+パブリックリポジトリのため`@claude`コメント自体は誰でも投稿できるが、ラベルの付与・削除はGitHub側で
+write権限を要求する。トリガー経路によらず一律で実行者(`github.actor`)のリポジトリ権限を
+`gh api repos/{owner}/{repo}/collaborators/{actor}/permission`で確認し、write権限未満なら何もしない。
+
+### `21.plan-required`が付いている場合の二段階トリガー（再起動方法を確定）
+
+「未解決の課題」に残っていた「②→③の具体的な再起動トリガー」を以下のとおり確定した。
+
+1. **計画提示**: `21.plan-required`が付いたissueへの初回dispatch時は実装せず、コードを調査した計画を
+   `gh issue comment`でissueに投稿し、`00.check-user`を付与して停止する。
+2. **承認・再開**: 人間が計画を確認し、issueから`00.check-user`ラベルを外すと「承認」とみなし、
+   同ワークフローが実装を再開する（`issues: unlabeled`イベントをトリガーに使う）。
+3. **練り直し**: `00.check-user`が付いたまま（＝未承認）人間が`@claude`とコメントした場合は、計画への
+   修正依頼として扱い、計画コメントを投稿し直す（`00.check-user`は外さない）。
+
+`00.check-user`はPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、対応する
+`issue-<番号>`ブランチがまだ存在しない状態でのみ「承認」と解釈するようガードしている
+（ブランチ作成後は本ワークフローはそのissueに対して常にskipする）ため、Phase4側の判定と混線しない。
+
+### 無人実行時の権限モード（許可ツールリスト）
+
+- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"`。
+  コード変更ツール（Edit/Write）は許可しない（計画提示のみで実装はしないため）。
+- **実装ステップ**: `--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"`。
+  `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
+  明示的に許可する方針（Phase1〜4から継続）。
+- git push・PR作成は既定の`GITHUB_TOKEN`（ジョブの`contents: write`/`pull-requests: write`権限）で行う。
+
+### 既知の制約・今後の検討事項
+
+- **develop向けPR作成後、Phase3/4のレビュー・自動マージが自動発火しない可能性がある**: GitHub仕様上、
+  既定の`GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しない。そのため
+  `claude-issue-dispatch.yml`が作成したPRに対して`claude-review-develop.yml`（Phase3/4）が自動的には
+  起動しない可能性が高い（未検証）。Phase5の完了条件は「develop向けPR作成まで」であり、developへの
+  マージまでの自動化は前提にしていないため今回は許容したが、実運用で発火しないことが確認された場合は、
+  PAT（Personal Access Token）ベースのトークンへの切り替えや`claude-review-develop.yml`への
+  `workflow_dispatch`トリガー追加などの対応を別途検討する。
+- `22.preview-required`・`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、
+  画面確認・スクリーンショット取得ができないため、実装・コミット・ブランチpushまで行った上で
+  `00.check-user`を付与しPR作成前に停止する運用にとどめている。このケースの「承認後の再開」は
+  Phase5のスコープでは自動化しておらず、人間が手動で`gh pr create`する運用（申し送り事項）。
 
 ## 未解決の課題・申し送り事項
 
