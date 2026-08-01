@@ -15,6 +15,7 @@ type SidebarNavProps = {
   onSelectView: (view: NavViewId) => void;
   navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
+  selectedRepoFullName?: string | null;
   onSelectRepository?: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
   className?: string;
@@ -33,6 +34,7 @@ export function SidebarNav({
   onSelectView,
   navCounts,
   repositories,
+  selectedRepoFullName,
   onSelectRepository,
   labelSummary,
   className,
@@ -93,7 +95,10 @@ export function SidebarNav({
                   <button
                     type="button"
                     onClick={() => onSelectRepository?.(repo)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                      selectedRepoFullName === repo.fullName && "bg-accent font-medium",
+                    )}
                   >
                     <span className="flex items-center gap-2 truncate">
                       <span

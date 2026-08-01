@@ -210,6 +210,7 @@ export function IssueDeckShell({
           onSelectView={handleSelectView}
           navCounts={navCounts}
           repositories={repositories}
+          selectedRepoFullName={filters.repo}
           onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
           labelSummary={labelSummary}
           className="hidden w-60 shrink-0 border-r md:flex"
