@@ -79,7 +79,15 @@ export function IssueList({
                       <Lock className="size-3 shrink-0" aria-label="プライベート" />
                     )}
                   </span>
-                  <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {issue.favorite && (
+                      <Star
+                        className="size-3.5 fill-yellow-400 text-yellow-400"
+                        aria-label="お気に入り"
+                      />
+                    )}
+                    <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
+                  </span>
                 </div>
                 <p className="line-clamp-2 text-sm font-medium">
                   #{issue.number} {issue.title}
