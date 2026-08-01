@@ -1,4 +1,4 @@
-import { ChevronDown, Eye, FolderGit2, Plus } from "lucide-react";
+import { Archive, ChevronDown, Eye, FolderGit2, Lock, Plus } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Progress } from "@/components/ui/progress";
@@ -61,6 +61,12 @@ export function IssuePropertiesPanel({ issue }: IssuePropertiesPanelProps) {
         <div className="flex items-center gap-2">
           <FolderGit2 className="size-4 text-muted-foreground" />
           {issue.repositoryFullName}
+          {issue.repositoryArchived && (
+            <Archive className="size-3.5 text-muted-foreground" aria-label="アーカイブ済み" />
+          )}
+          {issue.repositoryPrivate && (
+            <Lock className="size-3.5 text-muted-foreground" aria-label="プライベート" />
+          )}
         </div>
       </section>
 

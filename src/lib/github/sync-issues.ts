@@ -113,14 +113,13 @@ export async function deleteIssueByGithubId(githubIssueId: number): Promise<void
 }
 
 export async function upsertIssueAndGetDisplay(
-  repositoryFullName: string,
-  repositoryId: string,
+  repository: { id: string; fullName: string; private: boolean; archived: boolean },
   raw: GithubApiIssue,
 ): Promise<Issue> {
-  const issue = await upsertIssueRow(repositoryId, raw);
+  const issue = await upsertIssueRow(repository.id, raw);
   const row = await db.issue.findUniqueOrThrow({
     where: { id: issue.id },
     include: { labels: true },
   });
-  return dbIssueToDisplayIssue(repositoryFullName, row);
+  return dbIssueToDisplayIssue(repository, row);
 }

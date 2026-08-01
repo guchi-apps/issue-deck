@@ -39,6 +39,7 @@ export default async function DashboardPage() {
         name: repo.name,
         fullName: repo.fullName,
         private: repo.private,
+        archived: repo.archived,
         hidden: hiddenRepositoryIds.has(repo.id),
       }))}
       issues={issues}

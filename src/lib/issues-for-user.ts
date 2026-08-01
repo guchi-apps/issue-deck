@@ -8,5 +8,5 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
     include: { labels: true, repository: true },
   });
 
-  return issueRows.map((row) => dbIssueToDisplayIssue(row.repository.fullName, row));
+  return issueRows.map((row) => dbIssueToDisplayIssue(row.repository, row));
 }

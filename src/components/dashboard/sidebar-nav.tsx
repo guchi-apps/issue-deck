@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import {
+  Archive,
   CheckCircle2,
   Eye,
   EyeOff,
   FolderGit2,
   ListChecks,
+  Lock,
   Plus,
   SlidersHorizontal,
   Star,
@@ -140,8 +142,19 @@ export function SidebarNav({
                         </span>
                         <span className="truncate">{repo.name}</span>
                       </span>
-                      {repo.private && (
-                        <span className="text-xs text-muted-foreground">Private</span>
+                      {(repo.archived || repo.private) && (
+                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                          {repo.archived && (
+                            <span title="アーカイブ済み">
+                              <Archive className="size-3" />
+                            </span>
+                          )}
+                          {repo.private && (
+                            <span title="プライベートリポジトリ">
+                              <Lock className="size-3" />
+                            </span>
+                          )}
+                        </span>
                       )}
                     </button>
                     <button

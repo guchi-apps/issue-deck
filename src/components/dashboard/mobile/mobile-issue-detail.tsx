@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  Archive,
   ArrowLeft,
   FolderGit2,
+  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -87,6 +89,10 @@ export function MobileIssueDetail({ issue, onBack, onEdit, onIssueUpdated }: Mob
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}
+          {issue.repositoryArchived && (
+            <Archive className="size-3" aria-label="アーカイブ済み" />
+          )}
+          {issue.repositoryPrivate && <Lock className="size-3" aria-label="プライベート" />}
         </span>
 
         <h1 className="text-lg font-semibold">

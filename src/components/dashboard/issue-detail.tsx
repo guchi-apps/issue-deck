@@ -1,6 +1,15 @@
 "use client";
 
-import { ExternalLink, MoreHorizontal, Pencil, RotateCcw, Star, XCircle } from "lucide-react";
+import {
+  Archive,
+  ExternalLink,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  Star,
+  XCircle,
+} from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -51,7 +60,13 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps)
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-muted-foreground">{issue.repositoryFullName}</span>
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {issue.repositoryFullName}
+            {issue.repositoryArchived && (
+              <Archive className="size-3.5" aria-label="アーカイブ済み" />
+            )}
+            {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
+          </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">

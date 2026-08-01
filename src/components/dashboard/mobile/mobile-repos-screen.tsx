@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FolderGit2, Search } from "lucide-react";
+import { Archive, FolderGit2, Lock, Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -71,8 +71,19 @@ export function MobileReposScreen({ repositories, onSelectRepository }: MobileRe
                       </span>
                       <span className="truncate">{repo.name}</span>
                     </span>
-                    {repo.private && (
-                      <span className="shrink-0 text-xs text-muted-foreground">Private</span>
+                    {(repo.archived || repo.private) && (
+                      <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                        {repo.archived && (
+                          <span title="アーカイブ済み">
+                            <Archive className="size-3.5" />
+                          </span>
+                        )}
+                        {repo.private && (
+                          <span title="プライベートリポジトリ">
+                            <Lock className="size-3.5" />
+                          </span>
+                        )}
+                      </span>
                     )}
                   </button>
                 </li>

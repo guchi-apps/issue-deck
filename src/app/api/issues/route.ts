@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       assignees:
         typeof payload.assignee === "string" && payload.assignee ? [payload.assignee] : undefined,
     });
-    const issue = await upsertIssueAndGetDisplay(repositoryFullName, repository.id, created);
+    const issue = await upsertIssueAndGetDisplay(repository, created);
     return NextResponse.json({ issue });
   } catch (error) {
     return NextResponse.json(
@@ -109,7 +109,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const token = await getInstallationToken(repository.installation.installationId);
     const updated = await updateIssue(owner, repo, number, token, input);
-    const issue = await upsertIssueAndGetDisplay(repositoryFullName, repository.id, updated);
+    const issue = await upsertIssueAndGetDisplay(repository, updated);
     return NextResponse.json({ issue });
   } catch (error) {
     return NextResponse.json(

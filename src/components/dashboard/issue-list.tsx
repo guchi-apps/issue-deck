@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, Star } from "lucide-react";
+import { Archive, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Input } from "@/components/ui/input";
@@ -70,8 +70,14 @@ export function IssueList({
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs text-muted-foreground">
-                    {issue.repositoryFullName.split("/")[1]}
+                  <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    <span className="truncate">{issue.repositoryFullName.split("/")[1]}</span>
+                    {issue.repositoryArchived && (
+                      <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />
+                    )}
+                    {issue.repositoryPrivate && (
+                      <Lock className="size-3 shrink-0" aria-label="プライベート" />
+                    )}
                   </span>
                   <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
                 </div>
