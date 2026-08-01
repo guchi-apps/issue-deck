@@ -18,7 +18,10 @@ name: Claude Issue Dispatch
 # 付与・削除にはリポジトリへのwrite権限が必要でGitHub側で担保されるが、
 # @claudeコメントによる起動は権限を持たない第三者からも到達しうるため、
 # 全トリガー経路で一律に実行者(github.actor)のリポジトリ権限を確認し、
-# write権限未満の場合は何もしない。
+# write権限未満の場合は何もしない。ただし issue-deckアプリ自身のGitHub App経由の
+# コメント投稿(issue-deck[bot])は、人間がアプリ画面上で操作していてもGitHub上は
+# 常にBot扱いになるため例外とし、アプリがコメント本文に埋め込む投稿者マーカーから
+# 実際に操作した人間を復元したうえで同様に権限確認する(詳細は後述のステップを参照)。
 #
 # 対象issueの番号はissues/issue_commentイベントの github.event.issue.number
 # からそのまま取得できる(ブランチ名からの推測が必要な他ワークフローと異なる)。
@@ -70,14 +73,31 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_LABEL: ${{ github.event.label.name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           set -e
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
           if [ "$ACTOR_TYPE" = "Bot" ]; then
-            echo "実行者がBotのため何もしません（自己ループ防止）: $ACTOR"
-            echo "mode=skip" >> "$GITHUB_OUTPUT"
-            exit 0
+            # issue-deckアプリ自身のGitHub App経由の書き込みは、人間がアプリ画面上で
+            # 操作した場合でもGitHub上は issue-deck[bot] が投稿者になる。issue_comment
+            # イベントに限り、アプリがコメント本文の末尾に埋め込む投稿者マーカー
+            # (<!-- issue-deck:posted-by:<login> -->。src/app/api/issues/comments/route.ts
+            # のPOSTで付与、ユーザー入力より後ろに付くため本文中の偽マーカーは無効)から
+            # 実際に操作した人間のログイン名を取り出し、以降の権限チェックをその人間に
+            # 対して行う。マーカーが無い場合(issue-deck[bot]以外のBotや、マーカーの無い
+            # 旧コメント)はこれまで通りスキップする。
+            POSTED_BY=""
+            if [ "$ACTOR" = "issue-deck[bot]" ] && [ "$EVENT_NAME" = "issue_comment" ]; then
+              POSTED_BY="$(printf '%s' "$COMMENT_BODY" | grep -oP '(?<=<!-- issue-deck:posted-by:)\S+(?= -->)' | tail -n1 || true)"
+            fi
+            if [ -z "$POSTED_BY" ]; then
+              echo "実行者がBotのため何もしません（自己ループ防止）: $ACTOR"
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "issue-deck[bot]経由のコメントを検出、投稿者マーカーから実行者を復元します: $POSTED_BY"
+            ACTOR="$POSTED_BY"
           fi
 
           PERMISSION="$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo "none")"
