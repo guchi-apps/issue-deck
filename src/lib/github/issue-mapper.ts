@@ -51,6 +51,7 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
     htmlUrl: raw.html_url,
+    favorite: false,
   };
 }
 
@@ -86,6 +87,7 @@ export function dbIssueToDisplayIssue(
     createdAt: row.githubCreatedAt.toISOString(),
     updatedAt: row.githubUpdatedAt.toISOString(),
     htmlUrl: row.htmlUrl,
+    favorite: false,
   };
 }
 

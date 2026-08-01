@@ -45,6 +45,7 @@ export type Issue = {
   createdAt: string;
   updatedAt: string;
   htmlUrl: string;
+  favorite: boolean;
 };
 
 export type NavViewId =

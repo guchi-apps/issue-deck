@@ -166,6 +166,36 @@ export function IssueDeckShell({
     }
   }
 
+  async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
+    function applyFavorite(target: boolean) {
+      setIssues((prev) =>
+        prev.map((item) => (item.id === issue.id ? { ...item, favorite: target } : item)),
+      );
+      setSelectedIssue((prev) =>
+        prev && prev.id === issue.id ? { ...prev, favorite: target } : prev,
+      );
+      setMobileScreen((prev) =>
+        prev.kind === "issue-detail" && prev.issue.id === issue.id
+          ? { ...prev, issue: { ...prev.issue, favorite: target } }
+          : prev,
+      );
+    }
+
+    applyFavorite(favorite);
+
+    try {
+      const response = await fetch("/api/issues/favorites", {
+        method: favorite ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId: issue.id }),
+      });
+      if (!response.ok) throw new Error("failed to update favorite issue");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update favorite issue", error);
+      applyFavorite(!favorite);
+    }
+  }
+
   const activeBottomNavTab: MobileBottomNavTab =
     mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
       ? "home"
@@ -232,6 +262,7 @@ export function IssueDeckShell({
                 onBack={handleMobileBack}
                 onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
+                onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
               />
             )}
           </div>
@@ -272,6 +303,7 @@ export function IssueDeckShell({
             issue={selectedIssue}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
+            onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
           />
         </div>
         {selectedIssue && (

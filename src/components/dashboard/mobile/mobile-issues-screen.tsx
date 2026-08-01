@@ -13,7 +13,7 @@ import { navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
-const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "recent"];
+const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "favorites", "recent"];
 
 type MobileIssuesScreenProps = {
   issues: Issue[];
