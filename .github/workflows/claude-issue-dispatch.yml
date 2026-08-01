@@ -28,8 +28,13 @@ name: Claude Issue Dispatch
 # 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
 # 展開しない(.github/workflows/issue-labels.yml と同じ方針)。
 #
-# 既知の制約: ブランチのpush・PR作成は既定の`GITHUB_TOKEN`で行っている。GitHubの仕様上
-# `GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しないため、
+# ブランチのpush(.github/workflows/配下への書き込みを含む)は、既定のGITHUB_TOKENには
+# workflows権限を付与できない(ワークフロー構文レベルの制約)ため、fine-grained PAT
+# (.github/claude-dispatch.env.tpl経由で1Passwordから注入)をactions/checkoutの認証に
+# 使っている。一方PR作成(gh pr create)やラベル操作は引き続き既定のGITHUB_TOKENで行っている。
+#
+# 既知の制約: `gh pr create`によるPR作成は既定の`GITHUB_TOKEN`で行っている。GitHubの仕様上
+# `GITHUB_TOKEN`によるAPI操作はイベントとして他のワークフローを起動しないため、
 # ここで作成したPRに対して.github/workflows/claude-review-develop.yml(Phase3自動レビュー・
 # Phase4自動マージ)は自動発火しない可能性が高い(未検証)。develop向けPR作成までが本ワークフロー
 # の完了条件であり、developへのマージまでの自動化は前提としない。発火しない場合は、人間が
@@ -56,11 +61,20 @@ jobs:
       actions: read
       id-token: write
     steps:
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/claude-dispatch.env.tpl
+
       - name: Checkout develop
         uses: actions/checkout@v4
         with:
           ref: develop
           fetch-depth: 1
+          token: ${{ env.WORKFLOW_PUSH_PAT }}
 
       - name: 実行者の権限・状態を判定する
         id: state
