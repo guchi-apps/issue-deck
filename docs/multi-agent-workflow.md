@@ -68,7 +68,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-develop→mainのリリースフロー自体（バージョンアップコミット・PR作成等）は現状、既存の手動運用（git-github-jaスキル参照）のまま（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。ただし上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+develop→mainのリリースフロー自体（バージョンアップコミット・PR作成等）は現状、既存の手動運用（release-to-mainスキル参照）のまま（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。ただし上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
 ### GitHub Actionsによるラベル遷移の自動化
 
