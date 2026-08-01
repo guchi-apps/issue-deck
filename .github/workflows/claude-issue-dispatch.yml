@@ -116,6 +116,7 @@ jobs:
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             BRANCH_EXISTS=true
           fi
+          echo "branch_exists=$BRANCH_EXISTS" >> "$GITHUB_OUTPUT"
 
           LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
           PLAN_REQUIRED=false
@@ -147,6 +148,46 @@ jobs:
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM branch_exists=$BRANCH_EXISTS"
+
+      - name: 対応開始をコメントで通知する
+        # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
+        # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
+        # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
+        # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
+        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
+            BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+          else
+            BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
+          fi
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+
+      - name: 実装済み・対応中のissueへの@claudeコメントに返信する
+        # BRANCH_EXISTS=trueによりmode=skipとなるケース(#105)。issue-<番号>ブランチが
+        # 既に存在するため実装は再始動しないが、issue_commentトリガー(人間が直接
+        # @claudeへ呼びかけたケース)に限り、これまでの「無言でスキップ」を避けて
+        # 対応状況を返信する。labeled/unlabeledイベントでの同条件のskip
+        # (Phase4の要確認判定など)は人間への呼びかけではないため対象外。
+        if: |
+          steps.state.outputs.mode == 'skip' &&
+          steps.state.outputs.branch_exists == 'true' &&
+          github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          BRANCH="${{ steps.state.outputs.branch }}"
+          PR_URL="$(gh pr list --head "$BRANCH" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)"
+          BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。"
+          if [ -n "$PR_URL" ]; then
+            BODY="$BODY 関連するPull Requestはこちらです: $PR_URL"
+          fi
+          BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 計画提示前のコメント数を記録する
         id: before_plan

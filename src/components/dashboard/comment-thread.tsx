@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MoreHorizontal, Pencil, ThumbsUp, Trash2 } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
   AlertDialog,
@@ -24,7 +25,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { IssueComment } from "@/types/issue";
 
@@ -32,11 +32,21 @@ type CommentThreadProps = {
   comments: IssueComment[];
   isLoading?: boolean;
   error?: string | null;
+  repositoryFullName: string;
+  issueSuggestions: IssueSuggestion[];
   onUpdate: (commentId: string, body: string) => Promise<boolean>;
   onDelete: (commentId: string) => Promise<boolean>;
 };
 
-export function CommentThread({ comments, isLoading, error, onUpdate, onDelete }: CommentThreadProps) {
+export function CommentThread({
+  comments,
+  isLoading,
+  error,
+  repositoryFullName,
+  issueSuggestions,
+  onUpdate,
+  onDelete,
+}: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -123,10 +133,11 @@ export function CommentThread({ comments, isLoading, error, onUpdate, onDelete }
               </div>
               {editingId === comment.id ? (
                 <div className="mt-2 flex flex-col gap-2">
-                  <Textarea
+                  <MentionTextarea
                     className="min-h-20"
                     value={editBody}
-                    onChange={(e) => setEditBody(e.target.value)}
+                    onChange={setEditBody}
+                    issueSuggestions={issueSuggestions}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
                         e.preventDefault();
@@ -146,7 +157,11 @@ export function CommentThread({ comments, isLoading, error, onUpdate, onDelete }
                 </div>
               ) : (
                 <>
-                  <MarkdownBody content={comment.body} className="mt-1" />
+                  <MarkdownBody
+                    content={comment.body}
+                    className="mt-1"
+                    repositoryFullName={repositoryFullName}
+                  />
                   {comment.reactionCount > 0 && (
                     <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
                       <ThumbsUp className="size-3" />

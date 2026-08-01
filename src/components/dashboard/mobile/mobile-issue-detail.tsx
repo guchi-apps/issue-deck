@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   Archive,
@@ -20,6 +20,7 @@ import {
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -47,6 +47,7 @@ import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
   issue: Issue;
+  issues: Issue[];
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
@@ -55,6 +56,7 @@ type MobileIssueDetailProps = {
 
 export function MobileIssueDetail({
   issue,
+  issues,
   onBack,
   onEdit,
   onIssueUpdated,
@@ -71,6 +73,10 @@ export function MobileIssueDetail({
   const [newCommentBody, setNewCommentBody] = useState("");
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
+  const issueSuggestions = useMemo(
+    () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
+    [issues, issue.repositoryFullName],
+  );
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -278,7 +284,7 @@ export function MobileIssueDetail({
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <MarkdownBody content={issue.body} />
+          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
 
         <div>
@@ -289,16 +295,19 @@ export function MobileIssueDetail({
             comments={comments}
             isLoading={isLoading}
             error={error}
+            repositoryFullName={issue.repositoryFullName}
+            issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
           />
 
           <div className="mt-4 flex flex-col gap-2">
-            <Textarea
+            <MentionTextarea
               placeholder="コメントを追加..."
               className="min-h-20"
               value={newCommentBody}
-              onChange={(e) => setNewCommentBody(e.target.value)}
+              onChange={setNewCommentBody}
+              issueSuggestions={issueSuggestions}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();

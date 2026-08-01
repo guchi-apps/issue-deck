@@ -17,6 +17,7 @@ import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
+import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
@@ -29,10 +30,12 @@ import {
   computeOverviewStats,
   filterIssuesByView,
   getAssigneeOptions,
+  reconcileIssues,
   sortIssues,
 } from "@/lib/issue-stats";
 import { navViews } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
+import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -40,17 +43,21 @@ type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
+  quickFilters: QuickFilter[];
 };
 
 export function IssueDeckShell({
   currentUser,
   repositories: initialRepositories,
   issues: initialIssues,
+  quickFilters: initialQuickFilters,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
+  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack } =
     useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -75,10 +82,11 @@ export function IssueDeckShell({
   }
 
   useIssuePolling((polledIssues) => {
-    setIssues(polledIssues);
+    const reconciledIssues = reconcileIssues(issues, polledIssues);
+    setIssues(reconciledIssues);
     setSelectedIssue((prev) => {
       if (!prev) return prev;
-      return polledIssues.find((issue) => issue.id === prev.id) ?? prev;
+      return reconciledIssues.find((issue) => issue.id === prev.id) ?? prev;
     });
   });
 
@@ -159,6 +167,40 @@ export function IssueDeckShell({
     }
   }
 
+  function applyQuickFilter(quickFilter: QuickFilter) {
+    setFilters({
+      view: quickFilter.view,
+      q: quickFilter.q,
+      repo: quickFilter.repo,
+      state: quickFilter.state,
+      labels: quickFilter.labels,
+      assignee: quickFilter.assignee,
+      sort: quickFilter.sort,
+    });
+    setSelectedIssue(null);
+  }
+
+  function handleSelectQuickFilter(quickFilter: QuickFilter) {
+    applyQuickFilter(quickFilter);
+  }
+
+  function handleSelectQuickFilterMobile(quickFilter: QuickFilter) {
+    applyQuickFilter(quickFilter);
+    selectQuickView(quickFilter.view);
+  }
+
+  async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
+    setQuickFilters((prev) => prev.filter((item) => item.id !== quickFilter.id));
+
+    try {
+      const response = await fetch(`/api/quick-filters/${quickFilter.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("failed to delete quick filter");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to delete quick filter", error);
+      setQuickFilters((prev) => [...prev, quickFilter]);
+    }
+  }
+
   const activeBottomNavTab: MobileBottomNavTab =
     mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
       ? "home"
@@ -184,6 +226,10 @@ export function IssueDeckShell({
                 overviewStats={overviewStats}
                 navCounts={navCounts}
                 onSelectQuickView={selectQuickView}
+                quickFilters={quickFilters}
+                onSelectQuickFilter={handleSelectQuickFilterMobile}
+                onDeleteQuickFilter={handleDeleteQuickFilter}
+                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
               />
             )}
 
@@ -228,6 +274,7 @@ export function IssueDeckShell({
             {mobileScreen.kind === "issue-detail" && (
               <MobileIssueDetail
                 issue={mobileScreen.issue}
+                issues={issues}
                 onBack={goBack}
                 onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
@@ -253,6 +300,10 @@ export function IssueDeckShell({
           selectedLabels={filters.labels}
           onSelectLabel={(label) => toggleLabel(label.name)}
           onClearLabels={() => setFilter("labels", [])}
+          quickFilters={quickFilters}
+          onSelectQuickFilter={handleSelectQuickFilter}
+          onDeleteQuickFilter={handleDeleteQuickFilter}
+          onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 
@@ -270,6 +321,7 @@ export function IssueDeckShell({
         <div className="hidden flex-1 overflow-hidden md:flex">
           <IssueDetail
             issue={selectedIssue}
+            issues={issues}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
@@ -287,7 +339,14 @@ export function IssueDeckShell({
         onOpenChange={setCreateDialogOpen}
         repositories={repositories}
         defaultRepositoryFullName={createDialogRepo}
+        issues={issues}
         onCreated={handleIssueCreated}
+      />
+      <QuickFilterDialog
+        open={quickFilterDialogOpen}
+        onOpenChange={setQuickFilterDialogOpen}
+        filters={filters}
+        onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
       />
       <EditIssueDialog
         open={editingIssue !== null}
@@ -295,6 +354,7 @@ export function IssueDeckShell({
           if (!open) setEditingIssue(null);
         }}
         issue={editingIssue}
+        issues={issues}
         onUpdated={handleIssueUpdated}
       />
     </div>
