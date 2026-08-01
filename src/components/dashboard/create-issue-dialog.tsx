@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
+import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -33,6 +33,7 @@ type CreateIssueDialogProps = {
   onOpenChange: (open: boolean) => void;
   repositories: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
+  issues: Issue[];
   onCreated: (issue: Issue) => void;
 };
 
@@ -41,6 +42,7 @@ export function CreateIssueDialog({
   onOpenChange,
   repositories,
   defaultRepositoryFullName,
+  issues,
   onCreated,
 }: CreateIssueDialogProps) {
   const { createIssue, isSubmitting, error, setError } = useIssueMutations();
@@ -53,6 +55,10 @@ export function CreateIssueDialog({
 
   const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
+  );
+  const issueSuggestions = useMemo(
+    () => getRepoIssueSuggestions(issues, repositoryFullName),
+    [issues, repositoryFullName],
   );
 
   useEffect(() => {
@@ -126,10 +132,11 @@ export function CreateIssueDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="create-issue-body">本文</Label>
-            <Textarea
+            <MentionTextarea
               id="create-issue-body"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
+              issueSuggestions={issueSuggestions}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();

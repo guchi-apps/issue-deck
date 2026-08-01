@@ -228,6 +228,7 @@ export function IssueDeckShell({
             {mobileScreen.kind === "issue-detail" && (
               <MobileIssueDetail
                 issue={mobileScreen.issue}
+                issues={issues}
                 onBack={goBack}
                 onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
@@ -270,6 +271,7 @@ export function IssueDeckShell({
         <div className="hidden flex-1 overflow-hidden md:flex">
           <IssueDetail
             issue={selectedIssue}
+            issues={issues}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
@@ -287,6 +289,7 @@ export function IssueDeckShell({
         onOpenChange={setCreateDialogOpen}
         repositories={repositories}
         defaultRepositoryFullName={createDialogRepo}
+        issues={issues}
         onCreated={handleIssueCreated}
       />
       <EditIssueDialog
@@ -295,6 +298,7 @@ export function IssueDeckShell({
           if (!open) setEditingIssue(null);
         }}
         issue={editingIssue}
+        issues={issues}
         onUpdated={handleIssueUpdated}
       />
     </div>

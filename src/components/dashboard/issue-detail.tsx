@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   Archive,
@@ -17,6 +17,7 @@ import {
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -37,12 +37,13 @@ import type { Issue } from "@/types/issue";
 
 type IssueDetailProps = {
   issue: Issue | null;
+  issues: Issue[];
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
 };
 
-export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
+export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
@@ -53,6 +54,10 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+  const issueSuggestions = useMemo(
+    () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
+    [issues, issue],
+  );
 
   async function handleToggleState() {
     if (!issue) return;
@@ -207,7 +212,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <MarkdownBody content={issue.body} />
+          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
 
         <Separator />
@@ -222,16 +227,19 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
             comments={comments}
             isLoading={isLoading}
             error={error}
+            repositoryFullName={issue.repositoryFullName}
+            issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
           />
 
           <div className="mt-4 flex flex-col gap-2">
-            <Textarea
+            <MentionTextarea
               placeholder="コメントを追加..."
               className="min-h-20"
               value={newCommentBody}
-              onChange={(e) => setNewCommentBody(e.target.value)}
+              onChange={setNewCommentBody}
+              issueSuggestions={issueSuggestions}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
