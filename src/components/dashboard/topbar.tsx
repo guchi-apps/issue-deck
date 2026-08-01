@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, LayoutDashboard, Plus, Search } from "lucide-react";
+import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Search } from "lucide-react";
 
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
+import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { LabelSummary } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -46,6 +47,7 @@ export function TopBar({
   onCreateIssue,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
+  const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
   const repoLabel = filters.repo
@@ -220,6 +222,17 @@ export function TopBar({
             }}
           >
             {currentUser?.name ?? currentUser?.login}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={isSyncing}
+            onSelect={(e) => {
+              e.preventDefault();
+              handleSync();
+            }}
+          >
+            <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
+            {isSyncing ? "再同期中..." : "今すぐ再同期"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
