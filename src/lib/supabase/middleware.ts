@@ -43,6 +43,15 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // ログイン済みユーザーが /login を開いた場合（ブラウザの「戻る」操作等）は
+  // ログイン画面を再表示せずダッシュボードへ送り、URL上もログイン前の状態に
+  // 戻れてしまわないようにする。
+  if (pathname === "/login" && user) {
+    const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
+    const target = callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : "/dashboard";
+    return NextResponse.redirect(new URL(target, getRequestOrigin(request)));
+  }
+
   if (isPublicPath(pathname)) {
     return supabaseResponse;
   }
