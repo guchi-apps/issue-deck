@@ -1,5 +1,7 @@
 import { ImageResponse } from "next/og";
 
+import { AppIconGlyph } from "@/lib/app-icon-glyph";
+
 const SIZE = 192;
 
 export function GET() {
@@ -13,12 +15,9 @@ export function GET() {
           alignItems: "center",
           justifyContent: "center",
           background: "#171717",
-          color: "#fafafa",
-          fontSize: SIZE * 0.48,
-          fontWeight: 700,
         }}
       >
-        ID
+        <AppIconGlyph size={SIZE * 0.6} />
       </div>
     ),
     { width: SIZE, height: SIZE }

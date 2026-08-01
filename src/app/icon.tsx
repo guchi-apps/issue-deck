@@ -2,10 +2,10 @@ import { ImageResponse } from "next/og";
 
 import { AppIconGlyph } from "@/lib/app-icon-glyph";
 
-export const size = { width: 180, height: 180 };
+export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
-export default function AppleIcon() {
+export default function Icon() {
   return new ImageResponse(
     (
       <div
