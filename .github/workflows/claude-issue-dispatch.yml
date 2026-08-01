@@ -148,6 +148,23 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM branch_exists=$BRANCH_EXISTS"
 
+      - name: 対応開始をコメントで通知する
+        # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
+        # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
+        # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
+        # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
+        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
+            BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+          else
+            BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
+          fi
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+
       - name: 計画提示前のコメント数を記録する
         id: before_plan
         if: steps.state.outputs.mode == 'plan'
