@@ -148,6 +148,15 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM branch_exists=$BRANCH_EXISTS"
 
+      - name: 計画提示前のコメント数を記録する
+        id: before_plan
+        if: steps.state.outputs.mode == 'plan'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
       - name: Claude Code（計画提示）
         if: steps.state.outputs.mode == 'plan'
         uses: anthropics/claude-code-action@v1
@@ -155,8 +164,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"'
-          show_full_output: true # 調査用の一時設定。原因判明後に外す（#70で計画コメントが投稿されなかった件の調査）
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"'
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
@@ -174,6 +182,14 @@ jobs:
             - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
               （既に付いていても無害なので毎回実行してよい）
 
+            ## 迷った場合・調査に行き詰まった場合の振る舞い
+            - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
+              分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
+              （コメントを一切投稿できないまま終了することが最悪の結果のため）
+            - 実装範囲が広く一度の計画にまとめきれないと判断した場合は、無理に一つの計画に収めようとせず、
+              Issueを複数に分割して段階的に進めることを計画コメントの中で提案してよい
+              （実際にIssueを分割する作業はこのステップでは行わず、提案に留める）
+
             ## このステップでは行わないこと
             - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ）
 
@@ -181,6 +197,25 @@ jobs:
             人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と
             みなし、別のワークフロー実行が実装を開始します。計画に修正が必要な場合は、人間が
             `@claude` 宛にコメントで指摘するので、その場合はこのステップが再び起動し計画を練り直します。
+
+      - name: 計画コメント投稿を検証し、必要ならフォールバックする
+        if: always() && steps.state.outputs.mode == 'plan'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before_plan.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため計画提示は完了とみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
+          FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
+          gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
       - name: Claude Code（実装・PR作成）
         if: steps.state.outputs.mode == 'implement'
