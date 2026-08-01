@@ -71,7 +71,7 @@ export function TopBar({
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
       <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
         <LayoutDashboard className="size-5 text-primary" />
-        Issue Dashboard
+        Issue Deck
       </div>
 
       <div className="relative w-72">

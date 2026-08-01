@@ -13,7 +13,7 @@ export function MobileHomeScreen({ labelSummary, overviewStats }: MobileHomeScre
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <header className="border-b p-4">
-        <span className="text-base font-semibold">Issue Dashboard</span>
+        <span className="text-base font-semibold">Issue Deck</span>
       </header>
 
       <div className="p-4">
