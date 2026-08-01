@@ -26,8 +26,16 @@
 - Issueの要件を実装する
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
-- `develop` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）
-- `01.wip` → `02.close` のラベル付け替えを行う
+- `develop` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。developへのマージ時点ではissueをcloseしない運用のため、PR本文に`closes #番号`/`fixes #番号`は使わず、`#{{ISSUE_NUMBER}}`のように番号のみ記載する
+- `01.wip` → `03.d:marge` のラベル付け替えを行う（developへのマージ・issueのcloseはレビュー・統合エージェント側が担当する）
+
+## 開発環境での画面確認
+
+{{PREVIEW_INSTRUCTIONS}}
+
+## スクリーンショット取得
+
+{{SCREENSHOT_INSTRUCTIONS}}
 
 ## 実装完了直前にやること
 

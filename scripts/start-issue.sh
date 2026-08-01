@@ -48,7 +48,7 @@ done
 mkdir -p "$PROMPT_DIR"
 
 # issue番号ごとにworktree・ブランチを準備し、起動用プロンプトを生成する。
-# 戻り値として WORKTREE_DIR / PROMPT_FILE をグローバル変数に設定する。
+# 戻り値として WORKTREE_DIR / PROMPT_FILE / DEV_PORT をグローバル変数に設定する。
 prepare_issue() {
   local n="$1"
   WORKTREE_DIR="$WORKTREE_BASE/issue-$n"
@@ -81,6 +81,14 @@ prepare_issue() {
     echo "警告: $ROOT/.env.local が無いため .env.local をコピーしませんでした。" >&2
   fi
 
+  # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
+  DEV_PORT=$((4000 + n))
+  if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
+    sed -i '/^PORT=/d' "$WORKTREE_DIR/.env.local"
+    printf '\nPORT=%s\n' "$DEV_PORT" >>"$WORKTREE_DIR/.env.local"
+  fi
+  echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
+
   echo "#$n: pnpm install しています..."
   (cd "$WORKTREE_DIR" && pnpm install)
 
@@ -88,18 +96,55 @@ prepare_issue() {
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
-issue_json_path, template_path = sys.argv[1], sys.argv[2]
+issue_json_path, template_path, dev_port = sys.argv[1], sys.argv[2], sys.argv[3]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
 with open(template_path, encoding="utf-8") as f:
     template = f.read()
 
-labels = ", ".join(l["name"] for l in issue.get("labels", [])) or "(なし)"
+label_names = {l["name"] for l in issue.get("labels", [])}
+labels = ", ".join(sorted(label_names)) or "(なし)"
+
+if "22.preview-required" in label_names:
+    preview_instructions = (
+        "このIssueには`22.preview-required`ラベルが付いています。実装・テストが完了したら、"
+        "PRを作成する**前**に次の手順を行ってください。\n\n"
+        "1. このworktreeの開発サーバー（`pnpm dev`）をポート`{port}`で起動する（`.env.local`に設定済み）\n"
+        "2. `http://localhost:{port}` で実際の画面を確認する\n"
+        "3. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
+        "4. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
+        "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
+    ).format(port=dev_port)
+else:
+    preview_instructions = (
+        "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`を使うよう`.env.local`に設定済みです"
+        "（他Issueのworktreeと同時に起動しても衝突しません）。画面に関わる変更を行った場合、"
+        "PR本文の「確認方法」に次の情報を含めてください。\n\n"
+        "- 起動コマンド（例: `pnpm dev`）とアクセスURL（`http://localhost:{port}`）\n"
+        "- 実際に確認すべき画面・操作手順\n\n"
+        "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
+    ).format(port=dev_port)
+
+if "23.screenshot-required" in label_names:
+    screenshot_instructions = (
+        "このIssueには`23.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
+        "PRを作成する**前**に次の手順を行ってください。\n\n"
+        f"1. `run`スキル等を使って開発サーバー（ポート`{dev_port}`）上で変更箇所のスクリーンショットを取得する"
+        "（Playwright等の新規依存関係の追加が必要な場合は、追加前に必ずユーザーに確認する）\n"
+        "2. 取得したスクリーンショットをユーザーに提示し、問題ないか明示的な承認を得る\n"
+        "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
+        "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
+    )
+else:
+    screenshot_instructions = (
+        "このIssueには`23.screenshot-required`ラベルが付いていないため、"
+        "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
+    )
 
 comments = issue.get("comments", [])
 if comments:
@@ -120,6 +165,9 @@ result = (
     .replace("{{ISSUE_LABELS}}", labels)
     .replace("{{ISSUE_BODY}}", issue.get("body") or "(本文なし)")
     .replace("{{ISSUE_COMMENTS}}", comment_text)
+    .replace("{{DEV_PORT}}", dev_port)
+    .replace("{{PREVIEW_INSTRUCTIONS}}", preview_instructions)
+    .replace("{{SCREENSHOT_INSTRUCTIONS}}", screenshot_instructions)
 )
 sys.stdout.write(result)
 PY
