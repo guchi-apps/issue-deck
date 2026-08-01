@@ -56,6 +56,33 @@ async function handleIssuesEvent(payload: {
   await upsertIssueFromWebhookPayload(repository.id, payload.issue);
 }
 
+async function handleLabelEvent(payload: {
+  action: string;
+  label: { id: number; name: string; color: string };
+  repository: { id: number };
+}) {
+  const repository = await db.repository.findUnique({
+    where: { githubRepositoryId: payload.repository.id },
+  });
+  if (!repository) return;
+
+  const githubLabelId = BigInt(payload.label.id);
+
+  if (payload.action === "deleted") {
+    await db.issueLabel.deleteMany({
+      where: { githubLabelId, issue: { repositoryId: repository.id } },
+    });
+    return;
+  }
+
+  if (payload.action === "edited") {
+    await db.issueLabel.updateMany({
+      where: { githubLabelId, issue: { repositoryId: repository.id } },
+      data: { name: payload.label.name, color: payload.label.color },
+    });
+  }
+}
+
 async function handleInstallationRepositoriesEvent(payload: {
   action: "added" | "removed";
   installation: InstallationPayload;
@@ -160,6 +187,8 @@ export async function POST(request: NextRequest) {
   try {
     if (event === "issues") {
       await handleIssuesEvent(payload);
+    } else if (event === "label") {
+      await handleLabelEvent(payload);
     } else if (event === "installation_repositories") {
       await handleInstallationRepositoriesEvent(payload);
     } else if (event === "installation") {

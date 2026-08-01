@@ -21,6 +21,10 @@ function mapLabelColor(label: { name: string; color: string } | string): string 
   return typeof label === "string" ? "64748b" : label.color;
 }
 
+function mapLabelId(label: { id: number } | string): bigint | null {
+  return typeof label === "string" ? null : BigInt(label.id);
+}
+
 function toIssueState(state: "open" | "closed"): IssueState {
   return state === "open" ? "OPEN" : "CLOSED";
 }
@@ -64,8 +68,13 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     ...raw.labels.map((label) =>
       db.issueLabel.upsert({
         where: { issueId_name: { issueId: issue.id, name: mapLabelName(label) } },
-        create: { issueId: issue.id, name: mapLabelName(label), color: mapLabelColor(label) },
-        update: { color: mapLabelColor(label) },
+        create: {
+          issueId: issue.id,
+          name: mapLabelName(label),
+          color: mapLabelColor(label),
+          githubLabelId: mapLabelId(label),
+        },
+        update: { color: mapLabelColor(label), githubLabelId: mapLabelId(label) },
       }),
     ),
     db.issueLabel.deleteMany({

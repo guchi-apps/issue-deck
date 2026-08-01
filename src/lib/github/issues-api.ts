@@ -11,7 +11,7 @@ export type GithubApiIssue = {
   html_url: string;
   user: { login: string } | null;
   assignee: { login: string } | null;
-  labels: ({ name: string; color: string } | string)[];
+  labels: ({ id: number; name: string; color: string } | string)[];
   milestone: { title: string; open_issues: number; closed_issues: number } | null;
   comments: number;
   created_at: string;

@@ -132,12 +132,14 @@ model Issue {
 }
 
 model IssueLabel {
-  id      String @id @default(cuid())
-  issueId String
-  name    String
-  color   String
+  id            String  @id @default(cuid())
+  issueId       String
+  githubLabelId BigInt?
+  name          String
+  color         String
 
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@unique([issueId, name])
+  @@index([githubLabelId])
 }
