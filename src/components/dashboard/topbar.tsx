@@ -9,7 +9,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -21,17 +20,12 @@ import { useAccountActions } from "@/hooks/use-account-actions";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
-import type { LabelSummary } from "@/types/issue";
-import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type TopBarProps = {
   currentUser: CurrentUser | null;
   filters: IssueFilters;
   setFilter: <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => void;
-  toggleLabel: (name: string) => void;
-  repositories: ConnectedRepository[];
-  labelSummary: LabelSummary[];
   assigneeOptions: string[];
   onCreateIssue: () => void;
 };
@@ -40,9 +34,6 @@ export function TopBar({
   currentUser,
   filters,
   setFilter,
-  toggleLabel,
-  repositories,
-  labelSummary,
   assigneeOptions,
   onCreateIssue,
 }: TopBarProps) {
@@ -50,16 +41,12 @@ export function TopBar({
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
-  const repoLabel = filters.repo
-    ? (repositories.find((repo) => repo.fullName === filters.repo)?.name ?? filters.repo)
-    : "リポジトリ";
   const stateLabel =
     filters.state === "open"
       ? "状態: Open"
       : filters.state === "closed"
         ? "状態: Closed"
         : "状態: すべて";
-  const labelsLabel = filters.labels.length > 0 ? `ラベル (${filters.labels.length})` : "ラベル";
   const assigneeLabel = filters.assignee
     ? filters.assignee === "unassigned"
       ? "担当者: 未設定"
@@ -88,28 +75,6 @@ export function TopBar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="text-xs">
-              {repoLabel}
-              <ChevronDown className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuRadioGroup
-              value={filters.repo ?? ""}
-              onValueChange={(value) => setFilter("repo", value || null)}
-            >
-              <DropdownMenuRadioItem value="">すべて</DropdownMenuRadioItem>
-              {repositories.map((repo) => (
-                <DropdownMenuRadioItem key={repo.id} value={repo.fullName}>
-                  {repo.name}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="text-xs">
               {stateLabel}
               <ChevronDown className="size-3" />
             </Button>
@@ -128,31 +93,6 @@ export function TopBar({
               <DropdownMenuRadioItem value="open">Open</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="closed">Closed</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="text-xs">
-              {labelsLabel}
-              <ChevronDown className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            {labelSummary.length === 0 ? (
-              <DropdownMenuItem disabled>ラベルがありません</DropdownMenuItem>
-            ) : (
-              labelSummary.map((label) => (
-                <DropdownMenuCheckboxItem
-                  key={label.name}
-                  checked={filters.labels.includes(label.name)}
-                  onCheckedChange={() => toggleLabel(label.name)}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  {label.name}
-                </DropdownMenuCheckboxItem>
-              ))
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
 
