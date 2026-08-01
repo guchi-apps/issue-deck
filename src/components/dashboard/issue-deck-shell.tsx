@@ -175,9 +175,6 @@ export function IssueDeckShell({
         currentUser={currentUser}
         filters={filters}
         setFilter={setFilter}
-        toggleLabel={toggleLabel}
-        repositories={repositories}
-        labelSummary={labelSummary}
         assigneeOptions={assigneeOptions}
         onCreateIssue={() => openCreateDialog(filters.repo)}
       />
