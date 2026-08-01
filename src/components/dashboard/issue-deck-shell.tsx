@@ -47,7 +47,7 @@ export function IssueDeckShell({
   repositories: initialRepositories,
   issues: initialIssues,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -112,7 +112,12 @@ export function IssueDeckShell({
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
   function handleSelectView(view: NavViewId) {
-    setFilter("view", view);
+    if (view === "all") {
+      // 「すべてのIssue」はリポジトリ・状態・ラベル・担当者・キーワードの絞り込みをすべて解除する。
+      setFilters({ view, q: "", repo: null, state: "all", labels: [], assignee: null });
+    } else {
+      setFilter("view", view);
+    }
     setSelectedIssue(null);
   }
 
