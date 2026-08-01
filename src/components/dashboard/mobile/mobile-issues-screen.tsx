@@ -21,6 +21,7 @@ type MobileIssuesScreenProps = {
   labelSummary: LabelSummary[];
   assigneeOptions: string[];
   selectedIssueId: string | null;
+  initialView?: NavViewId;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
 };
@@ -31,10 +32,11 @@ export function MobileIssuesScreen({
   labelSummary,
   assigneeOptions,
   selectedIssueId,
+  initialView = "all",
   onSelectIssue,
   onCreateIssue,
 }: MobileIssuesScreenProps) {
-  const [view, setView] = useState<NavViewId>("all");
+  const [view, setView] = useState<NavViewId>(initialView);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
     state: "open",

@@ -51,10 +51,8 @@ export function IssueDeckShell({
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
-  const { mobileScreen, selectTab, selectRepository, selectIssue, goBack } = useMobileScreen(
-    issues,
-    repositories,
-  );
+  const { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack } =
+    useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -189,23 +187,35 @@ export function IssueDeckShell({
         <div className="flex flex-1 flex-col overflow-hidden md:hidden">
           <div className="flex-1 overflow-hidden">
             {mobileScreen.kind === "home" && (
-              <MobileHomeScreen labelSummary={labelSummary} overviewStats={overviewStats} />
+              <MobileHomeScreen
+                labelSummary={labelSummary}
+                overviewStats={overviewStats}
+                navCounts={navCounts}
+                onSelectQuickView={selectQuickView}
+              />
             )}
 
             {mobileScreen.kind === "issues" && (
               <MobileIssuesScreen
+                key={mobileScreen.view}
                 issues={issues}
                 currentUserLogin={currentUserLogin}
                 labelSummary={labelSummary}
                 assigneeOptions={assigneeOptions}
                 selectedIssueId={null}
+                initialView={mobileScreen.view}
                 onSelectIssue={selectIssue}
                 onCreateIssue={() => openCreateDialog()}
               />
             )}
 
             {mobileScreen.kind === "repos" && (
-              <MobileReposScreen repositories={repositories} onSelectRepository={selectRepository} />
+              <MobileReposScreen
+                repositories={repositories}
+                onSelectRepository={selectRepository}
+                onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+                onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+              />
             )}
 
             {mobileScreen.kind === "settings" && (

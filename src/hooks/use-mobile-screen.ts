@@ -4,19 +4,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
-import type { Issue } from "@/types/issue";
+import { navViews } from "@/lib/nav-views";
+import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 export type MobileScreen =
   | { kind: "home" }
-  | { kind: "issues" }
+  | { kind: "issues"; view: NavViewId }
   | { kind: "repos" }
   | { kind: "settings" }
   | { kind: "repo-detail"; repository: ConnectedRepository; back: MobileScreen }
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
-function isMobileBottomNavTab(value: string | null): value is MobileBottomNavTab {
-  return value === "home" || value === "issues" || value === "repos" || value === "settings";
+function isNavViewId(value: string | null): value is NavViewId {
+  return value !== null && navViews.some((view) => view.id === value);
 }
 
 // スマホ画面の現在地をURLクエリ（mscreen/mrepo/missue）に保持する。
@@ -29,6 +30,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const screenParam = searchParams.get("mscreen");
   const repoParam = searchParams.get("mrepo");
   const issueParam = searchParams.get("missue");
+  const viewParam = searchParams.get("mview");
 
   const mobileScreen = useMemo<MobileScreen>(() => {
     if (screenParam === "issue-detail") {
@@ -40,7 +42,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         : undefined;
       const back: MobileScreen = repository
         ? { kind: "repo-detail", repository, back: { kind: "repos" } }
-        : { kind: "issues" };
+        : { kind: "issues", view: "all" };
 
       return { kind: "issue-detail", issue, back };
     }
@@ -51,11 +53,24 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: "repo-detail", repository, back: { kind: "repos" } };
     }
 
-    return { kind: isMobileBottomNavTab(screenParam) ? screenParam : "home" };
-  }, [screenParam, repoParam, issueParam, issues, repositories]);
+    if (screenParam === "issues") {
+      return { kind: "issues", view: isNavViewId(viewParam) ? viewParam : "all" };
+    }
+
+    if (screenParam === "repos" || screenParam === "settings") {
+      return { kind: screenParam };
+    }
+
+    return { kind: "home" };
+  }, [screenParam, repoParam, issueParam, viewParam, issues, repositories]);
 
   const navigate = useCallback(
-    (next: { screen: MobileBottomNavTab | "issue-detail" | "repo-detail"; repo?: string | null; issue?: string | null }) => {
+    (next: {
+      screen: MobileBottomNavTab | "issue-detail" | "repo-detail";
+      repo?: string | null;
+      issue?: string | null;
+      view?: NavViewId | null;
+    }) => {
       const params = new URLSearchParams(searchParams.toString());
 
       if (next.screen === "home") {
@@ -76,6 +91,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("missue");
       }
 
+      if (next.view) {
+        params.set("mview", next.view);
+      } else {
+        params.delete("mview");
+      }
+
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
     [router, pathname, searchParams],
@@ -85,6 +106,11 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
+    [navigate],
+  );
+
+  const selectQuickView = useCallback(
+    (view: NavViewId) => navigate({ screen: "issues", view }),
     [navigate],
   );
 
@@ -107,10 +133,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     const back = mobileScreen.back;
     if (back.kind === "repo-detail") {
       navigate({ screen: "repo-detail", repo: back.repository.fullName });
+    } else if (back.kind === "issues") {
+      navigate({ screen: "issues", view: back.view });
     } else {
       navigate({ screen: back.kind });
     }
   }, [mobileScreen, navigate]);
 
-  return { mobileScreen, selectTab, selectRepository, selectIssue, goBack };
+  return { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack };
 }

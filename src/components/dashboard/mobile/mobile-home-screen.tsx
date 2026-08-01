@@ -2,14 +2,24 @@
 
 import { Card } from "@/components/ui/card";
 import { getLabelDotStyle } from "@/lib/label-color";
-import type { LabelSummary, OverviewStat } from "@/types/issue";
+import { navViewIcons, navViews } from "@/lib/nav-views";
+import type { LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 
 type MobileHomeScreenProps = {
   labelSummary: LabelSummary[];
   overviewStats: OverviewStat[];
+  navCounts: Record<NavViewId, number>;
+  onSelectQuickView: (view: NavViewId) => void;
 };
 
-export function MobileHomeScreen({ labelSummary, overviewStats }: MobileHomeScreenProps) {
+const quickFilterViews = navViews.filter((view) => view.id !== "all");
+
+export function MobileHomeScreen({
+  labelSummary,
+  overviewStats,
+  navCounts,
+  onSelectQuickView,
+}: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="border-b p-4">
@@ -30,6 +40,30 @@ export function MobileHomeScreen({ labelSummary, overviewStats }: MobileHomeScre
               </Card>
             ))}
           </div>
+        </div>
+
+        <div className="px-4 pb-4">
+          <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
+          <ul className="flex flex-col gap-1">
+            {quickFilterViews.map((view) => {
+              const Icon = navViewIcons[view.id];
+              return (
+                <li key={view.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectQuickView(view.id)}
+                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      {view.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
         <div className="px-4 pb-4">
