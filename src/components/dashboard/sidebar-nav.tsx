@@ -1,6 +1,14 @@
 "use client";
 
-import { CheckCircle2, FolderGit2, ListChecks, Plus, SlidersHorizontal, Star } from "lucide-react";
+import {
+  CheckCircle2,
+  FolderGit2,
+  ListChecks,
+  Plus,
+  SlidersHorizontal,
+  Star,
+  X,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -18,6 +26,9 @@ type SidebarNavProps = {
   selectedRepoFullName?: string | null;
   onSelectRepository?: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
+  selectedLabels?: string[];
+  onSelectLabel?: (label: LabelSummary) => void;
+  onClearLabels?: () => void;
   className?: string;
 };
 
@@ -37,8 +48,13 @@ export function SidebarNav({
   selectedRepoFullName,
   onSelectRepository,
   labelSummary,
+  selectedLabels = [],
+  onSelectLabel,
+  onClearLabels,
   className,
 }: SidebarNavProps) {
+  const sortedLabelSummary = [...labelSummary].sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)}>
       <div>
@@ -121,13 +137,29 @@ export function SidebarNav({
       </div>
 
       <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">ラベル</h2>
+        <div className="mb-2 flex items-center justify-between px-2">
+          <h2 className="text-xs font-semibold text-muted-foreground">ラベル</h2>
+          {selectedLabels.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onClearLabels?.()}
+              className="text-muted-foreground hover:text-foreground"
+              title="ラベルの選択を解除"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
         <ul className="flex flex-col gap-0.5">
-          {labelSummary.map((label) => (
+          {sortedLabelSummary.map((label) => (
             <li key={label.name}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                onClick={() => onSelectLabel?.(label)}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                  selectedLabels.includes(label.name) && "bg-accent font-medium",
+                )}
               >
                 <span className="flex items-center gap-2">
                   <span

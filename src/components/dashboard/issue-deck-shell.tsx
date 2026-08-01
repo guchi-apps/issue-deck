@@ -213,6 +213,9 @@ export function IssueDeckShell({
           selectedRepoFullName={filters.repo}
           onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
           labelSummary={labelSummary}
+          selectedLabels={filters.labels}
+          onSelectLabel={(label) => toggleLabel(label.name)}
+          onClearLabels={() => setFilter("labels", [])}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 
