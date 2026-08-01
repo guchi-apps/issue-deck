@@ -33,7 +33,6 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
@@ -114,10 +113,9 @@ export function MobileIssueDetail({
           aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
         >
           <Star
-            className={cn(
-              "size-4 text-muted-foreground",
-              issue.favorite && "fill-yellow-400 text-yellow-400",
-            )}
+            className={
+              issue.favorite ? "size-4 fill-yellow-400 text-yellow-400" : "size-4 text-muted-foreground"
+            }
           />
         </button>
         <Share2 className="size-4 text-muted-foreground" />
