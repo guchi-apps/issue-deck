@@ -38,7 +38,11 @@ export async function GET(request: NextRequest) {
       fetchRepoAssignees(owner, repo, token),
     ]);
     return NextResponse.json({
-      labels: labels.map((label) => ({ name: label.name, color: `#${label.color}` })),
+      labels: labels.map((label) => ({
+        name: label.name,
+        color: `#${label.color}`,
+        description: label.description,
+      })),
       assignees: assignees.map((assignee) => assignee.login),
     });
   } catch (error) {

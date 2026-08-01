@@ -18,6 +18,8 @@ export type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: "open" | "closed";
+  labels?: string[];
+  assignee?: string | null;
 };
 
 async function postJson(url: string, method: "POST" | "PATCH", input: unknown): Promise<Issue> {

@@ -13,10 +13,12 @@ import {
   RotateCcw,
   Share2,
   Star,
+  X,
   XCircle,
 } from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +29,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
@@ -54,6 +64,30 @@ export function MobileIssueDetail({
   const { updateIssue, isSubmitting } = useIssueMutations();
   const { createComment, updateComment, deleteComment } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
+    useIssueRepoMeta(issue.repositoryFullName);
+
+  async function toggleLabel(name: string) {
+    const current = issue.labels.map((label) => label.name);
+    const next = current.includes(name)
+      ? current.filter((label) => label !== name)
+      : [...current, name];
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: next,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleAssigneeChange(login: string | null) {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      assignee: login,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
 
   async function handleToggleState() {
     const updated = await updateIssue({
@@ -179,14 +213,22 @@ export function MobileIssueDetail({
           </div>
           <div>
             <p className="mb-1 text-xs text-muted-foreground">担当者</p>
-            {issue.assignee ? (
-              <span className="flex items-center gap-1.5 text-sm">
-                <UserAvatar login={issue.assignee.login} />
-                {issue.assignee.login}
-              </span>
-            ) : (
-              <span className="text-sm text-muted-foreground">未設定</span>
-            )}
+            <Select
+              value={issue.assignee?.login ?? "__none__"}
+              onValueChange={(value) => handleAssigneeChange(value === "__none__" ? null : value)}
+            >
+              <SelectTrigger className="h-auto border-none p-0 text-sm shadow-none" disabled={isMetaLoading || isSubmitting}>
+                <SelectValue placeholder="担当者を選択" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">未設定</SelectItem>
+                {repoAssignees.map((login) => (
+                  <SelectItem key={login} value={login}>
+                    {login}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -196,18 +238,36 @@ export function MobileIssueDetail({
             {issue.labels.map((label) => (
               <span
                 key={label.name}
-                className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
                 style={getLabelBadgeStyle(label.color)}
               >
                 {label.name}
+                <button
+                  type="button"
+                  onClick={() => toggleLabel(label.name)}
+                  disabled={isSubmitting}
+                  aria-label={`${label.name}を削除`}
+                  className="rounded-full hover:opacity-70 disabled:opacity-50"
+                >
+                  <X className="size-3" />
+                </button>
               </span>
             ))}
-            <button
-              type="button"
-              className="flex size-6 items-center justify-center rounded-full border text-muted-foreground"
-            >
-              <Plus className="size-3.5" />
-            </button>
+            <LabelPicker
+              labels={repoLabels}
+              selectedNames={issue.labels.map((label) => label.name)}
+              onToggle={toggleLabel}
+              isLoading={isMetaLoading}
+              trigger={
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  className="flex size-6 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              }
+            />
           </div>
         </div>
 

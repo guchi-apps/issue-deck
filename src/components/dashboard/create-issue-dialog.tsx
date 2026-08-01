@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
+import { LabelPicker } from "@/components/dashboard/label-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,13 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -149,32 +143,18 @@ export function CreateIssueDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label>ラベル</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <LabelPicker
+              labels={labels}
+              selectedNames={selectedLabels}
+              onToggle={toggleLabel}
+              isLoading={isMetaLoading}
+              trigger={
                 <Button variant="outline" size="sm" className="w-fit text-xs" disabled={isMetaLoading}>
                   {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
                   <ChevronDown className="size-3" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                {labels.length === 0 ? (
-                  <DropdownMenuItem disabled>
-                    {isMetaLoading ? "読み込み中..." : "ラベルがありません"}
-                  </DropdownMenuItem>
-                ) : (
-                  labels.map((label) => (
-                    <DropdownMenuCheckboxItem
-                      key={label.name}
-                      checked={selectedLabels.includes(label.name)}
-                      onCheckedChange={() => toggleLabel(label.name)}
-                      onSelect={(e) => e.preventDefault()}
-                    >
-                      {label.name}
-                    </DropdownMenuCheckboxItem>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              }
+            />
             {selectedLabels.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {selectedLabels.map((name) => {

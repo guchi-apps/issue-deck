@@ -9,11 +9,13 @@ import {
   MoreHorizontal,
   Pencil,
   RotateCcw,
+  SlidersHorizontal,
   Star,
   XCircle,
 } from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
@@ -44,6 +47,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
   const { updateIssue, isSubmitting } = useIssueMutations();
   const { createComment, updateComment, deleteComment } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
 
   async function handleToggleState() {
     if (!issue) return;
@@ -104,7 +108,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             {issue.repositoryFullName}
             {issue.repositoryArchived && (
@@ -112,12 +116,21 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
             )}
             {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                 GitHubで開く
                 <ExternalLink />
               </a>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="xl:hidden"
+              aria-label="プロパティ"
+              onClick={() => setIsPropertiesOpen(true)}
+            >
+              <SlidersHorizontal />
             </Button>
             <Button
               variant="outline"
@@ -227,6 +240,15 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
           </div>
         </div>
       </div>
+
+      <Sheet open={isPropertiesOpen} onOpenChange={setIsPropertiesOpen}>
+        <SheetContent className="w-80">
+          <SheetHeader>
+            <SheetTitle>プロパティ</SheetTitle>
+          </SheetHeader>
+          <IssuePropertiesPanel issue={issue} onIssueUpdated={onIssueUpdated} />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

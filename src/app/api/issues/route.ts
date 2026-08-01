@@ -97,10 +97,23 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const input: { title?: string; body?: string; state?: "open" | "closed" } = {};
+  const input: {
+    title?: string;
+    body?: string;
+    state?: "open" | "closed";
+    labels?: string[];
+    assignees?: string[];
+  } = {};
   if (typeof payload.title === "string" && payload.title.trim()) input.title = payload.title.trim();
   if (typeof payload.body === "string") input.body = payload.body;
   if (payload.state === "open" || payload.state === "closed") input.state = payload.state;
+  if (Array.isArray(payload.labels)) {
+    input.labels = payload.labels.filter((l: unknown) => typeof l === "string");
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "assignee")) {
+    if (payload.assignee === null) input.assignees = [];
+    else if (typeof payload.assignee === "string" && payload.assignee) input.assignees = [payload.assignee];
+  }
 
   if (Object.keys(input).length === 0) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
