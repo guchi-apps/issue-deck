@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { createIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
+import { getIssuesForUser } from "@/lib/issues-for-user";
 
 async function findRepository(userId: string, repositoryFullName: string) {
   return db.repository.findFirst({
@@ -14,6 +15,16 @@ async function findRepository(userId: string, repositoryFullName: string) {
     },
     include: { installation: true },
   });
+}
+
+export async function GET() {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const issues = await getIssuesForUser(userId);
+  return NextResponse.json({ issues });
 }
 
 export async function POST(request: NextRequest) {

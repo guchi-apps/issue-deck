@@ -20,6 +20,7 @@ import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-setti
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
+import { useIssuePolling } from "@/hooks/use-issue-polling";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -80,6 +81,19 @@ export function IssueDeckShell({
       prev.kind === "issue-detail" && prev.issue.id === issue.id ? { ...prev, issue } : prev,
     );
   }
+
+  useIssuePolling((polledIssues) => {
+    setIssues(polledIssues);
+    setSelectedIssue((prev) => {
+      if (!prev) return prev;
+      return polledIssues.find((issue) => issue.id === prev.id) ?? prev;
+    });
+    setMobileScreen((prev) => {
+      if (prev.kind !== "issue-detail") return prev;
+      const updated = polledIssues.find((issue) => issue.id === prev.issue.id);
+      return updated ? { ...prev, issue: updated } : prev;
+    });
+  });
 
   // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
   // サイドバーの件数表示はこれを基準にする。
