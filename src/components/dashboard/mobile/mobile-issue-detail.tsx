@@ -5,10 +5,12 @@ import { useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  CheckCircle2,
   FolderGit2,
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   Plus,
   RotateCcw,
   Share2,
@@ -39,6 +41,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { getIssueDispatchCta } from "@/lib/issue-dispatch-cta";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -66,11 +69,13 @@ export function MobileIssueDetail({
     createComment,
     updateComment,
     deleteComment,
+    isSubmitting: isCommentSubmitting,
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
+  const cta = getIssueDispatchCta(issue);
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -103,20 +108,20 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleCreateComment() {
-    if (!newCommentBody.trim()) return;
+  async function postComment(body: string): Promise<boolean> {
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: newCommentBody,
-    });
+    const created = await createComment({ owner, repo, number: issue.number, body });
     if (created) {
       setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      return true;
     }
+    return false;
+  }
+
+  async function handleCreateComment() {
+    if (!newCommentBody.trim()) return;
+    if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -146,6 +151,21 @@ export function MobileIssueDetail({
           <ArrowLeft className="size-5" />
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
+        {cta.mode && (
+          <button
+            type="button"
+            onClick={() => postComment(cta.commentBody)}
+            disabled={isCommentSubmitting}
+            aria-label={cta.mode === "start" ? "実装を開始" : "計画を承認して実装を再開"}
+            className="text-muted-foreground disabled:opacity-50"
+          >
+            {cta.mode === "start" ? (
+              <Play className="size-4" />
+            ) : (
+              <CheckCircle2 className="size-4" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onToggleFavorite(issue)}

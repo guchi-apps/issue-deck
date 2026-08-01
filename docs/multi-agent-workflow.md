@@ -227,6 +227,14 @@ write権限を要求する。トリガー経路によらず一律で実行者(`g
 `issue-<番号>`ブランチがまだ存在しない状態でのみ「承認」と解釈するようガードしている
 （ブランチ作成後は本ワークフローはそのissueに対して常にskipする）ため、Phase4側の判定と混線しない。
 
+issue-deck画面の「計画を承認して実装を再開」ボタン（Issue #70）は、上記②のラベル解除を直接は使わない。
+issue-deckからのラベル更新はGitHub App経由でactorが常に`issue-deck[bot]`になり、`issues: unlabeled`
+イベントの実行者復元手段がないため（`issue_comment`イベント限定の投稿者マーカー復元とは別問題）、
+代わりに承認専用マーカー（`<!-- issue-deck:approve-plan -->`）付きの`@claude`コメントを投稿する方式に
+した。`00.check-user`付与中にこのマーカー付きコメントを検出した場合は②のラベル解除と同様に承認と
+みなし実装を再開し、実装ステップの`01.wip`付与時に`00.check-user`も併せて除去する
+（`issues: unlabeled`イベントを経由しない承認経路のため）。
+
 ### 無人実行時の権限モード（許可ツールリスト）
 
 - **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"`。

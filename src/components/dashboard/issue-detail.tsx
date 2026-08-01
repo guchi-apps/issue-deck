@@ -4,10 +4,12 @@ import { useState } from "react";
 
 import {
   Archive,
+  CheckCircle2,
   ExternalLink,
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   RotateCcw,
   SlidersHorizontal,
   Star,
@@ -32,6 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { getIssueDispatchCta } from "@/lib/issue-dispatch-cta";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -49,6 +52,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
     createComment,
     updateComment,
     deleteComment,
+    isSubmitting: isCommentSubmitting,
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
@@ -64,20 +68,21 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleCreateComment() {
-    if (!issue || !newCommentBody.trim()) return;
+  async function postComment(body: string): Promise<boolean> {
+    if (!issue) return false;
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: newCommentBody,
-    });
+    const created = await createComment({ owner, repo, number: issue.number, body });
     if (created) {
       setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      return true;
     }
+    return false;
+  }
+
+  async function handleCreateComment() {
+    if (!newCommentBody.trim()) return;
+    if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -110,6 +115,8 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
     );
   }
 
+  const cta = getIssueDispatchCta(issue);
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
@@ -122,6 +129,16 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
             {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {cta.mode && (
+              <Button
+                size="sm"
+                disabled={isCommentSubmitting}
+                onClick={() => postComment(cta.commentBody)}
+              >
+                {cta.mode === "start" ? <Play /> : <CheckCircle2 />}
+                {cta.mode === "start" ? "実装を開始" : "計画を承認して実装を再開"}
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                 GitHubで開く
