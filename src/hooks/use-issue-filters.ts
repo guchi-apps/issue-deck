@@ -91,6 +91,19 @@ export function useIssueFilters() {
     [router, pathname, searchParams],
   );
 
+  // 複数フィールドを1回のURL更新でまとめて反映する（よく使うフィルター適用など、
+  // setFilterの連続呼び出しだと互いの変更を上書きしてしまうケース向け）。
+  const setFilters = useCallback(
+    (patch: Partial<IssueFilters>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const key of Object.keys(patch) as (keyof IssueFilters)[]) {
+        applyFilterParam(params, key, patch[key] as IssueFilters[typeof key]);
+      }
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
+
   const toggleLabel = useCallback(
     (name: string) => {
       const next = filters.labels.includes(name)
@@ -101,5 +114,5 @@ export function useIssueFilters() {
     [filters.labels, setFilter],
   );
 
-  return { filters, setFilter, toggleLabel };
+  return { filters, setFilter, setFilters, toggleLabel };
 }

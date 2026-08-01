@@ -1,15 +1,22 @@
 "use client";
 
+import { Plus, SlidersHorizontal, X } from "lucide-react";
+
 import { Card } from "@/components/ui/card";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { navViewIcons, navViews } from "@/lib/nav-views";
 import type { LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
+import type { QuickFilter } from "@/types/quick-filter";
 
 type MobileHomeScreenProps = {
   labelSummary: LabelSummary[];
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
   onSelectQuickView: (view: NavViewId) => void;
+  quickFilters: QuickFilter[];
+  onSelectQuickFilter: (quickFilter: QuickFilter) => void;
+  onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
+  onSaveQuickFilter: () => void;
 };
 
 const quickFilterViews = navViews.filter((view) => view.id !== "all");
@@ -19,6 +26,10 @@ export function MobileHomeScreen({
   overviewStats,
   navCounts,
   onSelectQuickView,
+  quickFilters,
+  onSelectQuickFilter,
+  onDeleteQuickFilter,
+  onSaveQuickFilter,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -64,6 +75,48 @@ export function MobileHomeScreen({
               );
             })}
           </ul>
+        </div>
+
+        <div className="px-4 pb-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">保存したフィルター</h2>
+            <button
+              type="button"
+              onClick={onSaveQuickFilter}
+              className="text-muted-foreground hover:text-foreground"
+              title="現在の検索条件を保存"
+            >
+              <Plus className="size-4" />
+            </button>
+          </div>
+          {quickFilters.length === 0 ? (
+            <p className="px-2 text-xs text-muted-foreground">
+              よく使う検索条件を保存できます
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {quickFilters.map((quickFilter) => (
+                <li key={quickFilter.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onSelectQuickFilter(quickFilter)}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  >
+                    <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{quickFilter.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteQuickFilter(quickFilter)}
+                    title="削除"
+                    className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="px-4 pb-4">

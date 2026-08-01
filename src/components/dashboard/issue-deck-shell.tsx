@@ -17,6 +17,7 @@ import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
+import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/issue-stats";
 import { navViews } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
+import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -40,17 +42,21 @@ type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
+  quickFilters: QuickFilter[];
 };
 
 export function IssueDeckShell({
   currentUser,
   repositories: initialRepositories,
   issues: initialIssues,
+  quickFilters: initialQuickFilters,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
+  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack } =
     useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -159,6 +165,40 @@ export function IssueDeckShell({
     }
   }
 
+  function applyQuickFilter(quickFilter: QuickFilter) {
+    setFilters({
+      view: quickFilter.view,
+      q: quickFilter.q,
+      repo: quickFilter.repo,
+      state: quickFilter.state,
+      labels: quickFilter.labels,
+      assignee: quickFilter.assignee,
+      sort: quickFilter.sort,
+    });
+    setSelectedIssue(null);
+  }
+
+  function handleSelectQuickFilter(quickFilter: QuickFilter) {
+    applyQuickFilter(quickFilter);
+  }
+
+  function handleSelectQuickFilterMobile(quickFilter: QuickFilter) {
+    applyQuickFilter(quickFilter);
+    selectQuickView(quickFilter.view);
+  }
+
+  async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
+    setQuickFilters((prev) => prev.filter((item) => item.id !== quickFilter.id));
+
+    try {
+      const response = await fetch(`/api/quick-filters/${quickFilter.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("failed to delete quick filter");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to delete quick filter", error);
+      setQuickFilters((prev) => [...prev, quickFilter]);
+    }
+  }
+
   const activeBottomNavTab: MobileBottomNavTab =
     mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
       ? "home"
@@ -184,6 +224,10 @@ export function IssueDeckShell({
                 overviewStats={overviewStats}
                 navCounts={navCounts}
                 onSelectQuickView={selectQuickView}
+                quickFilters={quickFilters}
+                onSelectQuickFilter={handleSelectQuickFilterMobile}
+                onDeleteQuickFilter={handleDeleteQuickFilter}
+                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
               />
             )}
 
@@ -253,6 +297,10 @@ export function IssueDeckShell({
           selectedLabels={filters.labels}
           onSelectLabel={(label) => toggleLabel(label.name)}
           onClearLabels={() => setFilter("labels", [])}
+          quickFilters={quickFilters}
+          onSelectQuickFilter={handleSelectQuickFilter}
+          onDeleteQuickFilter={handleDeleteQuickFilter}
+          onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 
@@ -288,6 +336,12 @@ export function IssueDeckShell({
         repositories={repositories}
         defaultRepositoryFullName={createDialogRepo}
         onCreated={handleIssueCreated}
+      />
+      <QuickFilterDialog
+        open={quickFilterDialogOpen}
+        onOpenChange={setQuickFilterDialogOpen}
+        filters={filters}
+        onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
       />
       <EditIssueDialog
         open={editingIssue !== null}
