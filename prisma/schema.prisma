@@ -12,13 +12,14 @@ datasource db {
 // SupabaseのユーザーID（auth.users.id）を外部キーとして紐付ける。
 
 model User {
-  id             String  @id @default(cuid())
-  supabaseUserId String  @unique
-  githubUserId   Int     @unique
-  githubLogin    String  @unique
-  name           String?
-  email          String?
-  image          String?
+  id                String  @id @default(cuid())
+  supabaseUserId    String  @unique
+  githubUserId      Int     @unique
+  githubLogin       String  @unique
+  name              String?
+  email             String?
+  image             String?
+  githubAccessToken String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

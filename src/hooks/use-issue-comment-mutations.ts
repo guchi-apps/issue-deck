@@ -24,6 +24,13 @@ export type DeleteCommentInput = {
   commentId: number;
 };
 
+function errorMessageForResponse(status: number, errorCode: string | undefined): string {
+  if (errorCode === "github_reauth_required") {
+    return "GitHub連携が必要です。再ログインしてください。";
+  }
+  return `リクエストに失敗しました (${status})`;
+}
+
 async function postJson(
   url: string,
   method: "POST" | "PATCH",
@@ -35,7 +42,8 @@ async function postJson(
     body: JSON.stringify(input),
   });
   if (!res.ok) {
-    throw new Error(`リクエストに失敗しました (${res.status})`);
+    const data: { error?: string } = await res.json().catch(() => ({}));
+    throw new Error(errorMessageForResponse(res.status, data.error));
   }
   const data: { comment: IssueComment } = await res.json();
   return data.comment;
