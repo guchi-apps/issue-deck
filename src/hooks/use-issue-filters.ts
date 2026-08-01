@@ -25,7 +25,7 @@ const DEFAULT_FILTERS: IssueFilters = {
   state: "open",
   labels: [],
   assignee: null,
-  sort: "updated",
+  sort: "created",
 };
 
 function isNavViewId(value: string | null): value is NavViewId {
@@ -59,7 +59,7 @@ export function useIssueFilters() {
           : DEFAULT_FILTERS.state,
       labels: labelsParam ? labelsParam.split(",").filter(Boolean) : [],
       assignee: searchParams.get("assignee"),
-      sort: sortParam === "created" ? "created" : DEFAULT_FILTERS.sort,
+      sort: sortParam === "updated" ? "updated" : DEFAULT_FILTERS.sort,
     };
   }, [searchParams]);
 

@@ -1,7 +1,8 @@
-import { ChevronDown, Eye, FolderGit2, Plus } from "lucide-react";
+import { Archive, ChevronDown, Eye, FolderGit2, Lock, Plus } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Progress } from "@/components/ui/progress";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 
 type IssuePropertiesPanelProps = {
@@ -17,8 +18,8 @@ export function IssuePropertiesPanel({ issue }: IssuePropertiesPanelProps) {
           {issue.labels.map((label) => (
             <span
               key={label.name}
-              className="rounded-full px-2 py-0.5 text-xs"
-              style={{ backgroundColor: `${label.color}20`, color: label.color }}
+              className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+              style={getLabelBadgeStyle(label.color)}
             >
               {label.name}
             </span>
@@ -60,6 +61,12 @@ export function IssuePropertiesPanel({ issue }: IssuePropertiesPanelProps) {
         <div className="flex items-center gap-2">
           <FolderGit2 className="size-4 text-muted-foreground" />
           {issue.repositoryFullName}
+          {issue.repositoryArchived && (
+            <Archive className="size-3.5 text-muted-foreground" aria-label="アーカイブ済み" />
+          )}
+          {issue.repositoryPrivate && (
+            <Lock className="size-3.5 text-muted-foreground" aria-label="プライベート" />
+          )}
         </div>
       </section>
 

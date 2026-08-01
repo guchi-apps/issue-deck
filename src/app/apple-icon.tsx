@@ -1,5 +1,7 @@
 import { ImageResponse } from "next/og";
 
+import { AppIconGlyph } from "@/lib/app-icon-glyph";
+
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 
@@ -14,12 +16,9 @@ export default function AppleIcon() {
           alignItems: "center",
           justifyContent: "center",
           background: "#171717",
-          color: "#fafafa",
-          fontSize: size.width * 0.48,
-          fontWeight: 700,
         }}
       >
-        ID
+        <AppIconGlyph size={size.width * 0.6} />
       </div>
     ),
     size

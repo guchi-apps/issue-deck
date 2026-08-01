@@ -2,12 +2,14 @@ import { Suspense } from "react";
 import { LayoutDashboard } from "lucide-react";
 
 import { GithubLoginButton } from "@/components/auth/github-login-button";
+import { LoginBfcacheReload } from "@/components/auth/login-bfcache-reload";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 
 export default function LoginPage() {
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-muted/30 p-4">
+      <LoginBfcacheReload />
       <div className="flex items-center gap-2 text-xl font-semibold">
         <LayoutDashboard className="size-6 text-primary" />
         IssueDeck

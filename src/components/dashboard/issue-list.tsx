@@ -1,9 +1,10 @@
 "use client";
 
-import { MessageSquare, Star } from "lucide-react";
+import { Archive, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Input } from "@/components/ui/input";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -69,10 +70,24 @@ export function IssueList({
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs text-muted-foreground">
-                    {issue.repositoryFullName.split("/")[1]}
+                  <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    <span className="truncate">{issue.repositoryFullName.split("/")[1]}</span>
+                    {issue.repositoryArchived && (
+                      <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />
+                    )}
+                    {issue.repositoryPrivate && (
+                      <Lock className="size-3 shrink-0" aria-label="プライベート" />
+                    )}
                   </span>
-                  <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {issue.favorite && (
+                      <Star
+                        className="size-3.5 fill-yellow-400 text-yellow-400"
+                        aria-label="お気に入り"
+                      />
+                    )}
+                    <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
+                  </span>
                 </div>
                 <p className="line-clamp-2 text-sm font-medium">
                   #{issue.number} {issue.title}
@@ -82,8 +97,8 @@ export function IssueList({
                     {issue.labels.map((label) => (
                       <span
                         key={label.name}
-                        className="rounded-full px-1.5 py-0.5 text-[10px]"
-                        style={{ backgroundColor: `${label.color}20`, color: label.color }}
+                        className="rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                        style={getLabelBadgeStyle(label.color)}
                       >
                         {label.name}
                       </span>

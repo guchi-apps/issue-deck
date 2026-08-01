@@ -23,7 +23,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userInstallations UserInstallation[]
+  userInstallations  UserInstallation[]
+  hiddenRepositories HiddenRepository[]
+  favoriteIssues     FavoriteIssue[]
 }
 
 // --- GitHub App 連携 ---
@@ -40,13 +42,13 @@ enum RepositorySelection {
 
 // GitHub App のインストール単位（個人アカウント or Organization ごとに1件）
 model GithubInstallation {
-  id                    String              @id @default(cuid())
-  installationId        Int                 @unique
-  accountId             Int
-  accountLogin          String
-  accountType           AccountType
-  repositorySelection   RepositorySelection
-  suspendedAt           DateTime?
+  id                  String              @id @default(cuid())
+  installationId      Int                 @unique
+  accountId           Int
+  accountLogin        String
+  accountType         AccountType
+  repositorySelection RepositorySelection
+  suspendedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -59,7 +61,7 @@ model GithubInstallation {
 
 // ログインユーザーとGitHub Appインストールの紐付け（同一インストールに複数ユーザーがアクセスできる場合を考慮）
 model UserInstallation {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   userId         String
   installationId String
   role           String?
@@ -73,26 +75,42 @@ model UserInstallation {
 }
 
 model Repository {
-  id                   String   @id @default(cuid())
-  githubRepositoryId   Int      @unique
-  installationId       String
-  ownerLogin           String
-  name                 String
-  fullName             String
-  private              Boolean
-  htmlUrl              String
-  archived             Boolean  @default(false)
-  defaultBranch        String
-  lastSyncedAt         DateTime?
+  id                 String    @id @default(cuid())
+  githubRepositoryId Int       @unique
+  installationId     String
+  ownerLogin         String
+  name               String
+  fullName           String
+  private            Boolean
+  htmlUrl            String
+  archived           Boolean   @default(false)
+  defaultBranch      String
+  lastSyncedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
   issues       Issue[]
+  hiddenBy     HiddenRepository[]
 
-  @@index([installationId])
   @@unique([installationId, fullName])
+  @@index([installationId])
+}
+
+// ユーザーごとに左メニューで非表示にしたリポジトリ
+model HiddenRepository {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
 }
 
 // --- Issueキャッシュ（M6: Webhookで差分反映） ---
@@ -124,20 +142,38 @@ model Issue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repository Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  labels     IssueLabel[]
+  repository  Repository      @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels      IssueLabel[]
+  favoritedBy FavoriteIssue[]
 
   @@unique([repositoryId, number])
   @@index([repositoryId])
 }
 
-model IssueLabel {
+// ユーザーごとにお気に入り登録したIssue
+model FavoriteIssue {
   id      String @id @default(cuid())
+  userId  String
   issueId String
-  name    String
-  color   String
+
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId])
+  @@index([issueId])
+}
+
+model IssueLabel {
+  id            String  @id @default(cuid())
+  issueId       String
+  githubLabelId BigInt?
+  name          String
+  color         String
 
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@unique([issueId, name])
+  @@index([githubLabelId])
 }

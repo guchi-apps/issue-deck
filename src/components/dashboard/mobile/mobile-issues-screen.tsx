@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import {
@@ -13,7 +13,7 @@ import { navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
-const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "recent"];
+const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "favorites", "recent"];
 
 type MobileIssuesScreenProps = {
   issues: Issue[];
@@ -22,6 +22,7 @@ type MobileIssuesScreenProps = {
   assigneeOptions: string[];
   selectedIssueId: string | null;
   onSelectIssue: (issue: Issue) => void;
+  onCreateIssue: () => void;
 };
 
 export function MobileIssuesScreen({
@@ -31,6 +32,7 @@ export function MobileIssuesScreen({
   assigneeOptions,
   selectedIssueId,
   onSelectIssue,
+  onCreateIssue,
 }: MobileIssuesScreenProps) {
   const [view, setView] = useState<NavViewId>("all");
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -38,7 +40,7 @@ export function MobileIssuesScreen({
     state: "open",
     labels: [],
     assignee: null,
-    sort: "updated",
+    sort: "created",
   });
 
   const displayedIssues = useMemo(() => {
@@ -54,7 +56,7 @@ export function MobileIssuesScreen({
   }, [issues, view, currentUserLogin, localFilters]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       <header className="flex items-center justify-between gap-2 border-b p-4">
         <h1 className="text-base font-semibold">Issue</h1>
         <button
@@ -104,6 +106,15 @@ export function MobileIssuesScreen({
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
       />
+
+      <button
+        type="button"
+        onClick={onCreateIssue}
+        aria-label="新しいIssueを作成"
+        className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+      >
+        <Plus className="size-5" />
+      </button>
     </div>
   );
 }

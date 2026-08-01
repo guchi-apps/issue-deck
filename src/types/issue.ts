@@ -35,6 +35,8 @@ export type Issue = {
   body: string;
   state: IssueState;
   repositoryFullName: string;
+  repositoryPrivate: boolean;
+  repositoryArchived: boolean;
   author: GithubUser;
   assignee: GithubUser | null;
   labels: IssueLabel[];
@@ -43,6 +45,7 @@ export type Issue = {
   createdAt: string;
   updatedAt: string;
   htmlUrl: string;
+  favorite: boolean;
 };
 
 export type NavViewId =

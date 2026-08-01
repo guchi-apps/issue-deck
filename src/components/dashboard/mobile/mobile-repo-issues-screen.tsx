@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, FolderGit2, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, FolderGit2, MoreHorizontal, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import {
@@ -19,6 +19,7 @@ type MobileRepoIssuesScreenProps = {
   selectedIssueId: string | null;
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
+  onCreateIssue: () => void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -27,13 +28,14 @@ export function MobileRepoIssuesScreen({
   selectedIssueId,
   onSelectIssue,
   onBack,
+  onCreateIssue,
 }: MobileRepoIssuesScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
     state: "open",
     labels: [],
     assignee: null,
-    sort: "updated",
+    sort: "created",
   });
 
   const repoIssues = useMemo(
@@ -57,7 +59,7 @@ export function MobileRepoIssuesScreen({
   const color = getRepoColor(repository.fullName);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b p-4">
         <button type="button" onClick={onBack}>
           <ArrowLeft className="size-5" />
@@ -113,6 +115,15 @@ export function MobileRepoIssuesScreen({
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
       />
+
+      <button
+        type="button"
+        onClick={onCreateIssue}
+        aria-label="新しいIssueを作成"
+        className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+      >
+        <Plus className="size-5" />
+      </button>
     </div>
   );
 }

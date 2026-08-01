@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
@@ -18,6 +20,7 @@ import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-setti
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
+import { useIssuePolling } from "@/hooks/use-issue-polling";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -48,14 +51,50 @@ type IssueDeckShellProps = {
 
 export function IssueDeckShell({
   currentUser,
-  repositories,
-  issues,
+  repositories: initialRepositories,
+  issues: initialIssues,
 }: IssueDeckShellProps) {
   const { filters, setFilter, toggleLabel } = useIssueFilters();
+  const [issues, setIssues] = useState<Issue[]>(initialIssues);
+  const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
+  const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
 
   const currentUserLogin = currentUser?.login ?? null;
+
+  function openCreateDialog(defaultRepositoryFullName?: string | null) {
+    setCreateDialogRepo(defaultRepositoryFullName ?? null);
+    setCreateDialogOpen(true);
+  }
+
+  function handleIssueCreated(issue: Issue) {
+    setIssues((prev) => [issue, ...prev]);
+    setSelectedIssue(issue);
+  }
+
+  function handleIssueUpdated(issue: Issue) {
+    setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
+    setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
+    setMobileScreen((prev) =>
+      prev.kind === "issue-detail" && prev.issue.id === issue.id ? { ...prev, issue } : prev,
+    );
+  }
+
+  useIssuePolling((polledIssues) => {
+    setIssues(polledIssues);
+    setSelectedIssue((prev) => {
+      if (!prev) return prev;
+      return polledIssues.find((issue) => issue.id === prev.id) ?? prev;
+    });
+    setMobileScreen((prev) => {
+      if (prev.kind !== "issue-detail") return prev;
+      const updated = polledIssues.find((issue) => issue.id === prev.issue.id);
+      return updated ? { ...prev, issue: updated } : prev;
+    });
+  });
 
   // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
   // サイドバーの件数表示はこれを基準にする。
@@ -107,6 +146,56 @@ export function IssueDeckShell({
     setMobileScreen({ kind: tab });
   }
 
+  async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
+    setRepositories((prev) =>
+      prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden } : repo)),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/hidden", {
+        method: hidden ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id }),
+      });
+      if (!response.ok) throw new Error("failed to update hidden repository");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update hidden repository", error);
+      setRepositories((prev) =>
+        prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden: !hidden } : repo)),
+      );
+    }
+  }
+
+  async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
+    function applyFavorite(target: boolean) {
+      setIssues((prev) =>
+        prev.map((item) => (item.id === issue.id ? { ...item, favorite: target } : item)),
+      );
+      setSelectedIssue((prev) =>
+        prev && prev.id === issue.id ? { ...prev, favorite: target } : prev,
+      );
+      setMobileScreen((prev) =>
+        prev.kind === "issue-detail" && prev.issue.id === issue.id
+          ? { ...prev, issue: { ...prev.issue, favorite: target } }
+          : prev,
+      );
+    }
+
+    applyFavorite(favorite);
+
+    try {
+      const response = await fetch("/api/issues/favorites", {
+        method: favorite ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId: issue.id }),
+      });
+      if (!response.ok) throw new Error("failed to update favorite issue");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update favorite issue", error);
+      applyFavorite(!favorite);
+    }
+  }
+
   const activeBottomNavTab: MobileBottomNavTab =
     mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
       ? "home"
@@ -122,6 +211,7 @@ export function IssueDeckShell({
         repositories={repositories}
         labelSummary={labelSummary}
         assigneeOptions={assigneeOptions}
+        onCreateIssue={() => openCreateDialog(filters.repo)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -140,6 +230,7 @@ export function IssueDeckShell({
                 assigneeOptions={assigneeOptions}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
+                onCreateIssue={() => openCreateDialog()}
               />
             )}
 
@@ -161,11 +252,18 @@ export function IssueDeckShell({
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
+                onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
               />
             )}
 
             {mobileScreen.kind === "issue-detail" && (
-              <MobileIssueDetail issue={mobileScreen.issue} onBack={handleMobileBack} />
+              <MobileIssueDetail
+                issue={mobileScreen.issue}
+                onBack={handleMobileBack}
+                onEdit={setEditingIssue}
+                onIssueUpdated={handleIssueUpdated}
+                onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+              />
             )}
           </div>
 
@@ -178,8 +276,14 @@ export function IssueDeckShell({
           onSelectView={handleSelectView}
           navCounts={navCounts}
           repositories={repositories}
+          selectedRepoFullName={filters.repo}
           onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
+          onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+          onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
           labelSummary={labelSummary}
+          selectedLabels={filters.labels}
+          onSelectLabel={(label) => toggleLabel(label.name)}
+          onClearLabels={() => setFilter("labels", [])}
           className="hidden w-60 shrink-0 border-r md:flex"
         />
 
@@ -195,7 +299,12 @@ export function IssueDeckShell({
 
         {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
         <div className="hidden flex-1 overflow-hidden md:flex">
-          <IssueDetail issue={selectedIssue} />
+          <IssueDetail
+            issue={selectedIssue}
+            onEdit={setEditingIssue}
+            onIssueUpdated={handleIssueUpdated}
+            onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+          />
         </div>
         {selectedIssue && (
           <div className="hidden w-72 shrink-0 border-l xl:block">
@@ -203,6 +312,22 @@ export function IssueDeckShell({
           </div>
         )}
       </div>
+
+      <CreateIssueDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        repositories={repositories}
+        defaultRepositoryFullName={createDialogRepo}
+        onCreated={handleIssueCreated}
+      />
+      <EditIssueDialog
+        open={editingIssue !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingIssue(null);
+        }}
+        issue={editingIssue}
+        onUpdated={handleIssueUpdated}
+      />
     </div>
   );
 }

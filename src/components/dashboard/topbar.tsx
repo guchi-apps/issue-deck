@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, LayoutDashboard, Search } from "lucide-react";
+import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Search } from "lucide-react";
 
-import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
+import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,7 +19,8 @@ import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import { CONTACT_EMAIL, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
+import { useIssueSync } from "@/hooks/use-issue-sync";
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { LabelSummary } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -32,6 +33,7 @@ type TopBarProps = {
   repositories: ConnectedRepository[];
   labelSummary: LabelSummary[];
   assigneeOptions: string[];
+  onCreateIssue: () => void;
 };
 
 export function TopBar({
@@ -42,9 +44,11 @@ export function TopBar({
   repositories,
   labelSummary,
   assigneeOptions,
+  onCreateIssue,
 }: TopBarProps) {
-  const { handleLogout, handleDeleteAccount } = useAccountActions();
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const { handleLogout } = useAccountActions();
+  const { isSyncing, handleSync } = useIssueSync();
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
   const repoLabel = filters.repo
     ? (repositories.find((repo) => repo.fullName === filters.repo)?.name ?? filters.repo)
@@ -67,7 +71,7 @@ export function TopBar({
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
       <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
         <LayoutDashboard className="size-5 text-primary" />
-        Issue Dashboard
+        Issue Deck
       </div>
 
       <div className="relative w-72">
@@ -194,6 +198,11 @@ export function TopBar({
         </DropdownMenu>
       </div>
 
+      <Button size="sm" className="text-xs" onClick={onCreateIssue}>
+        <Plus />
+        新規Issue
+      </Button>
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className="flex items-center gap-1 rounded-md p-1 hover:bg-accent">
@@ -206,9 +215,26 @@ export function TopBar({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled>{currentUser?.name ?? currentUser?.login}</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setProfileDialogOpen(true);
+            }}
+          >
+            {currentUser?.name ?? currentUser?.login}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleLogout}>ログアウト</DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isSyncing}
+            onSelect={(e) => {
+              e.preventDefault();
+              handleSync();
+            }}
+          >
+            <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
+            {isSyncing ? "再同期中..." : "今すぐ再同期"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
               利用規約
@@ -219,26 +245,17 @@ export function TopBar({
               プライバシーポリシー
             </a>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a href={`mailto:${CONTACT_EMAIL}`}>お問い合わせ</a>
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={(e) => {
-              e.preventDefault();
-              setDeleteDialogOpen(true);
-            }}
-          >
-            アカウントを削除
+          <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+            ログアウト
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DeleteAccountDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        onConfirm={handleDeleteAccount}
+      <ProfileDialog
+        currentUser={currentUser}
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
       />
     </header>
   );

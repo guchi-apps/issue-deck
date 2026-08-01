@@ -15,8 +15,7 @@ export function filterIssuesByView(
     case "created":
       return issues.filter((issue) => issue.author.login === currentUserLogin);
     case "favorites":
-      // お気に入り登録機能は未実装のため常に空。
-      return [];
+      return issues.filter((issue) => issue.favorite);
     case "recent":
       return issues.filter(
         (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
@@ -42,7 +41,7 @@ export function applyIssueFilters(
     if (filters.state !== "all" && issue.state !== filters.state) return false;
     if (filters.labels.length > 0) {
       const issueLabelNames = new Set(issue.labels.map((label) => label.name));
-      if (!filters.labels.every((name) => issueLabelNames.has(name))) return false;
+      if (!filters.labels.some((name) => issueLabelNames.has(name))) return false;
     }
     if (filters.assignee) {
       if (filters.assignee === "unassigned") {
@@ -79,7 +78,7 @@ export function computeNavCounts(
     all: issues.length,
     assigned: issues.filter((issue) => issue.assignee?.login === currentUserLogin).length,
     created: issues.filter((issue) => issue.author.login === currentUserLogin).length,
-    favorites: 0,
+    favorites: issues.filter((issue) => issue.favorite).length,
     recent: issues.length,
   };
 }

@@ -6,6 +6,12 @@ import type {
   IssueLabel as DbIssueLabel,
 } from "@prisma/client";
 
+type RepositoryRef = {
+  fullName: string;
+  private: boolean;
+  archived: boolean;
+};
+
 function mapLabel(label: { name: string; color: string } | string): IssueLabel {
   if (typeof label === "string") {
     return { name: label, color: "#64748b" };
@@ -13,7 +19,7 @@ function mapLabel(label: { name: string; color: string } | string): IssueLabel {
   return { name: label.name, color: `#${label.color}` };
 }
 
-export function mapIssue(repositoryFullName: string, raw: GithubApiIssue): Issue {
+export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue {
   const milestone = raw.milestone
     ? {
         name: raw.milestone.title,
@@ -34,7 +40,9 @@ export function mapIssue(repositoryFullName: string, raw: GithubApiIssue): Issue
     title: raw.title,
     body: raw.body ?? "",
     state: raw.state,
-    repositoryFullName,
+    repositoryFullName: repository.fullName,
+    repositoryPrivate: repository.private,
+    repositoryArchived: repository.archived,
     author: { login: raw.user?.login ?? "unknown" },
     assignee: raw.assignee ? { login: raw.assignee.login } : null,
     labels: raw.labels.map(mapLabel),
@@ -43,11 +51,12 @@ export function mapIssue(repositoryFullName: string, raw: GithubApiIssue): Issue
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
     htmlUrl: raw.html_url,
+    favorite: false,
   };
 }
 
 export function dbIssueToDisplayIssue(
-  repositoryFullName: string,
+  repository: RepositoryRef,
   row: DbIssue & { labels: DbIssueLabel[] },
 ): Issue {
   const milestone =
@@ -67,7 +76,9 @@ export function dbIssueToDisplayIssue(
     title: row.title,
     body: row.body ?? "",
     state: row.state === "OPEN" ? "open" : "closed",
-    repositoryFullName,
+    repositoryFullName: repository.fullName,
+    repositoryPrivate: repository.private,
+    repositoryArchived: repository.archived,
     author: { login: row.authorLogin },
     assignee: row.assigneeLogin ? { login: row.assigneeLogin } : null,
     labels: row.labels.map((label) => ({ name: label.name, color: `#${label.color}` })),
@@ -76,6 +87,7 @@ export function dbIssueToDisplayIssue(
     createdAt: row.githubCreatedAt.toISOString(),
     updatedAt: row.githubUpdatedAt.toISOString(),
     htmlUrl: row.htmlUrl,
+    favorite: false,
   };
 }
 

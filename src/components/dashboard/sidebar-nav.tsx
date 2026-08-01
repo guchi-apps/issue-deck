@@ -1,9 +1,23 @@
 "use client";
 
-import { CheckCircle2, FolderGit2, ListChecks, Plus, SlidersHorizontal, Star } from "lucide-react";
+import { useState } from "react";
+import {
+  Archive,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  FolderGit2,
+  ListChecks,
+  Lock,
+  Plus,
+  SlidersHorizontal,
+  Star,
+  X,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
+import { getLabelDotStyle } from "@/lib/label-color";
 import { navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
@@ -15,8 +29,14 @@ type SidebarNavProps = {
   onSelectView: (view: NavViewId) => void;
   navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
+  selectedRepoFullName?: string | null;
   onSelectRepository?: (repository: ConnectedRepository) => void;
+  onHideRepository?: (repository: ConnectedRepository) => void;
+  onShowRepository?: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
+  selectedLabels?: string[];
+  onSelectLabel?: (label: LabelSummary) => void;
+  onClearLabels?: () => void;
   className?: string;
 };
 
@@ -33,10 +53,23 @@ export function SidebarNav({
   onSelectView,
   navCounts,
   repositories,
+  selectedRepoFullName,
   onSelectRepository,
+  onHideRepository,
+  onShowRepository,
   labelSummary,
+  selectedLabels = [],
+  onSelectLabel,
+  onClearLabels,
   className,
 }: SidebarNavProps) {
+  const [showHiddenRepos, setShowHiddenRepos] = useState(false);
+  const sortedLabelSummary = [...labelSummary].sort((a, b) => a.name.localeCompare(b.name));
+  const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
+  const visibleRepositories = showHiddenRepos
+    ? repositories
+    : repositories.filter((repo) => !repo.hidden);
+
   return (
     <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)}>
       <div>
@@ -85,49 +118,108 @@ export function SidebarNav({
             </a>
           </div>
         ) : (
-          <ul className="flex flex-col gap-0.5">
-            {repositories.map((repo) => {
-              const color = getRepoColor(repo.fullName);
-              return (
-                <li key={repo.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectRepository?.(repo)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <span
-                        className="flex size-5 shrink-0 items-center justify-center rounded"
-                        style={{ backgroundColor: `${color}20`, color }}
-                      >
-                        <FolderGit2 className="size-3" />
+          <>
+            <ul className="flex flex-col gap-0.5">
+              {visibleRepositories.map((repo) => {
+                const color = getRepoColor(repo.fullName);
+                return (
+                  <li key={repo.id} className="group/repo flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onSelectRepository?.(repo)}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                        selectedRepoFullName === repo.fullName && "bg-accent font-medium",
+                        repo.hidden && "text-muted-foreground",
+                      )}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        <span
+                          className="flex size-5 shrink-0 items-center justify-center rounded"
+                          style={{ backgroundColor: `${color}20`, color }}
+                        >
+                          <FolderGit2 className="size-3" />
+                        </span>
+                        <span className="truncate">{repo.name}</span>
                       </span>
-                      <span className="truncate">{repo.name}</span>
-                    </span>
-                    {repo.private && (
-                      <span className="text-xs text-muted-foreground">Private</span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      {(repo.archived || repo.private) && (
+                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                          {repo.archived && (
+                            <span title="アーカイブ済み">
+                              <Archive className="size-3" />
+                            </span>
+                          )}
+                          {repo.private && (
+                            <span title="プライベートリポジトリ">
+                              <Lock className="size-3" />
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
+                      }
+                      title={repo.hidden ? "表示する" : "非表示にする"}
+                      className={cn(
+                        "shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                        !repo.hidden && "opacity-0 group-hover/repo:opacity-100",
+                      )}
+                    >
+                      {repo.hidden ? (
+                        <Eye className="size-3.5" />
+                      ) : (
+                        <EyeOff className="size-3.5" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {hiddenRepoCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowHiddenRepos((prev) => !prev)}
+                className="mt-1 px-2 text-xs text-primary hover:underline"
+              >
+                {showHiddenRepos ? "非表示のリポジトリを隠す" : `すべて表示する（${hiddenRepoCount}）`}
+              </button>
+            )}
+          </>
         )}
       </div>
 
       <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">ラベル</h2>
+        <div className="mb-2 flex items-center justify-between px-2">
+          <h2 className="text-xs font-semibold text-muted-foreground">ラベル</h2>
+          {selectedLabels.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onClearLabels?.()}
+              className="text-muted-foreground hover:text-foreground"
+              title="ラベルの選択を解除"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
         <ul className="flex flex-col gap-0.5">
-          {labelSummary.map((label) => (
+          {sortedLabelSummary.map((label) => (
             <li key={label.name}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                onClick={() => onSelectLabel?.(label)}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                  selectedLabels.includes(label.name) && "bg-accent font-medium",
+                )}
               >
                 <span className="flex items-center gap-2">
                   <span
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: label.color }}
+                    className="size-2 rounded-full ring-1 ring-inset ring-border"
+                    style={getLabelDotStyle(label.color)}
                   />
                   {label.name}
                 </span>
