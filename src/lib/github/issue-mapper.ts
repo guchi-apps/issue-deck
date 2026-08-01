@@ -12,11 +12,13 @@ type RepositoryRef = {
   archived: boolean;
 };
 
-function mapLabel(label: { name: string; color: string } | string): IssueLabel {
+function mapLabel(
+  label: { name: string; color: string; description: string | null } | string,
+): IssueLabel {
   if (typeof label === "string") {
-    return { name: label, color: "#64748b" };
+    return { name: label, color: "#64748b", description: null };
   }
-  return { name: label.name, color: `#${label.color}` };
+  return { name: label.name, color: `#${label.color}`, description: label.description };
 }
 
 export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue {
@@ -81,7 +83,11 @@ export function dbIssueToDisplayIssue(
     repositoryArchived: repository.archived,
     author: { login: row.authorLogin },
     assignee: row.assigneeLogin ? { login: row.assigneeLogin } : null,
-    labels: row.labels.map((label) => ({ name: label.name, color: `#${label.color}` })),
+    labels: row.labels.map((label) => ({
+      name: label.name,
+      color: `#${label.color}`,
+      description: label.description,
+    })),
     milestone,
     commentCount: row.commentCount,
     createdAt: row.githubCreatedAt.toISOString(),

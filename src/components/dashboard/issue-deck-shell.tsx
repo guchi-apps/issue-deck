@@ -270,7 +270,7 @@ export function IssueDeckShell({
         </div>
         {selectedIssue && (
           <div className="hidden w-72 shrink-0 border-l xl:block">
-            <IssuePropertiesPanel issue={selectedIssue} />
+            <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
           </div>
         )}
       </div>

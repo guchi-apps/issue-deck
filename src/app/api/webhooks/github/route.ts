@@ -58,7 +58,7 @@ async function handleIssuesEvent(payload: {
 
 async function handleLabelEvent(payload: {
   action: string;
-  label: { id: number; name: string; color: string };
+  label: { id: number; name: string; color: string; description: string | null };
   repository: { id: number };
 }) {
   const repository = await db.repository.findUnique({
@@ -78,7 +78,11 @@ async function handleLabelEvent(payload: {
   if (payload.action === "edited") {
     await db.issueLabel.updateMany({
       where: { githubLabelId, issue: { repositoryId: repository.id } },
-      data: { name: payload.label.name, color: payload.label.color },
+      data: {
+        name: payload.label.name,
+        color: payload.label.color,
+        description: payload.label.description,
+      },
     });
   }
 }

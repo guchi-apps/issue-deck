@@ -7,6 +7,7 @@ export type GithubUser = {
 export type IssueLabel = {
   name: string;
   color: string;
+  description: string | null;
 };
 
 export type LabelSummary = {

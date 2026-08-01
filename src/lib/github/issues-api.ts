@@ -11,7 +11,7 @@ export type GithubApiIssue = {
   html_url: string;
   user: { login: string } | null;
   assignee: { login: string } | null;
-  labels: ({ id: number; name: string; color: string } | string)[];
+  labels: ({ id: number; name: string; color: string; description: string | null } | string)[];
   milestone: { title: string; open_issues: number; closed_issues: number } | null;
   comments: number;
   created_at: string;
@@ -51,7 +51,7 @@ export async function fetchCommentsForIssue(
   );
 }
 
-export type GithubApiRepoLabel = { name: string; color: string };
+export type GithubApiRepoLabel = { name: string; color: string; description: string | null };
 
 export async function fetchRepoLabels(
   owner: string,
@@ -118,6 +118,8 @@ export type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: "open" | "closed";
+  labels?: string[];
+  assignees?: string[];
 };
 
 export async function updateIssue(

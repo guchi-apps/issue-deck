@@ -171,6 +171,7 @@ model IssueLabel {
   githubLabelId BigInt?
   name          String
   color         String
+  description   String?
 
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
