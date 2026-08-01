@@ -30,6 +30,7 @@ import {
   computeOverviewStats,
   filterIssuesByView,
   getAssigneeOptions,
+  reconcileIssues,
   sortIssues,
 } from "@/lib/issue-stats";
 import { navViews } from "@/lib/nav-views";
@@ -81,10 +82,11 @@ export function IssueDeckShell({
   }
 
   useIssuePolling((polledIssues) => {
-    setIssues(polledIssues);
+    const reconciledIssues = reconcileIssues(issues, polledIssues);
+    setIssues(reconciledIssues);
     setSelectedIssue((prev) => {
       if (!prev) return prev;
-      return polledIssues.find((issue) => issue.id === prev.id) ?? prev;
+      return reconciledIssues.find((issue) => issue.id === prev.id) ?? prev;
     });
   });
 
