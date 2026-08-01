@@ -1,0 +1,221 @@
+name: Claude Issue Dispatch
+
+# Issueラベル付与(20.auto-implement)またはIssueへの@claudeコメントを起点に、
+# ローカルのscripts/start-issue.shが行っている作業(issue-<番号>ブランチ作成・
+# 実装・develop向けPR作成)をGitHub Actions上で無人実行する(docs/multi-agent-workflow.md Phase5)。
+#
+# 21.plan-requiredラベルが付いているissueは二段階トリガーにする(無人実行では
+# 対話的な承認者がその場にいないため):
+#   1. 計画をIssueコメントとして投稿し、00.check-userを付与して停止する(implementはしない)
+#   2. 人間が計画を確認し、00.check-userラベルを外すと「承認」とみなして実装を再開する
+#      (00.check-userが付いたままの状態で新たに@claudeコメントが付いた場合は、計画の
+#      練り直し依頼として扱い、計画コメントを投稿し直す。00.check-userは外さない)
+#      00.check-userはPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、
+#      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
+#      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
+#
+# パブリックリポジトリのため、Issueへのコメント自体は誰でも投稿できる。ラベルの
+# 付与・削除にはリポジトリへのwrite権限が必要でGitHub側で担保されるが、
+# @claudeコメントによる起動は権限を持たない第三者からも到達しうるため、
+# 全トリガー経路で一律に実行者(github.actor)のリポジトリ権限を確認し、
+# write権限未満の場合は何もしない。
+#
+# 対象issueの番号はissues/issue_commentイベントの github.event.issue.number
+# からそのまま取得できる(ブランチ名からの推測が必要な他ワークフローと異なる)。
+# 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
+# 展開しない(.github/workflows/issue-labels.yml と同じ方針)。
+#
+# 既知の制約: ブランチのpush・PR作成は既定の`GITHUB_TOKEN`で行っている。GitHubの仕様上
+# `GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しないため、
+# ここで作成したPRに対して.github/workflows/claude-review-develop.yml(Phase3自動レビュー・
+# Phase4自動マージ)は自動発火しない可能性が高い(未検証)。develop向けPR作成までが本ワークフロー
+# の完了条件であり、developへのマージまでの自動化は前提としない。発火しない場合は、人間が
+# 当該PRに何らかのイベント(re-request review、コメント等)を起こすか、`claude-review-develop.yml`
+# にworkflow_dispatchトリガーを追加する等の対応を別途検討する。
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+  issue_comment:
+    types: [created]
+
+jobs:
+  dispatch:
+    if: |
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == '20.auto-implement') ||
+      (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 1
+
+      - name: 実行者の権限・状態を判定する
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_TYPE: ${{ github.event.sender.type }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+        run: |
+          set -e
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+          if [ "$ACTOR_TYPE" = "Bot" ]; then
+            echo "実行者がBotのため何もしません（自己ループ防止）: $ACTOR"
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PERMISSION="$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo "none")"
+          case "$PERMISSION" in
+            admin|write|maintain) : ;;
+            *)
+              echo "実行者 $ACTOR はwrite権限を持たないため何もしません（権限: $PERMISSION）"
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          BRANCH="issue-$ISSUE_NUMBER"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          BRANCH_EXISTS=false
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            BRANCH_EXISTS=true
+          fi
+
+          LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+          PLAN_REQUIRED=false
+          echo "$LABELS" | grep -qx "21.plan-required" && PLAN_REQUIRED=true
+          AWAITING_CONFIRM=false
+          echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
+
+          # BRANCH_EXISTSを最優先の判定にする: issue-<番号>ブランチが存在する時点で、
+          # このissueへのdispatchはこのワークフロー内で既に完了しているとみなし、以後は
+          # 何が起きても常にskipする。00.check-userはPhase4の自動マージ不可判定でも
+          # 使われる汎用ラベルなので、ブランチが存在する状態でそれが外れても
+          # (Phase4側のレビュー通過の意味である可能性が高く)ここでは実装を再始動しない。
+          MODE=skip
+          if [ "$BRANCH_EXISTS" = "true" ]; then
+            MODE=skip
+          elif [ "$EVENT_NAME" = "issues" ] && [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "00.check-user" ]; then
+            # 人間が計画を確認し00.check-userを外した = 承認
+            MODE=implement
+          elif [ "$AWAITING_CONFIRM" = "true" ]; then
+            # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
+            if [ "$EVENT_NAME" = "issue_comment" ]; then
+              MODE=plan
+            fi
+          elif [ "$PLAN_REQUIRED" = "true" ]; then
+            MODE=plan
+          else
+            MODE=implement
+          fi
+
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM branch_exists=$BRANCH_EXISTS"
+
+      - name: Claude Code（計画提示）
+        if: steps.state.outputs.mode == 'plan'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"'
+          prompt: |
+            あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
+            `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
+
+            ## 最初にやること
+            `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・ラベル・
+            コメント（過去に提示した計画やそれへのフィードバックを含む）を確認してください。
+
+            ## やること
+            - リポジトリのコードを調査し、対応方針・変更範囲（触るファイル・追加するファイル）・懸念点を
+              日本語でまとめる
+            - 直前のコメントで計画への修正依頼が来ている場合は、それを踏まえて計画を練り直す
+            - まとめた計画を `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
+              Issueにコメント投稿する
+            - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
+              （既に付いていても無害なので毎回実行してよい）
+
+            ## このステップでは行わないこと
+            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ）
+
+            ## 次に起きること
+            人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と
+            みなし、別のワークフロー実行が実装を開始します。計画に修正が必要な場合は、人間が
+            `@claude` 宛にコメントで指摘するので、その場合はこのステップが再び起動し計画を練り直します。
+
+      - name: Claude Code（実装・PR作成）
+        if: steps.state.outputs.mode == 'implement'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          prompt: |
+            あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
+            おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。現在のワークツリーは
+            `develop` の最新コミットをチェックアウトした状態です。
+
+            ## 最初にやること
+            - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
+              ラベル・コメントを確認する（`21.plan-required` が付いている場合、承認済みの計画が
+              Issueコメントに投稿されているはずなので、それに沿って実装する）
+            - 確認したら直ちに `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"`
+              を実行する（実装中であることを示すため。コードの調査・実装に着手するより前に行うこと）
+            - `git checkout -b ${{ steps.state.outputs.branch }}` で作業ブランチを作成する
+
+            ## 責務
+            - Issueの要件を実装する
+            - テスト・Lint・型チェック・ビルドを実行する
+            - 変更をコミットする（コミットメッセージは日本語、1〜2文で変更の目的を書き、末尾に
+              `#${{ steps.state.outputs.issue_number }}` を付ける。Authorは
+              `Claude Code <claude-code@example.com>` にする）
+            - `git push -u origin ${{ steps.state.outputs.branch }}` でブランチをpushする
+            - `gh pr create --base develop --head ${{ steps.state.outputs.branch }}` で
+              `develop` 向けPull Requestを作成する（タイトル・本文は日本語。本文には対応Issue・実装内容・
+              テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
+              `closes #番号` / `fixes #番号` は使わず、`#${{ steps.state.outputs.issue_number }}` のように
+              番号のみ記載する）
+            - `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
+              を実行する（このワークフローのgit push/PR作成は既定の`GITHUB_TOKEN`で行っており、GitHubの仕様上
+              `GITHUB_TOKEN`によるpush/PR作成は他のワークフローを起動しないため、`.github/workflows/issue-labels.yml`
+              による自動付与を当てにせず、必ず自分でこのコマンドを実行すること）
+
+            ## 画面確認・スクリーンショットについて
+            無人実行のため、開発サーバーを起動しての画面確認やPlaywright等によるスクリーンショット取得は
+            できません。
+            - Issueに `22.preview-required` または `23.screenshot-required` のいずれかのラベルが付いている
+              場合は、実装・テストまで終えた時点でPRを作成せず、代わりに
+              `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行し、
+              実装内容の要約と「画面確認が必要なため人間の確認を待っています。ブランチ
+              `${{ steps.state.outputs.branch }}` の内容を確認のうえ、問題なければ手動でPRを作成してください」
+              という旨を `gh issue comment` で投稿して停止してください（ブランチのpushまでは行う）
+            - 上記いずれのラベルも付いていない場合は、通常どおりPR作成まで進めてください
+
+            ## 禁止事項
+            - `main` / `develop` への直接コミット・push
+            - 他Issueのブランチの編集
+            - 不要なforce push
+            - 自分が作成したPull Requestの自己マージ
+
+            ## コミット・PRの書き方
+            - コミットメッセージ・PRタイトル・PR本文は英語ではなく日本語で書く
+            - PR本文の見出し（Summary/Test planなど）は英語でもよいが、説明文は日本語で書く
