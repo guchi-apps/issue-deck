@@ -24,6 +24,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -32,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -49,12 +54,23 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
 
-  async function handleToggleState() {
+  async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
-      state: issue.state === "open" ? "closed" : "open",
+      state: "closed",
+      stateReason,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReopen() {
+    if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "open",
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -151,19 +167,35 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
                   <Pencil />
                   編集
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
-                  {issue.state === "open" ? (
-                    <>
+                {issue.state === "open" ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={isSubmitting}>
                       <XCircle />
                       クローズする
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw />
-                      再オープンする
-                    </>
-                  )}
-                </DropdownMenuItem>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem
+                          disabled={isSubmitting}
+                          onSelect={() => handleClose("completed")}
+                        >
+                          完了としてクローズ
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={isSubmitting}
+                          onSelect={() => handleClose("not_planned")}
+                        >
+                          計画外としてクローズ
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+                ) : (
+                  <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
+                    <RotateCcw />
+                    再オープンする
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -175,7 +207,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
           <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-            {issue.state === "open" ? "Open" : "Closed"}
+            {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
           </Badge>
           <span className="flex items-center gap-1.5 text-muted-foreground">
             作成者 <UserAvatar login={issue.author.login} /> {issue.author.login}

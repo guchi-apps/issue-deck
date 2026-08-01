@@ -18,6 +18,7 @@ export type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: "open" | "closed";
+  stateReason?: "completed" | "not_planned";
   labels?: string[];
   assignee?: string | null;
 };

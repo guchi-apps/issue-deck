@@ -2,12 +2,15 @@ import { fetchAllPages } from "@/lib/github/pagination";
 
 const GITHUB_API = "https://api.github.com";
 
+export type GithubApiIssueStateReason = "completed" | "not_planned" | "reopened" | null;
+
 export type GithubApiIssue = {
   id: number;
   number: number;
   title: string;
   body: string | null;
   state: "open" | "closed";
+  state_reason?: GithubApiIssueStateReason;
   html_url: string;
   user: { login: string } | null;
   assignee: { login: string } | null;
@@ -118,6 +121,7 @@ export type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: "open" | "closed";
+  state_reason?: "completed" | "not_planned";
   labels?: string[];
   assignees?: string[];
 };

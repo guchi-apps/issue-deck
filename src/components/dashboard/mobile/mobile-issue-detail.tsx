@@ -27,6 +27,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -39,6 +43,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { closedStateLabel } from "@/lib/issue-state-reason";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -89,11 +94,21 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleToggleState() {
+  async function handleClose(stateReason: "completed" | "not_planned") {
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
-      state: issue.state === "open" ? "closed" : "open",
+      state: "closed",
+      stateReason,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReopen() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "open",
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -164,19 +179,35 @@ export function MobileIssueDetail({
               <Pencil />
               編集
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
-              {issue.state === "open" ? (
-                <>
+            {issue.state === "open" ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger disabled={isSubmitting}>
                   <XCircle />
                   クローズする
-                </>
-              ) : (
-                <>
-                  <RotateCcw />
-                  再オープンする
-                </>
-              )}
-            </DropdownMenuItem>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem
+                      disabled={isSubmitting}
+                      onSelect={() => handleClose("completed")}
+                    >
+                      完了としてクローズ
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={isSubmitting}
+                      onSelect={() => handleClose("not_planned")}
+                    >
+                      計画外としてクローズ
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+            ) : (
+              <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
+                <RotateCcw />
+                再オープンする
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
@@ -197,7 +228,7 @@ export function MobileIssueDetail({
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-            {issue.state === "open" ? "Open" : "Closed"}
+            {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
           </Badge>
           <span>作成日 {new Date(issue.createdAt).toLocaleDateString("ja-JP")}</span>
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
