@@ -51,11 +51,12 @@ type IssueDeckShellProps = {
 
 export function IssueDeckShell({
   currentUser,
-  repositories,
+  repositories: initialRepositories,
   issues: initialIssues,
 }: IssueDeckShellProps) {
   const { filters, setFilter, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
+  const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -145,6 +146,26 @@ export function IssueDeckShell({
     setMobileScreen({ kind: tab });
   }
 
+  async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
+    setRepositories((prev) =>
+      prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden } : repo)),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/hidden", {
+        method: hidden ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id }),
+      });
+      if (!response.ok) throw new Error("failed to update hidden repository");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update hidden repository", error);
+      setRepositories((prev) =>
+        prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden: !hidden } : repo)),
+      );
+    }
+  }
+
   const activeBottomNavTab: MobileBottomNavTab =
     mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
       ? "home"
@@ -226,6 +247,8 @@ export function IssueDeckShell({
           repositories={repositories}
           selectedRepoFullName={filters.repo}
           onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
+          onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+          onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
           labelSummary={labelSummary}
           selectedLabels={filters.labels}
           onSelectLabel={(label) => toggleLabel(label.name)}

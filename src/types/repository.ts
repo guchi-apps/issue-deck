@@ -3,4 +3,5 @@ export type ConnectedRepository = {
   name: string;
   fullName: string;
   private: boolean;
+  hidden: boolean;
 };

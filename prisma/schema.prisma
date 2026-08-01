@@ -23,7 +23,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userInstallations UserInstallation[]
+  userInstallations  UserInstallation[]
+  hiddenRepositories HiddenRepository[]
 }
 
 // --- GitHub App 連携 ---
@@ -90,9 +91,25 @@ model Repository {
 
   installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
   issues       Issue[]
+  hiddenBy     HiddenRepository[]
 
   @@index([installationId])
   @@unique([installationId, fullName])
+}
+
+// ユーザーごとに左メニューで非表示にしたリポジトリ
+model HiddenRepository {
+  id           String   @id @default(cuid())
+  userId       String
+  repositoryId String
+
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
 }
 
 // --- Issueキャッシュ（M6: Webhookで差分反映） ---

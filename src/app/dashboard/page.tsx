@@ -14,6 +14,17 @@ export default async function DashboardPage() {
       })
     : [];
 
+  const hiddenRepositoryIds = currentUser
+    ? new Set(
+        (
+          await db.hiddenRepository.findMany({
+            where: { userId: currentUser.id },
+            select: { repositoryId: true },
+          })
+        ).map((row) => row.repositoryId),
+      )
+    : new Set<string>();
+
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
   return (
@@ -28,6 +39,7 @@ export default async function DashboardPage() {
         name: repo.name,
         fullName: repo.fullName,
         private: repo.private,
+        hidden: hiddenRepositoryIds.has(repo.id),
       }))}
       issues={issues}
     />
