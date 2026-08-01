@@ -1,22 +1,50 @@
 "use client";
 
-import { ArrowLeft, FolderGit2, MoreHorizontal, Plus, Share2 } from "lucide-react";
+import {
+  ArrowLeft,
+  FolderGit2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Share2,
+  XCircle,
+} from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { useIssueComments } from "@/hooks/use-issue-comments";
+import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
   issue: Issue;
   onBack: () => void;
+  onEdit: (issue: Issue) => void;
+  onIssueUpdated: (issue: Issue) => void;
 };
 
-export function MobileIssueDetail({ issue, onBack }: MobileIssueDetailProps) {
+export function MobileIssueDetail({ issue, onBack, onEdit, onIssueUpdated }: MobileIssueDetailProps) {
   const { comments, isLoading, error } = useIssueComments(issue);
+  const { updateIssue, isSubmitting } = useIssueMutations();
+
+  async function handleToggleState() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: issue.state === "open" ? "closed" : "open",
+    });
+    if (updated) onIssueUpdated(updated);
+  }
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -26,7 +54,32 @@ export function MobileIssueDetail({ issue, onBack }: MobileIssueDetailProps) {
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
         <Share2 className="size-4 text-muted-foreground" />
-        <MoreHorizontal className="size-4 text-muted-foreground" />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="操作メニュー">
+              <MoreHorizontal className="size-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onEdit(issue)}>
+              <Pencil />
+              編集
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
+              {issue.state === "open" ? (
+                <>
+                  <XCircle />
+                  クローズする
+                </>
+              ) : (
+                <>
+                  <RotateCcw />
+                  再オープンする
+                </>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">

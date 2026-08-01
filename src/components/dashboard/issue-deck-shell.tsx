@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
@@ -49,13 +51,35 @@ type IssueDeckShellProps = {
 export function IssueDeckShell({
   currentUser,
   repositories,
-  issues,
+  issues: initialIssues,
 }: IssueDeckShellProps) {
   const { filters, setFilter, toggleLabel } = useIssueFilters();
+  const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [mobileScreen, setMobileScreen] = useState<MobileScreen>({ kind: "home" });
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
+  const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
 
   const currentUserLogin = currentUser?.login ?? null;
+
+  function openCreateDialog(defaultRepositoryFullName?: string | null) {
+    setCreateDialogRepo(defaultRepositoryFullName ?? null);
+    setCreateDialogOpen(true);
+  }
+
+  function handleIssueCreated(issue: Issue) {
+    setIssues((prev) => [issue, ...prev]);
+    setSelectedIssue(issue);
+  }
+
+  function handleIssueUpdated(issue: Issue) {
+    setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
+    setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
+    setMobileScreen((prev) =>
+      prev.kind === "issue-detail" && prev.issue.id === issue.id ? { ...prev, issue } : prev,
+    );
+  }
 
   // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
   // サイドバーの件数表示はこれを基準にする。
@@ -122,6 +146,7 @@ export function IssueDeckShell({
         repositories={repositories}
         labelSummary={labelSummary}
         assigneeOptions={assigneeOptions}
+        onCreateIssue={() => openCreateDialog(filters.repo)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -140,6 +165,7 @@ export function IssueDeckShell({
                 assigneeOptions={assigneeOptions}
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
+                onCreateIssue={() => openCreateDialog()}
               />
             )}
 
@@ -161,11 +187,17 @@ export function IssueDeckShell({
                 selectedIssueId={null}
                 onSelectIssue={handleMobileSelectIssue}
                 onBack={handleMobileBack}
+                onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
               />
             )}
 
             {mobileScreen.kind === "issue-detail" && (
-              <MobileIssueDetail issue={mobileScreen.issue} onBack={handleMobileBack} />
+              <MobileIssueDetail
+                issue={mobileScreen.issue}
+                onBack={handleMobileBack}
+                onEdit={setEditingIssue}
+                onIssueUpdated={handleIssueUpdated}
+              />
             )}
           </div>
 
@@ -195,7 +227,11 @@ export function IssueDeckShell({
 
         {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
         <div className="hidden flex-1 overflow-hidden md:flex">
-          <IssueDetail issue={selectedIssue} />
+          <IssueDetail
+            issue={selectedIssue}
+            onEdit={setEditingIssue}
+            onIssueUpdated={handleIssueUpdated}
+          />
         </div>
         {selectedIssue && (
           <div className="hidden w-72 shrink-0 border-l xl:block">
@@ -203,6 +239,22 @@ export function IssueDeckShell({
           </div>
         )}
       </div>
+
+      <CreateIssueDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        repositories={repositories}
+        defaultRepositoryFullName={createDialogRepo}
+        onCreated={handleIssueCreated}
+      />
+      <EditIssueDialog
+        open={editingIssue !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingIssue(null);
+        }}
+        issue={editingIssue}
+        onUpdated={handleIssueUpdated}
+      />
     </div>
   );
 }

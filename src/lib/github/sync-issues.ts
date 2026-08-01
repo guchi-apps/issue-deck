@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
+import type { Issue } from "@/types/issue";
 import type { IssueState } from "@prisma/client";
 
 type RepoForSync = {
@@ -90,4 +92,17 @@ export async function upsertIssueFromWebhookPayload(
 
 export async function deleteIssueByGithubId(githubIssueId: number): Promise<void> {
   await db.issue.deleteMany({ where: { githubIssueId: BigInt(githubIssueId) } });
+}
+
+export async function upsertIssueAndGetDisplay(
+  repositoryFullName: string,
+  repositoryId: string,
+  raw: GithubApiIssue,
+): Promise<Issue> {
+  const issue = await upsertIssueRow(repositoryId, raw);
+  const row = await db.issue.findUniqueOrThrow({
+    where: { id: issue.id },
+    include: { labels: true },
+  });
+  return dbIssueToDisplayIssue(repositoryFullName, row);
 }

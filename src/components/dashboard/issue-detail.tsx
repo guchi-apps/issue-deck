@@ -1,23 +1,43 @@
 "use client";
 
-import { ExternalLink, MoreHorizontal, Star } from "lucide-react";
+import { ExternalLink, MoreHorizontal, Pencil, RotateCcw, Star, XCircle } from "lucide-react";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useIssueComments } from "@/hooks/use-issue-comments";
+import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import type { Issue } from "@/types/issue";
 
 type IssueDetailProps = {
   issue: Issue | null;
+  onEdit: (issue: Issue) => void;
+  onIssueUpdated: (issue: Issue) => void;
 };
 
-export function IssueDetail({ issue }: IssueDetailProps) {
+export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps) {
   const { comments, isLoading, error } = useIssueComments(issue);
+  const { updateIssue, isSubmitting } = useIssueMutations();
+
+  async function handleToggleState() {
+    if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: issue.state === "open" ? "closed" : "open",
+    });
+    if (updated) onIssueUpdated(updated);
+  }
 
   if (!issue) {
     return (
@@ -42,9 +62,32 @@ export function IssueDetail({ issue }: IssueDetailProps) {
             <Button variant="outline" size="icon">
               <Star />
             </Button>
-            <Button variant="outline" size="icon">
-              <MoreHorizontal />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => onEdit(issue)}>
+                  <Pencil />
+                  編集
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
+                  {issue.state === "open" ? (
+                    <>
+                      <XCircle />
+                      クローズする
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw />
+                      再オープンする
+                    </>
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

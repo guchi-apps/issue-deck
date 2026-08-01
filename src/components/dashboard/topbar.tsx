@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, LayoutDashboard, Search } from "lucide-react";
+import { ChevronDown, LayoutDashboard, Plus, Search } from "lucide-react";
 
 import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ type TopBarProps = {
   repositories: ConnectedRepository[];
   labelSummary: LabelSummary[];
   assigneeOptions: string[];
+  onCreateIssue: () => void;
 };
 
 export function TopBar({
@@ -42,6 +43,7 @@ export function TopBar({
   repositories,
   labelSummary,
   assigneeOptions,
+  onCreateIssue,
 }: TopBarProps) {
   const { handleLogout, handleDeleteAccount } = useAccountActions();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -193,6 +195,11 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Button size="sm" className="text-xs" onClick={onCreateIssue}>
+        <Plus />
+        新規Issue
+      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
