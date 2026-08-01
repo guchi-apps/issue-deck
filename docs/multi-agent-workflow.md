@@ -146,7 +146,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 ## ブランチ保護ルール案
 
 - **`main`**: 組織標準（`_docs/guides/github-repo-setup.md` §5）どおり設定する。Require pull request before merging、Required status checks=`lint-and-build`（`.github/workflows/ci.yml`のジョブ名）、Restrict updates、bypass=自分のアカウント（For pull requests only）。**現状（2026年時点）未設定のため要設定。** 実際の設定はGitHub Web UIで行う（workflowでは自動化しない）。
-- **`develop`**: ローカル実行が主体のうちは未設定のままでよい（前述の理由により設定しても実効性が薄い）。GitHub Actions専用トークンが導入された時点で「Require pull request before merging」＋bypass=人間アカウントのみ、を再検討する。
+- **`develop`**: Phase4で`required_status_checks`（`lint-and-build`）のみを設定した（`gh api PUT repos/{owner}/{repo}/branches/develop/protection`、`required_pull_request_reviews`・`restrictions`は`null`のまま）。これは`gh pr merge --auto`がCIの完了を待たずに即マージしてしまうのを防ぐための最小構成で、直接pushやApprove必須化は行っていない。「Require pull request before merging」＋bypass=人間アカウントのみへの本格的な制限は、影響範囲が大きく本Issueの完了条件にも必須ではないため見送った。GitHub Actions専用トークン（`github.token`、Phase3/4で導入済み）を使えば技術的には設定可能なので、必要になった時点で改めて検討する。
 
 ## 自動マージ可否の判定方法
 
@@ -160,10 +160,10 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - 大規模な依存関係の更新
 - `develop`→`main`のマージ
 
-判定方法:
-- **一次判定（機械的）**: `git diff --name-only develop...HEAD` のパスを、上記カテゴリに対応するパターン（例: `prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`, `package.json`の依存メジャーバージョン変更等）に照合し、ヒットしたら`00.check-user`を自動付与する。
-- **二次判定（エージェントの判断）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断する。
-- マージ自体は独自の待受スクリプトを書かず、GitHubネイティブの`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化が必要）を使う。必須ステータスチェック待ちのポーリングを自前実装せずに済む。
+判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
+- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
+- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
+- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 
 ## 段階的導入計画
 
@@ -183,14 +183,15 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `scripts/start-reviewer.sh` / `scripts/start-reviewer.ps1`（Phase2）
 - `scripts/prompts/review-agent.md`（Phase2）
 - `.github/workflows/issue-labels.yml`（Phase2.5、作成済み）
-- `.github/workflows/claude-review-develop.yml`（Phase3）
+- `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5）
-- リスク判定ロジック（Phase4。既存の`00.check-user`ラベル自動付与としてActions内に実装）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
 - `main`のBranch protection設定（未設定のため）
+- リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
+- `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
 
 ## 未解決の課題・申し送り事項
 
