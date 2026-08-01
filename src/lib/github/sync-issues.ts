@@ -26,6 +26,15 @@ function toIssueState(state: "open" | "closed"): IssueState {
 }
 
 async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
+  const githubUpdatedAt = new Date(raw.updated_at);
+
+  const existing = await db.issue.findUnique({ where: { githubIssueId: BigInt(raw.id) } });
+  if (existing && existing.githubUpdatedAt > githubUpdatedAt) {
+    // Webhookの配信順序はGitHub側で保証されないため、既に反映済みより古いペイロードは無視する
+    // （新しいラベル状態が古い状態で上書きされるのを防ぐ）。
+    return existing;
+  }
+
   const data = {
     repositoryId,
     number: raw.number,
@@ -40,7 +49,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     milestoneOpen: raw.milestone?.open_issues ?? null,
     milestoneClosed: raw.milestone?.closed_issues ?? null,
     githubCreatedAt: new Date(raw.created_at),
-    githubUpdatedAt: new Date(raw.updated_at),
+    githubUpdatedAt,
     syncedAt: new Date(),
   };
 

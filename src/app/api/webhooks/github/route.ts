@@ -166,8 +166,10 @@ export async function POST(request: NextRequest) {
       await handleInstallationEvent(payload);
     }
   } catch (error) {
-    // GitHubは非2xxで再送するため、処理中エラーはログに残しつつ200を返す。
+    // 非2xxを返すとGitHubが自動再送・手動redeliveryの対象にしてくれるため、
+    // 握りつぶさずエラーとして返す。
     console.error("[webhooks/github] failed to process event", event, error);
+    return NextResponse.json({ error: "processing_failed" }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
