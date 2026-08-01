@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
+import { getLabelDotStyle } from "@/lib/label-color";
 import { navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
@@ -163,8 +164,8 @@ export function SidebarNav({
               >
                 <span className="flex items-center gap-2">
                   <span
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: label.color }}
+                    className="size-2 rounded-full ring-1 ring-inset ring-border"
+                    style={getLabelDotStyle(label.color)}
                   />
                   {label.name}
                 </span>

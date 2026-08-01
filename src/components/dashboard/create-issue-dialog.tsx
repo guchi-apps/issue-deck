@@ -30,6 +30,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -175,11 +176,8 @@ export function CreateIssueDialog({
                   return (
                     <span
                       key={name}
-                      className="rounded-full px-2 py-0.5 text-xs"
-                      style={{
-                        backgroundColor: `${label?.color ?? "#64748b"}20`,
-                        color: label?.color ?? "#64748b",
-                      }}
+                      className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                      style={getLabelBadgeStyle(label?.color ?? "#64748b")}
                     >
                       {name}
                     </span>

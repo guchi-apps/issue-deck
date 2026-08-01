@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/card";
+import { getLabelDotStyle } from "@/lib/label-color";
 import type { LabelSummary, OverviewStat } from "@/types/issue";
 
 type MobileHomeScreenProps = {
@@ -36,7 +37,10 @@ export function MobileHomeScreen({ labelSummary, overviewStats }: MobileHomeScre
           {labelSummary.map((label) => (
             <li key={label.name} className="flex items-center justify-between px-2 py-1.5 text-sm">
               <span className="flex items-center gap-2">
-                <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                <span
+                  className="size-2 rounded-full ring-1 ring-inset ring-border"
+                  style={getLabelDotStyle(label.color)}
+                />
                 {label.name}
               </span>
               <span className="text-xs text-muted-foreground">{label.count}</span>

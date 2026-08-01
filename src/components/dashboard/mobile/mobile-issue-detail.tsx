@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import type { Issue } from "@/types/issue";
@@ -127,8 +128,8 @@ export function MobileIssueDetail({ issue, onBack, onEdit, onIssueUpdated }: Mob
             {issue.labels.map((label) => (
               <span
                 key={label.name}
-                className="rounded-full px-2 py-0.5 text-xs"
-                style={{ backgroundColor: `${label.color}20`, color: label.color }}
+                className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                style={getLabelBadgeStyle(label.color)}
               >
                 {label.name}
               </span>

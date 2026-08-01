@@ -4,6 +4,7 @@ import { MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Input } from "@/components/ui/input";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -82,8 +83,8 @@ export function IssueList({
                     {issue.labels.map((label) => (
                       <span
                         key={label.name}
-                        className="rounded-full px-1.5 py-0.5 text-[10px]"
-                        style={{ backgroundColor: `${label.color}20`, color: label.color }}
+                        className="rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                        style={getLabelBadgeStyle(label.color)}
                       >
                         {label.name}
                       </span>
