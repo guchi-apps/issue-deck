@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUserId } from "@/lib/auth-user";
+import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const userId = await requireUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -75,14 +75,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const repository = await findRepository(userId, owner, repo);
+  const repository = await findRepository(user.id, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const created = await createComment(owner, repo, number, token, { body: body.trim() });
+    // GitHub上ではissue-deckのGitHub App(issue-deck[bot])が投稿者になり、実際に
+    // 操作した人間が誰かは分からなくなる。ユーザー入力より後ろに投稿者の
+    // GitHubログイン名を不可視マーカーとして埋め込むことで、
+    // .github/workflows/claude-issue-dispatch.yml 側が実行者のwrite権限を
+    // 検証できるようにする(ユーザー本文中に偽のマーカーが含まれていても、
+    // 末尾にあるこのマーカーが常に最後に出現するため無効化できる)。
+    const bodyWithPoster = `${body.trim()}\n\n<!-- issue-deck:posted-by:${user.githubLogin} -->`;
+    const created = await createComment(owner, repo, number, token, { body: bodyWithPoster });
     return NextResponse.json({ comment: mapComment(created) });
   } catch (error) {
     return NextResponse.json(
