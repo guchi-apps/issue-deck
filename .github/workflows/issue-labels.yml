@@ -6,6 +6,11 @@ name: Issue Labels
 # 付け忘れがあっても後から是正されるようにするための安全網、および
 # develop->mainの遷移(07/09)を新たにカバーするためのもの。
 #
+# develop-pr-opened(03.d:marge)・develop-pr-merged(05.develop)の2ジョブは、
+# ラベル遷移と同時にIssueへ完了報告のコメントも投稿する。ラベルより気付きやすい
+# 通知手段として、実装エージェント経由・人間の手動PRのどちらでも同じ場所
+# (PRオープン・マージイベント)で確実に発火する。
+#
 # 対象issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない。
@@ -51,11 +56,13 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       HEAD_REF: ${{ github.head_ref }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
     steps:
       - name: 03.d:marge へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "01.wip"
+            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"
           fi
 
   develop-pr-merged:
@@ -69,11 +76,13 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       HEAD_REF: ${{ github.head_ref }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
     steps:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge"
+            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"
           fi
 
   main-pr-in-progress:
