@@ -235,6 +235,15 @@ issue-deckからのラベル更新はGitHub App経由でactorが常に`issue-dec
 みなし実装を再開し、実装ステップの`01.wip`付与時に`00.check-user`も併せて除去する
 （`issues: unlabeled`イベントを経由しない承認経路のため）。
 
+### 着手直後の通知コメント
+
+モード判定（plan/implement）が終わった直後に、`gh issue comment`で「依頼を確認し対応を開始する」旨を
+issueに投稿するステップを設けている（issue #75）。Claude Codeエージェント自身に通知コメントの投稿を
+委ねると、調査に時間がかかった場合や途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に
+伝わらない恐れがある。そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェル
+スクリプトのステップとしてモード判定直後に配置し、確実に投稿する（下記「計画提示ステップの信頼性
+確保」のフォールバック検証と同じ考え方）。
+
 ### 無人実行時の権限モード（許可ツールリスト）
 
 - **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"`。
