@@ -13,12 +13,6 @@ name: Claude Issue Dispatch
 #      00.check-userはPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、
 #      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
 #      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
-#      issue-deck画面の「計画を承認して実装を再開」ボタンは、ラベル更新APIがGitHub App
-#      経由でactorが常にissue-deck[bot]になり上記②のunlabeledイベントとして機能しない
-#      ため、代わりに承認専用マーカー(<!-- issue-deck:approve-plan -->)付きの@claude
-#      コメントを投稿する。00.check-user付与中にこのマーカー付きコメントが来た場合は
-#      ②のラベル解除と同様に承認とみなしimplementする(実装ステップ側で00.check-userの
-#      除去も行う)。
 #
 # パブリックリポジトリのため、Issueへのコメント自体は誰でも投稿できる。ラベルの
 # 付与・削除にはリポジトリへのwrite権限が必要でGitHub側で担保されるが、
@@ -141,14 +135,8 @@ jobs:
             # 人間が計画を確認し00.check-userを外した = 承認
             MODE=implement
           elif [ "$AWAITING_CONFIRM" = "true" ]; then
-            # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う。
-            # ただし issue-deck の承認ボタンが投稿する承認専用マーカー付きコメントは、
-            # 「00.check-userを外す」操作の代わりとして承認とみなし実装を再開する
-            # (issue-deckからのラベル直接更新はGitHub App経由でactorが常にissue-deck[bot]に
-            # なるため使えず、コメント投稿を承認の合図として使っている)。
-            if [ "$EVENT_NAME" = "issue_comment" ] && printf '%s' "$COMMENT_BODY" | grep -qF '<!-- issue-deck:approve-plan -->'; then
-              MODE=implement
-            elif [ "$EVENT_NAME" = "issue_comment" ]; then
+            # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
+            if [ "$EVENT_NAME" = "issue_comment" ]; then
               MODE=plan
             fi
           elif [ "$PLAN_REQUIRED" = "true" ]; then
@@ -246,10 +234,8 @@ jobs:
             - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
               ラベル・コメントを確認する（`21.plan-required` が付いている場合、承認済みの計画が
               Issueコメントに投稿されているはずなので、それに沿って実装する）
-            - 確認したら直ちに `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "00.check-user"`
-              を実行する（実装中であることを示すため。コードの調査・実装に着手するより前に行うこと。
-              `00.check-user` はissue-deckの承認ボタン経由の承認では外れていない場合があるため、
-              既に外れていても無害なのでここで確実に除去する）
+            - 確認したら直ちに `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"`
+              を実行する（実装中であることを示すため。コードの調査・実装に着手するより前に行うこと）
             - `git checkout -b ${{ steps.state.outputs.branch }}` で作業ブランチを作成する
 
             ## 責務
