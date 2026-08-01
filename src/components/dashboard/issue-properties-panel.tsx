@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, Eye, FolderGit2, Lock, Plus, X } from "lucide-react";
+import { Archive, FolderGit2, Lock, Plus, X } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { Progress } from "@/components/ui/progress";
@@ -130,18 +130,6 @@ export function IssuePropertiesPanel({ issue, onIssueUpdated }: IssuePropertiesP
             <Lock className="size-3.5 text-muted-foreground" aria-label="プライベート" />
           )}
         </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-xs font-semibold text-muted-foreground">通知を受け取る</h3>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-accent"
-        >
-          <Eye className="size-3.5" />
-          ウォッチ中
-          <ChevronDown className="size-3" />
-        </button>
       </section>
     </div>
   );
