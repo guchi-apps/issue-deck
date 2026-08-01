@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, LayoutDashboard, Plus, Search } from "lucide-react";
 
-import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
+import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import { CONTACT_EMAIL, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { LabelSummary } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -45,8 +45,8 @@ export function TopBar({
   assigneeOptions,
   onCreateIssue,
 }: TopBarProps) {
-  const { handleLogout, handleDeleteAccount } = useAccountActions();
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const { handleLogout } = useAccountActions();
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
   const repoLabel = filters.repo
     ? (repositories.find((repo) => repo.fullName === filters.repo)?.name ?? filters.repo)
@@ -213,9 +213,15 @@ export function TopBar({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled>{currentUser?.name ?? currentUser?.login}</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setProfileDialogOpen(true);
+            }}
+          >
+            {currentUser?.name ?? currentUser?.login}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleLogout}>ログアウト</DropdownMenuItem>
           <DropdownMenuItem asChild>
             <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
               利用規約
@@ -226,26 +232,17 @@ export function TopBar({
               プライバシーポリシー
             </a>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a href={`mailto:${CONTACT_EMAIL}`}>お問い合わせ</a>
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={(e) => {
-              e.preventDefault();
-              setDeleteDialogOpen(true);
-            }}
-          >
-            アカウントを削除
+          <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+            ログアウト
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DeleteAccountDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        onConfirm={handleDeleteAccount}
+      <ProfileDialog
+        currentUser={currentUser}
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
       />
     </header>
   );
