@@ -13,6 +13,10 @@ fi
 
 PORT="${PORT:-3000}"
 
+# 同一LAN上の別端末（スマホ等）からsslip.io経由でアクセスできるよう、
+# Windows側のポートフォワーディングをベストエフォートで設定する（失敗してもdevサーバー起動は続行する）。
+bash "$(dirname "${BASH_SOURCE[0]}")/setup-lan-access.sh" "${PORT}" || echo "警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
+
 SMEE_PID=""
 if [ -n "${GITHUB_WEBHOOK_PROXY_URL:-}" ]; then
   pnpm exec smee --url "${GITHUB_WEBHOOK_PROXY_URL}" --target "http://127.0.0.1:${PORT}/api/webhooks/github" &

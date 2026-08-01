@@ -2,7 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  allowedDevOrigins: ["192.168.2.114.sslip.io"],
+  // WSLのIPはWSL再起動のたびに変わるため、個別IPではなくsslip.ioサブドメイン全体を許可する
+  // （Next.jsのallowedDevOriginsは "*.example.com" 形式のワイルドカードに対応している）。
+  allowedDevOrigins: ["*.sslip.io"],
 };
 
 export default nextConfig;

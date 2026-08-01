@@ -89,6 +89,17 @@ prepare_issue() {
   fi
   echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
 
+  echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
+  SSLIP_URL=""
+  if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
+    WSL_IP="$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)"
+    if [[ -n "$WSL_IP" ]]; then
+      SSLIP_URL="http://${WSL_IP}.sslip.io:${DEV_PORT}"
+    fi
+  else
+    echo "#$n: 警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
+  fi
+
   echo "#$n: pnpm install しています..."
   (cd "$WORKTREE_DIR" && pnpm install)
 
@@ -96,11 +107,11 @@ prepare_issue() {
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
-issue_json_path, template_path, dev_port = sys.argv[1], sys.argv[2], sys.argv[3]
+issue_json_path, template_path, dev_port, sslip_url = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -110,25 +121,30 @@ with open(template_path, encoding="utf-8") as f:
 label_names = {l["name"] for l in issue.get("labels", [])}
 labels = ", ".join(sorted(label_names)) or "(なし)"
 
+if sslip_url:
+    sslip_note = f"（スマホ等、同一LAN上の別端末から確認する場合は`{sslip_url}`を使う）"
+else:
+    sslip_note = ""
+
 if "22.preview-required" in label_names:
     preview_instructions = (
         "このIssueには`22.preview-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         "1. このworktreeの開発サーバー（`pnpm dev`）をポート`{port}`で起動する（`.env.local`に設定済み）\n"
-        "2. `http://localhost:{port}` で実際の画面を確認する\n"
+        "2. `http://localhost:{port}` で実際の画面を確認する{sslip_note}\n"
         "3. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
         "4. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
         "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
-    ).format(port=dev_port)
+    ).format(port=dev_port, sslip_note=sslip_note)
 else:
     preview_instructions = (
         "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`を使うよう`.env.local`に設定済みです"
         "（他Issueのworktreeと同時に起動しても衝突しません）。画面に関わる変更を行った場合、"
         "PR本文の「確認方法」に次の情報を含めてください。\n\n"
-        "- 起動コマンド（例: `pnpm dev`）とアクセスURL（`http://localhost:{port}`）\n"
+        "- 起動コマンド（例: `pnpm dev`）とアクセスURL（`http://localhost:{port}`）{sslip_note}\n"
         "- 実際に確認すべき画面・操作手順\n\n"
         "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
-    ).format(port=dev_port)
+    ).format(port=dev_port, sslip_note=sslip_note)
 
 if "23.screenshot-required" in label_names:
     screenshot_instructions = (
