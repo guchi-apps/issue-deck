@@ -146,7 +146,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 ## ブランチ保護ルール案
 
 - **`main`**: 組織標準（`_docs/guides/github-repo-setup.md` §5）どおり設定する。Require pull request before merging、Required status checks=`lint-and-build`（`.github/workflows/ci.yml`のジョブ名）、Restrict updates、bypass=自分のアカウント（For pull requests only）。**現状（2026年時点）未設定のため要設定。** 実際の設定はGitHub Web UIで行う（workflowでは自動化しない）。
-- **`develop`**: Phase4で`required_status_checks`（`lint-and-build`）のみを設定した（`gh api PUT repos/{owner}/{repo}/branches/develop/protection`、`required_pull_request_reviews`・`restrictions`は`null`のまま）。これは`gh pr merge --auto`がCIの完了を待たずに即マージしてしまうのを防ぐための最小構成で、直接pushやApprove必須化は行っていない。「Require pull request before merging」＋bypass=人間アカウントのみへの本格的な制限は、影響範囲が大きく本Issueの完了条件にも必須ではないため見送った。GitHub Actions専用トークン（`github.token`、Phase3/4で導入済み）を使えば技術的には設定可能なので、必要になった時点で改めて検討する。
+- **`develop`**: Phase4で`required_status_checks`（`lint-and-build`）のみを設定する方針とした（`gh api PUT repos/{owner}/{repo}/branches/develop/protection`、`required_pull_request_reviews`・`restrictions`は`null`のまま）。**設定コマンドの実行はClaude Code CLIのauto modeクラシファイアにブロックされたため、2026-08-02時点でまだ未実施。** これは`gh pr merge --auto`がCIの完了を待たずに即マージしてしまうのを防ぐための最小構成で、直接pushやApprove必須化は行わない想定。「Require pull request before merging」＋bypass=人間アカウントのみへの本格的な制限は、影響範囲が大きく本Issueの完了条件にも必須ではないため見送った。GitHub Actions専用トークン（`github.token`、Phase3/4で導入済み）を使えば技術的には設定可能なので、必要になった時点で改めて検討する。
 
 ## 自動マージ可否の判定方法
 
@@ -191,7 +191,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
-- `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
+- `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4、**未実施**。設定コマンドは「ブランチ保護ルール案」節参照。本設定が完了するまでAuto-mergeがCI完了を待たずに即マージする恐れがあるため、PR #64のマージ前に実施すること）
 
 ## 未解決の課題・申し送り事項
 
