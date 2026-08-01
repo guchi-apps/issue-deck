@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { Issue, IssueComment } from "@/types/issue";
 
@@ -8,6 +8,7 @@ type UseIssueCommentsResult = {
   comments: IssueComment[];
   isLoading: boolean;
   error: string | null;
+  setComments: Dispatch<SetStateAction<IssueComment[]>>;
 };
 
 export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
@@ -49,5 +50,5 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
     return () => controller.abort();
   }, [issue]);
 
-  return { comments, isLoading, error };
+  return { comments, isLoading, error, setComments };
 }

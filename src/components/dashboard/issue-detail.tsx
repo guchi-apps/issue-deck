@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import {
   Archive,
   ExternalLink,
@@ -22,21 +24,26 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
 type IssueDetailProps = {
   issue: Issue | null;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  onToggleFavorite: (issue: Issue) => void;
 };
 
-export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps) {
-  const { comments, isLoading, error } = useIssueComments(issue);
+export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
+  const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { updateIssue, isSubmitting } = useIssueMutations();
+  const { createComment, updateComment, deleteComment } = useIssueCommentMutations();
+  const [newCommentBody, setNewCommentBody] = useState("");
 
   async function handleToggleState() {
     if (!issue) return;
@@ -46,6 +53,44 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps)
       state: issue.state === "open" ? "closed" : "open",
     });
     if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleCreateComment() {
+    if (!issue || !newCommentBody.trim()) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: newCommentBody,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      setNewCommentBody("");
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
+  async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
+    if (!issue) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const updated = await updateComment({ owner, repo, commentId: Number(commentId), body });
+    if (updated) {
+      setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+      return true;
+    }
+    return false;
+  }
+
+  async function handleDeleteComment(commentId: string): Promise<boolean> {
+    if (!issue) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const ok = await deleteComment({ owner, repo, commentId: Number(commentId) });
+    if (ok) {
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      onIssueUpdated({ ...issue, commentCount: Math.max(0, issue.commentCount - 1) });
+    }
+    return ok;
   }
 
   if (!issue) {
@@ -74,8 +119,13 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps)
                 <ExternalLink />
               </a>
             </Button>
-            <Button variant="outline" size="icon">
-              <Star />
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+              onClick={() => onToggleFavorite(issue)}
+            >
+              <Star className={cn(issue.favorite && "fill-yellow-400 text-yellow-400")} />
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -150,11 +200,30 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated }: IssueDetailProps)
               コメント <span className="text-muted-foreground">{issue.commentCount}</span>
             </h2>
           </div>
-          <CommentThread comments={comments} isLoading={isLoading} error={error} />
+          <CommentThread
+            comments={comments}
+            isLoading={isLoading}
+            error={error}
+            onUpdate={handleUpdateComment}
+            onDelete={handleDeleteComment}
+          />
 
-          <div className="mt-4 flex items-center gap-2">
-            <Input placeholder="コメントを追加..." />
-            <Button>コメント</Button>
+          <div className="mt-4 flex flex-col gap-2">
+            <Textarea
+              placeholder="コメントを追加..."
+              className="min-h-20"
+              value={newCommentBody}
+              onChange={(e) => setNewCommentBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleCreateComment();
+                }
+              }}
+            />
+            <Button className="self-end" onClick={handleCreateComment} disabled={!newCommentBody.trim()}>
+              コメント
+            </Button>
           </div>
         </div>
       </div>

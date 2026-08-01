@@ -75,7 +75,12 @@ export async function fetchRepoAssignees(
   );
 }
 
-async function requestJson(url: string, token: string, method: "POST" | "PATCH", body: unknown) {
+async function requestJson(
+  url: string,
+  token: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body?: unknown,
+) {
   const res = await fetch(url, {
     method,
     headers: {
@@ -83,12 +88,13 @@ async function requestJson(url: string, token: string, method: "POST" | "PATCH",
       Accept: "application/vnd.github+json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
+  if (res.status === 204) return undefined;
   return res.json();
 }
 
@@ -126,5 +132,52 @@ export async function updateIssue(
     token,
     "PATCH",
     input,
+  );
+}
+
+export type CommentBodyInput = {
+  body: string;
+};
+
+export async function createComment(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+  input: CommentBodyInput,
+): Promise<GithubApiComment> {
+  return requestJson(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/comments`,
+    token,
+    "POST",
+    input,
+  );
+}
+
+export async function updateComment(
+  owner: string,
+  repo: string,
+  commentId: number,
+  token: string,
+  input: CommentBodyInput,
+): Promise<GithubApiComment> {
+  return requestJson(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    token,
+    "PATCH",
+    input,
+  );
+}
+
+export async function deleteComment(
+  owner: string,
+  repo: string,
+  commentId: number,
+  token: string,
+): Promise<void> {
+  await requestJson(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    token,
+    "DELETE",
   );
 }
