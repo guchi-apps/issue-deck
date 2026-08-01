@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, ShieldCheck } from "lucide-react";
+import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
@@ -16,6 +17,7 @@ type MobileSettingsScreenProps = {
 
 export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps) {
   const { handleLogout } = useAccountActions();
+  const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
   return (
@@ -40,6 +42,16 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
             <p className="text-xs text-muted-foreground">@{currentUser?.login}</p>
           </div>
         </button>
+
+        <Button
+          variant="outline"
+          className="justify-start"
+          disabled={isSyncing}
+          onClick={handleSync}
+        >
+          <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
+          {isSyncing ? "再同期中..." : "今すぐ再同期"}
+        </Button>
 
         <Button variant="outline" className="justify-start" asChild>
           <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">

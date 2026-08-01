@@ -3,22 +3,18 @@
 import { useState } from "react";
 import {
   Archive,
-  CheckCircle2,
   Eye,
   EyeOff,
   FolderGit2,
-  ListChecks,
   Lock,
   Plus,
   SlidersHorizontal,
-  Star,
   X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
-import { navViews } from "@/lib/nav-views";
+import { navViewIcons, navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -38,14 +34,6 @@ type SidebarNavProps = {
   onSelectLabel?: (label: LabelSummary) => void;
   onClearLabels?: () => void;
   className?: string;
-};
-
-const viewIcons: Record<NavViewId, LucideIcon> = {
-  all: ListChecks,
-  assigned: CheckCircle2,
-  created: FolderGit2,
-  favorites: Star,
-  recent: SlidersHorizontal,
 };
 
 export function SidebarNav({
@@ -76,7 +64,7 @@ export function SidebarNav({
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">全体</h2>
         <ul className="flex flex-col gap-0.5">
           {navViews.map((view) => {
-            const Icon = viewIcons[view.id];
+            const Icon = navViewIcons[view.id];
             return (
               <li key={view.id}>
                 <button
