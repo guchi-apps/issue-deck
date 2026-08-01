@@ -1,0 +1,125 @@
+name: Issue Labels
+
+# Issueラベル(01.wip -> 03.d:marge -> 05.develop -> 07.m:marge -> 09.main)の
+# 状態遷移をイベント駆動で保証する。実装エージェント・レビュー統合エージェントによる
+# 手動のラベル付け替え(docs/multi-agent-workflow.md参照)を置き換えるものではなく、
+# 付け忘れがあっても後から是正されるようにするための安全網、および
+# develop->mainの遷移(07/09)を新たにカバーするためのもの。
+#
+# 対象issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
+# (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
+# を避けるため env 経由でのみ参照し、run: 本文に直接展開しない。
+#
+# gh issue edit の --add-label/--remove-label は、既に付与済み/未付与のラベルに
+# 対して呼んでも無害(冪等)なため、状態を事前チェックせず毎回呼び出してよい。
+
+on:
+  push:
+    branches:
+      - "issue-*"
+  pull_request:
+    types: [opened, synchronize, closed]
+    branches:
+      - develop
+      - main
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  wip-on-push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 01.wip を付与する
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "01.wip"
+          fi
+
+  develop-pr-opened:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      github.event.pull_request.base.ref == 'develop'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_REF: ${{ github.head_ref }}
+    steps:
+      - name: 03.d:marge へ遷移する
+        run: |
+          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "01.wip"
+          fi
+
+  develop-pr-merged:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'develop'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_REF: ${{ github.head_ref }}
+    steps:
+      - name: 05.develop へ遷移する
+        run: |
+          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge"
+          fi
+
+  main-pr-in-progress:
+    # develop -> main のPRが開いている間、その時点で05.developが付いている
+    # 全issueを07.m:margeへ一括遷移する。synchronizeも対象にすることで、
+    # PRオープン後にdevelopへ追加マージされたissueも随時反映する。
+    if: |
+      github.event_name == 'pull_request' &&
+      (github.event.action == 'opened' || github.event.action == 'synchronize') &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'develop'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 05.develop の issue を 07.m:marge へ一括遷移する
+        run: |
+          for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
+            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop"
+          done
+
+  main-pr-merged:
+    # develop -> main のPRがマージされた時点で、05.develop/07.m:margeの
+    # どちらが付いているissueも09.mainへ一括遷移してcloseする。両方のラベルを
+    # 対象にするのは、main-pr-in-progressのsynchronizeが拾いきれていない
+    # 可能性のあるissue(マージ直前にdevelopへ入ったもの)を取りこぼさないため。
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'develop'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 09.main へ一括遷移し issue を close する
+        run: |
+          issues="$(
+            { gh issue list --label "05.develop" --state open --json number --jq '.[].number'
+              gh issue list --label "07.m:marge" --state open --json number --jq '.[].number'
+            } | sort -un
+          )"
+          for n in $issues; do
+            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge"
+            gh issue close "$n"
+          done

@@ -42,6 +42,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
 - 開発サーバー（`pnpm dev`）のポートは`start-issue.sh`/`.ps1`が`.env.local`に`PORT=4000 + Issue番号`を自動設定する（例: issue-46 → 4046）。複数Issueのworktreeで同時に`pnpm dev`を起動しても衝突せず、developへマージする前に人間がブラウザ（`http://localhost:<ポート>`）で直接画面を確認できる。実装エージェントは画面に関わる変更のPRで、このURLを「確認方法」に記載する。
+- `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
 
 ## 実装前の「計画フェーズ」要否をIssueラベルでトグルする
 
@@ -53,7 +54,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 - 「承認待ち」を表す専用ラベル `00.check-user`（ユーザーの確認・指示が必要）を計画承認待ちの合図としても使う。
 - 実行形態による承認方法の違い:
   - **ローカル実行（人間が横にいる）**: Claude Code本来のPlan mode（`EnterPlanMode`→提示→`ExitPlanMode`で承認）がそのまま使える。起動スクリプトは「`21.plan-required`が付いているので実装前に必ずPlan modeで計画提示すること」という一文をプロンプトに含めるだけでよい。
-  - **GitHub Actions実行（無人）**: 対話的な承認者がその場にいないため二段階に分ける。①エージェントが計画をPRドラフト or Issueコメントとして投稿し`00.check-user`を付与して停止 → ②人間がコメント/ラベル操作で承認 → ③再起動されたエージェントが実装を再開する。②→③の具体的な再起動トリガーは未確定（該当フェーズ設計時に詰める）。
+  - **GitHub Actions実行（無人）**: 対話的な承認者がその場にいないため二段階に分ける。①エージェントが計画をPRドラフト or Issueコメントとして投稿し`00.check-user`を付与して停止 → ②人間がコメント/ラベル操作で承認 → ③再起動されたエージェントが実装を再開する。②→③の具体的な再起動トリガーはPhase5で確定した（`00.check-user`ラベルを人間が外すことを承認とみなす。詳細は「Phase 5」節を参照）。
 
 ## Issueラベルの状態遷移
 
@@ -67,7 +68,16 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-`07.m:marge`・`09.main`、およびそれに対応するdevelop→mainのリリースフロー自体はまだ未設計・未実装（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。develop→mainのリリースは現状、既存の手動運用（バージョンアップコミット・PR、git-github-jaスキル参照）のまま。
+develop→mainのリリースフロー自体（バージョンアップコミット・PR作成等）は現状、既存の手動運用（git-github-jaスキル参照）のまま（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。ただし上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+
+### GitHub Actionsによるラベル遷移の自動化
+
+`.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
+
+- `01.wip`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
+- `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
+
+issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）から行う。この規約に従わないブランチ・PRは対象外（何もしない）。
 
 ## 開発環境プレビュー要否をIssueラベルでトグルする
 
@@ -95,7 +105,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 Issueごとに独立したClaude Codeセッションとして起動する。
 
 責務:
-- GitHub Issueの内容を取得する
+- GitHub Issueの内容を取得する。取得したら**忘れずに`01.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
 - 最新の`develop`からIssue専用ブランチ（`issue-<番号>`）を作成する
 - Git worktreeで作業フォルダを分離する
 - `21.plan-required`ラベルが付いていれば、実装前にPlan modeで計画を提示し承認を得る
@@ -136,7 +146,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 ## ブランチ保護ルール案
 
 - **`main`**: 組織標準（`_docs/guides/github-repo-setup.md` §5）どおり設定する。Require pull request before merging、Required status checks=`lint-and-build`（`.github/workflows/ci.yml`のジョブ名）、Restrict updates、bypass=自分のアカウント（For pull requests only）。**現状（2026年時点）未設定のため要設定。** 実際の設定はGitHub Web UIで行う（workflowでは自動化しない）。
-- **`develop`**: ローカル実行が主体のうちは未設定のままでよい（前述の理由により設定しても実効性が薄い）。GitHub Actions専用トークンが導入された時点で「Require pull request before merging」＋bypass=人間アカウントのみ、を再検討する。
+- **`develop`**: Phase4で`required_status_checks`（`lint-and-build`）のみを設定した（`gh api PUT repos/{owner}/{repo}/branches/develop/protection`、`required_pull_request_reviews`・`restrictions`は`null`のまま）。これは`gh pr merge --auto`がCIの完了を待たずに即マージしてしまうのを防ぐための最小構成で、直接pushやApprove必須化は行っていない。「Require pull request before merging」＋bypass=人間アカウントのみへの本格的な制限は、影響範囲が大きく本Issueの完了条件にも必須ではないため見送った。GitHub Actions専用トークン（`github.token`、Phase3/4で導入済み）を使えば技術的には設定可能なので、必要になった時点で改めて検討する。
 
 ## 自動マージ可否の判定方法
 
@@ -150,18 +160,19 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - 大規模な依存関係の更新
 - `develop`→`main`のマージ
 
-判定方法:
-- **一次判定（機械的）**: `git diff --name-only develop...HEAD` のパスを、上記カテゴリに対応するパターン（例: `prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`, `package.json`の依存メジャーバージョン変更等）に照合し、ヒットしたら`00.check-user`を自動付与する。
-- **二次判定（エージェントの判断）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断する。
-- マージ自体は独自の待受スクリプトを書かず、GitHubネイティブの`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化が必要）を使う。必須ステータスチェック待ちのポーリングを自前実装せずに済む。
+判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
+- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
+- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
+- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 
 ## 段階的導入計画
 
 1. **Phase 1**: `start-issue.sh`/`.ps1` — worktree・ブランチ・Claude Code起動のコマンド化
 2. **Phase 2**: `start-reviewer.sh`/`.ps1` — レビュー・統合セッション起動のコマンド化
-3. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
-4. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
-5. **Phase 5**: Issueラベル/`@claude`コメントを起点に実装からPR作成まで自動化
+3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.wip`〜`09.main`）のGitHub Actionsによる自動化
+4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
+5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
+6. **Phase 5**: Issueラベル/`@claude`コメントを起点に実装からPR作成まで自動化
 
 各Phaseは前段が安定稼働してから着手する。
 
@@ -171,14 +182,91 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `scripts/prompts/implementation-agent.md`（Phase1）
 - `scripts/start-reviewer.sh` / `scripts/start-reviewer.ps1`（Phase2）
 - `scripts/prompts/review-agent.md`（Phase2）
-- `.github/workflows/claude-review-develop.yml`（Phase3）
-- `.github/workflows/claude-issue-dispatch.yml`（Phase5）
-- リスク判定ロジック（Phase4。既存の`00.check-user`ラベル自動付与としてActions内に実装）
+- `.github/workflows/issue-labels.yml`（Phase2.5、作成済み）
+- `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
+- `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
+- GitHubラベル`20.auto-implement`の新規作成（Phase5、作成済み）
 - `main`のBranch protection設定（未設定のため）
+- リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
+- `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
+
+## Phase 5: Issueラベル/@claudeコメント起点の完全自動化
+
+`.github/workflows/claude-issue-dispatch.yml`で実装済み。ローカルの`scripts/start-issue.sh`が行っている
+作業（issue-<番号>ブランチ作成・実装・develop向けPR作成）をGitHub Actions上で無人実行する。
+
+### トリガー
+
+- Issueへのラベル`20.auto-implement`付与（新規作成したラベル）
+- Issueへの`@claude`コメント
+
+パブリックリポジトリのため`@claude`コメント自体は誰でも投稿できるが、ラベルの付与・削除はGitHub側で
+write権限を要求する。トリガー経路によらず一律で実行者(`github.actor`)のリポジトリ権限を
+`gh api repos/{owner}/{repo}/collaborators/{actor}/permission`で確認し、write権限未満なら何もしない。
+
+### `21.plan-required`が付いている場合の二段階トリガー（再起動方法を確定）
+
+「未解決の課題」に残っていた「②→③の具体的な再起動トリガー」を以下のとおり確定した。
+
+1. **計画提示**: `21.plan-required`が付いたissueへの初回dispatch時は実装せず、コードを調査した計画を
+   `gh issue comment`でissueに投稿し、`00.check-user`を付与して停止する。
+2. **承認・再開**: 人間が計画を確認し、issueから`00.check-user`ラベルを外すと「承認」とみなし、
+   同ワークフローが実装を再開する（`issues: unlabeled`イベントをトリガーに使う）。
+3. **練り直し**: `00.check-user`が付いたまま（＝未承認）人間が`@claude`とコメントした場合は、計画への
+   修正依頼として扱い、計画コメントを投稿し直す（`00.check-user`は外さない）。
+
+`00.check-user`はPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、対応する
+`issue-<番号>`ブランチがまだ存在しない状態でのみ「承認」と解釈するようガードしている
+（ブランチ作成後は本ワークフローはそのissueに対して常にskipする）ため、Phase4側の判定と混線しない。
+
+### 無人実行時の権限モード（許可ツールリスト）
+
+- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"`。
+  コード変更ツール（Edit/Write）は許可しない（計画提示のみで実装はしないため）。当初`gh issue`系3種のみを
+  許可していたが、計画立案のための調査で`git ls-remote`・`gh pr list`・`gh api`（関連PR・ブランチ状況の確認）
+  を試みて未許可コマンドとして拒否され続け、ターン数を使い切ってコメント投稿・ラベル付与に到達できない
+  失敗が実際に発生した（Issue #70で確認）。読み取り専用の調査コマンドを許可リストに加えて解消した。
+- **実装ステップ**: `--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"`。
+  `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
+  明示的に許可する方針（Phase1〜4から継続）。
+- git push・PR作成は既定の`GITHUB_TOKEN`（ジョブの`contents: write`/`pull-requests: write`権限）で行う。
+
+### 計画提示ステップの信頼性確保
+
+許可コマンドを広げても、より調査対象が広いIssueでは未許可の操作（他のBashコマンド・ツール）に
+突き当たり、同様にコメント投稿まで到達できない失敗が再発する可能性は構造的に残る。これを個別の
+許可コマンド追加だけで塞ぎ続けるのではなく、二段構えで対処する。
+
+1. **プロンプト側の回避策**: 計画提示ステップのプロンプトに「調査に行き詰まった場合はそれ以上粘らず、
+   分かっている範囲の情報で計画をまとめてコメント投稿を最優先する」「実装範囲が広く一度の計画に
+   まとめきれない場合は、Issueの分割を計画コメントの中で提案してよい（分割作業自体はこのステップでは
+   行わない）」という指示を追加した。調査を早めに切り上げさせることでターン数の消費を抑える狙い。
+   ただし「何回失敗したら諦めるか」はモデルの裁量に委ねられるため、これだけでは失敗確率を下げる
+   だけで、到達を保証するものではない。
+2. **機械的な検証・フォールバック（本命）**: 計画提示ステップの前後でIssueのコメント数を記録・比較し、
+   新規コメントが増えていなければ「計画提示ステップ実行後、コメント投稿を検証する」ステップが
+   `gh issue comment`でフォールバック通知を投稿し`00.check-user`を付与する。この検証ステップは
+   `gh issue view`/`gh issue comment`/`gh issue edit`のみを使う単純なシェルスクリプトであり、
+   Claude Code自体の許可コマンドの問題から独立しているため、1で防ぎきれなかったケースでも
+   「Issueに何も反映されないまま無言で終わる」事態を確実に防げる。
+
+### 既知の制約・今後の検討事項
+
+- **develop向けPR作成後、Phase3/4のレビュー・自動マージが自動発火しない可能性がある**: GitHub仕様上、
+  既定の`GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しない。そのため
+  `claude-issue-dispatch.yml`が作成したPRに対して`claude-review-develop.yml`（Phase3/4）が自動的には
+  起動しない可能性が高い（未検証）。Phase5の完了条件は「develop向けPR作成まで」であり、developへの
+  マージまでの自動化は前提にしていないため今回は許容したが、実運用で発火しないことが確認された場合は、
+  PAT（Personal Access Token）ベースのトークンへの切り替えや`claude-review-develop.yml`への
+  `workflow_dispatch`トリガー追加などの対応を別途検討する。
+- `22.preview-required`・`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、
+  画面確認・スクリーンショット取得ができないため、実装・コミット・ブランチpushまで行った上で
+  `00.check-user`を付与しPR作成前に停止する運用にとどめている。このケースの「承認後の再開」は
+  Phase5のスコープでは自動化しておらず、人間が手動で`gh pr create`する運用（申し送り事項）。
 
 ## 未解決の課題・申し送り事項
 

@@ -12,6 +12,17 @@ type RepositoryRef = {
   archived: boolean;
 };
 
+// POST /api/issues/comments (src/app/api/issues/comments/route.ts) が投稿者識別用に
+// 本文末尾へ埋め込む不可視マーカー。GitHub上のコメント投稿者は常にissue-deckの
+// GitHub App(issue-deck[bot])になるため、.github/workflows/claude-issue-dispatch.yml が
+// 実際に操作した人間のwrite権限を検証できるようにするためのもの。アプリ画面上には
+// 表示したくないため、取得時に取り除く。
+const POSTER_MARKER_PATTERN = /\n\n<!-- issue-deck:posted-by:\S+ -->$/;
+
+function stripPosterMarker(body: string): string {
+  return body.replace(POSTER_MARKER_PATTERN, "");
+}
+
 function mapLabel(
   label: { name: string; color: string; description: string | null } | string,
 ): IssueLabel {
@@ -102,7 +113,7 @@ export function mapComment(raw: GithubApiComment): IssueComment {
     id: String(raw.id),
     author: { login: raw.user?.login ?? "unknown" },
     createdAtLabel: formatRelativeDate(raw.created_at),
-    body: raw.body ?? "",
+    body: stripPosterMarker(raw.body ?? ""),
     reactionCount: raw.reactions?.["+1"] ?? 0,
   };
 }

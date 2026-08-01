@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUserId } from "@/lib/auth-user";
+import { getCurrentUser, requireUserId } from "@/lib/auth-user";
+import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
@@ -8,6 +9,7 @@ import {
   createComment,
   deleteComment,
   fetchCommentsForIssue,
+  GithubApiError,
   updateComment,
 } from "@/lib/github/issues-api";
 
@@ -54,8 +56,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const userId = await requireUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -75,16 +77,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const repository = await findRepository(userId, owner, repo);
+  const repository = await findRepository(user.id, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  if (!user.githubAccessToken) {
+    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  }
+
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
+    const token = decryptSecret(user.githubAccessToken);
     const created = await createComment(owner, repo, number, token, { body: body.trim() });
     return NextResponse.json({ comment: mapComment(created) });
   } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) {
+      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
+      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

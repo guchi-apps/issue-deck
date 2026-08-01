@@ -45,7 +45,12 @@ type IssueDetailProps = {
 export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { updateIssue, isSubmitting } = useIssueMutations();
-  const { createComment, updateComment, deleteComment } = useIssueCommentMutations();
+  const {
+    createComment,
+    updateComment,
+    deleteComment,
+    error: commentMutationError,
+  } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
 
@@ -237,6 +242,9 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
             <Button className="self-end" onClick={handleCreateComment} disabled={!newCommentBody.trim()}>
               コメント
             </Button>
+            {commentMutationError && (
+              <p className="text-sm text-destructive">{commentMutationError}</p>
+            )}
           </div>
         </div>
       </div>

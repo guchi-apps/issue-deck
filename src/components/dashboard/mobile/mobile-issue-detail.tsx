@@ -62,7 +62,12 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { updateIssue, isSubmitting } = useIssueMutations();
-  const { createComment, updateComment, deleteComment } = useIssueCommentMutations();
+  const {
+    createComment,
+    updateComment,
+    deleteComment,
+    error: commentMutationError,
+  } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
@@ -304,6 +309,9 @@ export function MobileIssueDetail({
             <Button className="self-end" onClick={handleCreateComment} disabled={!newCommentBody.trim()}>
               コメント
             </Button>
+            {commentMutationError && (
+              <p className="text-sm text-destructive">{commentMutationError}</p>
+            )}
           </div>
         </div>
       </div>

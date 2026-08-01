@@ -17,6 +17,7 @@ export function GithubLoginButton() {
       provider: "github",
       options: {
         redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        scopes: "repo",
       },
     });
   }

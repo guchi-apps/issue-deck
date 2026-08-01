@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +32,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login`);
   }
 
+  const providerToken = data.session?.provider_token;
+  const githubAccessToken = providerToken ? encryptSecret(providerToken) : undefined;
+
   await db.user.upsert({
     where: { supabaseUserId: user.id },
     create: {
@@ -40,12 +44,14 @@ export async function GET(request: NextRequest) {
       name: (metadata.full_name as string) ?? (metadata.name as string) ?? null,
       email: user.email ?? null,
       image: (metadata.avatar_url as string) ?? null,
+      githubAccessToken,
     },
     update: {
       githubLogin,
       name: (metadata.full_name as string) ?? (metadata.name as string) ?? null,
       email: user.email ?? null,
       image: (metadata.avatar_url as string) ?? null,
+      ...(githubAccessToken ? { githubAccessToken } : {}),
     },
   });
 

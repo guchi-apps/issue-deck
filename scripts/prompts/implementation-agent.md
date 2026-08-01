@@ -27,7 +27,7 @@
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
 - `develop` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。developへのマージ時点ではissueをcloseしない運用のため、PR本文に`closes #番号`/`fixes #番号`は使わず、`#{{ISSUE_NUMBER}}`のように番号のみ記載する
-- `01.wip` → `03.d:marge` のラベル付け替えを行う（developへのマージ・issueのcloseはレビュー・統合エージェント側が担当する）
+- `01.wip` → `03.d:marge` のラベル付け替えを行う（developへのマージ・issueのcloseはレビュー・統合エージェント側が担当する）。なおGitHub Actions（`.github/workflows/issue-labels.yml`）がブランチpush・PR作成をトリガーに同じ遷移を安全網として自動でも行うため、万一付け忘れても後で是正される（ただし手動での付け替えは引き続き必須）
 
 ## 開発環境での画面確認
 
