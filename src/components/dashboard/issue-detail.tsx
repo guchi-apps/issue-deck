@@ -108,7 +108,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             {issue.repositoryFullName}
             {issue.repositoryArchived && (
@@ -116,7 +116,7 @@ export function IssueDetail({ issue, onEdit, onIssueUpdated, onToggleFavorite }:
             )}
             {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                 GitHubで開く
