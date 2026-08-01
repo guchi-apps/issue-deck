@@ -75,6 +75,16 @@ export async function fetchRepoAssignees(
   );
 }
 
+export class GithubApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GithubApiError";
+  }
+}
+
 async function requestJson(
   url: string,
   token: string,
@@ -92,7 +102,7 @@ async function requestJson(
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`GitHub API request failed: ${res.status} ${url} ${detail}`);
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
   if (res.status === 204) return undefined;
   return res.json();

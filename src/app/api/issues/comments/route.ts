@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
+import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
@@ -8,6 +9,7 @@ import {
   createComment,
   deleteComment,
   fetchCommentsForIssue,
+  GithubApiError,
   updateComment,
 } from "@/lib/github/issues-api";
 
@@ -80,18 +82,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  if (!user.githubAccessToken) {
+    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  }
+
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
-    // GitHub上ではissue-deckのGitHub App(issue-deck[bot])が投稿者になり、実際に
-    // 操作した人間が誰かは分からなくなる。ユーザー入力より後ろに投稿者の
-    // GitHubログイン名を不可視マーカーとして埋め込むことで、
-    // .github/workflows/claude-issue-dispatch.yml 側が実行者のwrite権限を
-    // 検証できるようにする(ユーザー本文中に偽のマーカーが含まれていても、
-    // 末尾にあるこのマーカーが常に最後に出現するため無効化できる)。
-    const bodyWithPoster = `${body.trim()}\n\n<!-- issue-deck:posted-by:${user.githubLogin} -->`;
-    const created = await createComment(owner, repo, number, token, { body: bodyWithPoster });
+    const token = decryptSecret(user.githubAccessToken);
+    const created = await createComment(owner, repo, number, token, { body: body.trim() });
     return NextResponse.json({ comment: mapComment(created) });
   } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) {
+      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
+      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
