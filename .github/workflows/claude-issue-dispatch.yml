@@ -156,6 +156,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"'
+          show_full_output: true # 調査用の一時設定。原因判明後に外す（#70で計画コメントが投稿されなかった件の調査）
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
