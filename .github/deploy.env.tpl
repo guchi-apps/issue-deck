@@ -22,5 +22,6 @@ GITHUB_APP_ID=op://apps/issue-deck/github-app-id
 GITHUB_APP_PRIVATE_KEY_BASE64=op://apps/issue-deck/github-app-private-key-base64
 NEXT_PUBLIC_GITHUB_APP_SLUG=op://apps/issue-deck/github-app-slug
 GITHUB_WEBHOOK_SECRET=op://apps/issue-deck/github-webhook-secret
+GITHUB_USER_TOKEN_ENCRYPTION_KEY=op://apps/issue-deck/github-user-token-encryption-key
 
 SIGNALY_WEBHOOK_URL=op://apps/issue-deck/ci-webhook-url
