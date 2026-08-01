@@ -81,6 +81,12 @@ export function EditIssueDialog({ open, onOpenChange, issue, onUpdated }: EditIs
               id="edit-issue-body"
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
               className="min-h-32"
             />
           </div>

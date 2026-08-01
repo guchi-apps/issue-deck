@@ -136,6 +136,12 @@ export function CreateIssueDialog({
               id="create-issue-body"
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
               placeholder="詳細を入力（任意）"
               className="min-h-32"
             />
