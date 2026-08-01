@@ -1,9 +1,18 @@
 name: Claude Code Review (develop向けPR)
 
-# develop向けPRの作成・更新時にClaude Codeによる自動レビューを実行し、
-# PRへレビューコメントを投稿する(docs/multi-agent-workflow.md Phase3)。
-# マージやラベル状態遷移(03.d:marge等)は行わない。自動マージ不可カテゴリを
-# 検知した場合のみ、対応Issueへ00.check-userラベルを付与する。
+# develop向けPRの作成・更新時に、機械的リスク判定・Claude Codeによる自動レビュー・
+# 低リスクPRの自動マージを行う(docs/multi-agent-workflow.md Phase3/Phase4)。
+#
+# ジョブ構成:
+# - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
+# - risk-check: パスパターンによる機械的リスク判定。該当時は00.check-userを付与する
+# - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
+#   該当時は00.check-userを付与する。マージやラベル状態遷移(03.d:marge等)は行わない
+# - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
+#   付いていなければ gh pr merge --auto --squash を実行する
+#
+# 00.check-userラベルを両判定(機械的/意味的)共通の「マージ保留」シグナルとして
+# 使うことで、判定ロジックとマージ可否判断を疎結合に保っている。
 #
 # 対応issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
@@ -17,7 +26,103 @@ on:
       - develop
 
 jobs:
+  identify-issue:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.issue.outputs.number }}
+    steps:
+      - name: 対応Issue番号を特定する
+        id: issue
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            echo "number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=" >> "$GITHUB_OUTPUT"
+          fi
+
+  risk-check:
+    needs: identify-issue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: パスパターンによる機械的リスク判定
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -e
+          CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          RISKY=false
+          REASONS=""
+
+          add_reason() {
+            RISKY=true
+            REASONS="${REASONS}${REASONS:+$'\n'}- $1"
+          }
+
+          if echo "$CHANGED_FILES" | grep -q '^prisma/migrations/'; then
+            add_reason "DBマイグレーションの変更 (prisma/migrations/**)"
+          fi
+          if echo "$CHANGED_FILES" | grep -qE '(^|/)\.env'; then
+            add_reason "環境変数ファイルの変更 (.env*)"
+          fi
+          if echo "$CHANGED_FILES" | grep -q '^\.github/workflows/'; then
+            add_reason "GitHub Actionsワークフローの変更 (.github/workflows/**)"
+          fi
+          if echo "$CHANGED_FILES" | grep -qE '(^|/)auth(/|\.[^/]*$)'; then
+            add_reason "認証・認可関連ファイルの変更 (**/auth/**)"
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^package\.json$'; then
+            if git show "origin/${BASE_REF}:package.json" > /tmp/old-package.json 2>/dev/null; then
+              if ! node -e '
+                const fs = require("fs");
+                const old = JSON.parse(fs.readFileSync("/tmp/old-package.json", "utf8"));
+                const neu = JSON.parse(fs.readFileSync("package.json", "utf8"));
+                const oldDeps = { ...old.dependencies, ...old.devDependencies };
+                const newDeps = { ...neu.dependencies, ...neu.devDependencies };
+                let major = false;
+                for (const [name, newVer] of Object.entries(newDeps)) {
+                  const oldVer = oldDeps[name];
+                  if (!oldVer) continue;
+                  const oldMajor = oldVer.match(/\d+/)?.[0];
+                  const newMajor = newVer.match(/\d+/)?.[0];
+                  if (oldMajor && newMajor && oldMajor !== newMajor) {
+                    console.log(`${name}: ${oldVer} -> ${newVer}`);
+                    major = true;
+                  }
+                }
+                process.exit(major ? 1 : 0);
+              '; then
+                add_reason "依存関係のメジャーバージョン更新 (package.json)"
+              fi
+            else
+              add_reason "package.jsonの変更（比較元の取得に失敗したため安全側で判定）"
+            fi
+          fi
+
+          if [ "$RISKY" = "true" ]; then
+            echo "リスクありと判定:"
+            echo "$REASONS"
+            if [ -n "$ISSUE_NUMBER" ]; then
+              gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+            fi
+          else
+            echo "機械的リスク判定: 該当なし"
+          fi
+
   claude-review:
+    needs: identify-issue
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
@@ -32,17 +137,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 対応Issue番号を特定する
-        id: issue
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            echo "number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          else
-            echo "number=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Run Claude Code Review
         uses: anthropics/claude-code-action@v1
         env:
@@ -56,7 +150,7 @@ jobs:
             develop向けPull Request（${{ github.repository }}/pull/${{ github.event.pull_request.number }}）を自動レビューしてください。
 
             ## 対応Issue
-            対応Issue番号: ${{ steps.issue.outputs.number }}
+            対応Issue番号: ${{ needs.identify-issue.outputs.number }}
             （空欄の場合はブランチ名がissue-<番号>の命名規約に従っていないため、Issue番号は不明として扱ってください）
 
             ## 確認すること
@@ -76,8 +170,8 @@ jobs:
             - 大規模な依存関係の更新
 
             判定方法:
-            - 一次判定（機械的）: `git diff --name-only origin/develop...HEAD` のパスが `prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`・`package.json`の依存メジャーバージョン変更等に該当するか
-            - 二次判定（意味的）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
+            - 一次判定（機械的）: 同一ワークフロー内の`risk-check`ジョブが`git diff --name-only origin/develop...HEAD`のパスパターンで既に判定済み（該当時は対応Issueへの00.check-user付与も完了している）
+            - 二次判定（意味的、あなたの担当）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
 
             該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を実行してください。
             `gh issue edit <対応Issue番号> --add-label "00.check-user"`
@@ -92,3 +186,32 @@ jobs:
             - PRのマージ・承認（Approve）は行わない
             - ラベル `03.d:marge` 等の状態遷移ラベルの付け替えは行わない（`00.check-user`の付与のみ許可）
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
+
+  auto-merge:
+    needs: [identify-issue, risk-check, claude-review]
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: 自動マージ可否を判定して実行する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "対応Issue番号を特定できないため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+          if echo "$LABELS" | grep -qx "00.check-user"; then
+            echo "対応Issue #${ISSUE_NUMBER} に 00.check-user が付与されているため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          echo "自動マージ不可カテゴリに該当しないため、auto-mergeを有効化します。"
+          gh pr merge "$PR_NUMBER" --auto --squash
