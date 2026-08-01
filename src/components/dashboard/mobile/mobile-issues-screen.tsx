@@ -40,7 +40,7 @@ export function MobileIssuesScreen({
     state: "open",
     labels: [],
     assignee: null,
-    sort: "updated",
+    sort: "created",
   });
 
   const displayedIssues = useMemo(() => {

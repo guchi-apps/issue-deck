@@ -35,7 +35,7 @@ export function MobileRepoIssuesScreen({
     state: "open",
     labels: [],
     assignee: null,
-    sort: "updated",
+    sort: "created",
   });
 
   const repoIssues = useMemo(
