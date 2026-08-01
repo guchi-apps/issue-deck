@@ -143,6 +143,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 本運用ではPRをclaude[bot]（Claude CodeのGitHub App）が作成するため、
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する
+          # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
+          allowed_bots: "claude[bot]"
           additional_permissions: |
             actions: read
           claude_args: '--allowedTools Bash(gh issue edit:*)'
