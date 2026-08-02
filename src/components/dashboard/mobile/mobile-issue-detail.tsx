@@ -85,6 +85,7 @@ export function MobileIssueDetail({
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const [isImageUploading, setIsImageUploading] = useState(false);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
@@ -439,6 +440,7 @@ export function MobileIssueDetail({
               onChange={setNewCommentBody}
               issueSuggestions={issueSuggestions}
               disabled={isCommentSubmitting}
+              onUploadingChange={setIsImageUploading}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -449,7 +451,7 @@ export function MobileIssueDetail({
             <Button
               className="self-end"
               onClick={handleCreateComment}
-              disabled={!newCommentBody.trim() || isCommentSubmitting}
+              disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
             >
               {isCommentSubmitting && <Loader2 className="animate-spin" />}
               {isCommentSubmitting ? "送信中..." : "コメント"}

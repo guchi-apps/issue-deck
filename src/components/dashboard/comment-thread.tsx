@@ -122,6 +122,7 @@ export function CommentThread({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isImageUploading, setIsImageUploading] = useState(false);
 
   if (isLoading) {
     return (
@@ -164,11 +165,13 @@ export function CommentThread({
   function startEdit(comment: IssueComment) {
     setEditingId(comment.id);
     setEditBody(comment.body);
+    setIsImageUploading(false);
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditBody("");
+    setIsImageUploading(false);
   }
 
   async function saveEdit(commentId: string) {
@@ -228,6 +231,7 @@ export function CommentThread({
                     onChange={setEditBody}
                     issueSuggestions={issueSuggestions}
                     disabled={isUpdating}
+                    onUploadingChange={setIsImageUploading}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
                         e.preventDefault();
@@ -243,7 +247,7 @@ export function CommentThread({
                     <Button
                       size="sm"
                       onClick={() => saveEdit(comment.id)}
-                      disabled={!editBody.trim() || isUpdating}
+                      disabled={!editBody.trim() || isUpdating || isImageUploading}
                     >
                       {isUpdating && <Loader2 className="animate-spin" />}
                       {isUpdating ? "保存中..." : "保存"}
