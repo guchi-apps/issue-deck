@@ -16,3 +16,17 @@ export function labelsAfterApproval(labels: IssueLabel[]): string[] {
     .map((label) => label.name)
     .filter((name) => name !== CHECK_USER_LABEL && name !== PLAN_REQUIRED_LABEL);
 }
+
+/**
+ * 承認ボタン押下時、ラベル更新に続けて投稿する定型コメント本文
+ * （claude-issue-dispatch.ymlの@claudeトリガーに反応する）。
+ *
+ * ラベル更新はissue-deckのGitHub App（インストールトークン）で行うためGitHub上は
+ * issue-deck[bot]の操作として記録され、issues.unlabeledイベントだけでは実際に
+ * 承認操作をした人間を特定できず、ワークフロー側の自己ループ防止ロジックにより
+ * 実装が再開されない（#173）。GitHub Appの人力アプリ操作であっても
+ * 個人のGitHubアカウントで投稿されるコメント（POST /api/issues/comments、
+ * user.githubAccessToken使用）を承認ラベル更新の直後に送ることで、
+ * issue_commentトリガー経由で実装を確実に再開させる。
+ */
+export const APPROVE_COMMENT_BODY = "@claude 計画を承認しました。実装を進めてください。";
