@@ -230,6 +230,17 @@ export function MobileIssueDetail({
     }
   }
 
+  async function handleWithdraw() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "closed",
+      stateReason: "not_planned",
+      labels: labelsAfterApproval(issue.labels),
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex items-center gap-1 border-b p-4">
@@ -467,8 +478,10 @@ export function MobileIssueDetail({
             pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
+            onWithdraw={handleWithdraw}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
+            isWithdrawing={isSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

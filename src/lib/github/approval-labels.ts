@@ -37,8 +37,8 @@ export function labelsAfterApproval(labels: IssueLabel[]): string[] {
 }
 
 /**
- * 却下時に外すラベル名の配列を返す（00.check-userのみを外す。21.plan-requiredは計画の
- * 再提示が必要なため残す）
+ * 却下（UI上のボタン表記は「修正」）時に外すラベル名の配列を返す（00.check-userのみを
+ * 外す。21.plan-requiredは計画の再提示が必要なため残す）
  */
 export function labelsAfterRejection(labels: IssueLabel[]): string[] {
   return labels.map((label) => label.name).filter((name) => name !== CHECK_USER_LABEL);
