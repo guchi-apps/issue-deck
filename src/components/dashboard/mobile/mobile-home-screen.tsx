@@ -3,13 +3,11 @@
 import { Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
-import { getLabelDotStyle } from "@/lib/label-color";
 import { navViewIcons, navViews } from "@/lib/nav-views";
-import type { LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
+import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 
 type MobileHomeScreenProps = {
-  labelSummary: LabelSummary[];
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
   onSelectQuickView: (view: NavViewId) => void;
@@ -22,7 +20,6 @@ type MobileHomeScreenProps = {
 const quickFilterViews = navViews.filter((view) => view.id !== "all");
 
 export function MobileHomeScreen({
-  labelSummary,
   overviewStats,
   navCounts,
   onSelectQuickView,
@@ -119,24 +116,6 @@ export function MobileHomeScreen({
               ))}
             </ul>
           )}
-        </div>
-
-        <div className="px-4 pb-4">
-          <h2 className="mb-2 text-sm font-semibold">ラベル</h2>
-          <ul className="flex flex-col gap-1">
-            {labelSummary.map((label) => (
-              <li key={label.name} className="flex items-center justify-between px-2 py-1.5 text-sm">
-                <span className="flex items-center gap-2">
-                  <span
-                    className="size-2 rounded-full ring-1 ring-inset ring-border"
-                    style={getLabelDotStyle(label.color)}
-                  />
-                  {label.name}
-                </span>
-                <span className="text-xs text-muted-foreground">{label.count}</span>
-              </li>
-            ))}
-          </ul>
         </div>
       </div>
     </div>

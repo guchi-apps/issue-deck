@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 
 const items = [
   { id: "home", label: "ホーム", icon: Home },
-  { id: "issues", label: "Issue", icon: ListChecks },
   { id: "repos", label: "リポジトリ", icon: FolderGit2 },
+  { id: "issues", label: "Issue", icon: ListChecks },
   { id: "settings", label: "設定", icon: Settings },
 ] as const;
 
