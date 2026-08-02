@@ -10,6 +10,10 @@ name: Claude Code Review (develop向けPR)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
 #   マージやラベル状態遷移(03.d:marge等)は行わない
+# - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
+#   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
+#   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
+#   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
 # - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
 #   付いていなければ gh pr merge --auto --squash を実行する
 #
@@ -199,6 +203,27 @@ jobs:
             - PRのマージ・承認（Approve）は行わない
             - ラベル `03.d:marge` 等の状態遷移ラベルの付け替えは行わない（`00.check-user`の付与のみ許可）
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
+
+  claude-review-fallback:
+    needs: [identify-issue, claude-review]
+    if: always() && needs.claude-review.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: 自動レビュー失敗をPRに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -e
+          gh pr comment "$PR_NUMBER" --body "⚠️ 自動レビュー（claude-review）が実行できませんでした。Actionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          fi
 
   auto-merge:
     needs: [identify-issue, risk-check, claude-review]
