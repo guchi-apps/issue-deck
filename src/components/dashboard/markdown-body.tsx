@@ -30,23 +30,23 @@ const components: Components = {
   ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
   ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
   blockquote: ({ children }) => (
-    <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground last:mb-0">
+    <blockquote className="mb-3 border-l-2 border-border pl-3 text-muted-foreground last:mb-0">
       {children}
     </blockquote>
   ),
   code: ({ className, children, ...props }) => (
-    <code {...props} className={cn("rounded bg-muted px-1 py-0.5 font-mono text-xs", className)}>
+    <code {...props} className={cn("rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem]", className)}>
       {children}
     </code>
   ),
   pre: ({ children }) => (
-    <pre className="mb-2 overflow-x-auto rounded-md bg-muted p-3 text-xs last:mb-0">{children}</pre>
+    <pre className="mb-3 overflow-x-auto rounded-md bg-muted p-3 text-[0.8125rem] last:mb-0">{children}</pre>
   ),
   h1: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
   h2: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
   h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold">{children}</h3>,
   table: ({ children }) => (
-    <div className="mb-2 overflow-x-auto last:mb-0">
+    <div className="mb-3 overflow-x-auto last:mb-0">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
@@ -62,7 +62,7 @@ type MarkdownBodyProps = {
 
 export function MarkdownBody({ content, className, repositoryFullName }: MarkdownBodyProps) {
   return (
-    <div className={cn("text-[0.9375rem] leading-[1.9] break-words", className)}>
+    <div className={cn("font-body text-[0.9375rem] leading-[1.9] break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[

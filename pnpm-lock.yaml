@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/biz-udpgothic':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/murecho':
         specifier: ^5.3.0
         version: 5.3.0
@@ -309,6 +312,9 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@fontsource/biz-udpgothic@5.3.0':
+    resolution: {integrity: sha512-uBcdaC2/Bg7GEhzWSb2REs8azL1ys+KpI8TmPnJa2xtaD8DVMgsRbtIcEss8xjN5KRtp8E0+LFbG43FhkWZdPw==}
 
   '@fontsource/murecho@5.3.0':
     resolution: {integrity: sha512-PbKokx/Rwdu7A/6h53ov9f7W7RlYmhllr69gjwg6WHtYoICAR6U6U6MQsJpSaNkl+trRwvPnZwkDTXxGyjn4fA==}
@@ -4550,6 +4556,8 @@ snapshots:
       react-dom: 19.2.4(react@19.2.4)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@fontsource/biz-udpgothic@5.3.0': {}
 
   '@fontsource/murecho@5.3.0': {}
 
