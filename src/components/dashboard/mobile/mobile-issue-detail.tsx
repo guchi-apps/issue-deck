@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -68,6 +69,7 @@ export function MobileIssueDetail({
     createComment,
     updateComment,
     deleteComment,
+    isSubmitting: isCommentSubmitting,
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
@@ -143,6 +145,25 @@ export function MobileIssueDetail({
       onIssueUpdated({ ...issue, commentCount: Math.max(0, issue.commentCount - 1) });
     }
     return ok;
+  }
+
+  async function handleApprove() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterApproval(issue.labels),
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReject(reason: string) {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
+    const created = await createComment({ owner, repo, number: issue.number, body });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
   }
 
   return (
@@ -299,6 +320,11 @@ export function MobileIssueDetail({
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
+            approvalPending={isApprovalPending(issue.labels)}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            isApproving={isSubmitting}
+            isRejecting={isCommentSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">
