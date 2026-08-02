@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
@@ -176,7 +176,23 @@ export function MobileIssueDetail({
       number: issue.number,
       labels: labelsAfterApproval(issue.labels),
     });
-    if (updated) onIssueUpdated(updated);
+    if (!updated) return;
+    onIssueUpdated(updated);
+
+    // ラベル更新はissue-deckのGitHub Appが行うためGitHub上はbotの操作として記録され、
+    // issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
+    // 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: APPROVE_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+    }
   }
 
   async function handleReject(reason: string) {
