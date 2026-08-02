@@ -432,6 +432,44 @@ GitHub ActionsのUIから`Run workflow`で明示的に実行する。
 効くため、本Phaseで新たなガードは追加していない）。develop→mainのPRについてはそもそも
 `claude-review-develop.yml`が`develop`向けPRしか対象にしないため関与しない。
 
+## Phase 7: 無人実行でのスクリーンショット画像埋め込み（#255）
+
+`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、上記Phase5の
+説明のとおり実際のスクリーンショット取得・画面確認ができず、`00.check-user`を付与して停止する
+運用にとどまっている（issue #199）。#199は複数の技術的障壁があるため4つのサブIssueに分割され、
+本Phaseはそのうち「任意のPNG画像をGitHub Issueコメントに画像として埋め込む」手段を確立する
+サブIssue（#255）に対応する。DB・認証には触れておらず、実際のPlaywright撮影と組み合わせる
+統合作業は別のサブIssueのスコープ。
+
+### 仕組み
+
+- 画像は`develop`/`main`の祖先には含まれない専用のorphanブランチ`screenshots`にコミットする
+  （通常のリリースフローではマージしない）。
+- コミットした画像を`https://raw.githubusercontent.com/<owner>/<repo>/screenshots/issue-<番号>/<ファイル名>.png`
+  のURLとして参照し、Markdownの`![...](...)`記法で`gh issue comment`の本文に埋め込む。公開
+  リポジトリのため認証なしで表示できる（`scripts/post-issue-screenshot.sh`実行時に実機検証済み、
+  `raw.githubusercontent.com`から`content-type: image/png`で200が返ることを確認した）。
+- `scripts/post-issue-screenshot.sh <issue番号> <画像ファイルパス> [画像ファイルパス...]`が、
+  画像を`screenshots`ブランチの`issue-<番号>/`配下にコミット・pushし、上記raw URLを標準出力に
+  1行1URLで出力する。呼び出し側（将来のPlaywright統合サブIssueなど）はこの出力をそのまま
+  `gh issue comment`の本文に埋め込めばよい。ファイル名には取得時刻を接頭辞として付与しており、
+  同名ファイルで撮り直した場合でも`raw.githubusercontent.com`側の古いキャッシュを参照し続けない
+  ようにしている。
+
+### 権限
+
+`screenshots`ブランチは`.github/workflows/`配下を含まないため、pushには
+issue #106のようなworkflow書き込み権限を持つPAT（`secrets.WORKFLOW_PAT`）は不要で、既定の
+`GITHUB_TOKEN`（`contents: write`権限）で足りる（懸念点として#255のissue本文に挙げられていたが、
+検証の結果PATは不要と判明した）。
+
+### 肥大化対策
+
+`screenshots`ブランチが際限なく肥大化しないよう、`issue-labels.yml`の`cleanup-on-close`ジョブが
+Issueクローズをトリガーに対応する`issue-<番号>/`ディレクトリを削除する。定期的なバッチ削除等は
+導入していない（クローズされないまま放置されるIssueは通常のIssue運用上も稀なため、クローズ時の
+削除のみで十分と判断した）。
+
 ## 未解決の課題・申し送り事項
 
 - Claude Code CLIの起動オプション（`--permission-mode`の具体的な値、`--add-dir`等）は実装時に`claude --help`で最新仕様を確認する。特に無人実行（Phase3以降）で全チェックを無効化するようなフラグ（例: `--dangerously-skip-permissions`）を使うのは、意図しない破壊的操作のリスクがあるため避け、ローカル実行は`acceptEdits`（人間が横にいる前提）、GitHub Actions実行は`claude-code-action`側の許可ツールリスト等で制御する方針とする。

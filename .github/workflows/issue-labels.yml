@@ -179,8 +179,17 @@ jobs:
     # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
     # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が「要確認」のまま
     # 残り続けないよう、クローズをトリガーに除去する。
+    #
+    # あわせて、screenshotsブランチ(#255。orphanブランチにスクリーンショット画像をコミットし
+    # raw.githubusercontent.com経由でIssueコメントに埋め込む仕組み)上の issue-<番号>/
+    # ディレクトリが際限なく肥大化しないよう、Issueクローズをトリガーに削除する。
+    # screenshotsブランチは.github/workflows/配下を含まないため、pushにはissue #106のような
+    # workflow書き込み権限を持つPATは不要で、既定のGITHUB_TOKEN(contents: write)で足りる。
     if: github.event_name == 'issues' && github.event.action == 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -188,3 +197,26 @@ jobs:
     steps:
       - name: 00.check-user を除去する
         run: gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: screenshotsブランチから対応する画像ディレクトリを削除する
+        run: |
+          set -e
+          if ! git ls-remote --exit-code --heads origin screenshots >/dev/null 2>&1; then
+            echo "screenshotsブランチが存在しないため何もしません"
+            exit 0
+          fi
+          git fetch origin screenshots:screenshots
+          git checkout screenshots
+          if [ ! -d "issue-$ISSUE_NUMBER" ]; then
+            echo "issue-$ISSUE_NUMBER ディレクトリが無いため何もしません"
+            exit 0
+          fi
+          git rm -rq "issue-$ISSUE_NUMBER"
+          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+            commit -m "issue-$ISSUE_NUMBER のスクリーンショットを削除（Issueクローズに伴うクリーンアップ）"
+          git push origin screenshots
