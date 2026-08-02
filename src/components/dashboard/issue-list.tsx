@@ -1,12 +1,23 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Archive, CircleAlert, Loader2, Lock, MessageSquare, Star } from "lucide-react";
+import {
+  Archive,
+  CircleAlert,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  Loader2,
+  Lock,
+  MessageSquare,
+  Star,
+} from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
+import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
@@ -40,6 +51,26 @@ function statusSortRank(labelName: string) {
 
 function sortLabelsByStatus(labels: IssueLabel[]) {
   return [...labels].sort((a, b) => statusSortRank(a.name) - statusSortRank(b.name));
+}
+
+function IssueStateIcon({ issue }: { issue: Issue }) {
+  if (issue.state === "open") {
+    return <CircleDot className="size-3 shrink-0 text-green-600" aria-label="Open" />;
+  }
+  if (issue.stateReason === "not_planned") {
+    return (
+      <CircleSlash
+        className="size-3 shrink-0 text-muted-foreground"
+        aria-label={closedStateLabel(issue.stateReason)}
+      />
+    );
+  }
+  return (
+    <CircleCheck
+      className="size-3 shrink-0 text-purple-600"
+      aria-label={closedStateLabel(issue.stateReason)}
+    />
+  );
 }
 
 export function IssueList({
@@ -105,6 +136,7 @@ export function IssueList({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    <IssueStateIcon issue={issue} />
                     <span className="truncate">{issue.repositoryFullName.split("/")[1]}</span>
                     {issue.repositoryArchived && (
                       <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />
