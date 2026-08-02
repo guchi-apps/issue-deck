@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Search } from "lucide-react";
 
+import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
@@ -172,32 +172,11 @@ export function TopBar({
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
           <div className="px-1.5 pb-1.5">
-            {rateLimitsLoading && (
-              <p className="text-xs text-muted-foreground">読み込み中...</p>
-            )}
-            {rateLimitsError && <p className="text-xs text-destructive">{rateLimitsError}</p>}
-            {rateLimits && rateLimits.length === 0 && (
-              <p className="text-xs text-muted-foreground">連携中のインストールがありません</p>
-            )}
-            {rateLimits && rateLimits.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {rateLimits.map((rateLimit) => (
-                  <li key={rateLimit.accountLogin} className="rounded-lg border p-2">
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="font-medium">{rateLimit.accountLogin}</span>
-                      <span className="text-muted-foreground">
-                        残り {rateLimit.remaining} / {rateLimit.limit}
-                      </span>
-                    </div>
-                    <Progress value={(rateLimit.remaining / rateLimit.limit) * 100} />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      リセット:{" "}
-                      {new Date(rateLimit.reset * 1000).toLocaleTimeString("ja-JP")}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <GithubRateLimitList
+              data={rateLimits}
+              isLoading={rateLimitsLoading}
+              error={rateLimitsError}
+            />
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
