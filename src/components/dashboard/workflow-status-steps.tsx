@@ -9,6 +9,33 @@ type WorkflowStatusStepsProps = {
   labels: IssueLabel[];
 };
 
+type WorkflowStepBadgeProps = {
+  labels: IssueLabel[];
+};
+
+/** 一覧などの省スペースな箇所向けに、現在の実装状況ステップだけを小さな丸バッジで示す */
+export function WorkflowStepBadge({ labels }: WorkflowStepBadgeProps) {
+  const currentIndex = getWorkflowStepIndex(labels);
+  if (currentIndex === null) return null;
+
+  const approvalPending = isApprovalPending(labels);
+  const step = WORKFLOW_STEPS[currentIndex];
+
+  return (
+    <span
+      title={`${step.labelName} ${step.label}`}
+      className={cn(
+        "flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold ring-1 ring-inset",
+        approvalPending
+          ? "bg-amber-500/15 text-amber-600 ring-amber-500 dark:text-amber-400"
+          : "bg-primary/15 text-primary ring-primary",
+      )}
+    >
+      {currentIndex + 1}
+    </span>
+  );
+}
+
 /** 01.wip〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない */
 export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex(labels);

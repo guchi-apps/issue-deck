@@ -3,6 +3,7 @@
 import { Archive, CircleAlert, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -91,6 +92,7 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
+                    <WorkflowStepBadge labels={issue.labels} />
                     {issue.favorite && (
                       <Star
                         className="size-3.5 fill-yellow-400 text-yellow-400"
