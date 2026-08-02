@@ -176,7 +176,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.wip`〜`09.main`）のGitHub Actionsによる自動化
 4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
 5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
-6. **Phase 5**: Issueラベル/`@claude`コメントを起点に実装からPR作成まで自動化
+6. **Phase 5**: Issueへの`@claude`コメントを起点に実装からPR作成まで自動化
 
 各Phaseは前段が安定稼働してから着手する。
 
@@ -193,24 +193,26 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
-- GitHubラベル`20.auto-implement`の新規作成（Phase5、作成済み）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
 
-## Phase 5: Issueラベル/@claudeコメント起点の完全自動化
+## Phase 5: @claudeコメント起点の完全自動化
 
 `.github/workflows/claude-issue-dispatch.yml`で実装済み。ローカルの`scripts/start-issue.sh`が行っている
 作業（issue-<番号>ブランチ作成・実装・develop向けPR作成）をGitHub Actions上で無人実行する。
 
 ### トリガー
 
-- Issueへのラベル`20.auto-implement`付与（新規作成したラベル）
-- Issueへの`@claude`コメント
+- Issueへの`@claude`コメント（起動トリガーはこれに一本化。旧`20.auto-implement`ラベルは廃止した）
 
-パブリックリポジトリのため`@claude`コメント自体は誰でも投稿できるが、ラベルの付与・削除はGitHub側で
-write権限を要求する。トリガー経路によらず一律で実行者(`github.actor`)のリポジトリ権限を
-`gh api repos/{owner}/{repo}/collaborators/{actor}/permission`で確認し、write権限未満なら何もしない。
+パブリックリポジトリのため`@claude`コメント自体は誰でも投稿できる。トリガー経路によらず一律で
+実行者(`github.actor`)のリポジトリ権限を`gh api repos/{owner}/{repo}/collaborators/{actor}/permission`
+で確認し、write権限未満なら何もしない。
+
+なお`21.plan-required`の承認再開（`00.check-user`ラベルの削除）は引き続き`issues: unlabeled`
+イベントをトリガーに使う（下記「二段階トリガー」参照）。ラベル付与（`labeled`イベント）はもはや
+本ワークフローのトリガーには使わない。
 
 ### `21.plan-required`が付いている場合の二段階トリガー（再起動方法を確定）
 

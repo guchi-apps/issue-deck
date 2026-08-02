@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  CircleAlert,
   FolderGit2,
   Lock,
   MoreHorizontal,
@@ -22,6 +23,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +42,7 @@ import {
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -235,6 +238,8 @@ export function MobileIssueDetail({
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
         </div>
 
+        <WorkflowStatusSteps labels={issue.labels} />
+
         <div className="flex items-center gap-6">
           <div>
             <p className="mb-1 text-xs text-muted-foreground">作成者</p>
@@ -267,24 +272,44 @@ export function MobileIssueDetail({
         <div>
           <h2 className="mb-2 text-sm font-semibold">ラベル</h2>
           <div className="flex flex-wrap items-center gap-1.5">
-            {issue.labels.map((label) => (
-              <span
-                key={label.name}
-                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                style={getLabelBadgeStyle(label.color)}
-              >
-                {label.name}
-                <button
-                  type="button"
-                  onClick={() => toggleLabel(label.name)}
-                  disabled={isSubmitting}
-                  aria-label={`${label.name}を削除`}
-                  className="rounded-full hover:opacity-70 disabled:opacity-50"
+            {issue.labels.map((label) => {
+              const step = matchStatusStep(label.name);
+              const attention = isAttentionLabel(label.name);
+              return (
+                <span
+                  key={label.name}
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                  style={getLabelBadgeStyle(label.color)}
+                  title={step ? `${label.name}（ステップ${step}/${STATUS_STEP_MAX}）` : undefined}
                 >
-                  <X className="size-3" />
-                </button>
-              </span>
-            ))}
+                  {attention && <CircleAlert className="size-3 shrink-0" aria-hidden="true" />}
+                  {step && (
+                    <span
+                      className="h-1.5 w-5 overflow-hidden rounded-full bg-border"
+                      aria-hidden="true"
+                    >
+                      <span
+                        className="block h-full rounded-full"
+                        style={{
+                          width: `${(step / STATUS_STEP_MAX) * 100}%`,
+                          backgroundColor: label.color,
+                        }}
+                      />
+                    </span>
+                  )}
+                  {label.name}
+                  <button
+                    type="button"
+                    onClick={() => toggleLabel(label.name)}
+                    disabled={isSubmitting}
+                    aria-label={`${label.name}を削除`}
+                    className="rounded-full hover:opacity-70 disabled:opacity-50"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              );
+            })}
             <LabelPicker
               labels={repoLabels}
               selectedNames={issue.labels.map((label) => label.name)}

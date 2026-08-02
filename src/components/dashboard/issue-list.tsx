@@ -1,12 +1,13 @@
 "use client";
 
-import { Archive, Lock, MessageSquare, Star } from "lucide-react";
+import { Archive, CircleAlert, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Input } from "@/components/ui/input";
+import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
-import type { Issue } from "@/types/issue";
+import type { Issue, IssueLabel } from "@/types/issue";
 
 type IssueListProps = {
   title: string;
@@ -24,6 +25,16 @@ function formatRelativeDate(iso: string) {
   if (diffDays <= 0) return "今日";
   if (diffDays === 1) return "1日前";
   return `${diffDays}日前`;
+}
+
+// 要対応フラグ→進行ステップ→その他ラベルの順に並べ、状況が一目でわかるよう左詰めにする
+function statusSortRank(labelName: string) {
+  if (isAttentionLabel(labelName)) return -1;
+  return matchStatusStep(labelName) ?? STATUS_STEP_MAX + 1;
+}
+
+function sortLabelsByStatus(labels: IssueLabel[]) {
+  return [...labels].sort((a, b) => statusSortRank(a.name) - statusSortRank(b.name));
 }
 
 export function IssueList({
@@ -93,16 +104,36 @@ export function IssueList({
                   #{issue.number} {issue.title}
                 </p>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <div className="flex flex-wrap gap-1">
-                    {issue.labels.map((label) => (
-                      <span
-                        key={label.name}
-                        className="rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
-                        style={getLabelBadgeStyle(label.color)}
-                      >
-                        {label.name}
-                      </span>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-1">
+                    {sortLabelsByStatus(issue.labels).map((label) => {
+                      const step = matchStatusStep(label.name);
+                      const attention = isAttentionLabel(label.name);
+                      return (
+                        <span
+                          key={label.name}
+                          className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                          style={getLabelBadgeStyle(label.color)}
+                          title={step ? `${label.name}（ステップ${step}/${STATUS_STEP_MAX}）` : undefined}
+                        >
+                          {attention && <CircleAlert className="size-3 shrink-0" aria-hidden="true" />}
+                          {step && (
+                            <span
+                              className="h-1.5 w-5 overflow-hidden rounded-full bg-border"
+                              aria-hidden="true"
+                            >
+                              <span
+                                className="block h-full rounded-full"
+                                style={{
+                                  width: `${(step / STATUS_STEP_MAX) * 100}%`,
+                                  backgroundColor: label.color,
+                                }}
+                              />
+                            </span>
+                          )}
+                          {label.name}
+                        </span>
+                      );
+                    })}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {issue.commentCount > 0 && (

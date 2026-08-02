@@ -1,8 +1,8 @@
 name: Claude Issue Dispatch
 
-# Issueラベル付与(20.auto-implement)またはIssueへの@claudeコメントを起点に、
-# ローカルのscripts/start-issue.shが行っている作業(issue-<番号>ブランチ作成・
-# 実装・develop向けPR作成)をGitHub Actions上で無人実行する(docs/multi-agent-workflow.md Phase5)。
+# Issueへの@claudeコメントを起点に、ローカルのscripts/start-issue.shが行っている作業
+# (issue-<番号>ブランチ作成・実装・develop向けPR作成)をGitHub Actions上で無人実行する
+# (docs/multi-agent-workflow.md Phase5)。
 #
 # 21.plan-requiredラベルが付いているissueは二段階トリガーにする(無人実行では
 # 対話的な承認者がその場にいないため):
@@ -54,14 +54,13 @@ name: Claude Issue Dispatch
 
 on:
   issues:
-    types: [labeled, unlabeled]
+    types: [unlabeled]
   issue_comment:
     types: [created]
 
 jobs:
   dispatch:
     if: |
-      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == '20.auto-implement') ||
       (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
@@ -238,7 +237,7 @@ jobs:
         # ここに該当するのはPRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な
         # 中間状態で、issue-<番号>ブランチが既に存在するため実装は再始動しないが、
         # issue_commentトリガー(人間が直接@claudeへ呼びかけたケース)に限り、これまでの
-        # 「無言でスキップ」を避けて対応状況を返信する。labeled/unlabeledイベントでの
+        # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの
         # 同条件のskip(Phase4の要確認判定など)は人間への呼びかけではないため対象外。
         if: |
           steps.state.outputs.mode == 'skip' &&
