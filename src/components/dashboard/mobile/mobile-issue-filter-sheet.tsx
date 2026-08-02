@@ -35,7 +35,7 @@ function Pill({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1 text-xs whitespace-nowrap",
+        "rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
         active && "border-primary bg-primary/10 text-primary",
       )}
     >
