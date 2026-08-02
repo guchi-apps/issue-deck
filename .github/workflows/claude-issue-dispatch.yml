@@ -304,9 +304,10 @@ jobs:
               を実行する（このワークフローのgit push/PR作成は既定の`GITHUB_TOKEN`で行っており、GitHubの仕様上
               `GITHUB_TOKEN`によるpush/PR作成は他のワークフローを起動しないため、`.github/workflows/issue-labels.yml`
               による自動付与を当てにせず、必ず自分でこのコマンドを実行すること）
-            - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で実装完了と
-              作成したPRのURLを報告するコメントを投稿する（無人実行のため、この報告が使用者にとって
-              唯一の完了確認手段になる）
+            - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で実装完了の
+              報告コメントを投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認手段になる）。
+              本文には作成したPRのURLに加えて、どのような変更・新規実装を行ったかの要約（触ったファイルや
+              対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること
 
             ## 画面確認・スクリーンショットについて
             無人実行のため、開発サーバーを起動しての画面確認やPlaywright等によるスクリーンショット取得は
@@ -352,7 +353,12 @@ jobs:
           PR_URL="$(gh pr list --head "$BRANCH" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)"
           if [ -n "$PR_URL" ]; then
             echo "コメントは無いがPRの存在を確認できたため、フォールバックとして完了報告コメントを投稿します: $PR_URL"
-            gh issue comment "$ISSUE_NUMBER" --body "✅ 実装が完了し、Pull Requestを作成しました: $PR_URL"
+            PR_BODY="$(gh pr view "$BRANCH" --json body --jq '.body // empty' 2>/dev/null || true)"
+            FALLBACK_BODY="✅ 実装が完了し、Pull Requestを作成しました: $PR_URL"
+            if [ -n "$PR_BODY" ]; then
+              FALLBACK_BODY="$FALLBACK_BODY"$'\n\n---\n\n'"$PR_BODY"
+            fi
+            gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
             exit 0
           fi
 
