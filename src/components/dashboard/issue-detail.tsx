@@ -22,6 +22,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
@@ -45,7 +46,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
-import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
+import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -186,21 +187,6 @@ export function IssueDetail({
     }
   }
 
-  async function handleStartImplementation() {
-    if (!issue) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: START_IMPLEMENTATION_COMMENT_BODY,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
-  }
-
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -222,10 +208,17 @@ export function IssueDetail({
           </span>
           <div className="ml-auto flex items-center gap-2">
             {canStartImplementation(issue) && (
-              <Button size="sm" onClick={handleStartImplementation} disabled={isCommentSubmitting}>
-                {isCommentSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                実装を開始
-              </Button>
+              <StartImplementationDialog
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                renderTrigger={(isSubmitting) => (
+                  <Button size="sm" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                    実装を開始
+                  </Button>
+                )}
+              />
             )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
