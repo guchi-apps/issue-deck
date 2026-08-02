@@ -320,7 +320,7 @@ export function MobileIssueDetail({
           {issue.repositoryPrivate && <Lock className="size-3" aria-label="プライベート" />}
         </span>
 
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-lg font-semibold break-words">
           #{issue.number} {issue.title}
         </h1>
 

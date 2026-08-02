@@ -113,7 +113,7 @@ export function IssueList({
                 </div>
                 <p
                   className={cn(
-                    "line-clamp-2 flex items-start gap-1.5 text-sm",
+                    "flex items-start gap-1.5 text-sm",
                     issue.hasUnreadComments ? "font-semibold" : "font-medium",
                   )}
                 >
@@ -123,7 +123,9 @@ export function IssueList({
                       aria-label="未読コメントあり"
                     />
                   )}
-                  #{issue.number} {issue.title}
+                  <span className="line-clamp-2 min-w-0 break-words">
+                    #{issue.number} {issue.title}
+                  </span>
                 </p>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div className="flex flex-wrap items-center gap-1">
