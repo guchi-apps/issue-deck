@@ -19,6 +19,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -50,6 +52,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
     createComment,
     updateComment,
     deleteComment,
+    isSubmitting: isCommentSubmitting,
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
@@ -105,6 +108,27 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
       onIssueUpdated({ ...issue, commentCount: Math.max(0, issue.commentCount - 1) });
     }
     return ok;
+  }
+
+  async function handleApprove() {
+    if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterApproval(issue.labels),
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReject(reason: string) {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
+    const created = await createComment({ owner, repo, number: issue.number, body });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
   }
 
   if (!issue) {
@@ -208,6 +232,8 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
           </span>
         </div>
 
+        <WorkflowStatusSteps labels={issue.labels} />
+
         <Separator />
 
         <div>
@@ -231,6 +257,11 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
+            approvalPending={isApprovalPending(issue.labels)}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            isApproving={isSubmitting}
+            isRejecting={isCommentSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

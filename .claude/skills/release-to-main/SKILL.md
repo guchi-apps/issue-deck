@@ -5,11 +5,18 @@ description: issue-deckでdevelopからmainへリリースPRを作成・マー�
 
 # develop→mainリリース手順（issue-deck）
 
+## 0. ローカルのdevelopを最新化する
+
+リリース作業はブランチの祖先関係に敏感なため、ローカルの`origin/develop`が実際のリモートより古いまま作業を始めない。`git status`で`behind`と出ていたり、`git rev-parse origin/develop`と`gh api repos/m-guchi/issue-deck/branches/develop -q .commit.sha`が一致しない場合はズレている。
+
+`git fetch`はgit-github-jaスキルの運用（明示的指示があるまで実行しない）の対象のため、ズレを検知したらユーザーに一言断ってから`git fetch origin`する。
+
 ## 1. バージョンを上げる
 
 - `package.json`の`version`を更新する（変更内容に応じてpatch/minorを判断。迷う場合はユーザーに確認する）
 - コミットメッセージは`vX.Y.Zをリリースする。`
 - Author はClaude Code（git-github-jaスキル参照）
+- リリースブランチ名は`release/vX.Y.Z`で統一する（過去に`release-v0.5.2`のようなハイフン区切りも使われたことがあるが、スラッシュ区切りに統一する）
 
 ## 2. developへの反映はフィーチャーブランチ+PR経由で行う
 
@@ -26,6 +33,8 @@ developへの直接コミットを試みると`GH013: Repository rule violations
 - `gh pr create --base main --head develop --title "vX.Y.Zをmainへリリースする"`
 - PR本文には対象Issue・含まれる主な変更・注意点（Secrets/DBマイグレーション等の有無）・Test planを記載する
 - **develop→mainのマージは自動マージ不可カテゴリに該当する**（CLAUDE.md記載）。CI通過後、必ずユーザーに確認を取ってからマージする（自己マージしない）
+
+バージョンbump前にこのPRを先に作ってしまっていた場合は、作り直す必要はない。1〜2のバージョンbump用PRがdevelopへマージされれば差分は自動的にこのPRへ反映されるので、マージ後にタイトルを`vX.Y.Zをmainへリリースする`へ更新すればよい。
 
 ## 4. マージ方式は「マージコミット」を使う（squash mergeは厳禁）
 

@@ -5,9 +5,15 @@ name: Claude Code Review (develop向けPR)
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
-# - risk-check: パスパターンによる機械的リスク判定。該当時は00.check-userを付与する
+# - risk-check: パスパターンによる機械的リスク判定。該当時は00.check-userを付与し、
+#   判定理由をissueにコメント投稿する(#94)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
-#   該当時は00.check-userを付与する。マージやラベル状態遷移(03.d:marge等)は行わない
+#   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
+#   マージやラベル状態遷移(03.d:marge等)は行わない
+# - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
+#   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
+#   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
+#   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
 # - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
 #   付いていなければ gh pr merge --auto --squash を実行する
 #
@@ -116,6 +122,9 @@ jobs:
             echo "$REASONS"
             if [ -n "$ISSUE_NUMBER" ]; then
               gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+              COMMENT_BODY="⚠️ 以下の変更が含まれるため、自動マージ不可カテゴリに該当すると判定しました。マージ前に人間の確認をお願いします。"
+              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+              gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
             fi
           else
             echo "機械的リスク判定: 該当なし"
@@ -149,7 +158,7 @@ jobs:
           allowed_bots: "claude[bot]"
           additional_permissions: |
             actions: read
-          claude_args: '--allowedTools Bash(gh issue edit:*)'
+          claude_args: '--allowedTools "Bash(gh issue edit:*),Bash(gh issue comment:*)"'
           prompt: |
             develop向けPull Request（${{ github.repository }}/pull/${{ github.event.pull_request.number }}）を自動レビューしてください。
 
@@ -177,8 +186,12 @@ jobs:
             - 一次判定（機械的）: 同一ワークフロー内の`risk-check`ジョブが`git diff --name-only origin/develop...HEAD`のパスパターンで既に判定済み（該当時は対応Issueへの00.check-user付与も完了している）
             - 二次判定（意味的、あなたの担当）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
 
-            該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を実行してください。
-            `gh issue edit <対応Issue番号> --add-label "00.check-user"`
+            該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を両方実行してください
+            （ラベル付与だけでなくコメント投稿も必須。ユーザーがissue画面を見て理由が分かるようにするため）。
+            - `gh issue edit <対応Issue番号> --add-label "00.check-user"`
+            - `gh issue comment <対応Issue番号> --body "..."` で、該当すると判断した理由を日本語で
+              issueにコメント投稿する（risk-checkジョブが既にコメント済みの理由と重複してもよい。
+              あなたの判定はrisk-checkとは独立した二次判定のため）
 
             ## 出力
             レビュー結果は日本語で、以下の内容を含めてPRへのコメントとして投稿してください。
@@ -190,6 +203,27 @@ jobs:
             - PRのマージ・承認（Approve）は行わない
             - ラベル `03.d:marge` 等の状態遷移ラベルの付け替えは行わない（`00.check-user`の付与のみ許可）
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
+
+  claude-review-fallback:
+    needs: [identify-issue, claude-review]
+    if: always() && needs.claude-review.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: 自動レビュー失敗をPRに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -e
+          gh pr comment "$PR_NUMBER" --body "⚠️ 自動レビュー（claude-review）が実行できませんでした。Actionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          fi
 
   auto-merge:
     needs: [identify-issue, risk-check, claude-review]
