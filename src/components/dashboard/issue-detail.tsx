@@ -223,7 +223,7 @@ export function IssueDetail({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex max-w-3xl flex-col gap-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             {issue.repositoryFullName}
