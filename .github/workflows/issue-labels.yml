@@ -24,6 +24,13 @@ name: Issue Labels
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
 # develop-merge-sweepジョブはこれを取りこぼした03.d:margeをscheduleで定期的に拾い直す。
+#
+# cleanup-on-closeジョブは、上記の状態遷移(main-pr-mergedによる09.main遷移)を経由しない
+# Issueクローズ(例: 21.plan-requiredの計画をユーザーが承認・練り直しのいずれもせず、
+# `not planned`等の理由でIssueを直接クローズして実装自体を取りやめた場合)で、
+# `00.check-user`ラベルが「要確認」のまま残り続けるのを防ぐための安全網(issue #172)。
+# クローズ済みのIssueはclaude-issue-dispatch.ymlの全モードで再始動しないため
+# (`issue_closed`ガード)、`00.check-user`を除去してもワークフローが誤って再始動することはない。
 
 on:
   push:
@@ -34,6 +41,8 @@ on:
     branches:
       - develop
       - main
+  issues:
+    types: [closed]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
@@ -165,3 +174,17 @@ jobs:
             gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge"
             gh issue close "$n"
           done
+
+  cleanup-on-close:
+    # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
+    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が「要確認」のまま
+    # 残り続けないよう、クローズをトリガーに除去する。
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: 00.check-user を除去する
+        run: gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"

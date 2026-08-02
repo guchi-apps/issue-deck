@@ -13,6 +13,10 @@ name: Claude Issue Dispatch
 #      00.check-userはPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、
 #      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
 #      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
+#   3. 承認・練り直しのいずれもせず計画を拒否する場合は、人間がIssueを直接クローズする
+#      (`not planned`等の理由。コメントに@claudeを含める必要はない)。クローズ済みIssueは
+#      本ワークフローの全モードで再始動しないため(issue_closedガード)、クローズ後に
+#      issue-labels.ymlのcleanup-on-closeジョブが00.check-userを除去しても安全(issue #172)。
 #
 # 21.plan-requiredの計画提示ステップは、実装範囲が広くGitHub Actions上で一度に処理しきれない
 # 懸念がある場合、計画コメントをサブIssueへの分割案として提示できる(#144)。計画コメント末尾に
