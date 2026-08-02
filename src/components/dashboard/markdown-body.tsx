@@ -62,7 +62,7 @@ type MarkdownBodyProps = {
 
 export function MarkdownBody({ content, className, repositoryFullName }: MarkdownBodyProps) {
   return (
-    <div className={cn("text-[0.9375rem] leading-[1.9] break-words", className)}>
+    <div className={cn("font-body text-[0.9375rem] leading-[1.9] break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[

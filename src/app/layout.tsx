@@ -1,11 +1,15 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
-// Murechoは@fontsourceパッケージ（npm経由でフォントファイル本体を配布）で自己ホストする。
+// Murecho・BIZ UDPGothicは@fontsourceパッケージ（npm経由でフォントファイル本体を配布）で自己ホストする。
 // next/font/googleのCJKフォントはこの開発環境から fonts.gstatic.com に到達できずビルドが失敗するため使わない。
 import "@fontsource/murecho/400.css";
 import "@fontsource/murecho/500.css";
 import "@fontsource/murecho/600.css";
 import "@fontsource/murecho/700.css";
+// Issue本文・コメントのMarkdown表示（長文の読み物）専用。UI全体のMurechoより
+// 可読性を優先し、ユニバーサルデザインフォントのBIZ UDPGothicを使う。
+import "@fontsource/biz-udpgothic/400.css";
+import "@fontsource/biz-udpgothic/700.css";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
