@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
+import { remarkTrimCjkAutolink } from "@/lib/remark-trim-cjk-autolink";
 import { cn } from "@/lib/utils";
 
 const sanitizeSchema = {
@@ -64,7 +65,7 @@ export function MarkdownBody({ content, className, repositoryFullName }: Markdow
   return (
     <div className={cn("font-body text-[0.9375rem] leading-[1.9] break-words", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkTrimCjkAutolink, remarkBreaks]}
         rehypePlugins={[
           rehypeRaw,
           [rehypeLinkifyIssueRefs, { repositoryFullName }],
