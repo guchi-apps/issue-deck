@@ -61,6 +61,10 @@ async function handleIssueCommentEvent(payload: {
   issue: GithubApiIssue;
   repository: { id: number };
 }) {
+  // issue_commentイベントはPRへのコメントでも発火する（GitHub内部ではPRもissueの一種のため）。
+  // PRはissue一覧の対象外なので、pull_requestキーを持つペイロードは無視する。
+  if (payload.issue.pull_request) return;
+
   const repository = await db.repository.findUnique({
     where: { githubRepositoryId: payload.repository.id },
   });
