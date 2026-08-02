@@ -15,11 +15,12 @@ name: Release develop to main
 # - main版 != develop版: バンプPRが既にdevelopへマージ済み。develop→mainのPRが
 #   無ければ新規に作成する。
 #
-# バージョンの上げ幅（patch/minor）は、現在`05.develop`または`07.m:marge`が付いている
+# バージョンの上げ幅（major/minor/patch）は、現在`05.develop`または`07.m:marge`が付いている
 # （＝developへマージ済みだがmain未反映の）issueのラベルから機械的に判定する。
+# `52.breaking`（後方互換性を壊す変更）が1件でも含まれていればmajor、無ければ
 # `50.feature`（新機能の追加）が1件でも含まれていればminor、それ以外はpatchとする。
-# 大規模な変更やbreaking changeの判断はこのラベルだけでは表現できないため、判断が
-# つかない場合はrelease-to-mainスキルどおり人間がPRのバージョンを修正する想定。
+# それでも判断がつかない・誤っていると思われる場合はrelease-to-mainスキルどおり
+# 人間がPRのバージョンを修正する想定。
 
 on:
   pull_request:
@@ -125,6 +126,9 @@ jobs:
           )"
           echo "$ISSUES_JSON" > /tmp/release-issues.json
 
+          HAS_BREAKING="$(echo "$ISSUES_JSON" | jq '[.[] | select([.labels[].name] | contains(["52.breaking"]))] | length > 0')"
+          echo "has_breaking=$HAS_BREAKING" >> "$GITHUB_OUTPUT"
+
           HAS_FEATURE="$(echo "$ISSUES_JSON" | jq '[.[] | select([.labels[].name] | contains(["50.feature"]))] | length > 0')"
           echo "has_feature=$HAS_FEATURE" >> "$GITHUB_OUTPUT"
 
@@ -141,12 +145,18 @@ jobs:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           MAIN_VERSION: ${{ steps.state.outputs.main_version }}
+          HAS_BREAKING: ${{ steps.issues.outputs.has_breaking }}
           HAS_FEATURE: ${{ steps.issues.outputs.has_feature }}
         run: |
           set -e
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$MAIN_VERSION"
-          if [ "$HAS_FEATURE" = "true" ]; then
+          if [ "$HAS_BREAKING" = "true" ]; then
+            BUMP_KIND=major
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$HAS_FEATURE" = "true" ]; then
             BUMP_KIND=minor
             MINOR=$((MINOR + 1))
             PATCH=0
@@ -157,10 +167,12 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           BRANCH="release/v$NEW_VERSION"
 
-          if [ "$BUMP_KIND" = "minor" ]; then
+          if [ "$BUMP_KIND" = "major" ]; then
+            REASON="対象issueに \`52.breaking\`（後方互換性を壊す変更）が含まれるため"
+          elif [ "$BUMP_KIND" = "minor" ]; then
             REASON="対象issueに \`50.feature\`（新機能の追加）が含まれるため"
           else
-            REASON="対象issueに \`50.feature\`（新機能の追加）が含まれないため"
+            REASON="対象issueに \`52.breaking\`・\`50.feature\`のいずれも含まれないため"
           fi
 
           git checkout -b "$BRANCH" origin/develop
