@@ -88,6 +88,7 @@ export function TopBar({
         <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Issueを検索..."
+          title='検索式が使えます（例: label:bug -label:wontfix is:open assignee:octocat）。トークン以外の文字列はタイトル・本文の部分一致になります。'
           className="pl-8"
           value={filters.q}
           onChange={(e) => setFilter("q", e.target.value)}
