@@ -257,7 +257,6 @@ export function IssueDeckShell({
           <div className="flex-1 overflow-hidden">
             {mobileScreen.kind === "home" && (
               <MobileHomeScreen
-                labelSummary={labelSummary}
                 overviewStats={overviewStats}
                 navCounts={navCounts}
                 onSelectQuickView={selectQuickView}
