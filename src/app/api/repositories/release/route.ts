@@ -77,6 +77,7 @@ export async function GET(request: NextRequest) {
       await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
       return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
     }
+    console.error(`[GET /api/repositories/release] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
@@ -116,6 +117,7 @@ export async function POST(request: NextRequest) {
       await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
       return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
     }
+    console.error(`[POST /api/repositories/release] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
