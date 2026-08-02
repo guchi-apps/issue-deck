@@ -14,6 +14,19 @@ name: Claude Issue Dispatch
 #      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
 #      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
 #
+# 21.plan-requiredの計画提示ステップは、実装範囲が広くGitHub Actions上で一度に処理しきれない
+# 懸念がある場合、計画コメントをサブIssueへの分割案として提示できる(#144)。計画コメント末尾に
+# 埋め込む<!-- issue-deck-plan-type:implement|split -->マーカーにより、00.check-user解除時に
+# 実装(mode=implement)を始めるかサブIssueへの分割(mode=split)を始めるかを判定する。
+# mode=splitでは、承認済みの計画コメントに沿って`gh issue create`でサブIssueを作成し、元Issue
+# にサブIssue一覧をコメントしたうえで元Issueを`not planned`理由でクローズする。サブIssueへの
+# 実際の着手は、これまでどおり人間が各サブIssueに`@claude`とコメントして個別に起動する
+# (自動連鎖起動はしない)。
+#
+# クローズ済みのIssueに対する@claudeコメント・ラベル操作では、実装・計画・分割のいずれも
+# 再始動しない(mode=skip)。上記の分割で元Issueがクローズされた後に誤って再始動しないための
+# ガードだが、通常の09.mainクローズ後のIssueにも同様に適用される。
+#
 # issue-<番号>ブランチが既に存在する場合でも、対応するdevelop向けPRがOPENの状態で人間が
 # @claudeコメントを投稿した場合は、mode=additional(追加対応)として扱う(#129)。00.check-userの
 # 有無は問わない(Phase4の要確認判定と、人間からの追加依頼は独立した文脈のため)。既存ブランチに
@@ -139,6 +152,13 @@ jobs:
           BRANCH="issue-$ISSUE_NUMBER"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
+          # クローズ済みのIssueは実装・計画・分割のいずれも再始動しない。分割(#144)で元Issueが
+          # クローズされた後の誤爆防止が主目的だが、09.mainクローズ後のIssue全般にも適用される。
+          ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
+          ISSUE_CLOSED=false
+          [ "$ISSUE_STATE" = "CLOSED" ] && ISSUE_CLOSED=true
+          echo "issue_closed=$ISSUE_CLOSED" >> "$GITHUB_OUTPUT"
+
           BRANCH_EXISTS=false
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             BRANCH_EXISTS=true
@@ -179,7 +199,9 @@ jobs:
           #   従来どおりmode=skipとし、実装は再始動しない。
           MODE=skip
           IS_RETRY=false
-          if [ "$BRANCH_EXISTS" = "true" ]; then
+          if [ "$ISSUE_CLOSED" = "true" ]; then
+            MODE=skip
+          elif [ "$BRANCH_EXISTS" = "true" ]; then
             if [ "$PR_STATE" = "OPEN" ] && [ "$EVENT_NAME" = "issue_comment" ]; then
               MODE=additional
             elif [ -z "$PR_STATE" ] && [ "$WIP" = "true" ]; then
@@ -190,8 +212,17 @@ jobs:
               MODE=skip
             fi
           elif [ "$EVENT_NAME" = "issues" ] && [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "00.check-user" ]; then
-            # 人間が計画を確認し00.check-userを外した = 承認
-            MODE=implement
+            # 人間が計画を確認し00.check-userを外した = 承認。直前の計画コメントに埋め込まれた
+            # <!-- issue-deck-plan-type:implement|split -->マーカーから、そのまま実装するか
+            # サブIssueへ分割するかを判定する(#144)。マーカーが無い場合(旧形式の計画コメントや
+            # フォールバック通知のみの場合)はimplementにフォールバックする。
+            PLAN_TYPE="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' | grep -oP '(?<=<!-- issue-deck-plan-type:)(implement|split)(?= -->)' | tail -n1 || true)"
+            : "${PLAN_TYPE:=implement}"
+            if [ "$PLAN_TYPE" = "split" ]; then
+              MODE=split
+            else
+              MODE=implement
+            fi
           elif [ "$AWAITING_CONFIRM" = "true" ]; then
             # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
             if [ "$EVENT_NAME" = "issue_comment" ]; then
@@ -205,14 +236,14 @@ jobs:
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "is_retry=$IS_RETRY" >> "$GITHUB_OUTPUT"
-          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE is_retry=$IS_RETRY"
+          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE is_retry=$IS_RETRY issue_closed=$ISSUE_CLOSED"
 
       - name: 対応開始をコメントで通知する
         # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
         # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
         # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
-        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -220,6 +251,8 @@ jobs:
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
             BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+          elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
+            BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
           elif [ "${{ steps.state.outputs.is_retry }}" = "true" ]; then
             BODY="🔧 前回の実装が完了しなかった可能性があるため、\`${{ steps.state.outputs.branch }}\` ブランチを作り直して実装を再試行します。"
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
@@ -239,14 +272,22 @@ jobs:
         # issue_commentトリガー(人間が直接@claudeへ呼びかけたケース)に限り、これまでの
         # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの
         # 同条件のskip(Phase4の要確認判定など)は人間への呼びかけではないため対象外。
+        # Issueがクローズ済み(issue_closed=true)の場合も同様の理由で返信する(#144の分割で
+        # クローズされたIssueへの呼びかけ等、branch_existsがfalseのケースを含む)。
         if: |
           steps.state.outputs.mode == 'skip' &&
-          steps.state.outputs.branch_exists == 'true' &&
-          github.event_name == 'issue_comment'
+          github.event_name == 'issue_comment' &&
+          (steps.state.outputs.branch_exists == 'true' || steps.state.outputs.issue_closed == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          if [ "${{ steps.state.outputs.issue_closed }}" = "true" ]; then
+            BODY='ℹ️ このIssueは既にクローズされています。分割により対応が複数のサブIssueに分かれている場合、コメント欄でリンクをご確認ください。'
+            BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。人間が対応してください。'
+            gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+            exit 0
+          fi
           BRANCH="${{ steps.state.outputs.branch }}"
           PR_URL="$(gh pr list --head "$BRANCH" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)"
           BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。"
@@ -285,28 +326,48 @@ jobs:
             - リポジトリのコードを調査し、対応方針・変更範囲（触るファイル・追加するファイル）・懸念点を
               日本語でまとめる
             - 直前のコメントで計画への修正依頼が来ている場合は、それを踏まえて計画を練り直す
+            - 実装範囲が広く、GitHub Actions上の1回の実装ステップで最後まで処理しきれない懸念がある
+              場合は、無理に一つの計画に収めようとせず、下記「分割するかどうかの判断」に従って
+              サブIssueへの分割を計画してよい
             - まとめた計画を `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
-              Issueにコメント投稿する。コメント末尾に、このワークフロー実行への追跡用リンクとして
+              Issueにコメント投稿する。コメント本文の末尾に、下記の計画種別マーカーと、このワークフロー
+              実行への追跡用リンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
             - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
               （既に付いていても無害なので毎回実行してよい）
 
+            ## 分割するかどうかの判断とマーカー
+            計画コメントの末尾に、判断結果に応じて次のいずれか1つのHTMLコメントマーカーを必ず含めて
+            ください。人間が`00.check-user`を外して承認した後、別のワークフロー実行がこのマーカーを
+            読み取ってそのまま実装するかサブIssueへ分割するかを自動的に振り分けます。
+
+            - このIssueのまま1つのPull Requestとして実装できると判断した場合:
+              `<!-- issue-deck-plan-type:implement -->`
+            - 実装範囲が広く、複数のサブIssueに分割してそれぞれ独立に実装すべきと判断した場合:
+              `<!-- issue-deck-plan-type:split -->`
+              - この場合、計画コメント本文に分割後の各サブIssue案（タイトル案・スコープ・実装順序や
+                依存関係があればそれも）を箇条書きで明記すること。承認後、別のワークフロー実行がこの
+                計画コメントを読んでサブIssueを実際に作成するため、その内容がそのままサブIssue作成の
+                元になります
+              - 分割後の1つのサブIssueもなお複雑だと判断される場合、そのサブIssue案の中に
+                「このサブIssueには21.plan-requiredが必要」と書き添えてよい（実際のラベル付与は
+                分割を実行するステップが行う）
+
             ## 迷った場合・調査に行き詰まった場合の振る舞い
             - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
               分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
               （コメントを一切投稿できないまま終了することが最悪の結果のため）
-            - 実装範囲が広く一度の計画にまとめきれないと判断した場合は、無理に一つの計画に収めようとせず、
-              Issueを複数に分割して段階的に進めることを計画コメントの中で提案してよい
-              （実際にIssueを分割する作業はこのステップでは行わず、提案に留める）
 
             ## このステップでは行わないこと
-            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ）
+            - コードの変更・コミット・ブランチ作成・PR作成・Issueの新規作成は一切行わない（計画提示のみ。
+              分割を計画した場合も、実際のサブIssue作成はこのステップでは行わない）
 
             ## 次に起きること
             人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と
-            みなし、別のワークフロー実行が実装を開始します。計画に修正が必要な場合は、人間が
-            `@claude` 宛にコメントで指摘するので、その場合はこのステップが再び起動し計画を練り直します。
+            みなし、別のワークフロー実行が、上記マーカーに応じて実装（`implement`）またはサブIssueの
+            作成（`split`）を開始します。計画に修正が必要な場合は、人間が`@claude`宛にコメントで指摘するので、
+            その場合はこのステップが再び起動し計画を練り直します。
 
       - name: 計画コメント投稿を検証し、必要ならフォールバックする
         if: always() && steps.state.outputs.mode == 'plan'
@@ -325,6 +386,87 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
+          gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+
+      - name: 分割前のコメント数を記録する
+        id: before_split
+        if: steps.state.outputs.mode == 'split'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Claude Code（分割）
+        if: steps.state.outputs.mode == 'split'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"'
+          prompt: |
+            あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} は、
+            人間が承認済みの計画（直前の`<!-- issue-deck-plan-type:split -->`マーカー付きコメント）により、
+            このIssueのまま実装せず複数のサブIssueに分割することが決まっています。この分割を実行してください。
+
+            ## 最初にやること
+            `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの本文と、承認済みの
+            計画コメント（分割後の各サブIssue案）を確認してください。
+
+            ## やること
+            - 計画コメントに記載されたサブIssue案それぞれについて、
+              `gh issue create --title "..." --body "..."` でサブIssueを作成する
+              - 本文には「分割元: #${{ steps.state.outputs.issue_number }}」を含め、元Issueを読み返さなくても
+                単独で着手できる程度に、対応するスコープの背景・要件を書く
+              - 計画コメントでそのサブIssueにも`21.plan-required`が必要と書かれている場合は
+                `--label "21.plan-required"`を付ける
+              - 元Issueに`22.preview-required`または`23.screenshot-required`が付いており、かつそのサブIssue
+                が画面に関わる変更を含む場合は、該当するラベルを引き継ぐ
+              - 一度に作成するサブIssueは目安として6件程度までとする。計画がそれを超える数の分割を
+                提案している場合、無理に全部作らず作成できた分にとどめ、残りは後述の親Issueコメントで
+                「追って検討が必要」である旨を明記する
+            - 全て作成したら `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
+              元Issueに作成したサブIssue一覧（`#番号`の形式で書けば自動的にリンクされる）をコメントする。
+              コメント末尾に実行ログのリンク
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
+            - 最後に `gh issue close ${{ steps.state.outputs.issue_number }} --reason "not planned"` を実行し、
+              元Issueをクローズする（元Issueは今後このままでは実装されず、作業は上記サブIssueへ引き継がれる
+              ことを明示するため）
+
+            ## 迷った場合・行き詰まった場合の振る舞い
+            - 許可されていない操作が拒否される等で行き詰まった場合、それ以上粘らず、その時点で作成できた
+              サブIssue（0件でもよい）と状況を元Issueにコメントすることを最優先する
+              （コメントを一切投稿できないまま終了することが最悪の結果のため）。この場合、元Issueの
+              クローズは行わず、人間が状況を確認できるよう開いたままにする
+
+            ## このステップでは行わないこと
+            - サブIssueへの`@claude`コメント投稿など、サブIssueの実装を自動的に開始させる操作は行わない
+              （サブIssueの着手はこれまでどおり人間が個別に`@claude`とコメントして起動する）
+            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない
+
+      - name: 分割結果を検証し、必要ならフォールバックする
+        # 計画コメント投稿の検証と同じ考え方。サブIssue作成後の親Issueコメントが確認できない場合、
+        # 途中で行き詰まった可能性があるためフォールバック通知を投稿する。
+        if: always() && steps.state.outputs.mode == 'split'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before_split.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため分割の完了または途中経過の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
+          FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
