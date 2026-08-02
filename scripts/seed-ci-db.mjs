@@ -5,10 +5,18 @@
 //
 // 実行前に `prisma migrate deploy` でスキーマを適用しておくこと。
 // 使い方: DATABASE_URL=mysql://... node scripts/seed-ci-db.mjs
+//
+// scripts/ci-seed-user.mjs（#257）が作成するCIバイパス用ユーザー（存在する場合）を
+// 投入したGithubInstallationにUserInstallationとして紐付ける(#258)。この紐付けが無いと
+// /dashboardのリポジトリ・Issue取得はいずれもUserInstallation経由の絞り込みで空になり、
+// CIバイパスでログインしても画面に何も表示されない。
 
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+// src/lib/ci-auth-bypass.ts の CI_BYPASS_SUPABASE_USER_ID と一致させること。
+const CI_BYPASS_SUPABASE_USER_ID = "ci-screenshot-bot";
 
 const INSTALLATION_ID = 900000001;
 const REPOSITORY_GITHUB_ID = 900000001;
@@ -70,6 +78,21 @@ async function main() {
       defaultBranch: "main",
     },
   });
+
+  const ciUser = await prisma.user.findUnique({
+    where: { supabaseUserId: CI_BYPASS_SUPABASE_USER_ID },
+  });
+  if (ciUser) {
+    await prisma.userInstallation.upsert({
+      where: { userId_installationId: { userId: ciUser.id, installationId: installation.id } },
+      update: {},
+      create: { userId: ciUser.id, installationId: installation.id },
+    });
+  } else {
+    console.warn(
+      `CIバイパス用ユーザー（supabaseUserId=${CI_BYPASS_SUPABASE_USER_ID}）が見つからないため、UserInstallationの紐付けをスキップしました。先にscripts/ci-seed-user.mjsを実行してください。`,
+    );
+  }
 
   for (const { labels, ...issueData } of ISSUES) {
     const githubIssueId = BigInt(REPOSITORY_GITHUB_ID) * 1000n + BigInt(issueData.number);
