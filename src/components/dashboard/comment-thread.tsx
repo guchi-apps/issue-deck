@@ -119,6 +119,12 @@ function ApprovalActions({
             placeholder="修正依頼を入力（任意）"
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !busy) {
+                e.preventDefault();
+                submitReject();
+              }
+            }}
             autoFocus
           />
           <div className="flex justify-end gap-2">
