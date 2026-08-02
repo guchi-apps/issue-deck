@@ -279,7 +279,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
           </div>
         </div>
 
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-lg font-semibold break-words">
           #{issue.number} {issue.title}
         </h1>
 
