@@ -1,10 +1,11 @@
 "use client";
 
-import { Archive, CircleAlert, Lock, MessageSquare, Star } from "lucide-react";
+import { Archive, CircleAlert, Loader2, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
+import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,8 @@ export function IssueList({
   showSearch = true,
   showHeader = true,
 }: IssueListProps) {
+  const runningByIssueId = useIssuesWorkflowRunning(issues);
+
   return (
     <div className={cn("flex h-full flex-col", className)}>
       {showSearch && (
@@ -92,6 +95,12 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
+                    {runningByIssueId[issue.id] && (
+                      <Loader2
+                        className="size-3.5 animate-spin text-primary"
+                        aria-label="GitHub Actions実行中"
+                      />
+                    )}
                     <WorkflowStepBadge labels={issue.labels} />
                     {issue.favorite && (
                       <Star
