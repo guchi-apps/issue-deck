@@ -16,6 +16,7 @@ export type IssueFilters = {
   labels: string[];
   assignee: string | null;
   sort: IssueSort;
+  inProgressOnly: boolean;
 };
 
 const DEFAULT_FILTERS: IssueFilters = {
@@ -26,6 +27,7 @@ const DEFAULT_FILTERS: IssueFilters = {
   labels: [],
   assignee: null,
   sort: "created",
+  inProgressOnly: false,
 };
 
 function applyFilterParam<K extends keyof IssueFilters>(
@@ -79,6 +81,7 @@ export function useIssueFilters() {
       labels: labelsParam ? labelsParam.split(",").filter(Boolean) : [],
       assignee: searchParams.get("assignee"),
       sort: sortParam === "updated" ? "updated" : DEFAULT_FILTERS.sort,
+      inProgressOnly: searchParams.get("inProgressOnly") === "true",
     };
   }, [searchParams]);
 

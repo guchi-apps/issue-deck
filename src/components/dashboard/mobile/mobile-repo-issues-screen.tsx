@@ -39,6 +39,7 @@ export function MobileRepoIssuesScreen({
     labels: [],
     assignee: null,
     sort: "created",
+    inProgressOnly: false,
   });
 
   const repoIssues = useMemo(
@@ -53,6 +54,7 @@ export function MobileRepoIssuesScreen({
       state: localFilters.state,
       labels: localFilters.labels,
       assignee: localFilters.assignee,
+      inProgressOnly: localFilters.inProgressOnly,
     });
     return sortIssues(filtered, localFilters.sort);
   }, [repoIssues, localFilters]);

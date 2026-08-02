@@ -10,6 +10,7 @@ export type MobileIssueLocalFilters = {
   labels: string[];
   assignee: string | null;
   sort: IssueSort;
+  inProgressOnly: boolean;
 };
 
 type MobileIssueFilterSheetProps = {
@@ -81,6 +82,18 @@ export function MobileIssueFilterSheet({
                 onClick={() => onChange({ ...filters, state: "closed" })}
               >
                 Closed
+              </Pill>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
+            <div className="flex flex-wrap gap-2">
+              <Pill
+                active={filters.inProgressOnly}
+                onClick={() => onChange({ ...filters, inProgressOnly: !filters.inProgressOnly })}
+              >
+                実装中のみ
               </Pill>
             </div>
           </section>
