@@ -43,7 +43,12 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
-import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import {
+  approveCommentBody,
+  isApprovalPending,
+  isMergeApprovalPending,
+  labelsAfterApproval,
+} from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -167,7 +172,7 @@ export function IssueDetail({
       owner,
       repo,
       number: issue.number,
-      body: APPROVE_COMMENT_BODY,
+      body: approveCommentBody(issue.labels),
     });
     if (created) {
       setComments((prev) => [...prev, created]);
@@ -359,6 +364,8 @@ export function IssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+            pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
             isApproving={isSubmitting}
