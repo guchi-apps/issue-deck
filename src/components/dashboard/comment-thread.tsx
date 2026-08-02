@@ -27,6 +27,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { isBotComment } from "@/lib/github/is-bot-comment";
+import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssueComment } from "@/types/issue";
 
 type CommentThreadProps = {
@@ -39,8 +40,12 @@ type CommentThreadProps = {
   onDelete: (commentId: string) => Promise<boolean>;
   /** trueの場合、コメントの編集保存中であることを示す（保存ボタン・テキスト欄を無効化する） */
   isUpdating?: boolean;
-  /** trueの場合、直近のbotコメントの下に承認・却下ボタンを表示する（00.check-userラベルが付いているissue用） */
+  /** trueの場合、直近のbotコメントの下に承認・却下ボタン（またはPRマージ案内）を表示する（00.check-userラベルが付いているissue用） */
   approvalPending?: boolean;
+  /** trueの場合、承認・却下ボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
+  mergeApprovalPending?: boolean;
+  /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク。取得できない場合はnull */
+  pullRequestLink?: PullRequestLink | null;
   onApprove?: () => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   isApproving?: boolean;
@@ -52,11 +57,15 @@ function ApprovalActions({
   onReject,
   isApproving,
   isRejecting,
+  mergeApprovalPending,
+  pullRequestLink,
 }: {
   onApprove: () => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
   isApproving?: boolean;
   isRejecting?: boolean;
+  mergeApprovalPending?: boolean;
+  pullRequestLink?: PullRequestLink | null;
 }) {
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -66,6 +75,27 @@ function ApprovalActions({
     await onReject(rejectReason);
     setIsRejectOpen(false);
     setRejectReason("");
+  }
+
+  if (mergeApprovalPending) {
+    return (
+      <div className="mt-3 rounded-lg border border-dashed p-3">
+        <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
+        <p className="text-sm text-muted-foreground">
+          GitHub上で内容を確認のうえマージしてください。
+        </p>
+        {pullRequestLink && (
+          <a
+            href={pullRequestLink.url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2"
+          >
+            対応PR #{pullRequestLink.number}
+          </a>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -114,6 +144,8 @@ export function CommentThread({
   onDelete,
   isUpdating,
   approvalPending,
+  mergeApprovalPending,
+  pullRequestLink,
   onApprove,
   onReject,
   isApproving,
@@ -151,6 +183,8 @@ export function CommentThread({
             onReject={onReject}
             isApproving={isApproving}
             isRejecting={isRejecting}
+            mergeApprovalPending={mergeApprovalPending}
+            pullRequestLink={pullRequestLink}
           />
         )}
       </>
@@ -275,6 +309,8 @@ export function CommentThread({
                   onReject={onReject}
                   isApproving={isApproving}
                   isRejecting={isRejecting}
+                  mergeApprovalPending={mergeApprovalPending}
+                  pullRequestLink={pullRequestLink}
                 />
               )}
             </div>
@@ -287,6 +323,8 @@ export function CommentThread({
           onReject={onReject}
           isApproving={isApproving}
           isRejecting={isRejecting}
+          mergeApprovalPending={mergeApprovalPending}
+          pullRequestLink={pullRequestLink}
         />
       )}
 
