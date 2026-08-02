@@ -594,6 +594,14 @@ jobs:
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
               （`01.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
               必要なため人間の確認を待っています」旨を`gh issue comment`で投稿して停止してください。
+              - `22.preview-required`が付いている場合は、このコメントに開発サーバーのプレビューURLも
+                あわせて記載する。無人実行では実際にdevサーバーを起動できないため、人間が手元で
+                ブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
+                `docs/multi-agent-workflow.md`のポート割り当て規約（`PORT=4000 + Issue番号`。本Issueの
+                番号は${{ steps.state.outputs.issue_number }}）に従い、以下の2形式で案内する。
+                ・`http://localhost:<ポート>`
+                ・`http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`（同一LAN上の別端末から確認する
+                場合。IPアドレスは人間が手元の環境に合わせて読み替える）
               - `implement`の場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` の内容を確認の
                 うえ、問題なければ手動でPRを作成してください」
               - `additional`の場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` に追加コミット
