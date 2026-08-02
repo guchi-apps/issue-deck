@@ -18,9 +18,16 @@ export type ReleaseStatus =
       releasePullRequest: ReleasePullRequest | null;
     };
 
-function errorMessageForResponse(status: number, errorCode: string | undefined): string {
+function errorMessageForResponse(
+  status: number,
+  errorCode: string | undefined,
+  message: string | undefined,
+): string {
   if (errorCode === "github_reauth_required") {
     return "GitHub連携が必要です。再ログインしてください。";
+  }
+  if (errorCode === "github_api_error" && message) {
+    return message;
   }
   return `リクエストに失敗しました (${status})`;
 }
@@ -46,7 +53,7 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
     fetch(`/api/repositories/release?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(errorMessageForResponse(res.status, json.error));
+        if (!res.ok) throw new Error(errorMessageForResponse(res.status, json.error, json.message));
         return json as ReleaseStatus;
       })
       .then((json) => {
@@ -77,7 +84,7 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
         body: JSON.stringify({ owner, repo }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(errorMessageForResponse(res.status, json.error));
+      if (!res.ok) throw new Error(errorMessageForResponse(res.status, json.error, json.message));
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

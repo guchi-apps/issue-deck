@@ -1,4 +1,4 @@
-import { GithubApiError } from "@/lib/github/issues-api";
+import { GithubApiError } from "@/lib/github/github-api-error";
 
 const GITHUB_API = "https://api.github.com";
 

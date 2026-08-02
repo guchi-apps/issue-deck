@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       assignees: assignees.map((assignee) => assignee.login),
     });
   } catch (error) {
+    console.error(`[GET /api/issues/meta] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

@@ -1,3 +1,5 @@
+import { GithubApiError } from "@/lib/github/github-api-error";
+
 function getNextUrl(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
   const parts = linkHeader.split(",");
@@ -26,7 +28,8 @@ export async function fetchAllPages<T>(
     });
 
     if (!res.ok) {
-      throw new Error(`GitHub API request failed: ${res.status} ${url}`);
+      const detail = await res.text().catch(() => "");
+      throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
     }
 
     const page: T[] = await res.json();

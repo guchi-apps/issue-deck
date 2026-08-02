@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
     if (error instanceof GithubApiError && error.status === 404) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+    console.error(`[GET /api/issues/workflow-run] ${owner}/${repo} run ${runIdParam}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
