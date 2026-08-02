@@ -98,11 +98,21 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {runningByIssueId[issue.id] && (
-                      <Loader2
-                        className="size-3.5 animate-spin text-primary"
-                        aria-label="GitHub Actions実行中"
-                      />
+                    {runningByIssueId[issue.id]?.isRunning && (
+                      <span className="flex items-center gap-1">
+                        {runningByIssueId[issue.id]?.currentStep && (
+                          <span
+                            className="max-w-[7rem] truncate text-[10px] text-muted-foreground"
+                            title={runningByIssueId[issue.id]?.currentStep ?? undefined}
+                          >
+                            {runningByIssueId[issue.id]?.currentStep}
+                          </span>
+                        )}
+                        <Loader2
+                          className="size-3.5 animate-spin text-primary"
+                          aria-label="GitHub Actions実行中"
+                        />
+                      </span>
                     )}
                     <WorkflowStepBadge labels={issue.labels} />
                     {issue.favorite && (
