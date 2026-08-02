@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Check, MoreHorizontal, Pencil, ThumbsUp, Trash2, X } from "lucide-react";
+import { Check, Loader2, MoreHorizontal, Pencil, ThumbsUp, Trash2, X } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
@@ -37,6 +37,8 @@ type CommentThreadProps = {
   issueSuggestions: IssueSuggestion[];
   onUpdate: (commentId: string, body: string) => Promise<boolean>;
   onDelete: (commentId: string) => Promise<boolean>;
+  /** trueの場合、コメントの編集保存中であることを示す（保存ボタン・テキスト欄を無効化する） */
+  isUpdating?: boolean;
   /** trueの場合、直近のbotコメントの下に承認・却下ボタンを表示する（00.check-userラベルが付いているissue用） */
   approvalPending?: boolean;
   onApprove?: () => Promise<void> | void;
@@ -110,6 +112,7 @@ export function CommentThread({
   issueSuggestions,
   onUpdate,
   onDelete,
+  isUpdating,
   approvalPending,
   onApprove,
   onReject,
@@ -224,6 +227,7 @@ export function CommentThread({
                     value={editBody}
                     onChange={setEditBody}
                     issueSuggestions={issueSuggestions}
+                    disabled={isUpdating}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
                         e.preventDefault();
@@ -233,11 +237,16 @@ export function CommentThread({
                     autoFocus
                   />
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={cancelEdit}>
+                    <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
                       キャンセル
                     </Button>
-                    <Button size="sm" onClick={() => saveEdit(comment.id)} disabled={!editBody.trim()}>
-                      保存
+                    <Button
+                      size="sm"
+                      onClick={() => saveEdit(comment.id)}
+                      disabled={!editBody.trim() || isUpdating}
+                    >
+                      {isUpdating && <Loader2 className="animate-spin" />}
+                      {isUpdating ? "保存中..." : "保存"}
                     </Button>
                   </div>
                 </div>
