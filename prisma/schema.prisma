@@ -122,14 +122,22 @@ enum IssueState {
   CLOSED
 }
 
+// GitHubのstate_reason（Issueがクローズ/オープンされた理由）
+enum IssueStateReason {
+  COMPLETED
+  NOT_PLANNED
+  REOPENED
+}
+
 model Issue {
-  id              String     @id @default(cuid())
-  githubIssueId   BigInt     @unique
+  id              String            @id @default(cuid())
+  githubIssueId   BigInt            @unique
   repositoryId    String
   number          Int
-  title           String     @db.Text
-  body            String?    @db.Text
+  title           String            @db.Text
+  body            String?           @db.Text
   state           IssueState
+  stateReason     IssueStateReason?
   htmlUrl         String
   authorLogin     String
   assigneeLogin   String?

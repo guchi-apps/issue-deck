@@ -4,7 +4,7 @@ import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
 import type { Issue } from "@/types/issue";
-import type { IssueState } from "@prisma/client";
+import type { IssueState, IssueStateReason } from "@prisma/client";
 
 type RepoForSync = {
   id: string;
@@ -33,6 +33,21 @@ function toIssueState(state: "open" | "closed"): IssueState {
   return state === "open" ? "OPEN" : "CLOSED";
 }
 
+function toIssueStateReason(
+  stateReason: GithubApiIssue["state_reason"],
+): IssueStateReason | null {
+  switch (stateReason) {
+    case "completed":
+      return "COMPLETED";
+    case "not_planned":
+      return "NOT_PLANNED";
+    case "reopened":
+      return "REOPENED";
+    default:
+      return null;
+  }
+}
+
 async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
   const githubUpdatedAt = new Date(raw.updated_at);
 
@@ -49,6 +64,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     title: raw.title,
     body: raw.body,
     state: toIssueState(raw.state),
+    stateReason: toIssueStateReason(raw.state_reason),
     htmlUrl: raw.html_url,
     authorLogin: raw.user?.login ?? "unknown",
     assigneeLogin: raw.assignee?.login ?? null,

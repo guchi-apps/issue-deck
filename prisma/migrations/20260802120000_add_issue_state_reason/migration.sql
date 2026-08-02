@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `Issue` ADD COLUMN `stateReason` ENUM('COMPLETED', 'NOT_PLANNED', 'REOPENED') NULL;
