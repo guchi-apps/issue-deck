@@ -80,7 +80,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
 ### GitHub Actionsによるラベル遷移の自動化
 
@@ -408,14 +408,12 @@ major/minor/patchのいずれでもない不正な場合はpatchにフォール�
 
 ### トリガー
 
-- `develop`向けPRのマージ（`pull_request: closed`、`base: develop`）: 何らかの変更が
-  developへマージされるたびに、バージョンbumpやdevelop→mainのPR作成が必要になっていないか
-  即座に確認する。
-- `schedule`（15分おき）: `issue-labels.yml`の`develop-merge-sweep`と同じ間隔の安全網。
-  GitHub Auto-mergeによるマージ等で上記イベントを取りこぼした場合に拾い直す。
-- `workflow_dispatch`: 手動実行用。
+`workflow_dispatch`（手動実行）のみ。バンプPR・develop→mainのPR作成は人間の確認なしに
+走ってしまうため、developへのPRマージや`schedule`による自動起動はしない（#178）。人間が
+GitHub ActionsのUIから`Run workflow`で明示的に実行する。
 
-同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
+同時実行による二重作成を避けるため、`concurrency`グループで直列化している（手動実行のみの
+現在でも、短時間に複数回実行された場合の安全網として維持している）。
 
 ### 自動マージされないことの担保
 
