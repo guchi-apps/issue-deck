@@ -16,6 +16,7 @@ import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-de
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
@@ -58,8 +59,15 @@ export function IssueDeckShell({
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
-  const { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack } =
-    useMobileScreen(issues, repositories);
+  const {
+    mobileScreen,
+    isPending: isMobileScreenPending,
+    selectTab,
+    selectRepository,
+    selectIssue,
+    selectQuickView,
+    goBack,
+  } = useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
@@ -265,66 +273,72 @@ export function IssueDeckShell({
         {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
         <div className="flex flex-1 flex-col overflow-hidden md:hidden">
           <div className="flex-1 overflow-hidden">
-            {mobileScreen.kind === "home" && (
-              <MobileHomeScreen
-                overviewStats={overviewStats}
-                navCounts={navCounts}
-                onSelectQuickView={selectQuickView}
-                quickFilters={quickFilters}
-                onSelectQuickFilter={handleSelectQuickFilterMobile}
-                onDeleteQuickFilter={handleDeleteQuickFilter}
-                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-              />
-            )}
+            {isMobileScreenPending ? (
+              <MobileScreenSkeleton />
+            ) : (
+              <>
+                {mobileScreen.kind === "home" && (
+                  <MobileHomeScreen
+                    overviewStats={overviewStats}
+                    navCounts={navCounts}
+                    onSelectQuickView={selectQuickView}
+                    quickFilters={quickFilters}
+                    onSelectQuickFilter={handleSelectQuickFilterMobile}
+                    onDeleteQuickFilter={handleDeleteQuickFilter}
+                    onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+                  />
+                )}
 
-            {mobileScreen.kind === "issues" && (
-              <MobileIssuesScreen
-                key={mobileScreen.view}
-                issues={issues}
-                currentUserLogin={currentUserLogin}
-                labelSummary={labelSummary}
-                assigneeOptions={assigneeOptions}
-                selectedIssueId={null}
-                initialView={mobileScreen.view}
-                onSelectIssue={selectIssue}
-                onCreateIssue={() => openCreateDialog()}
-              />
-            )}
+                {mobileScreen.kind === "issues" && (
+                  <MobileIssuesScreen
+                    key={mobileScreen.view}
+                    issues={issues}
+                    currentUserLogin={currentUserLogin}
+                    labelSummary={labelSummary}
+                    assigneeOptions={assigneeOptions}
+                    selectedIssueId={null}
+                    initialView={mobileScreen.view}
+                    onSelectIssue={selectIssue}
+                    onCreateIssue={() => openCreateDialog()}
+                  />
+                )}
 
-            {mobileScreen.kind === "repos" && (
-              <MobileReposScreen
-                repositories={repositories}
-                onSelectRepository={selectRepository}
-                onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-                onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-              />
-            )}
+                {mobileScreen.kind === "repos" && (
+                  <MobileReposScreen
+                    repositories={repositories}
+                    onSelectRepository={selectRepository}
+                    onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+                    onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                  />
+                )}
 
-            {mobileScreen.kind === "settings" && (
-              <MobileSettingsScreen currentUser={currentUser} />
-            )}
+                {mobileScreen.kind === "settings" && (
+                  <MobileSettingsScreen currentUser={currentUser} />
+                )}
 
-            {mobileScreen.kind === "repo-detail" && (
-              <MobileRepoIssuesScreen
-                repository={mobileScreen.repository}
-                issues={issues}
-                selectedIssueId={null}
-                onSelectIssue={selectIssue}
-                onBack={goBack}
-                onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-              />
-            )}
+                {mobileScreen.kind === "repo-detail" && (
+                  <MobileRepoIssuesScreen
+                    repository={mobileScreen.repository}
+                    issues={issues}
+                    selectedIssueId={null}
+                    onSelectIssue={selectIssue}
+                    onBack={goBack}
+                    onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
+                  />
+                )}
 
-            {mobileScreen.kind === "issue-detail" && (
-              <MobileIssueDetail
-                issue={mobileScreen.issue}
-                issues={issues}
-                onBack={goBack}
-                onEdit={setEditingIssue}
-                onIssueUpdated={handleIssueUpdated}
-                onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-                onCreateFollowupIssue={openFollowupIssueDialog}
-              />
+                {mobileScreen.kind === "issue-detail" && (
+                  <MobileIssueDetail
+                    issue={mobileScreen.issue}
+                    issues={issues}
+                    onBack={goBack}
+                    onEdit={setEditingIssue}
+                    onIssueUpdated={handleIssueUpdated}
+                    onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                    onCreateFollowupIssue={openFollowupIssueDialog}
+                  />
+                )}
+              </>
             )}
           </div>
 
