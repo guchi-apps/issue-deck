@@ -11,6 +11,7 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   Plus,
   RotateCcw,
   Share2,
@@ -43,6 +44,7 @@ import {
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
@@ -170,6 +172,20 @@ export function MobileIssueDetail({
     }
   }
 
+  async function handleStartImplementation() {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: START_IMPLEMENTATION_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <header className="flex items-center gap-1 border-b p-4">
@@ -182,6 +198,21 @@ export function MobileIssueDetail({
           <ArrowLeft className="size-5" />
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
+        {canStartImplementation(issue) && (
+          <button
+            type="button"
+            onClick={handleStartImplementation}
+            disabled={isCommentSubmitting}
+            aria-label="実装を開始"
+            className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+          >
+            {isCommentSubmitting ? (
+              <Loader2 className="size-5 animate-spin" />
+            ) : (
+              <Play className="size-5" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onToggleFavorite(issue)}

@@ -9,6 +9,7 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   RotateCcw,
   SlidersHorizontal,
   Star,
@@ -37,6 +38,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -135,6 +137,21 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
     }
   }
 
+  async function handleStartImplementation() {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: START_IMPLEMENTATION_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -155,6 +172,12 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {canStartImplementation(issue) && (
+              <Button size="sm" onClick={handleStartImplementation} disabled={isCommentSubmitting}>
+                {isCommentSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                実装を開始
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                 GitHubで開く
