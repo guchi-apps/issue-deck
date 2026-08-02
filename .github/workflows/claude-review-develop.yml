@@ -16,6 +16,8 @@ name: Claude Code Review (develop向けPR)
 #   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
 # - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
 #   付いていなければ gh pr merge --auto --squash を実行する
+# - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
+#   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
 # 00.check-userラベルを両判定(機械的/意味的)共通の「マージ保留」シグナルとして
 # 使うことで、判定ロジックとマージ可否判断を疎結合に保っている。
@@ -258,3 +260,24 @@ jobs:
 
           echo "自動マージ不可カテゴリに該当しないため、auto-mergeを有効化します。"
           gh pr merge "$PR_NUMBER" --auto --squash
+
+  auto-merge-fallback:
+    needs: [identify-issue, auto-merge]
+    if: always() && needs.auto-merge.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: 自動マージ失敗をPRに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -e
+          gh pr comment "$PR_NUMBER" --body "⚠️ 自動マージ（auto-merge）が失敗しました。Actionsの実行ログを確認し、必要であれば手動でマージしてください。"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          fi
