@@ -8,6 +8,7 @@ import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { applyIssueFilters, computeLabelSummary, getAssigneeOptions, sortIssues } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
 import type { Issue } from "@/types/issue";
@@ -57,9 +58,10 @@ export function MobileRepoIssuesScreen({
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
   const color = getRepoColor(repository.fullName);
+  const swipeBackHandlers = useSwipeBack(onBack);
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex items-center gap-1 border-b p-4">
         <button
           type="button"
