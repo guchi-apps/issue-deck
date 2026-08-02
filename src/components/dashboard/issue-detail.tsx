@@ -20,6 +20,7 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
@@ -42,6 +43,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
@@ -73,6 +75,11 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
+  const pullRequestLink = useMemo(() => {
+    if (!issue) return null;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return extractLatestPullRequestLink(comments, owner, repo);
+  }, [comments, issue]);
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -309,7 +316,10 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
-        <WorkflowRunStatus run={workflowRun} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
+          <WorkflowRunStatus run={workflowRun} />
+        </div>
 
         <Separator />
 

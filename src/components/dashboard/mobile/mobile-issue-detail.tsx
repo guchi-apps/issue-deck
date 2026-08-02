@@ -24,6 +24,7 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,7 @@ import {
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
@@ -92,6 +94,10 @@ export function MobileIssueDetail({
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
+  const pullRequestLink = useMemo(() => {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return extractLatestPullRequestLink(comments, owner, repo);
+  }, [comments, issue.repositoryFullName]);
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -333,6 +339,7 @@ export function MobileIssueDetail({
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
+        <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
 
         <div className="flex items-center gap-6">
           <div>
