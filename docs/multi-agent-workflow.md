@@ -245,6 +245,15 @@ Issueごとに独立したClaude Codeセッションとして起動する。
    同ワークフローが実装を再開する（`issues: unlabeled`イベントをトリガーに使う）。
 3. **練り直し**: `00.check-user`が付いたまま（＝未承認）人間が`@claude`とコメントした場合は、計画への
    修正依頼として扱い、計画コメントを投稿し直す（`00.check-user`は外さない）。
+4. **拒否**: 承認も練り直しもせず、計画自体を取りやめて実装しない場合は、人間が
+   `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
+   クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
+   拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
+   クローズ後も`00.check-user`ラベルが「要確認」のまま残ると紛らわしいため、
+   `.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、Issueクローズをトリガーに
+   `00.check-user`を自動的に除去する（issue #172）。この除去自体が`00.check-user`の
+   `unlabeled`イベントを発生させ本ワークフローを起動するが、対象issueは既にクローズ済みのため
+   `issue_closed`ガードにより何もせず`mode=skip`となる。
 
 `00.check-user`はPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、対応issueの
 PRが既に作成されている場合にのみ本ワークフローは常にskipし、それ以前の状態でのみ「承認」と
