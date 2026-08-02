@@ -231,6 +231,15 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 実行者(`github.actor`)のリポジトリ権限を`gh api repos/{owner}/{repo}/collaborators/{actor}/permission`
 で確認し、write権限未満なら何もしない。
 
+コメント本文とのマッチングは`contains()`ではなく`startsWith()`で行う（本文の先頭が`@claude`か
+どうかのみ判定し、本文中のどこかに`@claude`という文字列が含まれるだけでは反応しない、#173）。
+`contains()`だと、このワークフロー自身が投稿する完了報告コメント（承認コメントの定型文
+`APPROVE_COMMENT_BODY`を説明のため引用する場合など）にまで反応し、報告コメントが次のワーク
+フロー実行を誘発し、その実行がまた報告コメントを投稿して…という無限ループを起こしうる
+（#173で実際に2回連続発生した）。アプリが送信する定型コメント（`APPROVE_COMMENT_BODY`・
+`START_IMPLEMENTATION_COMMENT_BODY`等）と、人間が手動で投稿する起動コメントはいずれも本文の
+先頭が`@claude`という慣習のため、`startsWith()`に絞っても正規の起動経路は損なわれない。
+
 なお`21.plan-required`の承認再開（`00.check-user`ラベルの削除）は引き続き`issues: unlabeled`
 イベントをトリガーに使う（下記「二段階トリガー」参照）。ラベル付与（`labeled`イベント）はもはや
 本ワークフローのトリガーには使わない。

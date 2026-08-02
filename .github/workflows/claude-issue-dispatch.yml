@@ -63,6 +63,15 @@ name: Claude Issue Dispatch
 # 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
 # 展開しない(.github/workflows/issue-labels.yml と同じ方針)。
 #
+# @claudeトリガーの判定はcontains()ではなくstartsWith()を使う(#173)。containsだと、この
+# ワークフロー自身が投稿する完了報告コメント(APPROVE_COMMENT_BODY等の定型コメント本文を
+# 説明のため引用する場合や、ドキュメント・コード中の`@claude`という記述を含む場合)にまで
+# 反応し、報告コメント→再トリガー→報告コメント...の無限ループを起こしうる
+# (実際に#173で2回連続発生した)。issue-detail.tsx・mobile-issue-detail.tsx・
+# approval-labels.ts・start-implementation.tsが送信する定型コメントは全て本文の先頭が
+# `@claude`であり、人間が手動で投稿する起動コメントも同様の慣習(先頭に`@claude`)のため、
+# startsWith()に絞っても正規の起動経路は損なわれない。
+#
 # ブランチのpush(Checkoutステップ)・実装ステップのgit push/PR作成はGITHUB_TOKENではなく、
 # secrets.WORKFLOW_PAT(workflowスコープ/Repository permissions > Workflows: Read and write
 # を持つFine-grained PAT)を使う(issue #106)。既定のGITHUB_TOKENは`.github/workflows/`配下への
@@ -84,7 +93,7 @@ jobs:
   dispatch:
     if: |
       (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
     # 同じブランチに同時にcheckout・pushして競合するのを避けるため、issueごとに直列化する(#129)。
