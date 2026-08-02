@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 20_000;
 
 type RunningState = { isRunning: boolean; currentStep: string | null };
 type RunningMap = Record<string, RunningState>;
+type ApiRunningState = RunningState & { runId: number | null };
 
-const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null };
+const NOT_RUNNING: ApiRunningState = { isRunning: false, currentStep: null, runId: null };
 
 /**
  * 一覧に表示中のIssueのうち、実装状況ラベル（01.wip〜09.main）が付き承認待ち
@@ -19,6 +20,7 @@ const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null };
  */
 export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
   const [running, setRunning] = useState<RunningMap>({});
+  const knownRunIdsRef = useRef<Map<string, number>>(new Map());
   const candidates = issues.filter(
     (issue) => getWorkflowStepIndex(issue.labels) !== null && !isApprovalPending(issue.labels),
   );
@@ -36,6 +38,7 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
 
     let cancelled = false;
     const controller = new AbortController();
+    const knownRunIds = knownRunIdsRef.current;
 
     async function poll() {
       if (document.hidden) return;
@@ -43,12 +46,16 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
         candidates.map(async (issue) => {
           const [owner, repo] = issue.repositoryFullName.split("/");
           try {
-            const res = await fetch(
-              `/api/issues/workflow-running?owner=${owner}&repo=${repo}&number=${issue.number}`,
-              { signal: controller.signal },
-            );
+            const params = new URLSearchParams({ owner, repo, number: String(issue.number) });
+            const knownRunId = knownRunIds.get(issue.id);
+            if (knownRunId !== undefined) {
+              params.set("knownRunId", String(knownRunId));
+            }
+            const res = await fetch(`/api/issues/workflow-running?${params.toString()}`, {
+              signal: controller.signal,
+            });
             if (!res.ok) return [issue.id, NOT_RUNNING] as const;
-            const data: RunningState = await res.json();
+            const data: ApiRunningState = await res.json();
             return [issue.id, data] as const;
           } catch {
             return [issue.id, NOT_RUNNING] as const;
@@ -56,7 +63,21 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
         }),
       );
       if (cancelled) return;
-      setRunning(Object.fromEntries(results));
+      for (const [issueId, data] of results) {
+        if (data.runId !== null) {
+          knownRunIds.set(issueId, data.runId);
+        } else {
+          knownRunIds.delete(issueId);
+        }
+      }
+      setRunning(
+        Object.fromEntries(
+          results.map(([issueId, data]) => [
+            issueId,
+            { isRunning: data.isRunning, currentStep: data.currentStep },
+          ]),
+        ),
+      );
     }
 
     poll();
