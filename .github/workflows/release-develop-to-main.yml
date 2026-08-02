@@ -130,6 +130,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # github_token省略時は既定のGITHUB_TOKENにフォールバックし、このステップの実行中に
+          # チェックアウト済みリポジトリのgit認証情報がWORKFLOW_PATから置き換わってしまう。
+          # 後続の「バージョンをbumpして...」ステップの素のgit pushがWORKFLOW_PATの認証情報を
+          # 使えるよう、claude-issue-dispatch.ymlの実装ステップと同じくWORKFLOW_PATを明示する。
+          github_token: ${{ secrets.WORKFLOW_PAT }}
           claude_args: |
             --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"}},"required":["bump_kind","reason"]}'
