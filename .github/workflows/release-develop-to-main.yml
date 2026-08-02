@@ -20,16 +20,11 @@ name: Release develop to main
 # semverに基づき判定する(#55)。判定に失敗した場合はpatchにフォールバックする。
 # それでも判断が誤っていると思われる場合はrelease-to-mainスキルどおり
 # 人間がPRのバージョンを修正する想定。
+#
+# バンプPR・develop→mainのPRの作成は人間の確認なしに走ってしまうため、developへの
+# PRマージやscheduleでの自動起動はせず、workflow_dispatchによる手動実行のみとする(#178)。
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - develop
-  schedule:
-    # develop-merge-sweep(issue-labels.yml)と同じ15分間隔。GitHub Auto-mergeや
-    # 手動マージがpull_requestイベントを取りこぼした場合の安全網。
-    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -45,10 +40,6 @@ permissions:
 
 jobs:
   release:
-    if: |
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout develop
