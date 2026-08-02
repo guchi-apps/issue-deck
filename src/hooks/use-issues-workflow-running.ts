@@ -6,7 +6,7 @@ import { isApprovalPending } from "@/lib/github/approval-labels";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 
-const POLL_INTERVAL_MS = 20_000;
+const POLL_INTERVAL_MS = 5_000;
 
 type RunningMap = Record<string, boolean>;
 
