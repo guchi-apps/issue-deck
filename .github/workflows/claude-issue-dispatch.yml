@@ -20,6 +20,10 @@ name: Claude Issue Dispatch
 #      issues/unlabeledイベント単独では実際に承認した人間を特定できず自己ループ防止ロジックで
 #      弾かれる。そのためアプリはラベル更新に続けて個人アカウントでの@claudeコメントも送信し、
 #      issue_commentイベント経由で実装を再開させる(#173)。
+#   3. 承認・練り直しのいずれもせず計画を拒否する場合は、人間がIssueを直接クローズする
+#      (`not planned`等の理由。コメントに@claudeを含める必要はない)。クローズ済みIssueは
+#      本ワークフローの全モードで再始動しないため(issue_closedガード)、クローズ後に
+#      issue-labels.ymlのcleanup-on-closeジョブが00.check-userを除去しても安全(issue #172)。
 #
 # 21.plan-requiredの計画提示ステップは、実装範囲が広くGitHub Actions上で一度に処理しきれない
 # 懸念がある場合、計画コメントをサブIssueへの分割案として提示できる(#144)。計画コメント末尾に

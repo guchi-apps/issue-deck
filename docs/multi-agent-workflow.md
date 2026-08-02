@@ -80,7 +80,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-develop→mainのリリースフロー自体（バージョンアップコミット・PR作成等）は現状、既存の手動運用（release-to-mainスキル参照）のまま（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。ただし上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
 ### GitHub Actionsによるラベル遷移の自動化
 
@@ -198,6 +198,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
 5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
 6. **Phase 5**: Issueへの`@claude`コメントを起点に実装からPR作成まで自動化
+7. **Phase 6**: develop→mainのリリースフロー（バージョンbump PR・develop→mainのPR作成）を自動化
 
 各Phaseは前段が安定稼働してから着手する。
 
@@ -210,6 +211,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `.github/workflows/issue-labels.yml`（Phase2.5、作成済み）
 - `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
+- `.github/workflows/release-develop-to-main.yml`（Phase6、作成済み）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
@@ -254,6 +256,15 @@ Issueごとに独立したClaude Codeセッションとして起動する。
    同ワークフローが実装を再開する（`issues: unlabeled`イベントをトリガーに使う）。
 3. **練り直し**: `00.check-user`が付いたまま（＝未承認）人間が`@claude`とコメントした場合は、計画への
    修正依頼として扱い、計画コメントを投稿し直す（`00.check-user`は外さない）。
+4. **拒否**: 承認も練り直しもせず、計画自体を取りやめて実装しない場合は、人間が
+   `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
+   クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
+   拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
+   クローズ後も`00.check-user`ラベルが「要確認」のまま残ると紛らわしいため、
+   `.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、Issueクローズをトリガーに
+   `00.check-user`を自動的に除去する（issue #172）。この除去自体が`00.check-user`の
+   `unlabeled`イベントを発生させ本ワークフローを起動するが、対象issueは既にクローズ済みのため
+   `issue_closed`ガードにより何もせず`mode=skip`となる。
 
 `00.check-user`はPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、対応issueの
 PRが既に作成されている場合にのみ本ワークフローは常にskipし、それ以前の状態でのみ「承認」と
@@ -366,6 +377,53 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
   `http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`をあわせて案内する。無人実行のワークフロー
   自体はdevサーバーを起動しないため、人間が手元でブランチをcheckoutして`pnpm dev`を起動した際に
   開くURLとしての案内であり、実際に到達可能なURLをその場で提示しているわけではない。
+
+## Phase 6: develop→mainのリリースフロー自動化
+
+`.github/workflows/release-develop-to-main.yml`で実装済み（issue #55）。release-to-mainスキル
+（`.claude/skills/release-to-main/SKILL.md`）が定める手順のうち、「1. バージョンを上げる」
+「2. developへの反映（フィーチャーブランチ+PR）」「3. develop→mainのPRを作成する」までを
+自動化する。手順4（実際のマージ、マージコミット必須）はCLAUDE.mdの自動マージ不可カテゴリ
+（`develop`→`main`のマージ）に該当するため、これまでどおり人間が手動で行う。
+
+### 状態判定
+
+他に状態を保持せず、develop/mainそれぞれの`package.json`の`version`フィールドの比較だけで
+判定する。
+
+- **main版 == develop版**（まだ何もバンプしていない）: developとmainに差分があれば、
+  develop向けのバージョンbump PRが無いことを確認したうえで新規に作成する。
+- **main版 != develop版**（バンプPRが既にdevelopへマージ済み）: develop→mainのPRが無いことを
+  確認したうえで新規に作成する。
+
+### バージョンの上げ幅の判定
+
+issueのラベルではなく、main/develop間の実際のコード差分の内容から判定する。専用のClaude
+Codeステップ（`claude-code-action`、`--json-schema`による構造化出力）が`git diff origin/main
+origin/develop`・`git log origin/main..origin/develop`を確認し、semverに基づき
+major/minor/patchのいずれかと判断根拠を返す。判定ステップ自体が失敗した場合や、返り値が
+major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。判断が誤っている
+と思われる場合は人間が生成されたPR上でバージョンを直接修正する想定（release-to-mainスキルの
+「迷う場合はユーザーに確認する」に相当）。
+
+### トリガー
+
+- `develop`向けPRのマージ（`pull_request: closed`、`base: develop`）: 何らかの変更が
+  developへマージされるたびに、バージョンbumpやdevelop→mainのPR作成が必要になっていないか
+  即座に確認する。
+- `schedule`（15分おき）: `issue-labels.yml`の`develop-merge-sweep`と同じ間隔の安全網。
+  GitHub Auto-mergeによるマージ等で上記イベントを取りこぼした場合に拾い直す。
+- `workflow_dispatch`: 手動実行用。
+
+同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
+
+### 自動マージされないことの担保
+
+バージョンbump用PR（`release/v*` → `develop`）・develop→mainのPR（`develop` → `main`）は
+いずれも、ブランチ名が`issue-<番号>`の命名規約に従わないため、`claude-review-develop.yml`の
+`auto-merge`ジョブが対応Issue番号を特定できず自動マージをスキップする（既存の仕組みがそのまま
+効くため、本Phaseで新たなガードは追加していない）。develop→mainのPRについてはそもそも
+`claude-review-develop.yml`が`develop`向けPRしか対象にしないため関与しない。
 
 ## 未解決の課題・申し送り事項
 
