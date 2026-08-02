@@ -19,6 +19,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -230,6 +231,8 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             更新日 {new Date(issue.updatedAt).toLocaleDateString("ja-JP")}
           </span>
         </div>
+
+        <WorkflowStatusSteps labels={issue.labels} />
 
         <Separator />
 

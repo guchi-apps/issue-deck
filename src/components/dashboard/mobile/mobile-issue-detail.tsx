@@ -23,6 +23,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -236,6 +237,8 @@ export function MobileIssueDetail({
           <span>作成日 {new Date(issue.createdAt).toLocaleDateString("ja-JP")}</span>
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
         </div>
+
+        <WorkflowStatusSteps labels={issue.labels} />
 
         <div className="flex items-center gap-6">
           <div>
