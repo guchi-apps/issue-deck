@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { MoreHorizontal, Pencil, ThumbsUp, Trash2 } from "lucide-react";
+import { Check, MoreHorizontal, Pencil, ThumbsUp, Trash2, X } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { IssueComment } from "@/types/issue";
 
@@ -36,7 +37,70 @@ type CommentThreadProps = {
   issueSuggestions: IssueSuggestion[];
   onUpdate: (commentId: string, body: string) => Promise<boolean>;
   onDelete: (commentId: string) => Promise<boolean>;
+  /** trueの場合、直近のbotコメントの下に承認・却下ボタンを表示する（00.check-userラベルが付いているissue用） */
+  approvalPending?: boolean;
+  onApprove?: () => Promise<void> | void;
+  onReject?: (reason: string) => Promise<void> | void;
+  isApproving?: boolean;
+  isRejecting?: boolean;
 };
+
+function ApprovalActions({
+  onApprove,
+  onReject,
+  isApproving,
+  isRejecting,
+}: {
+  onApprove: () => Promise<void> | void;
+  onReject: (reason: string) => Promise<void> | void;
+  isApproving?: boolean;
+  isRejecting?: boolean;
+}) {
+  const [isRejectOpen, setIsRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const busy = Boolean(isApproving || isRejecting);
+
+  async function submitReject() {
+    await onReject(rejectReason);
+    setIsRejectOpen(false);
+    setRejectReason("");
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-dashed p-3">
+      <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
+      {isRejectOpen ? (
+        <div className="flex flex-col gap-2">
+          <Textarea
+            placeholder="却下理由・修正依頼を入力（任意）"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(false)} disabled={busy}>
+              キャンセル
+            </Button>
+            <Button variant="destructive" size="sm" onClick={submitReject} disabled={busy}>
+              却下を送信
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => onApprove()} disabled={busy}>
+            <Check />
+            承認
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(true)} disabled={busy}>
+            <X />
+            却下
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function CommentThread({
   comments,
@@ -46,6 +110,11 @@ export function CommentThread({
   issueSuggestions,
   onUpdate,
   onDelete,
+  approvalPending,
+  onApprove,
+  onReject,
+  isApproving,
+  isRejecting,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -69,8 +138,25 @@ export function CommentThread({
   }
 
   if (comments.length === 0) {
-    return <p className="text-sm text-muted-foreground">まだコメントはありません</p>;
+    return (
+      <>
+        <p className="text-sm text-muted-foreground">まだコメントはありません</p>
+        {approvalPending && onApprove && onReject && (
+          <ApprovalActions
+            onApprove={onApprove}
+            onReject={onReject}
+            isApproving={isApproving}
+            isRejecting={isRejecting}
+          />
+        )}
+      </>
+    );
   }
+
+  const lastBotCommentIndex = comments.reduce(
+    (foundIndex, comment, index) => (isBotComment(comment.author.login) ? index : foundIndex),
+    -1,
+  );
 
   function startEdit(comment: IssueComment) {
     setEditingId(comment.id);
@@ -99,7 +185,7 @@ export function CommentThread({
   return (
     <>
       <ul className="flex flex-col gap-4">
-        {comments.map((comment) => (
+        {comments.map((comment, index) => (
           <li key={comment.id} className="flex gap-2">
             <UserAvatar login={comment.author.login} className="mt-0.5 size-7" />
             <div className="flex-1 rounded-lg border p-3">
@@ -170,10 +256,26 @@ export function CommentThread({
                   )}
                 </>
               )}
+              {approvalPending && onApprove && onReject && lastBotCommentIndex === index && (
+                <ApprovalActions
+                  onApprove={onApprove}
+                  onReject={onReject}
+                  isApproving={isApproving}
+                  isRejecting={isRejecting}
+                />
+              )}
             </div>
           </li>
         ))}
       </ul>
+      {approvalPending && onApprove && onReject && lastBotCommentIndex === -1 && (
+        <ApprovalActions
+          onApprove={onApprove}
+          onReject={onReject}
+          isApproving={isApproving}
+          isRejecting={isRejecting}
+        />
+      )}
 
       <AlertDialog open={deletingId !== null} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent>
