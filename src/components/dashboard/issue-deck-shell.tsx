@@ -297,7 +297,7 @@ export function IssueDeckShell({
                     currentUserLogin={currentUserLogin}
                     labelSummary={labelSummary}
                     assigneeOptions={assigneeOptions}
-                    selectedIssueId={null}
+                    selectedIssueId={mobileScreen.returnToIssueId}
                     initialView={mobileScreen.view}
                     onSelectIssue={selectIssue}
                     onCreateIssue={() => openCreateDialog()}
@@ -321,7 +321,7 @@ export function IssueDeckShell({
                   <MobileRepoIssuesScreen
                     repository={mobileScreen.repository}
                     issues={issues}
-                    selectedIssueId={null}
+                    selectedIssueId={mobileScreen.returnToIssueId}
                     onSelectIssue={selectIssue}
                     onBack={goBack}
                     onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}

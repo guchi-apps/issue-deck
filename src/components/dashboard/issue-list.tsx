@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Archive, CircleAlert, Loader2, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -52,6 +53,15 @@ export function IssueList({
   fabSpacing = false,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
+  const itemRefs = useRef(new Map<string, HTMLLIElement>());
+
+  // 一覧が再マウントされた直後（Issue詳細から戻ってきた等）に、直前まで表示していた
+  // Issue行が見えるようスクロールする。以降の選択変更では追従しない（空配列deps）。
+  useEffect(() => {
+    if (!selectedIssueId) return;
+    itemRefs.current.get(selectedIssueId)?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className={cn("flex h-full flex-col", className)}>
@@ -78,7 +88,13 @@ export function IssueList({
       ) : (
         <ul className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
           {issues.map((issue) => (
-            <li key={issue.id}>
+            <li
+              key={issue.id}
+              ref={(el) => {
+                if (el) itemRefs.current.set(issue.id, el);
+                else itemRefs.current.delete(issue.id);
+              }}
+            >
               <button
                 type="button"
                 onClick={() => onSelectIssue(issue)}

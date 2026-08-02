@@ -10,10 +10,15 @@ import type { ConnectedRepository } from "@/types/repository";
 
 export type MobileScreen =
   | { kind: "home" }
-  | { kind: "issues"; view: NavViewId }
+  | { kind: "issues"; view: NavViewId; returnToIssueId: string | null }
   | { kind: "repos" }
   | { kind: "settings" }
-  | { kind: "repo-detail"; repository: ConnectedRepository; back: MobileScreen }
+  | {
+      kind: "repo-detail";
+      repository: ConnectedRepository;
+      returnToIssueId: string | null;
+      back: MobileScreen;
+    }
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
 function isNavViewId(value: string | null): value is NavViewId {
@@ -42,8 +47,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         ? repositories.find((repo) => repo.fullName === repoParam)
         : undefined;
       const back: MobileScreen = repository
-        ? { kind: "repo-detail", repository, back: { kind: "repos" } }
-        : { kind: "issues", view: "all" };
+        ? { kind: "repo-detail", repository, returnToIssueId: null, back: { kind: "repos" } }
+        : { kind: "issues", view: isNavViewId(viewParam) ? viewParam : "all", returnToIssueId: null };
 
       return { kind: "issue-detail", issue, back };
     }
@@ -51,11 +56,15 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     if (screenParam === "repo-detail") {
       const repository = repositories.find((repo) => repo.fullName === repoParam);
       if (!repository) return { kind: "home" };
-      return { kind: "repo-detail", repository, back: { kind: "repos" } };
+      return { kind: "repo-detail", repository, returnToIssueId: issueParam, back: { kind: "repos" } };
     }
 
     if (screenParam === "issues") {
-      return { kind: "issues", view: isNavViewId(viewParam) ? viewParam : "all" };
+      return {
+        kind: "issues",
+        view: isNavViewId(viewParam) ? viewParam : "all",
+        returnToIssueId: issueParam,
+      };
     }
 
     if (screenParam === "repos" || screenParam === "settings") {
@@ -125,6 +134,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         screen: "issue-detail",
         issue: issue.id,
         repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
+        view: mobileScreen.kind === "issues" ? mobileScreen.view : null,
       }),
     [navigate, mobileScreen],
   );
@@ -136,10 +146,11 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     const back = mobileScreen.back;
+    const returnIssueId = mobileScreen.kind === "issue-detail" ? mobileScreen.issue.id : null;
     if (back.kind === "repo-detail") {
-      navigate({ screen: "repo-detail", repo: back.repository.fullName });
+      navigate({ screen: "repo-detail", repo: back.repository.fullName, issue: returnIssueId });
     } else if (back.kind === "issues") {
-      navigate({ screen: "issues", view: back.view });
+      navigate({ screen: "issues", view: back.view, issue: returnIssueId });
     } else {
       navigate({ screen: back.kind });
     }
