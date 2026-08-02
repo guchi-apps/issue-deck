@@ -19,6 +19,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -47,6 +49,7 @@ type IssueDetailProps = {
 
 export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { run: workflowRun } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
     createComment,
@@ -233,6 +236,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
+        <WorkflowRunStatus run={workflowRun} />
 
         <Separator />
 
