@@ -52,6 +52,7 @@ export function CreateIssueDialog({
   const [body, setBody] = useState("");
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<string | null>(null);
+  const [isImageUploading, setIsImageUploading] = useState(false);
 
   const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -71,6 +72,7 @@ export function CreateIssueDialog({
     setBody("");
     setSelectedLabels([]);
     setAssignee(null);
+    setIsImageUploading(false);
     setError(null);
   }, [open, defaultRepositoryFullName, repositories, setError]);
 
@@ -137,6 +139,7 @@ export function CreateIssueDialog({
               value={body}
               onChange={setBody}
               issueSuggestions={issueSuggestions}
+              onUploadingChange={setIsImageUploading}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -209,7 +212,7 @@ export function CreateIssueDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !repositoryFullName || !title.trim()}
+            disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
           >
             {isSubmitting ? "作成中..." : "作成"}
           </Button>
