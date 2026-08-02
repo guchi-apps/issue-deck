@@ -259,6 +259,7 @@ export function IssueDeckShell({
         setFilter={setFilter}
         assigneeOptions={assigneeOptions}
         onCreateIssue={() => openCreateDialog(filters.repo)}
+        selectedRepoFullName={filters.repo}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
