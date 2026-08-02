@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isEmailAllowed } from "@/lib/allowed-emails";
 import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
@@ -23,6 +25,17 @@ export async function GET(request: NextRequest) {
   }
 
   const { user } = data;
+
+  if (!isEmailAllowed(user.email)) {
+    await supabase.auth.signOut();
+    const admin = createAdminClient();
+    const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
+    if (deleteError) {
+      console.error("[auth/callback] failed to delete disallowed Supabase Auth user", deleteError);
+    }
+    return NextResponse.redirect(`${origin}/login?error=not_allowed`);
+  }
+
   const metadata = user.user_metadata as Record<string, unknown>;
 
   const githubUserId = Number(metadata.provider_id ?? metadata.sub);

@@ -6,7 +6,13 @@ import { LoginBfcacheReload } from "@/components/auth/login-bfcache-reload";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-muted/30 p-4">
       <LoginBfcacheReload />
@@ -22,7 +28,10 @@ export default function LoginPage() {
             GitHubアカウントでログインして、複数リポジトリのIssueを横断管理しましょう。
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-3">
+          {error === "not_allowed" && (
+            <p className="text-sm text-destructive">このアカウントではログインできません。</p>
+          )}
           <Suspense fallback={null}>
             <GithubLoginButton />
           </Suspense>
