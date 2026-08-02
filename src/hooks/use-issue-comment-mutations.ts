@@ -24,9 +24,16 @@ export type DeleteCommentInput = {
   commentId: number;
 };
 
-function errorMessageForResponse(status: number, errorCode: string | undefined): string {
+function errorMessageForResponse(
+  status: number,
+  errorCode: string | undefined,
+  message: string | undefined,
+): string {
   if (errorCode === "github_reauth_required") {
     return "GitHub連携が必要です。再ログインしてください。";
+  }
+  if (errorCode === "github_api_error" && message) {
+    return message;
   }
   return `リクエストに失敗しました (${status})`;
 }
@@ -42,8 +49,8 @@ async function postJson(
     body: JSON.stringify(input),
   });
   if (!res.ok) {
-    const data: { error?: string } = await res.json().catch(() => ({}));
-    throw new Error(errorMessageForResponse(res.status, data.error));
+    const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+    throw new Error(errorMessageForResponse(res.status, data.error, data.message));
   }
   const data: { comment: IssueComment } = await res.json();
   return data.comment;
@@ -90,7 +97,8 @@ export function useIssueCommentMutations() {
       });
       const res = await fetch(`/api/issues/comments?${params.toString()}`, { method: "DELETE" });
       if (!res.ok) {
-        throw new Error(`リクエストに失敗しました (${res.status})`);
+        const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+        throw new Error(errorMessageForResponse(res.status, data.error, data.message));
       }
       return true;
     } catch (err) {

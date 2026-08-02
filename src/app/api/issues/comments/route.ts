@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
     const rawComments = await fetchCommentsForIssue(owner, repo, Number(numberParam), token);
     return NextResponse.json({ comments: rawComments.map(mapComment) });
   } catch (error) {
+    console.error(`[GET /api/issues/comments] ${owner}/${repo}#${numberParam}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
@@ -95,6 +96,7 @@ export async function POST(request: NextRequest) {
       await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
       return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
     }
+    console.error(`[POST /api/issues/comments] ${owner}/${repo}#${number}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
@@ -134,6 +136,7 @@ export async function PATCH(request: NextRequest) {
     const updated = await updateComment(owner, repo, commentId, token, { body: body.trim() });
     return NextResponse.json({ comment: mapComment(updated) });
   } catch (error) {
+    console.error(`[PATCH /api/issues/comments] ${owner}/${repo} comment ${commentId}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
@@ -166,6 +169,7 @@ export async function DELETE(request: NextRequest) {
     await deleteComment(owner, repo, Number(commentIdParam), token);
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error(`[DELETE /api/issues/comments] ${owner}/${repo} comment ${commentIdParam}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

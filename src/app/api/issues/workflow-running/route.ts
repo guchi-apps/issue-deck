@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
     if (error instanceof GithubApiError && error.status === 404) {
       return NextResponse.json({ isRunning: false, currentStep: null });
     }
+    console.error(`[GET /api/issues/workflow-running] ${owner}/${repo}#${numberParam}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

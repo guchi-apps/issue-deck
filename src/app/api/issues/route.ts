@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
     const issue = await upsertIssueAndGetDisplay(repository, created);
     return NextResponse.json({ issue });
   } catch (error) {
+    console.error(`[POST /api/issues] ${repositoryFullName}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
@@ -129,6 +130,7 @@ export async function PATCH(request: NextRequest) {
     const issue = await upsertIssueAndGetDisplay(repository, updated);
     return NextResponse.json({ issue });
   } catch (error) {
+    console.error(`[PATCH /api/issues] ${repositoryFullName}#${number}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

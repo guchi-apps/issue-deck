@@ -43,7 +43,10 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
       signal: controller.signal,
     })
       .then(async (res) => {
-        if (!res.ok) throw new Error(`コメントの取得に失敗しました (${res.status})`);
+        if (!res.ok) {
+          const data: { message?: string } = await res.json().catch(() => ({}));
+          throw new Error(data.message ?? `コメントの取得に失敗しました (${res.status})`);
+        }
         const data: { comments: IssueComment[] } = await res.json();
         setComments(data.comments);
       })
