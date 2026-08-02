@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   Archive,
   ExternalLink,
+  FilePlus2,
   Loader2,
   Lock,
   MoreHorizontal,
@@ -53,9 +54,17 @@ type IssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
+  onCreateFollowupIssue: (issue: Issue) => void;
 };
 
-export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
+export function IssueDetail({
+  issue,
+  issues,
+  onEdit,
+  onIssueUpdated,
+  onToggleFavorite,
+  onCreateFollowupIssue,
+}: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { run: workflowRun } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
@@ -241,6 +250,10 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
+                  <FilePlus2 />
+                  引き継いでIssueを作成
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onEdit(issue)}>
                   <Pencil />
                   編集
