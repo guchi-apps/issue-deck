@@ -256,6 +256,16 @@ jobs:
           BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
+      - name: 01.wip を付与する（計画検討着手時）
+        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
+        # 依存してしまうため、他の確実な通知ステップと同じくシェルスクリプトで直接行う。
+        # CLAUDE.mdの運用ルール(01.wipはPlan mode開始時点で付与する)をこのワークフローでも
+        # 保証するためのステップ。
+        if: steps.state.outputs.mode == 'plan'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
+
       - name: 計画提示前のコメント数を記録する
         id: before_plan
         if: steps.state.outputs.mode == 'plan'
@@ -349,6 +359,21 @@ jobs:
           git fetch origin "${{ steps.state.outputs.branch }}"
           git checkout "${{ steps.state.outputs.branch }}"
 
+      - name: 01.wip を付与する（実装着手時）
+        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
+        # 依存してしまう(実際、コメント投稿から付与まで数分〜10分ほど遅延する例があった)ため、
+        # 実装着手前にシェルスクリプトで直接・確実に付与する。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "03.d:marge"
+          else
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
+          fi
+
       - name: Claude Code（実装・PR作成）
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         uses: anthropics/claude-code-action@v1
@@ -378,11 +403,8 @@ jobs:
               ラベル・コメントを確認する（`implement`で`21.plan-required`が付いている場合、承認済みの
               計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`の場合は、
               直近の`@claude`コメントの内容を踏まえて対応する）
-            - 確認したら直ちに以下を実行する（コードの調査・実装に着手するより前に行うこと）
-              - `implement`の場合: `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"`
-              - `additional`の場合: `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "03.d:marge"`
-                （`00.check-user`が付いていてもそれには触れない。Phase4の自動マージ不可判定など別の
-                文脈で付与されている可能性があるため）
+              （`01.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
+              既に完了しているため、ここで行う必要はない）
             - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
               作成する（`additional`の場合は既にcheckout済みのため不要）
 
