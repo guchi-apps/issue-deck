@@ -50,6 +50,7 @@ export type Issue = {
   updatedAt: string;
   htmlUrl: string;
   favorite: boolean;
+  hasUnreadComments: boolean;
 };
 
 export type NavViewId =

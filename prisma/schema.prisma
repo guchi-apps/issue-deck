@@ -28,6 +28,7 @@ model User {
   hiddenRepositories HiddenRepository[]
   favoriteIssues     FavoriteIssue[]
   quickFilters       QuickFilter[]
+  commentReads       IssueCommentRead[]
 }
 
 // --- GitHub App 連携 ---
@@ -141,20 +142,21 @@ model Issue {
   htmlUrl         String
   authorLogin     String
   assigneeLogin   String?
-  commentCount    Int        @default(0)
+  commentCount    Int               @default(0)
   milestoneTitle  String?
   milestoneOpen   Int?
   milestoneClosed Int?
   githubCreatedAt DateTime
   githubUpdatedAt DateTime
-  syncedAt        DateTime   @default(now())
+  syncedAt        DateTime          @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repository  Repository      @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  labels      IssueLabel[]
-  favoritedBy FavoriteIssue[]
+  repository    Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels        IssueLabel[]
+  favoritedBy   FavoriteIssue[]
+  commentReadBy IssueCommentRead[]
 
   @@unique([repositoryId, number])
   @@index([repositoryId])
@@ -167,6 +169,23 @@ model FavoriteIssue {
   issueId String
 
   createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId])
+  @@index([issueId])
+}
+
+// ユーザーごとに、Issueのコメントを何件まで読んだか（未読コメント判定用）
+model IssueCommentRead {
+  id               String @id @default(cuid())
+  userId           String
+  issueId          String
+  readCommentCount Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)

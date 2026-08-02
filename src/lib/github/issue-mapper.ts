@@ -80,6 +80,7 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     updatedAt: raw.updated_at,
     htmlUrl: raw.html_url,
     favorite: false,
+    hasUnreadComments: false,
   };
 }
 
@@ -121,6 +122,7 @@ export function dbIssueToDisplayIssue(
     updatedAt: row.githubUpdatedAt.toISOString(),
     htmlUrl: row.htmlUrl,
     favorite: false,
+    hasUnreadComments: false,
   };
 }
 

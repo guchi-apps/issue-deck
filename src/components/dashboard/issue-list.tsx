@@ -102,7 +102,18 @@ export function IssueList({
                     <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
                   </span>
                 </div>
-                <p className="line-clamp-2 text-sm font-medium">
+                <p
+                  className={cn(
+                    "line-clamp-2 flex items-start gap-1.5 text-sm",
+                    issue.hasUnreadComments ? "font-semibold" : "font-medium",
+                  )}
+                >
+                  {issue.hasUnreadComments && (
+                    <span
+                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-blue-500"
+                      aria-label="未読コメントあり"
+                    />
+                  )}
                   #{issue.number} {issue.title}
                 </p>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
