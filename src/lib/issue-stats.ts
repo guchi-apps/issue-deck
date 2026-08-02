@@ -124,6 +124,7 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
     a.commentCount === b.commentCount &&
     a.updatedAt === b.updatedAt &&
     a.favorite === b.favorite &&
+    a.hasUnreadComments === b.hasUnreadComments &&
     a.htmlUrl === b.htmlUrl &&
     a.assignee?.login === b.assignee?.login &&
     a.milestone?.name === b.milestone?.name &&

@@ -29,6 +29,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [isImageUploading, setIsImageUploading] = useState(false);
   const issueSuggestions = useMemo(
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
@@ -41,6 +42,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTitle(issue.title);
     setBody(issue.body);
+    setIsImageUploading(false);
     setError(null);
   }, [open, issue, setError]);
 
@@ -87,6 +89,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
               value={body}
               onChange={setBody}
               issueSuggestions={issueSuggestions}
+              onUploadingChange={setIsImageUploading}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -104,7 +107,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             キャンセル
           </Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting || !title.trim()}>
+          <Button onClick={handleSubmit} disabled={isSubmitting || !title.trim() || isImageUploading}>
             {isSubmitting ? "保存中..." : "保存"}
           </Button>
         </DialogFooter>

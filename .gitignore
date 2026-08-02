@@ -38,6 +38,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# 画像アップロードAPIがVPSのローカルディスクへ保存するアップロード画像
+/uploads/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

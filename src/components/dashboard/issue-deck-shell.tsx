@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
@@ -80,6 +80,41 @@ export function IssueDeckShell({
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
     setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
   }
+
+  // PC・スマホどちらで開いていても、現在表示中のIssueを検知して既読化する
+  // （URLの`missue`クエリを直接開いた場合＝リロード・共有リンクもmobileScreen経由でカバーされる）
+  const displayedIssueId =
+    selectedIssue?.id ?? (mobileScreen.kind === "issue-detail" ? mobileScreen.issue.id : null);
+
+  useEffect(() => {
+    if (!displayedIssueId) return;
+    const issue = issues.find((item) => item.id === displayedIssueId);
+    if (!issue || !issue.hasUnreadComments) return;
+
+    let cancelled = false;
+
+    fetch("/api/issues/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: issue.id, readCommentCount: issue.commentCount }),
+    })
+      .then((response) => {
+        if (!response.ok || cancelled) return;
+        setIssues((prev) =>
+          prev.map((item) => (item.id === issue.id ? { ...item, hasUnreadComments: false } : item)),
+        );
+        setSelectedIssue((prev) =>
+          prev && prev.id === issue.id ? { ...prev, hasUnreadComments: false } : prev,
+        );
+      })
+      .catch((error) => {
+        console.error("[issue-deck-shell] failed to mark issue comments as read", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedIssueId, issues]);
 
   useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);

@@ -101,12 +101,16 @@ export async function PATCH(request: NextRequest) {
     title?: string;
     body?: string;
     state?: "open" | "closed";
+    state_reason?: "completed" | "not_planned";
     labels?: string[];
     assignees?: string[];
   } = {};
   if (typeof payload.title === "string" && payload.title.trim()) input.title = payload.title.trim();
   if (typeof payload.body === "string") input.body = payload.body;
   if (payload.state === "open" || payload.state === "closed") input.state = payload.state;
+  if (payload.stateReason === "completed" || payload.stateReason === "not_planned") {
+    input.state_reason = payload.stateReason;
+  }
   if (Array.isArray(payload.labels)) {
     input.labels = payload.labels.filter((l: unknown) => typeof l === "string");
   }

@@ -13,6 +13,17 @@ name: Claude Issue Dispatch
 #      00.check-userはPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、
 #      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
 #      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
+#      「00.check-user・21.plan-requiredともに付いていない」状態を承認済みとみなして実装を
+#      再開する判定自体はissues/unlabeled・issue_commentどちらのイベント経由でも同じロジックで
+#      行う(下記「実行者の権限・状態を判定する」ステップ)。issue-deckアプリの承認ボタンは
+#      ラベル更新をGitHub App経由(issue-deck[bot]として記録される)で行うため、
+#      issues/unlabeledイベント単独では実際に承認した人間を特定できず自己ループ防止ロジックで
+#      弾かれる。そのためアプリはラベル更新に続けて個人アカウントでの@claudeコメントも送信し、
+#      issue_commentイベント経由で実装を再開させる(#173)。
+#   3. 承認・練り直しのいずれもせず計画を拒否する場合は、人間がIssueを直接クローズする
+#      (`not planned`等の理由。コメントに@claudeを含める必要はない)。クローズ済みIssueは
+#      本ワークフローの全モードで再始動しないため(issue_closedガード)、クローズ後に
+#      issue-labels.ymlのcleanup-on-closeジョブが00.check-userを除去しても安全(issue #172)。
 #
 # 21.plan-requiredの計画提示ステップは、実装範囲が広くGitHub Actions上で一度に処理しきれない
 # 懸念がある場合、計画コメントをサブIssueへの分割案として提示できる(#144)。計画コメント末尾に
@@ -56,6 +67,15 @@ name: Claude Issue Dispatch
 # 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
 # 展開しない(.github/workflows/issue-labels.yml と同じ方針)。
 #
+# @claudeトリガーの判定はcontains()ではなくstartsWith()を使う(#173)。containsだと、この
+# ワークフロー自身が投稿する完了報告コメント(APPROVE_COMMENT_BODY等の定型コメント本文を
+# 説明のため引用する場合や、ドキュメント・コード中の`@claude`という記述を含む場合)にまで
+# 反応し、報告コメント→再トリガー→報告コメント...の無限ループを起こしうる
+# (実際に#173で2回連続発生した)。issue-detail.tsx・mobile-issue-detail.tsx・
+# approval-labels.ts・start-implementation.tsが送信する定型コメントは全て本文の先頭が
+# `@claude`であり、人間が手動で投稿する起動コメントも同様の慣習(先頭に`@claude`)のため、
+# startsWith()に絞っても正規の起動経路は損なわれない。
+#
 # ブランチのpush(Checkoutステップ)・実装ステップのgit push/PR作成はGITHUB_TOKENではなく、
 # secrets.WORKFLOW_PAT(workflowスコープ/Repository permissions > Workflows: Read and write
 # を持つFine-grained PAT)を使う(issue #106)。既定のGITHUB_TOKENは`.github/workflows/`配下への
@@ -77,7 +97,7 @@ jobs:
   dispatch:
     if: |
       (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
     # 同じブランチに同時にcheckout・pushして競合するのを避けるため、issueごとに直列化する(#129)。
@@ -209,18 +229,6 @@ jobs:
             else
               MODE=skip
             fi
-          elif [ "$EVENT_NAME" = "issues" ] && [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "00.check-user" ]; then
-            # 人間が計画を確認し00.check-userを外した = 承認。直前の計画コメントに埋め込まれた
-            # <!-- issue-deck-plan-type:implement|split -->マーカーから、そのまま実装するか
-            # サブIssueへ分割するかを判定する(#144)。マーカーが無い場合(旧形式の計画コメントや
-            # フォールバック通知のみの場合)はimplementにフォールバックする。
-            PLAN_TYPE="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' | grep -oP '(?<=<!-- issue-deck-plan-type:)(implement|split)(?= -->)' | tail -n1 || true)"
-            : "${PLAN_TYPE:=implement}"
-            if [ "$PLAN_TYPE" = "split" ]; then
-              MODE=split
-            else
-              MODE=implement
-            fi
           elif [ "$AWAITING_CONFIRM" = "true" ]; then
             # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
             if [ "$EVENT_NAME" = "issue_comment" ]; then
@@ -229,7 +237,27 @@ jobs:
           elif [ "$PLAN_REQUIRED" = "true" ]; then
             MODE=plan
           else
-            MODE=implement
+            # 00.check-user・21.plan-requiredともに付いていない状態。計画レビューを経ていた
+            # issueであれば、それらのラベルが外れた = 承認とみなす。直前の計画コメントに
+            # 埋め込まれた<!-- issue-deck-plan-type:implement|split -->マーカーから、
+            # そのまま実装するかサブIssueへ分割するかを判定する(#144)。マーカーが無い場合
+            # (計画レビューを経ていない通常issueや、旧形式の計画コメント・フォールバック通知
+            # のみの場合)はimplementにフォールバックする。
+            #
+            # 承認操作の経路は2通りある:
+            #   - 人間がGitHub UI等で直接00.check-userを外す(issues/unlabeledイベント)
+            #   - issue-deckアプリの承認ボタン(issue-deckのGitHub Appによるラベル更新の
+            #     操作はGitHub上issue-deck[bot]として記録され、issues/unlabeledイベント単独
+            #     では実際に操作した人間を特定できず前段の権限チェックで自己ループ防止に
+            #     より弾かれるため、アプリはラベル更新に続けて個人アカウントでの@claudeコメント
+            #     も送信し、issue_commentイベント経由でここに到達する。#173)
+            PLAN_TYPE="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' | grep -oP '(?<=<!-- issue-deck-plan-type:)(implement|split)(?= -->)' | tail -n1 || true)"
+            : "${PLAN_TYPE:=implement}"
+            if [ "$PLAN_TYPE" = "split" ]; then
+              MODE=split
+            else
+              MODE=implement
+            fi
           fi
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"

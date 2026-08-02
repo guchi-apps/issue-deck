@@ -1,5 +1,7 @@
 export type IssueState = "open" | "closed";
 
+export type IssueStateReason = "completed" | "not_planned" | "reopened" | null;
+
 export type GithubUser = {
   login: string;
 };
@@ -35,6 +37,7 @@ export type Issue = {
   title: string;
   body: string;
   state: IssueState;
+  stateReason: IssueStateReason;
   repositoryFullName: string;
   repositoryPrivate: boolean;
   repositoryArchived: boolean;
@@ -47,6 +50,7 @@ export type Issue = {
   updatedAt: string;
   htmlUrl: string;
   favorite: boolean;
+  hasUnreadComments: boolean;
 };
 
 export type NavViewId =

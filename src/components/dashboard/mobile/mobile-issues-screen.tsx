@@ -64,7 +64,7 @@ export function MobileIssuesScreen({
         <button
           type="button"
           onClick={() => setFilterSheetOpen(true)}
-          className="rounded-md border p-1.5"
+          className="rounded-md border p-2.5"
           aria-label="絞り込み・並び替え"
         >
           <SlidersHorizontal className="size-4" />
@@ -80,7 +80,7 @@ export function MobileIssuesScreen({
               type="button"
               onClick={() => setView(viewId)}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs whitespace-nowrap",
+                "rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
                 view === viewId && "border-primary bg-primary/10 text-primary",
               )}
             >

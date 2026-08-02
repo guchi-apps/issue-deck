@@ -9,6 +9,7 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   RotateCcw,
   SlidersHorizontal,
   Star,
@@ -28,6 +29,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -36,7 +41,9 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
-import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
+import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -61,17 +68,29 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+  const [isImageUploading, setIsImageUploading] = useState(false);
   const issueSuggestions = useMemo(
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
 
-  async function handleToggleState() {
+  async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
-      state: issue.state === "open" ? "closed" : "open",
+      state: "closed",
+      stateReason,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReopen() {
+    if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "open",
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -121,7 +140,23 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
       number: issue.number,
       labels: labelsAfterApproval(issue.labels),
     });
-    if (updated) onIssueUpdated(updated);
+    if (!updated) return;
+    onIssueUpdated(updated);
+
+    // ラベル更新はissue-deckのGitHub Appが行うためGitHub上はbotの操作として記録され、
+    // issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
+    // 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: APPROVE_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+    }
   }
 
   async function handleReject(reason: string) {
@@ -129,6 +164,21 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
     const [owner, repo] = issue.repositoryFullName.split("/");
     const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
     const created = await createComment({ owner, repo, number: issue.number, body });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
+  async function handleStartImplementation() {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: START_IMPLEMENTATION_COMMENT_BODY,
+    });
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
@@ -155,6 +205,12 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {canStartImplementation(issue) && (
+              <Button size="sm" onClick={handleStartImplementation} disabled={isCommentSubmitting}>
+                {isCommentSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                実装を開始
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                 GitHubで開く
@@ -189,19 +245,35 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
                   <Pencil />
                   編集
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
-                  {issue.state === "open" ? (
-                    <>
+                {issue.state === "open" ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={isSubmitting}>
                       <XCircle />
                       クローズする
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw />
-                      再オープンする
-                    </>
-                  )}
-                </DropdownMenuItem>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem
+                          disabled={isSubmitting}
+                          onSelect={() => handleClose("completed")}
+                        >
+                          完了としてクローズ
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={isSubmitting}
+                          onSelect={() => handleClose("not_planned")}
+                        >
+                          計画外としてクローズ
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+                ) : (
+                  <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
+                    <RotateCcw />
+                    再オープンする
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -213,7 +285,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
           <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-            {issue.state === "open" ? "Open" : "Closed"}
+            {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
           </Badge>
           <span className="flex items-center gap-1.5 text-muted-foreground">
             作成者 <UserAvatar login={issue.author.login} /> {issue.author.login}
@@ -278,6 +350,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
               onChange={setNewCommentBody}
               issueSuggestions={issueSuggestions}
               disabled={isCommentSubmitting}
+              onUploadingChange={setIsImageUploading}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -288,7 +361,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             <Button
               className="self-end"
               onClick={handleCreateComment}
-              disabled={!newCommentBody.trim() || isCommentSubmitting}
+              disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
             >
               {isCommentSubmitting && <Loader2 className="animate-spin" />}
               {isCommentSubmitting ? "送信中..." : "コメント"}

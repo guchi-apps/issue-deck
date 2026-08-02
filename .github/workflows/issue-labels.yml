@@ -24,6 +24,13 @@ name: Issue Labels
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
 # develop-merge-sweepジョブはこれを取りこぼした03.d:margeをscheduleで定期的に拾い直す。
+#
+# cleanup-on-closeジョブは、上記の状態遷移(main-pr-mergedによる09.main遷移)を経由しない
+# Issueクローズ(例: 21.plan-requiredの計画をユーザーが承認・練り直しのいずれもせず、
+# `not planned`等の理由でIssueを直接クローズして実装自体を取りやめた場合)で、
+# `00.check-user`ラベルが「要確認」のまま残り続けるのを防ぐための安全網(issue #172)。
+# クローズ済みのIssueはclaude-issue-dispatch.ymlの全モードで再始動しないため
+# (`issue_closed`ガード)、`00.check-user`を除去してもワークフローが誤って再始動することはない。
 
 on:
   push:
@@ -34,6 +41,8 @@ on:
     branches:
       - develop
       - main
+  issues:
+    types: [closed]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
@@ -93,7 +102,7 @@ jobs:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge"
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
             gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
           fi
 
@@ -113,7 +122,7 @@ jobs:
           for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge"
+              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"
             fi
           done
@@ -135,7 +144,7 @@ jobs:
       - name: 05.develop の issue を 07.m:marge へ一括遷移する
         run: |
           for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
-            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop"
+            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
           done
 
   main-pr-merged:
@@ -162,6 +171,20 @@ jobs:
             } | sort -un
           )"
           for n in $issues; do
-            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge"
+            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "01.wip"
             gh issue close "$n"
           done
+
+  cleanup-on-close:
+    # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
+    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が「要確認」のまま
+    # 残り続けないよう、クローズをトリガーに除去する。
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: 00.check-user を除去する
+        run: gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"

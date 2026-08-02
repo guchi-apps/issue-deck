@@ -1,9 +1,10 @@
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { GithubApiComment, GithubApiIssue } from "@/lib/github/issues-api";
-import type { Issue, IssueComment, IssueLabel } from "@/types/issue";
+import type { Issue, IssueComment, IssueLabel, IssueStateReason } from "@/types/issue";
 import type {
   Issue as DbIssue,
   IssueLabel as DbIssueLabel,
+  IssueStateReason as DbIssueStateReason,
 } from "@prisma/client";
 
 type RepositoryRef = {
@@ -21,6 +22,19 @@ const POSTER_MARKER_PATTERN = /\n\n<!-- issue-deck:posted-by:\S+ -->$/;
 
 function stripPosterMarker(body: string): string {
   return body.replace(POSTER_MARKER_PATTERN, "");
+}
+
+function mapDbStateReason(stateReason: DbIssueStateReason | null): IssueStateReason {
+  switch (stateReason) {
+    case "COMPLETED":
+      return "completed";
+    case "NOT_PLANNED":
+      return "not_planned";
+    case "REOPENED":
+      return "reopened";
+    default:
+      return null;
+  }
 }
 
 function mapLabel(
@@ -53,6 +67,7 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     title: raw.title,
     body: raw.body ?? "",
     state: raw.state,
+    stateReason: raw.state_reason ?? null,
     repositoryFullName: repository.fullName,
     repositoryPrivate: repository.private,
     repositoryArchived: repository.archived,
@@ -65,6 +80,7 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     updatedAt: raw.updated_at,
     htmlUrl: raw.html_url,
     favorite: false,
+    hasUnreadComments: false,
   };
 }
 
@@ -89,6 +105,7 @@ export function dbIssueToDisplayIssue(
     title: row.title,
     body: row.body ?? "",
     state: row.state === "OPEN" ? "open" : "closed",
+    stateReason: mapDbStateReason(row.stateReason),
     repositoryFullName: repository.fullName,
     repositoryPrivate: repository.private,
     repositoryArchived: repository.archived,
@@ -105,6 +122,7 @@ export function dbIssueToDisplayIssue(
     updatedAt: row.githubUpdatedAt.toISOString(),
     htmlUrl: row.htmlUrl,
     favorite: false,
+    hasUnreadComments: false,
   };
 }
 

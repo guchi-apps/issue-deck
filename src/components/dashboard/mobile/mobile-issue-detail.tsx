@@ -11,6 +11,7 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
+  Play,
   Plus,
   RotateCcw,
   Share2,
@@ -31,6 +32,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -42,12 +47,15 @@ import {
 } from "@/components/ui/select";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
+import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
@@ -77,12 +85,14 @@ export function MobileIssueDetail({
     error: commentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const [isImageUploading, setIsImageUploading] = useState(false);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
+  const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -106,11 +116,21 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleToggleState() {
+  async function handleClose(stateReason: "completed" | "not_planned") {
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
-      state: issue.state === "open" ? "closed" : "open",
+      state: "closed",
+      stateReason,
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleReopen() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "open",
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -157,7 +177,23 @@ export function MobileIssueDetail({
       number: issue.number,
       labels: labelsAfterApproval(issue.labels),
     });
-    if (updated) onIssueUpdated(updated);
+    if (!updated) return;
+    onIssueUpdated(updated);
+
+    // ラベル更新はissue-deckのGitHub Appが行うためGitHub上はbotの操作として記録され、
+    // issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
+    // 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: APPROVE_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+    }
   }
 
   async function handleReject(reason: string) {
@@ -170,29 +206,70 @@ export function MobileIssueDetail({
     }
   }
 
+  async function handleStartImplementation() {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: START_IMPLEMENTATION_COMMENT_BODY,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
-      <header className="flex items-center gap-2 border-b p-4">
-        <button type="button" onClick={onBack}>
+    <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
+      <header className="flex items-center gap-1 border-b p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="戻る"
+          className="-m-2 rounded-full p-2 active:bg-muted"
+        >
           <ArrowLeft className="size-5" />
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
+        {canStartImplementation(issue) && (
+          <button
+            type="button"
+            onClick={handleStartImplementation}
+            disabled={isCommentSubmitting}
+            aria-label="実装を開始"
+            className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+          >
+            {isCommentSubmitting ? (
+              <Loader2 className="size-5 animate-spin" />
+            ) : (
+              <Play className="size-5" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onToggleFavorite(issue)}
           aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+          className="-m-2 rounded-full p-2 active:bg-muted"
         >
           <Star
             className={
-              issue.favorite ? "size-4 fill-yellow-400 text-yellow-400" : "size-4 text-muted-foreground"
+              issue.favorite ? "size-5 fill-yellow-400 text-yellow-400" : "size-5 text-muted-foreground"
             }
           />
         </button>
-        <Share2 className="size-4 text-muted-foreground" />
+        <button type="button" aria-label="共有" className="-m-2 rounded-full p-2 active:bg-muted">
+          <Share2 className="size-5 text-muted-foreground" />
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="操作メニュー">
-              <MoreHorizontal className="size-4 text-muted-foreground" />
+            <button
+              type="button"
+              aria-label="操作メニュー"
+              className="-m-2 rounded-full p-2 active:bg-muted"
+            >
+              <MoreHorizontal className="size-5 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -200,19 +277,35 @@ export function MobileIssueDetail({
               <Pencil />
               編集
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={isSubmitting} onSelect={handleToggleState}>
-              {issue.state === "open" ? (
-                <>
+            {issue.state === "open" ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger disabled={isSubmitting}>
                   <XCircle />
                   クローズする
-                </>
-              ) : (
-                <>
-                  <RotateCcw />
-                  再オープンする
-                </>
-              )}
-            </DropdownMenuItem>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem
+                      disabled={isSubmitting}
+                      onSelect={() => handleClose("completed")}
+                    >
+                      完了としてクローズ
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={isSubmitting}
+                      onSelect={() => handleClose("not_planned")}
+                    >
+                      計画外としてクローズ
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+            ) : (
+              <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
+                <RotateCcw />
+                再オープンする
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
@@ -233,7 +326,7 @@ export function MobileIssueDetail({
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-            {issue.state === "open" ? "Open" : "Closed"}
+            {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
           </Badge>
           <span>作成日 {new Date(issue.createdAt).toLocaleDateString("ja-JP")}</span>
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
@@ -304,7 +397,7 @@ export function MobileIssueDetail({
                     onClick={() => toggleLabel(label.name)}
                     disabled={isSubmitting}
                     aria-label={`${label.name}を削除`}
-                    className="rounded-full hover:opacity-70 disabled:opacity-50"
+                    className="-m-1.5 rounded-full p-1.5 hover:opacity-70 disabled:opacity-50"
                   >
                     <X className="size-3" />
                   </button>
@@ -320,9 +413,10 @@ export function MobileIssueDetail({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  className="flex size-6 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
+                  aria-label="ラベルを追加"
+                  className="flex size-9 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-4" />
                 </button>
               }
             />
@@ -362,6 +456,7 @@ export function MobileIssueDetail({
               onChange={setNewCommentBody}
               issueSuggestions={issueSuggestions}
               disabled={isCommentSubmitting}
+              onUploadingChange={setIsImageUploading}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -372,7 +467,7 @@ export function MobileIssueDetail({
             <Button
               className="self-end"
               onClick={handleCreateComment}
-              disabled={!newCommentBody.trim() || isCommentSubmitting}
+              disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
             >
               {isCommentSubmitting && <Loader2 className="animate-spin" />}
               {isCommentSubmitting ? "送信中..." : "コメント"}

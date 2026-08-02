@@ -56,6 +56,19 @@ async function handleIssuesEvent(payload: {
   await upsertIssueFromWebhookPayload(repository.id, payload.issue);
 }
 
+async function handleIssueCommentEvent(payload: {
+  action: string;
+  issue: GithubApiIssue;
+  repository: { id: number };
+}) {
+  const repository = await db.repository.findUnique({
+    where: { githubRepositoryId: payload.repository.id },
+  });
+  if (!repository) return;
+
+  await upsertIssueFromWebhookPayload(repository.id, payload.issue);
+}
+
 async function handleLabelEvent(payload: {
   action: string;
   label: { id: number; name: string; color: string; description: string | null };
@@ -191,6 +204,8 @@ export async function POST(request: NextRequest) {
   try {
     if (event === "issues") {
       await handleIssuesEvent(payload);
+    } else if (event === "issue_comment") {
+      await handleIssueCommentEvent(payload);
     } else if (event === "label") {
       await handleLabelEvent(payload);
     } else if (event === "installation_repositories") {
