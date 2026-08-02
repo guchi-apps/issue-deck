@@ -42,7 +42,7 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-`07.m:marge`・`09.main`に対応するdevelop→mainのリリースフロー自体は未設計・未実装（`05.develop`まででdevelopマージ後の自動化は一旦止まる）。
+`07.m:marge`・`09.main`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細はdocs/multi-agent-workflow.md「Phase 6」参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
 
 ### 自動マージ不可カテゴリ（`00.check-user`付与対象）
 
