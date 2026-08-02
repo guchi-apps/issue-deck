@@ -111,6 +111,25 @@ jobs:
       issues: write
       actions: read
       id-token: write
+    # 無人実行環境でも`pnpm dev`を起動して画面を確認できるようにするためのMySQLサービス
+    # コンテナ(#256)。plan/splitモードでは使わないが、サービスコンテナはジョブ全体に
+    # 紐づく仕様上いずれのモードでも起動する(未使用でも実行時間への影響は小さい)。
+    # 認証情報はCI専用のプレースホルダーで、.github/workflows/ci.yml のDATABASE_URLと揃える。
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: placeholder
+          MYSQL_DATABASE: app_issue_deck
+          MYSQL_USER: placeholder
+          MYSQL_PASSWORD: placeholder
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - name: Checkout develop
         uses: actions/checkout@v4
@@ -535,6 +554,40 @@ jobs:
           set -e
           git fetch origin "${{ steps.state.outputs.branch }}"
           git checkout "${{ steps.state.outputs.branch }}"
+
+      - name: Setup pnpm（DBセットアップ用）
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js（DBセットアップ用）
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: 依存関係をインストールする（DBセットアップ用）
+        # 後続のprisma migrate deploy・シードスクリプト実行に必要。実装エージェント自身も
+        # lint/typecheck/build実行のため`pnpm install`を行うが、ここで先に済ませておくことで
+        # ロックファイルどおりの依存関係でマイグレーション・シードを確実に実行する。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        run: pnpm install --frozen-lockfile
+
+      - name: DBマイグレーションを適用する
+        # 無人実行で`pnpm dev`を起動できるようにするための土台(#256)。実際に開発サーバーを
+        # 起動して画面を確認する処理自体は別Issueで統合する。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+        run: pnpm db:migrate:deploy
+
+      - name: 画面確認用のダミーデータをシードする
+        # 実際のGitHub Appとの同期処理(src/lib/github/sync-issues.ts等)は使わず、Prismaで
+        # 直接最小限のダミーデータ（リポジトリ・Issue数件）を投入する(#256)。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+        run: pnpm db:seed:ci
 
       - name: 01.wip を付与する（実装着手時）
         # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
