@@ -1,0 +1,281 @@
+name: Release develop to main
+
+# release-to-mainスキル（.claude/skills/release-to-main/SKILL.md）が定める手順のうち、
+# 「1. バージョンを上げる」「2. developへの反映（フィーチャーブランチ+PR）」
+# 「3. develop→mainのPRを作成する」までを自動化する(#55)。
+#
+# develop→mainの実際のマージ（手順4、マージコミット必須）はCLAUDE.mdの自動マージ不可
+# カテゴリに該当するため、これまでどおり人間が手動で行う。本ワークフローはPR作成までを
+# 担い、マージは一切行わない。
+#
+# 状態はdevelop/mainのpackage.jsonのversionフィールドだけから判定する（他に状態を
+# 保持しない）。
+# - main版 == develop版: まだ何もバンプしていない。develop向けのバンプPRが無ければ
+#   新規に作成する（既にバンプPRがオープン中なら二重作成を避けるため何もしない）。
+# - main版 != develop版: バンプPRが既にdevelopへマージ済み。develop→mainのPRが
+#   無ければ新規に作成する。
+#
+# バージョンの上げ幅（major/minor/patch）は、issueのラベルではなくmain/develop間の実際の
+# コード差分の内容からClaude Code（claude-code-action、--json-schemaによる構造化出力）が
+# semverに基づき判定する(#55)。判定に失敗した場合はpatchにフォールバックする。
+# それでも判断が誤っていると思われる場合はrelease-to-mainスキルどおり
+# 人間がPRのバージョンを修正する想定。
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+  schedule:
+    # develop-merge-sweep(issue-labels.yml)と同じ15分間隔。GitHub Auto-mergeや
+    # 手動マージがpull_requestイベントを取りこぼした場合の安全網。
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  # 同時に複数実行してバンプPRやdevelop→mainのPRを二重作成しないよう直列化する。
+  group: release-develop-to-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  release:
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # フィーチャーブランチのpush・PR作成を後続のCI/レビューworkflow
+          # (ci.yml, claude-review-develop.yml)が確実に検知できるよう、
+          # GITHUB_TOKEN起点のイベントは他のworkflowを起動しないというGitHub仕様を
+          # 避けるためWORKFLOW_PATを使う（claude-issue-dispatch.ymlと同じ方針）。
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: develop/mainの最新を取得する
+        # actions/checkoutが作成するリモート追跡ブランチの範囲に依存せず、
+        # origin/develop・origin/mainを確実に参照できるよう明示的なrefspecで取得する。
+        run: |
+          git fetch origin develop:refs/remotes/origin/develop --quiet --force
+          git fetch origin main:refs/remotes/origin/main --quiet --force
+
+      - name: リリース状態を判定する
+        id: state
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          MAIN_VERSION="$(git show origin/main:package.json | jq -r .version)"
+          DEV_VERSION="$(jq -r .version package.json)"
+          echo "main_version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dev_version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
+
+          NEED_BUMP=false
+          NEED_MAIN_PR=false
+
+          if [ "$MAIN_VERSION" = "$DEV_VERSION" ]; then
+            if git diff --quiet origin/main origin/develop; then
+              echo "developとmainに差分が無いため、リリースするものがありません"
+            else
+              EXISTING_BUMP_PR="$(gh pr list --base develop --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | .[0].headRefName // empty')"
+              if [ -n "$EXISTING_BUMP_PR" ]; then
+                echo "バージョンbump用のPR（$EXISTING_BUMP_PR）が既にオープン中のため、新規作成をスキップします"
+              else
+                NEED_BUMP=true
+              fi
+            fi
+          else
+            echo "developのバージョン($DEV_VERSION)がmain($MAIN_VERSION)と異なるため、バンプ済みとみなします"
+            EXISTING_MAIN_PR="$(gh pr list --base main --head develop --state open --json url --jq '.[0].url // empty')"
+            if [ -n "$EXISTING_MAIN_PR" ]; then
+              echo "develop→mainのPR（$EXISTING_MAIN_PR）が既にオープン中のため、新規作成をスキップします"
+            else
+              NEED_MAIN_PR=true
+            fi
+          fi
+
+          echo "need_bump=$NEED_BUMP" >> "$GITHUB_OUTPUT"
+          echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
+          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION"
+
+      - name: リリース対象issueの一覧を取得する
+        id: issues
+        if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          ISSUES_JSON="$(
+            {
+              gh issue list --label "05.develop" --state open --json number,title,labels
+              gh issue list --label "07.m:marge" --state open --json number,title,labels
+            } | jq -s 'add | unique_by(.number) | sort_by(.number)'
+          )"
+          echo "$ISSUES_JSON" > /tmp/release-issues.json
+
+          jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
+          if [ ! -s /tmp/release-issue-lines.txt ]; then
+            echo "（05.develop・07.m:margeが付いたissueが見つかりませんでした）" > /tmp/release-issue-lines.txt
+          fi
+          echo "対象issue:"
+          cat /tmp/release-issue-lines.txt
+
+      - name: コード変更内容からバージョンの上げ幅を判定する
+        id: version-decision
+        if: steps.state.outputs.need_bump == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"}},"required":["bump_kind","reason"]}'
+          prompt: |
+            issue-deckリポジトリで、mainブランチとdevelopブランチの実際のコード差分の内容から、
+            セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅
+            （major/minor/patch）を判定してください。Issueのラベルは一切参照せず、差分の
+            内容そのものだけから判断してください。
+
+            ## 確認すること
+            - `git diff origin/main origin/develop` で実際のコード変更内容を確認する
+            - `git log origin/main..origin/develop --oneline` でコミット一覧も参考にする
+
+            ## 判定基準
+            - major: 既存の挙動・データ構造・公開APIに対する後方互換性のない変更
+              （破壊的変更）が含まれる場合
+            - minor: 後方互換性を保ったまま新機能が追加されている場合
+            - patch: バグ修正・リファクタリング・ドキュメント更新など、上記のいずれにも
+              該当しない変更のみの場合
+            - 複数種類の変更が混在する場合は、最も上げ幅が大きい判定を採用する
+              （例: 新機能追加とバグ修正が両方含まれる場合はminor）
+
+            ## 出力
+            判定結果（bump_kind）と、その判断根拠（reason。日本語で、実際にどのファイル・
+            どのような変更を根拠にしたか具体的に触れて説明する）を返してください。
+
+      - name: バージョン判定結果を検証する
+        id: bump
+        # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
+        # 前ステップの成否によらず実行する
+        if: always() && steps.state.outputs.need_bump == 'true'
+        env:
+          # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
+          # run:本文に直接展開せずenv経由でのみ参照する
+          # (.github/workflows/issue-labels.ymlと同じ、script injectionを避ける方針)。
+          STRUCTURED_OUTPUT: ${{ steps.version-decision.outputs.structured_output }}
+        run: |
+          set -e
+
+          BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
+          # PR本文への埋め込み時に改行で崩れないよう、1行に平坦化しておく
+          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null | tr '\n' ' ' || true)"
+
+          case "$BUMP_KIND" in
+            major|minor|patch) ;;
+            *)
+              echo "Claude Codeによるバージョン判定が失敗・不正な結果だったため、patchにフォールバックします（判定結果: '$BUMP_KIND'）"
+              BUMP_KIND=patch
+              REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
+              ;;
+          esac
+
+          echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON"
+
+      - name: バージョンをbumpしてdevelop向けPRを作成する
+        if: always() && steps.state.outputs.need_bump == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          MAIN_VERSION: ${{ steps.state.outputs.main_version }}
+          BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
+          REASON: ${{ steps.bump.outputs.reason }}
+        run: |
+          set -e
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$MAIN_VERSION"
+          case "$BUMP_KIND" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            *)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          BRANCH="release/v$NEW_VERSION"
+
+          git checkout -b "$BRANCH" origin/develop
+          npm pkg set version="$NEW_VERSION"
+
+          git config user.name "Claude Code"
+          git config user.email "claude-code@example.com"
+          git add package.json
+          git commit -m "v${NEW_VERSION}をリリースする。"
+          git push -u origin "$BRANCH"
+
+          {
+            echo "developへの取り込み待ちの変更を v${NEW_VERSION} としてリリースします。"
+            echo
+            echo "## バージョンの判断根拠"
+            echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+            echo
+            echo "$REASON"
+            echo
+            echo "判断が誤っていると思われる場合は、このPR上でバージョンを修正してください。"
+            echo
+            echo "## 対象issue"
+            cat /tmp/release-issue-lines.txt
+            echo
+            echo "## 注意点"
+            echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
+            echo "- 自動マージはされません。CI通過を確認のうえ、人間がマージしてください"
+          } > /tmp/release-pr-body.md
+
+          gh pr create --base develop --head "$BRANCH" \
+            --title "v${NEW_VERSION}をリリースする" \
+            --body-file /tmp/release-pr-body.md
+
+      - name: develop→mainのPRを作成する
+        if: steps.state.outputs.need_main_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+        run: |
+          set -e
+
+          {
+            echo "developの内容をv${DEV_VERSION}としてmainへリリースします。"
+            echo
+            echo "## 対象issue"
+            cat /tmp/release-issue-lines.txt
+            echo
+            echo "## 注意点"
+            echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
+            echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。人間が内容を確認のうえマージしてください"
+            echo "- マージ方式は必ず「Create a merge commit」を選んでください（squash mergeはdevelop/mainの祖先のつながりを切ってしまうため厳禁。詳細はrelease-to-mainスキル参照）"
+          } > /tmp/main-pr-body.md
+
+          gh pr create --base main --head develop \
+            --title "v${DEV_VERSION}をmainへリリースする" \
+            --body-file /tmp/main-pr-body.md
