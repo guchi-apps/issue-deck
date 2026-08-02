@@ -269,8 +269,8 @@ export function CommentThread({
       <ul className="flex flex-col gap-4">
         {comments.map((comment, index) => (
           <li key={comment.id} className="flex gap-2">
-            <UserAvatar login={comment.author.login} className="mt-0.5 size-7" />
-            <div className="flex-1 rounded-lg border p-3">
+            <UserAvatar login={comment.author.login} className="mt-0.5 size-7 shrink-0" />
+            <div className="min-w-0 flex-1 rounded-lg border p-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-medium">{comment.author.login}</span>
