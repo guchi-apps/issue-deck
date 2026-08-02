@@ -205,6 +205,8 @@ export function MentionTextarea({
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
+        // 候補選択中はEnterを確定操作として扱うため、祖先のCtrl+Enter送信ショートカットへ伝播させない。
+        e.stopPropagation();
         if (trigger.type === "mention") {
           applySuggestion(mentionItems[activeIndex]);
         } else {
