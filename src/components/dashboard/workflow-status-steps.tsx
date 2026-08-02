@@ -76,7 +76,7 @@ export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
                   isCurrent &&
                     (approvalPending
                       ? "text-amber-600 ring-amber-500 dark:text-amber-400"
-                      : "bg-primary/15 text-primary ring-primary"),
+                      : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
                   !isDone && !isCurrent && "text-muted-foreground ring-border",
                 )}
               >
