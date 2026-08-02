@@ -1,6 +1,6 @@
 import { isApprovalPending, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
-import type { Issue } from "@/types/issue";
+import type { Issue, IssueLabel } from "@/types/issue";
 
 /** 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する） */
 export const START_IMPLEMENTATION_COMMENT_BODY = "@claude 実装を開始してください";
@@ -53,6 +53,15 @@ export function startImplementationLabelsToAdd(options: StartImplementationOptio
   return START_IMPLEMENTATION_OPTIONS.filter((option) => options[option.key]).map(
     (option) => option.githubLabel,
   );
+}
+
+/** issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める */
+export function startImplementationOptionsFromLabels(labels: IssueLabel[]): StartImplementationOptions {
+  const labelNames = new Set(labels.map((label) => label.name));
+  return START_IMPLEMENTATION_OPTIONS.reduce((options, option) => {
+    options[option.key] = labelNames.has(option.githubLabel);
+    return options;
+  }, {} as StartImplementationOptions);
 }
 
 /**

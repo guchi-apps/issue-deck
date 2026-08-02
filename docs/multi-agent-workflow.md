@@ -189,6 +189,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
 - **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
+- **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
 
 ## 段階的導入計画
 
@@ -377,12 +378,15 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
   `issue-labels.yml`に`schedule`（15分おき）で走査する`develop-merge-sweep`ジョブを追加し、
   取りこぼした`03.d:marge`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
   非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
-- `22.preview-required`・`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、
-  画面確認・スクリーンショット取得ができないため、実装・コミット・ブランチpushまで行った上で
-  `00.check-user`を付与しPR作成前に停止する運用にとどめている。このケースの「承認後の再開」は
-  Phase5のスコープでは自動化しておらず、人間が手動で`gh pr create`する運用（申し送り事項）。
-  `22.preview-required`の場合、停止時のコメントには上記のポート割り当て規約（`PORT=4000 + Issue番号`）
-  に基づく`http://localhost:<ポート>`と、同一LAN上の別端末から確認する場合向けの
+- `23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合は、Phase7で統合した
+  Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメント・PR本文に埋め込んだ
+  うえで通常どおり完了処理まで進める（ブロックしない）。詳細はPhase7参照。
+- `22.preview-required`が付いていて`23.screenshot-required`が付いていないissueをPhase5経由
+  （無人実行）で処理する場合、実際に到達可能なプレビューURLを無人実行環境から提供できないため、
+  実装・コミット・ブランチpushまで行った上で`00.check-user`を付与しPR作成前に停止する運用にとどめて
+  いる。このケースの「承認後の再開」はPhase5のスコープでは自動化しておらず、人間が手動で`gh pr create`
+  する運用（申し送り事項）。停止時のコメントには上記のポート割り当て規約（`PORT=4000 + Issue番号`）に
+  基づく`http://localhost:<ポート>`と、同一LAN上の別端末から確認する場合向けの
   `http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`をあわせて案内する。無人実行のワークフロー
   自体はdevサーバーを起動しないため、人間が手元でブランチをcheckoutして`pnpm dev`を起動した際に
   開くURLとしての案内であり、実際に到達可能なURLをその場で提示しているわけではない。
@@ -431,6 +435,93 @@ GitHub ActionsのUIから`Run workflow`で明示的に実行する。
 `auto-merge`ジョブが対応Issue番号を特定できず自動マージをスキップする（既存の仕組みがそのまま
 効くため、本Phaseで新たなガードは追加していない）。develop→mainのPRについてはそもそも
 `claude-review-develop.yml`が`develop`向けPRしか対象にしないため関与しない。
+
+## Phase 7: 無人実行でのスクリーンショット撮影・画像埋め込み（#199, #255, #256, #257, #258）
+
+issue #199（「PC画面とスマホ画面のデザインを確認したい」）は複数の技術的障壁があるため4つの
+サブIssueに分割された。
+
+- #255: 任意のPNG画像をGitHub Issueコメントに画像として埋め込む手段の確立（DB・認証には
+  触れない）
+- #256: 無人実行フローにMySQLサービスコンテナを追加し、開発サーバーを起動できるようにする
+- #257: Supabaseを経由しないCI専用ログインバイパス機構
+- #258: 上記3件の上に実際のPlaywright撮影処理を統合し、Phase5の`23.screenshot-required`の
+  挙動を「撮影できないので`00.check-user`を付与して停止する」から「実際に撮影してコメント・
+  PR本文に埋め込んだうえで通常どおり完了処理まで進める」に変更する
+
+### 画像埋め込みの仕組み（#255）
+
+- 画像は`develop`/`main`の祖先には含まれない専用のorphanブランチ`screenshots`にコミットする
+  （通常のリリースフローではマージしない）。
+- コミットした画像を`https://raw.githubusercontent.com/<owner>/<repo>/screenshots/issue-<番号>/<ファイル名>.png`
+  のURLとして参照し、Markdownの`![...](...)`記法で`gh issue comment`の本文に埋め込む。公開
+  リポジトリのため認証なしで表示できる（`scripts/post-issue-screenshot.sh`実行時に実機検証済み、
+  `raw.githubusercontent.com`から`content-type: image/png`で200が返ることを確認した）。
+- `scripts/post-issue-screenshot.sh <issue番号> <画像ファイルパス> [画像ファイルパス...]`が、
+  画像を`screenshots`ブランチの`issue-<番号>/`配下にコミット・pushし、上記raw URLを標準出力に
+  1行1URLで出力する。呼び出し側（将来のPlaywright統合サブIssueなど）はこの出力をそのまま
+  `gh issue comment`の本文に埋め込めばよい。ファイル名には取得時刻を接頭辞として付与しており、
+  同名ファイルで撮り直した場合でも`raw.githubusercontent.com`側の古いキャッシュを参照し続けない
+  ようにしている。
+
+### 権限
+
+`screenshots`ブランチは`.github/workflows/`配下を含まないため、pushには
+issue #106のようなworkflow書き込み権限を持つPAT（`secrets.WORKFLOW_PAT`）は不要で、既定の
+`GITHUB_TOKEN`（`contents: write`権限）で足りる（懸念点として#255のissue本文に挙げられていたが、
+検証の結果PATは不要と判明した）。
+
+### 肥大化対策
+
+`screenshots`ブランチが際限なく肥大化しないよう、`issue-labels.yml`の`cleanup-on-close`ジョブが
+Issueクローズをトリガーに対応する`issue-<番号>/`ディレクトリを削除する。定期的なバッチ削除等は
+導入していない（クローズされないまま放置されるIssueは通常のIssue運用上も稀なため、クローズ時の
+削除のみで十分と判断した）。
+
+### Playwright撮影の統合（#258）
+
+`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、`claude-issue-
+dispatch.yml`のClaude Codeステップ（実装・PR作成）が、実装・テスト・コミットを終えた後に
+`scripts/capture-issue-screenshots.sh <issue番号>`を実行する。このスクリプトが以下を一括で
+行い、埋め込み用のraw URLを標準出力に2行（1行目がデスクトップ、2行目がモバイル）で出力する。
+
+1. `next dev`をバックグラウンドで起動する（DB・CIバイパス用ユーザーは、この前段の
+   シェルスクリプトのステップ（DBマイグレーション・`scripts/ci-seed-user.mjs`・
+   `scripts/db:seed:ci`）で既に用意済み）
+2. Playwright（`scripts/capture-screenshots.mjs`）で、CIバイパス用Cookie
+   （`src/lib/ci-auth-bypass.ts`の`CI_BYPASS_COOKIE_NAME`）をセットしたうえで`/dashboard`に
+   アクセスし、デスクトップビューポート（1440x900）とモバイルデバイスプリセット
+   （`devices['iPhone 13']`）の両方でスクリーンショットを撮影する。撮影対象を`/`ではなく
+   `/dashboard`に固定しているのは、CIバイパスCookie使用時は`src/lib/supabase/middleware.ts`の
+   認証チェック自体をスキップするため、`/`が本来の遷移先（未ログインなら`/login`、ログイン済み
+   なら`/login`経由で`/dashboard`へリダイレクト）に到達せずログイン画面がそのまま表示されて
+   しまうため
+3. 開発サーバーを停止し、`scripts/post-issue-screenshot.sh`（#255）で`screenshots`ブランチへ
+   コミット・pushする
+
+呼び出し元のClaude Codeエージェントは、取得した2つのURLを`![PC画面](...)`・
+`![スマホ画面](...)`というMarkdown画像記法でPR本文・完了報告コメントに埋め込む。`22.preview-
+required`は依然、無人実行環境から到達可能なプレビューURLを提供できないため、
+`23.screenshot-required`が付いていない場合はPhase5の説明のとおり`00.check-user`で停止する運用を
+維持している。
+
+#### CIバイパス用ユーザーとダミーデータの紐付け
+
+`/dashboard`のリポジトリ・Issue一覧は`UserInstallation`（ユーザーとGitHub Appインストールの
+紐付け）経由で絞り込まれる（`src/app/dashboard/page.tsx`, `src/lib/issues-for-user.ts`）。
+`scripts/ci-seed-user.mjs`（#257）はCIバイパス用ユーザーの作成のみ、`scripts/seed-ci-db.mjs`
+（#256）はダミーのリポジトリ・Issueの作成のみを行っており、両者を紐付ける`UserInstallation`が
+どちらにも存在しなかった（#258で発覚）。そのため`seed-ci-db.mjs`に、CIバイパス用ユーザーが
+存在する場合に限り対応する`UserInstallation`をupsertする処理を追加した。ワークフロー上も
+`scripts/ci-seed-user.mjs`を`seed-ci-db.mjs`より先に実行する順序に固定している。
+
+#### Playwrightブラウザのインストール
+
+`pnpm exec playwright install --with-deps chromium`によるchromiumダウンロードは数分かかるため、
+`23.screenshot-required`が付いていないissueでは実行しない（`claude-issue-dispatch.yml`の
+state stepが出力する`screenshot_required`で分岐）。`pnpm add -D playwright`によるパッケージ
+自体の追加は、他のDBセットアップ用の依存関係と同じ`pnpm install --frozen-lockfile`の対象になる
+ため、ラベルの有無を問わず常に行われる（ダウンロード容量が小さく無視できるコストのため）。
 
 ## 未解決の課題・申し送り事項
 

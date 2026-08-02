@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Rocket, Search } from "lucide-react";
+import { ChevronDown, Hourglass, LayoutDashboard, Plus, RefreshCw, Rocket, Search } from "lucide-react";
 
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
@@ -118,6 +118,17 @@ export function TopBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button
+          variant={filters.inProgressOnly ? "secondary" : "outline"}
+          size="sm"
+          className="text-xs"
+          aria-pressed={filters.inProgressOnly}
+          onClick={() => setFilter("inProgressOnly", !filters.inProgressOnly)}
+        >
+          <Hourglass className="size-3" />
+          実装中のみ
+        </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

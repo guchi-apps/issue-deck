@@ -43,6 +43,7 @@ export function MobileIssuesScreen({
     labels: [],
     assignee: null,
     sort: "created",
+    inProgressOnly: false,
   });
 
   const displayedIssues = useMemo(() => {
@@ -53,6 +54,7 @@ export function MobileIssuesScreen({
       state: localFilters.state,
       labels: localFilters.labels,
       assignee: localFilters.assignee,
+      inProgressOnly: localFilters.inProgressOnly,
     });
     return sortIssues(filtered, localFilters.sort);
   }, [issues, view, currentUserLogin, localFilters]);

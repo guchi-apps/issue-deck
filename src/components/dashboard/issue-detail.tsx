@@ -201,6 +201,18 @@ export function IssueDetail({
     }
   }
 
+  async function handleWithdraw() {
+    if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "closed",
+      stateReason: "not_planned",
+      labels: labelsAfterApproval(issue.labels),
+    });
+    if (updated) onIssueUpdated(updated);
+  }
+
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -211,7 +223,7 @@ export function IssueDetail({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex max-w-3xl flex-col gap-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             {issue.repositoryFullName}
@@ -370,8 +382,10 @@ export function IssueDetail({
             pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
+            onWithdraw={handleWithdraw}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
+            isWithdrawing={isSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
 
 const publicPaths = ["/login", "/auth/callback"];
@@ -11,6 +12,10 @@ function isPublicPath(pathname: string): boolean {
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
+
+  if (isCiBypassRequest(request.cookies.get(CI_BYPASS_COOKIE_NAME)?.value)) {
+    return supabaseResponse;
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
