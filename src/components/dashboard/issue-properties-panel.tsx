@@ -1,4 +1,4 @@
-import { Archive, FolderGit2, Lock, Plus, X } from "lucide-react";
+import { Archive, CircleAlert, FolderGit2, Lock, Plus, X } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { Progress } from "@/components/ui/progress";
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 
@@ -51,24 +52,44 @@ export function IssuePropertiesPanel({ issue, onIssueUpdated }: IssuePropertiesP
       <section>
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground">ラベル</h3>
         <div className="flex flex-wrap items-center gap-1.5">
-          {issue.labels.map((label) => (
-            <span
-              key={label.name}
-              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-              style={getLabelBadgeStyle(label.color)}
-            >
-              {label.name}
-              <button
-                type="button"
-                onClick={() => toggleLabel(label.name)}
-                disabled={isSubmitting}
-                aria-label={`${label.name}を削除`}
-                className="rounded-full hover:opacity-70 disabled:opacity-50"
+          {issue.labels.map((label) => {
+            const step = matchStatusStep(label.name);
+            const attention = isAttentionLabel(label.name);
+            return (
+              <span
+                key={label.name}
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                style={getLabelBadgeStyle(label.color)}
+                title={step ? `${label.name}（ステップ${step}/${STATUS_STEP_MAX}）` : undefined}
               >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
+                {attention && <CircleAlert className="size-3 shrink-0" aria-hidden="true" />}
+                {step && (
+                  <span
+                    className="h-1.5 w-5 overflow-hidden rounded-full bg-border"
+                    aria-hidden="true"
+                  >
+                    <span
+                      className="block h-full rounded-full"
+                      style={{
+                        width: `${(step / STATUS_STEP_MAX) * 100}%`,
+                        backgroundColor: label.color,
+                      }}
+                    />
+                  </span>
+                )}
+                {label.name}
+                <button
+                  type="button"
+                  onClick={() => toggleLabel(label.name)}
+                  disabled={isSubmitting}
+                  aria-label={`${label.name}を削除`}
+                  className="rounded-full hover:opacity-70 disabled:opacity-50"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            );
+          })}
           <LabelPicker
             labels={repoLabels}
             selectedNames={issue.labels.map((label) => label.name)}
