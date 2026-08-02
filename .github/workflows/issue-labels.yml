@@ -31,6 +31,12 @@ name: Issue Labels
 # `00.check-user`ラベルが「要確認」のまま残り続けるのを防ぐための安全網(issue #172)。
 # クローズ済みのIssueはclaude-issue-dispatch.ymlの全モードで再始動しないため
 # (`issue_closed`ガード)、`00.check-user`を除去してもワークフローが誤って再始動することはない。
+#
+# `00.check-user`はclaude-review-develop.ymlの自動マージ不可判定でも「マージ保留」
+# シグナルとして使われ、付与時は人間がPRリンクから手動マージする運用になっている。
+# その手動マージ自体が確認完了を意味するため、develop-pr-merged・develop-merge-sweep・
+# main-pr-mergedの各ジョブでは状態遷移とあわせて`00.check-user`も除去する(#266。
+# 除去のタイミングが無く残り続けていた)。
 
 on:
   push:
@@ -86,6 +92,10 @@ jobs:
           fi
 
   develop-pr-merged:
+    # 00.check-userが付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする
+    # 運用になっている(claude-review-develop.ymlのauto-mergeジョブ参照)。このマージ操作自体が
+    # 「確認済み」を意味するため、05.develop遷移とあわせて00.check-userもここで除去する
+    # (#266。除去のタイミングが無く残り続けていた)。
     if: |
       github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
@@ -102,7 +112,7 @@ jobs:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
             gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
           fi
 
@@ -122,7 +132,7 @@ jobs:
           for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
+              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"
             fi
           done
@@ -152,6 +162,11 @@ jobs:
     # どちらが付いているissueも09.mainへ一括遷移してcloseする。両方のラベルを
     # 対象にするのは、main-pr-in-progressのsynchronizeが拾いきれていない
     # 可能性のあるissue(マージ直前にdevelopへ入ったもの)を取りこぼさないため。
+    #
+    # ここでの`gh issue close`はGITHUB_TOKEN起点のため、cleanup-on-closeジョブの
+    # `issues: closed`トリガーは発火しない(他ジョブと同様のGitHub仕様。#266)。
+    # そのため00.check-userが残っていた場合の除去をこのジョブ自身でも行っておく
+    # (cleanup-on-closeだけに頼るとclose済みissueにラベルが残り続ける)。
     if: |
       github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
@@ -171,7 +186,7 @@ jobs:
             } | sort -un
           )"
           for n in $issues; do
-            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "01.wip"
+            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
             gh issue close "$n"
           done
 
