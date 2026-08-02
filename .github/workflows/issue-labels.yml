@@ -57,12 +57,13 @@ jobs:
       GH_REPO: ${{ github.repository }}
       HEAD_REF: ${{ github.head_ref }}
       PR_URL: ${{ github.event.pull_request.html_url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: 03.d:marge へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "01.wip"
-            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"
+            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
           fi
 
   develop-pr-merged:
@@ -77,12 +78,13 @@ jobs:
       GH_REPO: ${{ github.repository }}
       HEAD_REF: ${{ github.head_ref }}
       PR_URL: ${{ github.event.pull_request.html_url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge"
-            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"
+            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
           fi
 
   main-pr-in-progress:
