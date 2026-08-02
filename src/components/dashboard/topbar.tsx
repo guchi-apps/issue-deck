@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, LayoutDashboard, Plus, RefreshCw, Rocket, Search } from "lucide-react";
 
+import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,12 +17,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useReleaseStatus } from "@/hooks/use-release-status";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
@@ -31,6 +32,7 @@ type TopBarProps = {
   setFilter: <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => void;
   assigneeOptions: string[];
   onCreateIssue: () => void;
+  selectedRepoFullName: string | null;
 };
 
 export function TopBar({
@@ -39,6 +41,7 @@ export function TopBar({
   setFilter,
   assigneeOptions,
   onCreateIssue,
+  selectedRepoFullName,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
@@ -46,6 +49,20 @@ export function TopBar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
+  const {
+    data: releaseStatus,
+    isLoading: releaseStatusLoading,
+    error: releaseStatusError,
+    triggerRelease,
+    isTriggering: isTriggeringRelease,
+  } = useReleaseStatus(selectedRepoFullName, accountMenuOpen);
+
+  async function handleTriggerRelease() {
+    const ok = await triggerRelease();
+    if (ok) {
+      alert("リリースworkflowを起動しました。Pull Requestの作成状況はGitHub上で確認してください。");
+    }
+  }
 
   const stateLabel =
     filters.state === "open"
@@ -172,32 +189,11 @@ export function TopBar({
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
           <div className="px-1.5 pb-1.5">
-            {rateLimitsLoading && (
-              <p className="text-xs text-muted-foreground">読み込み中...</p>
-            )}
-            {rateLimitsError && <p className="text-xs text-destructive">{rateLimitsError}</p>}
-            {rateLimits && rateLimits.length === 0 && (
-              <p className="text-xs text-muted-foreground">連携中のインストールがありません</p>
-            )}
-            {rateLimits && rateLimits.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {rateLimits.map((rateLimit) => (
-                  <li key={rateLimit.accountLogin} className="rounded-lg border p-2">
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="font-medium">{rateLimit.accountLogin}</span>
-                      <span className="text-muted-foreground">
-                        残り {rateLimit.remaining} / {rateLimit.limit}
-                      </span>
-                    </div>
-                    <Progress value={(rateLimit.remaining / rateLimit.limit) * 100} />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      リセット:{" "}
-                      {new Date(rateLimit.reset * 1000).toLocaleTimeString("ja-JP")}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <GithubRateLimitList
+              data={rateLimits}
+              isLoading={rateLimitsLoading}
+              error={rateLimitsError}
+            />
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -210,6 +206,76 @@ export function TopBar({
             <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
             {isSyncing ? "再同期中..." : "今すぐ再同期"}
           </DropdownMenuItem>
+
+          {selectedRepoFullName && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>リリース（{selectedRepoFullName}）</DropdownMenuLabel>
+              <div className="px-1.5 pb-1.5">
+                {releaseStatusLoading && (
+                  <p className="text-xs text-muted-foreground">読み込み中...</p>
+                )}
+                {releaseStatusError && (
+                  <p className="text-xs text-destructive">{releaseStatusError}</p>
+                )}
+                {releaseStatus && !releaseStatus.available && (
+                  <p className="text-xs text-muted-foreground">
+                    このリポジトリにはリリース用のworkflowが見つかりませんでした
+                  </p>
+                )}
+                {releaseStatus?.available && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">main</span>
+                      <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">develop</span>
+                      <span>
+                        {releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}
+                      </span>
+                    </div>
+                    {releaseStatus.bumpPullRequest && (
+                      <a
+                        href={releaseStatus.bumpPullRequest.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate text-xs text-primary hover:underline"
+                      >
+                        バンプPR #{releaseStatus.bumpPullRequest.number}:{" "}
+                        {releaseStatus.bumpPullRequest.title}
+                      </a>
+                    )}
+                    {releaseStatus.releasePullRequest && (
+                      <a
+                        href={releaseStatus.releasePullRequest.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate text-xs text-primary hover:underline"
+                      >
+                        develop→main PR #{releaseStatus.releasePullRequest.number}:{" "}
+                        {releaseStatus.releasePullRequest.title}
+                      </a>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      disabled={isTriggeringRelease}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleTriggerRelease();
+                      }}
+                    >
+                      <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
+                      {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">

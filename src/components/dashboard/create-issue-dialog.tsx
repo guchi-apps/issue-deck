@@ -103,7 +103,15 @@ export function CreateIssueDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>新しいIssueを作成</DialogTitle>
         </DialogHeader>
@@ -144,12 +152,6 @@ export function CreateIssueDialog({
               onChange={setBody}
               issueSuggestions={issueSuggestions}
               onUploadingChange={setIsImageUploading}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
               placeholder="詳細を入力（任意）"
               className="min-h-32"
             />

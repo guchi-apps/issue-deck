@@ -22,6 +22,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
@@ -43,9 +44,15 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
-import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import {
+  approveCommentBody,
+  isApprovalPending,
+  isMergeApprovalPending,
+  labelsAfterApproval,
+  labelsAfterRejection,
+} from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
-import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
+import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -167,7 +174,7 @@ export function IssueDetail({
       owner,
       repo,
       number: issue.number,
-      body: APPROVE_COMMENT_BODY,
+      body: approveCommentBody(issue.labels),
     });
     if (created) {
       setComments((prev) => [...prev, created]);
@@ -177,27 +184,20 @@ export function IssueDetail({
 
   async function handleReject(reason: string) {
     if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
     const [owner, repo] = issue.repositoryFullName.split("/");
     const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
     const created = await createComment({ owner, repo, number: issue.number, body });
     if (created) {
       setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
-  }
-
-  async function handleStartImplementation() {
-    if (!issue) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: START_IMPLEMENTATION_COMMENT_BODY,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
     }
   }
 
@@ -222,10 +222,17 @@ export function IssueDetail({
           </span>
           <div className="ml-auto flex items-center gap-2">
             {canStartImplementation(issue) && (
-              <Button size="sm" onClick={handleStartImplementation} disabled={isCommentSubmitting}>
-                {isCommentSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                実装を開始
-              </Button>
+              <StartImplementationDialog
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                renderTrigger={(isSubmitting) => (
+                  <Button size="sm" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                    実装を開始
+                  </Button>
+                )}
+              />
             )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
@@ -359,6 +366,8 @@ export function IssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+            pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
             isApproving={isSubmitting}

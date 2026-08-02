@@ -6,9 +6,12 @@ import { isApprovalPending } from "@/lib/github/approval-labels";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 
-const POLL_INTERVAL_MS = 20_000;
+const POLL_INTERVAL_MS = 5_000;
 
-type RunningMap = Record<string, boolean>;
+type RunningState = { isRunning: boolean; currentStep: string | null };
+type RunningMap = Record<string, RunningState>;
+
+const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null };
 
 /**
  * 一覧に表示中のIssueのうち、実装状況ラベル（01.wip〜09.main）が付き承認待ち
@@ -44,11 +47,11 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
               `/api/issues/workflow-running?owner=${owner}&repo=${repo}&number=${issue.number}`,
               { signal: controller.signal },
             );
-            if (!res.ok) return [issue.id, false] as const;
-            const data: { isRunning: boolean } = await res.json();
-            return [issue.id, data.isRunning] as const;
+            if (!res.ok) return [issue.id, NOT_RUNNING] as const;
+            const data: RunningState = await res.json();
+            return [issue.id, data] as const;
           } catch {
-            return [issue.id, false] as const;
+            return [issue.id, NOT_RUNNING] as const;
           }
         }),
       );

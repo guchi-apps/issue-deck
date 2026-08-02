@@ -12,6 +12,9 @@ import "@fontsource/biz-udpgothic/400.css";
 import "@fontsource/biz-udpgothic/700.css";
 import "./globals.css";
 
+import packageJson from "../../package.json";
+import { AppUpdateChecker } from "@/components/app-update-checker";
+
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -42,9 +45,12 @@ export default function RootLayout({
   return (
     <html
       lang="ja"
-      className={`${geistMono.variable} h-full antialiased`}
+      className={`${geistMono.variable} h-full overflow-x-hidden antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col overflow-x-hidden">
+        {children}
+        <AppUpdateChecker currentVersion={packageJson.version} />
+      </body>
     </html>
   );
 }

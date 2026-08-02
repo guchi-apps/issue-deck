@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 
+import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
@@ -19,6 +21,8 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
+    useGithubRateLimit(true);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -42,6 +46,15 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
             <p className="text-xs text-muted-foreground">@{currentUser?.login}</p>
           </div>
         </button>
+
+        <div className="rounded-lg border p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">GitHub API使用量</p>
+          <GithubRateLimitList
+            data={rateLimits}
+            isLoading={rateLimitsLoading}
+            error={rateLimitsError}
+          />
+        </div>
 
         <Button
           variant="outline"

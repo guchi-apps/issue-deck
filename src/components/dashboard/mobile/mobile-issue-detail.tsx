@@ -26,6 +26,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
@@ -49,9 +50,15 @@ import {
 } from "@/components/ui/select";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import {
+  approveCommentBody,
+  isApprovalPending,
+  isMergeApprovalPending,
+  labelsAfterApproval,
+  labelsAfterRejection,
+} from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
-import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
+import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -197,7 +204,7 @@ export function MobileIssueDetail({
       owner,
       repo,
       number: issue.number,
-      body: APPROVE_COMMENT_BODY,
+      body: approveCommentBody(issue.labels),
     });
     if (created) {
       setComments((prev) => [...prev, created]);
@@ -206,26 +213,20 @@ export function MobileIssueDetail({
   }
 
   async function handleReject(reason: string) {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
     const [owner, repo] = issue.repositoryFullName.split("/");
     const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
     const created = await createComment({ owner, repo, number: issue.number, body });
     if (created) {
       setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
-  }
-
-  async function handleStartImplementation() {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: START_IMPLEMENTATION_COMMENT_BODY,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
     }
   }
 
@@ -242,19 +243,25 @@ export function MobileIssueDetail({
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
         {canStartImplementation(issue) && (
-          <button
-            type="button"
-            onClick={handleStartImplementation}
-            disabled={isCommentSubmitting}
-            aria-label="実装を開始"
-            className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
-          >
-            {isCommentSubmitting ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : (
-              <Play className="size-5" />
+          <StartImplementationDialog
+            issue={issue}
+            onIssueUpdated={onIssueUpdated}
+            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            renderTrigger={(isSubmitting) => (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                aria-label="実装を開始"
+                className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <Play className="size-5" />
+                )}
+              </button>
             )}
-          </button>
+          />
         )}
         <button
           type="button"
@@ -456,6 +463,8 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+            pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
             isApproving={isSubmitting}

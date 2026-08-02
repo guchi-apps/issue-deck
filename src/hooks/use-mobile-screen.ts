@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useTransition } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
 import { navViews } from "@/lib/nav-views";
@@ -26,6 +26,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   const screenParam = searchParams.get("mscreen");
   const repoParam = searchParams.get("mrepo");
@@ -97,7 +98,11 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("mview");
       }
 
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
+      // 生じうる。startTransitionでラップしisPendingを公開し、その間はスケルトンを表示する（#221）。
+      startTransition(() => {
+        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      });
     },
     [router, pathname, searchParams],
   );
@@ -140,5 +145,13 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
   }, [mobileScreen, navigate]);
 
-  return { mobileScreen, selectTab, selectRepository, selectIssue, selectQuickView, goBack };
+  return {
+    mobileScreen,
+    isPending,
+    selectTab,
+    selectRepository,
+    selectIssue,
+    selectQuickView,
+    goBack,
+  };
 }

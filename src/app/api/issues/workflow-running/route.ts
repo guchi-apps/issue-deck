@@ -2,11 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { fetchWorkflowRun } from "@/lib/github/actions-api";
+import { fetchWorkflowRun, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue, GithubApiError } from "@/lib/github/issues-api";
 import { extractLatestWorkflowRunId } from "@/lib/github/workflow-run-log";
+import { getCurrentStepName } from "@/lib/github/workflow-run-jobs";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -18,7 +19,10 @@ async function findRepository(userId: string, owner: string, repo: string) {
   });
 }
 
-/** 一覧画面向けに、Issueコメント中の直近の実行ログリンクが指すGitHub Actions実行が現在進行中かどうかだけを返す */
+/**
+ * 一覧画面向けに、Issueコメント中の直近の実行ログリンクが指すGitHub Actions実行が現在進行中かどうかと、
+ * 進行中の場合は現在実行中のステップ名を返す
+ */
 export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
@@ -44,14 +48,22 @@ export async function GET(request: NextRequest) {
     const rawComments = await fetchCommentsForIssue(owner, repo, Number(numberParam), token);
     const runId = extractLatestWorkflowRunId(rawComments.map(mapComment), owner, repo);
     if (!runId) {
-      return NextResponse.json({ isRunning: false });
+      return NextResponse.json({ isRunning: false, currentStep: null });
     }
 
     const run = await fetchWorkflowRun(owner, repo, runId, token);
-    return NextResponse.json({ isRunning: run.status !== "completed" });
+    const isRunning = run.status !== "completed";
+    if (!isRunning) {
+      return NextResponse.json({ isRunning, currentStep: null });
+    }
+
+    const currentStep = await fetchWorkflowRunJobs(owner, repo, runId, token)
+      .then(getCurrentStepName)
+      .catch(() => null);
+    return NextResponse.json({ isRunning, currentStep });
   } catch (error) {
     if (error instanceof GithubApiError && error.status === 404) {
-      return NextResponse.json({ isRunning: false });
+      return NextResponse.json({ isRunning: false, currentStep: null });
     }
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },

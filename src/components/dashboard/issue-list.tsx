@@ -19,6 +19,8 @@ type IssueListProps = {
   className?: string;
   showSearch?: boolean;
   showHeader?: boolean;
+  /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
+  fabSpacing?: boolean;
 };
 
 function formatRelativeDate(iso: string) {
@@ -47,6 +49,7 @@ export function IssueList({
   className,
   showSearch = true,
   showHeader = true,
+  fabSpacing = false,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
 
@@ -73,7 +76,7 @@ export function IssueList({
           該当するIssueがありません
         </div>
       ) : (
-        <ul className="flex-1 overflow-y-auto">
+        <ul className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
           {issues.map((issue) => (
             <li key={issue.id}>
               <button
@@ -95,11 +98,21 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {runningByIssueId[issue.id] && (
-                      <Loader2
-                        className="size-3.5 animate-spin text-primary"
-                        aria-label="GitHub Actions実行中"
-                      />
+                    {runningByIssueId[issue.id]?.isRunning && (
+                      <span className="flex items-center gap-1">
+                        {runningByIssueId[issue.id]?.currentStep && (
+                          <span
+                            className="max-w-[7rem] truncate text-[10px] text-muted-foreground"
+                            title={runningByIssueId[issue.id]?.currentStep ?? undefined}
+                          >
+                            {runningByIssueId[issue.id]?.currentStep}
+                          </span>
+                        )}
+                        <Loader2
+                          className="size-3.5 animate-spin text-primary"
+                          aria-label="GitHub Actions実行中"
+                        />
+                      </span>
                     )}
                     <WorkflowStepBadge labels={issue.labels} />
                     {issue.favorite && (
