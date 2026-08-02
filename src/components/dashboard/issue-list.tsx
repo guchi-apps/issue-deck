@@ -19,6 +19,8 @@ type IssueListProps = {
   className?: string;
   showSearch?: boolean;
   showHeader?: boolean;
+  /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
+  fabSpacing?: boolean;
 };
 
 function formatRelativeDate(iso: string) {
@@ -47,6 +49,7 @@ export function IssueList({
   className,
   showSearch = true,
   showHeader = true,
+  fabSpacing = false,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
 
@@ -73,7 +76,7 @@ export function IssueList({
           該当するIssueがありません
         </div>
       ) : (
-        <ul className="flex-1 overflow-y-auto">
+        <ul className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
           {issues.map((issue) => (
             <li key={issue.id}>
               <button
