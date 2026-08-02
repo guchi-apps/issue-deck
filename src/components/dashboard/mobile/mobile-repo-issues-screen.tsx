@@ -8,6 +8,7 @@ import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { applyIssueFilters, computeLabelSummary, getAssigneeOptions, sortIssues } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
@@ -32,6 +33,7 @@ export function MobileRepoIssuesScreen({
   onCreateIssue,
 }: MobileRepoIssuesScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
     state: "open",
     labels: [],
@@ -98,7 +100,12 @@ export function MobileRepoIssuesScreen({
           >
             <SlidersHorizontal className="size-4" />
           </button>
-          <button type="button" aria-label="その他の操作" className="rounded-md border p-2.5">
+          <button
+            type="button"
+            onClick={() => setReleaseSheetOpen(true)}
+            className="rounded-md border p-2.5"
+            aria-label="リリース"
+          >
             <MoreHorizontal className="size-4" />
           </button>
         </div>
@@ -123,6 +130,8 @@ export function MobileRepoIssuesScreen({
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
       />
+
+      <MobileReleaseSheet open={releaseSheetOpen} onOpenChange={setReleaseSheetOpen} repository={repository} />
 
       <button
         type="button"
