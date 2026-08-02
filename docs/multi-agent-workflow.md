@@ -83,6 +83,15 @@ issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`
 同時に`gh issue comment`でIssueへ完了報告のコメントも投稿する。ラベルだけでは気付きにくいため、
 PRオープン・マージという確実なイベントに紐づけて通知している。
 
+`develop-pr-merged`は、`claude-review-develop.yml`の`auto-merge`ジョブが有効化するGitHub Auto-merge
+機能による実際のマージ（必須ステータスチェック通過後にGitHub側が非同期に実行）では発火しないことが
+ある（Issue #112。GITHUB_TOKEN起点のイベントは他のワークフローを起動しないというGitHub仕様の影響を
+受けるため）。`auto-merge`ジョブ自体はWORKFLOW_PATでAuto-mergeを有効化するよう対応済みだが、
+根本解消したか確証が持てないため、`develop-merge-sweep`ジョブが`schedule`（15分おき）・
+`workflow_dispatch`をトリガーに、`03.d:marge`が付いた全issueを走査し、対応ブランチ
+（`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`05.develop`へ遷移する安全網を
+別途設けている。
+
 ## 開発環境プレビュー要否をIssueラベルでトグルする
 
 開発サーバー（`pnpm dev`）のポート割り当て自体はコストがないため、ラベルの有無に関わらず常に`.env.local`に`PORT=4000 + Issue番号`を設定する。ラベルは「画面確認をPR作成前の承認ゲートにするかどうか」を制御する。
@@ -312,6 +321,14 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
   可能性があるが、実運用でまだ確認できていない。Phase5の完了条件は「develop向けPR作成まで」であり、
   developへのマージまでの自動化は前提にしていないため、発火してもしなくても許容する
   （実装ステップのプロンプト内で`03.d:marge`ラベル付与を自前でも行っており、自動発火に依存しない）。
+- **GitHub Auto-mergeによるdevelopマージ後、`03.d:marge`が`05.develop`へ遷移しないことがある**
+  （Issue #112、対応済み）: 上記と同根の制約で、`claude-review-develop.yml`の`auto-merge`ジョブが
+  既定の`GITHUB_TOKEN`で有効化していたGitHub Auto-merge機能による実際のマージは、
+  `issue-labels.yml`の`develop-pr-merged`ジョブ（`pull_request: closed`トリガー）を起動しないこと
+  があった。対応として`auto-merge`ジョブの`GH_TOKEN`を`WORKFLOW_PAT`に切り替え、あわせて
+  `issue-labels.yml`に`schedule`（15分おき）で走査する`develop-merge-sweep`ジョブを追加し、
+  取りこぼした`03.d:marge`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
+  非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
 - `22.preview-required`・`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、
   画面確認・スクリーンショット取得ができないため、実装・コミット・ブランチpushまで行った上で
   `00.check-user`を付与しPR作成前に停止する運用にとどめている。このケースの「承認後の再開」は

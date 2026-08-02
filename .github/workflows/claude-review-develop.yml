@@ -208,9 +208,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
+      # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の
+      # ワークフローを起動しない」というGitHub仕様の影響を受け、issue-labels.ymlの
+      # develop-pr-mergedジョブが発火しないことがある(Issue #112)。WORKFLOW_PAT
+      # （実PAT由来）で有効化することでこの制約を回避する。
       - name: 自動マージ可否を判定して実行する
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
