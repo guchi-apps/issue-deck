@@ -14,18 +14,33 @@ name: Claude Issue Dispatch
 #      実装ブランチ(issue-<番号>)がまだ存在しない状態でのみ「承認」と解釈するため、
 #      既にPRが存在する状態(Phase4側の要確認)で外されても実装が誤って再始動することはない。
 #
-# issue-<番号>ブランチが既に存在する場合でも、対応するdevelop向けPRがOPENの状態で人間が
-# @claudeコメントを投稿した場合は、mode=additional(追加対応)として扱う(#129)。00.check-userの
-# 有無は問わない(Phase4の要確認判定と、人間からの追加依頼は独立した文脈のため)。既存ブランチに
-# 追加コミットしてpushし、新規PRは作らず既存PRにコメントで通知する。着手時に01.wipへ、
-# 完了時に03.d:margeへラベルを付け替える。PRがMERGED/CLOSEDの場合は従来どおりmode=skipとし、
-# 実装は再始動しない。
+# 21.plan-requiredの計画提示ステップは、実装範囲が広くGitHub Actions上で一度に処理しきれない
+# 懸念がある場合、計画コメントをサブIssueへの分割案として提示できる(#144)。計画コメント末尾に
+# 埋め込む<!-- issue-deck-plan-type:implement|split -->マーカーにより、00.check-user解除時に
+# 実装(mode=implement)を始めるかサブIssueへの分割(mode=split)を始めるかを判定する。
+# mode=splitでは、承認済みの計画コメントに沿って`gh issue create`でサブIssueを作成し、元Issue
+# にサブIssue一覧をコメントしたうえで元Issueを`not planned`理由でクローズする。サブIssueへの
+# 実際の着手は、これまでどおり人間が各サブIssueに`@claude`とコメントして個別に起動する
+# (自動連鎖起動はしない)。
 #
-# ブランチは存在するがPRがまだ一度も無く、かつ01.wipが付いている場合(#112)は、前回の実装
-# 試行がPR作成に至らないまま(権限拒否・エラー等で)終了し詰まった状態とみなす。中途半端な
-# issue-<番号>ブランチを削除してdevelopから作り直したうえで、実装を最初からリトライする
-# (mode=implement, is_retry=true)。ブランチが存在してもPRが無く01.wipも付いていない場合は
-# 異常な中間状態とみなし、従来どおりmode=skipとする。
+# クローズ済みのIssueに対する@claudeコメント・ラベル操作では、実装・計画・分割のいずれも
+# 再始動しない(mode=skip)。上記の分割で元Issueがクローズされた後に誤って再始動しないための
+# ガードだが、通常の09.mainクローズ後のIssueにも同様に適用される。
+#
+# issue-<番号>ブランチが既に存在する場合でも、issue_commentトリガー(人間からの明示的な
+# @claudeコメント)であれば、以下のいずれかに該当する限りmode=additional(既存ブランチへの
+# 追加対応)として扱う。00.check-userの有無は問わない(Phase4の要確認判定と、人間からの追加
+# 依頼は独立した文脈のため)。新規ブランチは作らず、既存のissue-<番号>ブランチをcheckoutして
+# 続きから作業する。
+#   - PRがOPEN(#129): 追加の依頼内容としてコミットをpushし、既存PRにコメントで報告する。
+#   - PRがまだ一度も無く、かつ01.wipが付いている(#112): 前回の実装試行がPR作成に至らないまま
+#     (権限拒否・エラー等で)終了し詰まった状態の可能性がある。ブランチを削除して作り直すのは
+#     人間しかできない(自動では行わない。前回コミットまで進んでいた作業を無言で失わせない
+#     ため)が、その既存ブランチをそのままcheckoutして続きから再開すること自体は自動で行い、
+#     完了時に新規でPRを作成する(実装ステップのプロンプト内で、現在のブランチの状態を確認して
+#     続行可能か判断させる)。
+# PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な中間状態の場合は、従来どおり
+# mode=skipとし、実装は再始動しない。
 #
 # パブリックリポジトリのため、Issueへのコメント自体は誰でも投稿できる。ラベルの
 # 付与・削除にはリポジトリへのwrite権限が必要でGitHub側で担保されるが、
@@ -66,9 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
     # 同じブランチに同時にcheckout・pushして競合するのを避けるため、issueごとに直列化する(#129)。
-    # cancel-in-progress: falseにより、先行実行を中断せず後続を待たせる。実装が詰まった状態
-    # (01.wipかつPR未作成)からのリトライ時にブランチを削除して作り直すのも、同じ理由で
-    # 実行中の別ジョブと競合させないようにするためこの直列化に乗せている(#112)。
+    # cancel-in-progress: falseにより、先行実行を中断せず後続を待たせる。
     concurrency:
       group: issue-dispatch-${{ github.event.issue.number }}
       cancel-in-progress: false
@@ -139,6 +152,13 @@ jobs:
           BRANCH="issue-$ISSUE_NUMBER"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
+          # クローズ済みのIssueは実装・計画・分割のいずれも再始動しない。分割(#144)で元Issueが
+          # クローズされた後の誤爆防止が主目的だが、09.mainクローズ後のIssue全般にも適用される。
+          ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
+          ISSUE_CLOSED=false
+          [ "$ISSUE_STATE" = "CLOSED" ] && ISSUE_CLOSED=true
+          echo "issue_closed=$ISSUE_CLOSED" >> "$GITHUB_OUTPUT"
+
           BRANCH_EXISTS=false
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             BRANCH_EXISTS=true
@@ -167,31 +187,40 @@ jobs:
           WIP=false
           echo "$LABELS" | grep -qx "01.wip" && WIP=true
 
-          # ブランチが既に存在する場合の分岐:
-          # - PRがOPENで人間からの@claudeコメントなら追加対応として扱う(#129)。00.check-user
-          #   (Phase4の自動マージ不可判定を含む)の有無は問わない。labeled/unlabeledイベント
-          #   (Phase4の判定処理そのもの等)は人間からの明示的な追加依頼ではないため対象外。
-          # - PRがまだ無いのに01.wipが付いている場合(#112)、前回の実装試行がPR作成やコメント
-          #   投稿に至らないまま終了した=詰まった可能性が高い。中途半端な状態のissue-<番号>
-          #   ブランチを削除しdevelopから作り直したうえで、実装を再試行する(is_retry=true)。
-          #   実行中の別ジョブと競合しないよう、concurrency設定でissueごとに直列化している。
-          # - それ以外(PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な中間状態)は
-          #   従来どおりmode=skipとし、実装は再始動しない。
+          # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な
+          # 追加依頼ではないため、以下はいずれもissue_commentトリガーに限定する):
+          # - PRがOPENなら追加対応として扱う(#129)。00.check-user(Phase4の自動マージ不可判定を
+          #   含む)の有無は問わない。
+          # - PRがまだ無く01.wipが付いている詰まった状態(#112)も追加対応として扱い、既存
+          #   ブランチをそのままcheckoutして続きから再開する(実装ステップのプロンプト側で
+          #   続行可能か判断する)。ブランチの削除・作り直しは自動化せず人間の明示操作に委ねる。
+          # - それ以外(PRがMERGED/CLOSED、または01.wipも付いていない異常な中間状態)は
+          #   mode=skipとし、実装は再始動しない。
           MODE=skip
-          IS_RETRY=false
-          if [ "$BRANCH_EXISTS" = "true" ]; then
-            if [ "$PR_STATE" = "OPEN" ] && [ "$EVENT_NAME" = "issue_comment" ]; then
+          if [ "$ISSUE_CLOSED" = "true" ]; then
+            MODE=skip
+          elif [ "$BRANCH_EXISTS" = "true" ]; then
+            if [ "$EVENT_NAME" != "issue_comment" ]; then
+              MODE=skip
+            elif [ "$PR_STATE" = "OPEN" ]; then
               MODE=additional
             elif [ -z "$PR_STATE" ] && [ "$WIP" = "true" ]; then
-              MODE=implement
-              IS_RETRY=true
-              git push origin --delete "$BRANCH" 2>/dev/null || true
+              MODE=additional
             else
               MODE=skip
             fi
           elif [ "$EVENT_NAME" = "issues" ] && [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "00.check-user" ]; then
-            # 人間が計画を確認し00.check-userを外した = 承認
-            MODE=implement
+            # 人間が計画を確認し00.check-userを外した = 承認。直前の計画コメントに埋め込まれた
+            # <!-- issue-deck-plan-type:implement|split -->マーカーから、そのまま実装するか
+            # サブIssueへ分割するかを判定する(#144)。マーカーが無い場合(旧形式の計画コメントや
+            # フォールバック通知のみの場合)はimplementにフォールバックする。
+            PLAN_TYPE="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' | grep -oP '(?<=<!-- issue-deck-plan-type:)(implement|split)(?= -->)' | tail -n1 || true)"
+            : "${PLAN_TYPE:=implement}"
+            if [ "$PLAN_TYPE" = "split" ]; then
+              MODE=split
+            else
+              MODE=implement
+            fi
           elif [ "$AWAITING_CONFIRM" = "true" ]; then
             # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
             if [ "$EVENT_NAME" = "issue_comment" ]; then
@@ -204,15 +233,14 @@ jobs:
           fi
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "is_retry=$IS_RETRY" >> "$GITHUB_OUTPUT"
-          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE is_retry=$IS_RETRY"
+          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED"
 
       - name: 対応開始をコメントで通知する
         # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
         # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
         # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
-        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -220,10 +248,12 @@ jobs:
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
             BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
-          elif [ "${{ steps.state.outputs.is_retry }}" = "true" ]; then
-            BODY="🔧 前回の実装が完了しなかった可能性があるため、\`${{ steps.state.outputs.branch }}\` ブランチを作り直して実装を再試行します。"
-          elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+          elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
+            BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
+          elif [ "${{ steps.state.outputs.mode }}" = "additional" ] && [ -n "${{ steps.state.outputs.pr_url }}" ]; then
             BODY="🔧 依頼を確認しました。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
+          elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+            BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
           else
             BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
           fi
@@ -231,30 +261,50 @@ jobs:
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 実装済み・対応中のissueへの@claudeコメントに返信する
-        # BRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態で
-        # issue_commentが来た場合はmode=additionalに、PRが無く01.wipが付いている場合は
-        # mode=implement(is_retry=true)になり、いずれもこのステップの対象外(#129, #112)。
-        # ここに該当するのはPRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な
+        # BRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態、または
+        # PRが無く01.wipが付いている詰まった状態(#112)でissue_commentが来た場合はmode=additional
+        # になり、このステップの対象外(#129, #112。既存ブランチをcheckoutして続きから再開する)。
+        # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な
         # 中間状態で、issue-<番号>ブランチが既に存在するため実装は再始動しないが、
         # issue_commentトリガー(人間が直接@claudeへ呼びかけたケース)に限り、これまでの
-        # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの
-        # 同条件のskip(Phase4の要確認判定など)は人間への呼びかけではないため対象外。
+        # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの同条件のskip
+        # (Phase4の要確認判定など)は人間への呼びかけではないため対象外。Issueがクローズ済み
+        # (issue_closed=true)の場合も同様の理由で返信する(#144の分割でクローズされたIssueへの
+        # 呼びかけ等、branch_existsがfalseのケースを含む)。
         if: |
           steps.state.outputs.mode == 'skip' &&
-          steps.state.outputs.branch_exists == 'true' &&
-          github.event_name == 'issue_comment'
+          github.event_name == 'issue_comment' &&
+          (steps.state.outputs.branch_exists == 'true' || steps.state.outputs.issue_closed == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          BRANCH="${{ steps.state.outputs.branch }}"
-          PR_URL="$(gh pr list --head "$BRANCH" --state all --json url --jq '.[0].url // empty' 2>/dev/null || true)"
-          BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。"
-          if [ -n "$PR_URL" ]; then
-            BODY="$BODY 関連するPull Requestはこちらです: $PR_URL"
+          if [ "${{ steps.state.outputs.issue_closed }}" = "true" ]; then
+            BODY='ℹ️ このIssueは既にクローズされています。分割により対応が複数のサブIssueに分かれている場合、コメント欄でリンクをご確認ください。'
+            BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。人間が対応してください。'
+            gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+            exit 0
           fi
-          BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
+          BRANCH="${{ steps.state.outputs.branch }}"
+          PR_URL="${{ steps.state.outputs.pr_url }}"
+          if [ -z "$PR_URL" ]; then
+            BODY="⚠️ \`$BRANCH\` ブランチは存在しますが、Pull Requestも\`01.wip\`ラベルも無い、想定外の状態です。"
+            BODY="$BODY"$'\n\n'"作り直す場合は、人間が明示的に \`git push origin --delete $BRANCH\` 等でブランチを削除してから、改めて\`@claude\`とコメントしてください（このワークフローが自動でブランチを削除・作り直すことはありません）。"
+          else
+            BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。関連するPull Requestはこちらです: $PR_URL"
+            BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
+          fi
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+
+      - name: 01.wip を付与する（計画検討着手時）
+        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
+        # 依存してしまうため、他の確実な通知ステップと同じくシェルスクリプトで直接行う。
+        # CLAUDE.mdの運用ルール(01.wipはPlan mode開始時点で付与する)をこのワークフローでも
+        # 保証するためのステップ。
+        if: steps.state.outputs.mode == 'plan'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
 
       - name: 計画提示前のコメント数を記録する
         id: before_plan
@@ -285,28 +335,48 @@ jobs:
             - リポジトリのコードを調査し、対応方針・変更範囲（触るファイル・追加するファイル）・懸念点を
               日本語でまとめる
             - 直前のコメントで計画への修正依頼が来ている場合は、それを踏まえて計画を練り直す
+            - 実装範囲が広く、GitHub Actions上の1回の実装ステップで最後まで処理しきれない懸念がある
+              場合は、無理に一つの計画に収めようとせず、下記「分割するかどうかの判断」に従って
+              サブIssueへの分割を計画してよい
             - まとめた計画を `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
-              Issueにコメント投稿する。コメント末尾に、このワークフロー実行への追跡用リンクとして
+              Issueにコメント投稿する。コメント本文の末尾に、下記の計画種別マーカーと、このワークフロー
+              実行への追跡用リンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
             - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
               （既に付いていても無害なので毎回実行してよい）
 
+            ## 分割するかどうかの判断とマーカー
+            計画コメントの末尾に、判断結果に応じて次のいずれか1つのHTMLコメントマーカーを必ず含めて
+            ください。人間が`00.check-user`を外して承認した後、別のワークフロー実行がこのマーカーを
+            読み取ってそのまま実装するかサブIssueへ分割するかを自動的に振り分けます。
+
+            - このIssueのまま1つのPull Requestとして実装できると判断した場合:
+              `<!-- issue-deck-plan-type:implement -->`
+            - 実装範囲が広く、複数のサブIssueに分割してそれぞれ独立に実装すべきと判断した場合:
+              `<!-- issue-deck-plan-type:split -->`
+              - この場合、計画コメント本文に分割後の各サブIssue案（タイトル案・スコープ・実装順序や
+                依存関係があればそれも）を箇条書きで明記すること。承認後、別のワークフロー実行がこの
+                計画コメントを読んでサブIssueを実際に作成するため、その内容がそのままサブIssue作成の
+                元になります
+              - 分割後の1つのサブIssueもなお複雑だと判断される場合、そのサブIssue案の中に
+                「このサブIssueには21.plan-requiredが必要」と書き添えてよい（実際のラベル付与は
+                分割を実行するステップが行う）
+
             ## 迷った場合・調査に行き詰まった場合の振る舞い
             - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
               分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
               （コメントを一切投稿できないまま終了することが最悪の結果のため）
-            - 実装範囲が広く一度の計画にまとめきれないと判断した場合は、無理に一つの計画に収めようとせず、
-              Issueを複数に分割して段階的に進めることを計画コメントの中で提案してよい
-              （実際にIssueを分割する作業はこのステップでは行わず、提案に留める）
 
             ## このステップでは行わないこと
-            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ）
+            - コードの変更・コミット・ブランチ作成・PR作成・Issueの新規作成は一切行わない（計画提示のみ。
+              分割を計画した場合も、実際のサブIssue作成はこのステップでは行わない）
 
             ## 次に起きること
             人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と
-            みなし、別のワークフロー実行が実装を開始します。計画に修正が必要な場合は、人間が
-            `@claude` 宛にコメントで指摘するので、その場合はこのステップが再び起動し計画を練り直します。
+            みなし、別のワークフロー実行が、上記マーカーに応じて実装（`implement`）またはサブIssueの
+            作成（`split`）を開始します。計画に修正が必要な場合は、人間が`@claude`宛にコメントで指摘するので、
+            その場合はこのステップが再び起動し計画を練り直します。
 
       - name: 計画コメント投稿を検証し、必要ならフォールバックする
         if: always() && steps.state.outputs.mode == 'plan'
@@ -329,9 +399,92 @@ jobs:
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
+      - name: 分割前のコメント数を記録する
+        id: before_split
+        if: steps.state.outputs.mode == 'split'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Claude Code（分割）
+        if: steps.state.outputs.mode == 'split'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"'
+          prompt: |
+            あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} は、
+            人間が承認済みの計画（直前の`<!-- issue-deck-plan-type:split -->`マーカー付きコメント）により、
+            このIssueのまま実装せず複数のサブIssueに分割することが決まっています。この分割を実行してください。
+
+            ## 最初にやること
+            `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの本文と、承認済みの
+            計画コメント（分割後の各サブIssue案）を確認してください。
+
+            ## やること
+            - 計画コメントに記載されたサブIssue案それぞれについて、
+              `gh issue create --title "..." --body "..."` でサブIssueを作成する
+              - 本文には「分割元: #${{ steps.state.outputs.issue_number }}」を含め、元Issueを読み返さなくても
+                単独で着手できる程度に、対応するスコープの背景・要件を書く
+              - 計画コメントでそのサブIssueにも`21.plan-required`が必要と書かれている場合は
+                `--label "21.plan-required"`を付ける
+              - 元Issueに`22.preview-required`または`23.screenshot-required`が付いており、かつそのサブIssue
+                が画面に関わる変更を含む場合は、該当するラベルを引き継ぐ
+              - 一度に作成するサブIssueは目安として6件程度までとする。計画がそれを超える数の分割を
+                提案している場合、無理に全部作らず作成できた分にとどめ、残りは後述の親Issueコメントで
+                「追って検討が必要」である旨を明記する
+            - 全て作成したら `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
+              元Issueに作成したサブIssue一覧（`#番号`の形式で書けば自動的にリンクされる）をコメントする。
+              コメント末尾に実行ログのリンク
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
+            - 最後に `gh issue close ${{ steps.state.outputs.issue_number }} --reason "not planned"` を実行し、
+              元Issueをクローズする（元Issueは今後このままでは実装されず、作業は上記サブIssueへ引き継がれる
+              ことを明示するため）
+
+            ## 迷った場合・行き詰まった場合の振る舞い
+            - 許可されていない操作が拒否される等で行き詰まった場合、それ以上粘らず、その時点で作成できた
+              サブIssue（0件でもよい）と状況を元Issueにコメントすることを最優先する
+              （コメントを一切投稿できないまま終了することが最悪の結果のため）。この場合、元Issueの
+              クローズは行わず、人間が状況を確認できるよう開いたままにする
+
+            ## このステップでは行わないこと
+            - サブIssueへの`@claude`コメント投稿など、サブIssueの実装を自動的に開始させる操作は行わない
+              （サブIssueの着手はこれまでどおり人間が個別に`@claude`とコメントして起動する）
+            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない
+
+      - name: 分割結果を検証し、必要ならフォールバックする
+        # 計画コメント投稿の検証と同じ考え方。サブIssue作成後の親Issueコメントが確認できない場合、
+        # 途中で行き詰まった可能性があるためフォールバック通知を投稿する。
+        if: always() && steps.state.outputs.mode == 'split'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before_split.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため分割の完了または途中経過の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
+          FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
+          gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+
       - name: 実装前のコメント数を記録する
         id: before_implement
-        if: steps.state.outputs.mode == 'implement'
+        # additionalモード(PR未作成の詰まった状態からの再開を含む)も、implementと同様に
+        # 途中で行き詰まって無言のまま終了しうるため、フォールバック検証の対象に含める。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -349,6 +502,21 @@ jobs:
           git fetch origin "${{ steps.state.outputs.branch }}"
           git checkout "${{ steps.state.outputs.branch }}"
 
+      - name: 01.wip を付与する（実装着手時）
+        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
+        # 依存してしまう(実際、コメント投稿から付与まで数分〜10分ほど遅延する例があった)ため、
+        # 実装着手前にシェルスクリプトで直接・確実に付与する。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "03.d:marge"
+          else
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
+          fi
+
       - name: Claude Code（実装・PR作成）
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         uses: anthropics/claude-code-action@v1
@@ -359,6 +527,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
+          show_full_output: true
           claude_args: '--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
@@ -367,22 +536,32 @@ jobs:
 
             - `implement`（新規実装）: 現在のワークツリーは `develop` の最新コミットをチェックアウトした
               状態です。新しく作業ブランチを作成し、新規にPull Requestを作成します。
-            - `additional`（既存PRへの追加対応）: このIssueに対応する作業ブランチ
-              `${{ steps.state.outputs.branch }}` と、develop向けPull Request
-              （${{ steps.state.outputs.pr_url }}）が既に存在しており、直近のIssueへの`@claude`コメントが
-              追加の依頼内容です。現在のワークツリーは既にそのブランチをcheckout済みです。新規ブランチ・
-              新規PRは作成せず、既存のものに追加コミットします。
+            - `additional`（既存ブランチへの追加対応）: このIssueに対応する作業ブランチ
+              `${{ steps.state.outputs.branch }}` が既に存在し、現在のワークツリーは既にそのブランチを
+              checkout済みです。新規ブランチは作成しません。develop向けPull RequestのURLは
+              `${{ steps.state.outputs.pr_url }}` です（空の場合は後述のとおりPR未作成の再開ケースです）。
+              - PR作成済み（上記URLが空でない場合）: 直近のIssueへの`@claude`コメントが追加の依頼内容
+                です。それを踏まえて追加コミットし、新規PRは作らず既存PRにコメントで報告します。
+              - PR未作成（上記URLが空の場合）: 前回の実装試行がPR作成に至らないまま（権限拒否・
+                エラー等で）終了した可能性があります。まず`git log develop..HEAD --stat`・`git status`・
+                `git diff develop`で現在のブランチの状態を確認してください。
+                - 既にコミットされた変更が把握できる内容であれば、それを踏まえて実装を続行して
+                  ください（ゼロからやり直す必要はありません）。完了したら新規にPull Requestを
+                  作成してください（`implement`と同じ手順）。
+                - 続行が難しいほど中途半端・矛盾した状態だと判断した場合は、無理に修正しようと
+                  せず、現在の状態を`gh issue comment`で報告し
+                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
+                  を実行して停止してください（ブランチの削除・作り直しは人間の明示操作でのみ行われ、
+                  このワークフローが自動で行うことはありません）。
 
             ## 最初にやること
             - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
               ラベル・コメントを確認する（`implement`で`21.plan-required`が付いている場合、承認済みの
-              計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`の場合は、
-              直近の`@claude`コメントの内容を踏まえて対応する）
-            - 確認したら直ちに以下を実行する（コードの調査・実装に着手するより前に行うこと）
-              - `implement`の場合: `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"`
-              - `additional`の場合: `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "03.d:marge"`
-                （`00.check-user`が付いていてもそれには触れない。Phase4の自動マージ不可判定など別の
-                文脈で付与されている可能性があるため）
+              計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`でPR
+              作成済みの場合は、直近の`@claude`コメントの内容を踏まえて対応する。PR未作成の再開の
+              場合は、過去のコメント履歴や既存のコミットから前回どこまで実装が進んでいたかも把握する）
+              （`01.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
+              既に完了しているため、ここで行う必要はない）
             - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
               作成する（`additional`の場合は既にcheckout済みのため不要）
 
@@ -401,12 +580,13 @@ jobs:
                 `gh issue comment ${{ steps.state.outputs.issue_number }}`で他の変更と競合したため
                 追加対応を中断した旨を人間に報告して停止する
             - Pull Requestを作成・更新する
-              - `implement`の場合: `gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
+              - `implement`の場合、または`additional`でPRがまだ無い場合:
+                `gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
                 `develop`向けPull Requestを作成する（タイトル・本文は日本語。本文には対応Issue・実装内容・
                 テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
                 `closes #番号` / `fixes #番号`は使わず、`#${{ steps.state.outputs.issue_number }}`のように
                 番号のみ記載する）
-              - `additional`の場合: 新規PRは作成しない。既存のPull Request
+              - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
                 （${{ steps.state.outputs.pr_url }}）に`gh pr comment`で、今回追加でpushしたコミットの
                 内容を日本語で要約して投稿する
             - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
@@ -416,23 +596,32 @@ jobs:
               可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
             - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で対応完了の
               報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認手段に
-              なる）。`implement`の場合は作成したPRのURL、`additional`の場合は追加コミットした旨と対象PR
-              （${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
+              なる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
+              対象PR（${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
               要約（触ったファイルや対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること
 
             ## 画面確認・スクリーンショットについて
             無人実行のため、開発サーバーを起動しての画面確認やPlaywright等によるスクリーンショット取得は
             できません。
             - Issueに`22.preview-required`または`23.screenshot-required`のいずれかのラベルが付いている
-              場合は、実装・テストまで終えた時点で上記の完了処理（`implement`ならPR作成、`additional`なら
-              PRコメント投稿）を行わず、ブランチのpushまでは行ったうえで、代わりに
+              場合は、実装・テストまで終えた時点で上記の完了処理（新規PR作成またはPRコメント投稿）を
+              行わず、ブランチのpushまでは行ったうえで、代わりに
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
               （`01.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
               必要なため人間の確認を待っています」旨を`gh issue comment`で投稿して停止してください。
-              - `implement`の場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` の内容を確認の
-                うえ、問題なければ手動でPRを作成してください」
-              - `additional`の場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` に追加コミット
-                をpushしました。Pull Request（${{ steps.state.outputs.pr_url }}）の内容を確認してください」
+              - `22.preview-required`が付いている場合は、このコメントに開発サーバーのプレビューURLも
+                あわせて記載する。無人実行では実際にdevサーバーを起動できないため、人間が手元で
+                ブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
+                `docs/multi-agent-workflow.md`のポート割り当て規約（`PORT=4000 + Issue番号`。本Issueの
+                番号は${{ steps.state.outputs.issue_number }}）に従い、以下の2形式で案内する。
+                ・`http://localhost:<ポート>`
+                ・`http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`（同一LAN上の別端末から確認する
+                場合。IPアドレスは人間が手元の環境に合わせて読み替える）
+              - 新規にPRを作成する予定だった場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` の
+                内容を確認のうえ、問題なければ手動でPRを作成してください」
+              - 既存PRにコメントする予定だった場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}`
+                に追加コミットをpushしました。Pull Request（${{ steps.state.outputs.pr_url }}）の内容を
+                確認してください」
               コメント末尾に、このワークフロー実行への追跡用リンクとして
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
@@ -452,7 +641,8 @@ jobs:
         # Claude Codeエージェントに完了報告コメントの投稿を委ねるだけだと、途中でエラー終了した場合や
         # 許可されていない操作で行き詰まった場合に「どうなったか」が使用者に一切伝わらない恐れがある。
         # そのため計画コメントの検証と同じ考え方で、後続のステップとして独立に結果を確認する。
-        if: always() && steps.state.outputs.mode == 'implement'
+        # additionalモード(PR未作成の詰まった状態からの再開を含む)も同じ理由で対象に含める。
+        if: always() && (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -472,7 +662,7 @@ jobs:
           if [ -n "$PR_URL" ]; then
             echo "コメントは無いがPRの存在を確認できたため、フォールバックとして完了報告コメントを投稿します: $PR_URL"
             PR_BODY="$(gh pr view "$BRANCH" --json body --jq '.body // empty' 2>/dev/null || true)"
-            FALLBACK_BODY="✅ 実装が完了し、Pull Requestを作成しました: $PR_URL"
+            FALLBACK_BODY="✅ 実装が完了し、Pull Requestを確認できました: $PR_URL"
             if [ -n "$PR_BODY" ]; then
               FALLBACK_BODY="$FALLBACK_BODY"$'\n\n---\n\n'"$PR_BODY"
             fi

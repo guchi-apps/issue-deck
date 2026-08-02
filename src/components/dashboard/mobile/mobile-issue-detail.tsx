@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   CircleAlert,
   FolderGit2,
+  Loader2,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -345,6 +346,7 @@ export function MobileIssueDetail({
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
+            isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
             onApprove={handleApprove}
             onReject={handleReject}
@@ -359,6 +361,7 @@ export function MobileIssueDetail({
               value={newCommentBody}
               onChange={setNewCommentBody}
               issueSuggestions={issueSuggestions}
+              disabled={isCommentSubmitting}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -366,8 +369,13 @@ export function MobileIssueDetail({
                 }
               }}
             />
-            <Button className="self-end" onClick={handleCreateComment} disabled={!newCommentBody.trim()}>
-              コメント
+            <Button
+              className="self-end"
+              onClick={handleCreateComment}
+              disabled={!newCommentBody.trim() || isCommentSubmitting}
+            >
+              {isCommentSubmitting && <Loader2 className="animate-spin" />}
+              {isCommentSubmitting ? "送信中..." : "コメント"}
             </Button>
             {commentMutationError && (
               <p className="text-sm text-destructive">{commentMutationError}</p>

@@ -17,6 +17,13 @@ name: Issue Labels
 #
 # gh issue edit の --add-label/--remove-label は、既に付与済み/未付与のラベルに
 # 対して呼んでも無害(冪等)なため、状態を事前チェックせず毎回呼び出してよい。
+#
+# develop-pr-mergedジョブは、claude-review-develop.ymlのauto-mergeジョブが有効化する
+# GitHub Auto-merge機能による実際のマージ(必須ステータスチェック通過後にGitHub側が
+# 非同期に実行)では発火しないことがある(Issue #112。GITHUB_TOKEN起点のイベントは他の
+# ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
+# WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
+# develop-merge-sweepジョブはこれを取りこぼした03.d:margeをscheduleで定期的に拾い直す。
 
 on:
   push:
@@ -27,6 +34,9 @@ on:
     branches:
       - develop
       - main
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
 
 permissions:
   issues: write
@@ -86,6 +96,27 @@ jobs:
             gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge"
             gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
           fi
+
+  develop-merge-sweep:
+    # GitHub Auto-merge機能によるマージがdevelop-pr-mergedジョブを起動しなかった
+    # ケースの安全網。03.d:margeが付いた全issueについて、対応ブランチ(issue-<番号>)
+    # からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら05.developへ遷移する。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: マージ済みのdevelop向けPRを持つissueを05.developへ遷移する
+        run: |
+          for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
+            pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
+            if [ -n "$pr_url" ]; then
+              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge"
+              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"
+            fi
+          done
 
   main-pr-in-progress:
     # develop -> main のPRが開いている間、その時点で05.developが付いている

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   Archive,
   ExternalLink,
+  Loader2,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -19,6 +20,7 @@ import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-pa
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -47,6 +50,7 @@ type IssueDetailProps = {
 
 export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFavorite }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { run: workflowRun } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
     createComment,
@@ -233,6 +237,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
+        <WorkflowRunStatus run={workflowRun} />
 
         <Separator />
 
@@ -257,6 +262,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
             onDelete={handleDeleteComment}
+            isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
             onApprove={handleApprove}
             onReject={handleReject}
@@ -271,6 +277,7 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
               value={newCommentBody}
               onChange={setNewCommentBody}
               issueSuggestions={issueSuggestions}
+              disabled={isCommentSubmitting}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -278,8 +285,13 @@ export function IssueDetail({ issue, issues, onEdit, onIssueUpdated, onToggleFav
                 }
               }}
             />
-            <Button className="self-end" onClick={handleCreateComment} disabled={!newCommentBody.trim()}>
-              コメント
+            <Button
+              className="self-end"
+              onClick={handleCreateComment}
+              disabled={!newCommentBody.trim() || isCommentSubmitting}
+            >
+              {isCommentSubmitting && <Loader2 className="animate-spin" />}
+              {isCommentSubmitting ? "送信中..." : "コメント"}
             </Button>
             {commentMutationError && (
               <p className="text-sm text-destructive">{commentMutationError}</p>
