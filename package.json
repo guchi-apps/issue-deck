@@ -16,7 +16,8 @@
     "db:setup": "bash scripts/setup-db.sh",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:seed:ci": "node scripts/seed-ci-db.mjs"
   },
   "dependencies": {
     "@fontsource/biz-udpgothic": "^5.3.0",
