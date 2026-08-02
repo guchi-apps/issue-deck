@@ -42,6 +42,13 @@ on:
   issue_comment:
     types: [created]
 
+# 同一issueに対する実行を直列化する。実装が詰まった状態(01.wipかつPR未作成)からの
+# リトライ時にブランチを削除して作り直すため、実行中の別ジョブと競合しないよう
+# キャンセルではなくキューイングで待たせる(cancel-in-progress: false)。
+concurrency:
+  group: issue-dispatch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   dispatch:
     if: |
@@ -112,26 +119,40 @@ jobs:
 
           BRANCH="issue-$ISSUE_NUMBER"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          BRANCH_EXISTS=false
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            BRANCH_EXISTS=true
+
+          PR_EXISTS=false
+          if [ -n "$(gh pr list --head "$BRANCH" --state all --json number --jq '.[0].number' 2>/dev/null)" ]; then
+            PR_EXISTS=true
           fi
-          echo "branch_exists=$BRANCH_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "pr_exists=$PR_EXISTS" >> "$GITHUB_OUTPUT"
 
           LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
           PLAN_REQUIRED=false
           echo "$LABELS" | grep -qx "21.plan-required" && PLAN_REQUIRED=true
           AWAITING_CONFIRM=false
           echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
+          WIP=false
+          echo "$LABELS" | grep -qx "01.wip" && WIP=true
 
-          # BRANCH_EXISTSを最優先の判定にする: issue-<番号>ブランチが存在する時点で、
-          # このissueへのdispatchはこのワークフロー内で既に完了しているとみなし、以後は
-          # 何が起きても常にskipする。00.check-userはPhase4の自動マージ不可判定でも
-          # 使われる汎用ラベルなので、ブランチが存在する状態でそれが外れても
-          # (Phase4側のレビュー通過の意味である可能性が高く)ここでは実装を再始動しない。
+          # PR_EXISTSを最優先の判定にする: 対応issueのPRが既に作成されている時点で、
+          # このissueへのdispatchはこのワークフローの役目を終え、以後の判定・マージ承認は
+          # Phase3/4(claude-review-develop.yml)側の管轄になる。00.check-userはPhase4の
+          # マージ保留シグナルとしても使われる汎用ラベルだが、Phase4の対象は常にPR作成後
+          # にしか起こらないため、PR_EXISTSがtrueである限りここでのunlabeledイベントを
+          # 実装再開とは解釈しない(=混線しない)。
+          #
+          # PRが無いのに01.wipが付いている場合(#112)、前回の実装試行がPR作成やコメント
+          # 投稿に至らないまま終了した=詰まった可能性が高い。中途半端な状態のissue-<番号>
+          # ブランチを削除しdevelopから作り直したうえで、実装を再試行する。実行中の別
+          # ジョブと競合しないよう、concurrency設定でissueごとに直列化している。
           MODE=skip
-          if [ "$BRANCH_EXISTS" = "true" ]; then
+          IS_RETRY=false
+          if [ "$PR_EXISTS" = "true" ]; then
             MODE=skip
+          elif [ "$WIP" = "true" ]; then
+            MODE=implement
+            IS_RETRY=true
+            git push origin --delete "$BRANCH" 2>/dev/null || true
           elif [ "$EVENT_NAME" = "issues" ] && [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "00.check-user" ]; then
             # 人間が計画を確認し00.check-userを外した = 承認
             MODE=implement
@@ -147,7 +168,8 @@ jobs:
           fi
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM branch_exists=$BRANCH_EXISTS"
+          echo "is_retry=$IS_RETRY" >> "$GITHUB_OUTPUT"
+          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP pr_exists=$PR_EXISTS is_retry=$IS_RETRY"
 
       - name: 対応開始をコメントで通知する
         # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
@@ -161,20 +183,23 @@ jobs:
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
             BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+          elif [ "${{ steps.state.outputs.is_retry }}" = "true" ]; then
+            BODY="🔧 前回の実装が完了しなかった可能性があるため、\`${{ steps.state.outputs.branch }}\` ブランチを作り直して実装を再試行します。"
           else
             BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
           fi
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 実装済み・対応中のissueへの@claudeコメントに返信する
-        # BRANCH_EXISTS=trueによりmode=skipとなるケース(#105)。issue-<番号>ブランチが
-        # 既に存在するため実装は再始動しないが、issue_commentトリガー(人間が直接
-        # @claudeへ呼びかけたケース)に限り、これまでの「無言でスキップ」を避けて
-        # 対応状況を返信する。labeled/unlabeledイベントでの同条件のskip
-        # (Phase4の要確認判定など)は人間への呼びかけではないため対象外。
+        # PR_EXISTS=trueによりmode=skipとなるケース(#105)。対応PRが既に存在するため
+        # 実装は再始動しないが、issue_commentトリガー(人間が直接@claudeへ呼びかけた
+        # ケース)に限り、これまでの「無言でスキップ」を避けて対応状況を返信する。
+        # labeled/unlabeledイベントでの同条件のskip(Phase4の要確認判定など)は
+        # 人間への呼びかけではないため対象外。PRが無くbranchだけ詰まっている状態
+        # (01.wip)は既にmode=implementでリトライされるため、ここには来ない。
         if: |
           steps.state.outputs.mode == 'skip' &&
-          steps.state.outputs.branch_exists == 'true' &&
+          steps.state.outputs.pr_exists == 'true' &&
           github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ github.token }}
