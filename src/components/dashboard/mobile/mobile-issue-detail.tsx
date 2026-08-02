@@ -50,6 +50,7 @@ import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 
 type MobileIssueDetailProps = {
@@ -85,6 +86,7 @@ export function MobileIssueDetail({
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
+  const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -187,7 +189,7 @@ export function MobileIssueDetail({
   }
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex items-center gap-1 border-b p-4">
         <button
           type="button"
