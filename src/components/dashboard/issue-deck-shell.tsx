@@ -62,12 +62,22 @@ export function IssueDeckShell({
     useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
+  const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
 
   const currentUserLogin = currentUser?.login ?? null;
 
   function openCreateDialog(defaultRepositoryFullName?: string | null) {
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
+    setCreateDialogBody(null);
+    setCreateDialogOpen(true);
+  }
+
+  // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
+  // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
+  function openFollowupIssueDialog(issue: Issue) {
+    setCreateDialogRepo(issue.repositoryFullName);
+    setCreateDialogBody(`関連: #${issue.number}\n\n`);
     setCreateDialogOpen(true);
   }
 
@@ -257,7 +267,6 @@ export function IssueDeckShell({
           <div className="flex-1 overflow-hidden">
             {mobileScreen.kind === "home" && (
               <MobileHomeScreen
-                labelSummary={labelSummary}
                 overviewStats={overviewStats}
                 navCounts={navCounts}
                 onSelectQuickView={selectQuickView}
@@ -314,6 +323,7 @@ export function IssueDeckShell({
                 onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
                 onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                onCreateFollowupIssue={openFollowupIssueDialog}
               />
             )}
           </div>
@@ -360,6 +370,7 @@ export function IssueDeckShell({
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+            onCreateFollowupIssue={openFollowupIssueDialog}
           />
         </div>
         {selectedIssue && (
@@ -374,6 +385,7 @@ export function IssueDeckShell({
         onOpenChange={setCreateDialogOpen}
         repositories={repositories}
         defaultRepositoryFullName={createDialogRepo}
+        defaultBody={createDialogBody}
         issues={issues}
         onCreated={handleIssueCreated}
       />

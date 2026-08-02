@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 
 const items = [
   { id: "home", label: "ホーム", icon: Home },
-  { id: "issues", label: "Issue", icon: ListChecks },
   { id: "repos", label: "リポジトリ", icon: FolderGit2 },
+  { id: "issues", label: "Issue", icon: ListChecks },
   { id: "settings", label: "設定", icon: Settings },
 ] as const;
 
@@ -27,7 +27,7 @@ export function MobileBottomNav({ active = "home", onSelect }: MobileBottomNavPr
           type="button"
           onClick={() => onSelect?.(id)}
           className={cn(
-            "flex flex-1 flex-col items-center gap-0.5 py-2 text-xs text-muted-foreground",
+            "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs text-muted-foreground",
             active === id && "text-foreground",
           )}
         >

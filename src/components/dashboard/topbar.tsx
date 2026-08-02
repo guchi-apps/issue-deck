@@ -9,14 +9,17 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
@@ -40,6 +43,9 @@ export function TopBar({
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
+    useGithubRateLimit(accountMenuOpen);
 
   const stateLabel =
     filters.state === "open"
@@ -143,7 +149,7 @@ export function TopBar({
         新規Issue
       </Button>
 
-      <DropdownMenu>
+      <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button type="button" className="flex items-center gap-1 rounded-md p-1 hover:bg-accent">
             <UserAvatar
@@ -154,7 +160,7 @@ export function TopBar({
             <ChevronDown className="size-3 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="w-72">
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
@@ -163,6 +169,36 @@ export function TopBar({
           >
             {currentUser?.name ?? currentUser?.login}
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
+          <div className="px-1.5 pb-1.5">
+            {rateLimitsLoading && (
+              <p className="text-xs text-muted-foreground">読み込み中...</p>
+            )}
+            {rateLimitsError && <p className="text-xs text-destructive">{rateLimitsError}</p>}
+            {rateLimits && rateLimits.length === 0 && (
+              <p className="text-xs text-muted-foreground">連携中のインストールがありません</p>
+            )}
+            {rateLimits && rateLimits.length > 0 && (
+              <ul className="flex flex-col gap-2">
+                {rateLimits.map((rateLimit) => (
+                  <li key={rateLimit.accountLogin} className="rounded-lg border p-2">
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-medium">{rateLimit.accountLogin}</span>
+                      <span className="text-muted-foreground">
+                        残り {rateLimit.remaining} / {rateLimit.limit}
+                      </span>
+                    </div>
+                    <Progress value={(rateLimit.remaining / rateLimit.limit) * 100} />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      リセット:{" "}
+                      {new Date(rateLimit.reset * 1000).toLocaleTimeString("ja-JP")}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={isSyncing}

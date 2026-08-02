@@ -303,14 +303,23 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
 
 ### 無人実行時の権限モード（許可ツールリスト）
 
-- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"`。
+- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。
   コード変更ツール（Edit/Write）は許可しない（計画提示のみで実装はしないため）。当初`gh issue`系3種のみを
   許可していたが、計画立案のための調査で`git ls-remote`・`gh pr list`・`gh api`（関連PR・ブランチ状況の確認）
   を試みて未許可コマンドとして拒否され続け、ターン数を使い切ってコメント投稿・ラベル付与に到達できない
   失敗が実際に発生した（Issue #70で確認）。読み取り専用の調査コマンドを許可リストに加えて解消した。
-- **実装ステップ**: `--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"`。
+- **実装ステップ**: `--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。
+- `Bash(curl:*)`・`Read`は、issue本文に貼り付けられた画像がissue-deck独自の画像アップロードAPI
+  （`user-images.githubusercontent.com`等のGitHub純正CDNではなく`/api/issues/images/...`）経由の場合、
+  claude-code-action組み込みの画像取得機能の対象外となり素通りしていた問題への対応として追加した
+  （Issue #195）。`WebFetch`はHTMLをMarkdown化して要約する用途向けで画像本体をClaudeに見せられないため、
+  代わりに`curl`でローカルに保存し`Read`で開く方式にした。`Bash(curl:*)`はURL・HTTPメソッドを問わず
+  任意の外部通信を許可してしまう（シークレットの外部送信等）ため、より狭い許可（ドメイン限定や
+  GET専用化）が理想だが、Bashの許可ルールはコマンド文字列の前方一致でしか絞り込めずフラグの
+  順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
+  （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
 - git push・PR作成はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository permissions >
   Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`ステップの
   `actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の`github_token`入力・

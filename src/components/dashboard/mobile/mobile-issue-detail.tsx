@@ -6,6 +6,7 @@ import {
   Archive,
   ArrowLeft,
   CircleAlert,
+  FilePlus2,
   FolderGit2,
   Loader2,
   Lock,
@@ -24,6 +25,7 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,7 @@ import {
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
@@ -65,6 +68,7 @@ type MobileIssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
+  onCreateFollowupIssue: (issue: Issue) => void;
 };
 
 export function MobileIssueDetail({
@@ -74,6 +78,7 @@ export function MobileIssueDetail({
   onEdit,
   onIssueUpdated,
   onToggleFavorite,
+  onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { updateIssue, isSubmitting } = useIssueMutations();
@@ -92,6 +97,10 @@ export function MobileIssueDetail({
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
+  const pullRequestLink = useMemo(() => {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return extractLatestPullRequestLink(comments, owner, repo);
+  }, [comments, issue.repositoryFullName]);
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -273,6 +282,10 @@ export function MobileIssueDetail({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
+              <FilePlus2 />
+              引き継いでIssueを作成
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onEdit(issue)}>
               <Pencil />
               編集
@@ -320,7 +333,7 @@ export function MobileIssueDetail({
           {issue.repositoryPrivate && <Lock className="size-3" aria-label="プライベート" />}
         </span>
 
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-lg font-semibold break-words">
           #{issue.number} {issue.title}
         </h1>
 
@@ -333,6 +346,7 @@ export function MobileIssueDetail({
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
+        <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
 
         <div className="flex items-center gap-6">
           <div>
@@ -481,6 +495,8 @@ export function MobileIssueDetail({
 
       <button
         type="button"
+        onClick={() => onCreateFollowupIssue(issue)}
+        aria-label="引き継いでIssueを作成"
         className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
       >
         <Plus className="size-5" />

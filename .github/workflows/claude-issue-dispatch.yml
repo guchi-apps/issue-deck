@@ -350,7 +350,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*)"'
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
@@ -358,6 +358,12 @@ jobs:
             ## 最初にやること
             `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・ラベル・
             コメント（過去に提示した計画やそれへのフィードバックを含む）を確認してください。
+
+            ## Issue本文・コメントに画像が含まれる場合
+            issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
+            GitHub純正の画像CDNではないため自動では読み込めません。計画立案に画像の内容確認が必要な場合は、
+            `curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、`Read`ツールで
+            そのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
 
             ## やること
             - リポジトリのコードを調査し、対応方針・変更範囲（触るファイル・追加するファイル）・懸念点を
@@ -556,7 +562,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"'
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
             おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の
@@ -592,6 +598,12 @@ jobs:
               既に完了しているため、ここで行う必要はない）
             - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
               作成する（`additional`の場合は既にcheckout済みのため不要）
+
+            ## Issue本文・コメントに画像が含まれる場合
+            issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
+            GitHub純正の画像CDNではないため自動では読み込めません。実装内容の把握に画像の内容確認が必要な
+            場合は、`curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、
+            `Read`ツールでそのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
 
             ## 責務
             - Issueの要件を実装する

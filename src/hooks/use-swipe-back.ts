@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import type { TouchEvent } from "react";
+import { useRef, useState } from "react";
+import type { CSSProperties, TouchEvent } from "react";
 
 const SWIPE_THRESHOLD_PX = 80;
 const DIRECTION_LOCK_PX = 10;
@@ -34,6 +34,8 @@ function isInsideHorizontalScroller(target: EventTarget | null, container: Eleme
 // ジェスチャーの方向を判定し、横方向優位のときのみ戻る操作として扱う。
 export function useSwipeBack(onBack: () => void) {
   const stateRef = useRef<SwipeState | null>(null);
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   function onTouchStart(e: TouchEvent<HTMLElement>) {
     const touch = e.touches[0];
@@ -73,23 +75,42 @@ export function useSwipeBack(onBack: () => void) {
         state.tracking = false;
         return;
       }
+      setIsDragging(true);
     }
 
     state.deltaX = deltaX;
+    setDragX(Math.max(0, deltaX));
   }
 
   function onTouchEnd() {
     const state = stateRef.current;
     stateRef.current = null;
-    if (!state || !state.tracking || state.locked !== "horizontal") return;
-    if (state.deltaX > SWIPE_THRESHOLD_PX) {
-      onBack();
+    setIsDragging(false);
+    if (!state || !state.tracking || state.locked !== "horizontal") {
+      setDragX(0);
+      return;
     }
+    if (state.deltaX > SWIPE_THRESHOLD_PX) {
+      // 戻る操作を確定させる。この画面はここで表示されなくなるので、
+      // 追従していた位置を0に戻すアニメーションは行わない。
+      onBack();
+      return;
+    }
+    setDragX(0);
   }
 
   function onTouchCancel() {
     stateRef.current = null;
+    setIsDragging(false);
+    setDragX(0);
   }
 
-  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel };
+  // ドラッグ中は指の動きにそのまま追従させ、指を離した後の戻り（スワイプ未達時）
+  // だけアニメーションさせる。
+  const style: CSSProperties = {
+    transform: dragX > 0 ? `translateX(${dragX}px)` : undefined,
+    transition: isDragging ? "none" : "transform 0.2s ease-out",
+  };
+
+  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, style };
 }

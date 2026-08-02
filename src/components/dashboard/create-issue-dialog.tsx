@@ -33,6 +33,8 @@ type CreateIssueDialogProps = {
   onOpenChange: (open: boolean) => void;
   repositories: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
+  defaultTitle?: string | null;
+  defaultBody?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
 };
@@ -42,6 +44,8 @@ export function CreateIssueDialog({
   onOpenChange,
   repositories,
   defaultRepositoryFullName,
+  defaultTitle,
+  defaultBody,
   issues,
   onCreated,
 }: CreateIssueDialogProps) {
@@ -68,13 +72,13 @@ export function CreateIssueDialog({
     // ループや連鎖的な再レンダリングは発生しない。
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRepositoryFullName(defaultRepositoryFullName ?? repositories[0]?.fullName ?? "");
-    setTitle("");
-    setBody("");
+    setTitle(defaultTitle ?? "");
+    setBody(defaultBody ?? "");
     setSelectedLabels([]);
     setAssignee(null);
     setIsImageUploading(false);
     setError(null);
-  }, [open, defaultRepositoryFullName, repositories, setError]);
+  }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, repositories, setError]);
 
   function toggleLabel(name: string) {
     setSelectedLabels((prev) =>
