@@ -92,6 +92,9 @@ export function IssueDeckShell({
   function handleIssueCreated(issue: Issue) {
     setIssues((prev) => [issue, ...prev]);
     setSelectedIssue(issue);
+    // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
+    // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
+    selectIssue(issue);
   }
 
   function handleIssueUpdated(issue: Issue) {
