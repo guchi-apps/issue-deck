@@ -112,6 +112,7 @@ export function MobileRepoIssuesScreen({
         showSearch={false}
         showHeader={false}
         className="flex-1"
+        fabSpacing
       />
 
       <MobileIssueFilterSheet
