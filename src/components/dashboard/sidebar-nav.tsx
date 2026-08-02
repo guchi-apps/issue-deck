@@ -8,6 +8,7 @@ import {
   FolderGit2,
   Lock,
   Plus,
+  Settings2,
   SlidersHorizontal,
   X,
 } from "lucide-react";
@@ -61,6 +62,7 @@ export function SidebarNav({
   className,
 }: SidebarNavProps) {
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
+  const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
   const sortedLabelSummary = [...labelSummary].sort((a, b) => a.name.localeCompare(b.name));
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
   const visibleRepositories = showHiddenRepos
@@ -99,13 +101,30 @@ export function SidebarNav({
       <div>
         <div className="mb-2 flex items-center justify-between px-2">
           <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
-          <a
-            href={getGithubAppInstallUrl()}
-            className="text-muted-foreground hover:text-foreground"
-            title="GitHub Appをインストールしてリポジトリを追加"
-          >
-            <Plus className="size-3.5" />
-          </a>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
+              title={
+                isEditingRepoVisibility
+                  ? "表示・非表示の切り替えを終了"
+                  : "表示・非表示を切り替える"
+              }
+              className={cn(
+                "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                isEditingRepoVisibility && "bg-accent text-foreground",
+              )}
+            >
+              <Settings2 className="size-3.5" />
+            </button>
+            <a
+              href={getGithubAppInstallUrl()}
+              className="text-muted-foreground hover:text-foreground"
+              title="GitHub Appをインストールしてリポジトリを追加"
+            >
+              <Plus className="size-3.5" />
+            </a>
+          </div>
         </div>
         {repositories.length === 0 ? (
           <div className="px-2 text-xs text-muted-foreground">
@@ -120,7 +139,7 @@ export function SidebarNav({
               {visibleRepositories.map((repo) => {
                 const color = getRepoColor(repo.fullName);
                 return (
-                  <li key={repo.id} className="group/repo flex items-center gap-1">
+                  <li key={repo.id} className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => onSelectRepository?.(repo)}
@@ -154,23 +173,22 @@ export function SidebarNav({
                         </span>
                       )}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
-                      }
-                      title={repo.hidden ? "表示する" : "非表示にする"}
-                      className={cn(
-                        "shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
-                        !repo.hidden && "opacity-0 group-hover/repo:opacity-100",
-                      )}
-                    >
-                      {repo.hidden ? (
-                        <Eye className="size-3.5" />
-                      ) : (
-                        <EyeOff className="size-3.5" />
-                      )}
-                    </button>
+                    {isEditingRepoVisibility && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
+                        }
+                        title={repo.hidden ? "表示する" : "非表示にする"}
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        {repo.hidden ? (
+                          <Eye className="size-3.5" />
+                        ) : (
+                          <EyeOff className="size-3.5" />
+                        )}
+                      </button>
+                    )}
                   </li>
                 );
               })}
