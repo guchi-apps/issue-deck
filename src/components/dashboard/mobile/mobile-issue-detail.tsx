@@ -55,6 +55,7 @@ import {
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
+  labelsAfterRejection,
 } from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
@@ -212,12 +213,20 @@ export function MobileIssueDetail({
   }
 
   async function handleReject(reason: string) {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
     const [owner, repo] = issue.repositoryFullName.split("/");
     const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
     const created = await createComment({ owner, repo, number: issue.number, body });
     if (created) {
       setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
     }
   }
 

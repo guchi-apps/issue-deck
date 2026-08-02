@@ -37,6 +37,14 @@ export function labelsAfterApproval(labels: IssueLabel[]): string[] {
 }
 
 /**
+ * 却下時に外すラベル名の配列を返す（00.check-userのみを外す。21.plan-requiredは計画の
+ * 再提示が必要なため残す）
+ */
+export function labelsAfterRejection(labels: IssueLabel[]): string[] {
+  return labels.map((label) => label.name).filter((name) => name !== CHECK_USER_LABEL);
+}
+
+/**
  * 承認ボタン押下時、ラベル更新に続けて投稿する定型コメント本文
  * （claude-issue-dispatch.ymlの@claudeトリガーに反応する）。
  *
