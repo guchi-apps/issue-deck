@@ -172,8 +172,13 @@ export function MobileIssueDetail({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      <header className="flex items-center gap-2 border-b p-4">
-        <button type="button" onClick={onBack}>
+      <header className="flex items-center gap-1 border-b p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="戻る"
+          className="-m-2 rounded-full p-2 active:bg-muted"
+        >
           <ArrowLeft className="size-5" />
         </button>
         <span className="flex-1 text-sm font-semibold">Issue詳細</span>
@@ -181,18 +186,25 @@ export function MobileIssueDetail({
           type="button"
           onClick={() => onToggleFavorite(issue)}
           aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+          className="-m-2 rounded-full p-2 active:bg-muted"
         >
           <Star
             className={
-              issue.favorite ? "size-4 fill-yellow-400 text-yellow-400" : "size-4 text-muted-foreground"
+              issue.favorite ? "size-5 fill-yellow-400 text-yellow-400" : "size-5 text-muted-foreground"
             }
           />
         </button>
-        <Share2 className="size-4 text-muted-foreground" />
+        <button type="button" aria-label="共有" className="-m-2 rounded-full p-2 active:bg-muted">
+          <Share2 className="size-5 text-muted-foreground" />
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="操作メニュー">
-              <MoreHorizontal className="size-4 text-muted-foreground" />
+            <button
+              type="button"
+              aria-label="操作メニュー"
+              className="-m-2 rounded-full p-2 active:bg-muted"
+            >
+              <MoreHorizontal className="size-5 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -304,7 +316,7 @@ export function MobileIssueDetail({
                     onClick={() => toggleLabel(label.name)}
                     disabled={isSubmitting}
                     aria-label={`${label.name}を削除`}
-                    className="rounded-full hover:opacity-70 disabled:opacity-50"
+                    className="-m-1.5 rounded-full p-1.5 hover:opacity-70 disabled:opacity-50"
                   >
                     <X className="size-3" />
                   </button>
@@ -320,9 +332,10 @@ export function MobileIssueDetail({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  className="flex size-6 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
+                  aria-label="ラベルを追加"
+                  className="flex size-9 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-4" />
                 </button>
               }
             />
