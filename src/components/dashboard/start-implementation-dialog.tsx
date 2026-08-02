@@ -22,6 +22,7 @@ import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   START_IMPLEMENTATION_OPTIONS,
   startImplementationLabelsToAdd,
+  startImplementationOptionsFromLabels,
   type StartImplementationOptionKey,
 } from "@/lib/github/start-implementation";
 import type { Issue, IssueComment } from "@/types/issue";
@@ -49,6 +50,13 @@ export function StartImplementationDialog({
   const { updateIssue, isSubmitting: isUpdatingIssue } = useIssueMutations();
   const { createComment, isSubmitting: isCreatingComment } = useIssueCommentMutations();
   const isSubmitting = isUpdatingIssue || isCreatingComment;
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) {
+      setOptions(startImplementationOptionsFromLabels(issue.labels));
+    }
+    setOpen(nextOpen);
+  }
 
   function toggleOption(key: StartImplementationOptionKey) {
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -82,12 +90,11 @@ export function StartImplementationDialog({
 
     onCommentCreated(created);
     onIssueUpdated({ ...currentIssue, commentCount: currentIssue.commentCount + 1 });
-    setOptions(START_IMPLEMENTATION_DEFAULT_OPTIONS);
     setOpen(false);
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{renderTrigger(isSubmitting)}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
