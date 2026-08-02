@@ -49,7 +49,12 @@ import {
 } from "@/components/ui/select";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { APPROVE_COMMENT_BODY, isApprovalPending, labelsAfterApproval } from "@/lib/github/approval-labels";
+import {
+  approveCommentBody,
+  isApprovalPending,
+  isMergeApprovalPending,
+  labelsAfterApproval,
+} from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation, START_IMPLEMENTATION_COMMENT_BODY } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -197,7 +202,7 @@ export function MobileIssueDetail({
       owner,
       repo,
       number: issue.number,
-      body: APPROVE_COMMENT_BODY,
+      body: approveCommentBody(issue.labels),
     });
     if (created) {
       setComments((prev) => [...prev, created]);
@@ -456,6 +461,8 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+            pullRequestLink={pullRequestLink}
             onApprove={handleApprove}
             onReject={handleReject}
             isApproving={isSubmitting}
