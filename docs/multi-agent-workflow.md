@@ -246,7 +246,14 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
 - **実装ステップ**: `--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。
-- git push・PR作成は既定の`GITHUB_TOKEN`（ジョブの`contents: write`/`pull-requests: write`権限）で行う。
+- git push・PR作成はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository permissions >
+  Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`ステップの
+  `actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の`github_token`入力・
+  `GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は`.github/workflows/`配下への
+  pushをGitHubの仕様上原理的に許可できない（リポジトリの「Workflow permissions」設定を
+  Read and writeにしても解除されない）ため、`.github/workflows/`自体を変更するIssueを本ワークフロー
+  で扱うにはPATが必須。他のステップ（状態判定・通知コメント・計画提示など、ワークフローファイルを
+  変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
 
 ### 計画提示ステップの信頼性確保
 
@@ -267,15 +274,27 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
    Claude Code自体の許可コマンドの問題から独立しているため、1で防ぎきれなかったケースでも
    「Issueに何も反映されないまま無言で終わる」事態を確実に防げる。
 
+### 自動投稿コメントへの実行ログリンク付与
+
+`claude-issue-dispatch.yml`・`issue-labels.yml`がGitHub Actions上で`gh issue comment`を使って
+自動投稿するコメント（着手通知・計画提示・計画提示失敗時のフォールバック・画面確認待ちの通知・
+develop向けPR作成完了・developマージ完了）には、末尾に`実行ログ: <ワークフロー実行のURL>`を
+追記している（issue #106）。URLは`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+で組み立てられ、そのコメントを投稿した1回のワークフロー実行を指す。人間がコメントから該当する
+Actionsの実行ログへワンクリックで辿れるようにし、無人実行時のトラブルシュートを追跡しやすくする
+のが狙い。計画提示ステップの計画コメント自体はClaude Codeエージェントが投稿するため、シェル
+スクリプト側でURLを組み立てて渡すのではなく、プロンプトの指示に組み込んでエージェントに
+追記させている。
+
 ### 既知の制約・今後の検討事項
 
-- **develop向けPR作成後、Phase3/4のレビュー・自動マージが自動発火しない可能性がある**: GitHub仕様上、
-  既定の`GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しない。そのため
-  `claude-issue-dispatch.yml`が作成したPRに対して`claude-review-develop.yml`（Phase3/4）が自動的には
-  起動しない可能性が高い（未検証）。Phase5の完了条件は「develop向けPR作成まで」であり、developへの
-  マージまでの自動化は前提にしていないため今回は許容したが、実運用で発火しないことが確認された場合は、
-  PAT（Personal Access Token）ベースのトークンへの切り替えや`claude-review-develop.yml`への
-  `workflow_dispatch`トリガー追加などの対応を別途検討する。
+- **develop向けPR作成後、Phase3/4のレビュー・自動マージが自動発火するか未検証**: `WORKFLOW_PAT`への
+  切り替え（前述）により、`claude-issue-dispatch.yml`が作成するPRは既定の`GITHUB_TOKEN`ではなく
+  実PAT由来になったため、GitHub仕様上の「`GITHUB_TOKEN`によるpush/PR作成は他のワークフローを
+  起動しない」制限は受けなくなった。そのため`claude-review-develop.yml`（Phase3/4）が自動発火する
+  可能性があるが、実運用でまだ確認できていない。Phase5の完了条件は「develop向けPR作成まで」であり、
+  developへのマージまでの自動化は前提にしていないため、発火してもしなくても許容する
+  （実装ステップのプロンプト内で`03.d:marge`ラベル付与を自前でも行っており、自動発火に依存しない）。
 - `22.preview-required`・`23.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、
   画面確認・スクリーンショット取得ができないため、実装・コミット・ブランチpushまで行った上で
   `00.check-user`を付与しPR作成前に停止する運用にとどめている。このケースの「承認後の再開」は

@@ -28,13 +28,16 @@ name: Claude Issue Dispatch
 # 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
 # 展開しない(.github/workflows/issue-labels.yml と同じ方針)。
 #
-# 既知の制約: ブランチのpush・PR作成は既定の`GITHUB_TOKEN`で行っている。GitHubの仕様上
-# `GITHUB_TOKEN`によるpush/PR作成はイベントとして他のワークフローを起動しないため、
-# ここで作成したPRに対して.github/workflows/claude-review-develop.yml(Phase3自動レビュー・
-# Phase4自動マージ)は自動発火しない可能性が高い(未検証)。develop向けPR作成までが本ワークフロー
-# の完了条件であり、developへのマージまでの自動化は前提としない。発火しない場合は、人間が
-# 当該PRに何らかのイベント(re-request review、コメント等)を起こすか、`claude-review-develop.yml`
-# にworkflow_dispatchトリガーを追加する等の対応を別途検討する。
+# ブランチのpush(Checkoutステップ)・実装ステップのgit push/PR作成はGITHUB_TOKENではなく、
+# secrets.WORKFLOW_PAT(workflowスコープ/Repository permissions > Workflows: Read and write
+# を持つFine-grained PAT)を使う(issue #106)。既定のGITHUB_TOKENは`.github/workflows/`配下への
+# push権限をGitHubの仕様上原理的に持てない(リポジトリのWorkflow permissions設定をRead and write
+# にしても解除されない制限)ため、本ワークフロー自身がワークフローファイルを変更するIssueを
+# 扱えるようにするにはPATが必須。副次効果として、GITHUB_TOKENによるpush/PR作成と異なりPATに
+# よるpush/PR作成は他のワークフローを起動できるため、ここで作成したPRに対して
+# .github/workflows/claude-review-develop.yml(Phase3自動レビュー・Phase4自動マージ)が
+# 自動発火する可能性がある(未検証)。develop向けPR作成までが本ワークフローの完了条件であり、
+# developへのマージまでの自動化は前提としないが、自動発火した場合はそれ自体は許容する。
 
 on:
   issues:
@@ -61,6 +64,9 @@ jobs:
         with:
           ref: develop
           fetch-depth: 1
+          # .github/workflows/配下を変更するIssueでも実装ステップのgit pushが拒否されないよう、
+          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106)。
+          token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: 実行者の権限・状態を判定する
         id: state
@@ -157,6 +163,7 @@ jobs:
         if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement'
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
@@ -164,6 +171,7 @@ jobs:
           else
             BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
           fi
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 実装済み・対応中のissueへの@claudeコメントに返信する
@@ -219,7 +227,9 @@ jobs:
               日本語でまとめる
             - 直前のコメントで計画への修正依頼が来ている場合は、それを踏まえて計画を練り直す
             - まとめた計画を `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
-              Issueにコメント投稿する
+              Issueにコメント投稿する。コメント末尾に、このワークフロー実行への追跡用リンクとして
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
             - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
               （既に付いていても無害なので毎回実行してよい）
 
@@ -243,6 +253,7 @@ jobs:
         if: always() && steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
           AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
@@ -255,6 +266,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
@@ -262,9 +274,12 @@ jobs:
         if: steps.state.outputs.mode == 'implement'
         uses: anthropics/claude-code-action@v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          # .github/workflows/配下を変更するIssueでもgit pushが拒否されないよう、workflow書き込み
+          # 権限を持つPAT(secrets.WORKFLOW_PAT)を使う(issue #106)。Checkoutステップと同じPAT。
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
           claude_args: '--allowedTools "Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
@@ -292,9 +307,9 @@ jobs:
               `closes #番号` / `fixes #番号` は使わず、`#${{ steps.state.outputs.issue_number }}` のように
               番号のみ記載する）
             - `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
-              を実行する（このワークフローのgit push/PR作成は既定の`GITHUB_TOKEN`で行っており、GitHubの仕様上
-              `GITHUB_TOKEN`によるpush/PR作成は他のワークフローを起動しないため、`.github/workflows/issue-labels.yml`
-              による自動付与を当てにせず、必ず自分でこのコマンドを実行すること）
+              を実行する（このワークフローのgit push/PR作成はPAT（`secrets.WORKFLOW_PAT`）で行っており
+              `.github/workflows/issue-labels.yml`が自動発火する可能性があるが、未検証のため当てにせず、
+              必ず自分でこのコマンドを実行すること）
 
             ## 画面確認・スクリーンショットについて
             無人実行のため、開発サーバーを起動しての画面確認やPlaywright等によるスクリーンショット取得は
@@ -304,7 +319,10 @@ jobs:
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行し、
               実装内容の要約と「画面確認が必要なため人間の確認を待っています。ブランチ
               `${{ steps.state.outputs.branch }}` の内容を確認のうえ、問題なければ手動でPRを作成してください」
-              という旨を `gh issue comment` で投稿して停止してください（ブランチのpushまでは行う）
+              という旨を `gh issue comment` で投稿して停止してください（ブランチのpushまでは行う）。
+              コメント末尾に、このワークフロー実行への追跡用リンクとして
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
             - 上記いずれのラベルも付いていない場合は、通常どおりPR作成まで進めてください
 
             ## 禁止事項
