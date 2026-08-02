@@ -15,11 +15,10 @@ name: Release develop to main
 # - main版 != develop版: バンプPRが既にdevelopへマージ済み。develop→mainのPRが
 #   無ければ新規に作成する。
 #
-# バージョンの上げ幅（major/minor/patch）は、現在`05.develop`または`07.m:marge`が付いている
-# （＝developへマージ済みだがmain未反映の）issueのラベルから機械的に判定する。
-# `52.breaking`（後方互換性を壊す変更）が1件でも含まれていればmajor、無ければ
-# `50.feature`（新機能の追加）が1件でも含まれていればminor、それ以外はpatchとする。
-# それでも判断がつかない・誤っていると思われる場合はrelease-to-mainスキルどおり
+# バージョンの上げ幅（major/minor/patch）は、issueのラベルではなくmain/develop間の実際の
+# コード差分の内容からClaude Code（claude-code-action、--json-schemaによる構造化出力）が
+# semverに基づき判定する(#55)。判定に失敗した場合はpatchにフォールバックする。
+# それでも判断が誤っていると思われる場合はrelease-to-mainスキルどおり
 # 人間がPRのバージョンを修正する想定。
 
 on:
@@ -42,6 +41,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: read
+  id-token: write
 
 jobs:
   release:
@@ -126,12 +126,6 @@ jobs:
           )"
           echo "$ISSUES_JSON" > /tmp/release-issues.json
 
-          HAS_BREAKING="$(echo "$ISSUES_JSON" | jq '[.[] | select([.labels[].name] | contains(["52.breaking"]))] | length > 0')"
-          echo "has_breaking=$HAS_BREAKING" >> "$GITHUB_OUTPUT"
-
-          HAS_FEATURE="$(echo "$ISSUES_JSON" | jq '[.[] | select([.labels[].name] | contains(["50.feature"]))] | length > 0')"
-          echo "has_feature=$HAS_FEATURE" >> "$GITHUB_OUTPUT"
-
           jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
           if [ ! -s /tmp/release-issue-lines.txt ]; then
             echo "（05.develop・07.m:margeが付いたissueが見つかりませんでした）" > /tmp/release-issue-lines.txt
@@ -139,41 +133,96 @@ jobs:
           echo "対象issue:"
           cat /tmp/release-issue-lines.txt
 
-      - name: バージョンをbumpしてdevelop向けPRを作成する
+      - name: コード変更内容からバージョンの上げ幅を判定する
+        id: version-decision
         if: steps.state.outputs.need_bump == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"}},"required":["bump_kind","reason"]}'
+          prompt: |
+            issue-deckリポジトリで、mainブランチとdevelopブランチの実際のコード差分の内容から、
+            セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅
+            （major/minor/patch）を判定してください。Issueのラベルは一切参照せず、差分の
+            内容そのものだけから判断してください。
+
+            ## 確認すること
+            - `git diff origin/main origin/develop` で実際のコード変更内容を確認する
+            - `git log origin/main..origin/develop --oneline` でコミット一覧も参考にする
+
+            ## 判定基準
+            - major: 既存の挙動・データ構造・公開APIに対する後方互換性のない変更
+              （破壊的変更）が含まれる場合
+            - minor: 後方互換性を保ったまま新機能が追加されている場合
+            - patch: バグ修正・リファクタリング・ドキュメント更新など、上記のいずれにも
+              該当しない変更のみの場合
+            - 複数種類の変更が混在する場合は、最も上げ幅が大きい判定を採用する
+              （例: 新機能追加とバグ修正が両方含まれる場合はminor）
+
+            ## 出力
+            判定結果（bump_kind）と、その判断根拠（reason。日本語で、実際にどのファイル・
+            どのような変更を根拠にしたか具体的に触れて説明する）を返してください。
+
+      - name: バージョン判定結果を検証する
+        id: bump
+        # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
+        # 前ステップの成否によらず実行する
+        if: always() && steps.state.outputs.need_bump == 'true'
+        env:
+          # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
+          # run:本文に直接展開せずenv経由でのみ参照する
+          # (.github/workflows/issue-labels.ymlと同じ、script injectionを避ける方針)。
+          STRUCTURED_OUTPUT: ${{ steps.version-decision.outputs.structured_output }}
+        run: |
+          set -e
+
+          BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
+          # PR本文への埋め込み時に改行で崩れないよう、1行に平坦化しておく
+          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null | tr '\n' ' ' || true)"
+
+          case "$BUMP_KIND" in
+            major|minor|patch) ;;
+            *)
+              echo "Claude Codeによるバージョン判定が失敗・不正な結果だったため、patchにフォールバックします（判定結果: '$BUMP_KIND'）"
+              BUMP_KIND=patch
+              REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
+              ;;
+          esac
+
+          echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON"
+
+      - name: バージョンをbumpしてdevelop向けPRを作成する
+        if: always() && steps.state.outputs.need_bump == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           MAIN_VERSION: ${{ steps.state.outputs.main_version }}
-          HAS_BREAKING: ${{ steps.issues.outputs.has_breaking }}
-          HAS_FEATURE: ${{ steps.issues.outputs.has_feature }}
+          BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
+          REASON: ${{ steps.bump.outputs.reason }}
         run: |
           set -e
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$MAIN_VERSION"
-          if [ "$HAS_BREAKING" = "true" ]; then
-            BUMP_KIND=major
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-          elif [ "$HAS_FEATURE" = "true" ]; then
-            BUMP_KIND=minor
-            MINOR=$((MINOR + 1))
-            PATCH=0
-          else
-            BUMP_KIND=patch
-            PATCH=$((PATCH + 1))
-          fi
+          case "$BUMP_KIND" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            *)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           BRANCH="release/v$NEW_VERSION"
-
-          if [ "$BUMP_KIND" = "major" ]; then
-            REASON="対象issueに \`52.breaking\`（後方互換性を壊す変更）が含まれるため"
-          elif [ "$BUMP_KIND" = "minor" ]; then
-            REASON="対象issueに \`50.feature\`（新機能の追加）が含まれるため"
-          else
-            REASON="対象issueに \`52.breaking\`・\`50.feature\`のいずれも含まれないため"
-          fi
 
           git checkout -b "$BRANCH" origin/develop
           npm pkg set version="$NEW_VERSION"
@@ -188,7 +237,11 @@ jobs:
             echo "developへの取り込み待ちの変更を v${NEW_VERSION} としてリリースします。"
             echo
             echo "## バージョンの判断根拠"
-            echo "${REASON} ${BUMP_KIND} バージョンを上げました。判断が誤っていると思われる場合は、このPR上でバージョンを修正してください。"
+            echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+            echo
+            echo "$REASON"
+            echo
+            echo "判断が誤っていると思われる場合は、このPR上でバージョンを修正してください。"
             echo
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt

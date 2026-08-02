@@ -380,12 +380,13 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
 
 ### バージョンの上げ幅の判定
 
-`05.develop`または`07.m:marge`が付いている（＝developへマージ済みだがmain未反映の）issueの
-ラベルから機械的に判定する。`52.breaking`（後方互換性を壊す変更）が1件でも含まれていれば
-major、無ければ`50.feature`（新機能の追加）が1件でも含まれていればminor、それ以外はpatchと
-する。ラベル付けが実態と合っていない等で判断が誤っていると思われる場合は人間が生成された
-PR上でバージョンを直接修正する想定（release-to-mainスキルの「迷う場合はユーザーに確認する」
-に相当）。
+issueのラベルではなく、main/develop間の実際のコード差分の内容から判定する。専用のClaude
+Codeステップ（`claude-code-action`、`--json-schema`による構造化出力）が`git diff origin/main
+origin/develop`・`git log origin/main..origin/develop`を確認し、semverに基づき
+major/minor/patchのいずれかと判断根拠を返す。判定ステップ自体が失敗した場合や、返り値が
+major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。判断が誤っている
+と思われる場合は人間が生成されたPR上でバージョンを直接修正する想定（release-to-mainスキルの
+「迷う場合はユーザーに確認する」に相当）。
 
 ### トリガー
 
