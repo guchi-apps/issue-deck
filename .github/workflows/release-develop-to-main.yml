@@ -4,9 +4,14 @@ name: Release develop to main
 # 「1. バージョンを上げる」「2. developへの反映（フィーチャーブランチ+PR）」
 # 「3. develop→mainのPRを作成する」までを自動化する(#55)。
 #
-# develop→mainの実際のマージ（手順4、マージコミット必須）はCLAUDE.mdの自動マージ不可
-# カテゴリに該当するため、これまでどおり人間が手動で行う。本ワークフローはPR作成までを
-# 担い、マージは一切行わない。
+# バンプPRはCI通過後にdevelopへ自動マージする（GitHubのauto-merge。リポジトリ設定
+# 'Allow auto-merge'が有効な場合。無効時・CI要確認時はPRを残し、アプリのリリース画面に
+# 表示するマージ用URLからの手動マージにフォールバックする）。
+# バンプPRがdevelopへマージされてpackage.jsonのversionが変わると、
+# push(develop, paths:package.json)で本ワークフローが再度起動し、develop→mainのPRを
+# 自動作成する。develop→mainの実際のマージ（手順4、マージコミット必須）はCLAUDE.mdの
+# 自動マージ不可カテゴリに該当するため、これまでどおり人間が手動で行う
+# （アプリのリリース画面がマージ用URLを提示する）。
 #
 # 状態はdevelop/mainのpackage.jsonのversionフィールドだけから判定する（他に状態を
 # 保持しない）。
@@ -21,11 +26,20 @@ name: Release develop to main
 # それでも判断が誤っていると思われる場合はrelease-to-mainスキルどおり
 # 人間がPRのバージョンを修正する想定。
 #
-# バンプPR・develop→mainのPRの作成は人間の確認なしに走ってしまうため、developへの
-# PRマージやscheduleでの自動起動はせず、workflow_dispatchによる手動実行のみとする(#178)。
+# バンプPRの作成は人間の確認なしに走るため、scheduleでの自動起動はしない。起動は
+# 利用者のworkflow_dispatch（手動）と、バンプPRのdevelopマージに伴う
+# push(develop, paths:package.json)による自動連鎖のみとする(#178)。
 
 on:
   workflow_dispatch: {}
+  # バンプPRがdevelopへ（auto-mergeで）マージされ、package.jsonのversionが変わった
+  # ときに再起動してdevelop→mainのPRを自動作成する。通常のフィーチャーpushでは
+  # package.jsonが変わらないため起動しない。need_bump系ステップはworkflow_dispatch
+  # 限定にゲートしてあるため、push起点でバンプPRが誤作成されることはない。
+  push:
+    branches: [develop]
+    paths:
+      - package.json
 
 concurrency:
   # 同時に複数実行してバンプPRやdevelop→mainのPRを二重作成しないよう直列化する。
@@ -126,7 +140,7 @@ jobs:
 
       - name: コード変更内容からバージョンの上げ幅を判定する
         id: version-decision
-        if: steps.state.outputs.need_bump == 'true'
+        if: steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -165,7 +179,7 @@ jobs:
         id: bump
         # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
         # 前ステップの成否によらず実行する
-        if: always() && steps.state.outputs.need_bump == 'true'
+        if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
         env:
           # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
           # run:本文に直接展開せずenv経由でのみ参照する
@@ -192,7 +206,7 @@ jobs:
           echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
-        if: always() && steps.state.outputs.need_bump == 'true'
+        if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -250,6 +264,14 @@ jobs:
           gh pr create --base develop --head "$BRANCH" \
             --title "v${NEW_VERSION}をリリースする" \
             --body-file /tmp/release-pr-body.md
+
+          # CI通過後にdevelopへ自動マージする（リポジトリ設定 'Allow auto-merge' が必要）。
+          # このマージによりpackage.jsonのversionが変わり、push(develop, paths:package.json)で
+          # 本ワークフローが再起動してdevelop→mainのPRを自動作成する。
+          # 有効化に失敗しても run は落とさず、アプリのリリース画面のマージ用URLからの
+          # 手動マージに委ねる。
+          gh pr merge "$BRANCH" --auto --merge \
+            || echo "auto-mergeの有効化に失敗しました。CI通過後に手動でマージしてください（アプリのリリース画面のリンクからマージできます）。"
 
       - name: develop→mainのPRを作成する
         if: steps.state.outputs.need_main_pr == 'true'
