@@ -286,6 +286,7 @@ export function IssueDeckShell({
                     overviewStats={overviewStats}
                     navCounts={navCounts}
                     onSelectQuickView={selectQuickView}
+                    onSelectLabelPreset={(labels) => selectQuickView("all", labels)}
                     quickFilters={quickFilters}
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -295,13 +296,14 @@ export function IssueDeckShell({
 
                 {mobileScreen.kind === "issues" && (
                   <MobileIssuesScreen
-                    key={mobileScreen.view}
+                    key={`${mobileScreen.view}:${mobileScreen.labels.join(",")}`}
                     issues={issues}
                     currentUserLogin={currentUserLogin}
                     labelSummary={labelSummary}
                     assigneeOptions={assigneeOptions}
                     selectedIssueId={mobileScreen.returnToIssueId}
                     initialView={mobileScreen.view}
+                    initialLabels={mobileScreen.labels}
                     onSelectIssue={selectIssue}
                     onCreateIssue={() => openCreateDialog()}
                   />

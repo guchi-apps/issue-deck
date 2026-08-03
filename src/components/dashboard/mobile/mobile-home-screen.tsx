@@ -1,8 +1,9 @@
 "use client";
 
-import { Plus, SlidersHorizontal, X } from "lucide-react";
+import { PlayCircle, Plus, Rocket, SlidersHorizontal, UserCheck, X, type LucideIcon } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
+import { LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
 import { navViewIcons, navViews } from "@/lib/nav-views";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -11,6 +12,7 @@ type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
   onSelectQuickView: (view: NavViewId) => void;
+  onSelectLabelPreset: (labels: string[]) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
@@ -19,10 +21,17 @@ type MobileHomeScreenProps = {
 
 const quickFilterViews = navViews.filter((view) => view.id !== "all");
 
+const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
+  "check-user": UserCheck,
+  "in-progress": PlayCircle,
+  "release-pending": Rocket,
+};
+
 export function MobileHomeScreen({
   overviewStats,
   navCounts,
   onSelectQuickView,
+  onSelectLabelPreset,
   quickFilters,
   onSelectQuickFilter,
   onDeleteQuickFilter,
@@ -53,6 +62,21 @@ export function MobileHomeScreen({
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
           <ul className="flex flex-col gap-1">
+            {LABEL_FILTER_PRESETS.map((preset) => {
+              const Icon = LABEL_FILTER_PRESET_ICONS[preset.key];
+              return (
+                <li key={preset.key}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectLabelPreset(preset.labels)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                  >
+                    <Icon className="size-3.5 text-muted-foreground" />
+                    {preset.label}
+                  </button>
+                </li>
+              );
+            })}
             {quickFilterViews.map((view) => {
               const Icon = navViewIcons[view.id];
               return (
