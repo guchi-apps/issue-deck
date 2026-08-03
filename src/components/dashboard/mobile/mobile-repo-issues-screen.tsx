@@ -9,6 +9,7 @@ import {
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
+import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { applyIssueFilters, computeLabelSummary, getAssigneeOptions, sortIssues } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
@@ -19,6 +20,11 @@ type MobileRepoIssuesScreenProps = {
   repository: ConnectedRepository;
   issues: Issue[];
   selectedIssueId: string | null;
+  labels: string[];
+  state: IssueStateFilter;
+  assignee: string | null;
+  sort: IssueSort;
+  onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
   onCreateIssue: () => void;
@@ -28,18 +34,17 @@ export function MobileRepoIssuesScreen({
   repository,
   issues,
   selectedIssueId,
+  labels,
+  state,
+  assignee,
+  sort,
+  onChangeFilters,
   onSelectIssue,
   onBack,
   onCreateIssue,
 }: MobileRepoIssuesScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
-  const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
-    state: "open",
-    labels: [],
-    assignee: null,
-    sort: "created",
-  });
 
   const repoIssues = useMemo(
     () => issues.filter((issue) => issue.repositoryFullName === repository.fullName),
@@ -50,12 +55,12 @@ export function MobileRepoIssuesScreen({
     const filtered = applyIssueFilters(repoIssues, {
       q: "",
       repo: null,
-      state: localFilters.state,
-      labels: localFilters.labels,
-      assignee: localFilters.assignee,
+      state,
+      labels,
+      assignee,
     });
-    return sortIssues(filtered, localFilters.sort);
-  }, [repoIssues, localFilters]);
+    return sortIssues(filtered, sort);
+  }, [repoIssues, state, labels, assignee, sort]);
 
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
@@ -126,8 +131,8 @@ export function MobileRepoIssuesScreen({
       <MobileIssueFilterSheet
         open={filterSheetOpen}
         onOpenChange={setFilterSheetOpen}
-        filters={localFilters}
-        onChange={setLocalFilters}
+        filters={{ state, labels, assignee, sort }}
+        onChange={onChangeFilters}
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
       />
