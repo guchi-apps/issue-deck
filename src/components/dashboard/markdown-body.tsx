@@ -1,3 +1,6 @@
+"use client";
+
+import { useState, type ComponentProps } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -7,6 +10,45 @@ import remarkGfm from "remark-gfm";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
 import { remarkTrimCjkAutolink } from "@/lib/remark-trim-cjk-autolink";
 import { cn } from "@/lib/utils";
+
+// 一覧⇔詳細の行き来で再マウントされた際に画像の読み込みに失敗しても、代替テキストが
+// 空だと何も表示されず「画像の部分が消えた」ように見えてしまう。読み込み失敗を
+// 目に見える形で示し、再読み込みもできるようにする（#326）。
+function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  if (failed) {
+    return (
+      <span className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground">
+        画像を読み込めませんでした{alt ? `（${alt}）` : ""}
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-foreground"
+          onClick={() => {
+            setFailed(false);
+            setAttempt((n) => n + 1);
+          }}
+        >
+          再読み込み
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      {...props}
+      key={attempt}
+      src={src}
+      alt={alt ?? ""}
+      className="max-w-full rounded-md border"
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 const sanitizeSchema = {
   ...defaultSchema,
@@ -23,10 +65,7 @@ const components: Components = {
       {children}
     </a>
   ),
-  img: ({ ...props }) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img {...props} className="max-w-full rounded-md border" loading="lazy" alt={props.alt ?? ""} />
-  ),
+  img: (props) => <MarkdownImage {...props} />,
   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
   ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
