@@ -289,7 +289,9 @@ export function MobileIssueDetail({
         >
           <ArrowLeft className="size-5" />
         </button>
-        <span className="flex-1 text-sm font-semibold">Issue詳細</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          #{issue.number} {issue.title}
+        </span>
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
