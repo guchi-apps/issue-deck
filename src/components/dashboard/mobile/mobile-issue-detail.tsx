@@ -16,7 +16,6 @@ import {
   Play,
   Plus,
   RotateCcw,
-  Share2,
   Star,
   X,
   XCircle,
@@ -271,7 +270,7 @@ export function MobileIssueDetail({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
-      <header className="flex items-center gap-1 border-b p-4">
+      <header className="flex items-center gap-3 border-b p-4">
         <button
           type="button"
           onClick={onBack}
@@ -334,9 +333,6 @@ export function MobileIssueDetail({
               issue.favorite ? "size-5 fill-yellow-400 text-yellow-400" : "size-5 text-muted-foreground"
             }
           />
-        </button>
-        <button type="button" aria-label="共有" className="-m-2 rounded-full p-2 active:bg-muted">
-          <Share2 className="size-5 text-muted-foreground" />
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
