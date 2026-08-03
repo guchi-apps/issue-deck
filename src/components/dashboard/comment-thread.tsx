@@ -6,6 +6,7 @@ import { Ban, Check, Loader2, MoreHorizontal, Pencil, ThumbsUp, Trash2, X } from
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
+import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
   AlertDialog,
@@ -27,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { isBotComment } from "@/lib/github/is-bot-comment";
+import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssueComment } from "@/types/issue";
 
@@ -46,6 +48,8 @@ type CommentThreadProps = {
   mergeApprovalPending?: boolean;
   /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク。取得できない場合はnull */
   pullRequestLink?: PullRequestLink | null;
+  /** mergeApprovalPending時に対応PRの最新コミットのCI状態を併せて表示する。取得できない場合はnull */
+  pullRequestCiStatus?: PullRequestCiStatus | null;
   onApprove?: () => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   onWithdraw?: () => Promise<void> | void;
@@ -63,6 +67,7 @@ function ApprovalActions({
   isWithdrawing,
   mergeApprovalPending,
   pullRequestLink,
+  pullRequestCiStatus,
 }: {
   onApprove: () => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
@@ -72,6 +77,7 @@ function ApprovalActions({
   isWithdrawing?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
+  pullRequestCiStatus?: PullRequestCiStatus | null;
 }) {
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -106,6 +112,9 @@ function ApprovalActions({
             対応PR #{pullRequestLink.number}
           </a>
         )}
+        <div>
+          <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
+        </div>
       </div>
     );
   }
@@ -190,6 +199,7 @@ export function CommentThread({
   approvalPending,
   mergeApprovalPending,
   pullRequestLink,
+  pullRequestCiStatus,
   onApprove,
   onReject,
   onWithdraw,
@@ -233,6 +243,7 @@ export function CommentThread({
             isWithdrawing={isWithdrawing}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
+            pullRequestCiStatus={pullRequestCiStatus}
           />
         )}
       </>
@@ -361,6 +372,7 @@ export function CommentThread({
                   isWithdrawing={isWithdrawing}
                   mergeApprovalPending={mergeApprovalPending}
                   pullRequestLink={pullRequestLink}
+                  pullRequestCiStatus={pullRequestCiStatus}
                 />
               )}
             </div>
@@ -377,6 +389,7 @@ export function CommentThread({
           isWithdrawing={isWithdrawing}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
+          pullRequestCiStatus={pullRequestCiStatus}
         />
       )}
 
