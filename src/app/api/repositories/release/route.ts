@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { getCurrentUser } from "@/lib/auth-user";
-import { decryptSecret } from "@/lib/crypto/secret-cipher";
+import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { GithubApiError } from "@/lib/github/issues-api";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   dispatchReleaseWorkflow,
   fetchOpenPullRequestsForBase,
@@ -17,12 +16,13 @@ async function findRepository(userId: string, owner: string, repo: string) {
       fullName: `${owner}/${repo}`,
       installation: { userInstallations: { some: { userId } } },
     },
+    include: { installation: true },
   });
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) {
+  const userId = await requireUserId();
+  if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -34,17 +34,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const repository = await findRepository(user.id, owner, repo);
+  const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-  }
-
   try {
-    const token = decryptSecret(user.githubAccessToken);
+    const token = await getInstallationToken(repository.installation.installationId);
     const available = await fetchReleaseWorkflowExists(owner, repo, token);
     if (!available) {
       return NextResponse.json({ available: false });
@@ -73,10 +69,6 @@ export async function GET(request: NextRequest) {
         : null,
     });
   } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
     console.error(`[GET /api/repositories/release] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
@@ -86,8 +78,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) {
+  const userId = await requireUserId();
+  if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -99,24 +91,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const repository = await findRepository(user.id, owner, repo);
+  const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-  }
-
   try {
-    const token = decryptSecret(user.githubAccessToken);
+    const token = await getInstallationToken(repository.installation.installationId);
     await dispatchReleaseWorkflow(owner, repo, token);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
     console.error(`[POST /api/repositories/release] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
