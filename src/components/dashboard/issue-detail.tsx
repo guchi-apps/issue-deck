@@ -226,6 +226,14 @@ export function IssueDetail({
 
   async function handleRequestContinuation() {
     if (!issue) return;
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
     const [owner, repo] = issue.repositoryFullName.split("/");
     const created = await createComment({
       owner,
@@ -235,7 +243,7 @@ export function IssueDetail({
     });
     if (created) {
       setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
     }
   }
 
