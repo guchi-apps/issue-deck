@@ -20,7 +20,7 @@ type MobileBottomNavProps = {
 
 export function MobileBottomNav({ active = "home", onSelect }: MobileBottomNavProps) {
   return (
-    <nav className="flex border-t bg-background md:hidden">
+    <nav className="flex shrink-0 border-t bg-background md:hidden">
       {items.map(({ id, label, icon: Icon }) => (
         <button
           key={id}

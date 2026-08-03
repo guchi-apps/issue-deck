@@ -47,7 +47,7 @@ export default function RootLayout({
       lang="ja"
       className={`${geistMono.variable} h-full overflow-x-hidden antialiased`}
     >
-      <body className="min-h-full flex flex-col overflow-x-hidden">
+      <body className="h-full flex flex-col overflow-hidden">
         {children}
         <AppUpdateChecker currentVersion={packageJson.version} />
       </body>
