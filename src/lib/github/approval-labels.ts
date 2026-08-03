@@ -91,3 +91,15 @@ export function approveCommentBody(labels: IssueLabel[]): string {
     ? "@claude 計画を承認しました。実装を進めてください。"
     : "@claude 確認しました。実装を進めてください。";
 }
+
+/**
+ * フォールバック通知（計画コメント投稿・実装結果報告のいずれも確認できなかった場合の通知）に対して、
+ * 「続きを実装・調査を依頼」ボタン押下時に投稿する定型コメント本文。
+ *
+ * ラベルは一切変更しない。00.check-user・21.plan-requiredを残したまま@claudeコメントのみを
+ * 投稿することで、claude-issue-dispatch.ymlの起動判定（ラベル・ブランチ・PRの状態）が
+ * 計画フェーズの再試行か実装の続行かを自動的に振り分ける。
+ */
+export function requestContinuationCommentBody(): string {
+  return "@claude 続きを実装・調査してください。";
+}

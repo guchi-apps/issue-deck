@@ -469,7 +469,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
@@ -838,6 +838,6 @@ jobs:
 
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "新規コメント・PRのいずれも確認できないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"
+          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
