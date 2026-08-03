@@ -10,6 +10,7 @@ import {
   FolderGit2,
   Loader2,
   Lock,
+  MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
   Play,
@@ -21,6 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -57,6 +59,7 @@ import {
   labelsAfterApproval,
   labelsAfterRejection,
 } from "@/lib/github/approval-labels";
+import { canAskClaude } from "@/lib/github/ask-claude";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -275,6 +278,27 @@ export function MobileIssueDetail({
                   <Loader2 className="size-5 animate-spin" />
                 ) : (
                   <Play className="size-5" />
+                )}
+              </button>
+            )}
+          />
+        )}
+        {canAskClaude(issue) && (
+          <AskClaudeDialog
+            issue={issue}
+            onIssueUpdated={onIssueUpdated}
+            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            renderTrigger={(isSubmitting) => (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                aria-label="Claudeに質問する"
+                className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <MessageCircleQuestion className="size-5" />
                 )}
               </button>
             )}
