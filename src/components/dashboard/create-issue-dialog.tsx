@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
@@ -27,6 +27,8 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
+
+const DEFAULT_ASSIGNEE = "m-guchi";
 
 type CreateIssueDialogProps = {
   open: boolean;
@@ -57,6 +59,7 @@ export function CreateIssueDialog({
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
+  const hasUserSetAssignee = useRef(false);
 
   const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -78,12 +81,26 @@ export function CreateIssueDialog({
     setAssignee(null);
     setIsImageUploading(false);
     setError(null);
+    hasUserSetAssignee.current = false;
   }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, repositories, setError]);
+
+  useEffect(() => {
+    if (!open || hasUserSetAssignee.current) return;
+    if (assignees.includes(DEFAULT_ASSIGNEE)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAssignee(DEFAULT_ASSIGNEE);
+    }
+  }, [open, assignees]);
 
   function toggleLabel(name: string) {
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
+  }
+
+  function handleAssigneeChange(value: string) {
+    hasUserSetAssignee.current = true;
+    setAssignee(value === "__none__" ? null : value);
   }
 
   async function handleSubmit() {
@@ -140,6 +157,7 @@ export function CreateIssueDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Issueのタイトル"
+              className="text-sm"
               autoFocus
             />
           </div>
@@ -153,7 +171,7 @@ export function CreateIssueDialog({
               issueSuggestions={issueSuggestions}
               onUploadingChange={setIsImageUploading}
               placeholder="詳細を入力（任意）"
-              className="min-h-32"
+              className="min-h-32 text-sm"
             />
           </div>
 
@@ -165,9 +183,9 @@ export function CreateIssueDialog({
               onToggle={toggleLabel}
               isLoading={isMetaLoading}
               trigger={
-                <Button variant="outline" size="sm" className="w-fit text-xs" disabled={isMetaLoading}>
+                <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
                   {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
-                  <ChevronDown className="size-3" />
+                  <ChevronDown className="size-3.5" />
                 </Button>
               }
             />
@@ -191,11 +209,12 @@ export function CreateIssueDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="create-issue-assignee">担当者</Label>
-            <Select
-              value={assignee ?? "__none__"}
-              onValueChange={(value) => setAssignee(value === "__none__" ? null : value)}
-            >
-              <SelectTrigger id="create-issue-assignee" className="w-full" disabled={isMetaLoading}>
+            <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
+              <SelectTrigger
+                id="create-issue-assignee"
+                className="h-9 w-full"
+                disabled={isMetaLoading}
+              >
                 <SelectValue placeholder="担当者を選択" />
               </SelectTrigger>
               <SelectContent>
