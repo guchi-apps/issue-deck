@@ -82,6 +82,7 @@ type MobileIssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
+  onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
 };
 
@@ -92,6 +93,7 @@ export function MobileIssueDetail({
   onEdit,
   onIssueUpdated,
   onToggleFavorite,
+  onCreateIssue,
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
@@ -581,8 +583,8 @@ export function MobileIssueDetail({
 
       <button
         type="button"
-        onClick={() => onCreateFollowupIssue(issue)}
-        aria-label="引き継いでIssueを作成"
+        onClick={() => onCreateIssue(issue.repositoryFullName)}
+        aria-label="新しいIssueを作成"
         className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
       >
         <Plus className="size-5" />

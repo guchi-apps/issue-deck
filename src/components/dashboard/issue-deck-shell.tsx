@@ -352,6 +352,7 @@ export function IssueDeckShell({
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                    onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
                   />
                 )}
