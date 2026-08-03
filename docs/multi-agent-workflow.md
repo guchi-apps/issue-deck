@@ -515,13 +515,14 @@ required`は依然、無人実行環境から到達可能なプレビューURL�
 存在する場合に限り対応する`UserInstallation`をupsertする処理を追加した。ワークフロー上も
 `scripts/ci-seed-user.mjs`を`seed-ci-db.mjs`より先に実行する順序に固定している。
 
-#### Playwrightブラウザのインストール
+#### DBセットアップ・Playwrightブラウザのインストールを実行する条件
 
-`pnpm exec playwright install --with-deps chromium`によるchromiumダウンロードは数分かかるため、
-`23.screenshot-required`が付いていないissueでは実行しない（`claude-issue-dispatch.yml`の
-state stepが出力する`screenshot_required`で分岐）。`pnpm add -D playwright`によるパッケージ
-自体の追加は、他のDBセットアップ用の依存関係と同じ`pnpm install --frozen-lockfile`の対象になる
-ため、ラベルの有無を問わず常に行われる（ダウンロード容量が小さく無視できるコストのため）。
+`Setup pnpm`・`Setup Node.js`・依存関係インストール・DBマイグレーション・CIバイパス用ユーザーの
+シード・ダミーデータのシード・Playwrightブラウザ（chromium）のインストールは、いずれも上記の
+スクリーンショット撮影でのみ使われる。当初はDBセットアップ一式（chromiumのダウンロードを除く）
+を`23.screenshot-required`の有無によらず毎回実行していたが、撮影しないissueでは完全に無駄な
+処理のため、chromiumダウンロード（数分かかる）と同様にstate stepが出力する
+`screenshot_required`が`true`の場合のみ実行するよう変更した（#319）。
 
 ## 未解決の課題・申し送り事項
 

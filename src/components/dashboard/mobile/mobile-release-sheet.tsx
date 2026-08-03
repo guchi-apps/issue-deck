@@ -2,6 +2,7 @@
 
 import { Rocket } from "lucide-react";
 
+import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useReleaseStatus } from "@/hooks/use-release-status";
@@ -25,7 +26,7 @@ export function MobileReleaseSheet({ open, onOpenChange, repository }: MobileRel
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
     if (ok) {
-      alert("リリースworkflowを起動しました。Pull Requestの作成状況はGitHub上で確認してください。");
+      alert("リリースを起動しました。進捗はこの画面に表示されます（マージが必要な段階ではマージ用リンクが出ます）。");
     }
   }
 
@@ -54,27 +55,7 @@ export function MobileReleaseSheet({ open, onOpenChange, repository }: MobileRel
                 <span className="text-muted-foreground">develop</span>
                 <span>{releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}</span>
               </div>
-              {releaseStatus.bumpPullRequest && (
-                <a
-                  href={releaseStatus.bumpPullRequest.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate text-sm text-primary hover:underline"
-                >
-                  バンプPR #{releaseStatus.bumpPullRequest.number}: {releaseStatus.bumpPullRequest.title}
-                </a>
-              )}
-              {releaseStatus.releasePullRequest && (
-                <a
-                  href={releaseStatus.releasePullRequest.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate text-sm text-primary hover:underline"
-                >
-                  develop→main PR #{releaseStatus.releasePullRequest.number}:{" "}
-                  {releaseStatus.releasePullRequest.title}
-                </a>
-              )}
+              <ReleaseProgress status={releaseStatus} />
               <Button
                 variant="outline"
                 disabled={isTriggeringRelease}

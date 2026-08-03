@@ -16,7 +16,6 @@ import {
   Play,
   Plus,
   RotateCcw,
-  Share2,
   Star,
   X,
   XCircle,
@@ -83,6 +82,7 @@ type MobileIssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
+  onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
 };
 
@@ -93,6 +93,7 @@ export function MobileIssueDetail({
   onEdit,
   onIssueUpdated,
   onToggleFavorite,
+  onCreateIssue,
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
@@ -256,6 +257,14 @@ export function MobileIssueDetail({
   }
 
   async function handleRequestContinuation() {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
     const [owner, repo] = issue.repositoryFullName.split("/");
     const created = await createComment({
       owner,
@@ -265,13 +274,13 @@ export function MobileIssueDetail({
     });
     if (created) {
       setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
     }
   }
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
-      <header className="flex items-center gap-1 border-b p-4">
+      <header className="flex items-center gap-3 border-b p-4">
         <button
           type="button"
           onClick={onBack}
@@ -280,7 +289,9 @@ export function MobileIssueDetail({
         >
           <ArrowLeft className="size-5" />
         </button>
-        <span className="flex-1 text-sm font-semibold">Issue詳細</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          #{issue.number} {issue.title}
+        </span>
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
@@ -334,9 +345,6 @@ export function MobileIssueDetail({
               issue.favorite ? "size-5 fill-yellow-400 text-yellow-400" : "size-5 text-muted-foreground"
             }
           />
-        </button>
-        <button type="button" aria-label="共有" className="-m-2 rounded-full p-2 active:bg-muted">
-          <Share2 className="size-5 text-muted-foreground" />
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -577,8 +585,8 @@ export function MobileIssueDetail({
 
       <button
         type="button"
-        onClick={() => onCreateFollowupIssue(issue)}
-        aria-label="引き継いでIssueを作成"
+        onClick={() => onCreateIssue(issue.repositoryFullName)}
+        aria-label="新しいIssueを作成"
         className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
       >
         <Plus className="size-5" />

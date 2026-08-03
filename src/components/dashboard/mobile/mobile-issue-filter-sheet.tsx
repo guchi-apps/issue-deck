@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
@@ -11,7 +12,6 @@ export type MobileIssueLocalFilters = {
   labels: string[];
   assignee: string | null;
   sort: IssueSort;
-  inProgressOnly: boolean;
 };
 
 type MobileIssueFilterSheetProps = {
@@ -22,6 +22,8 @@ type MobileIssueFilterSheetProps = {
   labelOptions: LabelSummary[];
   assigneeOptions: string[];
 };
+
+const LABEL_COLLAPSE_THRESHOLD = 8;
 
 function Pill({
   active,
@@ -54,12 +56,23 @@ export function MobileIssueFilterSheet({
   labelOptions,
   assigneeOptions,
 }: MobileIssueFilterSheetProps) {
+  const [showAllLabels, setShowAllLabels] = useState(false);
+
   function toggleLabel(name: string) {
     const next = filters.labels.includes(name)
       ? filters.labels.filter((label) => label !== name)
       : [...filters.labels, name];
     onChange({ ...filters, labels: next });
   }
+
+  const canCollapseLabels = labelOptions.length > LABEL_COLLAPSE_THRESHOLD;
+  const visibleLabelOptions =
+    canCollapseLabels && !showAllLabels
+      ? labelOptions.filter(
+          (label, index) => index < LABEL_COLLAPSE_THRESHOLD || filters.labels.includes(label.name),
+        )
+      : labelOptions;
+  const hiddenLabelCount = labelOptions.length - visibleLabelOptions.length;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -90,12 +103,6 @@ export function MobileIssueFilterSheet({
           <section>
             <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
             <div className="flex flex-wrap gap-2">
-              <Pill
-                active={filters.inProgressOnly}
-                onClick={() => onChange({ ...filters, inProgressOnly: !filters.inProgressOnly })}
-              >
-                実装中のみ
-              </Pill>
               {LABEL_FILTER_PRESETS.map((preset) => {
                 const active = isLabelFilterPresetActive(filters.labels, preset);
                 return (
@@ -116,17 +123,28 @@ export function MobileIssueFilterSheet({
             {labelOptions.length === 0 ? (
               <p className="text-xs text-muted-foreground">ラベルがありません</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {labelOptions.map((label) => (
-                  <Pill
-                    key={label.name}
-                    active={filters.labels.includes(label.name)}
-                    onClick={() => toggleLabel(label.name)}
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {visibleLabelOptions.map((label) => (
+                    <Pill
+                      key={label.name}
+                      active={filters.labels.includes(label.name)}
+                      onClick={() => toggleLabel(label.name)}
+                    >
+                      {label.name}
+                    </Pill>
+                  ))}
+                </div>
+                {canCollapseLabels && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllLabels((prev) => !prev)}
+                    className="mt-2 text-xs text-primary hover:underline"
                   >
-                    {label.name}
-                  </Pill>
-                ))}
-              </div>
+                    {showAllLabels ? "折りたたむ" : `すべて表示する（+${hiddenLabelCount}）`}
+                  </button>
+                )}
+              </>
             )}
           </section>
 

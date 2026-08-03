@@ -66,6 +66,8 @@ export function IssueDeckShell({
     selectRepository,
     selectIssue,
     selectQuickView,
+    applyQuickFilter: applyMobileQuickFilter,
+    updateListFilters,
     goBack,
   } = useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -242,7 +244,7 @@ export function IssueDeckShell({
 
   function handleSelectQuickFilterMobile(quickFilter: QuickFilter) {
     applyQuickFilter(quickFilter);
-    selectQuickView(quickFilter.view);
+    applyMobileQuickFilter(quickFilter);
   }
 
   async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
@@ -286,6 +288,7 @@ export function IssueDeckShell({
                     overviewStats={overviewStats}
                     navCounts={navCounts}
                     onSelectQuickView={selectQuickView}
+                    onSelectLabelPreset={(labels) => selectQuickView("all", labels)}
                     quickFilters={quickFilters}
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -295,13 +298,18 @@ export function IssueDeckShell({
 
                 {mobileScreen.kind === "issues" && (
                   <MobileIssuesScreen
-                    key={mobileScreen.view}
                     issues={issues}
                     currentUserLogin={currentUserLogin}
                     labelSummary={labelSummary}
                     assigneeOptions={assigneeOptions}
                     selectedIssueId={mobileScreen.returnToIssueId}
-                    initialView={mobileScreen.view}
+                    view={mobileScreen.view}
+                    labels={mobileScreen.labels}
+                    state={mobileScreen.state}
+                    assignee={mobileScreen.assignee}
+                    sort={mobileScreen.sort}
+                    onChangeView={(view) => updateListFilters({ view })}
+                    onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onCreateIssue={() => openCreateDialog()}
                   />
@@ -325,6 +333,11 @@ export function IssueDeckShell({
                     repository={mobileScreen.repository}
                     issues={issues}
                     selectedIssueId={mobileScreen.returnToIssueId}
+                    labels={mobileScreen.labels}
+                    state={mobileScreen.state}
+                    assignee={mobileScreen.assignee}
+                    sort={mobileScreen.sort}
+                    onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onBack={goBack}
                     onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
@@ -339,6 +352,7 @@ export function IssueDeckShell({
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                    onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
                   />
                 )}
