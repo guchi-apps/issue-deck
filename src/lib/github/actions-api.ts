@@ -62,6 +62,26 @@ export async function fetchWorkflowRunJobs(
   return data.jobs;
 }
 
+export async function cancelWorkflowRun(
+  owner: string,
+  repo: string,
+  runId: number,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/cancel`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
 export type GithubApiPullRequest = {
   head: { sha: string };
 };
