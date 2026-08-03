@@ -17,6 +17,32 @@ export function isApprovalPending(labels: IssueLabel[]): boolean {
   return labels.some((label) => label.name === CHECK_USER_LABEL);
 }
 
+export type LabelFilterPreset = {
+  key: string;
+  label: string;
+  labels: string[];
+};
+
+/** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
+export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
+  { key: "check-user", label: "確認待ち", labels: [CHECK_USER_LABEL] },
+  {
+    key: "in-progress",
+    label: "実行中",
+    labels: [WORKFLOW_STEPS[0].labelName, WORKFLOW_STEPS[1].labelName],
+  },
+  {
+    key: "release-pending",
+    label: "本番反映待ち",
+    labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
+  },
+];
+
+/** 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する */
+export function isLabelFilterPresetActive(labels: string[], preset: LabelFilterPreset): boolean {
+  return labels.length === preset.labels.length && preset.labels.every((name) => labels.includes(name));
+}
+
 /**
  * 00.check-userかつワークフロー状況が03.d:marge/07.m:margeの場合、PRマージ待ち
  * （GitHub上で人間が直接マージする必要があり、@claudeコメントでの再開対象ではない）と判定する。
