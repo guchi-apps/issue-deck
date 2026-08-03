@@ -8,6 +8,7 @@ import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { applyIssueFilters, filterIssuesByView, sortIssues } from "@/lib/issue-stats";
 import { navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
@@ -21,8 +22,13 @@ type MobileIssuesScreenProps = {
   labelSummary: LabelSummary[];
   assigneeOptions: string[];
   selectedIssueId: string | null;
-  initialView?: NavViewId;
-  initialLabels?: string[];
+  view: NavViewId;
+  labels: string[];
+  state: IssueStateFilter;
+  assignee: string | null;
+  sort: IssueSort;
+  onChangeView: (view: NavViewId) => void;
+  onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
 };
@@ -33,31 +39,29 @@ export function MobileIssuesScreen({
   labelSummary,
   assigneeOptions,
   selectedIssueId,
-  initialView = "all",
-  initialLabels = [],
+  view,
+  labels,
+  state,
+  assignee,
+  sort,
+  onChangeView,
+  onChangeFilters,
   onSelectIssue,
   onCreateIssue,
 }: MobileIssuesScreenProps) {
-  const [view, setView] = useState<NavViewId>(initialView);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
-    state: "open",
-    labels: initialLabels,
-    assignee: null,
-    sort: "created",
-  });
 
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
     const filtered = applyIssueFilters(scoped, {
       q: "",
       repo: null,
-      state: localFilters.state,
-      labels: localFilters.labels,
-      assignee: localFilters.assignee,
+      state,
+      labels,
+      assignee,
     });
-    return sortIssues(filtered, localFilters.sort);
-  }, [issues, view, currentUserLogin, localFilters]);
+    return sortIssues(filtered, sort);
+  }, [issues, view, currentUserLogin, state, labels, assignee, sort]);
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -80,7 +84,7 @@ export function MobileIssuesScreen({
             <button
               key={viewId}
               type="button"
-              onClick={() => setView(viewId)}
+              onClick={() => onChangeView(viewId)}
               className={cn(
                 "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
                 view === viewId && "border-primary bg-primary/10 text-primary",
@@ -106,8 +110,8 @@ export function MobileIssuesScreen({
       <MobileIssueFilterSheet
         open={filterSheetOpen}
         onOpenChange={setFilterSheetOpen}
-        filters={localFilters}
-        onChange={setLocalFilters}
+        filters={{ state, labels, assignee, sort }}
+        onChange={onChangeFilters}
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
       />
