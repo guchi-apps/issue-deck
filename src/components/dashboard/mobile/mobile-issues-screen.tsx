@@ -22,6 +22,7 @@ type MobileIssuesScreenProps = {
   assigneeOptions: string[];
   selectedIssueId: string | null;
   initialView?: NavViewId;
+  initialLabels?: string[];
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
 };
@@ -33,6 +34,7 @@ export function MobileIssuesScreen({
   assigneeOptions,
   selectedIssueId,
   initialView = "all",
+  initialLabels = [],
   onSelectIssue,
   onCreateIssue,
 }: MobileIssuesScreenProps) {
@@ -40,10 +42,9 @@ export function MobileIssuesScreen({
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<MobileIssueLocalFilters>({
     state: "open",
-    labels: [],
+    labels: initialLabels,
     assignee: null,
     sort: "created",
-    inProgressOnly: false,
   });
 
   const displayedIssues = useMemo(() => {
@@ -54,7 +55,6 @@ export function MobileIssuesScreen({
       state: localFilters.state,
       labels: localFilters.labels,
       assignee: localFilters.assignee,
-      inProgressOnly: localFilters.inProgressOnly,
     });
     return sortIssues(filtered, localFilters.sort);
   }, [issues, view, currentUserLogin, localFilters]);

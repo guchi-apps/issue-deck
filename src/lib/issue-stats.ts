@@ -1,10 +1,6 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import { matchesSearchQuery } from "@/lib/search-query";
-
-/** ワークフロー進行中とみなす最後のindex（09.mainは完了状態のため対象外） */
-const IN_PROGRESS_MAX_STEP_INDEX = WORKFLOW_STEPS.length - 2;
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 const RECENT_WINDOW_MS = DAY_MS * 7;
@@ -33,7 +29,7 @@ export function filterIssuesByView(
 
 export function applyIssueFilters(
   issues: Issue[],
-  filters: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee" | "inProgressOnly">,
+  filters: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee">,
 ): Issue[] {
   const q = filters.q.trim();
 
@@ -51,10 +47,6 @@ export function applyIssueFilters(
       } else if (issue.assignee?.login !== filters.assignee) {
         return false;
       }
-    }
-    if (filters.inProgressOnly) {
-      const stepIndex = getWorkflowStepIndex(issue.labels);
-      if (stepIndex === null || stepIndex > IN_PROGRESS_MAX_STEP_INDEX) return false;
     }
     return true;
   });

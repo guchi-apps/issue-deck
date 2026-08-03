@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   ChevronDown,
-  Hourglass,
   LayoutDashboard,
   type LucideIcon,
   PlayCircle,
@@ -137,17 +136,6 @@ export function TopBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        <Button
-          variant={filters.inProgressOnly ? "secondary" : "outline"}
-          size="sm"
-          className="text-xs"
-          aria-pressed={filters.inProgressOnly}
-          onClick={() => setFilter("inProgressOnly", !filters.inProgressOnly)}
-        >
-          <Hourglass className="size-3" />
-          実装中のみ
-        </Button>
 
         {LABEL_FILTER_PRESETS.map((preset) => {
           const active = isLabelFilterPresetActive(filters.labels, preset);

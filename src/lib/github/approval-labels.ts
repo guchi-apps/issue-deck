@@ -25,7 +25,7 @@ export type LabelFilterPreset = {
 
 /** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
-  { key: "check-user", label: "確認待ち", labels: [CHECK_USER_LABEL] },
+  { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
   {
     key: "in-progress",
     label: "実行中",

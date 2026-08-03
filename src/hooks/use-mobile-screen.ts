@@ -10,7 +10,7 @@ import type { ConnectedRepository } from "@/types/repository";
 
 export type MobileScreen =
   | { kind: "home" }
-  | { kind: "issues"; view: NavViewId; returnToIssueId: string | null }
+  | { kind: "issues"; view: NavViewId; labels: string[]; returnToIssueId: string | null }
   | { kind: "repos" }
   | { kind: "settings" }
   | {
@@ -37,6 +37,11 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const repoParam = searchParams.get("mrepo");
   const issueParam = searchParams.get("missue");
   const viewParam = searchParams.get("mview");
+  const labelsParam = searchParams.get("mlabels");
+  const labels = useMemo(
+    () => (labelsParam ? labelsParam.split(",").filter(Boolean) : []),
+    [labelsParam],
+  );
 
   const mobileScreen = useMemo<MobileScreen>(() => {
     if (screenParam === "issue-detail") {
@@ -48,7 +53,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         : undefined;
       const back: MobileScreen = repository
         ? { kind: "repo-detail", repository, returnToIssueId: null, back: { kind: "repos" } }
-        : { kind: "issues", view: isNavViewId(viewParam) ? viewParam : "all", returnToIssueId: null };
+        : {
+            kind: "issues",
+            view: isNavViewId(viewParam) ? viewParam : "all",
+            labels,
+            returnToIssueId: null,
+          };
 
       return { kind: "issue-detail", issue, back };
     }
@@ -63,6 +73,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return {
         kind: "issues",
         view: isNavViewId(viewParam) ? viewParam : "all",
+        labels,
         returnToIssueId: issueParam,
       };
     }
@@ -72,7 +83,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     return { kind: "home" };
-  }, [screenParam, repoParam, issueParam, viewParam, issues, repositories]);
+  }, [screenParam, repoParam, issueParam, viewParam, labels, issues, repositories]);
 
   const navigate = useCallback(
     (next: {
@@ -80,6 +91,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       repo?: string | null;
       issue?: string | null;
       view?: NavViewId | null;
+      labels?: string[] | null;
     }) => {
       const params = new URLSearchParams(searchParams.toString());
 
@@ -107,6 +119,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("mview");
       }
 
+      if (next.labels && next.labels.length > 0) {
+        params.set("mlabels", next.labels.join(","));
+      } else {
+        params.delete("mlabels");
+      }
+
       // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
       // 生じうる。startTransitionでラップしisPendingを公開し、その間はスケルトンを表示する（#221）。
       startTransition(() => {
@@ -124,7 +142,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   );
 
   const selectQuickView = useCallback(
-    (view: NavViewId) => navigate({ screen: "issues", view }),
+    (view: NavViewId, labels?: string[]) => navigate({ screen: "issues", view, labels }),
     [navigate],
   );
 
@@ -135,6 +153,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         issue: issue.id,
         repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
         view: mobileScreen.kind === "issues" ? mobileScreen.view : null,
+        labels: mobileScreen.kind === "issues" ? mobileScreen.labels : null,
       }),
     [navigate, mobileScreen],
   );
@@ -150,7 +169,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     if (back.kind === "repo-detail") {
       navigate({ screen: "repo-detail", repo: back.repository.fullName, issue: returnIssueId });
     } else if (back.kind === "issues") {
-      navigate({ screen: "issues", view: back.view, issue: returnIssueId });
+      navigate({ screen: "issues", view: back.view, labels: back.labels, issue: returnIssueId });
     } else {
       navigate({ screen: back.kind });
     }
