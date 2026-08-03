@@ -96,9 +96,16 @@ export function approveCommentBody(labels: IssueLabel[]): string {
  * フォールバック通知（計画コメント投稿・実装結果報告のいずれも確認できなかった場合の通知）に対して、
  * 「続きを実装・調査を依頼」ボタン押下時に投稿する定型コメント本文。
  *
- * ラベルは一切変更しない。00.check-user・21.plan-requiredを残したまま@claudeコメントのみを
- * 投稿することで、claude-issue-dispatch.ymlの起動判定（ラベル・ブランチ・PRの状態）が
- * 計画フェーズの再試行か実装の続行かを自動的に振り分ける。
+ * ボタン押下時はこのコメント投稿に先立ち、labelsAfterRejection（00.check-userのみ除去、
+ * 21.plan-requiredは残す）でラベルを更新する（#330）。00.check-userを残したままだと、
+ * 投稿直後は直近コメントがこの継続依頼コメントになるためisFallbackNoticeComment判定が
+ * 外れ、UI上フォールバック専用のボタンではなく通常の承認・修正・取り下げボタンに戻って
+ * 表示されてしまう不具合があった。ラベル更新はissue-deckのGitHub App経由でissues.unlabeled
+ * イベントとして記録されるが、claude-issue-dispatch.yml側の自己ループ防止ロジックにより
+ * Botの操作は無視されるため実装の再開はトリガーされず、続けて投稿する本コメント
+ * （issue_commentイベント）経由でのみ再開される。21.plan-requiredを残すため、
+ * 計画フェーズ・分割フェーズでのフォールバック（ブランチ未作成）に対する継続依頼でも
+ * 従来どおり計画の再試行として扱われる。
  */
 export function requestContinuationCommentBody(): string {
   return "@claude 続きを実装・調査してください。";
