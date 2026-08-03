@@ -5,8 +5,10 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   dispatchReleaseWorkflow,
+  fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
+  fetchRefCiState,
   fetchReleaseWorkflowExists,
 } from "@/lib/github/release-api";
 
@@ -46,23 +48,43 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ available: false });
     }
 
-    const [mainVersion, developVersion, developBasePullRequests, mainBasePullRequests] =
+    const [mainVersion, developVersion, developBasePullRequests, mainBasePullRequests, workflowRun] =
       await Promise.all([
         fetchPackageVersion(owner, repo, "main", token),
         fetchPackageVersion(owner, repo, "develop", token),
         fetchOpenPullRequestsForBase(owner, repo, "develop", token),
         fetchOpenPullRequestsForBase(owner, repo, "main", token),
+        fetchLatestReleaseWorkflowRun(owner, repo, token),
       ]);
 
     const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
     const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
 
+    // バンプPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
+    const bumpCiState = bumpPr ? await fetchRefCiState(owner, repo, bumpPr.head.ref, token) : null;
+
+    // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
+    // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
+    // - release_pr_open: develop→mainのPRがオープン中（mainマージ待ち＝人手）
+    // - release_pending: developがbump済み（版数がmainと異なる）だがdevelop→mainのPRは未作成
+    //                    （auto-merge直後などの過渡状態。push起動でまもなくPRが作られる）
+    // - none:           対象なし、または一連の反映が完了した状態
+    const phase = bumpPr
+      ? "bump_pr_open"
+      : releasePr
+        ? "release_pr_open"
+        : mainVersion && developVersion && mainVersion !== developVersion
+          ? "release_pending"
+          : "none";
+
     return NextResponse.json({
       available: true,
       mainVersion,
       developVersion,
+      phase,
+      workflowRun,
       bumpPullRequest: bumpPr
-        ? { number: bumpPr.number, url: bumpPr.html_url, title: bumpPr.title }
+        ? { number: bumpPr.number, url: bumpPr.html_url, title: bumpPr.title, ciState: bumpCiState }
         : null,
       releasePullRequest: releasePr
         ? { number: releasePr.number, url: releasePr.html_url, title: releasePr.title }

@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
@@ -77,7 +78,7 @@ export function TopBar({
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
     if (ok) {
-      alert("リリースworkflowを起動しました。Pull Requestの作成状況はGitHub上で確認してください。");
+      alert("リリースを起動しました。進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。");
     }
   }
 
@@ -271,28 +272,7 @@ export function TopBar({
                         {releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}
                       </span>
                     </div>
-                    {releaseStatus.bumpPullRequest && (
-                      <a
-                        href={releaseStatus.bumpPullRequest.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate text-xs text-primary hover:underline"
-                      >
-                        バンプPR #{releaseStatus.bumpPullRequest.number}:{" "}
-                        {releaseStatus.bumpPullRequest.title}
-                      </a>
-                    )}
-                    {releaseStatus.releasePullRequest && (
-                      <a
-                        href={releaseStatus.releasePullRequest.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate text-xs text-primary hover:underline"
-                      >
-                        develop→main PR #{releaseStatus.releasePullRequest.number}:{" "}
-                        {releaseStatus.releasePullRequest.title}
-                      </a>
-                    )}
+                    <ReleaseProgress status={releaseStatus} compact />
                     <Button
                       size="sm"
                       variant="outline"

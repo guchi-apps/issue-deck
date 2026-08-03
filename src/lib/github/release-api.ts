@@ -71,6 +71,69 @@ export async function fetchOpenPullRequestsForBase(
   return res.json();
 }
 
+export type ReleaseWorkflowRun = {
+  /** queued | in_progress | completed など */
+  status: string;
+  /** success | failure | cancelled | null（未完了時） */
+  conclusion: string | null;
+  htmlUrl: string;
+  createdAt: string;
+};
+
+/** `release-develop-to-main.yml`の最新の実行（run）を1件取得する。無ければnull */
+export async function fetchLatestReleaseWorkflowRun(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<ReleaseWorkflowRun | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?per_page=1`;
+  const res = await fetch(url, { headers: authHeaders(token) });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: {
+    workflow_runs?: Array<{ status: string; conclusion: string | null; html_url: string; created_at: string }>;
+  } = await res.json();
+  const run = data.workflow_runs?.[0];
+  if (!run) return null;
+  return {
+    status: run.status,
+    conclusion: run.conclusion ?? null,
+    htmlUrl: run.html_url,
+    createdAt: run.created_at,
+  };
+}
+
+/** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
+export type CiState = "pending" | "success" | "failure" | "unknown";
+
+/**
+ * 指定ref（ブランチ名/SHA）のGitHub Actionsチェック（check-runs）を集約したCI状態を返す。
+ * `Checks: read`権限が無い等で取得に失敗した場合は例外を投げず`unknown`を返す（進捗表示は
+ * あくまで補助情報のため、CI状態が取れなくてもマージ用URL自体は表示できるようにする）。
+ */
+export async function fetchRefCiState(
+  owner: string,
+  repo: string,
+  ref: string,
+  token: string,
+): Promise<CiState> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`;
+  const res = await fetch(url, { headers: authHeaders(token) }).catch(() => null);
+  if (!res || !res.ok) return "unknown";
+  const data: { check_runs?: Array<{ status: string; conclusion: string | null }> } = await res
+    .json()
+    .catch(() => ({}));
+  const runs = data.check_runs ?? [];
+  if (runs.length === 0) return "unknown";
+  if (runs.some((r) => r.status !== "completed")) return "pending";
+  const passable = new Set(["success", "neutral", "skipped"]);
+  if (runs.some((r) => !r.conclusion || !passable.has(r.conclusion))) return "failure";
+  return "success";
+}
+
 /** 「Release develop to main」workflowをdevelopブランチを対象に手動起動する */
 export async function dispatchReleaseWorkflow(
   owner: string,
