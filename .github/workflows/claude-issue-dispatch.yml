@@ -670,11 +670,14 @@ jobs:
           git checkout "${{ steps.state.outputs.branch }}"
 
       - name: Setup pnpm（DBセットアップ用）
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        # 以下のDBセットアップ一式は、スクリーンショット撮影(scripts/capture-issue-screenshots.sh)
+        # でのみ使われる(#258)。撮影しない`23.screenshot-required`無しのissueでは無駄なため、
+        # Playwrightのブラウザインストールと同様にscreenshot_requiredでのみ実行する(#319)。
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js（DBセットアップ用）
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -684,14 +687,14 @@ jobs:
         # 後続のprisma migrate deploy・シードスクリプト実行に必要。実装エージェント自身も
         # lint/typecheck/build実行のため`pnpm install`を行うが、ここで先に済ませておくことで
         # ロックファイルどおりの依存関係でマイグレーション・シードを確実に実行する。
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: DBマイグレーションを適用する
         # 無人実行で`pnpm dev`を起動できるようにするための土台(#256)。実際に開発サーバーを
         # 起動して画面を確認・撮影する処理自体は#258で統合済み(後述のClaude Codeステップの
         # プロンプト内`23.screenshot-required`の節、およびscripts/capture-issue-screenshots.sh)。
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         env:
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
         run: pnpm db:migrate:deploy
@@ -700,7 +703,7 @@ jobs:
         # Supabaseを経由しないCI専用ログインバイパス(#257)の対象ユーザーをupsertする。
         # 後続の「画面確認用のダミーデータをシードする」ステップがこのユーザーに
         # UserInstallationを紐付けるため、必ずこちらを先に実行する(#258)。
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         env:
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
         run: node scripts/ci-seed-user.mjs
@@ -709,7 +712,7 @@ jobs:
         # 実際のGitHub Appとの同期処理(src/lib/github/sync-issues.ts等)は使わず、Prismaで
         # 直接最小限のダミーデータ（リポジトリ・Issue数件）を投入する(#256)。CIバイパス用
         # ユーザーへのUserInstallation紐付けも行う(#258。紐付けが無いと/dashboardが空になる)。
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         env:
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
         run: pnpm db:seed:ci
