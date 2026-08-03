@@ -1,0 +1,285 @@
+name: Claude Conflict Resolve
+
+# develop向けPRがdevelopとの間でコンフリクトした際、これまでは人間がIssueに
+# `@claude コンフリクトを解消して`のようにコメントして個別に依頼する必要があった。
+# この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を
+# 試みるワークフロー(docs/multi-agent-workflow.md「PRコンフリクトの自動解消」参照、issue #315)。
+#
+# ジョブ構成:
+# - detect-conflicts: develop向けの全OPEN PRのうち、ブランチ命名規約issue-<番号>
+#   (scripts/start-issue.shが作成)に従い、かつdevelopとコンフリクトしている
+#   (mergeable=CONFLICTING)ものを対応Issue番号の配列として検出する
+# - resolve-conflicts: 検出したIssueごとにmatrixで並列実行し、対応ブランチへ
+#   `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを
+#   解消してpushする。解消が難しいと判断した場合は無理をせず00.check-userを
+#   付与して人間に判断を委ねる
+#
+# トリガー:
+# - push(develop): developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、
+#   その都度検知する(最も速報性が高い経路)
+# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push直後の
+#   検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。取りこぼしを
+#   拾い直す安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
+# - workflow_dispatch: 手動実行用
+#
+# resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
+# concurrencyグループ(issue-dispatch-<Issue番号>)を使う。同じissue-<番号>ブランチへ
+# 人間からの追加依頼(@claudeコメント)による実装ステップと本ワークフローのコンフリクト
+# 解消が同時に走ってpushが競合するのを避けるため。
+
+on:
+  push:
+    branches:
+      - develop
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  detect-conflicts:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      issues: ${{ steps.detect.outputs.issues }}
+    steps:
+      - name: developとコンフリクトしているPRを検出する
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+          ISSUES="$(echo "$PRS_JSON" | jq -c '
+            [.[]
+              | select(.mergeable == "CONFLICTING")
+              | select(.headRefName | test("^issue-[0-9]+$"))
+              | (.headRefName | capture("^issue-(?<n>[0-9]+)$").n | tonumber)]
+          ')"
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          echo "検出結果: $ISSUES"
+
+  resolve-conflicts:
+    needs: detect-conflicts
+    if: needs.detect-conflicts.outputs.issues != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJson(needs.detect-conflicts.outputs.issues) }}
+    runs-on: ubuntu-latest
+    # claude-issue-dispatch.ymlのdispatchジョブと同じグループ名で直列化する(上記コメント参照)。
+    concurrency:
+      group: issue-dispatch-${{ matrix.issue }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # 後続のgit push、および.github/workflows/配下がコンフリクトしていた場合に備え、
+          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106と同様)。
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: 対象PRの状態を再確認する
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -e
+          BRANCH="issue-$ISSUE_NUMBER"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          # detect-conflicts実行時点からタイムラグがあるため、実際に着手する前に
+          # Issueのクローズ状態・PRのコンフリクト状態を再確認する。
+          ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
+          if [ "$ISSUE_STATE" = "CLOSED" ]; then
+            echo "Issueがクローズ済みのため何もしません"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_JSON="$(gh pr list --head "$BRANCH" --base develop --state open --json number,mergeable,url --jq '.[0]')"
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "対象のdevelop向けPRが見つからないため何もしません"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MERGEABLE="$(echo "$PR_JSON" | jq -r '.mergeable')"
+          if [ "$MERGEABLE" != "CONFLICTING" ]; then
+            echo "既にコンフリクトが解消されているため何もしません（mergeable=$MERGEABLE）"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_resolve=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$(echo "$PR_JSON" | jq -r '.number')" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$(echo "$PR_JSON" | jq -r '.url')" >> "$GITHUB_OUTPUT"
+
+      - name: 作業ブランチをcheckoutする
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          set -e
+          git fetch origin "${{ steps.state.outputs.branch }}" develop
+          git checkout "${{ steps.state.outputs.branch }}"
+
+      - name: 対応開始をコメントで通知する
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          BODY="🔀 developとの間にコンフリクトを検知したため、\`${{ steps.state.outputs.branch }}\` ブランチで自動解消を試みます。"
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          gh issue comment ${{ matrix.issue }} --body "$BODY"
+
+      - name: 解消前のコメント数を記録する
+        id: before
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ matrix.issue }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        if: steps.state.outputs.should_resolve == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: steps.state.outputs.should_resolve == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: 依存関係をインストールする
+        if: steps.state.outputs.should_resolve == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Claude Code（コンフリクト解消）
+        if: steps.state.outputs.should_resolve == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          # .github/workflows/配下がコンフリクトしていた場合でもgit pushが拒否されないよう、
+          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)を使う(issue #106と同様)。
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
+          # プレースホルダー値を使う(実際の外部サービスには接続しない)。
+          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+          GITHUB_APP_ID: "123456"
+          GITHUB_APP_PRIVATE_KEY_BASE64: Y2ktcGxhY2Vob2xkZXI=
+          NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder
+          GITHUB_WEBHOOK_SECRET: ci-placeholder
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+          show_full_output: true
+          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          prompt: |
+            あなたはissue-deckリポジトリのPRコンフリクト解消エージェントです。GitHub Actions上で
+            無人実行されており、対応するIssueは #${{ matrix.issue }}、対応するdevelop向け
+            Pull Requestは ${{ steps.state.outputs.pr_url }} です。現在のワークツリーは
+            `${{ steps.state.outputs.branch }}` ブランチをcheckout済みで、originの`develop`も
+            fetch済みです。
+
+            このPull Requestは`develop`との間でコンフリクトが発生しています。これまでは人間が
+            Issueにコメントして個別にコンフリクト解消を依頼する必要がありましたが、その依頼を
+            自動化したものがこのワークフローです。
+
+            ## 最初にやること
+            - `gh pr view ${{ steps.state.outputs.pr_number }} --json title,body,commits` と
+              `gh issue view ${{ matrix.issue }} --comments` で、このPull Requestが何を実装した
+              ものかを把握する
+
+            ## やること
+            - `git merge origin/develop` を実行し、developの最新変更をこのブランチへ取り込む
+              （リベースではなくマージを使うこと。force pushは禁止のため）
+            - コンフリクトが発生したファイルは `git diff --name-only --diff-filter=U` で確認する。
+              このPull Requestが実装した変更の意図と、developで新たに入った変更の両方を踏まえて
+              内容を読み、片方を機械的に採用するのではなく両者の変更が両立するように手動で解消する
+            - 解消後、`pnpm test`（lint・typecheckを実行）と `pnpm build:ci` を実行し、問題が
+              ないことを確認する（DBサーバーは実際には起動していないが、環境変数はこのステップに
+              既に設定済みのため`.github/workflows/ci.yml`のbuildステップと同様に成功するはず）
+            - 解消したファイルを `git add` でステージし、`git commit` でマージコミットを作成する
+              （コミットメッセージは日本語で「developとのコンフリクトを解消する。」のように1文で
+              目的を書き、末尾に `#${{ matrix.issue }}` を付ける。Authorは
+              `Claude Code <claude-code@example.com>` にする）
+            - `git push origin ${{ steps.state.outputs.branch }}` でpushする。pushが拒否された
+              場合は、このブランチ自体をマージで進めているため`git pull --rebase`は使わず
+              `git fetch origin ${{ steps.state.outputs.branch }} && git merge origin/${{ steps.state.outputs.branch }}`
+              で追随し、1回だけリトライする。それでも失敗する場合はそれ以上リトライせず、下記
+              「解消できない場合」の手順で報告する
+            - pushが成功したら `gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."` で、
+              コンフリクトが発生していたファイルと解消方針を日本語で要約して報告する。コメント末尾に
+              実行ログのリンク
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
+            - 最後に `gh issue comment ${{ matrix.issue }} --body "..."` で、Issueにも解消が
+              完了した旨と対象PR（${{ steps.state.outputs.pr_url }}）を日本語で報告する
+              （無人実行のため、この報告が使用者にとって唯一の完了確認手段になる。コメント末尾に
+              上記と同じ実行ログのリンクを必ず追記する）
+
+            ## 解消できない場合
+            意味的に矛盾する変更で機械的に両立できない、解消後にテスト・ビルドが通らず自力で
+            直せない等、安全に自動解消できないと判断した場合は、無理に解消しようとせず
+            `git merge --abort`（マージが進行中の場合）でブランチを元の状態に戻したうえで、
+            `gh issue comment ${{ matrix.issue }} --body "..."` でコンフリクトの内容と自動解消を
+            断念した理由を日本語で報告し、
+            `gh issue edit ${{ matrix.issue }} --add-label "00.check-user"` を実行して停止して
+            ください（コミット・pushは行わない）。
+
+            ## 禁止事項
+            - `main`/`develop`への直接コミット・push
+            - 他Issueのブランチの編集
+            - 不要なforce push
+            - 自分が作成したPull Requestの自己マージ
+
+      - name: 01.wip ラベルを除去する
+        # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
+        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で01.wipを
+        # 付与するため、03.d:marge/00.check-user状態のissueに01.wipが混在して
+        # 残らないよう明示的に除去する。LLMの実行有無に依存させないため独立した
+        # シェルステップとする(--remove-labelは未付与でも無害なため常に実行してよい)。
+        if: always() && steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ matrix.issue }} --remove-label "01.wip"
+
+      - name: 解消結果を検証し、報告が確認できない場合はフォールバック通知する
+        # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
+        # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
+        # そのため後続のステップとして独立に結果を確認する(claude-issue-dispatch.ymlの
+        # 同種の検証ステップと同じ考え方)。
+        if: always() && steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ISSUE_NUMBER="${{ matrix.issue }}"
+          AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため、完了または停止の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
+          FALLBACK_BODY="⚠️ developとのコンフリクト自動解消ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や解消の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
+          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
