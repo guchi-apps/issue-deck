@@ -10,6 +10,7 @@ import {
   FolderGit2,
   Loader2,
   Lock,
+  MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
   Play,
@@ -21,6 +22,8 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
+import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -28,6 +31,7 @@ import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,7 +60,9 @@ import {
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
+import { canAskClaude } from "@/lib/github/ask-claude";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -65,6 +71,8 @@ import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
+import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 
@@ -88,6 +96,7 @@ export function MobileIssueDetail({
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
     createComment,
@@ -108,6 +117,11 @@ export function MobileIssueDetail({
     const [owner, repo] = issue.repositoryFullName.split("/");
     return extractLatestPullRequestLink(comments, owner, repo);
   }, [comments, issue.repositoryFullName]);
+  const { status: pullRequestCiStatus } = usePullRequestCiStatus(
+    issue.repositoryFullName,
+    pullRequestLink,
+    isMergeApprovalPending(issue.labels),
+  );
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -241,6 +255,20 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
+  async function handleRequestContinuation() {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: requestContinuationCommentBody(),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex items-center gap-1 border-b p-4">
@@ -269,6 +297,27 @@ export function MobileIssueDetail({
                   <Loader2 className="size-5 animate-spin" />
                 ) : (
                   <Play className="size-5" />
+                )}
+              </button>
+            )}
+          />
+        )}
+        {canAskClaude(issue) && (
+          <AskClaudeDialog
+            issue={issue}
+            onIssueUpdated={onIssueUpdated}
+            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            renderTrigger={(isSubmitting) => (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                aria-label="Claudeに質問する"
+                className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <MessageCircleQuestion className="size-5" />
                 )}
               </button>
             )}
@@ -364,7 +413,15 @@ export function MobileIssueDetail({
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
-        <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
+          <WorkflowRunStatus run={workflowRun} />
+          <CancelWorkflowRunButton
+            run={workflowRun}
+            runId={workflowRunId}
+            repositoryFullName={issue.repositoryFullName}
+          />
+        </div>
 
         <div className="flex items-center gap-6">
           <div>
@@ -476,12 +533,15 @@ export function MobileIssueDetail({
             approvalPending={isApprovalPending(issue.labels)}
             mergeApprovalPending={isMergeApprovalPending(issue.labels)}
             pullRequestLink={pullRequestLink}
+            pullRequestCiStatus={pullRequestCiStatus}
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
+            onRequestContinuation={handleRequestContinuation}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
+            isRequestingContinuation={isCommentSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

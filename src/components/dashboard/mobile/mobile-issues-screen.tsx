@@ -73,7 +73,7 @@ export function MobileIssuesScreen({
         </button>
       </header>
 
-      <div className="flex items-center gap-2 overflow-x-auto border-b p-3">
+      <div className="flex items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {QUICK_VIEWS.map((viewId) => {
           const label = navViews.find((v) => v.id === viewId)?.label ?? viewId;
           return (
@@ -82,7 +82,7 @@ export function MobileIssuesScreen({
               type="button"
               onClick={() => setView(viewId)}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+                "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
                 view === viewId && "border-primary bg-primary/10 text-primary",
               )}
             >

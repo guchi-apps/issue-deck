@@ -8,6 +8,7 @@ import {
   FilePlus2,
   Loader2,
   Lock,
+  MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
   Play,
@@ -17,6 +18,8 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
+import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -44,13 +47,16 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
+import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import {
   approveCommentBody,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
+import { canAskClaude } from "@/lib/github/ask-claude";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -75,7 +81,7 @@ export function IssueDetail({
   onCreateFollowupIssue,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
-  const { run: workflowRun } = useIssueWorkflowRun(issue, comments);
+  const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
     createComment,
@@ -96,6 +102,11 @@ export function IssueDetail({
     const [owner, repo] = issue.repositoryFullName.split("/");
     return extractLatestPullRequestLink(comments, owner, repo);
   }, [comments, issue]);
+  const { status: pullRequestCiStatus } = usePullRequestCiStatus(
+    issue?.repositoryFullName ?? null,
+    pullRequestLink,
+    issue ? isMergeApprovalPending(issue.labels) : false,
+  );
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -213,6 +224,21 @@ export function IssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
+  async function handleRequestContinuation() {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: requestContinuationCommentBody(),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -242,6 +268,19 @@ export function IssueDetail({
                   <Button size="sm" disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
                     実装を開始
+                  </Button>
+                )}
+              />
+            )}
+            {canAskClaude(issue) && (
+              <AskClaudeDialog
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                renderTrigger={(isSubmitting) => (
+                  <Button variant="outline" size="sm" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : <MessageCircleQuestion />}
+                    Claudeに質問する
                   </Button>
                 )}
               />
@@ -351,6 +390,11 @@ export function IssueDetail({
         <div className="flex flex-wrap items-center gap-2">
           <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
           <WorkflowRunStatus run={workflowRun} />
+          <CancelWorkflowRunButton
+            run={workflowRun}
+            runId={workflowRunId}
+            repositoryFullName={issue.repositoryFullName}
+          />
         </div>
 
         <Separator />
@@ -380,12 +424,15 @@ export function IssueDetail({
             approvalPending={isApprovalPending(issue.labels)}
             mergeApprovalPending={isMergeApprovalPending(issue.labels)}
             pullRequestLink={pullRequestLink}
+            pullRequestCiStatus={pullRequestCiStatus}
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
+            onRequestContinuation={handleRequestContinuation}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
+            isRequestingContinuation={isCommentSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

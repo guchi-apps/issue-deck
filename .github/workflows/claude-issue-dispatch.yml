@@ -38,6 +38,12 @@ name: Claude Issue Dispatch
 # 再始動しない(mode=skip)。上記の分割で元Issueがクローズされた後に誤って再始動しないための
 # ガードだが、通常の09.mainクローズ後のIssueにも同様に適用される。
 #
+# issue-detail.tsx等の「Claudeに質問する」ダイアログ(src/lib/github/ask-claude.ts)が投稿する
+# `@claude 質問: `で始まるコメントは、コード変更を伴わない読み取り専用の質問応答(mode=ask)として
+# 扱う。実装状況(実装中・承認待ち・PR作成後・クローズ済み等、上記いずれの状態でも)によらず常に
+# 最優先で割り込み、ラベル変更・ブランチ作成・コミット・PR作成は一切行わずIssueへの回答コメントの
+# 投稿のみを行う(#216)。
+#
 # issue-<番号>ブランチが既に存在する場合でも、issue_commentトリガー(人間からの明示的な
 # @claudeコメント)であれば、以下のいずれかに該当する限りmode=additional(既存ブランチへの
 # 追加対応)として扱う。00.check-userの有無は問わない(Phase4の要確認判定と、人間からの追加
@@ -229,6 +235,15 @@ jobs:
           echo "$LABELS" | grep -qx "23.screenshot-required" && SCREENSHOT_REQUIRED=true
           echo "screenshot_required=$SCREENSHOT_REQUIRED" >> "$GITHUB_OUTPUT"
 
+          # issue-detail.tsx等の「Claudeに質問する」ダイアログが投稿する定型プレフィックス
+          # （ASK_CLAUDE_COMMENT_PREFIX、src/lib/github/ask-claude.ts）で始まるコメントかを判定する。
+          # 該当する場合、実装状況（実装中・承認待ち・PR作成後等）によらず常に最優先で読み取り専用の
+          # 質問応答モード(mode=ask)へ割り込む。
+          IS_ASK=false
+          case "$COMMENT_BODY" in
+            "@claude 質問: "*) IS_ASK=true ;;
+          esac
+
           # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な
           # 追加依頼ではないため、以下はいずれもissue_commentトリガーに限定する):
           # - PRがOPENなら追加対応として扱う(#129)。00.check-user(Phase4の自動マージ不可判定を
@@ -239,7 +254,9 @@ jobs:
           # - それ以外(PRがMERGED/CLOSED、または01.wipも付いていない異常な中間状態)は
           #   mode=skipとし、実装は再始動しない。
           MODE=skip
-          if [ "$ISSUE_CLOSED" = "true" ]; then
+          if [ "$EVENT_NAME" = "issue_comment" ] && [ "$IS_ASK" = "true" ]; then
+            MODE=ask
+          elif [ "$ISSUE_CLOSED" = "true" ]; then
             MODE=skip
           elif [ "$BRANCH_EXISTS" = "true" ]; then
             if [ "$EVENT_NAME" != "issue_comment" ]; then
@@ -290,13 +307,15 @@ jobs:
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
         # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
         # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
-        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split'
+        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
-          if [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
+          if [ "${{ steps.state.outputs.mode }}" = "ask" ]; then
+            BODY='🤔 ご質問を確認しました。回答をまとめています。'
+          elif [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
             BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
           elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
             BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
@@ -469,7 +488,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
@@ -553,6 +572,80 @@ jobs:
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+
+      - name: 質問前のコメント数を記録する
+        id: before_ask
+        if: steps.state.outputs.mode == 'ask'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Claude Code（質問応答）
+        # コードやIssueの状態を一切変更しない読み取り専用モード。ラベル変更・ブランチ作成・
+        # コミット・PR作成は許可しない（allowedToolsにEdit/Write/Bash(git ...)を含めない）。
+        if: steps.state.outputs.mode == 'ask'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
+          prompt: |
+            あなたはissue-deckリポジトリについて質問に答えるエージェントです。Issue #${{ steps.state.outputs.issue_number }} に
+            投稿された、`@claude 質問: ` で始まる直近のコメントへの回答のみを行ってください。
+            コード変更・コミット・ブランチ作成・PR作成・ラベル操作は一切行いません（許可されたツールにも
+            含まれていません）。
+
+            ## 最初にやること
+            `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの本文・ラベル・
+            コメント履歴を確認し、直近の `@claude 質問: ` で始まるコメントから質問内容（プレフィックスに
+            続く部分）を読み取ってください。
+
+            ## Issue本文・コメントに画像が含まれる場合
+            issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
+            GitHub純正の画像CDNではないため自動では読み込めません。回答に画像の内容確認が必要な場合は、
+            `curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、`Read`ツールで
+            そのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
+
+            ## やること
+            - 必要に応じてリポジトリのコード（`Read`ツール）やgit履歴（`git log`）、関連するPull Request
+              （`gh pr list`）を調査し、質問に日本語で回答する
+            - `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で回答をコメント投稿する。
+              コメント本文の先頭を`@claude`にしない（このワークフロー自身の再トリガーを防ぐため）。
+              コメント末尾に、このワークフロー実行への追跡用リンク
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              を必ず追記する
+
+            ## 迷った場合・調査に行き詰まった場合の振る舞い
+            - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
+              分かっている情報の範囲で回答をコメント投稿することを最優先する
+              （コメントを一切投稿できないまま終了することが最悪の結果のため）
+
+            ## このステップでは行わないこと
+            - コードの変更・コミット・ブランチ作成・PR作成・Issueのラベル変更・状態変更は一切行わない
+
+      - name: 質問への回答を検証し、必要ならフォールバックする
+        if: always() && steps.state.outputs.mode == 'ask'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before_ask.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため質問への回答は完了とみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
+          FALLBACK_BODY=$'⚠️ 質問への回答に失敗した可能性があります。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 
       - name: 実装前のコメント数を記録する
         id: before_implement
@@ -838,6 +931,6 @@ jobs:
 
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "新規コメント・PRのいずれも確認できないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"
+          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

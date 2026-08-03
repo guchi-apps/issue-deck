@@ -17,6 +17,32 @@ export function isApprovalPending(labels: IssueLabel[]): boolean {
   return labels.some((label) => label.name === CHECK_USER_LABEL);
 }
 
+export type LabelFilterPreset = {
+  key: string;
+  label: string;
+  labels: string[];
+};
+
+/** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
+export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
+  { key: "check-user", label: "確認待ち", labels: [CHECK_USER_LABEL] },
+  {
+    key: "in-progress",
+    label: "実行中",
+    labels: [WORKFLOW_STEPS[0].labelName, WORKFLOW_STEPS[1].labelName],
+  },
+  {
+    key: "release-pending",
+    label: "本番反映待ち",
+    labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
+  },
+];
+
+/** 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する */
+export function isLabelFilterPresetActive(labels: string[], preset: LabelFilterPreset): boolean {
+  return labels.length === preset.labels.length && preset.labels.every((name) => labels.includes(name));
+}
+
 /**
  * 00.check-userかつワークフロー状況が03.d:marge/07.m:margeの場合、PRマージ待ち
  * （GitHub上で人間が直接マージする必要があり、@claudeコメントでの再開対象ではない）と判定する。
@@ -64,4 +90,16 @@ export function approveCommentBody(labels: IssueLabel[]): string {
   return isPlanApproval
     ? "@claude 計画を承認しました。実装を進めてください。"
     : "@claude 確認しました。実装を進めてください。";
+}
+
+/**
+ * フォールバック通知（計画コメント投稿・実装結果報告のいずれも確認できなかった場合の通知）に対して、
+ * 「続きを実装・調査を依頼」ボタン押下時に投稿する定型コメント本文。
+ *
+ * ラベルは一切変更しない。00.check-user・21.plan-requiredを残したまま@claudeコメントのみを
+ * 投稿することで、claude-issue-dispatch.ymlの起動判定（ラベル・ブランチ・PRの状態）が
+ * 計画フェーズの再試行か実装の続行かを自動的に振り分ける。
+ */
+export function requestContinuationCommentBody(): string {
+  return "@claude 続きを実装・調査してください。";
 }

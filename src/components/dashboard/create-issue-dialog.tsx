@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +28,8 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
+
+const DEFAULT_ASSIGNEE = "m-guchi";
 
 type CreateIssueDialogProps = {
   open: boolean;
@@ -57,6 +60,17 @@ export function CreateIssueDialog({
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
+  const hasUserSetAssignee = useRef(false);
+  // 作成直後に「実装を開始」オプション選択ダイアログを表示する対象issue。
+  // ダイアログ内の非同期処理（ラベル更新→コメント投稿）の途中経過を追うためstateと
+  // 併せてrefでも保持し、閉じるタイミングで最新のissueを確実に参照できるようにする。
+  const [pendingStartIssue, setPendingStartIssue] = useState<Issue | null>(null);
+  const pendingStartIssueRef = useRef<Issue | null>(null);
+
+  function setPendingStart(issue: Issue | null) {
+    pendingStartIssueRef.current = issue;
+    setPendingStartIssue(issue);
+  }
 
   const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -78,12 +92,26 @@ export function CreateIssueDialog({
     setAssignee(null);
     setIsImageUploading(false);
     setError(null);
+    hasUserSetAssignee.current = false;
   }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, repositories, setError]);
+
+  useEffect(() => {
+    if (!open || hasUserSetAssignee.current) return;
+    if (assignees.includes(DEFAULT_ASSIGNEE)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAssignee(DEFAULT_ASSIGNEE);
+    }
+  }, [open, assignees]);
 
   function toggleLabel(name: string) {
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
+  }
+
+  function handleAssigneeChange(value: string) {
+    hasUserSetAssignee.current = true;
+    setAssignee(value === "__none__" ? null : value);
   }
 
   async function handleSubmit() {
@@ -101,129 +129,173 @@ export function CreateIssueDialog({
     }
   }
 
+  // 「作成+実装開始」ボタン押下時: Issue作成後、Issue詳細画面の「実装を開始」と同じ
+  // オプション選択ダイアログを続けて表示する。オプション選択が完了（または取消）して
+  // ダイアログが閉じた時点で、その時点の最新issueをonCreatedに渡して一覧・遷移へ反映する。
+  async function handleCreateAndStart() {
+    if (!repositoryFullName || !title.trim()) return;
+    const issue = await createIssue({
+      repositoryFullName,
+      title,
+      body,
+      labels: selectedLabels,
+      assignee,
+    });
+    if (issue) {
+      onOpenChange(false);
+      setPendingStart(issue);
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-lg"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>新しいIssueを作成</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent
+          className="sm:max-w-lg"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>新しいIssueを作成</DialogTitle>
+          </DialogHeader>
 
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-repo">リポジトリ</Label>
-            <Select value={repositoryFullName} onValueChange={setRepositoryFullName}>
-              <SelectTrigger id="create-issue-repo" className="w-full">
-                <SelectValue placeholder="リポジトリを選択" />
-              </SelectTrigger>
-              <SelectContent>
-                {repositories.map((repo) => (
-                  <SelectItem key={repo.id} value={repo.fullName}>
-                    {repo.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-repo">リポジトリ</Label>
+              <Select value={repositoryFullName} onValueChange={setRepositoryFullName}>
+                <SelectTrigger id="create-issue-repo" className="w-full">
+                  <SelectValue placeholder="リポジトリを選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  {repositories.map((repo) => (
+                    <SelectItem key={repo.id} value={repo.fullName}>
+                      {repo.fullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-title">タイトル</Label>
+              <Input
+                id="create-issue-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Issueのタイトル"
+                className="text-sm"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-body">本文</Label>
+              <MentionTextarea
+                id="create-issue-body"
+                value={body}
+                onChange={setBody}
+                issueSuggestions={issueSuggestions}
+                onUploadingChange={setIsImageUploading}
+                placeholder="詳細を入力（任意）"
+                className="min-h-32 text-sm"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label>ラベル</Label>
+              <LabelPicker
+                labels={labels}
+                selectedNames={selectedLabels}
+                onToggle={toggleLabel}
+                isLoading={isMetaLoading}
+                trigger={
+                  <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                    {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                }
+              />
+              {selectedLabels.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {selectedLabels.map((name) => {
+                    const label = labels.find((l) => l.name === name);
+                    return (
+                      <span
+                        key={name}
+                        className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                        style={getLabelBadgeStyle(label?.color ?? "#64748b")}
+                      >
+                        {name}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-assignee">担当者</Label>
+              <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
+                <SelectTrigger
+                  id="create-issue-assignee"
+                  className="h-9 w-full"
+                  disabled={isMetaLoading}
+                >
+                  <SelectValue placeholder="担当者を選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">未設定</SelectItem>
+                  {assignees.map((login) => (
+                    <SelectItem key={login} value={login}>
+                      {login}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-title">タイトル</Label>
-            <Input
-              id="create-issue-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Issueのタイトル"
-              autoFocus
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-body">本文</Label>
-            <MentionTextarea
-              id="create-issue-body"
-              value={body}
-              onChange={setBody}
-              issueSuggestions={issueSuggestions}
-              onUploadingChange={setIsImageUploading}
-              placeholder="詳細を入力（任意）"
-              className="min-h-32"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label>ラベル</Label>
-            <LabelPicker
-              labels={labels}
-              selectedNames={selectedLabels}
-              onToggle={toggleLabel}
-              isLoading={isMetaLoading}
-              trigger={
-                <Button variant="outline" size="sm" className="w-fit text-xs" disabled={isMetaLoading}>
-                  {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
-                  <ChevronDown className="size-3" />
-                </Button>
-              }
-            />
-            {selectedLabels.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {selectedLabels.map((name) => {
-                  const label = labels.find((l) => l.name === name);
-                  return (
-                    <span
-                      key={name}
-                      className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                      style={getLabelBadgeStyle(label?.color ?? "#64748b")}
-                    >
-                      {name}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-assignee">担当者</Label>
-            <Select
-              value={assignee ?? "__none__"}
-              onValueChange={(value) => setAssignee(value === "__none__" ? null : value)}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              キャンセル
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleCreateAndStart}
+              disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
             >
-              <SelectTrigger id="create-issue-assignee" className="w-full" disabled={isMetaLoading}>
-                <SelectValue placeholder="担当者を選択" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">未設定</SelectItem>
-                {assignees.map((login) => (
-                  <SelectItem key={login} value={login}>
-                    {login}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            キャンセル
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
-          >
-            {isSubmitting ? "作成中..." : "作成"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+              {isSubmitting ? "作成中..." : "作成+実装開始"}
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
+            >
+              {isSubmitting ? "作成中..." : "作成"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {pendingStartIssue && (
+        <StartImplementationDialog
+          issue={pendingStartIssue}
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              const finalIssue = pendingStartIssueRef.current;
+              setPendingStart(null);
+              if (finalIssue) onCreated(finalIssue);
+            }
+          }}
+          onIssueUpdated={setPendingStart}
+          onCommentCreated={() => {}}
+        />
+      )}
+    </>
   );
 }
