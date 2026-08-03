@@ -52,6 +52,7 @@ import {
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
@@ -218,6 +219,21 @@ export function IssueDetail({
       labels: labelsAfterApproval(issue.labels),
     });
     if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleRequestContinuation() {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: requestContinuationCommentBody(),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
   }
 
   if (!issue) {
@@ -396,9 +412,11 @@ export function IssueDetail({
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
+            onRequestContinuation={handleRequestContinuation}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
+            isRequestingContinuation={isCommentSubmitting}
           />
 
           <div className="mt-4 flex flex-col gap-2">

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Ban, Check, Loader2, MoreHorizontal, Pencil, ThumbsUp, Trash2, X } from "lucide-react";
+import { Ban, Check, Loader2, MoreHorizontal, Pencil, RotateCw, ThumbsUp, Trash2, X } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
@@ -53,18 +54,24 @@ type CommentThreadProps = {
   onApprove?: () => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   onWithdraw?: () => Promise<void> | void;
+  /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
+  onRequestContinuation?: () => Promise<void> | void;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
+  isRequestingContinuation?: boolean;
 };
 
 function ApprovalActions({
   onApprove,
   onReject,
   onWithdraw,
+  onRequestContinuation,
   isApproving,
   isRejecting,
   isWithdrawing,
+  isRequestingContinuation,
+  isFallbackNotice,
   mergeApprovalPending,
   pullRequestLink,
   pullRequestCiStatus,
@@ -72,9 +79,12 @@ function ApprovalActions({
   onApprove: () => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
   onWithdraw: () => Promise<void> | void;
+  onRequestContinuation?: () => Promise<void> | void;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
+  isRequestingContinuation?: boolean;
+  isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
   pullRequestCiStatus?: PullRequestCiStatus | null;
@@ -82,7 +92,7 @@ function ApprovalActions({
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
-  const busy = Boolean(isApproving || isRejecting || isWithdrawing);
+  const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
 
   async function submitReject() {
     await onReject(rejectReason);
@@ -145,6 +155,22 @@ function ApprovalActions({
             </Button>
           </div>
         </div>
+      ) : isFallbackNotice ? (
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
+            <RotateCw />
+            続きを実装・調査を依頼
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsWithdrawConfirmOpen(true)}
+            disabled={busy}
+          >
+            <Ban />
+            取り下げ
+          </Button>
+        </div>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" onClick={() => onApprove()} disabled={busy}>
@@ -203,9 +229,11 @@ export function CommentThread({
   onApprove,
   onReject,
   onWithdraw,
+  onRequestContinuation,
   isApproving,
   isRejecting,
   isWithdrawing,
+  isRequestingContinuation,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -254,6 +282,7 @@ export function CommentThread({
     (foundIndex, comment, index) => (isBotComment(comment.author.login) ? index : foundIndex),
     -1,
   );
+  const isFallbackNotice = isFallbackNoticeComment(comments[comments.length - 1]);
 
   function startEdit(comment: IssueComment) {
     setEditingId(comment.id);
@@ -367,9 +396,12 @@ export function CommentThread({
                   onApprove={onApprove}
                   onReject={onReject}
                   onWithdraw={onWithdraw}
+                  onRequestContinuation={onRequestContinuation}
                   isApproving={isApproving}
                   isRejecting={isRejecting}
                   isWithdrawing={isWithdrawing}
+                  isRequestingContinuation={isRequestingContinuation}
+                  isFallbackNotice={isFallbackNotice}
                   mergeApprovalPending={mergeApprovalPending}
                   pullRequestLink={pullRequestLink}
                   pullRequestCiStatus={pullRequestCiStatus}
@@ -384,9 +416,12 @@ export function CommentThread({
           onApprove={onApprove}
           onReject={onReject}
           onWithdraw={onWithdraw}
+          onRequestContinuation={onRequestContinuation}
           isApproving={isApproving}
           isRejecting={isRejecting}
           isWithdrawing={isWithdrawing}
+          isRequestingContinuation={isRequestingContinuation}
+          isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
           pullRequestCiStatus={pullRequestCiStatus}
