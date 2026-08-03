@@ -44,6 +44,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
+import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import {
   approveCommentBody,
   isApprovalPending,
@@ -96,6 +97,11 @@ export function IssueDetail({
     const [owner, repo] = issue.repositoryFullName.split("/");
     return extractLatestPullRequestLink(comments, owner, repo);
   }, [comments, issue]);
+  const { status: pullRequestCiStatus } = usePullRequestCiStatus(
+    issue?.repositoryFullName ?? null,
+    pullRequestLink,
+    issue ? isMergeApprovalPending(issue.labels) : false,
+  );
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -380,6 +386,7 @@ export function IssueDetail({
             approvalPending={isApprovalPending(issue.labels)}
             mergeApprovalPending={isMergeApprovalPending(issue.labels)}
             pullRequestLink={pullRequestLink}
+            pullRequestCiStatus={pullRequestCiStatus}
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}

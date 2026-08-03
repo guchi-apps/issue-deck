@@ -65,6 +65,7 @@ import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 
@@ -108,6 +109,11 @@ export function MobileIssueDetail({
     const [owner, repo] = issue.repositoryFullName.split("/");
     return extractLatestPullRequestLink(comments, owner, repo);
   }, [comments, issue.repositoryFullName]);
+  const { status: pullRequestCiStatus } = usePullRequestCiStatus(
+    issue.repositoryFullName,
+    pullRequestLink,
+    isMergeApprovalPending(issue.labels),
+  );
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -476,6 +482,7 @@ export function MobileIssueDetail({
             approvalPending={isApprovalPending(issue.labels)}
             mergeApprovalPending={isMergeApprovalPending(issue.labels)}
             pullRequestLink={pullRequestLink}
+            pullRequestCiStatus={pullRequestCiStatus}
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
