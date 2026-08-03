@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# IssueDeck
 
-## Getting Started
+複数のGitHubリポジトリのIssueを横断して確認・整理できるWebアプリ。
 
-First, run the development server:
+## 技術スタック
+
+- [Next.js](https://nextjs.org)（App Router） / React / TypeScript
+- [Prisma](https://www.prisma.io) + MySQL
+- [Supabase Auth](https://supabase.com/auth)（GitHubプロバイダー）
+- GitHub App連携（Octokit）
+- Tailwind CSS / shadcn・Radix UI
+
+## セットアップ
+
+前提: pnpm、MySQLが利用できること（`sudo mysql`でroot接続できる環境を想定）。
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+
+# .env.local を作成し、DB/Auth/GitHub関連の値を編集する
+pnpm env:init
+
+# .env.local の DATABASE_URL を元に MySQL の DB・ユーザーをセットアップする
+pnpm db:setup
+pnpm db:migrate:dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local`に設定する値の詳細は`.env.local.example`のコメントを参照。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 開発サーバーの起動
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev
+```
 
-## Learn More
+[http://localhost:3000](http://localhost:3000) で確認できる。`GITHUB_WEBHOOK_PROXY_URL`を設定している場合は、smee.io経由のWebhook転送も自動で起動する。
 
-To learn more about Next.js, take a look at the following resources:
+## 主なコマンド
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| コマンド | 内容 |
+| --- | --- |
+| `pnpm dev` | 開発サーバー起動 |
+| `pnpm build` | 本番ビルド |
+| `pnpm start` | 本番ビルドの起動 |
+| `pnpm lint` | ESLint実行 |
+| `pnpm typecheck` | TypeScriptの型チェック |
+| `pnpm test` | lint + typecheckをまとめて実行 |
+| `pnpm db:migrate:dev` | Prismaマイグレーション（開発用） |
+| `pnpm db:migrate:deploy` | Prismaマイグレーション（本番用） |
+| `pnpm db:studio` | Prisma Studioの起動 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## デプロイ
 
-## Deploy on Vercel
+`main`ブランチへのpushをトリガーに、GitHub Actions（`.github/workflows/deploy.yml`）経由で本番サーバーへPM2（`deploy/ecosystem.config.js`）でデプロイされる。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## ドキュメント
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 開発運用ルール: [CLAUDE.md](./CLAUDE.md)
+- Issueごとの複数Claude Codeエージェント運用: [docs/multi-agent-workflow.md](./docs/multi-agent-workflow.md)
