@@ -10,7 +10,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm lint && pnpm typecheck",
+    "test": "pnpm lint && pnpm typecheck && pnpm test:unit",
+    "test:unit": "vitest run",
     "postinstall": "prisma generate",
     "env:init": "cp -n .env.local.example .env.local && echo '.env.local を編集してください（DB/Auth/GitHub）'",
     "db:setup": "bash scripts/setup-db.sh",
@@ -54,6 +55,7 @@
     "playwright": "^1.62.1",
     "smee-client": "^5.0.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
