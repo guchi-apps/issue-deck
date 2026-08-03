@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Eye, EyeOff, FolderGit2, Lock, Rocket, Search } from "lucide-react";
+import { Archive, Eye, EyeOff, FolderGit2, Lock, Search } from "lucide-react";
 
-import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getRepoColor } from "@/lib/repo-color";
@@ -25,13 +24,6 @@ export function MobileReposScreen({
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
-  const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
-  const [releaseRepo, setReleaseRepo] = useState<ConnectedRepository | null>(null);
-
-  function handleOpenRelease(repo: ConnectedRepository) {
-    setReleaseRepo(repo);
-    setReleaseSheetOpen(true);
-  }
 
   const trimmedQuery = query.trim().toLowerCase();
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
@@ -113,15 +105,6 @@ export function MobileReposScreen({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOpenRelease(repo)}
-                      title="リリース"
-                      aria-label={`${repo.name}をリリース`}
-                      className="shrink-0 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <Rocket className="size-4" />
-                    </button>
-                    <button
-                      type="button"
                       onClick={() =>
                         repo.hidden ? onShowRepository(repo) : onHideRepository(repo)
                       }
@@ -150,14 +133,6 @@ export function MobileReposScreen({
           </>
         )}
       </div>
-
-      {releaseRepo && (
-        <MobileReleaseSheet
-          open={releaseSheetOpen}
-          onOpenChange={setReleaseSheetOpen}
-          repository={releaseRepo}
-        />
-      )}
     </div>
   );
 }
