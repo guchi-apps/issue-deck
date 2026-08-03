@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
+import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -30,6 +31,7 @@ import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,6 +70,7 @@ import { getLabelBadgeStyle } from "@/lib/label-color";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
@@ -92,6 +95,7 @@ export function MobileIssueDetail({
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const {
     createComment,
@@ -394,7 +398,15 @@ export function MobileIssueDetail({
         </div>
 
         <WorkflowStatusSteps labels={issue.labels} />
-        <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
+          <WorkflowRunStatus run={workflowRun} />
+          <CancelWorkflowRunButton
+            run={workflowRun}
+            runId={workflowRunId}
+            repositoryFullName={issue.repositoryFullName}
+          />
+        </div>
 
         <div className="flex items-center gap-6">
           <div>

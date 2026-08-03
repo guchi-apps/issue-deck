@@ -17,6 +17,7 @@ export type WorkflowRunInfo = {
 type UseIssueWorkflowRunResult = {
   run: WorkflowRunInfo | null;
   isLoading: boolean;
+  runId: number | null;
 };
 
 /** Issueのコメントから直近の「実行ログ:」リンクを見つけ、その実行の状態をポーリングする */
@@ -73,5 +74,5 @@ export function useIssueWorkflowRun(
     };
   }, [owner, repo, runId, issueId]);
 
-  return { run, isLoading };
+  return { run, isLoading, runId };
 }
