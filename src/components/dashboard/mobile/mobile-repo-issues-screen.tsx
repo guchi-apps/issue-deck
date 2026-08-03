@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, FolderGit2, MoreHorizontal, Plus, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, FolderGit2, Plus, Rocket, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import {
@@ -106,9 +106,10 @@ export function MobileRepoIssuesScreen({
             type="button"
             onClick={() => setReleaseSheetOpen(true)}
             className="rounded-md border p-2.5"
+            title="リリース"
             aria-label="リリース"
           >
-            <MoreHorizontal className="size-4" />
+            <Rocket className="size-4" />
           </button>
         </div>
       </div>
