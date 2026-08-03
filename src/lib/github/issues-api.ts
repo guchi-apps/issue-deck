@@ -1,4 +1,7 @@
+import { GithubApiError } from "@/lib/github/github-api-error";
 import { fetchAllPages } from "@/lib/github/pagination";
+
+export { GithubApiError } from "@/lib/github/github-api-error";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -76,16 +79,6 @@ export async function fetchRepoAssignees(
     `${GITHUB_API}/repos/${owner}/${repo}/assignees?per_page=100`,
     token,
   );
-}
-
-export class GithubApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "GithubApiError";
-  }
 }
 
 async function requestJson(

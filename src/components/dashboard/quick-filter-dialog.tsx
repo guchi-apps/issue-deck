@@ -75,7 +75,7 @@ export function QuickFilterDialog({
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            現在の検索条件（キーワード・リポジトリ・状態・ラベル・担当者・並び順）を保存します。
+            現在の検索条件（キーワード・検索式・リポジトリ・状態・ラベル・担当者・並び順）を保存します。
           </p>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

@@ -30,7 +30,12 @@ async function postJson(url: string, method: "POST" | "PATCH", input: unknown): 
     body: JSON.stringify(input),
   });
   if (!res.ok) {
-    throw new Error(`リクエストに失敗しました (${res.status})`);
+    const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+    throw new Error(
+      data.error === "github_api_error" && data.message
+        ? data.message
+        : `リクエストに失敗しました (${res.status})`,
+    );
   }
   const data: { issue: Issue } = await res.json();
   return data.issue;

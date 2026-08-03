@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isEmailAllowed } from "@/lib/allowed-emails";
 import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
 
@@ -42,6 +43,11 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // 一度許可されてログイン済みのユーザーが、後で許可リストから外れたケースへの多層防御。
+  // /auth/callback側で新規ログイン時点では弾いているが、既存セッションはここで塞ぐ。
+  // 許可されないユーザーは以降 user なし（＝未ログイン）と同様に扱う。
+  const allowedUser = user && isEmailAllowed(user.email) ? user : null;
+
   // /api/* はルートハンドラ自身が requireUserId() で認証チェックし、
   // 401 JSON を返す設計のため、ここではリダイレクトせず素通りさせる。
   if (pathname.startsWith("/api/")) {
@@ -51,7 +57,7 @@ export async function updateSession(request: NextRequest) {
   // ログイン済みユーザーが /login を開いた場合（ブラウザの「戻る」操作等）は
   // ログイン画面を再表示せずダッシュボードへ送り、URL上もログイン前の状態に
   // 戻れてしまわないようにする。
-  if (pathname === "/login" && user) {
+  if (pathname === "/login" && allowedUser) {
     const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
     const target = callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : "/dashboard";
     return NextResponse.redirect(new URL(target, getRequestOrigin(request)));
@@ -61,9 +67,13 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  if (!user) {
+  if (!allowedUser) {
     const loginUrl = new URL("/login", getRequestOrigin(request));
-    loginUrl.searchParams.set("callbackUrl", pathname);
+    if (user) {
+      loginUrl.searchParams.set("error", "not_allowed");
+    } else {
+      loginUrl.searchParams.set("callbackUrl", pathname);
+    }
     return NextResponse.redirect(loginUrl);
   }
 

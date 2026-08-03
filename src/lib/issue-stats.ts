@@ -1,6 +1,7 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import { matchesSearchQuery } from "@/lib/search-query";
 
 /** ワークフロー進行中とみなす最後のindex（09.mainは完了状態のため対象外） */
 const IN_PROGRESS_MAX_STEP_INDEX = WORKFLOW_STEPS.length - 2;
@@ -34,13 +35,10 @@ export function applyIssueFilters(
   issues: Issue[],
   filters: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee" | "inProgressOnly">,
 ): Issue[] {
-  const keyword = filters.q.trim().toLowerCase();
+  const q = filters.q.trim();
 
   return issues.filter((issue) => {
-    if (keyword) {
-      const haystack = `${issue.title}\n${issue.body}`.toLowerCase();
-      if (!haystack.includes(keyword)) return false;
-    }
+    if (q && !matchesSearchQuery(issue, q)) return false;
     if (filters.repo && issue.repositoryFullName !== filters.repo) return false;
     if (filters.state !== "all" && issue.state !== filters.state) return false;
     if (filters.labels.length > 0) {
