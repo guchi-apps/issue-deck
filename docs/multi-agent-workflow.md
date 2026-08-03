@@ -524,6 +524,55 @@ required`は依然、無人実行環境から到達可能なプレビューURL�
 処理のため、chromiumダウンロード（数分かかる）と同様にstate stepが出力する
 `screenshot_required`が`true`の場合のみ実行するよう変更した（#319）。
 
+## PRコンフリクトの自動解消（#315）
+
+develop向けPRがdevelopとの間でコンフリクトした場合、これまでは人間がIssueに`@claude`コメントで
+個別にコンフリクト解消を依頼する必要があった。`.github/workflows/claude-conflict-resolve.yml`が
+この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を試みる。
+
+### ジョブ構成
+
+- **detect-conflicts**: `gh pr list --base develop --state open --json number,headRefName,mergeable`で
+  develop向けの全OPEN PRを取得し、ブランチ命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）に
+  従い、かつ`mergeable`が`CONFLICTING`（developとコンフリクト中）のものを対応Issue番号の配列として
+  検出する。
+- **resolve-conflicts**: 検出したIssue番号ごとに`strategy.matrix`で並列実行する。まず対象PRの状態を
+  （detect-conflicts実行時点からのタイムラグを考慮して）再確認したうえで、対応ブランチへ
+  `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを解消してpushする。
+  意味的に矛盾する等、安全に自動解消できないと判断した場合は無理に解消せず`00.check-user`を
+  付与して人間に判断を委ねる。
+
+### トリガー
+
+- `push`（`develop`）: developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、最も速報性が
+  高い経路としてその都度検知する。
+- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push直後の検知時点では
+  まだ計算が終わっておらず`UNKNOWN`のままの場合がある。取りこぼしを拾い直す安全網として、
+  `issue-labels.yml`の各scheduleジョブと同じ間隔で走査する。
+- `workflow_dispatch`: 手動実行用。
+
+### 既存の実装ワークフローとの競合回避
+
+`resolve-conflicts`ジョブは、`claude-issue-dispatch.yml`の`dispatch`ジョブと同じconcurrencyグループ
+（`issue-dispatch-<Issue番号>`）を使う。同じ`issue-<番号>`ブランチへ、人間からの追加依頼
+（`@claude`コメント）による実装ステップと本ワークフローのコンフリクト解消が同時に走ってpushが
+競合するのを避けるため。
+
+コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
+push全般をトリガーに無条件で`01.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
+issueに`01.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`01.wip`を
+除去する。
+
+### 解消方針
+
+リベースではなく`git merge origin/develop`によるマージを使う（force pushは禁止のため）。
+コンフリクトしたファイルは、そのPRが実装した変更の意図とdevelopの最新変更の両方を踏まえて
+Claude Codeが読解し、片方を機械的に採用するのではなく両立するように解消する。解消後は
+`pnpm test`（lint・typecheck）・`pnpm build:ci`を実行して問題がないことを確認してからコミット・
+pushする。`pnpm build:ci`に必要な環境変数は、実装ステップの画面確認用DBセットアップとは異なり
+実際のDB接続を必要としないため、`.github/workflows/ci.yml`のbuildステップと同じプレースホルダー値を
+Claude Codeステップの`env`にそのまま設定している（MySQLサービスコンテナは使わない）。
+
 ## 未解決の課題・申し送り事項
 
 - Claude Code CLIの起動オプション（`--permission-mode`の具体的な値、`--add-dir`等）は実装時に`claude --help`で最新仕様を確認する。特に無人実行（Phase3以降）で全チェックを無効化するようなフラグ（例: `--dangerously-skip-permissions`）を使うのは、意図しない破壊的操作のリスクがあるため避け、ローカル実行は`acceptEdits`（人間が横にいる前提）、GitHub Actions実行は`claude-code-action`側の許可ツールリスト等で制御する方針とする。
