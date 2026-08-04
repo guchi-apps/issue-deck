@@ -377,6 +377,7 @@ export function IssueDeckShell({
           selectedLabels={filters.labels}
           onSelectLabel={(label) => toggleLabel(label.name)}
           onClearLabels={() => setFilter("labels", [])}
+          onSelectLabelPreset={(labels) => setFilter("labels", labels)}
           quickFilters={quickFilters}
           onSelectQuickFilter={handleSelectQuickFilter}
           onDeleteQuickFilter={handleDeleteQuickFilter}
