@@ -1,12 +1,11 @@
 /**
- * リセット時刻までの残り時間を「あと2時間13分」形式にする。
+ * リセット時刻(epoch秒)までの残り時間を「あと2時間13分」形式にする。
  * 解釈できない値の場合はnullを返す。
  */
-export function formatResetCountdown(resetsAt: string, now: number): string | null {
-  const target = Date.parse(resetsAt);
-  if (Number.isNaN(target)) return null;
+export function formatResetCountdown(resetsAtSeconds: number, nowMs: number): string | null {
+  if (!Number.isFinite(resetsAtSeconds)) return null;
 
-  const diffMs = target - now;
+  const diffMs = resetsAtSeconds * 1000 - nowMs;
   if (diffMs <= 0) return "まもなくリセット";
 
   const totalMinutes = Math.ceil(diffMs / 60_000);

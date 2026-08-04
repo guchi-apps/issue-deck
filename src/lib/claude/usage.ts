@@ -1,18 +1,24 @@
-const CLAUDE_OAUTH_API = "https://api.anthropic.com";
-const USAGE_PATH = "/api/oauth/usage";
-
-/** 取得成功時にレスポンスを保持する時間。 */
-const CACHE_TTL_MS = 60_000;
+const ANTHROPIC_API = "https://api.anthropic.com";
+const ANTHROPIC_VERSION = "2023-06-01";
+const OAUTH_BETA = "oauth-2025-04-20";
 
 /**
- * 表示するウィンドウと表示順。キーはレスポンスのプロパティ名。
- * レスポンスに存在しないキーは単に表示されない。
+ * 取得成功時にレスポンスを保持する時間。
+ * 取得自体がわずかにプラン枠を消費するため、GitHub版より長めに取る。
  */
+const CACHE_TTL_MS = 5 * 60_000;
+
+/** ヘッダを得るためだけに送る最小の推論リクエスト。 */
+const PROBE_REQUEST_BODY = JSON.stringify({
+  model: "claude-haiku-4-5",
+  max_tokens: 1,
+  messages: [{ role: "user", content: "ping" }],
+});
+
+/** 表示するウィンドウと表示順。キーはヘッダ名に埋め込まれる略称。 */
 const USAGE_WINDOWS: { key: string; label: string }[] = [
-  { key: "five_hour", label: "5時間" },
-  { key: "seven_day", label: "週間" },
-  { key: "seven_day_opus", label: "週間 (Opus)" },
-  { key: "seven_day_sonnet", label: "週間 (Sonnet)" },
+  { key: "5h", label: "5時間" },
+  { key: "7d", label: "週間" },
 ];
 
 export type ClaudeUsageWindow = {
@@ -22,72 +28,61 @@ export type ClaudeUsageWindow = {
   usedPercent: number;
   /** 上限までの残り(0-100)。 */
   remainingPercent: number;
-  /** リセット時刻(ISO 8601)。取得できなかった場合はnull。 */
-  resetsAt: string | null;
+  /** リセット時刻(epoch秒)。取得できなかった場合はnull。 */
+  resetsAt: number | null;
+  /** `allowed` / `allowed_warning` / `rejected` など。取得できなかった場合はnull。 */
+  status: string | null;
 };
 
 export type ClaudeUsage = {
   windows: ClaudeUsageWindow[];
-  /** 実際にAPIから取得できた時刻(epoch ms)。 */
+  /** 実際に取得できた時刻(epoch ms)。 */
   fetchedAt: number;
   /** レート制限等でキャッシュを返した場合にtrue。 */
   stale: boolean;
-};
-
-type RawUsageWindow = {
-  utilization?: unknown;
-  percent?: unknown;
-  resets_at?: unknown;
-  is_enabled?: unknown;
 };
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
-/**
- * 使用率をパーセント(0-100)に正規化する。
- *
- * `utilization`が比率(0-1)とパーセント(0-100)のどちらで返るかは実レスポンスで未確認のため、
- * 1以下なら比率とみなして100倍する。`percent`があればそちらを優先する。
- */
-export function toUsedPercent(raw: RawUsageWindow): number | null {
-  if (typeof raw.percent === "number" && Number.isFinite(raw.percent)) {
-    return clampPercent(raw.percent);
-  }
-  if (typeof raw.utilization === "number" && Number.isFinite(raw.utilization)) {
-    return clampPercent(raw.utilization <= 1 ? raw.utilization * 100 : raw.utilization);
-  }
-  return null;
+function readNumberHeader(headers: Headers, name: string): number | null {
+  // headers.get()は未設定時にnullを返し、Number(null)は0になってしまうため
+  // 存在チェックを先に行う。
+  const raw = headers.get(name);
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 /**
- * `/api/oauth/usage`のレスポンスから表示対象のウィンドウを取り出す。
- * 非公開エンドポイントのため、想定外の形でも例外を投げず取れたものだけを返す。
+ * `anthropic-ratelimit-unified-*` ヘッダからプラン枠の使用状況を取り出す。
+ * ヘッダは公開APIとして文書化されていないため、欠けていても例外を投げず
+ * 取れたウィンドウだけを返す。
  */
-export function parseClaudeUsage(payload: unknown): ClaudeUsageWindow[] {
-  if (typeof payload !== "object" || payload === null) return [];
-  const record = payload as Record<string, unknown>;
-
+export function parseUnifiedRateLimitHeaders(headers: Headers): ClaudeUsageWindow[] {
   const windows: ClaudeUsageWindow[] = [];
+
   for (const { key, label } of USAGE_WINDOWS) {
-    const raw = record[key];
-    if (typeof raw !== "object" || raw === null) continue;
+    // utilizationは0-1の比率で返る（例: 0.07 は7%）。
+    const utilization = readNumberHeader(
+      headers,
+      `anthropic-ratelimit-unified-${key}-utilization`,
+    );
+    if (utilization === null) continue;
 
-    const rawWindow = raw as RawUsageWindow;
-    if (rawWindow.is_enabled === false) continue;
-
-    const usedPercent = toUsedPercent(rawWindow);
-    if (usedPercent === null) continue;
-
+    const usedPercent = clampPercent(utilization * 100);
     windows.push({
       key,
       label,
       usedPercent,
       remainingPercent: 100 - usedPercent,
-      resetsAt: typeof rawWindow.resets_at === "string" ? rawWindow.resets_at : null,
+      // resetはepoch秒。
+      resetsAt: readNumberHeader(headers, `anthropic-ratelimit-unified-${key}-reset`),
+      status: headers.get(`anthropic-ratelimit-unified-${key}-status`),
     });
   }
+
   return windows;
 }
 
@@ -108,9 +103,12 @@ function staleOrThrow(message: string): ClaudeUsage {
 /**
  * Claudeプランの使用量(5時間枠・週次枠)を取得する。
  *
- * このエンドポイントはレート制限が厳しく、Claude Code自身も制限時は直近のキャッシュを
- * 表示する設計になっている。同じ挙動に倣い、取得できない場合は最後に成功した値を
- * stale扱いで返す。
+ * 専用エンドポイント`/api/oauth/usage`にも同じ情報があるが、そちらは`user:profile`
+ * スコープを要求する。`claude setup-token`で発行できるトークンは`user:inference`のみ
+ * のため到達できない。代わりに最小の推論リクエストを送り、レスポンスヘッダから読み取る。
+ * `count_tokens`ではこのヘッダが付かないため`/v1/messages`を使う。
+ *
+ * 取得のたびにわずかにプラン枠を消費するので、必ずキャッシュを介して呼ぶこと。
  */
 export async function fetchClaudeUsage(token: string): Promise<ClaudeUsage> {
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
@@ -119,22 +117,28 @@ export async function fetchClaudeUsage(token: string): Promise<ClaudeUsage> {
 
   let res: Response;
   try {
-    res = await fetch(`${CLAUDE_OAUTH_API}${USAGE_PATH}`, {
+    res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        Accept: "application/json",
+        "anthropic-beta": OAUTH_BETA,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
       },
+      body: PROBE_REQUEST_BODY,
       cache: "no-store",
     });
   } catch (cause) {
     return staleOrThrow(cause instanceof Error ? cause.message : String(cause));
   }
 
-  if (!res.ok) {
+  // 上限に達して429が返る場合でもレート制限ヘッダは付くため、
+  // ステータスコードに関わらずヘッダを読む。
+  const windows = parseUnifiedRateLimitHeaders(res.headers);
+  if (windows.length === 0) {
     return staleOrThrow(`Claudeの使用量を取得できませんでした (${res.status})`);
   }
 
-  const windows = parseClaudeUsage(await res.json());
   cache = { windows, fetchedAt: Date.now() };
   return { windows, fetchedAt: cache.fetchedAt, stale: false };
 }

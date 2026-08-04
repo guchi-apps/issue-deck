@@ -1,86 +1,107 @@
 import { describe, expect, it } from "vitest";
-import { parseClaudeUsage, toUsedPercent } from "@/lib/claude/usage";
+import { parseUnifiedRateLimitHeaders } from "@/lib/claude/usage";
 
-describe("toUsedPercent", () => {
-  it("percentがあればそれをそのまま使う", () => {
-    expect(toUsedPercent({ percent: 42 })).toBe(42);
+/** 実際の`POST /v1/messages`レスポンスから採取したヘッダ。 */
+function realHeaders(overrides: Record<string, string> = {}): Headers {
+  return new Headers({
+    "anthropic-ratelimit-unified-status": "allowed",
+    "anthropic-ratelimit-unified-5h-status": "allowed",
+    "anthropic-ratelimit-unified-5h-reset": "1785876000",
+    "anthropic-ratelimit-unified-5h-utilization": "0.07",
+    "anthropic-ratelimit-unified-7d-status": "allowed",
+    "anthropic-ratelimit-unified-7d-reset": "1786323600",
+    "anthropic-ratelimit-unified-7d-utilization": "0.09",
+    "anthropic-ratelimit-unified-overage-status": "allowed",
+    "anthropic-ratelimit-unified-overage-utilization": "0.0",
+    "anthropic-ratelimit-unified-representative-claim": "five_hour",
+    "anthropic-ratelimit-unified-reset": "1785876000",
+    ...overrides,
+  });
+}
+
+describe("parseUnifiedRateLimitHeaders", () => {
+  it("実レスポンスから5時間枠と週次枠を表示順に取り出す", () => {
+    const windows = parseUnifiedRateLimitHeaders(realHeaders());
+
+    expect(windows.map((w) => w.key)).toEqual(["5h", "7d"]);
+    expect(windows[0].label).toBe("5時間");
+    expect(windows[0].resetsAt).toBe(1785876000);
+    expect(windows[0].status).toBe("allowed");
+    expect(windows[1].label).toBe("週間");
+    expect(windows[1].resetsAt).toBe(1786323600);
   });
 
-  it("percentを優先し、utilizationは無視する", () => {
-    expect(toUsedPercent({ percent: 42, utilization: 0.9 })).toBe(42);
+  it("utilizationを比率(0-1)として扱いパーセントに変換する", () => {
+    const windows = parseUnifiedRateLimitHeaders(realHeaders());
+
+    expect(windows[0].usedPercent).toBeCloseTo(7);
+    expect(windows[0].remainingPercent).toBeCloseTo(93);
+    expect(windows[1].usedPercent).toBeCloseTo(9);
+    expect(windows[1].remainingPercent).toBeCloseTo(91);
   });
 
-  it("utilizationが1以下なら比率とみなして100倍する", () => {
-    expect(toUsedPercent({ utilization: 0.37 })).toBeCloseTo(37);
+  it("0%と100%を正しく扱う", () => {
+    const windows = parseUnifiedRateLimitHeaders(
+      realHeaders({
+        "anthropic-ratelimit-unified-5h-utilization": "0.0",
+        "anthropic-ratelimit-unified-7d-utilization": "1",
+      }),
+    );
+
+    expect(windows[0].usedPercent).toBe(0);
+    expect(windows[0].remainingPercent).toBe(100);
+    expect(windows[1].usedPercent).toBe(100);
+    expect(windows[1].remainingPercent).toBe(0);
   });
 
-  it("utilizationが1より大きければパーセントとみなす", () => {
-    expect(toUsedPercent({ utilization: 37 })).toBe(37);
+  it("上限超過で1を超える値が来ても100%に丸める", () => {
+    const windows = parseUnifiedRateLimitHeaders(
+      realHeaders({ "anthropic-ratelimit-unified-5h-utilization": "1.2" }),
+    );
+
+    expect(windows[0].usedPercent).toBe(100);
+    expect(windows[0].remainingPercent).toBe(0);
   });
 
-  it("0-100の範囲に丸める", () => {
-    expect(toUsedPercent({ percent: 120 })).toBe(100);
-    expect(toUsedPercent({ percent: -5 })).toBe(0);
+  it("警告状態のstatusをそのまま保持する", () => {
+    const windows = parseUnifiedRateLimitHeaders(
+      realHeaders({ "anthropic-ratelimit-unified-5h-status": "allowed_warning" }),
+    );
+
+    expect(windows[0].status).toBe("allowed_warning");
   });
 
-  it("数値が無ければnullを返す", () => {
-    expect(toUsedPercent({})).toBeNull();
-    expect(toUsedPercent({ utilization: "0.5" })).toBeNull();
-    expect(toUsedPercent({ percent: Number.NaN })).toBeNull();
-  });
-});
+  it("utilizationが無いウィンドウは除外する", () => {
+    const headers = realHeaders();
+    headers.delete("anthropic-ratelimit-unified-5h-utilization");
 
-describe("parseClaudeUsage", () => {
-  it("5時間枠と週次枠を表示順に取り出す", () => {
-    const windows = parseClaudeUsage({
-      seven_day: { utilization: 0.5, resets_at: "2026-08-10T00:00:00Z" },
-      five_hour: { utilization: 0.25, resets_at: "2026-08-04T18:00:00Z" },
-    });
-
-    expect(windows.map((w) => w.key)).toEqual(["five_hour", "seven_day"]);
-    expect(windows[0]).toEqual({
-      key: "five_hour",
-      label: "5時間",
-      usedPercent: 25,
-      remainingPercent: 75,
-      resetsAt: "2026-08-04T18:00:00Z",
-    });
+    expect(parseUnifiedRateLimitHeaders(headers).map((w) => w.key)).toEqual(["7d"]);
   });
 
-  it("モデル別の週次枠も対象にする", () => {
-    const windows = parseClaudeUsage({
-      seven_day_opus: { utilization: 0.1, resets_at: "2026-08-10T00:00:00Z" },
-      seven_day_sonnet: { utilization: 0.2, resets_at: "2026-08-10T00:00:00Z" },
-    });
+  it("resetやstatusが欠けていても使用率だけ取り出す", () => {
+    const headers = realHeaders();
+    headers.delete("anthropic-ratelimit-unified-5h-reset");
+    headers.delete("anthropic-ratelimit-unified-5h-status");
 
-    expect(windows.map((w) => w.key)).toEqual(["seven_day_opus", "seven_day_sonnet"]);
+    const windows = parseUnifiedRateLimitHeaders(headers);
+    expect(windows[0].resetsAt).toBeNull();
+    expect(windows[0].status).toBeNull();
+    expect(windows[0].usedPercent).toBeCloseTo(7);
   });
 
-  it("is_enabledがfalseのウィンドウは除外する", () => {
-    const windows = parseClaudeUsage({
-      five_hour: { utilization: 0.25, is_enabled: false },
-      seven_day: { utilization: 0.5 },
-    });
+  it("数値として解釈できない値は欠損として扱う", () => {
+    const windows = parseUnifiedRateLimitHeaders(
+      realHeaders({
+        "anthropic-ratelimit-unified-5h-utilization": "unexpected",
+        "anthropic-ratelimit-unified-7d-reset": "unexpected",
+      }),
+    );
 
-    expect(windows.map((w) => w.key)).toEqual(["seven_day"]);
-  });
-
-  it("resets_atが無くても使用率だけ取り出す", () => {
-    const windows = parseClaudeUsage({ five_hour: { utilization: 0.25 } });
-
-    expect(windows).toHaveLength(1);
+    expect(windows.map((w) => w.key)).toEqual(["7d"]);
     expect(windows[0].resetsAt).toBeNull();
   });
 
-  it("想定外の形でも例外を投げず空配列を返す", () => {
-    expect(parseClaudeUsage(null)).toEqual([]);
-    expect(parseClaudeUsage("unexpected")).toEqual([]);
-    expect(parseClaudeUsage({})).toEqual([]);
-    expect(parseClaudeUsage({ five_hour: "unexpected" })).toEqual([]);
-    expect(parseClaudeUsage({ five_hour: {} })).toEqual([]);
-  });
-
-  it("未知のキーは無視する", () => {
-    expect(parseClaudeUsage({ unknown_window: { utilization: 0.5 } })).toEqual([]);
+  it("ヘッダが1つも無ければ空配列を返す", () => {
+    expect(parseUnifiedRateLimitHeaders(new Headers())).toEqual([]);
   });
 });

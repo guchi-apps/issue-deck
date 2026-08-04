@@ -50,7 +50,13 @@ export function ClaudeUsageCard({
               <li key={usageWindow.key} className="rounded-lg border p-2">
                 <div className="mb-1 flex items-center justify-between text-xs">
                   <span className="font-medium">{usageWindow.label}</span>
-                  <span className="text-muted-foreground">
+                  <span
+                    className={
+                      usageWindow.status !== null && usageWindow.status !== "allowed"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }
+                  >
                     残り {Math.round(usageWindow.remainingPercent)}%
                   </span>
                 </div>
