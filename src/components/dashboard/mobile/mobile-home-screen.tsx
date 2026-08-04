@@ -20,6 +20,7 @@ import type { QuickFilter } from "@/types/quick-filter";
 type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
+  labelFilterPresetCounts: Record<string, number>;
   onSelectQuickView: (view: NavViewId) => void;
   onSelectLabelPreset: (preset: LabelFilterPreset) => void;
   quickFilters: QuickFilter[];
@@ -40,6 +41,7 @@ const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
 export function MobileHomeScreen({
   overviewStats,
   navCounts,
+  labelFilterPresetCounts,
   onSelectQuickView,
   onSelectLabelPreset,
   quickFilters,
@@ -79,10 +81,15 @@ export function MobileHomeScreen({
                   <button
                     type="button"
                     onClick={() => onSelectLabelPreset(preset)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className="flex w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
-                    <Icon className="size-3.5 text-muted-foreground" />
-                    {preset.label}
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      {preset.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {labelFilterPresetCounts[preset.key]}
+                    </span>
                   </button>
                 </li>
               );
