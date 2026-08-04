@@ -149,6 +149,10 @@ jobs:
           # 後続の「バージョンをbumpして...」ステップの素のgit pushがWORKFLOW_PATの認証情報を
           # 使えるよう、claude-issue-dispatch.ymlの実装ステップと同じくWORKFLOW_PATを明示する。
           github_token: ${{ secrets.WORKFLOW_PAT }}
+          # 本ワークフローはissue-deckアプリ（GitHub App = issue-deck[bot]）からの
+          # workflow_dispatchでも起動されるため、非人間アクター起点の実行を明示的に許可する
+          # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
+          allowed_bots: "issue-deck[bot],claude[bot]"
           claude_args: |
             --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"}},"required":["bump_kind","reason"]}'
