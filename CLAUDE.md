@@ -57,6 +57,8 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 - 大規模な依存関係の更新
 - `develop`→`main`のマージ
 
+上記カテゴリに該当するかどうかによらず、Issueに`24.merge-confirm-required`ラベルが付いている場合も、develop向けPRへのpushのたびに常に`00.check-user`が付与され自動マージがスキップされる（詳細はdocs/multi-agent-workflow.md「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
+
 ### PR本文テンプレート
 
 `develop`宛のPRには以下を記載する。

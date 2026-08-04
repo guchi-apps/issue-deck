@@ -5,8 +5,9 @@ name: Claude Code Review (develop向けPR)
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
-# - risk-check: パスパターンによる機械的リスク判定。該当時は00.check-userを付与し、
-#   判定理由をissueにコメント投稿する(#94)
+# - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
+#   24.merge-confirm-requiredラベル付与の有無を確認する。該当時は00.check-userを
+#   付与し、判定理由をissueにコメント投稿する(#94, #366)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
 #   マージやラベル状態遷移(03.d:marge等)は行わない
@@ -119,12 +120,19 @@ jobs:
             fi
           fi
 
+          if [ -n "$ISSUE_NUMBER" ]; then
+            ISSUE_LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+            if echo "$ISSUE_LABELS" | grep -qx "24.merge-confirm-required"; then
+              add_reason "Issueに \`24.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
+          fi
+
           if [ "$RISKY" = "true" ]; then
             echo "リスクありと判定:"
             echo "$REASONS"
             if [ -n "$ISSUE_NUMBER" ]; then
               gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-              COMMENT_BODY="⚠️ 以下の変更が含まれるため、自動マージ不可カテゴリに該当すると判定しました。マージ前に人間の確認をお願いします。"
+              COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前に人間の確認が必要と判定しました。"
               COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
               gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
             fi
