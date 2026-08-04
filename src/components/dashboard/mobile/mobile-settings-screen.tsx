@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 
+import packageJson from "../../../../package.json";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -84,6 +85,10 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
           <LogOut />
           ログアウト
         </Button>
+
+        <p className="text-center text-xs text-muted-foreground">
+          Issue Deck v{packageJson.version}
+        </p>
       </div>
 
       <ProfileDialog

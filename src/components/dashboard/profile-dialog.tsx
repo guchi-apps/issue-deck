@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 
-import packageJson from "../../../package.json";
 import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
@@ -49,10 +48,6 @@ export function ProfileDialog({ currentUser, open, onOpenChange }: ProfileDialog
             <Trash2 />
             アカウントを削除
           </Button>
-
-          <p className="text-center text-xs text-muted-foreground">
-            Issue Deck v{packageJson.version}
-          </p>
         </DialogContent>
       </Dialog>
 
