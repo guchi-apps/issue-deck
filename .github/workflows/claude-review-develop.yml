@@ -15,7 +15,7 @@ name: Claude Code Review (develop向けPR)
 #   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
 #   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
 # - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
-#   付いていなければ gh pr merge --auto --squash を実行する
+#   付いていなければ gh pr merge --auto --merge を実行する
 # - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
 #   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
@@ -259,7 +259,7 @@ jobs:
           fi
 
           echo "自動マージ不可カテゴリに該当しないため、auto-mergeを有効化します。"
-          gh pr merge "$PR_NUMBER" --auto --squash
+          gh pr merge "$PR_NUMBER" --auto --merge
 
   auto-merge-fallback:
     needs: [identify-issue, auto-merge]
