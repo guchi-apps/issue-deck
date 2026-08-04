@@ -112,9 +112,9 @@ export function MobileReposScreen({
                       className="shrink-0 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                       {repo.hidden ? (
-                        <Eye className="size-4" />
-                      ) : (
                         <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
                       )}
                     </button>
                   </li>
