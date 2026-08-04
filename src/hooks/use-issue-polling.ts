@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 import type { Issue } from "@/types/issue";
 
-const POLL_INTERVAL_MS = 20_000;
+const POLL_INTERVAL_MS = 10_000;
 
 export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
   const onIssuesRef = useRef(onIssues);
@@ -29,9 +29,18 @@ export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
     }
 
     const intervalId = setInterval(poll, POLL_INTERVAL_MS);
+
+    function handleVisibilityChange() {
+      // バックグラウンドタブでは`poll`がno-opのままインターバルだけ進むため、
+      // 復帰時に次の周期を待たず即座に最新状態を取得する
+      if (!document.hidden) poll();
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
       clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 }
