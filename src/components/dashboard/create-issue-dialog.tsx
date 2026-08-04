@@ -266,7 +266,7 @@ export function CreateIssueDialog({
               キャンセル
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={handleCreateAndStart}
               disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
             >
