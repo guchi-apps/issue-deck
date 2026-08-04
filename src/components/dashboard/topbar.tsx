@@ -36,6 +36,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
@@ -45,6 +52,7 @@ import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type TopBarProps = {
@@ -54,6 +62,7 @@ type TopBarProps = {
   assigneeOptions: string[];
   onCreateIssue: () => void;
   selectedRepoFullName: string | null;
+  repositories: ConnectedRepository[];
 };
 
 export function TopBar({
@@ -63,12 +72,18 @@ export function TopBar({
   assigneeOptions,
   onCreateIssue,
   selectedRepoFullName,
+  repositories,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
+  // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
+  const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
+    selectedRepoFullName ?? repositories[0]?.fullName ?? null,
+  );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
   const {
@@ -83,7 +98,7 @@ export function TopBar({
     error: releaseStatusError,
     triggerRelease,
     isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(selectedRepoFullName, accountMenuOpen);
+  } = useReleaseStatus(releaseRepoFullName, accountMenuOpen);
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -195,7 +210,19 @@ export function TopBar({
         新規Issue
       </Button>
 
-      <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+      <DropdownMenu
+        open={accountMenuOpen}
+        onOpenChange={(open) => {
+          setAccountMenuOpen(open);
+          if (open) {
+            setReleaseRepoFullName((prev) =>
+              prev && repositories.some((repo) => repo.fullName === prev)
+                ? prev
+                : (selectedRepoFullName ?? repositories[0]?.fullName ?? null),
+            );
+          }
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button type="button" className="flex items-center gap-1 rounded-md p-1 hover:bg-accent">
             <UserAvatar
@@ -246,11 +273,26 @@ export function TopBar({
             {isSyncing ? "再同期中..." : "今すぐ再同期"}
           </DropdownMenuItem>
 
-          {selectedRepoFullName && (
+          {repositories.length > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel>リリース（{selectedRepoFullName}）</DropdownMenuLabel>
+              <DropdownMenuLabel>リリース</DropdownMenuLabel>
               <div className="px-1.5 pb-1.5">
+                <Select
+                  value={releaseRepoFullName ?? undefined}
+                  onValueChange={setReleaseRepoFullName}
+                >
+                  <SelectTrigger className="mb-2 w-full text-xs" size="sm">
+                    <SelectValue placeholder="リポジトリを選択" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {repositories.map((repo) => (
+                      <SelectItem key={repo.id} value={repo.fullName}>
+                        {repo.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {releaseStatusLoading && (
                   <p className="text-xs text-muted-foreground">読み込み中...</p>
                 )}
