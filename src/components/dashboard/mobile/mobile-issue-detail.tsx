@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   Archive,
@@ -29,6 +29,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
+import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
@@ -110,6 +111,8 @@ export function MobileIssueDetail({
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isImageUploading, setIsImageUploading] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastCommentRef = useRef<HTMLLIElement>(null);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
@@ -424,7 +427,7 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
+      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}
@@ -576,6 +579,7 @@ export function MobileIssueDetail({
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
+            lastCommentRef={lastCommentRef}
           />
 
           <div className="mt-4 flex flex-col gap-2">
@@ -619,6 +623,13 @@ export function MobileIssueDetail({
           </div>
         </div>
       </div>
+
+      <ScrollToLatestCommentButton
+        containerRef={scrollContainerRef}
+        targetRef={lastCommentRef}
+        visible={comments.length > 0}
+        className="left-4 bottom-4"
+      />
 
       <button
         type="button"
