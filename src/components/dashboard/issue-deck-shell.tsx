@@ -175,6 +175,13 @@ export function IssueDeckShell({
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
+  // Issue作成ダイアログのリポジトリ選択肢は、サイドメニューで非表示にしたリポジトリを
+  // 除いたもの（メニューに表示中のリポジトリ一覧）に揃える（#367）。
+  const visibleRepositories = useMemo(
+    () => repositories.filter((repo) => !repo.hidden),
+    [repositories],
+  );
+
   function handleSelectView(view: NavViewId) {
     setFilter("view", view);
     setSelectedIssue(null);
@@ -415,7 +422,7 @@ export function IssueDeckShell({
       <CreateIssueDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
-        repositories={repositories}
+        repositories={visibleRepositories}
         defaultRepositoryFullName={createDialogRepo}
         defaultBody={createDialogBody}
         issues={issues}
