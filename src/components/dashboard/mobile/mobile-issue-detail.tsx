@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  Bot,
   CircleAlert,
   FilePlus2,
   FolderGit2,
@@ -62,6 +63,7 @@ import {
   requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
 import { canAskClaude } from "@/lib/github/ask-claude";
+import { buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -357,6 +359,14 @@ export function MobileIssueDetail({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {issue.state === "open" && (
+              <DropdownMenuItem asChild>
+                <a href={buildClaudeAppUrl(issue)} target="_blank" rel="noreferrer">
+                  <Bot />
+                  Claudeアプリで開く
+                </a>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
               <FilePlus2 />
               引き継いでIssueを作成
