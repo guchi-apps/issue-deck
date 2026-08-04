@@ -4,15 +4,14 @@ import { useState } from "react";
 import {
   ChevronDown,
   LayoutDashboard,
-  type LucideIcon,
-  PlayCircle,
   Plus,
   RefreshCw,
   Rocket,
   Search,
-  UserCheck,
 } from "lucide-react";
 
+import packageJson from "../../../package.json";
+import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
@@ -30,19 +29,13 @@ import { Input } from "@/components/ui/input";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
-import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
-
-const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
-  "check-user": UserCheck,
-  "in-progress": PlayCircle,
-  "release-pending": Rocket,
-};
 
 type TopBarProps = {
   currentUser: CurrentUser | null;
@@ -67,6 +60,12 @@ export function TopBar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
+  const {
+    data: claudeUsage,
+    isLoading: claudeUsageLoading,
+    error: claudeUsageError,
+    notConfigured: claudeUsageNotConfigured,
+  } = useClaudeUsage(accountMenuOpen);
   const {
     data: releaseStatus,
     isLoading: releaseStatusLoading,
@@ -137,24 +136,6 @@ export function TopBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {LABEL_FILTER_PRESETS.map((preset) => {
-          const active = isLabelFilterPresetActive(filters.labels, preset);
-          const Icon = LABEL_FILTER_PRESET_ICONS[preset.key];
-          return (
-            <Button
-              key={preset.key}
-              variant={active ? "secondary" : "outline"}
-              size="sm"
-              className="text-xs"
-              aria-pressed={active}
-              onClick={() => setFilter("labels", active ? [] : preset.labels)}
-            >
-              <Icon className="size-3" />
-              {preset.label}
-            </Button>
-          );
-        })}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -233,6 +214,16 @@ export function TopBar({
             />
           </div>
           <DropdownMenuSeparator />
+          <DropdownMenuLabel>Claudeプラン使用量</DropdownMenuLabel>
+          <div className="px-1.5 pb-1.5">
+            <ClaudeUsageCard
+              data={claudeUsage}
+              isLoading={claudeUsageLoading}
+              error={claudeUsageError}
+              notConfigured={claudeUsageNotConfigured}
+            />
+          </div>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={isSyncing}
             onSelect={(e) => {
@@ -307,6 +298,9 @@ export function TopBar({
           <DropdownMenuItem variant="destructive" onClick={handleLogout}>
             ログアウト
           </DropdownMenuItem>
+          <p className="pt-1 text-center text-xs text-muted-foreground">
+            Issue Deck v{packageJson.version}
+          </p>
         </DropdownMenuContent>
       </DropdownMenu>
 

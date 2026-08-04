@@ -58,9 +58,14 @@ export function StartImplementationDialog({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const [options, setOptions] = useState(START_IMPLEMENTATION_DEFAULT_OPTIONS);
-  const { updateIssue, isSubmitting: isUpdatingIssue } = useIssueMutations();
-  const { createComment, isSubmitting: isCreatingComment } = useIssueCommentMutations();
+  const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
+  const {
+    createComment,
+    isSubmitting: isCreatingComment,
+    error: commentMutationError,
+  } = useIssueCommentMutations();
   const isSubmitting = isUpdatingIssue || isCreatingComment;
+  const error = labelMutationError ?? commentMutationError;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
   // 巻き戻さないよう、下のuseEffectの依存配列には含めずrefで最新値だけ参照する。
   const issueLabelsRef = useRef(issue.labels);
@@ -144,6 +149,7 @@ export function StartImplementationDialog({
             </div>
           ))}
         </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={isSubmitting}>

@@ -18,6 +18,14 @@
 # 撮影対象パスの既定値は/dashboard。"/"はCIバイパスCookie使用時、
 # src/lib/supabase/middleware.tsの挙動によりログイン画面へ遷移してしまうため
 # ダッシュボードを直接指定している。
+#
+# Issue #308: 起動待ちのヘルスチェックcurlがCIバイパスCookie無しでリクエストしていたため、
+# src/lib/supabase/middleware.tsがバイパス判定前にSupabaseクライアントを生成しようとし、
+# 実際のSupabaseプロジェクト（NEXT_PUBLIC_SUPABASE_URL等）が未設定の環境では
+# 「Your project's URL and Key are required to create a Supabase client!」で落ちていた(#299)。
+# ヘルスチェックにもPlaywright撮影と同じCIバイパスCookieを付与し、Supabase自体を
+# 経由しないようにする。NEXT_PUBLIC_SUPABASE_URL等のプレースホルダーは、CIバイパス対象外の
+# パスに迷い込んだ場合の保険として.github/workflows/ci.ymlと同じ値を設定しておく。
 
 set -euo pipefail
 
@@ -34,6 +42,13 @@ PORT="${PORT:-3100}"
 BASE_URL="http://127.0.0.1:${PORT}"
 export DATABASE_URL="${DATABASE_URL:-mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck}"
 export CI_LOGIN_BYPASS_SECRET="${CI_LOGIN_BYPASS_SECRET:-ci-screenshot-bypass-secret}"
+export NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://ci-placeholder.supabase.co}"
+export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-ci-placeholder}"
+
+# src/lib/ci-auth-bypass.tsのCI_BYPASS_COOKIE_NAMEと必ず一致させること
+# （scripts/capture-screenshots.mjsと同じ理由で、シェルスクリプトからTSの値を
+# 直接importできないため直書きしている）。
+CI_BYPASS_COOKIE_NAME="ci-login-bypass"
 
 OUT_DIR="$(mktemp -d)"
 LOG_FILE="$(mktemp)"
@@ -54,7 +69,7 @@ DEV_PID=$!
 echo "開発サーバーの起動を待機します（${BASE_URL}${TARGET_PATH}）..." >&2
 READY=false
 for _ in $(seq 1 60); do
-  if curl --silent --fail --output /dev/null "${BASE_URL}${TARGET_PATH}"; then
+  if curl --silent --fail --output /dev/null --cookie "${CI_BYPASS_COOKIE_NAME}=${CI_LOGIN_BYPASS_SECRET}" "${BASE_URL}${TARGET_PATH}"; then
     READY=true
     break
   fi

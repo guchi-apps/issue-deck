@@ -123,6 +123,28 @@ PRオープン・マージという確実なイベントに紐づけて通知し
   - **ラベルなし（デフォルト）**: スクリーンショットの自動取得は行わない。
   - **ラベルあり**: PRを作成する**前**に、実装エージェントが`run`スキル等を使って開発サーバー上で変更箇所のスクリーンショットを取得してユーザーに提示し、明示的な承認を得てからPRを作成する（承認の得方は上記`22.preview-required`と同じ）。Playwright等の新規依存関係の追加が必要な場合は、追加前に必ずユーザーに確認する（依存関係の追加はCLAUDE.mdの方針により無断で行えないため）。
 
+## developへのマージ前確認要否をIssueラベルでトグルする（#366）
+
+「自動マージ可否の判定方法」（後述）は、変更内容（パスパターン・依存関係の変更内容）に基づく
+機械的・意味的判定のみで自動マージ可否を決めており、Issue単位で「この変更は内容によらず必ず
+人間の確認を経てからマージしたい」と明示的に指定する手段が無かった。これをIssueラベルで
+トグルできるようにする。
+
+- ラベル `24.merge-confirm-required` の有無で分岐する。
+  - **ラベルなし（デフォルト）**: 従来どおり、`risk-check`（機械的判定）・`claude-review`
+    （意味的判定）の結果のみで自動マージ可否を判断する。
+  - **ラベルあり**: 対応Issueに付いている限り、develop向けPRへのpushのたびに`risk-check`
+    ジョブが判定し、変更内容によらず常に`00.check-user`を付与して自動マージをスキップする
+    （詳細は「自動マージ可否の判定方法」参照）。他の`21.plan-required`等と異なり、実装
+    エージェントの挙動（Plan mode・画面確認等）を分岐させるものではなく、レビュー・統合側の
+    自動マージ判定にのみ影響する。
+  - 一度きりの`00.check-user`の手動付与と異なり、PRが複数回pushされる場合（追加修正・
+    コンフリクト解消の自動push等）でも、そのPRが存在する間はIssueにラベルを付けたままにして
+    おけば毎回のpushで確実に確認ゲートがかかる。
+  - 「実装を開始」ダイアログのチェックボックス（`src/lib/github/start-implementation.ts`の
+    `START_IMPLEMENTATION_OPTIONS`）にも「マージ前に確認が必要」として追加済みで、`21.plan-required`
+    等と同様にダイアログから選択して付与できる（#366）。
+
 ## エージェントの役割
 
 ### 実装エージェント
@@ -188,7 +210,8 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
 - **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
-- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --squash`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
+- **明示的指定（`risk-check`ジョブ、`24.merge-confirm-required`ラベル）**: 変更内容によらず、対応Issueに`24.merge-confirm-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366）。
+- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
 
 ## 段階的導入計画
@@ -217,6 +240,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
 - GitHubラベル`22.preview-required`・`23.screenshot-required`の新規作成
+- GitHubラベル`24.merge-confirm-required`の新規作成（#366、作成済み）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
@@ -523,6 +547,55 @@ required`は依然、無人実行環境から到達可能なプレビューURL�
 を`23.screenshot-required`の有無によらず毎回実行していたが、撮影しないissueでは完全に無駄な
 処理のため、chromiumダウンロード（数分かかる）と同様にstate stepが出力する
 `screenshot_required`が`true`の場合のみ実行するよう変更した（#319）。
+
+## PRコンフリクトの自動解消（#315）
+
+develop向けPRがdevelopとの間でコンフリクトした場合、これまでは人間がIssueに`@claude`コメントで
+個別にコンフリクト解消を依頼する必要があった。`.github/workflows/claude-conflict-resolve.yml`が
+この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を試みる。
+
+### ジョブ構成
+
+- **detect-conflicts**: `gh pr list --base develop --state open --json number,headRefName,mergeable`で
+  develop向けの全OPEN PRを取得し、ブランチ命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）に
+  従い、かつ`mergeable`が`CONFLICTING`（developとコンフリクト中）のものを対応Issue番号の配列として
+  検出する。
+- **resolve-conflicts**: 検出したIssue番号ごとに`strategy.matrix`で並列実行する。まず対象PRの状態を
+  （detect-conflicts実行時点からのタイムラグを考慮して）再確認したうえで、対応ブランチへ
+  `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを解消してpushする。
+  意味的に矛盾する等、安全に自動解消できないと判断した場合は無理に解消せず`00.check-user`を
+  付与して人間に判断を委ねる。
+
+### トリガー
+
+- `push`（`develop`）: developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、最も速報性が
+  高い経路としてその都度検知する。
+- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push直後の検知時点では
+  まだ計算が終わっておらず`UNKNOWN`のままの場合がある。取りこぼしを拾い直す安全網として、
+  `issue-labels.yml`の各scheduleジョブと同じ間隔で走査する。
+- `workflow_dispatch`: 手動実行用。
+
+### 既存の実装ワークフローとの競合回避
+
+`resolve-conflicts`ジョブは、`claude-issue-dispatch.yml`の`dispatch`ジョブと同じconcurrencyグループ
+（`issue-dispatch-<Issue番号>`）を使う。同じ`issue-<番号>`ブランチへ、人間からの追加依頼
+（`@claude`コメント）による実装ステップと本ワークフローのコンフリクト解消が同時に走ってpushが
+競合するのを避けるため。
+
+コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
+push全般をトリガーに無条件で`01.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
+issueに`01.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`01.wip`を
+除去する。
+
+### 解消方針
+
+リベースではなく`git merge origin/develop`によるマージを使う（force pushは禁止のため）。
+コンフリクトしたファイルは、そのPRが実装した変更の意図とdevelopの最新変更の両方を踏まえて
+Claude Codeが読解し、片方を機械的に採用するのではなく両立するように解消する。解消後は
+`pnpm test`（lint・typecheck）・`pnpm build:ci`を実行して問題がないことを確認してからコミット・
+pushする。`pnpm build:ci`に必要な環境変数は、実装ステップの画面確認用DBセットアップとは異なり
+実際のDB接続を必要としないため、`.github/workflows/ci.yml`のbuildステップと同じプレースホルダー値を
+Claude Codeステップの`env`にそのまま設定している（MySQLサービスコンテナは使わない）。
 
 ## 未解決の課題・申し送り事項
 

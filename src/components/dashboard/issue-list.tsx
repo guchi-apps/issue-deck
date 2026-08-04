@@ -85,12 +85,18 @@ export function IssueList({
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
+  const listRef = useRef<HTMLUListElement>(null);
 
   // 一覧が再マウントされた直後（Issue詳細から戻ってきた等）に、直前まで表示していた
   // Issue行が見えるようスクロールする。以降の選択変更では追従しない（空配列deps）。
+  // scrollIntoView()は祖先のoverflow-hiddenコンテナ（ヘッダー等を含む）まで巻き込んで
+  // スクロールさせてしまうため使わず、<ul>自身のscrollTopのみを直接操作する。
   useEffect(() => {
     if (!selectedIssueId) return;
-    itemRefs.current.get(selectedIssueId)?.scrollIntoView({ block: "center" });
+    const list = listRef.current;
+    const target = itemRefs.current.get(selectedIssueId);
+    if (!list || !target) return;
+    list.scrollTop = target.offsetTop - list.clientHeight / 2 + target.clientHeight / 2;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -117,7 +123,7 @@ export function IssueList({
           該当するIssueがありません
         </div>
       ) : (
-        <ul className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
+        <ul ref={listRef} className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
           {issues.map((issue) => (
             <li
               key={issue.id}

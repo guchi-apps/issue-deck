@@ -7,12 +7,17 @@ import {
   EyeOff,
   FolderGit2,
   Lock,
+  PlayCircle,
   Plus,
+  Rocket,
   Settings2,
   SlidersHorizontal,
+  UserCheck,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
+import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { navViewIcons, navViews } from "@/lib/nav-views";
@@ -21,6 +26,12 @@ import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import { cn } from "@/lib/utils";
+
+const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
+  "check-user": UserCheck,
+  "in-progress": PlayCircle,
+  "release-pending": Rocket,
+};
 
 type SidebarNavProps = {
   activeView: NavViewId;
@@ -35,6 +46,7 @@ type SidebarNavProps = {
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
   onClearLabels?: () => void;
+  onSelectLabelPreset?: (labels: string[]) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
@@ -55,6 +67,7 @@ export function SidebarNav({
   selectedLabels = [],
   onSelectLabel,
   onClearLabels,
+  onSelectLabelPreset,
   quickFilters,
   onSelectQuickFilter,
   onDeleteQuickFilter,
@@ -91,6 +104,26 @@ export function SidebarNav({
                     {view.label}
                   </span>
                   <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                </button>
+              </li>
+            );
+          })}
+          {LABEL_FILTER_PRESETS.map((preset) => {
+            const active = isLabelFilterPresetActive(selectedLabels, preset);
+            const Icon = LABEL_FILTER_PRESET_ICONS[preset.key];
+            return (
+              <li key={preset.key}>
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onSelectLabelPreset?.(active ? [] : preset.labels)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                    active && "bg-accent font-medium",
+                  )}
+                >
+                  <Icon className="size-3.5 text-muted-foreground" />
+                  {preset.label}
                 </button>
               </li>
             );

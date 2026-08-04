@@ -26,7 +26,7 @@
    - 該当理由をPRコメントに記載する
    - 次のPRの処理に進む
 5. 非該当の場合
-   - `gh pr merge <PR番号> --squash --delete-branch` でdevelopへマージする
+   - `gh pr merge <PR番号> --merge --delete-branch` でdevelopへマージする
    - マージ後、`git checkout develop && git pull --ff-only` してから `pnpm lint && pnpm typecheck` を再実行し、問題ないことを確認する
    - 対応Issueのラベルを `03.d:marge` → `05.develop` に付け替える。issueはcloseしない（closeするのは`09.main`＝mainへのマージ完了時点のため）。なおGitHub Actions（`.github/workflows/issue-labels.yml`）がPRマージをトリガーに同じ遷移を安全網として自動でも行うため、万一付け忘れても後で是正される（ただし手動での付け替えは引き続き必須）
    - developへのマージではissueを自動クローズしない運用のため、PR本文には`closes #番号`/`fixes #番号`は使わない（実装エージェント側のルール）。念のため対応Issueが誤って自動クローズされていないか確認し、closeされていたら`gh issue reopen <番号>`する

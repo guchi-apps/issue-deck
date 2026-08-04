@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,10 +28,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
+import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
 
 type CommentThreadProps = {
@@ -313,103 +316,129 @@ export function CommentThread({
   return (
     <>
       <ul className="flex flex-col gap-4">
-        {comments.map((comment, index) => (
-          <li key={comment.id} className="flex gap-2">
-            <UserAvatar login={comment.author.login} className="mt-0.5 size-7 shrink-0" />
-            <div className="min-w-0 flex-1 rounded-lg border p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="font-medium">{comment.author.login}</span>
-                  <span className="text-xs text-muted-foreground">{comment.createdAtLabel}</span>
-                </div>
-                {isBotComment(comment.author.login) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button type="button" aria-label="コメントの操作メニュー">
-                        <MoreHorizontal className="size-4 text-muted-foreground" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => startEdit(comment)}>
-                        <Pencil />
-                        編集
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => setDeletingId(comment.id)}
+        {comments.map((comment, index) => {
+          const isQuestion = isAskClaudeQuestionComment(comment);
+          const isAnswer = isQaAnswerComment(comment);
+          return (
+            <li key={comment.id} className="flex gap-2">
+              <UserAvatar login={comment.author.login} className="mt-0.5 size-7 shrink-0" />
+              <div
+                className={cn(
+                  "min-w-0 flex-1 rounded-lg border p-3",
+                  isQuestion && "border-blue-500/40 bg-blue-500/5",
+                  isAnswer && "border-violet-500/40 bg-violet-500/5",
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">{comment.author.login}</span>
+                    <span className="text-xs text-muted-foreground">{comment.createdAtLabel}</span>
+                    {isQuestion && (
+                      <Badge
+                        variant="outline"
+                        className="border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400"
                       >
-                        <Trash2 />
-                        削除
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        質問
+                      </Badge>
+                    )}
+                    {isAnswer && (
+                      <Badge
+                        variant="outline"
+                        className="border-violet-500/40 bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                      >
+                        回答
+                      </Badge>
+                    )}
+                  </div>
+                  {isBotComment(comment.author.login) && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" aria-label="コメントの操作メニュー">
+                          <MoreHorizontal className="size-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => startEdit(comment)}>
+                          <Pencil />
+                          編集
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => setDeletingId(comment.id)}
+                        >
+                          <Trash2 />
+                          削除
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                {editingId === comment.id ? (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <MentionTextarea
+                      className="min-h-20"
+                      value={editBody}
+                      onChange={setEditBody}
+                      issueSuggestions={issueSuggestions}
+                      disabled={isUpdating}
+                      onUploadingChange={setIsImageUploading}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
+                          e.preventDefault();
+                          saveEdit(comment.id);
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
+                        キャンセル
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => saveEdit(comment.id)}
+                        disabled={!editBody.trim() || isUpdating || isImageUploading}
+                      >
+                        {isUpdating && <Loader2 className="animate-spin" />}
+                        {isUpdating ? "保存中..." : "保存"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <MarkdownBody
+                      content={comment.body}
+                      className="mt-1"
+                      repositoryFullName={repositoryFullName}
+                    />
+                    {comment.reactionCount > 0 && (
+                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                        <ThumbsUp className="size-3" />
+                        {comment.reactionCount}
+                      </span>
+                    )}
+                  </>
+                )}
+                {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
+                  <ApprovalActions
+                    onApprove={onApprove}
+                    onReject={onReject}
+                    onWithdraw={onWithdraw}
+                    onRequestContinuation={onRequestContinuation}
+                    isApproving={isApproving}
+                    isRejecting={isRejecting}
+                    isWithdrawing={isWithdrawing}
+                    isRequestingContinuation={isRequestingContinuation}
+                    isFallbackNotice={isFallbackNotice}
+                    mergeApprovalPending={mergeApprovalPending}
+                    pullRequestLink={pullRequestLink}
+                    pullRequestCiStatus={pullRequestCiStatus}
+                  />
                 )}
               </div>
-              {editingId === comment.id ? (
-                <div className="mt-2 flex flex-col gap-2">
-                  <MentionTextarea
-                    className="min-h-20"
-                    value={editBody}
-                    onChange={setEditBody}
-                    issueSuggestions={issueSuggestions}
-                    disabled={isUpdating}
-                    onUploadingChange={setIsImageUploading}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
-                        e.preventDefault();
-                        saveEdit(comment.id);
-                      }
-                    }}
-                    autoFocus
-                  />
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
-                      キャンセル
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => saveEdit(comment.id)}
-                      disabled={!editBody.trim() || isUpdating || isImageUploading}
-                    >
-                      {isUpdating && <Loader2 className="animate-spin" />}
-                      {isUpdating ? "保存中..." : "保存"}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <MarkdownBody
-                    content={comment.body}
-                    className="mt-1"
-                    repositoryFullName={repositoryFullName}
-                  />
-                  {comment.reactionCount > 0 && (
-                    <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-                      <ThumbsUp className="size-3" />
-                      {comment.reactionCount}
-                    </span>
-                  )}
-                </>
-              )}
-              {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
-                <ApprovalActions
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onWithdraw={onWithdraw}
-                  onRequestContinuation={onRequestContinuation}
-                  isApproving={isApproving}
-                  isRejecting={isRejecting}
-                  isWithdrawing={isWithdrawing}
-                  isRequestingContinuation={isRequestingContinuation}
-                  isFallbackNotice={isFallbackNotice}
-                  mergeApprovalPending={mergeApprovalPending}
-                  pullRequestLink={pullRequestLink}
-                  pullRequestCiStatus={pullRequestCiStatus}
-                />
-              )}
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
       {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === -1 && (
         <ApprovalActions
