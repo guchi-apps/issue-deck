@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type RefObject, useState } from "react";
 
 import { Ban, Check, Loader2, MoreHorizontal, Pencil, RotateCw, ThumbsUp, Trash2, X } from "lucide-react";
 
@@ -63,6 +63,8 @@ type CommentThreadProps = {
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
+  /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
+  lastCommentRef?: RefObject<HTMLLIElement | null>;
 };
 
 function ApprovalActions({
@@ -237,6 +239,7 @@ export function CommentThread({
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
+  lastCommentRef,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -320,7 +323,11 @@ export function CommentThread({
           const isQuestion = isAskClaudeQuestionComment(comment);
           const isAnswer = isQaAnswerComment(comment);
           return (
-            <li key={comment.id} className="flex gap-2">
+            <li
+              key={comment.id}
+              ref={index === comments.length - 1 ? lastCommentRef : undefined}
+              className="flex gap-2"
+            >
               <UserAvatar login={comment.author.login} className="mt-0.5 size-7 shrink-0" />
               <div
                 className={cn(
