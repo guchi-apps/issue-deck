@@ -132,16 +132,19 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   }, [screenParam, repoParam, issueParam, viewParam, labels, state, assignee, sort, issues, repositories]);
 
   const navigate = useCallback(
-    (next: {
-      screen: MobileBottomNavTab | "issue-detail" | "repo-detail";
-      repo?: string | null;
-      issue?: string | null;
-      view?: NavViewId | null;
-      labels?: string[] | null;
-      state?: IssueStateFilter | null;
-      assignee?: string | null;
-      sort?: IssueSort | null;
-    }) => {
+    (
+      next: {
+        screen: MobileBottomNavTab | "issue-detail" | "repo-detail";
+        repo?: string | null;
+        issue?: string | null;
+        view?: NavViewId | null;
+        labels?: string[] | null;
+        state?: IssueStateFilter | null;
+        assignee?: string | null;
+        sort?: IssueSort | null;
+      },
+      options?: { silent?: boolean },
+    ) => {
       const params = new URLSearchParams(searchParams.toString());
 
       if (next.screen === "home") {
@@ -192,11 +195,19 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("msort");
       }
 
+      const url = `${pathname}?${params.toString()}`;
+
       // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
       // 生じうる。startTransitionでラップしisPendingを公開し、その間はスケルトンを表示する（#221）。
-      startTransition(() => {
-        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-      });
+      // ただし絞り込みシート内での連続操作（silent）はスクリーン種別を変えず、都度スケルトンで
+      // 画面を差し替えるとシートごとアンマウントされ選択を続けられなくなるため、対象外とする（#393）。
+      if (options?.silent) {
+        router.replace(url, { scroll: false });
+      } else {
+        startTransition(() => {
+          router.replace(url, { scroll: false });
+        });
+      }
     },
     [router, pathname, searchParams],
   );
@@ -274,25 +285,31 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       sort?: IssueSort;
     }) => {
       if (mobileScreen.kind === "issues") {
-        navigate({
-          screen: "issues",
-          issue: mobileScreen.returnToIssueId,
-          view: patch.view ?? mobileScreen.view,
-          labels: patch.labels ?? mobileScreen.labels,
-          state: patch.state ?? mobileScreen.state,
-          assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
-          sort: patch.sort ?? mobileScreen.sort,
-        });
+        navigate(
+          {
+            screen: "issues",
+            issue: mobileScreen.returnToIssueId,
+            view: patch.view ?? mobileScreen.view,
+            labels: patch.labels ?? mobileScreen.labels,
+            state: patch.state ?? mobileScreen.state,
+            assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
+            sort: patch.sort ?? mobileScreen.sort,
+          },
+          { silent: true },
+        );
       } else if (mobileScreen.kind === "repo-detail") {
-        navigate({
-          screen: "repo-detail",
-          repo: mobileScreen.repository.fullName,
-          issue: mobileScreen.returnToIssueId,
-          labels: patch.labels ?? mobileScreen.labels,
-          state: patch.state ?? mobileScreen.state,
-          assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
-          sort: patch.sort ?? mobileScreen.sort,
-        });
+        navigate(
+          {
+            screen: "repo-detail",
+            repo: mobileScreen.repository.fullName,
+            issue: mobileScreen.returnToIssueId,
+            labels: patch.labels ?? mobileScreen.labels,
+            state: patch.state ?? mobileScreen.state,
+            assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
+            sort: patch.sort ?? mobileScreen.sort,
+          },
+          { silent: true },
+        );
       }
     },
     [navigate, mobileScreen],
