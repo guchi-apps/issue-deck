@@ -57,7 +57,7 @@ import {
   labelsAfterRejection,
   requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
-import { canAskClaude } from "@/lib/github/ask-claude";
+import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
@@ -139,6 +139,22 @@ export function IssueDetail({
       repo,
       number: issue.number,
       body: newCommentBody,
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      setNewCommentBody("");
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
+  async function handleAskClaudeFromComposer() {
+    if (!issue || !newCommentBody.trim()) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: askClaudeCommentBody(newCommentBody),
     });
     if (created) {
       setComments((prev) => [...prev, created]);
@@ -469,14 +485,25 @@ export function IssueDetail({
                 }
               }}
             />
-            <Button
-              className="self-end"
-              onClick={handleCreateComment}
-              disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-            >
-              {isCommentSubmitting && <Loader2 className="animate-spin" />}
-              {isCommentSubmitting ? "送信中..." : "コメント"}
-            </Button>
+            <div className="flex justify-end gap-2">
+              {canAskClaude(issue) && (
+                <Button
+                  variant="outline"
+                  onClick={handleAskClaudeFromComposer}
+                  disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+                >
+                  <MessageCircleQuestion />
+                  質問する
+                </Button>
+              )}
+              <Button
+                onClick={handleCreateComment}
+                disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+              >
+                {isCommentSubmitting && <Loader2 className="animate-spin" />}
+                {isCommentSubmitting ? "送信中..." : "コメント"}
+              </Button>
+            </div>
             {commentMutationError && (
               <p className="text-sm text-destructive">{commentMutationError}</p>
             )}
