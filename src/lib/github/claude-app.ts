@@ -16,13 +16,19 @@ export function buildClaudeAppPrompt(
   return `${issue.repositoryFullName} の Issue #${issue.number}「${issue.title}」を実装してください。\n${issue.htmlUrl}`;
 }
 
-/** Issueを指定してClaudeアプリのセッション開始画面（プロンプト入力済み）に遷移するURLを組み立てる */
+/**
+ * Issueを指定してClaudeアプリのセッション開始画面（プロンプト入力済み）に遷移するURLを組み立てる。
+ *
+ * `URLSearchParams`はスペースを`+`にエンコードする（application/x-www-form-urlencoded）が、
+ * Claudeアプリ側はクエリパラメータの`+`をスペースへ変換せずそのまま表示してしまうため（#394）、
+ * スペースを`%20`にエンコードする`encodeURIComponent`でクエリ文字列を組み立てる。
+ */
 export function buildClaudeAppUrl(
   issue: Pick<Issue, "repositoryFullName" | "number" | "title" | "htmlUrl">,
 ): string {
-  const params = new URLSearchParams({
-    branch: "develop",
-    q: buildClaudeAppPrompt(issue),
-  });
-  return `${CLAUDE_APP_NEW_SESSION_URL}?${params.toString()}`;
+  const params = { branch: "develop", q: buildClaudeAppPrompt(issue) };
+  const query = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `${CLAUDE_APP_NEW_SESSION_URL}?${query}`;
 }
