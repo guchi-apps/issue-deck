@@ -415,7 +415,8 @@ jobs:
 
             - 単なる質問・確認と判断した場合:
               - 計画本文は書き直さず、`gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
-                で質問への回答のみを簡潔に投稿する
+                で質問への回答のみを簡潔に投稿する。回答コメントの本文末尾には、実装フローの通常コメントと
+                視覚的に区別できるよう`<!-- issue-deck-qa-answer -->`マーカーを必ず付与する
               - 計画種別マーカー（`<!-- issue-deck-plan-type:... -->`）は付けない（直前の計画のマーカーが
                 そのまま承認判定に使われる想定のため）
               - ラベル（`00.check-user`等）は変更しない
@@ -615,7 +616,8 @@ jobs:
               （`gh pr list`）を調査し、質問に日本語で回答する
             - `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で回答をコメント投稿する。
               コメント本文の先頭を`@claude`にしない（このワークフロー自身の再トリガーを防ぐため）。
-              コメント末尾に、このワークフロー実行への追跡用リンク
+              コメント末尾に、実装フローの通常コメントと視覚的に区別できるよう
+              `<!-- issue-deck-qa-answer -->`マーカーと、このワークフロー実行への追跡用リンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
 
@@ -764,7 +766,10 @@ jobs:
               - PR作成済み（上記URLが空でない場合）: 直近のIssueへの`@claude`コメントへの対応です。まず、
                 そのコメントが「コード変更を伴う追加の実装依頼」か「単なる質問・確認」かを判定してください。
                 - 単なる質問・確認と判断した場合: コードは一切変更せず、コミット・pushは行いません。
-                  `gh pr comment`（またはIssueへの`gh issue comment`）で質問への回答のみを簡潔に投稿します。
+                  `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`で質問への回答のみを
+                  簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの通常コメントと
+                  同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
+                  `<!-- issue-deck-qa-answer -->`マーカーを必ず付与してください。
                   なお、このステップの直前のシェルステップで既に`01.wip`が付与され`03.d:marge`が
                   外されているため、状態を元に戻すために
                   `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
