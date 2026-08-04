@@ -24,8 +24,10 @@ import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
 import {
   applyIssueFilters,
+  computeLabelFilterPresetCounts,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -172,6 +174,10 @@ export function IssueDeckShell({
     () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),
     [topbarFilteredIssues, currentUserLogin],
   );
+  const labelFilterPresetCounts = useMemo(
+    () => computeLabelFilterPresetCounts(topbarFilteredIssues, LABEL_FILTER_PRESETS),
+    [topbarFilteredIssues],
+  );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
@@ -295,6 +301,7 @@ export function IssueDeckShell({
                   <MobileHomeScreen
                     overviewStats={overviewStats}
                     navCounts={navCounts}
+                    labelFilterPresetCounts={labelFilterPresetCounts}
                     onSelectQuickView={selectQuickView}
                     onSelectLabelPreset={(preset) =>
                       selectQuickView("all", preset.labels, preset.state)
