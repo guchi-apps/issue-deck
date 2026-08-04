@@ -1,5 +1,6 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
+import type { LabelFilterPreset } from "@/lib/github/approval-labels";
 import { matchesSearchQuery } from "@/lib/search-query";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -81,6 +82,23 @@ export function computeNavCounts(
       (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
     ).length,
   };
+}
+
+export function computeLabelFilterPresetCounts(
+  issues: Issue[],
+  presets: readonly LabelFilterPreset[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const preset of presets) {
+    counts[preset.key] = applyIssueFilters(issues, {
+      q: "",
+      repo: null,
+      state: "all",
+      labels: preset.labels,
+      assignee: null,
+    }).length;
+  }
+  return counts;
 }
 
 export function computeOverviewStats(
