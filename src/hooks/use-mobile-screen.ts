@@ -209,12 +209,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   );
 
   const selectQuickView = useCallback(
-    (view: NavViewId, labels?: string[]) =>
+    (view: NavViewId, labels?: string[], state?: IssueStateFilter) =>
       navigate({
         screen: "issues",
         view,
         labels: labels ?? (mobileScreen.kind === "issues" ? mobileScreen.labels : undefined),
-        state: mobileScreen.kind === "issues" ? mobileScreen.state : undefined,
+        state: state ?? (mobileScreen.kind === "issues" ? mobileScreen.state : undefined),
         assignee: mobileScreen.kind === "issues" ? mobileScreen.assignee : undefined,
         sort: mobileScreen.kind === "issues" ? mobileScreen.sort : undefined,
       }),

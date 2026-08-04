@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
+  GitMerge,
   Lock,
   PlayCircle,
   Plus,
@@ -17,7 +18,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
+import type { IssueStateFilter } from "@/hooks/use-issue-filters";
+import {
+  isLabelFilterPresetActive,
+  LABEL_FILTER_PRESETS,
+  resolveLabelFilterPresetSelection,
+} from "@/lib/github/approval-labels";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { navViewIcons, navViews } from "@/lib/nav-views";
@@ -31,6 +37,7 @@ const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
   "check-user": UserCheck,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
+  "recently-merged": GitMerge,
 };
 
 type SidebarNavProps = {
@@ -46,7 +53,7 @@ type SidebarNavProps = {
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
   onClearLabels?: () => void;
-  onSelectLabelPreset?: (labels: string[]) => void;
+  onSelectLabelPreset?: (selection: { labels: string[]; state?: IssueStateFilter }) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
@@ -116,7 +123,7 @@ export function SidebarNav({
                 <button
                   type="button"
                   aria-pressed={active}
-                  onClick={() => onSelectLabelPreset?.(active ? [] : preset.labels)}
+                  onClick={() => onSelectLabelPreset?.(resolveLabelFilterPresetSelection(preset, active))}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                     active && "bg-accent font-medium",
