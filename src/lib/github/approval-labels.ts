@@ -146,10 +146,14 @@ export function requestContinuationCommentBody(): string {
 
 /**
  * PRマージ待ち画面（isMergeApprovalPending）の「修正を依頼する」ボタン押下時に投稿する
- * コメント本文。ラベル更新は行わない（00.check-userはPRマージ完了まで維持する運用のため、
- * handleReject等と異なりlabelsAfterRejectionは呼ばない）。claude-issue-dispatch.ymlは
- * 対応issueのブランチが既にありdevelopへのPRがOPENであればmode=additionalとして扱うため、
- * このコメント投稿のみで既存PRへの追加コミットが行われる（#376）。
+ * コメント本文。ボタン押下時はこのコメント投稿に先立ち、handleReject等と同様
+ * labelsAfterRejection（00.check-userのみ除去、21.plan-requiredは残す）でラベルを
+ * 更新する。修正コミットが積まれている間はユーザー確認待ちではないため、他の操作と
+ * 揃えて00.check-userを外す（#409）。claude-issue-dispatch.ymlは対応issueのブランチが
+ * 既にありdevelopへのPRがOPENであればmode=additionalとして扱うため、このコメント投稿
+ * により既存PRへの追加コミットが行われる（#376）。再度ユーザー確認が必要な状態になった
+ * 場合は、追加コミットのpushがclaude-review-develop.ymlを再発火させ、そちらのrisk-check/
+ * claude-reviewが必要に応じて00.check-userを再付与する。
  */
 export function requestPrFixCommentBody(reason: string): string {
   const trimmed = reason.trim();
