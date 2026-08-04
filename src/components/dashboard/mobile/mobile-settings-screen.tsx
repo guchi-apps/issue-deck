@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 
+import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
@@ -23,6 +25,12 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
+  const {
+    data: claudeUsage,
+    isLoading: claudeUsageLoading,
+    error: claudeUsageError,
+    notConfigured: claudeUsageNotConfigured,
+  } = useClaudeUsage(true);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -53,6 +61,16 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
             data={rateLimits}
             isLoading={rateLimitsLoading}
             error={rateLimitsError}
+          />
+        </div>
+
+        <div className="rounded-lg border p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Claudeプラン使用量</p>
+          <ClaudeUsageCard
+            data={claudeUsage}
+            isLoading={claudeUsageLoading}
+            error={claudeUsageError}
+            notConfigured={claudeUsageNotConfigured}
           />
         </div>
 

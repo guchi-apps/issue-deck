@@ -13,6 +13,7 @@ import {
   UserCheck,
 } from "lucide-react";
 
+import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
+import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
@@ -67,6 +69,12 @@ export function TopBar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
+  const {
+    data: claudeUsage,
+    isLoading: claudeUsageLoading,
+    error: claudeUsageError,
+    notConfigured: claudeUsageNotConfigured,
+  } = useClaudeUsage(accountMenuOpen);
   const {
     data: releaseStatus,
     isLoading: releaseStatusLoading,
@@ -230,6 +238,16 @@ export function TopBar({
               data={rateLimits}
               isLoading={rateLimitsLoading}
               error={rateLimitsError}
+            />
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>Claudeプラン使用量</DropdownMenuLabel>
+          <div className="px-1.5 pb-1.5">
+            <ClaudeUsageCard
+              data={claudeUsage}
+              isLoading={claudeUsageLoading}
+              error={claudeUsageError}
+              notConfigured={claudeUsageNotConfigured}
             />
           </div>
           <DropdownMenuSeparator />
