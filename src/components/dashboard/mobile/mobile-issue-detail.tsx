@@ -62,6 +62,7 @@ import {
   labelsAfterApproval,
   labelsAfterRejection,
   requestContinuationCommentBody,
+  requestPrFixCommentBody,
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppUrl } from "@/lib/github/claude-app";
@@ -296,6 +297,20 @@ export function MobileIssueDetail({
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+    }
+  }
+
+  async function handleRequestPrFix(reason: string) {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: requestPrFixCommentBody(reason),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
   }
 
@@ -575,10 +590,12 @@ export function MobileIssueDetail({
             onReject={handleReject}
             onWithdraw={handleWithdraw}
             onRequestContinuation={handleRequestContinuation}
+            onRequestPrFix={handleRequestPrFix}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
+            isRequestingPrFix={isCommentSubmitting}
             lastCommentRef={lastCommentRef}
           />
 

@@ -143,3 +143,15 @@ export function approveCommentBody(labels: IssueLabel[]): string {
 export function requestContinuationCommentBody(): string {
   return "@claude 続きを実装・調査してください。";
 }
+
+/**
+ * PRマージ待ち画面（isMergeApprovalPending）の「修正を依頼する」ボタン押下時に投稿する
+ * コメント本文。ラベル更新は行わない（00.check-userはPRマージ完了まで維持する運用のため、
+ * handleReject等と異なりlabelsAfterRejectionは呼ばない）。claude-issue-dispatch.ymlは
+ * 対応issueのブランチが既にありdevelopへのPRがOPENであればmode=additionalとして扱うため、
+ * このコメント投稿のみで既存PRへの追加コミットが行われる（#376）。
+ */
+export function requestPrFixCommentBody(reason: string): string {
+  const trimmed = reason.trim();
+  return trimmed ? `@claude ${trimmed}` : "@claude PRの内容を見直して修正してください。";
+}
