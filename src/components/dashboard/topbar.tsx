@@ -13,6 +13,7 @@ import {
   UserCheck,
 } from "lucide-react";
 
+import packageJson from "../../../package.json";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { Button } from "@/components/ui/button";
@@ -307,6 +308,9 @@ export function TopBar({
           <DropdownMenuItem variant="destructive" onClick={handleLogout}>
             ログアウト
           </DropdownMenuItem>
+          <p className="pt-1 text-center text-xs text-muted-foreground">
+            Issue Deck v{packageJson.version}
+          </p>
         </DropdownMenuContent>
       </DropdownMenu>
 
