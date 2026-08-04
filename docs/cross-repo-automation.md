@@ -194,6 +194,114 @@ C（設定ファイル + 共通ワークフロー本体を可能な限り集約�
 6. セキュリティレビュー（上記6。信頼境界の設計を固めてから展開開始する）
 7. テンプレートPR自動作成 or CLIスキャフォールディングの実装（上記1。方式比較の結論を受けて）
 
+## ケーススタディ: m-guchi/shopping-list での実現可能性（issue #357）
+
+issue #357 の調査として、実際の連携候補である`m-guchi/shopping-list`リポジトリを対象に、
+上記1〜6の各要素がどの程度そのまま適用できるかを検証した。**結論としては実現可能であり、
+issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし・npm依存パッケージゼロのため、
+`claude-issue-dispatch.yml`の前段セットアップの大半が不要になる）。唯一、スクリーンショットの
+無人撮影（`23.screenshot-required`）だけは、shopping-list側に追加実装がなければ成立しない。
+
+### shopping-listの構成（調査時点: v0.2.0 / develop = 5c43ad1）
+
+| 項目 | 内容 |
+|---|---|
+| 概要 | Notionの「🛒 買い物リスト」DBと同期するPWA |
+| フロントエンド | Vanilla JS PWA（`frontend/`、**ビルド不要**）。`@supabase/supabase-js`はesm.sh からCDN動的import |
+| バックエンド | Node.js（`backend/`、`node:http`のみ・**npm依存パッケージなし**）。Notion APIの薄いプロキシ |
+| DB | **なし**（Notionが唯一の情報源。マイグレーション・シードの概念が存在しない） |
+| 認証 | Supabase Auth + Google OAuth。バックエンドが`node:crypto`でJWTを自前検証（`backend/auth.js`） |
+| パッケージマネージャ | npm（lockfileもコミットされていない。`package.json`に`dependencies`自体がない） |
+| lint/test/build | `npm run check`（`node --check`による構文チェックのみ）。テスト・ビルド・型チェックは無し |
+| Node.jsバージョン | 20.19（既存ワークフローの`actions/setup-node`指定値） |
+| デプロイ | `main`へのpushで`deploy.yml`がVPSへSSHデプロイ（PM2、ポート3101） |
+| コード規模 | JS計約1,100行 |
+| コントリビューター | `m-guchi`（admin）1名のみ |
+
+### 上記1〜6の各要素の適合状況
+
+#### 既に条件が揃っているもの
+
+- **ブランチ運用（上記2）**: デフォルトブランチが`develop`で、`develop`→`main`の2段階運用も
+  issue-deckと**一致**している。差異の吸収が不要な軸。
+- **ラベル体系（上記5）**: `00.check-user`・`01.wip`・`03.d:marge`・`05.develop`・`07.m:marge`・
+  `09.main`・`21.plan-required`・`22.preview-required`・`23.screenshot-required`が、色・説明文まで
+  issue-deckと同一の内容で**既に全て作成済み**。issue #3（「ログイン機能を実装する」）は実際に
+  `09.main`まで遷移して運用されている。少なくともshopping-listに関しては「ラベル体系の可変化」は
+  課題にならず、`gh label create`による自動作成も不要。
+- **セキュリティ・信頼境界（上記6）**: コラボレーターがリポジトリオーナー1名のみのプライベート
+  相当構成であり、「第三者コントリビューターのフォークPRから秘匿情報が漏れる」類のリスクは現状
+  存在しない。issue-deckと同じ`github.actor`のwrite権限確認で十分と考えられる。
+- **Secrets配布（上記3）**: shopping-listには既に**1Password Service Accountベースのシークレット
+  注入機構**が稼働している（GitHub Secretsには`OP_SERVICE_ACCOUNT_TOKEN`のみを置き、実値は
+  `1password/load-secrets-action@v4` + `.github/ci.env.tpl`・`.github/deploy.env.tpl`の
+  `op://apps/...`参照で注入する方式）。`CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`も同じ経路で
+  1Passwordに置いて注入できるため、**IssueDeck側にActions Secrets書き込み権限を追加せずに済む**。
+  これは上記3で挙げた「IssueDeckがGitHub API経由でSecretsを直接設定する」方式の代替として、
+  少なくともm-guchi配下のリポジトリ群には現実的な選択肢になる（他リポジトリも同じ1Password運用に
+  揃っていることが前提）。
+
+#### 不足しており追加が必要なもの
+
+- **`CLAUDE.md`が存在しない**: `claude-issue-dispatch.yml`のプロンプトも`claude-review-develop.yml`の
+  自動マージ不可判定も、リポジトリのCLAUDE.mdが定める運用ルール（ブランチ運用・禁止事項・
+  自動マージ不可カテゴリ）を前提にしている。shopping-listにはCLAUDE.md自体が無いため、新規作成が必要。
+- **`issue-<番号>`ブランチ運用の実績がない**: 既存PR（#1・#2・#4）はいずれも`develop`→`main`の
+  直接PRで、Issue専用ブランチは使われていない。`scripts/start-issue.sh`相当のスクリプトも無い。
+  ただしワークフロー側の正規表現（`^issue-([0-9]+)$`）に合わせるだけなので、障壁としては低い。
+- **Secretsの登録**: `CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`は未登録（READMEのセットアップ
+  チェックリストに挙がっているのは`OP_SERVICE_ACCOUNT_TOKEN`のみ）。上記のとおり1Password経由で
+  配布できるが、`WORKFLOW_PAT`は`actions/checkout`の`token`入力に渡す必要があり、
+  `load-secrets-action`はcheckout後にしか実行できないため、これだけはGitHub Secretsへ直接登録する
+  必要がある点に注意（この制約は`claude-issue-dispatch.yml`の構造に由来する）。
+- **`develop`のBranch protection**: shopping-listのREADMEが設定を求めているのは`main`のみ。
+  issue-deck側のリリースフロー（[docs/multi-agent-workflow.md](multi-agent-workflow.md)・
+  `release-to-main`スキル）は`develop`も保護されている前提で組まれているため、揃えるかどうかの判断が要る。
+- **GitHub Appのインストール状況（上記4）**: shopping-listのissue #3はリポジトリオーナー本人が
+  作成しており（issue-deck側のIssueは`issue-deck[bot]`が作成している）、IssueDeckのGitHub Appが
+  shopping-listにインストール済みかは本調査では確認できなかった。GitHub側の設定画面での確認が必要。
+
+### ワークフローごとの移植コスト
+
+| ワークフロー | 移植可否 | 必要な改変 |
+|---|---|---|
+| `issue-labels.yml`（237行） | ほぼそのまま | ラベル名・`issue-<番号>`規約が一致するため実質無改変。末尾のスクリーンショット削除ジョブ（`screenshots`ブランチの`issue-<番号>/`配下を掃除する処理）は、撮影を導入しないなら削除する |
+| `claude-issue-dispatch.yml`（944行） | 可。**大幅に簡素化できる** | MySQLサービスコンテナ・pnpm setup・`pnpm install`・`pnpm db:migrate:deploy`・`pnpm db:seed:ci`・`playwright install`の前段ステップ（120行相当）が**丸ごと不要**。`claude_args`の`Bash(pnpm:*)`→`Bash(npm:*)`。lint/test/buildの指示は`npm run check`に置換 |
+| `claude-review-develop.yml`（283行） | 可 | `risk-check`のパターン調整。`prisma/migrations/**`は該当なしのため削除。`.github/workflows/**`はそのまま有効。`**/auth/**`判定（`(^\|/)auth(/\|\.[^/]*$)`）は`backend/auth.js`・`frontend/auth.js`・`frontend/auth/callback.html`にそのままヒットするので有効。`package.json`のメジャー更新判定は依存パッケージが無いため実質空振りだが無害。**追加すべき対象**として`deploy/`・`scripts/update-env-file.sh`・`.github/*.env.tpl`（本番設定・Secrets参照の変更）がある |
+| `claude-conflict-resolve.yml`（285行） | 可 | pnpm setup・`pnpm install`・`pnpm test`／`pnpm build:ci`の検証ステップを`npm run check`へ置換するのみ |
+| `release-develop-to-main.yml`（299行） | 要改変 | バージョン判定・bump自体は`package.json`の`version`比較と`npm pkg set version`で行っており汎用的。ただしshopping-listは`npm version`のlifecycleフックで`frontend/changelog.js`にスタブを生成する独自フローを持ち（`npm pkg set version`ではフックが走らない）、かつ`ci.yml`の`version-check`ジョブがタグ重複を検査する。この2点との整合が必要 |
+
+### スクリーンショット・プレビュー（上記2の「画面確認」軸）
+
+shopping-listはWebアプリ（PWA）なので撮影の対象になり得る。起動自体は`npm run dev`
+（＝`node backend/index.js`）のみでビルド不要と、issue-deckより軽い。しかし
+**`23.screenshot-required`相当の無人撮影は、現状のshopping-listには追加実装なしでは成立しない**。
+
+- 全画面がSupabase Auth + Google OAuthログインの背後にある（`frontend/app.js`のログイン画面、
+  バックエンドは全APIで`Authorization: Bearer <JWT>`必須）。issue-deckの`src/lib/ci-auth-bypass.ts`に
+  相当するCIバイパス機構が存在しない。
+- JWT検証は`backend/auth.js`がSupabaseのJWKSエンドポイントを実際に`fetch`して行うため、CIで
+  ダミートークンを通すには検証をバイパスする仕組みの追加が必要。
+- 表示データの出所がNotion APIの実体であり、DBが無いためシードできない。CIで意味のある画面を
+  撮るにはNotion APIのスタブが要る。
+- フロントエンドが`@supabase/supabase-js`をesm.sh からCDN動的importしているため、CIの
+  ネットワーク制約次第では読み込みに失敗しうる。
+
+したがってshopping-listでは、まず`22.preview-required`（人間が手元で確認する運用）に限定して
+導入し、`23.screenshot-required`は「CIバイパス + Notionスタブ」をshopping-list側に実装する
+別Issueとして切り出すのが現実的。
+
+### このケーススタディから見た方式選択への示唆
+
+- 「上記2（リポジトリ差異の吸収）」で吸収すべき軸のうち、shopping-listで実際に差異が出たのは
+  **パッケージマネージャ／検証コマンド**と**DBセットアップの要否**と**画面確認の可否**の3軸のみで、
+  ブランチ運用・ラベル体系は差異ゼロだった。設定スキーマ（`.issue-deck.yml`案）の初期版は、
+  この3軸＋`risk-check`の追加パスパターンを最小セットとして設計すれば足りる可能性が高い。
+- DBセットアップ・Playwright・パッケージマネージャの各ステップは「有効／無効」を設定値で切り替える
+  構造（`if:`条件）にできれば、issue-deckとshopping-listの両方を1つの再利用可能ワークフロー
+  （`workflow_call`）でカバーできる見込み。方式C（設定ファイル + 共通ワークフロー）が有利という
+  上記の比較結論を、実例として補強する材料になる。
+
 ## 未確定・要人間判断の事項
 
 - 「他のリポジトリ」がどの程度多様な技術スタック・運用を想定しているか（IssueDeckで連携する
@@ -203,3 +311,10 @@ C（設定ファイル + 共通ワークフロー本体を可能な限り集約�
   結論が出せない。
 - GitHub Appの権限拡張（Secrets書き込み等）は、GitHub側の設定変更が必要でありローカル調査だけでは
   確定できない。
+- IssueDeckのGitHub Appが`m-guchi/shopping-list`にインストール済みかは、GitHub側のApp設定画面での
+  確認が必要（上記ケーススタディ参照）。
+- shopping-listの`develop`にBranch protectionを設定するか（issue-deckのリリースフローに揃えるか）は
+  運用方針の判断。
+- shopping-listで`23.screenshot-required`を使えるようにするための「CIログインバイパス + Notion API
+  スタブ」の実装は、shopping-listリポジトリ側の変更であり、issue-deck側の対応範囲外。別Issueとして
+  切り出すかどうかの判断が必要。
