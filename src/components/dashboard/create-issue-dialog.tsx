@@ -200,6 +200,7 @@ export function CreateIssueDialog({
                 onChange={setBody}
                 issueSuggestions={issueSuggestions}
                 onUploadingChange={setIsImageUploading}
+                repositoryFullName={repositoryFullName}
                 placeholder="詳細を入力（任意）"
                 className="min-h-32 text-sm"
               />

@@ -501,6 +501,7 @@ export function IssueDetail({
                 issueSuggestions={issueSuggestions}
                 disabled={isCommentSubmitting}
                 onUploadingChange={setIsImageUploading}
+                repositoryFullName={issue.repositoryFullName}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();

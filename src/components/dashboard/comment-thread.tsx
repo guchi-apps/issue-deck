@@ -453,6 +453,7 @@ export function CommentThread({
                       issueSuggestions={issueSuggestions}
                       disabled={isUpdating}
                       onUploadingChange={setIsImageUploading}
+                      repositoryFullName={repositoryFullName}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
                           e.preventDefault();

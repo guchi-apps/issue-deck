@@ -36,7 +36,7 @@ function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
     );
   }
 
-  return (
+  const image = (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       {...props}
@@ -47,6 +47,21 @@ function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
       loading="lazy"
       onError={() => setFailed(true)}
     />
+  );
+
+  // 本文中の画像は表示幅が狭く内容を確認しづらいので、クリックで原寸を別タブに開けるようにする（#384）。
+  if (typeof src !== "string" || src === "") return image;
+
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title="画像を新しいタブで開く"
+      className="inline-block cursor-zoom-in"
+    >
+      {image}
+    </a>
   );
 }
 

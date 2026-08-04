@@ -9,8 +9,9 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ImagePlus, Loader2 } from "lucide-react";
+import { Eye, ImagePlus, Loader2, Pencil } from "lucide-react";
 
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,8 @@ type MentionTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange
   issueSuggestions?: IssueSuggestion[];
   /** trueの間、画像アップロード中であることを示す（呼び出し元は送信ボタンのdisabledに反映する） */
   onUploadingChange?: (uploading: boolean) => void;
+  /** プレビュー時にIssue参照（#番号）をリンク化するためのリポジトリ */
+  repositoryFullName?: string;
 };
 
 export function MentionTextarea({
@@ -64,6 +67,7 @@ export function MentionTextarea({
   onBlur,
   className,
   onUploadingChange,
+  repositoryFullName,
   disabled,
   ...props
 }: MentionTextareaProps) {
@@ -74,6 +78,10 @@ export function MentionTextarea({
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isPreview, setIsPreview] = useState(false);
+
+  // 送信後などに呼び出し元が本文を空にした場合は、空のプレビューを表示し続けずに入力へ戻す。
+  const showPreview = isPreview && value.trim() !== "";
 
   const mentionItems =
     trigger?.type === "mention"
@@ -111,6 +119,8 @@ export function MentionTextarea({
   }
 
   function handleChange(e: ChangeEvent<HTMLTextAreaElement>) {
+    // 空になってプレビューを抜けたあと、再入力で勝手にプレビューへ戻らないようにする。
+    setIsPreview(false);
     onChange(e.target.value);
     const cursor = e.target.selectionStart ?? e.target.value.length;
     setTrigger(detectTrigger(e.target.value, cursor));
@@ -223,6 +233,25 @@ export function MentionTextarea({
     onKeyDown?.(e);
   }
 
+  if (showPreview) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div
+          className={cn(
+            "max-h-64 w-full overflow-y-auto rounded-lg border border-input px-2.5 py-2",
+            className,
+          )}
+          data-slot="mention-textarea-preview"
+        >
+          <MarkdownBody content={value} repositoryFullName={repositoryFullName} />
+        </div>
+        <div className="flex items-center gap-2">
+          <PreviewToggleButton isPreview onClick={() => setIsPreview(false)} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <div className="relative">
@@ -307,8 +336,39 @@ export function MentionTextarea({
           {isUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
           {isUploading ? "アップロード中..." : "画像を添付"}
         </Button>
+        <PreviewToggleButton
+          isPreview={false}
+          onClick={() => setIsPreview(true)}
+          disabled={value.trim() === ""}
+        />
         {uploadError && <span className="text-xs text-destructive">{uploadError}</span>}
       </div>
     </div>
+  );
+}
+
+// 添付した画像やMarkdownの見た目を投稿前に確認するための、入力とプレビューの切り替えボタン（#384）。
+function PreviewToggleButton({
+  isPreview,
+  onClick,
+  disabled,
+}: {
+  isPreview: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={isPreview}
+    >
+      {isPreview ? <Pencil /> : <Eye />}
+      {isPreview ? "入力に戻る" : "プレビュー"}
+    </Button>
   );
 }
