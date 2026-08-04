@@ -1,24 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import {
-  Archive,
-  CircleAlert,
-  CircleCheck,
-  CircleDot,
-  CircleSlash,
-  Loader2,
-  Lock,
-  MessageSquare,
-  Star,
-} from "lucide-react";
+import { Archive, CircleCheck, CircleDot, CircleSlash, Loader2, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { closedStateLabel } from "@/lib/issue-state-reason";
-import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
+import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel } from "@/types/issue";
@@ -43,14 +33,10 @@ function formatRelativeDate(iso: string) {
   return `${diffDays}日前`;
 }
 
-// 要対応フラグ→進行ステップ→その他ラベルの順に並べ、状況が一目でわかるよう左詰めにする
-function statusSortRank(labelName: string) {
-  if (isAttentionLabel(labelName)) return -1;
-  return matchStatusStep(labelName) ?? STATUS_STEP_MAX + 1;
-}
-
-function sortLabelsByStatus(labels: IssueLabel[]) {
-  return [...labels].sort((a, b) => statusSortRank(a.name) - statusSortRank(b.name));
+// 進捗系ラベル（00.check-user、01.wip〜09.main）はカード右上のWorkflowStepBadgeで
+// 既に表現されているため、下部のラベル一覧からは除外する
+function nonStatusLabels(labels: IssueLabel[]) {
+  return labels.filter((label) => !isAttentionLabel(label.name) && matchStatusStep(label.name) === null);
 }
 
 function IssueStateIcon({ issue }: { issue: Issue }) {
@@ -196,35 +182,15 @@ export function IssueList({
                 </p>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div className="flex flex-wrap items-center gap-1">
-                    {sortLabelsByStatus(issue.labels).map((label) => {
-                      const step = matchStatusStep(label.name);
-                      const attention = isAttentionLabel(label.name);
-                      return (
-                        <span
-                          key={label.name}
-                          className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
-                          style={getLabelBadgeStyle(label.color)}
-                          title={step ? `${label.name}（ステップ${step}/${STATUS_STEP_MAX}）` : undefined}
-                        >
-                          {attention && <CircleAlert className="size-3 shrink-0" aria-hidden="true" />}
-                          {step && (
-                            <span
-                              className="h-1.5 w-5 overflow-hidden rounded-full bg-border"
-                              aria-hidden="true"
-                            >
-                              <span
-                                className="block h-full rounded-full"
-                                style={{
-                                  width: `${(step / STATUS_STEP_MAX) * 100}%`,
-                                  backgroundColor: label.color,
-                                }}
-                              />
-                            </span>
-                          )}
-                          {label.name}
-                        </span>
-                      );
-                    })}
+                    {nonStatusLabels(issue.labels).map((label) => (
+                      <span
+                        key={label.name}
+                        className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                        style={getLabelBadgeStyle(label.color)}
+                      >
+                        {label.name}
+                      </span>
+                    ))}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {issue.commentCount > 0 && (
