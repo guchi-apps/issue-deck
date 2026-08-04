@@ -25,4 +25,6 @@ GITHUB_WEBHOOK_SECRET=op://apps/issue-deck/github-webhook-secret
 GITHUB_USER_TOKEN_ENCRYPTION_KEY=op://apps/issue-deck/github-user-token-encryption-key
 ALLOWED_EMAILS=op://apps/issue-deck/allowed-emails
 
+ANTHROPIC_API_KEY=op://apps/issue-deck/anthropic-api-key
+
 SIGNALY_WEBHOOK_URL=op://apps/issue-deck/ci-webhook-url
