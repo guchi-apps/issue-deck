@@ -8,12 +8,14 @@ const CLAUDE_APP_NEW_SESSION_URL = "https://claude.ai/code/new";
 
 /**
  * GitHub Actions上のClaude（claude-issue-dispatch.yml）には実行時間・権限等の制限があるため、
- * Claudeアプリ上で同じIssueの実装を進められるよう、対象Issueを特定できるプロンプトを組み立てる。
+ * Claudeアプリ上で同じIssueの続きに取り組めるよう、対象Issueを特定できるプロンプトを組み立てる。
+ * 実装の続きだけでなく質問・相談で開くケースもあるため、「実装してください」のような特定の
+ * アクションは指示せず、対象Issueとの関連付けのみを記載する（#415）。
  */
 export function buildClaudeAppPrompt(
   issue: Pick<Issue, "repositoryFullName" | "number" | "title" | "htmlUrl">,
 ): string {
-  return `${issue.repositoryFullName} の Issue #${issue.number}「${issue.title}」を実装してください。\n${issue.htmlUrl}`;
+  return `${issue.repositoryFullName} の Issue #${issue.number}「${issue.title}」に関連するセッションです。\n${issue.htmlUrl}`;
 }
 
 /**
