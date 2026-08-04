@@ -11,7 +11,14 @@ export const PREVIEW_REQUIRED_LABEL = "22.preview-required";
 /** PR作成前に開発サーバーを起動し画面確認・承認を必須にするラベル */
 export const SCREENSHOT_REQUIRED_LABEL = "23.screenshot-required";
 
-export type StartImplementationOptionKey = "planRequired" | "previewRequired" | "screenshotRequired";
+/** developへのマージ前に必ずユーザー確認を必須にするラベル */
+export const MERGE_CONFIRM_REQUIRED_LABEL = "24.merge-confirm-required";
+
+export type StartImplementationOptionKey =
+  | "planRequired"
+  | "previewRequired"
+  | "screenshotRequired"
+  | "mergeConfirmRequired";
 
 export type StartImplementationOptions = Record<StartImplementationOptionKey, boolean>;
 
@@ -19,6 +26,7 @@ export const START_IMPLEMENTATION_DEFAULT_OPTIONS: StartImplementationOptions = 
   planRequired: false,
   previewRequired: false,
   screenshotRequired: false,
+  mergeConfirmRequired: false,
 };
 
 /** 「実装を開始」ダイアログで選択できるオプションの定義（表示順） */
@@ -45,6 +53,12 @@ export const START_IMPLEMENTATION_OPTIONS: {
     label: "スクリーンショットが必要",
     description: "PR作成前に変更箇所のスクリーンショットを取得し、確認してもらってから実装を進めます",
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
+  },
+  {
+    key: "mergeConfirmRequired",
+    label: "マージ前に確認が必要",
+    description: "developへのマージ前に必ずユーザーの確認を挟んでから進めます",
+    githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
   },
 ];
 
