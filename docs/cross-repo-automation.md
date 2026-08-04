@@ -1,0 +1,205 @@
+# 他リポジトリでも同様の自動化を有効にするための調査
+
+issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプリ）に既にある「実装を開始」
+ボタン・「Claudeに質問する」ボタンは、`@claude ...`形式の定型コメントをGitHub App経由で
+投稿する仕組み自体は特定リポジトリに依存せず汎用化されている。しかし、そのコメントを実際に
+受けて実装〜レビュー〜マージまで進める自動化本体（`.github/workflows/`配下のワークフロー群と
+対応するラベル体系）は、現状issue-deckリポジトリ自身にのみ存在し、issue-deck自身の開発
+（セルフホスティング）専用になっている。本ドキュメントは、この自動化を他リポジトリでも
+使えるようにするために必要な要素を整理し、実現方式の選択肢を比較する。**コード変更は行わず、
+調査結果のドキュメント化のみを行う。**
+
+## 現状把握
+
+### IssueDeckアプリ側（汎用化済みの部分）
+
+- `src/lib/github/start-implementation.ts`: 「実装を開始」ボタン押下時に`@claude 実装を開始
+  してください`という定型コメントを投稿する。あわせて選択したオプション（`21.plan-required`・
+  `22.preview-required`・`23.screenshot-required`に対応するラベル）を付与する。リポジトリ固有の
+  前提を含まない。
+- `src/lib/github/ask-claude.ts`: 「Claudeに質問する」ボタン押下時に`@claude 質問: <本文>`という
+  定型コメントを投稿する。回答コメントは`<!-- issue-deck-qa-answer -->`マーカーで識別する。
+  こちらもリポジトリ固有の前提を含まない。
+- どちらも投稿するのはコメントとラベルのみで、実際にコメントを解釈して実装まで進める処理は
+  持たない。つまりアプリ側は「起動トリガーを送る」役割に閉じており、他リポジトリでこのボタンを
+  押しても、対象リポジトリに対応するワークフローが存在しない限り何も起こらない。
+
+### 自動化本体（issue-deck専用）
+
+`.github/workflows/`配下の主要ワークフローとその責務:
+
+| ファイル | 責務 |
+|---|---|
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（944行、最大のワークフロー） |
+| `issue-labels.yml` | `01.wip`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する |
+| `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う |
+| `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる |
+| `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） |
+
+設計の経緯・詳細は[docs/multi-agent-workflow.md](multi-agent-workflow.md)を参照。
+
+これらのワークフローは、以下のようにissue-deck固有の前提へ強く結合している。
+
+- **技術スタック固有のセットアップ手順**: `claude-issue-dispatch.yml`はpnpm（`pnpm/action-setup`）・
+  Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQL（`services.mysql`のサービス
+  コンテナ、`DATABASE_URL=mysql://...`）を直接ハードコードしている。他言語・他フレームワークの
+  リポジトリではこれらのステップ自体が成立しない。
+- **ブランチ運用・命名規則**: `develop`→`main`の2段階ブランチ運用、Issue専用ブランチの命名規則
+  `issue-<番号>`（ローカルの`scripts/start-issue.sh`が作成する規則をワークフロー側も前提にしている）
+  に、`issue-labels.yml`のIssue番号特定処理や`claude-review-develop.yml`の対象PR判定が依存している。
+  この命名規則に従わないブランチ・PRは全ワークフローの対象外（何もしない）という設計。
+- **スクリーンショット撮影の固定パス**: `claude-issue-dispatch.yml`のPlaywright撮影処理は
+  `/dashboard`固定パス・issue-deck専用のCIバイパス機構（`src/lib/ci-auth-bypass.ts`、CIバイパス用
+  Cookieでミドルウェアの認証チェックをスキップする仕組み）に依存している。他リポジトリでは
+  この機構自体が存在しない。
+- **自動マージ不可判定のパス・カテゴリ**: `claude-review-develop.yml`の`risk-check`ジョブは
+  issue-deckのCLAUDE.mdが定める自動マージ不可カテゴリ（認証・認可、DBマイグレーション、
+  GitHub Actions/デプロイ設定等）を、issue-deckのディレクトリ構成（`prisma/migrations/**`等）に
+  合わせたパターンで機械判定している。
+- **ラベル体系**: `01.wip`〜`09.main`・`21.plan-required`〜`23.screenshot-required`・
+  `00.check-user`はissue-deckリポジトリ側で個別に作成したカスタムラベルであり、他リポジトリには
+  存在しない。
+
+### データモデル側
+
+`prisma/schema.prisma`の`GithubInstallation`/`Repository`モデルには、リポジトリごとの自動化設定
+（ワークフロー有効化フラグ・Secrets・ブランチ運用方針など）を保持するフィールドは現状存在しない
+（`Repository`が持つのは`ownerLogin`・`name`・`fullName`・`defaultBranch`等のGitHub側メタデータの
+キャッシュのみ）。
+
+一方、Secrets的な値の暗号化保管ユーティリティ自体は`src/lib/crypto/secret-cipher.ts`
+（AES-256-GCM、`GITHUB_USER_TOKEN_ENCRYPTION_KEY`）として既に存在するが、現状の用途は
+`User.githubAccessToken`（ユーザー本人のGitHub OAuthアクセストークン）の暗号化保存のみに
+限定されている（`src/app/auth/callback/route.ts`で暗号化・`src/app/api/issues/comments/route.ts`で
+復号）。リポジトリ単位のSecrets（他リポジトリで`CLAUDE_CODE_OAUTH_TOKEN`相当を保存する等）を
+想定した設計にはなっていないが、暗号化の仕組み自体は流用できる可能性がある。
+
+### GitHub Appの権限
+
+IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app`、`GITHUB_APP_ID`・
+`GITHUB_APP_PRIVATE_KEY_BASE64`）で行っている。App自体の権限スコープ（`contents`・`workflows`・
+`secrets`書き込み権限の有無等）はGitHub側のApp設定画面でのみ確認・変更でき、リポジトリ内の
+コード調査だけでは確定できない。現状のIssueDeck用GitHub Appが、連携先リポジトリへ
+`.github/workflows/`ファイルやSecretsを書き込む権限を持っているかは未確認。
+
+## 他リポジトリへ展開する上で必要になる要素
+
+### 1. ワークフローファイル一式の配布方法
+
+他リポジトリに`.github/workflows/claude-issue-dispatch.yml`等一式を配置する必要がある。選択肢:
+
+- **IssueDeckがテンプレートからPRを自動作成する**: 連携リポジトリに対し、ワークフローファイル一式を
+  追加するPRをIssueDeckが自動生成する。GitHub Appに`contents`/`pull_requests`書き込み権限が必要。
+  リポジトリ側のCI設定・ブランチ運用に合わせたカスタマイズが必要な場合、PRのdiffを人間がレビュー・
+  調整する前提になる。
+- **CLIでスキャフォールディングする**: `npx issue-deck-init`のようなCLIツールを別途配布し、
+  連携リポジトリのメンテナーがローカルで実行してワークフローファイルを生成する。IssueDeck側の
+  GitHub App権限を増やさずに済むが、IssueDeckのWebアプリからワンクリックで完結する体験は失われる。
+- **テンプレートリポジトリ + 手動コピー**: 単にテンプレートを公開し、利用者が手動でコピー・調整する。
+  実装コストは最小だが自動化の恩恵が薄い。
+
+### 2. リポジトリごとの差異の吸収
+
+`claude-issue-dispatch.yml`にハードコードされているpnpm/Next.js/Prisma/MySQL前提を、設定可能に
+する必要がある。少なくとも以下の軸で差異を吸収する仕組みが要る。
+
+- パッケージマネージャ・依存関係インストールコマンド（pnpm/npm/yarn、Python/Rubyなど非Node.js
+  スタックも含めるか）
+- lint・型チェック・テスト・ビルドコマンド
+- DBマイグレーション・シードの要否とコマンド（DBを使わないリポジトリも当然ある）
+- ブランチ運用（`develop`/`main`の2段階か、`main`直接か）とブランチ命名規則
+- 画面確認・スクリーンショット撮影の要否（対象がWebアプリでない場合はそもそも不要）
+
+設定方法としては、連携リポジトリ側に設定ファイル（例: `.issue-deck.yml`）を置く方式と、
+IssueDeckのDB（`Repository`モデルへのフィールド追加）で管理する方式が考えられる。前者は
+リポジトリ側で完結しGit管理下に置けるが、IssueDeck側から見た設定変更のUI操作性は劣る。
+
+### 3. Secrets配布
+
+連携リポジトリのGitHub Actionsから無人でClaude Codeを実行するには、各リポジトリに
+`CLAUDE_CODE_OAUTH_TOKEN`相当のSecretsが必要になる。論点:
+
+- **誰の認証情報を使うか**: IssueDeck運営者が持つ1つのトークンを全リポジトリで共有するか、
+  連携リポジトリのメンテナーが自身のClaude Codeサブスクリプション（またはAPIキー）を個別に
+  登録するか。前者はIssueDeck運営者の利用枠を消費し続けるスケーラビリティ・コストの問題があり、
+  後者は各メンテナーにセットアップの手間を強いる。
+- **課金面**: 上記と表裏一体で、Claude Code実行のAPI利用料を誰が負担するかというビジネス上の
+  論点。プロダクト設計判断であり、コード調査だけでは結論が出せない。
+- **配布方法**: IssueDeck側でユーザーごとにトークンを暗号化保存し（`secret-cipher.ts`を
+  流用できる可能性がある）、連携リポジトリのSecretsへGitHub API（`gh api`の
+  `repos/{owner}/{repo}/actions/secrets`相当）経由でIssueDeckが直接設定する方式であれば、
+  利用者は手動でSecrets設定画面を操作せずに済む。ただしこの場合IssueDeckのGitHub Appに
+  Secrets書き込み権限が必要になる。
+
+### 4. GitHub Appの権限確認
+
+前述のとおり、現状のGitHub Appが連携リポジトリへの`contents`（ワークフローファイル追加）・
+`workflows`（`.github/workflows/`への書き込み）・`secrets`（Actions Secretsの書き込み）権限を
+持っているかは、GitHub側の設定画面でしか確認できず、本調査では確定できない。展開方式の選択
+（上記1・3）によって必要な権限が変わるため、方式が決まった時点で改めて確認・申請が必要になる。
+
+### 5. ラベル体系の可変化
+
+`01.wip`〜`09.main`・`21.plan-required`〜`23.screenshot-required`・`00.check-user`は、いずれも
+issue-deckリポジトリに手動で作成したカスタムラベルであり、他リポジトリには存在しない。展開時には
+以下のいずれかが必要になる。
+
+- ワークフロー配布時にラベルも`gh label create`等で自動作成する
+- ラベル名自体をリポジトリごとに設定可能にする（ワークフロー内のラベル名が現状ハードコードされて
+  おり、可変化には各ワークフローの修正が必要）
+- 固定のラベル名・体系をそのまま使うことを前提とし、連携リポジトリ側に手動でのラベル作成を求める
+
+### 6. セキュリティ・信頼境界
+
+第三者リポジトリに対してIssueDeck経由で無人Claude Code実行を許可することには、issue-deck自身の
+セルフホスティングにはない追加のリスクがある。
+
+- 現状issue-deckでは、`@claude`コメント起動時に実行者（`github.actor`）のリポジトリ`write`権限を
+  `gh api repos/{owner}/{repo}/collaborators/{actor}/permission`で確認するのみ（詳細は
+  [docs/multi-agent-workflow.md](multi-agent-workflow.md)のPhase5参照）。他リポジトリでも
+  同じ考え方で足りるかは、連携リポジトリの性質（公開範囲・コントリビューター構成）次第で変わりうる。
+- IssueDeckが発行・管理するトークン（GitHub App / 上記3のClaude Codeトークン）が、連携リポジトリの
+  Actions実行環境に渡ることになるため、そのリポジトリのワークフロー定義やコードが信頼できない
+  場合に悪用されるリスクをどう抑えるかの検討が必要（例: フォークからのPRでは実行しない、
+  Actions実行時のみ最小権限のトークンを都度発行する、等）。
+- 自動マージ不可カテゴリ（`00.check-user`付与対象）の判定は、issue-deckのCLAUDE.mdが定める
+  カテゴリ・ディレクトリパターンに基づいている。他リポジトリでは技術スタック・ディレクトリ構成が
+  異なるため、この判定パターンもリポジトリごとに設定可能にする必要がある（上記2と関連）。
+
+## 実現方式の選択肢比較
+
+| 観点 | A: テンプレートPR自動作成 | B: CLIスキャフォールディング | C: 設定ファイル方式 + 共通ワークフロー |
+|---|---|---|---|
+| 導入体験 | IssueDeckのUIから完結、最も手軽 | ローカル操作が必要 | Aと同程度（設定ファイルの初期値もPRに含められる） |
+| IssueDeck側権限 | 連携リポジトリへの書き込み権限が必要（増加） | 増加なし | Aと同様に増加 |
+| リポジトリ差異の吸収 | ワークフローファイル自体を都度カスタマイズして生成する必要がある | 利用者がテンプレートを手動編集する前提にしやすい | 設定ファイルの値を読み取る共通ワークフローにできるため、ワークフロー本体の複製・改変が最小限で済む |
+| 保守性（issue-deck側の改善を配布先へ反映） | 配布済みリポジトリへの再配布が必要 | 同左 | 共通ワークフロー本体を更新するだけで配布済みリポジトリ全体に効く（設定ファイルを参照する形にできれば） |
+
+C（設定ファイル + 共通ワークフロー本体を可能な限り集約する方式）が保守性の観点で有利に見えるが、
+「共通ワークフロー本体をどこに置き、各リポジトリからどう参照するか」（例: `workflow_call`による
+再利用可能ワークフロー化）の技術検証が別途必要。いずれの方式を採るにせよ、上記2（差異の吸収）の
+設定項目の設計が先行して必要になる。
+
+## 段階的ロードマップ案（将来切り出す候補Issue）
+
+以下はあくまで案であり、本Issueの対応としてこれらのIssueを実際に作成することはしない。
+
+1. GitHub Appの権限確認（GitHub側App設定画面での棚卸し。上記4）
+2. リポジトリごとの差異吸収のための設定スキーマ設計（上記2。`.issue-deck.yml`案のドラフト作成）
+3. `claude-issue-dispatch.yml`等を`workflow_call`で再利用可能ワークフロー化する技術検証（技術スタック
+   固有部分を設定値で差し替えられるようにする最小限のPoC。まずissue-deck自身のワークフローで
+   動作を崩さないことを確認する）
+4. ラベル自動作成の仕組み（上記5）
+5. Secrets配布方式の決定とプロトタイプ（上記3。課金面の方針決定が前提）
+6. セキュリティレビュー（上記6。信頼境界の設計を固めてから展開開始する）
+7. テンプレートPR自動作成 or CLIスキャフォールディングの実装（上記1。方式比較の結論を受けて）
+
+## 未確定・要人間判断の事項
+
+- 「他のリポジトリ」がどの程度多様な技術スタック・運用を想定しているか（IssueDeckで連携する
+  全リポジトリを対象にするのか、まずはNext.js/pnpm系の近いスタックに限定するのか）はプロダクト
+  方針に関わり、本ドキュメントでは断定しない。
+- Claude Code実行のAPI利用料をどう負担・課金するかはビジネス上の論点であり、コード調査だけでは
+  結論が出せない。
+- GitHub Appの権限拡張（Secrets書き込み等）は、GitHub側の設定変更が必要でありローカル調査だけでは
+  確定できない。
