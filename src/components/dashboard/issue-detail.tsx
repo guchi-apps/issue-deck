@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import {
   Archive,
+  Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -57,6 +58,7 @@ import {
   requestContinuationCommentBody,
 } from "@/lib/github/approval-labels";
 import { canAskClaude } from "@/lib/github/ask-claude";
+import { buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -292,6 +294,14 @@ export function IssueDetail({
                   </Button>
                 )}
               />
+            )}
+            {issue.state === "open" && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={buildClaudeAppUrl(issue)} target="_blank" rel="noreferrer">
+                  <Bot />
+                  Claudeアプリで開く
+                </a>
+              </Button>
             )}
             <Button variant="outline" size="sm" asChild>
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
