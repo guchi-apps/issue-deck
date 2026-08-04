@@ -59,10 +59,13 @@ type CommentThreadProps = {
   onWithdraw?: () => Promise<void> | void;
   /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
   onRequestContinuation?: () => Promise<void> | void;
+  /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
+  onRequestPrFix?: (reason: string) => Promise<void> | void;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
+  isRequestingPrFix?: boolean;
   /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
   lastCommentRef?: RefObject<HTMLLIElement | null>;
 };
@@ -72,10 +75,12 @@ function ApprovalActions({
   onReject,
   onWithdraw,
   onRequestContinuation,
+  onRequestPrFix,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
+  isRequestingPrFix,
   isFallbackNotice,
   mergeApprovalPending,
   pullRequestLink,
@@ -85,10 +90,12 @@ function ApprovalActions({
   onReject: (reason: string) => Promise<void> | void;
   onWithdraw: () => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
+  onRequestPrFix?: (reason: string) => Promise<void> | void;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
+  isRequestingPrFix?: boolean;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
@@ -97,7 +104,10 @@ function ApprovalActions({
   const [isRejectOpen, setIsRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
+  const [isPrFixOpen, setIsPrFixOpen] = useState(false);
+  const [prFixReason, setPrFixReason] = useState("");
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
+  const prFixBusy = Boolean(isRequestingPrFix);
 
   async function submitReject() {
     await onReject(rejectReason);
@@ -108,6 +118,13 @@ function ApprovalActions({
   async function confirmWithdraw() {
     await onWithdraw();
     setIsWithdrawConfirmOpen(false);
+  }
+
+  async function submitPrFix() {
+    if (!onRequestPrFix) return;
+    await onRequestPrFix(prFixReason);
+    setIsPrFixOpen(false);
+    setPrFixReason("");
   }
 
   if (mergeApprovalPending) {
@@ -130,6 +147,49 @@ function ApprovalActions({
         <div>
           <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
         </div>
+        {onRequestPrFix && (
+          <div className="mt-2">
+            {isPrFixOpen ? (
+              <div className="flex flex-col gap-2">
+                <Textarea
+                  placeholder="修正依頼を入力（任意）"
+                  value={prFixReason}
+                  onChange={(e) => setPrFixReason(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !prFixBusy) {
+                      e.preventDefault();
+                      submitPrFix();
+                    }
+                  }}
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsPrFixOpen(false)}
+                    disabled={prFixBusy}
+                  >
+                    キャンセル
+                  </Button>
+                  <Button size="sm" onClick={submitPrFix} disabled={prFixBusy}>
+                    修正を送信
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPrFixOpen(true)}
+                disabled={prFixBusy}
+              >
+                <Pencil />
+                修正を依頼する
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -235,10 +295,12 @@ export function CommentThread({
   onReject,
   onWithdraw,
   onRequestContinuation,
+  onRequestPrFix,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
+  isRequestingPrFix,
   lastCommentRef,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -272,9 +334,11 @@ export function CommentThread({
             onApprove={onApprove}
             onReject={onReject}
             onWithdraw={onWithdraw}
+            onRequestPrFix={onRequestPrFix}
             isApproving={isApproving}
             isRejecting={isRejecting}
             isWithdrawing={isWithdrawing}
+            isRequestingPrFix={isRequestingPrFix}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
@@ -432,10 +496,12 @@ export function CommentThread({
                     onReject={onReject}
                     onWithdraw={onWithdraw}
                     onRequestContinuation={onRequestContinuation}
+                    onRequestPrFix={onRequestPrFix}
                     isApproving={isApproving}
                     isRejecting={isRejecting}
                     isWithdrawing={isWithdrawing}
                     isRequestingContinuation={isRequestingContinuation}
+                    isRequestingPrFix={isRequestingPrFix}
                     isFallbackNotice={isFallbackNotice}
                     mergeApprovalPending={mergeApprovalPending}
                     pullRequestLink={pullRequestLink}
@@ -453,10 +519,12 @@ export function CommentThread({
           onReject={onReject}
           onWithdraw={onWithdraw}
           onRequestContinuation={onRequestContinuation}
+          onRequestPrFix={onRequestPrFix}
           isApproving={isApproving}
           isRejecting={isRejecting}
           isWithdrawing={isWithdrawing}
           isRequestingContinuation={isRequestingContinuation}
+          isRequestingPrFix={isRequestingPrFix}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
