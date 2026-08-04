@@ -19,11 +19,14 @@ import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-sc
 import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
+import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { usePersistedState } from "@/hooks/use-persisted-state";
+import { useResizableWidth } from "@/hooks/use-resizable-width";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -74,6 +77,35 @@ export function IssueDeckShell({
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
+
+  // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
+  // サイドバー・Issue一覧・プロパティパネルの3カラムはドラッグで幅を調整できる。
+  // いずれもlocalStorageに永続化し、次回アクセス時に復元する。
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = usePersistedState(
+    "issue-deck:sidebar-collapsed",
+    false,
+  );
+  const sidebarWidth = useResizableWidth({
+    storageKey: "issue-deck:sidebar-width",
+    defaultWidth: 240,
+    minWidth: 180,
+    maxWidth: 400,
+    handleSide: "right",
+  });
+  const issueListWidth = useResizableWidth({
+    storageKey: "issue-deck:issue-list-width",
+    defaultWidth: 384,
+    minWidth: 280,
+    maxWidth: 600,
+    handleSide: "right",
+  });
+  const propertiesPanelWidth = useResizableWidth({
+    storageKey: "issue-deck:properties-panel-width",
+    defaultWidth: 288,
+    minWidth: 220,
+    maxWidth: 480,
+    handleSide: "left",
+  });
 
   const currentUserLogin = currentUser?.login ?? null;
 
@@ -281,6 +313,8 @@ export function IssueDeckShell({
         onCreateIssue={() => openCreateDialog(filters.repo)}
         selectedRepoFullName={filters.repo}
         repositories={repositories}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -373,37 +407,45 @@ export function IssueDeckShell({
           <MobileBottomNav active={activeBottomNavTab} onSelect={selectTab} />
         </div>
 
-        {/* PC: 左カラム（ナビゲーション） */}
-        <SidebarNav
-          activeView={filters.view}
-          onSelectView={handleSelectView}
-          navCounts={navCounts}
-          repositories={repositories}
-          selectedRepoFullName={filters.repo}
-          onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
-          onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-          onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-          labelSummary={labelSummary}
-          selectedLabels={filters.labels}
-          onSelectLabel={(label) => toggleLabel(label.name)}
-          onClearLabels={() => setFilter("labels", [])}
-          onSelectLabelPreset={(selection) => setFilters(selection)}
-          quickFilters={quickFilters}
-          onSelectQuickFilter={handleSelectQuickFilter}
-          onDeleteQuickFilter={handleDeleteQuickFilter}
-          onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-          className="hidden w-60 shrink-0 border-r md:flex"
-        />
+        {/* PC: 左カラム（ナビゲーション）。手動で開閉・幅調整ができる（#381） */}
+        {!isSidebarCollapsed && (
+          <>
+            <SidebarNav
+              activeView={filters.view}
+              onSelectView={handleSelectView}
+              navCounts={navCounts}
+              repositories={repositories}
+              selectedRepoFullName={filters.repo}
+              onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
+              onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+              onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+              labelSummary={labelSummary}
+              selectedLabels={filters.labels}
+              onSelectLabel={(label) => toggleLabel(label.name)}
+              onClearLabels={() => setFilter("labels", [])}
+              onSelectLabelPreset={(selection) => setFilters(selection)}
+              quickFilters={quickFilters}
+              onSelectQuickFilter={handleSelectQuickFilter}
+              onDeleteQuickFilter={handleDeleteQuickFilter}
+              onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+              className="hidden shrink-0 border-r md:flex"
+              style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
+            />
+            <ResizeHandle onDragStart={sidebarWidth.handleDragStart} className="hidden md:block" />
+          </>
+        )}
 
-        {/* PC: 中央カラム（Issue一覧） */}
+        {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
         <IssueList
           title={navViews.find((view) => view.id === filters.view)?.label ?? ""}
           issues={filteredIssues}
           selectedIssueId={selectedIssue?.id ?? null}
           onSelectIssue={setSelectedIssue}
           showSearch={false}
-          className="hidden w-96 shrink-0 border-r md:flex"
+          className="hidden shrink-0 border-r md:flex"
+          style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />
+        <ResizeHandle onDragStart={issueListWidth.handleDragStart} className="hidden md:block" />
 
         {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
         <div className="hidden flex-1 overflow-hidden md:flex">
@@ -417,9 +459,18 @@ export function IssueDeckShell({
           />
         </div>
         {selectedIssue && (
-          <div className="hidden w-72 shrink-0 border-l xl:block">
-            <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
-          </div>
+          <>
+            <ResizeHandle
+              onDragStart={propertiesPanelWidth.handleDragStart}
+              className="hidden xl:block"
+            />
+            <div
+              className="hidden shrink-0 border-l xl:block"
+              style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
+            >
+              <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
+            </div>
+          </>
         )}
       </div>
 

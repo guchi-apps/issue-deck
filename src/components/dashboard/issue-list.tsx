@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import {
   Archive,
   CircleAlert,
@@ -29,6 +30,7 @@ type IssueListProps = {
   selectedIssueId: string | null;
   onSelectIssue: (issue: Issue) => void;
   className?: string;
+  style?: CSSProperties;
   showSearch?: boolean;
   showHeader?: boolean;
   /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
@@ -79,6 +81,7 @@ export function IssueList({
   selectedIssueId,
   onSelectIssue,
   className,
+  style,
   showSearch = true,
   showHeader = true,
   fabSpacing = false,
@@ -101,7 +104,7 @@ export function IssueList({
   }, []);
 
   return (
-    <div className={cn("flex h-full flex-col", className)}>
+    <div className={cn("flex h-full flex-col", className)} style={style}>
       {showSearch && (
         <div className="border-b p-3">
           <Input placeholder="キーワードで検索" />

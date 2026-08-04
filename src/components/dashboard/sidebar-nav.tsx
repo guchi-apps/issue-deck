@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import {
   Archive,
   Eye,
@@ -59,6 +60,7 @@ type SidebarNavProps = {
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
   className?: string;
+  style?: CSSProperties;
 };
 
 export function SidebarNav({
@@ -80,6 +82,7 @@ export function SidebarNav({
   onDeleteQuickFilter,
   onSaveQuickFilter,
   className,
+  style,
 }: SidebarNavProps) {
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
   const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
@@ -90,7 +93,7 @@ export function SidebarNav({
     : repositories.filter((repo) => !repo.hidden);
 
   return (
-    <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)}>
+    <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)} style={style}>
       <div>
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">全体</h2>
         <ul className="flex flex-col gap-0.5">

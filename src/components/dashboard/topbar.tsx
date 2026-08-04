@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   ChevronDown,
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   Rocket,
@@ -63,6 +65,8 @@ type TopBarProps = {
   onCreateIssue: () => void;
   selectedRepoFullName: string | null;
   repositories: ConnectedRepository[];
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 };
 
 export function TopBar({
@@ -73,6 +77,8 @@ export function TopBar({
   onCreateIssue,
   selectedRepoFullName,
   repositories,
+  isSidebarCollapsed,
+  onToggleSidebar,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
@@ -122,6 +128,20 @@ export function TopBar({
 
   return (
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0"
+        onClick={onToggleSidebar}
+        title={isSidebarCollapsed ? "サイドバーを表示" : "サイドバーを非表示"}
+      >
+        {isSidebarCollapsed ? (
+          <PanelLeftOpen className="size-4" />
+        ) : (
+          <PanelLeftClose className="size-4" />
+        )}
+      </Button>
+
       <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
         <LayoutDashboard className="size-5 text-primary" />
         Issue Deck
