@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { Progress } from "@/components/ui/progress";
 import type { ClaudeUsage } from "@/hooks/use-claude-usage";
-import { formatResetCountdown } from "@/lib/claude/format-reset";
+import { useNow } from "@/hooks/use-now";
+import { formatResetAt } from "@/lib/format-reset";
 
 type ClaudeUsageCardProps = {
   data: ClaudeUsage | null;
@@ -19,15 +18,7 @@ export function ClaudeUsageCard({
   error,
   notConfigured,
 }: ClaudeUsageCardProps) {
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    // リセットまでの残り時間を表示するため、開いている間だけ現在時刻を更新する。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+  const now = useNow();
 
   return (
     <>
@@ -42,9 +33,9 @@ export function ClaudeUsageCard({
       {data && data.windows.length > 0 && (
         <ul className="flex flex-col gap-2">
           {data.windows.map((usageWindow) => {
-            const countdown =
+            const resetAt =
               usageWindow.resetsAt !== null && now !== null
-                ? formatResetCountdown(usageWindow.resetsAt, now)
+                ? formatResetAt(usageWindow.resetsAt, now)
                 : null;
             return (
               <li key={usageWindow.key} className="rounded-lg border p-2">
@@ -61,8 +52,8 @@ export function ClaudeUsageCard({
                   </span>
                 </div>
                 <Progress value={usageWindow.remainingPercent} />
-                {countdown && (
-                  <p className="mt-1 text-xs text-muted-foreground">リセット: {countdown}</p>
+                {resetAt && (
+                  <p className="mt-1 text-xs text-muted-foreground">リセット: {resetAt}</p>
                 )}
               </li>
             );
