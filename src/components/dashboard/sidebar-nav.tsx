@@ -216,9 +216,9 @@ export function SidebarNav({
                         className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                       >
                         {repo.hidden ? (
-                          <Eye className="size-3.5" />
-                        ) : (
                           <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
                         )}
                       </button>
                     )}
