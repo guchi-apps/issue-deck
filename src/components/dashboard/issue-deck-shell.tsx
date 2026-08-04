@@ -280,6 +280,7 @@ export function IssueDeckShell({
         assigneeOptions={assigneeOptions}
         onCreateIssue={() => openCreateDialog(filters.repo)}
         selectedRepoFullName={filters.repo}
+        repositories={repositories}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -295,7 +296,9 @@ export function IssueDeckShell({
                     overviewStats={overviewStats}
                     navCounts={navCounts}
                     onSelectQuickView={selectQuickView}
-                    onSelectLabelPreset={(labels) => selectQuickView("all", labels)}
+                    onSelectLabelPreset={(preset) =>
+                      selectQuickView("all", preset.labels, preset.state)
+                    }
                     quickFilters={quickFilters}
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -384,7 +387,7 @@ export function IssueDeckShell({
           selectedLabels={filters.labels}
           onSelectLabel={(label) => toggleLabel(label.name)}
           onClearLabels={() => setFilter("labels", [])}
-          onSelectLabelPreset={(labels) => setFilter("labels", labels)}
+          onSelectLabelPreset={(selection) => setFilters(selection)}
           quickFilters={quickFilters}
           onSelectQuickFilter={handleSelectQuickFilter}
           onDeleteQuickFilter={handleDeleteQuickFilter}

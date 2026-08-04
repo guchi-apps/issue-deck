@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   dispatchReleaseWorkflow,
+  fetchLatestDeployWorkflowRun,
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
@@ -48,14 +49,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ available: false });
     }
 
-    const [mainVersion, developVersion, developBasePullRequests, mainBasePullRequests, workflowRun] =
-      await Promise.all([
-        fetchPackageVersion(owner, repo, "main", token),
-        fetchPackageVersion(owner, repo, "develop", token),
-        fetchOpenPullRequestsForBase(owner, repo, "develop", token),
-        fetchOpenPullRequestsForBase(owner, repo, "main", token),
-        fetchLatestReleaseWorkflowRun(owner, repo, token),
-      ]);
+    const [
+      mainVersion,
+      developVersion,
+      developBasePullRequests,
+      mainBasePullRequests,
+      workflowRun,
+      deployWorkflowRun,
+    ] = await Promise.all([
+      fetchPackageVersion(owner, repo, "main", token),
+      fetchPackageVersion(owner, repo, "develop", token),
+      fetchOpenPullRequestsForBase(owner, repo, "develop", token),
+      fetchOpenPullRequestsForBase(owner, repo, "main", token),
+      fetchLatestReleaseWorkflowRun(owner, repo, token),
+      fetchLatestDeployWorkflowRun(owner, repo, token),
+    ]);
 
     const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
     const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
@@ -83,6 +91,7 @@ export async function GET(request: NextRequest) {
       developVersion,
       phase,
       workflowRun,
+      deployWorkflowRun,
       bumpPullRequest: bumpPr
         ? { number: bumpPr.number, url: bumpPr.html_url, title: bumpPr.title, ciState: bumpCiState }
         : null,

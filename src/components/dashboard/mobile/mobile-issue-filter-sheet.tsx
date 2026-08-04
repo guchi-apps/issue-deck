@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
-import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
+import {
+  isLabelFilterPresetActive,
+  LABEL_FILTER_PRESETS,
+  resolveLabelFilterPresetSelection,
+} from "@/lib/github/approval-labels";
 import { cn } from "@/lib/utils";
 import type { LabelSummary } from "@/types/issue";
 
@@ -109,7 +113,9 @@ export function MobileIssueFilterSheet({
                   <Pill
                     key={preset.key}
                     active={active}
-                    onClick={() => onChange({ ...filters, labels: active ? [] : preset.labels })}
+                    onClick={() =>
+                      onChange({ ...filters, ...resolveLabelFilterPresetSelection(preset, active) })
+                    }
                   >
                     {preset.label}
                   </Pill>

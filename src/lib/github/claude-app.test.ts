@@ -27,4 +27,10 @@ describe("buildClaudeAppUrl", () => {
     expect(url.searchParams.get("branch")).toBe("develop");
     expect(url.searchParams.get("q")).toBe(buildClaudeAppPrompt(issue));
   });
+
+  it("スペースを+ではなく%20でエンコードする（Claudeアプリ側で+がそのまま表示されるため）", () => {
+    const url = buildClaudeAppUrl(issue);
+    expect(url).not.toContain("+");
+    expect(url).toContain("%20");
+  });
 });

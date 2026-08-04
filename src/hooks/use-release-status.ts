@@ -35,6 +35,8 @@ export type ReleaseStatus =
       developVersion: string | null;
       phase: ReleasePhase;
       workflowRun: ReleaseWorkflowRun | null;
+      /** mainブランチ上の本番デプロイworkflow（deploy.yml）の最新実行。mainへのマージ後の見届けに使う(#392) */
+      deployWorkflowRun: ReleaseWorkflowRun | null;
       bumpPullRequest: BumpPullRequest | null;
       releasePullRequest: ReleasePullRequest | null;
     };

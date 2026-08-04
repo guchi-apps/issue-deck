@@ -1,9 +1,18 @@
 "use client";
 
-import { PlayCircle, Plus, Rocket, SlidersHorizontal, UserCheck, X, type LucideIcon } from "lucide-react";
+import {
+  GitMerge,
+  PlayCircle,
+  Plus,
+  Rocket,
+  SlidersHorizontal,
+  UserCheck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Card } from "@/components/ui/card";
-import { LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
+import { LABEL_FILTER_PRESETS, type LabelFilterPreset } from "@/lib/github/approval-labels";
 import { navViewIcons, navViews } from "@/lib/nav-views";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -12,7 +21,7 @@ type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
   onSelectQuickView: (view: NavViewId) => void;
-  onSelectLabelPreset: (labels: string[]) => void;
+  onSelectLabelPreset: (preset: LabelFilterPreset) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
@@ -25,6 +34,7 @@ const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
   "check-user": UserCheck,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
+  "recently-merged": GitMerge,
 };
 
 export function MobileHomeScreen({
@@ -68,7 +78,7 @@ export function MobileHomeScreen({
                 <li key={preset.key}>
                   <button
                     type="button"
-                    onClick={() => onSelectLabelPreset(preset.labels)}
+                    onClick={() => onSelectLabelPreset(preset)}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
                     <Icon className="size-3.5 text-muted-foreground" />
