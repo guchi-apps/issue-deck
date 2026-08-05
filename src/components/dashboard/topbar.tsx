@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronDown,
   LayoutDashboard,
@@ -53,7 +53,9 @@ import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
+import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -65,6 +67,7 @@ type TopBarProps = {
   onCreateIssue: () => void;
   selectedRepoFullName: string | null;
   repositories: ConnectedRepository[];
+  issues: Issue[];
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 };
@@ -77,6 +80,7 @@ export function TopBar({
   onCreateIssue,
   selectedRepoFullName,
   repositories,
+  issues,
   isSidebarCollapsed,
   onToggleSidebar,
 }: TopBarProps) {
@@ -84,6 +88,7 @@ export function TopBar({
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
@@ -112,6 +117,18 @@ export function TopBar({
       alert("リリースを起動しました。進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。");
     }
   }
+
+  // 誤タップでの起動を防ぐため確認ダイアログを挟む。今回developにマージ済みでmain未反映のIssueを
+  // 「今回反映する内容」として一覧表示する（#426）。
+  const pendingReleaseIssues = useMemo(
+    () =>
+      issues.filter(
+        (issue) =>
+          issue.repositoryFullName === releaseRepoFullName &&
+          issue.labels.some((label) => label.name === DEVELOP_MERGED_LABEL_NAME),
+      ),
+    [issues, releaseRepoFullName],
+  );
 
   const stateLabel =
     filters.state === "open"
@@ -344,7 +361,7 @@ export function TopBar({
                       disabled={isTriggeringRelease}
                       onClick={(e) => {
                         e.preventDefault();
-                        handleTriggerRelease();
+                        setReleaseConfirmOpen(true);
                       }}
                     >
                       <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
@@ -394,6 +411,44 @@ export function TopBar({
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={releaseConfirmOpen} onOpenChange={setReleaseConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {releaseRepoFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingReleaseIssues.length > 0 ? (
+            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
+              <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
+              <ul className="flex flex-col gap-1 text-xs">
+                {pendingReleaseIssues.map((issue) => (
+                  <li key={issue.id}>
+                    <a
+                      href={issue.htmlUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      #{issue.number} {issue.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              develop済みでmain未反映のIssueはありません。
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleTriggerRelease}>起動する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

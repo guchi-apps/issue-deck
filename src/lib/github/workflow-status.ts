@@ -7,11 +7,14 @@ export type WorkflowStep = {
   label: string;
 };
 
+/** developへマージ済み・main未反映のIssueに付与されるラベル名。リリース確認ダイアログでの対象Issue抽出にも使う */
+export const DEVELOP_MERGED_LABEL_NAME = "05.develop";
+
 /** マルチエージェント運用における実装状況ラベル（01.wip〜09.main）の遷移順（CLAUDE.md参照） */
 export const WORKFLOW_STEPS: readonly WorkflowStep[] = [
   { labelName: "01.wip", label: "実装中" },
   { labelName: "03.d:marge", label: "developへPR" },
-  { labelName: "05.develop", label: "develop済" },
+  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop済" },
   { labelName: "07.m:marge", label: "mainへPR" },
   { labelName: "09.main", label: "main済" },
 ];
