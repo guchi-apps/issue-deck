@@ -288,15 +288,12 @@ export function TopBar({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
-          <div className="px-1.5 pb-1.5">
+          <div className="flex flex-col gap-2 px-1.5 pb-1.5">
             <GithubRateLimitList
               data={rateLimits}
               isLoading={rateLimitsLoading}
               error={rateLimitsError}
             />
-          </div>
-          <DropdownMenuSeparator />
-          <div className="px-1.5 pb-1.5">
             <GithubApiUsageList
               data={apiUsage}
               isLoading={apiUsageLoading}
