@@ -51,6 +51,14 @@ export DATABASE_URL="${DATABASE_URL:-mysql://placeholder:placeholder@127.0.0.1:3
 export CI_LOGIN_BYPASS_SECRET="${CI_LOGIN_BYPASS_SECRET:-ci-screenshot-bypass-secret}"
 export NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://ci-placeholder.supabase.co}"
 export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-ci-placeholder}"
+# src/lib/github/app-auth.tsがモジュール読み込み時点でGITHUB_APP_ID・
+# GITHUB_APP_PRIVATE_KEY_BASE64を要求するため、未設定だと`/api/issues/comments`等
+# GitHub呼び出し系のAPI Routeが（実際には呼ばれないコードパスであっても）import時点で
+# 例外を投げ500になってしまう（#572）。CIバイパス経由のダミーコメント応答
+# （src/app/api/issues/comments/route.ts）はこれらの値を実際には使わないため、
+# モジュール読み込みを通すためだけのプレースホルダーでよい。
+export GITHUB_APP_ID="${GITHUB_APP_ID:-000000}"
+export GITHUB_APP_PRIVATE_KEY_BASE64="${GITHUB_APP_PRIVATE_KEY_BASE64:-Y2ktc2NyZWVuc2hvdC1wbGFjZWhvbGRlci1rZXk=}"
 
 # src/lib/ci-auth-bypass.tsのCI_BYPASS_COOKIE_NAMEと必ず一致させること
 # （scripts/capture-screenshots.mjsと同じ理由で、シェルスクリプトからTSの値を
