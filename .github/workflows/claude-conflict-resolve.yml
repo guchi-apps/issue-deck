@@ -174,7 +174,13 @@ jobs:
         env:
           # .github/workflows/配下がコンフリクトしていた場合でもgit pushが拒否されないよう、
           # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)を使う(issue #106と同様)。
+          # ただし、このPATは人間(m-guchi)名義のFine-grained PATのため、PR/Issueへのコメント投稿に
+          # そのまま使うと人間が書いたものとしてGitHub上に記録されてしまう(#576)。git push等の
+          # workflow書き込み権限が必要な操作はGH_TOKEN(WORKFLOW_PAT)のまま行い、コメント投稿は
+          # DEFAULT_GH_TOKEN(既定のGITHUB_TOKEN、投稿者はgithub-actions[bot])を明示的に使うよう
+          # プロンプト内で指示する。
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          DEFAULT_GH_TOKEN: ${{ github.token }}
           # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
           # プレースホルダー値を使う(実際の外部サービスには接続しない)。
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
@@ -205,6 +211,15 @@ jobs:
               `gh issue view ${{ matrix.issue }} --comments` で、このPull Requestが何を実装した
               ものかを把握する
 
+            ## コメント投稿時のトークンについて
+            このステップの既定の`GH_TOKEN`（`git push`に必要）は、`.github/workflows/`配下への
+            書き込みも可能にするため人間（m-guchi）名義のFine-grained PAT（`WORKFLOW_PAT`）です。
+            そのままPR/Issueへのコメント投稿に使うと、GitHub上で人間が書いたものとして記録されて
+            しまいます。そのため、以下の`gh pr comment` / `gh issue comment`は、必ず環境変数
+            `DEFAULT_GH_TOKEN`（投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN）を明示的に
+            指定して実行してください（例: `GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr comment ... --body "..."`）。
+            `git push`はこれまでどおり既定の`GH_TOKEN`（WORKFLOW_PAT）のまま実行してください。
+
             ## やること
             - `git merge origin/develop` を実行し、developの最新変更をこのブランチへ取り込む
               （リベースではなくマージを使うこと。force pushは禁止のため）
@@ -223,13 +238,13 @@ jobs:
               `git fetch origin ${{ steps.state.outputs.branch }} && git merge origin/${{ steps.state.outputs.branch }}`
               で追随し、1回だけリトライする。それでも失敗する場合はそれ以上リトライせず、下記
               「解消できない場合」の手順で報告する
-            - pushが成功したら `gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."` で、
-              コンフリクトが発生していたファイルと解消方針を日本語で要約して報告する。コメント末尾に
+            - pushが成功したら `GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."`
+              で、コンフリクトが発生していたファイルと解消方針を日本語で要約して報告する。コメント末尾に
               実行ログのリンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
-            - 最後に `gh issue comment ${{ matrix.issue }} --body "..."` で、Issueにも解消が
-              完了した旨と対象PR（${{ steps.state.outputs.pr_url }}）を日本語で報告する
+            - 最後に `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ matrix.issue }} --body "..."` で、
+              Issueにも解消が完了した旨と対象PR（${{ steps.state.outputs.pr_url }}）を日本語で報告する
               （無人実行のため、この報告が使用者にとって唯一の完了確認手段になる。コメント末尾に
               上記と同じ実行ログのリンクを必ず追記する）
 
@@ -237,7 +252,7 @@ jobs:
             意味的に矛盾する変更で機械的に両立できない、解消後にテスト・ビルドが通らず自力で
             直せない等、安全に自動解消できないと判断した場合は、無理に解消しようとせず
             `git merge --abort`（マージが進行中の場合）でブランチを元の状態に戻したうえで、
-            `gh issue comment ${{ matrix.issue }} --body "..."` でコンフリクトの内容と自動解消を
+            `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ matrix.issue }} --body "..."` でコンフリクトの内容と自動解消を
             断念した理由を日本語で報告し、
             `gh issue edit ${{ matrix.issue }} --add-label "00.check-user"` を実行して停止して
             ください（コミット・pushは行わない）。
