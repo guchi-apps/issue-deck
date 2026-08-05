@@ -75,7 +75,11 @@ function isProgressing(status: ReleaseStatus | null): boolean {
   return status.phase === "release_pending";
 }
 
-export function useReleaseStatus(repoFullName: string | null, enabled: boolean) {
+export function useReleaseStatus(
+  repoFullName: string | null,
+  enabled: boolean,
+  idlePollIntervalMs?: number,
+) {
   const [data, setData] = useState<ReleaseStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,12 +126,11 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
       }
     }
 
+    const idleIntervalMs = idlePollIntervalMs ?? IDLE_POLL_INTERVAL_MS;
+
     function schedule() {
       if (cancelled) return;
-      timerId = setTimeout(
-        poll,
-        isProgressing(lastStatus) ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
-      );
+      timerId = setTimeout(poll, isProgressing(lastStatus) ? ACTIVE_POLL_INTERVAL_MS : idleIntervalMs);
     }
 
     async function runOnce(initial: boolean) {
@@ -144,7 +147,7 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
     function poll() {
       // バックグラウンドタブでは取得せず次の周期だけ進める（復帰時にvisibilitychangeで即時取得する）
       if (document.hidden) {
-        timerId = setTimeout(poll, IDLE_POLL_INTERVAL_MS);
+        timerId = setTimeout(poll, idleIntervalMs);
         return;
       }
       void runOnce(false);
@@ -166,7 +169,7 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
       clearTimeout(timerId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [enabled, repoFullName, reloadKey]);
+  }, [enabled, repoFullName, reloadKey, idlePollIntervalMs]);
 
   async function triggerRelease(): Promise<boolean> {
     if (!repoFullName) return false;

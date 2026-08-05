@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FolderGit2, Rocket } from "lucide-react";
+import { CircleAlert, FolderGit2, Rocket } from "lucide-react";
 
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
+import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
+import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -15,8 +17,15 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
+import { cn } from "@/lib/utils";
 import type { DeployCheckStatus, Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
+
+/**
+ * ヘッダーの常時ポーリングによるGitHub API消費を抑えるため、シート開閉に連動する
+ * デフォルト間隔（30秒）より長い60秒に緩和する（#542）。
+ */
+const HEADER_IDLE_POLL_INTERVAL_MS = 60_000;
 
 type MobileRepoIssuesScreenProps = {
   repository: ConnectedRepository;
@@ -54,6 +63,15 @@ export function MobileRepoIssuesScreen({
   onSetIssueDeployCheck,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
+  const {
+    data: releaseStatus,
+    isLoading: releaseStatusLoading,
+    error: releaseStatusError,
+    triggerRelease,
+    isTriggering: isTriggeringRelease,
+  } = useReleaseStatus(repository.fullName, true, HEADER_IDLE_POLL_INTERVAL_MS);
+  const releaseButtonStatus =
+    releaseStatus?.available ? summarizeReleaseButtonStatus(releaseStatus) : "idle";
 
   const repoIssues = useMemo(
     () => issues.filter((issue) => issue.repositoryFullName === repository.fullName),
@@ -93,10 +111,28 @@ export function MobileRepoIssuesScreen({
         <button
           type="button"
           onClick={() => setReleaseSheetOpen(true)}
-          className="flex size-11 items-center justify-center rounded-md border"
+          className={cn(
+            "relative flex size-11 items-center justify-center rounded-md border",
+            releaseButtonStatus === "progressing" && "border-primary text-primary",
+            releaseButtonStatus === "action_required" &&
+              "border-amber-500 text-amber-600 dark:text-amber-500",
+            releaseButtonStatus === "error" && "border-red-500 text-red-600 dark:text-red-500",
+          )}
           title="リリース"
           aria-label="リリース"
         >
+          {releaseButtonStatus === "progressing" && (
+            <span
+              aria-hidden="true"
+              className="absolute animate-spin rounded-md border-2 border-transparent border-t-primary"
+              style={{ inset: -3 }}
+            />
+          )}
+          {releaseButtonStatus === "action_required" && (
+            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-white">
+              <CircleAlert className="size-2.5" />
+            </span>
+          )}
           <Rocket className="size-4" />
         </button>
       }
@@ -116,6 +152,11 @@ export function MobileRepoIssuesScreen({
         onOpenChange={setReleaseSheetOpen}
         repository={repository}
         issues={issues}
+        releaseStatus={releaseStatus}
+        releaseStatusLoading={releaseStatusLoading}
+        releaseStatusError={releaseStatusError}
+        triggerRelease={triggerRelease}
+        isTriggeringRelease={isTriggeringRelease}
         onSetIssueDeployCheck={onSetIssueDeployCheck}
       />
     </MobileIssueListScreen>

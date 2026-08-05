@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useReleaseStatus } from "@/hooks/use-release-status";
+import type { ReleaseStatus } from "@/hooks/use-release-status";
 import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
@@ -33,6 +33,11 @@ type MobileReleaseSheetProps = {
   onOpenChange: (open: boolean) => void;
   repository: ConnectedRepository;
   issues: Issue[];
+  releaseStatus: ReleaseStatus | null;
+  releaseStatusLoading: boolean;
+  releaseStatusError: string | null;
+  triggerRelease: () => Promise<boolean>;
+  isTriggeringRelease: boolean;
   onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
 };
 
@@ -41,15 +46,13 @@ export function MobileReleaseSheet({
   onOpenChange,
   repository,
   issues,
+  releaseStatus,
+  releaseStatusLoading,
+  releaseStatusError,
+  triggerRelease,
+  isTriggeringRelease,
   onSetIssueDeployCheck,
 }: MobileReleaseSheetProps) {
-  const {
-    data: releaseStatus,
-    isLoading: releaseStatusLoading,
-    error: releaseStatusError,
-    triggerRelease,
-    isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(repository.fullName, open);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
 
