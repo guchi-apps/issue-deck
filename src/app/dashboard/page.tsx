@@ -51,6 +51,7 @@ export default async function DashboardPage() {
         private: repo.private,
         archived: repo.archived,
         hidden: hiddenRepositoryIds.has(repo.id),
+        autoRetryLimit: repo.autoRetryLimit,
       }))}
       issues={issues}
       quickFilters={quickFilters}

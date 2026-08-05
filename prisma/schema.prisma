@@ -89,6 +89,8 @@ model Repository {
   archived           Boolean   @default(false)
   defaultBranch      String
   lastSyncedAt       DateTime?
+  // claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限（0は自動リトライ無効）。
+  autoRetryLimit     Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

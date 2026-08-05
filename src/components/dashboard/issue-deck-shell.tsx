@@ -19,6 +19,7 @@ import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-sc
 import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
+import { RepositorySettingsDialog } from "@/components/dashboard/repository-settings-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
@@ -63,6 +64,8 @@ export function IssueDeckShell({
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
+  const [repositorySettingsTarget, setRepositorySettingsTarget] =
+    useState<ConnectedRepository | null>(null);
   const {
     mobileScreen,
     isPending: isMobileScreenPending,
@@ -266,6 +269,12 @@ export function IssueDeckShell({
     }
   }
 
+  function handleRepositorySettingsUpdated(repositoryId: string, autoRetryLimit: number) {
+    setRepositories((prev) =>
+      prev.map((repo) => (repo.id === repositoryId ? { ...repo, autoRetryLimit } : repo)),
+    );
+  }
+
   async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
     function applyFavorite(target: boolean) {
       setIssues((prev) =>
@@ -448,6 +457,7 @@ export function IssueDeckShell({
               onClearRepository={() => setFilter("repo", null)}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+              onOpenRepositorySettings={setRepositorySettingsTarget}
               labelSummary={labelSummary}
               selectedLabels={filters.labels}
               onSelectLabel={(label) => toggleLabel(label.name)}
@@ -522,6 +532,13 @@ export function IssueDeckShell({
         onOpenChange={setQuickFilterDialogOpen}
         filters={filters}
         onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
+      />
+      <RepositorySettingsDialog
+        repository={repositorySettingsTarget}
+        onOpenChange={(open) => {
+          if (!open) setRepositorySettingsTarget(null);
+        }}
+        onUpdated={handleRepositorySettingsUpdated}
       />
       <EditIssueDialog
         open={editingIssue !== null}
