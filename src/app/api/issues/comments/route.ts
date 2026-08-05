@@ -11,8 +11,27 @@ import {
   deleteComment,
   fetchCommentsForIssue,
   GithubApiError,
+  type GithubApiComment,
   updateComment,
 } from "@/lib/github/issues-api";
+
+// scripts/seed-ci-db.mjsが投入するCI用ダミーリポジトリのgithubRepositoryIdと一致させること。
+// このリポジトリは実在しないためGitHub APIからコメントを取得できず、無人実行での
+// スクリーンショット確認用に固定のダミーコメントを返す(#550)。
+const CI_DUMMY_REPOSITORY_GITHUB_ID = 900000001;
+
+function buildCiDummyComments(): GithubApiComment[] {
+  return Array.from({ length: 5 }, (_, index) => {
+    const n = index + 1;
+    return {
+      id: -n,
+      user: { login: "ci-dummy-user" },
+      body: `CI環境の画面確認用ダミーコメントです（${n}件目）。`,
+      created_at: new Date(Date.UTC(2026, 0, n)).toISOString(),
+      reactions: { "+1": 0 },
+    };
+  });
+}
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -46,6 +65,10 @@ async function handleGET(request: NextRequest) {
   const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  if (repository.githubRepositoryId === CI_DUMMY_REPOSITORY_GITHUB_ID) {
+    return NextResponse.json({ comments: buildCiDummyComments().map(mapComment) });
   }
 
   try {

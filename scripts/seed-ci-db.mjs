@@ -23,12 +23,15 @@ const REPOSITORY_GITHUB_ID = 900000001;
 
 const ISSUES = [
   {
+    // 撮影対象のサンプルIssue(scripts/ci-get-sample-issue-id.mjsが返すnumber昇順の先頭)。
+    // commentCountはsrc/app/api/issues/comments/route.tsのCI用ダミーコメント（5件固定）の
+    // 件数と一致させておく(#550)。
     number: 1,
     title: "ログイン画面のレイアウトを見直す",
     body: "CI環境の画面確認用ダミーIssueです。",
     state: "OPEN",
     authorLogin: "ci-dummy-user",
-    commentCount: 2,
+    commentCount: 5,
     labels: [{ name: "bug", color: "d73a4a" }],
   },
   {
