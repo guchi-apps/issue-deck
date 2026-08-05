@@ -57,7 +57,7 @@ export function IssueDeckShell({
   issues: initialIssues,
   quickFilters: initialQuickFilters,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, setFilters, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
@@ -242,7 +242,7 @@ export function IssueDeckShell({
   );
 
   function handleSelectView(view: NavViewId) {
-    setFilter("view", view);
+    selectView(view);
     setSelectedIssue(null);
   }
 

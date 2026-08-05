@@ -3,7 +3,11 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
-import { getNavViewDefaultState, isNavViewId } from "@/lib/nav-views";
+import {
+  getNavViewDefaultState,
+  isNavViewId,
+  resolveStateOnViewChange,
+} from "@/lib/nav-views";
 import type { NavViewId } from "@/types/issue";
 
 export type IssueSort = "updated" | "created";
@@ -60,6 +64,10 @@ export function useIssueFilters() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // 状態がユーザーの明示的な選択かどうか。既定値と同じ状態はクエリに残さない運用のため、
+  // クエリの有無がそのまま「明示的に選ばれているか」になる（ビュー切り替え時の判断に使う）。
+  const isStateExplicit = ["all", "open", "closed"].includes(searchParams.get("state") ?? "");
+
   const filters = useMemo<IssueFilters>(() => {
     const viewParam = searchParams.get("view");
     const stateParam = searchParams.get("state");
@@ -106,6 +114,18 @@ export function useIssueFilters() {
     [router, pathname, searchParams, filters.view],
   );
 
+  // サイドメニュー等でのビュー切り替え。切り替え先ビューが状態を要求する場合は状態も
+  // 併せて自動で切り替える（「main反映済(直近)」をopen絞り込みのまま開くと0件になるため）。
+  const selectView = useCallback(
+    (view: NavViewId) => {
+      setFilters({
+        view,
+        state: resolveStateOnViewChange(view, filters.view, filters.state, isStateExplicit),
+      });
+    },
+    [setFilters, filters.view, filters.state, isStateExplicit],
+  );
+
   const toggleLabel = useCallback(
     (name: string) => {
       const next = filters.labels.includes(name)
@@ -116,5 +136,5 @@ export function useIssueFilters() {
     [filters.labels, setFilter],
   );
 
-  return { filters, setFilter, setFilters, toggleLabel };
+  return { filters, setFilter, setFilters, selectView, toggleLabel };
 }
