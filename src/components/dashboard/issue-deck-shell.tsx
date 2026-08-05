@@ -125,7 +125,13 @@ export function IssueDeckShell({
   }
 
   function handleIssueCreated(issue: Issue) {
-    setIssues((prev) => [issue, ...prev]);
+    // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
+    // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
+    setIssues((prev) =>
+      prev.some((item) => item.id === issue.id)
+        ? prev.map((item) => (item.id === issue.id ? issue : item))
+        : [issue, ...prev],
+    );
     setSelectedIssue(issue);
     // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
     // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
