@@ -78,6 +78,30 @@ export function MobileHomeScreen({
           </div>
         </div>
 
+        <div className="px-4 pb-4">
+          <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
+          <ul className="flex flex-col gap-1">
+            {quickFilterViews.map((view) => {
+              const Icon = navViewIcons[view.id];
+              return (
+                <li key={view.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectQuickView(view.id)}
+                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      {view.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
         {favoriteRepositories.length > 0 && (
           <div className="px-4 pb-4">
             <h2 className="mb-2 text-sm font-semibold">お気に入りリポジトリ</h2>
@@ -105,30 +129,6 @@ export function MobileHomeScreen({
             </ul>
           </div>
         )}
-
-        <div className="px-4 pb-4">
-          <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
-          <ul className="flex flex-col gap-1">
-            {quickFilterViews.map((view) => {
-              const Icon = navViewIcons[view.id];
-              return (
-                <li key={view.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectQuickView(view.id)}
-                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      {view.label}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
 
         <div className="px-4 pb-4">
           <div className="mb-2 flex items-center justify-between">
