@@ -220,7 +220,7 @@ async function main() {
     const now = new Date();
     const issue = await prisma.issue.upsert({
       where: { githubIssueId },
-      update: {},
+      update: { ...issueData, githubUpdatedAt: now },
       create: {
         ...issueData,
         githubIssueId,
