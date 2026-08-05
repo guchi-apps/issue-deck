@@ -22,9 +22,11 @@ export type NavView = {
    */
   labels?: readonly string[];
   /**
-   * stateクエリが未指定のときに適用する状態フィルター（未指定なら"open"）。
+   * このビューが要求する状態フィルター。stateクエリ未指定時の既定値になるほか、
+   * ビュー切り替え時には明示的に選ばれていたstateも上書きして自動で適用する（#475）。
    * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」ビューはopen絞り込みのままだと該当issueが出てこない。
+   * お気に入りなど状態を要求しないビューは未指定にし、現在の絞り込み条件を保つ。
    */
   defaultState?: IssueStateFilter;
   /**
@@ -85,4 +87,30 @@ export function getNavViewLabel(id: NavViewId): string {
 /** ビューごとの、stateクエリ未指定時に適用する状態フィルター */
 export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
   return getNavView(id).defaultState ?? "open";
+}
+
+/**
+ * ビュー切り替え後に適用すべき状態フィルターを解決する（#475）。
+ *
+ * - 切り替え先が状態を要求するビュー（「main反映済(直近)」）なら、その状態へ自動で
+ *   切り替える。openのままではどう絞り込んでも0件になり、ビューとして成立しないため、
+ *   ユーザーが明示的に選んでいた状態よりビューの要求を優先する。
+ * - 状態を要求しないビュー（お気に入り等）は現在の絞り込み条件をそのまま引き継ぐ。
+ *   ただし直前のビューの要求で決まっていただけの状態（＝明示的に選ばれていない）は、
+ *   ユーザーの選択ではないので切り替え先の既定値に戻す。
+ * - 同じビューを選び直しただけのときは、明示的な選択を上書きしない。
+ *
+ * @param isStateExplicit ユーザーが状態を明示的に選んでいるか（URLクエリに残っているか）
+ */
+export function resolveStateOnViewChange(
+  nextView: NavViewId,
+  currentView: NavViewId,
+  currentState: IssueStateFilter,
+  isStateExplicit: boolean,
+): IssueStateFilter {
+  if (nextView !== currentView) {
+    const requiredState = getNavView(nextView).defaultState;
+    if (requiredState) return requiredState;
+  }
+  return isStateExplicit ? currentState : getNavViewDefaultState(nextView);
 }
