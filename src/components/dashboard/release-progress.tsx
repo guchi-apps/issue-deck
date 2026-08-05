@@ -7,6 +7,17 @@ import type { CiState, ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-rel
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
+/**
+ * 「本番デプロイ」段がstate: "done"（デプロイ成功）で表示される条件と同じかどうかを判定する。
+ * デプロイ後の反映確認チェックリスト（#534）の表示条件に使う。
+ */
+export function isProductionDeployComplete(status: AvailableReleaseStatus): boolean {
+  const runActive = status.workflowRun != null && status.workflowRun.status !== "completed";
+  if (status.phase !== "none" || runActive) return false;
+  const deployRun = status.deployWorkflowRun;
+  return deployRun?.status === "completed" && deployRun.conclusion === "success";
+}
+
 type StepState =
   | "done" // 完了
   | "active" // 進行中（自動で進む。人の操作は不要）

@@ -52,7 +52,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ReleaseProgress } from "@/components/dashboard/release-progress";
+import { ReleaseDeployChecklist } from "@/components/dashboard/release-deploy-checklist";
+import { isProductionDeployComplete, ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
@@ -66,8 +67,9 @@ import {
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
+import { filterIssuesByView } from "@/lib/issue-stats";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
-import type { Issue } from "@/types/issue";
+import type { DeployCheckStatus, Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -82,6 +84,7 @@ type TopBarProps = {
   issues: Issue[];
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
   onOpenAppSettings: () => void;
 };
 
@@ -96,6 +99,7 @@ export function TopBar({
   issues,
   isSidebarCollapsed,
   onToggleSidebar,
+  onSetIssueDeployCheck,
   onOpenAppSettings,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
@@ -149,6 +153,14 @@ export function TopBar({
       ),
     [issues, releaseRepoFullName],
   );
+
+  // 本番デプロイ成功後（release-progress.tsxの「本番デプロイ」段と同じ条件）にのみ、
+  // 直近リリースでmainへ反映されたIssueの確認チェックリストを表示する（#534）。
+  const deployCheckIssues = useMemo(() => {
+    if (!releaseStatus?.available || !isProductionDeployComplete(releaseStatus)) return [];
+    const repoIssues = issues.filter((issue) => issue.repositoryFullName === releaseRepoFullName);
+    return filterIssuesByView(repoIssues, "recently-merged", null);
+  }, [issues, releaseRepoFullName, releaseStatus]);
 
   const stateLabel =
     filters.state === "open"
@@ -408,6 +420,10 @@ export function TopBar({
                           </span>
                         </div>
                         <ReleaseProgress status={releaseStatus} compact />
+                        <ReleaseDeployChecklist
+                          issues={deployCheckIssues}
+                          onSetDeployCheck={onSetIssueDeployCheck}
+                        />
                         <Button
                           size="sm"
                           variant="outline"
