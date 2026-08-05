@@ -19,36 +19,23 @@ const prisma = new PrismaClient();
 const CI_BYPASS_SUPABASE_USER_ID = "ci-screenshot-bot";
 
 const INSTALLATION_ID = 900000001;
-const REPOSITORY_GITHUB_ID = 900000001;
+const REPOSITORY_GITHUB_ID_BASE = 900000001;
+const REPOSITORY_COUNT = 5;
+const ISSUES_PER_REPOSITORY = 10;
+const COMMENT_COUNT_PER_ISSUE = 5;
 
-const ISSUES = [
-  {
-    number: 1,
-    title: "ログイン画面のレイアウトを見直す",
-    body: "CI環境の画面確認用ダミーIssueです。",
-    state: "OPEN",
-    authorLogin: "ci-dummy-user",
-    commentCount: 2,
-    labels: [{ name: "bug", color: "d73a4a" }],
-  },
-  {
-    number: 2,
-    title: "ダッシュボードの表示速度を改善する",
-    body: "CI環境の画面確認用ダミーIssueです。",
-    state: "OPEN",
-    authorLogin: "ci-dummy-user",
-    commentCount: 0,
-    labels: [{ name: "enhancement", color: "a2eeef" }],
-  },
-  {
-    number: 3,
-    title: "通知メールのテンプレートを修正する",
-    body: "CI環境の画面確認用ダミーIssueです。",
-    state: "CLOSED",
-    authorLogin: "ci-dummy-user",
-    commentCount: 1,
-    labels: [],
-  },
+// 各リポジトリ共通で使い回すIssueテンプレート（リポジトリ数 x このテンプレート数がIssue件数になる）。
+const ISSUE_TEMPLATES = [
+  { title: "ログイン画面のレイアウトを見直す", state: "OPEN", labels: [{ name: "bug", color: "d73a4a" }] },
+  { title: "ダッシュボードの表示速度を改善する", state: "OPEN", labels: [{ name: "enhancement", color: "a2eeef" }] },
+  { title: "通知メールのテンプレートを修正する", state: "CLOSED", labels: [] },
+  { title: "検索機能にフィルタを追加する", state: "OPEN", labels: [{ name: "enhancement", color: "a2eeef" }] },
+  { title: "モバイル版のナビゲーションを改善する", state: "OPEN", labels: [{ name: "bug", color: "d73a4a" }] },
+  { title: "APIレスポンスのキャッシュを見直す", state: "CLOSED", labels: [{ name: "enhancement", color: "a2eeef" }] },
+  { title: "エラーメッセージの文言を統一する", state: "OPEN", labels: [{ name: "documentation", color: "0075ca" }] },
+  { title: "ダークモード対応を追加する", state: "OPEN", labels: [{ name: "enhancement", color: "a2eeef" }] },
+  { title: "CSVエクスポート機能を追加する", state: "CLOSED", labels: [] },
+  { title: "アクセシビリティ対応を強化する", state: "OPEN", labels: [{ name: "question", color: "d876e3" }] },
 ];
 
 async function main() {
@@ -61,21 +48,6 @@ async function main() {
       accountLogin: "ci-dummy-org",
       accountType: "ORGANIZATION",
       repositorySelection: "ALL",
-    },
-  });
-
-  const repository = await prisma.repository.upsert({
-    where: { githubRepositoryId: REPOSITORY_GITHUB_ID },
-    update: {},
-    create: {
-      githubRepositoryId: REPOSITORY_GITHUB_ID,
-      installationId: installation.id,
-      ownerLogin: "ci-dummy-org",
-      name: "sample-repo",
-      fullName: "ci-dummy-org/sample-repo",
-      private: false,
-      htmlUrl: "https://github.com/ci-dummy-org/sample-repo",
-      defaultBranch: "main",
     },
   });
 
@@ -94,28 +66,56 @@ async function main() {
     );
   }
 
-  for (const { labels, ...issueData } of ISSUES) {
-    const githubIssueId = BigInt(REPOSITORY_GITHUB_ID) * 1000n + BigInt(issueData.number);
-    const now = new Date();
-    const issue = await prisma.issue.upsert({
-      where: { githubIssueId },
+  for (let repoIndex = 0; repoIndex < REPOSITORY_COUNT; repoIndex++) {
+    const repoNumber = repoIndex + 1;
+    const repositoryGithubId = REPOSITORY_GITHUB_ID_BASE + repoIndex;
+    const repoName = `sample-repo-${repoNumber}`;
+
+    const repository = await prisma.repository.upsert({
+      where: { githubRepositoryId: repositoryGithubId },
       update: {},
       create: {
-        ...issueData,
-        githubIssueId,
-        repositoryId: repository.id,
-        htmlUrl: `${repository.htmlUrl}/issues/${issueData.number}`,
-        githubCreatedAt: now,
-        githubUpdatedAt: now,
+        githubRepositoryId: repositoryGithubId,
+        installationId: installation.id,
+        ownerLogin: "ci-dummy-org",
+        name: repoName,
+        fullName: `ci-dummy-org/${repoName}`,
+        private: false,
+        htmlUrl: `https://github.com/ci-dummy-org/${repoName}`,
+        defaultBranch: "main",
       },
     });
 
-    for (const label of labels) {
-      await prisma.issueLabel.upsert({
-        where: { issueId_name: { issueId: issue.id, name: label.name } },
+    for (let issueIndex = 0; issueIndex < ISSUES_PER_REPOSITORY; issueIndex++) {
+      const template = ISSUE_TEMPLATES[issueIndex % ISSUE_TEMPLATES.length];
+      const number = issueIndex + 1;
+      const githubIssueId = BigInt(repositoryGithubId) * 1000n + BigInt(number);
+      const now = new Date();
+      const issue = await prisma.issue.upsert({
+        where: { githubIssueId },
         update: {},
-        create: { issueId: issue.id, name: label.name, color: label.color },
+        create: {
+          number,
+          title: template.title,
+          body: "CI環境の画面確認用ダミーIssueです。",
+          state: template.state,
+          authorLogin: "ci-dummy-user",
+          commentCount: COMMENT_COUNT_PER_ISSUE,
+          githubIssueId,
+          repositoryId: repository.id,
+          htmlUrl: `${repository.htmlUrl}/issues/${number}`,
+          githubCreatedAt: now,
+          githubUpdatedAt: now,
+        },
       });
+
+      for (const label of template.labels) {
+        await prisma.issueLabel.upsert({
+          where: { issueId_name: { issueId: issue.id, name: label.name } },
+          update: {},
+          create: { issueId: issue.id, name: label.name, color: label.color },
+        });
+      }
     }
   }
 
