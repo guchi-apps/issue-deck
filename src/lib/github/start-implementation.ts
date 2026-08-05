@@ -43,6 +43,12 @@ export const START_IMPLEMENTATION_OPTIONS: {
     githubLabel: PLAN_REQUIRED_LABEL,
   },
   {
+    key: "mergeConfirmRequired",
+    label: "マージ前に確認が必要",
+    description: "developへのマージ前に必ずユーザーの確認を挟んでから進めます",
+    githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
+  },
+  {
     key: "previewRequired",
     label: "開発環境を起動する",
     description: "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます",
@@ -53,12 +59,6 @@ export const START_IMPLEMENTATION_OPTIONS: {
     label: "スクリーンショットが必要",
     description: "PR作成前に変更箇所のスクリーンショットを取得し、確認してもらってから実装を進めます",
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
-  },
-  {
-    key: "mergeConfirmRequired",
-    label: "マージ前に確認が必要",
-    description: "developへのマージ前に必ずユーザーの確認を挟んでから進めます",
-    githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
   },
 ];
 
