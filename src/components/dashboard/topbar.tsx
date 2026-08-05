@@ -29,6 +29,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -325,63 +330,75 @@ export function TopBar({
           {repositories.length > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel>リリース</DropdownMenuLabel>
-              <div className="px-1.5 pb-1.5">
-                <Select
-                  value={releaseRepoFullName ?? undefined}
-                  onValueChange={setReleaseRepoFullName}
-                >
-                  <SelectTrigger className="mb-2 w-full text-xs" size="sm">
-                    <SelectValue placeholder="リポジトリを選択" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {repositories.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.fullName}>
-                        {repo.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {releaseStatusLoading && (
-                  <p className="text-xs text-muted-foreground">読み込み中...</p>
-                )}
-                {releaseStatusError && (
-                  <p className="text-xs text-destructive">{releaseStatusError}</p>
-                )}
-                {releaseStatus && !releaseStatus.available && (
-                  <p className="text-xs text-muted-foreground">
-                    このリポジトリにはリリース用のworkflowが見つかりませんでした
-                  </p>
-                )}
-                {releaseStatus?.available && (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">main</span>
-                      <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">develop</span>
-                      <span>
-                        {releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}
-                      </span>
-                    </div>
-                    <ReleaseProgress status={releaseStatus} compact />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs"
-                      disabled={isTriggeringRelease}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setReleaseConfirmOpen(true);
-                      }}
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between px-1.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+                  >
+                    リリース
+                    <ChevronDown className="size-3 transition-transform" />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="px-1.5 pb-1.5">
+                    <Select
+                      value={releaseRepoFullName ?? undefined}
+                      onValueChange={setReleaseRepoFullName}
                     >
-                      <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
-                      {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
-                    </Button>
+                      <SelectTrigger className="mb-2 w-full text-xs" size="sm">
+                        <SelectValue placeholder="リポジトリを選択" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {repositories.map((repo) => (
+                          <SelectItem key={repo.id} value={repo.fullName}>
+                            {repo.fullName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {releaseStatusLoading && (
+                      <p className="text-xs text-muted-foreground">読み込み中...</p>
+                    )}
+                    {releaseStatusError && (
+                      <p className="text-xs text-destructive">{releaseStatusError}</p>
+                    )}
+                    {releaseStatus && !releaseStatus.available && (
+                      <p className="text-xs text-muted-foreground">
+                        このリポジトリにはリリース用のworkflowが見つかりませんでした
+                      </p>
+                    )}
+                    {releaseStatus?.available && (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">main</span>
+                          <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">develop</span>
+                          <span>
+                            {releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}
+                          </span>
+                        </div>
+                        <ReleaseProgress status={releaseStatus} compact />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          disabled={isTriggeringRelease}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setReleaseConfirmOpen(true);
+                          }}
+                        >
+                          <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
+                          {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </CollapsibleContent>
+              </Collapsible>
             </>
           )}
 
