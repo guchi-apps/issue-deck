@@ -23,6 +23,11 @@ export type LabelFilterPreset = {
   label: string;
   labels: string[];
   /**
+   * このいずれかのラベルが付いているIssueを除外する（labelsとは逆にAND条件）。
+   * 「未着手」のように、特定ラベルの不在で定義するプリセット向け。
+   */
+  excludeLabels?: string[];
+  /**
    * プリセット選択時に適用するstateフィルター（省略時はstateを変更しない）。
    * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」プリセットはデフォルトのopen絞り込みのままだと該当issueが
@@ -38,6 +43,12 @@ export type LabelFilterPreset = {
  */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
+  {
+    key: "not-started",
+    label: "未着手",
+    labels: [],
+    excludeLabels: [CHECK_USER_LABEL, ...WORKFLOW_STEPS.map((step) => step.labelName)],
+  },
   {
     key: "in-progress",
     label: "実行中",
@@ -56,8 +67,13 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   },
 ];
 
-/** 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する */
+/**
+ * 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する。
+ * excludeLabelsのみで定義されるプリセット（「未着手」など）はlabels配列（選択中ラベルの
+ * トグル）では表現できないため、常に非アクティブとして扱う。
+ */
 export function isLabelFilterPresetActive(labels: string[], preset: LabelFilterPreset): boolean {
+  if (preset.labels.length === 0) return false;
   return labels.length === preset.labels.length && preset.labels.every((name) => labels.includes(name));
 }
 
