@@ -2,7 +2,8 @@ import type { Issue, IssueComment } from "@/types/issue";
 
 /**
  * Claudeアプリ（claude.ai/code）で新規セッションを開始する画面のベースURL。
- * `branch=develop`を付与することで、developブランチを起点にセッションが開始されることを確認済み（#360）。
+ * `branch`にIssue固有のブランチ名（`issue-<番号>`）を付与することで、無人実行と同じブランチを
+ * 起点にセッションが開始される（#499）。
  */
 const CLAUDE_APP_NEW_SESSION_URL = "https://claude.ai/code/new";
 
@@ -28,7 +29,7 @@ export function buildClaudeAppPrompt(
 export function buildClaudeAppUrl(
   issue: Pick<Issue, "repositoryFullName" | "number" | "title" | "htmlUrl">,
 ): string {
-  const params = { branch: "develop", q: buildClaudeAppPrompt(issue) };
+  const params = { branch: `issue-${issue.number}`, q: buildClaudeAppPrompt(issue) };
   const query = Object.entries(params)
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
