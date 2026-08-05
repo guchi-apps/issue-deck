@@ -74,7 +74,7 @@ export function MobileRepoIssuesScreen({
           type="button"
           onClick={onBack}
           aria-label="戻る"
-          className="-m-2 rounded-full p-2 active:bg-muted"
+          className="-m-3 rounded-full p-3 active:bg-muted"
         >
           <ArrowLeft className="size-5" />
         </button>
@@ -100,7 +100,7 @@ export function MobileRepoIssuesScreen({
           <button
             type="button"
             onClick={() => setFilterSheetOpen(true)}
-            className="rounded-md border p-2.5"
+            className="flex size-11 items-center justify-center rounded-md border"
             aria-label="絞り込み・並び替え"
           >
             <SlidersHorizontal className="size-4" />
@@ -108,7 +108,7 @@ export function MobileRepoIssuesScreen({
           <button
             type="button"
             onClick={() => setReleaseSheetOpen(true)}
-            className="rounded-md border p-2.5"
+            className="flex size-11 items-center justify-center rounded-md border"
             title="リリース"
             aria-label="リリース"
           >

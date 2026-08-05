@@ -27,7 +27,7 @@ export function MobileBottomNav({ active = "home", onSelect }: MobileBottomNavPr
           type="button"
           onClick={() => onSelect?.(id)}
           className={cn(
-            "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs text-muted-foreground",
+            "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs text-muted-foreground",
             active === id && "text-foreground",
           )}
         >

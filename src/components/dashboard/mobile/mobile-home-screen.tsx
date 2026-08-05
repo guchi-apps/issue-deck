@@ -81,7 +81,7 @@ export function MobileHomeScreen({
                   <button
                     type="button"
                     onClick={() => onSelectLabelPreset(preset)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
                     <span className="flex items-center gap-2">
                       <Icon className="size-3.5 text-muted-foreground" />
@@ -101,7 +101,7 @@ export function MobileHomeScreen({
                   <button
                     type="button"
                     onClick={() => onSelectQuickView(view.id)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
                     <span className="flex items-center gap-2">
                       <Icon className="size-3.5 text-muted-foreground" />
@@ -121,7 +121,7 @@ export function MobileHomeScreen({
             <button
               type="button"
               onClick={onSaveQuickFilter}
-              className="-m-2 rounded-full p-2 text-muted-foreground hover:text-foreground active:bg-muted"
+              className="-m-3.5 rounded-full p-3.5 text-muted-foreground hover:text-foreground active:bg-muted"
               title="現在の検索条件を保存"
               aria-label="現在の検索条件を保存"
             >
@@ -139,7 +139,7 @@ export function MobileHomeScreen({
                   <button
                     type="button"
                     onClick={() => onSelectQuickFilter(quickFilter)}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
                     <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">{quickFilter.name}</span>
@@ -149,7 +149,7 @@ export function MobileHomeScreen({
                     onClick={() => onDeleteQuickFilter(quickFilter)}
                     title="削除"
                     aria-label={`${quickFilter.name}を削除`}
-                    className="shrink-0 rounded-md p-2.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                   >
                     <X className="size-3.5" />
                   </button>
