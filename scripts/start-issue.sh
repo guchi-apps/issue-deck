@@ -126,9 +126,9 @@ if sslip_url:
 else:
     sslip_note = ""
 
-if "22.preview-required" in label_names:
+if "23.preview-required" in label_names:
     preview_instructions = (
-        "このIssueには`22.preview-required`ラベルが付いています。実装・テストが完了したら、"
+        "このIssueには`23.preview-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         "1. このworktreeの開発サーバー（`pnpm dev`）をポート`{port}`で起動する（`.env.local`に設定済み）\n"
         "2. `http://localhost:{port}` で実際の画面を確認する{sslip_note}\n"
@@ -146,9 +146,9 @@ else:
         "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
     ).format(port=dev_port, sslip_note=sslip_note)
 
-if "23.screenshot-required" in label_names:
+if "24.screenshot-required" in label_names:
     screenshot_instructions = (
-        "このIssueには`23.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
+        "このIssueには`24.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         f"1. `run`スキル等を使って開発サーバー（ポート`{dev_port}`）上で変更箇所のスクリーンショットを取得する"
         "（Playwright等の新規依存関係の追加が必要な場合は、追加前に必ずユーザーに確認する）\n"
@@ -158,7 +158,7 @@ if "23.screenshot-required" in label_names:
     )
 else:
     screenshot_instructions = (
-        "このIssueには`23.screenshot-required`ラベルが付いていないため、"
+        "このIssueには`24.screenshot-required`ラベルが付いていないため、"
         "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
     )
 

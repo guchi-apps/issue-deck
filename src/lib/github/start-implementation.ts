@@ -6,13 +6,13 @@ import type { Issue, IssueLabel } from "@/types/issue";
 export const START_IMPLEMENTATION_COMMENT_BODY = "@claude 実装を開始してください";
 
 /** 実装前にPlan modeでの計画提示・承認を必須にするラベル */
-export const PREVIEW_REQUIRED_LABEL = "22.preview-required";
+export const PREVIEW_REQUIRED_LABEL = "23.preview-required";
 
 /** PR作成前に開発サーバーを起動し画面確認・承認を必須にするラベル */
-export const SCREENSHOT_REQUIRED_LABEL = "23.screenshot-required";
+export const SCREENSHOT_REQUIRED_LABEL = "24.screenshot-required";
 
 /** developへのマージ前に必ずユーザー確認を必須にするラベル */
-export const MERGE_CONFIRM_REQUIRED_LABEL = "24.merge-confirm-required";
+export const MERGE_CONFIRM_REQUIRED_LABEL = "22.merge-confirm-required";
 
 export type StartImplementationOptionKey =
   | "planRequired"
