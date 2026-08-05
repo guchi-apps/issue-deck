@@ -100,7 +100,11 @@ export function MobileIssueListScreen({
         </div>
       </header>
 
-      <div className="isolate flex items-center gap-2 overflow-x-auto border-b p-3 [contain:paint] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* isolate/[contain:paint]は#473でring枠線のiOS Safari描画崩れ対策として付与したが、
+          #506でring自体を塗りつぶし背景に置き換えたため役目を終えていた。むしろ親の
+          h-dvh（#304でフッター隠れ対策として導入、Safariのツールバー開閉のたびに再計算される）
+          の変化を受けるたびにペイントコンテインメントの再計算が発生し、崩れを誘発し得るため削除する（#547） */}
+      <div className="flex items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {navViews.map((navView) => (
           <button
             key={navView.id}
