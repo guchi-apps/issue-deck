@@ -147,6 +147,8 @@ async function handlePATCH(request: NextRequest) {
   try {
     const token = await getInstallationToken(repository.installation.installationId);
     const updated = await updateComment(owner, repo, commentId, token, { body: body.trim() });
+    // 編集によって内容が変わった以上、キャッシュ済みのAI要約は古くなるため削除する（再生成はボタン操作に委ねる）
+    await db.issueCommentSummary.deleteMany({ where: { githubCommentId: BigInt(commentId) } });
     return NextResponse.json({ comment: mapComment(updated) });
   } catch (error) {
     console.error(`[PATCH /api/issues/comments] ${owner}/${repo} comment ${commentId}:`, error);
