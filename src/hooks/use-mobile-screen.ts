@@ -24,6 +24,10 @@ export type MobileScreen =
       assignee: string | null;
       sort: IssueSort;
       returnToIssueId: string | null;
+      // ボトムナビの「Issue」タブから直接開いたか（"tab"）、ホームの「よくつかう
+      // フィルター」「保存したフィルター」からのドリルダウンか（"home"）。ホーム経由の
+      // 場合のみ戻る導線（ヘッダーの戻るボタン・右スワイプ）を表示する（#525）。
+      origin: "tab" | "home";
     }
   | { kind: "repos" }
   | { kind: "settings" }
@@ -57,6 +61,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const stateParam = searchParams.get("mstate");
   const assigneeParam = searchParams.get("massignee");
   const sortParam = searchParams.get("msort");
+  const fromParam = searchParams.get("mfrom");
+  const origin: "tab" | "home" = fromParam === "home" ? "home" : "tab";
   const labels = useMemo(
     () => (labelsParam ? labelsParam.split(",").filter(Boolean) : []),
     [labelsParam],
@@ -101,6 +107,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
             assignee,
             sort,
             returnToIssueId: null,
+            origin,
           };
 
       return { kind: "issue-detail", issue, back };
@@ -131,6 +138,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         assignee,
         sort,
         returnToIssueId: issueParam,
+        origin,
       };
     }
 
@@ -139,7 +147,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     return { kind: "home" };
-  }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, issues, repositories]);
+  }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
 
   const navigate = useCallback(
     (
@@ -152,6 +160,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         state?: IssueStateFilter | null;
         assignee?: string | null;
         sort?: IssueSort | null;
+        origin?: "tab" | "home" | null;
       },
       options?: { silent?: boolean },
     ) => {
@@ -206,6 +215,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("msort");
       }
 
+      if (next.origin === "home") {
+        params.set("mfrom", "home");
+      } else {
+        params.delete("mfrom");
+      }
+
       const url = `${pathname}?${params.toString()}`;
 
       // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
@@ -242,6 +257,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         state: resolveStateOnViewChange(nextView, view, state, isStateExplicit),
         assignee: mobileScreen.kind === "issues" ? mobileScreen.assignee : undefined,
         sort: mobileScreen.kind === "issues" ? mobileScreen.sort : undefined,
+        // ホームの「よくつかうフィルター」からの遷移のため、戻る導線を有効にする（#525）。
+        origin: "home",
       }),
     [navigate, mobileScreen, view, state, isStateExplicit],
   );
@@ -256,6 +273,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         state: quickFilter.state,
         assignee: quickFilter.assignee,
         sort: quickFilter.sort,
+        // ホームの「保存したフィルター」からの遷移のため、戻る導線を有効にする（#525）。
+        origin: "home",
       }),
     [navigate],
   );
@@ -286,6 +305,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
             ? mobileScreen.sort
             : null,
+        origin: mobileScreen.kind === "issues" ? mobileScreen.origin : undefined,
       }),
     [navigate, mobileScreen],
   );
@@ -324,6 +344,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           state: nextState,
           assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
           sort: patch.sort ?? mobileScreen.sort,
+          // フィルター変更・タブ切替では遷移元は変わらないため、戻る導線の有無を維持する（#525）。
+          origin: mobileScreen.kind === "issues" ? mobileScreen.origin : undefined,
         },
         { silent: true },
       );
@@ -359,6 +381,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         state: back.state,
         assignee: back.assignee,
         sort: back.sort,
+        origin: back.origin,
       });
     } else {
       navigate({ screen: back.kind });

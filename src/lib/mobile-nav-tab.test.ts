@@ -28,6 +28,7 @@ const issuesScreen: MobileScreen = {
   assignee: null,
   sort: "created",
   returnToIssueId: null,
+  origin: "tab",
 };
 
 describe("resolveBottomNavTab", () => {
