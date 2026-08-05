@@ -107,7 +107,7 @@ export function MobileIssueListScreen({
             type="button"
             onClick={() => onChangeView(navView.id)}
             className={cn(
-              "flex h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap",
+              "flex h-11 shrink-0 transform-gpu items-center rounded-full border px-4 text-sm whitespace-nowrap",
               view === navView.id && "border-primary bg-primary/10 text-primary",
             )}
           >
