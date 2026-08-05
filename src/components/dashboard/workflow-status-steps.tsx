@@ -1,6 +1,7 @@
 import { Check, CircleAlert } from "lucide-react";
 
 import { isApprovalPending } from "@/lib/github/approval-labels";
+import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import { cn } from "@/lib/utils";
 import type { IssueLabel } from "@/types/issue";
@@ -11,67 +12,65 @@ type WorkflowStatusStepsProps = {
 
 type WorkflowStepBadgeProps = {
   labels: IssueLabel[];
+  /** GitHub Actions実行状況（一覧のポーリング結果）。省略時は実行中表示を行わない */
+  running?: { isRunning: boolean; currentStep: string | null };
 };
 
 const BADGE_SIZE = 18;
-const BADGE_STROKE_WIDTH = 2.5;
-const BADGE_RADIUS = (BADGE_SIZE - BADGE_STROKE_WIDTH) / 2;
-const BADGE_CIRCUMFERENCE = 2 * Math.PI * BADGE_RADIUS;
 
 /**
- * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを進捗リング（円弧）で示す。
- * ユーザーの確認待ち（00.check-user）の場合は数字の代わりにアラートアイコンへ切り替え、
- * amber色で強調することで一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
+ * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを円グラフ（パイ）で示す。
+ * ユーザーの確認待ち（00.check-user）の場合はamber色に切り替えたうえで中央にアラート
+ * アイコンを重ね、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
+ * GitHub Actionsの実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と
+ * 実行中（回転）を同じ円で同時に表現する。
  */
-export function WorkflowStepBadge({ labels }: WorkflowStepBadgeProps) {
+export function WorkflowStepBadge({ labels, running }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex(labels);
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
   const step = WORKFLOW_STEPS[currentIndex];
   const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
-  const dashOffset = BADGE_CIRCUMFERENCE * (1 - progress);
+  const progressDeg = progress * 360;
+  const isRunning = running?.isRunning ?? false;
+  const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
+  const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : ""}`;
 
   return (
     <span
       title={`${step.labelName} ${step.label}${approvalPending ? "（ユーザーの確認待ち）" : ""}`}
-      className="relative flex shrink-0 items-center justify-center"
-      style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
+      className="flex min-w-0 shrink-0 items-center gap-1.5"
     >
-      <svg
-        width={BADGE_SIZE}
-        height={BADGE_SIZE}
-        viewBox={`0 0 ${BADGE_SIZE} ${BADGE_SIZE}`}
-        className="-rotate-90"
-        aria-hidden="true"
-      >
-        <circle
-          cx={BADGE_SIZE / 2}
-          cy={BADGE_SIZE / 2}
-          r={BADGE_RADIUS}
-          fill="none"
-          strokeWidth={BADGE_STROKE_WIDTH}
-          className={approvalPending ? "stroke-amber-500/20" : "stroke-primary/15"}
-        />
-        <circle
-          cx={BADGE_SIZE / 2}
-          cy={BADGE_SIZE / 2}
-          r={BADGE_RADIUS}
-          fill="none"
-          strokeWidth={BADGE_STROKE_WIDTH}
-          strokeLinecap="round"
-          strokeDasharray={BADGE_CIRCUMFERENCE}
-          strokeDashoffset={dashOffset}
-          className={approvalPending ? "stroke-amber-500" : "stroke-primary"}
-        />
-      </svg>
+      <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{stepText}</span>
       <span
-        className={cn(
-          "absolute inset-0 flex items-center justify-center text-[8px] font-semibold",
-          approvalPending ? "text-amber-600 dark:text-amber-400" : "text-primary",
-        )}
+        className="relative flex shrink-0 items-center justify-center"
+        style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
       >
-        {approvalPending ? <CircleAlert className="size-2.5" /> : currentIndex + 1}
+        {isRunning && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute animate-spin rounded-full border-2 border-transparent",
+              approvalPending ? "border-t-amber-500" : "border-t-primary",
+            )}
+            style={{ inset: -3 }}
+          />
+        )}
+        <span
+          aria-hidden="true"
+          className={cn("block rounded-full", approvalPending ? "text-amber-500" : "text-primary")}
+          style={{
+            width: BADGE_SIZE,
+            height: BADGE_SIZE,
+            background: `conic-gradient(currentColor 0deg ${progressDeg}deg, color-mix(in oklch, currentColor ${approvalPending ? 20 : 15}%, transparent) ${progressDeg}deg 360deg)`,
+          }}
+        />
+        {approvalPending && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <CircleAlert className="size-2.5 text-background" />
+          </span>
+        )}
       </span>
     </span>
   );
