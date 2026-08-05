@@ -6,17 +6,20 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * GitHubは`/rate_limit`でもレスポンスヘッダでも「カテゴリ別の合計」しか返さず、どの機能が
  * どれだけ消費したかの内訳を得る手段が無い。そのため、アプリ側で自分の発信を数える。
  *
- * 直近24時間ぶんを5分バケットのリングバッファに保持する（プロセス内メモリのみ。再起動や
- * デプロイで消えるが、消費の偏りを把握し改善の効果を測る用途には足りる）。
+ * 直近24時間ぶんを5分バケットのリングバッファに保持する（プロセス内メモリが本体）。
+ * バケットが繰り上がるたびに直前に閉じたバケットを`onBucketClosed()`のリスナーへ通知し、
+ * 呼び出し元（`src/instrumentation.ts`）がDBへ永続化することで、再起動やデプロイをまたいでも
+ * 直近24時間ぶんの集計を維持できる（起動時は`loadPersistedBuckets()`でDBの内容をメモリへ
+ * 復元する）。DBへの反映は非同期・ベストエフォートであり、メモリ上の集計自体はDBの有無に
+ * 依存せず単体でも動作する（既存の単体テストはDB非依存のまま成立する）。
  * 用途の指定は`withGithubApiFeature()`でリクエスト単位に文脈として持たせ、
  * GitHub APIを叩く各関数の引数を増やさずに済ませている。
  *
  * この計測はプロセス単位で、ユーザー・セッション・デバイスによるフィルタを持たない
  * （単一プロセスでデプロイされている前提に暗黙的に依存している。複数インスタンス構成に
- * なるとインスタンスごとに集計が分裂する）。
+ * なるとインスタンスごとに集計が分裂する。DB永続化後もこの制約は変わらない）。
  *
- * 7日・30日規模への集計拡張は、現状のプロセス内メモリ保持のままでは再起動で消えるため
- * 別途永続化の検討が必要になる。
+ * 7日・30日規模への集計拡張は本モジュールのスコープ外（別途永続化戦略の検討が必要）。
  */
 
 export const GITHUB_API_FEATURES = [
@@ -59,10 +62,40 @@ type Bucket = {
 /** 開始時刻の昇順に保つ */
 let buckets: Bucket[] = [];
 
-/** 計測を開始した時刻。プロセス起動時にリセットされることをUIで示すために保持する */
-let measuringSince = Date.now();
-
 const featureStore = new AsyncLocalStorage<GithubApiFeature>();
+
+export type ClosedGithubApiUsageBucketEntry = {
+  feature: GithubApiFeature;
+  endpoint: string;
+  count: number;
+};
+
+export type ClosedGithubApiUsageBucket = {
+  /** バケットの開始時刻（BUCKET_MSで切り捨てたepoch ms） */
+  startedAt: number;
+  entries: ClosedGithubApiUsageBucketEntry[];
+};
+
+type BucketClosedListener = (bucket: ClosedGithubApiUsageBucket) => void;
+
+const bucketClosedListeners: BucketClosedListener[] = [];
+
+/**
+ * バケットが繰り上がる（新しい5分バケットが作られる）たびに、直前に閉じたバケットを渡して
+ * `listener`を呼ぶ。永続化（DB書き込み）など、集計ロジック自体とは独立した副作用の登録に使う。
+ */
+export function onBucketClosed(listener: BucketClosedListener): void {
+  bucketClosedListeners.push(listener);
+}
+
+function notifyBucketClosed(bucket: Bucket): void {
+  if (bucketClosedListeners.length === 0) return;
+  const entries = [...bucket.counts].map(([key, count]) => {
+    const [feature, endpoint] = key.split("\t");
+    return { feature: feature as GithubApiFeature, endpoint, count };
+  });
+  for (const listener of bucketClosedListeners) listener({ startedAt: bucket.startedAt, entries });
+}
 
 /**
  * `fn`の実行中に発生したGitHub API呼び出しを`feature`として計上する。
@@ -131,6 +164,9 @@ export function recordGithubApiCall(
   const startedAt = bucketStartAt(now);
   let bucket = buckets.at(-1);
   if (!bucket || bucket.startedAt !== startedAt) {
+    // 直前のバケットより後ろに進む場合のみ、そのバケットは書き込みを終えたとみなして通知する
+    // （時刻が巻き戻った場合のバックデート挿入では、既存の最新バケットはまだ閉じていない）
+    if (bucket && bucket.startedAt < startedAt) notifyBucketClosed(bucket);
     bucket = { startedAt, counts: new Map() };
     buckets.push(bucket);
     // 時刻が巻き戻った場合（NTP補正など）でも昇順を保つ
@@ -138,6 +174,27 @@ export function recordGithubApiCall(
   }
 
   bucket.counts.set(key, (bucket.counts.get(key) ?? 0) + 1);
+}
+
+/**
+ * DBなど外部から読み込んだバケットの内容をメモリへ流し込む。起動時に一度呼ぶ想定
+ * （既存のメモリ上の集計へ加算するため、複数回呼んでも壊れないが通常は起動時の1回のみ）。
+ */
+export function loadPersistedBuckets(persisted: ClosedGithubApiUsageBucket[], now: number = Date.now()): void {
+  for (const persistedBucket of persisted) {
+    const startedAt = bucketStartAt(persistedBucket.startedAt);
+    let bucket = buckets.find((candidate) => candidate.startedAt === startedAt);
+    if (!bucket) {
+      bucket = { startedAt, counts: new Map() };
+      buckets.push(bucket);
+    }
+    for (const entry of persistedBucket.entries) {
+      const key = `${entry.feature}\t${entry.endpoint}`;
+      bucket.counts.set(key, (bucket.counts.get(key) ?? 0) + entry.count);
+    }
+  }
+  buckets.sort((a, b) => a.startedAt - b.startedAt);
+  pruneBuckets(now);
 }
 
 export type GithubApiUsageEndpoint = {
@@ -156,7 +213,11 @@ export type GithubApiUsageFeature = {
 };
 
 export type GithubApiUsageSummary = {
-  /** 計測を開始した時刻(epoch ms)。プロセスの再起動でリセットされる */
+  /**
+   * 計測を開始した時刻(epoch ms)。現在保持している最古バケットの開始時刻（DBから復元した分を
+   * 含む）で、保持データが無ければ現在時刻になる。24時間より古いデータは持たないため、
+   * 最大でも「現在時刻の24時間前」までしか遡らない。
+   */
   measuringSince: number;
   /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
   currentHourStartedAt: number;
@@ -209,7 +270,7 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
     .sort((a, b) => b.last24h - a.last24h);
 
   return {
-    measuringSince,
+    measuringSince: buckets[0]?.startedAt ?? now,
     currentHourStartedAt,
     totalCurrentHour: features.reduce((sum, feature) => sum + feature.currentHour, 0),
     totalLast24h: features.reduce((sum, feature) => sum + feature.last24h, 0),
@@ -217,8 +278,8 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
   };
 }
 
-/** テスト用に計測結果を空にする */
-export function resetGithubApiUsage(now: number = Date.now()): void {
+/** テスト用に計測結果・`onBucketClosed`のリスナー登録を空にする */
+export function resetGithubApiUsage(): void {
   buckets = [];
-  measuringSince = now;
+  bucketClosedListeners.length = 0;
 }

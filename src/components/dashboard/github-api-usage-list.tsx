@@ -119,7 +119,7 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
             「{modeLabel}」の呼び出し回数。
             {measuredMs !== null && `計測期間は直近${formatDuration(measuredMs)}（`}
             {measuredMs === null && "（"}
-            アプリの再起動でリセットされます）
+            直近24時間分をDBへ保存しており、アプリの再起動をまたいでも記録を引き継ぎます）
           </p>
         </div>
       )}

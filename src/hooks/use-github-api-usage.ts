@@ -17,7 +17,10 @@ export type GithubApiUsageFeature = {
 };
 
 export type GithubApiUsage = {
-  /** 計測を開始した時刻(epoch ms)。アプリの再起動でリセットされる */
+  /**
+   * 計測を開始した時刻(epoch ms)。DBに保存された直近24時間分のデータから復元されるため、
+   * アプリの再起動をまたいでも保持される（保持データが無ければ現在時刻になる）。
+   */
   measuringSince: number;
   /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
   currentHourStartedAt: number;
