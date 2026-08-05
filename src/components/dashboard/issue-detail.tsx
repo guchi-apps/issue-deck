@@ -22,6 +22,7 @@ import {
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -456,6 +457,10 @@ export function IssueDetail({
               repositoryFullName={issue.repositoryFullName}
             />
           </div>
+
+          <Separator />
+
+          <IssueAiSummary issue={issue} />
 
           <Separator />
 

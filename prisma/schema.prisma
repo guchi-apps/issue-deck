@@ -151,6 +151,11 @@ model Issue {
   githubClosedAt  DateTime?
   syncedAt        DateTime          @default(now())
 
+  // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
+  aiSummary             String?   @db.Text
+  aiSummaryCommentCount Int?
+  aiSummaryGeneratedAt  DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
