@@ -26,6 +26,7 @@ export type MobileScreen =
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
+      view: NavViewId;
       labels: string[];
       state: IssueStateFilter;
       assignee: string | null;
@@ -80,6 +81,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         ? {
             kind: "repo-detail",
             repository,
+            view,
             labels,
             state,
             assignee,
@@ -106,6 +108,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return {
         kind: "repo-detail",
         repository,
+        view,
         labels,
         state,
         assignee,
@@ -258,7 +261,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         screen: "issue-detail",
         issue: issue.id,
         repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
-        view: mobileScreen.kind === "issues" ? mobileScreen.view : null,
+        view:
+          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+            ? mobileScreen.view
+            : null,
         labels:
           mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
             ? mobileScreen.labels
@@ -310,6 +316,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
             screen: "repo-detail",
             repo: mobileScreen.repository.fullName,
             issue: mobileScreen.returnToIssueId,
+            view: patch.view ?? mobileScreen.view,
             labels: patch.labels ?? mobileScreen.labels,
             state: patch.state ?? mobileScreen.state,
             assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
@@ -335,6 +342,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         screen: "repo-detail",
         repo: back.repository.fullName,
         issue: returnIssueId,
+        view: back.view,
         labels: back.labels,
         state: back.state,
         assignee: back.assignee,

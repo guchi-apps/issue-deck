@@ -37,6 +37,7 @@ import {
   reconcileIssues,
   sortIssues,
 } from "@/lib/issue-stats";
+import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -313,10 +314,7 @@ export function IssueDeckShell({
     }
   }
 
-  const activeBottomNavTab: MobileBottomNavTab =
-    mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
-      ? "home"
-      : mobileScreen.kind;
+  const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -389,11 +387,14 @@ export function IssueDeckShell({
                   <MobileRepoIssuesScreen
                     repository={mobileScreen.repository}
                     issues={issues}
+                    currentUserLogin={currentUserLogin}
                     selectedIssueId={mobileScreen.returnToIssueId}
+                    view={mobileScreen.view}
                     labels={mobileScreen.labels}
                     state={mobileScreen.state}
                     assignee={mobileScreen.assignee}
                     sort={mobileScreen.sort}
+                    onChangeView={(view) => updateListFilters({ view })}
                     onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onBack={goBack}
