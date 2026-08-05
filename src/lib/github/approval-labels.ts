@@ -50,7 +50,7 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   },
   {
     key: "recently-merged",
-    label: "直近に本番反映",
+    label: "直近本番に反映した",
     labels: [WORKFLOW_STEPS[4].labelName],
     state: "all",
   },
