@@ -5,6 +5,7 @@ import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { CI_DUMMY_REPOSITORY_FULL_NAME, getCiDummyComments } from "@/lib/github/ci-dummy-comments";
 import { mapComment } from "@/lib/github/issue-mapper";
 import {
   createComment,
@@ -46,6 +47,12 @@ async function handleGET(request: NextRequest) {
   const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // CI（無人実行）の画面確認用ダミーリポジトリには実在のGitHub Appインストールが無く
+  // fetchCommentsForIssueが必ず失敗するため、本番を除外したうえでダミーコメントを返す。
+  if (process.env.NODE_ENV !== "production" && repository.fullName === CI_DUMMY_REPOSITORY_FULL_NAME) {
+    return NextResponse.json({ comments: getCiDummyComments().map(mapComment) });
   }
 
   try {
