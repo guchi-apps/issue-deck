@@ -163,7 +163,7 @@ function ApprovalActions({
                   }}
                   autoFocus
                 />
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -211,7 +211,7 @@ function ApprovalActions({
             }}
             autoFocus
           />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(false)} disabled={busy}>
               キャンセル
             </Button>
@@ -221,7 +221,7 @@ function ApprovalActions({
           </div>
         </div>
       ) : isFallbackNotice ? (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
             <RotateCw />
             続きを実装・調査を依頼
@@ -237,7 +237,7 @@ function ApprovalActions({
           </Button>
         </div>
       ) : (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => onApprove()} disabled={busy}>
             <Check />
             承認
@@ -466,7 +466,7 @@ export function CommentThread({
                       }}
                       autoFocus
                     />
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
                         キャンセル
                       </Button>
