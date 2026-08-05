@@ -18,6 +18,7 @@ import {
   Plus,
   RotateCcw,
   Star,
+  Trash2,
   X,
   XCircle,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -87,6 +89,7 @@ type MobileIssueDetailProps = {
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -98,13 +101,21 @@ export function MobileIssueDetail({
   onBack,
   onEdit,
   onIssueUpdated,
+  onIssueDeleted,
   onToggleFavorite,
   onCreateIssue,
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
-  const { updateIssue, isSubmitting } = useIssueMutations();
+  const {
+    updateIssue,
+    deleteIssue,
+    isSubmitting,
+    error: deleteError,
+    setError: setDeleteError,
+  } = useIssueMutations();
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const {
     createComment,
     updateComment,
@@ -173,6 +184,18 @@ export function MobileIssueDetail({
       state: "open",
     });
     if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleDelete() {
+    const ok = await deleteIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+    });
+    if (ok) {
+      setIsDeleteDialogOpen(false);
+      onIssueDeleted(issue);
+      onBack();
+    }
   }
 
   async function handleCreateComment() {
@@ -442,6 +465,17 @@ export function MobileIssueDetail({
                 再オープンする
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={isSubmitting}
+              onSelect={() => {
+                setDeleteError(null);
+                setIsDeleteDialogOpen(true);
+              }}
+            >
+              <Trash2 />
+              Issueを削除
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
@@ -661,6 +695,14 @@ export function MobileIssueDetail({
       >
         <Plus className="size-5" />
       </button>
+
+      <DeleteIssueDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        onConfirm={handleDelete}
+        isDeleting={isSubmitting}
+        error={deleteError}
+      />
     </div>
   );
 }

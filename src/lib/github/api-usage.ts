@@ -19,7 +19,7 @@ export const GITHUB_API_FEATURES = [
   { key: "release_status", label: "リリース進捗ポーリング" },
   { key: "issue_comments", label: "コメント取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
-  { key: "issue_write", label: "Issueの作成・更新" },
+  { key: "issue_write", label: "Issueの作成・更新・削除" },
   { key: "comment_write", label: "コメントの投稿・編集・削除" },
   { key: "workflow_cancel", label: "実行のキャンセル" },
   { key: "release_dispatch", label: "リリースの起動" },

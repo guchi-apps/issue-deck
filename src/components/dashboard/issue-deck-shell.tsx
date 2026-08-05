@@ -137,6 +137,11 @@ export function IssueDeckShell({
     setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
   }
 
+  function handleIssueDeleted(issue: Issue) {
+    setIssues((prev) => prev.filter((item) => item.id !== issue.id));
+    setSelectedIssue((prev) => (prev && prev.id === issue.id ? null : prev));
+  }
+
   // PC・スマホどちらで開いていても、現在表示中のIssueを検知して既読化する
   // （URLの`missue`クエリを直接開いた場合＝リロード・共有リンクもmobileScreen経由でカバーされる）
   const displayedIssueId =
@@ -409,6 +414,7 @@ export function IssueDeckShell({
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
+                    onIssueDeleted={handleIssueDeleted}
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                     onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
@@ -468,6 +474,7 @@ export function IssueDeckShell({
             issues={issues}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
+            onIssueDeleted={handleIssueDeleted}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
             onCreateFollowupIssue={openFollowupIssueDialog}
           />
