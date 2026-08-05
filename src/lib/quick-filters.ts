@@ -1,8 +1,8 @@
 import type { QuickFilter as QuickFilterRow } from "@prisma/client";
 
+import { NAV_VIEW_IDS } from "@/types/issue";
 import type { QuickFilter, QuickFilterInput } from "@/types/quick-filter";
 
-const NAV_VIEW_IDS = ["all", "assigned", "created", "favorites", "recent"] as const;
 const STATE_FILTERS = ["all", "open", "closed"] as const;
 const SORTS = ["updated", "created"] as const;
 

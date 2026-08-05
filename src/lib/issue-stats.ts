@@ -1,6 +1,6 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import type { LabelFilterPreset } from "@/lib/github/approval-labels";
+import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -23,8 +23,15 @@ export function filterIssuesByView(
         (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
       );
     case "all":
-    default:
       return issues;
+    default: {
+      // 運用ラベルに基づくビュー（ユーザーの確認待ち・実行中など）はラベルのOR一致で絞り込む。
+      const viewLabels = getNavView(view).labels;
+      if (!viewLabels || viewLabels.length === 0) return issues;
+      return issues.filter((issue) =>
+        issue.labels.some((label) => viewLabels.includes(label.name)),
+      );
+    }
   }
 }
 
@@ -69,34 +76,20 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
   return [...logins].sort();
 }
 
+/**
+ * ビューごとの件数を数える。
+ * ビューのdefaultStateが現在の状態絞り込みと異なる場合（「直近main反映済み」など）は、
+ * 選択したときに実際に表示される件数と揃うようissuesIgnoringStateを基準にする。
+ */
 export function computeNavCounts(
   issues: Issue[],
+  issuesIgnoringState: Issue[],
   currentUserLogin: string | null,
 ): Record<NavViewId, number> {
-  return {
-    all: issues.length,
-    assigned: issues.filter((issue) => issue.assignee?.login === currentUserLogin).length,
-    created: issues.filter((issue) => issue.author.login === currentUserLogin).length,
-    favorites: issues.filter((issue) => issue.favorite).length,
-    recent: issues.filter(
-      (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
-    ).length,
-  };
-}
-
-export function computeLabelFilterPresetCounts(
-  issues: Issue[],
-  presets: readonly LabelFilterPreset[],
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const preset of presets) {
-    counts[preset.key] = applyIssueFilters(issues, {
-      q: "",
-      repo: null,
-      state: "all",
-      labels: preset.labels,
-      assignee: null,
-    }).length;
+  const counts = {} as Record<NavViewId, number>;
+  for (const view of navViews) {
+    const base = view.defaultState === "all" ? issuesIgnoringState : issues;
+    counts[view.id] = filterIssuesByView(base, view.id, currentUserLogin).length;
   }
   return counts;
 }

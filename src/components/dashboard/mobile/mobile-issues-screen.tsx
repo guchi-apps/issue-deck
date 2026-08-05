@@ -10,11 +10,9 @@ import {
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { applyIssueFilters, filterIssuesByView, sortIssues } from "@/lib/issue-stats";
-import { navViews } from "@/lib/nav-views";
+import { getNavViewLabel, navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
-
-const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "favorites", "recent"];
 
 type MobileIssuesScreenProps = {
   issues: Issue[];
@@ -78,26 +76,23 @@ export function MobileIssuesScreen({
       </header>
 
       <div className="flex items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {QUICK_VIEWS.map((viewId) => {
-          const label = navViews.find((v) => v.id === viewId)?.label ?? viewId;
-          return (
-            <button
-              key={viewId}
-              type="button"
-              onClick={() => onChangeView(viewId)}
-              className={cn(
-                "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
-                view === viewId && "border-primary bg-primary/10 text-primary",
-              )}
-            >
-              {label}
-            </button>
-          );
-        })}
+        {navViews.map((navView) => (
+          <button
+            key={navView.id}
+            type="button"
+            onClick={() => onChangeView(navView.id)}
+            className={cn(
+              "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+              view === navView.id && "border-primary bg-primary/10 text-primary",
+            )}
+          >
+            {navView.label}
+          </button>
+        ))}
       </div>
 
       <IssueList
-        title={navViews.find((v) => v.id === view)?.label ?? ""}
+        title={getNavViewLabel(view)}
         issues={displayedIssues}
         selectedIssueId={selectedIssueId}
         onSelectIssue={onSelectIssue}
@@ -114,6 +109,7 @@ export function MobileIssuesScreen({
         onChange={onChangeFilters}
         labelOptions={labelSummary}
         assigneeOptions={assigneeOptions}
+        showLabelPresets={false}
       />
 
       <button

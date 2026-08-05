@@ -5,7 +5,7 @@ import { useCallback, useMemo, useTransition } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
-import { navViews } from "@/lib/nav-views";
+import { getNavViewDefaultState, isNavViewId } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -35,10 +35,6 @@ export type MobileScreen =
     }
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
-function isNavViewId(value: string | null): value is NavViewId {
-  return value !== null && navViews.some((view) => view.id === value);
-}
-
 // スマホ画面の現在地をURLクエリ（mscreen/mrepo/missue/mview/mlabels/mstate/massignee/msort）に保持する。
 // ステートのみで管理するとページ更新時に必ずホーム画面へ戻ってしまい、Issue詳細から一覧へ
 // 戻ったときにも絞り込み条件（状態・担当者・並び順・ラベル）がリセットされてしまうため（#318）。
@@ -60,8 +56,15 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     () => (labelsParam ? labelsParam.split(",").filter(Boolean) : []),
     [labelsParam],
   );
-  const state: IssueStateFilter =
-    stateParam === "all" || stateParam === "closed" ? stateParam : "open";
+  const view: NavViewId = isNavViewId(viewParam) ? viewParam : "all";
+  // stateクエリ未指定時の既定値はビューによって変わる（「直近main反映済み」はclose済み
+  // issueが対象のためall）。明示的に選ばれているかどうかは、ビュー切り替え時に
+  // 状態を引き継ぐべきかの判断にも使う。
+  const isStateExplicit =
+    stateParam === "all" || stateParam === "closed" || stateParam === "open";
+  const state: IssueStateFilter = isStateExplicit
+    ? (stateParam as IssueStateFilter)
+    : getNavViewDefaultState(view);
   const assignee = assigneeParam ?? null;
   const sort: IssueSort = sortParam === "updated" ? "updated" : "created";
 
@@ -86,7 +89,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           }
         : {
             kind: "issues",
-            view: isNavViewId(viewParam) ? viewParam : "all",
+            view,
             labels,
             state,
             assignee,
@@ -115,7 +118,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     if (screenParam === "issues") {
       return {
         kind: "issues",
-        view: isNavViewId(viewParam) ? viewParam : "all",
+        view,
         labels,
         state,
         assignee,
@@ -129,7 +132,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     return { kind: "home" };
-  }, [screenParam, repoParam, issueParam, viewParam, labels, state, assignee, sort, issues, repositories]);
+  }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, issues, repositories]);
 
   const navigate = useCallback(
     (
@@ -177,7 +180,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("mlabels");
       }
 
-      if (next.state && next.state !== "open") {
+      // 既定値と同じstateはクエリに残さない。既定値はビューによって変わる。
+      if (next.state && next.state !== getNavViewDefaultState(next.view ?? "all")) {
         params.set("mstate", next.state);
       } else {
         params.delete("mstate");
@@ -220,16 +224,18 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   );
 
   const selectQuickView = useCallback(
-    (view: NavViewId, labels?: string[], state?: IssueStateFilter) =>
+    (nextView: NavViewId) =>
       navigate({
         screen: "issues",
-        view,
-        labels: labels ?? (mobileScreen.kind === "issues" ? mobileScreen.labels : undefined),
-        state: state ?? (mobileScreen.kind === "issues" ? mobileScreen.state : undefined),
+        view: nextView,
+        labels: mobileScreen.kind === "issues" ? mobileScreen.labels : undefined,
+        // 状態を明示的に選んでいない場合は、遷移先ビューの既定値に委ねる。
+        state:
+          isStateExplicit && mobileScreen.kind === "issues" ? mobileScreen.state : undefined,
         assignee: mobileScreen.kind === "issues" ? mobileScreen.assignee : undefined,
         sort: mobileScreen.kind === "issues" ? mobileScreen.sort : undefined,
       }),
-    [navigate, mobileScreen],
+    [navigate, mobileScreen, isStateExplicit],
   );
 
   // ホーム画面の「保存したフィルター」選択時、絞り込み条件をすべて置き換えてIssue一覧へ遷移する。
@@ -291,7 +297,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
             issue: mobileScreen.returnToIssueId,
             view: patch.view ?? mobileScreen.view,
             labels: patch.labels ?? mobileScreen.labels,
-            state: patch.state ?? mobileScreen.state,
+            // ビュー切り替え時、状態を明示的に選んでいなければ切り替え先の既定値に委ねる。
+            state: patch.state ?? (isStateExplicit ? mobileScreen.state : undefined),
             assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
             sort: patch.sort ?? mobileScreen.sort,
           },
@@ -312,7 +319,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         );
       }
     },
-    [navigate, mobileScreen],
+    [navigate, mobileScreen, isStateExplicit],
   );
 
   const goBack = useCallback(() => {

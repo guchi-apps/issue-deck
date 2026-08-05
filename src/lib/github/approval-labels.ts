@@ -1,6 +1,6 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
-import type { IssueLabel } from "@/types/issue";
+import type { IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
 export const CHECK_USER_LABEL = "00.check-user";
@@ -19,7 +19,7 @@ export function isApprovalPending(labels: IssueLabel[]): boolean {
 }
 
 export type LabelFilterPreset = {
-  key: string;
+  key: LabelNavViewId;
   label: string;
   labels: string[];
   /**
@@ -31,7 +31,11 @@ export type LabelFilterPreset = {
   state?: IssueStateFilter;
 };
 
-/** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
+/**
+ * 運用ラベルに基づく定型の絞り込みプリセット。
+ * サイドメニュー・スマホのクイックビューでは、これをビュー（viewクエリ）として扱う
+ * （@/lib/nav-views の labelNavViews）。
+ */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
   {

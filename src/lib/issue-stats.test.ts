@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyIssueFilters,
-  computeLabelFilterPresetCounts,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -11,7 +10,6 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import type { LabelFilterPreset } from "@/lib/github/approval-labels";
 import type { Issue } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -159,33 +157,6 @@ describe("computeLabelSummary", () => {
   });
 });
 
-describe("computeLabelFilterPresetCounts", () => {
-  const presets: LabelFilterPreset[] = [
-    { key: "check-user", label: "ユーザーの確認待ち", labels: ["00.check-user"] },
-    { key: "in-progress", label: "実行中", labels: ["03.d:marge", "07.m:marge"] },
-  ];
-
-  it("プリセットごとにラベルOR一致するIssue数を返す", () => {
-    const issues = [
-      makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-      makeIssue({ id: "2", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
-      makeIssue({ id: "3", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
-      makeIssue({ id: "4", labels: [] }),
-    ];
-    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
-      "check-user": 1,
-      "in-progress": 2,
-    });
-  });
-
-  it("該当するIssueがない場合は0を返す", () => {
-    const issues = [makeIssue({ id: "1", labels: [] })];
-    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
-      "check-user": 0,
-      "in-progress": 0,
-    });
-  });
-});
 
 describe("reconcileIssues", () => {
   it("内容が変わっていないIssueは直前のオブジェクト参照を再利用する", () => {
@@ -257,6 +228,24 @@ describe("time-dependent stats", () => {
       const issues = [makeIssue({ id: "1" }), makeIssue({ id: "2" })];
       expect(filterIssuesByView(issues, "all", null)).toHaveLength(2);
     });
+
+    it("ラベルベースのビューは該当ラベルを持つIssueのみ返す", () => {
+      const issues = [
+        makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
+        makeIssue({ id: "2", labels: [{ name: "01.wip", color: "blue", description: null }] }),
+        makeIssue({ id: "3", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
+        makeIssue({ id: "4", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
+        makeIssue({ id: "5", labels: [] }),
+      ];
+      expect(filterIssuesByView(issues, "check-user", null).map((issue) => issue.id)).toEqual(["1"]);
+      expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
+        "2",
+        "3",
+      ]);
+      expect(filterIssuesByView(issues, "release-pending", null).map((issue) => issue.id)).toEqual([
+        "4",
+      ]);
+    });
   });
 
   describe("computeNavCounts", () => {
@@ -268,6 +257,7 @@ describe("time-dependent stats", () => {
           author: { login: "me" },
           favorite: true,
           updatedAt: "2026-01-09T00:00:00.000Z",
+          labels: [{ name: "00.check-user", color: "red", description: null }],
         }),
         makeIssue({
           id: "2",
@@ -277,13 +267,32 @@ describe("time-dependent stats", () => {
           updatedAt: "2025-01-01T00:00:00.000Z",
         }),
       ];
-      expect(computeNavCounts(issues, "me")).toEqual({
+      expect(computeNavCounts(issues, issues, "me")).toEqual({
         all: 2,
         assigned: 1,
         created: 1,
         favorites: 1,
         recent: 1,
+        "check-user": 1,
+        "in-progress": 0,
+        "release-pending": 0,
+        "recently-merged": 0,
       });
+    });
+
+    it("close済みIssueが対象のビューはissuesIgnoringStateを基準に数える", () => {
+      const openIssues = [makeIssue({ id: "1" })];
+      const allIssues = [
+        ...openIssues,
+        makeIssue({
+          id: "2",
+          state: "closed",
+          labels: [{ name: "09.main", color: "green", description: null }],
+        }),
+      ];
+      const counts = computeNavCounts(openIssues, allIssues, null);
+      expect(counts.all).toBe(1);
+      expect(counts["recently-merged"]).toBe(1);
     });
   });
 

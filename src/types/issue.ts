@@ -53,12 +53,29 @@ export type Issue = {
   hasUnreadComments: boolean;
 };
 
-export type NavViewId =
-  | "all"
-  | "assigned"
-  | "created"
-  | "favorites"
-  | "recent";
+/**
+ * 運用ラベル（00.check-userやワークフロー状況ラベル）で絞り込むビューのID。
+ * 「自分の担当」などのビューと同じくviewクエリで表現し、URLの持ち方を揃える。
+ */
+export const LABEL_NAV_VIEW_IDS = [
+  "check-user",
+  "in-progress",
+  "release-pending",
+  "recently-merged",
+] as const;
+
+export type LabelNavViewId = (typeof LABEL_NAV_VIEW_IDS)[number];
+
+export const NAV_VIEW_IDS = [
+  "all",
+  "assigned",
+  "created",
+  "favorites",
+  "recent",
+  ...LABEL_NAV_VIEW_IDS,
+] as const;
+
+export type NavViewId = (typeof NAV_VIEW_IDS)[number];
 
 export type OverviewStat = {
   label: string;
