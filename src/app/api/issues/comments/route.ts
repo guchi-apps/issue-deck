@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
 import {
@@ -23,7 +24,11 @@ async function findRepository(userId: string, owner: string, repo: string) {
   });
 }
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("issue_comments", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -56,7 +61,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withGithubApiFeature("comment_write", () => handlePOST(request));
+}
+
+async function handlePOST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -104,7 +113,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+export function PATCH(request: NextRequest) {
+  return withGithubApiFeature("comment_write", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -144,7 +157,11 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export function DELETE(request: NextRequest) {
+  return withGithubApiFeature("comment_write", () => handleDELETE(request));
+}
+
+async function handleDELETE(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

@@ -27,10 +27,8 @@ import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import { LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
 import {
   applyIssueFilters,
-  computeLabelFilterPresetCounts,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -39,7 +37,8 @@ import {
   reconcileIssues,
   sortIssues,
 } from "@/lib/issue-stats";
-import { navViews } from "@/lib/nav-views";
+import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
+import { getNavViewLabel } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
@@ -189,26 +188,37 @@ export function IssueDeckShell({
     [issues, filters],
   );
 
+  // 「直近main反映済み」のようにclose済みIssueを含むビューの件数を数えるための、
+  // 状態（open/closed）の絞り込みだけを外した集合。
+  const topbarFilteredIssuesIgnoringState = useMemo(
+    () => applyIssueFilters(issues, { ...filters, state: "all" }),
+    [issues, filters],
+  );
+
   const filteredIssues = useMemo(
     () =>
       sortIssues(
-        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin),
+        // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
+        // 基準がずれて古いリリース分が現れないようにする）。
+        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin, issues),
         filters.sort,
       ),
-    [topbarFilteredIssues, filters.view, filters.sort, currentUserLogin],
+    [topbarFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );
 
   const navCounts = useMemo(
-    () => computeNavCounts(topbarFilteredIssues, currentUserLogin),
-    [topbarFilteredIssues, currentUserLogin],
+    () =>
+      computeNavCounts(
+        topbarFilteredIssues,
+        topbarFilteredIssuesIgnoringState,
+        currentUserLogin,
+        issues,
+      ),
+    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
   );
   const overviewStats = useMemo(
     () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),
     [topbarFilteredIssues, currentUserLogin],
-  );
-  const labelFilterPresetCounts = useMemo(
-    () => computeLabelFilterPresetCounts(topbarFilteredIssues, LABEL_FILTER_PRESETS),
-    [topbarFilteredIssues],
   );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
@@ -304,10 +314,7 @@ export function IssueDeckShell({
     }
   }
 
-  const activeBottomNavTab: MobileBottomNavTab =
-    mobileScreen.kind === "issue-detail" || mobileScreen.kind === "repo-detail"
-      ? "home"
-      : mobileScreen.kind;
+  const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -319,6 +326,7 @@ export function IssueDeckShell({
         onCreateIssue={() => openCreateDialog(filters.repo)}
         selectedRepoFullName={filters.repo}
         repositories={repositories}
+        issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
       />
@@ -335,11 +343,7 @@ export function IssueDeckShell({
                   <MobileHomeScreen
                     overviewStats={overviewStats}
                     navCounts={navCounts}
-                    labelFilterPresetCounts={labelFilterPresetCounts}
                     onSelectQuickView={selectQuickView}
-                    onSelectLabelPreset={(preset) =>
-                      selectQuickView("all", preset.labels, preset.state)
-                    }
                     quickFilters={quickFilters}
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -383,11 +387,14 @@ export function IssueDeckShell({
                   <MobileRepoIssuesScreen
                     repository={mobileScreen.repository}
                     issues={issues}
+                    currentUserLogin={currentUserLogin}
                     selectedIssueId={mobileScreen.returnToIssueId}
+                    view={mobileScreen.view}
                     labels={mobileScreen.labels}
                     state={mobileScreen.state}
                     assignee={mobileScreen.assignee}
                     sort={mobileScreen.sort}
+                    onChangeView={(view) => updateListFilters({ view })}
                     onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onBack={goBack}
@@ -430,7 +437,6 @@ export function IssueDeckShell({
               selectedLabels={filters.labels}
               onSelectLabel={(label) => toggleLabel(label.name)}
               onClearLabels={() => setFilter("labels", [])}
-              onSelectLabelPreset={(selection) => setFilters(selection)}
               quickFilters={quickFilters}
               onSelectQuickFilter={handleSelectQuickFilter}
               onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -444,7 +450,7 @@ export function IssueDeckShell({
 
         {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
         <IssueList
-          title={navViews.find((view) => view.id === filters.view)?.label ?? ""}
+          title={getNavViewLabel(filters.view)}
           issues={filteredIssues}
           selectedIssueId={selectedIssue?.id ?? null}
           onSelectIssue={setSelectedIssue}

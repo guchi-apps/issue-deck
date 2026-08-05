@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { cancelWorkflowRun, forceCancelWorkflowRun } from "@/lib/github/actions-api";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
 
@@ -16,7 +17,11 @@ async function findRepository(userId: string, owner: string, repo: string) {
   });
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withGithubApiFeature("workflow_cancel", () => handlePOST(request));
+}
+
+async function handlePOST(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

@@ -25,6 +25,12 @@ type MobileIssueFilterSheetProps = {
   onChange: (filters: MobileIssueLocalFilters) => void;
   labelOptions: LabelSummary[];
   assigneeOptions: string[];
+  /**
+   * 運用ラベルのプリセット（ユーザーの確認待ち・実行中など）を表示するか。
+   * Issue一覧画面ではビュー（viewクエリ）として上部のチップで選べるため、
+   * 二重の導線にならないよう非表示にする。
+   */
+  showLabelPresets?: boolean;
 };
 
 const LABEL_COLLAPSE_THRESHOLD = 8;
@@ -43,7 +49,7 @@ function Pill({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+        "flex h-11 items-center rounded-full border px-4 text-sm whitespace-nowrap",
         active && "border-primary bg-primary/10 text-primary",
       )}
     >
@@ -59,6 +65,7 @@ export function MobileIssueFilterSheet({
   onChange,
   labelOptions,
   assigneeOptions,
+  showLabelPresets = true,
 }: MobileIssueFilterSheetProps) {
   const [showAllLabels, setShowAllLabels] = useState(false);
 
@@ -104,25 +111,30 @@ export function MobileIssueFilterSheet({
             </div>
           </section>
 
-          <section>
-            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
-            <div className="flex flex-wrap gap-2">
-              {LABEL_FILTER_PRESETS.map((preset) => {
-                const active = isLabelFilterPresetActive(filters.labels, preset);
-                return (
-                  <Pill
-                    key={preset.key}
-                    active={active}
-                    onClick={() =>
-                      onChange({ ...filters, ...resolveLabelFilterPresetSelection(preset, active) })
-                    }
-                  >
-                    {preset.label}
-                  </Pill>
-                );
-              })}
-            </div>
-          </section>
+          {showLabelPresets && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
+              <div className="flex flex-wrap gap-2">
+                {LABEL_FILTER_PRESETS.map((preset) => {
+                  const active = isLabelFilterPresetActive(filters.labels, preset);
+                  return (
+                    <Pill
+                      key={preset.key}
+                      active={active}
+                      onClick={() =>
+                        onChange({
+                          ...filters,
+                          ...resolveLabelFilterPresetSelection(preset, active),
+                        })
+                      }
+                    >
+                      {preset.label}
+                    </Pill>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <section>
             <h3 className="mb-2 text-xs font-semibold text-muted-foreground">ラベル</h3>
@@ -145,7 +157,7 @@ export function MobileIssueFilterSheet({
                   <button
                     type="button"
                     onClick={() => setShowAllLabels((prev) => !prev)}
-                    className="mt-2 text-xs text-primary hover:underline"
+                    className="mt-2 flex min-h-11 items-center text-sm text-primary hover:underline"
                   >
                     {showAllLabels ? "折りたたむ" : `すべて表示する（+${hiddenLabelCount}）`}
                   </button>

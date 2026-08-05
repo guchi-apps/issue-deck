@@ -1,6 +1,5 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
-
-const GITHUB_API = "https://api.github.com";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 export type GithubApiWorkflowRun = {
   status: "queued" | "in_progress" | "completed" | string;
@@ -16,12 +15,7 @@ export async function fetchWorkflowRun(
   token: string,
 ): Promise<GithubApiWorkflowRun> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -48,12 +42,7 @@ export async function fetchWorkflowRunJobs(
   token: string,
 ): Promise<GithubApiWorkflowJob[]> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/jobs`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -69,13 +58,7 @@ export async function cancelWorkflowRun(
   token: string,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/cancel`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token, { method: "POST" });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -89,13 +72,7 @@ export async function forceCancelWorkflowRun(
   token: string,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/force-cancel`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token, { method: "POST" });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -113,12 +90,7 @@ export async function fetchPullRequest(
   token: string,
 ): Promise<GithubApiPullRequest> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -138,12 +110,7 @@ export async function fetchCheckRuns(
   token: string,
 ): Promise<GithubApiCheckRun[]> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${ref}/check-runs`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

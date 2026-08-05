@@ -13,6 +13,8 @@ export type CiState = "pending" | "success" | "failure" | "unknown";
 
 export type BumpPullRequest = ReleasePullRequest & {
   ciState: CiState | null;
+  /** バンプPRのブランチ名から取り出した次バージョン（例: "1.2.3"）。取得できない場合はnull */
+  version: string | null;
 };
 
 export type ReleaseWorkflowRun = {
@@ -55,8 +57,23 @@ function errorMessageForResponse(
   return `リクエストに失敗しました (${status})`;
 }
 
-/** シートを開いている間、進捗をライブ更新するためのポーリング間隔（ミリ秒） */
-const POLL_INTERVAL_MS = 6000;
+/**
+ * シートを開いている間のポーリング間隔（ミリ秒）。
+ * 1回の取得でGitHub APIを7〜8回消費するため、自動で状態が進む段階（workflow実行中・CI待ちなど）
+ * だけ短い間隔でライブ更新し、人のマージ待ち・対象なしの段階では長い間隔に落とす。
+ */
+const ACTIVE_POLL_INTERVAL_MS = 10_000;
+const IDLE_POLL_INTERVAL_MS = 30_000;
+
+/** 放置していても自動で状態が進む段階かどうか（＝短い間隔でのポーリングに意味がある段階か） */
+function isProgressing(status: ReleaseStatus | null): boolean {
+  if (!status || !status.available) return false;
+  if (status.workflowRun && status.workflowRun.status !== "completed") return true;
+  if (status.deployWorkflowRun && status.deployWorkflowRun.status !== "completed") return true;
+  if (status.bumpPullRequest?.ciState === "pending") return true;
+  // develop→mainのPRが自動作成されるのを待っている過渡状態
+  return status.phase === "release_pending";
+}
 
 export function useReleaseStatus(repoFullName: string | null, enabled: boolean) {
   const [data, setData] = useState<ReleaseStatus | null>(null);
@@ -71,10 +88,15 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
 
     const [owner, repo] = repoFullName.split("/");
     let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    /** 取得中かどうか。タブ復帰時の即時取得が二重に走るのを防ぐ */
+    let inFlight = false;
+    /** 直近の取得結果。次のポーリング間隔の決定に使う */
+    let lastStatus: ReleaseStatus | null = null;
 
     // initial=true の初回のみローディング表示・data初期化を行う。以降のポーリング更新では
     // 画面をちらつかせないよう、取得済みdataを保ったまま差し替える。
-    async function load(initial: boolean) {
+    async function load(initial: boolean): Promise<ReleaseStatus | null> {
       if (initial) {
         setIsLoading(true);
         setData(null);
@@ -90,21 +112,59 @@ export function useReleaseStatus(repoFullName: string | null, enabled: boolean) 
           setData(json as ReleaseStatus);
           setError(null);
         }
+        return json as ReleaseStatus;
       } catch (err) {
         // ポーリング中の一時的な失敗で既存の表示を消さないよう、初回のみエラーを表面化する。
         if (!cancelled && initial) setError(err instanceof Error ? err.message : String(err));
+        return null;
       } finally {
         if (!cancelled && initial) setIsLoading(false);
       }
     }
 
-    // 開いた瞬間に外部システム（GitHub API）から取得し、以降は一定間隔でライブ更新する。
-    load(true);
-    const timer = setInterval(() => load(false), POLL_INTERVAL_MS);
+    function schedule() {
+      if (cancelled) return;
+      timerId = setTimeout(
+        poll,
+        isProgressing(lastStatus) ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
+      );
+    }
+
+    async function runOnce(initial: boolean) {
+      inFlight = true;
+      try {
+        // 取得に失敗した場合は直前の状態を保ったまま次の間隔を決める（失敗を理由に間隔を変えない）
+        lastStatus = (await load(initial)) ?? lastStatus;
+      } finally {
+        inFlight = false;
+      }
+      schedule();
+    }
+
+    function poll() {
+      // バックグラウンドタブでは取得せず次の周期だけ進める（復帰時にvisibilitychangeで即時取得する）
+      if (document.hidden) {
+        timerId = setTimeout(poll, IDLE_POLL_INTERVAL_MS);
+        return;
+      }
+      void runOnce(false);
+    }
+
+    function handleVisibilityChange() {
+      // 取得中の復帰では新たに走らせない（ポーリングの連鎖が二重になるのを防ぐ）
+      if (document.hidden || inFlight) return;
+      clearTimeout(timerId);
+      poll();
+    }
+
+    // 開いた瞬間に外部システム（GitHub API）から取得し、以降は状況に応じた間隔でライブ更新する。
+    void runOnce(true);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timerId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, repoFullName, reloadKey]);
 

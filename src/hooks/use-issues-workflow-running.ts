@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { isApprovalPending } from "@/lib/github/approval-labels";
-import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
+import { hasActiveWorkflowStep } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 
 const POLL_INTERVAL_MS = 20_000;
@@ -15,14 +15,17 @@ type ApiRunningState = RunningState & { runId: number | null };
 const NOT_RUNNING: ApiRunningState = { isRunning: false, currentStep: null, runId: null };
 
 /**
- * 一覧に表示中のIssueのうち、実装状況ラベル（01.wip〜09.main）が付き承認待ち
- * （00.check-user）でないものについて、対応するGitHub Actions実行が進行中かどうかをポーリングする
+ * 一覧に表示中のIssueのうち、実行が進行し得る実装状況ラベル（01.wip / 03.d:marge / 07.m:marge）が
+ * 付き承認待ち（00.check-user）でないものについて、対応するGitHub Actions実行が進行中かどうかを
+ * ポーリングする。
+ * `05.develop`・`09.main`はマージ完了後の定常状態で実行は走らないため、GitHub APIの消費を抑える
+ * 目的で対象から除外している。
  */
 export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
   const [running, setRunning] = useState<RunningMap>({});
   const knownRunIdsRef = useRef<Map<string, number>>(new Map());
   const candidates = issues.filter(
-    (issue) => getWorkflowStepIndex(issue.labels) !== null && !isApprovalPending(issue.labels),
+    (issue) => hasActiveWorkflowStep(issue.labels) && !isApprovalPending(issue.labels),
   );
   const candidateKey = candidates
     .map((issue) => issue.id)

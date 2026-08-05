@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { fetchCheckRuns, fetchPullRequest } from "@/lib/github/actions-api";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { summarizePullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -17,7 +18,11 @@ async function findRepository(userId: string, owner: string, repo: string) {
   });
 }
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("pull_request_ci", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

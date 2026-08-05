@@ -1,6 +1,6 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
-import type { IssueLabel } from "@/types/issue";
+import type { IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
 export const CHECK_USER_LABEL = "00.check-user";
@@ -19,7 +19,7 @@ export function isApprovalPending(labels: IssueLabel[]): boolean {
 }
 
 export type LabelFilterPreset = {
-  key: string;
+  key: LabelNavViewId;
   label: string;
   labels: string[];
   /**
@@ -31,7 +31,11 @@ export type LabelFilterPreset = {
   state?: IssueStateFilter;
 };
 
-/** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
+/**
+ * 運用ラベルに基づく定型の絞り込みプリセット。
+ * サイドメニュー・スマホのクイックビューでは、これをビュー（viewクエリ）として扱う
+ * （@/lib/nav-views の labelNavViews）。
+ */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
   {
@@ -158,4 +162,22 @@ export function requestContinuationCommentBody(): string {
 export function requestPrFixCommentBody(reason: string): string {
   const trimmed = reason.trim();
   return trimmed ? `@claude ${trimmed}` : "@claude PRの内容を見直して修正してください。";
+}
+
+/**
+ * 承認・修正依頼・継続依頼・PR修正依頼の各操作は「ラベル更新→コメント投稿」の順で行うが、
+ * コメント投稿（個人のGitHub OAuthトークン使用）はトークン失効時に失敗しうる（#421）。
+ * その場合ラベル更新のみが反映され「ラベル上は操作済みに見えるが実装は再開されない」不整合
+ * 状態になるため、呼び出し側はラベルをロールバックしたうえで、次に取るべき行動が分かるよう
+ * 元のエラーメッセージにこの案内を追記する。
+ */
+export function withRollbackNotice(baseMessage: string): string {
+  return `${baseMessage} ラベルの変更は取り消しました。GitHubからログアウトし、再度ログインしてからもう一度お試しください。`;
+}
+
+/**
+ * ラベルのロールバック（updateIssueの再実行）自体も失敗した場合の案内。手動確認を促す。
+ */
+export function withRollbackFailureNotice(baseMessage: string): string {
+  return `${baseMessage} ラベルの復元にも失敗しました。手動でご確認ください。`;
 }

@@ -63,6 +63,8 @@ import {
   labelsAfterRejection,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
+  withRollbackFailureNotice,
+  withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
@@ -109,6 +111,7 @@ export function MobileIssueDetail({
     deleteComment,
     isSubmitting: isCommentSubmitting,
     error: commentMutationError,
+    setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isImageUploading, setIsImageUploading] = useState(false);
@@ -238,47 +241,57 @@ export function MobileIssueDetail({
     return ok;
   }
 
-  async function handleApprove() {
+  /**
+   * ラベル更新→コメント投稿の順で行う承認系操作の共通処理。
+   * コメント投稿（個人のGitHub OAuthトークン使用）はトークン失効時に失敗しうるため、
+   * その場合はラベル更新前の状態にロールバックし、「ラベルは外れたが実装は再開されない」
+   * 不整合状態を防ぐ（#421）。
+   *
+   * ラベル更新はissue-deckのGitHub Appが行うためGitHub上はbotの操作として記録され、
+   * issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
+   * 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
+   */
+  async function updateLabelsAndComment(newLabels: string[], commentBody: string) {
+    const originalLabels = issue.labels.map((label) => label.name);
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
-      labels: labelsAfterApproval(issue.labels),
+      labels: newLabels,
     });
     if (!updated) return;
     onIssueUpdated(updated);
 
-    // ラベル更新はissue-deckのGitHub Appが行うためGitHub上はbotの操作として記録され、
-    // issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
-    // 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
     const [owner, repo] = issue.repositoryFullName.split("/");
     const created = await createComment({
       owner,
       repo,
       number: issue.number,
-      body: approveCommentBody(issue.labels),
+      body: commentBody,
     });
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+      return;
     }
+
+    const rolledBack = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: originalLabels,
+    });
+    if (rolledBack) onIssueUpdated(rolledBack);
+    setCommentMutationError((prev) =>
+      rolledBack ? withRollbackNotice(prev ?? "") : withRollbackFailureNotice(prev ?? ""),
+    );
+  }
+
+  async function handleApprove() {
+    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
   }
 
   async function handleReject(reason: string) {
-    const updated = await updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: labelsAfterRejection(issue.labels),
-    });
-    if (!updated) return;
-    onIssueUpdated(updated);
-
-    const [owner, repo] = issue.repositoryFullName.split("/");
     const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
-    const created = await createComment({ owner, repo, number: issue.number, body });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-    }
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), body);
   }
 
   async function handleWithdraw() {
@@ -293,47 +306,11 @@ export function MobileIssueDetail({
   }
 
   async function handleRequestContinuation() {
-    const updated = await updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: labelsAfterRejection(issue.labels),
-    });
-    if (!updated) return;
-    onIssueUpdated(updated);
-
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: requestContinuationCommentBody(),
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-    }
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestContinuationCommentBody());
   }
 
   async function handleRequestPrFix(reason: string) {
-    const updated = await updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: labelsAfterRejection(issue.labels),
-    });
-    if (!updated) return;
-    onIssueUpdated(updated);
-
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: requestPrFixCommentBody(reason),
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-    }
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
   }
 
   return (
@@ -343,7 +320,7 @@ export function MobileIssueDetail({
           type="button"
           onClick={onBack}
           aria-label="戻る"
-          className="-m-2 rounded-full p-2 active:bg-muted"
+          className="-m-3 rounded-full p-3 active:bg-muted"
         >
           <ArrowLeft className="size-5" />
         </button>
@@ -360,7 +337,7 @@ export function MobileIssueDetail({
                 type="button"
                 disabled={isSubmitting}
                 aria-label="実装を開始"
-                className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+                className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <Loader2 className="size-5 animate-spin" />
@@ -381,7 +358,7 @@ export function MobileIssueDetail({
                 type="button"
                 disabled={isSubmitting}
                 aria-label="Claudeに質問する"
-                className="-m-2 rounded-full p-2 text-primary active:bg-muted disabled:opacity-50"
+                className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <Loader2 className="size-5 animate-spin" />
@@ -396,7 +373,7 @@ export function MobileIssueDetail({
           type="button"
           onClick={() => onToggleFavorite(issue)}
           aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-          className="-m-2 rounded-full p-2 active:bg-muted"
+          className="-m-3 rounded-full p-3 active:bg-muted"
         >
           <Star
             className={
@@ -409,7 +386,7 @@ export function MobileIssueDetail({
             <button
               type="button"
               aria-label="操作メニュー"
-              className="-m-2 rounded-full p-2 active:bg-muted"
+              className="-m-3 rounded-full p-3 active:bg-muted"
             >
               <MoreHorizontal className="size-5 text-muted-foreground" />
             </button>
@@ -565,7 +542,7 @@ export function MobileIssueDetail({
                     onClick={() => toggleLabel(label.name)}
                     disabled={isSubmitting}
                     aria-label={`${label.name}を削除`}
-                    className="-m-1.5 rounded-full p-1.5 hover:opacity-70 disabled:opacity-50"
+                    className="relative -m-1.5 rounded-full p-1.5 after:absolute after:-inset-2.5 hover:opacity-70 disabled:opacity-50"
                   >
                     <X className="size-3" />
                   </button>
@@ -582,7 +559,7 @@ export function MobileIssueDetail({
                   type="button"
                   disabled={isSubmitting}
                   aria-label="ラベルを追加"
-                  className="flex size-9 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
+                  className="flex size-11 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
                 >
                   <Plus className="size-4" />
                 </button>
