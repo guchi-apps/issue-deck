@@ -221,6 +221,19 @@ model QuickFilter {
   @@index([userId])
 }
 
+// GitHub API消費の内訳計測（src/lib/github/api-usage.ts）を、プロセス再起動をまたいで
+// 保持するための永続化先。5分バケット単位でupsertし、直近24時間より古い行は随時削除する
+model GithubApiUsageBucket {
+  id        String   @id @default(cuid())
+  startedAt DateTime
+  feature   String
+  endpoint  String
+  count     Int
+
+  @@unique([startedAt, feature, endpoint])
+  @@index([startedAt])
+}
+
 model IssueLabel {
   id            String  @id @default(cuid())
   issueId       String
