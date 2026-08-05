@@ -20,9 +20,9 @@ export const DEVELOP_MERGED_LABEL_NAME = "05.develop";
 export const WORKFLOW_STEPS: readonly WorkflowStep[] = [
   { labelName: "01.wip", label: "実装中", active: true },
   { labelName: "03.d:marge", label: "developへPR", active: true },
-  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "本番反映待ち", active: false },
+  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop反映済", active: false },
   { labelName: "07.m:marge", label: "mainへPR", active: true },
-  { labelName: "09.main", label: "直近に本番反映", active: false },
+  { labelName: "09.main", label: "本番反映済", active: false },
 ];
 
 /** issueのラベルからワークフロー上の現在ステップのindexを返す。該当ラベルがなければnull */
