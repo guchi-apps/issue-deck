@@ -390,6 +390,25 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
    `gh issue view`/`gh issue comment`/`gh issue edit`のみを使う単純なシェルスクリプトであり、
    Claude Code自体の許可コマンドの問題から独立しているため、1で防ぎきれなかったケースでも
    「Issueに何も反映されないまま無言で終わる」事態を確実に防げる。
+3. **設定回数までの自動リトライ（#497）**: 2のフォールバック検証ステップが「新規コメント（計画提示
+   ステップ）・新規コメントとPRのいずれも（実装ステップ）が確認できない」と判断した時点で、即座に
+   `00.check-user`を付けて止めるのではなく、まずリポジトリ設定の自動リトライ上限（`GET
+   /api/repositories/settings?fullName=<owner/repo>`から取得する`autoRetryLimit`、#496で追加した
+   読み取り専用API）と現在のリトライ回数を比較する。上限未満であれば「自動リトライします」という
+   趣旨のコメントを投稿したうえで`gh workflow run claude-issue-dispatch.yml -f
+   issue_number=<n> -f retry_attempt=<n+1>`で`claude-issue-dispatch.yml`自身を`workflow_dispatch`
+   経由で再起動し、`00.check-user`は付与せず終了する。上限に達した場合（`autoRetryLimit`が未設定・
+   API到達不可の場合は常に上限0扱いとし安全側にフォールバックする）は従来どおりのフォールバック
+   通知＋`00.check-user`を行う。
+   - `workflow_dispatch`による自己再起動は、`GITHUB_TOKEN`によるAPI呼び出しが新たなワークフロー
+     実行を誘発しないGitHubの仕様上の制約（[docs/actions-token-model.md](actions-token-model.md)
+     参照）のため、`secrets.WORKFLOW_PAT`を使う。
+   - `workflow_dispatch`トリガー自体は、`workflow_dispatch`のAPI呼び出しがリポジトリへのwrite
+     権限を要求するGitHub側の仕様により、`issue_comment`向けの実行者パーミッション確認と同等の
+     信頼レベルが既に担保されているとみなし、Bot判定・実行者パーミッション確認をスキップする。
+   - 自動リトライ発火時のコメントには、フォールバック通知の`<!-- issue-deck-fallback-notice -->`
+     マーカーを付けない（`00.check-user`も付けないため、issue-deck画面の「続きを実装・調査を依頼」
+     ボタンは表示されず、UIの継続依頼導線と自動リトライが二重に走ることはない）。
 
 ### 自動投稿コメントへの実行ログリンク付与
 
