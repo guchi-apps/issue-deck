@@ -26,11 +26,11 @@ describe("buildClaudeAppPrompt", () => {
 });
 
 describe("buildClaudeAppUrl", () => {
-  it("branch=developとプロンプトをクエリパラメータに含むURLを組み立てる", () => {
+  it("Issue固有ブランチ（issue-<番号>）とプロンプトをクエリパラメータに含むURLを組み立てる", () => {
     const url = new URL(buildClaudeAppUrl(issue));
     expect(url.origin).toBe("https://claude.ai");
     expect(url.pathname).toBe("/code/new");
-    expect(url.searchParams.get("branch")).toBe("develop");
+    expect(url.searchParams.get("branch")).toBe("issue-360");
     expect(url.searchParams.get("q")).toBe(buildClaudeAppPrompt(issue));
   });
 

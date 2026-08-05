@@ -19,10 +19,10 @@ export const DEVELOP_MERGED_LABEL_NAME = "05.develop";
 /** マルチエージェント運用における実装状況ラベル（01.wip〜09.main）の遷移順（CLAUDE.md参照） */
 export const WORKFLOW_STEPS: readonly WorkflowStep[] = [
   { labelName: "01.wip", label: "実装中", active: true },
-  { labelName: "03.d:marge", label: "developへPR", active: true },
-  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop済", active: false },
-  { labelName: "07.m:marge", label: "mainへPR", active: true },
-  { labelName: "09.main", label: "main済", active: false },
+  { labelName: "03.d:marge", label: "developへマージ", active: true },
+  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop反映済", active: false },
+  { labelName: "07.m:marge", label: "本番へマージ", active: true },
+  { labelName: "09.main", label: "本番反映済", active: false },
 ];
 
 /** issueのラベルからワークフロー上の現在ステップのindexを返す。該当ラベルがなければnull */

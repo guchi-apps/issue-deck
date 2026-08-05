@@ -30,4 +30,30 @@ describe("buildIssueSuggestPrompt", () => {
     expect(prompt).toContain("...(省略)");
     expect(prompt.length).toBeLessThan(longBody.length + 1000);
   });
+
+  it("00〜09番台のラベル（ユーザーチェック・進捗管理用）は候補から除外する", () => {
+    const prompt = buildIssueSuggestPrompt({
+      body: "本文",
+      availableLabels: [
+        { name: "00.check-user", description: "要確認" },
+        { name: "01.wip", description: "作業中" },
+        { name: "09.main", description: "main反映済み" },
+        { name: "bug", description: "不具合" },
+      ],
+    });
+
+    expect(prompt).not.toContain("00.check-user");
+    expect(prompt).not.toContain("01.wip");
+    expect(prompt).not.toContain("09.main");
+    expect(prompt).toContain("- bug: 不具合");
+  });
+
+  it("00〜09番台のラベルのみの場合は「利用可能なラベルなし」と表示する", () => {
+    const prompt = buildIssueSuggestPrompt({
+      body: "本文",
+      availableLabels: [{ name: "00.check-user", description: "要確認" }],
+    });
+
+    expect(prompt).toContain("(利用可能なラベルなし)");
+  });
 });

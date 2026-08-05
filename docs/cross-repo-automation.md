@@ -82,6 +82,13 @@ IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app
 コード調査だけでは確定できない。現状のIssueDeck用GitHub Appが、連携先リポジトリへ
 `.github/workflows/`ファイルやSecretsを書き込む権限を持っているかは未確認。
 
+なお、GraphQLの`transferIssue`ミューテーション（`src/lib/github/issues-api.ts`の`transferIssue()`、
+Issue移動機能で使用）はGitHub App固有の`Administration`（Read and write）権限でゲーティングされて
+おり、OAuth Appのユーザーアクセストークンではスコープの有無によらず常に
+`Resource not accessible by integration`エラーになる。IssueDeck用GitHub Appが`Administration`権限を
+持っていない場合、インストール済みリポジトリのオーナーに権限追加後の再承認を依頼する必要がある
+（#523）。
+
 ## 他リポジトリへ展開する上で必要になる要素
 
 ### 1. ワークフローファイル一式の配布方法
@@ -193,6 +200,9 @@ C（設定ファイル + 共通ワークフロー本体を可能な限り集約�
 5. Secrets配布方式の決定とプロトタイプ（上記3。課金面の方針決定が前提）
 6. セキュリティレビュー（上記6。信頼境界の設計を固めてから展開開始する）
 7. テンプレートPR自動作成 or CLIスキャフォールディングの実装（上記1。方式比較の結論を受けて）
+
+なお、実際に自動化が導入・検討されているリポジトリの一覧は
+[docs/supported-repositories.md](supported-repositories.md)に記録する。
 
 ## ケーススタディ: m-guchi/shopping-list での実現可能性（issue #357）
 

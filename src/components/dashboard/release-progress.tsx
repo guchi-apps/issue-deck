@@ -75,7 +75,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "active";
-    steps[2].note = "developへ反映済み。まもなくdevelop→mainのPRを自動作成します（起動ボタンでも作成できます）。";
+    steps[2].note = "まもなく自動作成（起動ボタンでも可）";
   } else if (phase === "release_pr_open" && release) {
     steps[0].state = "done";
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;

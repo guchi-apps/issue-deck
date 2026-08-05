@@ -58,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
@@ -542,13 +543,22 @@ export function MobileIssueDetail({
               value={issue.assignee?.login ?? "__none__"}
               onValueChange={(value) => handleAssigneeChange(value === "__none__" ? null : value)}
             >
-              <SelectTrigger className="h-auto border-none p-0 text-sm shadow-none" disabled={isMetaLoading || isSubmitting}>
-                <SelectValue placeholder="担当者を選択" />
+              <SelectTrigger
+                className="h-auto gap-1 border-none bg-transparent p-0 text-sm shadow-none hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent"
+                disabled={isMetaLoading || isSubmitting}
+              >
+                <SelectValue placeholder="担当者を選択">
+                  <span className="flex items-center gap-1.5">
+                    {issue.assignee && <UserAvatar login={issue.assignee.login} />}
+                    {issue.assignee?.login ?? "未設定"}
+                  </span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">未設定</SelectItem>
                 {repoAssignees.map((login) => (
                   <SelectItem key={login} value={login}>
+                    <UserAvatar login={login} />
                     {login}
                   </SelectItem>
                 ))}
@@ -617,12 +627,32 @@ export function MobileIssueDetail({
           </div>
         </div>
 
+        <Separator />
+
         <IssueAiSummary issue={issue} />
+
+        <Separator />
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
           <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
+
+        {canStartImplementation(issue) && (
+          <StartImplementationDialog
+            issue={issue}
+            onIssueUpdated={onIssueUpdated}
+            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            renderTrigger={(isSubmitting) => (
+              <Button className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                実装を開始
+              </Button>
+            )}
+          />
+        )}
+
+        <Separator />
 
         <div>
           <h2 className="mb-3 text-sm font-semibold">

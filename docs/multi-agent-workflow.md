@@ -524,7 +524,13 @@ Issueクローズをトリガーに対応する`issue-<番号>/`ディレクト�
 
 `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、`claude-issue-
 dispatch.yml`のClaude Codeステップ（実装・PR作成）が、実装・テスト・コミットを終えた後に
-`scripts/capture-issue-screenshots.sh <issue番号>`を実行する。このスクリプトが以下を一括で
+`pnpm run capture:issue-screenshots -- <issue番号>`を実行する。これは`package.json`の
+`capture:issue-screenshots`スクリプト経由で`scripts/capture-issue-screenshots.sh`を実行するもの。
+かつては実装ステップの`allowedTools`に`Bash(scripts/capture-issue-screenshots.sh:*)`という
+前方一致の許可を直接列挙していたが、エージェントが`bash scripts/capture-issue-screenshots.sh
+<issue番号>`のように`bash `を前置して呼び出すと一致せず拒否される問題があったため、既に
+許可済みの`Bash(pnpm:*)`経由の呼び出しに変更し、`allowedTools`からその許可は削除した
+（Issue #522）。このスクリプトが以下を一括で
 行い、埋め込み用のraw URLを標準出力に2行（1行目がデスクトップ、2行目がモバイル）で出力する。
 
 1. `next dev`をバックグラウンドで起動する（DB・CIバイパス用ユーザーは、この前段の
