@@ -53,6 +53,13 @@ async function handleIssuesEvent(payload: {
   if (payload.action === "transferred") {
     // issue-deck経由ではなくGitHub上で直接Issueが移動された場合も、DBの整合性を保つために対応する。
     // Webhookは移動元リポジトリ（payload.repository）宛に配信されるが、移動先はchanges.new_repositoryに入る。
+    //
+    // このイベントの`payload.issue`は移動「前」のIssue（旧番号・旧URL・旧ID）であり、移動先には
+    // 新しい番号・IDのIssueが作り直される。そのため`payload.issue`をそのままupsertすると、
+    // GitHub上には既に存在しない旧Issueがアプリ上に残り続けてしまう（#523）。
+    // 移動元のレコードは必ず削除し、移動先のIssueは移動先リポジトリの再同期で取り込む。
+    await deleteIssueByGithubId(payload.issue.id);
+
     const newRepositoryId = payload.changes?.new_repository?.id;
     if (typeof newRepositoryId !== "number") {
       console.error(
@@ -64,14 +71,14 @@ async function handleIssuesEvent(payload: {
 
     const destinationRepository = await db.repository.findUnique({
       where: { githubRepositoryId: newRepositoryId },
+      include: { installation: true },
     });
-    if (!destinationRepository) {
-      // 移動先がissue-deckに未接続のリポジトリの場合、移動元のレコードを削除して整合性を保つ
-      await deleteIssueByGithubId(payload.issue.id);
-      return;
-    }
+    // 移動先がissue-deckに未接続のリポジトリの場合は、移動元のレコードを消すだけでよい
+    if (!destinationRepository) return;
 
-    await upsertIssueFromWebhookPayload(destinationRepository.id, payload.issue);
+    // 移動先の新しいIssueは`payload`から番号・IDを特定できないため、移動先リポジトリを再同期して取り込む。
+    // Issueの移動自体が頻繁な操作ではないため、都度の全件同期でも影響は小さい。
+    await syncRepositoryIssues(destinationRepository);
     return;
   }
 

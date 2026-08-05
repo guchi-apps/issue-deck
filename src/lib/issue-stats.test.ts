@@ -7,6 +7,7 @@ import {
   filterIssuesByView,
   getAssigneeOptions,
   reconcileIssues,
+  replaceMovedIssue,
   sortIssues,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
@@ -178,6 +179,36 @@ describe("reconcileIssues", () => {
     const nextIssue = makeIssue({ id: "2" });
     const result = reconcileIssues([], [nextIssue]);
     expect(result[0]).toBe(nextIssue);
+  });
+});
+
+describe("replaceMovedIssue", () => {
+  it("移動元のIssueを取り除き、同じ位置に移動後のIssueを差し込む", () => {
+    const issues = [makeIssue({ id: "1" }), makeIssue({ id: "2" }), makeIssue({ id: "3" })];
+    const moved = makeIssue({ id: "10", number: 5, repositoryFullName: "owner/other" });
+
+    const result = replaceMovedIssue(issues, "2", moved);
+
+    expect(result.map((issue) => issue.id)).toEqual(["1", "10", "3"]);
+  });
+
+  it("移動元が一覧に無い場合は先頭に追加する", () => {
+    const issues = [makeIssue({ id: "1" })];
+    const moved = makeIssue({ id: "10" });
+
+    const result = replaceMovedIssue(issues, "999", moved);
+
+    expect(result.map((issue) => issue.id)).toEqual(["10", "1"]);
+  });
+
+  it("ポーリングで移動後のIssueが既に取り込まれていても重複させない", () => {
+    const issues = [makeIssue({ id: "1" }), makeIssue({ id: "2" }), makeIssue({ id: "10" })];
+    const moved = makeIssue({ id: "10", title: "移動後" });
+
+    const result = replaceMovedIssue(issues, "2", moved);
+
+    expect(result.map((issue) => issue.id)).toEqual(["1", "10"]);
+    expect(result[1]).toBe(moved);
   });
 });
 

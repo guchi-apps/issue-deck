@@ -57,6 +57,10 @@ async function handlePOST(request: NextRequest) {
   try {
     const token = await getInstallationToken(destinationRepository.installation.installationId);
     const transferred = await transferIssue(owner, repo, number, newOwner, newRepo, token);
+    // 移動元のIssueはGitHub上では新しい番号のIssueに置き換わり、元の番号ではもう存在しない。
+    // DBに残したままだとアプリ上に存在しないIssueが表示され続けるため、移動先のレコードを
+    // 作る前に削除する（#523）。
+    await db.issue.deleteMany({ where: { repositoryId: repository.id, number } });
     const issue = await upsertIssueAndGetDisplay(destinationRepository, transferred);
     return NextResponse.json({ issue });
   } catch (error) {

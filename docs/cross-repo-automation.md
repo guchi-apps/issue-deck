@@ -89,6 +89,12 @@ Issue移動機能で使用）はGitHub App固有の`Administration`（Read and w
 持っていない場合、インストール済みリポジトリのオーナーに権限追加後の再承認を依頼する必要がある
 （#523）。
 
+また、GitHubのIssue移動は「移動先で新しいIssueを作り直し、移動元の番号はリダイレクトになる」挙動
+であり、Issue番号もIssue ID（`githubIssueId`）も変わる。そのため、IssueDeck側では移動のたびに
+移動元のIssueレコードを削除しないと、GitHub上には存在しないIssueがアプリ上に残り続ける。
+`issues.transferred` Webhookの`payload.issue`は移動「前」のIssue（旧番号・旧URL・旧ID）である点にも
+注意が必要で、移動先の新しいIssueは移動先リポジトリの再同期で取り込んでいる（#523）。
+
 ## 他リポジトリへ展開する上で必要になる要素
 
 ### 1. ワークフローファイル一式の配布方法

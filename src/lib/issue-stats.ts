@@ -167,6 +167,28 @@ export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue
   });
 }
 
+// Issueを別リポジトリへ移動すると、GitHub上では移動先で新しいIssueとして作り直され、
+// issue-deck側のIssue ID（GitHubのIssue ID）も番号も変わる。IDが変わる以上、更新時と同じ
+// 「同じIDのIssueを差し替える」処理では移動元のIssueが一覧に残ってしまうため、
+// 移動元を取り除いたうえで移動後のIssueを同じ位置へ差し込む（#523）。
+export function replaceMovedIssue(
+  issues: Issue[],
+  previousIssueId: string,
+  movedIssue: Issue,
+): Issue[] {
+  const insertIndex = issues.findIndex(
+    (issue) => issue.id === previousIssueId || issue.id === movedIssue.id,
+  );
+  const rest = issues.filter(
+    (issue) => issue.id !== previousIssueId && issue.id !== movedIssue.id,
+  );
+  // 移動元が一覧に無い場合（フィルタ済みの一覧を渡した場合など）は先頭に追加する
+  if (insertIndex === -1) return [movedIssue, ...rest];
+
+  const boundedIndex = Math.min(insertIndex, rest.length);
+  return [...rest.slice(0, boundedIndex), movedIssue, ...rest.slice(boundedIndex)];
+}
+
 function isIssueContentEqual(a: Issue, b: Issue): boolean {
   return (
     a.title === b.title &&

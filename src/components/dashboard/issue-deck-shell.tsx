@@ -35,6 +35,7 @@ import {
   filterIssuesByView,
   getAssigneeOptions,
   reconcileIssues,
+  replaceMovedIssue,
   sortIssues,
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
@@ -141,6 +142,16 @@ export function IssueDeckShell({
   function handleIssueUpdated(issue: Issue) {
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
     setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
+  }
+
+  // Issue移動後は移動先で新しいIssueとして作り直されIDが変わるため、handleIssueUpdatedの
+  // 「同じIDのIssueを差し替える」処理では移動元のIssueが一覧に残ってしまう。
+  // 移動元を取り除いて移動後のIssueに置き換え、そのまま移動後のIssueを表示する（#523）。
+  function handleIssueMoved(previousIssue: Issue, movedIssue: Issue) {
+    setIssues((prev) => replaceMovedIssue(prev, previousIssue.id, movedIssue));
+    setSelectedIssue(movedIssue);
+    // スマホはURLクエリで表示中のIssueを管理しているため、selectIssueでPC・スマホ両方に対応する
+    selectIssue(movedIssue);
   }
 
   function handleIssueDeleted(issue: Issue) {
@@ -423,6 +434,7 @@ export function IssueDeckShell({
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
                     onIssueDeleted={handleIssueDeleted}
+                    onIssueMoved={handleIssueMoved}
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                     onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
@@ -484,6 +496,7 @@ export function IssueDeckShell({
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onIssueDeleted={handleIssueDeleted}
+            onIssueMoved={handleIssueMoved}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
             onCreateFollowupIssue={openFollowupIssueDialog}
           />
@@ -502,6 +515,7 @@ export function IssueDeckShell({
                 issue={selectedIssue}
                 repositories={visibleRepositories}
                 onIssueUpdated={handleIssueUpdated}
+                onIssueMoved={handleIssueMoved}
               />
             </div>
           </>

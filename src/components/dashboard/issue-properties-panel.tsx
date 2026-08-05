@@ -23,12 +23,14 @@ type IssuePropertiesPanelProps = {
   issue: Issue;
   repositories: ConnectedRepository[];
   onIssueUpdated: (issue: Issue) => void;
+  onIssueMoved: (previousIssue: Issue, movedIssue: Issue) => void;
 };
 
 export function IssuePropertiesPanel({
   issue,
   repositories,
   onIssueUpdated,
+  onIssueMoved,
 }: IssuePropertiesPanelProps) {
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
@@ -181,7 +183,7 @@ export function IssuePropertiesPanel({
         onOpenChange={setIsMoveDialogOpen}
         issue={issue}
         repositories={repositories}
-        onMoved={onIssueUpdated}
+        onMoved={onIssueMoved}
       />
     </div>
   );

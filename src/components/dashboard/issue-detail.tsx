@@ -81,6 +81,7 @@ type IssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
+  onIssueMoved: (previousIssue: Issue, movedIssue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
 };
@@ -92,6 +93,7 @@ export function IssueDetail({
   onEdit,
   onIssueUpdated,
   onIssueDeleted,
+  onIssueMoved,
   onToggleFavorite,
   onCreateFollowupIssue,
 }: IssueDetailProps) {
@@ -607,6 +609,7 @@ export function IssueDetail({
             issue={issue}
             repositories={repositories}
             onIssueUpdated={onIssueUpdated}
+            onIssueMoved={onIssueMoved}
           />
         </SheetContent>
       </Sheet>

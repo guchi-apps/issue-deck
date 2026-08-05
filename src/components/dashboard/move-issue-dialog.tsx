@@ -27,7 +27,11 @@ type MoveIssueDialogProps = {
   onOpenChange: (open: boolean) => void;
   issue: Issue;
   repositories: ConnectedRepository[];
-  onMoved: (issue: Issue) => void;
+  /**
+   * 移動後のIssueは移動先で新しいIssueとして作り直されIDが変わるため、
+   * 呼び出し側が移動元のIssueを一覧から取り除けるよう、移動前後の両方を渡す。
+   */
+  onMoved: (previousIssue: Issue, movedIssue: Issue) => void;
 };
 
 export function MoveIssueDialog({
@@ -62,7 +66,7 @@ export function MoveIssueDialog({
     });
     if (moved) {
       onOpenChange(false);
-      onMoved(moved);
+      onMoved(issue, moved);
     }
   }
 

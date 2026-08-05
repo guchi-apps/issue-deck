@@ -97,6 +97,7 @@ type MobileIssueDetailProps = {
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
+  onIssueMoved: (previousIssue: Issue, movedIssue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -110,6 +111,7 @@ export function MobileIssueDetail({
   onEdit,
   onIssueUpdated,
   onIssueDeleted,
+  onIssueMoved,
   onToggleFavorite,
   onCreateIssue,
   onCreateFollowupIssue,
@@ -762,7 +764,7 @@ export function MobileIssueDetail({
         onOpenChange={setIsMoveDialogOpen}
         issue={issue}
         repositories={repositories}
-        onMoved={onIssueUpdated}
+        onMoved={onIssueMoved}
       />
     </div>
   );
