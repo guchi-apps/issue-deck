@@ -125,6 +125,9 @@ jobs:
             if echo "$ISSUE_LABELS" | grep -qx "22.merge-confirm-required"; then
               add_reason "Issueに \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
             fi
+            if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
+              add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
           fi
 
           if [ "$RISKY" = "true" ]; then
