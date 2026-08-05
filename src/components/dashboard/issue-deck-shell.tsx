@@ -431,6 +431,7 @@ export function IssueDeckShell({
               repositories={repositories}
               selectedRepoFullName={filters.repo}
               onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
+              onClearRepository={() => setFilter("repo", null)}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
               labelSummary={labelSummary}
