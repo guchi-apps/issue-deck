@@ -378,6 +378,7 @@ export function IssueDeckShell({
                     onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onCreateIssue={() => openCreateDialog()}
+                    onBack={mobileScreen.origin === "home" ? goBack : undefined}
                   />
                 )}
 
