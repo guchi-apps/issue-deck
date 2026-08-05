@@ -192,8 +192,12 @@ jobs:
 
   cleanup-on-close:
     # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
-    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が「要確認」のまま
-    # 残り続けないよう、クローズをトリガーに除去する。
+    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`および進捗ラベル
+    # (01.wip/03.d:marge/05.develop/07.m:marge)が残り続けないよう、クローズをトリガーに
+    # 除去する(#464)。`09.main`は「本番反映済み」を示す恒久的な状態として
+    # approval-labels.ts の recently-merged プリセット・issue-stats.ts の直近リリース分
+    # クラスタリング・workflow-status.ts の完了バッジ表示が参照しているため、他の進捗
+    # ラベルと異なり除去対象から明示的に除外する。
     #
     # あわせて、screenshotsブランチ(#255。orphanブランチにスクリーンショット画像をコミットし
     # raw.githubusercontent.com経由でIssueコメントに埋め込む仕組み)上の issue-<番号>/
@@ -210,8 +214,14 @@ jobs:
       GH_REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: 00.check-user を除去する
-        run: gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"
+      - name: 00.check-user と進捗ラベル(09.mainを除く)を除去する
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --remove-label "00.check-user" \
+            --remove-label "01.wip" \
+            --remove-label "03.d:marge" \
+            --remove-label "05.develop" \
+            --remove-label "07.m:marge"
 
       - name: Checkout
         uses: actions/checkout@v4
