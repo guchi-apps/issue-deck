@@ -44,7 +44,7 @@ function ciLabel(ci: CiState | null): string {
  * mainの本番デプロイ（deploy.yml）のrunが取得できれば、5段目として末尾に追加する。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
-  const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun } = status;
+  const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
   const runActive = workflowRun != null && workflowRun.status !== "completed";
 
   const steps: Step[] = [
@@ -56,6 +56,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
 
   if (phase === "bump_pr_open" && bump) {
     steps[0].state = "done";
+    steps[0].note = bump.version ? `次バージョン: v${bump.version}` : undefined;
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
@@ -68,11 +69,13 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     }
   } else if (phase === "release_pending") {
     steps[0].state = "done";
+    steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "active";
     steps[2].note = "developへ反映済み。まもなくdevelop→mainのPRを自動作成します（起動ボタンでも作成できます）。";
   } else if (phase === "release_pr_open" && release) {
     steps[0].state = "done";
+    steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "done";
     steps[3].state = "action";

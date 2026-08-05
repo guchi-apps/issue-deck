@@ -13,6 +13,8 @@ export type CiState = "pending" | "success" | "failure" | "unknown";
 
 export type BumpPullRequest = ReleasePullRequest & {
   ciState: CiState | null;
+  /** バンプPRのブランチ名から取り出した次バージョン（例: "1.2.3"）。取得できない場合はnull */
+  version: string | null;
 };
 
 export type ReleaseWorkflowRun = {

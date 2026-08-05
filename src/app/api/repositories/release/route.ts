@@ -13,6 +13,12 @@ import {
   fetchReleaseWorkflowExists,
 } from "@/lib/github/release-api";
 
+/** バンプPRのブランチ名（`release/v1.2.3`）から次バージョンを取り出す */
+function versionFromBranch(ref: string): string | null {
+  const match = /^release\/v(.+)$/.exec(ref);
+  return match ? match[1] : null;
+}
+
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
     where: {
@@ -93,7 +99,13 @@ export async function GET(request: NextRequest) {
       workflowRun,
       deployWorkflowRun,
       bumpPullRequest: bumpPr
-        ? { number: bumpPr.number, url: bumpPr.html_url, title: bumpPr.title, ciState: bumpCiState }
+        ? {
+            number: bumpPr.number,
+            url: bumpPr.html_url,
+            title: bumpPr.title,
+            ciState: bumpCiState,
+            version: versionFromBranch(bumpPr.head.ref),
+          }
         : null,
       releasePullRequest: releasePr
         ? { number: releasePr.number, url: releasePr.html_url, title: releasePr.title }
