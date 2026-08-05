@@ -542,13 +542,22 @@ export function MobileIssueDetail({
               value={issue.assignee?.login ?? "__none__"}
               onValueChange={(value) => handleAssigneeChange(value === "__none__" ? null : value)}
             >
-              <SelectTrigger className="h-auto border-none p-0 text-sm shadow-none" disabled={isMetaLoading || isSubmitting}>
-                <SelectValue placeholder="担当者を選択" />
+              <SelectTrigger
+                className="h-auto gap-1 border-none bg-transparent p-0 text-sm shadow-none hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent"
+                disabled={isMetaLoading || isSubmitting}
+              >
+                <SelectValue placeholder="担当者を選択">
+                  <span className="flex items-center gap-1.5">
+                    {issue.assignee && <UserAvatar login={issue.assignee.login} />}
+                    {issue.assignee?.login ?? "未設定"}
+                  </span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">未設定</SelectItem>
                 {repoAssignees.map((login) => (
                   <SelectItem key={login} value={login}>
+                    <UserAvatar login={login} />
                     {login}
                   </SelectItem>
                 ))}
