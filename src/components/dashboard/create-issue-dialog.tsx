@@ -92,7 +92,7 @@ export function CreateIssueDialog({
     // ダイアログを開くたびにフォームを初期状態へ戻す。外部トリガー（開閉）に同期する一度きりの処理であり、
     // ループや連鎖的な再レンダリングは発生しない。
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRepositoryFullName(defaultRepositoryFullName ?? repositories[0]?.fullName ?? "");
+    setRepositoryFullName(defaultRepositoryFullName ?? "");
     setTitle(defaultTitle ?? "");
     setBody(defaultBody ?? "");
     setSelectedLabels([]);
@@ -100,7 +100,7 @@ export function CreateIssueDialog({
     setIsImageUploading(false);
     setError(null);
     hasUserSetAssignee.current = false;
-  }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, repositories, setError]);
+  }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, setError]);
 
   useEffect(() => {
     if (!open || hasUserSetAssignee.current) return;

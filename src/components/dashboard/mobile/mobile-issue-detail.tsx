@@ -58,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
@@ -626,12 +627,32 @@ export function MobileIssueDetail({
           </div>
         </div>
 
+        <Separator />
+
         <IssueAiSummary issue={issue} />
+
+        <Separator />
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
           <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
+
+        {canStartImplementation(issue) && (
+          <StartImplementationDialog
+            issue={issue}
+            onIssueUpdated={onIssueUpdated}
+            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            renderTrigger={(isSubmitting) => (
+              <Button className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                実装を開始
+              </Button>
+            )}
+          />
+        )}
+
+        <Separator />
 
         <div>
           <h2 className="mb-3 text-sm font-semibold">

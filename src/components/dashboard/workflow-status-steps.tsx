@@ -89,6 +89,7 @@ export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
         {WORKFLOW_STEPS.map((step, index) => {
           const isDone = index < currentIndex;
           const isCurrent = index === currentIndex;
+          const showApprovalPending = isCurrent && approvalPending;
           return (
             <div key={step.labelName} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
               {index !== 0 && (
@@ -115,7 +116,7 @@ export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
                   isDone && "bg-primary text-primary-foreground ring-primary",
                   isCurrent &&
                     (approvalPending
-                      ? "text-amber-600 ring-amber-500 dark:text-amber-400"
+                      ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
                       : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
                   !isDone && !isCurrent && "text-muted-foreground ring-border",
                 )}
@@ -130,15 +131,15 @@ export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
               >
                 {step.label}
               </span>
+              {showApprovalPending && (
+                <span className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+                  ユーザー確認待ち
+                </span>
+              )}
             </div>
           );
         })}
       </div>
-      {approvalPending && (
-        <p className="mt-1.5 text-center text-[11px] text-amber-600 dark:text-amber-400">
-          ユーザーの確認待ちです
-        </p>
-      )}
     </div>
   );
 }
