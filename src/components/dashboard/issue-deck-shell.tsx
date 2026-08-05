@@ -120,7 +120,7 @@ export function IssueDeckShell({
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
-    setCreateDialogBody(`関連: #${issue.number}\n\n`);
+    setCreateDialogBody(`## Issue #${issue.number} に関連するセクションです\n\n`);
     setCreateDialogOpen(true);
   }
 
