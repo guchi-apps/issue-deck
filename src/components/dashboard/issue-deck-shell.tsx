@@ -231,8 +231,8 @@ export function IssueDeckShell({
     [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
   );
   const overviewStats = useMemo(
-    () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),
-    [topbarFilteredIssues, currentUserLogin],
+    () => computeOverviewStats(topbarFilteredIssues, topbarFilteredIssuesIgnoringState),
+    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState],
   );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);

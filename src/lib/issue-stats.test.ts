@@ -339,23 +339,51 @@ describe("time-dependent stats", () => {
   });
 
   describe("computeOverviewStats", () => {
-    it("オープン件数・担当中件数・24時間以内更新件数を返す", () => {
+    it("確認待ち件数・24時間以内の本番反映件数・オープンIssue件数を返す", () => {
+      const mainLabel = { name: "09.main", color: "green", description: null };
+      const checkUserLabel = { name: "00.check-user", color: "red", description: null };
       const issues = [
+        makeIssue({ id: "1", state: "open", labels: [checkUserLabel] }),
+        makeIssue({ id: "2", state: "open", labels: [] }),
         makeIssue({
-          id: "1",
-          state: "open",
-          assignee: { login: "me" },
-          updatedAt: "2026-01-09T12:00:00.000Z",
+          id: "3",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-09T12:00:00.000Z",
         }),
-        makeIssue({ id: "2", state: "open", assignee: null, updatedAt: "2026-01-01T00:00:00.000Z" }),
-        makeIssue({ id: "3", state: "closed", assignee: { login: "me" } }),
+        // 24時間より前にcloseされた分は「24時間以内の本番反映」から除外
+        makeIssue({
+          id: "4",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-08T00:00:00.000Z",
+        }),
+        // 09.mainラベルが無いclose済みIssueは「24時間以内の本番反映」から除外
+        makeIssue({
+          id: "5",
+          state: "closed",
+          labels: [],
+          closedAt: "2026-01-09T12:00:00.000Z",
+        }),
       ];
-      const stats = computeOverviewStats(issues, "me");
+      const issuesIgnoringState = issues;
+      const stats = computeOverviewStats(issues, issuesIgnoringState);
       expect(stats).toEqual([
+        { label: "確認待ち", value: "1", diffLabel: "", linkedView: "check-user" },
+        { label: "24時間以内の本番反映", value: "1件", diffLabel: "" },
         { label: "オープンIssue", value: "2", diffLabel: "" },
-        { label: "担当中", value: "1", diffLabel: "" },
-        { label: "24時間以内の更新", value: "1件", diffLabel: "" },
       ]);
+    });
+
+    it("オープンIssue件数はissuesIgnoringStateを基準に数える（TopBarのstate絞り込みを無視する）", () => {
+      const openIssues = [makeIssue({ id: "1", state: "open" })];
+      const allIssues = [...openIssues, makeIssue({ id: "2", state: "closed" })];
+      const stats = computeOverviewStats(openIssues, allIssues);
+      expect(stats.find((stat) => stat.label === "オープンIssue")).toEqual({
+        label: "オープンIssue",
+        value: "1",
+        diffLabel: "",
+      });
     });
   });
 });
