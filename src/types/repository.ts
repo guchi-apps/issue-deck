@@ -5,5 +5,4 @@ export type ConnectedRepository = {
   private: boolean;
   archived: boolean;
   hidden: boolean;
-  autoRetryLimit: number;
 };

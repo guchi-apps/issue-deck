@@ -1,4 +1,5 @@
 import { IssueDeckShell } from "@/components/dashboard/issue-deck-shell";
+import { AUTO_RETRY_LIMIT_MIN } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getIssuesForUser } from "@/lib/issues-for-user";
@@ -14,6 +15,9 @@ export default async function DashboardPage() {
         include: { installation: true },
       })
     : [];
+
+  const appSetting = currentUser ? await db.appSetting.findUnique({ where: { id: 1 } }) : null;
+  const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
 
   const hiddenRepositoryIds = currentUser
     ? new Set(
@@ -51,10 +55,10 @@ export default async function DashboardPage() {
         private: repo.private,
         archived: repo.archived,
         hidden: hiddenRepositoryIds.has(repo.id),
-        autoRetryLimit: repo.autoRetryLimit,
       }))}
       issues={issues}
       quickFilters={quickFilters}
+      autoRetryLimit={autoRetryLimit}
     />
   );
 }

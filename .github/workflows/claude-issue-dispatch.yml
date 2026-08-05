@@ -104,9 +104,9 @@ name: Claude Issue Dispatch
 #
 # 計画提示ステップ・実装ステップそれぞれのフォールバック検証ステップ(「計画コメント投稿を検証し、
 # 必要ならフォールバックする」「実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック
-# 通知する」)は、新規コメント・PRのいずれも確認できず行き詰まったと判断した場合、リポジトリ設定の
-# 自動リトライ上限(GET /api/repositories/settings?fullName=<owner/repo>で取得するautoRetryLimit、
-# #496)未満であれば、workflow_dispatchで自分自身を再起動して再試行する(#497)。上限に達した場合
+# 通知する」)は、新規コメント・PRのいずれも確認できず行き詰まったと判断した場合、全リポジトリ共通の
+# 自動リトライ上限(GET /api/settings/auto-retryで取得するautoRetryLimit、#496・#497)未満で
+# あれば、workflow_dispatchで自分自身を再起動して再試行する(#497)。上限に達した場合
 # (未設定なら常に上限0扱い)は従来どおり00.check-userを付与して停止する。自己再起動のgh workflow run
 # 呼び出しはGITHUB_TOKENでは新たなワークフロー実行を誘発しない制約があるためWORKFLOW_PATを使う。
 # workflow_dispatchトリガー自体は、issue_comment/issuesの各トリガーと異なりBot判定・実行者
@@ -562,11 +562,11 @@ jobs:
 
           echo "新規コメントが確認できないため、自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
 
-          # リポジトリ設定の自動リトライ上限を読み取り専用APIから取得する(#496)。APP_BASE_URL未設定・
+          # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
           if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/repositories/settings?fullName=$REPO" 2>/dev/null || true)"
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
             if [ -n "$RESPONSE" ]; then
               AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
             fi
@@ -1052,11 +1052,11 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "新規コメント・PRのいずれも確認できないため、自動リトライの可否を確認します"
 
-          # リポジトリ設定の自動リトライ上限を読み取り専用APIから取得する(#496)。APP_BASE_URL未設定・
+          # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
           if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/repositories/settings?fullName=$REPO" 2>/dev/null || true)"
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
             if [ -n "$RESPONSE" ]; then
               AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
             fi

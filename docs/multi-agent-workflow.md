@@ -392,9 +392,10 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
    「Issueに何も反映されないまま無言で終わる」事態を確実に防げる。
 3. **設定回数までの自動リトライ（#497）**: 2のフォールバック検証ステップが「新規コメント（計画提示
    ステップ）・新規コメントとPRのいずれも（実装ステップ）が確認できない」と判断した時点で、即座に
-   `00.check-user`を付けて止めるのではなく、まずリポジトリ設定の自動リトライ上限（`GET
-   /api/repositories/settings?fullName=<owner/repo>`から取得する`autoRetryLimit`、#496で追加した
-   読み取り専用API）と現在のリトライ回数を比較する。上限未満であれば「自動リトライします」という
+   `00.check-user`を付けて止めるのではなく、まず全リポジトリ共通の自動リトライ上限（`GET
+   /api/settings/auto-retry`から取得する`autoRetryLimit`。#496で追加した読み取り専用APIを、
+   リポジトリ単位ではなくアプリ全体で共通の設定に置き換えたもの）と現在のリトライ回数を比較する。
+   上限未満であれば「自動リトライします」という
    趣旨のコメントを投稿したうえで`gh workflow run claude-issue-dispatch.yml -f
    issue_number=<n> -f retry_attempt=<n+1>`で`claude-issue-dispatch.yml`自身を`workflow_dispatch`
    経由で再起動し、`00.check-user`は付与せず終了する。上限に達した場合（`autoRetryLimit`が未設定・
