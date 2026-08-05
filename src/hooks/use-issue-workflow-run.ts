@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { extractLatestWorkflowRunId } from "@/lib/github/workflow-run-log";
+import { findLatestWorkflowRunLogComment } from "@/lib/github/workflow-run-log";
 import type { Issue, IssueComment } from "@/types/issue";
 
 const POLL_INTERVAL_MS = 20_000;
@@ -18,6 +18,8 @@ type UseIssueWorkflowRunResult = {
   run: WorkflowRunInfo | null;
   isLoading: boolean;
   runId: number | null;
+  /** 実行時間表示を該当コメントの横に配置するための、実行ログリンクを含むコメントのID */
+  commentId: string | null;
 };
 
 /** Issueのコメントから直近の「実行ログ:」リンクを見つけ、その実行の状態をポーリングする */
@@ -31,7 +33,8 @@ export function useIssueWorkflowRun(
   const repositoryFullName = issue?.repositoryFullName ?? null;
   const issueId = issue?.id ?? null;
   const [owner, repo] = repositoryFullName ? repositoryFullName.split("/") : [null, null];
-  const runId = owner && repo ? extractLatestWorkflowRunId(comments, owner, repo) : null;
+  const runMatch = owner && repo ? findLatestWorkflowRunLogComment(comments, owner, repo) : null;
+  const runId = runMatch?.runId ?? null;
 
   useEffect(() => {
     if (!owner || !repo || !runId) {
@@ -74,5 +77,5 @@ export function useIssueWorkflowRun(
     };
   }, [owner, repo, runId, issueId]);
 
-  return { run, isLoading, runId };
+  return { run, isLoading, runId, commentId: runMatch?.commentId ?? null };
 }
