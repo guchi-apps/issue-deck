@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
-import { Archive, CircleCheck, CircleDot, CircleSlash, Loader2, Lock, MessageSquare, Star } from "lucide-react";
+import { Archive, CircleCheck, CircleDot, CircleSlash, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
@@ -141,23 +141,7 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {runningByIssueId[issue.id]?.isRunning && (
-                      <span className="flex items-center gap-1">
-                        {runningByIssueId[issue.id]?.currentStep && (
-                          <span
-                            className="max-w-[7rem] truncate text-[10px] text-muted-foreground"
-                            title={runningByIssueId[issue.id]?.currentStep ?? undefined}
-                          >
-                            {runningByIssueId[issue.id]?.currentStep}
-                          </span>
-                        )}
-                        <Loader2
-                          className="size-3.5 animate-spin text-primary"
-                          aria-label="GitHub Actions実行中"
-                        />
-                      </span>
-                    )}
-                    <WorkflowStepBadge labels={issue.labels} />
+                    <WorkflowStepBadge labels={issue.labels} running={runningByIssueId[issue.id]} />
                     {issue.favorite && (
                       <Star
                         className="size-3.5 fill-yellow-400 text-yellow-400"
