@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -75,10 +76,38 @@ export function MentionTextarea({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const isUploading = uploadingCount > 0;
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isPreview, setIsPreview] = useState(false);
+
+  // 複数画像を同時にアップロードすると、各アップロード完了時のonChangeがレンダー未反映のvalueを
+  // 閉じ込めてしまい、後勝ちで他方の挿入結果を消してしまう。挿入のたびに同期更新するrefを
+  // 正とすることで、完了順が前後しても両方の挿入結果を保持できるようにする。
+  const latestValueRef = useRef(value);
+  const lastEmittedRef = useRef(value);
+  // 画像アップロード中に次の挿入位置を引き継ぐための参照。nullの間は実際のカーソル位置を使う。
+  const pendingInsertPosRef = useRef<number | null>(null);
+  const activeUploadsRef = useRef(0);
+  useEffect(() => {
+    // onChange経由で自分が発行した値への追従（エコーバック）は無視し、送信後のクリアなど
+    // 呼び出し元起因の外部変更のみをrefへ反映する。
+    if (value !== lastEmittedRef.current) {
+      latestValueRef.current = value;
+      lastEmittedRef.current = value;
+    }
+  }, [value]);
+
+  function emitChange(nextValue: string) {
+    latestValueRef.current = nextValue;
+    lastEmittedRef.current = nextValue;
+    onChange(nextValue);
+  }
+
+  useEffect(() => {
+    onUploadingChange?.(isUploading);
+  }, [isUploading, onUploadingChange]);
 
   // 送信後などに呼び出し元が本文を空にした場合は、空のプレビューを表示し続けずに入力へ戻す。
   const showPreview = isPreview && value.trim() !== "";
@@ -108,7 +137,7 @@ export function MentionTextarea({
     const after = value.slice(cursor);
     const symbol = trigger.type === "mention" ? "@" : "#";
     const text = `${symbol}${inserted} `;
-    onChange(`${before}${text}${after}`);
+    emitChange(`${before}${text}${after}`);
     setTrigger(null);
     requestAnimationFrame(() => {
       if (!el) return;
@@ -121,31 +150,40 @@ export function MentionTextarea({
   function handleChange(e: ChangeEvent<HTMLTextAreaElement>) {
     // 空になってプレビューを抜けたあと、再入力で勝手にプレビューへ戻らないようにする。
     setIsPreview(false);
-    onChange(e.target.value);
+    emitChange(e.target.value);
     const cursor = e.target.selectionStart ?? e.target.value.length;
     setTrigger(detectTrigger(e.target.value, cursor));
     setActiveIndex(0);
+    // ユーザーが手で編集した場合は、以降の画像挿入は現在のカーソル位置へ戻す。
+    pendingInsertPosRef.current = null;
   }
 
   function insertAtCursor(text: string) {
     const el = textareaRef.current;
-    const start = el?.selectionStart ?? value.length;
-    const end = el?.selectionEnd ?? value.length;
-    const before = value.slice(0, start);
-    const after = value.slice(end);
-    onChange(`${before}${text}${after}`);
+    // 複数画像を同時にアップロードすると、完了順が前後してレンダー未反映の value を
+    // 元に挿入し合い、互いの挿入結果を消してしまうことがあるため、常に最新の内容を
+    // 保持する latestValueRef を正として使う。挿入位置も、同一操作内の他の画像の挿入で
+    // 動いた分を pendingInsertPosRef で引き継ぎ、1枚目の直後に2枚目が続くようにする。
+    const current = latestValueRef.current;
+    const start = pendingInsertPosRef.current ?? el?.selectionStart ?? current.length;
+    const end = pendingInsertPosRef.current ?? el?.selectionEnd ?? current.length;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const combined = `${before}${text}${after}`;
+    const nextPos = before.length + text.length;
+    pendingInsertPosRef.current = nextPos;
+    emitChange(combined);
     requestAnimationFrame(() => {
       if (!el) return;
-      const pos = before.length + text.length;
       el.focus();
-      el.setSelectionRange(pos, pos);
+      el.setSelectionRange(nextPos, nextPos);
     });
   }
 
   async function uploadImage(file: File) {
     setUploadError(null);
-    setIsUploading(true);
-    onUploadingChange?.(true);
+    activeUploadsRef.current += 1;
+    setUploadingCount(activeUploadsRef.current);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -156,8 +194,12 @@ export function MentionTextarea({
     } catch {
       setUploadError("画像のアップロードに失敗しました");
     } finally {
-      setIsUploading(false);
-      onUploadingChange?.(false);
+      activeUploadsRef.current -= 1;
+      setUploadingCount(activeUploadsRef.current);
+      if (activeUploadsRef.current === 0) {
+        // 一連のアップロードが終わったら、次回は改めて実際のカーソル位置から挿入する。
+        pendingInsertPosRef.current = null;
+      }
     }
   }
 
