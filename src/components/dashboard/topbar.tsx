@@ -27,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -91,6 +91,7 @@ export function TopBar({
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
+  const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
@@ -121,7 +122,7 @@ export function TopBar({
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
     if (ok) {
-      alert("リリースを起動しました。進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。");
+      setReleaseSuccessOpen(true);
     }
   }
 
@@ -464,6 +465,22 @@ export function TopBar({
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={handleTriggerRelease}>起動する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={releaseSuccessOpen} onOpenChange={setReleaseSuccessOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リリースを起動しました</AlertDialogTitle>
+            <AlertDialogDescription>
+              進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction className={buttonVariants({ variant: "default" })}>
+              OK
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
