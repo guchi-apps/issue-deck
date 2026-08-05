@@ -4,7 +4,7 @@ import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
-const RECENT_WINDOW_MS = DAY_MS * 7;
+const RECENTLY_ADDED_WINDOW_MS = DAY_MS;
 
 /**
  * 同一リリースでcloseされたIssueとみなす、closedAtの許容差。
@@ -49,15 +49,11 @@ export function filterIssuesByView(
   referenceIssues: Issue[] = issues,
 ): Issue[] {
   switch (view) {
-    case "assigned":
-      return issues.filter((issue) => issue.assignee?.login === currentUserLogin);
-    case "created":
-      return issues.filter((issue) => issue.author.login === currentUserLogin);
     case "favorites":
       return issues.filter((issue) => issue.favorite);
-    case "recent":
+    case "recently-added":
       return issues.filter(
-        (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
+        (issue) => Date.now() - new Date(issue.createdAt).getTime() < RECENTLY_ADDED_WINDOW_MS,
       );
     case "all":
       return issues;

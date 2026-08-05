@@ -1,11 +1,9 @@
 import {
-  CheckCircle2,
-  FolderGit2,
+  Clock,
   GitMerge,
   ListChecks,
   PlayCircle,
   Rocket,
-  SlidersHorizontal,
   Star,
   UserCheck,
 } from "lucide-react";
@@ -46,10 +44,8 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
 
 const baseNavViews: NavView[] = [
   { id: "all", label: "すべてのIssue" },
-  { id: "assigned", label: "自分の担当" },
-  { id: "created", label: "自分が作成" },
   { id: "favorites", label: "お気に入り" },
-  { id: "recent", label: "最近更新されたIssue" },
+  { id: "recently-added", label: "最近追加した" },
 ];
 
 /** 運用ラベルに基づく絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
@@ -69,10 +65,8 @@ export const navViews: NavView[] = [...baseNavViews, ...labelNavViews];
 
 export const navViewIcons: Record<NavViewId, LucideIcon> = {
   all: ListChecks,
-  assigned: CheckCircle2,
-  created: FolderGit2,
   favorites: Star,
-  recent: SlidersHorizontal,
+  "recently-added": Clock,
   ...LABEL_NAV_VIEW_ICONS,
 };
 
