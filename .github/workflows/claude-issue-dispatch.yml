@@ -759,7 +759,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*),Bash(scripts/capture-issue-screenshots.sh:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"'
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
             おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の
@@ -858,7 +858,7 @@ jobs:
               作成・Playwright（chromium）のインストールは、このClaude Codeステップより前段の
               シェルスクリプトのステップで既に完了しています。実装・テスト・コミットまで終えたら、
               上記の完了処理（PR作成またはPRコメント投稿）を行う前に以下を行ってください。
-              1. `scripts/capture-issue-screenshots.sh ${{ steps.state.outputs.issue_number }}`を実行する。
+              1. `pnpm run capture:issue-screenshots -- ${{ steps.state.outputs.issue_number }}`を実行する。
                  内部で開発サーバー（`next dev`）を起動し、CIバイパス用ユーザーでログインした状態の
                  `/dashboard`をデスクトップビューポートとモバイルデバイスプリセット
                  （`devices['iPhone 13']`）の両方で撮影し、`screenshots`ブランチへコミット・pushした
@@ -867,7 +867,9 @@ jobs:
                  - 失敗した場合（開発サーバーが起動しない等）は、無理に修正しようとせず、ブランチの
                    pushまでは行ったうえで`gh issue comment`で失敗した旨とエラー内容を報告し、
                    `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を
-                   実行して停止してください（`01.wip`はそのまま、`03.d:marge`への付け替えは行わない）。
+                   実行して停止してください（`01.wip`はそのまま、`03.d:marge`への付け替えは行わない。
+                   エラーの原因を推測で決めつけず、実際のエラーメッセージをそのままIssueコメントに
+                   引用すること）。
               2. 撮影に成功したら、通常どおり完了処理（PR作成またはPRコメント投稿）へ進めてください。
                  新規PR作成時はPR本文の「確認方法」節に、既存PRへのコメント時はその報告コメントに、
                  取得した2つのURLを`![PC画面](デスクトップのraw URL)`・`![スマホ画面](モバイルのraw URL)`
