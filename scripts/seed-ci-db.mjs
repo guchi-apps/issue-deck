@@ -25,6 +25,10 @@ const ISSUES_PER_REPOSITORY = 10;
 const COMMENT_COUNT_PER_ISSUE = 5;
 
 // 各リポジトリ共通で使い回すIssueテンプレート（リポジトリ数 x このテンプレート数がIssue件数になる）。
+// Issue #584: フィルタータブの高さ潰れ不具合はIssue件数が多いときにだけ再現するため、
+// リポジトリを跨いだ合計件数（REPOSITORY_COUNT x このテンプレート数 = 50件）で
+// 「すべてのIssue」ビュー（src/lib/issues-for-user.tsは全リポジトリのIssueを横断取得する）
+// に十分な件数が並ぶようにしている。
 const ISSUE_TEMPLATES = [
   { title: "ログイン画面のレイアウトを見直す", state: "OPEN", labels: [{ name: "bug", color: "d73a4a" }] },
   { title: "ダッシュボードの表示速度を改善する", state: "OPEN", labels: [{ name: "enhancement", color: "a2eeef" }] },

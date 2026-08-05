@@ -847,7 +847,14 @@ jobs:
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないよう、workflow書き込み
           # 権限を持つPAT(secrets.WORKFLOW_PAT)を使う(issue #106)。Checkoutステップと同じPAT。
+          # ただし、このPATは人間(m-guchi)名義のFine-grained PATのため、Issue/PRへのコメント投稿・
+          # PR作成のように人間の目に触れる書き込みにこのトークンをそのまま使うと、GitHub上で
+          # 「人間が書いた／作成した」ものとして記録されてしまう(#576)。git push・ラベル操作等の
+          # workflow書き込み権限が必要な操作はGH_TOKEN(WORKFLOW_PAT)のまま行い、Issue/PRへの
+          # コメント投稿・PR作成はDEFAULT_GH_TOKEN(既定のGITHUB_TOKEN、投稿者はgithub-actions[bot])を
+          # 明示的に使うようプロンプト内で指示する。
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          DEFAULT_GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
@@ -867,9 +874,9 @@ jobs:
               - PR作成済み（上記URLが空でない場合）: 直近のIssueへの`@claude`コメントへの対応です。まず、
                 そのコメントが「コード変更を伴う追加の実装依頼」か「単なる質問・確認」かを判定してください。
                 - 単なる質問・確認と判断した場合: コードは一切変更せず、コミット・pushは行いません。
-                  `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`で質問への回答のみを
-                  簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの通常コメントと
-                  同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
+                  `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
+                  で質問への回答のみを簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの
+                  通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
                   `<!-- issue-deck-qa-answer -->`マーカーを必ず付与してください。
                   なお、このステップの直前のシェルステップで既に`01.wip`が付与され`03.d:marge`が
                   外されているため、状態を元に戻すために
@@ -890,7 +897,7 @@ jobs:
                   ください（ゼロからやり直す必要はありません）。完了したら新規にPull Requestを
                   作成してください（`implement`と同じ手順）。
                 - 続行が難しいほど中途半端・矛盾した状態だと判断した場合は、無理に修正しようと
-                  せず、現在の状態を`gh issue comment`で報告し
+                  せず、現在の状態を`GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment`で報告し
                   `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
                   を実行して停止してください（ブランチの削除・作り直しは人間の明示操作でのみ行われ、
                   このワークフローが自動で行うことはありません）。
@@ -912,6 +919,17 @@ jobs:
             場合は、`curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、
             `Read`ツールでそのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
 
+            ## コメント投稿・PR作成時のトークンについて
+            このステップの既定の`GH_TOKEN`（`git push`・`gh issue edit`によるラベル操作に必要）は、
+            `.github/workflows/`配下への書き込みも可能にするため人間（m-guchi）名義のFine-grained PAT
+            （`WORKFLOW_PAT`）です。そのままIssue/PRへのコメント投稿やPR作成に使うと、GitHub上で
+            人間が書いた・作成したものとして記録されてしまいます。そのため、以下の「責務」に記載する
+            `gh issue comment` / `gh pr create` / `gh pr comment`は、必ず環境変数`DEFAULT_GH_TOKEN`
+            （投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN）を明示的に指定して実行してください
+            （例: `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ... --body "..."`）。`git push`・
+            `git checkout`・`gh issue edit`によるラベル操作はこれまでどおり既定の`GH_TOKEN`
+            （WORKFLOW_PAT）のまま実行してください。
+
             ## 責務
             - Issueの要件を実装する
             - テスト・Lint・型チェック・ビルドを実行する
@@ -924,26 +942,26 @@ jobs:
                 のため`-u`は不要）。pushが拒否された場合は
                 `git pull --rebase origin ${{ steps.state.outputs.branch }}`で追随し、1回だけリトライする。
                 それでも失敗する場合はそれ以上リトライせず、
-                `gh issue comment ${{ steps.state.outputs.issue_number }}`で他の変更と競合したため
-                追加対応を中断した旨を人間に報告して停止する
+                `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ steps.state.outputs.issue_number }}`
+                で他の変更と競合したため追加対応を中断した旨を人間に報告して停止する
             - Pull Requestを作成・更新する
               - `implement`の場合、または`additional`でPRがまだ無い場合:
-                `gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
+                `GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
                 `develop`向けPull Requestを作成する（タイトル・本文は日本語。本文には対応Issue・実装内容・
                 テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
                 `closes #番号` / `fixes #番号`は使わず、`#${{ steps.state.outputs.issue_number }}`のように
                 番号のみ記載する）
               - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
-                （${{ steps.state.outputs.pr_url }}）に`gh pr comment`で、今回追加でpushしたコミットの
-                内容を日本語で要約して投稿する
+                （${{ steps.state.outputs.pr_url }}）に`GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr comment`で、
+                今回追加でpushしたコミットの内容を日本語で要約して投稿する
             - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
               を実行する（`additional`の場合も同じコマンドで`01.wip`↔`03.d:marge`の付け替えを閉じる。
               `00.check-user`には触れない。このワークフローのgit push/PR作成はPAT
               （`secrets.WORKFLOW_PAT`）で行っており`.github/workflows/issue-labels.yml`が自動発火する
               可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
-            - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で対応完了の
-              報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認手段に
-              なる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
+            - 最後に `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
+              で対応完了の報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認
+              手段になる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
               対象PR（${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
               要約（触ったファイルや対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること。
               `24.screenshot-required`が付いている場合は、後述の「画面確認・スクリーンショットについて」の
@@ -975,7 +993,8 @@ jobs:
                    4行（1行目: デスクトップ、2行目: スマホ・ホーム、3行目: スマホ・イシュー一覧、
                    4行目: スマホ・イシュー詳細）で出力する。
                  - 失敗した場合（開発サーバーが起動しない等）は、無理に修正しようとせず、ブランチの
-                   pushまでは行ったうえで`gh issue comment`で失敗した旨とエラー内容を報告し、
+                   pushまでは行ったうえで`GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment`で失敗した旨と
+                   エラー内容を報告し、
                    `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を
                    実行して停止してください（`01.wip`はそのまま、`03.d:marge`への付け替えは行わない。
                    エラーの原因を推測で決めつけず、実際のエラーメッセージをそのままIssueコメントに
@@ -1001,7 +1020,8 @@ jobs:
               ブランチのpushまでは行ったうえで、代わりに
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
               （`01.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
-              必要なため人間の確認を待っています」旨を`gh issue comment`で投稿して停止してください。
+              必要なためユーザーの確認を待っています」旨を`GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment`で
+              投稿して停止してください。
               このコメントに開発サーバーのプレビューURLもあわせて記載する。無人実行では実際にdevサーバーを
               起動できないため、人間が手元でブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
               `docs/multi-agent-workflow.md`のポート割り当て規約（`PORT=4000 + Issue番号`。本Issueの
