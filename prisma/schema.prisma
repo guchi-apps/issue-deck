@@ -90,8 +90,6 @@ model Repository {
   archived           Boolean   @default(false)
   defaultBranch      String
   lastSyncedAt       DateTime?
-  // claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限（0は自動リトライ無効）。
-  autoRetryLimit     Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -252,6 +250,15 @@ model GithubApiUsageBucket {
 
   @@unique([startedAt, feature, endpoint])
   @@index([startedAt])
+}
+
+// アプリ全体で共通の設定値を保持するシングルトンテーブル（id=1固定の1行のみ）。
+// autoRetryLimit: claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限
+// （0は自動リトライ無効）。リポジトリ間で個別設定にする必要が無いため全リポジトリ共通の値とする（#497）。
+model AppSetting {
+  id             Int      @id @default(1)
+  autoRetryLimit Int      @default(0)
+  updatedAt      DateTime @updatedAt
 }
 
 model IssueLabel {
