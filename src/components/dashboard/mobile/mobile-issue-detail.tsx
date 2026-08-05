@@ -701,7 +701,7 @@ export function MobileIssueDetail({
                 }
               }}
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               {canCreateFollowupFromComment(issue) && (
                 <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
                   <FilePlus2 />
