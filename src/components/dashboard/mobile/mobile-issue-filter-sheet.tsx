@@ -115,7 +115,8 @@ export function MobileIssueFilterSheet({
             <section>
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
               <div className="flex flex-wrap gap-2">
-                {LABEL_FILTER_PRESETS.map((preset) => {
+                {/* excludeLabelsのみで定義される「未着手」等はlabels配列のトグルでは表現できないため除外 */}
+                {LABEL_FILTER_PRESETS.filter((preset) => preset.labels.length > 0).map((preset) => {
                   const active = isLabelFilterPresetActive(filters.labels, preset);
                   return (
                     <Pill

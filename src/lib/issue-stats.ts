@@ -58,15 +58,28 @@ export function filterIssuesByView(
     case "all":
       return issues;
     default: {
-      // 運用ラベルに基づくビュー（ユーザーの確認待ち・実行中など）はラベルのOR一致で絞り込む。
+      // 運用ラベルに基づくビュー（ユーザーの確認待ち・実行中など）はラベルのOR一致で、
+      // 「未着手」のように特定ラベルの不在で定義するビューはexcludeLabelsの不一致で絞り込む。
       const navView = getNavView(view);
       const viewLabels = navView.labels;
-      if (!viewLabels || viewLabels.length === 0) return issues;
-      const hasViewLabel = (issue: Issue) =>
-        issue.labels.some((label) => viewLabels.includes(label.name));
-      const matched = issues.filter(hasViewLabel);
+      const excludeLabels = navView.excludeLabels;
+      const hasNoLabelCondition =
+        (!viewLabels || viewLabels.length === 0) && (!excludeLabels || excludeLabels.length === 0);
+      if (hasNoLabelCondition) return issues;
+
+      const matchesView = (issue: Issue) => {
+        const issueLabelNames = issue.labels.map((label) => label.name);
+        if (viewLabels && viewLabels.length > 0) {
+          if (!issueLabelNames.some((name) => viewLabels.includes(name))) return false;
+        }
+        if (excludeLabels && excludeLabels.length > 0) {
+          if (issueLabelNames.some((name) => excludeLabels.includes(name))) return false;
+        }
+        return true;
+      };
+      const matched = issues.filter(matchesView);
       if (!navView.latestReleaseOnly) return matched;
-      return filterLatestReleaseIssues(matched, referenceIssues.filter(hasViewLabel));
+      return filterLatestReleaseIssues(matched, referenceIssues.filter(matchesView));
     }
   }
 }

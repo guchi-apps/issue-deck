@@ -230,6 +230,23 @@ describe("time-dependent stats", () => {
       ]);
     });
 
+    it("view=not-startedは実装状況ラベル・00.check-userのいずれも持たないIssueのみ返す", () => {
+      const issues = [
+        makeIssue({ id: "1", labels: [] }),
+        makeIssue({ id: "2", labels: [{ name: "00.check-user", color: "red", description: null }] }),
+        makeIssue({ id: "3", labels: [{ name: "01.wip", color: "blue", description: null }] }),
+        makeIssue({ id: "4", labels: [{ name: "09.main", color: "green", description: null }] }),
+        makeIssue({
+          id: "5",
+          labels: [{ name: "51.improvement", color: "purple", description: null }],
+        }),
+      ];
+      expect(filterIssuesByView(issues, "not-started", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "5",
+      ]);
+    });
+
     it("view=recently-mergedはリポジトリごとに最新リリース分のみ返す", () => {
       const mainLabel = { name: "09.main", color: "green", description: null };
       const issues = [
@@ -315,6 +332,7 @@ describe("time-dependent stats", () => {
         favorites: 1,
         "recently-added": 1,
         "check-user": 1,
+        "not-started": 1,
         "in-progress": 0,
         "release-pending": 0,
         "recently-merged": 0,
