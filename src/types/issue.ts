@@ -31,6 +31,9 @@ export type IssueMilestone = {
   progressPercent: number;
 };
 
+/** 本番デプロイ後の反映確認状況。未確認はnull */
+export type DeployCheckStatus = "ok" | "ng" | "skip";
+
 export type Issue = {
   id: string;
   number: number;
@@ -53,6 +56,7 @@ export type Issue = {
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;
+  deployCheckStatus: DeployCheckStatus | null;
 };
 
 /**

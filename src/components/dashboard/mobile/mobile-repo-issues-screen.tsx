@@ -15,7 +15,7 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
-import type { Issue, NavViewId } from "@/types/issue";
+import type { DeployCheckStatus, Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileRepoIssuesScreenProps = {
@@ -33,6 +33,7 @@ type MobileRepoIssuesScreenProps = {
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
   onCreateIssue: () => void;
+  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -50,6 +51,7 @@ export function MobileRepoIssuesScreen({
   onSelectIssue,
   onBack,
   onCreateIssue,
+  onSetIssueDeployCheck,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
 
@@ -114,6 +116,7 @@ export function MobileRepoIssuesScreen({
         onOpenChange={setReleaseSheetOpen}
         repository={repository}
         issues={issues}
+        onSetIssueDeployCheck={onSetIssueDeployCheck}
       />
     </MobileIssueListScreen>
   );

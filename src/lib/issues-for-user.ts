@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
-import type { Issue } from "@/types/issue";
+import type { DeployCheckStatus, Issue } from "@/types/issue";
 
 export async function getIssuesForUser(userId: string): Promise<Issue[]> {
   const issueRows = await db.issue.findMany({
@@ -10,6 +10,7 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
       repository: true,
       favoritedBy: { where: { userId } },
       commentReadBy: { where: { userId } },
+      deployCheckedBy: { where: { userId } },
     },
   });
 
@@ -17,5 +18,6 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
     ...dbIssueToDisplayIssue(row.repository, row),
     favorite: row.favoritedBy.length > 0,
     hasUnreadComments: row.commentCount > (row.commentReadBy[0]?.readCommentCount ?? 0),
+    deployCheckStatus: (row.deployCheckedBy[0]?.status as DeployCheckStatus | undefined) ?? null,
   }));
 }

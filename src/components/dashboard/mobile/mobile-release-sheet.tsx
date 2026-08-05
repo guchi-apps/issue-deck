@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 
 import { Rocket } from "lucide-react";
 
-import { ReleaseProgress } from "@/components/dashboard/release-progress";
+import { ReleaseDeployChecklist } from "@/components/dashboard/release-deploy-checklist";
+import { isProductionDeployComplete, ReleaseProgress } from "@/components/dashboard/release-progress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +24,8 @@ import {
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
-import type { Issue } from "@/types/issue";
+import { filterIssuesByView } from "@/lib/issue-stats";
+import type { DeployCheckStatus, Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileReleaseSheetProps = {
@@ -31,9 +33,16 @@ type MobileReleaseSheetProps = {
   onOpenChange: (open: boolean) => void;
   repository: ConnectedRepository;
   issues: Issue[];
+  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
 };
 
-export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: MobileReleaseSheetProps) {
+export function MobileReleaseSheet({
+  open,
+  onOpenChange,
+  repository,
+  issues,
+  onSetIssueDeployCheck,
+}: MobileReleaseSheetProps) {
   const {
     data: releaseStatus,
     isLoading: releaseStatusLoading,
@@ -55,6 +64,14 @@ export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: M
       ),
     [issues, repository.fullName],
   );
+
+  // 本番デプロイ成功後（release-progress.tsxの「本番デプロイ」段と同じ条件）にのみ、
+  // 直近リリースでmainへ反映されたIssueの確認チェックリストを表示する（#534）。
+  const deployCheckIssues = useMemo(() => {
+    if (!releaseStatus?.available || !isProductionDeployComplete(releaseStatus)) return [];
+    const repoIssues = issues.filter((issue) => issue.repositoryFullName === repository.fullName);
+    return filterIssuesByView(repoIssues, "recently-merged", null);
+  }, [issues, repository.fullName, releaseStatus]);
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -101,6 +118,10 @@ export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: M
                 </span>
               </div>
               <ReleaseProgress status={releaseStatus} />
+              <ReleaseDeployChecklist
+                issues={deployCheckIssues}
+                onSetDeployCheck={onSetIssueDeployCheck}
+              />
               <Button
                 variant="outline"
                 disabled={isTriggeringRelease}

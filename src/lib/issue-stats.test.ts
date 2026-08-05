@@ -34,6 +34,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
+    deployCheckStatus: null,
     ...overrides,
   };
 }
