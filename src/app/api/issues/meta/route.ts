@@ -2,10 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchRepoAssignees, fetchRepoLabels } from "@/lib/github/issues-api";
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("repo_meta", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

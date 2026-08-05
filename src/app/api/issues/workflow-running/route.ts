@@ -7,6 +7,7 @@ import {
   fetchWorkflowRunJobs,
   type GithubApiWorkflowRun,
 } from "@/lib/github/actions-api";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   getIssueRunCache,
@@ -37,7 +38,11 @@ async function findRepository(userId: string, owner: string, repo: string) {
  * - コメント件数（DB上の値）が前回と変わっていなければ、解決済みのrunId・完了状態をキャッシュから再利用する。
  *   完了済みと分かっている場合はGitHub APIを一度も呼ばずに応答する。
  */
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("issue_list_workflow_running", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

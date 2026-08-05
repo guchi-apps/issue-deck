@@ -5,6 +5,7 @@ import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -21,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
@@ -37,6 +39,11 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
+  const {
+    data: apiUsage,
+    isLoading: apiUsageLoading,
+    error: apiUsageError,
+  } = useGithubApiUsage(true);
   const {
     data: claudeUsage,
     isLoading: claudeUsageLoading,
@@ -73,6 +80,15 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
             data={rateLimits}
             isLoading={rateLimitsLoading}
             error={rateLimitsError}
+          />
+        </div>
+
+        <div className="rounded-lg border p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">GitHub API消費の内訳</p>
+          <GithubApiUsageList
+            data={apiUsage}
+            isLoading={apiUsageLoading}
+            error={apiUsageError}
           />
         </div>
 

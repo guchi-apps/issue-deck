@@ -1,0 +1,77 @@
+"use client";
+
+import { Progress } from "@/components/ui/progress";
+import type { GithubApiUsage } from "@/hooks/use-github-api-usage";
+import { useNow } from "@/hooks/use-now";
+import { formatDuration } from "@/lib/format-duration";
+
+type GithubApiUsageListProps = {
+  data: GithubApiUsage | null;
+  isLoading: boolean;
+  error: string | null;
+};
+
+/** 用途ごとに表示するエンドポイント内訳の件数 */
+const ENDPOINTS_PER_FEATURE = 3;
+
+/**
+ * 用途別のGitHub API消費の内訳。
+ * GitHubは消費の内訳を返さないため、アプリが自分で発信したリクエストを数えた値を表示する。
+ */
+export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageListProps) {
+  const now = useNow();
+
+  if (isLoading) return <p className="text-xs text-muted-foreground">読み込み中...</p>;
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (!data) return null;
+  if (data.features.length === 0) {
+    return <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>;
+  }
+
+  const measuredMs = now !== null ? now - data.measuringSince : null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">
+        直近1時間 {data.totalLastHour.toLocaleString()}回 / 24時間{" "}
+        {data.totalLast24h.toLocaleString()}回
+      </p>
+      <ul className="flex flex-col gap-2">
+        {data.features.map((feature) => {
+          const sharePercent =
+            data.totalLast24h > 0 ? (feature.last24h / data.totalLast24h) * 100 : 0;
+          return (
+            <li key={feature.key} className="rounded-lg border p-2">
+              <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                <span className="truncate font-medium">{feature.label}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {feature.lastHour.toLocaleString()} / {feature.last24h.toLocaleString()}
+                </span>
+              </div>
+              <Progress value={sharePercent} />
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {feature.endpoints.slice(0, ENDPOINTS_PER_FEATURE).map((endpoint) => (
+                  <li
+                    key={endpoint.endpoint}
+                    className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
+                  >
+                    <span className="truncate" title={endpoint.endpoint}>
+                      {endpoint.endpoint}
+                    </span>
+                    <span className="shrink-0">{endpoint.last24h.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[10px] text-muted-foreground">
+        「直近1時間 / 24時間」の呼び出し回数。
+        {measuredMs !== null && `計測期間は直近${formatDuration(measuredMs)}（`}
+        {measuredMs === null && "（"}
+        アプリの再起動でリセットされます）
+      </p>
+    </div>
+  );
+}

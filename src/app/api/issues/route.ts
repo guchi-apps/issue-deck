@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { createIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
@@ -27,7 +28,11 @@ export async function GET() {
   return NextResponse.json({ issues });
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withGithubApiFeature("issue_write", () => handlePOST(request));
+}
+
+async function handlePOST(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -73,7 +78,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+export function PATCH(request: NextRequest) {
+  return withGithubApiFeature("issue_write", () => handlePATCH(request));
+}
+
+async function handlePATCH(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

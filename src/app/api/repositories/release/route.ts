@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   dispatchReleaseWorkflow,
@@ -48,7 +49,11 @@ async function findRepository(userId: string, owner: string, repo: string) {
   });
 }
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("release_status", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -139,7 +144,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withGithubApiFeature("release_dispatch", () => handlePOST(request));
+}
+
+async function handlePOST(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

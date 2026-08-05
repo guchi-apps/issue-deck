@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
 
-export async function POST() {
+export function POST() {
+  return withGithubApiFeature("sync", () => handlePOST());
+}
+
+async function handlePOST() {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

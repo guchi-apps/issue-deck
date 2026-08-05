@@ -14,6 +14,7 @@ import {
 
 import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import {
@@ -49,6 +50,7 @@ import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
@@ -97,6 +99,11 @@ export function TopBar({
   );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
+  const {
+    data: apiUsage,
+    isLoading: apiUsageLoading,
+    error: apiUsageError,
+  } = useGithubApiUsage(accountMenuOpen);
   const {
     data: claudeUsage,
     isLoading: claudeUsageLoading,
@@ -286,6 +293,15 @@ export function TopBar({
               data={rateLimits}
               isLoading={rateLimitsLoading}
               error={rateLimitsError}
+            />
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>GitHub API消費の内訳</DropdownMenuLabel>
+          <div className="px-1.5 pb-1.5">
+            <GithubApiUsageList
+              data={apiUsage}
+              isLoading={apiUsageLoading}
+              error={apiUsageError}
             />
           </div>
           <DropdownMenuSeparator />

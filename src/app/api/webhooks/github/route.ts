@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import {
   deleteIssueByGithubId,
@@ -189,7 +190,11 @@ async function handleInstallationEvent(payload: {
   }
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withGithubApiFeature("setup", () => handlePOST(request));
+}
+
+async function handlePOST(request: NextRequest) {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "webhook_not_configured" }, { status: 500 });

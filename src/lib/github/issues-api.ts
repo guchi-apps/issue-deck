@@ -1,9 +1,8 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { fetchAllPages } from "@/lib/github/pagination";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 export { GithubApiError } from "@/lib/github/github-api-error";
-
-const GITHUB_API = "https://api.github.com";
 
 export type GithubApiIssueStateReason = "completed" | "not_planned" | "reopened" | null;
 
@@ -88,15 +87,7 @@ async function requestJson(
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,
 ) {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const res = await githubFetch(url, token, { method, body });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
