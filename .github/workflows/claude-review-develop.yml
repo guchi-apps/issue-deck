@@ -142,7 +142,7 @@ jobs:
               if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
                 echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
               else
-                COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前に人間の確認が必要と判定しました。"
+                COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
                 COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
                 gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
               fi

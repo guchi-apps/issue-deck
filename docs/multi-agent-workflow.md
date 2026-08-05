@@ -219,7 +219,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
-- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。実装がまだ進行中の段階で同内容の「developへのマージ前に人間の確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
+- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
 
 ## 段階的導入計画
 
@@ -368,14 +368,24 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   GET専用化）が理想だが、Bashの許可ルールはコマンド文字列の前方一致でしか絞り込めずフラグの
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
-- git push・PR作成はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository permissions >
-  Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`ステップの
-  `actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の`github_token`入力・
-  `GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は`.github/workflows/`配下への
-  pushをGitHubの仕様上原理的に許可できない（リポジトリの「Workflow permissions」設定を
-  Read and writeにしても解除されない）ため、`.github/workflows/`自体を変更するIssueを本ワークフロー
-  で扱うにはPATが必須。他のステップ（状態判定・通知コメント・計画提示など、ワークフローファイルを
-  変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
+- git push（ラベル操作を含む）はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository
+  permissions > Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`
+  ステップの`actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の
+  `github_token`入力・`GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は
+  `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
+  「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
+  自体を変更するIssueを本ワークフローで扱うにはPATが必須。他のステップ（状態判定・通知コメント・
+  計画提示など、ワークフローファイルを変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの
+  利用は最小限にとどめている。
+  - 一方、`WORKFLOW_PAT`は`.github/workflows/`配下への書き込み権限を持たせるためのFine-grained PAT
+    であり、実体は人間（m-guchi）名義のトークンである。そのため実装ステップのプロンプトでは、
+    `gh issue comment` / `gh pr create` / `gh pr comment`によるIssue/PRへのコメント投稿・PR作成は
+    ステップ側でenv経由で渡す`DEFAULT_GH_TOKEN`（既定の`GITHUB_TOKEN`、投稿者は`github-actions[bot]`）
+    を明示的に指定して実行するよう指示し、`git push`・`gh issue edit`によるラベル操作のみ既定の
+    `GH_TOKEN`（`WORKFLOW_PAT`）を使う。これを怠ると、エージェントが投稿したコメントやPRが
+    GitHub上・issue-deck画面上で人間（m-guchi）が書いたものとして表示されてしまう問題があった
+    （issue #576）。同じパターンが使われる`.github/workflows/claude-conflict-resolve.yml`の
+    コンフリクト解消ステップも同様の方針にしている。
 
 ### 計画提示ステップの信頼性確保
 
