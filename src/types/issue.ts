@@ -31,6 +31,9 @@ export type IssueMilestone = {
   progressPercent: number;
 };
 
+/** 本番デプロイ後の反映確認状況。未確認はnull */
+export type DeployCheckStatus = "ok" | "ng" | "skip";
+
 export type Issue = {
   id: string;
   number: number;
@@ -53,6 +56,7 @@ export type Issue = {
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;
+  deployCheckStatus: DeployCheckStatus | null;
 };
 
 /**
@@ -61,6 +65,7 @@ export type Issue = {
  */
 export const LABEL_NAV_VIEW_IDS = [
   "check-user",
+  "not-started",
   "in-progress",
   "release-pending",
   "recently-merged",
@@ -81,4 +86,6 @@ export type OverviewStat = {
   label: string;
   value: string;
   diffLabel: string;
+  /** 指定時、カードをタップすると遷移する先のクイックビュー */
+  linkedView?: NavViewId;
 };

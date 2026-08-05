@@ -43,15 +43,32 @@ export function MobileHomeScreen({
         <div className="p-4">
           <h2 className="mb-2 text-sm font-semibold">概要</h2>
           <div className="grid grid-cols-3 gap-2">
-            {overviewStats.map((stat) => (
-              <Card key={stat.label} className="gap-1 p-3">
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-                <p className="text-lg font-semibold">{stat.value}</p>
-                {stat.diffLabel && (
-                  <p className="text-xs text-muted-foreground">{stat.diffLabel}</p>
-                )}
-              </Card>
-            ))}
+            {overviewStats.map((stat) =>
+              stat.linkedView ? (
+                <button
+                  key={stat.label}
+                  type="button"
+                  onClick={() => onSelectQuickView(stat.linkedView as NavViewId)}
+                  className="w-full text-left"
+                >
+                  <Card className="gap-1 p-3 hover:bg-accent active:bg-accent">
+                    <p className="text-xs text-muted-foreground">{stat.label}</p>
+                    <p className="text-lg font-semibold">{stat.value}</p>
+                    {stat.diffLabel && (
+                      <p className="text-xs text-muted-foreground">{stat.diffLabel}</p>
+                    )}
+                  </Card>
+                </button>
+              ) : (
+                <Card key={stat.label} className="gap-1 p-3">
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  <p className="text-lg font-semibold">{stat.value}</p>
+                  {stat.diffLabel && (
+                    <p className="text-xs text-muted-foreground">{stat.diffLabel}</p>
+                  )}
+                </Card>
+              ),
+            )}
           </div>
         </div>
 

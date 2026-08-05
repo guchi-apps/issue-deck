@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getGithubApiUsageSummary,
+  loadPersistedBuckets,
+  onBucketClosed,
   recordGithubApiCall,
   resetGithubApiUsage,
   toEndpointLabel,
@@ -45,7 +47,7 @@ describe("toEndpointLabel", () => {
 
 describe("githubApiUsage", () => {
   beforeEach(() => {
-    resetGithubApiUsage(NOW);
+    resetGithubApiUsage();
   });
 
   it("用途別・エンドポイント別に呼び出し回数を集計する", () => {
@@ -132,5 +134,90 @@ describe("githubApiUsage", () => {
     recordGithubApiCall(RUN_URL, { now: NOW });
 
     expect(getGithubApiUsageSummary(NOW).features[0].key).toBe("other");
+  });
+});
+
+describe("onBucketClosed", () => {
+  beforeEach(() => {
+    resetGithubApiUsage();
+  });
+
+  it("バケットが繰り上がるとき、直前に閉じたバケットの内容を通知する", () => {
+    const listener = vi.fn();
+    onBucketClosed(listener);
+
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+    recordGithubApiCall(COMMENTS_URL, { feature: "sync", now: NOW });
+    expect(listener).not.toHaveBeenCalled();
+
+    // 次の5分バケットへ進むタイミングで、直前のバケットが閉じたとして通知される
+    const nextBucket = NOW + 5 * 60_000;
+    recordGithubApiCall(RUN_URL, { feature: "issue_comments", now: nextBucket });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    const closed = listener.mock.calls[0][0];
+    expect(closed.startedAt).toBe(NOW);
+    expect(closed.entries).toEqual(
+      expect.arrayContaining([
+        { feature: "sync", endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", count: 1 },
+        { feature: "sync", endpoint: "/repos/{owner}/{repo}/issues/{n}/comments", count: 1 },
+      ]),
+    );
+  });
+
+  it("時刻が巻き戻ったバックデート挿入では、既存の最新バケットを閉じたとみなさない", () => {
+    const listener = vi.fn();
+    onBucketClosed(listener);
+
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW - 5 * 60_000 });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadPersistedBuckets", () => {
+  beforeEach(() => {
+    resetGithubApiUsage();
+  });
+
+  it("DBから読み込んだバケットをメモリの集計へ反映する", () => {
+    loadPersistedBuckets(
+      [
+        {
+          startedAt: NOW - 60 * 60_000,
+          entries: [{ feature: "sync", endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", count: 3 }],
+        },
+      ],
+      NOW,
+    );
+
+    const summary = getGithubApiUsageSummary(NOW);
+    expect(summary.totalLast24h).toBe(3);
+    expect(summary.measuringSince).toBe(NOW - 60 * 60_000);
+  });
+
+  it("既にメモリ上にある集計とマージする（加算する）", () => {
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+    loadPersistedBuckets(
+      [{ startedAt: NOW, entries: [{ feature: "sync", endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", count: 2 }] }],
+      NOW,
+    );
+
+    expect(getGithubApiUsageSummary(NOW).totalLast24h).toBe(3);
+  });
+
+  it("24時間より古いバケットは読み込み後すぐに刈り取られる", () => {
+    loadPersistedBuckets(
+      [
+        {
+          startedAt: NOW - USAGE_WINDOW_MS - 60_000,
+          entries: [{ feature: "sync", endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", count: 5 }],
+        },
+      ],
+      NOW,
+    );
+
+    expect(getGithubApiUsageSummary(NOW).totalLast24h).toBe(0);
   });
 });

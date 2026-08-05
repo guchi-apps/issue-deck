@@ -2,6 +2,7 @@ import {
   Clock,
   GitMerge,
   ListChecks,
+  ListTodo,
   PlayCircle,
   Rocket,
   Star,
@@ -22,6 +23,11 @@ export type NavView = {
    */
   labels?: readonly string[];
   /**
+   * ビュー選択時に暗黙で適用するラベル除外（このいずれかを持つIssueを除く）。
+   * labelsとは逆にAND条件で、「未着手」のようにラベルの不在で定義するビュー向け。
+   */
+  excludeLabels?: readonly string[];
+  /**
    * このビューが要求する状態フィルター。stateクエリ未指定時の既定値になるほか、
    * ビュー切り替え時には明示的に選ばれていたstateも上書きして自動で適用する（#475）。
    * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
@@ -39,6 +45,7 @@ export type NavView = {
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
+  "not-started": ListTodo,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
   "recently-merged": GitMerge,
@@ -55,6 +62,7 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   id: preset.key,
   label: preset.label,
   labels: preset.labels,
+  excludeLabels: preset.excludeLabels,
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
 }));

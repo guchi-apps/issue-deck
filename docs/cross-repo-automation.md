@@ -82,12 +82,10 @@ IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app
 コード調査だけでは確定できない。現状のIssueDeck用GitHub Appが、連携先リポジトリへ
 `.github/workflows/`ファイルやSecretsを書き込む権限を持っているかは未確認。
 
-なお、GraphQLの`transferIssue`ミューテーション（`src/lib/github/issues-api.ts`の`transferIssue()`、
-Issue移動機能で使用）はGitHub App固有の`Administration`（Read and write）権限でゲーティングされて
-おり、OAuth Appのユーザーアクセストークンではスコープの有無によらず常に
-`Resource not accessible by integration`エラーになる。IssueDeck用GitHub Appが`Administration`権限を
-持っていない場合、インストール済みリポジトリのオーナーに権限追加後の再承認を依頼する必要がある
-（#523）。
+現状使用している権限の機能ごとの棚卸し（Issues/Actions/Pull requests等の通常権限と、Issue移動機能
+（`transferIssue`）にのみ必要な`Administration`権限の切り分け、Administrationをより狭い権限に
+置き換えられるかの調査結果）は[docs/github-app-permissions.md](github-app-permissions.md)を参照
+（#523・#532）。
 
 ## 他リポジトリへ展開する上で必要になる要素
 

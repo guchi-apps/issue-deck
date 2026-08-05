@@ -8,6 +8,7 @@ import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
@@ -54,6 +56,10 @@ type CommentThreadProps = {
   pullRequestLink?: PullRequestLink | null;
   /** mergeApprovalPending時に対応PRの最新コミットのCI状態を併せて表示する。取得できない場合はnull */
   pullRequestCiStatus?: PullRequestCiStatus | null;
+  /** 直近の「実行ログ:」リンクが指すGitHub Actions実行の状態。取得できない場合はnull */
+  workflowRun?: WorkflowRunInfo | null;
+  /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
+  workflowRunCommentId?: string | null;
   onApprove?: () => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   onWithdraw?: () => Promise<void> | void;
@@ -163,7 +169,7 @@ function ApprovalActions({
                   }}
                   autoFocus
                 />
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -211,7 +217,7 @@ function ApprovalActions({
             }}
             autoFocus
           />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(false)} disabled={busy}>
               キャンセル
             </Button>
@@ -221,7 +227,7 @@ function ApprovalActions({
           </div>
         </div>
       ) : isFallbackNotice ? (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
             <RotateCw />
             続きを実装・調査を依頼
@@ -237,7 +243,7 @@ function ApprovalActions({
           </Button>
         </div>
       ) : (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => onApprove()} disabled={busy}>
             <Check />
             承認
@@ -291,6 +297,8 @@ export function CommentThread({
   mergeApprovalPending,
   pullRequestLink,
   pullRequestCiStatus,
+  workflowRun,
+  workflowRunCommentId,
   onApprove,
   onReject,
   onWithdraw,
@@ -404,6 +412,7 @@ export function CommentThread({
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-medium">{comment.author.login}</span>
                     <span className="text-xs text-muted-foreground">{comment.createdAtLabel}</span>
+                    {workflowRunCommentId === comment.id && <WorkflowRunStatus run={workflowRun ?? null} />}
                     {isQuestion && (
                       <Badge
                         variant="outline"
@@ -466,7 +475,7 @@ export function CommentThread({
                       }}
                       autoFocus
                     />
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
                         キャンセル
                       </Button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { LogOut, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -30,9 +30,13 @@ import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
   currentUser: CurrentUser | null;
+  onOpenAppSettings: () => void;
 };
 
-export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps) {
+export function MobileSettingsScreen({
+  currentUser,
+  onOpenAppSettings,
+}: MobileSettingsScreenProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
@@ -106,6 +110,11 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
         >
           <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
           {isSyncing ? "再同期中..." : "今すぐ再同期"}
+        </Button>
+
+        <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
+          <Settings />
+          アプリ設定
         </Button>
 
         <Button variant="outline" className="justify-start" asChild>

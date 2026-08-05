@@ -140,6 +140,10 @@ PRオープン・マージという確実なイベントに紐づけて通知し
     （詳細は「自動マージ可否の判定方法」参照）。他の`21.plan-required`等と異なり、実装
     エージェントの挙動（Plan mode・画面確認等）を分岐させるものではなく、レビュー・統合側の
     自動マージ判定にのみ影響する。
+  - `24.screenshot-required`が付いている場合も同様に`risk-check`ジョブが常に`00.check-user`を
+    付与する（#567）。無人実行では撮影自体は完結できてもスクリーンショットの内容を人間が
+    確認する前にdevelopへマージされてしまう問題があったため、`22.merge-confirm-required`と
+    同じ仕組みに乗せている。詳細は「自動マージ可否の判定方法」・Phase7参照。
   - 一度きりの`00.check-user`の手動付与と異なり、PRが複数回pushされる場合（追加修正・
     コンフリクト解消の自動push等）でも、そのPRが存在する間はIssueにラベルを付けたままにして
     おけば毎回のpushで確実に確認ゲートがかかる。
@@ -212,7 +216,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
 - **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
-- **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366）。
+- **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
 
@@ -390,6 +394,26 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
    `gh issue view`/`gh issue comment`/`gh issue edit`のみを使う単純なシェルスクリプトであり、
    Claude Code自体の許可コマンドの問題から独立しているため、1で防ぎきれなかったケースでも
    「Issueに何も反映されないまま無言で終わる」事態を確実に防げる。
+3. **設定回数までの自動リトライ（#497）**: 2のフォールバック検証ステップが「新規コメント（計画提示
+   ステップ）・新規コメントとPRのいずれも（実装ステップ）が確認できない」と判断した時点で、即座に
+   `00.check-user`を付けて止めるのではなく、まず全リポジトリ共通の自動リトライ上限（`GET
+   /api/settings/auto-retry`から取得する`autoRetryLimit`。#496で追加した読み取り専用APIを、
+   リポジトリ単位ではなくアプリ全体で共通の設定に置き換えたもの）と現在のリトライ回数を比較する。
+   上限未満であれば「自動リトライします」という
+   趣旨のコメントを投稿したうえで`gh workflow run claude-issue-dispatch.yml -f
+   issue_number=<n> -f retry_attempt=<n+1>`で`claude-issue-dispatch.yml`自身を`workflow_dispatch`
+   経由で再起動し、`00.check-user`は付与せず終了する。上限に達した場合（`autoRetryLimit`が未設定・
+   API到達不可の場合は常に上限0扱いとし安全側にフォールバックする）は従来どおりのフォールバック
+   通知＋`00.check-user`を行う。
+   - `workflow_dispatch`による自己再起動は、`GITHUB_TOKEN`によるAPI呼び出しが新たなワークフロー
+     実行を誘発しないGitHubの仕様上の制約（[docs/actions-token-model.md](actions-token-model.md)
+     参照）のため、`secrets.WORKFLOW_PAT`を使う。
+   - `workflow_dispatch`トリガー自体は、`workflow_dispatch`のAPI呼び出しがリポジトリへのwrite
+     権限を要求するGitHub側の仕様により、`issue_comment`向けの実行者パーミッション確認と同等の
+     信頼レベルが既に担保されているとみなし、Bot判定・実行者パーミッション確認をスキップする。
+   - 自動リトライ発火時のコメントには、フォールバック通知の`<!-- issue-deck-fallback-notice -->`
+     マーカーを付けない（`00.check-user`も付けないため、issue-deck画面の「続きを実装・調査を依頼」
+     ボタンは表示されず、UIの継続依頼導線と自動リトライが二重に走ることはない）。
 
 ### 自動投稿コメントへの実行ログリンク付与
 
@@ -422,7 +446,9 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
   非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
 - `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合は、Phase7で統合した
   Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメント・PR本文に埋め込んだ
-  うえで通常どおり完了処理まで進める（ブロックしない）。詳細はPhase7参照。
+  うえで通常どおり完了処理（PR作成）まで進める（PR作成自体はブロックしない）。ただし developへの
+  実際のマージは`risk-check`ジョブが`00.check-user`を付与するため、人間がスクリーンショットを
+  確認するまで保留される（#567）。詳細はPhase7参照。
 - `23.preview-required`が付いていて`24.screenshot-required`が付いていないissueをPhase5経由
   （無人実行）で処理する場合、実際に到達可能なプレビューURLを無人実行環境から提供できないため、
   実装・コミット・ブランチpushまで行った上で`00.check-user`を付与しPR作成前に停止する運用にとどめて
@@ -524,34 +550,59 @@ Issueクローズをトリガーに対応する`issue-<番号>/`ディレクト�
 
 `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合、`claude-issue-
 dispatch.yml`のClaude Codeステップ（実装・PR作成）が、実装・テスト・コミットを終えた後に
-`pnpm run capture:issue-screenshots -- <issue番号>`を実行する。これは`package.json`の
+`pnpm run capture:issue-screenshots -- <issue番号> [対象パス]`を実行する。これは`package.json`の
 `capture:issue-screenshots`スクリプト経由で`scripts/capture-issue-screenshots.sh`を実行するもの。
 かつては実装ステップの`allowedTools`に`Bash(scripts/capture-issue-screenshots.sh:*)`という
 前方一致の許可を直接列挙していたが、エージェントが`bash scripts/capture-issue-screenshots.sh
 <issue番号>`のように`bash `を前置して呼び出すと一致せず拒否される問題があったため、既に
 許可済みの`Bash(pnpm:*)`経由の呼び出しに変更し、`allowedTools`からその許可は削除した
-（Issue #522）。このスクリプトが以下を一括で
-行い、埋め込み用のraw URLを標準出力に2行（1行目がデスクトップ、2行目がモバイル）で出力する。
+（Issue #522）。
+
+第2引数（対象パス）は実装エージェントが今回の変更内容から判断して指定する（#567）。
 
 1. `next dev`をバックグラウンドで起動する（DB・CIバイパス用ユーザーは、この前段の
    シェルスクリプトのステップ（DBマイグレーション・`scripts/ci-seed-user.mjs`・
    `scripts/db:seed:ci`）で既に用意済み）
 2. Playwright（`scripts/capture-screenshots.mjs`）で、CIバイパス用Cookie
-   （`src/lib/ci-auth-bypass.ts`の`CI_BYPASS_COOKIE_NAME`）をセットしたうえで`/dashboard`に
-   アクセスし、デスクトップビューポート（1440x900）とモバイルデバイスプリセット
-   （`devices['iPhone 13']`）の両方でスクリーンショットを撮影する。撮影対象を`/`ではなく
-   `/dashboard`に固定しているのは、CIバイパスCookie使用時は`src/lib/supabase/middleware.ts`の
-   認証チェック自体をスキップするため、`/`が本来の遷移先（未ログインなら`/login`、ログイン済み
-   なら`/login`経由で`/dashboard`へリダイレクト）に到達せずログイン画面がそのまま表示されて
-   しまうため
+   （`src/lib/ci-auth-bypass.ts`の`CI_BYPASS_COOKIE_NAME`）をセットしたうえで撮影対象へ
+   アクセスし、スクリーンショットを撮影する。
+   - **対象パスを明示指定した場合**: そのパスをデスクトップビューポート（1440x900）と
+     モバイルデバイスプリセット（`devices['iPhone 13']`）の両方で撮影する（`desktop.png`・
+     `mobile.png`の2枚）。
+   - **対象パスを省略した場合（フォールバック）**: デスクトップは`/dashboard`1枚
+     （`desktop.png`）、モバイルはホーム（`/dashboard`、`mobile-home.png`）・イシュー一覧
+     （`/dashboard?mscreen=issues`、`mobile-issues.png`）・イシュー詳細
+     （`/dashboard?mscreen=issue-detail&missue=<id>`、`mobile-issue-detail.png`）の計3枚を
+     撮影する。スマホUIは別ルートではなく`/dashboard`単体ページ内でURLクエリ
+     （`mscreen`/`missue`等、`src/hooks/use-mobile-screen.ts`）によって画面を切り替える
+     SPA構成のため、これらは同一ページへの異なるクエリとして表現できる。デスクトップ/
+     モバイルの出し分けはTailwindの`md:hidden`等によるCSS制御のため、モバイルデバイス
+     プリセットで撮影すれば自動的にモバイルUIが撮れる。イシュー詳細の`missue`はGitHubの
+     Issue番号ではなくPrisma `Issue.id`（`cuid()`）が必要なため、`scripts/ci-get-sample-
+     issue-id.mjs`でCI用ダミーデータ（`scripts/seed-ci-db.mjs`）のIssue idを取得してから
+     撮影する。
+   - 撮影対象を`/`ではなく`/dashboard`に固定しているのは、CIバイパスCookie使用時は
+     `src/lib/supabase/middleware.ts`の認証チェック自体をスキップするため、`/`が本来の遷移先
+     （未ログインなら`/login`、ログイン済みなら`/login`経由で`/dashboard`へリダイレクト）に
+     到達せずログイン画面がそのまま表示されてしまうため
 3. 開発サーバーを停止し、`scripts/post-issue-screenshot.sh`（#255）で`screenshots`ブランチへ
    コミット・pushする
 
-呼び出し元のClaude Codeエージェントは、取得した2つのURLを`![PC画面](...)`・
-`![スマホ画面](...)`というMarkdown画像記法でPR本文・完了報告コメントに埋め込む。`22.preview-
-required`は依然、無人実行環境から到達可能なプレビューURLを提供できないため、
-`24.screenshot-required`が付いていない場合はPhase5の説明のとおり`00.check-user`で停止する運用を
-維持している。
+`scripts/capture-issue-screenshots.sh`は撮影対象パスの有無に応じて上記いずれかの構成で
+`scripts/capture-screenshots.mjs`（複数の`名前:パス:device`の組を任意個数受け取る汎用形）を
+呼び出し、埋め込み用のraw URLを標準出力に出力する（対象パス明示指定時は2行、省略時は4行）。
+
+呼び出し元のClaude Codeエージェントは、取得したURLを対象パス明示指定時は`![PC画面](...)`・
+`![スマホ画面](...)`、省略時は`![PC画面](...)`・`![スマホ:ホーム](...)`・
+`![スマホ:イシュー一覧](...)`・`![スマホ:イシュー詳細](...)`というMarkdown画像記法でPR本文・
+完了報告コメントに埋め込む。
+
+develop向けPRのマージ前には、`risk-check`ジョブが`24.screenshot-required`ラベルの有無を見て
+常に`00.check-user`を付与するため（「developへのマージ前確認要否をIssueラベルでトグルする」・
+「自動マージ可否の判定方法」参照、#567）、撮影したスクリーンショットを人間が確認するまで
+developへは自動マージされない。`22.preview-required`は依然、無人実行環境から到達可能な
+プレビューURLを提供できないため、`24.screenshot-required`が付いていない場合はPhase5の説明の
+とおり`00.check-user`で停止する運用を維持している。
 
 #### CIバイパス用ユーザーとダミーデータの紐付け
 

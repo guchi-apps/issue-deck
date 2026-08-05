@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -39,7 +40,7 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
-import type { Issue, NavViewId } from "@/types/issue";
+import type { DeployCheckStatus, Issue, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -49,6 +50,7 @@ type IssueDeckShellProps = {
   repositories: ConnectedRepository[];
   issues: Issue[];
   quickFilters: QuickFilter[];
+  autoRetryLimit: number;
 };
 
 export function IssueDeckShell({
@@ -56,6 +58,7 @@ export function IssueDeckShell({
   repositories: initialRepositories,
   issues: initialIssues,
   quickFilters: initialQuickFilters,
+  autoRetryLimit: initialAutoRetryLimit,
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
@@ -63,6 +66,8 @@ export function IssueDeckShell({
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
+  const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
+  const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const {
     mobileScreen,
     isPending: isMobileScreenPending,
@@ -228,8 +233,8 @@ export function IssueDeckShell({
     [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
   );
   const overviewStats = useMemo(
-    () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),
-    [topbarFilteredIssues, currentUserLogin],
+    () => computeOverviewStats(topbarFilteredIssues, topbarFilteredIssuesIgnoringState),
+    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState],
   );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
@@ -291,6 +296,34 @@ export function IssueDeckShell({
     }
   }
 
+  async function handleSetIssueDeployCheck(issue: Issue, status: DeployCheckStatus | null) {
+    function applyDeployCheck(target: DeployCheckStatus | null) {
+      setIssues((prev) =>
+        prev.map((item) => (item.id === issue.id ? { ...item, deployCheckStatus: target } : item)),
+      );
+      setSelectedIssue((prev) =>
+        prev && prev.id === issue.id ? { ...prev, deployCheckStatus: target } : prev,
+      );
+    }
+
+    const previousStatus = issue.deployCheckStatus;
+    applyDeployCheck(status);
+
+    try {
+      const response = await fetch("/api/issues/deploy-check", {
+        method: status === null ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          status === null ? { issueId: issue.id } : { issueId: issue.id, status },
+        ),
+      });
+      if (!response.ok) throw new Error("failed to update issue deploy check");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update issue deploy check", error);
+      applyDeployCheck(previousStatus);
+    }
+  }
+
   function applyQuickFilter(quickFilter: QuickFilter) {
     setFilters({
       view: quickFilter.view,
@@ -340,6 +373,8 @@ export function IssueDeckShell({
         issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+        onSetIssueDeployCheck={handleSetIssueDeployCheck}
+        onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -392,7 +427,10 @@ export function IssueDeckShell({
                 )}
 
                 {mobileScreen.kind === "settings" && (
-                  <MobileSettingsScreen currentUser={currentUser} />
+                  <MobileSettingsScreen
+                    currentUser={currentUser}
+                    onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+                  />
                 )}
 
                 {mobileScreen.kind === "repo-detail" && (
@@ -411,6 +449,7 @@ export function IssueDeckShell({
                     onSelectIssue={selectIssue}
                     onBack={goBack}
                     onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
+                    onSetIssueDeployCheck={handleSetIssueDeployCheck}
                   />
                 )}
 
@@ -522,6 +561,12 @@ export function IssueDeckShell({
         onOpenChange={setQuickFilterDialogOpen}
         filters={filters}
         onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
+      />
+      <AppSettingsDialog
+        open={appSettingsDialogOpen}
+        autoRetryLimit={autoRetryLimit}
+        onOpenChange={setAppSettingsDialogOpen}
+        onUpdated={setAutoRetryLimit}
       />
       <EditIssueDialog
         open={editingIssue !== null}

@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isLabelFilterPresetActive,
+  LABEL_FILTER_PRESETS,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
+
+describe("LABEL_FILTER_PRESETS", () => {
+  it("未着手プリセットは実装状況ラベル・00.check-userを除外条件に持つ", () => {
+    const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "not-started");
+    expect(preset?.labels).toEqual([]);
+    expect(preset?.excludeLabels).toEqual([
+      "00.check-user",
+      "01.wip",
+      "03.d:marge",
+      "05.develop",
+      "07.m:marge",
+      "09.main",
+    ]);
+  });
+});
+
+describe("isLabelFilterPresetActive", () => {
+  it("excludeLabelsのみで定義されるプリセット（labelsが空）は常に非アクティブとして扱う", () => {
+    const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "not-started");
+    expect(preset && isLabelFilterPresetActive([], preset)).toBe(false);
+  });
+});
 
 describe("requestPrFixCommentBody", () => {
   it("修正依頼の入力がある場合はその内容を@claudeメンションに続けて返す", () => {

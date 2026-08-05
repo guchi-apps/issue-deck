@@ -29,6 +29,7 @@ model User {
   favoriteIssues     FavoriteIssue[]
   quickFilters       QuickFilter[]
   commentReads       IssueCommentRead[]
+  deployChecks       IssueDeployCheck[]
 }
 
 // --- GitHub App 連携 ---
@@ -159,10 +160,11 @@ model Issue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repository    Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  labels        IssueLabel[]
-  favoritedBy   FavoriteIssue[]
-  commentReadBy IssueCommentRead[]
+  repository      Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels          IssueLabel[]
+  favoritedBy     FavoriteIssue[]
+  commentReadBy   IssueCommentRead[]
+  deployCheckedBy IssueDeployCheck[]
 
   @@unique([repositoryId, number])
   @@index([repositoryId])
@@ -200,6 +202,22 @@ model IssueCommentRead {
   @@index([issueId])
 }
 
+// ユーザーごとに、本番デプロイ後の反映確認状況を記録する（"ok" | "ng" | "skip"。行が無ければ未確認）
+model IssueDeployCheck {
+  id      String @id @default(cuid())
+  userId  String
+  issueId String
+  status  String
+
+  updatedAt DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId])
+  @@index([issueId])
+}
+
 // ユーザーごとに保存したよく使うフィルター（PC左メニュー・スマホホーム画面に表示）
 model QuickFilter {
   id       String  @id @default(cuid())
@@ -219,6 +237,28 @@ model QuickFilter {
 
   @@unique([userId, name])
   @@index([userId])
+}
+
+// GitHub API消費の内訳計測（src/lib/github/api-usage.ts）を、プロセス再起動をまたいで
+// 保持するための永続化先。5分バケット単位でupsertし、直近24時間より古い行は随時削除する
+model GithubApiUsageBucket {
+  id        String   @id @default(cuid())
+  startedAt DateTime
+  feature   String
+  endpoint  String
+  count     Int
+
+  @@unique([startedAt, feature, endpoint])
+  @@index([startedAt])
+}
+
+// アプリ全体で共通の設定値を保持するシングルトンテーブル（id=1固定の1行のみ）。
+// autoRetryLimit: claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限
+// （0は自動リトライ無効）。リポジトリ間で個別設定にする必要が無いため全リポジトリ共通の値とする（#497）。
+model AppSetting {
+  id             Int      @id @default(1)
+  autoRetryLimit Int      @default(0)
+  updatedAt      DateTime @updatedAt
 }
 
 model IssueLabel {

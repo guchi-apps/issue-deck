@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 
 import { Rocket } from "lucide-react";
 
-import { ReleaseProgress } from "@/components/dashboard/release-progress";
+import { ReleaseDeployChecklist } from "@/components/dashboard/release-deploy-checklist";
+import { isProductionDeployComplete, ReleaseProgress } from "@/components/dashboard/release-progress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,9 +18,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useReleaseStatus } from "@/hooks/use-release-status";
+import type { ReleaseStatus } from "@/hooks/use-release-status";
+import {
+  formatDevelopVersionDisplay,
+  formatMainVersionDisplay,
+} from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
-import type { Issue } from "@/types/issue";
+import { filterIssuesByView } from "@/lib/issue-stats";
+import type { DeployCheckStatus, Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileReleaseSheetProps = {
@@ -27,16 +33,26 @@ type MobileReleaseSheetProps = {
   onOpenChange: (open: boolean) => void;
   repository: ConnectedRepository;
   issues: Issue[];
+  releaseStatus: ReleaseStatus | null;
+  releaseStatusLoading: boolean;
+  releaseStatusError: string | null;
+  triggerRelease: () => Promise<boolean>;
+  isTriggeringRelease: boolean;
+  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
 };
 
-export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: MobileReleaseSheetProps) {
-  const {
-    data: releaseStatus,
-    isLoading: releaseStatusLoading,
-    error: releaseStatusError,
-    triggerRelease,
-    isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(repository.fullName, open);
+export function MobileReleaseSheet({
+  open,
+  onOpenChange,
+  repository,
+  issues,
+  releaseStatus,
+  releaseStatusLoading,
+  releaseStatusError,
+  triggerRelease,
+  isTriggeringRelease,
+  onSetIssueDeployCheck,
+}: MobileReleaseSheetProps) {
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
 
@@ -51,6 +67,14 @@ export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: M
       ),
     [issues, repository.fullName],
   );
+
+  // 本番デプロイ成功後（release-progress.tsxの「本番デプロイ」段と同じ条件）にのみ、
+  // 直近リリースでmainへ反映されたIssueの確認チェックリストを表示する（#534）。
+  const deployCheckIssues = useMemo(() => {
+    if (!releaseStatus?.available || !isProductionDeployComplete(releaseStatus)) return [];
+    const repoIssues = issues.filter((issue) => issue.repositoryFullName === repository.fullName);
+    return filterIssuesByView(repoIssues, "recently-merged", null);
+  }, [issues, repository.fullName, releaseStatus]);
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -78,13 +102,29 @@ export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: M
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">main</span>
-                <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
+                <span>
+                  {formatMainVersionDisplay(
+                    releaseStatus.mainVersion,
+                    releaseStatus.developVersion,
+                    releaseStatus.phase,
+                  )}
+                </span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">develop</span>
-                <span>{releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}</span>
+                <span>
+                  {formatDevelopVersionDisplay(
+                    releaseStatus.developVersion,
+                    releaseStatus.bumpPullRequest?.version ?? null,
+                    releaseStatus.phase,
+                  )}
+                </span>
               </div>
               <ReleaseProgress status={releaseStatus} />
+              <ReleaseDeployChecklist
+                issues={deployCheckIssues}
+                onSetDeployCheck={onSetIssueDeployCheck}
+              />
               <Button
                 variant="outline"
                 disabled={isTriggeringRelease}

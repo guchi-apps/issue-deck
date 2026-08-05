@@ -7,6 +7,17 @@ import type { CiState, ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-rel
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
+/**
+ * 「本番デプロイ」段がstate: "done"（デプロイ成功）で表示される条件と同じかどうかを判定する。
+ * デプロイ後の反映確認チェックリスト（#534）の表示条件に使う。
+ */
+export function isProductionDeployComplete(status: AvailableReleaseStatus): boolean {
+  const runActive = status.workflowRun != null && status.workflowRun.status !== "completed";
+  if (status.phase !== "none" || runActive) return false;
+  const deployRun = status.deployWorkflowRun;
+  return deployRun?.status === "completed" && deployRun.conclusion === "success";
+}
+
 type StepState =
   | "done" // 完了
   | "active" // 進行中（自動で進む。人の操作は不要）
@@ -42,9 +53,11 @@ function ciLabel(ci: CiState | null): string {
  * リリースの論理段階（4ステップ）を、版数・オープン中PR・実行中runから組み立てる。
  * 人の操作（マージ）が必要な段には、その場でマージできるPRのURLを`action`として添える。
  * mainの本番デプロイ（deploy.yml）のrunが取得できれば、5段目として末尾に追加する。ただし
- * phaseが"none"（今回の一連の反映が完了、または対象なし）以外では追加しない。バンプPR作成〜
- * mainへマージが進行中の間にdeploy.ymlの最新runを出すと、まだ今回のmainへのマージが完了して
- * いないにもかかわらず前回リリース時のデプロイ成功が残り続けて見えてしまうため(#470)。
+ * phaseが"none"（今回の一連の反映が完了、または対象なし）かつワークフロー実行中でない場合
+ * のみ追加する。バンプPR作成〜mainへマージが進行中の間にdeploy.ymlの最新runを出すと、まだ
+ * 今回のmainへのマージが完了していないにもかかわらず前回リリース時のデプロイ成功が残り
+ * 続けて見えてしまうため(#470)。バンプPRがまだ現れていない起動直後（phaseは"none"のまま）も
+ * ワークフロー実行中である以上は同様に隠す必要がある(#545)。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
@@ -93,7 +106,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = "ワークフロー実行中...";
   }
 
-  if (phase === "none") {
+  if (phase === "none" && !runActive) {
     const deployStep = buildDeployStep(status.deployWorkflowRun);
     if (deployStep) steps.push(deployStep);
   }

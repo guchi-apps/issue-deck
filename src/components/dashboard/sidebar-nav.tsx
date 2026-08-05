@@ -130,8 +130,8 @@ export function SidebarNav({
               onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
               title={
                 isEditingRepoVisibility
-                  ? "表示・非表示の切り替えを終了"
-                  : "表示・非表示を切り替える"
+                  ? "表示・非表示や設定の切り替えを終了"
+                  : "表示・非表示や設定を切り替える"
               }
               className={cn(
                 "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
