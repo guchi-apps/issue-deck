@@ -197,10 +197,12 @@ export function IssueDeckShell({
   const filteredIssues = useMemo(
     () =>
       sortIssues(
-        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin),
+        // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
+        // 基準がずれて古いリリース分が現れないようにする）。
+        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin, issues),
         filters.sort,
       ),
-    [topbarFilteredIssues, filters.view, filters.sort, currentUserLogin],
+    [topbarFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );
 
   const navCounts = useMemo(
@@ -209,8 +211,9 @@ export function IssueDeckShell({
         topbarFilteredIssues,
         topbarFilteredIssuesIgnoringState,
         currentUserLogin,
+        issues,
       ),
-    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, currentUserLogin],
+    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
   );
   const overviewStats = useMemo(
     () => computeOverviewStats(topbarFilteredIssues, currentUserLogin),

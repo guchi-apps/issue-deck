@@ -30,6 +30,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     commentCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    closedAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
@@ -246,6 +247,70 @@ describe("time-dependent stats", () => {
         "4",
       ]);
     });
+
+    it("view=recently-mergedはリポジトリごとに最新リリース分のみ返す", () => {
+      const mainLabel = { name: "09.main", color: "green", description: null };
+      const issues = [
+        // owner/repo-a の最新リリース（同一workflow run内で連続close）
+        makeIssue({
+          id: "1",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-09T10:00:00.000Z",
+        }),
+        makeIssue({
+          id: "2",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-09T10:00:20.000Z",
+        }),
+        // owner/repo-a の1つ前のリリース
+        makeIssue({
+          id: "3",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-05T10:00:00.000Z",
+        }),
+        // 別リポジトリは別リリースとして扱う
+        makeIssue({
+          id: "4",
+          repositoryFullName: "owner/repo-b",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-02T10:00:00.000Z",
+        }),
+        // 09.mainがないclose済みIssueは対象外
+        makeIssue({ id: "5", state: "closed", closedAt: "2026-01-09T10:00:10.000Z" }),
+      ];
+      expect(filterIssuesByView(issues, "recently-merged", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "2",
+        "4",
+      ]);
+    });
+
+    it("view=recently-mergedの基準時刻は絞り込み前の集合から求める", () => {
+      const mainLabel = { name: "09.main", color: "green", description: null };
+      const latest = makeIssue({
+        id: "1",
+        state: "closed",
+        labels: [mainLabel],
+        closedAt: "2026-01-09T10:00:00.000Z",
+      });
+      const previous = makeIssue({
+        id: "2",
+        state: "closed",
+        labels: [mainLabel],
+        closedAt: "2026-01-05T10:00:00.000Z",
+      });
+      // 検索などで最新リリース分が絞り込まれて消えても、古いリリース分は現れない
+      expect(
+        filterIssuesByView([previous], "recently-merged", null, [latest, previous]),
+      ).toEqual([]);
+    });
   });
 
   describe("computeNavCounts", () => {
@@ -288,6 +353,7 @@ describe("time-dependent stats", () => {
           id: "2",
           state: "closed",
           labels: [{ name: "09.main", color: "green", description: null }],
+          closedAt: "2026-01-09T10:00:00.000Z",
         }),
       ];
       const counts = computeNavCounts(openIssues, allIssues, null);

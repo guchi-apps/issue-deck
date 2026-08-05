@@ -29,6 +29,12 @@ export type NavView = {
    * 「直近main反映済み」ビューはopen絞り込みのままだと該当issueが出てこない。
    */
   defaultState?: IssueStateFilter;
+  /**
+   * 最新リリース分だけに絞るビューかどうか。
+   * 09.mainは一度付くと外れないラベルのため、これがないと過去の全リリース分が
+   * 累積してしまう（詳細はissue-statsのfilterLatestReleaseIssues）。
+   */
+  latestReleaseOnly?: boolean;
 };
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
@@ -52,6 +58,7 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   label: preset.label,
   labels: preset.labels,
   defaultState: preset.state,
+  latestReleaseOnly: preset.key === "recently-merged",
 }));
 
 /**

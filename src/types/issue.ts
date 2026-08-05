@@ -48,6 +48,8 @@ export type Issue = {
   commentCount: number;
   createdAt: string;
   updatedAt: string;
+  /** closeされた日時（ISO8601）。openなIssueはnull */
+  closedAt: string | null;
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;

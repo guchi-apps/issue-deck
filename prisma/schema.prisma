@@ -148,6 +148,7 @@ model Issue {
   milestoneClosed Int?
   githubCreatedAt DateTime
   githubUpdatedAt DateTime
+  githubClosedAt  DateTime?
   syncedAt        DateTime          @default(now())
 
   createdAt DateTime @default(now())
