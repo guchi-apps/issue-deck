@@ -4,7 +4,6 @@ import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { getInstallationToken } from "@/lib/github/app-auth";
 import { mapComment } from "@/lib/github/issue-mapper";
 import {
   createComment,
@@ -27,10 +26,19 @@ function buildCiDummyComments(): GithubApiComment[] {
       id: -n,
       user: { login: "ci-dummy-user" },
       body: `CI環境の画面確認用ダミーコメントです（${n}件目）。`,
-      created_at: new Date(Date.UTC(2026, 0, n)).toISOString(),
+      created_at: new Date(Date.UTC(2026, 7, n)).toISOString(),
       reactions: { "+1": 0 },
     };
   });
+}
+
+// src/lib/github/app-auth.tsはトップレベルでGITHUB_APP_ID等の環境変数を要求するため、
+// 静的importするとGitHub App認証情報が無い環境（無人でのCIスクリーンショット撮影等）では
+// このモジュール自体の読み込みで例外になり、CI用ダミーリポジトリ向けの早期returnにも
+// たどり着けなくなる。実際にGitHub APIを呼ぶ経路でのみ動的importする(#550)。
+async function getInstallationTokenLazy(installationId: number) {
+  const { getInstallationToken } = await import("@/lib/github/app-auth");
+  return getInstallationToken(installationId);
 }
 
 async function findRepository(userId: string, owner: string, repo: string) {
@@ -72,7 +80,7 @@ async function handleGET(request: NextRequest) {
   }
 
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
+    const token = await getInstallationTokenLazy(repository.installation.installationId);
     const rawComments = await fetchCommentsForIssue(owner, repo, Number(numberParam), token);
     return NextResponse.json({ comments: rawComments.map(mapComment) });
   } catch (error) {
@@ -168,7 +176,7 @@ async function handlePATCH(request: NextRequest) {
   }
 
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
+    const token = await getInstallationTokenLazy(repository.installation.installationId);
     const updated = await updateComment(owner, repo, commentId, token, { body: body.trim() });
     return NextResponse.json({ comment: mapComment(updated) });
   } catch (error) {
@@ -205,7 +213,7 @@ async function handleDELETE(request: NextRequest) {
   }
 
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
+    const token = await getInstallationTokenLazy(repository.installation.installationId);
     await deleteComment(owner, repo, Number(commentIdParam), token);
     return NextResponse.json({ success: true });
   } catch (error) {
