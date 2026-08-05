@@ -45,12 +45,12 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   },
   {
     key: "release-pending",
-    label: "develop反映済",
+    label: "本番反映待ち",
     labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
   },
   {
     key: "recently-merged",
-    label: "main反映済(直近)",
+    label: "直近に本番反映",
     labels: [WORKFLOW_STEPS[4].labelName],
     state: "all",
   },
