@@ -187,7 +187,7 @@ export function CreateIssueDialog({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Issueのタイトル"
-                className="text-sm"
+                className="md:text-sm"
                 autoFocus
               />
             </div>
@@ -202,7 +202,7 @@ export function CreateIssueDialog({
                 onUploadingChange={setIsImageUploading}
                 repositoryFullName={repositoryFullName}
                 placeholder="詳細を入力（任意）"
-                className="min-h-32 text-sm"
+                className="min-h-32 md:text-sm"
               />
             </div>
 
