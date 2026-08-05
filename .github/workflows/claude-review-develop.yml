@@ -7,7 +7,10 @@ name: Claude Code Review (develop向けPR)
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
 #   22.merge-confirm-requiredラベル付与の有無を確認する。該当時は00.check-userを
-#   付与し、判定理由をissueにコメント投稿する(#94, #366)
+#   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
+#   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
+#   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
+#   投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
 #   マージやラベル状態遷移(03.d:marge等)は行わない
@@ -135,9 +138,14 @@ jobs:
             echo "$REASONS"
             if [ -n "$ISSUE_NUMBER" ]; then
               gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-              COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前に人間の確認が必要と判定しました。"
-              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
-              gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+              # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)
+              if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+                echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
+              else
+                COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前に人間の確認が必要と判定しました。"
+                COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+                gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+              fi
             fi
           else
             echo "機械的リスク判定: 該当なし"
