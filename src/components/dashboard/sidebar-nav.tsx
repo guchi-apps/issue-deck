@@ -30,6 +30,7 @@ type SidebarNavProps = {
   repositories: ConnectedRepository[];
   selectedRepoFullName?: string | null;
   onSelectRepository?: (repository: ConnectedRepository) => void;
+  onClearRepository?: () => void;
   onHideRepository?: (repository: ConnectedRepository) => void;
   onShowRepository?: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
@@ -51,6 +52,7 @@ export function SidebarNav({
   repositories,
   selectedRepoFullName,
   onSelectRepository,
+  onClearRepository,
   onHideRepository,
   onShowRepository,
   labelSummary,
@@ -105,6 +107,16 @@ export function SidebarNav({
         <div className="mb-2 flex items-center justify-between px-2">
           <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
           <div className="flex items-center gap-1">
+            {selectedRepoFullName && (
+              <button
+                type="button"
+                onClick={() => onClearRepository?.()}
+                className="text-muted-foreground hover:text-foreground"
+                title="リポジトリの選択を解除"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
