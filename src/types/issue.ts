@@ -81,4 +81,6 @@ export type OverviewStat = {
   label: string;
   value: string;
   diffLabel: string;
+  /** 指定時、カードをタップすると遷移する先のクイックビュー */
+  linkedView?: NavViewId;
 };

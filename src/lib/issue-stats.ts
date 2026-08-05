@@ -1,7 +1,12 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
+import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import { WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
+
+/** developへマージ完了・mainへの反映済みを示すラベル名（09.main） */
+const MAIN_MERGED_LABEL = WORKFLOW_STEPS[4].labelName;
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 const RECENTLY_ADDED_WINDOW_MS = DAY_MS;
@@ -136,22 +141,35 @@ export function computeNavCounts(
   return counts;
 }
 
+/**
+ * 概要カードの統計を求める。
+ * 「確認待ち」はTopBarの絞り込みを適用した集合（issues）、「24時間以内の本番反映」
+ * 「オープンIssue件数」はstate絞り込みを無視した集合（issuesIgnoringState）を基準にする
+ * （close済みIssueが対象の指標や、TopBarのstate絞り込みに影響されたくない指標のため）。
+ */
 export function computeOverviewStats(
   issues: Issue[],
-  currentUserLogin: string | null,
+  issuesIgnoringState: Issue[],
 ): OverviewStat[] {
-  const openCount = issues.filter((issue) => issue.state === "open").length;
-  const assignedOpenCount = issues.filter(
-    (issue) => issue.state === "open" && issue.assignee?.login === currentUserLogin,
+  const checkUserCount = issues.filter((issue) =>
+    issue.labels.some((label) => label.name === CHECK_USER_LABEL),
   ).length;
-  const updatedRecentlyCount = issues.filter(
-    (issue) => Date.now() - new Date(issue.updatedAt).getTime() < DAY_MS,
-  ).length;
+  const recentlyReleasedCount = issuesIgnoringState.filter((issue) => {
+    if (!issue.closedAt) return false;
+    if (!issue.labels.some((label) => label.name === MAIN_MERGED_LABEL)) return false;
+    return Date.now() - new Date(issue.closedAt).getTime() < DAY_MS;
+  }).length;
+  const openCount = issuesIgnoringState.filter((issue) => issue.state === "open").length;
 
   return [
+    {
+      label: "確認待ち",
+      value: String(checkUserCount),
+      diffLabel: "",
+      linkedView: "check-user",
+    },
+    { label: "24時間以内の本番反映", value: `${recentlyReleasedCount}件`, diffLabel: "" },
     { label: "オープンIssue", value: String(openCount), diffLabel: "" },
-    { label: "担当中", value: String(assignedOpenCount), diffLabel: "" },
-    { label: "24時間以内の更新", value: `${updatedRecentlyCount}件`, diffLabel: "" },
   ];
 }
 
