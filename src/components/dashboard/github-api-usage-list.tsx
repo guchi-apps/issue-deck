@@ -20,45 +20,25 @@ const ENDPOINTS_PER_FEATURE = 3;
 /**
  * 用途別のGitHub API消費の内訳。
  * GitHubは消費の内訳を返さないため、アプリが自分で発信したリクエストを数えた値を表示する。
+ * 見出し「GitHub API使用量」は呼び出し元（topbar.tsx / mobile-settings-screen.tsx）が
+ * GithubRateLimitListと共通で表示するため、このコンポーネント自体は見出しを持たない（#474）。
  */
 export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageListProps) {
   const now = useNow();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const detailId = useId();
 
-  // 折りたたみ時は総量のみの「GitHub Action使用量」、展開時は用途別内訳の
-  // 「GitHub API消費の内訳」として見出しを切り替える（#455）
-  const heading = isDetailOpen ? "GitHub API消費の内訳" : "GitHub Action使用量";
-
-  if (isLoading)
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-muted-foreground">読み込み中...</p>
-      </div>
-    );
-  if (error)
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-destructive">{error}</p>
-      </div>
-    );
+  if (isLoading) return <p className="text-xs text-muted-foreground">読み込み中...</p>;
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
   if (!data) return null;
   if (data.features.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>
-      </div>
-    );
+    return <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>;
   }
 
   const measuredMs = now !== null ? now - data.measuringSince : null;
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium text-muted-foreground">{heading}</p>
       <button
         type="button"
         aria-expanded={isDetailOpen}
