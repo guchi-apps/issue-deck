@@ -1,49 +1,33 @@
 "use client";
 
-import {
-  GitMerge,
-  PlayCircle,
-  Plus,
-  Rocket,
-  SlidersHorizontal,
-  UserCheck,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
-import { LABEL_FILTER_PRESETS, type LabelFilterPreset } from "@/lib/github/approval-labels";
-import { navViewIcons, navViews } from "@/lib/nav-views";
+import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 
 type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
-  labelFilterPresetCounts: Record<string, number>;
   onSelectQuickView: (view: NavViewId) => void;
-  onSelectLabelPreset: (preset: LabelFilterPreset) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
 };
 
-const quickFilterViews = navViews.filter((view) => view.id !== "all");
-
-const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
-  "check-user": UserCheck,
-  "in-progress": PlayCircle,
-  "release-pending": Rocket,
-  "recently-merged": GitMerge,
-};
+// 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
+// 残りのビューを後ろに並べる。
+const quickFilterViews = [
+  ...labelNavViews,
+  ...navViews.filter((view) => view.id !== "all" && !view.labels),
+];
 
 export function MobileHomeScreen({
   overviewStats,
   navCounts,
-  labelFilterPresetCounts,
   onSelectQuickView,
-  onSelectLabelPreset,
   quickFilters,
   onSelectQuickFilter,
   onDeleteQuickFilter,
@@ -74,26 +58,6 @@ export function MobileHomeScreen({
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
           <ul className="flex flex-col gap-1">
-            {LABEL_FILTER_PRESETS.map((preset) => {
-              const Icon = LABEL_FILTER_PRESET_ICONS[preset.key];
-              return (
-                <li key={preset.key}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectLabelPreset(preset)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      {preset.label}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {labelFilterPresetCounts[preset.key]}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
             {quickFilterViews.map((view) => {
               const Icon = navViewIcons[view.id];
               return (

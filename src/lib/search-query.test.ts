@@ -20,6 +20,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     commentCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    closedAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,

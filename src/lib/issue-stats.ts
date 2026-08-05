@@ -1,15 +1,52 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import type { LabelFilterPreset } from "@/lib/github/approval-labels";
+import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 const RECENT_WINDOW_MS = DAY_MS * 7;
 
+/**
+ * 同一リリースでcloseされたIssueとみなす、closedAtの許容差。
+ * develop→mainのPRがマージされると、対象Issueは1つのworkflow run内で連続して
+ * 09.main付与・closeされる（.github/workflows/issue-labels.yml の main-pr-merged）。
+ * 実際の間隔は数秒〜数分だが、リリース同士は通常それよりずっと離れているため
+ * 1時間を境界とする。
+ */
+const RELEASE_CLOSE_BATCH_WINDOW_MS = 1000 * 60 * 60;
+
+/**
+ * 最新リリースでcloseされたIssueだけを残す。
+ * 09.mainは一度付くと外れないため、ラベルだけで絞ると過去の全リリース分が累積する。
+ * リポジトリごとにclosedAtの最大値（＝最新リリースのclose時刻）を求め、そこから
+ * 一定時間内にcloseされたIssueを同じリリースの分とみなす。
+ * closedAtの基準は、検索・状態などの絞り込み前の集合（referenceIssues）から求める。
+ */
+function filterLatestReleaseIssues(issues: Issue[], referenceIssues: Issue[]): Issue[] {
+  const latestClosedAtByRepo = new Map<string, number>();
+  for (const issue of referenceIssues) {
+    if (!issue.closedAt) continue;
+    const closedAt = new Date(issue.closedAt).getTime();
+    const latest = latestClosedAtByRepo.get(issue.repositoryFullName);
+    if (latest === undefined || closedAt > latest) {
+      latestClosedAtByRepo.set(issue.repositoryFullName, closedAt);
+    }
+  }
+
+  return issues.filter((issue) => {
+    if (!issue.closedAt) return false;
+    const latest = latestClosedAtByRepo.get(issue.repositoryFullName);
+    if (latest === undefined) return false;
+    return latest - new Date(issue.closedAt).getTime() <= RELEASE_CLOSE_BATCH_WINDOW_MS;
+  });
+}
+
 export function filterIssuesByView(
   issues: Issue[],
   view: NavViewId,
   currentUserLogin: string | null,
+  // 「最新リリース」の基準時刻を求めるための、絞り込み前の集合（省略時はissuesと同じ）
+  referenceIssues: Issue[] = issues,
 ): Issue[] {
   switch (view) {
     case "assigned":
@@ -23,8 +60,18 @@ export function filterIssuesByView(
         (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
       );
     case "all":
-    default:
       return issues;
+    default: {
+      // 運用ラベルに基づくビュー（ユーザーの確認待ち・実行中など）はラベルのOR一致で絞り込む。
+      const navView = getNavView(view);
+      const viewLabels = navView.labels;
+      if (!viewLabels || viewLabels.length === 0) return issues;
+      const hasViewLabel = (issue: Issue) =>
+        issue.labels.some((label) => viewLabels.includes(label.name));
+      const matched = issues.filter(hasViewLabel);
+      if (!navView.latestReleaseOnly) return matched;
+      return filterLatestReleaseIssues(matched, referenceIssues.filter(hasViewLabel));
+    }
   }
 }
 
@@ -69,34 +116,26 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
   return [...logins].sort();
 }
 
+/**
+ * ビューごとの件数を数える。
+ * ビューのdefaultStateが現在の状態絞り込みと異なる場合（「直近main反映済み」など）は、
+ * 選択したときに実際に表示される件数と揃うようissuesIgnoringStateを基準にする。
+ */
 export function computeNavCounts(
   issues: Issue[],
+  issuesIgnoringState: Issue[],
   currentUserLogin: string | null,
+  referenceIssues?: Issue[],
 ): Record<NavViewId, number> {
-  return {
-    all: issues.length,
-    assigned: issues.filter((issue) => issue.assignee?.login === currentUserLogin).length,
-    created: issues.filter((issue) => issue.author.login === currentUserLogin).length,
-    favorites: issues.filter((issue) => issue.favorite).length,
-    recent: issues.filter(
-      (issue) => Date.now() - new Date(issue.updatedAt).getTime() < RECENT_WINDOW_MS,
-    ).length,
-  };
-}
-
-export function computeLabelFilterPresetCounts(
-  issues: Issue[],
-  presets: readonly LabelFilterPreset[],
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const preset of presets) {
-    counts[preset.key] = applyIssueFilters(issues, {
-      q: "",
-      repo: null,
-      state: "all",
-      labels: preset.labels,
-      assignee: null,
-    }).length;
+  const counts = {} as Record<NavViewId, number>;
+  for (const view of navViews) {
+    const base = view.defaultState === "all" ? issuesIgnoringState : issues;
+    counts[view.id] = filterIssuesByView(
+      base,
+      view.id,
+      currentUserLogin,
+      referenceIssues ?? base,
+    ).length;
   }
   return counts;
 }

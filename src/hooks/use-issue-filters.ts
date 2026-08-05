@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
+import { getNavViewDefaultState, isNavViewId } from "@/lib/nav-views";
 import type { NavViewId } from "@/types/issue";
 
 export type IssueSort = "updated" | "created";
@@ -28,16 +29,23 @@ const DEFAULT_FILTERS: IssueFilters = {
   sort: "created",
 };
 
+// ビューによってstateの既定値が変わる（「直近main反映済み」はcloseされたissueが対象のため
+// all）ので、省略時の値はビューを踏まえて解決する。
+function resolveDefaultFilters(view: NavViewId): IssueFilters {
+  return { ...DEFAULT_FILTERS, state: getNavViewDefaultState(view) };
+}
+
 function applyFilterParam<K extends keyof IssueFilters>(
   params: URLSearchParams,
   key: K,
   value: IssueFilters[K],
+  defaults: IssueFilters,
 ) {
   if (
     value === null ||
     value === "" ||
     (Array.isArray(value) && value.length === 0) ||
-    value === DEFAULT_FILTERS[key]
+    value === defaults[key]
   ) {
     params.delete(key);
   } else if (Array.isArray(value)) {
@@ -45,16 +53,6 @@ function applyFilterParam<K extends keyof IssueFilters>(
   } else {
     params.set(key, String(value));
   }
-}
-
-function isNavViewId(value: string | null): value is NavViewId {
-  return (
-    value === "all" ||
-    value === "assigned" ||
-    value === "created" ||
-    value === "favorites" ||
-    value === "recent"
-  );
 }
 
 export function useIssueFilters() {
@@ -68,14 +66,16 @@ export function useIssueFilters() {
     const labelsParam = searchParams.get("labels");
     const sortParam = searchParams.get("sort");
 
+    const view = isNavViewId(viewParam) ? viewParam : DEFAULT_FILTERS.view;
+
     return {
-      view: isNavViewId(viewParam) ? viewParam : DEFAULT_FILTERS.view,
+      view,
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repo: searchParams.get("repo"),
       state:
         stateParam === "open" || stateParam === "closed" || stateParam === "all"
           ? stateParam
-          : DEFAULT_FILTERS.state,
+          : getNavViewDefaultState(view),
       labels: labelsParam ? labelsParam.split(",").filter(Boolean) : [],
       assignee: searchParams.get("assignee"),
       sort: sortParam === "updated" ? "updated" : DEFAULT_FILTERS.sort,
@@ -85,10 +85,11 @@ export function useIssueFilters() {
   const setFilter = useCallback(
     <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => {
       const params = new URLSearchParams(searchParams.toString());
-      applyFilterParam(params, key, value);
+      const nextView = key === "view" ? (value as NavViewId) : filters.view;
+      applyFilterParam(params, key, value, resolveDefaultFilters(nextView));
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, filters.view],
   );
 
   // 複数フィールドを1回のURL更新でまとめて反映する（よく使うフィルター適用など、
@@ -96,12 +97,13 @@ export function useIssueFilters() {
   const setFilters = useCallback(
     (patch: Partial<IssueFilters>) => {
       const params = new URLSearchParams(searchParams.toString());
+      const defaults = resolveDefaultFilters(patch.view ?? filters.view);
       for (const key of Object.keys(patch) as (keyof IssueFilters)[]) {
-        applyFilterParam(params, key, patch[key] as IssueFilters[typeof key]);
+        applyFilterParam(params, key, patch[key] as IssueFilters[typeof key], defaults);
       }
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, filters.view],
   );
 
   const toggleLabel = useCallback(

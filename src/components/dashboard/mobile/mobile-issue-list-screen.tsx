@@ -14,8 +14,6 @@ import { navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
-const QUICK_VIEWS: NavViewId[] = ["all", "assigned", "created", "favorites", "recent"];
-
 type MobileIssueListScreenProps = {
   /** ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名） */
   title: string;
@@ -103,22 +101,19 @@ export function MobileIssueListScreen({
       </header>
 
       <div className="flex items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {QUICK_VIEWS.map((viewId) => {
-          const label = navViews.find((v) => v.id === viewId)?.label ?? viewId;
-          return (
-            <button
-              key={viewId}
-              type="button"
-              onClick={() => onChangeView(viewId)}
-              className={cn(
-                "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
-                view === viewId && "border-primary bg-primary/10 text-primary",
-              )}
-            >
-              {label}
-            </button>
-          );
-        })}
+        {navViews.map((navView) => (
+          <button
+            key={navView.id}
+            type="button"
+            onClick={() => onChangeView(navView.id)}
+            className={cn(
+              "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+              view === navView.id && "border-primary bg-primary/10 text-primary",
+            )}
+          >
+            {navView.label}
+          </button>
+        ))}
       </div>
 
       <IssueList
@@ -139,6 +134,7 @@ export function MobileIssueListScreen({
         onChange={onChangeFilters}
         labelOptions={labelOptions}
         assigneeOptions={assigneeOptions}
+        showLabelPresets={false}
       />
 
       {children}
