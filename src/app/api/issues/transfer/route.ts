@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
-import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { GithubApiError, transferIssue } from "@/lib/github/issues-api";
+import { getInstallationToken } from "@/lib/github/app-auth";
+import { transferIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 
 async function findRepository(userId: string, repositoryFullName: string) {
@@ -13,6 +13,7 @@ async function findRepository(userId: string, repositoryFullName: string) {
       fullName: repositoryFullName,
       installation: { userInstallations: { some: { userId } } },
     },
+    include: { installation: true },
   });
 }
 
@@ -53,20 +54,12 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-  }
-
   try {
-    const token = decryptSecret(user.githubAccessToken);
+    const token = await getInstallationToken(destinationRepository.installation.installationId);
     const transferred = await transferIssue(owner, repo, number, newOwner, newRepo, token);
     const issue = await upsertIssueAndGetDisplay(destinationRepository, transferred);
     return NextResponse.json({ issue });
   } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
     console.error(
       `[POST /api/issues/transfer] ${repositoryFullName}#${number} -> ${newRepositoryFullName}:`,
       error,
