@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, Loader2 } from "lucide-react";
+import { Bot, ChevronDown, Loader2, Mic } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
@@ -86,6 +87,12 @@ export function CreateIssueDialog({
     notConfigured: suggestNotConfigured,
     generate: generateSuggestion,
   } = useIssueSuggest();
+  const {
+    isGenerating: isCleaningUpBody,
+    error: bodyCleanupError,
+    notConfigured: bodyCleanupNotConfigured,
+    generate: generateBodyCleanup,
+  } = useIssueBodyCleanup();
 
   useEffect(() => {
     if (!open) return;
@@ -129,6 +136,12 @@ export function CreateIssueDialog({
     if (!result) return;
     setTitle(result.title);
     setSelectedLabels((prev) => [...new Set([...prev, ...result.labels])]);
+  }
+
+  async function handleGenerateBodyCleanup() {
+    const result = await generateBodyCleanup(body);
+    if (!result) return;
+    setBody(result.text);
   }
 
   async function handleSubmit() {
@@ -221,22 +234,41 @@ export function CreateIssueDialog({
                 placeholder="詳細を入力（任意）"
                 className="min-h-32 md:text-sm"
               />
-              <div>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={!body.trim() || !repositoryFullName || isMetaLoading || isSuggesting}
-                  onClick={handleGenerateSuggestion}
-                >
-                  {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
-                  タイトル・ラベルを自動生成
-                </Button>
-                {suggestNotConfigured && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていません
-                  </p>
-                )}
-                {suggestError && <p className="mt-1 text-xs text-destructive">{suggestError}</p>}
+              <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={!body.trim() || isCleaningUpBody}
+                    onClick={handleGenerateBodyCleanup}
+                  >
+                    {isCleaningUpBody ? <Loader2 className="animate-spin" /> : <Mic />}
+                    音声入力を整理
+                  </Button>
+                  {bodyCleanupNotConfigured && (
+                    <p className="text-xs text-muted-foreground">
+                      Claudeのトークンが設定されていません
+                    </p>
+                  )}
+                  {bodyCleanupError && <p className="text-xs text-destructive">{bodyCleanupError}</p>}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={!body.trim() || !repositoryFullName || isMetaLoading || isSuggesting}
+                    onClick={handleGenerateSuggestion}
+                  >
+                    {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+                    タイトル・ラベルを自動生成
+                  </Button>
+                  {suggestNotConfigured && (
+                    <p className="text-xs text-muted-foreground">
+                      Claudeのトークンが設定されていません
+                    </p>
+                  )}
+                  {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
+                </div>
               </div>
             </div>
 
