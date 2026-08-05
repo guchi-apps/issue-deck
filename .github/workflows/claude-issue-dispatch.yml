@@ -155,8 +155,8 @@ jobs:
       issues: write
       # 自己リトライ(#497)のgh workflow run呼び出しは、GITHUB_TOKENが同呼び出しを誘発しない
       # 制約があるためsecrets.WORKFLOW_PATを使う(WORKFLOW_PAT側の権限はpermissions:の対象外)。
-      # このactions: writeはGITHUB_TOKEN自体を使う将来の呼び出しへの備え・最小権限の明示目的。
-      actions: write
+      # GITHUB_TOKEN自体はactions:writeを使わないため、least privilegeの観点でreadのままにする。
+      actions: read
       id-token: write
     # 無人実行環境でも`pnpm dev`を起動して画面を確認できるようにするためのMySQLサービス
     # コンテナ(#256)。plan/splitモードでは使わないが、サービスコンテナはジョブ全体に
@@ -206,6 +206,9 @@ jobs:
 
           RETRY_ATTEMPT="${INPUT_RETRY_ATTEMPT:-0}"
           : "${RETRY_ATTEMPT:=0}"
+          # 後続のフォールバック検証ステップで$((RETRY_ATTEMPT + 1))という算術展開に使うため、
+          # workflow_dispatchの手動起動等で不正な値が渡された場合に備え数値であることを検証する(#497)。
+          case "$RETRY_ATTEMPT" in ''|*[!0-9]*) RETRY_ATTEMPT=0 ;; esac
           echo "retry_attempt=$RETRY_ATTEMPT" >> "$GITHUB_OUTPUT"
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then

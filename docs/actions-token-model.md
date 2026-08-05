@@ -95,12 +95,12 @@ least privilege の方針が既に実践されている**。計画ステップ�
 ### 3-1. `permissions:`ブロックが無効化される
 
 `claude-issue-dispatch.yml`のジョブは`contents: write` / `pull-requests: write` / `issues: write` /
-`actions: write` / `id-token: write`と最小権限を宣言している（L114〜）。`actions: write`は#497の
-自己リトライ機構（フォールバック検証ステップが`gh workflow run`で自分自身を再起動する）向けだが、
-実際の呼び出しは`GITHUB_TOKEN`ではなく`secrets.WORKFLOW_PAT`で行っており、この宣言自体は
-`GITHUB_TOKEN`を使う将来の呼び出しへの備え・最小権限の明示目的で付与している。しかし**この宣言が効くのは
-`GITHUB_TOKEN`に対してだけ**であり、PAT 経由の操作は一切制約を受けない。ワークフローファイル上の
-least privilege 宣言が形骸化する。
+`actions: read` / `id-token: write`と最小権限を宣言している（L114〜）。#497の自己リトライ機構
+（フォールバック検証ステップが`gh workflow run`で自分自身を再起動する）は`GITHUB_TOKEN`では
+`workflow_dispatch`を発火できないため`secrets.WORKFLOW_PAT`で呼び出しており、`GITHUB_TOKEN`側の
+`permissions:`に`actions: write`を追加する必要はない（least privilegeの観点から`actions: read`の
+ままにしている）。ただしこの宣言が効くのは**`GITHUB_TOKEN`に対してだけ**であり、PAT 経由の操作は
+一切制約を受けない。ワークフローファイル上の least privilege 宣言が形骸化する。
 
 ### 3-2. 自己ループ防止の第1層・第2層が同時に無効化される
 
