@@ -998,7 +998,7 @@ jobs:
               ブランチのpushまでは行ったうえで、代わりに
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
               （`01.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
-              必要なため人間の確認を待っています」旨を`gh issue comment`で投稿して停止してください。
+              必要なためユーザーの確認を待っています」旨を`gh issue comment`で投稿して停止してください。
               このコメントに開発サーバーのプレビューURLもあわせて記載する。無人実行では実際にdevサーバーを
               起動できないため、人間が手元でブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
               `docs/multi-agent-workflow.md`のポート割り当て規約（`PORT=4000 + Issue番号`。本Issueの

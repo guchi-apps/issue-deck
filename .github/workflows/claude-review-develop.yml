@@ -135,7 +135,7 @@ jobs:
             echo "$REASONS"
             if [ -n "$ISSUE_NUMBER" ]; then
               gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-              COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前に人間の確認が必要と判定しました。"
+              COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
               COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
               gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
             fi

@@ -262,7 +262,7 @@ jobs:
             echo
             echo "## 注意点"
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
-            echo "- 自動マージはされません。CI通過を確認のうえ、人間がマージしてください"
+            echo "- 自動マージはされません。CI通過を確認のうえ、ユーザーがマージしてください"
           } > /tmp/release-pr-body.md
 
           gh pr create --base develop --head "$BRANCH" \
@@ -294,7 +294,7 @@ jobs:
             echo
             echo "## 注意点"
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
-            echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。人間が内容を確認のうえマージしてください"
+            echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。ユーザーが内容を確認のうえマージしてください"
             echo "- マージ方式は必ず「Create a merge commit」を選んでください（squash mergeはdevelop/mainの祖先のつながりを切ってしまうため厳禁。詳細はrelease-to-mainスキル参照）"
           } > /tmp/main-pr-body.md
 
