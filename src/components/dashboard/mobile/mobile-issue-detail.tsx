@@ -27,6 +27,7 @@ import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -602,6 +603,8 @@ export function MobileIssueDetail({
             />
           </div>
         </div>
+
+        <IssueAiSummary issue={issue} />
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
