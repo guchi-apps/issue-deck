@@ -79,7 +79,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[1].state = "done";
     steps[2].state = "done";
     steps[3].state = "action";
-    steps[3].note = "最終マージは人が行います。内容を確認してmainへマージしてください（マージ方式は必ず「Create a merge commit」）。";
+    steps[3].note = "最終マージはユーザーが行います。内容を確認してmainへマージしてください（マージ方式は必ず「Create a merge commit」）。";
     steps[3].action = {
       href: release.url,
       label: `develop→main PR #${release.number} をタップしてmainへマージ`,
