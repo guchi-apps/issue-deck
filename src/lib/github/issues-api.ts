@@ -286,10 +286,11 @@ export async function transferIssue(
     errors?: { message: string }[];
   } = await graphqlRes.json();
   if (graphqlData.errors?.length || !graphqlData.data) {
-    throw new GithubApiError(
-      403,
-      `GitHub GraphQL transferIssue failed: ${graphqlData.errors?.map((e) => e.message).join("; ") ?? "unknown error"}`,
-    );
+    const message = graphqlData.errors?.map((e) => e.message).join("; ") ?? "unknown error";
+    const hint = message.includes("Resource not accessible by integration")
+      ? " (IssueDeckのGitHub AppにAdministration権限が不足している可能性があります)"
+      : "";
+    throw new GithubApiError(403, `GitHub GraphQL transferIssue failed: ${message}${hint}`);
   }
 
   const newNumber = graphqlData.data.transferIssue.issue.number;
