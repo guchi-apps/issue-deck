@@ -42,9 +42,11 @@ function ciLabel(ci: CiState | null): string {
  * リリースの論理段階（4ステップ）を、版数・オープン中PR・実行中runから組み立てる。
  * 人の操作（マージ）が必要な段には、その場でマージできるPRのURLを`action`として添える。
  * mainの本番デプロイ（deploy.yml）のrunが取得できれば、5段目として末尾に追加する。ただし
- * phaseが"none"（今回の一連の反映が完了、または対象なし）以外では追加しない。バンプPR作成〜
- * mainへマージが進行中の間にdeploy.ymlの最新runを出すと、まだ今回のmainへのマージが完了して
- * いないにもかかわらず前回リリース時のデプロイ成功が残り続けて見えてしまうため(#470)。
+ * phaseが"none"（今回の一連の反映が完了、または対象なし）かつワークフロー実行中でない場合
+ * のみ追加する。バンプPR作成〜mainへマージが進行中の間にdeploy.ymlの最新runを出すと、まだ
+ * 今回のmainへのマージが完了していないにもかかわらず前回リリース時のデプロイ成功が残り
+ * 続けて見えてしまうため(#470)。バンプPRがまだ現れていない起動直後（phaseは"none"のまま）も
+ * ワークフロー実行中である以上は同様に隠す必要がある(#545)。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
@@ -93,7 +95,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = "ワークフロー実行中...";
   }
 
-  if (phase === "none") {
+  if (phase === "none" && !runActive) {
     const deployStep = buildDeployStep(status.deployWorkflowRun);
     if (deployStep) steps.push(deployStep);
   }
