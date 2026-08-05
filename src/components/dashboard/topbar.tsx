@@ -60,6 +60,10 @@ import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import {
+  formatDevelopVersionDisplay,
+  formatMainVersionDisplay,
+} from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { Issue } from "@/types/issue";
@@ -373,12 +377,22 @@ export function TopBar({
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">main</span>
-                          <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
+                          <span>
+                            {formatMainVersionDisplay(
+                              releaseStatus.mainVersion,
+                              releaseStatus.developVersion,
+                              releaseStatus.phase,
+                            )}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">develop</span>
                           <span>
-                            {releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}
+                            {formatDevelopVersionDisplay(
+                              releaseStatus.developVersion,
+                              releaseStatus.bumpPullRequest?.version ?? null,
+                              releaseStatus.phase,
+                            )}
                           </span>
                         </div>
                         <ReleaseProgress status={releaseStatus} compact />
