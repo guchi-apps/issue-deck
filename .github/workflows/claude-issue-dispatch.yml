@@ -62,6 +62,12 @@ name: Claude Issue Dispatch
 # PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な中間状態の場合は、従来どおり
 # mode=skipとし、実装は再始動しない。
 #
+# PRがOPENの状態(上記1つ目)で、直近の@claudeコメントが「単なる質問・確認」と判定された場合も、
+# mode=plan(上記21.plan-required)の質問判定分岐と同様に、回答コメント投稿後に00.check-userを
+# 必ず再付与する。issue-deck画面の「修正を依頼する」ボタンは送信前に機械的に00.check-userを
+# 外す一方、質問と判定されるとコミット・pushが発生せずclaude-review-develop.yml側の再判定による
+# 復元も起きないため、確認待ちラベルが失われたままになる問題があった(#417と同種の問題。#528)。
+#
 # パブリックリポジトリのため、Issueへのコメント自体は誰でも投稿できる。ラベルの
 # 付与・削除にはリポジトリへのwrite権限が必要でGitHub側で担保されるが、
 # @claudeコメントによる起動は権限を持たない第三者からも到達しうるため、
@@ -780,8 +786,13 @@ jobs:
                   `<!-- issue-deck-qa-answer -->`マーカーを必ず付与してください。
                   なお、このステップの直前のシェルステップで既に`01.wip`が付与され`03.d:marge`が
                   外されているため、状態を元に戻すために
-                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
-                  のみ実行してください（`00.check-user`等、他のラベルは変更しません）。以降の「責務」
+                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "01.wip"`
+                  を実行してください（`00.check-user`以外の他のラベルは変更しません）。`00.check-user`は
+                  既に付いていても無害なので必ず付与すること。理由: issue-deck画面の「修正を依頼する」
+                  ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
+                  コード変更を伴わない質問だった場合はコミット・pushが発生しないため
+                  `claude-review-develop.yml`側の再判定による`00.check-user`の復元が起きず、確認待ち
+                  ラベルが失われたままになってしまう問題があった（#417と同種の問題）。以降の「責務」
                   「画面確認・スクリーンショットについて」の手順は行わず、ここで対応を終了してください。
                 - コード変更が必要な依頼と判断した場合: それを踏まえて追加コミットし、新規PRは作らず
                   既存PRにコメントで報告します（以下の「責務」に従って進めてください）。
