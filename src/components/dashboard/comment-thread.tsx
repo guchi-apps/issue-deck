@@ -424,7 +424,11 @@ export function CommentThread({
                   {isBotComment(comment.author.login) && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button type="button" aria-label="コメントの操作メニュー">
+                        <button
+                          type="button"
+                          aria-label="コメントの操作メニュー"
+                          className="relative after:absolute after:-inset-3.5 md:after:-inset-1"
+                        >
                           <MoreHorizontal className="size-4 text-muted-foreground" />
                         </button>
                       </DropdownMenuTrigger>

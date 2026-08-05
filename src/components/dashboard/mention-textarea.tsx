@@ -283,7 +283,7 @@ export function MentionTextarea({
                     <button
                       type="button"
                       className={cn(
-                        "w-full rounded-sm px-2 py-1 text-left hover:bg-accent",
+                        "flex min-h-11 w-full items-center rounded-sm px-2 py-1 text-left hover:bg-accent md:min-h-0",
                         index === activeIndex && "bg-accent",
                       )}
                       onMouseDown={(e) => {
@@ -300,7 +300,7 @@ export function MentionTextarea({
                     <button
                       type="button"
                       className={cn(
-                        "flex w-full items-baseline gap-1.5 rounded-sm px-2 py-1 text-left hover:bg-accent",
+                        "flex min-h-11 w-full items-baseline gap-1.5 rounded-sm px-2 py-2.5 text-left hover:bg-accent md:min-h-0 md:py-1",
                         index === activeIndex && "bg-accent",
                       )}
                       onMouseDown={(e) => {

@@ -75,7 +75,7 @@ export function MobileReposScreen({
                       type="button"
                       onClick={() => onSelectRepository(repo)}
                       className={cn(
-                        "flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent",
+                        "flex min-h-11 min-w-0 flex-1 items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent",
                         repo.hidden && "text-muted-foreground",
                       )}
                     >
@@ -109,7 +109,7 @@ export function MobileReposScreen({
                         repo.hidden ? onShowRepository(repo) : onHideRepository(repo)
                       }
                       title={repo.hidden ? "表示する" : "非表示にする"}
-                      className="shrink-0 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                       {repo.hidden ? (
                         <EyeOff className="size-4" />
@@ -125,7 +125,7 @@ export function MobileReposScreen({
               <button
                 type="button"
                 onClick={() => setShowHiddenRepos((prev) => !prev)}
-                className="mt-2 px-2 text-xs text-primary hover:underline"
+                className="mt-2 flex min-h-11 items-center px-2 text-sm text-primary hover:underline"
               >
                 {showHiddenRepos ? "非表示のリポジトリを隠す" : `すべて表示する（${hiddenRepoCount}）`}
               </button>

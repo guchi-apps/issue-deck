@@ -49,7 +49,7 @@ function Pill({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+        "flex h-11 items-center rounded-full border px-4 text-sm whitespace-nowrap",
         active && "border-primary bg-primary/10 text-primary",
       )}
     >
@@ -157,7 +157,7 @@ export function MobileIssueFilterSheet({
                   <button
                     type="button"
                     onClick={() => setShowAllLabels((prev) => !prev)}
-                    className="mt-2 text-xs text-primary hover:underline"
+                    className="mt-2 flex min-h-11 items-center text-sm text-primary hover:underline"
                   >
                     {showAllLabels ? "折りたたむ" : `すべて表示する（+${hiddenLabelCount}）`}
                   </button>

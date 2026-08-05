@@ -75,7 +75,7 @@ export function MobileIssueListScreen({
             type="button"
             onClick={onBack}
             aria-label="戻る"
-            className="-ml-2 shrink-0 rounded-full p-2 active:bg-muted"
+            className="-my-3 -ml-3 shrink-0 rounded-full p-3 active:bg-muted"
           >
             <ArrowLeft className="size-5" />
           </button>
@@ -91,7 +91,7 @@ export function MobileIssueListScreen({
           <button
             type="button"
             onClick={() => setFilterSheetOpen(true)}
-            className="rounded-md border p-2.5"
+            className="flex size-11 items-center justify-center rounded-md border"
             aria-label="絞り込み・並び替え"
           >
             <SlidersHorizontal className="size-4" />
@@ -107,7 +107,7 @@ export function MobileIssueListScreen({
             type="button"
             onClick={() => onChangeView(navView.id)}
             className={cn(
-              "shrink-0 rounded-full border px-3 py-1.5 text-sm whitespace-nowrap",
+              "flex h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap",
               view === navView.id && "border-primary bg-primary/10 text-primary",
             )}
           >

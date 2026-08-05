@@ -19,7 +19,7 @@ export function PullRequestLinkBadge({ link, approvalPending }: PullRequestLinkB
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors hover:opacity-80",
+        "inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors hover:opacity-80 md:min-h-0 md:px-2.5",
         approvalPending
           ? "bg-amber-500/15 text-amber-600 ring-amber-500 dark:text-amber-400"
           : "bg-muted text-muted-foreground ring-border",
