@@ -56,7 +56,7 @@ describe("githubApiUsage", () => {
 
     const summary = getGithubApiUsageSummary(NOW);
 
-    expect(summary.totalLastHour).toBe(4);
+    expect(summary.totalCurrentHour).toBe(4);
     expect(summary.totalLast24h).toBe(4);
     // 呼び出しが多い用途が先頭に来る
     expect(summary.features.map((feature) => feature.key)).toEqual([
@@ -65,19 +65,43 @@ describe("githubApiUsage", () => {
     ]);
     expect(summary.features[0].label).toBe("一覧の実行状況ポーリング");
     expect(summary.features[0].endpoints).toEqual([
-      { endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", lastHour: 2, last24h: 2 },
-      { endpoint: "/repos/{owner}/{repo}/issues/{n}/comments", lastHour: 1, last24h: 1 },
+      { endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", currentHour: 2, last24h: 2 },
+      { endpoint: "/repos/{owner}/{repo}/issues/{n}/comments", currentHour: 1, last24h: 1 },
     ]);
   });
 
-  it("1時間より前の呼び出しは直近1時間に含めず、24時間には含める", () => {
+  it("現在の正時より前の呼び出しは直近1時間（正時起点）に含めず、24時間には含める", () => {
     recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW - 3 * 60 * 60_000 });
     recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
 
     const summary = getGithubApiUsageSummary(NOW);
 
-    expect(summary.totalLastHour).toBe(1);
+    expect(summary.totalCurrentHour).toBe(1);
     expect(summary.totalLast24h).toBe(2);
+    expect(summary.currentHourStartedAt).toBe(NOW);
+  });
+
+  it("直近1時間はローリング60分ではなく正時起点の固定ウィンドウで数える（正時をまたぐとリセットされる）", () => {
+    // NOWちょうどの5分前（前の正時からの経過分。ローリング60分では含まれるが、正時起点では含まれない）
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW - 5 * 60_000 });
+    // NOWちょうど（現在の正時の開始時刻そのもの。ウィンドウに含む）
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+
+    const summary = getGithubApiUsageSummary(NOW);
+
+    expect(summary.totalCurrentHour).toBe(1);
+    expect(summary.totalLast24h).toBe(2);
+  });
+
+  it("同じ正時の中の呼び出しはすべて直近1時間として数える", () => {
+    const midHour = NOW + 30 * 60_000;
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: midHour });
+
+    const summary = getGithubApiUsageSummary(midHour);
+
+    expect(summary.totalCurrentHour).toBe(2);
+    expect(summary.currentHourStartedAt).toBe(NOW);
   });
 
   it("24時間より前の呼び出しは集計から外れる", () => {
@@ -91,7 +115,7 @@ describe("githubApiUsage", () => {
     const summary = getGithubApiUsageSummary(NOW);
 
     expect(summary.features).toEqual([]);
-    expect(summary.totalLastHour).toBe(0);
+    expect(summary.totalCurrentHour).toBe(0);
     expect(summary.totalLast24h).toBe(0);
     expect(summary.measuringSince).toBe(NOW);
   });

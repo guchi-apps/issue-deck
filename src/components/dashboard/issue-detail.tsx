@@ -72,10 +72,12 @@ import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 
 type IssueDetailProps = {
   issue: Issue | null;
   issues: Issue[];
+  repositories: ConnectedRepository[];
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
@@ -86,6 +88,7 @@ type IssueDetailProps = {
 export function IssueDetail({
   issue,
   issues,
+  repositories,
   onEdit,
   onIssueUpdated,
   onIssueDeleted,
@@ -600,7 +603,11 @@ export function IssueDetail({
           <SheetHeader>
             <SheetTitle>プロパティ</SheetTitle>
           </SheetHeader>
-          <IssuePropertiesPanel issue={issue} onIssueUpdated={onIssueUpdated} />
+          <IssuePropertiesPanel
+            issue={issue}
+            repositories={repositories}
+            onIssueUpdated={onIssueUpdated}
+          />
         </SheetContent>
       </Sheet>
 

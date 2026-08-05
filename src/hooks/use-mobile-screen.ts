@@ -5,7 +5,11 @@ import { useCallback, useMemo, useTransition } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
-import { getNavViewDefaultState, isNavViewId } from "@/lib/nav-views";
+import {
+  getNavViewDefaultState,
+  isNavViewId,
+  resolveStateOnViewChange,
+} from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -232,13 +236,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         screen: "issues",
         view: nextView,
         labels: mobileScreen.kind === "issues" ? mobileScreen.labels : undefined,
-        // 状態を明示的に選んでいない場合は、遷移先ビューの既定値に委ねる。
-        state:
-          isStateExplicit && mobileScreen.kind === "issues" ? mobileScreen.state : undefined,
+        // 遷移先ビューが状態を要求するなら自動で切り替え、要求しないなら現在の条件を保つ。
+        // ホームから選んだ場合は絞り込み条件がクエリごと消えている（isStateExplicit=false）ため、
+        // 同じ解決で遷移先ビューの既定値に落ちる。
+        state: resolveStateOnViewChange(nextView, view, state, isStateExplicit),
         assignee: mobileScreen.kind === "issues" ? mobileScreen.assignee : undefined,
         sort: mobileScreen.kind === "issues" ? mobileScreen.sort : undefined,
       }),
-    [navigate, mobileScreen, isStateExplicit],
+    [navigate, mobileScreen, view, state, isStateExplicit],
   );
 
   // ホーム画面の「保存したフィルター」選択時、絞り込み条件をすべて置き換えてIssue一覧へ遷移する。
@@ -296,35 +301,32 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       assignee?: string | null;
       sort?: IssueSort;
     }) => {
-      if (mobileScreen.kind === "issues") {
-        navigate(
-          {
-            screen: "issues",
-            issue: mobileScreen.returnToIssueId,
-            view: patch.view ?? mobileScreen.view,
-            labels: patch.labels ?? mobileScreen.labels,
-            // ビュー切り替え時、状態を明示的に選んでいなければ切り替え先の既定値に委ねる。
-            state: patch.state ?? (isStateExplicit ? mobileScreen.state : undefined),
-            assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
-            sort: patch.sort ?? mobileScreen.sort,
-          },
-          { silent: true },
+      if (mobileScreen.kind !== "issues" && mobileScreen.kind !== "repo-detail") return;
+
+      // 絞り込みシートで状態を選んだときはその選択が最優先。ビューだけを切り替えたときは、
+      // 切り替え先ビューの要求・現在の明示選択を踏まえて状態を解決する（#475）。
+      const nextState =
+        patch.state ??
+        resolveStateOnViewChange(
+          patch.view ?? mobileScreen.view,
+          mobileScreen.view,
+          mobileScreen.state,
+          isStateExplicit,
         );
-      } else if (mobileScreen.kind === "repo-detail") {
-        navigate(
-          {
-            screen: "repo-detail",
-            repo: mobileScreen.repository.fullName,
-            issue: mobileScreen.returnToIssueId,
-            view: patch.view ?? mobileScreen.view,
-            labels: patch.labels ?? mobileScreen.labels,
-            state: patch.state ?? mobileScreen.state,
-            assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
-            sort: patch.sort ?? mobileScreen.sort,
-          },
-          { silent: true },
-        );
-      }
+
+      navigate(
+        {
+          screen: mobileScreen.kind === "issues" ? "issues" : "repo-detail",
+          repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
+          issue: mobileScreen.returnToIssueId,
+          view: patch.view ?? mobileScreen.view,
+          labels: patch.labels ?? mobileScreen.labels,
+          state: nextState,
+          assignee: patch.assignee !== undefined ? patch.assignee : mobileScreen.assignee,
+          sort: patch.sort ?? mobileScreen.sort,
+        },
+        { silent: true },
+      );
     },
     [navigate, mobileScreen, isStateExplicit],
   );

@@ -100,15 +100,15 @@ export function MobileIssueListScreen({
         </div>
       </header>
 
-      <div className="flex items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="isolate flex items-center gap-2 overflow-x-auto border-b p-3 [contain:paint] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {navViews.map((navView) => (
           <button
             key={navView.id}
             type="button"
             onClick={() => onChangeView(navView.id)}
             className={cn(
-              "flex h-11 shrink-0 transform-gpu items-center rounded-full border px-4 text-sm whitespace-nowrap",
-              view === navView.id && "border-primary bg-primary/10 text-primary",
+              "flex h-11 shrink-0 items-center rounded-full px-4 text-sm whitespace-nowrap ring-1 ring-inset ring-border",
+              view === navView.id && "bg-primary/10 text-primary ring-primary",
             )}
           >
             {navView.label}

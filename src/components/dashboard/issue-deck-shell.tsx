@@ -57,7 +57,7 @@ export function IssueDeckShell({
   issues: initialIssues,
   quickFilters: initialQuickFilters,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, setFilters, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
@@ -125,7 +125,13 @@ export function IssueDeckShell({
   }
 
   function handleIssueCreated(issue: Issue) {
-    setIssues((prev) => [issue, ...prev]);
+    // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
+    // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
+    setIssues((prev) =>
+      prev.some((item) => item.id === issue.id)
+        ? prev.map((item) => (item.id === issue.id ? issue : item))
+        : [issue, ...prev],
+    );
     setSelectedIssue(issue);
     // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
     // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
@@ -236,7 +242,7 @@ export function IssueDeckShell({
   );
 
   function handleSelectView(view: NavViewId) {
-    setFilter("view", view);
+    selectView(view);
     setSelectedIssue(null);
   }
 
@@ -411,6 +417,7 @@ export function IssueDeckShell({
                   <MobileIssueDetail
                     issue={mobileScreen.issue}
                     issues={issues}
+                    repositories={visibleRepositories}
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
@@ -472,6 +479,7 @@ export function IssueDeckShell({
           <IssueDetail
             issue={selectedIssue}
             issues={issues}
+            repositories={visibleRepositories}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onIssueDeleted={handleIssueDeleted}
@@ -489,7 +497,11 @@ export function IssueDeckShell({
               className="hidden shrink-0 border-l xl:block"
               style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
             >
-              <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
+              <IssuePropertiesPanel
+                issue={selectedIssue}
+                repositories={visibleRepositories}
+                onIssueUpdated={handleIssueUpdated}
+              />
             </div>
           </>
         )}

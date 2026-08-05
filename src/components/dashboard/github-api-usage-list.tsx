@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { GithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useNow } from "@/hooks/use-now";
@@ -18,47 +19,58 @@ type GithubApiUsageListProps = {
 const ENDPOINTS_PER_FEATURE = 3;
 
 /**
+ * 表示する集計モード。
+ * `currentHour`はGitHub REST APIのコアレート制限に合わせた、正時起点の固定1時間ウィンドウ
+ * （ローリング60分ではない）。`last24h`は直近24時間のローリングウィンドウ。
+ */
+type UsageMode = "currentHour" | "last24h";
+
+/**
  * 用途別のGitHub API消費の内訳。
  * GitHubは消費の内訳を返さないため、アプリが自分で発信したリクエストを数えた値を表示する。
+ * 見出し「GitHub API使用量」は呼び出し元（topbar.tsx / mobile-settings-screen.tsx）が
+ * GithubRateLimitListと共通で表示するため、このコンポーネント自体は見出しを持たない（#474）。
  */
 export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageListProps) {
   const now = useNow();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [mode, setMode] = useState<UsageMode>("currentHour");
   const detailId = useId();
 
-  // 折りたたみ時は総量のみの「GitHub Action使用量」、展開時は用途別内訳の
-  // 「GitHub API消費の内訳」として見出しを切り替える（#455）
-  const heading = isDetailOpen ? "GitHub API消費の内訳" : "GitHub Action使用量";
-
-  if (isLoading)
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-muted-foreground">読み込み中...</p>
-      </div>
-    );
-  if (error)
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-destructive">{error}</p>
-      </div>
-    );
+  if (isLoading) return <p className="text-xs text-muted-foreground">読み込み中...</p>;
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
   if (!data) return null;
   if (data.features.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
-        <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>
-      </div>
-    );
+    return <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>;
   }
 
   const measuredMs = now !== null ? now - data.measuringSince : null;
+  const currentHourLabel = `${new Date(data.currentHourStartedAt).getHours()}:00〜`;
+  const modeLabel = mode === "currentHour" ? `今時（${currentHourLabel}）` : "過去1日";
+  const total = mode === "currentHour" ? data.totalCurrentHour : data.totalLast24h;
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium text-muted-foreground">{heading}</p>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          aria-pressed={mode === "currentHour"}
+          onClick={() => setMode("currentHour")}
+        >
+          今時（{currentHourLabel}）
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          aria-pressed={mode === "last24h"}
+          onClick={() => setMode("last24h")}
+        >
+          過去1日
+        </Button>
+      </div>
       <button
         type="button"
         aria-expanded={isDetailOpen}
@@ -67,8 +79,7 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
         className="flex w-full items-center justify-between gap-1 rounded-md text-xs text-muted-foreground hover:text-foreground"
       >
         <span>
-          直近1時間 {data.totalLastHour.toLocaleString()}回 / 24時間{" "}
-          {data.totalLast24h.toLocaleString()}回
+          {modeLabel} {total.toLocaleString()}回
         </span>
         <ChevronRight className={`size-3 shrink-0 transition-transform ${isDetailOpen ? "rotate-90" : ""}`} />
       </button>
@@ -76,15 +87,13 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
         <div id={detailId} className="flex flex-col gap-2">
           <ul className="flex flex-col gap-2">
             {data.features.map((feature) => {
-              const sharePercent =
-                data.totalLast24h > 0 ? (feature.last24h / data.totalLast24h) * 100 : 0;
+              const count = mode === "currentHour" ? feature.currentHour : feature.last24h;
+              const sharePercent = total > 0 ? (count / total) * 100 : 0;
               return (
                 <li key={feature.key} className="rounded-lg border p-2">
                   <div className="mb-1 flex items-center justify-between gap-2 text-xs">
                     <span className="truncate font-medium">{feature.label}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {feature.lastHour.toLocaleString()} / {feature.last24h.toLocaleString()}
-                    </span>
+                    <span className="shrink-0 text-muted-foreground">{count.toLocaleString()}</span>
                   </div>
                   <Progress value={sharePercent} />
                   <ul className="mt-1 flex flex-col gap-0.5">
@@ -96,7 +105,9 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
                         <span className="truncate" title={endpoint.endpoint}>
                           {endpoint.endpoint}
                         </span>
-                        <span className="shrink-0">{endpoint.last24h.toLocaleString()}</span>
+                        <span className="shrink-0">
+                          {(mode === "currentHour" ? endpoint.currentHour : endpoint.last24h).toLocaleString()}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -105,7 +116,7 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
             })}
           </ul>
           <p className="text-[10px] text-muted-foreground">
-            「直近1時間 / 24時間」の呼び出し回数。
+            「{modeLabel}」の呼び出し回数。
             {measuredMs !== null && `計測期間は直近${formatDuration(measuredMs)}（`}
             {measuredMs === null && "（"}
             アプリの再起動でリセットされます）

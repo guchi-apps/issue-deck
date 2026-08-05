@@ -98,8 +98,11 @@ async function handleGET(request: NextRequest) {
     const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
     const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
 
-    // バンプPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
-    const bumpCiState = bumpPr ? await fetchRefCiState(owner, repo, bumpPr.head.ref, token) : null;
+    // バンプPR・develop→mainのPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
+    const [bumpCiState, releaseCiState] = await Promise.all([
+      bumpPr ? fetchRefCiState(owner, repo, bumpPr.head.ref, token) : Promise.resolve(null),
+      releasePr ? fetchRefCiState(owner, repo, releasePr.head.ref, token) : Promise.resolve(null),
+    ]);
 
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
     // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
@@ -132,7 +135,12 @@ async function handleGET(request: NextRequest) {
           }
         : null,
       releasePullRequest: releasePr
-        ? { number: releasePr.number, url: releasePr.html_url, title: releasePr.title }
+        ? {
+            number: releasePr.number,
+            url: releasePr.html_url,
+            title: releasePr.title,
+            ciState: releaseCiState,
+          }
         : null,
     });
   } catch (error) {

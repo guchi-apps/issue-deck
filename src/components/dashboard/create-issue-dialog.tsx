@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Bot, ChevronDown, Loader2 } from "lucide-react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -79,6 +80,12 @@ export function CreateIssueDialog({
     () => getRepoIssueSuggestions(issues, repositoryFullName),
     [issues, repositoryFullName],
   );
+  const {
+    isGenerating: isSuggesting,
+    error: suggestError,
+    notConfigured: suggestNotConfigured,
+    generate: generateSuggestion,
+  } = useIssueSuggest();
 
   useEffect(() => {
     if (!open) return;
@@ -112,6 +119,16 @@ export function CreateIssueDialog({
   function handleAssigneeChange(value: string) {
     hasUserSetAssignee.current = true;
     setAssignee(value === "__none__" ? null : value);
+  }
+
+  async function handleGenerateSuggestion() {
+    const result = await generateSuggestion(
+      body,
+      labels.map((label) => ({ name: label.name, description: label.description })),
+    );
+    if (!result) return;
+    setTitle(result.title);
+    setSelectedLabels((prev) => [...new Set([...prev, ...result.labels])]);
   }
 
   async function handleSubmit() {
@@ -204,6 +221,23 @@ export function CreateIssueDialog({
                 placeholder="詳細を入力（任意）"
                 className="min-h-32 md:text-sm"
               />
+              <div>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={!body.trim() || !repositoryFullName || isMetaLoading || isSuggesting}
+                  onClick={handleGenerateSuggestion}
+                >
+                  {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+                  タイトル・ラベルを自動生成
+                </Button>
+                {suggestNotConfigured && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Claudeのトークンが設定されていません
+                  </p>
+                )}
+                {suggestError && <p className="mt-1 text-xs text-destructive">{suggestError}</p>}
+              </div>
             </div>
 
             <div className="flex flex-col gap-1.5">

@@ -41,7 +41,10 @@ function ciLabel(ci: CiState | null): string {
 /**
  * リリースの論理段階（4ステップ）を、版数・オープン中PR・実行中runから組み立てる。
  * 人の操作（マージ）が必要な段には、その場でマージできるPRのURLを`action`として添える。
- * mainの本番デプロイ（deploy.yml）のrunが取得できれば、5段目として末尾に追加する。
+ * mainの本番デプロイ（deploy.yml）のrunが取得できれば、5段目として末尾に追加する。ただし
+ * phaseが"none"（今回の一連の反映が完了、または対象なし）以外では追加しない。バンプPR作成〜
+ * mainへマージが進行中の間にdeploy.ymlの最新runを出すと、まだ今回のmainへのマージが完了して
+ * いないにもかかわらず前回リリース時のデプロイ成功が残り続けて見えてしまうため(#470)。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
@@ -79,7 +82,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[1].state = "done";
     steps[2].state = "done";
     steps[3].state = "action";
-    steps[3].note = "最終マージは人が行います。内容を確認してmainへマージしてください（マージ方式は必ず「Create a merge commit」）。";
+    steps[3].note = `${ciLabel(release.ciState)}。内容を確認して「merge commit」でマージしてください。`;
     steps[3].action = {
       href: release.url,
       label: `develop→main PR #${release.number} をタップしてmainへマージ`,
@@ -90,8 +93,10 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = "ワークフロー実行中...";
   }
 
-  const deployStep = buildDeployStep(status.deployWorkflowRun);
-  if (deployStep) steps.push(deployStep);
+  if (phase === "none") {
+    const deployStep = buildDeployStep(status.deployWorkflowRun);
+    if (deployStep) steps.push(deployStep);
+  }
 
   return steps;
 }

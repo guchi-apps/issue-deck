@@ -74,16 +74,13 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
           </div>
         </button>
 
-        <div className="rounded-lg border p-3">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">GitHub API使用量</p>
+        <div className="flex flex-col gap-2 rounded-lg border p-3">
+          <p className="text-xs font-medium text-muted-foreground">GitHub API使用量</p>
           <GithubRateLimitList
             data={rateLimits}
             isLoading={rateLimitsLoading}
             error={rateLimitsError}
           />
-        </div>
-
-        <div className="rounded-lg border p-3">
           <GithubApiUsageList
             data={apiUsage}
             isLoading={apiUsageLoading}

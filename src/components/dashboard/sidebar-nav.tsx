@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Archive,
@@ -16,11 +16,12 @@ import {
 
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
-import { navViewIcons, navViews } from "@/lib/nav-views";
+import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 type SidebarNavProps = {
@@ -82,22 +83,29 @@ export function SidebarNav({
           {navViews.map((view) => {
             const Icon = navViewIcons[view.id];
             return (
-              <li key={view.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectView(view.id)}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                    activeView === view.id && "bg-accent font-medium",
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-3.5 text-muted-foreground" />
-                    {view.label}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
-                </button>
-              </li>
+              <Fragment key={view.id}>
+                {view.id === labelNavViews[0]?.id && (
+                  <li aria-hidden="true">
+                    <Separator className="my-1" />
+                  </li>
+                )}
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onSelectView(view.id)}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                      activeView === view.id && "bg-accent font-medium",
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      {view.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                  </button>
+                </li>
+              </Fragment>
             );
           })}
         </ul>

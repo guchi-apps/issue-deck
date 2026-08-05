@@ -70,10 +70,8 @@ export type LabelNavViewId = (typeof LABEL_NAV_VIEW_IDS)[number];
 
 export const NAV_VIEW_IDS = [
   "all",
-  "assigned",
-  "created",
   "favorites",
-  "recent",
+  "recently-added",
   ...LABEL_NAV_VIEW_IDS,
 ] as const;
 

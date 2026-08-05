@@ -15,7 +15,7 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
 
 - `src/lib/github/start-implementation.ts`: 「実装を開始」ボタン押下時に`@claude 実装を開始
   してください`という定型コメントを投稿する。あわせて選択したオプション（`21.plan-required`・
-  `22.preview-required`・`23.screenshot-required`に対応するラベル）を付与する。リポジトリ固有の
+  `23.preview-required`・`24.screenshot-required`に対応するラベル）を付与する。リポジトリ固有の
   前提を含まない。
 - `src/lib/github/ask-claude.ts`: 「Claudeに質問する」ボタン押下時に`@claude 質問: <本文>`という
   定型コメントを投稿する。回答コメントは`<!-- issue-deck-qa-answer -->`マーカーで識別する。
@@ -56,7 +56,7 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   issue-deckのCLAUDE.mdが定める自動マージ不可カテゴリ（認証・認可、DBマイグレーション、
   GitHub Actions/デプロイ設定等）を、issue-deckのディレクトリ構成（`prisma/migrations/**`等）に
   合わせたパターンで機械判定している。
-- **ラベル体系**: `01.wip`〜`09.main`・`21.plan-required`〜`23.screenshot-required`・
+- **ラベル体系**: `01.wip`〜`09.main`・`21.plan-required`〜`24.screenshot-required`・
   `00.check-user`はissue-deckリポジトリ側で個別に作成したカスタムラベルであり、他リポジトリには
   存在しない。
 
@@ -140,7 +140,7 @@ IssueDeckのDB（`Repository`モデルへのフィールド追加）で管理す
 
 ### 5. ラベル体系の可変化
 
-`01.wip`〜`09.main`・`21.plan-required`〜`23.screenshot-required`・`00.check-user`は、いずれも
+`01.wip`〜`09.main`・`21.plan-required`〜`24.screenshot-required`・`00.check-user`は、いずれも
 issue-deckリポジトリに手動で作成したカスタムラベルであり、他リポジトリには存在しない。展開時には
 以下のいずれかが必要になる。
 
@@ -200,7 +200,7 @@ issue #357 の調査として、実際の連携候補である`m-guchi/shopping-
 上記1〜6の各要素がどの程度そのまま適用できるかを検証した。**結論としては実現可能であり、
 issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし・npm依存パッケージゼロのため、
 `claude-issue-dispatch.yml`の前段セットアップの大半が不要になる）。唯一、スクリーンショットの
-無人撮影（`23.screenshot-required`）だけは、shopping-list側に追加実装がなければ成立しない。
+無人撮影（`24.screenshot-required`）だけは、shopping-list側に追加実装がなければ成立しない。
 
 ### shopping-listの構成（調査時点: v0.2.0 / develop = 5c43ad1）
 
@@ -225,7 +225,7 @@ issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし
 - **ブランチ運用（上記2）**: デフォルトブランチが`develop`で、`develop`→`main`の2段階運用も
   issue-deckと**一致**している。差異の吸収が不要な軸。
 - **ラベル体系（上記5）**: `00.check-user`・`01.wip`・`03.d:marge`・`05.develop`・`07.m:marge`・
-  `09.main`・`21.plan-required`・`22.preview-required`・`23.screenshot-required`が、色・説明文まで
+  `09.main`・`21.plan-required`・`23.preview-required`・`24.screenshot-required`が、色・説明文まで
   issue-deckと同一の内容で**既に全て作成済み**。issue #3（「ログイン機能を実装する」）は実際に
   `09.main`まで遷移して運用されている。少なくともshopping-listに関しては「ラベル体系の可変化」は
   課題にならず、`gh label create`による自動作成も不要。
@@ -275,7 +275,7 @@ issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし
 
 shopping-listはWebアプリ（PWA）なので撮影の対象になり得る。起動自体は`npm run dev`
 （＝`node backend/index.js`）のみでビルド不要と、issue-deckより軽い。しかし
-**`23.screenshot-required`相当の無人撮影は、現状のshopping-listには追加実装なしでは成立しない**。
+**`24.screenshot-required`相当の無人撮影は、現状のshopping-listには追加実装なしでは成立しない**。
 
 - 全画面がSupabase Auth + Google OAuthログインの背後にある（`frontend/app.js`のログイン画面、
   バックエンドは全APIで`Authorization: Bearer <JWT>`必須）。issue-deckの`src/lib/ci-auth-bypass.ts`に
@@ -287,8 +287,8 @@ shopping-listはWebアプリ（PWA）なので撮影の対象になり得る。�
 - フロントエンドが`@supabase/supabase-js`をesm.sh からCDN動的importしているため、CIの
   ネットワーク制約次第では読み込みに失敗しうる。
 
-したがってshopping-listでは、まず`22.preview-required`（人間が手元で確認する運用）に限定して
-導入し、`23.screenshot-required`は「CIバイパス + Notionスタブ」をshopping-list側に実装する
+したがってshopping-listでは、まず`23.preview-required`（人間が手元で確認する運用）に限定して
+導入し、`24.screenshot-required`は「CIバイパス + Notionスタブ」をshopping-list側に実装する
 別Issueとして切り出すのが現実的。
 
 ### このケーススタディから見た方式選択への示唆
@@ -315,6 +315,6 @@ shopping-listはWebアプリ（PWA）なので撮影の対象になり得る。�
   確認が必要（上記ケーススタディ参照）。
 - shopping-listの`develop`にBranch protectionを設定するか（issue-deckのリリースフローに揃えるか）は
   運用方針の判断。
-- shopping-listで`23.screenshot-required`を使えるようにするための「CIログインバイパス + Notion API
+- shopping-listで`24.screenshot-required`を使えるようにするための「CIログインバイパス + Notion API
   スタブ」の実装は、shopping-listリポジトリ側の変更であり、issue-deck側の対応範囲外。別Issueとして
   切り出すかどうかの判断が必要。

@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  ArrowRightLeft,
   Bot,
   CircleAlert,
   FilePlus2,
@@ -27,9 +28,11 @@ import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { MoveIssueDialog } from "@/components/dashboard/move-issue-dialog";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -83,10 +86,12 @@ import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 
 type MobileIssueDetailProps = {
   issue: Issue;
   issues: Issue[];
+  repositories: ConnectedRepository[];
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
@@ -99,6 +104,7 @@ type MobileIssueDetailProps = {
 export function MobileIssueDetail({
   issue,
   issues,
+  repositories,
   onBack,
   onEdit,
   onIssueUpdated,
@@ -117,6 +123,8 @@ export function MobileIssueDetail({
     setError: setDeleteError,
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
   const {
     createComment,
     updateComment,
@@ -437,6 +445,12 @@ export function MobileIssueDetail({
               <Pencil />
               編集
             </DropdownMenuItem>
+            {canMove && (
+              <DropdownMenuItem onSelect={() => setIsMoveDialogOpen(true)}>
+                <ArrowRightLeft />
+                リポジトリを移動
+              </DropdownMenuItem>
+            )}
             {issue.state === "open" ? (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger disabled={isSubmitting}>
@@ -603,6 +617,8 @@ export function MobileIssueDetail({
           </div>
         </div>
 
+        <IssueAiSummary issue={issue} />
+
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
           <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
@@ -709,6 +725,14 @@ export function MobileIssueDetail({
         onConfirm={handleDelete}
         isDeleting={isSubmitting}
         error={deleteError}
+      />
+
+      <MoveIssueDialog
+        open={isMoveDialogOpen}
+        onOpenChange={setIsMoveDialogOpen}
+        issue={issue}
+        repositories={repositories}
+        onMoved={onIssueUpdated}
       />
     </div>
   );
