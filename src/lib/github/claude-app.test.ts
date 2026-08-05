@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildClaudeAppPrompt, buildClaudeAppUrl } from "@/lib/github/claude-app";
+import {
+  buildClaudeAppHandoffCommentBody,
+  buildClaudeAppPrompt,
+  buildClaudeAppUrl,
+  CLAUDE_APP_HANDOFF_COMMENT_MARKER,
+  isClaudeAppHandoffComment,
+} from "@/lib/github/claude-app";
 
 const issue = {
   repositoryFullName: "owner/repo",
@@ -32,5 +38,27 @@ describe("buildClaudeAppUrl", () => {
     const url = buildClaudeAppUrl(issue);
     expect(url).not.toContain("+");
     expect(url).toContain("%20");
+  });
+});
+
+describe("buildClaudeAppHandoffCommentBody", () => {
+  it("マーカーを含む引き継ぎ記録コメントを組み立てる", () => {
+    const body = buildClaudeAppHandoffCommentBody();
+    expect(body).toContain(CLAUDE_APP_HANDOFF_COMMENT_MARKER);
+  });
+
+  it("@claudeから書き始めない（claude-issue-dispatch.ymlのトリガーを誤爆させないため）", () => {
+    const body = buildClaudeAppHandoffCommentBody();
+    expect(body.startsWith("@claude")).toBe(false);
+  });
+});
+
+describe("isClaudeAppHandoffComment", () => {
+  it("マーカーを含むコメントを引き継ぎ記録コメントと判定する", () => {
+    expect(isClaudeAppHandoffComment({ body: buildClaudeAppHandoffCommentBody() })).toBe(true);
+  });
+
+  it("マーカーを含まないコメントは引き継ぎ記録コメントと判定しない", () => {
+    expect(isClaudeAppHandoffComment({ body: "普通のコメントです" })).toBe(false);
   });
 });

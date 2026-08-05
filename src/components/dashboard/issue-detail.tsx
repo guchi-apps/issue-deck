@@ -60,7 +60,7 @@ import {
   requestPrFixCommentBody,
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
-import { buildClaudeAppUrl } from "@/lib/github/claude-app";
+import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -165,6 +165,21 @@ export function IssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
+  }
+
+  function handleClaudeAppHandoff() {
+    if (!issue) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: buildClaudeAppHandoffCommentBody(),
+    }).then((created) => {
+      if (!created) return;
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    });
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -341,7 +356,12 @@ export function IssueDetail({
               )}
               {issue.state === "open" && (
                 <Button variant="outline" size="sm" asChild>
-                  <a href={buildClaudeAppUrl(issue)} target="_blank" rel="noreferrer">
+                  <a
+                    href={buildClaudeAppUrl(issue)}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={handleClaudeAppHandoff}
+                  >
                     <Bot />
                     Claudeアプリで開く
                   </a>
