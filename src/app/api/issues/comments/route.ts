@@ -1,6 +1,8 @@
+import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
+import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
@@ -13,6 +15,28 @@ import {
   GithubApiError,
   updateComment,
 } from "@/lib/github/issues-api";
+import type { IssueComment } from "@/types/issue";
+
+// CI（GitHub Actions）の無人実行環境でPlaywrightによる画面確認・スクリーンショット撮影を行う際、
+// scripts/seed-ci-db.mjsが投入するダミーIssueは実在のGitHubリポジトリではないため、
+// 実GitHub APIを呼ぶ通常経路ではコメントが必ず空になってしまう（#572）。
+// CI認証バイパス済みのリクエストに限り、実GitHub APIを呼ばずこの固定データを返す。
+const CI_DUMMY_COMMENTS: IssueComment[] = [
+  {
+    id: "ci-dummy-comment-1",
+    author: { login: "ci-dummy-user" },
+    createdAtLabel: "3日前",
+    body: "CI環境の画面確認用ダミーコメントです。実装内容を確認しました、ありがとうございます。",
+    reactionCount: 2,
+  },
+  {
+    id: "ci-dummy-comment-2",
+    author: { login: "ci-reviewer" },
+    createdAtLabel: "1日前",
+    body: "追加で確認したい点がありますが、全体的には良さそうです。よろしくお願いします。",
+    reactionCount: 0,
+  },
+];
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -46,6 +70,11 @@ async function handleGET(request: NextRequest) {
   const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  const cookieStore = await cookies();
+  if (isCiBypassRequest(cookieStore.get(CI_BYPASS_COOKIE_NAME)?.value)) {
+    return NextResponse.json({ comments: CI_DUMMY_COMMENTS });
   }
 
   try {
