@@ -26,17 +26,39 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const detailId = useId();
 
-  if (isLoading) return <p className="text-xs text-muted-foreground">読み込み中...</p>;
-  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  // 折りたたみ時は総量のみの「GitHub Action使用量」、展開時は用途別内訳の
+  // 「GitHub API消費の内訳」として見出しを切り替える（#455）
+  const heading = isDetailOpen ? "GitHub API消費の内訳" : "GitHub Action使用量";
+
+  if (isLoading)
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
+        <p className="text-xs text-muted-foreground">読み込み中...</p>
+      </div>
+    );
+  if (error)
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
+        <p className="text-xs text-destructive">{error}</p>
+      </div>
+    );
   if (!data) return null;
   if (data.features.length === 0) {
-    return <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>;
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{heading}</p>
+        <p className="text-xs text-muted-foreground">まだ消費が記録されていません</p>
+      </div>
+    );
   }
 
   const measuredMs = now !== null ? now - data.measuringSince : null;
 
   return (
     <div className="flex flex-col gap-2">
+      <p className="text-xs font-medium text-muted-foreground">{heading}</p>
       <button
         type="button"
         aria-expanded={isDetailOpen}

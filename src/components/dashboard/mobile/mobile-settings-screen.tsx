@@ -84,7 +84,6 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
         </div>
 
         <div className="rounded-lg border p-3">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">GitHub API消費の内訳</p>
           <GithubApiUsageList
             data={apiUsage}
             isLoading={apiUsageLoading}
