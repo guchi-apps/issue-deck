@@ -80,6 +80,8 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
+上記1〜4の進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
+
 develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
 ### GitHub Actionsによるラベル遷移の自動化
@@ -285,11 +287,13 @@ Issueごとに独立したClaude Codeセッションとして起動する。
    `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
    クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
    拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
-   クローズ後も`00.check-user`ラベルが「要確認」のまま残ると紛らわしいため、
-   `.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、Issueクローズをトリガーに
-   `00.check-user`を自動的に除去する（issue #172）。この除去自体が`00.check-user`の
-   `unlabeled`イベントを発生させ本ワークフローを起動するが、対象issueは既にクローズ済みのため
-   `issue_closed`ガードにより何もせず`mode=skip`となる。
+   クローズ後も`00.check-user`ラベルや`01.wip`等の進捗ラベルが「要確認」「作業中」のまま
+   残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、
+   Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/
+   `07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）を自動的に除去する
+   （issue #172、#464）。この除去自体が`00.check-user`の`unlabeled`イベントを発生させ本
+   ワークフローを起動するが、対象issueは既にクローズ済みのため`issue_closed`ガードにより
+   何もせず`mode=skip`となる。
 
 `00.check-user`はPhase4の自動マージ不可判定でも使われる汎用の「要確認」ラベルだが、対応issueの
 PRが既に作成されている場合にのみ本ワークフローは常にskipし、それ以前の状態でのみ「承認」と
