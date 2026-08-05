@@ -417,6 +417,7 @@ export function IssueDeckShell({
                   <MobileIssueDetail
                     issue={mobileScreen.issue}
                     issues={issues}
+                    repositories={visibleRepositories}
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
@@ -478,6 +479,7 @@ export function IssueDeckShell({
           <IssueDetail
             issue={selectedIssue}
             issues={issues}
+            repositories={visibleRepositories}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onIssueDeleted={handleIssueDeleted}
@@ -495,7 +497,11 @@ export function IssueDeckShell({
               className="hidden shrink-0 border-l xl:block"
               style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
             >
-              <IssuePropertiesPanel issue={selectedIssue} onIssueUpdated={handleIssueUpdated} />
+              <IssuePropertiesPanel
+                issue={selectedIssue}
+                repositories={visibleRepositories}
+                onIssueUpdated={handleIssueUpdated}
+              />
             </div>
           </>
         )}

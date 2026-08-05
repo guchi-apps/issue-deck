@@ -1,6 +1,9 @@
-import { Archive, CircleAlert, FolderGit2, Lock, Plus, X } from "lucide-react";
+import { Archive, ArrowRightLeft, CircleAlert, FolderGit2, Lock, Plus, X } from "lucide-react";
+import { useState } from "react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
+import { MoveIssueDialog } from "@/components/dashboard/move-issue-dialog";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -14,16 +17,24 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 
 type IssuePropertiesPanelProps = {
   issue: Issue;
+  repositories: ConnectedRepository[];
   onIssueUpdated: (issue: Issue) => void;
 };
 
-export function IssuePropertiesPanel({ issue, onIssueUpdated }: IssuePropertiesPanelProps) {
+export function IssuePropertiesPanel({
+  issue,
+  repositories,
+  onIssueUpdated,
+}: IssuePropertiesPanelProps) {
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const { updateIssue, isSubmitting } = useIssueMutations();
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -141,17 +152,37 @@ export function IssuePropertiesPanel({ issue, onIssueUpdated }: IssuePropertiesP
 
       <section>
         <h3 className="mb-2 text-xs font-semibold text-muted-foreground">関連するリポジトリ</h3>
-        <div className="flex items-center gap-2">
-          <FolderGit2 className="size-4 text-muted-foreground" />
-          {issue.repositoryFullName}
-          {issue.repositoryArchived && (
-            <Archive className="size-3.5 text-muted-foreground" aria-label="アーカイブ済み" />
-          )}
-          {issue.repositoryPrivate && (
-            <Lock className="size-3.5 text-muted-foreground" aria-label="プライベート" />
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FolderGit2 className="size-4 text-muted-foreground" />
+            {issue.repositoryFullName}
+            {issue.repositoryArchived && (
+              <Archive className="size-3.5 text-muted-foreground" aria-label="アーカイブ済み" />
+            )}
+            {issue.repositoryPrivate && (
+              <Lock className="size-3.5 text-muted-foreground" aria-label="プライベート" />
+            )}
+          </div>
+          {canMove && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => setIsMoveDialogOpen(true)}
+            >
+              <ArrowRightLeft />
+              移動
+            </Button>
           )}
         </div>
       </section>
+
+      <MoveIssueDialog
+        open={isMoveDialogOpen}
+        onOpenChange={setIsMoveDialogOpen}
+        issue={issue}
+        repositories={repositories}
+        onMoved={onIssueUpdated}
+      />
     </div>
   );
 }

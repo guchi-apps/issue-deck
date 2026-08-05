@@ -227,3 +227,82 @@ export async function deleteIssue(
     );
   }
 }
+
+/**
+ * IssueをGitHub上で別リポジトリへ移動する。
+ * REST APIにはIssue移動のエンドポイントが存在しないため、GraphQLの`transferIssue`ミューテーションを使う。
+ * このミューテーションは移動元Issue・移動先リポジトリ双方のnode_id（GraphQL ID）を要求するため、
+ * 事前にREST APIで両方を取得してから移動する。移動後は新しいIssue番号でREST APIから
+ * 完全なIssue情報を再取得して返す。
+ */
+export async function transferIssue(
+  owner: string,
+  repo: string,
+  number: number,
+  newOwner: string,
+  newRepo: string,
+  token: string,
+): Promise<GithubApiIssue> {
+  const issueRes = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`, token);
+  if (!issueRes.ok) {
+    const detail = await issueRes.text().catch(() => "");
+    throw new GithubApiError(
+      issueRes.status,
+      `GitHub API request failed: ${issueRes.status} ${detail}`,
+    );
+  }
+  const { node_id: issueNodeId }: { node_id: string } = await issueRes.json();
+
+  const destinationRepoRes = await githubFetch(`${GITHUB_API}/repos/${newOwner}/${newRepo}`, token);
+  if (!destinationRepoRes.ok) {
+    const detail = await destinationRepoRes.text().catch(() => "");
+    throw new GithubApiError(
+      destinationRepoRes.status,
+      `GitHub API request failed: ${destinationRepoRes.status} ${detail}`,
+    );
+  }
+  const { node_id: destinationRepoNodeId }: { node_id: string } = await destinationRepoRes.json();
+
+  const graphqlRes = await githubFetch(`${GITHUB_API}/graphql`, token, {
+    method: "POST",
+    body: {
+      query: `mutation($issueId: ID!, $repositoryId: ID!) {
+        transferIssue(input: { issueId: $issueId, repositoryId: $repositoryId }) {
+          issue { number }
+        }
+      }`,
+      variables: { issueId: issueNodeId, repositoryId: destinationRepoNodeId },
+    },
+  });
+  if (!graphqlRes.ok) {
+    const detail = await graphqlRes.text().catch(() => "");
+    throw new GithubApiError(
+      graphqlRes.status,
+      `GitHub GraphQL request failed: ${graphqlRes.status} ${detail}`,
+    );
+  }
+  const graphqlData: {
+    data?: { transferIssue: { issue: { number: number } } };
+    errors?: { message: string }[];
+  } = await graphqlRes.json();
+  if (graphqlData.errors?.length || !graphqlData.data) {
+    throw new GithubApiError(
+      403,
+      `GitHub GraphQL transferIssue failed: ${graphqlData.errors?.map((e) => e.message).join("; ") ?? "unknown error"}`,
+    );
+  }
+
+  const newNumber = graphqlData.data.transferIssue.issue.number;
+  const newIssueRes = await githubFetch(
+    `${GITHUB_API}/repos/${newOwner}/${newRepo}/issues/${newNumber}`,
+    token,
+  );
+  if (!newIssueRes.ok) {
+    const detail = await newIssueRes.text().catch(() => "");
+    throw new GithubApiError(
+      newIssueRes.status,
+      `GitHub API request failed: ${newIssueRes.status} ${detail}`,
+    );
+  }
+  return newIssueRes.json();
+}
