@@ -5,6 +5,9 @@ const GITHUB_API = "https://api.github.com";
 /** 「develop→mainのリリースフロー」を自動化するworkflowのファイル名（release-develop-to-main.yml） */
 export const RELEASE_WORKFLOW_FILE = "release-develop-to-main.yml";
 
+/** mainへのマージを受けて本番デプロイを行うworkflowのファイル名（deploy.yml） */
+export const DEPLOY_WORKFLOW_FILE = "deploy.yml";
+
 function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
@@ -80,13 +83,15 @@ export type ReleaseWorkflowRun = {
   createdAt: string;
 };
 
-/** `release-develop-to-main.yml`の最新の実行（run）を1件取得する。無ければnull */
-export async function fetchLatestReleaseWorkflowRun(
+async function fetchLatestWorkflowRun(
   owner: string,
   repo: string,
+  workflowFile: string,
   token: string,
+  query?: string,
 ): Promise<ReleaseWorkflowRun | null> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?per_page=1`;
+  const qs = query ? `&${query}` : "";
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1${qs}`;
   const res = await fetch(url, { headers: authHeaders(token) });
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -104,6 +109,27 @@ export async function fetchLatestReleaseWorkflowRun(
     htmlUrl: run.html_url,
     createdAt: run.created_at,
   };
+}
+
+/** `release-develop-to-main.yml`の最新の実行（run）を1件取得する。無ければnull */
+export async function fetchLatestReleaseWorkflowRun(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<ReleaseWorkflowRun | null> {
+  return fetchLatestWorkflowRun(owner, repo, RELEASE_WORKFLOW_FILE, token);
+}
+
+/**
+ * mainブランチ上の`deploy.yml`（本番デプロイ）の最新の実行（run）を1件取得する。無ければnull。
+ * mainへのマージ後にこのrunを追うことで、デプロイまで成功したかを見届けられるようにする(#392)。
+ */
+export async function fetchLatestDeployWorkflowRun(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<ReleaseWorkflowRun | null> {
+  return fetchLatestWorkflowRun(owner, repo, DEPLOY_WORKFLOW_FILE, token, "branch=main");
 }
 
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */

@@ -1,3 +1,4 @@
+import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import type { IssueLabel } from "@/types/issue";
 
@@ -21,6 +22,13 @@ export type LabelFilterPreset = {
   key: string;
   label: string;
   labels: string[];
+  /**
+   * プリセット選択時に適用するstateフィルター（省略時はstateを変更しない）。
+   * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
+   * 「直近main反映済み」プリセットはデフォルトのopen絞り込みのままだと該当issueが
+   * 出てこない。
+   */
+  state?: IssueStateFilter;
 };
 
 /** Issue一覧のクイックフィルターとして提供する、運用ラベルに基づく定型の絞り込みプリセット */
@@ -36,11 +44,36 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
     label: "本番反映待ち",
     labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
   },
+  {
+    key: "recently-merged",
+    label: "直近main反映済み",
+    labels: [WORKFLOW_STEPS[4].labelName],
+    state: "all",
+  },
 ];
 
 /** 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する */
 export function isLabelFilterPresetActive(labels: string[], preset: LabelFilterPreset): boolean {
   return labels.length === preset.labels.length && preset.labels.every((name) => labels.includes(name));
+}
+
+export type LabelFilterPresetSelection = {
+  labels: string[];
+  state?: IssueStateFilter;
+};
+
+/**
+ * プリセットボタン押下時に適用すべきラベル・stateフィルターを返す。
+ * 選択中なら解除し、プリセットがstateを指定していれば併せてデフォルト（open）へ戻す。
+ */
+export function resolveLabelFilterPresetSelection(
+  preset: LabelFilterPreset,
+  isActive: boolean,
+): LabelFilterPresetSelection {
+  if (isActive) {
+    return preset.state ? { labels: [], state: "open" } : { labels: [] };
+  }
+  return preset.state ? { labels: preset.labels, state: preset.state } : { labels: preset.labels };
 }
 
 /**
@@ -109,4 +142,20 @@ export function approveCommentBody(labels: IssueLabel[]): string {
  */
 export function requestContinuationCommentBody(): string {
   return "@claude 続きを実装・調査してください。";
+}
+
+/**
+ * PRマージ待ち画面（isMergeApprovalPending）の「修正を依頼する」ボタン押下時に投稿する
+ * コメント本文。ボタン押下時はこのコメント投稿に先立ち、handleReject等と同様
+ * labelsAfterRejection（00.check-userのみ除去、21.plan-requiredは残す）でラベルを
+ * 更新する。修正コミットが積まれている間はユーザー確認待ちではないため、他の操作と
+ * 揃えて00.check-userを外す（#409）。claude-issue-dispatch.ymlは対応issueのブランチが
+ * 既にありdevelopへのPRがOPENであればmode=additionalとして扱うため、このコメント投稿
+ * により既存PRへの追加コミットが行われる（#376）。再度ユーザー確認が必要な状態になった
+ * 場合は、追加コミットのpushがclaude-review-develop.ymlを再発火させ、そちらのrisk-check/
+ * claude-reviewが必要に応じて00.check-userを再付与する。
+ */
+export function requestPrFixCommentBody(reason: string): string {
+  const trimmed = reason.trim();
+  return trimmed ? `@claude ${trimmed}` : "@claude PRの内容を見直して修正してください。";
 }

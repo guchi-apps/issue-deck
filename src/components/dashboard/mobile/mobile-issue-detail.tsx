@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   Archive,
@@ -29,6 +29,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
+import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
@@ -61,9 +62,10 @@ import {
   labelsAfterApproval,
   labelsAfterRejection,
   requestContinuationCommentBody,
+  requestPrFixCommentBody,
 } from "@/lib/github/approval-labels";
-import { canAskClaude } from "@/lib/github/ask-claude";
-import { buildClaudeAppUrl } from "@/lib/github/claude-app";
+import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
+import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -110,6 +112,8 @@ export function MobileIssueDetail({
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
   const [isImageUploading, setIsImageUploading] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastCommentRef = useRef<HTMLLIElement>(null);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
@@ -182,6 +186,36 @@ export function MobileIssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
+  }
+
+  async function handleAskClaudeFromComposer() {
+    if (!newCommentBody.trim()) return;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: askClaudeCommentBody(newCommentBody),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      setNewCommentBody("");
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    }
+  }
+
+  function handleClaudeAppHandoff() {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: buildClaudeAppHandoffCommentBody(),
+    }).then((created) => {
+      if (!created) return;
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    });
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -280,6 +314,28 @@ export function MobileIssueDetail({
     }
   }
 
+  async function handleRequestPrFix(reason: string) {
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: labelsAfterRejection(issue.labels),
+    });
+    if (!updated) return;
+    onIssueUpdated(updated);
+
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: requestPrFixCommentBody(reason),
+    });
+    if (created) {
+      setComments((prev) => [...prev, created]);
+      onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
+    }
+  }
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex items-center gap-3 border-b p-4">
@@ -361,7 +417,12 @@ export function MobileIssueDetail({
           <DropdownMenuContent align="end">
             {issue.state === "open" && (
               <DropdownMenuItem asChild>
-                <a href={buildClaudeAppUrl(issue)} target="_blank" rel="noreferrer">
+                <a
+                  href={buildClaudeAppUrl(issue)}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={handleClaudeAppHandoff}
+                >
                   <Bot />
                   Claudeアプリで開く
                 </a>
@@ -408,7 +469,7 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
+      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}
@@ -556,10 +617,13 @@ export function MobileIssueDetail({
             onReject={handleReject}
             onWithdraw={handleWithdraw}
             onRequestContinuation={handleRequestContinuation}
+            onRequestPrFix={handleRequestPrFix}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
+            isRequestingPrFix={isCommentSubmitting}
+            lastCommentRef={lastCommentRef}
           />
 
           <div className="mt-4 flex flex-col gap-2">
@@ -571,6 +635,7 @@ export function MobileIssueDetail({
               issueSuggestions={issueSuggestions}
               disabled={isCommentSubmitting}
               onUploadingChange={setIsImageUploading}
+              repositoryFullName={issue.repositoryFullName}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -578,20 +643,38 @@ export function MobileIssueDetail({
                 }
               }}
             />
-            <Button
-              className="self-end"
-              onClick={handleCreateComment}
-              disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-            >
-              {isCommentSubmitting && <Loader2 className="animate-spin" />}
-              {isCommentSubmitting ? "送信中..." : "コメント"}
-            </Button>
+            <div className="flex justify-end gap-2">
+              {canAskClaude(issue) && (
+                <Button
+                  variant="outline"
+                  onClick={handleAskClaudeFromComposer}
+                  disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+                >
+                  <MessageCircleQuestion />
+                  質問する
+                </Button>
+              )}
+              <Button
+                onClick={handleCreateComment}
+                disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+              >
+                {isCommentSubmitting && <Loader2 className="animate-spin" />}
+                {isCommentSubmitting ? "送信中..." : "コメント"}
+              </Button>
+            </div>
             {commentMutationError && (
               <p className="text-sm text-destructive">{commentMutationError}</p>
             )}
           </div>
         </div>
       </div>
+
+      <ScrollToLatestCommentButton
+        containerRef={scrollContainerRef}
+        targetRef={lastCommentRef}
+        visible={comments.length > 0}
+        className="left-4 bottom-4"
+      />
 
       <button
         type="button"

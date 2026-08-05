@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import {
   Archive,
   Eye,
   EyeOff,
   FolderGit2,
+  GitMerge,
   Lock,
   PlayCircle,
   Plus,
@@ -17,7 +19,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { isLabelFilterPresetActive, LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
+import type { IssueStateFilter } from "@/hooks/use-issue-filters";
+import {
+  isLabelFilterPresetActive,
+  LABEL_FILTER_PRESETS,
+  resolveLabelFilterPresetSelection,
+} from "@/lib/github/approval-labels";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { navViewIcons, navViews } from "@/lib/nav-views";
@@ -31,6 +38,7 @@ const LABEL_FILTER_PRESET_ICONS: Record<string, LucideIcon> = {
   "check-user": UserCheck,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
+  "recently-merged": GitMerge,
 };
 
 type SidebarNavProps = {
@@ -46,12 +54,13 @@ type SidebarNavProps = {
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
   onClearLabels?: () => void;
-  onSelectLabelPreset?: (labels: string[]) => void;
+  onSelectLabelPreset?: (selection: { labels: string[]; state?: IssueStateFilter }) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
   className?: string;
+  style?: CSSProperties;
 };
 
 export function SidebarNav({
@@ -73,6 +82,7 @@ export function SidebarNav({
   onDeleteQuickFilter,
   onSaveQuickFilter,
   className,
+  style,
 }: SidebarNavProps) {
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
   const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
@@ -83,7 +93,7 @@ export function SidebarNav({
     : repositories.filter((repo) => !repo.hidden);
 
   return (
-    <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)}>
+    <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)} style={style}>
       <div>
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">全体</h2>
         <ul className="flex flex-col gap-0.5">
@@ -116,7 +126,7 @@ export function SidebarNav({
                 <button
                   type="button"
                   aria-pressed={active}
-                  onClick={() => onSelectLabelPreset?.(active ? [] : preset.labels)}
+                  onClick={() => onSelectLabelPreset?.(resolveLabelFilterPresetSelection(preset, active))}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                     active && "bg-accent font-medium",
@@ -216,9 +226,9 @@ export function SidebarNav({
                         className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                       >
                         {repo.hidden ? (
-                          <Eye className="size-3.5" />
-                        ) : (
                           <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
                         )}
                       </button>
                     )}

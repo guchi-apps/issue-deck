@@ -90,6 +90,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
               onChange={setBody}
               issueSuggestions={issueSuggestions}
               onUploadingChange={setIsImageUploading}
+              repositoryFullName={issue.repositoryFullName}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();

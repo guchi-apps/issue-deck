@@ -6,6 +6,7 @@ export type CancelWorkflowRunInput = {
   owner: string;
   repo: string;
   runId: number;
+  force?: boolean;
 };
 
 function errorMessageForResponse(

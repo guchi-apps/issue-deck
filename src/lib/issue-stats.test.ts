@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyIssueFilters,
+  computeLabelFilterPresetCounts,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -10,6 +11,7 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
+import type { LabelFilterPreset } from "@/lib/github/approval-labels";
 import type { Issue } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -154,6 +156,34 @@ describe("computeLabelSummary", () => {
       { name: "bug", color: "red", count: 2 },
       { name: "docs", color: "blue", count: 1 },
     ]);
+  });
+});
+
+describe("computeLabelFilterPresetCounts", () => {
+  const presets: LabelFilterPreset[] = [
+    { key: "check-user", label: "ユーザーの確認待ち", labels: ["00.check-user"] },
+    { key: "in-progress", label: "実行中", labels: ["03.d:marge", "07.m:marge"] },
+  ];
+
+  it("プリセットごとにラベルOR一致するIssue数を返す", () => {
+    const issues = [
+      makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
+      makeIssue({ id: "2", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
+      makeIssue({ id: "3", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
+      makeIssue({ id: "4", labels: [] }),
+    ];
+    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
+      "check-user": 1,
+      "in-progress": 2,
+    });
+  });
+
+  it("該当するIssueがない場合は0を返す", () => {
+    const issues = [makeIssue({ id: "1", labels: [] })];
+    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
+      "check-user": 0,
+      "in-progress": 0,
+    });
   });
 });
 

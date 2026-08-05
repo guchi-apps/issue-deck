@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   ChevronDown,
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   Rocket,
@@ -14,6 +16,16 @@ import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -26,6 +38,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
@@ -35,6 +54,7 @@ import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type TopBarProps = {
@@ -44,6 +64,9 @@ type TopBarProps = {
   assigneeOptions: string[];
   onCreateIssue: () => void;
   selectedRepoFullName: string | null;
+  repositories: ConnectedRepository[];
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 };
 
 export function TopBar({
@@ -53,11 +76,20 @@ export function TopBar({
   assigneeOptions,
   onCreateIssue,
   selectedRepoFullName,
+  repositories,
+  isSidebarCollapsed,
+  onToggleSidebar,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
+  // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
+  const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
+    selectedRepoFullName ?? repositories[0]?.fullName ?? null,
+  );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
   const {
@@ -72,7 +104,7 @@ export function TopBar({
     error: releaseStatusError,
     triggerRelease,
     isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(selectedRepoFullName, accountMenuOpen);
+  } = useReleaseStatus(releaseRepoFullName, accountMenuOpen);
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -96,6 +128,20 @@ export function TopBar({
 
   return (
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0"
+        onClick={onToggleSidebar}
+        title={isSidebarCollapsed ? "サイドバーを表示" : "サイドバーを非表示"}
+      >
+        {isSidebarCollapsed ? (
+          <PanelLeftOpen className="size-4" />
+        ) : (
+          <PanelLeftClose className="size-4" />
+        )}
+      </Button>
+
       <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
         <LayoutDashboard className="size-5 text-primary" />
         Issue Deck
@@ -184,7 +230,19 @@ export function TopBar({
         新規Issue
       </Button>
 
-      <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+      <DropdownMenu
+        open={accountMenuOpen}
+        onOpenChange={(open) => {
+          setAccountMenuOpen(open);
+          if (open) {
+            setReleaseRepoFullName((prev) =>
+              prev && repositories.some((repo) => repo.fullName === prev)
+                ? prev
+                : (selectedRepoFullName ?? repositories[0]?.fullName ?? null),
+            );
+          }
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button type="button" className="flex items-center gap-1 rounded-md p-1 hover:bg-accent">
             <UserAvatar
@@ -228,18 +286,33 @@ export function TopBar({
             disabled={isSyncing}
             onSelect={(e) => {
               e.preventDefault();
-              handleSync();
+              setSyncConfirmOpen(true);
             }}
           >
             <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
             {isSyncing ? "再同期中..." : "今すぐ再同期"}
           </DropdownMenuItem>
 
-          {selectedRepoFullName && (
+          {repositories.length > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel>リリース（{selectedRepoFullName}）</DropdownMenuLabel>
+              <DropdownMenuLabel>リリース</DropdownMenuLabel>
               <div className="px-1.5 pb-1.5">
+                <Select
+                  value={releaseRepoFullName ?? undefined}
+                  onValueChange={setReleaseRepoFullName}
+                >
+                  <SelectTrigger className="mb-2 w-full text-xs" size="sm">
+                    <SelectValue placeholder="リポジトリを選択" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {repositories.map((repo) => (
+                      <SelectItem key={repo.id} value={repo.fullName}>
+                        {repo.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {releaseStatusLoading && (
                   <p className="text-xs text-muted-foreground">読み込み中...</p>
                 )}
@@ -309,6 +382,21 @@ export function TopBar({
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
       />
+
+      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のIssue情報を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   );
 }

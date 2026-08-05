@@ -8,6 +8,16 @@ import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
@@ -24,6 +34,7 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
   const {
@@ -79,7 +90,7 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
           variant="outline"
           className="justify-start"
           disabled={isSyncing}
-          onClick={handleSync}
+          onClick={() => setSyncConfirmOpen(true)}
         >
           <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
           {isSyncing ? "再同期中..." : "今すぐ再同期"}
@@ -114,6 +125,21 @@ export function MobileSettingsScreen({ currentUser }: MobileSettingsScreenProps)
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
       />
+
+      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のIssue情報を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
