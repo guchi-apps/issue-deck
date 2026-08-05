@@ -28,6 +28,12 @@ export type DeleteIssueInput = {
   number: number;
 };
 
+export type TransferIssueInput = {
+  repositoryFullName: string;
+  number: number;
+  newRepositoryFullName: string;
+};
+
 function errorMessageForResponse(status: number, data: { error?: string; message?: string }): string {
   return data.error === "github_api_error" && data.message
     ? data.message
@@ -78,6 +84,19 @@ export function useIssueMutations() {
     }
   }
 
+  async function transferIssue(input: TransferIssueInput): Promise<Issue | null> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      return await postJson("/api/issues/transfer", "POST", input);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function deleteIssue(input: DeleteIssueInput): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -100,5 +119,5 @@ export function useIssueMutations() {
     }
   }
 
-  return { createIssue, updateIssue, deleteIssue, isSubmitting, error, setError };
+  return { createIssue, updateIssue, transferIssue, deleteIssue, isSubmitting, error, setError };
 }

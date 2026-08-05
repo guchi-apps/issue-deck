@@ -43,9 +43,35 @@ async function handleIssuesEvent(payload: {
   action: string;
   issue: GithubApiIssue;
   repository: { id: number };
+  changes?: { new_repository?: { id: number } };
 }) {
   if (payload.action === "deleted") {
     await deleteIssueByGithubId(payload.issue.id);
+    return;
+  }
+
+  if (payload.action === "transferred") {
+    // issue-deck経由ではなくGitHub上で直接Issueが移動された場合も、DBの整合性を保つために対応する。
+    // Webhookは移動元リポジトリ（payload.repository）宛に配信されるが、移動先はchanges.new_repositoryに入る。
+    const newRepositoryId = payload.changes?.new_repository?.id;
+    if (typeof newRepositoryId !== "number") {
+      console.error(
+        "[webhooks/github] issues.transferred event is missing changes.new_repository.id",
+        payload,
+      );
+      return;
+    }
+
+    const destinationRepository = await db.repository.findUnique({
+      where: { githubRepositoryId: newRepositoryId },
+    });
+    if (!destinationRepository) {
+      // 移動先がissue-deckに未接続のリポジトリの場合、移動元のレコードを削除して整合性を保つ
+      await deleteIssueByGithubId(payload.issue.id);
+      return;
+    }
+
+    await upsertIssueFromWebhookPayload(destinationRepository.id, payload.issue);
     return;
   }
 
