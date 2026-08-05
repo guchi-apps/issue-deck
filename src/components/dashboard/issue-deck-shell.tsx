@@ -319,6 +319,7 @@ export function IssueDeckShell({
         onCreateIssue={() => openCreateDialog(filters.repo)}
         selectedRepoFullName={filters.repo}
         repositories={repositories}
+        issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
       />

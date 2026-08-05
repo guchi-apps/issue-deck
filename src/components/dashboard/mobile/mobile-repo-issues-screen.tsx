@@ -137,7 +137,12 @@ export function MobileRepoIssuesScreen({
         assigneeOptions={assigneeOptions}
       />
 
-      <MobileReleaseSheet open={releaseSheetOpen} onOpenChange={setReleaseSheetOpen} repository={repository} />
+      <MobileReleaseSheet
+        open={releaseSheetOpen}
+        onOpenChange={setReleaseSheetOpen}
+        repository={repository}
+        issues={issues}
+      />
 
       <button
         type="button"
