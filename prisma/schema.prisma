@@ -24,12 +24,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userInstallations  UserInstallation[]
-  hiddenRepositories HiddenRepository[]
-  favoriteIssues     FavoriteIssue[]
-  quickFilters       QuickFilter[]
-  commentReads       IssueCommentRead[]
-  deployChecks       IssueDeployCheck[]
+  userInstallations    UserInstallation[]
+  hiddenRepositories   HiddenRepository[]
+  favoriteRepositories FavoriteRepository[]
+  favoriteIssues       FavoriteIssue[]
+  quickFilters         QuickFilter[]
+  commentReads         IssueCommentRead[]
+  deployChecks         IssueDeployCheck[]
 }
 
 // --- GitHub App 連携 ---
@@ -94,9 +95,10 @@ model Repository {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  installation GithubInstallation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
   issues       Issue[]
   hiddenBy     HiddenRepository[]
+  favoritedBy  FavoriteRepository[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -104,6 +106,21 @@ model Repository {
 
 // ユーザーごとに左メニューで非表示にしたリポジトリ
 model HiddenRepository {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
+}
+
+// ユーザーごとにお気に入り登録したリポジトリ（ホーム画面に表示する）
+model FavoriteRepository {
   id           String @id @default(cuid())
   userId       String
   repositoryId String

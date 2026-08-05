@@ -1,16 +1,20 @@
 "use client";
 
-import { Plus, SlidersHorizontal, X } from "lucide-react";
+import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
+import type { ConnectedRepository } from "@/types/repository";
 
 type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
   onSelectQuickView: (view: NavViewId) => void;
+  favoriteRepositories: ConnectedRepository[];
+  onSelectRepository: (repository: ConnectedRepository) => void;
   quickFilters: QuickFilter[];
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
@@ -28,6 +32,8 @@ export function MobileHomeScreen({
   overviewStats,
   navCounts,
   onSelectQuickView,
+  favoriteRepositories,
+  onSelectRepository,
   quickFilters,
   onSelectQuickFilter,
   onDeleteQuickFilter,
@@ -71,6 +77,34 @@ export function MobileHomeScreen({
             )}
           </div>
         </div>
+
+        {favoriteRepositories.length > 0 && (
+          <div className="px-4 pb-4">
+            <h2 className="mb-2 text-sm font-semibold">お気に入りリポジトリ</h2>
+            <ul className="flex flex-col gap-1">
+              {favoriteRepositories.map((repo) => {
+                const color = getRepoColor(repo.fullName);
+                return (
+                  <li key={repo.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectRepository(repo)}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    >
+                      <span
+                        className="flex size-6 shrink-0 items-center justify-center rounded"
+                        style={{ backgroundColor: `${color}20`, color }}
+                      >
+                        <FolderGit2 className="size-3.5" />
+                      </span>
+                      <span className="truncate">{repo.name}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
