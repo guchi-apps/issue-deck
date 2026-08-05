@@ -1,19 +1,11 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
-
-const GITHUB_API = "https://api.github.com";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 /** 「develop→mainのリリースフロー」を自動化するworkflowのファイル名（release-develop-to-main.yml） */
 export const RELEASE_WORKFLOW_FILE = "release-develop-to-main.yml";
 
 /** mainへのマージを受けて本番デプロイを行うworkflowのファイル名（deploy.yml） */
 export const DEPLOY_WORKFLOW_FILE = "deploy.yml";
-
-function authHeaders(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-  };
-}
 
 /** リポジトリに`release-develop-to-main.yml`と同名のworkflowが存在するかどうか */
 export async function fetchReleaseWorkflowExists(
@@ -22,7 +14,7 @@ export async function fetchReleaseWorkflowExists(
   token: string,
 ): Promise<boolean> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}`;
-  const res = await fetch(url, { headers: authHeaders(token) });
+  const res = await githubFetch(url, token);
   if (res.status === 404) return false;
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -39,7 +31,7 @@ export async function fetchPackageVersion(
   token: string,
 ): Promise<string | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/package.json?ref=${encodeURIComponent(ref)}`;
-  const res = await fetch(url, { headers: authHeaders(token) });
+  const res = await githubFetch(url, token);
   if (res.status === 404) return null;
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -66,7 +58,7 @@ export async function fetchOpenPullRequestsForBase(
   token: string,
 ): Promise<GithubApiPullRequest[]> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls?base=${encodeURIComponent(base)}&state=open&per_page=30`;
-  const res = await fetch(url, { headers: authHeaders(token) });
+  const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
@@ -92,7 +84,7 @@ async function fetchLatestWorkflowRun(
 ): Promise<ReleaseWorkflowRun | null> {
   const qs = query ? `&${query}` : "";
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1${qs}`;
-  const res = await fetch(url, { headers: authHeaders(token) });
+  const res = await githubFetch(url, token);
   if (res.status === 404) return null;
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -147,7 +139,7 @@ export async function fetchRefCiState(
   token: string,
 ): Promise<CiState> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`;
-  const res = await fetch(url, { headers: authHeaders(token) }).catch(() => null);
+  const res = await githubFetch(url, token).catch(() => null);
   if (!res || !res.ok) return "unknown";
   const data: { check_runs?: Array<{ status: string; conclusion: string | null }> } = await res
     .json()
@@ -167,11 +159,7 @@ export async function dispatchReleaseWorkflow(
   token: string,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { ...authHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: "develop" }),
-  });
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: "develop" } });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

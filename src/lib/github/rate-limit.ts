@@ -1,4 +1,4 @@
-const GITHUB_API = "https://api.github.com";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 export type GithubRateLimit = {
   limit: number;
@@ -8,12 +8,8 @@ export type GithubRateLimit = {
 };
 
 export async function fetchRateLimit(token: string): Promise<GithubRateLimit> {
-  const res = await fetch(`${GITHUB_API}/rate_limit`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  // `/rate_limit`自体はレート制限を消費しないため、使用量には計上しない。
+  const res = await githubFetch(`${GITHUB_API}/rate_limit`, token, { record: false });
   if (!res.ok) {
     throw new Error(`GitHub API request failed: ${res.status} ${GITHUB_API}/rate_limit`);
   }

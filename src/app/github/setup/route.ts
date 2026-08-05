@@ -2,12 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth-user";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getAppJwt, getInstallationToken } from "@/lib/github/app-auth";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { getRequestOrigin } from "@/lib/request-origin";
 import type { AccountType, RepositorySelection } from "@prisma/client";
-
-const GITHUB_API = "https://api.github.com";
 
 type GithubInstallationResponse = {
   id: number;
@@ -39,12 +39,7 @@ async function fetchInstallation(
   installationId: number,
   jwt: string,
 ): Promise<GithubInstallationResponse> {
-  const res = await fetch(`${GITHUB_API}/app/installations/${installationId}`, {
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const res = await githubFetch(`${GITHUB_API}/app/installations/${installationId}`, jwt);
   if (!res.ok) {
     throw new Error(`Failed to fetch installation: ${res.status}`);
   }
@@ -58,14 +53,9 @@ async function fetchInstallationRepositories(
   let page = 1;
 
   while (true) {
-    const res = await fetch(
+    const res = await githubFetch(
       `${GITHUB_API}/installation/repositories?per_page=100&page=${page}`,
-      {
-        headers: {
-          Authorization: `Bearer ${installationToken}`,
-          Accept: "application/vnd.github+json",
-        },
-      },
+      installationToken,
     );
     if (!res.ok) {
       throw new Error(`Failed to fetch installation repositories: ${res.status}`);
@@ -80,7 +70,11 @@ async function fetchInstallationRepositories(
   return repositories;
 }
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("setup", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const origin = getRequestOrigin(request);
   const { searchParams } = new URL(request.url);
   const installationIdParam = searchParams.get("installation_id");

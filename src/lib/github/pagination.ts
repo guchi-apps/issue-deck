@@ -1,4 +1,5 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
+import { githubFetch } from "@/lib/github/request";
 
 function getNextUrl(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
@@ -20,12 +21,9 @@ export async function fetchAllPages<T>(
   let url: string | null = initialUrl;
 
   while (url) {
-    const res: Response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-      },
-    });
+    // ページごとに1リクエストとして計測されるため、コメント全件取得のような
+    // 多ページの取得も使用量の内訳にそのまま反映される。
+    const res: Response = await githubFetch(url, token);
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
