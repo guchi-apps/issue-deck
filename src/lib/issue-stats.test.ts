@@ -192,36 +192,18 @@ describe("time-dependent stats", () => {
   });
 
   describe("filterIssuesByView", () => {
-    it("view=assignedはcurrentUserLoginが担当のIssueのみ返す", () => {
-      const issues = [
-        makeIssue({ id: "1", assignee: { login: "me" } }),
-        makeIssue({ id: "2", assignee: { login: "other" } }),
-      ];
-      const result = filterIssuesByView(issues, "assigned", "me");
-      expect(result.map((issue) => issue.id)).toEqual(["1"]);
-    });
-
-    it("view=createdはcurrentUserLoginが作成したIssueのみ返す", () => {
-      const issues = [
-        makeIssue({ id: "1", author: { login: "me" } }),
-        makeIssue({ id: "2", author: { login: "other" } }),
-      ];
-      const result = filterIssuesByView(issues, "created", "me");
-      expect(result.map((issue) => issue.id)).toEqual(["1"]);
-    });
-
     it("view=favoritesはfavorite=trueのIssueのみ返す", () => {
       const issues = [makeIssue({ id: "1", favorite: true }), makeIssue({ id: "2", favorite: false })];
       const result = filterIssuesByView(issues, "favorites", null);
       expect(result.map((issue) => issue.id)).toEqual(["1"]);
     });
 
-    it("view=recentは直近7日以内に更新されたIssueのみ返す", () => {
+    it("view=recently-addedは直近24時間以内に作成されたIssueのみ返す", () => {
       const issues = [
-        makeIssue({ id: "1", updatedAt: "2026-01-09T00:00:00.000Z" }),
-        makeIssue({ id: "2", updatedAt: "2025-12-01T00:00:00.000Z" }),
+        makeIssue({ id: "1", createdAt: "2026-01-09T12:00:00.000Z" }),
+        makeIssue({ id: "2", createdAt: "2026-01-08T00:00:00.000Z" }),
       ];
-      const result = filterIssuesByView(issues, "recent", null);
+      const result = filterIssuesByView(issues, "recently-added", null);
       expect(result.map((issue) => issue.id)).toEqual(["1"]);
     });
 
@@ -318,26 +300,20 @@ describe("time-dependent stats", () => {
       const issues = [
         makeIssue({
           id: "1",
-          assignee: { login: "me" },
-          author: { login: "me" },
           favorite: true,
-          updatedAt: "2026-01-09T00:00:00.000Z",
+          createdAt: "2026-01-09T12:00:00.000Z",
           labels: [{ name: "00.check-user", color: "red", description: null }],
         }),
         makeIssue({
           id: "2",
-          assignee: { login: "other" },
-          author: { login: "other" },
           favorite: false,
-          updatedAt: "2025-01-01T00:00:00.000Z",
+          createdAt: "2025-01-01T00:00:00.000Z",
         }),
       ];
       expect(computeNavCounts(issues, issues, "me")).toEqual({
         all: 2,
-        assigned: 1,
-        created: 1,
         favorites: 1,
-        recent: 1,
+        "recently-added": 1,
         "check-user": 1,
         "in-progress": 0,
         "release-pending": 0,
