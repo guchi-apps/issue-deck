@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Rocket,
   Search,
+  Settings,
 } from "lucide-react";
 
 import packageJson from "../../../package.json";
@@ -81,6 +82,7 @@ type TopBarProps = {
   issues: Issue[];
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onOpenAppSettings: () => void;
 };
 
 export function TopBar({
@@ -94,6 +96,7 @@ export function TopBar({
   issues,
   isSidebarCollapsed,
   onToggleSidebar,
+  onOpenAppSettings,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
   const { isSyncing, handleSync } = useIssueSync();
@@ -295,6 +298,15 @@ export function TopBar({
             }}
           >
             {currentUser?.name ?? currentUser?.login}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              onOpenAppSettings();
+            }}
+          >
+            <Settings />
+            アプリ設定
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>

@@ -9,7 +9,6 @@ import {
   FolderGit2,
   Lock,
   Plus,
-  Settings,
   Settings2,
   SlidersHorizontal,
   X,
@@ -35,7 +34,6 @@ type SidebarNavProps = {
   onClearRepository?: () => void;
   onHideRepository?: (repository: ConnectedRepository) => void;
   onShowRepository?: (repository: ConnectedRepository) => void;
-  onOpenRepositorySettings?: (repository: ConnectedRepository) => void;
   labelSummary: LabelSummary[];
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
@@ -58,7 +56,6 @@ export function SidebarNav({
   onClearRepository,
   onHideRepository,
   onShowRepository,
-  onOpenRepositorySettings,
   labelSummary,
   selectedLabels = [],
   onSelectLabel,
@@ -200,30 +197,20 @@ export function SidebarNav({
                       )}
                     </button>
                     {isEditingRepoVisibility && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => onOpenRepositorySettings?.(repo)}
-                          title="リポジトリの設定"
-                          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          <Settings className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
-                          }
-                          title={repo.hidden ? "表示する" : "非表示にする"}
-                          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          {repo.hidden ? (
-                            <EyeOff className="size-3.5" />
-                          ) : (
-                            <Eye className="size-3.5" />
-                          )}
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
+                        }
+                        title={repo.hidden ? "表示する" : "非表示にする"}
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        {repo.hidden ? (
+                          <EyeOff className="size-3.5" />
+                        ) : (
+                          <Eye className="size-3.5" />
+                        )}
+                      </button>
                     )}
                   </li>
                 );

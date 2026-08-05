@@ -101,29 +101,61 @@ name: Claude Issue Dispatch
 # .github/workflows/claude-review-develop.yml(Phase3自動レビュー・Phase4自動マージ)が
 # 自動発火する可能性がある(未検証)。develop向けPR作成までが本ワークフローの完了条件であり、
 # developへのマージまでの自動化は前提としないが、自動発火した場合はそれ自体は許容する。
+#
+# 計画提示ステップ・実装ステップそれぞれのフォールバック検証ステップ(「計画コメント投稿を検証し、
+# 必要ならフォールバックする」「実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック
+# 通知する」)は、新規コメント・PRのいずれも確認できず行き詰まったと判断した場合、全リポジトリ共通の
+# 自動リトライ上限(GET /api/settings/auto-retryで取得するautoRetryLimit、#496・#497)未満で
+# あれば、workflow_dispatchで自分自身を再起動して再試行する(#497)。上限に達した場合
+# (未設定なら常に上限0扱い)は従来どおり00.check-userを付与して停止する。自己再起動のgh workflow run
+# 呼び出しはGITHUB_TOKENでは新たなワークフロー実行を誘発しない制約があるためWORKFLOW_PATを使う。
+# workflow_dispatchトリガー自体は、issue_comment/issuesの各トリガーと異なりBot判定・実行者
+# パーミッション確認(下記「実行者の権限・状態を判定する」ステップ)を経由しない。これは
+# workflow_dispatchのAPI呼び出し自体がリポジトリへのwrite権限を要求するGitHub側の仕様により、
+# 同等の信頼レベルが既に担保されているため。
 
 on:
   issues:
     types: [unlabeled]
   issue_comment:
     types: [created]
+  # 計画/実装フォールバック検証ステップ(下記「計画コメント投稿を検証し、必要ならフォールバックする」
+  # 「実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック通知する」)専用の自己リトライ
+  # 起動経路(#497)。issue_number/retry_attemptともにgh workflow runから渡す想定で、人間が直接
+  # 手動実行することも許容する(GitHub側がworkflow_dispatchの実行自体にwrite権限を要求するため、
+  # 実行者チェックの信頼レベルは他のトリガー経路と同等)。
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "対象issue番号"
+        required: true
+        type: string
+      retry_attempt:
+        description: "これまでの自動リトライ回数(0始まり。指定した回数の次の試行として実行する)"
+        required: false
+        type: string
+        default: "0"
 
 jobs:
   dispatch:
     if: |
       (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude')) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
     # 同じブランチに同時にcheckout・pushして競合するのを避けるため、issueごとに直列化する(#129)。
     # cancel-in-progress: falseにより、先行実行を中断せず後続を待たせる。
     concurrency:
-      group: issue-dispatch-${{ github.event.issue.number }}
+      group: issue-dispatch-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
       cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
       issues: write
+      # 自己リトライ(#497)のgh workflow run呼び出しは、GITHUB_TOKENが同呼び出しを誘発しない
+      # 制約があるためsecrets.WORKFLOW_PATを使う(WORKFLOW_PAT側の権限はpermissions:の対象外)。
+      # GITHUB_TOKEN自体はactions:writeを使わないため、least privilegeの観点でreadのままにする。
       actions: read
       id-token: write
     # 無人実行環境でも`pnpm dev`を起動して画面を確認できるようにするためのMySQLサービス
@@ -160,48 +192,64 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
           ACTOR: ${{ github.actor }}
           ACTOR_TYPE: ${{ github.event.sender.type }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_LABEL: ${{ github.event.label.name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          INPUT_RETRY_ATTEMPT: ${{ github.event.inputs.retry_attempt }}
         run: |
           set -e
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
-          if [ "$ACTOR_TYPE" = "Bot" ]; then
-            # issue-deckアプリ自身のGitHub App経由の書き込みは、人間がアプリ画面上で
-            # 操作した場合でもGitHub上は issue-deck[bot] が投稿者になる。issue_comment
-            # イベントに限り、アプリがコメント本文の末尾に埋め込む投稿者マーカー
-            # (<!-- issue-deck:posted-by:<login> -->。src/app/api/issues/comments/route.ts
-            # のPOSTで付与、ユーザー入力より後ろに付くため本文中の偽マーカーは無効)から
-            # 実際に操作した人間のログイン名を取り出し、以降の権限チェックをその人間に
-            # 対して行う。マーカーが無い場合(issue-deck[bot]以外のBotや、マーカーの無い
-            # 旧コメント)はこれまで通りスキップする。
-            POSTED_BY=""
-            if [ "$ACTOR" = "issue-deck[bot]" ] && [ "$EVENT_NAME" = "issue_comment" ]; then
-              POSTED_BY="$(printf '%s' "$COMMENT_BODY" | grep -oP '(?<=<!-- issue-deck:posted-by:)\S+(?= -->)' | tail -n1 || true)"
-            fi
-            if [ -z "$POSTED_BY" ]; then
-              echo "実行者がBotのため何もしません（自己ループ防止）: $ACTOR"
-              echo "mode=skip" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "issue-deck[bot]経由のコメントを検出、投稿者マーカーから実行者を復元します: $POSTED_BY"
-            ACTOR="$POSTED_BY"
-          fi
+          RETRY_ATTEMPT="${INPUT_RETRY_ATTEMPT:-0}"
+          : "${RETRY_ATTEMPT:=0}"
+          # 後続のフォールバック検証ステップで$((RETRY_ATTEMPT + 1))という算術展開に使うため、
+          # workflow_dispatchの手動起動等で不正な値が渡された場合に備え数値であることを検証する(#497)。
+          case "$RETRY_ATTEMPT" in ''|*[!0-9]*) RETRY_ATTEMPT=0 ;; esac
+          echo "retry_attempt=$RETRY_ATTEMPT" >> "$GITHUB_OUTPUT"
 
-          PERMISSION="$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo "none")"
-          case "$PERMISSION" in
-            admin|write|maintain) : ;;
-            *)
-              echo "実行者 $ACTOR はwrite権限を持たないため何もしません（権限: $PERMISSION）"
-              echo "mode=skip" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # 計画/実装フォールバック検証ステップからの自己リトライ専用の起動経路(#497)。
+            # workflow_dispatchのAPI呼び出し自体がリポジトリへのwrite権限を要求するため、
+            # issue_comment向けに実装済みのBot判定・実行者パーミッション確認と同等の信頼レベルが
+            # 既に担保されている。そのためここではスキップする。
+            echo "workflow_dispatch起動のため、Bot判定・実行者パーミッション確認をスキップします（retry_attempt=$RETRY_ATTEMPT）"
+          else
+            if [ "$ACTOR_TYPE" = "Bot" ]; then
+              # issue-deckアプリ自身のGitHub App経由の書き込みは、人間がアプリ画面上で
+              # 操作した場合でもGitHub上は issue-deck[bot] が投稿者になる。issue_comment
+              # イベントに限り、アプリがコメント本文の末尾に埋め込む投稿者マーカー
+              # (<!-- issue-deck:posted-by:<login> -->。src/app/api/issues/comments/route.ts
+              # のPOSTで付与、ユーザー入力より後ろに付くため本文中の偽マーカーは無効)から
+              # 実際に操作した人間のログイン名を取り出し、以降の権限チェックをその人間に
+              # 対して行う。マーカーが無い場合(issue-deck[bot]以外のBotや、マーカーの無い
+              # 旧コメント)はこれまで通りスキップする。
+              POSTED_BY=""
+              if [ "$ACTOR" = "issue-deck[bot]" ] && [ "$EVENT_NAME" = "issue_comment" ]; then
+                POSTED_BY="$(printf '%s' "$COMMENT_BODY" | grep -oP '(?<=<!-- issue-deck:posted-by:)\S+(?= -->)' | tail -n1 || true)"
+              fi
+              if [ -z "$POSTED_BY" ]; then
+                echo "実行者がBotのため何もしません（自己ループ防止）: $ACTOR"
+                echo "mode=skip" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "issue-deck[bot]経由のコメントを検出、投稿者マーカーから実行者を復元します: $POSTED_BY"
+              ACTOR="$POSTED_BY"
+            fi
+
+            PERMISSION="$(gh api "repos/$GH_REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo "none")"
+            case "$PERMISSION" in
+              admin|write|maintain) : ;;
+              *)
+                echo "実行者 $ACTOR はwrite権限を持たないため何もしません（権限: $PERMISSION）"
+                echo "mode=skip" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          fi
 
           BRANCH="issue-$ISSUE_NUMBER"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
@@ -254,7 +302,10 @@ jobs:
           esac
 
           # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な
-          # 追加依頼ではないため、以下はいずれもissue_commentトリガーに限定する):
+          # 追加依頼ではないため、以下はissue_comment・workflow_dispatchトリガーに限定する。
+          # workflow_dispatchは計画/実装フォールバック検証ステップからの自己リトライ(#497)。
+          # PRがまだ無く01.wipが付いている詰まった状態(#112)からの再開先(mode=additional)は、
+          # 実装フォールバックの自己リトライがちょうど再開したい状態と一致する):
           # - PRがOPENなら追加対応として扱う(#129)。00.check-user(Phase4の自動マージ不可判定を
           #   含む)の有無は問わない。
           # - PRがまだ無く01.wipが付いている詰まった状態(#112)も追加対応として扱い、既存
@@ -268,7 +319,7 @@ jobs:
           elif [ "$ISSUE_CLOSED" = "true" ]; then
             MODE=skip
           elif [ "$BRANCH_EXISTS" = "true" ]; then
-            if [ "$EVENT_NAME" != "issue_comment" ]; then
+            if [ "$EVENT_NAME" != "issue_comment" ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
               MODE=skip
             elif [ "$PR_STATE" = "OPEN" ]; then
               MODE=additional
@@ -316,7 +367,10 @@ jobs:
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
         # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
         # ステップとしてここで確実に投稿する（計画コメントのフォールバック検証と同じ考え方）。
-        if: steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask'
+        # workflow_dispatch起動(計画/実装フォールバック検証ステップからの自己リトライ、#497)では、
+        # フォールバック検証ステップ側が専用の「自動リトライします」コメントを既に投稿しているため、
+        # ここでの重複した「対応確認しました」系コメントは投稿しない。
+        if: github.event_name != 'workflow_dispatch' && (steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask')
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -490,10 +544,15 @@ jobs:
         if: always() && steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
-          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
+          AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
           BEFORE_COUNT="${{ steps.before_plan.outputs.comment_count }}"
           : "${BEFORE_COUNT:=0}"
           if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
@@ -501,11 +560,39 @@ jobs:
             exit 0
           fi
 
-          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
+          echo "新規コメントが確認できないため、自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
+
+          # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
+          # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
+          AUTO_RETRY_LIMIT=0
+          if [ -n "$APP_BASE_URL" ]; then
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
+            if [ -n "$RESPONSE" ]; then
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+            fi
+          fi
+          case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
+
+          NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
+          if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
+            echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
+            if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+              RETRY_BODY="🔁 計画提示ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。"
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"
+              gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
+              exit 0
+            fi
+            echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
+          fi
+
+          echo "自動リトライを行わないため、フォールバックコメントを投稿します"
           FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          if [ "$RETRY_ATTEMPT" -gt 0 ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
+          fi
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
-          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
-          gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+          gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
+          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
 
       - name: 分割前のコメント数を記録する
         id: before_split
@@ -948,6 +1035,10 @@ jobs:
         if: always() && (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
           BRANCH="${{ steps.state.outputs.branch }}"
@@ -974,7 +1065,36 @@ jobs:
           fi
 
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "新規コメント・PRのいずれも確認できないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
+          echo "新規コメント・PRのいずれも確認できないため、自動リトライの可否を確認します"
+
+          # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
+          # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
+          AUTO_RETRY_LIMIT=0
+          if [ -n "$APP_BASE_URL" ]; then
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
+            if [ -n "$RESPONSE" ]; then
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+            fi
+          fi
+          case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
+
+          NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
+          if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
+            echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
+            if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+              RETRY_BODY="🔁 実装ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。既存のブランチ・コミットがあれば続きから再開します。"
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"
+              gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
+              exit 0
+            fi
+            echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
+          fi
+
+          echo "自動リトライを行わないため、フォールバックコメントを投稿します"
+          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"
+          if [ "$RETRY_ATTEMPT" -gt 0 ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
+          fi
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

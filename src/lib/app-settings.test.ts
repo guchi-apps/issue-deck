@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAutoRetryLimit } from "@/lib/repository-settings";
+import { parseAutoRetryLimit } from "@/lib/app-settings";
 
 describe("parseAutoRetryLimit", () => {
   it("範囲内の整数はそのまま返す", () => {

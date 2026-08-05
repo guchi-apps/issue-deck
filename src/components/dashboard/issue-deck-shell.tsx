@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -19,7 +20,6 @@ import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-sc
 import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
-import { RepositorySettingsDialog } from "@/components/dashboard/repository-settings-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
@@ -50,6 +50,7 @@ type IssueDeckShellProps = {
   repositories: ConnectedRepository[];
   issues: Issue[];
   quickFilters: QuickFilter[];
+  autoRetryLimit: number;
 };
 
 export function IssueDeckShell({
@@ -57,6 +58,7 @@ export function IssueDeckShell({
   repositories: initialRepositories,
   issues: initialIssues,
   quickFilters: initialQuickFilters,
+  autoRetryLimit: initialAutoRetryLimit,
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
@@ -64,8 +66,8 @@ export function IssueDeckShell({
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
-  const [repositorySettingsTarget, setRepositorySettingsTarget] =
-    useState<ConnectedRepository | null>(null);
+  const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
+  const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const {
     mobileScreen,
     isPending: isMobileScreenPending,
@@ -269,12 +271,6 @@ export function IssueDeckShell({
     }
   }
 
-  function handleRepositorySettingsUpdated(repositoryId: string, autoRetryLimit: number) {
-    setRepositories((prev) =>
-      prev.map((repo) => (repo.id === repositoryId ? { ...repo, autoRetryLimit } : repo)),
-    );
-  }
-
   async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
     function applyFavorite(target: boolean) {
       setIssues((prev) =>
@@ -349,6 +345,7 @@ export function IssueDeckShell({
         issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+        onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -401,7 +398,10 @@ export function IssueDeckShell({
                 )}
 
                 {mobileScreen.kind === "settings" && (
-                  <MobileSettingsScreen currentUser={currentUser} />
+                  <MobileSettingsScreen
+                    currentUser={currentUser}
+                    onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+                  />
                 )}
 
                 {mobileScreen.kind === "repo-detail" && (
@@ -457,7 +457,6 @@ export function IssueDeckShell({
               onClearRepository={() => setFilter("repo", null)}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-              onOpenRepositorySettings={setRepositorySettingsTarget}
               labelSummary={labelSummary}
               selectedLabels={filters.labels}
               onSelectLabel={(label) => toggleLabel(label.name)}
@@ -533,12 +532,11 @@ export function IssueDeckShell({
         filters={filters}
         onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
       />
-      <RepositorySettingsDialog
-        repository={repositorySettingsTarget}
-        onOpenChange={(open) => {
-          if (!open) setRepositorySettingsTarget(null);
-        }}
-        onUpdated={handleRepositorySettingsUpdated}
+      <AppSettingsDialog
+        open={appSettingsDialogOpen}
+        autoRetryLimit={autoRetryLimit}
+        onOpenChange={setAppSettingsDialogOpen}
+        onUpdated={setAutoRetryLimit}
       />
       <EditIssueDialog
         open={editingIssue !== null}

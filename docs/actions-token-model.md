@@ -45,7 +45,7 @@ Fine-grained PAT（`claude-issue-dispatch.yml`冒頭のコメント参照）。
 
 | ワークフロー | `WORKFLOW_PAT`を使う箇所 | 目的 |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `actions/checkout`の`token`（L147）、実装ステップの`GH_TOKEN`と`github_token`（L749・L752）、`mode=additional`時の checkout（L668） | ワークフローファイルへの push、push/PR 作成による`issue-labels.yml`の発火 |
+| `claude-issue-dispatch.yml` | `actions/checkout`の`token`、実装ステップの`GH_TOKEN`と`github_token`、`mode=additional`時の checkout、計画/実装フォールバック検証ステップの自動リトライで`gh workflow run`を呼ぶ際の`GH_TOKEN`（#497） | ワークフローファイルへの push、push/PR 作成による`issue-labels.yml`の発火、`workflow_dispatch`による自己再起動（`GITHUB_TOKEN`では発火しないため） |
 | `claude-conflict-resolve.yml` | checkout の`token`（L89）、コンフリクト解消ステップの`GH_TOKEN`・`github_token`（L177・L189）、L130 | 同上 |
 | `claude-review-develop.yml` | ラベル付け替えステップの`GH_TOKEN`（L245） | 後続ジョブを発火させるため（issue #112） |
 | `release-develop-to-main.yml` | checkout の`token`（L68）、および各ステップの`GH_TOKEN`（L80・L122・L211・L279）、`github_token`（L151） | バージョン bump コミットの push と、それによる自身の再起動 |
@@ -95,9 +95,12 @@ least privilege の方針が既に実践されている**。計画ステップ�
 ### 3-1. `permissions:`ブロックが無効化される
 
 `claude-issue-dispatch.yml`のジョブは`contents: write` / `pull-requests: write` / `issues: write` /
-`actions: read` / `id-token: write`と最小権限を宣言している（L114〜）。しかし**この宣言が効くのは
-`GITHUB_TOKEN`に対してだけ**であり、PAT 経由の操作は一切制約を受けない。ワークフローファイル上の
-least privilege 宣言が形骸化する。
+`actions: read` / `id-token: write`と最小権限を宣言している（L114〜）。#497の自己リトライ機構
+（フォールバック検証ステップが`gh workflow run`で自分自身を再起動する）は`GITHUB_TOKEN`では
+`workflow_dispatch`を発火できないため`secrets.WORKFLOW_PAT`で呼び出しており、`GITHUB_TOKEN`側の
+`permissions:`に`actions: write`を追加する必要はない（least privilegeの観点から`actions: read`の
+ままにしている）。ただしこの宣言が効くのは**`GITHUB_TOKEN`に対してだけ**であり、PAT 経由の操作は
+一切制約を受けない。ワークフローファイル上の least privilege 宣言が形骸化する。
 
 ### 3-2. 自己ループ防止の第1層・第2層が同時に無効化される
 
