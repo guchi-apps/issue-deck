@@ -194,6 +194,9 @@ C（設定ファイル + 共通ワークフロー本体を可能な限り集約�
 6. セキュリティレビュー（上記6。信頼境界の設計を固めてから展開開始する）
 7. テンプレートPR自動作成 or CLIスキャフォールディングの実装（上記1。方式比較の結論を受けて）
 
+なお、実際に自動化が導入・検討されているリポジトリの一覧は
+[docs/supported-repositories.md](supported-repositories.md)に記録する。
+
 ## ケーススタディ: m-guchi/shopping-list での実現可能性（issue #357）
 
 issue #357 の調査として、実際の連携候補である`m-guchi/shopping-list`リポジトリを対象に、
