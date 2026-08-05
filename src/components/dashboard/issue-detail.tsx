@@ -32,7 +32,6 @@ import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-b
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,7 +95,11 @@ export function IssueDetail({
   onCreateFollowupIssue,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
-  const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
+  const {
+    run: workflowRun,
+    runId: workflowRunId,
+    commentId: workflowRunCommentId,
+  } = useIssueWorkflowRun(issue, comments);
   const {
     updateIssue,
     deleteIssue,
@@ -488,7 +491,6 @@ export function IssueDetail({
           <WorkflowStatusSteps labels={issue.labels} />
           <div className="flex flex-wrap items-center gap-2">
             <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
-            <WorkflowRunStatus run={workflowRun} />
             <CancelWorkflowRunButton
               run={workflowRun}
               runId={workflowRunId}
@@ -528,6 +530,8 @@ export function IssueDetail({
               mergeApprovalPending={isMergeApprovalPending(issue.labels)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
+              workflowRun={workflowRun}
+              workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}
               onReject={handleReject}
               onWithdraw={handleWithdraw}
