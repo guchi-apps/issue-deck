@@ -397,6 +397,7 @@ export function IssueDeckShell({
                     onSelectRepository={selectRepository}
                     onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
                     onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                    onOpenRepositorySettings={setRepositorySettingsTarget}
                   />
                 )}
 

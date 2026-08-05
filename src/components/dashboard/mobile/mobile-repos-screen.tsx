@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Eye, EyeOff, FolderGit2, Lock, Search } from "lucide-react";
+import { Archive, Eye, EyeOff, FolderGit2, Lock, Search, Settings } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -14,6 +14,7 @@ type MobileReposScreenProps = {
   onSelectRepository: (repository: ConnectedRepository) => void;
   onHideRepository: (repository: ConnectedRepository) => void;
   onShowRepository: (repository: ConnectedRepository) => void;
+  onOpenRepositorySettings: (repository: ConnectedRepository) => void;
 };
 
 export function MobileReposScreen({
@@ -21,6 +22,7 @@ export function MobileReposScreen({
   onSelectRepository,
   onHideRepository,
   onShowRepository,
+  onOpenRepositorySettings,
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
@@ -102,6 +104,14 @@ export function MobileReposScreen({
                           )}
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenRepositorySettings(repo)}
+                      title="リポジトリの設定"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <Settings className="size-4" />
                     </button>
                     <button
                       type="button"
