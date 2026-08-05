@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getWorkflowStepIndex, hasActiveWorkflowStep } from "@/lib/github/workflow-status";
+import {
+  canCreateFollowupFromComment,
+  getWorkflowStepIndex,
+  hasActiveWorkflowStep,
+} from "@/lib/github/workflow-status";
 import type { IssueLabel } from "@/types/issue";
 
 function labels(...names: string[]): IssueLabel[] {
@@ -28,5 +32,24 @@ describe("hasActiveWorkflowStep", () => {
     // 現在ステップの判定（先頭一致）では05.developになるケース
     expect(getWorkflowStepIndex(labels("05.develop", "07.m:marge"))).toBe(2);
     expect(hasActiveWorkflowStep(labels("05.develop", "07.m:marge"))).toBe(true);
+  });
+});
+
+describe("canCreateFollowupFromComment", () => {
+  it("closedなissueではtrueを返す", () => {
+    expect(canCreateFollowupFromComment({ state: "closed", labels: labels() })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "closed", labels: labels("01.wip") })).toBe(true);
+  });
+
+  it("openかつdevelopマージ未満の段階ではfalseを返す", () => {
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels() })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("01.wip") })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("03.d:marge") })).toBe(false);
+  });
+
+  it("openでもdevelopマージ以降の段階ではtrueを返す", () => {
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("05.develop") })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("07.m:marge") })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("09.main") })).toBe(true);
   });
 });
