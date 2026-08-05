@@ -326,6 +326,20 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
 スクリプトのステップとしてモード判定直後に配置し、確実に投稿する（下記「計画提示ステップの信頼性
 確保」のフォールバック検証と同じ考え方）。
 
+### Claudeアプリへの引き継ぎ時にコメントで記録する（#412）
+
+無人実行（`claude-issue-dispatch.yml`）が行き詰まった場合の逃げ道として、「Claudeアプリで開く」
+ボタン（issue #360）が用意されている。しかしこのボタンは単なる`<a href>`リンクのため、クリック
+してclaude.aiへ遷移してもissue側には何の記録も残らず、「無人実行がフォールバックしたまま放置
+されている」のか「実は人間がClaudeアプリで作業中」なのかが区別できない問題があった。
+
+これは上記「着手直後の通知コメント」と同じ考え方で、「エージェント自身が気を利かせてコメントを
+残す」ことに頼らず、UI側（issue-deckアプリ自身）がボタン押下時に確実に引き継ぎ記録コメントを
+投稿してから遷移する方式にした（`buildClaudeAppHandoffCommentBody`）。コメント本文は
+`@claude`から書き始めない（`claude-issue-dispatch.yml`の`startsWith("@claude")`トリガーを
+誤爆させ、無人実行を再起動してしまうため）。コメント投稿はページ遷移をブロックしないfire-and-
+forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は必ず行う。
+
 ### 無人実行時の権限モード（許可ツールリスト）
 
 - **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。

@@ -1,4 +1,4 @@
-import type { Issue } from "@/types/issue";
+import type { Issue, IssueComment } from "@/types/issue";
 
 /**
  * Claudeアプリ（claude.ai/code）で新規セッションを開始する画面のベースURL。
@@ -33,4 +33,25 @@ export function buildClaudeAppUrl(
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
   return `${CLAUDE_APP_NEW_SESSION_URL}?${query}`;
+}
+
+/**
+ * 「Claudeアプリで開く」ボタン押下時に投稿する引き継ぎ記録コメントの末尾に付与するマーカー
+ * （claude-issue-dispatch.ymlやissue-labels.ymlの状態管理と区別するための検出用）。
+ */
+export const CLAUDE_APP_HANDOFF_COMMENT_MARKER = "<!-- issue-deck-claude-app-handoff -->";
+
+/**
+ * 「Claudeアプリで開く」ボタン押下時にIssueへ投稿する引き継ぎ記録コメントの本文を組み立てる。
+ *
+ * `@claude`から書き始めるとclaude-issue-dispatch.ymlの`startsWith("@claude")`トリガーを
+ * 誤爆させてしまう（無人実行を再起動してしまう）ため、先頭には付けない。
+ */
+export function buildClaudeAppHandoffCommentBody(): string {
+  return `🤖 Claudeアプリでの作業に切り替えます。\n\n${CLAUDE_APP_HANDOFF_COMMENT_MARKER}`;
+}
+
+/** 指定したコメントが、上記の引き継ぎ記録コメントかどうかを判定する */
+export function isClaudeAppHandoffComment(comment: Pick<IssueComment, "body">): boolean {
+  return comment.body.includes(CLAUDE_APP_HANDOFF_COMMENT_MARKER);
 }
