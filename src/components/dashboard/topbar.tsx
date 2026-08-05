@@ -296,7 +296,6 @@ export function TopBar({
             />
           </div>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel>GitHub API消費の内訳</DropdownMenuLabel>
           <div className="px-1.5 pb-1.5">
             <GithubApiUsageList
               data={apiUsage}

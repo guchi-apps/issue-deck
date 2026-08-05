@@ -16,12 +16,15 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Star,
+  Trash2,
   XCircle,
 } from "lucide-react";
 
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
+import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -65,6 +68,7 @@ import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
+import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -74,6 +78,7 @@ type IssueDetailProps = {
   issues: Issue[];
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
 };
@@ -83,12 +88,20 @@ export function IssueDetail({
   issues,
   onEdit,
   onIssueUpdated,
+  onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { run: workflowRun, runId: workflowRunId } = useIssueWorkflowRun(issue, comments);
-  const { updateIssue, isSubmitting } = useIssueMutations();
+  const {
+    updateIssue,
+    deleteIssue,
+    isSubmitting,
+    error: deleteError,
+    setError: setDeleteError,
+  } = useIssueMutations();
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const {
     createComment,
     updateComment,
@@ -136,6 +149,18 @@ export function IssueDetail({
       state: "open",
     });
     if (updated) onIssueUpdated(updated);
+  }
+
+  async function handleDelete() {
+    if (!issue) return;
+    const ok = await deleteIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+    });
+    if (ok) {
+      setIsDeleteDialogOpen(false);
+      onIssueDeleted(issue);
+    }
   }
 
   async function handleCreateComment() {
@@ -412,6 +437,17 @@ export function IssueDetail({
                       再オープンする
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={isSubmitting}
+                    onSelect={() => {
+                      setDeleteError(null);
+                      setIsDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 />
+                    Issueを削除
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -456,6 +492,10 @@ export function IssueDetail({
               repositoryFullName={issue.repositoryFullName}
             />
           </div>
+
+          <Separator />
+
+          <IssueAiSummary issue={issue} />
 
           <Separator />
 
@@ -516,6 +556,12 @@ export function IssueDetail({
                 }}
               />
               <div className="flex justify-end gap-2">
+                {canCreateFollowupFromComment(issue) && (
+                  <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
+                    <FilePlus2 />
+                    引き継いでIssueを作成
+                  </Button>
+                )}
                 {canAskClaude(issue) && (
                   <Button
                     variant="outline"
@@ -557,6 +603,14 @@ export function IssueDetail({
           <IssuePropertiesPanel issue={issue} onIssueUpdated={onIssueUpdated} />
         </SheetContent>
       </Sheet>
+
+      <DeleteIssueDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        onConfirm={handleDelete}
+        isDeleting={isSubmitting}
+        error={deleteError}
+      />
     </div>
   );
 }

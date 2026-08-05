@@ -23,6 +23,17 @@ export type UpdateIssueInput = {
   assignee?: string | null;
 };
 
+export type DeleteIssueInput = {
+  repositoryFullName: string;
+  number: number;
+};
+
+function errorMessageForResponse(status: number, data: { error?: string; message?: string }): string {
+  return data.error === "github_api_error" && data.message
+    ? data.message
+    : `リクエストに失敗しました (${status})`;
+}
+
 async function postJson(url: string, method: "POST" | "PATCH", input: unknown): Promise<Issue> {
   const res = await fetch(url, {
     method,
@@ -31,11 +42,7 @@ async function postJson(url: string, method: "POST" | "PATCH", input: unknown): 
   });
   if (!res.ok) {
     const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
-    throw new Error(
-      data.error === "github_api_error" && data.message
-        ? data.message
-        : `リクエストに失敗しました (${res.status})`,
-    );
+    throw new Error(errorMessageForResponse(res.status, data));
   }
   const data: { issue: Issue } = await res.json();
   return data.issue;
@@ -71,5 +78,27 @@ export function useIssueMutations() {
     }
   }
 
-  return { createIssue, updateIssue, isSubmitting, error, setError };
+  async function deleteIssue(input: DeleteIssueInput): Promise<boolean> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        repositoryFullName: input.repositoryFullName,
+        number: String(input.number),
+      });
+      const res = await fetch(`/api/issues?${params.toString()}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+        throw new Error(errorMessageForResponse(res.status, data));
+      }
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return { createIssue, updateIssue, deleteIssue, isSubmitting, error, setError };
 }

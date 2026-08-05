@@ -182,3 +182,48 @@ export async function deleteComment(
     "DELETE",
   );
 }
+
+/**
+ * IssueをGitHub上から完全に削除する。
+ * REST APIにはIssue削除のエンドポイントが存在しないため、GraphQLの`deleteIssue`ミューテーションを使う。
+ * このミューテーションはIssueのnode_id（GraphQL ID）を要求するが、REST APIのレスポンスにしか
+ * 含まれないため、事前にREST APIでIssueを取得してnode_idを取得してから削除する。
+ */
+export async function deleteIssue(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<void> {
+  const issueRes = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`, token);
+  if (!issueRes.ok) {
+    const detail = await issueRes.text().catch(() => "");
+    throw new GithubApiError(
+      issueRes.status,
+      `GitHub API request failed: ${issueRes.status} ${detail}`,
+    );
+  }
+  const { node_id: nodeId }: { node_id: string } = await issueRes.json();
+
+  const graphqlRes = await githubFetch(`${GITHUB_API}/graphql`, token, {
+    method: "POST",
+    body: {
+      query: `mutation($issueId: ID!) { deleteIssue(input: { issueId: $issueId }) { clientMutationId } }`,
+      variables: { issueId: nodeId },
+    },
+  });
+  if (!graphqlRes.ok) {
+    const detail = await graphqlRes.text().catch(() => "");
+    throw new GithubApiError(
+      graphqlRes.status,
+      `GitHub GraphQL request failed: ${graphqlRes.status} ${detail}`,
+    );
+  }
+  const graphqlData: { errors?: { message: string }[] } = await graphqlRes.json();
+  if (graphqlData.errors?.length) {
+    throw new GithubApiError(
+      403,
+      `GitHub GraphQL deleteIssue failed: ${graphqlData.errors.map((e) => e.message).join("; ")}`,
+    );
+  }
+}

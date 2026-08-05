@@ -120,7 +120,7 @@ export function IssueDeckShell({
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
-    setCreateDialogBody(`関連: #${issue.number}\n\n`);
+    setCreateDialogBody(`## Issue #${issue.number} に関連するセクションです\n\n`);
     setCreateDialogOpen(true);
   }
 
@@ -135,6 +135,11 @@ export function IssueDeckShell({
   function handleIssueUpdated(issue: Issue) {
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
     setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
+  }
+
+  function handleIssueDeleted(issue: Issue) {
+    setIssues((prev) => prev.filter((item) => item.id !== issue.id));
+    setSelectedIssue((prev) => (prev && prev.id === issue.id ? null : prev));
   }
 
   // PC・スマホどちらで開いていても、現在表示中のIssueを検知して既読化する
@@ -409,6 +414,7 @@ export function IssueDeckShell({
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
+                    onIssueDeleted={handleIssueDeleted}
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                     onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
@@ -431,6 +437,7 @@ export function IssueDeckShell({
               repositories={repositories}
               selectedRepoFullName={filters.repo}
               onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
+              onClearRepository={() => setFilter("repo", null)}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
               labelSummary={labelSummary}
@@ -467,6 +474,7 @@ export function IssueDeckShell({
             issues={issues}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
+            onIssueDeleted={handleIssueDeleted}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
             onCreateFollowupIssue={openFollowupIssueDialog}
           />

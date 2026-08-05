@@ -4,7 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { createIssue, updateIssue } from "@/lib/github/issues-api";
+import { createIssue, deleteIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 
@@ -140,6 +140,46 @@ async function handlePATCH(request: NextRequest) {
     return NextResponse.json({ issue });
   } catch (error) {
     console.error(`[PATCH /api/issues] ${repositoryFullName}#${number}:`, error);
+    return NextResponse.json(
+      { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
+      { status: 502 },
+    );
+  }
+}
+
+export function DELETE(request: NextRequest) {
+  return withGithubApiFeature("issue_write", () => handleDELETE(request));
+}
+
+async function handleDELETE(request: NextRequest) {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const repositoryFullName = searchParams.get("repositoryFullName");
+  const numberParam = searchParams.get("number");
+
+  if (!repositoryFullName || !repositoryFullName.includes("/") || !numberParam || Number.isNaN(Number(numberParam))) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const number = Number(numberParam);
+
+  const [owner, repo] = repositoryFullName.split("/");
+
+  const repository = await findRepository(userId, repositoryFullName);
+  if (!repository) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  try {
+    const token = await getInstallationToken(repository.installation.installationId);
+    await deleteIssue(owner, repo, number, token);
+    await db.issue.deleteMany({ where: { repositoryId: repository.id, number } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error(`[DELETE /api/issues] ${repositoryFullName}#${number}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },
