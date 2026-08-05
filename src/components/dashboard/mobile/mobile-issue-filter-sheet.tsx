@@ -49,8 +49,8 @@ function Pill({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-11 items-center rounded-full px-4 text-sm whitespace-nowrap ring-1 ring-inset ring-border",
-        active && "bg-primary/10 text-primary ring-primary",
+        "flex h-11 items-center rounded-full bg-muted px-4 text-sm whitespace-nowrap text-muted-foreground",
+        active && "bg-primary/10 text-primary",
       )}
     >
       {children}
