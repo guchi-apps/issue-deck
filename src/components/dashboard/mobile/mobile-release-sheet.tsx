@@ -18,6 +18,10 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import {
+  formatDevelopVersionDisplay,
+  formatMainVersionDisplay,
+} from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -78,11 +82,23 @@ export function MobileReleaseSheet({ open, onOpenChange, repository, issues }: M
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">main</span>
-                <span>{releaseStatus.mainVersion ? `v${releaseStatus.mainVersion}` : "-"}</span>
+                <span>
+                  {formatMainVersionDisplay(
+                    releaseStatus.mainVersion,
+                    releaseStatus.developVersion,
+                    releaseStatus.phase,
+                  )}
+                </span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">develop</span>
-                <span>{releaseStatus.developVersion ? `v${releaseStatus.developVersion}` : "-"}</span>
+                <span>
+                  {formatDevelopVersionDisplay(
+                    releaseStatus.developVersion,
+                    releaseStatus.bumpPullRequest?.version ?? null,
+                    releaseStatus.phase,
+                  )}
+                </span>
               </div>
               <ReleaseProgress status={releaseStatus} />
               <Button
