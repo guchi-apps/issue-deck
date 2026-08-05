@@ -1,3 +1,5 @@
+import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
+
 const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -28,13 +30,19 @@ function truncate(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength)}...(省略)`;
 }
 
+/** 00〜09番台のラベルはユーザーチェック・進捗管理用（CLAUDE.md参照）のため、自動生成の選択対象から除外する。 */
+function isSelectableLabel(name: string): boolean {
+  return !isAttentionLabel(name) && matchStatusStep(name) === null;
+}
+
 /** Issue本文と選択可能なラベル一覧から、タイトル・ラベル提案生成用プロンプトを組み立てる。 */
 export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
   const { body, availableLabels } = input;
+  const selectableLabels = availableLabels.filter((label) => isSelectableLabel(label.name));
 
   const labelsText =
-    availableLabels.length > 0
-      ? availableLabels
+    selectableLabels.length > 0
+      ? selectableLabels
           .map((label) => `- ${label.name}${label.description ? `: ${label.description}` : ""}`)
           .join("\n")
       : "(利用可能なラベルなし)";
@@ -121,7 +129,9 @@ export async function generateIssueSuggestion(
   const { title, labels: rawLabels } = parsed as { title: string; labels: unknown[] };
 
   const availableByLowerName = new Map(
-    input.availableLabels.map((label) => [label.name.toLowerCase(), label.name]),
+    input.availableLabels
+      .filter((label) => isSelectableLabel(label.name))
+      .map((label) => [label.name.toLowerCase(), label.name]),
   );
   const labels = rawLabels
     .filter((label): label is string => typeof label === "string")
