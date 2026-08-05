@@ -2,17 +2,17 @@
 
 import { useEffect, useState } from "react";
 
+/** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
+export type CiState = "pending" | "success" | "failure" | "unknown";
+
 export type ReleasePullRequest = {
   number: number;
   url: string;
   title: string;
+  ciState: CiState | null;
 };
 
-/** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
-export type CiState = "pending" | "success" | "failure" | "unknown";
-
 export type BumpPullRequest = ReleasePullRequest & {
-  ciState: CiState | null;
   /** バンプPRのブランチ名から取り出した次バージョン（例: "1.2.3"）。取得できない場合はnull */
   version: string | null;
 };
