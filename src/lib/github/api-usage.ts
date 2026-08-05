@@ -10,6 +10,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * デプロイで消えるが、消費の偏りを把握し改善の効果を測る用途には足りる）。
  * 用途の指定は`withGithubApiFeature()`でリクエスト単位に文脈として持たせ、
  * GitHub APIを叩く各関数の引数を増やさずに済ませている。
+ *
+ * この計測はプロセス単位で、ユーザー・セッション・デバイスによるフィルタを持たない
+ * （単一プロセスでデプロイされている前提に暗黙的に依存している。複数インスタンス構成に
+ * なるとインスタンスごとに集計が分裂する）。
+ *
+ * 7日・30日規模への集計拡張は、現状のプロセス内メモリ保持のままでは再起動で消えるため
+ * 別途永続化の検討が必要になる。
  */
 
 export const GITHUB_API_FEATURES = [
@@ -100,6 +107,11 @@ function bucketStartAt(now: number): number {
   return Math.floor(now / BUCKET_MS) * BUCKET_MS;
 }
 
+/** 正時（0分）を起点とした、現在の1時間ウィンドウの開始時刻を返す */
+function currentHourStartAt(now: number): number {
+  return Math.floor(now / HOUR_MS) * HOUR_MS;
+}
+
 function pruneBuckets(now: number): void {
   const oldest = now - USAGE_WINDOW_MS;
   buckets = buckets.filter((bucket) => bucket.startedAt >= oldest);
@@ -130,14 +142,14 @@ export function recordGithubApiCall(
 
 export type GithubApiUsageEndpoint = {
   endpoint: string;
-  lastHour: number;
+  currentHour: number;
   last24h: number;
 };
 
 export type GithubApiUsageFeature = {
   key: GithubApiFeature;
   label: string;
-  lastHour: number;
+  currentHour: number;
   last24h: number;
   /** 呼び出し数の多い順 */
   endpoints: GithubApiUsageEndpoint[];
@@ -146,7 +158,9 @@ export type GithubApiUsageFeature = {
 export type GithubApiUsageSummary = {
   /** 計測を開始した時刻(epoch ms)。プロセスの再起動でリセットされる */
   measuringSince: number;
-  totalLastHour: number;
+  /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
+  currentHourStartedAt: number;
+  totalCurrentHour: number;
   totalLast24h: number;
   /** 直近24時間の呼び出し数が多い順 */
   features: GithubApiUsageFeature[];
@@ -156,16 +170,16 @@ export type GithubApiUsageSummary = {
 export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsageSummary {
   pruneBuckets(now);
 
-  const lastHourFrom = now - HOUR_MS;
-  const totals = new Map<string, { lastHour: number; last24h: number }>();
+  const currentHourStartedAt = currentHourStartAt(now);
+  const totals = new Map<string, { currentHour: number; last24h: number }>();
 
   for (const bucket of buckets) {
-    // バケットの開始時刻が1時間以内なら直近1時間ぶんとして数える
-    const withinHour = bucket.startedAt >= bucketStartAt(lastHourFrom);
+    // バケットの開始時刻が現在の正時起点1時間ウィンドウ内なら数える（ローリング60分ではない）
+    const withinCurrentHour = bucket.startedAt >= currentHourStartedAt;
     for (const [key, count] of bucket.counts) {
-      const total = totals.get(key) ?? { lastHour: 0, last24h: 0 };
+      const total = totals.get(key) ?? { currentHour: 0, last24h: 0 };
       total.last24h += count;
-      if (withinHour) total.lastHour += count;
+      if (withinCurrentHour) total.currentHour += count;
       totals.set(key, total);
     }
   }
@@ -177,13 +191,13 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
     const entry = byFeature.get(feature) ?? {
       key: feature,
       label: FEATURE_LABELS.get(feature) ?? feature,
-      lastHour: 0,
+      currentHour: 0,
       last24h: 0,
       endpoints: [],
     };
-    entry.lastHour += total.lastHour;
+    entry.currentHour += total.currentHour;
     entry.last24h += total.last24h;
-    entry.endpoints.push({ endpoint, lastHour: total.lastHour, last24h: total.last24h });
+    entry.endpoints.push({ endpoint, currentHour: total.currentHour, last24h: total.last24h });
     byFeature.set(feature, entry);
   }
 
@@ -196,7 +210,8 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
 
   return {
     measuringSince,
-    totalLastHour: features.reduce((sum, feature) => sum + feature.lastHour, 0),
+    currentHourStartedAt,
+    totalCurrentHour: features.reduce((sum, feature) => sum + feature.currentHour, 0),
     totalLast24h: features.reduce((sum, feature) => sum + feature.last24h, 0),
     features,
   };

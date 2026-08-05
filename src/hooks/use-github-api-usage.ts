@@ -4,14 +4,14 @@ import { useEffect, useState } from "react";
 
 export type GithubApiUsageEndpoint = {
   endpoint: string;
-  lastHour: number;
+  currentHour: number;
   last24h: number;
 };
 
 export type GithubApiUsageFeature = {
   key: string;
   label: string;
-  lastHour: number;
+  currentHour: number;
   last24h: number;
   endpoints: GithubApiUsageEndpoint[];
 };
@@ -19,7 +19,9 @@ export type GithubApiUsageFeature = {
 export type GithubApiUsage = {
   /** 計測を開始した時刻(epoch ms)。アプリの再起動でリセットされる */
   measuringSince: number;
-  totalLastHour: number;
+  /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
+  currentHourStartedAt: number;
+  totalCurrentHour: number;
   totalLast24h: number;
   features: GithubApiUsageFeature[];
 };
