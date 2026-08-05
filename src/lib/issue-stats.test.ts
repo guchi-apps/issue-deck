@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyIssueFilters,
-  computeLabelFilterPresetCounts,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -11,7 +10,6 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import type { LabelFilterPreset } from "@/lib/github/approval-labels";
 import type { Issue } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -32,6 +30,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     commentCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    closedAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
@@ -159,33 +158,6 @@ describe("computeLabelSummary", () => {
   });
 });
 
-describe("computeLabelFilterPresetCounts", () => {
-  const presets: LabelFilterPreset[] = [
-    { key: "check-user", label: "ユーザーの確認待ち", labels: ["00.check-user"] },
-    { key: "in-progress", label: "実行中", labels: ["03.d:marge", "07.m:marge"] },
-  ];
-
-  it("プリセットごとにラベルOR一致するIssue数を返す", () => {
-    const issues = [
-      makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-      makeIssue({ id: "2", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
-      makeIssue({ id: "3", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
-      makeIssue({ id: "4", labels: [] }),
-    ];
-    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
-      "check-user": 1,
-      "in-progress": 2,
-    });
-  });
-
-  it("該当するIssueがない場合は0を返す", () => {
-    const issues = [makeIssue({ id: "1", labels: [] })];
-    expect(computeLabelFilterPresetCounts(issues, presets)).toEqual({
-      "check-user": 0,
-      "in-progress": 0,
-    });
-  });
-});
 
 describe("reconcileIssues", () => {
   it("内容が変わっていないIssueは直前のオブジェクト参照を再利用する", () => {
@@ -257,6 +229,88 @@ describe("time-dependent stats", () => {
       const issues = [makeIssue({ id: "1" }), makeIssue({ id: "2" })];
       expect(filterIssuesByView(issues, "all", null)).toHaveLength(2);
     });
+
+    it("ラベルベースのビューは該当ラベルを持つIssueのみ返す", () => {
+      const issues = [
+        makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
+        makeIssue({ id: "2", labels: [{ name: "01.wip", color: "blue", description: null }] }),
+        makeIssue({ id: "3", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
+        makeIssue({ id: "4", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
+        makeIssue({ id: "5", labels: [] }),
+      ];
+      expect(filterIssuesByView(issues, "check-user", null).map((issue) => issue.id)).toEqual(["1"]);
+      expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
+        "2",
+        "3",
+      ]);
+      expect(filterIssuesByView(issues, "release-pending", null).map((issue) => issue.id)).toEqual([
+        "4",
+      ]);
+    });
+
+    it("view=recently-mergedはリポジトリごとに最新リリース分のみ返す", () => {
+      const mainLabel = { name: "09.main", color: "green", description: null };
+      const issues = [
+        // owner/repo-a の最新リリース（同一workflow run内で連続close）
+        makeIssue({
+          id: "1",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-09T10:00:00.000Z",
+        }),
+        makeIssue({
+          id: "2",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-09T10:00:20.000Z",
+        }),
+        // owner/repo-a の1つ前のリリース
+        makeIssue({
+          id: "3",
+          repositoryFullName: "owner/repo-a",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-05T10:00:00.000Z",
+        }),
+        // 別リポジトリは別リリースとして扱う
+        makeIssue({
+          id: "4",
+          repositoryFullName: "owner/repo-b",
+          state: "closed",
+          labels: [mainLabel],
+          closedAt: "2026-01-02T10:00:00.000Z",
+        }),
+        // 09.mainがないclose済みIssueは対象外
+        makeIssue({ id: "5", state: "closed", closedAt: "2026-01-09T10:00:10.000Z" }),
+      ];
+      expect(filterIssuesByView(issues, "recently-merged", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "2",
+        "4",
+      ]);
+    });
+
+    it("view=recently-mergedの基準時刻は絞り込み前の集合から求める", () => {
+      const mainLabel = { name: "09.main", color: "green", description: null };
+      const latest = makeIssue({
+        id: "1",
+        state: "closed",
+        labels: [mainLabel],
+        closedAt: "2026-01-09T10:00:00.000Z",
+      });
+      const previous = makeIssue({
+        id: "2",
+        state: "closed",
+        labels: [mainLabel],
+        closedAt: "2026-01-05T10:00:00.000Z",
+      });
+      // 検索などで最新リリース分が絞り込まれて消えても、古いリリース分は現れない
+      expect(
+        filterIssuesByView([previous], "recently-merged", null, [latest, previous]),
+      ).toEqual([]);
+    });
   });
 
   describe("computeNavCounts", () => {
@@ -268,6 +322,7 @@ describe("time-dependent stats", () => {
           author: { login: "me" },
           favorite: true,
           updatedAt: "2026-01-09T00:00:00.000Z",
+          labels: [{ name: "00.check-user", color: "red", description: null }],
         }),
         makeIssue({
           id: "2",
@@ -277,13 +332,33 @@ describe("time-dependent stats", () => {
           updatedAt: "2025-01-01T00:00:00.000Z",
         }),
       ];
-      expect(computeNavCounts(issues, "me")).toEqual({
+      expect(computeNavCounts(issues, issues, "me")).toEqual({
         all: 2,
         assigned: 1,
         created: 1,
         favorites: 1,
         recent: 1,
+        "check-user": 1,
+        "in-progress": 0,
+        "release-pending": 0,
+        "recently-merged": 0,
       });
+    });
+
+    it("close済みIssueが対象のビューはissuesIgnoringStateを基準に数える", () => {
+      const openIssues = [makeIssue({ id: "1" })];
+      const allIssues = [
+        ...openIssues,
+        makeIssue({
+          id: "2",
+          state: "closed",
+          labels: [{ name: "09.main", color: "green", description: null }],
+          closedAt: "2026-01-09T10:00:00.000Z",
+        }),
+      ];
+      const counts = computeNavCounts(openIssues, allIssues, null);
+      expect(counts.all).toBe(1);
+      expect(counts["recently-merged"]).toBe(1);
     });
   });
 

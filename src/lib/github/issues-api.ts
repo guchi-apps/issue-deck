@@ -22,6 +22,7 @@ export type GithubApiIssue = {
   comments: number;
   created_at: string;
   updated_at: string;
+  closed_at: string | null;
   pull_request?: unknown;
 };
 

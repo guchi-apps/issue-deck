@@ -74,6 +74,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     milestoneClosed: raw.milestone?.closed_issues ?? null,
     githubCreatedAt: new Date(raw.created_at),
     githubUpdatedAt,
+    githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
   };
 
