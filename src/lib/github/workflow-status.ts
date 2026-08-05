@@ -1,4 +1,4 @@
-import type { IssueLabel } from "@/types/issue";
+import type { Issue, IssueLabel } from "@/types/issue";
 
 export type WorkflowStep = {
   /** 対応するGitHubラベル名 */
@@ -41,4 +41,19 @@ export function getWorkflowStepIndex(labels: IssueLabel[]): number | null {
 export function hasActiveWorkflowStep(labels: IssueLabel[]): boolean {
   const names = new Set(labels.map((label) => label.name));
   return WORKFLOW_STEPS.some((step) => step.active && names.has(step.labelName));
+}
+
+/**
+ * コメント欄の「引き継いでIssueを作成」ボタンを表示すべきかどうか。
+ * このissueで直接修正を続けるのが難しい（developへのPRがマージ済み、またはissueがclosed）
+ * 場合にのみ表示し、まだ同じブランチで修正できる段階では非表示にする（#452）。
+ */
+export function canCreateFollowupFromComment(issue: Pick<Issue, "state" | "labels">): boolean {
+  if (issue.state === "closed") return true;
+  const index = getWorkflowStepIndex(issue.labels);
+  if (index === null) return false;
+  const developMergedIndex = WORKFLOW_STEPS.findIndex(
+    (step) => step.labelName === DEVELOP_MERGED_LABEL_NAME,
+  );
+  return index >= developMergedIndex;
 }

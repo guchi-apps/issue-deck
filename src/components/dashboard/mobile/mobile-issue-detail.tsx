@@ -72,6 +72,7 @@ import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
+import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -655,6 +656,12 @@ export function MobileIssueDetail({
               }}
             />
             <div className="flex justify-end gap-2">
+              {canCreateFollowupFromComment(issue) && (
+                <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
+                  <FilePlus2 />
+                  引き継いでIssueを作成
+                </Button>
+              )}
               {canAskClaude(issue) && (
                 <Button
                   variant="outline"
