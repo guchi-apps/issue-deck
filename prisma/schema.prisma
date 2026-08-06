@@ -24,12 +24,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userInstallations  UserInstallation[]
-  hiddenRepositories HiddenRepository[]
-  favoriteIssues     FavoriteIssue[]
-  quickFilters       QuickFilter[]
-  commentReads       IssueCommentRead[]
-  deployChecks       IssueDeployCheck[]
+  userInstallations    UserInstallation[]
+  hiddenRepositories   HiddenRepository[]
+  favoriteRepositories FavoriteRepository[]
+  favoriteIssues       FavoriteIssue[]
+  quickFilters         QuickFilter[]
+  commentReads         IssueCommentRead[]
+  deployChecks         IssueDeployCheck[]
 }
 
 // --- GitHub App 連携 ---
@@ -94,9 +95,10 @@ model Repository {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  installation GithubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  installation GithubInstallation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
   issues       Issue[]
   hiddenBy     HiddenRepository[]
+  favoritedBy  FavoriteRepository[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -104,6 +106,21 @@ model Repository {
 
 // ユーザーごとに左メニューで非表示にしたリポジトリ
 model HiddenRepository {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
+}
+
+// ユーザーごとにお気に入り登録したリポジトリ（ホーム画面に表示する）
+model FavoriteRepository {
   id           String @id @default(cuid())
   userId       String
   repositoryId String
@@ -152,6 +169,10 @@ model Issue {
   githubClosedAt  DateTime?
   syncedAt        DateTime          @default(now())
 
+  // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
+  // 並べるための基準）。ラベルが外れるとnullに戻す
+  checkUserLabeledAt DateTime?
+
   // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
   aiSummary             String?   @db.Text
   aiSummaryCommentCount Int?
@@ -160,14 +181,32 @@ model Issue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repository      Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  labels          IssueLabel[]
-  favoritedBy     FavoriteIssue[]
-  commentReadBy   IssueCommentRead[]
-  deployCheckedBy IssueDeployCheck[]
+  repository       Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels           IssueLabel[]
+  favoritedBy      FavoriteIssue[]
+  commentReadBy    IssueCommentRead[]
+  deployCheckedBy  IssueDeployCheck[]
+  commentSummaries IssueCommentSummary[]
 
   @@unique([repositoryId, number])
   @@index([repositoryId])
+}
+
+// コメント単位のAI要約（明示的なボタン操作で生成しDBにキャッシュする。コメント編集時にキャッシュ行を削除し、再生成を促す）
+model IssueCommentSummary {
+  id              String   @id @default(cuid())
+  issueId         String
+  githubCommentId BigInt
+  summary         String   @db.Text
+  generatedAt     DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, githubCommentId])
+  @@index([issueId])
 }
 
 // ユーザーごとにお気に入り登録したIssue

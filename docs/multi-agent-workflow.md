@@ -219,6 +219,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
+- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
 
 ## 段階的導入計画
 
@@ -367,14 +368,24 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   GET専用化）が理想だが、Bashの許可ルールはコマンド文字列の前方一致でしか絞り込めずフラグの
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
-- git push・PR作成はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository permissions >
-  Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`ステップの
-  `actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の`github_token`入力・
-  `GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は`.github/workflows/`配下への
-  pushをGitHubの仕様上原理的に許可できない（リポジトリの「Workflow permissions」設定を
-  Read and writeにしても解除されない）ため、`.github/workflows/`自体を変更するIssueを本ワークフロー
-  で扱うにはPATが必須。他のステップ（状態判定・通知コメント・計画提示など、ワークフローファイルを
-  変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
+- git push（ラベル操作を含む）はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository
+  permissions > Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`
+  ステップの`actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の
+  `github_token`入力・`GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は
+  `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
+  「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
+  自体を変更するIssueを本ワークフローで扱うにはPATが必須。他のステップ（状態判定・通知コメント・
+  計画提示など、ワークフローファイルを変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの
+  利用は最小限にとどめている。
+  - 一方、`WORKFLOW_PAT`は`.github/workflows/`配下への書き込み権限を持たせるためのFine-grained PAT
+    であり、実体は人間（m-guchi）名義のトークンである。そのため実装ステップのプロンプトでは、
+    `gh issue comment` / `gh pr create` / `gh pr comment`によるIssue/PRへのコメント投稿・PR作成は
+    ステップ側でenv経由で渡す`DEFAULT_GH_TOKEN`（既定の`GITHUB_TOKEN`、投稿者は`github-actions[bot]`）
+    を明示的に指定して実行するよう指示し、`git push`・`gh issue edit`によるラベル操作のみ既定の
+    `GH_TOKEN`（`WORKFLOW_PAT`）を使う。これを怠ると、エージェントが投稿したコメントやPRが
+    GitHub上・issue-deck画面上で人間（m-guchi）が書いたものとして表示されてしまう問題があった
+    （issue #576）。同じパターンが使われる`.github/workflows/claude-conflict-resolve.yml`の
+    コンフリクト解消ステップも同様の方針にしている。
 
 ### 計画提示ステップの信頼性確保
 
@@ -445,8 +456,9 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
   取りこぼした`03.d:marge`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
   非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
 - `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合は、Phase7で統合した
-  Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメント・PR本文に埋め込んだ
-  うえで通常どおり完了処理（PR作成）まで進める（PR作成自体はブロックしない）。ただし developへの
+  Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメントに埋め込んだ
+  うえで通常どおり完了処理（PR作成）まで進める（PR作成自体はブロックしない。スクリーンショットは
+  PR側ではなくIssue側のスレッドに集約する、#589）。ただし developへの
   実際のマージは`risk-check`ジョブが`00.check-user`を付与するため、人間がスクリーンショットを
   確認するまで保留される（#567）。詳細はPhase7参照。
 - `23.preview-required`が付いていて`24.screenshot-required`が付いていないissueをPhase5経由
@@ -514,8 +526,8 @@ issue #199（「PC画面とスマホ画面のデザインを確認したい」�
 - #256: 無人実行フローにMySQLサービスコンテナを追加し、開発サーバーを起動できるようにする
 - #257: Supabaseを経由しないCI専用ログインバイパス機構
 - #258: 上記3件の上に実際のPlaywright撮影処理を統合し、Phase5の`24.screenshot-required`の
-  挙動を「撮影できないので`00.check-user`を付与して停止する」から「実際に撮影してコメント・
-  PR本文に埋め込んだうえで通常どおり完了処理まで進める」に変更する
+  挙動を「撮影できないので`00.check-user`を付与して停止する」から「実際に撮影してIssue
+  コメントに埋め込んだうえで通常どおり完了処理まで進める」に変更する
 
 ### 画像埋め込みの仕組み（#255）
 
@@ -594,8 +606,9 @@ dispatch.yml`のClaude Codeステップ（実装・PR作成）が、実装・テ
 
 呼び出し元のClaude Codeエージェントは、取得したURLを対象パス明示指定時は`![PC画面](...)`・
 `![スマホ画面](...)`、省略時は`![PC画面](...)`・`![スマホ:ホーム](...)`・
-`![スマホ:イシュー一覧](...)`・`![スマホ:イシュー詳細](...)`というMarkdown画像記法でPR本文・
-完了報告コメントに埋め込む。
+`![スマホ:イシュー一覧](...)`・`![スマホ:イシュー詳細](...)`というMarkdown画像記法で、PR本文・
+PRコメントではなくIssue側の完了報告コメント（`gh issue comment`）に埋め込む（#589。以前はPR本文・
+PRコメントに埋め込んでいたが、視覚確認・承認をイシューコメント側で完結させるため変更した）。
 
 develop向けPRのマージ前には、`risk-check`ジョブが`24.screenshot-required`ラベルの有無を見て
 常に`00.check-user`を付与するため（「developへのマージ前確認要否をIssueラベルでトグルする」・

@@ -79,6 +79,7 @@ import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
@@ -114,6 +115,7 @@ export function MobileIssueDetail({
   onCreateFollowupIssue,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const commentSummary = useIssueCommentSummaries(issue);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -635,11 +637,6 @@ export function MobileIssueDetail({
 
         <Separator />
 
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
-        </div>
-
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
@@ -653,6 +650,11 @@ export function MobileIssueDetail({
             )}
           />
         )}
+
+        <div>
+          <h2 className="mb-2 text-sm font-semibold">説明</h2>
+          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+        </div>
 
         <Separator />
 
@@ -686,6 +688,7 @@ export function MobileIssueDetail({
             isRequestingContinuation={isCommentSubmitting}
             isRequestingPrFix={isCommentSubmitting}
             lastCommentRef={lastCommentRef}
+            commentSummary={commentSummary}
           />
 
           <div className="mt-4 flex flex-col gap-2">
@@ -741,7 +744,7 @@ export function MobileIssueDetail({
         containerRef={scrollContainerRef}
         targetRef={lastCommentRef}
         visible={comments.length > 0}
-        className="left-4 bottom-4"
+        className="left-1/2 bottom-4 h-11 w-20 -translate-x-1/2"
       />
 
       <button

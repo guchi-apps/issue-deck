@@ -11,6 +11,7 @@ import {
   Plus,
   Settings2,
   SlidersHorizontal,
+  Star,
   X,
 } from "lucide-react";
 
@@ -34,6 +35,7 @@ type SidebarNavProps = {
   onClearRepository?: () => void;
   onHideRepository?: (repository: ConnectedRepository) => void;
   onShowRepository?: (repository: ConnectedRepository) => void;
+  onSetRepositoryFavorite?: (repository: ConnectedRepository, favorite: boolean) => void;
   labelSummary: LabelSummary[];
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
@@ -56,6 +58,7 @@ export function SidebarNav({
   onClearRepository,
   onHideRepository,
   onShowRepository,
+  onSetRepositoryFavorite,
   labelSummary,
   selectedLabels = [],
   onSelectLabel,
@@ -162,7 +165,7 @@ export function SidebarNav({
               {visibleRepositories.map((repo) => {
                 const color = getRepoColor(repo.fullName);
                 return (
-                  <li key={repo.id} className="flex items-center gap-1">
+                  <li key={repo.id} className="group/repo flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => onSelectRepository?.(repo)}
@@ -195,6 +198,20 @@ export function SidebarNav({
                           )}
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSetRepositoryFavorite?.(repo, !repo.favorite)}
+                      title={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                      aria-label={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                      className={cn(
+                        "shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground",
+                        repo.favorite
+                          ? "text-yellow-500 opacity-100"
+                          : "text-muted-foreground opacity-0 group-hover/repo:opacity-100",
+                      )}
+                    >
+                      <Star className={cn("size-3.5", repo.favorite && "fill-yellow-400")} />
                     </button>
                     {isEditingRepoVisibility && (
                       <button

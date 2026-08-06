@@ -48,6 +48,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
+import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
@@ -95,6 +96,7 @@ export function IssueDetail({
   onCreateFollowupIssue,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const commentSummary = useIssueCommentSummaries(issue);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -543,6 +545,7 @@ export function IssueDetail({
               isRequestingContinuation={isCommentSubmitting}
               isRequestingPrFix={isCommentSubmitting}
               lastCommentRef={lastCommentRef}
+              commentSummary={commentSummary}
             />
 
             <div className="mt-4 flex flex-col gap-2">

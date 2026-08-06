@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
+import { clearIssueDraft, resolveInitialIssueDraft, useIssueDraftAutosave } from "@/hooks/use-issue-draft";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
@@ -96,18 +97,32 @@ export function CreateIssueDialog({
 
   useEffect(() => {
     if (!open) return;
-    // ダイアログを開くたびにフォームを初期状態へ戻す。外部トリガー（開閉）に同期する一度きりの処理であり、
-    // ループや連鎖的な再レンダリングは発生しない。
+    // ダイアログを開くたびにフォームを初期状態へ戻す。明示的なプリフィル（引用元テキスト等）が
+    // 渡されていればそちらを優先し、なければ保存済みの下書きを復元する。外部トリガー（開閉）に
+    // 同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
+    const draft = resolveInitialIssueDraft({
+      defaultRepositoryFullName,
+      defaultTitle,
+      defaultBody,
+    });
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRepositoryFullName(defaultRepositoryFullName ?? "");
-    setTitle(defaultTitle ?? "");
-    setBody(defaultBody ?? "");
-    setSelectedLabels([]);
-    setAssignee(null);
+    setRepositoryFullName(draft.repositoryFullName);
+    setTitle(draft.title);
+    setBody(draft.body);
+    setSelectedLabels(draft.selectedLabels);
+    setAssignee(draft.assignee);
     setIsImageUploading(false);
     setError(null);
-    hasUserSetAssignee.current = false;
+    hasUserSetAssignee.current = draft.assignee !== null;
   }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, setError]);
+
+  useIssueDraftAutosave(open, {
+    repositoryFullName,
+    title,
+    body,
+    selectedLabels,
+    assignee,
+  });
 
   useEffect(() => {
     if (!open || hasUserSetAssignee.current) return;
@@ -154,6 +169,7 @@ export function CreateIssueDialog({
       assignee,
     });
     if (issue) {
+      clearIssueDraft();
       onCreated(issue);
       onOpenChange(false);
     }
@@ -172,6 +188,7 @@ export function CreateIssueDialog({
       assignee,
     });
     if (issue) {
+      clearIssueDraft();
       onOpenChange(false);
       setPendingStart(issue);
     }

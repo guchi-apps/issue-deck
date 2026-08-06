@@ -114,12 +114,28 @@ export function applyIssueFilters(
   });
 }
 
-export function sortIssues(issues: Issue[], sort: IssueSort): Issue[] {
+/**
+ * 「ユーザーの確認待ち」ビュー（view=check-user）では、TopBarの並び順選択によらず
+ * 確認待ちになった日時（checkUserLabeledAt）の古い順に固定する。先に確認待ちになった
+ * Issueから順番に確認してもらうため。日時が取れないIssue（マイグレーション前から
+ * ラベルが付いていた等）は最も古いものとして先頭に寄せる。
+ */
+export function sortIssues(issues: Issue[], sort: IssueSort, view?: NavViewId): Issue[] {
+  if (view === "check-user") {
+    return [...issues].sort(
+      (a, b) => checkUserLabeledAtTime(a) - checkUserLabeledAtTime(b),
+    );
+  }
+
   const key: keyof Pick<Issue, "updatedAt" | "createdAt"> =
     sort === "created" ? "createdAt" : "updatedAt";
   return [...issues].sort(
     (a, b) => new Date(b[key]).getTime() - new Date(a[key]).getTime(),
   );
+}
+
+function checkUserLabeledAtTime(issue: Issue): number {
+  return issue.checkUserLabeledAt ? new Date(issue.checkUserLabeledAt).getTime() : -Infinity;
 }
 
 export function getAssigneeOptions(issues: Issue[]): string[] {

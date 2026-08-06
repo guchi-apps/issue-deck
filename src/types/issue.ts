@@ -53,6 +53,8 @@ export type Issue = {
   updatedAt: string;
   /** closeされた日時（ISO8601）。openなIssueはnull */
   closedAt: string | null;
+  /** 00.check-userラベルが最後に付与された日時（ISO8601）。未付与・解除済みはnull */
+  checkUserLabeledAt: string | null;
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;
