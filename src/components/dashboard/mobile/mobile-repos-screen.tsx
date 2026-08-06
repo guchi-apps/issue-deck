@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Eye, EyeOff, FolderGit2, Lock, Search, Star } from "lucide-react";
+import { Archive, Eye, EyeOff, FolderGit2, Lock, Search, Settings2, Star } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -26,6 +26,7 @@ export function MobileReposScreen({
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
+  const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
 
   const trimmedQuery = query.trim().toLowerCase();
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
@@ -38,8 +39,28 @@ export function MobileReposScreen({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="shrink-0 border-b p-4">
+      <header className="flex shrink-0 items-center justify-between border-b p-4">
         <h1 className="text-base font-semibold">リポジトリ</h1>
+        <button
+          type="button"
+          onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
+          title={
+            isEditingRepoVisibility
+              ? "表示・非表示の切り替えを終了"
+              : "表示・非表示を切り替える"
+          }
+          aria-label={
+            isEditingRepoVisibility
+              ? "表示・非表示の切り替えを終了"
+              : "表示・非表示を切り替える"
+          }
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+            isEditingRepoVisibility && "bg-accent text-foreground",
+          )}
+        >
+          <Settings2 className="size-4" />
+        </button>
       </header>
 
       <div className="shrink-0 p-4">
@@ -54,7 +75,7 @@ export function MobileReposScreen({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
         {repositories.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
             まだリポジトリと連携していません。
@@ -117,20 +138,22 @@ export function MobileReposScreen({
                     >
                       <Star className={cn("size-4", repo.favorite && "fill-yellow-400")} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        repo.hidden ? onShowRepository(repo) : onHideRepository(repo)
-                      }
-                      title={repo.hidden ? "表示する" : "非表示にする"}
-                      className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      {repo.hidden ? (
-                        <EyeOff className="size-4" />
-                      ) : (
-                        <Eye className="size-4" />
-                      )}
-                    </button>
+                    {isEditingRepoVisibility && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          repo.hidden ? onShowRepository(repo) : onHideRepository(repo)
+                        }
+                        title={repo.hidden ? "表示する" : "非表示にする"}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        {repo.hidden ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </button>
+                    )}
                   </li>
                 );
               })}

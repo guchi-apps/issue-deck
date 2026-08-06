@@ -85,6 +85,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -158,6 +159,11 @@ export function MobileIssueDetail({
     pullRequestLink,
     isMergeApprovalPending(issue.labels),
   );
+  const {
+    mergePullRequest,
+    isSubmitting: isMergingPullRequest,
+    error: mergePullRequestError,
+  } = usePullRequestMergeMutation();
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -349,6 +355,12 @@ export function MobileIssueDetail({
 
   async function handleRequestPrFix(reason: string) {
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
+  }
+
+  async function handleMergePullRequest(): Promise<boolean> {
+    if (!pullRequestLink) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return mergePullRequest({ owner, repo, number: pullRequestLink.number });
   }
 
   return (
@@ -682,11 +694,14 @@ export function MobileIssueDetail({
             onWithdraw={handleWithdraw}
             onRequestContinuation={handleRequestContinuation}
             onRequestPrFix={handleRequestPrFix}
+            onMergePullRequest={handleMergePullRequest}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
             isRequestingPrFix={isCommentSubmitting}
+            isMergingPullRequest={isMergingPullRequest}
+            mergePullRequestError={mergePullRequestError}
             lastCommentRef={lastCommentRef}
             commentSummary={commentSummary}
           />

@@ -53,6 +53,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
   isApprovalPending,
@@ -137,6 +138,11 @@ export function IssueDetail({
     pullRequestLink,
     issue ? isMergeApprovalPending(issue.labels) : false,
   );
+  const {
+    mergePullRequest,
+    isSubmitting: isMergingPullRequest,
+    error: mergePullRequestError,
+  } = usePullRequestMergeMutation();
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -316,6 +322,12 @@ export function IssueDetail({
   async function handleRequestPrFix(reason: string) {
     if (!issue) return;
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
+  }
+
+  async function handleMergePullRequest(): Promise<boolean> {
+    if (!issue || !pullRequestLink) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return mergePullRequest({ owner, repo, number: pullRequestLink.number });
   }
 
   if (!issue) {
@@ -539,11 +551,14 @@ export function IssueDetail({
               onWithdraw={handleWithdraw}
               onRequestContinuation={handleRequestContinuation}
               onRequestPrFix={handleRequestPrFix}
+              onMergePullRequest={handleMergePullRequest}
               isApproving={isSubmitting}
               isRejecting={isCommentSubmitting}
               isWithdrawing={isSubmitting}
               isRequestingContinuation={isCommentSubmitting}
               isRequestingPrFix={isCommentSubmitting}
+              isMergingPullRequest={isMergingPullRequest}
+              mergePullRequestError={mergePullRequestError}
               lastCommentRef={lastCommentRef}
               commentSummary={commentSummary}
             />

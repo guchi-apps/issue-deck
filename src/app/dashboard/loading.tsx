@@ -3,7 +3,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 // ログイン直後など/dashboardへの遷移でDB取得が終わるまで白画面になるのを防ぐ（#221）。
 export default function DashboardLoading() {
   return (
-    // 高さの基準はIssueDeckShellと揃える（#607）
     <div className="flex h-full flex-col">
       <div className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
         <Skeleton className="h-5 w-28" />

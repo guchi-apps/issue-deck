@@ -2,7 +2,18 @@
 
 import { type RefObject, useState } from "react";
 
-import { Ban, Check, Loader2, MoreHorizontal, Pencil, RotateCw, ThumbsUp, Trash2, X } from "lucide-react";
+import {
+  Ban,
+  Check,
+  GitMerge,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  RotateCw,
+  ThumbsUp,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -33,6 +44,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
+import { commentSourceLabel, resolveCommentSource } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -72,11 +84,16 @@ type CommentThreadProps = {
   onRequestContinuation?: () => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
+  onMergePullRequest?: () => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
+  isMergingPullRequest?: boolean;
+  /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
+  mergePullRequestError?: string | null;
   /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
   lastCommentRef?: RefObject<HTMLLIElement | null>;
   /** コメントごとのAI要約の状態・生成関数。本文が長いコメントにのみ要約UIを表示する */
@@ -89,11 +106,14 @@ function ApprovalActions({
   onWithdraw,
   onRequestContinuation,
   onRequestPrFix,
+  onMergePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
+  isMergingPullRequest,
+  mergePullRequestError,
   isFallbackNotice,
   mergeApprovalPending,
   pullRequestLink,
@@ -104,11 +124,14 @@ function ApprovalActions({
   onWithdraw: () => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  onMergePullRequest?: () => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
+  isMergingPullRequest?: boolean;
+  mergePullRequestError?: string | null;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
@@ -119,8 +142,11 @@ function ApprovalActions({
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
   const [isPrFixOpen, setIsPrFixOpen] = useState(false);
   const [prFixReason, setPrFixReason] = useState("");
+  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
+  const [isMerged, setIsMerged] = useState(false);
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
   const prFixBusy = Boolean(isRequestingPrFix);
+  const mergeBusy = Boolean(isMergingPullRequest);
 
   async function submitReject() {
     await onReject(rejectReason);
@@ -138,6 +164,13 @@ function ApprovalActions({
     await onRequestPrFix(prFixReason);
     setIsPrFixOpen(false);
     setPrFixReason("");
+  }
+
+  async function confirmMerge() {
+    if (!onMergePullRequest) return;
+    const ok = await onMergePullRequest();
+    setIsMergeConfirmOpen(false);
+    if (ok) setIsMerged(true);
   }
 
   if (mergeApprovalPending) {
@@ -160,6 +193,39 @@ function ApprovalActions({
         <div>
           <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
         </div>
+        {onMergePullRequest && (
+          <div className="mt-2">
+            <Button
+              size="sm"
+              onClick={() => setIsMergeConfirmOpen(true)}
+              disabled={mergeBusy || isMerged}
+            >
+              {mergeBusy ? <Loader2 className="animate-spin" /> : <GitMerge />}
+              {isMerged ? "マージ済み" : "マージする"}
+            </Button>
+            {mergePullRequestError && (
+              <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
+            )}
+
+            <AlertDialog open={isMergeConfirmOpen} onOpenChange={setIsMergeConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Pull Requestをマージしますか？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {pullRequestLink ? `対応PR #${pullRequestLink.number}を` : "対応PRを"}
+                    マージコミットでdevelopへマージします。この操作は取り消せません。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={mergeBusy}>キャンセル</AlertDialogCancel>
+                  <AlertDialogAction onClick={confirmMerge} disabled={mergeBusy}>
+                    マージする
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
         {onRequestPrFix && (
           <div className="mt-2">
             {isPrFixOpen ? (
@@ -311,11 +377,14 @@ export function CommentThread({
   onWithdraw,
   onRequestContinuation,
   onRequestPrFix,
+  onMergePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
+  isMergingPullRequest,
+  mergePullRequestError,
   lastCommentRef,
   commentSummary,
 }: CommentThreadProps) {
@@ -351,10 +420,13 @@ export function CommentThread({
             onReject={onReject}
             onWithdraw={onWithdraw}
             onRequestPrFix={onRequestPrFix}
+            onMergePullRequest={onMergePullRequest}
             isApproving={isApproving}
             isRejecting={isRejecting}
             isWithdrawing={isWithdrawing}
             isRequestingPrFix={isRequestingPrFix}
+            isMergingPullRequest={isMergingPullRequest}
+            mergePullRequestError={mergePullRequestError}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
@@ -402,6 +474,7 @@ export function CommentThread({
         {comments.map((comment, index) => {
           const isQuestion = isAskClaudeQuestionComment(comment);
           const isAnswer = isQaAnswerComment(comment);
+          const source = resolveCommentSource(comment, comment.author.login);
           return (
             <li
               key={comment.id}
@@ -419,6 +492,14 @@ export function CommentThread({
                 <div className="flex items-center justify-between">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
                     <span className="font-medium">{comment.author.login}</span>
+                    {source && (
+                      <Badge
+                        variant="outline"
+                        className="border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400"
+                      >
+                        {commentSourceLabel(source)}
+                      </Badge>
+                    )}
                     <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
                       {comment.createdAtLabel}
                     </span>
@@ -530,11 +611,14 @@ export function CommentThread({
                     onWithdraw={onWithdraw}
                     onRequestContinuation={onRequestContinuation}
                     onRequestPrFix={onRequestPrFix}
+                    onMergePullRequest={onMergePullRequest}
                     isApproving={isApproving}
                     isRejecting={isRejecting}
                     isWithdrawing={isWithdrawing}
                     isRequestingContinuation={isRequestingContinuation}
                     isRequestingPrFix={isRequestingPrFix}
+                    isMergingPullRequest={isMergingPullRequest}
+                    mergePullRequestError={mergePullRequestError}
                     isFallbackNotice={isFallbackNotice}
                     mergeApprovalPending={mergeApprovalPending}
                     pullRequestLink={pullRequestLink}
@@ -553,11 +637,14 @@ export function CommentThread({
           onWithdraw={onWithdraw}
           onRequestContinuation={onRequestContinuation}
           onRequestPrFix={onRequestPrFix}
+          onMergePullRequest={onMergePullRequest}
           isApproving={isApproving}
           isRejecting={isRejecting}
           isWithdrawing={isWithdrawing}
           isRequestingContinuation={isRequestingContinuation}
           isRequestingPrFix={isRequestingPrFix}
+          isMergingPullRequest={isMergingPullRequest}
+          mergePullRequestError={mergePullRequestError}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
