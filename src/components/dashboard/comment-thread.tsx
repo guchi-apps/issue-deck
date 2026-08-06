@@ -417,9 +417,11 @@ export function CommentThread({
                 )}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
                     <span className="font-medium">{comment.author.login}</span>
-                    <span className="text-xs text-muted-foreground">{comment.createdAtLabel}</span>
+                    <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
+                      {comment.createdAtLabel}
+                    </span>
                     {workflowRunCommentId === comment.id && <WorkflowRunStatus run={workflowRun ?? null} />}
                     {isQuestion && (
                       <Badge
