@@ -450,6 +450,7 @@ jobs:
           echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Claude Code（計画提示）
+        id: claude_plan
         if: steps.state.outputs.mode == 'plan'
         uses: anthropics/claude-code-action@v1
         env:
@@ -553,6 +554,12 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_plan.outcome }}
+          # APP_BASE_URL未設定・API到達不可等でリポジトリ共通のAUTO_RETRY_LIMITを取得できない
+          # 環境でも、一過性障害(ERROR_TYPE=transient)と判定した場合にだけ適用する最低限の
+          # リトライ回数(#621)。一過性のGitHub API障害はリトライで解消する可能性が高い一方、
+          # 恒常的な障害(ツール権限拒否等)はリトライしても解消しないため区別する。
+          TRANSIENT_FALLBACK_RETRY_LIMIT: 2
         run: |
           set -e
           AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
@@ -563,7 +570,19 @@ jobs:
             exit 0
           fi
 
-          echo "新規コメントが確認できないため、自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
+          echo "新規コメントが確認できないため、エラー種別の判定と自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
+
+          # Claude Code（計画提示）ステップ自体がfailureで終了した場合、Claude起動前後のGitHub API
+          # 呼び出しエラー等、一過性の可能性が高いインフラ障害と判断する(#610で実際に観測された例:
+          # 実行者の権限チェックAPIが一時的に503を返しステップごと失敗した)。ステップ自体はsuccessで
+          # 終了したが新規コメントが確認できない場合は、Claude内部でのツール権限拒否等、リトライしても
+          # 解消しない可能性が高い恒常的な障害と判断する。
+          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ]; then
+            ERROR_TYPE=transient
+          else
+            ERROR_TYPE=persistent
+          fi
+          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME）"
 
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
@@ -575,6 +594,13 @@ jobs:
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
+
+          # APP_BASE_URL未設定等でAUTO_RETRY_LIMITを取得できない環境でも、一過性障害と判定した
+          # 場合は最低限のリトライ回数を保証する(#621)。恒常的な障害の場合はこれまでどおり
+          # APP_BASE_URL未設定時はリトライしない。
+          if [ "$ERROR_TYPE" = "transient" ] && [ "$AUTO_RETRY_LIMIT" -lt "$TRANSIENT_FALLBACK_RETRY_LIMIT" ]; then
+            AUTO_RETRY_LIMIT="$TRANSIENT_FALLBACK_RETRY_LIMIT"
+          fi
 
           NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
@@ -588,8 +614,12 @@ jobs:
             echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
           fi
 
-          echo "自動リトライを行わないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          echo "自動リトライを行わないため、フォールバックコメントを投稿します（エラー種別: $ERROR_TYPE）"
+          if [ "$ERROR_TYPE" = "transient" ]; then
+            FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。Claude Code起動前後のGitHub API呼び出しが一時的に失敗した等、一過性の障害が発生したと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行してください。再実行すれば解消する可能性があります。'
+          else
+            FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          fi
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
@@ -846,6 +876,7 @@ jobs:
           fi
 
       - name: Claude Code（実装・PR作成）
+        id: claude_implement
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         uses: anthropics/claude-code-action@v1
         env:
@@ -1075,6 +1106,11 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_implement.outcome }}
+          # 計画提示ステップと同じ考え方(#621)。APP_BASE_URL未設定等でリポジトリ共通の
+          # AUTO_RETRY_LIMITを取得できない環境でも、一過性障害と判定した場合にだけ適用する
+          # 最低限のリトライ回数。
+          TRANSIENT_FALLBACK_RETRY_LIMIT: 2
         run: |
           set -e
           BRANCH="${{ steps.state.outputs.branch }}"
@@ -1102,7 +1138,19 @@ jobs:
           fi
 
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "新規コメント・PRのいずれも確認できないため、自動リトライの可否を確認します"
+          echo "新規コメント・PRのいずれも確認できないため、エラー種別の判定と自動リトライの可否を確認します"
+
+          # Claude Code（実装・PR作成）ステップ自体がfailureで終了した場合、Claude起動前後の
+          # GitHub API呼び出しエラー等、一過性の可能性が高いインフラ障害と判断する(#610で実際に
+          # 観測された例: 実行者の権限チェックAPIが一時的に503を返しステップごと失敗した)。ステップ
+          # 自体はsuccessで終了したが新規コメント・PRのいずれも確認できない場合は、Claude内部での
+          # ツール権限拒否等、リトライしても解消しない可能性が高い恒常的な障害と判断する。
+          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ]; then
+            ERROR_TYPE=transient
+          else
+            ERROR_TYPE=persistent
+          fi
+          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME）"
 
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
@@ -1114,6 +1162,13 @@ jobs:
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
+
+          # APP_BASE_URL未設定等でAUTO_RETRY_LIMITを取得できない環境でも、一過性障害と判定した
+          # 場合は最低限のリトライ回数を保証する(#621)。恒常的な障害の場合はこれまでどおり
+          # APP_BASE_URL未設定時はリトライしない。
+          if [ "$ERROR_TYPE" = "transient" ] && [ "$AUTO_RETRY_LIMIT" -lt "$TRANSIENT_FALLBACK_RETRY_LIMIT" ]; then
+            AUTO_RETRY_LIMIT="$TRANSIENT_FALLBACK_RETRY_LIMIT"
+          fi
 
           NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
@@ -1127,8 +1182,12 @@ jobs:
             echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
           fi
 
-          echo "自動リトライを行わないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"
+          echo "自動リトライを行わないため、フォールバックコメントを投稿します（エラー種別: $ERROR_TYPE）"
+          if [ "$ERROR_TYPE" = "transient" ]; then
+            FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。Claude Code起動前後のGitHub API呼び出しが一時的に失敗した等、一過性の障害が発生したと考えられます。再実行すれば解消する可能性があります。実行ログをご確認ください: $RUN_URL"
+          else
+            FALLBACK_BODY="⚠️ 実装ステップが終了しましたが、コメント投稿・PR作成のいずれも確認できませんでした。調査や実装の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"
+          fi
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
