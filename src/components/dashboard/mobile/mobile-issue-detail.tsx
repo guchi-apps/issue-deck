@@ -635,11 +635,6 @@ export function MobileIssueDetail({
 
         <Separator />
 
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
-        </div>
-
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
@@ -653,6 +648,11 @@ export function MobileIssueDetail({
             )}
           />
         )}
+
+        <div>
+          <h2 className="mb-2 text-sm font-semibold">説明</h2>
+          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+        </div>
 
         <Separator />
 
@@ -741,7 +741,7 @@ export function MobileIssueDetail({
         containerRef={scrollContainerRef}
         targetRef={lastCommentRef}
         visible={comments.length > 0}
-        className="left-4 bottom-4"
+        className="left-1/2 bottom-4 h-11 w-20 -translate-x-1/2"
       />
 
       <button
