@@ -73,7 +73,6 @@ import {
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -85,6 +84,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestLink } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
@@ -150,10 +150,7 @@ export function MobileIssueDetail({
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
-  const pullRequestLink = useMemo(() => {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    return extractLatestPullRequestLink(comments, owner, repo);
-  }, [comments, issue.repositoryFullName]);
+  const pullRequestLink = usePullRequestLink(issue.repositoryFullName, issue.number, comments);
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue.repositoryFullName,
     pullRequestLink,
