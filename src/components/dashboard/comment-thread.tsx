@@ -4,6 +4,7 @@ import { type RefObject, useState } from "react";
 
 import { Ban, Check, Loader2, MoreHorizontal, Pencil, RotateCw, ThumbsUp, Trash2, X } from "lucide-react";
 
+import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
@@ -37,6 +39,9 @@ import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
+
+/** この文字数を超えるコメント本文にのみAI要約の生成ボタンを表示する */
+const LONG_COMMENT_THRESHOLD = 400;
 
 type CommentThreadProps = {
   comments: IssueComment[];
@@ -74,6 +79,8 @@ type CommentThreadProps = {
   isRequestingPrFix?: boolean;
   /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
   lastCommentRef?: RefObject<HTMLLIElement | null>;
+  /** コメントごとのAI要約の状態・生成関数。本文が長いコメントにのみ要約UIを表示する */
+  commentSummary: IssueCommentSummaries;
 };
 
 function ApprovalActions({
@@ -310,6 +317,7 @@ export function CommentThread({
   isRequestingContinuation,
   isRequestingPrFix,
   lastCommentRef,
+  commentSummary,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -501,6 +509,15 @@ export function CommentThread({
                         <ThumbsUp className="size-3" />
                         {comment.reactionCount}
                       </span>
+                    )}
+                    {comment.body.length > LONG_COMMENT_THRESHOLD && (
+                      <CommentAiSummary
+                        summary={commentSummary.summaries[comment.id]?.summary ?? null}
+                        isGenerating={commentSummary.generatingIds.has(comment.id)}
+                        error={commentSummary.errors[comment.id] ?? null}
+                        notConfigured={commentSummary.notConfigured}
+                        onGenerate={() => commentSummary.generate(comment.id)}
+                      />
                     )}
                   </>
                 )}

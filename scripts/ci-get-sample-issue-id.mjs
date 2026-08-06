@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Issue #567: スマホのイシュー詳細画面（/dashboard?mscreen=issue-detail&missue=<id>）を
-// 撮影するには、フロントエンドのIssue.id（src/lib/github/issue-mapper.tsの
-// dbIssueToDisplayIssueが`String(githubIssueId)`として組み立てる値）が必要なため、
+// 撮影するには、GitHubのIssue番号ではなく、アプリのクライアント側で使われるIssue識別子
+// （src/lib/github/issue-mapper.tsのdbIssueToDisplayIssueが`String(githubIssueId)`として
+// 組み立てるもの。Prismaの主キー`Issue.id`＝cuidとは別物）が必要なため、
 // scripts/seed-ci-db.mjs が投入したCI用ダミーIssueのgithubIssueIdをDBから取得するだけの
-// スクリプト。Prismaの主キー`Issue.id`（cuid）を渡すと、useMobileScreenのissues.find()が
-// 一致せず/dashboardがホーム画面にフォールバックしてしまう(#550)。
+// スクリプト（#550, #571: 以前は誤ってPrismaの`id`を返しており、`issues.find`が常に一致せず
+// mobile-issue-detailの撮影がホーム画面にフォールバックしていた。develop側で#550として、
+// このブランチ側で#571として同じ不具合を独立に修正していた）。
 //
 // 使い方: DATABASE_URL=mysql://... node scripts/ci-get-sample-issue-id.mjs
 // 出力: 見つかったIssueのgithubIssueId（1件）を標準出力に1行で出力する。

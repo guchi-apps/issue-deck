@@ -57,6 +57,25 @@ export async function fetchCommentsForIssue(
   );
 }
 
+/**
+ * コメント1件だけを取得する。`fetchCommentsForIssue`（全件・ページネーション付き）は
+ * コメント単位の要約生成のように1件だけ必要な場面では無駄なAPI消費になるため分けている。
+ */
+export async function fetchComment(
+  owner: string,
+  repo: string,
+  commentId: number,
+  token: string,
+): Promise<GithubApiComment> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.json();
+}
+
 export type GithubApiRepoLabel = { name: string; color: string; description: string | null };
 
 export async function fetchRepoLabels(

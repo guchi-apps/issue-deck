@@ -160,14 +160,32 @@ model Issue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repository      Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  labels          IssueLabel[]
-  favoritedBy     FavoriteIssue[]
-  commentReadBy   IssueCommentRead[]
-  deployCheckedBy IssueDeployCheck[]
+  repository       Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  labels           IssueLabel[]
+  favoritedBy      FavoriteIssue[]
+  commentReadBy    IssueCommentRead[]
+  deployCheckedBy  IssueDeployCheck[]
+  commentSummaries IssueCommentSummary[]
 
   @@unique([repositoryId, number])
   @@index([repositoryId])
+}
+
+// コメント単位のAI要約（明示的なボタン操作で生成しDBにキャッシュする。コメント編集時にキャッシュ行を削除し、再生成を促す）
+model IssueCommentSummary {
+  id              String   @id @default(cuid())
+  issueId         String
+  githubCommentId BigInt
+  summary         String   @db.Text
+  generatedAt     DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, githubCommentId])
+  @@index([issueId])
 }
 
 // ユーザーごとにお気に入り登録したIssue

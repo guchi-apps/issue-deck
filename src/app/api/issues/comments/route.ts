@@ -19,18 +19,27 @@ import {
 // スクリーンショット確認用に固定のダミーコメントを返す(#550)。
 const CI_DUMMY_REPOSITORY_GITHUB_ID = 900000001;
 
+// コメント単位AI要約機能（#571）の「要約を生成」ボタンはLONG_COMMENT_THRESHOLD
+// （src/components/dashboard/comment-thread.tsx）を超える本文にのみ表示されるため、
+// 画面確認用に2件目を長文（400文字超）にしている。
 function buildCiDummyComments(): GithubApiComment[] {
   return Array.from({ length: 5 }, (_, index) => {
     const n = index + 1;
     return {
       id: -n,
       user: { login: "ci-dummy-user" },
-      body: `CI環境の画面確認用ダミーコメントです（${n}件目）。`,
+      body: n === 2 ? CI_DUMMY_LONG_COMMENT_BODY : `CI環境の画面確認用ダミーコメントです（${n}件目）。`,
       created_at: new Date(Date.UTC(2026, 7, n)).toISOString(),
       reactions: { "+1": 0 },
     };
   });
 }
+
+const CI_DUMMY_LONG_COMMENT_BODY =
+  "画面確認用の長文ダミーコメントです。このコメントはAI要約ボタンの表示確認のため、意図的に400文字を超える長さにしています。\n\n" +
+  "現状整理: 既存のIssue全体AI要約機能とは別に、コメント単位で「重要な点」「変更点」「懸念点」の3観点の要約を生成・表示する機能を追加しました。コメント本体はDBに保存されず表示のたびにGitHub APIから取得する既存方針を踏襲しつつ、要約結果のみDBにキャッシュします。生成はボタン押下時のみ行い、Issue全体要約と同様に自動生成は行いません。\n\n" +
+  "変更点: DBスキーマに新規モデルを追加し、コメント編集時にはキャッシュを削除して再生成をボタン操作に委ねる方式にしました。GitHub APIラッパーには単一コメント取得用の関数を追加し、全件取得APIを無駄に呼ばずに済むようにしています。\n\n" +
+  "懸念点: 要約ボタンを表示する本文文字数の閾値は暫定値のため、実際の運用を見ながら調整が必要になる可能性があります。また、Claudeのプラン枠を消費するため、生成頻度についても引き続き注視が必要だと考えています。";
 
 // src/lib/github/app-auth.tsはトップレベルでGITHUB_APP_ID等の環境変数を要求するため、
 // 静的importするとGitHub App認証情報が無い環境（無人でのCIスクリーンショット撮影等）では
@@ -178,6 +187,8 @@ async function handlePATCH(request: NextRequest) {
   try {
     const token = await getInstallationTokenLazy(repository.installation.installationId);
     const updated = await updateComment(owner, repo, commentId, token, { body: body.trim() });
+    // 編集によって内容が変わった以上、キャッシュ済みのAI要約は古くなるため削除する（再生成はボタン操作に委ねる）
+    await db.issueCommentSummary.deleteMany({ where: { githubCommentId: BigInt(commentId) } });
     return NextResponse.json({ comment: mapComment(updated) });
   } catch (error) {
     console.error(`[PATCH /api/issues/comments] ${owner}/${repo} comment ${commentId}:`, error);
