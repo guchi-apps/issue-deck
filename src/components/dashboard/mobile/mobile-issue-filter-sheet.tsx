@@ -31,6 +31,11 @@ type MobileIssueFilterSheetProps = {
    * 二重の導線にならないよう非表示にする。
    */
   showLabelPresets?: boolean;
+  /**
+   * 「ユーザーの確認待ち」ビューでは並び順を確認が古い順に固定するため、
+   * 並び順選択セクションを非表示にする。
+   */
+  sortLocked?: boolean;
 };
 
 const LABEL_COLLAPSE_THRESHOLD = 8;
@@ -66,6 +71,7 @@ export function MobileIssueFilterSheet({
   labelOptions,
   assigneeOptions,
   showLabelPresets = true,
+  sortLocked = false,
 }: MobileIssueFilterSheetProps) {
   const [showAllLabels, setShowAllLabels] = useState(false);
 
@@ -194,17 +200,26 @@ export function MobileIssueFilterSheet({
             </div>
           </section>
 
-          <section>
-            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">並び順</h3>
-            <div className="flex flex-wrap gap-2">
-              <Pill active={filters.sort === "updated"} onClick={() => onChange({ ...filters, sort: "updated" })}>
-                更新日
-              </Pill>
-              <Pill active={filters.sort === "created"} onClick={() => onChange({ ...filters, sort: "created" })}>
-                作成日
-              </Pill>
-            </div>
-          </section>
+          {sortLocked ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">並び順</h3>
+              <p className="text-xs text-muted-foreground">
+                確認待ちビューでは確認が古い順に固定されます
+              </p>
+            </section>
+          ) : (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">並び順</h3>
+              <div className="flex flex-wrap gap-2">
+                <Pill active={filters.sort === "updated"} onClick={() => onChange({ ...filters, sort: "updated" })}>
+                  更新日
+                </Pill>
+                <Pill active={filters.sort === "created"} onClick={() => onChange({ ...filters, sort: "created" })}>
+                  作成日
+                </Pill>
+              </div>
+            </section>
+          )}
         </div>
       </SheetContent>
     </Sheet>

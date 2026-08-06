@@ -52,7 +52,7 @@ export function MobileIssuesScreen({
       labels,
       assignee,
     });
-    return sortIssues(filtered, sort);
+    return sortIssues(filtered, sort, view);
   }, [issues, view, currentUserLogin, state, labels, assignee, sort]);
 
   return (

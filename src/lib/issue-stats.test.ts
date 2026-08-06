@@ -31,6 +31,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     closedAt: null,
+    checkUserLabeledAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
@@ -125,6 +126,25 @@ describe("sortIssues", () => {
     ];
     sortIssues(issues, "updated");
     expect(issues.map((issue) => issue.id)).toEqual(["1", "2"]);
+  });
+
+  it("view=check-userの場合、sort指定によらずcheckUserLabeledAtの古い順で並べる", () => {
+    const issues = [
+      makeIssue({ id: "1", checkUserLabeledAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
+      makeIssue({ id: "2", checkUserLabeledAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z" }),
+      makeIssue({ id: "3", checkUserLabeledAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" }),
+    ];
+    const result = sortIssues(issues, "updated", "check-user");
+    expect(result.map((issue) => issue.id)).toEqual(["2", "3", "1"]);
+  });
+
+  it("view=check-userでcheckUserLabeledAtがnullのIssueは最も古いものとして先頭に来る", () => {
+    const issues = [
+      makeIssue({ id: "1", checkUserLabeledAt: "2026-01-01T00:00:00.000Z" }),
+      makeIssue({ id: "2", checkUserLabeledAt: null }),
+    ];
+    const result = sortIssues(issues, "created", "check-user");
+    expect(result.map((issue) => issue.id)).toEqual(["2", "1"]);
   });
 });
 

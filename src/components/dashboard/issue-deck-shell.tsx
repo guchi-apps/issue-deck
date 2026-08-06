@@ -218,6 +218,7 @@ export function IssueDeckShell({
         // 基準がずれて古いリリース分が現れないようにする）。
         filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin, issues),
         filters.sort,
+        filters.view,
       ),
     [topbarFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );

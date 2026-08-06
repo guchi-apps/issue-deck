@@ -173,7 +173,12 @@ export function TopBar({
       ? "担当者: 未設定"
       : `担当者: ${filters.assignee}`
     : "担当者";
-  const sortLabel = filters.sort === "created" ? "並び順: 作成日" : "並び順: 更新日";
+  const isCheckUserView = filters.view === "check-user";
+  const sortLabel = isCheckUserView
+    ? "並び順: 確認が古い順"
+    : filters.sort === "created"
+      ? "並び順: 作成日"
+      : "並び順: 更新日";
 
   return (
     <header className="hidden items-center gap-3 border-b px-4 py-2 md:flex">
@@ -257,7 +262,13 @@ export function TopBar({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="text-xs">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              disabled={isCheckUserView}
+              title={isCheckUserView ? "確認待ちビューでは確認が古い順に固定されます" : undefined}
+            >
               {sortLabel}
               <ChevronDown className="size-3" />
             </Button>

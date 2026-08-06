@@ -152,6 +152,10 @@ model Issue {
   githubClosedAt  DateTime?
   syncedAt        DateTime          @default(now())
 
+  // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
+  // 並べるための基準）。ラベルが外れるとnullに戻す
+  checkUserLabeledAt DateTime?
+
   // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
   aiSummary             String?   @db.Text
   aiSummaryCommentCount Int?

@@ -87,7 +87,7 @@ export function MobileRepoIssuesScreen({
       labels,
       assignee,
     });
-    return sortIssues(filtered, sort);
+    return sortIssues(filtered, sort, view);
   }, [repoIssues, view, currentUserLogin, state, labels, assignee, sort]);
 
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
@@ -51,12 +52,27 @@ function toIssueStateReason(
 async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
   const githubUpdatedAt = new Date(raw.updated_at);
 
-  const existing = await db.issue.findUnique({ where: { githubIssueId: BigInt(raw.id) } });
+  const existing = await db.issue.findUnique({
+    where: { githubIssueId: BigInt(raw.id) },
+    include: { labels: true },
+  });
   if (existing && existing.githubUpdatedAt > githubUpdatedAt) {
     // Webhookの配信順序はGitHub側で保証されないため、既に反映済みより古いペイロードは無視する
     // （新しいラベル状態が古い状態で上書きされるのを防ぐ）。
     return existing;
   }
+
+  // 「確認待ちフィルターを確認が古い順に並べる」ための基準時刻。00.check-userが新たに
+  // 付与された瞬間をcheckUserLabeledAtとして記録し、外れたらnullに戻す。既存Issueで
+  // 付与状態が変わらない場合は記録済みの日時を維持する
+  const hasCheckUserLabel = raw.labels.some((label) => mapLabelName(label) === CHECK_USER_LABEL);
+  const hadCheckUserLabel =
+    existing?.labels.some((label) => label.name === CHECK_USER_LABEL) ?? false;
+  const checkUserLabeledAt = !hasCheckUserLabel
+    ? null
+    : hadCheckUserLabel
+      ? existing?.checkUserLabeledAt ?? new Date()
+      : new Date();
 
   const data = {
     repositoryId,
@@ -76,6 +92,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     githubUpdatedAt,
     githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
+    checkUserLabeledAt,
   };
 
   const issue = await db.issue.upsert({
