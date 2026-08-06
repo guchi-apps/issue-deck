@@ -19,10 +19,17 @@ name: Claude Issue Dispatch
 #      「00.check-user・21.plan-requiredともに付いていない」状態を承認済みとみなして実装を
 #      再開する判定自体はissues/unlabeled・issue_commentどちらのイベント経由でも同じロジックで
 #      行う(下記「実行者の権限・状態を判定する」ステップ)。issue-deckアプリの承認ボタンは
-#      ラベル更新をGitHub App経由(issue-deck[bot]として記録される)で行うため、
-#      issues/unlabeledイベント単独では実際に承認した人間を特定できず自己ループ防止ロジックで
-#      弾かれる。そのためアプリはラベル更新に続けて個人アカウントでの@claudeコメントも送信し、
-#      issue_commentイベント経由で実装を再開させる(#173)。
+#      ラベル更新を個人のGitHub OAuthトークン(user.githubAccessToken)経由で行うため、
+#      GitHub上は操作した本人のアカウントによるissues/unlabeledイベントとして記録され、
+#      自己ループ防止ロジック(Bot判定)には引っかからない(#566。旧: GitHub Appインストール
+#      トークンでissue-deck[bot]として記録され、ラベル更新に続けて個人アカウントでの
+#      @claudeコメントも送信することで実装を再開させていた。#173)。ただし21.plan-required保持時
+#      (ブランチ未作成の計画承認・練り直し)は、ラベル除去イベント単独で実装再開に必要な情報が
+#      揃うため、アプリが続けて送る確認コメントと二重に実装を再始動しかねない。この場合のみ
+#      アプリは確認コメント本文に<!-- issue-deck:no-trigger -->マーカーを付与し(下記「@claudeトリガー
+#      の判定」を参照)、ラベル除去イベント単独を正規のトリガーとする(#566)。ブランチ・PR作成後の
+#      状態(03.d:marge/07.m:margeでの「修正を依頼する」等)は後述のBRANCH_EXISTSガードにより
+#      二重発火の実害が無いため、確認コメントにマーカーは付けない。
 #   3. 承認・練り直しのいずれもせず計画を拒否する場合は、人間がIssueを直接クローズする
 #      (`not planned`等の理由。コメントに@claudeを含める必要はない)。クローズ済みIssueは
 #      本ワークフローの全モードで再始動しないため(issue_closedガード)、クローズ後に
@@ -140,7 +147,7 @@ jobs:
   dispatch:
     if: |
       (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '00.check-user') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && startsWith(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '<!-- issue-deck:no-trigger -->')) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
