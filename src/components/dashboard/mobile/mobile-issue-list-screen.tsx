@@ -141,6 +141,7 @@ export function MobileIssueListScreen({
         labelOptions={labelOptions}
         assigneeOptions={assigneeOptions}
         showLabelPresets={false}
+        sortLocked={view === "check-user"}
       />
 
       {children}
