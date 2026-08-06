@@ -41,6 +41,34 @@ develop向けPR作成・マージは常にPAT所有者（`m-guchi`）名義に�
 問題が表面化していない。将来マルチユーザー化する場合は「実際の操作者が分からなくなる」
 設計上の制約として残る）。
 
+## コメント投稿元マーカー（同じ名義の中でも「どの処理が投稿したか」を判別する）
+
+上記のとおり`github-actions[bot]`名義には複数の異なるワークフロー・処理（`claude-issue-dispatch.yml`
+のClaude Code、`claude-review-develop.yml`のレビュー結果、`claude-conflict-resolve.yml`の
+コンフリクト解消、`issue-labels.yml`の純粋なシェルスクリプト）が混在しており、login名だけでは
+「Claude Codeが投稿したのか、それ以外の機械的なCI処理が投稿したのか」を判別できない（issue #563）。
+
+これを解決するため、自動投稿コメントの本文末尾に不可視のHTMLコメントマーカーを付与し、
+`src/lib/github/comment-source.ts`の`resolveCommentSource()`がそれを読み取って
+`comment-thread.tsx`にバッジ表示する仕組みを設けている。判定の優先順位は以下のとおり
+（詳細は`comment-source.ts`のコメントを参照）。
+
+1. `<!-- issue-deck-fallback-notice -->`（`fallback-notice.ts`、既存） — 行き詰まり・エラー終了時のフォールバック通知
+2. `<!-- issue-deck-qa-answer -->`（`ask-claude.ts`、既存） — 「Claudeに質問する」への回答
+3. `<!-- issue-deck-plan-type:implement|split -->`（`comment-source.ts`で新たにTS側の判定関数を用意） — 計画コメント
+4. `<!-- issue-deck-source:<id> -->`（`comment-source.ts`で新設） — 上記に該当しない定型コメントの投稿元ワークフロー
+   - id一覧: `claude-issue-dispatch` / `claude-review-develop` / `claude-conflict-resolve` / `issue-labels`
+   - 実際にワークフロー側へマーカー付与を適用済みなのは`claude-issue-dispatch.yml`のみ（#563時点）。
+     残り3つは判定関数側の定義のみ先行して用意してあり、各ワークフローへの実際の適用は別Issueで対応する
+5. 上記いずれにも該当せずbotログインの場合は「不明な自動投稿」（過去に投稿された、マーカー無しの旧コメントが該当）
+6. bot以外のログインの場合はバッジを表示しない
+
+`claude-issue-dispatch.yml`側では、bashで直接組み立てるコメント本文には末尾に直接マーカー文字列を
+追記し、Claude Codeへの指示文で本文を組み立てるコメント（計画提示・実装完了報告・質問応答等）は
+プロンプト内で「マーカーを必ず付与する」よう指示する形で対応している。`gh pr create` / `gh pr comment`
+によるPR側への投稿は、`comment-thread.tsx`が表示するIssueコメントスレッドに現れないためマーカー
+付与の対象外。
+
 ## デッドコードの疑い
 
 `src/lib/github/issue-mapper.ts`の`POSTER_MARKER_PATTERN`／`stripPosterMarker`、および

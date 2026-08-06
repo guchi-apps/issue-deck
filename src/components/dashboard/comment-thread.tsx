@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
+import { commentSourceLabel, resolveCommentSource } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -402,6 +403,7 @@ export function CommentThread({
         {comments.map((comment, index) => {
           const isQuestion = isAskClaudeQuestionComment(comment);
           const isAnswer = isQaAnswerComment(comment);
+          const source = resolveCommentSource(comment, comment.author.login);
           return (
             <li
               key={comment.id}
@@ -419,6 +421,14 @@ export function CommentThread({
                 <div className="flex items-center justify-between">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
                     <span className="font-medium">{comment.author.login}</span>
+                    {source && (
+                      <Badge
+                        variant="outline"
+                        className="border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400"
+                      >
+                        {commentSourceLabel(source)}
+                      </Badge>
+                    )}
                     <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
                       {comment.createdAtLabel}
                     </span>

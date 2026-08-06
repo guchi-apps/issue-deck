@@ -389,7 +389,7 @@ jobs:
           else
             BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
           fi
-          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 実装済み・対応中のissueへの@claudeコメントに返信する
@@ -414,6 +414,7 @@ jobs:
           if [ "${{ steps.state.outputs.issue_closed }}" = "true" ]; then
             BODY='ℹ️ このIssueは既にクローズされています。分割により対応が複数のサブIssueに分かれている場合、コメント欄でリンクをご確認ください。'
             BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。人間が対応してください。'
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
             gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
             exit 0
           fi
@@ -426,6 +427,7 @@ jobs:
             BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。関連するPull Requestはこちらです: $PR_URL"
             BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
           fi
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 01.wip を付与する（計画検討着手時）
@@ -479,7 +481,8 @@ jobs:
             - 単なる質問・確認と判断した場合:
               - 計画本文は書き直さず、`gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
                 で質問への回答のみを簡潔に投稿する。回答コメントの本文末尾には、実装フローの通常コメントと
-                視覚的に区別できるよう`<!-- issue-deck-qa-answer -->`マーカーを必ず付与する
+                視覚的に区別できるよう`<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
+                `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与する
               - 計画種別マーカー（`<!-- issue-deck-plan-type:... -->`）は付けない（直前の計画のマーカーが
                 そのまま承認判定に使われる想定のため）
               - 回答コメント投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
@@ -503,8 +506,8 @@ jobs:
             - まとめた計画を `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
               Issueにコメント投稿する。コメント本文の末尾に、下記の計画種別マーカーと、このワークフロー
               実行への追跡用リンク
-              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-              を必ず追記する
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`、
+              投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず追記する
             - 投稿後、`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"` を実行する
               （既に付いていても無害なので毎回実行してよい）
 
@@ -578,7 +581,7 @@ jobs:
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               RETRY_BODY="🔁 計画提示ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
@@ -590,7 +593,7 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
 
@@ -635,8 +638,8 @@ jobs:
             - 全て作成したら `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
               元Issueに作成したサブIssue一覧（`#番号`の形式で書けば自動的にリンクされる）をコメントする。
               コメント末尾に実行ログのリンク
-              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-              を必ず追記する
+              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`、
+              投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず追記する
             - 最後に `gh issue close ${{ steps.state.outputs.issue_number }} --reason "not planned"` を実行し、
               元Issueをクローズする（元Issueは今後このままでは実装されず、作業は上記サブIssueへ引き継がれる
               ことを明示するため）
@@ -671,7 +674,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
@@ -718,8 +721,9 @@ jobs:
             - `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で回答をコメント投稿する。
               コメント本文の先頭を`@claude`にしない（このワークフロー自身の再トリガーを防ぐため）。
               コメント末尾に、実装フローの通常コメントと視覚的に区別できるよう
-              `<!-- issue-deck-qa-answer -->`マーカーと、このワークフロー実行への追跡用リンク
-              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
+              `<!-- issue-deck-source:claude-issue-dispatch -->`マーカー、このワークフロー実行への
+              追跡用リンク`実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
 
             ## 迷った場合・調査に行き詰まった場合の振る舞い
@@ -747,7 +751,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 質問への回答に失敗した可能性があります。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 
       - name: 実装前のコメント数を記録する
@@ -877,7 +881,8 @@ jobs:
                   `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
                   で質問への回答のみを簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの
                   通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
-                  `<!-- issue-deck-qa-answer -->`マーカーを必ず付与してください。
+                  `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
+                  `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
                   なお、このステップの直前のシェルステップで既に`01.wip`が付与され`03.d:marge`が
                   外されているため、状態を元に戻すために
                   `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "01.wip"`
@@ -929,6 +934,14 @@ jobs:
             （例: `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ... --body "..."`）。`git push`・
             `git checkout`・`gh issue edit`によるラベル操作はこれまでどおり既定の`GH_TOKEN`
             （WORKFLOW_PAT）のまま実行してください。
+
+            ## コメント投稿元マーカーについて
+            このステップ全体を通じて`gh issue comment`によりIssueへ投稿する全てのコメント（上記の
+            質問への回答、PR未作成の再開が困難な場合の状況報告、以下の「責務」「画面確認・
+            スクリーンショットについて」に記載の完了報告・push競合の報告・スクリーンショット失敗報告・
+            画面確認待ちの報告等）の本文末尾に、投稿元を示す
+            `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください
+            （`gh pr create` / `gh pr comment`によるPR側への投稿は対象外です）。
 
             ## 責務
             - Issueの要件を実装する
@@ -1083,6 +1096,7 @@ jobs:
             if [ -n "$PR_BODY" ]; then
               FALLBACK_BODY="$FALLBACK_BODY"$'\n\n---\n\n'"$PR_BODY"
             fi
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
             gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
             exit 0
           fi
@@ -1106,7 +1120,7 @@ jobs:
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               RETRY_BODY="🔁 実装ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。既存のブランチ・コミットがあれば続きから再開します。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
@@ -1118,6 +1132,6 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
