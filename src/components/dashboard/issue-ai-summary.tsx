@@ -2,10 +2,16 @@
 
 import { Bot, Loader2, RotateCcw } from "lucide-react";
 
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIssueSummary } from "@/hooks/use-issue-summary";
 import type { Issue } from "@/types/issue";
+
+// 要約は見出し＋箇条書きのMarkdownで生成される。本文より控えめに見せたいので、
+// MarkdownBodyの既定サイズ・余白を要約向けに縮めて表示する（#631）。
+const SUMMARY_MARKDOWN_CLASS =
+  "text-sm leading-relaxed [&>*:first-child]:mt-0 [&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-sm [&_p]:mb-2 [&_ul]:mb-2 [&_ol]:mb-2";
 
 type IssueAiSummaryProps = {
   issue: Issue;
@@ -53,7 +59,7 @@ export function IssueAiSummary({ issue }: IssueAiSummaryProps) {
 
       {!isLoading && !error && state?.summary && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-sm whitespace-pre-wrap">{state.summary}</p>
+          <MarkdownBody content={state.summary} className={SUMMARY_MARKDOWN_CLASS} />
           {isStale && (
             <p className="text-xs text-muted-foreground">
               コメントが追加されており、要約の内容が更新されていない可能性があります

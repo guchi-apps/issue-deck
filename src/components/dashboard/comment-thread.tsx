@@ -582,6 +582,16 @@ export function CommentThread({
                   </div>
                 ) : (
                   <>
+                    {/* 長文コメントは要約を先に読めるよう、本文より前に表示する（#631）。 */}
+                    {comment.body.length > LONG_COMMENT_THRESHOLD && (
+                      <CommentAiSummary
+                        summary={commentSummary.summaries[comment.id]?.summary ?? null}
+                        isGenerating={commentSummary.generatingIds.has(comment.id)}
+                        error={commentSummary.errors[comment.id] ?? null}
+                        notConfigured={commentSummary.notConfigured}
+                        onGenerate={() => commentSummary.generate(comment.id)}
+                      />
+                    )}
                     <MarkdownBody
                       content={comment.body}
                       className="mt-1"
@@ -592,15 +602,6 @@ export function CommentThread({
                         <ThumbsUp className="size-3" />
                         {comment.reactionCount}
                       </span>
-                    )}
-                    {comment.body.length > LONG_COMMENT_THRESHOLD && (
-                      <CommentAiSummary
-                        summary={commentSummary.summaries[comment.id]?.summary ?? null}
-                        isGenerating={commentSummary.generatingIds.has(comment.id)}
-                        error={commentSummary.errors[comment.id] ?? null}
-                        notConfigured={commentSummary.notConfigured}
-                        onGenerate={() => commentSummary.generate(comment.id)}
-                      />
                     )}
                   </>
                 )}
