@@ -43,11 +43,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // スマホ（特にiOS Safari・ホーム画面アプリ）では、overflow-hiddenだけでは
+    // ドキュメント自体のラバーバンドスクロールを止められず、指でスクロールすると
+    // アプリシェルごと上下に動いてヘッダー・フッターが固定されていないように見える（#607）。
+    // overscroll-none（overscroll-behavior: none）でバウンス・引っ張って更新を無効化し、
+    // bodyをfixed inset-0でビューポートに固定して、ドキュメントが一切動かないようにする。
     <html
       lang="ja"
-      className={`${geistMono.variable} h-full overflow-x-hidden antialiased`}
+      className={`${geistMono.variable} h-full overflow-x-hidden overscroll-none antialiased`}
     >
-      <body className="h-full flex flex-col overflow-hidden">
+      <body className="fixed inset-0 flex flex-col overflow-hidden overscroll-none">
         {children}
         <AppUpdateChecker currentVersion={packageJson.version} />
       </body>

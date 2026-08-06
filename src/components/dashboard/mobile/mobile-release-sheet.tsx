@@ -85,7 +85,7 @@ export function MobileReleaseSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto">
+      <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto overscroll-contain">
         <SheetHeader>
           <SheetTitle>リリース（{repository.fullName}）</SheetTitle>
         </SheetHeader>

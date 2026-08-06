@@ -14,7 +14,7 @@ export default async function LoginPage({
   const { error } = await searchParams;
 
   return (
-    <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-muted/30 p-4">
+    <div className="flex h-full flex-col items-center justify-center gap-6 bg-muted/30 p-4">
       <LoginBfcacheReload />
       <div className="flex items-center gap-2 text-xl font-semibold">
         <LayoutDashboard className="size-6 text-primary" />

@@ -93,7 +93,7 @@ export function MobileIssueFilterSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto">
+      <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto overscroll-contain">
         <SheetHeader>
           <SheetTitle>絞り込み・並び替え</SheetTitle>
         </SheetHeader>
