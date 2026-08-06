@@ -30,6 +30,17 @@ export default async function DashboardPage() {
       )
     : new Set<string>();
 
+  const favoriteRepositoryIds = currentUser
+    ? new Set(
+        (
+          await db.favoriteRepository.findMany({
+            where: { userId: currentUser.id },
+            select: { repositoryId: true },
+          })
+        ).map((row) => row.repositoryId),
+      )
+    : new Set<string>();
+
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
   const quickFilters = currentUser
@@ -55,6 +66,7 @@ export default async function DashboardPage() {
         private: repo.private,
         archived: repo.archived,
         hidden: hiddenRepositoryIds.has(repo.id),
+        favorite: favoriteRepositoryIds.has(repo.id),
       }))}
       issues={issues}
       quickFilters={quickFilters}

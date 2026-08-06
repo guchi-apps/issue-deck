@@ -272,6 +272,26 @@ export function IssueDeckShell({
     }
   }
 
+  async function handleSetRepositoryFavorite(repository: ConnectedRepository, favorite: boolean) {
+    setRepositories((prev) =>
+      prev.map((repo) => (repo.id === repository.id ? { ...repo, favorite } : repo)),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/favorites", {
+        method: favorite ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id }),
+      });
+      if (!response.ok) throw new Error("failed to update favorite repository");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update favorite repository", error);
+      setRepositories((prev) =>
+        prev.map((repo) => (repo.id === repository.id ? { ...repo, favorite: !favorite } : repo)),
+      );
+    }
+  }
+
   async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
     function applyFavorite(target: boolean) {
       setIssues((prev) =>
@@ -391,6 +411,8 @@ export function IssueDeckShell({
                     overviewStats={overviewStats}
                     navCounts={navCounts}
                     onSelectQuickView={selectQuickView}
+                    favoriteRepositories={repositories.filter((repo) => repo.favorite)}
+                    onSelectRepository={selectRepository}
                     quickFilters={quickFilters}
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
@@ -424,6 +446,7 @@ export function IssueDeckShell({
                     onSelectRepository={selectRepository}
                     onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
                     onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                    onSetRepositoryFavorite={handleSetRepositoryFavorite}
                   />
                 )}
 
@@ -488,6 +511,7 @@ export function IssueDeckShell({
               onClearRepository={() => setFilter("repo", null)}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+              onSetRepositoryFavorite={handleSetRepositoryFavorite}
               labelSummary={labelSummary}
               selectedLabels={filters.labels}
               onSelectLabel={(label) => toggleLabel(label.name)}

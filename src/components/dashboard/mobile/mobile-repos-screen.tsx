@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Eye, EyeOff, FolderGit2, Lock, Search } from "lucide-react";
+import { Archive, Eye, EyeOff, FolderGit2, Lock, Search, Star } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -14,6 +14,7 @@ type MobileReposScreenProps = {
   onSelectRepository: (repository: ConnectedRepository) => void;
   onHideRepository: (repository: ConnectedRepository) => void;
   onShowRepository: (repository: ConnectedRepository) => void;
+  onSetRepositoryFavorite: (repository: ConnectedRepository, favorite: boolean) => void;
 };
 
 export function MobileReposScreen({
@@ -21,6 +22,7 @@ export function MobileReposScreen({
   onSelectRepository,
   onHideRepository,
   onShowRepository,
+  onSetRepositoryFavorite,
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
@@ -102,6 +104,18 @@ export function MobileReposScreen({
                           )}
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSetRepositoryFavorite(repo, !repo.favorite)}
+                      title={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                      aria-label={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                      className={cn(
+                        "flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground",
+                        repo.favorite ? "text-yellow-500" : "text-muted-foreground",
+                      )}
+                    >
+                      <Star className={cn("size-4", repo.favorite && "fill-yellow-400")} />
                     </button>
                     <button
                       type="button"

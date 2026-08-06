@@ -5,4 +5,5 @@ export type ConnectedRepository = {
   private: boolean;
   archived: boolean;
   hidden: boolean;
+  favorite: boolean;
 };
