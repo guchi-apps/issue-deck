@@ -13,6 +13,7 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
+  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -58,6 +59,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
@@ -142,6 +144,12 @@ export function MobileIssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const {
+    isGenerating: isCleaningUpComment,
+    error: commentCleanupError,
+    notConfigured: commentCleanupNotConfigured,
+    generate: generateCommentCleanup,
+  } = useIssueBodyCleanup();
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastCommentRef = useRef<HTMLLIElement>(null);
@@ -231,6 +239,12 @@ export function MobileIssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
+  }
+
+  async function handleGenerateCommentCleanup() {
+    const result = await generateCommentCleanup(newCommentBody);
+    if (!result) return;
+    setNewCommentBody(result.text);
   }
 
   async function handleAskClaudeFromComposer() {
@@ -720,6 +734,26 @@ export function MobileIssueDetail({
                 }
               }}
             />
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="outline"
+                size="xs"
+                className="w-fit"
+                disabled={!newCommentBody.trim() || isCleaningUpComment}
+                onClick={handleGenerateCommentCleanup}
+              >
+                {isCleaningUpComment ? <Loader2 className="animate-spin" /> : <Mic />}
+                音声入力を整理
+              </Button>
+              {commentCleanupNotConfigured && (
+                <p className="text-xs text-muted-foreground">
+                  Claudeのトークンが設定されていません
+                </p>
+              )}
+              {commentCleanupError && (
+                <p className="text-xs text-destructive">{commentCleanupError}</p>
+              )}
+            </div>
             <div className="flex flex-wrap justify-end gap-2">
               {canCreateFollowupFromComment(issue) && (
                 <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
