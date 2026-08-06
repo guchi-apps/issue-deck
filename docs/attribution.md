@@ -18,7 +18,7 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 
 | 操作 | 経路 | 使用トークン | GitHub上の名義 |
 |---|---|---|---|
-| Issue作成 | アプリ画面（`POST /api/issues`） | GitHub Appインストールトークン（`src/app/api/issues/route.ts`） | `issue-deck[bot]`（操作した人間によらず固定） |
+| Issue作成 | アプリ画面（`POST /api/issues`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | サブIssue作成（計画の分割、`mode=split`） | `claude-issue-dispatch.yml` | `GITHUB_TOKEN` | `github-actions[bot]` |
 | コメント投稿（通常コメント・「Claudeに質問する」・承認/修正ボタン） | アプリ画面（`POST /api/issues/comments`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | コメント投稿（計画提示・実装完了報告・質問への回答等） | `claude-issue-dispatch.yml`ほか | `GITHUB_TOKEN` | `github-actions[bot]` |
@@ -34,12 +34,11 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 
 ## 一致する経路・しない経路
 
-コメント投稿はアプリ画面から人間個人のOAuthトークンを使うため、GitHub上も実際に操作した
-人間の名義になる。一方、Issue作成・ラベル操作（アプリ経由）は常に`issue-deck[bot]`、
-develop向けPR作成・マージは常にPAT所有者（`m-guchi`）名義になり、**実際に画面を操作した
-人間が誰であってもこの名義は変わらない**（現状は事実上ユーザーが`m-guchi`のみのため
-問題が表面化していない。将来マルチユーザー化する場合は「実際の操作者が分からなくなる」
-設計上の制約として残る）。
+コメント投稿・Issue作成はアプリ画面から人間個人のOAuthトークンを使うため、GitHub上も実際に
+操作した人間の名義になる。一方、ラベル操作（アプリ経由）は常に`issue-deck[bot]`、develop向け
+PR作成・マージは常にPAT所有者（`m-guchi`）名義になり、**実際に画面を操作した人間が誰であっても
+この名義は変わらない**（現状は事実上ユーザーが`m-guchi`のみのため問題が表面化していない。
+将来マルチユーザー化する場合は「実際の操作者が分からなくなる」設計上の制約として残る）。
 
 ## コメント投稿元マーカー（同じ名義の中でも「どの処理が投稿したか」を判別する）
 

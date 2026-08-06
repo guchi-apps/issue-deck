@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUserId } from "@/lib/auth-user";
+import { getCurrentUser, requireUserId } from "@/lib/auth-user";
+import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { createIssue, deleteIssue, updateIssue } from "@/lib/github/issues-api";
+import { createIssue, deleteIssue, GithubApiError, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 
@@ -33,8 +34,8 @@ export function POST(request: NextRequest) {
 }
 
 async function handlePOST(request: NextRequest) {
-  const userId = await requireUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -53,13 +54,17 @@ async function handlePOST(request: NextRequest) {
 
   const [owner, repo] = repositoryFullName.split("/");
 
-  const repository = await findRepository(userId, repositoryFullName);
+  const repository = await findRepository(user.id, repositoryFullName);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  if (!user.githubAccessToken) {
+    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  }
+
   try {
-    const token = await getInstallationToken(repository.installation.installationId);
+    const token = decryptSecret(user.githubAccessToken);
     const created = await createIssue(owner, repo, token, {
       title: title.trim(),
       body: typeof payload.body === "string" && payload.body.trim() ? payload.body : undefined,
@@ -70,6 +75,10 @@ async function handlePOST(request: NextRequest) {
     const issue = await upsertIssueAndGetDisplay(repository, created);
     return NextResponse.json({ issue });
   } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) {
+      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
+      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+    }
     console.error(`[POST /api/issues] ${repositoryFullName}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
