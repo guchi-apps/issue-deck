@@ -248,6 +248,12 @@ PAT はユーザー個人に紐づくため、コメント投稿もラベル操�
 
 App のインストールと権限付与が前提になる。**長期的にはこれが本命。**
 
+なお、issue #622 で遭遇した「リポジトリの Workflow permissions で
+『Allow GitHub Actions to create and approve pull requests』が無効だと`gh pr create`が
+失敗する」という制限は、既定の`GITHUB_TOKEN`固有のものであり、Fine-grained PAT や
+GitHub App のインストールトークンにはこの制限が適用されない（issue #640）。したがって
+案B へ移行すれば、このリポジトリ設定を変更しなくても#622 の問題は解消する。
+
 ### 案C: 調査フェーズを Actions で行わない（issue #360 で実装予定）
 
 他リポジトリの調査は、人間がループに入れる実行環境（Claude Code のセッション）で実施し、
