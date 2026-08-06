@@ -52,15 +52,15 @@ export type IssueDraftDefaults = {
   defaultBody?: string | null;
 };
 
-// 引用元テキストなどdefault系propsが明示的に渡されている場合はそちらを優先し、
-// それ以外の通常の新規作成の場合のみ保存済み下書きを復元する。
+// 引用元テキスト（defaultTitle/defaultBody）が明示的に渡されている場合はそちらを優先し、
+// それ以外の通常の新規作成の場合は保存済み下書きを復元する。defaultRepositoryFullNameは
+// 「現在の文脈から推測したリポジトリの初期値」に過ぎず、下書き全体の復元を止める理由には
+// ならないため判定対象から除外し、リポジトリ欄のみ下書きより優先する。
 export function resolveInitialIssueDraft(defaults: IssueDraftDefaults): IssueDraft {
-  const hasExplicitPrefill = Boolean(
-    defaults.defaultRepositoryFullName || defaults.defaultTitle || defaults.defaultBody,
-  );
+  const hasExplicitPrefill = Boolean(defaults.defaultTitle || defaults.defaultBody);
   const draft = hasExplicitPrefill ? null : readIssueDraft();
   return {
-    repositoryFullName: draft?.repositoryFullName ?? defaults.defaultRepositoryFullName ?? "",
+    repositoryFullName: defaults.defaultRepositoryFullName ?? draft?.repositoryFullName ?? "",
     title: draft?.title ?? defaults.defaultTitle ?? "",
     body: draft?.body ?? defaults.defaultBody ?? "",
     selectedLabels: draft?.selectedLabels ?? [],
@@ -69,9 +69,13 @@ export function resolveInitialIssueDraft(defaults: IssueDraftDefaults): IssueDra
 }
 
 // ダイアログが開いている間、フォーム値の変更をデバウンスしてlocalStorageに保存する。
+// ダイアログが閉じる際は、デバウンス中の内容を破棄せず即座に書き込む。
 export function useIssueDraftAutosave(open: boolean, draft: IssueDraft) {
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      writeIssueDraft(draft);
+      return;
+    }
     const timer = window.setTimeout(() => {
       writeIssueDraft(draft);
     }, SAVE_DEBOUNCE_MS);
