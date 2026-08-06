@@ -219,6 +219,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
+- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
 
 ## 段階的導入計画
 
