@@ -10,6 +10,7 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
+  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -47,12 +48,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestLink } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
@@ -60,6 +63,7 @@ import {
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  rejectCommentBody,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -67,7 +71,6 @@ import {
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -120,6 +123,12 @@ export function IssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const {
+    isGenerating: isCleaningUpComment,
+    error: commentCleanupError,
+    notConfigured: commentCleanupNotConfigured,
+    generate: generateCommentCleanup,
+  } = useIssueBodyCleanup();
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -128,11 +137,11 @@ export function IssueDetail({
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
-  const pullRequestLink = useMemo(() => {
-    if (!issue) return null;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    return extractLatestPullRequestLink(comments, owner, repo);
-  }, [comments, issue]);
+  const pullRequestLink = usePullRequestLink(
+    issue?.repositoryFullName ?? null,
+    issue?.number ?? null,
+    comments,
+  );
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,
@@ -191,6 +200,12 @@ export function IssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
+  }
+
+  async function handleGenerateCommentCleanup() {
+    const result = await generateCommentCleanup(newCommentBody);
+    if (!result) return;
+    setNewCommentBody(result.text);
   }
 
   async function handleAskClaudeFromComposer() {
@@ -298,8 +313,7 @@ export function IssueDetail({
 
   async function handleReject(reason: string) {
     if (!issue) return;
-    const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), body);
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), rejectCommentBody(issue.labels, reason));
   }
 
   async function handleWithdraw() {
@@ -580,6 +594,26 @@ export function IssueDetail({
                   }
                 }}
               />
+              <div className="flex flex-col gap-1">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="w-fit"
+                  disabled={!newCommentBody.trim() || isCleaningUpComment}
+                  onClick={handleGenerateCommentCleanup}
+                >
+                  {isCleaningUpComment ? <Loader2 className="animate-spin" /> : <Mic />}
+                  音声入力を整理
+                </Button>
+                {commentCleanupNotConfigured && (
+                  <p className="text-xs text-muted-foreground">
+                    Claudeのトークンが設定されていません
+                  </p>
+                )}
+                {commentCleanupError && (
+                  <p className="text-xs text-destructive">{commentCleanupError}</p>
+                )}
+              </div>
               <div className="flex flex-wrap justify-end gap-2">
                 {canCreateFollowupFromComment(issue) && (
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>

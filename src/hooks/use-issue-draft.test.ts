@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearIssueDraft,
   isIssueDraftEmpty,
   readIssueDraft,
   resolveInitialIssueDraft,
+  useIssueDraftAutosave,
   writeIssueDraft,
   type IssueDraft,
 } from "@/hooks/use-issue-draft";
@@ -106,11 +108,59 @@ describe("resolveInitialIssueDraft", () => {
     });
   });
 
-  it("defaultRepositoryFullNameが明示的に渡された場合は下書きより優先し、復元しない", () => {
-    writeIssueDraft({ ...emptyDraft, repositoryFullName: "owner/draft-repo" });
+  it("defaultRepositoryFullNameのみが渡された場合はリポジトリ欄以外の下書き（タイトル・本文・ラベル・担当者）を復元する", () => {
+    const draft: IssueDraft = {
+      repositoryFullName: "owner/draft-repo",
+      title: "下書きタイトル",
+      body: "下書き本文",
+      selectedLabels: ["bug"],
+      assignee: "octocat",
+    };
+    writeIssueDraft(draft);
+    expect(resolveInitialIssueDraft({ defaultRepositoryFullName: "owner/context-repo" })).toEqual({
+      ...draft,
+      repositoryFullName: "owner/context-repo",
+    });
+  });
+
+  it("defaultRepositoryFullNameが渡され、保存済み下書きが無い場合はその値を使う", () => {
     expect(resolveInitialIssueDraft({ defaultRepositoryFullName: "owner/context-repo" })).toEqual({
       ...emptyDraft,
       repositoryFullName: "owner/context-repo",
     });
+  });
+});
+
+describe("useIssueDraftAutosave", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("openの間はデバウンスしてから保存する", () => {
+    const draft: IssueDraft = { ...emptyDraft, title: "入力中のタイトル" };
+    renderHook(({ open, draft }) => useIssueDraftAutosave(open, draft), {
+      initialProps: { open: true, draft },
+    });
+
+    expect(readIssueDraft()).toBeNull();
+    vi.advanceTimersByTime(500);
+    expect(readIssueDraft()).toEqual(draft);
+  });
+
+  it("デバウンス完了前にopenがfalseになった場合、保留中の内容を即座に保存する", () => {
+    const draft: IssueDraft = { ...emptyDraft, title: "入力直後に閉じた内容" };
+    const { rerender } = renderHook(({ open, draft }) => useIssueDraftAutosave(open, draft), {
+      initialProps: { open: true, draft },
+    });
+
+    vi.advanceTimersByTime(100);
+    expect(readIssueDraft()).toBeNull();
+
+    rerender({ open: false, draft });
+    expect(readIssueDraft()).toEqual(draft);
   });
 });
