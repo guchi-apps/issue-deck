@@ -103,7 +103,8 @@ export function MobileIssueListScreen({
       {/* isolate/[contain:paint]は#473でring枠線のiOS Safari描画崩れ対策として付与したが、
           #506でring自体を塗りつぶし背景に置き換えたため役目を終えていた。むしろ親の
           h-dvh（#304でフッター隠れ対策として導入、Safariのツールバー開閉のたびに再計算される）
-          の変化を受けるたびにペイントコンテインメントの再計算が発生し、崩れを誘発し得るため削除する（#547） */}
+          の変化を受けるたびにペイントコンテインメントの再計算が発生し、崩れを誘発し得るため削除する（#547）。
+          その後#604で親のh-dvhはh-fullに置き換え、body側（#304で固定サイズ済み）に追従させた */}
       {/* shrink-0がないと、下のIssueList（flex-1でflex-basisが0のため縮小分を負担しない）の
           分まで縮小配分がこの行に集中し、表示件数が多いときにタブの高さが潰れてしまう（#584） */}
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
