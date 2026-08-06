@@ -58,13 +58,13 @@ develop向けPR作成・マージは常にPAT所有者（`m-guchi`）名義に�
 3. `<!-- issue-deck-plan-type:implement|split -->`（`comment-source.ts`で新たにTS側の判定関数を用意） — 計画コメント
 4. `<!-- issue-deck-source:<id> -->`（`comment-source.ts`で新設） — 上記に該当しない定型コメントの投稿元ワークフロー
    - id一覧: `claude-issue-dispatch` / `claude-review-develop` / `claude-conflict-resolve` / `issue-labels`
-   - 実際にワークフロー側へマーカー付与を適用済みなのは`claude-issue-dispatch.yml`のみ（#563時点）。
-     残り3つは判定関数側の定義のみ先行して用意してあり、各ワークフローへの実際の適用は別Issueで対応する
+   - 4ワークフロー全てで`gh issue comment`によるIssue側への投稿箇所にマーカー付与を適用済み
+     （`claude-issue-dispatch.yml`は#563、残り3つは#564で対応）
 5. 上記いずれにも該当せずbotログインの場合は「不明な自動投稿」（過去に投稿された、マーカー無しの旧コメントが該当）
 6. bot以外のログインの場合はバッジを表示しない
 
-`claude-issue-dispatch.yml`側では、bashで直接組み立てるコメント本文には末尾に直接マーカー文字列を
-追記し、Claude Codeへの指示文で本文を組み立てるコメント（計画提示・実装完了報告・質問応答等）は
+各ワークフローとも、bashで直接組み立てるコメント本文には末尾に直接マーカー文字列を追記し、
+Claude Codeへの指示文で本文を組み立てるコメント（計画提示・実装完了報告・質問応答等）は
 プロンプト内で「マーカーを必ず付与する」よう指示する形で対応している。`gh pr create` / `gh pr comment`
 によるPR側への投稿は、`comment-thread.tsx`が表示するIssueコメントスレッドに現れないためマーカー
 付与の対象外。
