@@ -1224,9 +1224,14 @@ jobs:
   # 00.check-userは付与しない。このラベルは解除が「計画の承認」として解釈される経路があり
   # (実装ブランチ未作成の状態でのunlabeledイベント)、計画コメントが投稿されないまま起動に失敗した
   # ケースで付与してしまうと、人間が解除した際に計画フェーズを飛ばして実装が始まる恐れがあるため。
+  #
+  # 発火条件に`if: failure()`は使わない。実際に検証したところ、dispatchジョブが`Set up job`で
+  # 失敗したケース(まさに本ジョブが拾いたいインフラ起因の失敗)では、`if: failure()`が真にならず
+  # 本ジョブごとskipされた(run 31119604256で確認)。そのため`always()`で必ず起動したうえで、
+  # needs.dispatch.resultの値を見てシェル側で通知要否を判定する。
   notify-failure:
     needs: dispatch
-    if: failure()
+    if: always() && needs.dispatch.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -1237,8 +1242,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISPATCH_RESULT: ${{ needs.dispatch.result }}
         run: |
           set -e
+          echo "dispatchジョブの結果: $DISPATCH_RESULT"
+
+          # cancelled(人間による中断・concurrencyによる置き換え)は意図的な停止のため通知しない。
+          if [ "$DISPATCH_RESULT" != "failure" ]; then
+            echo "dispatchジョブは失敗していないため、通知しません"
+            exit 0
+          fi
+
           if [ -z "$ISSUE_NUMBER" ]; then
             echo "対象issue番号を特定できないため、通知をスキップします"
             exit 0
