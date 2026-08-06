@@ -122,11 +122,26 @@ export function MobileRepoIssuesScreen({
           aria-label="リリース"
         >
           {releaseButtonStatus === "progressing" && (
-            <span
+            <svg
               aria-hidden="true"
-              className="absolute animate-spin rounded-md border-2 border-transparent border-t-primary"
+              className="absolute block animate-[border-trace_1.4s_linear_infinite] text-primary"
               style={{ inset: -3 }}
-            />
+              viewBox="0 0 100 100"
+            >
+              <rect
+                x="2"
+                y="2"
+                width="96"
+                height="96"
+                rx="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="4"
+                strokeLinecap="round"
+                pathLength="100"
+                strokeDasharray="20 80"
+              />
+            </svg>
           )}
           {releaseButtonStatus === "action_required" && (
             <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-white">
