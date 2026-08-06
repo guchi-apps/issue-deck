@@ -382,7 +382,10 @@ export function IssueDeckShell({
   const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
-    <div className="flex h-dvh flex-col">
+    // h-dvhはSafariのツールバー開閉のたびに再計算され、そのつどヘッダー・フッターの
+    // 位置がずれる（#607）。bodyをfixed inset-0でビューポートに固定したため、
+    // h-fullでbodyと同じ高さに揃えれば動的ビューポートの変化に影響されない。
+    <div className="flex h-full flex-col">
       <TopBar
         currentUser={currentUser}
         filters={filters}

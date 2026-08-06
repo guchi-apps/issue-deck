@@ -41,11 +41,11 @@ export function MobileHomeScreen({
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="border-b p-4">
+      <header className="shrink-0 border-b p-4">
         <span className="text-base font-semibold">Issue Deck</span>
       </header>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         <div className="p-4">
           <h2 className="mb-2 text-sm font-semibold">概要</h2>
           <div className="grid grid-cols-3 gap-2">

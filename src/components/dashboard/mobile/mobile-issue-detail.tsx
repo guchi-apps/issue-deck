@@ -353,7 +353,7 @@ export function MobileIssueDetail({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
-      <header className="flex items-center gap-3 border-b p-4">
+      <header className="flex shrink-0 items-center gap-3 border-b p-4">
         <button
           type="button"
           onClick={onBack}
@@ -501,7 +501,7 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
+      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}

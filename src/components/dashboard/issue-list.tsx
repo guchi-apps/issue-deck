@@ -107,12 +107,17 @@ export function IssueList({
         </div>
       )}
 
+      {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが
+          ドキュメント側へ伝播してヘッダー・フッターごと動くのを防ぐ（#607） */}
       {issues.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
           該当するIssueがありません
         </div>
       ) : (
-        <ul ref={listRef} className={cn("flex-1 overflow-y-auto", fabSpacing && "pb-20")}>
+        <ul
+          ref={listRef}
+          className={cn("flex-1 overflow-y-auto overscroll-contain", fabSpacing && "pb-20")}
+        >
           {issues.map((issue) => (
             <li
               key={issue.id}

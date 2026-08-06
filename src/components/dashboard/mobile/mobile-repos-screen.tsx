@@ -38,11 +38,11 @@ export function MobileReposScreen({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="border-b p-4">
+      <header className="shrink-0 border-b p-4">
         <h1 className="text-base font-semibold">リポジトリ</h1>
       </header>
 
-      <div className="p-4">
+      <div className="shrink-0 p-4">
         <div className="relative">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -54,7 +54,7 @@ export function MobileReposScreen({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
         {repositories.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
             まだリポジトリと連携していません。
