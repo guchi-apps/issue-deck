@@ -76,3 +76,27 @@ describe("CommentThread 投稿元バッジ", () => {
     expect(screen.getByText("不明な自動投稿")).not.toBeNull();
   });
 });
+
+describe("CommentThread AI要約の表示位置", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("長文コメントではAI要約を本文より前に表示する", () => {
+    const body = `本文の先頭${"あ".repeat(500)}`;
+    renderThread([makeComment({ body })]);
+
+    const summaryLabel = screen.getByText("AI要約");
+    const bodyText = screen.getByText(body);
+    // Node.DOCUMENT_POSITION_FOLLOWING: summaryLabel より後ろに bodyText がある
+    expect(summaryLabel.compareDocumentPosition(bodyText) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("短いコメントにはAI要約を表示しない", () => {
+    renderThread([makeComment({ body: "短いコメント" })]);
+
+    expect(screen.queryByText("AI要約")).toBeNull();
+  });
+});
