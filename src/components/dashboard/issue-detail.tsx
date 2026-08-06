@@ -53,6 +53,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestLink } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
@@ -67,7 +68,6 @@ import {
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -128,11 +128,11 @@ export function IssueDetail({
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
-  const pullRequestLink = useMemo(() => {
-    if (!issue) return null;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    return extractLatestPullRequestLink(comments, owner, repo);
-  }, [comments, issue]);
+  const pullRequestLink = usePullRequestLink(
+    issue?.repositoryFullName ?? null,
+    issue?.number ?? null,
+    comments,
+  );
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,

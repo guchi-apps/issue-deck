@@ -26,6 +26,7 @@ export const GITHUB_API_FEATURES = [
   { key: "issue_list_workflow_running", label: "一覧の実行状況ポーリング" },
   { key: "issue_detail_workflow_run", label: "詳細の実行状況ポーリング" },
   { key: "pull_request_ci", label: "PRのCI状態ポーリング" },
+  { key: "pull_request_link_fallback", label: "PR紐付けのフォールバック検索" },
   { key: "release_status", label: "リリース進捗ポーリング" },
   { key: "issue_comments", label: "コメント取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
