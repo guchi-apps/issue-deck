@@ -98,6 +98,20 @@ export async function fetchPullRequest(
   return res.json();
 }
 
+export async function mergePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/merge`;
+  const res = await githubFetch(url, token, { method: "PUT", body: { merge_method: "merge" } });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
 export type GithubApiCheckRun = {
   status: "queued" | "in_progress" | "completed" | string;
   conclusion: string | null;

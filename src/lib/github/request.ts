@@ -3,7 +3,7 @@ import { recordGithubApiCall } from "@/lib/github/api-usage";
 export const GITHUB_API = "https://api.github.com";
 
 type GithubFetchOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** JSONとして送信する本文 */
   body?: unknown;
   /**
