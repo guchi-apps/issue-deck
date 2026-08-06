@@ -88,7 +88,7 @@ jobs:
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "01.wip"
-            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
+            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
   develop-pr-merged:
@@ -113,7 +113,7 @@ jobs:
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
-            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"
+            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
   develop-merge-sweep:
@@ -133,7 +133,7 @@ jobs:
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
               gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
-              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"
+              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
             fi
           done
 
