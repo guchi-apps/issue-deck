@@ -369,23 +369,30 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
 - git push（ラベル操作を含む）はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository
-  permissions > Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`
-  ステップの`actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の
-  `github_token`入力・`GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は
+  permissions > Workflows: Read and write を含む）で行う（issue #106）。既定の`GITHUB_TOKEN`は
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
   「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
-  自体を変更するIssueを本ワークフローで扱うにはPATが必須。他のステップ（状態判定・通知コメント・
-  計画提示など、ワークフローファイルを変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの
-  利用は最小限にとどめている。
-  - 一方、`WORKFLOW_PAT`は`.github/workflows/`配下への書き込み権限を持たせるためのFine-grained PAT
-    であり、実体は人間（m-guchi）名義のトークンである。そのため実装ステップのプロンプトでは、
-    `gh issue comment` / `gh pr create` / `gh pr comment`によるIssue/PRへのコメント投稿・PR作成は
-    ステップ側でenv経由で渡す`DEFAULT_GH_TOKEN`（既定の`GITHUB_TOKEN`、投稿者は`github-actions[bot]`）
-    を明示的に指定して実行するよう指示し、`git push`・`gh issue edit`によるラベル操作のみ既定の
-    `GH_TOKEN`（`WORKFLOW_PAT`）を使う。これを怠ると、エージェントが投稿したコメントやPRが
-    GitHub上・issue-deck画面上で人間（m-guchi）が書いたものとして表示されてしまう問題があった
-    （issue #576）。同じパターンが使われる`.github/workflows/claude-conflict-resolve.yml`の
-    コンフリクト解消ステップも同様の方針にしている。
+  自体を変更するIssueを本ワークフローで扱うにはPATが必須。この認証は`Checkout develop`ステップの
+  `actions/checkout`の`token`入力（`persist-credentials`によりジョブ全体の`.git/config`に
+  `http.extraheader`として永続化される）のみで完結しており、後続の実装ステップ
+  （`claude-code-action`）側の`github_token`入力・`GH_TOKEN`環境変数には依存しない。他のステップ
+  （状態判定・通知コメント・計画提示など、ワークフローファイルを変更しない箇所）は既定の
+  `GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
+  - 実装ステップの`GH_TOKEN`環境変数（および`github_token`入力）は、上記のとおりgit pushの認証には
+    使われないため、そのまま既定の`GITHUB_TOKEN`（`${{ github.token }}`）を設定している。これにより
+    `gh issue comment` / `gh pr create` / `gh pr comment` / `gh issue edit`はすべてトークンを
+    上書きせずそのまま実行すればよく、投稿者・作成者は`github-actions[bot]`になる。同じパターンが
+    使われる`.github/workflows/claude-conflict-resolve.yml`のコンフリクト解消ステップも同様の方針
+    にしている。
+  - 当初（issue #576時点）は`GH_TOKEN`を`WORKFLOW_PAT`（人間（m-guchi）名義のFine-grained PAT）に
+    設定したうえで、Issue/PRへのコメント投稿・PR作成のみコマンド単位で`DEFAULT_GH_TOKEN`
+    （既定の`GITHUB_TOKEN`）に明示的に上書きさせるようプロンプトで指示する方式を取っていた。しかし
+    実際にはClaude Codeのbashツール自体が持つシークレット保護のガードレールが、`TOKEN`を含む名前の
+    環境変数の展開を一律ブロックするため、この上書きは実行時に機能せず、完了報告コメント・PRの
+    投稿者が人間（m-guchi）名義のまま記録され続ける問題が再発した（issue #621）。原因調査の結果、
+    そもそもgit pushの認証はcheckoutステップ側で完結しており実装ステップの`GH_TOKEN`には依存しない
+    ことが判明したため、`GH_TOKEN`を`WORKFLOW_PAT`にする理由自体がなく、コマンド単位の上書きという
+    壊れやすい方式をやめて既定の`GITHUB_TOKEN`をそのまま使う現在の構成に変更した（issue #635）。
 
 ### 計画提示ステップの信頼性確保
 
