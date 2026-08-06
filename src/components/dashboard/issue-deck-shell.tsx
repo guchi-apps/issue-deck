@@ -382,7 +382,7 @@ export function IssueDeckShell({
   const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-full flex-col">
       <TopBar
         currentUser={currentUser}
         filters={filters}
