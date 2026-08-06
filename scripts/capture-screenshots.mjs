@@ -49,12 +49,23 @@ const targets = targetArgs.map((arg) => {
 
 const hostname = new URL(baseUrl).hostname;
 
+// モバイル画面（src/components/dashboard/mobile/配下）は「ヘッダー固定+内部
+// overflow-y-autoで本文をスクロールする」構成のものが多く、iPhone 13実機相当の
+// viewport高さ（844px）のままだとコンテンツがそのdiv内スクロール領域に収まりきらず、
+// documentの高さ自体は変わらないため`page.screenshot({ fullPage: true })`では
+// スクロールしないと見えない範囲が撮影できない（#572）。撮影専用なので実機の見た目を
+// 再現する必要はなく、内部スクロール分もまとめて1枚に収まるよう高さだけ大きく確保する。
+const MOBILE_DEVICE = {
+  ...devices["iPhone 13"],
+  viewport: { ...devices["iPhone 13"].viewport, height: 2400 },
+};
+
 async function capture({ name, targetPath, device }) {
   const targetUrl = new URL(targetPath, baseUrl).toString();
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext(
-      device === "mobile" ? devices["iPhone 13"] : { viewport: { width: 1440, height: 900 } },
+      device === "mobile" ? MOBILE_DEVICE : { viewport: { width: 1440, height: 900 } },
     );
     await context.addCookies([
       {
@@ -66,8 +77,10 @@ async function capture({ name, targetPath, device }) {
     ]);
     const page = await context.newPage();
     await page.goto(targetUrl, { waitUntil: "load" });
-    // クライアント側のレンダリング・フォント読み込みが落ち着くまでの猶予。
-    await page.waitForTimeout(500);
+    // クライアント側のレンダリング・フォント読み込み・コメント欄等クライアント側fetchが
+    // 落ち着くまでの猶予（#572: コメント取得はクライアント側useEffect経由のため、
+    // 短すぎると撮影時点で反映されないことがある）。
+    await page.waitForTimeout(1500);
     const filePath = path.join(outDir, `${name}.png`);
     await page.screenshot({ path: filePath, fullPage: true });
     console.error(`撮影しました: ${filePath} (${targetUrl})`);
