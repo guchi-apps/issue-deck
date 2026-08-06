@@ -120,6 +120,11 @@ name: Claude Issue Dispatch
 # パーミッション確認(下記「実行者の権限・状態を判定する」ステップ)を経由しない。これは
 # workflow_dispatchのAPI呼び出し自体がリポジトリへのwrite権限を要求するGitHub側の仕様により、
 # 同等の信頼レベルが既に担保されているため。
+#
+# 上記のフォールバック検証ステップは、いずれもdispatchジョブ内のステップとして動く。そのため
+# dispatchジョブが「対応開始をコメントで通知する」より前の段階(Set up job・Checkout等)で落ちた
+# 場合は、どのフォールバックも動かずIssue側に痕跡が一切残らない。これを拾うために、dispatchとは
+# 独立したnotify-failureジョブで起動失敗を通知する(#650)。
 
 on:
   issues:
@@ -1201,3 +1206,56 @@ jobs:
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+
+  # dispatchジョブが「対応開始をコメントで通知する」ステップに到達する前に落ちた場合、Issue側に
+  # 痕跡が一切残らず、利用者からは処理が無反応のまま止まったようにしか見えない(#650)。
+  # 2026-08-06のGitHub Actions障害(Status: Actions=partial_outage)では、`Set up job`の
+  # `Failed to resolve action download info`により本ワークフローのrunが7件連続で失敗し、
+  # #641で実際にこの状態が発生した。
+  #
+  # このジョブは`uses:`を一切使わず`run:`ステップのみで構成する。上記障害はactionの解決処理
+  # (`Getting action download info`)そのもので発生したため、actionを使わないジョブであれば
+  # 解決処理が不要で、同種の障害でも生き残って通知を残せる見込みが高い。`gh`はrunnerに同梱
+  # されているためインストールも要らない。同じ理由でcheckoutも行わない。
+  #
+  # concurrencyは付けない。dispatchジョブはissueごとに直列化される(#129)が、通知は先行実行の
+  # 完了を待たず即座に出す必要があるため。
+  #
+  # 00.check-userは付与しない。このラベルは解除が「計画の承認」として解釈される経路があり
+  # (実装ブランチ未作成の状態でのunlabeledイベント)、計画コメントが投稿されないまま起動に失敗した
+  # ケースで付与してしまうと、人間が解除した際に計画フェーズを飛ばして実装が始まる恐れがあるため。
+  notify-failure:
+    needs: dispatch
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: 起動失敗をIssueに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "対象issue番号を特定できないため、通知をスキップします"
+            exit 0
+          fi
+
+          # dispatchジョブ側が既に何らかの通知(対応開始・各フォールバック通知)を投稿できていた
+          # 場合は二重に通知しない。dispatchが投稿するコメントには実行ログURLが含まれるため、
+          # 同一runのURLを含むコメントの有無で判定する。判定自体に失敗した場合は投稿する側に倒す
+          # (無言で止まるのを防ぐのが本ジョブの目的のため)。
+          if gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
+            echo "同一runの通知コメントを確認できたため、重複通知をスキップします"
+            exit 0
+          fi
+
+          BODY='⚠️ 自動対応の起動に失敗しました。計画・実装のいずれも行われていません。'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
+          BODY="$BODY"$'\n\n''復旧後、このIssueに改めて `@claude` とコメントすると再開します。'
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
