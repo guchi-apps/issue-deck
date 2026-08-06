@@ -362,6 +362,36 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED"
 
+      - name: claude-code-actionに渡すモデル指定を取得する
+        id: claude_model
+        # 全リポジトリ共通のモデル設定(自動リトライ上限と同じくAppSetting、#622)を読み取り専用
+        # APIから取得し、以降の各claude-code-actionステップのclaude_argsに埋め込む--modelの値に
+        # する。"auto"（未設定時のデフォルト含む）の場合はmodel_flagを空文字にし、--modelを
+        # 一切付与しない(claude-code-action側のデフォルトモデルに委ねる)。値はモデルの
+        # スナップショット日付を含まないエイリアス(opus/sonnet/haiku)のみを許可し、想定外の値は
+        # autoにフォールバックする(APP_BASE_URL未設定・疎通失敗時も同様)。
+        if: steps.state.outputs.mode != 'skip'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          CLAUDE_MODEL=auto
+          if [ -n "$APP_BASE_URL" ]; then
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/claude-model" 2>/dev/null || true)"
+            if [ -n "$RESPONSE" ]; then
+              CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null || echo auto)"
+            fi
+          fi
+          case "$CLAUDE_MODEL" in
+            opus|sonnet|haiku) : ;;
+            *) CLAUDE_MODEL=auto ;;
+          esac
+          echo "model=$CLAUDE_MODEL" >> "$GITHUB_OUTPUT"
+          if [ "$CLAUDE_MODEL" = "auto" ]; then
+            echo "model_flag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "model_flag=--model $CLAUDE_MODEL" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 対応開始をコメントで通知する
         # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
@@ -457,7 +487,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"
+            ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
@@ -613,7 +645,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"'
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"
+            ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} は、
             人間が承認済みの計画（直前の`<!-- issue-deck-plan-type:split -->`マーカー付きコメント）により、
@@ -697,7 +731,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"
+            ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリについて質問に答えるエージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             投稿された、`@claude 質問: ` で始まる直近のコメントへの回答のみを行ってください。
@@ -863,7 +899,9 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"'
+          claude_args: |
+            --allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"
+            ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
             おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の

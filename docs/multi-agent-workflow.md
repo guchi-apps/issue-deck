@@ -426,6 +426,24 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
      マーカーを付けない（`00.check-user`も付けないため、issue-deck画面の「続きを実装・調査を依頼」
      ボタンは表示されず、UIの継続依頼導線と自動リトライが二重に走ることはない）。
 
+### 使用するモデルの設定（#622）
+
+`claude-issue-dispatch.yml`の各モード（計画提示・分割・質問応答・実装/追加対応）の
+`claude-code-action`起動時、`claude_args`に含める`--model`の値は、自動リトライ上限
+（`autoRetryLimit`）と同じ`AppSetting`シングルトンテーブルで管理する全リポジトリ共通の設定
+（`claudeModel`。既定値は`"auto"`）から決める。アプリ設定ダイアログ（歯車アイコン）で
+「自動」「Opus」「Sonnet」「Haiku」のいずれかを選択でき、値は`GET /api/settings/claude-model`
+（読み取り専用、認証不要）経由でワークフローから参照する。
+
+- ジョブの先頭付近（実行者・状態判定ステップの直後）に専用ステップを設け、`APP_BASE_URL`未設定
+  時やAPI疎通失敗時、または許可された値（`opus`/`sonnet`/`haiku`）以外が返った場合は安全側で
+  `"auto"`扱いにフォールバックする（autoRetryLimitの取得ステップと同じ方針）。
+- `claudeModel`が`"auto"`の場合は`--model`を一切付与せず、`claude-code-action`側のデフォルト
+  モデルに委ねる。それ以外の場合は`--model <値>`を各`claude_args`に追記する。
+- モデル値はスナップショット日付を含む具体的なモデルIDではなく、Claude Code CLIが解決する
+  エイリアス（`opus`/`sonnet`/`haiku`）のみを許可する。特定のスナップショットに固定すると、
+  将来Anthropic側でデフォルトモデルが更新されても自動的に恩恵を受けられなくなるため。
+
 ### 自動投稿コメントへの実行ログリンク付与
 
 `claude-issue-dispatch.yml`・`issue-labels.yml`がGitHub Actions上で`gh issue comment`を使って
