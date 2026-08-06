@@ -61,6 +61,7 @@ import {
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  rejectCommentBody,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -298,8 +299,7 @@ export function IssueDetail({
 
   async function handleReject(reason: string) {
     if (!issue) return;
-    const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), body);
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), rejectCommentBody(issue.labels, reason));
   }
 
   async function handleWithdraw() {

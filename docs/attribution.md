@@ -9,8 +9,10 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 
 [docs/actions-token-model.md](actions-token-model.md)がトークンの使い分け・自己ループ防止の
 観点でこの話題を扱っているのに対し、本ドキュメントは**名義（誰の操作として記録されるか）**
-という観点に絞って整理する。自己ループ防止機構の第2層（Bot判定）は本ドキュメントで扱う
-「アプリ経由のラベル操作が`issue-deck[bot]`名義になる」という性質に依存している。詳細は
+という観点に絞って整理する。自己ループ防止機構の第2層（Bot判定）は、元々本ドキュメントで扱う
+「アプリ経由のラベル操作が`issue-deck[bot]`名義になる」という性質に依存していたが、#566で
+アプリ画面経由のラベル操作が個人OAuthトークン化されたことでこの前提は崩れ、代わりに
+`<!-- issue-deck:no-trigger -->`マーカー（後述）による対策に置き換わっている。詳細は
 [actions-token-model.md](actions-token-model.md)の「2. 自己ループ防止機構（3層構造）」
 「第2層: Bot 判定」を参照。
 
@@ -22,7 +24,8 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 | サブIssue作成（計画の分割、`mode=split`） | `claude-issue-dispatch.yml` | `GITHUB_TOKEN` | `github-actions[bot]` |
 | コメント投稿（通常コメント・「Claudeに質問する」・承認/修正ボタン） | アプリ画面（`POST /api/issues/comments`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | コメント投稿（計画提示・実装完了報告・質問への回答等） | `claude-issue-dispatch.yml`ほか | `GITHUB_TOKEN` | `github-actions[bot]` |
-| ラベル操作 | アプリ画面 | GitHub Appインストールトークン | `issue-deck[bot]` |
+| ラベル操作（Issue更新、`PATCH /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
+| Issue削除（`DELETE /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人**（GraphQL `deleteIssue`ミューテーションはリポジトリのadmin権限を要求するため、write権限のみのユーザーは失敗しうる） |
 | ラベル操作 | GitHub Actions（`issue-labels.yml`等） | `GITHUB_TOKEN` | `github-actions[bot]` |
 | ブランチpush・develop向けPR作成 | `claude-issue-dispatch.yml`実装ステップ | `secrets.WORKFLOW_PAT` | PAT所有者個人（現状`m-guchi`固定） |
 | develop向けPRの自動マージ | `claude-review-develop.yml` | `secrets.WORKFLOW_PAT` | PAT所有者個人 |
@@ -34,11 +37,11 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 
 ## 一致する経路・しない経路
 
-コメント投稿・Issue作成はアプリ画面から人間個人のOAuthトークンを使うため、GitHub上も実際に
-操作した人間の名義になる。一方、ラベル操作（アプリ経由）は常に`issue-deck[bot]`、develop向け
-PR作成・マージは常にPAT所有者（`m-guchi`）名義になり、**実際に画面を操作した人間が誰であっても
-この名義は変わらない**（現状は事実上ユーザーが`m-guchi`のみのため問題が表面化していない。
-将来マルチユーザー化する場合は「実際の操作者が分からなくなる」設計上の制約として残る）。
+コメント投稿・Issue作成・ラベル操作・Issue削除はいずれもアプリ画面から人間個人のOAuthトークンを
+使うため、GitHub上も実際に操作した人間の名義になる。一方、develop向けPR作成・マージは常にPAT
+所有者（`m-guchi`）名義になり、**実際に画面を操作した人間が誰であってもこの名義は変わらない**
+（現状は事実上ユーザーが`m-guchi`のみのため問題が表面化していない。将来マルチユーザー化する場合は
+「実際の操作者が分からなくなる」設計上の制約として残る）。
 
 ## コメント投稿元マーカー（同じ名義の中でも「どの処理が投稿したか」を判別する）
 
@@ -68,6 +71,23 @@ Claude Codeへの指示文で本文を組み立てるコメント（計画提示
 によるPR側への投稿は、`comment-thread.tsx`が表示するIssueコメントスレッドに現れないためマーカー
 付与の対象外。
 
+## `no-trigger`マーカー（ワークフロー起動条件の除外。投稿元マーカーとは別概念）
+
+上記の「コメント投稿元マーカー」は投稿されたコメントが**どの処理由来か**を判別してUI表示に使う
+ためのものだが、`<!-- issue-deck:no-trigger -->`（`src/lib/github/approval-labels.ts`）は
+**そのコメント自体が`claude-issue-dispatch.yml`の起動条件を満たさないようにする**ためのマーカーで、
+目的・作用先が異なる（コメント自体は通常どおり投稿・表示され、UI上のバッジ表示にも影響しない）。
+
+#566でラベル操作が個人OAuthトークン化されたことにより、アプリの承認・修正ボタンが行う
+「ラベル更新→確認コメント投稿」のうち、ラベル更新（`issues.unlabeled`イベント）がGitHub上
+操作した本人の操作として記録されるようになった。`21.plan-required`保持時（ブランチ未作成の
+計画承認・練り直し）はこのラベル除去イベント単独で実装再開に必要な情報が揃うため、続けて送る
+確認コメント（`issue_comment`イベント）が同じ操作を二重にトリガーしてしまう。この場合に限り
+`approveCommentBody`/`rejectCommentBody`がコメント本文に`no-trigger`マーカーを付与し、
+`claude-issue-dispatch.yml`の`issue_comment`トリガーの`if:`条件がこのマーカー付きコメントを
+起動対象から除外することで、ラベル除去イベント側のみを正規のトリガーとする。詳細は
+[actions-token-model.md](actions-token-model.md)の「第2層: Bot 判定」を参照。
+
 ## デッドコードの疑い
 
 `src/lib/github/issue-mapper.ts`の`POSTER_MARKER_PATTERN`／`stripPosterMarker`、および
@@ -85,3 +105,7 @@ Claude Codeへの指示文で本文を組み立てるコメント（計画提示
 そのため、マーカー関連のコード・ワークフローロジックは現状**実質的に到達しないデッドコードに
 なっている可能性が高い**。削除するかどうかは自己ループ防止という安全機構に関わる部分のため、
 本ドキュメントでは事実の記録に留め、削除の判断・実施は別Issueとする。
+
+#566でラベル操作も個人OAuthトークン化されたが、この`posted-by`マーカーは`POST /api/issues/comments`
+（コメント投稿）専用のものであり今回の変更対象外のため、上記の状況（実質到達しないデッドコードの
+疑い）に変化はない。
