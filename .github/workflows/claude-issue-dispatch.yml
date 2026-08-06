@@ -457,7 +457,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"'
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
@@ -697,7 +697,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"'
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"'
           prompt: |
             あなたはissue-deckリポジトリについて質問に答えるエージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             投稿された、`@claude 質問: ` で始まる直近のコメントへの回答のみを行ってください。
@@ -863,7 +863,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"'
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
             おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の
