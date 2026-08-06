@@ -10,8 +10,9 @@
 # 各1枚ずつ撮影する（従来と同じ、出力URLは2行）。省略した場合は、実装エージェントが
 # 対応箇所を判断できなかった場合のフォールバックとして、デスクトップは/dashboard1枚、
 # モバイルはホーム・イシュー一覧・イシュー詳細の計3枚を撮影する（出力URLは4行）。
-# イシュー詳細の撮影にはPrisma `Issue.id`が必要なため、scripts/ci-get-sample-issue-id.mjs
-# でCI用ダミーデータ（scripts/seed-ci-db.mjs）のIssue idを取得する。
+# イシュー詳細の撮影にはフロントエンドのIssue.id（githubIssueId由来）が必要なため、
+# scripts/ci-get-sample-issue-id.mjsでCI用ダミーデータ（scripts/seed-ci-db.mjs）の
+# githubIssueIdを取得する。
 #
 # 前提:
 #   - pnpm install済み、Playwrightのブラウザ本体(chromium)がインストール済みであること
