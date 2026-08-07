@@ -191,6 +191,7 @@ jobs:
       issue_closed: ${{ steps.state.outputs.issue_closed }}
       branch_exists: ${{ steps.state.outputs.branch_exists }}
       screenshot_required: ${{ steps.state.outputs.screenshot_required }}
+      lane: ${{ steps.state.outputs.lane }}
     steps:
       - name: 実行者の権限・状態を判定する
         id: state
@@ -367,7 +368,19 @@ jobs:
           fi
 
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "判定結果: mode=$MODE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED"
+
+          # dispatchジョブのconcurrencyグループをbranch/commentレーンに分割するためのlane算出
+          # (#652)。implement/additionalは実際にissue-<番号>ブランチへcommit・pushするレーン
+          # (branch)、それ以外(plan/split/ask/skip)はブランチに触れずコメント投稿のみのレーン
+          # (comment)に分類する。この分類はmode確定ロジック自体に既に存在する事実を機械的に
+          # 転記したものであり、新たな判断基準を持ち込むものではない。
+          case "$MODE" in
+            implement|additional) LANE=branch ;;
+            *) LANE=comment ;;
+          esac
+          echo "lane=$LANE" >> "$GITHUB_OUTPUT"
+
+          echo "判定結果: mode=$MODE lane=$LANE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED"
 
       - name: 依頼を受け取ったことをリアクションで示す
         # triageはconcurrencyの外で即時実行されるため、dispatchがキュー待ちの間でも「受け取った」
@@ -437,8 +450,16 @@ jobs:
     # 同じissueに対して短時間に複数の@claudeコメント等が来た場合、複数のワークフロー実行が
     # 同じブランチに同時にcheckout・pushして競合するのを避けるため、issueごとに直列化する(#129)。
     # cancel-in-progress: falseにより、先行実行を中断せず後続を待たせる。
+    #
+    # グループ名にはtriageジョブが算出したlane(branch/comment)をサフィックスとして含める(#652)。
+    # implement/additional(issue-<番号>ブランチへcommit・push)とplan/split/ask(ブランチに触れず
+    # コメント投稿のみ)は本来競合しないが、単一のconcurrencyグループで直列化していたため、
+    # 実装中のissueにplan相当の質問対応が割り込めず、無関係な待ち時間が発生していた。レーンを
+    # 分けることで両者は並行実行できるようにしつつ、同じレーン内(例: implement→additional)では
+    # 従来どおり直列化を維持する。claude-conflict-resolve.ymlのresolve-conflictsジョブは常に
+    # branchレーンに属する(docs/multi-agent-workflow.md「既存の実装ワークフローとの競合回避」参照)。
     concurrency:
-      group: issue-dispatch-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
+      group: issue-dispatch-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}-${{ needs.triage.outputs.lane }}
       cancel-in-progress: false
     permissions:
       contents: write

@@ -768,10 +768,13 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 ### 既存の実装ワークフローとの競合回避
 
-`resolve-conflicts`ジョブは、`claude-issue-dispatch.yml`の`dispatch`ジョブと同じconcurrencyグループ
-（`issue-dispatch-<Issue番号>`）を使う。同じ`issue-<番号>`ブランチへ、人間からの追加依頼
-（`@claude`コメント）による実装ステップと本ワークフローのコンフリクト解消が同時に走ってpushが
-競合するのを避けるため。
+`claude-issue-dispatch.yml`の`dispatch`ジョブのconcurrencyグループは、`triage`ジョブが`mode`
+（`implement`/`additional`→`branch`、`plan`/`split`/`ask`/`skip`→`comment`）から算出する
+lane別に`issue-dispatch-<Issue番号>-branch`/`issue-dispatch-<Issue番号>-comment`へ分割されている。
+`resolve-conflicts`ジョブは常に`issue-<番号>`ブランチへpushするため、`branch`レーンの
+concurrencyグループ（`issue-dispatch-<Issue番号>-branch`）に固定して使う。同じ`issue-<番号>`
+ブランチへ、人間からの追加依頼（`@claude`コメント）による実装ステップと本ワークフローの
+コンフリクト解消が同時に走ってpushが競合するのを避けるため。
 
 コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
 push全般をトリガーに無条件で`01.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の

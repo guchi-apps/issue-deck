@@ -23,9 +23,12 @@ name: Claude Conflict Resolve
 # - workflow_dispatch: 手動実行用
 #
 # resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
-# concurrencyグループ(issue-dispatch-<Issue番号>)を使う。同じissue-<番号>ブランチへ
+# concurrencyグループ(issue-dispatch-<Issue番号>-branch)を使う。同じissue-<番号>ブランチへ
 # 人間からの追加依頼(@claudeコメント)による実装ステップと本ワークフローのコンフリクト
-# 解消が同時に走ってpushが競合するのを避けるため。
+# 解消が同時に走ってpushが競合するのを避けるため。本ジョブは常にissue-<番号>ブランチへ
+# pushするため、claude-issue-dispatch.ymlがmodeから算出するbranch/commentレーン(#652)の
+# うち常にbranchレーンに固定する(commentレーンのplan/split/ask相当の実行とは競合しないため
+# 直列化しなくてよい)。
 
 on:
   push:
@@ -68,9 +71,10 @@ jobs:
       matrix:
         issue: ${{ fromJson(needs.detect-conflicts.outputs.issues) }}
     runs-on: ubuntu-latest
-    # claude-issue-dispatch.ymlのdispatchジョブと同じグループ名で直列化する(上記コメント参照)。
+    # claude-issue-dispatch.ymlのdispatchジョブのbranchレーンと同じグループ名で直列化する
+    # (上記コメント参照)。
     concurrency:
-      group: issue-dispatch-${{ matrix.issue }}
+      group: issue-dispatch-${{ matrix.issue }}-branch
       cancel-in-progress: false
     permissions:
       contents: write
