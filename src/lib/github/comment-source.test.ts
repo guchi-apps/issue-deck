@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { QA_ANSWER_MARKER } from "@/lib/github/ask-claude";
 import {
-  commentSourceLabel,
+  COMMENT_AGENT_PROFILES,
+  commentAgentRole,
+  extractAgentMarker,
   extractCommentSourceId,
   extractPlanType,
   resolveCommentSource,
@@ -41,6 +43,24 @@ describe("extractCommentSourceId", () => {
   });
 });
 
+describe("extractAgentMarker", () => {
+  it("issue-deck-agentマーカー付きコメントから役割を読み取る", () => {
+    expect(
+      extractAgentMarker({ body: "実装しました\n\n<!-- issue-deck-agent:implementer -->" }),
+    ).toBe("implementer");
+    expect(extractAgentMarker({ body: "分割しました\n\n<!-- issue-deck-agent:splitter -->" })).toBe(
+      "splitter",
+    );
+    expect(extractAgentMarker({ body: "ご案内します\n\n<!-- issue-deck-agent:guide -->" })).toBe(
+      "guide",
+    );
+  });
+
+  it("マーカーが無いコメントはnullを返す", () => {
+    expect(extractAgentMarker({ body: "通常のコメント" })).toBeNull();
+  });
+});
+
 describe("resolveCommentSource", () => {
   it("フォールバック通知を最優先で判定する", () => {
     const body = `⚠️ 実装ステップが終了しましたが...\n\n実行ログ: https://example.com\n\n${FALLBACK_NOTICE_MARKER}`;
@@ -62,6 +82,15 @@ describe("resolveCommentSource", () => {
     });
   });
 
+  it("issue-deck-agentマーカーを計画・質問回答・フォールバック通知より後、issue-deck-sourceより前に判定する", () => {
+    const body =
+      "着手します\n\n<!-- issue-deck-agent:implementer -->\n\n<!-- issue-deck-source:claude-issue-dispatch -->";
+    expect(resolveCommentSource({ body }, "github-actions[bot]")).toEqual({
+      kind: "agent",
+      role: "implementer",
+    });
+  });
+
   it("issue-deck-sourceマーカーをidとともに判定する", () => {
     const body = "対応完了しました\n\n<!-- issue-deck-source:issue-labels -->";
     expect(resolveCommentSource({ body }, "github-actions[bot]")).toEqual({
@@ -70,7 +99,26 @@ describe("resolveCommentSource", () => {
     });
   });
 
-  it("botログインだが該当マーカーが無いコメントは不明な自動投稿と判定する", () => {
+  it("マーカーが無い過去コメントを書き出しの絵文字からフォールバック推測する", () => {
+    expect(resolveCommentSource({ body: "🔧 実装が完了しました" }, "github-actions[bot]")).toEqual({
+      kind: "emoji-fallback",
+      role: "implementer",
+    });
+    expect(resolveCommentSource({ body: "🔍 計画を検討します" }, "claude[bot]")).toEqual({
+      kind: "emoji-fallback",
+      role: "planner",
+    });
+    expect(resolveCommentSource({ body: "🔀 サブIssueに分割します" }, "claude[bot]")).toEqual({
+      kind: "emoji-fallback",
+      role: "splitter",
+    });
+    expect(resolveCommentSource({ body: "ℹ️ ご案内します" }, "github-actions[bot]")).toEqual({
+      kind: "emoji-fallback",
+      role: "guide",
+    });
+  });
+
+  it("botログインだが該当マーカー・絵文字が無いコメントは不明な自動投稿と判定する", () => {
     expect(resolveCommentSource({ body: "通常のコメント" }, "github-actions[bot]")).toEqual({
       kind: "unknown-automation",
     });
@@ -86,38 +134,71 @@ describe("resolveCommentSource", () => {
   });
 });
 
-describe("commentSourceLabel", () => {
-  it("fallback-noticeを「自動処理（エラー通知）」に変換する", () => {
-    expect(commentSourceLabel({ kind: "fallback-notice" })).toBe("自動処理（エラー通知）");
+describe("commentAgentRole", () => {
+  it("fallback-noticeをerror-notifierに変換する", () => {
+    expect(commentAgentRole({ kind: "fallback-notice" })).toBe("error-notifier");
   });
 
-  it("qa-answerを「Claude Code」に変換する", () => {
-    expect(commentSourceLabel({ kind: "qa-answer" })).toBe("Claude Code");
+  it("qa-answerをresponderに変換する", () => {
+    expect(commentAgentRole({ kind: "qa-answer" })).toBe("responder");
   });
 
-  it("plan(implement)を「Claude Code（計画）」に変換する", () => {
-    expect(commentSourceLabel({ kind: "plan", planType: "implement" })).toBe(
-      "Claude Code（計画）",
+  it("plan(implement)をplannerに変換する", () => {
+    expect(commentAgentRole({ kind: "plan", planType: "implement" })).toBe("planner");
+  });
+
+  it("plan(split)をsplitterに変換する", () => {
+    expect(commentAgentRole({ kind: "plan", planType: "split" })).toBe("splitter");
+  });
+
+  it("agentマーカーの役割をそのまま返す", () => {
+    expect(commentAgentRole({ kind: "agent", role: "guide" })).toBe("guide");
+  });
+
+  it("source:claude-review-developをreviewerに変換する", () => {
+    expect(commentAgentRole({ kind: "source", id: "claude-review-develop" })).toBe("reviewer");
+  });
+
+  it("source:claude-conflict-resolveをconflict-resolverに変換する", () => {
+    expect(commentAgentRole({ kind: "source", id: "claude-conflict-resolve" })).toBe(
+      "conflict-resolver",
     );
   });
 
-  it("plan(split)を「Claude Code（分割計画）」に変換する", () => {
-    expect(commentSourceLabel({ kind: "plan", planType: "split" })).toBe(
-      "Claude Code（分割計画）",
-    );
+  it("source:issue-labelsをnotifierに変換する", () => {
+    expect(commentAgentRole({ kind: "source", id: "issue-labels" })).toBe("notifier");
   });
 
-  it("source:claude-issue-dispatchを「Claude Code」に変換する", () => {
-    expect(commentSourceLabel({ kind: "source", id: "claude-issue-dispatch" })).toBe(
-      "Claude Code",
-    );
+  it("source:claude-issue-dispatch単独では役割を特定できずnullを返す（agentマーカー・絵文字での判別が前提のため）", () => {
+    expect(commentAgentRole({ kind: "source", id: "claude-issue-dispatch" })).toBeNull();
   });
 
-  it("source:issue-labelsを「自動処理」に変換する", () => {
-    expect(commentSourceLabel({ kind: "source", id: "issue-labels" })).toBe("自動処理");
+  it("emoji-fallbackの役割をそのまま返す", () => {
+    expect(commentAgentRole({ kind: "emoji-fallback", role: "implementer" })).toBe("implementer");
   });
 
-  it("unknown-automationを「不明な自動投稿」に変換する", () => {
-    expect(commentSourceLabel({ kind: "unknown-automation" })).toBe("不明な自動投稿");
+  it("unknown-automationはnullを返す（汎用ボット扱い）", () => {
+    expect(commentAgentRole({ kind: "unknown-automation" })).toBeNull();
+  });
+});
+
+describe("COMMENT_AGENT_PROFILES", () => {
+  it("commentAgentRole()が返しうる全ての役割に表示名・アイコン・色が定義されている", () => {
+    const roles = [
+      "planner",
+      "splitter",
+      "implementer",
+      "responder",
+      "guide",
+      "reviewer",
+      "conflict-resolver",
+      "notifier",
+      "error-notifier",
+    ] as const;
+    for (const role of roles) {
+      expect(COMMENT_AGENT_PROFILES[role].label).toBeTruthy();
+      expect(COMMENT_AGENT_PROFILES[role].icon).toBeTruthy();
+      expect(COMMENT_AGENT_PROFILES[role].avatarColor).toMatch(/^#[0-9a-f]{6}$/);
+    }
   });
 });

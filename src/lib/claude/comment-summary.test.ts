@@ -9,6 +9,7 @@ describe("buildCommentSummaryPrompt", () => {
     expect(prompt).toContain("## 重要な点");
     expect(prompt).toContain("## 変更点");
     expect(prompt).toContain("## 懸念点");
+    expect(prompt).toContain("## 関連Issue");
     expect(prompt).toContain("実装が完了しました。DBスキーマを変更したので確認をお願いします。");
   });
 

@@ -38,41 +38,112 @@ function renderThread(comments: IssueComment[]) {
   );
 }
 
-describe("CommentThread 投稿元バッジ", () => {
+describe("CommentThread ボットの役割表示", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("issue-deck-sourceマーカー付きのbotコメントに投稿元バッジを表示する", () => {
+  it("issue-deck-sourceマーカー付きのbotコメントはヘッダに役割の表示名を表示する", () => {
     renderThread([
       makeComment({
         author: { login: "github-actions[bot]" },
         body: "対応完了しました\n\n<!-- issue-deck-source:issue-labels -->",
       }),
     ]);
-    expect(screen.getByText("自動処理")).not.toBeNull();
+    expect(screen.getByText("進捗通知ボット")).not.toBeNull();
   });
 
-  it("計画コメントには計画種別付きのバッジを表示する", () => {
+  it("計画コメントはヘッダに計画ボットを表示する", () => {
     renderThread([
       makeComment({
         author: { login: "github-actions[bot]" },
         body: "計画本文\n\n<!-- issue-deck-plan-type:split -->",
       }),
     ]);
-    expect(screen.getByText("Claude Code（分割計画）")).not.toBeNull();
+    expect(screen.getByText("分割ボット")).not.toBeNull();
   });
 
-  it("人間のコメントには投稿元バッジを表示しない", () => {
+  it("issue-deck-agentマーカー付きのbotコメントはヘッダに役割の表示名を表示する", () => {
+    renderThread([
+      makeComment({
+        author: { login: "github-actions[bot]" },
+        body: "着手します\n\n<!-- issue-deck-agent:implementer -->\n\n<!-- issue-deck-source:claude-issue-dispatch -->",
+      }),
+    ]);
+    expect(screen.getByText("実装ボット")).not.toBeNull();
+  });
+
+  it("人間のコメントにはヘッダにloginをそのまま表示する", () => {
     renderThread([makeComment({ author: { login: "m-guchi" }, body: "通常のコメント" })]);
-    expect(screen.queryByText("自動処理")).toBeNull();
-    expect(screen.queryByText("不明な自動投稿")).toBeNull();
+    expect(screen.getByText("m-guchi")).not.toBeNull();
   });
 
-  it("マーカーの無いbotコメントには「不明な自動投稿」バッジを表示する", () => {
+  it("マーカーの無いbotコメントにはヘッダにloginをそのまま表示する（汎用ボット扱い）", () => {
     renderThread([
       makeComment({ author: { login: "github-actions[bot]" }, body: "マーカーの無いコメント" }),
     ]);
-    expect(screen.getByText("不明な自動投稿")).not.toBeNull();
+    expect(screen.getByText("github-actions[bot]")).not.toBeNull();
+  });
+});
+
+describe("CommentThread 左右の吹き出し", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("currentUserLoginと一致するコメントは右寄せの吹き出しになる", () => {
+    render(
+      <CommentThread
+        comments={[makeComment({ author: { login: "m-guchi" }, body: "自分のコメント" })]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("自分のコメント").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).toContain("flex-row-reverse");
+  });
+
+  it("currentUserLoginと一致しないコメントは左寄せのままになる", () => {
+    render(
+      <CommentThread
+        comments={[makeComment({ author: { login: "other-user" }, body: "他の人のコメント" })]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("他の人のコメント").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).not.toContain("flex-row-reverse");
+  });
+});
+
+describe("CommentThread AI要約の表示位置", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("長文コメントではAI要約を本文より前に表示する", () => {
+    const body = `本文の先頭${"あ".repeat(500)}`;
+    renderThread([makeComment({ body })]);
+
+    const summaryLabel = screen.getByText("AI要約");
+    const bodyText = screen.getByText(body);
+    // Node.DOCUMENT_POSITION_FOLLOWING: summaryLabel より後ろに bodyText がある
+    expect(summaryLabel.compareDocumentPosition(bodyText) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("短いコメントにはAI要約を表示しない", () => {
+    renderThread([makeComment({ body: "短いコメント" })]);
+
+    expect(screen.queryByText("AI要約")).toBeNull();
   });
 });
