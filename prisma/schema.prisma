@@ -294,9 +294,12 @@ model GithubApiUsageBucket {
 // アプリ全体で共通の設定値を保持するシングルトンテーブル（id=1固定の1行のみ）。
 // autoRetryLimit: claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限
 // （0は自動リトライ無効）。リポジトリ間で個別設定にする必要が無いため全リポジトリ共通の値とする（#497）。
+// claudeModel: claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの値。
+// "auto"の場合は--modelを付与せずclaude-code-action側のデフォルトモデルに委ねる（#622）。
 model AppSetting {
   id             Int      @id @default(1)
   autoRetryLimit Int      @default(0)
+  claudeModel    String   @default("auto")
   updatedAt      DateTime @updatedAt
 }
 
