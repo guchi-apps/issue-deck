@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Loader2, Mic } from "lucide-react";
 
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import type { Issue } from "@/types/issue";
 
@@ -34,6 +36,12 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
+  const {
+    isGenerating: isCleaningUpBody,
+    error: bodyCleanupError,
+    notConfigured: bodyCleanupNotConfigured,
+    generate: generateBodyCleanup,
+  } = useIssueBodyCleanup();
 
   useEffect(() => {
     if (!open || !issue) return;
@@ -45,6 +53,12 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     setIsImageUploading(false);
     setError(null);
   }, [open, issue, setError]);
+
+  async function handleGenerateBodyCleanup() {
+    const result = await generateBodyCleanup(body);
+    if (!result) return;
+    setBody(result.text);
+  }
 
   async function handleSubmit() {
     if (!issue || !title.trim()) return;
@@ -99,6 +113,23 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
               }}
               className="min-h-32"
             />
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={!body.trim() || isCleaningUpBody}
+                onClick={handleGenerateBodyCleanup}
+              >
+                {isCleaningUpBody ? <Loader2 className="animate-spin" /> : <Mic />}
+                音声入力を整理
+              </Button>
+              {bodyCleanupNotConfigured && (
+                <p className="text-xs text-muted-foreground">
+                  Claudeのトークンが設定されていません
+                </p>
+              )}
+              {bodyCleanupError && <p className="text-xs text-destructive">{bodyCleanupError}</p>}
+            </div>
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
