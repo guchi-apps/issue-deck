@@ -36,6 +36,14 @@
 
 set -euo pipefail
 
+# `pnpm run capture:issue-screenshots -- <Issue番号>`という呼び出し規約(#522)で使う`--`は、
+# npmと異なりpnpmではオプション区切りとして消費されず、そのままスクリプトへの第1引数として
+# 転送される(pnpm 10.34.5で実測・確認)。放置すると`$1`が`--`になり、直後の数字チェックで
+# 常に失敗する(#673)。`--`が単独で渡された場合のみ読み飛ばし、後続の引数をそのまま使う。
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
 ISSUE_NUMBER="${1:?Issue番号を指定してください}"
 TARGET_PATH="${2:-}"
 HEALTHCHECK_PATH="${TARGET_PATH:-/dashboard}"
