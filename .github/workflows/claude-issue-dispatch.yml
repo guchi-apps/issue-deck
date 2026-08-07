@@ -476,7 +476,32 @@ jobs:
           fetch-depth: 1
           # .github/workflows/配下を変更するIssueでも実装ステップのgit pushが拒否されないよう、
           # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106)。
+          # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
+          # 次のステップで別途固定する(#662)。
           token: ${{ secrets.WORKFLOW_PAT }}
+      - name: pushの認証をWORKFLOW_PATに固定する
+        # claude-code-actionは実行時にreplaceCheckoutCredentials()で、actions/checkoutが
+        # .git/configに残したhttp.<server>/.extraheaderを削除し、remote.origin.urlを
+        # `https://x-access-token:<action自身のトークン>@github.com/...`へ差し替える
+        # (claude-code-action@v1のsrc/github/operations/git-config.ts)。github_token未指定時の
+        # そのトークンはClaude GitHub Appのインストールトークンで、workflows権限を持たないため、
+        # `.github/workflows/`配下を含むpushだけがremote rejectedになる(#662で判明。#621で
+        # github_token: WORKFLOW_PATを外して以降、#622・#638・#652が停止した)。
+        #
+        # 一方でgithub_token: WORKFLOW_PATを戻すと、claude-code-actionが実装ステップのGH_TOKENも
+        # 同じPATへ上書きするため(src/entrypoints/run.tsのprocess.env.GH_TOKEN代入)、#621で直した
+        # 「Issue/PRコメントの投稿者が人間名義になる」問題が再発する。actionに渡すトークン1本では
+        # 「pushはPAT・コメントはbot」を両立できない。
+        #
+        # そのためpush専用のURL(remote.origin.pushurl)にだけPATを固定する。actionが行うのは
+        # `git remote set-url origin <URL>`(fetch側のremote.origin.urlのみ)であり、pushurlは
+        # 書き換えられないため、fetchはaction自身のトークン、pushはPATという分離が成立する。
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
         # 同じ id: state として出力し直す(#651)。ファイル全体に101箇所ある steps.state.outputs.*
@@ -1021,10 +1046,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないようにする認証は、
-          # このステップより前段の「Checkout develop」ステップの`actions/checkout`の
-          # `token: secrets.WORKFLOW_PAT`（persist-credentialsによりジョブ全体の.git/configに
-          # 永続化される）で完結しており、このステップのGH_TOKEN/github_tokenには依存しない
-          # (#635で判明。#576時点ではGH_TOKENをWORKFLOW_PATにしたうえでコメント投稿・PR作成のみ
+          # 前段の「pushの認証をWORKFLOW_PATに固定する」ステップが設定するremote.origin.pushurl
+          # で完結しており、このステップのGH_TOKEN/github_tokenには依存しない(#662)。
+          # (#635時点では`actions/checkout`のtoken入力がpersist-credentialsで永続化されるため
+          # 十分だと判断していたが、claude-code-action自身がその認証情報を消して自前トークンに
+          # 差し替えるため誤りだった。#622・#638・#652の停止原因)
+          # (#576時点ではGH_TOKENをWORKFLOW_PATにしたうえでコメント投稿・PR作成のみ
           # コマンド単位でDEFAULT_GH_TOKENに上書きさせる方式を試みたが、Claude Codeのbashツール
           # 自体のシークレット保護がTOKENを含む環境変数の展開を一律ブロックするため機能しなかった
           # (#621で発覚)。そのため、そもそもgit pushに不要なWORKFLOW_PATをGH_TOKENに設定するのを
@@ -1098,9 +1125,10 @@ jobs:
             このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN
             です。以下の「責務」に記載する`gh issue comment` / `gh pr create` / `gh pr comment` /
             `gh issue edit`は、すべてトークンを上書きせずそのまま実行してください。
-            `.github/workflows/`配下を含む`git push`の認証は、このステップより前段の
-            「Checkout develop」ステップで設定済みの認証情報（workflow書き込み権限を持つPAT）で
-            別途完結しているため、このステップのGH_TOKENには依存しません。
+            `.github/workflows/`配下を含む`git push`の認証は、このステップより前段で設定済みの
+            push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT）で別途完結して
+            いるため、このステップのGH_TOKENには依存しません。`git push origin <ブランチ名>`は
+            リモート名`origin`のまま実行してください（push時だけ自動的にPATが使われます）。
 
             ## コメント投稿元マーカーについて
             このステップ全体を通じて`gh issue comment`によりIssueへ投稿する全てのコメント（上記の

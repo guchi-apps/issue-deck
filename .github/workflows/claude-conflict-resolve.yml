@@ -86,7 +86,24 @@ jobs:
           fetch-depth: 0
           # 後続のgit push、および.github/workflows/配下がコンフリクトしていた場合に備え、
           # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106と同様)。
+          # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
+          # 次のステップで別途固定する(#662)。
           token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: pushの認証をWORKFLOW_PATに固定する
+        # claude-code-actionは実行時にactions/checkoutが残した認証情報(extraheader)を削除し、
+        # remote.origin.urlを自身のトークン付きURLへ差し替える。github_token未指定時のそれは
+        # workflows権限を持たないClaude GitHub Appのインストールトークンのため、
+        # `.github/workflows/`配下を含むpushがremote rejectedになる(#662)。このワークフローが
+        # 解消するコンフリクトは`.github/workflows/`配下で起きることが多く、実際に#622で5回連続
+        # 失敗した。actionが書き換えないpush専用URL(remote.origin.pushurl)にPATを固定して回避する。
+        # 詳細な理由はclaude-issue-dispatch.ymlの同名ステップのコメントを参照。
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
 
       - name: 対象PRの状態を再確認する
         id: state
@@ -174,8 +191,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を含むgit pushの認証は、このステップより前段の
-          # 「作業ブランチをcheckoutする」ステップで設定済みの認証情報（workflow書き込み権限を
-          # 持つPAT）で別途完結しており、このステップのGH_TOKENには依存しない(#635で判明。
+          # 「pushの認証をWORKFLOW_PATに固定する」ステップが設定するremote.origin.pushurlで
+          # 別途完結しており、このステップのGH_TOKENには依存しない(#662。#635時点ではcheckoutの
+          # 認証情報で足りると判断していたが、claude-code-actionがそれを消すため誤りだった。
           # 詳細はclaude-issue-dispatch.ymlの実装ステップの同種コメント参照)。そのため既定の
           # GITHUB_TOKENをそのまま使い、PR/Issueへのコメント投稿の投稿者もgithub-actions[bot]になる。
           GH_TOKEN: ${{ github.token }}
@@ -211,8 +229,10 @@ jobs:
             ## コメント投稿時のトークンについて
             このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN
             です。以下の`gh pr comment` / `gh issue comment`は、トークンを上書きせずそのまま実行して
-            ください。`.github/workflows/`配下を含む`git push`の認証は、前段のcheckoutステップで
-            設定済みの認証情報で別途完結しているため、このステップのGH_TOKENには依存しません。
+            ください。`.github/workflows/`配下を含む`git push`の認証は、前段で設定済みのpush専用URL
+            （`remote.origin.pushurl`、workflow書き込み権限を持つPAT）で別途完結しているため、この
+            ステップのGH_TOKENには依存しません。`git push origin ...`はリモート名`origin`のまま
+            実行してください（push時だけ自動的にPATが使われます）。
 
             ## やること
             - `git merge origin/develop` を実行し、developの最新変更をこのブランチへ取り込む

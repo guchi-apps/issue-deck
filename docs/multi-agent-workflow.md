@@ -413,8 +413,8 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
   「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
   自体を変更するIssueを本ワークフローで扱うにはPATが必須。この認証は`Checkout develop`ステップの
-  `actions/checkout`の`token`入力（`persist-credentials`によりジョブ全体の`.git/config`に
-  `http.extraheader`として永続化される）のみで完結しており、後続の実装ステップ
+  直後に置いた`pushの認証をWORKFLOW_PATに固定する`ステップ（`git remote set-url --push origin`で
+  `remote.origin.pushurl`にPATを埋め込んだURLを設定する）で完結しており、後続の実装ステップ
   （`claude-code-action`）側の`github_token`入力・`GH_TOKEN`環境変数には依存しない。他のステップ
   （状態判定・通知コメント・計画提示など、ワークフローファイルを変更しない箇所）は既定の
   `GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
@@ -429,10 +429,24 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
     （既定の`GITHUB_TOKEN`）に明示的に上書きさせるようプロンプトで指示する方式を取っていた。しかし
     実際にはClaude Codeのbashツール自体が持つシークレット保護のガードレールが、`TOKEN`を含む名前の
     環境変数の展開を一律ブロックするため、この上書きは実行時に機能せず、完了報告コメント・PRの
-    投稿者が人間（m-guchi）名義のまま記録され続ける問題が再発した（issue #621）。原因調査の結果、
-    そもそもgit pushの認証はcheckoutステップ側で完結しており実装ステップの`GH_TOKEN`には依存しない
-    ことが判明したため、`GH_TOKEN`を`WORKFLOW_PAT`にする理由自体がなく、コマンド単位の上書きという
-    壊れやすい方式をやめて既定の`GITHUB_TOKEN`をそのまま使う現在の構成に変更した（issue #635）。
+    投稿者が人間（m-guchi）名義のまま記録され続ける問題が再発した（issue #621）。そこで
+    「git pushの認証はcheckoutステップ側で完結しており実装ステップの`GH_TOKEN`には依存しない」と
+    判断し、コマンド単位の上書きという壊れやすい方式をやめて既定の`GITHUB_TOKEN`をそのまま使う
+    構成に変更した（issue #635）。
+  - しかしこの「checkoutステップ側で完結している」という前提は誤りだった（issue #662）。
+    `claude-code-action`は実行時に`replaceCheckoutCredentials()`で、`actions/checkout`が残した
+    `http.<server>/.extraheader`を削除したうえで`remote.origin.url`を
+    `https://x-access-token:<action自身のトークン>@github.com/...`に差し替える。`github_token`
+    入力を省略した場合のそのトークンはOIDC交換で得たClaude GitHub Appのインストールトークンであり、
+    `workflows`権限を持たないため、`.github/workflows/`配下を含むpushだけが
+    `refusing to allow a GitHub App to create or update workflow ... without 'workflows' permission`
+    で拒否されるようになった（issue #622・#638・#652が実際にこれで停止した）。
+    一方で`github_token`に`WORKFLOW_PAT`を戻すと、`claude-code-action`が実装ステップの`GH_TOKEN`も
+    同じPATへ上書きするため（`src/entrypoints/run.ts`）、issue #621の「投稿者が人間名義になる」問題が
+    再発する。actionに渡すトークンは1本しかなく「pushはPAT・コメントはbot」を両立できないため、
+    actionが書き換えないpush専用URL（`remote.origin.pushurl`）にだけPATを固定する方式に変更した。
+    fetchはaction自身のトークン、pushはPATという分離が成立し、プロンプト側は
+    `git push origin <ブランチ名>`のままでよい。
 
 ### 計画提示ステップの信頼性確保
 
