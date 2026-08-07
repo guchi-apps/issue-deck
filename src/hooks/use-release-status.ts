@@ -15,6 +15,8 @@ export type ReleasePullRequest = {
 export type BumpPullRequest = ReleasePullRequest & {
   /** バンプPRのブランチ名から取り出した次バージョン（例: "1.2.3"）。取得できない場合はnull */
   version: string | null;
+  /** バンプPR本文の「## バージョンの判断根拠」セクションから抜き出した判断根拠。取得できない場合はnull */
+  reason: string | null;
 };
 
 export type ReleaseWorkflowRun = {

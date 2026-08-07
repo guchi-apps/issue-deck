@@ -47,6 +47,7 @@ export type GithubApiPullRequest = {
   number: number;
   html_url: string;
   title: string;
+  body: string | null;
   head: { ref: string };
 };
 
