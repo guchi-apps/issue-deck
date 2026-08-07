@@ -28,6 +28,7 @@ import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
+import type { ClaudeModel } from "@/lib/app-settings";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -51,6 +52,7 @@ type IssueDeckShellProps = {
   issues: Issue[];
   quickFilters: QuickFilter[];
   autoRetryLimit: number;
+  claudeModel: ClaudeModel;
 };
 
 export function IssueDeckShell({
@@ -59,6 +61,7 @@ export function IssueDeckShell({
   issues: initialIssues,
   quickFilters: initialQuickFilters,
   autoRetryLimit: initialAutoRetryLimit,
+  claudeModel: initialClaudeModel,
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
@@ -67,6 +70,7 @@ export function IssueDeckShell({
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
+  const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const {
     mobileScreen,
@@ -382,7 +386,7 @@ export function IssueDeckShell({
   const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-full flex-col">
       <TopBar
         currentUser={currentUser}
         filters={filters}
@@ -482,6 +486,7 @@ export function IssueDeckShell({
                     issue={mobileScreen.issue}
                     issues={issues}
                     repositories={visibleRepositories}
+                    currentUserLogin={currentUserLogin}
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
@@ -545,6 +550,7 @@ export function IssueDeckShell({
             issue={selectedIssue}
             issues={issues}
             repositories={visibleRepositories}
+            currentUserLogin={currentUserLogin}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onIssueDeleted={handleIssueDeleted}
@@ -590,8 +596,12 @@ export function IssueDeckShell({
       <AppSettingsDialog
         open={appSettingsDialogOpen}
         autoRetryLimit={autoRetryLimit}
+        claudeModel={claudeModel}
         onOpenChange={setAppSettingsDialogOpen}
-        onUpdated={setAutoRetryLimit}
+        onUpdated={(nextAutoRetryLimit, nextClaudeModel) => {
+          setAutoRetryLimit(nextAutoRetryLimit);
+          setClaudeModel(nextClaudeModel);
+        }}
       />
       <EditIssueDialog
         open={editingIssue !== null}

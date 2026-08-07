@@ -15,7 +15,7 @@ type ApiRunningState = RunningState & { runId: number | null };
 const NOT_RUNNING: ApiRunningState = { isRunning: false, currentStep: null, runId: null };
 
 /**
- * 一覧に表示中のIssueのうち、実行が進行し得る実装状況ラベル（01.wip / 03.d:marge / 07.m:marge）が
+ * 一覧に表示中のIssueのうち、実行が進行し得る実装状況ラベル（01.planning / 02.wip / 03.d:marge / 07.m:marge）が
  * 付き承認待ち（00.check-user）でないものについて、対応するGitHub Actions実行が進行中かどうかを
  * ポーリングする。
  * `05.develop`・`09.main`はマージ完了後の定常状態で実行は走らないため、GitHub APIの消費を抑える

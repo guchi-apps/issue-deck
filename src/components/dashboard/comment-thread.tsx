@@ -2,7 +2,18 @@
 
 import { type RefObject, useState } from "react";
 
-import { Ban, Check, Loader2, MoreHorizontal, Pencil, RotateCw, ThumbsUp, Trash2, X } from "lucide-react";
+import {
+  Ban,
+  Check,
+  GitMerge,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  RotateCw,
+  ThumbsUp,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -33,6 +44,11 @@ import { Textarea } from "@/components/ui/textarea";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
+import {
+  COMMENT_AGENT_PROFILES,
+  commentAgentRole,
+  resolveCommentSource,
+} from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -47,6 +63,8 @@ type CommentThreadProps = {
   comments: IssueComment[];
   isLoading?: boolean;
   error?: string | null;
+  /** ログイン中ユーザーのlogin名。一致するコメントは右寄せの吹き出しで表示する。未ログイン時はnull */
+  currentUserLogin?: string | null;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   onUpdate: (commentId: string, body: string) => Promise<boolean>;
@@ -72,11 +90,16 @@ type CommentThreadProps = {
   onRequestContinuation?: () => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
+  onMergePullRequest?: () => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
+  isMergingPullRequest?: boolean;
+  /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
+  mergePullRequestError?: string | null;
   /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
   lastCommentRef?: RefObject<HTMLLIElement | null>;
   /** コメントごとのAI要約の状態・生成関数。本文が長いコメントにのみ要約UIを表示する */
@@ -89,11 +112,14 @@ function ApprovalActions({
   onWithdraw,
   onRequestContinuation,
   onRequestPrFix,
+  onMergePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
+  isMergingPullRequest,
+  mergePullRequestError,
   isFallbackNotice,
   mergeApprovalPending,
   pullRequestLink,
@@ -104,11 +130,14 @@ function ApprovalActions({
   onWithdraw: () => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  onMergePullRequest?: () => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
+  isMergingPullRequest?: boolean;
+  mergePullRequestError?: string | null;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
@@ -119,8 +148,11 @@ function ApprovalActions({
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
   const [isPrFixOpen, setIsPrFixOpen] = useState(false);
   const [prFixReason, setPrFixReason] = useState("");
+  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
+  const [isMerged, setIsMerged] = useState(false);
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
   const prFixBusy = Boolean(isRequestingPrFix);
+  const mergeBusy = Boolean(isMergingPullRequest);
 
   async function submitReject() {
     await onReject(rejectReason);
@@ -138,6 +170,13 @@ function ApprovalActions({
     await onRequestPrFix(prFixReason);
     setIsPrFixOpen(false);
     setPrFixReason("");
+  }
+
+  async function confirmMerge() {
+    if (!onMergePullRequest) return;
+    const ok = await onMergePullRequest();
+    setIsMergeConfirmOpen(false);
+    if (ok) setIsMerged(true);
   }
 
   if (mergeApprovalPending) {
@@ -160,6 +199,39 @@ function ApprovalActions({
         <div>
           <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
         </div>
+        {onMergePullRequest && (
+          <div className="mt-2">
+            <Button
+              size="sm"
+              onClick={() => setIsMergeConfirmOpen(true)}
+              disabled={mergeBusy || isMerged}
+            >
+              {mergeBusy ? <Loader2 className="animate-spin" /> : <GitMerge />}
+              {isMerged ? "マージ済み" : "マージする"}
+            </Button>
+            {mergePullRequestError && (
+              <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
+            )}
+
+            <AlertDialog open={isMergeConfirmOpen} onOpenChange={setIsMergeConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Pull Requestをマージしますか？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {pullRequestLink ? `対応PR #${pullRequestLink.number}を` : "対応PRを"}
+                    マージコミットでdevelopへマージします。この操作は取り消せません。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={mergeBusy}>キャンセル</AlertDialogCancel>
+                  <AlertDialogAction onClick={confirmMerge} disabled={mergeBusy}>
+                    マージする
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
         {onRequestPrFix && (
           <div className="mt-2">
             {isPrFixOpen ? (
@@ -295,6 +367,7 @@ export function CommentThread({
   comments,
   isLoading,
   error,
+  currentUserLogin,
   repositoryFullName,
   issueSuggestions,
   onUpdate,
@@ -311,11 +384,14 @@ export function CommentThread({
   onWithdraw,
   onRequestContinuation,
   onRequestPrFix,
+  onMergePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
+  isMergingPullRequest,
+  mergePullRequestError,
   lastCommentRef,
   commentSummary,
 }: CommentThreadProps) {
@@ -328,9 +404,9 @@ export function CommentThread({
     return (
       <div className="flex flex-col gap-4">
         {[0, 1].map((i) => (
-          <div key={i} className="flex gap-2">
+          <div key={i} className={cn("flex gap-2", i === 1 && "flex-row-reverse")}>
             <Skeleton className="mt-0.5 size-7 shrink-0 rounded-full" />
-            <Skeleton className="h-16 flex-1 rounded-lg" />
+            <Skeleton className="h-16 max-w-[85%] flex-1 rounded-lg" />
           </div>
         ))}
       </div>
@@ -351,10 +427,13 @@ export function CommentThread({
             onReject={onReject}
             onWithdraw={onWithdraw}
             onRequestPrFix={onRequestPrFix}
+            onMergePullRequest={onMergePullRequest}
             isApproving={isApproving}
             isRejecting={isRejecting}
             isWithdrawing={isWithdrawing}
             isRequestingPrFix={isRequestingPrFix}
+            isMergingPullRequest={isMergingPullRequest}
+            mergePullRequestError={mergePullRequestError}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
@@ -402,144 +481,173 @@ export function CommentThread({
         {comments.map((comment, index) => {
           const isQuestion = isAskClaudeQuestionComment(comment);
           const isAnswer = isQaAnswerComment(comment);
+          const source = resolveCommentSource(comment, comment.author.login);
+          const role = source ? commentAgentRole(source) : null;
+          const profile = role ? COMMENT_AGENT_PROFILES[role] : null;
+          const isSelf = currentUserLogin != null && comment.author.login === currentUserLogin;
+          const headerName = isSelf || !profile ? comment.author.login : profile.label;
+          const timeLabel = (
+            <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
+              {comment.createdAtLabel}
+            </span>
+          );
           return (
             <li
               key={comment.id}
               ref={index === comments.length - 1 ? lastCommentRef : undefined}
-              className="flex gap-2"
+              className="flex flex-col gap-2"
             >
-              <UserAvatar login={comment.author.login} className="mt-0.5 size-7 shrink-0" />
-              <div
-                className={cn(
-                  "min-w-0 flex-1 rounded-lg border p-3",
-                  isQuestion && "border-blue-500/40 bg-blue-500/5",
-                  isAnswer && "border-violet-500/40 bg-violet-500/5",
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium">{comment.author.login}</span>
-                    <span className="text-xs text-muted-foreground">{comment.createdAtLabel}</span>
-                    {workflowRunCommentId === comment.id && <WorkflowRunStatus run={workflowRun ?? null} />}
-                    {isQuestion && (
-                      <Badge
-                        variant="outline"
-                        className="border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                      >
-                        質問
-                      </Badge>
-                    )}
-                    {isAnswer && (
-                      <Badge
-                        variant="outline"
-                        className="border-violet-500/40 bg-violet-500/15 text-violet-600 dark:text-violet-400"
-                      >
-                        回答
-                      </Badge>
+              <div className={cn("flex gap-2", isSelf && "flex-row-reverse")}>
+                <UserAvatar
+                  login={comment.author.login}
+                  agent={isSelf ? null : role}
+                  className="mt-0.5 size-7 shrink-0"
+                />
+                <div
+                  className={cn(
+                    "min-w-0 rounded-lg border p-3",
+                    editingId === comment.id ? "flex-1" : "max-w-[85%]",
+                    isSelf ? "rounded-tr-none" : "rounded-tl-none",
+                    isSelf && "border-primary/20 bg-primary/5",
+                    !isSelf && isQuestion && "border-blue-500/40 bg-blue-500/5",
+                    !isSelf && !isQuestion && isAnswer && "border-violet-500/40 bg-violet-500/5",
+                    !isSelf && !isQuestion && !isAnswer && profile?.bubbleClassName,
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+                      {isSelf && timeLabel}
+                      <span className={cn("font-medium", !isSelf && profile?.textClassName)}>
+                        {headerName}
+                      </span>
+                      {workflowRunCommentId === comment.id && (
+                        <WorkflowRunStatus run={workflowRun ?? null} />
+                      )}
+                      {isQuestion && (
+                        <Badge
+                          variant="outline"
+                          className="border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                        >
+                          質問
+                        </Badge>
+                      )}
+                      {isAnswer && (
+                        <Badge
+                          variant="outline"
+                          className="border-violet-500/40 bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                        >
+                          回答
+                        </Badge>
+                      )}
+                      {!isSelf && timeLabel}
+                    </div>
+                    {isBotComment(comment.author.login) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="コメントの操作メニュー"
+                            className="relative after:absolute after:-inset-3.5 md:after:-inset-1"
+                          >
+                            <MoreHorizontal className="size-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => startEdit(comment)}>
+                            <Pencil />
+                            編集
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setDeletingId(comment.id)}
+                          >
+                            <Trash2 />
+                            削除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
-                  {isBotComment(comment.author.login) && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="コメントの操作メニュー"
-                          className="relative after:absolute after:-inset-3.5 md:after:-inset-1"
+                  {editingId === comment.id ? (
+                    <div className="mt-2 flex flex-col gap-2">
+                      <MentionTextarea
+                        className="min-h-20"
+                        value={editBody}
+                        onChange={setEditBody}
+                        issueSuggestions={issueSuggestions}
+                        disabled={isUpdating}
+                        onUploadingChange={setIsImageUploading}
+                        repositoryFullName={repositoryFullName}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
+                            e.preventDefault();
+                            saveEdit(comment.id);
+                          }
+                        }}
+                        autoFocus
+                      />
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
+                          キャンセル
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => saveEdit(comment.id)}
+                          disabled={!editBody.trim() || isUpdating || isImageUploading}
                         >
-                          <MoreHorizontal className="size-4 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => startEdit(comment)}>
-                          <Pencil />
-                          編集
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setDeletingId(comment.id)}
-                        >
-                          <Trash2 />
-                          削除
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          {isUpdating && <Loader2 className="animate-spin" />}
+                          {isUpdating ? "保存中..." : "保存"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* 長文コメントは要約を先に読めるよう、本文より前に表示する（#631）。 */}
+                      {comment.body.length > LONG_COMMENT_THRESHOLD && (
+                        <CommentAiSummary
+                          summary={commentSummary.summaries[comment.id]?.summary ?? null}
+                          isGenerating={commentSummary.generatingIds.has(comment.id)}
+                          error={commentSummary.errors[comment.id] ?? null}
+                          notConfigured={commentSummary.notConfigured}
+                          onGenerate={() => commentSummary.generate(comment.id)}
+                        />
+                      )}
+                      <MarkdownBody
+                        content={comment.body}
+                        className="mt-1"
+                        repositoryFullName={repositoryFullName}
+                      />
+                      {comment.reactionCount > 0 && (
+                        <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                          <ThumbsUp className="size-3" />
+                          {comment.reactionCount}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
-                {editingId === comment.id ? (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <MentionTextarea
-                      className="min-h-20"
-                      value={editBody}
-                      onChange={setEditBody}
-                      issueSuggestions={issueSuggestions}
-                      disabled={isUpdating}
-                      onUploadingChange={setIsImageUploading}
-                      repositoryFullName={repositoryFullName}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editBody.trim()) {
-                          e.preventDefault();
-                          saveEdit(comment.id);
-                        }
-                      }}
-                      autoFocus
-                    />
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={cancelEdit} disabled={isUpdating}>
-                        キャンセル
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => saveEdit(comment.id)}
-                        disabled={!editBody.trim() || isUpdating || isImageUploading}
-                      >
-                        {isUpdating && <Loader2 className="animate-spin" />}
-                        {isUpdating ? "保存中..." : "保存"}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <MarkdownBody
-                      content={comment.body}
-                      className="mt-1"
-                      repositoryFullName={repositoryFullName}
-                    />
-                    {comment.reactionCount > 0 && (
-                      <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-                        <ThumbsUp className="size-3" />
-                        {comment.reactionCount}
-                      </span>
-                    )}
-                    {comment.body.length > LONG_COMMENT_THRESHOLD && (
-                      <CommentAiSummary
-                        summary={commentSummary.summaries[comment.id]?.summary ?? null}
-                        isGenerating={commentSummary.generatingIds.has(comment.id)}
-                        error={commentSummary.errors[comment.id] ?? null}
-                        notConfigured={commentSummary.notConfigured}
-                        onGenerate={() => commentSummary.generate(comment.id)}
-                      />
-                    )}
-                  </>
-                )}
-                {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
-                  <ApprovalActions
-                    onApprove={onApprove}
-                    onReject={onReject}
-                    onWithdraw={onWithdraw}
-                    onRequestContinuation={onRequestContinuation}
-                    onRequestPrFix={onRequestPrFix}
-                    isApproving={isApproving}
-                    isRejecting={isRejecting}
-                    isWithdrawing={isWithdrawing}
-                    isRequestingContinuation={isRequestingContinuation}
-                    isRequestingPrFix={isRequestingPrFix}
-                    isFallbackNotice={isFallbackNotice}
-                    mergeApprovalPending={mergeApprovalPending}
-                    pullRequestLink={pullRequestLink}
-                    pullRequestCiStatus={pullRequestCiStatus}
-                  />
-                )}
               </div>
+              {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
+                <ApprovalActions
+                  onApprove={onApprove}
+                  onReject={onReject}
+                  onWithdraw={onWithdraw}
+                  onRequestContinuation={onRequestContinuation}
+                  onRequestPrFix={onRequestPrFix}
+                  onMergePullRequest={onMergePullRequest}
+                  isApproving={isApproving}
+                  isRejecting={isRejecting}
+                  isWithdrawing={isWithdrawing}
+                  isRequestingContinuation={isRequestingContinuation}
+                  isRequestingPrFix={isRequestingPrFix}
+                  isMergingPullRequest={isMergingPullRequest}
+                  mergePullRequestError={mergePullRequestError}
+                  isFallbackNotice={isFallbackNotice}
+                  mergeApprovalPending={mergeApprovalPending}
+                  pullRequestLink={pullRequestLink}
+                  pullRequestCiStatus={pullRequestCiStatus}
+                />
+              )}
             </li>
           );
         })}
@@ -551,11 +659,14 @@ export function CommentThread({
           onWithdraw={onWithdraw}
           onRequestContinuation={onRequestContinuation}
           onRequestPrFix={onRequestPrFix}
+          onMergePullRequest={onMergePullRequest}
           isApproving={isApproving}
           isRejecting={isRejecting}
           isWithdrawing={isWithdrawing}
           isRequestingContinuation={isRequestingContinuation}
           isRequestingPrFix={isRequestingPrFix}
+          isMergingPullRequest={isMergingPullRequest}
+          mergePullRequestError={mergePullRequestError}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}

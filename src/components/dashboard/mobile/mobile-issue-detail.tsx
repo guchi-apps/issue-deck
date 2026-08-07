@@ -13,6 +13,7 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
+  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -58,6 +59,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
@@ -66,6 +68,7 @@ import {
   isMergeApprovalPending,
   labelsAfterApproval,
   labelsAfterRejection,
+  rejectCommentBody,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -73,7 +76,6 @@ import {
 } from "@/lib/github/approval-labels";
 import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { extractLatestPullRequestLink } from "@/lib/github/pull-request-link";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -85,6 +87,8 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
+import { usePullRequestLink } from "@/hooks/use-pull-request-link";
+import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -93,6 +97,8 @@ type MobileIssueDetailProps = {
   issue: Issue;
   issues: Issue[];
   repositories: ConnectedRepository[];
+  /** ログイン中ユーザーのlogin名。コメント欄で自分のコメントを右寄せ表示するために使う */
+  currentUserLogin: string | null;
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
@@ -106,6 +112,7 @@ export function MobileIssueDetail({
   issue,
   issues,
   repositories,
+  currentUserLogin,
   onBack,
   onEdit,
   onIssueUpdated,
@@ -140,6 +147,12 @@ export function MobileIssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  const {
+    isGenerating: isCleaningUpComment,
+    error: commentCleanupError,
+    notConfigured: commentCleanupNotConfigured,
+    generate: generateCommentCleanup,
+  } = useIssueBodyCleanup();
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastCommentRef = useRef<HTMLLIElement>(null);
@@ -149,15 +162,17 @@ export function MobileIssueDetail({
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
   );
-  const pullRequestLink = useMemo(() => {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    return extractLatestPullRequestLink(comments, owner, repo);
-  }, [comments, issue.repositoryFullName]);
+  const pullRequestLink = usePullRequestLink(issue.repositoryFullName, issue.number, comments);
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue.repositoryFullName,
     pullRequestLink,
     isMergeApprovalPending(issue.labels),
   );
+  const {
+    mergePullRequest,
+    isSubmitting: isMergingPullRequest,
+    error: mergePullRequestError,
+  } = usePullRequestMergeMutation();
   const swipeBackHandlers = useSwipeBack(onBack);
 
   async function toggleLabel(name: string) {
@@ -227,6 +242,12 @@ export function MobileIssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
+  }
+
+  async function handleGenerateCommentCleanup() {
+    const result = await generateCommentCleanup(newCommentBody);
+    if (!result) return;
+    setNewCommentBody(result.text);
   }
 
   async function handleAskClaudeFromComposer() {
@@ -328,8 +349,7 @@ export function MobileIssueDetail({
   }
 
   async function handleReject(reason: string) {
-    const body = reason.trim() ? `@claude ${reason.trim()}` : "@claude 内容を見直してください。";
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), body);
+    await updateLabelsAndComment(labelsAfterRejection(issue.labels), rejectCommentBody(issue.labels, reason));
   }
 
   async function handleWithdraw() {
@@ -351,9 +371,15 @@ export function MobileIssueDetail({
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
   }
 
+  async function handleMergePullRequest(): Promise<boolean> {
+    if (!pullRequestLink) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    return mergePullRequest({ owner, repo, number: pullRequestLink.number });
+  }
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
-      <header className="flex items-center gap-3 border-b p-4">
+      <header className="flex shrink-0 items-center gap-3 border-b p-4">
         <button
           type="button"
           onClick={onBack}
@@ -501,7 +527,7 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto p-4 pb-20">
+      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}
@@ -666,6 +692,7 @@ export function MobileIssueDetail({
             comments={comments}
             isLoading={isLoading}
             error={error}
+            currentUserLogin={currentUserLogin}
             repositoryFullName={issue.repositoryFullName}
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}
@@ -682,11 +709,14 @@ export function MobileIssueDetail({
             onWithdraw={handleWithdraw}
             onRequestContinuation={handleRequestContinuation}
             onRequestPrFix={handleRequestPrFix}
+            onMergePullRequest={handleMergePullRequest}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
             isRequestingPrFix={isCommentSubmitting}
+            isMergingPullRequest={isMergingPullRequest}
+            mergePullRequestError={mergePullRequestError}
             lastCommentRef={lastCommentRef}
             commentSummary={commentSummary}
           />
@@ -708,6 +738,26 @@ export function MobileIssueDetail({
                 }
               }}
             />
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="outline"
+                size="xs"
+                className="w-fit"
+                disabled={!newCommentBody.trim() || isCleaningUpComment}
+                onClick={handleGenerateCommentCleanup}
+              >
+                {isCleaningUpComment ? <Loader2 className="animate-spin" /> : <Mic />}
+                音声入力を整理
+              </Button>
+              {commentCleanupNotConfigured && (
+                <p className="text-xs text-muted-foreground">
+                  Claudeのトークンが設定されていません
+                </p>
+              )}
+              {commentCleanupError && (
+                <p className="text-xs text-destructive">{commentCleanupError}</p>
+              )}
+            </div>
             <div className="flex flex-wrap justify-end gap-2">
               {canCreateFollowupFromComment(issue) && (
                 <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>

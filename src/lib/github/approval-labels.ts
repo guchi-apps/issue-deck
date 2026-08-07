@@ -1,5 +1,12 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
-import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import {
+  DEVELOP_MERGED_LABEL_NAME,
+  MAIN_MERGED_LABEL_NAME,
+  PLANNING_LABEL_NAME,
+  WIP_LABEL_NAME,
+  getWorkflowStepIndex,
+  WORKFLOW_STEPS,
+} from "@/lib/github/workflow-status";
 import type { IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
@@ -7,6 +14,28 @@ export const CHECK_USER_LABEL = "00.check-user";
 
 /** 実装前の計画承認待ちであることを示すラベル */
 export const PLAN_REQUIRED_LABEL = "21.plan-required";
+
+/**
+ * claude-issue-dispatch.ymlのissue_commentトリガーを起動させないためのマーカー（#566）。
+ * ラベル操作（PATCH /api/issues）が個人OAuthトークン化されたことで、`00.check-user`除去
+ * イベント（issues.unlabeled）のsender.typeがUserになり、第2層Bot判定（コメント側で
+ * 使うissue-deck-source系マーカーとは別物）を素通りするようになった。21.plan-required保持時
+ * （承認でブランチ作成前の計画やり直し・実装開始に入る分岐）は、ラベル除去イベント単独で
+ * MODE判定に必要な情報が揃うため、後続のコメント投稿（issue_commentイベント）が同じ操作を
+ * 二重にトリガーしてしまう。このマーカーを付けたコメントはワークフロー起動条件から除外し、
+ * ラベル除去イベント側のみを正規のトリガーとする。マーカーはワークフロー起動条件の除外にのみ
+ * 作用し、コメント自体は通常どおり投稿される（Issue画面上の記録、Claude側の`gh issue view
+ * --comments`での可読性は維持する）。
+ */
+const NO_TRIGGER_MARKER = "<!-- issue-deck:no-trigger -->";
+
+function isPlanApprovalPending(labels: IssueLabel[]): boolean {
+  return labels.some((label) => label.name === PLAN_REQUIRED_LABEL);
+}
+
+function withNoTriggerMarkerIfPlanPending(labels: IssueLabel[], body: string): string {
+  return isPlanApprovalPending(labels) ? `${body}\n${NO_TRIGGER_MARKER}` : body;
+}
 
 /** developへのPR作成・マージ中であることを示すワークフロー状況ラベル */
 const D_MARGE_LABEL = "03.d:marge";
@@ -52,17 +81,17 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   {
     key: "in-progress",
     label: "実行中",
-    labels: [WORKFLOW_STEPS[0].labelName, WORKFLOW_STEPS[1].labelName],
+    labels: [PLANNING_LABEL_NAME, WIP_LABEL_NAME, D_MARGE_LABEL],
   },
   {
     key: "release-pending",
     label: "本番反映待ち",
-    labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
+    labels: [DEVELOP_MERGED_LABEL_NAME, M_MARGE_LABEL],
   },
   {
     key: "recently-merged",
     label: "直近本番に反映した",
-    labels: [WORKFLOW_STEPS[4].labelName],
+    labels: [MAIN_MERGED_LABEL_NAME],
     state: "all",
   },
 ];
@@ -137,12 +166,27 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  *
  * 21.plan-requiredによる計画承認待ちの場合と、それ以外（画面確認待ち・フォールバック
  * エラー通知など）の汎用確認待ちの場合とで、「計画」という語を含むかどうかの文言を変える。
+ * また21.plan-required保持時は、ラベル除去イベントとの二重発火を防ぐためNO_TRIGGER_MARKER
+ * を付与する（#566、詳細は同定数のコメントを参照）。
  */
 export function approveCommentBody(labels: IssueLabel[]): string {
-  const isPlanApproval = labels.some((label) => label.name === PLAN_REQUIRED_LABEL);
-  return isPlanApproval
+  const isPlanApproval = isPlanApprovalPending(labels);
+  const body = isPlanApproval
     ? "@claude 計画を承認しました。実装を進めてください。"
     : "@claude 確認しました。実装を進めてください。";
+  return withNoTriggerMarkerIfPlanPending(labels, body);
+}
+
+/**
+ * 却下（UI上のボタン表記は「修正」）時に、ラベル更新に続けて投稿する定型コメント本文。
+ * reasonが空でなければ`@claude <reason>`、空なら汎用の見直し依頼文言にする。
+ * approveCommentBodyと同様、21.plan-required保持時（計画のやり直し）はラベル除去イベントとの
+ * 二重発火を防ぐためNO_TRIGGER_MARKERを付与する（#566）。
+ */
+export function rejectCommentBody(labels: IssueLabel[], reason: string): string {
+  const trimmed = reason.trim();
+  const body = trimmed ? `@claude ${trimmed}` : "@claude 内容を見直してください。";
+  return withNoTriggerMarkerIfPlanPending(labels, body);
 }
 
 /**

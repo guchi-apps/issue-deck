@@ -70,17 +70,18 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 ## Issueラベルの状態遷移
 
-マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は流用しつつ、旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
+マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は`02.wip`にリネームし、実装着手前の計画検討中を表す`01.planning`を新設した（`21.plan-required`が付いていないIssueでは`01.planning`を経由せず最初から`02.wip`になる）。旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
 
-1. `01.wip` — 実装エージェントがコード実装中
-2. `03.d:marge` — developへPR作成・マージ中
-3. `05.develop` — developへマージ完了（main未反映）
-4. `07.m:marge` — mainへPR作成・マージ中
-5. `09.main` — mainへマージ完了。この時点でissueをcloseする
+1. `01.planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
+2. `02.wip` — 実装エージェントがコード実装中
+3. `03.d:marge` — developへPR作成・マージ中
+4. `05.develop` — developへマージ完了（main未反映）
+5. `07.m:marge` — mainへPR作成・マージ中
+6. `09.main` — mainへマージ完了。この時点でissueをcloseする
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-上記1〜4の進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
+上記1〜5の進捗ラベル（`01.planning`/`02.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
 
 develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
@@ -88,7 +89,7 @@ develop→mainのリリースフロー（バージョンアップコミット・
 
 `.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
 
-- `01.wip`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
+- `01.planning`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
 - `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
 
 issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）から行う。この規約に従わないブランチ・PRは対象外（何もしない）。
@@ -158,7 +159,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 Issueごとに独立したClaude Codeセッションとして起動する。
 
 責務:
-- GitHub Issueの内容を取得する。取得したら**忘れずに`01.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
+- GitHub Issueの内容を取得する。取得したら**忘れずに`02.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
 - 最新の`develop`からIssue専用ブランチ（`issue-<番号>`）を作成する
 - Git worktreeで作業フォルダを分離する
 - `21.plan-required`ラベルが付いていれば、実装前にPlan modeで計画を提示し承認を得る
@@ -166,7 +167,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
 - `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
-- `01.wip`→`03.d:marge`のラベル付け替え
+- `02.wip`→`03.d:marge`のラベル付け替え
 
 禁止事項:
 - `main`/`develop`への直接コミット・push
@@ -225,7 +226,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 
 1. **Phase 1**: `start-issue.sh`/`.ps1` — worktree・ブランチ・Claude Code起動のコマンド化
 2. **Phase 2**: `start-reviewer.sh`/`.ps1` — レビュー・統合セッション起動のコマンド化
-3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.wip`〜`09.main`）のGitHub Actionsによる自動化
+3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.planning`〜`09.main`）のGitHub Actionsによる自動化
 4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
 5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
 6. **Phase 5**: Issueへの`@claude`コメントを起点に実装からPR作成まで自動化
@@ -292,10 +293,11 @@ Issueごとに独立したClaude Codeセッションとして起動する。
    `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
    クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
    拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
-   クローズ後も`00.check-user`ラベルや`01.wip`等の進捗ラベルが「要確認」「作業中」のまま
-   残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、
-   Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/
-   `07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）を自動的に除去する
+   クローズ後も`00.check-user`ラベルや`01.planning`/`02.wip`等の進捗ラベルが「要確認」「計画検討中」
+   「作業中」のまま残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`
+   ジョブが、Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.planning`/`02.wip`/
+   `03.d:marge`/`05.develop`/`07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）
+   を自動的に除去する
    （issue #172、#464）。この除去自体が`00.check-user`の`unlabeled`イベントを発生させ本
    ワークフローを起動するが、対象issueは既にクローズ済みのため`issue_closed`ガードにより
    何もせず`mode=skip`となる。
@@ -313,7 +315,7 @@ pushされたがPRが作成されないまま終了した）。この場合、�
 判定）では、PRが無いまま`issue-<番号>`ブランチだけが残り、以後どのイベントが来ても再始動しない
 状態でスタックしてしまい、人間がブランチを手動削除する以外に復旧手段が無かった。
 
-判定ステップでは「`01.wip`が付いているのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
+判定ステップでは「`02.wip`が付いているのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
 リトライとみなして`issue-<番号>`ブランチを自動削除・作り直しした上で実装ステップを再実行していた。
 しかし、これは「そのissueに来た@claudeコメントや00.check-user解除イベントなら何でも」トリガーに
 なってしまい、実は前回コミットまで進んでいた作業が本人の意図に関わらず無言で失われる恐れがあった。
@@ -334,6 +336,46 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
 伝わらない恐れがある。そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェル
 スクリプトのステップとしてモード判定直後に配置し、確実に投稿する（下記「計画提示ステップの信頼性
 確保」のフォールバック検証と同じ考え方）。
+
+### コメント投稿元・ボットの役割表示（`issue-deck-source` / `issue-deck-agent`マーカー）
+
+issue-deckは1つのIssueに複数のワークフロー・複数のモードのボットコメントが積み重なるため、
+issue詳細画面（`comment-thread.tsx`）はコメントを投稿者別に整理して表示する。ログイン中の
+ユーザー本人のコメントは右寄せの吹き出し、ボットのコメントは役割ごとにアイコン・色を分けた
+左寄せの吹き出しで表示し、ヘッダには（役割が判別できる場合）loginの代わりに役割の表示名を出す。
+
+役割の判定は`src/lib/github/comment-source.ts`の`resolveCommentSource()` /
+`commentAgentRole()`が行う。優先順位は次のとおり。
+
+1. `<!-- issue-deck-fallback-notice -->`（`fallback-notice.ts`） → エラー通知ボット
+2. `<!-- issue-deck-qa-answer -->`（`ask-claude.ts`） → 回答ボット
+3. `<!-- issue-deck-plan-type:implement|split -->` → 計画ボット／分割ボット
+4. `<!-- issue-deck-agent:<role> -->`（`role`は`implementer` / `splitter` / `guide`のいずれか） →
+   指定された役割
+5. `<!-- issue-deck-source:<id> -->`のうち`claude-review-develop` / `claude-conflict-resolve` /
+   `issue-labels` → レビューボット／コンフリクト解消ボット／進捗通知ボット（`claude-issue-dispatch`
+   はこのidだけでは役割が一意に決まらないため対象外。4のagentマーカーか、下記6の絵文字フォール
+   バックで判別する）
+6. 本文書き出しの絵文字（`🔍`→計画ボット、`🔧`→実装ボット、`🔀`→分割ボット、`ℹ️`→案内ボット） →
+   マーカー導入前の過去コメント向けのフォールバック推測
+7. 上記いずれにも該当しないbotログイン → 役割なしの汎用ボット（ヘッダにはloginをそのまま表示）
+8. bot以外のログイン → 役割解決の対象外（人間のコメントとして表示）
+
+`issue-deck-source`マーカー自体は#563/#564で導入済みの投稿元ワークフロー識別用マーカーで、本
+`issue-deck-agent`マーカーとは別軸（source＝どのワークフローが投稿したか、agent＝その中の
+どの役割か）として併記する。`claude-issue-dispatch.yml`は計画・実装・分割・案内のいずれのコメント
+も同じ`claude-issue-dispatch`というsource idで投稿するため、agentマーカーが無いと役割まで
+区別できない。他の3ワークフロー（`claude-review-develop` / `claude-conflict-resolve` /
+`issue-labels`）はsource idだけで役割が一意に決まるため、agentマーカーは付与していない。
+
+**新しくボットコメントを追加する場合は、上記の優先順位のどれか1つに当てはまるマーカーを必ず
+本文末尾に付与すること。** 特に`claude-issue-dispatch.yml`に新しいコメント種別を追加する場合、
+1〜3のいずれにも該当しないなら`<!-- issue-deck-agent:implementer|splitter|guide -->`のいずれかを
+選んで付与する（迷った場合は、実装作業そのものに関する通知なら`implementer`、それ以外の案内・
+状態通知なら`guide`を選ぶ）。マーカーを付け忘れると、絵文字フォールバック（6）に頼ることになり、
+文言を変えるだけで表示が壊れる脆い状態になる。
+
+各役割のアイコン・色は`src/lib/github/comment-source.ts`の`COMMENT_AGENT_PROFILES`に集約している。
 
 ### Claudeアプリへの引き継ぎ時にコメントで記録する（#412）
 
@@ -369,23 +411,44 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
 - git push（ラベル操作を含む）はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository
-  permissions > Workflows: Read and write を含む）で行う（issue #106）。`Checkout develop`
-  ステップの`actions/checkout`の`token`入力と、実装ステップ（`claude-code-action`）の
-  `github_token`入力・`GH_TOKEN`環境変数の両方に配線している。既定の`GITHUB_TOKEN`は
+  permissions > Workflows: Read and write を含む）で行う（issue #106）。既定の`GITHUB_TOKEN`は
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
   「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
-  自体を変更するIssueを本ワークフローで扱うにはPATが必須。他のステップ（状態判定・通知コメント・
-  計画提示など、ワークフローファイルを変更しない箇所）は既定の`GITHUB_TOKEN`のままとし、PATの
-  利用は最小限にとどめている。
-  - 一方、`WORKFLOW_PAT`は`.github/workflows/`配下への書き込み権限を持たせるためのFine-grained PAT
-    であり、実体は人間（m-guchi）名義のトークンである。そのため実装ステップのプロンプトでは、
-    `gh issue comment` / `gh pr create` / `gh pr comment`によるIssue/PRへのコメント投稿・PR作成は
-    ステップ側でenv経由で渡す`DEFAULT_GH_TOKEN`（既定の`GITHUB_TOKEN`、投稿者は`github-actions[bot]`）
-    を明示的に指定して実行するよう指示し、`git push`・`gh issue edit`によるラベル操作のみ既定の
-    `GH_TOKEN`（`WORKFLOW_PAT`）を使う。これを怠ると、エージェントが投稿したコメントやPRが
-    GitHub上・issue-deck画面上で人間（m-guchi）が書いたものとして表示されてしまう問題があった
-    （issue #576）。同じパターンが使われる`.github/workflows/claude-conflict-resolve.yml`の
-    コンフリクト解消ステップも同様の方針にしている。
+  自体を変更するIssueを本ワークフローで扱うにはPATが必須。この認証は`Checkout develop`ステップの
+  直後に置いた`pushの認証をWORKFLOW_PATに固定する`ステップ（`git remote set-url --push origin`で
+  `remote.origin.pushurl`にPATを埋め込んだURLを設定する）で完結しており、後続の実装ステップ
+  （`claude-code-action`）側の`github_token`入力・`GH_TOKEN`環境変数には依存しない。他のステップ
+  （状態判定・通知コメント・計画提示など、ワークフローファイルを変更しない箇所）は既定の
+  `GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。
+  - 実装ステップの`GH_TOKEN`環境変数（および`github_token`入力）は、上記のとおりgit pushの認証には
+    使われないため、そのまま既定の`GITHUB_TOKEN`（`${{ github.token }}`）を設定している。これにより
+    `gh issue comment` / `gh pr create` / `gh pr comment` / `gh issue edit`はすべてトークンを
+    上書きせずそのまま実行すればよく、投稿者・作成者は`github-actions[bot]`になる。同じパターンが
+    使われる`.github/workflows/claude-conflict-resolve.yml`のコンフリクト解消ステップも同様の方針
+    にしている。
+  - 当初（issue #576時点）は`GH_TOKEN`を`WORKFLOW_PAT`（人間（m-guchi）名義のFine-grained PAT）に
+    設定したうえで、Issue/PRへのコメント投稿・PR作成のみコマンド単位で`DEFAULT_GH_TOKEN`
+    （既定の`GITHUB_TOKEN`）に明示的に上書きさせるようプロンプトで指示する方式を取っていた。しかし
+    実際にはClaude Codeのbashツール自体が持つシークレット保護のガードレールが、`TOKEN`を含む名前の
+    環境変数の展開を一律ブロックするため、この上書きは実行時に機能せず、完了報告コメント・PRの
+    投稿者が人間（m-guchi）名義のまま記録され続ける問題が再発した（issue #621）。そこで
+    「git pushの認証はcheckoutステップ側で完結しており実装ステップの`GH_TOKEN`には依存しない」と
+    判断し、コマンド単位の上書きという壊れやすい方式をやめて既定の`GITHUB_TOKEN`をそのまま使う
+    構成に変更した（issue #635）。
+  - しかしこの「checkoutステップ側で完結している」という前提は誤りだった（issue #662）。
+    `claude-code-action`は実行時に`replaceCheckoutCredentials()`で、`actions/checkout`が残した
+    `http.<server>/.extraheader`を削除したうえで`remote.origin.url`を
+    `https://x-access-token:<action自身のトークン>@github.com/...`に差し替える。`github_token`
+    入力を省略した場合のそのトークンはOIDC交換で得たClaude GitHub Appのインストールトークンであり、
+    `workflows`権限を持たないため、`.github/workflows/`配下を含むpushだけが
+    `refusing to allow a GitHub App to create or update workflow ... without 'workflows' permission`
+    で拒否されるようになった（issue #622・#638・#652が実際にこれで停止した）。
+    一方で`github_token`に`WORKFLOW_PAT`を戻すと、`claude-code-action`が実装ステップの`GH_TOKEN`も
+    同じPATへ上書きするため（`src/entrypoints/run.ts`）、issue #621の「投稿者が人間名義になる」問題が
+    再発する。actionに渡すトークンは1本しかなく「pushはPAT・コメントはbot」を両立できないため、
+    actionが書き換えないpush専用URL（`remote.origin.pushurl`）にだけPATを固定する方式に変更した。
+    fetchはaction自身のトークン、pushはPATという分離が成立し、プロンプト側は
+    `git push origin <ブランチ名>`のままでよい。
 
 ### 計画提示ステップの信頼性確保
 
@@ -425,6 +488,48 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
    - 自動リトライ発火時のコメントには、フォールバック通知の`<!-- issue-deck-fallback-notice -->`
      マーカーを付けない（`00.check-user`も付けないため、issue-deck画面の「続きを実装・調査を依頼」
      ボタンは表示されず、UIの継続依頼導線と自動リトライが二重に走ることはない）。
+4. **エラー原因（一過性/恒常的）に応じたフォールバック文言・リトライ挙動の出し分け（#621）**:
+   上記のフォールバック通知は、当初「ツール権限拒否等の恒常的な障害」を前提にした固定文言だったが、
+   実際には計画提示・実装ステップに使う`anthropics/claude-code-action@v1`ステップ自体が、Claude
+   起動前後のGitHub API呼び出し（実行者の権限チェック等、アクション内部の処理）が一時的に失敗した
+   ことでステップごと`failure`終了するケースがあり（Issue #610で実際に観測: 権限チェックAPIの
+   一時的な503エラー）、その場合も同じ「ツール権限拒否」文言のフォールバック通知が投稿されて
+   ユーザーに誤った原因認識を与えていた。そこで、`Claude Code（計画提示）`・
+   `Claude Code（実装・PR作成）`の各ステップに`id`（`claude_plan`・`claude_implement`）を付け、
+   後続のフォールバック検証ステップから`steps.<id>.outcome`を参照して次のように区別する。
+   - ステップの終了状態が`failure`（アクション自体がエラー終了した）→ 一過性のインフラ障害
+     （`ERROR_TYPE=transient`）とみなし、「GitHub API呼び出しが一時的に失敗した可能性があり、
+     再実行すれば解消する場合がある」という趣旨の文言を投稿する。
+   - ステップの終了状態が`failure`以外（Claude自体は完走したが、新規コメント・PRが確認できない）
+     → 従来どおり、ツール権限拒否等の恒常的な障害（`ERROR_TYPE=persistent`）とみなし、既存の文言を
+     投稿する。
+   - リトライ判定にも同じ区別を用いる。3の自動リトライ上限（`autoRetryLimit`）は`APP_BASE_URL`
+     未設定・API到達不可の場合は常に上限0扱いになり自動リトライが働かない仕様だが、一過性障害と
+     判定した場合に限り、`autoRetryLimit`が取得できない/低すぎる環境でも最低限のリトライ回数
+     （ワークフロー内の`TRANSIENT_FALLBACK_RETRY_LIMIT`、現在は2回）を保証する。恒常的な障害と
+     判定した場合はリトライしても解消しない可能性が高いため、この下駄は適用せず`APP_BASE_URL`
+     未設定時は従来どおりリトライしない。
+   - このエラー種別判定は、アクションステップ自体の終了状態という機械的に取得できる情報のみに
+     基づく簡易な推定であり、HTTPステータスコード等アクション内部のエラー詳細までは判別しない
+     （ジョブログからの詳細抽出はアクション実行中のログ取得の信頼性が不確かなため見送った）。
+
+### 使用するモデルの設定（#622）
+
+`claude-issue-dispatch.yml`の各モード（計画提示・分割・質問応答・実装/追加対応）の
+`claude-code-action`起動時、`claude_args`に含める`--model`の値は、自動リトライ上限
+（`autoRetryLimit`）と同じ`AppSetting`シングルトンテーブルで管理する全リポジトリ共通の設定
+（`claudeModel`。既定値は`"auto"`）から決める。アプリ設定ダイアログ（歯車アイコン）で
+「自動」「Opus」「Sonnet」「Haiku」のいずれかを選択でき、値は`GET /api/settings/claude-model`
+（読み取り専用、認証不要）経由でワークフローから参照する。
+
+- ジョブの先頭付近（実行者・状態判定ステップの直後）に専用ステップを設け、`APP_BASE_URL`未設定
+  時やAPI疎通失敗時、または許可された値（`opus`/`sonnet`/`haiku`）以外が返った場合は安全側で
+  `"auto"`扱いにフォールバックする（autoRetryLimitの取得ステップと同じ方針）。
+- `claudeModel`が`"auto"`の場合は`--model`を一切付与せず、`claude-code-action`側のデフォルト
+  モデルに委ねる。それ以外の場合は`--model <値>`を各`claude_args`に追記する。
+- モデル値はスナップショット日付を含む具体的なモデルIDではなく、Claude Code CLIが解決する
+  エイリアス（`opus`/`sonnet`/`haiku`）のみを許可する。特定のスナップショットに固定すると、
+  将来Anthropic側でデフォルトモデルが更新されても自動的に恩恵を受けられなくなるため。
 
 ### 自動投稿コメントへの実行ログリンク付与
 
@@ -665,14 +770,17 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 ### 既存の実装ワークフローとの競合回避
 
-`resolve-conflicts`ジョブは、`claude-issue-dispatch.yml`の`dispatch`ジョブと同じconcurrencyグループ
-（`issue-dispatch-<Issue番号>`）を使う。同じ`issue-<番号>`ブランチへ、人間からの追加依頼
-（`@claude`コメント）による実装ステップと本ワークフローのコンフリクト解消が同時に走ってpushが
-競合するのを避けるため。
+`claude-issue-dispatch.yml`の`dispatch`ジョブのconcurrencyグループは、`triage`ジョブが`mode`
+（`implement`/`additional`→`branch`、`plan`/`split`/`ask`/`skip`→`comment`）から算出する
+lane別に`issue-dispatch-<Issue番号>-branch`/`issue-dispatch-<Issue番号>-comment`へ分割されている。
+`resolve-conflicts`ジョブは常に`issue-<番号>`ブランチへpushするため、`branch`レーンの
+concurrencyグループ（`issue-dispatch-<Issue番号>-branch`）に固定して使う。同じ`issue-<番号>`
+ブランチへ、人間からの追加依頼（`@claude`コメント）による実装ステップと本ワークフローの
+コンフリクト解消が同時に走ってpushが競合するのを避けるため。
 
 コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
-push全般をトリガーに無条件で`01.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
-issueに`01.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`01.wip`を
+push全般をトリガーに無条件で`02.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
+issueに`02.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`02.wip`を
 除去する。
 
 ### 解消方針

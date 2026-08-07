@@ -23,9 +23,12 @@ name: Claude Conflict Resolve
 # - workflow_dispatch: 手動実行用
 #
 # resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
-# concurrencyグループ(issue-dispatch-<Issue番号>)を使う。同じissue-<番号>ブランチへ
+# concurrencyグループ(issue-dispatch-<Issue番号>-branch)を使う。同じissue-<番号>ブランチへ
 # 人間からの追加依頼(@claudeコメント)による実装ステップと本ワークフローのコンフリクト
-# 解消が同時に走ってpushが競合するのを避けるため。
+# 解消が同時に走ってpushが競合するのを避けるため。本ジョブは常にissue-<番号>ブランチへ
+# pushするため、claude-issue-dispatch.ymlがmodeから算出するbranch/commentレーン(#652)の
+# うち常にbranchレーンに固定する(commentレーンのplan/split/ask相当の実行とは競合しないため
+# 直列化しなくてよい)。
 
 on:
   push:
@@ -68,9 +71,10 @@ jobs:
       matrix:
         issue: ${{ fromJson(needs.detect-conflicts.outputs.issues) }}
     runs-on: ubuntu-latest
-    # claude-issue-dispatch.ymlのdispatchジョブと同じグループ名で直列化する(上記コメント参照)。
+    # claude-issue-dispatch.ymlのdispatchジョブのbranchレーンと同じグループ名で直列化する
+    # (上記コメント参照)。
     concurrency:
-      group: issue-dispatch-${{ matrix.issue }}
+      group: issue-dispatch-${{ matrix.issue }}-branch
       cancel-in-progress: false
     permissions:
       contents: write
@@ -86,7 +90,24 @@ jobs:
           fetch-depth: 0
           # 後続のgit push、および.github/workflows/配下がコンフリクトしていた場合に備え、
           # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106と同様)。
+          # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
+          # 次のステップで別途固定する(#662)。
           token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: pushの認証をWORKFLOW_PATに固定する
+        # claude-code-actionは実行時にactions/checkoutが残した認証情報(extraheader)を削除し、
+        # remote.origin.urlを自身のトークン付きURLへ差し替える。github_token未指定時のそれは
+        # workflows権限を持たないClaude GitHub Appのインストールトークンのため、
+        # `.github/workflows/`配下を含むpushがremote rejectedになる(#662)。このワークフローが
+        # 解消するコンフリクトは`.github/workflows/`配下で起きることが多く、実際に#622で5回連続
+        # 失敗した。actionが書き換えないpush専用URL(remote.origin.pushurl)にPATを固定して回避する。
+        # 詳細な理由はclaude-issue-dispatch.ymlの同名ステップのコメントを参照。
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
 
       - name: 対象PRの状態を再確認する
         id: state
@@ -142,6 +163,7 @@ jobs:
           set -e
           BODY="🔀 developとの間にコンフリクトを検知したため、\`${{ steps.state.outputs.branch }}\` ブランチで自動解消を試みます。"
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-conflict-resolve -->'
           gh issue comment ${{ matrix.issue }} --body "$BODY"
 
       - name: 解消前のコメント数を記録する
@@ -172,15 +194,13 @@ jobs:
         if: steps.state.outputs.should_resolve == 'true'
         uses: anthropics/claude-code-action@v1
         env:
-          # .github/workflows/配下がコンフリクトしていた場合でもgit pushが拒否されないよう、
-          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)を使う(issue #106と同様)。
-          # ただし、このPATは人間(m-guchi)名義のFine-grained PATのため、PR/Issueへのコメント投稿に
-          # そのまま使うと人間が書いたものとしてGitHub上に記録されてしまう(#576)。git push等の
-          # workflow書き込み権限が必要な操作はGH_TOKEN(WORKFLOW_PAT)のまま行い、コメント投稿は
-          # DEFAULT_GH_TOKEN(既定のGITHUB_TOKEN、投稿者はgithub-actions[bot])を明示的に使うよう
-          # プロンプト内で指示する。
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
-          DEFAULT_GH_TOKEN: ${{ github.token }}
+          # .github/workflows/配下を含むgit pushの認証は、このステップより前段の
+          # 「pushの認証をWORKFLOW_PATに固定する」ステップが設定するremote.origin.pushurlで
+          # 別途完結しており、このステップのGH_TOKENには依存しない(#662。#635時点ではcheckoutの
+          # 認証情報で足りると判断していたが、claude-code-actionがそれを消すため誤りだった。
+          # 詳細はclaude-issue-dispatch.ymlの実装ステップの同種コメント参照)。そのため既定の
+          # GITHUB_TOKENをそのまま使い、PR/Issueへのコメント投稿の投稿者もgithub-actions[bot]になる。
+          GH_TOKEN: ${{ github.token }}
           # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
           # プレースホルダー値を使う(実際の外部サービスには接続しない)。
           DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
@@ -192,7 +212,6 @@ jobs:
           GITHUB_WEBHOOK_SECRET: ci-placeholder
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.WORKFLOW_PAT }}
           show_full_output: true
           claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
           prompt: |
@@ -212,13 +231,12 @@ jobs:
               ものかを把握する
 
             ## コメント投稿時のトークンについて
-            このステップの既定の`GH_TOKEN`（`git push`に必要）は、`.github/workflows/`配下への
-            書き込みも可能にするため人間（m-guchi）名義のFine-grained PAT（`WORKFLOW_PAT`）です。
-            そのままPR/Issueへのコメント投稿に使うと、GitHub上で人間が書いたものとして記録されて
-            しまいます。そのため、以下の`gh pr comment` / `gh issue comment`は、必ず環境変数
-            `DEFAULT_GH_TOKEN`（投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN）を明示的に
-            指定して実行してください（例: `GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr comment ... --body "..."`）。
-            `git push`はこれまでどおり既定の`GH_TOKEN`（WORKFLOW_PAT）のまま実行してください。
+            このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN
+            です。以下の`gh pr comment` / `gh issue comment`は、トークンを上書きせずそのまま実行して
+            ください。`.github/workflows/`配下を含む`git push`の認証は、前段で設定済みのpush専用URL
+            （`remote.origin.pushurl`、workflow書き込み権限を持つPAT）で別途完結しているため、この
+            ステップのGH_TOKENには依存しません。`git push origin ...`はリモート名`origin`のまま
+            実行してください（push時だけ自動的にPATが使われます）。
 
             ## やること
             - `git merge origin/develop` を実行し、developの最新変更をこのブランチへ取り込む
@@ -238,22 +256,24 @@ jobs:
               `git fetch origin ${{ steps.state.outputs.branch }} && git merge origin/${{ steps.state.outputs.branch }}`
               で追随し、1回だけリトライする。それでも失敗する場合はそれ以上リトライせず、下記
               「解消できない場合」の手順で報告する
-            - pushが成功したら `GH_TOKEN="$DEFAULT_GH_TOKEN" gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."`
+            - pushが成功したら `gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."`
               で、コンフリクトが発生していたファイルと解消方針を日本語で要約して報告する。コメント末尾に
               実行ログのリンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
               を必ず追記する
-            - 最後に `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ matrix.issue }} --body "..."` で、
+            - 最後に `gh issue comment ${{ matrix.issue }} --body "..."` で、
               Issueにも解消が完了した旨と対象PR（${{ steps.state.outputs.pr_url }}）を日本語で報告する
               （無人実行のため、この報告が使用者にとって唯一の完了確認手段になる。コメント末尾に
-              上記と同じ実行ログのリンクを必ず追記する）
+              上記と同じ実行ログのリンクと、投稿元を示す
+              `<!-- issue-deck-source:claude-conflict-resolve -->`マーカーを必ず追記する）
 
             ## 解消できない場合
             意味的に矛盾する変更で機械的に両立できない、解消後にテスト・ビルドが通らず自力で
             直せない等、安全に自動解消できないと判断した場合は、無理に解消しようとせず
             `git merge --abort`（マージが進行中の場合）でブランチを元の状態に戻したうえで、
-            `GH_TOKEN="$DEFAULT_GH_TOKEN" gh issue comment ${{ matrix.issue }} --body "..."` でコンフリクトの内容と自動解消を
-            断念した理由を日本語で報告し、
+            `gh issue comment ${{ matrix.issue }} --body "..."` でコンフリクトの内容と自動解消を
+            断念した理由を日本語で報告し（コメント本文の末尾に、投稿元を示す
+            `<!-- issue-deck-source:claude-conflict-resolve -->`マーカーを必ず付与すること）、
             `gh issue edit ${{ matrix.issue }} --add-label "00.check-user"` を実行して停止して
             ください（コミット・pushは行わない）。
 
@@ -263,16 +283,16 @@ jobs:
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
 
-      - name: 01.wip ラベルを除去する
+      - name: 02.wip ラベルを除去する
         # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
-        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で01.wipを
-        # 付与するため、03.d:marge/00.check-user状態のissueに01.wipが混在して
+        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で02.wipを
+        # 付与するため、03.d:marge/00.check-user状態のissueに02.wipが混在して
         # 残らないよう明示的に除去する。LLMの実行有無に依存させないため独立した
         # シェルステップとする(--remove-labelは未付与でも無害なため常に実行してよい)。
         if: always() && steps.state.outputs.should_resolve == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue edit ${{ matrix.issue }} --remove-label "01.wip"
+        run: gh issue edit ${{ matrix.issue }} --remove-label "02.wip"
 
       - name: 解消結果を検証し、報告が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
@@ -295,6 +315,6 @@ jobs:
 
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ developとのコンフリクト自動解消ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や解消の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="⚠️ developとのコンフリクト自動解消ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や解消の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-conflict-resolve -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

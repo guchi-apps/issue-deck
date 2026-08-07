@@ -98,7 +98,8 @@ export function CreateIssueDialog({
   useEffect(() => {
     if (!open) return;
     // ダイアログを開くたびにフォームを初期状態へ戻す。明示的なプリフィル（引用元テキスト等）が
-    // 渡されていればそちらを優先し、なければ保存済みの下書きを復元する。外部トリガー（開閉）に
+    // 渡されていればそちらを優先し、なければ保存済みの下書きを復元する（リポジトリ欄のみ、
+    // 文脈から渡されたdefaultRepositoryFullNameを下書きの値より優先する）。外部トリガー（開閉）に
     // 同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
     const draft = resolveInitialIssueDraft({
       defaultRepositoryFullName,

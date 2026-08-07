@@ -236,7 +236,7 @@ describe("time-dependent stats", () => {
     it("ラベルベースのビューは該当ラベルを持つIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-        makeIssue({ id: "2", labels: [{ name: "01.wip", color: "blue", description: null }] }),
+        makeIssue({ id: "2", labels: [{ name: "02.wip", color: "blue", description: null }] }),
         makeIssue({ id: "3", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
         makeIssue({ id: "4", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
         makeIssue({ id: "5", labels: [] }),
@@ -255,7 +255,7 @@ describe("time-dependent stats", () => {
       const issues = [
         makeIssue({ id: "1", labels: [] }),
         makeIssue({ id: "2", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-        makeIssue({ id: "3", labels: [{ name: "01.wip", color: "blue", description: null }] }),
+        makeIssue({ id: "3", labels: [{ name: "02.wip", color: "blue", description: null }] }),
         makeIssue({ id: "4", labels: [{ name: "09.main", color: "green", description: null }] }),
         makeIssue({
           id: "5",

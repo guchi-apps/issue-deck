@@ -35,6 +35,9 @@ export type TransferIssueInput = {
 };
 
 function errorMessageForResponse(status: number, data: { error?: string; message?: string }): string {
+  if (data.error === "github_reauth_required") {
+    return "GitHub連携が必要です。再ログインしてください。";
+  }
   return data.error === "github_api_error" && data.message
     ? data.message
     : `リクエストに失敗しました (${status})`;

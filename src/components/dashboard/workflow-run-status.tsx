@@ -35,12 +35,8 @@ export function WorkflowRunStatus({ run }: WorkflowRunStatusProps) {
   return (
     <span
       className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
-        isRunning
-          ? "bg-primary/15 text-primary ring-primary"
-          : failed
-            ? "bg-destructive/15 text-destructive ring-destructive"
-            : "bg-muted text-muted-foreground ring-border",
+        "inline-flex w-fit shrink-0 items-center whitespace-nowrap text-[10px] font-medium",
+        isRunning ? "text-primary" : failed ? "text-destructive" : "text-muted-foreground",
       )}
     >
       {isRunning ? `実行中: ${formatDuration(elapsedMs)}経過` : `所要時間: ${formatDuration(elapsedMs)}`}

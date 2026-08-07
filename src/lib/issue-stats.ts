@@ -1,12 +1,9 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
-import { WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import { MAIN_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
-
-/** developへマージ完了・mainへの反映済みを示すラベル名（09.main） */
-const MAIN_MERGED_LABEL = WORKFLOW_STEPS[4].labelName;
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 const RECENTLY_ADDED_WINDOW_MS = DAY_MS;
@@ -185,7 +182,7 @@ export function computeOverviewStats(
   ).length;
   const recentlyReleasedCount = issuesIgnoringState.filter((issue) => {
     if (!issue.closedAt) return false;
-    if (!issue.labels.some((label) => label.name === MAIN_MERGED_LABEL)) return false;
+    if (!issue.labels.some((label) => label.name === MAIN_MERGED_LABEL_NAME)) return false;
     return Date.now() - new Date(issue.closedAt).getTime() < DAY_MS;
   }).length;
   const openCount = issuesIgnoringState.filter((issue) => issue.state === "open").length;

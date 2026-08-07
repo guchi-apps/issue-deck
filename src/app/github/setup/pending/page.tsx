@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 export default function GithubSetupPendingPage() {
   return (
-    <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-muted/30 p-4">
+    <div className="flex h-full flex-col items-center justify-center gap-6 bg-muted/30 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <Clock className="size-8 text-muted-foreground" />

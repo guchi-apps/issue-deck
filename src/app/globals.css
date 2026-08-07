@@ -143,3 +143,11 @@
     @apply font-sans;
   }
 }
+
+/* 角丸四角形のボタン向けローディング表示。animate-spinによる回転は円形にしか
+   自然に見えないため、四角形の外周をなぞるようstroke-dashoffsetを動かす（#603）。 */
+@keyframes border-trace {
+  to {
+    stroke-dashoffset: -100;
+  }
+}

@@ -144,6 +144,7 @@ jobs:
               else
                 COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
                 COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+                COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
                 gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
               fi
             fi
@@ -212,7 +213,8 @@ jobs:
             - `gh issue edit <対応Issue番号> --add-label "00.check-user"`
             - `gh issue comment <対応Issue番号> --body "..."` で、該当すると判断した理由を日本語で
               issueにコメント投稿する（risk-checkジョブが既にコメント済みの理由と重複してもよい。
-              あなたの判定はrisk-checkとは独立した二次判定のため）
+              あなたの判定はrisk-checkとは独立した二次判定のため）。コメント本文の末尾に、投稿元を
+              示す`<!-- issue-deck-source:claude-review-develop -->`マーカーを必ず付与すること
 
             ## 出力
             レビュー結果は日本語で、以下の内容を含めてPRへのコメントとして投稿してください。
