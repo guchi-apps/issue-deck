@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, LogOut, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
+import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
@@ -24,6 +25,7 @@ import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
+import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
@@ -41,6 +43,7 @@ export function MobileSettingsScreen({
   const { isSyncing, handleSync } = useIssueSync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
   const {
@@ -54,6 +57,11 @@ export function MobileSettingsScreen({
     error: claudeUsageError,
     notConfigured: claudeUsageNotConfigured,
   } = useClaudeUsage(true);
+  const {
+    data: githubStatus,
+    isLoading: githubStatusLoading,
+    error: githubStatusError,
+  } = useGithubStatus(true);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -117,6 +125,18 @@ export function MobileSettingsScreen({
           アプリ設定
         </Button>
 
+        <Button
+          variant="outline"
+          className="justify-start"
+          onClick={() => setGithubStatusDialogOpen(true)}
+        >
+          <Activity />
+          GitHub障害状況
+          {githubStatus && githubStatus.indicator !== "none" && (
+            <AlertTriangle className="ml-auto size-4 text-destructive" />
+          )}
+        </Button>
+
         <Button variant="outline" className="justify-start" asChild>
           <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
             <ShieldCheck />
@@ -145,6 +165,14 @@ export function MobileSettingsScreen({
         currentUser={currentUser}
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
+      />
+
+      <GithubStatusDialog
+        open={githubStatusDialogOpen}
+        onOpenChange={setGithubStatusDialogOpen}
+        data={githubStatus}
+        isLoading={githubStatusLoading}
+        error={githubStatusError}
       />
 
       <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
