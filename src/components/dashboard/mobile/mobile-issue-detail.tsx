@@ -97,6 +97,8 @@ type MobileIssueDetailProps = {
   issue: Issue;
   issues: Issue[];
   repositories: ConnectedRepository[];
+  /** ログイン中ユーザーのlogin名。コメント欄で自分のコメントを右寄せ表示するために使う */
+  currentUserLogin: string | null;
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
@@ -110,6 +112,7 @@ export function MobileIssueDetail({
   issue,
   issues,
   repositories,
+  currentUserLogin,
   onBack,
   onEdit,
   onIssueUpdated,
@@ -689,6 +692,7 @@ export function MobileIssueDetail({
             comments={comments}
             isLoading={isLoading}
             error={error}
+            currentUserLogin={currentUserLogin}
             repositoryFullName={issue.repositoryFullName}
             issueSuggestions={issueSuggestions}
             onUpdate={handleUpdateComment}

@@ -335,6 +335,46 @@ issueに投稿するステップを設けている（issue #75）。Claude Code�
 スクリプトのステップとしてモード判定直後に配置し、確実に投稿する（下記「計画提示ステップの信頼性
 確保」のフォールバック検証と同じ考え方）。
 
+### コメント投稿元・ボットの役割表示（`issue-deck-source` / `issue-deck-agent`マーカー）
+
+issue-deckは1つのIssueに複数のワークフロー・複数のモードのボットコメントが積み重なるため、
+issue詳細画面（`comment-thread.tsx`）はコメントを投稿者別に整理して表示する。ログイン中の
+ユーザー本人のコメントは右寄せの吹き出し、ボットのコメントは役割ごとにアイコン・色を分けた
+左寄せの吹き出しで表示し、ヘッダには（役割が判別できる場合）loginの代わりに役割の表示名を出す。
+
+役割の判定は`src/lib/github/comment-source.ts`の`resolveCommentSource()` /
+`commentAgentRole()`が行う。優先順位は次のとおり。
+
+1. `<!-- issue-deck-fallback-notice -->`（`fallback-notice.ts`） → エラー通知ボット
+2. `<!-- issue-deck-qa-answer -->`（`ask-claude.ts`） → 回答ボット
+3. `<!-- issue-deck-plan-type:implement|split -->` → 計画ボット／分割ボット
+4. `<!-- issue-deck-agent:<role> -->`（`role`は`implementer` / `splitter` / `guide`のいずれか） →
+   指定された役割
+5. `<!-- issue-deck-source:<id> -->`のうち`claude-review-develop` / `claude-conflict-resolve` /
+   `issue-labels` → レビューボット／コンフリクト解消ボット／進捗通知ボット（`claude-issue-dispatch`
+   はこのidだけでは役割が一意に決まらないため対象外。4のagentマーカーか、下記6の絵文字フォール
+   バックで判別する）
+6. 本文書き出しの絵文字（`🔍`→計画ボット、`🔧`→実装ボット、`🔀`→分割ボット、`ℹ️`→案内ボット） →
+   マーカー導入前の過去コメント向けのフォールバック推測
+7. 上記いずれにも該当しないbotログイン → 役割なしの汎用ボット（ヘッダにはloginをそのまま表示）
+8. bot以外のログイン → 役割解決の対象外（人間のコメントとして表示）
+
+`issue-deck-source`マーカー自体は#563/#564で導入済みの投稿元ワークフロー識別用マーカーで、本
+`issue-deck-agent`マーカーとは別軸（source＝どのワークフローが投稿したか、agent＝その中の
+どの役割か）として併記する。`claude-issue-dispatch.yml`は計画・実装・分割・案内のいずれのコメント
+も同じ`claude-issue-dispatch`というsource idで投稿するため、agentマーカーが無いと役割まで
+区別できない。他の3ワークフロー（`claude-review-develop` / `claude-conflict-resolve` /
+`issue-labels`）はsource idだけで役割が一意に決まるため、agentマーカーは付与していない。
+
+**新しくボットコメントを追加する場合は、上記の優先順位のどれか1つに当てはまるマーカーを必ず
+本文末尾に付与すること。** 特に`claude-issue-dispatch.yml`に新しいコメント種別を追加する場合、
+1〜3のいずれにも該当しないなら`<!-- issue-deck-agent:implementer|splitter|guide -->`のいずれかを
+選んで付与する（迷った場合は、実装作業そのものに関する通知なら`implementer`、それ以外の案内・
+状態通知なら`guide`を選ぶ）。マーカーを付け忘れると、絵文字フォールバック（6）に頼ることになり、
+文言を変えるだけで表示が壊れる脆い状態になる。
+
+各役割のアイコン・色は`src/lib/github/comment-source.ts`の`COMMENT_AGENT_PROFILES`に集約している。
+
 ### Claudeアプリへの引き継ぎ時にコメントで記録する（#412）
 
 無人実行（`claude-issue-dispatch.yml`）が行き詰まった場合の逃げ道として、「Claudeアプリで開く」
