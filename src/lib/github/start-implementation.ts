@@ -1,5 +1,9 @@
 import { isApprovalPending, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
-import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import {
+  getWorkflowStepIndex,
+  PLANNING_LABEL_NAME,
+  WIP_LABEL_NAME,
+} from "@/lib/github/workflow-status";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 /** 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する） */
@@ -64,12 +68,14 @@ export const START_IMPLEMENTATION_OPTIONS: {
 
 /**
  * 選択されたオプションに対応するGitHubラベル名の配列を返す。
- * ワークフロー起動を待たずにUI上で即座に着手状態を示せるよう、
- * オプションの選択有無に関わらず常に01.wip（実装中）を含む。
+ * ワークフロー起動を待たずにUI上で即座に着手状態を示せるよう、進捗状況ラベルを必ず含める。
+ * 「計画が必要」選択時は計画検討中を示す01.planningのみを付与し、実装着手（02.wip）は
+ * claude-issue-dispatch.yml側が計画承認後に付与する。未選択時は計画フェーズを経ないため
+ * 最初から02.wipを付与する。
  */
 export function startImplementationLabelsToAdd(options: StartImplementationOptions): string[] {
   return [
-    WORKFLOW_STEPS[0].labelName,
+    options.planRequired ? PLANNING_LABEL_NAME : WIP_LABEL_NAME,
     ...START_IMPLEMENTATION_OPTIONS.filter((option) => options[option.key]).map(
       (option) => option.githubLabel,
     ),
