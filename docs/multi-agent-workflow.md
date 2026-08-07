@@ -675,6 +675,16 @@ dispatch.yml`のClaude Codeステップ（実装・PR作成）が、実装・テ
 許可済みの`Bash(pnpm:*)`経由の呼び出しに変更し、`allowedTools`からその許可は削除した
 （Issue #522）。
 
+npmとは異なりpnpm（10.34.5で確認）は`pnpm run <script> -- <args>`の`--`をオプション区切りとして
+消費せず、そのまま第1引数としてスクリプトへ転送する。そのため`pnpm run capture:issue-screenshots
+-- <issue番号>`と呼び出すと`scripts/capture-issue-screenshots.sh`側の`$1`が`--`になり、Issue番号の
+数字チェックで毎回失敗していた（#673）。エージェントはこの失敗を誤診断し、代わりに`bash
+scripts/capture-issue-screenshots.sh <issue番号>`を直接呼び出そうとして#522と同じ「`bash `前置で
+`allowedTools`に一致せず拒否される」問題を再度踏んでいた。呼び出し規約（`pnpm run
+capture:issue-screenshots -- <issue番号> [対象パス]`）自体は変更せず、`scripts/capture-issue-
+screenshots.sh`側で`--`が単独の第1引数として渡された場合はこれを読み飛ばすようにして対応した
+（#673）。
+
 第2引数（対象パス）は実装エージェントが今回の変更内容から判断して指定する（#567）。
 
 1. `next dev`をバックグラウンドで起動する（DB・CIバイパス用ユーザーは、この前段の
