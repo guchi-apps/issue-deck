@@ -482,6 +482,7 @@ export function IssueDeckShell({
                     issue={mobileScreen.issue}
                     issues={issues}
                     repositories={visibleRepositories}
+                    currentUserLogin={currentUserLogin}
                     onBack={goBack}
                     onEdit={setEditingIssue}
                     onIssueUpdated={handleIssueUpdated}
@@ -545,6 +546,7 @@ export function IssueDeckShell({
             issue={selectedIssue}
             issues={issues}
             repositories={visibleRepositories}
+            currentUserLogin={currentUserLogin}
             onEdit={setEditingIssue}
             onIssueUpdated={handleIssueUpdated}
             onIssueDeleted={handleIssueDeleted}
