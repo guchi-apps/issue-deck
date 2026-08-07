@@ -614,7 +614,7 @@ export function CommentThread({
                       )}
                       <MarkdownBody
                         content={comment.body}
-                        className="mt-1"
+                        className="mt-1 text-sm"
                         repositoryFullName={repositoryFullName}
                       />
                       {comment.reactionCount > 0 && (
