@@ -6,6 +6,7 @@ import {
   clearIssueDraft,
   isIssueDraftEmpty,
   readIssueDraft,
+  readRestorableIssueDraft,
   resolveInitialIssueDraft,
   useIssueDraftAutosave,
   writeIssueDraft,
@@ -80,7 +81,7 @@ describe("resolveInitialIssueDraft", () => {
     expect(resolveInitialIssueDraft({})).toEqual(emptyDraft);
   });
 
-  it("明示的なプリフィルがない場合は保存済みの下書きを復元する", () => {
+  it("保存済みの下書きがあっても自動では復元せず空の状態を返す", () => {
     const draft: IssueDraft = {
       repositoryFullName: "owner/repo",
       title: "下書きタイトル",
@@ -89,10 +90,10 @@ describe("resolveInitialIssueDraft", () => {
       assignee: "octocat",
     };
     writeIssueDraft(draft);
-    expect(resolveInitialIssueDraft({})).toEqual(draft);
+    expect(resolveInitialIssueDraft({})).toEqual(emptyDraft);
   });
 
-  it("defaultTitleが明示的に渡された場合は下書きより優先し、復元しない", () => {
+  it("defaultTitleが明示的に渡された場合はそちらを使う", () => {
     writeIssueDraft({ ...emptyDraft, title: "下書きタイトル" });
     expect(resolveInitialIssueDraft({ defaultTitle: "引用元タイトル" })).toEqual({
       ...emptyDraft,
@@ -100,7 +101,7 @@ describe("resolveInitialIssueDraft", () => {
     });
   });
 
-  it("defaultBodyが明示的に渡された場合は下書きより優先し、復元しない", () => {
+  it("defaultBodyが明示的に渡された場合はそちらを使う", () => {
     writeIssueDraft({ ...emptyDraft, body: "下書き本文" });
     expect(resolveInitialIssueDraft({ defaultBody: "## 引用元セクション" })).toEqual({
       ...emptyDraft,
@@ -108,7 +109,7 @@ describe("resolveInitialIssueDraft", () => {
     });
   });
 
-  it("defaultRepositoryFullNameのみが渡された場合はリポジトリ欄以外の下書き（タイトル・本文・ラベル・担当者）を復元する", () => {
+  it("defaultRepositoryFullNameが渡された場合は保存済み下書きのリポジトリより優先する", () => {
     const draft: IssueDraft = {
       repositoryFullName: "owner/draft-repo",
       title: "下書きタイトル",
@@ -118,7 +119,7 @@ describe("resolveInitialIssueDraft", () => {
     };
     writeIssueDraft(draft);
     expect(resolveInitialIssueDraft({ defaultRepositoryFullName: "owner/context-repo" })).toEqual({
-      ...draft,
+      ...emptyDraft,
       repositoryFullName: "owner/context-repo",
     });
   });
@@ -128,6 +129,46 @@ describe("resolveInitialIssueDraft", () => {
       ...emptyDraft,
       repositoryFullName: "owner/context-repo",
     });
+  });
+});
+
+describe("readRestorableIssueDraft", () => {
+  it("保存済みの下書きが無い場合はnullを返す", () => {
+    expect(readRestorableIssueDraft({})).toBeNull();
+  });
+
+  it("明示的なプリフィルがない場合は保存済みの下書きを返す", () => {
+    const draft: IssueDraft = {
+      repositoryFullName: "owner/repo",
+      title: "下書きタイトル",
+      body: "下書き本文",
+      selectedLabels: ["bug"],
+      assignee: "octocat",
+    };
+    writeIssueDraft(draft);
+    expect(readRestorableIssueDraft({})).toEqual(draft);
+  });
+
+  it("defaultTitleが明示的に渡された場合はnullを返す", () => {
+    writeIssueDraft({ ...emptyDraft, title: "下書きタイトル" });
+    expect(readRestorableIssueDraft({ defaultTitle: "引用元タイトル" })).toBeNull();
+  });
+
+  it("defaultBodyが明示的に渡された場合はnullを返す", () => {
+    writeIssueDraft({ ...emptyDraft, body: "下書き本文" });
+    expect(readRestorableIssueDraft({ defaultBody: "## 引用元セクション" })).toBeNull();
+  });
+
+  it("defaultRepositoryFullNameのみが渡された場合は保存済みの下書きを返す", () => {
+    const draft: IssueDraft = {
+      repositoryFullName: "owner/draft-repo",
+      title: "下書きタイトル",
+      body: "下書き本文",
+      selectedLabels: ["bug"],
+      assignee: "octocat",
+    };
+    writeIssueDraft(draft);
+    expect(readRestorableIssueDraft({ defaultRepositoryFullName: "owner/context-repo" })).toEqual(draft);
   });
 });
 
