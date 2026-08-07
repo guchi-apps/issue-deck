@@ -1,5 +1,12 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
-import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import {
+  DEVELOP_MERGED_LABEL_NAME,
+  MAIN_MERGED_LABEL_NAME,
+  PLANNING_LABEL_NAME,
+  WIP_LABEL_NAME,
+  getWorkflowStepIndex,
+  WORKFLOW_STEPS,
+} from "@/lib/github/workflow-status";
 import type { IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
@@ -74,17 +81,17 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   {
     key: "in-progress",
     label: "実行中",
-    labels: [WORKFLOW_STEPS[0].labelName, WORKFLOW_STEPS[1].labelName],
+    labels: [PLANNING_LABEL_NAME, WIP_LABEL_NAME, D_MARGE_LABEL],
   },
   {
     key: "release-pending",
     label: "本番反映待ち",
-    labels: [WORKFLOW_STEPS[2].labelName, WORKFLOW_STEPS[3].labelName],
+    labels: [DEVELOP_MERGED_LABEL_NAME, M_MARGE_LABEL],
   },
   {
     key: "recently-merged",
     label: "直近本番に反映した",
-    labels: [WORKFLOW_STEPS[4].labelName],
+    labels: [MAIN_MERGED_LABEL_NAME],
     state: "all",
   },
 ];

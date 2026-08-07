@@ -21,12 +21,28 @@ describe("LABEL_FILTER_PRESETS", () => {
     expect(preset?.labels).toEqual([]);
     expect(preset?.excludeLabels).toEqual([
       "00.check-user",
-      "01.wip",
+      "01.planning",
+      "02.wip",
       "03.d:marge",
       "05.develop",
       "07.m:marge",
       "09.main",
     ]);
+  });
+
+  it("実行中プリセットは01.planning/02.wip/03.d:margeを対象にする", () => {
+    const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "in-progress");
+    expect(preset?.labels).toEqual(["01.planning", "02.wip", "03.d:marge"]);
+  });
+
+  it("本番反映待ちプリセットは05.develop/07.m:margeを対象にする", () => {
+    const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "release-pending");
+    expect(preset?.labels).toEqual(["05.develop", "07.m:marge"]);
+  });
+
+  it("直近本番に反映したプリセットは09.mainを対象にする", () => {
+    const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "recently-merged");
+    expect(preset?.labels).toEqual(["09.main"]);
   });
 });
 

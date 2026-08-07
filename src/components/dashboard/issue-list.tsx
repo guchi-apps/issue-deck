@@ -35,7 +35,7 @@ function formatRelativeDate(iso: string) {
   return `${diffDays}日前`;
 }
 
-// 進捗系ラベル（00.check-user、01.wip〜09.main）はカード右上のWorkflowStepBadgeで
+// 進捗系ラベル（00.check-user、01.planning〜09.main）はカード右上のWorkflowStepBadgeで
 // 既に表現されているため、下部のラベル一覧からは除外する
 function nonStatusLabels(labels: IssueLabel[]) {
   return labels.filter((label) => !isAttentionLabel(label.name) && matchStatusStep(label.name) === null);

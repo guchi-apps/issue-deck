@@ -70,17 +70,18 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 ## Issueラベルの状態遷移
 
-マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は流用しつつ、旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
+マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は`02.wip`にリネームし、実装着手前の計画検討中を表す`01.planning`を新設した（`21.plan-required`が付いていないIssueでは`01.planning`を経由せず最初から`02.wip`になる）。旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
 
-1. `01.wip` — 実装エージェントがコード実装中
-2. `03.d:marge` — developへPR作成・マージ中
-3. `05.develop` — developへマージ完了（main未反映）
-4. `07.m:marge` — mainへPR作成・マージ中
-5. `09.main` — mainへマージ完了。この時点でissueをcloseする
+1. `01.planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
+2. `02.wip` — 実装エージェントがコード実装中
+3. `03.d:marge` — developへPR作成・マージ中
+4. `05.develop` — developへマージ完了（main未反映）
+5. `07.m:marge` — mainへPR作成・マージ中
+6. `09.main` — mainへマージ完了。この時点でissueをcloseする
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
-上記1〜4の進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
+上記1〜5の進捗ラベル（`01.planning`/`02.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
 
 develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
@@ -88,7 +89,7 @@ develop→mainのリリースフロー（バージョンアップコミット・
 
 `.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
 
-- `01.wip`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
+- `01.planning`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
 - `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
 
 issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）から行う。この規約に従わないブランチ・PRは対象外（何もしない）。
@@ -158,7 +159,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 Issueごとに独立したClaude Codeセッションとして起動する。
 
 責務:
-- GitHub Issueの内容を取得する。取得したら**忘れずに`01.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
+- GitHub Issueの内容を取得する。取得したら**忘れずに`02.wip`ラベルを付与する**（実装中であることを示すため。付け忘れやすいので要注意）
 - 最新の`develop`からIssue専用ブランチ（`issue-<番号>`）を作成する
 - Git worktreeで作業フォルダを分離する
 - `21.plan-required`ラベルが付いていれば、実装前にPlan modeで計画を提示し承認を得る
@@ -166,7 +167,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
 - `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
-- `01.wip`→`03.d:marge`のラベル付け替え
+- `02.wip`→`03.d:marge`のラベル付け替え
 
 禁止事項:
 - `main`/`develop`への直接コミット・push
@@ -225,7 +226,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 
 1. **Phase 1**: `start-issue.sh`/`.ps1` — worktree・ブランチ・Claude Code起動のコマンド化
 2. **Phase 2**: `start-reviewer.sh`/`.ps1` — レビュー・統合セッション起動のコマンド化
-3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.wip`〜`09.main`）のGitHub Actionsによる自動化
+3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.planning`〜`09.main`）のGitHub Actionsによる自動化
 4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
 5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
 6. **Phase 5**: Issueへの`@claude`コメントを起点に実装からPR作成まで自動化
@@ -292,10 +293,11 @@ Issueごとに独立したClaude Codeセッションとして起動する。
    `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
    クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
    拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
-   クローズ後も`00.check-user`ラベルや`01.wip`等の進捗ラベルが「要確認」「作業中」のまま
-   残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、
-   Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.wip`/`03.d:marge`/`05.develop`/
-   `07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）を自動的に除去する
+   クローズ後も`00.check-user`ラベルや`01.planning`/`02.wip`等の進捗ラベルが「要確認」「計画検討中」
+   「作業中」のまま残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`
+   ジョブが、Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.planning`/`02.wip`/
+   `03.d:marge`/`05.develop`/`07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）
+   を自動的に除去する
    （issue #172、#464）。この除去自体が`00.check-user`の`unlabeled`イベントを発生させ本
    ワークフローを起動するが、対象issueは既にクローズ済みのため`issue_closed`ガードにより
    何もせず`mode=skip`となる。
@@ -313,7 +315,7 @@ pushされたがPRが作成されないまま終了した）。この場合、�
 判定）では、PRが無いまま`issue-<番号>`ブランチだけが残り、以後どのイベントが来ても再始動しない
 状態でスタックしてしまい、人間がブランチを手動削除する以外に復旧手段が無かった。
 
-判定ステップでは「`01.wip`が付いているのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
+判定ステップでは「`02.wip`が付いているのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
 リトライとみなして`issue-<番号>`ブランチを自動削除・作り直しした上で実装ステップを再実行していた。
 しかし、これは「そのissueに来た@claudeコメントや00.check-user解除イベントなら何でも」トリガーに
 なってしまい、実は前回コミットまで進んでいた作業が本人の意図に関わらず無言で失われる恐れがあった。
@@ -777,8 +779,8 @@ concurrencyグループ（`issue-dispatch-<Issue番号>-branch`）に固定し�
 コンフリクト解消が同時に走ってpushが競合するのを避けるため。
 
 コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
-push全般をトリガーに無条件で`01.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
-issueに`01.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`01.wip`を
+push全般をトリガーに無条件で`02.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
+issueに`02.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`02.wip`を
 除去する。
 
 ### 解消方針

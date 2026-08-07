@@ -76,7 +76,7 @@ export function WorkflowStepBadge({ labels, running }: WorkflowStepBadgeProps) {
   );
 }
 
-/** 01.wip〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない */
+/** 01.planning〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない */
 export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex(labels);
   if (currentIndex === null) return null;

@@ -283,16 +283,16 @@ jobs:
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
 
-      - name: 01.wip ラベルを除去する
+      - name: 02.wip ラベルを除去する
         # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
-        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で01.wipを
-        # 付与するため、03.d:marge/00.check-user状態のissueに01.wipが混在して
+        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で02.wipを
+        # 付与するため、03.d:marge/00.check-user状態のissueに02.wipが混在して
         # 残らないよう明示的に除去する。LLMの実行有無に依存させないため独立した
         # シェルステップとする(--remove-labelは未付与でも無害なため常に実行してよい)。
         if: always() && steps.state.outputs.should_resolve == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue edit ${{ matrix.issue }} --remove-label "01.wip"
+        run: gh issue edit ${{ matrix.issue }} --remove-label "02.wip"
 
       - name: 解消結果を検証し、報告が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した

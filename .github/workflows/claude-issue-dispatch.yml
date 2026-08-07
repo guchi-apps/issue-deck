@@ -60,13 +60,13 @@ name: Claude Issue Dispatch
 # 依頼は独立した文脈のため)。新規ブランチは作らず、既存のissue-<番号>ブランチをcheckoutして
 # 続きから作業する。
 #   - PRがOPEN(#129): 追加の依頼内容としてコミットをpushし、既存PRにコメントで報告する。
-#   - PRがまだ一度も無く、かつ01.wipが付いている(#112): 前回の実装試行がPR作成に至らないまま
+#   - PRがまだ一度も無く、かつ02.wipが付いている(#112): 前回の実装試行がPR作成に至らないまま
 #     (権限拒否・エラー等で)終了し詰まった状態の可能性がある。ブランチを削除して作り直すのは
 #     人間しかできない(自動では行わない。前回コミットまで進んでいた作業を無言で失わせない
 #     ため)が、その既存ブランチをそのままcheckoutして続きから再開すること自体は自動で行い、
 #     完了時に新規でPRを作成する(実装ステップのプロンプト内で、現在のブランチの状態を確認して
 #     続行可能か判断させる)。
-# PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な中間状態の場合は、従来どおり
+# PRがMERGED/CLOSED、またはPRが無く02.wipも付いていない異常な中間状態の場合は、従来どおり
 # mode=skipとし、実装は再始動しない。
 #
 # PRがOPENの状態(上記1つ目)で、直近の@claudeコメントが「単なる質問・確認」と判定された場合も、
@@ -295,7 +295,7 @@ jobs:
           AWAITING_CONFIRM=false
           echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
           WIP=false
-          echo "$LABELS" | grep -qx "01.wip" && WIP=true
+          echo "$LABELS" | grep -qx "02.wip" && WIP=true
           SCREENSHOT_REQUIRED=false
           echo "$LABELS" | grep -qx "24.screenshot-required" && SCREENSHOT_REQUIRED=true
           echo "screenshot_required=$SCREENSHOT_REQUIRED" >> "$GITHUB_OUTPUT"
@@ -312,14 +312,14 @@ jobs:
           # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な
           # 追加依頼ではないため、以下はissue_comment・workflow_dispatchトリガーに限定する。
           # workflow_dispatchは計画/実装フォールバック検証ステップからの自己リトライ(#497)。
-          # PRがまだ無く01.wipが付いている詰まった状態(#112)からの再開先(mode=additional)は、
+          # PRがまだ無く02.wipが付いている詰まった状態(#112)からの再開先(mode=additional)は、
           # 実装フォールバックの自己リトライがちょうど再開したい状態と一致する):
           # - PRがOPENなら追加対応として扱う(#129)。00.check-user(Phase4の自動マージ不可判定を
           #   含む)の有無は問わない。
-          # - PRがまだ無く01.wipが付いている詰まった状態(#112)も追加対応として扱い、既存
+          # - PRがまだ無く02.wipが付いている詰まった状態(#112)も追加対応として扱い、既存
           #   ブランチをそのままcheckoutして続きから再開する(実装ステップのプロンプト側で
           #   続行可能か判断する)。ブランチの削除・作り直しは自動化せず人間の明示操作に委ねる。
-          # - それ以外(PRがMERGED/CLOSED、または01.wipも付いていない異常な中間状態)は
+          # - それ以外(PRがMERGED/CLOSED、または02.wipも付いていない異常な中間状態)は
           #   mode=skipとし、実装は再始動しない。
           MODE=skip
           if [ "$EVENT_NAME" = "issue_comment" ] && [ "$IS_ASK" = "true" ]; then
@@ -405,9 +405,9 @@ jobs:
 
       - name: 実装済み・対応中のissueへの@claudeコメントに返信する
         # BRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態、または
-        # PRが無く01.wipが付いている詰まった状態(#112)でissue_commentが来た場合はmode=additional
+        # PRが無く02.wipが付いている詰まった状態(#112)でissue_commentが来た場合はmode=additional
         # になり、このステップの対象外(#129, #112。既存ブランチをcheckoutして続きから再開する)。
-        # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く01.wipも付いていない異常な
+        # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く02.wipも付いていない異常な
         # 中間状態で、issue-<番号>ブランチが既に存在するため実装は再始動しないが、
         # issue_commentトリガー(人間が直接@claudeへ呼びかけたケース)に限り、これまでの
         # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの同条件のskip
@@ -432,7 +432,7 @@ jobs:
           BRANCH="${{ steps.state.outputs.branch }}"
           PR_URL="${{ steps.state.outputs.pr_url }}"
           if [ -z "$PR_URL" ]; then
-            BODY="⚠️ \`$BRANCH\` ブランチは存在しますが、Pull Requestも\`01.wip\`ラベルも無い、想定外の状態です。"
+            BODY="⚠️ \`$BRANCH\` ブランチは存在しますが、Pull Requestも\`02.wip\`ラベルも無い、想定外の状態です。"
             BODY="$BODY"$'\n\n'"作り直す場合は、人間が明示的に \`git push origin --delete $BRANCH\` 等でブランチを削除してから、改めて\`@claude\`とコメントしてください（このワークフローが自動でブランチを削除・作り直すことはありません）。"
           else
             BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。関連するPull Requestはこちらです: $PR_URL"
@@ -646,15 +646,15 @@ jobs:
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
-      - name: 01.wip を付与する（計画検討着手時）
+      - name: 01.planning を付与する（計画検討着手時）
         # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
         # 依存してしまうため、他の確実な通知ステップと同じくシェルスクリプトで直接行う。
-        # CLAUDE.mdの運用ルール(01.wipはPlan mode開始時点で付与する)をこのワークフローでも
+        # CLAUDE.mdの運用ルール(01.planningはPlan mode開始時点で付与する)をこのワークフローでも
         # 保証するためのステップ。
         if: steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
+        run: gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.planning"
 
       - name: 計画提示前のコメント数を記録する
         id: before_plan
@@ -1082,19 +1082,21 @@ jobs:
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: 01.wip を付与する（実装着手時）
+      - name: 02.wip を付与する（実装着手時）
         # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
         # 依存してしまう(実際、コメント投稿から付与まで数分〜10分ほど遅延する例があった)ため、
-        # 実装着手前にシェルスクリプトで直接・確実に付与する。
+        # 実装着手前にシェルスクリプトで直接・確実に付与する。計画検討中（01.planning）から
+        # 実装着手に進む場合に備え、両分岐とも01.planningの除去も併せて行う（付いていなくても
+        # 無害）。
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip" --remove-label "03.d:marge"
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "03.d:marge" --remove-label "01.planning"
           else
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.wip"
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "01.planning"
           fi
 
       - name: Claude Code（実装・PR作成）
@@ -1139,9 +1141,9 @@ jobs:
                   通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
                   `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
                   `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
-                  なお、このステップの直前のシェルステップで既に`01.wip`が付与され`03.d:marge`が
+                  なお、このステップの直前のシェルステップで既に`02.wip`が付与され`03.d:marge`が
                   外されているため、状態を元に戻すために
-                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "01.wip"`
+                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "02.wip"`
                   を実行してください（`00.check-user`以外の他のラベルは変更しません）。`00.check-user`は
                   既に付いていても無害なので必ず付与すること。理由: issue-deck画面の「修正を依頼する」
                   ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
@@ -1169,7 +1171,7 @@ jobs:
               計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`でPR
               作成済みの場合は、直近の`@claude`コメントの内容を踏まえて対応する。PR未作成の再開の
               場合は、過去のコメント履歴や既存のコミットから前回どこまで実装が進んでいたかも把握する）
-              （`01.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
+              （`02.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
               既に完了しているため、ここで行う必要はない）
             - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
               作成する（`additional`の場合は既にcheckout済みのため不要）
@@ -1221,8 +1223,8 @@ jobs:
               - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
                 （${{ steps.state.outputs.pr_url }}）に`gh pr comment`で、
                 今回追加でpushしたコミットの内容を日本語で要約して投稿する
-            - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "01.wip"`
-              を実行する（`additional`の場合も同じコマンドで`01.wip`↔`03.d:marge`の付け替えを閉じる。
+            - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "02.wip"`
+              を実行する（`additional`の場合も同じコマンドで`02.wip`↔`03.d:marge`の付け替えを閉じる。
               `00.check-user`には触れない。このワークフローのgit pushはPAT
               （`secrets.WORKFLOW_PAT`）で行っており`.github/workflows/issue-labels.yml`が自動発火する
               可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
@@ -1263,7 +1265,7 @@ jobs:
                    pushまでは行ったうえで`gh issue comment`で失敗した旨と
                    エラー内容を報告し、
                    `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を
-                   実行して停止してください（`01.wip`はそのまま、`03.d:marge`への付け替えは行わない。
+                   実行して停止してください（`02.wip`はそのまま、`03.d:marge`への付け替えは行わない。
                    エラーの原因を推測で決めつけず、実際のエラーメッセージをそのままIssueコメントに
                    引用すること）。
               2. 撮影に成功したら、通常どおり完了処理（PR作成またはPRコメント投稿）へ進めてください。
@@ -1286,7 +1288,7 @@ jobs:
               実装・テストまで終えた時点で上記の完了処理（新規PR作成またはPRコメント投稿）を行わず、
               ブランチのpushまでは行ったうえで、代わりに
               `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
-              （`01.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
+              （`02.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
               必要なためユーザーの確認を待っています」旨を`gh issue comment`で
               投稿して停止してください。
               このコメントに開発サーバーのプレビューURLもあわせて記載する。無人実行では実際にdevサーバーを

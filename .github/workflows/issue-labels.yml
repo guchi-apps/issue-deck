@@ -1,7 +1,8 @@
 name: Issue Labels
 
-# Issueラベル(01.wip -> 03.d:marge -> 05.develop -> 07.m:marge -> 09.main)の
-# 状態遷移をイベント駆動で保証する。実装エージェント・レビュー統合エージェントによる
+# Issueラベル(01.planning -> 02.wip -> 03.d:marge -> 05.develop -> 07.m:marge -> 09.main。
+# 01.planningは21.plan-required選択時のみ経由する)の状態遷移をイベント駆動で保証する。
+# 実装エージェント・レビュー統合エージェントによる
 # 手動のラベル付け替え(docs/multi-agent-workflow.md参照)を置き換えるものではなく、
 # 付け忘れがあっても後から是正されるようにするための安全網、および
 # develop->mainの遷移(07/09)を新たにカバーするためのもの。
@@ -65,10 +66,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: 01.wip を付与する
+      - name: 02.wip を付与する
         run: |
           if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "01.wip"
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "02.wip"
           fi
 
   develop-pr-opened:
@@ -87,7 +88,7 @@ jobs:
       - name: 03.d:marge へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "01.wip"
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "02.wip"
             gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
@@ -112,7 +113,7 @@ jobs:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
+            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
             gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
@@ -132,7 +133,7 @@ jobs:
           for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
+              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
             fi
           done
@@ -154,7 +155,7 @@ jobs:
       - name: 05.develop の issue を 07.m:marge へ一括遷移する
         run: |
           for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
-            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop" --remove-label "03.d:marge" --remove-label "01.wip"
+            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip"
           done
 
   main-pr-merged:
@@ -186,15 +187,15 @@ jobs:
             } | sort -un
           )"
           for n in $issues; do
-            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "01.wip" --remove-label "00.check-user"
+            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
             gh issue close "$n"
           done
 
   cleanup-on-close:
     # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
     # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`および進捗ラベル
-    # (01.wip/03.d:marge/05.develop/07.m:marge)が残り続けないよう、クローズをトリガーに
-    # 除去する(#464)。`09.main`は「本番反映済み」を示す恒久的な状態として
+    # (01.planning/02.wip/03.d:marge/05.develop/07.m:marge)が残り続けないよう、クローズを
+    # トリガーに除去する(#464)。`09.main`は「本番反映済み」を示す恒久的な状態として
     # approval-labels.ts の recently-merged プリセット・issue-stats.ts の直近リリース分
     # クラスタリング・workflow-status.ts の完了バッジ表示が参照しているため、他の進捗
     # ラベルと異なり除去対象から明示的に除外する。
@@ -218,7 +219,8 @@ jobs:
         run: |
           gh issue edit "$ISSUE_NUMBER" \
             --remove-label "00.check-user" \
-            --remove-label "01.wip" \
+            --remove-label "01.planning" \
+            --remove-label "02.wip" \
             --remove-label "03.d:marge" \
             --remove-label "05.develop" \
             --remove-label "07.m:marge"

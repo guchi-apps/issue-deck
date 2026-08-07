@@ -13,7 +13,8 @@ function labels(...names: string[]): IssueLabel[] {
 
 describe("hasActiveWorkflowStep", () => {
   it("実行が進行し得るラベルではtrueを返す", () => {
-    expect(hasActiveWorkflowStep(labels("01.wip"))).toBe(true);
+    expect(hasActiveWorkflowStep(labels("01.planning"))).toBe(true);
+    expect(hasActiveWorkflowStep(labels("02.wip"))).toBe(true);
     expect(hasActiveWorkflowStep(labels("03.d:marge"))).toBe(true);
     expect(hasActiveWorkflowStep(labels("07.m:marge"))).toBe(true);
   });
@@ -30,7 +31,7 @@ describe("hasActiveWorkflowStep", () => {
 
   it("遷移の過渡期に新旧のラベルが同時に付いていても、進行し得る方を優先してtrueを返す", () => {
     // 現在ステップの判定（先頭一致）では05.developになるケース
-    expect(getWorkflowStepIndex(labels("05.develop", "07.m:marge"))).toBe(2);
+    expect(getWorkflowStepIndex(labels("05.develop", "07.m:marge"))).toBe(3);
     expect(hasActiveWorkflowStep(labels("05.develop", "07.m:marge"))).toBe(true);
   });
 });
@@ -38,12 +39,13 @@ describe("hasActiveWorkflowStep", () => {
 describe("canCreateFollowupFromComment", () => {
   it("closedなissueではtrueを返す", () => {
     expect(canCreateFollowupFromComment({ state: "closed", labels: labels() })).toBe(true);
-    expect(canCreateFollowupFromComment({ state: "closed", labels: labels("01.wip") })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "closed", labels: labels("02.wip") })).toBe(true);
   });
 
   it("openかつdevelopマージ未満の段階ではfalseを返す", () => {
     expect(canCreateFollowupFromComment({ state: "open", labels: labels() })).toBe(false);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("01.wip") })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("01.planning") })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", labels: labels("02.wip") })).toBe(false);
     expect(canCreateFollowupFromComment({ state: "open", labels: labels("03.d:marge") })).toBe(false);
   });
 
