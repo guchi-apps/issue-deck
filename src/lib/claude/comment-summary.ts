@@ -15,11 +15,12 @@ function truncate(text: string, maxLength: number): string {
 
 /** GitHub Issueの1コメントから要約生成用プロンプトを組み立てる。 */
 export function buildCommentSummaryPrompt(body: string): string {
-  return `以下はGitHub Issueに投稿された1件のコメントです。内容を「重要な点」「変更点」「懸念点」の3つの見出しに分けて、それぞれ簡潔な箇条書きで日本語で要約してください。該当する内容が無い見出しには「特になし」とだけ記載してください。前置きは付けず、以下の見出し構成のみで出力してください。
+  return `以下はGitHub Issueに投稿された1件のコメントです。内容を「重要な点」「変更点」「懸念点」「関連Issue」の4つの見出しに分けて、それぞれ簡潔な箇条書きで日本語で要約してください。「関連Issue」の見出しには、コメント中で明示的に言及されているIssue番号（例: #123）や、「必要であれば別途Issueを立てて計画・対応する」といった今後Issue化する可能性がある旨の記述があればその内容を記載してください。該当する内容が無い見出しには「特になし」とだけ記載してください。前置きは付けず、以下の見出し構成のみで出力してください。
 
 ## 重要な点
 ## 変更点
 ## 懸念点
+## 関連Issue
 
 # コメント本文
 ${truncate(body, MAX_COMMENT_LENGTH)}`;
