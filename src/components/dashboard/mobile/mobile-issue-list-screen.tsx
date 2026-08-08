@@ -77,7 +77,10 @@ export function MobileIssueListScreen({
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
   const swipeFilterHandlers = useSwipeFilterView((direction) => {
-    const nextView = getAdjacentNavViewId(view, direction);
+    // タブの表示順（tabNavViews）で隣接判定する。navViews順のままだと、
+    // #714でタブ上「すべてのIssue」の右隣に固定表示したユーザー確認待ちタブへ
+    // スワイプしても隣接扱いされず、表示順とスワイプの挙動がズレてしまう（#734）。
+    const nextView = getAdjacentNavViewId(view, direction, tabNavViews);
     if (nextView) onChangeView(nextView);
   });
   const tabRefs = useRef<Partial<Record<NavViewId, HTMLButtonElement | null>>>({});
@@ -190,6 +193,7 @@ export function MobileIssueListScreen({
         showSearch={false}
         showHeader={false}
         className="flex-1"
+        style={swipeFilterHandlers.style}
         fabSpacing
         footerSpacing
       />

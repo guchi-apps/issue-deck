@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import type { TouchEvent } from "react";
+import { useRef, useState } from "react";
+import type { CSSProperties, TouchEvent } from "react";
 
 import { BACK_EDGE_RATIO, isInsideHorizontalScroller } from "@/hooks/use-swipe-back";
 
@@ -27,6 +27,8 @@ type SwipeState = {
 // 画面左端寄り（BACK_EDGE_RATIO）から始まった場合は戻る側に譲り、何もしない。
 export function useSwipeFilterView(onSwipe: (direction: SwipeFilterDirection) => void) {
   const stateRef = useRef<SwipeState | null>(null);
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   function onTouchStart(e: TouchEvent<HTMLElement>) {
     const touch = e.touches[0];
@@ -66,28 +68,50 @@ export function useSwipeFilterView(onSwipe: (direction: SwipeFilterDirection) =>
         state.tracking = false;
         return;
       }
+      setIsDragging(true);
     }
 
     state.deltaX = deltaX;
+    // 戻るジェスチャーの判定領域内から始まった右方向の動きは、useSwipeBack側の
+    // ドラッグ表示に譲る（両方の見た目が重なって二重に動いて見えるのを防ぐ）。
+    setDragX(deltaX > 0 && state.startedInBackEdge ? 0 : deltaX);
   }
 
   function onTouchEnd() {
     const state = stateRef.current;
     stateRef.current = null;
-    if (!state || !state.tracking || state.locked !== "horizontal") return;
+    setIsDragging(false);
+    if (!state || !state.tracking || state.locked !== "horizontal") {
+      setDragX(0);
+      return;
+    }
 
     if (state.deltaX <= -SWIPE_THRESHOLD_PX) {
       onSwipe("next");
+      setDragX(0);
       return;
     }
     if (state.deltaX >= SWIPE_THRESHOLD_PX && !state.startedInBackEdge) {
       onSwipe("prev");
+      setDragX(0);
+      return;
     }
+    setDragX(0);
   }
 
   function onTouchCancel() {
     stateRef.current = null;
+    setIsDragging(false);
+    setDragX(0);
   }
 
-  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel };
+  // ドラッグ中は指の動きにそのまま追従させ、指を離した後は0へ戻すアニメーションを
+  // かける。スワイプが成立した場合は切り替え後の新しいビューの内容が0の位置へ
+  // 滑り込んでくるように見え、閾値未達の場合は元の内容がそのまま戻る（#734）。
+  const style: CSSProperties = {
+    transform: dragX !== 0 ? `translateX(${dragX}px)` : undefined,
+    transition: isDragging ? "none" : "transform 0.2s ease-out",
+  };
+
+  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, style };
 }
