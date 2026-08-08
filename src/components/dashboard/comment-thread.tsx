@@ -40,6 +40,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
@@ -304,22 +305,17 @@ function ApprovalActions({
             対応PR #{pullRequestLink.number}
           </a>
         )}
-        <div>
-          <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
-        </div>
         {onMergePullRequest && (
-          <div className="mt-2">
+          <div className="mt-2 flex items-center gap-2">
+            <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
             <Button
               size="sm"
               onClick={() => setIsMergeConfirmOpen(true)}
-              disabled={mergeBusy || isMerged}
+              disabled={mergeBusy || isMerged || pullRequestCiStatus === "in_progress"}
             >
               {mergeBusy ? <Loader2 className="animate-spin" /> : <GitMerge />}
               {isMerged ? "マージ済み" : "マージする"}
             </Button>
-            {mergePullRequestError && (
-              <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
-            )}
 
             <AlertDialog open={isMergeConfirmOpen} onOpenChange={setIsMergeConfirmOpen}>
               <AlertDialogContent>
@@ -340,31 +336,37 @@ function ApprovalActions({
             </AlertDialog>
           </div>
         )}
+        {onMergePullRequest && mergePullRequestError && (
+          <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
+        )}
         {onRequestPrFix && !isMerged && (
-          <div className="mt-2 flex flex-col gap-2">
-            <ApprovalTextField
-              value={prFixReason}
-              onChange={changePrFixReason}
-              placeholder="修正依頼を入力（必須）"
-              repositoryFullName={repositoryFullName}
-              issueSuggestions={issueSuggestions}
-              disabled={prFixBusy}
-              onUploadingChange={setIsPrFixTextUploading}
-            />
-            {prFixValidationError && (
-              <p className="text-sm text-destructive">{prFixValidationError}</p>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-fit"
-              onClick={submitPrFix}
-              disabled={prFixBusy || isPrFixTextUploading}
-            >
-              <Pencil />
-              修正を依頼する
-            </Button>
-          </div>
+          <>
+            <Separator className="my-3" />
+            <div className="flex flex-col gap-2">
+              <ApprovalTextField
+                value={prFixReason}
+                onChange={changePrFixReason}
+                placeholder="修正依頼を入力（必須）"
+                repositoryFullName={repositoryFullName}
+                issueSuggestions={issueSuggestions}
+                disabled={prFixBusy}
+                onUploadingChange={setIsPrFixTextUploading}
+              />
+              {prFixValidationError && (
+                <p className="text-sm text-destructive">{prFixValidationError}</p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={submitPrFix}
+                disabled={prFixBusy || isPrFixTextUploading}
+              >
+                <Pencil />
+                修正を依頼する
+              </Button>
+            </div>
+          </>
         )}
       </div>
     );
