@@ -82,6 +82,7 @@ import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -124,6 +125,7 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
+  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -156,7 +158,7 @@ export function MobileIssueDetail({
   } = useIssueBodyCleanup();
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastCommentRef = useRef<HTMLLIElement>(null);
+  const targetCommentRef = useRef<HTMLLIElement>(null);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
@@ -728,7 +730,8 @@ export function MobileIssueDetail({
             isRequestingPrFix={isCommentSubmitting}
             isMergingPullRequest={isMergingPullRequest}
             mergePullRequestError={mergePullRequestError}
-            lastCommentRef={lastCommentRef}
+            targetCommentIndex={targetCommentIndex}
+            targetCommentRef={targetCommentRef}
             commentSummary={commentSummary}
           />
 
@@ -801,7 +804,7 @@ export function MobileIssueDetail({
 
       <ScrollToLatestCommentButton
         containerRef={scrollContainerRef}
-        targetRef={lastCommentRef}
+        targetRef={targetCommentRef}
         visible={comments.length > 0}
         className="left-1/2 bottom-4 h-11 w-20 -translate-x-1/2"
       />

@@ -101,8 +101,10 @@ type CommentThreadProps = {
   isMergingPullRequest?: boolean;
   /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
   mergePullRequestError?: string | null;
-  /** 最新コメントの要素に設定するref（「最新のコメントに移動」ボタンのスクロール先） */
-  lastCommentRef?: RefObject<HTMLLIElement | null>;
+  /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
+  targetCommentIndex?: number;
+  /** targetCommentIndexが指すコメントの要素に設定するref */
+  targetCommentRef?: RefObject<HTMLLIElement | null>;
   /** コメントごとのAI要約の状態・生成関数。本文が長いコメントにのみ要約UIを表示する */
   commentSummary: IssueCommentSummaries;
 };
@@ -475,7 +477,8 @@ export function CommentThread({
   isRequestingPrFix,
   isMergingPullRequest,
   mergePullRequestError,
-  lastCommentRef,
+  targetCommentIndex,
+  targetCommentRef,
   commentSummary,
 }: CommentThreadProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -579,7 +582,7 @@ export function CommentThread({
           return (
             <li
               key={comment.id}
-              ref={index === comments.length - 1 ? lastCommentRef : undefined}
+              ref={index === targetCommentIndex ? targetCommentRef : undefined}
               className="flex flex-col gap-2"
             >
               <div className={cn("flex gap-2", isSelf && "flex-row-reverse")}>

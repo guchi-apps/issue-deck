@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
@@ -105,6 +106,7 @@ export function IssueDetail({
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
+  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -136,7 +138,7 @@ export function IssueDetail({
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastCommentRef = useRef<HTMLLIElement>(null);
+  const targetCommentRef = useRef<HTMLLIElement>(null);
   const issueSuggestions = useMemo(
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
@@ -588,7 +590,8 @@ export function IssueDetail({
               isRequestingPrFix={isCommentSubmitting}
               isMergingPullRequest={isMergingPullRequest}
               mergePullRequestError={mergePullRequestError}
-              lastCommentRef={lastCommentRef}
+              targetCommentIndex={targetCommentIndex}
+              targetCommentRef={targetCommentRef}
               commentSummary={commentSummary}
             />
 
@@ -662,7 +665,7 @@ export function IssueDetail({
 
       <ScrollToLatestCommentButton
         containerRef={scrollContainerRef}
-        targetRef={lastCommentRef}
+        targetRef={targetCommentRef}
         visible={comments.length > 0}
         className="right-4 bottom-4"
       />

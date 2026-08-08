@@ -5,7 +5,7 @@ import type { RefObject } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { computeScrollTopToRevealTarget } from "@/lib/scroll-to-latest";
+import { computeScrollToLatestTarget } from "@/lib/scroll-to-latest";
 import { cn } from "@/lib/utils";
 
 type ScrollToLatestCommentButtonProps = {
@@ -29,7 +29,12 @@ export function ScrollToLatestCommentButton({
     if (!container || !target) return;
     const containerTop = container.getBoundingClientRect().top;
     const targetTop = target.getBoundingClientRect().top;
-    const top = computeScrollTopToRevealTarget(container.scrollTop, containerTop, targetTop);
+    const top = computeScrollToLatestTarget({
+      containerScrollTop: container.scrollTop,
+      containerTop,
+      targetTop,
+      containerScrollHeight: container.scrollHeight,
+    });
     container.scrollTo({ top, behavior: "smooth" });
   }
 

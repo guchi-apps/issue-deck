@@ -58,6 +58,8 @@ export type Issue = {
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;
+  /** ユーザーが最後に読んだ時点でのコメント総数。「ページ下部へ移動」ボタンで最初の未読コメントへ移動するために使う */
+  readCommentCount: number;
   deployCheckStatus: DeployCheckStatus | null;
 };
 
