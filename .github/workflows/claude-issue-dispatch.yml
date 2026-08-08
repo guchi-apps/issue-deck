@@ -126,6 +126,15 @@ name: Claude Issue Dispatch
 # 場合は、どのフォールバックも動かずIssue側に痕跡が一切残らない。これを拾うために、dispatchとは
 # 独立したnotify-failureジョブで起動失敗を通知する(#650)。
 #
+# 自動リトライを使い切って諦める最終的なフォールバックコメントには、直前のClaude Codeステップ
+# (claude_plan・claude_implement)のexecution_file出力(anthropics/claude-code-action@v1が
+# 公開する、SDKのメッセージ列を書き出したJSONファイルへのパス。ステップがfailure終了しても
+# SDK内部で書き出し済みなら出力される)から、最後のresultターンのsubtype/result、無ければ
+# 最後のassistantターンのテキストを抽出し、参考情報として折りたたみ表示する(#716)。
+# execution_fileのJSON構造はclaude-code-action側の内部実装詳細のため、抽出は全て
+# `// empty`等でフォールバックし、失敗しても理由セクションを省略するだけでフォールバック
+# コメント自体は従来どおり必ず投稿される。
+#
 # ジョブは triage → dispatch → notify-failure の3段構成(#651)。
 #   triage        : 実行者の権限・issueの状態を判定してmodeを決める。concurrency・services・uses:
 #                   のいずれも持たず即時実行される。受理を示す👀リアクションと、mode=skipのうち
@@ -813,6 +822,11 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
           CLAUDE_STEP_OUTCOME: ${{ steps.claude_plan.outcome }}
+          # claude-code-actionの正式な出力(action.ymlで公開)。SDKが書き出したメッセージ列
+          # (Turn[]相当。system/assistant/user/resultの各typeを持つ)へのパスで、Claude Code
+          # ステップがfailure終了した場合でもSDK内部のcatch節で書き出し済みなら出力される
+          # (base-action/src/run-claude-sdk.ts)。フォールバック理由の推定表示(#716)に使う。
+          EXECUTION_FILE: ${{ steps.claude_plan.outputs.execution_file }}
           # APP_BASE_URL未設定・API到達不可等でリポジトリ共通のAUTO_RETRY_LIMITを取得できない
           # 環境でも、一過性障害(ERROR_TYPE=transient)と判定した場合にだけ適用する最低限の
           # リトライ回数(#621)。一過性のGitHub API障害はリトライで解消する可能性が高い一方、
@@ -894,6 +908,41 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
+
+          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。抽出優先順位は
+          # 1.最後のresultターンのresult(subtypeも既知の値なら定型理由を添える) 2.無ければ
+          # 最後のassistantターンのテキスト 3.どちらも無ければ理由セクション自体を省略する。
+          # execution_fileはclaude-code-action内部の実装詳細でスキーマが変わりうるため、
+          # jqは全て`// empty`等でフォールバックし、抽出に失敗してもフォールバックコメント
+          # 自体は必ず投稿する(理由抽出の失敗が通知を壊さないようにする)。
+          REASON=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+            REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            if [ -z "$REASON" ]; then
+              REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            fi
+            case "$RESULT_SUBTYPE" in
+              error_max_turns) SUBTYPE_HINT="ターン数の上限に達したため、投稿まで到達できなかった可能性があります。" ;;
+              error_during_execution) SUBTYPE_HINT="実行中にエラーが発生したため、投稿まで到達できなかった可能性があります。" ;;
+              *) SUBTYPE_HINT="" ;;
+            esac
+            if [ -n "$SUBTYPE_HINT" ]; then
+              if [ -n "$REASON" ]; then
+                REASON="$SUBTYPE_HINT $REASON"
+              else
+                REASON="$SUBTYPE_HINT"
+              fi
+            fi
+            # Issueコメントが極端に長くならないよう切り詰める
+            if [ "${#REASON}" -gt 500 ]; then
+              REASON="${REASON:0:500}…"
+            fi
+          fi
+          if [ -n "$REASON" ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
+          fi
+
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
@@ -1390,6 +1439,9 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
           CLAUDE_STEP_OUTCOME: ${{ steps.claude_implement.outcome }}
+          # 計画提示ステップのフォールバック検証ステップと同じ考え方(#716)。フォールバック
+          # 理由の推定表示に使う(詳細は計画提示ステップ側のコメントを参照)。
+          EXECUTION_FILE: ${{ steps.claude_implement.outputs.execution_file }}
           # 計画提示ステップと同じ考え方(#621)。APP_BASE_URL未設定等でリポジトリ共通の
           # AUTO_RETRY_LIMITを取得できない環境でも、一過性障害と判定した場合にだけ適用する
           # 最低限のリトライ回数。
@@ -1487,6 +1539,38 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
+
+          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。計画提示ステップの
+          # フォールバック検証ステップと同じ抽出ロジック(優先順位・既知subtypeの定型理由・
+          # 文字数制限・抽出失敗時は理由セクションを省略するのみ)。
+          REASON=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+            REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            if [ -z "$REASON" ]; then
+              REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            fi
+            case "$RESULT_SUBTYPE" in
+              error_max_turns) SUBTYPE_HINT="ターン数の上限に達したため、投稿まで到達できなかった可能性があります。" ;;
+              error_during_execution) SUBTYPE_HINT="実行中にエラーが発生したため、投稿まで到達できなかった可能性があります。" ;;
+              *) SUBTYPE_HINT="" ;;
+            esac
+            if [ -n "$SUBTYPE_HINT" ]; then
+              if [ -n "$REASON" ]; then
+                REASON="$SUBTYPE_HINT $REASON"
+              else
+                REASON="$SUBTYPE_HINT"
+              fi
+            fi
+            # Issueコメントが極端に長くならないよう切り詰める
+            if [ "${#REASON}" -gt 500 ]; then
+              REASON="${REASON:0:500}…"
+            fi
+          fi
+          if [ -n "$REASON" ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
+          fi
+
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
