@@ -1,12 +1,39 @@
 import { describe, expect, it } from "vitest";
 
-import { getAdjacentNavViewId, getNavViewDefaultState, navViews, resolveStateOnViewChange } from "@/lib/nav-views";
+import {
+  getAdjacentNavViewId,
+  getNavViewDefaultGroupByRepo,
+  getNavViewDefaultState,
+  navViews,
+  resolveStateOnViewChange,
+} from "@/lib/nav-views";
 
 describe("getNavViewDefaultState", () => {
   it("状態を要求しないビューはopen、「main反映済(直近)」はall", () => {
     expect(getNavViewDefaultState("all")).toBe("open");
     expect(getNavViewDefaultState("favorites")).toBe("open");
     expect(getNavViewDefaultState("recently-merged")).toBe("all");
+  });
+});
+
+describe("getNavViewDefaultGroupByRepo", () => {
+  it("未着手はリポジトリ横断でまとめて表示するためデフォルトOFF（#876）", () => {
+    expect(getNavViewDefaultGroupByRepo("not-started")).toBe(false);
+  });
+
+  it("実行中・本番関連待ちはリポジトリごとに見通しが良いためデフォルトON", () => {
+    expect(getNavViewDefaultGroupByRepo("in-progress")).toBe(true);
+    expect(getNavViewDefaultGroupByRepo("release-pending")).toBe(true);
+    expect(getNavViewDefaultGroupByRepo("recently-merged")).toBe(true);
+  });
+
+  it("確認待ちは古い順の優先順位付けを崩さないためデフォルトOFF", () => {
+    expect(getNavViewDefaultGroupByRepo("check-user")).toBe(false);
+  });
+
+  it("ラベル絞り込みを持たないビューはデフォルトOFF", () => {
+    expect(getNavViewDefaultGroupByRepo("all")).toBe(false);
+    expect(getNavViewDefaultGroupByRepo("favorites")).toBe(false);
   });
 });
 
