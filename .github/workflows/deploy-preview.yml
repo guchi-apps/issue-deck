@@ -7,6 +7,29 @@ name: Deploy Preview
 # workflow_call化しているのは、claude-issue-dispatch.ymlから呼び出す想定のため（#832で実際に接続）。
 # refは省略時developを対象にする。claude-issue-dispatch.ymlは23.preview-requiredが付いた
 # issueの実装ブランチ（issue-<番号>）をレビュー用に表示したいため、呼び出し時に明示的に指定する。
+#
+# ## 複数プレビュー環境の同時起動（#892）
+#
+# 当初は単一のFly.ioアプリ（fly.tomlの`app`）の中身を都度上書きする方式だったため、同時に
+# 存在できるプレビューが1つだけで、後からデプロイした側が前のプレビューを潰していた。しかも
+# m-guchi/shopping-listも同じアプリ名を使っていたため、リポジトリをまたいで上書きが起きていた。
+#
+# Fly.ioのMachineは個別の公開URLを持てない（`<machine-id>.vm.<app>.internal`はプライベート
+# ネットワーク限定）ため、同時に複数のプレビューを別々のURLで提供するには**アプリ自体を分ける**
+# 必要がある。そのためIssueごとに`<fly.tomlのapp>-<Issue番号>`という名前のアプリを作る方式にした。
+#
+#   issue_number=<Issue番号> → issue-deck-preview-<Issue番号> → https://issue-deck-preview-<Issue番号>.fly.dev
+#
+# （具体的な番号入りのURLをこのファイルに書かないのは、scripts/check-cross-repo-guide-sync.sh
+#  のラベル検出正規表現が「2桁数字＋ドット＋英字」を全てラベル名とみなすため、番号入りの
+#  ホスト名がラベルの誤検出になるため）
+#
+# issue_numberを渡さない場合（developの手動デプロイ等）は従来どおりfly.tomlの`app`をそのまま
+# 使う。アプリの破棄は.github/workflows/cleanup-preview.ymlが担当する。
+#
+# **前提**: `flyctl apps create`にはorganizationスコープのFly.ioトークンが必要。特定アプリに
+# 限定されたデプロイトークンでは新規アプリを作成できず、「アプリを作成する」ステップで失敗する。
+# その場合は失敗理由をIssueへ通知して終了する（後述のskipped_reason）。
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +37,10 @@ on:
         description: "デプロイ対象のブランチ・コミット参照"
         type: string
         default: develop
+      issue_number:
+        description: "対象のIssue番号（指定するとIssueごとの専用プレビューアプリへデプロイする。空ならfly.tomlのapp）"
+        type: string
+        default: ""
       preview_mode:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
@@ -32,6 +59,10 @@ on:
         description: "デプロイ対象のブランチ・コミット参照"
         type: string
         default: develop
+      issue_number:
+        description: "対象のIssue番号（指定するとIssueごとの専用プレビューアプリへデプロイする。空ならfly.tomlのapp）"
+        type: string
+        default: ""
       preview_mode:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
@@ -40,9 +71,16 @@ on:
       preview_url:
         description: "デプロイ後のプレビューURL"
         value: ${{ jobs.deploy.outputs.preview_url }}
+      skipped_reason:
+        description: "デプロイを行わなかった場合の理由（空ならデプロイ実施）。呼び出し側はこれを見て通知内容を切り替える"
+        value: ${{ jobs.deploy.outputs.skipped_reason }}
 
+# プレビューアプリはIssueごとに分かれるため（#892）、直列化の単位もIssueごとにする。
+# 従来は全プレビューが単一グループで直列化されており、別Issueのデプロイを待つ必要があった。
+# issue_numberが空（developの手動デプロイ等）の場合は共有アプリを対象にするため、
+# 従来どおり単一グループにまとめる。
 concurrency:
-  group: deploy-issue-deck-preview
+  group: deploy-issue-deck-preview-${{ inputs.issue_number || 'shared' }}
   cancel-in-progress: true
 
 jobs:
@@ -71,6 +109,7 @@ jobs:
           OP_ENV_FILE: .github/deploy-preview.env.tpl
 
       - name: Setup flyctl
+        if: steps.app.outputs.skipped_reason == ''
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: ログを流す
@@ -88,6 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       preview_url: ${{ steps.deploy.outputs.preview_url }}
+      skipped_reason: ${{ steps.app.outputs.skipped_reason }}
 
     # ダンプのサニタイズ用（本番から取得した生ダンプを一時的にロードして書き換える）。
     # プレビューMachine自体のMariaDB（scripts/preview-entrypoint.sh）とは無関係の、
@@ -123,16 +163,99 @@ jobs:
       - name: Setup flyctl（デプロイ前ログ取得用）
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: プレビューアプリ名を決定し、必要なら作成する
+        # Issueごとに専用のFly.ioアプリを持たせることで、複数のプレビューを同時に別々のURLで
+        # 提供できるようにする（#892）。issue_numberが空の場合（developの手動デプロイ等）は
+        # 従来どおりfly.tomlのappをそのまま使う。
+        #
+        # 同時起動数の上限（PREVIEW_MAX_APPS、既定5）に達している場合は、既存のプレビューを
+        # 勝手に破棄せずデプロイ自体を見送る。他の人が確認中の環境を消さないため。呼び出し側は
+        # outputs.skipped_reasonを見て、その旨をIssueへ通知する。
+        #
+        # `flyctl apps create`にはorganizationスコープのトークンが必要。アプリ単位に限定された
+        # デプロイトークンでは失敗するため、その場合も理由を明示してスキップ扱いにする。
+        id: app
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          # 同時に存在してよいIssueごとのプレビューアプリ数の上限。リポジトリ変数で調整できる。
+          PREVIEW_MAX_APPS: ${{ vars.PREVIEW_MAX_APPS || '5' }}
+        run: |
+          set -euo pipefail
+
+          BASE_APP="$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')"
+          if [ -z "$BASE_APP" ]; then
+            echo "fly.tomlからapp名を取得できませんでした" >&2
+            exit 1
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "issue_numberが空のため、共有プレビューアプリ($BASE_APP)を対象にします"
+            {
+              echo "app_name=$BASE_APP"
+              echo "skipped_reason="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          APP_NAME="${BASE_APP}-${ISSUE_NUMBER}"
+          echo "対象アプリ: $APP_NAME"
+
+          # 既に存在するなら作成不要。flyctl status はアプリが無いと非ゼロで終了する。
+          if flyctl status --app "$APP_NAME" >/dev/null 2>&1; then
+            echo "アプリは既に存在するため作成をスキップします"
+            {
+              echo "app_name=$APP_NAME"
+              echo "skipped_reason="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 上限チェック。Issueごとのプレビューアプリ（<BASE_APP>-<数字>）だけを数える。
+          # 共有アプリ($BASE_APP)自体は上限の対象外。
+          EXISTING_COUNT="$(flyctl apps list --json 2>/dev/null \
+            | jq --arg base "$BASE_APP" '[.[] | select(.Name // .name | test("^" + $base + "-[0-9]+$"))] | length' 2>/dev/null || echo 0)"
+          case "$EXISTING_COUNT" in ''|*[!0-9]*) EXISTING_COUNT=0 ;; esac
+          echo "既存のIssueごとプレビューアプリ数: $EXISTING_COUNT / 上限: $PREVIEW_MAX_APPS"
+
+          if [ "$EXISTING_COUNT" -ge "$PREVIEW_MAX_APPS" ]; then
+            echo "上限に達しているため、新規プレビューアプリを作成せず終了します"
+            {
+              echo "app_name="
+              echo "skipped_reason=limit_reached:${EXISTING_COUNT}/${PREVIEW_MAX_APPS}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! flyctl apps create "$APP_NAME" --org personal --json >/dev/null 2>/tmp/fly-create-err.txt; then
+            echo "アプリの作成に失敗しました:" >&2
+            cat /tmp/fly-create-err.txt >&2 || true
+            {
+              echo "app_name="
+              echo "skipped_reason=create_failed"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "アプリを作成しました: $APP_NAME"
+          {
+            echo "app_name=$APP_NAME"
+            echo "skipped_reason="
+          } >> "$GITHUB_OUTPUT"
+
       - name: デプロイ前のMachineログを出力する
         # 現在動いているプレビューで起きたエラー（ログイン後の500など）は、Machine内の
         # Next.jsが出すログにしか残らない。デプロイするとMachineが再起動して追いにくくなるため、
         # 何かを置き換える前にここで直近のログを吐き出しておく（#880）。
         # ログが取れなくてもデプロイ自体は続行させる。
-        run: timeout 120 flyctl logs --no-tail | tail -n 200 || true
+        # 新規作成直後のアプリにはMachineもログも無いが、`|| true`で無視される。
+        if: steps.app.outputs.skipped_reason == ''
+        run: timeout 120 flyctl logs --no-tail --app "$APP_NAME" | tail -n 200 || true
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          APP_NAME: ${{ steps.app.outputs.app_name }}
 
       - name: Install SSH key
+        if: steps.app.outputs.skipped_reason == ''
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ env.SSH_PRIVATE_KEY }}
@@ -140,12 +263,14 @@ jobs:
           if_key_exists: replace
 
       - name: Add known hosts
+        if: steps.app.outputs.skipped_reason == ''
         run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
         env:
           HOST: ${{ env.HOST }}
           SSH_PORT: ${{ env.SSH_PORT }}
 
       - name: mariadb-clientをインストール
+        if: steps.app.outputs.skipped_reason == ''
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mariadb-client
 
       - name: 本番DBをダンプ
@@ -154,6 +279,7 @@ jobs:
         # --defaults-extra-file=/dev/stdin でssh経由の標準入力から読ませることで、
         # 本番サーバー側に認証情報を書いたファイルを作成せずに済ませる
         # （一時ファイルを作って削除するより単純かつ確実なため、この方式にした）。
+        if: steps.app.outputs.skipped_reason == ''
         run: |
           set -euo pipefail
           ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" \
@@ -172,21 +298,26 @@ jobs:
           DB_NAME: ${{ env.DB_NAME }}
 
       - name: ダンプをサニタイズ用MariaDBへロード
+        if: steps.app.outputs.skipped_reason == ''
         run: gunzip -c /tmp/prod-dump.sql.gz | mysql -h127.0.0.1 -P3306 -uroot -proot app_issue_deck
 
       - name: Setup pnpm
+        if: steps.app.outputs.skipped_reason == ''
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
+        if: steps.app.outputs.skipped_reason == ''
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: pnpm
 
       - name: Install dependencies
+        if: steps.app.outputs.skipped_reason == ''
         run: pnpm install --frozen-lockfile
 
       - name: installation ID書き換え・ユーザートークンのサニタイズ
+        if: steps.app.outputs.skipped_reason == ''
         run: node scripts/preview-sanitize-dump.mjs
         env:
           DATABASE_URL: mysql://root:root@127.0.0.1:3306/app_issue_deck
@@ -194,6 +325,7 @@ jobs:
           GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}
 
       - name: サニタイズ済みDBを再ダンプ
+        if: steps.app.outputs.skipped_reason == ''
         run: |
           set -euo pipefail
           mkdir -p db-dump
@@ -201,9 +333,11 @@ jobs:
             | gzip > db-dump/dump.sql.gz
 
       - name: Setup flyctl
+        if: steps.app.outputs.skipped_reason == ''
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: fly secrets set
+        if: steps.app.outputs.skipped_reason == ''
         # 実行時にしか使われないサーバー専用シークレット（Dockerfileのrunnerステージには
         # 引き継がれないため、ビルド時ではなくfly secretsで渡す。fly.tomlのコメント参照）。
         # --stageで今回のdeployとまとめて反映する（このコマンド単体ではreleaseしない）。
@@ -216,7 +350,7 @@ jobs:
         # User.githubAccessToken等はpreview-sanitize-dump.mjsでNULL化済みのため、
         # 鍵が毎デプロイ変わっても復号できない古い暗号文が残ることはない。
         run: |
-          flyctl secrets set --stage \
+          flyctl secrets set --stage --app "$APP_NAME" \
             GITHUB_APP_ID="4445268" \
             GITHUB_APP_PRIVATE_KEY_BASE64="${PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64}" \
             SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY}" \
@@ -224,29 +358,33 @@ jobs:
             GITHUB_USER_TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          APP_NAME: ${{ steps.app.outputs.app_name }}
           PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
           ALLOWED_EMAILS: ${{ env.ALLOWED_EMAILS }}
 
       - name: fly deploy
         id: deploy
+        if: steps.app.outputs.skipped_reason == ''
         run: |
           set -euo pipefail
           # --ha=falseでMachineは常に1台に保つ。プレビュー環境はMachine内のローカルMariaDBに
           # ダンプを載せる構成のため、2台に増えるとリクエストごとに別々のDBを見ることになる
           # （初回デプロイのログにも`create 2 "app" machines`と出ていた）。
-          flyctl deploy --remote-only --ha=false \
+          #
+          # --app でfly.tomlのapp名を上書きする（#892）。Issueごとに専用アプリへデプロイするため。
+          flyctl deploy --remote-only --ha=false --app "$APP_NAME" \
             --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL}" \
             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
             --build-arg NEXT_PUBLIC_GITHUB_APP_SLUG="issue-deck-dev" \
             --env PREVIEW_MODE="${PREVIEW_MODE}"
 
-          APP_NAME=$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')
           PREVIEW_URL="https://${APP_NAME}.fly.dev"
           echo "preview_url=${PREVIEW_URL}" >> "$GITHUB_OUTPUT"
           echo "### プレビューURL: ${PREVIEW_URL}" >> "$GITHUB_STEP_SUMMARY"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          APP_NAME: ${{ steps.app.outputs.app_name }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
           PREVIEW_MODE: ${{ inputs.preview_mode }}
@@ -258,18 +396,21 @@ jobs:
         # レビュアーの初回アクセスがコールドスタート（MariaDB初期化・ダンプロード）待ちに
         # なるため、デプロイ直後にここで先に起こしておく。
         # 起動済みのMachineに対して実行しても`flyctl machine start`は成功扱いになる。
+        if: steps.app.outputs.skipped_reason == ''
         run: |
           set -euo pipefail
-          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id // empty')
+          MACHINE_ID=$(flyctl machine list --app "$APP_NAME" --json | jq -r '.[0].id // empty')
           if [[ -z "$MACHINE_ID" ]]; then
             echo "Machineが存在しないため起動をスキップします" >&2
             exit 0
           fi
-          flyctl machine start "$MACHINE_ID"
+          flyctl machine start "$MACHINE_ID" --app "$APP_NAME"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          APP_NAME: ${{ steps.app.outputs.app_name }}
 
       - name: プレビューURLの疎通を確認する
+        if: steps.app.outputs.skipped_reason == ''
         # Machineが起動しても、コンテナ内のMariaDB初期化・ダンプロードが終わるまでは応答しない
         # ため、少し待ちながらリトライする。未ログインではログイン画面へのリダイレクトになる
         # ので2xx/3xxを成功とみなす。#880では起動していないMachineのURLをそのままIssueへ通知して
@@ -293,7 +434,29 @@ jobs:
         # Machineの中で何が起きたかはGitHub Actions側のログには出てこないため、
         # 起動に失敗したときだけFly.io側のログを取り出して原因を追えるようにする
         # （#880では実行ビットの落ちたentrypointでMachineが即クラッシュしていた）。
-        if: failure()
-        run: flyctl logs --no-tail || true
+        if: failure() && steps.app.outputs.skipped_reason == ''
+        run: flyctl logs --no-tail --app "$APP_NAME" || true
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          APP_NAME: ${{ steps.app.outputs.app_name }}
+
+      - name: デプロイをスキップした理由をログに出す
+        # skipped_reasonが非空のときは、以降のデプロイ系ステップがすべてskipされている。
+        # 呼び出し側（claude-issue-dispatch.ymlのnotify-preview-urlジョブ）がこの値を見て
+        # Issueへ通知するが、Actionsのログだけを見た人にも状況が分かるようにしておく。
+        if: steps.app.outputs.skipped_reason != ''
+        env:
+          SKIPPED_REASON: ${{ steps.app.outputs.skipped_reason }}
+          PREVIEW_MAX_APPS: ${{ vars.PREVIEW_MAX_APPS || '5' }}
+        run: |
+          case "$SKIPPED_REASON" in
+            limit_reached:*)
+              echo "::warning::プレビュー環境の同時起動数が上限（${PREVIEW_MAX_APPS}）に達しているため、デプロイをスキップしました（${SKIPPED_REASON}）。不要なプレビューを破棄してから再実行してください。"
+              ;;
+            create_failed)
+              echo "::warning::Fly.ioアプリの作成に失敗したため、デプロイをスキップしました。FLY_API_TOKENがorganizationスコープであるか確認してください（アプリ単位のデプロイトークンでは新規アプリを作成できません）。"
+              ;;
+            *)
+              echo "::warning::デプロイをスキップしました（理由: ${SKIPPED_REASON}）"
+              ;;
+          esac

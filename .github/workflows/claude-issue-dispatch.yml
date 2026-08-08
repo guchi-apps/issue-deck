@@ -1858,6 +1858,9 @@ jobs:
     uses: ./.github/workflows/deploy-preview.yml
     with:
       ref: ${{ needs.triage.outputs.branch }}
+      # Issueごとに専用のFly.ioアプリ(<fly.tomlのapp>-<Issue番号>)へデプロイし、複数の
+      # プレビューを同時に別々のURLで提供できるようにする(#892)。
+      issue_number: ${{ needs.triage.outputs.issue_number }}
     secrets: inherit
 
   # deploy-previewジョブの結果をIssueへ別コメントとして通知する。実装完了報告コメント
@@ -1882,15 +1885,37 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.issue_number }}
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          SKIPPED_REASON: ${{ needs.deploy-preview.outputs.skipped_reason }}
           DEPLOY_RESULT: ${{ needs.deploy-preview.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
-          if [ "$DEPLOY_RESULT" = "success" ] && [ -n "$PREVIEW_URL" ]; then
-            BODY="🚀 プレビュー環境へのデプロイが完了しました。実際に開けるプレビューURLはこちらです: $PREVIEW_URL"
-          else
-            BODY="⚠️ プレビュー環境へのデプロイに失敗しました（結果: $DEPLOY_RESULT）。実行ログをご確認ください: $RUN_URL"
-          fi
+          # skipped_reasonが非空のときは、デプロイ自体を意図的に見送っている(#892)。
+          # 「失敗」ではないため、原因に応じた対処方法を案内する。
+          case "$SKIPPED_REASON" in
+            limit_reached:*)
+              COUNTS="${SKIPPED_REASON#limit_reached:}"
+              BODY="⏸️ プレビュー環境の同時起動数が上限に達しているため（${COUNTS}）、このIssueのプレビューは作成していません。"
+              BODY="$BODY"$'\n\n''他のIssueで不要になったプレビュー環境を破棄すると枠が空きます。破棄はそのIssueをクローズするか、`23.preview-required`ラベルを外すと自動で行われます（`.github/workflows/cleanup-preview.yml`）。'
+              BODY="$BODY"$'\n\n''枠が空いたら、このIssueに `@claude` とコメントすれば改めてプレビューが作成されます。'
+              ;;
+            create_failed)
+              BODY="⚠️ プレビュー環境用のFly.ioアプリを作成できなかったため、プレビューを作成していません。"
+              BODY="$BODY"$'\n\n''`FLY_API_TOKEN`がorganizationスコープのトークンか確認してください（特定アプリに限定されたデプロイトークンでは新規アプリを作成できません）。'
+              BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+              ;;
+            "")
+              if [ "$DEPLOY_RESULT" = "success" ] && [ -n "$PREVIEW_URL" ]; then
+                BODY="🚀 プレビュー環境へのデプロイが完了しました。実際に開けるプレビューURLはこちらです: $PREVIEW_URL"
+                BODY="$BODY"$'\n\n''このプレビューはこのIssue専用です。develop向けPRのマージ、またはIssueのクローズで自動的に破棄されます。'
+              else
+                BODY="⚠️ プレビュー環境へのデプロイに失敗しました（結果: $DEPLOY_RESULT）。実行ログをご確認ください: $RUN_URL"
+              fi
+              ;;
+            *)
+              BODY="⚠️ プレビュー環境へのデプロイを見送りました（理由: $SKIPPED_REASON）。実行ログをご確認ください: $RUN_URL"
+              ;;
+          esac
           BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:implementer -->'
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
 

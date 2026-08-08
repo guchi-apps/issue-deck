@@ -60,6 +60,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `ci.yml` | lint・型チェック・テスト・ビルドを実行するCI本体 | 対象リポジトリごとに固有の内容のため、そのままの移植ではなく参考にする程度 |
 | `deploy.yml` | `main`へのpushをトリガーにしたPM2デプロイ | issue-deck固有の本番環境向け。不要 |
 | `deploy-preview.yml` | 本番DBダンプをサニタイズしてFly.io Machine上にIssueごとのプレビュー環境をデプロイする（`workflow_dispatch`／`workflow_call`） | issue-deck固有のFly.io Machine構成向け。不要 |
+| `cleanup-preview.yml` | `deploy-preview.yml`が作ったIssueごとのプレビューアプリを破棄する（PRクローズ・Issueクローズ・ラベル解除・アイドル5分での定期掃除） | 同上。`deploy-preview.yml`を導入する場合のみ対で必要 |
 | `preview-logs.yml` | デプロイを伴わず、プレビュー環境のMachineのログだけを取得する（`workflow_dispatch`） | issue-deck固有のFly.io Machine構成向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
 
