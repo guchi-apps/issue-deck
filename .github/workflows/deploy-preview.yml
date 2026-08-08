@@ -149,12 +149,21 @@ jobs:
         # 実行時にしか使われないサーバー専用シークレット（Dockerfileのrunnerステージには
         # 引き継がれないため、ビルド時ではなくfly secretsで渡す。fly.tomlのコメント参照）。
         # --stageで今回のdeployとまとめて反映する（このコマンド単体ではreleaseしない）。
+        #
+        # GITHUB_USER_TOKEN_ENCRYPTION_KEYは本番の鍵を複製せず、デプロイのたびにその場で
+        # ランダム生成する（本番GitHub Appの秘密鍵を持ち込まず開発Appを使うのと同じ考え方）。
+        # この鍵はログイン時にGitHubユーザートークンを暗号化して保存するために使われ、
+        # 未設定だと/auth/callbackが500になる（#880）。Machineは起動のたびに
+        # scripts/preview-entrypoint.shがダンプからDBを作り直し、ダンプ中の
+        # User.githubAccessToken等はpreview-sanitize-dump.mjsでNULL化済みのため、
+        # 鍵が毎デプロイ変わっても復号できない古い暗号文が残ることはない。
         run: |
           flyctl secrets set --stage \
             GITHUB_APP_ID="4445268" \
             GITHUB_APP_PRIVATE_KEY_BASE64="${PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64}" \
             SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY}" \
-            ALLOWED_EMAILS="${ALLOWED_EMAILS}"
+            ALLOWED_EMAILS="${ALLOWED_EMAILS}" \
+            GITHUB_USER_TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
           PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}

@@ -66,6 +66,12 @@ IDが入っているが、これをそのまま使うと開発Appとして認証
 - 本番DBの認証情報はmysqldumpのコマンドライン引数（`-u`/`-p`）で渡さず、
   `--defaults-extra-file=/dev/stdin`でssh経由の標準入力から読ませる。本番サーバーは共用機の
   ため、コマンドライン引数だと他ユーザーから`ps`で認証情報が見えてしまう。
+- `GITHUB_USER_TOKEN_ENCRYPTION_KEY`（ログイン時にGitHubユーザートークンを暗号化して保存する
+  ための鍵）は、本番の鍵を複製せず`deploy-preview.yml`が`openssl rand -base64 32`でデプロイの
+  たびに生成する。Machineは起動のたびにダンプからDBを作り直し、ダンプ中の
+  `User.githubAccessToken`・`githubRefreshToken`は`preview-sanitize-dump.mjs`でNULL化済みの
+  ため、鍵が毎デプロイ変わっても復号できない暗号文が残ることはない。未設定だと
+  `/auth/callback`が500になる（#880）。
 - プレビュー環境は`ALLOWED_EMAILS`によるログイン必須（未ログインでは中身を見られない）。
   当初は多重防御として`fly.toml`の`auto_start_machines = false`も併用し、URLを外部から
   叩かれただけではMachineが起動しないようにしていたが、`auto_stop_machines`によりアイドルで

@@ -22,7 +22,9 @@ DB_NAME=op://apps/issue-deck/db-name
 NEXT_PUBLIC_SUPABASE_URL=op://apps/Supabase/project-url
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=op://apps/Supabase/publishable-key
 
-# 以下はサーバー専用の実行時シークレットのため fly secrets set で渡す（イメージに焼き込まない）
+# 以下はサーバー専用の実行時シークレットのため fly secrets set で渡す（イメージに焼き込まない）。
+# GITHUB_USER_TOKEN_ENCRYPTION_KEYは本番の鍵を複製せずデプロイのたびにworkflow側で
+# ランダム生成するため、ここには含めない（deploy-preview.ymlの「fly secrets set」ステップ参照）
 SUPABASE_SERVICE_ROLE_KEY=op://apps/Supabase/secret-key
 ALLOWED_EMAILS=op://apps/issue-deck/allowed-emails
 PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64=op://apps/issue-deck/preview-github-app-private-key-base64
