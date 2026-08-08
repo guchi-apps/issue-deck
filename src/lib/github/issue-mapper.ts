@@ -83,6 +83,7 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     htmlUrl: raw.html_url,
     favorite: false,
     hasUnreadComments: false,
+    readCommentCount: 0,
     deployCheckStatus: null,
   };
 }
@@ -128,6 +129,7 @@ export function dbIssueToDisplayIssue(
     htmlUrl: row.htmlUrl,
     favorite: false,
     hasUnreadComments: false,
+    readCommentCount: 0,
     deployCheckStatus: null,
   };
 }

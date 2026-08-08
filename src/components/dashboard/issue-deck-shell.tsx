@@ -188,10 +188,16 @@ export function IssueDeckShell({
       .then((response) => {
         if (!response.ok || cancelled) return;
         setIssues((prev) =>
-          prev.map((item) => (item.id === issue.id ? { ...item, hasUnreadComments: false } : item)),
+          prev.map((item) =>
+            item.id === issue.id
+              ? { ...item, hasUnreadComments: false, readCommentCount: item.commentCount }
+              : item,
+          ),
         );
         setSelectedIssue((prev) =>
-          prev && prev.id === issue.id ? { ...prev, hasUnreadComments: false } : prev,
+          prev && prev.id === issue.id
+            ? { ...prev, hasUnreadComments: false, readCommentCount: prev.commentCount }
+            : prev,
         );
       })
       .catch((error) => {
