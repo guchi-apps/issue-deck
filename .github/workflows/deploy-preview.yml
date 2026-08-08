@@ -18,6 +18,14 @@ on:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
         default: true
+      logs_only:
+        description: "デプロイせずMachineのログを流し続けるだけにする（エラーの再現用）"
+        type: boolean
+        default: false
+      logs_seconds:
+        description: "logs_only時にログを流す秒数"
+        type: string
+        default: "240"
   workflow_call:
     inputs:
       ref:
@@ -38,7 +46,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # デプロイせず、動いているMachineのログを一定時間流し続けるだけのジョブ。
+  # プレビューで起きたサーバーエラーの原因はMachine内のNext.jsのログにしか出ないが、
+  # `flyctl logs --no-tail`は直近のログしか返さず、再起動を挟むと失われる。
+  # このジョブを動かしている間に画面上で操作を再現してもらうことで、
+  # そのときのスタックトレースをActionsのログに残す（#880）。
+  logs:
+    if: inputs.logs_only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+          # FLY_API_TOKEN以外は使わないが、テンプレートを分けると管理対象が増えるため
+          # deploy-preview.env.tplをそのまま使う。
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: ログを流す
+        run: |
+          set -uo pipefail
+          echo "==== ここから ${LOGS_SECONDS} 秒間、プレビュー環境のログを流します ===="
+          timeout "${LOGS_SECONDS}" flyctl logs || true
+          echo "==== ここまで ===="
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          LOGS_SECONDS: ${{ inputs.logs_seconds || '240' }}
+
   deploy:
+    if: ${{ !inputs.logs_only }}
     runs-on: ubuntu-latest
     outputs:
       preview_url: ${{ steps.deploy.outputs.preview_url }}
@@ -73,6 +119,18 @@ jobs:
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Setup flyctl（デプロイ前ログ取得用）
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: デプロイ前のMachineログを出力する
+        # 現在動いているプレビューで起きたエラー（ログイン後の500など）は、Machine内の
+        # Next.jsが出すログにしか残らない。デプロイするとMachineが再起動して追いにくくなるため、
+        # 何かを置き換える前にここで直近のログを吐き出しておく（#880）。
+        # ログが取れなくてもデプロイ自体は続行させる。
+        run: timeout 120 flyctl logs --no-tail | tail -n 200 || true
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -149,12 +207,21 @@ jobs:
         # 実行時にしか使われないサーバー専用シークレット（Dockerfileのrunnerステージには
         # 引き継がれないため、ビルド時ではなくfly secretsで渡す。fly.tomlのコメント参照）。
         # --stageで今回のdeployとまとめて反映する（このコマンド単体ではreleaseしない）。
+        #
+        # GITHUB_USER_TOKEN_ENCRYPTION_KEYは本番の鍵を複製せず、デプロイのたびにその場で
+        # ランダム生成する（本番GitHub Appの秘密鍵を持ち込まず開発Appを使うのと同じ考え方）。
+        # この鍵はログイン時にGitHubユーザートークンを暗号化して保存するために使われ、
+        # 未設定だと/auth/callbackが500になる（#880）。Machineは起動のたびに
+        # scripts/preview-entrypoint.shがダンプからDBを作り直し、ダンプ中の
+        # User.githubAccessToken等はpreview-sanitize-dump.mjsでNULL化済みのため、
+        # 鍵が毎デプロイ変わっても復号できない古い暗号文が残ることはない。
         run: |
           flyctl secrets set --stage \
             GITHUB_APP_ID="4445268" \
             GITHUB_APP_PRIVATE_KEY_BASE64="${PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64}" \
             SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY}" \
-            ALLOWED_EMAILS="${ALLOWED_EMAILS}"
+            ALLOWED_EMAILS="${ALLOWED_EMAILS}" \
+            GITHUB_USER_TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
           PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}
@@ -165,7 +232,10 @@ jobs:
         id: deploy
         run: |
           set -euo pipefail
-          flyctl deploy --remote-only \
+          # --ha=falseでMachineは常に1台に保つ。プレビュー環境はMachine内のローカルMariaDBに
+          # ダンプを載せる構成のため、2台に増えるとリクエストごとに別々のDBを見ることになる
+          # （初回デプロイのログにも`create 2 "app" machines`と出ていた）。
+          flyctl deploy --remote-only --ha=false \
             --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL}" \
             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
             --build-arg NEXT_PUBLIC_GITHUB_APP_SLUG="issue-deck-dev" \
@@ -182,14 +252,48 @@ jobs:
           PREVIEW_MODE: ${{ inputs.preview_mode }}
 
       - name: Machineを起動
-        # fly.tomlでauto_start_machines=falseにしている（ボットやスキャナがURLを叩いただけで
-        # Machineが起動してしまうのを防ぐため）ため、既存Machineをrolling strategyで更新する
-        # `flyctl deploy`はconfigを更新するだけでMachineを起動せず、更新後はstopped状態のまま
-        # 終わる（#880で発生した503の原因）。auto_startに頼らず、このデプロイworkflow側で
-        # 明示的に起動する。
+        # 既存Machineをrolling strategyで更新する`flyctl deploy`は、configを更新するだけで
+        # Machineを起動せずstopped状態のまま終わることがある（#880）。fly.tomlの
+        # auto_start_machines=trueにより、その状態でもURLへアクセスすれば起動するが、
+        # レビュアーの初回アクセスがコールドスタート（MariaDB初期化・ダンプロード）待ちに
+        # なるため、デプロイ直後にここで先に起こしておく。
+        # 起動済みのMachineに対して実行しても`flyctl machine start`は成功扱いになる。
         run: |
           set -euo pipefail
-          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id')
+          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id // empty')
+          if [[ -z "$MACHINE_ID" ]]; then
+            echo "Machineが存在しないため起動をスキップします" >&2
+            exit 0
+          fi
           flyctl machine start "$MACHINE_ID"
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+
+      - name: プレビューURLの疎通を確認する
+        # Machineが起動しても、コンテナ内のMariaDB初期化・ダンプロードが終わるまでは応答しない
+        # ため、少し待ちながらリトライする。未ログインではログイン画面へのリダイレクトになる
+        # ので2xx/3xxを成功とみなす。#880では起動していないMachineのURLをそのままIssueへ通知して
+        # しまったため、通知前にここで落ちるようにしておく。
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || echo 000)
+            echo "[${i}] ${PREVIEW_URL} -> ${CODE}"
+            case "$CODE" in
+              2*|3*) exit 0 ;;
+            esac
+            sleep 10
+          done
+          echo "プレビューURLが応答しませんでした" >&2
+          exit 1
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+
+      - name: 起動失敗時にMachineのログを出力する
+        # Machineの中で何が起きたかはGitHub Actions側のログには出てこないため、
+        # 起動に失敗したときだけFly.io側のログを取り出して原因を追えるようにする
+        # （#880では実行ビットの落ちたentrypointでMachineが即クラッシュしていた）。
+        if: failure()
+        run: flyctl logs --no-tail || true
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
