@@ -31,6 +31,13 @@ describe("parseUnifiedRateLimitHeaders", () => {
     expect(windows[1].resetsAt).toBe(1786323600);
   });
 
+  it("固定ウィンドウ長(5時間・週間)を含める", () => {
+    const windows = parseUnifiedRateLimitHeaders(realHeaders());
+
+    expect(windows[0].durationMs).toBe(5 * 60 * 60_000);
+    expect(windows[1].durationMs).toBe(7 * 24 * 60 * 60_000);
+  });
+
   it("utilizationを比率(0-1)として扱いパーセントに変換する", () => {
     const windows = parseUnifiedRateLimitHeaders(realHeaders());
 
