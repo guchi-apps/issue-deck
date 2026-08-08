@@ -165,7 +165,10 @@ jobs:
         id: deploy
         run: |
           set -euo pipefail
-          flyctl deploy --remote-only \
+          # --ha=falseでMachineは常に1台に保つ。プレビュー環境はMachine内のローカルMariaDBに
+          # ダンプを載せる構成のため、2台に増えるとリクエストごとに別々のDBを見ることになる
+          # （初回デプロイのログにも`create 2 "app" machines`と出ていた）。
+          flyctl deploy --remote-only --ha=false \
             --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL}" \
             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
             --build-arg NEXT_PUBLIC_GITHUB_APP_SLUG="issue-deck-dev" \
@@ -182,14 +185,19 @@ jobs:
           PREVIEW_MODE: ${{ inputs.preview_mode }}
 
       - name: Machineを起動
-        # fly.tomlでauto_start_machines=falseにしている（ボットやスキャナがURLを叩いただけで
-        # Machineが起動してしまうのを防ぐため）ため、既存Machineをrolling strategyで更新する
-        # `flyctl deploy`はconfigを更新するだけでMachineを起動せず、更新後はstopped状態のまま
-        # 終わる（#880で発生した503の原因）。auto_startに頼らず、このデプロイworkflow側で
-        # 明示的に起動する。
+        # 既存Machineをrolling strategyで更新する`flyctl deploy`は、configを更新するだけで
+        # Machineを起動せずstopped状態のまま終わることがある（#880）。fly.tomlの
+        # auto_start_machines=trueにより、その状態でもURLへアクセスすれば起動するが、
+        # レビュアーの初回アクセスがコールドスタート（MariaDB初期化・ダンプロード）待ちに
+        # なるため、デプロイ直後にここで先に起こしておく。
+        # 起動済みのMachineに対して実行しても`flyctl machine start`は成功扱いになる。
         run: |
           set -euo pipefail
-          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id')
+          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id // empty')
+          if [[ -z "$MACHINE_ID" ]]; then
+            echo "Machineが存在しないため起動をスキップします" >&2
+            exit 0
+          fi
           flyctl machine start "$MACHINE_ID"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}

@@ -35,7 +35,7 @@ Fly Machine自体は「Next.js standalone + MariaDB」を1プロセスずつ同�
 
 | ファイル | 役割 | 追加Issue |
 |---|---|---|
-| `fly.toml` | Fly.io Machine構成（`app`名・リソースサイズ・`auto_start_machines=false`等） | #830 |
+| `fly.toml` | Fly.io Machine構成（`app`名・リソースサイズ・`auto_start_machines`/`auto_stop_machines`等） | #830 |
 | `Dockerfile` | deps→builder→runnerの3ステージビルド。runnerに`mariadb-server`を同梱 | #830 |
 | `scripts/preview-entrypoint.sh` | コンテナ起動時にMariaDB初期化→ダンプロード→Next.js起動の順序を制御 | #830 |
 | `src/lib/preview-mode.ts` | `PREVIEW_MODE=true`時に書き込み系API routeを403で封じるガード | #829 |
@@ -66,9 +66,12 @@ IDが入っているが、これをそのまま使うと開発Appとして認証
 - 本番DBの認証情報はmysqldumpのコマンドライン引数（`-u`/`-p`）で渡さず、
   `--defaults-extra-file=/dev/stdin`でssh経由の標準入力から読ませる。本番サーバーは共用機の
   ため、コマンドライン引数だと他ユーザーから`ps`で認証情報が見えてしまう。
-- `fly.toml`の`auto_start_machines = false`により、URLを外部から叩かれただけではMachineが
-  起動しない（`auto_stop_machines`のみ有効）。起動タイミングは`deploy-preview.yml`の
-  `fly deploy`が明示的に握る。
+- プレビュー環境は`ALLOWED_EMAILS`によるログイン必須（未ログインでは中身を見られない）。
+  当初は多重防御として`fly.toml`の`auto_start_machines = false`も併用し、URLを外部から
+  叩かれただけではMachineが起動しないようにしていたが、`auto_stop_machines`によりアイドルで
+  停止した後は再デプロイするまで誰も開けない（503）状態になり、レビュー用URLとして成立
+  しなかったため`auto_start_machines = true`に変更した（#880）。停止・起動のコスト面の
+  制御は`auto_stop_machines = "stop"`（アイドル時に自動停止）が引き続き担う。
 - `.github/workflows/deploy-preview.yml`は`concurrency: group: deploy-issue-deck-preview`
   （`cancel-in-progress: true`）を持つ。プレビュー環境はFly.io Machine 1台の使い捨て共有
   リソースのため、複数Issueから同時に呼ばれても直列化され、先行実行は後続に置き換わる
@@ -98,6 +101,23 @@ IDが入っているが、これをそのまま使うと開発Appとして認証
 developへの実際のマージは、これまでどおり`claude-review-develop.yml`の`risk-check`ジョブが
 `23.preview-required`を検知して`00.check-user`を付与するため、人間がプレビュー環境で画面を
 確認するまで保留される（「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
+
+### `deploy-preview.yml`自体の変更が反映されるタイミング
+
+`claude-issue-dispatch.yml`は`uses: ./.github/workflows/deploy-preview.yml`とローカル参照で
+呼び出している。GitHub Actionsの仕様上、この形の再利用ワークフローの定義は**呼び出し側runの
+ref**から読まれる。`claude-issue-dispatch.yml`は`issue_comment`等で起動するためrunのrefは常に
+デフォルトブランチ（`develop`）であり、実装ブランチ側で`deploy-preview.yml`を直しても、
+developへマージされるまでそのrunには一切反映されない（#880で、Machine起動ステップを実装
+ブランチに追加したのにデプロイ後もMachineがstoppedのままだった原因）。
+
+一方、`fly.toml`・`Dockerfile`・`scripts/preview-entrypoint.sh`はworkflowが
+`actions/checkout`で`inputs.ref`（実装ブランチ）をチェックアウトしたものを使うため、
+実装ブランチの内容がそのまま反映される。
+
+実装ブランチ側の`deploy-preview.yml`の変更を試したい場合は、`deploy-preview.yml`を
+`workflow_dispatch`でそのブランチを指定して直接実行する（`workflow_dispatch`は指定したref上の
+workflow定義で動く）。
 
 ## 未整備・要確認事項
 
