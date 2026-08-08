@@ -289,7 +289,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 `APPROVE_COMMENT_BODY`を説明のため引用する場合など）にまで反応し、報告コメントが次のワーク
 フロー実行を誘発し、その実行がまた報告コメントを投稿して…という無限ループを起こしうる
 （#173で実際に2回連続発生した）。アプリが送信する定型コメント（`APPROVE_COMMENT_BODY`・
-`START_IMPLEMENTATION_COMMENT_BODY`等）と、人間が手動で投稿する起動コメントはいずれも本文の
+`startImplementationCommentBody()`の返り値等）と、人間が手動で投稿する起動コメントはいずれも本文の
 先頭が`@claude`という慣習のため、`startsWith()`に絞っても正規の起動経路は損なわれない。
 
 なお`21.plan-required`の承認再開（`00.check-user`ラベルの削除）は引き続き`issues: unlabeled`
