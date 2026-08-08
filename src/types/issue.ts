@@ -31,9 +31,6 @@ export type IssueMilestone = {
   progressPercent: number;
 };
 
-/** 本番デプロイ後の反映確認状況。未確認はnull */
-export type DeployCheckStatus = "ok" | "ng" | "skip";
-
 export type Issue = {
   id: string;
   number: number;
@@ -69,7 +66,6 @@ export type Issue = {
   hasUnreadComments: boolean;
   /** ユーザーが最後に読んだ時点でのコメント総数。「ページ下部へ移動」ボタンで最初の未読コメントへ移動するために使う */
   readCommentCount: number;
-  deployCheckStatus: DeployCheckStatus | null;
 };
 
 /**
