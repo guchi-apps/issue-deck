@@ -4,6 +4,7 @@ export type ConnectedRepository = {
   fullName: string;
   private: boolean;
   archived: boolean;
+  hasClaudeWorkflow: boolean;
   hidden: boolean;
   favorite: boolean;
 };

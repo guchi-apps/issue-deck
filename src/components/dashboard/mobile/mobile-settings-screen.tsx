@@ -27,6 +27,7 @@ import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useRepositorySync } from "@/hooks/use-repository-sync";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
@@ -40,9 +41,12 @@ export function MobileSettingsScreen({
   onOpenAppSettings,
 }: MobileSettingsScreenProps) {
   const { handleLogout } = useAccountActions();
-  const { isSyncing, handleSync } = useIssueSync();
+  const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
+  const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
+    useRepositorySync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
+  const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
@@ -113,11 +117,21 @@ export function MobileSettingsScreen({
         <Button
           variant="outline"
           className="justify-start"
-          disabled={isSyncing}
-          onClick={() => setSyncConfirmOpen(true)}
+          disabled={isIssueSyncing}
+          onClick={() => setIssueSyncConfirmOpen(true)}
         >
-          <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
-          {isSyncing ? "再同期中..." : "今すぐ再同期"}
+          <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+          {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
+        </Button>
+
+        <Button
+          variant="outline"
+          className="justify-start"
+          disabled={isRepositorySyncing}
+          onClick={() => setRepositorySyncConfirmOpen(true)}
+        >
+          <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+          {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
         </Button>
 
         <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
@@ -175,17 +189,32 @@ export function MobileSettingsScreen({
         error={githubStatusError}
       />
 
-      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+      <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogTitle>Issueを再同期しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               GitHub上の最新のIssue情報を取得し直します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+            <AlertDialogAction onClick={handleIssueSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={repositorySyncConfirmOpen} onOpenChange={setRepositorySyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リポジトリを再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のリポジトリ情報（対応状況を含む）を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRepositorySync}>再同期する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

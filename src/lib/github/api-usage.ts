@@ -36,6 +36,7 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_merge", label: "PRのマージ" },
   { key: "release_dispatch", label: "リリースの起動" },
   { key: "sync", label: "Issueの再同期" },
+  { key: "repo_sync", label: "リポジトリの再同期" },
   { key: "setup", label: "セットアップ・インストール" },
   { key: "other", label: "その他" },
 ] as const;
