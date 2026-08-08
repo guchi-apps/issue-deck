@@ -31,6 +31,7 @@ import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
+import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -140,6 +141,7 @@ export function MobileIssueDetail({
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
   const {
     createComment,
@@ -395,9 +397,13 @@ export function MobileIssueDetail({
         >
           <ArrowLeft className="size-5" />
         </button>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <button
+          type="button"
+          onClick={() => setIsSummaryDialogOpen(true)}
+          className="min-w-0 flex-1 truncate text-left text-sm font-semibold"
+        >
           #{issue.number} {issue.title}
-        </span>
+        </button>
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
@@ -852,6 +858,12 @@ export function MobileIssueDetail({
         issue={issue}
         repositories={repositories}
         onMoved={onIssueUpdated}
+      />
+
+      <IssueSummaryDialog
+        issue={issue}
+        open={isSummaryDialogOpen}
+        onOpenChange={setIsSummaryDialogOpen}
       />
     </div>
   );
