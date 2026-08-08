@@ -98,6 +98,22 @@ export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
 }
 
 /**
+ * navViews上でidの1つ前・1つ後のビューIDを返す（スマホ一覧のスワイプ切り替え用、#706）。
+ * 先頭/末尾でそれ以上進められない場合や、idがnavViewsに存在しない場合はnullを返す
+ * （ループはしない）。
+ */
+export function getAdjacentNavViewId(
+  id: NavViewId,
+  direction: "prev" | "next",
+): NavViewId | null {
+  const index = navViews.findIndex((view) => view.id === id);
+  if (index === -1) return null;
+
+  const adjacentIndex = direction === "next" ? index + 1 : index - 1;
+  return navViews[adjacentIndex]?.id ?? null;
+}
+
+/**
  * ビュー切り替え後に適用すべき状態フィルターを解決する（#475）。
  *
  * - 切り替え先が状態を要求するビュー（「main反映済(直近)」）なら、その状態へ自動で

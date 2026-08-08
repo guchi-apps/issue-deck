@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode, TouchEvent } from "react";
 import { ArrowLeft, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -10,7 +10,8 @@ import {
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
-import { navViews } from "@/lib/nav-views";
+import { useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
+import { getAdjacentNavViewId, navViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
@@ -63,11 +64,44 @@ export function MobileIssueListScreen({
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
+  const swipeFilterHandlers = useSwipeFilterView((direction) => {
+    const nextView = getAdjacentNavViewId(view, direction);
+    if (nextView) onChangeView(nextView);
+  });
+  const tabRefs = useRef<Partial<Record<NavViewId, HTMLButtonElement | null>>>({});
+
+  useEffect(() => {
+    tabRefs.current[view]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [view]);
+
+  // 戻るスワイプとフィルター切り替えスワイプは同じ領域で発生するため、
+  // 2フックのハンドラを1つのtouchイベントハンドラ群に統合して同じ要素に付与する
+  // （別々にバインドすると、互いのドラッグ用スタイルが競合する）。
+  function onTouchStart(e: TouchEvent<HTMLDivElement>) {
+    if (onBack) swipeBackHandlers.onTouchStart(e);
+    swipeFilterHandlers.onTouchStart(e);
+  }
+  function onTouchMove(e: TouchEvent<HTMLDivElement>) {
+    if (onBack) swipeBackHandlers.onTouchMove(e);
+    swipeFilterHandlers.onTouchMove(e);
+  }
+  function onTouchEnd() {
+    if (onBack) swipeBackHandlers.onTouchEnd();
+    swipeFilterHandlers.onTouchEnd();
+  }
+  function onTouchCancel() {
+    if (onBack) swipeBackHandlers.onTouchCancel();
+    swipeFilterHandlers.onTouchCancel();
+  }
 
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
-      {...(onBack ? swipeBackHandlers : {})}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
+      style={onBack ? swipeBackHandlers.style : undefined}
     >
       <header className="flex shrink-0 items-center gap-2 border-b p-4">
         {onBack && (
@@ -111,6 +145,9 @@ export function MobileIssueListScreen({
         {navViews.map((navView) => (
           <button
             key={navView.id}
+            ref={(el) => {
+              tabRefs.current[navView.id] = el;
+            }}
             type="button"
             onClick={() => onChangeView(navView.id)}
             className={cn(

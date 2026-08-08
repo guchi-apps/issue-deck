@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getNavViewDefaultState, resolveStateOnViewChange } from "@/lib/nav-views";
+import { getAdjacentNavViewId, getNavViewDefaultState, navViews, resolveStateOnViewChange } from "@/lib/nav-views";
 
 describe("getNavViewDefaultState", () => {
   it("状態を要求しないビューはopen、「main反映済(直近)」はall", () => {
@@ -34,5 +34,24 @@ describe("resolveStateOnViewChange", () => {
       "open",
     );
     expect(resolveStateOnViewChange("favorites", "favorites", "closed", true)).toBe("closed");
+  });
+});
+
+describe("getAdjacentNavViewId", () => {
+  it("nextを指定すると次のビューIDを返す", () => {
+    expect(getAdjacentNavViewId("all", "next")).toBe("favorites");
+  });
+
+  it("prevを指定すると前のビューIDを返す", () => {
+    expect(getAdjacentNavViewId("favorites", "prev")).toBe("all");
+  });
+
+  it("先頭のビューでprevを指定するとnullを返す（ループしない）", () => {
+    expect(getAdjacentNavViewId(navViews[0].id, "prev")).toBeNull();
+  });
+
+  it("末尾のビューでnextを指定するとnullを返す（ループしない）", () => {
+    const lastView = navViews[navViews.length - 1];
+    expect(getAdjacentNavViewId(lastView.id, "next")).toBeNull();
   });
 });
