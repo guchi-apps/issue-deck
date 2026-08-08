@@ -450,30 +450,35 @@ export function IssueDetail({
                     <MoreHorizontal />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
-                    <FilePlus2 />
+                <DropdownMenuContent align="end" className="w-fit min-w-0">
+                  <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
+                    onSelect={() => onCreateFollowupIssue(issue)}
+                  >
+                    <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onEdit(issue)}>
-                    <Pencil />
+                  <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
+                    <Pencil className="size-3.5" />
                     編集
                   </DropdownMenuItem>
                   {issue.state === "open" ? (
                     <DropdownMenuSub>
-                      <DropdownMenuSubTrigger disabled={isSubmitting}>
-                        <XCircle />
+                      <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
+                        <XCircle className="size-3.5" />
                         クローズする
                       </DropdownMenuSubTrigger>
                       <DropdownMenuPortal>
-                        <DropdownMenuSubContent>
+                        <DropdownMenuSubContent className="w-fit min-w-0">
                           <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
                             disabled={isSubmitting}
                             onSelect={() => handleClose("completed")}
                           >
                             完了としてクローズ
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
                             disabled={isSubmitting}
                             onSelect={() => handleClose("not_planned")}
                           >
@@ -483,12 +488,17 @@ export function IssueDetail({
                       </DropdownMenuPortal>
                     </DropdownMenuSub>
                   ) : (
-                    <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
-                      <RotateCcw />
+                    <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
+                      disabled={isSubmitting}
+                      onSelect={handleReopen}
+                    >
+                      <RotateCcw className="size-3.5" />
                       再オープンする
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
                     variant="destructive"
                     disabled={isSubmitting}
                     onSelect={() => {
@@ -496,7 +506,7 @@ export function IssueDetail({
                       setIsDeleteDialogOpen(true);
                     }}
                   >
-                    <Trash2 />
+                    <Trash2 className="size-3.5" />
                     Issueを削除
                   </DropdownMenuItem>
                 </DropdownMenuContent>
