@@ -47,3 +47,26 @@ export function isQaAnswerPending(comments: Pick<IssueComment, "body">[]): boole
   }
   return false;
 }
+
+/**
+ * 「リポジトリに質問する」ダイアログ（AskRepoQuestionDialog）がIssueタイトルに付与する接頭辞。
+ * このタイトルを持つIssueかどうかで、質問フロー由来のIssueかを判定する（#885）。
+ */
+export const ASK_REPO_QUESTION_TITLE_PREFIX = "質問: ";
+
+/** 「リポジトリに質問する」ダイアログ経由で作成されたIssueかどうかを判定する */
+export function isAskRepoQuestionIssue(issue: Pick<Issue, "title">): boolean {
+  return issue.title.startsWith(ASK_REPO_QUESTION_TITLE_PREFIX);
+}
+
+/**
+ * 質問Issueをワンボタンでクローズできるようにするための表示条件。
+ * open状態かつ質問Issueであり、かつ回答待ちではない（回答が来る前に誤ってクローズするのを防ぐ）
+ * 場合のみtrueを返す。
+ */
+export function canCloseAskRepoQuestion(
+  issue: Pick<Issue, "state" | "title">,
+  comments: Pick<IssueComment, "body">[],
+): boolean {
+  return issue.state === "open" && isAskRepoQuestionIssue(issue) && !isQaAnswerPending(comments);
+}
