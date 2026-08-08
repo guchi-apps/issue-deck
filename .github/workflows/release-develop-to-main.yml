@@ -176,8 +176,11 @@ jobs:
               （例: 新機能追加とバグ修正が両方含まれる場合はminor）
 
             ## 出力
-            判定結果（bump_kind）と、その判断根拠（reason。日本語で、実際にどのファイル・
-            どのような変更を根拠にしたか具体的に触れて説明する）を返してください。
+            判定結果（bump_kind）と、その判断根拠（reason）を返してください。reasonは日本語で、
+            なぜそのbump_kindと判定したか（該当した変更の種類と、判定の決め手になった代表的な
+            変更点）を簡潔に説明してください。変更したファイルや修正内容を網羅的に列挙する必要は
+            なく、3〜5行程度に要約してください（バンプPRやリリース画面に表示されるため、冗長な
+            長文にしないこと）。
 
             あわせて、利用者向けの更新履歴（changelog）も生成してください。reasonが開発者向けの
             判断根拠であるのに対し、changelogはエンドユーザー向けに何ができるようになった/直った
@@ -199,8 +202,9 @@ jobs:
           set -e
 
           BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
-          # PR本文への埋め込み時に改行で崩れないよう、1行に平坦化しておく
-          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null | tr '\n' ' ' || true)"
+          # reasonはプロンプト側で3〜5行程度の要約に収めてもらう想定のため、changelogと同様に
+          # 改行を保持したまま扱う（1行への平坦化はしない）
+          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null || true)"
           # changelogは利用者向けの複数行文章になりうるため平坦化しない
           CHANGELOG="$(echo "$STRUCTURED_OUTPUT" | jq -r '.changelog // empty' 2>/dev/null || true)"
 
@@ -215,13 +219,19 @@ jobs:
           esac
 
           echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
-          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          {
+            echo "reason<<REASON_EOF"
+            echo "$REASON"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
           {
             echo "changelog<<CHANGELOG_EOF"
             echo "$CHANGELOG"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON changelog=$CHANGELOG"
+          echo "判定結果: bump_kind=$BUMP_KIND"
+          echo "reason: $REASON"
+          echo "changelog: $CHANGELOG"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
         if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
