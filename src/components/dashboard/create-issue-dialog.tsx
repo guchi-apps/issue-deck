@@ -24,7 +24,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
-import { clearIssueDraft, resolveInitialIssueDraft, useIssueDraftAutosave } from "@/hooks/use-issue-draft";
+import {
+  clearIssueDraft,
+  readRestorableIssueDraft,
+  resolveInitialIssueDraft,
+  useIssueDraftAutosave,
+  type IssueDraft,
+} from "@/hooks/use-issue-draft";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
@@ -63,6 +69,7 @@ export function CreateIssueDialog({
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
+  const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   const hasUserSetAssignee = useRef(false);
   // 作成直後に「実装を開始」オプション選択ダイアログを表示する対象issue。
   // ダイアログ内の非同期処理（ラベル更新→コメント投稿）の途中経過を追うためstateと
@@ -98,9 +105,9 @@ export function CreateIssueDialog({
   useEffect(() => {
     if (!open) return;
     // ダイアログを開くたびにフォームを初期状態へ戻す。明示的なプリフィル（引用元テキスト等）が
-    // 渡されていればそちらを優先し、なければ保存済みの下書きを復元する（リポジトリ欄のみ、
-    // 文脈から渡されたdefaultRepositoryFullNameを下書きの値より優先する）。外部トリガー（開閉）に
-    // 同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
+    // 渡されていればそちらを優先し、それ以外は空の状態にする（保存済みの下書きは自動では
+    // 反映せず、readRestorableIssueDraftの結果をユーザーが「復元する」で選んだ場合のみ反映する）。
+    // 外部トリガー（開閉）に同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
     const draft = resolveInitialIssueDraft({
       defaultRepositoryFullName,
       defaultTitle,
@@ -115,6 +122,9 @@ export function CreateIssueDialog({
     setIsImageUploading(false);
     setError(null);
     hasUserSetAssignee.current = draft.assignee !== null;
+    setRestorableDraft(
+      readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
+    );
   }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, setError]);
 
   useIssueDraftAutosave(open, {
@@ -132,6 +142,26 @@ export function CreateIssueDialog({
       setAssignee(DEFAULT_ASSIGNEE);
     }
   }, [open, assignees]);
+
+  function handleRestoreDraft() {
+    if (!restorableDraft) return;
+    setRepositoryFullName(defaultRepositoryFullName ?? restorableDraft.repositoryFullName);
+    setTitle(restorableDraft.title);
+    setBody(restorableDraft.body);
+    setSelectedLabels(restorableDraft.selectedLabels);
+    setAssignee(restorableDraft.assignee);
+    hasUserSetAssignee.current = restorableDraft.assignee !== null;
+    setRestorableDraft(null);
+  }
+
+  function resetForm() {
+    setRepositoryFullName("");
+    setTitle("");
+    setBody("");
+    setSelectedLabels([]);
+    setAssignee(null);
+    hasUserSetAssignee.current = false;
+  }
 
   function toggleLabel(name: string) {
     setSelectedLabels((prev) =>
@@ -170,6 +200,7 @@ export function CreateIssueDialog({
       assignee,
     });
     if (issue) {
+      resetForm();
       clearIssueDraft();
       onCreated(issue);
       onOpenChange(false);
@@ -189,6 +220,7 @@ export function CreateIssueDialog({
       assignee,
     });
     if (issue) {
+      resetForm();
       clearIssueDraft();
       onOpenChange(false);
       setPendingStart(issue);
@@ -210,6 +242,15 @@ export function CreateIssueDialog({
           <DialogHeader>
             <DialogTitle>新しいIssueを作成</DialogTitle>
           </DialogHeader>
+
+          {restorableDraft && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
+              <span>保存された下書きがあります</span>
+              <Button variant="outline" size="xs" onClick={handleRestoreDraft}>
+                復元する
+              </Button>
+            </div>
+          )}
 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">

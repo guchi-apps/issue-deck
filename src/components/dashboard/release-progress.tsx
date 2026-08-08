@@ -30,6 +30,8 @@ type Step = {
   state: StepState;
   /** 補足文（CI状態や次に起きることの説明） */
   note?: string;
+  /** noteより長い補足文（バージョンバンプの判断根拠など、複数行になりうるもの） */
+  detail?: string;
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
@@ -73,6 +75,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
   if (phase === "bump_pr_open" && bump) {
     steps[0].state = "done";
     steps[0].note = bump.version ? `次バージョン: v${bump.version}` : undefined;
+    steps[0].detail = bump.reason ?? undefined;
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
@@ -197,6 +200,11 @@ export function ReleaseProgress({
                 <span className={cn("text-xs text-muted-foreground")}>{step.note}</span>
               )}
             </div>
+            {step.detail && (
+              <p className="ml-6 max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-line text-muted-foreground">
+                {step.detail}
+              </p>
+            )}
             {step.action && (
               <a
                 href={step.action.href}

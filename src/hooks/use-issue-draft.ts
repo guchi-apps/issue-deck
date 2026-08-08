@@ -52,20 +52,27 @@ export type IssueDraftDefaults = {
   defaultBody?: string | null;
 };
 
-// 引用元テキスト（defaultTitle/defaultBody）が明示的に渡されている場合はそちらを優先し、
-// それ以外の通常の新規作成の場合は保存済み下書きを復元する。defaultRepositoryFullNameは
-// 「現在の文脈から推測したリポジトリの初期値」に過ぎず、下書き全体の復元を止める理由には
-// ならないため判定対象から除外し、リポジトリ欄のみ下書きより優先する。
+// 保存済み下書きは自動では復元せず、明示的なプリフィル（引用元テキスト等）または
+// 文脈から渡されたdefaultRepositoryFullNameのみを初期値として返す。保存済み下書きの
+// 復元はreadRestorableIssueDraftの結果をユーザーが明示的に選んだ場合のみ行う。
 export function resolveInitialIssueDraft(defaults: IssueDraftDefaults): IssueDraft {
-  const hasExplicitPrefill = Boolean(defaults.defaultTitle || defaults.defaultBody);
-  const draft = hasExplicitPrefill ? null : readIssueDraft();
   return {
-    repositoryFullName: defaults.defaultRepositoryFullName ?? draft?.repositoryFullName ?? "",
-    title: draft?.title ?? defaults.defaultTitle ?? "",
-    body: draft?.body ?? defaults.defaultBody ?? "",
-    selectedLabels: draft?.selectedLabels ?? [],
-    assignee: draft?.assignee ?? null,
+    repositoryFullName: defaults.defaultRepositoryFullName ?? "",
+    title: defaults.defaultTitle ?? "",
+    body: defaults.defaultBody ?? "",
+    selectedLabels: [],
+    assignee: null,
   };
+}
+
+// 「復元する」操作で提示できる保存済み下書きを返す。明示的なプリフィルがある場合や、
+// 保存済み下書きが無い（または空の）場合はnullを返す。
+export function readRestorableIssueDraft(defaults: IssueDraftDefaults): IssueDraft | null {
+  const hasExplicitPrefill = Boolean(defaults.defaultTitle || defaults.defaultBody);
+  if (hasExplicitPrefill) return null;
+  const draft = readIssueDraft();
+  if (!draft || isIssueDraftEmpty(draft)) return null;
+  return draft;
 }
 
 // ダイアログが開いている間、フォーム値の変更をデバウンスしてlocalStorageに保存する。

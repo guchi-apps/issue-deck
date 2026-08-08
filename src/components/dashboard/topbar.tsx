@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  Activity,
+  AlertTriangle,
   ChevronDown,
   LayoutDashboard,
   PanelLeftClose,
@@ -17,6 +19,7 @@ import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
+import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
 import {
   AlertDialog,
@@ -59,6 +62,7 @@ import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
+import { useGithubStatus } from "@/hooks/use-github-status";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
@@ -109,6 +113,7 @@ export function TopBar({
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
@@ -127,6 +132,11 @@ export function TopBar({
     error: claudeUsageError,
     notConfigured: claudeUsageNotConfigured,
   } = useClaudeUsage(accountMenuOpen);
+  const {
+    data: githubStatus,
+    isLoading: githubStatusLoading,
+    error: githubStatusError,
+  } = useGithubStatus(accountMenuOpen);
   const {
     data: releaseStatus,
     isLoading: releaseStatusLoading,
@@ -331,6 +341,18 @@ export function TopBar({
             <Settings />
             アプリ設定
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setGithubStatusDialogOpen(true);
+            }}
+          >
+            <Activity />
+            GitHub障害状況
+            {githubStatus && githubStatus.indicator !== "none" && (
+              <AlertTriangle className="ml-auto size-4 text-destructive" />
+            )}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
           <div className="flex flex-col gap-2 px-1.5 pb-1.5">
@@ -481,6 +503,14 @@ export function TopBar({
         currentUser={currentUser}
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
+      />
+
+      <GithubStatusDialog
+        open={githubStatusDialogOpen}
+        onOpenChange={setGithubStatusDialogOpen}
+        data={githubStatus}
+        isLoading={githubStatusLoading}
+        error={githubStatusError}
       />
 
       <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>

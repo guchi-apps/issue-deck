@@ -25,6 +25,8 @@ type IssueListProps = {
   showHeader?: boolean;
   /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
   fabSpacing?: boolean;
+  /** スマホのボトムナビ（フッター）と最後の項目が重ならないよう、フッターと同じ高さの空白を末尾に追加する（#677） */
+  footerSpacing?: boolean;
 };
 
 function formatRelativeDate(iso: string) {
@@ -71,6 +73,7 @@ export function IssueList({
   showSearch = true,
   showHeader = true,
   fabSpacing = false,
+  footerSpacing = false,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
@@ -197,6 +200,11 @@ export function IssueList({
               </button>
             </li>
           ))}
+          {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
+              兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
+              見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
+              保険として同じ高さの空白ボックスを追加する（#677） */}
+          {footerSpacing && <li aria-hidden className="h-14 shrink-0" />}
         </ul>
       )}
     </div>
