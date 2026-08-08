@@ -155,7 +155,7 @@ jobs:
           allowed_bots: "issue-deck[bot],claude[bot]"
           claude_args: |
             --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
-            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"}},"required":["bump_kind","reason"]}'
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"},"changelog":{"type":"string"}},"required":["bump_kind","reason"]}'
           prompt: |
             issue-deckリポジトリで、mainブランチとdevelopブランチの実際のコード差分の内容から、
             セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅
@@ -179,6 +179,12 @@ jobs:
             判定結果（bump_kind）と、その判断根拠（reason。日本語で、実際にどのファイル・
             どのような変更を根拠にしたか具体的に触れて説明する）を返してください。
 
+            あわせて、利用者向けの更新履歴（changelog）も生成してください。reasonが開発者向けの
+            判断根拠であるのに対し、changelogはエンドユーザー向けに何ができるようになった/直った
+            かを平易な日本語で簡潔に説明する文章にしてください（実装の詳細やファイル名には触れない）。
+            issue-deck自身は現時点でこの値を利用しませんが、更新履歴表示を持つ他リポジトリが
+            このワークフローを移植して活用するための汎用フックです。
+
       - name: バージョン判定結果を検証する
         id: bump
         # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
@@ -195,6 +201,8 @@ jobs:
           BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
           # PR本文への埋め込み時に改行で崩れないよう、1行に平坦化しておく
           REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null | tr '\n' ' ' || true)"
+          # changelogは利用者向けの複数行文章になりうるため平坦化しない
+          CHANGELOG="$(echo "$STRUCTURED_OUTPUT" | jq -r '.changelog // empty' 2>/dev/null || true)"
 
           case "$BUMP_KIND" in
             major|minor|patch) ;;
@@ -202,12 +210,18 @@ jobs:
               echo "Claude Codeによるバージョン判定が失敗・不正な結果だったため、patchにフォールバックします（判定結果: '$BUMP_KIND'）"
               BUMP_KIND=patch
               REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
+              CHANGELOG=""
               ;;
           esac
 
           echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
-          echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON"
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo "$CHANGELOG"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "判定結果: bump_kind=$BUMP_KIND reason=$REASON changelog=$CHANGELOG"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
         if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
@@ -217,6 +231,11 @@ jobs:
           MAIN_VERSION: ${{ steps.state.outputs.main_version }}
           BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
           REASON: ${{ steps.bump.outputs.reason }}
+          # 更新履歴表示を自リポジトリに持つ他リポジトリ向けの汎用フック。npm versionの
+          # "version" lifecycleスクリプト（対象リポジトリがpackage.jsonに定義した場合のみ実行
+          # される）がこの環境変数を読み、自前の更新履歴ファイルを書き換えるという契約にする。
+          # issue-deck自身は"version"スクリプトを持たないため、この変数は現状未使用。
+          RELEASE_CHANGELOG: ${{ steps.bump.outputs.changelog }}
         run: |
           set -e
 
@@ -239,11 +258,17 @@ jobs:
           BRANCH="release/v$NEW_VERSION"
 
           git checkout -b "$BRANCH" origin/develop
-          npm pkg set version="$NEW_VERSION"
+          # --no-git-tag-versionでコミット・タグ作成は抑止しつつ、"version" lifecycleスクリプトは
+          # 実行させる（更新履歴フックのため。npm pkg setではlifecycleスクリプトが起動しない）
+          npm version "$NEW_VERSION" --no-git-tag-version
 
           git config user.name "Claude Code"
           git config user.email "claude-code@example.com"
-          git add package.json
+          # package.json本体に加え、"version" lifecycleスクリプトが更新履歴フックとして
+          # 新規作成・更新したファイルもバンプコミットへ含める（このステップ開始時点で
+          # 作業ツリーはクリーンなので、意図しないファイルを拾うリスクは低い）
+          git status --porcelain
+          git add -A
           git commit -m "v${NEW_VERSION}をリリースする。"
           git push -u origin "$BRANCH"
 
@@ -257,6 +282,12 @@ jobs:
             echo
             echo "判断が誤っていると思われる場合は、このPR上でバージョンを修正してください。"
             echo
+            if [ -n "$RELEASE_CHANGELOG" ]; then
+              echo "## 更新履歴（生成された利用者向け文言）"
+              echo
+              echo "$RELEASE_CHANGELOG"
+              echo
+            fi
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt
             echo

@@ -288,7 +288,7 @@ issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし
 | `claude-issue-dispatch.yml`（944行） | 可。**大幅に簡素化できる** | MySQLサービスコンテナ・pnpm setup・`pnpm install`・`pnpm db:migrate:deploy`・`pnpm db:seed:ci`・`playwright install`の前段ステップ（120行相当）が**丸ごと不要**。`claude_args`の`Bash(pnpm:*)`→`Bash(npm:*)`。lint/test/buildの指示は`npm run check`に置換 |
 | `claude-review-develop.yml`（283行） | 可 | `risk-check`のパターン調整。`prisma/migrations/**`は該当なしのため削除。`.github/workflows/**`はそのまま有効。`**/auth/**`判定（`(^\|/)auth(/\|\.[^/]*$)`）は`backend/auth.js`・`frontend/auth.js`・`frontend/auth/callback.html`にそのままヒットするので有効。`package.json`のメジャー更新判定は依存パッケージが無いため実質空振りだが無害。**追加すべき対象**として`deploy/`・`scripts/update-env-file.sh`・`.github/*.env.tpl`（本番設定・Secrets参照の変更）がある |
 | `claude-conflict-resolve.yml`（285行） | 可 | pnpm setup・`pnpm install`・`pnpm test`／`pnpm build:ci`の検証ステップを`npm run check`へ置換するのみ |
-| `release-develop-to-main.yml`（299行） | 要改変 | バージョン判定・bump自体は`package.json`の`version`比較と`npm pkg set version`で行っており汎用的。ただしshopping-listは`npm version`のlifecycleフックで`frontend/changelog.js`にスタブを生成する独自フローを持ち（`npm pkg set version`ではフックが走らない）、かつ`ci.yml`の`version-check`ジョブがタグ重複を検査する。この2点との整合が必要 |
+| `release-develop-to-main.yml`（299行） | フックを実装すればそのまま利用可能 | バージョン判定・bump自体は`package.json`の`version`比較で行っており汎用的。#800でバンプ処理が`npm pkg set version`から`npm version --no-git-tag-version`へ変更され、`RELEASE_CHANGELOG`環境変数＋`package.json`の`"version"` lifecycleスクリプトによる更新履歴同期の汎用フックが追加された（詳細は[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「6. リポジトリ差異の吸収チェックリスト」参照）ため、shopping-listのような更新履歴表示を持つリポジトリは`"version"`スクリプトを定義するだけで移植でき、`release-develop-to-main.yml`本体の個別改造は不要になった。ただし`ci.yml`の`version-check`ジョブがタグ重複を検査する点との整合は引き続き個別対応が必要 |
 
 ### スクリーンショット・プレビュー（上記2の「画面確認」軸）
 
