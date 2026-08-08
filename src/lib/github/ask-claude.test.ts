@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   ASK_CLAUDE_COMMENT_PREFIX,
+  ASK_REPO_QUESTION_TITLE_PREFIX,
   askClaudeCommentBody,
   canAskClaude,
+  canCloseAskRepoQuestion,
   isAskClaudeQuestionComment,
+  isAskRepoQuestionIssue,
   isQaAnswerComment,
   isQaAnswerPending,
   QA_ANSWER_MARKER,
@@ -81,5 +84,42 @@ describe("isQaAnswerPending", () => {
   it("質問コメントが無い場合はfalseを返す", () => {
     const comments = [{ body: "通常の実装進捗コメント" }];
     expect(isQaAnswerPending(comments)).toBe(false);
+  });
+});
+
+describe("isAskRepoQuestionIssue", () => {
+  it("質問接頭辞で始まるタイトルをtrueと判定する", () => {
+    expect(isAskRepoQuestionIssue({ title: `${ASK_REPO_QUESTION_TITLE_PREFIX}質問内容` })).toBe(
+      true,
+    );
+  });
+
+  it("それ以外のタイトルはfalseと判定する", () => {
+    expect(isAskRepoQuestionIssue({ title: "通常のIssueタイトル" })).toBe(false);
+  });
+});
+
+describe("canCloseAskRepoQuestion", () => {
+  const askIssue = { state: "open" as const, title: `${ASK_REPO_QUESTION_TITLE_PREFIX}質問内容` };
+
+  it("open・質問Issue・回答待ちでない場合はtrueを返す", () => {
+    const comments = [
+      { body: askClaudeCommentBody("質問内容") },
+      { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+    ];
+    expect(canCloseAskRepoQuestion(askIssue, comments)).toBe(true);
+  });
+
+  it("closedな場合はfalseを返す", () => {
+    expect(canCloseAskRepoQuestion({ ...askIssue, state: "closed" }, [])).toBe(false);
+  });
+
+  it("質問Issueでない場合はfalseを返す", () => {
+    expect(canCloseAskRepoQuestion({ state: "open", title: "通常のIssue" }, [])).toBe(false);
+  });
+
+  it("回答待ちの場合はfalseを返す", () => {
+    const comments = [{ body: askClaudeCommentBody("質問内容") }];
+    expect(canCloseAskRepoQuestion(askIssue, comments)).toBe(false);
   });
 });

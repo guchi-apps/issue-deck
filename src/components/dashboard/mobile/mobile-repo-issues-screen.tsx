@@ -13,7 +13,7 @@ import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
-  countCheckUserIssues,
+  computeNavCounts,
   filterIssuesByView,
   getAssigneeOptions,
   sortIssues,
@@ -94,7 +94,12 @@ export function MobileRepoIssuesScreen({
 
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
-  const checkUserCount = useMemo(() => countCheckUserIssues(repoIssues), [repoIssues]);
+  // タブごとの該当Issue件数（#880）。全タブに件数バッジを表示するため、リポジトリで
+  // 絞り込んだissuesを対象にcomputeNavCountsで求める。
+  const navCounts = useMemo(
+    () => computeNavCounts(repoIssues, repoIssues, currentUserLogin),
+    [repoIssues, currentUserLogin],
+  );
   const color = getRepoColor(repository.fullName);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置はリポジトリ・
@@ -170,7 +175,7 @@ export function MobileRepoIssuesScreen({
         </button>
       }
       issues={displayedIssues}
-      checkUserCount={checkUserCount}
+      navCounts={navCounts}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}

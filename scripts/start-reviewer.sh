@@ -118,5 +118,19 @@ sys.stdout.write(template.replace("{{PR_LIST}}", pr_list))
 PY
 )"
 
+# 全アプリ共通の共有知識リポジトリ（m-guchi/docs）をローカルにcloneしてある場合は、
+# --add-dir でリポジトリ外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md
+# 「8. Claude Codeへのコンテキストの渡し方」）。cloneしていない環境でも起動できるよう、
+# 存在しない場合は --add-dir を付けずにそのまま起動する。
+SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
+CLAUDE_EXTRA_ARGS=()
+if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
+  CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
+  echo "共有知識リポジトリを参照可能にします: $SHARED_CONTEXT_DIR"
+else
+  echo "共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
+fi
+
 echo "Claude Codeセッションを起動します（このターミナルで実行）..."
-exec claude --permission-mode acceptEdits "$PROMPT_CONTENT"
+# set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
+exec claude --permission-mode acceptEdits ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$PROMPT_CONTENT"

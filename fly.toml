@@ -24,11 +24,16 @@ primary_region = "nrt"
 [http_service]
   internal_port = 3000
   force_https = true
-  # auto_startは無効にする（有効にするとボットやスキャナがURLを叩いただけでMachineが起動して
-  # しまうため。起動タイミングはデプロイworkflow側で明示的に握る）。auto_stopのみ有効にし、
-  # 止め忘れが起きないようにする。
+  # auto_stopでアイドル時にMachineを停止しつつ、auto_startでURLへのアクセス時に起動し直す。
+  # 当初はボットやスキャナに叩かれただけで起動するのを避けるためauto_startを無効にしていたが、
+  # auto_stop有効との組み合わせでは「デプロイ直後にレビュアーがすぐ開かない限り、停止したまま
+  # 二度と起動できず503」という状態になり、レビュー用URLとして成立しなかった（#880）。
+  # 停止した環境を起こせるのがデプロイworkflowの再実行だけ、という運用は現実的でないため、
+  # auto_startを有効にしてURLアクセスで起動できるようにする。起動されても、ログイン必須
+  # （ALLOWED_EMAILS）とPREVIEW_MODEによる書き込み封じは従来どおり効いており、アイドルになれば
+  # auto_stopで再び停止する。
   auto_stop_machines = "stop"
-  auto_start_machines = false
+  auto_start_machines = true
   min_machines_running = 0
 
 [[vm]]

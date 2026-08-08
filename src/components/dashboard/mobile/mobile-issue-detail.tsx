@@ -31,6 +31,7 @@ import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
+import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -75,7 +76,12 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
-import { askClaudeCommentBody, canAskClaude, isQaAnswerPending } from "@/lib/github/ask-claude";
+import {
+  askClaudeCommentBody,
+  canAskClaude,
+  canCloseAskRepoQuestion,
+  isQaAnswerPending,
+} from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -140,6 +146,7 @@ export function MobileIssueDetail({
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
   const {
     createComment,
@@ -395,9 +402,13 @@ export function MobileIssueDetail({
         >
           <ArrowLeft className="size-5" />
         </button>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <button
+          type="button"
+          onClick={() => setIsSummaryDialogOpen(true)}
+          className="min-w-0 flex-1 truncate text-left text-sm font-semibold"
+        >
           #{issue.number} {issue.title}
-        </span>
+        </button>
         {canStartImplementation(issue) && (
           <StartImplementationDialog
             issue={issue}
@@ -439,6 +450,17 @@ export function MobileIssueDetail({
               </button>
             )}
           />
+        )}
+        {canCloseAskRepoQuestion(issue, comments) && (
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={() => handleClose("completed")}
+            aria-label="質問を終えてクローズ"
+            className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
+          >
+            <XCircle className="size-5" />
+          </button>
         )}
         <button
           type="button"
@@ -852,6 +874,12 @@ export function MobileIssueDetail({
         issue={issue}
         repositories={repositories}
         onMoved={onIssueUpdated}
+      />
+
+      <IssueSummaryDialog
+        issue={issue}
+        open={isSummaryDialogOpen}
+        onOpenChange={setIsSummaryDialogOpen}
       />
     </div>
   );
