@@ -22,12 +22,19 @@ const CI_DUMMY_REPOSITORY_GITHUB_ID = 900000001;
 // コメント単位AI要約機能（#571）の「要約を生成」ボタンはLONG_COMMENT_THRESHOLD
 // （src/components/dashboard/comment-thread.tsx）を超える本文にのみ表示されるため、
 // 画面確認用に2件目を長文（400文字超）にしている。
+//
+// scripts/ci-seed-user.mjsが投入するCIバイパス用ユーザーのgithubLoginと一致させること。
+// 最後の1件をこのユーザーの投稿にすることで、自分のコメントが右寄せ吹き出しで表示される
+// 状態も画面確認できるようにしている(#740)。
+const CI_BYPASS_USER_LOGIN = "ci-screenshot-bot";
+
 function buildCiDummyComments(): GithubApiComment[] {
   return Array.from({ length: 5 }, (_, index) => {
     const n = index + 1;
+    const isSelfComment = n === 5;
     return {
       id: -n,
-      user: { login: "ci-dummy-user" },
+      user: { login: isSelfComment ? CI_BYPASS_USER_LOGIN : "ci-dummy-user" },
       body: n === 2 ? CI_DUMMY_LONG_COMMENT_BODY : `CI環境の画面確認用ダミーコメントです（${n}件目）。`,
       created_at: new Date(Date.UTC(2026, 7, n)).toISOString(),
       reactions: { "+1": 0 },
