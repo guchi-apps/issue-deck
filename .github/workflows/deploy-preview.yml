@@ -74,6 +74,18 @@ jobs:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           OP_ENV_FILE: .github/deploy-preview.env.tpl
 
+      - name: Setup flyctl（デプロイ前ログ取得用）
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: デプロイ前のMachineログを出力する
+        # 現在動いているプレビューで起きたエラー（ログイン後の500など）は、Machine内の
+        # Next.jsが出すログにしか残らない。デプロイするとMachineが再起動して追いにくくなるため、
+        # 何かを置き換える前にここで直近のログを吐き出しておく（#880）。
+        # ログが取れなくてもデプロイ自体は続行させる。
+        run: timeout 120 flyctl logs --no-tail | tail -n 200 || true
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
         with:
