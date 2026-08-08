@@ -124,10 +124,19 @@ export function TopBar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
+  // リリース機能はissue-deckの自動化workflow（claude-issue-dispatch.yml）が
+  // 導入済みのリポジトリでのみ動作するため、対応リポジトリのみに絞り込む（#767）。
+  const releaseRepositories = useMemo(
+    () => repositories.filter((repo) => repo.hasClaudeWorkflow),
+    [repositories],
+  );
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
-    selectedRepoFullName ?? repositories[0]?.fullName ?? null,
+    (selectedRepoFullName &&
+      releaseRepositories.some((repo) => repo.fullName === selectedRepoFullName)
+      ? selectedRepoFullName
+      : releaseRepositories[0]?.fullName) ?? null,
   );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(accountMenuOpen);
@@ -328,9 +337,12 @@ export function TopBar({
           setAccountMenuOpen(open);
           if (open) {
             setReleaseRepoFullName((prev) =>
-              prev && repositories.some((repo) => repo.fullName === prev)
+              prev && releaseRepositories.some((repo) => repo.fullName === prev)
                 ? prev
-                : (selectedRepoFullName ?? repositories[0]?.fullName ?? null),
+                : ((selectedRepoFullName &&
+                    releaseRepositories.some((repo) => repo.fullName === selectedRepoFullName)
+                      ? selectedRepoFullName
+                      : releaseRepositories[0]?.fullName) ?? null),
             );
           }
         }}
@@ -433,7 +445,7 @@ export function TopBar({
             {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
           </DropdownMenuItem>
 
-          {repositories.length > 0 && (
+          {releaseRepositories.length > 0 && (
             <>
               <DropdownMenuSeparator />
               <Collapsible>
@@ -456,7 +468,7 @@ export function TopBar({
                         <SelectValue placeholder="リポジトリを選択" />
                       </SelectTrigger>
                       <SelectContent>
-                        {repositories.map((repo) => (
+                        {releaseRepositories.map((repo) => (
                           <SelectItem key={repo.id} value={repo.fullName}>
                             {repo.fullName}
                           </SelectItem>
