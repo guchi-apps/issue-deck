@@ -248,6 +248,37 @@ export async function deleteIssue(
 }
 
 /**
+ * GraphQLの`transferIssue`ミューテーション成功直後は、書き込み直後の読み取り一貫性の遅延により
+ * REST APIでの再取得が一時的に404になることがあるため、短いバックオフを挟んで数回リトライする。
+ */
+const NEW_ISSUE_REFETCH_ATTEMPTS = 4;
+const NEW_ISSUE_REFETCH_BASE_DELAY_MS = 300;
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * `transferIssue()`がGraphQLミューテーション成功後に投げるエラー。GitHub上では既に移動が
+ * 完了しているため、呼び出し側は移動元Issueをissue-deckのDB上に残さないよう、最低限の
+ * クリーンアップ（移動元リポジトリの再同期等）を行うべきことを示す。
+ */
+export class IssueTransferPartialError extends Error {
+  constructor(
+    public readonly newNumber: number,
+    cause: unknown,
+  ) {
+    super(
+      `GitHub上でのIssue移動は成功したが（新番号: ${newNumber}）、移動後の情報再取得に失敗した: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    this.name = "IssueTransferPartialError";
+    this.cause = cause;
+  }
+}
+
+/**
  * IssueをGitHub上で別リポジトリへ移動する。
  * REST APIにはIssue移動のエンドポイントが存在しないため、GraphQLの`transferIssue`ミューテーションを使う。
  * このミューテーションは移動元Issue・移動先リポジトリ双方のnode_id（GraphQL ID）を要求するため、
@@ -313,16 +344,23 @@ export async function transferIssue(
   }
 
   const newNumber = graphqlData.data.transferIssue.issue.number;
-  const newIssueRes = await githubFetch(
-    `${GITHUB_API}/repos/${newOwner}/${newRepo}/issues/${newNumber}`,
-    token,
-  );
-  if (!newIssueRes.ok) {
+  let lastError: GithubApiError | null = null;
+  for (let attempt = 0; attempt < NEW_ISSUE_REFETCH_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleep(NEW_ISSUE_REFETCH_BASE_DELAY_MS * attempt);
+    }
+    const newIssueRes = await githubFetch(
+      `${GITHUB_API}/repos/${newOwner}/${newRepo}/issues/${newNumber}`,
+      token,
+    );
+    if (newIssueRes.ok) {
+      return newIssueRes.json();
+    }
     const detail = await newIssueRes.text().catch(() => "");
-    throw new GithubApiError(
+    lastError = new GithubApiError(
       newIssueRes.status,
       `GitHub API request failed: ${newIssueRes.status} ${detail}`,
     );
   }
-  return newIssueRes.json();
+  throw new IssueTransferPartialError(newNumber, lastError);
 }
