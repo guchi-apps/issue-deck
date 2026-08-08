@@ -695,7 +695,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
@@ -767,14 +767,34 @@ jobs:
                 「このサブIssueには21.plan-requiredが必要」と書き添えてよい（実際のラベル付与は
                 分割を実行するステップが行う）
 
+            ## 分割とは別に、関連する新しいIssueを提案・作成してよい場合
+            上記の「分割」は元Issueのスコープそのものを複数のサブIssueに割るためのものですが、それとは別に、
+            調査中に見つかった元Issueのスコープ外の関連事項（追加で対応すべきと判断した別件、副作用や懸念点
+            など）に気づいた場合は、以下の条件で独立した新規Issueとして起票してよいです。
+
+            - 元Issue自体の実装はまだ承認待ちのままで構いません。承認フローを経ずに、この計画提示ステップの
+              中でそのまま `gh issue create --title "..." --body "..."` を実行してよいです
+            - 新規Issueの本文には、元Issueへのトレーサビリティのため「起点: #${{ steps.state.outputs.issue_number }}」を
+              含め、元Issueを読み返さなくても単独で内容が伝わる程度に背景・要件を書いてください
+            - Issue本文を `@claude` から書き始めないでください（`claude-issue-dispatch.yml`の
+              `startsWith("@claude")` トリガーの誤爆防止のため）
+            - 起票した新規Issueには `--label "70.confirm"` を付与してください。人間が着手要否を判断するまでは
+              `02.wip` 等の実装フローに自動で乗らないようにするためです
+            - 暴発防止のため、1回の計画提示ステップで新規作成するIssueは目安3件程度までとしてください。
+              それを超える提案がある場合、無理に全部作らず、残りは計画コメント本文に箇条書きで記載するに
+              とどめてください
+            - 新規作成したIssueがある場合は、元Issueへの計画コメント本文にも `#<番号>` の形式で一覧を明記して
+              ください（後から元Issueを読み返した人にも分かるようにするため）
+
             ## 迷った場合・調査に行き詰まった場合の振る舞い
             - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
               分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
               （コメントを一切投稿できないまま終了することが最悪の結果のため）
 
             ## このステップでは行わないこと
-            - コードの変更・コミット・ブランチ作成・PR作成・Issueの新規作成は一切行わない（計画提示のみ。
-              分割を計画した場合も、実際のサブIssue作成はこのステップでは行わない）
+            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ。分割を計画した場合も、
+              実際のサブIssue作成はこのステップでは行わない）。ただし、上記「分割とは別に、関連する新しい
+              Issueを提案・作成してよい場合」に該当する新規Issueの起票は例外的に行ってよい
 
             ## 次に起きること
             人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と

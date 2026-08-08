@@ -68,6 +68,8 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 ローカル実行（`scripts/start-issue.sh`）では、分割の判断・提案自体はPlan mode内で人間に提示できるが、実際のサブIssue作成や元Issueのクローズを自動化する仕組みは今のところ用意していない（人間が`gh issue create`等で手動対応する）。
 
+分割とは別に、計画提示ステップは調査中に見つかった元Issueのスコープ外の関連事項（追加対応すべき別件・副作用や懸念点など）を、承認フローを経ずにその場で新規Issueとして起票してよい（元Issue自体の実装承認とは独立。#735）。分割が「元Issueのスコープを割る」ものであるのに対し、これは「元Issueとは別の関連事項を独立Issueとして提案する」もので、本文に「起点: #<元Issue番号>」を含め、`70.confirm`ラベルを付与したうえで1回あたり目安3件までに留める。
+
 ## Issueラベルの状態遷移
 
 マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は`02.wip`にリネームし、実装着手前の計画検討中を表す`01.planning`を新設した（`21.plan-required`が付いていないIssueでは`01.planning`を経由せず最初から`02.wip`になる）。旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
@@ -393,11 +395,13 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
 
 ### 無人実行時の権限モード（許可ツールリスト）
 
-- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。
+- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。
   コード変更ツール（Edit/Write）は許可しない（計画提示のみで実装はしないため）。当初`gh issue`系3種のみを
   許可していたが、計画立案のための調査で`git ls-remote`・`gh pr list`・`gh api`（関連PR・ブランチ状況の確認）
   を試みて未許可コマンドとして拒否され続け、ターン数を使い切ってコメント投稿・ラベル付与に到達できない
   失敗が実際に発生した（Issue #70で確認）。読み取り専用の調査コマンドを許可リストに加えて解消した。
+  `gh issue create`は、元Issueのスコープ外の関連事項を独立Issueとして提案・起票できるようにするため
+  追加した（#735。詳細は上記「実装範囲が広いIssueをサブIssueに分割する」節末尾を参照）。
 - **実装ステップ**: `--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。
