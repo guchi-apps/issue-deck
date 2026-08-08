@@ -1,4 +1,5 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
+import { commentAgentRole, resolveCommentSource } from "@/lib/github/comment-source";
 import {
   DEVELOP_MERGED_LABEL_NAME,
   MAIN_MERGED_LABEL_NAME,
@@ -7,7 +8,7 @@ import {
   getWorkflowStepIndex,
   WORKFLOW_STEPS,
 } from "@/lib/github/workflow-status";
-import type { IssueLabel, LabelNavViewId } from "@/types/issue";
+import type { IssueComment, IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
 export const CHECK_USER_LABEL = "00.check-user";
@@ -126,15 +127,42 @@ export function resolveLabelFilterPresetSelection(
 }
 
 /**
- * 00.check-userかつワークフロー状況が03.d:marge/07.m:margeの場合、PRマージ待ち
- * （GitHub上で人間が直接マージする必要があり、@claudeコメントでの再開対象ではない）と判定する。
+ * 00.check-userかつワークフロー状況が03.d:marge/07.m:margeの場合、または直近のbotコメントが
+ * claude-review-develop（レビューボット）発の場合、PRマージ待ち（GitHub上で人間が直接マージ
+ * する必要があり、@claudeコメントでの再開対象ではない）と判定する。
+ *
+ * ワークフロー状況ラベルだけでは判定できないケースがある（#728）。「additional」モードの
+ * 再開時、実装エージェントは着手直後に03.d:marge→02.wipへラベルを戻すが、それより後に
+ * 発生する追加コミットのpushをトリガーとしたclaude-review-develop.ymlのレビュー
+ * （00.check-user付与）は、実装エージェントがPR作成・03.d:margeへの復帰を終える前に
+ * 完了しうる。この間issueのラベルは一時的に02.wipのままなため、ラベルだけを見ると
+ * 「PRマージ待ち」と判定できず、承認ボタンを押すと本来のPRマージ待ち文言ではなく
+ * 「実装を進めてください」という汎用の確認文言が投稿されてしまう。直近のbotコメントの
+ * 発信元（レビューボットかどうか）を見ることで、ラベルの一時的な状態に依存せず判定する。
  */
-export function isMergeApprovalPending(labels: IssueLabel[]): boolean {
+export function isMergeApprovalPending(
+  labels: IssueLabel[],
+  comments: Pick<IssueComment, "body" | "author">[] = [],
+): boolean {
   if (!isApprovalPending(labels)) return false;
+  if (isLatestSourcedCommentFromReviewer(comments)) return true;
   const stepIndex = getWorkflowStepIndex(labels);
   if (stepIndex === null) return false;
   const stepLabel = WORKFLOW_STEPS[stepIndex].labelName;
   return stepLabel === D_MARGE_LABEL || stepLabel === M_MARGE_LABEL;
+}
+
+/** コメント配列を末尾から走査し、発信元を特定できる直近のbotコメントがレビューボット発かどうかを判定する */
+function isLatestSourcedCommentFromReviewer(
+  comments: Pick<IssueComment, "body" | "author">[],
+): boolean {
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    const resolved = resolveCommentSource(comment, comment.author.login);
+    if (!resolved) continue;
+    return commentAgentRole(resolved) === "reviewer";
+  }
+  return false;
 }
 
 /** 承認時に外すラベル名の配列を返す（00.check-userに加え、計画承認待ちなら21.plan-requiredも外す） */
