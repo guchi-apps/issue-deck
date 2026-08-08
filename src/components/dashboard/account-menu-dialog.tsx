@@ -60,7 +60,6 @@ import {
 } from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
-import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -184,7 +183,7 @@ export function AccountMenuDialog({
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="sr-only">アカウントメニュー</DialogTitle>
           </DialogHeader>
@@ -205,78 +204,84 @@ export function AccountMenuDialog({
               </span>
             </button>
 
-            <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
-              <Settings />
-              アプリ設定
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
+                <Settings />
+                アプリ設定
+              </Button>
 
-            <Button
-              variant="outline"
-              className="justify-start"
-              onClick={() => setGithubStatusDialogOpen(true)}
-            >
-              <Activity />
-              GitHub障害状況
-              {githubStatus && githubStatus.indicator !== "none" && (
-                <AlertTriangle className="ml-auto size-4 text-destructive" />
-              )}
-            </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => setGithubStatusDialogOpen(true)}
+              >
+                <Activity />
+                GitHub障害状況
+                {githubStatus && githubStatus.indicator !== "none" && (
+                  <AlertTriangle className="ml-auto size-4 text-destructive" />
+                )}
+              </Button>
 
-            <Button
-              variant="outline"
-              className="justify-start"
-              onClick={() => setFineGrainedTokensDialogOpen(true)}
-            >
-              <KeyRound />
-              Fine-grained PAT管理
-              {hasExpiringFineGrainedToken && (
-                <AlertTriangle className="ml-auto size-4 text-destructive" />
-              )}
-            </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => setFineGrainedTokensDialogOpen(true)}
+              >
+                <KeyRound />
+                Fine-grained PAT管理
+                {hasExpiringFineGrainedToken && (
+                  <AlertTriangle className="ml-auto size-4 text-destructive" />
+                )}
+              </Button>
 
-            <div className="flex flex-col gap-2 rounded-md border p-3">
-              <p className="text-xs font-medium text-muted-foreground">GitHub API使用量</p>
-              <GithubRateLimitList
-                data={rateLimits}
-                isLoading={rateLimitsLoading}
-                error={rateLimitsError}
-              />
-              <GithubApiUsageList
-                data={apiUsage}
-                isLoading={apiUsageLoading}
-                error={apiUsageError}
-              />
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={isIssueSyncing}
+                onClick={() => setIssueSyncConfirmOpen(true)}
+              >
+                <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+                {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
+              </Button>
+
+              <Button
+                variant="outline"
+                className="justify-start"
+                disabled={isRepositorySyncing}
+                onClick={() => setRepositorySyncConfirmOpen(true)}
+              >
+                <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+                {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
+              </Button>
             </div>
 
-            <div className="rounded-md border p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Claudeプラン使用量</p>
-              <ClaudeUsageCard
-                data={claudeUsage}
-                isLoading={claudeUsageLoading}
-                error={claudeUsageError}
-                notConfigured={claudeUsageNotConfigured}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <p className="text-xs font-medium text-muted-foreground">GitHub API使用量</p>
+                <GithubRateLimitList
+                  data={rateLimits}
+                  isLoading={rateLimitsLoading}
+                  error={rateLimitsError}
+                />
+                <GithubApiUsageList
+                  data={apiUsage}
+                  isLoading={apiUsageLoading}
+                  error={apiUsageError}
+                />
+              </div>
+
+              <div className="rounded-md border p-3">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  Claudeプラン使用量
+                </p>
+                <ClaudeUsageCard
+                  data={claudeUsage}
+                  isLoading={claudeUsageLoading}
+                  error={claudeUsageError}
+                  notConfigured={claudeUsageNotConfigured}
+                />
+              </div>
             </div>
-
-            <Button
-              variant="outline"
-              className="justify-start"
-              disabled={isIssueSyncing}
-              onClick={() => setIssueSyncConfirmOpen(true)}
-            >
-              <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
-              {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
-            </Button>
-
-            <Button
-              variant="outline"
-              className="justify-start"
-              disabled={isRepositorySyncing}
-              onClick={() => setRepositorySyncConfirmOpen(true)}
-            >
-              <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
-              {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
-            </Button>
 
             {releasableRepositories.length > 0 && (
               <Collapsible className="rounded-md border p-3">
@@ -355,19 +360,6 @@ export function AccountMenuDialog({
                 </CollapsibleContent>
               </Collapsible>
             )}
-
-            <div className="flex flex-col gap-1">
-              <Button variant="outline" className="justify-start" asChild>
-                <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
-                  利用規約
-                </a>
-              </Button>
-              <Button variant="outline" className="justify-start" asChild>
-                <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
-                  プライバシーポリシー
-                </a>
-              </Button>
-            </div>
 
             <Button variant="destructive" className="justify-start" onClick={handleLogout}>
               ログアウト
