@@ -914,6 +914,60 @@ pushする。`pnpm build:ci`に必要な環境変数は、実装ステップの�
 実際のDB接続を必要としないため、`.github/workflows/ci.yml`のbuildステップと同じプレースホルダー値を
 Claude Codeステップの`env`にそのまま設定している（MySQLサービスコンテナは使わない）。
 
+## CI失敗の自動解消（#807）
+
+develop向けPR（`issue-<番号>`ブランチ）の`.github/workflows/ci.yml`（CI）が失敗した場合、これまでは
+人間がIssueに`@claude`コメントで個別に修正を依頼する必要があった。`.github/workflows/claude-ci-fix.yml`が
+この依頼を自動化し、CI失敗を検知したら人間の操作なしにClaude Codeが修正を試みる。上記「PR
+コンフリクトの自動解消（#315）」と同じ設計思想で、`.github/workflows/claude-conflict-resolve.yml`と
+対になるワークフローとして実装している。
+
+develop→mainのリリースPR（head=`develop`）のCI失敗は対象外（#812で別途検討）。リリースPRのheadは
+`develop`自体であり、`develop`への直接pushが禁止のためこのワークフローと同じ「対象ブランチへ
+直接push」方式を適用できないこと、対応する単一のIssueが存在せずリトライ管理・報告先の前提が
+コンフリクト解消・CI失敗解消のいずれとも異なることが理由。
+
+### ジョブ構成
+
+- **detect**: `workflow_run`イベントのペイロードから、develop向けかつ`issue-<番号>`命名規約に
+  従うブランチのPRの失敗のみを対象Issue番号として抽出する。`workflow_dispatch`で手動実行する
+  場合は入力されたIssue番号をそのまま使う。
+- **fix**: 対象PRの状態（Issueのクローズ有無、現在のHEADに対するCIの実行結果）を再確認したうえで、
+  対応ブランチをcheckoutし、`gh run view <run_id> --log-failed`で取得した失敗ログをもとに
+  Claude Codeが原因を読解して修正し、`pnpm test`・`pnpm build:ci`で確認してからpushする。
+  安全に自動修正できないと判断した場合は無理をせず`00.check-user`を付与して人間に判断を委ねる。
+
+### トリガー
+
+- `workflow_run`（`workflows: ["CI"]`, `types: [completed]`）: CIの結果が出るたびに検知する。
+  `ci.yml`は`concurrency.cancel-in-progress: true`のため、追加pushで前の実行が`cancelled`に
+  なった場合は`conclusion != 'failure'`となり誤反応しない。`conclusion == 'failure'`かつ
+  `event == 'pull_request'`かつ対象PRの`base.ref == 'develop'`かつ`head.ref`が`issue-<番号>`
+  規約に従うもののみを対象にする。
+- `workflow_dispatch`: 手動実行用。対象のIssue番号を入力する。
+
+### 既存の実装ワークフローとの競合回避
+
+`resolve-conflicts`ジョブと同様、`fix`ジョブは`claude-issue-dispatch.yml`の`dispatch`ジョブの
+`branch`レーンと同じconcurrencyグループ（`issue-dispatch-<Issue番号>-branch`）で直列化する。
+同じ`issue-<番号>`ブランチへ、人間からの追加依頼（`@claude`コメント）による実装ステップや
+コンフリクト自動解消のpushと競合しないようにするため。push後は`issue-labels.yml`の
+`wip-on-push`ジョブが付与する`02.wip`を明示的に除去する。
+
+### リトライ上限
+
+同一原因の修正を繰り返し試みても直らない無限ループを避けるため、対象Issueに
+`<!-- issue-deck-source:claude-ci-fix -->`マーカー付きの「着手コメント」が既に2回投稿されている
+場合は、3回目以降の自動修正は行わず`00.check-user`を付与して人間に委ねる。
+
+### 修正方針
+
+ログから読み取った原因をもとにコードを修正し、`pnpm test`（lint・typecheck・unit test）・
+`pnpm build:ci`で確認してからコミット・pushする（環境変数は`claude-conflict-resolve.yml`と
+同じプレースホルダー値を使う）。表面的にCIを通すためだけの修正（lintエラーの握りつぶし、
+失敗しているテストの無効化・削除等）は明示的に禁止しており、テスト失敗がロジックの不具合を
+示している場合はロジック側を直すようプロンプトで指示している。
+
 ## 未解決の課題・申し送り事項
 
 - Claude Code CLIの起動オプション（`--permission-mode`の具体的な値、`--add-dir`等）は実装時に`claude --help`で最新仕様を確認する。特に無人実行（Phase3以降）で全チェックを無効化するようなフラグ（例: `--dangerously-skip-permissions`）を使うのは、意図しない破壊的操作のリスクがあるため避け、ローカル実行は`acceptEdits`（人間が横にいる前提）、GitHub Actions実行は`claude-code-action`側の許可ツールリスト等で制御する方針とする。

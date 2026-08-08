@@ -9,6 +9,7 @@ const SIMPLE_STEP_LABELS: Record<string, string> = {
   "Claude Code（分割）": "AIが分割中",
   "Claude Code（質問応答）": "AIが質問に回答中",
   "Claude Code（コンフリクト解消）": "AIがコンフリクト解消中",
+  "Claude Code（CI失敗修正）": "AIがCI失敗を修正中",
   "Run Claude Code Review": "AIがレビュー中",
 };
 
