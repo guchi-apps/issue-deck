@@ -10,8 +10,14 @@
 // （scripts/ci-seed-user.mjs と同じ理由で、プレーンJSのスクリプトからTSファイルを
 // 直接importせず値を直書きしている）。
 //
+// Issue #756: ダイアログ等、URLクエリパラメータだけでは表現できない画面状態（クリック操作が
+// 必要なUI）を撮影できるよう、撮影対象の指定に第4フィールド（クリック対象セレクタ、任意）を
+// 追加した。指定時はページ読み込み待機後にPlaywrightの`page.click(selector)`を実行してから
+// 撮影する。セレクタ自体にコロンを含むケース（`button:has-text("...")`等）に対応するため、
+// 4分割目以降は再結合してセレクタとして扱う。
+//
 // 使い方:
-//   CI_LOGIN_BYPASS_SECRET=... node scripts/capture-screenshots.mjs <ベースURL> <出力ディレクトリ> <名前:パス:device> [<名前:パス:device>...]
+//   CI_LOGIN_BYPASS_SECRET=... node scripts/capture-screenshots.mjs <ベースURL> <出力ディレクトリ> <名前:パス:device[:クリック対象セレクタ]> [<名前:パス:device[:クリック対象セレクタ]>...]
 //   device は "desktop" または "mobile"
 //
 // 出力: <出力ディレクトリ>/<名前>.png （撮影対象ごとに1枚）
@@ -39,12 +45,15 @@ if (!secret) {
 }
 
 const targets = targetArgs.map((arg) => {
-  const [name, targetPath, device] = arg.split(":");
+  const [name, targetPath, device, ...selectorParts] = arg.split(":");
   if (!name || !targetPath || (device !== "desktop" && device !== "mobile")) {
-    console.error(`Error: 撮影対象の指定が不正です（<名前:パス:device>の形式で指定してください）: ${arg}`);
+    console.error(
+      `Error: 撮影対象の指定が不正です（<名前:パス:device[:クリック対象セレクタ]>の形式で指定してください）: ${arg}`,
+    );
     process.exit(1);
   }
-  return { name, targetPath, device };
+  const clickSelector = selectorParts.length > 0 ? selectorParts.join(":") : undefined;
+  return { name, targetPath, device, clickSelector };
 });
 
 const hostname = new URL(baseUrl).hostname;
@@ -58,7 +67,7 @@ const hostname = new URL(baseUrl).hostname;
 // スクロールしておくことで、はみ出す内容は「スクロール後の見え方」として1枚に収める。
 const MOBILE_DEVICE = devices["iPhone 15"];
 
-async function capture({ name, targetPath, device }) {
+async function capture({ name, targetPath, device, clickSelector }) {
   const targetUrl = new URL(targetPath, baseUrl).toString();
   const browser = await chromium.launch();
   try {
@@ -79,6 +88,11 @@ async function capture({ name, targetPath, device }) {
     // 落ち着くまでの猶予（#572: コメント取得はクライアント側useEffect経由のため、
     // 短すぎると撮影時点で反映されないことがある）。
     await page.waitForTimeout(4000);
+    if (clickSelector) {
+      // クリック後、ダイアログのアニメーション等が収まるまでの猶予。
+      await page.click(clickSelector);
+      await page.waitForTimeout(500);
+    }
     // Issue詳細画面のコメント欄はヘッダー固定+内部overflow-y-autoのため、モバイルは
     // viewportそのままの撮影（下記のとおりfullPage: false）だと下端（承認待ちカード等）が
     // 写らない。src/components/dashboard/issue-detail.tsx・mobile/mobile-issue-detail.tsxが

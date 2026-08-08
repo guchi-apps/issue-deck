@@ -4,7 +4,7 @@
 # ブランチへ配置し、Issueコメント埋め込み用のraw URLを標準出力に1行1URLで出力する。
 #
 # 使い方:
-#   scripts/capture-issue-screenshots.sh <Issue番号> [撮影対象パス]
+#   scripts/capture-issue-screenshots.sh <Issue番号> [撮影対象パス] [クリック対象セレクタ]
 #
 # Issue #567: 第2引数（撮影対象パス）を指定した場合はそのパスをデスクトップ・モバイル
 # 各1枚ずつ撮影する（従来と同じ、出力URLは2行）。省略した場合は、実装エージェントが
@@ -13,6 +13,12 @@
 # イシュー詳細の撮影にはフロントエンドのIssue.id（githubIssueId由来）が必要なため、
 # scripts/ci-get-sample-issue-id.mjsでCI用ダミーデータ（scripts/seed-ci-db.mjs）の
 # githubIssueIdを取得する。
+#
+# Issue #756: 第3引数（クリック対象セレクタ）を指定すると、ダイアログ等クリック操作でしか
+# 到達できない画面状態を撮影できる。Playwright互換のセレクタ（`text=`・`role=`・CSS等）を
+# 指定でき、撮影対象パスへ遷移した後にそのセレクタをクリックしてから撮影する。第2引数
+# （撮影対象パス）を省略した場合のフォールバック撮影では対応しない（対象パスが不明な時点で
+# クリック対象も指定しようがないため）。
 #
 # 前提:
 #   - pnpm install済み、Playwrightのブラウザ本体(chromium)がインストール済みであること
@@ -46,6 +52,7 @@ fi
 
 ISSUE_NUMBER="${1:?Issue番号を指定してください}"
 TARGET_PATH="${2:-}"
+CLICK_SELECTOR="${3:-}"
 HEALTHCHECK_PATH="${TARGET_PATH:-/dashboard}"
 
 if [[ ! "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
@@ -108,9 +115,17 @@ fi
 
 if [[ -n "$TARGET_PATH" ]]; then
   # 対応箇所が分かる場合: 指定パスをデスクトップ・モバイル各1枚ずつ撮影する（従来と同じ構成）。
+  # クリック対象セレクタが指定されていれば、撮影対象の指定にそのまま付加する
+  # （scripts/capture-screenshots.mjs側の<名前:パス:device:セレクタ>形式）。
+  DESKTOP_TARGET="desktop:${TARGET_PATH}:desktop"
+  MOBILE_TARGET="mobile:${TARGET_PATH}:mobile"
+  if [[ -n "$CLICK_SELECTOR" ]]; then
+    DESKTOP_TARGET="${DESKTOP_TARGET}:${CLICK_SELECTOR}"
+    MOBILE_TARGET="${MOBILE_TARGET}:${CLICK_SELECTOR}"
+  fi
   node "$ROOT/scripts/capture-screenshots.mjs" "$BASE_URL" "$OUT_DIR" \
-    "desktop:${TARGET_PATH}:desktop" \
-    "mobile:${TARGET_PATH}:mobile"
+    "$DESKTOP_TARGET" \
+    "$MOBILE_TARGET"
 
   bash "$ROOT/scripts/post-issue-screenshot.sh" "$ISSUE_NUMBER" "$OUT_DIR/desktop.png" "$OUT_DIR/mobile.png"
 else
