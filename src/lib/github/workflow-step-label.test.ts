@@ -6,6 +6,7 @@ describe("getSimpleStepLabel", () => {
   it("マッピング対象のステップ名には対応する簡易文言を返す", () => {
     expect(getSimpleStepLabel("Claude Code（実装・PR作成）")).toBe("AIが実装中");
     expect(getSimpleStepLabel("Run Claude Code Review")).toBe("AIがレビュー中");
+    expect(getSimpleStepLabel("Claude Code（CI失敗修正）")).toBe("AIがCI失敗を修正中");
   });
 
   it("マッピング対象外のステップ名にはnullを返す", () => {

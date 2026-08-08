@@ -99,6 +99,14 @@ describe("resolveCommentSource", () => {
     });
   });
 
+  it("issue-deck-sourceマーカー（claude-ci-fix）をidとともに判定する", () => {
+    const body = "CIの修正を試みます\n\n<!-- issue-deck-source:claude-ci-fix -->";
+    expect(resolveCommentSource({ body }, "github-actions[bot]")).toEqual({
+      kind: "source",
+      id: "claude-ci-fix",
+    });
+  });
+
   it("マーカーが無い過去コメントを書き出しの絵文字からフォールバック推測する", () => {
     expect(resolveCommentSource({ body: "🔧 実装が完了しました" }, "github-actions[bot]")).toEqual({
       kind: "emoji-fallback",
@@ -165,6 +173,10 @@ describe("commentAgentRole", () => {
     );
   });
 
+  it("source:claude-ci-fixをci-fixerに変換する", () => {
+    expect(commentAgentRole({ kind: "source", id: "claude-ci-fix" })).toBe("ci-fixer");
+  });
+
   it("source:issue-labelsをnotifierに変換する", () => {
     expect(commentAgentRole({ kind: "source", id: "issue-labels" })).toBe("notifier");
   });
@@ -192,6 +204,7 @@ describe("COMMENT_AGENT_PROFILES", () => {
       "guide",
       "reviewer",
       "conflict-resolver",
+      "ci-fixer",
       "notifier",
       "error-notifier",
     ] as const;
