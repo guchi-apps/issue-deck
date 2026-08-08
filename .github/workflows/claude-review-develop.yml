@@ -12,7 +12,8 @@ name: Claude Code Review (develop向けPR)
 #   後続へ進める(fail-open。失敗させるとneeds経由でrisk-check/claude-reviewが
 #   skipされ、レビュー自体が行われないまま放置される事故につながるため)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
-#   22.merge-confirm-requiredラベル付与の有無を確認する。該当時は00.check-userを
+#   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
+#   付与の有無を確認する。該当時は00.check-userを
 #   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
 #   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
 #   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
@@ -163,6 +164,9 @@ jobs:
             fi
             if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
               add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
+            if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
+              add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
             fi
           fi
 

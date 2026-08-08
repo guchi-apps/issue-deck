@@ -65,6 +65,6 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 - `issue-labels.yml`: `screenshots`ブランチの掃除ジョブを削除（無人撮影を導入していないため）
 - **`24.screenshot-required`は未対応**: 全画面がSupabase Auth + Google OAuthログインの背後にあり、
   issue-deckの`src/lib/ci-auth-bypass.ts`相当のCIログインバイパス機構とNotion APIのスタブが
-  存在しないため無人撮影が成立しない。ラベルが付いていた場合は撮影を試みず、
-  `23.preview-required`と同様に画面確認待ちで停止する挙動にしている
+  存在しないため無人撮影が成立しない。ラベルが付いていた場合は撮影を試みず、実装・コミット・
+  ブランチpushまで行った上で`00.check-user`を付与しPR作成前に停止する挙動にしている
   （詳細は[docs/cross-repo-automation.md](cross-repo-automation.md)のケーススタディ参照）
