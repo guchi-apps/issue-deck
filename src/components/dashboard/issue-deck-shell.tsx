@@ -30,6 +30,7 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import { buildFollowupIssueBody } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
@@ -142,7 +143,7 @@ export function IssueDeckShell({
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
-    setCreateDialogBody(`## Issue #${issue.number} に関連するセクションです\n\n`);
+    setCreateDialogBody(buildFollowupIssueBody(issue));
     setCreateDialogOpen(true);
   }
 
