@@ -39,7 +39,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
-    deployCheckStatus: null,
     ...overrides,
   };
 }

@@ -152,7 +152,7 @@ export function IssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,
-    issue ? isMergeApprovalPending(issue.labels) : false,
+    issue ? isMergeApprovalPending(issue.labels, comments) : false,
   );
   const {
     mergePullRequest,
@@ -408,19 +408,6 @@ export function IssueDetail({
                   )}
                 />
               )}
-              {issue.state === "open" && (
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href={buildClaudeAppUrl(issue)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={handleClaudeAppHandoff}
-                  >
-                    <Bot />
-                    Claudeアプリで開く
-                  </a>
-                </Button>
-              )}
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                   GitHubで開く
@@ -579,7 +566,7 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
-              mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+              mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
               workflowRun={workflowRun}
@@ -644,6 +631,19 @@ export function IssueDetail({
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
                     <FilePlus2 />
                     引き継いでIssueを作成
+                  </Button>
+                )}
+                {issue.state === "open" && (
+                  <Button variant="outline" asChild>
+                    <a
+                      href={buildClaudeAppUrl(issue)}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={handleClaudeAppHandoff}
+                    >
+                      <Bot />
+                      Claudeアプリで開く
+                    </a>
                   </Button>
                 )}
                 {canAskClaude(issue) && (

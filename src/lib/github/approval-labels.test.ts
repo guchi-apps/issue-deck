@@ -3,16 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   approveCommentBody,
   isLabelFilterPresetActive,
+  isMergeApprovalPending,
   LABEL_FILTER_PRESETS,
   rejectCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
-import type { IssueLabel } from "@/types/issue";
+import type { IssueComment, IssueLabel } from "@/types/issue";
 
 function makeLabel(name: string): IssueLabel {
   return { name, color: "000000", description: null };
+}
+
+function makeComment(body: string, login = "github-actions[bot]"): Pick<IssueComment, "body" | "author"> {
+  return { body, author: { login } };
 }
 
 describe("LABEL_FILTER_PRESETS", () => {
@@ -86,6 +91,53 @@ describe("approveCommentBody", () => {
     expect(approveCommentBody([makeLabel("00.check-user")], "   ")).toBe(
       "@claude 確認しました。実装を進めてください。",
     );
+  });
+});
+
+describe("isMergeApprovalPending", () => {
+  it("00.check-userが無ければfalseを返す", () => {
+    expect(isMergeApprovalPending([makeLabel("03.d:marge")])).toBe(false);
+  });
+
+  it("00.check-user + 03.d:margeの場合はtrueを返す", () => {
+    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("03.d:marge")])).toBe(true);
+  });
+
+  it("00.check-user + 07.m:margeの場合はtrueを返す", () => {
+    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("07.m:marge")])).toBe(true);
+  });
+
+  it("00.check-user + 02.wipの場合はfalseを返す（コメントが無い場合）", () => {
+    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("02.wip")])).toBe(false);
+  });
+
+  it("00.check-user + 02.wipでも、直近のbotコメントがclaude-review-develop発ならtrueを返す（#728: additionalモード再開時のラベル戻し直後にレビューが完了するレース）", () => {
+    const labels = [makeLabel("00.check-user"), makeLabel("02.wip")];
+    const comments = [
+      makeComment("@claude コンフリクトを解消してください。", "m-guchi"),
+      makeComment(
+        "🔧 依頼を確認しました。追加コミットします。\n\n<!-- issue-deck-source:claude-issue-dispatch -->\n\n<!-- issue-deck-agent:implementer -->",
+      ),
+      makeComment(
+        "⚠️ developへのマージ前にユーザーの確認が必要と判定しました。\n\n<!-- issue-deck-source:claude-review-develop -->",
+      ),
+    ];
+    expect(isMergeApprovalPending(labels, comments)).toBe(true);
+  });
+
+  it("00.check-user + 02.wipで、直近のbotコメントがclaude-review-develop以外発ならfalseを返す（計画承認待ち等）", () => {
+    const labels = [makeLabel("00.check-user"), makeLabel("01.planning")];
+    const comments = [
+      makeComment("@claude 実装を開始してください", "m-guchi"),
+      makeComment("計画本文\n\n<!-- issue-deck-plan-type:implement -->"),
+    ];
+    expect(isMergeApprovalPending(labels, comments)).toBe(false);
+  });
+
+  it("直近のbotコメントが発信元不明（マーカー無し）の場合はラベルの判定にフォールバックする", () => {
+    const labels = [makeLabel("00.check-user"), makeLabel("03.d:marge")];
+    const comments = [makeComment("マーカーの無いコメント")];
+    expect(isMergeApprovalPending(labels, comments)).toBe(true);
   });
 });
 
