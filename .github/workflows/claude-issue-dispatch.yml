@@ -722,15 +722,15 @@ jobs:
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ] && [ -n "${{ steps.state.outputs.pr_url }}" ]; then
             BODY="🔧 依頼を確認しました${RETRY_NOTE_ADD}。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
-            AGENT_ROLE=implementer
+            AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
             # このケースはPRが無く02.wipのまま詰まった状態からの再開であり、文言自体が既に
             # 前回の実装が完了しなかったことを説明しているため、RETRY_NOTEは付け加えない。
             BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
-            AGENT_ROLE=implementer
+            AGENT_ROLE=guide
           else
             BODY="🔧 依頼を確認しました${RETRY_NOTE_IMPL}。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
-            AGENT_ROLE=implementer
+            AGENT_ROLE=guide
           fi
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
@@ -1763,6 +1763,7 @@ jobs:
       - name: プレビューURLをIssueに通知する
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.issue_number }}
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           DEPLOY_RESULT: ${{ needs.deploy-preview.result }}

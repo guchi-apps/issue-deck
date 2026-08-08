@@ -29,6 +29,7 @@ import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
+import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
@@ -77,6 +78,7 @@ export function IssueDeckShell({
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo } =
     useIssueFilters();
+  const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
@@ -446,6 +448,8 @@ export function IssueDeckShell({
         currentUser={currentUser}
         filters={filters}
         setFilter={setFilter}
+        groupByRepo={groupByRepo}
+        onChangeGroupByRepo={setGroupByRepo}
         assigneeOptions={assigneeOptions}
         onCreateIssue={() =>
           openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
@@ -602,6 +606,7 @@ export function IssueDeckShell({
           onSelectIssue={setSelectedIssue}
           showSearch={false}
           scrollKey={issueListScrollKey}
+          groupByRepo={groupByRepo}
           className="hidden shrink-0 border-r md:flex"
           style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />

@@ -8,6 +8,7 @@ import {
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
+  groupIssuesByRepository,
   reconcileIssues,
   sortIssues,
 } from "@/lib/issue-stats";
@@ -183,6 +184,35 @@ describe("getAssigneeOptions", () => {
       makeIssue({ id: "4", assignee: null }),
     ];
     expect(getAssigneeOptions(issues)).toEqual(["alice", "bob"]);
+  });
+});
+
+describe("groupIssuesByRepository", () => {
+  it("repositoryFullNameの昇順でグループ化し、渡された順序をグループ内で保つ", () => {
+    const issues = [
+      makeIssue({ id: "1", repositoryFullName: "owner/repo-b", updatedAt: "2026-01-02T00:00:00.000Z" }),
+      makeIssue({ id: "2", repositoryFullName: "owner/repo-a", updatedAt: "2026-01-03T00:00:00.000Z" }),
+      makeIssue({ id: "3", repositoryFullName: "owner/repo-b", updatedAt: "2026-01-01T00:00:00.000Z" }),
+    ];
+    const groups = groupIssuesByRepository(issues);
+    expect(groups.map((group) => group.repositoryFullName)).toEqual([
+      "owner/repo-a",
+      "owner/repo-b",
+    ]);
+    expect(groups[1].issues.map((issue) => issue.id)).toEqual(["1", "3"]);
+  });
+
+  it("グループにリポジトリのPrivate/Archived情報を含める", () => {
+    const issues = [
+      makeIssue({
+        id: "1",
+        repositoryFullName: "owner/repo-a",
+        repositoryPrivate: true,
+        repositoryArchived: true,
+      }),
+    ];
+    const groups = groupIssuesByRepository(issues);
+    expect(groups[0]).toMatchObject({ repositoryPrivate: true, repositoryArchived: true });
   });
 });
 

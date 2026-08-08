@@ -494,7 +494,7 @@ export function CommentThread({
         {[0, 1].map((i) => (
           <div key={i} className={cn("flex gap-2", i === 1 && "flex-row-reverse")}>
             <Skeleton className="mt-0.5 size-7 shrink-0 rounded-full" />
-            <Skeleton className="h-16 max-w-[85%] flex-1 rounded-lg" />
+            <Skeleton className="h-16 max-w-[92%] flex-1 rounded-lg md:max-w-[85%]" />
           </div>
         ))}
       </div>
@@ -597,7 +597,7 @@ export function CommentThread({
                   className={cn(
                     "min-w-0 rounded-lg border p-3",
                     editingId === comment.id || !isSelf ? "flex-1" : null,
-                    "max-w-[85%]",
+                    "max-w-[92%] md:max-w-[85%]",
                     isSelf ? "rounded-tr-none" : "rounded-tl-none",
                     isSelf && "border-primary/20 bg-primary/5",
                     !isSelf && isQuestion && "border-blue-500/40 bg-blue-500/5",
