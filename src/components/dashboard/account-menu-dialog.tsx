@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ChevronDown,
+  ExternalLink,
   KeyRound,
   RefreshCw,
   Rocket,
@@ -52,6 +53,7 @@ import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useNow } from "@/hooks/use-now";
+import { useReleasePendingMerges } from "@/hooks/use-release-pending-merges";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
 import {
@@ -92,6 +94,11 @@ export function AccountMenuDialog({
   const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
+  // ユーザーが明示的に開閉するまではnull（=マージ待ちがあれば自動展開する）。
+  // 一度でも操作したらその状態を優先する。
+  const [releaseSectionOpenOverride, setReleaseSectionOpenOverride] = useState<boolean | null>(
+    null,
+  );
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
   // リリース対象として選択できるのは、Issue-deckに登録済み（=claude-issue-dispatch.ymlの導入が
@@ -133,6 +140,9 @@ export function AccountMenuDialog({
     triggerRelease,
     isTriggering: isTriggeringRelease,
   } = useReleaseStatus(releaseRepoFullName, open);
+  const { data: pendingMerges } = useReleasePendingMerges(open);
+  const hasPendingMerges = (pendingMerges?.length ?? 0) > 0;
+  const releaseSectionOpen = releaseSectionOpenOverride ?? hasPendingMerges;
   const {
     data: fineGrainedTokens,
     isLoading: fineGrainedTokensLoading,
@@ -180,6 +190,7 @@ export function AccountMenuDialog({
                     releasableRepositories[0]?.fullName ??
                     null),
             );
+            setReleaseSectionOpenOverride(null);
           }
         }}
       >
@@ -283,8 +294,45 @@ export function AccountMenuDialog({
               </div>
             </div>
 
+            {hasPendingMerges && pendingMerges && (
+              <div className="flex flex-col gap-1.5 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-xs dark:bg-amber-950/40">
+                <p className="font-medium text-amber-700 dark:text-amber-300">
+                  {pendingMerges.length}件のリポジトリでmainへのマージ待ちです
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {pendingMerges.map((merge) => (
+                    <li key={merge.repoFullName} className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReleaseRepoFullName(merge.repoFullName);
+                          setReleaseSectionOpenOverride(true);
+                        }}
+                        className="truncate text-left text-amber-700 hover:underline dark:text-amber-300"
+                      >
+                        {merge.repoFullName}
+                      </button>
+                      <a
+                        href={merge.pullRequestUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex shrink-0 items-center gap-1 text-amber-700 hover:underline dark:text-amber-300"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        PR #{merge.pullRequestNumber}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {releasableRepositories.length > 0 && (
-              <Collapsible className="rounded-md border p-3">
+              <Collapsible
+                className="rounded-md border p-3"
+                open={releaseSectionOpen}
+                onOpenChange={setReleaseSectionOpenOverride}
+              >
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"

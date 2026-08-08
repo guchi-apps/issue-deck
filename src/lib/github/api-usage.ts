@@ -28,6 +28,7 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_ci", label: "PRのCI状態ポーリング" },
   { key: "pull_request_link_fallback", label: "PR紐付けのフォールバック検索" },
   { key: "release_status", label: "リリース進捗ポーリング" },
+  { key: "release_pending_merges", label: "mainマージ待ち確認" },
   { key: "issue_comments", label: "コメント取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
   { key: "issue_write", label: "Issueの作成・更新・削除・移動" },
