@@ -201,3 +201,12 @@ jobs:
           flyctl machine start "$MACHINE_ID"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+
+      - name: 起動失敗時にMachineのログを出力する
+        # Machineの中で何が起きたかはGitHub Actions側のログには出てこないため、
+        # 起動に失敗したときだけFly.io側のログを取り出して原因を追えるようにする
+        # （#880では実行ビットの落ちたentrypointでMachineが即クラッシュしていた）。
+        if: failure()
+        run: flyctl logs --no-tail || true
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}

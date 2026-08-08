@@ -80,7 +80,11 @@ COPY --from=builder /app/.next/static ./.next/static
 # 用意せず、ロードする仕組み（scripts/preview-entrypoint.sh）だけを用意する
 COPY db-dump/ /app/db-dump/
 
+# ENTRYPOINTはexec形式のため、実行ビットが落ちているとMachineが起動直後にクラッシュする
+# （#880で`machine exited abruptly`となっていた原因）。git側のmodeも755にしてあるが、
+# チェックアウト環境によっては実行ビットが保たれないため、イメージ内で明示的に付与する。
 COPY scripts/preview-entrypoint.sh /app/preview-entrypoint.sh
+RUN chmod +x /app/preview-entrypoint.sh
 
 EXPOSE 3000
 
