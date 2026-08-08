@@ -5,6 +5,12 @@ name: Claude Code Review (develop向けPR)
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
+# - wait-for-ci: risk-check/claude-reviewの判定・00.check-user付与を、CI(ci.yml)の
+#   完了を待ってから行うようにするための待機ジョブ。CIが`in_progress`のうちに
+#   00.check-userが付いてしまい、issue-deck画面上で時期尚早に「要確認」に見える
+#   問題を防ぐ(#810)。ポーリングがタイムアウトした場合もジョブ自体は失敗させず
+#   後続へ進める(fail-open。失敗させるとneeds経由でrisk-check/claude-reviewが
+#   skipされ、レビュー自体が行われないまま放置される事故につながるため)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
 #   22.merge-confirm-requiredラベル付与の有無を確認する。該当時は00.check-userを
 #   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
@@ -55,8 +61,35 @@ jobs:
             echo "number=" >> "$GITHUB_OUTPUT"
           fi
 
-  risk-check:
+  wait-for-ci:
     needs: identify-issue
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: CI(ci.yml)の完了を待つ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            STATUS="$(gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request" \
+              --jq '[.workflow_runs[] | select(.name == "CI")][0].status // ""')"
+            if [ -z "$STATUS" ]; then
+              echo "CIの実行がまだ見つかりません。20秒待って再試行します。($i/60)"
+            elif [ "$STATUS" = "completed" ]; then
+              echo "CIが完了しました。"
+              exit 0
+            else
+              echo "CIはまだ完了していません(status=${STATUS})。20秒待って再試行します。($i/60)"
+            fi
+            sleep 20
+          done
+          echo "タイムアウトしました。CI完了を待たずに後続ジョブへ進みます(fail-open)。"
+
+  risk-check:
+    needs: [identify-issue, wait-for-ci]
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -153,7 +186,7 @@ jobs:
           fi
 
   claude-review:
-    needs: identify-issue
+    needs: [identify-issue, wait-for-ci]
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
@@ -192,7 +225,9 @@ jobs:
             - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
             - Issue外の変更が混入していないか
             - コード品質・セキュリティ上の問題がないか（OWASP Top10等の観点を含む）
-            - CI結果に問題がないか（`gh pr checks`で確認。まだ実行中の場合はその旨のみ記載する）
+            - CI結果に問題がないか（`gh pr checks`で確認。同一ワークフロー内の`wait-for-ci`ジョブが
+              CI完了を待ってからこのジョブを起動しているため、通常は結果が出ているはずだが、
+              タイムアウト等でまだ実行中の場合はその旨のみ記載する）
 
             ## 自動マージ不可カテゴリの判定
             以下のいずれかに該当する変更が含まれる場合は「自動マージ不可」と判定してください。
