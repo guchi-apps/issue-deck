@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Archive,
+  CircleSlash,
   Eye,
   EyeOff,
   FolderGit2,
@@ -191,7 +192,7 @@ export function SidebarNav({
                         </span>
                         <span className="truncate">{repo.name}</span>
                       </span>
-                      {(repo.archived || repo.private) && (
+                      {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
                         <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                           {repo.archived && (
                             <span title="アーカイブ済み">
@@ -201,6 +202,11 @@ export function SidebarNav({
                           {repo.private && (
                             <span title="プライベートリポジトリ">
                               <Lock className="size-3" />
+                            </span>
+                          )}
+                          {!repo.hasClaudeWorkflow && (
+                            <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                              <CircleSlash className="size-3" />
                             </span>
                           )}
                         </span>

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getAppJwt, getInstallationToken } from "@/lib/github/app-auth";
+import { syncInstallationRepositories } from "@/lib/github/repository-sync";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { getRequestOrigin } from "@/lib/request-origin";
@@ -14,17 +15,6 @@ type GithubInstallationResponse = {
   account: { id: number; login: string; type: string } | null;
   repository_selection: "all" | "selected";
   suspended_at: string | null;
-};
-
-type GithubRepositoryResponse = {
-  id: number;
-  name: string;
-  full_name: string;
-  private: boolean;
-  html_url: string;
-  archived: boolean;
-  default_branch: string;
-  owner: { login: string };
 };
 
 function toAccountType(githubType: string): AccountType {
@@ -44,30 +34,6 @@ async function fetchInstallation(
     throw new Error(`Failed to fetch installation: ${res.status}`);
   }
   return res.json();
-}
-
-async function fetchInstallationRepositories(
-  installationToken: string,
-): Promise<GithubRepositoryResponse[]> {
-  const repositories: GithubRepositoryResponse[] = [];
-  let page = 1;
-
-  while (true) {
-    const res = await githubFetch(
-      `${GITHUB_API}/installation/repositories?per_page=100&page=${page}`,
-      installationToken,
-    );
-    if (!res.ok) {
-      throw new Error(`Failed to fetch installation repositories: ${res.status}`);
-    }
-    const data: { repositories: GithubRepositoryResponse[] } = await res.json();
-    repositories.push(...data.repositories);
-
-    if (data.repositories.length < 100) break;
-    page += 1;
-  }
-
-  return repositories;
 }
 
 export function GET(request: NextRequest) {
@@ -102,7 +68,6 @@ async function handleGET(request: NextRequest) {
   ]);
 
   const installation = await fetchInstallation(installationId, appJwt);
-  const repositories = await fetchInstallationRepositories(installationToken);
 
   const githubInstallation = await db.githubInstallation.upsert({
     where: { installationId },
@@ -123,42 +88,7 @@ async function handleGET(request: NextRequest) {
     },
   });
 
-  const savedRepositories = await Promise.all(
-    repositories.map((repo) =>
-      db.repository.upsert({
-        where: { githubRepositoryId: repo.id },
-        create: {
-          githubRepositoryId: repo.id,
-          installationId: githubInstallation.id,
-          ownerLogin: repo.owner.login,
-          name: repo.name,
-          fullName: repo.full_name,
-          private: repo.private,
-          htmlUrl: repo.html_url,
-          archived: repo.archived,
-          defaultBranch: repo.default_branch,
-          lastSyncedAt: new Date(),
-        },
-        update: {
-          ownerLogin: repo.owner.login,
-          name: repo.name,
-          fullName: repo.full_name,
-          private: repo.private,
-          htmlUrl: repo.html_url,
-          archived: repo.archived,
-          defaultBranch: repo.default_branch,
-          lastSyncedAt: new Date(),
-        },
-      }),
-    ),
-  );
-
-  await db.repository.deleteMany({
-    where: {
-      installationId: githubInstallation.id,
-      githubRepositoryId: { notIn: repositories.map((repo) => repo.id) },
-    },
-  });
+  const savedRepositories = await syncInstallationRepositories(githubInstallation, installationToken);
 
   await db.userInstallation.upsert({
     where: { userId_installationId: { userId, installationId: githubInstallation.id } },

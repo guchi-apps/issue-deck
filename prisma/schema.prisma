@@ -90,6 +90,9 @@ model Repository {
   htmlUrl            String
   archived           Boolean   @default(false)
   defaultBranch      String
+  // claude-issue-dispatch.ymlの存在有無による近似的な対応判定（#720）。DBに保存し、
+  // リポジトリ同期のタイミング（GitHub Appインストール時・リポジトリ再同期時）で更新する。
+  hasClaudeWorkflow  Boolean   @default(false)
   lastSyncedAt       DateTime?
 
   createdAt DateTime @default(now())

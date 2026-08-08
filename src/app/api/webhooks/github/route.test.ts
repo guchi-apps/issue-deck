@@ -26,6 +26,14 @@ vi.mock("@/lib/github/sync-issues", () => ({
   syncRepositoryIssues: vi.fn(),
 }));
 
+vi.mock("@/lib/github/app-auth", () => ({
+  getInstallationToken: vi.fn(),
+}));
+
+vi.mock("@/lib/github/workflow-support", () => ({
+  fetchClaudeWorkflowExists: vi.fn(),
+}));
+
 import { POST } from "@/app/api/webhooks/github/route";
 
 const SECRET = "test-secret";

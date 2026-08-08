@@ -3,12 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
+import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { AccountType } from "@prisma/client";
 
 type InstallationRepoPayload = {
@@ -156,8 +158,14 @@ async function handleInstallationRepositoriesEvent(payload: {
   }
 
   if (payload.action === "added" && payload.repositories_added) {
+    const installationToken = await getInstallationToken(installation.installationId);
     for (const repo of payload.repositories_added) {
       const ownerLogin = repo.full_name.split("/")[0];
+      const hasClaudeWorkflow = await fetchClaudeWorkflowExists(
+        ownerLogin,
+        repo.name,
+        installationToken,
+      ).catch(() => false);
       const created = await db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
@@ -170,6 +178,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           htmlUrl: `https://github.com/${repo.full_name}`,
           archived: false,
           defaultBranch: "main",
+          hasClaudeWorkflow,
           lastSyncedAt: new Date(),
         },
         update: {
@@ -177,6 +186,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           name: repo.name,
           fullName: repo.full_name,
           private: repo.private,
+          hasClaudeWorkflow,
         },
       });
       await syncRepositoryIssues({

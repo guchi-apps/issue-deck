@@ -66,6 +66,7 @@ import { useGithubStatus } from "@/hooks/use-github-status";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import { useRepositorySync } from "@/hooks/use-repository-sync";
 import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
@@ -107,9 +108,12 @@ export function TopBar({
   onOpenAppSettings,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
-  const { isSyncing, handleSync } = useIssueSync();
+  const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
+  const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
+    useRepositorySync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
+  const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -379,14 +383,24 @@ export function TopBar({
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            disabled={isSyncing}
+            disabled={isIssueSyncing}
             onSelect={(e) => {
               e.preventDefault();
-              setSyncConfirmOpen(true);
+              setIssueSyncConfirmOpen(true);
             }}
           >
-            <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
-            {isSyncing ? "再同期中..." : "今すぐ再同期"}
+            <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+            {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isRepositorySyncing}
+            onSelect={(e) => {
+              e.preventDefault();
+              setRepositorySyncConfirmOpen(true);
+            }}
+          >
+            <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+            {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
           </DropdownMenuItem>
 
           {repositories.length > 0 && (
@@ -513,17 +527,32 @@ export function TopBar({
         error={githubStatusError}
       />
 
-      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+      <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogTitle>Issueを再同期しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               GitHub上の最新のIssue情報を取得し直します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+            <AlertDialogAction onClick={handleIssueSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={repositorySyncConfirmOpen} onOpenChange={setRepositorySyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リポジトリを再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のリポジトリ情報（対応状況を含む）を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRepositorySync}>再同期する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

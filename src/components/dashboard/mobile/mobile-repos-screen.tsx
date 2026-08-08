@@ -1,7 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, Eye, EyeOff, FolderGit2, Lock, Search, Settings2, Star } from "lucide-react";
+import {
+  Archive,
+  CircleSlash,
+  Eye,
+  EyeOff,
+  FolderGit2,
+  Lock,
+  Search,
+  Settings2,
+  Star,
+} from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -116,7 +126,7 @@ export function MobileReposScreen({
                         </span>
                         <span className="truncate">{repo.name}</span>
                       </span>
-                      {(repo.archived || repo.private) && (
+                      {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
                         <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                           {repo.archived && (
                             <span title="アーカイブ済み">
@@ -126,6 +136,11 @@ export function MobileReposScreen({
                           {repo.private && (
                             <span title="プライベートリポジトリ">
                               <Lock className="size-3.5" />
+                            </span>
+                          )}
+                          {!repo.hasClaudeWorkflow && (
+                            <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                              <CircleSlash className="size-3.5" />
                             </span>
                           )}
                         </span>
