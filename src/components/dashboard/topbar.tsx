@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   ChevronDown,
   LayoutDashboard,
+  MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -32,6 +33,7 @@ type TopBarProps = {
   setFilter: <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => void;
   assigneeOptions: string[];
   onCreateIssue: () => void;
+  onAskQuestion: () => void;
   selectedRepoFullName: string | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
@@ -46,6 +48,7 @@ export function TopBar({
   setFilter,
   assigneeOptions,
   onCreateIssue,
+  onAskQuestion,
   selectedRepoFullName,
   repositories,
   issues,
@@ -177,6 +180,11 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Button variant="outline" size="sm" className="text-xs" onClick={onAskQuestion}>
+        <MessageCircleQuestion />
+        質問する
+      </Button>
 
       <Button size="sm" className="text-xs" onClick={onCreateIssue}>
         <Plus />
