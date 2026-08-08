@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
-import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { mapComment } from "@/lib/github/issue-mapper";
@@ -9,10 +8,10 @@ import {
   createComment,
   deleteComment,
   fetchCommentsForIssue,
-  GithubApiError,
   type GithubApiComment,
   updateComment,
 } from "@/lib/github/issues-api";
+import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 
 // scripts/seed-ci-db.mjsが投入するCI用ダミーリポジトリのgithubRepositoryIdと一致させること。
 // このリポジトリは実在しないためGitHub APIからコメントを取得できず、無人実行での
@@ -139,25 +138,15 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  const result = await withUserGithubToken(
+    user,
+    `POST /api/issues/comments ${owner}/${repo}#${number}`,
+    (token) => createComment(owner, repo, number, token, { body: body.trim() }),
+  );
+  if ("errorResponse" in result) {
+    return result.errorResponse;
   }
-
-  try {
-    const token = decryptSecret(user.githubAccessToken);
-    const created = await createComment(owner, repo, number, token, { body: body.trim() });
-    return NextResponse.json({ comment: mapComment(created) });
-  } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
-    console.error(`[POST /api/issues/comments] ${owner}/${repo}#${number}:`, error);
-    return NextResponse.json(
-      { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
+  return NextResponse.json({ comment: mapComment(result.value) });
 }
 
 export function PATCH(request: NextRequest) {
