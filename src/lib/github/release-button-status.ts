@@ -17,11 +17,17 @@ export type ReleaseButtonStatus = "idle" | "progressing" | "action_required" | "
  * 「要操作」判定基準（CIが`pending`でなくなった時点）だけは揃えている。develop→main PRの
  * マージ待ちのみを主対象としつつ、CI通過後もbump PRが残り続けるauto-merge滞留も
  * 「要操作」に含める（#542でのフィードバックを反映）。
+ * `workflowRun`（`release-develop-to-main.yml`自体の最新実行）が失敗している場合も、
+ * `deployWorkflowRun`と同じ優先度で`error`とする（#727）。
  */
 export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): ReleaseButtonStatus {
   const { phase, bumpPullRequest: bump, deployWorkflowRun, workflowRun } = status;
 
   if (deployWorkflowRun && deployWorkflowRun.status === "completed" && deployWorkflowRun.conclusion !== "success") {
+    return "error";
+  }
+
+  if (workflowRun && workflowRun.status === "completed" && workflowRun.conclusion !== "success") {
     return "error";
   }
 

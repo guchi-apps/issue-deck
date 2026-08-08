@@ -301,3 +301,56 @@ jobs:
           gh pr create --base main --head develop \
             --title "v${DEV_VERSION}をmainへリリースする" \
             --body-file /tmp/main-pr-body.md
+
+  # releaseジョブが失敗した場合の通知(#727)。他の3ワークフロー
+  # （claude-issue-dispatch.ymlのnotify-failure、claude-review-develop.ymlの
+  # claude-review-fallback/auto-merge-fallback、claude-conflict-resolve.ymlのフォールバック通知）
+  # と異なり、本ワークフローにはこれまで失敗時の通知が一切無く、Actionsの実行ログ以外に
+  # 失敗の痕跡が残らなかった。
+  #
+  # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
+  # で失敗しても対象issueを特定できるよう、releaseジョブの「リリース対象issueの一覧を取得する」
+  # ステップの出力には依存せず、このジョブでも05.develop・07.m:margeラベル付きissueの一覧を
+  # 独立に取得する。
+  notify-failure:
+    needs: [release]
+    if: always() && needs.release.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: リリース対象issueへ失敗を通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+
+          ISSUE_NUMBERS="$(
+            {
+              gh issue list --label "05.develop" --state open --json number
+              gh issue list --label "07.m:marge" --state open --json number
+            } | jq -s 'add | unique_by(.number) | .[].number'
+          )"
+
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "05.develop・07.m:margeが付いたissueが見つからないため、通知先を特定できません"
+            exit 0
+          fi
+
+          BODY='⚠️ develop→mainのリリースワークフロー（release-develop-to-main.yml）が失敗しました。'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
+          BODY="$BODY"$'\n\n''復旧している場合は、リポジトリのissue-deck画面から手動でリリースを再実行できます。'
+          BODY="$BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
+
+          for NUM in $ISSUE_NUMBERS; do
+            # dispatchジョブ側の他の通知と同様、同一runのURLを含むコメントが既にあれば重複通知しない。
+            if gh issue view "$NUM" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
+              echo "issue #$NUM は同一runの通知コメントを確認できたため、重複通知をスキップします"
+              continue
+            fi
+            gh issue comment "$NUM" --body "$BODY"
+            gh issue edit "$NUM" --add-label "00.check-user"
+          done
