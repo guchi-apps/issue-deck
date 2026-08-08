@@ -216,6 +216,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 共有知識リポジトリをcheckoutする
+        # レビュー観点の1つである「共有知識との整合性」と、実装エージェントが投稿した
+        # 共有知識への追加提案の審査に使う(docs/shared-knowledge.md「9.2 審査」)。
+        # checkoutに失敗してもレビュー自体は続行する(continue-on-error)。
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
+          path: .shared-context
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.WORKFLOW_PAT }}
+
       - name: Run Claude Code Review
         uses: anthropics/claude-code-action@v1
         env:
@@ -228,7 +242,10 @@ jobs:
           allowed_bots: "claude[bot]"
           additional_permissions: |
             actions: read
-          claude_args: '--allowedTools "Bash(gh issue edit:*),Bash(gh issue comment:*)"'
+          # Read/Grep/Globは、レビュー観点「共有知識との整合性」と共有知識追加提案の審査のために
+          # .shared-context/配下を読む用途で追加している。gh issue viewは対応Issueの本文・コメント
+          # （実装エージェントが投稿した追加提案コメントを含む）の取得に使う。
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Read,Grep,Glob"'
           prompt: |
             develop向けPull Request（${{ github.repository }}/pull/${{ github.event.pull_request.number }}）を自動レビューしてください。
 
@@ -239,10 +256,30 @@ jobs:
             ## 確認すること
             - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
             - Issue外の変更が混入していないか
+            - 既存設計・このリポジトリの`CLAUDE.md`・`docs/`のルールと整合しているか
             - コード品質・セキュリティ上の問題がないか（OWASP Top10等の観点を含む）
             - CI結果に問題がないか（`gh pr checks`で確認。同一ワークフロー内の`wait-for-ci`ジョブが
               CI完了を待ってからこのジョブを起動しているため、通常は結果が出ているはずだが、
               タイムアウト等でまだ実行中の場合はその旨のみ記載する）
+            - 全アプリ共通の共有知識と矛盾していないか（下記「共有知識との整合性」参照）
+            - `.shared-context/`配下（共有知識リポジトリのcheckout）がPRの差分に混入していないか。
+              混入していれば必ず指摘し、自動マージ不可として扱う
+
+            ## 全アプリ共通の共有知識（`.shared-context/`）
+            ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`m-guchi/docs`）が
+            チェックアウトされています。レビューに必要な範囲だけ読んでください。
+
+            - `.shared-context/CLAUDE.md` — 共有知識の索引・読む順序
+            - `.shared-context/agent-rules/review.md` — レビュー・統合エージェントの共通ルール
+            - `.shared-context/knowledge/` — 今回のPRが触る領域に対応するファイルがあれば読む
+
+            注意事項:
+            - `.shared-context/`配下は読み取り専用です。編集・コミットは行いません。
+            - ディレクトリが存在しない場合（checkoutに失敗した場合）は、共有知識に関する確認は
+              スキップし、その旨をレビューコメントに一行だけ記載してください。レビュー自体は続行します。
+            - 共有知識の記述とこのリポジトリの`CLAUDE.md`・`docs/`が矛盾する場合は、このリポジトリ側が
+              優先されます。共有知識に反しているという理由だけで「要修正」と判定しないでください。
+              ただし、意図的な逸脱に見えない場合は「気になった点」として指摘してください。
 
             ## 自動マージ不可カテゴリの判定
             以下のいずれかに該当する変更が含まれる場合は「自動マージ不可」と判定してください。
@@ -266,16 +303,54 @@ jobs:
               あなたの判定はrisk-checkとは独立した二次判定のため）。コメント本文の末尾に、投稿元を
               示す`<!-- issue-deck-source:claude-review-develop -->`マーカーを必ず付与すること
 
+            ## 共有知識への追加提案の審査
+            対応Issue番号が特定できている場合、`gh issue view <対応Issue番号> --comments` で取得した
+            コメントの中に、実装エージェントが投稿した`<!-- shared-knowledge-proposal -->`マーカー付きの
+            「共有知識への追加提案」コメントが含まれていることがあります。含まれている場合のみ、
+            以下の審査を行ってください（含まれていなければこの節は何もしません）。
+
+            提案されている各項目について、次の4観点を**すべて**満たすかを判定します。
+
+            1. **再利用性** — 対象リポジトリを別のアプリに差し替えても内容が成立するか。
+               issue-deck固有のディレクトリ構成・スキーマ・画面・ラベル・ワークフロー定義に
+               依存していないか
+            2. **正確性** — 根拠（出典URL、または再現した事象と実行ログ）が示されており、
+               `.shared-context/`の既存の記述や公式仕様と矛盾しないか
+            3. **重複** — `.shared-context/`配下に既に同等の記述がないか（`Grep`で確認する。
+               既にあるなら却下、または差分だけに絞るよう指摘する）
+            4. **恒久性** — 一時的な障害・特定バージョン限定のバグではなく、数週間以上有効な
+               仕様・制約・方針か
+
+            判定結果は `gh issue comment <対応Issue番号> --body "..."` で対応Issueへ日本語で投稿し、
+            本文末尾に次のマーカーを付与してください。
+
+            - 提案の全部または一部を承認する場合: `<!-- shared-knowledge-verdict:approved -->`
+            - すべて却下する場合: `<!-- shared-knowledge-verdict:rejected -->`
+
+            あわせて、投稿元を示す`<!-- issue-deck-source:claude-review-develop -->`マーカーも付与して
+            ください。一部承認の場合は、どの提案を承認しどれを却下したかを理由つきで本文に明記して
+            ください（承認された提案だけが、developマージ後に別のワークフローによって共有知識
+            リポジトリへのPull Requestに変換されます）。
+
+            **判定は共有知識を汚さない方向に倒してください。** 迷った場合は却下し、その知見は対象
+            リポジトリの`docs/`にアプリ固有の知見として残すよう本文で促してください。この審査は
+            PRのマージ可否とは独立しており、提案を却下したことを理由に`00.check-user`を付与したり
+            「要修正」と判定したりはしないでください。
+
             ## 出力
             レビュー結果は日本語で、以下の内容を含めてPRへのコメントとして投稿してください。
             - 総評（LGTM / 要修正 / 要確認 のいずれか）
             - 気になった点（あれば具体的なファイル・行を示す）
             - 自動マージ不可カテゴリに該当するかどうかとその理由
+            - 共有知識への追加提案があった場合は、その審査結果の要約（詳細は上記のとおりIssue側へ
+              投稿する）
 
             ## 禁止事項
             - PRのマージ・承認（Approve）は行わない
             - ラベル `03.d:marge` 等の状態遷移ラベルの付け替えは行わない（`00.check-user`の付与のみ許可）
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
+            - `.shared-context/`配下（共有知識リポジトリ）の編集・コミット。共有知識への反映は
+              developマージ後に別のワークフローがPull Requestとして行い、最終的なマージは人間が行う
 
   claude-review-fallback:
     needs: [identify-issue, claude-review]
