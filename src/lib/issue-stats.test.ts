@@ -4,6 +4,7 @@ import {
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
+  countCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
   reconcileIssues,
@@ -423,6 +424,19 @@ describe("time-dependent stats", () => {
         value: "1",
         diffLabel: "",
       });
+    });
+  });
+
+  describe("countCheckUserIssues", () => {
+    it("open状態かつ00.check-userラベル付きのIssueだけを数える", () => {
+      const checkUserLabel = { name: "00.check-user", color: "red", description: null };
+      const issues = [
+        makeIssue({ id: "1", state: "open", labels: [checkUserLabel] }),
+        makeIssue({ id: "2", state: "open", labels: [] }),
+        // closed状態は運用上付かない想定だが、念のため除外する
+        makeIssue({ id: "3", state: "closed", labels: [checkUserLabel] }),
+      ];
+      expect(countCheckUserIssues(issues)).toBe(1);
     });
   });
 });

@@ -1,6 +1,6 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import { CHECK_USER_LABEL, isApprovalPending } from "@/lib/github/approval-labels";
 import { MAIN_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
@@ -133,6 +133,16 @@ export function sortIssues(issues: Issue[], sort: IssueSort, view?: NavViewId): 
 
 function checkUserLabeledAtTime(issue: Issue): number {
   return issue.checkUserLabeledAt ? new Date(issue.checkUserLabeledAt).getTime() : -Infinity;
+}
+
+/**
+ * ユーザーの確認待ち（00.check-userラベル付き）の件数を数える。
+ * 運用上open Issueにしか付かない想定のため、念のためopen状態のIssueに限定する
+ * （スマホ一覧のクイックビューピルの強調表示・件数バッジ用、#715）。
+ */
+export function countCheckUserIssues(issues: Issue[]): number {
+  return issues.filter((issue) => issue.state === "open" && isApprovalPending(issue.labels))
+    .length;
 }
 
 export function getAssigneeOptions(issues: Issue[]): string[] {
