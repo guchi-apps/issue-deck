@@ -202,6 +202,26 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
 
+      - name: プレビューURLの疎通を確認する
+        # Machineが起動しても、コンテナ内のMariaDB初期化・ダンプロードが終わるまでは応答しない
+        # ため、少し待ちながらリトライする。未ログインではログイン画面へのリダイレクトになる
+        # ので2xx/3xxを成功とみなす。#880では起動していないMachineのURLをそのままIssueへ通知して
+        # しまったため、通知前にここで落ちるようにしておく。
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${PREVIEW_URL}" || echo 000)
+            echo "[${i}] ${PREVIEW_URL} -> ${CODE}"
+            case "$CODE" in
+              2*|3*) exit 0 ;;
+            esac
+            sleep 10
+          done
+          echo "プレビューURLが応答しませんでした" >&2
+          exit 1
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+
       - name: 起動失敗時にMachineのログを出力する
         # Machineの中で何が起きたかはGitHub Actions側のログには出てこないため、
         # 起動に失敗したときだけFly.io側のログを取り出して原因を追えるようにする
