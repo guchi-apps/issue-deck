@@ -12,6 +12,7 @@ import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status
 import {
   applyIssueFilters,
   computeLabelSummary,
+  countCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
   sortIssues,
@@ -92,6 +93,7 @@ export function MobileRepoIssuesScreen({
 
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
+  const checkUserCount = useMemo(() => countCheckUserIssues(repoIssues), [repoIssues]);
   const color = getRepoColor(repository.fullName);
 
   return (
@@ -152,6 +154,7 @@ export function MobileRepoIssuesScreen({
         </button>
       }
       issues={displayedIssues}
+      checkUserCount={checkUserCount}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}
