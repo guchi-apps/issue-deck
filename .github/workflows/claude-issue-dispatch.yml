@@ -647,29 +647,72 @@ jobs:
         # workflow_dispatch起動(計画/実装フォールバック検証ステップからの自己リトライ、#497)では、
         # フォールバック検証ステップ側が専用の「自動リトライします」コメントを既に投稿しているため、
         # ここでの重複した「対応確認しました」系コメントは投稿しない。
+        #
+        # トリガーとなったコメントの直前のコメントがフォールバック通知
+        # (`<!-- issue-deck-fallback-notice -->`、`src/lib/github/fallback-notice.ts`と同じ判定基準)
+        # だった場合、それはシステムが勝手に自動で再試行したのではなく、フォールバック通知を見た
+        # 使用者自身が`@claude`で再依頼した結果である。しかしこのステップの文言は従来その区別をせず
+        # 常に同一だったため、使用者からは「なぜ同じ通知が2回来たのか」が分からず、不安になって
+        # 重複して再依頼してしまう一因になっていた(#747)。そのため直前コメントを判定し、再試行で
+        # あることが分かる一文を付け加える。
         if: github.event_name != 'workflow_dispatch' && (steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask')
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -e
+
+          # トリガーコメントの1つ前のコメント本文を取得する。issue_comment以外(00.check-user
+          # unlabeledイベント)はトリガーとなったコメント自体が存在しないため対象外。
+          # コメント一覧のidはGraphQLノードIDでREST(github.event.comment.id)と一致しないため、
+          # `#issuecomment-<REST ID>`で終わるurlで対応するコメントを特定する。
+          PREV_BODY=""
+          if [ "${{ github.event_name }}" = "issue_comment" ] && [ -n "$COMMENT_ID" ]; then
+            COMMENTS_JSON="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments')"
+            PREV_BODY="$(printf '%s' "$COMMENTS_JSON" | jq -r --arg cid "$COMMENT_ID" '
+              (map(.url | endswith("#issuecomment-" + $cid)) | index(true)) as $idx
+              | if $idx == null or $idx == 0 then "" else .[$idx - 1].body end
+            ')"
+          fi
+
+          IS_RETRY=false
+          if [ "$(printf '%s' "$PREV_BODY" | tail -n1)" = "<!-- issue-deck-fallback-notice -->" ]; then
+            IS_RETRY=true
+          fi
+
+          RETRY_NOTE_ASK=""
+          RETRY_NOTE_PLAN=""
+          RETRY_NOTE_SPLIT=""
+          RETRY_NOTE_ADD=""
+          RETRY_NOTE_IMPL=""
+          if [ "$IS_RETRY" = "true" ]; then
+            RETRY_NOTE_ASK="（前回の回答提示が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_PLAN="（前回の計画提示が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_SPLIT="（前回の分割が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_ADD="（前回の対応報告が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_IMPL="（前回の実装結果の報告が完了しなかったため、続けて再試行します）"
+          fi
+
           if [ "${{ steps.state.outputs.mode }}" = "ask" ]; then
-            BODY='🤔 ご質問を確認しました。回答をまとめています。'
+            BODY="🤔 ご質問を確認しました${RETRY_NOTE_ASK}。回答をまとめています。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
-            BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+            BODY="🔍 依頼を確認しました${RETRY_NOTE_PLAN}。実装前の計画を検討します（まとまり次第このIssueにコメントします）。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
-            BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
+            BODY="🔀 承認された計画に沿って、このIssueをサブIssueに分割します${RETRY_NOTE_SPLIT}（完了次第このIssueにコメントします）。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ] && [ -n "${{ steps.state.outputs.pr_url }}" ]; then
-            BODY="🔧 依頼を確認しました。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
+            BODY="🔧 依頼を確認しました${RETRY_NOTE_ADD}。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
             AGENT_ROLE=implementer
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+            # このケースはPRが無く02.wipのまま詰まった状態からの再開であり、文言自体が既に
+            # 前回の実装が完了しなかったことを説明しているため、RETRY_NOTEは付け加えない。
             BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
             AGENT_ROLE=implementer
           else
-            BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
+            BODY="🔧 依頼を確認しました${RETRY_NOTE_IMPL}。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
             AGENT_ROLE=implementer
           fi
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
