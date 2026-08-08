@@ -8,6 +8,7 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -35,9 +36,21 @@ import {
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
+import { START_IMPLEMENTATION_OPTIONS } from "@/lib/github/start-implementation";
+import { isProgressLabel } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
+
+/** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
+const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
+  START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel),
+);
+
+/** 進捗管理用ラベル・実装オプション用ラベルを除いた、ユーザーが選択可能なラベルかどうか */
+function isSelectableLabelName(name: string): boolean {
+  return !isProgressLabel(name) && !START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);
+}
 
 const DEFAULT_ASSIGNEE = "m-guchi";
 
@@ -89,6 +102,10 @@ export function CreateIssueDialog({
   const issueSuggestions = useMemo(
     () => getRepoIssueSuggestions(issues, repositoryFullName),
     [issues, repositoryFullName],
+  );
+  const selectableLabels = useMemo(
+    () => labels.filter((label) => isSelectableLabelName(label.name)),
+    [labels],
   );
   const {
     isGenerating: isSuggesting,
@@ -182,7 +199,9 @@ export function CreateIssueDialog({
     );
     if (!result) return;
     setTitle(result.title);
-    setSelectedLabels((prev) => [...new Set([...prev, ...result.labels])]);
+    setSelectedLabels((prev) => [
+      ...new Set([...prev, ...result.labels.filter((name) => !isProgressLabel(name))]),
+    ]);
   }
 
   async function handleGenerateBodyCleanup() {
@@ -335,7 +354,7 @@ export function CreateIssueDialog({
             <div className="flex flex-col gap-1.5">
               <Label>ラベル</Label>
               <LabelPicker
-                labels={labels}
+                labels={selectableLabels}
                 selectedNames={selectedLabels}
                 onToggle={toggleLabel}
                 isLoading={isMetaLoading}
@@ -346,9 +365,9 @@ export function CreateIssueDialog({
                   </Button>
                 }
               />
-              {selectedLabels.length > 0 && (
+              {selectedLabels.filter(isSelectableLabelName).length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {selectedLabels.map((name) => {
+                  {selectedLabels.filter(isSelectableLabelName).map((name) => {
                     const label = labels.find((l) => l.name === name);
                     return (
                       <span
@@ -362,6 +381,28 @@ export function CreateIssueDialog({
                   })}
                 </div>
               )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {START_IMPLEMENTATION_OPTIONS.map((option) => (
+                <div key={option.key} className="flex items-start gap-2">
+                  <Checkbox
+                    id={`create-issue-option-${option.key}`}
+                    checked={selectedLabels.includes(option.githubLabel)}
+                    onCheckedChange={() => toggleLabel(option.githubLabel)}
+                    className="mt-0.5"
+                  />
+                  <Label
+                    htmlFor={`create-issue-option-${option.key}`}
+                    className="flex-col items-start gap-0.5"
+                  >
+                    {option.label}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </Label>
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-col gap-1.5">
