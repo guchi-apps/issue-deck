@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
+import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   countCheckUserIssues,
@@ -62,6 +63,21 @@ export function MobileIssuesScreen({
 
   const checkUserCount = useMemo(() => countCheckUserIssues(issues), [issues]);
 
+  // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
+  // ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
+  const scrollKey = useMemo(
+    () =>
+      buildIssueListScrollKey([
+        "mobile-issues",
+        view,
+        state,
+        labels.join(","),
+        assignee,
+        sort,
+      ]),
+    [view, state, labels, assignee, sort],
+  );
+
   return (
     <MobileIssueListScreen
       title="Issue"
@@ -77,6 +93,7 @@ export function MobileIssuesScreen({
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
       onBack={onBack}
+      scrollKey={scrollKey}
     />
   );
 }

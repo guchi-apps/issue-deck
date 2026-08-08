@@ -9,6 +9,7 @@ import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
+import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -94,6 +95,22 @@ export function MobileRepoIssuesScreen({
   const checkUserCount = useMemo(() => countCheckUserIssues(repoIssues), [repoIssues]);
   const color = getRepoColor(repository.fullName);
 
+  // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置はリポジトリ・
+  // 絞り込み条件ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
+  const scrollKey = useMemo(
+    () =>
+      buildIssueListScrollKey([
+        "mobile-repo",
+        repository.fullName,
+        view,
+        state,
+        labels.join(","),
+        assignee,
+        sort,
+      ]),
+    [repository.fullName, view, state, labels, assignee, sort],
+  );
+
   return (
     <MobileIssueListScreen
       title={repository.name}
@@ -161,6 +178,7 @@ export function MobileRepoIssuesScreen({
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
+      scrollKey={scrollKey}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}
