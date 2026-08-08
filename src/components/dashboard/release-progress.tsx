@@ -28,27 +28,46 @@ type StepState =
 type Step = {
   label: string;
   state: StepState;
-  /** 補足文（CI状態や次に起きることの説明） */
+  /** 補足文（次に起きることの説明など。CI状態はciStateのバッジで表す） */
   note?: string;
   /** noteより長い補足文（バージョンバンプの判断根拠など、複数行になりうるもの） */
   detail?: string;
+  /** マージ待ちPRの最新コミットのCI状態。バッジとして表示する */
+  ciState?: CiState | null;
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
   link?: { href: string; label: string; pending?: boolean };
 };
 
-function ciLabel(ci: CiState | null): string {
-  switch (ci) {
-    case "pending":
-      return "CI実行中";
-    case "success":
-      return "CI通過";
-    case "failure":
-      return "CI失敗";
-    default:
-      return "CI状態は不明";
-  }
+const CI_STATE_LABEL: Record<CiState, string> = {
+  pending: "CI実行中",
+  success: "CI通過",
+  failure: "CI失敗",
+  unknown: "CI状態は不明",
+};
+
+/**
+ * マージ待ちPRの最新コミットのCI状態を色付きピルで表示する。`pull-request-ci-status.tsx`の
+ * 配色方針（primary/destructive/mutedのring付きピル）を踏襲しつつ、型はCiState用に独立させている。
+ */
+function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
+  if (!ciState) return null;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        ciState === "pending"
+          ? "bg-primary/15 text-primary ring-primary"
+          : ciState === "failure"
+            ? "bg-destructive/15 text-destructive ring-destructive"
+            : "bg-muted text-muted-foreground ring-border",
+      )}
+    >
+      {CI_STATE_LABEL[ciState]}
+    </span>
+  );
 }
 
 /**
@@ -79,7 +98,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
-    steps[1].note = ciLabel(bump.ciState);
+    steps[1].ciState = bump.ciState;
     if (!waitingCi) {
       steps[1].action = {
         href: bump.url,
@@ -98,7 +117,8 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[1].state = "done";
     steps[2].state = "done";
     steps[3].state = "action";
-    steps[3].note = `${ciLabel(release.ciState)}。内容を確認して「merge commit」でマージしてください。`;
+    steps[3].ciState = release.ciState;
+    steps[3].note = "内容を確認して「merge commit」でマージしてください。";
     steps[3].action = {
       href: release.url,
       label: `develop→main PR #${release.number} をタップしてmainへマージ`,
@@ -196,6 +216,7 @@ export function ReleaseProgress({
               >
                 {step.label}
               </span>
+              <CiStateBadge ciState={step.ciState} />
               {step.note && step.state !== "action" && (
                 <span className={cn("text-xs text-muted-foreground")}>{step.note}</span>
               )}
