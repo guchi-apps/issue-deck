@@ -41,6 +41,13 @@ export type NavView = {
    * 累積してしまう（詳細はissue-statsのfilterLatestReleaseIssues）。
    */
   latestReleaseOnly?: boolean;
+  /**
+   * リポジトリごとのグルーピング表示（#849）の既定ON/OFF。未指定はOFFと同じ。
+   * 「本番関連待ち」（release-pending・recently-merged）とパイプライン上流
+   * （not-started・in-progress）はリポジトリごとに見通しが良いためデフォルトON。
+   * check-userはリポジトリ横断の優先順位付け（確認が古い順）を崩したくないためOFFのまま。
+   */
+  groupByRepoDefault?: boolean;
 };
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
@@ -57,6 +64,17 @@ export const baseNavViews: NavView[] = [
   { id: "recently-added", label: "最近追加した" },
 ];
 
+/**
+ * グルーピング表示（#849）をデフォルトONにするビュー。パイプライン上流
+ * （未着手・実行中）と「本番関連待ち」（本番反映待ち・直近本番に反映した）が対象。
+ */
+const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
+  "not-started",
+  "in-progress",
+  "release-pending",
+  "recently-merged",
+];
+
 /** 運用ラベルに基づく絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
 export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   id: preset.key,
@@ -65,6 +83,7 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   excludeLabels: preset.excludeLabels,
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
+  groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),
 }));
 
 /**
@@ -95,6 +114,11 @@ export function getNavViewLabel(id: NavViewId): string {
 /** ビューごとの、stateクエリ未指定時に適用する状態フィルター */
 export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
   return getNavView(id).defaultState ?? "open";
+}
+
+/** ビューごとの、リポジトリごとのグルーピング表示（#849）の既定ON/OFF */
+export function getNavViewDefaultGroupByRepo(id: NavViewId): boolean {
+  return getNavView(id).groupByRepoDefault ?? false;
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   ChevronDown,
+  FolderTree,
   LayoutDashboard,
   MessageCircleQuestion,
   PanelLeftClose,
@@ -31,6 +32,9 @@ type TopBarProps = {
   currentUser: CurrentUser | null;
   filters: IssueFilters;
   setFilter: <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => void;
+  /** リポジトリごとのグルーピング表示（#849）のON/OFF */
+  groupByRepo: boolean;
+  onChangeGroupByRepo: (value: boolean) => void;
   assigneeOptions: string[];
   onCreateIssue: () => void;
   onAskQuestion: () => void;
@@ -46,6 +50,8 @@ export function TopBar({
   currentUser,
   filters,
   setFilter,
+  groupByRepo,
+  onChangeGroupByRepo,
   assigneeOptions,
   onCreateIssue,
   onAskQuestion,
@@ -179,6 +185,18 @@ export function TopBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button
+          variant={groupByRepo ? "default" : "outline"}
+          size="sm"
+          className="text-xs"
+          onClick={() => onChangeGroupByRepo(!groupByRepo)}
+          title="リポジトリごとに分けて表示"
+          aria-pressed={groupByRepo}
+        >
+          <FolderTree className="size-3" />
+          リポジトリ別
+        </Button>
       </div>
 
       <Button variant="outline" size="sm" className="text-xs" onClick={onAskQuestion}>

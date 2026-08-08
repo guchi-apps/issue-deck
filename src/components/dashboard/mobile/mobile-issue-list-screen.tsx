@@ -44,6 +44,12 @@ type MobileIssueListScreenProps = {
   filters: MobileIssueLocalFilters;
   labelOptions: LabelSummary[];
   assigneeOptions: string[];
+  /**
+   * リポジトリごとのグルーピング表示（#849）のON/OFF。単一リポジトリの一覧
+   * （リポジトリ別画面）では対象外のため省略でき、その場合は常にフラット表示になる。
+   */
+  groupByRepo?: boolean;
+  onChangeGroupByRepo?: (value: boolean) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
@@ -72,6 +78,8 @@ export function MobileIssueListScreen({
   filters,
   labelOptions,
   assigneeOptions,
+  groupByRepo = false,
+  onChangeGroupByRepo,
   onChangeView,
   onChangeFilters,
   onSelectIssue,
@@ -203,6 +211,7 @@ export function MobileIssueListScreen({
         fabSpacing
         footerSpacing
         scrollKey={scrollKey}
+        groupByRepo={groupByRepo}
       />
 
       <MobileIssueFilterSheet
@@ -214,6 +223,8 @@ export function MobileIssueListScreen({
         assigneeOptions={assigneeOptions}
         showLabelPresets={false}
         sortLocked={view === "check-user"}
+        groupByRepo={groupByRepo}
+        onChangeGroupByRepo={onChangeGroupByRepo}
       />
 
       {children}

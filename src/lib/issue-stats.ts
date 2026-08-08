@@ -140,6 +140,38 @@ function checkUserPendingSinceTime(issue: Issue): number {
   return basis ? new Date(basis).getTime() : -Infinity;
 }
 
+export type IssueRepositoryGroup = {
+  repositoryFullName: string;
+  repositoryPrivate: boolean;
+  repositoryArchived: boolean;
+  issues: Issue[];
+};
+
+/**
+ * リポジトリごとにIssueをグループ化する（#849）。issuesの並び順（＝呼び出し側で
+ * 確定済みのソート順）はグループ内でそのまま保ち、グループ自体はrepositoryFullNameの
+ * 昇順（サイドバーの既定順と同じ）で並べる。
+ */
+export function groupIssuesByRepository(issues: Issue[]): IssueRepositoryGroup[] {
+  const groups = new Map<string, IssueRepositoryGroup>();
+  for (const issue of issues) {
+    const existing = groups.get(issue.repositoryFullName);
+    if (existing) {
+      existing.issues.push(issue);
+    } else {
+      groups.set(issue.repositoryFullName, {
+        repositoryFullName: issue.repositoryFullName,
+        repositoryPrivate: issue.repositoryPrivate,
+        repositoryArchived: issue.repositoryArchived,
+        issues: [issue],
+      });
+    }
+  }
+  return [...groups.values()].sort((a, b) =>
+    a.repositoryFullName.localeCompare(b.repositoryFullName),
+  );
+}
+
 /**
  * ユーザーの確認待ち（00.check-userラベル付き）の件数を数える。
  * 運用上open Issueにしか付かない想定のため、念のためopen状態のIssueに限定する

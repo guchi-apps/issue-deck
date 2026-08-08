@@ -4,6 +4,7 @@ import { useMemo } from "react";
 
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
+import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
@@ -51,6 +52,8 @@ export function MobileIssuesScreen({
   onAskQuestion,
   onBack,
 }: MobileIssuesScreenProps) {
+  const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
+
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
     const filtered = applyIssueFilters(scoped, {
@@ -90,6 +93,8 @@ export function MobileIssuesScreen({
       filters={{ state, labels, assignee, sort }}
       labelOptions={labelSummary}
       assigneeOptions={assigneeOptions}
+      groupByRepo={groupByRepo}
+      onChangeGroupByRepo={setGroupByRepo}
       onChangeView={onChangeView}
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
