@@ -16,6 +16,10 @@
 // 撮影する。セレクタ自体にコロンを含むケース（`button:has-text("...")`等）に対応するため、
 // 4分割目以降は再結合してセレクタとして扱う。
 //
+// Issue #717: モバイルは撮影直前にdata-capture-scroll-bottom要素を最下部までスクロールする
+// 仕様（下記）だが、画面上部（進捗ステップ等）を撮影したい場合はこのスクロールが邪魔になる。
+// 撮影対象パスのURLフラグメントに#topを指定すると、このスクロールをスキップする。
+//
 // 使い方:
 //   CI_LOGIN_BYPASS_SECRET=... node scripts/capture-screenshots.mjs <ベースURL> <出力ディレクトリ> <名前:パス:device[:クリック対象セレクタ]> [<名前:パス:device[:クリック対象セレクタ]>...]
 //   device は "desktop" または "mobile"
@@ -98,11 +102,16 @@ async function capture({ name, targetPath, device, clickSelector }) {
     // 写らない。src/components/dashboard/issue-detail.tsx・mobile/mobile-issue-detail.tsxが
     // 目印として付与しているdata-capture-scroll-bottom要素を撮影前に最下部までスクロール
     // しておく。
-    await page.evaluate(() => {
-      document.querySelectorAll("[data-capture-scroll-bottom]").forEach((element) => {
-        element.scrollTop = element.scrollHeight;
+    // Issue #717: 画面上部（進捗ステップ等）を撮影したいケースでは下端スクロールが逆に
+    // 邪魔になるため、対象パスのURLフラグメントに#topを指定した場合はスクロールせず
+    // 読み込み直後の（先頭にスクロールされた）状態のまま撮影する。
+    if (new URL(page.url()).hash !== "#top") {
+      await page.evaluate(() => {
+        document.querySelectorAll("[data-capture-scroll-bottom]").forEach((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
       });
-    });
+    }
     await page.waitForTimeout(200);
     const filePath = path.join(outDir, `${name}.png`);
     // Issue #713: モバイルは実機のviewportサイズそのままの見た目にするため`fullPage: false`
