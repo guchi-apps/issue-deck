@@ -16,7 +16,7 @@ export type IssueStateFilter = "all" | "open" | "closed";
 export type IssueFilters = {
   view: NavViewId;
   q: string;
-  repo: string | null;
+  repos: string[];
   state: IssueStateFilter;
   labels: string[];
   assignee: string | null;
@@ -26,7 +26,7 @@ export type IssueFilters = {
 const DEFAULT_FILTERS: IssueFilters = {
   view: "all",
   q: "",
-  repo: null,
+  repos: [],
   state: "open",
   labels: [],
   assignee: null,
@@ -72,6 +72,7 @@ export function useIssueFilters() {
     const viewParam = searchParams.get("view");
     const stateParam = searchParams.get("state");
     const labelsParam = searchParams.get("labels");
+    const reposParam = searchParams.get("repos");
     const sortParam = searchParams.get("sort");
 
     const view = isNavViewId(viewParam) ? viewParam : DEFAULT_FILTERS.view;
@@ -79,7 +80,7 @@ export function useIssueFilters() {
     return {
       view,
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
-      repo: searchParams.get("repo"),
+      repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
       state:
         stateParam === "open" || stateParam === "closed" || stateParam === "all"
           ? stateParam
@@ -136,5 +137,16 @@ export function useIssueFilters() {
     [filters.labels, setFilter],
   );
 
-  return { filters, setFilter, setFilters, selectView, toggleLabel };
+  // リポジトリは複数選択できる。選択済みのリポジトリをもう一度選ぶと選択解除される（#775）。
+  const toggleRepo = useCallback(
+    (fullName: string) => {
+      const next = filters.repos.includes(fullName)
+        ? filters.repos.filter((repo) => repo !== fullName)
+        : [...filters.repos, fullName];
+      setFilter("repos", next);
+    },
+    [filters.repos, setFilter],
+  );
+
+  return { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo };
 }

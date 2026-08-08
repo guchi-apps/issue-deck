@@ -43,9 +43,9 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-const DEFAULT_FILTERS: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee"> = {
+const DEFAULT_FILTERS: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee"> = {
   q: "",
-  repo: null,
+  repos: [],
   state: "all",
   labels: [],
   assignee: null,
@@ -58,13 +58,26 @@ describe("applyIssueFilters", () => {
     expect(result.map((issue) => issue.id)).toEqual(["1"]);
   });
 
-  it("repoが一致しないIssueを除外する", () => {
+  it("reposが一致しないIssueを除外する", () => {
     const issues = [
       makeIssue({ id: "1", repositoryFullName: "owner/repo-a" }),
       makeIssue({ id: "2", repositoryFullName: "owner/repo-b" }),
     ];
-    const result = applyIssueFilters(issues, { ...DEFAULT_FILTERS, repo: "owner/repo-a" });
+    const result = applyIssueFilters(issues, { ...DEFAULT_FILTERS, repos: ["owner/repo-a"] });
     expect(result.map((issue) => issue.id)).toEqual(["1"]);
+  });
+
+  it("reposを複数指定するといずれかに一致するIssueを残す", () => {
+    const issues = [
+      makeIssue({ id: "1", repositoryFullName: "owner/repo-a" }),
+      makeIssue({ id: "2", repositoryFullName: "owner/repo-b" }),
+      makeIssue({ id: "3", repositoryFullName: "owner/repo-c" }),
+    ];
+    const result = applyIssueFilters(issues, {
+      ...DEFAULT_FILTERS,
+      repos: ["owner/repo-a", "owner/repo-b"],
+    });
+    expect(result.map((issue) => issue.id)).toEqual(["1", "2"]);
   });
 
   it("stateがallでない場合は一致しないIssueを除外する", () => {
