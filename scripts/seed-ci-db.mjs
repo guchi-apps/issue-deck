@@ -42,6 +42,58 @@ const ISSUE_TEMPLATES = [
   { title: "アクセシビリティ対応を強化する", state: "OPEN", labels: [{ name: "question", color: "d876e3" }] },
 ];
 
+async function upsertDummyIssue(repository, { number, title, state, labels }) {
+  const githubIssueId = BigInt(repository.githubRepositoryId) * 1000n + BigInt(number);
+  const now = new Date();
+  const issue = await prisma.issue.upsert({
+    where: { githubIssueId },
+    update: {},
+    create: {
+      number,
+      title,
+      body: "CI環境の画面確認用ダミーIssueです。",
+      state,
+      authorLogin: "ci-dummy-user",
+      commentCount: COMMENT_COUNT_PER_ISSUE,
+      githubIssueId,
+      repositoryId: repository.id,
+      htmlUrl: `${repository.htmlUrl}/issues/${number}`,
+      githubCreatedAt: now,
+      githubUpdatedAt: now,
+    },
+  });
+
+  for (const label of labels) {
+    await prisma.issueLabel.upsert({
+      where: { issueId_name: { issueId: issue.id, name: label.name } },
+      update: {},
+      create: { issueId: issue.id, name: label.name, color: label.color },
+    });
+  }
+
+  return issue;
+}
+
+// 承認待ちカードのスクリーンショット確認用ダミーIssue（#688）。通常の承認/修正/取り下げ画面と
+// PRマージ待ち画面をそれぞれ再現するため、最初のリポジトリにのみ2件追加する。ラベル名は
+// src/lib/github/approval-labels.ts・src/lib/github/workflow-status.tsの値と一致させること
+// （このスクリプトはPrisma経由で直接書き込むためsrc配下をimportしない）。
+const APPROVAL_SAMPLE_ISSUES = [
+  {
+    number: ISSUES_PER_REPOSITORY + 1,
+    title: "[CI確認用] 承認待ちサンプルIssue",
+    labels: [{ name: "00.check-user", color: "d93f0b" }],
+  },
+  {
+    number: ISSUES_PER_REPOSITORY + 2,
+    title: "[CI確認用] PRマージ待ちサンプルIssue",
+    labels: [
+      { name: "00.check-user", color: "d93f0b" },
+      { name: "03.d:marge", color: "fbca04" },
+    ],
+  },
+];
+
 async function main() {
   const installation = await prisma.githubInstallation.upsert({
     where: { installationId: INSTALLATION_ID },
@@ -93,32 +145,17 @@ async function main() {
     for (let issueIndex = 0; issueIndex < ISSUES_PER_REPOSITORY; issueIndex++) {
       const template = ISSUE_TEMPLATES[issueIndex % ISSUE_TEMPLATES.length];
       const number = issueIndex + 1;
-      const githubIssueId = BigInt(repositoryGithubId) * 1000n + BigInt(number);
-      const now = new Date();
-      const issue = await prisma.issue.upsert({
-        where: { githubIssueId },
-        update: {},
-        create: {
-          number,
-          title: template.title,
-          body: "CI環境の画面確認用ダミーIssueです。",
-          state: template.state,
-          authorLogin: "ci-dummy-user",
-          commentCount: COMMENT_COUNT_PER_ISSUE,
-          githubIssueId,
-          repositoryId: repository.id,
-          htmlUrl: `${repository.htmlUrl}/issues/${number}`,
-          githubCreatedAt: now,
-          githubUpdatedAt: now,
-        },
+      await upsertDummyIssue(repository, {
+        number,
+        title: template.title,
+        state: template.state,
+        labels: template.labels,
       });
+    }
 
-      for (const label of template.labels) {
-        await prisma.issueLabel.upsert({
-          where: { issueId_name: { issueId: issue.id, name: label.name } },
-          update: {},
-          create: { issueId: issue.id, name: label.name, color: label.color },
-        });
+    if (repoIndex === 0) {
+      for (const sample of APPROVAL_SAMPLE_ISSUES) {
+        await upsertDummyIssue(repository, { ...sample, state: "OPEN" });
       }
     }
   }

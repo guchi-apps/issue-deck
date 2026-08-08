@@ -360,7 +360,14 @@ export function IssueDetail({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overscroll-contain">
+      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
+          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
+          スクロールして写すための目印 */}
+      <div
+        ref={scrollContainerRef}
+        data-capture-scroll-bottom
+        className="flex-1 overflow-y-auto overscroll-contain"
+      >
         <div className="flex max-w-3xl flex-col gap-4 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
