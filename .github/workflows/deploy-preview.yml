@@ -18,6 +18,14 @@ on:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
         default: true
+      logs_only:
+        description: "デプロイせずMachineのログを流し続けるだけにする（エラーの再現用）"
+        type: boolean
+        default: false
+      logs_seconds:
+        description: "logs_only時にログを流す秒数"
+        type: string
+        default: "240"
   workflow_call:
     inputs:
       ref:
@@ -38,7 +46,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # デプロイせず、動いているMachineのログを一定時間流し続けるだけのジョブ。
+  # プレビューで起きたサーバーエラーの原因はMachine内のNext.jsのログにしか出ないが、
+  # `flyctl logs --no-tail`は直近のログしか返さず、再起動を挟むと失われる。
+  # このジョブを動かしている間に画面上で操作を再現してもらうことで、
+  # そのときのスタックトレースをActionsのログに残す（#880）。
+  logs:
+    if: inputs.logs_only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+          # FLY_API_TOKEN以外は使わないが、テンプレートを分けると管理対象が増えるため
+          # deploy-preview.env.tplをそのまま使う。
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: ログを流す
+        run: |
+          set -uo pipefail
+          echo "==== ここから ${LOGS_SECONDS} 秒間、プレビュー環境のログを流します ===="
+          timeout "${LOGS_SECONDS}" flyctl logs || true
+          echo "==== ここまで ===="
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          LOGS_SECONDS: ${{ inputs.logs_seconds || '240' }}
+
   deploy:
+    if: ${{ !inputs.logs_only }}
     runs-on: ubuntu-latest
     outputs:
       preview_url: ${{ steps.deploy.outputs.preview_url }}
