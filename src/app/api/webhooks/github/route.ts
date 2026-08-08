@@ -3,12 +3,15 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
+  updateQaAnswerPendingState,
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
+import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { AccountType } from "@prisma/client";
 
 type InstallationRepoPayload = {
@@ -90,6 +93,7 @@ async function handleIssuesEvent(payload: {
 async function handleIssueCommentEvent(payload: {
   action: string;
   issue: GithubApiIssue;
+  comment: { body: string; created_at: string };
   repository: { id: number };
 }) {
   // issue_commentイベントはPRへのコメントでも発火する（GitHub内部ではPRもissueの一種のため）。
@@ -101,7 +105,17 @@ async function handleIssueCommentEvent(payload: {
   });
   if (!repository) return;
 
-  await upsertIssueFromWebhookPayload(repository.id, payload.issue);
+  // lastCommentAt（確認待ちフィルターのソート基準）は新規コメントの実際の投稿日時を
+  // 反映したいため、action=createdの場合のみ渡す。edited/deletedではcomment.created_at自体が
+  // 新規投稿を意味しないため対象外とする
+  const commentCreatedAt =
+    payload.action === "created" ? new Date(payload.comment.created_at) : undefined;
+  await upsertIssueFromWebhookPayload(repository.id, payload.issue, commentCreatedAt);
+
+  // 編集・削除は対象外とし、新規投稿のみを回答待ち状態の判定に使う
+  if (payload.action === "created") {
+    await updateQaAnswerPendingState(payload.issue.id, payload.comment.body);
+  }
 }
 
 async function handleLabelEvent(payload: {
@@ -156,8 +170,14 @@ async function handleInstallationRepositoriesEvent(payload: {
   }
 
   if (payload.action === "added" && payload.repositories_added) {
+    const installationToken = await getInstallationToken(installation.installationId);
     for (const repo of payload.repositories_added) {
       const ownerLogin = repo.full_name.split("/")[0];
+      const hasClaudeWorkflow = await fetchClaudeWorkflowExists(
+        ownerLogin,
+        repo.name,
+        installationToken,
+      ).catch(() => false);
       const created = await db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
@@ -170,6 +190,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           htmlUrl: `https://github.com/${repo.full_name}`,
           archived: false,
           defaultBranch: "main",
+          hasClaudeWorkflow,
           lastSyncedAt: new Date(),
         },
         update: {
@@ -177,6 +198,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           name: repo.name,
           fullName: repo.full_name,
           private: repo.private,
+          hasClaudeWorkflow,
         },
       });
       await syncRepositoryIssues({

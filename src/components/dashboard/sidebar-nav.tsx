@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Archive,
+  CircleSlash,
   Eye,
   EyeOff,
   FolderGit2,
@@ -145,6 +146,8 @@ export function SidebarNav({
             </button>
             <a
               href={getGithubAppInstallUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-muted-foreground hover:text-foreground"
               title="GitHub Appをインストールしてリポジトリを追加"
             >
@@ -155,7 +158,12 @@ export function SidebarNav({
         {repositories.length === 0 ? (
           <div className="px-2 text-xs text-muted-foreground">
             まだリポジトリと連携していません。
-            <a href={getGithubAppInstallUrl()} className="ml-1 text-primary hover:underline">
+            <a
+              href={getGithubAppInstallUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 text-primary hover:underline"
+            >
               GitHub Appをインストール
             </a>
           </div>
@@ -184,7 +192,7 @@ export function SidebarNav({
                         </span>
                         <span className="truncate">{repo.name}</span>
                       </span>
-                      {(repo.archived || repo.private) && (
+                      {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
                         <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                           {repo.archived && (
                             <span title="アーカイブ済み">
@@ -194,6 +202,11 @@ export function SidebarNav({
                           {repo.private && (
                             <span title="プライベートリポジトリ">
                               <Lock className="size-3" />
+                            </span>
+                          )}
+                          {!repo.hasClaudeWorkflow && (
+                            <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                              <CircleSlash className="size-3" />
                             </span>
                           )}
                         </span>

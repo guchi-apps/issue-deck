@@ -107,11 +107,12 @@ prepare_issue() {
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" >"$PROMPT_FILE" <<'PY'
+  local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
-issue_json_path, template_path, dev_port, sslip_url = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+issue_json_path, template_path, dev_port, sslip_url, dev_log = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -130,21 +131,22 @@ if "23.preview-required" in label_names:
     preview_instructions = (
         "このIssueには`23.preview-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に次の手順を行ってください。\n\n"
-        "1. このworktreeの開発サーバー（`pnpm dev`）をポート`{port}`で起動する（`.env.local`に設定済み）\n"
-        "2. `http://localhost:{port}` で実際の画面を確認する{sslip_note}\n"
-        "3. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
-        "4. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
+        "1. `http://localhost:{port}` で実際の画面を確認する"
+        "（このworktree用の開発サーバーはセッション開始時に自動起動済み。ログ: `{dev_log}`）{sslip_note}\n"
+        "2. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
+        "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
         "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
-    ).format(port=dev_port, sslip_note=sslip_note)
+    ).format(port=dev_port, sslip_note=sslip_note, dev_log=dev_log)
 else:
     preview_instructions = (
-        "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`を使うよう`.env.local`に設定済みです"
-        "（他Issueのworktreeと同時に起動しても衝突しません）。画面に関わる変更を行った場合、"
-        "PR本文の「確認方法」に次の情報を含めてください。\n\n"
-        "- 起動コマンド（例: `pnpm dev`）とアクセスURL（`http://localhost:{port}`）{sslip_note}\n"
+        "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`でセッション開始時に自動起動済みです"
+        "（他Issueのworktreeと同時に起動しても衝突しません。ログ: `{dev_log}`。Claude Codeセッション"
+        "終了時に自動停止します）。画面に関わる変更を行った場合、PR本文の「確認方法」に次の情報を"
+        "含めてください。\n\n"
+        "- アクセスURL（`http://localhost:{port}`）{sslip_note}\n"
         "- 実際に確認すべき画面・操作手順\n\n"
         "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
-    ).format(port=dev_port, sslip_note=sslip_note)
+    ).format(port=dev_port, sslip_note=sslip_note, dev_log=dev_log)
 
 if "24.screenshot-required" in label_names:
     screenshot_instructions = (
@@ -190,21 +192,23 @@ PY
   rm -f "$issue_json_file"
 }
 
-# 単一worktree内でclaudeを起動するコマンド文字列を作る（PROMPT_FILEのパスのみを埋め込み、
+# 単一worktree内で開発サーバー起動〜claude起動〜終了時のdevサーバー停止までを行う
+# run-issue-session.sh を起動するコマンド文字列を作る（PROMPT_FILEのパスのみを埋め込み、
 # Issue本文・コメントなどの外部由来テキストはコマンド文字列に直接展開しない）。
 build_claude_cmd() {
-  local worktree_dir="$1"
-  local prompt_file="$2"
-  printf "cd %q && claude --permission-mode acceptEdits \"\$(cat %q)\"" "$worktree_dir" "$prompt_file"
+  local issue_number="$1"
+  local worktree_dir="$2"
+  local dev_port="$3"
+  local prompt_file="$4"
+  printf "cd %q && bash %q %q %q %q" "$worktree_dir" "$ROOT/scripts/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
 }
 
 if [[ $# -eq 1 ]]; then
   n="$1"
   prepare_issue "$n"
-  echo "#$n: Claude Codeセッションを起動します（このターミナルで実行）..."
+  echo "#$n: 開発サーバーを自動起動し、Claude Codeセッションを起動します（このターミナルで実行）..."
   cd "$WORKTREE_DIR"
-  PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
-  exec claude --permission-mode acceptEdits "$PROMPT_CONTENT"
+  exec bash "$ROOT/scripts/run-issue-session.sh" "$n" "$DEV_PORT" "$PROMPT_FILE"
 fi
 
 # 複数issue指定時は、それぞれ独立したセッションを同時に使うため新しいWindows Terminalタブで起動する。
@@ -217,11 +221,11 @@ DISTRO="${WSL_DISTRO_NAME:-}"
 for n in "$@"; do
   prepare_issue "$n"
   if [[ "$WT_AVAILABLE" -eq 1 && -n "$DISTRO" ]]; then
-    echo "#$n: 新しいWindows Terminalタブでセッションを起動します..."
-    cmd="$(build_claude_cmd "$WORKTREE_DIR" "$PROMPT_FILE")"
+    echo "#$n: 新しいWindows Terminalタブで開発サーバーを自動起動し、セッションを起動します..."
+    cmd="$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
     wt.exe -w 0 new-tab --title "issue-$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
   else
     echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
-    echo "  cd \"$WORKTREE_DIR\" && claude --permission-mode acceptEdits \"\$(cat \"$PROMPT_FILE\")\""
+    echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""
   fi
 done

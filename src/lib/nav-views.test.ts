@@ -54,4 +54,13 @@ describe("getAdjacentNavViewId", () => {
     const lastView = navViews[navViews.length - 1];
     expect(getAdjacentNavViewId(lastView.id, "next")).toBeNull();
   });
+
+  it("orderを指定すると、navViewsではなくその並び順で隣接判定する（#734）", () => {
+    // スマホのタブ表示順（#714でユーザーの確認待ちを先頭近くに固定表示）を想定した並び。
+    const tabOrder = [navViews[0], navViews[3], navViews[1], navViews[2]];
+
+    expect(getAdjacentNavViewId(navViews[0].id, "next", tabOrder)).toBe(navViews[3].id);
+    expect(getAdjacentNavViewId(navViews[3].id, "prev", tabOrder)).toBe(navViews[0].id);
+    expect(getAdjacentNavViewId(navViews[3].id, "next", tabOrder)).toBe(navViews[1].id);
+  });
 });

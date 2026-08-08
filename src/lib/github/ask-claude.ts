@@ -34,3 +34,16 @@ export function isQaAnswerComment(comment: Pick<IssueComment, "body">): boolean 
 export function isAskClaudeQuestionComment(comment: Pick<IssueComment, "body">): boolean {
   return comment.body.startsWith(ASK_CLAUDE_COMMENT_PREFIX);
 }
+
+/**
+ * コメント配列（時系列順）を末尾から走査し、直近の質問コメント（isAskClaudeQuestionComment）が
+ * 回答コメント（isQaAnswerComment）より後に投稿されている、すなわち「回答待ち」かどうかを判定する。
+ */
+export function isQaAnswerPending(comments: Pick<IssueComment, "body">[]): boolean {
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (isQaAnswerComment(comment)) return false;
+    if (isAskClaudeQuestionComment(comment)) return true;
+  }
+  return false;
+}

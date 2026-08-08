@@ -71,7 +71,7 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
-import { askClaudeCommentBody, canAskClaude } from "@/lib/github/ask-claude";
+import { askClaudeCommentBody, canAskClaude, isQaAnswerPending } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -143,6 +143,7 @@ export function IssueDetail({
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
+  const qaAnswerPending = isQaAnswerPending(comments);
   const pullRequestLink = usePullRequestLink(
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
@@ -534,6 +535,12 @@ export function IssueDetail({
 
           <WorkflowStatusSteps labels={issue.labels} />
           <div className="flex flex-wrap items-center gap-2">
+            {qaAnswerPending && (
+              <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
+                <MessageCircleQuestion className="size-3" />
+                Claudeの回答待ち
+              </span>
+            )}
             <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
             <CancelWorkflowRunButton
               run={workflowRun}

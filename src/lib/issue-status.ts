@@ -15,3 +15,8 @@ export function matchStatusStep(labelName: string): number | null {
 export function isAttentionLabel(labelName: string): boolean {
   return ATTENTION_PATTERN.test(labelName);
 }
+
+/** 00〜09番台の進捗管理用ラベルかどうかを判定する（issue-deckのワークフロー側が自動で付け外しするため） */
+export function isProgressLabel(labelName: string): boolean {
+  return isAttentionLabel(labelName) || matchStatusStep(labelName) !== null;
+}

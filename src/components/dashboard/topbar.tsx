@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ChevronDown,
+  KeyRound,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,6 +18,7 @@ import {
 
 import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { FineGrainedTokensDialog } from "@/components/dashboard/fine-grained-tokens-dialog";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
@@ -60,17 +62,21 @@ import { isProductionDeployComplete, ReleaseProgress } from "@/components/dashbo
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useNow } from "@/hooks/use-now";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import { useRepositorySync } from "@/hooks/use-repository-sync";
 import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
+import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
 import { filterIssuesByView } from "@/lib/issue-stats";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { DeployCheckStatus, Issue } from "@/types/issue";
@@ -107,13 +113,17 @@ export function TopBar({
   onOpenAppSettings,
 }: TopBarProps) {
   const { handleLogout } = useAccountActions();
-  const { isSyncing, handleSync } = useIssueSync();
+  const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
+  const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
+    useRepositorySync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
+  const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
+  const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
@@ -144,6 +154,18 @@ export function TopBar({
     triggerRelease,
     isTriggering: isTriggeringRelease,
   } = useReleaseStatus(releaseRepoFullName, accountMenuOpen);
+  const {
+    data: fineGrainedTokens,
+    isLoading: fineGrainedTokensLoading,
+    error: fineGrainedTokensError,
+    refetch: refetchFineGrainedTokens,
+  } = useFineGrainedTokens(accountMenuOpen);
+  const now = useNow();
+  const hasExpiringFineGrainedToken =
+    now !== null &&
+    (fineGrainedTokens ?? []).some(
+      (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
+    );
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -353,6 +375,18 @@ export function TopBar({
               <AlertTriangle className="ml-auto size-4 text-destructive" />
             )}
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setFineGrainedTokensDialogOpen(true);
+            }}
+          >
+            <KeyRound />
+            Fine-grained PAT管理
+            {hasExpiringFineGrainedToken && (
+              <AlertTriangle className="ml-auto size-4 text-destructive" />
+            )}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
           <div className="flex flex-col gap-2 px-1.5 pb-1.5">
@@ -379,14 +413,24 @@ export function TopBar({
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            disabled={isSyncing}
+            disabled={isIssueSyncing}
             onSelect={(e) => {
               e.preventDefault();
-              setSyncConfirmOpen(true);
+              setIssueSyncConfirmOpen(true);
             }}
           >
-            <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
-            {isSyncing ? "再同期中..." : "今すぐ再同期"}
+            <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+            {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isRepositorySyncing}
+            onSelect={(e) => {
+              e.preventDefault();
+              setRepositorySyncConfirmOpen(true);
+            }}
+          >
+            <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+            {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
           </DropdownMenuItem>
 
           {repositories.length > 0 && (
@@ -513,17 +557,41 @@ export function TopBar({
         error={githubStatusError}
       />
 
-      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+      <FineGrainedTokensDialog
+        open={fineGrainedTokensDialogOpen}
+        onOpenChange={setFineGrainedTokensDialogOpen}
+        data={fineGrainedTokens}
+        isLoading={fineGrainedTokensLoading}
+        error={fineGrainedTokensError}
+        onChanged={refetchFineGrainedTokens}
+      />
+
+      <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogTitle>Issueを再同期しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               GitHub上の最新のIssue情報を取得し直します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+            <AlertDialogAction onClick={handleIssueSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={repositorySyncConfirmOpen} onOpenChange={setRepositorySyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リポジトリを再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のリポジトリ情報（対応状況を含む）を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRepositorySync}>再同期する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

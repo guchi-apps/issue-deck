@@ -1,10 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, AlertTriangle, LogOut, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  KeyRound,
+  LogOut,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { FineGrainedTokensDialog } from "@/components/dashboard/fine-grained-tokens-dialog";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
@@ -23,10 +32,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useNow } from "@/hooks/use-now";
+import { useRepositorySync } from "@/hooks/use-repository-sync";
+import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
@@ -40,10 +53,14 @@ export function MobileSettingsScreen({
   onOpenAppSettings,
 }: MobileSettingsScreenProps) {
   const { handleLogout } = useAccountActions();
-  const { isSyncing, handleSync } = useIssueSync();
+  const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
+  const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
+    useRepositorySync();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
+  const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
+  const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
   const {
@@ -62,6 +79,18 @@ export function MobileSettingsScreen({
     isLoading: githubStatusLoading,
     error: githubStatusError,
   } = useGithubStatus(true);
+  const {
+    data: fineGrainedTokens,
+    isLoading: fineGrainedTokensLoading,
+    error: fineGrainedTokensError,
+    refetch: refetchFineGrainedTokens,
+  } = useFineGrainedTokens(true);
+  const now = useNow();
+  const hasExpiringFineGrainedToken =
+    now !== null &&
+    (fineGrainedTokens ?? []).some(
+      (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
+    );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -113,11 +142,21 @@ export function MobileSettingsScreen({
         <Button
           variant="outline"
           className="justify-start"
-          disabled={isSyncing}
-          onClick={() => setSyncConfirmOpen(true)}
+          disabled={isIssueSyncing}
+          onClick={() => setIssueSyncConfirmOpen(true)}
         >
-          <RefreshCw className={isSyncing ? "animate-spin" : undefined} />
-          {isSyncing ? "再同期中..." : "今すぐ再同期"}
+          <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+          {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
+        </Button>
+
+        <Button
+          variant="outline"
+          className="justify-start"
+          disabled={isRepositorySyncing}
+          onClick={() => setRepositorySyncConfirmOpen(true)}
+        >
+          <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+          {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
         </Button>
 
         <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
@@ -133,6 +172,18 @@ export function MobileSettingsScreen({
           <Activity />
           GitHub障害状況
           {githubStatus && githubStatus.indicator !== "none" && (
+            <AlertTriangle className="ml-auto size-4 text-destructive" />
+          )}
+        </Button>
+
+        <Button
+          variant="outline"
+          className="justify-start"
+          onClick={() => setFineGrainedTokensDialogOpen(true)}
+        >
+          <KeyRound />
+          Fine-grained PAT管理
+          {hasExpiringFineGrainedToken && (
             <AlertTriangle className="ml-auto size-4 text-destructive" />
           )}
         </Button>
@@ -175,17 +226,41 @@ export function MobileSettingsScreen({
         error={githubStatusError}
       />
 
-      <AlertDialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
+      <FineGrainedTokensDialog
+        open={fineGrainedTokensDialogOpen}
+        onOpenChange={setFineGrainedTokensDialogOpen}
+        data={fineGrainedTokens}
+        isLoading={fineGrainedTokensLoading}
+        error={fineGrainedTokensError}
+        onChanged={refetchFineGrainedTokens}
+      />
+
+      <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>今すぐ再同期しますか？</AlertDialogTitle>
+            <AlertDialogTitle>Issueを再同期しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               GitHub上の最新のIssue情報を取得し直します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSync}>再同期する</AlertDialogAction>
+            <AlertDialogAction onClick={handleIssueSync}>再同期する</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={repositorySyncConfirmOpen} onOpenChange={setRepositorySyncConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>リポジトリを再同期しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub上の最新のリポジトリ情報（対応状況を含む）を取得し直します。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRepositorySync}>再同期する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

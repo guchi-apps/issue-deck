@@ -78,6 +78,42 @@ describe("useSwipeFilterView", () => {
     expect(onSwipe).not.toHaveBeenCalled();
   });
 
+  it("ドラッグ中は指の移動量に追従したtransformを返す", () => {
+    const onSwipe = vi.fn();
+    const { result } = renderHook(() => useSwipeFilterView(onSwipe));
+
+    act(() => {
+      result.current.onTouchStart(makeTouch(200, 0, document.createElement("div")));
+      result.current.onTouchMove(makeTouch(150, 0, document.createElement("div")));
+    });
+
+    expect(result.current.style.transform).toBe("translateX(-50px)");
+    expect(result.current.style.transition).toBe("none");
+  });
+
+  it("指を離すとtransformが0に戻り、遷移アニメーションが有効になる", () => {
+    const onSwipe = vi.fn();
+    const { result } = renderHook(() => useSwipeFilterView(onSwipe));
+
+    act(() => swipe(result.current, { x: 200, y: 0 }, { x: 130, y: 0 }));
+
+    expect(result.current.style.transform).toBeUndefined();
+    expect(result.current.style.transition).toBe("transform 0.2s ease-out");
+  });
+
+  it("戻るジェスチャー領域内から始まった右方向の動きはtransformに反映しない（useSwipeBack側に譲る）", () => {
+    const onSwipe = vi.fn();
+    const { result } = renderHook(() => useSwipeFilterView(onSwipe));
+
+    act(() => {
+      // 400px幅の画面で開始位置x=40は左端から1/5(80px)より内側
+      result.current.onTouchStart(makeTouch(40, 0, document.createElement("div")));
+      result.current.onTouchMove(makeTouch(100, 0, document.createElement("div")));
+    });
+
+    expect(result.current.style.transform).toBeUndefined();
+  });
+
   it("横スクロール可能な要素（タブ列）から始まったタッチは対象外にする", () => {
     const onSwipe = vi.fn();
     const { result } = renderHook(() => useSwipeFilterView(onSwipe));

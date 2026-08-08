@@ -42,6 +42,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
 - 開発サーバー（`pnpm dev`）のポートは`start-issue.sh`/`.ps1`が`.env.local`に`PORT=4000 + Issue番号`を自動設定する（例: issue-46 → 4046）。複数Issueのworktreeで同時に`pnpm dev`を起動しても衝突せず、developへマージする前に人間がブラウザ（`http://localhost:<ポート>`）で直接画面を確認できる。実装エージェントは画面に関わる変更のPRで、このURLを「確認方法」に記載する。
+- ポート設定に加えて、開発サーバーの起動・停止も自動化されている。`start-issue.sh`は`prepare_issue()`完了後、最終的に`exec claude ...`でClaude CLIへプロセス置き換えするのではなく、新規`scripts/run-issue-session.sh`（Issue番号・devポート・プロンプトファイルパスを引数に取るラッパー）を`exec`する。このラッパーが`pnpm dev`をバックグラウンド起動（ログ・PIDは`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.{log,pid}`）したうえで、`claude`を（execせず）フォアグラウンドの子プロセスとして実行し、`trap ... EXIT HUP TERM`でclaude終了時に開発サーバーのプロセスグループを停止する。Ctrl+C（`INT`）は意図的にtrapしない（1回の押下は現在の処理の中断であることが多く、devサーバーまで止めると過剰停止になるため）。`kill -9`やWSLごとのクラッシュ等、trapで捕捉できない強制終了時はPIDファイルが残るため、`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.pid`のPIDを手動で`kill`するのがフォールバック手段になる。
 - `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
 
 ## 実装前の「計画フェーズ」要否をIssueラベルでトグルする
@@ -67,6 +68,8 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 - クローズ済みのIssueに対する`@claude`コメントやラベル操作では、計画・実装・分割のいずれも再始動しない（分割で元Issueがクローズされた後の誤爆防止。通常の`09.main`クローズ後のIssueにも同様に適用される）。
 
 ローカル実行（`scripts/start-issue.sh`）では、分割の判断・提案自体はPlan mode内で人間に提示できるが、実際のサブIssue作成や元Issueのクローズを自動化する仕組みは今のところ用意していない（人間が`gh issue create`等で手動対応する）。
+
+分割とは別に、計画提示ステップは調査中に見つかった元Issueのスコープ外の関連事項（追加対応すべき別件・副作用や懸念点など）を、承認フローを経ずにその場で新規Issueとして起票してよい（元Issue自体の実装承認とは独立。#735）。分割が「元Issueのスコープを割る」ものであるのに対し、これは「元Issueとは別の関連事項を独立Issueとして提案する」もので、本文に「起点: #<元Issue番号>」を含め、`70.confirm`ラベルを付与したうえで1回あたり目安3件までに留める。
 
 ## Issueラベルの状態遷移
 
@@ -237,6 +240,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 ## 今後作成するファイル（Phase進行に合わせて）
 
 - `scripts/start-issue.sh` / `scripts/start-issue.ps1`（Phase1）
+- `scripts/run-issue-session.sh`（Phase1、開発サーバーの自動起動・セッション終了時の自動停止を担うラッパー。#687）
 - `scripts/prompts/implementation-agent.md`（Phase1）
 - `scripts/start-reviewer.sh` / `scripts/start-reviewer.ps1`（Phase2）
 - `scripts/prompts/review-agent.md`（Phase2）
@@ -393,11 +397,13 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
 
 ### 無人実行時の権限モード（許可ツールリスト）
 
-- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。
+- **計画提示ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read"`。
   コード変更ツール（Edit/Write）は許可しない（計画提示のみで実装はしないため）。当初`gh issue`系3種のみを
   許可していたが、計画立案のための調査で`git ls-remote`・`gh pr list`・`gh api`（関連PR・ブランチ状況の確認）
   を試みて未許可コマンドとして拒否され続け、ターン数を使い切ってコメント投稿・ラベル付与に到達できない
   失敗が実際に発生した（Issue #70で確認）。読み取り専用の調査コマンドを許可リストに加えて解消した。
+  `gh issue create`は、元Issueのスコープ外の関連事項を独立Issueとして提案・起票できるようにするため
+  追加した（#735。詳細は上記「実装範囲が広いIssueをサブIssueに分割する」節末尾を参照）。
 - **実装ステップ**: `--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。
@@ -512,6 +518,30 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
    - このエラー種別判定は、アクションステップ自体の終了状態という機械的に取得できる情報のみに
      基づく簡易な推定であり、HTTPステータスコード等アクション内部のエラー詳細までは判別しない
      （ジョブログからの詳細抽出はアクション実行中のログ取得の信頼性が不確かなため見送った）。
+5. **`execution_file`出力からの失敗理由推定（#716）**: 上記のフォールバック通知は`ERROR_TYPE`
+   （一過性/恒常的）に応じた定型文言のみで、実際にClaude Codeが何をしていて止まったのかまでは
+   記録されていなかった。`anthropics/claude-code-action@v1`は`outputs.execution_file`（Claude
+   Codeの実行内容をSDKのメッセージ列としてJSONファイルへ書き出したパス。ステップが`failure`
+   終了した場合でもSDK内部の`catch`節で書き出し済みなら出力される）を公開しており、これを使うと
+   完了報告コメントの投稿に至らず終了した場合でも、そのステップが最後に何をしていたかを事後的に
+   読み取れる。これは4の「ジョブログからの詳細抽出は見送った」判断（実行中のログをリアルタイムに
+   追う方式）とは前提が異なる。今回はアクションが実行後に書き出す構造化データを事後的に読む方式
+   であり、信頼性の懸念が当てはまらないため別途採用した。
+   - `Claude Code（計画提示）`・`Claude Code（実装・PR作成）`の各フォールバック検証ステップは、
+     `steps.<id>.outputs.execution_file`を`EXECUTION_FILE`として受け取り、自動リトライを使い
+     切って諦める最終的なフォールバックコメントを投稿する直前に、`jq`で理由テキストを抽出する。
+     優先順位は「最後の`result`ターンの`subtype`・`result`」→「無ければ最後の`assistant`ターンの
+     テキスト」→「どちらも無ければ理由なし」。`subtype`が`error_max_turns`等の既知の値であれば、
+     対応する日本語の定型理由を添える。
+   - 抽出できた場合のみ、フォールバックコメント本文に理由セクションを追記する（改行除去・
+     500文字での切り詰めのうえ`<details>`で折りたたむ）。抽出に失敗しても既存の定型フォールバック
+     文言自体は従来どおり必ず投稿される（理由抽出の失敗が通知自体を壊さないようにする）。
+   - `execution_file`のJSON構造は`claude-code-action`側の内部実装詳細であり、将来のマイナー
+     アップデートでスキーマが変わりうる。`jq`抽出は全て`// empty`等でフォールバックする。
+   - 抽出した理由（Claude自身の最終発言やSDKのエラーテキストの一部）は、Actionsのステップ
+     サマリ（`show_full_output: true`で既に出力されている）よりも到達性の高いIssueコメントとして
+     投稿されるため、コード片や内部パスが混ざる可能性がある。`<details>`での折りたたみ・文字数
+     制限は行うが、この可視性の変化自体は許容している。
 
 ### 使用するモデルの設定（#622）
 
@@ -694,7 +724,7 @@ screenshots.sh`側で`--`が単独の第1引数として渡された場合はこ
    （`src/lib/ci-auth-bypass.ts`の`CI_BYPASS_COOKIE_NAME`）をセットしたうえで撮影対象へ
    アクセスし、スクリーンショットを撮影する。
    - **対象パスを明示指定した場合**: そのパスをデスクトップビューポート（1440x900）と
-     モバイルデバイスプリセット（`devices['iPhone 13']`）の両方で撮影する（`desktop.png`・
+     モバイルデバイスプリセット（`devices['iPhone 15']`）の両方で撮影する（`desktop.png`・
      `mobile.png`の2枚）。
    - **対象パスを省略した場合（フォールバック）**: デスクトップは`/dashboard`1枚
      （`desktop.png`）、モバイルはホーム（`/dashboard`、`mobile-home.png`）・イシュー一覧
@@ -773,10 +803,24 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 - `push`（`develop`）: developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、最も速報性が
   高い経路としてその都度検知する。
-- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push直後の検知時点では
-  まだ計算が終わっておらず`UNKNOWN`のままの場合がある。取りこぼしを拾い直す安全網として、
-  `issue-labels.yml`の各scheduleジョブと同じ間隔で走査する。
+- `pull_request`（`develop`向け、`opened`/`reopened`）: develop向けPRが作成された直後、既に
+  developとコンフリクトした状態で生まれるケース（issue #715）を即座に拾うため。`synchronize`
+  （PRへの追加push毎）は含めない。実装エージェントが1つのIssueに対して何度も細かくpushする間、
+  毎回`detect-conflicts`から`resolve-conflicts`のmatrixジョブが走ると、`resolve-conflicts`が
+  使う同じ`issue-dispatch-<番号>-branch`concurrencyグループ内で実装ステップ自体と噛み合い
+  キューが詰まる懸念があるため。developが動いてPRがコンフリクトに変化するケースは既存の
+  `push`（`develop`）トリガーでカバーされる。
+- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push・pull_request
+  直後の検知時点ではまだ計算が終わっておらず`UNKNOWN`のままの場合がある。`detect-conflicts`の
+  ポーリング（下記）でも解消しきれなかった取りこぼしを拾い直す安全網として、`issue-labels.yml`の
+  各scheduleジョブと同じ間隔で走査する。
 - `workflow_dispatch`: 手動実行用。
+
+`detect-conflicts`は、`issue-<番号>`命名規約に従うdevelop向けPRの中に`mergeable`が`UNKNOWN`
+（判定計算未完了）のものが残っている間、10秒間隔・最大6回（計1分程度）ポーリングして再取得する。
+`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、「計算未完了
+イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。このポーリングは
+`push`・`schedule`トリガーの既存挙動にも同様に効く。
 
 ### 既存の実装ワークフローとの競合回避
 

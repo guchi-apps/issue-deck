@@ -238,6 +238,16 @@ issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし
   issue-deckと同一の内容で**既に全て作成済み**。issue #3（「ログイン機能を実装する」）は実際に
   `09.main`まで遷移して運用されている。少なくともshopping-listに関しては「ラベル体系の可変化」は
   課題にならず、`gh label create`による自動作成も不要。
+  - **補記（2026-08-08、実際の導入時に判明）**: 上記は調査時点（2026-08-04）の記述であり、その後
+    issue-deck側で#638の「進捗管理ラベルの見直し」によりラベルが世代交代したため、実際に導入した
+    時点では**差異ゼロではなくなっていた**。shopping-list側は旧世代（`01.wip`単独、
+    `22.preview-required`/`23.screenshot-required`）のまま止まっており、issue-deck現行の
+    `01.planning`+`02.wip`分割・`22.merge-confirm-required`追加・preview/screenshotの23/24への
+    繰り上げに合わせたリネーム・追加が必要だった。ワークフロー側はラベル名をハードコードしている
+    ため、この不一致は`gh issue edit --add-label`の実行時エラーとして現れる。
+    **他リポジトリへ展開する際は、既にラベルが揃っているように見えても、
+    [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」の定義および
+    `scripts/check-label-diff.sh`で必ず現行世代との差分を確認すること。**
 - **セキュリティ・信頼境界（上記6）**: コラボレーターがリポジトリオーナー1名のみのプライベート
   相当構成であり、「第三者コントリビューターのフォークPRから秘匿情報が漏れる」類のリスクは現状
   存在しない。issue-deckと同じ`github.actor`のwrite権限確認で十分と考えられる。

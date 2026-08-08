@@ -90,6 +90,9 @@ model Repository {
   htmlUrl            String
   archived           Boolean   @default(false)
   defaultBranch      String
+  // claude-issue-dispatch.ymlの存在有無による近似的な対応判定（#720）。DBに保存し、
+  // リポジトリ同期のタイミング（GitHub Appインストール時・リポジトリ再同期時）で更新する。
+  hasClaudeWorkflow  Boolean   @default(false)
   lastSyncedAt       DateTime?
 
   createdAt DateTime @default(now())
@@ -172,6 +175,16 @@ model Issue {
   // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
   // 並べるための基準）。ラベルが外れるとnullに戻す
   checkUserLabeledAt DateTime?
+
+  // 「Claudeに質問する」ダイアログ経由の質問コメント（isAskClaudeQuestionComment）が
+  // 投稿された日時。一覧画面はissueごとにコメント本文を取得しないため、Webhook
+  // （issue_comment created）で質問コメントを検知した時点で記録し、対応する回答コメント
+  // （isQaAnswerComment）が投稿されたらnullに戻す近似値として使う
+  qaAnswerPendingAt DateTime?
+
+  // 実際に最後にコメントが投稿された日時（issue_comment Webhookのaction=createdで記録）。
+  // 確認待ちフィルターのソート基準はcheckUserLabeledAtよりこちらを優先する
+  lastCommentAt DateTime?
 
   // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
   aiSummary             String?   @db.Text
@@ -301,6 +314,18 @@ model AppSetting {
   autoRetryLimit Int      @default(0)
   claudeModel    String   @default("auto")
   updatedAt      DateTime @updatedAt
+}
+
+// Fine-grained PAT（例: secrets.WORKFLOW_PAT）等、有効期限を追跡したいトークンの管理台帳。
+// GitHub側は発行済みトークンの実際の有効期限をAPIで取得できないため、GitHubのPAT設定画面で
+// 確認した有効期限をユーザーが手入力で登録する運用とする（#759）。全リポジトリ共通の設定。
+model FineGrainedToken {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model IssueLabel {

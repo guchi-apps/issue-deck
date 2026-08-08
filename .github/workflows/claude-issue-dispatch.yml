@@ -126,6 +126,15 @@ name: Claude Issue Dispatch
 # 場合は、どのフォールバックも動かずIssue側に痕跡が一切残らない。これを拾うために、dispatchとは
 # 独立したnotify-failureジョブで起動失敗を通知する(#650)。
 #
+# 自動リトライを使い切って諦める最終的なフォールバックコメントには、直前のClaude Codeステップ
+# (claude_plan・claude_implement)のexecution_file出力(anthropics/claude-code-action@v1が
+# 公開する、SDKのメッセージ列を書き出したJSONファイルへのパス。ステップがfailure終了しても
+# SDK内部で書き出し済みなら出力される)から、最後のresultターンのsubtype/result、無ければ
+# 最後のassistantターンのテキストを抽出し、参考情報として折りたたみ表示する(#716)。
+# execution_fileのJSON構造はclaude-code-action側の内部実装詳細のため、抽出は全て
+# `// empty`等でフォールバックし、失敗しても理由セクションを省略するだけでフォールバック
+# コメント自体は従来どおり必ず投稿される。
+#
 # ジョブは triage → dispatch → notify-failure の3段構成(#651)。
 #   triage        : 実行者の権限・issueの状態を判定してmodeを決める。concurrency・services・uses:
 #                   のいずれも持たず即時実行される。受理を示す👀リアクションと、mode=skipのうち
@@ -638,29 +647,72 @@ jobs:
         # workflow_dispatch起動(計画/実装フォールバック検証ステップからの自己リトライ、#497)では、
         # フォールバック検証ステップ側が専用の「自動リトライします」コメントを既に投稿しているため、
         # ここでの重複した「対応確認しました」系コメントは投稿しない。
+        #
+        # トリガーとなったコメントの直前のコメントがフォールバック通知
+        # (`<!-- issue-deck-fallback-notice -->`、`src/lib/github/fallback-notice.ts`と同じ判定基準)
+        # だった場合、それはシステムが勝手に自動で再試行したのではなく、フォールバック通知を見た
+        # 使用者自身が`@claude`で再依頼した結果である。しかしこのステップの文言は従来その区別をせず
+        # 常に同一だったため、使用者からは「なぜ同じ通知が2回来たのか」が分からず、不安になって
+        # 重複して再依頼してしまう一因になっていた(#747)。そのため直前コメントを判定し、再試行で
+        # あることが分かる一文を付け加える。
         if: github.event_name != 'workflow_dispatch' && (steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask')
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -e
+
+          # トリガーコメントの1つ前のコメント本文を取得する。issue_comment以外(00.check-user
+          # unlabeledイベント)はトリガーとなったコメント自体が存在しないため対象外。
+          # コメント一覧のidはGraphQLノードIDでREST(github.event.comment.id)と一致しないため、
+          # `#issuecomment-<REST ID>`で終わるurlで対応するコメントを特定する。
+          PREV_BODY=""
+          if [ "${{ github.event_name }}" = "issue_comment" ] && [ -n "$COMMENT_ID" ]; then
+            COMMENTS_JSON="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments')"
+            PREV_BODY="$(printf '%s' "$COMMENTS_JSON" | jq -r --arg cid "$COMMENT_ID" '
+              (map(.url | endswith("#issuecomment-" + $cid)) | index(true)) as $idx
+              | if $idx == null or $idx == 0 then "" else .[$idx - 1].body end
+            ')"
+          fi
+
+          IS_RETRY=false
+          if [ "$(printf '%s' "$PREV_BODY" | tail -n1)" = "<!-- issue-deck-fallback-notice -->" ]; then
+            IS_RETRY=true
+          fi
+
+          RETRY_NOTE_ASK=""
+          RETRY_NOTE_PLAN=""
+          RETRY_NOTE_SPLIT=""
+          RETRY_NOTE_ADD=""
+          RETRY_NOTE_IMPL=""
+          if [ "$IS_RETRY" = "true" ]; then
+            RETRY_NOTE_ASK="（前回の回答提示が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_PLAN="（前回の計画提示が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_SPLIT="（前回の分割が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_ADD="（前回の対応報告が完了しなかったため、続けて再試行します）"
+            RETRY_NOTE_IMPL="（前回の実装結果の報告が完了しなかったため、続けて再試行します）"
+          fi
+
           if [ "${{ steps.state.outputs.mode }}" = "ask" ]; then
-            BODY='🤔 ご質問を確認しました。回答をまとめています。'
+            BODY="🤔 ご質問を確認しました${RETRY_NOTE_ASK}。回答をまとめています。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
-            BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+            BODY="🔍 依頼を確認しました${RETRY_NOTE_PLAN}。実装前の計画を検討します（まとまり次第このIssueにコメントします）。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
-            BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
+            BODY="🔀 承認された計画に沿って、このIssueをサブIssueに分割します${RETRY_NOTE_SPLIT}（完了次第このIssueにコメントします）。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ] && [ -n "${{ steps.state.outputs.pr_url }}" ]; then
-            BODY="🔧 依頼を確認しました。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
+            BODY="🔧 依頼を確認しました${RETRY_NOTE_ADD}。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
             AGENT_ROLE=implementer
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
+            # このケースはPRが無く02.wipのまま詰まった状態からの再開であり、文言自体が既に
+            # 前回の実装が完了しなかったことを説明しているため、RETRY_NOTEは付け加えない。
             BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
             AGENT_ROLE=implementer
           else
-            BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
+            BODY="🔧 依頼を確認しました${RETRY_NOTE_IMPL}。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
             AGENT_ROLE=implementer
           fi
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
@@ -695,7 +747,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
@@ -767,14 +819,34 @@ jobs:
                 「このサブIssueには21.plan-requiredが必要」と書き添えてよい（実際のラベル付与は
                 分割を実行するステップが行う）
 
+            ## 分割とは別に、関連する新しいIssueを提案・作成してよい場合
+            上記の「分割」は元Issueのスコープそのものを複数のサブIssueに割るためのものですが、それとは別に、
+            調査中に見つかった元Issueのスコープ外の関連事項（追加で対応すべきと判断した別件、副作用や懸念点
+            など）に気づいた場合は、以下の条件で独立した新規Issueとして起票してよいです。
+
+            - 元Issue自体の実装はまだ承認待ちのままで構いません。承認フローを経ずに、この計画提示ステップの
+              中でそのまま `gh issue create --title "..." --body "..."` を実行してよいです
+            - 新規Issueの本文には、元Issueへのトレーサビリティのため「起点: #${{ steps.state.outputs.issue_number }}」を
+              含め、元Issueを読み返さなくても単独で内容が伝わる程度に背景・要件を書いてください
+            - Issue本文を `@claude` から書き始めないでください（`claude-issue-dispatch.yml`の
+              `startsWith("@claude")` トリガーの誤爆防止のため）
+            - 起票した新規Issueには `--label "70.confirm"` を付与してください。人間が着手要否を判断するまでは
+              `02.wip` 等の実装フローに自動で乗らないようにするためです
+            - 暴発防止のため、1回の計画提示ステップで新規作成するIssueは目安3件程度までとしてください。
+              それを超える提案がある場合、無理に全部作らず、残りは計画コメント本文に箇条書きで記載するに
+              とどめてください
+            - 新規作成したIssueがある場合は、元Issueへの計画コメント本文にも `#<番号>` の形式で一覧を明記して
+              ください（後から元Issueを読み返した人にも分かるようにするため）
+
             ## 迷った場合・調査に行き詰まった場合の振る舞い
             - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
               分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
               （コメントを一切投稿できないまま終了することが最悪の結果のため）
 
             ## このステップでは行わないこと
-            - コードの変更・コミット・ブランチ作成・PR作成・Issueの新規作成は一切行わない（計画提示のみ。
-              分割を計画した場合も、実際のサブIssue作成はこのステップでは行わない）
+            - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ。分割を計画した場合も、
+              実際のサブIssue作成はこのステップでは行わない）。ただし、上記「分割とは別に、関連する新しい
+              Issueを提案・作成してよい場合」に該当する新規Issueの起票は例外的に行ってよい
 
             ## 次に起きること
             人間が計画を確認し、問題なければIssueから `00.check-user` ラベルを外します。それをもって承認と
@@ -793,6 +865,11 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
           CLAUDE_STEP_OUTCOME: ${{ steps.claude_plan.outcome }}
+          # claude-code-actionの正式な出力(action.ymlで公開)。SDKが書き出したメッセージ列
+          # (Turn[]相当。system/assistant/user/resultの各typeを持つ)へのパスで、Claude Code
+          # ステップがfailure終了した場合でもSDK内部のcatch節で書き出し済みなら出力される
+          # (base-action/src/run-claude-sdk.ts)。フォールバック理由の推定表示(#716)に使う。
+          EXECUTION_FILE: ${{ steps.claude_plan.outputs.execution_file }}
           # APP_BASE_URL未設定・API到達不可等でリポジトリ共通のAUTO_RETRY_LIMITを取得できない
           # 環境でも、一過性障害(ERROR_TYPE=transient)と判定した場合にだけ適用する最低限の
           # リトライ回数(#621)。一過性のGitHub API障害はリトライで解消する可能性が高い一方、
@@ -874,6 +951,41 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
+
+          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。抽出優先順位は
+          # 1.最後のresultターンのresult(subtypeも既知の値なら定型理由を添える) 2.無ければ
+          # 最後のassistantターンのテキスト 3.どちらも無ければ理由セクション自体を省略する。
+          # execution_fileはclaude-code-action内部の実装詳細でスキーマが変わりうるため、
+          # jqは全て`// empty`等でフォールバックし、抽出に失敗してもフォールバックコメント
+          # 自体は必ず投稿する(理由抽出の失敗が通知を壊さないようにする)。
+          REASON=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+            REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            if [ -z "$REASON" ]; then
+              REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            fi
+            case "$RESULT_SUBTYPE" in
+              error_max_turns) SUBTYPE_HINT="ターン数の上限に達したため、投稿まで到達できなかった可能性があります。" ;;
+              error_during_execution) SUBTYPE_HINT="実行中にエラーが発生したため、投稿まで到達できなかった可能性があります。" ;;
+              *) SUBTYPE_HINT="" ;;
+            esac
+            if [ -n "$SUBTYPE_HINT" ]; then
+              if [ -n "$REASON" ]; then
+                REASON="$SUBTYPE_HINT $REASON"
+              else
+                REASON="$SUBTYPE_HINT"
+              fi
+            fi
+            # Issueコメントが極端に長くならないよう切り詰める
+            if [ "${#REASON}" -gt 500 ]; then
+              REASON="${REASON:0:500}…"
+            fi
+          fi
+          if [ -n "$REASON" ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
+          fi
+
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
@@ -1292,7 +1404,7 @@ jobs:
                    （例: `-- ${{ steps.state.outputs.issue_number }} /dashboard`）。ダッシュボード内の
                    特定の状態（モーダル・フィルタ等）を対象にしたい場合はクエリパラメータ付きの
                    URLパスを指定してもよい。この場合、指定したパスをデスクトップビューポートと
-                   モバイルデバイスプリセット（`devices['iPhone 13']`）の両方で撮影し、raw URLを
+                   モバイルデバイスプリセット（`devices['iPhone 15']`）の両方で撮影し、raw URLを
                    標準出力に2行（1行目がデスクトップ、2行目がモバイル）で出力する。
                  - 対応箇所のパスの判断が難しい場合: 無理に推測せず第2引数を省略してよい。この場合、
                    自動的にデスクトップは`/dashboard`1枚、モバイルはホーム・イシュー一覧・イシュー詳細
@@ -1370,6 +1482,9 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
           CLAUDE_STEP_OUTCOME: ${{ steps.claude_implement.outcome }}
+          # 計画提示ステップのフォールバック検証ステップと同じ考え方(#716)。フォールバック
+          # 理由の推定表示に使う(詳細は計画提示ステップ側のコメントを参照)。
+          EXECUTION_FILE: ${{ steps.claude_implement.outputs.execution_file }}
           # 計画提示ステップと同じ考え方(#621)。APP_BASE_URL未設定等でリポジトリ共通の
           # AUTO_RETRY_LIMITを取得できない環境でも、一過性障害と判定した場合にだけ適用する
           # 最低限のリトライ回数。
@@ -1467,6 +1582,38 @@ jobs:
           if [ "$RETRY_ATTEMPT" -gt 0 ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
+
+          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。計画提示ステップの
+          # フォールバック検証ステップと同じ抽出ロジック(優先順位・既知subtypeの定型理由・
+          # 文字数制限・抽出失敗時は理由セクションを省略するのみ)。
+          REASON=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+            REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            if [ -z "$REASON" ]; then
+              REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
+            fi
+            case "$RESULT_SUBTYPE" in
+              error_max_turns) SUBTYPE_HINT="ターン数の上限に達したため、投稿まで到達できなかった可能性があります。" ;;
+              error_during_execution) SUBTYPE_HINT="実行中にエラーが発生したため、投稿まで到達できなかった可能性があります。" ;;
+              *) SUBTYPE_HINT="" ;;
+            esac
+            if [ -n "$SUBTYPE_HINT" ]; then
+              if [ -n "$REASON" ]; then
+                REASON="$SUBTYPE_HINT $REASON"
+              else
+                REASON="$SUBTYPE_HINT"
+              fi
+            fi
+            # Issueコメントが極端に長くならないよう切り詰める
+            if [ "${#REASON}" -gt 500 ]; then
+              REASON="${REASON:0:500}…"
+            fi
+          fi
+          if [ -n "$REASON" ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
+          fi
+
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

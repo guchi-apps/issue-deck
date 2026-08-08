@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
@@ -49,7 +50,11 @@ function toIssueStateReason(
   }
 }
 
-async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
+async function upsertIssueRow(
+  repositoryId: string,
+  raw: GithubApiIssue,
+  commentCreatedAt?: Date,
+) {
   const githubUpdatedAt = new Date(raw.updated_at);
 
   const existing = await db.issue.findUnique({
@@ -61,6 +66,14 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     // （新しいラベル状態が古い状態で上書きされるのを防ぐ）。
     return existing;
   }
+
+  // 「確認待ちフィルターを実際のコメント投稿日時順に並べる」ための基準時刻。
+  // issue_comment Webhook（action=created）から渡された投稿日時を、既存の記録値より
+  // 新しい場合のみ採用する（配信順序が前後しても新しい方を優先するガード）
+  const lastCommentAt =
+    commentCreatedAt && (!existing?.lastCommentAt || commentCreatedAt > existing.lastCommentAt)
+      ? commentCreatedAt
+      : existing?.lastCommentAt ?? null;
 
   // 「確認待ちフィルターを確認が古い順に並べる」ための基準時刻。00.check-userが新たに
   // 付与された瞬間をcheckUserLabeledAtとして記録し、外れたらnullに戻す。既存Issueで
@@ -93,6 +106,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
     checkUserLabeledAt,
+    lastCommentAt,
   };
 
   const issue = await db.issue.upsert({
@@ -147,12 +161,38 @@ export async function syncRepositoryIssues(repository: RepoForSync): Promise<voi
 export async function upsertIssueFromWebhookPayload(
   repositoryId: string,
   issuePayload: GithubApiIssue,
+  commentCreatedAt?: Date,
 ): Promise<void> {
-  await upsertIssueRow(repositoryId, issuePayload);
+  await upsertIssueRow(repositoryId, issuePayload, commentCreatedAt);
 }
 
 export async function deleteIssueByGithubId(githubIssueId: number): Promise<void> {
   await db.issue.deleteMany({ where: { githubIssueId: BigInt(githubIssueId) } });
+}
+
+/**
+ * issue_comment（created）Webhookで届いた新規コメント本文から、質問への回答待ち状態
+ * （qaAnswerPendingAt）を更新する。質問コメント（isAskClaudeQuestionComment）なら現在時刻を
+ * セットし、回答コメント（isQaAnswerComment）ならnullに戻す。それ以外の通常コメントでは
+ * 何もしない（既存の状態を維持する）。
+ */
+export async function updateQaAnswerPendingState(
+  githubIssueId: number,
+  commentBody: string,
+): Promise<void> {
+  if (isAskClaudeQuestionComment({ body: commentBody })) {
+    await db.issue.updateMany({
+      where: { githubIssueId: BigInt(githubIssueId) },
+      data: { qaAnswerPendingAt: new Date() },
+    });
+    return;
+  }
+  if (isQaAnswerComment({ body: commentBody })) {
+    await db.issue.updateMany({
+      where: { githubIssueId: BigInt(githubIssueId) },
+      data: { qaAnswerPendingAt: null },
+    });
+  }
 }
 
 export async function upsertIssueAndGetDisplay(

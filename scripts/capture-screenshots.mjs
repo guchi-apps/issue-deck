@@ -49,16 +49,14 @@ const targets = targetArgs.map((arg) => {
 
 const hostname = new URL(baseUrl).hostname;
 
-// モバイル画面（src/components/dashboard/mobile/配下）は「ヘッダー固定+内部
-// overflow-y-autoで本文をスクロールする」構成のものが多く、iPhone 13実機相当の
-// viewport高さ（844px）のままだとコンテンツがそのdiv内スクロール領域に収まりきらず、
-// documentの高さ自体は変わらないため`page.screenshot({ fullPage: true })`では
-// スクロールしないと見えない範囲が撮影できない（#572）。撮影専用なので実機の見た目を
-// 再現する必要はなく、内部スクロール分もまとめて1枚に収まるよう高さだけ大きく確保する。
-const MOBILE_DEVICE = {
-  ...devices["iPhone 13"],
-  viewport: { ...devices["iPhone 13"].viewport, height: 2400 },
-};
+// Issue #713: 実際のiPhone 15のスクリーンショットに近い見た目にするため、viewportは
+// devices["iPhone 15"]（393x852）をそのまま使う。#572時点ではモバイル画面（src/components/
+// dashboard/mobile/配下、ヘッダー固定+内部overflow-y-autoで本文をスクロールする構成）の
+// 内部スクロール領域も1枚に収めるためviewport高さを2400まで拡張しfullPage撮影していたが、
+// 実機ではあり得ない縦長画像になってしまっていた。実機同様のviewportサイズのまま
+// （`fullPage: false`で）撮影し、内部スクロール領域は下記のとおり撮影直前に最下部へ
+// スクロールしておくことで、はみ出す内容は「スクロール後の見え方」として1枚に収める。
+const MOBILE_DEVICE = devices["iPhone 15"];
 
 async function capture({ name, targetPath, device }) {
   const targetUrl = new URL(targetPath, baseUrl).toString();
@@ -81,10 +79,11 @@ async function capture({ name, targetPath, device }) {
     // 落ち着くまでの猶予（#572: コメント取得はクライアント側useEffect経由のため、
     // 短すぎると撮影時点で反映されないことがある）。
     await page.waitForTimeout(4000);
-    // Issue詳細画面のコメント欄はヘッダー固定+内部overflow-y-autoのため、外側ページの
-    // fullPage撮影だけでは下端（承認待ちカード等）が写らない。src/components/dashboard/
-    // issue-detail.tsx・mobile/mobile-issue-detail.tsxが目印として付与している
-    // data-capture-scroll-bottom要素を撮影前に最下部までスクロールしておく。
+    // Issue詳細画面のコメント欄はヘッダー固定+内部overflow-y-autoのため、モバイルは
+    // viewportそのままの撮影（下記のとおりfullPage: false）だと下端（承認待ちカード等）が
+    // 写らない。src/components/dashboard/issue-detail.tsx・mobile/mobile-issue-detail.tsxが
+    // 目印として付与しているdata-capture-scroll-bottom要素を撮影前に最下部までスクロール
+    // しておく。
     await page.evaluate(() => {
       document.querySelectorAll("[data-capture-scroll-bottom]").forEach((element) => {
         element.scrollTop = element.scrollHeight;
@@ -92,7 +91,10 @@ async function capture({ name, targetPath, device }) {
     });
     await page.waitForTimeout(200);
     const filePath = path.join(outDir, `${name}.png`);
-    await page.screenshot({ path: filePath, fullPage: true });
+    // Issue #713: モバイルは実機のviewportサイズそのままの見た目にするため`fullPage: false`
+    // （viewportに写っている範囲のみ）で撮影する。デスクトップ画面（/dashboard）は元々
+    // 縦に長いレイアウトのため、従来どおりページ全体をfullPageで撮影する。
+    await page.screenshot({ path: filePath, fullPage: device !== "mobile" });
     console.error(`撮影しました: ${filePath} (${targetUrl})`);
   } finally {
     await browser.close();

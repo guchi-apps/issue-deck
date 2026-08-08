@@ -113,14 +113,16 @@ export function applyIssueFilters(
 
 /**
  * 「ユーザーの確認待ち」ビュー（view=check-user）では、TopBarの並び順選択によらず
- * 確認待ちになった日時（checkUserLabeledAt）の古い順に固定する。先に確認待ちになった
- * Issueから順番に確認してもらうため。日時が取れないIssue（マイグレーション前から
- * ラベルが付いていた等）は最も古いものとして先頭に寄せる。
+ * 確認待ちの起点となった日時の古い順に固定する。先に確認待ちになったIssueから順番に
+ * 確認してもらうため。実際の未読コメント投稿日時（lastCommentAt）を優先し、
+ * Webhook経由でまだ記録されていないIssueは00.check-userラベルが付与された日時
+ * （checkUserLabeledAt）にフォールバックする。どちらも取れないIssueは最も古いものとして
+ * 先頭に寄せる。
  */
 export function sortIssues(issues: Issue[], sort: IssueSort, view?: NavViewId): Issue[] {
   if (view === "check-user") {
     return [...issues].sort(
-      (a, b) => checkUserLabeledAtTime(a) - checkUserLabeledAtTime(b),
+      (a, b) => checkUserPendingSinceTime(a) - checkUserPendingSinceTime(b),
     );
   }
 
@@ -131,8 +133,9 @@ export function sortIssues(issues: Issue[], sort: IssueSort, view?: NavViewId): 
   );
 }
 
-function checkUserLabeledAtTime(issue: Issue): number {
-  return issue.checkUserLabeledAt ? new Date(issue.checkUserLabeledAt).getTime() : -Infinity;
+function checkUserPendingSinceTime(issue: Issue): number {
+  const basis = issue.lastCommentAt ?? issue.checkUserLabeledAt;
+  return basis ? new Date(basis).getTime() : -Infinity;
 }
 
 /**

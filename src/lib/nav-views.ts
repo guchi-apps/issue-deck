@@ -98,19 +98,25 @@ export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
 }
 
 /**
- * navViews上でidの1つ前・1つ後のビューIDを返す（スマホ一覧のスワイプ切り替え用、#706）。
- * 先頭/末尾でそれ以上進められない場合や、idがnavViewsに存在しない場合はnullを返す
- * （ループはしない）。
+ * 指定した並び順（省略時はnavViews）上でidの1つ前・1つ後のビューIDを返す
+ * （スマホ一覧のスワイプ切り替え用、#706）。先頭/末尾でそれ以上進められない場合や、
+ * idがorderに存在しない場合はnullを返す（ループはしない）。
+ *
+ * orderを引数で受け取れるようにしているのは、スマホのタブ表示順（#714で
+ * 「すべてのIssue」の右隣にユーザーの確認待ちを固定表示するようnavViewsとは
+ * 異なる順序に変更済み）とスワイプの前後判定がズレていると、タブ上は隣り合って
+ * 見えるビューにスワイプしても切り替わらず順番がおかしく感じられるため（#734）。
  */
 export function getAdjacentNavViewId(
   id: NavViewId,
   direction: "prev" | "next",
+  order: readonly NavView[] = navViews,
 ): NavViewId | null {
-  const index = navViews.findIndex((view) => view.id === id);
+  const index = order.findIndex((view) => view.id === id);
   if (index === -1) return null;
 
   const adjacentIndex = direction === "next" ? index + 1 : index - 1;
-  return navViews[adjacentIndex]?.id ?? null;
+  return order[adjacentIndex]?.id ?? null;
 }
 
 /**
