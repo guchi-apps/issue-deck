@@ -17,6 +17,12 @@ export type BumpPullRequest = ReleasePullRequest & {
   version: string | null;
   /** バンプPR本文の「## バージョンの判断根拠」セクションから抜き出した判断根拠。取得できない場合はnull */
   reason: string | null;
+  /**
+   * バンプPR本文の「## 更新履歴（生成された利用者向け文言）」セクションから抜き出した更新履歴。
+   * "version" npm lifecycleスクリプトで更新履歴を消費する仕組みを導入していないリポジトリでは
+   * このセクション自体がPR本文に現れないためnull
+   */
+  changelog: string | null;
 };
 
 export type ReleaseWorkflowRun = {

@@ -4,7 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { extractBumpReason } from "@/lib/github/release-bump-reason";
+import { extractBumpChangelog, extractBumpReason } from "@/lib/github/release-bump-reason";
 import {
   dispatchReleaseWorkflow,
   fetchLatestDeployWorkflowRun,
@@ -135,6 +135,7 @@ async function handleGET(request: NextRequest) {
             ciState: bumpCiState,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
+            changelog: extractBumpChangelog(bumpPr.body),
           }
         : null,
       releasePullRequest: releasePr

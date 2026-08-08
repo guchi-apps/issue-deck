@@ -32,6 +32,8 @@ type Step = {
   note?: string;
   /** noteより長い補足文（バージョンバンプの判断根拠など、複数行になりうるもの） */
   detail?: string;
+  /** バンプPR本文の「## 更新履歴（生成された利用者向け文言）」セクションから抜き出した更新履歴 */
+  changelog?: string;
   /** マージ待ちPRの最新コミットのCI状態。バッジとして表示する */
   ciState?: CiState | null;
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
@@ -101,6 +103,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].state = "done";
     steps[0].note = bump.version ? `次バージョン: v${bump.version}` : undefined;
     steps[0].detail = bump.reason ?? undefined;
+    steps[0].changelog = bump.changelog ?? undefined;
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
@@ -239,9 +242,20 @@ export function ReleaseProgress({
               )}
             </div>
             {step.detail && (
-              <p className="ml-6 max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-line text-muted-foreground">
-                {step.detail}
-              </p>
+              <div className="ml-6 flex flex-col gap-0.5">
+                <span className="text-xs font-medium text-muted-foreground">判断根拠</span>
+                <p className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-line text-muted-foreground">
+                  {step.detail}
+                </p>
+              </div>
+            )}
+            {step.changelog && (
+              <div className="ml-6 flex flex-col gap-0.5">
+                <span className="text-xs font-medium text-muted-foreground">更新履歴（利用者向け）</span>
+                <p className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-line text-muted-foreground">
+                  {step.changelog}
+                </p>
+              </div>
             )}
             {step.action && (
               <a

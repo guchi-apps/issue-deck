@@ -73,10 +73,46 @@ describe("ReleaseProgress CI状態バッジ", () => {
             ciState: "failure",
             version: "1.1.0",
             reason: null,
+            changelog: null,
           },
         })}
       />,
     );
     expect(screen.getByText("CI失敗")).not.toBeNull();
+  });
+});
+
+describe("ReleaseProgress 更新履歴表示", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function statusWithBump(reason: string | null, changelog: string | null): AvailableReleaseStatus {
+    return makeStatus({
+      phase: "bump_pr_open",
+      bumpPullRequest: {
+        number: 7,
+        url: "https://example.com/pr/7",
+        title: "bump",
+        ciState: null,
+        version: "1.1.0",
+        reason,
+        changelog,
+      },
+    });
+  }
+
+  it("changelogがある場合は更新履歴を判断根拠と並べて表示する", () => {
+    render(<ReleaseProgress status={statusWithBump("判断根拠のテキスト", "更新履歴のテキスト")} />);
+    expect(screen.getByText("判断根拠")).not.toBeNull();
+    expect(screen.getByText("判断根拠のテキスト")).not.toBeNull();
+    expect(screen.getByText("更新履歴（利用者向け）")).not.toBeNull();
+    expect(screen.getByText("更新履歴のテキスト")).not.toBeNull();
+  });
+
+  it("changelogが無い場合は更新履歴のボックスを表示しない", () => {
+    render(<ReleaseProgress status={statusWithBump("判断根拠のテキスト", null)} />);
+    expect(screen.getByText("判断根拠のテキスト")).not.toBeNull();
+    expect(screen.queryByText("更新履歴（利用者向け）")).toBeNull();
   });
 });
