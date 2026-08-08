@@ -694,7 +694,7 @@ screenshots.sh`側で`--`が単独の第1引数として渡された場合はこ
    （`src/lib/ci-auth-bypass.ts`の`CI_BYPASS_COOKIE_NAME`）をセットしたうえで撮影対象へ
    アクセスし、スクリーンショットを撮影する。
    - **対象パスを明示指定した場合**: そのパスをデスクトップビューポート（1440x900）と
-     モバイルデバイスプリセット（`devices['iPhone 13']`）の両方で撮影する（`desktop.png`・
+     モバイルデバイスプリセット（`devices['iPhone 15']`）の両方で撮影する（`desktop.png`・
      `mobile.png`の2枚）。
    - **対象パスを省略した場合（フォールバック）**: デスクトップは`/dashboard`1枚
      （`desktop.png`）、モバイルはホーム（`/dashboard`、`mobile-home.png`）・イシュー一覧
