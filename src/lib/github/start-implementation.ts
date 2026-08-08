@@ -92,6 +92,19 @@ export function startImplementationOptionsFromLabels(labels: IssueLabel[]): Star
 }
 
 /**
+ * 「作成＋実装開始」時に、Issue作成と同時に付与すべきラベル一覧を返す。
+ * オプション選択画面（実装オプション用チェックボックス）は既にIssue作成画面と共通のため、
+ * 選択済みラベルにはオプションの実装オプション用ラベルが含まれている。ここではそれに加えて、
+ * 「計画が必要」の選択有無に応じた進捗状況ラベル（01.planning/02.wip）を付与する。
+ */
+export function startImplementationLabelsForCreate(selectedLabels: string[]): string[] {
+  const progressLabel = selectedLabels.includes(PLAN_REQUIRED_LABEL)
+    ? PLANNING_LABEL_NAME
+    : WIP_LABEL_NAME;
+  return [...new Set([...selectedLabels, progressLabel])];
+}
+
+/**
  * 未着手（実装状況ラベルが無く、承認待ちでもない）openなissueでのみ
  * 「実装を開始」ボタンを表示する。着手済みissueでは通常のコメント欄から
  * 追加対応(additional)を依頼できるため、このボタンは初回起動専用。
