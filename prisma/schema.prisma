@@ -20,6 +20,9 @@ model User {
   email             String?
   image             String?
   githubAccessToken String? @db.Text
+  // 失効時に自動延長を試みるためのrefresh_token（githubAccessToken同様に暗号化して保存）。
+  // Supabase Auth側の設定によっては払い出されず、その場合はnullのまま（現状どおり再ログイン導線にフォールバック）
+  githubRefreshToken String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

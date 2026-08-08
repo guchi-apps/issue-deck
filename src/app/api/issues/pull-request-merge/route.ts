@@ -6,6 +6,7 @@ import { mergePullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -18,6 +19,8 @@ async function findRepository(userId: string, owner: string, repo: string) {
 }
 
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("pull_request_merge", () => handlePOST(request));
 }
 

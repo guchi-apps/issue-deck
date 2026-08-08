@@ -1,15 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  KeyRound,
-  LogOut,
-  RefreshCw,
-  Settings,
-  ShieldCheck,
-} from "lucide-react";
+import { Activity, AlertTriangle, KeyRound, LogOut, RefreshCw, Settings } from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -40,7 +32,6 @@ import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useNow } from "@/hooks/use-now";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
 import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
-import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
@@ -115,50 +106,6 @@ export function MobileSettingsScreen({
           </div>
         </button>
 
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <p className="text-xs font-medium text-muted-foreground">GitHub API使用量</p>
-          <GithubRateLimitList
-            data={rateLimits}
-            isLoading={rateLimitsLoading}
-            error={rateLimitsError}
-          />
-          <GithubApiUsageList
-            data={apiUsage}
-            isLoading={apiUsageLoading}
-            error={apiUsageError}
-          />
-        </div>
-
-        <div className="rounded-lg border p-3">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Claudeプラン使用量</p>
-          <ClaudeUsageCard
-            data={claudeUsage}
-            isLoading={claudeUsageLoading}
-            error={claudeUsageError}
-            notConfigured={claudeUsageNotConfigured}
-          />
-        </div>
-
-        <Button
-          variant="outline"
-          className="justify-start"
-          disabled={isIssueSyncing}
-          onClick={() => setIssueSyncConfirmOpen(true)}
-        >
-          <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
-          {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
-        </Button>
-
-        <Button
-          variant="outline"
-          className="justify-start"
-          disabled={isRepositorySyncing}
-          onClick={() => setRepositorySyncConfirmOpen(true)}
-        >
-          <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
-          {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
-        </Button>
-
         <Button variant="outline" className="justify-start" onClick={onOpenAppSettings}>
           <Settings />
           アプリ設定
@@ -188,19 +135,49 @@ export function MobileSettingsScreen({
           )}
         </Button>
 
-        <Button variant="outline" className="justify-start" asChild>
-          <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
-            <ShieldCheck />
-            利用規約
-          </a>
+        <Button
+          variant="outline"
+          className="justify-start"
+          disabled={isIssueSyncing}
+          onClick={() => setIssueSyncConfirmOpen(true)}
+        >
+          <RefreshCw className={isIssueSyncing ? "animate-spin" : undefined} />
+          {isIssueSyncing ? "Issueを再同期中..." : "Issueを再同期"}
         </Button>
 
-        <Button variant="outline" className="justify-start" asChild>
-          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
-            <ShieldCheck />
-            プライバシーポリシー
-          </a>
+        <Button
+          variant="outline"
+          className="justify-start"
+          disabled={isRepositorySyncing}
+          onClick={() => setRepositorySyncConfirmOpen(true)}
+        >
+          <RefreshCw className={isRepositorySyncing ? "animate-spin" : undefined} />
+          {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
         </Button>
+
+        <div className="flex flex-col gap-2 rounded-lg border p-3">
+          <p className="text-xs font-medium text-muted-foreground">GitHub API使用量</p>
+          <GithubRateLimitList
+            data={rateLimits}
+            isLoading={rateLimitsLoading}
+            error={rateLimitsError}
+          />
+          <GithubApiUsageList
+            data={apiUsage}
+            isLoading={apiUsageLoading}
+            error={apiUsageError}
+          />
+        </div>
+
+        <div className="rounded-lg border p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Claudeプラン使用量</p>
+          <ClaudeUsageCard
+            data={claudeUsage}
+            isLoading={claudeUsageLoading}
+            error={claudeUsageError}
+            notConfigured={claudeUsageNotConfigured}
+          />
+        </div>
 
         <Button variant="destructive" className="justify-start" onClick={handleLogout}>
           <LogOut />

@@ -4,7 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { extractBumpReason } from "@/lib/github/release-bump-reason";
+import { extractBumpChangelog, extractBumpReason } from "@/lib/github/release-bump-reason";
 import {
   dispatchReleaseWorkflow,
   fetchLatestDeployWorkflowRun,
@@ -14,6 +14,7 @@ import {
   fetchRefCiState,
   fetchReleaseWorkflowExists,
 } from "@/lib/github/release-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * `release-develop-to-main.yml`の有無はほとんど変化しないため、ポーリングのたびに問い合わせず
@@ -134,6 +135,7 @@ async function handleGET(request: NextRequest) {
             ciState: bumpCiState,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
+            changelog: extractBumpChangelog(bumpPr.body),
           }
         : null,
       releasePullRequest: releasePr
@@ -155,6 +157,8 @@ async function handleGET(request: NextRequest) {
 }
 
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("release_dispatch", () => handlePOST(request));
 }
 

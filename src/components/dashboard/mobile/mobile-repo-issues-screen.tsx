@@ -44,6 +44,7 @@ type MobileRepoIssuesScreenProps = {
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
   onCreateIssue: () => void;
+  onAskQuestion: () => void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -61,6 +62,7 @@ export function MobileRepoIssuesScreen({
   onSelectIssue,
   onBack,
   onCreateIssue,
+  onAskQuestion,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -178,6 +180,7 @@ export function MobileRepoIssuesScreen({
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
+      onAskQuestion={onAskQuestion}
       scrollKey={scrollKey}
     >
       <MobileReleaseSheet

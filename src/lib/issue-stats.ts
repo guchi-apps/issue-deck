@@ -226,6 +226,22 @@ export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue
   });
 }
 
+/**
+ * ポーリング前後のIssue配列を比較し、checkUserLabeledAtがnull→非nullに変わった
+ * （＝00.check-userラベルが新たに付与された）Issueを抽出する。画面を開いている間の
+ * トースト通知（#852）の発火判定に使う。
+ * 直前の配列に存在しないIssue（新規作成・初回ポーリング等）はcheckUserLabeledAtが
+ * nullだったとみなし、既に付与済みの状態で現れた場合も対象に含める。
+ */
+export function detectNewlyCheckUserIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue[] {
+  const prevById = new Map(prevIssues.map((issue) => [issue.id, issue] as const));
+  return nextIssues.filter((issue) => {
+    if (!issue.checkUserLabeledAt) return false;
+    const prevIssue = prevById.get(issue.id);
+    return !prevIssue?.checkUserLabeledAt;
+  });
+}
+
 function isIssueContentEqual(a: Issue, b: Issue): boolean {
   return (
     a.title === b.title &&

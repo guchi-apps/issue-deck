@@ -358,7 +358,7 @@ function ApprovalActions({
               <Button
                 variant="outline"
                 size="sm"
-                className="w-fit"
+                className="self-end"
                 onClick={submitPrFix}
                 disabled={prFixBusy || isPrFixTextUploading}
               >
@@ -376,7 +376,7 @@ function ApprovalActions({
     <div className="mt-3 rounded-lg border border-dashed p-3">
       <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
       {isFallbackNotice ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
             <RotateCw />
             続きを実装・調査を依頼
@@ -403,7 +403,7 @@ function ApprovalActions({
             onUploadingChange={setIsTextUploading}
           />
           {textValidationError && <p className="text-sm text-destructive">{textValidationError}</p>}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button size="sm" onClick={submitApprove} disabled={busy || isTextUploading}>
               <Check />
               承認

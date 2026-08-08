@@ -311,7 +311,7 @@ export function MentionTextarea({
           onDragOver={handleDragOver}
           onDragLeave={() => setIsDraggingOver(false)}
           disabled={disabled}
-          className={cn(isDraggingOver && "ring-3 ring-ring/50", className)}
+          className={cn("text-sm", isDraggingOver && "ring-3 ring-ring/50", className)}
           {...props}
         />
         {trigger && itemCount > 0 && (

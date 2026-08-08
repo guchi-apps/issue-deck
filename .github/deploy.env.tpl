@@ -23,6 +23,8 @@ GITHUB_APP_PRIVATE_KEY_BASE64=op://apps/issue-deck/github-app-private-key-base64
 NEXT_PUBLIC_GITHUB_APP_SLUG=op://apps/issue-deck/github-app-slug
 GITHUB_WEBHOOK_SECRET=op://apps/issue-deck/github-webhook-secret
 GITHUB_USER_TOKEN_ENCRYPTION_KEY=op://apps/issue-deck/github-user-token-encryption-key
+GITHUB_OAUTH_CLIENT_ID=op://apps/issue-deck/github-oauth-client-id
+GITHUB_OAUTH_CLIENT_SECRET=op://apps/issue-deck/github-oauth-client-secret
 ALLOWED_EMAILS=op://apps/issue-deck/allowed-emails
 
 CLAUDE_CODE_OAUTH_TOKEN=op://apps/issue-deck/claude-code-oauth-token
