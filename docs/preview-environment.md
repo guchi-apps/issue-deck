@@ -8,6 +8,7 @@
 - #830: Fly.io Machine構成（`fly.toml`・`Dockerfile`・起動スクリプト）
 - #831: 本番DBダンプ・サニタイズ・`fly deploy`を行うデプロイworkflow
 - #832: 無人実装フロー（`claude-issue-dispatch.yml`）への接続、本ドキュメントの新規追加
+- #892: Issueごとに専用のFly.ioアプリを作る複数同時起動対応・`cleanup-preview.yml`による破棄
 
 ## 全体像
 
@@ -44,6 +45,7 @@ Fly Machine自体は「Next.js standalone + MariaDB」を1プロセスずつ同�
 | `scripts/preview-sanitize-dump.mjs` | installation ID書き換え・`User`の GitHub トークンNULL化 | #831 |
 | `.dockerignore`の`!db-dump/dump.sql.gz` | 焼き込み用ダンプをビルドコンテキストから除外しないための例外 | #831 |
 | `.github/workflows/claude-issue-dispatch.yml`の`deploy-preview`・`notify-preview-url`ジョブ | 無人実装フローからの呼び出し・結果通知 | #832 |
+| `.github/workflows/cleanup-preview.yml` | Issueごとのプレビューアプリの破棄（PRクローズ・Issueクローズ・ラベル解除・定期掃除） | #892 |
 
 ## GitHub Appを開発App（issue-deck-dev）に分ける理由
 
@@ -57,6 +59,90 @@ IDが入っているが、これをそのまま使うと開発Appとして認証
 
 併せて、コピーした本番DBに残っている`User.githubAccessToken`・`User.githubRefreshToken`は
 プレビュー環境では無効な値（本番App向けに発行されたもの）のためNULL化する。
+
+## Issueごとの複数同時起動（#892）
+
+当初は単一のFly.ioアプリ（`fly.toml`の`app = "issue-deck-preview"`）の中身を都度上書きする
+方式だったため、**同時に存在できるプレビューは1つだけ**だった。加えて`m-guchi/shopping-list`も
+同じアプリ名へデプロイしていたため、リポジトリをまたいで互いのプレビューを潰していた
+（shopping-listのIssueで案内されたURLを開くとissue-deckの画面が出る、という状態が実際に発生した）。
+
+Fly.ioのMachineは個別の公開URLを持てない（`<machine-id>.vm.<app>.internal`はプライベート
+ネットワーク限定）ため、複数のプレビューを別々のURLで同時に提供するには**アプリ自体を分ける**
+必要がある。そこでIssueごとに専用アプリを作る方式にした。
+
+```text
+issue-deck-preview-892  → https://issue-deck-preview-892.fly.dev
+issue-deck-preview-885  → https://issue-deck-preview-885.fly.dev
+issue-deck-preview      ← issue_numberを渡さない手動デプロイ（develop確認用）の共有アプリ
+```
+
+### 命名とライフサイクル
+
+- アプリ名は`<fly.tomlのapp>-<Issue番号>`。`deploy-preview.yml`の`issue_number`入力で決まる。
+  入力が空の場合は従来どおり`fly.toml`の`app`をそのまま使う（developの手動デプロイ用）。
+- アプリが存在しなければ`flyctl apps create`で作成し、以降の`flyctl secrets set`・
+  `flyctl deploy`・`flyctl machine`はすべて`--app`で対象を明示する。
+- `concurrency`グループもIssueごとに分けている。従来は全プレビューが単一グループで直列化され、
+  別Issueのデプロイ完了を待つ必要があった。
+
+### 同時起動数の上限
+
+`vars.PREVIEW_MAX_APPS`（既定5）に達している場合、**既存のプレビューを破棄せずデプロイ自体を
+見送る**。他の人が確認中の環境を勝手に消さないための判断。見送った場合は
+`deploy-preview.yml`の`outputs.skipped_reason`に`limit_reached:<現在数>/<上限>`が入り、
+`claude-issue-dispatch.yml`の`notify-preview-url`ジョブが「枠が空いたら`@claude`で再実行できる」
+旨をIssueへコメントする（デプロイ失敗とは区別して通知する）。
+
+### 破棄（`cleanup-preview.yml`）
+
+放置するとFly.io側のリソースを占有し、上限を埋めて新しいプレビューを作れなくなる。破棄の契機を
+1つに絞るとイベントの取りこぼしで残留するため、3経路を重ねている。
+
+| 経路 | トリガー | 目的 |
+|---|---|---|
+| `cleanup-on-event` | `pull_request: closed`（base=develop） | レビュー完了時点での破棄（主経路） |
+| `cleanup-on-event` | `issues: closed` | PRを作らずIssueを閉じたケースの取りこぼし防止 |
+| `cleanup-on-event` | `issues: unlabeled`（`23.preview-required`） | 手動で即座に破棄したいとき |
+| `sweep` | `schedule`（5分ごと）・`workflow_dispatch` | 上記を取りこぼした場合の安全網＋アイドル破棄。下記参照 |
+
+破棄対象はアプリ名が`<fly.tomlのapp>-<数字>`に**完全一致**するものだけで、共有アプリ
+（`fly.toml`の`app`名そのもの）は決して破棄しない。
+
+#### アイドル破棄（`sweep`）
+
+`fly.toml`の`auto_stop_machines = "stop"`により、アクセスが途切れたMachineは自動的に
+`stopped`になる。`sweep`はこれを「もう誰も見ていない」の判定に使い、次のいずれかに該当する
+プレビューを破棄する。
+
+- 対応Issueが既にCLOSED、またはIssue自体が取得できない
+- **全Machineが`stopped`で、その状態になってから`vars.PREVIEW_IDLE_MINUTES`（既定5分）以上経過**
+
+稼働中（`stopped`以外）のMachineが1台でもあれば閲覧中の可能性があるため残す。Machineが1台も
+無い場合（デプロイ途中など）も破棄しない（安全側に倒す）。
+
+**破棄するとURLは404になる。** 停止しただけの状態なら`auto_start_machines = true`により再度
+アクセスで起動するが、アプリを破棄した後は復活しない。そのため破棄時にIssueへ「もう一度確認
+したい場合は`@claude`とコメントすれば作り直される」旨をコメントする（対応Issueが開いている
+場合のみ）。アイドル5分での破棄は、同時起動数の枠を空けることを優先した運用判断。
+
+なお`schedule`は指定時刻より遅延することがあるため、実際の破棄はアイドル5分を多少過ぎてから
+行われる。
+
+### 前提: Fly.ioトークンのスコープ
+
+`flyctl apps create`には**organizationスコープ**のトークンが必要。特定アプリに限定された
+デプロイトークンでは新規アプリを作成できず、作成ステップが失敗する。その場合は
+`skipped_reason=create_failed`となり、Issueへ「トークンのスコープを確認してください」という
+通知が投稿される（ワークフロー自体は失敗させない）。1Passwordの
+`apps/issue-deck/fly-api-token`がどちらのトークンかは、初回実行前に確認が必要。
+
+### 他リポジトリへの展開
+
+`m-guchi/shopping-list`は当面、従来どおり共有アプリ（`issue-deck-preview`）を使い続ける。
+issue-deck側がIssueごとの専用アプリへ移行することで日常的な上書きは大幅に減るが、developの
+手動デプロイと衝突する可能性は残る。shopping-listへの展開は、issue-deck側の実運用で方式が
+安定してから行う（[docs/supported-repositories.md](supported-repositories.md)参照）。
 
 ## 安全対策
 
@@ -78,10 +164,11 @@ IDが入っているが、これをそのまま使うと開発Appとして認証
   停止した後は再デプロイするまで誰も開けない（503）状態になり、レビュー用URLとして成立
   しなかったため`auto_start_machines = true`に変更した（#880）。停止・起動のコスト面の
   制御は`auto_stop_machines = "stop"`（アイドル時に自動停止）が引き続き担う。
-- `.github/workflows/deploy-preview.yml`は`concurrency: group: deploy-issue-deck-preview`
-  （`cancel-in-progress: true`）を持つ。プレビュー環境はFly.io Machine 1台の使い捨て共有
-  リソースのため、複数Issueから同時に呼ばれても直列化され、先行実行は後続に置き換わる
-  （同時に2つのプレビューを別々のURLで提供する構成にはしていない）。
+- `.github/workflows/deploy-preview.yml`の`concurrency`グループは
+  `deploy-issue-deck-preview-<Issue番号>`（`cancel-in-progress: true`）。同一Issueへ連続して
+  デプロイが走った場合は先行実行が後続に置き換わる。**Issueが異なれば直列化されない**
+  （#892で単一グループから変更。それ以前は同時に2つのプレビューを別々のURLで提供する構成に
+  なっておらず、全プレビューが1グループで直列化されていた）。
 
 ## 無人実装フローとの接続（#832）
 

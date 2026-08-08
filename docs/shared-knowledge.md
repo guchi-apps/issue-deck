@@ -34,7 +34,7 @@ AI専用のストレージや埋め込みDBは導入しない。
 | issue-deckの`CLAUDE.md` | issue-deck固有の運用ルール（ラベル遷移・自動マージ不可カテゴリ等） | ✅ | ✅ |
 | issue-deckの`docs/` | 設計ドキュメント（`multi-agent-workflow.md`ほか） | ✅ | ✅ |
 | `.github/workflows/*.yml`のプロンプト | 各エージェントの責務・手順 | —（Actions専用） | ✅ |
-| `m-guchi/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`README.md`＝アプリ設計ガイド、`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ❌ |
+| `m-guchi/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`CLAUDE.md`＝索引、`standards/`・`knowledge/`・`agent-rules/`・`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ❌ |
 
 ### 自動化の構成
 
@@ -92,7 +92,7 @@ AI専用のストレージや埋め込みDBは導入しない。
 分散し「どちらを更新すべきか」が毎回判断事項になる。
 
 そのため**新規リポジトリは作らず、`m-guchi/docs`にAIエージェント向けのエントリポイントと
-知見置き場を追加する**。人間向けの`README.md`（アプリ設計ガイド）はそのまま一次情報源として残し、
+知見置き場を追加する**。設計基準は`standards/`を一次情報源とし、
 `CLAUDE.md`はそこへの索引・読む順序を与える薄い層に徹する（内容を二重管理しない）。
 
 必要なファイルの一覧は[6. 共有知識リポジトリ側に必要なファイル](#6-共有知識リポジトリ側に必要なファイル)を参照。
@@ -132,7 +132,7 @@ $GITHUB_WORKSPACE/
 2. 対象リポジトリの`CLAUDE.md`
 3. 対象リポジトリの`docs/`
 4. `.shared-context/CLAUDE.md` および `.shared-context/agent-rules/`
-5. `.shared-context/knowledge/` ・ `.shared-context/README.md`（アプリ設計ガイド）・`.shared-context/guides/`
+5. `.shared-context/knowledge/` ・ `.shared-context/standards/`（設計基準）・`.shared-context/guides/`
 
 共有知識は「他のアプリではこうしている」という既定値であり、アプリ固有ルールを上書きしない。
 
@@ -190,25 +190,33 @@ $GITHUB_WORKSPACE/
 
 ```text
 m-guchi/docs/
-├── README.md                      # 既存（アプリ設計ガイド本体）。冒頭にCLAUDE.mdへの導線を追記
-├── CLAUDE.md                      # ★新規: AIエージェント向けエントリポイント（索引・読む順序）
-├── coding-standards.md            # ★新規: 全アプリ共通のコーディング方針
-├── agent-rules/
-│   ├── implementation.md          # ★新規: 実装エージェント共通ルール
-│   ├── review.md                  # ★新規: レビュー・統合エージェント共通ルール
-│   └── knowledge-contribution.md  # ★新規: 知見の振り分け基準と提案フォーマット
-├── knowledge/
-│   ├── README.md                  # ★新規: 知見ファイルの索引と書き方
-│   ├── github-actions.md          # ★新規: Actions上でClaude Codeを動かす際の知見
-│   ├── git-github-operations.md   # ★新規: Git/GitHub運用の共通知見
-│   ├── deployment.md              # ★新規: VPS/PM2/systemdデプロイの共通知見
-│   ├── nextjs-prisma.md           # ★新規: Next.js + Prisma スタックの共通知見
-│   ├── supabase.md                # ★新規: Supabase等の共通サービスの知見
-│   └── common-gotchas.md          # ★新規: 複数アプリで再発しうる落とし穴
-├── guides/                        # 既存（人間向け詳細ガイド。CLAUDE.mdから索引する）
-├── templates/                     # 既存
-└── label-sync/                    # 既存
+├── README.md                      # 入口だけを残したスタブ（索引はCLAUDE.mdへ一本化）
+├── CLAUDE.md                      # 唯一の索引。読む順序・優先順位・書き込み禁止・提案フロー
+├── agent-rules/                   # エージェントの役割別ルール
+│   ├── implementation.md          #   実装エージェント共通ルール
+│   ├── review.md                  #   レビュー・統合エージェント共通ルール
+│   └── knowledge-contribution.md  #   知見の振り分け基準と提案フォーマット
+├── standards/                     # 全アプリ共通の決定事項（1テーマ1ファイル）
+│   ├── README.md                  #   standards の索引（いつ読むか付き）
+│   ├── tech-stack.md / ports.md / directory-layout.md
+│   ├── secrets.md / database.md / auth.md
+│   ├── branching.md / ci-deploy.md / infrastructure.md
+│   └── coding.md                  #   コーディング方針
+├── knowledge/                     # 実際に踏んだ落とし穴・非自明な挙動
+│   ├── README.md                  #   知見ファイルの索引と書き方
+│   ├── github-actions.md / github-app.md / git-github-operations.md
+│   ├── multi-agent-workflow.md / preview-environments.md
+│   ├── deployment.md / nextjs-prisma.md / supabase.md
+│   └── common-gotchas.md
+├── guides/                        # 手作業の設定手順（大半はエージェントには実行できない）
+│   └── new-app-checklist.md       #   新規アプリ作成チェックリスト
+├── templates/
+└── label-sync/
 ```
+
+構成は「1テーマ1ファイル・見出しは結論・冒頭に『いつ読むか』の1行」で統一している。
+エージェントの読解コストのうち最も大きいのは「どのファイルを読むべきかの判断」であり、
+索引と冒頭1行がそこを直接下げるため。
 
 ### 6.1 `CLAUDE.md`（エントリポイント）に書くこと
 
@@ -216,7 +224,7 @@ m-guchi/docs/
 
 - このリポジトリが全アプリ共通の知識層であり、アプリ固有ルールが優先されること
 - 読む順序: `agent-rules/`（自分の役割のもの）→ 必要に応じて`knowledge/`の該当ファイル →
-  設計判断が要るときだけ`README.md`（アプリ設計ガイド）・`guides/`
+  設計判断が要るときだけ`standards/`・`guides/`
 - 各ディレクトリの索引（1行説明つき）
 - 「このリポジトリへ直接コミットしない。変更は提案フロー（`agent-rules/knowledge-contribution.md`）
   を通す」ことの明示
