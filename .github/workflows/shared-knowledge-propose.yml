@@ -1,0 +1,330 @@
+name: Shared Knowledge Propose (共有知識への反映PR作成)
+
+# develop向けPRがマージされた後、承認済みの「共有知識への追加提案」だけを、共有知識リポジトリ
+# (m-guchi/docs)へのPull Requestに変換する(docs/shared-knowledge.md「9.3 反映」)。
+#
+# 前提となる二段階の合意:
+# - 実装エージェント(claude-issue-dispatch.yml)が、対応Issueへ
+#   `<!-- shared-knowledge-proposal -->` マーカー付きの追加提案コメントを投稿している
+# - レビューエージェント(claude-review-develop.yml)が4観点で審査し、対応Issueへ
+#   `<!-- shared-knowledge-verdict:approved -->` マーカー付きの承認コメントを投稿している
+#
+# 両方のマーカーが揃っている場合にのみ動作する。片方でも欠ければ何もせず終了する。
+# さらに、このワークフロー自身も共有知識リポジトリのデフォルトブランチへ直接pushはせず、
+# 必ずPull Requestとして提示する。最終的なマージは人間が行う(知識汚染に対する3重目のガード)。
+#
+# 責務の分割:
+# - Claude Codeステップは`.shared-context/`配下のファイル編集とPR文面の生成のみを行う。
+#   git push・PR作成・Issueコメントは行わない。claude-code-actionは実行時にGH_TOKENを自前の
+#   トークンへ上書きするため(claude-issue-dispatch.ymlの#621/#662に関する注記を参照)、
+#   別リポジトリ(m-guchi/docs)への書き込み権限を持つPATをClaude側から確実に使わせられないため。
+# - 実際のブランチ作成・commit・push・PR作成・Issueへの報告は、後続の単純なシェルステップが
+#   secrets.WORKFLOW_PAT を使って行う。このリポジトリの他のワークフローと同じく、確実性が要る
+#   処理はClaude Codeに委ねずシェルで閉じる方針。
+#
+# 必要な権限: secrets.WORKFLOW_PAT の Repository access に共有知識リポジトリを含め、
+# Contents: Read and write / Pull requests: Read and write を付与しておくこと
+# (docs/shared-knowledge.md「7.2 事前設定」)。権限が不足している場合は push / PR作成が失敗し、
+# 最終ステップがフォールバック通知を対応Issueへ投稿する。
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "対象のIssue番号（developへマージ済みのIssue）"
+        required: true
+        type: string
+
+concurrency:
+  group: shared-knowledge-propose-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    # pull_requestトリガーではマージされた場合のみ動作する（closeしただけのPRは対象外）。
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      # claude-code-actionがトリガー元のPull Requestのコンテキストを取得するために必要。
+      # このワークフローはPull Requestへの書き込みを行わないためreadのままにする
+      # (共有知識リポジトリ側のPR作成はsecrets.WORKFLOW_PATで行う。permissions:の対象外)。
+      pull-requests: read
+      actions: read
+      id-token: write
+    steps:
+      - name: 対象Issueと提案の有無を判定する
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          INPUT_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        run: |
+          set -e
+
+          # 対応Issue番号の特定。pull_requestトリガーではブランチ名の命名規約
+          # issue-<番号>（.github/workflows/issue-labels.yml等と同じ）から求める。
+          ISSUE_NUMBER=""
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [[ "$INPUT_ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+              ISSUE_NUMBER="$INPUT_ISSUE_NUMBER"
+            fi
+          elif [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            ISSUE_NUMBER="${BASH_REMATCH[1]}"
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "対応Issue番号を特定できないため、何もせず終了します。"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+          COMMENTS="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' 2>/dev/null || true)"
+          if [ -z "$COMMENTS" ]; then
+            echo "Issue #${ISSUE_NUMBER} のコメントを取得できないため、何もせず終了します。"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HAS_PROPOSAL=false
+          HAS_APPROVAL=false
+          printf '%s' "$COMMENTS" | grep -qF '<!-- shared-knowledge-proposal -->' && HAS_PROPOSAL=true
+          printf '%s' "$COMMENTS" | grep -qF '<!-- shared-knowledge-verdict:approved -->' && HAS_APPROVAL=true
+
+          if [ "$HAS_PROPOSAL" != "true" ]; then
+            echo "共有知識への追加提案コメントが無いため、何もせず終了します。"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$HAS_APPROVAL" != "true" ]; then
+            echo "レビューエージェントの承認マーカーが無いため、何もせず終了します（提案は反映しません）。"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Issue #${ISSUE_NUMBER}: 承認済みの共有知識追加提案を検出しました。反映PRの作成に進みます。"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: steps.state.outputs.proceed == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 共有知識リポジトリをcheckoutする
+        id: checkout_shared
+        if: steps.state.outputs.proceed == 'true'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
+          path: .shared-context
+          fetch-depth: 1
+          # 認証情報を .shared-context/.git/config に残さない。pushに使うPATは後続のシェル
+          # ステップが remote.origin.pushurl として設定する（本体リポジトリの認証と混線させない）。
+          persist-credentials: false
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Claude Code（承認済み提案を共有知識へ反映する）
+        id: claude_apply
+        if: steps.state.outputs.proceed == 'true' && steps.checkout_shared.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Read,Grep,Glob,Edit,Write"
+            --disallowedTools "Task,Agent"
+          prompt: |
+            あなたは全アプリ共通の共有知識リポジトリを更新するエージェントです。
+            対象Issueは ${{ github.repository }} の #${{ steps.state.outputs.issue_number }} です。
+            このIssueの実装は既に`develop`へマージ済みで、実装中に得られた知見のうち「全アプリ共通」と
+            判定された提案が、レビューエージェントによって承認されています。
+
+            ## 最初にやること
+            `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueのコメントを取得し、
+            以下の2種類のコメントを特定してください。
+
+            - `<!-- shared-knowledge-proposal -->` マーカー付きのコメント（実装エージェントによる追加提案）
+            - `<!-- shared-knowledge-verdict:approved -->` マーカー付きのコメント（レビューエージェントによる審査結果）
+
+            審査結果コメントには、提案のうちどれを承認しどれを却下したかが書かれています。
+            **承認された提案のみ**を反映対象としてください。却下された提案、および審査結果コメントで
+            言及されていない提案は反映しません。
+
+            ## やること
+            1. `.shared-context/`（共有知識リポジトリのワークツリー）の構成を確認する。
+               `.shared-context/CLAUDE.md`・`.shared-context/knowledge/README.md`があれば、
+               記述の書式・粒度をそれに合わせる。
+            2. 承認された各提案について、提案コメントの`target`が指すファイル
+               （`.shared-context/<target>`）へ追記する。
+               - 既存ファイルがある場合は追記する。関連する既存セクションがあれば、新しいセクションを
+                 足すのではなく既存セクションを更新することを優先する
+               - ファイルが存在しない場合は新規作成してよい。ただし新規ファイルは`knowledge/`配下に
+                 限り、それ以外のディレクトリへの新規ファイル作成は行わない
+               - 記載形式は次を基本とする（既存ファイルの形式が異なる場合はそちらに合わせる）:
+
+                 ```markdown
+                 ## <一行で分かる結論>
+
+                 - **状況**: いつ・どこで問題になるか
+                 - **結論**: 何をすべきか / 何をしてはいけないか
+                 - **根拠**: 出典URL、または再現した事象と実行ログへのリンク
+                 - **確認日**: <提案コメントに書かれた確認日>
+                 - **出典リポジトリ**: ${{ github.repository }}#${{ steps.state.outputs.issue_number }}
+                 ```
+
+               - 既に同等の記述が存在する場合は、重複して追記せず既存記述の更新にとどめる。更新の
+                 必要すら無い場合は、そのファイルには何も書かない
+               - シークレットの実値・個人情報・一時的な障害情報は絶対に書かない。提案コメントに
+                 それらが含まれていた場合は、その部分を除いて反映する
+            3. Pull Requestの文面を `/tmp/shared-knowledge-pr.md` に書き出す。1行目をPRタイトル、
+               3行目以降をPR本文とする（2行目は空行）。本文には、反映した知見の要約・出典Issueへの
+               リンク（`${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.state.outputs.issue_number }}`）・
+               却下された提案があればその旨を日本語で記載する。
+
+            ## このステップで行わないこと
+            - `git` コマンドの実行（`git add` / `commit` / `push` / ブランチ作成）。ブランチ作成・
+              コミット・push・Pull Requestの作成は、このステップの後続のシェルステップが行います。
+              あなたはワークツリー上のファイルを編集し、上記のPR文面ファイルを書くところまでです
+            - Issueへのコメント投稿・ラベル操作
+            - `.shared-context/` 以外のファイルの編集（このリポジトリ自身のコードには一切触らない）
+
+            ## 反映すべき内容が無かった場合
+            承認された提案が既に共有知識へ反映済みだった等の理由で、結果として何も編集しなかった
+            場合は、ファイルを変更しないままにし、`/tmp/shared-knowledge-pr.md` も作成しないで
+            ください。後続のステップが「差分なし」として正常終了します。
+
+      - name: 反映PRを作成する
+        id: create_pr
+        if: steps.state.outputs.proceed == 'true' && steps.checkout_shared.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          SHARED_REF: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
+          SOURCE_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+        run: |
+          set -e
+          cd .shared-context
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "共有知識に差分がないため、Pull Requestは作成しません。"
+            echo "pr_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BRANCH="knowledge/${SOURCE_REPO#*/}-${ISSUE_NUMBER}"
+          git config user.name "Claude Code"
+          git config user.email "claude-code@example.com"
+          # 共有知識リポジトリのデフォルトブランチへは直接pushしない。必ず新規ブランチ + PRとする。
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "${SOURCE_REPO}#${ISSUE_NUMBER} で得た知見を共有知識へ反映する。"
+
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${SHARED_REPO}.git"
+          # 同じIssueに対して再実行された場合に備え、同名ブランチは上書きする（このブランチは
+          # 本ワークフローだけが作る命名規約のため、他者の作業を壊す恐れはない）。
+          git push --force origin "$BRANCH"
+
+          TITLE="${SOURCE_REPO}#${ISSUE_NUMBER} で得た知見を共有知識へ反映する"
+          BODY_FILE="$(mktemp)"
+          if [ -f /tmp/shared-knowledge-pr.md ]; then
+            TITLE="$(head -n 1 /tmp/shared-knowledge-pr.md)"
+            tail -n +3 /tmp/shared-knowledge-pr.md > "$BODY_FILE"
+          else
+            printf '%s\n' "自動生成: ${SOURCE_REPO}#${ISSUE_NUMBER} の実装中に得られ、レビューエージェントに承認された知見を反映しました。" > "$BODY_FILE"
+          fi
+          {
+            printf '\n---\n\n'
+            printf '出典Issue: %s/%s/issues/%s\n' "${GITHUB_SERVER_URL}" "${SOURCE_REPO}" "${ISSUE_NUMBER}"
+            printf '\nこのPull Requestは `%s` の `shared-knowledge-propose.yml` が自動生成しました。内容を確認のうえ、問題なければマージしてください。\n' "${SOURCE_REPO}"
+          } >> "$BODY_FILE"
+
+          PR_URL="$(gh pr create \
+            --repo "$SHARED_REPO" \
+            --base "$SHARED_REF" \
+            --head "$BRANCH" \
+            --title "$TITLE" \
+            --body-file "$BODY_FILE" 2>/dev/null || true)"
+
+          # gh pr create は成功時にPRのURLを標準出力へ出すが、環境によっては注意書き等が
+          # 前後に混ざることがあるため、URLらしき行だけを取り出す。
+          PR_URL="$(printf '%s\n' "$PR_URL" | grep -Eo 'https://[^[:space:]]+' | tail -n 1 || true)"
+
+          if [ -z "$PR_URL" ]; then
+            # 既に同じブランチのPRが開いている場合（再実行時）は既存PRのURLを拾う
+            PR_URL="$(gh pr list --repo "$SHARED_REPO" --head "$BRANCH" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
+          fi
+
+          if [ -z "$PR_URL" ]; then
+            echo "Pull Requestの作成に失敗しました。" >&2
+            exit 1
+          fi
+
+          echo "作成したPull Request: $PR_URL"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: 結果を対応Issueへ報告する
+        # 他のワークフローと同じく、結果の通知はClaude Codeに委ねず独立したシェルステップで
+        # 確実に行う。always()により、途中のステップが失敗した場合もフォールバック通知が出る。
+        if: always() && steps.state.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          PR_URL: ${{ steps.create_pr.outputs.pr_url }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout_shared.outcome }}
+          CLAUDE_OUTCOME: ${{ steps.claude_apply.outcome }}
+          CREATE_PR_OUTCOME: ${{ steps.create_pr.outcome }}
+          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          MARKERS=$'\n\n<!-- issue-deck-source:shared-knowledge-propose -->\n<!-- issue-deck-agent:reviewer -->'
+
+          if [ "$CHECKOUT_OUTCOME" != "success" ]; then
+            BODY="⚠️ 共有知識リポジトリ（\`${SHARED_REPO}\`）のcheckoutに失敗したため、承認済みの共有知識追加提案を反映できませんでした。"
+            BODY="$BODY"$'\n\n''`WORKFLOW_PAT` に共有知識リポジトリへのアクセス権（Contents: Read and write / Pull requests: Read and write）が付与されているかご確認ください。'
+            BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL$MARKERS"
+            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            exit 0
+          fi
+
+          if [ -n "$PR_URL" ]; then
+            BODY="📚 このIssueで得られた知見のうち、レビューで承認されたものを共有知識リポジトリ（\`${SHARED_REPO}\`）へ反映するPull Requestを作成しました: $PR_URL"
+            BODY="$BODY"$'\n\n''内容を確認のうえ、問題なければマージしてください（共有知識への反映は人間のマージをもって完了します）。'
+            BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL$MARKERS"
+            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            exit 0
+          fi
+
+          if [ "$CREATE_PR_OUTCOME" = "success" ] && [ "$CLAUDE_OUTCOME" = "success" ]; then
+            echo "共有知識に差分が無かったため、Issueへのコメントは投稿しません（既に反映済みと判断）。"
+            exit 0
+          fi
+
+          if [ "$CLAUDE_OUTCOME" != "success" ]; then
+            BODY="⚠️ 承認済みの共有知識追加提案を共有知識リポジトリ（\`${SHARED_REPO}\`）へ反映するステップが失敗したため、反映Pull Requestを作成できませんでした。"
+            BODY="$BODY"$'\n\n''お手数ですが、実行ログを確認のうえ、必要であれば手動で反映してください。'
+            BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL$MARKERS"
+            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+            exit 0
+          fi
+
+          BODY="⚠️ 承認済みの共有知識追加提案を共有知識リポジトリ（\`${SHARED_REPO}\`）へ反映する処理が失敗しました。"
+          BODY="$BODY"$'\n\n''お手数ですが、実行ログを確認のうえ、必要であれば手動で反映してください。'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL$MARKERS"
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"

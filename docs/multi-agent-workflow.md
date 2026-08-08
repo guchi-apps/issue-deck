@@ -190,12 +190,15 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - 変更をコミットしてpushする
 - `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
 - `02.wip`→`03.d:marge`のラベル付け替え
+- 全アプリ共通の共有知識（`.shared-context/`）を必要な範囲で参照する
+- 実装中に得た知見を、アプリ固有なら`docs/`へ同梱し、全アプリ共通と判断したものは対応Issueへ「追加提案」コメントとして投稿する（共有知識リポジトリ自体は編集しない。[docs/shared-knowledge.md](shared-knowledge.md)参照）
 
 禁止事項:
 - `main`/`develop`への直接コミット・push
 - 他Issueのブランチ・worktreeの編集
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
+- 共有知識リポジトリ（`.shared-context/`・ローカルの`~/apps/_docs`）の編集・コミット
 
 ### レビュー・統合エージェント
 
@@ -206,9 +209,28 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - 対応Issueの要件充足、Issue外変更の混入有無、コード品質・セキュリティ、CI結果を確認する
 - 「自動マージ不可カテゴリ」に該当する変更を検知したら`00.check-user`を付与し、マージせずユーザーの確認を待つ
 - 問題がなければ`develop`へマージし、マージ後`develop`上で再テストする。あわせて対応Issueのラベルを`03.d:marge`→`05.develop`に付け替える（issueはcloseしない）
+- 実装エージェントが投稿した共有知識への追加提案を、再利用性・正確性・重複・恒久性の4観点で審査し、承認/却下のマーカー付きコメントを投稿する（[docs/shared-knowledge.md](shared-knowledge.md)参照）
 
 禁止事項:
 - `main`への直接マージ・push
+- 共有知識リポジトリの編集・コミット（反映は`shared-knowledge-propose.yml`がPRを作成し、人間がマージする）
+
+## 全アプリ共通の共有知識層（shared context）
+
+GitHub Actions上の実行はチェックアウトしたワークツリーしか参照できないため、個人環境の
+グローバル`CLAUDE.md`・スキルは読み込まれない。その結果、全アプリ共通のルール（Git/GitHub運用、
+Actions上でClaude Codeを動かす際の知見、共通コーディング方針、デプロイ方針など）を各リポジトリの
+`CLAUDE.md`とワークフローのプロンプトへ手で複製することになり、複製先が静かにずれていく。
+
+これを解消するため、共通知識は共有知識リポジトリ`m-guchi/docs`で一元管理し、各ワークフローが
+実行時に`.shared-context/`へcheckoutして読む構成にしている。あわせて、実装中に得た知見を
+「アプリ固有＝対象リポジトリの`docs/`」「全アプリ共通＝提案 → レビュー審査 → 反映PR → 人間の
+マージ」に振り分ける循環を用意し、セッションではなくGit管理されたドキュメントとして知見を
+引き継げるようにしている。
+
+設計の全体像・提案フォーマット・審査の4観点・共有知識リポジトリ側に必要なファイルは
+[docs/shared-knowledge.md](shared-knowledge.md)を参照。他リポジトリへ導入する際の手順は
+[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「10. 共有知識リポジトリの参照設定」を参照。
 
 ## ローカル自動化とGitHub Actionsの役割分担
 
@@ -268,6 +290,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
 - `.github/workflows/release-develop-to-main.yml`（Phase6、作成済み）
+- `.github/workflows/shared-knowledge-propose.yml`（共有知識層、作成済み。承認済みの知見を`m-guchi/docs`へのPRに変換する。[docs/shared-knowledge.md](shared-knowledge.md)参照）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
@@ -276,6 +299,8 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
+- 共有知識リポジトリ（`m-guchi/docs`）への`secrets.WORKFLOW_PAT`の到達性（共有知識層。issue-deckのPATはRepository accessが「All repositories」のため追加設定は不要。**到達できない場合でも共有知識のcheckoutが失敗するだけで、各ワークフローは`continue-on-error`で続行する**）
+- 共有知識リポジトリ`m-guchi/docs`側へのファイル追加（`CLAUDE.md`・`agent-rules/`・`knowledge/`等。[docs/shared-knowledge.md](shared-knowledge.md)「6. 共有知識リポジトリ側に必要なファイル」参照。**対応済み**）
 
 ## Phase 5: @claudeコメント起点の完全自動化
 

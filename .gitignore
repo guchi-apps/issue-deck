@@ -44,6 +44,11 @@ yarn-error.log*
 # Fly.io Machinesプレビュー環境向けの本番DBダンプ（デプロイworkflowが配置。db-dump/README.md参照）
 /db-dump/*.sql.gz
 
+# 全アプリ共通の共有知識リポジトリ(m-guchi/docs)のcheckout先。
+# GitHub Actionsのワークフローと、ローカルでの手動cloneの両方がここへ配置する想定。
+# 本リポジトリのコミットには決して含めない(docs/shared-knowledge.md 参照)。
+/.shared-context/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
