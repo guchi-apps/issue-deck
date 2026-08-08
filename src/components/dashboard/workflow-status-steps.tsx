@@ -100,70 +100,89 @@ export function WorkflowStepBadge({ labels, running, qaAnswerPending = false }: 
   );
 }
 
-/** 01.planning〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない */
+/**
+ * 01.planning〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない。
+ * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
+ * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
+ * 1行キャプション（例:「実装中（2/6）」）を表示する。
+ */
 export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex(labels);
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
+  const currentStep = WORKFLOW_STEPS[currentIndex];
 
   return (
-    <div className="overflow-x-auto">
-      <div className="flex min-w-max" role="list" aria-label="実装状況">
-        {WORKFLOW_STEPS.map((step, index) => {
-          const isDone = index < currentIndex;
-          const isCurrent = index === currentIndex;
-          const showApprovalPending = isCurrent && approvalPending;
-          return (
-            <div key={step.labelName} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
-              {index !== 0 && (
+    <div>
+      <div className="overflow-x-auto">
+        <div className="flex min-w-max" role="list" aria-label="実装状況">
+          {WORKFLOW_STEPS.map((step, index) => {
+            const isDone = index < currentIndex;
+            const isCurrent = index === currentIndex;
+            const showApprovalPending = isCurrent && approvalPending;
+            const StepIcon = step.icon;
+            return (
+              <div key={step.labelName} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
+                {index !== 0 && (
+                  <div
+                    aria-hidden
+                    className={cn(
+                      "absolute left-0 top-3 h-px w-1/2",
+                      isDone || isCurrent ? "bg-primary" : "bg-border",
+                    )}
+                  />
+                )}
+                {index !== WORKFLOW_STEPS.length - 1 && (
+                  <div
+                    aria-hidden
+                    className={cn("absolute right-0 top-3 h-px w-1/2", isDone ? "bg-primary" : "bg-border")}
+                  />
+                )}
                 <div
-                  aria-hidden
+                  role="listitem"
+                  aria-current={isCurrent ? "step" : undefined}
+                  title={step.labelName}
                   className={cn(
-                    "absolute left-0 top-3 h-px w-1/2",
-                    isDone || isCurrent ? "bg-primary" : "bg-border",
+                    "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-inset",
+                    isDone && "bg-primary text-primary-foreground ring-primary",
+                    isCurrent &&
+                      (approvalPending
+                        ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
+                        : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
+                    !isDone && !isCurrent && "text-muted-foreground ring-border",
                   )}
-                />
-              )}
-              {index !== WORKFLOW_STEPS.length - 1 && (
-                <div
-                  aria-hidden
-                  className={cn("absolute right-0 top-3 h-px w-1/2", isDone ? "bg-primary" : "bg-border")}
-                />
-              )}
-              <div
-                role="listitem"
-                aria-current={isCurrent ? "step" : undefined}
-                title={step.labelName}
-                className={cn(
-                  "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background text-[11px] font-medium ring-1 ring-inset",
-                  isDone && "bg-primary text-primary-foreground ring-primary",
-                  isCurrent &&
-                    (approvalPending
-                      ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
-                      : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
-                  !isDone && !isCurrent && "text-muted-foreground ring-border",
-                )}
-              >
-                {isDone ? <Check className="size-3.5" /> : index + 1}
-              </div>
-              <span
-                className={cn(
-                  "whitespace-nowrap text-center text-[11px]",
-                  isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {step.label}
-              </span>
-              {showApprovalPending && (
-                <span className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-                  ユーザー確認待ち
+                >
+                  {isDone ? <Check className="size-3.5" /> : <StepIcon className="size-3.5" />}
+                </div>
+                <span
+                  className={cn(
+                    "hidden whitespace-nowrap text-center text-[11px] md:block",
+                    isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {step.label}
                 </span>
-              )}
-            </div>
-          );
-        })}
+                {showApprovalPending && (
+                  <span className="hidden whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 md:inline-block dark:text-amber-400">
+                    ユーザー確認待ち
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
+      <p className="mt-1.5 text-center text-[11px] md:hidden">
+        <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
+          {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
+        </span>
+        {approvalPending && (
+          <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+            ユーザー確認待ち
+          </span>
+        )}
+      </p>
     </div>
   );
 }

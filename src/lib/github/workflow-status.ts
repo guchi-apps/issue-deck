@@ -1,3 +1,12 @@
+import {
+  ClipboardList,
+  Code2,
+  GitMerge,
+  GitPullRequest,
+  Rocket,
+  type LucideIcon,
+} from "lucide-react";
+
 import type { Issue, IssueLabel } from "@/types/issue";
 
 export type WorkflowStep = {
@@ -5,6 +14,8 @@ export type WorkflowStep = {
   labelName: string;
   /** ステップ表示用の短い日本語ラベル */
   label: string;
+  /** ステップ表示用のアイコン（円の中身。未完了・現在ステップ時のみ使う。完了済みはCheckで統一） */
+  icon: LucideIcon;
   /**
    * この段階でGitHub Actions（実装・レビューエージェント）の実行が進行し得るかどうか。
    * `05.develop`（developマージ完了）・`09.main`（mainマージ完了）はマージ後の定常状態で
@@ -27,12 +38,12 @@ export const MAIN_MERGED_LABEL_NAME = "09.main";
 
 /** マルチエージェント運用における実装状況ラベル（01.planning〜09.main）の遷移順（CLAUDE.md参照） */
 export const WORKFLOW_STEPS: readonly WorkflowStep[] = [
-  { labelName: PLANNING_LABEL_NAME, label: "計画検討中", active: true },
-  { labelName: WIP_LABEL_NAME, label: "実装中", active: true },
-  { labelName: "03.d:marge", label: "developへマージ", active: true },
-  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop反映済", active: false },
-  { labelName: "07.m:marge", label: "本番へマージ", active: true },
-  { labelName: MAIN_MERGED_LABEL_NAME, label: "本番反映済", active: false },
+  { labelName: PLANNING_LABEL_NAME, label: "計画検討中", icon: ClipboardList, active: true },
+  { labelName: WIP_LABEL_NAME, label: "実装中", icon: Code2, active: true },
+  { labelName: "03.d:marge", label: "developへマージ", icon: GitPullRequest, active: true },
+  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop反映済", icon: GitMerge, active: false },
+  { labelName: "07.m:marge", label: "本番へマージ", icon: GitPullRequest, active: true },
+  { labelName: MAIN_MERGED_LABEL_NAME, label: "本番反映済", icon: Rocket, active: false },
 ];
 
 /** issueのラベルからワークフロー上の現在ステップのindexを返す。該当ラベルがなければnull */
