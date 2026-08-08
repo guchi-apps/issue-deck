@@ -47,6 +47,10 @@ export async function GET(request: NextRequest) {
 
   const providerToken = data.session?.provider_token;
   const githubAccessToken = providerToken ? encryptSecret(providerToken) : undefined;
+  // Supabase Auth側の設定（GitHub Appの「Expire user authorization tokens」有効時のみ）によっては
+  // 払い出されない。無い場合はundefinedのままにし、自動延長機能のみ無効化する
+  const providerRefreshToken = data.session?.provider_refresh_token;
+  const githubRefreshToken = providerRefreshToken ? encryptSecret(providerRefreshToken) : undefined;
 
   await db.user.upsert({
     where: { supabaseUserId: user.id },
@@ -58,6 +62,7 @@ export async function GET(request: NextRequest) {
       email: user.email ?? null,
       image: (metadata.avatar_url as string) ?? null,
       githubAccessToken,
+      githubRefreshToken,
     },
     update: {
       githubLogin,
@@ -65,6 +70,7 @@ export async function GET(request: NextRequest) {
       email: user.email ?? null,
       image: (metadata.avatar_url as string) ?? null,
       ...(githubAccessToken ? { githubAccessToken } : {}),
+      ...(githubRefreshToken ? { githubRefreshToken } : {}),
     },
   });
 

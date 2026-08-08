@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
-import { decryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { createIssue, deleteIssue, GithubApiError, updateIssue } from "@/lib/github/issues-api";
+import { createIssue, deleteIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
+import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -61,12 +61,7 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-  }
-
-  try {
-    const token = decryptSecret(user.githubAccessToken);
+  const result = await withUserGithubToken(user, `POST /api/issues ${repositoryFullName}`, async (token) => {
     const created = await createIssue(owner, repo, token, {
       title: title.trim(),
       body: typeof payload.body === "string" && payload.body.trim() ? payload.body : undefined,
@@ -74,19 +69,12 @@ async function handlePOST(request: NextRequest) {
       assignees:
         typeof payload.assignee === "string" && payload.assignee ? [payload.assignee] : undefined,
     });
-    const issue = await upsertIssueAndGetDisplay(repository, created);
-    return NextResponse.json({ issue });
-  } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
-    console.error(`[POST /api/issues] ${repositoryFullName}:`, error);
-    return NextResponse.json(
-      { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
+    return upsertIssueAndGetDisplay(repository, created);
+  });
+  if ("errorResponse" in result) {
+    return result.errorResponse;
   }
+  return NextResponse.json({ issue: result.value });
 }
 
 export function PATCH(request: NextRequest) {
@@ -146,26 +134,18 @@ async function handlePATCH(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  const result = await withUserGithubToken(
+    user,
+    `PATCH /api/issues ${repositoryFullName}#${number}`,
+    async (token) => {
+      const updated = await updateIssue(owner, repo, number, token, input);
+      return upsertIssueAndGetDisplay(repository, updated);
+    },
+  );
+  if ("errorResponse" in result) {
+    return result.errorResponse;
   }
-
-  try {
-    const token = decryptSecret(user.githubAccessToken);
-    const updated = await updateIssue(owner, repo, number, token, input);
-    const issue = await upsertIssueAndGetDisplay(repository, updated);
-    return NextResponse.json({ issue });
-  } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
-    console.error(`[PATCH /api/issues] ${repositoryFullName}#${number}:`, error);
-    return NextResponse.json(
-      { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
+  return NextResponse.json({ issue: result.value });
 }
 
 export function DELETE(request: NextRequest) {
@@ -196,24 +176,16 @@ async function handleDELETE(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  if (!user.githubAccessToken) {
-    return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
+  const result = await withUserGithubToken(
+    user,
+    `DELETE /api/issues ${repositoryFullName}#${number}`,
+    async (token) => {
+      await deleteIssue(owner, repo, number, token);
+      await db.issue.deleteMany({ where: { repositoryId: repository.id, number } });
+    },
+  );
+  if ("errorResponse" in result) {
+    return result.errorResponse;
   }
-
-  try {
-    const token = decryptSecret(user.githubAccessToken);
-    await deleteIssue(owner, repo, number, token);
-    await db.issue.deleteMany({ where: { repositoryId: repository.id, number } });
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    if (error instanceof GithubApiError && error.status === 401) {
-      await db.user.update({ where: { id: user.id }, data: { githubAccessToken: null } });
-      return NextResponse.json({ error: "github_reauth_required" }, { status: 409 });
-    }
-    console.error(`[DELETE /api/issues] ${repositoryFullName}#${number}:`, error);
-    return NextResponse.json(
-      { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
+  return NextResponse.json({ success: true });
 }
