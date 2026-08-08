@@ -11,9 +11,18 @@ import {
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
-import { getAdjacentNavViewId, navViews } from "@/lib/nav-views";
+import { baseNavViews, getAdjacentNavViewId, labelNavViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
+
+// 一覧画面上部のフィルタータブは「すべてのIssue」の右隣にユーザーの確認待ちを固定表示し、
+// 対応が必要なIssueを横スクロールなしで見つけられるようにする（#714）。
+const tabNavViews = [
+  baseNavViews[0],
+  labelNavViews[0],
+  ...baseNavViews.slice(1),
+  ...labelNavViews.slice(1),
+];
 
 type MobileIssueListScreenProps = {
   /** ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名） */
@@ -142,7 +151,7 @@ export function MobileIssueListScreen({
       {/* shrink-0がないと、下のIssueList（flex-1でflex-basisが0のため縮小分を負担しない）の
           分まで縮小配分がこの行に集中し、表示件数が多いときにタブの高さが潰れてしまう（#584） */}
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {navViews.map((navView) => (
+        {tabNavViews.map((navView) => (
           <button
             key={navView.id}
             ref={(el) => {
