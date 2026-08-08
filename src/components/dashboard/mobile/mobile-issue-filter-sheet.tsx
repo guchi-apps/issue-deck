@@ -36,6 +36,12 @@ type MobileIssueFilterSheetProps = {
    * 並び順選択セクションを非表示にする。
    */
   sortLocked?: boolean;
+  /**
+   * リポジトリごとのグルーピング表示（#849）のON/OFF。onChangeGroupByRepoを
+   * 指定した場合のみ「表示」セクションを出す（リポジトリ別一覧では対象外のため省略する）。
+   */
+  groupByRepo?: boolean;
+  onChangeGroupByRepo?: (value: boolean) => void;
 };
 
 const LABEL_COLLAPSE_THRESHOLD = 8;
@@ -72,6 +78,8 @@ export function MobileIssueFilterSheet({
   assigneeOptions,
   showLabelPresets = true,
   sortLocked = false,
+  groupByRepo = false,
+  onChangeGroupByRepo,
 }: MobileIssueFilterSheetProps) {
   const [showAllLabels, setShowAllLabels] = useState(false);
 
@@ -216,6 +224,20 @@ export function MobileIssueFilterSheet({
                 </Pill>
                 <Pill active={filters.sort === "created"} onClick={() => onChange({ ...filters, sort: "created" })}>
                   作成日
+                </Pill>
+              </div>
+            </section>
+          )}
+
+          {onChangeGroupByRepo && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">表示</h3>
+              <div className="flex flex-wrap gap-2">
+                <Pill active={!groupByRepo} onClick={() => onChangeGroupByRepo(false)}>
+                  まとめて表示
+                </Pill>
+                <Pill active={groupByRepo} onClick={() => onChangeGroupByRepo(true)}>
+                  リポジトリごとに分ける
                 </Pill>
               </div>
             </section>

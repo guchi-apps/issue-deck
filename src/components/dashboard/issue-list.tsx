@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { closedStateLabel } from "@/lib/issue-state-reason";
+import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,11 @@ type IssueListProps = {
    * 条件が変われば別の一覧として扱う。省略時は保存・復元を行わない。
    */
   scrollKey?: string | null;
+  /**
+   * リポジトリごとのグループヘッダーを挟んで表示するか（#849）。絞り込み結果に
+   * リポジトリが1種類しかない場合はヘッダーを出さずフラット表示のまま扱う。
+   */
+  groupByRepo?: boolean;
 };
 
 function formatRelativeDate(iso: string) {
@@ -69,6 +75,18 @@ function IssueStateIcon({ issue }: { issue: Issue }) {
   );
 }
 
+// グループ表示中は各行のリポジトリ名表示がヘッダーと重複するため省略する（#849）
+function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
+  return (
+    <div className="flex items-center gap-1.5 border-b bg-muted/50 px-4 py-2 text-xs font-semibold text-muted-foreground">
+      <span className="truncate">{group.repositoryFullName.split("/")[1]}</span>
+      {group.repositoryArchived && <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />}
+      {group.repositoryPrivate && <Lock className="size-3 shrink-0" aria-label="プライベート" />}
+      <span className="ml-auto shrink-0">{group.issues.length}件</span>
+    </div>
+  );
+}
+
 export function IssueList({
   title,
   issues,
@@ -81,6 +99,7 @@ export function IssueList({
   fabSpacing = false,
   footerSpacing = false,
   scrollKey = null,
+  groupByRepo = false,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
@@ -91,6 +110,104 @@ export function IssueList({
   // scrollIntoView()は祖先のoverflow-hiddenコンテナ（ヘッダー等を含む）まで巻き込んで
   // スクロールさせてしまうため使わず、<ul>自身のscrollTopのみを直接操作する。
   useIssueListScroll({ scrollKey, issueIds, selectedIssueId, listRef, itemRefs });
+
+  // リポジトリが1種類しかない場合（絞り込みで単一リポジトリのときなど）はヘッダーを
+  // 出す意味がないため、フラット表示のまま扱う。
+  const repoGroups = useMemo(
+    () => (groupByRepo ? groupIssuesByRepository(issues) : null),
+    [groupByRepo, issues],
+  );
+  const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
+
+  function renderIssueRow(issue: Issue, showRepoName: boolean) {
+    return (
+      <li
+        key={issue.id}
+        ref={(el) => {
+          if (el) itemRefs.current.set(issue.id, el);
+          else itemRefs.current.delete(issue.id);
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => onSelectIssue(issue)}
+          className={cn(
+            "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
+            selectedIssueId === issue.id && "border-l-primary bg-accent",
+          )}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <IssueStateIcon issue={issue} />
+              {showRepoName && (
+                <>
+                  <span className="truncate">{issue.repositoryFullName.split("/")[1]}</span>
+                  {issue.repositoryArchived && (
+                    <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />
+                  )}
+                  {issue.repositoryPrivate && (
+                    <Lock className="size-3 shrink-0" aria-label="プライベート" />
+                  )}
+                </>
+              )}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <WorkflowStepBadge
+                labels={issue.labels}
+                running={runningByIssueId[issue.id]}
+                qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
+              />
+              {issue.favorite && (
+                <Star
+                  className="size-3.5 fill-yellow-400 text-yellow-400"
+                  aria-label="お気に入り"
+                />
+              )}
+              <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
+            </span>
+          </div>
+          <p
+            className={cn(
+              "flex items-start gap-1.5 text-sm",
+              issue.hasUnreadComments ? "font-semibold" : "font-medium",
+            )}
+          >
+            {issue.hasUnreadComments && (
+              <span
+                className="mt-1.5 size-1.5 shrink-0 rounded-full bg-blue-500"
+                aria-label="未読コメントあり"
+              />
+            )}
+            <span className="line-clamp-2 min-w-0 break-words">
+              #{issue.number} {issue.title}
+            </span>
+          </p>
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1">
+              {nonStatusLabels(issue.labels).map((label) => (
+                <span
+                  key={label.name}
+                  className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                  style={getLabelBadgeStyle(label.color)}
+                >
+                  {label.name}
+                </span>
+              ))}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {issue.commentCount > 0 && (
+                <span className="flex items-center gap-0.5">
+                  <MessageSquare className="size-3" />
+                  {issue.commentCount}
+                </span>
+              )}
+              <span>{formatRelativeDate(issue.updatedAt)}</span>
+            </div>
+          </div>
+        </button>
+      </li>
+    );
+  }
 
   return (
     <div className={cn("flex h-full flex-col", className)} style={style}>
@@ -130,89 +247,14 @@ export function IssueList({
             fabSpacing && "pb-20",
           )}
         >
-          {issues.map((issue) => (
-            <li
-              key={issue.id}
-              ref={(el) => {
-                if (el) itemRefs.current.set(issue.id, el);
-                else itemRefs.current.delete(issue.id);
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => onSelectIssue(issue)}
-                className={cn(
-                  "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
-                  selectedIssueId === issue.id && "border-l-primary bg-accent",
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                    <IssueStateIcon issue={issue} />
-                    <span className="truncate">{issue.repositoryFullName.split("/")[1]}</span>
-                    {issue.repositoryArchived && (
-                      <Archive className="size-3 shrink-0" aria-label="アーカイブ済み" />
-                    )}
-                    {issue.repositoryPrivate && (
-                      <Lock className="size-3 shrink-0" aria-label="プライベート" />
-                    )}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <WorkflowStepBadge
-                      labels={issue.labels}
-                      running={runningByIssueId[issue.id]}
-                      qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
-                    />
-                    {issue.favorite && (
-                      <Star
-                        className="size-3.5 fill-yellow-400 text-yellow-400"
-                        aria-label="お気に入り"
-                      />
-                    )}
-                    <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
-                  </span>
-                </div>
-                <p
-                  className={cn(
-                    "flex items-start gap-1.5 text-sm",
-                    issue.hasUnreadComments ? "font-semibold" : "font-medium",
-                  )}
-                >
-                  {issue.hasUnreadComments && (
-                    <span
-                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-blue-500"
-                      aria-label="未読コメントあり"
-                    />
-                  )}
-                  <span className="line-clamp-2 min-w-0 break-words">
-                    #{issue.number} {issue.title}
-                  </span>
-                </p>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {nonStatusLabels(issue.labels).map((label) => (
-                      <span
-                        key={label.name}
-                        className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
-                        style={getLabelBadgeStyle(label.color)}
-                      >
-                        {label.name}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {issue.commentCount > 0 && (
-                      <span className="flex items-center gap-0.5">
-                        <MessageSquare className="size-3" />
-                        {issue.commentCount}
-                      </span>
-                    )}
-                    <span>{formatRelativeDate(issue.updatedAt)}</span>
-                  </div>
-                </div>
-              </button>
-            </li>
-          ))}
+          {isGrouped
+            ? repoGroups!.flatMap((group) => [
+                <li key={`group-${group.repositoryFullName}`}>
+                  <GroupHeader group={group} />
+                </li>,
+                ...group.issues.map((issue) => renderIssueRow(issue, false)),
+              ])
+            : issues.map((issue) => renderIssueRow(issue, true))}
           {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
               兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
               見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
