@@ -1467,7 +1467,7 @@ jobs:
             - `.shared-context/agent-rules/implementation.md` — 実装エージェントの共通ルール
             - `.shared-context/knowledge/` — 過去に他アプリ・他Issueで得た知見。今回触る領域
               （GitHub Actions・デプロイ・認証・DB等）に対応するファイルがあれば、着手前に読む
-            - `.shared-context/coding-standards.md` — 全アプリ共通のコーディング方針
+            - `.shared-context/standards/coding.md` — 全アプリ共通のコーディング方針
 
             注意事項:
             - **`.shared-context/`配下は読み取り専用です。** 編集・`git add`・コミットは一切行わないで
