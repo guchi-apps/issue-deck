@@ -7,6 +7,7 @@ import { createIssue, deleteIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { getIssuesForUser } from "@/lib/issues-for-user";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 async function findRepository(userId: string, repositoryFullName: string) {
   return db.repository.findFirst({
@@ -29,6 +30,8 @@ export async function GET() {
 }
 
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("issue_write", () => handlePOST(request));
 }
 
@@ -75,6 +78,8 @@ async function handlePOST(request: NextRequest) {
 }
 
 export function PATCH(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("issue_write", () => handlePATCH(request));
 }
 
@@ -144,6 +149,8 @@ async function handlePATCH(request: NextRequest) {
 }
 
 export function DELETE(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("issue_write", () => handleDELETE(request));
 }
 
