@@ -115,7 +115,7 @@ export function MobileRepoIssuesScreen({
           onClick={() => setReleaseSheetOpen(true)}
           className={cn(
             "relative flex size-11 items-center justify-center rounded-md border",
-            releaseButtonStatus === "progressing" && "border-primary text-primary",
+            releaseButtonStatus === "progressing" && "border-sky-500 text-sky-600 dark:text-sky-500",
             releaseButtonStatus === "action_required" &&
               "border-amber-500 text-amber-600 dark:text-amber-500",
             releaseButtonStatus === "error" && "border-red-500 text-red-600 dark:text-red-500",
@@ -126,8 +126,7 @@ export function MobileRepoIssuesScreen({
           {releaseButtonStatus === "progressing" && (
             <svg
               aria-hidden="true"
-              className="absolute block animate-[border-trace_1.4s_linear_infinite] text-primary"
-              style={{ inset: -3 }}
+              className="absolute inset-0 block size-full animate-[border-trace_1.4s_linear_infinite]"
               viewBox="0 0 100 100"
             >
               <rect
