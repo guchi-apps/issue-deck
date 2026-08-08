@@ -4,17 +4,26 @@ name: Deploy Preview
 # 本番DBをダンプし、サニタイズ・installation ID書き換え（開発App issue-deck-dev向け）を
 # 行った上でイメージに焼き込み、fly deploy する（#831）。
 #
-# workflow_call化しているのは、後続サブIssueでclaude-issue-dispatch.ymlから呼び出す
-# 想定のため（本Issue自体ではclaude-issue-dispatch.ymlへの接続は行わない）。
+# workflow_call化しているのは、claude-issue-dispatch.ymlから呼び出す想定のため（#832で実際に接続）。
+# refは省略時developを対象にする。claude-issue-dispatch.ymlは23.preview-requiredが付いた
+# issueの実装ブランチ（issue-<番号>）をレビュー用に表示したいため、呼び出し時に明示的に指定する。
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "デプロイ対象のブランチ・コミット参照"
+        type: string
+        default: develop
       preview_mode:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
         default: true
   workflow_call:
     inputs:
+      ref:
+        description: "デプロイ対象のブランチ・コミット参照"
+        type: string
+        default: develop
       preview_mode:
         description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
         type: boolean
@@ -54,6 +63,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Load secrets from 1Password
         uses: 1password/load-secrets-action@v4
