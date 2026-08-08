@@ -856,10 +856,12 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 ### ジョブ構成
 
-- **detect-conflicts**: `gh pr list --base develop --state open --json number,headRefName,mergeable`で
-  develop向けの全OPEN PRを取得し、ブランチ命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）に
-  従い、かつ`mergeable`が`CONFLICTING`（developとコンフリクト中）のものを対応Issue番号の配列として
-  検出する。
+- **detect-conflicts**: developとコンフリクトしている（`mergeable`が`CONFLICTING`）PRを対応
+  Issue番号の配列として検出する。トリガーが`pull_request`の場合は`gh pr view`でトリガー元のPR
+  1件のみを対象にし、それ以外（`push`/`schedule`/`workflow_dispatch`）は
+  `gh pr list --base develop --state open --json number,headRefName,mergeable`でdevelop向けの
+  全OPEN PRを取得し、ブランチ命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）に従うものを
+  対象にする（#814）。
 - **resolve-conflicts**: 検出したIssue番号ごとに`strategy.matrix`で並列実行する。まず対象PRの状態を
   （detect-conflicts実行時点からのタイムラグを考慮して）再確認したうえで、対応ブランチへ
   `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを解消してpushする。
@@ -876,18 +878,27 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
   毎回`detect-conflicts`から`resolve-conflicts`のmatrixジョブが走ると、`resolve-conflicts`が
   使う同じ`issue-dispatch-<番号>-branch`concurrencyグループ内で実装ステップ自体と噛み合い
   キューが詰まる懸念があるため。developが動いてPRがコンフリクトに変化するケースは既存の
-  `push`（`develop`）トリガーでカバーされる。
+  `push`（`develop`）トリガーでカバーされる。このトリガーはトリガー元のPR自身が既に
+  コンフリクトしていないかだけを見ればよく、develop向けの他PRの状態まで見る必要はない。
+  1回のワークフロー実行内のmatrix全ジョブのチェックはトリガーしたPRのチェック一覧に紐付いて
+  表示されるため、以前は全件スキャンしていたことで、たまたま同じタイミングでコンフリクト
+  していた無関係な他PRのチェックまで表示されてしまう不具合があった（#814で修正）。
 - `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push・pull_request
   直後の検知時点ではまだ計算が終わっておらず`UNKNOWN`のままの場合がある。`detect-conflicts`の
   ポーリング（下記）でも解消しきれなかった取りこぼしを拾い直す安全網として、`issue-labels.yml`の
   各scheduleジョブと同じ間隔で走査する。
 - `workflow_dispatch`: 手動実行用。
 
-`detect-conflicts`は、`issue-<番号>`命名規約に従うdevelop向けPRの中に`mergeable`が`UNKNOWN`
-（判定計算未完了）のものが残っている間、10秒間隔・最大6回（計1分程度）ポーリングして再取得する。
-`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、「計算未完了
-イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。このポーリングは
-`push`・`schedule`トリガーの既存挙動にも同様に効く。
+`detect-conflicts`は、対象PR（群）のうち`issue-<番号>`命名規約に従うものの中に`mergeable`が
+`UNKNOWN`（判定計算未完了）のものが残っている間、10秒間隔・最大6回（計1分程度）ポーリングして
+再取得する。`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、
+「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。
+このポーリングは`push`・`schedule`トリガーの既存挙動にも同様に効く。
+
+develop向けPRは`claude[bot]`（Claude Code GitHub App）が作成するため、`pull_request`トリガーでの
+`resolve-conflicts`ジョブの`claude-code-action`ステップはactorが`claude[bot]`になる。
+`claude-code-action`は既定でbot起点の実行を拒否するため、`allowed_bots: "claude[bot]"`を指定して
+明示的に許可している（`claude-review-develop.yml`等と同じ対処。#814）。
 
 ### 既存の実装ワークフローとの競合回避
 

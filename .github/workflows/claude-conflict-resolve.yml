@@ -6,9 +6,11 @@ name: Claude Conflict Resolve
 # 試みるワークフロー(docs/multi-agent-workflow.md「PRコンフリクトの自動解消」参照、issue #315)。
 #
 # ジョブ構成:
-# - detect-conflicts: develop向けの全OPEN PRのうち、ブランチ命名規約issue-<番号>
-#   (scripts/start-issue.shが作成)に従い、かつdevelopとコンフリクトしている
-#   (mergeable=CONFLICTING)ものを対応Issue番号の配列として検出する
+# - detect-conflicts: developとコンフリクトしている(mergeable=CONFLICTING)PRを
+#   対応Issue番号の配列として検出する。トリガーがpull_request(下記)の場合はそのPR
+#   1件のみ、それ以外(push/schedule/workflow_dispatch)はdevelop向けの全OPEN PRの
+#   うち、ブランチ命名規約issue-<番号>(scripts/start-issue.shが作成)に従うものを
+#   対象にする(#814)
 # - resolve-conflicts: 検出したIssueごとにmatrixで並列実行し、対応ブランチへ
 #   `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを
 #   解消してpushする。解消が難しいと判断した場合は無理をせず00.check-userを
@@ -23,17 +25,22 @@ name: Claude Conflict Resolve
 #   何度も細かくpushする間、毎回detect-conflicts→resolve-conflictsのmatrixジョブが
 #   走ると、resolve-conflictsが使う同じissue-dispatch-<番号>-branch concurrency
 #   グループ内で実装ステップ自体と噛み合いキューが詰まる懸念があるため。developが
-#   動いてPRがコンフリクトに変化するケースは既存のpush(develop)トリガーでカバーされる
+#   動いてPRがコンフリクトに変化するケースは既存のpush(develop)トリガーでカバーされる。
+#   このトリガーはトリガー元のPR自身が既にコンフリクトしていないかだけを見ればよく、
+#   develop向けの他PRの状態まで見る必要はない。1回のワークフロー実行内のmatrix全ジョブの
+#   チェックはトリガーしたPRのチェック一覧に紐付いて表示されるため、全件スキャンすると
+#   たまたま同じタイミングでコンフリクトしていた無関係な他PRのチェックまで表示されて
+#   しまう不具合があった(#814)
 # - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push・
 #   pull_request直後の検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。
 #   detect-conflictsのポーリング(下記)でも解消しきれなかった取りこぼしを拾い直す
 #   安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
 # - workflow_dispatch: 手動実行用
 #
-# detect-conflictsは、issue-<番号>命名規約に従うdevelop向けPRの中にmergeable=UNKNOWN
-# (判定計算未完了)のものが残っている間、10秒間隔・最大6回(計1分程度)ポーリングして
-# 再取得する。「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを
-# 取りこぼすのを防ぐため。
+# detect-conflictsは、対象PR(群)の中にmergeable=UNKNOWN(判定計算未完了)のものが
+# 残っている間、10秒間隔・最大6回(計1分程度)ポーリングして再取得する。
+# 「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを
+# 防ぐため。
 #
 # resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
 # concurrencyグループ(issue-dispatch-<Issue番号>-branch)を使う。同じissue-<番号>ブランチへ
@@ -72,12 +79,23 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -e
-          # mergeableの判定はGitHub側で非同期に計算されるため、issue-<番号>命名規約に
-          # 従うdevelop向けPRの中にUNKNOWN(計算未完了)が残っている間は、それを
-          # コンフリクトなしと誤判定しないよう10秒間隔・最大6回(計1分程度)まで
+          # pull_requestトリガー(opened/reopened)の場合は、トリガー元のPR1件のみを
+          # 対象にする(ヘッダのコメント参照、#814)。それ以外(push/schedule/
+          # workflow_dispatch)は従来通りdevelop向けの全OPEN PRを対象にする。
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+
+          # mergeableの判定はGitHub側で非同期に計算されるため、対象PR(群)のうち
+          # issue-<番号>命名規約に従うものの中にUNKNOWN(計算未完了)が残っている間は、
+          # それをコンフリクトなしと誤判定しないよう10秒間隔・最大6回(計1分程度)まで
           # ポーリングして再取得する。
           for i in 1 2 3 4 5 6; do
-            PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+            if [ -n "${PR_NUMBER:-}" ]; then
+              PRS_JSON="$(gh pr view "$PR_NUMBER" --json number,headRefName,mergeable | jq -c '[.]')"
+            else
+              PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+            fi
             UNKNOWN_COUNT="$(echo "$PRS_JSON" | jq '
               [.[]
                 | select(.headRefName | test("^issue-[0-9]+$"))
@@ -249,6 +267,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
+          # develop向けPRはclaude[bot](Claude Code GitHub App)が作成するため、
+          # pull_requestトリガーではactorがclaude[bot]になる。claude-code-actionは
+          # 既定でbot起点の実行を拒否するため明示的に許可する
+          # (参考: https://github.com/anthropics/claude-code-action/issues/1299。#814)
+          allowed_bots: "claude[bot]"
           claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
           prompt: |
             あなたはissue-deckリポジトリのPRコンフリクト解消エージェントです。GitHub Actions上で
