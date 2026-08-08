@@ -79,7 +79,12 @@ export function MobileReposScreen({
         {repositories.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
             まだリポジトリと連携していません。
-            <a href={getGithubAppInstallUrl()} className="ml-1 text-primary hover:underline">
+            <a
+              href={getGithubAppInstallUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 text-primary hover:underline"
+            >
               GitHub Appをインストール
             </a>
           </div>
