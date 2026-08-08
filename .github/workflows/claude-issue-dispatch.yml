@@ -843,6 +843,10 @@ jobs:
             - 許可されていない操作が拒否される等で調査に行き詰まった場合、それ以上粘らず、その時点で
               分かっている情報の範囲で計画をまとめてコメント投稿することを最優先する
               （コメントを一切投稿できないまま終了することが最悪の結果のため）
+            - このステップは1回のバッチ実行であり、後続のターンで完了通知が来るのを待つような進め方
+              はできない。「調査エージェントを起動しました。完了次第まとめます」のように、この実行内で
+              完結しない前提の投稿をしてそのまま終了しないこと。同一実行内で調査が終わらない場合も、
+              その時点までに分かっている情報でコメントをまとめて投稿する
 
             ## このステップでは行わないこと
             - コードの変更・コミット・ブランチ作成・PR作成は一切行わない（計画提示のみ。分割を計画した場合も、
@@ -905,15 +909,17 @@ jobs:
 
           echo "新規コメントが確認できないため、エラー種別の判定と自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
 
-          # execution_fileから、サブエージェント使用の痕跡(SDKが各メッセージに付与するsubagent_type
-          # フィールド)と、直近resultターンのpermission_denialsを抽出する(#780)。モデルが自作した
-          # echo出力などの不確かな手がかりではなく、SDKが構造化して付与するフィールドを使う。
-          # 以下のERROR_TYPE判定・フォールバック本文の生成の両方で使う。execution_fileは
+          # execution_fileから、RESULT_SUBTYPE(#777)と、サブエージェント使用の痕跡(SDKが各メッセージに
+          # 付与するsubagent_typeフィールド)・直近resultターンのpermission_denials(#780)を抽出する。
+          # モデルが自作したecho出力などの不確かな手がかりではなく、SDKが構造化して付与するフィールドを
+          # 使う。以下のERROR_TYPE判定・フォールバック本文の生成の両方で使う。execution_fileは
           # claude-code-action内部の実装詳細でスキーマが変わりうるため、抽出は全て`// empty`等で
           # フォールバックし、失敗しても後続の判定・通知自体は必ず動く。
+          RESULT_SUBTYPE=""
           SUBAGENT_TYPES=""
           DENIED_TOOLS=""
           if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
             SUBAGENT_TYPES="$(jq -r '[.[] | select(.subagent_type != null) | .subagent_type] | unique | join(", ")' "$EXECUTION_FILE" 2>/dev/null || true)"
             DENIED_TOOLS="$(jq -r '[.[] | select(.type == "result")] | last | (.permission_denials // []) | map(.tool_name // .tool // "?") | unique | join(", ")' "$EXECUTION_FILE" 2>/dev/null || true)"
           fi
@@ -921,19 +927,21 @@ jobs:
           # Claude Code（計画提示）ステップ自体がfailureで終了した場合、Claude起動前後のGitHub API
           # 呼び出しエラー等、一過性の可能性が高いインフラ障害と判断する(#610で実際に観測された例:
           # 実行者の権限チェックAPIが一時的に503を返しステップごと失敗した)。ステップ自体はsuccessで
-          # 終了したが新規コメントが確認できない場合は、以下いずれかの恒常的な障害と判断する。
+          # 終了した場合も、result subtypeがerror_max_turns(ターン数上限)であれば、投稿まで到達
+          # できなかっただけでリトライすれば解消する見込みが高い一過性の障害とみなす(#769, #777)。
+          # それ以外でsuccess終了かつ新規コメントが確認できない場合は、以下いずれかの恒常的な障害と判断する。
           #   - persistent_subagent: サブエージェント(Task/Agent)を起動したままターンを終えた(#780)。
           #     無人実行には結果を待つ次のユーザーターンが存在せずセッションごと打ち切られるため、
           #     再実行しても同じ条件では決定論的に再現する。自動リトライの対象から外す
           #   - persistent: それ以外(ツール権限拒否等)。従来どおりリポジトリ共通のAUTO_RETRY_LIMITに従う
-          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ]; then
+          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ] || [ "$RESULT_SUBTYPE" = "error_max_turns" ]; then
             ERROR_TYPE=transient
           elif [ -n "$SUBAGENT_TYPES" ]; then
             ERROR_TYPE=persistent_subagent
           else
             ERROR_TYPE=persistent
           fi
-          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME, 検出したサブエージェント: ${SUBAGENT_TYPES:-なし}, 拒否されたツール: ${DENIED_TOOLS:-なし}）"
+          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME, result subtype: ${RESULT_SUBTYPE:-なし}, 検出したサブエージェント: ${SUBAGENT_TYPES:-なし}, 拒否されたツール: ${DENIED_TOOLS:-なし}）"
 
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
@@ -1006,15 +1014,15 @@ jobs:
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
 
-          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。抽出優先順位は
-          # 1.最後のresultターンのresult(subtypeも既知の値なら定型理由を添える) 2.無ければ
+          # execution_fileから失敗理由(REASON)の推定を試みる(#716)。RESULT_SUBTYPEはERROR_TYPE
+          # 判定のため既に上で抽出済みなので、ここではREASON(本文)のみを新たに抽出する。抽出優先
+          # 順位は1.最後のresultターンのresult(subtypeも既知の値なら定型理由を添える) 2.無ければ
           # 最後のassistantターンのテキスト 3.どちらも無ければ理由セクション自体を省略する。
           # execution_fileはclaude-code-action内部の実装詳細でスキーマが変わりうるため、
           # jqは全て`// empty`等でフォールバックし、抽出に失敗してもフォールバックコメント
           # 自体は必ず投稿する(理由抽出の失敗が通知を壊さないようにする)。
           REASON=""
           if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
-            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
             REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
             if [ -z "$REASON" ]; then
               REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
@@ -1525,6 +1533,15 @@ jobs:
 
             - 上記いずれのラベルも付いていない場合は、通常どおり完了処理まで進めてください
 
+            ## 迷った場合・行き詰まった場合の振る舞い
+            - 許可されていない操作が拒否される等で実装や調査に行き詰まった場合、それ以上粘らず、その時点で
+              分かっている情報の範囲で状況を`gh issue comment`に報告することを最優先する
+              （コメントを一切投稿できないまま終了することが最悪の結果のため）
+            - このステップは1回のバッチ実行であり、後続のターンで完了通知が来るのを待つような進め方
+              はできない。「調査エージェントを起動しました。完了次第まとめます」のように、この実行内で
+              完結しない前提の投稿をしてそのまま終了しないこと。同一実行内で作業が終わらない場合も、
+              その時点までに分かっている情報でコメントをまとめて投稿する
+
             ## 禁止事項
             - `main` / `develop` への直接コミット・push
             - 他Issueのブランチの編集
@@ -1584,17 +1601,29 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "新規コメント・PRのいずれも確認できないため、エラー種別の判定と自動リトライの可否を確認します"
 
+          # execution_fileからRESULT_SUBTYPEを先に抽出する(#777)。以前はフォールバックコメント
+          # 生成直前(REASON抽出時)まで抽出していなかったが、ERROR_TYPE判定にも使うため前倒しした。
+          # execution_fileはclaude-code-action内部の実装詳細でスキーマが変わりうるため、jqは
+          # `// empty`でフォールバックし、抽出に失敗してもERROR_TYPE判定には影響しない(persistent
+          # 側の判定のまま)。
+          RESULT_SUBTYPE=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
+          fi
+
           # Claude Code（実装・PR作成）ステップ自体がfailureで終了した場合、Claude起動前後の
           # GitHub API呼び出しエラー等、一過性の可能性が高いインフラ障害と判断する(#610で実際に
           # 観測された例: 実行者の権限チェックAPIが一時的に503を返しステップごと失敗した)。ステップ
-          # 自体はsuccessで終了したが新規コメント・PRのいずれも確認できない場合は、Claude内部での
-          # ツール権限拒否等、リトライしても解消しない可能性が高い恒常的な障害と判断する。
-          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ]; then
+          # 自体はsuccessで終了した場合も、result subtypeがerror_max_turns(ターン数上限)であれば、
+          # 投稿まで到達できなかっただけでリトライすれば解消する見込みが高い一過性の障害とみなす
+          # (#769, #777)。それ以外でsuccess終了かつ新規コメント・PRのいずれも確認できない場合は、
+          # Claude内部でのツール権限拒否等、リトライしても解消しない可能性が高い恒常的な障害と判断する。
+          if [ "$CLAUDE_STEP_OUTCOME" = "failure" ] || [ "$RESULT_SUBTYPE" = "error_max_turns" ]; then
             ERROR_TYPE=transient
           else
             ERROR_TYPE=persistent
           fi
-          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME）"
+          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME, result subtype: ${RESULT_SUBTYPE:-なし}）"
 
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
@@ -1649,12 +1678,12 @@ jobs:
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"自動リトライを${RETRY_ATTEMPT}回試みましたが解決しませんでした。"
           fi
 
-          # execution_fileからここで初めて失敗理由の推定を試みる(#716)。計画提示ステップの
-          # フォールバック検証ステップと同じ抽出ロジック(優先順位・既知subtypeの定型理由・
+          # execution_fileから失敗理由(REASON)の推定を試みる(#716)。RESULT_SUBTYPEはERROR_TYPE
+          # 判定のため既に上で抽出済みなので、ここではREASON(本文)のみを新たに抽出する。計画提示
+          # ステップのフォールバック検証ステップと同じ抽出ロジック(優先順位・既知subtypeの定型理由・
           # 文字数制限・抽出失敗時は理由セクションを省略するのみ)。
           REASON=""
           if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
-            RESULT_SUBTYPE="$(jq -r '[.[] | select(.type == "result")] | last | .subtype // empty' "$EXECUTION_FILE" 2>/dev/null || true)"
             REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
             if [ -z "$REASON" ]; then
               REASON="$(jq -r '[.[] | select(.type == "assistant")] | last | (.message.content // []) | map(select(.type == "text") | .text) | join(" ")' "$EXECUTION_FILE" 2>/dev/null | tr '\n' ' ' || true)"
