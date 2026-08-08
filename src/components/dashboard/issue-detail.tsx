@@ -152,7 +152,7 @@ export function IssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,
-    issue ? isMergeApprovalPending(issue.labels) : false,
+    issue ? isMergeApprovalPending(issue.labels, comments) : false,
   );
   const {
     mergePullRequest,
@@ -579,7 +579,7 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
-              mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+              mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
               workflowRun={workflowRun}
