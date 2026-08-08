@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ChevronDown,
+  KeyRound,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,6 +18,7 @@ import {
 
 import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { FineGrainedTokensDialog } from "@/components/dashboard/fine-grained-tokens-dialog";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
@@ -60,11 +62,13 @@ import { isProductionDeployComplete, ReleaseProgress } from "@/components/dashbo
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useNow } from "@/hooks/use-now";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
 import {
@@ -72,6 +76,7 @@ import {
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
+import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
 import { filterIssuesByView } from "@/lib/issue-stats";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { DeployCheckStatus, Issue } from "@/types/issue";
@@ -118,6 +123,7 @@ export function TopBar({
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
+  const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
   // アカウントメニューを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
@@ -148,6 +154,18 @@ export function TopBar({
     triggerRelease,
     isTriggering: isTriggeringRelease,
   } = useReleaseStatus(releaseRepoFullName, accountMenuOpen);
+  const {
+    data: fineGrainedTokens,
+    isLoading: fineGrainedTokensLoading,
+    error: fineGrainedTokensError,
+    refetch: refetchFineGrainedTokens,
+  } = useFineGrainedTokens(accountMenuOpen);
+  const now = useNow();
+  const hasExpiringFineGrainedToken =
+    now !== null &&
+    (fineGrainedTokens ?? []).some(
+      (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
+    );
 
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
@@ -357,6 +375,18 @@ export function TopBar({
               <AlertTriangle className="ml-auto size-4 text-destructive" />
             )}
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setFineGrainedTokensDialogOpen(true);
+            }}
+          >
+            <KeyRound />
+            Fine-grained PAT管理
+            {hasExpiringFineGrainedToken && (
+              <AlertTriangle className="ml-auto size-4 text-destructive" />
+            )}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel>GitHub API使用量</DropdownMenuLabel>
           <div className="flex flex-col gap-2 px-1.5 pb-1.5">
@@ -525,6 +555,15 @@ export function TopBar({
         data={githubStatus}
         isLoading={githubStatusLoading}
         error={githubStatusError}
+      />
+
+      <FineGrainedTokensDialog
+        open={fineGrainedTokensDialogOpen}
+        onOpenChange={setFineGrainedTokensDialogOpen}
+        data={fineGrainedTokens}
+        isLoading={fineGrainedTokensLoading}
+        error={fineGrainedTokensError}
+        onChanged={refetchFineGrainedTokens}
       />
 
       <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>

@@ -310,6 +310,18 @@ model AppSetting {
   updatedAt      DateTime @updatedAt
 }
 
+// Fine-grained PAT（例: secrets.WORKFLOW_PAT）等、有効期限を追跡したいトークンの管理台帳。
+// GitHub側は発行済みトークンの実際の有効期限をAPIで取得できないため、GitHubのPAT設定画面で
+// 確認した有効期限をユーザーが手入力で登録する運用とする（#759）。全リポジトリ共通の設定。
+model FineGrainedToken {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model IssueLabel {
   id            String  @id @default(cuid())
   issueId       String
