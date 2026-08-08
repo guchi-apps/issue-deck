@@ -773,10 +773,24 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 - `push`（`develop`）: developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、最も速報性が
   高い経路としてその都度検知する。
-- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push直後の検知時点では
-  まだ計算が終わっておらず`UNKNOWN`のままの場合がある。取りこぼしを拾い直す安全網として、
-  `issue-labels.yml`の各scheduleジョブと同じ間隔で走査する。
+- `pull_request`（`develop`向け、`opened`/`reopened`）: develop向けPRが作成された直後、既に
+  developとコンフリクトした状態で生まれるケース（issue #715）を即座に拾うため。`synchronize`
+  （PRへの追加push毎）は含めない。実装エージェントが1つのIssueに対して何度も細かくpushする間、
+  毎回`detect-conflicts`から`resolve-conflicts`のmatrixジョブが走ると、`resolve-conflicts`が
+  使う同じ`issue-dispatch-<番号>-branch`concurrencyグループ内で実装ステップ自体と噛み合い
+  キューが詰まる懸念があるため。developが動いてPRがコンフリクトに変化するケースは既存の
+  `push`（`develop`）トリガーでカバーされる。
+- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push・pull_request
+  直後の検知時点ではまだ計算が終わっておらず`UNKNOWN`のままの場合がある。`detect-conflicts`の
+  ポーリング（下記）でも解消しきれなかった取りこぼしを拾い直す安全網として、`issue-labels.yml`の
+  各scheduleジョブと同じ間隔で走査する。
 - `workflow_dispatch`: 手動実行用。
+
+`detect-conflicts`は、`issue-<番号>`命名規約に従うdevelop向けPRの中に`mergeable`が`UNKNOWN`
+（判定計算未完了）のものが残っている間、10秒間隔・最大6回（計1分程度）ポーリングして再取得する。
+`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、「計算未完了
+イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。このポーリングは
+`push`・`schedule`トリガーの既存挙動にも同様に効く。
 
 ### 既存の実装ワークフローとの競合回避
 

@@ -17,10 +17,23 @@ name: Claude Conflict Resolve
 # トリガー:
 # - push(develop): developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、
 #   その都度検知する(最も速報性が高い経路)
-# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push直後の
-#   検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。取りこぼしを
-#   拾い直す安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
+# - pull_request(develop向け、opened/reopened): develop向けPRが作成された時点で
+#   既にdevelopとコンフリクトしているケース(issue #715)を即座に拾うため。
+#   synchronize(PRへの追加push毎)は含めない。実装エージェントが1つのIssueに対して
+#   何度も細かくpushする間、毎回detect-conflicts→resolve-conflictsのmatrixジョブが
+#   走ると、resolve-conflictsが使う同じissue-dispatch-<番号>-branch concurrency
+#   グループ内で実装ステップ自体と噛み合いキューが詰まる懸念があるため。developが
+#   動いてPRがコンフリクトに変化するケースは既存のpush(develop)トリガーでカバーされる
+# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push・
+#   pull_request直後の検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。
+#   detect-conflictsのポーリング(下記)でも解消しきれなかった取りこぼしを拾い直す
+#   安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
 # - workflow_dispatch: 手動実行用
+#
+# detect-conflictsは、issue-<番号>命名規約に従うdevelop向けPRの中にmergeable=UNKNOWN
+# (判定計算未完了)のものが残っている間、10秒間隔・最大6回(計1分程度)ポーリングして
+# 再取得する。「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを
+# 取りこぼすのを防ぐため。
 #
 # resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
 # concurrencyグループ(issue-dispatch-<Issue番号>-branch)を使う。同じissue-<番号>ブランチへ
@@ -32,6 +45,12 @@ name: Claude Conflict Resolve
 
 on:
   push:
+    branches:
+      - develop
+  pull_request:
+    types:
+      - opened
+      - reopened
     branches:
       - develop
   schedule:
@@ -53,7 +72,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -e
-          PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+          # mergeableの判定はGitHub側で非同期に計算されるため、issue-<番号>命名規約に
+          # 従うdevelop向けPRの中にUNKNOWN(計算未完了)が残っている間は、それを
+          # コンフリクトなしと誤判定しないよう10秒間隔・最大6回(計1分程度)まで
+          # ポーリングして再取得する。
+          for i in 1 2 3 4 5 6; do
+            PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+            UNKNOWN_COUNT="$(echo "$PRS_JSON" | jq '
+              [.[]
+                | select(.headRefName | test("^issue-[0-9]+$"))
+                | select(.mergeable == "UNKNOWN")] | length
+            ')"
+            if [ "$UNKNOWN_COUNT" -eq 0 ]; then
+              break
+            fi
+            echo "mergeable判定が未計算のPRが${UNKNOWN_COUNT}件あるため10秒待って再取得します(試行 $i/6)"
+            sleep 10
+          done
+
           ISSUES="$(echo "$PRS_JSON" | jq -c '
             [.[]
               | select(.mergeable == "CONFLICTING")
