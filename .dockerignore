@@ -8,3 +8,4 @@ coverage
 screenshots
 uploads
 db-dump/*.sql.gz
+!db-dump/dump.sql.gz

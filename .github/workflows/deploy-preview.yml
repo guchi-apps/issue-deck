@@ -1,0 +1,171 @@
+name: Deploy Preview
+
+# Fly.io Machines上のオンデマンドプレビュー環境（#826）へのデプロイ。
+# 本番DBをダンプし、サニタイズ・installation ID書き換え（開発App issue-deck-dev向け）を
+# 行った上でイメージに焼き込み、fly deploy する（#831）。
+#
+# workflow_call化しているのは、後続サブIssueでclaude-issue-dispatch.ymlから呼び出す
+# 想定のため（本Issue自体ではclaude-issue-dispatch.ymlへの接続は行わない）。
+on:
+  workflow_dispatch:
+    inputs:
+      preview_mode:
+        description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      preview_mode:
+        description: "PREVIEW_MODE（書き込み系API routeを403で封じるか）"
+        type: boolean
+        default: true
+    outputs:
+      preview_url:
+        description: "デプロイ後のプレビューURL"
+        value: ${{ jobs.deploy.outputs.preview_url }}
+
+concurrency:
+  group: deploy-issue-deck-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+
+    # ダンプのサニタイズ用（本番から取得した生ダンプを一時的にロードして書き換える）。
+    # プレビューMachine自体のMariaDB（scripts/preview-entrypoint.sh）とは無関係の、
+    # このジョブ限りの使い捨てコンテナ。
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: app_issue_deck
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ env.SSH_PRIVATE_KEY }}
+          known_hosts: placeholder
+          if_key_exists: replace
+
+      - name: Add known hosts
+        run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
+        env:
+          HOST: ${{ env.HOST }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+
+      - name: mariadb-clientをインストール
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mariadb-client
+
+      - name: 本番DBをダンプ
+        # 認証情報をmysqldumpのコマンドライン引数（-u/-p）で渡すと、共用の本番サーバー上で
+        # 他ユーザーからpsで見えてしまう（#826の「本番サーバーは共用機」という前提）。
+        # --defaults-extra-file=/dev/stdin でssh経由の標準入力から読ませることで、
+        # 本番サーバー側に認証情報を書いたファイルを作成せずに済ませる
+        # （一時ファイルを作って削除するより単純かつ確実なため、この方式にした）。
+        run: |
+          set -euo pipefail
+          ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" \
+            "mysqldump --defaults-extra-file=/dev/stdin --single-transaction --no-tablespaces ${DB_NAME} | gzip" \
+            > /tmp/prod-dump.sql.gz <<CNF
+          [client]
+          user=${DB_USER}
+          password=${DB_PASSWORD}
+          CNF
+        env:
+          HOST: ${{ env.HOST }}
+          USERNAME: ${{ env.USERNAME }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+          DB_USER: ${{ env.DB_USER }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD }}
+          DB_NAME: ${{ env.DB_NAME }}
+
+      - name: ダンプをサニタイズ用MariaDBへロード
+        run: gunzip -c /tmp/prod-dump.sql.gz | mysql -h127.0.0.1 -P3306 -uroot -proot app_issue_deck
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: installation ID書き換え・ユーザートークンのサニタイズ
+        run: node scripts/preview-sanitize-dump.mjs
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/app_issue_deck
+          GITHUB_APP_ID: "4445268"
+          GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}
+
+      - name: サニタイズ済みDBを再ダンプ
+        run: |
+          set -euo pipefail
+          mkdir -p db-dump
+          mysqldump -h127.0.0.1 -P3306 -uroot -proot --single-transaction --no-tablespaces app_issue_deck \
+            | gzip > db-dump/dump.sql.gz
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: fly secrets set
+        # 実行時にしか使われないサーバー専用シークレット（Dockerfileのrunnerステージには
+        # 引き継がれないため、ビルド時ではなくfly secretsで渡す。fly.tomlのコメント参照）。
+        # --stageで今回のdeployとまとめて反映する（このコマンド単体ではreleaseしない）。
+        run: |
+          flyctl secrets set --stage \
+            GITHUB_APP_ID="4445268" \
+            GITHUB_APP_PRIVATE_KEY_BASE64="${PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64}" \
+            SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY}" \
+            ALLOWED_EMAILS="${ALLOWED_EMAILS}"
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.PREVIEW_GITHUB_APP_PRIVATE_KEY_BASE64 }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
+          ALLOWED_EMAILS: ${{ env.ALLOWED_EMAILS }}
+
+      - name: fly deploy
+        id: deploy
+        run: |
+          set -euo pipefail
+          flyctl deploy --remote-only \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL}" \
+            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
+            --build-arg NEXT_PUBLIC_GITHUB_APP_SLUG="issue-deck-dev" \
+            --env PREVIEW_MODE="${PREVIEW_MODE}"
+
+          APP_NAME=$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')
+          PREVIEW_URL="https://${APP_NAME}.fly.dev"
+          echo "preview_url=${PREVIEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "### プレビューURL: ${PREVIEW_URL}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          PREVIEW_MODE: ${{ inputs.preview_mode }}
