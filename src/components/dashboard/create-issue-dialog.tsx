@@ -52,6 +52,18 @@ function isSelectableLabelName(name: string): boolean {
   return !isProgressLabel(name) && !START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);
 }
 
+/**
+ * 「タイトル・ラベルを自動生成」実行時の選択ラベルを算出する。
+ * 進捗管理用ラベル・実装オプション用ラベル（チェックボックスで個別に選択するもの）はリセット対象外として
+ * そのまま維持し、それ以外のユーザー選択可能なラベルは一度リセットしたうえで生成結果を反映する。
+ */
+export function mergeSuggestedLabels(prev: string[], suggested: string[]): string[] {
+  return [
+    ...prev.filter((name) => !isSelectableLabelName(name)),
+    ...new Set(suggested.filter(isSelectableLabelName)),
+  ];
+}
+
 const DEFAULT_ASSIGNEE = "m-guchi";
 
 type CreateIssueDialogProps = {
@@ -199,9 +211,7 @@ export function CreateIssueDialog({
     );
     if (!result) return;
     setTitle(result.title);
-    setSelectedLabels((prev) => [
-      ...new Set([...prev, ...result.labels.filter((name) => !isProgressLabel(name))]),
-    ]);
+    setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
   }
 
   async function handleGenerateBodyCleanup() {
