@@ -33,8 +33,8 @@ type MobileIssueListScreenProps = {
   headerActions?: ReactNode;
   /** 絞り込み済み・並び替え済みの表示対象Issue */
   issues: Issue[];
-  /** 「ユーザーの確認待ち」ピルの強調表示・件数バッジ用の件数（#715） */
-  checkUserCount?: number;
+  /** タブごとの該当Issue件数。「ユーザーの確認待ち」の強調表示判定にも使う（#715, #880） */
+  navCounts: Record<NavViewId, number>;
   selectedIssueId: string | null;
   view: NavViewId;
   filters: MobileIssueLocalFilters;
@@ -68,7 +68,7 @@ export function MobileIssueListScreen({
   onBack,
   headerActions,
   issues,
-  checkUserCount = 0,
+  navCounts,
   selectedIssueId,
   view,
   filters,
@@ -168,7 +168,8 @@ export function MobileIssueListScreen({
           分まで縮小配分がこの行に集中し、表示件数が多いときにタブの高さが潰れてしまう（#584） */}
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabNavViews.map((navView) => {
-          const isCheckUserHighlighted = navView.id === "check-user" && checkUserCount > 0;
+          const count = navCounts[navView.id] ?? 0;
+          const isCheckUserHighlighted = navView.id === "check-user" && count > 0;
           return (
             <button
               key={navView.id}
@@ -178,18 +179,22 @@ export function MobileIssueListScreen({
               type="button"
               onClick={() => onChangeView(navView.id)}
               className={cn(
-                "flex h-11 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
+                "flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
                 view === navView.id && "border-primary/20 bg-primary/10 text-primary",
                 isCheckUserHighlighted &&
                   "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
               )}
             >
               {navView.label}
-              {isCheckUserHighlighted && (
-                <span className="flex size-5 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
-                  {checkUserCount}
-                </span>
-              )}
+              <span
+                className={cn(
+                  "text-xs text-muted-foreground",
+                  isCheckUserHighlighted &&
+                    "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
+                )}
+              >
+                {count}
+              </span>
             </button>
           );
         })}
