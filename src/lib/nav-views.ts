@@ -51,7 +51,7 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "recently-merged": GitMerge,
 };
 
-const baseNavViews: NavView[] = [
+export const baseNavViews: NavView[] = [
   { id: "all", label: "すべてのIssue" },
   { id: "favorites", label: "お気に入り" },
   { id: "recently-added", label: "最近追加した" },
