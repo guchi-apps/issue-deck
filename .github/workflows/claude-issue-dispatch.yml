@@ -552,6 +552,34 @@ jobs:
         run: |
           git remote set-url --push origin \
             "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+      - name: 共有知識リポジトリをcheckoutする
+        # 全アプリ共通の知識(m-guchi/docs)をワークツリー内の .shared-context/ へ配置し、
+        # 各Claude CodeステップがRead/Grep/Globでそのまま読めるようにする
+        # (docs/shared-knowledge.md「3.3 Actionsからは checkout して読ませる」)。
+        #
+        # - actions/checkoutのpath:は$GITHUB_WORKSPACE配下しか指定できないため、ワークツリー内に
+        #   置く。誤コミットは.gitignoreの/.shared-context/と、各プロンプトの「読み取り専用」
+        #   指示の二段で防ぐ。
+        # - persist-credentials: false により、共有知識リポジトリ向けの認証情報が
+        #   .shared-context/.git/config に残らないようにする(本体リポジトリのpush認証と混線
+        #   させないため)。
+        # - continue-on-error: true。共有知識は「あれば精度が上がる」補助情報であり、PATの権限
+        #   不足やリポジトリ名の誤りでcheckoutに失敗しても実装自体は続行させる。プロンプト側でも
+        #   「.shared-context/が無ければ共有知識なしで進める」と明示している。
+        # - リポジトリ名・refはリポジトリ変数で上書きできる。他リポジトリへ本ワークフローを展開
+        #   する際、ワークフロー本文を書き換えずに切り替えられるようにするための逃げ道。
+        #
+        # mode=skipのrunはジョブ自体が起動しない(dispatchジョブのif条件)ため、ここでの分岐は不要。
+        # 後段の陳腐化チェックでskipへ倒れた場合も、checkout済みのディレクトリが残るだけで無害。
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
+          path: .shared-context
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.WORKFLOW_PAT }}
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
         # 同じ id: state として出力し直す(#651)。ファイル全体に101箇所ある steps.state.outputs.*
@@ -774,6 +802,22 @@ jobs:
             ## 最初にやること
             `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・ラベル・
             コメント（過去に提示した計画やそれへのフィードバックを含む）を確認してください。
+
+            ## 全アプリ共通の共有知識（`.shared-context/`）
+            ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`m-guchi/docs`）が
+            チェックアウトされています。計画の前提として、以下を必要な範囲だけ読んでください
+            （最初から全部読む必要はありません）。
+
+            - `.shared-context/CLAUDE.md` — 共有知識の索引・読む順序
+            - `.shared-context/agent-rules/implementation.md` — 実装エージェントの共通ルール
+            - `.shared-context/knowledge/` — 過去に他アプリ・他Issueで得た知見（該当テーマのファイルのみ）
+
+            注意事項:
+            - **`.shared-context/`配下は読み取り専用です。** 編集・`git add`・コミットは一切行わないでください。
+            - `.shared-context/`ディレクトリ自体が存在しない場合（checkoutに失敗した場合）は、共有知識
+              なしでそのまま計画をまとめて構いません。存在しないことを理由に停止しないでください。
+            - 内容がこのリポジトリの`CLAUDE.md`・`docs/`と矛盾する場合は、このリポジトリ側の記述を
+              優先してください（共有知識は他アプリでの既定値であり、issue-deck固有ルールを上書きしません）。
 
             ## Issue本文・コメントに画像が含まれる場合
             issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
@@ -1192,6 +1236,13 @@ jobs:
             コメント履歴を確認し、直近の `@claude 質問: ` で始まるコメントから質問内容（プレフィックスに
             続く部分）を読み取ってください。
 
+            ## 全アプリ共通の共有知識（`.shared-context/`）
+            ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`m-guchi/docs`）が
+            チェックアウトされています。回答の裏付けに必要な場合のみ、`.shared-context/CLAUDE.md`
+            （索引）から辿って該当ファイルを読んでください。読み取り専用として扱い、編集・`git add`は
+            行いません。ディレクトリが存在しない場合は共有知識なしで回答して構いません。
+            回答内容がこのリポジトリの`CLAUDE.md`・`docs/`と矛盾する場合は、このリポジトリ側を優先します。
+
             ## Issue本文・コメントに画像が含まれる場合
             issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
             GitHub純正の画像CDNではないため自動では読み込めません。回答に画像の内容確認が必要な場合は、
@@ -1407,6 +1458,27 @@ jobs:
             - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
               作成する（`additional`の場合は既にcheckout済みのため不要）
 
+            ## 全アプリ共通の共有知識（`.shared-context/`）
+            ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`m-guchi/docs`）が
+            チェックアウトされています。実装の前提として、以下を必要な範囲だけ読んでください
+            （最初から全部読む必要はありません）。
+
+            - `.shared-context/CLAUDE.md` — 共有知識の索引・読む順序
+            - `.shared-context/agent-rules/implementation.md` — 実装エージェントの共通ルール
+            - `.shared-context/knowledge/` — 過去に他アプリ・他Issueで得た知見。今回触る領域
+              （GitHub Actions・デプロイ・認証・DB等）に対応するファイルがあれば、着手前に読む
+            - `.shared-context/coding-standards.md` — 全アプリ共通のコーディング方針
+
+            注意事項:
+            - **`.shared-context/`配下は読み取り専用です。** 編集・`git add`・コミットは一切行わないで
+              ください（`.gitignore`済みですが、`git add -A`等で巻き込まないよう注意してください）。
+              共有知識への追加が必要だと判断した場合は、後述の「実装中に得た知見の記録」に従って
+              提案コメントを投稿するにとどめます。
+            - `.shared-context/`ディレクトリ自体が存在しない場合（checkoutに失敗した場合）は、共有知識
+              なしでそのまま実装して構いません。存在しないことを理由に停止しないでください。
+            - 内容がこのリポジトリの`CLAUDE.md`・`docs/`と矛盾する場合は、このリポジトリ側の記述を
+              優先してください（共有知識は他アプリでの既定値であり、issue-deck固有ルールを上書きしません）。
+
             ## Issue本文・コメントに画像が含まれる場合
             issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
             GitHub純正の画像CDNではないため自動では読み込めません。実装内容の把握に画像の内容確認が必要な
@@ -1473,6 +1545,49 @@ jobs:
               付いている場合も、同節に従い案内文をこのコメントに追記すること（実際のプレビューURLは
               このステップの完了後、別ジョブが後から別コメントとして通知するため、このステップ自身が
               実URLを取得・埋め込む必要はない）
+
+            ## 実装中に得た知見の記録
+            実装・調査の過程で、次に同じ領域を触るエージェントや人間にとって価値のある非自明な知見
+            （踏んだ制約、公式仕様の分かりにくい挙動、選んだ設計判断の理由など）を得た場合は、
+            それを残してください。**迷った場合はアプリ固有として扱ってください**（共有知識を汚さない
+            方向に倒す）。
+
+            - **issue-deck固有の知見**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに
+              依存する内容）: 今回のPull Requestに同梱して`docs/`配下の適切なファイル、または
+              `CLAUDE.md`へ追記してください。新規ファイルを増やす前に、既存ドキュメントへの追記で
+              済まないかを先に検討してください。
+            - **全アプリ共通の知見**（対象リポジトリを別のアプリに差し替えても内容が成立し、数週間
+              以上有効で、根拠を示せる内容）: **`.shared-context/`を直接編集してはいけません。**
+              代わりに `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."` で
+              以下の形式の「追加提案」コメントを投稿してください。承認されたものだけが、後続の
+              ワークフローによって共有知識リポジトリへのPull Requestに変換されます。
+
+              コメントの形式（`target`は`.shared-context/`配下の相対パス。該当ファイルが無い場合は
+              新規ファイル名を提案してよい）:
+
+              ```
+              <!-- shared-knowledge-proposal -->
+              ### 共有知識への追加提案
+
+              target: knowledge/github-actions.md
+              title: <一行で分かる結論>
+
+              - 状況: いつ・どこで問題になるか
+              - 結論: 何をすべきか / 何をしてはいけないか
+              - 根拠: 出典URL、または再現した事象と実行ログへのリンク
+              - 確認日: <YYYY-MM-DD>
+              - 出典: ${{ github.repository }}#${{ steps.state.outputs.issue_number }}
+
+              <!-- issue-deck-source:claude-issue-dispatch -->
+              <!-- issue-deck-agent:implementer -->
+              ```
+
+              - 1回の実装で投稿する提案は目安3件までとし、複数ある場合は1つのコメントにまとめて
+                ください（マーカー`<!-- shared-knowledge-proposal -->`はコメントの先頭に1つだけ）
+              - 提案が無い場合は、このコメント自体を投稿しないでください（「提案なし」の空コメントは
+                不要です）
+              - シークレットの実値・個人情報・一時的な障害情報は、アプリ固有・共通のいずれにも
+                記録しないでください
 
             ## 画面確認・スクリーンショットについて
 
@@ -1557,6 +1672,7 @@ jobs:
             - 他Issueのブランチの編集
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
+            - `.shared-context/`配下（共有知識リポジトリ）の編集・`git add`・コミット
 
             ## コミット・PRの書き方
             - コミットメッセージ・PRタイトル・PR本文は英語ではなく日本語で書く

@@ -30,7 +30,8 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
    技術スタック固有部分を置き換える
 7. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
    スクリプトを利用する
-8. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
+8. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
+9. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
 
 ## 1. ワークフローファイル一式
 
@@ -44,6 +45,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） | バージョン管理方式（`package.json`の`version`比較か、別言語のバージョンファイルか）に応じた改変が必要 |
+| `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`m-guchi/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
@@ -255,8 +257,37 @@ scripts/check-cross-repo-guide-sync.sh
 ジョブを追加しても、現状のBranch protectionの必須ステータスチェック一覧には自動では追加されない
 （GitHub側リポジトリ設定の変更が別途必要。本ガイドの追加時点では未設定）。
 
+## 10. 共有知識リポジトリの参照設定
+
+全アプリ共通の知識（Git/GitHub運用、Actions上でClaude Codeを動かす際の知見、共通コーディング方針、
+デプロイ方針など）は、各リポジトリの`CLAUDE.md`に複製せず、共有知識リポジトリ`m-guchi/docs`で
+一元管理する。各リポジトリのワークフローは実行時にそれを`.shared-context/`へcheckoutして読む。
+設計の全体像は[docs/shared-knowledge.md](shared-knowledge.md)を参照。
+
+導入は任意だが、行う場合は次の3点が必要。
+
+- [ ] **`.gitignore`に`/.shared-context/`を追加する。** checkout先をワークツリー内に置くため、
+      誤コミットを防ぐ。
+- [ ] **`secrets.WORKFLOW_PAT`が共有知識リポジトリへ到達できることを確認する。**
+      `m-guchi/docs`はprivateのため、checkoutにトークンが要る。PATのRepository accessが
+      「All repositories」であれば追加設定は不要（issue-deckはこの設定）。リポジトリを個別指定
+      している場合は`m-guchi/docs`を追加し、`Contents: Read and write`・
+      `Pull requests: Read and write`を付与する（`shared-knowledge-propose.yml`まで導入せず
+      読み取りだけなら`Contents: Read`で足りる）。
+- [ ] **共有知識のcheckoutステップを各ワークフローへ追加し、プロンプトに参照ルールを書く。**
+      issue-deckの`claude-issue-dispatch.yml`・`claude-review-develop.yml`の
+      「共有知識リポジトリをcheckoutする」ステップをそのままコピーできる。共有知識リポジトリを
+      別のものにする場合は、リポジトリ変数`SHARED_CONTEXT_REPO`（既定値`m-guchi/docs`）・
+      `SHARED_CONTEXT_REF`（既定値`main`）で切り替えられるため、ワークフロー本文の改変は不要。
+
+知見の書き戻し（実装エージェントの提案 → レビューエージェントの審査 → `shared-knowledge-propose.yml`
+による反映PR → 人間のマージ）まで導入する場合は、`shared-knowledge-propose.yml`もあわせてコピーし、
+`CLAUDE.md`に「`.shared-context/`は読み取り専用」「共通知見は提案コメントにとどめる」ルールを
+記載する。
+
 ## 関連ドキュメント
 
+- [docs/shared-knowledge.md](shared-knowledge.md) — 全アプリ共通の共有知識リポジトリの設計
 - [docs/cross-repo-automation.md](cross-repo-automation.md) — 展開方式の選択肢比較・調査結果
 - [docs/supported-repositories.md](supported-repositories.md) — 導入済み・検討中リポジトリの記録
 - [docs/multi-agent-workflow.md](multi-agent-workflow.md) — issue-deck自身の設計・実装の詳細

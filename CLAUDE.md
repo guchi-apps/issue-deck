@@ -20,6 +20,38 @@ GitHub Actions上の無人実行では、その場で確認を取る相手がい
 - 実シークレットの値を、コミットメッセージ・PR本文・Issueコメント・ワークフローのログなど、リポジトリやGitHub上に残る場所へ出力しない。
 - 既存のシークレット・環境変数の設定変更が必要になった場合は、自動で進めず`00.check-user`を付与してユーザーの確認を待つ（後述の「自動マージ不可カテゴリ」にも該当する）。
 
+## 全アプリ共通の共有知識（shared context）
+
+複数アプリで再利用できる知識は、このリポジトリではなく共有知識リポジトリ（`m-guchi/docs`）で管理する。設計の全体像は [docs/shared-knowledge.md](docs/shared-knowledge.md) を参照。
+
+### 参照先
+
+- **GitHub Actions実行**: 各ワークフローが実行前に`.shared-context/`へcheckoutする。存在しない場合（checkout失敗時など）は共有知識なしでそのまま作業を進めてよい。
+- **ローカル実行**: `~/apps/_docs`（`scripts/start-issue.sh`・`scripts/start-reviewer.sh`が`--add-dir`で参照可能にする）。
+
+読む順序は、自分の役割の`agent-rules/`（実装エージェントなら`agent-rules/implementation.md`、レビュー・統合エージェントなら`agent-rules/review.md`）→ 必要に応じて`knowledge/`の該当ファイル → 設計判断が要るときだけ`README.md`（アプリ設計ガイド）・`guides/`。最初から全部を読む必要はない。
+
+### 参照の優先順位
+
+内容が矛盾する場合は、具体的で近いものを優先する。
+
+1. Issue本文・コメントでの明示的な指示
+2. このファイル（`CLAUDE.md`）
+3. このリポジトリの`docs/`
+4. `.shared-context/CLAUDE.md`・`.shared-context/agent-rules/`
+5. `.shared-context/knowledge/`・`.shared-context/README.md`・`.shared-context/guides/`
+
+共有知識は「他のアプリではこうしている」という既定値であり、issue-deck固有のルールを上書きしない。
+
+### 書き込みの禁止と提案フロー
+
+- `.shared-context/`配下は**読み取り専用**として扱う。編集・`git add`・コミットは一切行わない（`.gitignore`済み）。
+- 実装中に得た知見は、次の基準で置き場所を分ける。**迷った場合はアプリ固有として扱う。**
+  - **アプリ固有**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに依存する）→ 実装PRに同梱して`docs/`または`CLAUDE.md`へ書く。
+  - **全アプリ共通**（対象リポジトリを差し替えても内容が成立し、数週間以上有効で、根拠を示せる）→ 共有知識リポジトリへ直接書かず、対応Issueへ「追加提案」コメントを投稿するにとどめる。
+- 提案コメントの書式・審査の4観点（再利用性・正確性・重複・恒久性）・反映までの流れは [docs/shared-knowledge.md](docs/shared-knowledge.md) の「9. 共有知識更新フロー」を参照。承認された提案のみ、`.github/workflows/shared-knowledge-propose.yml`が共有知識リポジトリへのPull Requestに変換し、最終的なマージは人間が行う。
+- シークレットの実値・個人情報・一時的な障害情報は、アプリ固有・共通のいずれにも記録しない。
+
 ## Issueごとの複数Claude Codeエージェント運用
 
 Issueごとに専用ブランチ・git worktree・Claude Codeセッションを分離して実装する運用を導入している（詳細設計は [docs/multi-agent-workflow.md](docs/multi-agent-workflow.md) を参照）。
