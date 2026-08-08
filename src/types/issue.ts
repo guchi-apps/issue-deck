@@ -55,6 +55,8 @@ export type Issue = {
   closedAt: string | null;
   /** 00.check-userラベルが最後に付与された日時（ISO8601）。未付与・解除済みはnull */
   checkUserLabeledAt: string | null;
+  /** 実際に最後にコメントが投稿された日時（ISO8601）。Webhook経由で未取得の場合はnull */
+  lastCommentAt: string | null;
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;

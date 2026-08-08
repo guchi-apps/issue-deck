@@ -92,6 +92,7 @@ async function handleIssuesEvent(payload: {
 async function handleIssueCommentEvent(payload: {
   action: string;
   issue: GithubApiIssue;
+  comment: { created_at: string };
   repository: { id: number };
 }) {
   // issue_commentイベントはPRへのコメントでも発火する（GitHub内部ではPRもissueの一種のため）。
@@ -103,7 +104,12 @@ async function handleIssueCommentEvent(payload: {
   });
   if (!repository) return;
 
-  await upsertIssueFromWebhookPayload(repository.id, payload.issue);
+  // lastCommentAt（確認待ちフィルターのソート基準）は新規コメントの実際の投稿日時を
+  // 反映したいため、action=createdの場合のみ渡す。edited/deletedではcomment.created_at自体が
+  // 新規投稿を意味しないため対象外とする
+  const commentCreatedAt =
+    payload.action === "created" ? new Date(payload.comment.created_at) : undefined;
+  await upsertIssueFromWebhookPayload(repository.id, payload.issue, commentCreatedAt);
 }
 
 async function handleLabelEvent(payload: {

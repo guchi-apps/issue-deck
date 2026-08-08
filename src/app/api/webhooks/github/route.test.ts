@@ -38,14 +38,14 @@ import { POST } from "@/app/api/webhooks/github/route";
 
 const SECRET = "test-secret";
 
-function makeRequest(body: unknown): NextRequest {
+function makeRequest(body: unknown, event = "issues"): NextRequest {
   const rawBody = JSON.stringify(body);
   const signature = `sha256=${createHmac("sha256", SECRET).update(rawBody).digest("hex")}`;
   return {
     text: async () => rawBody,
     headers: new Map([
       ["x-hub-signature-256", signature],
-      ["x-github-event", "issues"],
+      ["x-github-event", event],
     ]),
   } as unknown as NextRequest;
 }
@@ -94,5 +94,82 @@ describe("POST /api/webhooks/github issues.transferred", () => {
       number: 5,
     });
     expect(deleteIssueByGithubId).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/webhooks/github issue_comment", () => {
+  beforeEach(() => {
+    process.env.GITHUB_WEBHOOK_SECRET = SECRET;
+    findUniqueRepository.mockReset();
+    upsertIssueFromWebhookPayload.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    vi.clearAllMocks();
+  });
+
+  it("action=createdの場合、comment.created_atをlastCommentAt更新用に渡す", async () => {
+    findUniqueRepository.mockResolvedValue({ id: "repo-1" });
+
+    const response = await POST(
+      makeRequest(
+        {
+          action: "created",
+          issue: { id: 123, number: 1 },
+          comment: { created_at: "2026-08-08T00:00:00.000Z" },
+          repository: { id: 1 },
+        },
+        "issue_comment",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith(
+      "repo-1",
+      { id: 123, number: 1 },
+      new Date("2026-08-08T00:00:00.000Z"),
+    );
+  });
+
+  it("action=editedの場合、コメント投稿日時は渡さない", async () => {
+    findUniqueRepository.mockResolvedValue({ id: "repo-1" });
+
+    const response = await POST(
+      makeRequest(
+        {
+          action: "edited",
+          issue: { id: 123, number: 1 },
+          comment: { created_at: "2026-08-08T00:00:00.000Z" },
+          repository: { id: 1 },
+        },
+        "issue_comment",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith(
+      "repo-1",
+      { id: 123, number: 1 },
+      undefined,
+    );
+  });
+
+  it("PRへのコメント（issue.pull_requestあり）は無視する", async () => {
+    const response = await POST(
+      makeRequest(
+        {
+          action: "created",
+          issue: { id: 123, number: 1, pull_request: {} },
+          comment: { created_at: "2026-08-08T00:00:00.000Z" },
+          repository: { id: 1 },
+        },
+        "issue_comment",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).not.toHaveBeenCalled();
+    expect(findUniqueRepository).not.toHaveBeenCalled();
   });
 });

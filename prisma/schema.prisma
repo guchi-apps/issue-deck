@@ -176,6 +176,10 @@ model Issue {
   // 並べるための基準）。ラベルが外れるとnullに戻す
   checkUserLabeledAt DateTime?
 
+  // 実際に最後にコメントが投稿された日時（issue_comment Webhookのaction=createdで記録）。
+  // 確認待ちフィルターのソート基準はcheckUserLabeledAtよりこちらを優先する
+  lastCommentAt DateTime?
+
   // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
   aiSummary             String?   @db.Text
   aiSummaryCommentCount Int?

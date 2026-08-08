@@ -49,7 +49,11 @@ function toIssueStateReason(
   }
 }
 
-async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
+async function upsertIssueRow(
+  repositoryId: string,
+  raw: GithubApiIssue,
+  commentCreatedAt?: Date,
+) {
   const githubUpdatedAt = new Date(raw.updated_at);
 
   const existing = await db.issue.findUnique({
@@ -61,6 +65,14 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     // （新しいラベル状態が古い状態で上書きされるのを防ぐ）。
     return existing;
   }
+
+  // 「確認待ちフィルターを実際のコメント投稿日時順に並べる」ための基準時刻。
+  // issue_comment Webhook（action=created）から渡された投稿日時を、既存の記録値より
+  // 新しい場合のみ採用する（配信順序が前後しても新しい方を優先するガード）
+  const lastCommentAt =
+    commentCreatedAt && (!existing?.lastCommentAt || commentCreatedAt > existing.lastCommentAt)
+      ? commentCreatedAt
+      : existing?.lastCommentAt ?? null;
 
   // 「確認待ちフィルターを確認が古い順に並べる」ための基準時刻。00.check-userが新たに
   // 付与された瞬間をcheckUserLabeledAtとして記録し、外れたらnullに戻す。既存Issueで
@@ -93,6 +105,7 @@ async function upsertIssueRow(repositoryId: string, raw: GithubApiIssue) {
     githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
     checkUserLabeledAt,
+    lastCommentAt,
   };
 
   const issue = await db.issue.upsert({
@@ -147,8 +160,9 @@ export async function syncRepositoryIssues(repository: RepoForSync): Promise<voi
 export async function upsertIssueFromWebhookPayload(
   repositoryId: string,
   issuePayload: GithubApiIssue,
+  commentCreatedAt?: Date,
 ): Promise<void> {
-  await upsertIssueRow(repositoryId, issuePayload);
+  await upsertIssueRow(repositoryId, issuePayload, commentCreatedAt);
 }
 
 export async function deleteIssueByGithubId(githubIssueId: number): Promise<void> {
