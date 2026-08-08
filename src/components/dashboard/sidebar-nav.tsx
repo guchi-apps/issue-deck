@@ -145,6 +145,8 @@ export function SidebarNav({
             </button>
             <a
               href={getGithubAppInstallUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-muted-foreground hover:text-foreground"
               title="GitHub Appをインストールしてリポジトリを追加"
             >
@@ -155,7 +157,12 @@ export function SidebarNav({
         {repositories.length === 0 ? (
           <div className="px-2 text-xs text-muted-foreground">
             まだリポジトリと連携していません。
-            <a href={getGithubAppInstallUrl()} className="ml-1 text-primary hover:underline">
+            <a
+              href={getGithubAppInstallUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 text-primary hover:underline"
+            >
               GitHub Appをインストール
             </a>
           </div>
