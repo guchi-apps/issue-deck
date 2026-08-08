@@ -1,0 +1,36 @@
+# Fly.io Machine構成（オンデマンドプレビュー環境、#826）
+#
+# `app` は `fly apps create` で実際に作成したアプリ名に置き換える（本サブIssueでは
+# Fly.ioアプリ作成自体は人間側の外部準備のため未確定。プレースホルダーとして仮置き）。
+# DBダンプの焼き込み・installation ID書き換え・実際の `fly deploy` 実行は
+# .github/workflows/deploy-preview.yml（#831）の責務。
+app = "issue-deck-preview"
+primary_region = "nrt"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  # 書き込み系API routeを403で封じるガード（src/lib/preview-mode.ts、#829）
+  PREVIEW_MODE = "true"
+  # コンテナ内だけで完結するローカルMariaDBの接続情報（127.0.0.1にのみbindするため外部非公開）。
+  # GITHUB_APP_ID・GITHUB_APP_PRIVATE_KEY_BASE64等の実シークレットはfly secretsで別途設定する
+  # 想定（#831）であり、ここには含めない。
+  DB_NAME = "app_issue_deck"
+  DB_USER = "app"
+  DB_PASSWORD = "app"
+  DB_HOST = "127.0.0.1"
+  DB_PORT = "3306"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # auto_startは無効にする（有効にするとボットやスキャナがURLを叩いただけでMachineが起動して
+  # しまうため。起動タイミングはデプロイworkflow側で明示的に握る）。auto_stopのみ有効にし、
+  # 止め忘れが起きないようにする。
+  auto_stop_machines = "stop"
+  auto_start_machines = false
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"

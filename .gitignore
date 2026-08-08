@@ -41,6 +41,9 @@ yarn-error.log*
 # 画像アップロードAPIがVPSのローカルディスクへ保存するアップロード画像
 /uploads/
 
+# Fly.io Machinesプレビュー環境向けの本番DBダンプ（デプロイworkflowが配置。db-dump/README.md参照）
+/db-dump/*.sql.gz
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
