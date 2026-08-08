@@ -176,6 +176,12 @@ model Issue {
   // 並べるための基準）。ラベルが外れるとnullに戻す
   checkUserLabeledAt DateTime?
 
+  // 「Claudeに質問する」ダイアログ経由の質問コメント（isAskClaudeQuestionComment）が
+  // 投稿された日時。一覧画面はissueごとにコメント本文を取得しないため、Webhook
+  // （issue_comment created）で質問コメントを検知した時点で記録し、対応する回答コメント
+  // （isQaAnswerComment）が投稿されたらnullに戻す近似値として使う
+  qaAnswerPendingAt DateTime?
+
   // 実際に最後にコメントが投稿された日時（issue_comment Webhookのaction=createdで記録）。
   // 確認待ちフィルターのソート基準はcheckUserLabeledAtよりこちらを優先する
   lastCommentAt DateTime?

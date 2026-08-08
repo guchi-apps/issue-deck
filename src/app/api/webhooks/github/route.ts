@@ -8,6 +8,7 @@ import type { GithubApiIssue } from "@/lib/github/issues-api";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
+  updateQaAnswerPendingState,
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
@@ -92,7 +93,7 @@ async function handleIssuesEvent(payload: {
 async function handleIssueCommentEvent(payload: {
   action: string;
   issue: GithubApiIssue;
-  comment: { created_at: string };
+  comment: { body: string; created_at: string };
   repository: { id: number };
 }) {
   // issue_commentイベントはPRへのコメントでも発火する（GitHub内部ではPRもissueの一種のため）。
@@ -110,6 +111,11 @@ async function handleIssueCommentEvent(payload: {
   const commentCreatedAt =
     payload.action === "created" ? new Date(payload.comment.created_at) : undefined;
   await upsertIssueFromWebhookPayload(repository.id, payload.issue, commentCreatedAt);
+
+  // 編集・削除は対象外とし、新規投稿のみを回答待ち状態の判定に使う
+  if (payload.action === "created") {
+    await updateQaAnswerPendingState(payload.issue.id, payload.comment.body);
+  }
 }
 
 async function handleLabelEvent(payload: {
