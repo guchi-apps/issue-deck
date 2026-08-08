@@ -5,9 +5,16 @@ name: Preview Logs
 # ログにしか出てこないが、Fly.ioのダッシュボード・CLIを持っていない場合は確認する手段が
 # なかった（#880でログイン後の500を調査する際に必要になった）。
 # 再デプロイせずログだけを見るため、本番DBのダンプ・イメージビルドは行わない。
+#
+# プレビューアプリはIssueごとに分かれているため（#892）、`issue_number`で対象を指定する。
+# 空の場合はfly.tomlの`app`（developの手動デプロイで使う共有アプリ）を対象にする。
 on:
   workflow_dispatch:
     inputs:
+      issue_number:
+        description: "対象のIssue番号（空ならfly.tomlのapp＝共有プレビュー）"
+        type: string
+        default: ""
       lines:
         description: "取得する行数の上限"
         type: string
@@ -36,8 +43,16 @@ jobs:
         # それでも終了しない場合に備えてtimeoutで打ち切る（打ち切り自体は失敗扱いにしない）。
         run: |
           set -uo pipefail
-          timeout 120 flyctl logs --no-tail | tail -n "${LINES}"
+          BASE_APP="$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            APP_NAME="${BASE_APP}-${ISSUE_NUMBER}"
+          else
+            APP_NAME="$BASE_APP"
+          fi
+          echo "対象アプリ: $APP_NAME"
+          timeout 120 flyctl logs --no-tail --app "$APP_NAME" | tail -n "${LINES}"
           echo "（Fly.ioが保持している直近のログのみ。古いものは残っていない場合がある）"
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
           LINES: ${{ inputs.lines }}

@@ -1,0 +1,265 @@
+name: Cleanup Preview
+
+# Issueごとに作られたFly.ioのプレビューアプリ（`<fly.tomlのapp>-<Issue番号>`、#892）を破棄する。
+# 作成側は .github/workflows/deploy-preview.yml。設計の全体像は docs/preview-environment.md 参照。
+#
+# プレビューアプリはIssueごとに存在し続けるため、放置するとFly.io側のリソースを占有し、
+# 同時起動数の上限（PREVIEW_MAX_APPS）を埋めて新しいプレビューが作れなくなる。破棄の契機を
+# 1つに絞るとイベントの取りこぼしで残留するため、3経路を用意して取りこぼしを重ねて防ぐ。
+#
+# ジョブ構成:
+# - cleanup-on-event: 単一のIssueに対応するプレビューを破棄する
+#   - pull_request(closed, base=develop): develop向けPRがマージ/クローズされた＝レビュー完了
+#   - issues(closed): PRを作らずIssueを閉じたケースの取りこぼし防止
+#   - issues(unlabeled, 23.preview-required): ラベルを外して手動で即座に破棄する経路
+#   - workflow_dispatch: 手動実行（Issue番号を指定）
+# - sweep: schedule（5分ごと）/workflow_dispatchで全プレビューアプリを走査し、以下を破棄する。
+#   - 対応Issueが既にCLOSED（イベント経路を取りこぼした場合の安全網）
+#   - Machineがアイドル（stopped）になってからPREVIEW_IDLE_MINUTES（既定5分）以上経過している
+#     fly.tomlのauto_stop_machines="stop"により、アクセスが途切れたMachineは自動的にstoppedに
+#     なる。そこから一定時間経っていれば「もう誰も見ていない」とみなして破棄し、同時起動数の
+#     枠を空ける。破棄後はURLが404になるため、再度必要になった場合はIssueに@claudeとコメントして
+#     作り直す（この案内は破棄時のIssueコメントに含める）。
+#
+# 破棄は`flyctl apps destroy`で行い、共有アプリ（fly.tomlのapp名そのもの。issue_numberを
+# 渡さないdevelopの手動デプロイで使う）は**決して破棄しない**。アプリ名が
+# `<BASE_APP>-<数字>`に完全一致するものだけを対象にする。
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+  issues:
+    types: [closed, unlabeled]
+  schedule:
+    # 5分ごと。プレビューはアイドル（Machine停止）から5分で破棄する方針のため、
+    # 判定間隔もそれに合わせる（GitHub Actionsのscheduleは指定時刻より遅延することがあるため、
+    # 実際の破棄はアイドル5分を多少過ぎてから行われる）。
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "破棄する対象のIssue番号（空ならsweepのみ実行）"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: cleanup-preview
+  cancel-in-progress: false
+
+jobs:
+  cleanup-on-event:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issues' && github.event.action == 'closed') ||
+      (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == '23.preview-required') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: 対象Issue番号を特定する
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          INPUT_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER=""
+          case "$EVENT_NAME" in
+            pull_request)
+              # develop向けPRのheadブランチ名（issue-<番号>）から特定する。
+              # 命名規約に従わないブランチ（release/*等）は対象外。
+              if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+                ISSUE_NUMBER="${BASH_REMATCH[1]}"
+              fi
+              ;;
+            issues)
+              ISSUE_NUMBER="$EVENT_ISSUE_NUMBER"
+              ;;
+            workflow_dispatch)
+              if [[ "$INPUT_ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+                ISSUE_NUMBER="$INPUT_ISSUE_NUMBER"
+              fi
+              ;;
+          esac
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "対象Issue番号を特定できないため何もしません"
+            echo "issue_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "対象Issue: #$ISSUE_NUMBER"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        if: steps.target.outputs.issue_number != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load secrets from 1Password
+        if: steps.target.outputs.issue_number != ''
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Setup flyctl
+        if: steps.target.outputs.issue_number != ''
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: プレビューアプリを破棄する
+        if: steps.target.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          BASE_APP="$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')"
+          APP_NAME="${BASE_APP}-${ISSUE_NUMBER}"
+
+          if ! flyctl status --app "$APP_NAME" >/dev/null 2>&1; then
+            echo "$APP_NAME は存在しないため何もしません"
+            exit 0
+          fi
+
+          echo "$APP_NAME を破棄します"
+          if ! flyctl apps destroy "$APP_NAME" --yes; then
+            echo "::warning::$APP_NAME の破棄に失敗しました。手動で確認してください。"
+            exit 1
+          fi
+
+          BODY="🧹 このIssueのプレビュー環境（\`${APP_NAME}\`）を破棄しました。"
+          BODY="$BODY"$'\n\n''再度必要になった場合は、`23.preview-required` ラベルを付けたうえで `@claude` とコメントすると作り直されます。'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:cleanup-preview -->'
+          # Issueが既にクローズ済みでもコメント自体は投稿できる。失敗しても破棄は完了しているため無視する。
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY" || true
+
+  sweep:
+    # scheduleとworkflow_dispatchのときだけ走る全件走査。イベント経路の取りこぼし対策。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Issueの状態取得（read）だけでなく、アイドル破棄したことをIssueへ通知する
+      # `gh issue comment`を実行するためwriteが必要。readのままだと通知だけが静かに失敗する。
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy-preview.env.tpl
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: 不要になったプレビューアプリを破棄する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          # Machineがアイドル（stopped）になってからこの分数が経過したプレビューは、
+          # 対応Issueが開いていても破棄する。fly.tomlのauto_stop_machines="stop"により
+          # アクセスが途切れたMachineは自動的にstoppedになるため、これを「もう誰も見ていない」
+          # の判定に使う。
+          PREVIEW_IDLE_MINUTES: ${{ vars.PREVIEW_IDLE_MINUTES || '5' }}
+        run: |
+          set -euo pipefail
+          BASE_APP="$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')"
+
+          # <BASE_APP>-<数字> に完全一致するものだけを対象にする。共有アプリ（BASE_APP自体）は
+          # developの手動デプロイで使うため、走査対象から必ず外す。
+          APPS="$(flyctl apps list --json \
+            | jq -r --arg base "$BASE_APP" '.[] | (.Name // .name) | select(test("^" + $base + "-[0-9]+$"))')"
+
+          if [ -z "$APPS" ]; then
+            echo "Issueごとのプレビューアプリは存在しません"
+            exit 0
+          fi
+
+          NOW="$(date -u +%s)"
+          IDLE_SEC=$(( PREVIEW_IDLE_MINUTES * 60 ))
+          DESTROYED=0
+
+          while IFS= read -r APP_NAME; do
+            [ -z "$APP_NAME" ] && continue
+            ISSUE_NUMBER="${APP_NAME##*-}"
+            REASON=""
+
+            ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state 2>/dev/null || echo "")"
+            if [ "$ISSUE_STATE" = "CLOSED" ]; then
+              REASON="対応Issue #${ISSUE_NUMBER} がクローズ済み"
+            elif [ -z "$ISSUE_STATE" ]; then
+              REASON="対応Issue #${ISSUE_NUMBER} が取得できない（削除済み等）"
+            else
+              # Machineの状態で判定する。auto_stop_machines="stop"により、アクセスが途切れた
+              # Machineはstoppedになる。stoppedのままIDLE_SEC以上経過していれば、もう誰も
+              # 見ていないとみなす。startedのMachineが1台でもあれば閲覧中の可能性があるため残す。
+              # 状態が取得できない場合は破棄しない（安全側）。
+              MACHINES_JSON="$(flyctl machine list --app "$APP_NAME" --json 2>/dev/null || echo '[]')"
+              MACHINE_COUNT="$(printf '%s' "$MACHINES_JSON" | jq 'length' 2>/dev/null || echo 0)"
+              RUNNING_COUNT="$(printf '%s' "$MACHINES_JSON" \
+                | jq '[.[] | select((.state // "") != "stopped")] | length' 2>/dev/null || echo 1)"
+
+              if [ "$MACHINE_COUNT" -eq 0 ]; then
+                # デプロイ途中でMachineがまだ作られていない可能性があるため破棄しない。
+                echo "$APP_NAME: Machineが見つからないため判定をスキップします"
+              elif [ "$RUNNING_COUNT" -gt 0 ]; then
+                echo "$APP_NAME: 稼働中のMachineがあるため残します"
+              else
+                # 全Machineがstopped。最も新しいupdated_atを「アイドルになった時刻」とみなす。
+                LAST_UPDATED="$(printf '%s' "$MACHINES_JSON" \
+                  | jq -r '[.[] | (.updated_at // .UpdatedAt // empty)] | sort | last // empty' 2>/dev/null || true)"
+                if [ -n "$LAST_UPDATED" ]; then
+                  IDLE_SINCE="$(date -u -d "$LAST_UPDATED" +%s 2>/dev/null || echo 0)"
+                  if [ "$IDLE_SINCE" -gt 0 ]; then
+                    IDLE_ELAPSED=$(( NOW - IDLE_SINCE ))
+                    if [ "$IDLE_ELAPSED" -ge "$IDLE_SEC" ]; then
+                      REASON="アイドル（Machine停止）から$(( IDLE_ELAPSED / 60 ))分経過（しきい値${PREVIEW_IDLE_MINUTES}分）"
+                    else
+                      echo "$APP_NAME: アイドル $(( IDLE_ELAPSED / 60 ))分（しきい値${PREVIEW_IDLE_MINUTES}分）のため残します"
+                    fi
+                  fi
+                fi
+              fi
+            fi
+
+            if [ -z "$REASON" ]; then
+              continue
+            fi
+
+            echo "$APP_NAME: 破棄する（$REASON）"
+            if flyctl apps destroy "$APP_NAME" --yes; then
+              DESTROYED=$(( DESTROYED + 1 ))
+              # Issueが開いている場合は、破棄したこととURLが使えなくなったことを伝える。
+              # クローズ済みIssueには通知しない（cleanup-on-event側で通知済み、または不要なため）。
+              if [ "$ISSUE_STATE" = "OPEN" ]; then
+                BODY="🧹 プレビュー環境（\`${APP_NAME}\`）を破棄しました（${REASON}）。"
+                BODY="$BODY"$'\n\n''プレビューURLは開けなくなります。もう一度確認したい場合は、このIssueに `@claude` とコメントすると作り直されます。'
+                BODY="$BODY"$'\n\n<!-- issue-deck-source:cleanup-preview -->'
+                gh issue comment "$ISSUE_NUMBER" --body "$BODY" || true
+              fi
+            else
+              echo "::warning::$APP_NAME の破棄に失敗しました"
+            fi
+          done <<< "$APPS"
+
+          echo "破棄したプレビューアプリ: ${DESTROYED}件"
