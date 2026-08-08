@@ -152,7 +152,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: read
+      # Issueの状態取得（read）だけでなく、アイドル破棄したことをIssueへ通知する
+      # `gh issue comment`を実行するためwriteが必要。readのままだと通知だけが静かに失敗する。
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

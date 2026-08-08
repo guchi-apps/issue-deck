@@ -38,7 +38,7 @@ on:
         type: string
         default: develop
       issue_number:
-        description: "対象のIssue番号（指定するとIssueごとの専用プレビューアプリへデプロイする。空ならfly.tomlのapp）"
+        description: "対象のIssue番号（Issueごとの専用プレビューアプリを対象にする。デプロイ・ログ取得の両方に効く。空ならfly.tomlのapp）"
         type: string
         default: ""
       preview_mode:
@@ -60,7 +60,7 @@ on:
         type: string
         default: develop
       issue_number:
-        description: "対象のIssue番号（指定するとIssueごとの専用プレビューアプリへデプロイする。空ならfly.tomlのapp）"
+        description: "対象のIssue番号（Issueごとの専用プレビューアプリを対象にする。デプロイ・ログ取得の両方に効く。空ならfly.tomlのapp）"
         type: string
         default: ""
       preview_mode:
@@ -109,17 +109,25 @@ jobs:
           OP_ENV_FILE: .github/deploy-preview.env.tpl
 
       - name: Setup flyctl
-        if: steps.app.outputs.skipped_reason == ''
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: ログを流す
+        # deployジョブと同じくissue_numberでアプリを解決する(#892)。ここで--appを付けないと、
+        # Issueごとの専用プレビューのログを見たいときに共有アプリを見てしまう。
         run: |
           set -uo pipefail
-          echo "==== ここから ${LOGS_SECONDS} 秒間、プレビュー環境のログを流します ===="
-          timeout "${LOGS_SECONDS}" flyctl logs || true
+          BASE_APP="$(grep -m1 '^app = ' fly.toml | sed -E 's/app = "(.*)"/\1/')"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            APP_NAME="${BASE_APP}-${ISSUE_NUMBER}"
+          else
+            APP_NAME="$BASE_APP"
+          fi
+          echo "==== ここから ${LOGS_SECONDS} 秒間、${APP_NAME} のログを流します ===="
+          timeout "${LOGS_SECONDS}" flyctl logs --app "$APP_NAME" || true
           echo "==== ここまで ===="
         env:
           FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
           LOGS_SECONDS: ${{ inputs.logs_seconds || '240' }}
 
   deploy:
@@ -180,6 +188,8 @@ jobs:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           # 同時に存在してよいIssueごとのプレビューアプリ数の上限。リポジトリ変数で調整できる。
           PREVIEW_MAX_APPS: ${{ vars.PREVIEW_MAX_APPS || '5' }}
+          # Fly.ioのorganizationスラッグ。既定は`personal`（現在のプレビュー用アプリのOWNER）。
+          FLY_ORG: ${{ vars.FLY_ORG || 'personal' }}
         run: |
           set -euo pipefail
 
@@ -227,7 +237,9 @@ jobs:
             exit 0
           fi
 
-          if ! flyctl apps create "$APP_NAME" --org personal --json >/dev/null 2>/tmp/fly-create-err.txt; then
+          # orgスラッグは`flyctl apps list`のOWNER列で確認できる（本リポジトリのプレビュー用
+          # アプリは`personal`）。別のorgへ移す場合に備えてリポジトリ変数で上書きできるようにする。
+          if ! flyctl apps create "$APP_NAME" --org "$FLY_ORG" --json >/dev/null 2>/tmp/fly-create-err.txt; then
             echo "アプリの作成に失敗しました:" >&2
             cat /tmp/fly-create-err.txt >&2 || true
             {
