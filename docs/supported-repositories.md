@@ -13,7 +13,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `m-guchi/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`） | あり（本体） | 2026-08-05 | #354, #501 | issue-deck自身のセルフホスティング |
-| `m-guchi/shopping-list` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`） | あり（新規作成） | 2026-08-08 | #357, #723 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は未対応（後述） |
+| `m-guchi/shopping-list` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`） | あり（新規作成） | 2026-08-09 | #357, #723, #895 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
 
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
@@ -33,13 +33,30 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 加わった変更を一覧表示する（詳細は[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の
 「ワークフロー同期のずれ検知」を参照）。
 
+**マーカーは初回導入時だけでなく、issue-deck側の改善をバックポートするたびに更新する。**
+更新を怠ると、既に取り込み済みの変更まで「未反映」として報告され、一覧に当たりと外れが混在する。
+そうなると「常に大量に出るので誰も見ない」方向へ劣化し、検知の仕組み自体が機能しなくなる
+（実際に#895で発生した）。
+
 ### m-guchi/shopping-list
 
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-issue-dispatch.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=issue-labels.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-review-develop.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
+<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-issue-dispatch.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=m-guchi/shopping-list workflow=issue-labels.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-review-develop.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-ci-fix.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=m-guchi/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-conflict-resolve.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=release-develop-to-main.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
+
+上記のうち`claude-conflict-resolve.yml`だけは**意図的に古いbase-commitのまま**にしている。
+`#814`（pull_requestトリガー時に無関係な他PRを巻き込まないようトリガー元のPR1件に絞る修正）が
+shopping-list側へ未反映であることを確認済みで、ドリフト検知にそのまま出続けてよいため。
+他の5ファイルは、m-guchi/shopping-list#62（ワークフロー改善のバックポート）および
+m-guchi/shopping-list#64（共有知識層の導入）で`bb7d0f7`時点の内容へ同期した。
+
+`shared-knowledge-propose.yml`（共有知識層、#889）のマーカーは、issue-deck側とshopping-list側の
+双方のPull Requestがマージされた時点で追加する。
+
+**最終同期日: 2026-08-09**
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
@@ -62,9 +79,18 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
   [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「6. リポジトリ差異の吸収
   チェックリスト」参照）。shopping-list自身をこの汎用フックへ移行する作業は本Issueのスコープ外
   のため未実施
-- `issue-labels.yml`: `screenshots`ブランチの掃除ジョブを削除（無人撮影を導入していないため）
-- **`24.screenshot-required`は未対応**: 全画面がSupabase Auth + Google OAuthログインの背後にあり、
-  issue-deckの`src/lib/ci-auth-bypass.ts`相当のCIログインバイパス機構とNotion APIのスタブが
-  存在しないため無人撮影が成立しない。ラベルが付いていた場合は撮影を試みず、実装・コミット・
-  ブランチpushまで行った上で`00.check-user`を付与しPR作成前に停止する挙動にしている
-  （詳細は[docs/cross-repo-automation.md](cross-repo-automation.md)のケーススタディ参照）
+- `issue-labels.yml`: `screenshots`ブランチの掃除ジョブを削除
+- **`24.screenshot-required`は対応済み（独自実装）**: 導入検討時は「全画面がSupabase Auth +
+  Google OAuthログインの背後にあり、CIログインバイパス機構とNotion APIのスタブが無いため無人撮影が
+  成立しない」としていた（[docs/cross-repo-automation.md](cross-repo-automation.md)のケーススタディ）が、
+  その後shopping-list側で`CI_AUTH_BYPASS_TOKEN`（`backend/auth.js`）と`backend/notion-stub.js`が
+  実装され、`scripts/capture-screenshots.mjs`によるPlaywright撮影が動くようになった。issue-deckの
+  実装（Claude Codeステップのプロンプト内で撮影）とは異なり、実装ステップの後段に独立したシェル
+  ステップとして持つ構成のため、この部分はissue-deckからの同期対象ではない
+- **プレビュー環境（`23.preview-required`）はissue-deckとFly.ioアプリを共有している**:
+  `fly.toml`の`app`がissue-deckと同じ`issue-deck-preview`で、かつconcurrencyグループが
+  リポジトリごとに別のため、後からデプロイした側の内容で上書きされる。shopping-listのIssueで
+  案内されたプレビューURLがissue-deckの画面を表示する状態が実際に発生する。複数プレビュー環境の
+  同時起動による解消は#892で検討する
+- `claude-ci-fix.yml`: pnpm/Prisma/Next.js前提のセットアップとビルド用プレースホルダー環境変数を
+  削除し、検証コマンドを`npm run check`とmanifestのJSON検証へ置換（m-guchi/shopping-list#62で導入）
