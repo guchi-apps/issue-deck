@@ -4,9 +4,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 
-function renderSummary(summary: string | null) {
+function renderSummary(summary: string | null, body = "コメント本文") {
   return render(
     <CommentAiSummary
+      body={body}
       summary={summary}
       isGenerating={false}
       error={null}
@@ -41,5 +42,17 @@ describe("CommentAiSummary", () => {
     renderSummary(null);
 
     expect(screen.getByRole("button", { name: "要約を生成" })).not.toBeNull();
+  });
+
+  it("要約が未生成のときも本文の文字数と読了予想時間を表示する", () => {
+    renderSummary(null, "あ".repeat(1234));
+
+    expect(screen.getByText("本文 1,234文字・約2分")).not.toBeNull();
+  });
+
+  it("要約の生成後も本文の文字数と読了予想時間を表示する", () => {
+    renderSummary("## 重要な点\n\n- 項目", "あ".repeat(600));
+
+    expect(screen.getByText("本文 600文字・約1分")).not.toBeNull();
   });
 });
