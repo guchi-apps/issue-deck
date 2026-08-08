@@ -37,6 +37,17 @@ name: Claude Code Review (develop向けPR)
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない
 # (.github/workflows/issue-labels.yml と同じ方針)。
+#
+# concurrency: 本ワークフローはdevelop向けPRへのpush(synchronize)のたびに毎回起動するため、
+# 実装エージェントが同一PRへ連続してpushすると、supersededになった古いpush分のwait-for-ci/
+# risk-check/claude-review(Claude Code呼び出しを含む)が古いコミットに対してそのまま走り
+# 切ってしまい、無駄なClaude Code消費になっていた(#818)。ここでは新しいpushが来たら
+# 古い実行を丸ごとキャンセルする。各ジョブが行う操作(ラベル付与・コメント投稿・
+# auto-merge有効化)はいずれも冪等かつ「より新しい実行が最終的に正しい判定を行えば十分」
+# なため、実行途中でキャンセルされても後続のより新しい実行が正しい状態に収束する。
+concurrency:
+  group: claude-review-develop-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 on:
   pull_request:
