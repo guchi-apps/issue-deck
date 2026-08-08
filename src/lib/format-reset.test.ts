@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatResetAt, formatResetCountdown } from "@/lib/format-reset";
+import { calcRemainingTimePercent, formatResetAt, formatResetCountdown } from "@/lib/format-reset";
 
 // ローカルタイムで解釈させるためタイムゾーン指定なしで生成する。
 // 2026-08-04は火曜日。
@@ -63,5 +63,38 @@ describe("formatResetAt", () => {
 
   it("数値でない値はnullを返す", () => {
     expect(formatResetAt(Number.NaN, NOW_MS)).toBeNull();
+  });
+});
+
+describe("calcRemainingTimePercent", () => {
+  const HOUR_MS = 60 * 60_000;
+
+  it("ウィンドウ中間なら50%になる", () => {
+    expect(calcRemainingTimePercent(afterMinutes(30), HOUR_MS, NOW_MS)).toBeCloseTo(50);
+  });
+
+  it("リセット直後(開始時点)なら100%になる", () => {
+    expect(calcRemainingTimePercent(afterMinutes(60), HOUR_MS, NOW_MS)).toBeCloseTo(100);
+  });
+
+  it("リセット時点なら0%になる", () => {
+    expect(calcRemainingTimePercent(afterMinutes(0), HOUR_MS, NOW_MS)).toBeCloseTo(0);
+  });
+
+  it("リセット経過後は0%に丸める", () => {
+    expect(calcRemainingTimePercent(afterMinutes(-30), HOUR_MS, NOW_MS)).toBe(0);
+  });
+
+  it("ウィンドウ長を超える残り時間は100%に丸める", () => {
+    expect(calcRemainingTimePercent(afterMinutes(120), HOUR_MS, NOW_MS)).toBe(100);
+  });
+
+  it("数値でない値はnullを返す", () => {
+    expect(calcRemainingTimePercent(Number.NaN, HOUR_MS, NOW_MS)).toBeNull();
+    expect(calcRemainingTimePercent(afterMinutes(30), Number.NaN, NOW_MS)).toBeNull();
+  });
+
+  it("ウィンドウ長が0以下ならnullを返す", () => {
+    expect(calcRemainingTimePercent(afterMinutes(30), 0, NOW_MS)).toBeNull();
   });
 });

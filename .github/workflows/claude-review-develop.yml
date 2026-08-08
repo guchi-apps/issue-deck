@@ -5,8 +5,15 @@ name: Claude Code Review (develop向けPR)
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
+# - wait-for-ci: risk-check/claude-reviewの判定・00.check-user付与を、CI(ci.yml)の
+#   完了を待ってから行うようにするための待機ジョブ。CIが`in_progress`のうちに
+#   00.check-userが付いてしまい、issue-deck画面上で時期尚早に「要確認」に見える
+#   問題を防ぐ(#810)。ポーリングがタイムアウトした場合もジョブ自体は失敗させず
+#   後続へ進める(fail-open。失敗させるとneeds経由でrisk-check/claude-reviewが
+#   skipされ、レビュー自体が行われないまま放置される事故につながるため)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
-#   22.merge-confirm-requiredラベル付与の有無を確認する。該当時は00.check-userを
+#   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
+#   付与の有無を確認する。該当時は00.check-userを
 #   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
 #   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
 #   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
@@ -30,6 +37,17 @@ name: Claude Code Review (develop向けPR)
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない
 # (.github/workflows/issue-labels.yml と同じ方針)。
+#
+# concurrency: 本ワークフローはdevelop向けPRへのpush(synchronize)のたびに毎回起動するため、
+# 実装エージェントが同一PRへ連続してpushすると、supersededになった古いpush分のwait-for-ci/
+# risk-check/claude-review(Claude Code呼び出しを含む)が古いコミットに対してそのまま走り
+# 切ってしまい、無駄なClaude Code消費になっていた(#818)。ここでは新しいpushが来たら
+# 古い実行を丸ごとキャンセルする。各ジョブが行う操作(ラベル付与・コメント投稿・
+# auto-merge有効化)はいずれも冪等かつ「より新しい実行が最終的に正しい判定を行えば十分」
+# なため、実行途中でキャンセルされても後続のより新しい実行が正しい状態に収束する。
+concurrency:
+  group: claude-review-develop-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 on:
   pull_request:
@@ -55,8 +73,35 @@ jobs:
             echo "number=" >> "$GITHUB_OUTPUT"
           fi
 
-  risk-check:
+  wait-for-ci:
     needs: identify-issue
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: CI(ci.yml)の完了を待つ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            STATUS="$(gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request" \
+              --jq '[.workflow_runs[] | select(.name == "CI")][0].status // ""')"
+            if [ -z "$STATUS" ]; then
+              echo "CIの実行がまだ見つかりません。20秒待って再試行します。($i/60)"
+            elif [ "$STATUS" = "completed" ]; then
+              echo "CIが完了しました。"
+              exit 0
+            else
+              echo "CIはまだ完了していません(status=${STATUS})。20秒待って再試行します。($i/60)"
+            fi
+            sleep 20
+          done
+          echo "タイムアウトしました。CI完了を待たずに後続ジョブへ進みます(fail-open)。"
+
+  risk-check:
+    needs: [identify-issue, wait-for-ci]
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -131,6 +176,9 @@ jobs:
             if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
               add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
             fi
+            if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
+              add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
           fi
 
           if [ "$RISKY" = "true" ]; then
@@ -153,7 +201,7 @@ jobs:
           fi
 
   claude-review:
-    needs: identify-issue
+    needs: [identify-issue, wait-for-ci]
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
@@ -192,7 +240,9 @@ jobs:
             - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
             - Issue外の変更が混入していないか
             - コード品質・セキュリティ上の問題がないか（OWASP Top10等の観点を含む）
-            - CI結果に問題がないか（`gh pr checks`で確認。まだ実行中の場合はその旨のみ記載する）
+            - CI結果に問題がないか（`gh pr checks`で確認。同一ワークフロー内の`wait-for-ci`ジョブが
+              CI完了を待ってからこのジョブを起動しているため、通常は結果が出ているはずだが、
+              タイムアウト等でまだ実行中の場合はその旨のみ記載する）
 
             ## 自動マージ不可カテゴリの判定
             以下のいずれかに該当する変更が含まれる場合は「自動マージ不可」と判定してください。

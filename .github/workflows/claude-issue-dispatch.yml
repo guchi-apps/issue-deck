@@ -1452,7 +1452,8 @@ jobs:
               対象PR（${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
               要約（触ったファイルや対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること。
               `24.screenshot-required`が付いている場合は、後述の「画面確認・スクリーンショットについて」の
-              節に従い取得したスクリーンショットのURLもこのコメントに埋め込むこと
+              節に従い取得したスクリーンショットのURLもこのコメントに埋め込むこと。`23.preview-required`が
+              付いている場合も、同節に従いポート案内をこのコメントに追記すること
 
             ## 画面確認・スクリーンショットについて
 
@@ -1505,34 +1506,19 @@ jobs:
                 `-- ${{ steps.state.outputs.issue_number }} /dashboard "text=新規Issue"`）。
                 撮影対象パスへ遷移した後、撮影前にそのセレクタをクリックする。第2引数
                 （対象パス）を省略するフォールバック撮影モードでは対応していない。
-              - `23.preview-required`も同時に付いている場合、無人実行では実際に到達可能なプレビューURLを
-                提供できない点は変わらないため、上記の完了報告コメント（Issue側）に、下記
-                「`23.preview-required`のみが付いている場合」と同様のポート割り当て規約に基づく
-                `http://localhost:<ポート>`・`http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`の
-                案内もあわせて記載してください（この場合もブロックはしません）。
-
-            - Issueに`23.preview-required`ラベルが付いていて、`24.screenshot-required`が付いていない場合:
-              実装・テストまで終えた時点で上記の完了処理（新規PR作成またはPRコメント投稿）を行わず、
-              ブランチのpushまでは行ったうえで、代わりに
-              `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`を実行し
-              （`02.wip`はそのままにし`03.d:marge`への付け替えは行わない）、実装内容の要約と「画面確認が
-              必要なためユーザーの確認を待っています」旨を`gh issue comment`で
-              投稿して停止してください。
-              このコメントに開発サーバーのプレビューURLもあわせて記載する。無人実行では実際にdevサーバーを
-              起動できないため、人間が手元でブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
+            - Issueに`23.preview-required`ラベルが付いている場合（`24.screenshot-required`の有無を
+              問わない）: 無人実行では実際に到達可能なプレビューURLを提供できない点は変わりませんが、
+              それを理由にPR作成自体をブロックする必要はありません。上記「責務」に記載の完了処理
+              （新規PR作成またはPRコメント投稿・`03.d:marge`への付け替え）まで通常どおり進めてください。
+              developへのマージ前確認は`claude-review-develop.yml`のrisk-checkジョブが
+              `23.preview-required`を検知して常に`00.check-user`を付与する形でゲートするため、この
+              ステップでブロックする必要はありません。最後の完了報告コメント（Issue側）には、人間が
+              手元でブランチをcheckoutして`pnpm dev`を起動した際に開くURLとして、
               `docs/multi-agent-workflow.md`のポート割り当て規約（`PORT=4000 + Issue番号`。本Issueの
-              番号は${{ steps.state.outputs.issue_number }}）に従い、以下の2形式で案内する。
+              番号は${{ steps.state.outputs.issue_number }}）に従い、以下の2形式を案内してください。
               ・`http://localhost:<ポート>`
               ・`http://<WSLまたはLANのIPアドレス>.sslip.io:<ポート>`（同一LAN上の別端末から確認する
               場合。IPアドレスは人間が手元の環境に合わせて読み替える）
-              - 新規にPRを作成する予定だった場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}` の
-                内容を確認のうえ、問題なければ手動でPRを作成してください」
-              - 既存PRにコメントする予定だった場合の文言例:「ブランチ `${{ steps.state.outputs.branch }}`
-                に追加コミットをpushしました。Pull Request（${{ steps.state.outputs.pr_url }}）の内容を
-                確認してください」
-              コメント末尾に、このワークフロー実行への追跡用リンクとして
-              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-              を必ず追記する
 
             - 上記いずれのラベルも付いていない場合は、通常どおり完了処理まで進めてください
 

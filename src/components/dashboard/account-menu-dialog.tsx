@@ -95,10 +95,19 @@ export function AccountMenuDialog({
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
+  // リリース対象として選択できるのは、Issue-deckに登録済み（=claude-issue-dispatch.ymlの導入が
+  // 確認できる）リポジトリに限定する。GitHub Appのインストールだけが済み、まだissue-deckの
+  // 自動化を導入していないリポジトリは本番リリースもできないため選択肢から除く。
+  const releasableRepositories = useMemo(
+    () => repositories.filter((repo) => repo.hasClaudeWorkflow),
+    [repositories],
+  );
   // ダイアログを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
   // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
-    selectedRepoFullName ?? repositories[0]?.fullName ?? null,
+    releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)?.fullName ??
+      releasableRepositories[0]?.fullName ??
+      null,
   );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(open);
@@ -165,9 +174,12 @@ export function AccountMenuDialog({
           onOpenChange(nextOpen);
           if (nextOpen) {
             setReleaseRepoFullName((prev) =>
-              prev && repositories.some((repo) => repo.fullName === prev)
+              prev && releasableRepositories.some((repo) => repo.fullName === prev)
                 ? prev
-                : (selectedRepoFullName ?? repositories[0]?.fullName ?? null),
+                : (releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)
+                    ?.fullName ??
+                    releasableRepositories[0]?.fullName ??
+                    null),
             );
           }
         }}
@@ -266,7 +278,7 @@ export function AccountMenuDialog({
               {isRepositorySyncing ? "リポジトリを再同期中..." : "リポジトリを再同期"}
             </Button>
 
-            {repositories.length > 0 && (
+            {releasableRepositories.length > 0 && (
               <Collapsible className="rounded-md border p-3">
                 <CollapsibleTrigger asChild>
                   <button
@@ -287,7 +299,7 @@ export function AccountMenuDialog({
                         <SelectValue placeholder="リポジトリを選択" />
                       </SelectTrigger>
                       <SelectContent>
-                        {repositories.map((repo) => (
+                        {releasableRepositories.map((repo) => (
                           <SelectItem key={repo.id} value={repo.fullName}>
                             {repo.fullName}
                           </SelectItem>
@@ -331,7 +343,6 @@ export function AccountMenuDialog({
                         <Button
                           size="sm"
                           variant="outline"
-                          className="text-xs"
                           disabled={isTriggeringRelease}
                           onClick={() => setReleaseConfirmOpen(true)}
                         >

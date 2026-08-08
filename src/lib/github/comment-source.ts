@@ -3,6 +3,7 @@ import {
   ClipboardList,
   GitFork,
   GitMerge,
+  Hammer,
   Info,
   MessageCircleQuestion,
   ShieldCheck,
@@ -40,6 +41,7 @@ export const COMMENT_SOURCE_IDS = [
   "claude-issue-dispatch",
   "claude-review-develop",
   "claude-conflict-resolve",
+  "claude-ci-fix",
   "issue-labels",
 ] as const;
 
@@ -135,6 +137,7 @@ export type CommentAgentRole =
   | "guide"
   | "reviewer"
   | "conflict-resolver"
+  | "ci-fixer"
   | "notifier"
   | "error-notifier";
 
@@ -146,6 +149,7 @@ export type CommentAgentRole =
 const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "claude-review-develop": "reviewer",
   "claude-conflict-resolve": "conflict-resolver",
+  "claude-ci-fix": "ci-fixer",
   "issue-labels": "notifier",
 };
 
@@ -230,6 +234,13 @@ export const COMMENT_AGENT_PROFILES: Record<CommentAgentRole, CommentAgentProfil
     avatarColor: "#f97316",
     textClassName: "text-orange-600 dark:text-orange-400",
     bubbleClassName: "border-orange-500/30 bg-orange-500/5",
+  },
+  "ci-fixer": {
+    label: "CI修正ボット",
+    icon: Hammer,
+    avatarColor: "#14b8a6",
+    textClassName: "text-teal-600 dark:text-teal-400",
+    bubbleClassName: "border-teal-500/30 bg-teal-500/5",
   },
   notifier: {
     label: "進捗通知ボット",

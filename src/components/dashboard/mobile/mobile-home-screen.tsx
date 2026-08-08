@@ -5,6 +5,7 @@ import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
+import { cn } from "@/lib/utils";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
@@ -83,18 +84,37 @@ export function MobileHomeScreen({
           <ul className="flex flex-col gap-1">
             {quickFilterViews.map((view) => {
               const Icon = navViewIcons[view.id];
+              // ユーザーの確認待ちが1件以上あるときは、ヘッダー下フィルターと
+              // 同じ配色（amber）で強調する（#742）。
+              const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
               return (
                 <li key={view.id}>
                   <button
                     type="button"
                     onClick={() => onSelectQuickView(view.id)}
-                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className={cn(
+                      "flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent",
+                      isCheckUserHighlighted && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
+                    )}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
+                      <Icon
+                        className={cn(
+                          "size-3.5 text-muted-foreground",
+                          isCheckUserHighlighted && "text-amber-600 dark:text-amber-500",
+                        )}
+                      />
                       {view.label}
                     </span>
-                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                    <span
+                      className={cn(
+                        "text-xs text-muted-foreground",
+                        isCheckUserHighlighted &&
+                          "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
+                      )}
+                    >
+                      {navCounts[view.id]}
+                    </span>
                   </button>
                 </li>
               );

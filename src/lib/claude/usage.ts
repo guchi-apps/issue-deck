@@ -16,9 +16,9 @@ const PROBE_REQUEST_BODY = JSON.stringify({
 });
 
 /** 表示するウィンドウと表示順。キーはヘッダ名に埋め込まれる略称。 */
-const USAGE_WINDOWS: { key: string; label: string }[] = [
-  { key: "5h", label: "5時間" },
-  { key: "7d", label: "週間" },
+const USAGE_WINDOWS: { key: string; label: string; durationMs: number }[] = [
+  { key: "5h", label: "5時間", durationMs: 5 * 60 * 60_000 },
+  { key: "7d", label: "週間", durationMs: 7 * 24 * 60 * 60_000 },
 ];
 
 export type ClaudeUsageWindow = {
@@ -32,6 +32,8 @@ export type ClaudeUsageWindow = {
   resetsAt: number | null;
   /** `allowed` / `allowed_warning` / `rejected` など。取得できなかった場合はnull。 */
   status: string | null;
+  /** 固定ウィンドウ長(ミリ秒)。5時間枠・週間枠のいずれも固定値。 */
+  durationMs: number;
 };
 
 export type ClaudeUsage = {
@@ -63,7 +65,7 @@ function readNumberHeader(headers: Headers, name: string): number | null {
 export function parseUnifiedRateLimitHeaders(headers: Headers): ClaudeUsageWindow[] {
   const windows: ClaudeUsageWindow[] = [];
 
-  for (const { key, label } of USAGE_WINDOWS) {
+  for (const { key, label, durationMs } of USAGE_WINDOWS) {
     // utilizationは0-1の比率で返る（例: 0.07 は7%）。
     const utilization = readNumberHeader(
       headers,
@@ -80,6 +82,7 @@ export function parseUnifiedRateLimitHeaders(headers: Headers): ClaudeUsageWindo
       // resetはepoch秒。
       resetsAt: readNumberHeader(headers, `anthropic-ratelimit-unified-${key}-reset`),
       status: headers.get(`anthropic-ratelimit-unified-${key}-status`),
+      durationMs,
     });
   }
 

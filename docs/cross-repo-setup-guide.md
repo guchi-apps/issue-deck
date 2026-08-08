@@ -34,7 +34,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 1. ワークフローファイル一式
 
-`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下5ファイルである。
+`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下6ファイルである。
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
@@ -42,6 +42,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する | ラベル名・`issue-<番号>`ブランチ命名規則が一致していればほぼ無改変で移植できる。スクリーンショット撮影を導入しないリポジトリでは、末尾の`screenshots`ブランチ掃除ジョブを削除してよい |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
+| `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） | バージョン管理方式（`package.json`の`version`比較か、別言語のバージョンファイルか）に応じた改変が必要 |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
@@ -49,7 +50,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ### 参考: issue-deckの全ワークフロー一覧
 
-上記5ファイル以外にissue-deckが持つワークフローは、issue-deck自身のCI・デプロイ用途に固有であり、
+上記6ファイル以外にissue-deckが持つワークフローは、issue-deck自身のCI・デプロイ用途に固有であり、
 マルチエージェント運用の移植対象ではない（参考として一覧化する）。
 
 | ファイル | 用途 | 移植要否 |
@@ -170,6 +171,16 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
       置き換え）
 - [ ] **バージョン管理方式**（`release-develop-to-main.yml`のバージョンbump処理が前提にする
       `package.json`の`version`フィールド相当のものが存在するか）
+- [ ] **更新履歴表示の同期要否**（対象リポジトリが自アプリ内に更新履歴のコメント表示を持つか）。
+      `release-develop-to-main.yml`はバージョン判定ステップで利用者向けの更新履歴文言
+      （`changelog`）も生成し、バンプ処理を`npm version "$NEW_VERSION" --no-git-tag-version`
+      で実行する際に環境変数`RELEASE_CHANGELOG`としてexportする（#800）。更新履歴表示を持つ
+      リポジトリは、自分の`package.json`に`"scripts": {"version": "..."}`を定義し、その中で
+      `$RELEASE_CHANGELOG`を読んで自前の更新履歴ファイルを書き換える、という契約に乗るだけで
+      よい（`release-develop-to-main.yml`本体はリポジトリ固有の書き込み先を一切知らない）。
+      バンプコミットは`git add -A`で作成されるため、`"version"`スクリプトが新規作成・更新した
+      ファイルは自動的にコミットへ含まれる。更新履歴表示を持たないリポジトリでは`"version"`
+      スクリプトを定義しなければよく、何も変わらない
 
 `m-guchi/shopping-list`のケーススタディでは、実際に差異が出たのは上記のうち
 **パッケージマネージャ／検証コマンド**・**DBセットアップの要否**・**画面確認の可否**の3軸のみで、

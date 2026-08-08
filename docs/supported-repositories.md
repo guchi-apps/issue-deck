@@ -54,10 +54,17 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
   `npm version <新バージョン> --no-git-tag-version`へ変更（npmのversion lifecycleフックで
   `frontend/changelog.js`のスタブを生成する必要があるため）。あわせてバージョン判定の構造化出力に
   `changelog`を追加し、利用者向け更新履歴の本文もコード差分から生成する。生成文面が公開されるため
-  バンプPRの自動マージは行わない
+  バンプPRの自動マージは行わない。この改修は#800より前に、shopping-list側で個別に手改造する
+  形で行われたもの。#800でissue-deck本体の`release-develop-to-main.yml`にも同種の
+  `npm version --no-git-tag-version`化・`changelog`生成・`RELEASE_CHANGELOG`環境変数による
+  汎用フックが追加されたため、今後同様の更新履歴同期を導入するリポジトリは個別改造なしで
+  `"version"` lifecycleスクリプトを定義するだけで済むようになった（詳細は
+  [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「6. リポジトリ差異の吸収
+  チェックリスト」参照）。shopping-list自身をこの汎用フックへ移行する作業は本Issueのスコープ外
+  のため未実施
 - `issue-labels.yml`: `screenshots`ブランチの掃除ジョブを削除（無人撮影を導入していないため）
 - **`24.screenshot-required`は未対応**: 全画面がSupabase Auth + Google OAuthログインの背後にあり、
   issue-deckの`src/lib/ci-auth-bypass.ts`相当のCIログインバイパス機構とNotion APIのスタブが
-  存在しないため無人撮影が成立しない。ラベルが付いていた場合は撮影を試みず、
-  `23.preview-required`と同様に画面確認待ちで停止する挙動にしている
+  存在しないため無人撮影が成立しない。ラベルが付いていた場合は撮影を試みず、実装・コミット・
+  ブランチpushまで行った上で`00.check-user`を付与しPR作成前に停止する挙動にしている
   （詳細は[docs/cross-repo-automation.md](cross-repo-automation.md)のケーススタディ参照）

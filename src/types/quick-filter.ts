@@ -6,7 +6,7 @@ export type QuickFilter = {
   name: string;
   view: NavViewId;
   q: string;
-  repo: string | null;
+  repos: string[];
   state: IssueStateFilter;
   labels: string[];
   assignee: string | null;

@@ -88,13 +88,15 @@ export function filterIssuesByView(
 
 export function applyIssueFilters(
   issues: Issue[],
-  filters: Pick<IssueFilters, "q" | "repo" | "state" | "labels" | "assignee">,
+  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
 ): Issue[] {
   const q = filters.q.trim();
 
   return issues.filter((issue) => {
     if (q && !matchesSearchQuery(issue, q)) return false;
-    if (filters.repo && issue.repositoryFullName !== filters.repo) return false;
+    if (filters.repos.length > 0 && !filters.repos.includes(issue.repositoryFullName)) {
+      return false;
+    }
     if (filters.state !== "all" && issue.state !== filters.state) return false;
     if (filters.labels.length > 0) {
       const issueLabelNames = new Set(issue.labels.map((label) => label.name));

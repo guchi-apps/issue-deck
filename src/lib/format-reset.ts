@@ -61,3 +61,22 @@ export function formatResetAt(resetsAtSeconds: number, nowMs: number): string | 
   const countdown = formatResetCountdown(resetsAtSeconds, nowMs);
   return countdown === null ? `${weekday}${time}` : `${weekday}${time} (${countdown})`;
 }
+
+/**
+ * リセット時刻(epoch秒)・固定ウィンドウ長(ミリ秒)・現在時刻(epoch ms)から、
+ * ウィンドウ開始時点を100%・リセット時点を0%とする残り時間の割合(0-100)を返す。
+ * 解釈できない値の場合はnullを返す。
+ */
+export function calcRemainingTimePercent(
+  resetsAtSeconds: number,
+  durationMs: number,
+  nowMs: number,
+): number | null {
+  if (!Number.isFinite(resetsAtSeconds) || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+
+  const remainingMs = resetsAtSeconds * 1000 - nowMs;
+  const percent = (remainingMs / durationMs) * 100;
+  return Math.min(100, Math.max(0, percent));
+}
