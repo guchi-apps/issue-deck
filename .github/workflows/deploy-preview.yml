@@ -180,3 +180,16 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
           PREVIEW_MODE: ${{ inputs.preview_mode }}
+
+      - name: Machineを起動
+        # fly.tomlでauto_start_machines=falseにしている（ボットやスキャナがURLを叩いただけで
+        # Machineが起動してしまうのを防ぐため）ため、既存Machineをrolling strategyで更新する
+        # `flyctl deploy`はconfigを更新するだけでMachineを起動せず、更新後はstopped状態のまま
+        # 終わる（#880で発生した503の原因）。auto_startに頼らず、このデプロイworkflow側で
+        # 明示的に起動する。
+        run: |
+          set -euo pipefail
+          MACHINE_ID=$(flyctl machine list --json | jq -r '.[0].id')
+          flyctl machine start "$MACHINE_ID"
+        env:
+          FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }}
