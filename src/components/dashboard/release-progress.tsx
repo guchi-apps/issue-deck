@@ -79,10 +79,16 @@ function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
  * 今回のmainへのマージが完了していないにもかかわらず前回リリース時のデプロイ成功が残り
  * 続けて見えてしまうため(#470)。バンプPRがまだ現れていない起動直後（phaseは"none"のまま）も
  * ワークフロー実行中である以上は同様に隠す必要がある(#545)。
+ *
+ * `workflowRun`（`release-develop-to-main.yml`自体の最新実行）が失敗している場合、進行中の
+ * はずの段が実際には止まっていることを明示するため、該当段を"error"にしてrunへのリンクを
+ * 添える（それまでは`phase`が変わらないまま"PR作成中"等の表示が残り続け、失敗に気づきにくかった。#727）。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
   const runActive = workflowRun != null && workflowRun.status !== "completed";
+  const failedRun =
+    workflowRun && workflowRun.status === "completed" && workflowRun.conclusion !== "success" ? workflowRun : null;
 
   const steps: Step[] = [
     { label: "バンプPR作成", state: "todo" },
@@ -109,8 +115,14 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].state = "done";
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
-    steps[2].state = "active";
-    steps[2].note = "PR作成中";
+    if (failedRun) {
+      steps[2].state = "error";
+      steps[2].note = "develop→main PRの自動作成に失敗しました";
+      steps[2].action = { href: failedRun.htmlUrl, label: "GitHub Actionsで確認して対処" };
+    } else {
+      steps[2].state = "active";
+      steps[2].note = "PR作成中";
+    }
   } else if (phase === "release_pr_open" && release) {
     steps[0].state = "done";
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
@@ -127,6 +139,11 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     // まだPRが現れていないが実行中（起動直後）。最初の段を進行中にする。
     steps[0].state = "active";
     steps[0].note = "ワークフロー実行中...";
+  } else if (failedRun && phase === "none") {
+    // バージョン判定・バンプPR作成のいずれかで失敗し、PRが1つも作られなかったケース。
+    steps[0].state = "error";
+    steps[0].note = "バージョン判定・バンプPR作成に失敗しました";
+    steps[0].action = { href: failedRun.htmlUrl, label: "GitHub Actionsで確認して対処" };
   }
 
   if (phase === "none" && !runActive) {
