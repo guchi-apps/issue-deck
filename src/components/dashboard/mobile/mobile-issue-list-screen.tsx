@@ -17,12 +17,8 @@ import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
 // 一覧画面上部のフィルタータブは「すべてのIssue」の右隣にユーザーの確認待ちを固定表示し、
 // 対応が必要なIssueを横スクロールなしで見つけられるようにする（#714）。
-const tabNavViews = [
-  baseNavViews[0],
-  labelNavViews[0],
-  ...baseNavViews.slice(1),
-  ...labelNavViews.slice(1),
-];
+// 「お気に入り」「最近追加した」はスマホの一覧画面では表示しない（#873）。
+const tabNavViews = [baseNavViews[0], labelNavViews[0], ...labelNavViews.slice(1)];
 
 type MobileIssueListScreenProps = {
   /** ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名） */
