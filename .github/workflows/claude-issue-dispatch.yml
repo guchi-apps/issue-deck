@@ -1763,6 +1763,7 @@ jobs:
       - name: プレビューURLをIssueに通知する
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.issue_number }}
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           DEPLOY_RESULT: ${{ needs.deploy-preview.result }}
