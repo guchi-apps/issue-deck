@@ -9,7 +9,7 @@ import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
-  countCheckUserIssues,
+  computeNavCounts,
   filterIssuesByView,
   sortIssues,
 } from "@/lib/issue-stats";
@@ -66,7 +66,12 @@ export function MobileIssuesScreen({
     return sortIssues(filtered, sort, view);
   }, [issues, view, currentUserLogin, state, labels, assignee, sort]);
 
-  const checkUserCount = useMemo(() => countCheckUserIssues(issues), [issues]);
+  // タブごとの該当Issue件数（#880）。「ユーザーの確認待ち」のみだった件数バッジを
+  // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じcomputeNavCountsを使う。
+  const navCounts = useMemo(
+    () => computeNavCounts(issues, issues, currentUserLogin),
+    [issues, currentUserLogin],
+  );
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
   // ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
@@ -87,7 +92,7 @@ export function MobileIssuesScreen({
     <MobileIssueListScreen
       title="Issue"
       issues={displayedIssues}
-      checkUserCount={checkUserCount}
+      navCounts={navCounts}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}
