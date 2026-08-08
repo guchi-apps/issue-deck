@@ -182,10 +182,21 @@ function ApprovalActions({
   if (mergeApprovalPending) {
     return (
       <div className="mt-3 rounded-lg border border-dashed p-3">
-        <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
-        <p className="text-sm text-muted-foreground">
-          GitHub上で内容を確認のうえマージしてください。
-        </p>
+        {isMerged ? (
+          <>
+            <p className="mb-2 text-sm font-medium">Pull Requestをマージしました</p>
+            <p className="text-sm text-muted-foreground">
+              画面表示が更新されるまで少しお待ちください。
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
+            <p className="text-sm text-muted-foreground">
+              GitHub上で内容を確認のうえマージしてください。
+            </p>
+          </>
+        )}
         {pullRequestLink && (
           <a
             href={pullRequestLink.url}
@@ -232,7 +243,7 @@ function ApprovalActions({
             </AlertDialog>
           </div>
         )}
-        {onRequestPrFix && (
+        {onRequestPrFix && !isMerged && (
           <div className="mt-2">
             {isPrFixOpen ? (
               <div className="flex flex-col gap-2">
