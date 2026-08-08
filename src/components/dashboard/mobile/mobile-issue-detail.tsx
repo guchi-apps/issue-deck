@@ -462,49 +462,57 @@ export function MobileIssueDetail({
               <MoreHorizontal className="size-5 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-fit min-w-0">
             {issue.state === "open" && (
-              <DropdownMenuItem asChild>
+              <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
                 <a
                   href={buildClaudeAppUrl(issue)}
                   target="_blank"
                   rel="noreferrer"
                   onClick={handleClaudeAppHandoff}
                 >
-                  <Bot />
+                  <Bot className="size-3.5" />
                   Claudeアプリで開く
                 </a>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
-              <FilePlus2 />
+            <DropdownMenuItem
+              className="whitespace-nowrap text-xs"
+              onSelect={() => onCreateFollowupIssue(issue)}
+            >
+              <FilePlus2 className="size-3.5" />
               引き継いでIssueを作成
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onEdit(issue)}>
-              <Pencil />
+            <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
+              <Pencil className="size-3.5" />
               編集
             </DropdownMenuItem>
             {canMove && (
-              <DropdownMenuItem onSelect={() => setIsMoveDialogOpen(true)}>
-                <ArrowRightLeft />
+              <DropdownMenuItem
+                className="whitespace-nowrap text-xs"
+                onSelect={() => setIsMoveDialogOpen(true)}
+              >
+                <ArrowRightLeft className="size-3.5" />
                 リポジトリを移動
               </DropdownMenuItem>
             )}
             {issue.state === "open" ? (
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger disabled={isSubmitting}>
-                  <XCircle />
+                <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
+                  <XCircle className="size-3.5" />
                   クローズする
                 </DropdownMenuSubTrigger>
                 <DropdownMenuPortal>
-                  <DropdownMenuSubContent>
+                  <DropdownMenuSubContent className="w-fit min-w-0">
                     <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
                       disabled={isSubmitting}
                       onSelect={() => handleClose("completed")}
                     >
                       完了としてクローズ
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
                       disabled={isSubmitting}
                       onSelect={() => handleClose("not_planned")}
                     >
@@ -514,12 +522,17 @@ export function MobileIssueDetail({
                 </DropdownMenuPortal>
               </DropdownMenuSub>
             ) : (
-              <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
-                <RotateCcw />
+              <DropdownMenuItem
+                className="whitespace-nowrap text-xs"
+                disabled={isSubmitting}
+                onSelect={handleReopen}
+              >
+                <RotateCcw className="size-3.5" />
                 再オープンする
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
+              className="whitespace-nowrap text-xs"
               variant="destructive"
               disabled={isSubmitting}
               onSelect={() => {
@@ -527,7 +540,7 @@ export function MobileIssueDetail({
                 setIsDeleteDialogOpen(true);
               }}
             >
-              <Trash2 />
+              <Trash2 className="size-3.5" />
               Issueを削除
             </DropdownMenuItem>
           </DropdownMenuContent>
