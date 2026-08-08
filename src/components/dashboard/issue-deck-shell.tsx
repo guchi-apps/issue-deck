@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
+import {
+  CheckUserToastViewport,
+  type CheckUserToastItem,
+} from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -38,6 +42,7 @@ import {
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
+  detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
   reconcileIssues,
@@ -49,6 +54,9 @@ import type { Issue, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
+
+// 確認待ちトーストが積み上がりすぎないよう、直近分だけ表示する（#852）
+const MAX_CHECK_USER_TOASTS = 4;
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
@@ -104,6 +112,7 @@ export function IssueDeckShell({
   const [askDialogOpen, setAskDialogOpen] = useState(false);
   const [askDialogRepo, setAskDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
+  const [checkUserToasts, setCheckUserToasts] = useState<CheckUserToastItem[]>([]);
 
   // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
   // サイドバー・Issue一覧・プロパティパネルの3カラムはドラッグで幅を調整できる。
@@ -222,12 +231,41 @@ export function IssueDeckShell({
 
   useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);
+
+    // 画面を開いている間に、新たに00.check-userラベルが付与されたIssueをトーストで知らせる
+    // （画面下部にポコッと表示する方式。#852）。初回マウント時の直前状態（initialIssues）
+    // との比較にも同じロジックが使えるため、既に付与済みの確認待ちで毎回通知される問題は
+    // 特別分岐なしに回避できる。
+    const newlyCheckUserIssues = detectNewlyCheckUserIssues(issues, reconciledIssues);
+    if (newlyCheckUserIssues.length > 0) {
+      setCheckUserToasts((prev) =>
+        [
+          ...prev,
+          ...newlyCheckUserIssues.map((issue) => ({
+            id: `${issue.id}:${issue.checkUserLabeledAt}`,
+            issue,
+          })),
+        ].slice(-MAX_CHECK_USER_TOASTS),
+      );
+    }
+
     setIssues(reconciledIssues);
     setSelectedIssue((prev) => {
       if (!prev) return prev;
       return reconciledIssues.find((issue) => issue.id === prev.id) ?? prev;
     });
   });
+
+  function handleSelectCheckUserToastIssue(issue: Issue) {
+    setSelectedIssue(issue);
+    // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
+    // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
+    selectIssue(issue);
+  }
+
+  function handleDismissCheckUserToast(id: string) {
+    setCheckUserToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }
 
   // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
   // サイドバーの件数表示はこれを基準にする。
@@ -643,6 +681,11 @@ export function IssueDeckShell({
         issue={editingIssue}
         issues={issues}
         onUpdated={handleIssueUpdated}
+      />
+      <CheckUserToastViewport
+        toasts={checkUserToasts}
+        onSelectIssue={handleSelectCheckUserToastIssue}
+        onDismiss={handleDismissCheckUserToast}
       />
     </div>
   );

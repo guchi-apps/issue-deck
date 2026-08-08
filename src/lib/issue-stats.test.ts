@@ -5,6 +5,7 @@ import {
   computeNavCounts,
   computeOverviewStats,
   countCheckUserIssues,
+  detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
   reconcileIssues,
@@ -224,6 +225,41 @@ describe("reconcileIssues", () => {
     const nextIssue = makeIssue({ id: "2" });
     const result = reconcileIssues([], [nextIssue]);
     expect(result[0]).toBe(nextIssue);
+  });
+});
+
+describe("detectNewlyCheckUserIssues", () => {
+  it("checkUserLabeledAtがnullから非nullに変わったIssueを検知する", () => {
+    const prevIssue = makeIssue({ id: "1", checkUserLabeledAt: null });
+    const nextIssue = makeIssue({ id: "1", checkUserLabeledAt: "2026-01-05T00:00:00.000Z" });
+    const result = detectNewlyCheckUserIssues([prevIssue], [nextIssue]);
+    expect(result.map((issue) => issue.id)).toEqual(["1"]);
+  });
+
+  it("既にcheckUserLabeledAtが付与済みのIssueは再検知しない", () => {
+    const prevIssue = makeIssue({ id: "1", checkUserLabeledAt: "2026-01-01T00:00:00.000Z" });
+    const nextIssue = makeIssue({ id: "1", checkUserLabeledAt: "2026-01-01T00:00:00.000Z" });
+    const result = detectNewlyCheckUserIssues([prevIssue], [nextIssue]);
+    expect(result).toEqual([]);
+  });
+
+  it("checkUserLabeledAtがnullのままのIssueは検知しない", () => {
+    const prevIssue = makeIssue({ id: "1", checkUserLabeledAt: null });
+    const nextIssue = makeIssue({ id: "1", checkUserLabeledAt: null });
+    const result = detectNewlyCheckUserIssues([prevIssue], [nextIssue]);
+    expect(result).toEqual([]);
+  });
+
+  it("直前の配列に存在しない新規Issueは、checkUserLabeledAtが付与済みなら検知する", () => {
+    const nextIssue = makeIssue({ id: "2", checkUserLabeledAt: "2026-01-05T00:00:00.000Z" });
+    const result = detectNewlyCheckUserIssues([], [nextIssue]);
+    expect(result.map((issue) => issue.id)).toEqual(["2"]);
+  });
+
+  it("直前の配列に存在しない新規Issueで、checkUserLabeledAtが未付与なら検知しない", () => {
+    const nextIssue = makeIssue({ id: "2", checkUserLabeledAt: null });
+    const result = detectNewlyCheckUserIssues([], [nextIssue]);
+    expect(result).toEqual([]);
   });
 });
 
