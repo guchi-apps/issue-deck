@@ -54,6 +54,40 @@ jobs:
           NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder
           GITHUB_WEBHOOK_SECRET: ci-placeholder
 
+  docs-sync-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cross-repo setup guide sync check
+        run: scripts/check-cross-repo-guide-sync.sh
+
+  workflow-drift-notice:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for workflow file changes
+        id: changed
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          if ! git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- .github/workflows/; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Workflow sync drift notice
+        if: steps.changed.outputs.changed == 'true'
+        run: scripts/check-workflow-sync-drift.sh
+
   notify:
     needs: [lint-and-build]
     if: always()

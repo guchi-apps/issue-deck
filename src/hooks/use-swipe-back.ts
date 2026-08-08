@@ -6,6 +6,12 @@ import type { CSSProperties, TouchEvent } from "react";
 const SWIPE_THRESHOLD_PX = 80;
 const DIRECTION_LOCK_PX = 10;
 const HORIZONTAL_DOMINANCE_RATIO = 1.5;
+/**
+ * 戻るジェスチャーの判定領域（画面幅に対する左端からの比率）。
+ * スマホのIssue一覧ではこの領域外の右スワイプをフィルタービュー切り替えに
+ * 割り当てるため、use-swipe-filter-view.tsからも同じ比率を参照する（#706）。
+ */
+export const BACK_EDGE_RATIO = 1 / 5;
 
 type SwipeState = {
   startX: number;
@@ -17,7 +23,7 @@ type SwipeState = {
 
 // 横スクロール可能な要素（コード表示・ステップ表示など）の内側から始まった
 // タッチは、そちらのスクロール操作を優先させるため戻る判定の対象外にする。
-function isInsideHorizontalScroller(target: EventTarget | null, container: Element): boolean {
+export function isInsideHorizontalScroller(target: EventTarget | null, container: Element): boolean {
   let el = target instanceof Element ? target : null;
   while (el && el !== container) {
     if (el.scrollWidth > el.clientWidth) {
@@ -29,9 +35,10 @@ function isInsideHorizontalScroller(target: EventTarget | null, container: Eleme
   return false;
 }
 
-// 画面の左半分の領域から指で右にスワイプすると onBack を呼び出すフック。
-// 縦スクロールや横スクロール要素の操作は妨げないよう、最初の移動量から
-// ジェスチャーの方向を判定し、横方向優位のときのみ戻る操作として扱う。
+// 画面の左端寄り（BACK_EDGE_RATIO）の領域から指で右にスワイプすると
+// onBack を呼び出すフック。縦スクロールや横スクロール要素の操作は妨げないよう、
+// 最初の移動量からジェスチャーの方向を判定し、横方向優位のときのみ戻る操作として扱う。
+// 領域外の右スワイプはuseSwipeFilterView側でフィルタービュー切り替えに使う（#706）。
 export function useSwipeBack(onBack: () => void) {
   const stateRef = useRef<SwipeState | null>(null);
   const [dragX, setDragX] = useState(0);
@@ -47,11 +54,11 @@ export function useSwipeBack(onBack: () => void) {
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const isLeftHalf = touch.clientX - rect.left < rect.width / 2;
+    const isInBackEdge = touch.clientX - rect.left < rect.width * BACK_EDGE_RATIO;
     stateRef.current = {
       startX: touch.clientX,
       startY: touch.clientY,
-      tracking: isLeftHalf,
+      tracking: isInBackEdge,
       locked: null,
       deltaX: 0,
     };

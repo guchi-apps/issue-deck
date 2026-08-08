@@ -14,10 +14,14 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
     },
   });
 
-  return issueRows.map((row) => ({
-    ...dbIssueToDisplayIssue(row.repository, row),
-    favorite: row.favoritedBy.length > 0,
-    hasUnreadComments: row.commentCount > (row.commentReadBy[0]?.readCommentCount ?? 0),
-    deployCheckStatus: (row.deployCheckedBy[0]?.status as DeployCheckStatus | undefined) ?? null,
-  }));
+  return issueRows.map((row) => {
+    const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
+    return {
+      ...dbIssueToDisplayIssue(row.repository, row),
+      favorite: row.favoritedBy.length > 0,
+      hasUnreadComments: row.commentCount > readCommentCount,
+      readCommentCount,
+      deployCheckStatus: (row.deployCheckedBy[0]?.status as DeployCheckStatus | undefined) ?? null,
+    };
+  });
 }

@@ -4,8 +4,8 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { transferIssue } from "@/lib/github/issues-api";
-import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
+import { IssueTransferPartialError, transferIssue } from "@/lib/github/issues-api";
+import { syncRepositoryIssues, upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 
 async function findRepository(userId: string, repositoryFullName: string) {
   return db.repository.findFirst({
@@ -64,6 +64,20 @@ async function handlePOST(request: NextRequest) {
       `[POST /api/issues/transfer] ${repositoryFullName}#${number} -> ${newRepositoryFullName}:`,
       error,
     );
+
+    if (error instanceof IssueTransferPartialError) {
+      // GitHub上では移動が完了しているため、移動元リポジトリを再同期して孤児化したDB行を
+      // 消しておく（移動先への反映はできていないが、誤ったリポジトリに残り続ける状態は解消する）
+      try {
+        await syncRepositoryIssues(repository);
+      } catch (cleanupError) {
+        console.error(
+          `[POST /api/issues/transfer] cleanup failed for ${repositoryFullName}:`,
+          cleanupError,
+        );
+      }
+    }
+
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },
       { status: 502 },

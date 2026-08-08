@@ -57,3 +57,4 @@ pnpm dev
 
 - 開発運用ルール: [CLAUDE.md](./CLAUDE.md)
 - Issueごとの複数Claude Codeエージェント運用: [docs/multi-agent-workflow.md](./docs/multi-agent-workflow.md)
+- 他リポジトリへのマルチエージェント運用 導入ガイド: [docs/cross-repo-setup-guide.md](./docs/cross-repo-setup-guide.md)

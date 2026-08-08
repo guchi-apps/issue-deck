@@ -80,7 +80,17 @@ async function capture({ name, targetPath, device }) {
     // クライアント側のレンダリング・フォント読み込み・コメント欄等クライアント側fetchが
     // 落ち着くまでの猶予（#572: コメント取得はクライアント側useEffect経由のため、
     // 短すぎると撮影時点で反映されないことがある）。
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(4000);
+    // Issue詳細画面のコメント欄はヘッダー固定+内部overflow-y-autoのため、外側ページの
+    // fullPage撮影だけでは下端（承認待ちカード等）が写らない。src/components/dashboard/
+    // issue-detail.tsx・mobile/mobile-issue-detail.tsxが目印として付与している
+    // data-capture-scroll-bottom要素を撮影前に最下部までスクロールしておく。
+    await page.evaluate(() => {
+      document.querySelectorAll("[data-capture-scroll-bottom]").forEach((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+    });
+    await page.waitForTimeout(200);
     const filePath = path.join(outDir, `${name}.png`);
     await page.screenshot({ path: filePath, fullPage: true });
     console.error(`撮影しました: ${filePath} (${targetUrl})`);

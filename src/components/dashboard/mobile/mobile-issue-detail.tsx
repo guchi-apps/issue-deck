@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
@@ -81,6 +82,7 @@ import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -123,6 +125,7 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
+  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -155,7 +158,7 @@ export function MobileIssueDetail({
   } = useIssueBodyCleanup();
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastCommentRef = useRef<HTMLLIElement>(null);
+  const targetCommentRef = useRef<HTMLLIElement>(null);
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
@@ -344,8 +347,11 @@ export function MobileIssueDetail({
     );
   }
 
-  async function handleApprove() {
-    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
+  async function handleApprove(text?: string) {
+    await updateLabelsAndComment(
+      labelsAfterApproval(issue.labels),
+      approveCommentBody(issue.labels, text),
+    );
   }
 
   async function handleReject(reason: string) {
@@ -527,7 +533,14 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20">
+      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
+          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
+          スクロールして写すための目印 */}
+      <div
+        ref={scrollContainerRef}
+        data-capture-scroll-bottom
+        className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
+      >
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}
@@ -717,7 +730,8 @@ export function MobileIssueDetail({
             isRequestingPrFix={isCommentSubmitting}
             isMergingPullRequest={isMergingPullRequest}
             mergePullRequestError={mergePullRequestError}
-            lastCommentRef={lastCommentRef}
+            targetCommentIndex={targetCommentIndex}
+            targetCommentRef={targetCommentRef}
             commentSummary={commentSummary}
           />
 
@@ -783,16 +797,14 @@ export function MobileIssueDetail({
                 {isCommentSubmitting ? "送信中..." : "コメント"}
               </Button>
             </div>
-            {commentMutationError && (
-              <p className="text-sm text-destructive">{commentMutationError}</p>
-            )}
+            <ApiErrorMessage message={commentMutationError} />
           </div>
         </div>
       </div>
 
       <ScrollToLatestCommentButton
         containerRef={scrollContainerRef}
-        targetRef={lastCommentRef}
+        targetRef={targetCommentRef}
         visible={comments.length > 0}
         className="left-1/2 bottom-4 h-11 w-20 -translate-x-1/2"
       />

@@ -428,7 +428,7 @@ jobs:
           if [ "${{ steps.state.outputs.issue_closed }}" = "true" ]; then
             BODY='ℹ️ このIssueは既にクローズされています。分割により対応が複数のサブIssueに分かれている場合、コメント欄でリンクをご確認ください。'
             BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。人間が対応してください。'
-            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
             gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
             exit 0
           fi
@@ -441,7 +441,7 @@ jobs:
             BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。関連するPull Requestはこちらです: $PR_URL"
             BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。ブランチやPull Requestの状態を直接ご確認のうえ、人間が対応してください。'
           fi
-          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
   dispatch:
@@ -573,7 +573,7 @@ jobs:
             echo "$STALE_REASON ため、実装に入らず中止します（mode=$MODE -> skip）"
             BODY="⏹️ 順番待ちの間にIssueの状態が変わったため（$STALE_REASON）、今回の自動対応は実行せず中止しました。"
             BODY="$BODY"$'\n\n''必要であれば改めて `@claude` とコメントしてください。'
-            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
             gh issue comment "$ISSUE_NUMBER" --body "$BODY" || true
             MODE=skip
           fi
@@ -602,10 +602,21 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
         run: |
           CLAUDE_MODEL=auto
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/claude-model" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null || echo auto)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、claudeModel設定の取得をスキップしautoにフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/claude-model" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、claudeModel設定の取得に失敗しautoにフォールバックしました"
+            else
+              CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null)" || true
+              if [ -z "$CLAUDE_MODEL" ]; then
+                echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（レスポンス: ${RESPONSE}）"
+                CLAUDE_MODEL=auto
+              fi
             fi
           fi
           case "$CLAUDE_MODEL" in
@@ -635,18 +646,24 @@ jobs:
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "ask" ]; then
             BODY='🤔 ご質問を確認しました。回答をまとめています。'
+            AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "plan" ]; then
             BODY='🔍 依頼を確認しました。実装前の計画を検討します（まとまり次第このIssueにコメントします）。'
+            AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "split" ]; then
             BODY='🔀 承認された計画に沿って、このIssueをサブIssueに分割します（完了次第このIssueにコメントします）。'
+            AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ] && [ -n "${{ steps.state.outputs.pr_url }}" ]; then
             BODY="🔧 依頼を確認しました。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
+            AGENT_ROLE=implementer
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
             BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
+            AGENT_ROLE=implementer
           else
             BODY="🔧 依頼を確認しました。\`${{ steps.state.outputs.branch }}\` ブランチで調査・実装に着手します。"
+            AGENT_ROLE=implementer
           fi
-          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
       - name: 01.planning を付与する（計画検討着手時）
@@ -808,10 +825,23 @@ jobs:
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、自動リトライ上限の取得をスキップし0件にフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、自動リトライ上限の取得に失敗し0件にフォールバックしました"
+            else
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null)" || true
+              case "$AUTO_RETRY_LIMIT" in
+                ''|*[!0-9]*)
+                  echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（レスポンス: ${RESPONSE}）"
+                  AUTO_RETRY_LIMIT=0
+                  ;;
+              esac
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
@@ -828,7 +858,7 @@ jobs:
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               RETRY_BODY="🔁 計画提示ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
@@ -892,7 +922,8 @@ jobs:
               元Issueに作成したサブIssue一覧（`#番号`の形式で書けば自動的にリンクされる）をコメントする。
               コメント末尾に実行ログのリンク
               `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`、
-              投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず追記する
+              投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカー、役割を示す
+              `<!-- issue-deck-agent:splitter -->`マーカーを必ず追記する
             - 最後に `gh issue close ${{ steps.state.outputs.issue_number }} --reason "not planned"` を実行し、
               元Issueをクローズする（元Issueは今後このままでは実装されず、作業は上記サブIssueへ引き継がれる
               ことを明示するため）
@@ -927,7 +958,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:splitter -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
           gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
 
@@ -1006,7 +1037,7 @@ jobs:
 
           echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
           FALLBACK_BODY=$'⚠️ 質問への回答に失敗した可能性があります。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 
       - name: 実装前のコメント数を記録する
@@ -1201,6 +1232,10 @@ jobs:
             画面確認待ちの報告等）の本文末尾に、投稿元を示す
             `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください
             （`gh pr create` / `gh pr comment`によるPR側への投稿は対象外です）。
+            さらに、上記のうち`<!-- issue-deck-qa-answer -->`マーカーを付与する質問への回答コメントを
+            除く全てのコメントには、役割を示す`<!-- issue-deck-agent:implementer -->`マーカーも
+            あわせて付与してください（質問への回答は`issue-deck-qa-answer`マーカー単独で役割が
+            一意に決まるため対象外です）。
 
             ## 責務
             - Issueの要件を実装する
@@ -1360,7 +1395,7 @@ jobs:
             if [ -n "$PR_BODY" ]; then
               FALLBACK_BODY="$FALLBACK_BODY"$'\n\n---\n\n'"$PR_BODY"
             fi
-            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:implementer -->'
             gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
             exit 0
           fi
@@ -1383,10 +1418,23 @@ jobs:
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、自動リトライ上限の取得をスキップし0件にフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、自動リトライ上限の取得に失敗し0件にフォールバックしました"
+            else
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null)" || true
+              case "$AUTO_RETRY_LIMIT" in
+                ''|*[!0-9]*)
+                  echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（レスポンス: ${RESPONSE}）"
+                  AUTO_RETRY_LIMIT=0
+                  ;;
+              esac
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
@@ -1403,7 +1451,7 @@ jobs:
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               RETRY_BODY="🔁 実装ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。既存のブランチ・コミットがあれば続きから再開します。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi

@@ -51,7 +51,7 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "recently-merged": GitMerge,
 };
 
-const baseNavViews: NavView[] = [
+export const baseNavViews: NavView[] = [
   { id: "all", label: "すべてのIssue" },
   { id: "favorites", label: "お気に入り" },
   { id: "recently-added", label: "最近追加した" },
@@ -95,6 +95,22 @@ export function getNavViewLabel(id: NavViewId): string {
 /** ビューごとの、stateクエリ未指定時に適用する状態フィルター */
 export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
   return getNavView(id).defaultState ?? "open";
+}
+
+/**
+ * navViews上でidの1つ前・1つ後のビューIDを返す（スマホ一覧のスワイプ切り替え用、#706）。
+ * 先頭/末尾でそれ以上進められない場合や、idがnavViewsに存在しない場合はnullを返す
+ * （ループはしない）。
+ */
+export function getAdjacentNavViewId(
+  id: NavViewId,
+  direction: "prev" | "next",
+): NavViewId | null {
+  const index = navViews.findIndex((view) => view.id === id);
+  if (index === -1) return null;
+
+  const adjacentIndex = direction === "next" ? index + 1 : index - 1;
+  return navViews[adjacentIndex]?.id ?? null;
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
@@ -104,6 +106,7 @@ export function IssueDetail({
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
+  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -135,7 +138,7 @@ export function IssueDetail({
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastCommentRef = useRef<HTMLLIElement>(null);
+  const targetCommentRef = useRef<HTMLLIElement>(null);
   const issueSuggestions = useMemo(
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
@@ -309,9 +312,12 @@ export function IssueDetail({
     );
   }
 
-  async function handleApprove() {
+  async function handleApprove(text?: string) {
     if (!issue) return;
-    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
+    await updateLabelsAndComment(
+      labelsAfterApproval(issue.labels),
+      approveCommentBody(issue.labels, text),
+    );
   }
 
   async function handleReject(reason: string) {
@@ -357,7 +363,14 @@ export function IssueDetail({
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overscroll-contain">
+      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
+          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
+          スクロールして写すための目印 */}
+      <div
+        ref={scrollContainerRef}
+        data-capture-scroll-bottom
+        className="flex-1 overflow-y-auto overscroll-contain"
+      >
         <div className="flex max-w-3xl flex-col gap-4 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -577,7 +590,8 @@ export function IssueDetail({
               isRequestingPrFix={isCommentSubmitting}
               isMergingPullRequest={isMergingPullRequest}
               mergePullRequestError={mergePullRequestError}
-              lastCommentRef={lastCommentRef}
+              targetCommentIndex={targetCommentIndex}
+              targetCommentRef={targetCommentRef}
               commentSummary={commentSummary}
             />
 
@@ -643,9 +657,7 @@ export function IssueDetail({
                   {isCommentSubmitting ? "送信中..." : "コメント"}
                 </Button>
               </div>
-              {commentMutationError && (
-                <p className="text-sm text-destructive">{commentMutationError}</p>
-              )}
+              <ApiErrorMessage message={commentMutationError} />
             </div>
           </div>
         </div>
@@ -653,7 +665,7 @@ export function IssueDetail({
 
       <ScrollToLatestCommentButton
         containerRef={scrollContainerRef}
-        targetRef={lastCommentRef}
+        targetRef={targetCommentRef}
         visible={comments.length > 0}
         className="right-4 bottom-4"
       />

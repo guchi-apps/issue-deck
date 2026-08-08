@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
@@ -64,10 +65,20 @@ export function IssueDeckShell({
   claudeModel: initialClaudeModel,
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
+  const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
-  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  // PC版はスマホと異なりURLクエリで選択中Issueを管理していないため、`?issue=<id>`付きで
+  // 開いた場合は該当Issueを初期表示する（missueと同じ識別子＝String(githubIssueId)）。
+  // 無人実行のスクリーンショット撮影（scripts/capture-issue-screenshots.sh）で、承認待ち等
+  // 特定状態のIssueをPC版でも直接開けるようにするために追加した（#688）。初回レンダリングの
+  // 初期値としてのみ使い、以降のissues更新（ポーリング等）やユーザーの選択解除では上書きしない。
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(() => {
+    const issueParam = searchParams.get("issue");
+    if (!issueParam) return null;
+    return initialIssues.find((item) => item.id === issueParam) ?? null;
+  });
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
@@ -177,10 +188,16 @@ export function IssueDeckShell({
       .then((response) => {
         if (!response.ok || cancelled) return;
         setIssues((prev) =>
-          prev.map((item) => (item.id === issue.id ? { ...item, hasUnreadComments: false } : item)),
+          prev.map((item) =>
+            item.id === issue.id
+              ? { ...item, hasUnreadComments: false, readCommentCount: item.commentCount }
+              : item,
+          ),
         );
         setSelectedIssue((prev) =>
-          prev && prev.id === issue.id ? { ...prev, hasUnreadComments: false } : prev,
+          prev && prev.id === issue.id
+            ? { ...prev, hasUnreadComments: false, readCommentCount: prev.commentCount }
+            : prev,
         );
       })
       .catch((error) => {

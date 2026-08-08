@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
@@ -145,5 +145,164 @@ describe("CommentThread AI要約の表示位置", () => {
     renderThread([makeComment({ body: "短いコメント" })]);
 
     expect(screen.queryByText("AI要約")).toBeNull();
+  });
+});
+
+describe("CommentThread PRマージ待ちの表示", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("マージ実行後は「マージが必要です」ではなく完了の表示に切り替わる", async () => {
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    });
+    expect(screen.queryByText("Pull Requestのマージが必要です")).toBeNull();
+    expect(screen.queryByText("修正を依頼する")).toBeNull();
+  });
+});
+
+describe("CommentThread 承認カードのテキスト入力", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function renderApproval(overrides: {
+    onApprove: (text?: string) => void;
+    onReject: (reason: string) => void;
+  }) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        onApprove={overrides.onApprove}
+        onReject={overrides.onReject}
+        onWithdraw={async () => {}}
+      />,
+    );
+  }
+
+  it("テキスト入力欄と音声入力を整理ボタンが常設表示される", () => {
+    renderApproval({ onApprove: () => {}, onReject: () => {} });
+    expect(
+      screen.getByPlaceholderText("コメントを入力（承認は任意、修正は入力必須）"),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: /音声入力を整理/ })).not.toBeNull();
+  });
+
+  it("修正ボタンは空文字のままだと送信されずエラー文言を表示する", () => {
+    const onReject = vi.fn();
+    renderApproval({ onApprove: () => {}, onReject });
+    fireEvent.click(screen.getByRole("button", { name: "修正" }));
+    expect(screen.getByText("修正内容を入力してください")).not.toBeNull();
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("修正ボタンは入力ありでonReject(text)を呼ぶ", () => {
+    const onReject = vi.fn();
+    renderApproval({ onApprove: () => {}, onReject });
+    const textarea = screen.getByPlaceholderText(
+      "コメントを入力（承認は任意、修正は入力必須）",
+    );
+    fireEvent.change(textarea, { target: { value: "ここを直してください" } });
+    fireEvent.click(screen.getByRole("button", { name: "修正" }));
+    expect(onReject).toHaveBeenCalledWith("ここを直してください");
+  });
+
+  it("承認ボタンは入力が空ならonApprove()を引数なしで呼ぶ", () => {
+    const onApprove = vi.fn();
+    renderApproval({ onApprove, onReject: () => {} });
+    fireEvent.click(screen.getByRole("button", { name: "承認" }));
+    expect(onApprove).toHaveBeenCalledWith(undefined);
+  });
+
+  it("承認ボタンは入力があればonApprove(text)を呼ぶ", () => {
+    const onApprove = vi.fn();
+    renderApproval({ onApprove, onReject: () => {} });
+    const textarea = screen.getByPlaceholderText(
+      "コメントを入力（承認は任意、修正は入力必須）",
+    );
+    fireEvent.change(textarea, { target: { value: "次のステップへ進んでください" } });
+    fireEvent.click(screen.getByRole("button", { name: "承認" }));
+    expect(onApprove).toHaveBeenCalledWith("次のステップへ進んでください");
+  });
+});
+
+describe("CommentThread PRマージ待ちの修正を依頼するテキスト入力", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function renderMergePending(onRequestPrFix: (reason: string) => void) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={onRequestPrFix}
+        onMergePullRequest={async () => true}
+      />,
+    );
+  }
+
+  it("入力欄が常設表示される", () => {
+    renderMergePending(() => {});
+    expect(screen.getByPlaceholderText("修正依頼を入力（必須）")).not.toBeNull();
+  });
+
+  it("空文字では修正を依頼するが送信されずエラー文言が出る", () => {
+    const onRequestPrFix = vi.fn();
+    renderMergePending(onRequestPrFix);
+    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
+    expect(screen.getByText("修正内容を入力してください")).not.toBeNull();
+    expect(onRequestPrFix).not.toHaveBeenCalled();
+  });
+
+  it("入力ありでonRequestPrFix(text)が呼ばれる", () => {
+    const onRequestPrFix = vi.fn();
+    renderMergePending(onRequestPrFix);
+    const textarea = screen.getByPlaceholderText("修正依頼を入力（必須）");
+    fireEvent.change(textarea, { target: { value: "CIが失敗しています" } });
+    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
+    expect(onRequestPrFix).toHaveBeenCalledWith("CIが失敗しています");
   });
 });

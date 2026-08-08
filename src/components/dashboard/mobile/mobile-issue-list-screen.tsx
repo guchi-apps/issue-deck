@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode, TouchEvent } from "react";
 import { ArrowLeft, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -10,9 +10,19 @@ import {
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
-import { navViews } from "@/lib/nav-views";
+import { useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
+import { baseNavViews, getAdjacentNavViewId, labelNavViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
+
+// 一覧画面上部のフィルタータブは「すべてのIssue」の右隣にユーザーの確認待ちを固定表示し、
+// 対応が必要なIssueを横スクロールなしで見つけられるようにする（#714）。
+const tabNavViews = [
+  baseNavViews[0],
+  labelNavViews[0],
+  ...baseNavViews.slice(1),
+  ...labelNavViews.slice(1),
+];
 
 type MobileIssueListScreenProps = {
   /** ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名） */
@@ -27,6 +37,8 @@ type MobileIssueListScreenProps = {
   headerActions?: ReactNode;
   /** 絞り込み済み・並び替え済みの表示対象Issue */
   issues: Issue[];
+  /** 「ユーザーの確認待ち」ピルの強調表示・件数バッジ用の件数（#715） */
+  checkUserCount?: number;
   selectedIssueId: string | null;
   view: NavViewId;
   filters: MobileIssueLocalFilters;
@@ -50,6 +62,7 @@ export function MobileIssueListScreen({
   onBack,
   headerActions,
   issues,
+  checkUserCount = 0,
   selectedIssueId,
   view,
   filters,
@@ -63,11 +76,44 @@ export function MobileIssueListScreen({
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
+  const swipeFilterHandlers = useSwipeFilterView((direction) => {
+    const nextView = getAdjacentNavViewId(view, direction);
+    if (nextView) onChangeView(nextView);
+  });
+  const tabRefs = useRef<Partial<Record<NavViewId, HTMLButtonElement | null>>>({});
+
+  useEffect(() => {
+    tabRefs.current[view]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [view]);
+
+  // 戻るスワイプとフィルター切り替えスワイプは同じ領域で発生するため、
+  // 2フックのハンドラを1つのtouchイベントハンドラ群に統合して同じ要素に付与する
+  // （別々にバインドすると、互いのドラッグ用スタイルが競合する）。
+  function onTouchStart(e: TouchEvent<HTMLDivElement>) {
+    if (onBack) swipeBackHandlers.onTouchStart(e);
+    swipeFilterHandlers.onTouchStart(e);
+  }
+  function onTouchMove(e: TouchEvent<HTMLDivElement>) {
+    if (onBack) swipeBackHandlers.onTouchMove(e);
+    swipeFilterHandlers.onTouchMove(e);
+  }
+  function onTouchEnd() {
+    if (onBack) swipeBackHandlers.onTouchEnd();
+    swipeFilterHandlers.onTouchEnd();
+  }
+  function onTouchCancel() {
+    if (onBack) swipeBackHandlers.onTouchCancel();
+    swipeFilterHandlers.onTouchCancel();
+  }
 
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
-      {...(onBack ? swipeBackHandlers : {})}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
+      style={onBack ? swipeBackHandlers.style : undefined}
     >
       <header className="flex shrink-0 items-center gap-2 border-b p-4">
         {onBack && (
@@ -108,19 +154,32 @@ export function MobileIssueListScreen({
       {/* shrink-0がないと、下のIssueList（flex-1でflex-basisが0のため縮小分を負担しない）の
           分まで縮小配分がこの行に集中し、表示件数が多いときにタブの高さが潰れてしまう（#584） */}
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {navViews.map((navView) => (
-          <button
-            key={navView.id}
-            type="button"
-            onClick={() => onChangeView(navView.id)}
-            className={cn(
-              "flex h-11 shrink-0 items-center rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
-              view === navView.id && "border-primary/20 bg-primary/10 text-primary",
-            )}
-          >
-            {navView.label}
-          </button>
-        ))}
+        {tabNavViews.map((navView) => {
+          const isCheckUserHighlighted = navView.id === "check-user" && checkUserCount > 0;
+          return (
+            <button
+              key={navView.id}
+              ref={(el) => {
+                tabRefs.current[navView.id] = el;
+              }}
+              type="button"
+              onClick={() => onChangeView(navView.id)}
+              className={cn(
+                "flex h-11 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
+                view === navView.id && "border-primary/20 bg-primary/10 text-primary",
+                isCheckUserHighlighted &&
+                  "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
+              )}
+            >
+              {navView.label}
+              {isCheckUserHighlighted && (
+                <span className="flex size-5 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
+                  {checkUserCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <IssueList

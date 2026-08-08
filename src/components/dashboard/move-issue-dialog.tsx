@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -94,7 +95,7 @@ export function MoveIssueDialog({
             </Select>
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <ApiErrorMessage message={error} />
         </div>
 
         <DialogFooter>

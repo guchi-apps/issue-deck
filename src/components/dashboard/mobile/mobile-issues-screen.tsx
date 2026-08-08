@@ -5,7 +5,12 @@ import { useMemo } from "react";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
-import { applyIssueFilters, filterIssuesByView, sortIssues } from "@/lib/issue-stats";
+import {
+  applyIssueFilters,
+  countCheckUserIssues,
+  filterIssuesByView,
+  sortIssues,
+} from "@/lib/issue-stats";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
 type MobileIssuesScreenProps = {
@@ -55,10 +60,13 @@ export function MobileIssuesScreen({
     return sortIssues(filtered, sort, view);
   }, [issues, view, currentUserLogin, state, labels, assignee, sort]);
 
+  const checkUserCount = useMemo(() => countCheckUserIssues(issues), [issues]);
+
   return (
     <MobileIssueListScreen
       title="Issue"
       issues={displayedIssues}
+      checkUserCount={checkUserCount}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}
