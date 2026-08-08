@@ -43,8 +43,9 @@ export type NavView = {
   latestReleaseOnly?: boolean;
   /**
    * リポジトリごとのグルーピング表示（#849）の既定ON/OFF。未指定はOFFと同じ。
-   * 「本番関連待ち」（release-pending・recently-merged）とパイプライン上流
-   * （not-started・in-progress）はリポジトリごとに見通しが良いためデフォルトON。
+   * 「本番関連待ち」（release-pending・recently-merged）と実行中（in-progress）は
+   * リポジトリごとに見通しが良いためデフォルトON。not-startedはリポジトリ横断で
+   * まとめて一覧できる方が着手優先度を判断しやすいためデフォルトOFF（#876）。
    * check-userはリポジトリ横断の優先順位付け（確認が古い順）を崩したくないためOFFのまま。
    */
   groupByRepoDefault?: boolean;
@@ -65,11 +66,11 @@ export const baseNavViews: NavView[] = [
 ];
 
 /**
- * グルーピング表示（#849）をデフォルトONにするビュー。パイプライン上流
- * （未着手・実行中）と「本番関連待ち」（本番反映待ち・直近本番に反映した）が対象。
+ * グルーピング表示（#849）をデフォルトONにするビュー。実行中（in-progress）と
+ * 「本番関連待ち」（本番反映待ち・直近本番に反映した）が対象。not-startedは
+ * リポジトリ横断でまとめて表示する方が着手優先度を判断しやすいため対象外（#876）。
  */
 const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
-  "not-started",
   "in-progress",
   "release-pending",
   "recently-merged",
