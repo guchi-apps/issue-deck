@@ -9,6 +9,7 @@ import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
+import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -19,7 +20,7 @@ import {
 } from "@/lib/issue-stats";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { DeployCheckStatus, Issue, NavViewId } from "@/types/issue";
+import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
 /**
@@ -43,7 +44,6 @@ type MobileRepoIssuesScreenProps = {
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
   onCreateIssue: () => void;
-  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -61,7 +61,6 @@ export function MobileRepoIssuesScreen({
   onSelectIssue,
   onBack,
   onCreateIssue,
-  onSetIssueDeployCheck,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -96,6 +95,22 @@ export function MobileRepoIssuesScreen({
   const checkUserCount = useMemo(() => countCheckUserIssues(repoIssues), [repoIssues]);
   const color = getRepoColor(repository.fullName);
 
+  // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置はリポジトリ・
+  // 絞り込み条件ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
+  const scrollKey = useMemo(
+    () =>
+      buildIssueListScrollKey([
+        "mobile-repo",
+        repository.fullName,
+        view,
+        state,
+        labels.join(","),
+        assignee,
+        sort,
+      ]),
+    [repository.fullName, view, state, labels, assignee, sort],
+  );
+
   return (
     <MobileIssueListScreen
       title={repository.name}
@@ -115,7 +130,7 @@ export function MobileRepoIssuesScreen({
           onClick={() => setReleaseSheetOpen(true)}
           className={cn(
             "relative flex size-11 items-center justify-center rounded-md border",
-            releaseButtonStatus === "progressing" && "border-primary text-primary",
+            releaseButtonStatus === "progressing" && "border-sky-500 text-sky-600 dark:text-sky-500",
             releaseButtonStatus === "action_required" &&
               "border-amber-500 text-amber-600 dark:text-amber-500",
             releaseButtonStatus === "error" && "border-red-500 text-red-600 dark:text-red-500",
@@ -126,8 +141,7 @@ export function MobileRepoIssuesScreen({
           {releaseButtonStatus === "progressing" && (
             <svg
               aria-hidden="true"
-              className="absolute block animate-[border-trace_1.4s_linear_infinite] text-primary"
-              style={{ inset: -3 }}
+              className="absolute inset-0 block size-full animate-[border-trace_1.4s_linear_infinite]"
               viewBox="0 0 100 100"
             >
               <rect
@@ -164,6 +178,7 @@ export function MobileRepoIssuesScreen({
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
+      scrollKey={scrollKey}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}
@@ -175,7 +190,6 @@ export function MobileRepoIssuesScreen({
         releaseStatusError={releaseStatusError}
         triggerRelease={triggerRelease}
         isTriggeringRelease={isTriggeringRelease}
-        onSetIssueDeployCheck={onSetIssueDeployCheck}
       />
     </MobileIssueListScreen>
   );

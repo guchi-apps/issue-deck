@@ -186,6 +186,66 @@ describe("CommentThread PRマージ待ちの表示", () => {
   });
 });
 
+describe("CommentThread PRマージ待ちのCI状態とマージボタン", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderMergePendingWithCiStatus(
+    pullRequestCiStatus: "in_progress" | "success" | "failure" | "none" | null,
+  ) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestCiStatus={pullRequestCiStatus}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+  }
+
+  it("CI実行中はマージするボタンがdisabledになる", () => {
+    renderMergePendingWithCiStatus("in_progress");
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("CI成功時はマージするボタンがdisabledにならない", () => {
+    renderMergePendingWithCiStatus("success");
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("CI失敗時はマージするボタンがdisabledにならない", () => {
+    renderMergePendingWithCiStatus("failure");
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("CI状態が取得できない場合はマージするボタンがdisabledにならない", () => {
+    renderMergePendingWithCiStatus(null);
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("マージ操作エリアと修正依頼エリアの間にディバイダーが表示される", () => {
+    renderMergePendingWithCiStatus("success");
+    const separator = document.querySelector('[data-slot="separator"]');
+    expect(separator).not.toBeNull();
+  });
+});
+
 describe("CommentThread 承認カードのテキスト入力", () => {
   afterEach(() => {
     cleanup();

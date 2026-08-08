@@ -18,7 +18,7 @@ export function PullRequestCiStatusBadge({ status }: PullRequestCiStatusBadgePro
   return (
     <span
       className={cn(
-        "mt-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
+        "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
         status === "in_progress"
           ? "bg-primary/15 text-primary ring-primary"
           : status === "failure"

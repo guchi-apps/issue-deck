@@ -152,7 +152,7 @@ export function IssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,
-    issue ? isMergeApprovalPending(issue.labels) : false,
+    issue ? isMergeApprovalPending(issue.labels, comments) : false,
   );
   const {
     mergePullRequest,
@@ -408,19 +408,6 @@ export function IssueDetail({
                   )}
                 />
               )}
-              {issue.state === "open" && (
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href={buildClaudeAppUrl(issue)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={handleClaudeAppHandoff}
-                  >
-                    <Bot />
-                    Claudeアプリで開く
-                  </a>
-                </Button>
-              )}
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                   GitHubで開く
@@ -450,30 +437,35 @@ export function IssueDetail({
                     <MoreHorizontal />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => onCreateFollowupIssue(issue)}>
-                    <FilePlus2 />
+                <DropdownMenuContent align="end" className="w-fit min-w-0">
+                  <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
+                    onSelect={() => onCreateFollowupIssue(issue)}
+                  >
+                    <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onEdit(issue)}>
-                    <Pencil />
+                  <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
+                    <Pencil className="size-3.5" />
                     編集
                   </DropdownMenuItem>
                   {issue.state === "open" ? (
                     <DropdownMenuSub>
-                      <DropdownMenuSubTrigger disabled={isSubmitting}>
-                        <XCircle />
+                      <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
+                        <XCircle className="size-3.5" />
                         クローズする
                       </DropdownMenuSubTrigger>
                       <DropdownMenuPortal>
-                        <DropdownMenuSubContent>
+                        <DropdownMenuSubContent className="w-fit min-w-0">
                           <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
                             disabled={isSubmitting}
                             onSelect={() => handleClose("completed")}
                           >
                             完了としてクローズ
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
                             disabled={isSubmitting}
                             onSelect={() => handleClose("not_planned")}
                           >
@@ -483,12 +475,17 @@ export function IssueDetail({
                       </DropdownMenuPortal>
                     </DropdownMenuSub>
                   ) : (
-                    <DropdownMenuItem disabled={isSubmitting} onSelect={handleReopen}>
-                      <RotateCcw />
+                    <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
+                      disabled={isSubmitting}
+                      onSelect={handleReopen}
+                    >
+                      <RotateCcw className="size-3.5" />
                       再オープンする
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
                     variant="destructive"
                     disabled={isSubmitting}
                     onSelect={() => {
@@ -496,7 +493,7 @@ export function IssueDetail({
                       setIsDeleteDialogOpen(true);
                     }}
                   >
-                    <Trash2 />
+                    <Trash2 className="size-3.5" />
                     Issueを削除
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -579,7 +576,7 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
-              mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+              mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
               workflowRun={workflowRun}
@@ -644,6 +641,19 @@ export function IssueDetail({
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
                     <FilePlus2 />
                     引き継いでIssueを作成
+                  </Button>
+                )}
+                {issue.state === "open" && (
+                  <Button variant="outline" asChild>
+                    <a
+                      href={buildClaudeAppUrl(issue)}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={handleClaudeAppHandoff}
+                    >
+                      <Bot />
+                      Claudeアプリで開く
+                    </a>
                   </Button>
                 )}
                 {canAskClaude(issue) && (

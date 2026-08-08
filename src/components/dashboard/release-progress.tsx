@@ -28,27 +28,46 @@ type StepState =
 type Step = {
   label: string;
   state: StepState;
-  /** 補足文（CI状態や次に起きることの説明） */
+  /** 補足文（次に起きることの説明など。CI状態はciStateのバッジで表す） */
   note?: string;
   /** noteより長い補足文（バージョンバンプの判断根拠など、複数行になりうるもの） */
   detail?: string;
+  /** マージ待ちPRの最新コミットのCI状態。バッジとして表示する */
+  ciState?: CiState | null;
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
   link?: { href: string; label: string; pending?: boolean };
 };
 
-function ciLabel(ci: CiState | null): string {
-  switch (ci) {
-    case "pending":
-      return "CI実行中";
-    case "success":
-      return "CI通過";
-    case "failure":
-      return "CI失敗";
-    default:
-      return "CI状態は不明";
-  }
+const CI_STATE_LABEL: Record<CiState, string> = {
+  pending: "CI実行中",
+  success: "CI通過",
+  failure: "CI失敗",
+  unknown: "CI状態は不明",
+};
+
+/**
+ * マージ待ちPRの最新コミットのCI状態を色付きピルで表示する。`pull-request-ci-status.tsx`の
+ * 配色方針（primary/destructive/mutedのring付きピル）を踏襲しつつ、型はCiState用に独立させている。
+ */
+function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
+  if (!ciState) return null;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        ciState === "pending"
+          ? "bg-primary/15 text-primary ring-primary"
+          : ciState === "failure"
+            ? "bg-destructive/15 text-destructive ring-destructive"
+            : "bg-muted text-muted-foreground ring-border",
+      )}
+    >
+      {CI_STATE_LABEL[ciState]}
+    </span>
+  );
 }
 
 /**
@@ -60,10 +79,16 @@ function ciLabel(ci: CiState | null): string {
  * 今回のmainへのマージが完了していないにもかかわらず前回リリース時のデプロイ成功が残り
  * 続けて見えてしまうため(#470)。バンプPRがまだ現れていない起動直後（phaseは"none"のまま）も
  * ワークフロー実行中である以上は同様に隠す必要がある(#545)。
+ *
+ * `workflowRun`（`release-develop-to-main.yml`自体の最新実行）が失敗している場合、進行中の
+ * はずの段が実際には止まっていることを明示するため、該当段を"error"にしてrunへのリンクを
+ * 添える（それまでは`phase`が変わらないまま"PR作成中"等の表示が残り続け、失敗に気づきにくかった。#727）。
  */
 function buildSteps(status: AvailableReleaseStatus): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
   const runActive = workflowRun != null && workflowRun.status !== "completed";
+  const failedRun =
+    workflowRun && workflowRun.status === "completed" && workflowRun.conclusion !== "success" ? workflowRun : null;
 
   const steps: Step[] = [
     { label: "バンプPR作成", state: "todo" },
@@ -79,7 +104,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
-    steps[1].note = ciLabel(bump.ciState);
+    steps[1].ciState = bump.ciState;
     if (!waitingCi) {
       steps[1].action = {
         href: bump.url,
@@ -90,15 +115,22 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].state = "done";
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
-    steps[2].state = "active";
-    steps[2].note = "PR作成中";
+    if (failedRun) {
+      steps[2].state = "error";
+      steps[2].note = "develop→main PRの自動作成に失敗しました";
+      steps[2].action = { href: failedRun.htmlUrl, label: "GitHub Actionsで確認して対処" };
+    } else {
+      steps[2].state = "active";
+      steps[2].note = "PR作成中";
+    }
   } else if (phase === "release_pr_open" && release) {
     steps[0].state = "done";
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "done";
     steps[3].state = "action";
-    steps[3].note = `${ciLabel(release.ciState)}。内容を確認して「merge commit」でマージしてください。`;
+    steps[3].ciState = release.ciState;
+    steps[3].note = "内容を確認して「merge commit」でマージしてください。";
     steps[3].action = {
       href: release.url,
       label: `develop→main PR #${release.number} をタップしてmainへマージ`,
@@ -107,6 +139,11 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     // まだPRが現れていないが実行中（起動直後）。最初の段を進行中にする。
     steps[0].state = "active";
     steps[0].note = "ワークフロー実行中...";
+  } else if (failedRun && phase === "none") {
+    // バージョン判定・バンプPR作成のいずれかで失敗し、PRが1つも作られなかったケース。
+    steps[0].state = "error";
+    steps[0].note = "バージョン判定・バンプPR作成に失敗しました";
+    steps[0].action = { href: failedRun.htmlUrl, label: "GitHub Actionsで確認して対処" };
   }
 
   if (phase === "none" && !runActive) {
@@ -196,6 +233,7 @@ export function ReleaseProgress({
               >
                 {step.label}
               </span>
+              <CiStateBadge ciState={step.ciState} />
               {step.note && step.state !== "action" && (
                 <span className={cn("text-xs text-muted-foreground")}>{step.note}</span>
               )}

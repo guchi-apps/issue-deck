@@ -30,6 +30,7 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -42,7 +43,7 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
-import type { DeployCheckStatus, Issue, NavViewId } from "@/types/issue";
+import type { Issue, NavViewId } from "@/types/issue";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -261,6 +262,23 @@ export function IssueDeckShell({
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
+  // PC版Issue一覧のスクロール位置を保存・復元する単位（#773）。絞り込み条件が変われば
+  // 別の一覧として扱い、先頭から表示する。
+  const issueListScrollKey = useMemo(
+    () =>
+      buildIssueListScrollKey([
+        "pc",
+        filters.view,
+        filters.q,
+        filters.repo,
+        filters.state,
+        filters.labels.join(","),
+        filters.assignee,
+        filters.sort,
+      ]),
+    [filters],
+  );
+
   // Issue作成ダイアログのリポジトリ選択肢は、サイドメニューで非表示にしたリポジトリを
   // 除いたもの（メニューに表示中のリポジトリ一覧）に揃える（#367）。
   const visibleRepositories = useMemo(
@@ -338,34 +356,6 @@ export function IssueDeckShell({
     }
   }
 
-  async function handleSetIssueDeployCheck(issue: Issue, status: DeployCheckStatus | null) {
-    function applyDeployCheck(target: DeployCheckStatus | null) {
-      setIssues((prev) =>
-        prev.map((item) => (item.id === issue.id ? { ...item, deployCheckStatus: target } : item)),
-      );
-      setSelectedIssue((prev) =>
-        prev && prev.id === issue.id ? { ...prev, deployCheckStatus: target } : prev,
-      );
-    }
-
-    const previousStatus = issue.deployCheckStatus;
-    applyDeployCheck(status);
-
-    try {
-      const response = await fetch("/api/issues/deploy-check", {
-        method: status === null ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          status === null ? { issueId: issue.id } : { issueId: issue.id, status },
-        ),
-      });
-      if (!response.ok) throw new Error("failed to update issue deploy check");
-    } catch (error) {
-      console.error("[issue-deck-shell] failed to update issue deploy check", error);
-      applyDeployCheck(previousStatus);
-    }
-  }
-
   function applyQuickFilter(quickFilter: QuickFilter) {
     setFilters({
       view: quickFilter.view,
@@ -415,7 +405,6 @@ export function IssueDeckShell({
         issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-        onSetIssueDeployCheck={handleSetIssueDeployCheck}
         onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
       />
 
@@ -494,7 +483,6 @@ export function IssueDeckShell({
                     onSelectIssue={selectIssue}
                     onBack={goBack}
                     onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-                    onSetIssueDeployCheck={handleSetIssueDeployCheck}
                   />
                 )}
 
@@ -556,6 +544,7 @@ export function IssueDeckShell({
           selectedIssueId={selectedIssue?.id ?? null}
           onSelectIssue={setSelectedIssue}
           showSearch={false}
+          scrollKey={issueListScrollKey}
           className="hidden shrink-0 border-r md:flex"
           style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />

@@ -123,6 +123,31 @@ describe("summarizeReleaseButtonStatus", () => {
     ).toBe("error");
   });
 
+  it("リリースworkflow自体が失敗（completedかつconclusion !== success）はerrorを返す", () => {
+    expect(
+      summarizeReleaseButtonStatus(
+        baseStatus({ workflowRun: workflowRun({ status: "completed", conclusion: "failure" }) }),
+      ),
+    ).toBe("error");
+  });
+
+  it("リリースworkflow自体の失敗はrelease_pr_openより優先してerrorを返す", () => {
+    expect(
+      summarizeReleaseButtonStatus(
+        baseStatus({
+          phase: "release_pr_open",
+          releasePullRequest: {
+            number: 1,
+            url: "https://github.com/example/example/pull/1",
+            title: "release",
+            ciState: "success",
+          },
+          workflowRun: workflowRun({ status: "completed", conclusion: "failure" }),
+        }),
+      ),
+    ).toBe("error");
+  });
+
   it("デプロイ失敗はrelease_pr_openより優先してerrorを返す", () => {
     expect(
       summarizeReleaseButtonStatus(

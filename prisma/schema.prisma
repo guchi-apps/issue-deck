@@ -30,7 +30,6 @@ model User {
   favoriteIssues       FavoriteIssue[]
   quickFilters         QuickFilter[]
   commentReads         IssueCommentRead[]
-  deployChecks         IssueDeployCheck[]
 }
 
 // --- GitHub App 連携 ---
@@ -198,7 +197,6 @@ model Issue {
   labels           IssueLabel[]
   favoritedBy      FavoriteIssue[]
   commentReadBy    IssueCommentRead[]
-  deployCheckedBy  IssueDeployCheck[]
   commentSummaries IssueCommentSummary[]
 
   @@unique([repositoryId, number])
@@ -245,22 +243,6 @@ model IssueCommentRead {
   readCommentCount Int
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, issueId])
-  @@index([issueId])
-}
-
-// ユーザーごとに、本番デプロイ後の反映確認状況を記録する（"ok" | "ng" | "skip"。行が無ければ未確認）
-model IssueDeployCheck {
-  id      String @id @default(cuid())
-  userId  String
-  issueId String
-  status  String
-
   updatedAt DateTime @updatedAt
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
