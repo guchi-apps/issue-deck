@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
@@ -145,5 +145,43 @@ describe("CommentThread AI要約の表示位置", () => {
     renderThread([makeComment({ body: "短いコメント" })]);
 
     expect(screen.queryByText("AI要約")).toBeNull();
+  });
+});
+
+describe("CommentThread PRマージ待ちの表示", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("マージ実行後は「マージが必要です」ではなく完了の表示に切り替わる", async () => {
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    });
+    expect(screen.queryByText("Pull Requestのマージが必要です")).toBeNull();
+    expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
 });
