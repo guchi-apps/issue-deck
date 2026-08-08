@@ -506,7 +506,8 @@ export function CommentThread({
                 <div
                   className={cn(
                     "min-w-0 rounded-lg border p-3",
-                    editingId === comment.id ? "flex-1" : "max-w-[85%]",
+                    editingId === comment.id || !isSelf ? "flex-1" : null,
+                    "max-w-[85%]",
                     isSelf ? "rounded-tr-none" : "rounded-tl-none",
                     isSelf && "border-primary/20 bg-primary/5",
                     !isSelf && isQuestion && "border-blue-500/40 bg-blue-500/5",
