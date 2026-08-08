@@ -71,7 +71,12 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
-import { askClaudeCommentBody, canAskClaude, isQaAnswerPending } from "@/lib/github/ask-claude";
+import {
+  askClaudeCommentBody,
+  canAskClaude,
+  canCloseAskRepoQuestion,
+  isQaAnswerPending,
+} from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -407,6 +412,17 @@ export function IssueDetail({
                     </Button>
                   )}
                 />
+              )}
+              {canCloseAskRepoQuestion(issue, comments) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={() => handleClose("completed")}
+                >
+                  <XCircle />
+                  質問を終えてクローズ
+                </Button>
               )}
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">

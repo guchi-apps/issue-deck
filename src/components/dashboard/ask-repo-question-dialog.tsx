@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { LabelPicker } from "@/components/dashboard/label-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,11 +25,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { askClaudeCommentBody } from "@/lib/github/ask-claude";
+import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { ASK_REPO_QUESTION_TITLE_PREFIX, askClaudeCommentBody } from "@/lib/github/ask-claude";
+import { isProgressLabel } from "@/lib/issue-status";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
-const ASK_REPO_QUESTION_TITLE_PREFIX = "質問: ";
 const ASK_REPO_QUESTION_TITLE_MAX_LENGTH = 40;
 
 /**
@@ -75,10 +79,18 @@ export function AskRepoQuestionDialog({
 
   const [repositoryFullName, setRepositoryFullName] = useState("");
   const [question, setQuestion] = useState("");
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
 
   const askableRepositories = useMemo(
     () => repositories.filter((repo) => repo.hasClaudeWorkflow),
     [repositories],
+  );
+  const { labels, isLoading: isMetaLoading } = useIssueRepoMeta(
+    open ? repositoryFullName : null,
+  );
+  const selectableLabels = useMemo(
+    () => labels.filter((label) => !isProgressLabel(label.name)),
+    [labels],
   );
 
   useEffect(() => {
@@ -91,6 +103,7 @@ export function AskRepoQuestionDialog({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRepositoryFullName(initialRepo);
     setQuestion("");
+    setSelectedLabels([]);
     setCreateError(null);
     setCommentError(null);
     // askableRepositoriesはrepositoriesから毎レンダー再計算されるため依存に含めない
@@ -100,6 +113,12 @@ export function AskRepoQuestionDialog({
 
   const isSubmitting = isCreatingIssue || isCreatingComment;
 
+  function toggleLabel(name: string) {
+    setSelectedLabels((prev) =>
+      prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
+    );
+  }
+
   async function handleSubmit() {
     if (!repositoryFullName || !question.trim()) return;
 
@@ -107,7 +126,7 @@ export function AskRepoQuestionDialog({
       repositoryFullName,
       title: buildAskRepoQuestionTitle(question),
       body: question,
-      labels: [],
+      labels: selectedLabels,
       assignee: null,
     });
     if (!issue) return;
@@ -121,6 +140,7 @@ export function AskRepoQuestionDialog({
     });
 
     setQuestion("");
+    setSelectedLabels([]);
     onOpenChange(false);
     onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
   }
@@ -175,6 +195,38 @@ export function AskRepoQuestionDialog({
               className="min-h-32 md:text-sm"
               autoFocus
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>ラベル</Label>
+            <LabelPicker
+              labels={selectableLabels}
+              selectedNames={selectedLabels}
+              onToggle={toggleLabel}
+              isLoading={isMetaLoading}
+              trigger={
+                <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                  {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
+                  <ChevronDown className="size-3.5" />
+                </Button>
+              }
+            />
+            {selectedLabels.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {selectedLabels.map((name) => {
+                  const label = labels.find((l) => l.name === name);
+                  return (
+                    <span
+                      key={name}
+                      className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                      style={getLabelBadgeStyle(label?.color ?? "#64748b")}
+                    >
+                      {name}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <ApiErrorMessage message={createError ?? commentError} />

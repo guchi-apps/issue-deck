@@ -76,7 +76,12 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
-import { askClaudeCommentBody, canAskClaude, isQaAnswerPending } from "@/lib/github/ask-claude";
+import {
+  askClaudeCommentBody,
+  canAskClaude,
+  canCloseAskRepoQuestion,
+  isQaAnswerPending,
+} from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -445,6 +450,17 @@ export function MobileIssueDetail({
               </button>
             )}
           />
+        )}
+        {canCloseAskRepoQuestion(issue, comments) && (
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={() => handleClose("completed")}
+            aria-label="質問を終えてクローズ"
+            className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
+          >
+            <XCircle className="size-5" />
+          </button>
         )}
         <button
           type="button"
