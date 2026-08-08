@@ -337,8 +337,11 @@ jobs:
               MODE=skip
             fi
           elif [ "$AWAITING_CONFIRM" = "true" ]; then
-            # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う
-            if [ "$EVENT_NAME" = "issue_comment" ]; then
+            # 計画レビュー待ち中の@claudeコメントは、計画の練り直し依頼として扱う。workflow_dispatchは
+            # 計画提示フォールバック検証ステップからの自己リトライ(#497)であり、練り直し中の計画提示が
+            # 行き詰まった場合の再試行はこの状態(00.check-user付与中)で起動するため、issue_commentと
+            # 同様にMODE=planとして扱わないと自己リトライがmode=skipに落ちて何もしないまま終わる(#672)。
+            if [ "$EVENT_NAME" = "issue_comment" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
               MODE=plan
             fi
           elif [ "$PLAN_REQUIRED" = "true" ]; then
