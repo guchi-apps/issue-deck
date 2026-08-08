@@ -607,7 +607,6 @@ export function CommentThread({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
-                      {isSelf && timeLabel}
                       <span className={cn("font-medium", !isSelf && profile?.textClassName)}>
                         {headerName}
                       </span>
@@ -630,7 +629,7 @@ export function CommentThread({
                           回答
                         </Badge>
                       )}
-                      {!isSelf && timeLabel}
+                      {timeLabel}
                     </div>
                     {isBotComment(comment.author.login) && (
                       <DropdownMenu>
