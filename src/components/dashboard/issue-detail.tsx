@@ -309,9 +309,12 @@ export function IssueDetail({
     );
   }
 
-  async function handleApprove() {
+  async function handleApprove(text?: string) {
     if (!issue) return;
-    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
+    await updateLabelsAndComment(
+      labelsAfterApproval(issue.labels),
+      approveCommentBody(issue.labels, text),
+    );
   }
 
   async function handleReject(reason: string) {

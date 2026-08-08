@@ -344,8 +344,11 @@ export function MobileIssueDetail({
     );
   }
 
-  async function handleApprove() {
-    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
+  async function handleApprove(text?: string) {
+    await updateLabelsAndComment(
+      labelsAfterApproval(issue.labels),
+      approveCommentBody(issue.labels, text),
+    );
   }
 
   async function handleReject(reason: string) {

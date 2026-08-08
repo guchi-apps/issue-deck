@@ -168,12 +168,17 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * エラー通知など）の汎用確認待ちの場合とで、「計画」という語を含むかどうかの文言を変える。
  * また21.plan-required保持時は、ラベル除去イベントとの二重発火を防ぐためNO_TRIGGER_MARKER
  * を付与する（#566、詳細は同定数のコメントを参照）。
+ *
+ * textが指定された場合は`@claude <text>`の後に上記の定型文を補足として続ける（#688）。
+ * 指定が無ければ従来どおり定型文のみを返す。
  */
-export function approveCommentBody(labels: IssueLabel[]): string {
+export function approveCommentBody(labels: IssueLabel[], text?: string): string {
   const isPlanApproval = isPlanApprovalPending(labels);
-  const body = isPlanApproval
-    ? "@claude 計画を承認しました。実装を進めてください。"
-    : "@claude 確認しました。実装を進めてください。";
+  const followUp = isPlanApproval
+    ? "計画を承認しました。実装を進めてください。"
+    : "確認しました。実装を進めてください。";
+  const trimmed = text?.trim();
+  const body = trimmed ? `@claude ${trimmed}\n\n${followUp}` : `@claude ${followUp}`;
   return withNoTriggerMarkerIfPlanPending(labels, body);
 }
 
