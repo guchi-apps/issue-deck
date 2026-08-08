@@ -170,7 +170,7 @@ export function MobileIssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue.repositoryFullName,
     pullRequestLink,
-    isMergeApprovalPending(issue.labels),
+    isMergeApprovalPending(issue.labels, comments),
   );
   const {
     mergePullRequest,
@@ -719,7 +719,7 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
-            mergeApprovalPending={isMergeApprovalPending(issue.labels)}
+            mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
             workflowRun={workflowRun}

@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import type { DeployCheckStatus, Issue } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -37,7 +37,6 @@ type TopBarProps = {
   issues: Issue[];
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  onSetIssueDeployCheck: (issue: Issue, status: DeployCheckStatus | null) => void;
   onOpenAppSettings: () => void;
 };
 
@@ -52,7 +51,6 @@ export function TopBar({
   issues,
   isSidebarCollapsed,
   onToggleSidebar,
-  onSetIssueDeployCheck,
   onOpenAppSettings,
 }: TopBarProps) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -205,7 +203,6 @@ export function TopBar({
         selectedRepoFullName={selectedRepoFullName}
         repositories={repositories}
         issues={issues}
-        onSetIssueDeployCheck={onSetIssueDeployCheck}
         onOpenAppSettings={onOpenAppSettings}
       />
     </header>

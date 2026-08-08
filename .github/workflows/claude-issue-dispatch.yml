@@ -748,6 +748,7 @@ jobs:
           show_full_output: true
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
+            --disallowedTools "Task,Agent"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
@@ -854,6 +855,19 @@ jobs:
             作成（`split`）を開始します。計画に修正が必要な場合は、人間が`@claude`宛にコメントで指摘するので、
             その場合はこのステップが再び起動し計画を練り直します。
 
+      - name: 計画提示のexecution_fileをArtifactとして保存する
+        # フォールバック通知が抽出する失敗理由(下記)はexecution_file全体（実測で2900行規模に
+        # なることもある）からの要約に過ぎず、原因調査にはIssueコメントに埋め込めない全文を
+        # 追う必要がある場合がある(#780)。Artifactとして保存し、フォールバック通知からリンクする。
+        id: upload_plan_execution
+        if: always() && steps.state.outputs.mode == 'plan' && steps.claude_plan.outputs.execution_file != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-plan-execution-issue${{ steps.state.outputs.issue_number }}-run${{ github.run_id }}
+          path: ${{ steps.claude_plan.outputs.execution_file }}
+          retention-days: 14
+
       - name: 計画コメント投稿を検証し、必要ならフォールバックする
         if: always() && steps.state.outputs.mode == 'plan'
         env:
@@ -870,6 +884,10 @@ jobs:
           # ステップがfailure終了した場合でもSDK内部のcatch節で書き出し済みなら出力される
           # (base-action/src/run-claude-sdk.ts)。フォールバック理由の推定表示(#716)に使う。
           EXECUTION_FILE: ${{ steps.claude_plan.outputs.execution_file }}
+          # 直前ステップでexecution_fileをArtifactとして保存できた場合のダウンロードURL(#780)。
+          # upload-artifact@v4のartifact-url出力で、continue-on-error:trueにしているため
+          # Artifact保存自体が失敗した場合は空文字になる(その場合はフォールバック本文に含めない)。
+          ARTIFACT_URL: ${{ steps.upload_plan_execution.outputs.artifact-url }}
           # APP_BASE_URL未設定・API到達不可等でリポジトリ共通のAUTO_RETRY_LIMITを取得できない
           # 環境でも、一過性障害(ERROR_TYPE=transient)と判定した場合にだけ適用する最低限の
           # リトライ回数(#621)。一過性のGitHub API障害はリトライで解消する可能性が高い一方、
@@ -887,17 +905,35 @@ jobs:
 
           echo "新規コメントが確認できないため、エラー種別の判定と自動リトライの可否を確認します（投稿前後とも $BEFORE_COUNT 件）"
 
+          # execution_fileから、サブエージェント使用の痕跡(SDKが各メッセージに付与するsubagent_type
+          # フィールド)と、直近resultターンのpermission_denialsを抽出する(#780)。モデルが自作した
+          # echo出力などの不確かな手がかりではなく、SDKが構造化して付与するフィールドを使う。
+          # 以下のERROR_TYPE判定・フォールバック本文の生成の両方で使う。execution_fileは
+          # claude-code-action内部の実装詳細でスキーマが変わりうるため、抽出は全て`// empty`等で
+          # フォールバックし、失敗しても後続の判定・通知自体は必ず動く。
+          SUBAGENT_TYPES=""
+          DENIED_TOOLS=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            SUBAGENT_TYPES="$(jq -r '[.[] | select(.subagent_type != null) | .subagent_type] | unique | join(", ")' "$EXECUTION_FILE" 2>/dev/null || true)"
+            DENIED_TOOLS="$(jq -r '[.[] | select(.type == "result")] | last | (.permission_denials // []) | map(.tool_name // .tool // "?") | unique | join(", ")' "$EXECUTION_FILE" 2>/dev/null || true)"
+          fi
+
           # Claude Code（計画提示）ステップ自体がfailureで終了した場合、Claude起動前後のGitHub API
           # 呼び出しエラー等、一過性の可能性が高いインフラ障害と判断する(#610で実際に観測された例:
           # 実行者の権限チェックAPIが一時的に503を返しステップごと失敗した)。ステップ自体はsuccessで
-          # 終了したが新規コメントが確認できない場合は、Claude内部でのツール権限拒否等、リトライしても
-          # 解消しない可能性が高い恒常的な障害と判断する。
+          # 終了したが新規コメントが確認できない場合は、以下いずれかの恒常的な障害と判断する。
+          #   - persistent_subagent: サブエージェント(Task/Agent)を起動したままターンを終えた(#780)。
+          #     無人実行には結果を待つ次のユーザーターンが存在せずセッションごと打ち切られるため、
+          #     再実行しても同じ条件では決定論的に再現する。自動リトライの対象から外す
+          #   - persistent: それ以外(ツール権限拒否等)。従来どおりリポジトリ共通のAUTO_RETRY_LIMITに従う
           if [ "$CLAUDE_STEP_OUTCOME" = "failure" ]; then
             ERROR_TYPE=transient
+          elif [ -n "$SUBAGENT_TYPES" ]; then
+            ERROR_TYPE=persistent_subagent
           else
             ERROR_TYPE=persistent
           fi
-          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME）"
+          echo "エラー種別判定: $ERROR_TYPE（Claude Codeステップの終了状態: $CLAUDE_STEP_OUTCOME, 検出したサブエージェント: ${SUBAGENT_TYPES:-なし}, 拒否されたツール: ${DENIED_TOOLS:-なし}）"
 
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
@@ -930,6 +966,13 @@ jobs:
             AUTO_RETRY_LIMIT="$TRANSIENT_FALLBACK_RETRY_LIMIT"
           fi
 
+          # サブエージェントを起動したまま終了した場合は決定論的な失敗であり、リポジトリ共通の
+          # 自動リトライ上限設定にかかわらずリトライしない(#780)。1回あたりのコスト・時間を
+          # 無駄にしないため。
+          if [ "$ERROR_TYPE" = "persistent_subagent" ]; then
+            AUTO_RETRY_LIMIT=0
+          fi
+
           NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
@@ -945,6 +988,17 @@ jobs:
           echo "自動リトライを行わないため、フォールバックコメントを投稿します（エラー種別: $ERROR_TYPE）"
           if [ "$ERROR_TYPE" = "transient" ]; then
             FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。Claude Code起動前後のGitHub API呼び出しが一時的に失敗した等、一過性の障害が発生したと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行してください。再実行すれば解消する可能性があります。'
+          elif [ "$ERROR_TYPE" = "persistent_subagent" ]; then
+            # サブエージェント(Task/Agent)を起動したままターンを終了したことをsubagent_type
+            # フィールドから検知したケース(#780)。無人実行では次のユーザーターンが存在せず、
+            # 待機中のサブエージェントごとセッションが打ち切られるため、同じ条件で再実行しても
+            # 再現する可能性が高い決定論的な失敗であることを明示し、リトライを促さない。
+            FALLBACK_BODY="⚠️ 計画の自動提示に失敗しました。サブエージェント（\`${SUBAGENT_TYPES}\`）の完了を待ったままターンを終了し、計画コメントを投稿できなかったと考えられます。無人実行では結果を待つ次のターンが存在しないため、同じ条件で再実行しても再現する可能性が高い決定論的な失敗です。"
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n''お手数ですが、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
+          elif [ -n "$DENIED_TOOLS" ]; then
+            # permission_denialsが非空の場合は拒否されたツール名を実名で表示する(#780)。
+            FALLBACK_BODY="⚠️ 計画の自動提示に失敗した可能性があります。以下のツールの実行が許可されず拒否されたため、計画コメントの投稿まで到達できなかったと考えられます: \`${DENIED_TOOLS}\`"
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n''お手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
           else
             FALLBACK_BODY=$'⚠️ 計画の自動提示に失敗した可能性があります。コード調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、計画コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば計画フェーズを経ずに人間が直接対応方針を指示してください。'
           fi
@@ -984,6 +1038,12 @@ jobs:
           fi
           if [ -n "$REASON" ]; then
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
+          fi
+
+          # execution_file全文をArtifactとして保存できていれば、原因調査用にリンクを添える(#780)。
+          # 保存自体が失敗した場合(continue-on-error)はARTIFACT_URLが空文字になるため省略する。
+          if [ -n "$ARTIFACT_URL" ]; then
+            FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ全文（execution_file）: $ARTIFACT_URL"
           fi
 
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
