@@ -10,6 +10,15 @@ WORKDIR /app
 
 RUN corepack enable
 
+# postinstallの`prisma generate`はOpenSSLのバージョンを検出してクエリエンジンの
+# ビルドターゲット（native）を決めるが、slimイメージにはopensslが入っておらず検出に失敗し、
+# 実際にはOpenSSL 3.xなのにdebian-openssl-1.1.x向けのエンジンを生成してしまう。
+# その結果、実行時に「could not locate the Query Engine for runtime debian-openssl-3.0.x」で
+# DBアクセスが失敗する（#880でログイン後に500になっていた原因）。
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY prisma ./prisma
 RUN pnpm install --frozen-lockfile
@@ -21,6 +30,11 @@ FROM node:24-slim AS builder
 WORKDIR /app
 
 RUN corepack enable
+
+# depsステージと同じ理由（`pnpm build:ci`が再度`prisma generate`を実行するため）
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -74,6 +88,16 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+
+# クエリエンジンの取り違え（上記deps/builderのopensslに関するコメント参照）は、
+# 起動時ではなく最初にDBへアクセスした時点で初めて500として現れ、原因が分かりにくい。
+# イメージの時点で必要なエンジンが入っているかを検証し、無ければビルドを失敗させる。
+RUN set -eu; \
+  if ! find /app -name 'libquery_engine-debian-openssl-3.0.x*' | grep -q .; then \
+    echo "Prisma query engine for debian-openssl-3.0.x not found in the image:" >&2; \
+    find /app -name 'libquery_engine-*' >&2 || true; \
+    exit 1; \
+  fi
 
 # デプロイworkflow（#831）が本番DBダンプ（サニタイズ・installation ID書き換え済み）を
 # db-dump/dump.sql.gz に配置した上でイメージをビルドする想定。本サブIssue時点ではダンプ本体は
