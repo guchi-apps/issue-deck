@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
+import { CI_DUMMY_REPOSITORY_GITHUB_ID } from "@/lib/github/ci-dummy-repository";
 import { mapComment } from "@/lib/github/issue-mapper";
 import {
   createComment,
@@ -13,11 +14,6 @@ import {
 } from "@/lib/github/issues-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { previewModeGuard } from "@/lib/preview-mode";
-
-// scripts/seed-ci-db.mjsが投入するCI用ダミーリポジトリのgithubRepositoryIdと一致させること。
-// このリポジトリは実在しないためGitHub APIからコメントを取得できず、無人実行での
-// スクリーンショット確認用に固定のダミーコメントを返す(#550)。
-const CI_DUMMY_REPOSITORY_GITHUB_ID = 900000001;
 
 // コメント単位AI要約機能（#571）の「要約を生成」ボタンはLONG_COMMENT_THRESHOLD
 // （src/components/dashboard/comment-thread.tsx）を超える本文にのみ表示されるため、

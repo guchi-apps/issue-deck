@@ -4,6 +4,11 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  CI_DUMMY_REPOSITORY_GITHUB_ID,
+  CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER,
+  CI_DUMMY_RELEASE_PULL_REQUEST_TITLE,
+} from "@/lib/github/ci-dummy-repository";
 import { fetchOpenPullRequestsForBase } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 
@@ -51,6 +56,17 @@ async function handleGET() {
 
   const results = await Promise.all(
     repositories.map(async (repository): Promise<ReleasePendingMerge | null> => {
+      // CI用ダミーリポジトリは実在しないためGitHub APIを呼ばず、無人でのスクリーンショット
+      // 撮影用に固定のダミーデータを返す(#858)。
+      if (repository.githubRepositoryId === CI_DUMMY_REPOSITORY_GITHUB_ID) {
+        return {
+          repoFullName: repository.fullName,
+          pullRequestNumber: CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER,
+          pullRequestUrl: `https://github.com/${repository.fullName}/pull/${CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER}`,
+          pullRequestTitle: CI_DUMMY_RELEASE_PULL_REQUEST_TITLE,
+        };
+      }
+
       try {
         const token = await tokenFor(repository.installation.installationId);
         const available = await releaseWorkflowExists(repository.ownerLogin, repository.name, token);

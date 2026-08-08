@@ -211,6 +211,7 @@ export function TopBar({
 
       <button
         type="button"
+        aria-label="アカウントメニュー"
         className="flex items-center gap-1 rounded-md p-1 hover:bg-accent"
         onClick={() => setAccountMenuOpen(true)}
       >

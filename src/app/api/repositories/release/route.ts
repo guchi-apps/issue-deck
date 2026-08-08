@@ -4,6 +4,14 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  CI_DUMMY_DEVELOP_VERSION,
+  CI_DUMMY_MAIN_VERSION,
+  CI_DUMMY_REPOSITORY_GITHUB_ID,
+  CI_DUMMY_RELEASE_PULL_REQUEST_CI_STATE,
+  CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER,
+  CI_DUMMY_RELEASE_PULL_REQUEST_TITLE,
+} from "@/lib/github/ci-dummy-repository";
 import { extractBumpChangelog, extractBumpReason } from "@/lib/github/release-bump-reason";
 import {
   dispatchReleaseWorkflow,
@@ -53,6 +61,26 @@ async function handleGET(request: NextRequest) {
   const repository = await findRepository(userId, owner, repo);
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // CI用ダミーリポジトリは実在しないためGitHub APIを呼ばず、develop→mainのPRがオープン中
+  // （mainマージ待ち）の状態を無人でのスクリーンショット撮影用に固定で再現する(#858)。
+  if (repository.githubRepositoryId === CI_DUMMY_REPOSITORY_GITHUB_ID) {
+    return NextResponse.json({
+      available: true,
+      mainVersion: CI_DUMMY_MAIN_VERSION,
+      developVersion: CI_DUMMY_DEVELOP_VERSION,
+      phase: "release_pr_open",
+      workflowRun: null,
+      deployWorkflowRun: null,
+      bumpPullRequest: null,
+      releasePullRequest: {
+        number: CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER,
+        url: `https://github.com/${owner}/${repo}/pull/${CI_DUMMY_RELEASE_PULL_REQUEST_NUMBER}`,
+        title: CI_DUMMY_RELEASE_PULL_REQUEST_TITLE,
+        ciState: CI_DUMMY_RELEASE_PULL_REQUEST_CI_STATE,
+      },
+    });
   }
 
   try {

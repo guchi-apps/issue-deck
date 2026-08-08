@@ -127,9 +127,15 @@ async function main() {
     const repositoryGithubId = REPOSITORY_GITHUB_ID_BASE + repoIndex;
     const repoName = `sample-repo-${repoNumber}`;
 
+    // 設定画面の「mainへのマージ待ち」表示（#858）をCI環境でも確認できるよう、最初の
+    // リポジトリ（src/app/api/issues/comments/route.tsのCI_DUMMY_REPOSITORY_GITHUB_IDと
+    // 同一）だけをリリースworkflow導入済み扱いにする。実際のPR取得はGitHub APIを呼ばず
+    // src/lib/github/ci-dummy-repository.tsの固定データで再現する。
+    const hasClaudeWorkflow = repoIndex === 0;
+
     const repository = await prisma.repository.upsert({
       where: { githubRepositoryId: repositoryGithubId },
-      update: {},
+      update: { hasClaudeWorkflow },
       create: {
         githubRepositoryId: repositoryGithubId,
         installationId: installation.id,
@@ -139,6 +145,7 @@ async function main() {
         private: false,
         htmlUrl: `https://github.com/ci-dummy-org/${repoName}`,
         defaultBranch: "main",
+        hasClaudeWorkflow,
       },
     });
 

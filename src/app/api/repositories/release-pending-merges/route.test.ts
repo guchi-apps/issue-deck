@@ -125,6 +125,31 @@ describe("GET /api/repositories/release-pending-merges", () => {
     expect(getInstallationToken).toHaveBeenCalledTimes(1);
   });
 
+  it("CI用ダミーリポジトリはGitHub APIを呼ばず固定のダミーデータを返す", async () => {
+    const ciDummyRepo = {
+      fullName: "ci-dummy-org/sample-repo-1",
+      ownerLogin: "ci-dummy-org",
+      name: "sample-repo-1",
+      githubRepositoryId: 900000001,
+      installation: { installationId: 900000001 },
+    };
+    findMany.mockResolvedValue([ciDummyRepo]);
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.pendingMerges).toEqual([
+      {
+        repoFullName: "ci-dummy-org/sample-repo-1",
+        pullRequestNumber: 9999,
+        pullRequestUrl: "https://github.com/ci-dummy-org/sample-repo-1/pull/9999",
+        pullRequestTitle: "v2.4.0をmainへ反映する",
+      },
+    ]);
+    expect(getInstallationToken).not.toHaveBeenCalled();
+    expect(releaseWorkflowExists).not.toHaveBeenCalled();
+  });
+
   it("1リポジトリの取得に失敗しても他のリポジトリの結果は返す", async () => {
     fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string) => {
       if (repo === "repo-a") throw new Error("boom");
