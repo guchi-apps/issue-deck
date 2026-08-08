@@ -602,10 +602,21 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
         run: |
           CLAUDE_MODEL=auto
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/claude-model" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null || echo auto)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、claudeModel設定の取得をスキップしautoにフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/claude-model" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、claudeModel設定の取得に失敗しautoにフォールバックしました"
+            else
+              CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null)" || true
+              if [ -z "$CLAUDE_MODEL" ]; then
+                echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（レスポンス: ${RESPONSE}）"
+                CLAUDE_MODEL=auto
+              fi
             fi
           fi
           case "$CLAUDE_MODEL" in
@@ -808,10 +819,23 @@ jobs:
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、自動リトライ上限の取得をスキップし0件にフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、自動リトライ上限の取得に失敗し0件にフォールバックしました"
+            else
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null)" || true
+              case "$AUTO_RETRY_LIMIT" in
+                ''|*[!0-9]*)
+                  echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（レスポンス: ${RESPONSE}）"
+                  AUTO_RETRY_LIMIT=0
+                  ;;
+              esac
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
@@ -1383,10 +1407,23 @@ jobs:
           # 全リポジトリ共通の自動リトライ上限を読み取り専用APIから取得する(#496, #497)。APP_BASE_URL未設定・
           # API到達不可・レスポンス不正のいずれの場合も安全側(リトライなし=0)にフォールバックする。
           AUTO_RETRY_LIMIT=0
-          if [ -n "$APP_BASE_URL" ]; then
-            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null || true)"
-            if [ -n "$RESPONSE" ]; then
-              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null || echo 0)"
+          if [ -z "$APP_BASE_URL" ]; then
+            echo "::warning::APP_BASE_URLが未設定のため、自動リトライ上限の取得をスキップし0件にフォールバックしました"
+          else
+            CURL_EXIT=0
+            RESPONSE="$(curl -fsS "$APP_BASE_URL/api/settings/auto-retry" 2>/dev/null)" || CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})への疎通に失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（curl exit code: ${CURL_EXIT}）"
+            elif [ -z "$RESPONSE" ]; then
+              echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、自動リトライ上限の取得に失敗し0件にフォールバックしました"
+            else
+              AUTO_RETRY_LIMIT="$(printf '%s' "$RESPONSE" | jq -r '.autoRetryLimit // 0' 2>/dev/null)" || true
+              case "$AUTO_RETRY_LIMIT" in
+                ''|*[!0-9]*)
+                  echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、自動リトライ上限の取得に失敗し0件にフォールバックしました（レスポンス: ${RESPONSE}）"
+                  AUTO_RETRY_LIMIT=0
+                  ;;
+              esac
             fi
           fi
           case "$AUTO_RETRY_LIMIT" in ''|*[!0-9]*) AUTO_RETRY_LIMIT=0 ;; esac
