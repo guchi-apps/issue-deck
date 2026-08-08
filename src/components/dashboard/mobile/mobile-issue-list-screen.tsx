@@ -132,6 +132,7 @@ export function MobileIssueListScreen({
         showHeader={false}
         className="flex-1"
         fabSpacing
+        footerSpacing
       />
 
       <MobileIssueFilterSheet
