@@ -38,9 +38,10 @@ import {
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
+import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
-  START_IMPLEMENTATION_COMMENT_BODY,
   START_IMPLEMENTATION_OPTIONS,
+  startImplementationCommentBody,
   startImplementationLabelsForCreate,
 } from "@/lib/github/start-implementation";
 import { isProgressLabel } from "@/lib/issue-status";
@@ -275,7 +276,7 @@ export function CreateIssueDialog({
       owner,
       repo,
       number: issue.number,
-      body: START_IMPLEMENTATION_COMMENT_BODY,
+      body: startImplementationCommentBody(selectedLabels.includes(PLAN_REQUIRED_LABEL)),
     });
 
     resetForm();

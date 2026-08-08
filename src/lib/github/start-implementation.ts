@@ -6,8 +6,14 @@ import {
 } from "@/lib/github/workflow-status";
 import type { Issue, IssueLabel } from "@/types/issue";
 
-/** 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する） */
-export const START_IMPLEMENTATION_COMMENT_BODY = "@claude 実装を開始してください";
+/**
+ * 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する）。
+ * 「計画が必要」選択時は実際には計画提示までしか行われないため、文言を「実装を開始」ではなく
+ * 「計画を立案」にする（approveCommentBodyのisPlanApprovalPendingと同じ出し分けパターン）。
+ */
+export function startImplementationCommentBody(planRequired: boolean): string {
+  return planRequired ? "@claude 計画を立案してください" : "@claude 実装を開始してください";
+}
 
 /** 実装前にPlan modeでの計画提示・承認を必須にするラベル */
 export const PREVIEW_REQUIRED_LABEL = "23.preview-required";

@@ -19,9 +19,9 @@ import { Label } from "@/components/ui/label";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import {
-  START_IMPLEMENTATION_COMMENT_BODY,
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   START_IMPLEMENTATION_OPTIONS,
+  startImplementationCommentBody,
   startImplementationLabelsToAdd,
   startImplementationOptionsFromLabels,
   type StartImplementationOptionKey,
@@ -117,7 +117,7 @@ export function StartImplementationDialog({
       owner,
       repo,
       number: issue.number,
-      body: START_IMPLEMENTATION_COMMENT_BODY,
+      body: startImplementationCommentBody(options.planRequired),
     });
     if (!created) return;
 
