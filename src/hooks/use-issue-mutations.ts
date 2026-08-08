@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { GITHUB_REAUTH_REQUIRED_MESSAGE } from "@/lib/github/reauth-message";
 import type { Issue } from "@/types/issue";
 
 export type CreateIssueInput = {
@@ -36,7 +37,7 @@ export type TransferIssueInput = {
 
 function errorMessageForResponse(status: number, data: { error?: string; message?: string }): string {
   if (data.error === "github_reauth_required") {
-    return "GitHub連携が必要です。再ログインしてください。";
+    return GITHUB_REAUTH_REQUIRED_MESSAGE;
   }
   return data.error === "github_api_error" && data.message
     ? data.message

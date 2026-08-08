@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronDown, Loader2, Mic } from "lucide-react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -384,7 +385,7 @@ export function CreateIssueDialog({
               </Select>
             </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            <ApiErrorMessage message={error} />
           </div>
 
           <DialogFooter>

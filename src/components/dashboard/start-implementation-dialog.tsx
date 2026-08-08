@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -149,7 +150,7 @@ export function StartImplementationDialog({
             </div>
           ))}
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <ApiErrorMessage message={error} />
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={isSubmitting}>
