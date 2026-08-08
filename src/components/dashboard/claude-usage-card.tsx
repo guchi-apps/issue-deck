@@ -3,7 +3,7 @@
 import { Progress } from "@/components/ui/progress";
 import type { ClaudeUsage } from "@/hooks/use-claude-usage";
 import { useNow } from "@/hooks/use-now";
-import { formatResetAt } from "@/lib/format-reset";
+import { calcRemainingTimePercent, formatResetAt } from "@/lib/format-reset";
 
 type ClaudeUsageCardProps = {
   data: ClaudeUsage | null;
@@ -37,6 +37,10 @@ export function ClaudeUsageCard({
               usageWindow.resetsAt !== null && now !== null
                 ? formatResetAt(usageWindow.resetsAt, now)
                 : null;
+            const remainingTimePercent =
+              usageWindow.resetsAt !== null && now !== null
+                ? calcRemainingTimePercent(usageWindow.resetsAt, usageWindow.durationMs, now)
+                : null;
             return (
               <li key={usageWindow.key} className="rounded-lg border p-2">
                 <div className="mb-1 flex items-center justify-between text-xs">
@@ -54,6 +58,13 @@ export function ClaudeUsageCard({
                 <Progress value={usageWindow.remainingPercent} />
                 {resetAt && (
                   <p className="mt-1 text-xs text-muted-foreground">リセット: {resetAt}</p>
+                )}
+                {remainingTimePercent !== null && (
+                  <Progress
+                    value={remainingTimePercent}
+                    className="mt-1 h-0.5"
+                    indicatorClassName="bg-muted-foreground/40"
+                  />
                 )}
               </li>
             );
