@@ -218,6 +218,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `develop`→`main`のマージ
 
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
+- **CI完了待ち（`wait-for-ci`ジョブ）**: `risk-check`・`claude-review`はいずれも`wait-for-ci`ジョブに`needs`で依存しており、`ci.yml`（ワークフロー名`CI`）がそのPRのhead SHAに対して`completed`になるまで待ってから起動する。CIが`in_progress`のうちに`00.check-user`が付き、issue-deck画面上で時期尚早に「要確認」と見えてしまう問題を防ぐため（#810）。20秒間隔・最大60回（約20分）ポーリングし、タイムアウトした場合もジョブ自体は失敗させずそのまま後続へ進める（fail-open。失敗させると`risk-check`/`claude-review`がskipされ、レビュー自体が行われないまま放置される事故につながるため）。なお実際のマージ可否は`auto-merge`ジョブがGitHub Auto-merge機能（`develop`の`required_status_checks`でCI完了を待つ）に委ねているため、`wait-for-ci`の有無に関わらずマージの安全性自体は保たれる。
 - **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
 - **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
