@@ -21,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
@@ -643,9 +644,7 @@ export function IssueDetail({
                   {isCommentSubmitting ? "送信中..." : "コメント"}
                 </Button>
               </div>
-              {commentMutationError && (
-                <p className="text-sm text-destructive">{commentMutationError}</p>
-              )}
+              <ApiErrorMessage message={commentMutationError} />
             </div>
           </div>
         </div>

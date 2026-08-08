@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { GITHUB_REAUTH_REQUIRED_MESSAGE } from "@/lib/github/reauth-message";
 import type { IssueComment } from "@/types/issue";
 
 export type CreateCommentInput = {
@@ -30,7 +31,7 @@ function errorMessageForResponse(
   message: string | undefined,
 ): string {
   if (errorCode === "github_reauth_required") {
-    return "GitHub連携が必要です。再ログインしてください。";
+    return GITHUB_REAUTH_REQUIRED_MESSAGE;
   }
   if (errorCode === "github_api_error" && message) {
     return message;

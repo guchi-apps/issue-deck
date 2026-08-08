@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Mic } from "lucide-react";
 
+import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,7 +133,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
             </div>
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <ApiErrorMessage message={error} />
         </div>
 
         <DialogFooter>
