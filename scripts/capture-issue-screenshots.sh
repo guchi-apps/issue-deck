@@ -4,7 +4,13 @@
 # ブランチへ配置し、Issueコメント埋め込み用のraw URLを標準出力に1行1URLで出力する。
 #
 # 使い方:
-#   scripts/capture-issue-screenshots.sh <Issue番号> [撮影対象パス] [クリック対象セレクタ]
+#   scripts/capture-issue-screenshots.sh <Issue番号> [撮影対象パス] [クリック対象セレクタ] [デバイス]
+#
+# Issue #858: 第4引数（デバイス）を指定すると、撮影対象パス指定時のデスクトップ・モバイル
+# 各1枚ずつという既定の組を、"desktop"または"mobile"のみに絞れる。アカウントメニューの
+# ようにPC版にしか無いUIをクリックで開いて撮影したい場合、モバイル版には対象要素が存在せず
+# クリックが失敗して全体が失敗してしまうため。省略時は従来どおり両方（"both"）を撮影する。
+# 撮影対象パスを省略するフォールバック撮影では対応しない（第2引数省略時は無視される）。
 #
 # Issue #567: 第2引数（撮影対象パス）を指定した場合はそのパスをデスクトップ・モバイル
 # 各1枚ずつ撮影する（従来と同じ、出力URLは2行）。省略した場合は、実装エージェントが
@@ -53,7 +59,13 @@ fi
 ISSUE_NUMBER="${1:?Issue番号を指定してください}"
 TARGET_PATH="${2:-}"
 CLICK_SELECTOR="${3:-}"
+DEVICE="${4:-both}"
 HEALTHCHECK_PATH="${TARGET_PATH:-/dashboard}"
+
+if [[ "$DEVICE" != "both" && "$DEVICE" != "desktop" && "$DEVICE" != "mobile" ]]; then
+  echo "Error: デバイスは both・desktop・mobile のいずれかで指定してください: $DEVICE" >&2
+  exit 1
+fi
 
 if [[ ! "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
   echo "Error: issue番号は数字で指定してください: $ISSUE_NUMBER" >&2
@@ -117,17 +129,28 @@ if [[ -n "$TARGET_PATH" ]]; then
   # 対応箇所が分かる場合: 指定パスをデスクトップ・モバイル各1枚ずつ撮影する（従来と同じ構成）。
   # クリック対象セレクタが指定されていれば、撮影対象の指定にそのまま付加する
   # （scripts/capture-screenshots.mjs側の<名前:パス:device:セレクタ>形式）。
+  # デバイス指定（第4引数）が"desktop"/"mobile"の場合はその1枚のみ撮影する。
   DESKTOP_TARGET="desktop:${TARGET_PATH}:desktop"
   MOBILE_TARGET="mobile:${TARGET_PATH}:mobile"
   if [[ -n "$CLICK_SELECTOR" ]]; then
     DESKTOP_TARGET="${DESKTOP_TARGET}:${CLICK_SELECTOR}"
     MOBILE_TARGET="${MOBILE_TARGET}:${CLICK_SELECTOR}"
   fi
-  node "$ROOT/scripts/capture-screenshots.mjs" "$BASE_URL" "$OUT_DIR" \
-    "$DESKTOP_TARGET" \
-    "$MOBILE_TARGET"
 
-  bash "$ROOT/scripts/post-issue-screenshot.sh" "$ISSUE_NUMBER" "$OUT_DIR/desktop.png" "$OUT_DIR/mobile.png"
+  TARGETS=()
+  IMAGES=()
+  if [[ "$DEVICE" != "mobile" ]]; then
+    TARGETS+=("$DESKTOP_TARGET")
+    IMAGES+=("$OUT_DIR/desktop.png")
+  fi
+  if [[ "$DEVICE" != "desktop" ]]; then
+    TARGETS+=("$MOBILE_TARGET")
+    IMAGES+=("$OUT_DIR/mobile.png")
+  fi
+
+  node "$ROOT/scripts/capture-screenshots.mjs" "$BASE_URL" "$OUT_DIR" "${TARGETS[@]}"
+
+  bash "$ROOT/scripts/post-issue-screenshot.sh" "$ISSUE_NUMBER" "${IMAGES[@]}"
 else
   # 対応箇所の判断が難しい場合のフォールバック: デスクトップは/dashboard1枚、
   # モバイルはホーム・イシュー一覧・イシュー詳細の計3枚を撮影する。
