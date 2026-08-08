@@ -694,6 +694,7 @@ export function CommentThread({
                       {/* 長文コメントは要約を先に読めるよう、本文より前に表示する（#631）。 */}
                       {comment.body.length > LONG_COMMENT_THRESHOLD && (
                         <CommentAiSummary
+                          body={comment.body}
                           summary={commentSummary.summaries[comment.id]?.summary ?? null}
                           isGenerating={commentSummary.generatingIds.has(comment.id)}
                           error={commentSummary.errors[comment.id] ?? null}
