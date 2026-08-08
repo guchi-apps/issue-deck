@@ -82,7 +82,7 @@ export function MobileRepoIssuesScreen({
     const scoped = filterIssuesByView(repoIssues, view, currentUserLogin);
     const filtered = applyIssueFilters(scoped, {
       q: "",
-      repo: null,
+      repos: [],
       state,
       labels,
       assignee,

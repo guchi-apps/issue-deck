@@ -65,7 +65,8 @@ export function IssueDeckShell({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, setFilters, selectView, toggleLabel } = useIssueFilters();
+  const { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo } =
+    useIssueFilters();
   const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
@@ -270,7 +271,7 @@ export function IssueDeckShell({
         "pc",
         filters.view,
         filters.q,
-        filters.repo,
+        filters.repos.join(","),
         filters.state,
         filters.labels.join(","),
         filters.assignee,
@@ -360,7 +361,7 @@ export function IssueDeckShell({
     setFilters({
       view: quickFilter.view,
       q: quickFilter.q,
-      repo: quickFilter.repo,
+      repos: quickFilter.repos,
       state: quickFilter.state,
       labels: quickFilter.labels,
       assignee: quickFilter.assignee,
@@ -399,8 +400,10 @@ export function IssueDeckShell({
         filters={filters}
         setFilter={setFilter}
         assigneeOptions={assigneeOptions}
-        onCreateIssue={() => openCreateDialog(filters.repo)}
-        selectedRepoFullName={filters.repo}
+        onCreateIssue={() =>
+          openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+        }
+        selectedRepoFullName={filters.repos[0] ?? null}
         repositories={repositories}
         issues={issues}
         isSidebarCollapsed={isSidebarCollapsed}
@@ -516,9 +519,9 @@ export function IssueDeckShell({
               onSelectView={handleSelectView}
               navCounts={navCounts}
               repositories={repositories}
-              selectedRepoFullName={filters.repo}
-              onSelectRepository={(repo) => setFilter("repo", repo.fullName)}
-              onClearRepository={() => setFilter("repo", null)}
+              selectedRepoFullNames={filters.repos}
+              onSelectRepository={(repo) => toggleRepo(repo.fullName)}
+              onClearRepository={() => setFilter("repos", [])}
               onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
               onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
               onSetRepositoryFavorite={handleSetRepositoryFavorite}

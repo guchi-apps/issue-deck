@@ -18,7 +18,7 @@ export function toQuickFilter(row: QuickFilterRow): QuickFilter {
     name: row.name,
     view: isOneOf(NAV_VIEW_IDS, row.view) ? row.view : "all",
     q: row.q,
-    repo: row.repo,
+    repos: row.repo ? row.repo.split(",").filter(Boolean) : [],
     state: isOneOf(STATE_FILTERS, row.state) ? row.state : "open",
     labels: row.labels ? row.labels.split(",").filter(Boolean) : [],
     assignee: row.assignee,
@@ -39,9 +39,11 @@ export function parseQuickFilterInput(payload: unknown): QuickFilterInput | null
   if (!isOneOf(STATE_FILTERS, body.state)) return null;
   if (!isOneOf(SORTS, body.sort)) return null;
   if (typeof body.q !== "string") return null;
-  if (body.repo !== null && typeof body.repo !== "string") return null;
   if (body.assignee !== null && typeof body.assignee !== "string") return null;
   if (!Array.isArray(body.labels) || !body.labels.every((label) => typeof label === "string")) {
+    return null;
+  }
+  if (!Array.isArray(body.repos) || !body.repos.every((repo) => typeof repo === "string")) {
     return null;
   }
 
@@ -49,7 +51,7 @@ export function parseQuickFilterInput(payload: unknown): QuickFilterInput | null
     name,
     view: body.view,
     q: body.q,
-    repo: body.repo,
+    repos: body.repos,
     state: body.state,
     labels: body.labels,
     assignee: body.assignee,

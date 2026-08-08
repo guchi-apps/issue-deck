@@ -31,7 +31,7 @@ type SidebarNavProps = {
   onSelectView: (view: NavViewId) => void;
   navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
-  selectedRepoFullName?: string | null;
+  selectedRepoFullNames?: string[];
   onSelectRepository?: (repository: ConnectedRepository) => void;
   onClearRepository?: () => void;
   onHideRepository?: (repository: ConnectedRepository) => void;
@@ -54,7 +54,7 @@ export function SidebarNav({
   onSelectView,
   navCounts,
   repositories,
-  selectedRepoFullName,
+  selectedRepoFullNames = [],
   onSelectRepository,
   onClearRepository,
   onHideRepository,
@@ -136,7 +136,7 @@ export function SidebarNav({
         <div className="mb-2 flex items-center justify-between px-2">
           <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
           <div className="flex items-center gap-1">
-            {selectedRepoFullName && (
+            {selectedRepoFullNames.length > 0 && (
               <button
                 type="button"
                 onClick={() => onClearRepository?.()}
@@ -196,7 +196,7 @@ export function SidebarNav({
                       onClick={() => onSelectRepository?.(repo)}
                       className={cn(
                         "flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                        selectedRepoFullName === repo.fullName && "bg-accent font-medium",
+                        selectedRepoFullNames.includes(repo.fullName) && "bg-accent font-medium",
                         repo.hidden && "text-muted-foreground",
                       )}
                     >

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
         name: input.name,
         view: input.view,
         q: input.q,
-        repo: input.repo,
+        repo: input.repos.join(",") || null,
         state: input.state,
         labels: input.labels.join(","),
         assignee: input.assignee,
