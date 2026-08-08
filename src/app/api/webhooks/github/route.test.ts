@@ -115,13 +115,16 @@ describe("POST /api/webhooks/github issue_comment", () => {
     vi.clearAllMocks();
   });
 
-  it("action=createdの場合、コメント本文を渡してqaAnswerPendingAtを更新する", async () => {
+  it("action=createdの場合、comment.created_atをlastCommentAt更新用に渡し、コメント本文を渡してqaAnswerPendingAtを更新する", async () => {
     const response = await POST(
       makeRequest(
         {
           action: "created",
           issue: { id: 123, number: 1 },
-          comment: { body: "@claude 質問: これは質問です" },
+          comment: {
+            body: "@claude 質問: これは質問です",
+            created_at: "2026-08-08T00:00:00.000Z",
+          },
           repository: { id: 1 },
         },
         "issue_comment",
@@ -129,16 +132,24 @@ describe("POST /api/webhooks/github issue_comment", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith(
+      "repo-1",
+      { id: 123, number: 1 },
+      new Date("2026-08-08T00:00:00.000Z"),
+    );
     expect(updateQaAnswerPendingState).toHaveBeenCalledWith(123, "@claude 質問: これは質問です");
   });
 
-  it("action=editedの場合、qaAnswerPendingAtを更新しない", async () => {
+  it("action=editedの場合、コメント投稿日時は渡さずqaAnswerPendingAtも更新しない", async () => {
     const response = await POST(
       makeRequest(
         {
           action: "edited",
           issue: { id: 123, number: 1 },
-          comment: { body: "@claude 質問: これは質問です" },
+          comment: {
+            body: "@claude 質問: これは質問です",
+            created_at: "2026-08-08T00:00:00.000Z",
+          },
           repository: { id: 1 },
         },
         "issue_comment",
@@ -146,16 +157,24 @@ describe("POST /api/webhooks/github issue_comment", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith(
+      "repo-1",
+      { id: 123, number: 1 },
+      undefined,
+    );
     expect(updateQaAnswerPendingState).not.toHaveBeenCalled();
   });
 
-  it("PRへのコメントの場合は何も処理しない", async () => {
+  it("PRへのコメント（issue.pull_requestあり）は無視する", async () => {
     const response = await POST(
       makeRequest(
         {
           action: "created",
           issue: { id: 123, number: 1, pull_request: {} },
-          comment: { body: "@claude 質問: これは質問です" },
+          comment: {
+            body: "@claude 質問: これは質問です",
+            created_at: "2026-08-08T00:00:00.000Z",
+          },
           repository: { id: 1 },
         },
         "issue_comment",
@@ -165,5 +184,6 @@ describe("POST /api/webhooks/github issue_comment", () => {
     expect(response.status).toBe(200);
     expect(upsertIssueFromWebhookPayload).not.toHaveBeenCalled();
     expect(updateQaAnswerPendingState).not.toHaveBeenCalled();
+    expect(findUniqueRepository).not.toHaveBeenCalled();
   });
 });

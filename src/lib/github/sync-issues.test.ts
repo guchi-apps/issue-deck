@@ -182,3 +182,77 @@ describe("updateQaAnswerPendingState", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe("upsertIssueFromWebhookPayload の lastCommentAt 更新", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    findUnique.mockReset();
+    upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
+    issueLabelUpsert.mockReset().mockResolvedValue(undefined);
+    issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
+    $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("コメント投稿日時が渡された場合、lastCommentAtに設定する", async () => {
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: null,
+      lastCommentAt: null,
+      labels: [],
+    });
+    const raw = makeRawIssue();
+    const commentCreatedAt = new Date("2026-08-05T00:00:00.000Z");
+
+    await upsertIssueFromWebhookPayload("repo-1", raw, commentCreatedAt);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ lastCommentAt: commentCreatedAt }),
+      }),
+    );
+  });
+
+  it("既存のlastCommentAtより古いコメント投稿日時が渡された場合、既存の日時を維持する（Webhookの配信順序の入れ替わり対策）", async () => {
+    const existingLastCommentAt = new Date("2026-08-05T00:00:00.000Z");
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-08-05T00:00:00.000Z"),
+      checkUserLabeledAt: null,
+      lastCommentAt: existingLastCommentAt,
+      labels: [],
+    });
+    const raw = makeRawIssue({ updated_at: "2026-08-06T00:00:00.000Z" });
+    const olderCommentCreatedAt = new Date("2026-08-01T00:00:00.000Z");
+
+    await upsertIssueFromWebhookPayload("repo-1", raw, olderCommentCreatedAt);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ lastCommentAt: existingLastCommentAt }),
+      }),
+    );
+  });
+
+  it("コメント投稿日時が渡されない場合、既存のlastCommentAtを維持する", async () => {
+    const existingLastCommentAt = new Date("2026-08-01T00:00:00.000Z");
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: null,
+      lastCommentAt: existingLastCommentAt,
+      labels: [],
+    });
+    const raw = makeRawIssue();
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ lastCommentAt: existingLastCommentAt }),
+      }),
+    );
+  });
+});

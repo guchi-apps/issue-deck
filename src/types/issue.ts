@@ -62,6 +62,8 @@ export type Issue = {
    * 正確に算出する）
    */
   qaAnswerPendingAt: string | null;
+  /** 実際に最後にコメントが投稿された日時（ISO8601）。Webhook経由で未取得の場合はnull */
+  lastCommentAt: string | null;
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;

@@ -1,10 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, AlertTriangle, LogOut, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  KeyRound,
+  LogOut,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { FineGrainedTokensDialog } from "@/components/dashboard/fine-grained-tokens-dialog";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
@@ -23,11 +32,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
+import { useNow } from "@/hooks/use-now";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
+import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from "@/lib/legal-links";
 import type { CurrentUser } from "@/types/user";
 
@@ -48,6 +60,7 @@ export function MobileSettingsScreen({
   const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
   const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
+  const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(true);
   const {
@@ -66,6 +79,18 @@ export function MobileSettingsScreen({
     isLoading: githubStatusLoading,
     error: githubStatusError,
   } = useGithubStatus(true);
+  const {
+    data: fineGrainedTokens,
+    isLoading: fineGrainedTokensLoading,
+    error: fineGrainedTokensError,
+    refetch: refetchFineGrainedTokens,
+  } = useFineGrainedTokens(true);
+  const now = useNow();
+  const hasExpiringFineGrainedToken =
+    now !== null &&
+    (fineGrainedTokens ?? []).some(
+      (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
+    );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -151,6 +176,18 @@ export function MobileSettingsScreen({
           )}
         </Button>
 
+        <Button
+          variant="outline"
+          className="justify-start"
+          onClick={() => setFineGrainedTokensDialogOpen(true)}
+        >
+          <KeyRound />
+          Fine-grained PAT管理
+          {hasExpiringFineGrainedToken && (
+            <AlertTriangle className="ml-auto size-4 text-destructive" />
+          )}
+        </Button>
+
         <Button variant="outline" className="justify-start" asChild>
           <a href={TERMS_OF_SERVICE_URL} target="_blank" rel="noopener noreferrer">
             <ShieldCheck />
@@ -187,6 +224,15 @@ export function MobileSettingsScreen({
         data={githubStatus}
         isLoading={githubStatusLoading}
         error={githubStatusError}
+      />
+
+      <FineGrainedTokensDialog
+        open={fineGrainedTokensDialogOpen}
+        onOpenChange={setFineGrainedTokensDialogOpen}
+        data={fineGrainedTokens}
+        isLoading={fineGrainedTokensLoading}
+        error={fineGrainedTokensError}
+        onChanged={refetchFineGrainedTokens}
       />
 
       <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>

@@ -34,6 +34,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     closedAt: null,
     checkUserLabeledAt: null,
     qaAnswerPendingAt: null,
+    lastCommentAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
@@ -131,20 +132,29 @@ describe("sortIssues", () => {
     expect(issues.map((issue) => issue.id)).toEqual(["1", "2"]);
   });
 
-  it("view=check-userの場合、sort指定によらずcheckUserLabeledAtの古い順で並べる", () => {
+  it("view=check-userの場合、sort指定によらずlastCommentAtの古い順で並べる", () => {
     const issues = [
-      makeIssue({ id: "1", checkUserLabeledAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
-      makeIssue({ id: "2", checkUserLabeledAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z" }),
-      makeIssue({ id: "3", checkUserLabeledAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" }),
+      makeIssue({ id: "1", lastCommentAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }),
+      makeIssue({ id: "2", lastCommentAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z" }),
+      makeIssue({ id: "3", lastCommentAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" }),
     ];
     const result = sortIssues(issues, "updated", "check-user");
     expect(result.map((issue) => issue.id)).toEqual(["2", "3", "1"]);
   });
 
-  it("view=check-userでcheckUserLabeledAtがnullのIssueは最も古いものとして先頭に来る", () => {
+  it("view=check-userでlastCommentAtが無い場合、checkUserLabeledAtにフォールバックする", () => {
+    const issues = [
+      makeIssue({ id: "1", lastCommentAt: null, checkUserLabeledAt: "2026-01-03T00:00:00.000Z" }),
+      makeIssue({ id: "2", lastCommentAt: "2026-01-01T00:00:00.000Z", checkUserLabeledAt: "2026-01-05T00:00:00.000Z" }),
+    ];
+    const result = sortIssues(issues, "created", "check-user");
+    expect(result.map((issue) => issue.id)).toEqual(["2", "1"]);
+  });
+
+  it("view=check-userでlastCommentAt・checkUserLabeledAtどちらも無いIssueは最も古いものとして先頭に来る", () => {
     const issues = [
       makeIssue({ id: "1", checkUserLabeledAt: "2026-01-01T00:00:00.000Z" }),
-      makeIssue({ id: "2", checkUserLabeledAt: null }),
+      makeIssue({ id: "2", checkUserLabeledAt: null, lastCommentAt: null }),
     ];
     const result = sortIssues(issues, "created", "check-user");
     expect(result.map((issue) => issue.id)).toEqual(["2", "1"]);

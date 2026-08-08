@@ -42,6 +42,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
 - 開発サーバー（`pnpm dev`）のポートは`start-issue.sh`/`.ps1`が`.env.local`に`PORT=4000 + Issue番号`を自動設定する（例: issue-46 → 4046）。複数Issueのworktreeで同時に`pnpm dev`を起動しても衝突せず、developへマージする前に人間がブラウザ（`http://localhost:<ポート>`）で直接画面を確認できる。実装エージェントは画面に関わる変更のPRで、このURLを「確認方法」に記載する。
+- ポート設定に加えて、開発サーバーの起動・停止も自動化されている。`start-issue.sh`は`prepare_issue()`完了後、最終的に`exec claude ...`でClaude CLIへプロセス置き換えするのではなく、新規`scripts/run-issue-session.sh`（Issue番号・devポート・プロンプトファイルパスを引数に取るラッパー）を`exec`する。このラッパーが`pnpm dev`をバックグラウンド起動（ログ・PIDは`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.{log,pid}`）したうえで、`claude`を（execせず）フォアグラウンドの子プロセスとして実行し、`trap ... EXIT HUP TERM`でclaude終了時に開発サーバーのプロセスグループを停止する。Ctrl+C（`INT`）は意図的にtrapしない（1回の押下は現在の処理の中断であることが多く、devサーバーまで止めると過剰停止になるため）。`kill -9`やWSLごとのクラッシュ等、trapで捕捉できない強制終了時はPIDファイルが残るため、`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.pid`のPIDを手動で`kill`するのがフォールバック手段になる。
 - `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
 
 ## 実装前の「計画フェーズ」要否をIssueラベルでトグルする
@@ -239,6 +240,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 ## 今後作成するファイル（Phase進行に合わせて）
 
 - `scripts/start-issue.sh` / `scripts/start-issue.ps1`（Phase1）
+- `scripts/run-issue-session.sh`（Phase1、開発サーバーの自動起動・セッション終了時の自動停止を担うラッパー。#687）
 - `scripts/prompts/implementation-agent.md`（Phase1）
 - `scripts/start-reviewer.sh` / `scripts/start-reviewer.ps1`（Phase2）
 - `scripts/prompts/review-agent.md`（Phase2）

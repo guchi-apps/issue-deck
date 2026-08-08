@@ -23,6 +23,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     closedAt: null,
     checkUserLabeledAt: null,
     qaAnswerPendingAt: null,
+    lastCommentAt: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
     hasUnreadComments: false,
