@@ -55,10 +55,14 @@ async function handleIssuesEvent(payload: {
     // Webhookは移動元リポジトリ（payload.repository）宛に配信されるが、移動先はchanges.new_repositoryに入る。
     const newRepositoryId = payload.changes?.new_repository?.id;
     if (typeof newRepositoryId !== "number") {
+      // 移動先が特定できないため移動先への反映はできないが、移動元に古いリポジトリ・番号のまま
+      // 行を残し続けると重複表示の原因になるため、最低限のフォールバックとして削除しておく
+      // （移動先での再表示は、移動先リポジトリの次回同期・Webhookで改めて行われる）
       console.error(
         "[webhooks/github] issues.transferred event is missing changes.new_repository.id",
         payload,
       );
+      await deleteIssueByGithubId(payload.issue.id);
       return;
     }
 
