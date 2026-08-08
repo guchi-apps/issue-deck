@@ -86,6 +86,9 @@ export function SidebarNav({
         <ul className="flex flex-col gap-0.5">
           {navViews.map((view) => {
             const Icon = navViewIcons[view.id];
+            // ユーザーの確認待ちが1件以上あるときは、スマホのヘッダー下フィルターと
+            // 同じ配色（amber）で強調する（#742）。
+            const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
             return (
               <Fragment key={view.id}>
                 {view.id === labelNavViews[0]?.id && (
@@ -100,13 +103,27 @@ export function SidebarNav({
                     className={cn(
                       "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                       activeView === view.id && "bg-accent font-medium",
+                      isCheckUserHighlighted && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
                     )}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
+                      <Icon
+                        className={cn(
+                          "size-3.5 text-muted-foreground",
+                          isCheckUserHighlighted && "text-amber-600 dark:text-amber-500",
+                        )}
+                      />
                       {view.label}
                     </span>
-                    <span className="text-xs text-muted-foreground">{navCounts[view.id]}</span>
+                    <span
+                      className={cn(
+                        "text-xs text-muted-foreground",
+                        isCheckUserHighlighted &&
+                          "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
+                      )}
+                    >
+                      {navCounts[view.id]}
+                    </span>
                   </button>
                 </li>
               </Fragment>
