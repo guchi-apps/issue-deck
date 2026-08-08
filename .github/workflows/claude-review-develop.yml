@@ -174,7 +174,7 @@ jobs:
               add_reason "Issueに \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
             fi
             if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
-              add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
+              add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定。このコメントはPR作成・push直後に自動投稿されるため、この時点ではまだスクリーンショットは添付されていません。実装エージェントが撮影まで完了すると、この後に別コメントとして画像が追加投稿されるので、催促する前に少し待って最新コメントをご確認ください）"
             fi
             if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
               add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
