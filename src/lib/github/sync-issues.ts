@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
@@ -153,6 +154,31 @@ export async function upsertIssueFromWebhookPayload(
 
 export async function deleteIssueByGithubId(githubIssueId: number): Promise<void> {
   await db.issue.deleteMany({ where: { githubIssueId: BigInt(githubIssueId) } });
+}
+
+/**
+ * issue_comment（created）Webhookで届いた新規コメント本文から、質問への回答待ち状態
+ * （qaAnswerPendingAt）を更新する。質問コメント（isAskClaudeQuestionComment）なら現在時刻を
+ * セットし、回答コメント（isQaAnswerComment）ならnullに戻す。それ以外の通常コメントでは
+ * 何もしない（既存の状態を維持する）。
+ */
+export async function updateQaAnswerPendingState(
+  githubIssueId: number,
+  commentBody: string,
+): Promise<void> {
+  if (isAskClaudeQuestionComment({ body: commentBody })) {
+    await db.issue.updateMany({
+      where: { githubIssueId: BigInt(githubIssueId) },
+      data: { qaAnswerPendingAt: new Date() },
+    });
+    return;
+  }
+  if (isQaAnswerComment({ body: commentBody })) {
+    await db.issue.updateMany({
+      where: { githubIssueId: BigInt(githubIssueId) },
+      data: { qaAnswerPendingAt: null },
+    });
+  }
 }
 
 export async function upsertIssueAndGetDisplay(

@@ -149,7 +149,11 @@ export function IssueList({
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    <WorkflowStepBadge labels={issue.labels} running={runningByIssueId[issue.id]} />
+                    <WorkflowStepBadge
+                      labels={issue.labels}
+                      running={runningByIssueId[issue.id]}
+                      qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
+                    />
                     {issue.favorite && (
                       <Star
                         className="size-3.5 fill-yellow-400 text-yellow-400"

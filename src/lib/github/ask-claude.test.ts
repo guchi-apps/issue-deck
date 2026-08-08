@@ -6,6 +6,7 @@ import {
   canAskClaude,
   isAskClaudeQuestionComment,
   isQaAnswerComment,
+  isQaAnswerPending,
   QA_ANSWER_MARKER,
 } from "@/lib/github/ask-claude";
 
@@ -44,5 +45,41 @@ describe("isQaAnswerComment", () => {
 
   it("マーカーが無いコメントはfalseと判定する", () => {
     expect(isQaAnswerComment({ body: "通常の実装進捗コメント" })).toBe(false);
+  });
+});
+
+describe("isQaAnswerPending", () => {
+  it("コメントが1件も無い場合はfalseを返す", () => {
+    expect(isQaAnswerPending([])).toBe(false);
+  });
+
+  it("質問コメントの後に回答コメントが無い場合はtrueを返す", () => {
+    const comments = [
+      { body: "通常の実装進捗コメント" },
+      { body: askClaudeCommentBody("質問内容") },
+    ];
+    expect(isQaAnswerPending(comments)).toBe(true);
+  });
+
+  it("質問コメントの後に回答コメントが投稿済みの場合はfalseを返す", () => {
+    const comments = [
+      { body: askClaudeCommentBody("質問内容") },
+      { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+    ];
+    expect(isQaAnswerPending(comments)).toBe(false);
+  });
+
+  it("回答済みの質問の後に新たな質問が投稿された場合はtrueを返す", () => {
+    const comments = [
+      { body: askClaudeCommentBody("質問1") },
+      { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+      { body: askClaudeCommentBody("質問2") },
+    ];
+    expect(isQaAnswerPending(comments)).toBe(true);
+  });
+
+  it("質問コメントが無い場合はfalseを返す", () => {
+    const comments = [{ body: "通常の実装進捗コメント" }];
+    expect(isQaAnswerPending(comments)).toBe(false);
   });
 });

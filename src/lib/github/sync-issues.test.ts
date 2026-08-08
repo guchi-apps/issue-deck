@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { upsertIssueFromWebhookPayload } from "@/lib/github/sync-issues";
+import { askClaudeCommentBody, QA_ANSWER_MARKER } from "@/lib/github/ask-claude";
+import { updateQaAnswerPendingState, upsertIssueFromWebhookPayload } from "@/lib/github/sync-issues";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 
 const findUnique = vi.fn();
 const upsert = vi.fn();
+const updateMany = vi.fn();
 const $transaction = vi.fn();
 const issueLabelUpsert = vi.fn();
 const issueLabelDeleteMany = vi.fn();
@@ -21,6 +23,9 @@ vi.mock("@/lib/db", () => ({
       },
       get upsert() {
         return upsert;
+      },
+      get updateMany() {
+        return updateMany;
       },
     },
     issueLabel: {
@@ -139,5 +144,41 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: expect.objectContaining({ checkUserLabeledAt: null }) }),
     );
+  });
+});
+
+describe("updateQaAnswerPendingState", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    updateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("質問コメントの場合、現在時刻を設定する", async () => {
+    await updateQaAnswerPendingState(1, askClaudeCommentBody("質問内容"));
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { githubIssueId: BigInt(1) },
+      data: { qaAnswerPendingAt: NOW },
+    });
+  });
+
+  it("回答コメントの場合、nullに戻す", async () => {
+    await updateQaAnswerPendingState(1, `回答本文\n\n${QA_ANSWER_MARKER}`);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { githubIssueId: BigInt(1) },
+      data: { qaAnswerPendingAt: null },
+    });
+  });
+
+  it("通常のコメントの場合、何も更新しない", async () => {
+    await updateQaAnswerPendingState(1, "通常の実装進捗コメント");
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });

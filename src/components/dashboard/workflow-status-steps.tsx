@@ -1,4 +1,4 @@
-import { Check, CircleAlert } from "lucide-react";
+import { Check, CircleAlert, MessageCircleQuestion } from "lucide-react";
 
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
@@ -14,6 +14,11 @@ type WorkflowStepBadgeProps = {
   labels: IssueLabel[];
   /** GitHub Actions実行状況（一覧のポーリング結果）。省略時は実行中表示を行わない */
   running?: { isRunning: boolean; currentStep: string | null };
+  /**
+   * 「Claudeに質問する」ダイアログ経由の質問コメントが投稿済みで、まだ回答コメントが
+   * 投稿されていない状態かどうか（@/lib/github/ask-claudeのisQaAnswerPending相当）
+   */
+  qaAnswerPending?: boolean;
 };
 
 const BADGE_SIZE = 18;
@@ -22,24 +27,34 @@ const BADGE_SIZE = 18;
  * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを円グラフ（パイ）で示す。
  * ユーザーの確認待ち（00.check-user）の場合はamber色に切り替えたうえで中央にアラート
  * アイコンを重ね、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
+ * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで中央に質問アイコンを重ねる
+ * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
  * GitHub Actionsの実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と
  * 実行中（回転）を同じ円で同時に表現する。
  */
-export function WorkflowStepBadge({ labels, running }: WorkflowStepBadgeProps) {
+export function WorkflowStepBadge({ labels, running, qaAnswerPending = false }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex(labels);
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
+  const showQaAnswerPending = qaAnswerPending && !approvalPending;
   const step = WORKFLOW_STEPS[currentIndex];
   const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
   const progressDeg = progress * 360;
   const isRunning = running?.isRunning ?? false;
   const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
   const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : ""}`;
+  const accentColorClass = approvalPending
+    ? "text-amber-500"
+    : showQaAnswerPending
+      ? "text-blue-500"
+      : "text-primary";
 
   return (
     <span
-      title={`${step.labelName} ${step.label}${approvalPending ? "（ユーザーの確認待ち）" : ""}`}
+      title={`${step.labelName} ${step.label}${
+        approvalPending ? "（ユーザーの確認待ち）" : showQaAnswerPending ? "（Claudeの回答待ち）" : ""
+      }`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
     >
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{stepText}</span>
@@ -52,23 +67,32 @@ export function WorkflowStepBadge({ labels, running }: WorkflowStepBadgeProps) {
             aria-hidden="true"
             className={cn(
               "absolute animate-spin rounded-full border-2 border-transparent",
-              approvalPending ? "border-t-amber-500" : "border-t-primary",
+              approvalPending
+                ? "border-t-amber-500"
+                : showQaAnswerPending
+                  ? "border-t-blue-500"
+                  : "border-t-primary",
             )}
             style={{ inset: -3 }}
           />
         )}
         <span
           aria-hidden="true"
-          className={cn("block rounded-full", approvalPending ? "text-amber-500" : "text-primary")}
+          className={cn("block rounded-full", accentColorClass)}
           style={{
             width: BADGE_SIZE,
             height: BADGE_SIZE,
-            background: `conic-gradient(currentColor 0deg ${progressDeg}deg, color-mix(in oklch, currentColor ${approvalPending ? 20 : 15}%, transparent) ${progressDeg}deg 360deg)`,
+            background: `conic-gradient(currentColor 0deg ${progressDeg}deg, color-mix(in oklch, currentColor ${approvalPending || showQaAnswerPending ? 20 : 15}%, transparent) ${progressDeg}deg 360deg)`,
           }}
         />
         {approvalPending && (
           <span className="absolute inset-0 flex items-center justify-center">
             <CircleAlert className="size-2.5 text-background" />
+          </span>
+        )}
+        {showQaAnswerPending && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <MessageCircleQuestion className="size-2.5 text-background" />
           </span>
         )}
       </span>
