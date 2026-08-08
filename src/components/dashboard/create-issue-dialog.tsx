@@ -20,7 +20,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -54,6 +56,19 @@ const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
 /** 進捗管理用ラベル・実装オプション用ラベルを除いた、ユーザーが選択可能なラベルかどうか */
 function isSelectableLabelName(name: string): boolean {
   return !isProgressLabel(name) && !START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);
+}
+
+/**
+ * リポジトリ選択欄で、claude-issue-dispatch.ymlが導入済み（IssueDeckの自動化に対応済み）の
+ * リポジトリを先頭に、未導入のリポジトリをその下にまとめる。各グループ内の順序は維持する。
+ */
+export function groupRepositoriesByWorkflowStatus(
+  repositories: ConnectedRepository[],
+): { registered: ConnectedRepository[]; unregistered: ConnectedRepository[] } {
+  return {
+    registered: repositories.filter((repo) => repo.hasClaudeWorkflow),
+    unregistered: repositories.filter((repo) => !repo.hasClaudeWorkflow),
+  };
 }
 
 /**
@@ -113,6 +128,10 @@ export function CreateIssueDialog({
   const issueSuggestions = useMemo(
     () => getRepoIssueSuggestions(issues, repositoryFullName),
     [issues, repositoryFullName],
+  );
+  const { registered: registeredRepositories, unregistered: unregisteredRepositories } = useMemo(
+    () => groupRepositoriesByWorkflowStatus(repositories),
+    [repositories],
   );
   const selectableLabels = useMemo(
     () => labels.filter((label) => isSelectableLabelName(label.name)),
@@ -297,11 +316,26 @@ export function CreateIssueDialog({
                 <SelectValue placeholder="リポジトリを選択" />
               </SelectTrigger>
               <SelectContent>
-                {repositories.map((repo) => (
-                  <SelectItem key={repo.id} value={repo.fullName}>
-                    {repo.fullName}
-                  </SelectItem>
-                ))}
+                {registeredRepositories.length > 0 && (
+                  <SelectGroup>
+                    {unregisteredRepositories.length > 0 && <SelectLabel>登録済み</SelectLabel>}
+                    {registeredRepositories.map((repo) => (
+                      <SelectItem key={repo.id} value={repo.fullName}>
+                        {repo.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+                {unregisteredRepositories.length > 0 && (
+                  <SelectGroup>
+                    {registeredRepositories.length > 0 && <SelectLabel>未登録</SelectLabel>}
+                    {unregisteredRepositories.map((repo) => (
+                      <SelectItem key={repo.id} value={repo.fullName}>
+                        {repo.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
           </div>
