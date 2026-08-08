@@ -170,6 +170,16 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
       置き換え）
 - [ ] **バージョン管理方式**（`release-develop-to-main.yml`のバージョンbump処理が前提にする
       `package.json`の`version`フィールド相当のものが存在するか）
+- [ ] **更新履歴表示の同期要否**（対象リポジトリが自アプリ内に更新履歴のコメント表示を持つか）。
+      `release-develop-to-main.yml`はバージョン判定ステップで利用者向けの更新履歴文言
+      （`changelog`）も生成し、バンプ処理を`npm version "$NEW_VERSION" --no-git-tag-version`
+      で実行する際に環境変数`RELEASE_CHANGELOG`としてexportする（#800）。更新履歴表示を持つ
+      リポジトリは、自分の`package.json`に`"scripts": {"version": "..."}`を定義し、その中で
+      `$RELEASE_CHANGELOG`を読んで自前の更新履歴ファイルを書き換える、という契約に乗るだけで
+      よい（`release-develop-to-main.yml`本体はリポジトリ固有の書き込み先を一切知らない）。
+      バンプコミットは`git add -A`で作成されるため、`"version"`スクリプトが新規作成・更新した
+      ファイルは自動的にコミットへ含まれる。更新履歴表示を持たないリポジトリでは`"version"`
+      スクリプトを定義しなければよく、何も変わらない
 
 `m-guchi/shopping-list`のケーススタディでは、実際に差異が出たのは上記のうち
 **パッケージマネージャ／検証コマンド**・**DBセットアップの要否**・**画面確認の可否**の3軸のみで、
