@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import { Archive, CircleCheck, CircleDot, CircleSlash, Lock, MessageSquare, Star } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
+import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
@@ -27,6 +28,11 @@ type IssueListProps = {
   fabSpacing?: boolean;
   /** スマホのボトムナビ（フッター）と最後の項目が重ならないよう、フッターと同じ高さの空白を末尾に追加する（#677） */
   footerSpacing?: boolean;
+  /**
+   * スクロール位置を保存・復元する単位を表すキー（#773）。画面種別と絞り込み条件から作り、
+   * 条件が変われば別の一覧として扱う。省略時は保存・復元を行わない。
+   */
+  scrollKey?: string | null;
 };
 
 function formatRelativeDate(iso: string) {
@@ -74,23 +80,17 @@ export function IssueList({
   showHeader = true,
   fabSpacing = false,
   footerSpacing = false,
+  scrollKey = null,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
+  const issueIds = useMemo(() => issues.map((issue) => issue.id), [issues]);
 
-  // 一覧が再マウントされた直後（Issue詳細から戻ってきた等）に、直前まで表示していた
-  // Issue行が見えるようスクロールする。以降の選択変更では追従しない（空配列deps）。
+  // 一覧が再マウントされた直後（Issue詳細から戻ってきた等）に、直前まで見ていた位置へ戻す。
   // scrollIntoView()は祖先のoverflow-hiddenコンテナ（ヘッダー等を含む）まで巻き込んで
   // スクロールさせてしまうため使わず、<ul>自身のscrollTopのみを直接操作する。
-  useEffect(() => {
-    if (!selectedIssueId) return;
-    const list = listRef.current;
-    const target = itemRefs.current.get(selectedIssueId);
-    if (!list || !target) return;
-    list.scrollTop = target.offsetTop - list.clientHeight / 2 + target.clientHeight / 2;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useIssueListScroll({ scrollKey, issueIds, selectedIssueId, listRef, itemRefs });
 
   return (
     <div className={cn("flex h-full flex-col", className)} style={style}>
@@ -117,9 +117,18 @@ export function IssueList({
           該当するIssueがありません
         </div>
       ) : (
+        // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
+        // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
+        // offsetTopにヘッダー・タブの高さが含まれてしまう（実測で145pxずれる）。
+        // アンカーによる復元は保存時との差分を取るためこのずれが相殺されるが、保存済み位置が
+        // 無いときの中央寄せ（computeCenteredIssueListScrollTop）は生のoffsetTopを使うため、
+        // 基準を揃えないと同じ分だけ下にずれる。
         <ul
           ref={listRef}
-          className={cn("flex-1 overflow-y-auto overscroll-contain", fabSpacing && "pb-20")}
+          className={cn(
+            "relative flex-1 overflow-y-auto overscroll-contain",
+            fabSpacing && "pb-20",
+          )}
         >
           {issues.map((issue) => (
             <li

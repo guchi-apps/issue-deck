@@ -30,6 +30,7 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
@@ -260,6 +261,23 @@ export function IssueDeckShell({
   );
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
+
+  // PC版Issue一覧のスクロール位置を保存・復元する単位（#773）。絞り込み条件が変われば
+  // 別の一覧として扱い、先頭から表示する。
+  const issueListScrollKey = useMemo(
+    () =>
+      buildIssueListScrollKey([
+        "pc",
+        filters.view,
+        filters.q,
+        filters.repo,
+        filters.state,
+        filters.labels.join(","),
+        filters.assignee,
+        filters.sort,
+      ]),
+    [filters],
+  );
 
   // Issue作成ダイアログのリポジトリ選択肢は、サイドメニューで非表示にしたリポジトリを
   // 除いたもの（メニューに表示中のリポジトリ一覧）に揃える（#367）。
@@ -556,6 +574,7 @@ export function IssueDeckShell({
           selectedIssueId={selectedIssue?.id ?? null}
           onSelectIssue={setSelectedIssue}
           showSearch={false}
+          scrollKey={issueListScrollKey}
           className="hidden shrink-0 border-r md:flex"
           style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />

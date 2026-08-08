@@ -48,6 +48,8 @@ type MobileIssueListScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
+  /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
+  scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
   children?: ReactNode;
 };
@@ -72,6 +74,7 @@ export function MobileIssueListScreen({
   onChangeFilters,
   onSelectIssue,
   onCreateIssue,
+  scrollKey,
   children,
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -196,6 +199,7 @@ export function MobileIssueListScreen({
         style={swipeFilterHandlers.style}
         fabSpacing
         footerSpacing
+        scrollKey={scrollKey}
       />
 
       <MobileIssueFilterSheet
