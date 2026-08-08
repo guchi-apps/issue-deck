@@ -60,7 +60,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 2. ラベル体系
 
-マルチエージェント運用の状態遷移・オプション制御に使う11個のラベルは、issue-deckリポジトリに
+マルチエージェント運用の状態遷移・オプション制御に使う12個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、他リポジトリには存在しない。
 
 | ラベル | 色 | 説明 | 用途 |
@@ -76,6 +76,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
+| `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、`02.wip`等の実装フローへ自動で乗らないようにする |
 
 `gh label create`での作成例:
 
@@ -91,6 +92,7 @@ gh label create "21.plan-required" --color d4c5f9 --description "計画の確認
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
 gh label create "24.screenshot-required" --color d4c5f9 --description "スクリーンショットでの視覚確認・承認が必要"
+gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
 ```
 
 issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目的のみで使う一般的なラベルも
