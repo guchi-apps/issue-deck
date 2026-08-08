@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, TouchEvent } from "react";
-import { ArrowLeft, Plus, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, MessageCircleQuestion, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import {
@@ -48,6 +48,8 @@ type MobileIssueListScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
+  /** 指定時は「リポジトリに質問する」FABをあわせて表示する（#691） */
+  onAskQuestion?: () => void;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -74,6 +76,7 @@ export function MobileIssueListScreen({
   onChangeFilters,
   onSelectIssue,
   onCreateIssue,
+  onAskQuestion,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
@@ -215,14 +218,26 @@ export function MobileIssueListScreen({
 
       {children}
 
-      <button
-        type="button"
-        onClick={onCreateIssue}
-        aria-label="新しいIssueを作成"
-        className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
-      >
-        <Plus className="size-5" />
-      </button>
+      <div className="absolute right-4 bottom-4 flex items-center gap-2">
+        {onAskQuestion && (
+          <button
+            type="button"
+            onClick={onAskQuestion}
+            aria-label="リポジトリに質問する"
+            className="flex size-12 items-center justify-center rounded-full border bg-background shadow-lg"
+          >
+            <MessageCircleQuestion className="size-5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onCreateIssue}
+          aria-label="新しいIssueを作成"
+          className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        >
+          <Plus className="size-5" />
+        </button>
+      </div>
     </div>
   );
 }

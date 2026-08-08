@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
+import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -100,6 +101,8 @@ export function IssueDeckShell({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
+  const [askDialogOpen, setAskDialogOpen] = useState(false);
+  const [askDialogRepo, setAskDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
 
   // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
@@ -137,6 +140,11 @@ export function IssueDeckShell({
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
     setCreateDialogBody(null);
     setCreateDialogOpen(true);
+  }
+
+  function openAskRepoQuestionDialog(repositoryFullName?: string | null) {
+    setAskDialogRepo(repositoryFullName ?? null);
+    setAskDialogOpen(true);
   }
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
@@ -404,6 +412,9 @@ export function IssueDeckShell({
         onCreateIssue={() =>
           openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
         }
+        onAskQuestion={() =>
+          openAskRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+        }
         selectedRepoFullName={filters.repos[0] ?? null}
         repositories={repositories}
         issues={issues}
@@ -450,6 +461,7 @@ export function IssueDeckShell({
                     onChangeFilters={(filters) => updateListFilters(filters)}
                     onSelectIssue={selectIssue}
                     onCreateIssue={() => openCreateDialog()}
+                    onAskQuestion={() => openAskRepoQuestionDialog()}
                     onBack={mobileScreen.origin === "home" ? goBack : undefined}
                   />
                 )}
@@ -487,6 +499,9 @@ export function IssueDeckShell({
                     onSelectIssue={selectIssue}
                     onBack={goBack}
                     onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
+                    onAskQuestion={() =>
+                      openAskRepoQuestionDialog(mobileScreen.repository.fullName)
+                    }
                   />
                 )}
 
@@ -595,6 +610,13 @@ export function IssueDeckShell({
         defaultRepositoryFullName={createDialogRepo}
         defaultBody={createDialogBody}
         issues={issues}
+        onCreated={handleIssueCreated}
+      />
+      <AskRepoQuestionDialog
+        open={askDialogOpen}
+        onOpenChange={setAskDialogOpen}
+        repositories={visibleRepositories}
+        defaultRepositoryFullName={askDialogRepo}
         onCreated={handleIssueCreated}
       />
       <QuickFilterDialog

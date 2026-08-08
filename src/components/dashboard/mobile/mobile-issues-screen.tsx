@@ -29,6 +29,7 @@ type MobileIssuesScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
+  onAskQuestion: () => void;
   onBack?: () => void;
 };
 
@@ -47,6 +48,7 @@ export function MobileIssuesScreen({
   onChangeFilters,
   onSelectIssue,
   onCreateIssue,
+  onAskQuestion,
   onBack,
 }: MobileIssuesScreenProps) {
   const displayedIssues = useMemo(() => {
@@ -92,6 +94,7 @@ export function MobileIssuesScreen({
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
+      onAskQuestion={onAskQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
     />
