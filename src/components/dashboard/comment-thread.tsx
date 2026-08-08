@@ -7,6 +7,7 @@ import {
   Check,
   GitMerge,
   Loader2,
+  Mic,
   MoreHorizontal,
   Pencil,
   RotateCw,
@@ -40,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
+import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
@@ -83,7 +84,7 @@ type CommentThreadProps = {
   workflowRun?: WorkflowRunInfo | null;
   /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
   workflowRunCommentId?: string | null;
-  onApprove?: () => Promise<void> | void;
+  onApprove?: (text?: string) => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   onWithdraw?: () => Promise<void> | void;
   /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
@@ -106,6 +107,69 @@ type CommentThreadProps = {
   commentSummary: IssueCommentSummaries;
 };
 
+/** 承認・修正カード共通のテキスト入力欄。MentionTextarea常設表示＋「音声入力を整理」ボタンを担う */
+function ApprovalTextField({
+  value,
+  onChange,
+  placeholder,
+  repositoryFullName,
+  issueSuggestions,
+  disabled,
+  onUploadingChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  repositoryFullName: string;
+  issueSuggestions: IssueSuggestion[];
+  disabled?: boolean;
+  onUploadingChange?: (uploading: boolean) => void;
+}) {
+  const {
+    isGenerating: isCleaningUp,
+    error: cleanupError,
+    notConfigured: cleanupNotConfigured,
+    generate: generateCleanup,
+  } = useIssueBodyCleanup();
+
+  async function handleCleanup() {
+    const result = await generateCleanup(value);
+    if (!result) return;
+    onChange(result.text);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <MentionTextarea
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        issueSuggestions={issueSuggestions}
+        repositoryFullName={repositoryFullName}
+        onUploadingChange={onUploadingChange}
+        disabled={disabled}
+      />
+      <div className="flex flex-col gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="w-fit"
+          disabled={!value.trim() || isCleaningUp || disabled}
+          onClick={handleCleanup}
+        >
+          {isCleaningUp ? <Loader2 className="animate-spin" /> : <Mic />}
+          音声入力を整理
+        </Button>
+        {cleanupNotConfigured && (
+          <p className="text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>
+        )}
+        {cleanupError && <p className="text-xs text-destructive">{cleanupError}</p>}
+      </div>
+    </div>
+  );
+}
+
 function ApprovalActions({
   onApprove,
   onReject,
@@ -124,8 +188,10 @@ function ApprovalActions({
   mergeApprovalPending,
   pullRequestLink,
   pullRequestCiStatus,
+  repositoryFullName,
+  issueSuggestions,
 }: {
-  onApprove: () => Promise<void> | void;
+  onApprove: (text?: string) => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
   onWithdraw: () => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
@@ -142,22 +208,42 @@ function ApprovalActions({
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
   pullRequestCiStatus?: PullRequestCiStatus | null;
+  repositoryFullName: string;
+  issueSuggestions: IssueSuggestion[];
 }) {
-  const [isRejectOpen, setIsRejectOpen] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
+  const [text, setText] = useState("");
+  const [textValidationError, setTextValidationError] = useState<string | null>(null);
+  const [isTextUploading, setIsTextUploading] = useState(false);
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
-  const [isPrFixOpen, setIsPrFixOpen] = useState(false);
   const [prFixReason, setPrFixReason] = useState("");
+  const [prFixValidationError, setPrFixValidationError] = useState<string | null>(null);
+  const [isPrFixTextUploading, setIsPrFixTextUploading] = useState(false);
   const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
   const [isMerged, setIsMerged] = useState(false);
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
   const prFixBusy = Boolean(isRequestingPrFix);
   const mergeBusy = Boolean(isMergingPullRequest);
 
+  function changeText(value: string) {
+    setText(value);
+    setTextValidationError(null);
+  }
+
+  async function submitApprove() {
+    const trimmed = text.trim();
+    await onApprove(trimmed ? trimmed : undefined);
+    setText("");
+    setTextValidationError(null);
+  }
+
   async function submitReject() {
-    await onReject(rejectReason);
-    setIsRejectOpen(false);
-    setRejectReason("");
+    if (!text.trim()) {
+      setTextValidationError("修正内容を入力してください");
+      return;
+    }
+    await onReject(text);
+    setText("");
+    setTextValidationError(null);
   }
 
   async function confirmWithdraw() {
@@ -165,11 +251,20 @@ function ApprovalActions({
     setIsWithdrawConfirmOpen(false);
   }
 
+  function changePrFixReason(value: string) {
+    setPrFixReason(value);
+    setPrFixValidationError(null);
+  }
+
   async function submitPrFix() {
     if (!onRequestPrFix) return;
+    if (!prFixReason.trim()) {
+      setPrFixValidationError("修正内容を入力してください");
+      return;
+    }
     await onRequestPrFix(prFixReason);
-    setIsPrFixOpen(false);
     setPrFixReason("");
+    setPrFixValidationError(null);
   }
 
   async function confirmMerge() {
@@ -244,46 +339,29 @@ function ApprovalActions({
           </div>
         )}
         {onRequestPrFix && !isMerged && (
-          <div className="mt-2">
-            {isPrFixOpen ? (
-              <div className="flex flex-col gap-2">
-                <Textarea
-                  placeholder="修正依頼を入力（任意）"
-                  value={prFixReason}
-                  onChange={(e) => setPrFixReason(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !prFixBusy) {
-                      e.preventDefault();
-                      submitPrFix();
-                    }
-                  }}
-                  autoFocus
-                />
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsPrFixOpen(false)}
-                    disabled={prFixBusy}
-                  >
-                    キャンセル
-                  </Button>
-                  <Button size="sm" onClick={submitPrFix} disabled={prFixBusy}>
-                    修正を送信
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsPrFixOpen(true)}
-                disabled={prFixBusy}
-              >
-                <Pencil />
-                修正を依頼する
-              </Button>
+          <div className="mt-2 flex flex-col gap-2">
+            <ApprovalTextField
+              value={prFixReason}
+              onChange={changePrFixReason}
+              placeholder="修正依頼を入力（必須）"
+              repositoryFullName={repositoryFullName}
+              issueSuggestions={issueSuggestions}
+              disabled={prFixBusy}
+              onUploadingChange={setIsPrFixTextUploading}
+            />
+            {prFixValidationError && (
+              <p className="text-sm text-destructive">{prFixValidationError}</p>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={submitPrFix}
+              disabled={prFixBusy || isPrFixTextUploading}
+            >
+              <Pencil />
+              修正を依頼する
+            </Button>
           </div>
         )}
       </div>
@@ -293,30 +371,7 @@ function ApprovalActions({
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
       <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
-      {isRejectOpen ? (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            placeholder="修正依頼を入力（任意）"
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !busy) {
-                e.preventDefault();
-                submitReject();
-              }
-            }}
-            autoFocus
-          />
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(false)} disabled={busy}>
-              キャンセル
-            </Button>
-            <Button variant="destructive" size="sm" onClick={submitReject} disabled={busy}>
-              修正を送信
-            </Button>
-          </div>
-        </div>
-      ) : isFallbackNotice ? (
+      {isFallbackNotice ? (
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
             <RotateCw />
@@ -333,24 +388,41 @@ function ApprovalActions({
           </Button>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => onApprove()} disabled={busy}>
-            <Check />
-            承認
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setIsRejectOpen(true)} disabled={busy}>
-            <X />
-            修正
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsWithdrawConfirmOpen(true)}
+        <div className="flex flex-col gap-2">
+          <ApprovalTextField
+            value={text}
+            onChange={changeText}
+            placeholder="コメントを入力（承認は任意、修正は入力必須）"
+            repositoryFullName={repositoryFullName}
+            issueSuggestions={issueSuggestions}
             disabled={busy}
-          >
-            <Ban />
-            取り下げ
-          </Button>
+            onUploadingChange={setIsTextUploading}
+          />
+          {textValidationError && <p className="text-sm text-destructive">{textValidationError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={submitApprove} disabled={busy || isTextUploading}>
+              <Check />
+              承認
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={submitReject}
+              disabled={busy || isTextUploading}
+            >
+              <X />
+              修正
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsWithdrawConfirmOpen(true)}
+              disabled={busy}
+            >
+              <Ban />
+              取り下げ
+            </Button>
+          </div>
         </div>
       )}
 
@@ -448,6 +520,8 @@ export function CommentThread({
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
+            repositoryFullName={repositoryFullName}
+            issueSuggestions={issueSuggestions}
           />
         )}
       </>
@@ -658,6 +732,8 @@ export function CommentThread({
                   mergeApprovalPending={mergeApprovalPending}
                   pullRequestLink={pullRequestLink}
                   pullRequestCiStatus={pullRequestCiStatus}
+                  repositoryFullName={repositoryFullName}
+                  issueSuggestions={issueSuggestions}
                 />
               )}
             </li>
@@ -683,6 +759,8 @@ export function CommentThread({
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
           pullRequestCiStatus={pullRequestCiStatus}
+          repositoryFullName={repositoryFullName}
+          issueSuggestions={issueSuggestions}
         />
       )}
 

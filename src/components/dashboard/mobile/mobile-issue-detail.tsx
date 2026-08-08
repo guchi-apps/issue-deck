@@ -345,8 +345,11 @@ export function MobileIssueDetail({
     );
   }
 
-  async function handleApprove() {
-    await updateLabelsAndComment(labelsAfterApproval(issue.labels), approveCommentBody(issue.labels));
+  async function handleApprove(text?: string) {
+    await updateLabelsAndComment(
+      labelsAfterApproval(issue.labels),
+      approveCommentBody(issue.labels, text),
+    );
   }
 
   async function handleReject(reason: string) {
@@ -528,7 +531,14 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      <div ref={scrollContainerRef} className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20">
+      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
+          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
+          スクロールして写すための目印 */}
+      <div
+        ref={scrollContainerRef}
+        data-capture-scroll-bottom
+        className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
+      >
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
           {issue.repositoryFullName}

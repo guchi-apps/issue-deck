@@ -66,6 +66,27 @@ describe("approveCommentBody", () => {
       "@claude 計画を承認しました。実装を進めてください。\n<!-- issue-deck:no-trigger -->",
     );
   });
+
+  it("textを渡した場合は入力内容の後に定型の補足文を続ける", () => {
+    const body = approveCommentBody([makeLabel("00.check-user")], "  ここも直しておいて  ");
+    expect(body).toBe("@claude ここも直しておいて\n\n確認しました。実装を進めてください。");
+  });
+
+  it("21.plan-requiredがある状態でtextを渡した場合は計画向けの補足文を続け、no-triggerマーカーを付与する", () => {
+    const body = approveCommentBody(
+      [makeLabel("00.check-user"), makeLabel("21.plan-required")],
+      "ここも直しておいて",
+    );
+    expect(body).toBe(
+      "@claude ここも直しておいて\n\n計画を承認しました。実装を進めてください。\n<!-- issue-deck:no-trigger -->",
+    );
+  });
+
+  it("textが空白のみの場合はtext無し扱いで定型文のみを返す", () => {
+    expect(approveCommentBody([makeLabel("00.check-user")], "   ")).toBe(
+      "@claude 確認しました。実装を進めてください。",
+    );
+  });
 });
 
 describe("rejectCommentBody", () => {
