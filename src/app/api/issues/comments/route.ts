@@ -13,6 +13,7 @@ import {
   type GithubApiComment,
   updateComment,
 } from "@/lib/github/issues-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 // scripts/seed-ci-db.mjsが投入するCI用ダミーリポジトリのgithubRepositoryIdと一致させること。
 // このリポジトリは実在しないためGitHub APIからコメントを取得できず、無人実行での
@@ -109,6 +110,8 @@ async function handleGET(request: NextRequest) {
 }
 
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("comment_write", () => handlePOST(request));
 }
 
@@ -161,6 +164,8 @@ async function handlePOST(request: NextRequest) {
 }
 
 export function PATCH(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("comment_write", () => handlePATCH(request));
 }
 
@@ -207,6 +212,8 @@ async function handlePATCH(request: NextRequest) {
 }
 
 export function DELETE(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("comment_write", () => handleDELETE(request));
 }
 

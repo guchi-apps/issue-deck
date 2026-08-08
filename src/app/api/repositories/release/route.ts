@@ -14,6 +14,7 @@ import {
   fetchRefCiState,
   fetchReleaseWorkflowExists,
 } from "@/lib/github/release-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * `release-develop-to-main.yml`の有無はほとんど変化しないため、ポーリングのたびに問い合わせず
@@ -155,6 +156,8 @@ async function handleGET(request: NextRequest) {
 }
 
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("release_dispatch", () => handlePOST(request));
 }
 
