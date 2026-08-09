@@ -279,7 +279,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(grep:*),Bash(find:*)"'
           prompt: |
             あなたはissue-deckリポジトリのCI失敗修正エージェントです。GitHub Actions上で
             無人実行されており、対応するIssueは #${{ needs.detect.outputs.issue_number }}、
