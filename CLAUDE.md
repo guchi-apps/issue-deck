@@ -93,6 +93,8 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
+`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細はdocs/multi-agent-workflow.md「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`89.Priority: low`へリネームした。
+
 `07.m:marge`・`09.main`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細はdocs/multi-agent-workflow.md「Phase 6」参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
 
 ### 自動マージ不可カテゴリ（`00.check-user`付与対象）

@@ -241,6 +241,20 @@ Actions上でClaude Codeを動かす際の知見、共通コーディング方�
 
 ローカル実行はユーザー自身のGitHub認証で動くため、「developへの直接push禁止」はGitHubのbranch protectionでは技術的に強制できない（bypassしても同じアカウントになるため）。この段階ではCLAUDE.md・プロンプト内の運用ルールとして守らせる。GitHub Actionsでは専用トークンという別IDが使えるため、branch protectionのbypass listを人間アカウントのみにする設計が意味を持つ。
 
+### ローカル実行と無人実行の二重起動を防ぐ（`11.local`）
+
+同じIssueをローカルセッションと`claude-issue-dispatch.yml`（無人実行）が同時に進めてしまう事故が起きうる（#905）。原因は、無人実行が「計画が承認された」と判断するシグナルが`00.check-user`ラベルの除去である一方、ローカルセッションも承認を受けてラベルを次段階へ進める際に同じ操作を行うため、両者をイベントから区別できないことにある。#905では、ローカル側がPRを作成している裏で無人実行が計画フェーズを最初からやり直し、`21.plan-required`・`00.check-user`・`01.planning`・`03.d:marge`が同時に付いた矛盾状態になった。
+
+これを二段構えで防ぐ（#919）。
+
+1. **`issues/unlabeled`経路のガード**: `00.check-user`の除去イベントを受けた時点で`02.wip`または`03.d:marge`が付いている場合、そのIssueは別経路で着手済み・PR作成済みなので`mode=skip`とする。
+   `01.planning`はこの判定に含めない。無人実行の計画提示ステップが付けた`01.planning`は実装着手時まで外れず、正規の承認時点の状態が「`01.planning` + `00.check-user` + `21.plan-required`」になるため、含めると本来の承認経路が動かなくなる。
+2. **`11.local`ラベル**: 付いている間は、トリガー経路によらず`mode=skip`とする（読み取り専用の`mode=ask`だけは例外として通す）。1のガードはラベルを付け替える順序によってはすり抜ける（ローカル側が`02.wip`を付ける前に`00.check-user`を外した場合など）ため、人間が明示的に立てられる停止フラグを併せて用意する。
+   `@claude`コメント経由でスキップした場合は、無言で終わらせず「`11.local`が付いているため無人実行では対応しない」旨をIssueへ返信する。
+   順番待ちの間に`11.local`が付いた場合も、`dispatch`ジョブ冒頭の陳腐化チェックで検知して中止する。
+
+`11.local`は`0x.`始まりではないため、issue-deck画面上は進捗ステップ（`WorkflowStepBadge`）ではなく通常のラベルとして表示・編集できる（`src/lib/issue-status.ts`の`isProgressLabel`）。
+
 ## ブランチ保護ルール案
 
 - **`main`**: 組織標準（`_docs/guides/github-repo-setup.md` §5）どおり設定する。Require pull request before merging、Required status checks=`lint-and-build`（`.github/workflows/ci.yml`のジョブ名）、Restrict updates、bypass=自分のアカウント（For pull requests only）。**現状（2026年時点）未設定のため要設定。** 実際の設定はGitHub Web UIで行う（workflowでは自動化しない）。
