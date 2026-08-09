@@ -201,6 +201,14 @@ on:
         required: false
         type: string
         default: app_ci
+      prompts-ref:
+        description: >-
+          プロンプト(.github/prompts/)の取得元とするissue-deckのref。
+          未指定なら呼び出し元リポジトリの.github/prompts/を使う(issue-deck自身はこちら)。
+          他リポジトリから呼ぶ場合は uses: と同じタグを指定する。
+        required: false
+        type: string
+        default: ""
       node-version:
         description: >-
           実装(mode=implement|additional)の前にセットアップするNode.jsのバージョン。
@@ -682,6 +690,45 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           token: ${{ secrets.WORKFLOW_PAT }}
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
+        # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための
+        # 取得経路(#960)。
+        #
+        # 未指定(既定)なら何もしない。issue-deck自身は自分の.github/prompts/を使うため指定しない。
+        # 他リポジトリはuses:と同じタグを指定する。uses:のrefは式で書けず(@${{ }}は不可)、
+        # 再利用ワークフローが自分のrefを知る手段も無いため、callerから渡してもらう以外に方法がない。
+        #
+        # persist-credentials: false は共有知識のcheckoutと同じ理由(本体リポジトリのpush認証と
+        # 混線させないため)。continue-on-errorは付けない。プロンプトは「あれば精度が上がる」補助情報
+        # ではなく必須であり、取得に失敗したまま進むと空のプロンプトで走り出すため。
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: m-guchi/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: プロンプトの参照先を決める
+        # 以降のプロンプト組み立てステップが参照するディレクトリを1箇所で決める(#960)。
+        env:
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROMPTS_REF" ]; then
+            DIR=.shared-prompts/.github/prompts
+          else
+            DIR=.github/prompts
+          fi
+          if [ ! -d "$DIR" ]; then
+            echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
+            exit 1
+          fi
+          echo "プロンプトの参照先: $DIR"
+          echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
         # 同じ id: state として出力し直す(#651)。ファイル全体に101箇所ある steps.state.outputs.*
@@ -934,7 +981,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          PROMPT_FILE=.github/prompts/plan.md
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/plan.md"
           # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
           # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
           if [ ! -s "$PROMPT_FILE" ]; then
@@ -1191,7 +1238,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          PROMPT_FILE=.github/prompts/split.md
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/split.md"
           # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
           # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
           if [ ! -s "$PROMPT_FILE" ]; then
@@ -1270,7 +1317,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          PROMPT_FILE=.github/prompts/question.md
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/question.md"
           # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
           # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
           if [ ! -s "$PROMPT_FILE" ]; then
@@ -1470,7 +1517,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          PROMPT_FILE=.github/prompts/implement.md
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/implement.md"
           # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
           # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
           if [ ! -s "$PROMPT_FILE" ]; then

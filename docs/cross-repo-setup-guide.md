@@ -42,7 +42,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
 | `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義とプレビュー系ジョブのみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系の`deploy-preview`／`notify-preview-url`ジョブはFly.io設定がアプリ固有のため、caller側に置いて対象リポジトリの`deploy-preview.yml`を呼ぶ |
-| `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下もissue-deck側のものが使われるためコピー不要 |
+| `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下は`prompts-ref`で取得元を指定する（下記「プロンプトの取得元」。**指定しないと呼び出し元側の`.github/prompts/`が読まれ、無ければ落ちる**） |
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
@@ -107,6 +107,29 @@ jobs:
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
+#### プロンプトの取得元（`prompts-ref`）
+
+**他リポジトリから呼ぶ場合は必ず指定する。**
+
+```yaml
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v5
+    with:
+      prompts-ref: workflows/v5   # ↑の uses: と同じタグを指定する
+```
+
+共有ワークフローは `actions/checkout`（`repository:` 未指定＝呼び出し元）でチェックアウトするため、**`.github/prompts/` 配下も呼び出し元リポジトリのものが読まれる**。指定しないと、プロンプトを持たないリポジトリでは最初のClaudeステップで落ちる。
+
+- `prompts-ref` が空（既定）→ 呼び出し元の `.github/prompts/` を使う。**issue-deck 自身はこちら**
+- 非空 → `m-guchi/issue-deck` をその ref でチェックアウトし、そちらのプロンプトを使う
+
+プロンプトを各リポジトリへコピーしない方針にしているのは、4ファイル・約48KBあり中身のほとんどが汎用である一方、**最も更新頻度が高い部分**だから。コピーすると、ワークフロー本体を集約した意味が薄れる。
+
+##### なぜタグを2回書くのか
+
+`uses:` の ref は式で書けず（`@${{ inputs.x }}` は不可）、再利用ワークフローが**自分の ref を知る手段も無い**ため、呼び出し元から渡してもらう以外に方法がない。上の例のように `uses:` の直下に並べて書くこと。
+
+`uses:` のタグだけ上げて `prompts-ref` を据え置くと、**新しいワークフローで古いプロンプトが使われる**。タグを上げる際は必ず両方を更新する。
+
 #### 実装ステップのNodeバージョン固定（`node-version`）
 
 ```yaml
@@ -161,7 +184,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v1` | `reusable-issue-labels.yml` | |
 | `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成 |
 | `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
-| `workflows/v4` | 上記 | `node-version` inputs を追加（#956）。**本ドキュメント執筆時点では未作成** |
+| `workflows/v4` | 上記 | `node-version` inputs を追加（#956） |
+| `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960）。**本ドキュメント執筆時点では未作成** |
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
