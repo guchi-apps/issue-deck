@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  isSelectableLabelName,
   startImplementationCommentBody,
   startImplementationLabelsForCreate,
 } from "@/lib/github/start-implementation";
@@ -35,5 +36,24 @@ describe("startImplementationLabelsForCreate", () => {
       WIP_LABEL_NAME,
       "bug",
     ]);
+  });
+});
+
+describe("isSelectableLabelName", () => {
+  it("通常のラベルは選択可能と判定する", () => {
+    expect(isSelectableLabelName("bug")).toBe(true);
+  });
+
+  it("実装フロー制御ラベル（21.plan-required等）は選択不可と判定する（#887: 質問Issue作成時に選べてしまう不具合の直接原因）", () => {
+    expect(isSelectableLabelName("21.plan-required")).toBe(false);
+    expect(isSelectableLabelName("22.merge-confirm-required")).toBe(false);
+    expect(isSelectableLabelName("23.preview-required")).toBe(false);
+    expect(isSelectableLabelName("24.screenshot-required")).toBe(false);
+  });
+
+  it("進捗管理用ラベル（00〜09番台）は選択不可と判定する", () => {
+    expect(isSelectableLabelName("00.check-user")).toBe(false);
+    expect(isSelectableLabelName("00.qa-answered")).toBe(false);
+    expect(isSelectableLabelName("02.wip")).toBe(false);
   });
 });

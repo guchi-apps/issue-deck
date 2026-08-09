@@ -88,12 +88,13 @@ Markdownに置いている（#907）。**ワークフローファイルだけを
 
 ## 2. ラベル体系
 
-マルチエージェント運用の状態遷移・オプション制御に使う12個のラベルは、issue-deckリポジトリに
+マルチエージェント運用の状態遷移・オプション制御に使う13個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、他リポジトリには存在しない。
 
 | ラベル | 色 | 説明 | 用途 |
 |---|---|---|---|
 | `00.check-user` | `f0883e` | ユーザーの確認・指示が必要 | 承認待ち・自動マージ保留の合図。他の状態ラベルと併用 |
+| `00.qa-answered` | `c5def5` | 質問への回答のみ完了 | `00.check-user`と常に併用。単なる質問・確認と判定された場合に付与し、承認ボタンの文言を出し分ける |
 | `01.planning` | `e9f7e6` | 状態：計画検討中 | `21.plan-required`選択時のみ経由 |
 | `02.wip` | `d3f2d0` | 状態：実装中 | 実装エージェントが着手時に付与 |
 | `03.d:marge` | `a8e6a1` | developへのPRを作成・マージ待ち | PR作成時に付与 |
@@ -110,6 +111,7 @@ Markdownに置いている（#907）。**ワークフローファイルだけを
 
 ```bash
 gh label create "00.check-user" --color f0883e --description "ユーザーの確認・指示が必要"
+gh label create "00.qa-answered" --color c5def5 --description "質問への回答のみ完了"
 gh label create "01.planning" --color e9f7e6 --description "状態：計画検討中"
 gh label create "02.wip" --color d3f2d0 --description "状態：実装中"
 gh label create "03.d:marge" --color a8e6a1 --description "developへのPRを作成・マージ待ち"

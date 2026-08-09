@@ -4,6 +4,7 @@ import {
   PLANNING_LABEL_NAME,
   WIP_LABEL_NAME,
 } from "@/lib/github/workflow-status";
+import { isProgressLabel } from "@/lib/issue-status";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 /**
@@ -71,6 +72,19 @@ export const START_IMPLEMENTATION_OPTIONS: {
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
   },
 ];
+
+/** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
+const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
+  START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel),
+);
+
+/**
+ * 進捗管理用ラベル・実装オプション用ラベルを除いた、ユーザーが選択可能なラベルかどうか。
+ * 「新しいIssueを作成」「リポジトリに質問する」の両ラベル選択欄で共通して使う（#887）。
+ */
+export function isSelectableLabelName(name: string): boolean {
+  return !isProgressLabel(name) && !START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);
+}
 
 /**
  * 選択されたオプションに対応するGitHubラベル名の配列を返す。
