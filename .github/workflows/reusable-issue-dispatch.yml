@@ -201,6 +201,14 @@ on:
         required: false
         type: string
         default: app_ci
+      node-version:
+        description: >-
+          実装(mode=implement|additional)の前にセットアップするNode.jsのバージョン。
+          未指定ならセットアップしない(ランナー既定のNodeを使う)。
+          ランタイム準備側のSetup Nodeのバージョンにも使われる(未指定時は24)。
+        required: false
+        type: string
+        default: ""
       post-implement-script:
         description: >-
           実装(mode=implement|additional)の成功後に実行するスクリプトのパス。
@@ -1341,6 +1349,27 @@ jobs:
           git fetch origin "${{ steps.state.outputs.branch }}"
           git checkout "${{ steps.state.outputs.branch }}"
 
+      - name: Setup Node.js（実装ステップ用）
+        # 実装ステップ自体が使うNodeのバージョンを固定するための、呼び出し元向けの拡張点(#956)。
+        # 下のランタイム準備ブロックのSetup Nodeとは目的が異なる。あちらは撮影・DB準備のための
+        # ものでscreenshot_requiredに紐づくが、こちらは撮影の有無によらず実装のたびに効かせたい。
+        #
+        # プリセット(runtime-setup)に混ぜると、撮影を使わないリポジトリがバージョン固定のためだけに
+        # nodeプリセットを選ばざるを得ず、不要な依存インストールとPlaywrightのダウンロードまで
+        # 走ってしまう。直交する軸として独立させている。
+        #
+        # issue-deckは未指定のためスキップされ、従来どおりランナー既定のNodeで動く。
+        #
+        # node-versionを指定しつつruntime-setupがnode/node-dbで、かつscreenshot_requiredも
+        # trueの場合はactions/setup-nodeが2回走るが、同じバージョンの再実行はキャッシュヒットで
+        # 数秒であり実害は無い。条件を複雑にして避けるより素直な条件のまま許容する。
+        if: |
+          inputs.node-version != '' &&
+          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
       # ここから7ステップはランタイム準備。呼び出し元リポジトリの技術スタックによって
       # 要否が変わるため、inputs.runtime-setup / inputs.package-manager で出し分ける(#945)。
       # いずれもスクリーンショット撮影(scripts/capture-issue-screenshots.sh)でのみ使われる(#258)。
@@ -1353,7 +1382,7 @@ jobs:
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ inputs.package-manager }}
 
       - name: 依存関係をインストールする（DBセットアップ用）
