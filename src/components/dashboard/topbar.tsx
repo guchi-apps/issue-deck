@@ -10,23 +10,36 @@ import {
   PanelLeftOpen,
   Plus,
   Search,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { AccountMenuDialog } from "@/components/dashboard/account-menu-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
+
+/** フィルターポップオーバー内の選択肢チップ（#944：ヘッダーが崩れないよう状態・担当者・
+ * 並び順・表示切り替えを1つの「フィルター」ボタンにまとめた） */
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button type="button" variant={active ? "default" : "outline"} size="xs" onClick={onClick}>
+      {children}
+    </Button>
+  );
+}
 
 type TopBarProps = {
   currentUser: CurrentUser | null;
@@ -114,89 +127,82 @@ export function TopBar({
         />
       </div>
 
-      <div className="flex flex-1 flex-wrap items-center gap-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+      <div className="flex flex-1 items-center gap-2">
+        <Popover>
+          <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="text-xs">
-              {stateLabel}
+              <SlidersHorizontal className="size-3" />
+              フィルター
               <ChevronDown className="size-3" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuRadioGroup
-              value={filters.state}
-              onValueChange={(value) =>
-                setFilter(
-                  "state",
-                  value === "open" || value === "closed" ? value : "all",
-                )
-              }
-            >
-              <DropdownMenuRadioItem value="all">すべて</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="open">Open</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="closed">Closed</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="space-y-4">
+            <section>
+              <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">{stateLabel}</h3>
+              <div className="flex flex-wrap gap-1.5">
+                <FilterChip active={filters.state === "all"} onClick={() => setFilter("state", "all")}>
+                  すべて
+                </FilterChip>
+                <FilterChip active={filters.state === "open"} onClick={() => setFilter("state", "open")}>
+                  Open
+                </FilterChip>
+                <FilterChip active={filters.state === "closed"} onClick={() => setFilter("state", "closed")}>
+                  Closed
+                </FilterChip>
+              </div>
+            </section>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="text-xs">
-              {assigneeLabel}
-              <ChevronDown className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuRadioGroup
-              value={filters.assignee ?? ""}
-              onValueChange={(value) => setFilter("assignee", value || null)}
-            >
-              <DropdownMenuRadioItem value="">すべて</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="unassigned">未設定</DropdownMenuRadioItem>
-              {assigneeOptions.map((login) => (
-                <DropdownMenuRadioItem key={login} value={login}>
-                  {login}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <section>
+              <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">{assigneeLabel}</h3>
+              <div className="flex flex-wrap gap-1.5">
+                <FilterChip active={filters.assignee === null} onClick={() => setFilter("assignee", null)}>
+                  すべて
+                </FilterChip>
+                <FilterChip
+                  active={filters.assignee === "unassigned"}
+                  onClick={() => setFilter("assignee", "unassigned")}
+                >
+                  未設定
+                </FilterChip>
+                {assigneeOptions.map((login) => (
+                  <FilterChip
+                    key={login}
+                    active={filters.assignee === login}
+                    onClick={() => setFilter("assignee", login)}
+                  >
+                    {login}
+                  </FilterChip>
+                ))}
+              </div>
+            </section>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              disabled={isCheckUserView}
-              title={isCheckUserView ? "確認待ちビューでは確認が古い順に固定されます" : undefined}
-            >
-              {sortLabel}
-              <ChevronDown className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuRadioGroup
-              value={filters.sort}
-              onValueChange={(value) => setFilter("sort", value === "created" ? "created" : "updated")}
-            >
-              <DropdownMenuRadioItem value="updated">更新日</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="created">作成日</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <section>
+              <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">{sortLabel}</h3>
+              {isCheckUserView ? (
+                <p className="text-xs text-muted-foreground">
+                  確認待ちビューでは確認が古い順に固定されます
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  <FilterChip active={filters.sort === "updated"} onClick={() => setFilter("sort", "updated")}>
+                    更新日
+                  </FilterChip>
+                  <FilterChip active={filters.sort === "created"} onClick={() => setFilter("sort", "created")}>
+                    作成日
+                  </FilterChip>
+                </div>
+              )}
+            </section>
 
-        <Button
-          variant={groupByRepo ? "default" : "outline"}
-          size="sm"
-          className="text-xs"
-          onClick={() => onChangeGroupByRepo(!groupByRepo)}
-          title="リポジトリごとに分けて表示"
-          aria-pressed={groupByRepo}
-        >
-          <FolderTree className="size-3" />
-          リポジトリ別
-        </Button>
+            <section>
+              <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">表示</h3>
+              <FilterChip active={groupByRepo} onClick={() => onChangeGroupByRepo(!groupByRepo)}>
+                <FolderTree className="size-3" />
+                リポジトリ別
+              </FilterChip>
+            </section>
+          </PopoverContent>
+        </Popover>
       </div>
 
       <Button variant="outline" size="sm" className="text-xs" onClick={onAskQuestion}>
