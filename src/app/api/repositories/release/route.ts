@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { extractBumpChangelog, extractBumpReason } from "@/lib/github/release-bump-reason";
+import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
   dispatchReleaseWorkflow,
   fetchLatestDeployWorkflowRun,
@@ -81,6 +82,17 @@ async function handleGET(request: NextRequest) {
     const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
     const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
 
+    // バンプPR自身を除いた、develop向けのその他のオープンPR一覧。Issueを起票せず直接
+    // developへPRを作った場合に気づけるよう、リリース確認ダイアログで一覧表示する(#977)。
+    const otherPullRequests = developBasePullRequests
+      .filter((pr) => pr.number !== bumpPr?.number)
+      .map((pr) => ({
+        number: pr.number,
+        url: pr.html_url,
+        title: pr.title,
+        issueNumbers: extractLinkedIssueNumbers(pr.title, pr.body),
+      }));
+
     // バンプPR・develop→mainのPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
     const [bumpCiState, releaseCiState] = await Promise.all([
       bumpPr ? fetchRefCiState(owner, repo, bumpPr.head.ref, token) : Promise.resolve(null),
@@ -127,6 +139,7 @@ async function handleGET(request: NextRequest) {
             ciState: releaseCiState,
           }
         : null,
+      otherPullRequests,
     });
   } catch (error) {
     console.error(`[GET /api/repositories/release] ${owner}/${repo}:`, error);

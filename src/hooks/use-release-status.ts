@@ -34,6 +34,15 @@ export type ReleaseWorkflowRun = {
   createdAt: string;
 };
 
+/** バンプPR自身を除いた、develop向けのその他のオープンPR（#977） */
+export type OtherPullRequest = {
+  number: number;
+  url: string;
+  title: string;
+  /** タイトル・本文から抽出した参照Issue番号（見つからない場合は空配列） */
+  issueNumbers: number[];
+};
+
 /** リリース進行の論理段階。詳細はAPI(route.ts)側のコメントを参照 */
 export type ReleasePhase = "none" | "bump_pr_open" | "release_pending" | "release_pr_open";
 
@@ -49,6 +58,7 @@ export type ReleaseStatus =
       deployWorkflowRun: ReleaseWorkflowRun | null;
       bumpPullRequest: BumpPullRequest | null;
       releasePullRequest: ReleasePullRequest | null;
+      otherPullRequests: OtherPullRequest[];
     };
 
 function errorMessageForResponse(
