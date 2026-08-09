@@ -711,23 +711,39 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: プロンプトの参照先を決める
-        # 以降のプロンプト組み立てステップが参照するディレクトリを1箇所で決める(#960)。
+      - name: 共有ファイルの参照先を決める
+        # 以降のステップが参照する、呼び出し元リポジトリに存在しうる/しないファイルの
+        # 場所を1箇所で決める(#960, #964)。prompts-ref指定時は.shared-prompts/へ
+        # チェックアウト済みのissue-deck側を使う。
         env:
           PROMPTS_REF: ${{ inputs.prompts-ref }}
         run: |
           set -euo pipefail
           if [ -n "$PROMPTS_REF" ]; then
-            DIR=.shared-prompts/.github/prompts
+            ROOT=.shared-prompts
           else
-            DIR=.github/prompts
+            ROOT=.
           fi
+
+          DIR="$ROOT/.github/prompts"
           if [ ! -d "$DIR" ]; then
             echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
             exit 1
           fi
           echo "プロンプトの参照先: $DIR"
           echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
+          # 使用量出力スクリプト(#903)。プロンプトと違い必須ではないため、無くても落とさない。
+          # prompts-ref指定時は共有側のものが使えるので、呼び出し元にスクリプトが無くても
+          # 使用量の可視化が効く(#964)。
+          USAGE="$ROOT/.github/scripts/summarize-claude-usage.sh"
+          if [ -x "$USAGE" ]; then
+            echo "使用量出力スクリプト: $USAGE"
+          else
+            echo "使用量出力スクリプト $USAGE が無いため、使用量のJob Summary出力はスキップします"
+            USAGE=""
+          fi
+          echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
 
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
@@ -1015,7 +1031,14 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_plan.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "Claude Code（計画提示）" "${{ steps.claude_plan.outputs.execution_file }}"
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（計画提示）" "${{ steps.claude_plan.outputs.execution_file }}"
 
       - name: 計画提示のexecution_fileをArtifactとして保存する
         # フォールバック通知が抽出する失敗理由(下記)はexecution_file全体（実測で2900行規模に
@@ -1270,7 +1293,14 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_split.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "Claude Code（分割）" "${{ steps.claude_split.outputs.execution_file }}"
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（分割）" "${{ steps.claude_split.outputs.execution_file }}"
 
       - name: 分割結果を検証し、必要ならフォールバックする
         # 計画コメント投稿の検証と同じ考え方。サブIssue作成後の親Issueコメントが確認できない場合、
@@ -1352,7 +1382,14 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_question.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "Claude Code（質問応答）" "${{ steps.claude_question.outputs.execution_file }}"
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（質問応答）" "${{ steps.claude_question.outputs.execution_file }}"
 
       - name: 質問への回答を検証し、必要ならフォールバックする
         if: always() && steps.state.outputs.mode == 'ask'
@@ -1561,7 +1598,14 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_implement.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "Claude Code（実装・PR作成）" "${{ steps.claude_implement.outputs.execution_file }}"
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（実装・PR作成）" "${{ steps.claude_implement.outputs.execution_file }}"
 
       - name: 実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに完了報告コメントの投稿を委ねるだけだと、途中でエラー終了した場合や

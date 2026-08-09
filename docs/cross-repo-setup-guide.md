@@ -124,6 +124,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 プロンプトを各リポジトリへコピーしない方針にしているのは、4ファイル・約48KBあり中身のほとんどが汎用である一方、**最も更新頻度が高い部分**だから。コピーすると、ワークフロー本体を集約した意味が薄れる。
 
+`prompts-ref` を指定すると、issue-deck 側が `.shared-prompts/` へフルチェックアウトされる。プロンプトに加えて **使用量出力スクリプト（`.github/scripts/summarize-claude-usage.sh`）もそちらのものが使われる**ため、呼び出し元にスクリプトを置かなくてもトークン使用量のJob Summary出力が効く（#964）。どちらにも無い場合はスキップされ、ジョブは失敗しない。
+
 ##### なぜタグを2回書くのか
 
 `uses:` の ref は式で書けず（`@${{ inputs.x }}` は不可）、再利用ワークフローが**自分の ref を知る手段も無い**ため、呼び出し元から渡してもらう以外に方法がない。上の例のように `uses:` の直下に並べて書くこと。
@@ -185,7 +187,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成 |
 | `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
 | `workflows/v4` | 上記 | `node-version` inputs を追加（#956） |
-| `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960）。**本ドキュメント執筆時点では未作成** |
+| `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
+| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964）。**本ドキュメント執筆時点では未作成** |
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
