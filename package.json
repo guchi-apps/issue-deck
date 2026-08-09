@@ -19,7 +19,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed:ci": "node scripts/seed-ci-db.mjs",
-    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh"
+    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh",
+    "check:workflows": "node scripts/check-workflow-expression-length.mjs"
   },
   "dependencies": {
     "@fontsource/biz-udpgothic": "^5.3.0",

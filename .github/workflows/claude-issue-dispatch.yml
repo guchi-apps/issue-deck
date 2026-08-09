@@ -1398,66 +1398,16 @@ jobs:
           # (#621で発覚)。そのため、そもそもgit pushに不要なWORKFLOW_PATをGH_TOKENに設定するのを
           # やめ、既定のGITHUB_TOKENをそのまま使う「計画提示」ステップと同じ構成に揃える)。
           GH_TOKEN: ${{ github.token }}
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          show_full_output: true
-          claude_args: |
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"
-            ${{ steps.claude_model.outputs.model_flag }}
-          prompt: |
-            あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
-            おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の
-            モードは `${{ steps.state.outputs.mode }}` です。
 
-            - `implement`（新規実装）: 現在のワークツリーは `develop` の最新コミットをチェックアウトした
-              状態です。新しく作業ブランチを作成し、新規にPull Requestを作成します。
-            - `additional`（既存ブランチへの追加対応）: このIssueに対応する作業ブランチ
-              `${{ steps.state.outputs.branch }}` が既に存在し、現在のワークツリーは既にそのブランチを
-              checkout済みです。新規ブランチは作成しません。develop向けPull RequestのURLは
-              `${{ steps.state.outputs.pr_url }}` です（空の場合は後述のとおりPR未作成の再開ケースです）。
-              - PR作成済み（上記URLが空でない場合）: 直近のIssueへの`@claude`コメントへの対応です。まず、
-                そのコメントが「コード変更を伴う追加の実装依頼」か「単なる質問・確認」かを判定してください。
-                - 単なる質問・確認と判断した場合: コードは一切変更せず、コミット・pushは行いません。
-                  `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
-                  で質問への回答のみを簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの
-                  通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
-                  `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
-                  `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
-                  なお、このステップの直前のシェルステップで既に`02.wip`が付与され`03.d:marge`が
-                  外されているため、状態を元に戻すために
-                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "02.wip"`
-                  を実行してください（`00.check-user`以外の他のラベルは変更しません）。`00.check-user`は
-                  既に付いていても無害なので必ず付与すること。理由: issue-deck画面の「修正を依頼する」
-                  ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
-                  コード変更を伴わない質問だった場合はコミット・pushが発生しないため
-                  `claude-review-develop.yml`側の再判定による`00.check-user`の復元が起きず、確認待ち
-                  ラベルが失われたままになってしまう問題があった（#417と同種の問題）。以降の「責務」
-                  「画面確認・スクリーンショットについて」の手順は行わず、ここで対応を終了してください。
-                - コード変更が必要な依頼と判断した場合: それを踏まえて追加コミットし、新規PRは作らず
-                  既存PRにコメントで報告します（以下の「責務」に従って進めてください）。
-              - PR未作成（上記URLが空の場合）: 前回の実装試行がPR作成に至らないまま（権限拒否・
-                エラー等で）終了した可能性があります。まず`git log develop..HEAD --stat`・`git status`・
-                `git diff develop`で現在のブランチの状態を確認してください。
-                - 既にコミットされた変更が把握できる内容であれば、それを踏まえて実装を続行して
-                  ください（ゼロからやり直す必要はありません）。完了したら新規にPull Requestを
-                  作成してください（`implement`と同じ手順）。
-                - 続行が難しいほど中途半端・矛盾した状態だと判断した場合は、無理に修正しようと
-                  せず、現在の状態を`gh issue comment`で報告し
-                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
-                  を実行して停止してください（ブランチの削除・作り直しは人間の明示操作でのみ行われ、
-                  このワークフローが自動で行うことはありません）。
-
-            ## 最初にやること
-            - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
-              ラベル・コメントを確認する（`implement`で`21.plan-required`が付いている場合、承認済みの
-              計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`でPR
-              作成済みの場合は、直近の`@claude`コメントの内容を踏まえて対応する。PR未作成の再開の
-              場合は、過去のコメント履歴や既存のコミットから前回どこまで実装が進んでいたかも把握する）
-              （`02.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
-              既に完了しているため、ここで行う必要はない）
-            - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
-              作成する（`additional`の場合は既にcheckout済みのため不要）
-
+          # 実装プロンプトのうち、分量が大きく実行時の値に依存しにくいセクションはここへ切り出す。
+          # GitHub Actionsは`${{ }}`を1つでも含む文字列をブロック全体で1つの式テンプレートとして
+          # 扱い、その長さに21,000バイト（UTF-8）の上限がある。上限を超えるとワークフローファイル
+          # 自体が「Invalid workflow file」となり、issue_comment等のトリガーが一切発火しなくなる
+          # （#901。プロンプトへの追記だけでdispatchが全面停止した）。式テンプレート長は展開後では
+          # なく元テキストの長さで判定されるため、本文をenvへ移し`prompt:`側を短い参照に置き換えると
+          # 上限に対する余裕を確保できる。追記時の余裕はscripts/check-workflow-expression-length.mjs
+          # がCIで検査する。
+          PROMPT_SHARED_CONTEXT: |
             ## 全アプリ共通の共有知識（`.shared-context/`）
             ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`m-guchi/docs`）が
             チェックアウトされています。実装の前提として、以下を必要な範囲だけ読んでください
@@ -1478,74 +1428,7 @@ jobs:
               なしでそのまま実装して構いません。存在しないことを理由に停止しないでください。
             - 内容がこのリポジトリの`CLAUDE.md`・`docs/`と矛盾する場合は、このリポジトリ側の記述を
               優先してください（共有知識は他アプリでの既定値であり、issue-deck固有ルールを上書きしません）。
-
-            ## Issue本文・コメントに画像が含まれる場合
-            issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
-            GitHub純正の画像CDNではないため自動では読み込めません。実装内容の把握に画像の内容確認が必要な
-            場合は、`curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、
-            `Read`ツールでそのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
-
-            ## コメント投稿・PR作成時のトークンについて
-            このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN
-            です。以下の「責務」に記載する`gh issue comment` / `gh pr create` / `gh pr comment` /
-            `gh issue edit`は、すべてトークンを上書きせずそのまま実行してください。
-            `.github/workflows/`配下を含む`git push`の認証は、このステップより前段で設定済みの
-            push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT）で別途完結して
-            いるため、このステップのGH_TOKENには依存しません。`git push origin <ブランチ名>`は
-            リモート名`origin`のまま実行してください（push時だけ自動的にPATが使われます）。
-
-            ## コメント投稿元マーカーについて
-            このステップ全体を通じて`gh issue comment`によりIssueへ投稿する全てのコメント（上記の
-            質問への回答、PR未作成の再開が困難な場合の状況報告、以下の「責務」「画面確認・
-            スクリーンショットについて」に記載の完了報告・push競合の報告・スクリーンショット失敗報告・
-            画面確認待ちの報告等）の本文末尾に、投稿元を示す
-            `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください
-            （`gh pr create` / `gh pr comment`によるPR側への投稿は対象外です）。
-            さらに、上記のうち`<!-- issue-deck-qa-answer -->`マーカーを付与する質問への回答コメントを
-            除く全てのコメントには、役割を示す`<!-- issue-deck-agent:implementer -->`マーカーも
-            あわせて付与してください（質問への回答は`issue-deck-qa-answer`マーカー単独で役割が
-            一意に決まるため対象外です）。
-
-            ## 責務
-            - Issueの要件を実装する
-            - テスト・Lint・型チェック・ビルドを実行する
-            - 変更をコミットする（コミットメッセージは日本語、1〜2文で変更の目的を書き、末尾に
-              `#${{ steps.state.outputs.issue_number }}` を付ける。Authorは
-              `Claude Code <claude-code@example.com>` にする）
-            - ブランチをpushする
-              - `implement`の場合: `git push -u origin ${{ steps.state.outputs.branch }}`
-              - `additional`の場合: `git push origin ${{ steps.state.outputs.branch }}`（既に追跡設定済み
-                のため`-u`は不要）。pushが拒否された場合は
-                `git pull --rebase origin ${{ steps.state.outputs.branch }}`で追随し、1回だけリトライする。
-                それでも失敗する場合はそれ以上リトライせず、
-                `gh issue comment ${{ steps.state.outputs.issue_number }}`
-                で他の変更と競合したため追加対応を中断した旨を人間に報告して停止する
-            - Pull Requestを作成・更新する
-              - `implement`の場合、または`additional`でPRがまだ無い場合:
-                `gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
-                `develop`向けPull Requestを作成する（タイトル・本文は日本語。本文には対応Issue・実装内容・
-                テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
-                `closes #番号` / `fixes #番号`は使わず、`#${{ steps.state.outputs.issue_number }}`のように
-                番号のみ記載する）
-              - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
-                （${{ steps.state.outputs.pr_url }}）に`gh pr comment`で、
-                今回追加でpushしたコミットの内容を日本語で要約して投稿する
-            - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "02.wip"`
-              を実行する（`additional`の場合も同じコマンドで`02.wip`↔`03.d:marge`の付け替えを閉じる。
-              `00.check-user`には触れない。このワークフローのgit pushはPAT
-              （`secrets.WORKFLOW_PAT`）で行っており`.github/workflows/issue-labels.yml`が自動発火する
-              可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
-            - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
-              で対応完了の報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認
-              手段になる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
-              対象PR（${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
-              要約（触ったファイルや対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること。
-              `24.screenshot-required`が付いている場合は、後述の「画面確認・スクリーンショットについて」の
-              節に従い取得したスクリーンショットのURLもこのコメントに埋め込むこと。`23.preview-required`が
-              付いている場合も、同節に従い案内文をこのコメントに追記すること（実際のプレビューURLは
-              このステップの完了後、別ジョブが後から別コメントとして通知するため、このステップ自身が
-              実URLを取得・埋め込む必要はない）
-
+          PROMPT_KNOWLEDGE_RECORD: |
             ## 実装中に得た知見の記録
             実装・調査の過程で、次に同じ領域を触るエージェントや人間にとって価値のある非自明な知見
             （踏んだ制約、公式仕様の分かりにくい挙動、選んだ設計判断の理由など）を得た場合は、
@@ -1588,7 +1471,7 @@ jobs:
                 不要です）
               - シークレットの実値・個人情報・一時的な障害情報は、アプリ固有・共通のいずれにも
                 記録しないでください
-
+          PROMPT_SCREENSHOT: |
             ## 画面確認・スクリーンショットについて
 
             - Issueに`24.screenshot-required`ラベルが付いている場合:
@@ -1657,6 +1540,138 @@ jobs:
               ステップでブロックする必要はありません。
 
             - 上記いずれのラベルも付いていない場合は、通常どおり完了処理まで進めてください
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          claude_args: |
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"
+            ${{ steps.claude_model.outputs.model_flag }}
+          prompt: |
+            あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
+            おり、対応するIssueは #${{ steps.state.outputs.issue_number }} のみです。このワークフロー実行の
+            モードは `${{ steps.state.outputs.mode }}` です。
+
+            - `implement`（新規実装）: 現在のワークツリーは `develop` の最新コミットをチェックアウトした
+              状態です。新しく作業ブランチを作成し、新規にPull Requestを作成します。
+            - `additional`（既存ブランチへの追加対応）: このIssueに対応する作業ブランチ
+              `${{ steps.state.outputs.branch }}` が既に存在し、現在のワークツリーは既にそのブランチを
+              checkout済みです。新規ブランチは作成しません。develop向けPull RequestのURLは
+              `${{ steps.state.outputs.pr_url }}` です（空の場合は後述のとおりPR未作成の再開ケースです）。
+              - PR作成済み（上記URLが空でない場合）: 直近のIssueへの`@claude`コメントへの対応です。まず、
+                そのコメントが「コード変更を伴う追加の実装依頼」か「単なる質問・確認」かを判定してください。
+                - 単なる質問・確認と判断した場合: コードは一切変更せず、コミット・pushは行いません。
+                  `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
+                  で質問への回答のみを簡潔に投稿します（PR側ではなくIssue側のスレッドに投稿することで、実装フローの
+                  通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
+                  `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
+                  `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
+                  なお、このステップの直前のシェルステップで既に`02.wip`が付与され`03.d:marge`が
+                  外されているため、状態を元に戻すために
+                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "02.wip"`
+                  を実行してください（`00.check-user`以外の他のラベルは変更しません）。`00.check-user`は
+                  既に付いていても無害なので必ず付与すること。理由: issue-deck画面の「修正を依頼する」
+                  ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
+                  コード変更を伴わない質問だった場合はコミット・pushが発生しないため
+                  `claude-review-develop.yml`側の再判定による`00.check-user`の復元が起きず、確認待ち
+                  ラベルが失われたままになってしまう問題があった（#417と同種の問題）。以降の「責務」
+                  「画面確認・スクリーンショットについて」の手順は行わず、ここで対応を終了してください。
+                - コード変更が必要な依頼と判断した場合: それを踏まえて追加コミットし、新規PRは作らず
+                  既存PRにコメントで報告します（以下の「責務」に従って進めてください）。
+              - PR未作成（上記URLが空の場合）: 前回の実装試行がPR作成に至らないまま（権限拒否・
+                エラー等で）終了した可能性があります。まず`git log develop..HEAD --stat`・`git status`・
+                `git diff develop`で現在のブランチの状態を確認してください。
+                - 既にコミットされた変更が把握できる内容であれば、それを踏まえて実装を続行して
+                  ください（ゼロからやり直す必要はありません）。完了したら新規にPull Requestを
+                  作成してください（`implement`と同じ手順）。
+                - 続行が難しいほど中途半端・矛盾した状態だと判断した場合は、無理に修正しようと
+                  せず、現在の状態を`gh issue comment`で報告し
+                  `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
+                  を実行して停止してください（ブランチの削除・作り直しは人間の明示操作でのみ行われ、
+                  このワークフローが自動で行うことはありません）。
+
+            ## 最初にやること
+            - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
+              ラベル・コメントを確認する（`implement`で`21.plan-required`が付いている場合、承認済みの
+              計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`でPR
+              作成済みの場合は、直近の`@claude`コメントの内容を踏まえて対応する。PR未作成の再開の
+              場合は、過去のコメント履歴や既存のコミットから前回どこまで実装が進んでいたかも把握する）
+              （`02.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
+              既に完了しているため、ここで行う必要はない）
+            - `implement`の場合のみ`git checkout -b ${{ steps.state.outputs.branch }}`で作業ブランチを
+              作成する（`additional`の場合は既にcheckout済みのため不要）
+
+            ${{ env.PROMPT_SHARED_CONTEXT }}
+
+            ## Issue本文・コメントに画像が含まれる場合
+            issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
+            GitHub純正の画像CDNではないため自動では読み込めません。実装内容の把握に画像の内容確認が必要な
+            場合は、`curl -o /tmp/<適当なファイル名> "<画像URL>"`で一時ファイルにダウンロードしたうえで、
+            `Read`ツールでそのローカルファイルを開いて内容を確認してください（URLを直接`Read`しても開けません）。
+
+            ## コメント投稿・PR作成時のトークンについて
+            このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定のGITHUB_TOKEN
+            です。以下の「責務」に記載する`gh issue comment` / `gh pr create` / `gh pr comment` /
+            `gh issue edit`は、すべてトークンを上書きせずそのまま実行してください。
+            `.github/workflows/`配下を含む`git push`の認証は、このステップより前段で設定済みの
+            push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT）で別途完結して
+            いるため、このステップのGH_TOKENには依存しません。`git push origin <ブランチ名>`は
+            リモート名`origin`のまま実行してください（push時だけ自動的にPATが使われます）。
+
+            ## コメント投稿元マーカーについて
+            このステップ全体を通じて`gh issue comment`によりIssueへ投稿する全てのコメント（上記の
+            質問への回答、PR未作成の再開が困難な場合の状況報告、以下の「責務」「画面確認・
+            スクリーンショットについて」に記載の完了報告・push競合の報告・スクリーンショット失敗報告・
+            画面確認待ちの報告等）の本文末尾に、投稿元を示す
+            `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください
+            （`gh pr create` / `gh pr comment`によるPR側への投稿は対象外です）。
+            さらに、上記のうち`<!-- issue-deck-qa-answer -->`マーカーを付与する質問への回答コメントを
+            除く全てのコメントには、役割を示す`<!-- issue-deck-agent:implementer -->`マーカーも
+            あわせて付与してください（質問への回答は`issue-deck-qa-answer`マーカー単独で役割が
+            一意に決まるため対象外です）。
+
+            ## 責務
+            - Issueの要件を実装する
+            - テスト・Lint・型チェック・ビルドを実行する
+            - 変更をコミットする（コミットメッセージは日本語、1〜2文で変更の目的を書き、末尾に
+              `#${{ steps.state.outputs.issue_number }}` を付ける。Authorは
+              `Claude Code <claude-code@example.com>` にする）
+            - ブランチをpushする
+              - `implement`の場合: `git push -u origin ${{ steps.state.outputs.branch }}`
+              - `additional`の場合: `git push origin ${{ steps.state.outputs.branch }}`（既に追跡設定済み
+                のため`-u`は不要）。pushが拒否された場合は
+                `git pull --rebase origin ${{ steps.state.outputs.branch }}`で追随し、1回だけリトライする。
+                それでも失敗する場合はそれ以上リトライせず、
+                `gh issue comment ${{ steps.state.outputs.issue_number }}`
+                で他の変更と競合したため追加対応を中断した旨を人間に報告して停止する
+            - Pull Requestを作成・更新する
+              - `implement`の場合、または`additional`でPRがまだ無い場合:
+                `gh pr create --base develop --head ${{ steps.state.outputs.branch }}`で
+                `develop`向けPull Requestを作成する（タイトル・本文は日本語。本文には対応Issue・実装内容・
+                テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
+                `closes #番号` / `fixes #番号`は使わず、`#${{ steps.state.outputs.issue_number }}`のように
+                番号のみ記載する）
+              - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
+                （${{ steps.state.outputs.pr_url }}）に`gh pr comment`で、
+                今回追加でpushしたコミットの内容を日本語で要約して投稿する
+            - 完了したら`gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "03.d:marge" --remove-label "02.wip"`
+              を実行する（`additional`の場合も同じコマンドで`02.wip`↔`03.d:marge`の付け替えを閉じる。
+              `00.check-user`には触れない。このワークフローのgit pushはPAT
+              （`secrets.WORKFLOW_PAT`）で行っており`.github/workflows/issue-labels.yml`が自動発火する
+              可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
+            - 最後に `gh issue comment ${{ steps.state.outputs.issue_number }} --body "..."`
+              で対応完了の報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認
+              手段になる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
+              対象PR（${{ steps.state.outputs.pr_url }}）のURLに加えて、どのような変更・追加対応を行ったかの
+              要約（触ったファイルや対応内容が使用者に伝わる程度の箇条書き）を日本語で含めること。
+              `24.screenshot-required`が付いている場合は、後述の「画面確認・スクリーンショットについて」の
+              節に従い取得したスクリーンショットのURLもこのコメントに埋め込むこと。`23.preview-required`が
+              付いている場合も、同節に従い案内文をこのコメントに追記すること（実際のプレビューURLは
+              このステップの完了後、別ジョブが後から別コメントとして通知するため、このステップ自身が
+              実URLを取得・埋め込む必要はない）
+
+            ${{ env.PROMPT_KNOWLEDGE_RECORD }}
+
+            ${{ env.PROMPT_SCREENSHOT }}
 
             ## 迷った場合・行き詰まった場合の振る舞い
             - 許可されていない操作が拒否される等で実装や調査に行き詰まった場合、それ以上粘らず、その時点で
