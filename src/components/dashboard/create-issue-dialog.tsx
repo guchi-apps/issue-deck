@@ -44,6 +44,7 @@ import {
   START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsForCreate,
+  startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
@@ -123,6 +124,9 @@ export function CreateIssueDialog({
   const { registered: registeredRepositories, unregistered: unregisteredRepositories } = useMemo(
     () => groupRepositoriesByWorkflowStatus(repositories),
     [repositories],
+  );
+  const startDisabledReason = startImplementationDisabledReason(
+    repositories.find((repo) => repo.fullName === repositoryFullName)?.hasClaudeWorkflow,
   );
   const selectableLabels = useMemo(
     () => labels.filter((label) => isSelectableLabelName(label.name)),
@@ -483,8 +487,10 @@ export function CreateIssueDialog({
               isCreatingStartComment ||
               !repositoryFullName ||
               !title.trim() ||
-              isImageUploading
+              isImageUploading ||
+              startDisabledReason !== null
             }
+            title={startDisabledReason ?? undefined}
           >
             {isSubmitting || isCreatingStartComment ? "作成中..." : "作成+実装開始"}
           </Button>

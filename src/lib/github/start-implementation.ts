@@ -136,3 +136,18 @@ export function canStartImplementation(issue: Pick<Issue, "state" | "labels">): 
     !isApprovalPending(issue.labels)
   );
 }
+
+/**
+ * リポジトリにissue-deckの自動化ワークフロー（claude-issue-dispatch.yml）が見つからない場合、
+ * 「実装を開始」ボタンを押しても`@claude`コメントに反応するワークフローが存在せず何も起動しない。
+ * ボタン自体は非表示にせず、押せない理由を示した上で無効化する（#976）。
+ * `hasClaudeWorkflow`が明示的にfalseの場合のみ無効化し、リポジトリ情報が見つからない等でundefinedの
+ * 場合は誤って無効化しないよう理由を返さない。
+ * 文言・判定はリポジトリ一覧のバッジ（sidebar-nav.tsx・mobile-repos-screen.tsx）と揃えている。
+ */
+export function startImplementationDisabledReason(hasClaudeWorkflow: boolean | undefined): string | null {
+  if (hasClaudeWorkflow === false) {
+    return "issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）。実装を開始しても起動しません。";
+  }
+  return null;
+}

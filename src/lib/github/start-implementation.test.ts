@@ -4,6 +4,7 @@ import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
   isSelectableLabelName,
   startImplementationCommentBody,
+  startImplementationDisabledReason,
   startImplementationLabelsForCreate,
 } from "@/lib/github/start-implementation";
 import { PLANNING_LABEL_NAME, WIP_LABEL_NAME } from "@/lib/github/workflow-status";
@@ -36,6 +37,20 @@ describe("startImplementationLabelsForCreate", () => {
       WIP_LABEL_NAME,
       "bug",
     ]);
+  });
+});
+
+describe("startImplementationDisabledReason", () => {
+  it("hasClaudeWorkflowがfalseの場合、無効化理由を返す（#976）", () => {
+    expect(startImplementationDisabledReason(false)).not.toBeNull();
+  });
+
+  it("hasClaudeWorkflowがtrueの場合、nullを返す", () => {
+    expect(startImplementationDisabledReason(true)).toBeNull();
+  });
+
+  it("hasClaudeWorkflowがundefined（リポジトリ情報が見つからない等）の場合、誤って無効化しないようnullを返す", () => {
+    expect(startImplementationDisabledReason(undefined)).toBeNull();
   });
 });
 
