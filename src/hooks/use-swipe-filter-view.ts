@@ -5,7 +5,7 @@ import type { CSSProperties, TouchEvent } from "react";
 
 import { BACK_EDGE_RATIO, isInsideHorizontalScroller } from "@/hooks/use-swipe-back";
 
-const SWIPE_THRESHOLD_PX = 80;
+export const SWIPE_THRESHOLD_PX = 80;
 const DIRECTION_LOCK_PX = 10;
 const HORIZONTAL_DOMINANCE_RATIO = 1.5;
 
@@ -113,5 +113,5 @@ export function useSwipeFilterView(onSwipe: (direction: SwipeFilterDirection) =>
     transition: isDragging ? "none" : "transform 0.2s ease-out",
   };
 
-  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, style };
+  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, style, dragX, isDragging };
 }

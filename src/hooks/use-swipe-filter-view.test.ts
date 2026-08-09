@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { TouchEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
+import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 
 const CONTAINER_WIDTH = 400;
 
@@ -99,6 +99,33 @@ describe("useSwipeFilterView", () => {
 
     expect(result.current.style.transform).toBeUndefined();
     expect(result.current.style.transition).toBe("transform 0.2s ease-out");
+  });
+
+  it("ドラッグ中はdragXが移動量、isDraggingがtrueになる（タブのクロスフェード計算用）", () => {
+    const onSwipe = vi.fn();
+    const { result } = renderHook(() => useSwipeFilterView(onSwipe));
+
+    act(() => {
+      result.current.onTouchStart(makeTouch(200, 0, document.createElement("div")));
+      result.current.onTouchMove(makeTouch(150, 0, document.createElement("div")));
+    });
+
+    expect(result.current.dragX).toBe(-50);
+    expect(result.current.isDragging).toBe(true);
+  });
+
+  it("指を離すとdragXが0に、isDraggingがfalseに戻る", () => {
+    const onSwipe = vi.fn();
+    const { result } = renderHook(() => useSwipeFilterView(onSwipe));
+
+    act(() => swipe(result.current, { x: 200, y: 0 }, { x: 130, y: 0 }));
+
+    expect(result.current.dragX).toBe(0);
+    expect(result.current.isDragging).toBe(false);
+  });
+
+  it("SWIPE_THRESHOLD_PXが呼び出し側から利用できる", () => {
+    expect(SWIPE_THRESHOLD_PX).toBe(80);
   });
 
   it("戻るジェスチャー領域内から始まった右方向の動きはtransformに反映しない（useSwipeBack側に譲る）", () => {
