@@ -39,7 +39,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは944行、最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる |
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる。**`.github/prompts/`配下もあわせてコピーする必要がある**（後述） |
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する | ラベル名・`issue-<番号>`ブランチ命名規則が一致していればほぼ無改変で移植できる。スクリーンショット撮影を導入しないリポジトリでは、末尾の`screenshots`ブランチ掃除ジョブを削除してよい |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
@@ -49,6 +49,28 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
+
+### あわせてコピーが必要なファイル
+
+`claude-issue-dispatch.yml`のプロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下の
+Markdownに置いている（#907）。**ワークフローファイルだけをコピーしても動作しない。**
+
+| ファイル | 役割 |
+|---|---|
+| `.github/prompts/plan.md` | 計画提示ステップのプロンプト |
+| `.github/prompts/split.md` | サブIssue分割ステップのプロンプト |
+| `.github/prompts/question.md` | 質問応答ステップのプロンプト |
+| `.github/prompts/implement.md` | 実装・PR作成ステップのプロンプト |
+| `.github/scripts/summarize-claude-usage.sh` | 各Claudeステップの使用量をJob Summaryへ出力する（#903。導入は任意） |
+
+プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・
+`${RUN_URL}`のプレースホルダで表現し、ワークフロー側の「〜プロンプトを組み立てる」ステップが
+`envsubst`で埋めて環境変数へ格納する。プロンプト本文はリポジトリ固有の記述（ディレクトリ構成・
+ラベル名・確認コマンド等）を多く含むため、移植時は**ワークフローYAMLよりもこちらの書き換え量が
+多くなる**。
+
+この構成にしている理由は、GitHub Actionsの式テンプレート長の上限（21,000バイト）にある。詳細は
+[docs/multi-agent-workflow.md](multi-agent-workflow.md)の「プロンプトの配置と式テンプレート長上限」を参照。
 
 ### 参考: issue-deckの全ワークフロー一覧
 

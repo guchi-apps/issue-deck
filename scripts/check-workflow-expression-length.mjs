@@ -95,10 +95,51 @@ if (over.length > 0) {
   console.error(`エラー: 式テンプレート長が上限（${MAX_BYTES}バイト）を超えています。`);
   for (const entry of over) console.error(format(entry));
   console.error("  このままdevelopへマージすると、該当ワークフローのトリガーが一切発火しなくなります。");
-  console.error("  分量の大きい静的なセクションは env: へ切り出し、`${{ env.NAME }}` で参照してください。");
+  console.error("  分量の大きい静的なセクションは .github/prompts/ へ切り出してください（#907）。");
+  process.exit(1);
+}
+
+// .github/prompts/ 配下のプロンプトファイルのプレースホルダを検査する（#907）。
+// ここで使えるのは組み立てステップが envsubst に明示指定している変数だけで、それ以外の
+// `${FOO}` は置換されずそのままエージェントへ渡る。`${{ }}` を書いてもGitHub Actionsの式としては
+// 評価されない（ワークフローYAMLの外にあるため）。どちらも実行時に静かに壊れるだけで
+// 気付きにくいため、CIで落とす。
+const PROMPT_DIR = ".github/prompts";
+const KNOWN_PLACEHOLDERS = ["ISSUE_NUMBER", "BRANCH", "PR_URL", "MODE", "REPOSITORY", "RUN_URL"];
+
+const promptProblems = [];
+let promptFiles = [];
+try {
+  promptFiles = readdirSync(PROMPT_DIR).filter((name) => name.endsWith(".md")).sort();
+} catch {
+  promptFiles = []; // ディレクトリが無いリポジトリではこの検査自体をスキップする
+}
+
+for (const file of promptFiles) {
+  const path = join(PROMPT_DIR, file);
+  const source = readFileSync(path, "utf8");
+  source.split("\n").forEach((line, index) => {
+    if (line.includes("${{")) {
+      promptProblems.push(`  ${path}:${index + 1} — \`\${{ }}\` は評価されません。\`\${VAR}\` 形式にしてください`);
+    }
+    for (const [, name] of line.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      if (!KNOWN_PLACEHOLDERS.includes(name)) {
+        promptProblems.push(`  ${path}:${index + 1} — 未知のプレースホルダ \`\${${name}}\`（空文字に置換されます）`);
+      }
+    }
+  });
+}
+
+if (promptProblems.length > 0) {
+  console.error("エラー: プロンプトファイルのプレースホルダに問題があります。");
+  for (const problem of promptProblems) console.error(problem);
+  console.error(`  使用できるのは ${KNOWN_PLACEHOLDERS.map((n) => "\${" + n + "}").join(" ")} です。`);
+  console.error("  追加する場合は claude-issue-dispatch.yml の「〜プロンプトを組み立てる」ステップの");
+  console.error("  env: と envsubst の変数リスト、およびこのスクリプトの KNOWN_PLACEHOLDERS を更新してください。");
   process.exit(1);
 }
 
 console.log(
   `OK: ${files.length}ファイル中、式テンプレート長が上限（${MAX_BYTES}バイト）を超えるものはありません。`,
 );
+console.log(`OK: ${PROMPT_DIR} の${promptFiles.length}ファイルのプレースホルダに問題はありません。`);
