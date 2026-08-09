@@ -702,7 +702,7 @@ export function IssueDetail({
         targetRef={targetCommentRef}
         visible={comments.length > 0}
         hasUnread={hasUnread}
-        className="right-4 bottom-4"
+        className="left-1/2 bottom-4 -translate-x-1/2"
       />
 
       <Sheet open={isPropertiesOpen} onOpenChange={setIsPropertiesOpen}>
