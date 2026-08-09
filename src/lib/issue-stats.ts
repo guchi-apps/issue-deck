@@ -70,6 +70,11 @@ export function filterIssuesByView(
       if (hasNoLabelCondition) return issues;
 
       const matchesView = (issue: Issue) => {
+        // 「リポジトリに質問する」等（@claude 質問: コメント）の回答待ちは、実装状況ラベルを
+        // 持たない（付与元のmode=askはラベル操作を行わない）ため、ラベルだけでは実行中ビューに
+        // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、ラベル条件より優先する
+        // （#978）。
+        if (view === "in-progress" && issue.qaAnswerPendingAt) return true;
         const issueLabelNames = issue.labels.map((label) => label.name);
         if (viewLabels && viewLabels.length > 0) {
           if (!issueLabelNames.some((name) => viewLabels.includes(name))) return false;

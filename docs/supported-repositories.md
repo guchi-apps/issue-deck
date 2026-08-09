@@ -16,7 +16,8 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `m-guchi/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
-| `m-guchi/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）。**コピー**: `claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
+| `m-guchi/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）・`claude-issue-dispatch.yml`（`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
+| `m-guchi/dayspan` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`（ともに`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #971 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
 
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
@@ -43,7 +44,6 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 
 ### m-guchi/shopping-list
 
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-issue-dispatch.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-review-develop.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-ci-fix.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
@@ -52,11 +52,25 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 上記のうち`claude-conflict-resolve.yml`だけは**意図的に古いbase-commitのまま**にしている。
 `#814`（pull_requestトリガー時に無関係な他PRを巻き込まないようトリガー元のPR1件に絞る修正）が
 shopping-list側へ未反映であることを確認済みで、ドリフト検知にそのまま出続けてよいため。
-他の5ファイルは、m-guchi/shopping-list#62（ワークフロー改善のバックポート）および
+残る3ファイルは、m-guchi/shopping-list#62（ワークフロー改善のバックポート）および
 m-guchi/shopping-list#64（共有知識層の導入）で`bb7d0f7`時点の内容へ同期した。
+
+`claude-issue-dispatch.yml`のマーカーは削除した。同ファイルは参照方式
+（`reusable-issue-dispatch.yml@workflows/v6`）へ移行済みで、後述「参照方式のワークフローは
+sync-state の対象外」のとおり記録の対象外になったため。
 
 `shared-knowledge-propose.yml`（共有知識層、#889）のマーカーは、issue-deck側とshopping-list側の
 双方のPull Requestがマージされた時点で追加する。
+
+### m-guchi/dayspan
+
+<!-- sync-state: repo=m-guchi/dayspan workflow=claude-review-develop.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=m-guchi/dayspan workflow=claude-conflict-resolve.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=m-guchi/dayspan workflow=claude-ci-fix.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=m-guchi/dayspan workflow=release-develop-to-main.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+
+base-commitは各ワークフローファイル冒頭の「移植元コミット」コメント（dayspan側に記載がある）と同じ値。
+`issue-labels.yml`・`claude-issue-dispatch.yml`は参照方式のためマーカーを持たない。
 
 **最終同期日: 2026-08-09**
 
@@ -89,6 +103,7 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 | ワークフロー | 実体 | 移行時期 |
 |---|---|---|
 | `issue-labels.yml` | `reusable-issue-labels.yml` | 2026-08-09（#940、m-guchi/shopping-list#77） |
+| `claude-issue-dispatch.yml` | `reusable-issue-dispatch.yml` | 2026-08-09（#945。導入先は m-guchi/shopping-list・m-guchi/dayspan） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
