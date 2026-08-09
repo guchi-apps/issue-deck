@@ -64,6 +64,9 @@ jobs:
       - name: Cross-repo setup guide sync check
         run: scripts/check-cross-repo-guide-sync.sh
 
+      - name: Workflow gh repository check
+        run: scripts/check-workflow-gh-repo.sh
+
   # ワークフローの式テンプレート長（21,000バイト）超過を検出する（#901）。
   # 超過するとワークフローファイル自体が無効になり、issue_comment等のトリガーが
   # 一切発火しなくなるため、developへ入る前に落とす。
