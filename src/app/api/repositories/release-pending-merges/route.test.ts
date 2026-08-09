@@ -4,6 +4,7 @@ const requireUserId = vi.fn();
 const findMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchOpenPullRequestsForBase = vi.fn();
+const fetchRefCiState = vi.fn();
 const releaseWorkflowExists = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
@@ -34,6 +35,9 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     ...actual,
     get fetchOpenPullRequestsForBase() {
       return fetchOpenPullRequestsForBase;
+    },
+    get fetchRefCiState() {
+      return fetchRefCiState;
     },
   };
 });
@@ -66,6 +70,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     getInstallationToken.mockReset().mockResolvedValue("token");
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
     fetchOpenPullRequestsForBase.mockReset().mockResolvedValue([]);
+    fetchRefCiState.mockReset().mockResolvedValue("success");
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -81,9 +86,9 @@ describe("GET /api/repositories/release-pending-merges", () => {
     expect(response.status).toBe(401);
   });
 
-  it("develop→mainのPRがオープン中のリポジトリのみマージ待ちとして返す", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string) => {
-      if (repo === "repo-a") {
+  it("develop→mainのPRがオープン中のリポジトリはmainへのマージ待ちとして返す", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
+      if (base === "main" && repo === "repo-a") {
         return [
           {
             number: 12,
@@ -102,11 +107,65 @@ describe("GET /api/repositories/release-pending-merges", () => {
     expect(json.pendingMerges).toEqual([
       {
         repoFullName: "owner/repo-a",
+        mergeTarget: "main",
         pullRequestNumber: 12,
         pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
         pullRequestTitle: "release",
       },
     ]);
+    expect(fetchRefCiState).not.toHaveBeenCalled();
+  });
+
+  it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
+      if (base === "develop" && repo === "repo-a") {
+        return [
+          {
+            number: 34,
+            html_url: "https://github.com/owner/repo-a/pull/34",
+            title: "release/v1.2.3",
+            head: { ref: "release/v1.2.3" },
+          },
+        ];
+      }
+      return [];
+    });
+    fetchRefCiState.mockResolvedValue("success");
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.pendingMerges).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        mergeTarget: "develop",
+        pullRequestNumber: 34,
+        pullRequestUrl: "https://github.com/owner/repo-a/pull/34",
+        pullRequestTitle: "release/v1.2.3",
+      },
+    ]);
+  });
+
+  it("バンプPRのCIがpending中はマージ待ちに含めない", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
+      if (base === "develop" && repo === "repo-a") {
+        return [
+          {
+            number: 34,
+            html_url: "https://github.com/owner/repo-a/pull/34",
+            title: "release/v1.2.3",
+            head: { ref: "release/v1.2.3" },
+          },
+        ];
+      }
+      return [];
+    });
+    fetchRefCiState.mockResolvedValue("pending");
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.pendingMerges).toEqual([]);
   });
 
   it("リリースworkflowが存在しないリポジトリは対象外にする", async () => {
@@ -126,16 +185,19 @@ describe("GET /api/repositories/release-pending-merges", () => {
   });
 
   it("1リポジトリの取得に失敗しても他のリポジトリの結果は返す", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string) => {
+    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
       if (repo === "repo-a") throw new Error("boom");
-      return [
-        {
-          number: 3,
-          html_url: "https://github.com/owner/repo-b/pull/3",
-          title: "release",
-          head: { ref: "develop" },
-        },
-      ];
+      if (base === "main" && repo === "repo-b") {
+        return [
+          {
+            number: 3,
+            html_url: "https://github.com/owner/repo-b/pull/3",
+            title: "release",
+            head: { ref: "develop" },
+          },
+        ];
+      }
+      return [];
     });
 
     const response = await GET();
@@ -144,6 +206,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     expect(json.pendingMerges).toEqual([
       {
         repoFullName: "owner/repo-b",
+        mergeTarget: "main",
         pullRequestNumber: 3,
         pullRequestUrl: "https://github.com/owner/repo-b/pull/3",
         pullRequestTitle: "release",

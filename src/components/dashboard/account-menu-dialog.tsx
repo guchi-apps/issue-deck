@@ -1,16 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  ChevronDown,
-  ExternalLink,
-  KeyRound,
-  RefreshCw,
-  Rocket,
-  Settings,
-} from "lucide-react";
+import { useState } from "react";
+import { Activity, AlertTriangle, KeyRound, RefreshCw, Settings } from "lucide-react";
 
 import packageJson from "../../../package.json";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -19,7 +10,6 @@ import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
 import { GithubStatusDialog } from "@/components/dashboard/github-status-dialog";
 import { ProfileDialog } from "@/components/dashboard/profile-dialog";
-import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
   AlertDialog,
@@ -31,20 +21,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAccountActions } from "@/hooks/use-account-actions";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
@@ -53,26 +31,14 @@ import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useNow } from "@/hooks/use-now";
-import { useReleasePendingMerges } from "@/hooks/use-release-pending-merges";
-import { useReleaseStatus } from "@/hooks/use-release-status";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
-import {
-  formatDevelopVersionDisplay,
-  formatMainVersionDisplay,
-} from "@/lib/github/release-version-display";
-import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
 import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
-import type { Issue } from "@/types/issue";
-import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type AccountMenuDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentUser: CurrentUser | null;
-  selectedRepoFullName: string | null;
-  repositories: ConnectedRepository[];
-  issues: Issue[];
   onOpenAppSettings: () => void;
 };
 
@@ -80,9 +46,6 @@ export function AccountMenuDialog({
   open,
   onOpenChange,
   currentUser,
-  selectedRepoFullName,
-  repositories,
-  issues,
   onOpenAppSettings,
 }: AccountMenuDialogProps) {
   const { handleLogout } = useAccountActions();
@@ -92,29 +55,8 @@ export function AccountMenuDialog({
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
   const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
-  const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
-  const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
-  // ユーザーが明示的に開閉するまではnull（=マージ待ちがあれば自動展開する）。
-  // 一度でも操作したらその状態を優先する。
-  const [releaseSectionOpenOverride, setReleaseSectionOpenOverride] = useState<boolean | null>(
-    null,
-  );
   const [githubStatusDialogOpen, setGithubStatusDialogOpen] = useState(false);
   const [fineGrainedTokensDialogOpen, setFineGrainedTokensDialogOpen] = useState(false);
-  // リリース対象として選択できるのは、Issue-deckに登録済み（=claude-issue-dispatch.ymlの導入が
-  // 確認できる）リポジトリに限定する。GitHub Appのインストールだけが済み、まだissue-deckの
-  // 自動化を導入していないリポジトリは本番リリースもできないため選択肢から除く。
-  const releasableRepositories = useMemo(
-    () => repositories.filter((repo) => repo.hasClaudeWorkflow),
-    [repositories],
-  );
-  // ダイアログを開くたびに、直前に選んだリポジトリがまだ選択可能ならそれを維持し、
-  // そうでなければIssue一覧で絞り込み中のリポジトリ・先頭のリポジトリにフォールバックする（#383）。
-  const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
-    releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)?.fullName ??
-      releasableRepositories[0]?.fullName ??
-      null,
-  );
   const { data: rateLimits, isLoading: rateLimitsLoading, error: rateLimitsError } =
     useGithubRateLimit(open);
   const {
@@ -134,16 +76,6 @@ export function AccountMenuDialog({
     error: githubStatusError,
   } = useGithubStatus(open);
   const {
-    data: releaseStatus,
-    isLoading: releaseStatusLoading,
-    error: releaseStatusError,
-    triggerRelease,
-    isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(releaseRepoFullName, open);
-  const { data: pendingMerges } = useReleasePendingMerges(open);
-  const hasPendingMerges = (pendingMerges?.length ?? 0) > 0;
-  const releaseSectionOpen = releaseSectionOpenOverride ?? hasPendingMerges;
-  const {
     data: fineGrainedTokens,
     isLoading: fineGrainedTokensLoading,
     error: fineGrainedTokensError,
@@ -156,57 +88,9 @@ export function AccountMenuDialog({
       (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
     );
 
-  async function handleTriggerRelease() {
-    const ok = await triggerRelease();
-    if (ok) {
-      setReleaseSuccessOpen(true);
-    }
-  }
-
-  // 誤タップでの起動を防ぐため確認ダイアログを挟む。今回developにマージ済みでmain未反映のIssueを
-  // 「今回反映する内容」として一覧表示する（#426）。
-  const pendingReleaseIssues = useMemo(
-    () =>
-      issues.filter(
-        (issue) =>
-          issue.repositoryFullName === releaseRepoFullName &&
-          issue.labels.some((label) => label.name === DEVELOP_MERGED_LABEL_NAME),
-      ),
-    [issues, releaseRepoFullName],
-  );
-
-  // Issueを起票せず直接developへ作られたPRの見落としに気づけるよう、develop向けの
-  // その他のオープンPR（バンプPR自身を除く）を、参照Issue番号から画面に読み込み済みのIssueと
-  // 突き合わせて一覧表示する(#977)。突き合わせはこの画面側で行うため追加のAPI呼び出しは無い。
-  const otherPullRequestsWithIssue = useMemo(() => {
-    const otherPullRequests =
-      releaseStatus?.available && releaseStatus.otherPullRequests ? releaseStatus.otherPullRequests : [];
-    const repoIssues = issues.filter((issue) => issue.repositoryFullName === releaseRepoFullName);
-    return otherPullRequests.map((pr) => ({
-      ...pr,
-      linkedIssue: repoIssues.find((issue) => pr.issueNumbers.includes(issue.number)) ?? null,
-    }));
-  }, [releaseStatus, issues, releaseRepoFullName]);
-
   return (
     <>
-      <Dialog
-        open={open}
-        onOpenChange={(nextOpen) => {
-          onOpenChange(nextOpen);
-          if (nextOpen) {
-            setReleaseRepoFullName((prev) =>
-              prev && releasableRepositories.some((repo) => repo.fullName === prev)
-                ? prev
-                : (releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)
-                    ?.fullName ??
-                    releasableRepositories[0]?.fullName ??
-                    null),
-            );
-            setReleaseSectionOpenOverride(null);
-          }
-        }}
-      >
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="sr-only">アカウントメニュー</DialogTitle>
@@ -307,121 +191,6 @@ export function AccountMenuDialog({
               </div>
             </div>
 
-            {hasPendingMerges && pendingMerges && (
-              <div className="flex flex-col gap-1.5 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-xs dark:bg-amber-950/40">
-                <p className="font-medium text-amber-700 dark:text-amber-300">
-                  {pendingMerges.length}件のリポジトリでmainへのマージ待ちです
-                </p>
-                <ul className="flex flex-col gap-1">
-                  {pendingMerges.map((merge) => (
-                    <li key={merge.repoFullName} className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReleaseRepoFullName(merge.repoFullName);
-                          setReleaseSectionOpenOverride(true);
-                        }}
-                        className="truncate text-left text-amber-700 hover:underline dark:text-amber-300"
-                      >
-                        {merge.repoFullName}
-                      </button>
-                      <a
-                        href={merge.pullRequestUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex shrink-0 items-center gap-1 text-amber-700 hover:underline dark:text-amber-300"
-                      >
-                        <ExternalLink className="size-3.5" />
-                        PR #{merge.pullRequestNumber}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {releasableRepositories.length > 0 && (
-              <Collapsible
-                className="rounded-md border p-3"
-                open={releaseSectionOpen}
-                onOpenChange={setReleaseSectionOpenOverride}
-              >
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between text-xs font-medium text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
-                  >
-                    リリース
-                    <ChevronDown className="size-3 transition-transform" />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="pt-2">
-                    <Select
-                      value={releaseRepoFullName ?? undefined}
-                      onValueChange={setReleaseRepoFullName}
-                    >
-                      <SelectTrigger className="mb-2 w-full text-xs" size="sm">
-                        <SelectValue placeholder="リポジトリを選択" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {releasableRepositories.map((repo) => (
-                          <SelectItem key={repo.id} value={repo.fullName}>
-                            {repo.fullName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {releaseStatusLoading && (
-                      <p className="text-xs text-muted-foreground">読み込み中...</p>
-                    )}
-                    {releaseStatusError && (
-                      <p className="text-xs text-destructive">{releaseStatusError}</p>
-                    )}
-                    {releaseStatus && !releaseStatus.available && (
-                      <p className="text-xs text-muted-foreground">
-                        このリポジトリにはリリース用のworkflowが見つかりませんでした
-                      </p>
-                    )}
-                    {releaseStatus?.available && (
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">main</span>
-                          <span>
-                            {formatMainVersionDisplay(
-                              releaseStatus.mainVersion,
-                              releaseStatus.developVersion,
-                              releaseStatus.phase,
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">develop</span>
-                          <span>
-                            {formatDevelopVersionDisplay(
-                              releaseStatus.developVersion,
-                              releaseStatus.bumpPullRequest?.version ?? null,
-                              releaseStatus.phase,
-                            )}
-                          </span>
-                        </div>
-                        <ReleaseProgress status={releaseStatus} compact />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isTriggeringRelease}
-                          onClick={() => setReleaseConfirmOpen(true)}
-                        >
-                          <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
-                          {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-
             <Button variant="destructive" onClick={handleLogout}>
               ログアウト
             </Button>
@@ -482,95 +251,6 @@ export function AccountMenuDialog({
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={handleRepositorySync}>再同期する</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={releaseConfirmOpen} onOpenChange={setReleaseConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
-            <AlertDialogDescription>
-              {releaseRepoFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {pendingReleaseIssues.length > 0 ? (
-            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
-              <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
-              <ul className="flex flex-col gap-1 text-xs">
-                {pendingReleaseIssues.map((issue) => (
-                  <li key={issue.id}>
-                    <a
-                      href={issue.htmlUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
-                      #{issue.number} {issue.title}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              develop済みでmain未反映のIssueはありません。
-            </p>
-          )}
-          {otherPullRequestsWithIssue.length > 0 && (
-            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                developへの未マージPR（今回のリリースには含まれません）
-              </p>
-              <ul className="flex flex-col gap-1 text-xs">
-                {otherPullRequestsWithIssue.map((pr) => (
-                  <li key={pr.number} className="flex flex-col gap-0.5">
-                    <a
-                      href={pr.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
-                      #{pr.number} {pr.title}
-                    </a>
-                    {pr.linkedIssue ? (
-                      <a
-                        href={pr.linkedIssue.htmlUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="pl-3 text-muted-foreground hover:underline"
-                      >
-                        → #{pr.linkedIssue.number} {pr.linkedIssue.title}
-                      </a>
-                    ) : (
-                      <span className="pl-3 text-muted-foreground">
-                        紐づくIssueが見つかりませんでした（未起票の可能性があります）
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleTriggerRelease}>起動する</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={releaseSuccessOpen} onOpenChange={setReleaseSuccessOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>リリースを起動しました</AlertDialogTitle>
-            <AlertDialogDescription>
-              進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction className={buttonVariants({ variant: "default" })}>
-              OK
-            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
