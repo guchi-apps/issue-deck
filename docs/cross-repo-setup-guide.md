@@ -104,7 +104,7 @@ on:
 
 jobs:
   labels:
-    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v6
     permissions:
       issues: write
       pull-requests: write
@@ -116,8 +116,7 @@ jobs:
 ```yaml
 jobs:
   dispatch:
-    # workflows/v2 は #945 の動作確認が取れた時点で切る（本ドキュメント執筆時点では未作成）
-    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v2
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
     with:
       runtime-setup: minimal    # node-db / node / minimal
       package-manager: npm      # npm / pnpm（既定は npm）
@@ -145,9 +144,9 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 **他リポジトリから呼ぶ場合は必ず指定する。**
 
 ```yaml
-    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v5
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
     with:
-      prompts-ref: workflows/v5   # ↑の uses: と同じタグを指定する
+      prompts-ref: workflows/v6   # ↑の uses: と同じタグを指定する
 ```
 
 共有ワークフローは `actions/checkout`（`repository:` 未指定＝呼び出し元）でチェックアウトするため、**`.github/prompts/` 配下も呼び出し元リポジトリのものが読まれる**。指定しないと、プロンプトを持たないリポジトリでは最初のClaudeステップで落ちる。
@@ -217,11 +216,11 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | タグ | 含まれる再利用可能ワークフロー | 備考 |
 |---|---|---|
 | `workflows/v1` | `reusable-issue-labels.yml` | |
-| `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成 |
+| `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成した |
 | `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
 | `workflows/v4` | 上記 | `node-version` inputs を追加（#956） |
 | `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
-| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964）。**本ドキュメント執筆時点では未作成** |
+| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964）。現時点の最新タグで、m-guchi/shopping-list・m-guchi/dayspanが参照している |
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
@@ -261,8 +260,20 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 ## 2. ラベル体系
 
-マルチエージェント運用の状態遷移・オプション制御に使う13個のラベルは、issue-deckリポジトリに
-手動で作成したカスタムラベルであり、他リポジトリには存在しない。
+マルチエージェント運用の状態遷移・オプション制御に使う14個のラベルは、issue-deckリポジトリに
+手動で作成したカスタムラベルであり、導入前の他リポジトリには存在しない。
+
+**ラベルの正はこのissue-deckリポジトリに置いている。** `m-guchi/docs`の`label-sync/`にある
+同期スクリプトで、issue-deckをソースとして対象リポジトリへ一括作成できる。
+
+```bash
+cd /home/guchi/apps/_docs/label-sync
+./sync-labels.sh dry-run --from issue-deck --to my-app   # 差分プレビュー
+./sync-labels.sh apply   --from issue-deck --to my-app   # 反映
+```
+
+同期スクリプトはissue-deckの全ラベルを配るため、下記14個に加えて`30.bug`・`51.improvement`等の
+分類用ラベルもあわせて作成される。ラベルを個別に作りたい場合は次の`gh label create`を使う。
 
 | ラベル | 色 | 説明 | 用途 |
 |---|---|---|---|
