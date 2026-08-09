@@ -17,6 +17,7 @@ function makeStatus(overrides: Partial<AvailableReleaseStatus>): AvailableReleas
     deployWorkflowRun: null,
     bumpPullRequest: null,
     releasePullRequest: null,
+    otherPullRequests: [],
     ...overrides,
   };
 }

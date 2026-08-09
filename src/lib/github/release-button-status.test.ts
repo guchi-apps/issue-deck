@@ -15,6 +15,7 @@ function baseStatus(overrides: Partial<AvailableReleaseStatus> = {}): AvailableR
     deployWorkflowRun: null,
     bumpPullRequest: null,
     releasePullRequest: null,
+    otherPullRequests: [],
     ...overrides,
   };
 }

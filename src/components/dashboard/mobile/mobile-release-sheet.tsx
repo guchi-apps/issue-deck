@@ -64,6 +64,19 @@ export function MobileReleaseSheet({
     [issues, repository.fullName],
   );
 
+  // Issueを起票せず直接developへ作られたPRの見落としに気づけるよう、develop向けの
+  // その他のオープンPR（バンプPR自身を除く）を、参照Issue番号から画面に読み込み済みのIssueと
+  // 突き合わせて一覧表示する(#977)。突き合わせはこの画面側で行うため追加のAPI呼び出しは無い。
+  const otherPullRequestsWithIssue = useMemo(() => {
+    const otherPullRequests =
+      releaseStatus?.available && releaseStatus.otherPullRequests ? releaseStatus.otherPullRequests : [];
+    const repoIssues = issues.filter((issue) => issue.repositoryFullName === repository.fullName);
+    return otherPullRequests.map((pr) => ({
+      ...pr,
+      linkedIssue: repoIssues.find((issue) => pr.issueNumbers.includes(issue.number)) ?? null,
+    }));
+  }, [releaseStatus, issues, repository.fullName]);
+
   async function handleTriggerRelease() {
     const ok = await triggerRelease();
     if (ok) {
@@ -153,6 +166,41 @@ export function MobileReleaseSheet({
             <p className="text-xs text-muted-foreground">
               develop済みでmain未反映のIssueはありません。
             </p>
+          )}
+          {otherPullRequestsWithIssue.length > 0 && (
+            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                developへの未マージPR（今回のリリースには含まれません）
+              </p>
+              <ul className="flex flex-col gap-1 text-xs">
+                {otherPullRequestsWithIssue.map((pr) => (
+                  <li key={pr.number} className="flex flex-col gap-0.5">
+                    <a
+                      href={pr.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      #{pr.number} {pr.title}
+                    </a>
+                    {pr.linkedIssue ? (
+                      <a
+                        href={pr.linkedIssue.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="pl-3 text-muted-foreground hover:underline"
+                      >
+                        → #{pr.linkedIssue.number} {pr.linkedIssue.title}
+                      </a>
+                    ) : (
+                      <span className="pl-3 text-muted-foreground">
+                        紐づくIssueが見つかりませんでした（未起票の可能性があります）
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
