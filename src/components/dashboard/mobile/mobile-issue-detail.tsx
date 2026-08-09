@@ -83,7 +83,7 @@ import {
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { canStartImplementation } from "@/lib/github/start-implementation";
+import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
@@ -148,6 +148,9 @@ export function MobileIssueDetail({
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
+  const startDisabledReason = startImplementationDisabledReason(
+    repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
+  );
   const {
     createComment,
     updateComment,
@@ -417,8 +420,9 @@ export function MobileIssueDetail({
             renderTrigger={(isSubmitting) => (
               <button
                 type="button"
-                disabled={isSubmitting}
+                disabled={isSubmitting || startDisabledReason !== null}
                 aria-label="実装を開始"
+                title={startDisabledReason ?? undefined}
                 className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
               >
                 {isSubmitting ? (
@@ -724,7 +728,11 @@ export function MobileIssueDetail({
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
             renderTrigger={(isSubmitting) => (
-              <Button className="w-full" disabled={isSubmitting}>
+              <Button
+                className="w-full"
+                disabled={isSubmitting || startDisabledReason !== null}
+                title={startDisabledReason ?? undefined}
+              >
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
                 実装を開始
               </Button>

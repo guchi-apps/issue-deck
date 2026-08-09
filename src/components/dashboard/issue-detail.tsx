@@ -78,7 +78,7 @@ import {
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
-import { canStartImplementation } from "@/lib/github/start-implementation";
+import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
@@ -367,6 +367,10 @@ export function IssueDetail({
     );
   }
 
+  const startDisabledReason = startImplementationDisabledReason(
+    repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
+  );
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
@@ -393,7 +397,11 @@ export function IssueDetail({
                   onIssueUpdated={onIssueUpdated}
                   onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
                   renderTrigger={(isSubmitting) => (
-                    <Button size="sm" disabled={isSubmitting}>
+                    <Button
+                      size="sm"
+                      disabled={isSubmitting || startDisabledReason !== null}
+                      title={startDisabledReason ?? undefined}
+                    >
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
                       実装を開始
                     </Button>
