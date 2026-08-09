@@ -22,7 +22,19 @@ EXPLICIT_REPO = re.compile(r"--repo\b|\s-R\s")
 
 missing = []
 
-for path in sorted(glob.glob(".github/workflows/*.yml")):
+paths = sorted(glob.glob(".github/workflows/*.yml"))
+# 対象0件を「問題なし」と報告しない（#937）。本スクリプトは「構文としては妥当なのに静かに
+# 壊れる」欠落を検出するためのものなので、自身が同じ失敗モードを持ち込まないようにする。
+# ディレクトリの移動・リネーム、checkout失敗、他リポジトリへ展開した際の配置ミスで沈黙する。
+if not paths:
+    print(
+        "エラー: .github/workflows/*.yml が1件も見つかりません。"
+        "リポジトリルートで実行しているか確認してください。",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+for path in paths:
     with open(path, encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
     if not doc:
@@ -55,5 +67,5 @@ if missing:
     )
     sys.exit(1)
 
-print("OK: checkoutしないジョブのghコマンドは全てリポジトリを特定できます")
+print(f"OK: {len(paths)}ファイル中、checkoutしないジョブのghコマンドは全てリポジトリを特定できます")
 PYEOF

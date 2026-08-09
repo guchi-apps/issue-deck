@@ -35,12 +35,16 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 1. ワークフローファイル一式
 
-`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下6ファイルである。
+`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下のファイルである。
+
+**移植方法は2種類ある。** 従来どおりコピーして改変するものと、issue-deck側の再利用可能ワークフロー（`reusable-*.yml`）を`uses:`で参照するだけのものがある。後者は薄いcallerを置くだけで済み、issue-deck側の改善がタグを上げるだけで反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。現在は`issue-labels.yml`のみが後者へ移行済みで、順次広げていく。
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる。**`.github/prompts/`配下もあわせてコピーする必要がある**（後述） |
-| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する | ラベル名・`issue-<番号>`ブランチ命名規則が一致していればほぼ無改変で移植できる。スクリーンショット撮影を導入しないリポジトリでは、末尾の`screenshots`ブランチ掃除ジョブを削除してよい |
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義とプレビュー系ジョブのみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系の`deploy-preview`／`notify-preview-url`ジョブはFly.io設定がアプリ固有のため、caller側に置いて対象リポジトリの`deploy-preview.yml`を呼ぶ |
+| `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下もissue-deck側のものが使われるためコピー不要 |
+| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
+| `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
@@ -49,6 +53,78 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
+
+### 再利用可能ワークフローの参照
+
+`reusable-*.yml` を使うワークフローは、対象リポジトリ側にトリガー定義だけを持つ薄いcallerを置く。
+
+```yaml
+# 対象リポジトリの .github/workflows/issue-labels.yml
+name: Issue Labels
+
+on:
+  # issue-deck側の同名ファイルからトリガー定義をコピーする
+  push:
+    branches:
+      - "issue-*"
+  # …（以下略）
+
+jobs:
+  labels:
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+```
+
+`claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
+
+```yaml
+jobs:
+  dispatch:
+    # workflows/v2 は #945 の動作確認が取れた時点で切る（本ドキュメント執筆時点では未作成）
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v2
+    with:
+      runtime-setup: minimal    # node-db / node / minimal
+      package-manager: npm      # npm / pnpm（既定は npm）
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+```
+
+`runtime-setup` の選び方は以下のとおり（アプリ12個の実態調査は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。
+
+| 値 | 対象 | 実行される準備 |
+|---|---|---|
+| `node-db` | Next.js + DB（Prisma等） | Node・依存インストール・DBマイグレーション・シード・Playwright |
+| `node` | Next.js（DBなし） | Node・依存インストール・Playwright |
+| `minimal` | 素のJS・依存パッケージなし | なし |
+
+DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
+
+- **参照はタグ固定とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-*.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
+- **タグ名は `workflows/vN` 形式**（`v1`のような形にしない）。理由は2つある。
+  - アプリのリリースタグ（`vX.Y.Z`、`deploy.yml`がmainから作成）と名前空間を分けるため
+  - `release.yml`が`on: push: tags: ["v*"]`でGitHub Releaseを作るため。`v1`という名前でタグを切ると、その瞬間に意図しないReleaseが作られる
+- **タグは再利用可能ワークフロー全体で1バージョン**であり、ワークフローごとに別体系にはしない（#934）。ラベル体系が複数のワークフローをまたいで共有されているため、個別にバージョンをずらすと整合が壊れる。
+
+現在のタグと、含まれる再利用可能ワークフローの対応は以下のとおり。
+
+| タグ | 含まれる再利用可能ワークフロー |
+|---|---|
+| `workflows/v1` | `reusable-issue-labels.yml` |
+
+`workflows/v2`（`reusable-issue-dispatch.yml`を追加）は、issue-deck自身での動作確認（#945）が取れた時点で切る。
+
+タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
+- **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
+- **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。
+- issue-deckがprivateリポジトリになった場合、または対象リポジトリがprivateの場合は、issue-deck側の Settings → Actions → Access で同一オーナーからのアクセスを許可する必要がある（publicどうしなら設定不要）。
 
 ### あわせてコピーが必要なファイル
 

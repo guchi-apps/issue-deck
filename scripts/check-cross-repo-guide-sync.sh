@@ -14,6 +14,16 @@ if [ ! -f "$GUIDE" ]; then
   exit 1
 fi
 
+# 対象0件を「問題なし」と報告しない（#937）。globが展開されないまま処理が進むと、
+# 実態を検査せずに終わる・意味の分からないエラーになる、のどちらかになる。
+shopt -s nullglob
+workflow_files=("$WORKFLOWS_DIR"/*.yml)
+shopt -u nullglob
+if [ "${#workflow_files[@]}" -eq 0 ]; then
+  echo "エラー: $WORKFLOWS_DIR/*.yml が1件も見つかりません。リポジトリルートで実行しているか確認してください。" >&2
+  exit 1
+fi
+
 missing=0
 
 check() {
@@ -26,7 +36,7 @@ check() {
 }
 
 # 1. ワークフローファイル名
-for f in "$WORKFLOWS_DIR"/*.yml; do
+for f in "${workflow_files[@]}"; do
   check "workflow" "$(basename "$f")"
 done
 
@@ -51,4 +61,4 @@ if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 
-echo "OK: $GUIDE は現在の $WORKFLOWS_DIR/*.yml の識別子と同期しています"
+echo "OK: $GUIDE は現在の $WORKFLOWS_DIR/*.yml（${#workflow_files[@]}ファイル）の識別子と同期しています"
