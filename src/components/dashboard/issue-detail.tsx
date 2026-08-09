@@ -111,7 +111,7 @@ export function IssueDetail({
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
-  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
+  const { index: targetCommentIndex, hasUnread } = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -697,10 +697,12 @@ export function IssueDetail({
       </div>
 
       <ScrollToLatestCommentButton
+        key={issue.id}
         containerRef={scrollContainerRef}
         targetRef={targetCommentRef}
         visible={comments.length > 0}
-        className="right-4 bottom-4"
+        hasUnread={hasUnread}
+        className="left-1/2 bottom-4 -translate-x-1/2"
       />
 
       <Sheet open={isPropertiesOpen} onOpenChange={setIsPropertiesOpen}>

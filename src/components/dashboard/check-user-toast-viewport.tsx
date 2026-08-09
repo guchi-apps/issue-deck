@@ -55,8 +55,9 @@ export function CheckUserToastViewport({
           <ToastClose />
         </Toast>
       ))}
-      {/* スマホはボトムナビ（min-h-14）と重ならないよう底上げする */}
-      <ToastViewport className="bottom-16 md:bottom-4" />
+      {/* スマホはボトムナビ（min-h-14）及び「コメント欄へ移動」ボタンと、PCも同ボタンと
+          重ならないよう底上げする */}
+      <ToastViewport className="bottom-20 md:bottom-16" />
     </ToastProvider>
   );
 }
