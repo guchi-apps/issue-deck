@@ -657,6 +657,29 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   エイリアス（`opus`/`sonnet`/`haiku`）のみを許可する。特定のスナップショットに固定すると、
   将来Anthropic側でデフォルトモデルが更新されても自動的に恩恵を受けられなくなるため。
 
+#### 実装用と補助用の2系統に分ける（#905）
+
+すべてのステップを同じモデルで動かすと、実装ほどの精度を必要としない処理まで上位モデルのコストを
+払うことになる。そのため`AppSetting`に`claudeModelAssist`を追加し、2系統で管理する。
+
+| 設定 | 適用されるステップ |
+|---|---|
+| `claudeModel`（実装・計画） | 計画提示、実装・PR作成 |
+| `claudeModelAssist`（補助処理） | サブIssue分割、質問応答 |
+
+`claude_model`ステップは`model_flag`と`assist_model_flag`の2つを出力し、各`claude_args`が
+どちらかを埋め込む。フォールバックの考え方は両者で同じ（不正値・取得失敗時は`"auto"`扱い）。
+`claudeModelAssist`は後から追加した項目のため、レスポンスに項目自体が無い場合も`"auto"`へ倒れる。
+
+**develop向けPRの自動レビュー（`claude-review-develop.yml`）は対象外とし、`--model`を指定しない
+既定のままにしている。** レビュー品質の低下は自動マージ不可判定の見落としに直結し、コスト削減と
+釣り合わないため。`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
+`shared-knowledge-propose.yml`・`release-develop-to-main.yml`も同様に`--model`を指定していない
+（そもそもこの設定を参照していない）。
+
+削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
+品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
+
 ### 自動投稿コメントへの実行ログリンク付与
 
 `claude-issue-dispatch.yml`・`issue-labels.yml`がGitHub Actions上で`gh issue comment`を使って
