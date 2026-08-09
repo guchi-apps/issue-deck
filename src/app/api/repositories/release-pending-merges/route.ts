@@ -4,11 +4,15 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchOpenPullRequestsForBase } from "@/lib/github/release-api";
+import { fetchOpenPullRequestsForBase, fetchRefCiState } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
+
+/** "main": develop→mainのPRがマージ待ち。"develop": バンプPRがCI通過後もマージ待ち（#979） */
+export type ReleaseMergeTarget = "main" | "develop";
 
 export type ReleasePendingMerge = {
   repoFullName: string;
+  mergeTarget: ReleaseMergeTarget;
   pullRequestNumber: number;
   pullRequestUrl: string;
   pullRequestTitle: string;
@@ -56,21 +60,40 @@ async function handleGET() {
         const available = await releaseWorkflowExists(repository.ownerLogin, repository.name, token);
         if (!available) return null;
 
-        const pullRequests = await fetchOpenPullRequestsForBase(
-          repository.ownerLogin,
-          repository.name,
-          "main",
-          token,
-        );
-        const releasePr = pullRequests.find((pr) => pr.head.ref === "develop");
-        if (!releasePr) return null;
+        const [developBasePullRequests, mainBasePullRequests] = await Promise.all([
+          fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "develop", token),
+          fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "main", token),
+        ]);
 
-        return {
-          repoFullName: repository.fullName,
-          pullRequestNumber: releasePr.number,
-          pullRequestUrl: releasePr.html_url,
-          pullRequestTitle: releasePr.title,
-        };
+        // mainへのマージ待ち（develop→mainのPRがオープン中）を最優先で検出する。
+        const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop");
+        if (releasePr) {
+          return {
+            repoFullName: repository.fullName,
+            mergeTarget: "main",
+            pullRequestNumber: releasePr.number,
+            pullRequestUrl: releasePr.html_url,
+            pullRequestTitle: releasePr.title,
+          };
+        }
+
+        // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
+        // `summarizeReleaseButtonStatus`のaction_required判定基準（CIがpendingでなくなった時点）と揃える。
+        const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v"));
+        if (bumpPr) {
+          const ciState = await fetchRefCiState(repository.ownerLogin, repository.name, bumpPr.head.ref, token);
+          if (ciState !== "pending") {
+            return {
+              repoFullName: repository.fullName,
+              mergeTarget: "develop",
+              pullRequestNumber: bumpPr.number,
+              pullRequestUrl: bumpPr.html_url,
+              pullRequestTitle: bumpPr.title,
+            };
+          }
+        }
+
+        return null;
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まないよう、ログのみ残してスキップする。
         console.error(

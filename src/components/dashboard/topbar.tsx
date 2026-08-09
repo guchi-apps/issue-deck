@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { AccountMenuDialog } from "@/components/dashboard/account-menu-dialog";
+import { ReleaseStatusButton } from "@/components/dashboard/release-status-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -215,6 +216,12 @@ export function TopBar({
         新規Issue
       </Button>
 
+      <ReleaseStatusButton
+        repositories={repositories}
+        selectedRepoFullName={selectedRepoFullName}
+        issues={issues}
+      />
+
       <button
         type="button"
         className="flex items-center gap-1 rounded-md p-1 hover:bg-accent"
@@ -232,9 +239,6 @@ export function TopBar({
         open={accountMenuOpen}
         onOpenChange={setAccountMenuOpen}
         currentUser={currentUser}
-        selectedRepoFullName={selectedRepoFullName}
-        repositories={repositories}
-        issues={issues}
         onOpenAppSettings={onOpenAppSettings}
       />
     </header>
