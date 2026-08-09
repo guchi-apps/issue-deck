@@ -41,7 +41,8 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる。**`.github/prompts/`配下もあわせてコピーする必要がある**（後述） |
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義とプレビュー系ジョブのみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系の`deploy-preview`／`notify-preview-url`ジョブはFly.io設定がアプリ固有のため、caller側に置いて対象リポジトリの`deploy-preview.yml`を呼ぶ |
+| `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下もissue-deck側のものが使われるためコピー不要 |
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
@@ -76,6 +77,34 @@ jobs:
       pull-requests: write
       contents: write
 ```
+
+`claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
+
+```yaml
+jobs:
+  dispatch:
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v2
+    with:
+      runtime-setup: minimal    # node-db / node / minimal
+      package-manager: npm      # npm / pnpm（既定は npm）
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+```
+
+`runtime-setup` の選び方は以下のとおり（アプリ12個の実態調査は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。
+
+| 値 | 対象 | 実行される準備 |
+|---|---|---|
+| `node-db` | Next.js + DB（Prisma等） | Node・依存インストール・DBマイグレーション・シード・Playwright |
+| `node` | Next.js（DBなし） | Node・依存インストール・Playwright |
+| `minimal` | 素のJS・依存パッケージなし | なし |
+
+DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
 - **参照はタグ固定（`@v1`）とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-issue-labels.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
