@@ -52,3 +52,23 @@ for entry in "${entries[@]}"; do
   fi
   echo ""
 done
+
+# 参照方式(uses: で呼ぶ再利用可能ワークフロー)へ移行したものは、caller側の `@<タグ>` 自体が
+# バージョン記録になるため sync-state マーカーを持たず、上記の一覧には現れない(#942)。
+# 「出てこないが大丈夫か」と迷わせないための注記。対象は .github/workflows/reusable-*.yml の
+# 実在ファイルから導出する（固定文字列で列挙すると、それ自体が腐る手書き台帳になるため）。
+shopt -s nullglob
+reusables=(.github/workflows/reusable-*.yml)
+shopt -u nullglob
+if [ "${#reusables[@]}" -gt 0 ]; then
+  echo "--- 参照方式のため上記に現れないワークフロー（${#reusables[@]}件） ---"
+  for f in "${reusables[@]}"; do
+    echo "  $(basename "$f")"
+  done
+  echo ""
+  echo "  これらは各リポジトリがコピーせず uses: で参照している。参照中のバージョンは"
+  echo "  対象リポジトリのcallerファイルを見る（docs/supported-repositories.md"
+  echo "  「参照方式のワークフローは sync-state の対象外」を参照）。"
+  echo "  issue-deck側で切られているタグ:"
+  git tag --list 'workflows/*' | sed 's/^/    /' || true
+fi

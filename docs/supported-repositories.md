@@ -10,10 +10,13 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
 留めている。
 
+ただしワークフローの配布方法には**コピー方式**と**参照方式**の2種類があり、参照方式のものは
+手動記録の対象外とする（後述「参照方式のワークフローは sync-state の対象外」）。
+
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
-| `m-guchi/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`） | あり（本体） | 2026-08-05 | #354, #501 | issue-deck自身のセルフホスティング |
-| `m-guchi/shopping-list` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`） | あり（新規作成） | 2026-08-09 | #357, #723, #895 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
+| `m-guchi/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
+| `m-guchi/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）。**コピー**: `claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
 
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
@@ -41,7 +44,6 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 ### m-guchi/shopping-list
 
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-issue-dispatch.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=issue-labels.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-review-develop.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=claude-ci-fix.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
 <!-- sync-state: repo=m-guchi/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
@@ -57,6 +59,36 @@ m-guchi/shopping-list#64（共有知識層の導入）で`bb7d0f7`時点の内�
 双方のPull Requestがマージされた時点で追加する。
 
 **最終同期日: 2026-08-09**
+
+## 参照方式のワークフローは sync-state の対象外
+
+`reusable-*.yml`（`on: workflow_call`）を`uses:`で参照する方式へ移行したワークフローは、**`sync-state`マーカーを記録しない**（#940・#942）。
+
+理由は、参照方式では**caller側ファイルの`@<タグ>`という参照そのものがバージョン記録**であり、機械可読で常に正確だからである。ここに二重に書くと、手書きゆえに再び実態とずれる。#895 で「マーカーの更新漏れ → 当たりと外れが混在した一覧 → 誰も見なくなる」という劣化が実際に起きており、それを構造的に避けるのが#934で定めた方向である。
+
+そのため`scripts/check-workflow-sync-drift.sh`の出力にも、参照方式のワークフローは現れない（現れないことが正常である）。
+
+**どのリポジトリがどのバージョンを参照しているかは、対象リポジトリのcallerファイルを見る。**
+
+```bash
+# 例: shopping-list が参照しているバージョンを確認する
+gh api repos/m-guchi/shopping-list/contents/.github/workflows/issue-labels.yml?ref=develop \
+  -q .content | base64 -d | grep 'uses:'
+```
+
+```bash
+# issue-deck側で提供している再利用可能ワークフローと、切られているタグを確認する
+ls .github/workflows/reusable-*.yml
+git tag --list 'workflows/*'
+```
+
+issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）を参照し、常に最新の内容で動く。他リポジトリはタグ固定のため、issue-deck側の変更は**新しいタグを切り、各リポジトリのcallerを1行更新するPRを出す**まで波及しない。issue-deckが先に壊れて他リポジトリには届かない、カナリア構成である（#934）。
+
+移行済みのワークフローは以下のとおり。
+
+| ワークフロー | 実体 | 移行時期 |
+|---|---|---|
+| `issue-labels.yml` | `reusable-issue-labels.yml` | 2026-08-09（#940、m-guchi/shopping-list#77） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
