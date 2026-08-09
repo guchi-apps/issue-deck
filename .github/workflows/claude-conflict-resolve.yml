@@ -3,7 +3,7 @@ name: Claude Conflict Resolve
 # develop向けPRがdevelopとの間でコンフリクトした際、これまでは人間がIssueに
 # `@claude コンフリクトを解消して`のようにコメントして個別に依頼する必要があった。
 # この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を
-# 試みるワークフロー(docs/multi-agent-workflow.md「PRコンフリクトの自動解消」参照、issue #315)。
+# 試みるワークフロー(docs/multi-agent/auto-repair.md「PRコンフリクトの自動解消」参照、issue #315)。
 #
 # ジョブ構成:
 # - detect-conflicts: developとコンフリクトしている(mergeable=CONFLICTING)PRを

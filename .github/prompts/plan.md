@@ -5,10 +5,8 @@
 大きいファイルを丸ごと読むと、その内容が以降のやり取り全てに乗り続け、実行コストが
 大きく膨らみます。目安として数万バイトを超える`.md`・`.yml`は`Read`で全体を開かず、
 `Grep`で該当箇所を特定してから`Read`の`offset`・`limit`で必要な範囲だけ読んでください。
-特に次の2つは大きいため、全体を開かないでください。
-
-- `.github/workflows/claude-issue-dispatch.yml`（約150KB）
-- `docs/multi-agent-workflow.md`（約110KB）
+特に`.github/workflows/claude-issue-dispatch.yml`（約120KB）は大きいため、全体を開かないで
+ください。
 
 ファイル全体を`cat`で出力するのも同じ理由で避け、`Read`の`offset`・`limit`を使って
 ください。検索は`Grep`ツールを優先し、`Bash`の`grep`は`Grep`で表現しにくい場合に

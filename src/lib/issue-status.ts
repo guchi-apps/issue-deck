@@ -1,5 +1,5 @@
 // "02.wip" のように2桁の数字プレフィックスを持つラベルは、Issueの進行状況を示す
-// ステップ運用（docs/multi-agent-workflow.md参照）として使われることが多い。
+// ステップ運用（docs/multi-agent/labels.md参照）として使われることが多い。
 // 00番台のみステップではなく「要対応」を示す横断的なフラグ用途（例: 00.check-user）
 // として扱う。
 const STATUS_STEP_PATTERN = /^0([1-9])\./;

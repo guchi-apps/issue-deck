@@ -162,7 +162,7 @@ issue-deckリポジトリに手動で作成したカスタムラベルであり�
 
 - 現状issue-deckでは、`@claude`コメント起動時に実行者（`github.actor`）のリポジトリ`write`権限を
   `gh api repos/{owner}/{repo}/collaborators/{actor}/permission`で確認するのみ（詳細は
-  [docs/multi-agent-workflow.md](multi-agent-workflow.md)のPhase5参照）。他リポジトリでも
+  [docs/multi-agent/dispatch.md](multi-agent/dispatch.md)参照）。他リポジトリでも
   同じ考え方で足りるかは、連携リポジトリの性質（公開範囲・コントリビューター構成）次第で変わりうる。
 - IssueDeckが発行・管理するトークン（GitHub App / 上記3のClaude Codeトークン）が、連携リポジトリの
   Actions実行環境に渡ることになるため、そのリポジトリのワークフロー定義やコードが信頼できない
