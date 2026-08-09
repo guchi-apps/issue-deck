@@ -101,6 +101,7 @@ Markdownに置いている（#907）。**ワークフローファイルだけを
 | `05.develop` | `6fcf73` | developへマージ完了（main未反映） | developマージ完了時に付与 |
 | `07.m:marge` | `2f9e44` | mainへのPRを作成・マージ待ち | develop→mainのPRが開いている間 |
 | `09.main` | `1b5e20` | mainへマージ完了・リリース済み | この時点でissueをclose |
+| `11.local` | `e99695` | ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない | 付いている間`claude-issue-dispatch.yml`が計画・実装・分割・追加対応を行わない（読み取り専用の質問応答のみ例外）。ローカルセッションとの二重起動防止 |
 | `21.plan-required` | `d4c5f9` | 計画の確認・承認が必要 | 実装前にPlan modeでの計画提示を必須にする |
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
@@ -118,6 +119,7 @@ gh label create "03.d:marge" --color a8e6a1 --description "developへのPRを作
 gh label create "05.develop" --color 6fcf73 --description "developへマージ完了（main未反映）"
 gh label create "07.m:marge" --color 2f9e44 --description "mainへのPRを作成・マージ待ち"
 gh label create "09.main" --color 1b5e20 --description "mainへマージ完了・リリース済み"
+gh label create "11.local" --color e99695 --description "ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない"
 gh label create "21.plan-required" --color d4c5f9 --description "計画の確認・承認が必要"
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
