@@ -7,6 +7,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
 import { remarkTrimCjkAutolink } from "@/lib/remark-trim-cjk-autolink";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,7 @@ export function MarkdownBody({ content, className, repositoryFullName }: Markdow
         rehypePlugins={[
           rehypeRaw,
           [rehypeLinkifyIssueRefs, { repositoryFullName }],
+          rehypeAbsolutizeRelativeUrls,
           [rehypeSanitize, sanitizeSchema],
         ]}
         components={components}
