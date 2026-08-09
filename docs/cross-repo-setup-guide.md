@@ -21,23 +21,56 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 導入ステップの全体像
 
-1. [ワークフローファイル一式](#1-ワークフローファイル一式)をコピーし、リポジトリ差異に合わせて改変する
-2. [ラベル体系](#2-ラベル体系)を作成する
-3. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
-4. [Secrets](#4-secrets)を登録する
-5. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、ブランチ命名規則、Branch protection）
-6. [リポジトリ差異の吸収チェックリスト](#6-リポジトリ差異の吸収チェックリスト)を確認し、ワークフロー内の
-   技術スタック固有部分を置き換える
-7. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
+上から順に実行すればよい。
+
+1. [対象リポジトリの構成を調べ、5つの設定値を決める](#0-最初に決める5つの設定値)
+2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの2つは**コピーせず参照**、残りはコピーして改変）
+3. [ラベル体系](#2-ラベル体系)を作成する
+4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
+5. [Secrets](#4-secrets)を登録する
+6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、ブランチ命名規則、Branch protection）
+7. [コピーしたワークフローのリポジトリ差異を吸収する](#6-リポジトリ差異の吸収チェックリスト)（参照方式のものは`with:`で指定済みのため対象外）
+8. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
    スクリプトを利用する
-8. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
-9. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
+9. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
+10. [動作を確認する](#11-導入後の動作確認)
+11. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
+
+## 0. 最初に決める5つの設定値
+
+参照方式のワークフロー（`claude-issue-dispatch.yml`）に渡す `with:` の値。**対象リポジトリごとに決めるのはこれだけ**で、ワークフロー本体を編集する必要はない。
+
+| 設定 | 決め方 | 例 |
+|---|---|---|
+| `runtime-setup` | DBあり（Prisma等）→`node-db` / DBなしのNext.js等→`node` / 素のJS・依存なし→`minimal` | `minimal` |
+| `package-manager` | `pnpm-lock.yaml`があれば`pnpm`、`package-lock.json`なら`npm` | `npm` |
+| `node-version` | 対象リポジトリのCI（`ci.yml`）が固定しているバージョンに揃える。固定していなければ未指定でよい | `"20.19"` |
+| `prompts-ref` | **`uses:`と同じタグ**。対象リポジトリに`.github/prompts/`が無い限り必須 | `workflows/v6` |
+| `post-implement-script` | 実装後に固有の後処理（スクリーンショット撮影など）が要る場合のみ、そのスクリプトのパス | `scripts/ci-post-implement.sh` |
+
+判断材料は以下のコマンドで集められる。
+
+```bash
+REPO=m-guchi/<対象リポジトリ>
+gh api "repos/$REPO/contents" -q '[.[].name] | join(" ")'          # prisma/ や lock ファイルの有無
+gh api "repos/$REPO/contents/package.json" -q .content | base64 -d # scripts と依存関係
+gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d | grep node-version
+```
+
+各アプリの実際の構成調査結果は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照（12アプリ分。`node-db`が7、`node`が2、`minimal`が3）。
 
 ## 1. ワークフローファイル一式
 
 `.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下のファイルである。
 
-**移植方法は2種類ある。** 従来どおりコピーして改変するものと、issue-deck側の再利用可能ワークフロー（`reusable-*.yml`）を`uses:`で参照するだけのものがある。後者は薄いcallerを置くだけで済み、issue-deck側の改善がタグを上げるだけで反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。現在は`issue-labels.yml`のみが後者へ移行済みで、順次広げていく。
+**移植方法は2種類ある。** どちらに該当するかを先に確認すること。
+
+| 方式 | 対象ワークフロー | やること |
+|---|---|---|
+| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
+| コピー方式（未移行） | `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`・`shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
+
+参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
@@ -195,27 +228,22 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。
 - issue-deckがprivateリポジトリになった場合、または対象リポジトリがprivateの場合は、issue-deck側の Settings → Actions → Access で同一オーナーからのアクセスを許可する必要がある（publicどうしなら設定不要）。
 
-### あわせてコピーが必要なファイル
+### プロンプト・補助スクリプトはコピーしない
 
-`claude-issue-dispatch.yml`のプロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下の
-Markdownに置いている（#907）。**ワークフローファイルだけをコピーしても動作しない。**
+`claude-issue-dispatch.yml`のプロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下のMarkdownに置いている（#907。GitHub Actionsの式テンプレート長の上限21,000バイトを避けるため。詳細は[docs/multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)）。
 
-| ファイル | 役割 |
+**参照方式では、これらを対象リポジトリへコピーする必要はない。** `prompts-ref`を指定すれば、issue-deck側が`.shared-prompts/`へチェックアウトされ、そちらのファイルが使われる（#960・#964）。
+
+| ファイル | 参照方式での扱い |
 |---|---|
-| `.github/prompts/plan.md` | 計画提示ステップのプロンプト |
-| `.github/prompts/split.md` | サブIssue分割ステップのプロンプト |
-| `.github/prompts/question.md` | 質問応答ステップのプロンプト |
-| `.github/prompts/implement.md` | 実装・PR作成ステップのプロンプト |
-| `.github/scripts/summarize-claude-usage.sh` | 各Claudeステップの使用量をJob Summaryへ出力する（#903。導入は任意） |
+| `.github/prompts/{plan,split,question,implement}.md` | **コピー不要。** `prompts-ref`で解決される |
+| `.github/scripts/summarize-claude-usage.sh` | **コピー不要。** 同じく`prompts-ref`で解決される |
 
-プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・
-`${RUN_URL}`のプレースホルダで表現し、ワークフロー側の「〜プロンプトを組み立てる」ステップが
-`envsubst`で埋めて環境変数へ格納する。プロンプト本文はリポジトリ固有の記述（ディレクトリ構成・
-ラベル名・確認コマンド等）を多く含むため、移植時は**ワークフローYAMLよりもこちらの書き換え量が
-多くなる**。
+**`prompts-ref`を指定し忘れると、呼び出し元リポジトリの`.github/prompts/`が読まれ、存在しないため最初のClaudeステップで落ちる。** 使用量出力スクリプトも同様に解決されるため、これが無いと`exit 127`でジョブが失敗する（#964で実際に発生）。
 
-この構成にしている理由は、GitHub Actionsの式テンプレート長の上限（21,000バイト）にある。詳細は
-[docs/multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)を参照。
+対象リポジトリ固有のプロンプトを使いたい場合に限り、`.github/prompts/`配下を自分で用意して`prompts-ref`を未指定にする。ただしプロンプトは4ファイル・約48KBで最も更新頻度が高い部分のため、**特段の理由がなければ共有側を使う**こと。
+
+プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・`${RUN_URL}`のプレースホルダで表現され、ワークフロー側の「〜プロンプトを組み立てる」ステップが`envsubst`で埋めて環境変数へ格納する。
 
 ### 参考: issue-deckの全ワークフロー一覧
 
@@ -334,6 +362,9 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
   [docs/multi-agent/branching.md](multi-agent/branching.md)の「ブランチ保護ルール案」を参照
 
 ## 6. リポジトリ差異の吸収チェックリスト
+
+> **適用範囲**: 本節は**コピー方式のワークフロー**（`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`）が対象。参照方式の2つ（`claude-issue-dispatch.yml`・`issue-labels.yml`）は「0. 最初に決める5つの設定値」の`with:`で吸収済みのため、ワークフローを編集する必要はない。
+
 
 ワークフローファイルをそのままコピーしても動かない、個別カスタマイズが必要な観点。
 
@@ -468,6 +499,32 @@ scripts/check-cross-repo-guide-sync.sh
 による反映PR → 人間のマージ）まで導入する場合は、`shared-knowledge-propose.yml`もあわせてコピーし、
 `CLAUDE.md`に「`.shared-context/`は読み取り専用」「共通知見は提案コメントにとどめる」ルールを
 記載する。
+
+## 11. 導入後の動作確認
+
+いきなり実装を走らせず、影響の小さい順に確認する。
+
+| 順 | 確認内容 | 方法 |
+|---|---|---|
+| 1 | ラベル遷移 | `issue-<番号>`ブランチへpushし、Issueに`02.wip`が付くこと |
+| 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチもラベルも変更されない**ため最も安全 |
+| 3 | 実装フロー | `@claude`とコメントし、ブランチ作成・PR作成まで通ること |
+| 4 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
+
+**2 の時点で、参照方式が成立しているかはほぼ判断できる。** 実行ログのジョブ名が `dispatch / triage` のように`caller名 / callee名`の形になっていれば、再利用ワークフロー経由で動いている。
+
+`prompts-ref`が効いているかは「共有ファイルの参照先を決める」ステップのログで確認する。
+
+```
+プロンプトの参照先: .shared-prompts/.github/prompts
+使用量出力スクリプト: .shared-prompts/.github/scripts/summarize-claude-usage.sh
+```
+
+`.shared-prompts/`から始まっていれば共有側、`./`から始まっていれば呼び出し元側のものが使われている。
+
+### 実行ログの追跡時の注意
+
+コメント投稿をきっかけに結果を確認するとき、**`gh run list --limit 1`で「最新のrun」を取ってはいけない。** botコメントやラベル操作が数秒差で同時に飛ぶため、自分が起こしたものではないrunを掴む。投稿前後のrun一覧を差分で取り、`event`と`createdAt`を自分のコメントの`createdAt`と突き合わせて特定すること。
 
 ## 関連ドキュメント
 
