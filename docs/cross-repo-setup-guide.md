@@ -71,7 +71,7 @@ on:
 
 jobs:
   labels:
-    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@v1
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1
     permissions:
       issues: write
       pull-requests: write
@@ -83,6 +83,7 @@ jobs:
 ```yaml
 jobs:
   dispatch:
+    # workflows/v2 は #945 の動作確認が取れた時点で切る（本ドキュメント執筆時点では未作成）
     uses: m-guchi/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v2
     with:
       runtime-setup: minimal    # node-db / node / minimal
@@ -106,7 +107,21 @@ jobs:
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
-- **参照はタグ固定（`@v1`）とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-issue-labels.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
+- **参照はタグ固定とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-*.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
+- **タグ名は `workflows/vN` 形式**（`v1`のような形にしない）。理由は2つある。
+  - アプリのリリースタグ（`vX.Y.Z`、`deploy.yml`がmainから作成）と名前空間を分けるため
+  - `release.yml`が`on: push: tags: ["v*"]`でGitHub Releaseを作るため。`v1`という名前でタグを切ると、その瞬間に意図しないReleaseが作られる
+- **タグは再利用可能ワークフロー全体で1バージョン**であり、ワークフローごとに別体系にはしない（#934）。ラベル体系が複数のワークフローをまたいで共有されているため、個別にバージョンをずらすと整合が壊れる。
+
+現在のタグと、含まれる再利用可能ワークフローの対応は以下のとおり。
+
+| タグ | 含まれる再利用可能ワークフロー |
+|---|---|
+| `workflows/v1` | `reusable-issue-labels.yml` |
+
+`workflows/v2`（`reusable-issue-dispatch.yml`を追加）は、issue-deck自身での動作確認（#945）が取れた時点で切る。
+
+タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。
 - issue-deckがprivateリポジトリになった場合、または対象リポジトリがprivateの場合は、issue-deck側の Settings → Actions → Access で同一オーナーからのアクセスを許可する必要がある（publicどうしなら設定不要）。
