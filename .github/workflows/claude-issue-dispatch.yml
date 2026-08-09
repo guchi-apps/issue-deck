@@ -489,6 +489,11 @@ jobs:
            steps.state.outputs.issue_closed == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
+          # triageジョブはcheckoutを行わない(uses:を一切使わないため)ので、ghがリポジトリを
+          # 特定できるようGH_REPOを明示する。無いと`fatal: not a git repository`でこのステップ
+          # だけが落ち、スキップ判定自体は正しいのにジョブ失敗として扱われてnotify-failureが
+          # 「起動に失敗しました」と誤通知する(#929)。同ジョブの他ステップと揃えている。
+          GH_REPO: ${{ github.repository }}
         run: |
           set -e
           if [ "${{ steps.state.outputs.local_active }}" = "true" ]; then
