@@ -356,6 +356,22 @@ describe("time-dependent stats", () => {
       ]);
     });
 
+    it("view=in-progressは実装状況ラベルを持たなくてもqaAnswerPendingAtが立っていれば返す", () => {
+      const issues = [
+        makeIssue({ id: "1", labels: [], qaAnswerPendingAt: "2026-01-09T00:00:00.000Z" }),
+        makeIssue({ id: "2", labels: [], qaAnswerPendingAt: null }),
+        makeIssue({
+          id: "3",
+          labels: [{ name: "09.main", color: "green", description: null }],
+          qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
+        }),
+      ];
+      expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "3",
+      ]);
+    });
+
     it("view=not-startedは実装状況ラベル・00.check-userのいずれも持たないIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [] }),
