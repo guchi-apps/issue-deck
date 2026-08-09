@@ -64,6 +64,19 @@ jobs:
       - name: Cross-repo setup guide sync check
         run: scripts/check-cross-repo-guide-sync.sh
 
+  # ワークフローの式テンプレート長（21,000バイト）超過を検出する（#901）。
+  # 超過するとワークフローファイル自体が無効になり、issue_comment等のトリガーが
+  # 一切発火しなくなるため、developへ入る前に落とす。
+  workflow-expression-length-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Workflow expression length check
+        run: node scripts/check-workflow-expression-length.mjs
+
   workflow-drift-notice:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
