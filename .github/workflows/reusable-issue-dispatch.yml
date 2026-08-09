@@ -960,11 +960,17 @@ jobs:
         # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
         # 依存してしまうため、他の確実な通知ステップと同じくシェルスクリプトで直接行う。
         # CLAUDE.mdの運用ルール(01.planningはPlan mode開始時点で付与する)をこのワークフローでも
-        # 保証するためのステップ。
+        # 保証するためのステップ。展開先リポジトリに01.planningラベル自体が定義されていない
+        # 場合でもジョブ全体を落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
         if: steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.planning"
+        run: |
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "01.planning"; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.planning"
+          else
+            echo "::warning::ラベル '01.planning' がリポジトリに存在しないため付与をスキップします"
+          fi
 
       - name: 計画提示前のコメント数を記録する
         id: before_plan
@@ -1237,7 +1243,13 @@ jobs:
 
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
-          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
+          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          fi
 
       - name: 分割前のコメント数を記録する
         id: before_split
@@ -1323,7 +1335,13 @@ jobs:
           FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:splitter -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
-          gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
+          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          fi
 
       - name: 質問前のコメント数を記録する
         id: before_ask
@@ -1530,15 +1548,43 @@ jobs:
         # 実装着手に進む場合に備え、両分岐とも01.planningの除去も併せて行う（付いていなくても
         # 無害）。あわせて、質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で
         # 付与されうる00.qa-answeredも、実際に実装着手に進んだ時点で古い状態が残らないよう除去する。
+        # 展開先リポジトリにこれらのラベル自体が定義されていない場合でもジョブ全体を落とさない
+        # よう、付与・除去の対象を実在するラベルだけに絞り込む(#975)。
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+          label_exists() {
+            local name="$1" l
+            for l in "${existing[@]}"; do
+              [ "$l" = "$name" ] && return 0
+            done
+            return 1
+          }
+
+          remove_candidates=(01.planning 00.qa-answered)
           if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "03.d:marge" --remove-label "01.planning" --remove-label "00.qa-answered"
+            remove_candidates+=(03.d:marge)
+          fi
+
+          args=()
+          if label_exists "02.wip"; then
+            args+=(--add-label "02.wip")
           else
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "01.planning" --remove-label "00.qa-answered"
+            echo "::warning::ラベル '02.wip' がリポジトリに存在しないため付与をスキップします"
+          fi
+          for label in "${remove_candidates[@]}"; do
+            if label_exists "$label"; then
+              args+=(--remove-label "$label")
+            else
+              echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+            fi
+          done
+
+          if [ "${#args[@]}" -gt 0 ]; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} "${args[@]}"
           fi
 
       - name: 実装プロンプトを組み立てる
@@ -1766,7 +1812,13 @@ jobs:
 
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
-          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
+          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          fi
 
       - name: 実装後フックを実行する（post-implement-script）
         # 呼び出し元リポジトリ固有の後処理を差し込むための拡張点(#952)。issue-deck自身は

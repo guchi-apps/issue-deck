@@ -28,8 +28,10 @@ name: Issue Labels (reusable)
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない。
 #
-# gh issue edit の --add-label/--remove-label は、既に付与済み/未付与のラベルに
-# 対して呼んでも無害(冪等)なため、状態を事前チェックせず毎回呼び出してよい。
+# gh issue edit の --add-label/--remove-label は、Issueに「既に付与済み/未付与」なだけなら
+# 呼んでも無害(冪等)。ただし対象リポジトリにラベル定義自体が無いと exit 1 になりジョブ全体が
+# 落ちる(#975。展開先リポジトリのラベル1つの欠落だけで発生する)。そのため各ジョブでは
+# `gh label list`の結果と突き合わせ、実在するラベルだけを対象に絞り込んでから呼び出している。
 #
 # develop-pr-mergedジョブは、claude-review-develop.ymlのauto-mergeジョブが有効化する
 # GitHub Auto-merge機能による実際のマージ(必須ステータスチェック通過後にGitHub側が
@@ -70,7 +72,11 @@ jobs:
       - name: 02.wip を付与する
         run: |
           if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "02.wip"
+            if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "02.wip"; then
+              gh issue edit "${BASH_REMATCH[1]}" --add-label "02.wip"
+            else
+              echo "::warning::ラベル '02.wip' がリポジトリに存在しないため付与をスキップします"
+            fi
           fi
 
   develop-pr-opened:
@@ -89,8 +95,30 @@ jobs:
       - name: 03.d:marge へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "03.d:marge" --remove-label "02.wip"
-            gh issue comment "${BASH_REMATCH[1]}" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+            n="${BASH_REMATCH[1]}"
+            mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+            label_exists() {
+              local name="$1" l
+              for l in "${existing[@]}"; do
+                [ "$l" = "$name" ] && return 0
+              done
+              return 1
+            }
+            args=()
+            if label_exists "03.d:marge"; then
+              args+=(--add-label "03.d:marge")
+            else
+              echo "::warning::ラベル '03.d:marge' がリポジトリに存在しないため付与をスキップします"
+            fi
+            if label_exists "02.wip"; then
+              args+=(--remove-label "02.wip")
+            else
+              echo "::warning::ラベル '02.wip' がリポジトリに存在しないため除去をスキップします"
+            fi
+            if [ "${#args[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${args[@]}"
+            fi
+            gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
   develop-pr-merged:
@@ -114,8 +142,32 @@ jobs:
       - name: 05.develop へ遷移する
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            gh issue edit "${BASH_REMATCH[1]}" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
-            gh issue comment "${BASH_REMATCH[1]}" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+            n="${BASH_REMATCH[1]}"
+            mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+            label_exists() {
+              local name="$1" l
+              for l in "${existing[@]}"; do
+                [ "$l" = "$name" ] && return 0
+              done
+              return 1
+            }
+            args=()
+            if label_exists "05.develop"; then
+              args+=(--add-label "05.develop")
+            else
+              echo "::warning::ラベル '05.develop' がリポジトリに存在しないため付与をスキップします"
+            fi
+            for label in "03.d:marge" "02.wip" "00.check-user"; do
+              if label_exists "$label"; then
+                args+=(--remove-label "$label")
+              else
+                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+              fi
+            done
+            if [ "${#args[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${args[@]}"
+            fi
+            gh issue comment "$n" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
           fi
 
   develop-merge-sweep:
@@ -131,10 +183,33 @@ jobs:
     steps:
       - name: マージ済みのdevelop向けPRを持つissueを05.developへ遷移する
         run: |
+          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+          label_exists() {
+            local name="$1" l
+            for l in "${existing[@]}"; do
+              [ "$l" = "$name" ] && return 0
+            done
+            return 1
+          }
           for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              gh issue edit "$n" --add-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
+              args=()
+              if label_exists "05.develop"; then
+                args+=(--add-label "05.develop")
+              else
+                echo "::warning::ラベル '05.develop' がリポジトリに存在しないため付与をスキップします"
+              fi
+              for label in "03.d:marge" "02.wip" "00.check-user"; do
+                if label_exists "$label"; then
+                  args+=(--remove-label "$label")
+                else
+                  echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+                fi
+              done
+              if [ "${#args[@]}" -gt 0 ]; then
+                gh issue edit "$n" "${args[@]}"
+              fi
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
             fi
           done
@@ -155,8 +230,31 @@ jobs:
     steps:
       - name: 05.develop の issue を 07.m:marge へ一括遷移する
         run: |
+          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+          label_exists() {
+            local name="$1" l
+            for l in "${existing[@]}"; do
+              [ "$l" = "$name" ] && return 0
+            done
+            return 1
+          }
           for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
-            gh issue edit "$n" --add-label "07.m:marge" --remove-label "05.develop" --remove-label "03.d:marge" --remove-label "02.wip"
+            args=()
+            if label_exists "07.m:marge"; then
+              args+=(--add-label "07.m:marge")
+            else
+              echo "::warning::ラベル '07.m:marge' がリポジトリに存在しないため付与をスキップします"
+            fi
+            for label in "05.develop" "03.d:marge" "02.wip"; do
+              if label_exists "$label"; then
+                args+=(--remove-label "$label")
+              else
+                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+              fi
+            done
+            if [ "${#args[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${args[@]}"
+            fi
           done
 
   main-pr-merged:
@@ -187,8 +285,31 @@ jobs:
               gh issue list --label "07.m:marge" --state open --json number --jq '.[].number'
             } | sort -un
           )"
+          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+          label_exists() {
+            local name="$1" l
+            for l in "${existing[@]}"; do
+              [ "$l" = "$name" ] && return 0
+            done
+            return 1
+          }
           for n in $issues; do
-            gh issue edit "$n" --add-label "09.main" --remove-label "05.develop" --remove-label "07.m:marge" --remove-label "03.d:marge" --remove-label "02.wip" --remove-label "00.check-user"
+            args=()
+            if label_exists "09.main"; then
+              args+=(--add-label "09.main")
+            else
+              echo "::warning::ラベル '09.main' がリポジトリに存在しないため付与をスキップします"
+            fi
+            for label in "05.develop" "07.m:marge" "03.d:marge" "02.wip" "00.check-user"; do
+              if label_exists "$label"; then
+                args+=(--remove-label "$label")
+              else
+                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+              fi
+            done
+            if [ "${#args[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${args[@]}"
+            fi
             gh issue close "$n"
           done
 
@@ -218,13 +339,25 @@ jobs:
     steps:
       - name: 00.check-user と進捗ラベル(09.mainを除く)を除去する
         run: |
-          gh issue edit "$ISSUE_NUMBER" \
-            --remove-label "00.check-user" \
-            --remove-label "01.planning" \
-            --remove-label "02.wip" \
-            --remove-label "03.d:marge" \
-            --remove-label "05.develop" \
-            --remove-label "07.m:marge"
+          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
+          label_exists() {
+            local name="$1" l
+            for l in "${existing[@]}"; do
+              [ "$l" = "$name" ] && return 0
+            done
+            return 1
+          }
+          args=()
+          for label in "00.check-user" "01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge"; do
+            if label_exists "$label"; then
+              args+=(--remove-label "$label")
+            else
+              echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
+            fi
+          done
+          if [ "${#args[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${args[@]}"
+          fi
 
       - name: Checkout
         uses: actions/checkout@v4
