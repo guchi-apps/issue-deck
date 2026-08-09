@@ -231,6 +231,7 @@ jobs:
           token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: Run Claude Code Review
+        id: claude_review
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -351,6 +352,12 @@ jobs:
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
             - `.shared-context/`配下（共有知識リポジトリ）の編集・コミット。共有知識への反映は
               developマージ後に別のワークフローがPull Requestとして行い、最終的なマージは人間が行う
+
+      - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_review.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
 
   claude-review-fallback:
     needs: [identify-issue, claude-review]

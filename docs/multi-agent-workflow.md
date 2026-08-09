@@ -669,6 +669,33 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
 スクリプト側でURLを組み立てて渡すのではなく、プロンプトの指示に組み込んでエージェントに
 追記させている。
 
+### Claude使用量の可視化（#903）
+
+各Claude Codeステップの直後に、`.github/scripts/summarize-claude-usage.sh`を呼ぶステップを置いている。
+`claude-code-action`の`execution_file`出力から、そのステップのコスト・ターン数・所要時間・
+トークン内訳・権限拒否を抽出し、GitHub ActionsのJob Summaryへ表として出力する。
+
+対象は`claude-issue-dispatch.yml`の4ステップ（計画提示・分割・質問応答・実装）に加え、
+`claude-review-develop.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
+`shared-knowledge-propose.yml`・`release-develop-to-main.yml`の各1ステップ。
+
+**このスクリプトはジョブを失敗させない。** 計測は補助情報であり、`execution_file`が無い・
+`claude-code-action`側のJSONスキーマが変わった・`jq`が失敗した場合でも、本来の処理（実装・
+レビュー等）の成否に影響を与えてはならない。そのため`set -e`を使わず、抽出できなかった項目は
+`-`と表示して常に`exit 0`する。
+
+見るべき点は主に2つ。
+
+- **キャッシュ読み出しトークンが極端に大きいステップ** — 大きいファイルを文脈に載せたまま何ターンも
+  回している疑いがある。#901の調査時の実測では、`.github/workflows/claude-issue-dispatch.yml`
+  （当時161KB）を丸ごと1回Readしたrunで、平均文脈が10.8万トークンに達していた
+- **権限拒否（`permission_denials`）** — プロンプトが指示している操作が`--allowedTools`に
+  無いという設定漏れの可能性が高い。拒否1回はそのまま1往復であり、その時点の文脈をまるごと
+  再送するため、放置するとコストに効く
+
+トークン使用量の削減施策全体は#910で管理している。効果測定なしに削ると、安くなったのか単に
+手を抜くようになったのかを区別できないため、この可視化を先に入れている。
+
 ### プロンプトの式テンプレート長上限（21,000バイト、#901）
 
 GitHub Actionsは`${{ }}`を1つでも含む文字列を、**ブロック全体で1つの式テンプレート**として
