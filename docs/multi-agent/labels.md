@@ -25,6 +25,10 @@ develop→mainのリリースフロー（バージョンアップコミット・
 
 `.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
 
+このワークフローは**トリガー定義のみ**を持ち、ジョブ本体は`.github/workflows/reusable-issue-labels.yml`（`on: workflow_call`）へ切り出してある（#940）。他リポジトリへ展開する際は、ワークフローをコピーするのではなく**issue-deck側のこの実体をタグ固定で参照する薄いcallerを置く**（[docs/cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能ワークフローの参照」を参照）。issue-deck自身はローカルパス参照で常に最新の内容を使うため、変更が最初に自分へ跳ね返るカナリアとして機能する。
+
+呼ばれる側でも`github`コンテキストはcaller（呼び出し元リポジトリ）のものになるため、ジョブ定義は呼び出し元を意識した書き換えを必要としない（#939で実測）。
+
 - `01.planning`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
 - `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
 
