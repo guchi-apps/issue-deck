@@ -65,6 +65,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
+## DBへの接続は`lib/db.ts`の1インスタンスだけ
+
+- **`new PrismaClient()`をアプリ内で書き足さない。** PrismaClientは1つがMySQLのコネクション
+  プール1つに対応する。[`lib/db.ts`](../src/lib/db.ts) の `db` を必ず使う（`scripts/`配下の
+  使い捨てスクリプトだけは例外で、自前で生成し最後に`$disconnect()`する）。
+- `db`は**本番も含めて**`globalThis`へキャッシュしている。Next.jsはRoute Handlerと
+  `instrumentation.ts`を別エントリとしてバンドルするため、同じモジュールが複数回評価されると
+  その数だけプールができる。開発時のホットリロード対策だけが目的ではないので、
+  `NODE_ENV !== "production"`の条件を付け直さない。
+- プールサイズは[`lib/db-url.ts`](../src/lib/db-url.ts)がDATABASE_URLへ`connection_limit`・
+  `pool_timeout`を補って明示する。Prismaの既定は「物理CPUコア数 × 2 + 1」で、サーバーのコア数に
+  引きずられて増えるため、MySQLを他アプリと共有していると`ERROR 1040 (Too many connections)`の
+  一因になる。優先順位は DATABASE_URL のクエリパラメータ > `DATABASE_CONNECTION_LIMIT`・
+  `DATABASE_POOL_TIMEOUT` > 既定値。
+- 1040が再発する場合、アプリ側の上限だけでは決まらない。MySQLサーバー側で
+  `SHOW VARIABLES LIKE 'max_connections'` と `SHOW PROCESSLIST`（接続元ユーザー・ホスト別の内訳）を
+  確認し、どのアプリが占有しているかを切り分ける。
+
 ## 画像はVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
