@@ -272,7 +272,7 @@ jobs:
           # 既定でbot起点の実行を拒否するため明示的に許可する
           # (参考: https://github.com/anthropics/claude-code-action/issues/1299。#814)
           allowed_bots: "claude[bot]"
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(grep:*),Bash(find:*)"'
           prompt: |
             あなたはissue-deckリポジトリのPRコンフリクト解消エージェントです。GitHub Actions上で
             無人実行されており、対応するIssueは #${{ matrix.issue }}、対応するdevelop向け

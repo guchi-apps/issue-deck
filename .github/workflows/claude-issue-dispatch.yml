@@ -792,12 +792,29 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Read,Grep,Glob"
             --disallowedTools "Task,Agent"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリの実装エージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             `21.plan-required` ラベルが付いているため、実装に入る前に計画を提示してください。
+
+            ## ファイルの読み方
+            大きいファイルを丸ごと読むと、その内容が以降のやり取り全てに乗り続け、実行コストが
+            大きく膨らみます。目安として数万バイトを超える`.md`・`.yml`は`Read`で全体を開かず、
+            `Grep`で該当箇所を特定してから`Read`の`offset`・`limit`で必要な範囲だけ読んでください。
+            特に次の2つは大きいため、全体を開かないでください。
+
+            - `.github/workflows/claude-issue-dispatch.yml`（約150KB）
+            - `docs/multi-agent-workflow.md`（約110KB）
+
+            ファイル全体を`cat`で出力するのも同じ理由で避け、`Read`の`offset`・`limit`を使って
+            ください。検索は`Grep`ツールを優先し、`Bash`の`grep`は`Grep`で表現しにくい場合に
+            限って使ってください。
+
+            なお、このステップでは`Write`・`Edit`は許可されていません。一時ファイルを作ろうとしても
+            拒否されるだけで、その往復ぶんのコストが無駄になります。長文をコメントとして投稿する
+            場合は一時ファイルを経由せず、`gh issue comment`にヒアドキュメントで直接渡してください。
 
             ## 最初にやること
             `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・ラベル・
@@ -1223,13 +1240,30 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Read,Grep,Glob"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリについて質問に答えるエージェントです。Issue #${{ steps.state.outputs.issue_number }} に
             投稿された、`@claude 質問: ` で始まる直近のコメントへの回答のみを行ってください。
             コード変更・コミット・ブランチ作成・PR作成・ラベル操作は一切行いません（許可されたツールにも
             含まれていません）。
+
+            ## ファイルの読み方
+            大きいファイルを丸ごと読むと、その内容が以降のやり取り全てに乗り続け、実行コストが
+            大きく膨らみます。目安として数万バイトを超える`.md`・`.yml`は`Read`で全体を開かず、
+            `Grep`で該当箇所を特定してから`Read`の`offset`・`limit`で必要な範囲だけ読んでください。
+            特に次の2つは大きいため、全体を開かないでください。
+
+            - `.github/workflows/claude-issue-dispatch.yml`（約150KB）
+            - `docs/multi-agent-workflow.md`（約110KB）
+
+            ファイル全体を`cat`で出力するのも同じ理由で避け、`Read`の`offset`・`limit`を使って
+            ください。検索は`Grep`ツールを優先し、`Bash`の`grep`は`Grep`で表現しにくい場合に
+            限って使ってください。
+
+            なお、このステップでは`Write`・`Edit`は許可されていません。一時ファイルを作ろうとしても
+            拒否されるだけで、その往復ぶんのコストが無駄になります。長文をコメントとして投稿する
+            場合は一時ファイルを経由せず、`gh issue comment`にヒアドキュメントで直接渡してください。
 
             ## 最初にやること
             `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの本文・ラベル・
@@ -1544,7 +1578,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: |
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: |
             あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
@@ -1588,6 +1622,19 @@ jobs:
                   `gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"`
                   を実行して停止してください（ブランチの削除・作り直しは人間の明示操作でのみ行われ、
                   このワークフローが自動で行うことはありません）。
+
+            ## ファイルの読み方
+            大きいファイルを丸ごと読むと、その内容が以降のやり取り全てに乗り続け、実行コストが
+            大きく膨らみます。目安として数万バイトを超える`.md`・`.yml`は`Read`で全体を開かず、
+            `Grep`で該当箇所を特定してから`Read`の`offset`・`limit`で必要な範囲だけ読んでください。
+            特に次の2つは大きいため、全体を開かないでください。
+
+            - `.github/workflows/claude-issue-dispatch.yml`（約150KB）
+            - `docs/multi-agent-workflow.md`（約110KB）
+
+            ファイル全体を`cat`で出力するのも同じ理由で避け、`Read`の`offset`・`limit`を使って
+            ください。検索は`Grep`ツールを優先し、`Bash`の`grep`は`Grep`で表現しにくい場合に
+            限って使ってください。
 
             ## 最初にやること
             - `gh issue view ${{ steps.state.outputs.issue_number }} --comments` でIssueの最新の本文・
