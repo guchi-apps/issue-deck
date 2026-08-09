@@ -213,6 +213,21 @@ describe("groupIssuesByRepository", () => {
     const groups = groupIssuesByRepository(issues);
     expect(groups[0]).toMatchObject({ repositoryPrivate: true, repositoryArchived: true });
   });
+
+  it("sortByLatestClosedAt指定時はリポジトリごとのclosedAt最大値の降順でグループ化する（#922）", () => {
+    const issues = [
+      makeIssue({ id: "1", repositoryFullName: "owner/repo-a", closedAt: "2026-01-01T00:00:00.000Z" }),
+      makeIssue({ id: "2", repositoryFullName: "owner/repo-b", closedAt: "2026-01-03T00:00:00.000Z" }),
+      makeIssue({ id: "3", repositoryFullName: "owner/repo-b", closedAt: "2026-01-02T00:00:00.000Z" }),
+      makeIssue({ id: "4", repositoryFullName: "owner/repo-c", closedAt: null }),
+    ];
+    const groups = groupIssuesByRepository(issues, { sortByLatestClosedAt: true });
+    expect(groups.map((group) => group.repositoryFullName)).toEqual([
+      "owner/repo-b",
+      "owner/repo-a",
+      "owner/repo-c",
+    ]);
+  });
 });
 
 describe("computeLabelSummary", () => {

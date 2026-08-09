@@ -213,6 +213,7 @@ export function MobileIssueListScreen({
         footerSpacing
         scrollKey={scrollKey}
         groupByRepo={groupByRepo}
+        view={view}
       />
 
       <MobileIssueFilterSheet

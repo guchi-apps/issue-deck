@@ -611,6 +611,7 @@ export function IssueDeckShell({
           showSearch={false}
           scrollKey={issueListScrollKey}
           groupByRepo={groupByRepo}
+          view={filters.view}
           className="hidden shrink-0 border-r md:flex"
           style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />
