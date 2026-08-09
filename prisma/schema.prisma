@@ -298,6 +298,9 @@ model AppSetting {
   id             Int      @id @default(1)
   autoRetryLimit Int      @default(0)
   claudeModel    String   @default("auto")
+  // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
+  // 異なり、同じモデルで動かすとコストに見合わないため分けている。
+  claudeModelAssist String @default("auto")
   updatedAt      DateTime @updatedAt
 }
 

@@ -651,11 +651,19 @@ jobs:
         # 一切付与しない(claude-code-action側のデフォルトモデルに委ねる)。値はモデルの
         # スナップショット日付を含まないエイリアス(opus/sonnet/haiku)のみを許可し、想定外の値は
         # autoにフォールバックする(APP_BASE_URL未設定・疎通失敗時も同様)。
+        #
+        # モデルは2系統ある(#905)。
+        # - model_flag(claudeModel): 計画提示・実装。品質がそのまま成果物に出るため上位モデルを想定
+        # - assist_model_flag(claudeModelAssist): 質問応答・サブIssue分割。実装ほどの精度を必要と
+        #   しないため、より軽いモデルを選べるようにしている
+        # develop向けPRの自動レビュー(claude-review-develop.yml)は、品質低下が自動マージ不可判定の
+        # 見落としにつながるため、そもそも--modelを指定していない(既定のまま)。ここでも変更しない。
         if: steps.state.outputs.mode != 'skip'
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
         run: |
           CLAUDE_MODEL=auto
+          CLAUDE_MODEL_ASSIST=auto
           if [ -z "$APP_BASE_URL" ]; then
             echo "::warning::APP_BASE_URLが未設定のため、claudeModel設定の取得をスキップしautoにフォールバックしました"
           else
@@ -667,9 +675,15 @@ jobs:
               echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスが空だったため、claudeModel設定の取得に失敗しautoにフォールバックしました"
             else
               CLAUDE_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.claudeModel // "auto"' 2>/dev/null)" || true
+              # claudeModelAssistは後から追加した項目のため、古いレスポンス(項目自体が無い)でも
+              # autoへ倒れるだけで壊れないようにしておく。
+              CLAUDE_MODEL_ASSIST="$(printf '%s' "$RESPONSE" | jq -r '.claudeModelAssist // "auto"' 2>/dev/null)" || true
               if [ -z "$CLAUDE_MODEL" ]; then
                 echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（レスポンス: ${RESPONSE}）"
                 CLAUDE_MODEL=auto
+              fi
+              if [ -z "$CLAUDE_MODEL_ASSIST" ]; then
+                CLAUDE_MODEL_ASSIST=auto
               fi
             fi
           fi
@@ -677,11 +691,21 @@ jobs:
             opus|sonnet|haiku) : ;;
             *) CLAUDE_MODEL=auto ;;
           esac
+          case "$CLAUDE_MODEL_ASSIST" in
+            opus|sonnet|haiku) : ;;
+            *) CLAUDE_MODEL_ASSIST=auto ;;
+          esac
           echo "model=$CLAUDE_MODEL" >> "$GITHUB_OUTPUT"
+          echo "assist_model=$CLAUDE_MODEL_ASSIST" >> "$GITHUB_OUTPUT"
           if [ "$CLAUDE_MODEL" = "auto" ]; then
             echo "model_flag=" >> "$GITHUB_OUTPUT"
           else
             echo "model_flag=--model $CLAUDE_MODEL" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$CLAUDE_MODEL_ASSIST" = "auto" ]; then
+            echo "assist_model_flag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "assist_model_flag=--model $CLAUDE_MODEL_ASSIST" >> "$GITHUB_OUTPUT"
           fi
 
       - name: 対応開始をコメントで通知する
@@ -1087,7 +1111,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"
-            ${{ steps.claude_model.outputs.model_flag }}
+            ${{ steps.claude_model.outputs.assist_model_flag }}
           prompt: ${{ env.PROMPT_SPLIT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（分割））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -1169,7 +1193,7 @@ jobs:
           show_full_output: true
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Read,Grep,Glob"
-            ${{ steps.claude_model.outputs.model_flag }}
+            ${{ steps.claude_model.outputs.assist_model_flag }}
           prompt: ${{ env.PROMPT_QUESTION }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（質問応答））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
