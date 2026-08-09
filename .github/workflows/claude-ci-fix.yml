@@ -3,7 +3,7 @@ name: Claude CI Fix
 # develop向けPR（issue-<番号>ブランチ）のCI（.github/workflows/ci.yml）が失敗した際、これまでは
 # 人間がIssueに`@claude CIの失敗を直して`のようにコメントして個別に依頼する必要があった。
 # この依頼を自動化し、CI失敗を検知したら人間の操作なしにClaude Codeが修正を試みるワークフロー
-# （docs/multi-agent-workflow.md「CI失敗の自動解消」参照、issue #807）。
+# （docs/multi-agent/auto-repair.md「CI失敗の自動解消」参照、issue #807）。
 # claude-conflict-resolve.yml（PRコンフリクトの自動解消、#315）と同じ設計思想。
 #
 # develop→mainのリリースPR（head=develop）のCI失敗は対象外（#812で別途検討）。リリースPRの

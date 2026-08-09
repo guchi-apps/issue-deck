@@ -3,7 +3,7 @@ name: Issue Labels
 # Issueラベル(01.planning -> 02.wip -> 03.d:marge -> 05.develop -> 07.m:marge -> 09.main。
 # 01.planningは21.plan-required選択時のみ経由する)の状態遷移をイベント駆動で保証する。
 # 実装エージェント・レビュー統合エージェントによる
-# 手動のラベル付け替え(docs/multi-agent-workflow.md参照)を置き換えるものではなく、
+# 手動のラベル付け替え(docs/multi-agent/labels.md参照)を置き換えるものではなく、
 # 付け忘れがあっても後から是正されるようにするための安全網、および
 # develop->mainの遷移(07/09)を新たにカバーするためのもの。
 #

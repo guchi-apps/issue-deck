@@ -70,7 +70,7 @@ Markdownに置いている（#907）。**ワークフローファイルだけを
 多くなる**。
 
 この構成にしている理由は、GitHub Actionsの式テンプレート長の上限（21,000バイト）にある。詳細は
-[docs/multi-agent-workflow.md](multi-agent-workflow.md)の「プロンプトの配置と式テンプレート長上限」を参照。
+[docs/multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)を参照。
 
 ### 参考: issue-deckの全ワークフロー一覧
 
@@ -184,7 +184,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
   全ワークフローの対象外になる）
 - Branch protection: `main`はRequire pull request before merging・Required status checks、
   `develop`は最低限`required_status_checks`（CIジョブ名）を設定する。詳細な設定値・設定コマンド例は
-  [docs/multi-agent-workflow.md](multi-agent-workflow.md)の「ブランチ保護ルール案」を参照
+  [docs/multi-agent/branching.md](multi-agent/branching.md)の「ブランチ保護ルール案」を参照
 
 ## 6. リポジトリ差異の吸収チェックリスト
 

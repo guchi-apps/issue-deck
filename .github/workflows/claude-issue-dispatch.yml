@@ -2,7 +2,7 @@ name: Claude Issue Dispatch
 
 # Issueへの@claudeコメントを起点に、ローカルのscripts/start-issue.shが行っている作業
 # (issue-<番号>ブランチ作成・実装・develop向けPR作成)をGitHub Actions上で無人実行する
-# (docs/multi-agent-workflow.md Phase5)。
+# (docs/multi-agent/dispatch.md)。
 #
 # 21.plan-requiredラベルが付いているissueは二段階トリガーにする(無人実行では
 # 対話的な承認者がその場にいないため):
@@ -480,7 +480,7 @@ jobs:
     # 実装中のissueにplan相当の質問対応が割り込めず、無関係な待ち時間が発生していた。レーンを
     # 分けることで両者は並行実行できるようにしつつ、同じレーン内(例: implement→additional)では
     # 従来どおり直列化を維持する。claude-conflict-resolve.ymlのresolve-conflictsジョブは常に
-    # branchレーンに属する(docs/multi-agent-workflow.md「既存の実装ワークフローとの競合回避」参照)。
+    # branchレーンに属する(docs/multi-agent/auto-repair.md「既存の実装ワークフローとの競合回避」参照)。
     concurrency:
       group: issue-dispatch-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}-${{ needs.triage.outputs.lane }}
       cancel-in-progress: false
