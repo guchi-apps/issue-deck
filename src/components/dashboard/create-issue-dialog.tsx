@@ -40,24 +40,14 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  isSelectableLabelName,
   START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsForCreate,
 } from "@/lib/github/start-implementation";
-import { isProgressLabel } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
-
-/** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
-const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
-  START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel),
-);
-
-/** 進捗管理用ラベル・実装オプション用ラベルを除いた、ユーザーが選択可能なラベルかどうか */
-function isSelectableLabelName(name: string): boolean {
-  return !isProgressLabel(name) && !START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);
-}
 
 /**
  * リポジトリ選択欄で、claude-issue-dispatch.ymlが導入済み（IssueDeckの自動化に対応済み）の

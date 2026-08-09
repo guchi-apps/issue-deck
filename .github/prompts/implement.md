@@ -18,9 +18,11 @@
       `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
       なお、このステップの直前のシェルステップで既に`02.wip`が付与され`03.d:marge`が
       外されているため、状態を元に戻すために
-      `gh issue edit ${ISSUE_NUMBER} --add-label "03.d:marge" --add-label "00.check-user" --remove-label "02.wip"`
-      を実行してください（`00.check-user`以外の他のラベルは変更しません）。`00.check-user`は
-      既に付いていても無害なので必ず付与すること。理由: issue-deck画面の「修正を依頼する」
+      `gh issue edit ${ISSUE_NUMBER} --add-label "03.d:marge" --add-label "00.check-user" --add-label "00.qa-answered" --remove-label "02.wip"`
+      を実行してください（`00.check-user`・`00.qa-answered`以外の他のラベルは変更しません）。
+      `00.check-user`・`00.qa-answered`は既に付いていても無害なので必ず付与すること。
+      `00.qa-answered`は「質問への回答のみ完了（実装承認待ちとは別）」を表す専用ラベルで、
+      承認ボタン押下時に投稿される定型文をissue-deck画面側で出し分けるために使われます。理由: issue-deck画面の「修正を依頼する」
       ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
       コード変更を伴わない質問だった場合はコミット・pushが発生しないため
       `claude-review-develop.yml`側の再判定による`00.check-user`の復元が起きず、確認待ち

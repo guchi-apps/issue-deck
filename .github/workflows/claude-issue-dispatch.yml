@@ -1302,16 +1302,17 @@ jobs:
         # 依存してしまう(実際、コメント投稿から付与まで数分〜10分ほど遅延する例があった)ため、
         # 実装着手前にシェルスクリプトで直接・確実に付与する。計画検討中（01.planning）から
         # 実装着手に進む場合に備え、両分岐とも01.planningの除去も併せて行う（付いていなくても
-        # 無害）。
+        # 無害）。あわせて、質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で
+        # 付与されうる00.qa-answeredも、実際に実装着手に進んだ時点で古い状態が残らないよう除去する。
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "03.d:marge" --remove-label "01.planning"
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "03.d:marge" --remove-label "01.planning" --remove-label "00.qa-answered"
           else
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "01.planning"
+            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "02.wip" --remove-label "01.planning" --remove-label "00.qa-answered"
           fi
 
       - name: 実装プロンプトを組み立てる

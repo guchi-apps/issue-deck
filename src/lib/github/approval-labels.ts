@@ -17,6 +17,13 @@ export const CHECK_USER_LABEL = "00.check-user";
 export const PLAN_REQUIRED_LABEL = "21.plan-required";
 
 /**
+ * 質問への回答のみが完了した状態であることを示すラベル（00.check-userと常に併用し、
+ * 単独では意味を持たない）。claude-issue-dispatch.ymlのmode=plan・mode=additionalが、
+ * 直近の@claudeコメントを「単なる質問・確認」と判定した場合に付与する（#887）。
+ */
+export const QA_ANSWERED_LABEL = "00.qa-answered";
+
+/**
  * claude-issue-dispatch.ymlのissue_commentトリガーを起動させないためのマーカー（#566）。
  * ラベル操作（PATCH /api/issues）が個人OAuthトークン化されたことで、`00.check-user`除去
  * イベント（issues.unlabeled）のsender.typeがUserになり、第2層Bot判定（コメント側で
@@ -46,6 +53,17 @@ const M_MARGE_LABEL = "07.m:marge";
 
 export function isApprovalPending(labels: IssueLabel[]): boolean {
   return labels.some((label) => label.name === CHECK_USER_LABEL);
+}
+
+/**
+ * 00.check-userが「実装・計画の承認待ち」ではなく「質問への回答のみを確認してほしいだけ」の
+ * 状態かどうかを判定する。21.plan-requiredが付いている間は計画そのものへの承認待ちが実体として
+ * 残っているため、isPlanApprovalPendingを優先しfalseを返す。
+ */
+export function isQaOnlyApprovalPending(labels: IssueLabel[]): boolean {
+  if (!isApprovalPending(labels)) return false;
+  if (isPlanApprovalPending(labels)) return false;
+  return labels.some((label) => label.name === QA_ANSWERED_LABEL);
 }
 
 export type LabelFilterPreset = {
@@ -165,19 +183,26 @@ function isLatestSourcedCommentFromReviewer(
   return false;
 }
 
-/** 承認時に外すラベル名の配列を返す（00.check-userに加え、計画承認待ちなら21.plan-requiredも外す） */
+/**
+ * 承認時に外すラベル名の配列を返す（00.check-userに加え、計画承認待ちなら21.plan-requiredも外す。
+ * 00.qa-answeredは00.check-userとの併用でのみ意味を持つ消費済みフラグのため、常にあわせて外す）
+ */
 export function labelsAfterApproval(labels: IssueLabel[]): string[] {
   return labels
     .map((label) => label.name)
-    .filter((name) => name !== CHECK_USER_LABEL && name !== PLAN_REQUIRED_LABEL);
+    .filter(
+      (name) => name !== CHECK_USER_LABEL && name !== PLAN_REQUIRED_LABEL && name !== QA_ANSWERED_LABEL,
+    );
 }
 
 /**
- * 却下（UI上のボタン表記は「修正」）時に外すラベル名の配列を返す（00.check-userのみを
- * 外す。21.plan-requiredは計画の再提示が必要なため残す）
+ * 却下（UI上のボタン表記は「修正」）時に外すラベル名の配列を返す（00.check-user・
+ * 00.qa-answeredを外す。21.plan-requiredは計画の再提示が必要なため残す）
  */
 export function labelsAfterRejection(labels: IssueLabel[]): string[] {
-  return labels.map((label) => label.name).filter((name) => name !== CHECK_USER_LABEL);
+  return labels
+    .map((label) => label.name)
+    .filter((name) => name !== CHECK_USER_LABEL && name !== QA_ANSWERED_LABEL);
 }
 
 /**
@@ -192,8 +217,10 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * user.githubAccessToken使用）を承認ラベル更新の直後に送ることで、
  * issue_commentトリガー経由で実装を確実に再開させる。
  *
- * 21.plan-requiredによる計画承認待ちの場合と、それ以外（画面確認待ち・フォールバック
- * エラー通知など）の汎用確認待ちの場合とで、「計画」という語を含むかどうかの文言を変える。
+ * 21.plan-requiredによる計画承認待ちの場合、00.qa-answeredによる「質問への回答のみ確認待ち」の
+ * 場合、それ以外（画面確認待ち・フォールバックエラー通知など）の汎用確認待ちの場合の3通りで
+ * 文言を出し分ける（優先順位はこの順、#887）。質問のみ回答済みの場合は、実装承認待ちではないため
+ * 「実装を進めてください」を含まない文言にする。
  * また21.plan-required保持時は、ラベル除去イベントとの二重発火を防ぐためNO_TRIGGER_MARKER
  * を付与する（#566、詳細は同定数のコメントを参照）。
  *
@@ -201,10 +228,11 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * 指定が無ければ従来どおり定型文のみを返す。
  */
 export function approveCommentBody(labels: IssueLabel[], text?: string): string {
-  const isPlanApproval = isPlanApprovalPending(labels);
-  const followUp = isPlanApproval
+  const followUp = isPlanApprovalPending(labels)
     ? "計画を承認しました。実装を進めてください。"
-    : "確認しました。実装を進めてください。";
+    : isQaOnlyApprovalPending(labels)
+      ? "回答を確認しました。"
+      : "確認しました。実装を進めてください。";
   const trimmed = text?.trim();
   const body = trimmed ? `@claude ${trimmed}\n\n${followUp}` : `@claude ${followUp}`;
   return withNoTriggerMarkerIfPlanPending(labels, body);

@@ -27,7 +27,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { ASK_REPO_QUESTION_TITLE_PREFIX, askClaudeCommentBody } from "@/lib/github/ask-claude";
-import { isProgressLabel } from "@/lib/issue-status";
+import { isSelectableLabelName } from "@/lib/github/start-implementation";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -89,7 +89,7 @@ export function AskRepoQuestionDialog({
     open ? repositoryFullName : null,
   );
   const selectableLabels = useMemo(
-    () => labels.filter((label) => !isProgressLabel(label.name)),
+    () => labels.filter((label) => isSelectableLabelName(label.name)),
     [labels],
   );
 
