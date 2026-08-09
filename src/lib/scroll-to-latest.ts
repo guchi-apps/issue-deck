@@ -30,6 +30,24 @@ export function computeFirstUnreadCommentIndex(
 const REACHED_TARGET_TOLERANCE_PX = 4;
 
 /**
+ * 現在のscrollTopが、対象コメント上端に到達するのに必要なscrollTop
+ * （containerScrollTop + (targetTop - containerTop)）とほぼ一致しているか
+ * （＝1回前のクリックで既にそこへ移動済みか）を判定する。
+ */
+export function isAtScrollTarget(params: {
+  containerScrollTop: number;
+  containerTop: number;
+  targetTop: number;
+}): boolean {
+  const targetScrollTop = computeScrollTopToRevealTarget(
+    params.containerScrollTop,
+    params.containerTop,
+    params.targetTop,
+  );
+  return Math.abs(params.containerScrollTop - targetScrollTop) <= REACHED_TARGET_TOLERANCE_PX;
+}
+
+/**
  * 「ページ下部へ移動」ボタンの移動先scrollTopを求める。クリック時点のscrollTopが、
  * 対象コメント上端に到達するのに必要なscrollTopとほぼ一致している（＝1回前のクリックで
  * 既にそこへ移動済み）場合は、スクロールコンテナの最下部（承認ボタン・コメント入力欄を
@@ -46,7 +64,5 @@ export function computeScrollToLatestTarget(params: {
     params.containerTop,
     params.targetTop,
   );
-  const alreadyReachedTarget =
-    Math.abs(params.containerScrollTop - targetScrollTop) <= REACHED_TARGET_TOLERANCE_PX;
-  return alreadyReachedTarget ? params.containerScrollHeight : targetScrollTop;
+  return isAtScrollTarget(params) ? params.containerScrollHeight : targetScrollTop;
 }

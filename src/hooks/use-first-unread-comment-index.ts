@@ -5,8 +5,16 @@ import { useState } from "react";
 import { computeFirstUnreadCommentIndex } from "@/lib/scroll-to-latest";
 import type { Issue, IssueComment } from "@/types/issue";
 
+export type FirstUnreadCommentIndexResult = {
+  /** 「まだ見ていない最初のコメント」のインデックス（0始まり） */
+  index: number;
+  /** 未読コメントが実際に残っているか */
+  hasUnread: boolean;
+};
+
 /**
- * 選択中Issueの「最初の未読コメント」のインデックス（0始まり）を返す。
+ * 選択中Issueの「最初の未読コメント」のインデックス（0始まり）と、未読が実際に
+ * 残っているかを返す。
  *
  * Issue詳細画面を開くと、issue-deck-shell.tsx側のuseEffectがreadCommentCountを
  * 即座に「全件既読」まで上書きしてしまう（POST /api/issues/read）。そのため、
@@ -18,7 +26,7 @@ import type { Issue, IssueComment } from "@/types/issue";
 export function useFirstUnreadCommentIndex(
   issue: Issue | null,
   comments: IssueComment[],
-): number {
+): FirstUnreadCommentIndexResult {
   const [snapshot, setSnapshot] = useState<{ issueId: string; readCommentCount: number } | null>(
     null,
   );
@@ -30,5 +38,8 @@ export function useFirstUnreadCommentIndex(
   const readCommentCount =
     issue && snapshot?.issueId === issue.id ? snapshot.readCommentCount : 0;
 
-  return computeFirstUnreadCommentIndex(readCommentCount, comments.length);
+  return {
+    index: computeFirstUnreadCommentIndex(readCommentCount, comments.length),
+    hasUnread: readCommentCount < comments.length,
+  };
 }

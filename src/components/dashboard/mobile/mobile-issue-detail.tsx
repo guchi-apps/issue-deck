@@ -131,7 +131,7 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
-  const targetCommentIndex = useFirstUnreadCommentIndex(issue, comments);
+  const { index: targetCommentIndex, hasUnread } = useFirstUnreadCommentIndex(issue, comments);
   const {
     run: workflowRun,
     runId: workflowRunId,
@@ -845,10 +845,12 @@ export function MobileIssueDetail({
       </div>
 
       <ScrollToLatestCommentButton
+        key={issue.id}
         containerRef={scrollContainerRef}
         targetRef={targetCommentRef}
         visible={comments.length > 0}
-        className="left-1/2 bottom-4 h-11 w-20 -translate-x-1/2"
+        hasUnread={hasUnread}
+        className="left-1/2 bottom-4 -translate-x-1/2"
       />
 
       <button
