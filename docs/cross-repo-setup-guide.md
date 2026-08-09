@@ -35,12 +35,15 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 1. ワークフローファイル一式
 
-`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下6ファイルである。
+`.github/workflows/`配下のうち、マルチエージェント運用の自動化本体は以下のファイルである。
+
+**移植方法は2種類ある。** 従来どおりコピーして改変するものと、issue-deck側の再利用可能ワークフロー（`reusable-*.yml`）を`uses:`で参照するだけのものがある。後者は薄いcallerを置くだけで済み、issue-deck側の改善がタグを上げるだけで反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。現在は`issue-labels.yml`のみが後者へ移行済みで、順次広げていく。
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
 | `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる。**`.github/prompts/`配下もあわせてコピーする必要がある**（後述） |
-| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する | ラベル名・`issue-<番号>`ブランチ命名規則が一致していればほぼ無改変で移植できる。スクリーンショット撮影を導入しないリポジトリでは、末尾の`screenshots`ブランチ掃除ジョブを削除してよい |
+| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
+| `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
@@ -49,6 +52,35 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
+
+### 再利用可能ワークフローの参照
+
+`reusable-*.yml` を使うワークフローは、対象リポジトリ側にトリガー定義だけを持つ薄いcallerを置く。
+
+```yaml
+# 対象リポジトリの .github/workflows/issue-labels.yml
+name: Issue Labels
+
+on:
+  # issue-deck側の同名ファイルからトリガー定義をコピーする
+  push:
+    branches:
+      - "issue-*"
+  # …（以下略）
+
+jobs:
+  labels:
+    uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@v1
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+```
+
+- **参照はタグ固定（`@v1`）とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-issue-labels.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
+- **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
+- **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。
+- issue-deckがprivateリポジトリになった場合、または対象リポジトリがprivateの場合は、issue-deck側の Settings → Actions → Access で同一オーナーからのアクセスを許可する必要がある（publicどうしなら設定不要）。
 
 ### あわせてコピーが必要なファイル
 
