@@ -201,6 +201,13 @@ on:
         required: false
         type: string
         default: app_ci
+      post-implement-script:
+        description: >-
+          実装(mode=implement|additional)の成功後に実行するスクリプトのパス。
+          呼び出し元リポジトリ側のパスを指定する。未指定なら何もしない。
+        required: false
+        type: string
+        default: ""
     outputs:
       branch:
         description: "対象の実装ブランチ名（issue-<番号>）"
@@ -1640,6 +1647,45 @@ jobs:
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+
+      - name: 実装後フックを実行する（post-implement-script）
+        # 呼び出し元リポジトリ固有の後処理を差し込むための拡張点(#952)。issue-deck自身は
+        # 使わない（既定は空で、その場合このステップはスキップされる）。
+        #
+        # 最初の利用者はshopping-listのスクリーンショット撮影。撮影の作法は「そのアプリを
+        # どう起動するか」に強く依存し(shopping-listは自前バックエンドをNOTION_STUB付きで
+        # 起動してhealthzを待つ必要がある)、issue-deck方式(Claudeがプロンプト指示で
+        # スクリプトを実行し、スクリプト自身がサーバーを起動する)へ寄せるには対象リポジトリ側の
+        # 大きな作り替えが必要になるため、差し込み口を用意する方針とした。
+        #
+        # 撮影固有の条件(screenshot_required等)をここの`if:`に書くと、このフックが
+        # 「撮影専用」になり他用途に使えなくなる。絞り込みはスクリプト側に委ね、判断材料は
+        # 環境変数で渡す。
+        #
+        # 配置はdispatchジョブの最終ステップ。実装結果の検証・フォールバック通知より後に置くのは、
+        # 後処理の失敗が「実装は完了したのに未完了として通知される」事態を招かないようにするため。
+        if: |
+          inputs.post-implement-script != '' &&
+          steps.claude_implement.outcome == 'success' &&
+          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          MODE: ${{ steps.state.outputs.mode }}
+          SCREENSHOT_REQUIRED: ${{ steps.state.outputs.screenshot_required }}
+          PREVIEW_REQUIRED: ${{ steps.state.outputs.preview_required }}
+          POST_IMPLEMENT_SCRIPT: ${{ inputs.post-implement-script }}
+        run: |
+          set -e
+          if [ ! -f "$POST_IMPLEMENT_SCRIPT" ]; then
+            echo "::error::post-implement-script に指定された $POST_IMPLEMENT_SCRIPT が存在しません"
+            exit 1
+          fi
+          echo "実装後フックを実行します: $POST_IMPLEMENT_SCRIPT"
+          bash "$POST_IMPLEMENT_SCRIPT"
+
 
 
   # triage/dispatchジョブが「対応開始をコメントで通知する」ステップに到達する前に落ちた場合、

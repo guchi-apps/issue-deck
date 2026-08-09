@@ -107,6 +107,33 @@ jobs:
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
+#### リポジトリ固有の後処理（`post-implement-script`）
+
+ランタイム準備のプリセットでは吸収できない、そのリポジトリ固有の後処理を差し込む口（#952）。
+
+```yaml
+    with:
+      runtime-setup: minimal
+      post-implement-script: scripts/ci-post-implement.sh
+```
+
+- 実装（`mode=implement|additional`）が**成功した後**、`dispatch`ジョブの最終ステップとして実行される。実装結果の検証・フォールバック通知より後に置いているため、後処理の失敗が「実装は完了したのに未完了として通知される」事態を招かない
+- 未指定（既定）なら何もしない。issue-deck自身は使っていない
+- スクリプトには以下が環境変数で渡る。**絞り込みはスクリプト側で行う**
+
+  | 変数 | 内容 |
+  |---|---|
+  | `ISSUE_NUMBER` | 対象Issue番号 |
+  | `BRANCH` | 実装ブランチ名（`issue-<番号>`） |
+  | `MODE` | `implement` / `additional` |
+  | `SCREENSHOT_REQUIRED` | `24.screenshot-required` の有無 |
+  | `PREVIEW_REQUIRED` | `23.preview-required` の有無 |
+  | `GH_TOKEN` / `GH_REPO` | `gh` コマンド用 |
+
+ワークフロー側の `if:` に用途固有の条件（`SCREENSHOT_REQUIRED` など）を書いていないのは、そうするとこのフックが特定用途専用になり、他の後処理に使えなくなるため。
+
+最初の利用者は shopping-list のスクリーンショット撮影。撮影の作法は「そのアプリをどう起動するか」に強く依存する（shopping-listは自前バックエンドを`NOTION_STUB`付きで起動し`/healthz`を待つ必要がある）ため、issue-deck方式（Claudeがプロンプト指示でスクリプトを実行し、スクリプト自身がサーバーを起動する）へ寄せるより、差し込み口を用意する方針とした。
+
 - **参照はタグ固定とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-*.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
 - **タグ名は `workflows/vN` 形式**（`v1`のような形にしない）。理由は2つある。
   - アプリのリリースタグ（`vX.Y.Z`、`deploy.yml`がmainから作成）と名前空間を分けるため
@@ -115,11 +142,11 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 現在のタグと、含まれる再利用可能ワークフローの対応は以下のとおり。
 
-| タグ | 含まれる再利用可能ワークフロー |
-|---|---|
-| `workflows/v1` | `reusable-issue-labels.yml` |
-
-`workflows/v2`（`reusable-issue-dispatch.yml`を追加）は、issue-deck自身での動作確認（#945）が取れた時点で切る。
+| タグ | 含まれる再利用可能ワークフロー | 備考 |
+|---|---|---|
+| `workflows/v1` | `reusable-issue-labels.yml` | |
+| `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成 |
+| `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952）。**本ドキュメント執筆時点では未作成** |
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
