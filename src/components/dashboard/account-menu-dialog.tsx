@@ -409,7 +409,7 @@ export function AccountMenuDialog({
               </Collapsible>
             )}
 
-            <Button variant="destructive" className="justify-start" onClick={handleLogout}>
+            <Button variant="destructive" onClick={handleLogout}>
               ログアウト
             </Button>
 
