@@ -66,6 +66,7 @@ type IssueDeckShellProps = {
   quickFilters: QuickFilter[];
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
+  claudeModelAssist: ClaudeModel;
 };
 
 export function IssueDeckShell({
@@ -75,6 +76,7 @@ export function IssueDeckShell({
   quickFilters: initialQuickFilters,
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
+  claudeModelAssist: initialClaudeModelAssist,
 }: IssueDeckShellProps) {
   const { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo } =
     useIssueFilters();
@@ -96,6 +98,8 @@ export function IssueDeckShell({
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
+  const [claudeModelAssist, setClaudeModelAssist] =
+    useState<ClaudeModel>(initialClaudeModelAssist);
   const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const {
     mobileScreen,
@@ -607,6 +611,7 @@ export function IssueDeckShell({
           showSearch={false}
           scrollKey={issueListScrollKey}
           groupByRepo={groupByRepo}
+          view={filters.view}
           className="hidden shrink-0 border-r md:flex"
           style={{ width: issueListWidth.width, maxWidth: "50vw" }}
         />
@@ -672,10 +677,12 @@ export function IssueDeckShell({
         open={appSettingsDialogOpen}
         autoRetryLimit={autoRetryLimit}
         claudeModel={claudeModel}
+        claudeModelAssist={claudeModelAssist}
         onOpenChange={setAppSettingsDialogOpen}
-        onUpdated={(nextAutoRetryLimit, nextClaudeModel) => {
+        onUpdated={(nextAutoRetryLimit, nextClaudeModel, nextClaudeModelAssist) => {
           setAutoRetryLimit(nextAutoRetryLimit);
           setClaudeModel(nextClaudeModel);
+          setClaudeModelAssist(nextClaudeModelAssist);
         }}
       />
       <EditIssueDialog

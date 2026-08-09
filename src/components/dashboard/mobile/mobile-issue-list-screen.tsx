@@ -10,7 +10,7 @@ import {
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
-import { useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
+import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 import { baseNavViews, getAdjacentNavViewId, labelNavViews } from "@/lib/nav-views";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
@@ -95,6 +95,14 @@ export function MobileIssueListScreen({
   });
   const tabRefs = useRef<Partial<Record<NavViewId, HTMLButtonElement | null>>>({});
 
+  // Issue一覧本体のドラッグ追従（swipeFilterHandlers.style）と足並みを揃え、
+  // タブのハイライトもドラッグ量に応じて隣接タブへクロスフェードさせる（#924）。
+  const { dragX, isDragging } = swipeFilterHandlers;
+  const dragProgress = Math.min(Math.abs(dragX) / SWIPE_THRESHOLD_PX, 1);
+  const previewView =
+    dragX !== 0 ? getAdjacentNavViewId(view, dragX < 0 ? "next" : "prev", tabNavViews) : null;
+  const tabOverlayTransition = isDragging ? "none" : "opacity 0.2s ease-out";
+
   useEffect(() => {
     tabRefs.current[view]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [view]);
@@ -170,32 +178,54 @@ export function MobileIssueListScreen({
         {tabNavViews.map((navView) => {
           const count = navCounts[navView.id] ?? 0;
           const isCheckUserHighlighted = navView.id === "check-user" && count > 0;
+          const badgeClassName = cn(
+            "text-xs text-muted-foreground",
+            isCheckUserHighlighted &&
+              "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
+          );
+          // 選択状態の見た目（オーバーレイ）は隣接タブへドラッグ量に応じてクロスフェードする。
+          // previewViewがある間は選択中タブがフェードアウトし、隣接タブがフェードインする（#924）。
+          const overlayOpacity =
+            navView.id === view
+              ? previewView
+                ? 1 - dragProgress
+                : 1
+              : navView.id === previewView
+                ? dragProgress
+                : 0;
           return (
-            <button
-              key={navView.id}
-              ref={(el) => {
-                tabRefs.current[navView.id] = el;
-              }}
-              type="button"
-              onClick={() => onChangeView(navView.id)}
-              className={cn(
-                "flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
-                view === navView.id && "border-primary/20 bg-primary/10 text-primary",
-                isCheckUserHighlighted &&
-                  "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
-              )}
-            >
-              {navView.label}
-              <span
+            <div key={navView.id} className="relative shrink-0">
+              <button
+                ref={(el) => {
+                  tabRefs.current[navView.id] = el;
+                }}
+                type="button"
+                onClick={() => onChangeView(navView.id)}
                 className={cn(
-                  "text-xs text-muted-foreground",
+                  "flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
                   isCheckUserHighlighted &&
-                    "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
+                    "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
                 )}
               >
-                {count}
-              </span>
-            </button>
+                {navView.label}
+                <span className={badgeClassName}>{count}</span>
+              </button>
+              <button
+                type="button"
+                aria-hidden
+                tabIndex={-1}
+                className={cn(
+                  "pointer-events-none absolute inset-0 flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
+                  "border-primary/20 bg-primary/10 text-primary",
+                  isCheckUserHighlighted &&
+                    "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
+                )}
+                style={{ opacity: overlayOpacity, transition: tabOverlayTransition }}
+              >
+                {navView.label}
+                <span className={badgeClassName}>{count}</span>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -213,6 +243,7 @@ export function MobileIssueListScreen({
         footerSpacing
         scrollKey={scrollKey}
         groupByRepo={groupByRepo}
+        view={view}
       />
 
       <MobileIssueFilterSheet

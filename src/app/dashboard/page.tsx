@@ -19,6 +19,7 @@ export default async function DashboardPage() {
   const appSetting = currentUser ? await db.appSetting.findUnique({ where: { id: 1 } }) : null;
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
+  const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
 
   const hiddenRepositoryIds = currentUser
     ? new Set(
@@ -74,6 +75,7 @@ export default async function DashboardPage() {
       quickFilters={quickFilters}
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
+      claudeModelAssist={claudeModelAssist}
     />
   );
 }

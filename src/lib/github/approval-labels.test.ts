@@ -4,7 +4,10 @@ import {
   approveCommentBody,
   isLabelFilterPresetActive,
   isMergeApprovalPending,
+  isQaOnlyApprovalPending,
   LABEL_FILTER_PRESETS,
+  labelsAfterApproval,
+  labelsAfterRejection,
   rejectCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -91,6 +94,74 @@ describe("approveCommentBody", () => {
     expect(approveCommentBody([makeLabel("00.check-user")], "   ")).toBe(
       "@claude 確認しました。実装を進めてください。",
     );
+  });
+
+  it("00.qa-answeredがある場合は質問への回答確認のみの文言を返す（#887）", () => {
+    const body = approveCommentBody([makeLabel("00.check-user"), makeLabel("00.qa-answered")]);
+    expect(body).toBe("@claude 回答を確認しました。");
+  });
+
+  it("00.qa-answeredと21.plan-requiredが両方ある場合は計画承認の文言を優先する", () => {
+    const body = approveCommentBody([
+      makeLabel("00.check-user"),
+      makeLabel("00.qa-answered"),
+      makeLabel("21.plan-required"),
+    ]);
+    expect(body).toBe(
+      "@claude 計画を承認しました。実装を進めてください。\n<!-- issue-deck:no-trigger -->",
+    );
+  });
+});
+
+describe("isQaOnlyApprovalPending", () => {
+  it("00.check-user + 00.qa-answeredの場合はtrueを返す", () => {
+    expect(
+      isQaOnlyApprovalPending([makeLabel("00.check-user"), makeLabel("00.qa-answered")]),
+    ).toBe(true);
+  });
+
+  it("00.check-userが無ければfalseを返す", () => {
+    expect(isQaOnlyApprovalPending([makeLabel("00.qa-answered")])).toBe(false);
+  });
+
+  it("00.qa-answeredが無ければfalseを返す", () => {
+    expect(isQaOnlyApprovalPending([makeLabel("00.check-user")])).toBe(false);
+  });
+
+  it("21.plan-requiredが付いている間はfalseを返す（計画承認待ちを優先する）", () => {
+    expect(
+      isQaOnlyApprovalPending([
+        makeLabel("00.check-user"),
+        makeLabel("00.qa-answered"),
+        makeLabel("21.plan-required"),
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe("labelsAfterApproval", () => {
+  it("00.check-user・21.plan-required・00.qa-answeredを外す", () => {
+    expect(
+      labelsAfterApproval([
+        makeLabel("00.check-user"),
+        makeLabel("00.qa-answered"),
+        makeLabel("21.plan-required"),
+        makeLabel("bug"),
+      ]),
+    ).toEqual(["bug"]);
+  });
+});
+
+describe("labelsAfterRejection", () => {
+  it("00.check-user・00.qa-answeredを外し、21.plan-requiredは残す", () => {
+    expect(
+      labelsAfterRejection([
+        makeLabel("00.check-user"),
+        makeLabel("00.qa-answered"),
+        makeLabel("21.plan-required"),
+        makeLabel("bug"),
+      ]),
+    ).toEqual(["21.plan-required", "bug"]);
   });
 });
 

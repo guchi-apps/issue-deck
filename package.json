@@ -1,6 +1,6 @@
 {
   "name": "issue-deck",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "private": true,
   "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "scripts": {
@@ -19,7 +19,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed:ci": "node scripts/seed-ci-db.mjs",
-    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh"
+    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh",
+    "check:workflows": "node scripts/check-workflow-expression-length.mjs"
   },
   "dependencies": {
     "@fontsource/biz-udpgothic": "^5.3.0",

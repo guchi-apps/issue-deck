@@ -4,6 +4,7 @@ import {
   computeFirstUnreadCommentIndex,
   computeScrollToLatestTarget,
   computeScrollTopToRevealTarget,
+  isAtScrollTarget,
 } from "@/lib/scroll-to-latest";
 
 describe("computeScrollTopToRevealTarget", () => {
@@ -83,5 +84,47 @@ describe("computeScrollToLatestTarget", () => {
       containerScrollHeight: 2000,
     });
     expect(top).toBe(401);
+  });
+});
+
+describe("isAtScrollTarget", () => {
+  it("対象コメント上端に未到達の場合、falseを返す", () => {
+    expect(
+      isAtScrollTarget({
+        containerScrollTop: 0,
+        containerTop: 100,
+        targetTop: 500,
+      }),
+    ).toBe(false);
+  });
+
+  it("対象コメント上端に到達済み（誤差の範囲内）の場合、trueを返す", () => {
+    expect(
+      isAtScrollTarget({
+        containerScrollTop: 400,
+        containerTop: 100,
+        targetTop: 100,
+      }),
+    ).toBe(true);
+  });
+
+  it("誤差の境界値（許容誤差ちょうど）ではtrueを返す", () => {
+    expect(
+      isAtScrollTarget({
+        containerScrollTop: 396,
+        containerTop: 100,
+        targetTop: 104,
+      }),
+    ).toBe(true);
+  });
+
+  it("誤差の境界値を1px超えるとfalseを返す", () => {
+    expect(
+      isAtScrollTarget({
+        containerScrollTop: 396,
+        containerTop: 100,
+        targetTop: 105,
+      }),
+    ).toBe(false);
   });
 });

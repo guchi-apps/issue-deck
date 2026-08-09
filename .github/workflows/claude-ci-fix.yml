@@ -3,7 +3,7 @@ name: Claude CI Fix
 # develop向けPR（issue-<番号>ブランチ）のCI（.github/workflows/ci.yml）が失敗した際、これまでは
 # 人間がIssueに`@claude CIの失敗を直して`のようにコメントして個別に依頼する必要があった。
 # この依頼を自動化し、CI失敗を検知したら人間の操作なしにClaude Codeが修正を試みるワークフロー
-# （docs/multi-agent-workflow.md「CI失敗の自動解消」参照、issue #807）。
+# （docs/multi-agent/auto-repair.md「CI失敗の自動解消」参照、issue #807）。
 # claude-conflict-resolve.yml（PRコンフリクトの自動解消、#315）と同じ設計思想。
 #
 # develop→mainのリリースPR（head=develop）のCI失敗は対象外（#812で別途検討）。リリースPRの
@@ -259,6 +259,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Claude Code（CI失敗修正）
+        id: claude_ci_fix
         if: steps.state.outputs.should_fix == 'true'
         uses: anthropics/claude-code-action@v1
         env:
@@ -278,7 +279,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(grep:*),Bash(find:*)"'
           prompt: |
             あなたはissue-deckリポジトリのCI失敗修正エージェントです。GitHub Actions上で
             無人実行されており、対応するIssueは #${{ needs.detect.outputs.issue_number }}、
@@ -352,6 +353,12 @@ jobs:
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
             - 表面的にCIを通すためだけの修正（テストの無効化・削除、lintエラーの握りつぶし等）
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（CI失敗修正））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_ci_fix.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（CI失敗修正）" "${{ steps.claude_ci_fix.outputs.execution_file }}"
 
       - name: 02.wip ラベルを除去する
         # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush（このジョブが

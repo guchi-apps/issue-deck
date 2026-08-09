@@ -188,6 +188,12 @@ jobs:
             issue-deck自身は現時点でこの値を利用しませんが、更新履歴表示を持つ他リポジトリが
             このワークフローを移植して活用するための汎用フックです。
 
+      - name: Claude使用量をJob Summaryに出力する（コード変更内容からバージョンの上げ幅を判定する）
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.version-decision.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "コード変更内容からバージョンの上げ幅を判定する" "${{ steps.version-decision.outputs.execution_file }}"
+
       - name: バージョン判定結果を検証する
         id: bump
         # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、

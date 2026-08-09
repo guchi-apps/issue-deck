@@ -3,7 +3,7 @@ name: Claude Conflict Resolve
 # develop向けPRがdevelopとの間でコンフリクトした際、これまでは人間がIssueに
 # `@claude コンフリクトを解消して`のようにコメントして個別に依頼する必要があった。
 # この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を
-# 試みるワークフロー(docs/multi-agent-workflow.md「PRコンフリクトの自動解消」参照、issue #315)。
+# 試みるワークフロー(docs/multi-agent/auto-repair.md「PRコンフリクトの自動解消」参照、issue #315)。
 #
 # ジョブ構成:
 # - detect-conflicts: developとコンフリクトしている(mergeable=CONFLICTING)PRを
@@ -245,6 +245,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Claude Code（コンフリクト解消）
+        id: claude_conflict
         if: steps.state.outputs.should_resolve == 'true'
         uses: anthropics/claude-code-action@v1
         env:
@@ -272,7 +273,7 @@ jobs:
           # 既定でbot起点の実行を拒否するため明示的に許可する
           # (参考: https://github.com/anthropics/claude-code-action/issues/1299。#814)
           allowed_bots: "claude[bot]"
-          claude_args: '--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*)"'
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(grep:*),Bash(find:*)"'
           prompt: |
             あなたはissue-deckリポジトリのPRコンフリクト解消エージェントです。GitHub Actions上で
             無人実行されており、対応するIssueは #${{ matrix.issue }}、対応するdevelop向け
@@ -341,6 +342,12 @@ jobs:
             - 他Issueのブランチの編集
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（コンフリクト解消））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_conflict.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（コンフリクト解消）" "${{ steps.claude_conflict.outputs.execution_file }}"
 
       - name: 02.wip ラベルを除去する
         # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush

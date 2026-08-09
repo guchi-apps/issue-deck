@@ -1,7 +1,7 @@
 name: Claude Code Review (develop向けPR)
 
 # develop向けPRの作成・更新時に、機械的リスク判定・Claude Codeによる自動レビュー・
-# 低リスクPRの自動マージを行う(docs/multi-agent-workflow.md Phase3/Phase4)。
+# 低リスクPRの自動マージを行う(docs/multi-agent-workflow.md「段階的導入計画」のPhase3/Phase4)。
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
@@ -231,6 +231,7 @@ jobs:
           token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: Run Claude Code Review
+        id: claude_review
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -245,13 +246,31 @@ jobs:
           # Read/Grep/Globは、レビュー観点「共有知識との整合性」と共有知識追加提案の審査のために
           # .shared-context/配下を読む用途で追加している。gh issue viewは対応Issueの本文・コメント
           # （実装エージェントが投稿した追加提案コメントを含む）の取得に使う。
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Read,Grep,Glob"'
+          # gh pr diff/view/checksは、レビューの起点となる差分の取得とCI結果の確認に使う(#906)。
+          # プロンプトが指示している操作を許可リストに含めておかないと、拒否された分だけ無駄な
+          # 往復が発生し、その時点の文脈をまるごと再送することになる（`gh pr checks`は従来
+          # 「確認すること」で指示していながら許可されておらず、毎回拒否されていた）。
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
           prompt: |
             develop向けPull Request（${{ github.repository }}/pull/${{ github.event.pull_request.number }}）を自動レビューしてください。
 
             ## 対応Issue
             対応Issue番号: ${{ needs.identify-issue.outputs.number }}
             （空欄の場合はブランチ名がissue-<番号>の命名規約に従っていないため、Issue番号は不明として扱ってください）
+
+            ## 読む範囲
+            レビューの対象はこのPull Requestの変更内容です。まず`gh pr diff`で差分を取得し、そこを
+            起点に読んでください。変更ファイルとその呼び出し元・呼び出し先など、差分の評価に直接
+            必要な範囲を超えてリポジトリを読み回さないでください。
+
+            大きいファイルを丸ごと読むと、以降のやり取り全てにその内容が乗り続けます。目安として
+            数万バイトを超える`.md`・`.yml`は`Read`で全体を開かず、`Grep`で該当箇所を特定してから
+            `Read`の`offset`・`limit`で必要な範囲だけ読んでください。特に
+            `.github/workflows/claude-issue-dispatch.yml`（約120KB）は大きいため、全体を開かないで
+            ください。
+
+            これが差分に含まれている場合も、読むのは`gh pr diff`が出力した変更箇所と、その前後の
+            文脈を確認するために必要な範囲だけで十分です。
 
             ## 確認すること
             - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
@@ -351,6 +370,12 @@ jobs:
             - コードの直接修正は行わない（レビューコメントの投稿のみ）
             - `.shared-context/`配下（共有知識リポジトリ）の編集・コミット。共有知識への反映は
               developマージ後に別のワークフローがPull Requestとして行い、最終的なマージは人間が行う
+
+      - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_review.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
 
   claude-review-fallback:
     needs: [identify-issue, claude-review]

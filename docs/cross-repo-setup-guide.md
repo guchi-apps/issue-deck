@@ -39,7 +39,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは944行、最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる |
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（issue-deckでは最大のワークフロー） | pnpm（`pnpm/action-setup`）・Next.js（`next dev`）・Prisma（`pnpm db:migrate:deploy`）・MySQLサービスコンテナ等、issue-deck固有のセットアップ手順を対象リポジトリのスタックに置き換える。DBを使わない・ビルド不要なリポジトリではこれらのステップ自体を削除できる。**`.github/prompts/`配下もあわせてコピーする必要がある**（後述） |
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する | ラベル名・`issue-<番号>`ブランチ命名規則が一致していればほぼ無改変で移植できる。スクリーンショット撮影を導入しないリポジトリでは、末尾の`screenshots`ブランチ掃除ジョブを削除してよい |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
@@ -49,6 +49,28 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
+
+### あわせてコピーが必要なファイル
+
+`claude-issue-dispatch.yml`のプロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下の
+Markdownに置いている（#907）。**ワークフローファイルだけをコピーしても動作しない。**
+
+| ファイル | 役割 |
+|---|---|
+| `.github/prompts/plan.md` | 計画提示ステップのプロンプト |
+| `.github/prompts/split.md` | サブIssue分割ステップのプロンプト |
+| `.github/prompts/question.md` | 質問応答ステップのプロンプト |
+| `.github/prompts/implement.md` | 実装・PR作成ステップのプロンプト |
+| `.github/scripts/summarize-claude-usage.sh` | 各Claudeステップの使用量をJob Summaryへ出力する（#903。導入は任意） |
+
+プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・
+`${RUN_URL}`のプレースホルダで表現し、ワークフロー側の「〜プロンプトを組み立てる」ステップが
+`envsubst`で埋めて環境変数へ格納する。プロンプト本文はリポジトリ固有の記述（ディレクトリ構成・
+ラベル名・確認コマンド等）を多く含むため、移植時は**ワークフローYAMLよりもこちらの書き換え量が
+多くなる**。
+
+この構成にしている理由は、GitHub Actionsの式テンプレート長の上限（21,000バイト）にある。詳細は
+[docs/multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)を参照。
 
 ### 参考: issue-deckの全ワークフロー一覧
 
@@ -66,18 +88,20 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ## 2. ラベル体系
 
-マルチエージェント運用の状態遷移・オプション制御に使う12個のラベルは、issue-deckリポジトリに
+マルチエージェント運用の状態遷移・オプション制御に使う13個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、他リポジトリには存在しない。
 
 | ラベル | 色 | 説明 | 用途 |
 |---|---|---|---|
 | `00.check-user` | `f0883e` | ユーザーの確認・指示が必要 | 承認待ち・自動マージ保留の合図。他の状態ラベルと併用 |
+| `00.qa-answered` | `c5def5` | 質問への回答のみ完了 | `00.check-user`と常に併用。単なる質問・確認と判定された場合に付与し、承認ボタンの文言を出し分ける |
 | `01.planning` | `e9f7e6` | 状態：計画検討中 | `21.plan-required`選択時のみ経由 |
 | `02.wip` | `d3f2d0` | 状態：実装中 | 実装エージェントが着手時に付与 |
 | `03.d:marge` | `a8e6a1` | developへのPRを作成・マージ待ち | PR作成時に付与 |
 | `05.develop` | `6fcf73` | developへマージ完了（main未反映） | developマージ完了時に付与 |
 | `07.m:marge` | `2f9e44` | mainへのPRを作成・マージ待ち | develop→mainのPRが開いている間 |
 | `09.main` | `1b5e20` | mainへマージ完了・リリース済み | この時点でissueをclose |
+| `11.local` | `e99695` | ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない | 付いている間`claude-issue-dispatch.yml`が計画・実装・分割・追加対応を行わない（読み取り専用の質問応答のみ例外）。ローカルセッションとの二重起動防止 |
 | `21.plan-required` | `d4c5f9` | 計画の確認・承認が必要 | 実装前にPlan modeでの計画提示を必須にする |
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
@@ -88,12 +112,14 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 
 ```bash
 gh label create "00.check-user" --color f0883e --description "ユーザーの確認・指示が必要"
+gh label create "00.qa-answered" --color c5def5 --description "質問への回答のみ完了"
 gh label create "01.planning" --color e9f7e6 --description "状態：計画検討中"
 gh label create "02.wip" --color d3f2d0 --description "状態：実装中"
 gh label create "03.d:marge" --color a8e6a1 --description "developへのPRを作成・マージ待ち"
 gh label create "05.develop" --color 6fcf73 --description "developへマージ完了（main未反映）"
 gh label create "07.m:marge" --color 2f9e44 --description "mainへのPRを作成・マージ待ち"
 gh label create "09.main" --color 1b5e20 --description "mainへマージ完了・リリース済み"
+gh label create "11.local" --color e99695 --description "ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない"
 gh label create "21.plan-required" --color d4c5f9 --description "計画の確認・承認が必要"
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
@@ -160,7 +186,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
   全ワークフローの対象外になる）
 - Branch protection: `main`はRequire pull request before merging・Required status checks、
   `develop`は最低限`required_status_checks`（CIジョブ名）を設定する。詳細な設定値・設定コマンド例は
-  [docs/multi-agent-workflow.md](multi-agent-workflow.md)の「ブランチ保護ルール案」を参照
+  [docs/multi-agent/branching.md](multi-agent/branching.md)の「ブランチ保護ルール案」を参照
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
