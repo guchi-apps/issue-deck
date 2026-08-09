@@ -920,6 +920,12 @@ jobs:
             作成（`split`）を開始します。計画に修正が必要な場合は、人間が`@claude`宛にコメントで指摘するので、
             その場合はこのステップが再び起動し計画を練り直します。
 
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（計画提示））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_plan.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（計画提示）" "${{ steps.claude_plan.outputs.execution_file }}"
+
       - name: 計画提示のexecution_fileをArtifactとして保存する
         # フォールバック通知が抽出する失敗理由(下記)はexecution_file全体（実測で2900行規模に
         # なることもある）からの要約に過ぎず、原因調査にはIssueコメントに埋め込めない全文を
@@ -1129,6 +1135,7 @@ jobs:
           echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Claude Code（分割）
+        id: claude_split
         if: steps.state.outputs.mode == 'split'
         uses: anthropics/claude-code-action@v1
         env:
@@ -1180,6 +1187,12 @@ jobs:
               （サブIssueの着手はこれまでどおり人間が個別に`@claude`とコメントして起動する）
             - コードの変更・コミット・ブランチ作成・PR作成は一切行わない
 
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（分割））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_split.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（分割）" "${{ steps.claude_split.outputs.execution_file }}"
+
       - name: 分割結果を検証し、必要ならフォールバックする
         # 計画コメント投稿の検証と同じ考え方。サブIssue作成後の親Issueコメントが確認できない場合、
         # 途中で行き詰まった可能性があるためフォールバック通知を投稿する。
@@ -1213,6 +1226,7 @@ jobs:
           echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Claude Code（質問応答）
+        id: claude_question
         # コードやIssueの状態を一切変更しない読み取り専用モード。ラベル変更・ブランチ作成・
         # コミット・PR作成は許可しない（allowedToolsにEdit/Write/Bash(git ...)を含めない）。
         if: steps.state.outputs.mode == 'ask'
@@ -1267,6 +1281,12 @@ jobs:
 
             ## このステップでは行わないこと
             - コードの変更・コミット・ブランチ作成・PR作成・Issueのラベル変更・状態変更は一切行わない
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（質問応答））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_question.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（質問応答）" "${{ steps.claude_question.outputs.execution_file }}"
 
       - name: 質問への回答を検証し、必要ならフォールバックする
         if: always() && steps.state.outputs.mode == 'ask'
@@ -1692,6 +1712,12 @@ jobs:
             ## コミット・PRの書き方
             - コミットメッセージ・PRタイトル・PR本文は英語ではなく日本語で書く
             - PR本文の見出し（Summary/Test planなど）は英語でもよいが、説明文は日本語で書く
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（実装・PR作成））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_implement.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（実装・PR作成）" "${{ steps.claude_implement.outputs.execution_file }}"
 
       - name: 実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに完了報告コメントの投稿を委ねるだけだと、途中でエラー終了した場合や

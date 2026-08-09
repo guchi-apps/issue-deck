@@ -206,6 +206,12 @@ jobs:
             場合は、ファイルを変更しないままにし、`/tmp/shared-knowledge-pr.md` も作成しないで
             ください。後続のステップが「差分なし」として正常終了します。
 
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（承認済み提案を共有知識へ反映する））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_apply.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（承認済み提案を共有知識へ反映する）" "${{ steps.claude_apply.outputs.execution_file }}"
+
       - name: 反映PRを作成する
         id: create_pr
         if: steps.state.outputs.proceed == 'true' && steps.checkout_shared.outcome == 'success'

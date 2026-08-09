@@ -259,6 +259,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Claude Code（CI失敗修正）
+        id: claude_ci_fix
         if: steps.state.outputs.should_fix == 'true'
         uses: anthropics/claude-code-action@v1
         env:
@@ -352,6 +353,12 @@ jobs:
             - 不要なforce push
             - 自分が作成したPull Requestの自己マージ
             - 表面的にCIを通すためだけの修正（テストの無効化・削除、lintエラーの握りつぶし等）
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（CI失敗修正））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_ci_fix.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "Claude Code（CI失敗修正）" "${{ steps.claude_ci_fix.outputs.execution_file }}"
 
       - name: 02.wip ラベルを除去する
         # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush（このジョブが
