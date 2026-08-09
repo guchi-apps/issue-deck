@@ -14,7 +14,7 @@ import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
-import type { Issue, IssueLabel } from "@/types/issue";
+import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
 
 type IssueListProps = {
   title: string;
@@ -39,6 +39,12 @@ type IssueListProps = {
    * リポジトリが1種類しかない場合はヘッダーを出さずフラット表示のまま扱う。
    */
   groupByRepo?: boolean;
+  /**
+   * 現在表示中のナビビュー。グループ化時の並び順の切り替え（#922）にのみ使う。
+   * 「直近本番に反映した」ビューでは、最後に反映したリポジトリが上に来るよう
+   * グループの並び順をrepositoryFullName昇順ではなくclosedAt降順にする。
+   */
+  view?: NavViewId;
 };
 
 function formatRelativeDate(iso: string) {
@@ -100,6 +106,7 @@ export function IssueList({
   footerSpacing = false,
   scrollKey = null,
   groupByRepo = false,
+  view,
 }: IssueListProps) {
   const runningByIssueId = useIssuesWorkflowRunning(issues);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
@@ -114,8 +121,11 @@ export function IssueList({
   // リポジトリが1種類しかない場合（絞り込みで単一リポジトリのときなど）はヘッダーを
   // 出す意味がないため、フラット表示のまま扱う。
   const repoGroups = useMemo(
-    () => (groupByRepo ? groupIssuesByRepository(issues) : null),
-    [groupByRepo, issues],
+    () =>
+      groupByRepo
+        ? groupIssuesByRepository(issues, { sortByLatestClosedAt: view === "recently-merged" })
+        : null,
+    [groupByRepo, issues, view],
   );
   const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
 

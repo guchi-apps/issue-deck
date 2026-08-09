@@ -149,10 +149,16 @@ export type IssueRepositoryGroup = {
 
 /**
  * リポジトリごとにIssueをグループ化する（#849）。issuesの並び順（＝呼び出し側で
- * 確定済みのソート順）はグループ内でそのまま保ち、グループ自体はrepositoryFullNameの
- * 昇順（サイドバーの既定順と同じ）で並べる。
+ * 確定済みのソート順）はグループ内でそのまま保つ。グループ自体の並び順は既定では
+ * repositoryFullNameの昇順（サイドバーの既定順と同じ）だが、`sortByLatestClosedAt`を
+ * 指定すると、リポジトリごとのclosedAt最大値（＝最後に本番反映されたissueの日時）の
+ * 降順で並べる（#922）。「直近本番に反映した」ビューでは、最後に反映したリポジトリを
+ * 上に表示したいため。closedAtを持つissueが1件もないリポジトリは末尾に回す。
  */
-export function groupIssuesByRepository(issues: Issue[]): IssueRepositoryGroup[] {
+export function groupIssuesByRepository(
+  issues: Issue[],
+  options?: { sortByLatestClosedAt?: boolean },
+): IssueRepositoryGroup[] {
   const groups = new Map<string, IssueRepositoryGroup>();
   for (const issue of issues) {
     const existing = groups.get(issue.repositoryFullName);
@@ -167,9 +173,26 @@ export function groupIssuesByRepository(issues: Issue[]): IssueRepositoryGroup[]
       });
     }
   }
-  return [...groups.values()].sort((a, b) =>
-    a.repositoryFullName.localeCompare(b.repositoryFullName),
-  );
+  const groupList = [...groups.values()];
+
+  if (options?.sortByLatestClosedAt) {
+    const latestClosedAtByRepo = new Map<string, number>();
+    for (const issue of issues) {
+      if (!issue.closedAt) continue;
+      const closedAt = new Date(issue.closedAt).getTime();
+      const latest = latestClosedAtByRepo.get(issue.repositoryFullName);
+      if (latest === undefined || closedAt > latest) {
+        latestClosedAtByRepo.set(issue.repositoryFullName, closedAt);
+      }
+    }
+    return groupList.sort((a, b) => {
+      const aLatest = latestClosedAtByRepo.get(a.repositoryFullName) ?? -Infinity;
+      const bLatest = latestClosedAtByRepo.get(b.repositoryFullName) ?? -Infinity;
+      return bLatest - aLatest;
+    });
+  }
+
+  return groupList.sort((a, b) => a.repositoryFullName.localeCompare(b.repositoryFullName));
 }
 
 export function getAssigneeOptions(issues: Issue[]): string[] {
