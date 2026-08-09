@@ -48,6 +48,18 @@ name: Claude Issue Dispatch
 # 再始動しない(mode=skip)。上記の分割で元Issueがクローズされた後に誤って再始動しないための
 # ガードだが、通常の09.mainクローズ後のIssueにも同様に適用される。
 #
+# ローカル(VSCode等)のClaude Codeセッションで進めているIssueと、この無人実行が同じIssueを
+# 二重に進めないためのガードを二段構えで持つ(#905で実際に発生、#919で対応。詳細は
+# docs/multi-agent-workflow.md「ローカル実行と無人実行の二重起動を防ぐ」参照)。
+#   1. issues/unlabeled(00.check-userの除去)を受けた時点で02.wip・03.d:margeのいずれかが
+#      付いていればmode=skip。「計画が承認された」シグナルと、ローカルセッションが承認を
+#      受けてラベルを次段階へ進める操作はイベント上区別できないため、既に着手済み・PR作成済み
+#      であることを示すラベルの有無で切り分ける。01.planningは正規の承認時点でも付いたままの
+#      ため、この判定に含めてはいけない(下記MODE判定のコメント参照)。
+#   2. 11.localラベルが付いている間は、トリガー経路によらずmode=skip(読み取り専用のmode=askのみ
+#      例外)。1がラベル付け替えの順序次第ですり抜けるケースを、人間が明示的に立てる停止フラグで
+#      塞ぐ。順番待ち中に付与された場合もdispatchジョブの陳腐化チェックで拾って中止する。
+#
 # issue-detail.tsx等の「Claudeに質問する」ダイアログ(src/lib/github/ask-claude.ts)が投稿する
 # `@claude 質問: `で始まるコメントは、コード変更を伴わない読み取り専用の質問応答(mode=ask)として
 # 扱う。実装状況(実装中・承認待ち・PR作成後・クローズ済み等、上記いずれの状態でも)によらず常に
@@ -313,6 +325,13 @@ jobs:
           echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
           WIP=false
           echo "$LABELS" | grep -qx "02.wip" && WIP=true
+          DEVELOP_PR=false
+          echo "$LABELS" | grep -qx "03.d:marge" && DEVELOP_PR=true
+          # ローカル(VSCode等)のClaude Codeセッションで対応中であることを人間が明示するラベル(#919)。
+          # 付いている間はトリガー経路によらず無人実行を起動しない(下記MODE判定を参照)。
+          LOCAL=false
+          echo "$LABELS" | grep -qx "11.local" && LOCAL=true
+          echo "local_active=$LOCAL" >> "$GITHUB_OUTPUT"
           SCREENSHOT_REQUIRED=false
           echo "$LABELS" | grep -qx "24.screenshot-required" && SCREENSHOT_REQUIRED=true
           echo "screenshot_required=$SCREENSHOT_REQUIRED" >> "$GITHUB_OUTPUT"
@@ -344,6 +363,31 @@ jobs:
           MODE=skip
           if [ "$EVENT_NAME" = "issue_comment" ] && [ "$IS_ASK" = "true" ]; then
             MODE=ask
+          elif [ "$LOCAL" = "true" ]; then
+            # 11.localが付いている間は、どのトリガー経路でも計画・実装・分割・追加対応を行わない(#919)。
+            # ローカルのClaude Codeセッションと無人実行が同じIssueを二重に進めるのを防ぐための、
+            # 人間が明示的に立てる停止フラグ。下記のunlabeledガードが状態依存で取りこぼす
+            # (例: ローカル側が02.wipを付ける前に00.check-userを外した場合)ケースも塞ぐ。
+            #
+            # mode=ask(「Claudeに質問する」ダイアログ)だけは上の分岐で先に確定させて許可する。
+            # 読み取り専用でブランチにもラベル状態にも触れず、人間がその場で明示的に投げた質問で
+            # あるため、ローカル作業と競合しない。
+            MODE=skip
+          elif [ "$EVENT_NAME" = "issues" ] && { [ "$WIP" = "true" ] || [ "$DEVELOP_PR" = "true" ]; }; then
+            # issues/unlabeled(=00.check-userの除去)は「無人実行の計画が承認された」シグナルだが、
+            # ローカルセッションが承認を受けてラベルを次に進める操作と区別できない(#905, #919)。
+            # 02.wip・03.d:margeのいずれかが既に付いている状態でこのイベントが来た場合、
+            # そのIssueは別経路で実装着手済み・PR作成済みであり、新規に計画や実装を始めるのは
+            # 常に誤りなのでskipする。
+            #
+            # 01.planningはここに含めてはいけない。無人実行の計画提示ステップが付けた01.planningは
+            # 実装着手時(mode=implementの「02.wip を付与する」ステップ)まで外れないため、承認時点の
+            # 正規の状態が「01.planning + 00.check-user + 21.plan-required」になる。含めると本来の
+            # 承認経路そのものが動かなくなる。
+            #
+            # branch_exists=trueの場合のskipは下の分岐が従来どおり担当する(ローカルはworktreeで
+            # 作業しpushが最後になるため、ブランチ有無だけでは着手済みを判定できない)。
+            MODE=skip
           elif [ "$ISSUE_CLOSED" = "true" ]; then
             MODE=skip
           elif [ "$BRANCH_EXISTS" = "true" ]; then
@@ -403,7 +447,7 @@ jobs:
           esac
           echo "lane=$LANE" >> "$GITHUB_OUTPUT"
 
-          echo "判定結果: mode=$MODE lane=$LANE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED preview_required=$PREVIEW_REQUIRED"
+          echo "判定結果: mode=$MODE lane=$LANE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP develop_pr=$DEVELOP_PR local=$LOCAL branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED preview_required=$PREVIEW_REQUIRED"
 
       - name: 依頼を受け取ったことをリアクションで示す
         # triageはconcurrencyの外で即時実行されるため、dispatchがキュー待ちの間でも「受け取った」
@@ -426,8 +470,8 @@ jobs:
             gh api -X POST "repos/$GH_REPO/issues/$ISSUE_NUMBER/reactions" -f content=eyes --silent
           fi
 
-      - name: 実装済み・対応中のissueへの@claudeコメントに返信する
-        # BRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態、または
+      - name: 対応を見送った@claudeコメントに状況を返信する
+        # 11.localによるskip(#919)、およびBRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態、または
         # PRが無く02.wipが付いている詰まった状態(#112)でissue_commentが来た場合はmode=additional
         # になり、このステップの対象外(#129, #112。既存ブランチをcheckoutして続きから再開する)。
         # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く02.wipも付いていない異常な
@@ -440,11 +484,20 @@ jobs:
         if: |
           steps.state.outputs.mode == 'skip' &&
           github.event_name == 'issue_comment' &&
-          (steps.state.outputs.branch_exists == 'true' || steps.state.outputs.issue_closed == 'true')
+          (steps.state.outputs.local_active == 'true' ||
+           steps.state.outputs.branch_exists == 'true' ||
+           steps.state.outputs.issue_closed == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          if [ "${{ steps.state.outputs.local_active }}" = "true" ]; then
+            BODY='🖐️ このIssueには `11.local` ラベルが付いているため、無人実行（GitHub Actions）では対応しません。ローカルのClaude Codeセッションで対応中の想定です。'
+            BODY="$BODY"$'\n\n''Actions側に任せる場合は `11.local` を外してから、改めて `@claude` とコメントしてください。'
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
+            gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+            exit 0
+          fi
           if [ "${{ steps.state.outputs.issue_closed }}" = "true" ]; then
             BODY='ℹ️ このIssueは既にクローズされています。分割により対応が複数のサブIssueに分かれている場合、コメント欄でリンクをご確認ください。'
             BODY="$BODY"$'\n\n''追加の対応が必要な場合、このコメントをきっかけに実装が再始動することはありません。人間が対応してください。'
@@ -592,7 +645,7 @@ jobs:
         # 付けた場合、古い判定のまま実装が走る恐れがある。食い違いを検知した場合はmodeをskipに
         # 落とし、以降のステップを全て空振りさせる(個々のステップのif条件は触らない)。
         # ラベル全体の再判定は行わない。それはtriageを分離した意味を失わせるため、実装を止める
-        # 必要がある2条件(クローズ済み・要確認)に絞っている。
+        # 必要がある3条件(クローズ済み・要確認・ローカル対応中)に絞っている。
         id: state
         env:
           GH_TOKEN: ${{ github.token }}
@@ -618,6 +671,10 @@ jobs:
               STALE_REASON="判定後にIssueがクローズされた"
             elif echo "$NOW_LABELS" | grep -qx "00.check-user" && [ "$MODE" != "plan" ] && [ "$MODE" != "ask" ]; then
               STALE_REASON="判定後に00.check-userが付与された"
+            elif echo "$NOW_LABELS" | grep -qx "11.local" && [ "$MODE" != "ask" ]; then
+              # 順番待ちの間に人間がローカル対応へ切り替えた場合(#919)。triage側の判定と同じく
+              # 読み取り専用のmode=askだけは通す。
+              STALE_REASON="判定後に11.localが付与された"
             fi
           else
             echo "Issueの再取得に失敗したため、陳腐化の確認はスキップします"
