@@ -107,6 +107,20 @@ jobs:
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
+#### 実装ステップのNodeバージョン固定（`node-version`）
+
+```yaml
+    with:
+      runtime-setup: minimal
+      node-version: "20.19"
+```
+
+指定した場合のみ、実装（`mode=implement|additional`）の前に `actions/setup-node` でバージョンを固定する。未指定ならランナー既定のNodeが使われる（issue-deck自身は未指定）。
+
+ランタイム準備側（`runtime-setup: node`/`node-db`）のSetup Nodeとは**目的が異なる**。あちらは撮影・DB準備のためのもので `24.screenshot-required` に紐づくが、こちらは撮影の有無によらず実装のたびに効く。プリセットに混ぜると、撮影を使わないリポジトリがバージョン固定のためだけに `node` プリセットを選ばざるを得ず、不要な依存インストールとPlaywrightのダウンロードまで走ってしまうため、直交する軸として独立させている。
+
+なお `node-version` を指定しつつ `runtime-setup` が `node`/`node-db` で、かつ `24.screenshot-required` も付いている場合は `actions/setup-node` が2回走るが、同じバージョンの再実行はキャッシュヒットで数秒であり実害は無い。
+
 #### リポジトリ固有の後処理（`post-implement-script`）
 
 ランタイム準備のプリセットでは吸収できない、そのリポジトリ固有の後処理を差し込む口（#952）。
@@ -146,7 +160,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 |---|---|---|
 | `workflows/v1` | `reusable-issue-labels.yml` | |
 | `workflows/v2` | 上記 + `reusable-issue-dispatch.yml` | issue-deck自身での動作確認（#945）完了後に作成 |
-| `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952）。**本ドキュメント執筆時点では未作成** |
+| `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
+| `workflows/v4` | 上記 | `node-version` inputs を追加（#956）。**本ドキュメント執筆時点では未作成** |
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
