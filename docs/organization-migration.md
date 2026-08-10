@@ -235,36 +235,33 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
 
 ## 移行手順案
 
-依存の少ないものから順に進め、各段階で疎通を確認してから次へ進む。
+### 順序の原則：リポジトリを先に全部移し、GitHub Appの所有権移管は最後に行う
 
-1. **Organization `guchi-apps` を作成する**（GitHub Free、$0）。
-2. **GitHub Appの所有権を`guchi-apps`へ移す。**
-   privateなGitHub Appは**App所有者のアカウントにしかインストールできない**
-   （GitHub Docs [Making a GitHub App public or private](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/making-a-github-app-public-or-private):
-   "Private GitHub Apps can only be installed on the user or organization account of the app owner"）。
-   IssueDeckのAppは`m-guchi`個人アカウント所有のため、**そのままでは`guchi-apps`へ
-   インストールできない**。Appをpublicにする（誰でもインストール可能になる）か、
-   所有権ごとOrganizationへ移すかの二択で、後者を採る。
+privateなGitHub Appは**App所有者のアカウント1つにしかインストールできない**
+（GitHub Docs [Making a GitHub App public or private](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/making-a-github-app-public-or-private):
+"Private GitHub Apps can only be installed on the user or organization account of the app owner"）。
+さらにissue-deckは[app-auth.ts](../src/lib/github/app-auth.ts)が単一の`GITHUB_APP_ID`と秘密鍵で
+動いているため、**Appを2つ使い分けることもできない**（同一Appの複数インストールは扱えるが、
+複数のAppは扱えない）。
 
-   手順: <https://github.com/settings/apps> → 対象App → **Advanced** → **Transfer ownership**
-   → 移管先に`guchi-apps`を入力（同名のEnterprise/Organizationがあり得るためドロップダウンで
-   正しいものを選ぶ）→ **Transfer this GitHub App**。移管後は
-   `https://github.com/organizations/guchi-apps/settings/apps`側で管理する。
+したがって移行の過渡期には、個人アカウントと`guchi-apps`のどちらか一方しかissue-deckに映せない。
+順序で影響を最小化する。
 
-   注意点。
-   - **所有権を移すと個人アカウント側のインストールが外れることがある**（GitHubが警告を出す）。
-     Appを先に移すと、まだ個人アカウントに残っているリポジトリをissue-deckが一時的に
-     見られなくなる。GitHub側のデータは無事で表示が欠けるだけなので、リポジトリのtransferを
-     先に済ませるか、短い断絶を許容するかを選ぶ。
-   - **開発App（`issue-deck-dev`, App ID 4445268）も同じ対応が要る**（プレビュー環境が使用）。
-   - App ID・秘密鍵・Webhook URLは移管しても変わらないはずだが、GitHubのドキュメントに
-     明記が無い。移管後に`.env`・1Passwordの値のまま疎通するかを実測で確認する。
-3. **Appを`guchi-apps`へインストールする。** App設定ページの**Install App**から`guchi-apps`を選び、
-   **Only select repositories**で対象を選択する（またはAll repositories）。
-   ただし実際には**issue-deckの画面のインストール導線から踏むほうが確実**で、
-   [src/app/github/setup/route.ts](../src/app/github/setup/route.ts)を経由することで
-   インストール情報が`GithubInstallation`テーブルへ入る。
-4. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
+- **Appを先に移すと**: 個人アカウント側のインストールが外れ、まだ移していないリポジトリが
+  issue-deckから消える。残りを移し終わるまでその状態が続く
+- **リポジトリを先に移すと**: 移した分だけが一時的に見えなくなり、最後にAppを移した瞬間に
+  まとめて復帰する
+
+**後者を採る。** 稼働中の全リポジトリを`guchi-apps`へ移す方針（後述の「移行対象」）のため、
+Appをpublicにする必要はなく、privateのまま所有権だけを移せる。
+
+なお、一部のリポジトリを個人アカウントに残したまま両方をissue-deckに映したい場合は、
+Appをpublic（"Any account"）にする以外に方法がない。今回はその必要がない。
+
+### 手順
+
+1. ✅ **Organization `guchi-apps` を作成する**（GitHub Free、$0）。**完了済み**。
+2. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
 
    <https://github.com/settings/personal-access-tokens/new>（Settings → Developer settings →
    Personal access tokens → **Fine-grained tokens** → Generate new token）で作成する。
@@ -286,27 +283,62 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
    有効期限を`FineGrainedToken`台帳へ記録する。
 
    **organization secretへは一本化しない。** GitHub Freeではorganization secretを
-   privateリポジトリから参照できず、今回はprivate 5件を含む構成のため、publicだけorg secret・
+   privateリポジトリから参照できず、privateリポジトリを含む構成のため、publicだけorg secret・
    privateはrepo secretという分かれ方になって混乱を招く。当面はこれまでどおりrepo secretに
    置き、Team（選択肢C）へ上げた時点でorg secretへ一本化する。
-5. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
-   （`uptime-kuma`など）で、URLリダイレクト・Appの認識・issue-deckの画面表示を確認する。
-6. **`docs`をtransferする。** ワークフローは持たないが、`SHARED_CONTEXT_REPO`の既定値
-   `m-guchi/docs`を参照している箇所（`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・
-   `shared-knowledge-propose.yml`）があるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか
-   既定値を書き換える。ローカルの`~/apps/_docs`のremoteも更新する。
-7. **issue-deckをtransferする。** 上記「書き換えが必要な箇所」の1〜5を修正し、各リポジトリの
-   `WORKFLOW_PAT`を新しいPATへ差し替え、Actions（CI・deploy・issue-labels）が通ることを確認する。
-8. **`shopping-list`をtransferする。** issue-deckより後にする。caller側の
-   `uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の
-   更新が要るため。
-9. **残りのpublicアプリリポジトリ**（car-care・asset-manager・dayspan）をtransferする。
-10. **稼働中のprivateリポジトリ**（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）を
-    transferする。Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ
-    載せる際は最後のマージを手動にする（前述の`auto-merge-fallback`経由）。
-11. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
-    本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
-12. archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。
+
+3. **稼働中の全リポジトリを`guchi-apps`へtransferする。**
+   移した直後に、そのリポジトリのActions secret `WORKFLOW_PAT`を手順2の新しいPATへ差し替える
+   （旧PATはresource ownerが`m-guchi`のため、org配下へ移ったリポジトリには届かない）。
+
+   依存関係の都合で順序が決まっているものだけ先に並べ、残りは任意。
+
+   1. ✅ `uptime-kuma` — 検証用。URLリダイレクトとgit操作を確認する。**完了済み**
+   2. `docs` — `SHARED_CONTEXT_REPO`の既定値`m-guchi/docs`を参照する3ワークフロー
+      （`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・`shared-knowledge-propose.yml`）
+      があるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか既定値を書き換える。
+      ローカル`~/apps/_docs`のremoteも更新する
+   3. `issue-deck` — 「書き換えが必要な箇所」の1〜5を修正し、Actions（CI・deploy・issue-labels）が
+      通ることを確認する
+   4. `shopping-list` — issue-deckより後にする。caller側の
+      `uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の
+      更新が要るため
+   5. 残りのpublicアプリ（`car-care`・`asset-manager`・`dayspan`）
+   6. 稼働中のprivate 4件（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）。
+      Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ載せる際は
+      最後のマージを手動にする（前述の`auto-merge-fallback`経由）
+   7. その他の個人アプリ（`gucchii-os`・`meisai-lab`・`myroom`・`portfolio`・`signaly`・
+      `solitaire`・`subscription-lists`・`wifi-speed`・`pi0w_260719`・`sensor_260218`・
+      `sensor_260531`）
+
+   **この間、org側へ移したリポジトリはissue-deckに表示されない**（Appがまだ個人アカウント
+   所有のため）。GitHub側のデータは無事で、手順5のインストール後に再同期すれば戻る。
+
+4. **GitHub Appの所有権を`guchi-apps`へ移す。**
+
+   手順: <https://github.com/settings/apps> → 対象App → **Advanced** → **Transfer ownership**
+   → 移管先に`guchi-apps`を入力（同名のEnterprise/Organizationがあり得るためドロップダウンで
+   正しいものを選ぶ）→ **Transfer this GitHub App**。移管後は
+   `https://github.com/organizations/guchi-apps/settings/apps`側で管理する。
+
+   - **開発App（`issue-deck-dev`, App ID 4445268）も同じ対応が要る**（プレビュー環境が使用）。
+   - App ID・秘密鍵・Webhook URLは移管しても変わらないはずだが、GitHubのドキュメントに
+     明記が無い。移管後に`.env`・1Passwordの値のまま疎通するかを実測で確認する。
+
+5. **Appを`guchi-apps`へインストールする。** App設定ページの**Install App**から`guchi-apps`を選び、
+   **All repositories**（または対象を明示選択）でインストールする。
+   ただし実際には**issue-deckの画面のインストール導線から踏むほうが確実**で、
+   [src/app/github/setup/route.ts](../src/app/github/setup/route.ts)を経由することで
+   インストール情報が`GithubInstallation`テーブルへ入る。
+
+6. **issue-deckの画面で再同期し、リポジトリとIssueが揃うことを確認する。**
+
+7. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
+   本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
+
+8. **archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。**
+   Appが`guchi-apps`所有のprivateになるとこれらはissue-deckに表示できなくなるが、
+   運用対象ではないため支障はない。
 
 ## ロールバック策
 
@@ -316,13 +348,14 @@ Issue・PR・コミット履歴・secretsは保持される。必要になるの
 
 各段階で確認しておくべき点。
 
-- **手順1で止めれば影響ゼロ。** Organizationを作っただけの状態。
-- **手順2（Appの所有権移管）が実質的な後戻り点。** 個人アカウントへ再度transferすれば戻せるが、
+- **手順1・2で止めれば影響ゼロ。** Organizationを作りPATを発行しただけの状態。
+- **手順3-1（`uptime-kuma`のtransfer）で止めても影響は軽微。** 検証用の1件を戻すだけで済む。
+- **手順3-3（issue-deck）以降は書き換えたowner参照も巻き戻す必要がある。**
+  さらに手順3-4（`shopping-list`）以降は、caller側のタグ固定参照（`@workflows/v1`）の
+  owner部分も戻す。
+- **手順4（Appの所有権移管）が実質的な後戻り点。** 個人アカウントへ再度transferすれば戻せるが、
   移管のたびにインストールがやり直しになる。ここを越える前に、移管後もApp ID・秘密鍵・
   Webhook URLが変わらないことを実測で確認しておく。
-- **手順5で止めれば影響は軽微。** 検証用の1件を戻すだけで済む。
-- **手順8以降は`shopping-list`側のcallerも巻き戻す必要がある。** タグ固定参照（`@workflows/v1`）の
-  owner部分を戻す。
 - **Organization自体は削除できる**（リポジトリを空にしてから）。Free planなので解約手続きも不要。
 
 戻せない類のものは確認した範囲では見当たらなかったが、実際に移す前にGitHub Pagesを使っている
@@ -351,12 +384,20 @@ privateリポジトリのマージまで自動化できる。
 **選択肢Bを採用する。** Organization Free（$0）へ移行する。
 
 - **Organization名**: `guchi-apps`
-- **移行対象**: publicアプリ群（issue-deck・car-care・asset-manager・dayspan・shopping-list）に加え、
-  **稼働中のprivateリポジトリ5件すべて**（`docs`・`vps`・`ops-dashboard`・`db-console`・`clip-hive`）
-- **個人アカウントに残す**: archivedな大学系7件（thesis系・tyuujitu系）
+- **移行対象**: **稼働中の全リポジトリ**。publicアプリ群（issue-deck・car-care・asset-manager・
+  dayspan・shopping-list）、privateリポジトリ5件（`docs`・`vps`・`ops-dashboard`・`db-console`・
+  `clip-hive`）に加え、その他の個人アプリ（`gucchii-os`・`meisai-lab`・`myroom`・`portfolio`・
+  `signaly`・`solitaire`・`subscription-lists`・`wifi-speed`・`uptime-kuma`・`pi0w_260719`・
+  `sensor_260218`・`sensor_260531`）も含める
+- **個人アカウントに残す**: archivedな大学系7件（thesis系・tyuujitu系）のみ
 
-privateリポジトリを分割せず全件移すのは、`WORKFLOW_PAT`がFine-grained PATで
-resource ownerを1つしか持てず、分割するとPATが2本必要になるため（前述）。
+分割せず全件移す理由は2つある。
+
+- `WORKFLOW_PAT`がFine-grained PATで**resource ownerを1つしか持てず**、分割するとPATが
+  2本必要になる（前述）
+- issue-deckが使えるGitHub Appは1つだけで、privateなAppは**所有者アカウント1つにしか
+  インストールできない**。分割したままissue-deckに両方を映すにはAppをpublicにするしかなく、
+  全件移せばprivateのまま運用できる（後述の「順序の原則」）
 
 Teamへの引き上げ（選択肢C）は**当面見送る。** Free → Teamはいつでも切り替えられるため、
 先に払う理由がない。$4/月で追加的に得られるものは、実測にもとづくと次の2点に絞られる。
