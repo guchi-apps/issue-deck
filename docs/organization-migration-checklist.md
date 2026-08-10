@@ -22,7 +22,7 @@ org配下へ移したリポジトリのワークフローは動かない。
 ここが済むまで、org配下のリポジトリはワークフローが動かない。最優先。
 
 - [x] 開発App `issue-deck-dev`（App ID 4445268）も`guchi-apps`へ移管する（プレビュー環境が使用）
-- [ ] **Claude Code GitHub App（<https://github.com/apps/claude>）を`guchi-apps`へインストールする**
+- [x] **Claude Code GitHub App（<https://github.com/apps/claude>）を`guchi-apps`へインストールする**
 
       `anthropics/claude-code-action`が使うAnthropic提供のサードパーティAppで、IssueDeckの
       自作App（本番・`issue-deck-dev`）とは**別物**。他人のAppなので所有権移管ではなく、
@@ -128,19 +128,19 @@ org配下へ移したリポジトリのワークフローは動かない。
       git -C ~/apps/issue-deck remote set-url origin github:guchi-apps/issue-deck.git
       ```
 
-- [ ] コード修正のPRを作成する
-  - [ ] `.github/workflows/reusable-issue-dispatch.yml:708` → `repository: guchi-apps/issue-deck`
-  - [ ] `scripts/check-label-diff.sh:6` → `SOURCE_REPO="guchi-apps/issue-deck"`
-  - [ ] `scripts/start-issue.sh:64` → `--repo guchi-apps/issue-deck`
-  - [ ] `scripts/start-reviewer.sh:48` → `--repo guchi-apps/issue-deck`
-  - [ ] `.claude/skills/release-to-main/SKILL.md:10` → `repos/guchi-apps/issue-deck/...`
-  - [ ] ワークフローの既定値5箇所を`m-guchi/docs` → `guchi-apps/docs`へ
+- [x] コード修正のPRを作成する
+  - [x] `.github/workflows/reusable-issue-dispatch.yml:708` → `repository: guchi-apps/issue-deck`
+  - [x] `scripts/check-label-diff.sh:6` → `SOURCE_REPO="guchi-apps/issue-deck"`
+  - [x] `scripts/start-issue.sh:64` → `--repo guchi-apps/issue-deck`
+  - [x] `scripts/start-reviewer.sh:48` → `--repo guchi-apps/issue-deck`
+  - [x] `.claude/skills/release-to-main/SKILL.md:10` → `repos/guchi-apps/issue-deck/...`
+  - [x] ワークフローの既定値5箇所を`m-guchi/docs` → `guchi-apps/docs`へ
         （`reusable-issue-dispatch.yml:687`・`claude-review-develop.yml:226`・
         `shared-knowledge-propose.yml:128/221/298`）。org variableが読めない環境で
         古い参照へ静かに落ちるのを防ぐ保険
-  - [ ] 表示のみのドキュメント参照（`docs/cross-repo-setup-guide.md:74/87/115/123`・
+  - [x] 表示のみのドキュメント参照（`docs/cross-repo-setup-guide.md:74/87/115/123`・
         `docs/supported-repositories.md`・`docs/shared-knowledge.md:279/383`）
-- [ ] CI・deploy・issue-labelsが通ることを確認する
+- [x] CI・deploy・issue-labelsが通ることを確認する
 - [ ] **共有知識のcheckoutが通ることを確認する**（新PATが効いているかの実質的な検証）
 
 > issue-deckが`m-guchi`にある間は、共有知識のcheckoutは失敗したままになる。
@@ -152,9 +152,9 @@ org配下へ移したリポジトリのワークフローは動かない。
 
 issue-deckより後に行う。caller側の`uses:`更新が必要なため。
 
-- [ ] `shopping-list`をtransfer → repo secret（`WORKFLOW_PAT`・`CLAUDE_CODE_OAUTH_TOKEN`）削除
+- [x] `shopping-list`をtransfer → repo secret（`WORKFLOW_PAT`・`CLAUDE_CODE_OAUTH_TOKEN`）削除
       → remote更新
-- [ ] `dayspan`をtransfer → repo secret（同上）削除 → remote更新
+- [x] `dayspan`をtransfer → repo secret（同上）削除 → remote更新
 - [ ] caller の`uses:`計4箇所のownerを`guchi-apps`へ書き換える（タグはそのままでよい）
   - [ ] `shopping-list/.github/workflows/issue-labels.yml:34`（`@workflows/v1`）
   - [ ] `shopping-list/.github/workflows/claude-issue-dispatch.yml:46`（`@workflows/v6`）
@@ -192,6 +192,30 @@ private:
 
 > privateリポジトリはFree organizationではブランチ保護が使えない。マルチエージェント運用へ
 > 載せる際は、最後のマージを手動にする（`auto-merge-fallback`ジョブ経由）。
+
+> **transfer後はブランチ保護を必ず確認する。** `shopping-list`ではdevelop・mainとも保護が
+> 無い状態になっていた（`issue-deck`のmainも同様）。`dayspan`は残っていたため、transferで
+> 必ず消えるわけではないが、消えることがある。保護が無いと`gh pr merge --auto`が成立せず、
+> `claude-review-develop.yml`のauto-mergeが機能しなくなる（毎回手動マージになる）。
+>
+> ```bash
+> for b in develop main; do
+>   gh api /repos/guchi-apps/<repo>/branches/$b/protection \
+>     --jq '.required_status_checks.contexts' 2>/dev/null || echo "$b: 保護なし"
+> done
+> ```
+>
+> 付与するときは必須チェック名を対象リポジトリのCIジョブ名に合わせる
+> （issue-deck・dayspanは`lint-and-build`、shopping-listは`lint`）。`ci.yml`の
+> `pull_request.branches`に対象ブランチが含まれていることも確認する。含まれないと
+> 必須チェックが永久に埋まらずマージ不能になる。
+>
+> ```bash
+> jq -n '{required_status_checks:{strict:false,contexts:["<ジョブ名>"]},
+>         enforce_admins:false, required_pull_request_reviews:null, restrictions:null,
+>         allow_force_pushes:false, allow_deletions:false}' \
+>   | gh api -X PUT /repos/guchi-apps/<repo>/branches/<branch>/protection --input -
+> ```
 
 ## F. 仕上げ
 
