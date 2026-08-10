@@ -46,6 +46,50 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 対応表の実体は[`src/lib/issue-progress.ts`](../src/lib/issue-progress.ts)の`PROGRESS_STATUSES`
 にあり、Status名・ラベル名・表示名・アイコンを1箇所に集約している。
 
+### Projectの対象はIssueのみ。PRはアイテムにしない
+
+Project WorkflowsのAuto-addは`is:issue`で絞り、**Pull Requestは追加しない。**
+
+- **Statusの7段階がIssueの形をしている。** `Planning`・`Implementation`はPRにとって意味を持たず、
+  混ぜると半分の列が片方にとって無意味になる
+- **1つのIssueに複数のPRが発生するため、二重計上が倍数で効く。** #991は設計の記録・Phase 1の実装・
+  移行記録などで**4本のPR**（#1000・#1001・#1003・#1006）を生んだ。PRをアイテムにすると
+  1つの作業単位が5アイテムになり、「一望できる」というカンバンの価値が直接損なわれる
+- **PRの情報は既にIssue側に出ている。** issue-deckは`pull-request-link.ts`・`pull-request-ci.ts`・
+  `pull-request-timeline.ts`でPRとCIの状態をIssueのカードに表示している。Projectにも
+  `Linked pull requests`フィールドがあり、アイテムにしなくても紐づくPRは見える
+- `is:issue`を外すと、バージョンbump PR・リリースPR・ワークフロー修正PRまで流れ込む
+
+なお`fetchProjectItem`は`... on Issue`でクエリしているため、**PRが混ざってもnullを返して無視する**
+（[`projects-api.ts`](../src/lib/github/projects-api.ts)の`toSnapshot`）。誤って追加されても
+壊れないが、Statusを持ったまま盤面に居座ることにはなる。
+
+**隙間として、リリースPR（develop→main）とバージョンbump PRには対応するIssueが無く、盤面に
+現れない。** ただしリリースの進捗は「リリースされる側のIssue」が`Release` → `Done`と進むことで
+表現されており、リリース作業そのものをアイテムにしていないのは一貫している。
+
+### `Develop PR`・`Develop`は最新のPRの状態であり、Issueの完了ではない
+
+1つのIssueに複数のPRが発生するため、Statusは往復する。
+
+```
+Develop PR → Develop →（次のPR）→ Develop PR → Develop → ...
+```
+
+**各時点では正確だが、作業が続いているのに`Develop`（develop反映済）で止まって見える期間が
+生まれる。** 実際に#991で発生した。PR #1000がマージされた時点で`develop-pr-merged`ジョブが
+`05.develop`を付け、作業を続けるために人が手で外した。**#991でラベルとStatusがズレた原因は
+これである。**
+
+したがって**`Develop PR`・`Develop`は「最新のPRがどうなっているか」を表すものと定義する。**
+「Issueの作業が終わったか」ではない。Issueが終わるのは`Done`（本番反映）のときだけ。
+
+この定義なら往復は正常な挙動であり、盤面も嘘をつかない。「Develop列にあるがIssueはopen」は
+「直近のPRは反映済みだが作業は継続中」と読む。
+
+Phase 2でActionsから進捗を報告する際も、**PRのマージをもって`Develop`にするのが正しい**。
+Issueの完了判定をそこへ持ち込まない。
+
 ## 目標アーキテクチャ
 
 ```
