@@ -1,13 +1,13 @@
-import {
-  ClipboardList,
-  Code2,
-  GitMerge,
-  GitPullRequest,
-  Rocket,
-  type LucideIcon,
-} from "lucide-react";
+import { type LucideIcon } from "lucide-react";
 
-import type { Issue, IssueLabel } from "@/types/issue";
+import {
+  LABELED_PROGRESS_STATUSES,
+  getProgressStatusDef,
+  hasActiveProgress,
+  resolveProgressStatus,
+  type ProgressSource,
+} from "@/lib/issue-progress";
+import type { Issue } from "@/types/issue";
 
 export type WorkflowStep = {
   /** 対応するGitHubラベル名 */
@@ -36,32 +36,41 @@ export const DEVELOP_MERGED_LABEL_NAME = "05.develop";
 /** mainへ反映済みのIssueに付与されるラベル名 */
 export const MAIN_MERGED_LABEL_NAME = "09.main";
 
-/** マルチエージェント運用における実装状況ラベル（01.planning〜09.main）の遷移順（CLAUDE.md参照） */
-export const WORKFLOW_STEPS: readonly WorkflowStep[] = [
-  { labelName: PLANNING_LABEL_NAME, label: "計画検討中", icon: ClipboardList, active: true },
-  { labelName: WIP_LABEL_NAME, label: "実装中", icon: Code2, active: true },
-  { labelName: "03.d:marge", label: "developへマージ", icon: GitPullRequest, active: true },
-  { labelName: DEVELOP_MERGED_LABEL_NAME, label: "develop反映済", icon: GitMerge, active: false },
-  { labelName: "07.m:marge", label: "本番へマージ", icon: GitPullRequest, active: true },
-  { labelName: MAIN_MERGED_LABEL_NAME, label: "本番反映済", icon: Rocket, active: false },
-];
+/**
+ * マルチエージェント運用における実装状況ステップ（01.planning〜09.main）の遷移順。
+ *
+ * 定義の実体は[issue-progress.ts](../issue-progress.ts)の`PROGRESS_STATUSES`にあり、ここでは
+ * ステップ表示用に「進捗ラベルを持つ6状態」だけを取り出している。未着手（`ready`）を
+ * 含めないのは、進捗が動いていないissueではステップ表示自体を出さない仕様のため
+ * （`getWorkflowStepIndex`がnullを返す）。
+ */
+export const WORKFLOW_STEPS: readonly WorkflowStep[] = LABELED_PROGRESS_STATUSES.map((status) => ({
+  labelName: status.labelName,
+  label: status.label,
+  icon: status.icon,
+  active: status.active,
+}));
 
-/** issueのラベルからワークフロー上の現在ステップのindexを返す。該当ラベルがなければnull */
-export function getWorkflowStepIndex(labels: IssueLabel[]): number | null {
-  const names = new Set(labels.map((label) => label.name));
-  const index = WORKFLOW_STEPS.findIndex((step) => names.has(step.labelName));
+/**
+ * issueのワークフロー上の現在ステップのindexを返す。未着手ならnull。
+ *
+ * 判定は[issue-progress.ts](../issue-progress.ts)の`resolveProgressStatus`に委ねており、
+ * **Project Statusがあればそれを優先し、無ければ進捗ラベルへフォールバックする**。
+ */
+export function getWorkflowStepIndex(issue: ProgressSource): number | null {
+  const status = resolveProgressStatus(issue);
+  if (status === "ready") return null;
+  const labelName = getProgressStatusDef(status).labelName;
+  const index = WORKFLOW_STEPS.findIndex((step) => step.labelName === labelName);
   return index === -1 ? null : index;
 }
 
 /**
- * GitHub Actionsの実行が進行し得る段階のラベル（01.planning / 02.wip / 03.d:marge / 07.m:marge）が
- * 付いているかどうか。実行状況のポーリング対象を絞り込むのに使う。
- * 遷移の過渡期に新旧のラベルが同時に付くことがあるため、現在ステップ（先頭一致）ではなく
- * 「進行し得るラベルがひとつでも付いているか」で判定する。
+ * GitHub Actionsの実行が進行し得る段階かどうか。実行状況のポーリング対象を絞り込むのに使う。
+ * 判定の詳細は`hasActiveProgress`を参照。
  */
-export function hasActiveWorkflowStep(labels: IssueLabel[]): boolean {
-  const names = new Set(labels.map((label) => label.name));
-  return WORKFLOW_STEPS.some((step) => step.active && names.has(step.labelName));
+export function hasActiveWorkflowStep(issue: ProgressSource): boolean {
+  return hasActiveProgress(issue);
 }
 
 /**
@@ -69,9 +78,11 @@ export function hasActiveWorkflowStep(labels: IssueLabel[]): boolean {
  * このissueで直接修正を続けるのが難しい（developへのPRがマージ済み、またはissueがclosed）
  * 場合にのみ表示し、まだ同じブランチで修正できる段階では非表示にする（#452）。
  */
-export function canCreateFollowupFromComment(issue: Pick<Issue, "state" | "labels">): boolean {
+export function canCreateFollowupFromComment(
+  issue: Pick<Issue, "state" | "labels" | "projectStatus">,
+): boolean {
   if (issue.state === "closed") return true;
-  const index = getWorkflowStepIndex(issue.labels);
+  const index = getWorkflowStepIndex(issue);
   if (index === null) return false;
   const developMergedIndex = WORKFLOW_STEPS.findIndex(
     (step) => step.labelName === DEVELOP_MERGED_LABEL_NAME,

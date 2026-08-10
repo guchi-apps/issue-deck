@@ -129,10 +129,12 @@ export function startImplementationLabelsForCreate(selectedLabels: string[]): st
  * 「実装を開始」ボタンを表示する。着手済みissueでは通常のコメント欄から
  * 追加対応(additional)を依頼できるため、このボタンは初回起動専用。
  */
-export function canStartImplementation(issue: Pick<Issue, "state" | "labels">): boolean {
+export function canStartImplementation(
+  issue: Pick<Issue, "state" | "labels" | "projectStatus">,
+): boolean {
   return (
     issue.state === "open" &&
-    getWorkflowStepIndex(issue.labels) === null &&
+    getWorkflowStepIndex(issue) === null &&
     !isApprovalPending(issue.labels)
   );
 }

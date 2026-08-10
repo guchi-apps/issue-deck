@@ -8,6 +8,7 @@ import {
   getWorkflowStepIndex,
   WORKFLOW_STEPS,
 } from "@/lib/github/workflow-status";
+import type { ProgressSource } from "@/lib/issue-progress";
 import type { IssueComment, IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
@@ -159,12 +160,12 @@ export function resolveLabelFilterPresetSelection(
  * 発信元（レビューボットかどうか）を見ることで、ラベルの一時的な状態に依存せず判定する。
  */
 export function isMergeApprovalPending(
-  labels: IssueLabel[],
+  issue: ProgressSource,
   comments: Pick<IssueComment, "body" | "author">[] = [],
 ): boolean {
-  if (!isApprovalPending(labels)) return false;
+  if (!isApprovalPending(issue.labels)) return false;
   if (isLatestSourcedCommentFromReviewer(comments)) return true;
-  const stepIndex = getWorkflowStepIndex(labels);
+  const stepIndex = getWorkflowStepIndex(issue);
   if (stepIndex === null) return false;
   const stepLabel = WORKFLOW_STEPS[stepIndex].labelName;
   return stepLabel === D_MARGE_LABEL || stepLabel === M_MARGE_LABEL;

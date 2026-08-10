@@ -180,7 +180,7 @@ export function MobileIssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue.repositoryFullName,
     pullRequestLink,
-    isMergeApprovalPending(issue.labels, comments),
+    isMergeApprovalPending(issue, comments),
   );
   const {
     mergePullRequest,
@@ -602,7 +602,7 @@ export function MobileIssueDetail({
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
         </div>
 
-        <WorkflowStatusSteps labels={issue.labels} />
+        <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
         <div className="flex flex-wrap items-center gap-2">
           {qaAnswerPending && (
             <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -762,7 +762,7 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
-            mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
+            mergeApprovalPending={isMergeApprovalPending(issue, comments)}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
             workflowRun={workflowRun}

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
+import { fetchProjectItem } from "@/lib/github/projects-api";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
@@ -242,6 +243,57 @@ async function handleInstallationEvent(payload: {
   }
 }
 
+/**
+ * GitHub Projects v2 のカンバン操作を受けて、対応するIssueのStatusをDBへ反映する（#991）。
+ *
+ * ペイロードは`content_node_id`（GraphQLのnode ID）しか持たず、DBが持つ`githubIssueId`
+ * （RESTの数値ID）と直接突き合わせられない。そのため`fetchProjectItem`でnodeを解決し、
+ * ついでに現在のStatusも取得する。`changes`を見ない設計にしているのは、`created`・`restored`
+ * のように`changes`を持たないactionでも同じ経路で扱えるようにするため。
+ */
+async function handleProjectsV2ItemEvent(payload: {
+  action: string;
+  projects_v2_item: { node_id: string };
+  installation?: { id: number };
+  organization?: { login: string };
+}) {
+  const installation = payload.installation?.id
+    ? await db.githubInstallation.findUnique({
+        where: { installationId: payload.installation.id },
+      })
+    : payload.organization
+      ? await db.githubInstallation.findFirst({
+          where: { accountLogin: payload.organization.login },
+        })
+      : null;
+  if (!installation) return;
+
+  // Projectから外れた場合はStatusを消し、進捗ラベル起点の判定へ戻す（フォールバック）
+  if (payload.action === "deleted" || payload.action === "archived") {
+    await db.issue.updateMany({
+      where: { projectItemId: payload.projects_v2_item.node_id },
+      data: { projectStatus: null, projectItemId: null },
+    });
+    return;
+  }
+
+  const token = await getInstallationToken(installation.installationId);
+  const item = await fetchProjectItem(payload.projects_v2_item.node_id, token);
+  // Issue以外（PR等）が追加された場合はnullになる。運用対象外なので何もしない
+  if (!item) return;
+
+  const repository = await db.repository.findUnique({
+    where: { githubRepositoryId: item.repositoryDatabaseId },
+  });
+  // issue-deckが接続していないリポジトリのIssueは無視する（handleIssuesEventと同じ方針）
+  if (!repository) return;
+
+  await db.issue.updateMany({
+    where: { repositoryId: repository.id, number: item.issueNumber },
+    data: { projectStatus: item.status, projectItemId: item.itemId },
+  });
+}
+
 export function POST(request: NextRequest) {
   return withGithubApiFeature("setup", () => handlePOST(request));
 }
@@ -273,6 +325,8 @@ async function handlePOST(request: NextRequest) {
       await handleInstallationRepositoriesEvent(payload);
     } else if (event === "installation") {
       await handleInstallationEvent(payload);
+    } else if (event === "projects_v2_item") {
+      await handleProjectsV2ItemEvent(payload);
     }
   } catch (error) {
     // 非2xxを返すとGitHubが自動再送・手動redeliveryの対象にしてくれるため、

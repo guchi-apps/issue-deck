@@ -188,6 +188,14 @@ model Issue {
   // 確認待ちフィルターのソート基準はcheckUserLabeledAtよりこちらを優先する
   lastCommentAt DateTime?
 
+  // GitHub Projects v2 の Status（例: "Implementation"）。projects_v2_item Webhookと
+  // 再同期で反映する。Projectに未登録のIssueはnullで、そのときは従来どおり進捗ラベルから
+  // 解決する（src/lib/issue-progress.ts の resolveProgressStatus）
+  projectStatus String?
+
+  // 対応する ProjectV2Item の node ID。Statusを更新する際の対象指定に使う
+  projectItemId String?
+
   // AI要約（明示的なボタン操作で生成しDBにキャッシュする。自動生成はしない）
   aiSummary             String?   @db.Text
   aiSummaryCommentCount Int?
