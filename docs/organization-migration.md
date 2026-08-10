@@ -279,27 +279,15 @@ Appをpublic（"Any account"）にする以外に方法がない。今回はそ�
 [organization-migration-checklist.md](organization-migration-checklist.md)にある。
 以下は各手順の意味と根拠を示すもので、作業中はチェックリスト側を見る。
 
-### 実施状況（2026-08-11時点）
+### 実施状況：完了（2026-08-11）
 
-実際には手順4（App所有権移管）・手順5（インストール）を手順3（リポジトリのtransfer）より先に
-実施している。上記のとおりこの順序で問題はなく、むしろ推奨される。
+移行は完了した。`guchi-apps`に22リポジトリ、`m-guchi`にはarchived 15件のみが残る。
+実際には手順4（App所有権移管）・手順5（インストール）を手順3（リポジトリのtransfer）より
+先に実施したが、上記のとおりこの順序で問題はなく、むしろ推奨される。
 
-| 手順 | 状態 |
-|---|---|
-| 1. Organization `guchi-apps` 作成 | ✅ 完了 |
-| 4. GitHub App の所有権移管 | ✅ 完了（**開発App `issue-deck-dev` の移管は要確認**） |
-| 5. App を `guchi-apps` へインストール | ✅ 完了 |
-| 2. `guchi-apps` 所有のFine-grained PAT発行 | 未確認 |
-| 3. リポジトリのtransfer | 進行中（`uptime-kuma`・`docs` 完了、残り20件） |
-| 6. 再同期・確認 | 未 |
-| 7. 参照の更新 | 未 |
+実施の記録と積み残しは
+[organization-migration-checklist.md](organization-migration-checklist.md)を参照。
 
-**`docs`のtransferに伴う追従が未完了。** `vars.SHARED_CONTEXT_REPO`は未設定で、
-ワークフロー側の既定値も`m-guchi/docs`のまま（`reusable-issue-dispatch.yml:687`・
-`claude-review-develop.yml:226`・`shared-knowledge-propose.yml:128/221/298`）。
-加えて旧`WORKFLOW_PAT`はresource ownerが`m-guchi`のため`guchi-apps/docs`へ届かない。
-このままでは共有知識のcheckoutが失敗する（`continue-on-error`のため停止はせず、
-共有知識なしで実行される）。
 
 ### 手順
 
