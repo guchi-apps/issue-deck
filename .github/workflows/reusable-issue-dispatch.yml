@@ -663,7 +663,7 @@ jobs:
           git remote set-url --push origin \
             "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
       - name: 共有知識リポジトリをcheckoutする
-        # 全アプリ共通の知識(m-guchi/docs)をワークツリー内の .shared-context/ へ配置し、
+        # 全アプリ共通の知識(guchi-apps/docs)をワークツリー内の .shared-context/ へ配置し、
         # 各Claude CodeステップがRead/Grep/Globでそのまま読めるようにする
         # (docs/shared-knowledge.md「3.3 Actionsからは checkout して読ませる」)。
         #
@@ -684,7 +684,7 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
           ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
           path: .shared-context
           fetch-depth: 1
@@ -705,7 +705,7 @@ jobs:
         if: inputs.prompts-ref != ''
         uses: actions/checkout@v4
         with:
-          repository: m-guchi/issue-deck
+          repository: guchi-apps/issue-deck
           ref: ${{ inputs.prompts-ref }}
           path: .shared-prompts
           fetch-depth: 1

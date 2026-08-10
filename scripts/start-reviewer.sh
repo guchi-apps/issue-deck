@@ -45,7 +45,7 @@ git pull --ff-only origin develop
 echo "未処理PR一覧を取得しています..."
 PR_JSON_FILE="$(mktemp)"
 trap 'rm -f "$PR_JSON_FILE" "${PR_LIST_FILE:-}"' EXIT
-gh pr list --repo m-guchi/issue-deck --base develop --json number,title,author,headRefName,mergeable,statusCheckRollup,url >"$PR_JSON_FILE"
+gh pr list --repo guchi-apps/issue-deck --base develop --json number,title,author,headRefName,mergeable,statusCheckRollup,url >"$PR_JSON_FILE"
 
 PR_LIST_FILE="$(mktemp)"
 python3 - "$PR_JSON_FILE" >"$PR_LIST_FILE" <<'PY'
@@ -118,7 +118,7 @@ sys.stdout.write(template.replace("{{PR_LIST}}", pr_list))
 PY
 )"
 
-# 全アプリ共通の共有知識リポジトリ（m-guchi/docs）をローカルにcloneしてある場合は、
+# 全アプリ共通の共有知識リポジトリ（guchi-apps/docs）をローカルにcloneしてある場合は、
 # --add-dir でリポジトリ外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md
 # 「8. Claude Codeへのコンテキストの渡し方」）。cloneしていない環境でも起動できるよう、
 # 存在しない場合は --add-dir を付けずにそのまま起動する。

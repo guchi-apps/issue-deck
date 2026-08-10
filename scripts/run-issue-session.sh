@@ -46,7 +46,7 @@ DEV_PID=$!
 DEV_PGID="$DEV_PID"
 echo "$DEV_PID" >"$DEV_PID_FILE"
 
-# 全アプリ共通の共有知識リポジトリ（m-guchi/docs）をローカルにcloneしてある場合は、
+# 全アプリ共通の共有知識リポジトリ（guchi-apps/docs）をローカルにcloneしてある場合は、
 # --add-dir でworktree外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md
 # 「8. Claude Codeへのコンテキストの渡し方」）。cloneしていない環境でも起動できるよう、
 # 存在しない場合は --add-dir を付けずにそのまま起動する。

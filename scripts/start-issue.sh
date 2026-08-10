@@ -61,7 +61,7 @@ prepare_issue() {
 
   echo "#$n: Issue内容を取得しています..."
   local issue_json
-  if ! issue_json="$(gh issue view "$n" --repo m-guchi/issue-deck --json number,title,body,labels,comments)"; then
+  if ! issue_json="$(gh issue view "$n" --repo guchi-apps/issue-deck --json number,title,body,labels,comments)"; then
     echo "Error: issue #$n の取得に失敗しました。" >&2
     exit 1
   fi
