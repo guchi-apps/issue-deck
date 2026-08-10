@@ -265,8 +265,30 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
    [src/app/github/setup/route.ts](../src/app/github/setup/route.ts)を経由することで
    インストール情報が`GithubInstallation`テーブルへ入る。
 4. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
-   権限は現在の`WORKFLOW_PAT`と同等（Contents / Issues / Pull requests / Actions / Workflows）。
-   1Password側にも登録し、有効期限を`FineGrainedToken`台帳へ記録する。
+
+   <https://github.com/settings/personal-access-tokens/new>（Settings → Developer settings →
+   Personal access tokens → **Fine-grained tokens** → Generate new token）で作成する。
+
+   - **Resource owner**: ドロップダウンで**`guchi-apps`を選ぶ**。既定は個人アカウントのままなので
+     必ず切り替える。Organizationを作成した後でないとドロップダウンに出てこない
+   - **Expiration**: 最長366日。切れるとこれを使う全ワークフローが同時に停止する（3-6参照）
+   - **Repository access**: All repositories（現行の`WORKFLOW_PAT`と同じ）
+   - **Repository permissions**: Contents / Issues / Pull requests / Actions を
+     Read and write、**Workflows を Read and write**、Metadata は Read（自動付与）。
+     Workflowsが`WORKFLOW_PAT`の存在理由で、既定の`GITHUB_TOKEN`はGitHubの仕様上
+     `.github/workflows/`配下へpushできない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)参照）
+
+   orgのリソースを要求するFine-grained PATは既定で管理者承認が必要だが、
+   **org owner自身が作成したトークンは承認不要**（GitHub Docs
+   [Setting a personal access token policy for your organization](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization)）。
+
+   発行後、1Passwordへ保存し、各リポジトリのActions secret `WORKFLOW_PAT`を差し替え、
+   有効期限を`FineGrainedToken`台帳へ記録する。
+
+   **organization secretへは一本化しない。** GitHub Freeではorganization secretを
+   privateリポジトリから参照できず、今回はprivate 5件を含む構成のため、publicだけorg secret・
+   privateはrepo secretという分かれ方になって混乱を招く。当面はこれまでどおりrepo secretに
+   置き、Team（選択肢C）へ上げた時点でorg secretへ一本化する。
 5. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
    （`uptime-kuma`など）で、URLリダイレクト・Appの認識・issue-deckの画面表示を確認する。
 6. **`docs`をtransferする。** ワークフローは持たないが、`SHARED_CONTEXT_REPO`の既定値
