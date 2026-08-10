@@ -6,6 +6,10 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 [docs/cross-repo-automation.md](cross-repo-automation.md)、実際に導入する際の手順は
 [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)を参照。
 
+ここに挙がっていない**privateリポジトリ**（`ops-dashboard`・`vps`・`db-console`・`clip-hive`）を
+対象に加えられるかは、GitHubのプランとアカウント種別に依存する。判断材料は
+[docs/organization-migration.md](organization-migration.md)を参照。
+
 「対応」の実態はワークフローファイル一式・ラベル体系・CLAUDE.md・ブランチ運用・Secretsなど
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
 留めている。
