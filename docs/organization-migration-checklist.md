@@ -8,9 +8,7 @@
 作業中は上から順に潰していく。**Aのトークン整備が全体のボトルネック**で、ここが済むまで
 org配下へ移したリポジトリのワークフローは動かない。
 
-## マージ待ちのPull Request
-
-いずれもワークフローファイルの変更にあたるため、自動マージ対象外。人手で確認・マージする。
+## 関連Pull Request（すべてマージ済み）
 
 | PR | 内容 |
 |---|---|
@@ -18,7 +16,7 @@ org配下へ移したリポジトリのワークフローは動かない。
 | guchi-apps/shopping-list#90 | 再利用可能ワークフローの参照先を`guchi-apps`へ書き換え（手順D） |
 | guchi-apps/dayspan#117 | 同上（手順D） |
 
-**残っている確認項目（手順C末尾・手順D末尾）は、いずれもこの3件のマージが前提。**
+**手順A〜Dは完了。残るのは手順E（残り17リポジトリのtransfer）と手順F（仕上げ）。**
 
 ## 完了済み
 
@@ -164,7 +162,18 @@ org配下へ移したリポジトリのワークフローは動かない。
         自動マージをスキップします。」）
       - 必須チェック`lint-and-build`とブランチ保護
 
-- [ ] **共有知識のcheckoutが通ることを確認する**（新PATが効いているかの実質的な検証）
+- [x] **共有知識のcheckoutが通ることを確認する**（新PATが効いているかの実質的な検証）
+
+      guchi-apps/issue-deck#999 の`claude-review`ジョブで確認できた。
+
+      ```
+      共有知識リポジトリをcheckoutする    repository: guchi-apps/docs
+      From https://github.com/guchi-apps/docs
+      ```
+
+      org variable `SHARED_CONTEXT_REPO`が効いて`guchi-apps/docs`を指し、新PATで
+      private リポジトリのfetchが成功している。なお`shared-knowledge-propose.yml`は
+      提案コメントが無いと早期終了してcheckoutまで到達しないため、検証には使えない。
 
 > issue-deckが`m-guchi`にある間は、共有知識のcheckoutは失敗したままになる。
 > `WORKFLOW_PAT`はsecret 1つしか無く、`m-guchi/issue-deck`自身への操作と
@@ -186,9 +195,25 @@ issue-deckより後に行う。caller側の`uses:`更新が必要なため。
   - [x] `shopping-list/.github/workflows/claude-issue-dispatch.yml:46`（`@workflows/v6`）
   - [x] `dayspan/.github/workflows/issue-labels.yml:33`（`@workflows/v6`）
   - [x] `dayspan/.github/workflows/claude-issue-dispatch.yml:37`（`@workflows/v6`）
-- [ ] 両リポジトリでワークフローが通ることを確認する（上記PRのマージ後）
-  - [ ] `issue-<番号>`ブランチへのpushで`issue-labels.yml`が発火し`02.wip`が付くこと
-  - [ ] Issueへの`@claude`コメントで`claude-issue-dispatch.yml`が起動すること
+- [x] 両リポジトリでワークフローが通ることを確認する（上記PRのマージ後）
+
+      マージ直後のrunで`referenced_workflows`を見るのが確実。`uses:`が実際にどの
+      リポジトリのどのタグへ解決されたかが記録されている。
+
+      ```bash
+      gh api /repos/guchi-apps/<repo>/actions/runs/<run_id> \
+        --jq '.referenced_workflows[]? | "\(.path) @\(.ref)"'
+      ```
+
+      実測結果（いずれも`conclusion=success`）。
+
+      | リポジトリ | 解決先 |
+      |---|---|
+      | shopping-list | `guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1` |
+      | dayspan | `guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v6` |
+
+      マージ後の`CI`・`Claude Conflict Resolve`・`Claude CI Fix`・`Issue Labels`も
+      両リポジトリで全てsuccess。
 
 > 上記PRは`chore/org-migration-refs`というIssue紐付けの無いブランチ名にしたため、
 > `identify-issue`がIssueを特定できず`auto-merge`がスキップされる
