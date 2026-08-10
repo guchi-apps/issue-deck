@@ -21,22 +21,22 @@ org配下へ移したリポジトリのワークフローは動かない。
 
 ここが済むまで、org配下のリポジトリはワークフローが動かない。最優先。
 
-- [ ] 開発App `issue-deck-dev`（App ID 4445268）も`guchi-apps`へ移管する（プレビュー環境が使用）
-- [ ] 本番AppのApp ID・slug・Client ID・Webhook URLが移管の前後で変わっていないことを確認する
-  - [ ] 変わっていた場合、1Passwordの`apps/issue-deck`（`github-app-id`・
+- [x] 開発App `issue-deck-dev`（App ID 4445268）も`guchi-apps`へ移管する（プレビュー環境が使用）
+- [x] 本番AppのApp ID・slug・Client ID・Webhook URLが移管の前後で変わっていないことを確認する
+  - [x] 変わっていた場合、1Passwordの`apps/issue-deck`（`github-app-id`・
         `github-app-private-key-base64`・`github-app-slug`）と本番`.env`を更新する
-- [ ] 新しいFine-grained PATを発行する（<https://github.com/settings/personal-access-tokens/new>）
-  - [ ] **Resource owner = `guchi-apps`**（既定は個人アカウントのまま。必ず切り替える）
-  - [ ] Repository access = **All repositories**
-  - [ ] Contents / Issues / Pull requests / Actions = **Read and write**
-  - [ ] **Workflows = Read and write**（`.github/workflows/`配下へpushするために必須）
-  - [ ] Expiration を控える（最長366日）
-- [ ] 1Passwordの`apps/issue-deck`へ保存する
-- [ ] issue-deckの`FineGrainedToken`台帳へ有効期限を登録する
-- [ ] org secretを登録する（<https://github.com/organizations/guchi-apps/settings/secrets/actions>、
+- [x] 新しいFine-grained PATを発行する（<https://github.com/settings/personal-access-tokens/new>）
+  - [x] **Resource owner = `guchi-apps`**（既定は個人アカウントのまま。必ず切り替える）
+  - [x] Repository access = **All repositories**
+  - [x] Contents / Issues / Pull requests / Actions = **Read and write**
+  - [x] **Workflows = Read and write**（`.github/workflows/`配下へpushするために必須）
+  - [x] Expiration を控える（最長366日）
+- [x] 1Passwordの`apps/issue-deck`へ保存する
+- [x] issue-deckの`FineGrainedToken`台帳へ有効期限を登録する
+- [x] org secretを登録する（<https://github.com/organizations/guchi-apps/settings/secrets/actions>、
       Repository access = All repositories）
-  - [ ] `WORKFLOW_PAT` = 上で発行した新しいPAT
-  - [ ] `CLAUDE_CODE_OAUTH_TOKEN` = 既存と同じ値
+  - [x] `WORKFLOW_PAT` = 上で発行した新しいPAT
+  - [x] `CLAUDE_CODE_OAUTH_TOKEN` = 既存と同じ値
 
 > org secretは`guchi-apps`配下のリポジトリにしか効かない。`m-guchi`に残っている間は
 > 従来のrepo secretで動き続けるので、先に登録しておいて問題ない。
@@ -47,9 +47,28 @@ org配下へ移したリポジトリのワークフローは動かない。
 
 ## B. transfer済みリポジトリの後始末
 
-- [ ] `git -C ~/apps/_docs remote set-url origin github:guchi-apps/docs.git`
+- [x] `git -C ~/apps/_docs remote set-url origin github:guchi-apps/docs.git`
       （ディレクトリ名`_docs`とリポジトリ名`docs`が違う点に注意）
-- [ ] `~/apps/uptime-kuma`がgitクローンなら同様にremoteを更新する
+- [ ] `~/apps/uptime-kuma`のremoteを更新する。**このリポジトリだけremote名が`origin`ではなく
+      `oriorigin`**（過去のタイプミス）なので、ついでに直す
+
+      ```bash
+      git -C ~/apps/uptime-kuma remote rename oriorigin origin
+      git -C ~/apps/uptime-kuma remote set-url origin github:guchi-apps/uptime-kuma.git
+      ```
+
+> ローカルクローンのremoteは次のコマンドで一括確認できる。`~/apps/<repo>-worktrees/`配下は
+> 本体と`.git/config`を共有するため、確認・更新の対象外でよい。
+>
+> ```bash
+> for d in ~/apps/*/; do n=$(basename "$d"); case "$n" in *-worktrees) continue;; esac
+>   git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+>   printf "%-20s %s\n" "$n" "$(git -C "$d" remote -v | head -1)"
+> done
+> ```
+>
+> 2026-08-11時点でローカルクローンがあるのは18件。`gucchii-os`・`pi0w_260719`・
+> `sensor_260218`・`sensor_260531`はローカルに無いため、transfer後のremote更新は不要。
 
 ## C. issue-deckのtransfer
 
