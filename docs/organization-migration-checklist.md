@@ -8,6 +8,18 @@
 作業中は上から順に潰していく。**Aのトークン整備が全体のボトルネック**で、ここが済むまで
 org配下へ移したリポジトリのワークフローは動かない。
 
+## マージ待ちのPull Request
+
+いずれもワークフローファイルの変更にあたるため、自動マージ対象外。人手で確認・マージする。
+
+| PR | 内容 |
+|---|---|
+| guchi-apps/issue-deck#999 | issue-deckとdocsの参照先を`guchi-apps`へ書き換え（手順C） |
+| guchi-apps/shopping-list#90 | 再利用可能ワークフローの参照先を`guchi-apps`へ書き換え（手順D） |
+| guchi-apps/dayspan#117 | 同上（手順D） |
+
+**残っている確認項目（手順C末尾・手順D末尾）は、いずれもこの3件のマージが前提。**
+
 ## 完了済み
 
 - [x] Organization `guchi-apps` を作成
@@ -140,7 +152,18 @@ org配下へ移したリポジトリのワークフローは動かない。
         古い参照へ静かに落ちるのを防ぐ保険
   - [x] 表示のみのドキュメント参照（`docs/cross-repo-setup-guide.md:74/87/115/123`・
         `docs/supported-repositories.md`・`docs/shared-knowledge.md:279/383`）
+- [x] ブランチ保護を確認し、無ければ付与する（`main`が無保護だったため`lint-and-build`を付与）
 - [x] CI・deploy・issue-labelsが通ることを確認する
+
+      guchi-apps/issue-deck#999 で以下が実地で確認できた。
+
+      - ラベル遷移（`wip-on-push` → `develop-pr-opened`）
+      - `claude-code-action`（Claude Code Appのインストール後。それまでは401で失敗）
+      - `risk-check`によるワークフロー変更の検知と`00.check-user`の付与
+      - `auto-merge`のスキップ判定（「対応Issue #996 に 00.check-user が付与されているため、
+        自動マージをスキップします。」）
+      - 必須チェック`lint-and-build`とブランチ保護
+
 - [ ] **共有知識のcheckoutが通ることを確認する**（新PATが効いているかの実質的な検証）
 
 > issue-deckが`m-guchi`にある間は、共有知識のcheckoutは失敗したままになる。
@@ -155,12 +178,22 @@ issue-deckより後に行う。caller側の`uses:`更新が必要なため。
 - [x] `shopping-list`をtransfer → repo secret（`WORKFLOW_PAT`・`CLAUDE_CODE_OAUTH_TOKEN`）削除
       → remote更新
 - [x] `dayspan`をtransfer → repo secret（同上）削除 → remote更新
-- [ ] caller の`uses:`計4箇所のownerを`guchi-apps`へ書き換える（タグはそのままでよい）
-  - [ ] `shopping-list/.github/workflows/issue-labels.yml:34`（`@workflows/v1`）
-  - [ ] `shopping-list/.github/workflows/claude-issue-dispatch.yml:46`（`@workflows/v6`）
-  - [ ] `dayspan/.github/workflows/issue-labels.yml:33`（`@workflows/v6`）
-  - [ ] `dayspan/.github/workflows/claude-issue-dispatch.yml:37`（`@workflows/v6`）
-- [ ] 両リポジトリでワークフローが通ることを確認する
+- [x] `shopping-list`・`dayspan`のブランチ保護を確認し、無ければ付与する
+      （実際にdevelop・mainとも無保護だったため付与。詳細はE節の注記）
+- [x] caller の`uses:`計4箇所のownerを`guchi-apps`へ書き換える（タグはそのままでよい）
+      → guchi-apps/shopping-list#90・guchi-apps/dayspan#117（**マージ待ち**）
+  - [x] `shopping-list/.github/workflows/issue-labels.yml:34`（`@workflows/v1`）
+  - [x] `shopping-list/.github/workflows/claude-issue-dispatch.yml:46`（`@workflows/v6`）
+  - [x] `dayspan/.github/workflows/issue-labels.yml:33`（`@workflows/v6`）
+  - [x] `dayspan/.github/workflows/claude-issue-dispatch.yml:37`（`@workflows/v6`）
+- [ ] 両リポジトリでワークフローが通ることを確認する（上記PRのマージ後）
+  - [ ] `issue-<番号>`ブランチへのpushで`issue-labels.yml`が発火し`02.wip`が付くこと
+  - [ ] Issueへの`@claude`コメントで`claude-issue-dispatch.yml`が起動すること
+
+> 上記PRは`chore/org-migration-refs`というIssue紐付けの無いブランチ名にしたため、
+> `identify-issue`がIssueを特定できず`auto-merge`がスキップされる
+> （「対応Issue番号を特定できないため、自動マージをスキップします。」）。
+> ワークフロー変更なので人手でマージするのが適切であり、これは意図した状態。
 
 ## E. 残りのリポジトリのtransfer
 
