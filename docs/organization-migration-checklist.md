@@ -277,17 +277,31 @@ private:
 
 ## F. 仕上げ
 
-- [ ] issue-deckの画面で再同期し、リポジトリ一覧とIssue件数が移行前と一致することを確認する
+- [x] issue-deckの画面で再同期し、リポジトリ一覧とIssue件数が移行前と一致することを確認する
       （`POST /api/sync/repositories`・`POST /api/sync/issues`）
-- [ ] どれか1つのIssueにラベルを付け、Webhookが新しいownerからも届いて画面へ反映されることを確認する
-- [ ] 取りこぼしを確認する
+- [x] どれか1つのIssueにラベルを付け、Webhookが新しいownerからも届いて画面へ反映されることを確認する
+- [x] 取りこぼしを確認する。**issue-deckリポジトリの中で、`develop`を最新にしてから**実行する。
 
       ```bash
+      cd ~/apps/issue-deck && git switch develop && git pull
       grep -rn "m-guchi/" --include="*.md" --include="*.yml" --include="*.sh" . | grep -v node_modules
       ```
 
-- [ ] `docs/supported-repositories.md`のリポジトリ名を更新する
-- [ ] archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す
+      > `~/apps`から実行すると`<repo>-worktrees/`配下の古いブランチのチェックアウトまで拾い、
+      > 実態と乖離した大量のヒットが出る。作業用ブランチのまま実行しても、修正が入る前の
+      > 状態を見ることになる。実際にこの2つで誤検知した。
+      >
+      > 残る`m-guchi`は次のいずれかで、**いずれも変更不要**。
+      >
+      > - PAT所有者・assigneeとしての個人アカウント名（`docs/attribution.md`・
+      >   `docs/actions-token-model.md`・`create-issue-dialog.tsx`の`DEFAULT_ASSIGNEE`）
+      > - 調査時点の記録（`docs/cross-repo-automation.md`・`docs/organization-migration*.md`）
+
+- [x] `docs/supported-repositories.md`のリポジトリ名を更新する
+      （表・sync-stateマーカー・コマンド例の`m-guchi/shopping-list`・`m-guchi/dayspan`を
+      `guchi-apps/`へ。マーカーは`scripts/check-workflow-sync-drift.sh`が読む実データのため
+      更新後にスクリプトが動くことを確認済み）
+- [x] archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す
       （Appが`guchi-apps`所有のprivateになるためissue-deckには表示されなくなるが、
       運用対象ではないため支障はない）
 - [ ] このチェックリストと[organization-migration.md](organization-migration.md)の

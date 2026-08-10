@@ -20,8 +20,8 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `guchi-apps/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
-| `m-guchi/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）・`claude-issue-dispatch.yml`（`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
-| `m-guchi/dayspan` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`（ともに`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #971 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
+| `guchi-apps/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）・`claude-issue-dispatch.yml`（`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
+| `guchi-apps/dayspan` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`（ともに`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #971 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
 
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
@@ -32,7 +32,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 <!-- sync-state: repo=<owner/repo> workflow=<ワークフローファイル名> base-commit=<issue-deck側のコミットSHA> -->
 ```
 
-実際の記録例は下記「m-guchi/shopping-list」の節を参照する。`scripts/check-workflow-sync-drift.sh`は
+実際の記録例は下記「guchi-apps/shopping-list」の節を参照する。`scripts/check-workflow-sync-drift.sh`は
 本ドキュメント中のマーカーを（コードブロック内や説明用の記述であっても）すべて実データとして
 読み取るため、ここに架空のサンプル行は置かない。
 
@@ -46,18 +46,18 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 そうなると「常に大量に出るので誰も見ない」方向へ劣化し、検知の仕組み自体が機能しなくなる
 （実際に#895で発生した）。
 
-### m-guchi/shopping-list
+### guchi-apps/shopping-list
 
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-review-develop.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-ci-fix.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
-<!-- sync-state: repo=m-guchi/shopping-list workflow=claude-conflict-resolve.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
+<!-- sync-state: repo=guchi-apps/shopping-list workflow=claude-review-develop.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=guchi-apps/shopping-list workflow=claude-ci-fix.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=guchi-apps/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+<!-- sync-state: repo=guchi-apps/shopping-list workflow=claude-conflict-resolve.yml base-commit=29958837e7569c852740742dfd30daa2c03e89fc -->
 
 上記のうち`claude-conflict-resolve.yml`だけは**意図的に古いbase-commitのまま**にしている。
 `#814`（pull_requestトリガー時に無関係な他PRを巻き込まないようトリガー元のPR1件に絞る修正）が
 shopping-list側へ未反映であることを確認済みで、ドリフト検知にそのまま出続けてよいため。
-残る3ファイルは、m-guchi/shopping-list#62（ワークフロー改善のバックポート）および
-m-guchi/shopping-list#64（共有知識層の導入）で`bb7d0f7`時点の内容へ同期した。
+残る3ファイルは、guchi-apps/shopping-list#62（ワークフロー改善のバックポート）および
+guchi-apps/shopping-list#64（共有知識層の導入）で`bb7d0f7`時点の内容へ同期した。
 
 `claude-issue-dispatch.yml`のマーカーは削除した。同ファイルは参照方式
 （`reusable-issue-dispatch.yml@workflows/v6`）へ移行済みで、後述「参照方式のワークフローは
@@ -66,12 +66,12 @@ sync-state の対象外」のとおり記録の対象外になったため。
 `shared-knowledge-propose.yml`（共有知識層、#889）のマーカーは、issue-deck側とshopping-list側の
 双方のPull Requestがマージされた時点で追加する。
 
-### m-guchi/dayspan
+### guchi-apps/dayspan
 
-<!-- sync-state: repo=m-guchi/dayspan workflow=claude-review-develop.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
-<!-- sync-state: repo=m-guchi/dayspan workflow=claude-conflict-resolve.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
-<!-- sync-state: repo=m-guchi/dayspan workflow=claude-ci-fix.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
-<!-- sync-state: repo=m-guchi/dayspan workflow=release-develop-to-main.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=guchi-apps/dayspan workflow=claude-review-develop.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=guchi-apps/dayspan workflow=claude-conflict-resolve.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=guchi-apps/dayspan workflow=claude-ci-fix.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
+<!-- sync-state: repo=guchi-apps/dayspan workflow=release-develop-to-main.yml base-commit=b198601c22aea091124b9734326032ec65b6cee1 -->
 
 base-commitは各ワークフローファイル冒頭の「移植元コミット」コメント（dayspan側に記載がある）と同じ値。
 `issue-labels.yml`・`claude-issue-dispatch.yml`は参照方式のためマーカーを持たない。
@@ -90,7 +90,7 @@ base-commitは各ワークフローファイル冒頭の「移植元コミット
 
 ```bash
 # 例: shopping-list が参照しているバージョンを確認する
-gh api repos/m-guchi/shopping-list/contents/.github/workflows/issue-labels.yml?ref=develop \
+gh api repos/guchi-apps/shopping-list/contents/.github/workflows/issue-labels.yml?ref=develop \
   -q .content | base64 -d | grep 'uses:'
 ```
 
@@ -106,8 +106,8 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 
 | ワークフロー | 実体 | 移行時期 |
 |---|---|---|
-| `issue-labels.yml` | `reusable-issue-labels.yml` | 2026-08-09（#940、m-guchi/shopping-list#77） |
-| `claude-issue-dispatch.yml` | `reusable-issue-dispatch.yml` | 2026-08-09（#945。導入先は m-guchi/shopping-list・m-guchi/dayspan） |
+| `issue-labels.yml` | `reusable-issue-labels.yml` | 2026-08-09（#940、guchi-apps/shopping-list#77） |
+| `claude-issue-dispatch.yml` | `reusable-issue-dispatch.yml` | 2026-08-09（#945。導入先は guchi-apps/shopping-list・guchi-apps/dayspan） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
@@ -144,4 +144,4 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
   案内されたプレビューURLがissue-deckの画面を表示する状態が実際に発生する。複数プレビュー環境の
   同時起動による解消は#892で検討する
 - `claude-ci-fix.yml`: pnpm/Prisma/Next.js前提のセットアップとビルド用プレースホルダー環境変数を
-  削除し、検証コマンドを`npm run check`とmanifestのJSON検証へ置換（m-guchi/shopping-list#62で導入）
+  削除し、検証コマンドを`npm run check`とmanifestのJSON検証へ置換（guchi-apps/shopping-list#62で導入）
