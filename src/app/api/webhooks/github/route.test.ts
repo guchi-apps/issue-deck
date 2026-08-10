@@ -6,6 +6,10 @@ const findUniqueRepository = vi.fn();
 const deleteIssueByGithubId = vi.fn();
 const upsertIssueFromWebhookPayload = vi.fn();
 const updateQaAnswerPendingState = vi.fn();
+const updateManyIssue = vi.fn();
+const findUniqueInstallation = vi.fn();
+const findFirstInstallation = vi.fn();
+const fetchProjectItem = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -14,6 +18,25 @@ vi.mock("@/lib/db", () => ({
         return findUniqueRepository;
       },
     },
+    issue: {
+      get updateMany() {
+        return updateManyIssue;
+      },
+    },
+    githubInstallation: {
+      get findUnique() {
+        return findUniqueInstallation;
+      },
+      get findFirst() {
+        return findFirstInstallation;
+      },
+    },
+  },
+}));
+
+vi.mock("@/lib/github/projects-api", () => ({
+  get fetchProjectItem() {
+    return fetchProjectItem;
   },
 }));
 
@@ -185,5 +208,132 @@ describe("POST /api/webhooks/github issue_comment", () => {
     expect(upsertIssueFromWebhookPayload).not.toHaveBeenCalled();
     expect(updateQaAnswerPendingState).not.toHaveBeenCalled();
     expect(findUniqueRepository).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/webhooks/github projects_v2_item", () => {
+  beforeEach(() => {
+    process.env.GITHUB_WEBHOOK_SECRET = SECRET;
+    findUniqueRepository.mockReset();
+    updateManyIssue.mockReset().mockResolvedValue({ count: 1 });
+    findUniqueInstallation.mockReset();
+    findFirstInstallation.mockReset();
+    fetchProjectItem.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    vi.clearAllMocks();
+  });
+
+  function makeItemPayload(action: string, overrides: Record<string, unknown> = {}) {
+    return {
+      action,
+      projects_v2_item: { node_id: "PVTI_item1" },
+      installation: { id: 100 },
+      organization: { login: "guchi-apps" },
+      ...overrides,
+    };
+  }
+
+  it("Statusの変更をIssueへ反映する", async () => {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+    fetchProjectItem.mockResolvedValue({
+      itemId: "PVTI_item1",
+      repositoryDatabaseId: 555,
+      issueNumber: 42,
+      status: "Implementation",
+    });
+    findUniqueRepository.mockResolvedValue({ id: "repo-1" });
+
+    const response = await POST(makeRequest(makeItemPayload("edited"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(updateManyIssue).toHaveBeenCalledWith({
+      where: { repositoryId: "repo-1", number: 42 },
+      data: { projectStatus: "Implementation", projectItemId: "PVTI_item1" },
+    });
+  });
+
+  it("installationが無い場合はorganization.loginからインストールを引く", async () => {
+    findFirstInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+    fetchProjectItem.mockResolvedValue({
+      itemId: "PVTI_item1",
+      repositoryDatabaseId: 555,
+      issueNumber: 42,
+      status: "Ready",
+    });
+    findUniqueRepository.mockResolvedValue({ id: "repo-1" });
+
+    const payload = makeItemPayload("created");
+    delete (payload as Record<string, unknown>).installation;
+    const response = await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(findFirstInstallation).toHaveBeenCalledWith({
+      where: { accountLogin: "guchi-apps" },
+    });
+    expect(updateManyIssue).toHaveBeenCalled();
+  });
+
+  it("Projectから外れたらStatusを消してラベル起点の判定へ戻す", async () => {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+
+    const response = await POST(makeRequest(makeItemPayload("deleted"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(updateManyIssue).toHaveBeenCalledWith({
+      where: { projectItemId: "PVTI_item1" },
+      data: { projectStatus: null, projectItemId: null },
+    });
+    // Projectから外れているのでGitHubへ問い合わせる必要はない
+    expect(fetchProjectItem).not.toHaveBeenCalled();
+  });
+
+  it("archivedもStatusを消す対象にする", async () => {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+
+    await POST(makeRequest(makeItemPayload("archived"), "projects_v2_item"));
+
+    expect(updateManyIssue).toHaveBeenCalledWith({
+      where: { projectItemId: "PVTI_item1" },
+      data: { projectStatus: null, projectItemId: null },
+    });
+  });
+
+  it("Issue以外（PR等）のアイテムは何もしない", async () => {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+    fetchProjectItem.mockResolvedValue(null);
+
+    const response = await POST(makeRequest(makeItemPayload("edited"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(updateManyIssue).not.toHaveBeenCalled();
+  });
+
+  it("未接続のリポジトリのIssueは無視する", async () => {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+    fetchProjectItem.mockResolvedValue({
+      itemId: "PVTI_item1",
+      repositoryDatabaseId: 999,
+      issueNumber: 1,
+      status: "Done",
+    });
+    findUniqueRepository.mockResolvedValue(null);
+
+    const response = await POST(makeRequest(makeItemPayload("edited"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(updateManyIssue).not.toHaveBeenCalled();
+  });
+
+  it("インストールが見つからない場合は何もしない", async () => {
+    findUniqueInstallation.mockResolvedValue(null);
+
+    const response = await POST(makeRequest(makeItemPayload("edited"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(fetchProjectItem).not.toHaveBeenCalled();
+    expect(updateManyIssue).not.toHaveBeenCalled();
   });
 });

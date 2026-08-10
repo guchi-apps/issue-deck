@@ -61,6 +61,12 @@ export type Issue = {
   qaAnswerPendingAt: string | null;
   /** 実際に最後にコメントが投稿された日時（ISO8601）。Webhook経由で未取得の場合はnull */
   lastCommentAt: string | null;
+  /**
+   * GitHub Projects v2のStatus（例: "Implementation"）。Projectに未登録のIssueはnull。
+   * 進捗状態を判定するときはこの値を直接見ず、@/lib/issue-progressのresolveProgressStatusを
+   * 通すこと（Statusがnullなら進捗ラベルへフォールバックする）
+   */
+  projectStatus: string | null;
   htmlUrl: string;
   favorite: boolean;
   hasUnreadComments: boolean;

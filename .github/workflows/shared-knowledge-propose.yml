@@ -1,7 +1,7 @@
 name: Shared Knowledge Propose (共有知識への反映PR作成)
 
 # develop向けPRがマージされた後、承認済みの「共有知識への追加提案」だけを、共有知識リポジトリ
-# (m-guchi/docs)へのPull Requestに変換する(docs/shared-knowledge.md「9.3 反映」)。
+# (guchi-apps/docs)へのPull Requestに変換する(docs/shared-knowledge.md「9.3 反映」)。
 #
 # 前提となる二段階の合意:
 # - 実装エージェント(claude-issue-dispatch.yml)が、対応Issueへ
@@ -17,7 +17,7 @@ name: Shared Knowledge Propose (共有知識への反映PR作成)
 # - Claude Codeステップは`.shared-context/`配下のファイル編集とPR文面の生成のみを行う。
 #   git push・PR作成・Issueコメントは行わない。claude-code-actionは実行時にGH_TOKENを自前の
 #   トークンへ上書きするため(claude-issue-dispatch.ymlの#621/#662に関する注記を参照)、
-#   別リポジトリ(m-guchi/docs)への書き込み権限を持つPATをClaude側から確実に使わせられないため。
+#   別リポジトリ(guchi-apps/docs)への書き込み権限を持つPATをClaude側から確実に使わせられないため。
 # - 実際のブランチ作成・commit・push・PR作成・Issueへの報告は、後続の単純なシェルステップが
 #   secrets.WORKFLOW_PAT を使って行う。このリポジトリの他のワークフローと同じく、確実性が要る
 #   処理はClaude Codeに委ねずシェルで閉じる方針。
@@ -125,7 +125,7 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
           ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
           path: .shared-context
           fetch-depth: 1
@@ -218,7 +218,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
-          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
           SHARED_REF: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
           SOURCE_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
@@ -295,7 +295,7 @@ jobs:
           CHECKOUT_OUTCOME: ${{ steps.checkout_shared.outcome }}
           CLAUDE_OUTCOME: ${{ steps.claude_apply.outcome }}
           CREATE_PR_OUTCOME: ${{ steps.create_pr.outcome }}
-          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+          SHARED_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e

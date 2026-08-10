@@ -11,7 +11,7 @@ Git管理されたドキュメントを引き継ぐ**方式で解消するため
                                     ↓
         ┌───────────────────────────┴───────────────────────────┐
    アプリ固有                                              全アプリ共通
-   対象リポジトリの docs/ ・CLAUDE.md                共有知識リポジトリ(m-guchi/docs)
+   対象リポジトリの docs/ ・CLAUDE.md                共有知識リポジトリ(guchi-apps/docs)
    （実装PRに同梱してそのままマージ）                 （提案 → レビュー → 別PR → 人間が承認）
         └───────────────────────────┬───────────────────────────┘
                                     ↓
@@ -34,7 +34,7 @@ AI専用のストレージや埋め込みDBは導入しない。
 | issue-deckの`CLAUDE.md` | issue-deck固有の運用ルール（ラベル遷移・自動マージ不可カテゴリ等） | ✅ | ✅ |
 | issue-deckの`docs/` | 設計ドキュメント（`multi-agent-workflow.md`ほか） | ✅ | ✅ |
 | `.github/workflows/*.yml`のプロンプト | 各エージェントの責務・手順 | —（Actions専用） | ✅ |
-| `m-guchi/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`CLAUDE.md`＝索引、`standards/`・`knowledge/`・`agent-rules/`・`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ❌ |
+| `guchi-apps/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`CLAUDE.md`＝索引、`standards/`・`knowledge/`・`agent-rules/`・`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ❌ |
 
 ### 自動化の構成
 
@@ -66,7 +66,7 @@ AI専用のストレージや埋め込みDBは導入しない。
    ワークフローが発火しなくなる」）は、そのIssueのコメントやPR本文には残るが、**次の実行が読む場所
    には残らない**。同じ調査を毎回やり直すか、同じ失敗を繰り返す。
 4. **知見の置き場所の判断基準がない。** アプリ固有の知見と再利用可能な知見を分ける明文化された
-   基準がないため、`m-guchi/docs`は人間向けの設計基準に閉じたままで、エージェントが得た運用知見が
+   基準がないため、`guchi-apps/docs`は人間向けの設計基準に閉じたままで、エージェントが得た運用知見が
    蓄積されていない。
 5. **共有知識を書き換える経路が無制限になりやすい。** 逆に、実装エージェントが共有リポジトリへ
    直接コミットできるようにすると、1つのIssueの都合で全アプリの前提が書き換わり、誤りや一時的な
@@ -79,19 +79,19 @@ AI専用のストレージや埋め込みDBは導入しない。
 | 層 | 置き場所 | 判定基準 | 更新経路 |
 |---|---|---|---|
 | **アプリ固有** | 対象リポジトリの`CLAUDE.md` / `docs/` | そのリポジトリのコード・スキーマ・画面・ラベル・ワークフローに依存する内容 | 実装PRに同梱し、通常のレビュー・マージで反映 |
-| **全アプリ共通** | `m-guchi/docs`（共有知識リポジトリ） | リポジトリを1つ差し替えても内容が変わらない内容 | 提案 → レビュー審査 → 専用PR → **人間がマージ** |
+| **全アプリ共通** | `guchi-apps/docs`（共有知識リポジトリ） | リポジトリを1つ差し替えても内容が変わらない内容 | 提案 → レビュー審査 → 専用PR → **人間がマージ** |
 
 判定に迷う場合はアプリ固有として扱う（共有側を汚さない方向に倒す）。詳細な判定基準は
 [6.3 判定基準](#63-判定基準実装エージェントレビューエージェント共通)を参照。
 
-### 3.2 共有知識リポジトリは新設せず `m-guchi/docs` を拡張する
+### 3.2 共有知識リポジトリは新設せず `guchi-apps/docs` を拡張する
 
-`m-guchi/docs`（ローカルでは`~/apps/_docs`）は既に「アプリ開発の標準・規約・共通ガイド」として
+`guchi-apps/docs`（ローカルでは`~/apps/_docs`）は既に「アプリ開発の標準・規約・共通ガイド」として
 稼働しており、VPS構成・1Password運用・ブランチ運用・GitHub Actions手順・ラベル同期スクリプトを
 持っている。ここに`shared-ai-context`相当を新設すると、Git運用ルールやデプロイ方針が2箇所に
 分散し「どちらを更新すべきか」が毎回判断事項になる。
 
-そのため**新規リポジトリは作らず、`m-guchi/docs`にAIエージェント向けのエントリポイントと
+そのため**新規リポジトリは作らず、`guchi-apps/docs`にAIエージェント向けのエントリポイントと
 知見置き場を追加する**。設計基準は`standards/`を一次情報源とし、
 `CLAUDE.md`はそこへの索引・読む順序を与える薄い層に徹する（内容を二重管理しない）。
 
@@ -108,7 +108,7 @@ $GITHUB_WORKSPACE/
 ├── CLAUDE.md              ← アプリ固有ルール（優先）
 ├── docs/                  ← アプリ固有の設計・知見
 ├── src/ ...
-└── .shared-context/       ← m-guchi/docs のcheckout（読み取り専用・.gitignore済み）
+└── .shared-context/       ← guchi-apps/docs のcheckout（読み取り専用・.gitignore済み）
     ├── CLAUDE.md
     ├── agent-rules/
     ├── knowledge/
@@ -150,7 +150,7 @@ $GITHUB_WORKSPACE/
        proposal -->        verdict:approved / rejected          │                     │
                                 │                              │                     │
                         developへマージ ─────────────────────▶ approvedのみ拾う       │
-                                                        m-guchi/docs へPR作成 ──────▶ マージ
+                                                        guchi-apps/docs へPR作成 ──────▶ マージ
 ```
 
 ## 4. 必要な変更
@@ -184,12 +184,12 @@ $GITHUB_WORKSPACE/
 
 ## 6. 共有知識リポジトリ側に必要なファイル
 
-`m-guchi/docs`に以下を追加する。**このリポジトリからは変更できないため、実ファイルの追加は
-別途`m-guchi/docs`側で行う。** 追加前でも`.shared-context/`のcheckout自体は成功し、
+`guchi-apps/docs`に以下を追加する。**このリポジトリからは変更できないため、実ファイルの追加は
+別途`guchi-apps/docs`側で行う。** 追加前でも`.shared-context/`のcheckout自体は成功し、
 存在しないファイルはプロンプト側の「無ければ共有知識なしで進める」指示で吸収される。
 
 ```text
-m-guchi/docs/
+guchi-apps/docs/
 ├── README.md                      # 入口だけを残したスタブ（索引はCLAUDE.mdへ一本化）
 ├── CLAUDE.md                      # 唯一の索引。読む順序・優先順位・書き込み禁止・提案フロー
 ├── agent-rules/                   # エージェントの役割別ルール
@@ -276,7 +276,7 @@ m-guchi/docs/
 - **結論**: 何をすべきか / 何をしてはいけないか
 - **根拠**: 出典URL、または再現した事象と実行ログへのリンク
 - **確認日**: YYYY-MM-DD
-- **出典リポジトリ**: m-guchi/issue-deck#<Issue番号>
+- **出典リポジトリ**: guchi-apps/issue-deck#<Issue番号>
 ```
 
 「確認日」を必ず持たせることで、古くなった知見を後から棚卸しできるようにする。
@@ -312,7 +312,7 @@ Claude Code実行前に、以下のステップを挟む。
   uses: actions/checkout@v4
   continue-on-error: true
   with:
-    repository: ${{ vars.SHARED_CONTEXT_REPO || 'm-guchi/docs' }}
+    repository: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
     ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
     path: .shared-context
     fetch-depth: 1
@@ -321,7 +321,7 @@ Claude Code実行前に、以下のステップを挟む。
 ```
 
 - `vars.SHARED_CONTEXT_REPO` / `vars.SHARED_CONTEXT_REF`はリポジトリ変数での上書き用。未設定なら
-  `m-guchi/docs`の`main`を読む。他リポジトリへ展開する際、ワークフロー本文を書き換えずに
+  `guchi-apps/docs`の`main`を読む。他リポジトリへ展開する際、ワークフロー本文を書き換えずに
   切り替えられるようにするための逃げ道。
 - `persist-credentials: false`にして、共有知識リポジトリの認証情報が`.shared-context/.git/config`に
   残らないようにする（本体リポジトリのpush認証と混線させない）。
@@ -331,11 +331,11 @@ Claude Code実行前に、以下のステップを挟む。
 
 - **issue-deckの`secrets.WORKFLOW_PAT`はRepository accessが「All repositories」で設定済みのため、
   共有知識リポジトリ向けの追加設定は不要。** `.shared-context/`のcheckoutも、
-  `shared-knowledge-propose.yml`による`m-guchi/docs`へのブランチpush・PR作成も、このPATで動く
+  `shared-knowledge-propose.yml`による`guchi-apps/docs`へのブランチpush・PR作成も、このPATで動く
   （必要なpermissionは`Contents: Read and write`・`Pull requests: Read and write`。
   All repositoriesのPATにはこれらが既に含まれている）。
 - 他リポジトリへ展開する場合は、そのリポジトリの`WORKFLOW_PAT`が共有知識リポジトリへ到達できるかを
-  確認する。リポジトリを個別指定しているPATの場合は`m-guchi/docs`を追加する必要がある。
+  確認する。リポジトリを個別指定しているPATの場合は`guchi-apps/docs`を追加する必要がある。
 - PATが共有知識リポジトリへ到達できない場合でも、checkoutステップは`continue-on-error: true`の
   ため各ワークフローは停止しない（共有知識なしで実行される）。`shared-knowledge-propose.yml`側は
   失敗を検知して対応Issueへフォールバック通知を投稿する。
@@ -380,7 +380,7 @@ title: 既定のGITHUB_TOKENは.github/workflows/配下へpushできない
 - **結論**: workflowスコープを持つFine-grained PATを`actions/checkout`の`token`に渡す
 - **根拠**: 実行ログ <URL>。リポジトリのWorkflow permissionsをRead and writeにしても解消しない
 - **確認日**: 2026-08-09
-- **出典**: m-guchi/issue-deck#106
+- **出典**: guchi-apps/issue-deck#106
 
 <!-- issue-deck-source:claude-issue-dispatch -->
 ````
@@ -418,7 +418,7 @@ develop向けPRがマージされた時点で起動し、以下を行う。
    何もせず終了する
 3. 共有知識リポジトリを`.shared-context/`へcheckoutする（`WORKFLOW_PAT`）
 4. Claude Codeが、承認された提案だけを該当ファイルへ追記し、
-   `knowledge/issue-deck-<Issue番号>`ブランチを作成して`m-guchi/docs`へPull Requestを作成する
+   `knowledge/issue-deck-<Issue番号>`ブランチを作成して`guchi-apps/docs`へPull Requestを作成する
 5. 作成したPRのURLを対応Issueへコメントする
 6. PRもコメントも確認できない場合は、フォールバックコメントを投稿する（このリポジトリの他の
    ワークフローと同じ、機械的な検証ステップによる安全網）
@@ -433,7 +433,7 @@ develop向けPRがマージされた時点で起動し、以下を行う。
 |---|---|
 | 1. 書き込み経路の分離 | 実装エージェントには共有知識リポジトリへの書き込み手段を与えない（`.shared-context/`は`.gitignore`済み・読み取り専用。Actionsのcheckoutも`persist-credentials: false`） |
 | 2. 審査 | レビューエージェントが4観点で審査し、承認マーカーが無い提案は反映ワークフロー自体が起動しない |
-| 3. 人間のマージ | 反映は必ず`m-guchi/docs`へのPRとして提示され、マージは人間が行う |
+| 3. 人間のマージ | 反映は必ず`guchi-apps/docs`へのPRとして提示され、マージは人間が行う |
 
 さらに、共有知識リポジトリへの変更は常に「1 Issue = 1 PR」になるため、後から`git log`で
 「どの知見がどのIssueで、どういう根拠で入ったか」を追跡できる。

@@ -62,6 +62,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
+- **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
+  判定は必ず [`lib/issue-progress.ts`](../src/lib/issue-progress.ts) の `resolveProgressStatus`
+  を通す（`01.planning`等のラベル名やStatus名を直接見ない）。Statusは`projects_v2_item`
+  Webhookと再同期（`lib/github/sync-project-status.ts`）で`Issue.projectStatus`へ入り、
+  未登録なら`null`のままラベルから解決する。Projects v2はGraphQLのみのため境界は
+  [`lib/github/projects-api.ts`](../src/lib/github/projects-api.ts)。
+  Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
+  Project連携を一切行わない**（#991）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
@@ -103,4 +111,4 @@ pnpm test:unit   # vitestのみ
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
-[knowledge/deployment.md](https://github.com/m-guchi/docs/blob/main/knowledge/deployment.md) を参照。
+[knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。

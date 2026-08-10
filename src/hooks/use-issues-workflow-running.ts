@@ -25,7 +25,7 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
   const [running, setRunning] = useState<RunningMap>({});
   const knownRunIdsRef = useRef<Map<string, number>>(new Map());
   const candidates = issues.filter(
-    (issue) => hasActiveWorkflowStep(issue.labels) && !isApprovalPending(issue.labels),
+    (issue) => hasActiveWorkflowStep(issue) && !isApprovalPending(issue.labels),
   );
   const candidateKey = candidates
     .map((issue) => issue.id)

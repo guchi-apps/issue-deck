@@ -3,7 +3,7 @@
 # どのラベルを揃えるか・揃えないかの判断はユーザーに委ね、本スクリプトは差分の出力のみ行う。
 set -euo pipefail
 
-SOURCE_REPO="m-guchi/issue-deck"
+SOURCE_REPO="guchi-apps/issue-deck"
 
 if [ $# -ne 1 ]; then
   echo "使い方: $0 <owner/repo>" >&2

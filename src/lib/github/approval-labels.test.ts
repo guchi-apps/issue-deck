@@ -167,19 +167,19 @@ describe("labelsAfterRejection", () => {
 
 describe("isMergeApprovalPending", () => {
   it("00.check-userが無ければfalseを返す", () => {
-    expect(isMergeApprovalPending([makeLabel("03.d:marge")])).toBe(false);
+    expect(isMergeApprovalPending({ labels: [makeLabel("03.d:marge")], projectStatus: null })).toBe(false);
   });
 
   it("00.check-user + 03.d:margeの場合はtrueを返す", () => {
-    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("03.d:marge")])).toBe(true);
+    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("03.d:marge")], projectStatus: null })).toBe(true);
   });
 
   it("00.check-user + 07.m:margeの場合はtrueを返す", () => {
-    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("07.m:marge")])).toBe(true);
+    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("07.m:marge")], projectStatus: null })).toBe(true);
   });
 
   it("00.check-user + 02.wipの場合はfalseを返す（コメントが無い場合）", () => {
-    expect(isMergeApprovalPending([makeLabel("00.check-user"), makeLabel("02.wip")])).toBe(false);
+    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("02.wip")], projectStatus: null })).toBe(false);
   });
 
   it("00.check-user + 02.wipでも、直近のbotコメントがclaude-review-develop発ならtrueを返す（#728: additionalモード再開時のラベル戻し直後にレビューが完了するレース）", () => {
@@ -193,7 +193,7 @@ describe("isMergeApprovalPending", () => {
         "⚠️ developへのマージ前にユーザーの確認が必要と判定しました。\n\n<!-- issue-deck-source:claude-review-develop -->",
       ),
     ];
-    expect(isMergeApprovalPending(labels, comments)).toBe(true);
+    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(true);
   });
 
   it("00.check-user + 02.wipで、直近のbotコメントがclaude-review-develop以外発ならfalseを返す（計画承認待ち等）", () => {
@@ -202,13 +202,13 @@ describe("isMergeApprovalPending", () => {
       makeComment("@claude 実装を開始してください", "m-guchi"),
       makeComment("計画本文\n\n<!-- issue-deck-plan-type:implement -->"),
     ];
-    expect(isMergeApprovalPending(labels, comments)).toBe(false);
+    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(false);
   });
 
   it("直近のbotコメントが発信元不明（マーカー無し）の場合はラベルの判定にフォールバックする", () => {
     const labels = [makeLabel("00.check-user"), makeLabel("03.d:marge")];
     const comments = [makeComment("マーカーの無いコメント")];
-    expect(isMergeApprovalPending(labels, comments)).toBe(true);
+    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(true);
   });
 });
 
