@@ -68,7 +68,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Webhookと再同期（`lib/github/sync-project-status.ts`）で`Issue.projectStatus`へ入り、
   未登録なら`null`のままラベルから解決する。Projects v2はGraphQLのみのため境界は
   [`lib/github/projects-api.ts`](../src/lib/github/projects-api.ts)。
-  Projectの場所は`GITHUB_PROJECT_OWNER`・`GITHUB_PROJECT_NUMBER`で指定し、**未設定なら
+  Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**（#991）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。

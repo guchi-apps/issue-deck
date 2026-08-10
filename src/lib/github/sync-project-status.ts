@@ -9,13 +9,13 @@ import { fetchProjectItems } from "@/lib/github/projects-api";
  * 環境変数が欠けているときは黙って何もしない設計にしている。
  */
 function getProjectLocation(): { owner: string; number: number } | null {
-  const owner = process.env.GITHUB_PROJECT_OWNER;
-  const rawNumber = process.env.GITHUB_PROJECT_NUMBER;
+  const owner = process.env.PROJECT_V2_OWNER;
+  const rawNumber = process.env.PROJECT_V2_NUMBER;
   if (!owner || !rawNumber) return null;
 
   const number = Number(rawNumber);
   if (!Number.isInteger(number) || number <= 0) {
-    console.error("[sync-project-status] GITHUB_PROJECT_NUMBER が不正です", rawNumber);
+    console.error("[sync-project-status] PROJECT_V2_NUMBER が不正です", rawNumber);
     return null;
   }
   return { owner, number };
