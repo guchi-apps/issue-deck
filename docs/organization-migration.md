@@ -235,7 +235,7 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
 
 ## 移行手順案
 
-### 順序の原則：リポジトリを先に全部移し、GitHub Appの所有権移管は最後に行う
+### 順序の原則：Appを先に移し、「All repositories」でインストールしておく
 
 privateなGitHub Appは**App所有者のアカウント1つにしかインストールできない**
 （GitHub Docs [Making a GitHub App public or private](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/making-a-github-app-public-or-private):
@@ -245,18 +245,52 @@ privateなGitHub Appは**App所有者のアカウント1つにしかインスト
 複数のAppは扱えない）。
 
 したがって移行の過渡期には、個人アカウントと`guchi-apps`のどちらか一方しかissue-deckに映せない。
-順序で影響を最小化する。
+どちらを先にしても「見えない期間」の総量は変わらないが、**Appを先に移し「All repositories」で
+インストールしておくほうが確認しやすい。**
 
-- **Appを先に移すと**: 個人アカウント側のインストールが外れ、まだ移していないリポジトリが
-  issue-deckから消える。残りを移し終わるまでその状態が続く
-- **リポジトリを先に移すと**: 移した分だけが一時的に見えなくなり、最後にAppを移した瞬間に
-  まとめて復帰する
+`installation_repositories`（action=`added`）のWebhookを
+[webhooks/github/route.ts](../src/app/api/webhooks/github/route.ts)が処理しており、
+インストールへ追加されたリポジトリを`Repository`へupsertして`syncRepositoryIssues`まで走らせる。
+そのため**「All repositories」でインストールしてあれば、org配下へtransferしたリポジトリは
+その都度自動でissue-deckに現れる。**
 
-**後者を採る。** 稼働中の全リポジトリを`guchi-apps`へ移す方針（後述の「移行対象」）のため、
+- **Appを先に移す**: 移した直後は`guchi-apps`配下のリポジトリしか見えないが、transferするたびに
+  順次復帰していく。最大の後戻り点であるApp移管を、リポジトリ1件だけを賭けた状態で越えられ、
+  各transferの結果をその場で確認できる
+- **リポジトリを先に移す**: 移した分が見えないまま溜まり、最後にAppを移した時点で一括復帰する。
+  途中経過を確認できず、問題が出ても切り分けにくい
+
+**前者を採る。** 稼働中の全リポジトリを`guchi-apps`へ移す方針（後述の「移行対象」）のため、
 Appをpublicにする必要はなく、privateのまま所有権だけを移せる。
+
+Webhookが届かず自動で出てこない場合の保険として、`POST /api/sync/repositories`
+（[sync/repositories/route.ts](../src/app/api/sync/repositories/route.ts)）が
+ユーザーの全インストールに対して`syncInstallationRepositories`を回し直す。
 
 なお、一部のリポジトリを個人アカウントに残したまま両方をissue-deckに映したい場合は、
 Appをpublic（"Any account"）にする以外に方法がない。今回はその必要がない。
+
+### 実施状況（2026-08-11時点）
+
+実際には手順4（App所有権移管）・手順5（インストール）を手順3（リポジトリのtransfer）より先に
+実施している。上記のとおりこの順序で問題はなく、むしろ推奨される。
+
+| 手順 | 状態 |
+|---|---|
+| 1. Organization `guchi-apps` 作成 | ✅ 完了 |
+| 4. GitHub App の所有権移管 | ✅ 完了（**開発App `issue-deck-dev` の移管は要確認**） |
+| 5. App を `guchi-apps` へインストール | ✅ 完了 |
+| 2. `guchi-apps` 所有のFine-grained PAT発行 | 未確認 |
+| 3. リポジトリのtransfer | 進行中（`uptime-kuma`・`docs` 完了、残り20件） |
+| 6. 再同期・確認 | 未 |
+| 7. 参照の更新 | 未 |
+
+**`docs`のtransferに伴う追従が未完了。** `vars.SHARED_CONTEXT_REPO`は未設定で、
+ワークフロー側の既定値も`m-guchi/docs`のまま（`reusable-issue-dispatch.yml:687`・
+`claude-review-develop.yml:226`・`shared-knowledge-propose.yml:128/221/298`）。
+加えて旧`WORKFLOW_PAT`はresource ownerが`m-guchi`のため`guchi-apps/docs`へ届かない。
+このままでは共有知識のcheckoutが失敗する（`continue-on-error`のため停止はせず、
+共有知識なしで実行される）。
 
 ### 手順
 
