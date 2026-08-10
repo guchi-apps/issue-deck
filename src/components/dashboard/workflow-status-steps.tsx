@@ -6,12 +6,16 @@ import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-stat
 import { cn } from "@/lib/utils";
 import type { IssueLabel } from "@/types/issue";
 
-type WorkflowStatusStepsProps = {
+/** 進捗状態の判定に使う値。projectStatusがあればラベルより優先される（@/lib/issue-progress） */
+type ProgressProps = {
   labels: IssueLabel[];
+  /** GitHub Projects v2のStatus。Projectに未登録なら省略・null（ラベルへフォールバックする） */
+  projectStatus?: string | null;
 };
 
-type WorkflowStepBadgeProps = {
-  labels: IssueLabel[];
+type WorkflowStatusStepsProps = ProgressProps;
+
+type WorkflowStepBadgeProps = ProgressProps & {
   /** GitHub Actions実行状況（一覧のポーリング結果）。省略時は実行中表示を行わない */
   running?: { isRunning: boolean; currentStep: string | null };
   /**
@@ -32,8 +36,13 @@ const BADGE_SIZE = 18;
  * GitHub Actionsの実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と
  * 実行中（回転）を同じ円で同時に表現する。
  */
-export function WorkflowStepBadge({ labels, running, qaAnswerPending = false }: WorkflowStepBadgeProps) {
-  const currentIndex = getWorkflowStepIndex(labels);
+export function WorkflowStepBadge({
+  labels,
+  projectStatus = null,
+  running,
+  qaAnswerPending = false,
+}: WorkflowStepBadgeProps) {
+  const currentIndex = getWorkflowStepIndex({ labels, projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
@@ -106,8 +115,8 @@ export function WorkflowStepBadge({ labels, running, qaAnswerPending = false }: 
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
  */
-export function WorkflowStatusSteps({ labels }: WorkflowStatusStepsProps) {
-  const currentIndex = getWorkflowStepIndex(labels);
+export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowStatusStepsProps) {
+  const currentIndex = getWorkflowStepIndex({ labels, projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);

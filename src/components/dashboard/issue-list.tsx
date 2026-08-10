@@ -164,6 +164,7 @@ export function IssueList({
             <span className="flex shrink-0 items-center gap-1.5">
               <WorkflowStepBadge
                 labels={issue.labels}
+                projectStatus={issue.projectStatus}
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
               />

@@ -157,7 +157,7 @@ export function IssueDetail({
   const { status: pullRequestCiStatus } = usePullRequestCiStatus(
     issue?.repositoryFullName ?? null,
     pullRequestLink,
-    issue ? isMergeApprovalPending(issue.labels, comments) : false,
+    issue ? isMergeApprovalPending(issue, comments) : false,
   );
   const {
     mergePullRequest,
@@ -554,7 +554,7 @@ export function IssueDetail({
             </span>
           </div>
 
-          <WorkflowStatusSteps labels={issue.labels} />
+          <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
           <div className="flex flex-wrap items-center gap-2">
             {qaAnswerPending && (
               <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -600,7 +600,7 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
-              mergeApprovalPending={isMergeApprovalPending(issue.labels, comments)}
+              mergeApprovalPending={isMergeApprovalPending(issue, comments)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
               workflowRun={workflowRun}
