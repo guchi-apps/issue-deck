@@ -49,7 +49,7 @@ org配下へ移したリポジトリのワークフローは動かない。
 
 - [x] `git -C ~/apps/_docs remote set-url origin github:guchi-apps/docs.git`
       （ディレクトリ名`_docs`とリポジトリ名`docs`が違う点に注意）
-- [ ] `~/apps/uptime-kuma`のremoteを更新する。**このリポジトリだけremote名が`origin`ではなく
+- [x] `~/apps/uptime-kuma`のremoteを更新する。**このリポジトリだけremote名が`origin`ではなく
       `oriorigin`**（過去のタイプミス）なので、ついでに直す
 
       ```bash
@@ -75,13 +75,13 @@ org配下へ移したリポジトリのワークフローは動かない。
 **順序に注意。transfer → コード修正 の順で行う。** 先に`guchi-apps/issue-deck`へ書き換えると、
 まだ存在しないリポジトリを指すことになり`scripts/start-issue.sh`等が壊れる。
 
-- [ ] transferする
+- [x] transferする
 
       ```bash
       gh api -X POST /repos/m-guchi/issue-deck/transfer -f new_owner=guchi-apps
       ```
 
-- [ ] 引き継ぎを確認する
+- [x] 引き継ぎを確認する
 
       ```bash
       gh secret list   --repo guchi-apps/issue-deck
@@ -90,7 +90,7 @@ org配下へ移したリポジトリのワークフローは動かない。
         --jq '.required_status_checks.contexts'
       ```
 
-- [ ] **repo secretの`WORKFLOW_PAT`を削除する**
+- [x] **repo secretの`WORKFLOW_PAT`を削除する**
 
       ```bash
       gh secret delete WORKFLOW_PAT --repo guchi-apps/issue-deck
@@ -102,9 +102,9 @@ org配下へ移したリポジトリのワークフローは動かない。
       > takes precedence"）。transferで引き継がれた古いPATが残っていると、Aで登録した
       > 新しいorg secretが効かず、org配下へ届かないPATを使い続けて失敗する。
 
-- [ ] repo secretの`CLAUDE_CODE_OAUTH_TOKEN`を削除する（同上）
-- [ ] `OP_SERVICE_ACCOUNT_TOKEN`は**残す**（org化していないため）
-- [ ] ローカルremoteを更新する（linked worktreeは`.git/config`を共有するので1回でよい）
+- [x] repo secretの`CLAUDE_CODE_OAUTH_TOKEN`を削除する（同上）
+- [x] `OP_SERVICE_ACCOUNT_TOKEN`は**残す**（org化していないため）
+- [x] ローカルremoteを更新する（linked worktreeは`.git/config`を共有するので1回でよい）
 
       ```bash
       git -C ~/apps/issue-deck remote set-url origin github:guchi-apps/issue-deck.git
