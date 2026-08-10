@@ -238,29 +238,53 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
 依存の少ないものから順に進め、各段階で疎通を確認してから次へ進む。
 
 1. **Organization `guchi-apps` を作成する**（GitHub Free、$0）。
-2. **GitHub Appを`guchi-apps`へインストールする。** この時点ではまだリポジトリを移していないので、
-   インストールだけ済ませておく。
-3. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
+2. **GitHub Appの所有権を`guchi-apps`へ移す。**
+   privateなGitHub Appは**App所有者のアカウントにしかインストールできない**
+   （GitHub Docs [Making a GitHub App public or private](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/making-a-github-app-public-or-private):
+   "Private GitHub Apps can only be installed on the user or organization account of the app owner"）。
+   IssueDeckのAppは`m-guchi`個人アカウント所有のため、**そのままでは`guchi-apps`へ
+   インストールできない**。Appをpublicにする（誰でもインストール可能になる）か、
+   所有権ごとOrganizationへ移すかの二択で、後者を採る。
+
+   手順: <https://github.com/settings/apps> → 対象App → **Advanced** → **Transfer ownership**
+   → 移管先に`guchi-apps`を入力（同名のEnterprise/Organizationがあり得るためドロップダウンで
+   正しいものを選ぶ）→ **Transfer this GitHub App**。移管後は
+   `https://github.com/organizations/guchi-apps/settings/apps`側で管理する。
+
+   注意点。
+   - **所有権を移すと個人アカウント側のインストールが外れることがある**（GitHubが警告を出す）。
+     Appを先に移すと、まだ個人アカウントに残っているリポジトリをissue-deckが一時的に
+     見られなくなる。GitHub側のデータは無事で表示が欠けるだけなので、リポジトリのtransferを
+     先に済ませるか、短い断絶を許容するかを選ぶ。
+   - **開発App（`issue-deck-dev`, App ID 4445268）も同じ対応が要る**（プレビュー環境が使用）。
+   - App ID・秘密鍵・Webhook URLは移管しても変わらないはずだが、GitHubのドキュメントに
+     明記が無い。移管後に`.env`・1Passwordの値のまま疎通するかを実測で確認する。
+3. **Appを`guchi-apps`へインストールする。** App設定ページの**Install App**から`guchi-apps`を選び、
+   **Only select repositories**で対象を選択する（またはAll repositories）。
+   ただし実際には**issue-deckの画面のインストール導線から踏むほうが確実**で、
+   [src/app/github/setup/route.ts](../src/app/github/setup/route.ts)を経由することで
+   インストール情報が`GithubInstallation`テーブルへ入る。
+4. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
    権限は現在の`WORKFLOW_PAT`と同等（Contents / Issues / Pull requests / Actions / Workflows）。
    1Password側にも登録し、有効期限を`FineGrainedToken`台帳へ記録する。
-4. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
+5. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
    （`uptime-kuma`など）で、URLリダイレクト・Appの認識・issue-deckの画面表示を確認する。
-5. **`docs`をtransferする。** ワークフローは持たないが、`SHARED_CONTEXT_REPO`の既定値
+6. **`docs`をtransferする。** ワークフローは持たないが、`SHARED_CONTEXT_REPO`の既定値
    `m-guchi/docs`を参照している箇所（`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・
    `shared-knowledge-propose.yml`）があるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか
    既定値を書き換える。ローカルの`~/apps/_docs`のremoteも更新する。
-6. **issue-deckをtransferする。** 上記「書き換えが必要な箇所」の1〜5を修正し、各リポジトリの
+7. **issue-deckをtransferする。** 上記「書き換えが必要な箇所」の1〜5を修正し、各リポジトリの
    `WORKFLOW_PAT`を新しいPATへ差し替え、Actions（CI・deploy・issue-labels）が通ることを確認する。
-7. **`shopping-list`をtransferする。** issue-deckより後にする。caller側の
+8. **`shopping-list`をtransferする。** issue-deckより後にする。caller側の
    `uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の
    更新が要るため。
-8. **残りのpublicアプリリポジトリ**（car-care・asset-manager・dayspan）をtransferする。
-9. **稼働中のprivateリポジトリ**（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）をtransferする。
-   Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ載せる際は
-   最後のマージを手動にする（前述の`auto-merge-fallback`経由）。
-10. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
+9. **残りのpublicアプリリポジトリ**（car-care・asset-manager・dayspan）をtransferする。
+10. **稼働中のprivateリポジトリ**（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）を
+    transferする。Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ
+    載せる際は最後のマージを手動にする（前述の`auto-merge-fallback`経由）。
+11. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
     本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
-11. archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。
+12. archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。
 
 ## ロールバック策
 
@@ -270,8 +294,12 @@ Issue・PR・コミット履歴・secretsは保持される。必要になるの
 
 各段階で確認しておくべき点。
 
-- **手順3で止めれば影響はほぼゼロ。** 検証用の1件を戻すだけで済む。
-- **手順5以降は`shopping-list`側のcallerも巻き戻す必要がある。** タグ固定参照（`@workflows/v1`）の
+- **手順1で止めれば影響ゼロ。** Organizationを作っただけの状態。
+- **手順2（Appの所有権移管）が実質的な後戻り点。** 個人アカウントへ再度transferすれば戻せるが、
+  移管のたびにインストールがやり直しになる。ここを越える前に、移管後もApp ID・秘密鍵・
+  Webhook URLが変わらないことを実測で確認しておく。
+- **手順5で止めれば影響は軽微。** 検証用の1件を戻すだけで済む。
+- **手順8以降は`shopping-list`側のcallerも巻き戻す必要がある。** タグ固定参照（`@workflows/v1`）の
   owner部分を戻す。
 - **Organization自体は削除できる**（リポジトリを空にしてから）。Free planなので解約手続きも不要。
 
