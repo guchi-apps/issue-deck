@@ -227,26 +227,26 @@ issue-deckより後に行う。caller側の`uses:`更新が必要なため。
 
 publicアプリ:
 
-- [ ] `car-care`
-- [ ] `asset-manager`
-- [ ] `subscription-lists`（repo secretの`CLAUDE_CODE_OAUTH_TOKEN`を削除する）
-- [ ] `gucchii-os`
-- [ ] `meisai-lab`
-- [ ] `myroom`
-- [ ] `portfolio`
-- [ ] `signaly`
-- [ ] `solitaire`
-- [ ] `wifi-speed`
+- [x] `car-care`
+- [x] `asset-manager`
+- [x] `subscription-lists`（repo secretの`CLAUDE_CODE_OAUTH_TOKEN`を削除する）
+- [x] `gucchii-os`
+- [x] `meisai-lab`
+- [x] `myroom`
+- [x] `portfolio`
+- [x] `signaly`
+- [x] `solitaire`
+- [x] `wifi-speed`
 
 private:
 
-- [ ] `vps`
-- [ ] `ops-dashboard`
-- [ ] `db-console`
-- [ ] `clip-hive`
-- [ ] `pi0w_260719`
-- [ ] `sensor_260218`
-- [ ] `sensor_260531`
+- [x] `vps`
+- [x] `ops-dashboard`
+- [x] `db-console`
+- [x] `clip-hive`
+- [x] `pi0w_260719`
+- [x] `sensor_260218`
+- [x] `sensor_260531`
 
 > privateリポジトリはFree organizationではブランチ保護が使えない。マルチエージェント運用へ
 > 載せる際は、最後のマージを手動にする（`auto-merge-fallback`ジョブ経由）。
@@ -304,5 +304,33 @@ private:
 - [x] archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す
       （Appが`guchi-apps`所有のprivateになるためissue-deckには表示されなくなるが、
       運用対象ではないため支障はない）
-- [ ] このチェックリストと[organization-migration.md](organization-migration.md)の
+- [x] このチェックリストと[organization-migration.md](organization-migration.md)の
       「実施状況」を最終状態へ更新する
+
+## 移行完了（2026-08-11）
+
+`guchi-apps`に22リポジトリ、`m-guchi`にはarchived 15件のみが残る状態で完了した。
+
+関連PR（すべてマージ済み）。
+
+| PR | 内容 |
+|---|---|
+| guchi-apps/issue-deck#999 | issue-deckとdocsの参照先を`guchi-apps`へ |
+| guchi-apps/issue-deck#1000 | 調査ドキュメント・本チェックリストの追加、`supported-repositories.md`の更新 |
+| guchi-apps/shopping-list#90・guchi-apps/dayspan#117 | 再利用可能ワークフローの`uses:`を`guchi-apps`へ |
+| guchi-apps/shopping-list#91・guchi-apps/dayspan#118 | スクリプトとワークフロー既定値を`guchi-apps`へ |
+| guchi-apps/docs#7 | `label-sync`とドキュメントの参照先更新、実在しないリポジトリの整理 |
+
+### 積み残し
+
+- **privateリポジトリのブランチ保護はFree organizationでは設定できない**。
+  `vps`・`ops-dashboard`・`db-console`・`clip-hive`・`docs`・`uptime-kuma`・`pi0w_260719`・
+  `sensor_*`が該当。マルチエージェント運用へ載せる際はTeam（$4/月）への引き上げを判断する
+- **publicリポジトリ8件（`asset-manager`・`car-care`・`meisai-lab`・`myroom`・`portfolio`・
+  `signaly`・`solitaire`・`subscription-lists`）のブランチ保護は未設定**。移行前の状態を
+  確認できないため付与を見送った。マルチエージェント運用に載っていないため急がない
+- **`docs`の`label-sync/compare-labels.sh`の`guchiOS` → `gucchii-os`の対応付けは推定**。
+  旧名にリダイレクトが残っておらず追跡できなかった
+- **Organizationのデフォルトラベルは未設定**。Organization Settings → Repository defaults で
+  設定できるが、**新規リポジトリにしか適用されない**（既存リポジトリには効かない）ため、
+  `sync-labels.sh`の置き換えにはならない。新規アプリ作成時の初期投入を省ける利点はある
