@@ -270,6 +270,10 @@ Webhookが届かず自動で出てこない場合の保険として、`POST /api
 なお、一部のリポジトリを個人アカウントに残したまま両方をissue-deckに映したい場合は、
 Appをpublic（"Any account"）にする以外に方法がない。今回はその必要がない。
 
+実際に手を動かす順番のチェックリストは
+[organization-migration-checklist.md](organization-migration-checklist.md)にある。
+以下は各手順の意味と根拠を示すもので、作業中はチェックリスト側を見る。
+
 ### 実施状況（2026-08-11時点）
 
 実際には手順4（App所有権移管）・手順5（インストール）を手順3（リポジトリのtransfer）より先に
