@@ -174,7 +174,7 @@ archivedな大学系7件（thesis系・tyuujitu系）は個人の資産であり
 | 3 | [scripts/start-issue.sh:64](../scripts/start-issue.sh) | `gh issue view --repo m-guchi/issue-deck` |
 | 4 | [scripts/start-reviewer.sh:48](../scripts/start-reviewer.sh) | `gh pr list --repo m-guchi/issue-deck` |
 | 5 | `.claude/skills/release-to-main/SKILL.md:10` | `gh api repos/m-guchi/issue-deck/branches/develop` |
-| 6 | **リポジトリ外**: `m-guchi/shopping-list/.github/workflows/issue-labels.yml` | `uses: m-guchi/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1` |
+| 6 | **リポジトリ外**: `shopping-list`・`dayspan`のcaller計4ファイル | `uses: m-guchi/issue-deck/.github/workflows/reusable-*.yml@workflows/vN`。shopping-list: `issue-labels.yml:34`（v1）・`claude-issue-dispatch.yml:46`（v6）、dayspan: `issue-labels.yml:33`（v6）・`claude-issue-dispatch.yml:37`（v6）。いずれも実測で確認済み |
 
 加えて、表示のみの参照（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)の`uses:`スニペット・
 [supported-repositories.md](supported-repositories.md)の一覧・[shared-knowledge.md](shared-knowledge.md)の
@@ -288,53 +288,109 @@ Appをpublic（"Any account"）にする以外に方法がない。今回はそ�
    置き、Team（選択肢C）へ上げた時点でorg secretへ一本化する。
 
 3. **稼働中の全リポジトリを`guchi-apps`へtransferする。**
-   移した直後に、そのリポジトリのActions secret `WORKFLOW_PAT`を手順2の新しいPATへ差し替える
-   （旧PATはresource ownerが`m-guchi`のため、org配下へ移ったリポジトリには届かない）。
 
-   依存関係の都合で順序が決まっているものだけ先に並べ、残りは任意。
+   **リポジトリごとに毎回行う共通操作**（4つ）。
+
+   1. **transfer する。** UIならリポジトリ → **Settings** → **General** の最下部
+      **Danger Zone** → **Transfer** → New ownerに`guchi-apps` → リポジトリ名を入力して確認。
+      CLIなら次のとおり。
+
+      ```bash
+      gh api -X POST /repos/m-guchi/<repo>/transfer -f new_owner=guchi-apps
+      ```
+
+   2. **引き継ぎを確認する。** secretsとdeploy keyはtransferで保持されるはずだが、実測で確かめる。
+
+      ```bash
+      gh secret list   --repo guchi-apps/<repo>
+      gh variable list --repo guchi-apps/<repo>
+      gh api /repos/guchi-apps/<repo>/branches/develop/protection \
+        --jq '.required_status_checks.contexts'   # ブランチ保護が残っているか
+      ```
+
+   3. **`WORKFLOW_PAT`を手順2の新しいPATへ差し替える。** 旧PATはresource ownerが`m-guchi`
+      のため、org配下へ移ったリポジトリには届かない。これを忘れるとワークフローが軒並み失敗する。
+
+      ```bash
+      gh secret set WORKFLOW_PAT --repo guchi-apps/<repo>   # 値を貼り付けてCtrl-D
+      ```
+
+   4. **ローカルのremoteを更新する。** リダイレクトは効くが、明示更新しておく。
+      **linked worktreeは本体と`.git/config`を共有する**ため、リポジトリごとに1回で足りる
+      （`~/apps/<repo>-worktrees/`配下を個別に直す必要はない。実測で確認済み）。
+
+      ```bash
+      git -C ~/apps/<repo> remote set-url origin github:guchi-apps/<repo>.git
+      ```
+
+   **transferの順序と、リポジトリ固有の追加作業。**
 
    1. ✅ `uptime-kuma` — 検証用。URLリダイレクトとgit操作を確認する。**完了済み**
-   2. `docs` — `SHARED_CONTEXT_REPO`の既定値`m-guchi/docs`を参照する3ワークフロー
-      （`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・`shared-knowledge-propose.yml`）
-      があるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか既定値を書き換える。
-      ローカル`~/apps/_docs`のremoteも更新する
-   3. `issue-deck` — 「書き換えが必要な箇所」の1〜5を修正し、Actions（CI・deploy・issue-labels）が
-      通ることを確認する
-   4. `shopping-list` — issue-deckより後にする。caller側の
-      `uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の
-      更新が要るため
-   5. 残りのpublicアプリ（`car-care`・`asset-manager`・`dayspan`）
+   2. `docs` — transfer後、`SHARED_CONTEXT_REPO`の参照先を切り替える。issue-deck側の
+      既定値`m-guchi/docs`を書き換える（`reusable-issue-dispatch.yml:687`・
+      `claude-review-develop.yml:226`・`shared-knowledge-propose.yml:128/221/298`）か、
+      リポジトリ変数で上書きする。ローカルは`~/apps/_docs`（ディレクトリ名がリポジトリ名と
+      異なる点に注意）。
+
+      ```bash
+      gh variable set SHARED_CONTEXT_REPO --body guchi-apps/docs --repo guchi-apps/issue-deck
+      git -C ~/apps/_docs remote set-url origin github:guchi-apps/docs.git
+      ```
+
+   3. `issue-deck` — 「書き換えが必要な箇所」の1〜5を修正してPRを出し、CI・deploy・
+      issue-labelsが通ることを確認する。表示のみのドキュメント参照もあわせて更新する。
+   4. `shopping-list`・`dayspan` — issue-deckより後にする。**両リポジトリの計4ファイル**で
+      `uses:`のownerを`guchi-apps`へ書き換える必要があるため（前掲の表の6）。
+      タグ（`@workflows/v1` / `@workflows/v6`）はそのままでよい。
+   5. 残りのpublicアプリ（`car-care`・`asset-manager`）
    6. 稼働中のprivate 4件（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）。
       Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ載せる際は
       最後のマージを手動にする（前述の`auto-merge-fallback`経由）
    7. その他の個人アプリ（`gucchii-os`・`meisai-lab`・`myroom`・`portfolio`・`signaly`・
       `solitaire`・`subscription-lists`・`wifi-speed`・`pi0w_260719`・`sensor_260218`・
-      `sensor_260531`）
+      `sensor_260531`）。ワークフローを持たないものはtransferとremote更新だけでよい
 
    **この間、org側へ移したリポジトリはissue-deckに表示されない**（Appがまだ個人アカウント
    所有のため）。GitHub側のデータは無事で、手順5のインストール後に再同期すれば戻る。
 
 4. **GitHub Appの所有権を`guchi-apps`へ移す。**
 
+   移管前に、現在の値を控えておく（移管後に変わっていないかを突き合わせるため）。
+   App ID・slug・Client ID・Webhook URL・Setup URLを`https://github.com/settings/apps`の
+   対象Appの画面から控える。
+
    手順: <https://github.com/settings/apps> → 対象App → **Advanced** → **Transfer ownership**
    → 移管先に`guchi-apps`を入力（同名のEnterprise/Organizationがあり得るためドロップダウンで
    正しいものを選ぶ）→ **Transfer this GitHub App**。移管後は
    `https://github.com/organizations/guchi-apps/settings/apps`側で管理する。
 
-   - **開発App（`issue-deck-dev`, App ID 4445268）も同じ対応が要る**（プレビュー環境が使用）。
+   - **本番Appと開発App（`issue-deck-dev`, App ID 4445268）の2つとも移す**
+     （開発Appはプレビュー環境が使用）。
    - App ID・秘密鍵・Webhook URLは移管しても変わらないはずだが、GitHubのドキュメントに
-     明記が無い。移管後に`.env`・1Passwordの値のまま疎通するかを実測で確認する。
+     明記が無い。移管後に控えた値と一致するかを確認し、変わっていれば`.env`・1Password・
+     `.github/deploy.env.tpl`が指す1Passwordのitem（`apps/issue-deck`の`github-app-id`・
+     `github-app-private-key-base64`・`github-app-slug`）を更新する。
 
 5. **Appを`guchi-apps`へインストールする。** App設定ページの**Install App**から`guchi-apps`を選び、
    **All repositories**（または対象を明示選択）でインストールする。
    ただし実際には**issue-deckの画面のインストール導線から踏むほうが確実**で、
    [src/app/github/setup/route.ts](../src/app/github/setup/route.ts)を経由することで
-   インストール情報が`GithubInstallation`テーブルへ入る。
+   インストール情報が`GithubInstallation`テーブルへ入る（このルートを通らないと
+   `GithubInstallation`・`UserInstallation`の行が作られず、画面に何も出ない）。
 
 6. **issue-deckの画面で再同期し、リポジトリとIssueが揃うことを確認する。**
+   再同期ボタン（`POST /api/sync/issues`）を実行し、リポジトリ一覧とIssue件数が
+   移行前と一致することを見る。あわせて、Webhookが新しいownerからも届くことを、
+   どれか1つのIssueにラベルを付けて画面へ反映されるかで確認する。
 
-7. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
-   本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
+7. **ドキュメント・スクリプトの残りの参照を更新する。**
+   手順3で各リポジトリのremoteは更新済みなので、ここでは表示のみの参照
+   （`docs/cross-repo-setup-guide.md`の`uses:`スニペット・`docs/supported-repositories.md`の
+   一覧・`docs/shared-knowledge.md`の提案テンプレート）と、取りこぼしの確認を行う。
+
+   ```bash
+   grep -rn "m-guchi/" --include="*.md" --include="*.yml" --include="*.sh" . | grep -v node_modules
+   ```
 
 8. **archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。**
    Appが`guchi-apps`所有のprivateになるとこれらはissue-deckに表示できなくなるが、
