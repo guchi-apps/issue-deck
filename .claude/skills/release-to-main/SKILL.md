@@ -7,7 +7,7 @@ description: issue-deckでdevelopからmainへリリースPRを作成・マー�
 
 ## 0. ローカルのdevelopを最新化する
 
-リリース作業はブランチの祖先関係に敏感なため、ローカルの`origin/develop`が実際のリモートより古いまま作業を始めない。`git status`で`behind`と出ていたり、`git rev-parse origin/develop`と`gh api repos/m-guchi/issue-deck/branches/develop -q .commit.sha`が一致しない場合はズレている。
+リリース作業はブランチの祖先関係に敏感なため、ローカルの`origin/develop`が実際のリモートより古いまま作業を始めない。`git status`で`behind`と出ていたり、`git rev-parse origin/develop`と`gh api repos/guchi-apps/issue-deck/branches/develop -q .commit.sha`が一致しない場合はズレている。
 
 `git fetch`はgit-github-jaスキルの運用（明示的指示があるまで実行しない）の対象のため、ズレを検知したらユーザーに一言断ってから`git fetch origin`する。
 
