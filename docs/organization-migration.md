@@ -202,11 +202,32 @@ archivedな大学系7件（thesis系・tyuujitu系）は個人の資産であり
   **Webhook・secrets・deploy key** / 旧URLからのリダイレクト（`git clone`・`push`を含む）。
   GitHub Docs [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository) 参照。
 
+### `WORKFLOW_PAT`はresource ownerを1つしか持てない（移行の順序を縛る制約）
+
+`secrets.WORKFLOW_PAT`は**Fine-grained PAT**で、Repository accessは「All repositories」
+（[actions-token-model.md](actions-token-model.md#3-7-そもそも-fine-grained-pat-はリポジトリを明示追加しないと読めない)・
+[multi-agent-workflow.md](multi-agent-workflow.md)）。Fine-grained PATは
+**resource ownerを1つしか指定できない**ため、個人アカウントを対象に発行された現在のPATは、
+Organizationへ移したリポジトリには届かない。
+
+つまりリポジトリを個人アカウントとOrganizationに分割して運用すると、**PATを2本併存させる**
+ことになる。`secrets.WORKFLOW_PAT`の参照は31箇所あり、どちらのPATを使うかがリポジトリごとに
+変わるため、設定ミスの温床になりやすい。
+
+特に注意が要るのが共有知識リポジトリ`docs`で、`reusable-issue-dispatch.yml`・
+`claude-review-develop.yml`・`shared-knowledge-propose.yml`の3つが`WORKFLOW_PAT`でcheckoutしている。
+issue-deckだけをorgへ移して`docs`を個人アカウントに残すと、共有知識のcheckoutが失敗する
+（各ワークフローは`continue-on-error`で続行するため停止はしないが、共有知識なしで動くことになる）。
+
+**したがって、自動化に参加するリポジトリは分割せず一度にまとめて移す。** 移行の前に、
+Organizationをresource ownerとする新しいFine-grained PATを発行し、`WORKFLOW_PAT`を差し替える。
+
 ### 手当てが必要なもの
 
 - **GitHub Appのorganizationへの再インストール。** リポジトリのtransferではApp
   インストールは追従しない。org側でインストールし、対象リポジトリを選択し直す。
   App自体（App ID・秘密鍵・Webhook URL）は変更不要なので、`.env`や1Password側の値はそのまま使える。
+- **`WORKFLOW_PAT`の再発行と差し替え**（上記の制約による）。1Password側の値も更新する。
 - **Supabase Authが使うOAuth Appに対する、organizationのサードパーティアクセス許可。**
 - **ブランチ保護ルールの再確認。** transfer後に必須ステータスチェックが維持されているか確認する。
 - **ローカル`git remote`の更新。** 本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
@@ -216,24 +237,30 @@ archivedな大学系7件（thesis系・tyuujitu系）は個人の資産であり
 
 依存の少ないものから順に進め、各段階で疎通を確認してから次へ進む。
 
-1. **Organizationを作成する**（GitHub Free、$0）。名前を決める（`m-guchi`とは別の名前が必要）。
-2. **GitHub Appをorganizationへインストールする。** この時点ではまだリポジトリを移していないので、
+1. **Organization `guchi-apps` を作成する**（GitHub Free、$0）。
+2. **GitHub Appを`guchi-apps`へインストールする。** この時点ではまだリポジトリを移していないので、
    インストールだけ済ませておく。
-3. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
+3. **`guchi-apps`をresource ownerとするFine-grained PATを発行する**（前述の制約）。
+   権限は現在の`WORKFLOW_PAT`と同等（Contents / Issues / Pull requests / Actions / Workflows）。
+   1Password側にも登録し、有効期限を`FineGrainedToken`台帳へ記録する。
+4. **影響の小さいリポジトリを1件transferして検証する。** ワークフローを持たないもの
    （`uptime-kuma`など）で、URLリダイレクト・Appの認識・issue-deckの画面表示を確認する。
-4. **issue-deckをtransferする。** 上記「書き換えが必要な箇所」の1〜5を修正し、
-   Actions（CI・deploy・issue-labels）が通ることを確認する。
-5. **`shopping-list`をtransferする。** issue-deckより後にする。caller側の
-   `uses: <org>/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の更新が要るため。
-6. **残りのアプリリポジトリ**（car-care・asset-manager・dayspan）と`docs`をtransferする。
-   `docs`はワークフローを持たないが、`SHARED_CONTEXT_REPO`の既定値`m-guchi/docs`を参照している箇所
-   （`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・`shared-knowledge-propose.yml`）が
-   あるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか既定値を書き換える。
-7. **privateリポジトリ**（`ops-dashboard`・`vps`・`db-console`・`clip-hive`）を移すかを判断する。
-   移す場合、ブランチ保護は使えないままなので、マルチエージェント運用に載せる際は
+5. **`docs`をtransferする。** ワークフローは持たないが、`SHARED_CONTEXT_REPO`の既定値
+   `m-guchi/docs`を参照している箇所（`reusable-issue-dispatch.yml`・`claude-review-develop.yml`・
+   `shared-knowledge-propose.yml`）があるため、リポジトリ変数`SHARED_CONTEXT_REPO`で上書きするか
+   既定値を書き換える。ローカルの`~/apps/_docs`のremoteも更新する。
+6. **issue-deckをtransferする。** 上記「書き換えが必要な箇所」の1〜5を修正し、各リポジトリの
+   `WORKFLOW_PAT`を新しいPATへ差し替え、Actions（CI・deploy・issue-labels）が通ることを確認する。
+7. **`shopping-list`をtransferする。** issue-deckより後にする。caller側の
+   `uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v1`の
+   更新が要るため。
+8. **残りのpublicアプリリポジトリ**（car-care・asset-manager・dayspan）をtransferする。
+9. **稼働中のprivateリポジトリ**（`vps`・`ops-dashboard`・`db-console`・`clip-hive`）をtransferする。
+   Free organizationではブランチ保護が使えないままなので、マルチエージェント運用へ載せる際は
    最後のマージを手動にする（前述の`auto-merge-fallback`経由）。
-8. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
-9. archivedな大学系7件は個人アカウントに残す。
+10. **ローカル`git remote`とドキュメント・スクリプトの参照を更新する。**
+    本体リポジトリと`~/apps/issue-deck-worktrees/`配下の各worktree。
+11. archivedな大学系7件（thesis系・tyuujitu系）は個人アカウントに残す。
 
 ## ロールバック策
 
@@ -269,19 +296,27 @@ privateリポジトリの制約（ブランチ保護なし・organization secret
 Bに加えて、privateリポジトリでもブランチ保護とorganization secretsが使える。
 privateリポジトリのマージまで自動化できる。
 
-### 推奨
+### 決定（2026-08-10、#996）
 
-**Bを既定とし、privateリポジトリを無人運用に載せたくなった時点でCへ上げる。**
+**選択肢Bを採用する。** Organization Free（$0）へ移行する。
 
-Free → Teamはいつでも切り替えられるため、先に払う理由がない。$4/月で追加的に得られるものは、
-実測にもとづくと次の2点に絞られる。
+- **Organization名**: `guchi-apps`
+- **移行対象**: publicアプリ群（issue-deck・car-care・asset-manager・dayspan・shopping-list）に加え、
+  **稼働中のprivateリポジトリ5件すべて**（`docs`・`vps`・`ops-dashboard`・`db-console`・`clip-hive`）
+- **個人アカウントに残す**: archivedな大学系7件（thesis系・tyuujitu系）
+
+privateリポジトリを分割せず全件移すのは、`WORKFLOW_PAT`がFine-grained PATで
+resource ownerを1つしか持てず、分割するとPATが2本必要になるため（前述）。
+
+Teamへの引き上げ（選択肢C）は**当面見送る。** Free → Teamはいつでも切り替えられるため、
+先に払う理由がない。$4/月で追加的に得られるものは、実測にもとづくと次の2点に絞られる。
 
 - privateリポジトリ4件の「最後のマージ1クリック」の自動化
 - privateリポジトリ4件でのorganization secrets
 
 Actions分数の増枠は実測上不要（199分/月に対して2,000分）、publicリポジトリの
-organization secretsはFreeで足りる。まずBで移行し、privateリポジトリを実際に運用へ載せてみて
-手動マージが煩わしいと感じた時点でCへ上げるのが、費用対効果として合理的である。
+organization secretsはFreeで足りる。privateリポジトリを実際に無人運用へ載せてみて、
+手動マージが煩わしいと感じた時点でCへ上げる。
 
 ## 参考リンク
 
