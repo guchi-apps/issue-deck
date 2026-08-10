@@ -22,6 +22,24 @@ org配下へ移したリポジトリのワークフローは動かない。
 ここが済むまで、org配下のリポジトリはワークフローが動かない。最優先。
 
 - [x] 開発App `issue-deck-dev`（App ID 4445268）も`guchi-apps`へ移管する（プレビュー環境が使用）
+- [ ] **Claude Code GitHub App（<https://github.com/apps/claude>）を`guchi-apps`へインストールする**
+
+      `anthropics/claude-code-action`が使うAnthropic提供のサードパーティAppで、IssueDeckの
+      自作App（本番・`issue-deck-dev`）とは**別物**。他人のAppなので所有権移管ではなく、
+      org側へ新規インストールする。対象リポジトリの選択も必要。
+
+      未インストールだと、Claudeを動かす全ワークフロー（`claude-review-develop.yml`・
+      `reusable-issue-dispatch.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`）が
+      次のエラーで失敗する。
+
+      ```
+      App token exchange failed: 401 Unauthorized
+      Claude Code is not installed on this repository.
+      ```
+
+      guchi-apps/issue-deck#999 で実際に発生した（`claude-review`ジョブが失敗。
+      必須チェックは`lint-and-build`のみのためマージ自体はブロックされないが、
+      自動レビューが効かなくなる）。
 - [x] 本番AppのApp ID・slug・Client ID・Webhook URLが移管の前後で変わっていないことを確認する
   - [x] 変わっていた場合、1Passwordの`apps/issue-deck`（`github-app-id`・
         `github-app-private-key-base64`・`github-app-slug`）と本番`.env`を更新する

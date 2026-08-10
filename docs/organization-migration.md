@@ -227,6 +227,11 @@ Organizationをresource ownerとする新しいFine-grained PATを発行し、`W
 - **GitHub Appのorganizationへの再インストール。** リポジトリのtransferではApp
   インストールは追従しない。org側でインストールし、対象リポジトリを選択し直す。
   App自体（App ID・秘密鍵・Webhook URL）は変更不要なので、`.env`や1Password側の値はそのまま使える。
+- **Claude Code GitHub App（<https://github.com/apps/claude>）のorganizationへのインストール。**
+  `anthropics/claude-code-action`が使うAnthropic提供のサードパーティAppで、IssueDeckの自作Appとは
+  別物。他人のAppなので所有権移管ではなく新規インストールになる。未インストールだと
+  Claudeを動かす全ワークフローが`401 Unauthorized - Claude Code is not installed on this repository`
+  で失敗する（guchi-apps/issue-deck#999で実際に発生）。
 - **`WORKFLOW_PAT`の再発行と差し替え**（上記の制約による）。1Password側の値も更新する。
 - **Supabase Authが使うOAuth Appに対する、organizationのサードパーティアクセス許可。**
 - **ブランチ保護ルールの再確認。** transfer後に必須ステータスチェックが維持されているか確認する。
