@@ -116,7 +116,7 @@ export function currentGithubApiFeature(): GithubApiFeature {
 
 /**
  * GitHub APIのURLを、集計しやすい形（可変部分をプレースホルダに置換したパス）へ正規化する。
- * 例: `https://api.github.com/repos/m-guchi/issue-deck/issues/123/comments?per_page=100`
+ * 例: `https://api.github.com/repos/guchi-apps/issue-deck/issues/123/comments?per_page=100`
  *     -> `/repos/{owner}/{repo}/issues/{n}/comments`
  */
 export function toEndpointLabel(url: string): string {

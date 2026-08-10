@@ -71,7 +71,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 - `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
 - `.github/workflows/release-develop-to-main.yml`（Phase6、作成済み）
-- `.github/workflows/shared-knowledge-propose.yml`（共有知識層、作成済み。承認済みの知見を`m-guchi/docs`へのPRに変換する。[docs/shared-knowledge.md](shared-knowledge.md)参照）
+- `.github/workflows/shared-knowledge-propose.yml`（共有知識層、作成済み。承認済みの知見を`guchi-apps/docs`へのPRに変換する。[docs/shared-knowledge.md](shared-knowledge.md)参照）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
@@ -80,8 +80,8 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
-- 共有知識リポジトリ（`m-guchi/docs`）への`secrets.WORKFLOW_PAT`の到達性（共有知識層。issue-deckのPATはRepository accessが「All repositories」のため追加設定は不要。**到達できない場合でも共有知識のcheckoutが失敗するだけで、各ワークフローは`continue-on-error`で続行する**）
-- 共有知識リポジトリ`m-guchi/docs`側へのファイル追加（`CLAUDE.md`・`agent-rules/`・`knowledge/`等。[docs/shared-knowledge.md](shared-knowledge.md)「6. 共有知識リポジトリ側に必要なファイル」参照。**対応済み**）
+- 共有知識リポジトリ（`guchi-apps/docs`）への`secrets.WORKFLOW_PAT`の到達性（共有知識層。issue-deckのPATはRepository accessが「All repositories」のため追加設定は不要。**到達できない場合でも共有知識のcheckoutが失敗するだけで、各ワークフローは`continue-on-error`で続行する**）
+- 共有知識リポジトリ`guchi-apps/docs`側へのファイル追加（`CLAUDE.md`・`agent-rules/`・`knowledge/`等。[docs/shared-knowledge.md](shared-knowledge.md)「6. 共有知識リポジトリ側に必要なファイル」参照。**対応済み**）
 
 ## 未解決の課題・申し送り事項
 

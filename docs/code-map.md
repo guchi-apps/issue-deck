@@ -103,4 +103,4 @@ pnpm test:unit   # vitestのみ
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
-[knowledge/deployment.md](https://github.com/m-guchi/docs/blob/main/knowledge/deployment.md) を参照。
+[knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
