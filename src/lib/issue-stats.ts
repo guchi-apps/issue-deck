@@ -297,6 +297,8 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
     a.title === b.title &&
     a.body === b.body &&
     a.state === b.state &&
+    // Project Statusが変われば進捗表示も変わるため、再描画の判定に含める（#991）
+    a.projectStatus === b.projectStatus &&
     a.commentCount === b.commentCount &&
     a.updatedAt === b.updatedAt &&
     a.favorite === b.favorite &&
