@@ -13,6 +13,9 @@ type MobilePullRequestsScreenProps = {
   error: string | null;
   onRefresh: () => void;
   onBack: () => void;
+  /** PRを選んだとき。スマホでは同じ画面枠のままPR詳細へ切り替える（#1087） */
+  onSelectPullRequest: (pullRequest: OpenPullRequest) => void;
+  onMerged: (pullRequest: OpenPullRequest) => void;
 };
 
 /**
@@ -27,6 +30,8 @@ export function MobilePullRequestsScreen({
   error,
   onRefresh,
   onBack,
+  onSelectPullRequest,
+  onMerged,
 }: MobilePullRequestsScreenProps) {
   return (
     <PullRequestList
@@ -36,6 +41,8 @@ export function MobilePullRequestsScreen({
       isLoading={isLoading}
       error={error}
       onRefresh={onRefresh}
+      onSelectPullRequest={onSelectPullRequest}
+      onMerged={onMerged}
       className="h-full"
       footerSpacing
       headerLeading={

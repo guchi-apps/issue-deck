@@ -10,14 +10,19 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - worktreeは本体リポジトリの外、`~/apps/issue-deck-worktrees/<ブランチ名>/` に作成する。本体 `~/apps/issue-deck` は常にレビュー・統合エージェント用の `develop` 最新チェックアウトとして空けておく。
 - worktree作成後に必要な準備:
   - `.env.local` を本体からコピーする（`.gitignore`対象でworktreeに複製されないため。symlinkではなくコピーとし、将来worktreeごとに値を変える余地を残す）
+    - コピーは新規作成時の1回だけで、その後は追随しない。そのため**既存worktreeの再開時は、本体の`.env.local`にあってworktree側に無いキーだけを値ごと追記する**（#1099）。既存キーの値は書き換えないので、ローカルで書き換えている場合も壊れない。`PORT`はworktreeごとに採番するため対象外。worktree側でコメントアウトしているキーは「意図的に無効化している」とみなして復活させない。追記したキーは**キー名のみ**を表示する（値はログに出さない）
   - `pnpm install`（pnpmのcontent-addressableストアにより高速）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
 - 開発サーバー（`pnpm dev`）のポートは`start-issue.sh`/`.ps1`が`.env.local`に`PORT=4000 + Issue番号`を自動設定する（例: issue-46 → 4046）。複数Issueのworktreeで同時に`pnpm dev`を起動しても衝突せず、developへマージする前に人間がブラウザ（`http://localhost:<ポート>`）で直接画面を確認できる。実装エージェントは画面に関わる変更のPRで、このURLを「確認方法」に記載する。
-- ポート設定に加えて、開発サーバーの起動・停止も自動化されている。`start-issue.sh`は`prepare_issue()`完了後、最終的に`exec claude ...`でClaude CLIへプロセス置き換えするのではなく、新規`scripts/run-issue-session.sh`（Issue番号・devポート・プロンプトファイルパスを引数に取るラッパー）を`exec`する。このラッパーが`pnpm dev`をバックグラウンド起動（ログ・PIDは`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.{log,pid}`）したうえで、`claude`を（execせず）フォアグラウンドの子プロセスとして実行し、`trap ... EXIT HUP TERM`でclaude終了時に開発サーバーのプロセスグループを停止する。Ctrl+C（`INT`）は意図的にtrapしない（1回の押下は現在の処理の中断であることが多く、devサーバーまで止めると過剰停止になるため）。`kill -9`やWSLごとのクラッシュ等、trapで捕捉できない強制終了時はPIDファイルが残るため、`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.pid`のPIDを手動で`kill`するのがフォールバック手段になる。
+- ポート設定に加えて、開発サーバーの起動・停止も自動化されている。`start-issue.sh`は`prepare_issue()`完了後、最終的に`exec claude ...`でClaude CLIへプロセス置き換えするのではなく、新規`scripts/run-issue-session.sh`（Issue番号・devポート・プロンプトファイルパスを引数に取るラッパー）を`exec`する。このラッパーが`pnpm dev`をバックグラウンド起動（ログ・PIDは`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.{log,pid}`）したうえで、`claude`を（execせず）フォアグラウンドの子プロセスとして実行し、`trap ... EXIT HUP TERM`でclaude終了時に開発サーバーのプロセスグループを停止する。`pnpm dev`のstdinは`/dev/null`に向ける（#1094）。バックグラウンドジョブのまま端末を読む子プロセスがいると`SIGTTIN`でプロセスグループごと停止し、devサーバーが起動しないまま無反応になるため。Ctrl+C（`INT`）は意図的にtrapしない（1回の押下は現在の処理の中断であることが多く、devサーバーまで止めると過剰停止になるため）。`kill -9`やWSLごとのクラッシュ等、trapで捕捉できない強制終了時はPIDファイルが残るため、`$ISSUE_DECK_WORKTREE_BASE/.dev-servers/issue-<n>.pid`のPIDを手動で`kill`するのがフォールバック手段になる。
 - `start-issue.sh`はWSLのターミナルから直接叩くほか、issue-deckの画面の「ローカルで開始」からワンクリックで起動できる（`issuedeck://`プロトコル → `scripts/start-local-session.sh` 経由。#1049）。詳細は[local-quick-start.md](local-quick-start.md)。
 - VSCodeのClaude Codeタブを横に並べて複数Issueを並行で進める場合は、タブ内で`/issue <番号>`（`.claude/commands/issue.md`）を使う。`start-issue.sh --prepare-only`でworktreeだけを用意し、そのセッションがそのまま実装に入る（#1049）。**本体チェックアウトは全タブで共有されるため、そこでのブランチ切り替えは他タブのセッションを巻き込む。**
-- `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
+- `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。ただしワンクリック起動（`start-local-session.sh`）から始まったセッションでは、UAC待ちから戻らずタブが固まる／devサーバーが起動しないため、`ISSUE_DECK_SKIP_LAN_SETUP=1`により`start-issue.sh`・`dev.sh`の双方でスキップする（#1076・#1094。詳細は[local-quick-start.md](local-quick-start.md)）。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
+- worktreeは自動では消えないため、マージ済みのものは`scripts/cleanup-worktrees.sh`で掃除する（#1100）。「PRがマージ済み」「未コミットの変更が無い」「ブランチのコミットがすべて`origin/develop`に入っている」「そのIssueのセッション・開発サーバーが動いていない」「実行中のworktreeでない」を**すべて**満たすものだけを対象とし、削除対象を一覧表示して確認を取ってから、worktree・ローカルブランチ・そのIssue用の生成物（起動用プロンプト、devサーバーのログ・PIDファイル）を消す。`--dry-run`で判定だけ、`--yes`で確認省略、`--issue <番号>`で対象を1件に絞れる。非対話実行で`--yes`が無い場合は表示のみで終了する。リモートブランチには触れない。
+- 掃除で解放されるディスクは、`du -sh`で見えるworktreeのサイズ（1つあたり1GB前後）よりかなり小さい。pnpmは`node_modules`の実体をストアへのハードリンクとして持つため（実測でリンク数18）、worktree単位の`du`は他worktreeと共有している分まで数える。2026-08-11に6件（`du`合計6.7GB）を削除したときの`df`の変化は約1GBだった。掃除コマンドはこの旨を注記付きで表示する。
+- 掃除を`run-issue-session.sh`のtrap（セッション終了時）で自動化はしない。「あとで見返したい」「PRにコメントが付いたら直す」という用途を壊すため、明示的に走らせるコマンドにとどめている。
+- 放置すると効くのはディスクだけではない。#1076でworktreeを再利用するようにしたため、**マージ済みIssueで再開すると、developから分岐し直されていない古いブランチのまま作業を始めてしまう**（以前は「既に存在します」で止まっていた）。そのため`start-issue.sh`は再開時にマージ済みPRの有無を確認し、見つかったら警告する。詳細は[local-quick-start.md](local-quick-start.md)の「マージ済みIssueで再開したときの扱い」。
 
 ## エージェントの役割
 
@@ -96,6 +101,8 @@ Actions上でClaude Codeを動かす際の知見、共通コーディング方�
    `01.planning`はこの判定に含めない。無人実行の計画提示ステップが付けた`01.planning`は実装着手時まで外れず、正規の承認時点の状態が「`01.planning` + `00.check-user` + `21.plan-required`」になるため、含めると本来の承認経路が動かなくなる。
 2. **`11.local`ラベル**: 付いている間は、トリガー経路によらず`mode=skip`とする（読み取り専用の`mode=ask`だけは例外として通す）。1のガードはラベルを付け替える順序によってはすり抜ける（ローカル側が`02.wip`を付ける前に`00.check-user`を外した場合など）ため、人間が明示的に立てられる停止フラグを併せて用意する。
    `@claude`コメント経由でスキップした場合は、無言で終わらせず「`11.local`が付いているため無人実行では対応しない」旨をIssueへ返信する。
+   付与は人間の手だけに頼らず、ローカルセッションの起動経路が自動で行う。画面の「ローカルで開始」ボタンは起動前に、`scripts/start-issue.sh`は起動時（`prepare_issue`）に付ける。ターミナルから`start-issue.sh`を直接叩いた場合に何も付かず二重起動を止めるものが無かったのを、後者で塞いだ（#1097）。詳細は[local-quick-start.md](local-quick-start.md)「起動時のラベル付与」。
+   **外すのは付けた側の責任**で、自動では外れない。ローカルでの作業を終えてPRを無人実行側へ引き継ぐ時点で外す（付いている間は追加対応・レビュー指摘への対応も無人実行では動かない）。
    順番待ちの間に`11.local`が付いた場合も、`dispatch`ジョブ冒頭の陳腐化チェックで検知して中止する。
 
 `11.local`は`0x.`始まりではないため、issue-deck画面上は進捗ステップ（`WorkflowStepBadge`）ではなく通常のラベルとして表示・編集できる（`src/lib/issue-status.ts`の`isProgressLabel`）。あわせて番号帯が重ならないよう、優先度ラベルを`80.Priority: High`・`89.Priority: low`へリネームした。

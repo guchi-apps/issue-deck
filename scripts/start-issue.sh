@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
+# issue-deck-local-session: v1
+#
 # Issueごとに専用ブランチ・git worktreeを作成し、実装エージェント用のClaude Codeセッションを起動する
+#
+# 冒頭の `issue-deck-local-session:` は「ローカル起動プロトコル」の版数を宣言するマーカー（#1073）。
+# ワンクリック起動の受け口（scripts/start-local-session.sh）と画面がこの行を見て、対応可否を
+# 判定する。issue-deck自身もこの契約に従う側なので、他リポジトリと同じように宣言する。
+# 約束の内容は docs/multi-agent/local-quick-start.md を参照。
 #
 # 使い方:
 #   scripts/start-issue.sh <issue番号> [issue番号...]
 #   scripts/start-issue.sh --prepare-only <issue番号> [issue番号...]
+#   scripts/start-issue.sh --recreate <issue番号>      既存worktreeを捨ててdevelopから作り直す
+#   scripts/start-issue.sh --no-recreate <issue番号>   作り直しの確認を出さず必ず再利用する
 #
 # --prepare-only はworktree・ブランチ・起動用プロンプトの準備だけを行い、開発サーバーも
 # Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
@@ -11,9 +20,17 @@
 #
 # worktreeが既にある場合は作り直さず再利用する。一度閉じたセッションに戻るための経路であり、
 # ワンクリック起動（画面の「ローカルで開始」）を2回目以降に押しても使える（#1076）。
+# ただしそのIssueのPRが既にマージ済みなら、developから分岐し直されていない古いブランチのまま
+# 作業を始めてしまわないよう警告し、安全に捨てられる場合は作り直すかを尋ねる（#1100）。
+# 溜まったworktreeの掃除は scripts/cleanup-worktrees.sh を使う。
+#
+# 起動時にIssueへ `11.local`（無人実行との二重起動を防ぐ停止フラグ。#1097）と進捗ラベル
+# （`01.planning`/`02.wip`。#1096）を付ける。どの起動経路（ターミナル・画面のボタン・
+# `/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが起きない。
 #
 # 環境変数:
-#   ISSUE_DECK_SKIP_LAN_SETUP=1  LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定なら既定の4000）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -25,15 +42,37 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Windows Terminalのタブ名に出すリポジトリ名。複数リポジトリ・複数Issueのタブを同時に開くため、
+# 「どのリポジトリのどのIssueか」がタブだけで分かるようにする（#1105）。
+REPO_NAME="$(basename -s .git "$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null || true)")"
+if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
+  REPO_NAME="$(basename "$ROOT")"
+fi
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 PROMPT_TEMPLATE="$ROOT/scripts/prompts/implementation-agent.md"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
+# shellcheck source=scripts/lib/worktree-status.sh
+source "$ROOT/scripts/lib/worktree-status.sh"
+
+# 端末のタイトル（Windows Terminalのタブ名）を書き換える。worktree作成・pnpm installの間も
+# どのIssueの準備中かがタブから分かるようにする（#1105）。この後Claude Codeが起動すると、
+# 同じ書式の`--name`（scripts/run-issue-session.sh）が引き継ぐ。
+# 端末以外へ出力しているときは、エスケープシーケンスがログに混ざるだけなので何もしない。
+set_terminal_title() {
+  [[ -t 1 ]] || return 0
+  printf '\033]0;%s\007' "$1"
+}
+
 PREPARE_ONLY=0
+# マージ済みIssueのworktreeを作り直すかどうか。auto=マージ済みを検出したら対話で尋ねる（#1100）
+RECREATE_MODE=auto
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
+    --recreate) RECREATE_MODE=always ;;
+    --no-recreate) RECREATE_MODE=never ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
@@ -45,7 +84,7 @@ set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 SKIP_LAN_SETUP="${ISSUE_DECK_SKIP_LAN_SETUP:-0}"
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/start-issue.sh [--prepare-only] <issue番号> [issue番号...]" >&2
+  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] <issue番号> [issue番号...]" >&2
   exit 1
 fi
 
@@ -80,12 +119,213 @@ done
 
 mkdir -p "$PROMPT_DIR"
 
+# マージ済みPRを持つ既存worktreeを作り直すかどうかを決める（#1100）。作り直す場合のみ0を返す。
+# 判断材料と、作り直さない場合の理由もここで表示する。
+decide_recreate() {
+  local n="$1" merged_pr="$2" dirty_count="$3"
+  echo "#$n: 警告: このIssueのPR #$merged_pr は既にマージ済みです。"
+  echo "#$n: 　　　 ブランチ issue-$n はdevelopへ取り込み済みで、以降のdevelopの変更を含みません。"
+
+  if [[ "$RECREATE_MODE" == "never" ]]; then
+    echo "#$n: --no-recreate が指定されているため、このまま再利用します。"
+    return 1
+  fi
+
+  # 「入っていないコミットがある」の判定はorigin/developが最新であることが前提。再開経路では
+  # まだfetchしていないため、ここで最新化する（失敗しても判定は削除しない側に倒れるだけ）。
+  git -C "$ROOT" fetch origin develop >/dev/null 2>&1 || true
+
+  # 作り直す＝worktreeとブランチを消すこと。消して失われるものが残っている場合は作り直さない。
+  local blocker=""
+  if [[ "$dirty_count" -gt 0 ]]; then
+    blocker="未コミットの変更が $dirty_count 件あります"
+  elif ! worktree_branch_in_develop "$ROOT" "issue-$n"; then
+    blocker="origin/develop に入っていないコミットがあります"
+  elif worktree_session_running "$n" "$WORKTREE_BASE"; then
+    blocker="このIssueのセッションまたは開発サーバーが動いています"
+  fi
+  if [[ -n "$blocker" ]]; then
+    if [[ "$RECREATE_MODE" == "always" ]]; then
+      echo "Error: --recreate が指定されていますが、${blocker}。手動で確認してください。" >&2
+      exit 1
+    fi
+    echo "#$n: ただし${blocker}。作り直すと失われるため、このまま再利用します。"
+    return 1
+  fi
+
+  if [[ "$RECREATE_MODE" == "always" ]]; then
+    return 0
+  fi
+
+  # ワンクリック起動のタブは端末を持つので尋ねられる。--prepare-only（Claude Codeのタブから
+  # 呼ばれる経路）は端末を持たないため、勝手に消さず案内だけ出して再利用する。
+  if [[ ! -t 0 ]]; then
+    echo "#$n: 非対話実行のため、このまま再利用します。最新のdevelopから作り直す場合は --recreate を付けて実行してください。"
+    return 1
+  fi
+
+  local answer
+  read -r -p "#$n: worktreeを削除して最新のdevelopから作り直しますか？ [Y/n]: " answer
+  case "$answer" in
+    [nN]|[nN][oO]) echo "#$n: 既存のworktreeをそのまま使います。"; return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# 既存のworktree・ブランチを削除する。作り直し自体は呼び出し元の新規作成経路に任せる。
+remove_worktree() {
+  local n="$1" dir="$2"
+  # 自分の足元を消すとgitの内部状態を巻き込むため、カレントディレクトリが対象の中なら止める。
+  local current_dir
+  current_dir="$(pwd -P)"
+  if [[ "$current_dir" == "$dir" || "$current_dir" == "$dir"/* ]]; then
+    echo "Error: 削除対象のworktreeの中で実行されているため作り直せません: $dir" >&2
+    echo "       別のディレクトリ（例: $ROOT）へ移動してから実行してください。" >&2
+    exit 1
+  fi
+  echo "#$n: 既存のworktree・ブランチを削除しています..."
+  if ! git -C "$ROOT" worktree remove "$dir"; then
+    echo "Error: worktreeの削除に失敗しました: $dir" >&2
+    exit 1
+  fi
+  # コミットがすべて origin/develop に入っていることを確認済みなので -D でよい（-d は
+  # 現在のHEADを基準に判定するため、本体が別のIssueブランチを開いていると消せない）。
+  git -C "$ROOT" branch -D "issue-$n" >/dev/null
+  rm -f "$WORKTREE_BASE/.dev-servers/issue-$n.log" "$WORKTREE_BASE/.dev-servers/issue-$n.pid"
+}
+
+# 起動時にIssueへ付けるラベルを決めて付与する（#1096・#1097）。
+#
+# - `11.local`: ローカルセッションで対応中であることを示す停止フラグ。付いている間は
+#   無人実行（`claude-issue-dispatch.yml`）がこのIssueに手を出さない（#1097）
+# - 進捗ラベル: `21.plan-required` が付いていれば `01.planning`、無ければ `02.wip`（#1096）。
+#   ラベルを付ければWebhook経由でGitHub ProjectsのStatusも追随するため、Statusの報告は行わない
+#
+# **既に進捗ラベルが付いている場合は進捗ラベルに触らない。** 再開（#1076）で2回目以降に
+# 起動したときに、`03.d:marge`まで進んだIssueを`02.wip`へ巻き戻さないため。
+#
+# ラベル付与に失敗しても起動は止めない（起動できないより、記録が遅れる方が軽い。画面の
+# 「ローカルで開始」ボタンも`11.local`について同じ方針を取っている）。
+apply_start_labels() {
+  local n="$1"
+  # 既に付いているラベル名（1行1つ）。判定に使うだけなのでIssue取得のJSONから読み、
+  # 追加のAPI呼び出しはしない。
+  local existing="$2"
+  local add_labels=()
+
+  if ! printf '%s\n' "$existing" | grep -Fxq "11.local"; then
+    add_labels+=("11.local")
+  fi
+
+  local current_progress="" p
+  for p in "01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge" "09.main"; do
+    if printf '%s\n' "$existing" | grep -Fxq "$p"; then
+      current_progress="$p"
+      break
+    fi
+  done
+  if [[ -z "$current_progress" ]]; then
+    if printf '%s\n' "$existing" | grep -Fxq "21.plan-required"; then
+      add_labels+=("01.planning")
+    else
+      add_labels+=("02.wip")
+    fi
+  fi
+
+  if [[ ${#add_labels[@]} -eq 0 ]]; then
+    echo "#$n: ラベルは付与済みです（進捗: ${current_progress:-なし}）。"
+    return 0
+  fi
+
+  local gh_args=() l
+  for l in "${add_labels[@]}"; do
+    gh_args+=(--add-label "$l")
+  done
+  if gh issue edit "$n" --repo guchi-apps/issue-deck "${gh_args[@]}" >/dev/null; then
+    echo "#$n: ラベルを付与しました（$(IFS=, ; echo "${add_labels[*]}")）。"
+  else
+    echo "#$n: 警告: ラベル（$(IFS=, ; echo "${add_labels[*]}")）の付与に失敗しました。手動で付けてください。" >&2
+  fi
+}
+
+# 本体の .env.local にあってworktree側に無いキーだけを、値ごと追記する（#1099）。
+# worktreeの .env.local は作成時のコピーで固定されるため、本体に後から足した環境変数が
+# 既存のworktreeへ届かず、本体と違う挙動で画面確認をすることになっていた。
+# 既存キーの値には触れない（ローカルで書き換えている場合を壊さないため）。値はログに出さず、
+# 追記したキー名だけを表示する。
+sync_missing_env_keys() {
+  local issue_number="$1"
+  local source_file="$2"
+  local target_file="$3"
+  # 補完に失敗してもセッションの起動自体は妨げない（起動できない方が困るため）。
+  local added
+  if ! added="$(python3 - "$source_file" "$target_file" <<'PY'
+import pathlib
+import re
+import sys
+
+source_path = pathlib.Path(sys.argv[1])
+target_path = pathlib.Path(sys.argv[2])
+
+# PORTはworktreeごとに採番して別途書き込むため、同期の対象から外す。
+EXCLUDED_KEYS = {"PORT"}
+
+ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+# コメントアウトされた代入は「意図的に無効化している」とみなし、上書き復活させない。
+COMMENTED_ASSIGNMENT = re.compile(r"^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+source_lines = source_path.read_text(encoding="utf-8").splitlines()
+target_text = target_path.read_text(encoding="utf-8")
+
+existing = set()
+for line in target_text.splitlines():
+    matched = ASSIGNMENT.match(line) or COMMENTED_ASSIGNMENT.match(line)
+    if matched:
+        existing.add(matched.group(1))
+
+added_keys = []
+appended_lines = []
+for i, line in enumerate(source_lines):
+    matched = ASSIGNMENT.match(line)
+    if not matched:
+        continue
+    key = matched.group(1)
+    if key in EXCLUDED_KEYS or key in existing:
+        continue
+    # 何のためのキーかが分かるよう、直前の連続するコメント行も一緒に持っていく。
+    start = i
+    while start > 0 and source_lines[start - 1].lstrip().startswith("#"):
+        start -= 1
+    appended_lines.extend(source_lines[start:i])
+    appended_lines.append(line)
+    added_keys.append(key)
+
+if appended_lines:
+    if target_text and not target_text.endswith("\n"):
+        target_text += "\n"
+    if target_text and not target_text.endswith("\n\n"):
+        target_text += "\n"
+    target_path.write_text(target_text + "\n".join(appended_lines) + "\n", encoding="utf-8")
+
+# 値は出力しない（キー名のみ）。
+sys.stdout.write(" ".join(added_keys))
+PY
+  )"; then
+    echo "警告: $target_file の不足キーの補完に失敗しました。本体の .env.local と見比べてください。" >&2
+    return 0
+  fi
+  if [[ -n "$added" ]]; then
+    echo "#$issue_number: .env.local に不足していたキーを本体から追記しました: $added"
+  fi
+}
+
 # issue番号ごとにworktree・ブランチを準備し、起動用プロンプトを生成する。
 # 戻り値として WORKTREE_DIR / PROMPT_FILE / DEV_PORT をグローバル変数に設定する。
 prepare_issue() {
   local n="$1"
   WORKTREE_DIR="$WORKTREE_BASE/issue-$n"
   PROMPT_FILE="$PROMPT_DIR/issue-$n.md"
+  set_terminal_title "$REPO_NAME #$n"
 
   # 既存のworktreeは作り直さず再利用する（#1076）。ただしworktreeとして壊れている場合や
   # 別ブランチを開いている場合は、意図しない場所で作業を続けることになるため止める。
@@ -104,9 +344,18 @@ prepare_issue() {
     reuse_worktree=1
     echo "#$n: 既存のworktreeを再利用します（$WORKTREE_DIR）。"
     local dirty_count
-    dirty_count="$(git -C "$WORKTREE_DIR" status --porcelain | wc -l)"
+    dirty_count="$(worktree_dirty_count "$WORKTREE_DIR")"
     if [[ "$dirty_count" -gt 0 ]]; then
       echo "#$n: 未コミットの変更が $dirty_count 件あります。前回の続きから作業してください。"
+    fi
+
+    # マージ済みのIssueで再開すると、developから分岐し直されないまま古いブランチで作業を
+    # 始めてしまう。#1076で再開できるようにしたぶん、黙って進むと気づきにくい（#1100）。
+    local merged_pr
+    merged_pr="$(worktree_merged_pr "$n")"
+    if [[ -n "$merged_pr" ]] && decide_recreate "$n" "$merged_pr" "$dirty_count"; then
+      remove_worktree "$n" "$WORKTREE_DIR"
+      reuse_worktree=0
     fi
   fi
 
@@ -117,6 +366,16 @@ prepare_issue() {
     exit 1
   fi
 
+  # ラベルの付与は、worktree作成やpnpm installより先に行う。二重起動の停止フラグ
+  # （`11.local`）は早く立つほど効くうえ、以降の重い処理が失敗しても着手した記録は残る。
+  local issue_labels
+  if issue_labels="$(printf '%s' "$issue_json" | python3 -c 'import json, sys; print("\n".join(l["name"] for l in json.load(sys.stdin).get("labels") or []))')"; then
+    apply_start_labels "$n" "$issue_labels"
+  else
+    # 解析できないまま付与すると、既に進んでいる進捗ラベルを巻き戻しかねないのでスキップする。
+    echo "#$n: 警告: ラベル一覧を解析できなかったため、起動時のラベル付与をスキップします。" >&2
+  fi
+
   if [[ "$reuse_worktree" -eq 0 ]]; then
     echo "#$n: develop を最新化しています..."
     git -C "$ROOT" fetch origin develop
@@ -124,25 +383,31 @@ prepare_issue() {
     echo "#$n: worktree・ブランチ issue-$n を作成しています..."
     if ! git -C "$ROOT" worktree add "$WORKTREE_DIR" -b "issue-$n" origin/develop; then
       echo "Error: worktree/ブランチの作成に失敗しました（ブランチ issue-$n が既に存在する可能性があります）。" >&2
+      echo "       マージ済みのブランチが残っているだけなら scripts/cleanup-worktrees.sh --issue $n で掃除できます。" >&2
       exit 1
     fi
   fi
 
   # 再開時は既存の .env.local を尊重する（ローカルで書き換えている場合があるため）。
-  # 無いときだけ本体からコピーする。
+  # 無いときだけ本体からコピーし、既にある場合は不足しているキーだけを補う（#1099）。
   if [[ ! -f "$WORKTREE_DIR/.env.local" ]]; then
     if [[ -f "$ROOT/.env.local" ]]; then
       cp "$ROOT/.env.local" "$WORKTREE_DIR/.env.local"
     else
       echo "警告: $ROOT/.env.local が無いため .env.local をコピーしませんでした。" >&2
     fi
+  elif [[ -f "$ROOT/.env.local" ]]; then
+    sync_missing_env_keys "$n" "$ROOT/.env.local" "$WORKTREE_DIR/.env.local"
   fi
 
   # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
-  DEV_PORT=$((4000 + n))
+  # ワンクリック起動からはissue-deck側の受け口がベース値を渡してくる。リポジトリごとの帯を
+  # 一箇所で管理するための約束で（#1073）、渡されない場合は既定の4000を使う。
+  DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
   if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
-    sed -i '/^PORT=/d' "$WORKTREE_DIR/.env.local"
-    printf '\nPORT=%s\n' "$DEV_PORT" >>"$WORKTREE_DIR/.env.local"
+    # `sed`で消して追記する形にすると、再開のたびに先頭改行が積もって空行が増える（実測で
+    # 何度も再開したworktreeだけ空行が4行多かった）。既存行があれば置換する共通スクリプトを使う。
+    bash "$ROOT/scripts/update-env-file.sh" "$WORKTREE_DIR/.env.local" PORT "$DEV_PORT"
   fi
   echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
 
@@ -314,7 +579,7 @@ for n in "$@"; do
   if [[ "$WT_AVAILABLE" -eq 1 && -n "$DISTRO" ]]; then
     echo "#$n: 新しいWindows Terminalタブで開発サーバーを自動起動し、セッションを起動します..."
     cmd="$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
-    wt.exe -w 0 new-tab --title "issue-$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
+    wt.exe -w 0 new-tab --title "$REPO_NAME #$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
   else
     echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
     echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""

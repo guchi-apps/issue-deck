@@ -1,4 +1,4 @@
-<#
+﻿<#
   Windows側から wsl.exe 経由で scripts/start-issue.sh を呼び出す薄いラッパー。
   Issue番号ごとに新しいWindows Terminalタブを開き、その中でstart-issue.shを実行する。
 
@@ -31,8 +31,11 @@ foreach ($n in $IssueNumbers) {
     }
 }
 
+# タブ名に出すリポジトリ名。どのリポジトリのどのIssueかがタブだけで分かるようにする（#1105）。
+$repoName = Split-Path -Leaf $RepoPath
+
 foreach ($n in $IssueNumbers) {
     Write-Host "#$n : 新しいWindows Terminalタブで scripts/start-issue.sh を起動します..."
     $bashCmd = "cd $RepoPath && ./scripts/start-issue.sh $n"
-    wt.exe -w 0 new-tab --title "issue-$n" -- wsl.exe -d $Distro -- bash -lc $bashCmd
+    wt.exe -w 0 new-tab --title "$repoName #$n" -- wsl.exe -d $Distro -- bash -lc $bashCmd
 }

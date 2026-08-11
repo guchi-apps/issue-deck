@@ -6,6 +6,7 @@ import { StartLocalSessionButton } from "@/components/dashboard/start-local-sess
 import type { Issue, IssueLabel } from "@/types/issue";
 
 const updateIssue = vi.fn();
+const onFirstLaunch = vi.fn();
 
 vi.mock("@/hooks/use-issue-mutations", () => ({
   useIssueMutations: () => ({
@@ -64,17 +65,56 @@ describe("StartLocalSessionButton", () => {
   afterEach(() => {
     cleanup();
     updateIssue.mockReset();
+    onFirstLaunch.mockReset();
+    // セットアップ手順を見せたかの記録はlocalStorageに残るため、テスト間で持ち越さない（#1088）
+    window.localStorage.clear();
   });
 
   it("openなIssueではボタンを表示する", () => {
-    render(<StartLocalSessionButton issue={makeIssue()} onIssueUpdated={vi.fn()} />);
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /ローカルで開始/ })).not.toBeNull();
+  });
+
+  it("ローカル起動プロトコルに適合していないリポジトリでは表示しない（#1073）", () => {
+    const { container } = render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={false}
+      />,
+    );
+
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("リポジトリ情報が無い場合は表示する（誤って導線を消さない）", () => {
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={undefined}
+      />,
+    );
 
     expect(screen.getByRole("button", { name: /ローカルで開始/ })).not.toBeNull();
   });
 
   it("closeされたIssueでは表示しない（起動しても実装対象が無いため）", () => {
     const { container } = render(
-      <StartLocalSessionButton issue={makeIssue({ state: "closed" })} onIssueUpdated={vi.fn()} />,
+      <StartLocalSessionButton
+        issue={makeIssue({ state: "closed" })}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+      />,
     );
 
     expect(container.firstChild).toBeNull();
@@ -85,6 +125,7 @@ describe("StartLocalSessionButton", () => {
       <StartLocalSessionButton
         issue={makeIssue({ repositoryFullName: "guchi-apps/issue deck" })}
         onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
       />,
     );
 
@@ -98,7 +139,13 @@ describe("StartLocalSessionButton", () => {
     updateIssue.mockResolvedValue(updated);
     const onIssueUpdated = vi.fn();
 
-    render(<StartLocalSessionButton issue={issue} onIssueUpdated={onIssueUpdated} />);
+    render(
+      <StartLocalSessionButton
+        issue={issue}
+        onIssueUpdated={onIssueUpdated}
+        onFirstLaunch={onFirstLaunch}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
 
     await waitFor(() => {
@@ -119,6 +166,7 @@ describe("StartLocalSessionButton", () => {
       <StartLocalSessionButton
         issue={makeIssue({ labels: [label("11.local"), label("50.feature")] })}
         onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
@@ -134,12 +182,58 @@ describe("StartLocalSessionButton", () => {
     updateIssue.mockResolvedValue(null);
     const onIssueUpdated = vi.fn();
 
-    render(<StartLocalSessionButton issue={makeIssue()} onIssueUpdated={onIssueUpdated} />);
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={onIssueUpdated}
+        onFirstLaunch={onFirstLaunch}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
 
     await waitFor(() => {
       expect(location.href).toBe("issuedeck://start/guchi-apps/issue-deck/1049");
     });
     expect(onIssueUpdated).not.toHaveBeenCalled();
+  });
+
+  // プロトコルが登録済みかはブラウザから検知できないため、初回だけこちらから見せる（#1088）
+  it("初回の押下ではセットアップ手順の表示を要求する", async () => {
+    stubLocation();
+
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue({ labels: [label("11.local")] })}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
+
+    await waitFor(() => {
+      expect(onFirstLaunch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("2回目以降の押下ではセットアップ手順を要求しない", async () => {
+    const location = stubLocation();
+
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue({ labels: [label("11.local")] })}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
+    await waitFor(() => {
+      expect(onFirstLaunch).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /ローカルで開始/ }));
+    await waitFor(() => {
+      expect(location.href).toBe("issuedeck://start/guchi-apps/issue-deck/1049");
+    });
+    expect(onFirstLaunch).toHaveBeenCalledTimes(1);
   });
 });

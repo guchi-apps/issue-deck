@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
   Star,
   Trash2,
+  Wrench,
   XCircle,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
+import { LocalSessionSetupDialog } from "@/components/dashboard/local-session-setup-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
@@ -81,7 +83,7 @@ import {
 } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
-import { buildLocalSessionCommand } from "@/lib/local-session";
+import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
@@ -146,6 +148,7 @@ export function IssueDetail({
     generate: generateCommentCleanup,
   } = useIssueBodyCleanup();
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+  const [isLocalSessionSetupOpen, setIsLocalSessionSetupOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -372,10 +375,14 @@ export function IssueDetail({
     );
   }
 
-  const localSessionCommand = buildLocalSessionCommand(issue.repositoryFullName, issue.number);
-  const startDisabledReason = startImplementationDisabledReason(
-    repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
-  );
+  const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
+  const startDisabledReason = startImplementationDisabledReason(currentRepository?.hasClaudeWorkflow);
+  // ローカル起動の導線（ボタン・コマンドのコピー・セットアップ手順）は、対象リポジトリが
+  // ローカル起動プロトコルに適合しているときだけ出す（#1073）。3つとも同じ条件にしないと、
+  // 「ボタンは無いのにセットアップ手順だけ見られる」といった食い違いが出る。
+  const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
+    ? buildLocalSessionCommand(issue.repositoryFullName, issue.number)
+    : null;
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -447,7 +454,12 @@ export function IssueDetail({
                   質問を終えてクローズ
                 </Button>
               )}
-              <StartLocalSessionButton issue={issue} onIssueUpdated={onIssueUpdated} />
+              <StartLocalSessionButton
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                onFirstLaunch={() => setIsLocalSessionSetupOpen(true)}
+                hasLocalStartScript={currentRepository?.hasLocalStartScript}
+              />
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                   GitHubで開く
@@ -486,13 +498,22 @@ export function IssueDetail({
                     引き継いでIssueを作成
                   </DropdownMenuItem>
                   {localSessionCommand && (
-                    <DropdownMenuItem
-                      className="whitespace-nowrap text-xs"
-                      onSelect={() => void navigator.clipboard.writeText(localSessionCommand)}
-                    >
-                      <Copy className="size-3.5" />
-                      ローカル起動コマンドをコピー
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem
+                        className="whitespace-nowrap text-xs"
+                        onSelect={() => void navigator.clipboard.writeText(localSessionCommand)}
+                      >
+                        <Copy className="size-3.5" />
+                        ローカル起動コマンドをコピー
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="whitespace-nowrap text-xs"
+                        onSelect={() => setIsLocalSessionSetupOpen(true)}
+                      >
+                        <Wrench className="size-3.5" />
+                        ローカル起動のセットアップ
+                      </DropdownMenuItem>
+                    </>
                   )}
                   <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
                     <Pencil className="size-3.5" />
@@ -750,6 +771,14 @@ export function IssueDetail({
           />
         </SheetContent>
       </Sheet>
+
+      {localSessionCommand && (
+        <LocalSessionSetupDialog
+          open={isLocalSessionSetupOpen}
+          onOpenChange={setIsLocalSessionSetupOpen}
+          localSessionCommand={localSessionCommand}
+        />
+      )}
 
       <DeleteIssueDialog
         open={isDeleteDialogOpen}

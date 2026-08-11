@@ -110,14 +110,57 @@ if [[ ! -x "$LAUNCHER" && ! -f "$LAUNCHER" ]]; then
   exit 1
 fi
 
+# ローカル起動プロトコルの版数を確かめる（#1073）。ファイルがあっても約束を守っているとは
+# 限らず、守っていないと起動してから無言で固まる（ISSUE_DECK_SKIP_LAN_SETUPを解釈しない
+# リポジトリでは、UACを承認しても待ちから戻らない）。押した先で固まるより、ここで止める。
+# 版数は src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と揃える。
+SUPPORTED_CONTRACT_VERSION=1
+DECLARED_VERSION="$(grep -oP '^#\s*issue-deck-local-session:\s*v\K[0-9]+' "$LAUNCHER" | head -1 || true)"
+if [[ -z "$DECLARED_VERSION" ]]; then
+  echo "Error: $FULL_NAME はローカル起動プロトコルに対応していません。" >&2
+  echo "  $LAUNCHER の冒頭に次の1行を足し、約束を満たすようにしてください:" >&2
+  echo "    # issue-deck-local-session: v$SUPPORTED_CONTRACT_VERSION" >&2
+  echo "  約束の内容は issue-deck の docs/multi-agent/local-quick-start.md を参照してください。" >&2
+  exit 1
+fi
+if [[ "$DECLARED_VERSION" -gt "$SUPPORTED_CONTRACT_VERSION" ]]; then
+  echo "Error: $FULL_NAME が宣言する v$DECLARED_VERSION は、この受け口が扱える v$SUPPORTED_CONTRACT_VERSION より新しいです。" >&2
+  echo "  issue-deck側を更新してから、register-issuedeck-protocol.ps1 を再実行してください。" >&2
+  exit 1
+fi
+
 echo "#$ISSUE_NUMBER: $FULL_NAME（$REPO_PATH）のセッションを起動します..."
 cd "$REPO_PATH"
 
+# 対象リポジトリが必要とするパッケージマネージャを判定する。リポジトリごとに違うため
+# （issue-deck・dayspanはpnpm、shopping-listはnpmで依存インストールもしない）、pnpmを
+# 無条件に必須化すると壊れる。判定は宣言 → ロックファイル → package.json の順で確からしい
+# ものを採る。Node系でないリポジトリでは何も要求しない。
+detect_package_manager() {
+  local dir="$1"
+  if [[ -f "$dir/package.json" ]]; then
+    local declared
+    declared="$(grep -oP '"packageManager"\s*:\s*"\K[a-z]+' "$dir/package.json" | head -1 || true)"
+    if [[ -n "$declared" ]]; then
+      printf '%s\n' "$declared"
+      return 0
+    fi
+  fi
+  if [[ -f "$dir/pnpm-lock.yaml" ]]; then printf 'pnpm\n'; return 0; fi
+  if [[ -f "$dir/yarn.lock" ]]; then printf 'yarn\n'; return 0; fi
+  if [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]]; then printf 'bun\n'; return 0; fi
+  if [[ -f "$dir/package-lock.json" || -f "$dir/package.json" ]]; then printf 'npm\n'; return 0; fi
+  printf '\n'
+}
+
+PACKAGE_MANAGER="$(detect_package_manager "$REPO_PATH")"
+
 # wt.exeから開いたタブは `bash -lc`（非対話シェル）で始まる。Ubuntuの ~/.bashrc は冒頭で
-# 非対話シェルを弾くため、そこで設定しているnvmが読まれず、node・pnpmがPATHに乗らない
-# （システムのnodeだけが見える）。対象リポジトリのstart-issue.shはpnpmを使うので、
-# 見つからない場合はここで明示的に読み込む（#1085）。
-if ! command -v pnpm >/dev/null 2>&1; then
+# 非対話シェルを弾くため、そこで設定しているnvmが読まれず、node系のコマンドがPATHに乗らない
+# （システムのnodeだけが見える。#1085）。Node系のリポジトリなら読み込む。
+# 「pnpmが無いとき」ではなく「Node系なら」を条件にしているのは、npmのリポジトリでも
+# 通常ターミナルと同じnodeで動かすため（システムのnodeはバージョンが古いことがある）。
+if [[ -f "$REPO_PATH/package.json" ]]; then
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     # nvm.sh は set -u 下で未定義変数を参照し、set -e とも相性が悪いため一時的に外す。
@@ -125,21 +168,46 @@ if ! command -v pnpm >/dev/null 2>&1; then
     # shellcheck disable=SC1091
     . "$NVM_DIR/nvm.sh"
     set -eu
-    if command -v pnpm >/dev/null 2>&1; then
-      echo "#$ISSUE_NUMBER: nvmを読み込みました（node $(node --version) / pnpm $(pnpm --version)）"
-    else
-      echo "#$ISSUE_NUMBER: 警告: nvmを読み込みましたがpnpmが見つかりません。" >&2
+    if command -v node >/dev/null 2>&1; then
+      echo "#$ISSUE_NUMBER: nvmを読み込みました（node $(node --version)）"
     fi
-  else
-    echo "#$ISSUE_NUMBER: 警告: pnpmもnvm（$NVM_DIR/nvm.sh）も見つかりません。" >&2
   fi
 fi
+
+# 判定したパッケージマネージャが無ければ、worktreeを作る前にここで止める。
+# start-issue.sh の途中で落ちると中途半端なworktreeとブランチが残るため。
+if [[ -n "$PACKAGE_MANAGER" ]] && ! command -v "$PACKAGE_MANAGER" >/dev/null 2>&1; then
+  echo "Error: $FULL_NAME が必要とする $PACKAGE_MANAGER が見つかりません。" >&2
+  echo "  nvmを使っている場合、非対話シェルでは ~/.bashrc が読まれないため、" >&2
+  echo "  ~/.profile 等で nvm を読み込むか、$PACKAGE_MANAGER をPATHの通る場所へ入れてください。" >&2
+  exit 1
+fi
+
+# 起動に必要な外部コマンド。3リポジトリのstart-issue.shに同じ確認が重複していたため、
+# 経路の共通部分であるここへ寄せた（各リポジトリ側はターミナル直叩き用に残っている）。
+for required_command in git gh claude; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Error: $required_command コマンドが見つかりません。" >&2
+    exit 1
+  fi
+done
 
 # LANアクセス設定（Windowsの管理者権限が必要）は、wt.exeで開いたタブではUACを承認しても
 # 待ちから戻らずタブが固まる。ワンクリック起動では行わない（#1076）。
 # コマンドライン引数ではなく環境変数で渡すのは、この指定を解釈しないリポジトリの
 # start-issue.shへ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
 export ISSUE_DECK_SKIP_LAN_SETUP=1
+
+# 開発サーバーのポートは「ベース値 + Issue番号」で採番される。どのリポジトリがどの帯を使うかは
+# 定義上どのリポジトリ単独でも決められないため、全リポジトリを知る唯一の場所であるここが持つ
+# （#1073）。実際、issue-deckとshopping-listが同じ4000帯のまま衝突していた。
+# 表に無いリポジトリへは渡さず、そのリポジトリの既定に任せる。
+case "$FULL_NAME" in
+  guchi-apps/issue-deck) export ISSUE_DECK_DEV_PORT_BASE=4000 ;;
+  guchi-apps/shopping-list) export ISSUE_DECK_DEV_PORT_BASE=5000 ;;
+  guchi-apps/dayspan) export ISSUE_DECK_DEV_PORT_BASE=6000 ;;
+esac
+
 # start-issue.shはworktree作成〜devサーバー起動〜claude起動まで自前で面倒を見る。
 # execで置き換えるため、以降のtrapはstart-issue.sh側の挙動に委ねる。
 trap - EXIT

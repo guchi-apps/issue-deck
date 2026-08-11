@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildLocalSessionCommand,
   buildLocalSessionUrl,
+  canStartLocalSession,
+  isSupportedLocalSessionContract,
+  LOCAL_SESSION_CONTRACT_VERSION,
+  LOCAL_SESSION_REGISTER_COMMAND,
+  LOCAL_SESSION_TEST_ISSUE_NUMBER,
+  LOCAL_SESSION_TEST_REPOSITORY,
+  LOCAL_SESSION_TEST_URL,
   LOCAL_SESSION_URL_SCHEME,
+  parseLocalSessionContractVersion,
   parseRepositoryFullName,
 } from "@/lib/local-session";
 
@@ -83,5 +91,82 @@ describe("buildLocalSessionCommand", () => {
   it("不正な入力ではnullを返す", () => {
     expect(buildLocalSessionCommand("guchi-apps/issue;deck", 1049)).toBeNull();
     expect(buildLocalSessionCommand("guchi-apps/issue-deck", 0)).toBeNull();
+  });
+});
+
+describe("parseLocalSessionContractVersion", () => {
+  it("冒頭のマーカー行から版数を読む", () => {
+    const script = ["#!/usr/bin/env bash", "# issue-deck-local-session: v1", "set -euo pipefail"].join(
+      "\n",
+    );
+    expect(parseLocalSessionContractVersion(script)).toBe(1);
+  });
+
+  it("マーカーが無ければnullを返す（＝ワンクリック起動に対応していない）", () => {
+    expect(parseLocalSessionContractVersion("#!/usr/bin/env bash\nset -euo pipefail\n")).toBeNull();
+  });
+
+  it("行頭の`#`から始まらない記述はマーカーとして扱わない", () => {
+    // 説明文の中でマーカーに言及しているだけの行を拾わないこと
+    const script = 'echo "issue-deck-local-session: v1 を宣言してください"\n';
+    expect(parseLocalSessionContractVersion(script)).toBeNull();
+  });
+
+  it("`#`とコロンの前後の空白を許容する", () => {
+    expect(parseLocalSessionContractVersion("#   issue-deck-local-session:  v2  \n")).toBe(2);
+  });
+});
+
+describe("isSupportedLocalSessionContract", () => {
+  it("現在の版数を受け入れる", () => {
+    expect(isSupportedLocalSessionContract(LOCAL_SESSION_CONTRACT_VERSION)).toBe(true);
+  });
+
+  it("issue-deck側より新しい版数は受け入れない（受け口を先に更新する必要がある）", () => {
+    expect(isSupportedLocalSessionContract(LOCAL_SESSION_CONTRACT_VERSION + 1)).toBe(false);
+  });
+
+  it("宣言が無い場合は対応していないとみなす", () => {
+    expect(isSupportedLocalSessionContract(null)).toBe(false);
+  });
+});
+
+describe("LOCAL_SESSION_REGISTER_COMMAND", () => {
+  it("WSLのターミナルへそのまま貼れる1行になっている", () => {
+    expect(LOCAL_SESSION_REGISTER_COMMAND).toBe(
+      'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"',
+    );
+  });
+
+  it("改行を含まない（複数行だと貼り付け時に途中で実行される）", () => {
+    expect(LOCAL_SESSION_REGISTER_COMMAND).not.toContain("\n");
+  });
+});
+
+describe("LOCAL_SESSION_TEST_URL", () => {
+  // 経路確認用のURLだけ別に組み立てると、URLの形式を変えたときに片方だけ古くなる。
+  it("buildLocalSessionUrlと同じ形式である", () => {
+    expect(LOCAL_SESSION_TEST_URL).toBe(
+      buildLocalSessionUrl(LOCAL_SESSION_TEST_REPOSITORY, LOCAL_SESSION_TEST_ISSUE_NUMBER),
+    );
+  });
+
+  it("実体が作られないよう、実在しない番号を使う", () => {
+    expect(LOCAL_SESSION_TEST_URL).toBe("issuedeck://start/guchi-apps/issue-deck/99999");
+  });
+});
+
+describe("canStartLocalSession", () => {
+  it("適合しているリポジトリでは導線を出す", () => {
+    expect(canStartLocalSession(true)).toBe(true);
+  });
+
+  it("適合していないリポジトリでは出さない", () => {
+    expect(canStartLocalSession(false)).toBe(false);
+  });
+
+  it("リポジトリ情報が無い場合は隠さない（誤って導線を消さない）", () => {
+    // startImplementationDisabledReason と同じ判断。undefined は「未対応と確定した」ではない。
+    expect(canStartLocalSession(undefined)).toBe(true);
   });
 });
