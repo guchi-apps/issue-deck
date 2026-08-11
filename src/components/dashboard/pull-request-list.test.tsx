@@ -119,10 +119,12 @@ describe("PullRequestList", () => {
     expect(screen.queryByText("マージ待ちのPull Requestはありません。")).toBeNull();
   });
 
-  it("PRのタイトルはGitHubのPRへのリンクになっている", () => {
+  it("PR番号をタイトルの前に表示し、GitHubのPRへのリンクにする", () => {
     renderList([makePullRequest({ number: 42, title: "マージ待ちPR一覧を追加する" })]);
     const list = screen.getByRole("list");
     const link = within(list).getByRole("link", { name: /マージ待ちPR一覧を追加する/ });
+    // Issue一覧と同じ「#番号 タイトル」の並び
+    expect(link.textContent?.startsWith("#42 マージ待ちPR一覧を追加する")).toBe(true);
     expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/pull/42");
   });
 });

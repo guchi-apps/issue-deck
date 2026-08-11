@@ -108,16 +108,17 @@ function PullRequestCard({
         ) : (
           <GitPullRequest className="mt-0.5 size-4 shrink-0 text-green-600" aria-label="オープン" />
         )}
+        {/* 「#番号 タイトル」の並びはIssue一覧（issue-list.tsx）に揃えている。
+            行末に番号を置くとタイトルが長いときに見切れて、PRの識別子が読めなくなるため。 */}
         <a
           href={pullRequest.htmlUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="min-w-0 flex-1 text-sm font-medium hover:underline"
         >
-          {pullRequest.title}
+          #{pullRequest.number} {pullRequest.title}
           <ExternalLink className="ml-1 inline size-3 text-muted-foreground" />
         </a>
-        <span className="shrink-0 text-xs text-muted-foreground">#{pullRequest.number}</span>
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
