@@ -2,8 +2,9 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { getProjectLocation } from "@/lib/github/project-location";
 import {
+  addProjectItem,
   fetchProjectStatusField,
-  findProjectItemForIssue,
+  findIssueProjectState,
   updateProjectItemStatus,
   type ProjectStatusField,
 } from "@/lib/github/projects-api";
@@ -27,7 +28,7 @@ export type ProgressReportResult =
   | { applied: false; reason: "unknown_repository" }
   /** ProjectにStatusフィールド（単一選択）が無い、または対象の選択肢が無い */
   | { applied: false; reason: "unknown_status" }
-  /** Projectに未登録のIssue。Auto-addに任せる方針のためここでは追加しない */
+  /** GitHub上にIssueが無い（削除・移動済み）か、Projectへの追加に失敗した */
   | { applied: false; reason: "not_in_project" }
   /** 既に同じStatusだったため書き込まなかった */
   | { applied: false; reason: "unchanged" };
@@ -99,13 +100,19 @@ export async function reportProgressStatus(params: {
   // Projectと食い違ったままになるため、何もせず理由を返す
   if (!optionId) return { applied: false, reason: "unknown_status" };
 
-  const item = await findProjectItemForIssue(
+  const state = await findIssueProjectState(
     repository.ownerLogin,
     repository.name,
     params.issueNumber,
     field.projectId,
     token,
   );
+  // GitHub上にIssueが存在しない（削除・移動済み）
+  if (!state) return { applied: false, reason: "not_in_project" };
+
+  // 盤面に無ければ載せる。Project WorkflowsのAuto-addはプランごとに設定できる
+  // リポジトリ数の上限があり、対象リポジトリ全体には届かないため（#1036）
+  const item = state.item ?? (await addProjectItem(field.projectId, state.issueNodeId, token));
   if (!item) return { applied: false, reason: "not_in_project" };
 
   if (item.status === targetStatus) {

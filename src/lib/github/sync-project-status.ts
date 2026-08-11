@@ -2,6 +2,8 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { getProjectLocation } from "@/lib/github/project-location";
 import {
+  addProjectItem,
+  fetchOpenIssueNodes,
   fetchProjectItems,
   fetchProjectStatusField,
   updateProjectItemStatus,
@@ -83,6 +85,85 @@ export async function syncProjectStatuses(
   }
 
   return { updated, cleared, skipped: false };
+}
+
+export type ProjectItemBackfillResult = {
+  /** 盤面へ新しく載せたIssueの件数 */
+  added: number;
+  /** Projectを使わない設定（環境変数未設定）でスキップしたか */
+  skipped: boolean;
+};
+
+/**
+ * マルチエージェント運用の対象リポジトリのopenなIssueのうち、盤面に載っていないものを追加する（#1036）。
+ *
+ * **Project WorkflowsのAuto-addには頼れない。** GitHub Freeでは1リポジトリ、Teamでも5リポジトリ
+ * までしか設定できず（1ワークフローにつき1リポジトリ）、「対象はマルチエージェント対応リポジトリ
+ * 全体」という#991の目標に届かない。
+ *
+ * **対象は`hasClaudeWorkflow`が真のリポジトリに限る。** issue-deckは20以上のリポジトリに接続して
+ * おり、全部を載せると盤面が埋まる。共有ワークフローを持つ＝進捗を報告してくるリポジトリだけを扱う。
+ * closedなIssueも追加しない（過去分で埋まるため）。
+ *
+ * @param installationId GitHub Appのインストールid（Projectの所有org側のもの）
+ */
+export async function addMissingProjectItems(
+  installationId: number,
+): Promise<ProjectItemBackfillResult> {
+  const location = getProjectLocation();
+  if (!location) return { added: 0, skipped: true };
+
+  const token = await getInstallationToken(installationId);
+  const project = await fetchProjectStatusField(location.owner, location.number, token);
+  if (!project) return { added: 0, skipped: false };
+
+  const items = await fetchProjectItems(location.owner, location.number, token);
+
+  const repositories = await db.repository.findMany({
+    where: {
+      hasClaudeWorkflow: true,
+      archived: false,
+      installation: { installationId },
+    },
+    select: { githubRepositoryId: true, ownerLogin: true, name: true },
+  });
+
+  const readyOptionId = project.optionIdByName.get(getProgressStatusDef("ready").projectStatus);
+
+  let added = 0;
+  for (const repository of repositories) {
+    const onBoard = new Set(
+      items
+        .filter((item) => item.repositoryDatabaseId === repository.githubRepositoryId)
+        .map((item) => item.issueNumber),
+    );
+
+    const openIssues = await fetchOpenIssueNodes(repository.ownerLogin, repository.name, token);
+    for (const issue of openIssues) {
+      if (onBoard.has(issue.number)) continue;
+      const item = await addProjectItem(project.projectId, issue.nodeId, token);
+      if (!item) continue;
+      added += 1;
+
+      // **Statusを明示的に`Ready`にする。** 追加直後は未設定になることがあり、その状態から
+      // カードを動かしても遷移前が`Ready`にならず、カンバン起点の起動（Phase 3）が働かない
+      // （resolveDispatchModeは`Ready`からの遷移だけを対象にする）。
+      // 進捗ラベルを持つIssueは、この後のreconcileProjectStatusesFromLabelsが上書きする。
+      if (item.status === null && readyOptionId) {
+        await updateProjectItemStatus(
+          {
+            projectId: project.projectId,
+            itemId: item.itemId,
+            fieldId: project.fieldId,
+            optionId: readyOptionId,
+          },
+          token,
+        );
+      }
+    }
+  }
+
+  return { added, skipped: false };
 }
 
 export type ProjectStatusReconcileResult = {

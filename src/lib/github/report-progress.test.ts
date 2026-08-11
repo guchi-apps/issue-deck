@@ -4,7 +4,8 @@ const findFirst = vi.fn();
 const updateMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectStatusField = vi.fn();
-const findProjectItemForIssue = vi.fn();
+const findIssueProjectState = vi.fn();
+const addProjectItem = vi.fn();
 const updateProjectItemStatus = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -32,8 +33,11 @@ vi.mock("@/lib/github/projects-api", () => ({
   get fetchProjectStatusField() {
     return fetchProjectStatusField;
   },
-  get findProjectItemForIssue() {
-    return findProjectItemForIssue;
+  get findIssueProjectState() {
+    return findIssueProjectState;
+  },
+  get addProjectItem() {
+    return addProjectItem;
   },
   get updateProjectItemStatus() {
     return updateProjectItemStatus;
@@ -58,6 +62,25 @@ const STATUS_FIELD = {
   ]),
 };
 
+/** 盤面に載っている状態 */
+function onBoard(status: string | null, itemId = "item-1") {
+  return {
+    issueNodeId: "I_issue1",
+    item: { itemId, repositoryDatabaseId: 100, issueNumber: 1007, status },
+  };
+}
+
+/** Issueは存在するが盤面には無い状態 */
+const NOT_ON_BOARD = { issueNodeId: "I_issue1", item: null };
+
+function report(issueNumber = 1007, status: "implementation" | "release" = "implementation") {
+  return reportProgressStatus({
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber,
+    status,
+  });
+}
+
 describe("reportProgressStatus", () => {
   beforeEach(() => {
     clearProjectStatusFieldCache();
@@ -68,7 +91,8 @@ describe("reportProgressStatus", () => {
     updateMany.mockReset().mockResolvedValue({ count: 1 });
     getInstallationToken.mockReset().mockResolvedValue("token");
     fetchProjectStatusField.mockReset().mockResolvedValue(STATUS_FIELD);
-    findProjectItemForIssue.mockReset();
+    findIssueProjectState.mockReset();
+    addProjectItem.mockReset();
     updateProjectItemStatus.mockReset().mockResolvedValue(undefined);
   });
 
@@ -78,18 +102,9 @@ describe("reportProgressStatus", () => {
   });
 
   it("ProjectのStatusを更新し、DBのキャッシュも同時に書き換える", async () => {
-    findProjectItemForIssue.mockResolvedValue({
-      itemId: "item-1",
-      repositoryDatabaseId: 100,
-      issueNumber: 1007,
-      status: "Ready",
-    });
+    findIssueProjectState.mockResolvedValue(onBoard("Ready"));
 
-    const result = await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "implementation",
-    });
+    const result = await report();
 
     expect(result).toEqual({ applied: true, from: "Ready", to: "Implementation" });
     expect(updateProjectItemStatus).toHaveBeenCalledWith(
@@ -100,16 +115,32 @@ describe("reportProgressStatus", () => {
       where: { repositoryId: "repo-1", number: 1007 },
       data: { projectStatus: "Implementation", projectItemId: "item-1" },
     });
+    expect(addProjectItem).not.toHaveBeenCalled();
+  });
+
+  it("盤面に無いIssueは自分で載せてからStatusを書く（Auto-addに頼らない）", async () => {
+    findIssueProjectState.mockResolvedValue(NOT_ON_BOARD);
+    addProjectItem.mockResolvedValue({
+      itemId: "item-new",
+      repositoryDatabaseId: 100,
+      issueNumber: 1007,
+      status: null,
+    });
+
+    const result = await report();
+
+    expect(addProjectItem).toHaveBeenCalledWith("PVT_1", "I_issue1", "token");
+    expect(result).toEqual({ applied: true, from: null, to: "Implementation" });
+    expect(updateProjectItemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ itemId: "item-new", optionId: "opt-impl" }),
+      "token",
+    );
   });
 
   it("環境変数が未設定ならGitHubへ一切問い合わせずproject_disabledを返す", async () => {
     delete process.env.PROJECT_V2_OWNER;
 
-    const result = await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "implementation",
-    });
+    const result = await report();
 
     expect(result).toEqual({ applied: false, reason: "project_disabled" });
     expect(findFirst).not.toHaveBeenCalled();
@@ -129,14 +160,22 @@ describe("reportProgressStatus", () => {
     expect(updateProjectItemStatus).not.toHaveBeenCalled();
   });
 
-  it("Projectに未登録のIssueは何もせずnot_in_projectを返す（自動追加はしない）", async () => {
-    findProjectItemForIssue.mockResolvedValue(null);
+  it("GitHub上にIssueが無ければ何もしない", async () => {
+    findIssueProjectState.mockResolvedValue(null);
 
-    const result = await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "implementation",
-    });
+    const result = await report();
+
+    expect(result).toEqual({ applied: false, reason: "not_in_project" });
+    expect(addProjectItem).not.toHaveBeenCalled();
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("Projectへの追加に失敗したら何も書かない", async () => {
+    findIssueProjectState.mockResolvedValue(NOT_ON_BOARD);
+    addProjectItem.mockResolvedValue(null);
+
+    const result = await report();
 
     expect(result).toEqual({ applied: false, reason: "not_in_project" });
     expect(updateProjectItemStatus).not.toHaveBeenCalled();
@@ -144,18 +183,9 @@ describe("reportProgressStatus", () => {
   });
 
   it("既に同じStatusならProjectへ書かず、DBのキャッシュだけ揃える", async () => {
-    findProjectItemForIssue.mockResolvedValue({
-      itemId: "item-1",
-      repositoryDatabaseId: 100,
-      issueNumber: 1007,
-      status: "Implementation",
-    });
+    findIssueProjectState.mockResolvedValue(onBoard("Implementation"));
 
-    const result = await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "implementation",
-    });
+    const result = await report();
 
     expect(result).toEqual({ applied: false, reason: "unchanged" });
     expect(updateProjectItemStatus).not.toHaveBeenCalled();
@@ -166,43 +196,23 @@ describe("reportProgressStatus", () => {
   });
 
   it("Project側に対応する選択肢が無ければ何も書かずunknown_statusを返す", async () => {
-    findProjectItemForIssue.mockResolvedValue({
-      itemId: "item-1",
-      repositoryDatabaseId: 100,
-      issueNumber: 1007,
-      status: "Ready",
-    });
+    findIssueProjectState.mockResolvedValue(onBoard("Ready"));
 
     // PROGRESS_STATUSESには存在するがProject側に選択肢が無いケース（Release）
-    const result = await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "release",
-    });
+    const result = await report(1007, "release");
 
     expect(result).toEqual({ applied: false, reason: "unknown_status" });
-    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    // 選択肢が無いと分かった時点で止め、盤面へ載せる操作もしない
+    expect(findIssueProjectState).not.toHaveBeenCalled();
+    expect(addProjectItem).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("Statusフィールドの取得は繰り返しの報告でキャッシュされる", async () => {
-    findProjectItemForIssue.mockResolvedValue({
-      itemId: "item-1",
-      repositoryDatabaseId: 100,
-      issueNumber: 1007,
-      status: "Ready",
-    });
+    findIssueProjectState.mockResolvedValue(onBoard("Ready"));
 
-    await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1007,
-      status: "implementation",
-    });
-    await reportProgressStatus({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1008,
-      status: "implementation",
-    });
+    await report(1007);
+    await report(1008);
 
     expect(fetchProjectStatusField).toHaveBeenCalledTimes(1);
   });
