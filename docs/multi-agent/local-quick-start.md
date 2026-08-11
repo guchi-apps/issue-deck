@@ -244,7 +244,7 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 | 状態 | 挙動 |
 | --- | --- |
 | worktreeが存在しない | 新規作成 |
-| `issue-<番号>`ブランチのworktreeがある | **再利用** |
+| `issue-<番号>`ブランチのworktreeがある | **再利用**（PRがマージ済みなら警告。後述） |
 | gitの作業ツリーでないディレクトリがある | エラー終了（中身を確認して手動で削除する） |
 | 別ブランチを開いている | エラー終了 |
 
@@ -381,8 +381,44 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 一方`worktree.symlinkDirectories`で`node_modules`をメインリポジトリから共有できる点は純正が
 優れており、`--prepare-only`が毎回`pnpm install`する現状より速い。命名の制約が外れたら再検討する。
 
+## マージ済みIssueで再開したときの扱い
+
+再開できるようにしたことで、**マージ済みのIssueでボタンを押すと古いworktreeがそのまま
+再利用される**という副作用が出た（#1100）。以前は「既に存在します」で止まっていたぶん、
+黙って進む方がかえって気づきにくい。マージ済みブランチは`develop`から分岐し直されておらず、
+以降のdevelopの変更を含まないまま作業を始めることになる。
+
+そのため`start-issue.sh`は再開時に`gh pr list --head issue-<番号> --state merged`を見て、
+マージ済みPRがあれば警告する。そのうえで**消しても失われないと確認できたときだけ**、
+作り直すかどうかを尋ねる。
+
+| 状態 | 挙動 |
+| --- | --- |
+| マージ済みPRが無い | 何も表示せず再利用（通常の再開） |
+| マージ済み・クリーン・端末あり | 警告し、`[Y/n]`で作り直すか尋ねる（既定は作り直す） |
+| マージ済み・クリーン・端末なし（`--prepare-only`等） | 警告して再利用。`--recreate`の案内を出す |
+| マージ済みだが未コミットの変更・未pushのコミット・稼働中のセッションがある | 警告して再利用（消すと失われるため作り直さない） |
+
+`--recreate`を付けると尋ねずに作り直し、`--no-recreate`を付けると尋ねずに再利用する。
+`--recreate`を指定しても、消すと失われるものが残っている場合は作り直さずエラーで止まる。
+
+作り直しはworktreeとローカルブランチを削除してから、通常の新規作成経路（最新の`develop`から
+`git worktree add -b`）へ合流する。判定に使う「消してよいか」のロジックは
+`scripts/lib/worktree-status.sh`に置き、掃除コマンドと共有している。**片方だけを緩めない。**
+
+## 溜まったworktreeを掃除する
+
+worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前後あるため、放置すると
+ディスクを食い、`git worktree list`も読みにくくなる。
+
+```bash
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+```
+
+対象・オプション・削除するものの範囲は[branching.md](branching.md)の「ブランチ・worktree運用」を参照。
+
 ## 未対応（このIssueの範囲外）
 
-- マージ済みworktreeの**掃除**。放置すると溜まる。
 - 受け口スクリプトの**陳腐化の検知**（別Issue）。画面側は「登録コマンドをコピーした版」を控えて
   人が照合できるようにするところまでで、実際にインストールされている版はブラウザからは見えない。

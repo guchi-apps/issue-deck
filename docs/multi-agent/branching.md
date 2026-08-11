@@ -19,6 +19,10 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - `start-issue.sh`はWSLのターミナルから直接叩くほか、issue-deckの画面の「ローカルで開始」からワンクリックで起動できる（`issuedeck://`プロトコル → `scripts/start-local-session.sh` 経由。#1049）。詳細は[local-quick-start.md](local-quick-start.md)。
 - VSCodeのClaude Codeタブを横に並べて複数Issueを並行で進める場合は、タブ内で`/issue <番号>`（`.claude/commands/issue.md`）を使う。`start-issue.sh --prepare-only`でworktreeだけを用意し、そのセッションがそのまま実装に入る（#1049）。**本体チェックアウトは全タブで共有されるため、そこでのブランチ切り替えは他タブのセッションを巻き込む。**
 - `start-issue.sh`はworktree準備時に`scripts/setup-lan-access.sh`を呼び、Windows側のポートフォワーディング（`netsh interface portproxy`）とファイアウォール許可を自動設定したうえで、`http://<WSL IP>.sslip.io:<ポート>`をあわせて提示する（同一LAN上のスマホ等、`localhost`が使えない別端末からの確認用。詳細はsslip-io-lan-devスキル参照）。WSLのIPはWSL再起動のたびに変わるため、`scripts/dev.sh`経由の通常起動時も含め、devサーバー起動のたびに再設定する。Windowsの管理者権限が必要なためUACダイアログが表示される。`next.config.ts`の`allowedDevOrigins`は個別IPではなく`*.sslip.io`（ワイルドカード）を許可しており、WSLのIPが変わってもコード変更不要。
+- worktreeは自動では消えないため、マージ済みのものは`scripts/cleanup-worktrees.sh`で掃除する（#1100）。「PRがマージ済み」「未コミットの変更が無い」「ブランチのコミットがすべて`origin/develop`に入っている」「そのIssueのセッション・開発サーバーが動いていない」「実行中のworktreeでない」を**すべて**満たすものだけを対象とし、削除対象を一覧表示して確認を取ってから、worktree・ローカルブランチ・そのIssue用の生成物（起動用プロンプト、devサーバーのログ・PIDファイル）を消す。`--dry-run`で判定だけ、`--yes`で確認省略、`--issue <番号>`で対象を1件に絞れる。非対話実行で`--yes`が無い場合は表示のみで終了する。リモートブランチには触れない。
+- 掃除で解放されるディスクは、`du -sh`で見えるworktreeのサイズ（1つあたり1GB前後）よりかなり小さい。pnpmは`node_modules`の実体をストアへのハードリンクとして持つため（実測でリンク数18）、worktree単位の`du`は他worktreeと共有している分まで数える。2026-08-11に6件（`du`合計6.7GB）を削除したときの`df`の変化は約1GBだった。掃除コマンドはこの旨を注記付きで表示する。
+- 掃除を`run-issue-session.sh`のtrap（セッション終了時）で自動化はしない。「あとで見返したい」「PRにコメントが付いたら直す」という用途を壊すため、明示的に走らせるコマンドにとどめている。
+- 放置すると効くのはディスクだけではない。#1076でworktreeを再利用するようにしたため、**マージ済みIssueで再開すると、developから分岐し直されていない古いブランチのまま作業を始めてしまう**（以前は「既に存在します」で止まっていた）。そのため`start-issue.sh`は再開時にマージ済みPRの有無を確認し、見つかったら警告する。詳細は[local-quick-start.md](local-quick-start.md)の「マージ済みIssueで再開したときの扱い」。
 
 ## エージェントの役割
 
