@@ -139,6 +139,11 @@ pnpm test:unit   # vitestのみ
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の
 起動を行う。`next dev` を直接叩くとGitHubからのWebhookがローカルに届かない。
 
+ポートフォワード設定（[../scripts/setup-lan-access.sh](../scripts/setup-lan-access.sh)）はWindowsの
+管理者権限を要求するため、`ISSUE_DECK_SKIP_LAN_SETUP=1` が設定されている場合はスキップする
+（ワンクリック起動経路でUAC待ちから戻らずdevサーバーが起動しなくなるため。#1094。詳細は
+[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)）。
+
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub Appの3系統に分かれる。

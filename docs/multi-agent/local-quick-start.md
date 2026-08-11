@@ -245,12 +245,35 @@ UACを承認して中の処理が成功しても`Start-Process -Verb RunAs -Wait
 画面は無反応、という判断のつかない状態になる）。
 
 そのためワンクリック経路では行わない。`start-local-session.sh`が
-`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`がそれを見てスキップする。
+`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`と`dev.sh`がそれを見てスキップする。
 LAN内の別端末（スマホ等）から見たくなったら、そのworktreeで
 `scripts/setup-lan-access.sh <ポート>`を直接実行する。
 
 コマンドライン引数ではなく環境変数で渡しているのは、この指定を解釈しない他リポジトリの
 `start-issue.sh`へ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
+
+`start-issue.sh`だけでなく`dev.sh`も見る必要がある点に注意（#1094）。`setup-lan-access.sh`の
+呼び出し口は2つあり、#1076で`start-issue.sh`側だけを外した結果、まったく同じ症状が
+`pnpm dev` → `dev.sh`側に残っていた。呼び出し経路は次のとおりで、`pnpm dev`は
+`run-issue-session.sh`の子プロセスなので`export`した環境変数がそのまま届く。
+
+```text
+start-local-session.sh（ISSUE_DECK_SKIP_LAN_SETUP=1 を export）
+  → start-issue.sh          ← 見てスキップする
+    → run-issue-session.sh
+      → pnpm dev → dev.sh   ← 見てスキップする
+```
+
+`pnpm dev`を普通のターミナルから叩く従来の使い方（環境変数なし）では、これまでどおり
+LANアクセス設定が走る。
+
+### 待ちには上限を設けている
+
+#1076・#1094のどちらも、症状の本体は「UAC待ちから戻らない」ことだった。スキップし忘れた
+経路が残っても無反応で止まり続けないよう、`setup-lan-access.sh`はUAC待ちを
+`timeout`（既定60秒）で打ち切る保険を持つ。上限は`ISSUE_DECK_LAN_SETUP_TIMEOUT`で変更でき、
+`0`を指定すると従来どおり無制限に待つ。打ち切った場合と失敗した場合はどちらも終了コード1を
+返し、呼び出し元は警告を出して先へ進む（devサーバーの起動は止めない）。
 
 ## VSCodeのタブから始める（`/issue <番号>`）
 
