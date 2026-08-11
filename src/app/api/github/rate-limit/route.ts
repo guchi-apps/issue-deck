@@ -5,6 +5,12 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchRateLimit } from "@/lib/github/rate-limit";
 
+/**
+ * インストールごとのGitHubレート制限を返す。
+ *
+ * RESTとGraphQLは別枠のため、枠ごとに返す（#1040）。Projects v2はGraphQL専用APIなので、
+ * 進捗管理の消費はGraphQL側にしか現れない。
+ */
 export async function GET() {
   const userId = await requireUserId();
   if (!userId) {
@@ -19,8 +25,8 @@ export async function GET() {
   const installations = await Promise.all(
     userInstallations.map(async ({ installation }) => {
       const token = await getInstallationToken(installation.installationId);
-      const rateLimit = await fetchRateLimit(token);
-      return { accountLogin: installation.accountLogin, ...rateLimit };
+      const resources = await fetchRateLimit(token);
+      return { accountLogin: installation.accountLogin, resources };
     }),
   );
 

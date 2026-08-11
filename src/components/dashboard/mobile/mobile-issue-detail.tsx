@@ -8,6 +8,7 @@ import {
   ArrowRightLeft,
   Bot,
   CircleAlert,
+  ExternalLink,
   FilePlus2,
   FolderGit2,
   Loader2,
@@ -504,6 +505,12 @@ export function MobileIssueDetail({
                 </a>
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
+              <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-3.5" />
+                GitHubで開く
+              </a>
+            </DropdownMenuItem>
             <DropdownMenuItem
               className="whitespace-nowrap text-xs"
               onSelect={() => onCreateFollowupIssue(issue)}
