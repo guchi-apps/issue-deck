@@ -42,12 +42,27 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Windows Terminalのタブ名に出すリポジトリ名。複数リポジトリ・複数Issueのタブを同時に開くため、
+# 「どのリポジトリのどのIssueか」がタブだけで分かるようにする（#1105）。
+REPO_NAME="$(basename -s .git "$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null || true)")"
+if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
+  REPO_NAME="$(basename "$ROOT")"
+fi
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 PROMPT_TEMPLATE="$ROOT/scripts/prompts/implementation-agent.md"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
 # shellcheck source=scripts/lib/worktree-status.sh
 source "$ROOT/scripts/lib/worktree-status.sh"
+
+# 端末のタイトル（Windows Terminalのタブ名）を書き換える。worktree作成・pnpm installの間も
+# どのIssueの準備中かがタブから分かるようにする（#1105）。この後Claude Codeが起動すると、
+# 同じ書式の`--name`（scripts/run-issue-session.sh）が引き継ぐ。
+# 端末以外へ出力しているときは、エスケープシーケンスがログに混ざるだけなので何もしない。
+set_terminal_title() {
+  [[ -t 1 ]] || return 0
+  printf '\033]0;%s\007' "$1"
+}
 
 PREPARE_ONLY=0
 # マージ済みIssueのworktreeを作り直すかどうか。auto=マージ済みを検出したら対話で尋ねる（#1100）
@@ -310,6 +325,7 @@ prepare_issue() {
   local n="$1"
   WORKTREE_DIR="$WORKTREE_BASE/issue-$n"
   PROMPT_FILE="$PROMPT_DIR/issue-$n.md"
+  set_terminal_title "$REPO_NAME #$n"
 
   # 既存のworktreeは作り直さず再利用する（#1076）。ただしworktreeとして壊れている場合や
   # 別ブランチを開いている場合は、意図しない場所で作業を続けることになるため止める。
@@ -563,7 +579,7 @@ for n in "$@"; do
   if [[ "$WT_AVAILABLE" -eq 1 && -n "$DISTRO" ]]; then
     echo "#$n: 新しいWindows Terminalタブで開発サーバーを自動起動し、セッションを起動します..."
     cmd="$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
-    wt.exe -w 0 new-tab --title "issue-$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
+    wt.exe -w 0 new-tab --title "$REPO_NAME #$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
   else
     echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
     echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""

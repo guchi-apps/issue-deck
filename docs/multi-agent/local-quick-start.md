@@ -201,7 +201,8 @@ python3によるプロンプト生成ブロック全体・`wt.exe`でのタブ�
 
 ## PowerShellスクリプトはUTF-8 BOM付きで保存する
 
-`scripts/windows/*.ps1`は**UTF-8 BOM付き**でコミットしている。Windows PowerShell 5.1
+`scripts/windows/*.ps1`と`scripts/start-issue.ps1`（Windows側で実行する`.ps1`すべて）は
+**UTF-8 BOM付き**でコミットしている。Windows PowerShell 5.1
 （`powershell.exe`。Windowsに標準搭載されているもの）は、BOMが無いファイルをANSI（日本語環境では
 CP932）として読むため、日本語コメントを含むスクリプトが文字化けし、**構文エラーで動かなくなる**。
 
@@ -218,6 +219,16 @@ CP932）として読むため、日本語コメントを含むスクリプトが
 ```bash
 head -c 3 scripts/windows/issuedeck-protocol.ps1 | xxd   # efbbbf ならBOM付き
 ```
+
+構文エラーの有無は、Windows PowerShellのパーサーにかければWSL側からでも確かめられる。
+
+```bash
+w=$(wslpath -w scripts/start-issue.ps1)
+powershell.exe -NoProfile -NonInteractive -Command "\$e=\$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$w',[ref]\$null,[ref]\$e); if(\$e.Count -gt 0){\$e[0].Message}else{'OK'}"
+```
+
+`scripts/start-issue.ps1`はBOM無しのままコミットされており、この方法で構文エラーになることを
+確認したうえでBOMを付けた（#1105）。`scripts/start-reviewer.ps1`も同じ状態のまま残っている。
 
 ## プロトコルが登録されていない環境
 
@@ -323,6 +334,59 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 
 前回のセッションがタブの強制終了などで開発サーバーを残していた場合は、再開時に停止してから
 起動し直す。残ったままだとポートを掴んでいて`pnpm dev`が起動できないため。
+
+## タブ名で「どのリポジトリのどのIssueか」を示す
+
+タブ名は`<リポジトリ名> #<Issue番号>`（例: `issue-deck #1105`）にする（#1105）。Issueごとに
+タブを開いて並行作業するため、タブを切り替えなくても中身が分かる必要がある。
+
+設定箇所は起動の段階ごとに3つあり、後の段階が前の段階を上書きしていく。
+
+| 段階 | 設定するもの | 実装 |
+| --- | --- | --- |
+| タブを開く | Windows Terminalのタブ名 | `--title "<repo> #<番号>"`（`issuedeck-protocol.ps1`・`start-issue.ps1`・`start-issue.sh`） |
+| worktree準備中（`gh`取得・`pnpm install`） | 端末のタイトル（OSC 0） | `set_terminal_title`（`start-issue.sh`） |
+| セッション実行中 | セッション名（＝端末のタイトル） | `claude --name "<repo> #<番号>"`（`run-issue-session.sh`） |
+
+**最後の`--name`が要点。** Claude Codeは会話の内容からセッション名を自動生成し、それを端末の
+タイトル（OSC 0）へ継続的に書き込む。`--name`で明示しない限り、前段で付けたタブ名は
+セッション開始後に自動命名で上書きされ、タブからIssueを特定できなくなる。`--name`で渡した名前は
+プロンプトボックスと`/resume`の一覧にも出る。
+
+`--name`を解釈しない古いClaude Codeへ渡すと起動自体が失敗するため、`claude --help`に`--name`が
+あるときだけ付ける（無い場合はタイトルを諦めて起動する）。
+
+ownerは入れずリポジトリ名だけにしている。タブの横幅が限られており、同名リポジトリを別ownerで
+同時に扱う場面が今のところ無いため。
+
+## セッションに渡す最初のプロンプト
+
+`run-issue-session.sh`が`claude`へ渡すのは、プロンプトファイル（`.prompts/issue-<番号>.md`）の
+中身そのものではなく、次の1行だけにする（#1105）。
+
+```text
+Issue #<番号> の実装を開始してください。あなたへの指示は <プロンプトファイルのパス> にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。
+```
+
+- **届かなかったときに貼り直せる。** 数KBのプロンプト全文を貼り直すのは現実的でない。起動前に
+  この1行を必ず端末へ表示しておく
+- プロンプトファイルを読むのは起動後なので、渡した後に再生成された場合でも最新の内容で動く
+- `ps`の出力にIssue本文が丸ごと出るのを避けられる
+
+「確認を待たずに着手する」ことは、プロンプトファイル側（`scripts/prompts/implementation-agent.md`）
+にも明記している。ここが曖昧だと、セッションは開いたのに指示待ちで止まる。
+
+### 起動直後に何も始まらない場合
+
+セッションは開いたのに実装が始まらないときは、端末に表示された上の1行を貼り付ける。
+
+この事象は実際に起きている（#1105の時点で、worktree上の過去9セッションすべて、最初のメッセージ
+が手打ちだった＝渡したプロンプトが1度も届いていない）。一方、**すでに信頼済みのディレクトリ**では、
+同じフラグ・同じ長さ（6KB超・複数行）のプロンプトでも自動送信されることを確認できている。
+差分は「worktreeが新規ディレクトリで、初回起動時にフォルダの信頼確認
+（`Is this a project you created or one you trust?`）が出ること」だけだが、**承認時にプロンプトが
+失われると確定させたわけではない**。信頼確認はこちらから自動化するものではないため、原因を
+追うのではなく、貼り直せる形にして先へ進めるようにしている。
 
 ## タブは非対話シェルで始まる（nvmが読まれない）
 
