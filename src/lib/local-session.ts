@@ -15,8 +15,15 @@
 /** カスタムURLプロトコルのスキーム名（Windows側のレジストリ登録キーと一致させる） */
 export const LOCAL_SESSION_URL_SCHEME = "issuedeck";
 
-/** WSL側の受け口スクリプト（`~`はハンドラ側のシェルで展開される） */
-export const LOCAL_SESSION_LAUNCHER = "~/apps/issue-deck/scripts/start-local-session.sh";
+/**
+ * WSL側の受け口スクリプト（`~`はハンドラ側のシェルで展開される）。
+ *
+ * リポジトリの作業ディレクトリではなく、プロトコル登録時に複製した固定の場所を指す（#1076）。
+ * 作業ディレクトリを直接指すと、そこが別Issueのブランチに切り替わっている間はファイルが
+ * 存在せず起動できない（実際に踏んだ）。複製は
+ * `scripts/windows/register-issuedeck-protocol.ps1` が作る。
+ */
+export const LOCAL_SESSION_LAUNCHER = "~/.local/share/issue-deck/start-local-session.sh";
 
 /**
  * owner・repoに許可する文字。GitHubのowner名・リポジトリ名で実際に使われうる文字に限定し、
