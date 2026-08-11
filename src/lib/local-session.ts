@@ -84,3 +84,44 @@ export function buildLocalSessionCommand(
   if (!parsed || !isValidIssueNumber(issueNumber)) return null;
   return `${LOCAL_SESSION_LAUNCHER} ${parsed.owner} ${parsed.repo} ${issueNumber}`;
 }
+
+/**
+ * WSL上のissue-deckのチェックアウト先（#1088）。`scripts/start-local-session.sh`の
+ * `resolve_repo_path`が既定で返す場所と同じ値にしている。画面が案内するパスと実際の
+ * 解決先がずれると、案内どおりに実行しても登録できない。
+ *
+ * `~`より下はユーザー環境依存のため、別の場所へ置いている場合に読み替える旨は画面側で添える。
+ */
+export const LOCAL_SESSION_REPO_PATH = "~/apps/issue-deck";
+
+/** WSLディストロ名を切り替える環境変数名（Windows側で設定する。登録スクリプトと合わせる） */
+export const LOCAL_SESSION_WSL_DISTRO_ENV = "ISSUEDECK_WSL_DISTRO";
+
+/** 上記が未設定のときに登録スクリプトが使うディストロ名 */
+export const LOCAL_SESSION_DEFAULT_WSL_DISTRO = "Ubuntu";
+
+/**
+ * `issuedeck://`をWindowsへ登録するコマンド（#1088）。
+ *
+ * Windows側のPowerShellスクリプトだが、**WSLのターミナルへそのまま貼れる1行**にしている。
+ * 画面を見ている流れのままコピーして実行できるようにするためで、`wslpath -w`がWSLのパスを
+ * Windowsのパス（`\\wsl.localhost\...`）へ変換する。`~`はコマンド置換の中でもシェルが
+ * 展開するため、ユーザー名を埋め込まずに済む。
+ */
+export const LOCAL_SESSION_REGISTER_COMMAND = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ${LOCAL_SESSION_REPO_PATH}/scripts/windows/register-issuedeck-protocol.ps1)"`;
+
+/** 動作確認用のリポジトリ。`start-local-session.sh`が設定ファイル無しで解決できる唯一のもの */
+export const LOCAL_SESSION_TEST_REPOSITORY = "guchi-apps/issue-deck";
+
+/**
+ * 動作確認用のIssue番号。**実在しない番号**を使う。
+ * `start-issue.sh`はIssueの取得を`git worktree add`より前に行うため、取得に失敗した時点で
+ * 止まり、ブランチもworktreeも作られない。実在する番号ではその場で実装セッションが始まる。
+ */
+export const LOCAL_SESSION_TEST_ISSUE_NUMBER = 99999;
+
+/**
+ * 実体を作らずに経路（レジストリ登録→ハンドラ→WSLの受け口）だけを確認するURL（#1088）。
+ * 形式が`buildLocalSessionUrl`とずれていないことは`local-session.test.ts`で固定している。
+ */
+export const LOCAL_SESSION_TEST_URL = `${LOCAL_SESSION_URL_SCHEME}://start/${LOCAL_SESSION_TEST_REPOSITORY}/${LOCAL_SESSION_TEST_ISSUE_NUMBER}`;

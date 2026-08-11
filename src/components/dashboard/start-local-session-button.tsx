@@ -6,11 +6,14 @@ import { Button } from "@/components/ui/button";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { buildLocalSessionUrl } from "@/lib/local-session";
+import { hasSeenLocalSessionSetup, markLocalSessionSetupSeen } from "@/lib/local-session-setup";
 import type { Issue } from "@/types/issue";
 
 type StartLocalSessionButtonProps = {
   issue: Issue;
   onIssueUpdated: (issue: Issue) => void;
+  /** 初回起動時にセットアップ手順を見せるためのコールバック（#1088） */
+  onFirstLaunch: () => void;
 };
 
 /**
@@ -23,7 +26,11 @@ type StartLocalSessionButtonProps = {
  * 起動前に`11.local`を付与するのは、無人実行（claude-issue-dispatch.yml）との二重起動を
  * 防ぐため。ラベル付与に失敗しても起動自体は妨げない（起動できないより、ラベルが遅れる方が軽い）。
  */
-export function StartLocalSessionButton({ issue, onIssueUpdated }: StartLocalSessionButtonProps) {
+export function StartLocalSessionButton({
+  issue,
+  onIssueUpdated,
+  onFirstLaunch,
+}: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
 
   const url = buildLocalSessionUrl(issue.repositoryFullName, issue.number);
@@ -44,6 +51,13 @@ export function StartLocalSessionButton({ issue, onIssueUpdated }: StartLocalSes
     // プロトコル未登録の環境ではブラウザ側で無視されるだけで、ページ遷移は起きない。
     // その場合のフォールバックは「…」メニューの「ローカル起動コマンドをコピー」。
     window.location.href = sessionUrl;
+
+    // 未登録かどうかは検知できない（#1088）ため、初回だけこちらからセットアップ手順を見せる。
+    // 登録済みの環境では余計だが、一度きりなので押し付けにはならない。
+    if (!hasSeenLocalSessionSetup()) {
+      markLocalSessionSetupSeen();
+      onFirstLaunch();
+    }
   }
 
   return (
