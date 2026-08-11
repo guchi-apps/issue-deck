@@ -90,6 +90,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得コストは「対象リポジトリ数 + draft以外のPR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
   `hooks/use-open-pull-requests.ts`）。
+- **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、一覧でPRを選んだ
+  ときだけ取得する。** 会話コメント・レビュー・レビューコメントの3エンドポイントを
+  [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
+  統合する。タイトル・ブランチ・CI状態など**一覧が既に持っている情報はこのAPIで返さない**
+  （画面のヘッダーは一覧の項目から描く）。こちらも自動ポーリングは無い
+  （`hooks/use-pull-request-detail.ts`）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
@@ -136,6 +142,10 @@ pnpm test:unit   # vitestのみ
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub Appの3系統に分かれる。
+
+既存のworktree（`~/apps/issue-deck-worktrees/issue-<番号>`）の`.env.local`には、`start-issue.sh`が
+セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
+古いworktreeを開き直したときに自動で埋まる。
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
