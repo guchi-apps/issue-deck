@@ -367,12 +367,57 @@ UACを承認して中の処理が成功しても`Start-Process -Verb RunAs -Wait
 画面は無反応、という判断のつかない状態になる）。
 
 そのためワンクリック経路では行わない。`start-local-session.sh`が
-`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`がそれを見てスキップする。
+`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`と`dev.sh`がそれを見てスキップする。
 LAN内の別端末（スマホ等）から見たくなったら、そのworktreeで
 `scripts/setup-lan-access.sh <ポート>`を直接実行する。
 
 コマンドライン引数ではなく環境変数で渡しているのは、この指定を解釈しない他リポジトリの
 `start-issue.sh`へ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
+
+`start-issue.sh`だけでなく`dev.sh`も見る必要がある点に注意（#1094）。`setup-lan-access.sh`の
+呼び出し口は2つあり、#1076で`start-issue.sh`側だけを外した結果、まったく同じ症状が
+`pnpm dev` → `dev.sh`側に残っていた。呼び出し経路は次のとおりで、`pnpm dev`は
+`run-issue-session.sh`の子プロセスなので`export`した環境変数がそのまま届く。
+
+```text
+start-local-session.sh（ISSUE_DECK_SKIP_LAN_SETUP=1 を export）
+  → start-issue.sh          ← 見てスキップする
+    → run-issue-session.sh
+      → pnpm dev → dev.sh   ← 見てスキップする
+```
+
+`pnpm dev`を普通のターミナルから叩く従来の使い方（環境変数なし）では、これまでどおり
+LANアクセス設定が走る。
+
+### 止まる正体はUAC待ちではなくSIGTTIN
+
+「UAC待ちから戻らない」ように見えるが、#1094の調査で実際の機構が分かった。**バックグラウンドの
+プロセスグループが端末から読もうとして`SIGTTIN`で停止している。**
+
+`run-issue-session.sh`は`pnpm dev`をバックグラウンドジョブとして起動する。`set -m`があるため
+これは独立したプロセスグループになり、端末のフォアグラウンドプロセスグループは`claude`のままになる。
+出力は`.dev-servers/issue-<n>.log`へ逃がしてあるが、**stdinは端末のまま**だった。この状態で
+`setup-lan-access.sh`が起動する`powershell.exe`（WSL interop）が端末を読もうとすると、
+カーネルがプロセスグループ全体に`SIGTTIN`を送って停止させる。誰も`SIGCONT`しないので永久に止まる。
+
+止まっているプロセスは`ps`の`STAT`列が`T`（`wchan`は`do_signal_stop`）になる。**`S`ではなく`T`
+なら、待っているのではなく止められている。**UACダイアログを承認しても動かないのはこのため。
+
+普通のWSLターミナルから`pnpm dev`を叩く場合はフォアグラウンドプロセスグループなので端末を
+読んでよく、停止しない。**ワンクリック経路に固有**なのはこれが理由。
+
+対策は3層になっている。
+
+1. **`ISSUE_DECK_SKIP_LAN_SETUP=1`**（上記）。ワンクリック経路ではそもそも呼ばない
+2. **`run-issue-session.sh`が`pnpm dev </dev/null`で起動する**。stdinが端末でなければ
+   `SIGTTIN`は原理的に発生しない。devサーバー配下のあらゆる子プロセスに効く
+3. **`setup-lan-access.sh`のUAC待ちに`timeout`（既定60秒）**。`ISSUE_DECK_LAN_SETUP_TIMEOUT`で
+   変更でき`0`で無制限。打ち切り・失敗のいずれも終了コード1を返し、呼び出し元は警告を出して
+   先へ進む（devサーバーの起動は止めない）
+
+3が`SIGTTIN`停止にも効くのは、`timeout`が子を**別のプロセスグループ**に置くため。停止するのは
+子だけで`timeout`自身は生き残り、時間になれば落とせる。停止中のプロセスには`SIGTERM`が届かない
+ので`--kill-after`を併用している（GNU timeoutはシグナル送出後に`SIGCONT`も送る）。
 
 ## VSCodeのタブから始める（`/issue <番号>`）
 
