@@ -276,6 +276,19 @@ HTTP 404、直後の一瞬は503になりうる**。
 投稿者マーカーは**必ず本文の末尾**に置く。ワークフローが`grep -oP ... | tail -n1`で読むため、
 本文中に偽のマーカーが混ざっても最後のものが優先される。
 
+**権限のチェックは2系統ある。** 投稿者マーカーが効くのはワークフロー自身の検証だけで、
+`claude-code-action`は**コメント本文を見ず`github.actor`だけで**非人間アクターを拒否する
+（`checkHumanActor`）。そのため各`claude-code-action`ステップに`allowed_bots: "issue-deck[bot]"`が要る。
+
+| 検証 | 見るもの | マーカーで復元できるか |
+|---|---|---|
+| `reusable-issue-dispatch.yml`のtriage | `github.actor` ＋ コメント本文 | できる |
+| `claude-code-action`の`checkHumanActor` | `github.actor`のみ | **できない** |
+
+これを落とすと**ドラッグ起点の実行が必ず1回失敗する**。しかも自動リトライ（#497）は
+`workflow_dispatch`起動で`github.actor`が人間になるため通ってしまい、「実装はできているのに
+毎回1回無駄になり、Issueに再実行のノイズが残る」という分かりにくい壊れ方をする（#1022で実際に発生）。
+
 #### `Planning`へ動かすときはラベルを先に書く
 
 **ワークフローのmodeはコメント本文ではなく`21.plan-required`ラベルで決まる**
