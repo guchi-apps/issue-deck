@@ -59,6 +59,13 @@ if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
+# worktreeを作ってから落ちると中途半端な状態が残るため、先に確認する。ワンクリック起動の
+# タブは非対話シェルで始まり、nvmを ~/.bashrc に置いていると読まれない（#1085）。
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "Error: pnpm コマンドが見つかりません（nvmを使っている場合、非対話シェルでは ~/.bashrc が読まれません）。" >&2
+  exit 1
+fi
+
 if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
   echo "Error: $PROMPT_TEMPLATE がありません。" >&2
   exit 1
