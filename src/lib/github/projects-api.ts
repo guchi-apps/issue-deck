@@ -227,23 +227,35 @@ export async function fetchProjectStatusField(
 /** 1つのIssueが同時に所属しうるProjectの数。実運用では1件だが余裕を持って引く */
 const ISSUE_PROJECT_ITEMS_PAGE_SIZE = 20;
 
+/** Issueと、指定したProjectにおけるそのアイテムの状態 */
+export type IssueProjectState = {
+  /** IssueのGraphQL node ID。Projectへ追加する際の`contentId`に使う */
+  issueNodeId: string;
+  /** 指定したProjectにおけるアイテム。未登録ならnull */
+  item: ProjectItemSnapshot | null;
+};
+
 /**
- * Issueから、指定したProjectにおけるアイテムを引く。Projectに未登録ならnull。
+ * Issueのnode IDと、指定したProjectにおけるアイテムを1クエリで引く。Issueが無ければnull。
  *
  * DBの`Issue.projectItemId`（Phase 1でWebhook・再同期が入れる）を使わずGitHubへ問い合わせるのは、
  * **報告APIの正しさをDBの鮮度に依存させないため**。Projectへ追加された直後でWebhookが未到達でも
- * 正しく更新できる。逆にProjectへ自動追加はしない（Project WorkflowsのAuto-addに任せる）。
+ * 正しく更新できる。
+ *
+ * 未登録だった場合にそのまま`addProjectItem`へ渡せるよう、Issueのnode IDも一緒に取っている
+ * （追加のための問い合わせを増やさないため。#1036）。
  */
-export async function findProjectItemForIssue(
+export async function findIssueProjectState(
   owner: string,
   repo: string,
   issueNumber: number,
   projectId: string,
   token: string,
-): Promise<ProjectItemSnapshot | null> {
+): Promise<IssueProjectState | null> {
   const data = await graphql<{
     repository: {
       issue: {
+        id: string;
         projectItems: { nodes: (RawItem & { project: { id: string } })[] };
       } | null;
     } | null;
@@ -252,6 +264,7 @@ export async function findProjectItemForIssue(
     `query($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
       repository(owner: $owner, name: $repo) {
         issue(number: $number) {
+          id
           projectItems(first: $first) {
             nodes { project { id } ${ITEM_FIELDS} }
           }
@@ -259,13 +272,96 @@ export async function findProjectItemForIssue(
       }
     }`,
     { owner, repo, number: issueNumber, first: ISSUE_PROJECT_ITEMS_PAGE_SIZE },
-    "findProjectItemForIssue",
+    "findIssueProjectState",
   );
 
-  const node = data.repository?.issue?.projectItems.nodes.find(
-    (item) => item.project.id === projectId,
+  const issue = data.repository?.issue;
+  if (!issue) return null;
+
+  const node = issue.projectItems.nodes.find((item) => item.project.id === projectId);
+  return { issueNodeId: issue.id, item: toSnapshot(node) };
+}
+
+/**
+ * IssueをProjectへ追加し、追加後のアイテムを返す。
+ *
+ * **Project WorkflowsのAuto-addには頼れない。** GitHub Freeでは1リポジトリ、Teamでも5リポジトリ
+ * までしか自動追加を設定できず（1ワークフローにつき1リポジトリ）、対象リポジトリ全体を載せる
+ * という#991の目標に届かない。Projectへの読み書きをissue-deckへ一本化する設計に、アイテムの
+ * 追加も含める（#1036）。
+ *
+ * `addProjectV2ItemById`は**登録済みなら既存のアイテムを返す**ため、重複追加にはならない。
+ */
+export async function addProjectItem(
+  projectId: string,
+  contentId: string,
+  token: string,
+): Promise<ProjectItemSnapshot | null> {
+  const data = await graphql<{ addProjectV2ItemById: { item: RawItem | null } | null }>(
+    token,
+    `mutation($projectId: ID!, $contentId: ID!) {
+      addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+        item { ${ITEM_FIELDS} }
+      }
+    }`,
+    { projectId, contentId },
+    "addProjectItem",
   );
-  return toSnapshot(node);
+  return toSnapshot(data.addProjectV2ItemById?.item);
+}
+
+/** 1回のクエリで取得するIssue数 */
+const OPEN_ISSUES_PAGE_SIZE = 100;
+
+/** 盤面への一括投入で扱うIssueの上限。1リポジトリぶんの再同期が延々と続かないようにする */
+const OPEN_ISSUES_MAX = 500;
+
+/**
+ * リポジトリのopenなIssueのnode IDと番号を取得する。再同期時の一括投入に使う。
+ *
+ * DBは`githubIssueId`（RESTの数値ID）しか持たず`addProjectV2ItemById`の`contentId`に使えないため、
+ * GraphQLから引く。上限に達した場合は打ち切る（次回の再同期で続きが載る）。
+ */
+export async function fetchOpenIssueNodes(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<{ number: number; nodeId: string }[]> {
+  const issues: { number: number; nodeId: string }[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const data: {
+      repository: {
+        issues: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: { id: string; number: number }[];
+        };
+      } | null;
+    } = await graphql(
+      token,
+      `query($owner: String!, $repo: String!, $first: Int!, $after: String) {
+        repository(owner: $owner, name: $repo) {
+          issues(states: OPEN, first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id number }
+          }
+        }
+      }`,
+      { owner, repo, first: OPEN_ISSUES_PAGE_SIZE, after: cursor },
+      "fetchOpenIssueNodes",
+    );
+
+    const page = data.repository?.issues;
+    if (!page) return issues;
+
+    for (const node of page.nodes) {
+      issues.push({ number: node.number, nodeId: node.id });
+    }
+
+    if (!page.pageInfo.hasNextPage || issues.length >= OPEN_ISSUES_MAX) return issues;
+    cursor = page.pageInfo.endCursor;
+  }
 }
 
 /**

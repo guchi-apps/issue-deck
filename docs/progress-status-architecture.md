@@ -46,9 +46,43 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 対応表の実体は[`src/lib/issue-progress.ts`](../src/lib/issue-progress.ts)の`PROGRESS_STATUSES`
 にあり、Status名・ラベル名・表示名・アイコンを1箇所に集約している。
 
+### 盤面へ載せるのもissue-deckの仕事
+
+**Project WorkflowsのAuto-addには頼れない。** GitHub Docs
+[Adding items automatically](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)
+のとおり、auto-addワークフローは**1つにつき1リポジトリ**で、数はプランで制限される。
+
+| プラン | auto-add の上限 |
+|---|---|
+| **Free** | **1** |
+| Pro / Team | 5 |
+| Enterprise Cloud | 20 |
+
+**Teamへ上げても5リポジトリまで**で、「対象はマルチエージェント対応リポジトリ全体」という
+決定事項に届かない（アプリは12個ある）。したがって**アイテムの追加もissue-deckが行う**（#1036。
+Phase 4で`dayspan`へ展開する段で判明した）。
+
+これは回避策ではなく、「Projectへの読み書きはissue-deckに一本化する」という中核の判断に
+アイテムの追加を含めただけである。載せるタイミングは2つ。
+
+| タイミング | 対象 |
+|---|---|
+| 進捗報告時（`reportProgressStatus`） | 報告されたIssueが盤面に無ければ載せる |
+| 再同期時（`addMissingProjectItems`） | `hasClaudeWorkflow`が真のリポジトリのopenなIssueで、盤面に無いもの |
+
+**再同期の対象を`hasClaudeWorkflow`で絞る**のは、issue-deckが20以上のリポジトリに接続しており
+全部を載せると盤面が埋まるため。closedなIssueも追加しない。
+
+**追加直後はStatusを`Ready`にする。** 未設定のままだと、そこからカードを動かしても遷移前が
+`Ready`にならず、カンバン起点の起動（Phase 3）が働かない。
+
+`addProjectV2ItemById`は**登録済みなら既存のアイテムを返す**ため、GitHub側のAuto-addを有効に
+したままでも重複しない。
+
 ### Projectの対象はIssueのみ。PRはアイテムにしない
 
-Project WorkflowsのAuto-addは`is:issue`で絞り、**Pull Requestは追加しない。**
+Auto-addを使う場合は`is:issue`で絞り、**Pull Requestは追加しない。** issue-deck側から載せる
+経路はIssueしか扱わないため、そもそもPRは入らない。
 
 - **Statusの7段階がIssueの形をしている。** `Planning`・`Implementation`はPRにとって意味を持たず、
   混ぜると半分の列が片方にとって無意味になる
@@ -189,7 +223,8 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
   呼び出し側は無人実行でログインセッションを持てない。GitHub側にはorganization secretとして置く
 - **StatusフィールドのidとoptionのidはProjectごとに異なる**ため環境変数に持てず、実行時に
   `PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`から引く（10分キャッシュ）
-- **Projectに未登録のIssueには何もしない。** 追加はProject WorkflowsのAuto-add（`is:issue`）に任せる
+- **Projectに未登録のIssueは、issue-deckが自分で盤面へ載せてからStatusを書く**（#1036。当初は
+  Project WorkflowsのAuto-addに任せる方針だったが、後述のプラン制限により成立しなかった）
 - **アイテムの特定はDBの`projectItemId`ではなくGitHubへ問い合わせる。** 報告の正しさをDBの鮮度に
   依存させないため（Projectへ追加された直後でWebhookが未到達でも正しく更新できる）
 - 反映されなかったケース（Project未導入・未登録・変化なし）も**200で理由を返す**。呼び出し側に

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
 import {
+  addMissingProjectItems,
   reconcileProjectStatusesFromLabels,
   syncProjectStatuses,
 } from "@/lib/github/sync-project-status";
@@ -48,6 +49,11 @@ async function handlePOST() {
   const installationIds = [...new Set(repositories.map((repo) => repo.installation.installationId))];
   for (const installationId of installationIds) {
     try {
+      // 盤面に載っていないIssueを先に載せる（#1036）。Project WorkflowsのAuto-addは
+      // プランごとに設定できるリポジトリ数の上限があり、対象リポジトリ全体には届かない。
+      // 先に載せておかないと、続くsyncProjectStatusesが取りこぼす
+      const backfill = await addMissingProjectItems(installationId);
+      if (backfill.skipped) break;
       const result = await syncProjectStatuses(installationId);
       if (result.skipped) break;
       await reconcileProjectStatusesFromLabels(installationId);

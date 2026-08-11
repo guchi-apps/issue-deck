@@ -77,6 +77,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   書き込み権限を持つのをissue-deckのGitHub Appだけに閉じるための一本化で、認証は共有シークレット
   `PROGRESS_REPORT_SECRET`。**呼び出し側はこのAPIの失敗で処理を止めない**取り決めのため、
   取りこぼしは再同期（`reconcileProjectStatusesFromLabels`）がラベルを正として是正する。
+- **Projectへの「アイテムの追加」もissue-deckが行う。** GitHubのAuto-addはプランごとに
+  設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
+  報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
+  まとめて載せる（`addMissingProjectItems`）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
