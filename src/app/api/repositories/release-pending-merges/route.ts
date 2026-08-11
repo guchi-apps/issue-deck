@@ -4,7 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchOpenPullRequestsForBase, fetchRefCiState } from "@/lib/github/release-api";
+import { type CiState, fetchOpenPullRequestsForBase, fetchRefCiState } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 
 /** "main": develop→mainのPRがマージ待ち。"develop": バンプPRがCI通過後もマージ待ち（#979） */
@@ -16,6 +16,11 @@ export type ReleasePendingMerge = {
   pullRequestNumber: number;
   pullRequestUrl: string;
   pullRequestTitle: string;
+  /**
+   * マージ対象PRのCI状態。**`failure`でも一覧から外さない。** マージできない状態にあること自体を
+   * 画面へ出し、「マージすればよい」と「CIが落ちていて直す必要がある」を区別するため（#1059）。
+   */
+  ciState: CiState;
 };
 
 export function GET() {
@@ -68,12 +73,27 @@ async function handleGET() {
         // mainへのマージ待ち（develop→mainのPRがオープン中）を最優先で検出する。
         const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop");
         if (releasePr) {
+          // リリースPRのheadは`develop`そのもののため、`develop`のcheck-runsがそのままこのPRの状態になる。
+          // **CIワークフローだけでなく、その時点でdevelopに対して走った全ワークフローが含まれる**
+          // （実測でdeploy-preview・dispatch・labelsなど94件）。ワークフロー名でCIを特定する方式は
+          // ファイル名がリポジトリごとに違う（asset-managerはtest.yml）ため採らず、集約値をそのまま
+          // 使う。画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのはこのため。
+          //
+          // なお`fetchRefCiState`はper_page=100の1ページのみを見る。developは既に94件あり、
+          // 100を超えると失敗を取りこぼしうる（#1061）。
+          const ciState = await fetchRefCiState(
+            repository.ownerLogin,
+            repository.name,
+            "develop",
+            token,
+          );
           return {
             repoFullName: repository.fullName,
             mergeTarget: "main",
             pullRequestNumber: releasePr.number,
             pullRequestUrl: releasePr.html_url,
             pullRequestTitle: releasePr.title,
+            ciState,
           };
         }
 
@@ -89,6 +109,7 @@ async function handleGET() {
               pullRequestNumber: bumpPr.number,
               pullRequestUrl: bumpPr.html_url,
               pullRequestTitle: bumpPr.title,
+              ciState,
             };
           }
         }
