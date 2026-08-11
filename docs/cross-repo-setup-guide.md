@@ -109,7 +109,14 @@ jobs:
       issues: write
       pull-requests: write
       contents: write
+    # 進捗をissue-deckのProjectカンバンへ反映したい場合のみ（#991 Phase 2）。
+    # 省略すると報告ステップがスキップされるだけで、ラベル遷移には影響しない
+    secrets:
+      PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
 ```
+
+**この`secrets:`が効くのは、報告ステップを含むタグ（`workflows/v6`より後）を参照している場合のみ。**
+`v6`以前のタグには報告ステップ自体が無いため、渡しても何も起きない（エラーにもならない）。
 
 `claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
 
@@ -224,7 +231,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
-- **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。
+- **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
+- **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
 - issue-deckがprivateリポジトリになった場合、または対象リポジトリがprivateの場合は、issue-deck側の Settings → Actions → Access で同一オーナーからのアクセスを許可する必要がある（publicどうしなら設定不要）。
 
 ### プロンプト・補助スクリプトはコピーしない
@@ -352,6 +360,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude-code-action`の実行に使うClaude Codeの認証トークン | 各リポジトリで個別に発行・登録が必要 |
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
+| `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）へ進捗の変化を送るための共有シークレット（#991 Phase 2） | **任意。** organization secretとして1つ登録すれば全リポジトリで共有できる。未登録なら報告ステップがスキップされるだけで、ラベル遷移には影響しない |
 | `OP_SERVICE_ACCOUNT_TOKEN` | issue-deck自身のSignaly（社内通知）連携で使う1Password Service Accountトークン | マルチエージェント運用そのものには不要。issue-deckの`ci.yml`/`deploy.yml`/`release.yml`固有の設定であり、他リポジトリで導入する必然性はない |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）を呼び出す際の共有シークレット | `reusable-issue-labels.yml`・`reusable-issue-dispatch.yml`の`workflow_call`が`required: false`で受け取る。未設定でも報告ステップが警告のみでスキップされジョブは落ちない（issue-deckを進捗更新の単一障害点にしないため）。渡す場合は各対象リポジトリのorganization secretとして登録する |
 
