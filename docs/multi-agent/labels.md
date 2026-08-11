@@ -184,6 +184,50 @@ Job Summaryに出力される。スキップした旨をPRやIssueへコメン�
 他リポジトリへ移植する際はここを調整する。
 
 
+## ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる
+
+`claude-code-action`には、**ワークフローファイルの内容がリポジトリのデフォルトブランチ
+（issue-deckでは`develop`）の同ファイルと完全一致していなければ、Claudeの実行だけを
+スキップする**という検証機構がある。ワークフローファイルを書き換えたPRから、そのPR自身の
+内容でClaudeを動かせてしまうと任意のプロンプト・任意の権限で実行できてしまうため、
+それを防ぐためのもの。
+
+そのため`.github/workflows/`配下を変更するPRでは、`claude-review`ジョブのClaudeステップが
+次の警告を出して必ずスキップされる。
+
+```
+##[warning]Skipping action due to workflow validation: Workflow validation failed.
+The workflow file must exist and have identical content to the version on the
+repository's default branch.
+```
+
+**注意すべきなのは、このときステップもジョブも`success`で終わることである。** `claude-review`
+ジョブが成功していても、レビューが実際に行われたとは限らない。実際に行われたかどうかは、
+PRにレビューコメントが投稿されているか、あるいは「Claude使用量をJob Summaryに出力する」
+ステップが`execution_file`が空でskipされていないかで判別する。
+
+この挙動による運用上の帰結は次の2つ。
+
+- **ワークフロー変更はマージ前に完全には検証できない。** ワークフローファイルへの変更が
+  実際にClaudeの挙動へどう効くかは、デフォルトブランチへマージされて初めて確認できる。
+  ワークフロー変更PRでは、Claudeを介さない部分（シェルスクリプトによる判定ロジック・
+  ジョブ間の`needs`/`if`の依存関係など）をローカルで検証しておき、Claude側の挙動は
+  マージ後の次のPRで確認する、という二段構えになる。判定ロジックのローカル検証方法は
+  ステップの`run`を抽出して`gh`をスタブ化する形が使えるが、`env`の定義漏れはこの方法では
+  捕まらないため、`env`にキーが存在することは別途確認する（#929で実際に見逃した）。
+- **安全網は`risk-check`側が担保している。** `risk-check`は`.github/workflows/**`の変更を
+  機械的リスク判定の対象にしており、ワークフロー変更PRには必ず`00.check-user`が付いて
+  自動マージがスキップされる。したがって「レビューが行われないまま自動マージされる」
+  事態にはならない。ワークフロー変更PRでレビュー結果が無いのは想定どおりの状態であり、
+  人間の確認で代替する。
+
+実例: PR #1048（本ゲート機構の導入PR）の
+[run 31477646748](https://github.com/guchi-apps/issue-deck/actions/runs/31477646748)。
+`risk-check`が`.github/workflows/**`の変更を検知して`00.check-user`を付与し、ゲート判定は
+`claude-review`を実行する側に倒れ、ジョブ自体も`success`で終わったが、Claudeの実行は
+上記の検証機構でスキップされており、PRへのレビューコメントは投稿されていない。
+
+
 ## 自動マージ可否の判定方法
 
 自動マージ不可カテゴリ（`00.check-user`付与対象）:

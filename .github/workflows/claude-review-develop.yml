@@ -27,6 +27,13 @@ name: Claude Code Review (develop向けPR)
 #   trueのときだけ実行する(#992)。ゲート条件は risk-check の該当・大きな差分・
 #   共有知識への追加提案あり・対応Issue番号不明・対応Issueに00.check-user付与済み、の
 #   いずれか。スキップされた場合はauto-mergeがそのまま進む(下記auto-mergeのif参照)
+#   なお、claude-code-actionには「ワークフローファイルの内容がデフォルトブランチ(develop)の
+#   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
+#   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
+#   実行しないまま success で終わる(ステップもジョブも成功扱いになる点に注意)。
+#   その場合もrisk-checkが .github/workflows/** の変更を検知して00.check-userを付与するため
+#   自動マージはされない。詳細は docs/multi-agent/labels.md
+#   「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」参照
 # - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
 #   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
 #   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
