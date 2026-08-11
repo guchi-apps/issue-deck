@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { CiState } from "@/lib/github/release-api";
+
 /** "main": develop→mainのPRがマージ待ち。"develop": バンプPRがCI通過後もマージ待ち（#979） */
 export type ReleaseMergeTarget = "main" | "develop";
 
@@ -11,6 +13,8 @@ export type ReleasePendingMerge = {
   pullRequestNumber: number;
   pullRequestUrl: string;
   pullRequestTitle: string;
+  /** マージ対象PRのCI状態。`failure`は「マージ待ち」ではなく修正が要ることを示す（#1059） */
+  ciState: CiState;
 };
 
 /**

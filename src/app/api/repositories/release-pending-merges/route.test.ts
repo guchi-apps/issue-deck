@@ -111,9 +111,44 @@ describe("GET /api/repositories/release-pending-merges", () => {
         pullRequestNumber: 12,
         pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
         pullRequestTitle: "release",
+        ciState: "success",
       },
     ]);
-    expect(fetchRefCiState).not.toHaveBeenCalled();
+    // リリースPRのheadはdevelopそのもののため、CI状態はdevelopに対して問い合わせる。
+    expect(fetchRefCiState).toHaveBeenCalledWith("owner", "repo-a", "develop", "token");
+  });
+
+  it("リリースPRのCIが失敗していても一覧から外さず、ciStateにfailureを返す（#1059）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
+      if (base === "main" && repo === "repo-a") {
+        return [
+          {
+            number: 12,
+            html_url: "https://github.com/owner/repo-a/pull/12",
+            title: "release",
+            head: { ref: "develop" },
+          },
+        ];
+      }
+      return [];
+    });
+    fetchRefCiState.mockResolvedValue("failure");
+
+    const response = await GET();
+    const json = await response.json();
+
+    // バンプPRと違い、CIが通っていないことを理由に一覧から落とさない。
+    // マージできない状態にあること自体を画面へ出すのが目的のため。
+    expect(json.pendingMerges).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        mergeTarget: "main",
+        pullRequestNumber: 12,
+        pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
+        pullRequestTitle: "release",
+        ciState: "failure",
+      },
+    ]);
   });
 
   it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
@@ -142,6 +177,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         pullRequestNumber: 34,
         pullRequestUrl: "https://github.com/owner/repo-a/pull/34",
         pullRequestTitle: "release/v1.2.3",
+        ciState: "success",
       },
     ]);
   });
@@ -210,6 +246,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         pullRequestNumber: 3,
         pullRequestUrl: "https://github.com/owner/repo-b/pull/3",
         pullRequestTitle: "release",
+        ciState: "success",
       },
     ]);
   });

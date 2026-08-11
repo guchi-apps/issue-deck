@@ -78,7 +78,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下は`prompts-ref`で取得元を指定する（下記「プロンプトの取得元」。**指定しないと呼び出し元側の`.github/prompts/`が読まれ、無ければ落ちる**） |
 | `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
-| `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する |
+| `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する。あわせて、`claude-review`の実行要否を決める差分規模の閾値（`REVIEW_FILE_THRESHOLD`・`REVIEW_LINE_THRESHOLD`）と、除外するlockファイル名を、対象リポジトリのPRの粒度・パッケージマネージャに合わせて調整する（#992） |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） | バージョン管理方式（`package.json`の`version`比較か、別言語のバージョンファイルか）に応じた改変が必要 |

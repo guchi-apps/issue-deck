@@ -248,6 +248,25 @@ PAT はユーザー個人に紐づくため、コメント投稿もラベル操�
 
 App のインストールと権限付与が前提になる。**長期的にはこれが本命。**
 
+#### 前提条件の充足状況（2026-08-11時点、#834）
+
+本案が必要とする権限は、GitHub側のApp設定画面での確認により**既に3つとも付与済み**であることが
+確認できた。追加申請もインストール済みリポジトリのオーナー再承認も不要である。
+
+| 権限 | 実際の設定 | 本案での用途 |
+|---|---|---|
+| `Contents` | Read and write | ファイルの書き換えとbranch push |
+| `Workflows` | Read and write | `.github/workflows/`配下への push（既定の`GITHUB_TOKEN`では原理的に不可能な部分） |
+| `Pull requests` | Read and write | PR の作成 |
+
+権限一覧の一次情報は[docs/github-app-permissions.md](github-app-permissions.md)の
+「実際に付与されている権限（実測）」に置く。**同ドキュメントの棚卸し表は「各機能が必要とする
+権限の推定」であって実際の付与内容ではない**ため、権限を前提にした判断ではそちらと混同しない
+こと（#834 で実際に誤判断が起きた）。
+
+残る前提は、App ID と秘密鍵を issue-deck リポジトリの Actions Secrets へ登録することのみ
+（#834 のやること2）。これが済めば #835（`WORKFLOW_PAT`参照の置き換え）へ着手できる。
+
 なお、issue #622 で遭遇した「リポジトリの Workflow permissions で
 『Allow GitHub Actions to create and approve pull requests』が無効だと`gh pr create`が
 失敗する」という制限は、既定の`GITHUB_TOKEN`固有のものであり、Fine-grained PAT や
