@@ -42,7 +42,19 @@ Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-prot
 
 ## 初回セットアップ（1回だけ）
 
-Windows側のPowerShellで実行する。**管理者権限は不要**（HKCU配下に登録するため）。
+**手順は画面からも見られる。** Issue詳細の「…」メニュー →「ローカル起動のセットアップ」
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。詳細は後述の
+[セットアップ手順を画面から見せる](#セットアップ手順を画面から見せる)。
+
+WSLのターミナルに貼れる形。`wslpath -w`がWSLのパスをWindowsのパスへ変換する（`~`はコマンド
+置換の中でもシェルが展開するので、ユーザー名を埋める必要は無い）。**管理者権限は不要**
+（HKCU配下に登録するため）。
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"
+```
+
+Windows側のPowerShellから直接実行してもよい。
 
 ```powershell
 cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
@@ -91,11 +103,84 @@ guchi-apps/shopping-list  /home/guchi/apps/shopping-list
 
 最初の空白までをリポジトリ名、残りをパスとして扱うので、**パスに空白を含んでもよい**。
 行末のCRLFと余分な空白も落とす（Windows側のエディタで編集されうるため）。
-ローカルのフォルダ名はリポジトリ名と一致していなくてよい。
+ローカルのフォルダ名はリポジトリ名と一致していなくてよい。サンプルは
+[scripts/local-repos.conf.example](../../scripts/local-repos.conf.example)。
 
-ただし**ワンクリック起動が成立するのは`scripts/start-issue.sh`を持つリポジトリだけ**で、
-2026-08-11時点でこれを持つのはissue-deckのみ（[docs/cross-repo-automation.md](../cross-repo-automation.md)）。
-対応表に無いリポジトリや、スクリプトを持たないリポジトリでは、その旨を表示して停止する。
+**ただし対応表に書いただけでは起動しない。** 対象リポジトリが後述の「ローカル起動プロトコル」に
+適合している必要がある。
+
+## ローカル起動プロトコル v1
+
+ワンクリック起動は、対象リポジトリの`scripts/start-issue.sh`を呼ぶ形で成り立っている。実体が
+リポジトリごとにあるため、**ファイルがあっても約束を守っているとは限らない**。
+
+実際に踏んだ例: shopping-listは`scripts/start-issue.sh`を持っているが`ISSUE_DECK_SKIP_LAN_SETUP`を
+解釈しないため、押すとUACを承認しても待ちから戻らず**タブが無言で固まる**。「ファイルの存在」だけを
+条件にすると、この最悪ケースを通してしまう。
+
+そこで各リポジトリの`scripts/start-issue.sh`の冒頭に**マーカー行**を宣言させ、これを対応可否の
+**単一の真実**として扱う（#1073）。
+
+```bash
+#!/usr/bin/env bash
+# issue-deck-local-session: v1
+```
+
+受け口（`scripts/start-local-session.sh`）・画面・検査スクリプトの3か所がこの行を見る。
+ワークフロー側が`uses: ...@workflows/v6`という参照そのものをバージョン記録にしているのと同じ発想で、
+bashには`uses:`が無いため実体はコピーせざるを得ないが、**どの契約に従っているかの宣言だけは
+機械可読にできる**。
+
+### 約束の内容
+
+| # | 約束 | 機械検査 |
+| --- | --- | --- |
+| 1 | `bash scripts/start-issue.sh <番号>`の1引数で、**そのターミナルのフォアグラウンドで**セッションを開始する（新しいタブを開かない） | できない |
+| 2 | `ISSUE_DECK_SKIP_LAN_SETUP`が`0`以外なら、UACを伴う処理（`setup-lan-access.sh`）を行わない | できる |
+| 3 | worktreeが既にあり`issue-<番号>`ブランチなら、作り直さず再利用する | できない |
+| 4 | `ISSUE_DECK_DEV_PORT_BASE`が渡されたら開発サーバーのポートのベース値に使う | できる |
+| 5 | 上記を満たしたうえでマーカー行を宣言する | できる |
+
+**約束しないこと**: 依存インストール・開発サーバー起動・スクリーンショット対応の有無。これらは
+技術スタックの違いで、リポジトリごとに要否が変わる（shopping-listは依存パッケージを持たない）。
+
+約束1が要るのは、受け口が`exec`で自分自身を置き換えるため。ここで新しいタブを開くと元のタブが
+即座に閉じる。約束4は、どのリポジトリがどのポート帯を使うかが**定義上どのリポジトリ単独でも
+決められない**ため。実際、issue-deckとshopping-listが同じ`4000 + Issue番号`のまま衝突していた。
+ベース値の表は受け口が持つ（issue-deck=4000／shopping-list=5000／dayspan=6000）。
+
+### 適合を確かめる
+
+```bash
+scripts/check-local-session-contract.sh          # issue-deck自身（CIでも同じものが動く）
+scripts/check-local-session-contract.sh --all    # 対応表の全リポジトリ
+```
+
+`--all`はローカルのチェックアウトを読むため、手元にクローンしていないリポジトリは見られない。
+検査できるのは「宣言があるか」「約束が要求する環境変数を解釈しているか」までで、実際の挙動
+（約束1・3）までは見ない。
+
+適合していないリポジトリでボタンを押すと、**受け口の段階で停止して足すべき1行を表示する**。
+起動してから固まるより安全という判断。
+
+### 他リポジトリへ移植するとき
+
+`scripts/start-issue.sh`は骨格が共通で、書き換えが要るのは実質6点。
+
+| # | 書き換える箇所 | 例 |
+| --- | --- | --- |
+| 1 | worktreeベースの環境変数名と既定ディレクトリ | `DAYSPAN_WORKTREE_BASE:-$HOME/apps/dayspan-worktrees` |
+| 2 | 共有知識ディレクトリの環境変数名 | `DAYSPAN_SHARED_CONTEXT_DIR` |
+| 3 | `gh issue view --repo <owner/repo>` | |
+| 4 | 環境変数ファイルの名前と供給方法 | `.env.local`のコピー／`.env`のコピーor`op inject` |
+| 5 | 依存インストールの有無と開発サーバーの起動方式 | `pnpm install`＋`run-issue-session.sh`／どちらも無し |
+| 6 | プロンプト内のリポジトリ名と技術前提 | テスト・ビルドの有無、認証、スクリーンショット可否 |
+
+ポートのベース値は約束4により受け口が渡すので、移植時に決め直す必要はない。
+
+そのままコピーで済むのは、事前バリデーション・worktreeの作成と再利用・sslip.ioの設定・
+python3によるプロンプト生成ブロック全体・`wt.exe`でのタブ起動・`claude --permission-mode acceptEdits`
+の起動フラグ。
 
 ## セキュリティ上の前提
 
@@ -161,6 +246,43 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
 ```
 
+## セットアップ手順を画面から見せる
+
+登録手順がこのドキュメントにしか無いと、使う側は**「ボタンを押しても何も起きない」状態から
+自力でここへ辿り着く**必要がある（#1088）。Issue詳細の「…」メニューに
+**「ローカル起動のセットアップ」**を置き、ダイアログで手順を出す
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。
+
+**初回の「ローカルで開始」押下時には自動で開く**（localStorageで一度きり。以降はメニューから
+任意に開ける）。
+
+### 検知はできない
+
+**ブラウザから`issuedeck://`が登録済みかを知る手段は無い。** 未登録でも押下は黙って無視される
+だけで、エラーも遷移も観測できない。インストール済みの受け口のバージョンも見えず、画面から
+何かを実行することもできない。遷移後に`blur`が来るかを見る裏技はあるが、ブラウザ自身の確認
+ダイアログがフォーカスを奪うため誤検知する。**当てにしない。**
+
+したがって「状況を検知して出す」のではなく、**こちらから一度だけ見せる**設計にしている。
+
+### ダイアログの内容
+
+| 項目 | 内容 |
+| --- | --- |
+| 1. 登録コマンド | WSLのターミナルにそのまま貼れる1行（コピーボタン付き） |
+| 2. 動作確認 | `issuedeck://start/guchi-apps/issue-deck/99999`へのリンク。押せばその場で経路を確認でき、Issue取得に失敗して止まるのでブランチもworktreeも作られない |
+| 3. 再実行が要るケース | 「受け口スクリプトを更新したら登録スクリプトを再実行」。アプリのバージョンを併記する |
+| 4. フォールバック | プロトコル未登録の環境向けの起動コマンド（「ローカル起動コマンドをコピー」と同じもの） |
+
+3のバージョンは、**登録コマンドをコピーした時点の版**をlocalStorageに控え、現在の版と並べて
+出す（`src/lib/local-session-setup.ts`）。登録そのものは検知できないので、「いつの版で登録した
+か」を人が照合できるところまでを担保する。版が違えば登録し直しを促す。
+
+コマンドの生成は経路によらず`src/lib/local-session.ts`へ集約している。分かれていると片方だけ
+古くなる。案内するチェックアウト先（`~/apps/issue-deck`）も`start-local-session.sh`の既定の
+解決先と同じ値にしてある。**ユーザー環境依存の値**（チェックアウト先・WSLのディストロ名）に
+ついては、読み替える旨と`ISSUEDECK_WSL_DISTRO`の存在をダイアログ内に添えている。
+
 ## 起動時のラベル付与（`11.local`・進捗ラベル）
 
 ローカルセッションを起こした時点で、Issue側にも「ローカルで対応中である」「着手した」ことが
@@ -206,7 +328,7 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 | 状態 | 挙動 |
 | --- | --- |
 | worktreeが存在しない | 新規作成 |
-| `issue-<番号>`ブランチのworktreeがある | **再利用** |
+| `issue-<番号>`ブランチのworktreeがある | **再利用**（PRがマージ済みなら警告。後述） |
 | gitの作業ツリーでないディレクトリがある | エラー終了（中身を確認して手動で削除する） |
 | 別ブランチを開いている | エラー終了 |
 
@@ -309,12 +431,57 @@ UACを承認して中の処理が成功しても`Start-Process -Verb RunAs -Wait
 画面は無反応、という判断のつかない状態になる）。
 
 そのためワンクリック経路では行わない。`start-local-session.sh`が
-`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`がそれを見てスキップする。
+`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`と`dev.sh`がそれを見てスキップする。
 LAN内の別端末（スマホ等）から見たくなったら、そのworktreeで
 `scripts/setup-lan-access.sh <ポート>`を直接実行する。
 
 コマンドライン引数ではなく環境変数で渡しているのは、この指定を解釈しない他リポジトリの
 `start-issue.sh`へ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
+
+`start-issue.sh`だけでなく`dev.sh`も見る必要がある点に注意（#1094）。`setup-lan-access.sh`の
+呼び出し口は2つあり、#1076で`start-issue.sh`側だけを外した結果、まったく同じ症状が
+`pnpm dev` → `dev.sh`側に残っていた。呼び出し経路は次のとおりで、`pnpm dev`は
+`run-issue-session.sh`の子プロセスなので`export`した環境変数がそのまま届く。
+
+```text
+start-local-session.sh（ISSUE_DECK_SKIP_LAN_SETUP=1 を export）
+  → start-issue.sh          ← 見てスキップする
+    → run-issue-session.sh
+      → pnpm dev → dev.sh   ← 見てスキップする
+```
+
+`pnpm dev`を普通のターミナルから叩く従来の使い方（環境変数なし）では、これまでどおり
+LANアクセス設定が走る。
+
+### 止まる正体はUAC待ちではなくSIGTTIN
+
+「UAC待ちから戻らない」ように見えるが、#1094の調査で実際の機構が分かった。**バックグラウンドの
+プロセスグループが端末から読もうとして`SIGTTIN`で停止している。**
+
+`run-issue-session.sh`は`pnpm dev`をバックグラウンドジョブとして起動する。`set -m`があるため
+これは独立したプロセスグループになり、端末のフォアグラウンドプロセスグループは`claude`のままになる。
+出力は`.dev-servers/issue-<n>.log`へ逃がしてあるが、**stdinは端末のまま**だった。この状態で
+`setup-lan-access.sh`が起動する`powershell.exe`（WSL interop）が端末を読もうとすると、
+カーネルがプロセスグループ全体に`SIGTTIN`を送って停止させる。誰も`SIGCONT`しないので永久に止まる。
+
+止まっているプロセスは`ps`の`STAT`列が`T`（`wchan`は`do_signal_stop`）になる。**`S`ではなく`T`
+なら、待っているのではなく止められている。**UACダイアログを承認しても動かないのはこのため。
+
+普通のWSLターミナルから`pnpm dev`を叩く場合はフォアグラウンドプロセスグループなので端末を
+読んでよく、停止しない。**ワンクリック経路に固有**なのはこれが理由。
+
+対策は3層になっている。
+
+1. **`ISSUE_DECK_SKIP_LAN_SETUP=1`**（上記）。ワンクリック経路ではそもそも呼ばない
+2. **`run-issue-session.sh`が`pnpm dev </dev/null`で起動する**。stdinが端末でなければ
+   `SIGTTIN`は原理的に発生しない。devサーバー配下のあらゆる子プロセスに効く
+3. **`setup-lan-access.sh`のUAC待ちに`timeout`（既定60秒）**。`ISSUE_DECK_LAN_SETUP_TIMEOUT`で
+   変更でき`0`で無制限。打ち切り・失敗のいずれも終了コード1を返し、呼び出し元は警告を出して
+   先へ進む（devサーバーの起動は止めない）
+
+3が`SIGTTIN`停止にも効くのは、`timeout`が子を**別のプロセスグループ**に置くため。停止するのは
+子だけで`timeout`自身は生き残り、時間になれば落とせる。停止中のプロセスには`SIGTERM`が届かない
+ので`--kill-after`を併用している（GNU timeoutはシグナル送出後に`SIGCONT`も送る）。
 
 ## VSCodeのタブから始める（`/issue <番号>`）
 
@@ -396,6 +563,44 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 一方`worktree.symlinkDirectories`で`node_modules`をメインリポジトリから共有できる点は純正が
 優れており、`--prepare-only`が毎回`pnpm install`する現状より速い。命名の制約が外れたら再検討する。
 
+## マージ済みIssueで再開したときの扱い
+
+再開できるようにしたことで、**マージ済みのIssueでボタンを押すと古いworktreeがそのまま
+再利用される**という副作用が出た（#1100）。以前は「既に存在します」で止まっていたぶん、
+黙って進む方がかえって気づきにくい。マージ済みブランチは`develop`から分岐し直されておらず、
+以降のdevelopの変更を含まないまま作業を始めることになる。
+
+そのため`start-issue.sh`は再開時に`gh pr list --head issue-<番号> --state merged`を見て、
+マージ済みPRがあれば警告する。そのうえで**消しても失われないと確認できたときだけ**、
+作り直すかどうかを尋ねる。
+
+| 状態 | 挙動 |
+| --- | --- |
+| マージ済みPRが無い | 何も表示せず再利用（通常の再開） |
+| マージ済み・クリーン・端末あり | 警告し、`[Y/n]`で作り直すか尋ねる（既定は作り直す） |
+| マージ済み・クリーン・端末なし（`--prepare-only`等） | 警告して再利用。`--recreate`の案内を出す |
+| マージ済みだが未コミットの変更・未pushのコミット・稼働中のセッションがある | 警告して再利用（消すと失われるため作り直さない） |
+
+`--recreate`を付けると尋ねずに作り直し、`--no-recreate`を付けると尋ねずに再利用する。
+`--recreate`を指定しても、消すと失われるものが残っている場合は作り直さずエラーで止まる。
+
+作り直しはworktreeとローカルブランチを削除してから、通常の新規作成経路（最新の`develop`から
+`git worktree add -b`）へ合流する。判定に使う「消してよいか」のロジックは
+`scripts/lib/worktree-status.sh`に置き、掃除コマンドと共有している。**片方だけを緩めない。**
+
+## 溜まったworktreeを掃除する
+
+worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前後あるため、放置すると
+ディスクを食い、`git worktree list`も読みにくくなる。
+
+```bash
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+```
+
+対象・オプション・削除するものの範囲は[branching.md](branching.md)の「ブランチ・worktree運用」を参照。
+
 ## 未対応（このIssueの範囲外）
 
-- マージ済みworktreeの**掃除**。放置すると溜まる。
+- 受け口スクリプトの**陳腐化の検知**（別Issue）。画面側は「登録コマンドをコピーした版」を控えて
+  人が照合できるようにするところまでで、実際にインストールされている版はブラウザからは見えない。

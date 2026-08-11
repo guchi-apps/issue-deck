@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
+# issue-deck-local-session: v1
+#
 # Issueごとに専用ブランチ・git worktreeを作成し、実装エージェント用のClaude Codeセッションを起動する
+#
+# 冒頭の `issue-deck-local-session:` は「ローカル起動プロトコル」の版数を宣言するマーカー（#1073）。
+# ワンクリック起動の受け口（scripts/start-local-session.sh）と画面がこの行を見て、対応可否を
+# 判定する。issue-deck自身もこの契約に従う側なので、他リポジトリと同じように宣言する。
+# 約束の内容は docs/multi-agent/local-quick-start.md を参照。
 #
 # 使い方:
 #   scripts/start-issue.sh <issue番号> [issue番号...]
 #   scripts/start-issue.sh --prepare-only <issue番号> [issue番号...]
+#   scripts/start-issue.sh --recreate <issue番号>      既存worktreeを捨ててdevelopから作り直す
+#   scripts/start-issue.sh --no-recreate <issue番号>   作り直しの確認を出さず必ず再利用する
 #
 # --prepare-only はworktree・ブランチ・起動用プロンプトの準備だけを行い、開発サーバーも
 # Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
@@ -11,13 +20,17 @@
 #
 # worktreeが既にある場合は作り直さず再利用する。一度閉じたセッションに戻るための経路であり、
 # ワンクリック起動（画面の「ローカルで開始」）を2回目以降に押しても使える（#1076）。
+# ただしそのIssueのPRが既にマージ済みなら、developから分岐し直されていない古いブランチのまま
+# 作業を始めてしまわないよう警告し、安全に捨てられる場合は作り直すかを尋ねる（#1100）。
+# 溜まったworktreeの掃除は scripts/cleanup-worktrees.sh を使う。
 #
 # 起動時にIssueへ `11.local`（無人実行との二重起動を防ぐ停止フラグ。#1097）と進捗ラベル
 # （`01.planning`/`02.wip`。#1096）を付ける。どの起動経路（ターミナル・画面のボタン・
 # `/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが起きない。
 #
 # 環境変数:
-#   ISSUE_DECK_SKIP_LAN_SETUP=1  LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定なら既定の4000）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -39,6 +52,9 @@ WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 PROMPT_TEMPLATE="$ROOT/scripts/prompts/implementation-agent.md"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
+# shellcheck source=scripts/lib/worktree-status.sh
+source "$ROOT/scripts/lib/worktree-status.sh"
+
 # 端末のタイトル（Windows Terminalのタブ名）を書き換える。worktree作成・pnpm installの間も
 # どのIssueの準備中かがタブから分かるようにする（#1105）。この後Claude Codeが起動すると、
 # 同じ書式の`--name`（scripts/run-issue-session.sh）が引き継ぐ。
@@ -49,10 +65,14 @@ set_terminal_title() {
 }
 
 PREPARE_ONLY=0
+# マージ済みIssueのworktreeを作り直すかどうか。auto=マージ済みを検出したら対話で尋ねる（#1100）
+RECREATE_MODE=auto
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
+    --recreate) RECREATE_MODE=always ;;
+    --no-recreate) RECREATE_MODE=never ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
@@ -64,7 +84,7 @@ set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 SKIP_LAN_SETUP="${ISSUE_DECK_SKIP_LAN_SETUP:-0}"
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/start-issue.sh [--prepare-only] <issue番号> [issue番号...]" >&2
+  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] <issue番号> [issue番号...]" >&2
   exit 1
 fi
 
@@ -98,6 +118,81 @@ for n in "$@"; do
 done
 
 mkdir -p "$PROMPT_DIR"
+
+# マージ済みPRを持つ既存worktreeを作り直すかどうかを決める（#1100）。作り直す場合のみ0を返す。
+# 判断材料と、作り直さない場合の理由もここで表示する。
+decide_recreate() {
+  local n="$1" merged_pr="$2" dirty_count="$3"
+  echo "#$n: 警告: このIssueのPR #$merged_pr は既にマージ済みです。"
+  echo "#$n: 　　　 ブランチ issue-$n はdevelopへ取り込み済みで、以降のdevelopの変更を含みません。"
+
+  if [[ "$RECREATE_MODE" == "never" ]]; then
+    echo "#$n: --no-recreate が指定されているため、このまま再利用します。"
+    return 1
+  fi
+
+  # 「入っていないコミットがある」の判定はorigin/developが最新であることが前提。再開経路では
+  # まだfetchしていないため、ここで最新化する（失敗しても判定は削除しない側に倒れるだけ）。
+  git -C "$ROOT" fetch origin develop >/dev/null 2>&1 || true
+
+  # 作り直す＝worktreeとブランチを消すこと。消して失われるものが残っている場合は作り直さない。
+  local blocker=""
+  if [[ "$dirty_count" -gt 0 ]]; then
+    blocker="未コミットの変更が $dirty_count 件あります"
+  elif ! worktree_branch_in_develop "$ROOT" "issue-$n"; then
+    blocker="origin/develop に入っていないコミットがあります"
+  elif worktree_session_running "$n" "$WORKTREE_BASE"; then
+    blocker="このIssueのセッションまたは開発サーバーが動いています"
+  fi
+  if [[ -n "$blocker" ]]; then
+    if [[ "$RECREATE_MODE" == "always" ]]; then
+      echo "Error: --recreate が指定されていますが、${blocker}。手動で確認してください。" >&2
+      exit 1
+    fi
+    echo "#$n: ただし${blocker}。作り直すと失われるため、このまま再利用します。"
+    return 1
+  fi
+
+  if [[ "$RECREATE_MODE" == "always" ]]; then
+    return 0
+  fi
+
+  # ワンクリック起動のタブは端末を持つので尋ねられる。--prepare-only（Claude Codeのタブから
+  # 呼ばれる経路）は端末を持たないため、勝手に消さず案内だけ出して再利用する。
+  if [[ ! -t 0 ]]; then
+    echo "#$n: 非対話実行のため、このまま再利用します。最新のdevelopから作り直す場合は --recreate を付けて実行してください。"
+    return 1
+  fi
+
+  local answer
+  read -r -p "#$n: worktreeを削除して最新のdevelopから作り直しますか？ [Y/n]: " answer
+  case "$answer" in
+    [nN]|[nN][oO]) echo "#$n: 既存のworktreeをそのまま使います。"; return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# 既存のworktree・ブランチを削除する。作り直し自体は呼び出し元の新規作成経路に任せる。
+remove_worktree() {
+  local n="$1" dir="$2"
+  # 自分の足元を消すとgitの内部状態を巻き込むため、カレントディレクトリが対象の中なら止める。
+  local current_dir
+  current_dir="$(pwd -P)"
+  if [[ "$current_dir" == "$dir" || "$current_dir" == "$dir"/* ]]; then
+    echo "Error: 削除対象のworktreeの中で実行されているため作り直せません: $dir" >&2
+    echo "       別のディレクトリ（例: $ROOT）へ移動してから実行してください。" >&2
+    exit 1
+  fi
+  echo "#$n: 既存のworktree・ブランチを削除しています..."
+  if ! git -C "$ROOT" worktree remove "$dir"; then
+    echo "Error: worktreeの削除に失敗しました: $dir" >&2
+    exit 1
+  fi
+  # コミットがすべて origin/develop に入っていることを確認済みなので -D でよい（-d は
+  # 現在のHEADを基準に判定するため、本体が別のIssueブランチを開いていると消せない）。
+  git -C "$ROOT" branch -D "issue-$n" >/dev/null
+  rm -f "$WORKTREE_BASE/.dev-servers/issue-$n.log" "$WORKTREE_BASE/.dev-servers/issue-$n.pid"
+}
 
 # 起動時にIssueへ付けるラベルを決めて付与する（#1096・#1097）。
 #
@@ -249,9 +344,18 @@ prepare_issue() {
     reuse_worktree=1
     echo "#$n: 既存のworktreeを再利用します（$WORKTREE_DIR）。"
     local dirty_count
-    dirty_count="$(git -C "$WORKTREE_DIR" status --porcelain | wc -l)"
+    dirty_count="$(worktree_dirty_count "$WORKTREE_DIR")"
     if [[ "$dirty_count" -gt 0 ]]; then
       echo "#$n: 未コミットの変更が $dirty_count 件あります。前回の続きから作業してください。"
+    fi
+
+    # マージ済みのIssueで再開すると、developから分岐し直されないまま古いブランチで作業を
+    # 始めてしまう。#1076で再開できるようにしたぶん、黙って進むと気づきにくい（#1100）。
+    local merged_pr
+    merged_pr="$(worktree_merged_pr "$n")"
+    if [[ -n "$merged_pr" ]] && decide_recreate "$n" "$merged_pr" "$dirty_count"; then
+      remove_worktree "$n" "$WORKTREE_DIR"
+      reuse_worktree=0
     fi
   fi
 
@@ -279,6 +383,7 @@ prepare_issue() {
     echo "#$n: worktree・ブランチ issue-$n を作成しています..."
     if ! git -C "$ROOT" worktree add "$WORKTREE_DIR" -b "issue-$n" origin/develop; then
       echo "Error: worktree/ブランチの作成に失敗しました（ブランチ issue-$n が既に存在する可能性があります）。" >&2
+      echo "       マージ済みのブランチが残っているだけなら scripts/cleanup-worktrees.sh --issue $n で掃除できます。" >&2
       exit 1
     fi
   fi
@@ -296,10 +401,13 @@ prepare_issue() {
   fi
 
   # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
-  DEV_PORT=$((4000 + n))
+  # ワンクリック起動からはissue-deck側の受け口がベース値を渡してくる。リポジトリごとの帯を
+  # 一箇所で管理するための約束で（#1073）、渡されない場合は既定の4000を使う。
+  DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
   if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
-    sed -i '/^PORT=/d' "$WORKTREE_DIR/.env.local"
-    printf '\nPORT=%s\n' "$DEV_PORT" >>"$WORKTREE_DIR/.env.local"
+    # `sed`で消して追記する形にすると、再開のたびに先頭改行が積もって空行が増える（実測で
+    # 何度も再開したworktreeだけ空行が4行多かった）。既存行があれば置換する共通スクリプトを使う。
+    bash "$ROOT/scripts/update-env-file.sh" "$WORKTREE_DIR/.env.local" PORT "$DEV_PORT"
   fi
   echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
 

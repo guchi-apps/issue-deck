@@ -563,11 +563,37 @@ scripts/check-cross-repo-guide-sync.sh
 
 コメント投稿をきっかけに結果を確認するとき、**`gh run list --limit 1`で「最新のrun」を取ってはいけない。** botコメントやラベル操作が数秒差で同時に飛ぶため、自分が起こしたものではないrunを掴む。投稿前後のrun一覧を差分で取り、`event`と`createdAt`を自分のコメントの`createdAt`と突き合わせて特定すること。
 
+## 12. ローカル起動スクリプト（任意）
+
+ここまではGitHub Actions側の話。**issue-deckの画面からローカルのClaude Codeセッションをワンクリックで
+起動する**経路は別立てで、対応するかどうかもリポジトリごとに選べる。Actions側の導入とは独立している。
+
+対応させるには2つ要る。
+
+1. リポジトリに`scripts/start-issue.sh`を置き、**ローカル起動プロトコル**に適合させる
+2. 各自の環境の対応表（`~/.config/issue-deck/local-repos.conf`）に、そのリポジトリのチェックアウト先を書く
+
+2は環境ごとの設定なのでリポジトリには入らない。1だけがリポジトリ側の作業。
+
+適合しているかは次で確認できる。
+
+```bash
+scripts/check-local-session-contract.sh --all
+```
+
+**約束の内容・移植時に書き換える6点・検査の仕組みは
+[docs/multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「ローカル起動プロトコル v1」に
+まとめてある。** ここでは重複して書かない。
+
+適合状況の一覧は [docs/supported-repositories.md](supported-repositories.md)「ローカル起動プロトコルの
+適合状況」。**Actions側の対応済みとは一致しない**（導入順が「ワークフロー→ローカル」になるため）。
+
 ## 関連ドキュメント
 
 - [docs/shared-knowledge.md](shared-knowledge.md) — 全アプリ共通の共有知識リポジトリの設計
 - [docs/cross-repo-automation.md](cross-repo-automation.md) — 展開方式の選択肢比較・調査結果
 - [docs/supported-repositories.md](supported-repositories.md) — 導入済み・検討中リポジトリの記録
+- [docs/multi-agent/local-quick-start.md](multi-agent/local-quick-start.md) — ローカル起動プロトコルと画面からのワンクリック起動
 - [docs/multi-agent-workflow.md](multi-agent-workflow.md) — issue-deck自身の設計・実装の詳細
 - [docs/github-app-permissions.md](github-app-permissions.md) — GitHub Appの権限棚卸し
 - [CLAUDE.md](../CLAUDE.md) — issue-deckの運用ルール本体
