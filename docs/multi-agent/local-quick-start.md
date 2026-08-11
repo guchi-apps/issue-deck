@@ -150,11 +150,33 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
 ```
 
-## `11.local`の自動付与
+## 起動時のラベル付与（`11.local`・進捗ラベル）
 
-ボタン押下時に`11.local`を付与してから起動する。ローカルセッションで対応するIssueに無人実行が
-重ねて走るのを防ぐため（[labels.md](labels.md)）。ラベル付与に失敗しても起動自体は妨げない
-（起動できないより、ラベルが遅れる方が軽いという判断）。
+ローカルセッションを起こした時点で、Issue側にも「ローカルで対応中である」「着手した」ことが
+残るようにラベルを付ける。付ける場所は2箇所ある。
+
+| 付ける場所 | 付けるもの | 目的 |
+| --- | --- | --- |
+| 画面のボタン（`src/components/dashboard/start-local-session-button.tsx`） | `11.local` | **起動前**に立てる。プロトコルハンドラを経てWSLに到達するまでの間も無防備にしないため |
+| `scripts/start-issue.sh`（`prepare_issue`） | `11.local` ＋ 進捗ラベル | どの起動経路（ターミナル直叩き・ボタン・`/issue`）もここを通るため、付け忘れが起きない（#1096・#1097） |
+
+スクリプト側の判定は、Issue取得時のJSONに入っているラベルから行う（判定のための追加のAPI
+呼び出しはしない）。
+
+- `11.local` — 付いていなければ付ける。無人実行（`claude-issue-dispatch.yml`）との二重起動を
+  防ぐ停止フラグ（[branching.md](branching.md)）
+- 進捗ラベル — `21.plan-required`が付いていれば`01.planning`、無ければ`02.wip`。
+  **既に進捗ラベル（`01.planning`〜`09.main`）のいずれかが付いている場合は触らない。**
+  再開（後述）で2回目以降に起動したときに、`03.d:marge`まで進んだIssueを`02.wip`へ
+  巻き戻さないため
+
+進捗ラベルを付ければGitHub ProjectsのStatusもWebhook経由で追随する
+（`src/app/api/webhooks/github/route.ts`がラベルを正としてStatusを是正する）ため、ローカルから
+`/api/progress`へ報告する必要はない。共有シークレット（`PROGRESS_REPORT_SECRET`）をローカルへ
+置かずに済む。
+
+ラベル付与に失敗しても起動自体は妨げない（起動できないより、記録が遅れる方が軽いという判断）。
+ボタン経由では`11.local`の付与がスクリプト側と重複するが、二重に付けても害はない。
 
 ## 2回目以降は再開になる
 
@@ -239,7 +261,7 @@ VSCodeでClaude Codeのタブを開く（Claude Code: Open in New Tab）
   ↓
 /issue 1049
   ↓
-worktree準備（scripts/start-issue.sh --prepare-only）→ ラベル付与 → プロンプト適用
+worktree準備・ラベル付与（scripts/start-issue.sh --prepare-only）→ プロンプト適用
 ```
 
 `--prepare-only`はworktree・ブランチ・`.env.local`・ポート採番・`pnpm install`・起動用
