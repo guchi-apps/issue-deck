@@ -399,7 +399,9 @@ export function IssueDetail({
               )}
               {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
             </span>
-            <div className="ml-auto flex items-center gap-2">
+            {/* 詳細ペインが狭いときやボタンが増えたときに「GitHubで開く」等が
+                横へはみ出して見えなくならないよう、この行は折り返す（#998） */}
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {canStartImplementation(issue) && (
                 <StartImplementationDialog
                   issue={issue}
