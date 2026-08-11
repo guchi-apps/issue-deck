@@ -1216,8 +1216,26 @@ jobs:
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+              # gh workflow runは起動したrunのIDを返さないため、そのまま$RUN_URL(=このrun自身、
+              # 既に完了間際で参考にならない)を使うと「自動的に再実行します」の実行ログが前回の
+              # 通知と同じURLになってしまう(#1113)。claude-issue-dispatch.ymlのrun-nameで
+              # 表示名を"Issue #<番号>"に固定しているため、それをdisplayTitleの手がかりに
+              # 新しいrunをポーリングで特定する。反映までのタイムラグを見込み最大20秒
+              # (2秒×10回)試み、見つからなければ$RUN_URLのままフォールバックする。
+              NEW_RUN_URL="$RUN_URL"
+              DISPATCH_TITLE="Issue #$ISSUE_NUMBER"
+              CURRENT_RUN_ID="${{ github.run_id }}"
+              for _ in 1 2 3 4 5 6 7 8 9 10; do
+                sleep 2
+                CANDIDATE_RUN_ID="$(gh run list --repo "$REPO" --workflow claude-issue-dispatch.yml --event workflow_dispatch --json databaseId,createdAt,displayTitle --limit 20 2>/dev/null | jq -r --arg title "$DISPATCH_TITLE" --arg cur "$CURRENT_RUN_ID" '[.[] | select(.displayTitle == $title and (.databaseId | tostring) != $cur)] | sort_by(.createdAt) | last | .databaseId // empty' 2>/dev/null || true)"
+                if [ -n "$CANDIDATE_RUN_ID" ]; then
+                  NEW_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${CANDIDATE_RUN_ID}"
+                  break
+                fi
+              done
+
               RETRY_BODY="🔁 計画提示ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $NEW_RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
@@ -1846,8 +1864,22 @@ jobs:
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
             if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+              # 新しく起動したrunのURLを特定する。計画提示ステップ側のフォールバック検証ステップと
+              # 同じロジック(#1113、詳細はそちら側のコメント参照)。
+              NEW_RUN_URL="$RUN_URL"
+              DISPATCH_TITLE="Issue #$ISSUE_NUMBER"
+              CURRENT_RUN_ID="${{ github.run_id }}"
+              for _ in 1 2 3 4 5 6 7 8 9 10; do
+                sleep 2
+                CANDIDATE_RUN_ID="$(gh run list --repo "$REPO" --workflow claude-issue-dispatch.yml --event workflow_dispatch --json databaseId,createdAt,displayTitle --limit 20 2>/dev/null | jq -r --arg title "$DISPATCH_TITLE" --arg cur "$CURRENT_RUN_ID" '[.[] | select(.displayTitle == $title and (.databaseId | tostring) != $cur)] | sort_by(.createdAt) | last | .databaseId // empty' 2>/dev/null || true)"
+                if [ -n "$CANDIDATE_RUN_ID" ]; then
+                  NEW_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${CANDIDATE_RUN_ID}"
+                  break
+                fi
+              done
+
               RETRY_BODY="🔁 実装ステップの完了を確認できなかったため、自動的に再実行します（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）。既存のブランチ・コミットがあれば続きから再開します。"
-              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
+              RETRY_BODY="$RETRY_BODY"$'\n\n'"実行ログ: $NEW_RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
