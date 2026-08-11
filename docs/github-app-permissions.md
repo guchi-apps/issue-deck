@@ -22,6 +22,12 @@ IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app
 `GITHUB_APP_PRIVATE_KEY_BASE64`）で行っている。`getInstallationToken()`を使っている全呼び出し箇所と、
 そこから呼ばれるGitHub REST/GraphQL APIのエンドポイントを洗い出した結果は以下のとおり。
 
+**この表は「各機能が動くために必要な権限の推定」であり、Appに実際に付与されている権限の一覧では
+ない。** 実際の付与内容はGitHub側のApp設定画面（Organization/User settings > Developer settings >
+GitHub Apps > Permissions）でのみ確認でき、コードからは導けない。両者を混同すると「この権限は
+付与されていないはずだ」という誤った前提で設計判断をしてしまう（#834 で実際に発生した。後述
+「実際に付与されている権限（実測）」参照）。
+
 | 機能 | 呼び出し元 | 主なエンドポイント | 必要な権限（推定） |
 |---|---|---|---|
 | Issue一覧・コメント・ラベル・担当者の取得/作成/更新/削除 | `src/lib/github/issues-api.ts` | `GET/POST/PATCH /repos/{owner}/{repo}/issues*`、`/labels`、`/assignees` | Issues: Read and write |
@@ -36,6 +42,26 @@ IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app
 **Administrationが必要な箇所は`transferIssue()`の1関数のみ。** それ以外の全機能はIssues/Pull
 requests/Actions/Checks/Contents(Read)という、GitHub Appの権限モデル上「通常のIssue/PR管理ボット」
 として妥当な範囲に収まっている。
+
+## 実際に付与されている権限（実測）
+
+上記の棚卸しとは別に、GitHub側のApp設定画面で実際に有効になっている権限を確認した記録。
+**推定と実測は一致しないため、権限を前提にした設計判断を行う際は必ずこちらを見る。**
+
+| 確認日 | 権限 | 実際の設定 | 確認の経緯 |
+|---|---|---|---|
+| 2026-08-11 | `Contents` | **Read and write** | #834（WORKFLOW_PAT廃止の事前準備）でApp設定画面を確認 |
+| 2026-08-11 | `Workflows` | **Read and write** | 同上 |
+| 2026-08-11 | `Pull requests` | **Read and write** | 同上 |
+
+上の棚卸し表では`Contents: Read`・`Pull requests: Read`と推定していたが、いずれも実際には
+`Read and write`だった。この差により、#834 では当初「`.github/workflows/`を書き換えてPRを作るには
+権限の追加申請が必要で、オーナーの再承認が発生する」と誤って判断していた。実際には追加申請も
+再承認も不要である。
+
+`Workflows: Read and write`が付与済みであることは、`secrets.WORKFLOW_PAT`をGitHub Appインストール
+トークンへ置き換える計画（#834・#835）にとって前提条件にあたる。詳細は
+[docs/actions-token-model.md](actions-token-model.md)を参照。
 
 ## 「Administrationをより狭い権限に置き換えられるか」の結論
 
