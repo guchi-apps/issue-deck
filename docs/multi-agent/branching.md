@@ -10,6 +10,7 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - worktreeは本体リポジトリの外、`~/apps/issue-deck-worktrees/<ブランチ名>/` に作成する。本体 `~/apps/issue-deck` は常にレビュー・統合エージェント用の `develop` 最新チェックアウトとして空けておく。
 - worktree作成後に必要な準備:
   - `.env.local` を本体からコピーする（`.gitignore`対象でworktreeに複製されないため。symlinkではなくコピーとし、将来worktreeごとに値を変える余地を残す）
+    - コピーは新規作成時の1回だけで、その後は追随しない。そのため**既存worktreeの再開時は、本体の`.env.local`にあってworktree側に無いキーだけを値ごと追記する**（#1099）。既存キーの値は書き換えないので、ローカルで書き換えている場合も壊れない。`PORT`はworktreeごとに採番するため対象外。worktree側でコメントアウトしているキーは「意図的に無効化している」とみなして復活させない。追記したキーは**キー名のみ**を表示する（値はログに出さない）
   - `pnpm install`（pnpmのcontent-addressableストアにより高速）
   - `postinstall` で `prisma generate` が走る
 - 開発用MySQL DBはworktree間で共有する（Issueごとに新規DBは作らない）。通常のIssueはスキーマ変更を伴わない前提。マイグレーションを伴うIssueは下記「自動マージ不可カテゴリ」の対象として扱う。
