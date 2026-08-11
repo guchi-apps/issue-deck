@@ -108,6 +108,7 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 |---|---|---|
 | `issue-labels.yml` | `reusable-issue-labels.yml` | 2026-08-09（#940、guchi-apps/shopping-list#77） |
 | `claude-issue-dispatch.yml` | `reusable-issue-dispatch.yml` | 2026-08-09（#945。導入先は guchi-apps/shopping-list・guchi-apps/dayspan） |
+| `claude-ci-fix.yml` | `reusable-claude-ci-fix.yml` | 2026-08-11（#1066。issue-deck側のみ。他リポジトリへの適用は別Issue） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
