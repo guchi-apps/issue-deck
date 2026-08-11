@@ -69,7 +69,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   未登録なら`null`のままラベルから解決する。Projects v2はGraphQLのみのため境界は
   [`lib/github/projects-api.ts`](../src/lib/github/projects-api.ts)。
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
-  Project連携を一切行わない**（#991）。
+  Project連携を一切行わない**。設計の一次情報源は
+  [progress-status-architecture.md](progress-status-architecture.md)（#991）。
+- **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
+  Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
+  （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
+  書き込み権限を持つのをissue-deckのGitHub Appだけに閉じるための一本化で、認証は共有シークレット
+  `PROGRESS_REPORT_SECRET`。**呼び出し側はこのAPIの失敗で処理を止めない**取り決めのため、
+  取りこぼしは再同期（`reconcileProjectStatusesFromLabels`）がラベルを正として是正する。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
