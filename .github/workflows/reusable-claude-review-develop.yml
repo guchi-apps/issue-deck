@@ -1,0 +1,629 @@
+name: Reusable Claude Code Review (develop向けPR)
+
+# develop向けPRの作成・更新時に、機械的リスク判定・Claude Codeによる自動レビュー・
+# 低リスクPRの自動マージを行う(docs/multi-agent-workflow.md「段階的導入計画」のPhase3/Phase4)。
+#
+# ジョブ構成:
+# - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
+# - wait-for-ci: risk-check/claude-reviewの判定・00.check-user付与を、CI(ci.yml)の
+#   完了を待ってから行うようにするための待機ジョブ。CIが`in_progress`のうちに
+#   00.check-userが付いてしまい、issue-deck画面上で時期尚早に「要確認」に見える
+#   問題を防ぐ(#810)。ポーリングがタイムアウトした場合もジョブ自体は失敗させず
+#   後続へ進める(fail-open。失敗させるとneeds経由でrisk-check/claude-reviewが
+#   skipされ、レビュー自体が行われないまま放置される事故につながるため)
+# - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
+#   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
+#   付与の有無を確認する。該当時は00.check-userを
+#   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
+#   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
+#   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
+#   投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
+#   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)
+# - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
+#   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
+#   マージやラベル状態遷移(03.d:marge等)は行わない。
+#   develop向けPRの大半は小規模・低リスクで、そこにClaude Codeによる意味的レビューを
+#   毎回かけるのは費用対効果が低いため、risk-checkのneeds-review出力が
+#   trueのときだけ実行する(#992)。ゲート条件は risk-check の該当・大きな差分・
+#   共有知識への追加提案あり・対応Issue番号不明・対応Issueに00.check-user付与済み、の
+#   いずれか。スキップされた場合はauto-mergeがそのまま進む(下記auto-mergeのif参照)
+#   なお、claude-code-actionには「ワークフローファイルの内容がデフォルトブランチ(develop)の
+#   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
+#   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
+#   実行しないまま success で終わる(ステップもジョブも成功扱いになる点に注意)。
+#   その場合もrisk-checkが .github/workflows/** の変更を検知して00.check-userを付与するため
+#   自動マージはされない。詳細は docs/multi-agent/labels.md
+#   「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」参照
+# - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
+#   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
+#   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
+#   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
+# - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
+#   付いていなければ gh pr merge --auto --merge を実行する
+# - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
+#   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
+#
+# 00.check-userラベルを両判定(機械的/意味的)共通の「マージ保留」シグナルとして
+# 使うことで、判定ロジックとマージ可否判断を疎結合に保っている。
+#
+# 対応issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
+# (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
+# を避けるため env 経由でのみ参照し、run: 本文に直接展開しない
+# (.github/workflows/issue-labels.yml と同じ方針)。
+#
+# concurrency: 本ワークフローはdevelop向けPRへのpush(synchronize)のたびに毎回起動するため、
+# 実装エージェントが同一PRへ連続してpushすると、supersededになった古いpush分のwait-for-ci/
+# risk-check/claude-review(Claude Code呼び出しを含む)が古いコミットに対してそのまま走り
+# 切ってしまい、無駄なClaude Code消費になっていた(#818)。ここでは新しいpushが来たら
+# 古い実行を丸ごとキャンセルする。各ジョブが行う操作(ラベル付与・コメント投稿・
+# auto-merge有効化)はいずれも冪等かつ「より新しい実行が最終的に正しい判定を行えば十分」
+# なため、実行途中でキャンセルされても後続のより新しい実行が正しい状態に収束する。
+# concurrencyは呼び出し元(claude-review-develop.yml)のワークフローレベルに置く。
+# トリガーと同じ場所にあるべきもので、呼び出し元がキャンセルされれば呼び出し先のジョブも
+# 一緒にキャンセルされるため挙動は変わらない(#818)。
+
+on:
+  workflow_call:
+    inputs:
+      risk-paths:
+        description: >-
+          このリポジトリ固有の「リスクとみなすパス」。1行1件で
+          「<grep -E の正規表現> :: <Issueコメントに出す理由>」の形式で書く。
+          区切りは半角スペース2つのコロン( :: )。正規表現側が選択(|)を含むことがあるため
+          区切りに | は使えない。区切りの無い行があればジョブを失敗させる。
+          .github/workflows/** ・.env* ・.shared-context/** ・prisma/migrations/** ・
+          **/auth/** は再利用ワークフロー側に内蔵されており、ここで指定しなくても常に判定される
+          (入力はリスクを追加できるが削減はできない)。
+        required: false
+        type: string
+        default: ""
+      dependency-check:
+        description: >-
+          package.json の依存関係変更をどこからリスクとみなすか。
+          major(既定・メジャーバージョン更新のみ) / any(新規追加も含む) / none(判定しない)。
+          npm依存を持たない方針のリポジトリは any にする。
+        required: false
+        type: string
+        default: major
+      review-file-threshold:
+        description: "claude-reviewを実行する変更ファイル数の閾値(#992)"
+        required: false
+        type: string
+        default: "10"
+      review-line-threshold:
+        description: "claude-reviewを実行する変更行数の閾値(#992)"
+        required: false
+        type: string
+        default: "500"
+      lock-files:
+        description: >-
+          差分規模の算出から除外する自動生成ファイル(スペース区切り)。
+          依存を1つ足しただけで数百行動くため、除外しないと小さなPRが閾値を超えてしまう。
+        required: false
+        type: string
+        default: "pnpm-lock.yaml package-lock.json"
+      prompts-ref:
+        description: >-
+          プロンプト(.github/prompts/)の取得元とするissue-deckのref。
+          未指定なら呼び出し元リポジトリの.github/prompts/を使う(issue-deck自身はこちら)。
+          他リポジトリから呼ぶ場合は uses: と同じタグを指定する。
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  identify-issue:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.issue.outputs.number }}
+    steps:
+      - name: 対応Issue番号を特定する
+        id: issue
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            echo "number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=" >> "$GITHUB_OUTPUT"
+          fi
+
+  wait-for-ci:
+    needs: identify-issue
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: CI(ci.yml)の完了を待つ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            STATUS="$(gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request" \
+              --jq '[.workflow_runs[] | select(.name == "CI")][0].status // ""')"
+            if [ -z "$STATUS" ]; then
+              echo "CIの実行がまだ見つかりません。20秒待って再試行します。($i/60)"
+            elif [ "$STATUS" = "completed" ]; then
+              echo "CIが完了しました。"
+              exit 0
+            else
+              echo "CIはまだ完了していません(status=${STATUS})。20秒待って再試行します。($i/60)"
+            fi
+            sleep 20
+          done
+          echo "タイムアウトしました。CI完了を待たずに後続ジョブへ進みます(fail-open)。"
+
+  risk-check:
+    needs: [identify-issue, wait-for-ci]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    outputs:
+      # 機械的リスク判定に該当したか(00.check-user付与の有無と一致する)
+      risky: ${{ steps.risk.outputs.risky }}
+      # 後続のclaude-reviewを実行するか(#992)。riskyより広い条件で立つ
+      needs-review: ${{ steps.risk.outputs.needs-review }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: パスパターンによる機械的リスク判定とレビュー実行ゲート判定
+        id: risk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          BASE_REF: ${{ github.base_ref }}
+          # claude-reviewを実行する差分規模の閾値(#992)。いずれかを超えたら「大きな差分」と
+          # みなしてレビューを実行する。直近のdevelop向けPRの実測(2〜5ファイル・数十〜200行が
+          # 大半)をもとに、通常の機能追加PRはスキップされ、複数領域にまたがる変更だけが
+          # 引っかかる水準に設定している
+          REVIEW_FILE_THRESHOLD: ${{ inputs.review-file-threshold }}
+          REVIEW_LINE_THRESHOLD: ${{ inputs.review-line-threshold }}
+          RISK_PATHS: ${{ inputs.risk-paths }}
+          DEPENDENCY_CHECK: ${{ inputs.dependency-check }}
+          LOCK_FILES: ${{ inputs.lock-files }}
+        run: |
+          set -e
+          CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          RISKY=false
+          REASONS=""
+
+          add_reason() {
+            RISKY=true
+            REASONS="${REASONS}${REASONS:+$'\n'}- $1"
+          }
+
+          if echo "$CHANGED_FILES" | grep -q '^prisma/migrations/'; then
+            add_reason "DBマイグレーションの変更 (prisma/migrations/**)"
+          fi
+          if echo "$CHANGED_FILES" | grep -qE '(^|/)\.env'; then
+            add_reason "環境変数ファイルの変更 (.env*)"
+          fi
+          if echo "$CHANGED_FILES" | grep -q '^\.github/workflows/'; then
+            add_reason "GitHub Actionsワークフローの変更 (.github/workflows/**)"
+          fi
+          if echo "$CHANGED_FILES" | grep -qE '(^|/)auth(/|\.[^/]*$)'; then
+            add_reason "認証・認可関連ファイルの変更 (**/auth/**)"
+          fi
+          # 共有知識リポジトリのcheckout先(.gitignore済み)がコミットされていないかを機械的に確認する。
+          # 従来はclaude-reviewのプロンプトだけがこれを見ていたが、claude-reviewは
+          # 低リスクPRではskipされるようになった(#992)ため、機械判定側にも同じ確認を置く。
+          if echo "$CHANGED_FILES" | grep -q '^\.shared-context/'; then
+            add_reason "共有知識リポジトリのcheckout先が差分に混入している (.shared-context/**)。読み取り専用のため、コミットから除外する必要がある"
+          fi
+
+          # ここまでが全リポジトリ共通の内蔵パターン。以降は呼び出し元が宣言した
+          # リポジトリ固有のリスクパスを評価する。入力はリスクを追加できるが削減はできない。
+          if [ -n "${RISK_PATHS:-}" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              case "$line" in \#*) continue ;; esac
+              case "$line" in
+                *" :: "*) ;;
+                *)
+                  echo "::error::risk-paths の行が「<正規表現> :: <理由>」形式ではありません: $line"
+                  exit 1
+                  ;;
+              esac
+              PATTERN="${line%% :: *}"
+              REASON="${line#* :: }"
+              if echo "$CHANGED_FILES" | grep -qE "$PATTERN"; then
+                add_reason "$REASON"
+              fi
+            done <<< "$RISK_PATHS"
+          fi
+
+          if [ "${DEPENDENCY_CHECK:-major}" != "none" ] && echo "$CHANGED_FILES" | grep -q '^package\.json$'; then
+            if git show "origin/${BASE_REF}:package.json" > /tmp/old-package.json 2>/dev/null; then
+              if ! node -e '
+                const fs = require("fs");
+                const old = JSON.parse(fs.readFileSync("/tmp/old-package.json", "utf8"));
+                const neu = JSON.parse(fs.readFileSync("package.json", "utf8"));
+                const oldDeps = { ...old.dependencies, ...old.devDependencies };
+                const newDeps = { ...neu.dependencies, ...neu.devDependencies };
+                // any の場合は依存の新規追加もリスクとみなす(npm依存を持たない方針の
+                // リポジトリでは、1つ増えること自体が方針の変更にあたるため)。
+                const mode = process.env.DEPENDENCY_CHECK || "major";
+                let risky = false;
+                for (const [name, newVer] of Object.entries(newDeps)) {
+                  const oldVer = oldDeps[name];
+                  if (!oldVer) {
+                    if (mode === "any") {
+                      console.log(`${name}: 新規追加 (${newVer})`);
+                      risky = true;
+                    }
+                    continue;
+                  }
+                  const oldMajor = oldVer.match(/\d+/)?.[0];
+                  const newMajor = newVer.match(/\d+/)?.[0];
+                  if (oldMajor && newMajor && oldMajor !== newMajor) {
+                    console.log(`${name}: ${oldVer} -> ${newVer}`);
+                    risky = true;
+                  }
+                }
+                process.exit(risky ? 1 : 0);
+              '; then
+                if [ "$DEPENDENCY_CHECK" = "any" ]; then
+                  add_reason "依存関係の新規追加またはメジャーバージョン更新 (package.json)"
+                else
+                  add_reason "依存関係のメジャーバージョン更新 (package.json)"
+                fi
+              fi
+            else
+              add_reason "package.jsonの変更（比較元の取得に失敗したため安全側で判定）"
+            fi
+          fi
+
+          if [ -n "$ISSUE_NUMBER" ]; then
+            ISSUE_LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+            if echo "$ISSUE_LABELS" | grep -qx "22.merge-confirm-required"; then
+              add_reason "Issueに \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
+            if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
+              add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定。このコメントはPR作成・push直後に自動投稿されるため、この時点ではまだスクリーンショットは添付されていません。実装エージェントが撮影まで完了すると、この後に別コメントとして画像が追加投稿されるので、催促する前に少し待って最新コメントをご確認ください）"
+            fi
+            if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
+              add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
+            fi
+          fi
+
+          if [ "$RISKY" = "true" ]; then
+            echo "リスクありと判定:"
+            echo "$REASONS"
+            if [ -n "$ISSUE_NUMBER" ]; then
+              gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+              # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)
+              if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+                echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
+              else
+                COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
+                COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+                COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
+                gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+              fi
+            fi
+          else
+            echo "機械的リスク判定: 該当なし"
+          fi
+
+          # ここから、後続のclaude-reviewを実行するかどうかのゲート判定(#992)。
+          # develop向けPRの大半は2〜5ファイル・数百行以内の小規模かつ低リスクな変更で、
+          # そこにClaude Codeによる意味的レビューを毎回かけるのは費用対効果が低い。
+          # 「人が確認する必要がある/レビューが最後の判断材料になる」場面に絞って実行する。
+          #
+          # 注意: ここで立てるのはレビュー実行の要否だけで、00.check-user(マージ保留)の
+          # 判定には影響させない。差分が大きいことは「レビューを読みたい」理由にはなるが、
+          # 「マージを止める」理由ではないため、RISKYとは別のフラグとして扱う。
+          NEEDS_REVIEW=false
+          REVIEW_REASONS=""
+
+          add_review_reason() {
+            NEEDS_REVIEW=true
+            REVIEW_REASONS="${REVIEW_REASONS}${REVIEW_REASONS:+$'\n'}- $1"
+          }
+
+          # 差分規模の算出。lockファイルは自動生成で行数が大きく膨らむ一方、
+          # レビューで読む価値のある変更ではないため、ファイル数・行数の双方から除外する。
+          # 除外するlockファイル名を入力から正規表現へ組み立てる（リポジトリごとに
+          # パッケージマネージャが異なるため）。未指定なら除外しない。
+          LOCK_PATTERN=""
+          for f in ${LOCK_FILES:-}; do
+            ESCAPED="$(printf '%s' "$f" | sed 's/\./\\./g')"
+            LOCK_PATTERN="${LOCK_PATTERN}${LOCK_PATTERN:+|}${ESCAPED}"
+          done
+          DIFF_NUMSTAT="$(git diff --numstat "origin/${BASE_REF}...HEAD")"
+          if [ -n "$LOCK_PATTERN" ]; then
+            DIFF_NUMSTAT="$(printf '%s\n' "$DIFF_NUMSTAT" \
+              | grep -vE "(^|[/[:space:]])(${LOCK_PATTERN})$" || true)"
+          fi
+          CHANGED_COUNT="$(printf '%s\n' "$DIFF_NUMSTAT" | grep -c '[^[:space:]]' || true)"
+          # バイナリファイルはnumstatの追加/削除行が "-" になるため0として数える
+          CHANGED_LINES="$(printf '%s\n' "$DIFF_NUMSTAT" \
+            | awk '{ a = ($1 == "-" ? 0 : $1); d = ($2 == "-" ? 0 : $2); total += a + d } END { print total + 0 }')"
+
+          if [ -n "$LOCK_PATTERN" ]; then
+            echo "差分規模: ${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行（除外: ${LOCK_FILES}）"
+          else
+            echo "差分規模: ${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行（除外なし）"
+          fi
+
+          if [ "$RISKY" = "true" ]; then
+            add_review_reason "機械的リスク判定に該当したため"
+          fi
+
+          if [ "$CHANGED_COUNT" -ge "$REVIEW_FILE_THRESHOLD" ] || [ "$CHANGED_LINES" -ge "$REVIEW_LINE_THRESHOLD" ]; then
+            add_review_reason "差分が大きいため（${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行。閾値: ${REVIEW_FILE_THRESHOLD}ファイル または ${REVIEW_LINE_THRESHOLD}行）"
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # 対応Issueが分からない場合はauto-merge自体もスキップされる。
+            # 判断材料を残すため、レビューは安全側に倒して実行する。
+            add_review_reason "対応Issue番号を特定できないため（安全側でレビューを実行）"
+          else
+            if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+              add_review_reason "対応Issueに \`00.check-user\` が付与されており、ユーザーが確認する際の判断材料が必要なため"
+            fi
+            # 共有知識への追加提案は、claude-reviewが投稿する
+            # <!-- shared-knowledge-verdict:approved --> コメントを
+            # shared-knowledge-propose.ymlが起点にしている。レビューをスキップすると
+            # 提案が永久に審査されないままになるため、提案があれば必ず実行する。
+            if gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' \
+              | grep -qF '<!-- shared-knowledge-proposal -->'; then
+              add_review_reason "対応Issueに共有知識への追加提案コメントがあり、審査が必要なため"
+            fi
+          fi
+
+          if [ "$NEEDS_REVIEW" = "true" ]; then
+            echo "claude-reviewを実行します。理由:"
+            echo "$REVIEW_REASONS"
+          else
+            echo "低リスクかつ小規模なため、claude-reviewをスキップします。"
+          fi
+
+          {
+            echo "needs-review=${NEEDS_REVIEW}"
+            echo "risky=${RISKY}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Claude Review 実行判定"
+            echo ""
+            if [ "$NEEDS_REVIEW" = "true" ]; then
+              echo "**実行する**"
+              echo ""
+              echo "$REVIEW_REASONS"
+            else
+              echo "**スキップする**（低リスクかつ小規模な変更のため）"
+            fi
+            echo ""
+            echo "- 変更ファイル数: ${CHANGED_COUNT}（閾値: ${REVIEW_FILE_THRESHOLD}）"
+            echo "- 変更行数: ${CHANGED_LINES}（閾値: ${REVIEW_LINE_THRESHOLD}）"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  claude-review:
+    # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
+    # スキップされた場合、auto-mergeはclaude-reviewの結果を'skipped'として許容する
+    needs: [identify-issue, wait-for-ci, risk-check]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
+        # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための
+        # 取得経路（reusable-issue-dispatch.ymlと同じ仕組み、#960）。
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 共有ファイルの参照先を決める
+        # 呼び出し元リポジトリに存在しうる/しないファイルの場所を1箇所で決める（#960・#964）。
+        env:
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROMPTS_REF" ]; then
+            ROOT=.shared-prompts
+          else
+            ROOT=.
+          fi
+
+          DIR="$ROOT/.github/prompts"
+          if [ ! -d "$DIR" ]; then
+            echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
+            exit 1
+          fi
+          echo "プロンプトの参照先: $DIR"
+          echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
+          # 使用量出力スクリプト(#903)。プロンプトと違い必須ではないため、無くても落とさない。
+          USAGE="$ROOT/.github/scripts/summarize-claude-usage.sh"
+          if [ -x "$USAGE" ]; then
+            echo "使用量出力スクリプト: $USAGE"
+          else
+            echo "使用量出力スクリプト $USAGE が無いため、使用量のJob Summary出力はスキップします"
+            USAGE=""
+          fi
+          echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
+
+      - name: 共有知識リポジトリをcheckoutする
+        # レビュー観点の1つである「共有知識との整合性」と、実装エージェントが投稿した
+        # 共有知識への追加提案の審査に使う(docs/shared-knowledge.md「9.2 審査」)。
+        # checkoutに失敗してもレビュー自体は続行する(continue-on-error)。
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
+          ref: ${{ vars.SHARED_CONTEXT_REF || 'main' }}
+          path: .shared-context
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: レビュープロンプトを組み立てる
+        # プロンプト本文は.github/prompts/review-develop.mdに置き、ここで動的な値を埋めたうえで
+        # 環境変数に格納する（reusable-issue-dispatch.ymlと同じ仕組み、#907）。
+        # `${{ }}`を含む文字列ブロックにかかる21,000バイト上限を構造的に回避する（#901の経路）。
+        env:
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/review-develop.md"
+          # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
+          # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+          {
+            echo 'PROMPT_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Run Claude Code Review
+        id: claude_review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 本運用ではPRをclaude[bot]（Claude CodeのGitHub App）が作成するため、
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する
+          # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
+          allowed_bots: "claude[bot]"
+          additional_permissions: |
+            actions: read
+          # Read/Grep/Globは、レビュー観点「共有知識との整合性」と共有知識追加提案の審査のために
+          # .shared-context/配下を読む用途で追加している。gh issue viewは対応Issueの本文・コメント
+          # （実装エージェントが投稿した追加提案コメントを含む）の取得に使う。
+          # gh pr diff/view/checksは、レビューの起点となる差分の取得とCI結果の確認に使う(#906)。
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
+          prompt: ${{ env.PROMPT_REVIEW }}
+
+      - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_review.outputs.execution_file != ''
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
+
+  claude-review-fallback:
+    needs: [identify-issue, claude-review]
+    if: always() && needs.claude-review.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: 自動レビュー失敗をPRに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -e
+          gh pr comment "$PR_NUMBER" --body "⚠️ 自動レビュー（claude-review）が実行できませんでした。Actionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          fi
+
+  auto-merge:
+    needs: [identify-issue, risk-check, claude-review]
+    # claude-reviewはrisk-checkの判定次第でskipされる(#992)。needsの既定動作では
+    # 依存ジョブがskipされると後続もskipされてしまうため、条件を明示的に組み立てて
+    # 「claude-reviewがsuccessまたはskipped」を許容する。
+    # 逆に、claude-reviewやrisk-checkがfailureのときは従来どおり自動マージを行わない
+    # (レビュー結果が得られていない状態でマージしないための安全側の挙動)。
+    # identify-issueはdraft PRのときにskipされるため、successを要求することで
+    # draft PRに対する自動マージも従来どおり行われない。
+    # always()ではなく!cancelled()を使うのは、always()がワークフローのキャンセル時にも
+    # ジョブを実行してしまうため。本ワークフローは新しいpushが来ると古い実行を
+    # concurrencyで丸ごとキャンセルする(#818)ので、always()にすると
+    # supersededになった古い実行がauto-mergeを有効化してしまう。
+    if: >-
+      !cancelled()
+      && github.event.pull_request.draft == false
+      && needs.identify-issue.result == 'success'
+      && needs.risk-check.result == 'success'
+      && (needs.claude-review.result == 'success' || needs.claude-review.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
+      # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の
+      # ワークフローを起動しない」というGitHub仕様の影響を受け、issue-labels.ymlの
+      # develop-pr-mergedジョブが発火しないことがある(Issue #112)。WORKFLOW_PAT
+      # （実PAT由来）で有効化することでこの制約を回避する。
+      - name: 自動マージ可否を判定して実行する
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "対応Issue番号を特定できないため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+          if echo "$LABELS" | grep -qx "00.check-user"; then
+            echo "対応Issue #${ISSUE_NUMBER} に 00.check-user が付与されているため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          echo "自動マージ不可カテゴリに該当しないため、auto-mergeを有効化します。"
+          gh pr merge "$PR_NUMBER" --auto --merge
+
+  auto-merge-fallback:
+    needs: [identify-issue, auto-merge]
+    if: always() && needs.auto-merge.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: 自動マージ失敗をPRに通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -e
+          gh pr comment "$PR_NUMBER" --body "⚠️ 自動マージ（auto-merge）が失敗しました。Actionsの実行ログを確認し、必要であれば手動でマージしてください。"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          fi
