@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   Archive,
   Bot,
+  Copy,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -33,6 +34,7 @@ import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +81,7 @@ import {
 } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
+import { buildLocalSessionCommand } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
@@ -369,6 +372,7 @@ export function IssueDetail({
     );
   }
 
+  const localSessionCommand = buildLocalSessionCommand(issue.repositoryFullName, issue.number);
   const startDisabledReason = startImplementationDisabledReason(
     repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
   );
@@ -443,6 +447,7 @@ export function IssueDetail({
                   質問を終えてクローズ
                 </Button>
               )}
+              <StartLocalSessionButton issue={issue} onIssueUpdated={onIssueUpdated} />
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
                   GitHubで開く
@@ -480,6 +485,15 @@ export function IssueDetail({
                     <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
                   </DropdownMenuItem>
+                  {localSessionCommand && (
+                    <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
+                      onSelect={() => void navigator.clipboard.writeText(localSessionCommand)}
+                    >
+                      <Copy className="size-3.5" />
+                      ローカル起動コマンドをコピー
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
                     <Pencil className="size-3.5" />
                     編集
