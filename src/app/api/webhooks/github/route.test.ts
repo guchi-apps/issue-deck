@@ -362,6 +362,42 @@ describe("POST /api/webhooks/github projects_v2_item", () => {
     expect(updateIssueApi).not.toHaveBeenCalled();
   });
 
+  it("Planning→Implementation は、承認待ちなら計画を承認して実装を始める", async () => {
+    const payload = arrangeDrag("Implementation");
+    findUniqueIssue.mockResolvedValue({
+      projectStatus: "Planning",
+      state: "OPEN",
+      labels: [{ name: "01.planning" }, { name: "00.check-user" }, { name: "21.plan-required" }],
+    });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    // 承認はラベルを外すことで表現される。00.check-user・21.plan-requiredが残っていると
+    // ワークフローは計画のやり直しとして動いてしまう
+    expect(updateIssueApi).toHaveBeenCalledWith("guchi-apps", "issue-deck", 42, undefined, {
+      labels: ["01.planning"],
+    });
+    expect(createComment.mock.calls[0][4].body).toContain("@claude 計画を承認しました。");
+    // ラベルを外してからコメントを投稿する
+    expect(updateIssueApi.mock.invocationCallOrder[0]).toBeLessThan(
+      createComment.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("Planning→Implementation でも承認待ちでなければ何もしない", async () => {
+    const payload = arrangeDrag("Implementation");
+    findUniqueIssue.mockResolvedValue({
+      projectStatus: "Planning",
+      state: "OPEN",
+      labels: [{ name: "01.planning" }],
+    });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(createComment).not.toHaveBeenCalled();
+    expect(updateIssueApi).not.toHaveBeenCalled();
+  });
+
   it("11.local が付いていれば起動しない（ローカルセッションで対応中）", async () => {
     const payload = arrangeDrag("Implementation");
     findUniqueIssue.mockResolvedValue({

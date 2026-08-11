@@ -1,3 +1,4 @@
+import { CHECK_USER_LABEL, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
   getProgressStatusDef,
   matchProjectStatus,
@@ -20,8 +21,16 @@ import {
  * 設計の一次情報源は docs/progress-status-architecture.md。
  */
 
-/** 起動する実行の種類。`reusable-issue-dispatch.yml`のmode（plan/implement）に対応する */
-export type DispatchMode = "plan" | "implement";
+/**
+ * 起動する実行の種類。
+ *
+ * `plan`・`implement`は`reusable-issue-dispatch.yml`のmodeにそのまま対応する。
+ * `approve-plan`は「提示済みの計画を承認して実装へ進める」操作で、ワークフロー側に対応する
+ * modeは無い。**承認はラベルを外すことで表現される**（`00.check-user`・`21.plan-required`が
+ * 両方外れた状態がワークフローにとっての「承認済み」）ため、issue-deck側でラベルを片付けてから
+ * コメントを投稿すると、ワークフローは通常の実装（またはサブIssue分割）として動く。
+ */
+export type DispatchMode = "plan" | "implement" | "approve-plan";
 
 /**
  * ローカル（VS Code等）のClaude Codeセッションで対応中であることを人間が明示するラベル（#919）。
@@ -29,31 +38,52 @@ export type DispatchMode = "plan" | "implement";
  */
 export const LOCAL_LABEL_NAME = "11.local";
 
-/** 未着手を表すProject Status名。ここからの遷移だけを起動対象にする */
+/** 未着手を表すProject Status名 */
 const READY_STATUS = getProgressStatusDef("ready").projectStatus;
 
 /**
  * Statusの遷移から起動する実行を判定する。起動しないならnull。
  *
- * **`Ready`からの遷移だけを対象にする。** 途中の段階からの移動（例: `Develop` → `Implementation`）を
- * 拾うと、進捗の巻き戻しや報告APIの書き込みが実行の再起動になってしまう。
- * **後戻り（`Implementation` → `Ready`等）にも何も割り当てない。** 実行のキャンセルを割り当てると
+ * 対象にするのは次の3つだけ。
+ *
+ * | 遷移 | 条件 | 結果 |
+ * |---|---|---|
+ * | `Ready` → `Planning` | — | `plan` |
+ * | `Ready` → `Implementation` | — | `implement` |
+ * | `Planning` → `Implementation` | 計画の承認待ち | `approve-plan` |
+ *
+ * **途中の段階からの移動を無条件には拾わない。** 拾うと進捗の巻き戻しや報告APIの書き込みが
+ * 実行の再起動になってしまう。**後戻りにも何も割り当てない。** 実行のキャンセルを割り当てると
  * Statusを書き戻す処理と往復しうるうえ、ドラッグの誤操作で実行が止まる影響が大きい。
  *
  * `from`が`null`（Projectへ追加された直後でStatus未設定・DBに履歴が無い）も対象外にする。
  * 盤面へ載せた操作そのものが実行の開始になってしまうため。
  */
-export function resolveDispatchMode(from: string | null, to: string | null): DispatchMode | null {
-  if (from !== READY_STATUS || !to) return null;
+export function resolveDispatchMode(params: {
+  from: string | null;
+  to: string | null;
+  /** 対象Issueに付いているラベル名。承認待ちかどうかの判定に使う */
+  labels: string[];
+}): DispatchMode | null {
+  const { from, to, labels } = params;
+  if (!to) return null;
+  const toKey = matchProjectStatus(to);
 
-  switch (matchProjectStatus(to)) {
-    case "planning":
-      return "plan";
-    case "implementation":
-      return "implement";
-    default:
-      return null;
+  if (from === READY_STATUS) {
+    if (toKey === "planning") return "plan";
+    if (toKey === "implementation") return "implement";
+    return null;
   }
+
+  // 計画の承認。**承認待ちであることを確認してから**でないと、計画の実行中にカードを動かした
+  // だけで実装が始まってしまう。`21.plan-required`が付いている間は「質問への回答のみの確認待ち」
+  // ではなく計画そのものへの承認待ちであることがapproval-labels.tsの判定で保証されている
+  if (from === getProgressStatusDef("planning").projectStatus && toKey === "implementation") {
+    const names = new Set(labels);
+    return names.has(CHECK_USER_LABEL) && names.has(PLAN_REQUIRED_LABEL) ? "approve-plan" : null;
+  }
+
+  return null;
 }
 
 /**
@@ -92,6 +122,13 @@ export function posterMarker(login: string): string {
  * 本文中に偽のマーカーが混ざっても最後のものが優先される（`reusable-issue-dispatch.yml`の
  * 「Bot判定・実行者パーミッション確認」ステップ参照）。
  */
+const INSTRUCTIONS: Record<DispatchMode, string> = {
+  plan: "@claude 計画を立案してください",
+  implement: "@claude 実装を開始してください",
+  // 「計画を承認」ボタンの定型文（approval-labels.tsのapproveCommentBody）と揃える
+  "approve-plan": "@claude 計画を承認しました。実装を進めてください。",
+};
+
 export function dispatchCommentBody(params: {
   mode: DispatchMode;
   /** Statusを動かした人のログイン名。この人のwrite権限がワークフロー側で検証される */
@@ -99,10 +136,8 @@ export function dispatchCommentBody(params: {
   /** カンバン上の遷移先Status名。何が起点で始まったかをIssue上に残す */
   toStatus: string;
 }): string {
-  const instruction =
-    params.mode === "plan" ? "@claude 計画を立案してください" : "@claude 実装を開始してください";
   return [
-    instruction,
+    INSTRUCTIONS[params.mode],
     "",
     `（GitHub ProjectsでStatusを\`${params.toStatus}\`へ変更したため開始します）`,
     "",
