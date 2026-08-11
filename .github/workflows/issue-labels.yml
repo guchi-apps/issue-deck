@@ -31,3 +31,7 @@ jobs:
       issues: write
       pull-requests: write
       contents: write
+    # 進捗をissue-deckの報告APIへ送るための共有シークレット(#991 Phase 2)。
+    # secrets: inherit ではなく個別に渡し、呼ばれる側へ渡る秘密を最小限に保つ。
+    secrets:
+      PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}

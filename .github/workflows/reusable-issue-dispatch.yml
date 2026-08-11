@@ -972,6 +972,38 @@ jobs:
             echo "::warning::ラベル '01.planning' がリポジトリに存在しないため付与をスキップします"
           fi
 
+      - name: Project Status を報告する（計画検討着手時）
+        # ラベル付与と同じ状態をissue-deckの進捗報告APIへ送り、Projectsのカンバンを追従させる
+        # (#991 Phase 2)。Planning/Implementationへの遷移はこのワークフローが起点のため、
+        # reusable-issue-labels.ymlではなくここから報告する。
+        # 疎通失敗・未設定でジョブを落とさないのは、issue-deckを進捗更新の単一障害点に
+        # しないため(設計はdocs/progress-status-architecture.md)。
+        if: steps.state.outputs.mode == 'plan'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          STATUS: planning
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/progress" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"issue\":$ISSUE_NUMBER,\"status\":\"$STATUS\"}")" || code=000
+          if [ "$code" = "200" ]; then
+            echo "issue #$ISSUE_NUMBER を $STATUS として報告しました"
+          else
+            echo "::warning::Project Statusの報告に失敗しました（issue #$ISSUE_NUMBER / status=$STATUS / HTTP $code）"
+          fi
+
       - name: 計画提示前のコメント数を記録する
         id: before_plan
         if: steps.state.outputs.mode == 'plan'
@@ -1585,6 +1617,38 @@ jobs:
 
           if [ "${#args[@]}" -gt 0 ]; then
             gh issue edit ${{ steps.state.outputs.issue_number }} "${args[@]}"
+          fi
+
+      - name: Project Status を報告する（実装着手時）
+        # 上記「01.planning を付与する」ステップの報告と同じ趣旨(#991 Phase 2)。
+        # modeがadditional(追加対応)の場合も、developへのPRが出た後にもう一度実装へ戻るため
+        # Implementationへ報告する。Statusが Develop -> Implementation と戻るのは正常な挙動で、
+        # `Develop`は「最新のPRの状態」であってIssueの完了ではない
+        # (docs/progress-status-architecture.md)。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          STATUS: implementation
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/progress" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"issue\":$ISSUE_NUMBER,\"status\":\"$STATUS\"}")" || code=000
+          if [ "$code" = "200" ]; then
+            echo "issue #$ISSUE_NUMBER を $STATUS として報告しました"
+          else
+            echo "::warning::Project Statusの報告に失敗しました（issue #$ISSUE_NUMBER / status=$STATUS / HTTP $code）"
           fi
 
       - name: 実装プロンプトを組み立てる

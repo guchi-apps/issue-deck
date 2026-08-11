@@ -29,4 +29,6 @@ ALLOWED_EMAILS=op://apps/issue-deck/allowed-emails
 
 CLAUDE_CODE_OAUTH_TOKEN=op://apps/issue-deck/claude-code-oauth-token
 
+PROGRESS_REPORT_SECRET=op://apps/issue-deck/progress-report-secret
+
 SIGNALY_WEBHOOK_URL=op://apps/issue-deck/ci-webhook-url

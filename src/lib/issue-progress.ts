@@ -128,6 +128,15 @@ export function getProgressStatusDef(key: ProgressStatusKey): ProgressStatusDef 
   return PROGRESS_STATUSES.find((status) => status.key === key) ?? PROGRESS_STATUSES[0];
 }
 
+/**
+ * 外部から受け取った文字列を`ProgressStatusKey`として検証する。
+ * 進捗報告API（`POST /api/progress`）がワークフローからの入力を受けるのに使う。
+ */
+export function parseProgressStatusKey(value: unknown): ProgressStatusKey | null {
+  if (typeof value !== "string") return null;
+  return PROGRESS_STATUSES.find((status) => status.key === value)?.key ?? null;
+}
+
 /** Project StatusフィールドのStatus名から状態を引く。未知の名前ならnull */
 export function matchProjectStatus(projectStatus: string): ProgressStatusKey | null {
   return PROGRESS_STATUSES.find((status) => status.projectStatus === projectStatus)?.key ?? null;

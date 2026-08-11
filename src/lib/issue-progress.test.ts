@@ -7,6 +7,7 @@ import {
   hasActiveProgress,
   matchProgressLabels,
   matchProjectStatus,
+  parseProgressStatusKey,
   resolveProgressStatus,
 } from "@/lib/issue-progress";
 import type { IssueLabel } from "@/types/issue";
@@ -138,5 +139,28 @@ describe("hasActiveProgress", () => {
 
   it("未知のStatus名はラベルへフォールバックする", () => {
     expect(hasActiveProgress({ projectStatus: "Blocked", labels: labels("02.wip") })).toBe(true);
+  });
+});
+
+describe("parseProgressStatusKey", () => {
+  it("定義済みの状態キーだけを受け付ける", () => {
+    expect(parseProgressStatusKey("implementation")).toBe("implementation");
+    expect(parseProgressStatusKey("develop-pr")).toBe("develop-pr");
+    expect(parseProgressStatusKey("done")).toBe("done");
+  });
+
+  it("ラベル名・Status名・未知の値・非文字列はnullを返す", () => {
+    // 報告APIが受けるのは状態キーであり、ラベル名やProject Status名ではない
+    expect(parseProgressStatusKey("02.wip")).toBeNull();
+    expect(parseProgressStatusKey("Implementation")).toBeNull();
+    expect(parseProgressStatusKey("blocked")).toBeNull();
+    expect(parseProgressStatusKey(undefined)).toBeNull();
+    expect(parseProgressStatusKey(3)).toBeNull();
+  });
+
+  it("PROGRESS_STATUSESの全キーを受け付ける", () => {
+    for (const status of PROGRESS_STATUSES) {
+      expect(parseProgressStatusKey(status.key)).toBe(status.key);
+    }
   });
 });
