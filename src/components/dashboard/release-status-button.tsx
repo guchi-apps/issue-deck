@@ -68,6 +68,9 @@ export function ReleaseStatusButton({
     return map;
   }, [pendingMerges]);
   const hasPendingMerges = (pendingMerges?.length ?? 0) > 0;
+  // CI失敗はマージ待ちより強い通知にする。ポップオーバーを開かずに気づけるのはこのドットだけのため、
+  // 1件でも失敗があれば色を変える（#1059）。
+  const hasCiFailure = (pendingMerges ?? []).some((merge) => merge.ciState === "failure");
 
   const {
     data: releaseStatus,
@@ -140,7 +143,12 @@ export function ReleaseStatusButton({
           >
             <Rocket className="size-4" />
             {hasPendingMerges && (
-              <span className="absolute -top-0.5 -right-0.5 flex size-2.5 rounded-full bg-amber-500" />
+              <span
+                className={cn(
+                  "absolute -top-0.5 -right-0.5 flex size-2.5 rounded-full",
+                  hasCiFailure ? "bg-destructive" : "bg-amber-500",
+                )}
+              />
             )}
           </button>
         </PopoverTrigger>
@@ -162,8 +170,19 @@ export function ReleaseStatusButton({
                     >
                       <span className="truncate">{repo.fullName}</span>
                       {pending && (
-                        <span className="shrink-0 text-amber-700 dark:text-amber-400">
-                          {pending.mergeTarget === "main" ? "mainへ待ち" : "developへ待ち"}
+                        <span
+                          className={cn(
+                            "shrink-0",
+                            pending.ciState === "failure"
+                              ? "text-destructive"
+                              : "text-amber-700 dark:text-amber-400",
+                          )}
+                        >
+                          {pending.ciState === "failure"
+                            ? "チェック失敗"
+                            : pending.mergeTarget === "main"
+                              ? "mainへ待ち"
+                              : "developへ待ち"}
                         </span>
                       )}
                     </button>
