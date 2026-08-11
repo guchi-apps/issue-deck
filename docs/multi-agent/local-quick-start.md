@@ -42,7 +42,19 @@ Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-prot
 
 ## 初回セットアップ（1回だけ）
 
-Windows側のPowerShellで実行する。**管理者権限は不要**（HKCU配下に登録するため）。
+**手順は画面からも見られる。** Issue詳細の「…」メニュー →「ローカル起動のセットアップ」
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。詳細は後述の
+[セットアップ手順を画面から見せる](#セットアップ手順を画面から見せる)。
+
+WSLのターミナルに貼れる形。`wslpath -w`がWSLのパスをWindowsのパスへ変換する（`~`はコマンド
+置換の中でもシェルが展開するので、ユーザー名を埋める必要は無い）。**管理者権限は不要**
+（HKCU配下に登録するため）。
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"
+```
+
+Windows側のPowerShellから直接実行してもよい。
 
 ```powershell
 cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
@@ -222,6 +234,43 @@ URL経路と同じものを動かすためだが、複製を作るのは登録�
 install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
 ```
+
+## セットアップ手順を画面から見せる
+
+登録手順がこのドキュメントにしか無いと、使う側は**「ボタンを押しても何も起きない」状態から
+自力でここへ辿り着く**必要がある（#1088）。Issue詳細の「…」メニューに
+**「ローカル起動のセットアップ」**を置き、ダイアログで手順を出す
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。
+
+**初回の「ローカルで開始」押下時には自動で開く**（localStorageで一度きり。以降はメニューから
+任意に開ける）。
+
+### 検知はできない
+
+**ブラウザから`issuedeck://`が登録済みかを知る手段は無い。** 未登録でも押下は黙って無視される
+だけで、エラーも遷移も観測できない。インストール済みの受け口のバージョンも見えず、画面から
+何かを実行することもできない。遷移後に`blur`が来るかを見る裏技はあるが、ブラウザ自身の確認
+ダイアログがフォーカスを奪うため誤検知する。**当てにしない。**
+
+したがって「状況を検知して出す」のではなく、**こちらから一度だけ見せる**設計にしている。
+
+### ダイアログの内容
+
+| 項目 | 内容 |
+| --- | --- |
+| 1. 登録コマンド | WSLのターミナルにそのまま貼れる1行（コピーボタン付き） |
+| 2. 動作確認 | `issuedeck://start/guchi-apps/issue-deck/99999`へのリンク。押せばその場で経路を確認でき、Issue取得に失敗して止まるのでブランチもworktreeも作られない |
+| 3. 再実行が要るケース | 「受け口スクリプトを更新したら登録スクリプトを再実行」。アプリのバージョンを併記する |
+| 4. フォールバック | プロトコル未登録の環境向けの起動コマンド（「ローカル起動コマンドをコピー」と同じもの） |
+
+3のバージョンは、**登録コマンドをコピーした時点の版**をlocalStorageに控え、現在の版と並べて
+出す（`src/lib/local-session-setup.ts`）。登録そのものは検知できないので、「いつの版で登録した
+か」を人が照合できるところまでを担保する。版が違えば登録し直しを促す。
+
+コマンドの生成は経路によらず`src/lib/local-session.ts`へ集約している。分かれていると片方だけ
+古くなる。案内するチェックアウト先（`~/apps/issue-deck`）も`start-local-session.sh`の既定の
+解決先と同じ値にしてある。**ユーザー環境依存の値**（チェックアウト先・WSLのディストロ名）に
+ついては、読み替える旨と`ISSUEDECK_WSL_DISTRO`の存在をダイアログ内に添えている。
 
 ## 起動時のラベル付与（`11.local`・進捗ラベル）
 
@@ -408,3 +457,5 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 ## 未対応（このIssueの範囲外）
 
 - マージ済みworktreeの**掃除**。放置すると溜まる。
+- 受け口スクリプトの**陳腐化の検知**（別Issue）。画面側は「登録コマンドをコピーした版」を控えて
+  人が照合できるようにするところまでで、実際にインストールされている版はブラウザからは見えない。
