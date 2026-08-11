@@ -17,6 +17,10 @@
 # 作業を始めてしまわないよう警告し、安全に捨てられる場合は作り直すかを尋ねる（#1100）。
 # 溜まったworktreeの掃除は scripts/cleanup-worktrees.sh を使う。
 #
+# 起動時にIssueへ `11.local`（無人実行との二重起動を防ぐ停止フラグ。#1097）と進捗ラベル
+# （`01.planning`/`02.wip`。#1096）を付ける。どの起動経路（ターミナル・画面のボタン・
+# `/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが起きない。
+#
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1  LANアクセス設定（Windowsの管理者権限が必要）を行わない
 #
@@ -167,6 +171,60 @@ remove_worktree() {
   rm -f "$WORKTREE_BASE/.dev-servers/issue-$n.log" "$WORKTREE_BASE/.dev-servers/issue-$n.pid"
 }
 
+# 起動時にIssueへ付けるラベルを決めて付与する（#1096・#1097）。
+#
+# - `11.local`: ローカルセッションで対応中であることを示す停止フラグ。付いている間は
+#   無人実行（`claude-issue-dispatch.yml`）がこのIssueに手を出さない（#1097）
+# - 進捗ラベル: `21.plan-required` が付いていれば `01.planning`、無ければ `02.wip`（#1096）。
+#   ラベルを付ければWebhook経由でGitHub ProjectsのStatusも追随するため、Statusの報告は行わない
+#
+# **既に進捗ラベルが付いている場合は進捗ラベルに触らない。** 再開（#1076）で2回目以降に
+# 起動したときに、`03.d:marge`まで進んだIssueを`02.wip`へ巻き戻さないため。
+#
+# ラベル付与に失敗しても起動は止めない（起動できないより、記録が遅れる方が軽い。画面の
+# 「ローカルで開始」ボタンも`11.local`について同じ方針を取っている）。
+apply_start_labels() {
+  local n="$1"
+  # 既に付いているラベル名（1行1つ）。判定に使うだけなのでIssue取得のJSONから読み、
+  # 追加のAPI呼び出しはしない。
+  local existing="$2"
+  local add_labels=()
+
+  if ! printf '%s\n' "$existing" | grep -Fxq "11.local"; then
+    add_labels+=("11.local")
+  fi
+
+  local current_progress="" p
+  for p in "01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge" "09.main"; do
+    if printf '%s\n' "$existing" | grep -Fxq "$p"; then
+      current_progress="$p"
+      break
+    fi
+  done
+  if [[ -z "$current_progress" ]]; then
+    if printf '%s\n' "$existing" | grep -Fxq "21.plan-required"; then
+      add_labels+=("01.planning")
+    else
+      add_labels+=("02.wip")
+    fi
+  fi
+
+  if [[ ${#add_labels[@]} -eq 0 ]]; then
+    echo "#$n: ラベルは付与済みです（進捗: ${current_progress:-なし}）。"
+    return 0
+  fi
+
+  local gh_args=() l
+  for l in "${add_labels[@]}"; do
+    gh_args+=(--add-label "$l")
+  done
+  if gh issue edit "$n" --repo guchi-apps/issue-deck "${gh_args[@]}" >/dev/null; then
+    echo "#$n: ラベルを付与しました（$(IFS=, ; echo "${add_labels[*]}")）。"
+  else
+    echo "#$n: 警告: ラベル（$(IFS=, ; echo "${add_labels[*]}")）の付与に失敗しました。手動で付けてください。" >&2
+  fi
+}
+
 # 本体の .env.local にあってworktree側に無いキーだけを、値ごと追記する（#1099）。
 # worktreeの .env.local は作成時のコピーで固定されるため、本体に後から足した環境変数が
 # 既存のworktreeへ届かず、本体と違う挙動で画面確認をすることになっていた。
@@ -282,6 +340,16 @@ prepare_issue() {
   if ! issue_json="$(gh issue view "$n" --repo guchi-apps/issue-deck --json number,title,body,labels,comments)"; then
     echo "Error: issue #$n の取得に失敗しました。" >&2
     exit 1
+  fi
+
+  # ラベルの付与は、worktree作成やpnpm installより先に行う。二重起動の停止フラグ
+  # （`11.local`）は早く立つほど効くうえ、以降の重い処理が失敗しても着手した記録は残る。
+  local issue_labels
+  if issue_labels="$(printf '%s' "$issue_json" | python3 -c 'import json, sys; print("\n".join(l["name"] for l in json.load(sys.stdin).get("labels") or []))')"; then
+    apply_start_labels "$n" "$issue_labels"
+  else
+    # 解析できないまま付与すると、既に進んでいる進捗ラベルを巻き戻しかねないのでスキップする。
+    echo "#$n: 警告: ラベル一覧を解析できなかったため、起動時のラベル付与をスキップします。" >&2
   fi
 
   if [[ "$reuse_worktree" -eq 0 ]]; then
