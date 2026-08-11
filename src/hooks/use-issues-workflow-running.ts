@@ -8,11 +8,14 @@ import type { Issue } from "@/types/issue";
 
 const POLL_INTERVAL_MS = 20_000;
 
-type RunningState = { isRunning: boolean; currentStep: string | null };
+/**
+ * `runId`もそのまま画面へ渡す。実行が一度も紐づいていない（null）ことが、
+ * 「Statusは進んでいるのに起動していない」＝起動待ちの判定材料になるため（#991 Phase 3）。
+ */
+type RunningState = { isRunning: boolean; currentStep: string | null; runId: number | null };
 type RunningMap = Record<string, RunningState>;
-type ApiRunningState = RunningState & { runId: number | null };
 
-const NOT_RUNNING: ApiRunningState = { isRunning: false, currentStep: null, runId: null };
+const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null, runId: null };
 
 /**
  * 一覧に表示中のIssueのうち、実行が進行し得る実装状況ラベル（01.planning / 02.wip / 03.d:marge / 07.m:marge）が
@@ -58,7 +61,7 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
               signal: controller.signal,
             });
             if (!res.ok) return [issue.id, NOT_RUNNING] as const;
-            const data: ApiRunningState = await res.json();
+            const data: RunningState = await res.json();
             return [issue.id, data] as const;
           } catch {
             return [issue.id, NOT_RUNNING] as const;
@@ -73,14 +76,7 @@ export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
           knownRunIds.delete(issueId);
         }
       }
-      setRunning(
-        Object.fromEntries(
-          results.map(([issueId, data]) => [
-            issueId,
-            { isRunning: data.isRunning, currentStep: data.currentStep },
-          ]),
-        ),
-      );
+      setRunning(Object.fromEntries(results));
     }
 
     poll();
