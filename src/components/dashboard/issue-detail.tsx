@@ -96,6 +96,7 @@ type IssueDetailProps = {
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
+  onSelectRepository: (repositoryFullName: string) => void;
 };
 
 export function IssueDetail({
@@ -108,6 +109,7 @@ export function IssueDetail({
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
+  onSelectRepository,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
@@ -384,7 +386,14 @@ export function IssueDetail({
         <div className="flex flex-col gap-4 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              {issue.repositoryFullName}
+              <button
+                type="button"
+                onClick={() => onSelectRepository(issue.repositoryFullName)}
+                className="hover:text-foreground hover:underline"
+                title="このリポジトリでフィルター"
+              >
+                {issue.repositoryFullName}
+              </button>
               {issue.repositoryArchived && (
                 <Archive className="size-3.5" aria-label="アーカイブ済み" />
               )}
