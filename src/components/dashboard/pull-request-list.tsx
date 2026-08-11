@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
 import type { CSSProperties } from "react";
 import { ExternalLink, GitPullRequest, GitPullRequestDraft, Lock, RefreshCw } from "lucide-react";
 
+import {
+  BranchBadge,
+  CiStateBadge,
+  PullRequestMetaBadge,
+  formatElapsed,
+  pullRequestKindLabel,
+} from "@/components/dashboard/pull-request-badges";
+import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
-import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
-import type { CiState } from "@/lib/github/release-api";
-import { groupPullRequestsByRepository, needsManualMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { OpenPullRequest, PullRequestKind } from "@/types/pull-request";
+import type { OpenPullRequest } from "@/types/pull-request";
 
 type PullRequestListProps = {
   pullRequests: OpenPullRequest[];
@@ -20,6 +25,12 @@ type PullRequestListProps = {
   isLoading: boolean;
   error: string | null;
   onRefresh: () => void;
+  /** 詳細を表示中のPRのid。未選択・詳細を持たない画面ではnull */
+  selectedPullRequestId?: string | null;
+  /** PRを選んだとき（詳細の表示）。渡さない場合もタイトルのリンクからGitHubは開ける */
+  onSelectPullRequest?: (pullRequest: OpenPullRequest) => void;
+  /** マージが成功したとき。一覧から伏せる・再取得するといった後始末は親が行う */
+  onMerged?: (pullRequest: OpenPullRequest) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -28,77 +39,30 @@ type PullRequestListProps = {
   footerSpacing?: boolean;
 };
 
-const CI_STATE_LABEL: Record<CiState, string> = {
-  pending: "CI実行中",
-  success: "CI通過",
-  failure: "CI失敗",
-  unknown: "CI状態は不明",
-};
-
-const KIND_LABEL: Record<Exclude<PullRequestKind, "other">, string> = {
-  release: "リリース（develop→main）",
-  "version-bump": "バージョンバンプ",
-  issue: "Issue対応",
-};
-
-function formatElapsed(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffHours < 1) return "1時間以内";
-  if (diffHours < 24) return `${diffHours}時間前`;
-  return `${Math.floor(diffHours / 24)}日前`;
-}
-
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** CI状態のピル。配色は`release-progress.tsx`のCiStateBadgeに揃えている */
-function CiStateBadge({ ciState }: { ciState: CiState }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-        ciState === "pending"
-          ? "bg-primary/15 text-primary ring-primary"
-          : ciState === "failure"
-            ? "bg-destructive/15 text-destructive ring-destructive"
-            : "bg-muted text-muted-foreground ring-border",
-      )}
-    >
-      {CI_STATE_LABEL[ciState]}
-    </span>
-  );
-}
-
-function BranchBadge({ baseRef, headRef }: { baseRef: string; headRef: string }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-      <code className="truncate rounded bg-muted px-1 py-0.5">{headRef}</code>
-      <span aria-hidden="true">→</span>
-      <code className="truncate rounded bg-muted px-1 py-0.5">{baseRef}</code>
-    </span>
-  );
-}
-
 function PullRequestCard({
   pullRequest,
+  selected,
+  onSelect,
   onMerged,
 }: {
   pullRequest: OpenPullRequest;
+  selected: boolean;
+  onSelect?: (pullRequest: OpenPullRequest) => void;
   onMerged: () => void;
 }) {
-  const { mergePullRequest, isSubmitting, error } = usePullRequestMergeMutation();
-  const [owner, repo] = pullRequest.repositoryFullName.split("/");
-  const kindLabel = pullRequest.kind === "other" ? null : KIND_LABEL[pullRequest.kind];
-
-  async function handleMerge() {
-    const merged = await mergePullRequest({ owner, repo, number: pullRequest.number });
-    if (merged) onMerged();
-  }
+  const kindLabel = pullRequestKindLabel(pullRequest.kind);
 
   return (
-    <li className="flex flex-col gap-2 border-b px-4 py-3 last:border-b-0">
+    <li
+      className={cn(
+        "flex flex-col gap-2 border-b border-l-4 border-l-transparent px-4 py-3 last:border-b-0",
+        selected && "border-l-primary bg-accent",
+      )}
+    >
       <div className="flex min-w-0 items-start gap-2">
         {pullRequest.draft ? (
           <GitPullRequestDraft
@@ -109,25 +73,29 @@ function PullRequestCard({
           <GitPullRequest className="mt-0.5 size-4 shrink-0 text-green-600" aria-label="オープン" />
         )}
         {/* 「#番号 タイトル」の並びはIssue一覧（issue-list.tsx）に揃えている。
-            行末に番号を置くとタイトルが長いときに見切れて、PRの識別子が読めなくなるため。 */}
+            行末に番号を置くとタイトルが長いときに見切れて、PRの識別子が読めなくなるため。
+            タイトルは詳細を開くボタンで、GitHubへは右のアイコンから開く（#1087）。 */}
+        <button
+          type="button"
+          onClick={() => onSelect?.(pullRequest)}
+          className="min-w-0 flex-1 text-left text-sm font-medium hover:underline"
+        >
+          #{pullRequest.number} {pullRequest.title}
+        </button>
         <a
           href={pullRequest.htmlUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="min-w-0 flex-1 text-sm font-medium hover:underline"
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          aria-label={`#${pullRequest.number} をGitHubで開く`}
         >
-          #{pullRequest.number} {pullRequest.title}
-          <ExternalLink className="ml-1 inline size-3 text-muted-foreground" />
+          <ExternalLink className="size-3.5" />
         </a>
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
-        {kindLabel && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {kindLabel}
-          </span>
-        )}
+        {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
         {pullRequest.linkedIssueNumber !== null && (
           <a
             href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
@@ -142,36 +110,24 @@ function PullRequestCard({
 
       <div className="flex flex-wrap items-center gap-2">
         {pullRequest.draft ? (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            ドラフト
-          </span>
+          <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
         ) : (
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
-        {pullRequest.autoMergeEnabled && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            Auto-merge有効
-          </span>
-        )}
+        {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <UserAvatar login={pullRequest.authorLogin} className="size-4" />
           {pullRequest.authorLogin}
         </span>
         <span className="text-xs text-muted-foreground">{formatElapsed(pullRequest.createdAt)}</span>
-        {needsManualMerge(pullRequest) && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto h-7"
-            disabled={isSubmitting}
-            onClick={handleMerge}
-          >
-            {isSubmitting ? "マージ中..." : "マージする"}
-          </Button>
+        {canMergeFromDeck(pullRequest) && (
+          <PullRequestMergeButton
+            pullRequest={pullRequest}
+            onMerged={onMerged}
+            className="ml-auto"
+          />
         )}
       </div>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </li>
   );
 }
@@ -190,16 +146,15 @@ export function PullRequestList({
   isLoading,
   error,
   onRefresh,
+  selectedPullRequestId = null,
+  onSelectPullRequest,
+  onMerged,
   headerLeading,
   className,
   style,
   footerSpacing = false,
 }: PullRequestListProps) {
-  // マージ直後はGitHub側の反映を待たずに一覧から消したいが、再取得の結果が返るまでの間だけ
-  // ローカルに伏せる（次の取得結果で正しい状態に置き換わる）。
-  const [mergedIds, setMergedIds] = useState<string[]>([]);
-  const visiblePullRequests = pullRequests.filter((pr) => !mergedIds.includes(pr.id));
-  const groups = groupPullRequestsByRepository(visiblePullRequests);
+  const groups = groupPullRequestsByRepository(pullRequests);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -208,7 +163,7 @@ export function PullRequestList({
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">マージ待ちPR</h1>
           <p className="truncate text-xs text-muted-foreground">
-            <span>{visiblePullRequests.length}件</span>
+            <span>{pullRequests.length}件</span>
             {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
           </p>
         </div>
@@ -233,7 +188,7 @@ export function PullRequestList({
           </p>
         )}
 
-        {!error && visiblePullRequests.length === 0 && (
+        {!error && pullRequests.length === 0 && (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
             {isLoading ? "読み込み中..." : "マージ待ちのPull Requestはありません。"}
           </p>
@@ -260,10 +215,9 @@ export function PullRequestList({
                 <PullRequestCard
                   key={pullRequest.id}
                   pullRequest={pullRequest}
-                  onMerged={() => {
-                    setMergedIds((prev) => [...prev, pullRequest.id]);
-                    onRefresh();
-                  }}
+                  selected={selectedPullRequestId === pullRequest.id}
+                  onSelect={onSelectPullRequest}
+                  onMerged={() => onMerged?.(pullRequest)}
                 />
               ))}
             </ul>

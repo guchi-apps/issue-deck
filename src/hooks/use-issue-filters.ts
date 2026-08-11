@@ -24,6 +24,11 @@ export type DashboardPane = "issues" | "pull-requests";
 export type IssueFilters = {
   view: NavViewId;
   pane: DashboardPane;
+  /**
+   * PRペインで詳細を開いているPRのid（`<owner>/<repo>#<番号>`）。未選択はnull。
+   * PC・スマホで同じクエリを使う（スマホは選択中かどうかで一覧と詳細の画面を切り替える）。
+   */
+  pr: string | null;
   q: string;
   repos: string[];
   state: IssueStateFilter;
@@ -35,6 +40,7 @@ export type IssueFilters = {
 const DEFAULT_FILTERS: IssueFilters = {
   view: "all",
   pane: "issues",
+  pr: null,
   q: "",
   repos: [],
   state: "open",
@@ -90,6 +96,7 @@ export function useIssueFilters() {
     return {
       view,
       pane: searchParams.get("pane") === "pull-requests" ? "pull-requests" : "issues",
+      pr: searchParams.get("pr"),
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
       state:
@@ -136,6 +143,7 @@ export function useIssueFilters() {
         // Issueのビューを選んだらIssueペインへ戻す。PRペインを開いたままビューだけ変わると
         // 左メニューの選択と表示内容が食い違って見えるため。
         pane: "issues",
+        pr: null,
       });
     },
     [setFilters, filters.view, filters.state, isStateExplicit],
@@ -143,7 +151,16 @@ export function useIssueFilters() {
 
   const selectPane = useCallback(
     (pane: DashboardPane) => {
-      setFilter("pane", pane);
+      // ペインを切り替えるときは選択中PRを畳む。PRは開きっぱなしにする対象ではなく
+      // （マージすれば一覧から消える）、戻ってきたときに存在しないPRの詳細が残るのを避ける。
+      setFilters({ pane, pr: null });
+    },
+    [setFilters],
+  );
+
+  const selectPullRequest = useCallback(
+    (pullRequestId: string | null) => {
+      setFilter("pr", pullRequestId);
     },
     [setFilter],
   );
@@ -169,5 +186,14 @@ export function useIssueFilters() {
     [filters.repos, setFilter],
   );
 
-  return { filters, setFilter, setFilters, selectView, selectPane, toggleLabel, toggleRepo };
+  return {
+    filters,
+    setFilter,
+    setFilters,
+    selectView,
+    selectPane,
+    selectPullRequest,
+    toggleLabel,
+    toggleRepo,
+  };
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
@@ -29,7 +29,15 @@ function makePullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequ
   };
 }
 
-function renderList(pullRequests: OpenPullRequest[], overrides: Partial<{ isLoading: boolean; error: string | null; failedRepositories: string[] }> = {}) {
+type RenderOverrides = Partial<{
+  isLoading: boolean;
+  error: string | null;
+  failedRepositories: string[];
+  selectedPullRequestId: string | null;
+  onSelectPullRequest: (pullRequest: OpenPullRequest) => void;
+}>;
+
+function renderList(pullRequests: OpenPullRequest[], overrides: RenderOverrides = {}) {
   return render(
     <PullRequestList
       pullRequests={pullRequests}
@@ -38,6 +46,8 @@ function renderList(pullRequests: OpenPullRequest[], overrides: Partial<{ isLoad
       isLoading={overrides.isLoading ?? false}
       error={overrides.error ?? null}
       onRefresh={vi.fn()}
+      selectedPullRequestId={overrides.selectedPullRequestId ?? null}
+      onSelectPullRequest={overrides.onSelectPullRequest}
     />,
   );
 }
@@ -73,16 +83,27 @@ describe("PullRequestList", () => {
     expect(screen.getByText("CI通過")).toBeTruthy();
   });
 
-  it("CI実行中・draft・Auto-merge有効のPRにはマージボタンを出さない", () => {
+  it("CI実行中・Auto-merge有効のPRにもマージボタンを出す（#1087）", () => {
     renderList([
       makePullRequest({ number: 1, ciState: "pending" }),
-      makePullRequest({ number: 2, draft: true }),
       makePullRequest({ number: 3, autoMergeEnabled: true }),
     ]);
-    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "マージする" })).toHaveLength(2);
     expect(screen.getByText("CI実行中")).toBeTruthy();
-    expect(screen.getByText("ドラフト")).toBeTruthy();
     expect(screen.getByText("Auto-merge有効")).toBeTruthy();
+  });
+
+  it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
+    renderList([makePullRequest({ draft: true })]);
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    expect(screen.getByText("ドラフト")).toBeTruthy();
+  });
+
+  it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {
+    renderList([makePullRequest({ ciState: "failure" })]);
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+    expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
+    expect(screen.getByText("CIが失敗しています。")).toBeTruthy();
   });
 
   it("種別・ブランチ・対応Issueへの導線を表示する", () => {
@@ -119,12 +140,33 @@ describe("PullRequestList", () => {
     expect(screen.queryByText("マージ待ちのPull Requestはありません。")).toBeNull();
   });
 
-  it("PR番号をタイトルの前に表示し、GitHubのPRへのリンクにする", () => {
+  it("PR番号をタイトルの前に表示し、GitHubのPRへのリンクを併記する", () => {
     renderList([makePullRequest({ number: 42, title: "マージ待ちPR一覧を追加する" })]);
-    const list = screen.getByRole("list");
-    const link = within(list).getByRole("link", { name: /マージ待ちPR一覧を追加する/ });
     // Issue一覧と同じ「#番号 タイトル」の並び
-    expect(link.textContent?.startsWith("#42 マージ待ちPR一覧を追加する")).toBe(true);
+    const title = screen.getByRole("button", { name: /マージ待ちPR一覧を追加する/ });
+    expect(title.textContent?.startsWith("#42 マージ待ちPR一覧を追加する")).toBe(true);
+    const link = screen.getByRole("link", { name: "#42 をGitHubで開く" });
     expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/pull/42");
+  });
+
+  it("タイトルを押すと選択を親へ通知する（#1087）", () => {
+    const onSelectPullRequest = vi.fn();
+    renderList([makePullRequest({ number: 42, title: "PR詳細を追加する" })], {
+      onSelectPullRequest,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /#42 PR詳細を追加する/ }));
+    expect(onSelectPullRequest).toHaveBeenCalledTimes(1);
+    expect(onSelectPullRequest.mock.calls[0][0].number).toBe(42);
+  });
+
+  it("選択中のPRは一覧側でも見分けられるようにする", () => {
+    renderList([makePullRequest({ number: 42 }), makePullRequest({ number: 43 })], {
+      selectedPullRequestId: "guchi-apps/issue-deck#43",
+    });
+
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0].className).not.toContain("border-l-primary");
+    expect(rows[1].className).toContain("border-l-primary");
   });
 });
