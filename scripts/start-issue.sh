@@ -3,6 +3,11 @@
 #
 # 使い方:
 #   scripts/start-issue.sh <issue番号> [issue番号...]
+#   scripts/start-issue.sh --prepare-only <issue番号> [issue番号...]
+#
+# --prepare-only はworktree・ブランチ・起動用プロンプトの準備だけを行い、開発サーバーも
+# Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
+# で呼ぶ用途（既にセッションの中にいるので、さらにclaudeを起動しても意味がない。#1049）。
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -18,8 +23,18 @@ WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 PROMPT_TEMPLATE="$ROOT/scripts/prompts/implementation-agent.md"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
+PREPARE_ONLY=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --prepare-only) PREPARE_ONLY=1 ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
+
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/start-issue.sh <issue番号> [issue番号...]" >&2
+  echo "Usage: scripts/start-issue.sh [--prepare-only] <issue番号> [issue番号...]" >&2
   exit 1
 fi
 
@@ -28,7 +43,7 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v claude >/dev/null 2>&1; then
+if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
   echo "Error: claude コマンドが見つかりません。" >&2
   exit 1
 fi
@@ -89,15 +104,21 @@ prepare_issue() {
   fi
   echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
 
-  echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
   SSLIP_URL=""
-  if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
-    WSL_IP="$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)"
-    if [[ -n "$WSL_IP" ]]; then
-      SSLIP_URL="http://${WSL_IP}.sslip.io:${DEV_PORT}"
-    fi
+  if [[ "$PREPARE_ONLY" -eq 1 ]]; then
+    # 開発サーバーを起動しないので、この時点でポートフォワーディングを設定する意味がない。
+    # UACダイアログを出さずに済ませる（必要になったらdevサーバー起動時に設定する）。
+    echo "#$n: --prepare-only のためLANアクセス設定はスキップします。"
   else
-    echo "#$n: 警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
+    echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
+    if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
+      WSL_IP="$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)"
+      if [[ -n "$WSL_IP" ]]; then
+        SSLIP_URL="http://${WSL_IP}.sslip.io:${DEV_PORT}"
+      fi
+    else
+      echo "#$n: 警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
+    fi
   fi
 
   echo "#$n: pnpm install しています..."
@@ -108,11 +129,15 @@ prepare_issue() {
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
   local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
 issue_json_path, template_path, dev_port, sslip_url, dev_log = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+# --prepare-only では開発サーバーを起動しない。プロンプト側の「起動済み」という記述が
+# 嘘にならないよう、この値で文面を分ける。
+prepare_only = sys.argv[6] == "1"
+worktree_dir = sys.argv[7]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -127,26 +152,36 @@ if sslip_url:
 else:
     sslip_note = ""
 
+if prepare_only:
+    dev_server_state = (
+        "このworktree用の開発サーバーは**まだ起動していません**。画面確認が必要になったら "
+        "`cd {worktree} && pnpm dev` でバックグラウンド起動してください（ポート`{port}`は"
+        "`.env.local`に設定済みなので、そのまま`pnpm dev`でよい）"
+    ).format(worktree=worktree_dir, port=dev_port)
+else:
+    dev_server_state = (
+        "このworktree用の開発サーバーはセッション開始時に自動起動済み（ログ: `{dev_log}`）"
+    ).format(dev_log=dev_log)
+
 if "23.preview-required" in label_names:
     preview_instructions = (
         "このIssueには`23.preview-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         "1. `http://localhost:{port}` で実際の画面を確認する"
-        "（このworktree用の開発サーバーはセッション開始時に自動起動済み。ログ: `{dev_log}`）{sslip_note}\n"
+        "（{dev_server_state}）{sslip_note}\n"
         "2. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
         "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
         "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
-    ).format(port=dev_port, sslip_note=sslip_note, dev_log=dev_log)
+    ).format(port=dev_port, sslip_note=sslip_note, dev_server_state=dev_server_state)
 else:
     preview_instructions = (
-        "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`でセッション開始時に自動起動済みです"
-        "（他Issueのworktreeと同時に起動しても衝突しません。ログ: `{dev_log}`。Claude Codeセッション"
-        "終了時に自動停止します）。画面に関わる変更を行った場合、PR本文の「確認方法」に次の情報を"
-        "含めてください。\n\n"
+        "このworktreeの開発サーバー（`pnpm dev`）はポート`{port}`を使います"
+        "（他Issueのworktreeと同時に起動しても衝突しません）。{dev_server_state}。"
+        "画面に関わる変更を行った場合、PR本文の「確認方法」に次の情報を含めてください。\n\n"
         "- アクセスURL（`http://localhost:{port}`）{sslip_note}\n"
         "- 実際に確認すべき画面・操作手順\n\n"
         "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
-    ).format(port=dev_port, sslip_note=sslip_note, dev_log=dev_log)
+    ).format(port=dev_port, sslip_note=sslip_note, dev_server_state=dev_server_state)
 
 if "24.screenshot-required" in label_names:
     screenshot_instructions = (
@@ -202,6 +237,17 @@ build_claude_cmd() {
   local prompt_file="$4"
   printf "cd %q && bash %q %q %q %q" "$worktree_dir" "$ROOT/scripts/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
 }
+
+if [[ "$PREPARE_ONLY" -eq 1 ]]; then
+  for n in "$@"; do
+    prepare_issue "$n"
+    echo "#$n: 準備が完了しました。"
+    echo "  worktree: $WORKTREE_DIR"
+    echo "  プロンプト: $PROMPT_FILE"
+    echo "  開発サーバー用ポート: $DEV_PORT（未起動）"
+  done
+  exit 0
+fi
 
 if [[ $# -eq 1 ]]; then
   n="$1"
