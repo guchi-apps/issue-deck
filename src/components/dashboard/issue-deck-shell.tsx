@@ -23,8 +23,10 @@ import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-de
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
 import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
+import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
@@ -33,6 +35,7 @@ import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { useOpenPullRequests } from "@/hooks/use-open-pull-requests";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
@@ -78,7 +81,7 @@ export function IssueDeckShell({
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo } =
+  const { filters, setFilter, setFilters, selectView, selectPane, toggleLabel, toggleRepo } =
     useIssueFilters();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const searchParams = useSearchParams();
@@ -105,6 +108,7 @@ export function IssueDeckShell({
     mobileScreen,
     isPending: isMobileScreenPending,
     selectTab,
+    selectPullRequests,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -341,6 +345,22 @@ export function IssueDeckShell({
     [repositories],
   );
 
+  // マージ待ちPR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから
+  // 取得するため、PRペイン（PC）またはPR画面（スマホ）を開いている間だけ有効にする。
+  const isPullRequestPaneActive =
+    filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
+  const openPullRequests = useOpenPullRequests(isPullRequestPaneActive);
+  // 左メニューでリポジトリを絞り込んでいるときは、PR一覧も同じ絞り込みに従わせる。
+  const filteredPullRequests = useMemo(
+    () =>
+      filters.repos.length === 0
+        ? openPullRequests.pullRequests
+        : openPullRequests.pullRequests.filter((pullRequest) =>
+            filters.repos.includes(pullRequest.repositoryFullName),
+          ),
+    [openPullRequests.pullRequests, filters.repos],
+  );
+
   function handleSelectView(view: NavViewId) {
     selectView(view);
     setSelectedIssue(null);
@@ -420,6 +440,8 @@ export function IssueDeckShell({
       labels: quickFilter.labels,
       assignee: quickFilter.assignee,
       sort: quickFilter.sort,
+      // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
+      pane: "issues",
     });
     setSelectedIssue(null);
   }
@@ -489,6 +511,19 @@ export function IssueDeckShell({
                     onSelectQuickFilter={handleSelectQuickFilterMobile}
                     onDeleteQuickFilter={handleDeleteQuickFilter}
                     onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+                    onSelectPullRequests={selectPullRequests}
+                  />
+                )}
+
+                {mobileScreen.kind === "pull-requests" && (
+                  <MobilePullRequestsScreen
+                    pullRequests={filteredPullRequests}
+                    failedRepositories={openPullRequests.failedRepositories}
+                    fetchedAt={openPullRequests.fetchedAt}
+                    isLoading={openPullRequests.isLoading}
+                    error={openPullRequests.error}
+                    onRefresh={openPullRequests.refresh}
+                    onBack={goBack}
                   />
                 )}
 
@@ -581,6 +616,8 @@ export function IssueDeckShell({
             <SidebarNav
               activeView={filters.view}
               onSelectView={handleSelectView}
+              activePane={filters.pane}
+              onSelectPane={selectPane}
               navCounts={navCounts}
               repositories={repositories}
               selectedRepoFullNames={filters.repos}
@@ -604,52 +641,69 @@ export function IssueDeckShell({
           </>
         )}
 
-        {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
-        <IssueList
-          title={getNavViewLabel(filters.view)}
-          issues={filteredIssues}
-          selectedIssueId={selectedIssue?.id ?? null}
-          onSelectIssue={setSelectedIssue}
-          showSearch={false}
-          scrollKey={issueListScrollKey}
-          groupByRepo={groupByRepo}
-          view={filters.view}
-          className="hidden shrink-0 border-r md:flex"
-          style={{ width: issueListWidth.width, maxWidth: "50vw" }}
-        />
-        <ResizeHandle onDragStart={issueListWidth.handleDragStart} className="hidden md:block" />
-
-        {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
-        <div className="hidden flex-1 overflow-hidden md:flex">
-          <IssueDetail
-            issue={selectedIssue}
-            issues={issues}
-            repositories={visibleRepositories}
-            currentUserLogin={currentUserLogin}
-            onEdit={setEditingIssue}
-            onIssueUpdated={handleIssueUpdated}
-            onIssueDeleted={handleIssueDeleted}
-            onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-            onCreateFollowupIssue={openFollowupIssueDialog}
-            onSelectRepository={(repositoryFullName) => setFilters({ repos: [repositoryFullName] })}
+        {filters.pane === "pull-requests" ? (
+          /* PC: マージ待ちPR一覧。Issue一覧・詳細の代わりに中央〜右カラム全体を使う（#1058） */
+          <PullRequestList
+            pullRequests={filteredPullRequests}
+            failedRepositories={openPullRequests.failedRepositories}
+            fetchedAt={openPullRequests.fetchedAt}
+            isLoading={openPullRequests.isLoading}
+            error={openPullRequests.error}
+            onRefresh={openPullRequests.refresh}
+            className="hidden flex-1 md:flex"
           />
-        </div>
-        {selectedIssue && (
+        ) : (
           <>
-            <ResizeHandle
-              onDragStart={propertiesPanelWidth.handleDragStart}
-              className="hidden xl:block"
+            {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
+            <IssueList
+              title={getNavViewLabel(filters.view)}
+              issues={filteredIssues}
+              selectedIssueId={selectedIssue?.id ?? null}
+              onSelectIssue={setSelectedIssue}
+              showSearch={false}
+              scrollKey={issueListScrollKey}
+              groupByRepo={groupByRepo}
+              view={filters.view}
+              className="hidden shrink-0 border-r md:flex"
+              style={{ width: issueListWidth.width, maxWidth: "50vw" }}
             />
-            <div
-              className="hidden shrink-0 border-l xl:block"
-              style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
-            >
-              <IssuePropertiesPanel
+            <ResizeHandle onDragStart={issueListWidth.handleDragStart} className="hidden md:block" />
+
+            {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
+            <div className="hidden flex-1 overflow-hidden md:flex">
+              <IssueDetail
                 issue={selectedIssue}
+                issues={issues}
                 repositories={visibleRepositories}
+                currentUserLogin={currentUserLogin}
+                onEdit={setEditingIssue}
                 onIssueUpdated={handleIssueUpdated}
+                onIssueDeleted={handleIssueDeleted}
+                onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                onCreateFollowupIssue={openFollowupIssueDialog}
+                onSelectRepository={(repositoryFullName) =>
+                  setFilters({ repos: [repositoryFullName] })
+                }
               />
             </div>
+            {selectedIssue && (
+              <>
+                <ResizeHandle
+                  onDragStart={propertiesPanelWidth.handleDragStart}
+                  className="hidden xl:block"
+                />
+                <div
+                  className="hidden shrink-0 border-l xl:block"
+                  style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
+                >
+                  <IssuePropertiesPanel
+                    issue={selectedIssue}
+                    repositories={visibleRepositories}
+                    onIssueUpdated={handleIssueUpdated}
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -673,7 +727,17 @@ export function IssueDeckShell({
       <QuickFilterDialog
         open={quickFilterDialogOpen}
         onOpenChange={setQuickFilterDialogOpen}
-        filters={filters}
+        // 保存対象はIssueの絞り込み条件だけ。表示中のペイン（filters.pane）は絞り込み条件では
+        // ないため、QuickFilterには含めない。
+        filters={{
+          view: filters.view,
+          q: filters.q,
+          repos: filters.repos,
+          state: filters.state,
+          labels: filters.labels,
+          assignee: filters.assignee,
+          sort: filters.sort,
+        }}
         onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
       />
       <AppSettingsDialog

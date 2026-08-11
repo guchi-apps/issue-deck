@@ -13,8 +13,17 @@ import type { NavViewId } from "@/types/issue";
 export type IssueSort = "updated" | "created";
 export type IssueStateFilter = "all" | "open" | "closed";
 
+/**
+ * ダッシュボード中央〜右カラムに何を表示しているか（#1058）。
+ * Issue一覧とマージ待ちPR一覧は同じ画面内で切り替える別ペインで、Issue用の絞り込み条件とは
+ * 直交する。ただしURLの持ち方を揃えたいのと、ビュー切り替えと同時に1回のURL更新で
+ * 反映したい（別フックに分けると2回のrouter.replaceが競合する）ため、ここで一緒に扱う。
+ */
+export type DashboardPane = "issues" | "pull-requests";
+
 export type IssueFilters = {
   view: NavViewId;
+  pane: DashboardPane;
   q: string;
   repos: string[];
   state: IssueStateFilter;
@@ -25,6 +34,7 @@ export type IssueFilters = {
 
 const DEFAULT_FILTERS: IssueFilters = {
   view: "all",
+  pane: "issues",
   q: "",
   repos: [],
   state: "open",
@@ -79,6 +89,7 @@ export function useIssueFilters() {
 
     return {
       view,
+      pane: searchParams.get("pane") === "pull-requests" ? "pull-requests" : "issues",
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
       state:
@@ -122,9 +133,19 @@ export function useIssueFilters() {
       setFilters({
         view,
         state: resolveStateOnViewChange(view, filters.view, filters.state, isStateExplicit),
+        // Issueのビューを選んだらIssueペインへ戻す。PRペインを開いたままビューだけ変わると
+        // 左メニューの選択と表示内容が食い違って見えるため。
+        pane: "issues",
       });
     },
     [setFilters, filters.view, filters.state, isStateExplicit],
+  );
+
+  const selectPane = useCallback(
+    (pane: DashboardPane) => {
+      setFilter("pane", pane);
+    },
+    [setFilter],
   );
 
   const toggleLabel = useCallback(
@@ -148,5 +169,5 @@ export function useIssueFilters() {
     [filters.repos, setFilter],
   );
 
-  return { filters, setFilter, setFilters, selectView, toggleLabel, toggleRepo };
+  return { filters, setFilter, setFilters, selectView, selectPane, toggleLabel, toggleRepo };
 }
