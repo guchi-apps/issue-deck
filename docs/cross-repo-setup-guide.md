@@ -360,9 +360,8 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude-code-action`の実行に使うClaude Codeの認証トークン | 各リポジトリで個別に発行・登録が必要 |
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
-| `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）へ進捗の変化を送るための共有シークレット（#991 Phase 2） | **任意。** organization secretとして1つ登録すれば全リポジトリで共有できる。未登録なら報告ステップがスキップされるだけで、ラベル遷移には影響しない |
+| `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）へ進捗の変化を送るための共有シークレット（#991 Phase 2） | **任意。** organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る。未設定でも報告ステップがスキップされるだけでジョブは落ちない（issue-deckを進捗更新の単一障害点にしないため） |
 | `OP_SERVICE_ACCOUNT_TOKEN` | issue-deck自身のSignaly（社内通知）連携で使う1Password Service Accountトークン | マルチエージェント運用そのものには不要。issue-deckの`ci.yml`/`deploy.yml`/`release.yml`固有の設定であり、他リポジトリで導入する必然性はない |
-| `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）を呼び出す際の共有シークレット | `reusable-issue-labels.yml`・`reusable-issue-dispatch.yml`の`workflow_call`が`required: false`で受け取る。未設定でも報告ステップが警告のみでスキップされジョブは落ちない（issue-deckを進捗更新の単一障害点にしないため）。渡す場合は各対象リポジトリのorganization secretとして登録する |
 
 `m-guchi/shopping-list`のケーススタディでは、1Password Service Account経由でのSecrets注入
 （`1password/load-secrets-action@v4` + `op://...`参照）が既に稼働しており、`CLAUDE_CODE_OAUTH_TOKEN`も
