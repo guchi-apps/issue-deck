@@ -55,7 +55,12 @@ cleanup() {
 trap cleanup EXIT HUP TERM
 
 echo "#$ISSUE_NUMBER: 開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
-pnpm dev >"$DEV_LOG" 2>&1 &
+# stdinを/dev/nullにするのは必須（#1094）。set -m によりこのジョブはバックグラウンドの
+# プロセスグループになるため、配下のプロセスが端末（tty）から読もうとするとカーネルが
+# SIGTTINを送り、プロセスグループごと停止（ps上は T）して誰も再開しない。
+# 実際にsetup-lan-access.shが起動するpowershell.exeがこれを踏み、devサーバーが
+# 起動しないまま止まっていた。出力はログへ逃がしていたが、stdinがttyのままだった。
+pnpm dev </dev/null >"$DEV_LOG" 2>&1 &
 DEV_PID=$!
 # set -m によりバックグラウンドジョブは新しいプロセスグループを持ち、そのPGIDは先頭プロセスのPIDと一致する。
 DEV_PGID="$DEV_PID"
