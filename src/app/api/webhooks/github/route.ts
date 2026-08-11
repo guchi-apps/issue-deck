@@ -4,7 +4,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import type { GithubApiIssue } from "@/lib/github/issues-api";
+import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import { createComment, updateIssue, type GithubApiIssue } from "@/lib/github/issues-api";
+import {
+  dispatchCommentBody,
+  isOwnAppSender,
+  LOCAL_LABEL_NAME,
+  resolveDispatchMode,
+} from "@/lib/github/project-status-dispatch";
 import { fetchProjectItem } from "@/lib/github/projects-api";
 import {
   deleteIssueByGithubId,
@@ -13,7 +20,7 @@ import {
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
-import type { AccountType } from "@prisma/client";
+import type { AccountType, IssueState } from "@prisma/client";
 
 type InstallationRepoPayload = {
   id: number;
@@ -256,6 +263,7 @@ async function handleProjectsV2ItemEvent(payload: {
   projects_v2_item: { node_id: string };
   installation?: { id: number };
   organization?: { login: string };
+  sender?: { login?: string };
 }) {
   const installation = payload.installation?.id
     ? await db.githubInstallation.findUnique({
@@ -288,10 +296,102 @@ async function handleProjectsV2ItemEvent(payload: {
   // issue-deckが接続していないリポジトリのIssueは無視する（handleIssuesEventと同じ方針）
   if (!repository) return;
 
-  await db.issue.updateMany({
-    where: { repositoryId: repository.id, number: item.issueNumber },
+  const issue = await db.issue.findUnique({
+    where: { repositoryId_number: { repositoryId: repository.id, number: item.issueNumber } },
+    select: { projectStatus: true, state: true, labels: { select: { name: true } } },
+  });
+  const previousStatus = issue?.projectStatus ?? null;
+
+  // 遷移前のStatusを条件に含めた比較更新にする（compare-and-set）。Webhookの再配信や
+  // 同一イベントの同時配信があっても、実際に状態を進めた1回だけがcount > 0になるため、
+  // 後続の起動が二重に走らない（#991 Phase 3）。
+  const updated = await db.issue.updateMany({
+    where: {
+      repositoryId: repository.id,
+      number: item.issueNumber,
+      projectStatus: previousStatus,
+    },
     data: { projectStatus: item.status, projectItemId: item.itemId },
   });
+  if (updated.count === 0) return;
+
+  await maybeDispatchFromProjectStatus({
+    repository,
+    installationId: installation.installationId,
+    issueNumber: item.issueNumber,
+    issueState: issue?.state,
+    issueLabels: issue?.labels.map((label) => label.name) ?? [],
+    from: previousStatus,
+    to: item.status,
+    senderLogin: payload.sender?.login,
+  });
+}
+
+/**
+ * カンバンでStatusを動かした操作を実行の起動につなげる（#991 Phase 3）。
+ *
+ * 起動するかどうかの判定は`resolveDispatchMode`に集約しており、issue-deckの
+ * 「実装を開始」ボタン（`POST /api/issues/progress-status`）も同じ関数を通る。
+ * ここが担うのは**カンバンのドラッグ起点の経路だけ**で、ボタン経由の書き込みは
+ * `isOwnAppSender`で弾かれる（ボタンは自分でコメントを投稿するため取りこぼさない）。
+ *
+ * 失敗してもWebhook全体は失敗させない。Statusの取り込み自体は済んでおり、
+ * 起動しなかったことは画面上「起動待ち」として見えるため。
+ */
+async function maybeDispatchFromProjectStatus(params: {
+  repository: { id: string; ownerLogin: string; name: string };
+  installationId: number;
+  issueNumber: number;
+  issueState: IssueState | undefined;
+  issueLabels: string[];
+  from: string | null;
+  to: string | null;
+  senderLogin: string | undefined;
+}) {
+  // issue-deck自身の書き込み（報告APIやボタン）で自分が起動するのを防ぐ
+  if (isOwnAppSender(params.senderLogin) || !params.senderLogin) return;
+  // closedなIssueは全モードで再始動しない（reusable-issue-dispatch.ymlのissue_closedガードと同じ方針）
+  if (params.issueState === "CLOSED") return;
+  // ローカルのClaude Codeセッションで対応中のIssueは無人実行を起動しない（#919と同じ方針）。
+  // ワークフロー側でもskipされるが、意味の無いコメントをIssueに残さないためここでも止める
+  if (params.issueLabels.includes(LOCAL_LABEL_NAME)) return;
+
+  const mode = resolveDispatchMode(params.from, params.to);
+  if (!mode) return;
+
+  try {
+    const token = await getInstallationToken(params.installationId);
+
+    // **ワークフローのmodeはコメント本文ではなく`21.plan-required`ラベルで決まる**
+    // （reusable-issue-dispatch.ymlの「実行モードを決める」ステップ）。`Planning`へ動かした
+    // 意図を計画実行として通すには、コメントより先にラベルを付けておく必要がある。
+    if (mode === "plan" && !params.issueLabels.includes(PLAN_REQUIRED_LABEL)) {
+      await updateIssue(params.repository.ownerLogin, params.repository.name, params.issueNumber, token, {
+        labels: [...params.issueLabels, PLAN_REQUIRED_LABEL],
+      });
+    }
+
+    await createComment(
+      params.repository.ownerLogin,
+      params.repository.name,
+      params.issueNumber,
+      token,
+      {
+        body: dispatchCommentBody({
+          mode,
+          senderLogin: params.senderLogin,
+          toStatus: params.to ?? "",
+        }),
+      },
+    );
+  } catch (error) {
+    console.error(
+      "[webhooks/github] failed to dispatch from project status",
+      params.repository.id,
+      params.issueNumber,
+      error,
+    );
+  }
 }
 
 export function POST(request: NextRequest) {

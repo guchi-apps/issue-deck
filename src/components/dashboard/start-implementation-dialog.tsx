@@ -18,6 +18,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   START_IMPLEMENTATION_OPTIONS,
@@ -65,6 +66,7 @@ export function StartImplementationDialog({
     isSubmitting: isCreatingComment,
     error: commentMutationError,
   } = useIssueCommentMutations();
+  const { setProgressStatus } = useProgressStatusMutation();
   const isSubmitting = isUpdatingIssue || isCreatingComment;
   const error = labelMutationError ?? commentMutationError;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
@@ -111,6 +113,15 @@ export function StartImplementationDialog({
       currentIssue = updated;
       onIssueUpdated(updated);
     }
+
+    // カンバンを即座に追従させる（#991 Phase 3）。オプションラベル→Statusの順に書くのは、
+    // 万一この書き込みがWebhook起動の判定に届いた場合でも「計画が必要」の選択が先に反映される
+    // ようにするため（通常はissue-deck自身の書き込みとして無視される）。失敗しても続行する。
+    await setProgressStatus({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      status: options.planRequired ? "planning" : "implementation",
+    });
 
     const [owner, repo] = issue.repositoryFullName.split("/");
     const created = await createComment({
