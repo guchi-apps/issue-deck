@@ -104,6 +104,12 @@ fi
 
 echo "#$ISSUE_NUMBER: $FULL_NAME（$REPO_PATH）のセッションを起動します..."
 cd "$REPO_PATH"
+
+# LANアクセス設定（Windowsの管理者権限が必要）は、wt.exeで開いたタブではUACを承認しても
+# 待ちから戻らずタブが固まる。ワンクリック起動では行わない（#1076）。
+# コマンドライン引数ではなく環境変数で渡すのは、この指定を解釈しないリポジトリの
+# start-issue.shへ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
+export ISSUE_DECK_SKIP_LAN_SETUP=1
 # start-issue.shはworktree作成〜devサーバー起動〜claude起動まで自前で面倒を見る。
 # execで置き換えるため、以降のtrapはstart-issue.sh側の挙動に委ねる。
 trap - EXIT

@@ -28,6 +28,21 @@ DEV_PID_FILE="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.pid"
 
 mkdir -p "$DEV_SERVER_DIR"
 
+# 前回のセッションがタブの強制終了などでtrapを通らずに終わると、開発サーバーが残ったまま
+# ポートを掴んでいることがある。再開時（#1076）にpnpm devが起動できなくなるため先に止める。
+if [[ -f "$DEV_PID_FILE" ]]; then
+  STALE_PID="$(cat "$DEV_PID_FILE")"
+  if [[ "$STALE_PID" =~ ^[0-9]+$ ]] && kill -0 "$STALE_PID" 2>/dev/null; then
+    echo "#$ISSUE_NUMBER: 前回の開発サーバー（PID $STALE_PID）が残っているため停止します..."
+    kill -TERM "-$STALE_PID" 2>/dev/null || kill -TERM "$STALE_PID" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      kill -0 "$STALE_PID" 2>/dev/null || break
+      sleep 0.5
+    done
+  fi
+  rm -f "$DEV_PID_FILE"
+fi
+
 DEV_PGID=""
 
 cleanup() {

@@ -14,18 +14,20 @@ Issue #$1 のローカル実装を開始してください。
 
 1. `$1` がIssue番号（正の整数）として妥当か確認する。妥当でなければ、何もせず使い方を示して止まる。
 
-2. worktreeの有無を確認する。
+2. worktreeを用意する。**あってもなくても同じコマンドでよい。**
 
    ```bash
-   ls -d ~/apps/issue-deck-worktrees/issue-$1 2>/dev/null
+   bash ~/apps/issue-deck/scripts/start-issue.sh --prepare-only $1
    ```
 
-   - **無い場合**: `bash ~/apps/issue-deck/scripts/start-issue.sh --prepare-only $1` を実行する。
-     worktree・ブランチ`issue-$1`の作成、`.env.local`のコピー、開発サーバー用ポートの採番、
-     `pnpm install`、起動用プロンプトの生成までを行い、Claude Codeも開発サーバーも起動せずに
-     終了する（このセッションが既にClaude Codeなので、さらに起動しても意味がないため）。
-   - **既にある場合**: 作り直さず再利用する。`git -C ~/apps/issue-deck-worktrees/issue-$1 status`
-     で未コミットの変更が残っていないかを確認し、あればユーザーに提示してから続きに入る。
+   worktree・ブランチ`issue-$1`の作成、`.env.local`のコピー、開発サーバー用ポートの採番、
+   `pnpm install`、起動用プロンプトの生成までを行い、Claude Codeも開発サーバーも起動せずに
+   終了する（このセッションが既にClaude Codeなので、さらに起動しても意味がないため）。
+
+   **worktreeが既にある場合は作り直さず再利用する**（#1076）。未コミットの変更が残っていれば
+   件数が表示されるので、あればユーザーに提示してから続きに入る。gitの作業ツリーでない
+   ディレクトリがあるときや別ブランチを開いているときはエラー終了するので、その場合は
+   勝手に消さずユーザーに状況を伝える。
 
 3. 以降の作業ディレクトリを worktree に固定する。`cd ~/apps/issue-deck-worktrees/issue-$1` を
    基点にし、**本体チェックアウトのファイルは読むだけ**にする。
