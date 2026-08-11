@@ -159,15 +159,21 @@ Claude Codeタブのカレントディレクトリは、VSCodeで開いている
 /add-dir ~/apps/issue-deck-worktrees/issue-1049
 ```
 
-毎回不要にするなら、`.claude/settings.local.json`（ローカル専用。gitで無視される）に書く。
+毎回不要にするなら、**本体チェックアウト**の`.claude/settings.local.json`（ローカル専用。
+gitで無視される）に追記する。Claudeタブのカレントディレクトリは本体チェックアウトなので、
+worktree側ではなくこちらに書く。
 
 ```json
 {
   "permissions": {
-    "additionalDirectories": ["~/apps/issue-deck-worktrees"]
+    "additionalDirectories": ["/tmp", "/home/<ユーザー名>/apps/issue-deck-worktrees"]
   }
 }
 ```
+
+パスは絶対パスで書く。このファイルはコミットされないマシン固有の設定なので、`~`の展開に
+依存させる必要がない。既存の`additionalDirectories`がある場合は**上書きせず追記する**
+（`/tmp`等が消えると別の場所で権限エラーになる）。
 
 **コミット対象の`.claude/settings.json`には書かない。** そちらはGitHub Actions上の無人実行でも
 読まれるため、Actions側に存在しないパスを持ち込むことになる。
