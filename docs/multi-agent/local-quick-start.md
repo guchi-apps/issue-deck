@@ -42,7 +42,19 @@ Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-prot
 
 ## 初回セットアップ（1回だけ）
 
-Windows側のPowerShellで実行する。**管理者権限は不要**（HKCU配下に登録するため）。
+**手順は画面からも見られる。** Issue詳細の「…」メニュー →「ローカル起動のセットアップ」
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。詳細は後述の
+[セットアップ手順を画面から見せる](#セットアップ手順を画面から見せる)。
+
+WSLのターミナルに貼れる形。`wslpath -w`がWSLのパスをWindowsのパスへ変換する（`~`はコマンド
+置換の中でもシェルが展開するので、ユーザー名を埋める必要は無い）。**管理者権限は不要**
+（HKCU配下に登録するため）。
+
+```bash
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"
+```
+
+Windows側のPowerShellから直接実行してもよい。
 
 ```powershell
 cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
@@ -150,6 +162,43 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
 ```
 
+## セットアップ手順を画面から見せる
+
+登録手順がこのドキュメントにしか無いと、使う側は**「ボタンを押しても何も起きない」状態から
+自力でここへ辿り着く**必要がある（#1088）。Issue詳細の「…」メニューに
+**「ローカル起動のセットアップ」**を置き、ダイアログで手順を出す
+（`src/components/dashboard/local-session-setup-dialog.tsx`）。
+
+**初回の「ローカルで開始」押下時には自動で開く**（localStorageで一度きり。以降はメニューから
+任意に開ける）。
+
+### 検知はできない
+
+**ブラウザから`issuedeck://`が登録済みかを知る手段は無い。** 未登録でも押下は黙って無視される
+だけで、エラーも遷移も観測できない。インストール済みの受け口のバージョンも見えず、画面から
+何かを実行することもできない。遷移後に`blur`が来るかを見る裏技はあるが、ブラウザ自身の確認
+ダイアログがフォーカスを奪うため誤検知する。**当てにしない。**
+
+したがって「状況を検知して出す」のではなく、**こちらから一度だけ見せる**設計にしている。
+
+### ダイアログの内容
+
+| 項目 | 内容 |
+| --- | --- |
+| 1. 登録コマンド | WSLのターミナルにそのまま貼れる1行（コピーボタン付き） |
+| 2. 動作確認 | `issuedeck://start/guchi-apps/issue-deck/99999`へのリンク。押せばその場で経路を確認でき、Issue取得に失敗して止まるのでブランチもworktreeも作られない |
+| 3. 再実行が要るケース | 「受け口スクリプトを更新したら登録スクリプトを再実行」。アプリのバージョンを併記する |
+| 4. フォールバック | プロトコル未登録の環境向けの起動コマンド（「ローカル起動コマンドをコピー」と同じもの） |
+
+3のバージョンは、**登録コマンドをコピーした時点の版**をlocalStorageに控え、現在の版と並べて
+出す（`src/lib/local-session-setup.ts`）。登録そのものは検知できないので、「いつの版で登録した
+か」を人が照合できるところまでを担保する。版が違えば登録し直しを促す。
+
+コマンドの生成は経路によらず`src/lib/local-session.ts`へ集約している。分かれていると片方だけ
+古くなる。案内するチェックアウト先（`~/apps/issue-deck`）も`start-local-session.sh`の既定の
+解決先と同じ値にしてある。**ユーザー環境依存の値**（チェックアウト先・WSLのディストロ名）に
+ついては、読み替える旨と`ISSUEDECK_WSL_DISTRO`の存在をダイアログ内に添えている。
+
 ## 起動時のラベル付与（`11.local`・進捗ラベル）
 
 ローカルセッションを起こした時点で、Issue側にも「ローカルで対応中である」「着手した」ことが
@@ -195,7 +244,7 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 | 状態 | 挙動 |
 | --- | --- |
 | worktreeが存在しない | 新規作成 |
-| `issue-<番号>`ブランチのworktreeがある | **再利用** |
+| `issue-<番号>`ブランチのworktreeがある | **再利用**（PRがマージ済みなら警告。後述） |
 | gitの作業ツリーでないディレクトリがある | エラー終了（中身を確認して手動で削除する） |
 | 別ブランチを開いている | エラー終了 |
 
@@ -377,6 +426,44 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 一方`worktree.symlinkDirectories`で`node_modules`をメインリポジトリから共有できる点は純正が
 優れており、`--prepare-only`が毎回`pnpm install`する現状より速い。命名の制約が外れたら再検討する。
 
+## マージ済みIssueで再開したときの扱い
+
+再開できるようにしたことで、**マージ済みのIssueでボタンを押すと古いworktreeがそのまま
+再利用される**という副作用が出た（#1100）。以前は「既に存在します」で止まっていたぶん、
+黙って進む方がかえって気づきにくい。マージ済みブランチは`develop`から分岐し直されておらず、
+以降のdevelopの変更を含まないまま作業を始めることになる。
+
+そのため`start-issue.sh`は再開時に`gh pr list --head issue-<番号> --state merged`を見て、
+マージ済みPRがあれば警告する。そのうえで**消しても失われないと確認できたときだけ**、
+作り直すかどうかを尋ねる。
+
+| 状態 | 挙動 |
+| --- | --- |
+| マージ済みPRが無い | 何も表示せず再利用（通常の再開） |
+| マージ済み・クリーン・端末あり | 警告し、`[Y/n]`で作り直すか尋ねる（既定は作り直す） |
+| マージ済み・クリーン・端末なし（`--prepare-only`等） | 警告して再利用。`--recreate`の案内を出す |
+| マージ済みだが未コミットの変更・未pushのコミット・稼働中のセッションがある | 警告して再利用（消すと失われるため作り直さない） |
+
+`--recreate`を付けると尋ねずに作り直し、`--no-recreate`を付けると尋ねずに再利用する。
+`--recreate`を指定しても、消すと失われるものが残っている場合は作り直さずエラーで止まる。
+
+作り直しはworktreeとローカルブランチを削除してから、通常の新規作成経路（最新の`develop`から
+`git worktree add -b`）へ合流する。判定に使う「消してよいか」のロジックは
+`scripts/lib/worktree-status.sh`に置き、掃除コマンドと共有している。**片方だけを緩めない。**
+
+## 溜まったworktreeを掃除する
+
+worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前後あるため、放置すると
+ディスクを食い、`git worktree list`も読みにくくなる。
+
+```bash
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+```
+
+対象・オプション・削除するものの範囲は[branching.md](branching.md)の「ブランチ・worktree運用」を参照。
+
 ## 未対応（このIssueの範囲外）
 
-- マージ済みworktreeの**掃除**。放置すると溜まる。
+- 受け口スクリプトの**陳腐化の検知**（別Issue）。画面側は「登録コマンドをコピーした版」を控えて
+  人が照合できるようにするところまでで、実際にインストールされている版はブラウザからは見えない。
