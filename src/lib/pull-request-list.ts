@@ -95,12 +95,32 @@ export function groupPullRequestsByRepository(
 }
 
 /**
- * 「人がマージ操作をする必要があるか」の判定。CIが通っていて、draftでもAuto-merge待ちでも
- * ないPRだけを対象にする。ここがfalseのPRには一覧のマージボタンを出さない
- * （放っておけば自動でマージされる、あるいはまだマージできる状態にない）。
+ * issue-deckの画面からマージ操作を出してよいPRか。draft以外はすべて対象にする（#1087）。
+ *
+ * 以前はCI通過済み・Auto-merge無効のPRだけにボタンを出していたが、CIが落ちたPRを確認のうえ
+ * マージする、Auto-mergeの完了を待たずに今すぐ入れる、といった操作のためだけにGitHubへ
+ * 移動する必要があった。「そのままマージしてよいか」の判断材料は`mergeWarnings`が文言で返し、
+ * 実行前に確認を挟む形にしている。draftだけはGitHub側がマージを受け付けないため対象外。
  */
-export function needsManualMerge(pullRequest: OpenPullRequest): boolean {
-  if (pullRequest.draft) return false;
-  if (pullRequest.autoMergeEnabled) return false;
-  return pullRequest.ciState === "success";
+export function canMergeFromDeck(pullRequest: OpenPullRequest): boolean {
+  return !pullRequest.draft;
+}
+
+/**
+ * そのままマージすると意図しない結果になりうる状態の説明。空配列なら確認なしでマージしてよい。
+ * 画面はこの内容を確認ダイアログに並べる。
+ */
+export function mergeWarnings(pullRequest: OpenPullRequest): string[] {
+  const warnings: string[] = [];
+  if (pullRequest.ciState === "failure") {
+    warnings.push("CIが失敗しています。");
+  } else if (pullRequest.ciState === "pending") {
+    warnings.push("CIがまだ実行中です。");
+  } else if (pullRequest.ciState === "unknown") {
+    warnings.push("CIの状態を確認できていません。");
+  }
+  if (pullRequest.autoMergeEnabled) {
+    warnings.push("Auto-mergeが有効です。待てばCI通過後に自動でマージされます。");
+  }
+  return warnings;
 }

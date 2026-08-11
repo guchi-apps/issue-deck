@@ -185,6 +185,8 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 
 作り直さないため、`git worktree add`と`.env.local`のコピーは行わない。`.env.local`は
 ローカルで書き換えている場合があるので、既にあるものを尊重する（無いときだけ本体からコピー）。
+ただし本体に後から足した環境変数が古いworktreeへ届かないままになるため、**本体の`.env.local`に
+あってworktree側に無いキーだけは値ごと追記する**（#1099。既存キーの値は書き換えない）。
 `pnpm install`とプロンプトの再生成は毎回行う（前者は数秒で終わり、後者はIssueに付いた
 新しいコメントを取り込むため）。
 

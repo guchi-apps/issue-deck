@@ -20,7 +20,7 @@ Issue #$1 のローカル実装を開始してください。
    bash ~/apps/issue-deck/scripts/start-issue.sh --prepare-only $1
    ```
 
-   worktree・ブランチ`issue-$1`の作成、`.env.local`のコピー、開発サーバー用ポートの採番、
+   worktree・ブランチ`issue-$1`の作成、`.env.local`のコピー（再開時は本体にあって不足しているキーだけを追記）、開発サーバー用ポートの採番、
    `pnpm install`、起動用プロンプトの生成までを行い、Claude Codeも開発サーバーも起動せずに
    終了する（このセッションが既にClaude Codeなので、さらに起動しても意味がないため）。
 

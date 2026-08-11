@@ -23,9 +23,11 @@ import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-de
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { MobilePullRequestDetailScreen } from "@/components/dashboard/mobile/mobile-pull-request-detail-screen";
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
 import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
+import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -36,6 +38,7 @@ import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { useOpenPullRequests } from "@/hooks/use-open-pull-requests";
+import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
@@ -55,6 +58,7 @@ import {
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
+import type { OpenPullRequest } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -81,8 +85,16 @@ export function IssueDeckShell({
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
 }: IssueDeckShellProps) {
-  const { filters, setFilter, setFilters, selectView, selectPane, toggleLabel, toggleRepo } =
-    useIssueFilters();
+  const {
+    filters,
+    setFilter,
+    setFilters,
+    selectView,
+    selectPane,
+    selectPullRequest,
+    toggleLabel,
+    toggleRepo,
+  } = useIssueFilters();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
@@ -144,6 +156,13 @@ export function IssueDeckShell({
     defaultWidth: 384,
     minWidth: 280,
     maxWidth: 600,
+    handleSide: "right",
+  });
+  const pullRequestListWidth = useResizableWidth({
+    storageKey: "issue-deck:pull-request-list-width",
+    defaultWidth: 420,
+    minWidth: 320,
+    maxWidth: 640,
     handleSide: "right",
   });
   const propertiesPanelWidth = useResizableWidth({
@@ -350,16 +369,49 @@ export function IssueDeckShell({
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
   const openPullRequests = useOpenPullRequests(isPullRequestPaneActive);
-  // 左メニューでリポジトリを絞り込んでいるときは、PR一覧も同じ絞り込みに従わせる。
-  const filteredPullRequests = useMemo(
+  // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
+  // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
+  // （マージできていなければまた一覧に現れる）。
+  const [mergedPullRequests, setMergedPullRequests] = useState<{
+    ids: string[];
+    fetchedAt: string | null;
+  }>({ ids: [], fetchedAt: null });
+  const hiddenPullRequestIds = useMemo(
     () =>
-      filters.repos.length === 0
-        ? openPullRequests.pullRequests
-        : openPullRequests.pullRequests.filter((pullRequest) =>
-            filters.repos.includes(pullRequest.repositoryFullName),
-          ),
-    [openPullRequests.pullRequests, filters.repos],
+      mergedPullRequests.fetchedAt === openPullRequests.fetchedAt ? mergedPullRequests.ids : [],
+    [mergedPullRequests, openPullRequests.fetchedAt],
   );
+
+  // 左メニューでリポジトリを絞り込んでいるときは、PR一覧も同じ絞り込みに従わせる。
+  const filteredPullRequests = useMemo(() => {
+    const visible = openPullRequests.pullRequests.filter(
+      (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
+    );
+    return filters.repos.length === 0
+      ? visible
+      : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
+  }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
+
+  // 詳細を開いているPR（#1087）。一覧の取得前・マージ済み・リポジトリ絞り込みで対象外に
+  // なった場合はnullになり、詳細は「PRを選ぶと〜」の空状態に戻る。
+  const selectedPullRequest = useMemo(
+    () => filteredPullRequests.find((pullRequest) => pullRequest.id === filters.pr) ?? null,
+    [filteredPullRequests, filters.pr],
+  );
+  const pullRequestDetail = usePullRequestDetail(selectedPullRequest);
+
+  function handlePullRequestMerged(pullRequest: OpenPullRequest) {
+    setMergedPullRequests((prev) => ({
+      ids:
+        prev.fetchedAt === openPullRequests.fetchedAt
+          ? [...prev.ids, pullRequest.id]
+          : [pullRequest.id],
+      fetchedAt: openPullRequests.fetchedAt,
+    }));
+    // マージしたPRの詳細は用済みなので閉じて一覧へ戻す（スマホでは一覧画面へ戻る）。
+    if (filters.pr === pullRequest.id) selectPullRequest(null);
+    openPullRequests.refresh();
+  }
 
   function handleSelectView(view: NavViewId) {
     selectView(view);
@@ -515,17 +567,33 @@ export function IssueDeckShell({
                   />
                 )}
 
-                {mobileScreen.kind === "pull-requests" && (
-                  <MobilePullRequestsScreen
-                    pullRequests={filteredPullRequests}
-                    failedRepositories={openPullRequests.failedRepositories}
-                    fetchedAt={openPullRequests.fetchedAt}
-                    isLoading={openPullRequests.isLoading}
-                    error={openPullRequests.error}
-                    onRefresh={openPullRequests.refresh}
-                    onBack={goBack}
-                  />
-                )}
+                {mobileScreen.kind === "pull-requests" &&
+                  // PRを選んでいる間は同じ画面枠をPR詳細に差し替える。PR一覧はスマホの
+                  // ボトムナビにタブを持たないドリルダウン画面のため、一覧→詳細も
+                  // mscreenを増やさず選択状態（prクエリ）だけで切り替える（#1087）。
+                  (selectedPullRequest ? (
+                    <MobilePullRequestDetailScreen
+                      pullRequest={selectedPullRequest}
+                      detail={pullRequestDetail.detail}
+                      isLoading={pullRequestDetail.isLoading}
+                      error={pullRequestDetail.error}
+                      onRefresh={pullRequestDetail.refresh}
+                      onMerged={() => handlePullRequestMerged(selectedPullRequest)}
+                      onBack={() => selectPullRequest(null)}
+                    />
+                  ) : (
+                    <MobilePullRequestsScreen
+                      pullRequests={filteredPullRequests}
+                      failedRepositories={openPullRequests.failedRepositories}
+                      fetchedAt={openPullRequests.fetchedAt}
+                      isLoading={openPullRequests.isLoading}
+                      error={openPullRequests.error}
+                      onRefresh={openPullRequests.refresh}
+                      onBack={goBack}
+                      onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
+                      onMerged={handlePullRequestMerged}
+                    />
+                  ))}
 
                 {mobileScreen.kind === "issues" && (
                   <MobileIssuesScreen
@@ -642,16 +710,38 @@ export function IssueDeckShell({
         )}
 
         {filters.pane === "pull-requests" ? (
-          /* PC: マージ待ちPR一覧。Issue一覧・詳細の代わりに中央〜右カラム全体を使う（#1058） */
-          <PullRequestList
-            pullRequests={filteredPullRequests}
-            failedRepositories={openPullRequests.failedRepositories}
-            fetchedAt={openPullRequests.fetchedAt}
-            isLoading={openPullRequests.isLoading}
-            error={openPullRequests.error}
-            onRefresh={openPullRequests.refresh}
-            className="hidden flex-1 md:flex"
-          />
+          /* PC: マージ待ちPR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
+             揃えている（#1058・#1087） */
+          <>
+            <PullRequestList
+              pullRequests={filteredPullRequests}
+              failedRepositories={openPullRequests.failedRepositories}
+              fetchedAt={openPullRequests.fetchedAt}
+              isLoading={openPullRequests.isLoading}
+              error={openPullRequests.error}
+              onRefresh={openPullRequests.refresh}
+              selectedPullRequestId={filters.pr}
+              onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
+              onMerged={handlePullRequestMerged}
+              className="hidden shrink-0 border-r md:flex"
+              style={{ width: pullRequestListWidth.width, maxWidth: "50vw" }}
+            />
+            <ResizeHandle
+              onDragStart={pullRequestListWidth.handleDragStart}
+              className="hidden md:block"
+            />
+            <PullRequestDetail
+              pullRequest={selectedPullRequest}
+              detail={pullRequestDetail.detail}
+              isLoading={pullRequestDetail.isLoading}
+              error={pullRequestDetail.error}
+              onRefresh={pullRequestDetail.refresh}
+              onMerged={() =>
+                selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
+              }
+              className="hidden flex-1 md:flex"
+            />
+          </>
         ) : (
           <>
             {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
