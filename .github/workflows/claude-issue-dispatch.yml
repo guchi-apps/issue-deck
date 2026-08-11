@@ -1,4 +1,8 @@
 name: Claude Issue Dispatch
+# 対象issue番号をActionsの実行一覧で見分けられるようにする(#1113)。計画/実装フォールバック
+# 検証ステップの自動リトライ通知が「自動的に再実行します」の実行ログURLとして新しく起動した
+# runを特定する際、この表示名(displayTitle)をgh run listでの絞り込みに使う。
+run-name: "Issue #${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}"
 
 # Issueへの@claudeコメントを起点にした無人実行の、issue-deck自身のトリガー定義(#945)。
 # ジョブ本体はreusable-issue-dispatch.ymlへ切り出し、他リポジトリからも同じ実体を
