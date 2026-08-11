@@ -67,8 +67,8 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 
 | 方式 | 対象ワークフロー | やること |
 |---|---|---|
-| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
-| コピー方式（未移行） | `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`・`shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
+| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
+| コピー方式（未移行） | `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`・`shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
 
 参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
 
@@ -80,12 +80,19 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う | `risk-check`ジョブの機械判定パターン（`prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`等）を、対象リポジトリのディレクトリ構成・自動マージ不可カテゴリに合わせて調整する。あわせて、`claude-review`の実行要否を決める差分規模の閾値（`REVIEW_FILE_THRESHOLD`・`REVIEW_LINE_THRESHOLD`）と、除外するlockファイル名を、対象リポジトリのPRの粒度・パッケージマネージャに合わせて調整する（#992） |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる | 検証ステップ（lint/test/build相当のコマンド）を対象リポジトリのコマンドに置き換える |
-| `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる | CIワークフロー名（`workflows: ["CI"]`）・検証ステップ（lint/test/build相当のコマンド）を対象リポジトリの構成に置き換える |
+| `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-ci-fix.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`・`package-manager`・`node-version`で、ビルド検証に要るダミー環境変数は`build-env`で、修正後の検証手順の説明は`verify-commands`で指定する。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
+| `reusable-claude-ci-fix.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect`／`fix`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） | バージョン管理方式（`package.json`の`version`比較か、別言語のバージョンファイルか）に応じた改変が必要 |
 | `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
+
+> **`build-env`に実シークレットを渡さないこと**（`reusable-claude-ci-fix.yml`、#1066）。
+> この入力はCI上でビルド検証を通すためだけのプレースホルダー値を想定しており、値は
+> caller側のワークフローファイル（＝リポジトリにコミットされる平文）に書かれる。
+> 実シークレットは`secrets: inherit`で別途渡るため、`build-env`に置く理由は無い。
+> 値は1行で書く（改行を含む値は扱えず、`KEY=VALUE`形式でない行があればジョブが失敗する）。
 
 ### 再利用可能ワークフローの参照
 
@@ -383,7 +390,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
-> **適用範囲**: 本節は**コピー方式のワークフロー**（`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml`）が対象。参照方式の2つ（`claude-issue-dispatch.yml`・`issue-labels.yml`）は「0. 最初に決める5つの設定値」の`with:`で吸収済みのため、ワークフローを編集する必要はない。
+> **適用範囲**: 本節は**コピー方式のワークフロー**（`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）が対象。参照方式の3つ（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`）は`with:`で吸収済みのため、ワークフローを編集する必要はない。
 
 
 ワークフローファイルをそのままコピーしても動かない、個別カスタマイズが必要な観点。

@@ -89,6 +89,20 @@ develop向けPR（`issue-<番号>`ブランチ）の`.github/workflows/ci.yml`�
 コンフリクトの自動解消（#315）」と同じ設計思想で、`.github/workflows/claude-conflict-resolve.yml`と
 対になるワークフローとして実装している。
 
+このワークフローは**トリガー定義のみ**を持ち、ジョブ本体（`detect`／`fix`）は
+`.github/workflows/reusable-claude-ci-fix.yml`（`on: workflow_call`）へ切り出してある（#1066）。
+他リポジトリへ展開する際は、ワークフローをコピーせず**issue-deck側のこの実体をタグ固定で参照する
+薄いcallerを置く**（[docs/cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能
+ワークフローの参照」を参照）。issue-deck自身はローカルパス参照で常に最新の内容で動くため、
+変更が最初に自分へ跳ね返るカナリアとして機能する。
+
+リポジトリ差は`with:`の入力で吸収する。`runtime-setup`・`package-manager`・`node-version`が
+ランタイム準備を、`build-env`がビルド検証用のダミー環境変数を、`verify-commands`が修正後の
+検証手順の説明を、`prompts-ref`がプロンプト（`.github/prompts/ci-fix.md`）の取得元を決める。
+Claude Codeへ渡すプロンプト本文は`.github/prompts/ci-fix.md`にあり、ワークフロー側で
+`envsubst`により動的な値を埋めてから`$GITHUB_ENV`経由で渡す（`${{ }}`を含む文字列ブロックに
+かかる21,000バイト上限を構造的に回避するため。#901で無人実行が半日停止した経路）。
+
 develop→mainのリリースPR（head=`develop`）のCI失敗は対象外（#812で別途検討）。リリースPRのheadは
 `develop`自体であり、`develop`への直接pushが禁止のためこのワークフローと同じ「対象ブランチへ
 直接push」方式を適用できないこと、対応する単一のIssueが存在せずリトライ管理・報告先の前提が
