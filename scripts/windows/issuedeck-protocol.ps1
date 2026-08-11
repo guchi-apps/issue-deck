@@ -54,9 +54,26 @@ if ([string]::IsNullOrWhiteSpace($distro)) {
     $distro = "Ubuntu"
 }
 
-# 受け口は常にissue-deck側の start-local-session.sh に固定する。
+# 受け口は、プロトコル登録時にWSL側の固定の場所へ複製したものを使う（#1076）。
+# リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間は
+# ファイルが存在せず起動できない（実際に踏んだ）。
 # 対象リポジトリ→ローカルのチェックアウト先の解決は、そちらの対応表が持つ。
-$bashCmd = "~/apps/issue-deck/scripts/start-local-session.sh $owner $repo $number"
+$launcher = "~/.local/share/issue-deck/start-local-session.sh"
+
+# 見つからない場合、bash側は終了コード127を返すだけで原因が読めない。受け口側のエラー表示
+# （pause_on_error）もスクリプトが起動する前なので働かない。ここで先に確かめる。
+$launcherReady = $false
+try {
+    & wsl.exe -d $distro -- bash -lc "test -x $launcher" 2>$null | Out-Null
+    $launcherReady = ($LASTEXITCODE -eq 0)
+} catch {
+    $launcherReady = $false
+}
+if (-not $launcherReady) {
+    Fail "受け口スクリプトが見つかりません（WSL: $launcher）。register-issuedeck-protocol.ps1 を実行し直してください。"
+}
+
+$bashCmd = "$launcher $owner $repo $number"
 
 # 上の検証を通った値しか埋め込んでいないため、引用符・区切り文字が壊れる余地はない。
 $wtArgs = "-w 0 new-tab --title issue-$number -- wsl.exe -d $distro -- bash -lc `"$bashCmd`""

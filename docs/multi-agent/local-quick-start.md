@@ -25,7 +25,7 @@ issue-deckの画面「ローカルで開始」
   ↓ issuedeck://start/<owner>/<repo>/<Issue番号>
 Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-protocol.ps1）
   ↓ wt.exe → wsl.exe → bash -lc
-scripts/start-local-session.sh <owner> <repo> <番号>   ← リポジトリ→ローカルパスの解決
+~/.local/share/issue-deck/start-local-session.sh <owner> <repo> <番号>   ← リポジトリ→ローカルパスの解決
   ↓
 <対象リポジトリ>/scripts/start-issue.sh <番号>          ← worktree・devサーバー・claude起動
 ```
@@ -49,14 +49,31 @@ cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\register-issuedeck-protocol.ps1
 ```
 
-登録スクリプトは、ハンドラ本体を`%LOCALAPPDATA%\issue-deck\`へ複製したうえでレジストリを書く。
-WSL上のパス（`\\wsl.localhost\...`）を直接登録しないのは、WSLが停止した状態からの初回起動で
-パス解決に失敗しうるため。**`scripts/windows/issuedeck-protocol.ps1`を変更したときは、
-登録スクリプトを再実行して複製を更新する。**
+登録スクリプトは2つの複製を作る。
 
-解除は`-Unregister`を付けて実行する。
+| 複製するもの | 複製先 | 理由 |
+| --- | --- | --- |
+| `scripts/windows/issuedeck-protocol.ps1` | `%LOCALAPPDATA%\issue-deck\` | WSL上のパス（`\\wsl.localhost\...`）を直接登録すると、WSLが停止した状態からの初回起動でパス解決に失敗しうる |
+| `scripts/start-local-session.sh` | WSLの`~/.local/share/issue-deck/` | リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間はファイルが存在せず起動できない（#1076） |
 
-動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/1`を入力する。
+**どちらかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+
+受け口の複製元は`$PSScriptRoot`から辿る。`\\wsl.localhost\<ディストロ>\...`と`\\wsl$\<ディストロ>\...`は
+そのまま読み替え、それ以外（Cドライブ等から実行した場合）は`wslpath -u`に任せる。特定できない
+場合は警告を出すので、表示された`install`コマンドをWSL側で実行する。
+
+解除は`-Unregister`を付けて実行する。両方の複製とレジストリ登録が消える。
+
+動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/99999`を入力する。
+新しいタブが開いて「issue #99999 の取得に失敗しました」で止まれば、レジストリ登録からWSLの
+受け口までが繋がっている。**存在しないIssue番号を使う**のは、`start-issue.sh`がIssueの取得を
+`git worktree add`より前に行うため、そこで止まればブランチもworktreeも作られないから。実在する
+番号を入れると、その場で実装セッションが始まってしまう（#1076で、closedのEpic #1 を案内して
+いたのを改めた）。
+
+受け口の複製が見つからない場合は、ハンドラが起動前に検出してエラーを表示する。bashに任せると
+終了コード127が出るだけで原因が読めず、受け口側の`pause_on_error`もスクリプトが起動する前
+なので働かないため。
 
 ### WSLディストロ名が`Ubuntu`でない場合
 
@@ -71,6 +88,10 @@ WSL上のパス（`\\wsl.localhost\...`）を直接登録しないのは、WSL�
 # ~/.config/issue-deck/local-repos.conf
 guchi-apps/shopping-list  /home/guchi/apps/shopping-list
 ```
+
+最初の空白までをリポジトリ名、残りをパスとして扱うので、**パスに空白を含んでもよい**。
+行末のCRLFと余分な空白も落とす（Windows側のエディタで編集されうるため）。
+ローカルのフォルダ名はリポジトリ名と一致していなくてよい。
 
 ただし**ワンクリック起動が成立するのは`scripts/start-issue.sh`を持つリポジトリだけ**で、
 2026-08-11時点でこれを持つのはissue-deckのみ（[docs/cross-repo-automation.md](../cross-repo-automation.md)）。
@@ -119,6 +140,15 @@ head -c 3 scripts/windows/issuedeck-protocol.ps1 | xxd   # efbbbf ならBOM付�
 Issue詳細の「…」メニューに**「ローカル起動コマンドをコピー」**を用意している。コピーした
 コマンドをWSLのターミナルに貼れば、URL経路とまったく同じ`start-local-session.sh`が動く。
 経路ごとに挙動が分かれないよう、コマンドの生成も`src/lib/local-session.ts`に集約している。
+
+**このコマンドも受け口の複製（`~/.local/share/issue-deck/start-local-session.sh`）を指す。**
+URL経路と同じものを動かすためだが、複製を作るのは登録スクリプトなので、一度も実行していない
+環境では存在しない。その場合はリポジトリから直接置く。
+
+```bash
+install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
+  ~/.local/share/issue-deck/start-local-session.sh
+```
 
 ## `11.local`の自動付与
 

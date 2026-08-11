@@ -60,15 +60,23 @@ FULL_NAME="$OWNER/$REPO"
 
 # リポジトリ→ローカルのチェックアウト先の対応表。
 # 既定はissue-deck自身のみ。他リポジトリを足す場合は設定ファイルに1行ずつ書く
-# （`owner/repo<空白>絶対パス`。`#`始まりはコメント）。
+# （`owner/repo<空白>絶対パス`。`#`始まりはコメント）。パスに空白を含んでもよい
+# （最初の空白までをリポジトリ名、残りをパスとして扱う）。
 CONFIG_FILE="${ISSUE_DECK_LOCAL_REPOS_CONFIG:-$HOME/.config/issue-deck/local-repos.conf}"
 
 resolve_repo_path() {
   local target="$1"
   if [[ -f "$CONFIG_FILE" ]]; then
-    local name path
-    while read -r name path _; do
-      [[ -z "${name:-}" || "$name" == \#* ]] && continue
+    local line name path
+    # `read -r name path _` だとパスが空白で切れるため、1行読んで最初の空白で2分割する。
+    # 併せてCRLFの改行と行末の空白も落とす（Windows側のエディタで編集されうるため）。
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+      [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
+      name="${BASH_REMATCH[1]}"
+      path="${BASH_REMATCH[2]}"
+      path="${path%"${path##*[![:space:]]}"}"
       if [[ "$name" == "$target" ]]; then
         # 設定ファイル側の `~` はシェル展開されないため自前で展開する。
         printf '%s\n' "${path/#\~/$HOME}"

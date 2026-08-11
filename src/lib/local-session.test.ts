@@ -76,7 +76,7 @@ describe("buildLocalSessionUrl", () => {
 describe("buildLocalSessionCommand", () => {
   it("URL経路と同じstart-local-session.shを同じ引数で呼ぶ", () => {
     expect(buildLocalSessionCommand("guchi-apps/issue-deck", 1049)).toBe(
-      "~/apps/issue-deck/scripts/start-local-session.sh guchi-apps issue-deck 1049",
+      "~/.local/share/issue-deck/start-local-session.sh guchi-apps issue-deck 1049",
     );
   });
 
