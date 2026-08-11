@@ -113,8 +113,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: implementation
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
@@ -184,8 +187,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: develop-pr
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
@@ -265,8 +271,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: develop
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
@@ -346,8 +355,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: develop
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
@@ -426,8 +438,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: release
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
@@ -519,8 +534,11 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: done
         run: |
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
             exit 0
           fi
           while read -r n; do
