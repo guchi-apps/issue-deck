@@ -80,6 +80,11 @@ jobs:
       - name: Workflow expression length check
         run: node scripts/check-workflow-expression-length.mjs
 
+  # ワークフロー同期のずれを知らせるだけの通知ジョブ。CIの合否には影響させない。
+  # continue-on-errorをジョブ単位ではなくステップ単位に付けているのは、ジョブ単位だと
+  # ジョブのcheck-run conclusionがfailureのまま残り、refのcheck-runsを集約して
+  # CI状態を出す側（lib/github/release-api.tsのfetchRefCiState、#1059）から失敗に
+  # 見えてしまうため。ステップ単位ならジョブはsuccessで終わる。
   workflow-drift-notice:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -92,6 +97,9 @@ jobs:
 
       - name: Check for workflow file changes
         id: changed
+        # base_refのfetchに失敗してもCIを落とさない。失敗時はchangedが空になり、
+        # 後続の通知ステップはif条件を満たさずスキップされる。
+        continue-on-error: true
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=1
           if ! git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- .github/workflows/; then
@@ -102,6 +110,12 @@ jobs:
 
       - name: Workflow sync drift notice
         if: steps.changed.outputs.changed == 'true'
+        # 情報表示が目的のステップなので、スクリプトの実行時エラーでCIを失敗させない。
+        # 2026-08-08に実行権限漏れ(exit 126 Permission denied)でdevelop→mainの
+        # リリースPRのCIを落とした実績がある(その個別原因は51ac1cfで解消済み)。
+        # scripts/check-workflow-sync-drift.shはset -euo pipefailで動くため、
+        # 同種の実行時エラーは今後も起こりうる。
+        continue-on-error: true
         run: scripts/check-workflow-sync-drift.sh
 
   notify:
