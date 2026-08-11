@@ -2,12 +2,19 @@
 
 import { useEffect, useState } from "react";
 
-export type InstallationRateLimit = {
-  accountLogin: string;
+/** レート制限の枠1つぶん。RESTとGraphQLは別枠のため複数返る（#1040） */
+export type RateLimitResource = {
+  key: string;
+  label: string;
   limit: number;
   remaining: number;
   used: number;
   reset: number;
+};
+
+export type InstallationRateLimit = {
+  accountLogin: string;
+  resources: RateLimitResource[];
 };
 
 export function useGithubRateLimit(enabled: boolean) {
