@@ -1,0 +1,454 @@
+name: Reusable Claude Conflict Resolve
+
+# develop向けPRがdevelopとの間でコンフリクトした際、これまでは人間がIssueに
+# `@claude コンフリクトを解消して`のようにコメントして個別に依頼する必要があった。
+# この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を
+# 試みるワークフロー(docs/multi-agent/auto-repair.md「PRコンフリクトの自動解消」参照、issue #315)。
+#
+# ジョブ構成:
+# - detect-conflicts: developとコンフリクトしている(mergeable=CONFLICTING)PRを
+#   対応Issue番号の配列として検出する。トリガーがpull_request(下記)の場合はそのPR
+#   1件のみ、それ以外(push/schedule/workflow_dispatch)はdevelop向けの全OPEN PRの
+#   うち、ブランチ命名規約issue-<番号>(scripts/start-issue.shが作成)に従うものを
+#   対象にする(#814)
+# - resolve-conflicts: 検出したIssueごとにmatrixで並列実行し、対応ブランチへ
+#   `git merge origin/develop`でdevelopを取り込み、Claude Codeでコンフリクトを
+#   解消してpushする。解消が難しいと判断した場合は無理をせず00.check-userを
+#   付与して人間に判断を委ねる
+#
+# 本ファイルはジョブ本体（on: workflow_call）で、トリガー定義は呼び出し元の
+# claude-conflict-resolve.ymlが持つ（#1066）。リポジトリ差はinputsで吸収する。
+# 詳細は reusable-claude-ci-fix.yml のヘッダーコメントを参照（同じ設計）。
+#
+# トリガー:
+# - push(develop): developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、
+#   その都度検知する(最も速報性が高い経路)
+# - pull_request(develop向け、opened/reopened): develop向けPRが作成された時点で
+#   既にdevelopとコンフリクトしているケース(issue #715)を即座に拾うため。
+#   synchronize(PRへの追加push毎)は含めない。実装エージェントが1つのIssueに対して
+#   何度も細かくpushする間、毎回detect-conflicts→resolve-conflictsのmatrixジョブが
+#   走ると、resolve-conflictsが使う同じissue-dispatch-<番号>-branch concurrency
+#   グループ内で実装ステップ自体と噛み合いキューが詰まる懸念があるため。developが
+#   動いてPRがコンフリクトに変化するケースは既存のpush(develop)トリガーでカバーされる。
+#   このトリガーはトリガー元のPR自身が既にコンフリクトしていないかだけを見ればよく、
+#   develop向けの他PRの状態まで見る必要はない。1回のワークフロー実行内のmatrix全ジョブの
+#   チェックはトリガーしたPRのチェック一覧に紐付いて表示されるため、全件スキャンすると
+#   たまたま同じタイミングでコンフリクトしていた無関係な他PRのチェックまで表示されて
+#   しまう不具合があった(#814)
+# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push・
+#   pull_request直後の検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。
+#   detect-conflictsのポーリング(下記)でも解消しきれなかった取りこぼしを拾い直す
+#   安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
+# - workflow_dispatch: 手動実行用
+#
+# detect-conflictsは、対象PR(群)の中にmergeable=UNKNOWN(判定計算未完了)のものが
+# 残っている間、10秒間隔・最大6回(計1分程度)ポーリングして再取得する。
+# 「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを
+# 防ぐため。
+#
+# resolve-conflictsジョブは、claude-issue-dispatch.ymlのdispatchジョブと同じ
+# concurrencyグループ(issue-dispatch-<Issue番号>-branch)を使う。同じissue-<番号>ブランチへ
+# 人間からの追加依頼(@claudeコメント)による実装ステップと本ワークフローのコンフリクト
+# 解消が同時に走ってpushが競合するのを避けるため。本ジョブは常にissue-<番号>ブランチへ
+# pushするため、claude-issue-dispatch.ymlがmodeから算出するbranch/commentレーン(#652)の
+# うち常にbranchレーンに固定する(commentレーンのplan/split/ask相当の実行とは競合しないため
+# 直列化しなくてよい)。
+
+on:
+  workflow_call:
+    inputs:
+      runtime-setup:
+        description: "ランタイム準備のプリセット: node-db / node / minimal"
+        required: false
+        type: string
+        default: minimal
+      package-manager:
+        description: "パッケージマネージャ: npm / pnpm"
+        required: false
+        type: string
+        default: npm
+      node-version:
+        description: "セットアップするNode.jsのバージョン。未指定なら24"
+        required: false
+        type: string
+        default: ""
+      build-env:
+        description: >-
+          Claude Codeステップに設定するビルド検証用の環境変数（複数行の KEY=VALUE）。
+          値はワークフローログに残りうるCI専用のプレースホルダーに限り、
+          実シークレットは絶対に渡さないこと（実シークレットは secrets: inherit で渡る）。
+          値に改行を含めることはできない。
+        required: false
+        type: string
+        default: ""
+      verify-commands:
+        description: >-
+          コンフリクト解消後の検証手順の説明。プロンプトの「- 解消後、」に続けてそのまま
+          埋め込まれるため、文末まで含む完全な文で渡すこと。ビルドに外部サービスが要らない
+          旨などの補足もここに含める。未指定なら
+          「.github/workflows/ci.yml を読んで同じコマンドを実行する」旨の文面へ
+          フォールバックする。
+        required: false
+        type: string
+        default: ""
+      prompts-ref:
+        description: >-
+          プロンプト(.github/prompts/)の取得元とするissue-deckのref。
+          未指定なら呼び出し元リポジトリの.github/prompts/を使う(issue-deck自身はこちら)。
+          他リポジトリから呼ぶ場合は uses: と同じタグを指定する。
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  detect-conflicts:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      issues: ${{ steps.detect.outputs.issues }}
+    steps:
+      - name: developとコンフリクトしているPRを検出する
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          # pull_requestトリガー(opened/reopened)の場合は、トリガー元のPR1件のみを
+          # 対象にする(ヘッダのコメント参照、#814)。それ以外(push/schedule/
+          # workflow_dispatch)は従来通りdevelop向けの全OPEN PRを対象にする。
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+
+          # mergeableの判定はGitHub側で非同期に計算されるため、対象PR(群)のうち
+          # issue-<番号>命名規約に従うものの中にUNKNOWN(計算未完了)が残っている間は、
+          # それをコンフリクトなしと誤判定しないよう10秒間隔・最大6回(計1分程度)まで
+          # ポーリングして再取得する。
+          for i in 1 2 3 4 5 6; do
+            if [ -n "${PR_NUMBER:-}" ]; then
+              PRS_JSON="$(gh pr view "$PR_NUMBER" --json number,headRefName,mergeable | jq -c '[.]')"
+            else
+              PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"
+            fi
+            UNKNOWN_COUNT="$(echo "$PRS_JSON" | jq '
+              [.[]
+                | select(.headRefName | test("^issue-[0-9]+$"))
+                | select(.mergeable == "UNKNOWN")] | length
+            ')"
+            if [ "$UNKNOWN_COUNT" -eq 0 ]; then
+              break
+            fi
+            echo "mergeable判定が未計算のPRが${UNKNOWN_COUNT}件あるため10秒待って再取得します(試行 $i/6)"
+            sleep 10
+          done
+
+          ISSUES="$(echo "$PRS_JSON" | jq -c '
+            [.[]
+              | select(.mergeable == "CONFLICTING")
+              | select(.headRefName | test("^issue-[0-9]+$"))
+              | (.headRefName | capture("^issue-(?<n>[0-9]+)$").n | tonumber)]
+          ')"
+          echo "issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          echo "検出結果: $ISSUES"
+
+  resolve-conflicts:
+    needs: detect-conflicts
+    if: needs.detect-conflicts.outputs.issues != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJson(needs.detect-conflicts.outputs.issues) }}
+    runs-on: ubuntu-latest
+    # claude-issue-dispatch.ymlのdispatchジョブのbranchレーンと同じグループ名で直列化する
+    # (上記コメント参照)。
+    concurrency:
+      group: issue-dispatch-${{ matrix.issue }}-branch
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # 後続のgit push、および.github/workflows/配下がコンフリクトしていた場合に備え、
+          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106と同様)。
+          # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
+          # 次のステップで別途固定する(#662)。
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
+        # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための
+        # 取得経路（reusable-issue-dispatch.ymlと同じ仕組み、#960）。
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 共有ファイルの参照先を決める
+        # 呼び出し元リポジトリに存在しうる/しないファイルの場所を1箇所で決める（#960・#964）。
+        env:
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROMPTS_REF" ]; then
+            ROOT=.shared-prompts
+          else
+            ROOT=.
+          fi
+
+          DIR="$ROOT/.github/prompts"
+          if [ ! -d "$DIR" ]; then
+            echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
+            exit 1
+          fi
+          echo "プロンプトの参照先: $DIR"
+          echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
+          # 使用量出力スクリプト(#903)。プロンプトと違い必須ではないため、無くても落とさない。
+          USAGE="$ROOT/.github/scripts/summarize-claude-usage.sh"
+          if [ -x "$USAGE" ]; then
+            echo "使用量出力スクリプト: $USAGE"
+          else
+            echo "使用量出力スクリプト $USAGE が無いため、使用量のJob Summary出力はスキップします"
+            USAGE=""
+          fi
+          echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
+
+      - name: pushの認証をWORKFLOW_PATに固定する
+        # claude-code-actionは実行時にactions/checkoutが残した認証情報(extraheader)を削除し、
+        # remote.origin.urlを自身のトークン付きURLへ差し替える。github_token未指定時のそれは
+        # workflows権限を持たないClaude GitHub Appのインストールトークンのため、
+        # `.github/workflows/`配下を含むpushがremote rejectedになる(#662)。このワークフローが
+        # 解消するコンフリクトは`.github/workflows/`配下で起きることが多く、実際に#622で5回連続
+        # 失敗した。actionが書き換えないpush専用URL(remote.origin.pushurl)にPATを固定して回避する。
+        # 詳細な理由はclaude-issue-dispatch.ymlの同名ステップのコメントを参照。
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+
+      - name: 対象PRの状態を再確認する
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -e
+          BRANCH="issue-$ISSUE_NUMBER"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          # detect-conflicts実行時点からタイムラグがあるため、実際に着手する前に
+          # Issueのクローズ状態・PRのコンフリクト状態を再確認する。
+          ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
+          if [ "$ISSUE_STATE" = "CLOSED" ]; then
+            echo "Issueがクローズ済みのため何もしません"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_JSON="$(gh pr list --head "$BRANCH" --base develop --state open --json number,mergeable,url --jq '.[0]')"
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "対象のdevelop向けPRが見つからないため何もしません"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MERGEABLE="$(echo "$PR_JSON" | jq -r '.mergeable')"
+          if [ "$MERGEABLE" != "CONFLICTING" ]; then
+            echo "既にコンフリクトが解消されているため何もしません（mergeable=$MERGEABLE）"
+            echo "should_resolve=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_resolve=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$(echo "$PR_JSON" | jq -r '.number')" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$(echo "$PR_JSON" | jq -r '.url')" >> "$GITHUB_OUTPUT"
+
+      - name: 作業ブランチをcheckoutする
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          set -e
+          git fetch origin "${{ steps.state.outputs.branch }}" develop
+          git checkout "${{ steps.state.outputs.branch }}"
+
+      - name: 対応開始をコメントで通知する
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          BODY="🔀 developとの間にコンフリクトを検知したため、\`${{ steps.state.outputs.branch }}\` ブランチで自動解消を試みます。"
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-conflict-resolve -->'
+          gh issue comment ${{ matrix.issue }} --body "$BODY"
+
+      - name: 解消前のコメント数を記録する
+        id: before
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT="$(gh issue view ${{ matrix.issue }} --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        if: steps.state.outputs.should_resolve == 'true' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: steps.state.outputs.should_resolve == 'true' && inputs.runtime-setup != 'minimal'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version || '24' }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: 依存関係をインストールする
+        if: steps.state.outputs.should_resolve == 'true' && inputs.runtime-setup != 'minimal'
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: ビルド検証用の環境変数を設定する
+        # Claude Codeエージェントが解消結果をビルドで検証できるようにするためのCI専用
+        # プレースホルダー。実シークレットは渡さない前提（inputs.build-envのdescription参照）。
+        if: steps.state.outputs.should_resolve == 'true' && inputs.build-env != ''
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in \#*) continue ;; esac
+            if ! printf '%s' "$line" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*='; then
+              echo "::error::build-env の行が KEY=VALUE 形式ではありません: $line"
+              exit 1
+            fi
+            # 環境変数名だけをログに出す（値はプレースホルダーの想定だが、念のため出力しない）
+            echo "設定: ${line%%=*}"
+            echo "$line" >> "$GITHUB_ENV"
+          done <<< "$BUILD_ENV"
+
+      - name: コンフリクト解消プロンプトを組み立てる
+        # プロンプト本文は.github/prompts/conflict-resolve.mdに置き、ここで動的な値を埋めたうえで
+        # 環境変数に格納する（reusable-issue-dispatch.ymlと同じ仕組み、#907）。
+        # `${{ }}`を含む文字列ブロックにかかる21,000バイト上限を構造的に回避する（#901の経路）。
+        if: steps.state.outputs.should_resolve == 'true'
+        env:
+          ISSUE_NUMBER: ${{ matrix.issue }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERIFY_COMMANDS_INPUT: ${{ inputs.verify-commands }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERIFY_COMMANDS_INPUT" ]; then
+            VERIFY_COMMANDS="$VERIFY_COMMANDS_INPUT"
+          else
+            VERIFY_COMMANDS='`.github/workflows/ci.yml` を読み、CIが実行している検証コマンドと同じものを実行して、問題がないことを確認する'
+          fi
+          export VERIFY_COMMANDS
+
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/conflict-resolve.md"
+          # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
+          # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+          {
+            echo 'PROMPT_CONFLICT<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_NUMBER} ${PR_URL} ${REPOSITORY} ${RUN_URL} ${VERIFY_COMMANDS}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Claude Code（コンフリクト解消）
+        id: claude_conflict
+        if: steps.state.outputs.should_resolve == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          # `.github/workflows/`配下を含むgit pushの認証は、前段の「pushの認証をWORKFLOW_PATに
+          # 固定する」ステップが設定するremote.origin.pushurlで別途完結しており、このステップの
+          # GH_TOKENには依存しない。
+          # ビルド検証用の環境変数は前段の「ビルド検証用の環境変数を設定する」ステップが
+          # $GITHUB_ENV経由で設定済み。
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 本運用ではPRをclaude[bot]（Claude CodeのGitHub App）が作成するため、
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#814）。
+          allowed_bots: "claude[bot]"
+          show_full_output: true
+          claude_args: >-
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(grep:*),Bash(find:*)"
+          prompt: ${{ env.PROMPT_CONFLICT }}
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（コンフリクト解消））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_conflict.outputs.execution_file != ''
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（コンフリクト解消）" "${{ steps.claude_conflict.outputs.execution_file }}"
+
+      - name: 02.wip ラベルを除去する
+        # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
+        # (このジョブが上記ステップで行うpushを含む)をトリガーに無条件で02.wipを
+        # 付与するため、03.d:marge/00.check-user状態のissueに02.wipが混在して
+        # 残らないよう明示的に除去する。LLMの実行有無に依存させないため独立した
+        # シェルステップとする(--remove-labelは未付与でも無害なため常に実行してよい)。
+        if: always() && steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ matrix.issue }} --remove-label "02.wip"
+
+      - name: 解消結果を検証し、報告が確認できない場合はフォールバック通知する
+        # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
+        # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
+        # そのため後続のステップとして独立に結果を確認する(claude-issue-dispatch.ymlの
+        # 同種の検証ステップと同じ考え方)。
+        if: always() && steps.state.outputs.should_resolve == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ISSUE_NUMBER="${{ matrix.issue }}"
+          AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
+          BEFORE_COUNT="${{ steps.before.outputs.comment_count }}"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため、完了または停止の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
+          FALLBACK_BODY="⚠️ developとのコンフリクト自動解消ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や解消の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-conflict-resolve -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
+          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

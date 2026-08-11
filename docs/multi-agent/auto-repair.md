@@ -10,6 +10,15 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 個別にコンフリクト解消を依頼する必要があった。`.github/workflows/claude-conflict-resolve.yml`が
 この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を試みる。
 
+このワークフローも`claude-ci-fix.yml`と同様に**トリガー定義のみ**を持ち、ジョブ本体は
+`.github/workflows/reusable-claude-conflict-resolve.yml`（`on: workflow_call`）へ切り出してある
+（#1066）。入力の意味・プロンプトの置き場所（`.github/prompts/conflict-resolve.md`）・
+カナリア構成の考え方は後述「CI失敗の自動解消（#807）」と共通なので、そちらを参照。
+
+`resolve-conflicts`ジョブは`strategy.matrix`で検出したIssueごとに並列実行するが、matrixは
+再利用ワークフロー側に閉じている（呼び出し元でmatrixを組む形にはしていない）。呼び出し元は
+`uses:`ひとつだけを持つ。
+
 ### ジョブ構成
 
 - **detect-conflicts**: developとコンフリクトしている（`mergeable`が`CONFLICTING`）PRを対応
