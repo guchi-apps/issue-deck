@@ -101,6 +101,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 定型文やマーカーコメントを変更するときは、ワークフロー側のトリガー条件と対になっているため
 両方を確認する。
 
+**GitHub ProjectsでStatusを`Ready`から動かしても同じ`@claude`コメントが投稿される**（#991 Phase 3）。
+起動するかどうかの判定は[`lib/github/project-status-dispatch.ts`](../src/lib/github/project-status-dispatch.ts)
+に集約されており、ボタンとカンバンのドラッグが同じ関数を通る。ただし**コメントの投稿者は経路で
+異なる**（ボタン＝操作した人間、ドラッグ＝issue-deckのApp）。ワークフローが投稿者のwrite権限を
+検証するため、ドラッグ経路では`<!-- issue-deck:posted-by:<login> -->`で人間を復元させている。
+`21.plan-required`ラベルがワークフローのmodeを決めるので、`Planning`へ動かすときはコメントより
+先にラベルを書く。
+
 ## テスト
 
 ```bash

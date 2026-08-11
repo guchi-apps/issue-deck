@@ -10,6 +10,9 @@ const updateManyIssue = vi.fn();
 const findUniqueInstallation = vi.fn();
 const findFirstInstallation = vi.fn();
 const fetchProjectItem = vi.fn();
+const findUniqueIssue = vi.fn();
+const createComment = vi.fn();
+const updateIssueApi = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -22,6 +25,9 @@ vi.mock("@/lib/db", () => ({
       get updateMany() {
         return updateManyIssue;
       },
+      get findUnique() {
+        return findUniqueIssue;
+      },
     },
     githubInstallation: {
       get findUnique() {
@@ -31,6 +37,15 @@ vi.mock("@/lib/db", () => ({
         return findFirstInstallation;
       },
     },
+  },
+}));
+
+vi.mock("@/lib/github/issues-api", () => ({
+  get createComment() {
+    return createComment;
+  },
+  get updateIssue() {
+    return updateIssueApi;
   },
 }));
 
@@ -219,10 +234,15 @@ describe("POST /api/webhooks/github projects_v2_item", () => {
     findUniqueInstallation.mockReset();
     findFirstInstallation.mockReset();
     fetchProjectItem.mockReset();
+    findUniqueIssue.mockReset().mockResolvedValue({ projectStatus: null, state: "OPEN", labels: [] });
+    createComment.mockReset().mockResolvedValue({ id: 1 });
+    updateIssueApi.mockReset().mockResolvedValue({});
+    process.env.NEXT_PUBLIC_GITHUB_APP_SLUG = "issue-deck";
   });
 
   afterEach(() => {
     delete process.env.GITHUB_WEBHOOK_SECRET;
+    delete process.env.NEXT_PUBLIC_GITHUB_APP_SLUG;
     vi.clearAllMocks();
   });
 
@@ -250,7 +270,7 @@ describe("POST /api/webhooks/github projects_v2_item", () => {
 
     expect(response.status).toBe(200);
     expect(updateManyIssue).toHaveBeenCalledWith({
-      where: { repositoryId: "repo-1", number: 42 },
+      where: { repositoryId: "repo-1", number: 42, projectStatus: null },
       data: { projectStatus: "Implementation", projectItemId: "PVTI_item1" },
     });
   });
@@ -274,6 +294,134 @@ describe("POST /api/webhooks/github projects_v2_item", () => {
       where: { accountLogin: "guchi-apps" },
     });
     expect(updateManyIssue).toHaveBeenCalled();
+  });
+
+  // --- カンバンのドラッグ起点の起動（#991 Phase 3） ---
+
+  /** Ready から動かしたときの共通セットアップ。senderは人間 */
+  function arrangeDrag(to: string, overrides: Record<string, unknown> = {}) {
+    findUniqueInstallation.mockResolvedValue({ id: "inst-1", installationId: 100 });
+    fetchProjectItem.mockResolvedValue({
+      itemId: "PVTI_item1",
+      repositoryDatabaseId: 555,
+      issueNumber: 42,
+      status: to,
+    });
+    findUniqueRepository.mockResolvedValue({ id: "repo-1", ownerLogin: "guchi-apps", name: "issue-deck" });
+    findUniqueIssue.mockResolvedValue({ projectStatus: "Ready", state: "OPEN", labels: [] });
+    return makeItemPayload("edited", { sender: { login: "m-guchi" }, ...overrides });
+  }
+
+  it("Ready→Implementation を人が動かすと実装開始のコメントを投稿する", async () => {
+    const response = await POST(makeRequest(arrangeDrag("Implementation"), "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(createComment).toHaveBeenCalledTimes(1);
+    const [owner, repo, number, , options] = createComment.mock.calls[0];
+    expect([owner, repo, number]).toEqual(["guchi-apps", "issue-deck", 42]);
+    expect(options.body).toContain("@claude 実装を開始してください");
+    // ワークフローが実行者の権限を確認できるよう、操作した人間を末尾のマーカーで伝える
+    expect(options.body.endsWith("<!-- issue-deck:posted-by:m-guchi -->")).toBe(true);
+  });
+
+  it("Ready→Planning なら計画立案のコメントを投稿する", async () => {
+    await POST(makeRequest(arrangeDrag("Planning"), "projects_v2_item"));
+
+    expect(createComment.mock.calls[0][4].body).toContain("@claude 計画を立案してください");
+  });
+
+  it("Planningへの移動では、コメントより先に21.plan-requiredを付ける", async () => {
+    // ワークフローのmodeはコメント本文ではなくこのラベルで決まるため、順序が逆だと実装が始まる
+    await POST(makeRequest(arrangeDrag("Planning"), "projects_v2_item"));
+
+    expect(updateIssueApi).toHaveBeenCalledWith("guchi-apps", "issue-deck", 42, undefined, {
+      labels: ["21.plan-required"],
+    });
+    expect(updateIssueApi.mock.invocationCallOrder[0]).toBeLessThan(
+      createComment.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("21.plan-requiredが既に付いていればラベルは触らない", async () => {
+    const payload = arrangeDrag("Planning");
+    findUniqueIssue.mockResolvedValue({
+      projectStatus: "Ready",
+      state: "OPEN",
+      labels: [{ name: "21.plan-required" }],
+    });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(updateIssueApi).not.toHaveBeenCalled();
+    expect(createComment).toHaveBeenCalled();
+  });
+
+  it("Implementationへの移動では21.plan-requiredを付けない", async () => {
+    await POST(makeRequest(arrangeDrag("Implementation"), "projects_v2_item"));
+
+    expect(updateIssueApi).not.toHaveBeenCalled();
+  });
+
+  it("11.local が付いていれば起動しない（ローカルセッションで対応中）", async () => {
+    const payload = arrangeDrag("Implementation");
+    findUniqueIssue.mockResolvedValue({
+      projectStatus: "Ready",
+      state: "OPEN",
+      labels: [{ name: "11.local" }],
+    });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("issue-deck自身のGitHub Appによる変更では起動しない（報告APIの自己ループ防止）", async () => {
+    const payload = arrangeDrag("Implementation", { sender: { login: "issue-deck[bot]" } });
+
+    const response = await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(createComment).not.toHaveBeenCalled();
+    // Statusの取り込み自体は行う
+    expect(updateManyIssue).toHaveBeenCalled();
+  });
+
+  it("Ready以外からの遷移では起動しない", async () => {
+    const payload = arrangeDrag("Implementation");
+    findUniqueIssue.mockResolvedValue({ projectStatus: "Develop", state: "OPEN", labels: [] });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("closedなIssueでは起動しない", async () => {
+    const payload = arrangeDrag("Implementation");
+    findUniqueIssue.mockResolvedValue({ projectStatus: "Ready", state: "CLOSED", labels: [] });
+
+    await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("Webhookが再配信されても二重投稿しない（比較更新が0件なら以降を行わない）", async () => {
+    const payload = arrangeDrag("Implementation");
+    // 先行する配信が既にStatusを進めており、遷移前Statusでの更新が1件も当たらない状態
+    updateManyIssue.mockResolvedValue({ count: 0 });
+
+    const response = await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(response.status).toBe(200);
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("コメント投稿に失敗してもWebhookは成功で返す（Statusの取り込みは済んでいるため）", async () => {
+    const payload = arrangeDrag("Implementation");
+    createComment.mockRejectedValue(new Error("boom"));
+
+    const response = await POST(makeRequest(payload, "projects_v2_item"));
+
+    expect(response.status).toBe(200);
   });
 
   it("Projectから外れたらStatusを消してラベル起点の判定へ戻す", async () => {

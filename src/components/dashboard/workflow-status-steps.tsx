@@ -1,8 +1,10 @@
 import { Check, CircleAlert, MessageCircleQuestion } from "lucide-react";
 
 import { isApprovalPending } from "@/lib/github/approval-labels";
+import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
 import { cn } from "@/lib/utils";
 import type { IssueLabel } from "@/types/issue";
 
@@ -16,8 +18,11 @@ type ProgressProps = {
 type WorkflowStatusStepsProps = ProgressProps;
 
 type WorkflowStepBadgeProps = ProgressProps & {
-  /** GitHub Actions実行状況（一覧のポーリング結果）。省略時は実行中表示を行わない */
-  running?: { isRunning: boolean; currentStep: string | null };
+  /**
+   * GitHub Actions実行状況（一覧のポーリング結果）。省略時は実行中表示を行わない。
+   * `runId`がnull（実行が1つも紐づいていない）ことを起動待ちの判定に使う（#991 Phase 3）
+   */
+  running?: { isRunning: boolean; currentStep: string | null; runId?: number | null };
   /**
    * 「Claudeに質問する」ダイアログ経由の質問コメントが投稿済みで、まだ回答コメントが
    * 投稿されていない状態かどうか（@/lib/github/ask-claudeのisQaAnswerPending相当）
@@ -51,8 +56,16 @@ export function WorkflowStepBadge({
   const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
   const progressDeg = progress * 360;
   const isRunning = running?.isRunning ?? false;
+  // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
+  // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
+  // ポーリング結果が未取得（running未定義）のうちは判定しない
+  const awaitingDispatch =
+    running !== undefined &&
+    !isRunning &&
+    running.runId === null &&
+    isDispatchedStatusKey(resolveProgressStatus({ labels, projectStatus }));
   const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
-  const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : ""}`;
+  const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : awaitingDispatch ? "（起動待ち）" : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"
     : showQaAnswerPending
@@ -62,7 +75,13 @@ export function WorkflowStepBadge({
   return (
     <span
       title={`${step.labelName} ${step.label}${
-        approvalPending ? "（ユーザーの確認待ち）" : showQaAnswerPending ? "（Claudeの回答待ち）" : ""
+        approvalPending
+          ? "（ユーザーの確認待ち）"
+          : showQaAnswerPending
+            ? "（Claudeの回答待ち）"
+            : awaitingDispatch
+              ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
+              : ""
       }`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
     >

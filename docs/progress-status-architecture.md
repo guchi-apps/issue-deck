@@ -144,7 +144,7 @@ curlで叩き、疎通失敗時は警告を出してフォールバックする�
 |---|---|---|
 | 1 | 読み取りをStatus優先に。`resolveProgressStatus`へ集約 | ✅ 完了（v2.12.0・PR #1003） |
 | 2 | 進捗報告APIを作り、issue-deckがProjectを更新する（ラベルと併走） | ✅ 実装済み（#1007） |
-| 3 | 起動をStatus一本化。ボタンもドラッグも「Statusを変える」だけにする | |
+| 3 | 起動をStatus起点にする。カンバンのドラッグで実行が始まる | ✅ 実装済み（#1008） |
 | 4 | `shopping-list`・`dayspan`へ展開 | |
 | 5 | 進捗ラベルを廃止 | |
 | 6 | privateアプリを統合（**この時点でTeamへ上げる**） | |
@@ -238,21 +238,65 @@ HTTP 404、直後の一瞬は503になりうる**。
 いずれも警告に留まりジョブは成功するため実害は無く、**リリース後の最初の遷移から自然に効き始める**。
 リリース前に進んだぶんのズレは再同期ボタンで回収できる。
 
-### Phase 3 の設計（合意済み）
+### Phase 3（実装済み）
 
-**起動経路をStatus一本化する。** 「実装を開始」ボタンはStatusとオプションラベルだけを書き、
-`@claude`コメントの投稿はWebhookハンドラへ一本化する。ボタンとドラッグが同じ経路を通るため、
-二重起動が原理的に起きない。
+**カンバンでStatusを動かすと実行が始まる。** 起動経路は2つあるが、**起動するかどうかの判定は
+[`project-status-dispatch.ts`](../src/lib/github/project-status-dispatch.ts)の1箇所に集約**した。
 
-- 起動対象は**Readyからの遷移のみ**（`Ready → Planning`・`Ready → Implementation`）
-- **後戻りには当面なにも割り当てない。** 実行のキャンセルを割り当てるとStatusを書き戻す処理と
+```
+[実装を開始ボタン] → オプションラベル → Status → @claudeコメント（投稿者＝操作した人間）
+                                    ↓ 直後に来るApp由来のWebhookは無視する
+[カンバンのドラッグ] → Webhook（sender＝人間）→ issue-deck → @claudeコメント（投稿者＝App）
+```
+
+- 起動対象は**`Ready`からの遷移のみ**（`Ready → Planning`・`Ready → Implementation`）。
+  途中の段階からの移動を拾うと、**Phase 2の進捗報告そのものが実行の再起動になる**
+- **後戻りには何も割り当てない。** 実行のキャンセルを割り当てるとStatusを書き戻す処理と
   往復しうるうえ、ドラッグの誤操作で実行が止まる影響が大きい
-- **オプションラベルを先に、Statusを後に書く。** 逆順だとWebhookが先に届き、「計画が必要」を
-  選んだのに実装が始まる
-- **Webhookの再配信による二重投稿は、マーカーコメント（`<!-- issue-deck-source:... -->`）の
-  有無で防ぐ。** 判定は[`comment-source.ts`](../src/lib/github/comment-source.ts)にある
-- **`sender`がissue-deckのGitHub Appなら無視する**
-- ボタンがWebhook到達に依存するため、**「起動待ち」の状態表示が必要**
+- **`from`が`null`（盤面へ載せた直後）も対象外。** 載せる操作自体が実行の開始になってしまう
+- **`sender`がissue-deckのGitHub Appなら起動しない。** これが無いと、Actionsが
+  `implementation`を報告するたびに実装が再起動する
+- **`11.local`が付いていれば起動しない**（ローカルセッションで対応中。#919と同じ方針）
+- closedなIssueでは起動しない
+
+#### コメント投稿者を変えない（設計上の分岐点）
+
+当初は「ボタンもStatusだけ書き、コメント投稿はWebhookへ一本化する」案だったが、
+**`reusable-issue-dispatch.yml`が`@claude`コメントの投稿者のwrite権限を検証している**ため
+成立しない。ボタンがAppトークンでStatusを書くと`sender`がAppになり、自己ループ防止のルールで
+自分の操作を無視してしまう。
+
+そこで**判定だけを共通化し、コメントの投稿者は経路ごとに変えない**形にした。
+
+| 経路 | コメントの投稿者 | ワークフロー側の権限検証 |
+|---|---|---|
+| ボタン | 操作した人間（従来どおり） | `github.actor`＝人間。そのまま通る |
+| ドラッグ | issue-deckのGitHub App | `<!-- issue-deck:posted-by:<sender.login> -->`から人間を復元して検証 |
+
+投稿者マーカーは**必ず本文の末尾**に置く。ワークフローが`grep -oP ... | tail -n1`で読むため、
+本文中に偽のマーカーが混ざっても最後のものが優先される。
+
+#### `Planning`へ動かすときはラベルを先に書く
+
+**ワークフローのmodeはコメント本文ではなく`21.plan-required`ラベルで決まる**
+（`reusable-issue-dispatch.yml`の「実行モードを決める」ステップ）。したがって
+`Ready → Planning`では、コメントより先にこのラベルを付ける。順序が逆だと、計画のつもりで
+動かしたのに実装が始まる。
+
+#### 二重起動はDBの比較更新で防ぐ
+
+Webhookの再配信・同時配信に対しては、**遷移前のStatusを条件に含めた更新**（compare-and-set）で
+防ぐ。実際に状態を進めた1回だけが`count > 0`になり、それ以外は以降の処理へ進まない。
+
+マーカーコメントの有無で防ぐ案もあったが、`Done`まで進んだIssueを`Ready`へ戻して再度動かす場合に
+古いマーカーが残っていて起動できなくなる。**遷移そのものを一度きりの資源として扱うほうが正確。**
+
+#### 「起動待ち」表示
+
+`Planning`・`Implementation`にいるのにGitHub Actionsの実行が1つも紐づいていない状態を
+ステップバッジに「（起動待ち）」と出す（[`workflow-status-steps.tsx`](../src/components/dashboard/workflow-status-steps.tsx)）。
+ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
+判定材料は`/api/issues/workflow-running`が返す`runId`で、専用の状態は持たない。
 
 ### Phase 6：privateリポジトリ統合時にGitHub Teamへ上げる
 

@@ -43,6 +43,8 @@ export const COMMENT_SOURCE_IDS = [
   "claude-conflict-resolve",
   "claude-ci-fix",
   "issue-labels",
+  // カンバンのStatus変更を受けてissue-deckが投稿する起動コメント（#991 Phase 3）
+  "project-status-dispatch",
 ] as const;
 
 export type CommentSourceId = (typeof COMMENT_SOURCE_IDS)[number];
@@ -151,6 +153,9 @@ const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "claude-conflict-resolve": "conflict-resolver",
   "claude-ci-fix": "ci-fixer",
   "issue-labels": "notifier",
+  // 起動コメント自体は「誰かが開始を指示した」ことを伝えるだけで、実装・計画は
+  // このあとワークフローが投稿する別のコメントが担う。案内役として扱う
+  "project-status-dispatch": "guide",
 };
 
 /** resolveCommentSource()の結果からボットの役割を導く。役割を特定できない場合はnull（汎用ボット扱い） */

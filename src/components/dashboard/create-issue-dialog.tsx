@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
+import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   clearIssueDraft,
   readRestorableIssueDraft,
@@ -104,6 +105,7 @@ export function CreateIssueDialog({
     isSubmitting: isCreatingStartComment,
     error: startCommentError,
   } = useIssueCommentMutations();
+  const { setProgressStatus } = useProgressStatusMutation();
 
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   const [title, setTitle] = useState("");
@@ -264,6 +266,15 @@ export function CreateIssueDialog({
       assignee,
     });
     if (!issue) return;
+
+    // カンバンを追従させる（#991 Phase 3）。作成直後のIssueはProject Workflowsの
+    // Auto-addがまだ走っておらず盤面に載っていないことがあり、その場合は何も起きない。
+    // 少し後にワークフローが進捗報告APIへ同じ状態を送るため、そちらで追いつく。
+    await setProgressStatus({
+      repositoryFullName,
+      number: issue.number,
+      status: selectedLabels.includes(PLAN_REQUIRED_LABEL) ? "planning" : "implementation",
+    });
 
     const [owner, repo] = repositoryFullName.split("/");
     const comment = await createComment({
