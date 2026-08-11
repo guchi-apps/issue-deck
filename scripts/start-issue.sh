@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
+# issue-deck-local-session: v1
+#
 # Issueごとに専用ブランチ・git worktreeを作成し、実装エージェント用のClaude Codeセッションを起動する
+#
+# 冒頭の `issue-deck-local-session:` は「ローカル起動プロトコル」の版数を宣言するマーカー（#1073）。
+# ワンクリック起動の受け口（scripts/start-local-session.sh）と画面がこの行を見て、対応可否を
+# 判定する。issue-deck自身もこの契約に従う側なので、他リポジトリと同じように宣言する。
+# 約束の内容は docs/multi-agent/local-quick-start.md を参照。
 #
 # 使い方:
 #   scripts/start-issue.sh <issue番号> [issue番号...]
@@ -17,7 +24,8 @@
 # `/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが起きない。
 #
 # 環境変数:
-#   ISSUE_DECK_SKIP_LAN_SETUP=1  LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定なら既定の4000）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -280,10 +288,13 @@ prepare_issue() {
   fi
 
   # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
-  DEV_PORT=$((4000 + n))
+  # ワンクリック起動からはissue-deck側の受け口がベース値を渡してくる。リポジトリごとの帯を
+  # 一箇所で管理するための約束で（#1073）、渡されない場合は既定の4000を使う。
+  DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
   if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
-    sed -i '/^PORT=/d' "$WORKTREE_DIR/.env.local"
-    printf '\nPORT=%s\n' "$DEV_PORT" >>"$WORKTREE_DIR/.env.local"
+    # `sed`で消して追記する形にすると、再開のたびに先頭改行が積もって空行が増える（実測で
+    # 何度も再開したworktreeだけ空行が4行多かった）。既存行があれば置換する共通スクリプトを使う。
+    bash "$ROOT/scripts/update-env-file.sh" "$WORKTREE_DIR/.env.local" PORT "$DEV_PORT"
   fi
   echo "#$n: 開発サーバーはポート $DEV_PORT を使用します（http://localhost:$DEV_PORT）"
 

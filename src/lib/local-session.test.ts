@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildLocalSessionCommand,
   buildLocalSessionUrl,
+  isSupportedLocalSessionContract,
+  LOCAL_SESSION_CONTRACT_VERSION,
   LOCAL_SESSION_URL_SCHEME,
+  parseLocalSessionContractVersion,
   parseRepositoryFullName,
 } from "@/lib/local-session";
 
@@ -83,5 +86,42 @@ describe("buildLocalSessionCommand", () => {
   it("不正な入力ではnullを返す", () => {
     expect(buildLocalSessionCommand("guchi-apps/issue;deck", 1049)).toBeNull();
     expect(buildLocalSessionCommand("guchi-apps/issue-deck", 0)).toBeNull();
+  });
+});
+
+describe("parseLocalSessionContractVersion", () => {
+  it("冒頭のマーカー行から版数を読む", () => {
+    const script = ["#!/usr/bin/env bash", "# issue-deck-local-session: v1", "set -euo pipefail"].join(
+      "\n",
+    );
+    expect(parseLocalSessionContractVersion(script)).toBe(1);
+  });
+
+  it("マーカーが無ければnullを返す（＝ワンクリック起動に対応していない）", () => {
+    expect(parseLocalSessionContractVersion("#!/usr/bin/env bash\nset -euo pipefail\n")).toBeNull();
+  });
+
+  it("行頭の`#`から始まらない記述はマーカーとして扱わない", () => {
+    // 説明文の中でマーカーに言及しているだけの行を拾わないこと
+    const script = 'echo "issue-deck-local-session: v1 を宣言してください"\n';
+    expect(parseLocalSessionContractVersion(script)).toBeNull();
+  });
+
+  it("`#`とコロンの前後の空白を許容する", () => {
+    expect(parseLocalSessionContractVersion("#   issue-deck-local-session:  v2  \n")).toBe(2);
+  });
+});
+
+describe("isSupportedLocalSessionContract", () => {
+  it("現在の版数を受け入れる", () => {
+    expect(isSupportedLocalSessionContract(LOCAL_SESSION_CONTRACT_VERSION)).toBe(true);
+  });
+
+  it("issue-deck側より新しい版数は受け入れない（受け口を先に更新する必要がある）", () => {
+    expect(isSupportedLocalSessionContract(LOCAL_SESSION_CONTRACT_VERSION + 1)).toBe(false);
+  });
+
+  it("宣言が無い場合は対応していないとみなす", () => {
+    expect(isSupportedLocalSessionContract(null)).toBe(false);
   });
 });
