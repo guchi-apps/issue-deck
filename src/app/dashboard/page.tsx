@@ -68,6 +68,7 @@ export default async function DashboardPage() {
         private: repo.private,
         archived: repo.archived,
         hasClaudeWorkflow: repo.hasClaudeWorkflow,
+        hasLocalStartScript: repo.hasLocalStartScript,
         hidden: hiddenRepositoryIds.has(repo.id),
         favorite: favoriteRepositoryIds.has(repo.id),
       }))}

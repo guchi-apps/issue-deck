@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { Repository } from "@prisma/client";
 
@@ -57,6 +58,14 @@ export async function syncInstallationRepositories(
         installationToken,
       ).catch(() => false);
 
+      // ローカル起動プロトコルへの適合（#1073）。Actions側の対応（hasClaudeWorkflow）とは
+      // 別の軸なので、それぞれ問い合わせる。失敗時は未対応扱いにして同期自体は止めない。
+      const hasLocalStartScript = await fetchLocalStartScriptSupported(
+        repo.owner.login,
+        repo.name,
+        installationToken,
+      ).catch(() => false);
+
       return db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
@@ -70,6 +79,7 @@ export async function syncInstallationRepositories(
           archived: repo.archived,
           defaultBranch: repo.default_branch,
           hasClaudeWorkflow,
+          hasLocalStartScript,
           lastSyncedAt: new Date(),
         },
         update: {
@@ -81,6 +91,7 @@ export async function syncInstallationRepositories(
           archived: repo.archived,
           defaultBranch: repo.default_branch,
           hasClaudeWorkflow,
+          hasLocalStartScript,
           lastSyncedAt: new Date(),
         },
       });

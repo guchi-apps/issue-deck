@@ -5,7 +5,7 @@ import { Loader2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
-import { buildLocalSessionUrl } from "@/lib/local-session";
+import { buildLocalSessionUrl, canStartLocalSession } from "@/lib/local-session";
 import { hasSeenLocalSessionSetup, markLocalSessionSetupSeen } from "@/lib/local-session-setup";
 import type { Issue } from "@/types/issue";
 
@@ -14,6 +14,11 @@ type StartLocalSessionButtonProps = {
   onIssueUpdated: (issue: Issue) => void;
   /** 初回起動時にセットアップ手順を見せるためのコールバック（#1088） */
   onFirstLaunch: () => void;
+  /**
+   * 対象リポジトリがローカル起動プロトコルに適合しているか（#1073）。
+   * リポジトリ情報が見つからない場合は`undefined`。そのときは隠さない。
+   */
+  hasLocalStartScript?: boolean;
 };
 
 /**
@@ -25,16 +30,21 @@ type StartLocalSessionButtonProps = {
  *
  * 起動前に`11.local`を付与するのは、無人実行（claude-issue-dispatch.yml）との二重起動を
  * 防ぐため。ラベル付与に失敗しても起動自体は妨げない（起動できないより、ラベルが遅れる方が軽い）。
+ *
+ * ローカル起動プロトコルに適合していないリポジトリでは出さない（#1073）。押しても受け口の
+ * 段階で停止するだけで、押せること自体が誤解を招くため。
  */
 export function StartLocalSessionButton({
   issue,
   onIssueUpdated,
   onFirstLaunch,
+  hasLocalStartScript,
 }: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
 
   const url = buildLocalSessionUrl(issue.repositoryFullName, issue.number);
   if (url === null || issue.state !== "open") return null;
+  if (!canStartLocalSession(hasLocalStartScript)) return null;
   // 関数宣言は巻き上げられるため、上のnarrowingがhandleStart内へ伝わらない。改めて束ね直す。
   const sessionUrl: string = url;
 

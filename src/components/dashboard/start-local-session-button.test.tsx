@@ -82,6 +82,32 @@ describe("StartLocalSessionButton", () => {
     expect(screen.getByRole("button", { name: /ローカルで開始/ })).not.toBeNull();
   });
 
+  it("ローカル起動プロトコルに適合していないリポジトリでは表示しない（#1073）", () => {
+    const { container } = render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={false}
+      />,
+    );
+
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("リポジトリ情報が無い場合は表示する（誤って導線を消さない）", () => {
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /ローカルで開始/ })).not.toBeNull();
+  });
+
   it("closeされたIssueでは表示しない（起動しても実装対象が無いため）", () => {
     const { container } = render(
       <StartLocalSessionButton

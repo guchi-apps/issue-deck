@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLocalSessionCommand,
   buildLocalSessionUrl,
+  canStartLocalSession,
   isSupportedLocalSessionContract,
   LOCAL_SESSION_CONTRACT_VERSION,
   LOCAL_SESSION_REGISTER_COMMAND,
@@ -152,5 +153,20 @@ describe("LOCAL_SESSION_TEST_URL", () => {
 
   it("実体が作られないよう、実在しない番号を使う", () => {
     expect(LOCAL_SESSION_TEST_URL).toBe("issuedeck://start/guchi-apps/issue-deck/99999");
+  });
+});
+
+describe("canStartLocalSession", () => {
+  it("適合しているリポジトリでは導線を出す", () => {
+    expect(canStartLocalSession(true)).toBe(true);
+  });
+
+  it("適合していないリポジトリでは出さない", () => {
+    expect(canStartLocalSession(false)).toBe(false);
+  });
+
+  it("リポジトリ情報が無い場合は隠さない（誤って導線を消さない）", () => {
+    // startImplementationDisabledReason と同じ判断。undefined は「未対応と確定した」ではない。
+    expect(canStartLocalSession(undefined)).toBe(true);
   });
 });

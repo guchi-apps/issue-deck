@@ -83,7 +83,7 @@ import {
 } from "@/lib/github/ask-claude";
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
-import { buildLocalSessionCommand } from "@/lib/local-session";
+import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
@@ -375,10 +375,14 @@ export function IssueDetail({
     );
   }
 
-  const localSessionCommand = buildLocalSessionCommand(issue.repositoryFullName, issue.number);
-  const startDisabledReason = startImplementationDisabledReason(
-    repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
-  );
+  const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
+  const startDisabledReason = startImplementationDisabledReason(currentRepository?.hasClaudeWorkflow);
+  // ローカル起動の導線（ボタン・コマンドのコピー・セットアップ手順）は、対象リポジトリが
+  // ローカル起動プロトコルに適合しているときだけ出す（#1073）。3つとも同じ条件にしないと、
+  // 「ボタンは無いのにセットアップ手順だけ見られる」といった食い違いが出る。
+  const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
+    ? buildLocalSessionCommand(issue.repositoryFullName, issue.number)
+    : null;
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -454,6 +458,7 @@ export function IssueDetail({
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
                 onFirstLaunch={() => setIsLocalSessionSetupOpen(true)}
+                hasLocalStartScript={currentRepository?.hasLocalStartScript}
               />
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">

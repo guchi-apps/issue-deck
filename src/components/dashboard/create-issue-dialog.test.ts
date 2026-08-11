@@ -15,6 +15,7 @@ function makeRepo(overrides: Partial<ConnectedRepository>): ConnectedRepository 
     private: false,
     archived: false,
     hasClaudeWorkflow: false,
+    hasLocalStartScript: true,
     hidden: false,
     favorite: false,
     ...overrides,
