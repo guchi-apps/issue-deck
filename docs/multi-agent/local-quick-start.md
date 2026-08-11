@@ -178,6 +178,40 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 前回のセッションがタブの強制終了などで開発サーバーを残していた場合は、再開時に停止してから
 起動し直す。残ったままだとポートを掴んでいて`pnpm dev`が起動できないため。
 
+## タブは非対話シェルで始まる（nvmが読まれない）
+
+`wt.exe` → `wsl.exe -d <ディストロ> -- bash -lc` で開くタブは**非対話シェル**で、Ubuntuの
+`~/.bashrc` は冒頭で非対話シェルを弾く。
+
+```sh
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+```
+
+nvmの設定は`~/.bashrc`のこれより後ろにあるため読まれない。結果、タブの中では
+**システムのnodeしか見えず、nvm管理下のnodeとpnpmがPATHに乗らない**（#1085で実際に踏み、
+`pnpm: command not found`で終了コード127になった）。
+
+| | 通常のWSLターミナル | タブ（`bash -lc`） |
+| --- | --- | --- |
+| node | v24.18.0（nvm） | v20.20.2（システム） |
+| pnpm | あり | **無し** |
+| claude | あり | あり（`~/.local/bin`。nvmと無関係） |
+
+`claude`は見つかるので`start-issue.sh`冒頭のコマンド存在チェックを通過してしまい、
+worktreeを作ったあとで落ちていた。
+
+`start-local-session.sh`が、`pnpm`が見つからない場合に`nvm.sh`を明示的に読み込む。
+`nvm.sh`は`set -u`下で未定義変数を参照し`set -e`とも相性が悪いため、読み込みの前後で
+`set +eu`／`set -eu`を挟んでいる。あわせて`start-issue.sh`の冒頭で`pnpm`の存在も確認する
+（`gh`・`claude`と同じ位置。worktreeを作ってから落ちると中途半端な状態が残るため）。
+
+この問題は**ワンクリック経路に固有**で、`start-issue.sh`を普通のWSLターミナルから叩く
+従来の経路では対話シェルなので出ない。作ったことで初めて表に出た類のもの。
+
 ## ワンクリック起動ではLANアクセス設定を行わない
 
 `start-issue.sh`を素で叩くと`setup-lan-access.sh`（Windows側のポートフォワーディングと
