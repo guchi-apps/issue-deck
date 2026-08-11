@@ -4,13 +4,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import { labelsAfterApproval, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment, updateIssue, type GithubApiIssue } from "@/lib/github/issues-api";
 import {
   dispatchCommentBody,
   isOwnAppSender,
   LOCAL_LABEL_NAME,
   resolveDispatchMode,
+  type DispatchMode,
 } from "@/lib/github/project-status-dispatch";
 import { fetchProjectItem } from "@/lib/github/projects-api";
 import {
@@ -328,6 +329,26 @@ async function handleProjectsV2ItemEvent(payload: {
 }
 
 /**
+ * 起動コメントを投稿する前に整えるラベル一覧。変更不要ならnull。
+ *
+ * **ラベル操作はissue-deckのGitHub Appトークンで行う。** そのため`issues.unlabeled`イベントの
+ * senderがAppになり、ワークフローの自己ループ防止で無視される（マーカーによる操作者の復元は
+ * `issue_comment`にしか効かない）。つまり**起動の引き金になるのは後続のコメントだけ**であり、
+ * 「計画を承認」ボタンが付ける`<!-- issue-deck:no-trigger -->`マーカー（#566。ボタンは個人の
+ * OAuthトークンでラベルを外すためラベル除去イベント側が正規の引き金になる）は、こちらでは
+ * 付けてはいけない。付けるとどちらの経路でも起動しなくなる。
+ */
+function resolveLabelsBeforeDispatch(mode: DispatchMode, current: string[]): string[] | null {
+  if (mode === "plan") {
+    return current.includes(PLAN_REQUIRED_LABEL) ? null : [...current, PLAN_REQUIRED_LABEL];
+  }
+  if (mode === "approve-plan") {
+    return labelsAfterApproval(current.map((name) => ({ name, color: "", description: null })));
+  }
+  return null;
+}
+
+/**
  * カンバンでStatusを動かした操作を実行の起動につなげる（#991 Phase 3）。
  *
  * 起動するかどうかの判定は`resolveDispatchMode`に集約しており、issue-deckの
@@ -356,18 +377,27 @@ async function maybeDispatchFromProjectStatus(params: {
   // ワークフロー側でもskipされるが、意味の無いコメントをIssueに残さないためここでも止める
   if (params.issueLabels.includes(LOCAL_LABEL_NAME)) return;
 
-  const mode = resolveDispatchMode(params.from, params.to);
+  const mode = resolveDispatchMode({
+    from: params.from,
+    to: params.to,
+    labels: params.issueLabels,
+  });
   if (!mode) return;
 
   try {
     const token = await getInstallationToken(params.installationId);
 
-    // **ワークフローのmodeはコメント本文ではなく`21.plan-required`ラベルで決まる**
-    // （reusable-issue-dispatch.ymlの「実行モードを決める」ステップ）。`Planning`へ動かした
-    // 意図を計画実行として通すには、コメントより先にラベルを付けておく必要がある。
-    if (mode === "plan" && !params.issueLabels.includes(PLAN_REQUIRED_LABEL)) {
+    // **ワークフローのmodeはコメント本文ではなくラベルで決まる**
+    // （reusable-issue-dispatch.ymlの「実行モードを決める」ステップ）。そのため、意図した
+    // 実行を通すにはコメントより先にラベルを整える必要がある。
+    //
+    // - `plan`: `21.plan-required`が無いと実装が始まってしまう
+    // - `approve-plan`: `00.check-user`・`21.plan-required`が残っていると計画がやり直される。
+    //   両方外れた状態が、ワークフローにとっての「承認済み」を意味する
+    const nextLabels = resolveLabelsBeforeDispatch(mode, params.issueLabels);
+    if (nextLabels) {
       await updateIssue(params.repository.ownerLogin, params.repository.name, params.issueNumber, token, {
-        labels: [...params.issueLabels, PLAN_REQUIRED_LABEL],
+        labels: nextLabels,
       });
     }
 

@@ -20,36 +20,79 @@ afterEach(() => {
 
 describe("resolveDispatchMode", () => {
   it("Ready からの遷移だけを起動する", () => {
-    expect(resolveDispatchMode("Ready", "Planning")).toBe("plan");
-    expect(resolveDispatchMode("Ready", "Implementation")).toBe("implement");
+    expect(resolveDispatchMode({ from: "Ready", to: "Planning", labels: [] })).toBe("plan");
+    expect(resolveDispatchMode({ from: "Ready", to: "Implementation", labels: [] })).toBe("implement");
   });
 
   it("Ready 以外からの前進は起動しない（報告APIの書き込みで再起動しないため）", () => {
-    expect(resolveDispatchMode("Planning", "Implementation")).toBeNull();
-    expect(resolveDispatchMode("Implementation", "Develop PR")).toBeNull();
-    expect(resolveDispatchMode("Develop", "Implementation")).toBeNull();
+    expect(resolveDispatchMode({ from: "Implementation", to: "Develop PR", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Develop", to: "Implementation", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Release", to: "Done", labels: [] })).toBeNull();
+  });
+
+  describe("Planning → Implementation（計画の承認）", () => {
+    const APPROVAL_PENDING = ["01.planning", "00.check-user", "21.plan-required"];
+
+    it("承認待ちならapprove-planになる", () => {
+      expect(
+        resolveDispatchMode({ from: "Planning", to: "Implementation", labels: APPROVAL_PENDING }),
+      ).toBe("approve-plan");
+    });
+
+    it("承認待ちでなければ起動しない（計画の実行中に動かしても実装が始まらない）", () => {
+      expect(
+        resolveDispatchMode({ from: "Planning", to: "Implementation", labels: ["01.planning"] }),
+      ).toBeNull();
+    });
+
+    it("00.check-userだけ・21.plan-requiredだけでは起動しない", () => {
+      // 前者は質問への回答待ち等、後者は計画の実行中でありどちらも承認の場面ではない
+      expect(
+        resolveDispatchMode({
+          from: "Planning",
+          to: "Implementation",
+          labels: ["00.check-user"],
+        }),
+      ).toBeNull();
+      expect(
+        resolveDispatchMode({
+          from: "Planning",
+          to: "Implementation",
+          labels: ["21.plan-required"],
+        }),
+      ).toBeNull();
+    });
+
+    it("承認待ちでもImplementation以外へ動かしたら起動しない", () => {
+      expect(
+        resolveDispatchMode({ from: "Planning", to: "Develop PR", labels: APPROVAL_PENDING }),
+      ).toBeNull();
+      expect(
+        resolveDispatchMode({ from: "Planning", to: "Ready", labels: APPROVAL_PENDING }),
+      ).toBeNull();
+    });
   });
 
   it("後戻りには何も割り当てない", () => {
-    expect(resolveDispatchMode("Implementation", "Ready")).toBeNull();
-    expect(resolveDispatchMode("Done", "Ready")).toBeNull();
+    expect(resolveDispatchMode({ from: "Implementation", to: "Ready", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Done", to: "Ready", labels: [] })).toBeNull();
   });
 
   it("Ready から起動対象外のStatusへ動かしても起動しない", () => {
-    expect(resolveDispatchMode("Ready", "Develop PR")).toBeNull();
-    expect(resolveDispatchMode("Ready", "Done")).toBeNull();
-    expect(resolveDispatchMode("Ready", "Ready")).toBeNull();
+    expect(resolveDispatchMode({ from: "Ready", to: "Develop PR", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Ready", to: "Done", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Ready", to: "Ready", labels: [] })).toBeNull();
   });
 
   it("遷移前が不明（null・未知の名前）なら起動しない", () => {
     // Projectへ載せた操作そのものが実行の開始になってしまうため
-    expect(resolveDispatchMode(null, "Implementation")).toBeNull();
-    expect(resolveDispatchMode("Blocked", "Implementation")).toBeNull();
+    expect(resolveDispatchMode({ from: null, to: "Implementation", labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Blocked", to: "Implementation", labels: [] })).toBeNull();
   });
 
   it("遷移後がnull・未知の名前なら起動しない", () => {
-    expect(resolveDispatchMode("Ready", null)).toBeNull();
-    expect(resolveDispatchMode("Ready", "Blocked")).toBeNull();
+    expect(resolveDispatchMode({ from: "Ready", to: null, labels: [] })).toBeNull();
+    expect(resolveDispatchMode({ from: "Ready", to: "Blocked", labels: [] })).toBeNull();
   });
 });
 
@@ -104,6 +147,23 @@ describe("dispatchCommentBody", () => {
     const body = dispatchCommentBody({ mode: "plan", senderLogin: "m-guchi", toStatus: "Planning" });
     expect(body).toContain("@claude 計画を立案してください");
     expect(body).not.toContain("実装を開始");
+  });
+
+  it("承認モードでは計画の承認を伝える", () => {
+    const body = dispatchCommentBody({
+      mode: "approve-plan",
+      senderLogin: "m-guchi",
+      toStatus: "Implementation",
+    });
+    expect(body).toContain("@claude 計画を承認しました。実装を進めてください。");
+  });
+
+  it("no-triggerマーカーは付けない（ラベル除去がAppの操作で引き金にならないため）", () => {
+    // これを付けると、ラベル除去イベント・コメントのどちらでも起動しなくなる
+    for (const mode of ["plan", "implement", "approve-plan"] as const) {
+      const body = dispatchCommentBody({ mode, senderLogin: "m-guchi", toStatus: "Implementation" });
+      expect(body).not.toContain("issue-deck:no-trigger");
+    }
   });
 
   it("投稿者マーカーを必ず末尾に置く（ワークフローがtail -n1で読むため）", () => {
