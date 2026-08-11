@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   FolderTree,
@@ -78,6 +78,26 @@ export function TopBar({
 }: TopBarProps) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
+  // 検索欄はURL（filters.q）に直接バインドすると、1文字入力するたびにrouter.replaceによる
+  // ナビゲーションが走り入力が遅く感じられる（#1024）。入力自体はローカルstateで即時反映し、
+  // URLへの反映（＝一覧の絞り込み）はデバウンスして行う。
+  const [searchInput, setSearchInput] = useState(filters.q);
+  // クイックフィルター適用等、入力以外の経路でfilters.qが変わった場合はローカルstateを
+  // 追随させる（レンダー中に比較・更新することでeffectでの同期に伴うカスケード再レンダーを避ける）。
+  const [syncedFiltersQ, setSyncedFiltersQ] = useState(filters.q);
+  if (filters.q !== syncedFiltersQ) {
+    setSyncedFiltersQ(filters.q);
+    setSearchInput(filters.q);
+  }
+
+  useEffect(() => {
+    if (searchInput === filters.q) return;
+    const timer = setTimeout(() => {
+      setFilter("q", searchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, filters.q, setFilter]);
+
   const stateLabel =
     filters.state === "open"
       ? "状態: Open"
@@ -123,8 +143,8 @@ export function TopBar({
           placeholder="Issueを検索..."
           title='検索式が使えます（例: label:bug -label:wontfix is:open assignee:octocat）。トークン以外の文字列はタイトル・本文の部分一致になります。'
           className="pl-8"
-          value={filters.q}
-          onChange={(e) => setFilter("q", e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
         />
       </div>
 

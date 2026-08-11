@@ -276,6 +276,25 @@ HTTP 404、直後の一瞬は503になりうる**。
 投稿者マーカーは**必ず本文の末尾**に置く。ワークフローが`grep -oP ... | tail -n1`で読むため、
 本文中に偽のマーカーが混ざっても最後のものが優先される。
 
+**権限のチェックは2系統ある。** 投稿者マーカーが効くのはワークフロー自身の検証だけで、
+`claude-code-action`は**コメント本文を見ず`github.actor`だけで**非人間アクターを拒否する
+（`checkHumanActor`）。そのため各`claude-code-action`ステップに`allowed_bots: "issue-deck[bot]"`が要る。
+
+| 検証 | 見るもの | マーカーで復元できるか |
+|---|---|---|
+| `reusable-issue-dispatch.yml`のtriage | `github.actor` ＋ コメント本文 | できる |
+| `claude-code-action`の`checkHumanActor` | `github.actor`のみ | **できない** |
+
+これを落とすと**ドラッグ起点の実行が必ず1回失敗する**。しかも自動リトライ（#497）は
+`workflow_dispatch`起動で`github.actor`が人間になるため通ってしまい、「実装はできているのに
+毎回1回無駄になり、Issueに再実行のノイズが残る」という分かりにくい壊れ方をする（#1022で実際に発生）。
+
+**画面上は起動コメントを操作者本人のコメントとして表示する**（#1026）。同じ`@claude`コメントを
+ボタンから投稿すると本人名義になるため、起動経路で見た目が変わらないようにするもの。投稿者は
+`posted-by`マーカーから解決するが、**GitHub上の投稿者がissue-deck自身のGitHub Appである場合に
+限って信用する**（パブリックリポジトリでは誰でも偽のマーカーを付けられるため）。判定は
+[`issue-mapper.ts`](../src/lib/github/issue-mapper.ts)の`resolveCommentAuthorLogin`。
+
 #### `Planning`へ動かすときはラベルを先に書く
 
 **ワークフローのmodeはコメント本文ではなく`21.plan-required`ラベルで決まる**

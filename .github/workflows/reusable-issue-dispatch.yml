@@ -113,6 +113,15 @@ name: Claude Issue Dispatch (reusable)
 # 常にBot扱いになるため例外とし、アプリがコメント本文に埋め込む投稿者マーカーから
 # 実際に操作した人間を復元したうえで同様に権限確認する(詳細は後述のステップを参照)。
 #
+# claude-code-actionは上記とは別に、自前の非人間アクター拒否(checkHumanActor)を持つ。
+# こちらはコメント本文を見ず github.actor だけで判定するため、投稿者マーカーによる復元が
+# 効かない。issue-deck[bot]名義のコメントで起動する経路(#991 Phase 3のカンバンのドラッグ)を
+# 通すには、各claude-code-actionステップに allowed_bots を渡す必要がある(#1022)。
+# 未設定だとドラッグ起点の実行が必ず1回失敗し、自動リトライ(workflow_dispatch起動で
+# actorが人間になるため通る)で偶然リカバリされるという分かりにくい壊れ方をする。
+# 緩めるのはclaude-code-action側の判定だけで、上記の投稿者マーカーによる権限確認は残るため、
+# マーカーの無いbotコメントは従来どおりmode=skipで弾かれる。
+#
 # 対象issueの番号はissues/issue_commentイベントの github.event.issue.number
 # からそのまま取得できる(ブランチ名からの推測が必要な他ワークフローと異なる)。
 # 値はscript injectionを避けるため env 経由でのみ参照し、run: 本文に直接
@@ -1059,6 +1068,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
+          # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
+          allowed_bots: "issue-deck[bot]"
           show_full_output: true
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Read,Grep,Glob"
@@ -1329,6 +1341,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
+          # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
+          allowed_bots: "issue-deck[bot]"
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"
             ${{ steps.claude_model.outputs.assist_model_flag }}
@@ -1423,6 +1438,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
+          # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
+          allowed_bots: "issue-deck[bot]"
           show_full_output: true
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Read,Grep,Glob"
@@ -1699,6 +1717,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
+          # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
+          allowed_bots: "issue-deck[bot]"
           show_full_output: true
           claude_args: |
             --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"

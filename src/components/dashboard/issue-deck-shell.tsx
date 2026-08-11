@@ -106,6 +106,7 @@ export function IssueDeckShell({
     isPending: isMobileScreenPending,
     selectTab,
     selectRepository,
+    selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
     applyQuickFilter: applyMobileQuickFilter,
@@ -564,6 +565,7 @@ export function IssueDeckShell({
                     onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                     onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                     onCreateFollowupIssue={openFollowupIssueDialog}
+                    onSelectRepository={selectRepositoryByFullName}
                   />
                 )}
               </>
@@ -629,6 +631,7 @@ export function IssueDeckShell({
             onIssueDeleted={handleIssueDeleted}
             onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
             onCreateFollowupIssue={openFollowupIssueDialog}
+            onSelectRepository={(repositoryFullName) => setFilters({ repos: [repositoryFullName] })}
           />
         </div>
         {selectedIssue && (
