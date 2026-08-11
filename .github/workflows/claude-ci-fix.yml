@@ -4,19 +4,18 @@ name: Claude CI Fix
 # 人間がIssueに`@claude CIの失敗を直して`のようにコメントして個別に依頼する必要があった。
 # この依頼を自動化し、CI失敗を検知したら人間の操作なしにClaude Codeが修正を試みるワークフロー
 # （docs/multi-agent/auto-repair.md「CI失敗の自動解消」参照、issue #807）。
-# claude-conflict-resolve.yml（PRコンフリクトの自動解消、#315）と同じ設計思想。
+#
+# **トリガー定義のみ**を持ち、ジョブ本体はreusable-claude-ci-fix.ymlへ切り出してある（#1066）。
+# 他リポジトリからも同じ実体を呼べるようにするため（方式は#934、先行例は#940・#945）。
+#
+# issue-deck自身はローカルパス参照(./)を使い、常にそのブランチ・PRの内容で動かす。
+# 他アプリはタグ固定(@workflows/vX)で参照する運用とし、issue-deck側が先に壊れて
+# 他アプリには波及しない「カナリア」構成にする（#934）。
 #
 # develop→mainのリリースPR（head=develop）のCI失敗は対象外（#812で別途検討）。リリースPRの
 # headはdevelop自体であり、develop直接pushが禁止のためこのワークフローと同じ「対象ブランチへ
 # 直接push」方式を適用できないこと、対応する単一のIssueが存在せずリトライ管理・報告先の前提が
 # 異なることが理由。
-#
-# ジョブ構成:
-# - detect: workflow_run（CI）のペイロードから、develop向けかつissue-<番号>ブランチのPRの
-#   失敗のみを対象Issue番号として抽出する（workflow_dispatchの場合は入力のIssue番号をそのまま使う）
-# - fix: 対象PRの状態・リトライ回数を再確認したうえで、対応ブランチのCIログを読み、
-#   Claude Codeが原因を修正してpushする。安全に自動修正できないと判断した場合は
-#   00.check-userを付与して人間に判断を委ねる
 #
 # トリガー:
 # - workflow_run（CI, completed）: CIの結果が出るたびに検知する。ci.ymlはconcurrency設定で
@@ -36,361 +35,33 @@ on:
         type: number
 
 jobs:
-  detect:
-    runs-on: ubuntu-latest
-    outputs:
-      should_process: ${{ steps.detect.outputs.should_process }}
-      issue_number: ${{ steps.detect.outputs.issue_number }}
-    steps:
-      - name: 対象Issueを判定する
-        id: detect
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
-          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
-          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          PR_LIST_JSON: ${{ toJson(github.event.workflow_run.pull_requests) }}
-        run: |
-          set -e
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "手動実行のため入力されたIssue番号をそのまま対象にします"
-            echo "should_process=true" >> "$GITHUB_OUTPUT"
-            echo "issue_number=$INPUT_ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$WORKFLOW_RUN_CONCLUSION" != "failure" ]; then
-            echo "conclusion=$WORKFLOW_RUN_CONCLUSION のため対象外です"
-            echo "should_process=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$WORKFLOW_RUN_EVENT" != "pull_request" ]; then
-            echo "event=$WORKFLOW_RUN_EVENT のため対象外です（developへの直接pushはこのワークフローの対象外）"
-            echo "should_process=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PR_JSON="$(echo "$PR_LIST_JSON" | jq -c '.[0]')"
-          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
-            echo "workflow_runペイロードにPR情報が無いため対象外です"
-            echo "should_process=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
-          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
-          if [ "$BASE_REF" != "develop" ]; then
-            echo "base=$BASE_REF のため対象外です（developへ向くPRのみ対象。develop→mainのリリースPRは#812で別途検討）"
-            echo "should_process=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! echo "$HEAD_REF" | grep -qE '^issue-[0-9]+$'; then
-            echo "head=$HEAD_REF がissue-<番号>命名規約に従わないため対象外です"
-            echo "should_process=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          ISSUE_NUMBER="$(echo "$HEAD_REF" | sed -E 's/^issue-([0-9]+)$/\1/')"
-          echo "対象Issue: #$ISSUE_NUMBER"
-          echo "should_process=true" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-
-  fix:
-    needs: detect
-    if: needs.detect.outputs.should_process == 'true'
-    runs-on: ubuntu-latest
-    # claude-issue-dispatch.ymlのdispatchジョブのbranchレーンと同じグループ名で直列化する。
-    # 同じissue-<番号>ブランチへ、人間からの追加依頼（@claudeコメント）による実装ステップや
-    # claude-conflict-resolve.ymlのコンフリクト解消のpushと競合しないようにする
-    # （claude-conflict-resolve.ymlと同じ考え方）。
-    concurrency:
-      group: issue-dispatch-${{ needs.detect.outputs.issue_number }}-branch
-      cancel-in-progress: false
+  ci-fix:
+    uses: ./.github/workflows/reusable-claude-ci-fix.yml
+    # issue-deckは唯一pnpmを使うリポジトリ（他の全アプリはnpm）。既定は多数派のnpmのため明示する。
+    with:
+      runtime-setup: node-db
+      package-manager: pnpm
+      # 再利用ワークフロー内のinputsコンテキストはworkflow_callのinputsを指すため、
+      # 呼び出し元のworkflow_dispatch入力はここで明示的に渡す。
+      issue-number: ${{ inputs.issue_number }}
+      # プロンプトの「- 修正後、」に続けてそのまま埋め込まれるため、文末まで含めて書く。
+      # YAMLの折りたたみ(>-)は改行を半角スペースへ変換し日本語の途中に空白が入るため、1行で書く。
+      verify-commands: "`pnpm test`（lint・typecheck・unit testを実行）と `pnpm build:ci` を実行し、いずれも問題がないことを確認する（DBサーバーは実際には起動していないが、環境変数はこのステップに既に設定済みのため`.github/workflows/ci.yml`のbuildステップと同様に成功するはず）"
+      # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
+      # プレースホルダー値を使う（実際の外部サービスには接続しない）。
+      # 実シークレットはここに書かない（secrets: inheritで別途渡る）。
+      build-env: |
+        DATABASE_URL=mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+        NEXT_PUBLIC_SUPABASE_URL=https://ci-placeholder.supabase.co
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-placeholder
+        GITHUB_APP_ID=123456
+        GITHUB_APP_PRIVATE_KEY_BASE64=Y2ktcGxhY2Vob2xkZXI=
+        NEXT_PUBLIC_GITHUB_APP_SLUG=ci-placeholder
+        GITHUB_WEBHOOK_SECRET=ci-placeholder
+    secrets: inherit
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
       id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: develop
-          fetch-depth: 0
-          # 後続のgit push、および.github/workflows/配下の修正に備え、workflow書き込み権限を持つ
-          # PAT（secrets.WORKFLOW_PAT）でcheckoutする（claude-conflict-resolve.ymlと同じ理由）。
-          token: ${{ secrets.WORKFLOW_PAT }}
-
-      - name: pushの認証をWORKFLOW_PATに固定する
-        # claude-code-actionは実行時にactions/checkoutが残した認証情報を削除するため、
-        # push専用URL（remote.origin.pushurl）にPATを固定して.github/workflows/配下を含む
-        # pushのremote rejectedを防ぐ（claude-conflict-resolve.ymlの同名ステップと同じ理由）。
-        env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          git remote set-url --push origin \
-            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
-
-      - name: 対象PRの状態・リトライ回数を再確認する
-        id: state
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
-        run: |
-          set -e
-          BRANCH="issue-$ISSUE_NUMBER"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-
-          # detect実行時点からのタイムラグを考慮し、着手前にIssueのクローズ状態を再確認する。
-          ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
-          if [ "$ISSUE_STATE" = "CLOSED" ]; then
-            echo "Issueがクローズ済みのため何もしません"
-            echo "should_fix=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PR_JSON="$(gh pr list --head "$BRANCH" --base develop --state open --json number,url,headRefOid --jq '.[0]')"
-          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
-            echo "対象のdevelop向けPRが見つからないため何もしません"
-            echo "should_fix=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PR_NUMBER="$(echo "$PR_JSON" | jq -r '.number')"
-          PR_URL="$(echo "$PR_JSON" | jq -r '.url')"
-          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.headRefOid')"
-
-          # 現在のHEADに対する最新のCI実行結果を再確認する。workflow_run発火からこのジョブの
-          # 着手までの間に、実装エージェントの追加pushなどで既に直っている可能性があるため。
-          RUN_JSON="$(gh run list --branch "$BRANCH" --workflow "CI" \
-            --json databaseId,conclusion,headSha,event --limit 10 \
-            | jq -c --arg sha "$HEAD_SHA" \
-              '[.[] | select(.headSha == $sha and .event == "pull_request")] | sort_by(.databaseId) | reverse | .[0]')"
-          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
-            echo "現在のHEADに対するCI実行結果がまだ取得できないため何もしません"
-            echo "should_fix=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          CONCLUSION="$(echo "$RUN_JSON" | jq -r '.conclusion')"
-          if [ "$CONCLUSION" != "failure" ]; then
-            echo "現在のHEADのCIは失敗していないため何もしません（conclusion=$CONCLUSION）"
-            echo "should_fix=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          RUN_ID="$(echo "$RUN_JSON" | jq -r '.databaseId')"
-
-          # 無限ループ防止のため、このワークフローが投稿した「着手コメント」の数（=試行回数）が
-          # 既に上限（2回）に達している場合は、これ以上自動修正を試みず人間の確認を待つ。
-          ATTEMPT_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '
-            [.comments[]
-              | select(.body | contains("<!-- issue-deck-source:claude-ci-fix -->"))
-              | select(.body | contains("自動修正を試みます"))
-            ] | length
-          ')"
-          if [ "$ATTEMPT_COUNT" -ge 2 ]; then
-            echo "自動修正の試行回数が上限（2回）に達しているため人間の確認を待ちます"
-            BODY="⚠️ CI失敗の自動修正を${ATTEMPT_COUNT}回試みましたが、まだCIが失敗しています。無限ループを避けるため自動修正を停止し、人間の確認を待ちます。"
-            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-ci-fix -->'
-            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
-            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-            echo "should_fix=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "should_fix=true" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-
-      - name: 作業ブランチをcheckoutする
-        if: steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
-        run: |
-          set -e
-          git fetch origin "${{ steps.state.outputs.branch }}"
-          git checkout "${{ steps.state.outputs.branch }}"
-
-      - name: 対応開始をコメントで通知する
-        if: steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -e
-          BODY="🛠️ CIの失敗を検知したため、\`${{ steps.state.outputs.branch }}\` ブランチで自動修正を試みます。"
-          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
-          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-ci-fix -->'
-          gh issue comment "${{ needs.detect.outputs.issue_number }}" --body "$BODY"
-
-      - name: 解消前のコメント数を記録する
-        id: before
-        if: steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          COUNT="$(gh issue view "${{ needs.detect.outputs.issue_number }}" --json comments --jq '.comments | length')"
-          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
-
-      - name: 失敗したジョブ・ステップのログを取得する
-        if: steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          gh run view "${{ steps.state.outputs.run_id }}" --log-failed > /tmp/ci-failed-log.txt || true
-          echo "取得したログの行数: $(wc -l < /tmp/ci-failed-log.txt)"
-
-      - name: Setup pnpm
-        if: steps.state.outputs.should_fix == 'true'
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        if: steps.state.outputs.should_fix == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - name: 依存関係をインストールする
-        if: steps.state.outputs.should_fix == 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Claude Code（CI失敗修正）
-        id: claude_ci_fix
-        if: steps.state.outputs.should_fix == 'true'
-        uses: anthropics/claude-code-action@v1
-        env:
-          # .github/workflows/配下を含むgit pushの認証は、前段の「pushの認証をWORKFLOW_PATに
-          # 固定する」ステップが設定するremote.origin.pushurlで別途完結しており、このステップの
-          # GH_TOKENには依存しない（claude-conflict-resolve.ymlと同じ理由）。
-          GH_TOKEN: ${{ github.token }}
-          # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
-          # プレースホルダー値を使う（実際の外部サービスには接続しない）。
-          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
-          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
-          GITHUB_APP_ID: "123456"
-          GITHUB_APP_PRIVATE_KEY_BASE64: Y2ktcGxhY2Vob2xkZXI=
-          NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder
-          GITHUB_WEBHOOK_SECRET: ci-placeholder
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          show_full_output: true
-          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(grep:*),Bash(find:*)"'
-          prompt: |
-            あなたはissue-deckリポジトリのCI失敗修正エージェントです。GitHub Actions上で
-            無人実行されており、対応するIssueは #${{ needs.detect.outputs.issue_number }}、
-            対応するdevelop向けPull Requestは ${{ steps.state.outputs.pr_url }} です。現在の
-            ワークツリーは `${{ steps.state.outputs.branch }}` ブランチをcheckout済みです。
-
-            このPull Requestの`.github/workflows/ci.yml`（CI）が失敗しています。これまでは
-            人間がIssueにコメントして個別に修正を依頼する必要がありましたが、その依頼を自動化
-            したものがこのワークフローです。失敗したジョブ・ステップのログは
-            `/tmp/ci-failed-log.txt` に保存済みです（`gh run view --log-failed`の出力）。
-
-            ## 最初にやること
-            - `/tmp/ci-failed-log.txt` を読み、どのジョブ・ステップ（lint / typecheck /
-              unit test / build のいずれか）が何のエラーで失敗しているかを把握する
-            - `gh pr view ${{ steps.state.outputs.pr_number }} --json title,body,commits` と
-              `gh issue view ${{ needs.detect.outputs.issue_number }} --comments` で、この
-              Pull Requestが何を実装したものかを把握する
-
-            ## コメント投稿時のトークンについて
-            このステップの既定の`GH_TOKEN`は、投稿者が`github-actions[bot]`になる既定の
-            GITHUB_TOKENです。以下の`gh pr comment` / `gh issue comment`は、トークンを
-            上書きせずそのまま実行してください。`.github/workflows/`配下を含む`git push`の
-            認証は、前段で設定済みのpush専用URL（`remote.origin.pushurl`、workflow書き込み
-            権限を持つPAT）で別途完結しているため、このステップのGH_TOKENには依存しません。
-            `git push origin ${{ steps.state.outputs.branch }}`はリモート名`origin`のまま
-            実行してください（push時だけ自動的にPATが使われます）。
-
-            ## やること
-            - ログから読み取った原因をもとに、該当するコードを修正する。表面的にCIを通す
-              ためだけの修正（lintエラーの`eslint-disable`での握りつぶし、失敗している
-              テストの無効化・削除・期待値の機械的な書き換え等）は禁止する。テスト失敗が
-              ロジックの不具合を示している場合はロジック側を直すこと
-            - 修正後、`pnpm test`（lint・typecheck・unit testを実行）と `pnpm build:ci` を
-              実行し、いずれも問題がないことを確認する（DBサーバーは実際には起動していないが、
-              環境変数はこのステップに既に設定済みのため`.github/workflows/ci.yml`のbuild
-              ステップと同様に成功するはず）
-            - 修正したファイルを `git add` でステージし、`git commit` でコミットを作成する
-              （コミットメッセージは日本語で、CIが失敗していた原因と修正内容を1〜2文で
-              書き、末尾に `#${{ needs.detect.outputs.issue_number }}` を付ける。Authorは
-              `Claude Code <claude-code@example.com>` にする）
-            - `git push origin ${{ steps.state.outputs.branch }}` でpushする。pushが拒否
-              された場合は `git pull --rebase origin ${{ steps.state.outputs.branch }}` で
-              追随し、1回だけリトライする。それでも失敗する場合はそれ以上リトライせず、下記
-              「修正できない場合」の手順で報告する
-            - pushが成功したら `gh pr comment ${{ steps.state.outputs.pr_number }} --body "..."`
-              で、CIが失敗していた原因と修正内容を日本語で要約して報告する。コメント末尾に
-              実行ログのリンク
-              `実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-              を必ず追記する
-            - 最後に
-              `gh issue comment ${{ needs.detect.outputs.issue_number }} --body "..."` で、
-              Issueにも修正が完了した旨と対象PR（${{ steps.state.outputs.pr_url }}）を日本語で
-              報告する（無人実行のため、この報告が使用者にとって唯一の完了確認手段になる。
-              コメント末尾に上記と同じ実行ログのリンクと、投稿元を示す
-              `<!-- issue-deck-source:claude-ci-fix -->`マーカーを必ず追記する）
-
-            ## 修正できない場合
-            ログからは原因が特定できない、修正しても`pnpm test`・`pnpm build:ci`が通らない、
-            CIの失敗自体がインフラ側の一時的な問題（外部サービス障害等）で自動修正の対象外
-            と判断した等、安全に自動修正できないと判断した場合は、無理に修正しようとせず
-            コミット・pushせずに
-            `gh issue comment ${{ needs.detect.outputs.issue_number }} --body "..."` で
-            CI失敗の内容と自動修正を断念した理由を日本語で報告し（コメント本文の末尾に、
-            投稿元を示す`<!-- issue-deck-source:claude-ci-fix -->`マーカーを必ず付与すること）、
-            `gh issue edit ${{ needs.detect.outputs.issue_number }} --add-label "00.check-user"`
-            を実行して停止してください。
-
-            ## 禁止事項
-            - `main`/`develop`への直接コミット・push
-            - 他Issueのブランチの編集
-            - 不要なforce push
-            - 自分が作成したPull Requestの自己マージ
-            - 表面的にCIを通すためだけの修正（テストの無効化・削除、lintエラーの握りつぶし等）
-
-      - name: Claude使用量をJob Summaryに出力する（Claude Code（CI失敗修正））
-        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
-        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
-        if: always() && steps.claude_ci_fix.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "Claude Code（CI失敗修正）" "${{ steps.claude_ci_fix.outputs.execution_file }}"
-
-      - name: 02.wip ラベルを除去する
-        # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush（このジョブが
-        # 上記ステップで行うpushを含む）をトリガーに無条件で02.wipを付与するため、
-        # 03.d:marge/00.check-user状態のissueに02.wipが混在して残らないよう明示的に除去する
-        # （claude-conflict-resolve.ymlの同名ステップと同じ理由）。
-        if: always() && steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue edit "${{ needs.detect.outputs.issue_number }}" --remove-label "02.wip"
-
-      - name: 修正結果を検証し、報告が確認できない場合はフォールバック通知する
-        # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
-        # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
-        # そのため後続のステップとして独立に結果を確認する（claude-conflict-resolve.ymlの
-        # 同種の検証ステップと同じ考え方）。
-        if: always() && steps.state.outputs.should_fix == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          ISSUE_NUMBER="${{ needs.detect.outputs.issue_number }}"
-          AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
-          BEFORE_COUNT="${{ steps.before.outputs.comment_count }}"
-          : "${BEFORE_COUNT:=0}"
-          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
-            echo "新規コメントを確認できたため、完了または停止の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
-            exit 0
-          fi
-
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
-          FALLBACK_BODY="⚠️ CI失敗の自動修正ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や修正の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-ci-fix -->'$'\n\n<!-- issue-deck-fallback-notice -->'
-          gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
-          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"

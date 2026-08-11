@@ -60,15 +60,23 @@ FULL_NAME="$OWNER/$REPO"
 
 # リポジトリ→ローカルのチェックアウト先の対応表。
 # 既定はissue-deck自身のみ。他リポジトリを足す場合は設定ファイルに1行ずつ書く
-# （`owner/repo<空白>絶対パス`。`#`始まりはコメント）。
+# （`owner/repo<空白>絶対パス`。`#`始まりはコメント）。パスに空白を含んでもよい
+# （最初の空白までをリポジトリ名、残りをパスとして扱う）。
 CONFIG_FILE="${ISSUE_DECK_LOCAL_REPOS_CONFIG:-$HOME/.config/issue-deck/local-repos.conf}"
 
 resolve_repo_path() {
   local target="$1"
   if [[ -f "$CONFIG_FILE" ]]; then
-    local name path
-    while read -r name path _; do
-      [[ -z "${name:-}" || "$name" == \#* ]] && continue
+    local line name path
+    # `read -r name path _` だとパスが空白で切れるため、1行読んで最初の空白で2分割する。
+    # 併せてCRLFの改行と行末の空白も落とす（Windows側のエディタで編集されうるため）。
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+      [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
+      name="${BASH_REMATCH[1]}"
+      path="${BASH_REMATCH[2]}"
+      path="${path%"${path##*[![:space:]]}"}"
       if [[ "$name" == "$target" ]]; then
         # 設定ファイル側の `~` はシェル展開されないため自前で展開する。
         printf '%s\n' "${path/#\~/$HOME}"
@@ -104,6 +112,12 @@ fi
 
 echo "#$ISSUE_NUMBER: $FULL_NAME（$REPO_PATH）のセッションを起動します..."
 cd "$REPO_PATH"
+
+# LANアクセス設定（Windowsの管理者権限が必要）は、wt.exeで開いたタブではUACを承認しても
+# 待ちから戻らずタブが固まる。ワンクリック起動では行わない（#1076）。
+# コマンドライン引数ではなく環境変数で渡すのは、この指定を解釈しないリポジトリの
+# start-issue.shへ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
+export ISSUE_DECK_SKIP_LAN_SETUP=1
 # start-issue.shはworktree作成〜devサーバー起動〜claude起動まで自前で面倒を見る。
 # execで置き換えるため、以降のtrapはstart-issue.sh側の挙動に委ねる。
 trap - EXIT

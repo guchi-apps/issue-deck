@@ -31,6 +31,8 @@ export type MobileScreen =
     }
   | { kind: "repos" }
   | { kind: "settings" }
+  // マージ待ちPR一覧（#1058）。ホームからのドリルダウンで、ボトムナビのタブは持たない
+  | { kind: "pull-requests" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -146,13 +148,17 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: screenParam };
     }
 
+    if (screenParam === "pull-requests") {
+      return { kind: "pull-requests" };
+    }
+
     return { kind: "home" };
   }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
 
   const navigate = useCallback(
     (
       next: {
-        screen: MobileBottomNavTab | "issue-detail" | "repo-detail";
+        screen: MobileBottomNavTab | "issue-detail" | "repo-detail" | "pull-requests";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -239,6 +245,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   );
 
   const selectTab = useCallback((tab: MobileBottomNavTab) => navigate({ screen: tab }), [navigate]);
+
+  // ホームからマージ待ちPR一覧へ遷移する（#1058）。Issueの絞り込み条件は引き継がない。
+  const selectPullRequests = useCallback(
+    () => navigate({ screen: "pull-requests" }),
+    [navigate],
+  );
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -399,6 +411,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     mobileScreen,
     isPending,
     selectTab,
+    selectPullRequests,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

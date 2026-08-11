@@ -10,6 +10,15 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 個別にコンフリクト解消を依頼する必要があった。`.github/workflows/claude-conflict-resolve.yml`が
 この依頼を自動化し、コンフリクトを検知したら人間の操作なしにClaude Codeが解消を試みる。
 
+このワークフローも`claude-ci-fix.yml`と同様に**トリガー定義のみ**を持ち、ジョブ本体は
+`.github/workflows/reusable-claude-conflict-resolve.yml`（`on: workflow_call`）へ切り出してある
+（#1066）。入力の意味・プロンプトの置き場所（`.github/prompts/conflict-resolve.md`）・
+カナリア構成の考え方は後述「CI失敗の自動解消（#807）」と共通なので、そちらを参照。
+
+`resolve-conflicts`ジョブは`strategy.matrix`で検出したIssueごとに並列実行するが、matrixは
+再利用ワークフロー側に閉じている（呼び出し元でmatrixを組む形にはしていない）。呼び出し元は
+`uses:`ひとつだけを持つ。
+
 ### ジョブ構成
 
 - **detect-conflicts**: developとコンフリクトしている（`mergeable`が`CONFLICTING`）PRを対応
@@ -88,6 +97,20 @@ develop向けPR（`issue-<番号>`ブランチ）の`.github/workflows/ci.yml`�
 この依頼を自動化し、CI失敗を検知したら人間の操作なしにClaude Codeが修正を試みる。上記「PR
 コンフリクトの自動解消（#315）」と同じ設計思想で、`.github/workflows/claude-conflict-resolve.yml`と
 対になるワークフローとして実装している。
+
+このワークフローは**トリガー定義のみ**を持ち、ジョブ本体（`detect`／`fix`）は
+`.github/workflows/reusable-claude-ci-fix.yml`（`on: workflow_call`）へ切り出してある（#1066）。
+他リポジトリへ展開する際は、ワークフローをコピーせず**issue-deck側のこの実体をタグ固定で参照する
+薄いcallerを置く**（[docs/cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能
+ワークフローの参照」を参照）。issue-deck自身はローカルパス参照で常に最新の内容で動くため、
+変更が最初に自分へ跳ね返るカナリアとして機能する。
+
+リポジトリ差は`with:`の入力で吸収する。`runtime-setup`・`package-manager`・`node-version`が
+ランタイム準備を、`build-env`がビルド検証用のダミー環境変数を、`verify-commands`が修正後の
+検証手順の説明を、`prompts-ref`がプロンプト（`.github/prompts/ci-fix.md`）の取得元を決める。
+Claude Codeへ渡すプロンプト本文は`.github/prompts/ci-fix.md`にあり、ワークフロー側で
+`envsubst`により動的な値を埋めてから`$GITHUB_ENV`経由で渡す（`${{ }}`を含む文字列ブロックに
+かかる21,000バイト上限を構造的に回避するため。#901で無人実行が半日停止した経路）。
 
 develop→mainのリリースPR（head=`develop`）のCI失敗は対象外（#812で別途検討）。リリースPRのheadは
 `develop`自体であり、`develop`への直接pushが禁止のためこのワークフローと同じ「対象ブランチへ

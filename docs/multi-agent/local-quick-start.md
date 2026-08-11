@@ -25,7 +25,7 @@ issue-deckの画面「ローカルで開始」
   ↓ issuedeck://start/<owner>/<repo>/<Issue番号>
 Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-protocol.ps1）
   ↓ wt.exe → wsl.exe → bash -lc
-scripts/start-local-session.sh <owner> <repo> <番号>   ← リポジトリ→ローカルパスの解決
+~/.local/share/issue-deck/start-local-session.sh <owner> <repo> <番号>   ← リポジトリ→ローカルパスの解決
   ↓
 <対象リポジトリ>/scripts/start-issue.sh <番号>          ← worktree・devサーバー・claude起動
 ```
@@ -49,14 +49,31 @@ cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\register-issuedeck-protocol.ps1
 ```
 
-登録スクリプトは、ハンドラ本体を`%LOCALAPPDATA%\issue-deck\`へ複製したうえでレジストリを書く。
-WSL上のパス（`\\wsl.localhost\...`）を直接登録しないのは、WSLが停止した状態からの初回起動で
-パス解決に失敗しうるため。**`scripts/windows/issuedeck-protocol.ps1`を変更したときは、
-登録スクリプトを再実行して複製を更新する。**
+登録スクリプトは2つの複製を作る。
 
-解除は`-Unregister`を付けて実行する。
+| 複製するもの | 複製先 | 理由 |
+| --- | --- | --- |
+| `scripts/windows/issuedeck-protocol.ps1` | `%LOCALAPPDATA%\issue-deck\` | WSL上のパス（`\\wsl.localhost\...`）を直接登録すると、WSLが停止した状態からの初回起動でパス解決に失敗しうる |
+| `scripts/start-local-session.sh` | WSLの`~/.local/share/issue-deck/` | リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間はファイルが存在せず起動できない（#1076） |
 
-動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/1`を入力する。
+**どちらかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+
+受け口の複製元は`$PSScriptRoot`から辿る。`\\wsl.localhost\<ディストロ>\...`と`\\wsl$\<ディストロ>\...`は
+そのまま読み替え、それ以外（Cドライブ等から実行した場合）は`wslpath -u`に任せる。特定できない
+場合は警告を出すので、表示された`install`コマンドをWSL側で実行する。
+
+解除は`-Unregister`を付けて実行する。両方の複製とレジストリ登録が消える。
+
+動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/99999`を入力する。
+新しいタブが開いて「issue #99999 の取得に失敗しました」で止まれば、レジストリ登録からWSLの
+受け口までが繋がっている。**存在しないIssue番号を使う**のは、`start-issue.sh`がIssueの取得を
+`git worktree add`より前に行うため、そこで止まればブランチもworktreeも作られないから。実在する
+番号を入れると、その場で実装セッションが始まってしまう（#1076で、closedのEpic #1 を案内して
+いたのを改めた）。
+
+受け口の複製が見つからない場合は、ハンドラが起動前に検出してエラーを表示する。bashに任せると
+終了コード127が出るだけで原因が読めず、受け口側の`pause_on_error`もスクリプトが起動する前
+なので働かないため。
 
 ### WSLディストロ名が`Ubuntu`でない場合
 
@@ -71,6 +88,10 @@ WSL上のパス（`\\wsl.localhost\...`）を直接登録しないのは、WSL�
 # ~/.config/issue-deck/local-repos.conf
 guchi-apps/shopping-list  /home/guchi/apps/shopping-list
 ```
+
+最初の空白までをリポジトリ名、残りをパスとして扱うので、**パスに空白を含んでもよい**。
+行末のCRLFと余分な空白も落とす（Windows側のエディタで編集されうるため）。
+ローカルのフォルダ名はリポジトリ名と一致していなくてよい。
 
 ただし**ワンクリック起動が成立するのは`scripts/start-issue.sh`を持つリポジトリだけ**で、
 2026-08-11時点でこれを持つのはissue-deckのみ（[docs/cross-repo-automation.md](../cross-repo-automation.md)）。
@@ -120,11 +141,58 @@ Issue詳細の「…」メニューに**「ローカル起動コマンドをコ�
 コマンドをWSLのターミナルに貼れば、URL経路とまったく同じ`start-local-session.sh`が動く。
 経路ごとに挙動が分かれないよう、コマンドの生成も`src/lib/local-session.ts`に集約している。
 
+**このコマンドも受け口の複製（`~/.local/share/issue-deck/start-local-session.sh`）を指す。**
+URL経路と同じものを動かすためだが、複製を作るのは登録スクリプトなので、一度も実行していない
+環境では存在しない。その場合はリポジトリから直接置く。
+
+```bash
+install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
+  ~/.local/share/issue-deck/start-local-session.sh
+```
+
 ## `11.local`の自動付与
 
 ボタン押下時に`11.local`を付与してから起動する。ローカルセッションで対応するIssueに無人実行が
 重ねて走るのを防ぐため（[labels.md](labels.md)）。ラベル付与に失敗しても起動自体は妨げない
 （起動できないより、ラベルが遅れる方が軽いという判断）。
+
+## 2回目以降は再開になる
+
+同じIssueでもう一度ボタンを押すと、worktreeを作り直さずに**既存のworktreeでセッションを
+開き直す**（#1076）。一度タブを閉じても戻れる。未コミットの変更が残っていれば件数を表示する。
+
+作り直さないため、`git worktree add`と`.env.local`のコピーは行わない。`.env.local`は
+ローカルで書き換えている場合があるので、既にあるものを尊重する（無いときだけ本体からコピー）。
+`pnpm install`とプロンプトの再生成は毎回行う（前者は数秒で終わり、後者はIssueに付いた
+新しいコメントを取り込むため）。
+
+想定外の状態のときは再利用せずに止める。
+
+| 状態 | 挙動 |
+| --- | --- |
+| worktreeが存在しない | 新規作成 |
+| `issue-<番号>`ブランチのworktreeがある | **再利用** |
+| gitの作業ツリーでないディレクトリがある | エラー終了（中身を確認して手動で削除する） |
+| 別ブランチを開いている | エラー終了 |
+
+前回のセッションがタブの強制終了などで開発サーバーを残していた場合は、再開時に停止してから
+起動し直す。残ったままだとポートを掴んでいて`pnpm dev`が起動できないため。
+
+## ワンクリック起動ではLANアクセス設定を行わない
+
+`start-issue.sh`を素で叩くと`setup-lan-access.sh`（Windows側のポートフォワーディングと
+ファイアウォール規則）が走り、**UACダイアログが出る**。ところがwt.exeで開いたタブでは、
+UACを承認して中の処理が成功しても`Start-Process -Verb RunAs -Wait`が待ちから戻らず、
+**タブが固まる**（#1076で実際に踏んだ。portproxyとファイアウォール規則は作成済みなのに
+画面は無反応、という判断のつかない状態になる）。
+
+そのためワンクリック経路では行わない。`start-local-session.sh`が
+`ISSUE_DECK_SKIP_LAN_SETUP=1`を設定し、`start-issue.sh`がそれを見てスキップする。
+LAN内の別端末（スマホ等）から見たくなったら、そのworktreeで
+`scripts/setup-lan-access.sh <ポート>`を直接実行する。
+
+コマンドライン引数ではなく環境変数で渡しているのは、この指定を解釈しない他リポジトリの
+`start-issue.sh`へ渡っても無害にするため（未知のフラグはissue番号として扱われて失敗する）。
 
 ## VSCodeのタブから始める（`/issue <番号>`）
 
@@ -146,7 +214,8 @@ worktree準備（scripts/start-issue.sh --prepare-only）→ ラベル付与 →
 （Windowsの管理者権限＝UACダイアログが出る）も、開発サーバーを立てない以上は不要なので
 スキップする。
 
-worktreeが既にある場合は作り直さず再利用する。同じIssueへ戻る操作がここで吸収される。
+worktreeが既にある場合は作り直さず再利用する（この挙動は`start-issue.sh`自体が持つため、
+画面のボタンから起動したときも同じ。前述の「2回目以降は再開になる」を参照）。
 
 ### worktreeを編集できるようにする
 
@@ -207,7 +276,4 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 
 ## 未対応（このIssueの範囲外）
 
-- **画面のワンクリック起動からの再アタッチ**。`/issue`は既存worktreeを再利用するが、
-  `start-issue.sh`を素で叩く経路（＝画面のボタン）はworktreeが既に存在するとエラー終了する。
-- マージ済みworktreeの**掃除**。放置すると溜まり、上記と組み合わさって
-  「一度やったIssueはボタンから起動できない」状態になる。
+- マージ済みworktreeの**掃除**。放置すると溜まる。

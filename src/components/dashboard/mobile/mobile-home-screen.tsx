@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
+import { FolderGit2, GitPullRequest, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
@@ -20,6 +20,7 @@ type MobileHomeScreenProps = {
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
+  onSelectPullRequests: () => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -39,6 +40,7 @@ export function MobileHomeScreen({
   onSelectQuickFilter,
   onDeleteQuickFilter,
   onSaveQuickFilter,
+  onSelectPullRequests,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -119,6 +121,22 @@ export function MobileHomeScreen({
                 </li>
               );
             })}
+          </ul>
+        </div>
+
+        <div className="px-4 pb-4">
+          <h2 className="mb-2 text-sm font-semibold">Pull Request</h2>
+          <ul className="flex flex-col gap-1">
+            <li>
+              <button
+                type="button"
+                onClick={onSelectPullRequests}
+                className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+              >
+                <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
+                マージ待ちPR
+              </button>
+            </li>
           </ul>
         </div>
 

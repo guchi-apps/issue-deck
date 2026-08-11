@@ -105,7 +105,38 @@ if (over.length > 0) {
 // 評価されない（ワークフローYAMLの外にあるため）。どちらも実行時に静かに壊れるだけで
 // 気付きにくいため、CIで落とす。
 const PROMPT_DIR = ".github/prompts";
-const KNOWN_PLACEHOLDERS = ["ISSUE_NUMBER", "BRANCH", "PR_URL", "MODE", "REPOSITORY", "RUN_URL"];
+
+/**
+ * 各プロンプトファイルで使えるプレースホルダを、ワークフロー側の
+ * `envsubst '${A} ${B} ...' < "$PROMPT_FILE"` から自動導出する。
+ *
+ * プロンプトを持つワークフローは複数あり（claude-issue-dispatch / claude-ci-fix など、#1066）、
+ * 使える変数はワークフローごとに異なる。ここを単一の固定リストにすると、あるワークフローで
+ * 追加した変数が別のワークフローのプロンプトでも「既知」と判定され、実行時に空文字で
+ * 置換される事故を検出できなくなる。導出元を1つにすることで、変数を増やすときに
+ * このスクリプトを更新する必要も無くなる。
+ *
+ * 走査は行ベース。`PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/<名前>.md"` を見つけたら
+ * 以降の `envsubst '...'` をそのファイルのものとみなす（実際のステップがこの順で書かれているため）。
+ */
+function collectPromptPlaceholders() {
+  const map = new Map(); // "ci-fix.md" -> Set(["ISSUE_NUMBER", ...])
+  for (const file of files) {
+    const source = readFileSync(join(WORKFLOW_DIR, file), "utf8");
+    let current = null;
+    for (const line of source.split("\n")) {
+      const fileMatch = /\/([\w.-]+\.md)"/.exec(line);
+      if (fileMatch) current = fileMatch[1];
+      const envsubstMatch = /envsubst\s+'([^']*)'/.exec(line);
+      if (!envsubstMatch || !current) continue;
+      const names = [...envsubstMatch[1].matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)].map((m) => m[1]);
+      const known = map.get(current) ?? new Set();
+      for (const name of names) known.add(name);
+      map.set(current, known);
+    }
+  }
+  return map;
+}
 
 const promptProblems = [];
 let promptFiles = [];
@@ -115,16 +146,29 @@ try {
   promptFiles = []; // ディレクトリが無いリポジトリではこの検査自体をスキップする
 }
 
+const placeholdersByPrompt = collectPromptPlaceholders();
+
 for (const file of promptFiles) {
   const path = join(PROMPT_DIR, file);
+  const known = placeholdersByPrompt.get(file);
+  if (!known) {
+    // どのワークフローからも組み立てられないプロンプトは、消し忘れかファイル名の取り違え。
+    promptProblems.push(
+      `  ${path} — どのワークフローからも参照されていません（envsubstで組み立てるステップが見つかりません）`,
+    );
+    continue;
+  }
   const source = readFileSync(path, "utf8");
   source.split("\n").forEach((line, index) => {
     if (line.includes("${{")) {
       promptProblems.push(`  ${path}:${index + 1} — \`\${{ }}\` は評価されません。\`\${VAR}\` 形式にしてください`);
     }
     for (const [, name] of line.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
-      if (!KNOWN_PLACEHOLDERS.includes(name)) {
-        promptProblems.push(`  ${path}:${index + 1} — 未知のプレースホルダ \`\${${name}}\`（空文字に置換されます）`);
+      if (!known.has(name)) {
+        const usable = [...known].map((n) => "${" + n + "}").join(" ");
+        promptProblems.push(
+          `  ${path}:${index + 1} — 未知のプレースホルダ \`\${${name}}\`（空文字に置換されます）。このファイルで使えるのは ${usable}`,
+        );
       }
     }
   });
@@ -133,9 +177,8 @@ for (const file of promptFiles) {
 if (promptProblems.length > 0) {
   console.error("エラー: プロンプトファイルのプレースホルダに問題があります。");
   for (const problem of promptProblems) console.error(problem);
-  console.error(`  使用できるのは ${KNOWN_PLACEHOLDERS.map((n) => "\${" + n + "}").join(" ")} です。`);
-  console.error("  追加する場合は claude-issue-dispatch.yml の「〜プロンプトを組み立てる」ステップの");
-  console.error("  env: と envsubst の変数リスト、およびこのスクリプトの KNOWN_PLACEHOLDERS を更新してください。");
+  console.error("  変数を追加する場合は、そのプロンプトを組み立てるステップの env: と");
+  console.error("  envsubst の変数リストの両方に追加してください（このスクリプトの更新は不要です）。");
   process.exit(1);
 }
 

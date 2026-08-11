@@ -9,6 +9,12 @@
 # Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
 # で呼ぶ用途（既にセッションの中にいるので、さらにclaudeを起動しても意味がない。#1049）。
 #
+# worktreeが既にある場合は作り直さず再利用する。一度閉じたセッションに戻るための経路であり、
+# ワンクリック起動（画面の「ローカルで開始」）を2回目以降に押しても使える（#1076）。
+#
+# 環境変数:
+#   ISSUE_DECK_SKIP_LAN_SETUP=1  LANアクセス設定（Windowsの管理者権限が必要）を行わない
+#
 # 前提:
 #   - gh コマンドで認証済みであること
 #   - pnpm install 済み（本体の node_modules は使わず、worktreeごとに個別インストールする）
@@ -32,6 +38,11 @@ for arg in "$@"; do
   esac
 done
 set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
+
+# ワンクリック起動（scripts/start-local-session.sh）から呼ばれた場合に立つ。LANアクセス設定は
+# Windowsの管理者権限を要求し、wt.exeで開いたタブではUACを承認しても待ちから戻らずタブが
+# 固まるため、この経路では行わない（#1076）。
+SKIP_LAN_SETUP="${ISSUE_DECK_SKIP_LAN_SETUP:-0}"
 
 if [[ $# -eq 0 ]]; then
   echo "Usage: scripts/start-issue.sh [--prepare-only] <issue番号> [issue番号...]" >&2
@@ -69,9 +80,27 @@ prepare_issue() {
   WORKTREE_DIR="$WORKTREE_BASE/issue-$n"
   PROMPT_FILE="$PROMPT_DIR/issue-$n.md"
 
+  # 既存のworktreeは作り直さず再利用する（#1076）。ただしworktreeとして壊れている場合や
+  # 別ブランチを開いている場合は、意図しない場所で作業を続けることになるため止める。
+  local reuse_worktree=0
   if [[ -e "$WORKTREE_DIR" ]]; then
-    echo "Error: $WORKTREE_DIR は既に存在します（issue #$n は起動済みの可能性があります）。" >&2
-    exit 1
+    if ! git -C "$WORKTREE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo "Error: $WORKTREE_DIR はgitの作業ツリーではありません。中身を確認して削除してください。" >&2
+      exit 1
+    fi
+    local current_branch
+    current_branch="$(git -C "$WORKTREE_DIR" branch --show-current)"
+    if [[ "$current_branch" != "issue-$n" ]]; then
+      echo "Error: $WORKTREE_DIR が開いているのは issue-$n ではなく ${current_branch:-(デタッチHEAD)} です。" >&2
+      exit 1
+    fi
+    reuse_worktree=1
+    echo "#$n: 既存のworktreeを再利用します（$WORKTREE_DIR）。"
+    local dirty_count
+    dirty_count="$(git -C "$WORKTREE_DIR" status --porcelain | wc -l)"
+    if [[ "$dirty_count" -gt 0 ]]; then
+      echo "#$n: 未コミットの変更が $dirty_count 件あります。前回の続きから作業してください。"
+    fi
   fi
 
   echo "#$n: Issue内容を取得しています..."
@@ -81,19 +110,25 @@ prepare_issue() {
     exit 1
   fi
 
-  echo "#$n: develop を最新化しています..."
-  git -C "$ROOT" fetch origin develop
+  if [[ "$reuse_worktree" -eq 0 ]]; then
+    echo "#$n: develop を最新化しています..."
+    git -C "$ROOT" fetch origin develop
 
-  echo "#$n: worktree・ブランチ issue-$n を作成しています..."
-  if ! git -C "$ROOT" worktree add "$WORKTREE_DIR" -b "issue-$n" origin/develop; then
-    echo "Error: worktree/ブランチの作成に失敗しました（ブランチ issue-$n が既に存在する可能性があります）。" >&2
-    exit 1
+    echo "#$n: worktree・ブランチ issue-$n を作成しています..."
+    if ! git -C "$ROOT" worktree add "$WORKTREE_DIR" -b "issue-$n" origin/develop; then
+      echo "Error: worktree/ブランチの作成に失敗しました（ブランチ issue-$n が既に存在する可能性があります）。" >&2
+      exit 1
+    fi
   fi
 
-  if [[ -f "$ROOT/.env.local" ]]; then
-    cp "$ROOT/.env.local" "$WORKTREE_DIR/.env.local"
-  else
-    echo "警告: $ROOT/.env.local が無いため .env.local をコピーしませんでした。" >&2
+  # 再開時は既存の .env.local を尊重する（ローカルで書き換えている場合があるため）。
+  # 無いときだけ本体からコピーする。
+  if [[ ! -f "$WORKTREE_DIR/.env.local" ]]; then
+    if [[ -f "$ROOT/.env.local" ]]; then
+      cp "$ROOT/.env.local" "$WORKTREE_DIR/.env.local"
+    else
+      echo "警告: $ROOT/.env.local が無いため .env.local をコピーしませんでした。" >&2
+    fi
   fi
 
   # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
@@ -109,6 +144,9 @@ prepare_issue() {
     # 開発サーバーを起動しないので、この時点でポートフォワーディングを設定する意味がない。
     # UACダイアログを出さずに済ませる（必要になったらdevサーバー起動時に設定する）。
     echo "#$n: --prepare-only のためLANアクセス設定はスキップします。"
+  elif [[ "$SKIP_LAN_SETUP" != "0" ]]; then
+    # ワンクリック起動経路。UACを承認しても待ちから戻らずタブが固まるため行わない（#1076）。
+    echo "#$n: LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh $DEV_PORT を実行してください）。"
   else
     echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
     if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
