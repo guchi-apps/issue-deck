@@ -52,10 +52,33 @@ name: Issue Labels (reusable)
 # その手動マージ自体が確認完了を意味するため、develop-pr-merged・develop-merge-sweep・
 # main-pr-mergedの各ジョブでは状態遷移とあわせて`00.check-user`も除去する(#266。
 # 除去のタイミングが無く残り続けていた)。
+#
+# 各遷移ジョブは、ラベル付け替えに続けてissue-deckの進捗報告API(POST /api/progress)へ
+# 同じ状態を報告し、GitHub Projectsのカンバンを追従させる(#991 Phase 2)。
+# ここからProjectsを直接書かないのは、Projects v2の書き込み権限を持つのをissue-deckの
+# GitHub Appだけに閉じ、対象リポジトリが増えてもトークンを配らずに済ませるため
+# (設計はdocs/progress-status-architecture.md「中核の判断」)。
+#
+# 報告は`ProgressStatusKey`(src/lib/issue-progress.ts)で送る。ラベル名ではなく状態キーを
+# 送るのは、ラベルを廃止するPhase 5でこのワークフローを書き換えずに済ませるため。
+# 各ジョブは遷移対象のissue番号を`issue_numbers`(改行区切り)としてstep outputへ出し、
+# 続く報告ステップが同じ本文で処理できるようにしている(単一issueのジョブも一括遷移の
+# ジョブも同じ形にするため)。
+#
+# **報告の失敗はジョブを落とさない。** issue-deckを進捗更新の単一障害点にしないための
+# 取り決めで、疎通失敗・未設定は警告に留める。取りこぼしたズレは、issue-deckの再同期
+# ボタン(POST /api/sync/issues)がラベルを正としてProjectへ書き戻すことで是正できる。
 
 
 on:
   workflow_call:
+    secrets:
+      PROGRESS_REPORT_SECRET:
+        # issue-deckの進捗報告API(POST /api/progress)の共有シークレット(#991 Phase 2)。
+        # caller側でorganization secretとして解決される。渡さない・未設定の場合は
+        # 報告ステップが警告も出さずスキップされるだけで、ラベル遷移には影響しない
+        # (Project未導入のリポジトリからも同じ実体を呼べるようにするため required: false)。
+        required: false
 
 permissions:
   issues: write
@@ -70,6 +93,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - name: 02.wip を付与する
+        id: transition
         run: |
           if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
             if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "02.wip"; then
@@ -77,7 +101,35 @@ jobs:
             else
               echo "::warning::ラベル '02.wip' がリポジトリに存在しないため付与をスキップします"
             fi
+            echo "issue_numbers=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: implementation
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   develop-pr-opened:
     if: |
@@ -93,6 +145,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: 03.d:marge へ遷移する
+        id: transition
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
@@ -119,7 +172,35 @@ jobs:
               gh issue edit "$n" "${args[@]}"
             fi
             gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+            echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: develop-pr
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   develop-pr-merged:
     # 00.check-userが付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする
@@ -140,6 +221,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: 05.develop へ遷移する
+        id: transition
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
@@ -168,7 +250,38 @@ jobs:
               gh issue edit "$n" "${args[@]}"
             fi
             gh issue comment "$n" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+            echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
           fi
+
+      # 1つのIssueに複数のPRが発生するため、ここでの`develop`は「最新のPRがdevelopへ入った」
+      # ことを表し、Issueの完了を意味しない(docs/progress-status-architecture.md)。
+      # Statusは次のPRで`Develop PR`へ戻る。この往復は正常な挙動として扱う。
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: develop
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   develop-merge-sweep:
     # GitHub Auto-merge機能によるマージがdevelop-pr-mergedジョブを起動しなかった
@@ -182,6 +295,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: マージ済みのdevelop向けPRを持つissueを05.developへ遷移する
+        id: transition
         run: |
           mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
           label_exists() {
@@ -191,6 +305,7 @@ jobs:
             done
             return 1
           }
+          transitioned=""
           for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
@@ -211,8 +326,43 @@ jobs:
                 gh issue edit "$n" "${args[@]}"
               fi
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+              transitioned="${transitioned}${n}"$'\n'
             fi
           done
+          if [ -n "$transitioned" ]; then
+            {
+              echo "issue_numbers<<TRANSITIONED_EOF"
+              printf '%s' "$transitioned"
+              echo "TRANSITIONED_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: develop
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   main-pr-in-progress:
     # develop -> main のPRが開いている間、その時点で05.developが付いている
@@ -229,6 +379,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - name: 05.develop の issue を 07.m:marge へ一括遷移する
+        id: transition
         run: |
           mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
           label_exists() {
@@ -238,6 +389,7 @@ jobs:
             done
             return 1
           }
+          transitioned=""
           for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
             args=()
             if label_exists "07.m:marge"; then
@@ -255,7 +407,42 @@ jobs:
             if [ "${#args[@]}" -gt 0 ]; then
               gh issue edit "$n" "${args[@]}"
             fi
+            transitioned="${transitioned}${n}"$'\n'
           done
+          if [ -n "$transitioned" ]; then
+            {
+              echo "issue_numbers<<TRANSITIONED_EOF"
+              printf '%s' "$transitioned"
+              echo "TRANSITIONED_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: release
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   main-pr-merged:
     # develop -> main のPRがマージされた時点で、05.develop/07.m:margeの
@@ -279,6 +466,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - name: 09.main へ一括遷移し issue を close する
+        id: transition
         run: |
           issues="$(
             { gh issue list --label "05.develop" --state open --json number --jq '.[].number'
@@ -293,6 +481,7 @@ jobs:
             done
             return 1
           }
+          transitioned=""
           for n in $issues; do
             args=()
             if label_exists "09.main"; then
@@ -311,7 +500,42 @@ jobs:
               gh issue edit "$n" "${args[@]}"
             fi
             gh issue close "$n"
+            transitioned="${transitioned}${n}"$'\n'
           done
+          if [ -n "$transitioned" ]; then
+            {
+              echo "issue_numbers<<TRANSITIONED_EOF"
+              printf '%s' "$transitioned"
+              echo "TRANSITIONED_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: done
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL または PROGRESS_REPORT_SECRET が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+              -X POST "$APP_BASE_URL/api/progress" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
 
   cleanup-on-close:
     # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの

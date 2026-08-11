@@ -143,7 +143,7 @@ curlで叩き、疎通失敗時は警告を出してフォールバックする�
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 1 | 読み取りをStatus優先に。`resolveProgressStatus`へ集約 | ✅ 完了（v2.12.0・PR #1003） |
-| 2 | 進捗報告APIを作り、issue-deckがProjectを更新する（ラベルと併走） | |
+| 2 | 進捗報告APIを作り、issue-deckがProjectを更新する（ラベルと併走） | ✅ 実装済み（#1007） |
 | 3 | 起動をStatus一本化。ボタンもドラッグも「Statusを変える」だけにする | |
 | 4 | `shopping-list`・`dayspan`へ展開 | |
 | 5 | 進捗ラベルを廃止 | |
@@ -167,6 +167,66 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 **ナビゲーションビューの絞り込みはラベルベースのまま据え置いている。** 二重運用中は両者が
 一致するため実害が無く、`filterIssuesByView`のラベル配列マッチを状態ベースへ変える改修は
 影響範囲が広いため。Phase 5で一緒に移す。
+
+### Phase 2（実装済み）
+
+**進捗報告API `POST /api/progress` を作り、Projectへの書き込みをissue-deckへ一本化した**（#1007）。
+
+```
+ワークフロー / ローカル実行
+        │  POST /api/progress
+        │  {"repository":"owner/name","issue":1007,"status":"implementation"}
+        ▼
+   issue-deck（Appトークン）
+        │  updateProjectV2ItemFieldValue
+        ▼
+   GitHub Projects の Status
+```
+
+- **受け取るのは`ProgressStatusKey`**（`implementation`等）で、ラベル名でもStatus名でもない。
+  ラベルを廃止するPhase 5で呼び出し側を書き換えずに済ませるため
+- **認証は共有シークレット`PROGRESS_REPORT_SECRET`**（[`progress-report-auth.ts`](../src/lib/progress-report-auth.ts)）。
+  呼び出し側は無人実行でログインセッションを持てない。GitHub側にはorganization secretとして置く
+- **StatusフィールドのidとoptionのidはProjectごとに異なる**ため環境変数に持てず、実行時に
+  `PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`から引く（10分キャッシュ）
+- **Projectに未登録のIssueには何もしない。** 追加はProject WorkflowsのAuto-add（`is:issue`）に任せる
+- **アイテムの特定はDBの`projectItemId`ではなくGitHubへ問い合わせる。** 報告の正しさをDBの鮮度に
+  依存させないため（Projectへ追加された直後でWebhookが未到達でも正しく更新できる）
+- 反映されなかったケース（Project未導入・未登録・変化なし）も**200で理由を返す**。呼び出し側に
+  とってはエラーではないため
+
+報告する側は次のとおり。**すべて失敗してもジョブを落とさない**（issue-deckを単一障害点にしない）。
+
+| 遷移 | 報告元 | `status` |
+|---|---|---|
+| `01.planning`付与 | `reusable-issue-dispatch.yml`（mode=plan） | `planning` |
+| `02.wip`付与 | `reusable-issue-dispatch.yml`（mode=implement/additional）・`reusable-issue-labels.yml`（push） | `implementation` |
+| `03.d:marge` | `reusable-issue-labels.yml`（develop向けPR作成） | `develop-pr` |
+| `05.develop` | `reusable-issue-labels.yml`（developへマージ・sweep） | `develop` |
+| `07.m:marge` | `reusable-issue-labels.yml`（main向けPRオープン） | `release` |
+| `09.main` | `reusable-issue-labels.yml`（mainへマージ） | `done` |
+
+**Issueのクローズ（`cleanup-on-close`）は報告しない。** このジョブは進捗ラベルを外すが、`09.main`は
+残す。ここで`ready`を報告すると、`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。
+
+**ズレの是正方向はラベル → Status。** 再同期ボタン（`POST /api/sync/issues`）が
+`reconcileProjectStatusesFromLabels`を呼び、報告の取りこぼし（issue-deckの停止中・疎通失敗）を
+回収する。Phase 2はラベルが正でStatusがその写しであり、Statusを唯一の正にするのはPhase 5。
+**ただし進捗ラベルが1つも付いていないIssueは対象外にする** — ラベル無し＝`ready`として書き戻すと、
+人がカンバンでドラッグした結果（Phase 3で起動トリガーになる）を再同期のたびに巻き戻すため。
+
+#### 前提となる設定
+
+| 設定 | 場所 | 未設定時 |
+|---|---|---|
+| `PROGRESS_REPORT_SECRET` | 1Password → issue-deckの`.env`（`deploy.yml`が配る） | APIが503を返す |
+| `PROGRESS_REPORT_SECRET` | organization secret（ワークフロー側） | 報告ステップがスキップ |
+| `APP_BASE_URL` | organization/repository変数 | 報告ステップがスキップ |
+| GitHub Appのorganization permission **Projects: Read and write** | GitHub App設定 | 書き込みが403 |
+
+**Appの権限はPhase 1（読み取りのみ）から一段上がる。** `Read`のままだと
+`updateProjectV2ItemFieldValue`が`Resource not accessible by integration`で失敗する
+（[`projects-api.ts`](../src/lib/github/projects-api.ts)がこの文言を検出してヒントを添える）。
 
 ### Phase 3 の設計（合意済み）
 
