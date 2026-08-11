@@ -17,10 +17,16 @@ name: Claude Code Review (develop向けPR)
 #   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
 #   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
 #   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
-#   投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)
+#   投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
+#   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
-#   マージやラベル状態遷移(03.d:marge等)は行わない
+#   マージやラベル状態遷移(03.d:marge等)は行わない。
+#   develop向けPRの大半は小規模・低リスクで、そこにClaude Codeによる意味的レビューを
+#   毎回かけるのは費用対効果が低いため、risk-checkのneeds-review出力が
+#   trueのときだけ実行する(#992)。ゲート条件は risk-check の該当・大きな差分・
+#   共有知識への追加提案あり・対応Issue番号不明・対応Issueに00.check-user付与済み、の
+#   いずれか。スキップされた場合はauto-mergeがそのまま進む(下記auto-mergeのif参照)
 # - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
 #   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
 #   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
@@ -105,17 +111,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+    outputs:
+      # 機械的リスク判定に該当したか(00.check-user付与の有無と一致する)
+      risky: ${{ steps.risk.outputs.risky }}
+      # 後続のclaude-reviewを実行するか(#992)。riskyより広い条件で立つ
+      needs-review: ${{ steps.risk.outputs.needs-review }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: パスパターンによる機械的リスク判定
+      - name: パスパターンによる機械的リスク判定とレビュー実行ゲート判定
+        id: risk
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           BASE_REF: ${{ github.base_ref }}
+          # claude-reviewを実行する差分規模の閾値(#992)。いずれかを超えたら「大きな差分」と
+          # みなしてレビューを実行する。直近のdevelop向けPRの実測(2〜5ファイル・数十〜200行が
+          # 大半)をもとに、通常の機能追加PRはスキップされ、複数領域にまたがる変更だけが
+          # 引っかかる水準に設定している
+          REVIEW_FILE_THRESHOLD: "10"
+          REVIEW_LINE_THRESHOLD: "500"
         run: |
           set -e
           CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
@@ -138,6 +156,12 @@ jobs:
           fi
           if echo "$CHANGED_FILES" | grep -qE '(^|/)auth(/|\.[^/]*$)'; then
             add_reason "認証・認可関連ファイルの変更 (**/auth/**)"
+          fi
+          # 共有知識リポジトリのcheckout先(.gitignore済み)がコミットされていないかを機械的に確認する。
+          # 従来はclaude-reviewのプロンプトだけがこれを見ていたが、claude-reviewは
+          # 低リスクPRではskipされるようになった(#992)ため、機械判定側にも同じ確認を置く。
+          if echo "$CHANGED_FILES" | grep -q '^\.shared-context/'; then
+            add_reason "共有知識リポジトリのcheckout先が差分に混入している (.shared-context/**)。読み取り専用のため、コミットから除外する必要がある"
           fi
 
           if echo "$CHANGED_FILES" | grep -q '^package\.json$'; then
@@ -200,9 +224,91 @@ jobs:
             echo "機械的リスク判定: 該当なし"
           fi
 
+          # ここから、後続のclaude-reviewを実行するかどうかのゲート判定(#992)。
+          # develop向けPRの大半は2〜5ファイル・数百行以内の小規模かつ低リスクな変更で、
+          # そこにClaude Codeによる意味的レビューを毎回かけるのは費用対効果が低い。
+          # 「人が確認する必要がある/レビューが最後の判断材料になる」場面に絞って実行する。
+          #
+          # 注意: ここで立てるのはレビュー実行の要否だけで、00.check-user(マージ保留)の
+          # 判定には影響させない。差分が大きいことは「レビューを読みたい」理由にはなるが、
+          # 「マージを止める」理由ではないため、RISKYとは別のフラグとして扱う。
+          NEEDS_REVIEW=false
+          REVIEW_REASONS=""
+
+          add_review_reason() {
+            NEEDS_REVIEW=true
+            REVIEW_REASONS="${REVIEW_REASONS}${REVIEW_REASONS:+$'\n'}- $1"
+          }
+
+          # 差分規模の算出。lockファイルは自動生成で行数が大きく膨らむ一方、
+          # レビューで読む価値のある変更ではないため、ファイル数・行数の双方から除外する。
+          DIFF_NUMSTAT="$(git diff --numstat "origin/${BASE_REF}...HEAD" \
+            | grep -vE '(^|[/[:space:]])(pnpm-lock\.yaml|package-lock\.json)$' || true)"
+          CHANGED_COUNT="$(printf '%s\n' "$DIFF_NUMSTAT" | grep -c '[^[:space:]]' || true)"
+          # バイナリファイルはnumstatの追加/削除行が "-" になるため0として数える
+          CHANGED_LINES="$(printf '%s\n' "$DIFF_NUMSTAT" \
+            | awk '{ a = ($1 == "-" ? 0 : $1); d = ($2 == "-" ? 0 : $2); total += a + d } END { print total + 0 }')"
+
+          echo "差分規模: ${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行（lockファイル除く）"
+
+          if [ "$RISKY" = "true" ]; then
+            add_review_reason "機械的リスク判定に該当したため"
+          fi
+
+          if [ "$CHANGED_COUNT" -ge "$REVIEW_FILE_THRESHOLD" ] || [ "$CHANGED_LINES" -ge "$REVIEW_LINE_THRESHOLD" ]; then
+            add_review_reason "差分が大きいため（${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行。閾値: ${REVIEW_FILE_THRESHOLD}ファイル または ${REVIEW_LINE_THRESHOLD}行）"
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # 対応Issueが分からない場合はauto-merge自体もスキップされる。
+            # 判断材料を残すため、レビューは安全側に倒して実行する。
+            add_review_reason "対応Issue番号を特定できないため（安全側でレビューを実行）"
+          else
+            if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+              add_review_reason "対応Issueに \`00.check-user\` が付与されており、ユーザーが確認する際の判断材料が必要なため"
+            fi
+            # 共有知識への追加提案は、claude-reviewが投稿する
+            # <!-- shared-knowledge-verdict:approved --> コメントを
+            # shared-knowledge-propose.ymlが起点にしている。レビューをスキップすると
+            # 提案が永久に審査されないままになるため、提案があれば必ず実行する。
+            if gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' \
+              | grep -qF '<!-- shared-knowledge-proposal -->'; then
+              add_review_reason "対応Issueに共有知識への追加提案コメントがあり、審査が必要なため"
+            fi
+          fi
+
+          if [ "$NEEDS_REVIEW" = "true" ]; then
+            echo "claude-reviewを実行します。理由:"
+            echo "$REVIEW_REASONS"
+          else
+            echo "低リスクかつ小規模なため、claude-reviewをスキップします。"
+          fi
+
+          {
+            echo "needs-review=${NEEDS_REVIEW}"
+            echo "risky=${RISKY}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Claude Review 実行判定"
+            echo ""
+            if [ "$NEEDS_REVIEW" = "true" ]; then
+              echo "**実行する**"
+              echo ""
+              echo "$REVIEW_REASONS"
+            else
+              echo "**スキップする**（低リスクかつ小規模な変更のため）"
+            fi
+            echo ""
+            echo "- 変更ファイル数: ${CHANGED_COUNT}（閾値: ${REVIEW_FILE_THRESHOLD}）"
+            echo "- 変更行数: ${CHANGED_LINES}（閾値: ${REVIEW_LINE_THRESHOLD}）"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   claude-review:
-    needs: [identify-issue, wait-for-ci]
-    if: github.event.pull_request.draft == false
+    # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
+    # スキップされた場合、auto-mergeはclaude-reviewの結果を'skipped'として許容する
+    needs: [identify-issue, wait-for-ci, risk-check]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -400,7 +506,23 @@ jobs:
 
   auto-merge:
     needs: [identify-issue, risk-check, claude-review]
-    if: github.event.pull_request.draft == false
+    # claude-reviewはrisk-checkの判定次第でskipされる(#992)。needsの既定動作では
+    # 依存ジョブがskipされると後続もskipされてしまうため、条件を明示的に組み立てて
+    # 「claude-reviewがsuccessまたはskipped」を許容する。
+    # 逆に、claude-reviewやrisk-checkがfailureのときは従来どおり自動マージを行わない
+    # (レビュー結果が得られていない状態でマージしないための安全側の挙動)。
+    # identify-issueはdraft PRのときにskipされるため、successを要求することで
+    # draft PRに対する自動マージも従来どおり行われない。
+    # always()ではなく!cancelled()を使うのは、always()がワークフローのキャンセル時にも
+    # ジョブを実行してしまうため。本ワークフローは新しいpushが来ると古い実行を
+    # concurrencyで丸ごとキャンセルする(#818)ので、always()にすると
+    # supersededになった古い実行がauto-mergeを有効化してしまう。
+    if: >-
+      !cancelled()
+      && github.event.pull_request.draft == false
+      && needs.identify-issue.result == 'success'
+      && needs.risk-check.result == 'success'
+      && (needs.claude-review.result == 'success' || needs.claude-review.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write

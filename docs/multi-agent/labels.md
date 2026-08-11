@@ -137,6 +137,53 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
     `START_IMPLEMENTATION_OPTIONS`）にも「マージ前に確認が必要」として追加済みで、`21.plan-required`
     等と同様にダイアログから選択して付与できる（#366）。
 
+## Claude Reviewの実行要否を`risk-check`でゲートする（#992）
+
+`claude-review`ジョブ（Claude Codeによる意味的レビュー）は、当初はdevelop向けPRの作成・更新の
+たびに無条件で実行していた。しかし実際のdevelop向けPRは2〜5ファイル・数十〜200行程度の小規模で
+低リスクな変更が大半を占めており（本Issue検討時点の直近18件では14件・約78%がパスパターンに
+一切該当しない小規模変更だった）、そのすべてにClaude Codeの実行コストをかけるのは費用対効果が
+低い。そこで`risk-check`ジョブが`needs-review`出力を返し、`claude-review`はそれが`true`のときだけ
+実行する形に変更した。
+
+`needs-review`が`true`になる条件は以下のいずれかを満たす場合。
+
+| 条件 | 理由 |
+|---|---|
+| 一次判定（機械的リスク判定）に該当した | 変更内容そのものがリスクカテゴリに触れている。人間が確認する際の判断材料としてレビュー結果が要る |
+| 差分が大きい（10ファイル以上 **または** 500行以上） | 複数領域にまたがる変更は、パスパターンに引っかからなくても影響範囲の読解が要る |
+| 対応Issueに共有知識への追加提案コメント（`<!-- shared-knowledge-proposal -->`）がある | 提案の審査は`claude-review`だけが行う。スキップすると`shared-knowledge-propose.yml`の起点となる`<!-- shared-knowledge-verdict:approved -->`コメントが投稿されず、提案が永久に未審査のまま残る |
+| 対応Issueに既に`00.check-user`が付いている | ユーザーが確認待ちの状態であり、判断材料としてレビュー結果が役立つ |
+| 対応Issue番号を特定できない（ブランチ名が`issue-<番号>`規約外） | この場合`auto-merge`自体もスキップされる。安全側に倒してレビューを実行する |
+
+差分規模の算出では`pnpm-lock.yaml`・`package-lock.json`をファイル数・行数の双方から除外する。
+自動生成されるlockファイルは依存を1つ追加しただけでも数百行動くため、除外しないと
+「依存を1つ足しただけの小さなPR」が常に差分規模の閾値を超えてしまう。
+
+設計上の注意点は次の3つ。
+
+- **差分規模は`00.check-user`の判定には影響させない。** 差分が大きいことは「レビューを読みたい」
+  理由にはなるが「マージを止める」理由ではないため、`risk-check`内では機械的リスク判定の
+  フラグ（`RISKY`）とレビュー実行ゲートのフラグ（`NEEDS_REVIEW`）を別々に持っている。
+  閾値超過だけでは`00.check-user`は付かず、レビュー結果が問題なければそのまま自動マージされる。
+- **`auto-merge`ジョブは`claude-review`がskipされても進む必要がある。** `needs`の既定動作では
+  依存ジョブがskipされると後続もskipされるため、`auto-merge`の`if`で
+  「`claude-review`が`success`または`skipped`」を明示的に許容している。`failure`のときは
+  従来どおり自動マージしない。
+- **`always()`ではなく`!cancelled()`を使う。** `always()`はワークフローのキャンセル時にも
+  ジョブを実行してしまう。本ワークフローは新しいpushが来ると古い実行をconcurrencyで丸ごと
+  キャンセルする（#818）ため、`always()`にするとsupersededになった古い実行がauto-mergeを
+  有効化してしまう。
+
+判定結果（実行するかスキップするか、その理由、差分規模と閾値）は`risk-check`ジョブの
+Job Summaryに出力される。スキップした旨をPRやIssueへコメント投稿はしない。低リスクPRは
+そのまま自動マージされるため、毎回コメントが増えるとノイズになるだけだからである。
+
+なお、この閾値（10ファイル / 500行）は`risk-check`ジョブの`env`（`REVIEW_FILE_THRESHOLD`・
+`REVIEW_LINE_THRESHOLD`）で定義している。リポジトリごとにPRの粒度が違うため、
+他リポジトリへ移植する際はここを調整する。
+
+
 ## 自動マージ可否の判定方法
 
 自動マージ不可カテゴリ（`00.check-user`付与対象）:
@@ -151,8 +198,8 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **CI完了待ち（`wait-for-ci`ジョブ）**: `risk-check`・`claude-review`はいずれも`wait-for-ci`ジョブに`needs`で依存しており、`ci.yml`（ワークフロー名`CI`）がそのPRのhead SHAに対して`completed`になるまで待ってから起動する。CIが`in_progress`のうちに`00.check-user`が付き、issue-deck画面上で時期尚早に「要確認」と見えてしまう問題を防ぐため（#810）。20秒間隔・最大60回（約20分）ポーリングし、タイムアウトした場合もジョブ自体は失敗させずそのまま後続へ進める（fail-open。失敗させると`risk-check`/`claude-review`がskipされ、レビュー自体が行われないまま放置される事故につながるため）。なお実際のマージ可否は`auto-merge`ジョブがGitHub Auto-merge機能（`develop`の`required_status_checks`でCI完了を待つ）に委ねているため、`wait-for-ci`の有無に関わらずマージの安全性自体は保たれる。
-- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。ヒットしたら対応Issueに`00.check-user`を自動付与する。
-- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。
+- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`）に照合する。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。あわせて、共有知識リポジトリのcheckout先である`.shared-context/`（`.gitignore`済み）が差分に混入していないかも確認する。従来はこの確認を`claude-review`のプロンプトだけが担っていたが、`claude-review`は低リスクPRではskipされるようになった（#992）ため、機械判定側にも同じ確認を置いている。ヒットしたら対応Issueに`00.check-user`を自動付与する。
+- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。ただしこのジョブは全PRで実行されるわけではなく、`risk-check`ジョブの`needs-review`出力によってゲートされる（後述「Claude Reviewの実行要否を`risk-check`でゲートする」、#992）。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
