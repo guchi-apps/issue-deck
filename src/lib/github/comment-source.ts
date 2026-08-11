@@ -153,9 +153,10 @@ const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "claude-conflict-resolve": "conflict-resolver",
   "claude-ci-fix": "ci-fixer",
   "issue-labels": "notifier",
-  // 起動コメント自体は「誰かが開始を指示した」ことを伝えるだけで、実装・計画は
-  // このあとワークフローが投稿する別のコメントが担う。案内役として扱う
-  "project-status-dispatch": "guide",
+  // project-status-dispatchは意図的に割り当てない。カンバンのStatus変更で起動した
+  // コメントは、issue-mapper.tsが投稿者マーカーから操作者本人へ寄せて表示するため
+  // （ボタン経由の起動と同じ見た目にする。#1026）、ボットの役割を持たせるとボット名と
+  // 投稿者名が食い違う
 };
 
 /** resolveCommentSource()の結果からボットの役割を導く。役割を特定できない場合はnull（汎用ボット扱い） */
