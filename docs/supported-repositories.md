@@ -23,6 +23,30 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/shopping-list` | 対応済み | **参照**: `issue-labels.yml`（`@workflows/v1`）・`claude-issue-dispatch.yml`（`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #357, #723, #895, #942 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
 | `guchi-apps/dayspan` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`（ともに`@workflows/v6`）。**コピー**: `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`release-develop-to-main.yml` | あり（新規作成） | 2026-08-09 | #971 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
 
+## ローカル起動プロトコルの適合状況
+
+上の表はGitHub Actions側の自動化についてのもの。**ローカルのワンクリック起動**（issue-deckの画面の
+「ローカルで開始」）は別の軸で、対応可否は各リポジトリの`scripts/start-issue.sh`の冒頭に置いた
+マーカー行が決める。
+
+| リポジトリ | ローカル起動プロトコル |
+|---|---|
+| `guchi-apps/issue-deck` | v1 |
+| `guchi-apps/dayspan` | v1 |
+| `guchi-apps/shopping-list` | — |
+
+**この表は要約であって真実の源ではない。** 正はマーカー行そのもので、次のコマンドが実態を読む。
+
+```bash
+scripts/check-local-session-contract.sh --all
+```
+
+Actions側の対応とローカル起動の対応は**必ずしも一致しない**。導入順が「ワークフロー→ローカル」に
+なるため、Actionsは対応済みでローカルは未対応、という状態が普通に発生する。
+
+約束の内容と移植手順は [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)
+「ローカル起動プロトコル v1」を参照。
+
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
 リポジトリが実際にワークフローファイルを導入した際、issue-deckのどのコミット時点から
