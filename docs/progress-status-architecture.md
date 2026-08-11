@@ -244,6 +244,12 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 **Issueのクローズ（`cleanup-on-close`）は報告しない。** このジョブは進捗ラベルを外すが、`09.main`は
 残す。ここで`ready`を報告すると、`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。
 
+**手で付け替えたラベルもStatusへ反映する**（#1042）。当初はワークフローのラベル遷移だけを
+報告元にしていたが、GitHubのUI・CLI・issue-deckの画面から手でラベルを変えてもStatusが追従せず、
+再同期を押すまでズレたままになっていた。運用上ラベルの手動付け替えは常態のため、
+`issues` Webhookの`labeled`・`unlabeled`を受けて報告する。**DBの値と比較してから呼ぶ**ので、
+ワークフローが付けたラベル（報告済みで一致している）では二重に報告されない。
+
 **ズレの是正方向はラベル → Status。** 再同期ボタン（`POST /api/sync/issues`）が
 `reconcileProjectStatusesFromLabels`を呼び、報告の取りこぼし（issue-deckの停止中・疎通失敗）を
 回収する。Phase 2はラベルが正でStatusがその写しであり、Statusを唯一の正にするのはPhase 5。

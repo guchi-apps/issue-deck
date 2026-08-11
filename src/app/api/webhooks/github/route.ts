@@ -14,6 +14,7 @@ import {
   type DispatchMode,
 } from "@/lib/github/project-status-dispatch";
 import { fetchProjectItem } from "@/lib/github/projects-api";
+import { reportProgressStatus } from "@/lib/github/report-progress";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
@@ -21,6 +22,7 @@ import {
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
+import { getProgressStatusDef, matchProgressLabels } from "@/lib/issue-progress";
 import type { AccountType, IssueState } from "@prisma/client";
 
 type InstallationRepoPayload = {
@@ -96,7 +98,70 @@ async function handleIssuesEvent(payload: {
   });
   if (!repository) return;
 
+  // 反映前のStatusを控える。取り込み後だと「変わったかどうか」が判定できない
+  const previousStatus = (
+    await db.issue.findUnique({
+      where: { repositoryId_number: { repositoryId: repository.id, number: payload.issue.number } },
+      select: { projectStatus: true },
+    })
+  )?.projectStatus ?? null;
+
   await upsertIssueFromWebhookPayload(repository.id, payload.issue);
+
+  if (payload.action === "labeled" || payload.action === "unlabeled") {
+    await syncProjectStatusFromLabels({
+      repositoryFullName: repository.fullName,
+      issueNumber: payload.issue.number,
+      // GitHubのペイロードはラベルを文字列またはオブジェクトで返す（sync-issues.tsのmapLabelNameと同じ正規化）
+      labelNames: payload.issue.labels.map((label) => (typeof label === "string" ? label : label.name)),
+      currentProjectStatus: previousStatus,
+    });
+  }
+}
+
+/**
+ * 手で付け替えたラベルをProject Statusへ反映する（#1042）。
+ *
+ * 進捗報告（#991 Phase 2）はワークフローのラベル遷移からしか行っていなかったため、
+ * **GitHubのUI・CLI・issue-deckの画面から手でラベルを変えてもStatusが追従しなかった**。
+ * 運用上ラベルの手動付け替えは常態のため（CLAUDE.mdもワークフローの付与を「付け忘れの安全網」と
+ * 位置づけている）、ここで埋める。
+ *
+ * **DBの値と比較してから呼ぶ。** 一致していればGitHubへ問い合わせない。ラベル変更は頻繁に
+ * 起きるうえ、Projects v2はGraphQL枠を消費するため、無駄打ちを避ける。ワークフローが付けた
+ * ラベルは報告済みで一致しているため、二重に報告されることもない。
+ *
+ * **進捗ラベルが1つも無い状態（`ready`）へは戻さない。** ラベル無しを理由にStatusを巻き戻すと、
+ * 人がカンバンでドラッグした結果（Phase 3の起動トリガー）を潰す。
+ * `reconcileProjectStatusesFromLabels`と同じ方針。
+ */
+async function syncProjectStatusFromLabels(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  labelNames: string[];
+  currentProjectStatus: string | null;
+}) {
+  const labelStatus = matchProgressLabels(
+    params.labelNames.map((name) => ({ name, color: "", description: null })),
+  );
+  if (labelStatus === "ready") return;
+  if (getProgressStatusDef(labelStatus).projectStatus === params.currentProjectStatus) return;
+
+  try {
+    await reportProgressStatus({
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      status: labelStatus,
+    });
+  } catch (error) {
+    // Statusの反映に失敗してもIssueの取り込み自体は済んでいる。再同期で是正できる
+    console.error(
+      "[webhooks/github] failed to sync project status from labels",
+      params.repositoryFullName,
+      params.issueNumber,
+      error,
+    );
+  }
 }
 
 async function handleIssueCommentEvent(payload: {
