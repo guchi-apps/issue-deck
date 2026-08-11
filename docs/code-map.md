@@ -137,6 +137,10 @@ pnpm test:unit   # vitestのみ
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub Appの3系統に分かれる。
 
+既存のworktree（`~/apps/issue-deck-worktrees/issue-<番号>`）の`.env.local`には、`start-issue.sh`が
+セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
+古いworktreeを開き直したときに自動で埋まる。
+
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
