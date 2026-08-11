@@ -31,6 +31,20 @@ type MoveIssueDialogProps = {
   onMoved: (issue: Issue) => void;
 };
 
+/**
+ * 移動先として選べるリポジトリを返す。移動元リポジトリ自身に加えて、
+ * claude-issue-dispatch.yml未導入（IssueDeckの自動化に未対応）のリポジトリも除く（#1074）。
+ * 未対応リポジトリへ移すとラベル運用も自動実行も引き継げず、移動が取り消せないため。
+ */
+export function moveDestinationRepositories(
+  repositories: ConnectedRepository[],
+  currentRepositoryFullName: string,
+): ConnectedRepository[] {
+  return repositories.filter(
+    (repo) => repo.hasClaudeWorkflow && repo.fullName !== currentRepositoryFullName,
+  );
+}
+
 export function MoveIssueDialog({
   open,
   onOpenChange,
@@ -39,9 +53,7 @@ export function MoveIssueDialog({
   onMoved,
 }: MoveIssueDialogProps) {
   const { transferIssue, isSubmitting, error, setError } = useIssueMutations();
-  const destinationCandidates = repositories.filter(
-    (repo) => repo.fullName !== issue.repositoryFullName,
-  );
+  const destinationCandidates = moveDestinationRepositories(repositories, issue.repositoryFullName);
   const [newRepositoryFullName, setNewRepositoryFullName] = useState<string>("");
 
   useEffect(() => {
@@ -93,6 +105,9 @@ export function MoveIssueDialog({
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              IssueDeckの自動化に対応済み（claude-issue-dispatch.yml導入済み）のリポジトリのみ表示しています。
+            </p>
           </div>
 
           <ApiErrorMessage message={error} />

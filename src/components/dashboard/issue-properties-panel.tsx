@@ -2,7 +2,10 @@ import { Archive, ArrowRightLeft, CircleAlert, FolderGit2, Lock, Plus, X } from 
 import { useState } from "react";
 
 import { LabelPicker } from "@/components/dashboard/label-picker";
-import { MoveIssueDialog } from "@/components/dashboard/move-issue-dialog";
+import {
+  moveDestinationRepositories,
+  MoveIssueDialog,
+} from "@/components/dashboard/move-issue-dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -34,7 +37,7 @@ export function IssuePropertiesPanel({
     useIssueRepoMeta(issue.repositoryFullName);
   const { updateIssue, isSubmitting } = useIssueMutations();
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-  const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
+  const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);

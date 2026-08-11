@@ -36,7 +36,10 @@ import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog"
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
-import { MoveIssueDialog } from "@/components/dashboard/move-issue-dialog";
+import {
+  moveDestinationRepositories,
+  MoveIssueDialog,
+} from "@/components/dashboard/move-issue-dialog";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -150,7 +153,7 @@ export function MobileIssueDetail({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
-  const canMove = repositories.some((repo) => repo.fullName !== issue.repositoryFullName);
+  const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   const startDisabledReason = startImplementationDisabledReason(
     repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
   );
