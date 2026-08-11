@@ -76,7 +76,9 @@ if (-not $launcherReady) {
 $bashCmd = "$launcher $owner $repo $number"
 
 # 上の検証を通った値しか埋め込んでいないため、引用符・区切り文字が壊れる余地はない。
-$wtArgs = "-w 0 new-tab --title issue-$number -- wsl.exe -d $distro -- bash -lc `"$bashCmd`""
+# タブ名は「<repo> #<Issue番号>」。複数リポジトリ・複数Issueのタブを並べても、どのリポジトリの
+# どのIssueかがタブだけで分かるようにする（#1105）。ownerまで入れると幅を食うためrepoのみ。
+$wtArgs = "-w 0 new-tab --title `"$repo #$number`" -- wsl.exe -d $distro -- bash -lc `"$bashCmd`""
 
 $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
 if ($wt) {
