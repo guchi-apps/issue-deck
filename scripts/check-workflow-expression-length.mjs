@@ -105,7 +105,16 @@ if (over.length > 0) {
 // 評価されない（ワークフローYAMLの外にあるため）。どちらも実行時に静かに壊れるだけで
 // 気付きにくいため、CIで落とす。
 const PROMPT_DIR = ".github/prompts";
-const KNOWN_PLACEHOLDERS = ["ISSUE_NUMBER", "BRANCH", "PR_URL", "MODE", "REPOSITORY", "RUN_URL"];
+const KNOWN_PLACEHOLDERS = [
+  "ISSUE_NUMBER",
+  "BRANCH",
+  "PR_URL",
+  "PR_NUMBER",
+  "MODE",
+  "REPOSITORY",
+  "RUN_URL",
+  "VERIFY_COMMANDS",
+];
 
 const promptProblems = [];
 let promptFiles = [];
@@ -134,7 +143,7 @@ if (promptProblems.length > 0) {
   console.error("エラー: プロンプトファイルのプレースホルダに問題があります。");
   for (const problem of promptProblems) console.error(problem);
   console.error(`  使用できるのは ${KNOWN_PLACEHOLDERS.map((n) => "\${" + n + "}").join(" ")} です。`);
-  console.error("  追加する場合は claude-issue-dispatch.yml の「〜プロンプトを組み立てる」ステップの");
+  console.error("  追加する場合は各呼び出し元ワークフローの「〜プロンプトを組み立てる」ステップの");
   console.error("  env: と envsubst の変数リスト、およびこのスクリプトの KNOWN_PLACEHOLDERS を更新してください。");
   process.exit(1);
 }
