@@ -4,7 +4,8 @@ import {
   classifyPullRequest,
   extractLinkedIssueNumber,
   groupPullRequestsByRepository,
-  needsManualMerge,
+  canMergeFromDeck,
+  mergeWarnings,
   sortOpenPullRequests,
 } from "@/lib/pull-request-list";
 import type { OpenPullRequest } from "@/types/pull-request";
@@ -128,22 +129,42 @@ describe("groupPullRequestsByRepository", () => {
   });
 });
 
-describe("needsManualMerge", () => {
-  it("CI通過済みでdraftでもAuto-merge待ちでもないPRだけtrue", () => {
-    expect(needsManualMerge(pullRequest({ ciState: "success" }))).toBe(true);
+describe("canMergeFromDeck", () => {
+  it("draft以外はCIの状態によらずマージ操作の対象にする", () => {
+    expect(canMergeFromDeck(pullRequest({ ciState: "success" }))).toBe(true);
+    expect(canMergeFromDeck(pullRequest({ ciState: "failure" }))).toBe(true);
+    expect(canMergeFromDeck(pullRequest({ ciState: "pending" }))).toBe(true);
+    expect(canMergeFromDeck(pullRequest({ autoMergeEnabled: true }))).toBe(true);
   });
 
-  it("draftはマージ対象にしない", () => {
-    expect(needsManualMerge(pullRequest({ draft: true }))).toBe(false);
+  it("draftはGitHub側がマージを受け付けないため対象にしない", () => {
+    expect(canMergeFromDeck(pullRequest({ draft: true }))).toBe(false);
+  });
+});
+
+describe("mergeWarnings", () => {
+  it("CI通過済み・Auto-merge無効なら確認は不要", () => {
+    expect(mergeWarnings(pullRequest({ ciState: "success" }))).toEqual([]);
   });
 
-  it("Auto-merge有効なPRは放っておけばマージされるため対象にしない", () => {
-    expect(needsManualMerge(pullRequest({ autoMergeEnabled: true }))).toBe(false);
+  it("CIの状態ごとに確認文言を返す", () => {
+    expect(mergeWarnings(pullRequest({ ciState: "failure" }))).toEqual(["CIが失敗しています。"]);
+    expect(mergeWarnings(pullRequest({ ciState: "pending" }))).toEqual(["CIがまだ実行中です。"]);
+    expect(mergeWarnings(pullRequest({ ciState: "unknown" }))).toEqual([
+      "CIの状態を確認できていません。",
+    ]);
   });
 
-  it("CIが通っていないPRは対象にしない", () => {
-    expect(needsManualMerge(pullRequest({ ciState: "pending" }))).toBe(false);
-    expect(needsManualMerge(pullRequest({ ciState: "failure" }))).toBe(false);
-    expect(needsManualMerge(pullRequest({ ciState: "unknown" }))).toBe(false);
+  it("Auto-merge有効なPRは待てば自動でマージされることを伝える", () => {
+    expect(mergeWarnings(pullRequest({ autoMergeEnabled: true }))).toEqual([
+      "Auto-mergeが有効です。待てばCI通過後に自動でマージされます。",
+    ]);
+  });
+
+  it("CI未通過とAuto-merge有効は両方並べる", () => {
+    expect(mergeWarnings(pullRequest({ ciState: "pending", autoMergeEnabled: true }))).toEqual([
+      "CIがまだ実行中です。",
+      "Auto-mergeが有効です。待てばCI通過後に自動でマージされます。",
+    ]);
   });
 });
