@@ -21,6 +21,7 @@ import {
   updateQaAnswerPendingState,
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
+import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import { getProgressStatusDef, matchProgressLabels } from "@/lib/issue-progress";
 import type { AccountType, IssueState } from "@prisma/client";
@@ -252,6 +253,12 @@ async function handleInstallationRepositoriesEvent(payload: {
         repo.name,
         installationToken,
       ).catch(() => false);
+      // ローカル起動プロトコルへの適合（#1073）。Actions側の対応とは別の軸なので個別に問い合わせる。
+      const hasLocalStartScript = await fetchLocalStartScriptSupported(
+        ownerLogin,
+        repo.name,
+        installationToken,
+      ).catch(() => false);
       const created = await db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
@@ -265,6 +272,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           archived: false,
           defaultBranch: "main",
           hasClaudeWorkflow,
+          hasLocalStartScript,
           lastSyncedAt: new Date(),
         },
         update: {
@@ -273,6 +281,7 @@ async function handleInstallationRepositoriesEvent(payload: {
           fullName: repo.full_name,
           private: repo.private,
           hasClaudeWorkflow,
+          hasLocalStartScript,
         },
       });
       await syncRepositoryIssues({

@@ -71,6 +71,23 @@ export function isSupportedLocalSessionContract(version: number | null): boolean
 }
 
 /**
+ * 画面にローカル起動の導線（「ローカルで開始」ボタン・「ローカル起動コマンドをコピー」・
+ * 「ローカル起動のセットアップ」）を出してよいか（#1073）。
+ *
+ * 判定材料は`Repository.hasLocalStartScript`のみ。**`false`のときだけ隠し、`undefined`では
+ * 隠さない。** リポジトリ情報が見つからない場合に誤って導線を消さないためで、
+ * `startImplementationDisabledReason`（`lib/github/start-implementation.ts`）と同じ判断。
+ *
+ * ここで分かるのは「リポジトリにマーカー付きの`scripts/start-issue.sh`があるか」までで、
+ * ローカルの対応表（`~/.config/issue-deck/local-repos.conf`）とチェックアウトのブランチは
+ * 画面からは知りようがない。**出したボタンが失敗することはある。** そこはWSL側のエラー
+ * メッセージとセットアップダイアログ（#1088）が担う。
+ */
+export function canStartLocalSession(hasLocalStartScript: boolean | undefined): boolean {
+  return hasLocalStartScript !== false;
+}
+
+/**
  * owner・repoに許可する文字。GitHubのowner名・リポジトリ名で実際に使われうる文字に限定し、
  * `;`（Windows Terminalのサブコマンド区切り）や空白・引用符が混ざる余地を無くしている。
  */

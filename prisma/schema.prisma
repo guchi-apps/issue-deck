@@ -95,6 +95,10 @@ model Repository {
   // claude-issue-dispatch.ymlの存在有無による近似的な対応判定（#720）。DBに保存し、
   // リポジトリ同期のタイミング（GitHub Appインストール時・リポジトリ再同期時）で更新する。
   hasClaudeWorkflow  Boolean   @default(false)
+  // ローカル起動プロトコルへの適合（#1073）。scripts/start-issue.sh 冒頭のマーカー行で判定する。
+  // hasClaudeWorkflowとは軸が違う（あちらはActions側の対応）。導入順が「ワークフロー→ローカル」に
+  // なるため、片方だけ対応済みという状態が普通に起きる。
+  hasLocalStartScript Boolean  @default(false)
   lastSyncedAt       DateTime?
 
   createdAt DateTime @default(now())
