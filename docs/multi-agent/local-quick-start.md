@@ -126,9 +126,82 @@ Issue詳細の「…」メニューに**「ローカル起動コマンドをコ�
 重ねて走るのを防ぐため（[labels.md](labels.md)）。ラベル付与に失敗しても起動自体は妨げない
 （起動できないより、ラベルが遅れる方が軽いという判断）。
 
+## VSCodeのタブから始める（`/issue <番号>`）
+
+上のワンクリック起動はWindows Terminalの**タブ**を開くため、同時に見えるのは1つだけになる。
+VSCodeのClaude Codeタブを横に並べて複数Issueを並行で進める使い方（1ウィンドウ・Nタブ）には、
+`.claude/commands/issue.md` のスラッシュコマンドを使う。
+
+```text
+VSCodeでClaude Codeのタブを開く（Claude Code: Open in New Tab）
+  ↓
+/issue 1049
+  ↓
+worktree準備（scripts/start-issue.sh --prepare-only）→ ラベル付与 → プロンプト適用
+```
+
+`--prepare-only`はworktree・ブランチ・`.env.local`・ポート採番・`pnpm install`・起動用
+プロンプトの生成までを行い、**開発サーバーもClaude Codeも起動せずに終了する**。既に
+セッションの中にいるので、さらに`claude`を起動しても意味がないため。LANアクセス設定
+（Windowsの管理者権限＝UACダイアログが出る）も、開発サーバーを立てない以上は不要なので
+スキップする。
+
+worktreeが既にある場合は作り直さず再利用する。同じIssueへ戻る操作がここで吸収される。
+
+### worktreeを編集できるようにする
+
+Claude Codeタブのカレントディレクトリは、VSCodeで開いているフォルダ（＝本体チェックアウト）
+になる。worktreeはその外にあるため、**そのままではEdit/Writeが通らない**。
+
+その場限りで通すなら、セッション内で一度だけ実行する。
+
+```text
+/add-dir ~/apps/issue-deck-worktrees/issue-1049
+```
+
+毎回不要にするなら、`.claude/settings.local.json`（ローカル専用。gitで無視される）に書く。
+
+```json
+{
+  "permissions": {
+    "additionalDirectories": ["~/apps/issue-deck-worktrees"]
+  }
+}
+```
+
+**コミット対象の`.claude/settings.json`には書かない。** そちらはGitHub Actions上の無人実行でも
+読まれるため、Actions側に存在しないパスを持ち込むことになる。
+
+### なぜ本体チェックアウトで作業しないか
+
+タブを複数開くと、全タブのカレントディレクトリが同じ本体チェックアウトになる。そこで
+`git switch`すると**他タブのセッションの作業ツリーごと切り替わる**。実際、このIssueの作業中に
+本体が`issue-1049`から`issue-834`へ切り替わり、未コミットの変更が別Issueのセッション側へ
+持ち越される事故が起きた。`/issue`が必ずworktreeへ寄せるのはこのため。
+
+### Claude Code純正のworktree機能を使わない理由
+
+Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Worktree`があるが、
+このリポジトリでは採用していない。実測（2026-08-11、CLI 2.1.220 / 拡張 2.1.227）での差分は次のとおり。
+
+| 項目 | 純正worktree | issue-deckの規約 | |
+|---|---|---|---|
+| 作成先 | `<repo>/.claude/worktrees/<name>` | `~/apps/issue-deck-worktrees/<name>` | リポジトリ内部に入る |
+| ブランチ名 | `worktree-<name>` 固定 | `issue-<番号>` | **衝突** |
+| 分岐元 | `origin/HEAD`（このリポジトリでは`develop`） | `develop` | 一致 |
+| gitignore | 追加されない（`?? .claude/`が出る） | — | 除外設定が要る |
+
+**ブランチ名が決定的**で、`worktree-issue-1049`のような名前になる。`issue-<番号>`の命名規約を
+前提にした`issue-labels.yml`等の自動化（[labels.md](labels.md)）が対象外と判定して空振りする。
+設定スキーマに`branchPrefix`・`branchName`にあたる項目は無く、コード上も`worktree-${name}`の
+ハードコードのため、設定で回避できない。
+
+一方`worktree.symlinkDirectories`で`node_modules`をメインリポジトリから共有できる点は純正が
+優れており、`--prepare-only`が毎回`pnpm install`する現状より速い。命名の制約が外れたら再検討する。
+
 ## 未対応（このIssueの範囲外）
 
-- 既存worktreeがある状態での**再アタッチ**。`start-issue.sh`はworktreeが既に存在すると
-  エラー終了する。同じIssueへ戻る操作は今も手作業。
-- マージ済みworktreeの**掃除**。放置すると溜まり、上記の再アタッチ不可と組み合わさって
+- **画面のワンクリック起動からの再アタッチ**。`/issue`は既存worktreeを再利用するが、
+  `start-issue.sh`を素で叩く経路（＝画面のボタン）はworktreeが既に存在するとエラー終了する。
+- マージ済みworktreeの**掃除**。放置すると溜まり、上記と組み合わさって
   「一度やったIssueはボタンから起動できない」状態になる。
