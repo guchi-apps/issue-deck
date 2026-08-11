@@ -81,6 +81,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
   報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
   まとめて載せる（`addMissingProjectItems`）。
+- **マージ待ちPR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
+  Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
+  無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
+  （#1058の調査時点で全連携リポジトリ合計0件）、DBキャッシュを持つ効果より
+  スキーマ・Webhook設定を増やさない方が勝つと判断した。マージ済みPRの履歴や既読管理が
+  必要になった時点でキャッシュ層の追加を再検討する。
+  取得コストは「対象リポジトリ数 + draft以外のPR数」回のAPI呼び出しで、母集団が広いぶん
+  1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
+  `hooks/use-open-pull-requests.ts`）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

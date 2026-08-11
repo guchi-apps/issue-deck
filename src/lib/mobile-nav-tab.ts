@@ -10,6 +10,9 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab {
       return "repos";
     case "issue-detail":
       return resolveBottomNavTab(screen.back);
+    // マージ待ちPR一覧はホームからのドリルダウンで、対応するタブを持たない（#1058）
+    case "pull-requests":
+      return "home";
     default:
       return screen.kind;
   }

@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
+  GitPullRequest,
   Lock,
   Plus,
   Settings2,
@@ -16,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 
+import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
@@ -29,6 +31,9 @@ import { cn } from "@/lib/utils";
 type SidebarNavProps = {
   activeView: NavViewId;
   onSelectView: (view: NavViewId) => void;
+  /** 中央カラムに表示中のペイン。Issueビューの選択状態はIssueペインのときだけ表示する */
+  activePane: DashboardPane;
+  onSelectPane: (pane: DashboardPane) => void;
   navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
   selectedRepoFullNames?: string[];
@@ -52,6 +57,8 @@ type SidebarNavProps = {
 export function SidebarNav({
   activeView,
   onSelectView,
+  activePane,
+  onSelectPane,
   navCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -102,7 +109,7 @@ export function SidebarNav({
                     onClick={() => onSelectView(view.id)}
                     className={cn(
                       "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                      activeView === view.id && "bg-accent font-medium",
+                      activeView === view.id && activePane === "issues" && "bg-accent font-medium",
                       isCheckUserHighlighted && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
                     )}
                   >
@@ -129,6 +136,27 @@ export function SidebarNav({
               </Fragment>
             );
           })}
+        </ul>
+      </div>
+
+      <div>
+        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Pull Request</h2>
+        <ul className="flex flex-col gap-0.5">
+          <li>
+            <button
+              type="button"
+              onClick={() => onSelectPane("pull-requests")}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                activePane === "pull-requests" && "bg-accent font-medium",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <GitPullRequest className="size-3.5 text-muted-foreground" />
+                マージ待ちPR
+              </span>
+            </button>
+          </li>
         </ul>
       </div>
 
