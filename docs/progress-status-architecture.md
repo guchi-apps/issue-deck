@@ -228,6 +228,16 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 `updateProjectV2ItemFieldValue`が`Resource not accessible by integration`で失敗する
 （[`projects-api.ts`](../src/lib/github/projects-api.ts)がこの文言を検出してヒントを添える）。
 
+#### 有効になるのはmainへのリリース後
+
+報告先の`/api/progress`は**本番へデプロイされて初めて存在する**。`APP_BASE_URL`は本番を指しており、
+developへマージしただけでは報告は届かない。またシークレットを本番の`.env`へ配るのは
+`deploy.yml`（mainへのpushで動く）なので、**ワークフロー側の設定が揃っていてもリリース前は
+HTTP 404、直後の一瞬は503になりうる**。
+
+いずれも警告に留まりジョブは成功するため実害は無く、**リリース後の最初の遷移から自然に効き始める**。
+リリース前に進んだぶんのズレは再同期ボタンで回収できる。
+
 ### Phase 3 の設計（合意済み）
 
 **起動経路をStatus一本化する。** 「実装を開始」ボタンはStatusとオプションラベルだけを書き、
