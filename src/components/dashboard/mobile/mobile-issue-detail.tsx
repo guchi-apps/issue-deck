@@ -114,6 +114,7 @@ type MobileIssueDetailProps = {
   onToggleFavorite: (issue: Issue) => void;
   onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
+  onSelectRepository: (repositoryFullName: string) => void;
 };
 
 export function MobileIssueDetail({
@@ -128,6 +129,7 @@ export function MobileIssueDetail({
   onToggleFavorite,
   onCreateIssue,
   onCreateFollowupIssue,
+  onSelectRepository,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const commentSummary = useIssueCommentSummaries(issue);
@@ -583,7 +585,13 @@ export function MobileIssueDetail({
       >
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <FolderGit2 className="size-3.5" />
-          {issue.repositoryFullName}
+          <button
+            type="button"
+            onClick={() => onSelectRepository(issue.repositoryFullName)}
+            className="hover:text-foreground hover:underline"
+          >
+            {issue.repositoryFullName}
+          </button>
           {issue.repositoryArchived && (
             <Archive className="size-3" aria-label="アーカイブ済み" />
           )}

@@ -245,6 +245,13 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate],
   );
 
+  // Issue詳細画面のリポジトリ名クリックなど、ConnectedRepositoryオブジェクトを持たず
+  // fullNameだけが分かっている場合の遷移用（#997）。
+  const selectRepositoryByFullName = useCallback(
+    (fullName: string) => navigate({ screen: "repo-detail", repo: fullName }),
+    [navigate],
+  );
+
   const selectQuickView = useCallback(
     (nextView: NavViewId) =>
       navigate({
@@ -393,6 +400,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     isPending,
     selectTab,
     selectRepository,
+    selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
     applyQuickFilter,
