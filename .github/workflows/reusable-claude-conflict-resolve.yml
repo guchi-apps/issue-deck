@@ -72,6 +72,14 @@ on:
         required: false
         type: string
         default: ""
+      install-dependencies:
+        description: >-
+          ランタイム準備で依存関係をインストールするか。runtime-setup が minimal 以外のときのみ効く。
+          Nodeのセットアップは必要だが依存のインストールは不要なリポジトリ（検証コマンドが
+          node --check だけで node_modules を要さない等）で false にする。
+        required: false
+        type: boolean
+        default: true
       build-env:
         description: >-
           Claude Codeステップに設定するビルド検証用の環境変数（複数行の KEY=VALUE）。
@@ -320,7 +328,7 @@ jobs:
           cache: ${{ inputs.package-manager }}
 
       - name: 依存関係をインストールする
-        if: steps.state.outputs.should_resolve == 'true' && inputs.runtime-setup != 'minimal'
+        if: steps.state.outputs.should_resolve == 'true' && inputs.runtime-setup != 'minimal' && inputs.install-dependencies
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
