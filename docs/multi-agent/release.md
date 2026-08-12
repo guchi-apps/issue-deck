@@ -33,12 +33,42 @@ major/minor/patchのいずれでもない不正な場合はpatchにフォール�
 
 ## トリガー
 
-`workflow_dispatch`（手動実行）のみ。バンプPR・develop→mainのPR作成は人間の確認なしに
-走ってしまうため、developへのPRマージや`schedule`による自動起動はしない（#178）。人間が
-GitHub ActionsのUIから`Run workflow`で明示的に実行する。
+`workflow_dispatch`（手動実行）と、**`package.json`の変更を伴う`develop`へのpush**の2つ。
 
-同時実行による二重作成を避けるため、`concurrency`グループで直列化している（手動実行のみの
-現在でも、短時間に複数回実行された場合の安全網として維持している）。
+```yaml
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [develop]
+    paths:
+      - package.json
+```
+
+`schedule`による定期起動はしない（#178）。通常のフィーチャーpushでは`package.json`が変わらない
+ため、pushトリガーが発火するのは実質**バンプPRがdevelopへマージされた瞬間だけ**である。この1回で
+develop→mainのPRを自動作成し、「バンプPRをマージしたあと、もう一度手で起動する」という手間を
+省いている。
+
+**pushトリガーからバンプPRが誤作成されることはない。** `need_bump`系のステップは
+`github.event_name == 'workflow_dispatch'`でゲートしてあり、push起点の実行はdevelop→mainのPR作成
+だけを行う。
+
+同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
+
+### pushトリガーで起動したときは、ワークフローファイルもdevelop側のものが使われる
+
+`workflow_dispatch`は起動時に`--ref`でどのブランチのワークフローファイルを使うか選べるが、
+pushトリガーは当然`develop`のものになる。**ジョブが対象コードとして`ref: develop`を明示的に
+チェックアウトするのとは別の話**なので、混同しないこと。
+
+これはリリースフロー自体を変更した直後に効いてくる。#1010（進捗ラベルの廃止）のリリースでは、
+対象issueの取得をラベル検索から`GET /api/progress`へ変えたが、その変更はまだ本番へ反映されて
+いなかった。develop→mainのPRを旧版（ラベル検索）で作るつもりで`--ref main`を使おうとしたところ、
+バンプPRのマージがpushトリガーで**develop側の新版を先に起動**し、そちらがPRを作成した。結果、
+問い合わせ先の本番APIがまだ存在せず（HTTP 405）、PR本文の対象issue一覧が空になった。
+
+リリースフローや進捗の取得方法自体を変更する場合は、**バンプPRをマージした時点で新版が動く**
+ことを前提に段取りを組む。
 
 ## 自動マージされないことの担保
 

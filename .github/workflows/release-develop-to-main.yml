@@ -132,13 +132,28 @@ jobs:
         run: |
           set -e
           NUMBERS=""
-          if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
-            BODY="$(curl -sS -m 20 \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || BODY=""
-            NUMBERS="$(printf '%s' "$BODY" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
-          else
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。取得できなかった場合は
+          # PR本文にもその旨を残す。空一覧と同じ文言だと、後から読んだときに「本当にissueが
+          # 無かったリリース」と見分けがつかない。
+          UNAVAILABLE_NOTE=""
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
             echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、リリース対象issueを特定できません"
+            UNAVAILABLE_NOTE="（設定不足のためリリース対象issueを取得できませんでした。APP_BASE_URL・PROGRESS_REPORT_SECRET を確認してください）"
+          else
+            BODY_FILE="${RUNNER_TEMP:-/tmp}/release-progress.json"
+            CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+            if [ "$CODE" != "200" ]; then
+              echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。リリース対象issueを特定できません"
+              UNAVAILABLE_NOTE="（issue-deckへ問い合わせできず、リリース対象issueを取得できませんでした。HTTP $CODE）"
+            elif [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
+              REASON="$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)"
+              echo "::warning::issue-deckが進捗を返せませんでした（reason=$REASON）。リリース対象issueを特定できません"
+              UNAVAILABLE_NOTE="（issue-deckが進捗を返せず、リリース対象issueを取得できませんでした。reason=$REASON）"
+            else
+              NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
+            fi
           fi
 
           echo "[]" > /tmp/release-issues.json
@@ -150,7 +165,11 @@ jobs:
             jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
           fi
           if [ ! -s /tmp/release-issue-lines.txt ]; then
-            echo "（Develop・Releaseにいるopenなissueが見つかりませんでした）" > /tmp/release-issue-lines.txt
+            if [ -n "$UNAVAILABLE_NOTE" ]; then
+              echo "$UNAVAILABLE_NOTE" > /tmp/release-issue-lines.txt
+            else
+              echo "（Develop・Releaseにいるopenなissueはありませんでした）" > /tmp/release-issue-lines.txt
+            fi
           fi
           echo "対象issue:"
           cat /tmp/release-issue-lines.txt
@@ -393,16 +412,29 @@ jobs:
         run: |
           set -e
 
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。後者は本来通知すべき
+          # 相手がいるのに通知できていない状態で、放置するとリリース失敗そのものに気づけない。
           ISSUE_NUMBERS=""
-          if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
-            BODY="$(curl -sS -m 20 \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || BODY=""
-            ISSUE_NUMBERS="$(printf '%s' "$BODY" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、通知先を特定できません"
+            exit 0
           fi
+          BODY_FILE="${RUNNER_TEMP:-/tmp}/notify-progress.json"
+          CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+          if [ "$CODE" != "200" ]; then
+            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。通知先を特定できません"
+            exit 0
+          fi
+          if [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)）。通知先を特定できません"
+            exit 0
+          fi
+          ISSUE_NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
 
           if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "Develop・Releaseにいるopenなissueが見つからない（またはissue-deckへ問い合わせできない）ため、通知先を特定できません"
+            echo "Develop・Releaseにいるopenなissueはありません（対象なしのため通知しません）"
             exit 0
           fi
 
