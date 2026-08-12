@@ -70,7 +70,7 @@ function item(issueNumber: number, status: string | null) {
 }
 
 describe("addMissingProjectItems", () => {
-  const REPO = { githubRepositoryId: 100, ownerLogin: "guchi-apps", name: "dayspan" };
+  const REPO = { id: "repo-1", githubRepositoryId: 100, ownerLogin: "guchi-apps", name: "dayspan" };
 
   beforeEach(() => {
     process.env.PROJECT_V2_OWNER = "guchi-apps";
@@ -110,6 +110,12 @@ describe("addMissingProjectItems", () => {
       expect.objectContaining({ itemId: "item-5", optionId: "opt-ready" }),
       "token",
     );
+    // **DBへも書く（#1132）。** Projectだけ更新してDBをnullのままにすると、載せた直後の
+    // 最初のドラッグが from = null になり、カンバン起点の起動が除外されてしまう
+    expect(issueUpdateMany).toHaveBeenCalledWith({
+      where: { repositoryId: "repo-1", number: 5 },
+      data: { projectStatus: "Ready", projectItemId: "item-5" },
+    });
   });
 
   it("既に盤面にあるIssueは追加しない", async () => {
@@ -134,6 +140,21 @@ describe("addMissingProjectItems", () => {
     await addMissingProjectItems(42);
 
     expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    // Projectを書き換えないケースでも、DBにはその値を写しておく（#1132）
+    expect(issueUpdateMany).toHaveBeenCalledWith({
+      where: { repositoryId: "repo-1", number: 5 },
+      data: { projectStatus: "Ready", projectItemId: "item-5" },
+    });
+  });
+
+  it("追加できなかったIssueはDBへ書かない", async () => {
+    fetchOpenIssueNodes.mockResolvedValue([{ number: 5, nodeId: "I_5" }]);
+    addProjectItem.mockResolvedValue(null);
+
+    const result = await addMissingProjectItems(42);
+
+    expect(result).toEqual({ added: 0, skipped: false });
+    expect(issueUpdateMany).not.toHaveBeenCalled();
   });
 
   it("マルチエージェント対応リポジトリ・アーカイブ済みでないものだけを対象にする", async () => {
