@@ -1,41 +1,44 @@
-# Issueラベルによる状態管理とトグル
+# Issueの進捗管理とラベルによるトグル
 
-ラベルの状態遷移、各種の要否トグル（計画フェーズ・プレビュー・スクリーンショット・マージ前確認）、サブIssue分割、自動マージ可否の判定。
+進捗（Project Status）の状態遷移、各種の要否トグル（計画フェーズ・プレビュー・スクリーンショット・マージ前確認）、サブIssue分割、自動マージ可否の判定。
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
-## Issueラベルの状態遷移
+## Issueの進捗の状態遷移
 
-マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は`02.wip`にリネームし、実装着手前の計画検討中を表す`01.planning`を新設した（`21.plan-required`が付いていないIssueでは`01.planning`を経由せず最初から`02.wip`になる）。旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
+**進捗はGitHub ProjectsのStatusで管理する。唯一の正はStatusで、進捗ラベルは存在しない。** #991 Phase 5（#1010）で`01.planning`〜`09.main`を廃止した。設計の一次情報源は[progress-status-architecture.md](../progress-status-architecture.md)。
 
-1. `01.planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
-2. `02.wip` — 実装エージェントがコード実装中
-3. `03.d:marge` — developへPR作成・マージ中
-4. `05.develop` — developへマージ完了（main未反映）
-5. `07.m:marge` — mainへPR作成・マージ中
-6. `09.main` — mainへマージ完了。この時点でissueをcloseする
+マルチエージェント運用で進めるIssueは、原則として以下の順でStatusが遷移する。
 
-`00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
+1. `Ready` — 未着手
+2. `Planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
+3. `Implementation` — 実装エージェントがコード実装中
+4. `Develop PR` — developへPR作成・マージ中
+5. `Develop` — developへマージ完了（main未反映）
+6. `Release` — mainへPR作成・マージ中
+7. `Done` — mainへマージ完了。この時点でissueをcloseする
 
-上記1〜5の進捗ラベル（`01.planning`/`02.wip`/`03.d:marge`/`05.develop`/`07.m:marge`）は、`09.main`遷移を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブによってクローズ時に自動的に除去される（#464）。「本番反映済み」を示す恒久的な状態である`09.main`のみ除去対象から除外する。
+`00.check-user`（ユーザーのチェックが必要）は上記のどの段階でもラベルとして併用して付与する。Status = 今どこにいるか、Label = どんな性質・条件があるか、という役割分担にしている。
 
-develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`05.develop`までを扱う）。上記1〜5のラベル遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
+`Done`を経由せずにIssueがクローズされた場合（`21.plan-required`の計画を拒否して直接クローズした場合など）、`.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが`00.check-user`を除去する（#464）。**進捗そのものは巻き戻さない** — `Done`のIssueを人が閉じ直しただけで盤面が`Ready`へ戻るのを避けるため。
 
-### GitHub Actionsによるラベル遷移の自動化
+develop→mainのリリースフロー（バージョンアップコミット・PR作成）は、`.github/workflows/release-develop-to-main.yml`によりバージョンbump PR・develop→mainのPR作成までを自動化済み（Phase 6参照。release-to-mainスキルが定める手順の1〜3に相当）。ただし人間の確認なしにPRが作成されることを避けるため、起動は`workflow_dispatch`による手動実行のみとしている（developへのPRマージやscheduleでの自動起動はしない）。実際のマージ（手順4）はこれまでどおり人間が手動で行う（Phase2の`start-reviewer.sh`は`Develop`までを扱う）。上記の状態遷移自体は、`.github/workflows/issue-labels.yml`によりGitHub Actions上でイベント駆動に自動化済み（次項参照）。
 
-`.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に付け替える。
+### GitHub Actionsによる進捗遷移の自動化
+
+`.github/workflows/issue-labels.yml`が、上記の状態遷移をGitHubイベント（ブランチpush・PR作成・PRマージ）をトリガーに自動的に進める。実際に行うのはissue-deckの進捗報告API（`POST /api/progress`）への報告で、Projectを書くのはissue-deckのGitHub Appだけである。
 
 このワークフローは**トリガー定義のみ**を持ち、ジョブ本体は`.github/workflows/reusable-issue-labels.yml`（`on: workflow_call`）へ切り出してある（#940）。他リポジトリへ展開する際は、ワークフローをコピーするのではなく**issue-deck側のこの実体をタグ固定で参照する薄いcallerを置く**（[docs/cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能ワークフローの参照」を参照）。issue-deck自身はローカルパス参照で常に最新の内容を使うため、変更が最初に自分へ跳ね返るカナリアとして機能する。
 
 呼ばれる側でも`github`コンテキストはcaller（呼び出し元リポジトリ）のものになるため、ジョブ定義は呼び出し元を意識した書き換えを必要としない（#939で実測）。
 
-- `01.planning`〜`05.develop`: 実装エージェント・レビュー統合エージェントが手順どおり手動でラベルを付け替える運用は継続する（着手直後・PR作成時点で即座にラベルへ反映される速報性を残すため）。着手時の`01.planning`／`02.wip`については、ローカル実行の場合は`scripts/start-issue.sh`が起動時に付与する（#1096。既に進捗ラベルが付いているIssueには触らないため、再開時に巻き戻らない）。Actionsはこれと同じ遷移を安全網として保証するもので、エージェント側が付け忘れても、対応するブランチpush・PR作成・PRマージのタイミングで自動的に是正される。
-- `07.m:marge`・`09.main`: 対応するエージェント運用が存在しないため、Actionsが唯一の付与手段となる。develop→mainのPRが開いている間は`05.develop`のissueを`07.m:marge`へ、PRがマージされた時点で`05.develop`/`07.m:marge`のissueを`09.main`へ一括遷移し、あわせてissueをcloseする。
+- `Planning`〜`Develop`: エージェントが自分で進捗を動かす運用は**Phase 5で廃止した**。`gh issue edit`で進捗を進める手段がもう無いため、遷移はすべてワークフローのシェルステップが担う（着手時は`reusable-issue-dispatch.yml`、PR作成・マージ時は`reusable-issue-labels.yml`）。ローカル実行の場合は`scripts/start-issue.sh`が起動時に着手（`Planning`／`Implementation`）を報告する（#1096。既に進捗が始まっているIssueには触らないため、再開時に巻き戻らない）。
+- `Release`・`Done`: 対応するエージェント運用が存在しないため、Actionsが唯一の遷移手段となる。develop→mainのPRが開いている間は`Develop`のissueを`Release`へ、PRがマージされた時点で`Develop`/`Release`のissueを`Done`へ一括遷移し、あわせてissueをcloseする。**対象のissueはissue-deckの進捗問い合わせAPI（`GET /api/progress`）から引く**（Phase 4まではラベルで探していた）。
 
 issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）から行う。この規約に従わないブランチ・PRは対象外（何もしない）。
 
-`develop-pr-opened`（`03.d:marge`遷移時）・`develop-pr-merged`（`05.develop`遷移時）は、ラベル遷移と
-同時に`gh issue comment`でIssueへ完了報告のコメントも投稿する。ラベルだけでは気付きにくいため、
+`develop-pr-opened`（`Develop PR`遷移時）・`develop-pr-merged`（`Develop`遷移時）は、進捗の報告と
+同時に`gh issue comment`でIssueへ完了報告のコメントも投稿する。盤面だけでは気付きにくいため、
 PRオープン・マージという確実なイベントに紐づけて通知している。
 
 `develop-pr-merged`は、`claude-review-develop.yml`の`auto-merge`ジョブが有効化するGitHub Auto-merge
@@ -43,9 +46,10 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 ある（Issue #112。GITHUB_TOKEN起点のイベントは他のワークフローを起動しないというGitHub仕様の影響を
 受けるため）。`auto-merge`ジョブ自体はWORKFLOW_PATでAuto-mergeを有効化するよう対応済みだが、
 根本解消したか確証が持てないため、`develop-merge-sweep`ジョブが`schedule`（15分おき）・
-`workflow_dispatch`をトリガーに、`03.d:marge`が付いた全issueを走査し、対応ブランチ
-（`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`05.develop`へ遷移する安全網を
-別途設けている。
+`workflow_dispatch`をトリガーに、`Develop PR`にいる全issueを走査し、対応ブランチ
+（`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`Develop`へ進める安全網を
+別途設けている。走査対象はissue-deckの進捗問い合わせAPIから引くため、**issue-deckへ疎通
+できない間このジョブは何も見つけられない**（ラベルという代替の判断材料はもう無い）。
 
 ## 実装前の「計画フェーズ」要否をIssueラベルでトグルする
 
@@ -67,7 +71,7 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 - 人間が計画を確認し`00.check-user`を外す（＝承認）と、別のワークフロー実行がこのマーカーを読み取り、`implement`（そのまま実装）または`split`（サブIssue作成）に自動的に分岐する。
 - `split`の場合、計画コメントの分割案に沿って`gh issue create`でサブIssueを実際に作成し（本文に「分割元: #<元Issue番号>」を含め、単独で着手できる情報を持たせる）、元IssueにサブIssue一覧をコメントしたうえで、元Issueを`not planned`理由でクローズする。
 - サブIssueへの実際の着手（`@claude`コメントによる起動）は自動連鎖させず、これまでどおり人間が個別に行う。分割はあくまで「大きな作業を、無人実行で扱える単位に事前に切り分ける」ところまでを自動化するもので、着手の判断は人間に残す。
-- クローズ済みのIssueに対する`@claude`コメントやラベル操作では、計画・実装・分割のいずれも再始動しない（分割で元Issueがクローズされた後の誤爆防止。通常の`09.main`クローズ後のIssueにも同様に適用される）。
+- クローズ済みのIssueに対する`@claude`コメントやラベル操作では、計画・実装・分割のいずれも再始動しない（分割で元Issueがクローズされた後の誤爆防止。通常の本番反映（`Done`）によるクローズ後のIssueにも同様に適用される）。
 
 ローカル実行（`scripts/start-issue.sh`）では、分割の判断・提案自体はPlan mode内で人間に提示できるが、実際のサブIssue作成や元Issueのクローズを自動化する仕組みは今のところ用意していない（人間が`gh issue create`等で手動対応する）。
 

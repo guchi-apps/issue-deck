@@ -78,26 +78,29 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 ### 実装前の計画フェーズ（`21.plan-required`ラベル）
 
 - Issueに`21.plan-required`ラベルが付いている場合、実装前にPlan modeで計画（アプローチ・変更範囲・懸念点）を提示し、承認を得てから実装に入る。
-- `01.planning`は計画の検討に着手した時点（Plan mode開始時点）で付与し、承認後・実装着手時点で外して`02.wip`を付与する。
-- ラベルが付いていない場合は直接実装してよく、`01.planning`は経由せず最初から`02.wip`を付与する。
+- 進捗（Project Status）は計画の検討に着手した時点（Plan mode開始時点）で`Planning`になり、承認後・実装着手時点で`Implementation`へ進む。
+- ラベルが付いていない場合は直接実装してよく、`Planning`は経由せず最初から`Implementation`になる。
 - 承認待ちの合図には`00.check-user`ラベルを使う。
 
-### Issueラベルの状態遷移
+### Issueの進捗の状態遷移
 
-マルチエージェント運用で進めるIssueは、原則として以下の順でラベルが遷移する。全PJ共通の`01.wip`は`02.wip`にリネームし、実装着手前の計画検討中を表す`01.planning`を新設した（`21.plan-required`が付いていないIssueでは`01.planning`を経由せず最初から`02.wip`になる）。旧`02.close`（状態：対応済）はissue-deckでは`09.main`にリネームして統合した（他リポジトリの`02.close`には影響しない。ラベルはリポジトリごとの設定のため）。
+**進捗はGitHub ProjectsのStatusで管理する。唯一の正はStatusで、進捗ラベルは存在しない**（#991 Phase 5・#1010で`01.planning`〜`09.main`を廃止した。設計は[docs/progress-status-architecture.md](docs/progress-status-architecture.md)）。マルチエージェント運用で進めるIssueは、原則として以下の順でStatusが遷移する。
 
-1. `01.planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
-2. `02.wip` — 実装エージェントがコード実装中
-3. `03.d:marge` — developへPR作成・マージ中
-4. `05.develop` — developへマージ完了（main未反映）
-5. `07.m:marge` — mainへPR作成・マージ中
-6. `09.main` — mainへマージ完了。**この時点でissueをclose**する
+1. `Ready` — 未着手
+2. `Planning` — 実装エージェントが計画検討中（`21.plan-required`選択時のみ経由）
+3. `Implementation` — 実装エージェントがコード実装中
+4. `Develop PR` — developへPR作成・マージ中
+5. `Develop` — developへマージ完了（main未反映）
+6. `Release` — mainへPR作成・マージ中
+7. `Done` — mainへマージ完了。**この時点でissueをclose**する
+
+Statusを進めるのはissue-deckだけで、各ワークフロー・ローカルセッションは進捗報告API（`POST /api/progress`）へ報告する。**`gh issue edit`で進捗を付け替えることはできない。** 人が動かす場合はカンバンのカードをドラッグするか、issue-deckの画面のボタンを使う。
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 
 `11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`89.Priority: low`へリネームした。
 
-`07.m:marge`・`09.main`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細は[docs/multi-agent/release.md](docs/multi-agent/release.md)参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
+`Release`・`Done`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細は[docs/multi-agent/release.md](docs/multi-agent/release.md)参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
 
 ### 自動マージ不可カテゴリ（`00.check-user`付与対象）
 

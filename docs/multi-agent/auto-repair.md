@@ -76,8 +76,8 @@ concurrencyグループ（`issue-dispatch-<Issue番号>-branch`）に固定し�
 コンフリクト解消が同時に走ってpushが競合するのを避けるため。
 
 コンフリクト解消のための`git push`は`issue-labels.yml`の`wip-on-push`ジョブ（`issue-*`ブランチへの
-push全般をトリガーに無条件で`02.wip`を付与する）を誘発する。`03.d:marge`/`00.check-user`状態の
-issueに`02.wip`が混在して残らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`02.wip`を
+push全般をトリガーに無条件で`Implementation`を報告する）を誘発する。`Develop PR`にいるissueの進捗が
+盤面上だけ実装中へ巻き戻らないよう、`resolve-conflicts`ジョブ自身が解消後に明示的に`Develop PR`を
 除去する。
 
 ### 解消方針
@@ -142,7 +142,7 @@ develop→mainのリリースPR（head=`develop`）のCI失敗は対象外（#81
 `branch`レーンと同じconcurrencyグループ（`issue-dispatch-<Issue番号>-branch`）で直列化する。
 同じ`issue-<番号>`ブランチへ、人間からの追加依頼（`@claude`コメント）による実装ステップや
 コンフリクト自動解消のpushと競合しないようにするため。push後は`issue-labels.yml`の
-`wip-on-push`ジョブが付与する`02.wip`を明示的に除去する。
+`wip-on-push`ジョブが報告する`Implementation`を打ち消して`Develop PR`を再報告する。
 
 ### リトライ上限
 

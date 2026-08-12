@@ -1,4 +1,4 @@
-name: Issue Labels (reusable)
+name: Issue Progress (reusable)
 
 # 他リポジトリからも呼び出せる再利用可能ワークフロー本体(#940)。トリガー定義は各リポジトリの
 # 薄いcaller(.github/workflows/issue-labels.yml)側に置き、ここにはジョブ本体だけを置く。
@@ -12,15 +12,18 @@ name: Issue Labels (reusable)
 # `secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能なため、caller側から
 # `secrets: inherit`を渡していない(最小権限)。
 
-# Issueラベル(01.planning -> 02.wip -> 03.d:marge -> 05.develop -> 07.m:marge -> 09.main。
-# 01.planningは21.plan-required選択時のみ経由する)の状態遷移をイベント駆動で保証する。
-# 実装エージェント・レビュー統合エージェントによる
-# 手動のラベル付け替え(docs/multi-agent/labels.md参照)を置き換えるものではなく、
-# 付け忘れがあっても後から是正されるようにするための安全網、および
-# develop->mainの遷移(07/09)を新たにカバーするためのもの。
+# Issueの進捗(Ready -> Planning -> Implementation -> Develop PR -> Develop -> Release -> Done。
+# Planningは21.plan-required選択時のみ経由する)の状態遷移をイベント駆動で保証する。
 #
-# develop-pr-opened(03.d:marge)・develop-pr-merged(05.develop)の2ジョブは、
-# ラベル遷移と同時にIssueへ完了報告のコメントも投稿する。ラベルより気付きやすい
+# **進捗はGitHub ProjectsのStatusが唯一の正である(#991 Phase 5・#1010)。**
+# Phase 4までは同じ遷移を進捗ラベル(計画検討中〜本番反映済の6つ)にも書いており、Statusが壊れても
+# ラベルから状態を復元できる二重運用になっていた。Phase 5でラベルを廃止したため、このワークフローが
+# 行うのは**issue-deckの進捗報告API(POST /api/progress)への報告だけ**になっている。
+# `00.check-user`(条件系ラベル)の除去だけはラベル操作として残る。Status = 今どこにいるか、
+# Label = どんな性質・条件があるか、という役割分担のため。
+#
+# develop-pr-opened(Develop PR)・develop-pr-merged(Develop)の2ジョブは、
+# 進捗の報告と同時にIssueへ完了報告のコメントも投稿する。盤面より気付きやすい
 # 通知手段として、実装エージェント経由・人間の手動PRのどちらでも同じ場所
 # (PRオープン・マージイベント)で確実に発火する。
 #
@@ -28,19 +31,19 @@ name: Issue Labels (reusable)
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない。
 #
-# gh issue edit の --add-label/--remove-label は、Issueに「既に付与済み/未付与」なだけなら
-# 呼んでも無害(冪等)。ただし対象リポジトリにラベル定義自体が無いと exit 1 になりジョブ全体が
-# 落ちる(#975。展開先リポジトリのラベル1つの欠落だけで発生する)。そのため各ジョブでは
-# `gh label list`の結果と突き合わせ、実在するラベルだけを対象に絞り込んでから呼び出している。
+# gh issue edit の --remove-label は、Issueに未付与なだけなら呼んでも無害(冪等)。ただし
+# 対象リポジトリにラベル定義自体が無いと exit 1 になりジョブ全体が落ちる(#975。展開先
+# リポジトリのラベル1つの欠落だけで発生する)。そのため`00.check-user`の除去では
+# `gh label list`の結果と突き合わせ、実在する場合だけ呼び出している。
 #
 # develop-pr-mergedジョブは、claude-review-develop.ymlのauto-mergeジョブが有効化する
 # GitHub Auto-merge機能による実際のマージ(必須ステータスチェック通過後にGitHub側が
 # 非同期に実行)では発火しないことがある(Issue #112。GITHUB_TOKEN起点のイベントは他の
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
-# develop-merge-sweepジョブはこれを取りこぼした03.d:margeをscheduleで定期的に拾い直す。
+# develop-merge-sweepジョブはこれを取りこぼした`Develop PR`をscheduleで定期的に拾い直す。
 #
-# cleanup-on-closeジョブは、上記の状態遷移(main-pr-mergedによる09.main遷移)を経由しない
+# cleanup-on-closeジョブは、上記の状態遷移(main-pr-mergedによるDone遷移)を経由しない
 # Issueクローズ(例: 21.plan-requiredの計画をユーザーが承認・練り直しのいずれもせず、
 # `not planned`等の理由でIssueを直接クローズして実装自体を取りやめた場合)で、
 # `00.check-user`ラベルが「要確認」のまま残り続けるのを防ぐための安全網(issue #172)。
@@ -50,33 +53,35 @@ name: Issue Labels (reusable)
 # `00.check-user`はclaude-review-develop.ymlの自動マージ不可判定でも「マージ保留」
 # シグナルとして使われ、付与時は人間がPRリンクから手動マージする運用になっている。
 # その手動マージ自体が確認完了を意味するため、develop-pr-merged・develop-merge-sweep・
-# main-pr-mergedの各ジョブでは状態遷移とあわせて`00.check-user`も除去する(#266。
+# main-pr-mergedの各ジョブでは進捗の報告とあわせて`00.check-user`も除去する(#266。
 # 除去のタイミングが無く残り続けていた)。
 #
-# 各遷移ジョブは、ラベル付け替えに続けてissue-deckの進捗報告API(POST /api/progress)へ
-# 同じ状態を報告し、GitHub Projectsのカンバンを追従させる(#991 Phase 2)。
-# ここからProjectsを直接書かないのは、Projects v2の書き込み権限を持つのをissue-deckの
-# GitHub Appだけに閉じ、対象リポジトリが増えてもトークンを配らずに済ませるため
-# (設計はdocs/progress-status-architecture.md「中核の判断」)。
-#
-# 報告は`ProgressStatusKey`(src/lib/issue-progress.ts)で送る。ラベル名ではなく状態キーを
-# 送るのは、ラベルを廃止するPhase 5でこのワークフローを書き換えずに済ませるため。
+# 報告は`ProgressStatusKey`(src/lib/issue-progress.ts)で送る。ラベル名でもStatus名でもない
+# 状態キーを送るのは、呼び出し側を表記の変更から切り離すため。
 # 各ジョブは遷移対象のissue番号を`issue_numbers`(改行区切り)としてstep outputへ出し、
 # 続く報告ステップが同じ本文で処理できるようにしている(単一issueのジョブも一括遷移の
 # ジョブも同じ形にするため)。
 #
 # **報告の失敗はジョブを落とさない。** issue-deckを進捗更新の単一障害点にしないための
-# 取り決めで、疎通失敗・未設定は警告に留める。取りこぼしたズレは、issue-deckの再同期
-# ボタン(POST /api/sync/issues)がラベルを正としてProjectへ書き戻すことで是正できる。
+# 取り決めで、疎通失敗・未設定は警告に留める。
+#
+# **ただしPhase 5以降、対象issueの「検索」もissue-deck経由になった。**
+# develop-merge-sweep・main-pr-in-progress・main-pr-mergedの3ジョブは、以前
+# `gh issue list --label <進捗ラベル>`で対象を探していた。ラベルが無くなった
+# 以上、探し先はProjectしかなく、Projectへの読み書きはissue-deckへ一本化する設計
+# (docs/progress-status-architecture.md「中核の判断」)に従って`GET /api/progress`を使う。
+# **issue-deckへ届かない間、これらのジョブは対象を1件も見つけられず何もしない。**
+# ラベルという代替の判断材料はもう無い。取りこぼしはissue-deckの復旧後に
+# workflow_dispatch(develop-merge-sweep)またはrun再実行で回収する。
 
 
 on:
   workflow_call:
     secrets:
       PROGRESS_REPORT_SECRET:
-        # issue-deckの進捗報告API(POST /api/progress)の共有シークレット(#991 Phase 2)。
+        # issue-deckの進捗報告API(POST/GET /api/progress)の共有シークレット(#991 Phase 2)。
         # caller側でorganization secretとして解決される。渡さない・未設定の場合は
-        # 報告ステップが警告も出さずスキップされるだけで、ラベル遷移には影響しない
+        # 報告・問い合わせのステップが警告を出してスキップされる
         # (Project未導入のリポジトリからも同じ実体を呼べるようにするため required: false)。
         required: false
 
@@ -88,19 +93,11 @@ jobs:
   wip-on-push:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
     steps:
-      - name: 02.wip を付与する
+      - name: 対象issueを特定する
         id: transition
         run: |
           if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
-            if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "02.wip"; then
-              gh issue edit "${BASH_REMATCH[1]}" --add-label "02.wip"
-            else
-              echo "::warning::ラベル '02.wip' がリポジトリに存在しないため付与をスキップします"
-            fi
             echo "issue_numbers=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -147,33 +144,11 @@ jobs:
       PR_URL: ${{ github.event.pull_request.html_url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: 03.d:marge へ遷移する
+      - name: PR作成をIssueへ通知する
         id: transition
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
-            mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-            label_exists() {
-              local name="$1" l
-              for l in "${existing[@]}"; do
-                [ "$l" = "$name" ] && return 0
-              done
-              return 1
-            }
-            args=()
-            if label_exists "03.d:marge"; then
-              args+=(--add-label "03.d:marge")
-            else
-              echo "::warning::ラベル '03.d:marge' がリポジトリに存在しないため付与をスキップします"
-            fi
-            if label_exists "02.wip"; then
-              args+=(--remove-label "02.wip")
-            else
-              echo "::warning::ラベル '02.wip' がリポジトリに存在しないため除去をスキップします"
-            fi
-            if [ "${#args[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${args[@]}"
-            fi
             gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
             echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
           fi
@@ -211,7 +186,7 @@ jobs:
   develop-pr-merged:
     # 00.check-userが付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする
     # 運用になっている(claude-review-develop.ymlのauto-mergeジョブ参照)。このマージ操作自体が
-    # 「確認済み」を意味するため、05.develop遷移とあわせて00.check-userもここで除去する
+    # 「確認済み」を意味するため、Developへの遷移とあわせて00.check-userもここで除去する
     # (#266。除去のタイミングが無く残り続けていた)。
     if: |
       github.event_name == 'pull_request' &&
@@ -226,34 +201,15 @@ jobs:
       PR_URL: ${{ github.event.pull_request.html_url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: 05.develop へ遷移する
+      - name: 00.check-user を外しマージ完了を通知する
         id: transition
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
-            mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-            label_exists() {
-              local name="$1" l
-              for l in "${existing[@]}"; do
-                [ "$l" = "$name" ] && return 0
-              done
-              return 1
-            }
-            args=()
-            if label_exists "05.develop"; then
-              args+=(--add-label "05.develop")
+            if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+              gh issue edit "$n" --remove-label "00.check-user"
             else
-              echo "::warning::ラベル '05.develop' がリポジトリに存在しないため付与をスキップします"
-            fi
-            for label in "03.d:marge" "02.wip" "00.check-user"; do
-              if label_exists "$label"; then
-                args+=(--remove-label "$label")
-              else
-                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-              fi
-            done
-            if [ "${#args[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${args[@]}"
+              echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
             fi
             gh issue comment "$n" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
             echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
@@ -294,8 +250,12 @@ jobs:
 
   develop-merge-sweep:
     # GitHub Auto-merge機能によるマージがdevelop-pr-mergedジョブを起動しなかった
-    # ケースの安全網。03.d:margeが付いた全issueについて、対応ブランチ(issue-<番号>)
-    # からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら05.developへ遷移する。
+    # ケースの安全網。`Develop PR`にいる全issueについて、対応ブランチ(issue-<番号>)
+    # からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら`Develop`へ進める。
+    #
+    # 対象の探し方がPhase 5で変わった。以前は`gh issue list --label <進捗ラベル>`で
+    # GitHubのラベルから探していたが、ラベルを廃止したためissue-deckへ問い合わせる。
+    # **issue-deckへ届かなければ対象は0件になり、このrunは何もしない。**
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
@@ -303,36 +263,39 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: マージ済みのdevelop向けPRを持つissueを05.developへ遷移する
+      - name: マージ済みのdevelop向けPRを持つissueをDevelopへ進める
         id: transition
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
         run: |
-          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-          label_exists() {
-            local name="$1" l
-            for l in "${existing[@]}"; do
-              [ "$l" = "$name" ] && return 0
-            done
-            return 1
-          }
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
+            exit 0
+          fi
+          body="$(curl -sS -m 20 \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr")" || body=""
+          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          if [ -z "$numbers" ]; then
+            echo "Develop PR にいるopenなissueはありません（またはissue-deckへ問い合わせできませんでした）"
+            exit 0
+          fi
+
+          check_user_exists=false
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            check_user_exists=true
+          fi
           transitioned=""
-          for n in $(gh issue list --label "03.d:marge" --state open --json number --jq '.[].number'); do
+          for n in $numbers; do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              args=()
-              if label_exists "05.develop"; then
-                args+=(--add-label "05.develop")
-              else
-                echo "::warning::ラベル '05.develop' がリポジトリに存在しないため付与をスキップします"
-              fi
-              for label in "03.d:marge" "02.wip" "00.check-user"; do
-                if label_exists "$label"; then
-                  args+=(--remove-label "$label")
-                else
-                  echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-                fi
-              done
-              if [ "${#args[@]}" -gt 0 ]; then
-                gh issue edit "$n" "${args[@]}"
+              if [ "$check_user_exists" = "true" ]; then
+                gh issue edit "$n" --remove-label "00.check-user"
               fi
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
               transitioned="${transitioned}${n}"$'\n'
@@ -355,13 +318,6 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: develop
         run: |
-          missing=""
-          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
-          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
-          if [ -n "$missing" ]; then
-            echo "$missing が未設定のため、Project Statusの報告をスキップします"
-            exit 0
-          fi
           while read -r n; do
             [ -n "$n" ] || continue
             code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
@@ -377,57 +333,45 @@ jobs:
           done <<< "$ISSUE_NUMBERS"
 
   main-pr-in-progress:
-    # develop -> main のPRが開いている間、その時点で05.developが付いている
-    # 全issueを07.m:margeへ一括遷移する。synchronizeも対象にすることで、
-    # PRオープン後にdevelopへ追加マージされたissueも随時反映する。
+    # develop -> main のPRが開いている間、その時点で`Develop`にいる全issueを`Release`へ
+    # 一括で進める。synchronizeも対象にすることで、PRオープン後にdevelopへ追加マージされた
+    # issueも随時反映する。
+    #
+    # 対象の探し方はdevelop-merge-sweepと同じ理由でissue-deckへの問い合わせになっている。
     if: |
       github.event_name == 'pull_request' &&
       (github.event.action == 'opened' || github.event.action == 'synchronize') &&
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'develop'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
     steps:
-      - name: 05.develop の issue を 07.m:marge へ一括遷移する
+      - name: Develop にいる issue を特定する
         id: transition
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
         run: |
-          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-          label_exists() {
-            local name="$1" l
-            for l in "${existing[@]}"; do
-              [ "$l" = "$name" ] && return 0
-            done
-            return 1
-          }
-          transitioned=""
-          for n in $(gh issue list --label "05.develop" --state open --json number --jq '.[].number'); do
-            args=()
-            if label_exists "07.m:marge"; then
-              args+=(--add-label "07.m:marge")
-            else
-              echo "::warning::ラベル '07.m:marge' がリポジトリに存在しないため付与をスキップします"
-            fi
-            for label in "05.develop" "03.d:marge" "02.wip"; do
-              if label_exists "$label"; then
-                args+=(--remove-label "$label")
-              else
-                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-              fi
-            done
-            if [ "${#args[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${args[@]}"
-            fi
-            transitioned="${transitioned}${n}"$'\n'
-          done
-          if [ -n "$transitioned" ]; then
-            {
-              echo "issue_numbers<<TRANSITIONED_EOF"
-              printf '%s' "$transitioned"
-              echo "TRANSITIONED_EOF"
-            } >> "$GITHUB_OUTPUT"
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
+            exit 0
           fi
+          body="$(curl -sS -m 20 \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop")" || body=""
+          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          if [ -z "$numbers" ]; then
+            echo "Develop にいるopenなissueはありません（またはissue-deckへ問い合わせできませんでした）"
+            exit 0
+          fi
+          {
+            echo "issue_numbers<<TRANSITIONED_EOF"
+            printf '%s\n' "$numbers"
+            echo "TRANSITIONED_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Project Status を報告する
         if: steps.transition.outputs.issue_numbers != ''
@@ -438,13 +382,6 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: release
         run: |
-          missing=""
-          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
-          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
-          if [ -n "$missing" ]; then
-            echo "$missing が未設定のため、Project Statusの報告をスキップします"
-            exit 0
-          fi
           while read -r n; do
             [ -n "$n" ] || continue
             code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
@@ -460,15 +397,19 @@ jobs:
           done <<< "$ISSUE_NUMBERS"
 
   main-pr-merged:
-    # develop -> main のPRがマージされた時点で、05.develop/07.m:margeの
-    # どちらが付いているissueも09.mainへ一括遷移してcloseする。両方のラベルを
-    # 対象にするのは、main-pr-in-progressのsynchronizeが拾いきれていない
-    # 可能性のあるissue(マージ直前にdevelopへ入ったもの)を取りこぼさないため。
+    # develop -> main のPRがマージされた時点で、`Develop`/`Release`のどちらにいるissueも
+    # `Done`へ一括で進めてcloseする。両方を対象にするのは、main-pr-in-progressの
+    # synchronizeが拾いきれていない可能性のあるissue(マージ直前にdevelopへ入ったもの)を
+    # 取りこぼさないため。
     #
     # ここでの`gh issue close`はGITHUB_TOKEN起点のため、cleanup-on-closeジョブの
     # `issues: closed`トリガーは発火しない(他ジョブと同様のGitHub仕様。#266)。
     # そのため00.check-userが残っていた場合の除去をこのジョブ自身でも行っておく
     # (cleanup-on-closeだけに頼るとclose済みissueにラベルが残り続ける)。
+    #
+    # **issue-deckへ問い合わせできない場合、対象は0件になりissueは1件もcloseされない。**
+    # 以前はラベルで探していたためissue-deckに依存せず完結していた。取りこぼした場合は
+    # issue-deckの復旧後にこのrunを再実行する。
     if: |
       github.event_name == 'pull_request' &&
       github.event.action == 'closed' &&
@@ -480,39 +421,37 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: 09.main へ一括遷移し issue を close する
+      - name: issue を close する
         id: transition
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
         run: |
-          issues="$(
-            { gh issue list --label "05.develop" --state open --json number --jq '.[].number'
-              gh issue list --label "07.m:marge" --state open --json number --jq '.[].number'
-            } | sort -un
-          )"
-          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-          label_exists() {
-            local name="$1" l
-            for l in "${existing[@]}"; do
-              [ "$l" = "$name" ] && return 0
-            done
-            return 1
-          }
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
+            exit 0
+          fi
+          body="$(curl -sS -m 20 \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || body=""
+          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          if [ -z "$numbers" ]; then
+            echo "::warning::本番反映の対象issueを特定できませんでした（Develop・Releaseにopenなissueが無いか、issue-deckへ問い合わせできませんでした）"
+            exit 0
+          fi
+
+          check_user_exists=false
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            check_user_exists=true
+          fi
           transitioned=""
-          for n in $issues; do
-            args=()
-            if label_exists "09.main"; then
-              args+=(--add-label "09.main")
-            else
-              echo "::warning::ラベル '09.main' がリポジトリに存在しないため付与をスキップします"
-            fi
-            for label in "05.develop" "07.m:marge" "03.d:marge" "02.wip" "00.check-user"; do
-              if label_exists "$label"; then
-                args+=(--remove-label "$label")
-              else
-                echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-              fi
-            done
-            if [ "${#args[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${args[@]}"
+          for n in $numbers; do
+            if [ "$check_user_exists" = "true" ]; then
+              gh issue edit "$n" --remove-label "00.check-user"
             fi
             gh issue close "$n"
             transitioned="${transitioned}${n}"$'\n'
@@ -534,13 +473,6 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
           STATUS: done
         run: |
-          missing=""
-          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
-          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
-          if [ -n "$missing" ]; then
-            echo "$missing が未設定のため、Project Statusの報告をスキップします"
-            exit 0
-          fi
           while read -r n; do
             [ -n "$n" ] || continue
             code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
@@ -556,13 +488,14 @@ jobs:
           done <<< "$ISSUE_NUMBERS"
 
   cleanup-on-close:
-    # main-pr-mergedの09.main遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
-    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`および進捗ラベル
-    # (01.planning/02.wip/03.d:marge/05.develop/07.m:marge)が残り続けないよう、クローズを
-    # トリガーに除去する(#464)。`09.main`は「本番反映済み」を示す恒久的な状態として
-    # approval-labels.ts の recently-merged プリセット・issue-stats.ts の直近リリース分
-    # クラスタリング・workflow-status.ts の完了バッジ表示が参照しているため、他の進捗
-    # ラベルと異なり除去対象から明示的に除外する。
+    # main-pr-mergedのDone遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
+    # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が残り続けないよう、
+    # クローズをトリガーに除去する(#464)。
+    #
+    # **進捗そのものはここで巻き戻さない**(Phase 2からの方針)。`Done`のIssueを人が
+    # 閉じ直しただけで盤面が`Ready`へ戻るのを避けるため。Phase 4までは進捗ラベル
+    # (計画検討中〜本番へマージ中)の除去も行っていたが、ラベルの廃止(#1010)で対象が
+    # `00.check-user`だけになった。
     #
     # あわせて、screenshotsブランチ(#255。orphanブランチにスクリーンショット画像をコミットし
     # raw.githubusercontent.com経由でIssueコメントに埋め込む仕組み)上の issue-<番号>/
@@ -579,26 +512,12 @@ jobs:
       GH_REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: 00.check-user と進捗ラベル(09.mainを除く)を除去する
+      - name: 00.check-user を除去する
         run: |
-          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-          label_exists() {
-            local name="$1" l
-            for l in "${existing[@]}"; do
-              [ "$l" = "$name" ] && return 0
-            done
-            return 1
-          }
-          args=()
-          for label in "00.check-user" "01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge"; do
-            if label_exists "$label"; then
-              args+=(--remove-label "$label")
-            else
-              echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-            fi
-          done
-          if [ "${#args[@]}" -gt 0 ]; then
-            gh issue edit "$ISSUE_NUMBER" "${args[@]}"
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+            gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
           fi
 
       - name: Checkout

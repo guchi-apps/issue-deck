@@ -4,54 +4,75 @@ import {
   canCreateFollowupFromComment,
   getWorkflowStepIndex,
   hasActiveWorkflowStep,
+  WORKFLOW_STEPS,
 } from "@/lib/github/workflow-status";
-import type { IssueLabel } from "@/types/issue";
 
-function labels(...names: string[]): IssueLabel[] {
-  return names.map((name) => ({ name, color: "64748b", description: null }));
-}
+describe("WORKFLOW_STEPS", () => {
+  it("未着手を除く6状態を遷移順に持つ", () => {
+    expect(WORKFLOW_STEPS.map((step) => step.key)).toEqual([
+      "planning",
+      "implementation",
+      "develop-pr",
+      "develop",
+      "release",
+      "done",
+    ]);
+  });
+});
+
+describe("getWorkflowStepIndex", () => {
+  it("Project Statusから現在ステップを引く", () => {
+    expect(getWorkflowStepIndex({ projectStatus: "Planning" })).toBe(0);
+    expect(getWorkflowStepIndex({ projectStatus: "Develop" })).toBe(3);
+    expect(getWorkflowStepIndex({ projectStatus: "Done" })).toBe(5);
+  });
+
+  it("Statusが無い・未着手・未知の名前ならnull（ステップ表示自体を出さない）", () => {
+    expect(getWorkflowStepIndex({ projectStatus: null })).toBeNull();
+    expect(getWorkflowStepIndex({ projectStatus: "Ready" })).toBeNull();
+    expect(getWorkflowStepIndex({ projectStatus: "Blocked" })).toBeNull();
+  });
+});
 
 describe("hasActiveWorkflowStep", () => {
-  it("実行が進行し得るラベルではtrueを返す", () => {
-    expect(hasActiveWorkflowStep({ labels: labels("01.planning"), projectStatus: null })).toBe(true);
-    expect(hasActiveWorkflowStep({ labels: labels("02.wip"), projectStatus: null })).toBe(true);
-    expect(hasActiveWorkflowStep({ labels: labels("03.d:marge"), projectStatus: null })).toBe(true);
-    expect(hasActiveWorkflowStep({ labels: labels("07.m:marge"), projectStatus: null })).toBe(true);
+  it("実行が進行し得る段階ではtrueを返す", () => {
+    expect(hasActiveWorkflowStep({ projectStatus: "Planning" })).toBe(true);
+    expect(hasActiveWorkflowStep({ projectStatus: "Implementation" })).toBe(true);
+    expect(hasActiveWorkflowStep({ projectStatus: "Develop PR" })).toBe(true);
+    expect(hasActiveWorkflowStep({ projectStatus: "Release" })).toBe(true);
   });
 
   it("マージ完了後の定常状態ではfalseを返す（ポーリング対象から外す）", () => {
-    expect(hasActiveWorkflowStep({ labels: labels("05.develop"), projectStatus: null })).toBe(false);
-    expect(hasActiveWorkflowStep({ labels: labels("09.main"), projectStatus: null })).toBe(false);
+    expect(hasActiveWorkflowStep({ projectStatus: "Develop" })).toBe(false);
+    expect(hasActiveWorkflowStep({ projectStatus: "Done" })).toBe(false);
   });
 
-  it("実装状況ラベルが無い場合はfalseを返す", () => {
-    expect(hasActiveWorkflowStep({ labels: labels(), projectStatus: null })).toBe(false);
-    expect(hasActiveWorkflowStep({ labels: labels("bug", "00.check-user"), projectStatus: null })).toBe(false);
-  });
-
-  it("遷移の過渡期に新旧のラベルが同時に付いていても、進行し得る方を優先してtrueを返す", () => {
-    // 現在ステップの判定（先頭一致）では05.developになるケース
-    expect(getWorkflowStepIndex({ labels: labels("05.develop", "07.m:marge"), projectStatus: null })).toBe(3);
-    expect(hasActiveWorkflowStep({ labels: labels("05.develop", "07.m:marge"), projectStatus: null })).toBe(true);
+  it("進捗が始まっていない場合はfalseを返す", () => {
+    expect(hasActiveWorkflowStep({ projectStatus: null })).toBe(false);
+    expect(hasActiveWorkflowStep({ projectStatus: "Ready" })).toBe(false);
   });
 });
 
 describe("canCreateFollowupFromComment", () => {
   it("closedなissueではtrueを返す", () => {
-    expect(canCreateFollowupFromComment({ state: "closed", labels: labels(), projectStatus: null })).toBe(true);
-    expect(canCreateFollowupFromComment({ state: "closed", labels: labels("02.wip"), projectStatus: null })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "closed", projectStatus: null })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "closed", projectStatus: "Implementation" })).toBe(
+      true,
+    );
   });
 
   it("openかつdevelopマージ未満の段階ではfalseを返す", () => {
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels(), projectStatus: null })).toBe(false);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("01.planning"), projectStatus: null })).toBe(false);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("02.wip"), projectStatus: null })).toBe(false);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("03.d:marge"), projectStatus: null })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: null })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Planning" })).toBe(false);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Implementation" })).toBe(
+      false,
+    );
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Develop PR" })).toBe(false);
   });
 
   it("openでもdevelopマージ以降の段階ではtrueを返す", () => {
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("05.develop"), projectStatus: null })).toBe(true);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("07.m:marge"), projectStatus: null })).toBe(true);
-    expect(canCreateFollowupFromComment({ state: "open", labels: labels("09.main"), projectStatus: null })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Develop" })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Release" })).toBe(true);
+    expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Done" })).toBe(true);
   });
 });

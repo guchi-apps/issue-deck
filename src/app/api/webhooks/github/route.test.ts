@@ -529,14 +529,15 @@ describe("POST /api/webhooks/github projects_v2_item", () => {
   });
 });
 
-describe("POST /api/webhooks/github issues.labeled（手動ラベルのStatus反映）", () => {
+describe("POST /api/webhooks/github issues（ラベル変更）", () => {
+  // 進捗ラベルを廃止した（#991 Phase 5・#1010）ため、ラベルの付け外しからStatusを
+  // 導く経路（#1042）そのものが無くなった。ラベル変更でIssueを取り込み直すだけになる。
   beforeEach(() => {
     process.env.GITHUB_WEBHOOK_SECRET = SECRET;
     findUniqueRepository.mockReset().mockResolvedValue({
       id: "repo-1",
       fullName: "guchi-apps/issue-deck",
     });
-    findUniqueIssue.mockReset().mockResolvedValue({ projectStatus: "Ready" });
     upsertIssueFromWebhookPayload.mockReset().mockResolvedValue(undefined);
     reportProgressStatus.mockReset().mockResolvedValue({ applied: true });
   });
@@ -554,61 +555,19 @@ describe("POST /api/webhooks/github issues.labeled（手動ラベルのStatus反
     };
   }
 
-  it("手で進捗ラベルを付けるとStatusを報告する", async () => {
-    const response = await POST(makeRequest(labeledPayload("labeled", ["02.wip"]), "issues"));
+  it("ラベルを付けてもStatusは報告しない（Statusが唯一の正のため写し元が無い）", async () => {
+    const response = await POST(makeRequest(labeledPayload("labeled", ["00.check-user"]), "issues"));
 
     expect(response.status).toBe(200);
-    expect(reportProgressStatus).toHaveBeenCalledWith({
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 42,
-      status: "implementation",
-    });
-  });
-
-  it("ラベルが文字列で来るペイロードでも扱える", async () => {
-    const payload = {
-      action: "labeled",
-      issue: { id: 1, number: 42, labels: ["02.wip"] },
-      repository: { id: 555 },
-    };
-
-    await POST(makeRequest(payload, "issues"));
-
-    expect(reportProgressStatus).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "implementation" }),
-    );
-  });
-
-  it("既にStatusが一致していれば報告しない（GraphQLの無駄打ちを避ける）", async () => {
-    findUniqueIssue.mockResolvedValue({ projectStatus: "Implementation" });
-
-    await POST(makeRequest(labeledPayload("labeled", ["02.wip"]), "issues"));
-
-    expect(reportProgressStatus).not.toHaveBeenCalled();
-  });
-
-  it("進捗ラベルが無くなってもReadyへは巻き戻さない", async () => {
-    // 人がカンバンでドラッグした結果（Phase 3の起動トリガー）を潰さないため
-    findUniqueIssue.mockResolvedValue({ projectStatus: "Implementation" });
-
-    await POST(makeRequest(labeledPayload("unlabeled", ["30.bug"]), "issues"));
-
-    expect(reportProgressStatus).not.toHaveBeenCalled();
-  });
-
-  it("ラベル以外のactionでは報告しない", async () => {
-    await POST(makeRequest(labeledPayload("edited", ["02.wip"]), "issues"));
-
     expect(reportProgressStatus).not.toHaveBeenCalled();
     // Issueの取り込み自体は従来どおり行う
     expect(upsertIssueFromWebhookPayload).toHaveBeenCalled();
   });
 
-  it("報告が失敗してもWebhookは成功で返す（取り込みは済んでいるため）", async () => {
-    reportProgressStatus.mockRejectedValue(new Error("boom"));
+  it("ラベルを外してもStatusは報告しない", async () => {
+    await POST(makeRequest(labeledPayload("unlabeled", ["30.bug"]), "issues"));
 
-    const response = await POST(makeRequest(labeledPayload("labeled", ["02.wip"]), "issues"));
-
-    expect(response.status).toBe(200);
+    expect(reportProgressStatus).not.toHaveBeenCalled();
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalled();
   });
 });

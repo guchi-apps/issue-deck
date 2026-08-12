@@ -64,7 +64,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
   判定は必ず [`lib/issue-progress.ts`](../src/lib/issue-progress.ts) の `resolveProgressStatus`
-  を通す（`01.planning`等のラベル名やStatus名を直接見ない）。Statusは`projects_v2_item`
+  を通す（Status名を直接見ない）。Statusは`projects_v2_item`
   Webhookと再同期（`lib/github/sync-project-status.ts`）で`Issue.projectStatus`へ入り、
   未登録なら`null`のままラベルから解決する。Projects v2はGraphQLのみのため境界は
   [`lib/github/projects-api.ts`](../src/lib/github/projects-api.ts)。

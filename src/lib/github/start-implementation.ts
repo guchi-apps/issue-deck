@@ -1,9 +1,5 @@
 import { isApprovalPending, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
-import {
-  getWorkflowStepIndex,
-  PLANNING_LABEL_NAME,
-  WIP_LABEL_NAME,
-} from "@/lib/github/workflow-status";
+import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { isProgressLabel } from "@/lib/issue-status";
 import type { Issue, IssueLabel } from "@/types/issue";
 
@@ -88,18 +84,15 @@ export function isSelectableLabelName(name: string): boolean {
 
 /**
  * 選択されたオプションに対応するGitHubラベル名の配列を返す。
- * ワークフロー起動を待たずにUI上で即座に着手状態を示せるよう、進捗状況ラベルを必ず含める。
- * 「計画が必要」選択時は計画検討中を示す01.planningのみを付与し、実装着手（02.wip）は
- * claude-issue-dispatch.yml側が計画承認後に付与する。未選択時は計画フェーズを経ないため
- * 最初から02.wipを付与する。
+ *
+ * **進捗（`Planning`/`Implementation`）はラベルではなくProject Statusで表す**（#991 Phase 5）。
+ * ここで返すのは実装オプション用ラベルだけで、着手状態は呼び出し側が続けて行う
+ * 進捗の書き込み（`setProgressStatus`）が担う。
  */
 export function startImplementationLabelsToAdd(options: StartImplementationOptions): string[] {
-  return [
-    options.planRequired ? PLANNING_LABEL_NAME : WIP_LABEL_NAME,
-    ...START_IMPLEMENTATION_OPTIONS.filter((option) => options[option.key]).map(
-      (option) => option.githubLabel,
-    ),
-  ];
+  return START_IMPLEMENTATION_OPTIONS.filter((option) => options[option.key]).map(
+    (option) => option.githubLabel,
+  );
 }
 
 /** issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める */
@@ -112,20 +105,7 @@ export function startImplementationOptionsFromLabels(labels: IssueLabel[]): Star
 }
 
 /**
- * 「作成＋実装開始」時に、Issue作成と同時に付与すべきラベル一覧を返す。
- * オプション選択画面（実装オプション用チェックボックス）は既にIssue作成画面と共通のため、
- * 選択済みラベルにはオプションの実装オプション用ラベルが含まれている。ここではそれに加えて、
- * 「計画が必要」の選択有無に応じた進捗状況ラベル（01.planning/02.wip）を付与する。
- */
-export function startImplementationLabelsForCreate(selectedLabels: string[]): string[] {
-  const progressLabel = selectedLabels.includes(PLAN_REQUIRED_LABEL)
-    ? PLANNING_LABEL_NAME
-    : WIP_LABEL_NAME;
-  return [...new Set([...selectedLabels, progressLabel])];
-}
-
-/**
- * 未着手（実装状況ラベルが無く、承認待ちでもない）openなissueでのみ
+ * 未着手（進捗が`Ready`で、承認待ちでもない）openなissueでのみ
  * 「実装を開始」ボタンを表示する。着手済みissueでは通常のコメント欄から
  * 追加対応(additional)を依頼できるため、このボタンは初回起動専用。
  */

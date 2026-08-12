@@ -1,8 +1,13 @@
-name: Issue Labels
+name: Issue Progress
 
-# Issueラベルの状態遷移を担うワークフローの、issue-deck自身のトリガー定義(#940)。
+# Issueの進捗(Project Status)の状態遷移を担うワークフローの、issue-deck自身のトリガー定義(#940)。
 # ジョブ本体はreusable-issue-labels.ymlへ切り出し、他リポジトリからも同じ実体を
 # 呼べるようにしている(展開方式は#934)。
+#
+# ファイル名に`labels`が残っているのは、他リポジトリのcallerが`uses:`でこのパスを
+# 指しているため(改名すると全リポジトリのcallerを同時に直す必要がある)。
+# 進捗ラベルそのものは#991 Phase 5(#1010)で廃止しており、いま扱うのはProject Statusと
+# 条件系ラベル(`00.check-user`)だけ。
 #
 # issue-deck自身はローカルパス参照(./)を使い、常にそのブランチ・PRの内容で動かす。
 # 他アプリはタグ固定(@workflows/vX)で参照する運用とし、issue-deck側が先に壊れて他アプリには

@@ -76,7 +76,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 |---|---|---|
 | `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義とプレビュー系ジョブのみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系の`deploy-preview`／`notify-preview-url`ジョブはFly.io設定がアプリ固有のため、caller側に置いて対象リポジトリの`deploy-preview.yml`を呼ぶ |
 | `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下は`prompts-ref`で取得元を指定する（下記「プロンプトの取得元」。**指定しないと呼び出し元側の`.github/prompts/`が読まれ、無ければ落ちる**） |
-| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。ラベル名・`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
+| `issue-labels.yml` | `Planning`〜`Done`の進捗（Project Status）の状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う。**トリガー定義と`concurrency`のみ**を持ち、本体は`reusable-claude-review-develop.yml`を`uses:`で呼ぶ（#1078） | **コピーではなく薄いcallerを置く。** リポジトリ固有のリスクパスは`risk-paths`、依存関係の判定基準は`dependency-check`、差分規模の閾値は`review-file-threshold`・`review-line-threshold`、除外するlockファイルは`lock-files`で指定する。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
 | `reusable-claude-review-develop.yml` | 上記のジョブ本体（`on: workflow_call`）。`identify-issue`／`wait-for-ci`／`risk-check`／`claude-review`／`auto-merge`と各fallbackを含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
@@ -244,7 +244,13 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
 | `workflows/v4` | 上記 | `node-version` inputs を追加（#956） |
 | `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
-| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964）。現時点の最新タグで、m-guchi/shopping-list・m-guchi/dayspanが参照している |
+| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964） |
+| `workflows/v7` | 上記 | Organization `guchi-apps` への移行後に作成（#1009 Phase 4） |
+| `workflows/v8` | 上記 | **現時点の最新タグ。** `guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
+
+> **未反映**: #991 Phase 5（#1010）で進捗ラベルを廃止した内容は、まだタグに含まれていない。
+> 他リポジトリへ届けるには`workflows/v9`を切ってcallerを更新する必要がある。
+> それまで各リポジトリは v8（ラベル遷移＋Status報告の両方を行う版）のまま動く。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
@@ -297,37 +303,29 @@ cd /home/guchi/apps/_docs/label-sync
 ./sync-labels.sh apply   --from issue-deck --to my-app   # 反映
 ```
 
-同期スクリプトはissue-deckの全ラベルを配るため、下記14個に加えて`30.bug`・`51.improvement`等の
+同期スクリプトはissue-deckの全ラベルを配るため、下記8個に加えて`30.bug`・`51.improvement`等の
 分類用ラベルもあわせて作成される。ラベルを個別に作りたい場合は次の`gh label create`を使う。
 
 | ラベル | 色 | 説明 | 用途 |
 |---|---|---|---|
 | `00.check-user` | `f0883e` | ユーザーの確認・指示が必要 | 承認待ち・自動マージ保留の合図。他の状態ラベルと併用 |
 | `00.qa-answered` | `c5def5` | 質問への回答のみ完了 | `00.check-user`と常に併用。単なる質問・確認と判定された場合に付与し、承認ボタンの文言を出し分ける |
-| `01.planning` | `e9f7e6` | 状態：計画検討中 | `21.plan-required`選択時のみ経由 |
-| `02.wip` | `d3f2d0` | 状態：実装中 | 実装エージェントが着手時に付与 |
-| `03.d:marge` | `a8e6a1` | developへのPRを作成・マージ待ち | PR作成時に付与 |
-| `05.develop` | `6fcf73` | developへマージ完了（main未反映） | developマージ完了時に付与 |
-| `07.m:marge` | `2f9e44` | mainへのPRを作成・マージ待ち | develop→mainのPRが開いている間 |
-| `09.main` | `1b5e20` | mainへマージ完了・リリース済み | この時点でissueをclose |
 | `11.local` | `e99695` | ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない | 付いている間`claude-issue-dispatch.yml`が計画・実装・分割・追加対応を行わない（読み取り専用の質問応答のみ例外）。ローカルセッションとの二重起動防止 |
 | `21.plan-required` | `d4c5f9` | 計画の確認・承認が必要 | 実装前にPlan modeでの計画提示を必須にする |
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
-| `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、`02.wip`等の実装フローへ自動で乗らないようにする |
+| `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする |
+
+> **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
+> GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
+> ここに残るのは条件系ラベル（Status = 今どこにいるか、Label = どんな性質・条件があるか）だけ。
 
 `gh label create`での作成例:
 
 ```bash
 gh label create "00.check-user" --color f0883e --description "ユーザーの確認・指示が必要"
 gh label create "00.qa-answered" --color c5def5 --description "質問への回答のみ完了"
-gh label create "01.planning" --color e9f7e6 --description "状態：計画検討中"
-gh label create "02.wip" --color d3f2d0 --description "状態：実装中"
-gh label create "03.d:marge" --color a8e6a1 --description "developへのPRを作成・マージ待ち"
-gh label create "05.develop" --color 6fcf73 --description "developへマージ完了（main未反映）"
-gh label create "07.m:marge" --color 2f9e44 --description "mainへのPRを作成・マージ待ち"
-gh label create "09.main" --color 1b5e20 --description "mainへマージ完了・リリース済み"
 gh label create "11.local" --color e99695 --description "ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない"
 gh label create "21.plan-required" --color d4c5f9 --description "計画の確認・承認が必要"
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
@@ -543,8 +541,8 @@ scripts/check-cross-repo-guide-sync.sh
 
 | 順 | 確認内容 | 方法 |
 |---|---|---|
-| 1 | ラベル遷移 | `issue-<番号>`ブランチへpushし、Issueに`02.wip`が付くこと |
-| 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチもラベルも変更されない**ため最も安全 |
+| 1 | 進捗遷移 | `issue-<番号>`ブランチへpushし、盤面のStatusが`Implementation`になること |
+| 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチも進捗も変更されない**ため最も安全 |
 | 3 | 実装フロー | `@claude`とコメントし、ブランチ作成・PR作成まで通ること |
 | 4 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
 

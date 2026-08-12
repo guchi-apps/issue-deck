@@ -32,7 +32,7 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
 | ファイル | 責務 |
 |---|---|
 | `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する（944行、最大のワークフロー） |
-| `issue-labels.yml` | `01.planning`〜`09.main`のラベル状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する |
+| `issue-labels.yml` | `Planning`〜`Done`の進捗（Project Status）の状態遷移をブランチpush・PR作成・PRマージ等のイベントで自動化する（#991 Phase 5までは`01.planning`〜`09.main`のラベル遷移だった） |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） |
@@ -57,9 +57,10 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   issue-deckのCLAUDE.mdが定める自動マージ不可カテゴリ（認証・認可、DBマイグレーション、
   GitHub Actions/デプロイ設定等）を、issue-deckのディレクトリ構成（`prisma/migrations/**`等）に
   合わせたパターンで機械判定している。
-- **ラベル体系**: `01.planning`〜`09.main`・`21.plan-required`〜`24.screenshot-required`・
-  `00.check-user`はissue-deckリポジトリ側で個別に作成したカスタムラベルであり、他リポジトリには
-  存在しない。
+- **ラベル体系**: `21.plan-required`〜`24.screenshot-required`・`00.check-user`はissue-deck
+  リポジトリ側で個別に作成したカスタムラベルであり、他リポジトリには存在しない。
+  （調査当時は`01.planning`〜`09.main`の進捗ラベルも同じ扱いだったが、#991 Phase 5・#1010で
+  廃止し、進捗はGitHub ProjectsのStatusへ移した）
 
 ### データモデル側
 
@@ -145,6 +146,11 @@ IssueDeckのDB（`Repository`モデルへのフィールド追加）で管理す
 （上記1・3）によって必要な権限が変わるため、方式が決まった時点で改めて確認・申請が必要になる。
 
 ### 5. ラベル体系の可変化
+
+> **2026-08-12 追記（#1010）**: 進捗ラベル（`01.planning`〜`09.main`）は#991 Phase 5で廃止し、
+> 進捗はGitHub ProjectsのStatusで管理するようになった。この節が扱う「ラベル体系の可変化」の
+> 対象は、条件系ラベル（`21.plan-required`〜`24.screenshot-required`・`00.check-user`等）だけに
+> 縮んでいる。以下は当時の記述をそのまま残す。
 
 `01.planning`〜`09.main`・`21.plan-required`〜`24.screenshot-required`・`00.check-user`は、いずれも
 issue-deckリポジトリに手動で作成したカスタムラベルであり、他リポジトリには存在しない。展開時には

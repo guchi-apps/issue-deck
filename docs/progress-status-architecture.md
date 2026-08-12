@@ -1,7 +1,7 @@
 # 進捗管理をGitHub Projectsへ移す設計
 
 **いつ読むか**: Issueの進捗（未着手〜本番反映済）の扱いに関わるコードを触るとき。
-`01.planning`〜`09.main`のラベルとProject Statusのどちらを見るべきか迷ったとき。
+進捗をどこから読むべきか（＝Project Status。進捗ラベルはPhase 5で廃止済み）を確かめたいとき。
 
 issue #991 の設計ドキュメント。**この文書が進捗管理の設計の一次情報源**で、各段階のIssueは
 ここを参照する（Issue側に設計を複製しない）。
@@ -22,6 +22,7 @@ Projects v2を読み書きできるようになったため前提が整った（
 議論の結果、以下を最終形とする。**この4点が各段階の設計を規定する。**
 
 1. **進捗ラベル（`01.planning`〜`09.main`）は最終的に廃止する。** Statusを唯一の正にする
+   （Phase 5・#1010で実施済み）
 2. **対象はマルチエージェント対応リポジトリ全体。** `shopping-list`・`dayspan`も同じProjectで管理する
 3. **実行基盤はGitHub ActionsとミニPC上のClaude Codeを併用する。** ローカル実行の主目的は
    セッションの保持
@@ -31,20 +32,21 @@ Projects v2を読み書きできるようになったため前提が整った（
 `24.screenshot-required`・`70.confirm`・`11.local`・Priority系は**ラベルのまま残す**。
 Status = 今どこにいるか、Label = どんな性質・条件があるか、という役割分担にする。
 
-### StatusとラベルとProgressStatusKeyの対応
+### StatusとProgressStatusKeyの対応
 
-| Project Status | 進捗ラベル | `ProgressStatusKey` |
+| Project Status | `ProgressStatusKey` | かつての進捗ラベル（Phase 5で廃止） |
 |---|---|---|
-| Ready | （進捗ラベル無し） | `ready` |
-| Planning | `01.planning` | `planning` |
-| Implementation | `02.wip` | `implementation` |
-| Develop PR | `03.d:marge` | `develop-pr` |
-| Develop | `05.develop` | `develop` |
-| Release | `07.m:marge` | `release` |
-| Done | `09.main` | `done` |
+| Ready | `ready` | （進捗ラベル無し） |
+| Planning | `planning` | `01.planning` |
+| Implementation | `implementation` | `02.wip` |
+| Develop PR | `develop-pr` | `03.d:marge` |
+| Develop | `develop` | `05.develop` |
+| Release | `release` | `07.m:marge` |
+| Done | `done` | `09.main` |
 
 対応表の実体は[`src/lib/issue-progress.ts`](../src/lib/issue-progress.ts)の`PROGRESS_STATUSES`
-にあり、Status名・ラベル名・表示名・アイコンを1箇所に集約している。
+にあり、Status名・表示名・アイコンを1箇所に集約している。**ラベル名の列は履歴であり、
+コード上には存在しない**（Phase 5・#1010で削除した）。
 
 ### 盤面へ載せるのもissue-deckの仕事
 
@@ -112,8 +114,8 @@ Develop PR → Develop →（次のPR）→ Develop PR → Develop → ...
 
 **各時点では正確だが、作業が続いているのに`Develop`（develop反映済）で止まって見える期間が
 生まれる。** 実際に#991で発生した。PR #1000がマージされた時点で`develop-pr-merged`ジョブが
-`05.develop`を付け、作業を続けるために人が手で外した。**#991でラベルとStatusがズレた原因は
-これである。**
+当時の`05.develop`ラベルを付け、作業を続けるために人が手で外した。**#991でラベルとStatusが
+ズレた原因はこれである。**
 
 したがって**`Develop PR`・`Develop`は「最新のPRがどうなっているか」を表すものと定義する。**
 「Issueの作業が終わったか」ではない。Issueが終わるのは`Done`（本番反映）のときだけ。
@@ -179,12 +181,14 @@ curlで叩き、疎通失敗時は警告を出してフォールバックする�
 | 1 | 読み取りをStatus優先に。`resolveProgressStatus`へ集約 | ✅ 完了（v2.12.0・PR #1003） |
 | 2 | 進捗報告APIを作り、issue-deckがProjectを更新する（ラベルと併走） | ✅ 実装済み（#1007） |
 | 3 | 起動をStatus起点にする。カンバンのドラッグで実行が始まる | ✅ 実装済み（#1008） |
-| 4 | `shopping-list`・`dayspan`へ展開 | |
-| 5 | 進捗ラベルを廃止 | |
+| 4 | `shopping-list`・`dayspan`へ展開 | ✅ 完了（#1009。残りのリポジトリは #1047） |
+| 5 | 進捗ラベルを廃止 | ✅ 実装済み（#1010） |
 | 6 | privateアプリを統合（**この時点でTeamへ上げる**） | |
 
-**Phase 5を後半に置くのは、ラベルが安全網として機能するため。** Statusが壊れてもラベルがあれば
-`resolveProgressStatus`がフォールバックする。全リポジトリで安定してから外す。
+**Phase 5を後半に置いたのは、ラベルが安全網として機能していたため。** Statusが壊れてもラベルが
+あれば`resolveProgressStatus`がフォールバックできた。**Phase 5でその保険は無くなった。**
+Projectへ載っていないリポジトリのIssueは、issue-deckの画面で一律「未着手」に見える
+（盤面へ載る条件は`hasClaudeWorkflow`）。#1047 の展開が終わるまでこの状態が続く。
 
 ### Phase 1（完了）
 
@@ -198,9 +202,9 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 `Issue.projectStatus`へ入る。Projects v2はGraphQLのみのため境界は
 [`projects-api.ts`](../src/lib/github/projects-api.ts)。
 
-**ナビゲーションビューの絞り込みはラベルベースのまま据え置いている。** 二重運用中は両者が
-一致するため実害が無く、`filterIssuesByView`のラベル配列マッチを状態ベースへ変える改修は
-影響範囲が広いため。Phase 5で一緒に移す。
+**ナビゲーションビューの絞り込みはこの段階ではラベルベースのまま据え置いた。** 二重運用中は
+両者が一致するため実害が無く、`filterIssuesByView`のラベル配列マッチを状態ベースへ変える改修は
+影響範囲が広いため。Phase 5（#1010）で移した。
 
 ### Phase 2（実装済み）
 
@@ -234,27 +238,22 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 
 | 遷移 | 報告元 | `status` |
 |---|---|---|
-| `01.planning`付与 | `reusable-issue-dispatch.yml`（mode=plan） | `planning` |
-| `02.wip`付与 | `reusable-issue-dispatch.yml`（mode=implement/additional）・`reusable-issue-labels.yml`（push） | `implementation` |
-| `03.d:marge` | `reusable-issue-labels.yml`（develop向けPR作成） | `develop-pr` |
-| `05.develop` | `reusable-issue-labels.yml`（developへマージ・sweep） | `develop` |
-| `07.m:marge` | `reusable-issue-labels.yml`（main向けPRオープン） | `release` |
-| `09.main` | `reusable-issue-labels.yml`（mainへマージ） | `done` |
+| 計画着手 | `reusable-issue-dispatch.yml`（mode=plan） | `planning` |
+| 実装着手 | `reusable-issue-dispatch.yml`（mode=implement/additional）・`reusable-issue-labels.yml`（push） | `implementation` |
+| develop向けPR作成 | `reusable-issue-labels.yml`（PRオープン）・`reusable-issue-dispatch.yml`（実装ステップ後の実態合わせ） | `develop-pr` |
+| developへマージ | `reusable-issue-labels.yml`（PRマージ・sweep） | `develop` |
+| main向けPRオープン | `reusable-issue-labels.yml` | `release` |
+| mainへマージ | `reusable-issue-labels.yml` | `done` |
 
-**Issueのクローズ（`cleanup-on-close`）は報告しない。** このジョブは進捗ラベルを外すが、`09.main`は
-残す。ここで`ready`を報告すると、`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。
+**Issueのクローズ（`cleanup-on-close`）は報告しない。** ここで`ready`を報告すると、
+`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。
 
-**手で付け替えたラベルもStatusへ反映する**（#1042）。当初はワークフローのラベル遷移だけを
-報告元にしていたが、GitHubのUI・CLI・issue-deckの画面から手でラベルを変えてもStatusが追従せず、
-再同期を押すまでズレたままになっていた。運用上ラベルの手動付け替えは常態のため、
-`issues` Webhookの`labeled`・`unlabeled`を受けて報告する。**DBの値と比較してから呼ぶ**ので、
-ワークフローが付けたラベル（報告済みで一致している）では二重に報告されない。
-
-**ズレの是正方向はラベル → Status。** 再同期ボタン（`POST /api/sync/issues`）が
-`reconcileProjectStatusesFromLabels`を呼び、報告の取りこぼし（issue-deckの停止中・疎通失敗）を
-回収する。Phase 2はラベルが正でStatusがその写しであり、Statusを唯一の正にするのはPhase 5。
-**ただし進捗ラベルが1つも付いていないIssueは対象外にする** — ラベル無し＝`ready`として書き戻すと、
-人がカンバンでドラッグした結果（Phase 3で起動トリガーになる）を再同期のたびに巻き戻すため。
+> **Phase 5（#1010）で削除した経路**: Phase 2には「手で付け替えたラベルもStatusへ反映する」
+> （#1042。`issues` Webhookの`labeled`・`unlabeled`起点）と「再同期がラベルを正としてStatusへ
+> 書き戻す」（`reconcileProjectStatusesFromLabels`）の2つがあった。どちらも**ラベルが正で
+> Statusがその写し**という二重運用期の前提に立つもので、ラベルの廃止で写し元そのものが
+> 無くなったため削除した。報告の取りこぼしはGitHub側の盤面を直接直すか、同じ遷移をもう一度
+> 起こして回収する。
 
 #### 前提となる設定
 
@@ -380,6 +379,79 @@ Webhookの再配信・同時配信に対しては、**遷移前のStatusを条�
 ステップバッジに「（起動待ち）」と出す（[`workflow-status-steps.tsx`](../src/components/dashboard/workflow-status-steps.tsx)）。
 ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
 判定材料は`/api/issues/workflow-running`が返す`runId`で、専用の状態は持たない。
+
+### Phase 5（実装済み）：進捗ラベルを廃止しStatusを唯一の正にする
+
+**進捗ラベル（`01.planning`〜`09.main`）を廃止した**（#1010）。Phase 1〜4はラベルとStatusの
+二重運用で、ラベルが「Statusが壊れても表示を失わない」安全網になっていた。Phase 5はその保険を
+外し、Statusだけを判断材料にする段階である。
+
+`00.check-user`・`21.plan-required`・`22.merge-confirm-required`・`23.preview-required`・
+`24.screenshot-required`・`70.confirm`・`11.local`・Priority系は**ラベルのまま残る**。
+Status = 今どこにいるか、Label = どんな性質・条件があるか、という役割分担は変わらない。
+
+#### 変わったこと
+
+| 対象 | Phase 4まで | Phase 5以降 |
+|---|---|---|
+| `resolveProgressStatus` | Status優先・無ければラベル | **Statusのみ**。無ければ`ready` |
+| ナビゲーションビューの絞り込み | ラベル配列のOR一致 | `LabelFilterPreset.statuses`（`ProgressStatusKey`のOR一致） |
+| `reusable-issue-labels.yml` | ラベル付け替え＋Status報告 | **Status報告のみ**（`00.check-user`の除去だけラベル操作が残る） |
+| 対象issueの検索（sweep・リリース） | `gh issue list --label "05.develop"` | `GET /api/progress?...&status=develop` |
+| 実行モードの判定（dispatch） | `02.wip`・`03.d:marge`の有無 | `GET /api/progress?...&issue=N`の`status` |
+| 再同期の是正 | ラベル → Status（`reconcileProjectStatusesFromLabels`） | **無し**（写し元が存在しない） |
+| 手動ラベル付け替えの追従（#1042） | ラベル → Status | **無し**（同上） |
+
+#### 進捗の問い合わせAPI `GET /api/progress`
+
+ラベルを外した結果、**「いま何がどの段階にあるか」をGitHubのラベルから知る手段が無くなった。**
+探し先はProjectしかなく、Projectへの読み書きはissue-deckへ一本化する（上記「中核の判断」）
+ため、書き込みの`POST`と対になる読み取りの入口を作った。認証は同じ`PROGRESS_REPORT_SECRET`。
+
+| 形 | 返すもの | 使う側 |
+|---|---|---|
+| `?repository=owner/name&issue=123` | `{ status: "implementation" \| null }` | `reusable-issue-dispatch.yml`の実行モード判定 |
+| `?repository=owner/name&status=develop,release` | `{ issues: [12, 34] }`（openのみ・昇順） | `develop-merge-sweep`・`main-pr-in-progress`・`main-pr-merged`・`release-develop-to-main.yml` |
+
+実体は[`query-progress.ts`](../src/lib/github/query-progress.ts)。書き込み側と同じく
+**DBの`projectStatus`ではなくGitHubへ問い合わせる**（判定の正しさをDBの鮮度に依存させないため）。
+
+#### ラベル定義の削除はリリース後に行う
+
+コードの入れ替えとラベル定義の削除は**同時にできない**。本番へ反映されるまでの間、
+稼働中のワークフロー（`reusable-issue-dispatch.yml`の実行モード判定・
+`reusable-issue-labels.yml`の対象issue検索）はまだラベルを参照している。先に消すと、
+進行中のIssueの追加対応（`mode=additional`）やdevelop→mainの一括遷移が動かなくなる。
+
+順序は次のとおりで、手順は[`scripts/remove-progress-labels.sh`](../scripts/remove-progress-labels.sh)
+にまとめてある（既定はdry-run・対象はissue-deckのみ）。
+
+1. #1010 を develop → main へリリースし、本番へデプロイする（`GET /api/progress`が生える）
+2. 本番で疎通を確認する。`GET /api/progress`が**405なら未反映・401なら反映済み**
+3. `scripts/remove-progress-labels.sh --apply` を実行する（issue-deckのラベルだけ消える）
+
+**他リポジトリ（`dayspan`・`shopping-list`）は同時に対応しなくてよい。** あちらのcallerは
+`workflows/v8`にタグ固定されており、issue-deckの`develop`/`main`を進めても影響を受けない。
+ラベルもあちらのリポジトリに残ったままなので、v8のワークフローは今までどおりラベル遷移と
+Status報告の両方を行う。新しいタグ（`workflows/v9`）を切ってcallerを更新したあとで、
+そのリポジトリのラベルを個別に消す（`--repo dayspan`）。
+
+**リリース直後の一括close（`main-pr-merged`）は1回だけ空振りしうる。** develop→mainのマージで
+`deploy.yml`（本番反映）と`main-pr-merged`が同時に走り、後者が対象issueを引きに行く時点では
+まだ`GET /api/progress`が生えていない可能性がある。**このリリースまではラベルが残っている**ため、
+古い版のワークフローが動けば従来どおり成立する。空振りした場合はデプロイ完了後に該当runの
+`main-pr-merged`ジョブを再実行すれば回収できる。
+
+#### 受け入れたリスク（Phase 5で増えたもの）
+
+- **issue-deckへ届かない間、リリース時の一括遷移が止まる。** `main-pr-merged`は対象issueを
+  1件も見つけられず、issueがcloseされない。Phase 4まではラベルで探しており、issue-deckに
+  依存せず完結していた。取りこぼした場合はissue-deckの復旧後にrunを再実行する
+- **盤面に載っていないリポジトリのIssueは一律「未着手」に見える。** ラベルという代替の表示元が
+  無いため。#1047 の展開が終わるまで続く
+- **ローカルセッション（`scripts/start-issue.sh`）は`.env.local`に`APP_BASE_URL`・
+  `PROGRESS_REPORT_SECRET`が無いと進捗を進められない。** その場合はスクリプトが案内を出し、
+  issue-deckの画面（カンバン・「実装を開始」ボタン）から進める
 
 ### Phase 6：privateリポジトリ統合時にGitHub Teamへ上げる
 

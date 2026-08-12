@@ -8,14 +8,18 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { IssueLabel } from "@/types/issue";
-
 /**
- * Issueの進捗状態。GitHub Projects v2のStatusと、従来の進捗ラベル（01.planning〜09.main）の
- * 両方をこのキーへ正規化する。画面・判定ロジックはラベル名やStatus名を直接見ず、必ずここを通す。
+ * Issueの進捗状態。**GitHub Projects v2のStatusが唯一の正**で、このキーへ正規化する。
+ * 画面・判定ロジックはStatus名を直接見ず、必ずここを通す。
  *
  * これが #991 の「実行環境に依存しない状態管理インターフェース」の実体である。
  * GitHub Actionsから更新されようとローカル実行から更新されようと、読む側は同じ入口を使う。
+ *
+ * **進捗ラベル（`01.planning`〜`09.main`）は #991 Phase 5（#1010）で廃止した。**
+ * Phase 1〜4の間はラベルが安全網（Statusが壊れてもラベルから状態を復元できる）として
+ * 二重に維持されていたが、Statusを唯一の正にする段階でその保険を外した。
+ * `00.check-user`・`21.plan-required`等の条件系ラベルは引き続きラベルのまま残る
+ * （Status = 今どこにいるか、Label = どんな性質・条件があるか）。
  */
 export type ProgressStatusKey =
   | "ready"
@@ -30,11 +34,6 @@ export type ProgressStatusDef = {
   key: ProgressStatusKey;
   /** GitHub Projects v2 の Status フィールドの選択肢名 */
   projectStatus: string;
-  /**
-   * 対応する進捗ラベル名。`ready`だけは「進捗ラベルが付いていない状態」を指すためnull。
-   * Projectへ未登録のIssueはこのラベルから状態を解決する。
-   */
-  labelName: string | null;
   /** 画面表示用の短い日本語ラベル */
   label: string;
   /** ステップ表示用のアイコン（円の中身。未完了・現在ステップ時のみ使う。完了済みはCheckで統一） */
@@ -49,14 +48,13 @@ export type ProgressStatusDef = {
 };
 
 /**
- * 進捗状態の遷移順（CLAUDE.md参照）。Status名・ラベル名・表示名の対応をここに一元化する。
+ * 進捗状態の遷移順（CLAUDE.md参照）。Status名・表示名の対応をここに一元化する。
  * 配列の順序がそのままカンバンとステップ表示の並び順になる。
  */
 export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "ready",
     projectStatus: "Ready",
-    labelName: null,
     label: "未着手",
     icon: ListTodo,
     active: false,
@@ -64,7 +62,6 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "planning",
     projectStatus: "Planning",
-    labelName: "01.planning",
     label: "計画検討中",
     icon: ClipboardList,
     active: true,
@@ -72,7 +69,6 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "implementation",
     projectStatus: "Implementation",
-    labelName: "02.wip",
     label: "実装中",
     icon: Code2,
     active: true,
@@ -80,7 +76,6 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "develop-pr",
     projectStatus: "Develop PR",
-    labelName: "03.d:marge",
     label: "developへマージ",
     icon: GitPullRequest,
     active: true,
@@ -88,7 +83,6 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "develop",
     projectStatus: "Develop",
-    labelName: "05.develop",
     label: "develop反映済",
     icon: GitMerge,
     active: false,
@@ -96,7 +90,6 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "release",
     projectStatus: "Release",
-    labelName: "07.m:marge",
     label: "本番へマージ",
     icon: GitPullRequest,
     active: true,
@@ -104,23 +97,24 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "done",
     projectStatus: "Done",
-    labelName: "09.main",
     label: "本番反映済",
     icon: Rocket,
     active: false,
   },
 ];
 
-/** 進捗ラベルを持つ状態のみ（`ready`を除く）。ラベル起点の判定に使う */
-export const LABELED_PROGRESS_STATUSES: readonly (ProgressStatusDef & { labelName: string })[] =
-  PROGRESS_STATUSES.filter(
-    (status): status is ProgressStatusDef & { labelName: string } => status.labelName !== null,
-  );
+/** 未着手（`ready`）を除く、進捗が動いている状態。ステップ表示の対象になる */
+export const ADVANCED_PROGRESS_STATUSES: readonly ProgressStatusDef[] = PROGRESS_STATUSES.filter(
+  (status) => status.key !== "ready",
+);
 
-/** 進捗状態の判定に必要な最小限のIssue。表示用のIssue型とDBの行のどちらからでも渡せる */
+/**
+ * 進捗状態の判定に必要な最小限のIssue。表示用のIssue型とDBの行のどちらからでも渡せる。
+ *
+ * Phase 5でラベルへのフォールバックが無くなったため、必要なのは`projectStatus`だけになった。
+ */
 export type ProgressSource = {
   projectStatus: string | null;
-  labels: IssueLabel[];
 };
 
 export function getProgressStatusDef(key: ProgressStatusKey): ProgressStatusDef {
@@ -130,7 +124,8 @@ export function getProgressStatusDef(key: ProgressStatusKey): ProgressStatusDef 
 
 /**
  * 外部から受け取った文字列を`ProgressStatusKey`として検証する。
- * 進捗報告API（`POST /api/progress`）がワークフローからの入力を受けるのに使う。
+ * 進捗報告API（`POST /api/progress`）・状態問い合わせAPI（`GET /api/progress`）が
+ * ワークフローからの入力を受けるのに使う。
  */
 export function parseProgressStatusKey(value: unknown): ProgressStatusKey | null {
   if (typeof value !== "string") return null;
@@ -143,34 +138,17 @@ export function matchProjectStatus(projectStatus: string): ProgressStatusKey | n
 }
 
 /**
- * 進捗ラベルから状態を引く。該当ラベルが無ければ「未着手」とみなして`ready`を返す。
+ * Issueの進捗状態を解決する。**Project Statusが唯一の判断材料**で、
+ * Statusが無いIssue（Projectへ未登録・Projectから外された）は`ready`（未着手）とみなす。
  *
- * 遷移の過渡期に新旧のラベルが同時に付くことがあるため、PROGRESS_STATUSESの並び順で
- * 最初に一致したものを採用する（＝より手前の状態を優先する）。これは移行前の
- * getWorkflowStepIndexの挙動を引き継いだもの。
- */
-export function matchProgressLabels(labels: IssueLabel[]): ProgressStatusKey {
-  const names = new Set(labels.map((label) => label.name));
-  return LABELED_PROGRESS_STATUSES.find((status) => names.has(status.labelName))?.key ?? "ready";
-}
-
-/**
- * Issueの進捗状態を解決する。**Project Statusがあればそれを優先し、無ければ進捗ラベルへ
- * フォールバックする。**
- *
- * 二重運用期（#991 Phase 1）は両方が維持されるため通常は一致するが、食い違った場合は
- * Statusを正とする。Projectから外れたIssueは`projectStatus`がnullに戻るため、
- * 自動的にラベル起点の判定へ戻る。これが巻き戻しの経路にもなっている。
- *
- * Statusに未知の名前が入っていた場合（Project側で選択肢を増やした等）もラベルへ
- * フォールバックする。画面が空になるより既存の挙動を保つほうが安全なため。
+ * Statusに未知の名前が入っていた場合（Project側で選択肢を増やした等）も`ready`になる。
+ * Phase 4までは進捗ラベルへフォールバックしていたが、Phase 5（#1010）でラベルを廃止した
+ * ため復元元が無い。**Projectへ載っていないリポジトリのIssueは一律「未着手」に見える。**
+ * 盤面へ載せる条件は`hasClaudeWorkflow`（docs/progress-status-architecture.md）。
  */
 export function resolveProgressStatus(issue: ProgressSource): ProgressStatusKey {
-  if (issue.projectStatus) {
-    const fromStatus = matchProjectStatus(issue.projectStatus);
-    if (fromStatus) return fromStatus;
-  }
-  return matchProgressLabels(issue.labels);
+  if (!issue.projectStatus) return "ready";
+  return matchProjectStatus(issue.projectStatus) ?? "ready";
 }
 
 /** 進捗状態の遷移順における位置。比較に使う */
@@ -180,16 +158,7 @@ export function getProgressStatusIndex(key: ProgressStatusKey): number {
 
 /**
  * GitHub Actionsの実行が進行し得る段階かどうか。実行状況のポーリング対象を絞り込むのに使う。
- *
- * 遷移の過渡期に新旧のラベルが同時に付くことがあるため、現在ステップ（先頭一致）ではなく
- * 「進行し得るラベルがひとつでも付いているか」で判定する。Project Statusは単一値のため
- * この過渡期の問題は起きず、Statusがある場合はその状態のactiveをそのまま見る。
  */
 export function hasActiveProgress(issue: ProgressSource): boolean {
-  if (issue.projectStatus) {
-    const fromStatus = matchProjectStatus(issue.projectStatus);
-    if (fromStatus) return getProgressStatusDef(fromStatus).active;
-  }
-  const names = new Set(issue.labels.map((label) => label.name));
-  return LABELED_PROGRESS_STATUSES.some((status) => status.active && names.has(status.labelName));
+  return getProgressStatusDef(resolveProgressStatus(issue)).active;
 }

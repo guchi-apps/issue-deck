@@ -4,11 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
-import {
-  addMissingProjectItems,
-  reconcileProjectStatusesFromLabels,
-  syncProjectStatuses,
-} from "@/lib/github/sync-project-status";
+import { addMissingProjectItems, syncProjectStatuses } from "@/lib/github/sync-project-status";
 
 export function POST() {
   return withGithubApiFeature("sync", () => handlePOST());
@@ -42,10 +38,10 @@ async function handlePOST() {
   // 初回導入時のバックフィルを、明示的な再同期でも回収できるようにするため。
   // Projectを使わない設定（環境変数未設定）なら何もせず返る。
   //
-  // そのうえで、進捗ラベルとStatusのズレをラベル基準で是正する（Phase 2）。報告API
-  // （POST /api/progress）がissue-deckの停止中・疎通失敗で取りこぼした変化を、
-  // 再同期ボタンで回収できるようにする経路。順序が逆だとProject→DBの取り込みが
-  // 是正結果を上書きしてしまうため、必ずsyncProjectStatusesの後に行う。
+  // Phase 2にあった「進捗ラベルを正としてStatusへ書き戻す」是正は、Phase 5（#1010）で
+  // ラベルを廃止したため無くなった。**Statusが唯一の正で、写し元がもう無い。**
+  // 報告API（POST /api/progress）が取りこぼした変化は、GitHub側のProjectを直接直すか、
+  // 該当の遷移をもう一度起こすことでしか回収できない。
   const installationIds = [...new Set(repositories.map((repo) => repo.installation.installationId))];
   for (const installationId of installationIds) {
     try {
@@ -56,7 +52,6 @@ async function handlePOST() {
       if (backfill.skipped) break;
       const result = await syncProjectStatuses(installationId);
       if (result.skipped) break;
-      await reconcileProjectStatusesFromLabels(installationId);
     } catch (error) {
       // Project連携が失敗してもIssueの再同期自体は成功しているため、全体を失敗にはしない
       errors.push({
