@@ -459,16 +459,40 @@ jobs:
           fi
           "$CLAUDE_USAGE_SCRIPT" "Claude Code（CI失敗修正）" "${{ steps.claude_ci_fix.outputs.execution_file }}"
 
-      - name: 02.wip ラベルを除去する
-        # issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush（このジョブが
-        # 上記ステップで行うpushを含む）をトリガーに無条件で02.wipを付与するため、
-        # 03.d:marge/00.check-user状態のissueに02.wipが混在して残らないよう明示的に除去する
-        # （claude-conflict-resolve.ymlの同名ステップと同じ理由）。
+      - name: Project Status を Develop PR へ戻す
+        # reusable-issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
+        # （このジョブが上記ステップで行うpushを含む）をトリガーに無条件でImplementationを
+        # 報告するため、developへのPRが出ている段階のissueが盤面上だけ実装中へ巻き戻る。
+        # それを打ち消して`Develop PR`へ戻す。LLMの実行有無に依存させないため独立した
+        # シェルステップとする（同じ状態を再報告するだけなので常に実行してよい）。
+        #
+        # Phase 4までは同じ目的で実装中を示す進捗ラベルを除去していた。進捗ラベルの廃止
+        # （#991 Phase 5・#1010）にあわせてStatusの再報告へ置き換えている。
         if: always() && steps.state.outputs.should_fix == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
-        run: gh issue edit "$ISSUE_NUMBER" --remove-label "02.wip"
+          STATUS: develop-pr
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/progress" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"issue\":$ISSUE_NUMBER,\"status\":\"$STATUS\"}")" || code=000
+          if [ "$code" = "200" ]; then
+            echo "issue #$ISSUE_NUMBER を $STATUS として報告しました"
+          else
+            echo "::warning::Project Statusの報告に失敗しました（issue #$ISSUE_NUMBER / status=$STATUS / HTTP $code）"
+          fi
 
       - name: 修正結果を検証し、報告が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した

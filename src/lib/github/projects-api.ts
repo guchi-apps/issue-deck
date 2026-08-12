@@ -17,6 +17,8 @@ export type ProjectItemSnapshot = {
   repositoryDatabaseId: number;
   /** 対象Issueの番号 */
   issueNumber: number;
+  /** 対象Issueがopenかどうか。Statusで絞って一覧するとき、closed分を落とすのに使う */
+  issueOpen: boolean;
   /** Statusフィールドの選択肢名（例: "Implementation"）。未設定ならnull */
   status: string | null;
 };
@@ -64,6 +66,7 @@ const ITEM_FIELDS = `
   content {
     ... on Issue {
       number
+      state
       repository { databaseId }
     }
   }
@@ -74,7 +77,7 @@ const ITEM_FIELDS = `
 
 type RawItem = {
   id: string;
-  content: { number?: number; repository?: { databaseId?: number } } | null;
+  content: { number?: number; state?: string; repository?: { databaseId?: number } } | null;
   fieldValueByName: { name?: string } | null;
 };
 
@@ -91,6 +94,7 @@ function toSnapshot(raw: RawItem | null | undefined): ProjectItemSnapshot | null
     itemId: raw.id,
     repositoryDatabaseId,
     issueNumber,
+    issueOpen: raw.content?.state === "OPEN",
     status: raw.fieldValueByName?.name ?? null,
   };
 }

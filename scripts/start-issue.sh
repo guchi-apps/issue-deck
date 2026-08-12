@@ -24,9 +24,11 @@
 # 作業を始めてしまわないよう警告し、安全に捨てられる場合は作り直すかを尋ねる（#1100）。
 # 溜まったworktreeの掃除は scripts/cleanup-worktrees.sh を使う。
 #
-# 起動時にIssueへ `11.local`（無人実行との二重起動を防ぐ停止フラグ。#1097）と進捗ラベル
-# （`01.planning`/`02.wip`。#1096）を付ける。どの起動経路（ターミナル・画面のボタン・
-# `/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが起きない。
+# 起動時にIssueへ `11.local`（無人実行との二重起動を防ぐ停止フラグ。#1097）を付け、進捗
+# （Project Statusの `Planning`/`Implementation`。#1096）を報告する。どの起動経路
+# （ターミナル・画面のボタン・`/issue`）もこのスクリプトを通るため、ここに置けば付け忘れが
+# 起きない。進捗ラベルは #991 Phase 5（#1010）で廃止しており、報告先はissue-deckの
+# 進捗報告API（`POST /api/progress`）だけになっている。
 #
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
@@ -194,57 +196,86 @@ remove_worktree() {
   rm -f "$WORKTREE_BASE/.dev-servers/issue-$n.log" "$WORKTREE_BASE/.dev-servers/issue-$n.pid"
 }
 
-# 起動時にIssueへ付けるラベルを決めて付与する（#1096・#1097）。
+# `.env.local` から1つのキーの値を読む（存在しなければ空文字）。値はログに出さない。
+read_env_value() {
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 0
+  sed -n "s/^${key}=//p" "$file" | tail -n1 | sed -e 's/^"//' -e 's/"$//'
+}
+
+# 起動時にIssueへ `11.local` を付ける（#1097）。
 #
-# - `11.local`: ローカルセッションで対応中であることを示す停止フラグ。付いている間は
-#   無人実行（`claude-issue-dispatch.yml`）がこのIssueに手を出さない（#1097）
-# - 進捗ラベル: `21.plan-required` が付いていれば `01.planning`、無ければ `02.wip`（#1096）。
-#   ラベルを付ければWebhook経由でGitHub ProjectsのStatusも追随するため、Statusの報告は行わない
-#
-# **既に進捗ラベルが付いている場合は進捗ラベルに触らない。** 再開（#1076）で2回目以降に
-# 起動したときに、`03.d:marge`まで進んだIssueを`02.wip`へ巻き戻さないため。
+# ローカルセッションで対応中であることを示す停止フラグで、付いている間は無人実行
+# （`claude-issue-dispatch.yml`）がこのIssueに手を出さない。
 #
 # ラベル付与に失敗しても起動は止めない（起動できないより、記録が遅れる方が軽い。画面の
-# 「ローカルで開始」ボタンも`11.local`について同じ方針を取っている）。
+# 「ローカルで開始」ボタンも同じ方針を取っている）。
 apply_start_labels() {
   local n="$1"
   # 既に付いているラベル名（1行1つ）。判定に使うだけなのでIssue取得のJSONから読み、
   # 追加のAPI呼び出しはしない。
   local existing="$2"
-  local add_labels=()
 
-  if ! printf '%s\n' "$existing" | grep -Fxq "11.local"; then
-    add_labels+=("11.local")
-  fi
-
-  local current_progress="" p
-  for p in "01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge" "09.main"; do
-    if printf '%s\n' "$existing" | grep -Fxq "$p"; then
-      current_progress="$p"
-      break
-    fi
-  done
-  if [[ -z "$current_progress" ]]; then
-    if printf '%s\n' "$existing" | grep -Fxq "21.plan-required"; then
-      add_labels+=("01.planning")
-    else
-      add_labels+=("02.wip")
-    fi
-  fi
-
-  if [[ ${#add_labels[@]} -eq 0 ]]; then
-    echo "#$n: ラベルは付与済みです（進捗: ${current_progress:-なし}）。"
+  if printf '%s\n' "$existing" | grep -Fxq "11.local"; then
+    echo "#$n: 11.local は付与済みです。"
     return 0
   fi
 
-  local gh_args=() l
-  for l in "${add_labels[@]}"; do
-    gh_args+=(--add-label "$l")
-  done
-  if gh issue edit "$n" --repo guchi-apps/issue-deck "${gh_args[@]}" >/dev/null; then
-    echo "#$n: ラベルを付与しました（$(IFS=, ; echo "${add_labels[*]}")）。"
+  if gh issue edit "$n" --repo guchi-apps/issue-deck --add-label "11.local" >/dev/null; then
+    echo "#$n: ラベルを付与しました（11.local）。"
   else
-    echo "#$n: 警告: ラベル（$(IFS=, ; echo "${add_labels[*]}")）の付与に失敗しました。手動で付けてください。" >&2
+    echo "#$n: 警告: ラベル（11.local）の付与に失敗しました。手動で付けてください。" >&2
+  fi
+}
+
+# 起動時にIssueの進捗（Project Status）を報告する（#1096。#1010でラベル付与から置き換え）。
+#
+# `21.plan-required` が付いていれば `planning`、無ければ `implementation` を報告する。
+#
+# **既に進捗が始まっている場合は触らない。** 再開（#1076）で2回目以降に起動したときに、
+# `Develop PR`まで進んだIssueを`Implementation`へ巻き戻さないため。判定にはissue-deckの
+# 進捗問い合わせAPI（`GET /api/progress`）を使う。
+#
+# 報告先と鍵は本体の `.env.local` から読む（`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`）。
+# **どちらかが無ければ何もせず案内だけ出す。** ローカル環境に鍵を持たない使い方
+# （issue-deckの画面やカンバンから進捗を動かす）も成立するため、起動を止める理由にしない。
+report_start_progress() {
+  local n="$1"
+  local existing="$2"
+  local base_url secret desired
+  base_url="$(read_env_value "$ROOT/.env.local" APP_BASE_URL)"
+  secret="$(read_env_value "$ROOT/.env.local" PROGRESS_REPORT_SECRET)"
+  if [[ -z "$base_url" || -z "$secret" ]]; then
+    echo "#$n: 進捗（Project Status）は報告しませんでした（.env.local に APP_BASE_URL / PROGRESS_REPORT_SECRET がありません）。"
+    echo "     issue-deckの画面の「実装を開始」ボタン、またはカンバンでカードを動かして進捗を進めてください。"
+    return 0
+  fi
+
+  local current
+  current="$(curl -sS -m 20 -H "Authorization: Bearer $secret" \
+    "$base_url/api/progress?repository=guchi-apps/issue-deck&issue=$n" 2>/dev/null \
+    | jq -r 'select(.available == true) | .status // empty' 2>/dev/null || true)"
+  if [[ -n "$current" && "$current" != "ready" ]]; then
+    echo "#$n: 進捗は既に開始済みです（$current）。巻き戻さないため報告しません。"
+    return 0
+  fi
+
+  if printf '%s\n' "$existing" | grep -Fxq "21.plan-required"; then
+    desired="planning"
+  else
+    desired="implementation"
+  fi
+
+  local code
+  code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+    -X POST "$base_url/api/progress" \
+    -H "Authorization: Bearer $secret" \
+    -H "Content-Type: application/json" \
+    -d "{\"repository\":\"guchi-apps/issue-deck\",\"issue\":$n,\"status\":\"$desired\"}" 2>/dev/null)" || code=000
+  if [[ "$code" == "200" ]]; then
+    echo "#$n: 進捗を $desired として報告しました。"
+  else
+    echo "#$n: 警告: 進捗（$desired）の報告に失敗しました（HTTP $code）。issue-deckの画面から進めてください。" >&2
   fi
 }
 
@@ -366,14 +397,16 @@ prepare_issue() {
     exit 1
   fi
 
-  # ラベルの付与は、worktree作成やpnpm installより先に行う。二重起動の停止フラグ
+  # ラベル付与と進捗の報告は、worktree作成やpnpm installより先に行う。二重起動の停止フラグ
   # （`11.local`）は早く立つほど効くうえ、以降の重い処理が失敗しても着手した記録は残る。
   local issue_labels
   if issue_labels="$(printf '%s' "$issue_json" | python3 -c 'import json, sys; print("\n".join(l["name"] for l in json.load(sys.stdin).get("labels") or []))')"; then
     apply_start_labels "$n" "$issue_labels"
+    report_start_progress "$n" "$issue_labels"
   else
-    # 解析できないまま付与すると、既に進んでいる進捗ラベルを巻き戻しかねないのでスキップする。
-    echo "#$n: 警告: ラベル一覧を解析できなかったため、起動時のラベル付与をスキップします。" >&2
+    # 解析できないまま進めると、`21.plan-required`の有無を取り違えて計画フェーズを飛ばしかねない
+    # のでスキップする。
+    echo "#$n: 警告: ラベル一覧を解析できなかったため、起動時のラベル付与・進捗の報告をスキップします。" >&2
   fi
 
   if [[ "$reuse_worktree" -eq 0 ]]; then

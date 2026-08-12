@@ -298,17 +298,18 @@ install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
 
 - `11.local` — 付いていなければ付ける。無人実行（`claude-issue-dispatch.yml`）との二重起動を
   防ぐ停止フラグ（[branching.md](branching.md)）
-- 進捗ラベル — `21.plan-required`が付いていれば`01.planning`、無ければ`02.wip`。
-  **既に進捗ラベル（`01.planning`〜`09.main`）のいずれかが付いている場合は触らない。**
-  再開（後述）で2回目以降に起動したときに、`03.d:marge`まで進んだIssueを`02.wip`へ
-  巻き戻さないため
+- 進捗（Project Status） — `21.plan-required`が付いていれば`Planning`、無ければ`Implementation`を
+  issue-deckの進捗報告API（`POST /api/progress`）へ報告する。
+  **既に進捗が始まっている（`Ready`以外）場合は触らない。** 再開（後述）で2回目以降に起動した
+  ときに、`Develop PR`まで進んだIssueを`Implementation`へ巻き戻さないため。現在の進捗は
+  `GET /api/progress`で確認してから報告する
 
-進捗ラベルを付ければGitHub ProjectsのStatusもWebhook経由で追随する
-（`src/app/api/webhooks/github/route.ts`がラベルを正としてStatusを是正する）ため、ローカルから
-`/api/progress`へ報告する必要はない。共有シークレット（`PROGRESS_REPORT_SECRET`）をローカルへ
-置かずに済む。
+進捗ラベルは#991 Phase 5（#1010）で廃止したため、ローカルからも`gh issue edit`では進捗を
+進められない。報告先と鍵は本体の`.env.local`の`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`から読む。
+**どちらかが無ければ報告せず案内だけ出す**（issue-deckの画面のボタン・カンバンから進める運用も
+成立するため、起動を止める理由にしない）。
 
-ラベル付与に失敗しても起動自体は妨げない（起動できないより、記録が遅れる方が軽いという判断）。
+ラベル付与・進捗の報告に失敗しても起動自体は妨げない（起動できないより、記録が遅れる方が軽いという判断）。
 ボタン経由では`11.local`の付与がスクリプト側と重複するが、二重に付けても害はない。
 
 ## 2回目以降は再開になる

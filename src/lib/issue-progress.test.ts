@@ -1,33 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  LABELED_PROGRESS_STATUSES,
+  ADVANCED_PROGRESS_STATUSES,
   PROGRESS_STATUSES,
   getProgressStatusIndex,
   hasActiveProgress,
-  matchProgressLabels,
   matchProjectStatus,
   parseProgressStatusKey,
   resolveProgressStatus,
 } from "@/lib/issue-progress";
-import type { IssueLabel } from "@/types/issue";
-
-function labels(...names: string[]): IssueLabel[] {
-  return names.map((name) => ({ name, color: "#000000", description: null }));
-}
 
 describe("PROGRESS_STATUSES の定義", () => {
-  it("readyだけがラベルを持たず、残りはすべてラベルを持つ", () => {
-    expect(PROGRESS_STATUSES.filter((status) => status.labelName === null)).toHaveLength(1);
+  it("先頭がreadyで、それ以外がステップ表示の対象になる", () => {
     expect(PROGRESS_STATUSES[0].key).toBe("ready");
-    expect(LABELED_PROGRESS_STATUSES).toHaveLength(PROGRESS_STATUSES.length - 1);
+    expect(ADVANCED_PROGRESS_STATUSES).toHaveLength(PROGRESS_STATUSES.length - 1);
+    expect(ADVANCED_PROGRESS_STATUSES.some((status) => status.key === "ready")).toBe(false);
   });
 
-  it("Status名とラベル名に重複がない", () => {
+  it("Status名に重複がない", () => {
     const statusNames = PROGRESS_STATUSES.map((status) => status.projectStatus);
-    const labelNames = LABELED_PROGRESS_STATUSES.map((status) => status.labelName);
     expect(new Set(statusNames).size).toBe(statusNames.length);
-    expect(new Set(labelNames).size).toBe(labelNames.length);
   });
 
   it("マージ後の定常状態と未着手はactiveではない", () => {
@@ -49,55 +41,20 @@ describe("matchProjectStatus", () => {
   });
 });
 
-describe("matchProgressLabels", () => {
-  it("進捗ラベルから状態を引ける", () => {
-    expect(matchProgressLabels(labels("02.wip"))).toBe("implementation");
-    expect(matchProgressLabels(labels("09.main"))).toBe("done");
-  });
-
-  it("進捗ラベルが無ければreadyになる", () => {
-    expect(matchProgressLabels([])).toBe("ready");
-    expect(matchProgressLabels(labels("00.check-user", "70.confirm"))).toBe("ready");
-  });
-
-  it("新旧のラベルが同時に付いている過渡期は手前の状態を優先する", () => {
-    expect(matchProgressLabels(labels("05.develop", "02.wip"))).toBe("implementation");
-    expect(matchProgressLabels(labels("09.main", "01.planning"))).toBe("planning");
-  });
-});
-
 describe("resolveProgressStatus", () => {
-  it("Project Statusがあればそれを優先する", () => {
-    expect(resolveProgressStatus({ projectStatus: "Release", labels: [] })).toBe("release");
+  it("Project Statusから状態を引く", () => {
+    expect(resolveProgressStatus({ projectStatus: "Release" })).toBe("release");
+    expect(resolveProgressStatus({ projectStatus: "Develop PR" })).toBe("develop-pr");
   });
 
-  it("Statusとラベルが食い違う場合はStatusが勝つ", () => {
-    expect(
-      resolveProgressStatus({ projectStatus: "Done", labels: labels("02.wip") }),
-    ).toBe("done");
+  it("Statusが無ければready（未着手）になる", () => {
+    // Phase 5で進捗ラベルを廃止したため、フォールバック先が無い。Projectへ載っていない
+    // リポジトリのIssueは一律「未着手」に見える
+    expect(resolveProgressStatus({ projectStatus: null })).toBe("ready");
   });
 
-  it("Statusが無ければラベルへフォールバックする", () => {
-    expect(resolveProgressStatus({ projectStatus: null, labels: labels("03.d:marge") })).toBe(
-      "develop-pr",
-    );
-  });
-
-  it("Statusもラベルも無ければreadyになる", () => {
-    expect(resolveProgressStatus({ projectStatus: null, labels: [] })).toBe("ready");
-  });
-
-  it("未知のStatus名はラベルへフォールバックする（画面が空になるのを避ける）", () => {
-    expect(
-      resolveProgressStatus({ projectStatus: "Blocked", labels: labels("02.wip") }),
-    ).toBe("implementation");
-  });
-
-  it("Projectから外れてStatusがnullに戻ればラベル起点の判定へ戻る", () => {
-    const issue = { projectStatus: "Done" as string | null, labels: labels("02.wip") };
-    expect(resolveProgressStatus(issue)).toBe("done");
-    issue.projectStatus = null;
-    expect(resolveProgressStatus(issue)).toBe("implementation");
+  it("未知のStatus名もreadyとして扱う", () => {
+    expect(resolveProgressStatus({ projectStatus: "Blocked" })).toBe("ready");
   });
 });
 
@@ -113,32 +70,19 @@ describe("getProgressStatusIndex", () => {
 
 describe("hasActiveProgress", () => {
   it("Statusがactiveな状態ならtrue", () => {
-    expect(hasActiveProgress({ projectStatus: "Implementation", labels: [] })).toBe(true);
+    expect(hasActiveProgress({ projectStatus: "Implementation" })).toBe(true);
+    expect(hasActiveProgress({ projectStatus: "Planning" })).toBe(true);
   });
 
   it("マージ後の定常状態はfalse", () => {
-    expect(hasActiveProgress({ projectStatus: "Develop", labels: [] })).toBe(false);
-    expect(hasActiveProgress({ projectStatus: "Done", labels: [] })).toBe(false);
+    expect(hasActiveProgress({ projectStatus: "Develop" })).toBe(false);
+    expect(hasActiveProgress({ projectStatus: "Done" })).toBe(false);
   });
 
-  it("未着手はfalse", () => {
-    expect(hasActiveProgress({ projectStatus: "Ready", labels: [] })).toBe(false);
-    expect(hasActiveProgress({ projectStatus: null, labels: [] })).toBe(false);
-  });
-
-  it("Statusが無ければラベルで判定する", () => {
-    expect(hasActiveProgress({ projectStatus: null, labels: labels("02.wip") })).toBe(true);
-    expect(hasActiveProgress({ projectStatus: null, labels: labels("05.develop") })).toBe(false);
-  });
-
-  it("ラベル判定は過渡期の同時付与を拾う（activeなラベルが1つでもあればtrue）", () => {
-    expect(
-      hasActiveProgress({ projectStatus: null, labels: labels("05.develop", "07.m:marge") }),
-    ).toBe(true);
-  });
-
-  it("未知のStatus名はラベルへフォールバックする", () => {
-    expect(hasActiveProgress({ projectStatus: "Blocked", labels: labels("02.wip") })).toBe(true);
+  it("未着手・Status無し・未知のStatus名はfalse", () => {
+    expect(hasActiveProgress({ projectStatus: "Ready" })).toBe(false);
+    expect(hasActiveProgress({ projectStatus: null })).toBe(false);
+    expect(hasActiveProgress({ projectStatus: "Blocked" })).toBe(false);
   });
 });
 
@@ -150,7 +94,7 @@ describe("parseProgressStatusKey", () => {
   });
 
   it("ラベル名・Status名・未知の値・非文字列はnullを返す", () => {
-    // 報告APIが受けるのは状態キーであり、ラベル名やProject Status名ではない
+    // 報告API・問い合わせAPIが受けるのは状態キーであり、ラベル名やProject Status名ではない
     expect(parseProgressStatusKey("02.wip")).toBeNull();
     expect(parseProgressStatusKey("Implementation")).toBeNull();
     expect(parseProgressStatusKey("blocked")).toBeNull();

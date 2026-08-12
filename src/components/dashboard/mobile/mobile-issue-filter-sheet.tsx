@@ -129,7 +129,9 @@ export function MobileIssueFilterSheet({
             <section>
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">絞り込み</h3>
               <div className="flex flex-wrap gap-2">
-                {/* excludeLabelsのみで定義される「未着手」等はlabels配列のトグルでは表現できないため除外 */}
+                {/* 進捗Status・excludeLabelsで定義されるプリセット（実行中・未着手等）は
+                    labels配列のトグルでは表現できないため除外する。それらはビュー
+                    （viewクエリ）側で選ぶ（#991 Phase 5でラベル配列マッチを廃止した） */}
                 {LABEL_FILTER_PRESETS.filter((preset) => preset.labels.length > 0).map((preset) => {
                   const active = isLabelFilterPresetActive(filters.labels, preset);
                   return (

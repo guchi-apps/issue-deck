@@ -42,7 +42,7 @@ const ISSUE_TEMPLATES = [
   { title: "アクセシビリティ対応を強化する", state: "OPEN", labels: [{ name: "question", color: "d876e3" }] },
 ];
 
-async function upsertDummyIssue(repository, { number, title, state, labels }) {
+async function upsertDummyIssue(repository, { number, title, state, labels, projectStatus = null }) {
   const githubIssueId = BigInt(repository.githubRepositoryId) * 1000n + BigInt(number);
   const now = new Date();
   const issue = await prisma.issue.upsert({
@@ -60,6 +60,7 @@ async function upsertDummyIssue(repository, { number, title, state, labels }) {
       htmlUrl: `${repository.htmlUrl}/issues/${number}`,
       githubCreatedAt: now,
       githubUpdatedAt: now,
+      projectStatus,
     },
   });
 
@@ -75,9 +76,12 @@ async function upsertDummyIssue(repository, { number, title, state, labels }) {
 }
 
 // 承認待ちカードのスクリーンショット確認用ダミーIssue（#688）。通常の承認/修正/取り下げ画面と
-// PRマージ待ち画面をそれぞれ再現するため、最初のリポジトリにのみ2件追加する。ラベル名は
-// src/lib/github/approval-labels.ts・src/lib/github/workflow-status.tsの値と一致させること
+// PRマージ待ち画面をそれぞれ再現するため、最初のリポジトリにのみ2件追加する。ラベル名・
+// Status名はsrc/lib/github/approval-labels.ts・src/lib/issue-progress.tsの値と一致させること
 // （このスクリプトはPrisma経由で直接書き込むためsrc配下をimportしない）。
+//
+// PRマージ待ちの再現に使うのは進捗ラベルではなくProject Statusの`Develop PR`。
+// 進捗ラベルは#991 Phase 5（#1010）で廃止した。
 const APPROVAL_SAMPLE_ISSUES = [
   {
     number: ISSUES_PER_REPOSITORY + 1,
@@ -87,10 +91,8 @@ const APPROVAL_SAMPLE_ISSUES = [
   {
     number: ISSUES_PER_REPOSITORY + 2,
     title: "[CI確認用] PRマージ待ちサンプルIssue",
-    labels: [
-      { name: "00.check-user", color: "d93f0b" },
-      { name: "03.d:marge", color: "fbca04" },
-    ],
+    labels: [{ name: "00.check-user", color: "d93f0b" }],
+    projectStatus: "Develop PR",
   },
 ];
 

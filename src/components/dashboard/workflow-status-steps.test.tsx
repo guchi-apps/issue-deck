@@ -14,27 +14,27 @@ describe("WorkflowStatusSteps", () => {
     cleanup();
   });
 
-  it("該当ラベルが無い場合は何も表示しない", () => {
+  it("Project Statusが無い場合は何も表示しない", () => {
     const { container } = render(<WorkflowStatusSteps labels={labels("bug")} />);
     expect(container.firstChild).toBeNull();
   });
 
   it("現在ステップの名称と番号をスマホ向けキャプションに表示する", () => {
-    render(<WorkflowStatusSteps labels={labels("02.wip")} />);
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Implementation" />);
     expect(screen.getByText("実装中（2/6）")).not.toBeNull();
   });
 
   it("ユーザー確認待ちの場合はキャプション付近にも確認待ち表示を出す", () => {
-    render(<WorkflowStatusSteps labels={labels("02.wip", "00.check-user")} />);
+    render(<WorkflowStatusSteps labels={labels("00.check-user")} projectStatus="Implementation" />);
     expect(screen.getAllByText("ユーザー確認待ち").length).toBeGreaterThan(0);
   });
 
   it("各ステップの円にaria-currentが付き、完了済みステップと現在ステップが判別できる", () => {
-    render(<WorkflowStatusSteps labels={labels("03.d:marge")} />);
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop PR" />);
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(6);
     expect(items[2].getAttribute("aria-current")).toBe("step");
     expect(items[0].getAttribute("aria-current")).toBeNull();
-    expect(items[0].title).toBe("01.planning");
+    expect(items[0].title).toBe("Planning");
   });
 });

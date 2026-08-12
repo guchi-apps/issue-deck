@@ -8,10 +8,13 @@ import { resolveProgressStatus } from "@/lib/issue-progress";
 import { cn } from "@/lib/utils";
 import type { IssueLabel } from "@/types/issue";
 
-/** 進捗状態の判定に使う値。projectStatusがあればラベルより優先される（@/lib/issue-progress） */
+/**
+ * 進捗状態の判定に使う値。判定材料はProject Statusだけ（@/lib/issue-progress）。
+ * `labels`は進捗の判定には使わず、承認待ち（`00.check-user`）の表示切り替えにのみ使う。
+ */
 type ProgressProps = {
   labels: IssueLabel[];
-  /** GitHub Projects v2のStatus。Projectに未登録なら省略・null（ラベルへフォールバックする） */
+  /** GitHub Projects v2のStatus。Projectに未登録なら省略・null（この場合は何も表示しない） */
   projectStatus?: string | null;
 };
 
@@ -47,7 +50,7 @@ export function WorkflowStepBadge({
   running,
   qaAnswerPending = false,
 }: WorkflowStepBadgeProps) {
-  const currentIndex = getWorkflowStepIndex({ labels, projectStatus });
+  const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
@@ -63,7 +66,7 @@ export function WorkflowStepBadge({
     running !== undefined &&
     !isRunning &&
     running.runId === null &&
-    isDispatchedStatusKey(resolveProgressStatus({ labels, projectStatus }));
+    isDispatchedStatusKey(resolveProgressStatus({ projectStatus }));
   const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
   const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : awaitingDispatch ? "（起動待ち）" : ""}`;
   const accentColorClass = approvalPending
@@ -74,7 +77,7 @@ export function WorkflowStepBadge({
 
   return (
     <span
-      title={`${step.labelName} ${step.label}${
+      title={`${step.projectStatus} ${step.label}${
         approvalPending
           ? "（ユーザーの確認待ち）"
           : showQaAnswerPending
@@ -129,13 +132,13 @@ export function WorkflowStepBadge({
 }
 
 /**
- * 01.planning〜09.mainの実装状況ラベルをstep形式で可視化する。該当ラベルがないissueでは何も表示しない。
+ * Planning〜Doneの実装状況（Project Status）をstep形式で可視化する。Statusを持たないissueでは何も表示しない。
  * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
  */
 export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowStatusStepsProps) {
-  const currentIndex = getWorkflowStepIndex({ labels, projectStatus });
+  const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
@@ -151,7 +154,7 @@ export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowSt
             const showApprovalPending = isCurrent && approvalPending;
             const StepIcon = step.icon;
             return (
-              <div key={step.labelName} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
+              <div key={step.key} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
                 {index !== 0 && (
                   <div
                     aria-hidden
@@ -170,7 +173,7 @@ export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowSt
                 <div
                   role="listitem"
                   aria-current={isCurrent ? "step" : undefined}
-                  title={step.labelName}
+                  title={step.projectStatus}
                   className={cn(
                     "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-inset",
                     isDone && "bg-primary text-primary-foreground ring-primary",

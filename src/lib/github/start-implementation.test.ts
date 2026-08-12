@@ -5,9 +5,8 @@ import {
   isSelectableLabelName,
   startImplementationCommentBody,
   startImplementationDisabledReason,
-  startImplementationLabelsForCreate,
+  startImplementationLabelsToAdd,
 } from "@/lib/github/start-implementation";
-import { PLANNING_LABEL_NAME, WIP_LABEL_NAME } from "@/lib/github/workflow-status";
 
 describe("startImplementationCommentBody", () => {
   it("計画が必要でない場合、実装開始の定型文を返す", () => {
@@ -19,24 +18,29 @@ describe("startImplementationCommentBody", () => {
   });
 });
 
-describe("startImplementationLabelsForCreate", () => {
-  it("計画が必要が選択されていない場合、02.wipを付与する", () => {
-    expect(startImplementationLabelsForCreate(["bug"])).toEqual(["bug", WIP_LABEL_NAME]);
+describe("startImplementationLabelsToAdd", () => {
+  // 進捗（Planning/Implementation）はProject Statusで表すため、ここが返すのは
+  // 実装オプション用ラベルだけ（#991 Phase 5・#1010）
+  it("オプションが1つも選ばれていなければ空配列を返す", () => {
+    expect(
+      startImplementationLabelsToAdd({
+        planRequired: false,
+        previewRequired: false,
+        screenshotRequired: false,
+        mergeConfirmRequired: false,
+      }),
+    ).toEqual([]);
   });
 
-  it("計画が必要が選択されている場合、02.wipではなく01.planningを付与する", () => {
-    expect(startImplementationLabelsForCreate(["bug", PLAN_REQUIRED_LABEL])).toEqual([
-      "bug",
-      PLAN_REQUIRED_LABEL,
-      PLANNING_LABEL_NAME,
-    ]);
-  });
-
-  it("選択済みラベルに重複があっても1つにまとめる", () => {
-    expect(startImplementationLabelsForCreate([WIP_LABEL_NAME, "bug"])).toEqual([
-      WIP_LABEL_NAME,
-      "bug",
-    ]);
+  it("選択したオプションに対応するラベルだけを返す（進捗ラベルは含めない）", () => {
+    expect(
+      startImplementationLabelsToAdd({
+        planRequired: true,
+        previewRequired: false,
+        screenshotRequired: false,
+        mergeConfirmRequired: false,
+      }),
+    ).toEqual([PLAN_REQUIRED_LABEL]);
   });
 });
 

@@ -44,7 +44,6 @@ import {
   isSelectableLabelName,
   START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
-  startImplementationLabelsForCreate,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -254,22 +253,22 @@ export function CreateIssueDialog({
 
   // 「作成+実装開始」ボタン押下時: 実装オプションの選択はこの画面のチェックボックスで
   // 既に完了しているため、Issue詳細画面の「実装を開始」ダイアログと同じオプション選択画面を
-  // 再度挟まず、選択済みラベルに進捗状況ラベルを加えてIssueを作成し、続けて実装開始の
-  // 定型コメントを投稿する（#774）。
+  // 再度挟まず、選択済みラベルのままIssueを作成し、続けて進捗（Status）の書き込みと
+  // 実装開始の定型コメントの投稿を行う（#774。進捗ラベルの付与は #991 Phase 5 で廃止した）。
   async function handleCreateAndStart() {
     if (!repositoryFullName || !title.trim()) return;
     const issue = await createIssue({
       repositoryFullName,
       title,
       body,
-      labels: startImplementationLabelsForCreate(selectedLabels),
+      labels: selectedLabels,
       assignee,
     });
     if (!issue) return;
 
-    // カンバンを追従させる（#991 Phase 3）。作成直後のIssueはProject Workflowsの
-    // Auto-addがまだ走っておらず盤面に載っていないことがあり、その場合は何も起きない。
-    // 少し後にワークフローが進捗報告APIへ同じ状態を送るため、そちらで追いつく。
+    // カンバンを追従させる（#991 Phase 3）。**進捗ラベルを廃止した後はこの書き込みが
+    // 着手状態を示す唯一の手段**（#1010）。盤面に未登録なら進捗報告API側が載せてから書く
+    // （#1036）。失敗しても、少し後にワークフローが同じ状態を報告するため追いつく。
     await setProgressStatus({
       repositoryFullName,
       number: issue.number,

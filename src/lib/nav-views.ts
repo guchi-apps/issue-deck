@@ -12,6 +12,7 @@ import type { LucideIcon } from "lucide-react";
 
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { LABEL_FILTER_PRESETS } from "@/lib/github/approval-labels";
+import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { LabelNavViewId, NavViewId } from "@/types/issue";
 
 export type NavView = {
@@ -28,16 +29,21 @@ export type NavView = {
    */
   excludeLabels?: readonly string[];
   /**
+   * ビュー選択時に暗黙で適用する進捗Statusの絞り込み（OR一致）。
+   * 判定は`resolveProgressStatus`（＝Project Status）を通す（#991 Phase 5）。
+   */
+  statuses?: readonly ProgressStatusKey[];
+  /**
    * このビューが要求する状態フィルター。stateクエリ未指定時の既定値になるほか、
    * ビュー切り替え時には明示的に選ばれていたstateも上書きして自動で適用する（#475）。
-   * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
+   * `Done`（本番反映済）はマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」ビューはopen絞り込みのままだと該当issueが出てこない。
    * お気に入りなど状態を要求しないビューは未指定にし、現在の絞り込み条件を保つ。
    */
   defaultState?: IssueStateFilter;
   /**
    * 最新リリース分だけに絞るビューかどうか。
-   * 09.mainは一度付くと外れないラベルのため、これがないと過去の全リリース分が
+   * `Done`は一度入ると戻らない状態のため、これがないと過去の全リリース分が
    * 累積してしまう（詳細はissue-statsのfilterLatestReleaseIssues）。
    */
   latestReleaseOnly?: boolean;
@@ -76,12 +82,13 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
   "recently-merged",
 ];
 
-/** 運用ラベルに基づく絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
+/** 定型の絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
 export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   id: preset.key,
   label: preset.label,
   labels: preset.labels,
   excludeLabels: preset.excludeLabels,
+  statuses: preset.statuses,
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
   groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),

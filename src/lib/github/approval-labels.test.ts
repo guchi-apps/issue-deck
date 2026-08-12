@@ -24,38 +24,39 @@ function makeComment(body: string, login = "github-actions[bot]"): Pick<IssueCom
 }
 
 describe("LABEL_FILTER_PRESETS", () => {
-  it("未着手プリセットは実装状況ラベル・00.check-userを除外条件に持つ", () => {
+  // 進捗による絞り込みはProject Statusを見る（#991 Phase 5・#1010）。
+  // ラベルが判断材料に残るのは条件系（00.check-user）だけ。
+  it("ユーザーの確認待ちプリセットだけがラベルを条件に持つ", () => {
+    const withLabels = LABEL_FILTER_PRESETS.filter((item) => item.labels.length > 0);
+    expect(withLabels.map((item) => item.key)).toEqual(["check-user"]);
+    expect(withLabels[0].labels).toEqual(["00.check-user"]);
+  });
+
+  it("未着手プリセットはreadyかつ00.check-userを持たないIssueを対象にする", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "not-started");
-    expect(preset?.labels).toEqual([]);
-    expect(preset?.excludeLabels).toEqual([
-      "00.check-user",
-      "01.planning",
-      "02.wip",
-      "03.d:marge",
-      "05.develop",
-      "07.m:marge",
-      "09.main",
-    ]);
+    expect(preset?.statuses).toEqual(["ready"]);
+    expect(preset?.excludeLabels).toEqual(["00.check-user"]);
   });
 
-  it("実行中プリセットは01.planning/02.wip/03.d:margeを対象にする", () => {
+  it("実行中プリセットはPlanning/Implementation/Develop PRを対象にする", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "in-progress");
-    expect(preset?.labels).toEqual(["01.planning", "02.wip", "03.d:marge"]);
+    expect(preset?.statuses).toEqual(["planning", "implementation", "develop-pr"]);
   });
 
-  it("本番反映待ちプリセットは05.develop/07.m:margeを対象にする", () => {
+  it("本番反映待ちプリセットはDevelop/Releaseを対象にする", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "release-pending");
-    expect(preset?.labels).toEqual(["05.develop", "07.m:marge"]);
+    expect(preset?.statuses).toEqual(["develop", "release"]);
   });
 
-  it("直近本番に反映したプリセットは09.mainを対象にする", () => {
+  it("直近本番に反映したプリセットはDoneを対象にし、state=allを要求する", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "recently-merged");
-    expect(preset?.labels).toEqual(["09.main"]);
+    expect(preset?.statuses).toEqual(["done"]);
+    expect(preset?.state).toBe("all");
   });
 });
 
 describe("isLabelFilterPresetActive", () => {
-  it("excludeLabelsのみで定義されるプリセット（labelsが空）は常に非アクティブとして扱う", () => {
+  it("ラベルを持たないプリセット（進捗Status・excludeLabelsで定義されるもの）は常に非アクティブとして扱う", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "not-started");
     expect(preset && isLabelFilterPresetActive([], preset)).toBe(false);
   });
@@ -167,23 +168,29 @@ describe("labelsAfterRejection", () => {
 
 describe("isMergeApprovalPending", () => {
   it("00.check-userが無ければfalseを返す", () => {
-    expect(isMergeApprovalPending({ labels: [makeLabel("03.d:marge")], projectStatus: null })).toBe(false);
+    expect(isMergeApprovalPending({ labels: [], projectStatus: "Develop PR" })).toBe(false);
   });
 
-  it("00.check-user + 03.d:margeの場合はtrueを返す", () => {
-    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("03.d:marge")], projectStatus: null })).toBe(true);
+  it("00.check-user + Develop PRの場合はtrueを返す", () => {
+    expect(
+      isMergeApprovalPending({ labels: [makeLabel("00.check-user")], projectStatus: "Develop PR" }),
+    ).toBe(true);
   });
 
-  it("00.check-user + 07.m:margeの場合はtrueを返す", () => {
-    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("07.m:marge")], projectStatus: null })).toBe(true);
+  it("00.check-user + Releaseの場合はtrueを返す", () => {
+    expect(
+      isMergeApprovalPending({ labels: [makeLabel("00.check-user")], projectStatus: "Release" }),
+    ).toBe(true);
   });
 
-  it("00.check-user + 02.wipの場合はfalseを返す（コメントが無い場合）", () => {
-    expect(isMergeApprovalPending({ labels: [makeLabel("00.check-user"), makeLabel("02.wip")], projectStatus: null })).toBe(false);
+  it("00.check-user + Implementationの場合はfalseを返す（コメントが無い場合）", () => {
+    expect(
+      isMergeApprovalPending({ labels: [makeLabel("00.check-user")], projectStatus: "Implementation" }),
+    ).toBe(false);
   });
 
-  it("00.check-user + 02.wipでも、直近のbotコメントがclaude-review-develop発ならtrueを返す（#728: additionalモード再開時のラベル戻し直後にレビューが完了するレース）", () => {
-    const labels = [makeLabel("00.check-user"), makeLabel("02.wip")];
+  it("00.check-user + Implementationでも、直近のbotコメントがclaude-review-develop発ならtrueを返す（#728: additionalモード再開時の進捗戻し直後にレビューが完了するレース）", () => {
+    const labels = [makeLabel("00.check-user")];
     const comments = [
       makeComment("@claude コンフリクトを解消してください。", "m-guchi"),
       makeComment(
@@ -193,22 +200,22 @@ describe("isMergeApprovalPending", () => {
         "⚠️ developへのマージ前にユーザーの確認が必要と判定しました。\n\n<!-- issue-deck-source:claude-review-develop -->",
       ),
     ];
-    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(true);
+    expect(isMergeApprovalPending({ labels, projectStatus: "Implementation" }, comments)).toBe(true);
   });
 
-  it("00.check-user + 02.wipで、直近のbotコメントがclaude-review-develop以外発ならfalseを返す（計画承認待ち等）", () => {
-    const labels = [makeLabel("00.check-user"), makeLabel("01.planning")];
+  it("00.check-user + Planningで、直近のbotコメントがclaude-review-develop以外発ならfalseを返す（計画承認待ち等）", () => {
+    const labels = [makeLabel("00.check-user")];
     const comments = [
       makeComment("@claude 実装を開始してください", "m-guchi"),
       makeComment("計画本文\n\n<!-- issue-deck-plan-type:implement -->"),
     ];
-    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(false);
+    expect(isMergeApprovalPending({ labels, projectStatus: "Planning" }, comments)).toBe(false);
   });
 
-  it("直近のbotコメントが発信元不明（マーカー無し）の場合はラベルの判定にフォールバックする", () => {
-    const labels = [makeLabel("00.check-user"), makeLabel("03.d:marge")];
+  it("直近のbotコメントが発信元不明（マーカー無し）の場合は進捗の判定にフォールバックする", () => {
+    const labels = [makeLabel("00.check-user")];
     const comments = [makeComment("マーカーの無いコメント")];
-    expect(isMergeApprovalPending({ labels, projectStatus: null }, comments)).toBe(true);
+    expect(isMergeApprovalPending({ labels, projectStatus: "Develop PR" }, comments)).toBe(true);
   });
 });
 

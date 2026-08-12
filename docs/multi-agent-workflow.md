@@ -53,7 +53,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 
 1. **Phase 1**: `start-issue.sh`/`.ps1` — worktree・ブランチ・Claude Code起動のコマンド化
 2. **Phase 2**: `start-reviewer.sh`/`.ps1` — レビュー・統合セッション起動のコマンド化
-3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — ラベル状態遷移（`01.planning`〜`09.main`）のGitHub Actionsによる自動化
+3. **Phase 2.5**: `.github/workflows/issue-labels.yml` — 進捗の状態遷移（`Planning`〜`Done`）のGitHub Actionsによる自動化（#991 Phase 5までは`01.planning`〜`09.main`のラベル遷移だった）
 4. **Phase 3**: PR作成時の自動レビューをGitHub Actionsで実行（`subscription-lists`リポジトリの`claude-code-action`テンプレートを土台にカスタマイズ）
 5. **Phase 4**: 低リスクなPRのみ`develop`へ自動マージ（自動マージ可否の判定方法を実装）
 6. **Phase 5**: Issueへの`@claude`コメントを起点に実装からPR作成まで自動化
