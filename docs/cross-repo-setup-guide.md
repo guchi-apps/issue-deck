@@ -696,36 +696,6 @@ hasClaudeWorkflow = GET /repos/{owner}/{repo}/actions/workflows/claude-issue-dis
 の順に押す。** どちらもログインセッションを要求するため、共有シークレットでは叩けない。
 画面のボタンから実行する。
 
-### 一括で載せた直後、最初のドラッグは起動しないことがある
-
-**「Issueを再同期」で盤面へ載せた直後にカードを動かしても、無人実行が始まらない場合がある。**
-Statusは変わるのに`@claude`コメントが投稿されず、Actionsも動かない。
-
-原因は`from`（遷移前のStatus）が`null`になること。カンバン起点の起動は
-`Ready → Planning`・`Ready → Implementation`の遷移だけを対象にしており、
-**`from`が`null`の遷移は意図的に除外している**（盤面へ載せる操作そのものが実行の開始に
-なってしまうため。[progress-status-architecture.md](progress-status-architecture.md)のPhase 3）。
-
-`addMissingProjectItems`はProject側のStatusを`Ready`に書くが、**DBの`projectStatus`は更新しない**。
-続けて走る`syncProjectStatuses`がProjectを読み直してDBへ書くものの、追加直後のアイテムが
-まだ`Ready`を返さないと、DBは`null`のまま残る。この状態でドラッグすると`from`が`null`になる。
-
-**2回目以降のドラッグは正常に起動する**（1回目のドラッグでDBが更新されるため）。
-「1回目だけ静かに失敗する」という、#1022の`allowed_bots`未設定と同じ形の壊れ方をする。
-
-確実に起動させたい場合は、進捗報告APIで一度`ready`を報告してからドラッグする。
-このAPIは**ProjectとDBの両方に書く**ため、遷移前の状態が確実に`Ready`になる。
-
-```bash
-curl -sS -X POST "$APP_BASE_URL/api/progress" \
-  -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"repository":"guchi-apps/my-app","issue":60,"status":"ready"}'
-```
-
-> `meisai-lab`（#1047の1周目）で実際に踏んだ。一括搭載直後に`#60`を`Planning`へ動かしても
-> 何も起きず、`ready`を報告し直してから同じ操作をすると起動した。
-
 ### 対象リポジトリのデフォルトブランチは`develop`にする
 
 **`claude-issue-dispatch.yml`は、デフォルトブランチに無いと登録されない。**
@@ -769,7 +739,7 @@ gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
 | 1 | 進捗遷移 | `issue-<番号>`ブランチへpushし、盤面のStatusが`Implementation`になること |
 | 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチも進捗も変更されない**ため最も安全 |
 | 3 | 実装フロー | `@claude`とコメントし、ブランチ作成・PR作成まで通ること |
-| 4 | カンバン起点の起動 | `Ready`のIssueを`Planning`へドラッグし、**1回目で**計画提示が始まること（[前項](#一括で載せた直後最初のドラッグは起動しないことがある)の`from`が`null`になる件と、#1022の`allowed_bots`未設定の両方をここで検知できる） |
+| 4 | カンバン起点の起動 | `Ready`のIssueを`Planning`へドラッグし、**1回目で**計画提示が始まること（#1022の`allowed_bots`未設定を検知できる。載せた直後の初回ドラッグが無反応になる不具合は #1132 で解消済み） |
 | 5 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
 
 **初回実行は`claude-code-action`のBunダウンロードで落ちることがある。** キャッシュが無いため
