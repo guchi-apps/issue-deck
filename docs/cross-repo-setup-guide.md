@@ -45,7 +45,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `runtime-setup` | DBあり（Prisma等）→`node-db` / DBなしのNext.js等→`node` / 素のJS・依存なし→`minimal` | `minimal` |
 | `package-manager` | `pnpm-lock.yaml`があれば`pnpm`、`package-lock.json`なら`npm` | `npm` |
 | `node-version` | 対象リポジトリのCI（`ci.yml`）が固定しているバージョンに揃える。固定していなければ未指定でよい | `"20.19"` |
-| `prompts-ref` | **`uses:`と同じタグ**。対象リポジトリに`.github/prompts/`が無い限り必須 | `workflows/v6` |
+| `prompts-ref` | **`uses:`と同じタグ**。対象リポジトリに`.github/prompts/`が無い限り必須 | `workflows/v9` |
 | `post-implement-script` | 実装後に固有の後処理（スクリーンショット撮影など）が要る場合のみ、そのスクリプトのパス | `scripts/ci-post-implement.sh` |
 
 判断材料は以下のコマンドで集められる。
@@ -121,7 +121,7 @@ on:
 
 jobs:
   labels:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v9
     permissions:
       issues: write
       pull-requests: write
@@ -140,7 +140,7 @@ jobs:
 ```yaml
 jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v9
     with:
       runtime-setup: minimal    # node-db / node / minimal
       package-manager: npm      # npm / pnpm（既定は npm）
@@ -168,9 +168,9 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 **他リポジトリから呼ぶ場合は必ず指定する。**
 
 ```yaml
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v9
     with:
-      prompts-ref: workflows/v6   # ↑の uses: と同じタグを指定する
+      prompts-ref: workflows/v9   # ↑の uses: と同じタグを指定する
 ```
 
 共有ワークフローは `actions/checkout`（`repository:` 未指定＝呼び出し元）でチェックアウトするため、**`.github/prompts/` 配下も呼び出し元リポジトリのものが読まれる**。指定しないと、プロンプトを持たないリポジトリでは最初のClaudeステップで落ちる。
@@ -246,11 +246,12 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
 | `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964） |
 | `workflows/v7` | 上記 | Organization `guchi-apps` への移行後に作成（#1009 Phase 4） |
-| `workflows/v8` | 上記 | **現時点の最新タグ。** `guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
+| `workflows/v8` | 上記 | Phase 5 の前。ラベル遷移とStatus報告の両方を行う最後の版 |
+| `workflows/v9` | 上記 | **現時点の最新タグ。** #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124）。`guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
 
-> **未反映**: #991 Phase 5（#1010）で進捗ラベルを廃止した内容は、まだタグに含まれていない。
-> 他リポジトリへ届けるには`workflows/v9`を切ってcallerを更新する必要がある。
-> それまで各リポジトリは v8（ラベル遷移＋Status報告の両方を行う版）のまま動く。
+> **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
+> caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
+> 「タグを上げる順序 — callerが先、ラベル削除が後」を参照）。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
@@ -320,6 +321,34 @@ cd /home/guchi/apps/_docs/label-sync
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
 > ここに残るのは条件系ラベル（Status = 今どこにいるか、Label = どんな性質・条件があるか）だけ。
+
+### タグを上げる順序 — callerが先、ラベル削除が後
+
+**進捗ラベルが残っているリポジトリでcallerを`v9`へ上げるとき、ラベルの削除は必ずcaller更新の
+後に行う。** 逆順にすると`claude-ci-fix`・`claude-conflict-resolve`のジョブが失敗する。
+
+`v8`のこの2つの実体は、ガード無しで進捗ラベルを消す。
+
+```yaml
+run: gh issue edit "$ISSUE_NUMBER" --remove-label "02.wip"
+```
+
+他のジョブは`gh label list`と突き合わせて実在するラベルだけを対象にしている（#975）が、
+この2つにはその保護が無い。**ラベル定義が存在しないリポジトリでは`gh issue edit`がexit 1を返し、
+`if: always()`で走るこのステップがジョブごと落とす。** `v9`ではStatusの再報告に置き換わっている
+ため、先にcallerを上げてしまえば問題は起きない。
+
+正しい順序は次のとおり（`dayspan`・`shopping-list`で実施した手順、#1129）。
+
+1. issue-deck側で`workflows/vN`を切る（**mainから**。developから切らない）
+2. 対象リポジトリのcallerを`vN`へ上げる。**5ファイル・9箇所すべて**を揃える
+   （`issue-labels.yml`は`uses:`のみ、他4つは`uses:`と`prompts-ref`の2箇所）
+3. そのPRのActionsで、ラベルを付けずにStatusだけを報告していることを確認する
+   （`issue #N を implementation として報告しました`が出て、Issueにラベルが付かない）
+4. PRをマージし、Statusが`Develop`へ進むことを確認する
+5. **そのあとで**`scripts/remove-progress-labels.sh --apply --repo <name>`を実行する
+
+3を飛ばさないこと。ラベルを消してしまうと、`vN`が期待どおり動かなかった場合に戻す手段が無くなる。
 
 `gh label create`での作成例:
 
