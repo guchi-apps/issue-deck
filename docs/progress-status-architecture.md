@@ -423,13 +423,24 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 `reusable-issue-labels.yml`の対象issue検索）はまだラベルを参照している。先に消すと、
 進行中のIssueの追加対応（`mode=additional`）やdevelop→mainの一括遷移が動かなくなる。
 
-順序は次のとおりで、3の手順は[`scripts/remove-progress-labels.sh`](../scripts/remove-progress-labels.sh)
-にまとめてある（既定はdry-run）。
+順序は次のとおりで、手順は[`scripts/remove-progress-labels.sh`](../scripts/remove-progress-labels.sh)
+にまとめてある（既定はdry-run・対象はissue-deckのみ）。
 
 1. #1010 を develop → main へリリースし、本番へデプロイする（`GET /api/progress`が生える）
-2. `workflows/v8` を切り、`dayspan`・`shopping-list` の caller を v8 へ更新する
-   （v7 のまま消すと、旧ワークフローがラベル操作を試みて警告が出続ける）
-3. `scripts/remove-progress-labels.sh --apply` を実行する
+2. 本番で疎通を確認する。`GET /api/progress`が**405なら未反映・401なら反映済み**
+3. `scripts/remove-progress-labels.sh --apply` を実行する（issue-deckのラベルだけ消える）
+
+**他リポジトリ（`dayspan`・`shopping-list`）は同時に対応しなくてよい。** あちらのcallerは
+`workflows/v8`にタグ固定されており、issue-deckの`develop`/`main`を進めても影響を受けない。
+ラベルもあちらのリポジトリに残ったままなので、v8のワークフローは今までどおりラベル遷移と
+Status報告の両方を行う。新しいタグ（`workflows/v9`）を切ってcallerを更新したあとで、
+そのリポジトリのラベルを個別に消す（`--repo dayspan`）。
+
+**リリース直後の一括close（`main-pr-merged`）は1回だけ空振りしうる。** develop→mainのマージで
+`deploy.yml`（本番反映）と`main-pr-merged`が同時に走り、後者が対象issueを引きに行く時点では
+まだ`GET /api/progress`が生えていない可能性がある。**このリリースまではラベルが残っている**ため、
+古い版のワークフローが動けば従来どおり成立する。空振りした場合はデプロイ完了後に該当runの
+`main-pr-merged`ジョブを再実行すれば回収できる。
 
 #### 受け入れたリスク（Phase 5で増えたもの）
 

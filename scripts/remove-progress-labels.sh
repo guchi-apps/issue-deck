@@ -10,24 +10,28 @@
 # やdevelop→mainの一括遷移が動かなくなる。順序は次のとおり。
 #
 #   1. #1010 を develop -> main へリリースし、本番へデプロイする（GET /api/progress が生える）
-#   2. workflows/v8 を切り、dayspan・shopping-list の caller を v8 へ更新する
-#      （v7 のまま消すと、旧ワークフローがラベル操作を試みて警告が出続ける）
-#   3. このスクリプトを実行する
+#   2. issue-deck のラベルを消す（--repo issue-deck）
+#   3. dayspan・shopping-list は急がない。あちらの caller は workflows/v8 にタグ固定されており、
+#      issue-deck の develop/main を進めても影響を受けない。**ラベルもあちらのリポジトリに
+#      残ったまま**なので、v8 のワークフローは今までどおり動く。新しいタグ（workflows/v9）を
+#      切って caller を更新したあとで、そのリポジトリのラベルを消す
 #
 # ラベルを消すと、そのラベルが付いていたIssueからは当然ラベルが外れる。**進捗はProjectの
 # Statusに残る**ため情報は失われないが、盤面へ載っていないIssue（closed含む）は
 # 「未着手」に見えるようになる。09.main が数百件に付いているのはそのため気に留めておく。
 #
+# **既定の対象は issue-deck だけ。** 他リポジトリは caller のタグを上げてから個別に指定する。
+#
 # 使い方:
 #   scripts/remove-progress-labels.sh --dry-run                 # 既定。消す対象を出すだけ
 #   scripts/remove-progress-labels.sh --apply                   # 実際に削除する
-#   scripts/remove-progress-labels.sh --apply --repo dayspan    # 単一リポジトリだけ
+#   scripts/remove-progress-labels.sh --apply --repo dayspan    # 他リポジトリ（caller更新後）
 #
 # 前提: gh コマンドで認証済みであること。
 set -euo pipefail
 
 OWNER="guchi-apps"
-DEFAULT_REPOS=(issue-deck dayspan shopping-list)
+DEFAULT_REPOS=(issue-deck)
 PROGRESS_LABELS=("01.planning" "02.wip" "03.d:marge" "05.develop" "07.m:marge" "09.main")
 
 apply=0

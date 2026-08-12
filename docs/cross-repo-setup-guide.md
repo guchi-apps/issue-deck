@@ -244,7 +244,13 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v3` | 上記 | `post-implement-script` inputs を追加（#952） |
 | `workflows/v4` | 上記 | `node-version` inputs を追加（#956） |
 | `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
-| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964）。現時点の最新タグで、m-guchi/shopping-list・m-guchi/dayspanが参照している |
+| `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964） |
+| `workflows/v7` | 上記 | Organization `guchi-apps` への移行後に作成（#1009 Phase 4） |
+| `workflows/v8` | 上記 | **現時点の最新タグ。** `guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
+
+> **未反映**: #991 Phase 5（#1010）で進捗ラベルを廃止した内容は、まだタグに含まれていない。
+> 他リポジトリへ届けるには`workflows/v9`を切ってcallerを更新する必要がある。
+> それまで各リポジトリは v8（ラベル遷移＋Status報告の両方を行う版）のまま動く。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
