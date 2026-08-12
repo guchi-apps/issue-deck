@@ -125,10 +125,11 @@ export async function addMissingProjectItems(
       archived: false,
       installation: { installationId },
     },
-    select: { githubRepositoryId: true, ownerLogin: true, name: true },
+    select: { id: true, githubRepositoryId: true, ownerLogin: true, name: true },
   });
 
-  const readyOptionId = project.optionIdByName.get(getProgressStatusDef("ready").projectStatus);
+  const readyStatus = getProgressStatusDef("ready").projectStatus;
+  const readyOptionId = project.optionIdByName.get(readyStatus);
 
   let added = 0;
   for (const repository of repositories) {
@@ -148,8 +149,8 @@ export async function addMissingProjectItems(
       // **Statusを明示的に`Ready`にする。** 追加直後は未設定になることがあり、その状態から
       // カードを動かしても遷移前が`Ready`にならず、カンバン起点の起動（Phase 3）が働かない
       // （resolveDispatchModeは`Ready`からの遷移だけを対象にする）。
-      // 進捗ラベルを持つIssueは、この後のreconcileProjectStatusesFromLabelsが上書きする。
-      if (item.status === null && readyOptionId) {
+      let status = item.status;
+      if (status === null && readyOptionId) {
         await updateProjectItemStatus(
           {
             projectId: project.projectId,
@@ -159,7 +160,21 @@ export async function addMissingProjectItems(
           },
           token,
         );
+        status = readyStatus;
       }
+
+      // **DBへも同じ値を書く（#1132）。** Projectだけ`Ready`にしてDBを`null`のままにすると、
+      // カンバン起点の起動が`from`にDBの値を使うため、**載せた直後の最初のドラッグが
+      // `from = null`になって除外される**（起動しないのは1回目だけで、そのドラッグがDBを
+      // 更新するため2回目以降は動く。エラーも出ないので気づきにくい）。
+      //
+      // この後に走る`syncProjectStatuses`もProjectを読み直してDBへ書くが、追加直後の
+      // アイテムがまだ`Ready`を返すとは限らず、当てにできない。`reportProgressStatus`が
+      // Projectを書いた直後にDBも更新しているのと同じ形に揃える。
+      await db.issue.updateMany({
+        where: { repositoryId: repository.id, number: issue.number },
+        data: { projectStatus: status, projectItemId: item.itemId },
+      });
     }
   }
 

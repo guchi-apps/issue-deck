@@ -24,17 +24,19 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 上から順に実行すればよい。
 
 1. [対象リポジトリの構成を調べ、5つの設定値を決める](#0-最初に決める5つの設定値)
-2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの2つは**コピーせず参照**、残りはコピーして改変）
-3. [ラベル体系](#2-ラベル体系)を作成する
+2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの5つは**コピーせず参照**、残りはコピーして改変）
+3. [ラベル体系](#2-ラベル体系)を作成する（**旧世代のラベルがある場合は、進捗を控えてから消す**）
 4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
 5. [Secrets](#4-secrets)を登録する
-6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、ブランチ命名規則、Branch protection）
+6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、**デフォルトブランチを`develop`にする**、ブランチ命名規則、Branch protection）
 7. [コピーしたワークフローのリポジトリ差異を吸収する](#6-リポジトリ差異の吸収チェックリスト)（参照方式のものは`with:`で指定済みのため対象外）
 8. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
    スクリプトを利用する
 9. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
-10. [動作を確認する](#11-導入後の動作確認)
-11. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
+10. [盤面へ載せる](#11-盤面へ載せるリポジトリを再同期)（issue-deckの画面で「リポジトリを再同期」）
+11. 控えておいた進捗を[書き戻す](#進捗ラベルが唯一の状態記録になっている重要)（旧世代のラベルがあった場合）
+12. [動作を確認する](#12-導入後の動作確認)
+13. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
 
 ## 0. 最初に決める5つの設定値
 
@@ -45,7 +47,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 | `runtime-setup` | DBあり（Prisma等）→`node-db` / DBなしのNext.js等→`node` / 素のJS・依存なし→`minimal` | `minimal` |
 | `package-manager` | `pnpm-lock.yaml`があれば`pnpm`、`package-lock.json`なら`npm` | `npm` |
 | `node-version` | 対象リポジトリのCI（`ci.yml`）が固定しているバージョンに揃える。固定していなければ未指定でよい | `"20.19"` |
-| `prompts-ref` | **`uses:`と同じタグ**。対象リポジトリに`.github/prompts/`が無い限り必須 | `workflows/v6` |
+| `prompts-ref` | **`uses:`と同じタグ**。対象リポジトリに`.github/prompts/`が無い限り必須 | `workflows/v9` |
 | `post-implement-script` | 実装後に固有の後処理（スクリーンショット撮影など）が要る場合のみ、そのスクリプトのパス | `scripts/ci-post-implement.sh` |
 
 判断材料は以下のコマンドで集められる。
@@ -121,7 +123,7 @@ on:
 
 jobs:
   labels:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-labels.yml@workflows/v9
     permissions:
       issues: write
       pull-requests: write
@@ -140,7 +142,7 @@ jobs:
 ```yaml
 jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v9
     with:
       runtime-setup: minimal    # node-db / node / minimal
       package-manager: npm      # npm / pnpm（既定は npm）
@@ -168,9 +170,9 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 **他リポジトリから呼ぶ場合は必ず指定する。**
 
 ```yaml
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v6
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v9
     with:
-      prompts-ref: workflows/v6   # ↑の uses: と同じタグを指定する
+      prompts-ref: workflows/v9   # ↑の uses: と同じタグを指定する
 ```
 
 共有ワークフローは `actions/checkout`（`repository:` 未指定＝呼び出し元）でチェックアウトするため、**`.github/prompts/` 配下も呼び出し元リポジトリのものが読まれる**。指定しないと、プロンプトを持たないリポジトリでは最初のClaudeステップで落ちる。
@@ -246,11 +248,12 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 | `workflows/v5` | 上記 | `prompts-ref` inputs を追加（#960） |
 | `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964） |
 | `workflows/v7` | 上記 | Organization `guchi-apps` への移行後に作成（#1009 Phase 4） |
-| `workflows/v8` | 上記 | **現時点の最新タグ。** `guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
+| `workflows/v8` | 上記 | Phase 5 の前。ラベル遷移とStatus報告の両方を行う最後の版 |
+| `workflows/v9` | 上記 | **現時点の最新タグ。** #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124）。`guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
 
-> **未反映**: #991 Phase 5（#1010）で進捗ラベルを廃止した内容は、まだタグに含まれていない。
-> 他リポジトリへ届けるには`workflows/v9`を切ってcallerを更新する必要がある。
-> それまで各リポジトリは v8（ラベル遷移＋Status報告の両方を行う版）のまま動く。
+> **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
+> caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
+> 「タグを上げる順序 — callerが先、ラベル削除が後」を参照）。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
@@ -291,7 +294,7 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 ## 2. ラベル体系
 
-マルチエージェント運用の状態遷移・オプション制御に使う14個のラベルは、issue-deckリポジトリに
+マルチエージェント運用のオプション制御に使う8個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、導入前の他リポジトリには存在しない。
 
 **ラベルの正はこのissue-deckリポジトリに置いている。** `guchi-apps/docs`の`label-sync/`にある
@@ -299,9 +302,67 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 ```bash
 cd /home/guchi/apps/_docs/label-sync
-./sync-labels.sh dry-run --from issue-deck --to my-app   # 差分プレビュー
-./sync-labels.sh apply   --from issue-deck --to my-app   # 反映
+GITHUB_USER=guchi-apps ./sync-labels.sh dry-run --from issue-deck --to my-app --delete-unmanaged
+GITHUB_USER=guchi-apps ./sync-labels.sh apply   --from issue-deck --to my-app --delete-unmanaged
 ```
+
+**`GITHUB_USER=guchi-apps`を必ず付ける。** スクリプトの既定値は組織移行前の`m-guchi`のままで
+（#996の移行に追随していない）、省略すると存在しないリポジトリを見に行く。
+
+**`apply`は`[y/N]`の対話確認を求める。** `--delete-unmanaged`を付けた場合は警告も出す。
+自動化のつもりで非対話に流すと、**警告だけ出して何も変更せず正常終了する**ため、
+成功したように見えて実際には同期されていない。実行後は必ず`gh label list`で結果を確かめる。
+
+```bash
+gh label list --repo guchi-apps/my-app --limit 60 --json name --jq '[.[].name]|sort|join(" ")'
+```
+
+### 既存の別世代のラベルがあるリポジトリ
+
+導入前のリポジトリは旧世代のラベル体系を持っていることが多い（`01.wip`・`22.preview-required`・
+`10.Priority: High`など）。**`--delete-unmanaged`を使い、旧ラベルを残さない。** 新旧が併存すると
+どちらを付けるか迷い、ワークフローが参照する名前と食い違ったまま気づけない。
+
+**削除は、そのラベルが付いているIssueからの除去でもある。** 実行前に対象を数え、
+**特に進捗を表していたラベルが付いたopenなIssueを控えておく**（次項）。
+
+```bash
+R=guchi-apps/my-app
+for l in "01.wip" "03.d:marge" "05.develop" "07.m:marge" "09.main"; do
+  gh issue list --repo $R --state open --label "$l" --json number,title \
+    --jq '.[] | "  '"$l"' → #\(.number) \(.title)"'
+done
+```
+
+### 進捗ラベルが唯一の状態記録になっている（重要）
+
+**旧世代のリポジトリでは、進捗ラベルがそのIssueの状態を示す唯一の記録である。**
+issue-deck・dayspan・shopping-listのように既に盤面へ載っているリポジトリと違い、
+Statusという写しが存在しない。
+
+そして**盤面へ載せる処理（`addMissingProjectItems`）は、追加したアイテムのStatusを一律`Ready`に
+する**。したがってラベルを消してから載せると、「developへマージ済みだが本番未反映」といった
+状態が失われ、すべて未着手として並ぶ。
+
+手順は次のとおり。
+
+1. ラベル同期の**前**に、進捗ラベルが付いたopenなIssueを控える（上のコマンド）
+2. ラベルを同期する（旧進捗ラベルは削除される）
+3. callerを置き、盤面へ載せる
+4. 控えた状態を進捗報告APIで書き戻す
+
+```bash
+curl -sS -X POST "$APP_BASE_URL/api/progress" \
+  -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"repository":"guchi-apps/my-app","issue":66,"status":"develop"}'
+```
+
+`status`に渡すのは`ProgressStatusKey`（`planning`・`implementation`・`develop-pr`・`develop`・
+`release`・`done`）。旧ラベルとの対応は
+[progress-status-architecture.md](progress-status-architecture.md)の対応表を参照。
+
+**このAPIは盤面に無いIssueを自分で載せてから書く**（#1036）ため、再同期を待つ必要はない。
 
 同期スクリプトはissue-deckの全ラベルを配るため、下記8個に加えて`30.bug`・`51.improvement`等の
 分類用ラベルもあわせて作成される。ラベルを個別に作りたい場合は次の`gh label create`を使う。
@@ -320,6 +381,34 @@ cd /home/guchi/apps/_docs/label-sync
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
 > ここに残るのは条件系ラベル（Status = 今どこにいるか、Label = どんな性質・条件があるか）だけ。
+
+### タグを上げる順序 — callerが先、ラベル削除が後
+
+**進捗ラベルが残っているリポジトリでcallerを`v9`へ上げるとき、ラベルの削除は必ずcaller更新の
+後に行う。** 逆順にすると`claude-ci-fix`・`claude-conflict-resolve`のジョブが失敗する。
+
+`v8`のこの2つの実体は、ガード無しで進捗ラベルを消す。
+
+```yaml
+run: gh issue edit "$ISSUE_NUMBER" --remove-label "02.wip"
+```
+
+他のジョブは`gh label list`と突き合わせて実在するラベルだけを対象にしている（#975）が、
+この2つにはその保護が無い。**ラベル定義が存在しないリポジトリでは`gh issue edit`がexit 1を返し、
+`if: always()`で走るこのステップがジョブごと落とす。** `v9`ではStatusの再報告に置き換わっている
+ため、先にcallerを上げてしまえば問題は起きない。
+
+正しい順序は次のとおり（`dayspan`・`shopping-list`で実施した手順、#1129）。
+
+1. issue-deck側で`workflows/vN`を切る（**mainから**。developから切らない）
+2. 対象リポジトリのcallerを`vN`へ上げる。**5ファイル・9箇所すべて**を揃える
+   （`issue-labels.yml`は`uses:`のみ、他4つは`uses:`と`prompts-ref`の2箇所）
+3. そのPRのActionsで、ラベルを付けずにStatusだけを報告していることを確認する
+   （`issue #N を implementation として報告しました`が出て、Issueにラベルが付かない）
+4. PRをマージし、Statusが`Develop`へ進むことを確認する
+5. **そのあとで**`scripts/remove-progress-labels.sh --apply --repo <name>`を実行する
+
+3を飛ばさないこと。ラベルを消してしまうと、`vN`が期待どおり動かなかった場合に戻す手段が無くなる。
 
 `gh label create`での作成例:
 
@@ -375,8 +464,53 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude-code-action`の実行に使うClaude Codeの認証トークン | 各リポジトリで個別に発行・登録が必要 |
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
-| `PROGRESS_REPORT_SECRET` | issue-deckの進捗報告API（`POST /api/progress`）へ進捗の変化を送るための共有シークレット（#991 Phase 2） | **任意。** organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る。未設定でも報告ステップがスキップされるだけでジョブは落ちない（issue-deckを進捗更新の単一障害点にしないため） |
+| `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | issue-deck自身のSignaly（社内通知）連携で使う1Password Service Accountトークン | マルチエージェント運用そのものには不要。issue-deckの`ci.yml`/`deploy.yml`/`release.yml`固有の設定であり、他リポジトリで導入する必然性はない |
+
+### 変数 `APP_BASE_URL`
+
+Secretsではなく**変数**（Variables）として登録する。値はissue-deck本体のURL
+（`https://issuedeck.gucchii.com`）で、**対象アプリ自身のURLではない。** 取り違えが`dayspan`で
+実際に起きた。
+
+**organization変数として1つ登録すれば全リポジトリへ届く。** 可視性は`Public repositories`で足りる
+（対象リポジトリがpublicである限り）。リポジトリ変数として個別に持つこともできるが、
+リポジトリが増えるたびに設定が要る。`SHARED_CONTEXT_REPO`と同じ方式。
+
+```bash
+# admin:org が要る
+gh variable set APP_BASE_URL --org guchi-apps --body "https://issuedeck.gucchii.com" --visibility all
+
+# 対象リポジトリから解決できるかの確認（admin:org 不要）
+gh api "/repos/guchi-apps/my-app/actions/organization-variables" \
+  --jq '.variables[] | select(.name=="APP_BASE_URL") | .name + "=" + .value'
+```
+
+変数は`secrets`と違い、callerから`with:`でも`secrets:`でも渡す必要がない（caller側リポジトリ・
+organizationの変数として解決される）。
+
+### `APP_BASE_URL`と`PROGRESS_REPORT_SECRET`は Phase 5 以降**必須**
+
+**#991 Phase 5（#1010）より前は、どちらも「任意」だった。** 進捗はラベルでも記録されており、
+報告が届かなくてもラベル側で成立していたためである。
+
+**進捗ラベルを廃止した現在、この2つが欠けると進捗が一切機能しない。** 代替の判断材料が無い。
+
+| 欠けたときに起きること | Phase 5 より前 | 現在 |
+|---|---|---|
+| 進捗の記録 | ラベルで残る | **何も残らない**（盤面は`Ready`のまま） |
+| 実行モードの判定（`mode=additional`等） | ラベルで判定 | **判定できない**（安全側に倒れてskip） |
+| develop→mainの一括遷移・close | ラベルで対象を検索 | **対象を1件も見つけられない** |
+| リリースPRの対象issue一覧 | ラベルで取得 | **空になる** |
+
+いずれもジョブは成功したまま警告を出すだけなので、**壊れていることに気づきにくい。**
+導入時に必ず疎通を確認する。
+
+```bash
+# 401 が返れば本番にAPIがあり鍵の検証も動いている（200 は鍵が正しい場合）
+curl -s -o /dev/null -w "%{http_code}\n" \
+  "https://issuedeck.gucchii.com/api/progress?repository=guchi-apps/my-app&issue=1"
+```
 
 `m-guchi/shopping-list`のケーススタディでは、1Password Service Account経由でのSecrets注入
 （`1password/load-secrets-action@v4` + `op://...`参照）が既に稼働しており、`CLAUDE_CODE_OAUTH_TOKEN`も
@@ -389,6 +523,10 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 
 - `main`は本番環境と一致するリリース用ブランチ。直接push禁止、`develop`→`main`のPRのみ
 - `develop`が日常の開発ブランチ
+- **デフォルトブランチは`develop`にする。** 単なる作法ではなく、無人実行が動く条件そのもの。
+  `issues`・`issue_comment`イベントはデフォルトブランチのワークフローしか起動しないため、
+  `main`のままだと`claude-issue-dispatch.yml`が`@claude`コメントに永久に反応しない
+  （詳細は「[盤面へ載せる](#11-盤面へ載せるリポジトリを再同期)」の同名の項）
 - Issue専用ブランチは`develop`から作成し、ブランチ名は`issue-<Issue番号>`とする
   （`issue-labels.yml`等のIssue番号特定処理がこの命名規則に依存しており、従わないブランチは
   全ワークフローの対象外になる）
@@ -535,16 +673,80 @@ scripts/check-cross-repo-guide-sync.sh
 `CLAUDE.md`に「`.shared-context/`は読み取り専用」「共通知見は提案コメントにとどめる」ルールを
 記載する。
 
-## 11. 導入後の動作確認
+## 11. 盤面へ載せる（リポジトリを再同期）
+
+callerを置いただけでは、そのリポジトリのIssueはカンバンに載らない。**載せる条件は
+`hasClaudeWorkflow`が真であること**で、この実体は`claude-issue-dispatch.yml`が存在するか
+どうかそのものである（[`workflow-support.ts`](../src/lib/github/workflow-support.ts)）。
+
+```
+hasClaudeWorkflow = GET /repos/{owner}/{repo}/actions/workflows/claude-issue-dispatch.yml が 404 でない
+```
+
+### 再同期は2つあり、両方を順に押す
+
+**役割が分かれている。片方だけでは載らない。**
+
+| ボタン | 実体 | すること |
+|---|---|---|
+| リポジトリを再同期 | `POST /api/sync/repositories` → `syncInstallationRepositories` | **`hasClaudeWorkflow`を更新するだけ** |
+| Issueを再同期 | `POST /api/sync/issues` → `addMissingProjectItems` | **実際に盤面へ載せる**（`hasClaudeWorkflow`が真のリポジトリが対象） |
+
+フラグを更新するのは前者だけ、載せるのは後者だけなので、**「リポジトリを再同期」→「Issueを再同期」
+の順に押す。** どちらもログインセッションを要求するため、共有シークレットでは叩けない。
+画面のボタンから実行する。
+
+### 対象リポジトリのデフォルトブランチは`develop`にする
+
+**`claude-issue-dispatch.yml`は、デフォルトブランチに無いと登録されない。**
+そして`hasClaudeWorkflow`はこの登録の有無を見るため、`develop`へマージしただけでは真にならない。
+
+さらに致命的なのは、**`issues`・`issue_comment`イベントはデフォルトブランチのワークフローしか
+起動しない**というGitHubの仕様である。デフォルトが`main`のままだと、callerを`develop`へ入れても
+`@claude`コメントに永久に反応しない。
+
+```bash
+# 確認
+gh api repos/guchi-apps/my-app --jq .default_branch          # develop であること
+gh api repos/guchi-apps/my-app/actions/workflows --jq '.workflows[].path'
+
+# 変更（即時に反映され、既存PRの向き先は変わらない）
+gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
+```
+
+`push`イベントはブランチ上のワークフローを起動するため、`issue-labels.yml`だけは
+デフォルトブランチに無くても動いてしまう。**片方だけ動いていると原因に気づきにくい。**
+
+> `meisai-lab`（#1047の1周目）で実際に踏んだ。11リポジトリ中このリポジトリだけデフォルトが
+> `main`のままで、`issue-labels.yml`は動くのに`claude-issue-dispatch.yml`が登録すらされて
+> いなかった。デフォルトブランチを`develop`へ変えた瞬間に登録された。
+
+### 作業中のIssueは再同期を待たずに載る
+
+進捗報告API（`POST /api/progress`）は、**盤面に無いIssueを自分で載せてからStatusを書く**（#1036）。
+そのため、callerを入れたブランチをpushした時点で、そのIssueだけは先に盤面へ現れる。
+
+再同期が必要なのは**残りのopenなIssueを一括で載せるため**であって、導入作業そのものを
+進めるためではない。順序に神経質になる必要はない。
+
+## 12. 導入後の動作確認
 
 いきなり実装を走らせず、影響の小さい順に確認する。
 
 | 順 | 確認内容 | 方法 |
 |---|---|---|
+| 0 | 疎通 | `GET /api/progress`が405以外を返すこと（405なら本番が古い）。設定不足だと以降が全部静かに失敗する |
 | 1 | 進捗遷移 | `issue-<番号>`ブランチへpushし、盤面のStatusが`Implementation`になること |
 | 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチも進捗も変更されない**ため最も安全 |
 | 3 | 実装フロー | `@claude`とコメントし、ブランチ作成・PR作成まで通ること |
-| 4 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
+| 4 | カンバン起点の起動 | `Ready`のIssueを`Planning`へドラッグし、**1回目で**計画提示が始まること（#1022の`allowed_bots`未設定を検知できる。載せた直後の初回ドラッグが無反応になる不具合は #1132 で解消済み） |
+| 5 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
+
+**初回実行は`claude-code-action`のBunダウンロードで落ちることがある。** キャッシュが無いため
+必ずダウンロードが走り、そこが不安定。ログに`Downloading a new version of Bun` →
+`socket hang up`が出ていれば**設定は無関係**なので、疑う前に失敗ジョブを再実行する
+（`meisai-lab`では3回目で通った）。同じジョブ内で`APP_BASE_URL`への疎通も同時に失敗していれば、
+ランナー側のネットワーク問題である裏付けになる。
 
 **2 の時点で、参照方式が成立しているかはほぼ判断できる。** 実行ログのジョブ名が `dispatch / triage` のように`caller名 / callee名`の形になっていれば、再利用ワークフロー経由で動いている。
 
@@ -561,7 +763,7 @@ scripts/check-cross-repo-guide-sync.sh
 
 コメント投稿をきっかけに結果を確認するとき、**`gh run list --limit 1`で「最新のrun」を取ってはいけない。** botコメントやラベル操作が数秒差で同時に飛ぶため、自分が起こしたものではないrunを掴む。投稿前後のrun一覧を差分で取り、`event`と`createdAt`を自分のコメントの`createdAt`と突き合わせて特定すること。
 
-## 12. ローカル起動スクリプト（任意）
+## 13. ローカル起動スクリプト（任意）
 
 ここまではGitHub Actions側の話。**issue-deckの画面からローカルのClaude Codeセッションをワンクリックで
 起動する**経路は別立てで、対応するかどうかもリポジトリごとに選べる。Actions側の導入とは独立している。
