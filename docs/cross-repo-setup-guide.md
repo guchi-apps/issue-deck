@@ -28,7 +28,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 3. [ラベル体系](#2-ラベル体系)を作成する（**旧世代のラベルがある場合は、進捗を控えてから消す**）
 4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
 5. [Secrets](#4-secrets)を登録する
-6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、ブランチ命名規則、Branch protection）
+6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、**デフォルトブランチを`develop`にする**、ブランチ命名規則、Branch protection）
 7. [コピーしたワークフローのリポジトリ差異を吸収する](#6-リポジトリ差異の吸収チェックリスト)（参照方式のものは`with:`で指定済みのため対象外）
 8. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
    スクリプトを利用する
@@ -523,6 +523,10 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 - `main`は本番環境と一致するリリース用ブランチ。直接push禁止、`develop`→`main`のPRのみ
 - `develop`が日常の開発ブランチ
+- **デフォルトブランチは`develop`にする。** 単なる作法ではなく、無人実行が動く条件そのもの。
+  `issues`・`issue_comment`イベントはデフォルトブランチのワークフローしか起動しないため、
+  `main`のままだと`claude-issue-dispatch.yml`が`@claude`コメントに永久に反応しない
+  （詳細は「[盤面へ載せる](#11-盤面へ載せるリポジトリを再同期)」の同名の項）
 - Issue専用ブランチは`develop`から作成し、ブランチ名は`issue-<Issue番号>`とする
   （`issue-labels.yml`等のIssue番号特定処理がこの命名規則に依存しており、従わないブランチは
   全ワークフローの対象外になる）
@@ -679,12 +683,43 @@ callerを置いただけでは、そのリポジトリのIssueはカンバンに
 hasClaudeWorkflow = GET /repos/{owner}/{repo}/actions/workflows/claude-issue-dispatch.yml が 404 でない
 ```
 
-**このフラグは issue-deck の画面の「リポジトリを再同期」でしか更新されない。**
-「Issueを再同期」では更新されないので注意する。再同期すると`addMissingProjectItems`が走り、
-対象リポジトリのopenなIssueが盤面へ`Ready`として載る（#1036）。
+### 再同期は2つあり、両方を順に押す
 
-`POST /api/sync/repositories`はログインセッションを要求するため、共有シークレットでは叩けない。
-**画面のボタンから実行する。**
+**役割が分かれている。片方だけでは載らない。**
+
+| ボタン | 実体 | すること |
+|---|---|---|
+| リポジトリを再同期 | `POST /api/sync/repositories` → `syncInstallationRepositories` | **`hasClaudeWorkflow`を更新するだけ** |
+| Issueを再同期 | `POST /api/sync/issues` → `addMissingProjectItems` | **実際に盤面へ載せる**（`hasClaudeWorkflow`が真のリポジトリが対象） |
+
+フラグを更新するのは前者だけ、載せるのは後者だけなので、**「リポジトリを再同期」→「Issueを再同期」
+の順に押す。** どちらもログインセッションを要求するため、共有シークレットでは叩けない。
+画面のボタンから実行する。
+
+### 対象リポジトリのデフォルトブランチは`develop`にする
+
+**`claude-issue-dispatch.yml`は、デフォルトブランチに無いと登録されない。**
+そして`hasClaudeWorkflow`はこの登録の有無を見るため、`develop`へマージしただけでは真にならない。
+
+さらに致命的なのは、**`issues`・`issue_comment`イベントはデフォルトブランチのワークフローしか
+起動しない**というGitHubの仕様である。デフォルトが`main`のままだと、callerを`develop`へ入れても
+`@claude`コメントに永久に反応しない。
+
+```bash
+# 確認
+gh api repos/guchi-apps/my-app --jq .default_branch          # develop であること
+gh api repos/guchi-apps/my-app/actions/workflows --jq '.workflows[].path'
+
+# 変更（即時に反映され、既存PRの向き先は変わらない）
+gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
+```
+
+`push`イベントはブランチ上のワークフローを起動するため、`issue-labels.yml`だけは
+デフォルトブランチに無くても動いてしまう。**片方だけ動いていると原因に気づきにくい。**
+
+> `meisai-lab`（#1047の1周目）で実際に踏んだ。11リポジトリ中このリポジトリだけデフォルトが
+> `main`のままで、`issue-labels.yml`は動くのに`claude-issue-dispatch.yml`が登録すらされて
+> いなかった。デフォルトブランチを`develop`へ変えた瞬間に登録された。
 
 ### 作業中のIssueは再同期を待たずに載る
 
