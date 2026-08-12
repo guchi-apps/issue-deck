@@ -35,13 +35,13 @@
    - 二次判定（意味的）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
 4. 該当する場合
    - マージしない
-   - `gh pr edit <PR番号> --add-label "00.check-user"` を付与する（`03.d:marge`はそのままにしてよい）
+   - `gh pr edit <PR番号> --add-label "00.check-user"` を付与する（進捗（Project Status）は変更しない）
    - 該当理由をPRコメントに記載する
    - 次のPRの処理に進む
 5. 非該当の場合
    - `gh pr merge <PR番号> --merge --delete-branch` でdevelopへマージする
    - マージ後、`git checkout develop && git pull --ff-only` してから `pnpm lint && pnpm typecheck` を再実行し、問題ないことを確認する
-   - 対応Issueのラベルを `03.d:marge` → `05.develop` に付け替える。issueはcloseしない（closeするのは`09.main`＝mainへのマージ完了時点のため）。なおGitHub Actions（`.github/workflows/issue-labels.yml`）がPRマージをトリガーに同じ遷移を安全網として自動でも行うため、万一付け忘れても後で是正される（ただし手動での付け替えは引き続き必須）
+   - 対応Issueの進捗は自分で動かさない。PRマージをトリガーにGitHub Actions（`.github/workflows/issue-labels.yml`）が`Develop PR` → `Develop`を報告する。issueはcloseしない（closeするのは`Done`＝mainへのマージ完了時点で、これも同じワークフローが行う）。**進捗ラベルは#991 Phase 5（#1010）で廃止済み**なので、`gh issue edit`で進捗を付け替えることはできない
    - developへのマージではissueを自動クローズしない運用のため、PR本文には`closes #番号`/`fixes #番号`は使わない（実装エージェント側のルール）。念のため対応Issueが誤って自動クローズされていないか確認し、closeされていたら`gh issue reopen <番号>`する
 
 ## 共有知識への追加提案の審査

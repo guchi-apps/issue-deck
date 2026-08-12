@@ -117,23 +117,40 @@ jobs:
 
       - name: リリース対象issueの一覧を取得する
         id: issues
+        # 対象は「developへ入ったがmainへ未反映」のissue、すなわち進捗が`Develop`または`Release`
+        # にあるもの。Phase 4までは`gh issue list --label <進捗ラベル>`でラベルから探して
+        # いたが、進捗ラベルの廃止（#991 Phase 5・#1010）で判断材料がProject Statusだけに
+        # なったため、issue-deckの進捗問い合わせAPIから引く。
+        # **issue-deckへ疎通できない場合は0件として扱い、リリース自体は続行する**（PR本文の
+        # 対象issue一覧が空になるだけで、バージョンbumpとPR作成は成立するため）。
         if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           set -e
-          ISSUES_JSON="$(
-            {
-              gh issue list --label "05.develop" --state open --json number,title,labels
-              gh issue list --label "07.m:marge" --state open --json number,title,labels
-            } | jq -s 'add | unique_by(.number) | sort_by(.number)'
-          )"
-          echo "$ISSUES_JSON" > /tmp/release-issues.json
+          NUMBERS=""
+          if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
+            BODY="$(curl -sS -m 20 \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || BODY=""
+            NUMBERS="$(printf '%s' "$BODY" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          else
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、リリース対象issueを特定できません"
+          fi
 
-          jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
+          echo "[]" > /tmp/release-issues.json
+          : > /tmp/release-issue-lines.txt
+          if [ -n "$NUMBERS" ]; then
+            for NUM in $NUMBERS; do
+              gh issue view "$NUM" --json number,title,labels
+            done | jq -s 'unique_by(.number) | sort_by(.number)' > /tmp/release-issues.json
+            jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
+          fi
           if [ ! -s /tmp/release-issue-lines.txt ]; then
-            echo "（05.develop・07.m:margeが付いたissueが見つかりませんでした）" > /tmp/release-issue-lines.txt
+            echo "（Develop・Releaseにいるopenなissueが見つかりませんでした）" > /tmp/release-issue-lines.txt
           fi
           echo "対象issue:"
           cat /tmp/release-issue-lines.txt
@@ -357,8 +374,8 @@ jobs:
   #
   # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
   # で失敗しても対象issueを特定できるよう、releaseジョブの「リリース対象issueの一覧を取得する」
-  # ステップの出力には依存せず、このジョブでも05.develop・07.m:margeラベル付きissueの一覧を
-  # 独立に取得する。
+  # ステップの出力には依存せず、このジョブでも`Develop`・`Release`にいるissueの一覧を
+  # 独立に取得する（#991 Phase 5でラベル検索からissue-deckへの問い合わせに変わった）。
   notify-failure:
     needs: [release]
     if: always() && needs.release.result == 'failure'
@@ -371,18 +388,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           set -e
 
-          ISSUE_NUMBERS="$(
-            {
-              gh issue list --label "05.develop" --state open --json number
-              gh issue list --label "07.m:marge" --state open --json number
-            } | jq -s 'add | unique_by(.number) | .[].number'
-          )"
+          ISSUE_NUMBERS=""
+          if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
+            BODY="$(curl -sS -m 20 \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || BODY=""
+            ISSUE_NUMBERS="$(printf '%s' "$BODY" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+          fi
 
           if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "05.develop・07.m:margeが付いたissueが見つからないため、通知先を特定できません"
+            echo "Develop・Releaseにいるopenなissueが見つからない（またはissue-deckへ問い合わせできない）ため、通知先を特定できません"
             exit 0
           fi
 

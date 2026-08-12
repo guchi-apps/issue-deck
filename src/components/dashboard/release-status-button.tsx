@@ -22,7 +22,7 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { DEVELOP_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -87,7 +87,7 @@ export function ReleaseStatusButton({
       issues.filter(
         (issue) =>
           issue.repositoryFullName === releaseRepoFullName &&
-          issue.labels.some((label) => label.name === DEVELOP_MERGED_LABEL_NAME),
+          resolveProgressStatus(issue) === "develop",
       ),
     [issues, releaseRepoFullName],
   );

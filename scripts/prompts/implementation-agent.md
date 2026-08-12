@@ -23,7 +23,7 @@
 
 ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・懸念点をまとめて提示し、承認を得てから実装に入ってください。含まれない場合はそのまま実装に進んでよいです。
 
-進捗ラベル（`01.planning`／`02.wip`）と`11.local`は、このセッションの起動時に`scripts/start-issue.sh`が付与済みです（#1096・#1097）。念のため確認し、付いていない場合だけ自分で付けてください。
+`11.local`ラベルの付与と進捗（Project Statusの`Planning`／`Implementation`）の報告は、このセッションの起動時に`scripts/start-issue.sh`が済ませています（#1096・#1097）。起動ログに報告をスキップした旨が出ていた場合だけ、issue-deckの画面（カンバンのカードを動かす・「実装を開始」ボタン）から進捗を進めてください。**進捗ラベルは#991 Phase 5（#1010）で廃止済みで、`gh issue edit`で進捗を進めることはできません。**
 
 ## 全アプリ共通の共有知識
 
@@ -41,7 +41,7 @@
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
 - `develop` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。developへのマージ時点ではissueをcloseしない運用のため、PR本文に`closes #番号`/`fixes #番号`は使わず、`#{{ISSUE_NUMBER}}`のように番号のみ記載する
-- 進捗ラベルを進める。`01.planning`から始まった場合は、承認を得て実装に着手する時点で`01.planning` → `02.wip`へ付け替える。PRを作成したら`02.wip` → `03.d:marge`へ付け替える（developへのマージ・issueのcloseはレビュー・統合エージェント側が担当する）。なおGitHub Actions（`.github/workflows/issue-labels.yml`）がブランチpush・PR作成をトリガーに同じ遷移を安全網として自動でも行うため、万一付け忘れても後で是正される（ただし手動での付け替えは引き続き必須）
+- 進捗（Project Status）を進める操作は不要。ブランチのpushとdevelop向けPRの作成をトリガーに、GitHub Actions（`.github/workflows/issue-labels.yml`）が`Implementation` → `Develop PR`を自動で報告する（developへのマージ・issueのcloseはレビュー・統合エージェント側が担当する）。**進捗ラベルは廃止済みなので、`gh issue edit`で進捗を付け替えないこと**（#991 Phase 5・#1010）。`21.plan-required`から始まった場合の`Planning` → `Implementation`も、承認後の実装着手時に同じ仕組みが扱う
 - PRを作成してレビュー・統合エージェントへ渡し、ローカルでの作業を終える時点で`11.local`を外す。付けたままだと、無人実行（`claude-issue-dispatch.yml`）がこのIssueへの追加対応を一切行えない。ローカルで作業を続けている間は付けたままにする
 
 ## Issueに残す記録

@@ -1,7 +1,7 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
-import { MAIN_MERGED_LABEL_NAME } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
@@ -11,7 +11,7 @@ const RECENTLY_ADDED_WINDOW_MS = DAY_MS;
 /**
  * 同一リリースでcloseされたIssueとみなす、closedAtの許容差。
  * develop→mainのPRがマージされると、対象Issueは1つのworkflow run内で連続して
- * 09.main付与・closeされる（.github/workflows/issue-labels.yml の main-pr-merged）。
+ * `Done`への報告・closeが行われる（.github/workflows/reusable-issue-labels.yml の main-pr-merged）。
  * 実際の間隔は数秒〜数分だが、リリース同士は通常それよりずっと離れているため
  * 1時間を境界とする。
  */
@@ -19,7 +19,7 @@ const RELEASE_CLOSE_BATCH_WINDOW_MS = 1000 * 60 * 60;
 
 /**
  * 最新リリースでcloseされたIssueだけを残す。
- * 09.mainは一度付くと外れないため、ラベルだけで絞ると過去の全リリース分が累積する。
+ * `Done`は一度入ると戻らないため、Statusだけで絞ると過去の全リリース分が累積する。
  * リポジトリごとにclosedAtの最大値（＝最新リリースのclose時刻）を求め、そこから
  * 一定時間内にcloseされたIssueを同じリリースの分とみなす。
  * closedAtの基準は、検索・状態などの絞り込み前の集合（referenceIssues）から求める。
@@ -60,21 +60,28 @@ export function filterIssuesByView(
     case "all":
       return issues;
     default: {
-      // 運用ラベルに基づくビュー（ユーザーの確認待ち・実行中など）はラベルのOR一致で、
-      // 「未着手」のように特定ラベルの不在で定義するビューはexcludeLabelsの不一致で絞り込む。
+      // 定型ビューの絞り込み条件は3種類。進捗（実行中・本番反映待ちなど）はProject Status
+      // のOR一致（#991 Phase 5）、条件系（ユーザーの確認待ち）はラベルのOR一致、
+      // 「未着手」のように特定ラベルの不在で定義するものはexcludeLabelsの不一致で絞り込む。
       const navView = getNavView(view);
       const viewLabels = navView.labels;
       const excludeLabels = navView.excludeLabels;
-      const hasNoLabelCondition =
-        (!viewLabels || viewLabels.length === 0) && (!excludeLabels || excludeLabels.length === 0);
-      if (hasNoLabelCondition) return issues;
+      const viewStatuses = navView.statuses;
+      const hasNoCondition =
+        (!viewLabels || viewLabels.length === 0) &&
+        (!excludeLabels || excludeLabels.length === 0) &&
+        (!viewStatuses || viewStatuses.length === 0);
+      if (hasNoCondition) return issues;
 
       const matchesView = (issue: Issue) => {
-        // 「リポジトリに質問する」等（@claude 質問: コメント）の回答待ちは、実装状況ラベルを
-        // 持たない（付与元のmode=askはラベル操作を行わない）ため、ラベルだけでは実行中ビューに
-        // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、ラベル条件より優先する
+        // 「リポジトリに質問する」等（@claude 質問: コメント）の回答待ちは、進捗を進めない
+        // （付与元のmode=askは進捗の報告を行わない）ため、Statusだけでは実行中ビューに
+        // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、他の条件より優先する
         // （#978）。
         if (view === "in-progress" && issue.qaAnswerPendingAt) return true;
+        if (viewStatuses && viewStatuses.length > 0) {
+          if (!viewStatuses.includes(resolveProgressStatus(issue))) return false;
+        }
         const issueLabelNames = issue.labels.map((label) => label.name);
         if (viewLabels && viewLabels.length > 0) {
           if (!issueLabelNames.some((name) => viewLabels.includes(name))) return false;
@@ -247,7 +254,7 @@ export function computeOverviewStats(
   ).length;
   const recentlyReleasedCount = issuesIgnoringState.filter((issue) => {
     if (!issue.closedAt) return false;
-    if (!issue.labels.some((label) => label.name === MAIN_MERGED_LABEL_NAME)) return false;
+    if (resolveProgressStatus(issue) !== "done") return false;
     return Date.now() - new Date(issue.closedAt).getTime() < DAY_MS;
   }).length;
   const openCount = issuesIgnoringState.filter((issue) => issue.state === "open").length;

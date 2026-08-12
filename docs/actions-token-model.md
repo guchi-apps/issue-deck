@@ -100,7 +100,7 @@ least privilege の方針が既に実践されている**。計画ステップ�
 `<!-- issue-deck:no-trigger -->`マーカーを付与し、`claude-issue-dispatch.yml`の`issue_comment`
 トリガーの`if:`条件がこのマーカー付きコメントを起動対象から除外する（マーカーはワークフロー起動条件の
 除外にのみ作用し、コメント自体の投稿・可読性には影響しない）。ブランチ・PR作成後の状態
-（`03.d:marge`/`07.m:marge`での「修正を依頼する」等）は、第3層（`BRANCH_EXISTS`ガード）により
+（`Develop PR`/`Release`での「修正を依頼する」等）は、第3層（`BRANCH_EXISTS`ガード）により
 ラベル除去イベント単独が`MODE=skip`になるため二重発火の実害が無く、この対策の対象外。
 
 ### 第3層: mode 判定（トークン非依存）

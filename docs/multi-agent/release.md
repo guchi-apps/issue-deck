@@ -54,9 +54,11 @@ GitHub ActionsのUIから`Run workflow`で明示的に実行する。
 claude-review-fallback/auto-merge-fallback、`claude-conflict-resolve.yml`のフォールバック通知と
 同じ考え方で、`release`ジョブ専用の`notify-failure`ジョブを持つ。`release`ジョブが状態判定・
 バージョン判定・バンプPR作成・develop→mainのPR作成のどのステップで失敗しても
-（`if: always() && needs.release.result == 'failure'`）起動し、`05.develop`・`07.m:marge`
-ラベルが付いたissue（`release`ジョブの「リリース対象issueの一覧を取得する」ステップとは独立に
+（`if: always() && needs.release.result == 'failure'`）起動し、進捗が`Develop`・`Release`に
+あるissue（`release`ジョブの「リリース対象issueの一覧を取得する」ステップとは独立に
 このジョブでも問い合わせる。どのステップで落ちてもissueを特定できるようにするため）へ実行ログ
 URL付きの警告コメントを投稿し、`00.check-user`を付与する。直近のコメントに同一run URLが既に
 含まれる場合は重複通知しない（他ワークフローと同じdedupパターン）。対象issueが1件も無い場合
-（ラベル付け忘れ等）は通知できず、Actionsの実行ログでしか気づけない制約が残る。
+（issue-deckへ疎通できない場合を含む）は通知できず、Actionsの実行ログでしか気づけない制約が残る。
+**対象の特定はissue-deckの進捗問い合わせAPI（`GET /api/progress`）に依存する**（#991 Phase 5で
+ラベル検索から置き換えた）。

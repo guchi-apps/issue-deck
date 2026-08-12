@@ -45,7 +45,7 @@ name: Claude Issue Dispatch (reusable)
 #      揃うため、アプリが続けて送る確認コメントと二重に実装を再始動しかねない。この場合のみ
 #      アプリは確認コメント本文に<!-- issue-deck:no-trigger -->マーカーを付与し(下記「@claudeトリガー
 #      の判定」を参照)、ラベル除去イベント単独を正規のトリガーとする(#566)。ブランチ・PR作成後の
-#      状態(03.d:marge/07.m:margeでの「修正を依頼する」等)は後述のBRANCH_EXISTSガードにより
+#      状態(Develop PR/Releaseでの「修正を依頼する」等)は後述のBRANCH_EXISTSガードにより
 #      二重発火の実害が無いため、確認コメントにマーカーは付けない。
 #   3. 承認・練り直しのいずれもせず計画を拒否する場合は、人間がIssueを直接クローズする
 #      (`not planned`等の理由。コメントに@claudeを含める必要はない)。クローズ済みIssueは
@@ -63,15 +63,15 @@ name: Claude Issue Dispatch (reusable)
 #
 # クローズ済みのIssueに対する@claudeコメント・ラベル操作では、実装・計画・分割のいずれも
 # 再始動しない(mode=skip)。上記の分割で元Issueがクローズされた後に誤って再始動しないための
-# ガードだが、通常の09.mainクローズ後のIssueにも同様に適用される。
+# ガードだが、通常の本番反映(Done)によるクローズ後のIssueにも同様に適用される。
 #
 # ローカル(VSCode等)のClaude Codeセッションで進めているIssueと、この無人実行が同じIssueを
 # 二重に進めないためのガードを二段構えで持つ(#905で実際に発生、#919で対応。詳細は
 # docs/multi-agent-workflow.md「ローカル実行と無人実行の二重起動を防ぐ」参照)。
-#   1. issues/unlabeled(00.check-userの除去)を受けた時点で02.wip・03.d:margeのいずれかが
+#   1. issues/unlabeled(00.check-userの除去)を受けた時点で進捗がImplementation・Develop PRのいずれかで
 #      付いていればmode=skip。「計画が承認された」シグナルと、ローカルセッションが承認を
 #      受けてラベルを次段階へ進める操作はイベント上区別できないため、既に着手済み・PR作成済み
-#      であることを示すラベルの有無で切り分ける。01.planningは正規の承認時点でも付いたままの
+#      であることを示す進捗の値で切り分ける。Planningは正規の承認時点でもその値のままの
 #      ため、この判定に含めてはいけない(下記MODE判定のコメント参照)。
 #   2. 11.localラベルが付いている間は、トリガー経路によらずmode=skip(読み取り専用のmode=askのみ
 #      例外)。1がラベル付け替えの順序次第ですり抜けるケースを、人間が明示的に立てる停止フラグで
@@ -89,13 +89,13 @@ name: Claude Issue Dispatch (reusable)
 # 依頼は独立した文脈のため)。新規ブランチは作らず、既存のissue-<番号>ブランチをcheckoutして
 # 続きから作業する。
 #   - PRがOPEN(#129): 追加の依頼内容としてコミットをpushし、既存PRにコメントで報告する。
-#   - PRがまだ一度も無く、かつ02.wipが付いている(#112): 前回の実装試行がPR作成に至らないまま
+#   - PRがまだ一度も無く、かつ進捗がImplementation(#112): 前回の実装試行がPR作成に至らないまま
 #     (権限拒否・エラー等で)終了し詰まった状態の可能性がある。ブランチを削除して作り直すのは
 #     人間しかできない(自動では行わない。前回コミットまで進んでいた作業を無言で失わせない
 #     ため)が、その既存ブランチをそのままcheckoutして続きから再開すること自体は自動で行い、
 #     完了時に新規でPRを作成する(実装ステップのプロンプト内で、現在のブランチの状態を確認して
 #     続行可能か判断させる)。
-# PRがMERGED/CLOSED、またはPRが無く02.wipも付いていない異常な中間状態の場合は、従来どおり
+# PRがMERGED/CLOSED、またはPRが無く進捗もImplementationではない異常な中間状態の場合は、従来どおり
 # mode=skipとし、実装は再始動しない。
 #
 # PRがOPENの状態(上記1つ目)で、直近の@claudeコメントが「単なる質問・確認」と判定された場合も、
@@ -295,6 +295,10 @@ jobs:
           EVENT_LABEL: ${{ github.event.label.name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           INPUT_RETRY_ATTEMPT: ${{ github.event.inputs.retry_attempt }}
+          # 進捗(Project Status)の問い合わせ先。#991 Phase 5でラベルを廃止したため、
+          # 実行モードの判定材料もissue-deck経由になった(後述「進捗はラベルではなく…」)。
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           set -e
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
@@ -350,7 +354,7 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
           # クローズ済みのIssueは実装・計画・分割のいずれも再始動しない。分割(#144)で元Issueが
-          # クローズされた後の誤爆防止が主目的だが、09.mainクローズ後のIssue全般にも適用される。
+          # クローズされた後の誤爆防止が主目的だが、本番反映(Done)によるクローズ後のIssue全般にも適用される。
           ISSUE_STATE="$(gh issue view "$ISSUE_NUMBER" --json state --jq .state)"
           ISSUE_CLOSED=false
           [ "$ISSUE_STATE" = "CLOSED" ] && ISSUE_CLOSED=true
@@ -383,10 +387,35 @@ jobs:
           echo "$LABELS" | grep -qx "21.plan-required" && PLAN_REQUIRED=true
           AWAITING_CONFIRM=false
           echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
+
+          # 進捗はラベルではなくissue-deckのProject Statusから引く(#991 Phase 5・#1010)。
+          # Phase 4までは実装中・developへマージ中を示す進捗ラベルの有無を見ていたが、廃止したため
+          # 判断材料はStatusだけになった。Projectへの読み書きはissue-deckへ一本化する設計
+          # (docs/progress-status-architecture.md)に従い、Projectを直接引かずAPIを経由する。
+          #
+          # **問い合わせに失敗した場合、進捗は「不明」として扱う(WIP/DEVELOP_PRともfalse)。**
+          # 下記MODE判定でこれが効くのは、(a) unlabeledイベントの着手済みガード、
+          # (b) PRがまだ無い詰まった状態(#112)からの再開、の2箇所。いずれも安全側に倒れる
+          # ((a)は本来skipすべきものが計画・実装へ進みうるが、そのケースは下のブランチ有無・
+          # PR状態のガードが引き続き効く。(b)は再開できずskipになる)。
+          PROGRESS_STATUS=""
+          if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
+            PROGRESS_BODY="$(curl -sS -m 20 \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$GH_REPO&issue=$ISSUE_NUMBER")" || PROGRESS_BODY=""
+            PROGRESS_STATUS="$(printf '%s' "$PROGRESS_BODY" | jq -r 'select(.available == true) | .status // empty' 2>/dev/null || true)"
+            if [ -z "$PROGRESS_STATUS" ]; then
+              echo "::warning::issue #$ISSUE_NUMBER の進捗を取得できませんでした（未着手・盤面へ未登録・issue-deckへ疎通不可のいずれか）"
+            else
+              echo "issue #$ISSUE_NUMBER の進捗: $PROGRESS_STATUS"
+            fi
+          else
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、進捗を取得できません"
+          fi
           WIP=false
-          echo "$LABELS" | grep -qx "02.wip" && WIP=true
+          [ "$PROGRESS_STATUS" = "implementation" ] && WIP=true
           DEVELOP_PR=false
-          echo "$LABELS" | grep -qx "03.d:marge" && DEVELOP_PR=true
+          [ "$PROGRESS_STATUS" = "develop-pr" ] && DEVELOP_PR=true
           # ローカル(VSCode等)のClaude Codeセッションで対応中であることを人間が明示するラベル(#919)。
           # 付いている間はトリガー経路によらず無人実行を起動しない(下記MODE判定を参照)。
           LOCAL=false
@@ -411,14 +440,14 @@ jobs:
           # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な
           # 追加依頼ではないため、以下はissue_comment・workflow_dispatchトリガーに限定する。
           # workflow_dispatchは計画/実装フォールバック検証ステップからの自己リトライ(#497)。
-          # PRがまだ無く02.wipが付いている詰まった状態(#112)からの再開先(mode=additional)は、
+          # PRがまだ無く進捗がImplementationのまま詰まった状態(#112)からの再開先(mode=additional)は、
           # 実装フォールバックの自己リトライがちょうど再開したい状態と一致する):
           # - PRがOPENなら追加対応として扱う(#129)。00.check-user(Phase4の自動マージ不可判定を
           #   含む)の有無は問わない。
-          # - PRがまだ無く02.wipが付いている詰まった状態(#112)も追加対応として扱い、既存
+          # - PRがまだ無く進捗がImplementationのまま詰まった状態(#112)も追加対応として扱い、既存
           #   ブランチをそのままcheckoutして続きから再開する(実装ステップのプロンプト側で
           #   続行可能か判断する)。ブランチの削除・作り直しは自動化せず人間の明示操作に委ねる。
-          # - それ以外(PRがMERGED/CLOSED、または02.wipも付いていない異常な中間状態)は
+          # - それ以外(PRがMERGED/CLOSED、または進捗もImplementationではない異常な中間状態)は
           #   mode=skipとし、実装は再始動しない。
           MODE=skip
           if [ "$EVENT_NAME" = "issue_comment" ] && [ "$IS_ASK" = "true" ]; then
@@ -427,7 +456,7 @@ jobs:
             # 11.localが付いている間は、どのトリガー経路でも計画・実装・分割・追加対応を行わない(#919)。
             # ローカルのClaude Codeセッションと無人実行が同じIssueを二重に進めるのを防ぐための、
             # 人間が明示的に立てる停止フラグ。下記のunlabeledガードが状態依存で取りこぼす
-            # (例: ローカル側が02.wipを付ける前に00.check-userを外した場合)ケースも塞ぐ。
+            # (例: ローカル側が進捗をImplementationへ進める前に00.check-userを外した場合)ケースも塞ぐ。
             #
             # mode=ask(「Claudeに質問する」ダイアログ)だけは上の分岐で先に確定させて許可する。
             # 読み取り専用でブランチにもラベル状態にも触れず、人間がその場で明示的に投げた質問で
@@ -436,13 +465,13 @@ jobs:
           elif [ "$EVENT_NAME" = "issues" ] && { [ "$WIP" = "true" ] || [ "$DEVELOP_PR" = "true" ]; }; then
             # issues/unlabeled(=00.check-userの除去)は「無人実行の計画が承認された」シグナルだが、
             # ローカルセッションが承認を受けてラベルを次に進める操作と区別できない(#905, #919)。
-            # 02.wip・03.d:margeのいずれかが既に付いている状態でこのイベントが来た場合、
+            # 進捗が既にImplementation・Develop PRのいずれかである状態でこのイベントが来た場合、
             # そのIssueは別経路で実装着手済み・PR作成済みであり、新規に計画や実装を始めるのは
             # 常に誤りなのでskipする。
             #
-            # 01.planningはここに含めてはいけない。無人実行の計画提示ステップが付けた01.planningは
-            # 実装着手時(mode=implementの「02.wip を付与する」ステップ)まで外れないため、承認時点の
-            # 正規の状態が「01.planning + 00.check-user + 21.plan-required」になる。含めると本来の
+            # Planningはここに含めてはいけない。無人実行の計画提示ステップが報告したPlanningは
+            # 実装着手時(mode=implementのProject Status報告ステップ)まで変わらないため、承認時点の
+            # 正規の状態が「Planning + 00.check-user + 21.plan-required」になる。含めると本来の
             # 承認経路そのものが動かなくなる。
             #
             # branch_exists=trueの場合のskipは下の分岐が従来どおり担当する(ローカルはworktreeで
@@ -532,9 +561,9 @@ jobs:
 
       - name: 対応を見送った@claudeコメントに状況を返信する
         # 11.localによるskip(#919)、およびBRANCH_EXISTS=trueかつmode=skipとなるケース(#105)。develop向けPRがOPENの状態、または
-        # PRが無く02.wipが付いている詰まった状態(#112)でissue_commentが来た場合はmode=additional
+        # PRが無く進捗がImplementationのまま詰まった状態(#112)でissue_commentが来た場合はmode=additional
         # になり、このステップの対象外(#129, #112。既存ブランチをcheckoutして続きから再開する)。
-        # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く02.wipも付いていない異常な
+        # ここに該当するのは、PRがMERGED/CLOSED、またはPRが無く進捗もImplementationではない異常な
         # 中間状態で、issue-<番号>ブランチが既に存在するため実装は再始動しないが、
         # issue_commentトリガー(人間が直接@claudeへ呼びかけたケース)に限り、これまでの
         # 「無言でスキップ」を避けて対応状況を返信する。unlabeledイベントでの同条件のskip
@@ -573,7 +602,7 @@ jobs:
           BRANCH="${{ steps.state.outputs.branch }}"
           PR_URL="${{ steps.state.outputs.pr_url }}"
           if [ -z "$PR_URL" ]; then
-            BODY="⚠️ \`$BRANCH\` ブランチは存在しますが、Pull Requestも\`02.wip\`ラベルも無い、想定外の状態です。"
+            BODY="⚠️ \`$BRANCH\` ブランチは存在しますが、Pull Requestが無く進捗も\`Implementation\`ではない、想定外の状態です。"
             BODY="$BODY"$'\n\n'"作り直す場合は、人間が明示的に \`git push origin --delete $BRANCH\` 等でブランチを削除してから、改めて\`@claude\`とコメントしてください（このワークフローが自動でブランチを削除・作り直すことはありません）。"
           else
             BODY="ℹ️ このIssueは既に \`$BRANCH\` ブランチで対応中、または対応済みです。関連するPull Requestはこちらです: $PR_URL"
@@ -954,7 +983,7 @@ jobs:
             BODY="🔧 依頼を確認しました${RETRY_NOTE_ADD}。既存の \`${{ steps.state.outputs.branch }}\` ブランチ・Pull Request（${{ steps.state.outputs.pr_url }}）に追加コミットします。"
             AGENT_ROLE=guide
           elif [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
-            # このケースはPRが無く02.wipのまま詰まった状態からの再開であり、文言自体が既に
+            # このケースはPRが無く進捗がImplementationのまま詰まった状態からの再開であり、文言自体が既に
             # 前回の実装が完了しなかったことを説明しているため、RETRY_NOTEは付け加えない。
             BODY="🔧 前回の実装がPull Request作成に至らないまま終了した可能性があるため、既存の \`${{ steps.state.outputs.branch }}\` ブランチの状態を確認したうえで実装を再開します。"
             AGENT_ROLE=guide
@@ -965,26 +994,14 @@ jobs:
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
 
-      - name: 01.planning を付与する（計画検討着手時）
-        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
-        # 依存してしまうため、他の確実な通知ステップと同じくシェルスクリプトで直接行う。
-        # CLAUDE.mdの運用ルール(01.planningはPlan mode開始時点で付与する)をこのワークフローでも
-        # 保証するためのステップ。展開先リポジトリに01.planningラベル自体が定義されていない
-        # 場合でもジョブ全体を落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
-        if: steps.state.outputs.mode == 'plan'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "01.planning"; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "01.planning"
-          else
-            echo "::warning::ラベル '01.planning' がリポジトリに存在しないため付与をスキップします"
-          fi
-
       - name: Project Status を報告する（計画検討着手時）
-        # ラベル付与と同じ状態をissue-deckの進捗報告APIへ送り、Projectsのカンバンを追従させる
-        # (#991 Phase 2)。Planning/Implementationへの遷移はこのワークフローが起点のため、
+        # 進捗をissue-deckの進捗報告APIへ送り、Projectsのカンバンを追従させる(#991 Phase 2)。
+        # Planning/Implementationへの遷移はこのワークフローが起点のため、
         # reusable-issue-labels.ymlではなくここから報告する。
+        #
+        # Phase 4まではこの直前に計画検討中の進捗ラベルを付けるステップがあったが、
+        # 進捗ラベルの廃止(#991 Phase 5・#1010)にあわせて削除した。**Planningに入ったことを
+        # 示すのはこの報告だけ**になっている。
         # 疎通失敗・未設定でジョブを落とさないのは、issue-deckを進捗更新の単一障害点に
         # しないため(設計はdocs/progress-status-architecture.md)。
         if: steps.state.outputs.mode == 'plan'
@@ -1609,54 +1626,28 @@ jobs:
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
         run: ${{ inputs.package-manager }} exec playwright install --with-deps chromium
 
-      - name: 02.wip を付与する（実装着手時）
-        # Claude Codeエージェント自身にラベル付与を委ねるとLLMの実行タイミング・忘れに
-        # 依存してしまう(実際、コメント投稿から付与まで数分〜10分ほど遅延する例があった)ため、
-        # 実装着手前にシェルスクリプトで直接・確実に付与する。計画検討中（01.planning）から
-        # 実装着手に進む場合に備え、両分岐とも01.planningの除去も併せて行う（付いていなくても
-        # 無害）。あわせて、質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で
-        # 付与されうる00.qa-answeredも、実際に実装着手に進んだ時点で古い状態が残らないよう除去する。
-        # 展開先リポジトリにこれらのラベル自体が定義されていない場合でもジョブ全体を落とさない
-        # よう、付与・除去の対象を実在するラベルだけに絞り込む(#975)。
+      - name: 00.qa-answered を除去する（実装着手時）
+        # 質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で付与されうる
+        # 00.qa-answeredを、実際に実装着手へ進んだ時点で古い状態が残らないよう除去する。
+        # 展開先リポジトリにこのラベル自体が定義されていない場合でもジョブ全体を落とさないよう、
+        # 除去前にリポジトリのラベル一覧と突き合わせる(#975)。
+        #
+        # Phase 4まではここで実装中の進捗ラベルの付与・他の進捗ラベルの除去も行っていたが、
+        # 進捗ラベルの廃止(#991 Phase 5・#1010)にあわせて削除した。進捗の遷移は下の
+        # 「Project Status を報告する」ステップだけが担う。
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          mapfile -t existing < <(gh label list --json name --jq '.[].name' --limit 200)
-          label_exists() {
-            local name="$1" l
-            for l in "${existing[@]}"; do
-              [ "$l" = "$name" ] && return 0
-            done
-            return 1
-          }
-
-          remove_candidates=(01.planning 00.qa-answered)
-          if [ "${{ steps.state.outputs.mode }}" = "additional" ]; then
-            remove_candidates+=(03.d:marge)
-          fi
-
-          args=()
-          if label_exists "02.wip"; then
-            args+=(--add-label "02.wip")
+          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.qa-answered"; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} --remove-label "00.qa-answered"
           else
-            echo "::warning::ラベル '02.wip' がリポジトリに存在しないため付与をスキップします"
-          fi
-          for label in "${remove_candidates[@]}"; do
-            if label_exists "$label"; then
-              args+=(--remove-label "$label")
-            else
-              echo "::warning::ラベル '$label' がリポジトリに存在しないため除去をスキップします"
-            fi
-          done
-
-          if [ "${#args[@]}" -gt 0 ]; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} "${args[@]}"
+            echo "::warning::ラベル '00.qa-answered' がリポジトリに存在しないため除去をスキップします"
           fi
 
       - name: Project Status を報告する（実装着手時）
-        # 上記「01.planning を付与する」ステップの報告と同じ趣旨(#991 Phase 2)。
+        # 上記「計画検討着手時」の報告と同じ趣旨(#991 Phase 2)。
         # modeがadditional(追加対応)の場合も、developへのPRが出た後にもう一度実装へ戻るため
         # Implementationへ報告する。Statusが Develop -> Implementation と戻るのは正常な挙動で、
         # `Develop`は「最新のPRの状態」であってIssueの完了ではない
@@ -1755,6 +1746,57 @@ jobs:
             exit 0
           fi
           "$CLAUDE_USAGE_SCRIPT" "Claude Code（実装・PR作成）" "${{ steps.claude_implement.outputs.execution_file }}"
+
+      - name: Project Status を実際のPR状態に合わせる（実装ステップ後）
+        # 実装ステップの前に無条件で`implementation`を報告しているため、実行が終わった時点の
+        # 実態（developへのPRが開いているか）と食い違うことがある。ここで実態に合わせ直す。
+        #
+        # 対象は2つ。どちらもPhase 4まではClaude Codeエージェント自身に
+        # `gh issue edit`で進捗ラベルを付け替えさせていた部分で、
+        # 進捗ラベルの廃止（#991 Phase 5・#1010）にあわせてシェルステップへ移した。
+        # LLMの実行タイミング・忘れに依存させないためでもあり、Claude Codeエージェントへ
+        # `PROGRESS_REPORT_SECRET` を渡さずに済ませるためでもある。
+        #
+        # 1. `additional`で既存PRへ追加コミットした場合。PRは既に開いており`opened`イベントが
+        #    発火しないため、reusable-issue-labels.ymlのdevelop-pr-openedジョブが働かない
+        # 2. `additional`で「単なる質問・確認」と判定し回答だけして終えた場合（#887）。
+        #    実装には入っていないため、進捗は元の`Develop PR`のままであるべき
+        #
+        # `implement`で新規PRを作成した場合はdevelop-pr-openedジョブが同じ報告を行うが、
+        # ここで重ねて報告しても同じ値を書くだけで冪等（APIは変化が無ければ`unchanged`を返す）。
+        # PRが開いていなければ何もしない（`implementation`のままが実態と合っている）。
+        if: always() && (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          STATUS: develop-pr
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          if [ -z "$(gh pr list --head "$BRANCH" --base develop --state open --json url --jq '.[0].url // empty')" ]; then
+            echo "developへのオープンなPRが無いため、進捗は実装中のままにします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/progress" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"issue\":$ISSUE_NUMBER,\"status\":\"$STATUS\"}")" || code=000
+          if [ "$code" = "200" ]; then
+            echo "issue #$ISSUE_NUMBER を $STATUS として報告しました"
+          else
+            echo "::warning::Project Statusの報告に失敗しました（issue #$ISSUE_NUMBER / status=$STATUS / HTTP $code）"
+          fi
 
       - name: 実装結果を検証し、完了・待ち状態が確認できない場合はフォールバック通知する
         # Claude Codeエージェントに完了報告コメントの投稿を委ねるだけだと、途中でエラー終了した場合や

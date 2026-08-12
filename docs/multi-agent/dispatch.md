@@ -43,12 +43,11 @@
    `gh issue close`（またはGitHub Web UI）でIssueを`not planned`等の理由で直接クローズする。
    クローズ済みのIssueは本ワークフローの全モードで再始動しない（`issue_closed`ガード）ため、
    拒否のコメント自体に`@claude`を含める必要はない（コメントを残さずクローズするだけでもよい）。
-   クローズ後も`00.check-user`ラベルや`01.planning`/`02.wip`等の進捗ラベルが「要確認」「計画検討中」
-   「作業中」のまま残ると紛らわしいため、`.github/workflows/issue-labels.yml`の`cleanup-on-close`
-   ジョブが、Issueクローズをトリガーに`00.check-user`と進捗ラベル（`01.planning`/`02.wip`/
-   `03.d:marge`/`05.develop`/`07.m:marge`。`09.main`は「本番反映済み」の恒久的な状態を示すため除外）
-   を自動的に除去する
-   （issue #172、#464）。この除去自体が`00.check-user`の`unlabeled`イベントを発生させ本
+   クローズ後も`00.check-user`ラベルが「要確認」のまま残ると紛らわしいため、
+   `.github/workflows/issue-labels.yml`の`cleanup-on-close`ジョブが、Issueクローズをトリガーに
+   `00.check-user`を自動的に除去する（issue #172、#464）。**進捗（Project Status）は巻き戻さない**
+   （`Done`のIssueを人が閉じ直しただけで盤面が`Ready`へ戻るのを避けるため。#991 Phase 5までは
+   進捗ラベルの除去も行っていた）。この除去自体が`00.check-user`の`unlabeled`イベントを発生させ本
    ワークフローを起動するが、対象issueは既にクローズ済みのため`issue_closed`ガードにより
    何もせず`mode=skip`となる。
 
@@ -65,7 +64,7 @@ pushされたがPRが作成されないまま終了した）。この場合、�
 判定）では、PRが無いまま`issue-<番号>`ブランチだけが残り、以後どのイベントが来ても再始動しない
 状態でスタックしてしまい、人間がブランチを手動削除する以外に復旧手段が無かった。
 
-判定ステップでは「`02.wip`が付いているのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
+判定ステップでは「進捗が`Implementation`なのにPRが無い」状態を検知でき、当初はこれを詰まった実装の
 リトライとみなして`issue-<番号>`ブランチを自動削除・作り直しした上で実装ステップを再実行していた。
 しかし、これは「そのissueに来た@claudeコメントや00.check-user解除イベントなら何でも」トリガーに
 なってしまい、実は前回コミットまで進んでいた作業が本人の意図に関わらず無言で失われる恐れがあった。
@@ -216,14 +215,14 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   起動しない」制限は受けなくなった。そのため`claude-review-develop.yml`（Phase3/4）が自動発火する
   可能性があるが、実運用でまだ確認できていない。Phase5の完了条件は「develop向けPR作成まで」であり、
   developへのマージまでの自動化は前提にしていないため、発火してもしなくても許容する
-  （実装ステップのプロンプト内で`03.d:marge`ラベル付与を自前でも行っており、自動発火に依存しない）。
-- **GitHub Auto-mergeによるdevelopマージ後、`03.d:marge`が`05.develop`へ遷移しないことがある**
+  （実装ステップ後のシェルステップが実際のPR状態を見て`Develop PR`を報告するため、自動発火に依存しない）。
+- **GitHub Auto-mergeによるdevelopマージ後、`Develop PR`が`Develop`へ遷移しないことがある**
   （Issue #112、対応済み）: 上記と同根の制約で、`claude-review-develop.yml`の`auto-merge`ジョブが
   既定の`GITHUB_TOKEN`で有効化していたGitHub Auto-merge機能による実際のマージは、
   `issue-labels.yml`の`develop-pr-merged`ジョブ（`pull_request: closed`トリガー）を起動しないこと
   があった。対応として`auto-merge`ジョブの`GH_TOKEN`を`WORKFLOW_PAT`に切り替え、あわせて
   `issue-labels.yml`に`schedule`（15分おき）で走査する`develop-merge-sweep`ジョブを追加し、
-  取りこぼした`03.d:marge`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
+  取りこぼした`Develop PR`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
   非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
 - `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合は、Phase7で統合した
   Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメントに埋め込んだ

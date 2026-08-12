@@ -16,11 +16,12 @@
       通常コメントと同じ場所で視覚的に区別できるようにするため）。回答コメントの本文末尾には
       `<!-- issue-deck-qa-answer -->`マーカーと、投稿元を示す
       `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与してください。
-      なお、このステップの直前のシェルステップで既に`02.wip`が付与され`03.d:marge`が
-      外されているため、状態を元に戻すために
-      `gh issue edit ${ISSUE_NUMBER} --add-label "03.d:marge" --add-label "00.check-user" --add-label "00.qa-answered" --remove-label "02.wip"`
-      を実行してください（`00.check-user`・`00.qa-answered`以外の他のラベルは変更しません）。
-      `00.check-user`・`00.qa-answered`は既に付いていても無害なので必ず付与すること。
+      あわせて `gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "00.qa-answered"`
+      を実行してください（この2つ以外のラベルは変更しません）。
+      どちらも既に付いていても無害なので必ず付与すること。
+      進捗（Project Status）の復元は不要です。このステップの直前にワークフローが
+      `Implementation`を報告していますが、実行後のシェルステップが実際のPR状態を見て
+      `Develop PR`へ戻します（進捗ラベルは#991 Phase 5で廃止済み）。
       `00.qa-answered`は「質問への回答のみ完了（実装承認待ちとは別）」を表す専用ラベルで、
       承認ボタン押下時に投稿される定型文をissue-deck画面側で出し分けるために使われます。理由: issue-deck画面の「修正を依頼する」
       ボタンは送信前に機械的に`00.check-user`を外す実装になっており、依頼内容が実際には
@@ -59,7 +60,7 @@
   計画がIssueコメントに投稿されているはずなので、それに沿って実装する。`additional`でPR
   作成済みの場合は、直近の`@claude`コメントの内容を踏まえて対応する。PR未作成の再開の
   場合は、過去のコメント履歴や既存のコミットから前回どこまで実装が進んでいたかも把握する）
-  （`02.wip`ラベルの付与・`03.d:marge`からの付け替えは、このステップの前段のシェルステップで
+  （進捗（Project Status）の`Implementation`への遷移は、このステップの前段のシェルステップで
   既に完了しているため、ここで行う必要はない）
 - `implement`の場合のみ`git checkout -b ${BRANCH}`で作業ブランチを
   作成する（`additional`の場合は既にcheckout済みのため不要）
@@ -151,11 +152,10 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
   - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request
     （${PR_URL}）に`gh pr comment`で、
     今回追加でpushしたコミットの内容を日本語で要約して投稿する
-- 完了したら`gh issue edit ${ISSUE_NUMBER} --add-label "03.d:marge" --remove-label "02.wip"`
-  を実行する（`additional`の場合も同じコマンドで`02.wip`↔`03.d:marge`の付け替えを閉じる。
-  `00.check-user`には触れない。このワークフローのgit pushはPAT
-  （`secrets.WORKFLOW_PAT`）で行っており`.github/workflows/issue-labels.yml`が自動発火する
-  可能性があるが、未検証のため当てにせず、必ず自分でこのコマンドを実行すること）
+- 進捗（Project Status）を`Develop PR`へ進める操作は不要。このステップの完了後に
+  ワークフローのシェルステップが、developへのオープンなPRの有無を見て自動で報告する
+  （進捗ラベルは#991 Phase 5で廃止済みで、あなたがラベルを付け替える必要はない）。
+  `00.check-user`にも触れない
 - 最後に `gh issue comment ${ISSUE_NUMBER} --body "..."`
   で対応完了の報告コメントをIssueに投稿する（無人実行のため、この報告が使用者にとって唯一の完了確認
   手段になる）。新規にPRを作成した場合はそのURL、既存PRにコメントした場合は追加コミットした旨と
@@ -218,11 +218,11 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
   バイパスの上に構築。#258）。DBマイグレーション・ダミーデータのシード・CIバイパス用ユーザーの
   作成・Playwright（chromium）のインストールは、このClaude Codeステップより前段の
   シェルスクリプトのステップで既に完了しています。実装・テスト・コミット・pushまで終えたら、
-  上記「責務」に記載のPull Request作成・更新と`03.d:marge`ラベルの復元（`02.wip`の除去）まで
-  先に済ませてください。その上で、最後の完了報告コメント（Issue側の`gh issue comment`）を
-  投稿する前に以下を行ってください（PR作成・ラベル復元をスクリーンショット撮影より先に行うのは、
-  pushしてからラベルが復元されるまでの間隔を短くし、`claude-review-develop.yml`の
-  risk-checkジョブが`00.check-user`を付与するタイミングとの競合を避けるためです）。
+  上記「責務」に記載のPull Request作成・更新まで先に済ませてください。その上で、最後の
+  完了報告コメント（Issue側の`gh issue comment`）を投稿する前に以下を行ってください
+  （PR作成をスクリーンショット撮影より先に行うのは、pushしてからPRが開くまでの間隔を短くし、
+  `claude-review-develop.yml`のrisk-checkジョブが`00.check-user`を付与するタイミングとの
+  競合を避けるためです）。
   1. `pnpm run capture:issue-screenshots -- ${ISSUE_NUMBER} [対象パス]`を
      実行する。内部で開発サーバー（`next dev`）を起動し、CIバイパス用ユーザーでログインした
      状態で撮影し、`screenshots`ブランチへコミット・pushしたうえで、埋め込み用のraw URLを
@@ -242,8 +242,8 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
      - 失敗した場合（開発サーバーが起動しない等）は、無理に修正しようとせず、
        `gh issue comment`で失敗した旨とエラー内容を報告し、
        `gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user"`を
-       実行して停止してください（PR作成・ラベル復元は既に完了しているため元に戻す必要はなく
-       `03.d:marge`のままでよい。エラーの原因を推測で決めつけず、実際のエラーメッセージを
+       実行して停止してください（PR作成は既に完了しているため元に戻す必要はない。
+       エラーの原因を推測で決めつけず、実際のエラーメッセージを
        そのままIssueコメントに引用すること）。
   2. 撮影に成功したら、通常どおり最後の完了報告コメント（Issue側の`gh issue comment`）を
      投稿してください。取得したスクリーンショットのURLはPR本文・PRコメントには含めず、
@@ -262,9 +262,8 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
     撮影対象パスへ遷移した後、撮影前にそのセレクタをクリックする。第2引数
     （対象パス）を省略するフォールバック撮影モードでは対応していない。
 - Issueに`23.preview-required`ラベルが付いている場合（`24.screenshot-required`の有無を
-  問わない）: 上記「責務」に記載の完了処理（新規PR作成またはPRコメント投稿・
-  `03.d:marge`への付け替え）まで通常どおり進めてください。それを理由にPR作成自体を
-  ブロックする必要はありません。
+  問わない）: 上記「責務」に記載の完了処理（新規PR作成またはPRコメント投稿）まで通常どおり
+  進めてください。それを理由にPR作成自体をブロックする必要はありません。
   実際に開けるプレビューURLの発行（Fly.io Machines上へのデプロイ、`.github/workflows/
   deploy-preview.yml`、#831）は、このClaude Codeステップとは別のジョブ
   （`deploy-preview`・`notify-preview-url`）がこのステップの完了後に自動的に行い、

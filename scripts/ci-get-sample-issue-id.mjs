@@ -8,12 +8,12 @@
 // mobile-issue-detailの撮影がホーム画面にフォールバックしていた。develop側で#550として、
 // このブランチ側で#571として同じ不具合を独立に修正していた）。
 //
-// Issue #717: 従来は番号最小のIssue（#1、ラベルは`bug`のみ）を選んでいたが、実装状況ラベル
-// （01.planning〜09.main）が一切付いていないため、mobile-issue-detailの撮影対象として使うと
+// Issue #717: 従来は番号最小のIssue（#1、ラベルは`bug`のみ）を選んでいたが、進捗
+// （Project Status）を持たないため、mobile-issue-detailの撮影対象として使うと
 // WorkflowStatusSteps（進捗ステップ表示）がスクロール位置に関わらず常に非表示になり、
 // 進捗ステップ周りの変更をスクリーンショットで確認できなかった。scripts/seed-ci-db.mjsが
-// 末尾（番号最大）に追加する承認待ちカード確認用ダミーIssue（#688）は実装状況ラベルが
-// 付いているため、番号最大のIssueを選ぶことで進捗ステップ表示も撮影対象に含める。
+// 末尾（番号最大）に追加する承認待ちカード確認用ダミーIssue（#688）は`Develop PR`の
+// Statusを持つため、番号最大のIssueを選ぶことで進捗ステップ表示も撮影対象に含める。
 //
 // 使い方: DATABASE_URL=mysql://... node scripts/ci-get-sample-issue-id.mjs
 // 出力: 見つかったIssueのgithubIssueId（1件）を標準出力に1行で出力する。

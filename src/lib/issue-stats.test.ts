@@ -339,12 +339,12 @@ describe("time-dependent stats", () => {
       expect(filterIssuesByView(issues, "all", null)).toHaveLength(2);
     });
 
-    it("ラベルベースのビューは該当ラベルを持つIssueのみ返す", () => {
+    it("定型ビューは該当する進捗・ラベルを持つIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-        makeIssue({ id: "2", labels: [{ name: "02.wip", color: "blue", description: null }] }),
-        makeIssue({ id: "3", labels: [{ name: "03.d:marge", color: "blue", description: null }] }),
-        makeIssue({ id: "4", labels: [{ name: "07.m:marge", color: "blue", description: null }] }),
+        makeIssue({ id: "2", projectStatus: "Implementation" }),
+        makeIssue({ id: "3", projectStatus: "Develop PR" }),
+        makeIssue({ id: "4", projectStatus: "Release" }),
         makeIssue({ id: "5", labels: [] }),
       ];
       expect(filterIssuesByView(issues, "check-user", null).map((issue) => issue.id)).toEqual(["1"]);
@@ -357,13 +357,13 @@ describe("time-dependent stats", () => {
       ]);
     });
 
-    it("view=in-progressは実装状況ラベルを持たなくてもqaAnswerPendingAtが立っていれば返す", () => {
+    it("view=in-progressは進捗が進んでいなくてもqaAnswerPendingAtが立っていれば返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [], qaAnswerPendingAt: "2026-01-09T00:00:00.000Z" }),
         makeIssue({ id: "2", labels: [], qaAnswerPendingAt: null }),
         makeIssue({
           id: "3",
-          labels: [{ name: "09.main", color: "green", description: null }],
+          projectStatus: "Done",
           qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
         }),
       ];
@@ -373,12 +373,12 @@ describe("time-dependent stats", () => {
       ]);
     });
 
-    it("view=not-startedは実装状況ラベル・00.check-userのいずれも持たないIssueのみ返す", () => {
+    it("view=not-startedは進捗がReadyかつ00.check-userを持たないIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [] }),
         makeIssue({ id: "2", labels: [{ name: "00.check-user", color: "red", description: null }] }),
-        makeIssue({ id: "3", labels: [{ name: "02.wip", color: "blue", description: null }] }),
-        makeIssue({ id: "4", labels: [{ name: "09.main", color: "green", description: null }] }),
+        makeIssue({ id: "3", projectStatus: "Implementation" }),
+        makeIssue({ id: "4", projectStatus: "Done" }),
         makeIssue({
           id: "5",
           labels: [{ name: "51.improvement", color: "purple", description: null }],
@@ -391,21 +391,21 @@ describe("time-dependent stats", () => {
     });
 
     it("view=recently-mergedはリポジトリごとに最新リリース分のみ返す", () => {
-      const mainLabel = { name: "09.main", color: "green", description: null };
+      const doneStatus = "Done";
       const issues = [
         // owner/repo-a の最新リリース（同一workflow run内で連続close）
         makeIssue({
           id: "1",
           repositoryFullName: "owner/repo-a",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-09T10:00:00.000Z",
         }),
         makeIssue({
           id: "2",
           repositoryFullName: "owner/repo-a",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-09T10:00:20.000Z",
         }),
         // owner/repo-a の1つ前のリリース
@@ -413,7 +413,7 @@ describe("time-dependent stats", () => {
           id: "3",
           repositoryFullName: "owner/repo-a",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-05T10:00:00.000Z",
         }),
         // 別リポジトリは別リリースとして扱う
@@ -421,10 +421,10 @@ describe("time-dependent stats", () => {
           id: "4",
           repositoryFullName: "owner/repo-b",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-02T10:00:00.000Z",
         }),
-        // 09.mainがないclose済みIssueは対象外
+        // Doneではないclose済みIssueは対象外
         makeIssue({ id: "5", state: "closed", closedAt: "2026-01-09T10:00:10.000Z" }),
       ];
       expect(filterIssuesByView(issues, "recently-merged", null).map((issue) => issue.id)).toEqual([
@@ -435,17 +435,17 @@ describe("time-dependent stats", () => {
     });
 
     it("view=recently-mergedの基準時刻は絞り込み前の集合から求める", () => {
-      const mainLabel = { name: "09.main", color: "green", description: null };
+      const doneStatus = "Done";
       const latest = makeIssue({
         id: "1",
         state: "closed",
-        labels: [mainLabel],
+        projectStatus: doneStatus,
         closedAt: "2026-01-09T10:00:00.000Z",
       });
       const previous = makeIssue({
         id: "2",
         state: "closed",
-        labels: [mainLabel],
+        projectStatus: doneStatus,
         closedAt: "2026-01-05T10:00:00.000Z",
       });
       // 検索などで最新リリース分が絞り込まれて消えても、古いリリース分は現れない
@@ -489,7 +489,7 @@ describe("time-dependent stats", () => {
         makeIssue({
           id: "2",
           state: "closed",
-          labels: [{ name: "09.main", color: "green", description: null }],
+          projectStatus: "Done",
           closedAt: "2026-01-09T10:00:00.000Z",
         }),
       ];
@@ -501,7 +501,7 @@ describe("time-dependent stats", () => {
 
   describe("computeOverviewStats", () => {
     it("確認待ち件数・24時間以内の本番反映件数・オープンIssue件数を返す", () => {
-      const mainLabel = { name: "09.main", color: "green", description: null };
+      const doneStatus = "Done";
       const checkUserLabel = { name: "00.check-user", color: "red", description: null };
       const issues = [
         makeIssue({ id: "1", state: "open", labels: [checkUserLabel] }),
@@ -509,17 +509,17 @@ describe("time-dependent stats", () => {
         makeIssue({
           id: "3",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-09T12:00:00.000Z",
         }),
         // 24時間より前にcloseされた分は「24時間以内の本番反映」から除外
         makeIssue({
           id: "4",
           state: "closed",
-          labels: [mainLabel],
+          projectStatus: doneStatus,
           closedAt: "2026-01-08T00:00:00.000Z",
         }),
-        // 09.mainラベルが無いclose済みIssueは「24時間以内の本番反映」から除外
+        // Doneではないclose済みIssueは「24時間以内の本番反映」から除外
         makeIssue({
           id: "5",
           state: "closed",

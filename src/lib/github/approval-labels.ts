@@ -1,14 +1,6 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { commentAgentRole, resolveCommentSource } from "@/lib/github/comment-source";
-import {
-  DEVELOP_MERGED_LABEL_NAME,
-  MAIN_MERGED_LABEL_NAME,
-  PLANNING_LABEL_NAME,
-  WIP_LABEL_NAME,
-  getWorkflowStepIndex,
-  WORKFLOW_STEPS,
-} from "@/lib/github/workflow-status";
-import type { ProgressSource } from "@/lib/issue-progress";
+import { resolveProgressStatus, type ProgressSource, type ProgressStatusKey } from "@/lib/issue-progress";
 import type { IssueComment, IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
@@ -46,12 +38,6 @@ function withNoTriggerMarkerIfPlanPending(labels: IssueLabel[], body: string): s
   return isPlanApprovalPending(labels) ? `${body}\n${NO_TRIGGER_MARKER}` : body;
 }
 
-/** developへのPR作成・マージ中であることを示すワークフロー状況ラベル */
-const D_MARGE_LABEL = "03.d:marge";
-
-/** mainへのPR作成・マージ中であることを示すワークフロー状況ラベル */
-const M_MARGE_LABEL = "07.m:marge";
-
 export function isApprovalPending(labels: IssueLabel[]): boolean {
   return labels.some((label) => label.name === CHECK_USER_LABEL);
 }
@@ -70,6 +56,11 @@ export function isQaOnlyApprovalPending(labels: IssueLabel[]): boolean {
 export type LabelFilterPreset = {
   key: LabelNavViewId;
   label: string;
+  /**
+   * このいずれかのラベルが付いているIssueに絞り込む（OR一致）。
+   * **進捗はラベルではなくStatusで表すため（#991 Phase 5）、ここに指定するのは
+   * 条件系ラベル（`00.check-user`）だけ**になった。進捗による絞り込みは`statuses`を使う。
+   */
   labels: string[];
   /**
    * このいずれかのラベルが付いているIssueを除外する（labelsとは逆にAND条件）。
@@ -77,8 +68,13 @@ export type LabelFilterPreset = {
    */
   excludeLabels?: string[];
   /**
+   * このいずれかの進捗状態にあるIssueに絞り込む（OR一致）。
+   * 判定は`resolveProgressStatus`（＝Project Status）を通す。
+   */
+  statuses?: ProgressStatusKey[];
+  /**
    * プリセット選択時に適用するstateフィルター（省略時はstateを変更しない）。
-   * 09.mainはマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
+   * `Done`（本番反映済）はマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」プリセットはデフォルトのopen絞り込みのままだと該当issueが
    * 出てこない。
    */
@@ -86,9 +82,14 @@ export type LabelFilterPreset = {
 };
 
 /**
- * 運用ラベルに基づく定型の絞り込みプリセット。
+ * 定型の絞り込みプリセット。
  * サイドメニュー・スマホのクイックビューでは、これをビュー（viewクエリ）として扱う
  * （@/lib/nav-views の labelNavViews）。
+ *
+ * **進捗による絞り込みはProject Statusを見る（#991 Phase 5・#1010）。** Phase 1では
+ * 影響範囲の広さからラベル配列マッチのまま据え置いていたが、進捗ラベルの廃止にあわせて移した。
+ * 「ユーザーの確認待ち」だけはラベル（`00.check-user`）が引き続き判断材料で、これは
+ * 進捗（今どこにいるか）ではなく条件（どんな性質があるか）を表すため。
  */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
@@ -96,30 +97,34 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
     key: "not-started",
     label: "未着手",
     labels: [],
-    excludeLabels: [CHECK_USER_LABEL, ...WORKFLOW_STEPS.map((step) => step.labelName)],
+    excludeLabels: [CHECK_USER_LABEL],
+    statuses: ["ready"],
   },
   {
     key: "in-progress",
     label: "実行中",
-    labels: [PLANNING_LABEL_NAME, WIP_LABEL_NAME, D_MARGE_LABEL],
+    labels: [],
+    statuses: ["planning", "implementation", "develop-pr"],
   },
   {
     key: "release-pending",
     label: "本番反映待ち",
-    labels: [DEVELOP_MERGED_LABEL_NAME, M_MARGE_LABEL],
+    labels: [],
+    statuses: ["develop", "release"],
   },
   {
     key: "recently-merged",
     label: "直近本番に反映した",
-    labels: [MAIN_MERGED_LABEL_NAME],
+    labels: [],
+    statuses: ["done"],
     state: "all",
   },
 ];
 
 /**
  * 現在選択中のラベル集合が、指定したプリセットとちょうど一致しているかを判定する。
- * excludeLabelsのみで定義されるプリセット（「未着手」など）はlabels配列（選択中ラベルの
- * トグル）では表現できないため、常に非アクティブとして扱う。
+ * ラベルを持たないプリセット（進捗Statusで定義されるもの・「未着手」など）はlabels配列
+ * （選択中ラベルのトグル）では表現できないため、常に非アクティブとして扱う。
  */
 export function isLabelFilterPresetActive(labels: string[], preset: LabelFilterPreset): boolean {
   if (preset.labels.length === 0) return false;
@@ -146,29 +151,27 @@ export function resolveLabelFilterPresetSelection(
 }
 
 /**
- * 00.check-userかつワークフロー状況が03.d:marge/07.m:margeの場合、または直近のbotコメントが
+ * 00.check-userかつ進捗が`Develop PR`/`Release`の場合、または直近のbotコメントが
  * claude-review-develop（レビューボット）発の場合、PRマージ待ち（GitHub上で人間が直接マージ
  * する必要があり、@claudeコメントでの再開対象ではない）と判定する。
  *
- * ワークフロー状況ラベルだけでは判定できないケースがある（#728）。「additional」モードの
- * 再開時、実装エージェントは着手直後に03.d:marge→02.wipへラベルを戻すが、それより後に
- * 発生する追加コミットのpushをトリガーとしたclaude-review-develop.ymlのレビュー
- * （00.check-user付与）は、実装エージェントがPR作成・03.d:margeへの復帰を終える前に
- * 完了しうる。この間issueのラベルは一時的に02.wipのままなため、ラベルだけを見ると
- * 「PRマージ待ち」と判定できず、承認ボタンを押すと本来のPRマージ待ち文言ではなく
- * 「実装を進めてください」という汎用の確認文言が投稿されてしまう。直近のbotコメントの
- * 発信元（レビューボットかどうか）を見ることで、ラベルの一時的な状態に依存せず判定する。
+ * 進捗だけでは判定できないケースがある（#728）。「additional」モードの再開時、実装は
+ * 着手直後に`Develop PR`→`Implementation`へ戻るが、それより後に発生する追加コミットの
+ * pushをトリガーとしたclaude-review-develop.ymlのレビュー（00.check-user付与）は、
+ * PR作成・`Develop PR`への復帰を終える前に完了しうる。この間の進捗は一時的に
+ * `Implementation`のままなため、進捗だけを見ると「PRマージ待ち」と判定できず、承認ボタンを
+ * 押すと本来のPRマージ待ち文言ではなく「実装を進めてください」という汎用の確認文言が
+ * 投稿されてしまう。直近のbotコメントの発信元（レビューボットかどうか）を見ることで、
+ * 進捗の一時的な状態に依存せず判定する。
  */
 export function isMergeApprovalPending(
-  issue: ProgressSource,
+  issue: ProgressSource & { labels: IssueLabel[] },
   comments: Pick<IssueComment, "body" | "author">[] = [],
 ): boolean {
   if (!isApprovalPending(issue.labels)) return false;
   if (isLatestSourcedCommentFromReviewer(comments)) return true;
-  const stepIndex = getWorkflowStepIndex(issue);
-  if (stepIndex === null) return false;
-  const stepLabel = WORKFLOW_STEPS[stepIndex].labelName;
-  return stepLabel === D_MARGE_LABEL || stepLabel === M_MARGE_LABEL;
+  const status = resolveProgressStatus(issue);
+  return status === "develop-pr" || status === "release";
 }
 
 /** コメント配列を末尾から走査し、発信元を特定できる直近のbotコメントがレビューボット発かどうかを判定する */
