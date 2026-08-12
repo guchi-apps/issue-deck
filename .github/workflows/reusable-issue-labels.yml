@@ -277,12 +277,24 @@ jobs:
             echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
             exit 0
           fi
-          body="$(curl -sS -m 20 \
+          body_file="${RUNNER_TEMP:-/tmp}/progress-develop-pr.json"
+          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr")" || body=""
-          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr")" || code=000
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
+          # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
+          # issueが1件もcloseされない」が正常系と見分けられなくなる。
+          if [ "$code" != "200" ]; then
+            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
           if [ -z "$numbers" ]; then
-            echo "Develop PR にいるopenなissueはありません（またはissue-deckへ問い合わせできませんでした）"
+            echo "Develop PR にいるopenなissueはありません（対象なしのため何もしません）"
             exit 0
           fi
 
@@ -359,12 +371,24 @@ jobs:
             echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
             exit 0
           fi
-          body="$(curl -sS -m 20 \
+          body_file="${RUNNER_TEMP:-/tmp}/progress-develop.json"
+          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop")" || body=""
-          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop")" || code=000
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
+          # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
+          # issueが1件もcloseされない」が正常系と見分けられなくなる。
+          if [ "$code" != "200" ]; then
+            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
           if [ -z "$numbers" ]; then
-            echo "Develop にいるopenなissueはありません（またはissue-deckへ問い合わせできませんでした）"
+            echo "Develop にいるopenなissueはありません（対象なしのため何もしません）"
             exit 0
           fi
           {
@@ -435,12 +459,24 @@ jobs:
             echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
             exit 0
           fi
-          body="$(curl -sS -m 20 \
+          body_file="${RUNNER_TEMP:-/tmp}/progress-done.json"
+          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || body=""
-          numbers="$(printf '%s' "$body" | jq -r 'select(.available == true) | .issues[]' 2>/dev/null || true)"
+            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || code=000
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
+          # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
+          # issueが1件もcloseされない」が正常系と見分けられなくなる。
+          if [ "$code" != "200" ]; then
+            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
+            exit 0
+          fi
+          numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
           if [ -z "$numbers" ]; then
-            echo "::warning::本番反映の対象issueを特定できませんでした（Develop・Releaseにopenなissueが無いか、issue-deckへ問い合わせできませんでした）"
+            echo "Develop・Releaseにopenなissueはありません（対象なしのため何もしません。今回のリリースに紐づくissueが無い場合に起きます）"
             exit 0
           fi
 
