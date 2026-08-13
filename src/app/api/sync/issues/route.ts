@@ -6,6 +6,15 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
 import { addMissingProjectItems, syncProjectStatuses } from "@/lib/github/sync-project-status";
 
+// 再同期の失敗。kindで由来を区別する（#1141）。
+// - repository: そのリポジトリのIssue取り込みが失敗した。syncedから差し引く
+// - projects-v2: インストール単位のProject連携が失敗した。リポジトリ横断のためsyncedには影響しない
+type SyncError = {
+  kind: "repository" | "projects-v2";
+  repo: string;
+  message: string;
+};
+
 export function POST() {
   return withGithubApiFeature("sync", () => handlePOST());
 }
@@ -21,13 +30,19 @@ async function handlePOST() {
     include: { installation: true },
   });
 
+  // **リポジトリ単位の失敗とインストール単位の失敗を分けて持つ（#1141）。**
+  // 混ぜて数えると、Project連携が1件落ちただけで同期できたリポジトリ数まで減って見える
+  // （リポジトリが1つの環境では 1 - 1 = 0 になり「1つも同期できなかった」と表示される）。
+  const repositoryErrors: SyncError[] = [];
+  const projectErrors: SyncError[] = [];
+
   // 全リポジトリを並列実行するとMariaDBへの書き込みが競合しデッドロックするため、1件ずつ順番に処理する。
-  const errors: { repo: string; message: string }[] = [];
   for (const repo of repositories) {
     try {
       await syncRepositoryIssues(repo);
     } catch (error) {
-      errors.push({
+      repositoryErrors.push({
+        kind: "repository",
         repo: repo.fullName,
         message: error instanceof Error ? error.message : String(error),
       });
@@ -63,12 +78,20 @@ async function handlePOST() {
       if (backfill.skipped) break;
     } catch (error) {
       // Project連携が失敗してもIssueの再同期自体は成功しているため、全体を失敗にはしない
-      errors.push({
+      projectErrors.push({
+        kind: "projects-v2",
+        // リポジトリ横断の失敗のため、特定のリポジトリ名は持たない。画面側は kind を見て
+        // 「Project連携」と表示する
         repo: "projects-v2",
         message: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  return NextResponse.json({ synced: repositories.length - errors.length, errors });
+  // syncedはリポジトリ単位の失敗だけを差し引く。errorsは呼び出し側が両方を表示できるよう
+  // 連結して返す（kindで区別できる）。
+  return NextResponse.json({
+    synced: repositories.length - repositoryErrors.length,
+    errors: [...repositoryErrors, ...projectErrors],
+  });
 }
