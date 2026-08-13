@@ -24,7 +24,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 上から順に実行すればよい。
 
 1. [対象リポジトリの構成を調べ、5つの設定値を決める](#0-最初に決める5つの設定値)
-2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの5つは**コピーせず参照**、残りはコピーして改変）
+2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの5つは**コピーせず参照**、残りはコピーして改変）。**素の`claude.yml`があれば削除する**
 3. [ラベル体系](#2-ラベル体系)を作成する（**旧世代のラベルがある場合は、進捗を控えてから消す**）
 4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
 5. [Secrets](#4-secrets)を登録する
@@ -164,6 +164,125 @@ jobs:
 | `minimal` | 素のJS・依存パッケージなし | なし |
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
+
+**判定は`prisma/`の有無で足りる。** `portfolio`（#1047の5周目）はNext.jsだが`prisma/`が無く、
+`node`を選んだ。`--if-present`があるので`node-db`にしても壊れはしないが、MySQLサービス
+コンテナの起動とマイグレーションの待ち時間が毎回乗るため、DBを使わないなら`node`にする。
+**`node`では`database-name`は使われない**ので、指定せずに省く。
+
+### 実装ステップが実行できるコマンド（許可リスト）
+
+**無人実行のClaude Codeは許可リスト方式で、載っていないコマンドは拒否される。** 検証コマンドが
+実行できるかは、`package.json`にscriptがあるかどうかとは別の話になる。
+
+| 種別 | 許可されているもの |
+|---|---|
+| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`・`npx`、そうでなければ`npm`・`node` |
+| Python | `python`・`python3`・`pip`・`pip3`・`pytest`（常時） |
+| その他 | `git`・`gh`・`curl`・`grep`・`find`、`Edit`・`Write`・`Read`・`Grep`・`Glob` |
+
+**この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
+`reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
+allowed-tools.test.ts`が一致をテストしている。
+
+**Pythonはランナー標準のものを使う。** `setup-python`は入れていないため、CIが
+`actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える
+必要が出たら`runtime-setup`のプリセット追加を検討する。
+
+これ以外のコマンド（`make`・`cargo`・`go`・`docker`等）が要るリポジトリは、そのままでは
+検証できない。導入時に`package.json`・CI設定を見て、**検証コマンドが上の表に収まるかを
+確認する**こと。収まらない場合は許可リストの拡張が必要になる。
+
+**`minimal`は「Nodeを使わない」という意味ではない。** `solitaire`（#1047の6周目）は
+`npm test`（`node --test tests`）でテストするが`minimal`を選んだ。判定基準は**依存パッケージと
+ロックファイルの有無**であって、Nodeを使うかどうかではない。依存ゼロのリポジトリで`node`を
+選ぶと、ロックファイルが無い状態で`npm ci`が走って失敗する。
+
+`node-version`は`runtime-setup`と独立した軸で、`cache:`を付けずに`actions/setup-node`を
+呼ぶだけなので、**ロックファイルが無くても`minimal`と併用できる**。CIとNodeのバージョンを
+揃えたいだけなら`node`へ格上げする必要はない。
+
+なお`minimal`ではPlaywrightがインストールされないため、**`24.screenshot-required`は無人実行では
+成立しない**。ラベル自体は残しつつ、ローカル実行専用として扱う旨をCLAUDE.mdへ書いておく。
+
+### 素の Claude Code ワークフローがある場合は削除する
+
+`/install-github-app` を実行したことのあるリポジトリには、`claude.yml`・`claude-code-review.yml`
+が残っていることがある。**マルチエージェント運用のものではなく、そのままだと二重起動する。**
+
+```yaml
+# claude.yml（素）
+on:
+  issue_comment:
+    types: [created]
+if: contains(github.event.comment.body, '@claude')
+```
+
+`claude-issue-dispatch.yml` も同じ `issue_comment` で起動するため、**1つのコメントで Claude が
+2回走る。** トークンを倍消費するうえ、2つの Claude が同じIssue・同じブランチを触って競合しうる。
+
+さらに `claude.yml` は `contains` 判定である点が厄介で、**マルチエージェント運用が投稿する
+進捗コメントや計画コメントの本文に `@claude` が含まれるだけでも反応する。** 意図しない起動が
+連鎖する余地がある。
+
+`claude-code-review.yml` は `pull_request` 起点で `claude-issue-dispatch.yml` とは重ならないが、
+`claude-review-develop.yml` を入れる場合は重複する。運用を一本化するなら、あわせて削除する。
+
+導入時に確認する。
+
+```bash
+gh api repos/guchi-apps/my-app/contents/.github/workflows --jq '.[].name'
+```
+
+削除したら、**再導入されないよう `CLAUDE.md` に理由を残す。** `/install-github-app` を
+もう一度実行すると復活するため。
+
+> `subscription-lists`（#1047の3周目）で実際に踏んだ。削除後に`@claude`コメントを投げて、
+> `issue_comment`で起動したワークフローが`Claude Issue Dispatch`の1つだけであることを確認した。
+
+### npm scriptが揃っていなくても導入できる
+
+**「共有ワークフローが期待するnpm scriptを持たないリポジトリは導入が難しい」と考えなくてよい。**
+実際にワークフローが呼ぶのは上記2つだけで、しかも次の二重の条件が付く。
+
+- `24.screenshot-required` が付いたIssueの実行でのみ走る（通常の実装では呼ばれない）
+- `--if-present` で保護されている（無ければ何もせず成功する）
+
+`test`・`typecheck`・`lint` はワークフローからは呼ばれない。プロンプト（`implement.md`）が
+「テスト・Lint・型チェック・ビルドを実行する」と指示するだけなので、**実行するコマンドは
+そのリポジトリの実態に合わせればよい。**
+
+したがって**scriptを増やして横並びに揃える必要は無い。** 代わりに、そのリポジトリの
+検証コマンドを`CLAUDE.md`（または`AGENTS.md`）へ明記する。エージェントは存在しない
+コマンドを探さずに済む。
+
+> `car-care`（#1047の2周目）は`test`・`typecheck`・`db:migrate:deploy`のいずれも持たないが、
+> callerの値は`meisai-lab`（すべて持つ）と完全に同一（`node-db`/`npm`/`20.19`）で済んだ。
+> 適応が必要だったのは`AGENTS.md`に検証コマンド（`lint`・`build:ci`）を書くことだけ。
+
+**ラッパー付きのコマンドがある場合は、CI向けの素の方を書く。** ローカル用のコマンドは
+`.env`を要求するため、CI・無人実行では落ちる。どちらが素かは**リポジトリごとに違う**ので、
+名前から推測せず`package.json`を見る。
+
+| リポジトリ | 素（CI・無人実行向け） | ラッパー付き（ローカル用） | ラッパーの中身 |
+|---|---|---|---|
+| `car-care` | `build:ci` | `build` | `scripts/with-local-env.sh` |
+| `asset-manager` | **`build`** | **`build:local`** | `scripts/with-local-env.sh` |
+| `portfolio` | **`build`** | **`build:local`** | **`op run --env-file=.env.tpl`（1Password CLI）** |
+
+**同じ`build`という名前で意味が逆**になっている。`asset-manager`にはさらに`check`
+（`lint && typecheck && build:local`）があり、一見まとめて検証できそうだが`build:local`を
+含むため無人実行では使えない。**「便利そうなまとめコマンド」ほど確認する。**
+
+**ラッパーの中身によって失敗の仕方が変わる。** `with-local-env.sh`系は`.env`が無いことで
+落ちるが、`portfolio`の`op run`は**`op`コマンド自体がrunnerに無い**ため`command not found`
+で落ちる。後者はエラーメッセージからは環境変数の問題に見えないので、`package.json`を先に
+読んでおかないと原因の切り分けに時間を取られる。
+
+**検証コマンドが`lint`と`build`だけのリポジトリもある**（`portfolio`）。`typecheck`・`test`が
+無いこと自体は問題ではない（ワークフローが呼ぶのは`--if-present`で保護されたDB系だけ）が、
+CLAUDE.mdに**無いことを明記**しておかないと、エージェントが存在しないコマンドを探して
+`package.json`を読み直す往復が発生する。
 
 #### プロンプトの取得元（`prompts-ref`）
 
