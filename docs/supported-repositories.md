@@ -23,6 +23,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/shopping-list` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #357, #723, #895, #942, #1129 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
 | `guchi-apps/dayspan` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #971, #1129 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
 | `guchi-apps/meisai-lab` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1051, guchi-apps/meisai-lab#69 | #1047の1周目。Next.js + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`は入れていない（無人実装はdispatchだけで成立するため1周目はスコープを絞った。必要になれば参照方式で追加できる）。導入前は旧世代のラベル体系で、`05.develop`が付いていた#66の進捗は削除前に控えて書き戻した |
+| `guchi-apps/car-care` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1050, guchi-apps/car-care#32 | #1047の2周目。Next.js + Prisma 7 + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。**`test`・`typecheck`のnpm scriptを持たない**が、ワークフローが呼ぶのは`db:migrate:deploy`・`db:seed:ci`（どちらも`24.screenshot-required`付きの実行のみ・`--if-present`で保護）だけのため実害は無く、scriptを足さずAGENTS.mdへ実際の検証コマンド（`lint`・`build:ci`）を書く形にした。`npm run build`は`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行は`build:ci`を使う点も明記 |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
@@ -49,6 +50,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/dayspan` | v1 |
 | `guchi-apps/shopping-list` | — |
 | `guchi-apps/meisai-lab` | — |
+| `guchi-apps/car-care` | — |
 
 **この表は要約であって真実の源ではない。** 正はマーカー行そのもので、次のコマンドが実態を読む。
 
