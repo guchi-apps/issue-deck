@@ -113,10 +113,38 @@ describe("POST /api/sync/issues", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.errors).toEqual([{ repo: "projects-v2", message: "boom" }]);
-    // `synced`は`repositories.length - errors.length`で数えており、リポジトリ単位の失敗と
-    // Project連携の失敗を区別していない。そのためProject側が1件落ちると、実際には同期できた
-    // リポジトリ数まで1つ減って見える（1 - 1 = 0）。現在の挙動としてここに固定しておく
+    expect(body.errors).toEqual([{ kind: "projects-v2", repo: "projects-v2", message: "boom" }]);
+    // **Project連携の失敗はsyncedから差し引かない（#1141）。** インストール単位・リポジトリ
+    // 横断の失敗であり、Issueの取り込み自体は全リポジトリで成功しているため。
+    // 以前は`repositories.length - errors.length`で数えていて、リポジトリが1つの環境では
+    // 1 - 1 = 0 になり「1つも同期できなかった」と表示されていた
+    expect(body.synced).toBe(1);
+  });
+
+  it("リポジトリ単位の失敗はsyncedから差し引く", async () => {
+    syncRepositoryIssues.mockRejectedValue(new Error("repo failed"));
+
+    const response = await POST();
+    const body = await response.json();
+
     expect(body.synced).toBe(0);
+    expect(body.errors).toEqual([
+      { kind: "repository", repo: "guchi-apps/car-care", message: "repo failed" },
+    ]);
+  });
+
+  it("両方が失敗した場合、syncedはリポジトリ単位の失敗だけを反映する", async () => {
+    syncRepositoryIssues.mockRejectedValue(new Error("repo failed"));
+    syncProjectStatuses.mockRejectedValue(new Error("boom"));
+
+    const response = await POST();
+    const body = await response.json();
+
+    expect(body.synced).toBe(0);
+    // リポジトリ単位の失敗が先、Project連携の失敗が後の順で並ぶ
+    expect(body.errors.map((error: { kind: string }) => error.kind)).toEqual([
+      "repository",
+      "projects-v2",
+    ]);
   });
 });
