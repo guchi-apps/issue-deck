@@ -1,0 +1,102 @@
+name: Propagate workflow tag
+
+# 共有ワークフローの参照タグ（`@workflows/vN`）を、展開済みの他リポジトリへ配るPRを作成する（#1173）。
+#
+# **なぜ要るか。** 共有ワークフローは`uses:`のタグ固定で配っているため、issue-deck側を直しても
+# 各リポジトリのcallerを上げるまで反映されない。上げ忘れても何も起きないので気づけない。
+# 実際`workflows/v10`はcar-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が
+# 届いていない状態）。検知は#985/PR #1170で画面に出るようにした。ここはその次の段階で、
+# 検知した対象へPRを作るところまでを自動化する。
+#
+# **マージは自動化しない。** Actionsの変更はCLAUDE.mdの自動マージ不可カテゴリに該当する。
+# v12の展開でも、PRを見る過程で.gitignoreの漏れ（#1151）に気づいている。
+#
+# **対象は呼び出し元（issue-deckの画面）が決めて渡す。** ここで再検知すると、画面の表示と
+# 実際の対象がずれる。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "配布するタグ（例: workflows/v12）"
+        required: true
+        type: string
+      repositories:
+        description: '対象リポジトリのJSON配列（例: ["guchi-apps/car-care"]）'
+        required: true
+        type: string
+
+concurrency:
+  # 同じタグの配布が重なると、同じ番号のIssueへ二重にPRを作りうる
+  group: propagate-workflow-tag
+  cancel-in-progress: false
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 入力を検証する
+        env:
+          TAG: ${{ inputs.tag }}
+          REPOSITORIES: ${{ inputs.repositories }}
+        run: |
+          set -euo pipefail
+
+          # タグ名はブランチ操作とsedの置換文字列に入るため、形式を固定して通す
+          if ! printf '%s' "$TAG" | grep -qE '^workflows/v[0-9]+$'; then
+            echo "::error::tag の形式が不正です: $TAG（workflows/vN 形式のみ）"
+            exit 1
+          fi
+
+          if ! printf '%s' "$REPOSITORIES" | jq -e 'type == "array" and length > 0' >/dev/null; then
+            echo "::error::repositories は空でないJSON配列である必要があります"
+            exit 1
+          fi
+
+          # owner/repo 以外を弾く。ここを緩めるとgh apiの宛先を任意に指定できてしまう
+          if ! printf '%s' "$REPOSITORIES" | jq -e 'all(test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))' >/dev/null; then
+            echo "::error::repositories に owner/repo 形式でない要素が含まれています"
+            exit 1
+          fi
+
+      - name: 配布先が実在するタグかを確認する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # 存在しないタグを配ると、参照先が解決できずワークフローが起動しなくなる
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG は ${{ github.repository }} に存在しません"
+            exit 1
+          fi
+
+      - name: 各リポジトリへPRを作成する
+        env:
+          # 他リポジトリの .github/workflows/ を変更するため、workflow権限を持つPATが要る
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          TAG: ${{ inputs.tag }}
+          REPOSITORIES: ${{ inputs.repositories }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          git config --global user.name "Claude Code"
+          git config --global user.email "claude-code@example.com"
+
+          FAILED=0
+          for REPO in $(printf '%s' "$REPOSITORIES" | jq -r '.[]'); do
+            echo "::group::$REPO"
+
+            # 1リポジトリの失敗で全体を止めない。残りは配れるほうがよい
+            if ! bash "$GITHUB_WORKSPACE/.github/scripts/propagate-workflow-tag.sh" "$REPO" "$TAG" "$SOURCE_REPOSITORY"; then
+              echo "::warning::$REPO への配布に失敗しました"
+              FAILED=$((FAILED + 1))
+            fi
+
+            echo "::endgroup::"
+          done
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED 件のリポジトリで失敗しました"
+            exit 1
+          fi
