@@ -1569,26 +1569,40 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      # ここから7ステップはランタイム準備。呼び出し元リポジトリの技術スタックによって
-      # 要否が変わるため、inputs.runtime-setup / inputs.package-manager で出し分ける(#945)。
-      # いずれもスクリーンショット撮影(scripts/capture-issue-screenshots.sh)でのみ使われる(#258)。
-      # 撮影しない`24.screenshot-required`無しのissueでは無駄なため、screenshot_requiredでも絞る(#319)。
-      - name: Setup pnpm（DBセットアップ用）
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
+      # ここからはランタイム準備。呼び出し元リポジトリの技術スタックによって要否が変わるため、
+      # inputs.runtime-setup / inputs.package-manager で出し分ける(#945)。
+      #
+      # **パッケージマネージャの用意と依存インストールは、撮影の有無によらず常に行う(#931)。**
+      # 以前は「撮影(scripts/capture-issue-screenshots.sh)でのみ使う」という前提で
+      # screenshot_requiredでも絞っていた(#258, #319)が、実装エージェント自身が
+      # lint/typecheck/test/buildを実行するために依存関係を必要とする。
+      #
+      # 絞っていた結果どうなったかの実測(#931のベースライン、issue-deck #1115のrun):
+      # node_modulesが無い状態で起動し、エージェントがpnpmを用意しようとして
+      # corepack・npm・シムの直接実行を10回試し、すべて権限拒否されて詰んだ。
+      # 76ターン・10分を費やしてコード変更ゼロで停止している。
+      # pnpmのリポジトリでは特に致命的で、pnpm自体がランナーに無いため、
+      # allowedToolsにBash(pnpm:*)があっても実行するものが存在しない。
+      #
+      # マイグレーション・シード・Playwrightは撮影でのみ使うため、引き続きscreenshot_requiredで絞る。
+      - name: Setup pnpm（実装ステップ用）
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node.js（DBセットアップ用）
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
+      - name: Setup Node.js（依存インストール用）
+        # 上の「Setup Node.js（実装ステップ用）」とはキャッシュ設定が異なる。あちらは
+        # node-versionの固定だけを目的にcache無しで呼ぶが、こちらは依存インストールの
+        # キャッシュを効かせる。同じバージョンの再実行はキャッシュヒットで数秒。
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ inputs.package-manager }}
 
-      - name: 依存関係をインストールする（DBセットアップ用）
-        # 後続のマイグレーション・シードスクリプト実行に必要。実装エージェント自身も
-        # lint/typecheck/build実行のため依存関係をインストールするが、ここで先に済ませておくことで
-        # ロックファイルどおりの依存関係でマイグレーション・シードを確実に実行する。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
+      - name: 依存関係をインストールする
+        # 実装エージェントがlint・typecheck・test・buildを実行するために必要(#931)。
+        # 撮影時のマイグレーション・シードもこれに依存する。
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal'
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
@@ -1763,8 +1777,15 @@ jobs:
           # ランナー標準のPythonを使うため、CIがsetup-pythonで固定しているバージョンと
           # ズレる可能性がある。厳密に揃える必要が出たらruntime-setupのプリセット追加を
           # 検討する。
+          #
+          # ls・cat・head・tail・wcは状態確認のための読み取り専用コマンド(#931)。
+          # 実測では `ls node_modules/.bin/playwright`・`cat .claude/settings.json` が
+          # 拒否されており、いずれも「今どうなっているか」を見るだけの操作だった。
+          # 書き込み・削除系(mkdir・rm・mv)は足していない。一時ファイルは既存の /tmp 直下へ
+          # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
+          # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
           claude_args: |
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: ${{ env.PROMPT_IMPLEMENT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（実装・PR作成））

@@ -425,8 +425,15 @@ jobs:
           # ランナー標準のPythonを使うため、CIがsetup-pythonで固定しているバージョンと
           # ズレる可能性がある。厳密に揃える必要が出たらruntime-setupのプリセット追加を
           # 検討する。
+          #
+          # ls・cat・head・tail・wcは状態確認のための読み取り専用コマンド(#931)。
+          # 実測では `ls node_modules/.bin/playwright`・`cat .claude/settings.json` が
+          # 拒否されており、いずれも「今どうなっているか」を見るだけの操作だった。
+          # 書き込み・削除系(mkdir・rm・mv)は足していない。一時ファイルは既存の /tmp 直下へ
+          # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
+          # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
           claude_args: >-
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
           prompt: ${{ env.PROMPT_CONFLICT }}
 
       - name: Claude使用量をJob Summaryに出力する（Claude Code（コンフリクト解消））

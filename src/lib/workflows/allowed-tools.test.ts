@@ -58,6 +58,35 @@ describe("再利用可能ワークフローの許可ツール", () => {
     }
   });
 
+  it("状態確認の読み取り専用コマンドを許可している", () => {
+    // 実測（#931のベースライン）で `ls node_modules/.bin/playwright`・
+    // `cat .claude/settings.json` が拒否されていた。どちらも「今どうなっているか」を
+    // 見るだけの操作で、拒否されるとエージェントが回避策を積み重ねて往復が増える。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    for (const tool of ["Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)"]) {
+      expect(allowedTools).toContain(tool);
+    }
+  });
+
+  it("書き込み・削除系のコマンドは許可しない", () => {
+    // 一時ファイルは /tmp 直下へ直接書けばディレクトリ作成が要らず、ランナーは実行ごとに
+    // 破棄されるため掃除も要らない。プロンプト側でそう案内して、そもそも使わせない（#931）。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    for (const tool of ["Bash(mkdir:*)", "Bash(rm:*)", "Bash(mv:*)", "Bash(sed:*)"]) {
+      expect(allowedTools).not.toContain(tool);
+    }
+  });
+
+  it("パッケージマネージャの用意を迂回する手段は許可しない", () => {
+    // corepack は依存インストールをワークフロー側で常に行うようにしたため不要（#931）。
+    // 許可すると「環境構築をやり直さない」という前提が崩れる。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    expect(allowedTools).not.toContain("Bash(corepack:*)");
+  });
+
   it("編集とgit操作を許可している（デグレ検知）", () => {
     const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
 
