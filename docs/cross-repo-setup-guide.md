@@ -1126,7 +1126,7 @@ scripts/check-local-session-contract.sh --all
 ```
 
 **約束の内容・移植時に書き換える6点・検査の仕組みは
-[docs/multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「ローカル起動プロトコル v1」に
+[docs/multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「ローカル起動プロトコル v2」に
 まとめてある。** ここでは重複して書かない。
 
 適合状況の一覧は [docs/supported-repositories.md](supported-repositories.md)「ローカル起動プロトコルの

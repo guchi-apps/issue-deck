@@ -39,8 +39,15 @@ export const LOCAL_SESSION_LAUNCHER = "~/.local/share/issue-deck/start-local-ses
  *
  * 約束の内容は [docs/multi-agent/local-quick-start.md](../../docs/multi-agent/local-quick-start.md)
  * を参照。**約束を増やす・変える場合はこの版数を上げる。**
+ *
+ * v2（#1178）で増えた約束は次の2つ。どちらもWindows Terminalが無いマシン（サブPCのUbuntu・
+ * SSH越しの実行）で起動できるようにするためのもので、v1のリポジトリも引き続き受け入れる
+ * （`isSupportedLocalSessionContract`が版数の上限だけを見る）。
+ *
+ * - Windows Terminalが無い環境では、tmuxの新しいセッションを出口にする
+ * - `ISSUE_DECK_DEV_PORT_BASE`が渡されない経路でも、自リポジトリのポート帯を既定値として使う
  */
-export const LOCAL_SESSION_CONTRACT_VERSION = 1;
+export const LOCAL_SESSION_CONTRACT_VERSION = 2;
 
 /**
  * マーカー行にマッチする正規表現。`scripts/start-local-session.sh`・
