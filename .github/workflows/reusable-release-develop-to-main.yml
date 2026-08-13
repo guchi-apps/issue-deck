@@ -1,0 +1,484 @@
+name: Reusable release develop to main
+
+# develop→mainのリリース手順（バージョンbump PR・develop→mainのPR作成）を、全リポジトリで
+# 共通化するための再利用可能ワークフロー（#1181）。呼び出し元には薄いcallerだけを置く。
+#
+# **元はコピー方式だった。** issue-deck・shopping-list・dayspanの3件だけが持ち、残り8件は
+# 手作業でリリースしていた。手作業ではリポジトリ固有の制約を毎回踏む（solitaireでは
+# deploy.ymlのタグ重複チェックと、更新履歴エントリを強制するテストの2つに当たった）。
+#
+# 参照方式にすることで、#985/#1173 の「参照タグの検知と一括更新」の対象にもなる
+# （コピー方式は対象外）。
+#
+# 呼び出し元ごとの差異は3つのinputで吸収する。バージョンの読み取り（version-file・
+# version-query）と、書き込み（bump-command）。**読み取りより書き込みの差異のほうが大きい。**
+# npm version を使う理由は「バージョンを書き換えること」ではなく「"version" lifecycle
+# スクリプトを起動すること」で、これが更新履歴フック（RELEASE_CHANGELOG）の土台になっている。
+# ルートに package.json が無いリポジトリ（myroom・signaly）ではそのままでは使えない。
+#
+# 元の設計（状態はversionフィールドだけから判定する・バンプPRはauto-merge・develop→mainの
+# マージは人間が行う）はそのまま維持している。
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: "バージョンを読み書きするファイル（既定: package.json）"
+        required: false
+        type: string
+        default: package.json
+      version-query:
+        description: "バージョンを取り出すjq式（既定: .version）"
+        required: false
+        type: string
+        default: .version
+      bump-command:
+        description: >-
+          バージョンを書き換えるコマンド。空なら
+          `npm version <新版> --no-git-tag-version` を実行する。
+          NEW_VERSION・RELEASE_CHANGELOG を環境変数で受け取れる
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  # 同時に複数実行してバンプPRやdevelop→mainのPRを二重作成しないよう直列化する。
+  group: release-develop-to-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # フィーチャーブランチのpush・PR作成を後続のCI/レビューworkflow
+          # (ci.yml, claude-review-develop.yml)が確実に検知できるよう、
+          # GITHUB_TOKEN起点のイベントは他のworkflowを起動しないというGitHub仕様を
+          # 避けるためWORKFLOW_PATを使う（claude-issue-dispatch.ymlと同じ方針）。
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: develop/mainの最新を取得する
+        # actions/checkoutが作成するリモート追跡ブランチの範囲に依存せず、
+        # origin/develop・origin/mainを確実に参照できるよう明示的なrefspecで取得する。
+        run: |
+          git fetch origin develop:refs/remotes/origin/develop --quiet --force
+          git fetch origin main:refs/remotes/origin/main --quiet --force
+
+      - name: リリース状態を判定する
+        id: state
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+        run: |
+          set -e
+
+          # バージョンの置き場所はリポジトリごとに違う（#1181）。実測では
+          # package.json が9件、frontend/package.json が1件（myroom）、
+          # version.json が1件（signaly）。version-query は全件 .version だった。
+          MAIN_VERSION="$(git show "origin/main:$VERSION_FILE" | jq -r "$VERSION_QUERY")"
+          DEV_VERSION="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
+          echo "main_version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dev_version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
+
+          NEED_BUMP=false
+          NEED_MAIN_PR=false
+
+          if [ "$MAIN_VERSION" = "$DEV_VERSION" ]; then
+            if git diff --quiet origin/main origin/develop; then
+              echo "developとmainに差分が無いため、リリースするものがありません"
+            else
+              EXISTING_BUMP_PR="$(gh pr list --base develop --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | .[0].headRefName // empty')"
+              if [ -n "$EXISTING_BUMP_PR" ]; then
+                echo "バージョンbump用のPR（$EXISTING_BUMP_PR）が既にオープン中のため、新規作成をスキップします"
+              else
+                NEED_BUMP=true
+              fi
+            fi
+          else
+            echo "developのバージョン($DEV_VERSION)がmain($MAIN_VERSION)と異なるため、バンプ済みとみなします"
+            EXISTING_MAIN_PR="$(gh pr list --base main --head develop --state open --json url --jq '.[0].url // empty')"
+            if [ -n "$EXISTING_MAIN_PR" ]; then
+              echo "develop→mainのPR（$EXISTING_MAIN_PR）が既にオープン中のため、新規作成をスキップします"
+            else
+              NEED_MAIN_PR=true
+            fi
+          fi
+
+          echo "need_bump=$NEED_BUMP" >> "$GITHUB_OUTPUT"
+          echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
+          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION"
+
+      - name: リリース対象issueの一覧を取得する
+        id: issues
+        # 対象は「developへ入ったがmainへ未反映」のissue、すなわち進捗が`Develop`または`Release`
+        # にあるもの。Phase 4までは`gh issue list --label <進捗ラベル>`でラベルから探して
+        # いたが、進捗ラベルの廃止（#991 Phase 5・#1010）で判断材料がProject Statusだけに
+        # なったため、issue-deckの進捗問い合わせAPIから引く。
+        # **issue-deckへ疎通できない場合は0件として扱い、リリース自体は続行する**（PR本文の
+        # 対象issue一覧が空になるだけで、バージョンbumpとPR作成は成立するため）。
+        if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          set -e
+          NUMBERS=""
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。取得できなかった場合は
+          # PR本文にもその旨を残す。空一覧と同じ文言だと、後から読んだときに「本当にissueが
+          # 無かったリリース」と見分けがつかない。
+          UNAVAILABLE_NOTE=""
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、リリース対象issueを特定できません"
+            UNAVAILABLE_NOTE="（設定不足のためリリース対象issueを取得できませんでした。APP_BASE_URL・PROGRESS_REPORT_SECRET を確認してください）"
+          else
+            BODY_FILE="${RUNNER_TEMP:-/tmp}/release-progress.json"
+            CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+            if [ "$CODE" != "200" ]; then
+              echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。リリース対象issueを特定できません"
+              UNAVAILABLE_NOTE="（issue-deckへ問い合わせできず、リリース対象issueを取得できませんでした。HTTP $CODE）"
+            elif [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
+              REASON="$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)"
+              echo "::warning::issue-deckが進捗を返せませんでした（reason=$REASON）。リリース対象issueを特定できません"
+              UNAVAILABLE_NOTE="（issue-deckが進捗を返せず、リリース対象issueを取得できませんでした。reason=$REASON）"
+            else
+              NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
+            fi
+          fi
+
+          echo "[]" > /tmp/release-issues.json
+          : > /tmp/release-issue-lines.txt
+          if [ -n "$NUMBERS" ]; then
+            for NUM in $NUMBERS; do
+              gh issue view "$NUM" --json number,title,labels
+            done | jq -s 'unique_by(.number) | sort_by(.number)' > /tmp/release-issues.json
+            jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
+          fi
+          if [ ! -s /tmp/release-issue-lines.txt ]; then
+            if [ -n "$UNAVAILABLE_NOTE" ]; then
+              echo "$UNAVAILABLE_NOTE" > /tmp/release-issue-lines.txt
+            else
+              echo "（Develop・Releaseにいるopenなissueはありませんでした）" > /tmp/release-issue-lines.txt
+            fi
+          fi
+          echo "対象issue:"
+          cat /tmp/release-issue-lines.txt
+
+      - name: コード変更内容からバージョンの上げ幅を判定する
+        id: version-decision
+        if: steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # github_token省略時は既定のGITHUB_TOKENにフォールバックし、このステップの実行中に
+          # チェックアウト済みリポジトリのgit認証情報がWORKFLOW_PATから置き換わってしまう。
+          # 後続の「バージョンをbumpして...」ステップの素のgit pushがWORKFLOW_PATの認証情報を
+          # 使えるよう、claude-issue-dispatch.ymlの実装ステップと同じくWORKFLOW_PATを明示する。
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+          # 本ワークフローはissue-deckアプリ（GitHub App = issue-deck[bot]）からの
+          # workflow_dispatchでも起動されるため、非人間アクター起点の実行を明示的に許可する
+          # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
+          allowed_bots: "issue-deck[bot],claude[bot]"
+          claude_args: |
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"},"changelog":{"type":"string"}},"required":["bump_kind","reason"]}'
+          prompt: |
+            ${{ github.repository }} リポジトリで、mainブランチとdevelopブランチの実際のコード差分の内容から、
+            セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅
+            （major/minor/patch）を判定してください。Issueのラベルは一切参照せず、差分の
+            内容そのものだけから判断してください。
+
+            ## 確認すること
+            - `git diff origin/main origin/develop` で実際のコード変更内容を確認する
+            - `git log origin/main..origin/develop --oneline` でコミット一覧も参考にする
+
+            ## 判定基準
+            - major: 既存の挙動・データ構造・公開APIに対する後方互換性のない変更
+              （破壊的変更）が含まれる場合
+            - minor: 後方互換性を保ったまま新機能が追加されている場合
+            - patch: バグ修正・リファクタリング・ドキュメント更新など、上記のいずれにも
+              該当しない変更のみの場合
+            - 複数種類の変更が混在する場合は、最も上げ幅が大きい判定を採用する
+              （例: 新機能追加とバグ修正が両方含まれる場合はminor）
+
+            ## 出力
+            判定結果（bump_kind）と、その判断根拠（reason）を返してください。reasonは日本語で、
+            なぜそのbump_kindと判定したか（該当した変更の種類と、判定の決め手になった代表的な
+            変更点）を簡潔に説明してください。変更したファイルや修正内容を網羅的に列挙する必要は
+            なく、3〜5行程度に要約してください（バンプPRやリリース画面に表示されるため、冗長な
+            長文にしないこと）。
+
+            あわせて、利用者向けの更新履歴（changelog）も生成してください。reasonが開発者向けの
+            判断根拠であるのに対し、changelogはエンドユーザー向けに何ができるようになった/直った
+            かを平易な日本語で簡潔に説明する文章にしてください（実装の詳細やファイル名には触れない）。
+            更新履歴表示を持つリポジトリが利用するための汎用フックです（`version` lifecycle
+            スクリプトへ `RELEASE_CHANGELOG` として渡されます）。持たないリポジトリでは
+            生成されるだけで使われません。
+
+      - name: Claude使用量をJob Summaryに出力する（コード変更内容からバージョンの上げ幅を判定する）
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.version-decision.outputs.execution_file != ''
+        run: .github/scripts/summarize-claude-usage.sh "コード変更内容からバージョンの上げ幅を判定する" "${{ steps.version-decision.outputs.execution_file }}"
+
+      - name: バージョン判定結果を検証する
+        id: bump
+        # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
+        # 前ステップの成否によらず実行する
+        if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
+          # run:本文に直接展開せずenv経由でのみ参照する
+          # (.github/workflows/issue-labels.ymlと同じ、script injectionを避ける方針)。
+          STRUCTURED_OUTPUT: ${{ steps.version-decision.outputs.structured_output }}
+        run: |
+          set -e
+
+          BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
+          # reasonはプロンプト側で3〜5行程度の要約に収めてもらう想定のため、changelogと同様に
+          # 改行を保持したまま扱う（1行への平坦化はしない）
+          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null || true)"
+          # changelogは利用者向けの複数行文章になりうるため平坦化しない
+          CHANGELOG="$(echo "$STRUCTURED_OUTPUT" | jq -r '.changelog // empty' 2>/dev/null || true)"
+
+          case "$BUMP_KIND" in
+            major|minor|patch) ;;
+            *)
+              echo "Claude Codeによるバージョン判定が失敗・不正な結果だったため、patchにフォールバックします（判定結果: '$BUMP_KIND'）"
+              BUMP_KIND=patch
+              REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
+              CHANGELOG=""
+              ;;
+          esac
+
+          echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
+          {
+            echo "reason<<REASON_EOF"
+            echo "$REASON"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo "$CHANGELOG"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "判定結果: bump_kind=$BUMP_KIND"
+          echo "reason: $REASON"
+          echo "changelog: $CHANGELOG"
+
+      - name: バージョンをbumpしてdevelop向けPRを作成する
+        if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          MAIN_VERSION: ${{ steps.state.outputs.main_version }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+          BUMP_COMMAND: ${{ inputs.bump-command }}
+          BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
+          REASON: ${{ steps.bump.outputs.reason }}
+          # 更新履歴表示を自リポジトリに持つ他リポジトリ向けの汎用フック。npm versionの
+          # "version" lifecycleスクリプト（対象リポジトリがpackage.jsonに定義した場合のみ実行
+          # される）がこの環境変数を読み、自前の更新履歴ファイルを書き換えるという契約にする。
+          # issue-deck自身は"version"スクリプトを持たないため、この変数は現状未使用。
+          RELEASE_CHANGELOG: ${{ steps.bump.outputs.changelog }}
+        run: |
+          set -e
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$MAIN_VERSION"
+          case "$BUMP_KIND" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            *)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          BRANCH="release/v$NEW_VERSION"
+
+          git checkout -b "$BRANCH" origin/develop
+
+          # **npm version を使う理由は「バージョンを書き換えること」ではなく、"version"
+          # lifecycleスクリプトを起動すること。** これが更新履歴フック（RELEASE_CHANGELOG）の
+          # 土台になっている（npm pkg set ではlifecycleスクリプトが起動しない）。
+          # --no-git-tag-versionでコミット・タグ作成だけを抑止する。
+          #
+          # ルートに package.json が無いリポジトリではそのままでは使えないため、
+          # bump-command で差し替えられるようにしてある（#1181）。
+          # 例: myroom は `npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend`
+          #     signaly は `python3 scripts/bump_version.py "$NEW_VERSION"`
+          if [ -n "$BUMP_COMMAND" ]; then
+            echo "bump-command を実行します: $BUMP_COMMAND"
+            bash -c "$BUMP_COMMAND"
+          else
+            npm version "$NEW_VERSION" --no-git-tag-version
+          fi
+
+          # 書き換えが実際に効いたかを確認する。コマンドが成功しても対象ファイルが
+          # 変わっていなければ、以降のPR作成は空振りになる
+          APPLIED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
+          if [ "$APPLIED" != "$NEW_VERSION" ]; then
+            echo "::error::バージョンの書き換えに失敗しました（$VERSION_FILE は $APPLIED のまま。期待: $NEW_VERSION）"
+            exit 1
+          fi
+
+          git config user.name "Claude Code"
+          git config user.email "claude-code@example.com"
+          # package.json本体に加え、"version" lifecycleスクリプトが更新履歴フックとして
+          # 新規作成・更新したファイルもバンプコミットへ含める（このステップ開始時点で
+          # 作業ツリーはクリーンなので、意図しないファイルを拾うリスクは低い）
+          git status --porcelain
+          git add -A
+          git commit -m "v${NEW_VERSION}をリリースする。"
+          git push -u origin "$BRANCH"
+
+          {
+            echo "developへの取り込み待ちの変更を v${NEW_VERSION} としてリリースします。"
+            echo
+            echo "## バージョンの判断根拠"
+            echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+            echo
+            echo "$REASON"
+            echo
+            echo "判断が誤っていると思われる場合は、このPR上でバージョンを修正してください。"
+            echo
+            if [ -n "$RELEASE_CHANGELOG" ]; then
+              echo "## 更新履歴（生成された利用者向け文言）"
+              echo
+              echo "$RELEASE_CHANGELOG"
+              echo
+            fi
+            echo "## 対象issue"
+            cat /tmp/release-issue-lines.txt
+            echo
+            echo "## 注意点"
+            echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
+            echo "- 自動マージはされません。CI通過を確認のうえ、ユーザーがマージしてください"
+          } > /tmp/release-pr-body.md
+
+          gh pr create --base develop --head "$BRANCH" \
+            --title "v${NEW_VERSION}をリリースする" \
+            --body-file /tmp/release-pr-body.md
+
+          # CI通過後にdevelopへ自動マージする（リポジトリ設定 'Allow auto-merge' が必要）。
+          # このマージによりpackage.jsonのversionが変わり、push(develop, paths:package.json)で
+          # 本ワークフローが再起動してdevelop→mainのPRを自動作成する。
+          # 有効化に失敗しても run は落とさず、アプリのリリース画面のマージ用URLからの
+          # 手動マージに委ねる。
+          gh pr merge "$BRANCH" --auto --merge \
+            || echo "auto-mergeの有効化に失敗しました。CI通過後に手動でマージしてください（アプリのリリース画面のリンクからマージできます）。"
+
+      - name: develop→mainのPRを作成する
+        if: steps.state.outputs.need_main_pr == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+        run: |
+          set -e
+
+          {
+            echo "developの内容をv${DEV_VERSION}としてmainへリリースします。"
+            echo
+            echo "## 対象issue"
+            cat /tmp/release-issue-lines.txt
+            echo
+            echo "## 注意点"
+            echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
+            echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。ユーザーが内容を確認のうえマージしてください"
+            echo "- マージ方式は必ず「Create a merge commit」を選んでください（squash mergeはdevelop/mainの祖先のつながりを切ってしまうため厳禁。詳細はrelease-to-mainスキル参照）"
+          } > /tmp/main-pr-body.md
+
+          gh pr create --base main --head develop \
+            --title "v${DEV_VERSION}をmainへリリースする" \
+            --body-file /tmp/main-pr-body.md
+
+  # releaseジョブが失敗した場合の通知(#727)。他の3ワークフロー
+  # （claude-issue-dispatch.ymlのnotify-failure、claude-review-develop.ymlの
+  # claude-review-fallback/auto-merge-fallback、claude-conflict-resolve.ymlのフォールバック通知）
+  # と異なり、本ワークフローにはこれまで失敗時の通知が一切無く、Actionsの実行ログ以外に
+  # 失敗の痕跡が残らなかった。
+  #
+  # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
+  # で失敗しても対象issueを特定できるよう、releaseジョブの「リリース対象issueの一覧を取得する」
+  # ステップの出力には依存せず、このジョブでも`Develop`・`Release`にいるissueの一覧を
+  # 独立に取得する（#991 Phase 5でラベル検索からissue-deckへの問い合わせに変わった）。
+  notify-failure:
+    needs: [release]
+    if: always() && needs.release.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: リリース対象issueへ失敗を通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          set -e
+
+          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。後者は本来通知すべき
+          # 相手がいるのに通知できていない状態で、放置するとリリース失敗そのものに気づけない。
+          ISSUE_NUMBERS=""
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、通知先を特定できません"
+            exit 0
+          fi
+          BODY_FILE="${RUNNER_TEMP:-/tmp}/notify-progress.json"
+          CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+          if [ "$CODE" != "200" ]; then
+            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。通知先を特定できません"
+            exit 0
+          fi
+          if [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)）。通知先を特定できません"
+            exit 0
+          fi
+          ISSUE_NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
+
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "Develop・Releaseにいるopenなissueはありません（対象なしのため通知しません）"
+            exit 0
+          fi
+
+          BODY='⚠️ develop→mainのリリースワークフロー（release-develop-to-main.yml）が失敗しました。'
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
+          BODY="$BODY"$'\n\n''復旧している場合は、リポジトリのissue-deck画面から手動でリリースを再実行できます。'
+          BODY="$BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
+
+          for NUM in $ISSUE_NUMBERS; do
+            # dispatchジョブ側の他の通知と同様、同一runのURLを含むコメントが既にあれば重複通知しない。
+            if gh issue view "$NUM" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
+              echo "issue #$NUM は同一runの通知コメントを確認できたため、重複通知をスキップします"
+              continue
+            fi
+            gh issue comment "$NUM" --body "$BODY"
+            gh issue edit "$NUM" --add-label "00.check-user"
+          done
