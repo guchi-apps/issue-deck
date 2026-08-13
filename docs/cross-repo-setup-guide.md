@@ -459,6 +459,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `cleanup-preview.yml` | `deploy-preview.yml`が作ったIssueごとのプレビューアプリを破棄する（PRクローズ・Issueクローズ・ラベル解除・アイドル5分での定期掃除） | 同上。`deploy-preview.yml`を導入する場合のみ対で必要 |
 | `preview-logs.yml` | デプロイを伴わず、プレビュー環境のMachineのログだけを取得する（`workflow_dispatch`） | issue-deck固有のFly.io Machine構成向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
+| `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 
 ## 2. ラベル体系
 
