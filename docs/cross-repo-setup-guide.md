@@ -165,6 +165,11 @@ jobs:
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
 
+**判定は`prisma/`の有無で足りる。** `portfolio`（#1047の5周目）はNext.jsだが`prisma/`が無く、
+`node`を選んだ。`--if-present`があるので`node-db`にしても壊れはしないが、MySQLサービス
+コンテナの起動とマイグレーションの待ち時間が毎回乗るため、DBを使わないなら`node`にする。
+**`node`では`database-name`は使われない**ので、指定せずに省く。
+
 ### 素の Claude Code ワークフローがある場合は削除する
 
 `/install-github-app` を実行したことのあるリポジトリには、`claude.yml`・`claude-code-review.yml`
@@ -224,14 +229,25 @@ gh api repos/guchi-apps/my-app/contents/.github/workflows --jq '.[].name'
 `.env`を要求するため、CI・無人実行では落ちる。どちらが素かは**リポジトリごとに違う**ので、
 名前から推測せず`package.json`を見る。
 
-| リポジトリ | 素（CI・無人実行向け） | ラッパー付き（ローカル用） |
-|---|---|---|
-| `car-care` | `build:ci` | `build` |
-| `asset-manager` | **`build`** | **`build:local`** |
+| リポジトリ | 素（CI・無人実行向け） | ラッパー付き（ローカル用） | ラッパーの中身 |
+|---|---|---|---|
+| `car-care` | `build:ci` | `build` | `scripts/with-local-env.sh` |
+| `asset-manager` | **`build`** | **`build:local`** | `scripts/with-local-env.sh` |
+| `portfolio` | **`build`** | **`build:local`** | **`op run --env-file=.env.tpl`（1Password CLI）** |
 
 **同じ`build`という名前で意味が逆**になっている。`asset-manager`にはさらに`check`
 （`lint && typecheck && build:local`）があり、一見まとめて検証できそうだが`build:local`を
 含むため無人実行では使えない。**「便利そうなまとめコマンド」ほど確認する。**
+
+**ラッパーの中身によって失敗の仕方が変わる。** `with-local-env.sh`系は`.env`が無いことで
+落ちるが、`portfolio`の`op run`は**`op`コマンド自体がrunnerに無い**ため`command not found`
+で落ちる。後者はエラーメッセージからは環境変数の問題に見えないので、`package.json`を先に
+読んでおかないと原因の切り分けに時間を取られる。
+
+**検証コマンドが`lint`と`build`だけのリポジトリもある**（`portfolio`）。`typecheck`・`test`が
+無いこと自体は問題ではない（ワークフローが呼ぶのは`--if-present`で保護されたDB系だけ）が、
+CLAUDE.mdに**無いことを明記**しておかないと、エージェントが存在しないコマンドを探して
+`package.json`を読み直す往復が発生する。
 
 #### プロンプトの取得元（`prompts-ref`）
 

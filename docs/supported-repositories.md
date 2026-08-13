@@ -26,6 +26,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/car-care` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1050, guchi-apps/car-care#32 | #1047の2周目。Next.js + Prisma 7 + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。**`test`・`typecheck`のnpm scriptを持たない**が、ワークフローが呼ぶのは`db:migrate:deploy`・`db:seed:ci`（どちらも`24.screenshot-required`付きの実行のみ・`--if-present`で保護）だけのため実害は無く、scriptを足さずAGENTS.mdへ実際の検証コマンド（`lint`・`build:ci`）を書く形にした。`npm run build`は`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行は`build:ci`を使う点も明記 |
 | `guchi-apps/subscription-lists` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1052, guchi-apps/subscription-lists#45 | #1047の3周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`test`・`typecheck`・`db:migrate:deploy`・`build:ci`をすべて持ち、共有ワークフローと過不足なく噛み合う。**`/install-github-app`が生成した素の`claude.yml`・`claude-code-review.yml`を削除した**（前者は`claude-issue-dispatch.yml`と同じ`issue_comment`イベントで起動し二重起動していた。詳細は下記）。`CLAUDE.md`・`AGENTS.md`のどちらも無かったため新規作成 |
 | `guchi-apps/asset-manager` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1053, guchi-apps/asset-manager#155 | #1047の4周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`。**`node-version`は`"20"`**（CIが`ci.yml`ではなく`test.yml`で、そこが`'20'`。他リポジトリの`20.19`と違う）。**`build`系の命名が他アプリと逆**で、`npm run build`がラッパー無し（CI・無人実行向け）、`npm run build:local`がローカル用。`npm run check`は`build:local`を含むため無人実行では使えない。この点をCLAUDE.mdの冒頭に置いた。`.claude/settings.json`は権限許可リストのみで運用ルールは含まない |
+| `guchi-apps/portfolio` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1054, guchi-apps/portfolio#81 | #1047の5周目。**`runtime-setup: node`を初めて使ったリポジトリ**（`prisma/`を持たずDBを使わないため。`node-db`にすると不要なMySQLサービスコンテナの起動・マイグレーション・シードが動く）。`database-name`は`node`では使われないので指定していない。`package-manager: npm`・`node-version: "20"`（`ci.yml`準拠）。**`test`・`typecheck`のnpm scriptを持たず、`lint`と`build`だけ**でCIも同じ2つを実行している。`npm run build`はラッパー無しでCI・無人実行から使え、`npm run build:local`は**1Passwordの`op run --env-file=.env.tpl`経由**なので無人実行では使えない（car-care・asset-managerの`with-local-env.sh`とは失敗の仕方が違い、`op`コマンド自体が無いことで落ちる）。進捗ラベルが`09.main`まで進んだままcloseされずに残っていた#76は、盤面へ載せたあとStatus `Done`にしてcloseした |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
@@ -55,6 +56,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/car-care` | — |
 | `guchi-apps/subscription-lists` | — |
 | `guchi-apps/asset-manager` | — |
+| `guchi-apps/portfolio` | — |
 
 **この表は要約であって真実の源ではない。** 正はマーカー行そのもので、次のコマンドが実態を読む。
 
