@@ -34,6 +34,11 @@ jobs:
   propagate:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        # 配布処理は .github/scripts/propagate-workflow-tag.sh に置いてあるため、
+        # このジョブ自身のチェックアウトが要る（checkoutしないとスクリプトが存在しない）。
+        uses: actions/checkout@v4
+
       - name: 入力を検証する
         env:
           TAG: ${{ inputs.tag }}
@@ -61,12 +66,15 @@ jobs:
       - name: 配布先が実在するタグかを確認する
         env:
           GH_TOKEN: ${{ github.token }}
+          # ghの宛先を明示する。埋め込みではなくGH_REPOで渡す
+          # （scripts/check-workflow-gh-repo.sh がこの形を要求する）
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           # 存在しないタグを配ると、参照先が解決できずワークフローが起動しなくなる
-          if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::$TAG は ${{ github.repository }} に存在しません"
+          if ! gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG は $GH_REPO に存在しません"
             exit 1
           fi
 
@@ -88,7 +96,7 @@ jobs:
             echo "::group::$REPO"
 
             # 1リポジトリの失敗で全体を止めない。残りは配れるほうがよい
-            if ! bash "$GITHUB_WORKSPACE/.github/scripts/propagate-workflow-tag.sh" "$REPO" "$TAG" "$SOURCE_REPOSITORY"; then
+            if ! bash .github/scripts/propagate-workflow-tag.sh "$REPO" "$TAG" "$SOURCE_REPOSITORY"; then
               echo "::warning::$REPO への配布に失敗しました"
               FAILED=$((FAILED + 1))
             fi
