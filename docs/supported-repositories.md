@@ -44,6 +44,11 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 
 ## ローカル起動プロトコルの適合状況
 
+> **`.gitignore`の`/.shared-context/`・`/.shared-prompts/`は全リポジトリで必要。** 無人実行の
+> たびにcheckoutされるが、#1047で導入した6リポジトリ（meisai-lab・car-care・subscription-lists・
+> asset-manager・portfolio・solitaire）では導入手順から漏れて一貫して抜けていた（#1151で追加）。
+> 先行のshopping-list・dayspanには最初から入っている。
+
 上の表はGitHub Actions側の自動化についてのもの。**ローカルのワンクリック起動**（issue-deckの画面の
 「ローカルで開始」）は別の軸で、対応可否は各リポジトリの`scripts/start-issue.sh`の冒頭に置いた
 マーカー行が決める。

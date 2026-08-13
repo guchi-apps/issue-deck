@@ -49,6 +49,11 @@ yarn-error.log*
 # 本リポジトリのコミットには決して含めない(docs/shared-knowledge.md 参照)。
 /.shared-context/
 
+# issue-deck側の実装プロンプトのcheckout先(prompts-ref指定時)。issue-deck自身は
+# ローカルパス参照でprompts-refを使わないため実際には作られないが、展開先リポジトリと
+# 揃えておく(#1151)。
+/.shared-prompts/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
