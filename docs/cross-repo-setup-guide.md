@@ -569,6 +569,35 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
+### 再利用可能ワークフローが呼び出し元のファイルを前提にしない
+
+**呼び出し元に無いファイルを実行すると、本来の処理が成功していてもジョブ全体が失敗する。**
+
+実際に踏んだ形（#1181）。`reusable-release-develop-to-main.yml` が
+`.github/scripts/summarize-claude-usage.sh` を直接実行していたため、`signaly` で
+**バージョンbump自体は成功しバンプPRも作られたのに、使用量出力のステップだけが落ちて
+ジョブが失敗**した。
+
+**このスクリプトを持っているのは10リポジトリ中 `dayspan` だけだった。**
+
+補助的な処理は**存在するときだけ実行する**。
+
+```yaml
+run: |
+  USAGE=.github/scripts/summarize-claude-usage.sh
+  if [ -x "$USAGE" ]; then
+    "$USAGE" "<ステップ名>" "<execution_file>"
+  else
+    echo "$USAGE が無いため、使用量のJob Summary出力はスキップします"
+  fi
+```
+
+`reusable-issue-dispatch.yml` は `prompts-ref` 経由で共有側のスクリプトを使えるが
+（#964）、リリース側は呼び出し元のcheckoutしか持たないため、無ければスキップする方針にした。
+
+**「本体は成功しているのにジョブが失敗する」形は原因が分かりにくい。** ステップ単位の
+conclusion を見ないと、どこで落ちたか特定できない。
+
 ### 呼ばれる側の権限は caller の付与範囲を超えられない
 
 **超えると `startup_failure` になる。** ジョブが1つも作られず、ログも残らない。#1181 で実際に踏んだ。
