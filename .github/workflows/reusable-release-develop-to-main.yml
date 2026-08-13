@@ -40,20 +40,17 @@ on:
         type: string
         default: ""
 
-concurrency:
-  # 同時に複数実行してバンプPRやdevelop→mainのPRを二重作成しないよう直列化する。
-  group: release-develop-to-main
-  cancel-in-progress: false
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: read
-  id-token: write
-
+# **concurrency と permissions は呼び出し元（caller）が持つ。** 再利用可能ワークフローの
+# トップレベルに置くと、呼び出し時に startup_failure になる（#1181で実際に踏んだ）。
+# 既存の reusable-issue-dispatch.yml・reusable-claude-ci-fix.yml も name / on / jobs だけを持つ。
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      id-token: write
     steps:
       - name: Checkout develop
         uses: actions/checkout@v4
