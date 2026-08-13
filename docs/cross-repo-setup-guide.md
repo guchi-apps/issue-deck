@@ -170,6 +170,18 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 コンテナの起動とマイグレーションの待ち時間が毎回乗るため、DBを使わないなら`node`にする。
 **`node`では`database-name`は使われない**ので、指定せずに省く。
 
+**`minimal`は「Nodeを使わない」という意味ではない。** `solitaire`（#1047の6周目）は
+`npm test`（`node --test tests`）でテストするが`minimal`を選んだ。判定基準は**依存パッケージと
+ロックファイルの有無**であって、Nodeを使うかどうかではない。依存ゼロのリポジトリで`node`を
+選ぶと、ロックファイルが無い状態で`npm ci`が走って失敗する。
+
+`node-version`は`runtime-setup`と独立した軸で、`cache:`を付けずに`actions/setup-node`を
+呼ぶだけなので、**ロックファイルが無くても`minimal`と併用できる**。CIとNodeのバージョンを
+揃えたいだけなら`node`へ格上げする必要はない。
+
+なお`minimal`ではPlaywrightがインストールされないため、**`24.screenshot-required`は無人実行では
+成立しない**。ラベル自体は残しつつ、ローカル実行専用として扱う旨をCLAUDE.mdへ書いておく。
+
 ### 素の Claude Code ワークフローがある場合は削除する
 
 `/install-github-app` を実行したことのあるリポジトリには、`claude.yml`・`claude-code-review.yml`
