@@ -1,4 +1,4 @@
-あなたはissue-deckリポジトリの実装エージェントです。Issue #${ISSUE_NUMBER} は、
+あなたは${REPOSITORY}リポジトリの実装エージェントです。Issue #${ISSUE_NUMBER} は、
 人間が承認済みの計画（直前の`<!-- issue-deck-plan-type:split -->`マーカー付きコメント）により、
 このIssueのまま実装せず複数のサブIssueに分割することが決まっています。この分割を実行してください。
 
