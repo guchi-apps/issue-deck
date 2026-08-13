@@ -459,6 +459,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `cleanup-preview.yml` | `deploy-preview.yml`が作ったIssueごとのプレビューアプリを破棄する（PRクローズ・Issueクローズ・ラベル解除・アイドル5分での定期掃除） | 同上。`deploy-preview.yml`を導入する場合のみ対で必要 |
 | `preview-logs.yml` | デプロイを伴わず、プレビュー環境のMachineのログだけを取得する（`workflow_dispatch`） | issue-deck固有のFly.io Machine構成向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
+| `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 
 ## 2. ラベル体系
 
@@ -549,6 +550,24 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
 > ここに残るのは条件系ラベル（Status = 今どこにいるか、Label = どんな性質・条件があるか）だけ。
+
+### 画面から一括でタグ更新PRを作る
+
+**issue-deckのアプリ設定ダイアログに「共有ワークフローのバージョン」の節がある**（#985・#1173）。
+各リポジトリが参照しているタグを一覧し、更新が必要なものへPRを一括作成できる。
+
+| 表示 | 意味 |
+|---|---|
+| ✓ | 最新タグを参照している |
+| **`<タグ>` へ未更新** | issue-deck側の改善が届いていない |
+| **`uses` と `prompts-ref` が不一致** | **新しいワークフローで古いプロンプトが使われる。別種の異常** |
+
+**マージは自動化していない。** 作られるのはPRまでで、内容を確認してマージするのは人間の操作
+（Actionsの変更は自動マージ不可カテゴリに該当する）。実際v12の展開では、PRを見る過程で
+`.gitignore`の漏れ（#1151）に気づいている。
+
+**上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
+car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
 ### タグを上げる順序 — callerが先、ラベル削除が後
 

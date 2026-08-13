@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
   evaluateWorkflowTags,
@@ -132,4 +133,57 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
   }
 
   return { latest, repositories: statuses };
+}
+
+/** タグ更新PRを一括作成するワークフロー（issue-deck 側） */
+const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
+
+/**
+ * 更新が必要なリポジトリへ、タグを上げるPRを作るワークフローを起動する（#1173）。
+ *
+ * **対象はここ（DBを持つissue-deck側）で決めて渡す。** ワークフロー側で再検知すると、
+ * 画面に出ている一覧と実際の対象がずれる。
+ *
+ * 起動するだけで、PRの作成自体はActions側が行う。ローカルのチェックアウトに依存せず、
+ * 同じ処理を手動起動でも使えるようにするため。
+ */
+export async function dispatchPropagation(
+  userId: string,
+): Promise<{ dispatched: boolean; tag: string | null; repositories: string[] }> {
+  const overview = await collectWorkflowTags(userId);
+  if (!overview.latest) return { dispatched: false, tag: null, repositories: [] };
+
+  const targets = overview.repositories
+    .filter((status) => status.outdated || status.mismatched)
+    .map((status) => status.fullName);
+
+  // 対象が無いのに起動すると、何もしないrunが履歴に残って紛らわしい
+  if (targets.length === 0) {
+    return { dispatched: false, tag: overview.latest, repositories: [] };
+  }
+
+  const [owner, repo] = SOURCE_REPOSITORY.split("/");
+  const source = await db.repository.findFirst({
+    where: { fullName: SOURCE_REPOSITORY },
+    select: { installation: { select: { installationId: true } } },
+  });
+  if (!source) {
+    throw new Error(`${SOURCE_REPOSITORY} が同期されていません`);
+  }
+
+  const token = await getInstallationToken(source.installation.installationId);
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${PROPAGATE_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    body: {
+      ref: "main",
+      inputs: { tag: overview.latest, repositories: JSON.stringify(targets) },
+    },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+
+  return { dispatched: true, tag: overview.latest, repositories: targets };
 }

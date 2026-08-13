@@ -4,11 +4,16 @@ const repositoryFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const githubFetch = vi.fn();
 
+const repositoryFindFirst = vi.fn();
+
 vi.mock("@/lib/db", () => ({
   db: {
     repository: {
       get findMany() {
         return repositoryFindMany;
+      },
+      get findFirst() {
+        return repositoryFindFirst;
       },
     },
   },
@@ -27,7 +32,7 @@ vi.mock("@/lib/github/request", () => ({
   },
 }));
 
-import { collectWorkflowTags } from "@/lib/github/workflow-tags";
+import { collectWorkflowTags, dispatchPropagation } from "@/lib/github/workflow-tags";
 
 function repo(fullName: string, installationId = 42) {
   const [ownerLogin, name] = fullName.split("/");
@@ -178,5 +183,114 @@ describe("collectWorkflowTags", () => {
 
     expect(overview).toEqual({ latest: null, repositories: [] });
     expect(githubFetch).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("dispatchPropagation", () => {
+  beforeEach(() => {
+    repositoryFindMany.mockReset().mockResolvedValue([repo("guchi-apps/car-care")]);
+    repositoryFindFirst
+      .mockReset()
+      .mockResolvedValue({ installation: { installationId: 42 } });
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    githubFetch.mockReset();
+  });
+
+  /** 検知（GET相当）は成功させ、dispatch（POST）だけを差し替える */
+  function withDispatch(dispatchResponse: unknown) {
+    githubFetch.mockImplementation((url: string, _token: string, options?: { method?: string }) => {
+      if (options?.method === "POST") return Promise.resolve(dispatchResponse);
+      if (url.includes("/tags?")) return Promise.resolve(ok([{ name: "workflows/v12" }]));
+      if (url.includes("/contents/.github/workflows?")) {
+        return Promise.resolve(ok([{ name: "claude-issue-dispatch.yml", type: "file" }]));
+      }
+      return Promise.resolve(ok(encode(CALLER)));
+    });
+  }
+
+  it("古いリポジトリを対象にワークフローを起動する", async () => {
+    withDispatch({ ok: true, status: 204 });
+
+    const result = await dispatchPropagation("user-1");
+
+    expect(result).toEqual({
+      dispatched: true,
+      tag: "workflows/v12",
+      repositories: ["guchi-apps/car-care"],
+    });
+
+    const post = githubFetch.mock.calls.find(
+      (call) => (call[2] as { method?: string } | undefined)?.method === "POST",
+    );
+    expect(String(post?.[0])).toContain("propagate-workflow-tag.yml/dispatches");
+    // **対象は呼び出し側で決めて渡す。** ワークフロー側で再検知すると画面の表示とずれる
+    expect((post?.[2] as { body: { inputs: Record<string, string> } }).body.inputs).toEqual({
+      tag: "workflows/v12",
+      repositories: '["guchi-apps/car-care"]',
+    });
+  });
+
+  it("更新が必要なリポジトリが無ければ起動しない", async () => {
+    // 何もしないrunが履歴に残ると紛らわしい
+    githubFetch.mockImplementation((url: string) => {
+      if (url.includes("/tags?")) return Promise.resolve(ok([{ name: "workflows/v11" }]));
+      if (url.includes("/contents/.github/workflows?")) {
+        return Promise.resolve(ok([{ name: "claude-issue-dispatch.yml", type: "file" }]));
+      }
+      return Promise.resolve(ok(encode(CALLER)));
+    });
+
+    const result = await dispatchPropagation("user-1");
+
+    expect(result.dispatched).toBe(false);
+    const posts = githubFetch.mock.calls.filter(
+      (call) => (call[2] as { method?: string } | undefined)?.method === "POST",
+    );
+    expect(posts).toHaveLength(0);
+  });
+
+  it("最新タグが分からなければ起動しない", async () => {
+    // 全リポジトリを対象にしてしまうと、意図しない一斉配布になる
+    githubFetch.mockImplementation((url: string) => {
+      if (url.includes("/tags?")) return Promise.resolve({ ok: false, status: 500 });
+      if (url.includes("/contents/.github/workflows?")) {
+        return Promise.resolve(ok([{ name: "claude-issue-dispatch.yml", type: "file" }]));
+      }
+      return Promise.resolve(ok(encode(CALLER)));
+    });
+
+    const result = await dispatchPropagation("user-1");
+
+    expect(result).toEqual({ dispatched: false, tag: null, repositories: [] });
+  });
+
+  it("uses と prompts-ref が不一致のリポジトリも対象にする", async () => {
+    const mismatched = `jobs:
+  dispatch:
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v12
+    with:
+      prompts-ref: workflows/v11
+`;
+    githubFetch.mockImplementation((url: string, _t: string, options?: { method?: string }) => {
+      if (options?.method === "POST") return Promise.resolve({ ok: true, status: 204 });
+      if (url.includes("/tags?")) return Promise.resolve(ok([{ name: "workflows/v12" }]));
+      if (url.includes("/contents/.github/workflows?")) {
+        return Promise.resolve(ok([{ name: "claude-issue-dispatch.yml", type: "file" }]));
+      }
+      return Promise.resolve(ok(encode(mismatched)));
+    });
+
+    const result = await dispatchPropagation("user-1");
+
+    // 最新タグと同じでも、prompts-ref がずれていれば配り直す必要がある
+    expect(result.dispatched).toBe(true);
+    expect(result.repositories).toEqual(["guchi-apps/car-care"]);
+  });
+
+  it("起動に失敗したら例外を投げる", async () => {
+    withDispatch({ ok: false, status: 403, text: async () => "forbidden" });
+
+    await expect(dispatchPropagation("user-1")).rejects.toThrow();
   });
 });
