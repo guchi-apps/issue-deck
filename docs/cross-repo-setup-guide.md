@@ -569,6 +569,25 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
+### 再利用可能ワークフローに `concurrency`・`permissions` をトップレベルで書かない
+
+**書くと呼び出し時に `startup_failure` になる**（ジョブが1つも起動せず、ログも残らない）。
+`#1181` で実際に踏んだ。コピー方式のワークフローをそのまま `on: workflow_call` へ
+差し替えると、元ファイルのトップレベル宣言が残るため起きやすい。
+
+| | トップレベルに書くもの |
+|---|---|
+| **再利用可能ワークフロー** | `name`・`on`・`jobs` **のみ**。`permissions` は各jobへ書く |
+| **caller** | `concurrency`・トリガー定義。`permissions` は `uses:` するjobへ書く |
+
+既存の `reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml` も `name` / `on` / `jobs`
+だけを持っている。**移行時はこの3つに揃っているかを確認する。**
+
+**`startup_failure` は原因が分かりにくい。** ジョブが作られないためログが無く、
+`gh run view` も「This run likely failed because of a workflow file issue.」としか出さない。
+YAMLとしては妥当なので構文チェックも通る。**動いている再利用可能ワークフローとトップレベルの
+キーを比べるのが早い。**
+
 ### リリースワークフローのバージョン管理方式
 
 `release-develop-to-main.yml`は**バージョンの差だけで状態を判定する**（`main`と`develop`の
