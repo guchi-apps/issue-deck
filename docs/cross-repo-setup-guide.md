@@ -569,24 +569,42 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
-### 再利用可能ワークフローに `concurrency`・`permissions` をトップレベルで書かない
+### 呼ばれる側の権限は caller の付与範囲を超えられない
 
-**書くと呼び出し時に `startup_failure` になる**（ジョブが1つも起動せず、ログも残らない）。
-`#1181` で実際に踏んだ。コピー方式のワークフローをそのまま `on: workflow_call` へ
-差し替えると、元ファイルのトップレベル宣言が残るため起きやすい。
+**超えると `startup_failure` になる。** ジョブが1つも作られず、ログも残らない。#1181 で実際に踏んだ。
 
-| | トップレベルに書くもの |
-|---|---|
-| **再利用可能ワークフロー** | `name`・`on`・`jobs` **のみ**。`permissions` は各jobへ書く |
-| **caller** | `concurrency`・トリガー定義。`permissions` は `uses:` するjobへ書く |
+```yaml
+# caller
+jobs:
+  release:
+    uses: ./.github/workflows/reusable-release-develop-to-main.yml
+    permissions:
+      issues: write   # ← 呼ばれる側の全ジョブが要求する範囲を満たす必要がある
+```
 
-既存の `reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml` も `name` / `on` / `jobs`
-だけを持っている。**移行時はこの3つに揃っているかを確認する。**
+**通常のワークフローとルールが違う。** 通常は job が workflow レベルの既定を上回る指定をして
+よいが、**再利用可能ワークフローでは caller が渡した範囲が上限**になる。
+
+実際に踏んだ形。`release-develop-to-main.yml` は元のコピー方式で
+「workflowレベル `issues: read` ＋ `notify-failure` ジョブだけ `issues: write`」と書かれており、
+これはコピー方式では合法だった。再利用可能化した途端に超過と判定される。
+
+**`src/lib/workflows/reusable-workflow-contract.test.ts` がこの超過を検知する。**
+ローカルパス参照の caller を辿り、呼ばれる側の各ジョブが要求する権限と突き合わせる。
+
+#### トップレベルの `concurrency`・`permissions` は原因ではない
+
+**最初はこれを疑って外したが、間違いだった。** 実際に動いている例がある。
+
+| ファイル | トップレベル | 状態 |
+|---|---|---|
+| `deploy-preview.yml` | `concurrency` あり | `workflow_call` で呼ばれて**正常動作** |
+| `reusable-issue-labels.yml` | `permissions` あり | 同上 |
 
 **`startup_failure` は原因が分かりにくい。** ジョブが作られないためログが無く、
 `gh run view` も「This run likely failed because of a workflow file issue.」としか出さない。
-YAMLとしては妥当なので構文チェックも通る。**動いている再利用可能ワークフローとトップレベルの
-キーを比べるのが早い。**
+YAMLとしては妥当なので構文チェックも通る。**推測で直すと、真因を潰さないまま2回目の失敗を招く**
+（実際そうなった）。
 
 ### リリースワークフローのバージョン管理方式
 

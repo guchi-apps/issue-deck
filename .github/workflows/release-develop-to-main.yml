@@ -34,10 +34,15 @@ jobs:
     # 定義しているため、inputsは全て既定値でよい（version-file: package.json /
     # version-query: .version / bump-command: 空）。
     secrets: inherit
-    # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 再利用可能ワークフロー側にも
-    # 同じ内容をjob単位で書いてあるが、ここで渡さないとそちらが効かない。
+    # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 通常のワークフローではjobが
+    # workflowレベルの既定を上回る指定をしてよいが、再利用可能ワークフローでは
+    # callerが渡した範囲が上限になる。超えると startup_failure になる（#1181で2度踏んだ）。
+    #
+    # issues が write なのは、reusable側の notify-failure ジョブがリリース対象issueへ
+    # 失敗を通知するため。元のコピー方式では workflow レベルが read で notify-failure だけが
+    # write へ上書きしており、その書き方は再利用可能ワークフローでは通らない。
     permissions:
       contents: write
       pull-requests: write
-      issues: read
+      issues: write
       id-token: write
