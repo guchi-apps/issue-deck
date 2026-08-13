@@ -569,6 +569,35 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
+### 再利用可能ワークフローが呼び出し元のファイルを前提にしない
+
+**呼び出し元に無いファイルを実行すると、本来の処理が成功していてもジョブ全体が失敗する。**
+
+実際に踏んだ形（#1181）。`reusable-release-develop-to-main.yml` が
+`.github/scripts/summarize-claude-usage.sh` を直接実行していたため、`signaly` で
+**バージョンbump自体は成功しバンプPRも作られたのに、使用量出力のステップだけが落ちて
+ジョブが失敗**した。
+
+**このスクリプトを持っているのは10リポジトリ中 `dayspan` だけだった。**
+
+補助的な処理は**存在するときだけ実行する**。
+
+```yaml
+run: |
+  USAGE=.github/scripts/summarize-claude-usage.sh
+  if [ -x "$USAGE" ]; then
+    "$USAGE" "<ステップ名>" "<execution_file>"
+  else
+    echo "$USAGE が無いため、使用量のJob Summary出力はスキップします"
+  fi
+```
+
+`reusable-issue-dispatch.yml` は `prompts-ref` 経由で共有側のスクリプトを使えるが
+（#964）、リリース側は呼び出し元のcheckoutしか持たないため、無ければスキップする方針にした。
+
+**「本体は成功しているのにジョブが失敗する」形は原因が分かりにくい。** ステップ単位の
+conclusion を見ないと、どこで落ちたか特定できない。
+
 ### 呼ばれる側の権限は caller の付与範囲を超えられない
 
 **超えると `startup_failure` になる。** ジョブが1つも作られず、ログも残らない。#1181 で実際に踏んだ。
@@ -637,14 +666,27 @@ YAMLとしては妥当なので構文チェックも通る。**推測で直す�
 **ルートに`package.json`が無いと`npm version`が使えない。** その場合だけ`bump-command`を渡す。
 
 ```yaml
-# myroom: frontend/ のpackage.jsonを対象にする
+# myroom: frontend/ のpackage.jsonを対象にする（バージョン番号を受け取る）
 bump-command: npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend
-# signaly: Pythonのスクリプトで version.json を書き換える
-bump-command: python3 scripts/bump_version.py "$NEW_VERSION"
+# signaly: Pythonのスクリプトで version.json を書き換える（上げ幅を受け取る）
+bump-command: python3 scripts/bump_version.py "$BUMP_KIND"
 ```
 
-`NEW_VERSION`・`RELEASE_CHANGELOG`が環境変数で渡る。**実行後にバージョンが実際に変わったかを
-検証する**ため、コマンドが成功しても書き換わっていなければワークフローが止まる。
+**スクリプトによって受け取る引数が違う。** 次の3つが環境変数で渡るので、実装に合わせて選ぶ。
+
+| 変数 | 例 |
+|---|---|
+| `NEW_VERSION` | `1.5.9`（バージョン番号そのもの） |
+| **`BUMP_KIND`** | **`patch` / `minor` / `major`（上げ幅）** |
+| `RELEASE_CHANGELOG` | 利用者向けの更新履歴文言 |
+
+`signaly`の`scripts/bump_version.py`は**上げ幅を受け取る**形で、`NEW_VERSION`を渡すと
+`使い方: python scripts/bump_version.py [patch|minor|major]`で失敗する（#1181で実際に踏んだ）。
+**呼ぶ前にスクリプトの引数を確認すること。**
+
+**実行後にバージョンが実際に変わったかを検証する**ため、コマンドが成功しても書き換わって
+いなければワークフローが止まる。上記の失敗もこの検証ではなくスクリプト自体の終了コードで
+検出されたが、引数が合っていても書き換え先が違うようなケースはこの検証が拾う。
 
 ### タグを上げる順序 — callerが先、ラベル削除が後
 
