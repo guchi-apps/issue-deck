@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -143,6 +145,10 @@ export function AppSettingsDialog({
             質問への回答とサブIssueへの分割で使用するモデルです。実装ほどの精度を必要としないため、
             より軽いモデルを選ぶとコストを抑えられます。
           </p>
+          <Separator />
+
+          <WorkflowTagStatusSection open={open} />
+
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
