@@ -220,9 +220,18 @@ gh api repos/guchi-apps/my-app/contents/.github/workflows --jq '.[].name'
 > callerの値は`meisai-lab`（すべて持つ）と完全に同一（`node-db`/`npm`/`20.19`）で済んだ。
 > 適応が必要だったのは`AGENTS.md`に検証コマンド（`lint`・`build:ci`）を書くことだけ。
 
-**ラッパー付きのコマンドがある場合は、CI向けの素の方を書く。** `car-care`の`npm run build`は
-`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行では落ちる。
-`build:ci`（ラッパー無し）を使う、と明記しておかないとエージェントが取り違える。
+**ラッパー付きのコマンドがある場合は、CI向けの素の方を書く。** ローカル用のコマンドは
+`.env`を要求するため、CI・無人実行では落ちる。どちらが素かは**リポジトリごとに違う**ので、
+名前から推測せず`package.json`を見る。
+
+| リポジトリ | 素（CI・無人実行向け） | ラッパー付き（ローカル用） |
+|---|---|---|
+| `car-care` | `build:ci` | `build` |
+| `asset-manager` | **`build`** | **`build:local`** |
+
+**同じ`build`という名前で意味が逆**になっている。`asset-manager`にはさらに`check`
+（`lint && typecheck && build:local`）があり、一見まとめて検証できそうだが`build:local`を
+含むため無人実行では使えない。**「便利そうなまとめコマンド」ほど確認する。**
 
 #### プロンプトの取得元（`prompts-ref`）
 
