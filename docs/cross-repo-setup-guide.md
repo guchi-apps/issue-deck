@@ -190,6 +190,15 @@ allowed-tools.test.ts`が一致をテストしている。
 `actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える
 必要が出たら`runtime-setup`のプリセット追加を検討する。
 
+**Pythonを使うリポジトリでは`workflows/v10`以上を参照すること。** v9までは許可リストが
+`pnpm`固定で、`python`・`pip`・`pytest`のいずれも実行できなかった（#1147）。`signaly`のように
+**検証手段がPythonのテストしか無い**リポジトリでは、タグを下げると検証が一切できなくなる。
+
+**依存はインストールされない。** 実装ステップの前に依存インストールが走るのは
+`24.screenshot-required`が付いているときだけ。通常の実装では、実装エージェント自身が
+`npm ci`（または`pip install -r requirements.txt`）から始めることになる。CLAUDE.mdに
+**どのディレクトリでどのコマンドを打つか**を書いておくと、この往復が減る。
+
 これ以外のコマンド（`make`・`cargo`・`go`・`docker`等）が要るリポジトリは、そのままでは
 検証できない。導入時に`package.json`・CI設定を見て、**検証コマンドが上の表に収まるかを
 確認する**こと。収まらない場合は許可リストの拡張が必要になる。
@@ -198,6 +207,23 @@ allowed-tools.test.ts`が一致をテストしている。
 `npm test`（`node --test tests`）でテストするが`minimal`を選んだ。判定基準は**依存パッケージと
 ロックファイルの有無**であって、Nodeを使うかどうかではない。依存ゼロのリポジトリで`node`を
 選ぶと、ロックファイルが無い状態で`npm ci`が走って失敗する。
+
+**準備ステップは全てリポジトリルートで動く。** モノレポ的な構成で実際の依存がサブディレクトリに
+ある場合、ルートを見て判定する。`myroom`（#1047の7周目）はルートの`package.json`が
+バージョン管理用scriptのみ・`package-lock.json`も空のスタブ（`"packages": {}`）で、実際の依存は
+`frontend/`にある。**この場合も`minimal`**で、`cd frontend && npm ci`は実装エージェント自身の
+仕事になる。
+
+**`package-manager`は`minimal`でも指定する意味がある。** 準備ステップには使われないが、
+**実装ステップの許可ツールの出し分け**（上記「実装ステップが実行できるコマンド」）が
+この値を見る（#1147）。`pnpm`にすると`npm`・`node`が許可されないため、npmのリポジトリで
+`minimal`を選ぶ場合も`npm`にしておくこと。**Nodeを一切使わないリポジトリでも既定値の`npm`のまま
+にする**（`signaly`。`pnpm`にすると`node`が許可されなくなり、後で困る）。
+
+**`node-version`は指定しない選択もある。** `signaly`（#1047の8周目）はNodeが一切無い
+（`package.json`がルートにもサブディレクトリにも無く、フロントエンドは素のHTML/JS）ため
+指定していない。他の7リポジトリは全て指定している。
+
 
 `node-version`は`runtime-setup`と独立した軸で、`cache:`を付けずに`actions/setup-node`を
 呼ぶだけなので、**ロックファイルが無くても`minimal`と併用できる**。CIとNodeのバージョンを
@@ -945,6 +971,38 @@ scripts/check-local-session-contract.sh --all
 
 適合状況の一覧は [docs/supported-repositories.md](supported-repositories.md)「ローカル起動プロトコルの
 適合状況」。**Actions側の対応済みとは一致しない**（導入順が「ワークフロー→ローカル」になるため）。
+
+## 付録: 8リポジトリの設定値一覧（#1047の実績）
+
+`#1047`で8リポジトリへ導入した際の`with:`の実績値。**同じ「Next.js」でも値が揃わない**ので、
+新しいリポジトリを足すときは推測せず`package.json`・CI設定を実際に見ること。
+
+| リポジトリ | `runtime-setup` | `package-manager` | `node-version` | 決め手 |
+|---|---|---|---|---|
+| `meisai-lab` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `car-care` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `subscription-lists` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `asset-manager` | `node-db` | npm | **`"20"`** | CIが`ci.yml`ではなく`test.yml` |
+| `portfolio` | **`node`** | npm | `"20"` | `prisma/`が無い |
+| `solitaire` | **`minimal`** | npm | `"20"` | 依存ゼロ・ロックファイル無し |
+| `myroom` | `minimal` | npm | `"20"` | ルートの依存が空スタブ。実体は`frontend/` |
+| `signaly` | `minimal` | npm | **指定しない** | Nodeが一切無い |
+
+**8件すべて`npm`。** `pnpm`はissue-deck自身と`dayspan`だけで、これが#1147
+（許可ツールが`pnpm`固定だった不具合）が長く発覚しなかった理由でもある。
+
+### 検証コマンドの実績
+
+**「Next.jsなら`lint`・`typecheck`・`test`・`build`が揃っている」とは限らない。**
+
+| リポジトリ | 持っていないもの | ラッパー付きコマンド |
+|---|---|---|
+| `car-care` | `test`・`typecheck` | `build`（`with-local-env.sh`）。CI用は`build:ci` |
+| `asset-manager` | `test` | `build:local`（`with-local-env.sh`）。CI用は`build` |
+| `portfolio` | `test`・`typecheck` | `build:local`（**`op run`**）。CI用は`build` |
+| `solitaire` | `lint`・`typecheck` | なし |
+| `myroom` | （`frontend/`には揃っている） | なし。ただし**ルートには無い** |
+| `signaly` | **Lintも型チェックも無い** | なし |
 
 ## 関連ドキュメント
 
