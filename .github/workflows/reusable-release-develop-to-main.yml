@@ -35,7 +35,8 @@ on:
         description: >-
           バージョンを書き換えるコマンド。空なら
           `npm version <新版> --no-git-tag-version` を実行する。
-          NEW_VERSION・RELEASE_CHANGELOG を環境変数で受け取れる
+          NEW_VERSION（例 1.5.9）・BUMP_KIND（patch/minor/major）・RELEASE_CHANGELOG を
+          環境変数で受け取れる。スクリプトが上げ幅を受け取る形なら BUMP_KIND を渡す
         required: false
         type: string
         default: ""
@@ -229,8 +230,20 @@ jobs:
       - name: Claude使用量をJob Summaryに出力する（コード変更内容からバージョンの上げ幅を判定する）
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        #
+        # **スクリプトは呼び出し元リポジトリに無いことがある(#1181)。** 実際 signaly には
+        # .github/scripts/summarize-claude-usage.sh が無く、バンプ自体は成功しているのに
+        # このステップだけが落ちてジョブ全体を失敗させた。存在するときだけ実行する。
+        # （reusable-issue-dispatch.yml は prompts-ref 経由で共有側を使えるが、こちらは
+        #   呼び出し元のcheckoutしか持たないため、無ければスキップする方針にする）
         if: always() && steps.version-decision.outputs.execution_file != ''
-        run: .github/scripts/summarize-claude-usage.sh "コード変更内容からバージョンの上げ幅を判定する" "${{ steps.version-decision.outputs.execution_file }}"
+        run: |
+          USAGE=.github/scripts/summarize-claude-usage.sh
+          if [ -x "$USAGE" ]; then
+            "$USAGE" "コード変更内容からバージョンの上げ幅を判定する" "${{ steps.version-decision.outputs.execution_file }}"
+          else
+            echo "$USAGE が無いため、使用量のJob Summary出力はスキップします"
+          fi
 
       - name: バージョン判定結果を検証する
         id: bump
@@ -324,7 +337,12 @@ jobs:
           # ルートに package.json が無いリポジトリではそのままでは使えないため、
           # bump-command で差し替えられるようにしてある（#1181）。
           # 例: myroom は `npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend`
-          #     signaly は `python3 scripts/bump_version.py "$NEW_VERSION"`
+          #     signaly は `python3 scripts/bump_version.py "$BUMP_KIND"`
+          #
+          # **スクリプトによって受け取る引数が違う。** バージョン番号そのものを取るものと、
+          # 上げ幅（patch/minor/major）を取るものがある。signaly の bump_version.py は後者で、
+          # NEW_VERSION を渡して「使い方: ... [patch|minor|major]」で失敗した（#1181で実際に踏んだ）。
+          # 両方を環境変数で渡してあるので、スクリプトの実装に合わせて選ぶこと。
           if [ -n "$BUMP_COMMAND" ]; then
             echo "bump-command を実行します: $BUMP_COMMAND"
             bash -c "$BUMP_COMMAND"
