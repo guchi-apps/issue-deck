@@ -178,9 +178,19 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 | 種別 | 許可されているもの |
 |---|---|
-| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`・`npx`、そうでなければ`npm`・`node` |
+| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`、そうでなければ`npm`。**取り違え防止のためここだけ分ける** |
+| JS実行系 | `node`・`npx`（常時。パッケージマネージャに依存しないため） |
 | Python | `python`・`python3`・`pip`・`pip3`・`pytest`（常時） |
+| 状態確認 | `ls`・`cat`・`head`・`tail`・`wc`（読み取り専用） |
 | その他 | `git`・`gh`・`curl`・`grep`・`find`、`Edit`・`Write`・`Read`・`Grep`・`Glob` |
+
+**書き込み・削除系（`mkdir`・`rm`・`mv`・`sed -i`）と`corepack`は意図的に許可していない。**
+一時ファイルは`/tmp`直下へ直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄される
+ため掃除も要らない。一括置換は`Edit`の`replace_all`を使う。プロンプト側でそう案内している。
+
+**コマンドを`&&`・`;`・`|`でつなぐと拒否される。** 許可判定はつないだ各コマンドごとに
+行われるため、片方が未許可だと全体が落ちる。**改行して複数行に分けたコマンドも拒否される**
+ことがある（`curl`が許可されているのに2行に分けて書いて拒否された実例がある）。
 
 **この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
 `reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
