@@ -244,6 +244,13 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
     const separator = document.querySelector('[data-slot="separator"]');
     expect(separator).not.toBeNull();
   });
+
+  it("マージするボタンはopacityを含む全プロパティのtransitionを使わない（#1115: CIバッジ出現によるレイアウト移動とdisabled化のopacity transitionが重なり、モバイルSafariでボタンが二重表示される不具合の再発防止）", () => {
+    renderMergePendingWithCiStatus("in_progress");
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.className).not.toMatch(/(?:^|\s)transition-all(?:\s|$)/);
+    expect(button.className).toMatch(/(?:^|\s)transition-colors(?:\s|$)/);
+  });
 });
 
 describe("CommentThread 承認カードのテキスト入力", () => {

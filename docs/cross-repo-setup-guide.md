@@ -178,9 +178,19 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 
 | 種別 | 許可されているもの |
 |---|---|
-| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`・`npx`、そうでなければ`npm`・`node` |
+| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`、そうでなければ`npm`。**取り違え防止のためここだけ分ける** |
+| JS実行系 | `node`・`npx`（常時。パッケージマネージャに依存しないため） |
 | Python | `python`・`python3`・`pip`・`pip3`・`pytest`（常時） |
+| 状態確認 | `ls`・`cat`・`head`・`tail`・`wc`（読み取り専用） |
 | その他 | `git`・`gh`・`curl`・`grep`・`find`、`Edit`・`Write`・`Read`・`Grep`・`Glob` |
+
+**書き込み・削除系（`mkdir`・`rm`・`mv`・`sed -i`）と`corepack`は意図的に許可していない。**
+一時ファイルは`/tmp`直下へ直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄される
+ため掃除も要らない。一括置換は`Edit`の`replace_all`を使う。プロンプト側でそう案内している。
+
+**コマンドを`&&`・`;`・`|`でつなぐと拒否される。** 許可判定はつないだ各コマンドごとに
+行われるため、片方が未許可だと全体が落ちる。**改行して複数行に分けたコマンドも拒否される**
+ことがある（`curl`が許可されているのに2行に分けて書いて拒否された実例がある）。
 
 **この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
 `reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
@@ -194,10 +204,22 @@ allowed-tools.test.ts`が一致をテストしている。
 `pnpm`固定で、`python`・`pip`・`pytest`のいずれも実行できなかった（#1147）。`signaly`のように
 **検証手段がPythonのテストしか無い**リポジトリでは、タグを下げると検証が一切できなくなる。
 
-**依存はインストールされない。** 実装ステップの前に依存インストールが走るのは
-`24.screenshot-required`が付いているときだけ。通常の実装では、実装エージェント自身が
-`npm ci`（または`pip install -r requirements.txt`）から始めることになる。CLAUDE.mdに
+**Node系の依存は実装ステップの前にインストールされる（#931）。** `runtime-setup`が
+`minimal`以外なら、撮影の有無によらず`npm ci`（または`pnpm install --frozen-lockfile`）が
+走る。パッケージマネージャもPATHに通った状態で実装ステップが始まる。
+
+以前は`24.screenshot-required`が付いているときだけ走っていた。**その結果、pnpmの
+リポジトリで詰んだ。** `pnpm`自体がランナーに無く、入れるには`corepack`か`npm`が要るが
+どちらも許可リストに無いため、エージェントが10回試して全部拒否され、76ターン・10分を
+費やしてコード変更ゼロで停止した（issue-deck#1115のrunで実測）。
+
+**Python・その他の言語の依存はインストールされない。** プリセットが無いため、
+`pip install -r requirements.txt`は実装エージェント自身が実行する。CLAUDE.mdに
 **どのディレクトリでどのコマンドを打つか**を書いておくと、この往復が減る。
+
+**`minimal`のリポジトリでも依存はインストールされない。** 依存ゼロ・ロックファイル無しが
+`minimal`を選ぶ条件なので通常は問題にならないが、サブディレクトリに依存がある構成
+（`myroom`の`frontend/`）では、エージェントが自分で`cd frontend && npm ci`する必要がある。
 
 これ以外のコマンド（`make`・`cargo`・`go`・`docker`等）が要るリポジトリは、そのままでは
 検証できない。導入時に`package.json`・CI設定を見て、**検証コマンドが上の表に収まるかを

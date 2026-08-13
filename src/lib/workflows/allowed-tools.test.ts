@@ -38,14 +38,25 @@ describe("再利用可能ワークフローの許可ツール", () => {
     expect(conflict).toBe(dispatch);
   });
 
-  it("package-manager で npm と pnpm を出し分けている", () => {
+  it("package-manager で出し分けるのはパッケージマネージャ本体だけ", () => {
     const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
 
-    // pnpm を直接ハードコードしていないこと。inputs の条件式の中に現れるのは正しい。
+    // pnpm のリポジトリで npm を許可するとロックファイルの取り違えが起きうるため、
+    // そこだけは分ける。pnpm を直接ハードコードしていないこと。
     expect(allowedTools).toContain(
-      "${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }}",
+      "${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }}",
     );
-    expect(allowedTools).not.toMatch(/,Bash\(pnpm:\*\),Bash\(npx:\*\),/);
+  });
+
+  it("node と npx はパッケージマネージャによらず許可する", () => {
+    // 以前は npm 側にしか node が無く、pnpm のリポジトリで `node -e "..."` が拒否されて
+    // いた（#931 の実測）。node はパッケージマネージャに依存しない実行系。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    // 条件式の外（＝常時許可）に出ていること
+    const outsideCondition = allowedTools.replace(/\$\{\{[^}]*\}\}/g, "");
+    expect(outsideCondition).toContain("Bash(node:*)");
+    expect(outsideCondition).toContain("Bash(npx:*)");
   });
 
   it("Python の検証コマンドを許可している", () => {
@@ -55,6 +66,49 @@ describe("再利用可能ワークフローの許可ツール", () => {
 
     for (const tool of ["Bash(python:*)", "Bash(python3:*)", "Bash(pip:*)", "Bash(pytest:*)"]) {
       expect(allowedTools).toContain(tool);
+    }
+  });
+
+  it("状態確認の読み取り専用コマンドを許可している", () => {
+    // 実測（#931のベースライン）で `ls node_modules/.bin/playwright`・
+    // `cat .claude/settings.json` が拒否されていた。どちらも「今どうなっているか」を
+    // 見るだけの操作で、拒否されるとエージェントが回避策を積み重ねて往復が増える。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    for (const tool of ["Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)"]) {
+      expect(allowedTools).toContain(tool);
+    }
+  });
+
+  it("書き込み・削除系のコマンドは許可しない", () => {
+    // 一時ファイルは /tmp 直下へ直接書けばディレクトリ作成が要らず、ランナーは実行ごとに
+    // 破棄されるため掃除も要らない。プロンプト側でそう案内して、そもそも使わせない（#931）。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    for (const tool of ["Bash(mkdir:*)", "Bash(rm:*)", "Bash(mv:*)", "Bash(sed:*)"]) {
+      expect(allowedTools).not.toContain(tool);
+    }
+  });
+
+  it("パッケージマネージャの用意を迂回する手段は許可しない", () => {
+    // corepack は依存インストールをワークフロー側で常に行うようにしたため不要（#931）。
+    // 許可すると「環境構築をやり直さない」という前提が崩れる。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    expect(allowedTools).not.toContain("Bash(corepack:*)");
+  });
+
+  it("読み取り専用モードでもPRの参照を許可している", () => {
+    // plan・質問応答モードで `gh pr view` が拒否されていた（#931 の実測）。関連PRの
+    // 状態を見るのは計画立案で普通に必要になる。
+    const source = readWorkflow(WORKFLOWS[0]);
+    const readOnly = source.match(/--allowedTools "Bash\(gh issue view[^"]*"/g) ?? [];
+    expect(readOnly.length).toBeGreaterThan(0);
+
+    // `gh issue close` だけを持つ分割用の許可リストは対象外
+    for (const list of readOnly.filter((entry) => entry.includes("Bash(gh api:*)"))) {
+      expect(list).toContain("Bash(gh pr view:*)");
+      expect(list).toContain("Bash(gh pr diff:*)");
     }
   });
 

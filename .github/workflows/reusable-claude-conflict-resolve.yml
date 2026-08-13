@@ -413,10 +413,17 @@ jobs:
           # reusable-claude-conflict-resolve)で同一に保つこと。** ここだけ食い違うと、
           # 「CIは自動修正できるのに実装はできない」といった不揃いな挙動になる(#1147)。
           #
-          # package-managerでpnpm/npmを出し分ける。allowedToolsは許可リストであり、
-          # 載っていないコマンドは拒否される。issue-deck自身はpnpmのため、pnpm固定でも
-          # セルフホスティングでは表面化せず、#1047でnpmのリポジトリを増やして初めて
-          # 発覚した(dispatchだけがこの出し分けから漏れていた)。
+          # 出し分けるのはパッケージマネージャ本体だけにする(#931)。pnpmのリポジトリで
+          # npmを許可するとロックファイルの取り違えが起きうるため、そこだけは分ける。
+          # allowedToolsは許可リストであり、載っていないコマンドは拒否される。issue-deck
+          # 自身はpnpmのため、pnpm固定でもセルフホスティングでは表面化せず、#1047でnpmの
+          # リポジトリを増やして初めて発覚した(dispatchだけがこの出し分けから漏れていた)。
+          #
+          # **nodeとnpxは両方で許可する(#931)。** 以前はnpm側にしかnodeが無く、pnpmの
+          # リポジトリでは `node -e "..."` のような状態確認が拒否されていた。実測では
+          # エージェントが `pnpm exec node <ファイル>` へ切り替えて回復したが、
+          # 一時ファイルを書く手間が余分に発生していた。nodeはパッケージマネージャに
+          # 依存しない実行系で、どちらのリポジトリでも同じように必要になる。
           #
           # pythonは常に許可する。Pythonを使わないリポジトリでは単に使われないだけで、
           # pip installで任意パッケージを取得できる点はnpm/npxと同等のためリスクの
@@ -425,8 +432,15 @@ jobs:
           # ランナー標準のPythonを使うため、CIがsetup-pythonで固定しているバージョンと
           # ズレる可能性がある。厳密に揃える必要が出たらruntime-setupのプリセット追加を
           # 検討する。
+          #
+          # ls・cat・head・tail・wcは状態確認のための読み取り専用コマンド(#931)。
+          # 実測では `ls node_modules/.bin/playwright`・`cat .claude/settings.json` が
+          # 拒否されており、いずれも「今どうなっているか」を見るだけの操作だった。
+          # 書き込み・削除系(mkdir・rm・mv)は足していない。一時ファイルは既存の /tmp 直下へ
+          # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
+          # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
           claude_args: >-
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
           prompt: ${{ env.PROMPT_CONFLICT }}
 
       - name: Claude使用量をJob Summaryに出力する（Claude Code（コンフリクト解消））

@@ -48,7 +48,24 @@ DURATION_MS="$(get '.duration_ms')"
 API_MS="$(get '.duration_api_ms')"
 SUBTYPE="$(get '.subtype')"
 IS_ERROR="$(get '.is_error')"
-DENIED="$(printf '%s' "$RESULT_JSON" | jq -r '(.permission_denials // []) | map(.tool_name // .tool // "?") | unique | join(", ")' 2>/dev/null || true)"
+
+# 権限拒否はtool_name単独でuniqすると「Bashが拒否された」としか分からない（#1166）。
+# Bashはtool_input.commandまで見てコマンド単位で件数を数え、対策（許可を足す／依存を
+# 事前インストールする等）の判断材料にする。Bash以外はtool_nameのみ表示する。
+# 改行は表を壊すため1行に潰し、長いコマンドは80文字で切り詰める。
+DENIALS_RAW="$(printf '%s' "$RESULT_JSON" | jq -r '
+    (.permission_denials // [])
+    | map(
+        if (.tool_name // .tool // "") == "Bash" then
+          (.tool_input.command // .tool_name // .tool // "?")
+        else
+          (.tool_name // .tool // "?")
+        end
+      )
+    | map(gsub("\r\n|\r|\n"; " ") | gsub("[ \t]+"; " "))
+    | map(if (length) > 80 then (.[0:80] + "…") else . end)
+    | .[]
+  ' 2>/dev/null || true)"
 
 # usageは入力の内訳（キャッシュ作成・キャッシュ読み出し・非キャッシュ入力）と出力。
 # キャッシュ読み出しが支配的になるのが通常で、ここが極端に大きいステップは
@@ -100,10 +117,20 @@ row() {
 
   # 権限拒否は1件でも「プロンプトが指示している操作がallowedToolsに無い」設定漏れの可能性が高い。
   # 拒否1回はそのまま1往復であり、その時点の文脈をまるごと再送するため、放置するとコストに効く。
-  if [ -n "$DENIED" ]; then
-    echo "⚠️ **権限拒否されたツール**: \`${DENIED}\`"
+  # 件数の多いコマンドほど対策の効果が大きいため、降順で並べる。
+  if [ -n "$DENIALS_RAW" ]; then
+    DENIED_COUNT="$(printf '%s\n' "$DENIALS_RAW" | grep -c '.' || true)"
+    echo "⚠️ **権限拒否**: ${DENIED_COUNT}件"
     echo ""
     echo "プロンプトが指示している操作が \`--allowedTools\` に含まれていない可能性があります。拒否1回につき1往復ぶんのトークンが無駄になります。"
+    echo ""
+    echo "| 回数 | コマンド |"
+    echo "| --- | --- |"
+    printf '%s\n' "$DENIALS_RAW" | sort | uniq -c | sort -rn \
+      | sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]+(.*)$/\1\t\2/' \
+      | while IFS=$'\t' read -r count cmd; do
+          printf '| %s | `%s` |\n' "$count" "${cmd//|/\\|}"
+        done
     echo ""
   fi
 
