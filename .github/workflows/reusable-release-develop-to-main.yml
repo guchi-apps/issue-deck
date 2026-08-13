@@ -345,6 +345,11 @@ jobs:
           # 両方を環境変数で渡してあるので、スクリプトの実装に合わせて選ぶこと。
           if [ -n "$BUMP_COMMAND" ]; then
             echo "bump-command を実行します: $BUMP_COMMAND"
+            # **NEW_VERSION はこのステップ内で計算したシェル変数のため、exportしないと
+            # `bash -c` の子プロセスへ渡らない（#1181で実際に踏んだ）。** BUMP_KIND・
+            # RELEASE_CHANGELOG は env: で渡しているので既に環境変数だが、揃えてexportする。
+            # myroom で `npm error Invalid version: ` となり、空文字が渡っていることが分かった。
+            export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG
             bash -c "$BUMP_COMMAND"
           else
             npm version "$NEW_VERSION" --no-git-tag-version
