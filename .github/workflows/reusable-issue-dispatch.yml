@@ -1049,8 +1049,8 @@ jobs:
         # 一切発火しなくなる(#901で無人実行が丸半日停止した)。env経由にするとワークフロー側の式は
         # `${{ env.PROMPT_X }}`の数十バイトで済み、この上限を構造的に回避できる。
         #
-        # 動的な値はenvsubstで埋める。プレースホルダは以下の6つ。
-        #   ${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL}
+        # 動的な値はenvsubstで埋める。プレースホルダは以下の7つ。
+        #   ${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL} ${PACKAGE_MANAGER}
         if: steps.state.outputs.mode == 'plan'
         env:
           ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
@@ -1058,6 +1058,10 @@ jobs:
           PR_URL: ${{ steps.state.outputs.pr_url }}
           MODE: ${{ steps.state.outputs.mode }}
           REPOSITORY: ${{ github.repository }}
+          # プロンプト内の検証・撮影コマンドを呼び出し元のパッケージマネージャに合わせる(#1158)。
+          # 実装ステップの許可ツール(#1147)と同じ値を使うこと。片方だけ pnpm だと、
+          # プロンプトが案内したコマンドが権限拒否される。
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1072,7 +1076,7 @@ jobs:
           # ようにする(現時点では本文に他の$表記は無いが、将来の加筆で混入しても壊れないようにする)。
           {
             echo 'PROMPT_PLAN<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL}' < "$PROMPT_FILE"
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL} ${PACKAGE_MANAGER}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
@@ -1349,6 +1353,10 @@ jobs:
           PR_URL: ${{ steps.state.outputs.pr_url }}
           MODE: ${{ steps.state.outputs.mode }}
           REPOSITORY: ${{ github.repository }}
+          # プロンプト内の検証・撮影コマンドを呼び出し元のパッケージマネージャに合わせる(#1158)。
+          # 実装ステップの許可ツール(#1147)と同じ値を使うこと。片方だけ pnpm だと、
+          # プロンプトが案内したコマンドが権限拒否される。
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1363,7 +1371,7 @@ jobs:
           # ようにする(現時点では本文に他の$表記は無いが、将来の加筆で混入しても壊れないようにする)。
           {
             echo 'PROMPT_SPLIT<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL}' < "$PROMPT_FILE"
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL} ${PACKAGE_MANAGER}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
@@ -1444,6 +1452,10 @@ jobs:
           PR_URL: ${{ steps.state.outputs.pr_url }}
           MODE: ${{ steps.state.outputs.mode }}
           REPOSITORY: ${{ github.repository }}
+          # プロンプト内の検証・撮影コマンドを呼び出し元のパッケージマネージャに合わせる(#1158)。
+          # 実装ステップの許可ツール(#1147)と同じ値を使うこと。片方だけ pnpm だと、
+          # プロンプトが案内したコマンドが権限拒否される。
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1458,7 +1470,7 @@ jobs:
           # ようにする(現時点では本文に他の$表記は無いが、将来の加筆で混入しても壊れないようにする)。
           {
             echo 'PROMPT_QUESTION<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL}' < "$PROMPT_FILE"
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL} ${PACKAGE_MANAGER}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
@@ -1688,6 +1700,10 @@ jobs:
           PR_URL: ${{ steps.state.outputs.pr_url }}
           MODE: ${{ steps.state.outputs.mode }}
           REPOSITORY: ${{ github.repository }}
+          # プロンプト内の検証・撮影コマンドを呼び出し元のパッケージマネージャに合わせる(#1158)。
+          # 実装ステップの許可ツール(#1147)と同じ値を使うこと。片方だけ pnpm だと、
+          # プロンプトが案内したコマンドが権限拒否される。
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1702,7 +1718,7 @@ jobs:
           # ようにする(現時点では本文に他の$表記は無いが、将来の加筆で混入しても壊れないようにする)。
           {
             echo 'PROMPT_IMPLEMENT<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL}' < "$PROMPT_FILE"
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_URL} ${MODE} ${REPOSITORY} ${RUN_URL} ${PACKAGE_MANAGER}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 

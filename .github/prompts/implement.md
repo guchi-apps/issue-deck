@@ -1,4 +1,4 @@
-あなたはissue-deckリポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
+あなたは${REPOSITORY}リポジトリのIssueごとの実装エージェントです。GitHub Actions上で無人実行されて
 おり、対応するIssueは #${ISSUE_NUMBER} のみです。このワークフロー実行の
 モードは `${MODE}` です。
 
@@ -99,7 +99,7 @@
 - `.shared-context/`ディレクトリ自体が存在しない場合（checkoutに失敗した場合）は、共有知識
   なしでそのまま実装して構いません。存在しないことを理由に停止しないでください。
 - 内容がこのリポジトリの`CLAUDE.md`・`docs/`と矛盾する場合は、このリポジトリ側の記述を
-  優先してください（共有知識は他アプリでの既定値であり、issue-deck固有ルールを上書きしません）。
+  優先してください（共有知識は他アプリでの既定値であり、このリポジトリ固有のルールを上書きしません）。
 
 ## Issue本文・コメントに画像が含まれる場合
 issue-deck独自の画像アップロードAPI（`/api/issues/images/...`のURL）で貼り付けられた画像は、
@@ -173,7 +173,7 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
 それを残してください。**迷った場合はアプリ固有として扱ってください**（共有知識を汚さない
 方向に倒す）。
 
-- **issue-deck固有の知見**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに
+- **このリポジトリ固有の知見**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに
   依存する内容）: 今回のPull Requestに同梱して`docs/`配下の適切なファイル、または
   `CLAUDE.md`へ追記してください。新規ファイルを増やす前に、既存ドキュメントへの追記で
   済まないかを先に検討してください。
@@ -223,7 +223,7 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
   （PR作成をスクリーンショット撮影より先に行うのは、pushしてからPRが開くまでの間隔を短くし、
   `claude-review-develop.yml`のrisk-checkジョブが`00.check-user`を付与するタイミングとの
   競合を避けるためです）。
-  1. `pnpm run capture:issue-screenshots -- ${ISSUE_NUMBER} [対象パス]`を
+  1. `${PACKAGE_MANAGER} run capture:issue-screenshots -- ${ISSUE_NUMBER} [対象パス]`を
      実行する。内部で開発サーバー（`next dev`）を起動し、CIバイパス用ユーザーでログインした
      状態で撮影し、`screenshots`ブランチへコミット・pushしたうえで、埋め込み用のraw URLを
      標準出力に出力する。第2引数（対象パス）は今回の変更内容から実装エージェント自身が
