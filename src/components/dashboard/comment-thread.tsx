@@ -312,6 +312,11 @@ function ApprovalActions({
               size="sm"
               onClick={() => setIsMergeConfirmOpen(true)}
               disabled={mergeBusy || isMerged || pullRequestCiStatus === "in_progress"}
+              // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
+              // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
+              // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
+              // やめ、色関連のみに絞ることで回避する。
+              className="transition-colors"
             >
               {mergeBusy ? <Loader2 className="animate-spin" /> : <GitMerge />}
               {isMerged ? "マージ済み" : "マージする"}
