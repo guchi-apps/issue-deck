@@ -38,14 +38,25 @@ describe("再利用可能ワークフローの許可ツール", () => {
     expect(conflict).toBe(dispatch);
   });
 
-  it("package-manager で npm と pnpm を出し分けている", () => {
+  it("package-manager で出し分けるのはパッケージマネージャ本体だけ", () => {
     const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
 
-    // pnpm を直接ハードコードしていないこと。inputs の条件式の中に現れるのは正しい。
+    // pnpm のリポジトリで npm を許可するとロックファイルの取り違えが起きうるため、
+    // そこだけは分ける。pnpm を直接ハードコードしていないこと。
     expect(allowedTools).toContain(
-      "${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }}",
+      "${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }}",
     );
-    expect(allowedTools).not.toMatch(/,Bash\(pnpm:\*\),Bash\(npx:\*\),/);
+  });
+
+  it("node と npx はパッケージマネージャによらず許可する", () => {
+    // 以前は npm 側にしか node が無く、pnpm のリポジトリで `node -e "..."` が拒否されて
+    // いた（#931 の実測）。node はパッケージマネージャに依存しない実行系。
+    const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    // 条件式の外（＝常時許可）に出ていること
+    const outsideCondition = allowedTools.replace(/\$\{\{[^}]*\}\}/g, "");
+    expect(outsideCondition).toContain("Bash(node:*)");
+    expect(outsideCondition).toContain("Bash(npx:*)");
   });
 
   it("Python の検証コマンドを許可している", () => {
@@ -85,6 +96,20 @@ describe("再利用可能ワークフローの許可ツール", () => {
     const allowedTools = extractImplementAllowedTools(readWorkflow(WORKFLOWS[0]));
 
     expect(allowedTools).not.toContain("Bash(corepack:*)");
+  });
+
+  it("読み取り専用モードでもPRの参照を許可している", () => {
+    // plan・質問応答モードで `gh pr view` が拒否されていた（#931 の実測）。関連PRの
+    // 状態を見るのは計画立案で普通に必要になる。
+    const source = readWorkflow(WORKFLOWS[0]);
+    const readOnly = source.match(/--allowedTools "Bash\(gh issue view[^"]*"/g) ?? [];
+    expect(readOnly.length).toBeGreaterThan(0);
+
+    // `gh issue close` だけを持つ分割用の許可リストは対象外
+    for (const list of readOnly.filter((entry) => entry.includes("Bash(gh api:*)"))) {
+      expect(list).toContain("Bash(gh pr view:*)");
+      expect(list).toContain("Bash(gh pr diff:*)");
+    }
   });
 
   it("編集とgit操作を許可している（デグレ検知）", () => {
