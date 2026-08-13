@@ -170,6 +170,29 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 コンテナの起動とマイグレーションの待ち時間が毎回乗るため、DBを使わないなら`node`にする。
 **`node`では`database-name`は使われない**ので、指定せずに省く。
 
+### 実装ステップが実行できるコマンド（許可リスト）
+
+**無人実行のClaude Codeは許可リスト方式で、載っていないコマンドは拒否される。** 検証コマンドが
+実行できるかは、`package.json`にscriptがあるかどうかとは別の話になる。
+
+| 種別 | 許可されているもの |
+|---|---|
+| パッケージマネージャ | `package-manager`が`pnpm`なら`pnpm`・`npx`、そうでなければ`npm`・`node` |
+| Python | `python`・`python3`・`pip`・`pip3`・`pytest`（常時） |
+| その他 | `git`・`gh`・`curl`・`grep`・`find`、`Edit`・`Write`・`Read`・`Grep`・`Glob` |
+
+**この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
+`reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
+allowed-tools.test.ts`が一致をテストしている。
+
+**Pythonはランナー標準のものを使う。** `setup-python`は入れていないため、CIが
+`actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える
+必要が出たら`runtime-setup`のプリセット追加を検討する。
+
+これ以外のコマンド（`make`・`cargo`・`go`・`docker`等）が要るリポジトリは、そのままでは
+検証できない。導入時に`package.json`・CI設定を見て、**検証コマンドが上の表に収まるかを
+確認する**こと。収まらない場合は許可リストの拡張が必要になる。
+
 **`minimal`は「Nodeを使わない」という意味ではない。** `solitaire`（#1047の6周目）は
 `npm test`（`node --test tests`）でテストするが`minimal`を選んだ。判定基準は**依存パッケージと
 ロックファイルの有無**であって、Nodeを使うかどうかではない。依存ゼロのリポジトリで`node`を
