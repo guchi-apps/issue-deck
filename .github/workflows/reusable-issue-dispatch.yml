@@ -1730,8 +1730,25 @@ jobs:
           # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
           allowed_bots: "issue-deck[bot]"
           show_full_output: true
+          # 実装が使う検証コマンドの許可リスト。**3つの再利用可能ワークフロー
+          # (reusable-issue-dispatch / reusable-claude-ci-fix /
+          # reusable-claude-conflict-resolve)で同一に保つこと。** ここだけ食い違うと、
+          # 「CIは自動修正できるのに実装はできない」といった不揃いな挙動になる(#1147)。
+          #
+          # package-managerでpnpm/npmを出し分ける。allowedToolsは許可リストであり、
+          # 載っていないコマンドは拒否される。issue-deck自身はpnpmのため、pnpm固定でも
+          # セルフホスティングでは表面化せず、#1047でnpmのリポジトリを増やして初めて
+          # 発覚した(dispatchだけがこの出し分けから漏れていた)。
+          #
+          # pythonは常に許可する。Pythonを使わないリポジトリでは単に使われないだけで、
+          # pip installで任意パッケージを取得できる点はnpm/npxと同等のためリスクの
+          # 種類が増えるわけではない。呼び出し元ごとに絞るinputは、必要になるまで
+          # 増やさない(#1056 myroomがpytestを使う)。
+          # ランナー標準のPythonを使うため、CIがsetup-pythonで固定しているバージョンと
+          # ズレる可能性がある。厳密に揃える必要が出たらruntime-setupのプリセット追加を
+          # 検討する。
           claude_args: |
-            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*),Bash(npx:*)' || 'Bash(npm:*),Bash(node:*)' }},Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*)"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: ${{ env.PROMPT_IMPLEMENT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（実装・PR作成））
