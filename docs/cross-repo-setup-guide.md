@@ -28,15 +28,16 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 3. [ラベル体系](#2-ラベル体系)を作成する（**旧世代のラベルがある場合は、進捗を控えてから消す**）
 4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
 5. [Secrets](#4-secrets)を登録する
-6. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、**デフォルトブランチを`develop`にする**、ブランチ命名規則、Branch protection）
-7. [コピーしたワークフローのリポジトリ差異を吸収する](#6-リポジトリ差異の吸収チェックリスト)（参照方式のものは`with:`で指定済みのため対象外）
-8. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
+6. [`.gitignore`に共有ディレクトリを追加する](#gitignoreに共有ディレクトリを追加する)（**忘れやすい**）
+7. [ブランチ運用](#5-ブランチ運用)を揃える（`develop`/`main`の2段階運用、**デフォルトブランチを`develop`にする**、ブランチ命名規則、Branch protection）
+8. [コピーしたワークフローのリポジトリ差異を吸収する](#6-リポジトリ差異の吸収チェックリスト)（参照方式のものは`with:`で指定済みのため対象外）
+9. 必要に応じて[ラベル差分チェック](#7-ラベル差分チェック)・[ワークフロー同期のずれ検知](#8-ワークフロー同期のずれ検知)の
    スクリプトを利用する
-9. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
-10. [盤面へ載せる](#11-盤面へ載せるリポジトリを再同期)（issue-deckの画面で「リポジトリを再同期」）
-11. 控えておいた進捗を[書き戻す](#進捗ラベルが唯一の状態記録になっている重要)（旧世代のラベルがあった場合）
-12. [動作を確認する](#12-導入後の動作確認)
-13. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
+10. [共有知識リポジトリの参照設定](#10-共有知識リポジトリの参照設定)を行う（任意）
+11. [盤面へ載せる](#11-盤面へ載せるリポジトリを再同期)（issue-deckの画面で「リポジトリを再同期」）
+12. 控えておいた進捗を[書き戻す](#進捗ラベルが唯一の状態記録になっている重要)（旧世代のラベルがあった場合）
+13. [動作を確認する](#12-導入後の動作確認)
+14. [docs/supported-repositories.md](supported-repositories.md)に導入状況を記録する
 
 ## 0. 最初に決める5つの設定値
 
@@ -189,6 +190,15 @@ allowed-tools.test.ts`が一致をテストしている。
 `actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える
 必要が出たら`runtime-setup`のプリセット追加を検討する。
 
+**Pythonを使うリポジトリでは`workflows/v10`以上を参照すること。** v9までは許可リストが
+`pnpm`固定で、`python`・`pip`・`pytest`のいずれも実行できなかった（#1147）。`signaly`のように
+**検証手段がPythonのテストしか無い**リポジトリでは、タグを下げると検証が一切できなくなる。
+
+**依存はインストールされない。** 実装ステップの前に依存インストールが走るのは
+`24.screenshot-required`が付いているときだけ。通常の実装では、実装エージェント自身が
+`npm ci`（または`pip install -r requirements.txt`）から始めることになる。CLAUDE.mdに
+**どのディレクトリでどのコマンドを打つか**を書いておくと、この往復が減る。
+
 これ以外のコマンド（`make`・`cargo`・`go`・`docker`等）が要るリポジトリは、そのままでは
 検証できない。導入時に`package.json`・CI設定を見て、**検証コマンドが上の表に収まるかを
 確認する**こと。収まらない場合は許可リストの拡張が必要になる。
@@ -197,6 +207,23 @@ allowed-tools.test.ts`が一致をテストしている。
 `npm test`（`node --test tests`）でテストするが`minimal`を選んだ。判定基準は**依存パッケージと
 ロックファイルの有無**であって、Nodeを使うかどうかではない。依存ゼロのリポジトリで`node`を
 選ぶと、ロックファイルが無い状態で`npm ci`が走って失敗する。
+
+**準備ステップは全てリポジトリルートで動く。** モノレポ的な構成で実際の依存がサブディレクトリに
+ある場合、ルートを見て判定する。`myroom`（#1047の7周目）はルートの`package.json`が
+バージョン管理用scriptのみ・`package-lock.json`も空のスタブ（`"packages": {}`）で、実際の依存は
+`frontend/`にある。**この場合も`minimal`**で、`cd frontend && npm ci`は実装エージェント自身の
+仕事になる。
+
+**`package-manager`は`minimal`でも指定する意味がある。** 準備ステップには使われないが、
+**実装ステップの許可ツールの出し分け**（上記「実装ステップが実行できるコマンド」）が
+この値を見る（#1147）。`pnpm`にすると`npm`・`node`が許可されないため、npmのリポジトリで
+`minimal`を選ぶ場合も`npm`にしておくこと。**Nodeを一切使わないリポジトリでも既定値の`npm`のまま
+にする**（`signaly`。`pnpm`にすると`node`が許可されなくなり、後で困る）。
+
+**`node-version`は指定しない選択もある。** `signaly`（#1047の8周目）はNodeが一切無い
+（`package.json`がルートにもサブディレクトリにも無く、フロントエンドは素のHTML/JS）ため
+指定していない。他の7リポジトリは全て指定している。
+
 
 `node-version`は`runtime-setup`と独立した軸で、`cache:`を付けずに`actions/setup-node`を
 呼ぶだけなので、**ロックファイルが無くても`minimal`と併用できる**。CIとNodeのバージョンを
@@ -638,6 +665,42 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 `WORKFLOW_PAT`だけはGitHub Secretsへの直接登録が必要になる点に注意（詳細は
 [docs/cross-repo-automation.md](cross-repo-automation.md)のケーススタディ参照）。
 
+### `.gitignore`に共有ディレクトリを追加する
+
+**忘れやすい。実際に6リポジトリ連続で抜けた（#1151）。**
+
+`claude-issue-dispatch.yml`は無人実行のたびに、呼び出し元リポジトリのワークツリーへ2つの
+ディレクトリをcheckoutする。**どちらも呼び出し元の管理対象ではない。**
+
+| ディレクトリ | 中身 | いつ作られるか |
+|---|---|---|
+| `.shared-context/` | 共有知識リポジトリ（`guchi-apps/docs`） | 毎回 |
+| `.shared-prompts/` | issue-deck側の実装プロンプト | `prompts-ref`指定時（＝他リポジトリからの参照時は常に） |
+
+対象リポジトリの`.gitignore`へ追記する。
+
+```gitignore
+# claude-issue-dispatch.yml が無人実行のたびにcheckoutする（リポジトリ管理外）
+/.shared-context/
+/.shared-prompts/
+```
+
+**入れないと2つの問題が起きる。**
+
+1. **Lintがリポジトリ管理外のファイルを検査する。** eslint等はワークツリー全体を見るため、
+   `.shared-prompts/`配下のエラーが実装エージェントの出力に混ざる。自分の変更が原因かどうかの
+   切り分けに毎回手数を使う（guchi-apps/car-care#40で実際に発生）
+2. **`git add -A`で共有リポジトリごとコミットされうる。** 実装プロンプトは「`.gitignore`済み
+   ですが`git add -A`等で巻き込まないよう注意」と書いており、**その前提が崩れる**
+
+確認は空ディレクトリを作って`git status`に出ないことを見ればよい。
+
+```bash
+mkdir -p .shared-context .shared-prompts && touch .shared-context/x .shared-prompts/x
+git status --porcelain | grep shared   # 何も出なければ正しい
+rm -rf .shared-context .shared-prompts
+```
+
 ## 5. ブランチ運用
 
 - `main`は本番環境と一致するリリース用ブランチ。直接push禁止、`develop`→`main`のPRのみ
@@ -660,6 +723,8 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 ワークフローファイルをそのままコピーしても動かない、個別カスタマイズが必要な観点。
 
+- [ ] **`.gitignore`に`/.shared-context/`・`/.shared-prompts/`があるか**（参照方式でも必要。
+      上記「[.gitignoreに共有ディレクトリを追加する](#gitignoreに共有ディレクトリを追加する)」参照）
 - [ ] **パッケージマネージャ・依存関係インストールコマンド**（pnpm/npm/yarn、Node.js以外のスタックを
       含むか）
 - [ ] **lint・型チェック・テスト・ビルドコマンド**
@@ -906,6 +971,38 @@ scripts/check-local-session-contract.sh --all
 
 適合状況の一覧は [docs/supported-repositories.md](supported-repositories.md)「ローカル起動プロトコルの
 適合状況」。**Actions側の対応済みとは一致しない**（導入順が「ワークフロー→ローカル」になるため）。
+
+## 付録: 8リポジトリの設定値一覧（#1047の実績）
+
+`#1047`で8リポジトリへ導入した際の`with:`の実績値。**同じ「Next.js」でも値が揃わない**ので、
+新しいリポジトリを足すときは推測せず`package.json`・CI設定を実際に見ること。
+
+| リポジトリ | `runtime-setup` | `package-manager` | `node-version` | 決め手 |
+|---|---|---|---|---|
+| `meisai-lab` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `car-care` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `subscription-lists` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `asset-manager` | `node-db` | npm | **`"20"`** | CIが`ci.yml`ではなく`test.yml` |
+| `portfolio` | **`node`** | npm | `"20"` | `prisma/`が無い |
+| `solitaire` | **`minimal`** | npm | `"20"` | 依存ゼロ・ロックファイル無し |
+| `myroom` | `minimal` | npm | `"20"` | ルートの依存が空スタブ。実体は`frontend/` |
+| `signaly` | `minimal` | npm | **指定しない** | Nodeが一切無い |
+
+**8件すべて`npm`。** `pnpm`はissue-deck自身と`dayspan`だけで、これが#1147
+（許可ツールが`pnpm`固定だった不具合）が長く発覚しなかった理由でもある。
+
+### 検証コマンドの実績
+
+**「Next.jsなら`lint`・`typecheck`・`test`・`build`が揃っている」とは限らない。**
+
+| リポジトリ | 持っていないもの | ラッパー付きコマンド |
+|---|---|---|
+| `car-care` | `test`・`typecheck` | `build`（`with-local-env.sh`）。CI用は`build:ci` |
+| `asset-manager` | `test` | `build:local`（`with-local-env.sh`）。CI用は`build` |
+| `portfolio` | `test`・`typecheck` | `build:local`（**`op run`**）。CI用は`build` |
+| `solitaire` | `lint`・`typecheck` | なし |
+| `myroom` | （`frontend/`には揃っている） | なし。ただし**ルートには無い** |
+| `signaly` | **Lintも型チェックも無い** | なし |
 
 ## 関連ドキュメント
 
