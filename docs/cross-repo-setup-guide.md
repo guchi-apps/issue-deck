@@ -71,7 +71,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | 方式 | 対象ワークフロー | やること |
 |---|---|---|
 | **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
-| コピー方式（未移行） | `release-develop-to-main.yml`・`shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
+| コピー方式（未移行） | `shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
 
 参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
 
@@ -87,7 +87,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `reusable-claude-conflict-resolve.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect-conflicts`／`resolve-conflicts`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-ci-fix.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`・`package-manager`・`node-version`で、ビルド検証に要るダミー環境変数は`build-env`で、修正後の検証手順の説明は`verify-commands`で指定する。**Nodeのセットアップは要るが依存のインストールは不要**なリポジトリ（検証が`node --check`だけで`node_modules`を要さない等）は`install-dependencies: false`を渡す。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
 | `reusable-claude-ci-fix.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect`／`fix`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
-| `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`のみ） | バージョン管理方式（`package.json`の`version`比較か、別言語のバージョンファイルか）に応じた改変が必要 |
+| `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
@@ -459,6 +459,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `cleanup-preview.yml` | `deploy-preview.yml`が作ったIssueごとのプレビューアプリを破棄する（PRクローズ・Issueクローズ・ラベル解除・アイドル5分での定期掃除） | 同上。`deploy-preview.yml`を導入する場合のみ対で必要 |
 | `preview-logs.yml` | デプロイを伴わず、プレビュー環境のMachineのログだけを取得する（`workflow_dispatch`） | issue-deck固有のFly.io Machine構成向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
+| `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 
 ## 2. ラベル体系
 
@@ -549,6 +550,101 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
 > ここに残るのは条件系ラベル（Status = 今どこにいるか、Label = どんな性質・条件があるか）だけ。
+
+### 画面から一括でタグ更新PRを作る
+
+**issue-deckのアプリ設定ダイアログに「共有ワークフローのバージョン」の節がある**（#985・#1173）。
+各リポジトリが参照しているタグを一覧し、更新が必要なものへPRを一括作成できる。
+
+| 表示 | 意味 |
+|---|---|
+| ✓ | 最新タグを参照している |
+| **`<タグ>` へ未更新** | issue-deck側の改善が届いていない |
+| **`uses` と `prompts-ref` が不一致** | **新しいワークフローで古いプロンプトが使われる。別種の異常** |
+
+**マージは自動化していない。** 作られるのはPRまでで、内容を確認してマージするのは人間の操作
+（Actionsの変更は自動マージ不可カテゴリに該当する）。実際v12の展開では、PRを見る過程で
+`.gitignore`の漏れ（#1151）に気づいている。
+
+**上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
+car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
+
+### 呼ばれる側の権限は caller の付与範囲を超えられない
+
+**超えると `startup_failure` になる。** ジョブが1つも作られず、ログも残らない。#1181 で実際に踏んだ。
+
+```yaml
+# caller
+jobs:
+  release:
+    uses: ./.github/workflows/reusable-release-develop-to-main.yml
+    permissions:
+      issues: write   # ← 呼ばれる側の全ジョブが要求する範囲を満たす必要がある
+```
+
+**通常のワークフローとルールが違う。** 通常は job が workflow レベルの既定を上回る指定をして
+よいが、**再利用可能ワークフローでは caller が渡した範囲が上限**になる。
+
+実際に踏んだ形。`release-develop-to-main.yml` は元のコピー方式で
+「workflowレベル `issues: read` ＋ `notify-failure` ジョブだけ `issues: write`」と書かれており、
+これはコピー方式では合法だった。再利用可能化した途端に超過と判定される。
+
+**`src/lib/workflows/reusable-workflow-contract.test.ts` がこの超過を検知する。**
+ローカルパス参照の caller を辿り、呼ばれる側の各ジョブが要求する権限と突き合わせる。
+
+#### トップレベルの `concurrency`・`permissions` は原因ではない
+
+**最初はこれを疑って外したが、間違いだった。** 実際に動いている例がある。
+
+| ファイル | トップレベル | 状態 |
+|---|---|---|
+| `deploy-preview.yml` | `concurrency` あり | `workflow_call` で呼ばれて**正常動作** |
+| `reusable-issue-labels.yml` | `permissions` あり | 同上 |
+
+**`startup_failure` は原因が分かりにくい。** ジョブが作られないためログが無く、
+`gh run view` も「This run likely failed because of a workflow file issue.」としか出さない。
+YAMLとしては妥当なので構文チェックも通る。**推測で直すと、真因を潰さないまま2回目の失敗を招く**
+（実際そうなった）。
+
+### リリースワークフローのバージョン管理方式
+
+`release-develop-to-main.yml`は**バージョンの差だけで状態を判定する**（`main`と`develop`の
+バージョンが同じならバンプPRを作り、違えばdevelop→mainのPRを作る）。そのため
+**どこにバージョンがあるか**をcallerが伝える必要がある。
+
+| input | 既定 | 用途 |
+|---|---|---|
+| `version-file` | `package.json` | バージョンを読み書きするファイル |
+| `version-query` | `.version` | 値を取り出すjq式 |
+| `bump-command` | 空 | 空なら`npm version <新版> --no-git-tag-version` |
+
+11リポジトリでの実測値（#1181）。
+
+| バージョンの場所 | 該当 |
+|---|---|
+| `package.json` | 9件 |
+| **`frontend/package.json`** | **`myroom`**（ルートの`package.json`は`version`を持たない） |
+| **`version.json`** | **`signaly`**（Nodeを一切使わないため`package.json`が無い） |
+
+**`version-query`は11件すべて`.version`だった。** 実質の差異は`version-file`だけ。
+
+#### `bump-command` が要るのはどんなときか
+
+**`npm version`を使う理由は「バージョンを書き換えること」ではなく、`version` lifecycle
+スクリプトを起動すること。** これが更新履歴フック（`RELEASE_CHANGELOG`）の土台になっている
+（`npm pkg set`ではlifecycleスクリプトが起動しない）。
+
+**ルートに`package.json`が無いと`npm version`が使えない。** その場合だけ`bump-command`を渡す。
+
+```yaml
+# myroom: frontend/ のpackage.jsonを対象にする
+bump-command: npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend
+# signaly: Pythonのスクリプトで version.json を書き換える
+bump-command: python3 scripts/bump_version.py "$NEW_VERSION"
+```
+
+`NEW_VERSION`・`RELEASE_CHANGELOG`が環境変数で渡る。**実行後にバージョンが実際に変わったかを
+検証する**ため、コマンドが成功しても書き換わっていなければワークフローが止まる。
 
 ### タグを上げる順序 — callerが先、ラベル削除が後
 
@@ -740,7 +836,7 @@ rm -rf .shared-context .shared-prompts
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
-> **適用範囲**: 本節は**コピー方式のワークフロー**（`release-develop-to-main.yml`）が対象。参照方式の5つ（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`）は`with:`で吸収済みのため、ワークフローを編集する必要はない。
+> **適用範囲**: 本節は**コピー方式のワークフロー**（`shared-knowledge-propose.yml`）が対象。参照方式の6つ（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`）は`with:`で吸収済みのため、ワークフローを編集する必要はない。
 
 
 ワークフローファイルをそのままコピーしても動かない、個別カスタマイズが必要な観点。
