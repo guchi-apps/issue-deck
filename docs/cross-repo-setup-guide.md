@@ -24,7 +24,7 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
 上から順に実行すればよい。
 
 1. [対象リポジトリの構成を調べ、5つの設定値を決める](#0-最初に決める5つの設定値)
-2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの5つは**コピーせず参照**、残りはコピーして改変）
+2. [ワークフローファイルを配置する](#1-ワークフローファイル一式)（移行済みの5つは**コピーせず参照**、残りはコピーして改変）。**素の`claude.yml`があれば削除する**
 3. [ラベル体系](#2-ラベル体系)を作成する（**旧世代のラベルがある場合は、進捗を控えてから消す**）
 4. [CLAUDE.md](#3-claudemd)を新規作成、または既存ファイルに運用ルールを追記する
 5. [Secrets](#4-secrets)を登録する
@@ -164,6 +164,41 @@ jobs:
 | `minimal` | 素のJS・依存パッケージなし | なし |
 
 DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
+
+### 素の Claude Code ワークフローがある場合は削除する
+
+`/install-github-app` を実行したことのあるリポジトリには、`claude.yml`・`claude-code-review.yml`
+が残っていることがある。**マルチエージェント運用のものではなく、そのままだと二重起動する。**
+
+```yaml
+# claude.yml（素）
+on:
+  issue_comment:
+    types: [created]
+if: contains(github.event.comment.body, '@claude')
+```
+
+`claude-issue-dispatch.yml` も同じ `issue_comment` で起動するため、**1つのコメントで Claude が
+2回走る。** トークンを倍消費するうえ、2つの Claude が同じIssue・同じブランチを触って競合しうる。
+
+さらに `claude.yml` は `contains` 判定である点が厄介で、**マルチエージェント運用が投稿する
+進捗コメントや計画コメントの本文に `@claude` が含まれるだけでも反応する。** 意図しない起動が
+連鎖する余地がある。
+
+`claude-code-review.yml` は `pull_request` 起点で `claude-issue-dispatch.yml` とは重ならないが、
+`claude-review-develop.yml` を入れる場合は重複する。運用を一本化するなら、あわせて削除する。
+
+導入時に確認する。
+
+```bash
+gh api repos/guchi-apps/my-app/contents/.github/workflows --jq '.[].name'
+```
+
+削除したら、**再導入されないよう `CLAUDE.md` に理由を残す。** `/install-github-app` を
+もう一度実行すると復活するため。
+
+> `subscription-lists`（#1047の3周目）で実際に踏んだ。削除後に`@claude`コメントを投げて、
+> `issue_comment`で起動したワークフローが`Claude Issue Dispatch`の1つだけであることを確認した。
 
 ### npm scriptが揃っていなくても導入できる
 
