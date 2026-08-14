@@ -471,6 +471,8 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
 | `load-secrets-check.yml` | シークレットの供給元（GitHub／1Password）を検証する（`workflow_dispatch`）。本番には触れず、解決できたかどうかと解決できなかった項目名だけを報告する（#1306） | **展開時に有用。** 対象リポジトリへGitHub側のsecret/variableを投入したあと、`deploy.yml`を切り替える前にこれで確認できる |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
+| `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |
+| `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と失敗した項目名だけ）をissue-deckへ報告する（#1309） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
 
 ## 2. ラベル体系
 
@@ -784,7 +786,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | Secrets名 | 用途 | 備考 |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude-code-action`の実行に使うClaude Codeの認証トークン | 各リポジトリで個別に発行・登録が必要 |
-| `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
+| `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む）。**`sync-secrets.yml`（#1309）が使うため Secrets・Variables の Read and write も要る** | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushもActions secretsの書き込みも、GitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
@@ -961,6 +963,59 @@ HTTP 422で拒否される**（`Secret names must not start with GITHUB_.`）。
 なお`guchi-apps`はGitHub Freeのorganizationであり、**organization secretはprivateリポジトリからは
 利用できない**（publicリポジトリのみ）。共通値をorganization secretへ集約できるのはpublicな
 14リポジトリまでで、privateな11リポジトリはrepository secretとして個別に持つ必要がある。
+
+### シークレット同期を画面のボタンから起こす（#1309）
+
+値を変えたあとの`scripts/sync-github-secrets.sh`の実行を、issue-deckの画面
+（設定ダイアログ → 「1Password → GitHub のシークレット同期」）から起こせるようにしてある。
+
+**issue-deckはsecretを書かない。** 押すと`workflow_dispatch`で対象リポジトリの
+`sync-secrets.yml`が起動し、1Passwordの読み取りもGitHubへの書き込みもそのリポジトリの
+Actionsの中で完結する。issue-deckは16リポジトリを操作する立場のため、直接Secrets書き込み権限を
+持たせると「全リポジトリのデプロイ用シークレットを書き換えられるアプリ」になる。
+
+導入するリポジトリ側に置くのは、次の薄いcaller 1ファイルだけ。
+
+```yaml
+# .github/workflows/sync-secrets.yml
+name: Sync secrets
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "同期するKEYをカンマ区切りで絞る（空ならマニフェスト全件）"
+        required: false
+        type: string
+        default: ""
+concurrency:
+  group: sync-secrets-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  sync-secrets:
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-sync-secrets.yml@workflows/vN
+    with:
+      only: ${{ inputs.only }}
+    permissions:
+      contents: read
+    secrets: inherit
+```
+
+- **スクリプトの置き場所が`scripts/`でないリポジトリは`script-path`を指定する**
+  （`vps`は`.github/scripts/sync-github-secrets.sh`。deploy.ymlがリポジトリ全体をVPSへ
+  rsyncするため）
+- **デフォルトブランチに載るまで`workflow_dispatch`は効かない。** マージ前に画面から押すと
+  「ワークフローが見つかりません」になる
+- 必要な値はすべてorganization側にある（`WORKFLOW_PAT`・`OP_SERVICE_ACCOUNT_TOKEN`・
+  `PROGRESS_REPORT_SECRET`・変数`APP_BASE_URL`）。リポジトリ側での追加登録は要らない
+
+**1Passwordの日次枠を消費するのはこの経路だけ。** ローカルCLIから直接叩く場合は個人アカウントの
+セッションを使うため枠を消費しないが、Actions経由はサービスアカウントを使うため、全件同期1回で
+マニフェストの項目数ぶん（20〜30件）を消費する（枠はアカウント全体で1,000件/日）。
+`--dry-run`も同じだけ読むため下見にはならない。画面側は、対象キーの絞り込み・実行前の確認・
+直近の成功から10分のクールダウンで連打を抑えている。
+
+**結果として画面に出るのは件数と失敗した項目名だけ**（`同期=N スキップ=M 失敗=K`）。値そのものも
+値の長さも、ログ・画面・APIのどこにも出さない（長さも手がかりになる）。
 
 ### 変数 `APP_BASE_URL`
 
