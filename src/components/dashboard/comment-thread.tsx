@@ -6,7 +6,6 @@ import {
   Ban,
   Check,
   Loader2,
-  Mic,
   MoreHorizontal,
   Pencil,
   RotateCw,
@@ -15,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -41,7 +41,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
@@ -139,19 +138,6 @@ function ApprovalTextField({
   disabled?: boolean;
   onUploadingChange?: (uploading: boolean) => void;
 }) {
-  const {
-    isGenerating: isCleaningUp,
-    error: cleanupError,
-    notConfigured: cleanupNotConfigured,
-    generate: generateCleanup,
-  } = useIssueBodyCleanup();
-
-  async function handleCleanup() {
-    const result = await generateCleanup(value);
-    if (!result) return;
-    onChange(result.text);
-  }
-
   return (
     <div className="flex flex-col gap-2">
       <MentionTextarea
@@ -163,23 +149,7 @@ function ApprovalTextField({
         onUploadingChange={onUploadingChange}
         disabled={disabled}
       />
-      <div className="flex flex-col gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          className="w-fit"
-          disabled={!value.trim() || isCleaningUp || disabled}
-          onClick={handleCleanup}
-        >
-          {isCleaningUp ? <Loader2 className="animate-spin" /> : <Mic />}
-          音声入力を整理
-        </Button>
-        {cleanupNotConfigured && (
-          <p className="text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>
-        )}
-        {cleanupError && <p className="text-xs text-destructive">{cleanupError}</p>}
-      </div>
+      <BodyCleanupButton value={value} onCleaned={onChange} disabled={disabled} />
     </div>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, Loader2, Mic } from "lucide-react";
+import { Bot, ChevronDown, Loader2 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -27,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import {
   clearIssueDraft,
   readRestorableIssueDraft,
@@ -167,13 +167,6 @@ export function CreateIssueDialog({
     notConfigured: suggestNotConfigured,
     generate: generateSuggestion,
   } = useIssueSuggest();
-  const {
-    isGenerating: isCleaningUpBody,
-    error: bodyCleanupError,
-    notConfigured: bodyCleanupNotConfigured,
-    generate: generateBodyCleanup,
-  } = useIssueBodyCleanup();
-
   useEffect(() => {
     if (!open) return;
     // ダイアログを開くたびにフォームを初期状態へ戻す。明示的なプリフィル（引用元テキスト等）が
@@ -273,12 +266,6 @@ export function CreateIssueDialog({
     if (!result) return;
     setTitle(result.title);
     setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
-  }
-
-  async function handleGenerateBodyCleanup() {
-    const result = await generateBodyCleanup(body);
-    if (!result) return;
-    setBody(result.text);
   }
 
   async function handleSubmit() {
@@ -422,23 +409,7 @@ export function CreateIssueDialog({
                 className="min-h-32 md:text-sm"
               />
               <div className="flex flex-wrap gap-2">
-                <div className="flex flex-col gap-1">
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    disabled={!body.trim() || isCleaningUpBody}
-                    onClick={handleGenerateBodyCleanup}
-                  >
-                    {isCleaningUpBody ? <Loader2 className="animate-spin" /> : <Mic />}
-                    音声入力を整理
-                  </Button>
-                  {bodyCleanupNotConfigured && (
-                    <p className="text-xs text-muted-foreground">
-                      Claudeのトークンが設定されていません
-                    </p>
-                  )}
-                  {bodyCleanupError && <p className="text-xs text-destructive">{bodyCleanupError}</p>}
-                </div>
+                <BodyCleanupButton value={body} onCleaned={setBody} />
                 <div className="flex flex-col gap-1">
                   <Button
                     variant="outline"
