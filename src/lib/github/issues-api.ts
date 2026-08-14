@@ -177,6 +177,35 @@ export async function addIssueLabels(
   );
 }
 
+/**
+ * Issueからラベルを**1つだけ**外す（#1342）。
+ *
+ * `addIssueLabels`と対になる。`updateIssue`の`labels`は全置換なので、外したい1つ以外を
+ * すべて数え上げる必要があり、その間に他の経路が付けたラベルを落とす。
+ *
+ * **付いていないラベルを外そうとしたときの404は成功として扱う。** 呼び出し側（計画の承認待ちを
+ * 解く経路）にとって「既に外れている」は望んだ結果そのもので、人が画面の承認ボタンで先に
+ * 外した場合に必ず起きる。ラベル自体がリポジトリに存在しない場合も同じ404で返る。
+ */
+export async function removeIssueLabel(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+  label: string,
+): Promise<void> {
+  try {
+    await requestJson(
+      `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(label)}`,
+      token,
+      "DELETE",
+    );
+  } catch (error) {
+    if (error instanceof GithubApiError && error.status === 404) return;
+    throw error;
+  }
+}
+
 export type CommentBodyInput = {
   body: string;
 };

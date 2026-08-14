@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # 実装セッションの状態をSignalyへ通知するフックスクリプト（#1219）。
 #
-# Claude Codeのフック（`Notification`・`Stop`）から呼ばれ、フックのstdinに来るJSONを読んで
-# 通知を1件投げる。設定は run-issue-session.sh が生成する settings JSON 側にあり、
+# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`）から呼ばれ、フックのstdinに来る
+# JSONを読んで1件処理する。設定は run-issue-session.sh が生成する settings JSON 側にあり、
 # このスクリプトを直接叩くのは検証のときだけ。
+#
+# 扱うイベントは3つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
+# 書き、判断を2箇所に分けない）。
+#
+#   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
+#   Stop                            応答終了  → 同上（＋計画の承認待ちを解く。#1342）
+#   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
+#
+# `ExitPlanMode`でSignalyへ送らないのは、直後に承認プロンプトの`Notification`が必ず飛び、
+# 同じ「入力待ち」が二重になるため。
 #
 # 使い方（フックのcommandとして）:
 #   scripts/session-notify.sh <Issue番号> <リポジトリ名> [owner/repo]   （JSONはstdinから）
@@ -24,7 +34,9 @@
 # 読むが、新規に設定するときは新しい名前を使う（#1231）。
 #
 # 検証用の環境変数:
-#   SESSION_NOTIFY_DRY_RUN=1   送信せず、送るはずのpayloadを標準出力へ出す
+#   SESSION_NOTIFY_DRY_RUN=1   送信せず、送るはずのpayloadを標準出力へ出す。
+#                              Signalyだけでなくissue-deckへの報告も止める（#1342で計画の投稿が
+#                              GitHubへのコメント書き込みになったため、検証で実際に書かせない）
 
 set -uo pipefail
 
@@ -74,9 +86,14 @@ fi
 #
 # 判定・組み立て・シェルへ返す値の生成をすべてpython3側に寄せる。フックのJSONを
 # シェルでパースする（grep -o 等）と、値に引用符や改行が入った時点で壊れるため。
-# 標準出力の1行目を「送るか（`send <イベント名> [remote-controlのURL]` / `skip`）」、
-# 2行目以降をpayloadとして返す。イベント名を返すのはシェル側がセッションの状態として記録する
-# ため（#1256）、URLを返すのはissue-deckの画面へ渡すため（#1264）。
+# 標準出力の1行目を「何をするか」、2行目以降をpayloadとして返す。
+#
+#   send <状態イベント> <activity> <remote-controlのURL|->   Signalyへ通知する（payloadはSignaly用）
+#   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用）
+#   skip                                                    何もしない
+#
+# イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
+# URLを返すのはissue-deckの画面へ渡すため（#1264）。
 # ---------------------------------------------------------------------------
 export HOOK_JSON
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
@@ -96,11 +113,29 @@ if [[ -n "${TMUX:-}" ]]; then
 fi
 export NOTIFY_TMUX_SESSION
 
+# 計画コメントの先頭に残す前提コミット（#1342）。手でIssueへ投稿していたときと同じ形
+# （`<!-- plan-base: <SHA> -->`）を保ち、`git log <SHA>..origin/develop`で前提の変化を
+# 辿れるようにする（docs/multi-agent/gates.md）。フックはworktree上で動くので、そのまま引ける。
+#
+# **JSONの中身の判定はここでは行わない**（判定はpython側の1箇所に集める）。ここでの文字列一致は
+# 「`git`を2回呼ぶ価値があるか」を決めるだけの前捌きで、外れても計画の投稿には影響しない。
+NOTIFY_PLAN_BASE_SHA=""
+if [[ "$HOOK_JSON" == *ExitPlanMode* ]]; then
+  NOTIFY_PLAN_BASE_SHA="$(git rev-parse origin/develop 2>/dev/null ||
+    git rev-parse origin/main 2>/dev/null || true)"
+fi
+export NOTIFY_PLAN_BASE_SHA
+
 result="$(python3 - <<'PY' 2>/dev/null || true
 import glob
 import json
 import os
+import re
 import sys
+
+# 転記ファイル（transcript）から計画ファイルのパスを探すときに読む末尾の量。
+# 長いセッションでは数MBになるため、全部は読まない。
+TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024
 
 try:
     hook = json.loads(os.environ.get("HOOK_JSON", ""))
@@ -111,6 +146,137 @@ if not isinstance(hook, dict):
 
 event = hook.get("hook_event_name", "")
 notification_type = hook.get("notification_type", "")
+
+issue_number = os.environ.get("NOTIFY_ISSUE_NUMBER", "")
+repo_name = os.environ.get("NOTIFY_REPO_NAME", "")
+repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
+host_name = os.environ.get("NOTIFY_HOST_NAME", "")
+tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
+
+
+def resolve_remote_url():
+    """remote-controlのURL（best-effort）。
+
+    `~/.claude/sessions/<pid>.json` に sessionId と bridgeSessionId の対応がある。
+    **非公開の内部ファイルなので、読めなくても・形が変わっても処理自体は落とさない。**
+    `--remote-control` を付けずに起動した場合は bridgeSessionId が無く、URLも取れない。
+    """
+    session_id = hook.get("session_id", "")
+    if not session_id:
+        return ""
+    try:
+        for path in glob.glob(os.path.join(os.environ.get("NOTIFY_CLAUDE_SESSIONS_DIR", ""), "*.json")):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            if meta.get("sessionId") != session_id:
+                continue
+            bridge = meta.get("bridgeSessionId")
+            if bridge:
+                return f"https://claude.ai/code/{bridge}"
+            break
+    except Exception:
+        return ""
+    return ""
+
+
+def resolve_plan_text(tool_input):
+    """提示された計画の本文を取り出す。
+
+    **今のClaude Codeでは、計画は`ExitPlanMode`の引数では渡ってこない**（実測。ツールの説明も
+    「This tool does NOT take the plan content as a parameter - it will read the plan from the
+    file you wrote」と言っている）。計画はplan modeの開始時に指示された
+    `~/.claude/plans/<スラッグ>.md`へエージェントが書き、ツールはそれを読む。
+
+    そこでフックのJSONにある`transcript_path`を末尾から読み、**エージェントが最後に
+    `Write`/`Edit`した`~/.claude/plans/`配下のファイル**を計画ファイルとみなして中身を読む。
+
+    - **末尾から探すのは、最後に書かれた計画が欲しいから**（却下されて書き直された場合、
+      新しいものが後ろに来る）。転記ファイルは数MBになりうるので全部は読まない
+    - **ツールの引数から拾い、本文の文字列一致では探さない。** 転記ファイルにはコマンドの
+      出力や引用も入るため、パスらしき文字列を拾うと別セッションの計画ファイルを掴む
+    - **候補は`~/.claude/plans/`直下の`.md`に限る。** 転記ファイルの中身はエージェントの
+      出力そのもので、任意のパスを読ませないため
+    - 引数で渡ってくる版に当たった場合はそれを優先する（版差に強くしておく）
+    """
+    if isinstance(tool_input, dict):
+        direct = tool_input.get("plan")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+
+    transcript = hook.get("transcript_path") or ""
+    if not transcript:
+        return ""
+    plans_dir = os.path.join(os.path.expanduser("~"), ".claude", "plans")
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            if size > TRANSCRIPT_TAIL_BYTES:
+                f.seek(size - TRANSCRIPT_TAIL_BYTES)
+                f.readline()  # 途中から読み始めた1行目は壊れているので捨てる
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return ""
+
+    # **本文の文字列一致ではなく、`Write`/`Edit`の引数から拾う。** 転記ファイルには
+    # コマンドの出力や引用も入るので、単に「`~/.claude/plans/`配下のパスらしき文字列」を
+    # 探すと、別セッションの計画ファイルの話をしただけの行を掴む（実際に踏んだ）。
+    plan_path = ""
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") not in ("Write", "Edit"):
+                continue
+            path = (block.get("input") or {}).get("file_path")
+            if isinstance(path, str) and path.endswith(".md") and os.path.dirname(path) == plans_dir:
+                plan_path = path
+                break
+        if plan_path:
+            break
+    if not plan_path:
+        return ""
+    try:
+        with open(plan_path, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+# 計画の提示（#1342）。**`ExitPlanMode`の`PreToolUse`は、承認プロンプトが出る前に飛ぶ。**
+# ここが計画をIssueへ残す唯一の機会で、`Notification`のJSONには計画に関する情報が何も無い。
+#
+# 送り先はSignalyではなくissue-deck。**計画本文を外部サービスへ出す経路は作らない**という
+# 方針（下の「応答テキストは載せない」と同じ理由）を守りつつ、Issueのコメントとしてなら
+# 残す価値がある（元々プロンプトが手で投稿するよう指示していたもの）。
+if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
+    plan = resolve_plan_text(hook.get("tool_input"))
+    # 宛先が引けない・計画が読めないなら何もしない。issue-deck側もこれらは400で弾く。
+    # **読めなかったときに黙って諦めるのは、プロンプト側に手で投稿する経路が残っているため**
+    if not plan or not repo_slug or not issue_number.isdigit():
+        print("skip")
+        sys.exit(0)
+    remote_url = resolve_remote_url()
+    print("plan", remote_url or "-")
+    print(json.dumps({
+        "repository": repo_slug,
+        "issue": int(issue_number),
+        "plan": plan,
+        "remoteControlUrl": remote_url or None,
+        "planBaseSha": os.environ.get("NOTIFY_PLAN_BASE_SHA") or None,
+        "hostName": host_name or None,
+    }))
+    sys.exit(0)
 
 # 飛ばすのは「本当に人の判断が要るもの」と「完了」の2つだけ（#1219）。
 #
@@ -142,33 +308,8 @@ else:
     print("skip")
     sys.exit(0)
 
-issue_number = os.environ.get("NOTIFY_ISSUE_NUMBER", "")
-repo_name = os.environ.get("NOTIFY_REPO_NAME", "")
-host_name = os.environ.get("NOTIFY_HOST_NAME", "")
-tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
+remote_url = resolve_remote_url()
 
-# remote-controlのURL（best-effort）。
-# `~/.claude/sessions/<pid>.json` に sessionId と bridgeSessionId の対応がある。
-# **非公開の内部ファイルなので、読めなくても・形が変わっても通知自体は落とさない。**
-# `--remote-control` を付けずに起動した場合は bridgeSessionId が無く、URLも載らない。
-remote_url = ""
-session_id = hook.get("session_id", "")
-if session_id:
-    try:
-        for path in glob.glob(os.path.join(os.environ.get("NOTIFY_CLAUDE_SESSIONS_DIR", ""), "*.json")):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    meta = json.load(f)
-            except Exception:
-                continue
-            if meta.get("sessionId") != session_id:
-                continue
-            bridge = meta.get("bridgeSessionId")
-            if bridge:
-                remote_url = f"https://claude.ai/code/{bridge}"
-            break
-    except Exception:
-        remote_url = ""
 
 def signaly_link(text, url):
     """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
@@ -209,7 +350,6 @@ title = " ".join(title_parts)
 # （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
 # `·`で連結していて、これに該当していた（#1247）。
 fields = []
-repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 if repo_name:
     fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
 if issue_number:
@@ -251,13 +391,81 @@ if [[ -z "$result" ]]; then
   exit 0
 fi
 
+# issue-deckへの報告に使う宛先と鍵は、pollerと同じ`dispatch.env`から読む（#1264）。
+# **未設定でも失敗でも実装は止めない**（このスクリプトの約束）。設定していないホストでは
+# Signalyへの通知だけが飛び、画面には出ないだけになる。
+dispatch_env_value() {
+  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}" key="$1"
+  [[ -f "$env_file" ]] || return 0
+  # shellcheck disable=SC1090
+  (
+    source "$env_file" >/dev/null 2>&1
+    printf '%s' "${!key:-}"
+  )
+}
+
+# issue-deckのAPIへJSONを1件投げる。送れなかったときだけ非0で返す。
+# **失敗の理由にURLや鍵を混ぜない**（tmuxのスクロールバックに残るため）。
+post_to_issue_deck() {
+  local path="$1" body="$2" app_base_url dispatch_secret
+  [[ -n "$body" ]] || return 1
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 1
+  # 検証時（#1342でGitHubへ実際にコメントを書くようになったため）はここも送らない。
+  # 送信先の判定までは通っているので、宛先と本文だけを出す
+  if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
+    printf '%s %s\n' "$path" "$body"
+    return 0
+  fi
+  curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}$path" >/dev/null 2>&1
+}
+
+# 計画をIssueへ残す（#1342）。**Signalyへは送らない**（直後の承認プロンプトの通知と二重になる）。
+report_plan_to_issue_deck() {
+  local body="$1"
+  if ! post_to_issue_deck /api/dispatch/sessions/plan "$body"; then
+    echo "session-notify: 計画のIssueへの投稿に失敗しました（実装は続行します）" >&2
+    return 0
+  fi
+  [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
+  # **投稿できたときだけ印を残す。** ラベルを外すのは印があるときだけなので、投稿できて
+  # いないのに印を残すと、人が別の理由で付けた`00.check-user`を落としに行くことになる。
+  # tmuxの外で起動したセッションは印を置く場所（キーがtmuxのセッション名）が無い
+  if [[ -n "$NOTIFY_TMUX_SESSION" ]] &&
+    declare -F session_state_mark_plan_pending >/dev/null 2>&1; then
+    session_state_mark_plan_pending "$NOTIFY_TMUX_SESSION" ||
+      echo "session-notify: 計画の承認待ちを記録できませんでした（実装は続行します）" >&2
+  fi
+}
+
 decision_line="$(printf '%s' "$result" | head -1)"
-# 形式: `send <状態イベント> <activity> <remote-controlのURL または "-">`
-read -r decision STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
+# 形式: `send <状態イベント> <activity> <URL または "-">` / `plan <URL または "-">` / `skip`
+decision="${decision_line%% *}"
+
+if [[ "$decision" == "plan" ]]; then
+  report_plan_to_issue_deck "$(printf '%s' "$result" | tail -n +2)"
+  exit 0
+fi
+
 if [[ "$decision" != "send" ]]; then
   exit 0
 fi
+read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 [[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
+
+# 計画の承認待ち（`00.check-user`）を解いてよいか（#1342）。**印があるときだけ。**
+# `Stop`はturnごとに飛ぶので、無条件に外すと人が別の理由で付けたラベルまで落とす。
+PLAN_RESOLVED=0
+if [[ "$STATE_EVENT" == "Stop" && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_plan_pending >/dev/null 2>&1 &&
+  session_state_plan_pending "$NOTIFY_TMUX_SESSION"; then
+  PLAN_RESOLVED=1
+fi
 
 # セッションの状態を記録する（#1256）。**送信より先に行う。**
 # webhookが未設定でも・Signalyが落ちていても、回収の判定材料はホストに残る必要がある。
@@ -269,36 +477,36 @@ if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
 fi
 
 # issue-deckの画面へも同じ様子を渡す（#1264）。**Signalyへの通知だけだと、通知を消した時点で
-# 承認待ちであることを知る手段が無くなる。** 宛先と鍵はpollerと同じ`dispatch.env`から読む。
-# 未設定・失敗のいずれでも実装は止めない（このスクリプトの約束）。
+# 承認待ちであることを知る手段が無くなる。**
+#
+# `Stop`のときは、計画の承認待ちを解いてよいか（#1342）も一緒に伝える。**受け口を分けないのは、
+# 「応答が終わった」と「計画の確認は終わった」が同じイベントで、往復を2回にする理由が無いため。**
 report_activity_to_issue_deck() {
-  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
-  [[ -f "$env_file" ]] || return 0
-  local app_base_url dispatch_secret
-  # shellcheck disable=SC1090
-  app_base_url="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${APP_BASE_URL:-}")"
-  # shellcheck disable=SC1090
-  dispatch_secret="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${DISPATCH_SECRET:-}")"
-  [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$REPO_SLUG" && -n "$ISSUE_NUMBER" ]] || return 0
+  [[ -n "$REPO_SLUG" && -n "$ISSUE_NUMBER" ]] || return 0
 
   local body
   body="$(ACTIVITY="$ACTIVITY" REMOTE_URL="$REMOTE_URL" REPO_SLUG="$REPO_SLUG" \
-    ISSUE_NUMBER="$ISSUE_NUMBER" python3 -c '
+    ISSUE_NUMBER="$ISSUE_NUMBER" PLAN_RESOLVED="$PLAN_RESOLVED" python3 -c '
 import json, os
 print(json.dumps({
     "repository": os.environ["REPO_SLUG"],
     "issue": int(os.environ["ISSUE_NUMBER"]),
     "activity": os.environ["ACTIVITY"],
     "remoteControlUrl": os.environ.get("REMOTE_URL") or None,
+    "planResolved": os.environ.get("PLAN_RESOLVED") == "1",
 }))' 2>/dev/null || true)"
-  [[ -n "$body" ]] || return 0
 
-  curl -fsS --max-time 10 \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $dispatch_secret" \
-    -d "$body" \
-    "${app_base_url%/}/api/dispatch/sessions/activity" >/dev/null 2>&1 ||
+  if ! post_to_issue_deck /api/dispatch/sessions/activity "$body"; then
     echo "session-notify: issue-deckへの様子の報告に失敗しました（実装は続行します）" >&2
+    return 0
+  fi
+  [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
+  # **報告できたときだけ印を消す。** 消してから失敗すると、ラベルが付いたまま外す手掛かりが
+  # 無くなる。残っていれば次の`Stop`でもう一度外しに行ける（既に外れていても404は無視される）
+  if [[ "$PLAN_RESOLVED" == "1" ]] &&
+    declare -F session_state_clear_plan_pending >/dev/null 2>&1; then
+    session_state_clear_plan_pending "$NOTIFY_TMUX_SESSION" || true
+  fi
 }
 report_activity_to_issue_deck
 

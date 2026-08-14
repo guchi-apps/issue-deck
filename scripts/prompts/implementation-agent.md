@@ -69,6 +69,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 次の内容は端末に出すだけでなく、`gh issue comment {{ISSUE_NUMBER}}`でIssueにも投稿してください。
 
 - **計画**（`21.plan-required`が付いている場合）: 端末で提示するのと同じ内容（アプローチ・変更範囲・懸念点）をIssueコメントにも投稿する。承認を受けて内容を修正した場合は、実装に着手するまでに修正後の計画も投稿する。**計画コメントの冒頭に、その計画が前提とした`origin/develop`のSHAを`<!-- plan-base: <SHA> -->`の形で残す**（`git rev-parse origin/develop`）。並行して走る他セッションのマージで計画の前提が無効になることが実際に起きているため、後から`git log <SHA>..origin/develop --oneline`で何が変わったかを辿れるようにする（[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）
+  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`を付けます**（#1342）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
 - **後から参照する価値のある判断**: 実装方針の変更、検討したうえで見送った案とその理由、端末でユーザーから受けた追加指示のうち仕様に影響するもの。細かい進捗の実況や、コミット・PRを読めば分かることは書かない
 - **作業を中断する場合**: どこまで進んで何が残っているか。特に`11.local`を外して無人実行へ引き継ぐときは必須
 
