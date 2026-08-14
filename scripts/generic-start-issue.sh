@@ -61,6 +61,9 @@ SCRIPT_DIR="$ROOT/scripts"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/env-file-sync.sh
 source "$SCRIPT_DIR/lib/env-file-sync.sh"
+# 起動時の進捗（Project Status）報告も issue-deck 自身のランチャーと共有する（#1236）。
+# shellcheck source=scripts/lib/progress-report.sh
+source "$SCRIPT_DIR/lib/progress-report.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -178,24 +181,10 @@ fi
 # worktree作成や依存インストールより先に行う。二重起動の停止フラグ（`11.local`）は早く立つほど
 # 効くうえ、以降の重い処理が失敗しても着手した記録は残る（start-issue.sh と同じ方針）。
 
-# envファイルから1つのキーの値を読む（存在しなければ空文字）。値はログに出さない。
-read_env_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | tail -n1 | sed -e 's/^"//' -e 's/"$//'
-}
-
-# 進捗報告APIの宛先と鍵。issue-deck本体の`.env.local`を第一候補にし、無ければサブPCの
-# ディスパッチ設定（`~/.config/issue-deck/dispatch.env`）から読む。**サブPCには issue-deck の
-# `.env.local` が無いことがある**（アプリ自体はVPSで動いており、手元は起動用のcloneに過ぎない）。
-resolve_progress_endpoint() {
-  local dispatch_env="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
-  PROGRESS_BASE_URL="$(read_env_value "$ROOT/.env.local" APP_BASE_URL)"
-  PROGRESS_SECRET="$(read_env_value "$ROOT/.env.local" PROGRESS_REPORT_SECRET)"
-  [[ -n "$PROGRESS_BASE_URL" ]] || PROGRESS_BASE_URL="$(read_env_value "$dispatch_env" APP_BASE_URL)"
-  [[ -n "$PROGRESS_SECRET" ]] || PROGRESS_SECRET="$(read_env_value "$dispatch_env" PROGRESS_REPORT_SECRET)"
-  PROGRESS_BASE_URL="${PROGRESS_BASE_URL%/}"
-}
+# 進捗報告APIの宛先・鍵の解決と報告そのものは scripts/lib/progress-report.sh が持つ（#1236）。
+# **issue-deck自身のランチャー（start-issue.sh）と同じ実装を使う。** 以前はここにだけ
+# `dispatch.env`へのフォールバックがあり、issue-deck自身のIssueをサブPCで起動したときだけ
+# 進捗が報告されなかった。
 
 # 起動時にIssueへ `11.local` を付ける（#1097）。付いている間は無人実行
 # （`claude-issue-dispatch.yml`）がこのIssueに手を出さない。
@@ -212,46 +201,9 @@ apply_start_labels() {
   fi
 }
 
-# 起動時にIssueの進捗（Project Status）を報告する（#1096）。
-# **既に進捗が始まっている場合は触らない**（再開で`Develop PR`まで進んだIssueを巻き戻さない）。
-report_start_progress() {
-  local desired current code
-  resolve_progress_endpoint
-  if [[ -z "$PROGRESS_BASE_URL" || -z "$PROGRESS_SECRET" ]]; then
-    echo "#$ISSUE_NUMBER: 進捗（Project Status）は報告しませんでした（APP_BASE_URL / PROGRESS_REPORT_SECRET が見つかりません）。"
-    echo "     issue-deckの画面の「実装を開始」ボタン、またはカンバンでカードを動かして進捗を進めてください。"
-    return 0
-  fi
-
-  current="$(curl -sS -m 20 -H "Authorization: Bearer $PROGRESS_SECRET" \
-    "$PROGRESS_BASE_URL/api/progress?repository=$FULL_NAME&issue=$ISSUE_NUMBER" 2>/dev/null |
-    jq -r 'select(.available == true) | .status // empty' 2>/dev/null || true)"
-  if [[ -n "$current" && "$current" != "ready" ]]; then
-    echo "#$ISSUE_NUMBER: 進捗は既に開始済みです（$current）。巻き戻さないため報告しません。"
-    return 0
-  fi
-
-  if printf '%s\n' "$ISSUE_LABELS" | grep -Fxq "21.plan-required"; then
-    desired="planning"
-  else
-    desired="implementation"
-  fi
-
-  code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-    -X POST "$PROGRESS_BASE_URL/api/progress" \
-    -H "Authorization: Bearer $PROGRESS_SECRET" \
-    -H "Content-Type: application/json" \
-    -d "{\"repository\":\"$FULL_NAME\",\"issue\":$ISSUE_NUMBER,\"status\":\"$desired\"}" 2>/dev/null)" || code=000
-  if [[ "$code" == "200" ]]; then
-    echo "#$ISSUE_NUMBER: 進捗を $desired として報告しました。"
-  else
-    echo "#$ISSUE_NUMBER: 警告: 進捗（$desired）の報告に失敗しました（HTTP $code）。issue-deckの画面から進めてください。" >&2
-  fi
-}
-
 if [[ "$SKIP_START_REPORT" -eq 0 ]]; then
   apply_start_labels
-  report_start_progress
+  report_start_progress "$ROOT" "$FULL_NAME" "$ISSUE_NUMBER" "$ISSUE_LABELS"
 fi
 
 # --- worktreeの作成・再利用 ---------------------------------------------------

@@ -538,8 +538,12 @@ install -D -m 755 ~/apps/issue-deck/scripts/lib/local-repo-resolve.sh \
   `GET /api/progress`で確認してから報告する
 
 進捗ラベルは#991 Phase 5（#1010）で廃止したため、ローカルからも`gh issue edit`では進捗を
-進められない。報告先と鍵は本体の`.env.local`の`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`から読む。
-**どちらかが無ければ報告せず案内だけ出す**（issue-deckの画面のボタン・カンバンから進める運用も
+進められない。報告先と鍵（`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`）は
+**環境変数 → 本体の`.env.local` → `~/.config/issue-deck/dispatch.env`** の順に探す（#1236。
+[scripts/lib/progress-report.sh](../../scripts/lib/progress-report.sh)）。**サブPCのチェックアウトは
+アプリを動かすためのものではないため`.env.local`のキーが空のことがあり**、その場合は
+サブPC側の設定ファイルが唯一の置き場になる（[subpc-dispatch.md](subpc-dispatch.md)）。
+**どこにも無ければ報告せず案内だけ出す**（issue-deckの画面のボタン・カンバンから進める運用も
 成立するため、起動を止める理由にしない）。
 
 ラベル付与・進捗の報告に失敗しても起動自体は妨げない（起動できないより、記録が遅れる方が軽いという判断）。

@@ -228,13 +228,23 @@ Bearer検証の実装自体は[src/lib/shared-secret-auth.ts](../../src/lib/shar
 未設定は`unauthorized`（401）ではなく`not_configured`（503）で返し、poller側が「設定漏れ」と
 「値の不一致」を切り分けられるようにしている。
 
+**ただし`dispatch.env`には`PROGRESS_REPORT_SECRET`も置く**（#1236）。分けるのは*値*であって
+*置き場*ではない。ジョブを取るのがpollerなら、進捗（Project Status）を報告するのは起動した
+ランチャーで、サブPCのissue-deckチェックアウトは**アプリを動かすためのものではないため
+`.env.local`のキーが空**（`.env.local.example`を写しただけの状態）。ここに無いと、
+**セッションは立つのに進捗が`Ready`のまま動かない**という、いちばん気づきにくい壊れ方をする。
+ランチャーの探索順は 環境変数 → 本体の`.env.local` → このファイル
+（[scripts/lib/progress-report.sh](../../scripts/lib/progress-report.sh)）。
+
 ## サブPC側のセットアップ
 
 ```bash
 # 1. 設定ファイル（chmod 600。実値はコミットしない）
 install -D -m 600 ~/apps/issue-deck/deploy/subpc/dispatch.env.example \
   ~/.config/issue-deck/dispatch.env
-$EDITOR ~/.config/issue-deck/dispatch.env   # APP_BASE_URL と DISPATCH_SECRET を埋める
+# APP_BASE_URL・DISPATCH_SECRET・PROGRESS_REPORT_SECRET を埋める。
+# PROGRESS_REPORT_SECRET が空だと、セッションは立つのに進捗が動かない（#1236）。
+$EDITOR ~/.config/issue-deck/dispatch.env
 
 # 2. 申告だけ試す（ジョブは取らない）
 ~/apps/issue-deck/scripts/subpc-dispatch-poller.sh --announce-only
@@ -265,6 +275,7 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | pollerが何をしたか | `journalctl --user -u issue-deck-dispatch-poller -n 50` |
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
+| 進捗（Project Status）が動かない理由 | 同じjournal。pollerは起動時に鍵の有無を1度だけ確かめ、無ければ警告を出す（#1236）。個々の起動でスキップした場合はランチャーの出力に理由が出る |
 
 `systemctl --user status issue-deck-dispatch-poller.service` で常駐しているかを確認できる。
 
