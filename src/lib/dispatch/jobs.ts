@@ -14,6 +14,8 @@ import {
   parseDispatchHostRepositories,
   resolveDispatchConcurrency,
   type DispatchEnqueueRejection,
+  type DispatchHostView,
+  type DispatchJobView,
   type DispatchReportStatus,
 } from "@/lib/dispatch/dispatch-job";
 
@@ -29,29 +31,10 @@ import {
  * それ自体の死活監視が要るようになる。ポーリングが60秒間隔で来るぶん、掃く機会は十分にある。
  */
 
-/** 画面へ返すジョブ。DBの行をそのまま出さず、必要な項目だけを整える */
-export type DispatchJobView = {
-  id: string;
-  repositoryFullName: string;
-  issueNumber: number;
-  targetHost: string;
-  status: DispatchJob["status"];
-  message: string | null;
-  tmuxSessionName: string | null;
-  createdAt: string;
-  claimedAt: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-};
-
-/** 画面へ返すホスト。実行可能リポジトリは配列に展開し、生存判定も済ませて渡す */
-export type DispatchHostView = {
-  name: string;
-  repositories: string[];
-  contractVersion: number | null;
-  online: boolean;
-  lastSeenAt: string;
-};
+// 画面へ返す形（`DispatchJobView`・`DispatchHostView`）の定義は`dispatch-job.ts`にある。
+// このモジュールはPrismaクライアントを読み込むため、クライアントコンポーネント（#1180）から
+// importできない。型だけを再輸出して、サーバー側の呼び出し元が経路を意識せずに使えるようにする。
+export type { DispatchHostView, DispatchJobView };
 
 function toJobView(job: DispatchJob): DispatchJobView {
   return {
