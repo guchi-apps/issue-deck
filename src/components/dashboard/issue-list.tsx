@@ -21,11 +21,13 @@ import { Input } from "@/components/ui/input";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
+import { useNow } from "@/hooks/use-now";
 import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue, shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
+import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
@@ -146,17 +148,17 @@ export function IssueList({
     }
     return map;
   }, [issues, dispatch.jobs, dispatch.sessions]);
-  // セッションの様子（#1264）。入力待ち・終了・異常終了だけを一覧へ出す
-  const sessionLabelByIssueId = useMemo(() => {
-    const map = new Map<string, string>();
+  // セッション（#1264）。添える文言（入力待ち・終了・異常終了）と、バッジの外周を回すかどうか
+  // （#1439）の両方をバッジ側がここから決める
+  const sessionByIssueId = useMemo(() => {
+    const map = new Map<string, DispatchSessionView>();
     for (const issue of issues) {
       const session = findSessionForIssue(
         dispatch.sessions,
         issue.repositoryFullName,
         issue.number,
       );
-      const label = session ? shortIssueSessionLabel(session) : null;
-      if (label) map.set(issue.id, label);
+      if (session) map.set(issue.id, session);
     }
     return map;
   }, [issues, dispatch.sessions]);
@@ -168,6 +170,9 @@ export function IssueList({
     return ids;
   }, [executionTargetByIssueId]);
   const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
+  // セッションの報告が途絶えたまま回り続けるのを止めるための現在時刻（#1439）。
+  // 30秒ごとに更新されれば足りる（判定のしきい値は5分）
+  const now = useNow();
   // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
   // Issueを開く。選択モードのときだけチェックボックスを出す
   const [isSelecting, setIsSelecting] = useState(false);
@@ -255,7 +260,8 @@ export function IssueList({
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
                 executionTarget={executionTargetByIssueId.get(issue.id)}
-                sessionLabel={sessionLabelByIssueId.get(issue.id) ?? null}
+                session={sessionByIssueId.get(issue.id) ?? null}
+                now={now}
               />
               {issue.favorite && (
                 <Star

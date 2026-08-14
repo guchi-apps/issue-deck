@@ -4,12 +4,15 @@ import {
   describeIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
+import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { cn } from "@/lib/utils";
+import { isWorkflowBadgeSpinning } from "@/lib/workflow-badge-activity";
 import type { IssueLabel } from "@/types/issue";
 
 /**
@@ -46,10 +49,18 @@ type WorkflowStepBadgeProps = ProgressProps & {
    */
   executionTarget?: IssueExecutionTarget;
   /**
-   * セッションの様子の短い表現（#1264・`shortIssueSessionLabel`）。
-   * **入力待ち・終了・異常終了のときだけ渡ってくる**（通常の実行中は一覧が情報で埋まるため出さない）。
+   * そのIssueのサブPCセッション（#1264・`findSessionForIssue`の結果）。無ければnull。
+   *
+   * 添える文言（`shortIssueSessionLabel`。入力待ち・終了・異常終了のときだけ出す）と、
+   * 外周リングを回すかどうか（#1439）の**両方をここから決める**。別々に渡すと、片方だけ
+   * 更新された状態（例: 「入力待ち」と出ているのに回り続ける）が作れてしまう。
    */
-  sessionLabel?: string | null;
+  session?: DispatchSessionView | null;
+  /**
+   * 現在時刻(epoch ms)。`useNow()`から渡す。**マウント前はnull**で、そのときは
+   * セッションの報告の古さを判定しない（`isWorkflowBadgeSpinning`）。
+   */
+  now?: number | null;
 };
 
 const BADGE_SIZE = 18;
@@ -60,8 +71,9 @@ const BADGE_SIZE = 18;
  * アイコンを重ね、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
  * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで中央に質問アイコンを重ねる
  * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
- * GitHub Actionsの実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と
- * 実行中（回転）を同じ円で同時に表現する。
+ * 実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と実行中（回転）を
+ * 同じ円で同時に表現する。**回すかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
+ * `isWorkflowBadgeSpinning`（#1439）に集約している。**
  */
 export function WorkflowStepBadge({
   labels,
@@ -69,7 +81,8 @@ export function WorkflowStepBadge({
   running,
   qaAnswerPending = false,
   executionTarget,
-  sessionLabel = null,
+  session = null,
+  now = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -79,7 +92,17 @@ export function WorkflowStepBadge({
   const step = WORKFLOW_STEPS[currentIndex];
   const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
   const progressDeg = progress * 360;
-  const isRunning = running?.isRunning ?? false;
+  const actionsRunning = running?.isRunning ?? false;
+  // 外周を回すかどうか（#1439）。Actionsの実行中に加えて、サブPCのセッションが生きて動いている
+  // 間も回す。人待ち（承認待ち・入力待ち）と、終わった・報告が途絶えたセッションでは回さない
+  const isSpinning = isWorkflowBadgeSpinning({
+    actionsRunning: running,
+    session,
+    approvalPending,
+    now,
+  });
+  // セッションの様子の短い表現（#1264）。入力待ち・終了・異常終了のときだけ出す
+  const sessionLabel = session ? shortIssueSessionLabel(session) : null;
   // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
   // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
   // ポーリング結果が未取得（running未定義）のうちは判定しない
@@ -88,10 +111,11 @@ export function WorkflowStepBadge({
   const awaitingDispatch =
     executionTarget?.expectsActionsRun !== false &&
     running !== undefined &&
-    !isRunning &&
+    !actionsRunning &&
     running.runId === null &&
     isDispatchedStatusKey(resolveProgressStatus({ projectStatus }));
-  const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
+  // ステップ名を出せるのはActionsの実行だけ（サブPCにはジョブの段階に相当するものが無い）
+  const simpleStep = actionsRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
   // 実行先が分かっている場合はそれを出す。押す前だけでなく**着手後も**どちらで動いているかが
   // 分かるようにするため（#1262）。実行中のステップ名が出せるならそちらを優先する
   const targetLabel =
@@ -128,16 +152,13 @@ export function WorkflowStepBadge({
         className="relative flex shrink-0 items-center justify-center"
         style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
       >
-        {isRunning && (
+        {/* 承認待ちのときは回さない（`isWorkflowBadgeSpinning`）ので、amberのリングは存在しない */}
+        {isSpinning && (
           <span
             aria-hidden="true"
             className={cn(
               "absolute animate-spin rounded-full border-2 border-transparent",
-              approvalPending
-                ? "border-t-amber-500"
-                : showQaAnswerPending
-                  ? "border-t-blue-500"
-                  : "border-t-primary",
+              showQaAnswerPending ? "border-t-blue-500" : "border-t-primary",
             )}
             style={{ inset: -3 }}
           />

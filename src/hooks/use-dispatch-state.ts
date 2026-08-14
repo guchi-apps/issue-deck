@@ -34,8 +34,15 @@ export type DispatchState = {
 
 /** 未完了ジョブがある間の取得間隔。押した直後の状態変化を追う */
 const ACTIVE_POLL_INTERVAL_MS = 5_000;
-/** 何も動いていないときの取得間隔。ホストの生存表示を古びさせない程度に落とす */
-const IDLE_POLL_INTERVAL_MS = 60_000;
+/**
+ * 何も動いていないときの取得間隔。
+ *
+ * **GitHub Actionsの実行状況ポーリング（`use-issues-workflow-running.ts`）と同じ20秒に
+ * 揃えている**（#1439）。一覧のバッジの回転はActions側がこのフック、サブPC側がこちらの
+ * セッションを材料にするため、間隔が違うと同じ「実行中」でも実行先によって反映の速さが変わる。
+ * 叩き先は自前の`GET /api/dispatch`（DBの読み取りのみ）で、GitHub APIは消費しない。
+ */
+const IDLE_POLL_INTERVAL_MS = 20_000;
 
 function hasActiveJob(state: DispatchState | null): boolean {
   return state?.jobs.some((job) => isActiveDispatchJobStatus(job.status)) ?? false;
