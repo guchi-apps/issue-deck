@@ -147,6 +147,26 @@ if session_id:
     except Exception:
         remote_url = ""
 
+def signaly_link(text, url):
+    """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
+
+    Signalyがfieldsの値でリンクにできるのは `[text](url)` のマスクドリンク記法だけで、
+    生URLを置いても自動ではリンクにならない（Signalyの`docs/webhook.md`・
+    `frontend/app.js`の`renderFieldValue`）。
+
+    ただし`renderFieldValue`は `[text](url)` を
+    `<a href="..." target="_blank" rel="noopener noreferrer">` へ置換した**あとで**
+    `_..._` を `<em>` へ変換するため、生成後のHTMLに残る `_blank` のアンダースコアと
+    URL中のアンダースコアが対になり、hrefとtarget属性ごと壊れる（#1234で観測した
+    `</em>`の混入はこれ）。つまり1つの値に含まれるアンダースコアが2個以上あると壊れる。
+
+    URL中の `_` を `%5F` にしておけば値に残るアンダースコアは `_blank` の1個だけになり、
+    対にならないので壊れない。`%5F` は `_` のパーセントエンコードなので、URLとしての
+    指す先は変わらない。
+    """
+    return f"[{text}]({url.replace('_', '%5F')})"
+
+
 title_parts = [emoji]
 if repo_name and issue_number:
     title_parts.append(f"[{repo_name} #{issue_number}]")
@@ -160,29 +180,36 @@ title = " ".join(title_parts)
 # **応答テキスト（hook の last_assistant_message）は載せない。**
 # Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうるものを、外部サービスである
 # Signalyへ出す経路を最初から作らない。中身はremote-controlのURLから見る。
+#
+# **リンクは1つのフィールドに1つだけ入れる。** マスクドリンク1つにつき `target="_blank"` 由来の
+# アンダースコアが1個増えるため、同じ値に2つ並べると `_` が対になって両方壊れる
+# （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
+# `·`で連結していて、これに該当していた（#1247）。
 fields = []
+repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 if repo_name:
     fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
 if issue_number:
-    fields.append({"name": "Issue", "value": f"#{issue_number}", "inline": True})
+    issue_value = f"#{issue_number}"
+    if repo_slug:
+        issue_value = signaly_link(issue_value, f"https://github.com/{repo_slug}/issues/{issue_number}")
+    fields.append({"name": "Issue", "value": issue_value, "inline": True})
 if host_name:
     fields.append({"name": "Host", "value": host_name, "inline": True})
 fields.append({"name": "Event", "value": label, "inline": True})
 if tmux_session:
     fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
-
-links = []
-repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
-if repo_slug and issue_number:
-    links.append(f"[Issue #{issue_number}](https://github.com/{repo_slug}/issues/{issue_number})")
 if remote_url:
-    # bridgeSessionId は `session_XXX` のようにアンダースコアを含む。`[text](url)` の
-    # マスクドリンク記法で埋め込むと、Signaly側のMarkdown変換がURL中のアンダースコアを
-    # 斜体（`<em>`）の区切りと誤認し、URLに`</em>`が混入して壊れることが確認された（#1234）。
-    # 生URLのまま出せば自動リンク検出に任せられ、この誤認を避けられる。
-    links.append(f"セッションを開く（remote-control）: {remote_url}")
-if links:
-    fields.append({"name": "Links", "value": " · ".join(links), "inline": False})
+    fields.append({
+        "name": "Remote Control",
+        "value": signaly_link("セッションを開く", remote_url),
+        "inline": False,
+    })
+    # 生URLも別フィールドで残す。**スマホのプッシュ通知の本文はSignaly側がMarkdownを
+    # 除去する**（`backend/push.py`の`_plain_text`）ので、マスクドリンクだけだと
+    # プッシュ通知には表示名しか出ずURLが消える。手でコピーする経路を残しておく。
+    # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
+    fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
 
 print("send")
 print(json.dumps({"title": title, "color": color, "fields": fields}))
