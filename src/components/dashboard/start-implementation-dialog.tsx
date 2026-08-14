@@ -148,6 +148,15 @@ export function StartImplementationDialog({
    * 「未選択」を別の値にしておけば、届いた時点で既定がサブPCへ寄る（#1262）。
    */
   const [target, setTarget] = useState<StartTarget | undefined>(undefined);
+  /**
+   * このダイアログから起動した実行先（#1318）。**押してから閉じ切るまでの間だけ入る。**
+   *
+   * 押した結果で選択欄が書き変わらないようにするために持つ。サブPCへ積んだ直後は、
+   * 自分が積んだジョブのせいでそのホストが`already_queued`で塞がり、既定の実行先が
+   * GitHub Actionsへ移る。閉じるまでの一瞬でも「サブPCの選択肢が消えてGitHub Actionsが
+   * 既定として光った開始画面」が見えてしまい、どちらで起動したのか分からなくなる。
+   */
+  const [startedTarget, setStartedTarget] = useState<StartTarget | null>(null);
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -181,6 +190,7 @@ export function StartImplementationDialog({
     setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current));
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
+    setStartedTarget(null);
     setCopied(false);
   }, [open]);
 
@@ -190,6 +200,13 @@ export function StartImplementationDialog({
   // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
   const showTargets = includeDispatchTargets === true;
   /**
+   * 未完了ジョブを理由に選択肢を塞ぐか（#1318）。**このダイアログから積んだ直後は塞がない。**
+   *
+   * 自分が押した結果で自分の選択肢が消えても、利用者には何の情報にもならない。閉じ切るまでの
+   * 間だけの話で、開き直せば通常どおり「実行中または待機中のジョブが既にあります」として塞がる。
+   */
+  const blocksByActiveJob = hasActiveJob && startedTarget === null;
+  /**
    * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
    * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばす。
    */
@@ -197,13 +214,15 @@ export function StartImplementationDialog({
     ? resolveDefaultDispatchHost({
         hosts: dispatch.hosts,
         repositoryFullName: issue.repositoryFullName,
-        hasActiveJob,
+        hasActiveJob: blocksByActiveJob,
       })
     : null;
   const defaultTarget: StartTarget = defaultTargetHost
     ? { kind: "host", host: defaultTargetHost }
     : { kind: "actions" };
-  const effectiveTarget = target ?? defaultTarget;
+  // 押した実行先を最優先にする。ホストの一覧が遅れて届いても、積んだジョブで既定が動いても、
+  // 押した後の表示が別の実行先へ移らない（#1318）
+  const effectiveTarget = startedTarget ?? target ?? defaultTarget;
   const isCopyTarget = effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command";
 
   const selectedHost =
@@ -215,7 +234,7 @@ export function StartImplementationDialog({
       ? resolveDispatchTargetRejection({
           host: selectedHost,
           repositoryFullName: issue.repositoryFullName,
-          hasActiveJob,
+          hasActiveJob: blocksByActiveJob,
         })
       : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
@@ -230,6 +249,17 @@ export function StartImplementationDialog({
     } else {
       setInternalOpen(nextOpen);
     }
+  }
+
+  /**
+   * 実行先を選び直す。**押した実行先のピン留めも解く**（#1318）。
+   * コピーの後はダイアログが開いたまま残るため、続けて別の出口を選べる必要がある。
+   */
+  function selectTarget(next: StartTarget) {
+    setStartedTarget(null);
+    setTarget(next);
+    // 直前のコピーの結果を、選び直した先の結果として見せない
+    setCopied(false);
   }
 
   function toggleOption(key: StartImplementationOptionKey) {
@@ -292,8 +322,16 @@ export function StartImplementationDialog({
       issueNumber: issue.number,
       hostName,
     });
-    // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）
-    if (!enqueued) return;
+    // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）。
+    // ピン留めも解き、拒否された時点の状態で選択欄を出し直す（#1318）
+    if (!enqueued) {
+      setStartedTarget(null);
+      return;
+    }
+
+    // **積めた時点で閉じる**（#1318）。この後の`11.local`の付与はGitHubへの往復で、
+    // 開いたまま待つと、その間ずっと「もう積んである」前提の選択欄が見えることになる。
+    handleOpenChange(false);
 
     // `11.local`は**積めたときだけ**付ける。拒否されたのにラベルだけ残ると、
     // 無人実行（claude-issue-dispatch.yml）までそのIssueに触れなくなる。
@@ -307,7 +345,6 @@ export function StartImplementationDialog({
       });
       if (updated) onIssueUpdated(updated);
     }
-    handleOpenChange(false);
   }
 
   /**
@@ -370,8 +407,15 @@ export function StartImplementationDialog({
   }
 
   async function handleStart() {
+    // 押した時点の実行先を固定する（#1318）。以降の再描画（オプションのラベル付与・
+    // ジョブの追加・ポーリングでのホストの入れ替わり）で選択が動かないようにする
+    setStartedTarget(effectiveTarget);
+
     const currentIssue = await applyOptionLabels();
-    if (!currentIssue) return;
+    if (!currentIssue) {
+      setStartedTarget(null);
+      return;
+    }
 
     if (effectiveTarget.kind === "host") {
       await startOnHost(currentIssue, effectiveTarget.host);
@@ -429,9 +473,9 @@ export function StartImplementationDialog({
                 key={host.name}
                 host={host}
                 repositoryFullName={issue.repositoryFullName}
-                hasActiveJob={hasActiveJob}
+                hasActiveJob={blocksByActiveJob}
                 selected={effectiveTarget.kind === "host" && effectiveTarget.host === host.name}
-                onSelect={() => setTarget({ kind: "host", host: host.name })}
+                onSelect={() => selectTarget({ kind: "host", host: host.name })}
               />
             ))}
             <StartTargetOption
@@ -443,7 +487,7 @@ export function StartImplementationDialog({
               }
               selected={effectiveTarget.kind === "actions"}
               disabled={actionsDisabledReason !== null}
-              onSelect={() => setTarget({ kind: "actions" })}
+              onSelect={() => selectTarget({ kind: "actions" })}
             />
             {/* 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263） */}
             <StartTargetOption
@@ -451,7 +495,7 @@ export function StartImplementationDialog({
               name="実装プロンプトをコピー"
               description="開いているClaude Codeセッションへ貼ります。11.localの付与と進捗の報告も行います"
               selected={effectiveTarget.kind === "copy-prompt"}
-              onSelect={() => setTarget({ kind: "copy-prompt" })}
+              onSelect={() => selectTarget({ kind: "copy-prompt" })}
             />
             {localSessionCommand && (
               <StartTargetOption
@@ -459,7 +503,7 @@ export function StartImplementationDialog({
                 name="起動コマンドをコピー"
                 description="ターミナルへ貼ると、worktreeの作成から新しいセッションの起動までを行います"
                 selected={effectiveTarget.kind === "copy-command"}
-                onSelect={() => setTarget({ kind: "copy-command" })}
+                onSelect={() => selectTarget({ kind: "copy-command" })}
               />
             )}
           </div>
