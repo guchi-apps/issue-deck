@@ -424,6 +424,9 @@ export function MobileIssueDetail({
             issue={issue}
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            /* スマホではヘッダーに置けるのがこの▶だけなので、実行先（GitHub Actions／
+               サブPC）もここで選ばせる（#1248） */
+            includeDispatchTargets
             renderTrigger={(isSubmitting) => (
               <button
                 type="button"
@@ -746,6 +749,7 @@ export function MobileIssueDetail({
             issue={issue}
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            includeDispatchTargets
             renderTrigger={(isSubmitting) => (
               <Button
                 className="w-full"

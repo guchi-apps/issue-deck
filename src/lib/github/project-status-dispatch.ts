@@ -38,6 +38,18 @@ export type DispatchMode = "plan" | "implement" | "approve-plan";
  */
 export const LOCAL_LABEL_NAME = "11.local";
 
+/**
+ * `11.local`を足したラベル名の配列を返す。**既に付いていれば`null`**（更新不要）。
+ *
+ * 画面からサブPCへ起動する経路が2つ（「サブPCで開始」ボタンと、スマホの「実装を開始」
+ * ダイアログでの実行先選択・#1248）になったため、判定をここに1つだけ置く。
+ */
+export function labelNamesWithLocal(labels: readonly { name: string }[]): string[] | null {
+  const names = labels.map((label) => label.name);
+  if (names.includes(LOCAL_LABEL_NAME)) return null;
+  return [...names, LOCAL_LABEL_NAME];
+}
+
 /** 未着手を表すProject Status名 */
 const READY_STATUS = getProgressStatusDef("ready").projectStatus;
 
