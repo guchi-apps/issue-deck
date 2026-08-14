@@ -55,6 +55,59 @@ Claude Codeは動き続けるし（skillの執筆自体がメインPCのObsidian
 違ってよいもの）・`projects/`・`history.jsonl`・`sessions/`（セッションの実行時状態）。
 `subpc-setup`の`setup.sh`が認証情報を扱わない方針なのと揃えている。
 
+## メモリを同期せず「昇格」させる
+
+`projects/`を同期対象から外していることには、もう一段の意味がある。Claude Codeの**メモリ**
+（`~/.claude/projects/<プロジェクトのslug>/memory/`）がここに入るため、**メモリは機体ごとに
+別々に育つ**（#1400）。CLAUDE.mdと個人skillが両機で同じ実体を指しているのとは対照的で、
+サブPCのメモリはメインPCからは見えないし、その逆も見えない。
+
+保存先について非自明な点が1つある。**worktreeのセッションでも、メモリは本体リポジトリのslugへ
+保存される。**
+
+```text
+セッションのcwd     ~/apps/issue-deck-worktrees/issue-1400
+トランスクリプト     ~/.claude/projects/-home-guchi-apps-issue-deck-worktrees-issue-1400/
+メモリ              ~/.claude/projects/-home-guchi-apps-issue-deck/memory/   ← 本体リポジトリ側
+```
+
+つまり同一機体内では、Issueごとに分かれたworktreeセッションのあいだでメモリが共有される。
+「このworktreeだけの事情」をメモリに書くと、無関係な他Issueのセッションにも読まれる。
+
+### 同期しない理由
+
+メモリはClaude Codeが会話の流れの中で自動的に書くもので、**人のレビューを通っていない**。
+共有知識（`guchi-apps/docs`）が提案→審査→PR→人のマージという3重のガードを敷いている
+（[shared-knowledge.md](../shared-knowledge.md)「9.4 汚染を防ぐための3重のガード」）のに対し、
+メモリを機体間で同期すると、片方の誤った学習が無審査でもう片方へ伝播する経路ができてしまう。
+同じ知識を扱いながらガードの強さが逆転するため、揃える方向は「メモリを同期する」ではなく
+「メモリに留めない」を採る。
+
+あわせて、**GitHub Actionsの無人実行にはメモリが存在しない**（実行のたびに新しい環境で起動する）。
+ローカルで`11.local`を外して無人実行へ引き継いだ時点で、メモリに書いた内容は失われる。
+
+### 昇格先
+
+セッション中にメモリへ書いた内容のうち、恒久的に価値があるものは次の分岐で昇格させる。
+**迷った場合はアプリ固有として扱う。**
+
+| メモリの内容 | 昇格先 |
+|---|---|
+| issue-deck固有（このリポジトリのコード・画面・ラベル・ワークフローに依存する） | 実装PRに同梱して`docs/`または`CLAUDE.md`へ書く |
+| 全アプリ共通（対象リポジトリを差し替えても成立し、数週間以上有効で、根拠を示せる） | 対応Issueへ`<!-- shared-knowledge-proposal -->`付きの追加提案コメントを投稿する（[shared-knowledge.md](../shared-knowledge.md)「9.1 提案」） |
+| 個人の作業ルール（回答言語・git運用・確認の取り方など、プロジェクトに依らない） | `~/apps/claude-config/CLAUDE.md`。`~/.claude/`配下はエージェントが書けないため、ユーザーが編集する |
+| そのセッション限りの事情（一時的な障害・その場の手順） | 昇格させない。メモリに残すか削除する |
+
+昇格は実装エージェントの自己申告で、機械的な強制力は持たせていない。
+[`scripts/prompts/implementation-agent.md`](../../scripts/prompts/implementation-agent.md)と
+[`scripts/prompts/generic-implementation-agent.md`](../../scripts/prompts/generic-implementation-agent.md)の
+「実装中に得た知見の記録」で促すに留め、投稿されたかどうかの検証はしない。共有知識と同じく
+**量より汚染防止を優先する**ため、取りこぼしは許容する。
+
+なお、これらのプロンプトは`scripts/start-issue.sh`・`scripts/generic-start-issue.sh`が
+起こしたセッションにしか渡らない。素の`claude`で起こしたセッションはこの分岐を読まないため、
+そこまで効かせたい場合は同じ内容を`~/apps/claude-config/CLAUDE.md`へ置く必要がある。
+
 ## symlinkの解決
 
 **skill単位のsymlinkは動作を確認済み**（Claude Code v2.1.232）。`~/.claude/skills/<名前>`を

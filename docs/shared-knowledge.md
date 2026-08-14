@@ -29,12 +29,18 @@ AI専用のストレージや埋め込みDBは導入しない。
 
 | 置き場所 | 内容 | ローカル実行から読めるか | GitHub Actions実行から読めるか |
 |---|---|---|---|
-| `~/.claude/CLAUDE.md`（個人環境のグローバル） | 日本語で回答する・Git/GitHub運用・シークレット管理などの横断ルール | ✅ | ❌ |
-| `~/.claude/skills/`（個人環境のスキル） | `git-github-ja`・`changelog-ja`・`secrets-1password`等 | ✅ | ❌ |
+| `~/.claude/CLAUDE.md`（個人環境のグローバル） | 日本語で回答する・Git/GitHub運用・シークレット管理などの横断ルール。実体は`guchi-apps/claude-config`で、両機がsymlinkで同じファイルを見る（#1190） | ✅ | ❌ |
+| `~/.claude/skills/`（個人環境のスキル） | `git-github-ja`・`changelog-ja`・`secrets-1password`等。実体は上と同じく`guchi-apps/claude-config` | ✅ | ❌ |
+| `~/.claude/projects/<slug>/memory/`（メモリ） | Claude Codeが会話中に自動で書く記録。**機体ローカルで、メインPC・サブPC間で同期されない** | ✅（そのマシンのぶんだけ） | ❌（毎回空） |
 | issue-deckの`CLAUDE.md` | issue-deck固有の運用ルール（ラベル遷移・自動マージ不可カテゴリ等） | ✅ | ✅ |
 | issue-deckの`docs/` | 設計ドキュメント（`multi-agent-workflow.md`ほか） | ✅ | ✅ |
 | `.github/workflows/*.yml`のプロンプト | 各エージェントの責務・手順 | —（Actions専用） | ✅ |
-| `guchi-apps/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`CLAUDE.md`＝索引、`standards/`・`knowledge/`・`agent-rules/`・`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ❌ |
+| `guchi-apps/docs`（別リポジトリ） | アプリ開発の標準・規約・共通ガイド（`CLAUDE.md`＝索引、`standards/`・`knowledge/`・`agent-rules/`・`guides/`・`templates/`・`label-sync/`） | ✅（`~/apps/_docs`にcloneしてあれば） | ✅（`.shared-context/`へcheckoutする） |
+
+このうち**メモリだけが、機体をまたいでも実行経路をまたいでも引き継がれない**。同期しない理由と、
+メモリに書いた内容をどこへ昇格させるかは
+[multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)「メモリを同期せず
+『昇格』させる」を参照する。
 
 ### 自動化の構成
 
