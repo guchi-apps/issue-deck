@@ -352,6 +352,12 @@ report_sessions() {
 
   # セッションごとにコマンドを起動せず、1回のlist-panesで全ペインを取る。
   # `pane_dead_status`は死んだペインの終了コード（tmux 3.0aのmanに記載あり）。
+  #
+  # **区切りのタブはANSI-Cクォート（`$'...'`）で実タブとして渡す。** tmuxはフォーマット
+  # 文字列の`\t`を展開せず、リテラルの`\`と`t`をそのまま出す（3.0a・3.4で確認）。通常の
+  # シングルクォートで書くと1行が丸ごと`session_name`へ入り、次の正規表現に一致せず
+  # **全ペインが捨てられて常に0件**になる（#1241。0件でも空配列を送る設計のためエラーにも
+  # ならず、静かに送り続ける）。
   while IFS=$'\t' read -r session_name pane_dead pane_status; do
     [[ -n "$session_name" ]] || continue
     [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
@@ -373,7 +379,7 @@ report_sessions() {
       --argjson paneDeadStatus "$status_json" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus}')")
-  done < <(tmux list-panes -a -F '#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
+  done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
   # （実装セッションは1ペインだが、人が分割した場合に取りこぼさないため）。
