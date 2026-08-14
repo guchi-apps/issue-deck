@@ -40,20 +40,26 @@ export type DispatchSessionState = "ALIVE" | "EXITED" | "FAILED" | "GONE";
  * そこだけをフックから受け取る。境界は`gates.md`の「フックが飛ぶか」と同じで、
  * ここに入るのはセッションが生きている間しか飛ばないものに限る。
  *
- * **古い値が残り続けないことが前提。** `WAITING_INPUT`が解けるのは次の3つ。
+ * **古い値が残り続けないことが前提。** `WAITING_INPUT`が解けるのは次の4つ。
  *
- * 1. `Stop`フック（`RESPONDED`へ）
- * 2. セッションの消滅（pollerの報告で`EXITED`/`FAILED`/`GONE`へ。**表示が状態を優先するだけで、
+ * 1. `PostToolUse`フック（`WORKING`へ。#1357）
+ * 2. `Stop`フック（`RESPONDED`へ）
+ * 3. セッションの消滅（pollerの報告で`EXITED`/`FAILED`/`GONE`へ。**表示が状態を優先するだけで、
  *    列の値自体は残る**）
- * 3. 同じ名前で立ち上がり直したときの破棄（`isRevivedSession`。#1353）
+ * 4. 同じ名前で立ち上がり直したときの破棄（`isRevivedSession`。#1353）
  *
- * 3が無いと、2で残った値が起動し直した次のセッションへそのまま引き継がれる。
+ * 4が無いと、3で残った値が起動し直した次のセッションへそのまま引き継がれる。
  *
- * **フックが飛ぶ範囲より細かい状態は表せない。** 承認プロンプトに人が答えても何のフックも
- * 飛ばないため、`WAITING_INPUT`は「答えた瞬間」ではなく「そのターンが終わった時（`Stop`）」に
- * 解ける。答えた後の作業中も入力待ちに見える窓がここに残っている（#1353で別Issueへ切り出し）。
+ * **`WORKING`は`RESPONDED`では代用できない**（#1357）。承認プロンプトに人が答えたことを知らせる
+ * フックは無く、答えた直後に必ず飛ぶのは「承認したツールが走った」`PostToolUse`だけ。そこで
+ * `RESPONDED`を送ると「応答を終えています／次の指示を待っている場合があります」と出るため、
+ * 作業中の表示としては誤りになる。
+ *
+ * **`WORKING`は「答えた直後」にしか報告されない。** `PostToolUse`はツールの実行ごとに飛ぶため、
+ * ホスト側（`scripts/lib/session-state.sh`の`.event`）で「直前が`permission_prompt`のとき」だけに
+ * 間引いている。作業中ずっと届く値ではないので、これを使って停滞を測らない。
  */
-export type DispatchSessionActivity = "WAITING_INPUT" | "RESPONDED";
+export type DispatchSessionActivity = "WAITING_INPUT" | "WORKING" | "RESPONDED";
 
 /** フックが送ってくる1件ぶんの報告 */
 export type DispatchSessionActivityReport = {
@@ -67,6 +73,7 @@ export type DispatchSessionActivityReport = {
 /** フックのイベント名（`session-notify.sh`が送る値）を内部の表現へ写す */
 export function parseDispatchSessionActivity(value: unknown): DispatchSessionActivity | null {
   if (value === "waiting_input") return "WAITING_INPUT";
+  if (value === "working") return "WORKING";
   if (value === "responded") return "RESPONDED";
   return null;
 }

@@ -526,12 +526,17 @@ model DispatchSession {
 // セッション自身がフックから報告してくる様子（#1264）。
 //
 // WAITING_INPUT=承認プロンプト・AskUserQuestionで人の入力を待っている /
+// WORKING=その入力に人が答え、作業へ戻った（#1357） /
 // RESPONDED=応答が終わった（無人で回すセッションでは実質「作業完了」）。
+//
+// **WORKINGはRESPONDEDでは代用できない。** RESPONDEDは「応答を終えています／次の指示を待って
+// いる場合があります」と出るため、答えた直後の作業中に送ると誤った表示になる（#1357）。
 //
 // **停滞・完了の判定には使わない。** これは「今この瞬間セッションが何をしているか」で、
 // 実装の進捗はProject Statusが唯一の正（docs/progress-status-architecture.md）。
 enum DispatchSessionActivity {
   WAITING_INPUT
+  WORKING
   RESPONDED
 }
 

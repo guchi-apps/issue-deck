@@ -292,7 +292,8 @@ if [[ -n "$TMUX_SESSION_NAME" ]]; then
   fi
 fi
 
-# セッションの状態をSignalyへ通知するフック（#1219）と、提示した計画をIssueへ残すフック（#1342）。
+# セッションの状態をSignalyへ通知するフック（#1219）、提示した計画をIssueへ残すフック（#1342）、
+# 承認に答えて作業へ戻ったことをissue-deckへ伝えるフック（#1357）。
 #
 # **`--settings` で渡すことで、このスクリプトから起動したセッションにだけ適用する。**
 # `~/.claude/settings.json` に書くとメインPCの対話セッションでも通知が飛んで邪魔になる。
@@ -317,6 +318,12 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # `PreToolUse`だけmatcherを付ける（#1342）。**計画本文（`tool_input.plan`）が手に入るのは
   # `ExitPlanMode`のこのフックだけ**で、承認プロンプトの`Notification`には入っていない。
   # matcherを付けずに全ツールで呼ぶと、`Read`・`Bash`のたびにスクリプトが起動する。
+  #
+  # **`PostToolUse`はmatcherを付けず全ツールで呼ぶ**（#1357）。これは「人が承認プロンプトに
+  # 答えた」ことを知る唯一の手掛かりで、承認が要るツールは`Bash`・`Write`・`WebFetch`・
+  # `AskUserQuestion`・MCPのツールと広く、絞ると答えたのに入力待ちのままになる組み合わせが残る。
+  # 代わりに`session-notify.sh`が状態ファイルを見て「直前が入力待ちのとき」以外を即座に捨てる
+  # （HTTPどころかpython3も起こさない）。
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -331,6 +338,9 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
         "matcher": "ExitPlanMode",
         "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
       }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ]
   }
 }

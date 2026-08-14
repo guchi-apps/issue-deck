@@ -218,6 +218,7 @@ describe("parseDispatchSessionReport", () => {
 describe("parseDispatchSessionActivity", () => {
   it("フックのイベント名を内部の表現へ写す", () => {
     expect(parseDispatchSessionActivity("waiting_input")).toBe("WAITING_INPUT");
+    expect(parseDispatchSessionActivity("working")).toBe("WORKING");
     expect(parseDispatchSessionActivity("responded")).toBe("RESPONDED");
   });
 
