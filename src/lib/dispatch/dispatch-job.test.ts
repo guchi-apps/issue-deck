@@ -153,6 +153,8 @@ describe("parseDispatchReportStatus", () => {
     expect(parseDispatchReportStatus("running")).toBe("running");
     expect(parseDispatchReportStatus("succeeded")).toBe("succeeded");
     expect(parseDispatchReportStatus("failed")).toBe("failed");
+    // 起動を見送ったときの報告（#1229）
+    expect(parseDispatchReportStatus("skipped")).toBe("skipped");
   });
 
   it("issue-deck側だけが付ける状態は受け付けない", () => {
@@ -383,6 +385,14 @@ describe("describeDispatchJobStatus", () => {
     expect(describeDispatchJobStatus("FAILED").tone).toBe("error");
     expect(describeDispatchJobStatus("TIMEOUT").tone).toBe("error");
   });
+
+  // #1229。正常に働いた安全機構を赤くすると、起動できなかったのかどうか判断できない
+  it("見送りは失敗として見せない", () => {
+    const skipped = describeDispatchJobStatus("SKIPPED");
+    expect(skipped.tone).toBe("muted");
+    expect(skipped.tone).not.toBe("error");
+    expect(skipped.label).toBe("起動済みのため見送り");
+  });
 });
 
 describe("isCancelableDispatchJobStatus", () => {
@@ -391,6 +401,13 @@ describe("isCancelableDispatchJobStatus", () => {
     expect(isCancelableDispatchJobStatus("CLAIMED")).toBe(true);
     expect(isCancelableDispatchJobStatus("RUNNING")).toBe(false);
     expect(isCancelableDispatchJobStatus("SUCCEEDED")).toBe(false);
+    // 見送りは終わった状態（#1229）。取り消す対象は残っていない
+    expect(isCancelableDispatchJobStatus("SKIPPED")).toBe(false);
+  });
+
+  // 見送られたジョブが未完了のままだと、activeKeyが残って次のジョブを積めなくなる
+  it("見送りは未完了ではない", () => {
+    expect(isActiveDispatchJobStatus("SKIPPED")).toBe(false);
   });
 });
 

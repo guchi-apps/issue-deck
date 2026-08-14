@@ -8,7 +8,11 @@ import { reportDispatchJob } from "@/lib/dispatch/jobs";
 const MAX_MESSAGE_LENGTH = 2000;
 
 /**
- * pollerからのジョブ状態の報告（#1179）。`running` / `succeeded` / `failed` の3つ。
+ * pollerからのジョブ状態の報告（#1179）。`running` / `succeeded` / `failed` / `skipped` の4つ。
+ *
+ * `skipped`は「起動する必要が無かった」（#1229）。既にそのIssueのtmuxセッションが動いていた
+ * ためpollerが起動を見送った場合で、**失敗ではない**。古いpollerは送ってこないため、
+ * 受け口だけが先に新しくなっても従来どおり動く。
  *
  * **`succeeded`は「tmuxセッションが立ち上がった」まで**を意味し、実装の完了ではない。
  * 実装の進捗は`POST /api/progress`（Project Status）が唯一の正として持つ
