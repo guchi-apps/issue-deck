@@ -158,6 +158,16 @@ jobs:
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # 切り分け用: ローカル複合アクションの参照だけを入れ、secrets/varsは空を渡す。
+      # これでCIが起動すれば、原因は toJSON(secrets) の受け渡しにあると分かる。
+      - name: シークレットを解決する
+        if: steps.status.outputs.should_notify == 'true'
+        uses: ./.github/actions/load-secrets
+        with:
+          only: SIGNALY_WEBHOOK_URL
+          secrets-json: "{}"
+          vars-json: "{}"
+
       - name: Signaly に通知
         if: steps.status.outputs.should_notify == 'true'
         # 通知はCIの合否そのものではない。ここが失敗してもrun全体を落とさない
