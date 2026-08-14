@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Archive,
   CircleSlash,
@@ -14,10 +14,28 @@ import {
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
+import {
+  describeReleaseStatusBadge,
+  type ReleaseStatusBadge,
+} from "@/lib/github/release-button-status";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { ConnectedRepository } from "@/types/repository";
+
+/**
+ * この画面を開いている間、動いているリポジトリがある場合の再取得間隔（#1117）。
+ * スマホからリリースの進み具合を見に来ている状況なので、既定の5分より短くする。
+ * 動きが無い間は既定の間隔に戻るため、リリース中でなければAPI消費は増えない。
+ */
+const ACTIVE_POLL_INTERVAL_MS = 60_000;
+
+const BADGE_TONE_CLASS: Record<ReleaseStatusBadge["tone"], string> = {
+  progressing: "bg-sky-500/15 text-sky-700 ring-sky-500/40 dark:text-sky-400",
+  action: "bg-amber-500/15 text-amber-700 ring-amber-500/40 dark:text-amber-400",
+  error: "bg-destructive/15 text-destructive ring-destructive/40",
+};
 
 type MobileReposScreenProps = {
   repositories: ConnectedRepository[];
@@ -37,6 +55,25 @@ export function MobileReposScreen({
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
   const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
+
+  // 本番ワークフローの進捗を一覧で把握できるようにする（#1117）。取得はこの画面を
+  // 開いている間だけで、`idle`のリポジトリはAPIが返さないためバッジも出ない。
+  const { data: releaseStatuses } = useRepositoryReleaseStatuses(repositories.length > 0, {
+    activeIntervalMs: ACTIVE_POLL_INTERVAL_MS,
+  });
+  const releaseBadgeByRepo = useMemo(() => {
+    const map = new Map<string, ReleaseStatusBadge>();
+    (releaseStatuses ?? []).forEach((releaseStatus) => {
+      const badge = describeReleaseStatusBadge({
+        status: releaseStatus.status,
+        failedWorkflow: releaseStatus.failedWorkflow,
+        mergeTarget: releaseStatus.pendingMerge?.mergeTarget ?? null,
+        ciState: releaseStatus.pendingMerge?.ciState ?? null,
+      });
+      if (badge) map.set(releaseStatus.repoFullName, badge);
+    });
+    return map;
+  }, [releaseStatuses]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
@@ -107,6 +144,9 @@ export function MobileReposScreen({
             <ul className="flex flex-col gap-1">
               {filtered.map((repo) => {
                 const color = getRepoColor(repo.fullName);
+                const releaseBadge = releaseBadgeByRepo.get(repo.fullName);
+                const hasStateIcons =
+                  repo.archived || repo.private || !repo.hasClaudeWorkflow;
                 return (
                   <li key={repo.id} className="flex items-center gap-1">
                     <button
@@ -126,21 +166,35 @@ export function MobileReposScreen({
                         </span>
                         <span className="truncate">{repo.name}</span>
                       </span>
-                      {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
-                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-                          {repo.archived && (
-                            <span title="アーカイブ済み">
-                              <Archive className="size-3.5" />
+                      {(releaseBadge || hasStateIcons) && (
+                        <span className="flex shrink-0 items-center gap-1.5 pl-2">
+                          {releaseBadge && (
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                                BADGE_TONE_CLASS[releaseBadge.tone],
+                              )}
+                            >
+                              {releaseBadge.label}
                             </span>
                           )}
-                          {repo.private && (
-                            <span title="プライベートリポジトリ">
-                              <Lock className="size-3.5" />
-                            </span>
-                          )}
-                          {!repo.hasClaudeWorkflow && (
-                            <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
-                              <CircleSlash className="size-3.5" />
+                          {hasStateIcons && (
+                            <span className="flex items-center gap-1 text-muted-foreground">
+                              {repo.archived && (
+                                <span title="アーカイブ済み">
+                                  <Archive className="size-3.5" />
+                                </span>
+                              )}
+                              {repo.private && (
+                                <span title="プライベートリポジトリ">
+                                  <Lock className="size-3.5" />
+                                </span>
+                              )}
+                              {!repo.hasClaudeWorkflow && (
+                                <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                                  <CircleSlash className="size-3.5" />
+                                </span>
+                              )}
                             </span>
                           )}
                         </span>
