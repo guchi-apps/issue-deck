@@ -120,6 +120,19 @@ echo "#$ISSUE_NUMBER: セッションへ次の1行を渡します。もし起動
 echo "  $KICKOFF_PROMPT"
 echo
 
-echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を起動します..."
+# 権限モード（#1205）。既定は `auto`。
+# `acceptEdits` はファイル編集だけを自動承認し、Bashコマンドは都度確認するため、
+# `npx tsc --noEmit`・`npx vitest run`・`gh issue comment` のたびにセッションが停止する。
+# 人が横にいない実行（サブPC・外出先からの起動）ではこれが致命的なので、既定を `auto` にする。
+# 代わりに失われる「個々のコマンドを人が目視する機会」は、Pull Request必須・
+# `claude-review-develop.yml`のレビュー・自動マージ不可カテゴリ（`00.check-user`）・
+# Issueごとのworktree分離という後段の防御で受ける。
+# 慎重に進めたいときは ISSUE_DECK_CLAUDE_PERMISSION_MODE=acceptEdits で従来の挙動に戻せる。
+# `bypassPermissions` は全権限チェックを飛ばし破壊的な操作も無確認で通るため、既定にはしない。
+# 値の妥当性検査はclaude側に任せる（ここで列挙を持つとclaudeの更新でずれる）。不正な値は
+# claudeが起動時にエラーで落ちるため、意図しないモードで動き出すことはない。
+PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+
+echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
-claude --permission-mode acceptEdits ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$KICKOFF_PROMPT"
+claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$KICKOFF_PROMPT"

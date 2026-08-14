@@ -131,6 +131,11 @@ else
   echo "共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
 
-echo "Claude Codeセッションを起動します（このターミナルで実行）..."
+# 権限モード（#1205）。既定は `auto`。実装セッション（run-issue-session.sh）と同じ理由・同じ
+# 環境変数で切り替える。レビュー・統合エージェントも`gh pr view`・`gh pr merge`等のBashコマンドを
+# 多用するため、`acceptEdits`のままでは都度停止する。
+PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+
+echo "Claude Codeセッションを権限モード $PERMISSION_MODE で起動します（このターミナルで実行）..."
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
-exec claude --permission-mode acceptEdits ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$PROMPT_CONTENT"
+exec claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$PROMPT_CONTENT"

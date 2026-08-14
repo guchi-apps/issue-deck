@@ -64,20 +64,32 @@ cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\register-issuedeck-protocol.ps1
 ```
 
-登録スクリプトは2つの複製を作る。
+登録スクリプトは3つの複製を作る。
 
 | 複製するもの | 複製先 | 理由 |
 | --- | --- | --- |
 | `scripts/windows/issuedeck-protocol.ps1` | `%LOCALAPPDATA%\issue-deck\` | WSL上のパス（`\\wsl.localhost\...`）を直接登録すると、WSLが停止した状態からの初回起動でパス解決に失敗しうる |
 | `scripts/start-local-session.sh` | WSLの`~/.local/share/issue-deck/` | リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間はファイルが存在せず起動できない（#1076） |
+| `scripts/lib/local-repo-resolve.sh` | WSLの`~/.local/share/issue-deck/lib/` | 受け口がリポジトリの解決・検証をこのライブラリに任せているため（#1179）。**受け口だけを複製しても起動しない** |
 
-**どちらかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+**いずれかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+
+> **#1179を取り込んだ環境では、登録スクリプトの再実行が必須。**
+> 受け口が`lib/`をsourceするようになり、複製の中身が「1ファイル」から「受け口＋`lib/`」へ
+> 変わった。再実行しないと`issuedeck://`からの起動が失敗する。#1085と同じ性質の変更で、
+> 画面側から検知する手段が無いこと自体は#1089に記録がある。
+> 受け口は黙って失敗せず、「登録スクリプトを再実行してください」と案内して止まる。
+
+受け口は自分と同じ位置の`lib/`を探す（`$(dirname "${BASH_SOURCE[0]}")/lib/`）。リポジトリ内の
+`scripts/lib/`と複製先の`~/.local/share/issue-deck/lib/`が同じ相対位置になるため、経路によらず
+同じ1行で解決できる。**ライブラリからリポジトリ内のファイルを参照しないこと**（複製先には
+チェックアウトが無い）。
 
 受け口の複製元は`$PSScriptRoot`から辿る。`\\wsl.localhost\<ディストロ>\...`と`\\wsl$\<ディストロ>\...`は
 そのまま読み替え、それ以外（Cドライブ等から実行した場合）は`wslpath -u`に任せる。特定できない
 場合は警告を出すので、表示された`install`コマンドをWSL側で実行する。
 
-解除は`-Unregister`を付けて実行する。両方の複製とレジストリ登録が消える。
+解除は`-Unregister`を付けて実行する。3つの複製（`lib/`ごと）とレジストリ登録が消える。
 
 動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/99999`を入力する。
 新しいタブが開いて「issue #99999 の取得に失敗しました」で止まれば、レジストリ登録からWSLの
@@ -198,7 +210,8 @@ v2の検査は**v2以上を宣言しているリポジトリにだけ課す**。
 
 そのままコピーで済むのは、事前バリデーション・worktreeの作成と再利用・sslip.ioの設定・
 python3によるプロンプト生成ブロック全体・tmux出口（出口の判定・セッション名の組み立て・
-`bash -lc`・`remain-on-exit`）・`claude --permission-mode acceptEdits`の起動フラグ。
+`bash -lc`・`remain-on-exit`）・`claude --permission-mode "$PERMISSION_MODE"`の起動フラグ
+（既定値の決め方は後述の[権限モードは環境変数で切り替える](#権限モードは環境変数で切り替える)）。
 
 ## ヘッドレス（tmux）で起動する
 
@@ -429,7 +442,12 @@ URL経路と同じものを動かすためだが、複製を作るのは登録�
 ```bash
 install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
+install -D -m 755 ~/apps/issue-deck/scripts/lib/local-repo-resolve.sh \
+  ~/.local/share/issue-deck/lib/local-repo-resolve.sh
 ```
+
+**受け口とライブラリは必ずセットで置く。** 受け口だけを置くと、実行時に
+「`lib/local-repo-resolve.sh`がありません」で停止する。
 
 ## セットアップ手順を画面から見せる
 
@@ -573,6 +591,46 @@ Issue #<番号> の実装を開始してください。あなたへの指示は 
 （`Is this a project you created or one you trust?`）が出ること」だけだが、**承認時にプロンプトが
 失われると確定させたわけではない**。信頼確認はこちらから自動化するものではないため、原因を
 追うのではなく、貼り直せる形にして先へ進めるようにしている。
+
+## 権限モードは環境変数で切り替える
+
+`run-issue-session.sh`（実装セッション）と`start-reviewer.sh`（レビュー・統合セッション）は、
+`claude --permission-mode`へ渡す値を`ISSUE_DECK_CLAUDE_PERMISSION_MODE`から取り、**既定を`auto`
+とする**（#1205）。
+
+```bash
+PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+claude --permission-mode "$PERMISSION_MODE" ...
+```
+
+元の既定だった`acceptEdits`は**ファイル編集だけを自動承認し、Bashコマンドは都度確認する**。
+そのためセッションは`npx tsc --noEmit`・`npx vitest run`・`python3`・`gh issue comment`のたびに
+停止し、人が承認しないと進まない（#1179の実装セッションでは1回の実装で6回以上停止した）。
+サブPCでの無人実行・外出先からの起動は、この状態では成立しない。
+
+代償は**人が個々のコマンドを目視する機会が失われる**ことで、これは取り戻せない。それでも`auto`を
+既定とするのは、後段に防御が残っているため。
+
+- 変更は必ずPull Requestになり、`claude-review-develop.yml`のレビューを通る
+- DBスキーマ・認証・本番設定・Secrets等は自動マージ不可カテゴリとして`00.check-user`で止まる
+- worktreeがIssueごとに分離されており、他Issueの作業を壊さない
+
+運用上の約束。
+
+- 慎重に進めたいときは`ISSUE_DECK_CLAUDE_PERMISSION_MODE=acceptEdits`で従来の挙動に戻せる。
+  ワンクリック起動の経路でもtmuxが`bash -lc`でログインシェルを経由するため、`~/.bashrc`等に
+  `export`しておけば効く
+- **`bypassPermissions`を既定にはしない。** すべての権限チェックを飛ばすため、破壊的な操作も
+  無確認で通る
+- 値の妥当性検査は**claude側に任せる**。issue-deck側で受け付ける値を列挙すると、claudeの更新で
+  ずれる。不正な値を渡した場合はclaudeが起動時にエラーで落ちるだけで、意図しないモードで
+  動き出すことはない（`--permission-mode nonexistent`は
+  `option '--permission-mode <mode>' argument 'nonexistent' is invalid.`（＋許可値の一覧）を出して
+  終了コード1で落ちる）
+
+なお[セキュリティ上の前提](#セキュリティ上の前提)のとおり、プロトコル経由の起動は
+「心当たりのないタブが開いたら閉じる」で受けている。`auto`ではその開いてしまったセッションが
+コマンドを確認なしで実行できるため、**閉じる判断は早いほどよい**。
 
 ## タブは非対話シェルで始まる（nvmが読まれない）
 

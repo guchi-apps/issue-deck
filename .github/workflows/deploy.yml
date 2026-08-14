@@ -220,6 +220,9 @@ jobs:
           # 進捗報告API(POST /api/progress)の共有シークレット(#991 Phase 2)。
           # 各ワークフローはorganization secretの同名の値でこのAPIを叩く
           PROGRESS_REPORT_SECRET: ${{ env.PROGRESS_REPORT_SECRET }}
+          # サブPCへのディスパッチAPIの共有シークレット(#1179)。進捗報告とは別の値にする
+          # (あちらは全リポジトリのActionsから参照できるorganization secretのため)
+          DISPATCH_SECRET: ${{ env.DISPATCH_SECRET }}
           TARGET_DIR: ${{ env.TARGET_DIR }}
           APP_PORT: ${{ env.PORT }}
         with:
@@ -227,7 +230,7 @@ jobs:
           username: ${{ env.USERNAME }}
           key: ${{ env.SSH_PRIVATE_KEY }}
           port: ${{ env.SSH_PORT }}
-          envs: DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,ALLOWED_EMAILS,CLAUDE_CODE_OAUTH_TOKEN,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,TARGET_DIR,APP_PORT
+          envs: DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,ALLOWED_EMAILS,CLAUDE_CODE_OAUTH_TOKEN,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,DISPATCH_SECRET,TARGET_DIR,APP_PORT
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -264,6 +267,7 @@ jobs:
             update_env PROJECT_V2_OWNER "${PROJECT_V2_OWNER:-}"
             update_env PROJECT_V2_NUMBER "${PROJECT_V2_NUMBER:-}"
             update_env PROGRESS_REPORT_SECRET "${PROGRESS_REPORT_SECRET:-}"
+            update_env DISPATCH_SECRET "${DISPATCH_SECRET:-}"
             update_env GITHUB_USER_TOKEN_ENCRYPTION_KEY "$GITHUB_USER_TOKEN_ENCRYPTION_KEY"
             update_env GITHUB_OAUTH_CLIENT_ID "$GITHUB_OAUTH_CLIENT_ID"
             update_env GITHUB_OAUTH_CLIENT_SECRET "$GITHUB_OAUTH_CLIENT_SECRET"
@@ -288,9 +292,22 @@ jobs:
             fi
 
             echo "Health check..."
-            sleep 5
-            curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null
-            echo "Deployment successful."
+            # Next.js は起動完了までに数秒かかる。1回だけの curl では起動を待ちきれず、
+            # アプリが正常に立ち上がっていても deploy ジョブが失敗する。失敗すると後続の
+            # release / notify-release がスキップされ、タグはあるのに GitHub Release が
+            # 作られない状態になる（複数アプリを同時にデプロイした際に実際に発生した）。
+            for i in $(seq 1 30); do
+              if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/"; then
+                echo "Deployment successful."
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Health check failed after 60s."
+            pm2 describe issue-deck || true
+            pm2 logs issue-deck --lines 50 --nostream || true
+            exit 1
 
   notify:
     runs-on: ubuntu-latest

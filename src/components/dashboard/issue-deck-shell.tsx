@@ -74,6 +74,7 @@ type IssueDeckShellProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  dispatchConcurrency: number;
 };
 
 export function IssueDeckShell({
@@ -84,6 +85,7 @@ export function IssueDeckShell({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  dispatchConcurrency: initialDispatchConcurrency,
 }: IssueDeckShellProps) {
   const {
     filters,
@@ -115,6 +117,7 @@ export function IssueDeckShell({
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
   const {
     mobileScreen,
@@ -835,11 +838,13 @@ export function IssueDeckShell({
         autoRetryLimit={autoRetryLimit}
         claudeModel={claudeModel}
         claudeModelAssist={claudeModelAssist}
+        dispatchConcurrency={dispatchConcurrency}
         onOpenChange={setAppSettingsDialogOpen}
-        onUpdated={(nextAutoRetryLimit, nextClaudeModel, nextClaudeModelAssist) => {
-          setAutoRetryLimit(nextAutoRetryLimit);
-          setClaudeModel(nextClaudeModel);
-          setClaudeModelAssist(nextClaudeModelAssist);
+        onUpdated={(next) => {
+          setAutoRetryLimit(next.autoRetryLimit);
+          setClaudeModel(next.claudeModel);
+          setClaudeModelAssist(next.claudeModelAssist);
+          setDispatchConcurrency(next.dispatchConcurrency);
         }}
       />
       <EditIssueDialog

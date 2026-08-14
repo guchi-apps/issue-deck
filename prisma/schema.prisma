@@ -313,6 +313,10 @@ model AppSetting {
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist String @default("auto")
+  // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
+  // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の2は#1177の実測
+  // （Athlon 200GE 2C/4Tで並行3本が上限、実運用の快適さでは2本）にもとづく。
+  dispatchConcurrency Int  @default(2)
   updatedAt      DateTime @updatedAt
 }
 
@@ -323,6 +327,94 @@ model FineGrainedToken {
   id        String   @id @default(cuid())
   name      String   @unique
   expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- サブPCへのディスパッチ（#1179） ---
+
+// ジョブの状態。queued → claimed → running → succeeded/failed が正常系で、
+// claim後に進まない・heartbeatが途絶えたものはTIMEOUTへ落とす（src/lib/dispatch/jobs.ts）。
+//
+// **SUCCEEDEDは「tmuxセッションが立ち上がった」までを意味し、実装の完了ではない。**
+// 以降の進捗はProject Status（POST /api/progress）が持つ唯一の正で、ここでは追わない。
+enum DispatchJobStatus {
+  QUEUED
+  CLAIMED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+  CANCELED
+}
+
+// issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
+//
+// 方式がpull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが
+// 無いため（#1176）。issue-deckはジョブを置くだけで、SSH等でサブPCへ届けには行かない。
+//
+// **RepositoryやIssueへの外部キーは張らない。** リポジトリ同期が済んでいないIssueでも
+// 積めるようにするためで、リポジトリはowner/nameの文字列で持つ（/api/progressと同じ形）。
+model DispatchJob {
+  id                 String            @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 起動先として指定されたホスト名（DispatchHost.nameと対応）
+  targetHost         String
+  status             DispatchJobStatus @default(QUEUED)
+  // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
+  // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは
+  // 複数のNULLを許すため、終了したジョブは同じIssueで何件でも並べられる。
+  // アプリ側の存在チェックだけに頼ると、二重クリックの競合で二重起動が通る。
+  activeKey          String?           @unique
+  // 画面から積んだユーザー（User.id）。Userを消してもジョブの履歴は残すためFKは張らない
+  requestedByUserId  String?
+  claimedByHost      String?
+  claimedAt          DateTime?
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  // RUNNING中の生存報告。途絶えたらTIMEOUTへ落とす
+  heartbeatAt        DateTime?
+  // 起動したtmuxセッション名。実行ログを見る唯一の手掛かり（`tmux attach -t <名前>`）で、
+  // Actions UIに相当するものが無いローカル実行ではこれがログの在り処になる
+  tmuxSessionName    String?
+  // 失敗理由・結果の要約。**画面にそのまま出す前提**。「投げたのに何も起きない」を避けるため、
+  // clone未登録・版数不一致・tmux起動失敗といった理由をここへ入れて返す
+  message            String?           @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([targetHost, status])
+  @@index([repositoryFullName, issueNumber])
+}
+
+// ジョブを実行できるホストの申告（#1179）。サブPCが定期的にpushする。
+//
+// **「実行できるリポジトリの一覧」をここに持つのは、ジョブの割り当て可否を決める情報だから**
+// （#1176のコメント）。ホストの死活・CPU・メモリ・tmuxセッション一覧はops-dashboard#34側の
+// 担当で、issue-deckには持ち込まない。
+//
+// 申告は`scripts/subpc-dispatch-poller.sh`が`~/.config/issue-deck/local-repos.conf`を走査し、
+// `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
+// 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
+model DispatchHost {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
+  // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
+  repositories    String   @db.Text
+  // ホストの受け口が扱えるローカル起動プロトコルの上限版数
+  // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
+  contractVersion Int?
+  // ホスト側が申告する同時実行数の上限。AppSetting.dispatchConcurrencyとminを取る
+  maxConcurrency  Int?
+  // pollerのバージョン。受け口が古いまま動いているかの手掛かり
+  agentVersion    String?
+  // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
+  lastSeenAt      DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

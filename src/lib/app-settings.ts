@@ -9,6 +9,21 @@ export function parseAutoRetryLimit(value: unknown): number | null {
   return value;
 }
 
+// サブPCへディスパッチしたジョブの同時実行数の上限（#1179）。**定数で埋め込まない**という
+// 決めごと（#1176）があるためAppSettingに持つ。CPUの載せ替えで適正値が変わる。
+// 既定の2は#1177の実測（Athlon 200GE 2C/4Tで並行3本が上限。実運用の快適さでは2本）による。
+// 上限の8は、6C/12TのRyzen 5 4650Gへ載せ替えた場合を見込んだ余裕。
+export const DISPATCH_CONCURRENCY_MIN = 1;
+export const DISPATCH_CONCURRENCY_MAX = 8;
+export const DISPATCH_CONCURRENCY_DEFAULT = 2;
+
+// APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。
+export function parseDispatchConcurrency(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < DISPATCH_CONCURRENCY_MIN || value > DISPATCH_CONCURRENCY_MAX) return null;
+  return value;
+}
+
 // claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの候補値（#622）。
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない
