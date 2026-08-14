@@ -75,6 +75,34 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 
 ローカル実行（`scripts/start-issue.sh`）では、分割の判断・提案自体はPlan mode内で人間に提示できるが、実際のサブIssue作成や元Issueのクローズを自動化する仕組みは今のところ用意していない（人間が`gh issue create`等で手動対応する）。
 
+### 親子関係の正はGitHubネイティブのサブIssue（#1246）
+
+分割で作ったIssueも、手で切り出したIssueも、**GitHubネイティブのサブIssueとして親へ紐付ける**。
+
+```bash
+# 子の数値ID（URLに出るIssue番号ではない）を取り、それを親へ紐付ける
+CHILD_ID=$(gh api repos/guchi-apps/issue-deck/issues/<子の番号> --jq .id)
+gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issues --method POST -F sub_issue_id="$CHILD_ID"
+# 外すとき
+gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELETE -F sub_issue_id="$CHILD_ID"
+```
+
+本文に書く「分割元: #番号」「親: #番号」といったテキストは、**人が読む補助でしかない**。
+機械的な集計はネイティブの関係だけを見る。テキストは表記が既に3種類に割れており（`親: #N（子A）`・
+`分割元: #N`・フェーズ表の`#N`）、本文編集でも壊れるため、正として使えない。
+
+紐付けておくと次の2つが同時に成立する。
+
+- **GitHub.com側**: 親Issueと一覧にネイティブの進捗バーが出る
+- **issue-deck側**: Issue詳細に「子Issue」セクションが出て、**Project Statusごとの内訳**が見える
+  （`未着手 1 / 実装中 2 / 本番反映済 3`）。ネイティブの集計はclose済み件数しか数えないため、
+  残りが未着手なのか実装中なのかまでは分からない。判定は`src/lib/sub-issue-progress.ts`で、
+  **closeされた子はStatusが何であってもdone**として数える（`not planned`でのcloseも「もう残っていない」ため）
+
+親子関係はDBへキャッシュせず、Issue詳細を開いたときだけ`GET /api/issues/sub-issues`が取りに行く
+（[../code-map.md](../code-map.md)「データの流れ」）。一覧にはバッジを出していない（Issueごとに
+1クエリ増えてN+1になるため）。
+
 分割とは別に、計画提示ステップは調査中に見つかった元Issueのスコープ外の関連事項（追加対応すべき別件・副作用や懸念点など）を、承認フローを経ずにその場で新規Issueとして起票してよい（元Issue自体の実装承認とは独立。#735）。分割が「元Issueのスコープを割る」ものであるのに対し、これは「元Issueとは別の関連事項を独立Issueとして提案する」もので、本文に「起点: #<元Issue番号>」を含め、`70.confirm`ラベルを付与したうえで1回あたり目安3件までに留める。
 
 ## 開発環境プレビュー要否をIssueラベルでトグルする

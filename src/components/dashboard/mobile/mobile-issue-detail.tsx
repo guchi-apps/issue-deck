@@ -43,6 +43,7 @@ import {
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
@@ -98,6 +99,7 @@ import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
 import { usePullRequestLink } from "@/hooks/use-pull-request-link";
@@ -137,6 +139,9 @@ export function MobileIssueDetail({
   onSelectRepository,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { relations: subIssueRelations } = useIssueSubIssues(issue);
+  const hasSubIssueRelations =
+    subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
   const commentSummary = useIssueCommentSummaries(issue);
   const { index: targetCommentIndex, hasUnread } = useFirstUnreadCommentIndex(issue, comments);
   const {
@@ -782,6 +787,13 @@ export function MobileIssueDetail({
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
           <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
+
+        {hasSubIssueRelations && (
+          <>
+            <Separator />
+            <SubIssueProgress relations={subIssueRelations} />
+          </>
+        )}
 
         <Separator />
 

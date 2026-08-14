@@ -1387,8 +1387,12 @@ jobs:
           # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
           # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
           allowed_bots: "issue-deck[bot]"
+          # `Bash(gh api repos/:*)`はサブIssueの紐付け（`POST /repos/{owner}/{repo}/issues/{n}/sub_issues`）
+          # のために要る。gh CLIにサブIssue用のサブコマンドが無く、許可ツールの判定が前方一致のため
+          # エンドポイント単位までは絞れない。実際にできることはこのジョブの`permissions:`が上限で、
+          # GITHUB_TOKENにはリポジトリ削除等の権限が無い(#1246)。
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*)"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh api repos/:*)"
             ${{ steps.claude_model.outputs.assist_model_flag }}
           prompt: ${{ env.PROMPT_SPLIT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（分割））

@@ -1,5 +1,4 @@
-import { GithubApiError } from "@/lib/github/github-api-error";
-import { githubFetch, GITHUB_API } from "@/lib/github/request";
+import { githubGraphql } from "@/lib/github/graphql";
 
 /**
  * GitHub Projects v2（カンバン）との境界。Projects v2はGraphQLのみで、RESTは提供されていない。
@@ -23,42 +22,20 @@ export type ProjectItemSnapshot = {
   status: string | null;
 };
 
-type GraphqlResponse<T> = {
-  data?: T;
-  errors?: { message: string }[];
-};
+/** 権限不足だったときにメッセージへ添えるヒント。Projects v2はorganization permissionを要求する */
+const PROJECTS_PERMISSION_HINT =
+  "（GitHub Appのorganization permission「Projects: Read and write」が必要です）";
 
-/**
- * GraphQLを実行する。`issues-api.ts`の`deleteIssue`・`transferIssue`と同じ流儀で、
- * HTTPレベルの失敗とGraphQLの`errors`の両方をGithubApiErrorへ寄せる。
- * HTTP 200でも`errors`があれば失敗として扱うのがGraphQLの仕様。
- */
-async function graphql<T>(
+/** GraphQLを実行する。共通処理は`graphql.ts`にあり、ここでは権限ヒントだけを固定する */
+function graphql<T>(
   token: string,
   query: string,
   variables: Record<string, unknown>,
   operationLabel: string,
 ): Promise<T> {
-  const res = await githubFetch(`${GITHUB_API}/graphql`, token, {
-    method: "POST",
-    body: { query, variables },
+  return githubGraphql<T>(token, query, variables, operationLabel, {
+    permissionHint: PROJECTS_PERMISSION_HINT,
   });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub GraphQL request failed: ${res.status} ${detail}`);
-  }
-
-  const json: GraphqlResponse<T> = await res.json();
-  if (json.errors?.length || !json.data) {
-    const message = json.errors?.map((error) => error.message).join("; ") ?? "unknown error";
-    // 権限不足はここに出るため、原因を切り分けやすいようヒントを添える
-    const hint = message.includes("Resource not accessible by integration")
-      ? "（GitHub Appのorganization permission「Projects: Read and write」が必要です）"
-      : "";
-    throw new GithubApiError(403, `GitHub GraphQL ${operationLabel} failed: ${message}${hint}`);
-  }
-  return json.data;
 }
 
 const ITEM_FIELDS = `
