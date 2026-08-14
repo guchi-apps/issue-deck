@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import { Button } from "@/components/ui/button";
 import {
@@ -196,6 +197,10 @@ export function AppSettingsDialog({
           <Separator />
 
           <WorkflowTagStatusSection open={open} />
+
+          <Separator />
+
+          <SecretsSyncSection open={open} />
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

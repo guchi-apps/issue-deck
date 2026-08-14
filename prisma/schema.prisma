@@ -571,3 +571,43 @@ model IssueLabel {
   @@unique([issueId, name])
   @@index([githubLabelId])
 }
+
+enum SecretSyncRunStatus {
+  QUEUED
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+}
+
+/// 1Password → GitHub のシークレット同期を画面のボタンから起こしたときの1実行1行（#1309）。
+///
+/// issue-deckはsecretを書かない。ここに残るのは「いつ・どのリポジトリへ・どの項目を対象に
+/// 起動したか」と、対象リポジトリのActionsから報告された**件数と失敗した項目名だけ**。
+/// **値そのものも値の長さも保存しない**（長さも手がかりになる）。
+model SecretSyncRun {
+  id                 String              @id @default(cuid())
+  repositoryFullName String
+  // 対象を絞ったKEYのカンマ区切り。空文字はマニフェスト全件を意味する
+  only               String              @default("")
+  status             SecretSyncRunStatus @default(QUEUED)
+  // 画面から起こしたユーザー（User.id）。Userを消しても履歴は残すためFKは張らない。
+  // Actionsタブから直接起動された実行の報告を受けた場合はnull
+  requestedByUserId  String?
+  startedAt          DateTime            @default(now())
+  finishedAt         DateTime?
+  syncedCount        Int                 @default(0)
+  skippedCount       Int                 @default(0)
+  failedCount        Int                 @default(0)
+  // 失敗した項目の**名前だけ**をカンマ区切りで持つ
+  failedKeys         String              @db.Text
+  runUrl             String?
+  // 画面にそのまま出す説明文（報告が来ないまま時間切れになった場合の理由など）
+  message            String?             @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 「このリポジトリの最新の実行」を引くのが画面・クールダウン判定・報告の突き合わせの
+  // すべてで共通の読み方
+  @@index([repositoryFullName, startedAt])
+}

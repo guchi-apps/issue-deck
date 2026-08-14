@@ -249,6 +249,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   引く側を`lib/dispatch/pending-dispatch.ts`に分けているのは、`lib/dispatch/jobs.ts`が
   セッション経由でGitHub Appの認証（読み込み時点で`GITHUB_APP_*`を要求する）を引きずるため。
   Issue一覧にその資格情報を要求させない。
+- **1Password→GitHubのシークレット同期は、issue-deckが書くのではなく対象リポジトリのActionsを
+  起動する**（#1309）。設定ダイアログの「1Password → GitHub のシークレット同期」から
+  `POST /api/secrets-sync`が`sync-secrets.yml`を`workflow_dispatch`し、1Passwordの読み取りも
+  GitHubへの書き込みも対象リポジトリのAction（`reusable-sync-secrets.yml`が
+  `scripts/sync-github-secrets.sh`をそのまま実行する）の中で完結する。**issue-deckはSecretsを
+  書けないままにする**——16リポジトリを操作する立場のため、書き込み権限を持たせると侵害時の
+  影響範囲が全リポジトリのデプロイ用シークレットに広がる（`docs/cross-repo-automation.md`）。
+  結果は`POST /api/secrets-sync/report`（認証は`PROGRESS_REPORT_SECRET`。進捗報告APIと同じ値）で
+  戻り、`SecretSyncRun`に残る。**保存も表示も件数と失敗した項目名だけで、値も値の長さも持たない**
+  （長さも手がかりになる）。判断は[`lib/secrets-sync.ts`](../src/lib/secrets-sync.ts)の純粋関数、
+  DBとの往復は[`lib/secrets-sync-runs.ts`](../src/lib/secrets-sync-runs.ts)。
+  **CLIから直接叩く経路とActions経由では、消費する1Passwordの枠が違う**——CLIは個人アカウントの
+  セッションで枠を消費しないが、Actionsはサービスアカウント（アカウント全体で1,000件/日）を使う。
+  そのため画面側にキーの絞り込み・確認ダイアログ・クールダウン（直近の成功から10分）を置いている。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
