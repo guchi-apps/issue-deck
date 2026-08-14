@@ -43,6 +43,36 @@ dev_server_pid_matches() {
   return 0
 }
 
+# そのポートを**localhost経由で**待ち受けているプロセスが居るかを判定する（#1391）。
+#
+# `ss -tlnH "sport = :<ポート>"`にマッチする行が1つでもあれば現役、では足りない。
+# `tailscale serve`を張ると**tailscaled自身がそのポートを掴む**ため、開発サーバーが死んでいても
+# 条件が真になり続ける。実測（ポート5349・開発サーバー停止直後）。
+#
+#   LISTEN 0 4096         100.81.154.79:5349 0.0.0.0:*        # tailscaled
+#   LISTEN 0 4096 [fd7a:115c:a1e0::7701:9acb]:5349 [::]:*     # tailscaled
+#
+# 孤児と判定されないままserveが残ると、tailnet IPを**具体的なアドレスとして**掴み続けるので、
+# 次に`pnpm dev`（Next.jsの既定は全アドレス）を起こすと`EADDRINUSE`で落ちる。
+#
+# **数えるのはloopback（127.0.0.0/8・::1）とワイルドカード（0.0.0.0・::・*）の行だけ。**
+# `tailscale serve`の転送先は`localhost:<ポート>`なので、「serveの繋がる先が居るか」は
+# この条件と一致する。tailnet IPやLAN IPだけを掴んでいる行は転送先になりえないため数えない。
+#
+# 待ち受けが居れば0、居なければ1、`ss`が無くて**判定できなければ2**を返す。
+# 呼び出し側は2を「居ない」と同じに扱わないこと（何も撤去しない側＝安全側に倒す）。
+dev_server_localhost_listening() {
+  local port="$1" addr
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  command -v ss >/dev/null 2>&1 || return 2
+  while read -r addr; do
+    case "$addr" in
+      127.*|'::1'|'[::1]'|0.0.0.0|'::'|'[::]'|'*') return 0 ;;
+    esac
+  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ sub(/:[^:]*$/, "", $4); print $4 }')
+  return 1
+}
+
 # 開発サーバーをプロセスグループごと止める。**止まったことを確認するところまでを1つの処理にする。**
 #
 # `pnpm dev` は `next dev` → `next-server` と子を持つ。TERMを撃ちっぱなしにすると、

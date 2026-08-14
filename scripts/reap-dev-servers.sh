@@ -109,22 +109,29 @@ stop_one() {
 # **今serveされているポートを列挙し、localhostで誰も待ち受けていないものを孤児とみなす**。
 # セッションがSIGKILLで落ちてcleanupを通らなかった場合もここで拾える。
 #
-# 外し忘れると、次に同じポートを使うセッションが立つまで繋がらないURLがtailnet上に残る。
+# 外し忘れると、次に同じポートを使うセッションが立つまで繋がらないURLがtailnet上に残るうえ、
+# 同じポートで`pnpm dev`を起こすと`EADDRINUSE`で落ちる（#1391）。
+#
+# **`.dev-servers/issue-<番号>.pid`の有無からは判定しない。** `tailscale serve`はホスト全体の
+# 設定で、他リポジトリのworktree（別のポート帯・別の`.dev-servers`）が張った分もここに並ぶ。
+# このディレクトリに無いポートを孤児と決めると、他リポジトリの現役セッションを撤去してしまう。
 reap_orphan_serves() {
-  local port removed=0
+  local port removed=0 listening=0
+  # `ss`が無い環境では待ち受けを確かめられないので、何も撤去しない（安全側）
+  command -v ss >/dev/null 2>&1 || return 0
   while read -r port; do
     [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
-    # 待ち受けが居るなら現役。`ss`が無い環境では判定できないので触らない
-    command -v ss >/dev/null 2>&1 || return 0
-    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
-      continue
-    fi
+    # localhostで待ち受けが居るなら現役。**tailscaled自身の待ち受けは数えない**（#1391）。
+    # 1（居ない）以外は現役か判定不能なので触らない
+    listening=0
+    dev_server_localhost_listening "$port" || listening=$?
+    [[ "$listening" -eq 1 ]] || continue
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "  [dry-run] tailnetへの公開（ポート $port）は待ち受けが無いため撤去する対象です"
+      echo "  [dry-run] tailnetへの公開（ポート $port）はlocalhostの待ち受けが無いため撤去する対象です"
       continue
     fi
     tailscale_serve_unpublish "$port"
-    echo "  tailnetへの公開（ポート $port）を撤去しました: 待ち受けが無い（孤児）"
+    echo "  tailnetへの公開（ポート $port）を撤去しました: localhostの待ち受けが無い（孤児）"
     removed=$((removed + 1))
   done < <(tailscale_serve_ports)
   [[ "$removed" -eq 0 ]] || echo "tailnetへの公開を撤去しました: $removed 件"

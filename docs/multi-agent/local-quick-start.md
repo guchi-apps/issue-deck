@@ -402,6 +402,9 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
 | 孤児 | `PPID == 1`（親の`run-issue-session.sh`が消えてinitに引き取られた） | 停止＋ログ |
 | アイドル | `.dev-servers/issue-<番号>.log`のmtimeが閾値（既定60分）より古い | 停止＋ログ |
 
+開発サーバーを止めた後、**tailnetへの公開（#1265）のうち繋がる先が無くなったもの**も撤去する。
+今serveされているポートを列挙し、**localhostで誰も待ち受けていないもの**を孤児とみなす。
+
 - **孤児判定にtmuxのセッション名を使わない。** リポジトリ名からセッション名を復元する対応表は、
   Issue番号がリポジトリごとに振られるぶん壊れやすい（#1224）。`PPID`はプロセス単位で確定する
   事実で、対応表を増やさずに済む。
@@ -411,6 +414,17 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
 - **プロセスグループごとkillする以上、確信が持てない相手には触らない。** PIDファイルは残りうる
   ため、書かれたPIDが再利用されている可能性を常に疑う。判定はどちらも
   [scripts/lib/dev-server.sh](../../scripts/lib/dev-server.sh)が持ち、`run-issue-session.sh`と共有する。
+- **serveの孤児判定で`tailscale serve`自身の待ち受けを数えない**（#1391）。`ss -tlnH "sport = :<ポート>"`は
+  アドレスを問わずマッチするため、serveを張った時点でtailscaled自身が掴んでいる
+  `100.x.x.x:<ポート>`・`[fd7a:...]:<ポート>`に当たってしまい、**開発サーバーが死んでいても永久に
+  「現役」と判定されて撤去されなかった**。数えるのはloopback（`127.0.0.0/8`・`::1`）とワイルドカード
+  （`0.0.0.0`・`::`・`*`）の行だけ（`dev_server_localhost_listening`）。serveの転送先は
+  `localhost:<ポート>`なので、この条件が「繋がる先が居るか」と一致する。撤去されずに残ったserveは
+  下記のとおり次の`pnpm dev`を`EADDRINUSE`で殺すため、**撤去し損ねる害は「繋がらないURLが残る」だけでは
+  済まない**。
+- **serveの孤児判定に`.dev-servers/issue-<番号>.pid`の有無は使わない。** `tailscale serve`はホスト全体の
+  設定で、他リポジトリのworktree（別のポート帯・別の`.dev-servers`）が張った分も同じ一覧に並ぶ。
+  このディレクトリに無いポートを孤児と決めると、他リポジトリの現役セッションを撤去してしまう。
 
 閾値は`~/.config/issue-deck/dispatch.env`の`DEV_SERVER_IDLE_MINUTES`（既定60・**0でアイドル回収を
 無効**）。孤児の回収はこの値と無関係に常に行う。手元で確かめるときは
@@ -587,7 +601,9 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 Supabaseのリダイレクト許可リストもホスト名の形でしか通らない（生IPは元から使えない）。
 
 撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
-`scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+`scripts/reap-dev-servers.sh`が**localhostの待ち受けが無いserveを孤児として**掃く。
+**この判定でtailscaled自身の待ち受けを数えてはいけない**（#1391。[回収の判定](#回収の判定scriptsreap-dev-serverssh)）。
+数えてしまうと孤児が永久に発生せず、下記の`EADDRINUSE`を自動では抜け出せなくなる。
 
 **順番が逆になると起動しない。** serveだけが残っているポート（掃かれる前や、前のセッションの
 残骸）で`pnpm dev`を起こすと、`listen EADDRINUSE :::<ポート>`で落ちる。serveはtailnet IPを
