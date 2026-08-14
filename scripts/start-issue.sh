@@ -83,6 +83,9 @@ source "$ROOT/scripts/lib/personal-config-sync.sh"
 # 本体の作業ツリーの scripts/ が origin/develop より古いままになっていないかの警告（#1274）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
+# 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
+# shellcheck source=scripts/lib/prompt-context.sh
+source "$ROOT/scripts/lib/prompt-context.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -403,11 +406,15 @@ prepare_issue() {
   (cd "$WORKTREE_DIR" && pnpm install)
 
   echo "#$n: 起動用プロンプトを生成しています..."
+  # 起動プロンプトへ差し込む「今の状況」（#1267）。集めるだけで判断はしない
+  local issue_relations concurrent_work
+  issue_relations="$(prompt_context_relations "guchi-apps/issue-deck" "$n")"
+  concurrent_work="$(prompt_context_concurrent "guchi-apps/issue-deck" "$n" "$WORKTREE_DIR" develop)"
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
   local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -416,6 +423,8 @@ issue_json_path, template_path, dev_port, sslip_url, dev_log = sys.argv[1], sys.
 # 嘘にならないよう、この値で文面を分ける。
 prepare_only = sys.argv[6] == "1"
 worktree_dir = sys.argv[7]
+issue_relations = sys.argv[8]
+concurrent_work = sys.argv[9]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -507,6 +516,8 @@ result = (
     .replace("{{ISSUE_LABELS}}", labels)
     .replace("{{ISSUE_BODY}}", issue.get("body") or "(本文なし)")
     .replace("{{ISSUE_COMMENTS}}", comment_text)
+    .replace("{{ISSUE_RELATIONS}}", issue_relations or "（取得できませんでした）")
+    .replace("{{CONCURRENT_WORK}}", concurrent_work or "（取得できませんでした）")
     .replace("{{DEV_PORT}}", dev_port)
     .replace("{{PREVIEW_INSTRUCTIONS}}", preview_instructions)
     .replace("{{SCREENSHOT_INSTRUCTIONS}}", screenshot_instructions)

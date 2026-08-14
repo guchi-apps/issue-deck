@@ -330,6 +330,12 @@ if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
   exit 1
 fi
 
+# 起動プロンプトへ差し込む「今の状況」（#1267）。集めるだけで判断はしない
+# shellcheck source=scripts/lib/prompt-context.sh
+source "$SCRIPT_DIR/lib/prompt-context.sh"
+ISSUE_RELATIONS="$(prompt_context_relations "$FULL_NAME" "$ISSUE_NUMBER")"
+CONCURRENT_WORK="$(prompt_context_concurrent "$FULL_NAME" "$ISSUE_NUMBER" "$WORKTREE_DIR" "${BASE_BRANCH:-develop}")"
+
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています（$PROMPT_TEMPLATE_SOURCE）..."
 DEV_COMMAND="${PACKAGE_MANAGER:-npm} run dev"
 if [[ "$PACKAGE_MANAGER" == "pnpm" || "$PACKAGE_MANAGER" == "bun" ]]; then
@@ -339,7 +345,7 @@ fi
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$WORKTREE_DIR" "${BASE_BRANCH:-}" \
-  "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" >"$PROMPT_FILE" <<'PY'
+  "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" "$ISSUE_RELATIONS" "$CONCURRENT_WORK" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -352,7 +358,9 @@ import sys
     package_manager,
     dev_command,
     dev_port,
-) = sys.argv[1:9]
+    issue_relations,
+    concurrent_work,
+) = sys.argv[1:11]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -424,6 +432,8 @@ replacements = {
     "{{ISSUE_LABELS}}": labels,
     "{{ISSUE_BODY}}": issue.get("body") or "(本文なし)",
     "{{ISSUE_COMMENTS}}": comment_text,
+    "{{ISSUE_RELATIONS}}": issue_relations or "（取得できませんでした）",
+    "{{CONCURRENT_WORK}}": concurrent_work or "（取得できませんでした）",
     "{{REPOSITORY}}": repository,
     "{{WORKTREE_DIR}}": worktree_dir,
     "{{BASE_BRANCH}}": base_branch or "(判定できませんでした)",

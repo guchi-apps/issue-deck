@@ -41,7 +41,7 @@ import {
   type StartImplementationOptionKey,
 } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
-import type { Issue, IssueComment } from "@/types/issue";
+import type { Issue, IssueComment, SubIssueRelations } from "@/types/issue";
 
 /**
  * 実行先（#1263）。**起動する2つと、貼り付けるための2つがある。**
@@ -92,6 +92,11 @@ type StartImplementationDialogProps = {
   /** 「実装プロンプトをコピー」に載せるコメント。省略時はコメントなしとして組み立てる */
   comments?: readonly IssueComment[];
   /**
+   * 親子Issue（#1267）。**子Issueを渡された側で親の背景が丸ごと落ちる**のを防ぐため、
+   * 分かっていれば文面へ載せる。省略時は「取得していません」と出す
+   */
+  subIssueRelations?: SubIssueRelations;
+  /**
    * 「ローカル起動コマンドをコピー」で渡すコマンド（`buildLocalSessionCommand`の結果）。
    * `null`・省略ならその選択肢を出さない（ローカル起動プロトコルに適合していないリポジトリ・#1073）。
    */
@@ -130,6 +135,7 @@ export function StartImplementationDialog({
   actionsDisabledReason = null,
   comments = [],
   localSessionCommand = null,
+  subIssueRelations,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -319,6 +325,17 @@ export function StartImplementationDialog({
             body: issue.body,
             labels: currentIssue.labels,
             comments,
+            relations: subIssueRelations
+              ? [
+                  ...(subIssueRelations.parent
+                    ? [{ ...subIssueRelations.parent, relation: "parent" as const }]
+                    : []),
+                  ...subIssueRelations.children.map((child) => ({
+                    ...child,
+                    relation: "sub" as const,
+                  })),
+                ]
+              : undefined,
           });
     if (!text) return;
 
