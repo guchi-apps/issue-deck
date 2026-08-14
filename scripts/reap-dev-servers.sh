@@ -14,6 +14,10 @@
 #   ISSUE_DECK_WORKTREE_BASE   worktreeの置き場（既定: ~/apps/issue-deck-worktrees）
 #   DEV_SERVER_IDLE_MINUTES    アイドルとみなすまでの分数（既定: 60・0で無効）
 #
+# **対象は`issue-<番号>.pid`だけ**（下のglob）。`develop.pid`（scripts/start-develop-dev.sh・#1289）は
+# 意図して常駐させる開発サーバーで、親を持たない（PPID==1）ぶん孤児の条件に必ず当てはまるため、
+# ここに含めると起動した直後に止められる。**globを緩めない。**
+#
 # **これは計器であって役ではない**（docs/multi-agent/gates.md「計器」）。判断はせず、
 # 決まった条件に当てはまるプロセスを止めて記録するだけで、LLMも人への問い合わせも挟まない。
 # サブPCのpoller（scripts/subpc-dispatch-poller.sh）が1巡ごとに呼ぶため、常駐プロセスは増えない。

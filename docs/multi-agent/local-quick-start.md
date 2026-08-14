@@ -410,6 +410,73 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
 「一定時間アクセスが無いと自動で停止される」ことを書いてあるため、画面確認で繋がらないことを
 事故と受け取って調査に入ることはない。
 
+## developの状態を開発サーバーで見る（#1289）
+
+Issueごとの開発サーバーが映すのは**実装中のブランチ**だけで、マージ済みの変更が積み上がった
+`develop`そのものを開く場所が無かった。本体チェックアウト（`~/apps/issue-deck`）で`pnpm dev`を
+叩く手は、そのときのブランチ・未コミットの変更・ポートのどれもが手元の作業次第で変わるうえ、
+PIDファイル・ログにも載らないため、`develop`を見る用途には使えない。
+
+```bash
+scripts/start-develop-dev.sh              # 最新のorigin/developへ更新して（再）起動する
+scripts/start-develop-dev.sh --status     # 起動しているか・どのコミットかとURLを表示する
+scripts/start-develop-dev.sh --stop       # 停止する
+scripts/start-develop-dev.sh --no-update  # 今チェックアウトされている内容のまま再起動する
+scripts/start-develop-dev.sh --no-migrate # マイグレーションの適用を行わない
+scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで停止）
+```
+
+`pnpm dev:develop`でも同じ（リポジトリのどこから叩いても本体チェックアウトを基準に動く）。
+
+| 項目 | 値 | 理由 |
+| --- | --- | --- |
+| worktree | `~/apps/issue-deck-worktrees/develop`（detached HEAD） | 本体が`develop`を開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしても`develop`は動かない |
+| ポート | `4000`（帯のベース値+0） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない |
+| ログ | `~/apps/issue-deck-worktrees/.dev-servers/develop.log` | Issueごとの開発サーバーと同じ置き場 |
+| 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、そのまま対象外になる |
+
+**既定はバックグラウンド起動で、`nohup`によりSSHを切っても残る。** Tailscale SSHでサブPCに入って
+叩き、そのまま外出先やスマホから画面を開く使い方（#1176 Phase 1と同じ狙い）を前提にしている。
+
+### 起動のたびに入れ替える
+
+既に動いていれば必ず止めてから起動し直す。`develop`の更新には依存関係の追加やマイグレーションが
+混ざり、それらは起動中のプロセスへHMRでは反映されないため、**HMRに任せない**。
+
+worktreeにブランチが乗っている・未コミットの変更があるときは**黙って捨てずにエラーで止める**。
+ここは`develop`を映すための場所で、作業場所ではない。
+
+### tailnet内の端末からはMagicDNSの名前で開く
+
+起動時とデフォルトの`--status`が、MagicDNSの名前（`http://<ホスト名>.<tailnet>.ts.net:4000`）と
+tailnet IPの両方を表示する。**開くのはMagicDNSの名前のほう。** 生のtailnet IPは
+`next.config.ts`の`allowedDevOrigins`（`**.ts.net`）に当たらず、画面のHTMLは出ても`/_next/*`が
+403になる（#1289で実測）。IPで開きたい場合は`.env.local`の`ISSUE_DECK_DEV_ALLOWED_ORIGINS`へ足す
+（[allowedDevOriginsに載せる必要がある](#alloweddevoriginsに載せる必要がある)を参照）。
+
+### マイグレーションは既定で適用する。失敗したら必ず直す
+
+開発用DB（`.env.local`の`DATABASE_URL`）は本体・全worktreeで共有しているため、developへマージ済みの
+マイグレーションが未適用だと画面がDBエラーになる。そのため起動前に`prisma migrate deploy`を実行する
+（適用済みのものは何もしない）。適用したくないときだけ`--no-migrate`。
+
+**失敗した場合、その記録が`_prisma_migrations`に残り、解消するまで以降のマイグレーションが一切
+当たらなくなる。** 共有DBなので、放置すると他のセッションの画面確認まで巻き込む。典型的な原因は、
+Issueのworktreeで`prisma migrate dev`を叩いて先に列を足しており、developへマージされた側の
+マイグレーション名と食い違うこと。#1289の初回起動で実際に起きた（`DispatchSession.remoteControlUrl`
+が既にあり、`20260814020000_add_dispatch_session_activity`が`Duplicate column name`で失敗した）。
+
+復旧は、足りない分だけ手で当ててから「適用済み」として記録する。
+
+```bash
+cd ~/apps/issue-deck-worktrees/develop
+pnpm exec prisma migrate status                     # どのマイグレーションが失敗したかを見る
+# 失敗したマイグレーションのSQLのうち、まだ当たっていない部分だけを実行する
+printf 'ALTER TABLE `X` ADD COLUMN ...;\n' | pnpm exec prisma db execute --stdin --schema prisma/schema.prisma
+pnpm exec prisma migrate resolve --applied <失敗したマイグレーション名>
+pnpm exec prisma migrate status                     # "Database schema is up to date!" になる
+```
+
 ## 作業が終わったセッションは自動で畳む（#1256）
 
 開発サーバーを止めてもセッション本体は残る。`claude`は対話プロセスで、作業が終わっても
