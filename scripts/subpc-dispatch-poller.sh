@@ -247,6 +247,86 @@ tmux_session_names() {
   tmux list-sessions -F '#{session_name}' 2>/dev/null | sort || true
 }
 
+# --- セッションの状態報告（#1217）------------------------------------------------
+# `DispatchJob`の寿命は「tmuxセッションが立った」ところで終わっており、**立った後の
+# セッションは誰も見ていない**。そこを埋めるための報告。
+#
+# **画面（capture-pane）の内容は読まない。** 実装中のコード・環境変数が映りうるうえ、画面の
+# 文字列から状態を推定する方式は既に実地で誤判定している（プランモードではフッターが
+# `esc to interrupt` にならず、作業中を停止と誤って通知した。#1219・#1223）。入力待ち・完了・
+# 停滞はClaude Codeのフックが担当し（#1219）、こちらはフックが飛ばない「プロセスの死・消失」だけを見る。
+#
+# 読むのはtmuxのメタデータだけなので、pollerに新しい依存（node等）は要らない。
+
+# セッション名（<リポジトリ名>-issue-<番号>）から owner/repo を復元する。
+# **リポジトリ名にownerが含まれない**ため、local-repos.conf の一覧の basename と突き合わせる。
+# **候補が2件以上あるときは何も出力しない。** 別ownerに同名のリポジトリがあると、どちらのIssueか
+# 名前だけでは決められず、当てずっぽうに選ぶと**無関係なIssueへ引き上げのコメントを投稿する**。
+resolve_session_repository() {
+  local repo_name="$1" full_name matched="" count=0
+  while IFS= read -r full_name; do
+    [[ -n "$full_name" ]] || continue
+    if [[ "${full_name#*/}" == "$repo_name" ]]; then
+      matched="$full_name"
+      count=$((count + 1))
+    fi
+  done < <(local_repo_list_names)
+  [[ "$count" -eq 1 ]] || return 1
+  printf '%s\n' "$matched"
+}
+
+# そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
+#
+# **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
+# 送らないと消失を検知できない。tmuxサーバーが動いていない場合も同じ扱いにする。
+report_sessions() {
+  local payload sessions_json line session_name pane_dead pane_status issue_number repo_name full_name
+  local entries=()
+
+  # セッションごとにコマンドを起動せず、1回のlist-panesで全ペインを取る。
+  # `pane_dead_status`は死んだペインの終了コード（tmux 3.0aのmanに記載あり）。
+  while IFS=$'\t' read -r session_name pane_dead pane_status; do
+    [[ -n "$session_name" ]] || continue
+    [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+
+    # 対応表から owner/repo を戻せないセッションは送らない（他リポジトリ・曖昧な同名）。
+    full_name="$(resolve_session_repository "$repo_name")" || continue
+
+    local dead_json status_json
+    if [[ "$pane_dead" == "1" ]]; then dead_json=true; else dead_json=false; fi
+    if [[ "$pane_status" =~ ^-?[0-9]+$ ]]; then status_json="$pane_status"; else status_json=null; fi
+
+    entries+=("$(jq -n \
+      --arg tmuxSessionName "$session_name" \
+      --arg repositoryFullName "$full_name" \
+      --argjson issueNumber "$issue_number" \
+      --argjson paneDead "$dead_json" \
+      --argjson paneDeadStatus "$status_json" \
+      '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
+        issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus}')")
+  done < <(tmux list-panes -a -F '#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
+
+  # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
+  # （実装セッションは1ペインだが、人が分割した場合に取りこぼさないため）。
+  sessions_json="$(printf '%s\n' "${entries[@]+"${entries[@]}"}" | jq -s '
+    group_by(.tmuxSessionName)
+    | map(sort_by(.paneDead) | last)')"
+
+  payload="$(jq -n --arg host "$HOST_NAME" --argjson sessions "$sessions_json" \
+    '{host: $host, sessions: $sessions}')"
+
+  if ! api_call POST /api/dispatch/sessions "$payload"; then
+    # **報告の失敗で処理を止めない。** 既存のジョブ状態の報告と同じ扱い。
+    report_api_failure "セッション状態の報告に失敗しました"
+    return 0
+  fi
+
+  echo "セッションを報告しました: $(printf '%s' "$sessions_json" | jq 'length') 件"
+  return 0
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -280,12 +360,17 @@ run_job() {
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
   # （そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない）。
-  local before after new_sessions
+  #
+  # **リポジトリ名まで含めて突き合わせる**（#1224）。Issue番号はリポジトリごとに振られるため、
+  # 番号だけ（`*-issue-<番号>`）で見ると、別リポジトリの同じ番号のセッションが動いているだけで
+  # 起動を断ってしまう。起動できるリポジトリが1つだった間は表に出なかったが、増やした時点で
+  # 番号の衝突はほぼ確実に起きる。セッション名の規約は`<リポジトリ名>-issue-<番号>`
+  # （docs/multi-agent/local-quick-start.md「セッション名」）。
+  local before after new_sessions expected_session
+  expected_session="${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
   before="$(tmux_session_names)"
-  if printf '%s\n' "$before" | grep -qx ".*-issue-$issue_number" 2>/dev/null; then
-    local existing
-    existing="$(printf '%s\n' "$before" | grep -x ".*-issue-$issue_number" | head -1)"
-    report_job "$job_id" failed "同じIssueのtmuxセッションが既に動いています: $existing" "$existing"
+  if printf '%s\n' "$before" | grep -qxF "$expected_session"; then
+    report_job "$job_id" failed "同じIssueのtmuxセッションが既に動いています: $expected_session" "$expected_session"
     return 0
   fi
 
@@ -333,6 +418,11 @@ run_job() {
 # 申告 → claim → 起動。**1巡の失敗でプロセスを終わらせない**（常駐時は次の巡で復帰できる）。
 run_once() {
   announce || return 1
+
+  # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
+  # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
+  # 起動が失敗したときの前後関係が読める。
+  report_sessions
 
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
     return 0

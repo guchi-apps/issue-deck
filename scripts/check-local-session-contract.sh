@@ -16,6 +16,11 @@
 # 検査できるのは「宣言があるか」「約束が要求する環境変数を解釈しているか」までで、
 # 実際の挙動（フォアグラウンドで起動するか・worktreeを再利用するか）までは見ない。
 # scripts/check-cross-repo-guide-sync.sh と同じく、存在チェックに徹する。
+#
+# **マーカー行が無いことは違反ではなくなった**（#1224）。宣言していないリポジトリは
+# issue-deck側の汎用ランチャー（scripts/generic-start-issue.sh）で起動する。ここで検査するのは
+# 「宣言した以上は約束を守っているか」であって、「宣言しているか」ではない。
+# CIで検査するissue-deck自身だけは、自前のstart-issue.shで起動し続けるため宣言を必須とする。
 
 set -euo pipefail
 
@@ -94,6 +99,18 @@ check_script() {
   return 1
 }
 
+# --all 用。マーカー行を宣言していないリポジトリは違反ではなく「汎用ランチャーで起動する」
+# と報告する（#1224）。宣言しているものだけを契約の検査に掛ける。
+report_repo() {
+  local label="$1" script_path="$2" expected="$3"
+  if [[ ! -f "$script_path" ]] ||
+    ! grep -q '^#[[:space:]]*issue-deck-local-session:' "$script_path"; then
+    echo "  ○ $label: issue-deck側の汎用ランチャーで起動します（マーカー行の宣言は不要・#1224）"
+    return 0
+  fi
+  check_script "$label" "$script_path" "$expected" || true
+}
+
 EXPECTED_VERSION="$(expected_version)"
 
 if [[ "${1:-}" != "--all" ]]; then
@@ -134,8 +151,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   path="${path%"${path##*[![:space:]]}"}"
   path="${path/#\~/$HOME}"
   [[ "$name" == "guchi-apps/issue-deck" ]] && continue
-  check_script "$name" "$path/scripts/start-issue.sh" "$EXPECTED_VERSION" || true
+  report_repo "$name" "$path/scripts/start-issue.sh" "$EXPECTED_VERSION"
 done <"$CONFIG_FILE"
 
 echo
-echo "違反があるリポジトリは、ワンクリック起動が受け口の段階で停止します（起動して固まるよりは安全）。"
+echo "○ のリポジトリは issue-deck の scripts/generic-start-issue.sh で起動します（#1224）。"
+echo "✗ のリポジトリは、宣言した契約を満たしていないため受け口の段階で停止します（起動して固まるよりは安全）。"

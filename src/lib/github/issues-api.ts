@@ -155,6 +155,28 @@ export async function updateIssue(
   );
 }
 
+/**
+ * Issueへラベルを**追加**する（#1217）。
+ *
+ * `updateIssue`の`labels`は**全置換**で、渡さなかったラベルが消える。既に付いている
+ * `21.plan-required`・`11.local`などを巻き込んで落とすため、1つ足したいだけの用途には使えない。
+ * GitHubの追加専用エンドポイントを使い、既に付いている場合も安全（重複しない）にする。
+ */
+export async function addIssueLabels(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+  labels: string[],
+): Promise<void> {
+  await requestJson(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/labels`,
+    token,
+    "POST",
+    { labels },
+  );
+}
+
 export type CommentBodyInput = {
   body: string;
 };

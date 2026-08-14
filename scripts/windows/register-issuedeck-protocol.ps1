@@ -40,6 +40,10 @@ $launcherWslPath = "~/.local/share/issue-deck/start-local-session.sh"
 # 置くことで、リポジトリ内（scripts/lib/）でも複製先でも同じ1行で解決できる。
 $launcherLibDirWslPath = "~/.local/share/issue-deck/lib"
 $launcherLibWslPath = "$launcherLibDirWslPath/local-repo-resolve.sh"
+# 開発サーバーのポート帯の対応表（#1224で受け口の `case` 文から移した）。受け口から見て
+# ライブラリと同じ場所を探すため、複製先も受け口と同じディレクトリに置く。
+# 配られていない場合は各リポジトリの既定値に落ちるだけなので、失敗しても起動は妨げない。
+$launcherPortsWslPath = "~/.local/share/issue-deck/local-repo-ports.conf"
 
 if ($Unregister) {
     if (Test-Path $registryKey) {
@@ -53,7 +57,7 @@ if ($Unregister) {
         Write-Host "ハンドラを削除しました: $installedHandler"
     }
     try {
-        & wsl.exe -d $distro -- bash -lc "rm -f $launcherWslPath; rm -rf $launcherLibDirWslPath" 2>$null | Out-Null
+        & wsl.exe -d $distro -- bash -lc "rm -f $launcherWslPath; rm -f $launcherPortsWslPath; rm -rf $launcherLibDirWslPath" 2>$null | Out-Null
         Write-Host "受け口スクリプトとライブラリを削除しました: $launcherWslPath / $launcherLibDirWslPath（WSL側）"
     } catch {
         Write-Warning "受け口スクリプトの削除に失敗しました: $launcherWslPath"
@@ -140,6 +144,15 @@ Install-WslFile `
     -Mode "755" `
     -Label "受け口のライブラリ" `
     -RepoRelativePath "scripts/lib/local-repo-resolve.sh"
+
+# 開発サーバーのポート帯の対応表（#1224）。無くても各リポジトリの既定値に落ちるだけなので、
+# 配布に失敗しても起動は妨げない（ライブラリと違い必須ではない）。
+Install-WslFile `
+    -SourcePath (Join-Path $PSScriptRoot "..\local-repo-ports.conf") `
+    -DestWslPath $launcherPortsWslPath `
+    -Mode "644" `
+    -Label "ポート帯の対応表" `
+    -RepoRelativePath "scripts/local-repo-ports.conf"
 
 # powershell.exe の実体を絶対パスで埋め込む（レジストリからの起動時にPATHへ依存しないため）。
 $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"

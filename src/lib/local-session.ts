@@ -78,8 +78,8 @@ export function isSupportedLocalSessionContract(version: number | null): boolean
 }
 
 /**
- * 画面にローカル起動の導線（「ローカルで開始」ボタン・「ローカル起動コマンドをコピー」・
- * 「ローカル起動のセットアップ」）を出してよいか（#1073）。
+ * 画面に**「このPC」経由**のローカル起動の導線（`issuedeck://`のボタン・「ローカル起動コマンドを
+ * コピー」・「ローカル起動のセットアップ」）を出してよいか（#1073）。
  *
  * 判定材料は`Repository.hasLocalStartScript`のみ。**`false`のときだけ隠し、`undefined`では
  * 隠さない。** リポジトリ情報が見つからない場合に誤って導線を消さないためで、
@@ -89,6 +89,11 @@ export function isSupportedLocalSessionContract(version: number | null): boolean
  * ローカルの対応表（`~/.config/issue-deck/local-repos.conf`）とチェックアウトのブランチは
  * 画面からは知りようがない。**出したボタンが失敗することはある。** そこはWSL側のエラー
  * メッセージとセットアップダイアログ（#1088）が担う。
+ *
+ * **サブPCへのディスパッチのゲートには使わない**（#1224）。サブPC側は汎用ランチャーで
+ * マーカー行を持たないリポジトリも起動できるため、GitHub上のファイルの有無で隠すと
+ * 「実際には起動できるのにボタンが出ない」ことになる。サブPC導線の可否は、実際にcloneされ
+ * 起動できるかを申告しているサブPC側の情報（`resolveDispatchTargetRejection`）だけで判定する。
  */
 export function canStartLocalSession(hasLocalStartScript: boolean | undefined): boolean {
   return hasLocalStartScript !== false;

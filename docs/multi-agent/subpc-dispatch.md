@@ -24,7 +24,8 @@ scripts/subpc-dispatch-poller.sh（systemd service・常駐）
   ↓
 scripts/start-local-session.sh <owner> <repo> <番号>
   ↓
-<対象リポジトリ>/scripts/start-issue.sh <番号>
+<対象リポジトリ>/scripts/start-issue.sh <番号>       ← 契約適合のリポジトリ（issue-deck自身）
+  または scripts/generic-start-issue.sh              ← それ以外（汎用ランチャー・#1224）
   ↓
 tmuxセッションが立つ → 以降の進捗は POST /api/progress（Project Status）が持つ
 ```
@@ -46,6 +47,22 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 ここで実装完了まで追うと、セッションの終了検知という別の仕組みが要るうえ、Project Statusと
 情報が二重になる。ジョブキューの責務は「起動を届けること」に閉じている。
 
+### 立ち上がった後のセッションは別のモデルで見る（#1217）
+
+ジョブの寿命が起動までで終わるということは、**立った後のセッションを見ている口が無い**ということでもある。
+そこは`DispatchSession`が担当し、pollerが1巡ごとに`POST /api/dispatch/sessions`で
+「そのホストで今見えている、Issueに紐づくtmuxセッションの全て」を報告する。ジョブへ相乗りさせないのは
+寿命が違うためで、同じ行に混ぜると`activeKey`（未完了ジョブを1件に制限するunique制約）の意味が壊れる。
+
+見るのは**`pane_dead`と`#{pane_dead_status}`（終了コード）だけ**で、画面（`capture-pane`）の内容は
+読まない。入力待ち・完了・停滞はClaude Codeのフックが担当し（#1219）、こちらはフックが飛ばない
+「プロセスの死・消失」に絞る。切り分けの根拠は[gates.md](gates.md)。
+
+**`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
+試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
+ときだけ異常終了として扱い、Issueコメントと`00.check-user`で引き上げる。消失は人が畳んだ場合と
+区別が付かないので引き上げない。
+
 取り消せるのは`queued`と`claimed`まで。`running`はworktreeの作成や依存インストールの最中で、
 途中で止めると中途半端なworktreeとブランチが残る（後始末は`scripts/cleanup-worktrees.sh`）。
 
@@ -65,8 +82,13 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 | 層 | 仕組み | 何を防ぐか |
 |---|---|---|
 | DB | `DispatchJob.activeKey`（`owner/repo#番号`）に`@unique` | 画面からの二重クリック。MySQLはunique indexに複数のNULLを許すため、終了時にnullへ戻せば「未完了は1件まで」が成立する |
-| poller | 起動前に`tmux has-session`相当の確認 | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
+| poller | 起動前に`<リポジトリ名>-issue-<番号>`のtmuxセッションがあるかを確認 | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
 | ラベル | 既存の`11.local` | 無人実行（`claude-issue-dispatch.yml`）との二重起動（#1097） |
+
+pollerの確認は、**リポジトリ名まで含めて突き合わせる**（#1224）。Issue番号はリポジトリごとに
+振られるため、番号だけ（`*-issue-<番号>`）で見ると、別リポジトリの同じ番号のセッションが動いて
+いるだけで起動を断ってしまう。起動できるリポジトリが1つだった間は表に出なかったが、増やした
+時点で番号の衝突はほぼ確実に起きる。
 
 ## 「実行できないリポジトリ」はディスパッチ前に弾く
 
@@ -77,15 +99,19 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 その場で`gh repo clone`して自動対応する案は採らない。冷えた状態からの依存インストールに時間が
 かかるうえ、リポジトリによってはDBセットアップも要り、無人実行の前提として重すぎるため。
 
-申告に載るのは、`scripts/start-local-session.sh`と**同じ4つの検証**を通ったものだけ。
+申告に載るのは、`scripts/start-local-session.sh`と**同じ検証**を通ったものだけ。
 
 1. `~/.config/issue-deck/local-repos.conf`に記載がある
 2. チェックアウト先のディレクトリが実在する
-3. `scripts/start-issue.sh`が存在する
-4. 宣言しているローカル起動プロトコルの版数が、受け口の対応範囲に収まる（#1073）
+3. `scripts/start-issue.sh`がマーカー行を宣言している場合は、その版数が受け口の対応範囲に収まる（#1073）
 
 **判定は[scripts/lib/local-repo-resolve.sh](../../scripts/lib/local-repo-resolve.sh)が持ち、
 受け口とpollerが同じ関数を呼ぶ。** 判定を二重に持つと、申告と実際の起動可否が必ずずれる。
+
+**マーカー行の宣言は必要条件ではない**（#1224）。宣言していないリポジトリはissue-deck側の汎用
+ランチャー（`scripts/generic-start-issue.sh`）で起動する。以前は宣言を必須にしていたため、
+cloneも対応表への記載も済んでいるdayspanが申告に載らず、**実際に起動できるリポジトリが
+issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](generic-launcher.md)。
 
 申告と実態がずれる可能性は残る（申告後にcloneを消した、`git pull`で版数が変わった等）。その場合は
 **ディスパッチが失敗した理由をジョブの結果として画面へ返す**。ここを省くと、無人実行では何も
@@ -96,6 +122,12 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 「実行できるリポジトリの一覧」は**ジョブの割り当て可否を決める情報なのでissue-deck側**に持つ。
 ホストの死活・CPU・メモリ・tmuxセッション一覧は[ops-dashboard#34](https://github.com/guchi-apps/ops-dashboard/issues/34)側で扱う。
 サブPCはissue-deck専用機ではなく、他リポジトリの作業セッションも並ぶため。
+
+**この切り分けは#1217のセッション報告でも守る。** 報告に載せるのは`<リポジトリ名>-issue-<番号>`に
+一致し、かつ`local-repos.conf`から`owner/repo`を**一意に**解決できたセッションだけで、ホスト上の
+無関係なtmuxセッションは送らない。セッション名にownerが含まれないため、別ownerに同名のリポジトリが
+あるとどちらのIssueか決められない。**曖昧なときは送らない**（当てずっぽうに選ぶと、無関係なIssueへ
+引き上げのコメントを投稿することになる）。
 
 ## 同時実行数の上限
 
@@ -178,11 +210,12 @@ pull型を採った以上、押してから起動が始まるまでポーリン�
 | ルート | 認証 | 用途 |
 |---|---|---|
 | `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否 |
-| `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・同時実行数 |
+| `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告 |
+| `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 
@@ -262,4 +295,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/iss
 - [#1176](https://github.com/guchi-apps/issue-deck/issues/1176) 実装実行基盤をサブPCへ移行する（親）
 - [#1180](https://github.com/guchi-apps/issue-deck/issues/1180) 起動先（このPC / subpc）を選べるようにする
 - [local-quick-start.md](local-quick-start.md) メインPCのワンクリック起動とローカル起動プロトコル
+- [generic-launcher.md](generic-launcher.md) 対象リポジトリに何も置かずに起動する汎用ランチャー（#1224）
 - [progress-status-architecture.md](../progress-status-architecture.md) 進捗の唯一の正はProject Status

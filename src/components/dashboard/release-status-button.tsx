@@ -67,7 +67,19 @@ export function ReleaseStatusButton({
     (pendingMerges ?? []).forEach((merge) => map.set(merge.repoFullName, merge));
     return map;
   }, [pendingMerges]);
-  const hasPendingMerges = (pendingMerges?.length ?? 0) > 0;
+  const pendingMergeCount = pendingMerges?.length ?? 0;
+  const hasPendingMerges = pendingMergeCount > 0;
+  // リポジトリごとに複数Issueが1つのバンプPR／リリースPRへまとめて乗る運用のため、
+  // 「リリース待ちが何個あるか」はPR件数ではなくIssue件数で表す（#1214）。
+  const releasePendingIssueCountByRepo = useMemo(() => {
+    const map = new Map<string, number>();
+    issues.forEach((issue) => {
+      const status = resolveProgressStatus(issue);
+      if (status !== "develop" && status !== "release") return;
+      map.set(issue.repositoryFullName, (map.get(issue.repositoryFullName) ?? 0) + 1);
+    });
+    return map;
+  }, [issues]);
   // CI失敗はマージ待ちより強い通知にする。ポップオーバーを開かずに気づけるのはこのドットだけのため、
   // 1件でも失敗があれば色を変える（#1059）。
   const hasCiFailure = (pendingMerges ?? []).some((merge) => merge.ciState === "failure");
@@ -145,19 +157,24 @@ export function ReleaseStatusButton({
             {hasPendingMerges && (
               <span
                 className={cn(
-                  "absolute -top-0.5 -right-0.5 flex size-2.5 rounded-full",
+                  "absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-medium text-white",
                   hasCiFailure ? "bg-destructive" : "bg-amber-500",
                 )}
-              />
+              >
+                {pendingMergeCount}
+              </span>
             )}
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 space-y-3">
           <div>
-            <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">リリース</h3>
+            <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">
+              リリース{hasPendingMerges ? `（${pendingMergeCount}件）` : ""}
+            </h3>
             <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
               {releasableRepositories.map((repo) => {
                 const pending = pendingMergeByRepo.get(repo.fullName);
+                const issueCount = releasePendingIssueCountByRepo.get(repo.fullName) ?? 0;
                 return (
                   <li key={repo.id}>
                     <button
@@ -168,7 +185,14 @@ export function ReleaseStatusButton({
                         releaseRepoFullName === repo.fullName && "bg-accent",
                       )}
                     >
-                      <span className="truncate">{repo.fullName}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate">{repo.fullName}</span>
+                        {issueCount > 0 && (
+                          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {issueCount}件
+                          </span>
+                        )}
+                      </span>
                       {pending && (
                         <span
                           className={cn(
