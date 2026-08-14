@@ -875,11 +875,14 @@ export function MobileIssueDetail({
         )}
 
         {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
-            兼ねる。サブPCの申告が無ければこの導線ごと出ない */}
+            兼ねる。サブPCの申告が無ければこの導線ごと出ない。
+            起動ボタンは、すぐ上の「実装を開始」（既定の実行先を文言にしている・#1262）が
+            出ていないときだけ出す（#1349） */}
         <StartLocalSessionButton
           issue={issue}
           onIssueUpdated={onIssueUpdated}
           fullWidth
+          showStartButton={!canStartImplementation(issue)}
           dispatch={dispatch}
         />
 

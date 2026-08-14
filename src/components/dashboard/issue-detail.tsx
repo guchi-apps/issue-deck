@@ -549,9 +549,14 @@ export function IssueDetail({
                   質問を終えてクローズ
                 </Button>
               )}
+              {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
+                  起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
+                  あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
+                  「subpcで開始」が2つ並ぶ */}
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
+                showStartButton={!canStartImplementation(issue)}
                 dispatch={dispatch}
               />
               <Button variant="outline" size="sm" asChild>
