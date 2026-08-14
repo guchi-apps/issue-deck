@@ -37,6 +37,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=scripts/lib/dev-server.sh
 source "$SCRIPT_DIR/lib/dev-server.sh"
+# tailnetへの公開（#1265）の撤去にも同じ関数を使う。
+# shellcheck source=scripts/lib/tailscale-serve.sh
+source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 IDLE_MINUTES="${DEV_SERVER_IDLE_MINUTES:-60}"
@@ -100,6 +103,33 @@ stop_one() {
   return 0
 }
 
+# tailnetへの公開（#1265）のうち、**繋がる先がもう無いもの**を外す。
+#
+# ポートとIssueの対応をここでは持たない（PIDファイルにポートを記録していない）ため、
+# **今serveされているポートを列挙し、localhostで誰も待ち受けていないものを孤児とみなす**。
+# セッションがSIGKILLで落ちてcleanupを通らなかった場合もここで拾える。
+#
+# 外し忘れると、次に同じポートを使うセッションが立つまで繋がらないURLがtailnet上に残る。
+reap_orphan_serves() {
+  local port removed=0
+  while read -r port; do
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
+    # 待ち受けが居るなら現役。`ss`が無い環境では判定できないので触らない
+    command -v ss >/dev/null 2>&1 || return 0
+    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
+      continue
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "  [dry-run] tailnetへの公開（ポート $port）は待ち受けが無いため撤去する対象です"
+      continue
+    fi
+    tailscale_serve_unpublish "$port"
+    echo "  tailnetへの公開（ポート $port）を撤去しました: 待ち受けが無い（孤児）"
+    removed=$((removed + 1))
+  done < <(tailscale_serve_ports)
+  [[ "$removed" -eq 0 ]] || echo "tailnetへの公開を撤去しました: $removed 件"
+}
+
 shopt -s nullglob
 for pid_file in "$DEV_SERVER_DIR"/issue-*.pid; do
   file_name="$(basename "$pid_file")"
@@ -154,5 +184,7 @@ for pid_file in "$DEV_SERVER_DIR"/issue-*.pid; do
       "$((idle_for / 60))分アクセスが無くアイドルだった（セッションはそのまま残す）"
   fi
 done
+
+reap_orphan_serves
 
 echo "開発サーバーを確認しました: $CHECKED 件（停止 $STOPPED 件・アイドル判定 ${IDLE_MINUTES}分）"

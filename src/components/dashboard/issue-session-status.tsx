@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, ExternalLink, HandHelping, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, HandHelping, Loader2, Monitor } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -87,14 +87,25 @@ export function IssueSessionStatus({
           {summary.detail}
         </p>
       )}
-      {summary.remoteControlUrl && (
-        <Button variant="outline" size="sm" asChild>
-          <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
-            Remote Controlで開く
-            <ExternalLink />
-          </a>
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {summary.remoteControlUrl && (
+          <Button variant="outline" size="sm" asChild>
+            <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
+              Remote Controlで開く
+              <ExternalLink />
+            </a>
+          </Button>
+        )}
+        {/* tailnet内からしか開けない（#1265）。スマホがtailnetにいれば押せる */}
+        {summary.previewUrl && (
+          <Button variant="outline" size="sm" asChild>
+            <a href={summary.previewUrl} target="_blank" rel="noreferrer">
+              <Monitor />
+              開発環境を開く
+            </a>
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

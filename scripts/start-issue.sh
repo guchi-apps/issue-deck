@@ -425,10 +425,16 @@ with open(template_path, encoding="utf-8") as f:
 label_names = {l["name"] for l in issue.get("labels", [])}
 labels = ", ".join(sorted(label_names)) or "(なし)"
 
+# 別端末から見るための案内。**メインPC（WSL）はsslip.io、サブPCはtailscale serve**（#1265）で
+# 経路が違うため、決め打ちで書かない。tailnetのURLは起動時にしか分からない（ホスト名が
+# ホスト依存）ので、起動ログの行を見るよう促す。
 if sslip_url:
     sslip_note = f"（スマホ等、同一LAN上の別端末から確認する場合は`{sslip_url}`を使う）"
 else:
-    sslip_note = ""
+    sslip_note = (
+        "（別端末から確認する場合は、起動ログの「開発サーバーをtailnetへ公開しました」の行に"
+        "出ているtailnetのURLを使う。出ていなければこのホストからは公開できていない）"
+    )
 
 if prepare_only:
     dev_server_state = (
@@ -451,7 +457,8 @@ if "23.preview-required" in label_names:
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         "1. `http://localhost:{port}` で実際の画面を確認する"
         "（{dev_server_state}）{sslip_note}\n"
-        "2. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
+        "2. 確認した画面・操作手順と**別端末から開けるURL**をユーザーに提示し、問題ないか"
+        "明示的な承認を得る（ユーザーは外出先のスマホから開くため、`localhost`のURLでは届かない）\n"
         "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
         "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
     ).format(port=dev_port, sslip_note=sslip_note, dev_server_state=dev_server_state)

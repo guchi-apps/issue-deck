@@ -23,6 +23,8 @@ export type IssueSessionSummary = {
   detail: string | null;
   /** スマホから答えるための出口。取れていなければnull */
   remoteControlUrl: string | null;
+  /** tailnetへ出した開発サーバー（#1265）。**生きているセッションでだけ出す** */
+  previewUrl: string | null;
 };
 
 /**
@@ -53,7 +55,13 @@ export function findSessionForIssue(
  * （もう一方の担保は`Stop`フックによる`RESPONDED`への遷移）。
  */
 export function summarizeIssueSession(session: DispatchSessionView): IssueSessionSummary {
-  const base = { session, remoteControlUrl: session.remoteControlUrl };
+  const base = {
+    session,
+    remoteControlUrl: session.remoteControlUrl,
+    // セッションが終われば`tailscale serve`も撤去されている（cleanupとpollerの回収）。
+    // 開いても繋がらないURLを残さない
+    previewUrl: session.state === "ALIVE" ? session.previewUrl : null,
+  };
 
   if (session.state === "FAILED") {
     return {
@@ -63,6 +71,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       detail: session.exitStatus === null ? null : `終了コード ${session.exitStatus}`,
       // 落ちたセッションのRemote Controlは開いても意味が無い
       remoteControlUrl: null,
+      previewUrl: null,
     };
   }
   if (session.state === "EXITED" || session.state === "GONE") {
@@ -72,6 +81,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       label: `${session.host}のセッションは終了しました`,
       detail: null,
       remoteControlUrl: null,
+      previewUrl: null,
     };
   }
 

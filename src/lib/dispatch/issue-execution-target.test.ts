@@ -22,6 +22,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activity: null,
     activityAt: null,
     remoteControlUrl: null,
+    previewUrl: null,
     ...overrides,
   };
 }

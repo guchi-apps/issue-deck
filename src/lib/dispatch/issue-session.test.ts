@@ -22,6 +22,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activity: null,
     activityAt: null,
     remoteControlUrl: null,
+    previewUrl: null,
     ...overrides,
   };
 }
@@ -117,4 +118,23 @@ describe("shortIssueSessionLabel", () => {
     expect(shortIssueSessionLabel(session({ state: "EXITED" }))).toBe("終了");
     expect(shortIssueSessionLabel(session({ state: "FAILED" }))).toBe("異常終了");
   });
+});
+
+describe("プレビューURL（#1265）", () => {
+  it("生きているセッションでは出す", () => {
+    const s = summarizeIssueSession(
+      session({ previewUrl: "http://subpc.tail5210f2.ts.net:4123" }),
+    );
+    expect(s.previewUrl).toBe("http://subpc.tail5210f2.ts.net:4123");
+  });
+
+  it.each([["EXITED"], ["GONE"], ["FAILED"]] as const)(
+    "%sのセッションでは出さない（serveは撤去済みで繋がらない）",
+    (state) => {
+      const s = summarizeIssueSession(
+        session({ state, previewUrl: "http://subpc.tail5210f2.ts.net:4123" }),
+      );
+      expect(s.previewUrl).toBeNull();
+    },
+  );
 });

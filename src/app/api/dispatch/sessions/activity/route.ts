@@ -4,6 +4,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
 import {
   parseDispatchSessionActivity,
+  parsePreviewUrl,
   parseRemoteControlUrl,
 } from "@/lib/dispatch/session-state";
 import { recordDispatchSessionActivity } from "@/lib/dispatch/sessions";
@@ -36,7 +37,13 @@ export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const target = parseDispatchTarget(payload?.repository, payload?.issue);
   const activity = parseDispatchSessionActivity(payload?.activity);
-  if (!target || !activity) {
+  // 形が想定外なら**受け付けずにnullへ倒す**（リクエスト自体は拒否しない）。URLが載らない
+  // だけで、入力待ちであること自体は画面に出す価値がある
+  const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
+  const previewUrl = parsePreviewUrl(payload?.previewUrl);
+  // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）は
+  // `activity`を伴わない**ので、そちらを必須にはできない
+  if (!target || (!activity && !remoteControlUrl && !previewUrl)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -44,9 +51,8 @@ export async function POST(request: NextRequest) {
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
     activity,
-    // 形が想定外なら**受け付けずにnullへ倒す**（リクエスト自体は拒否しない）。URLが載らない
-    // だけで、入力待ちであること自体は画面に出す価値がある
-    remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
+    remoteControlUrl,
+    previewUrl,
   });
 
   // 対象の行が無い（pollerがまだ1巡していない）場合も200で返す。呼び出し側に再送の判断を
