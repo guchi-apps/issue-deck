@@ -317,8 +317,8 @@ gh issue create --title "[手作業] <実行する場所>: <やること>" --lab
   上記「責務」に記載のPull Request作成・更新まで先に済ませてください。その上で、最後の
   完了報告コメント（Issue側の`gh issue comment`）を投稿する前に以下を行ってください
   （PR作成をスクリーンショット撮影より先に行うのは、pushしてからPRが開くまでの間隔を短くし、
-  `claude-review-develop.yml`のrisk-checkジョブが`00.check-user`を付与するタイミングとの
-  競合を避けるためです）。
+  `claude-review-develop.yml`が`00.check-user`を付与するタイミングとの
+  競合を避けるためです。付与を行うのは同ワークフローの最後の`auto-merge`ジョブです。#1406）。
   1. `${PACKAGE_MANAGER} run capture:issue-screenshots -- ${ISSUE_NUMBER} [対象パス]`を
      実行する。内部で開発サーバー（`next dev`）を起動し、CIバイパス用ユーザーでログインした
      状態で撮影し、`screenshots`ブランチへコミット・pushしたうえで、埋め込み用のraw URLを

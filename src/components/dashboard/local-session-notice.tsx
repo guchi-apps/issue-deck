@@ -77,6 +77,30 @@ export function LocalSessionApprovalNotice({
 }
 
 /**
+ * 走っているセッションが今まさに入力を待っているときに、承認欄のボタンの代わりに出す案内（#1417）。
+ *
+ * `LocalSessionApprovalNotice`は「押しても動かない」ことを添えるだけでボタンは出すが、
+ * **セッションが生きて入力待ちで止まっている間は、押して得られるものが何も無い**
+ * （コメントは届かず、`00.check-user`はフックが人の応答を検知した時点で自動的に外れる）。
+ * この状態でだけボタンを引っ込め、唯一効く出口であるRemote Controlに絞る。
+ */
+export function LocalSessionWaitingInputNotice({
+  session,
+}: {
+  /** 対応するセッション。見つかっていなければ`null`（案内だけ出す） */
+  session: DispatchSessionView | null;
+}) {
+  return (
+    <LocalSessionNotice session={session}>
+      走っているセッションが入力を待っています。
+      <strong className="font-medium">承認・修正はRemote Controlから伝えてください</strong>
+      （`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません）。
+      答えると`00.check-user`は自動的に外れます。
+    </LocalSessionNotice>
+  );
+}
+
+/**
  * コメント入力欄に出す案内（#1287）。
  *
  * 承認欄の案内は**承認待ちのときしか出ない**が、届かないのは承認コメントに限らない。

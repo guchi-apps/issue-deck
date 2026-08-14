@@ -51,6 +51,48 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 別途設けている。走査対象はissue-deckの進捗問い合わせAPIから引くため、**issue-deckへ疎通
 できない間このジョブは何も見つけられない**（ラベルという代替の判断材料はもう無い）。
 
+## `00.check-user`が付く・外れるタイミング（#1417）
+
+`00.check-user`は「ユーザーの確認・指示が要る」ことを表す唯一のラベルで、**付け外しをする実行体が
+無人実行のワークフロー・issue-deckの画面・ローカルセッションのフックの3経路に分かれている**。
+個々の理由はそれぞれのコードのコメントにあるが、全体を見渡せる場所が無いとどこかが欠けていても
+気付けないため、ここを一覧の正とする。個別の設計理由は各項目のリンク先を参照。
+
+### 付くタイミング
+
+| 契機 | 無人実行（GitHub Actions） | ローカル・サブPC実行 |
+| --- | --- | --- |
+| エージェントがユーザーに質問した | `reusable-issue-dispatch.yml`が回答コメントの投稿後に`00.check-user`＋`00.qa-answered`を付与（#887） | `Notification / permission_prompt`フックが`POST /api/dispatch/sessions/activity`へ`checkUserRequested`を報告し、`requestSessionCheckUser`が付与（#1417） |
+| 計画を提示した | 計画コメントの投稿後に付与（`.github/prompts/plan.md`） | `PreToolUse(ExitPlanMode)`フックが計画をIssueへ投稿して付与（#1342） |
+| PRを作成し、自動マージされなかった | `reusable-claude-review-develop.yml`の`risk-check`（機械的判定・`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`）と`claude-review`（意味的判定）が付与（後述「自動マージ可否の判定方法」） | 同じ（PR作成後はレビュー・統合側の担当） |
+| 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
+| スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
+| 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
+
+### 外れるタイミング
+
+| 契機 | 外す実行体 |
+| --- | --- |
+| ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
+| ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
+| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`が進捗の遷移とあわせて外す（#266） |
+| ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
+| ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
+| Issueがcloseされた | `reusable-issue-labels.yml`の`cleanup-on-close`（#464） |
+
+### ローカルセッションで守っている約束（#1342・#1417）
+
+- **外すのは自分で付けたときだけ。** `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で
+  付けた`00.check-user`まで落とす。付けた事実はホスト側の状態ファイル
+  （`scripts/lib/session-state.sh`の`<セッション名>.check-user`）に印として残し、印があるときしか
+  外しに行かない。
+- **入力待ちではコメントを投稿しない。** 承認プロンプトや質問はturnの途中で何度も起きるもので、
+  そのたびにIssueへ書くとノイズにしかならない。何を聞かれているかはRemote Controlで見る。
+  計画の提示（`ExitPlanMode`）だけは本文をコメントとして残す。
+- **入力待ちの間は画面の承認・修正ボタンを出さない。** `11.local`が付いている間、押しても
+  コメントが残るだけで走っているセッションには届かない（`LocalSessionWaitingInputNotice`）。
+  セッションが落ちていれば従来どおりボタンを出す — 画面から`00.check-user`を外す手段を残すため。
+
 ## 画面のチェックボックス4つの使い分け（#1317）
 
 issue-deckの「新しいIssueを作成」「実装を開始」ダイアログには、下記4つのラベルをチェックボックスとして出している（定義は`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`1か所で、両方の画面が同じ配列を読む）。どれも**エージェントを止める場所が違うだけ**で、迷ったら「どこで自分が見たいか」で選ぶ。
@@ -64,7 +106,7 @@ issue-deckの「新しいIssueを作成」「実装を開始」ダイアログ�
 
 - **「計画が必要」と他の3つは目的が違う。** 計画は「作る前に方向を合わせる」もので、残り3つは「出来上がったものを確認する」もの。バグ修正のように直す場所が決まっているIssueで計画を挟んでも、承認待ちの往復が増えるだけで判断は変わらない。
 - **「開発環境を起動する」と「スクリーンショットが必要」は択一で、実行先で決まる。** サブPC実行・ローカル実行は`tailscale serve`で開発サーバーそのものをtailnetへ出せる（#1265）ため、外出先のスマホからでも実物を触れる。撮影が要るのは、ワークフロー終了と同時にdevサーバーが消える無人実行だけ（Fly.ioのプレビュー環境は#1308で廃止済み）。このため「実装を開始」ダイアログでは、**実行先にGitHub Actionsを選んでいるときだけ撮影のチェックボックスを出す**（`visibleStartImplementationOptions`）。既にラベルが付いている場合は、外せなくならないよう実行先によらず出す。
-- **「マージ前に確認が必要」は、自動では止まらない変更を止めるためのもの。** 認証・認可、DBスキーマ・マイグレーション、本番環境の設定、GitHub Actions・デプロイ設定、Secrets・環境変数、課金・決済、大規模な依存更新は、このラベルが無くても`risk-check`ジョブが常に`00.check-user`を付けて自動マージを止める（「自動マージ可否の判定方法」参照）。したがってこのラベルを選ぶ意味があるのは、**そこに当てはまらないのに自分の目で通したい**場合に限られる。典型的には、影響範囲が読みにくいリファクタリング、共通コンポーネント・共通関数の書き換え、Issueの文面だけでは仕様が決まりきっていない実装、他リポジトリへ配る雛形の変更。一度きりの`00.check-user`の手動付与と違い、**PRが何度pushされても毎回止まる**のが実務上の違い。
+- **「マージ前に確認が必要」は、自動では止まらない変更を止めるためのもの。** 認証・認可、DBスキーマ・マイグレーション、本番環境の設定、GitHub Actions・デプロイ設定、Secrets・環境変数、課金・決済、大規模な依存更新は、このラベルが無くても自動レビューが常に該当と判定し、`00.check-user`を付けて自動マージを止める（「自動マージ可否の判定方法」参照）。したがってこのラベルを選ぶ意味があるのは、**そこに当てはまらないのに自分の目で通したい**場合に限られる。典型的には、影響範囲が読みにくいリファクタリング、共通コンポーネント・共通関数の書き換え、Issueの文面だけでは仕様が決まりきっていない実装、他リポジトリへ配る雛形の変更。一度きりの`00.check-user`の手動付与と違い、**PRが何度pushされても毎回止まる**のが実務上の違い。
 
 各ラベルの詳しい挙動は以下の各節を参照する。
 
@@ -177,12 +219,12 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
   - **ラベルなし（デフォルト）**: 従来どおり、`risk-check`（機械的判定）・`claude-review`
     （意味的判定）の結果のみで自動マージ可否を判断する。
   - **ラベルあり**: 対応Issueに付いている限り、develop向けPRへのpushのたびに`risk-check`
-    ジョブが判定し、変更内容によらず常に`00.check-user`を付与して自動マージをスキップする
-    （詳細は「自動マージ可否の判定方法」参照）。他の`21.plan-required`等と異なり、実装
+    ジョブが判定し、変更内容によらず常に該当扱いにして自動マージをスキップする
+    （`00.check-user`を実際に付けるのは`auto-merge`ジョブ。詳細は「自動マージ可否の判定方法」参照）。他の`21.plan-required`等と異なり、実装
     エージェントの挙動（Plan mode・画面確認等）を分岐させるものではなく、レビュー・統合側の
     自動マージ判定にのみ影響する。
-  - `24.screenshot-required`が付いている場合も同様に`risk-check`ジョブが常に`00.check-user`を
-    付与する（#567）。無人実行では撮影自体は完結できてもスクリーンショットの内容を人間が
+  - `24.screenshot-required`が付いている場合も同様に`risk-check`ジョブが常に該当と判定する
+    （#567）。無人実行では撮影自体は完結できてもスクリーンショットの内容を人間が
     確認する前にdevelopへマージされてしまう問題があったため、`22.merge-confirm-required`と
     同じ仕組みに乗せている。詳細は「自動マージ可否の判定方法」・Phase7参照。
     このコメントはPR作成・push直後（実装エージェントがスクリーンショットを撮影する前）に
@@ -190,8 +232,8 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
     このコメントだけを見てスクリーンショット未添付だと誤解し、再度添付を催促してしまう
     事象が起きたため（#859）、コメント文言自体に「撮影完了後に別コメントとして画像が
     追加投稿される」旨を明記した（#862）。
-  - `23.preview-required`が付いている場合も同様に`risk-check`ジョブが常に`00.check-user`を
-    付与する（#813）。無人実行ではPR作成前にプレビュー画面を提示できないため、確認ゲートを
+  - `23.preview-required`が付いている場合も同様に`risk-check`ジョブが常に該当と判定する
+    （#813）。無人実行ではPR作成前にプレビュー画面を提示できないため、確認ゲートを
     develop向けPRのマージ前に移した（詳細は「開発環境プレビュー要否をIssueラベルでトグルする」参照）。
   - 一度きりの`00.check-user`の手動付与と異なり、PRが複数回pushされる場合（追加修正・
     コンフリクト解消の自動push等）でも、そのPRが存在する間はIssueにラベルを付けたままにして
@@ -444,9 +486,10 @@ Issue詳細では、**エージェントへ送る導線を出さず、代わり�
 
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **CI完了待ち（`wait-for-ci`ジョブ）**: `risk-check`・`claude-review`はいずれも`wait-for-ci`ジョブに`needs`で依存しており、`ci.yml`（ワークフロー名`CI`）がそのPRのhead SHAに対して`completed`になるまで待ってから起動する。CIが`in_progress`のうちに`00.check-user`が付き、issue-deck画面上で時期尚早に「要確認」と見えてしまう問題を防ぐため（#810）。20秒間隔・最大60回（約20分）ポーリングし、タイムアウトした場合もジョブ自体は失敗させずそのまま後続へ進める（fail-open。失敗させると`risk-check`/`claude-review`がskipされ、レビュー自体が行われないまま放置される事故につながるため）。なお実際のマージ可否は`auto-merge`ジョブがGitHub Auto-merge機能（`develop`の`required_status_checks`でCI完了を待つ）に委ねているため、`wait-for-ci`の有無に関わらずマージの安全性自体は保たれる。
-- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`, `.shared-context/**`）に照合する。これらは`reusable-claude-review-develop.yml`に**内蔵**されており、呼び出し元から無効化できない（#1078）。リポジトリ固有のリスクパスは`risk-paths`入力で**追加**する。入力でリスクを追加できても削減はできない設計で、宣言し忘れたリポジトリで認証やマイグレーションの変更が無確認のままマージされるのを防いでいる。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。あわせて、共有知識リポジトリのcheckout先である`.shared-context/`（`.gitignore`済み）が差分に混入していないかも確認する。従来はこの確認を`claude-review`のプロンプトだけが担っていたが、`claude-review`は低リスクPRではskipされるようになった（#992）ため、機械判定側にも同じ確認を置いている。ヒットしたら対応Issueに`00.check-user`を自動付与する。
+- **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`, `.shared-context/**`）に照合する。これらは`reusable-claude-review-develop.yml`に**内蔵**されており、呼び出し元から無効化できない（#1078）。リポジトリ固有のリスクパスは`risk-paths`入力で**追加**する。入力でリスクを追加できても削減はできない設計で、宣言し忘れたリポジトリで認証やマイグレーションの変更が無確認のままマージされるのを防いでいる。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。あわせて、共有知識リポジトリのcheckout先である`.shared-context/`（`.gitignore`済み）が差分に混入していないかも確認する。従来はこの確認を`claude-review`のプロンプトだけが担っていたが、`claude-review`は低リスクPRではskipされるようになった（#992）ため、機械判定側にも同じ確認を置いている。ヒットした場合、**このジョブは判定結果を出力（`risky`・`reasons`・`already-check-user`）に載せるだけで、`00.check-user`の付与と理由コメントの投稿は行わない**。実際に反映するのは最後の`auto-merge`ジョブ（後述「`00.check-user`はレビュー完了後に付ける」、#1406）。
 - **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。ただしこのジョブは全PRで実行されるわけではなく、`risk-check`ジョブの`needs-review`出力によってゲートされる（後述「Claude Reviewの実行要否を`risk-check`でゲートする」、#992）。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
-- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは`risk-check`・`claude-review`の完了後、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
+- **`00.check-user`はレビュー完了後に付ける（#1406）**: 一次判定の結果を反映する（ラベル付与・理由コメント投稿）のは、`risk-check`ではなくワークフロー最後の`auto-merge`ジョブの先頭ステップ。`risk-check`の時点で付けていた頃は、そのあとに走る`claude-review`（数分かかる）と`auto-merge`のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では**head SHAの全check-runを集約したCI状態が`in_progress`のまま**（`src/lib/github/pull-request-ci.ts`）でマージボタンが押せなかった。実測（PR #1404）ではCI（`lint-and-build`）成功が17:43:23、`00.check-user`付与が17:43:51、`claude-review`完了が17:50:18で、**通知から約6分半**押せない状態が続いていた。**レビュー用ワークフローが自分自身の完了を待ってからラベルを付けることはできない**（デッドロックになる）ため、「ラベルを読む直前＝最後のジョブで書く」形にして、通知後に残るcheck-runを`auto-merge`ジョブ自身の数秒だけにしている。なお`risky`が真なら`needs-review`も必ず真になる（`add_review_reason "機械的リスク判定に該当したため"`）ので、一次判定に当たったPRでは`claude-review`が必ず走り、付与は常にレビュー完了後になる。`claude-review`が失敗して`auto-merge`ごとスキップされる経路では、`claude-review-fallback`がラベル付与と理由の伝達を肩代わりする。
+- **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは上記の反映を済ませたうえで、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
-- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
+- **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。**この「push開始時点で付いていたか」は`risk-check`が掴んで`already-check-user`出力で渡す**（#1406）。付与を行う`auto-merge`ジョブ側で読み直すと、`claude-review`が二次判定で付けたラベルを見て一次判定の理由コメントを取りこぼす。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。

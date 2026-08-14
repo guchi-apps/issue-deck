@@ -4,14 +4,23 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { type CiState, fetchOpenPullRequestsForBase, fetchRefCiState } from "@/lib/github/release-api";
+import {
+  type CiState,
+  fetchLatestDeployWorkflowRun,
+  fetchLatestReleaseWorkflowRun,
+  fetchOpenPullRequestsForBase,
+  fetchRefCiState,
+} from "@/lib/github/release-api";
+import {
+  resolveFailedReleaseWorkflow,
+  summarizeReleaseStatus,
+  type ReleaseButtonStatus,
+  type ReleaseMergeTarget,
+  type ReleaseStatusSummaryInput,
+} from "@/lib/github/release-button-status";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 
-/** "main": develop→mainのPRがマージ待ち。"develop": バンプPRがCI通過後もマージ待ち（#979） */
-export type ReleaseMergeTarget = "main" | "develop";
-
 export type ReleasePendingMerge = {
-  repoFullName: string;
   mergeTarget: ReleaseMergeTarget;
   pullRequestNumber: number;
   pullRequestUrl: string;
@@ -23,7 +32,22 @@ export type ReleasePendingMerge = {
   ciState: CiState;
 };
 
+/**
+ * リポジトリ1件ぶんのリリース状況。`status`が`idle`のリポジトリは返さない
+ * （画面側は「返ってきたもの＝動きがあるもの」として扱う）。
+ */
+export type RepositoryReleaseStatus = {
+  repoFullName: string;
+  status: ReleaseButtonStatus;
+  /** `error`のとき、どちらの実行が失敗しているか */
+  failedWorkflow: "deploy" | "release" | null;
+  /** 人のマージ操作を待っているPR。待っていなければnull */
+  pendingMerge: ReleasePendingMerge | null;
+};
+
 export function GET() {
+  // 元は「mainマージ待ち」だけを返していたが、#1117でリリース状況のサマリを返すようになった。
+  // 消費するリクエスト数の桁は変わっていないため、過去の集計と分断しないようキーは据え置く。
   return withGithubApiFeature("release_pending_merges", handleGET);
 }
 
@@ -44,7 +68,7 @@ async function handleGET() {
   });
 
   if (repositories.length === 0) {
-    return NextResponse.json({ pendingMerges: [] });
+    return NextResponse.json({ releaseStatuses: [] });
   }
 
   // 同一installationのリポジトリ間でトークン取得を使い回し、無駄なAPI呼び出しを避ける。
@@ -59,62 +83,90 @@ async function handleGET() {
   }
 
   const results = await Promise.all(
-    repositories.map(async (repository): Promise<ReleasePendingMerge | null> => {
+    repositories.map(async (repository): Promise<RepositoryReleaseStatus | null> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
         const available = await releaseWorkflowExists(repository.ownerLogin, repository.name, token);
         if (!available) return null;
 
-        const [developBasePullRequests, mainBasePullRequests] = await Promise.all([
-          fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "develop", token),
-          fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "main", token),
-        ]);
+        const [developBasePullRequests, mainBasePullRequests, workflowRun, deployWorkflowRun] =
+          await Promise.all([
+            fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "develop", token),
+            fetchOpenPullRequestsForBase(repository.ownerLogin, repository.name, "main", token),
+            // 実行中・失敗の検出にはPRだけでは足りないため、リリースworkflowと本番デプロイの
+            // 最新runも取る（#1117）。リリースworkflowを持たないリポジトリはこの行まで来ない。
+            fetchLatestReleaseWorkflowRun(repository.ownerLogin, repository.name, token),
+            fetchLatestDeployWorkflowRun(repository.ownerLogin, repository.name, token),
+          ]);
 
         // mainへのマージ待ち（develop→mainのPRがオープン中）を最優先で検出する。
-        const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop");
-        if (releasePr) {
-          // リリースPRのheadは`develop`そのもののため、`develop`のcheck-runsがそのままこのPRの状態になる。
-          // **CIワークフローだけでなく、その時点でdevelopに対して走った全ワークフローが含まれる**
-          // （実測でdeploy-preview・dispatch・labelsなど94件）。ワークフロー名でCIを特定する方式は
-          // ファイル名がリポジトリごとに違う（asset-managerはtest.yml）ため採らず、集約値をそのまま
-          // 使う。画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのはこのため。
-          //
-          // なお`fetchRefCiState`はper_page=100の1ページのみを見る。developは既に94件あり、
-          // 100を超えると失敗を取りこぼしうる（#1061）。
-          const ciState = await fetchRefCiState(
-            repository.ownerLogin,
-            repository.name,
-            "develop",
-            token,
-          );
-          return {
-            repoFullName: repository.fullName,
+        const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
+        const bumpPr =
+          developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
+
+        // CI状態は「今マージ待ちにあたるPR」の分だけ取る（1リポジトリにつき最大1回）。
+        //
+        // リリースPRのheadは`develop`そのもののため、`develop`のcheck-runsがそのままこのPRの
+        // 状態になる。**CIワークフローだけでなく、その時点でdevelopに対して走った全ワークフローが
+        // 含まれる**（実測でdeploy-preview・dispatch・labelsなど94件）。ワークフロー名でCIを
+        // 特定する方式はファイル名がリポジトリごとに違う（asset-managerはtest.yml）ため採らず、
+        // 集約値をそのまま使う。画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのは
+        // このため。
+        //
+        // なお`fetchRefCiState`はper_page=100の1ページのみを見る。developは既に94件あり、
+        // 100を超えると失敗を取りこぼしうる（#1061）。
+        const releaseCiState = releasePr
+          ? await fetchRefCiState(repository.ownerLogin, repository.name, "develop", token)
+          : null;
+        const bumpCiState =
+          !releasePr && bumpPr
+            ? await fetchRefCiState(repository.ownerLogin, repository.name, bumpPr.head.ref, token)
+            : null;
+
+        // `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）は判定しない。
+        // 判定には`package.json`の版数取得が1リポジトリあたり2回増えるのに対し、その状態は
+        // ほぼ常にリリースworkflowのrunが実行中か失敗として現れるため（#1117）。
+        const summaryInput: ReleaseStatusSummaryInput = {
+          workflowRun,
+          deployWorkflowRun,
+          // develop→mainのPRを優先する上記の方針に合わせ、そちらがオープン中の間は
+          // バンプPRを見ない（`/api/repositories/release`の`phase`とは優先順位が逆になる）。
+          bumpPullRequest: !releasePr && bumpPr ? { ciState: bumpCiState } : null,
+          releasePullRequest: releasePr ? { ciState: releaseCiState } : null,
+          releasePending: false,
+        };
+        const status = summarizeReleaseStatus(summaryInput);
+        if (status === "idle") return null;
+
+        let pendingMerge: ReleasePendingMerge | null = null;
+        if (releasePr && releaseCiState && releaseCiState !== "pending") {
+          // CI実行中はまだマージできないため、マージ待ちとして数えない（#1433）。
+          // `summarizeReleaseStatus`のaction_required判定基準・バンプPR側の条件と揃える。
+          pendingMerge = {
             mergeTarget: "main",
             pullRequestNumber: releasePr.number,
             pullRequestUrl: releasePr.html_url,
             pullRequestTitle: releasePr.title,
-            ciState,
+            ciState: releaseCiState,
+          };
+        } else if (bumpPr && bumpCiState && bumpCiState !== "pending") {
+          // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
+          // `summarizeReleaseStatus`のaction_required判定基準（CIがpendingでなくなった時点）と揃える。
+          pendingMerge = {
+            mergeTarget: "develop",
+            pullRequestNumber: bumpPr.number,
+            pullRequestUrl: bumpPr.html_url,
+            pullRequestTitle: bumpPr.title,
+            ciState: bumpCiState,
           };
         }
 
-        // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
-        // `summarizeReleaseButtonStatus`のaction_required判定基準（CIがpendingでなくなった時点）と揃える。
-        const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v"));
-        if (bumpPr) {
-          const ciState = await fetchRefCiState(repository.ownerLogin, repository.name, bumpPr.head.ref, token);
-          if (ciState !== "pending") {
-            return {
-              repoFullName: repository.fullName,
-              mergeTarget: "develop",
-              pullRequestNumber: bumpPr.number,
-              pullRequestUrl: bumpPr.html_url,
-              pullRequestTitle: bumpPr.title,
-              ciState,
-            };
-          }
-        }
-
-        return null;
+        return {
+          repoFullName: repository.fullName,
+          status,
+          failedWorkflow: resolveFailedReleaseWorkflow(summaryInput),
+          pendingMerge,
+        };
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まないよう、ログのみ残してスキップする。
         console.error(
@@ -127,6 +179,6 @@ async function handleGET() {
   );
 
   return NextResponse.json({
-    pendingMerges: results.filter((result): result is ReleasePendingMerge => result !== null),
+    releaseStatuses: results.filter((result): result is RepositoryReleaseStatus => result !== null),
   });
 }

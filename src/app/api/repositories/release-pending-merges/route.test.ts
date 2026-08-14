@@ -5,6 +5,8 @@ const findMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchOpenPullRequestsForBase = vi.fn();
 const fetchRefCiState = vi.fn();
+const fetchLatestReleaseWorkflowRun = vi.fn();
+const fetchLatestDeployWorkflowRun = vi.fn();
 const releaseWorkflowExists = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
@@ -39,6 +41,12 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     get fetchRefCiState() {
       return fetchRefCiState;
     },
+    get fetchLatestReleaseWorkflowRun() {
+      return fetchLatestReleaseWorkflowRun;
+    },
+    get fetchLatestDeployWorkflowRun() {
+      return fetchLatestDeployWorkflowRun;
+    },
   };
 });
 
@@ -63,6 +71,29 @@ const REPO_B = {
   installation: { installationId: 111 },
 };
 
+/** 指定したリポジトリ・baseにだけPRを返すモック実装を作る */
+function openPullRequestsFor(target: {
+  repo: string;
+  base: string;
+  pullRequest: { number: number; html_url: string; title: string; head: { ref: string } };
+}) {
+  return async (_owner: string, repo: string, base: string) =>
+    repo === target.repo && base === target.base ? [target.pullRequest] : [];
+}
+
+const RELEASE_PR = {
+  number: 12,
+  html_url: "https://github.com/owner/repo-a/pull/12",
+  title: "release",
+  head: { ref: "develop" },
+};
+const BUMP_PR = {
+  number: 34,
+  html_url: "https://github.com/owner/repo-a/pull/34",
+  title: "release/v1.2.3",
+  head: { ref: "release/v1.2.3" },
+};
+
 describe("GET /api/repositories/release-pending-merges", () => {
   beforeEach(() => {
     requireUserId.mockReset().mockResolvedValue("user-1");
@@ -71,6 +102,8 @@ describe("GET /api/repositories/release-pending-merges", () => {
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
     fetchOpenPullRequestsForBase.mockReset().mockResolvedValue([]);
     fetchRefCiState.mockReset().mockResolvedValue("success");
+    fetchLatestReleaseWorkflowRun.mockReset().mockResolvedValue(null);
+    fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -87,31 +120,25 @@ describe("GET /api/repositories/release-pending-merges", () => {
   });
 
   it("develop→mainのPRがオープン中のリポジトリはmainへのマージ待ちとして返す", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
-      if (base === "main" && repo === "repo-a") {
-        return [
-          {
-            number: 12,
-            html_url: "https://github.com/owner/repo-a/pull/12",
-            title: "release",
-            head: { ref: "develop" },
-          },
-        ];
-      }
-      return [];
-    });
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
 
     const response = await GET();
     const json = await response.json();
 
-    expect(json.pendingMerges).toEqual([
+    expect(json.releaseStatuses).toEqual([
       {
         repoFullName: "owner/repo-a",
-        mergeTarget: "main",
-        pullRequestNumber: 12,
-        pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
-        pullRequestTitle: "release",
-        ciState: "success",
+        status: "action_required",
+        failedWorkflow: null,
+        pendingMerge: {
+          mergeTarget: "main",
+          pullRequestNumber: 12,
+          pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
+          pullRequestTitle: "release",
+          ciState: "success",
+        },
       },
     ]);
     // リリースPRのheadはdevelopそのもののため、CI状態はdevelopに対して問い合わせる。
@@ -119,19 +146,9 @@ describe("GET /api/repositories/release-pending-merges", () => {
   });
 
   it("リリースPRのCIが失敗していても一覧から外さず、ciStateにfailureを返す（#1059）", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
-      if (base === "main" && repo === "repo-a") {
-        return [
-          {
-            number: 12,
-            html_url: "https://github.com/owner/repo-a/pull/12",
-            title: "release",
-            head: { ref: "develop" },
-          },
-        ];
-      }
-      return [];
-    });
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
     fetchRefCiState.mockResolvedValue("failure");
 
     const response = await GET();
@@ -139,69 +156,130 @@ describe("GET /api/repositories/release-pending-merges", () => {
 
     // バンプPRと違い、CIが通っていないことを理由に一覧から落とさない。
     // マージできない状態にあること自体を画面へ出すのが目的のため。
-    expect(json.pendingMerges).toEqual([
+    expect(json.releaseStatuses).toEqual([
       {
         repoFullName: "owner/repo-a",
-        mergeTarget: "main",
-        pullRequestNumber: 12,
-        pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
-        pullRequestTitle: "release",
-        ciState: "failure",
+        status: "action_required",
+        failedWorkflow: null,
+        pendingMerge: {
+          mergeTarget: "main",
+          pullRequestNumber: 12,
+          pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
+          pullRequestTitle: "release",
+          ciState: "failure",
+        },
       },
     ]);
   });
 
-  it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
-      if (base === "develop" && repo === "repo-a") {
-        return [
-          {
-            number: 34,
-            html_url: "https://github.com/owner/repo-a/pull/34",
-            title: "release/v1.2.3",
-            head: { ref: "release/v1.2.3" },
-          },
-        ];
-      }
-      return [];
-    });
-    fetchRefCiState.mockResolvedValue("success");
-
-    const response = await GET();
-    const json = await response.json();
-
-    expect(json.pendingMerges).toEqual([
-      {
-        repoFullName: "owner/repo-a",
-        mergeTarget: "develop",
-        pullRequestNumber: 34,
-        pullRequestUrl: "https://github.com/owner/repo-a/pull/34",
-        pullRequestTitle: "release/v1.2.3",
-        ciState: "success",
-      },
-    ]);
-  });
-
-  it("バンプPRのCIがpending中はマージ待ちに含めない", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
-      if (base === "develop" && repo === "repo-a") {
-        return [
-          {
-            number: 34,
-            html_url: "https://github.com/owner/repo-a/pull/34",
-            title: "release/v1.2.3",
-            head: { ref: "release/v1.2.3" },
-          },
-        ];
-      }
-      return [];
-    });
+  it("リリースPRのCIがpending中はマージ待ちではなく実行中として返す（#1433）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
     fetchRefCiState.mockResolvedValue("pending");
 
     const response = await GET();
     const json = await response.json();
 
-    expect(json.pendingMerges).toEqual([]);
+    // CI実行中はまだマージできないため、ヘッダーのオレンジのバッジ件数から外す。
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+      },
+    ]);
+  });
+
+  it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: BUMP_PR }),
+    );
+    fetchRefCiState.mockResolvedValue("success");
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "action_required",
+        failedWorkflow: null,
+        pendingMerge: {
+          mergeTarget: "develop",
+          pullRequestNumber: 34,
+          pullRequestUrl: "https://github.com/owner/repo-a/pull/34",
+          pullRequestTitle: "release/v1.2.3",
+          ciState: "success",
+        },
+      },
+    ]);
+  });
+
+  it("バンプPRのCIがpending中はマージ待ちではなく実行中として返す（#1117）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: BUMP_PR }),
+    );
+    fetchRefCiState.mockResolvedValue("pending");
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+      },
+    ]);
+  });
+
+  it("リリースworkflowが実行中のリポジトリはPRが無くても実行中として返す（#1117）", async () => {
+    fetchLatestReleaseWorkflowRun.mockImplementation(async (_owner: string, repo: string) =>
+      repo === "repo-a" ? { status: "in_progress", conclusion: null } : null,
+    );
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+      },
+    ]);
+  });
+
+  it("本番デプロイが失敗しているリポジトリはfailedWorkflow: deployとして返す（#1117）", async () => {
+    fetchLatestDeployWorkflowRun.mockImplementation(async (_owner: string, repo: string) =>
+      repo === "repo-a" ? { status: "completed", conclusion: "failure" } : null,
+    );
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "error",
+        failedWorkflow: "deploy",
+        pendingMerge: null,
+      },
+    ]);
+  });
+
+  it("動きが無い（idle）リポジトリは返さない", async () => {
+    fetchLatestReleaseWorkflowRun.mockResolvedValue({ status: "completed", conclusion: "success" });
+    fetchLatestDeployWorkflowRun.mockResolvedValue({ status: "completed", conclusion: "success" });
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([]);
   });
 
   it("リリースworkflowが存在しないリポジトリは対象外にする", async () => {
@@ -210,8 +288,11 @@ describe("GET /api/repositories/release-pending-merges", () => {
     const response = await GET();
     const json = await response.json();
 
-    expect(json.pendingMerges).toEqual([]);
+    expect(json.releaseStatuses).toEqual([]);
     expect(fetchOpenPullRequestsForBase).not.toHaveBeenCalled();
+    // 実行状況の取得もworkflowが無いリポジトリでは走らせない（API消費を増やさない）。
+    expect(fetchLatestReleaseWorkflowRun).not.toHaveBeenCalled();
+    expect(fetchLatestDeployWorkflowRun).not.toHaveBeenCalled();
   });
 
   it("同一installationのトークン取得は1回に抑える", async () => {
@@ -221,32 +302,38 @@ describe("GET /api/repositories/release-pending-merges", () => {
   });
 
   it("1リポジトリの取得に失敗しても他のリポジトリの結果は返す", async () => {
-    fetchOpenPullRequestsForBase.mockImplementation(async (_owner: string, repo: string, base: string) => {
-      if (repo === "repo-a") throw new Error("boom");
-      if (base === "main" && repo === "repo-b") {
-        return [
-          {
-            number: 3,
-            html_url: "https://github.com/owner/repo-b/pull/3",
-            title: "release",
-            head: { ref: "develop" },
-          },
-        ];
-      }
-      return [];
-    });
+    fetchOpenPullRequestsForBase.mockImplementation(
+      async (_owner: string, repo: string, base: string) => {
+        if (repo === "repo-a") throw new Error("boom");
+        if (base === "main" && repo === "repo-b") {
+          return [
+            {
+              number: 3,
+              html_url: "https://github.com/owner/repo-b/pull/3",
+              title: "release",
+              head: { ref: "develop" },
+            },
+          ];
+        }
+        return [];
+      },
+    );
 
     const response = await GET();
     const json = await response.json();
 
-    expect(json.pendingMerges).toEqual([
+    expect(json.releaseStatuses).toEqual([
       {
         repoFullName: "owner/repo-b",
-        mergeTarget: "main",
-        pullRequestNumber: 3,
-        pullRequestUrl: "https://github.com/owner/repo-b/pull/3",
-        pullRequestTitle: "release",
-        ciState: "success",
+        status: "action_required",
+        failedWorkflow: null,
+        pendingMerge: {
+          mergeTarget: "main",
+          pullRequestNumber: 3,
+          pullRequestUrl: "https://github.com/owner/repo-b/pull/3",
+          pullRequestTitle: "release",
+          ciState: "success",
+        },
       },
     ]);
   });

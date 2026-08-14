@@ -161,6 +161,25 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
+  詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、ロケットアイコンの
+  ポップオーバー・モバイルのリリースシートが使う。1回でGitHub APIを7〜8回消費するため、
+  開いている間だけポーリングする。横断のサマリは`GET /api/repositories/release-pending-merges`
+  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーのロケットアイコンのバッジと
+  **モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
+  （`idle`/`progressing`/`action_required`/`error`）と表示文言は、どちらの経路も
+  [`lib/github/release-button-status.ts`](../src/lib/github/release-button-status.ts)の
+  `summarizeReleaseStatus`・`describeReleaseStatusBadge`だけを通す**（画面ごとに分岐を書くと
+  同じ状態が別の言葉で出る）。横断のサマリは**版数（`package.json`）を取りに行かないため
+  `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）を判定しない**。
+  リポジトリあたり2リクエスト増えるのに対し、その状態はほぼ常にリリースworkflowのrunが
+  実行中か失敗として現れるため。`idle`のリポジトリは応答に含めない。
+  **マージ待ちPRを「要操作」（オレンジ強調）にする基準は、バンプPR・develop→mainのリリースPRの
+  どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
+  マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
+  取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
+  なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
+  ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -207,6 +226,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
   同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
+  **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
+  受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
+  （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
+  終了時に締めのコメントを書く（`lib/dispatch/session-wrapup.ts`。`/sessions/ended`とpollerの
+  巡回の両方から呼ばれるが、**自分のマーカーを「記録あり」に数えるので投稿は1回**。
+  `00.check-user`は付けない）。インストールトークンの取得は
+  `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
