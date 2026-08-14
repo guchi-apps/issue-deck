@@ -1,9 +1,10 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useTransition } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
+import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import {
   getNavViewDefaultState,
@@ -53,9 +54,8 @@ export type MobileScreen =
 // ステートのみで管理するとページ更新時に必ずホーム画面へ戻ってしまい、Issue詳細から一覧へ
 // 戻ったときにも絞り込み条件（状態・担当者・並び順・ラベル）がリセットされてしまうため（#318）。
 export function useMobileScreen(issues: Issue[], repositories: ConnectedRepository[]) {
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { navigateParams, goBackOrFallback } = useHistoryNavigation();
   const [isPending, startTransition] = useTransition();
 
   const screenParam = searchParams.get("mscreen");
@@ -173,88 +173,95 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         /** PR一覧の状態別ビュー（#1312）。PCと同じ`prview`クエリを共有する */
         prview?: PullRequestViewId | null;
       },
-      options?: { silent?: boolean },
+      options?: { silent?: boolean; history?: HistoryMode },
     ) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const mutate = (params: URLSearchParams) => {
+        if (next.screen === "home") {
+          params.delete("mscreen");
+        } else {
+          params.set("mscreen", next.screen);
+        }
 
-      if (next.screen === "home") {
-        params.delete("mscreen");
-      } else {
-        params.set("mscreen", next.screen);
-      }
+        if (next.repo) {
+          params.set("mrepo", next.repo);
+        } else {
+          params.delete("mrepo");
+        }
 
-      if (next.repo) {
-        params.set("mrepo", next.repo);
-      } else {
-        params.delete("mrepo");
-      }
+        if (next.issue) {
+          params.set("missue", next.issue);
+        } else {
+          params.delete("missue");
+        }
 
-      if (next.issue) {
-        params.set("missue", next.issue);
-      } else {
-        params.delete("missue");
-      }
+        // PC版の選択中Issue（#1396）。スマホとPCは同じURLを共有し、どちらのレイアウトを
+        // 見ているかはCSSのブレークポイントでしか決まらないため、両方の現在地を1回の更新で
+        // 揃える（#1260と同じ理由）。一覧に戻ったときの`missue`は選択位置を覚えるためだけの
+        // ものなので、PC側は詳細を開いている場合だけ立てる。
+        if (next.screen === "issue-detail" && next.issue) {
+          params.set("issue", next.issue);
+        } else {
+          params.delete("issue");
+        }
 
-      if (next.view) {
-        params.set("mview", next.view);
-      } else {
-        params.delete("mview");
-      }
+        if (next.view) {
+          params.set("mview", next.view);
+        } else {
+          params.delete("mview");
+        }
 
-      if (next.labels && next.labels.length > 0) {
-        params.set("mlabels", next.labels.join(","));
-      } else {
-        params.delete("mlabels");
-      }
+        if (next.labels && next.labels.length > 0) {
+          params.set("mlabels", next.labels.join(","));
+        } else {
+          params.delete("mlabels");
+        }
 
-      // 既定値と同じstateはクエリに残さない。既定値はビューによって変わる。
-      if (next.state && next.state !== getNavViewDefaultState(next.view ?? "all")) {
-        params.set("mstate", next.state);
-      } else {
-        params.delete("mstate");
-      }
+        // 既定値と同じstateはクエリに残さない。既定値はビューによって変わる。
+        if (next.state && next.state !== getNavViewDefaultState(next.view ?? "all")) {
+          params.set("mstate", next.state);
+        } else {
+          params.delete("mstate");
+        }
 
-      if (next.assignee) {
-        params.set("massignee", next.assignee);
-      } else {
-        params.delete("massignee");
-      }
+        if (next.assignee) {
+          params.set("massignee", next.assignee);
+        } else {
+          params.delete("massignee");
+        }
 
-      if (next.sort && next.sort !== "created") {
-        params.set("msort", next.sort);
-      } else {
-        params.delete("msort");
-      }
+        if (next.sort && next.sort !== "created") {
+          params.set("msort", next.sort);
+        } else {
+          params.delete("msort");
+        }
 
-      if (next.origin === "home") {
-        params.set("mfrom", "home");
-      } else {
-        params.delete("mfrom");
-      }
+        if (next.origin === "home") {
+          params.set("mfrom", "home");
+        } else {
+          params.delete("mfrom");
+        }
 
-      // 既定値と同じprviewはクエリに残さない（PC側のapplyFilterParamと同じ運用）。
-      // 未指定（undefined）のときは現在の値をそのまま引き継ぐ。
-      if (next.prview === DEFAULT_PULL_REQUEST_VIEW) {
-        params.delete("prview");
-      } else if (next.prview) {
-        params.set("prview", next.prview);
-      }
-
-      const url = `${pathname}?${params.toString()}`;
+        // 既定値と同じprviewはクエリに残さない（PC側のapplyFilterParamと同じ運用）。
+        // 未指定（undefined）のときは現在の値をそのまま引き継ぐ。
+        if (next.prview === DEFAULT_PULL_REQUEST_VIEW) {
+          params.delete("prview");
+        } else if (next.prview) {
+          params.set("prview", next.prview);
+        }
+      };
 
       // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
       // 生じうる。startTransitionでラップしisPendingを公開し、その間はスケルトンを表示する（#221）。
       // ただし絞り込みシート内での連続操作（silent）はスクリーン種別を変えず、都度スケルトンで
       // 画面を差し替えるとシートごとアンマウントされ選択を続けられなくなるため、対象外とする（#393）。
-      if (options?.silent) {
-        router.replace(url, { scroll: false });
-      } else {
-        startTransition(() => {
-          router.replace(url, { scroll: false });
-        });
-      }
+      // 履歴も同じ切り分けで、画面が変わる遷移だけ積む。絞り込みまで積むと、戻る操作が条件の
+      // 巻き戻しに費やされて前の画面へ着かなくなる（#1396）。
+      navigateParams(mutate, {
+        history: options?.history ?? (options?.silent ? "replace" : "push"),
+        wrap: options?.silent ? undefined : startTransition,
+      });
     },
-    [router, pathname, searchParams],
+    [navigateParams],
   );
 
   const selectTab = useCallback((tab: MobileBottomNavTab) => navigate({ screen: tab }), [navigate]);
@@ -386,40 +393,52 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen, isStateExplicit],
   );
 
+  // ヘッダーの戻るボタン・右スワイプ（#525）。ブラウザ・OSの戻ると同じ位置へ着かせたいので、
+  // 自分が積んだ履歴があるならそれを巻き戻す（#1396）。共有URLで詳細画面をいきなり開いた
+  // 場合は巻き戻せる履歴が無いため、従来どおり戻り先を計算して遷移する。こちらは戻る操作
+  // なので履歴を積まない（積むと戻る操作のたびに履歴が伸びていく）。
   const goBack = useCallback(() => {
-    if (mobileScreen.kind !== "issue-detail" && mobileScreen.kind !== "repo-detail") {
-      navigate({ screen: "home" });
-      return;
-    }
+    goBackOrFallback(() => {
+      if (mobileScreen.kind !== "issue-detail" && mobileScreen.kind !== "repo-detail") {
+        navigate({ screen: "home" }, { history: "replace" });
+        return;
+      }
 
-    const back = mobileScreen.back;
-    const returnIssueId = mobileScreen.kind === "issue-detail" ? mobileScreen.issue.id : null;
-    if (back.kind === "repo-detail") {
-      navigate({
-        screen: "repo-detail",
-        repo: back.repository.fullName,
-        issue: returnIssueId,
-        view: back.view,
-        labels: back.labels,
-        state: back.state,
-        assignee: back.assignee,
-        sort: back.sort,
-      });
-    } else if (back.kind === "issues") {
-      navigate({
-        screen: "issues",
-        view: back.view,
-        labels: back.labels,
-        issue: returnIssueId,
-        state: back.state,
-        assignee: back.assignee,
-        sort: back.sort,
-        origin: back.origin,
-      });
-    } else {
-      navigate({ screen: back.kind });
-    }
-  }, [mobileScreen, navigate]);
+      const back = mobileScreen.back;
+      const returnIssueId = mobileScreen.kind === "issue-detail" ? mobileScreen.issue.id : null;
+      if (back.kind === "repo-detail") {
+        navigate(
+          {
+            screen: "repo-detail",
+            repo: back.repository.fullName,
+            issue: returnIssueId,
+            view: back.view,
+            labels: back.labels,
+            state: back.state,
+            assignee: back.assignee,
+            sort: back.sort,
+          },
+          { history: "replace" },
+        );
+      } else if (back.kind === "issues") {
+        navigate(
+          {
+            screen: "issues",
+            view: back.view,
+            labels: back.labels,
+            issue: returnIssueId,
+            state: back.state,
+            assignee: back.assignee,
+            sort: back.sort,
+            origin: back.origin,
+          },
+          { history: "replace" },
+        );
+      } else {
+        navigate({ screen: back.kind }, { history: "replace" });
+      }
+    });
+  }, [mobileScreen, navigate, goBackOrFallback]);
 
   return {
     mobileScreen,
