@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
+import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import {
   parseDispatchSessionActivity,
   parsePreviewUrl,
@@ -41,10 +42,24 @@ export async function POST(request: NextRequest) {
   // だけで、入力待ちであること自体は画面に出す価値がある
   const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
   const previewUrl = parsePreviewUrl(payload?.previewUrl);
+  // 計画の承認待ち（`00.check-user`）を解いてよいかどうか（#1342）。**判断はホスト側が持つ。**
+  // 「このセッションが計画を投稿してラベルを付けた」印はホストの状態ファイルにあり
+  // （`scripts/lib/session-state.sh`の`.plan`）、こちらはその報告を受け取るだけ。
+  // `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で付けた`00.check-user`まで落とす
+  const planResolved = payload?.planResolved === true;
   // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）は
   // `activity`を伴わない**ので、そちらを必須にはできない
-  if (!target || (!activity && !remoteControlUrl && !previewUrl)) {
+  if (!target || (!activity && !remoteControlUrl && !previewUrl && !planResolved)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  if (planResolved) {
+    // **DBの更新より先に行う。** ラベルはGitHub側の状態で、画面の様子（DB）が書けたかどうかとは
+    // 独立している。失敗しても報告自体は受け付ける（`postSessionPlan`と同じく例外は投げない）
+    await resolveSessionPlanCheckUser({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+    });
   }
 
   const result = await recordDispatchSessionActivity({

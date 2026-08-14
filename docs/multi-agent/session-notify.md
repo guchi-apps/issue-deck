@@ -44,6 +44,79 @@ claude.ai/code/<セッション> （--remote-control）→ その場で答える
 止めない。書式と使い道は
 [作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 
+## 計画はIssueのコメントへ残す（#1342）
+
+**`21.plan-required`のIssueをここで起こすと、計画はセッションの中にしか残らなかった。**
+画面に出るのは「入力を待っています」というバッジだけで（後述の#1264）、中身はRemote Controlを
+開くまで見えない。プロンプト（`scripts/prompts/implementation-agent.md`）は計画をIssueへ投稿する
+よう指示していたが、**エージェントが従うかどうかに依存していて担保が無い。**
+
+そこで`ExitPlanMode`の`PreToolUse`フックで計画本文を掴み、issue-deckを経由してIssueへ書く。
+
+```text
+ExitPlanMode（計画の提示）
+  → PreToolUse フック → session-notify.sh
+       → POST /api/dispatch/sessions/plan
+            → Issueへ計画コメントを投稿（末尾にRemote Controlのリンク）
+            → 00.check-user を付与
+       → ホストに「ラベルを付けた」印を残す（<セッション名>.plan）
+  → 承認プロンプト（Notification）→ 従来どおりの入力待ち通知・画面表示
+  → 人がRemote Controlで承認 → 実装 → Stop
+       → POST /api/dispatch/sessions/activity に planResolved: true を添える
+            → 00.check-user を除去
+       → 印を消す
+```
+
+- **計画をIssueへ残せる唯一の機会が`ExitPlanMode`の`PreToolUse`。** 承認プロンプトの
+  `Notification`のJSONには計画に関する情報が何も無い。`PreToolUse`にmatcherを付けるのは
+  このためで、付けずに置くと`Read`・`Bash`のたびにスクリプトが起動する
+- **このイベントではSignalyへ送らない。** 直後に承認プロンプトの`Notification`が必ず飛び、
+  同じ「入力待ち」が二重になる。計画本文を外部サービスへ出す経路を作らない意味もある
+  （下の「通知の中身」と同じ理由）
+- **リンクは計画本文の下に、別の段落として置く。** 計画が長いほど、末尾に出口が無いと
+  「読んだ後どうすればよいか」が画面から消える
+- コメント本文の組み立ては`src/lib/dispatch/session-plan.ts`。GitHubへ書く経路は異常終了の
+  引き上げ（`session-escalation.ts`）と同じで、**サブPCにGitHubの認証を持たせない**
+
+### 計画本文は`ExitPlanMode`の引数では渡ってこない
+
+**計画は`~/.claude/plans/<スラッグ>.md`にある。** plan modeに入るとClaude Codeがそのパスを
+エージェントへ指示し、エージェントが`Write`／`Edit`で書く。`ExitPlanMode`は**そのファイルを
+読むだけで、計画を引数に取らない**（ツールの説明にも「This tool does NOT take the plan content
+as a parameter - it will read the plan from the file you wrote」とある。実測でも
+`tool_input`は空）。当初は`tool_input.plan`から取るつもりで書き、動かなかった。
+
+そこで`session-notify.sh`は、フックのJSONにある`transcript_path`を末尾から読み、
+**エージェントが最後に`Write`／`Edit`した`~/.claude/plans/`直下の`.md`**を計画ファイルとみなす。
+
+- **ツールの引数（`tool_use`ブロックの`input.file_path`）から拾い、本文の文字列一致では
+  探さない。** 転記ファイルにはコマンドの出力も引用も入るので、「`~/.claude/plans/`配下の
+  パスらしき文字列」を拾うと、**別セッションの計画ファイルの話をしただけの行**を掴む
+  （実際に踏んだ）
+- 末尾から探すのは、却下されて書き直された場合に新しいものが後ろに来るため。転記ファイルは
+  数MBになりうるので末尾8MBだけを読む
+- 引数で渡ってくる版に当たった場合はそちらを優先する（版差に強くしておく）
+- **読めなければ黙って諦める。** プロンプト側に手で投稿する経路が残っている
+
+**この形はClaude Codeの内部仕様に依存する**（Remote ControlのURLを`~/.claude/sessions/`から
+引いているのと同じ性質）。壊れても計画が自動で載らなくなるだけで、セッションは止まらない。
+
+### 「ラベルを外してよいか」の印はホスト側に置く
+
+`00.check-user`を外すのは**自分で付けたときだけ**にする必要がある。`Stop`はturnごとに飛ぶため、
+無条件に外すと人が別の理由で付けた`00.check-user`まで落とすからである。
+
+その印をissue-deckのDB（`DispatchSession`）ではなくホスト側の状態ファイル
+（`<セッション名>.plan`。#1256の仕組み）へ置いているのは、**`/activity`が`ALIVE`の行が無ければ
+何もしない**ため。pollerが1巡する前に計画が出ると記録できず、ラベルだけ付いて外れなくなる。
+
+計画待ちのまま畳まれたセッションでは、`cleanup`が印ごと消すのでラベルは残る。**これは正しい側の
+取りこぼし**で、人がまだ計画を見ていないことを表す。起こし直せば新しい計画が投稿され、
+その`Stop`で外れる。
+
+なお人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として
+扱うのでそのまま通る。
+
 ## 飛ばすのは2種類だけ
 
 `--permission-mode auto`（#1205）により承認プロンプトは激減しているので、飛ばすのは
@@ -55,6 +128,7 @@ claude.ai/code/<セッション> （--remote-control）→ その場で答える
 | `Notification` | `notification_type` が `permission_prompt` | 承認プロンプト・`AskUserQuestion`の質問 | 🙋 入力待ち |
 | `Notification` | `notification_type` が `idle_prompt` | 応答終了から60秒アイドル | **送らない** |
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | ✅ 応答終了 |
+| `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | **送らない**（Issueのコメントへ回す） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を送った約60秒後に同じ内容がもう1件飛ぶことになる。

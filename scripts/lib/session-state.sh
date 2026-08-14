@@ -3,7 +3,8 @@
 #
 # 誰が書いて誰が読むか:
 #   scripts/run-issue-session.sh  起動時に記述子（<セッション名>.session）を書き、終了時に消す
-#   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）を書く
+#   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）と
+#                                 計画の承認待ちの印（<セッション名>.plan、#1342）を書く
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む
 #
 # **キーはtmuxのセッション名。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
@@ -48,6 +49,16 @@ session_state_event_file() {
 session_state_reason_file() {
   session_state_name_ok "${1:-}" || return 1
   printf '%s/%s.reason' "$(session_state_dir)" "$1"
+}
+
+# 計画を投稿して `00.check-user` を付けたことの印（#1342）。
+# **ラベルを外してよいのは自分で付けたときだけ**なので、それをどこかに覚えておく必要がある。
+# issue-deck側のDBではなくホストに置くのは、`/api/dispatch/sessions/activity` が
+# `ALIVE` のDispatchSessionの行が無ければ何もしない仕様で、pollerが1巡する前に計画が出ると
+# 記録できず、ラベルだけ付いて外れなくなるため。
+session_state_plan_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.plan' "$(session_state_dir)" "$1"
 }
 
 # 書きかけを読まれないよう、一時ファイルへ書いてから置き換える。
@@ -97,6 +108,29 @@ session_state_record_event() {
   session_state_write_file "$file" "$content"
 }
 
+# 計画を投稿して `00.check-user` を付けたことを記録する（#1342）。
+session_state_mark_plan_pending() {
+  local session="$1" file content
+  file="$(session_state_plan_file "$session")" || return 1
+  printf -v content '%s pending\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+# 計画の承認待ちの印があるか。**あるときだけラベルを外す**。
+session_state_plan_pending() {
+  local session="$1" file
+  file="$(session_state_plan_file "$session")" || return 1
+  [[ -f "$file" ]]
+}
+
+# 印を消す（ラベルを外し終えたとき）。無ければ何もしない。
+session_state_clear_plan_pending() {
+  local session="$1" file
+  file="$(session_state_plan_file "$session")" || return 1
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # 記録した最後のイベントを `<epoch> <イベント名>` の形で返す。
 session_state_read_event() {
   local session="$1" file
@@ -125,7 +159,8 @@ session_state_remove() {
   for file in \
     "$(session_state_descriptor_file "$session" 2>/dev/null || true)" \
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
-    "$(session_state_reason_file "$session" 2>/dev/null || true)"; do
+    "$(session_state_reason_file "$session" 2>/dev/null || true)" \
+    "$(session_state_plan_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
   done

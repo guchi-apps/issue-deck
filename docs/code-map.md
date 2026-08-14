@@ -147,6 +147,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/ended`へ即時に報告する**（#1321。pollerの巡回は最大75秒遅れ、
   #1311の起動抑止がそのぶん解けないため。trapを通らない経路はpollerが従来どおり拾う）。
   画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
+  **`21.plan-required`のセッションが提示した計画は、`ExitPlanMode`の`PreToolUse`フックから
+  `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
+  （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
+  同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
