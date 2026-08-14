@@ -56,6 +56,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # **判定を二重に持つと、申告と実際の起動可否が必ずずれる**（#1179のコメント）。
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
+# 進捗報告の設定漏れを起動時に1度だけ知らせるために読む（#1236。報告そのものはランチャーが行う）。
+# shellcheck source=scripts/lib/progress-report.sh
+source "$SCRIPT_DIR/lib/progress-report.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
@@ -95,6 +98,16 @@ if [[ -z "${APP_BASE_URL:-}" || -z "${DISPATCH_SECRET:-}" ]]; then
   echo "Error: APP_BASE_URL と DISPATCH_SECRET を設定してください（$DISPATCH_ENV_FILE）。" >&2
   echo "  書式は issue-deck の deploy/subpc/dispatch.env.example を参照してください。" >&2
   exit 1
+fi
+
+# 進捗（Project Status）の報告はランチャー側の仕事だが、鍵が無いと**黙って報告されない**まま
+# セッションだけが立つ（起動は成功しているので、画面からは`Ready`のまま動かないように見える。
+# #1236）。ここで気づけるよう、起動時に1度だけ確かめて警告する。**報告できないこと自体は
+# 起動を止める理由にしない**（画面やカンバンから手で進める使い方も成立する）。
+if ! progress_endpoint_available "$SCRIPT_DIR/.."; then
+  echo "警告: PROGRESS_REPORT_SECRET / APP_BASE_URL が見つからないため、このホストで起動した" >&2
+  echo "  セッションはIssueの進捗（Project Status）を報告しません（$DISPATCH_ENV_FILE）。" >&2
+  echo "  書式は issue-deck の deploy/subpc/dispatch.env.example を参照してください。" >&2
 fi
 
 HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s)}"

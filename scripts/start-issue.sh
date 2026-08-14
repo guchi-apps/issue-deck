@@ -74,6 +74,9 @@ source "$ROOT/scripts/lib/worktree-status.sh"
 # 本体の .env.local からworktreeへ環境変数を供給する処理は、汎用ランチャー（#1224）と共有する。
 # shellcheck source=scripts/lib/env-file-sync.sh
 source "$ROOT/scripts/lib/env-file-sync.sh"
+# 起動時の進捗（Project Status）報告も同じく汎用ランチャーと共有する（#1236）。
+# shellcheck source=scripts/lib/progress-report.sh
+source "$ROOT/scripts/lib/progress-report.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -227,13 +230,6 @@ remove_worktree() {
   rm -f "$WORKTREE_BASE/.dev-servers/issue-$n.log" "$WORKTREE_BASE/.dev-servers/issue-$n.pid"
 }
 
-# `.env.local` から1つのキーの値を読む（存在しなければ空文字）。値はログに出さない。
-read_env_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | tail -n1 | sed -e 's/^"//' -e 's/"$//'
-}
-
 # 起動時にIssueへ `11.local` を付ける（#1097）。
 #
 # ローカルセッションで対応中であることを示す停止フラグで、付いている間は無人実行
@@ -259,56 +255,8 @@ apply_start_labels() {
   fi
 }
 
-# 起動時にIssueの進捗（Project Status）を報告する（#1096。#1010でラベル付与から置き換え）。
-#
-# `21.plan-required` が付いていれば `planning`、無ければ `implementation` を報告する。
-#
-# **既に進捗が始まっている場合は触らない。** 再開（#1076）で2回目以降に起動したときに、
-# `Develop PR`まで進んだIssueを`Implementation`へ巻き戻さないため。判定にはissue-deckの
-# 進捗問い合わせAPI（`GET /api/progress`）を使う。
-#
-# 報告先と鍵は本体の `.env.local` から読む（`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`）。
-# **どちらかが無ければ何もせず案内だけ出す。** ローカル環境に鍵を持たない使い方
-# （issue-deckの画面やカンバンから進捗を動かす）も成立するため、起動を止める理由にしない。
-report_start_progress() {
-  local n="$1"
-  local existing="$2"
-  local base_url secret desired
-  base_url="$(read_env_value "$ROOT/.env.local" APP_BASE_URL)"
-  secret="$(read_env_value "$ROOT/.env.local" PROGRESS_REPORT_SECRET)"
-  if [[ -z "$base_url" || -z "$secret" ]]; then
-    echo "#$n: 進捗（Project Status）は報告しませんでした（.env.local に APP_BASE_URL / PROGRESS_REPORT_SECRET がありません）。"
-    echo "     issue-deckの画面の「実装を開始」ボタン、またはカンバンでカードを動かして進捗を進めてください。"
-    return 0
-  fi
-
-  local current
-  current="$(curl -sS -m 20 -H "Authorization: Bearer $secret" \
-    "$base_url/api/progress?repository=guchi-apps/issue-deck&issue=$n" 2>/dev/null \
-    | jq -r 'select(.available == true) | .status // empty' 2>/dev/null || true)"
-  if [[ -n "$current" && "$current" != "ready" ]]; then
-    echo "#$n: 進捗は既に開始済みです（$current）。巻き戻さないため報告しません。"
-    return 0
-  fi
-
-  if printf '%s\n' "$existing" | grep -Fxq "21.plan-required"; then
-    desired="planning"
-  else
-    desired="implementation"
-  fi
-
-  local code
-  code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-    -X POST "$base_url/api/progress" \
-    -H "Authorization: Bearer $secret" \
-    -H "Content-Type: application/json" \
-    -d "{\"repository\":\"guchi-apps/issue-deck\",\"issue\":$n,\"status\":\"$desired\"}" 2>/dev/null)" || code=000
-  if [[ "$code" == "200" ]]; then
-    echo "#$n: 進捗を $desired として報告しました。"
-  else
-    echo "#$n: 警告: 進捗（$desired）の報告に失敗しました（HTTP $code）。issue-deckの画面から進めてください。" >&2
-  fi
-}
+# 起動時の進捗（Project Status）の報告は scripts/lib/progress-report.sh が持つ（#1236）。
+# 報告先と鍵の探し方（環境変数 → 本体の`.env.local` → サブPCの`dispatch.env`）もそちらを参照。
 
 # issue番号ごとにworktree・ブランチを準備し、起動用プロンプトを生成する。
 # 戻り値として WORKTREE_DIR / PROMPT_FILE / DEV_PORT をグローバル変数に設定する。
@@ -362,7 +310,7 @@ prepare_issue() {
   local issue_labels
   if issue_labels="$(printf '%s' "$issue_json" | python3 -c 'import json, sys; print("\n".join(l["name"] for l in json.load(sys.stdin).get("labels") or []))')"; then
     apply_start_labels "$n" "$issue_labels"
-    report_start_progress "$n" "$issue_labels"
+    report_start_progress "$ROOT" "guchi-apps/issue-deck" "$n" "$issue_labels"
   else
     # 解析できないまま進めると、`21.plan-required`の有無を取り違えて計画フェーズを飛ばしかねない
     # のでスキップする。

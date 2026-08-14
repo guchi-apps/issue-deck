@@ -449,9 +449,11 @@ Status報告の両方を行う。新しいタグ（`workflows/v9`）を切って
   依存せず完結していた。取りこぼした場合はissue-deckの復旧後にrunを再実行する
 - **盤面に載っていないリポジトリのIssueは一律「未着手」に見える。** ラベルという代替の表示元が
   無いため。#1047 の展開が終わるまで続く
-- **ローカルセッション（`scripts/start-issue.sh`）は`.env.local`に`APP_BASE_URL`・
-  `PROGRESS_REPORT_SECRET`が無いと進捗を進められない。** その場合はスクリプトが案内を出し、
-  issue-deckの画面（カンバン・「実装を開始」ボタン）から進める
+- **ローカルセッション（`scripts/start-issue.sh`・`scripts/generic-start-issue.sh`）は
+  `APP_BASE_URL`・`PROGRESS_REPORT_SECRET`が見つからないと進捗を進められない。** 探索順は
+  環境変数 → 本体の`.env.local` → `~/.config/issue-deck/dispatch.env`（#1236。
+  [scripts/lib/progress-report.sh](../scripts/lib/progress-report.sh)）。どこにも無い場合は
+  スクリプトが案内を出し、issue-deckの画面（カンバン・「実装を開始」ボタン）から進める
 
 ### Phase 6：privateリポジトリ統合時にGitHub Teamへ上げる
 
