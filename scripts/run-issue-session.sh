@@ -29,6 +29,10 @@ ISSUE_NUMBER="$1"
 DEV_PORT="$2"
 PROMPT_FILE="$3"
 
+# フック用スクリプトをこのファイルからの相対で解決する。呼び出し元がworktreeへcdしている前提の
+# スクリプトなので、カレントディレクトリ基準では自分のscripts/を指せない。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
 DEV_LOG="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.log"
@@ -100,6 +104,63 @@ if claude --help 2>/dev/null | grep -q -- "--name"; then
   CLAUDE_EXTRA_ARGS+=(--name "$SESSION_NAME")
 else
   echo "#$ISSUE_NUMBER: 情報: このClaude Codeは --name に未対応のため、タイトルにIssue番号を出しません。" >&2
+fi
+
+# 通知（#1219）用に owner/repo を取り出す。IssueのURLを組み立てるためだけに使うので、
+# 取れなくても（リモート未設定・SSH形式でない等）通知からリンクが消えるだけにする。
+REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+
+# セッションの状態をSignalyへ通知するフック（#1219）。
+#
+# **`--settings` で渡すことで、このスクリプトから起動したセッションにだけ適用する。**
+# `~/.claude/settings.json` に書くとメインPCの対話セッションでも通知が飛んで邪魔になる。
+# `--settings` の内容はユーザー設定・プロジェクト設定に加算される（既存の設定を壊さない）。
+#
+# JSON文字列ではなくファイルで渡す。`ps` の出力にフックの中身が丸ごと出るのを避けるため
+# （プロンプトをファイル経由で渡しているのと同じ理由）。
+# 置き場所は `.dev-servers/`・`.prompts/` と同じくworktreeの外の管理用ディレクトリ。
+#
+# 発火するイベントの選別（Notificationのidle_promptを捨てる等）は session-notify.sh 側が持つ。
+# フック設定には「呼ぶ」ことだけを書き、判断を2箇所に分けない。
+HOOKS_DIR="$WORKTREE_BASE/.claude-hooks"
+HOOK_SETTINGS_FILE="$HOOKS_DIR/issue-$ISSUE_NUMBER.settings.json"
+NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
+if [[ -x "$NOTIFY_SCRIPT" ]]; then
+  mkdir -p "$HOOKS_DIR"
+  # 引数はシェルのシングルクォートで囲む。シングルクォートはJSONではただの文字なので、
+  # `printf %q` のようにバックスラッシュを持ち込まずにスペースを含むパスを渡せる。
+  # 値はいずれもこのスクリプトが組み立てた識別子（数字・リポジトリ名・パス）で、
+  # 外部由来のテキストはここへ流さない。
+  HOOK_COMMAND="'$NOTIFY_SCRIPT' '$ISSUE_NUMBER' '$REPO_NAME' '$REPO_SLUG'"
+  cat >"$HOOK_SETTINGS_FILE" <<JSON
+{
+  "hooks": {
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ]
+  }
+}
+JSON
+  CLAUDE_EXTRA_ARGS+=(--settings "$HOOK_SETTINGS_FILE")
+else
+  echo "#$ISSUE_NUMBER: 情報: $NOTIFY_SCRIPT が無いため、セッションの状態通知は行いません。" >&2
+fi
+
+# Remote Control（#1219）。スマホやメインPCのブラウザから、このセッションの承認プロンプトに
+# 答えたり指示を足したりできるようにする。通知（上のフック）で気づいて、ここで答える。
+# 起動直後にセッションのURLが表示され、通知にも載る（session-notify.sh）。
+#
+# --name と同じく、解釈しない古いClaude Codeへ渡すと起動ごと失敗するため対応時のみ付ける。
+# 外部から操作可能になるのを避けたいときは ISSUE_DECK_CLAUDE_REMOTE_CONTROL=0 で無効化できる。
+if [[ "${ISSUE_DECK_CLAUDE_REMOTE_CONTROL:-1}" != "0" ]]; then
+  if claude --help 2>/dev/null | grep -q -- "--remote-control"; then
+    CLAUDE_EXTRA_ARGS+=(--remote-control "$SESSION_NAME")
+  else
+    echo "#$ISSUE_NUMBER: 情報: このClaude Codeは --remote-control に未対応のため、外部からの操作は使えません。" >&2
+  fi
 fi
 
 # セッションへ最初に渡すプロンプト（#1105）。プロンプトファイルの中身をそのまま渡すのではなく、
