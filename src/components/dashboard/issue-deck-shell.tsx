@@ -1,6 +1,5 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
@@ -35,6 +34,7 @@ import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
+import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
@@ -65,7 +65,7 @@ import {
   filterPullRequestsByView,
   scopeForPullRequestView,
 } from "@/lib/pull-request-list";
-import type { Issue, NavViewId } from "@/types/issue";
+import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
@@ -107,21 +107,21 @@ export function IssueDeckShell({
   } = useIssueFilters();
   const { openIssue: openIssueUrl, openPullRequest: openPullRequestUrl } =
     useReferenceNavigation();
+  const { goBackOrFallback } = useHistoryNavigation();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
-  const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
-  // PC版はスマホと異なりURLクエリで選択中Issueを管理していないため、`?issue=<id>`付きで
-  // 開いた場合は該当Issueを初期表示する（missueと同じ識別子＝String(githubIssueId)）。
-  // 無人実行のスクリーンショット撮影（scripts/capture-issue-screenshots.sh）で、承認待ち等
-  // 特定状態のIssueをPC版でも直接開けるようにするために追加した（#688）。初回レンダリングの
-  // 初期値としてのみ使い、以降のissues更新（ポーリング等）やユーザーの選択解除では上書きしない。
-  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(() => {
-    const issueParam = searchParams.get("issue");
-    if (!issueParam) return null;
-    return initialIssues.find((item) => item.id === issueParam) ?? null;
-  });
+  // PC版の選択中Issueは`issue`クエリ（missueと同じ識別子＝String(githubIssueId)）が正で、
+  // 表示するIssueはそこからの派生値（#1396）。stateで持つとIssueを開く操作が履歴に載らず、
+  // 戻る操作でアプリの外へ出てしまうため移した。ポーリングや編集でissuesが更新されれば
+  // ここも自動で追従する。
+  // `?issue=<id>`付きで直接開けるのは以前から（#688。無人実行のスクリーンショット撮影
+  // scripts/capture-issue-screenshots.shが承認待ち等のIssueをPC版で開くのに使う）。
+  const selectedIssue = useMemo<Issue | null>(
+    () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
+    [issues, filters.issue],
+  );
   const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
@@ -216,20 +216,19 @@ export function IssueDeckShell({
         ? prev.map((item) => (item.id === issue.id ? issue : item))
         : [issue, ...prev],
     );
-    setSelectedIssue(issue);
-    // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
-    // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
+    // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
   }
 
   function handleIssueUpdated(issue: Issue) {
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
-    setSelectedIssue((prev) => (prev && prev.id === issue.id ? issue : prev));
   }
 
+  // 削除したIssueはissuesから消えた時点で選択中Issueの解決に失敗するため、URLは触らない。
+  // 触ると、スマホの削除直後の戻る操作（MobileIssueDetailがonBackを続けて呼ぶ）と
+  // 遷移が二重になる。
   function handleIssueDeleted(issue: Issue) {
     setIssues((prev) => prev.filter((item) => item.id !== issue.id));
-    setSelectedIssue((prev) => (prev && prev.id === issue.id ? null : prev));
   }
 
   // PC・スマホどちらで開いていても、現在表示中のIssueを検知して既読化する
@@ -257,11 +256,6 @@ export function IssueDeckShell({
               ? { ...item, hasUnreadComments: false, readCommentCount: item.commentCount }
               : item,
           ),
-        );
-        setSelectedIssue((prev) =>
-          prev && prev.id === issue.id
-            ? { ...prev, hasUnreadComments: false, readCommentCount: prev.commentCount }
-            : prev,
         );
       })
       .catch((error) => {
@@ -294,16 +288,10 @@ export function IssueDeckShell({
     }
 
     setIssues(reconciledIssues);
-    setSelectedIssue((prev) => {
-      if (!prev) return prev;
-      return reconciledIssues.find((issue) => issue.id === prev.id) ?? prev;
-    });
   });
 
   function handleSelectCheckUserToastIssue(issue: Issue) {
-    setSelectedIssue(issue);
-    // スマホはURLクエリで画面遷移を管理しているため、PC用のselectedIssueだけでは
-    // 詳細画面へ遷移しない。selectIssueで両方に対応する（#192）。
+    // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
   }
 
@@ -468,17 +456,11 @@ export function IssueDeckShell({
           item.number === reference.number,
       );
       if (issue) {
-        setSelectedIssue(issue);
         openIssueUrl(issue.id);
         return;
       }
     }
     openPullRequestUrl(buildPullRequestId(reference.repositoryFullName, reference.number));
-  }
-
-  function handleSelectView(view: NavViewId) {
-    selectView(view);
-    setSelectedIssue(null);
   }
 
   async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
@@ -526,9 +508,6 @@ export function IssueDeckShell({
       setIssues((prev) =>
         prev.map((item) => (item.id === issue.id ? { ...item, favorite: target } : item)),
       );
-      setSelectedIssue((prev) =>
-        prev && prev.id === issue.id ? { ...prev, favorite: target } : prev,
-      );
     }
 
     applyFavorite(favorite);
@@ -546,19 +525,23 @@ export function IssueDeckShell({
     }
   }
 
-  function applyQuickFilter(quickFilter: QuickFilter) {
-    setFilters({
-      view: quickFilter.view,
-      q: quickFilter.q,
-      repos: quickFilter.repos,
-      state: quickFilter.state,
-      labels: quickFilter.labels,
-      assignee: quickFilter.assignee,
-      sort: quickFilter.sort,
-      // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
-      pane: "issues",
-    });
-    setSelectedIssue(null);
+  function applyQuickFilter(quickFilter: QuickFilter, options?: { history?: HistoryMode }) {
+    setFilters(
+      {
+        view: quickFilter.view,
+        q: quickFilter.q,
+        repos: quickFilter.repos,
+        state: quickFilter.state,
+        labels: quickFilter.labels,
+        assignee: quickFilter.assignee,
+        sort: quickFilter.sort,
+        // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
+        pane: "issues",
+        // 一覧の中身が入れ替わるので選択中Issueも畳む（1回のURL更新にまとめる）。
+        issue: null,
+      },
+      options,
+    );
   }
 
   function handleSelectQuickFilter(quickFilter: QuickFilter) {
@@ -566,7 +549,10 @@ export function IssueDeckShell({
   }
 
   function handleSelectQuickFilterMobile(quickFilter: QuickFilter) {
-    applyQuickFilter(quickFilter);
+    // スマホは続くapplyMobileQuickFilterが同じsearchParamsから次のURLを組み立て直すため、
+    // こちらの更新は後の1回に上書きされる（#1260と同じ理由）。履歴を積むのは実際に画面が
+    // 変わる後者だけにして、1回の操作で戻る操作が2回必要にならないようにする（#1396）。
+    applyQuickFilter(quickFilter, { history: "replace" });
     applyMobileQuickFilter(quickFilter);
   }
 
@@ -648,7 +634,8 @@ export function IssueDeckShell({
                         onMerged={() =>
                           selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                         }
-                        onBack={() => selectPullRequest(null)}
+                        // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
+                        onBack={() => goBackOrFallback(() => selectPullRequest(null))}
                       />
                     ) : (
                       <MobilePullRequestsScreen
@@ -753,7 +740,7 @@ export function IssueDeckShell({
             <>
               <SidebarNav
                 activeView={filters.view}
-                onSelectView={handleSelectView}
+                onSelectView={selectView}
                 activePane={filters.pane}
                 activePullRequestView={filters.prview}
                 onSelectPullRequestView={selectPullRequestView}
@@ -822,7 +809,9 @@ export function IssueDeckShell({
                 title={getNavViewLabel(filters.view)}
                 issues={filteredIssues}
                 selectedIssueId={selectedIssue?.id ?? null}
-                onSelectIssue={setSelectedIssue}
+                // Issueを開く操作も履歴に積み、戻る操作で1つ前のIssue・画面へ戻れるように
+                // する（#1396）。PC・スマホ両方の現在地を1回のURL更新で進める（#1260）。
+                onSelectIssue={(issue) => openIssueUrl(issue.id)}
                 showSearch={false}
                 scrollKey={issueListScrollKey}
                 groupByRepo={groupByRepo}

@@ -1,8 +1,9 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
+import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import {
   getNavViewDefaultState,
   isNavViewId,
@@ -35,6 +36,12 @@ export type IssueFilters = {
    * PC・スマホで同じクエリを使う（スマホは選択中かどうかで一覧と詳細の画面を切り替える）。
    */
   pr: string | null;
+  /**
+   * PC版で詳細を開いているIssueのid（`String(githubIssueId)`。スマホの`missue`と同じ識別子）。
+   * 未選択はnull。#688では初期表示用の読み取り専用クエリだったが、戻る操作で前の画面へ
+   * 戻れるようにするため、PC版の選択中Issueもこのクエリを正とする（#1396）。
+   */
+  issue: string | null;
   q: string;
   repos: string[];
   state: IssueStateFilter;
@@ -48,6 +55,7 @@ const DEFAULT_FILTERS: IssueFilters = {
   pane: "issues",
   prview: DEFAULT_PULL_REQUEST_VIEW,
   pr: null,
+  issue: null,
   q: "",
   repos: [],
   state: "open",
@@ -82,10 +90,25 @@ function applyFilterParam<K extends keyof IssueFilters>(
   }
 }
 
+/**
+ * 変えると現在地が変わる（＝履歴を積む）キー。残りは絞り込み条件で、変えても見ている場所は
+ * 同じなので履歴を積まない（#1396）。
+ */
+const NAVIGATION_KEYS: ReadonlySet<keyof IssueFilters> = new Set([
+  "view",
+  "pane",
+  "prview",
+  "pr",
+  "issue",
+]);
+
+function resolveHistoryMode(keys: (keyof IssueFilters)[]): HistoryMode {
+  return keys.some((key) => NAVIGATION_KEYS.has(key)) ? "push" : "replace";
+}
+
 export function useIssueFilters() {
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { navigateParams } = useHistoryNavigation();
 
   // 状態がユーザーの明示的な選択かどうか。既定値と同じ状態はクエリに残さない運用のため、
   // クエリの有無がそのまま「明示的に選ばれているか」になる（ビュー切り替え時の判断に使う）。
@@ -106,6 +129,7 @@ export function useIssueFilters() {
       pane: searchParams.get("pane") === "pull-requests" ? "pull-requests" : "issues",
       prview: isPullRequestViewId(prViewParam) ? prViewParam : DEFAULT_FILTERS.prview,
       pr: searchParams.get("pr"),
+      issue: searchParams.get("issue"),
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
       state:
@@ -118,28 +142,38 @@ export function useIssueFilters() {
     };
   }, [searchParams]);
 
+  // historyを明示しない場合は、変更するキーが現在地を変えるものかどうかで決まる。
   const setFilter = useCallback(
-    <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => {
-      const params = new URLSearchParams(searchParams.toString());
+    <K extends keyof IssueFilters>(
+      key: K,
+      value: IssueFilters[K],
+      options?: { history?: HistoryMode },
+    ) => {
       const nextView = key === "view" ? (value as NavViewId) : filters.view;
-      applyFilterParam(params, key, value, resolveDefaultFilters(nextView));
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      navigateParams(
+        (params) => applyFilterParam(params, key, value, resolveDefaultFilters(nextView)),
+        { history: options?.history ?? resolveHistoryMode([key]) },
+      );
     },
-    [router, pathname, searchParams, filters.view],
+    [navigateParams, filters.view],
   );
 
   // 複数フィールドを1回のURL更新でまとめて反映する（よく使うフィルター適用など、
   // setFilterの連続呼び出しだと互いの変更を上書きしてしまうケース向け）。
   const setFilters = useCallback(
-    (patch: Partial<IssueFilters>) => {
-      const params = new URLSearchParams(searchParams.toString());
+    (patch: Partial<IssueFilters>, options?: { history?: HistoryMode }) => {
+      const keys = Object.keys(patch) as (keyof IssueFilters)[];
       const defaults = resolveDefaultFilters(patch.view ?? filters.view);
-      for (const key of Object.keys(patch) as (keyof IssueFilters)[]) {
-        applyFilterParam(params, key, patch[key] as IssueFilters[typeof key], defaults);
-      }
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      navigateParams(
+        (params) => {
+          for (const key of keys) {
+            applyFilterParam(params, key, patch[key] as IssueFilters[typeof key], defaults);
+          }
+        },
+        { history: options?.history ?? resolveHistoryMode(keys) },
+      );
     },
-    [router, pathname, searchParams, filters.view],
+    [navigateParams, filters.view],
   );
 
   // サイドメニュー等でのビュー切り替え。切り替え先ビューが状態を要求する場合は状態も
@@ -153,6 +187,9 @@ export function useIssueFilters() {
         // 左メニューの選択と表示内容が食い違って見えるため。
         pane: "issues",
         pr: null,
+        // ビューを切り替えたら選択中Issueも畳む。別のビューの一覧に、そこに並んでいない
+        // Issueの詳細が残るのを避ける（1回のURL更新にまとめないと互いの変更を落とす）。
+        issue: null,
       });
     },
     [setFilters, filters.view, filters.state, isStateExplicit],
@@ -169,9 +206,11 @@ export function useIssueFilters() {
     [setFilters],
   );
 
+  // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
+  // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
     (pullRequestId: string | null) => {
-      setFilter("pr", pullRequestId);
+      setFilter("pr", pullRequestId, { history: pullRequestId ? "push" : "replace" });
     },
     [setFilter],
   );
