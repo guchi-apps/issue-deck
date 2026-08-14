@@ -107,6 +107,7 @@ export type Issue = {
  */
 export const LABEL_NAV_VIEW_IDS = [
   "check-user",
+  "manual-step",
   "not-started",
   "in-progress",
   "release-pending",

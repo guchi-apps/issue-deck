@@ -25,17 +25,18 @@ function makeComment(body: string, login = "github-actions[bot]"): Pick<IssueCom
 
 describe("LABEL_FILTER_PRESETS", () => {
   // 進捗による絞り込みはProject Statusを見る（#991 Phase 5・#1010）。
-  // ラベルが判断材料に残るのは条件系（00.check-user）だけ。
-  it("ユーザーの確認待ちプリセットだけがラベルを条件に持つ", () => {
+  // ラベルが判断材料に残るのは条件系（00.check-user・71.manual-step）だけ。
+  it("条件系プリセットだけがラベルを条件に持つ", () => {
     const withLabels = LABEL_FILTER_PRESETS.filter((item) => item.labels.length > 0);
-    expect(withLabels.map((item) => item.key)).toEqual(["check-user"]);
+    expect(withLabels.map((item) => item.key)).toEqual(["check-user", "manual-step"]);
     expect(withLabels[0].labels).toEqual(["00.check-user"]);
+    expect(withLabels[1].labels).toEqual(["71.manual-step"]);
   });
 
-  it("未着手プリセットはreadyかつ00.check-userを持たないIssueを対象にする", () => {
+  it("未着手プリセットはreadyかつ00.check-user・71.manual-stepを持たないIssueを対象にする", () => {
     const preset = LABEL_FILTER_PRESETS.find((item) => item.key === "not-started");
     expect(preset?.statuses).toEqual(["ready"]);
-    expect(preset?.excludeLabels).toEqual(["00.check-user"]);
+    expect(preset?.excludeLabels).toEqual(["00.check-user", "71.manual-step"]);
   });
 
   it("実行中プリセットはPlanning/Implementation/Develop PRを対象にする", () => {

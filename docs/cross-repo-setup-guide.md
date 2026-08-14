@@ -463,7 +463,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 
 ## 2. ラベル体系
 
-マルチエージェント運用のオプション制御に使う8個のラベルは、issue-deckリポジトリに
+マルチエージェント運用のオプション制御に使う9個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、導入前の他リポジトリには存在しない。
 
 **ラベルの正はこのissue-deckリポジトリに置いている。** `guchi-apps/docs`の`label-sync/`にある
@@ -533,7 +533,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 
 **このAPIは盤面に無いIssueを自分で載せてから書く**（#1036）ため、再同期を待つ必要はない。
 
-同期スクリプトはissue-deckの全ラベルを配るため、下記8個に加えて`30.bug`・`51.improvement`等の
+同期スクリプトはissue-deckの全ラベルを配るため、下記9個に加えて`30.bug`・`51.improvement`等の
 分類用ラベルもあわせて作成される。ラベルを個別に作りたい場合は次の`gh label create`を使う。
 
 | ラベル | 色 | 説明 | 用途 |
@@ -546,6 +546,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする |
+| `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「手作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。

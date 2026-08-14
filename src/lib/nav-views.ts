@@ -7,6 +7,7 @@ import {
   Rocket,
   Star,
   UserCheck,
+  Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -59,6 +60,7 @@ export type NavView = {
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
+  "manual-step": Wrench,
   "not-started": ListTodo,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
