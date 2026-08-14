@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   nextEscalatedState,
   parseDispatchSessionActivity,
+  parseDispatchSessionName,
   parseDispatchSessionReport,
   parsePreviewUrl,
   parseRemoteControlUrl,
@@ -132,6 +133,29 @@ describe("nextEscalatedState", () => {
     expect(escalated).toBeNull();
 
     expect(shouldEscalateSession(escalated, "FAILED")).toBe(true);
+  });
+});
+
+describe("parseDispatchSessionName", () => {
+  it("そのままの名前を受け付ける", () => {
+    expect(parseDispatchSessionName("issue-deck-issue-1321")).toBe("issue-deck-issue-1321");
+  });
+
+  it("文字列でなければnull", () => {
+    expect(parseDispatchSessionName(1321)).toBeNull();
+    expect(parseDispatchSessionName(null)).toBeNull();
+    expect(parseDispatchSessionName(undefined)).toBeNull();
+  });
+
+  it("空文字とDBの列の上限を超える長さは受け付けない", () => {
+    expect(parseDispatchSessionName("")).toBeNull();
+    expect(parseDispatchSessionName("a".repeat(191))).toBe("a".repeat(191));
+    expect(parseDispatchSessionName("a".repeat(192))).toBeNull();
+  });
+
+  // 形は見ない。照合キーにしか使わず、一致しなければ何も起きない
+  it("ランチャーが付ける形以外も通す", () => {
+    expect(parseDispatchSessionName("手で立てたセッション")).toBe("手で立てたセッション");
   });
 });
 
