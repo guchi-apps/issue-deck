@@ -51,11 +51,17 @@ synced=0
 skipped=0
 failed=0
 
-while IFS=$'\t' read -r key scope kind source; do
+while IFS=$'\t' read -r key scope kind gh_name source; do
   [[ -z "${key:-}" || "$key" == \#* ]] && continue
   [[ -z "${source:-}" ]] && continue
 
   if ! is_selected "$key"; then
+    continue
+  fi
+
+  if [[ "$gh_name" == GITHUB_* ]]; then
+    echo "FAIL   $key（GitHubは GITHUB_ で始まる名前を予約しており作成できない。マニフェストのGH_NAMEを修正してください: $gh_name）" >&2
+    failed=$((failed + 1))
     continue
   fi
 
@@ -79,19 +85,35 @@ while IFS=$'\t' read -r key scope kind source; do
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "dry    $key -> $kind ($REPO) ${#value}文字"
+    echo "dry    $key -> $kind ($REPO) $gh_name ${#value}文字"
     synced=$((synced + 1))
     continue
   fi
 
   # gh secret set / gh variable set は --body を省略すると標準入力から値を読む。
   # --body で渡すとプロセス一覧やシェル履歴に値が載るため、必ず標準入力を使う。
+  #
+  # 1件の失敗でスクリプト全体を止めない。以前は set -e により最初の失敗で即終了し、
+  # 残りを試さないまま集計も出さずに終わっていた（GITHUB_ プレフィックスが予約名で
+  # 弾かれた際に、28件中16件目で静かに止まった）。
   case "$kind" in
-    secret) printf '%s' "$value" | gh secret set "$key" --repo "$REPO" ;;
-    var)    printf '%s' "$value" | gh variable set "$key" --repo "$REPO" ;;
+    secret) push_err="$(printf '%s' "$value" | gh secret set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
+    var)    push_err="$(printf '%s' "$value" | gh variable set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
     *) echo "FAIL   $key（不明なKIND: $kind）" >&2; failed=$((failed + 1)); continue ;;
   esac
-  echo "ok     $key -> $kind ($REPO)"
+
+  if [[ "$rc" -ne 0 ]]; then
+    # 値そのものは出力しない。ghのエラー文のみを見せる。
+    echo "FAIL   $key -> $gh_name（$push_err）" >&2
+    failed=$((failed + 1))
+    continue
+  fi
+
+  if [[ "$key" == "$gh_name" ]]; then
+    echo "ok     $key -> $kind ($REPO)"
+  else
+    echo "ok     $key -> $kind ($REPO) ※GitHub側の名前は $gh_name"
+  fi
   synced=$((synced + 1))
 done < "$MANIFEST"
 
