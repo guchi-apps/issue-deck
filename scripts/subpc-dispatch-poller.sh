@@ -36,6 +36,7 @@
 #   DISPATCH_SECRET                 共有シークレット（issue-deck側の同名の環境変数と同じ値）
 #   DISPATCH_HOST_NAME              このホストの名前（省略時は `hostname -s`）
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
+#   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は60）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
@@ -133,6 +134,19 @@ require_positive_int() {
 
 POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 60)"
 LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPATCH_LAUNCH_TIMEOUT_SECONDS:-}" 900)"
+
+# 生かしておく実装セッションの上限（#1361）。
+#
+# `AppSetting.dispatchConcurrency` は**ジョブの払い出しにしか効かない**（tmuxが立った時点で
+# ジョブは`succeeded`）ため、生きているセッションの本数には上限が無い。回収（reap-sessions.sh）は
+# 「判定できなければ畳まない」設計で、IssueがOPENだったり人の入力待ちのセッションは正当に残るので、
+# 入口を絞らない限り本数は単調に増える。2026-08-14には34本まで積み上がり、サブPCが
+# メモリ枯渇で停止した（SSHもコンソールも応答せず、Magic SysRqでの再起動が要った）。
+#
+# 上限はホストの搭載メモリで決まる。サブPC（13.9GB）では実測で1セッション約390MBに加え、
+# 開発サーバーが最大3本（#1177）走るため、12本で1〜2割の余裕を残す見当。
+# 別のホストへ載せるときは搭載メモリに合わせて dispatch.env で変える。
+MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSIONS:-}" 12)"
 
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
@@ -509,6 +523,16 @@ run_job() {
   rm -f "$output_file"
 }
 
+# 生きている実装セッションの本数（#1361）。
+#
+# 数えるのは `<リポジトリ名>-issue-<番号>` に一致するものだけ。この仕組みが作ったセッションの
+# 名前の形で、report_sessions が送る対象と同じ。人が手で立てたセッションまで数えると、
+# この仕組みと関係のない事情でジョブが取れなくなる。
+count_issue_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-issue-[1-9][0-9]*$' || true
+}
+
 # --- 1巡 ----------------------------------------------------------------------
 # 申告 → claim → 起動。**1巡の失敗でプロセスを終わらせない**（常駐時は次の巡で復帰できる）。
 run_once() {
@@ -530,6 +554,18 @@ run_once() {
   report_sessions
 
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+
+  # セッションが上限に達している間はジョブを取りに行かない（#1361）。
+  # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。
+  #
+  # 取りに行かなくてもジョブは消えない。`expireStaleDispatchJobs()` が掃くのは CLAIMED と
+  # RUNNING だけで、QUEUED は対象外のため、空きができた次の巡でそのまま取りに行ける。
+  local live_sessions
+  live_sessions="$(count_issue_sessions)"
+  if [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
+    echo "セッションが上限に達しているため、ジョブを取りに行きません（$live_sessions/$MAX_SESSIONS 本）。"
     return 0
   fi
 
