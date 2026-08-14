@@ -876,17 +876,19 @@ export function MobileIssueDetail({
           />
         )}
 
+        {/* 子イシューの進捗はAI要約と説明の間に置く（#1340）。モバイルでは実装開始などの
+            操作導線を上に残したいため、説明のすぐ上へ差し込む */}
+        {hasSubIssueRelations && (
+          <>
+            <SubIssueProgress relations={subIssueRelations} />
+            <Separator />
+          </>
+        )}
+
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
           <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
         </div>
-
-        {hasSubIssueRelations && (
-          <>
-            <Separator />
-            <SubIssueProgress relations={subIssueRelations} />
-          </>
-        )}
 
         <Separator />
 

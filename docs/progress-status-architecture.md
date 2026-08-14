@@ -126,6 +126,32 @@ Develop PR → Develop →（次のPR）→ Develop PR → Develop → ...
 Phase 2でActionsから進捗を報告する際も、**PRのマージをもって`Develop`にするのが正しい**。
 Issueの完了判定をそこへ持ち込まない。
 
+#### ただしclosedなIssueは`Done`より手前へ戻さない（#1348）
+
+上の往復が成立するのはIssueがopenの間だけ。**closedなIssueが`Develop`へ戻ると、そこから
+二度と`Done`へ戻れない。**
+
+- `develop-pr-merged`（`.github/workflows/reusable-issue-labels.yml`）はブランチ名
+  `issue-<番号>`だけを見て`develop`を報告する。Issueの開閉は見ていない
+- リリース時に`Release`・`Done`へ一括遷移させる対象を引く`queryIssuesByProgressStatus`
+  （`GET /api/progress?status=...`）は、**openなIssueしか返さない**
+
+したがって`Done`でcloseされた後に同じブランチからdevelopへPRがマージされると、Statusだけが
+`Develop`へ巻き戻り、以降どれだけリリースを回してもそのIssueは拾われない。#1181が実際にこうなり、
+リリース確認ダイアログの「今回反映する内容」に永久に並び続けた（#1348）。
+
+対処は2か所に入れてある。
+
+- **書き込み側**: `reportProgressStatus`が、closedなIssueに対する`done`以外の報告を
+  `reason: "issue_closed"`で捨てる。`done`だけ通すのは、`main-pr-merged`が
+  「closeしてから`done`を報告する」順序で動いているため
+- **表示側**: リリース確認ダイアログの一覧・件数バッジは`isNextReleaseIssue`・
+  `isReleasePendingIssue`（`src/lib/issue-progress.ts`）を通し、closedなIssueを除く。
+  一括遷移の対象（openのみ）と画面の見え方を揃える
+
+**`Done`のIssueへ追加作業が必要になった場合は、新しいIssueを立てる。** closeされたIssueへ
+作業を積み増すと、そのdevelopの変更はどのリリースの対象一覧にも出てこない。
+
 ## 目標アーキテクチャ
 
 ```

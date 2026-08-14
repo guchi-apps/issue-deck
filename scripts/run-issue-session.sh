@@ -92,20 +92,32 @@ fi
 DEV_PGID=""
 PREVIEW_URL=""
 
+# issue-deckへ報告するための設定値を1つ読む。**環境変数が優先で、無ければ`dispatch.env`。**
+# pollerは`set -a`付きでこのファイルをsourceしてから起動するため、poller経由のセッションでは
+# 環境変数側に載っている。手元のターミナルから直接起動した場合はファイルから読む。
+# 見つからなければ空を返し、呼び出し側が「報告しない」を選ぶ。
+dispatch_env_value() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    printf '%s' "${!name}"
+    return 0
+  fi
+  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
+  [[ -f "$env_file" ]] || return 0
+  # shellcheck disable=SC1090
+  (source "$env_file" >/dev/null 2>&1; printf '%s' "${!name:-}")
+}
+
 # 公開したURLをissue-deckの画面へ渡す（#1265）。**スマホから画面を見る唯一の出口**なので、
 # ターミナルのログだけに出しても届かない。宛先と鍵はpollerと同じ`dispatch.env`から読む。
 # 受け口は`session-notify.sh`と共有（`POST /api/dispatch/sessions/activity`）。
 # **未設定でも失敗してもセッションは止めない。**
 report_preview_url_to_issue_deck() {
   local preview_url="$1"
-  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
-  [[ -f "$env_file" ]] || return 0
 
   local app_base_url dispatch_secret repo_slug body
-  # shellcheck disable=SC1090
-  app_base_url="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${APP_BASE_URL:-}")"
-  # shellcheck disable=SC1090
-  dispatch_secret="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${DISPATCH_SECRET:-}")"
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
   repo_slug="$(git config --get remote.origin.url 2>/dev/null |
     sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$repo_slug" ]] || return 0
@@ -125,6 +137,50 @@ print(json.dumps({
     -d "$body" \
     "${app_base_url%/}/api/dispatch/sessions/activity" >/dev/null 2>&1 ||
     echo "#$ISSUE_NUMBER: 情報: プレビューURLをissue-deckへ報告できませんでした（実装は続行します）。" >&2
+}
+
+# セッションが畳まれたことをその場でissue-deckへ知らせる（#1321）。
+#
+# pollerも1巡ごとに全セッションを報告しているが、**そちらは実測で最大75秒遅れる**
+# （`sleep`の60秒＋1巡の実処理の約14秒）。#1311で生きているセッションのあるIssueは起動を
+# 押せなくしたため、その遅れがそのまま「畳んだのにまだ押せない」時間になっていた。
+#
+# **送るのは「このセッションは終わった」だけで、終了コードは送らない。** `tmux kill-session`では
+# HUPでtrapに入るため、ここで拾える終了コードは異常終了かどうかを表さない。異常終了の判定
+# （`FAILED`＝Issueコメント＋`00.check-user`の引き上げ）はpollerの担当のまま。
+#
+# tmuxの外で起動した場合はセッション名が無く、issue-deck側に照合する行も無いので何もしない。
+# **報告できなくてもセッションの後始末は続ける**（次の巡回でpollerが拾う）。
+report_session_ended_to_issue_deck() {
+  [[ -n "$TMUX_SESSION_NAME" ]] || return 0
+
+  local app_base_url dispatch_secret host_name body
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
+
+  # ホスト名の決め方はpoller（`DISPATCH_HOST_NAME`→`hostname -s`）と揃える。**ずれると
+  # 照合が外れて黙って0件になる。**
+  host_name="$(dispatch_env_value DISPATCH_HOST_NAME)"
+  [[ -n "$host_name" ]] || host_name="$(hostname -s 2>/dev/null || true)"
+  [[ -n "$host_name" ]] || return 0
+
+  body="$(HOST_NAME="$host_name" SESSION_NAME="$TMUX_SESSION_NAME" python3 -c '
+import json, os
+print(json.dumps({
+    "host": os.environ["HOST_NAME"],
+    "tmuxSessionName": os.environ["SESSION_NAME"],
+}))' 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 0
+
+  # **失敗しても何も出さない。** ここが動くのはペインが壊された後で、stdout/stderrは既に無い
+  # ptyを指している（#1223）。書いても誰にも届かないうえ、EIOで返る。
+  # 待ち時間も短くする。届かないホストで毎回10秒待つと、そのぶんセッションの終了が伸びる。
+  curl -fsS --max-time 5 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}/api/dispatch/sessions/ended" >/dev/null 2>&1 || true
 }
 
 cleanup() {
@@ -156,6 +212,11 @@ cleanup() {
   if [[ -n "$TMUX_SESSION_NAME" ]]; then
     session_state_remove "$TMUX_SESSION_NAME"
   fi
+
+  # **画面への報告は後始末の最後に置く（#1321）。** ネットワークが死んでいるホストでは最大5秒
+  # 待つため、先に置くとその間に強制終了された場合に開発サーバーが孤児として残る（#1223で
+  # 実際に起きたのと同じ結果になる）。遅れるのは数秒で、消したいのは75秒のほう。
+  report_session_ended_to_issue_deck
 }
 trap cleanup EXIT HUP TERM
 

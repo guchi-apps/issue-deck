@@ -1,4 +1,6 @@
 import { db } from "@/lib/db";
+import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
+import { getPendingDispatchAt } from "@/lib/dispatch/pending-dispatch";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
@@ -204,5 +206,13 @@ export async function upsertIssueAndGetDisplay(
     where: { id: issue.id },
     include: { labels: true },
   });
-  return dbIssueToDisplayIssue(repository, row);
+  // 単票を返す経路（作成・編集・転送）でも順番待ちを落とさない（#1347）。落とすと、
+  // 画面がこの1件で一覧を差し替えた瞬間だけ「実行中」から消えて次のポーリングで戻る
+  const pendingAt = await getPendingDispatchAt(
+    buildDispatchActiveKey(repository.fullName, row.number),
+  );
+  return {
+    ...dbIssueToDisplayIssue(repository, row),
+    dispatchPendingAt: pendingAt?.toISOString() ?? null,
+  };
 }
