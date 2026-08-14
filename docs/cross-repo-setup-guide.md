@@ -784,31 +784,58 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 または1Passwordから**環境変数を組み立てる複合アクション。片方で解決できない項目はもう片方から補う。
 
 ```yaml
+  notify:
+    runs-on: ubuntu-latest
+    # GitHub側の値は**ジョブの env: で明示的に**渡す。複合アクションのステップはジョブの
+    # env: を引き継ぐが、呼び出しステップの env: は引き継がない。
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+    steps:
       - name: Checkout code           # ローカルパスのアクションのため先にcheckoutが要る
         uses: actions/checkout@v4
 
-      - name: シークレットを解決する
+      - name: 不足分を1Passwordから補う
         uses: ./.github/actions/load-secrets
         with:
           # only を省略するとマニフェストの全項目が対象
           only: SIGNALY_WEBHOOK_URL
-          secrets-json: ${{ toJSON(secrets) }}
-          vars-json: ${{ toJSON(vars) }}
-          # 空を渡すとフォールバックしない
+          # 空を渡すと1Passwordを一切触らない
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 ```
 
-`prefer`（既定`github`）で優先する供給元を選ぶ。**GitHub側の投入が済んでいないリポジトリは
-1Passwordのまま動き、投入が済んだ順に自動でGitHub側へ切り替わる**ため、全リポジトリを一斉に
-切り替える必要がない。
+**GitHub側の投入が済んでいないリポジトリは1Passwordのまま動き、投入が済んだ順に自動で
+GitHub側へ切り替わる**ため、全リポジトリを一斉に切り替える必要がない。
 
-1Passwordへフォールバックする際は、**未解決の項目だけ**を並べた一時テンプレートを生成して渡す。
+1Passwordから補う際は、**不足している項目だけ**を並べた一時テンプレートを生成して渡す。
 テンプレート全体を渡すと不要な項目まで取りに行き、日次レート制限を無駄に消費するため。
 
-`GITHUB_`で始まる名前の読み替え（`GH_NAME`列）はアクションが吸収するので、呼び出し側は本来の
-環境変数名だけを意識すればよい。
+`GITHUB_`で始まる名前の読み替え（`GH_NAME`列）は、`env:`ブロックを
+`scripts/generate-workflow-env-block.sh`で生成すれば自動で反映される。
 
 解決できなかった項目は**名前だけ**が報告される。値はログに出ない。
+
+#### `secrets` コンテキストは丸ごと渡せない
+
+当初は `secrets-json: ${{ toJSON(secrets) }}` でアクションへ渡し、アクション側がマニフェストを
+見て選ぶ設計にした。**しかしその形にするとワークフローのrunが`action_required`になり、ジョブが
+1つも作られなくなる**（PR #1315で3回とも再現）。必須チェックが「失敗」ではなく「そもそも
+実行されない」状態になるため、`gh pr checks`の一覧を眺めているだけでは気づきにくい。
+
+切り分けの結果は次のとおり。
+
+| ci.ymlの内容 | CI |
+|---|---|
+| 変更なし | 成功（5ジョブ） |
+| ローカル複合アクションの参照のみ | **成功（5ジョブ）** |
+| + `toJSON(secrets)`・`toJSON(vars)` を入力へ渡す | **`action_required`・ジョブ0件** |
+
+ローカル複合アクションを`uses: ./...`で呼ぶこと自体は問題ない。`toJSON(secrets)`を入力へ
+渡した場合のみ起きる。そのためGitHub側の値は呼び出し側のジョブの`env:`に明示的に並べる。
+
+`env:`ブロックは`scripts/generate-workflow-env-block.sh`で生成でき、マニフェストとのズレは
+`scripts/check-load-secrets-env-block.sh`が検出する（CIの`docs-sync-check`ジョブに入っている）。
+マニフェストへ項目を足したのに`env:`へ足し忘れると、検証ワークフローがその項目を見ないまま
+「OK」を出してしまうため。
 
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 
