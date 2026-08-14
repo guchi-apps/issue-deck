@@ -5,7 +5,6 @@ import { useMemo, useRef, useState } from "react";
 import {
   Archive,
   Bot,
-  Copy,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -19,7 +18,6 @@ import {
   SlidersHorizontal,
   Star,
   Trash2,
-  Wrench,
   XCircle,
 } from "lucide-react";
 
@@ -30,7 +28,6 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
-import { LocalSessionSetupDialog } from "@/components/dashboard/local-session-setup-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
@@ -40,6 +37,19 @@ import { StartLocalSessionButton } from "@/components/dashboard/start-local-sess
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
+import {
+  findDispatchJobForIssue,
+  isActiveDispatchJobStatus,
+  resolveDefaultDispatchHost,
+} from "@/lib/dispatch/dispatch-job";
+import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import {
+  LocalSessionApprovalNotice,
+  LocalSessionCommentNotice,
+} from "@/components/dashboard/local-session-notice";
+import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
+import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
+import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +68,7 @@ import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-ind
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
@@ -67,6 +78,7 @@ import { usePullRequestLink } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
+  canCompleteManualStep,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -152,8 +164,11 @@ export function IssueDetail({
     notConfigured: commentCleanupNotConfigured,
     generate: generateCommentCleanup,
   } = useIssueBodyCleanup();
+  // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）。
+  // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
+  // 同じ画面のためにポーリングが何本も走る
+  const dispatch = useDispatchState(true);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
-  const [isLocalSessionSetupOpen, setIsLocalSessionSetupOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -381,10 +396,42 @@ export function IssueDetail({
   }
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
-  const startDisabledReason = startImplementationDisabledReason(currentRepository?.hasClaudeWorkflow);
-  // ローカル起動の導線（ボタン・コマンドのコピー・セットアップ手順）は、対象リポジトリが
-  // ローカル起動プロトコルに適合しているときだけ出す（#1073）。3つとも同じ条件にしないと、
-  // 「ボタンは無いのにセットアップ手順だけ見られる」といった食い違いが出る。
+  // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
+  // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
+  const actionsDisabledReason = startImplementationDisabledReason(
+    currentRepository?.hasClaudeWorkflow,
+  );
+  // 押す前に実行先が分かるよう、ボタンの文言を既定の実行先そのものにする（#1262）。
+  // 既定の決め方はダイアログ側と同じ関数を使う
+  const dispatchJob = findDispatchJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const defaultDispatchHost = resolveDefaultDispatchHost({
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+  });
+  const startLabel = defaultDispatchHost
+    ? `${defaultDispatchHost}で開始`
+    : "GitHub Actionsで開始";
+  // 着手後もどちらで動いているかが分かるようにする（#1262）
+  // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
+  const issueSession = findSessionForIssue(
+    dispatch.sessions,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const executionTarget = resolveIssueExecutionTarget({
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+    labels: issue.labels,
+    jobs: dispatch.jobs,
+    sessions: dispatch.sessions,
+  });
+  // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
+  // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
     ? buildLocalSessionCommand(issue.repositoryFullName, issue.number)
     : null;
@@ -423,14 +470,16 @@ export function IssueDetail({
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
                   onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  includeDispatchTargets
+                  dispatch={dispatch}
+                  actionsDisabledReason={actionsDisabledReason}
+                  comments={comments}
+                  localSessionCommand={localSessionCommand}
+                  subIssueRelations={subIssueRelations}
                   renderTrigger={(isSubmitting) => (
-                    <Button
-                      size="sm"
-                      disabled={isSubmitting || startDisabledReason !== null}
-                      title={startDisabledReason ?? undefined}
-                    >
+                    <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                      実装を開始
+                      {startLabel}
                     </Button>
                   )}
                 />
@@ -462,8 +511,7 @@ export function IssueDetail({
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
-                onFirstLaunch={() => setIsLocalSessionSetupOpen(true)}
-                hasLocalStartScript={currentRepository?.hasLocalStartScript}
+                dispatch={dispatch}
               />
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
@@ -502,24 +550,6 @@ export function IssueDetail({
                     <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
                   </DropdownMenuItem>
-                  {localSessionCommand && (
-                    <>
-                      <DropdownMenuItem
-                        className="whitespace-nowrap text-xs"
-                        onSelect={() => void navigator.clipboard.writeText(localSessionCommand)}
-                      >
-                        <Copy className="size-3.5" />
-                        ローカル起動コマンドをコピー
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="whitespace-nowrap text-xs"
-                        onSelect={() => setIsLocalSessionSetupOpen(true)}
-                      >
-                        <Wrench className="size-3.5" />
-                        ローカル起動のセットアップ
-                      </DropdownMenuItem>
-                    </>
-                  )}
                   <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
                     <Pencil className="size-3.5" />
                     編集
@@ -605,7 +635,12 @@ export function IssueDetail({
             </span>
           </div>
 
-          <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
+          <WorkflowStatusSteps
+            labels={issue.labels}
+            projectStatus={issue.projectStatus}
+            executionTarget={executionTarget}
+          />
+          {issueSession && <IssueSessionStatus session={issueSession} align="end" />}
           <div className="flex flex-wrap items-center gap-2">
             {qaAnswerPending && (
               <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -620,6 +655,15 @@ export function IssueDetail({
               repositoryFullName={issue.repositoryFullName}
             />
           </div>
+
+          {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
+          {canCompleteManualStep(issue) && (
+            <ManualStepPanel
+              isSubmitting={isSubmitting}
+              onComplete={() => handleClose("completed")}
+              onSkip={() => handleClose("not_planned")}
+            />
+          )}
 
           <Separator />
 
@@ -658,6 +702,11 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
+              localSessionNotice={
+                executionTarget.expectsActionsRun ? undefined : (
+                  <LocalSessionApprovalNotice session={issueSession} />
+                )
+              }
               mergeApprovalPending={isMergeApprovalPending(issue, comments)}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
@@ -682,6 +731,12 @@ export function IssueDetail({
             />
 
             <div className="mt-4 flex flex-col gap-2">
+              {/* ローカルで走っているIssueでは、ここへ書いたコメントがセッションへ届かない
+                  （#1287）。承認欄の案内（#1264）は承認待ちのときしか出ないが、届かないのは
+                  承認コメントに限らないため、入力欄そのものにも出す */}
+              {!executionTarget.expectsActionsRun && (
+                <LocalSessionCommentNotice session={issueSession} />
+              )}
               <MentionTextarea
                 placeholder="コメントを追加..."
                 className="min-h-20"
@@ -784,13 +839,6 @@ export function IssueDetail({
         </SheetContent>
       </Sheet>
 
-      {localSessionCommand && (
-        <LocalSessionSetupDialog
-          open={isLocalSessionSetupOpen}
-          onOpenChange={setIsLocalSessionSetupOpen}
-          localSessionCommand={localSessionCommand}
-        />
-      )}
 
       <DeleteIssueDialog
         open={isDeleteDialogOpen}

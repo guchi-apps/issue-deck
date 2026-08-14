@@ -17,10 +17,10 @@ import { Button } from "@/components/ui/button";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import { mergeWarnings } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type PullRequestMergeButtonProps = {
-  pullRequest: OpenPullRequest;
+  pullRequest: PullRequestSummary;
   onMerged: () => void;
   className?: string;
   /** 詳細ペインでは主要な操作なので塗りつぶし、一覧では控えめな枠線にする */

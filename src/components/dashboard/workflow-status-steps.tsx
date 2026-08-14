@@ -1,5 +1,9 @@
 import { Check, CircleAlert, MessageCircleQuestion } from "lucide-react";
 
+import {
+  describeIssueExecutionTarget,
+  type IssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
@@ -18,7 +22,10 @@ type ProgressProps = {
   projectStatus?: string | null;
 };
 
-type WorkflowStatusStepsProps = ProgressProps;
+type WorkflowStatusStepsProps = ProgressProps & {
+  /** このIssueがどこで走っているか（#1262）。着手後もPC・スマホの詳細から実行先が分かるようにする */
+  executionTarget?: IssueExecutionTarget;
+};
 
 type WorkflowStepBadgeProps = ProgressProps & {
   /**
@@ -31,6 +38,18 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * 投稿されていない状態かどうか（@/lib/github/ask-claudeのisQaAnswerPending相当）
    */
   qaAnswerPending?: boolean;
+  /**
+   * このIssueがどこで走っているか（#1262）。**省略時は従来どおりActionsの実行を期待する。**
+   *
+   * サブPC実行では実行ログのリンクを含むコメントがPR作成まで出ないため、これが無いと
+   * `runId`がnullのまま「起動待ち」を出し続けてしまう。
+   */
+  executionTarget?: IssueExecutionTarget;
+  /**
+   * セッションの様子の短い表現（#1264・`shortIssueSessionLabel`）。
+   * **入力待ち・終了・異常終了のときだけ渡ってくる**（通常の実行中は一覧が情報で埋まるため出さない）。
+   */
+  sessionLabel?: string | null;
 };
 
 const BADGE_SIZE = 18;
@@ -49,6 +68,8 @@ export function WorkflowStepBadge({
   projectStatus = null,
   running,
   qaAnswerPending = false,
+  executionTarget,
+  sessionLabel = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -62,13 +83,25 @@ export function WorkflowStepBadge({
   // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
   // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
   // ポーリング結果が未取得（running未定義）のうちは判定しない
+  // Actionsの実行を期待してよい場合にだけ「起動待ち」を判定する（#1262）。サブPC実行では
+  // 実行が最初から存在しないため、ここを見ないと実装中ずっと誤警告が出続ける。
   const awaitingDispatch =
+    executionTarget?.expectsActionsRun !== false &&
     running !== undefined &&
     !isRunning &&
     running.runId === null &&
     isDispatchedStatusKey(resolveProgressStatus({ projectStatus }));
   const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
-  const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : awaitingDispatch ? "（起動待ち）" : ""}`;
+  // 実行先が分かっている場合はそれを出す。押す前だけでなく**着手後も**どちらで動いているかが
+  // 分かるようにするため（#1262）。実行中のステップ名が出せるならそちらを優先する
+  const targetLabel =
+    executionTarget && !executionTarget.expectsActionsRun
+      ? describeIssueExecutionTarget(executionTarget)
+      : null;
+  // 実行先とセッションの様子は両方出す（例:「subpc・入力待ち」）。どちらが欠けても意味が変わる
+  const localSuffix = [targetLabel, sessionLabel].filter(Boolean).join("・") || null;
+  const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
+  const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"
     : showQaAnswerPending
@@ -84,7 +117,9 @@ export function WorkflowStepBadge({
             ? "（Claudeの回答待ち）"
             : awaitingDispatch
               ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
-              : ""
+              : localSuffix
+                ? `（${localSuffix}）`
+                : ""
       }`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
     >
@@ -137,12 +172,22 @@ export function WorkflowStepBadge({
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
  */
-export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowStatusStepsProps) {
+export function WorkflowStatusSteps({
+  labels,
+  projectStatus = null,
+  executionTarget,
+}: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
   const currentStep = WORKFLOW_STEPS[currentIndex];
+  // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
+  // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
+  const targetLabel =
+    executionTarget && !executionTarget.expectsActionsRun
+      ? describeIssueExecutionTarget(executionTarget)
+      : null;
 
   return (
     <div>
@@ -204,10 +249,16 @@ export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowSt
           })}
         </div>
       </div>
+      {targetLabel && (
+        <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground md:block">
+          {targetLabel}で実行中
+        </p>
+      )}
       <p className="mt-1.5 text-center text-[11px] md:hidden">
         <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
           {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
         </span>
+        {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
         {approvalPending && (
           <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
             ユーザー確認待ち

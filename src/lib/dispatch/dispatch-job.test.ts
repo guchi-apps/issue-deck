@@ -17,6 +17,8 @@ import {
   parseDispatchTarget,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
+  resolveScreenshotRejection,
+  type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 
@@ -280,5 +282,38 @@ describe("findDispatchJobForIssue", () => {
       job({ id: "new", status: "FAILED", createdAt: "2026-08-14T00:00:00.000Z" }),
     ];
     expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("new");
+  });
+});
+
+describe("resolveScreenshotRejection（#1268）", () => {
+  function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      repositories: ["guchi-apps/issue-deck"],
+      contractVersion: 2,
+      online: true,
+      lastSeenAt: "2026-08-14T00:00:00Z",
+      screenshotCapable: true,
+      ...overrides,
+    };
+  }
+
+  it("撮れるホストでは塞がない", () => {
+    expect(resolveScreenshotRejection(host())).toBeNull();
+  });
+
+  it("撮れないと申告しているホストでは理由を返す", () => {
+    expect(resolveScreenshotRejection(host({ screenshotCapable: false }))).toContain(
+      "Playwright",
+    );
+  });
+
+  // 判定材料が無いことと「撮れない」ことは違う
+  it("申告していないホスト（古いpoller）は塞がない", () => {
+    expect(resolveScreenshotRejection(host({ screenshotCapable: null }))).toBeNull();
+  });
+
+  it("ホストを選んでいない（GitHub Actions等）なら塞がない", () => {
+    expect(resolveScreenshotRejection(null)).toBeNull();
   });
 });

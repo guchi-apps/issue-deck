@@ -1,18 +1,17 @@
-# 画面からのローカルセッション起動（クイックスタート）
+# ローカルセッションの起動（クイックスタート）
 
-issue-deckの画面の「ローカルで開始」から、WSL上のClaude Codeセッションをワンクリックで
-起動する仕組み（#1049）。
+対象リポジトリのworktreeを作り、開発サーバーを立て、Claude Codeセッションを起こすまでの仕組み
+（#1049）。**起動元はサブPC（`subpc-dispatch-poller.sh`）と、手元のターミナルの2つ。**
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
-> **この経路が成立するのは、ブラウザを開いている端末＝メインPCのときだけ。** サブPCが申告して
-> いる環境では「ローカルで開始」が起動先の選択になり、サブPCを選ぶとジョブをキューに積む
-> （#1180）。そちらは[subpc-dispatch.md](subpc-dispatch.md)を参照。このドキュメントが説明するのは
-> 「このPC」を選んだときの経路。
+> **画面の「このPC」（`issuedeck://`によるワンクリック起動）は#1263で廃止した。** 手元で作業する
+> ときはVS Codeを自分で開いているので、必要なのはセッションを丸ごと立てることではなく、開いて
+> いるセッションへ貼れる文面だった。現在の出口は「実装を開始」ダイアログの実行先に並ぶ
+> **「実装プロンプトをコピー」**と**「起動コマンドをコピー」**。詳細は後述の
+> [「このPC」を廃止した経緯](#このpcを廃止した経緯1263)。
 >
-> **後述の「ローカル起動プロトコル」が必須なのも、この「このPC」経路だけ**（#1224）。サブPCからの
-> 起動は、マーカー行を持たないリポジトリを汎用ランチャーで起こす
-> （[generic-launcher.md](generic-launcher.md)）。
+> サブPCへの起動は[subpc-dispatch.md](subpc-dispatch.md)を参照。
 
 ## なぜ必要だったか
 
@@ -20,100 +19,64 @@ issue-deckの画面の「ローカルで開始」から、WSL上のClaude Code�
 
 | 起点 | 実体 | 自動化 |
 |---|---|---|
-| GitHub Issue（`@claude`コメント・画面の「実装を開始」） | `claude-issue-dispatch.yml` | 全自動（無人実行） |
+| GitHub Issue（`@claude`コメント） | `claude-issue-dispatch.yml` | 全自動（無人実行） |
 | WSLのターミナル・SSH越しのターミナル | `scripts/start-issue.sh` | worktree作成〜devサーバー〜`claude`起動まで全自動 |
 | 画面を見ていて「これをローカルでやろう」と思った瞬間 | — | 無かった |
 
 （`start-issue.sh`がWindows Terminalの無い環境でも使えるようになったのは#1178から。
 後述の[ヘッドレス（tmux）で起動する](#ヘッドレスtmuxで起動する)）
 
-3つ目が抜けているため、実際には「Issue番号を覚える → ターミナルを開く → コマンドを打つ」を
-手でつないでいた。ここを画面のボタン1つに畳む。
+3つ目を画面のボタンへ畳んだのが#1049で、**その後サブPCへのディスパッチ（#1179）が同じ穴を
+より広く埋めた**ため、#1263でメインPC向けの経路（`issuedeck://`）を畳んでいる。
 
-## 経路
+## 「このPC」を廃止した経緯（#1263）
 
-```text
-issue-deckの画面「ローカルで開始」
-  ↓ issuedeck://start/<owner>/<repo>/<Issue番号>
-Windowsのプロトコルハンドラ（%LOCALAPPDATA%\issue-deck\issuedeck-protocol.ps1）
-  ↓ wt.exe → wsl.exe → bash -lc
-~/.local/share/issue-deck/start-local-session.sh <owner> <repo> <番号>   ← リポジトリ→ローカルパスの解決
-  ↓
-<対象リポジトリ>/scripts/start-issue.sh <番号>          ← worktree・devサーバー・claude起動
-```
+`issuedeck://start/<owner>/<repo>/<番号>` をWindowsへ登録し、そのハンドラから
+`wt.exe`→`wsl.exe`→受け口→対象リポジトリの`scripts/start-issue.sh`と辿る経路があった。
+**ブラウザからWSLのプロセスを直接起動する手段が無い**ための踏み台で、VS Codeが
+`vscode://vscode-remote/wsl+<ディストロ>/<パス>`を受けているのと同じ仕組み。
 
-**ブラウザからWSLのプロセスを直接起動する手段は存在しない。** そのため、Windows側に
-カスタムURLプロトコルを登録し、そのハンドラを踏み台にする。VSCodeが
-`vscode://vscode-remote/wsl+<ディストロ>/<パス>` を受けているのと同じ仕組み。
+畳んだ理由は、**手元で作業する場面ではVS Codeを既に開いているから**。新しいセッションを
+丸ごと立てるより、開いているセッションへ貼れる文面の方が要る。
 
-なお**Claude Code拡張（v2.1.227時点）はURIハンドラを登録していない**（`package.json`の
-`contributes`に`uriHandler`が無く、`activationEvents`にも`onUri`が無い）。したがって
-「deep linkでVSCodeを開き、そのままプロンプト入りのClaude Codeセッションを始める」ことは
-できない。起動先をターミナルの`claude` CLI（＝`start-issue.sh`の既存の出口）にしているのは
-この制約による。
+畳んだことで、この経路が抱えていた次の問題も同時に消えている。
 
-## 初回セットアップ（1回だけ）
+| 問題 | 内容 |
+|---|---|
+| 登録済みかを検知できない（#1088） | 押しても何も起きない環境と、起きた環境を区別できなかった。初回だけセットアップ手順を出す回避策を置いていた |
+| 受け口の複製が陳腐化する（#1085・#1179） | 登録スクリプトが`~/.local/share/issue-deck/`へ複製した受け口を使うため、内容が変わるたびに登録の再実行が要った |
+| UAC待ちで固まる（#1094） | ハンドラ経由の起動ではLANアクセス設定がUACの承認待ちから戻らず、devサーバーが立たなかった |
+| PowerShellのBOM問題 | ハンドラを日本語コメント入りで置くと、BOM無しでは文字化けして起動に失敗した |
 
-**手順は画面からも見られる。** Issue詳細の「…」メニュー →「ローカル起動のセットアップ」
-（`src/components/dashboard/local-session-setup-dialog.tsx`）。詳細は後述の
-[セットアップ手順を画面から見せる](#セットアップ手順を画面から見せる)。
+削除したもの: `scripts/windows/`（プロトコルハンドラと登録スクリプト）・
+`src/components/dashboard/local-session-setup-dialog.tsx`・`src/lib/local-session-setup.ts`・
+`lib/local-session.ts`のURL組み立てと登録コマンド。
 
-WSLのターミナルに貼れる形。`wslpath -w`がWSLのパスをWindowsのパスへ変換する（`~`はコマンド
-置換の中でもシェルが展開するので、ユーザー名を埋める必要は無い）。**管理者権限は不要**
-（HKCU配下に登録するため）。
+**残したもの**: 後述の[ローカル起動プロトコル](#ローカル起動プロトコル-v2)（サブPCの受け口が
+「対象リポジトリ自前の`start-issue.sh`を使うか、汎用ランチャーで起こすか」を決める分岐に使う）と、
+`buildLocalSessionCommand`（「起動コマンドをコピー」が渡す1行）。
 
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"
-```
+## 手元で作業するときの出口
 
-Windows側のPowerShellから直接実行してもよい。
+「実装を開始」ダイアログの実行先に2つ並ぶ（`src/components/dashboard/start-implementation-dialog.tsx`）。
 
-```powershell
-cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\register-issuedeck-protocol.ps1
-```
+| 選択肢 | 渡すもの | 貼る先 |
+|---|---|---|
+| **実装プロンプトをコピー** | サブPCのランチャーが渡すのと同じ文面（Issue本文・コメント・ラベルに応じた指示） | 既に開いているClaude Codeセッション |
+| **起動コマンドをコピー** | `~/apps/issue-deck/scripts/start-local-session.sh <owner> <repo> <番号>` | ターミナル（worktree作成から起動まで行う） |
 
-登録スクリプトは3つの複製を作る。
+**プロンプトのコピーでは、画面側が`11.local`の付与と進捗（Project Status）の報告を行う。**
+貼り付け先のセッションを起こすのは人間でランチャーを通らないため、ここでやらないと無人実行と
+二重に走りうるうえ盤面も動かない。**起動コマンドのコピーでは行わない**（そちらは
+`start-local-session.sh`が同じことをする）。
 
-| 複製するもの | 複製先 | 理由 |
-| --- | --- | --- |
-| `scripts/windows/issuedeck-protocol.ps1` | `%LOCALAPPDATA%\issue-deck\` | WSL上のパス（`\\wsl.localhost\...`）を直接登録すると、WSLが停止した状態からの初回起動でパス解決に失敗しうる |
-| `scripts/start-local-session.sh` | WSLの`~/.local/share/issue-deck/` | リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間はファイルが存在せず起動できない（#1076） |
-| `scripts/lib/local-repo-resolve.sh` | WSLの`~/.local/share/issue-deck/lib/` | 受け口がリポジトリの解決・検証をこのライブラリに任せているため（#1179）。**受け口だけを複製しても起動しない** |
+文面の正は`scripts/prompts/generic-implementation-agent.md`で、
+`scripts/generate-prompt-templates.mjs`がTSへ書き出したものを画面が読む。デプロイの成果物に
+`scripts/prompts/`が入っていないため生成物をコミットして運び、ずれていないことは
+`src/lib/prompts/templates.test.ts`が検証する。**文面を2か所に分けると必ず片方が古くなる。**
 
-**いずれかを変更したときは、登録スクリプトを再実行して複製を更新する。**
-
-> **#1179を取り込んだ環境では、登録スクリプトの再実行が必須。**
-> 受け口が`lib/`をsourceするようになり、複製の中身が「1ファイル」から「受け口＋`lib/`」へ
-> 変わった。再実行しないと`issuedeck://`からの起動が失敗する。#1085と同じ性質の変更で、
-> 画面側から検知する手段が無いこと自体は#1089に記録がある。
-> 受け口は黙って失敗せず、「登録スクリプトを再実行してください」と案内して止まる。
-
-受け口は自分と同じ位置の`lib/`を探す（`$(dirname "${BASH_SOURCE[0]}")/lib/`）。リポジトリ内の
-`scripts/lib/`と複製先の`~/.local/share/issue-deck/lib/`が同じ相対位置になるため、経路によらず
-同じ1行で解決できる。**ライブラリからリポジトリ内のファイルを参照しないこと**（複製先には
-チェックアウトが無い）。
-
-受け口の複製元は`$PSScriptRoot`から辿る。`\\wsl.localhost\<ディストロ>\...`と`\\wsl$\<ディストロ>\...`は
-そのまま読み替え、それ以外（Cドライブ等から実行した場合）は`wslpath -u`に任せる。特定できない
-場合は警告を出すので、表示された`install`コマンドをWSL側で実行する。
-
-解除は`-Unregister`を付けて実行する。3つの複製（`lib/`ごと）とレジストリ登録が消える。
-
-動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/99999`を入力する。
-新しいタブが開いて「issue #99999 の取得に失敗しました」で止まれば、レジストリ登録からWSLの
-受け口までが繋がっている。**存在しないIssue番号を使う**のは、`start-issue.sh`がIssueの取得を
-`git worktree add`より前に行うため、そこで止まればブランチもworktreeも作られないから。実在する
-番号を入れると、その場で実装セッションが始まってしまう（#1076で、closedのEpic #1 を案内して
-いたのを改めた）。
-
-受け口の複製が見つからない場合は、ハンドラが起動前に検出してエラーを表示する。bashに任せると
-終了コード127が出るだけで原因が読めず、受け口側の`pause_on_error`もスクリプトが起動する前
-なので働かないため。
-
-### WSLディストロ名が`Ubuntu`でない場合
-
-ハンドラは環境変数`ISSUEDECK_WSL_DISTRO`を見る。未設定なら`Ubuntu`を使う。
+起動コマンドのコピーは、**対象リポジトリがローカル起動プロトコルに適合しているときだけ**出す
+（貼った先で受け口が止まるだけの選択肢を並べないため）。スマホの画面では出さない（貼る先が無い）。
 
 ## 対象リポジトリを増やす
 
@@ -130,8 +93,8 @@ guchi-apps/shopping-list  /home/guchi/apps/shopping-list
 ローカルのフォルダ名はリポジトリ名と一致していなくてよい。サンプルは
 [scripts/local-repos.conf.example](../../scripts/local-repos.conf.example)。
 
-**「このPC」経由の起動は、対応表に書いただけでは動かない。** 対象リポジトリが後述の
-「ローカル起動プロトコル」に適合している必要がある。
+**「起動コマンドをコピー」経由の起動は、対応表に書いただけでは動かない。** 対象リポジトリが
+後述の「ローカル起動プロトコル」に適合している必要がある。
 
 **サブPCからの起動には適合が要らない**（#1224）。マーカー行を持たないリポジトリは、issue-deck側の
 汎用ランチャー（`scripts/generic-start-issue.sh`）が起こす。対象リポジトリを増やす手順は
@@ -139,12 +102,12 @@ guchi-apps/shopping-list  /home/guchi/apps/shopping-list
 
 ## ローカル起動プロトコル v2
 
-ワンクリック起動は、対象リポジトリの`scripts/start-issue.sh`を呼ぶ形で成り立っている。実体が
-リポジトリごとにあるため、**ファイルがあっても約束を守っているとは限らない**。
+受け口（`scripts/start-local-session.sh`）は、対象リポジトリの`scripts/start-issue.sh`を呼ぶ形で
+成り立っている。実体がリポジトリごとにあるため、**ファイルがあっても約束を守っているとは限らない**。
 
 実際に踏んだ例: shopping-listは`scripts/start-issue.sh`を持っているが`ISSUE_DECK_SKIP_LAN_SETUP`を
-解釈しないため、押すとUACを承認しても待ちから戻らず**タブが無言で固まる**。「ファイルの存在」だけを
-条件にすると、この最悪ケースを通してしまう。
+解釈しないため、起動すると待ちから戻らず**無言で固まる**。「ファイルの存在」だけを条件にすると、
+この最悪ケースを通してしまう。
 
 そこで各リポジトリの`scripts/start-issue.sh`の冒頭に**マーカー行**を宣言させ、これを対応可否の
 **単一の真実**として扱う（#1073）。
@@ -212,9 +175,9 @@ v2の検査は**v2以上を宣言しているリポジトリにだけ課す**。
 ### 他リポジトリへ移植するとき
 
 > **原則として移植しない**（#1224）。サブPCからの起動は汎用ランチャーで足りる
-> （[generic-launcher.md](generic-launcher.md)）。ここに残しているのは、「このPC」経由の
-> ワンクリック起動をどうしてもそのリポジトリで使いたい場合の手順。**対象を1つ増やすたびに
-> 700行を複製して6箇所を書き換える運用が割に合わない**というのが#1224の出発点だった。
+> （[generic-launcher.md](generic-launcher.md)）。ここに残しているのは、そのリポジトリ自前の
+> 起動処理をどうしても持たせたい場合の手順。**対象を1つ増やすたびに700行を複製して6箇所を
+> 書き換える運用が割に合わない**というのが#1224の出発点だった。
 
 `scripts/start-issue.sh`は骨格が共通で、書き換えが要るのは実質6点。
 
@@ -447,6 +410,73 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
 「一定時間アクセスが無いと自動で停止される」ことを書いてあるため、画面確認で繋がらないことを
 事故と受け取って調査に入ることはない。
 
+## developの状態を開発サーバーで見る（#1289）
+
+Issueごとの開発サーバーが映すのは**実装中のブランチ**だけで、マージ済みの変更が積み上がった
+`develop`そのものを開く場所が無かった。本体チェックアウト（`~/apps/issue-deck`）で`pnpm dev`を
+叩く手は、そのときのブランチ・未コミットの変更・ポートのどれもが手元の作業次第で変わるうえ、
+PIDファイル・ログにも載らないため、`develop`を見る用途には使えない。
+
+```bash
+scripts/start-develop-dev.sh              # 最新のorigin/developへ更新して（再）起動する
+scripts/start-develop-dev.sh --status     # 起動しているか・どのコミットかとURLを表示する
+scripts/start-develop-dev.sh --stop       # 停止する
+scripts/start-develop-dev.sh --no-update  # 今チェックアウトされている内容のまま再起動する
+scripts/start-develop-dev.sh --no-migrate # マイグレーションの適用を行わない
+scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで停止）
+```
+
+`pnpm dev:develop`でも同じ（リポジトリのどこから叩いても本体チェックアウトを基準に動く）。
+
+| 項目 | 値 | 理由 |
+| --- | --- | --- |
+| worktree | `~/apps/issue-deck-worktrees/develop`（detached HEAD） | 本体が`develop`を開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしても`develop`は動かない |
+| ポート | `4000`（帯のベース値+0） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない |
+| ログ | `~/apps/issue-deck-worktrees/.dev-servers/develop.log` | Issueごとの開発サーバーと同じ置き場 |
+| 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、そのまま対象外になる |
+
+**既定はバックグラウンド起動で、`nohup`によりSSHを切っても残る。** Tailscale SSHでサブPCに入って
+叩き、そのまま外出先やスマホから画面を開く使い方（#1176 Phase 1と同じ狙い）を前提にしている。
+
+### 起動のたびに入れ替える
+
+既に動いていれば必ず止めてから起動し直す。`develop`の更新には依存関係の追加やマイグレーションが
+混ざり、それらは起動中のプロセスへHMRでは反映されないため、**HMRに任せない**。
+
+worktreeにブランチが乗っている・未コミットの変更があるときは**黙って捨てずにエラーで止める**。
+ここは`develop`を映すための場所で、作業場所ではない。
+
+### tailnet内の端末からはMagicDNSの名前で開く
+
+起動時とデフォルトの`--status`が、MagicDNSの名前（`http://<ホスト名>.<tailnet>.ts.net:4000`）と
+tailnet IPの両方を表示する。**開くのはMagicDNSの名前のほう。** 生のtailnet IPは
+`next.config.ts`の`allowedDevOrigins`（`**.ts.net`）に当たらず、画面のHTMLは出ても`/_next/*`が
+403になる（#1289で実測）。IPで開きたい場合は`.env.local`の`ISSUE_DECK_DEV_ALLOWED_ORIGINS`へ足す
+（[allowedDevOriginsに載せる必要がある](#alloweddevoriginsに載せる必要がある)を参照）。
+
+### マイグレーションは既定で適用する。失敗したら必ず直す
+
+開発用DB（`.env.local`の`DATABASE_URL`）は本体・全worktreeで共有しているため、developへマージ済みの
+マイグレーションが未適用だと画面がDBエラーになる。そのため起動前に`prisma migrate deploy`を実行する
+（適用済みのものは何もしない）。適用したくないときだけ`--no-migrate`。
+
+**失敗した場合、その記録が`_prisma_migrations`に残り、解消するまで以降のマイグレーションが一切
+当たらなくなる。** 共有DBなので、放置すると他のセッションの画面確認まで巻き込む。典型的な原因は、
+Issueのworktreeで`prisma migrate dev`を叩いて先に列を足しており、developへマージされた側の
+マイグレーション名と食い違うこと。#1289の初回起動で実際に起きた（`DispatchSession.remoteControlUrl`
+が既にあり、`20260814020000_add_dispatch_session_activity`が`Duplicate column name`で失敗した）。
+
+復旧は、足りない分だけ手で当ててから「適用済み」として記録する。
+
+```bash
+cd ~/apps/issue-deck-worktrees/develop
+pnpm exec prisma migrate status                     # どのマイグレーションが失敗したかを見る
+# 失敗したマイグレーションのSQLのうち、まだ当たっていない部分だけを実行する
+printf 'ALTER TABLE `X` ADD COLUMN ...;\n' | pnpm exec prisma db execute --stdin --schema prisma/schema.prisma
+pnpm exec prisma migrate resolve --applied <失敗したマイグレーション名>
+pnpm exec prisma migrate status                     # "Database schema is up to date!" になる
+```
+
 ## 作業が終わったセッションは自動で畳む（#1256）
 
 開発サーバーを止めてもセッション本体は残る。`claude`は対話プロセスで、作業が終わっても
@@ -518,6 +548,33 @@ WSLで必要だったLANアクセス設定（`setup-lan-access.sh`）は、WSL2�
 **`-H 0.0.0.0`を明示してはいけない。** 既定（未指定）はIPv4/IPv6の両方を待ち受けるが、
 `0.0.0.0`を渡すとIPv4だけに絞られ、tailnetのIPv6アドレスから見えなくなる。
 
+### それでも`tailscale serve`を通す（#1265）
+
+**「全インターフェースを待ち受ける」のはNext.jsの挙動で、全リポジトリの前提にはできない。**
+汎用ランチャー（#1224）が起こすのはリポジトリごとに違う開発サーバーで、Viteのように既定が
+localhostのみのものがある。そこで`23.preview-required`のセッションでは
+`scripts/lib/tailscale-serve.sh`が一律に`tailscale serve`を通し、**待ち受けが何であっても同じ
+形のURLになる**ようにしている。
+
+```bash
+sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
+```
+
+実測して分かっていること（#1261・#1265）。
+
+| 項目 | 結果 |
+|---|---|
+| 全インターフェースを待ち受けている状態でserveを足す | **競合しない。** エラーも出ず、FQDNでのアクセスは通る |
+| 生IPでのアクセス | **404になる。** serveがtailnet IPのそのポートを取り、Hostヘッダーで振り分けるため |
+| HTTPS | `CertDomains: None`（未有効）のため`--https`は使えず**`--http`一択** |
+| 権限 | `OperatorUser: None`のためsudoが要る。`/etc/sudoers.d/tailscale-serve`で`serve`だけNOPASSWDにしてある |
+
+**生IPが404になるのは実害が無い。** 出すURLは常にFQDN（`http://<ホスト名>.<tailnet>.ts.net:<ポート>`）で、
+Supabaseのリダイレクト許可リストもホスト名の形でしか通らない（生IPは元から使えない）。
+
+撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
+`scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+
 ### allowedDevOriginsに載せる必要がある
 
 localhost以外のホスト名で開くと、開発サーバーの内部リソース（`/_next/*`とHMRのWebSocket）が
@@ -551,95 +608,6 @@ MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開�
 起動されうる操作の上限は「issue-deckのworktreeを作り、devサーバーとClaude Codeセッションを
 立ち上げる」ところまでで、任意コマンドの実行には至らない。ただしClaude Codeセッション自体は
 起動してしまうため、**心当たりのないタブが開いたら閉じる**。
-
-## PowerShellスクリプトはUTF-8 BOM付きで保存する
-
-`scripts/windows/*.ps1`と`scripts/start-issue.ps1`（Windows側で実行する`.ps1`すべて）は
-**UTF-8 BOM付き**でコミットしている。Windows PowerShell 5.1
-（`powershell.exe`。Windowsに標準搭載されているもの）は、BOMが無いファイルをANSI（日本語環境では
-CP932）として読むため、日本語コメントを含むスクリプトが文字化けし、**構文エラーで動かなくなる**。
-
-実際に、BOM無しで保存した時点では次のエラーになった。
-
-```text
-式またはステートメントのトークン '}' を使用できません。
-```
-
-エラー行（`}`）は実際の原因箇所ではなく、文字化けした前の行で文字列が閉じられなくなった結果
-そこまでずれて報告される。**エラー行を読んでも原因にたどり着けない**ので、`.ps1`で不可解な
-構文エラーが出たらまずBOMの有無を疑う。
-
-```bash
-head -c 3 scripts/windows/issuedeck-protocol.ps1 | xxd   # efbbbf ならBOM付き
-```
-
-構文エラーの有無は、Windows PowerShellのパーサーにかければWSL側からでも確かめられる。
-
-```bash
-w=$(wslpath -w scripts/start-issue.ps1)
-powershell.exe -NoProfile -NonInteractive -Command "\$e=\$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$w',[ref]\$null,[ref]\$e); if(\$e.Count -gt 0){\$e[0].Message}else{'OK'}"
-```
-
-`scripts/start-issue.ps1`はBOM無しのままコミットされており、この方法で構文エラーになることを
-確認したうえでBOMを付けた（#1105）。`scripts/start-reviewer.ps1`も同じ状態のまま残っている。
-
-## プロトコルが登録されていない環境
-
-ボタンを押しても何も起きない（ブラウザが未知のスキームを無視する）。この場合のフォールバックとして、
-Issue詳細の「…」メニューに**「ローカル起動コマンドをコピー」**を用意している。コピーした
-コマンドをWSLのターミナルに貼れば、URL経路とまったく同じ`start-local-session.sh`が動く。
-経路ごとに挙動が分かれないよう、コマンドの生成も`src/lib/local-session.ts`に集約している。
-
-**このコマンドも受け口の複製（`~/.local/share/issue-deck/start-local-session.sh`）を指す。**
-URL経路と同じものを動かすためだが、複製を作るのは登録スクリプトなので、一度も実行していない
-環境では存在しない。その場合はリポジトリから直接置く。
-
-```bash
-install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
-  ~/.local/share/issue-deck/start-local-session.sh
-install -D -m 755 ~/apps/issue-deck/scripts/lib/local-repo-resolve.sh \
-  ~/.local/share/issue-deck/lib/local-repo-resolve.sh
-```
-
-**受け口とライブラリは必ずセットで置く。** 受け口だけを置くと、実行時に
-「`lib/local-repo-resolve.sh`がありません」で停止する。
-
-## セットアップ手順を画面から見せる
-
-登録手順がこのドキュメントにしか無いと、使う側は**「ボタンを押しても何も起きない」状態から
-自力でここへ辿り着く**必要がある（#1088）。Issue詳細の「…」メニューに
-**「ローカル起動のセットアップ」**を置き、ダイアログで手順を出す
-（`src/components/dashboard/local-session-setup-dialog.tsx`）。
-
-**初回の「ローカルで開始」押下時には自動で開く**（localStorageで一度きり。以降はメニューから
-任意に開ける）。
-
-### 検知はできない
-
-**ブラウザから`issuedeck://`が登録済みかを知る手段は無い。** 未登録でも押下は黙って無視される
-だけで、エラーも遷移も観測できない。インストール済みの受け口のバージョンも見えず、画面から
-何かを実行することもできない。遷移後に`blur`が来るかを見る裏技はあるが、ブラウザ自身の確認
-ダイアログがフォーカスを奪うため誤検知する。**当てにしない。**
-
-したがって「状況を検知して出す」のではなく、**こちらから一度だけ見せる**設計にしている。
-
-### ダイアログの内容
-
-| 項目 | 内容 |
-| --- | --- |
-| 1. 登録コマンド | WSLのターミナルにそのまま貼れる1行（コピーボタン付き） |
-| 2. 動作確認 | `issuedeck://start/guchi-apps/issue-deck/99999`へのリンク。押せばその場で経路を確認でき、Issue取得に失敗して止まるのでブランチもworktreeも作られない |
-| 3. 再実行が要るケース | 「受け口スクリプトを更新したら登録スクリプトを再実行」。アプリのバージョンを併記する |
-| 4. フォールバック | プロトコル未登録の環境向けの起動コマンド（「ローカル起動コマンドをコピー」と同じもの） |
-
-3のバージョンは、**登録コマンドをコピーした時点の版**をlocalStorageに控え、現在の版と並べて
-出す（`src/lib/local-session-setup.ts`）。登録そのものは検知できないので、「いつの版で登録した
-か」を人が照合できるところまでを担保する。版が違えば登録し直しを促す。
-
-コマンドの生成は経路によらず`src/lib/local-session.ts`へ集約している。分かれていると片方だけ
-古くなる。案内するチェックアウト先（`~/apps/issue-deck`）も`start-local-session.sh`の既定の
-解決先と同じ値にしてある。**ユーザー環境依存の値**（チェックアウト先・WSLのディストロ名）に
-ついては、読み替える旨と`ISSUEDECK_WSL_DISTRO`の存在をダイアログ内に添えている。
 
 ## 起動時のラベル付与（`11.local`・進捗ラベル）
 
@@ -723,6 +691,35 @@ install -D -m 755 ~/apps/issue-deck/scripts/lib/local-repo-resolve.sh \
 
 ownerは入れずリポジトリ名だけにしている。タブの横幅が限られており、同名リポジトリを別ownerで
 同時に扱う場面が今のところ無いため。
+
+## 起動プロンプトに差し込む「今の状況」（#1267）
+
+Issue本文とコメント全件は元から展開している。そこに落ちていた4つのうち3つを足した。
+
+| 足したもの | 集め方 | 置き場所 |
+|---|---|---|
+| 親子Issue | `gh issue view --json parent,subIssues` | `{{ISSUE_RELATIONS}}` |
+| 並行状況（`origin/develop`の先端・未マージPR・同じホストの他セッション） | git・`gh pr list`・`tmux list-sessions` | `{{CONCURRENT_WORK}}` |
+| 画像の読み方 | データ不要（テンプレートの固定文） | 本文中 |
+
+集める処理は[scripts/lib/prompt-context.sh](../../scripts/lib/prompt-context.sh)が持ち、
+`start-issue.sh`と`generic-start-issue.sh`が共有する。**どれも失敗しても起動を止めない**
+（集まらなければその旨を書いて先へ進む）。
+
+**判断はしない。事実だけを集める。** [gates.md](gates.md)の「計器」の側で、tmuxはメタデータしか
+読まない（画面の文字列からの推定は実地で誤判定した実績がある）。
+
+### 画面からコピーしたプロンプトでは並行状況が空になる
+
+ブラウザからはgitも`gh`も叩けないため、「実装プロンプトをコピー」（#1263）では
+**取得していないことを明示し、自分で確認するコマンドを添える**。黙って空にすると
+「並行しているものは無い」と読まれる。親子Issueは画面が持っているのでそのまま載る。
+
+### 長いIssueの要約は入れていない
+
+コメント全件を連結するとプロンプトが大きくなるが、**実際に困った観測がまだ無い**。
+要約を渡すにはissue-deck側に認証付きの要約APIが要り、先に作ると使われないまま残りうる。
+実運用で困ってから入れる。
 
 ## セッションに渡す最初のプロンプト
 

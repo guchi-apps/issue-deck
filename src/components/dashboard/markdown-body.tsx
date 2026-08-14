@@ -7,6 +7,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
 import { remarkTrimCjkAutolink } from "@/lib/remark-trim-cjk-autolink";
@@ -75,12 +76,35 @@ const sanitizeSchema = {
   },
 };
 
-const components: Components = {
-  a: ({ children, ...props }) => (
-    <a {...props} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+const LINK_CLASS = "text-primary underline underline-offset-2";
+
+/**
+ * 本文・コメント中のリンク。GitHubのIssue・PRを指すものはIssueDeckの画面内で開き、
+ * それ以外（外部サイト・Actionsのログなど）は従来どおり別タブで開く（#1260）。
+ * `#123`形式の参照は`rehypeLinkifyIssueRefs`が既にGitHubのURLへ展開しているので、
+ * ここでは区別せず同じ扱いになる。
+ */
+function MarkdownLink({ children, href, title }: ComponentProps<"a">) {
+  // 受け取ったpropsをまとめて流さないのは、react-markdownがhastのノード（node）も渡してくるため。
+  // DOMへ流すと無効な属性になる。リンクとして必要なのはhrefとtitleだけで、target・relは
+  // GithubReferenceLinkが決める。
+  if (typeof href !== "string" || href === "") {
+    return (
+      <a title={title} className={LINK_CLASS}>
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <GithubReferenceLink href={href} title={title} rel="noreferrer" className={LINK_CLASS}>
       {children}
-    </a>
-  ),
+    </GithubReferenceLink>
+  );
+}
+
+const components: Components = {
+  a: (props) => <MarkdownLink {...props} />,
   img: (props) => <MarkdownImage {...props} />,
   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,

@@ -96,18 +96,48 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   必要になった時点でキャッシュ層の追加を再検討する。
   取得コストは「対象リポジトリ数 + draft以外のPR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
-  `hooks/use-open-pull-requests.ts`）。
-- **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、一覧でPRを選んだ
-  ときだけ取得する。** 会話コメント・レビュー・レビューコメントの3エンドポイントを
+  `hooks/use-open-pull-requests.ts`）。**この一覧が返すのは今もopenのPRだけ**で、マージ済み・
+  クローズ済みのPRは下記の詳細API経由でしか表示しない。
+- **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、PRを選んだ・
+  画面内のリンクからPRを開いたときだけ取得する。** 会話コメント・レビュー・レビューコメントの
+  3エンドポイントを
   [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
-  統合する。タイトル・ブランチ・CI状態など**一覧が既に持っている情報はこのAPIで返さない**
-  （画面のヘッダーは一覧の項目から描く）。こちらも自動ポーリングは無い
-  （`hooks/use-pull-request-detail.ts`）。
+  統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
+  ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
+  **一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・クローズ済みのPRも
+  開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
+  選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
+  一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
+  の`toPullRequestSummary`で同じ形に揃える。
+- **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
+  （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
+  一覧・PR詳細・ロケットアイコンのリリース進捗に出る。**どのワークフローを起動するかの判定は
+  サーバー側**（[`lib/github/pull-request-repair.ts`](../src/lib/github/pull-request-repair.ts)）
+  で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
+  Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
+  振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
+  `<a href="https://github.com/...">`のまま出しておき、
+  [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
+  が通常クリックだけを奪ってアプリ内遷移に差し替える（Ctrl/⌘クリック・中クリックはGitHubを開ける）。
+  遷移の実体は`IssueDeckShell`の`openReference`だけが持ち、Markdown本文の中のような深い位置へは
+  contextで配る（`github-reference-navigation.tsx`）。**providerが無い場所では素の外部リンクに
+  戻るだけ**なので、ダイアログ単体のテストでも壊れない。GitHubは`/issues/<番号>`でPRも開けるため、
+  Issue参照はまずDBキャッシュのIssueを探し、無ければPRとして開き直す。PC（`pane`・`pr`）と
+  スマホ（`mscreen`・`missue`）は現在地の持ち方が別なので、**両方を1回の`router.replace`で
+  進める**（`hooks/use-reference-navigation.ts`。2回に分けると後の1回が前の1回の変更を落とす）。
+  「GitHubで開く」ボタン・Actionsの実行ログ・GitHub Appのインストールは、アプリ内に対応する
+  画面が無いため外部リンクのまま残している。
 - **サブPCへのディスパッチはpull型で、書き込み経路は`/api/dispatch/*`の1本。** 画面はジョブを
   `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
   tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。
   **ジョブの`succeeded`は「tmuxセッションが立った」までで、実装の完了ではない**（以降の進捗は
-  Project Statusが持つ）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
+  Project Statusが持つ）。その後のセッションは`DispatchSession`が持ち、**tmuxのメタデータ
+  （poller）とフック（#1219）の両方から埋まる**。入力待ちとRemote ControlのURLはフック側で、
+  受け口は`POST /api/dispatch/sessions/activity`（pollerの一括報告とは別。あちらは含まれない
+  行を`GONE`へ倒すため）。画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
+  `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
+  同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
@@ -115,7 +145,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/start-issue.sh`を持つリポジトリ（issue-deck自身）だけが自前のスクリプトで起動し、
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
-  **画面の`canStartLocalSession`は「このPC」導線のゲートに限定**しており、サブPC導線はサブPCの
+  **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
 - **起動したセッションの後始末はpollerの1巡に相乗りさせ、常駐プロセスを増やさない。**
   `scripts/reap-dev-servers.sh`が開発サーバーを（#1223）、`scripts/reap-sessions.sh`が作業の
@@ -131,6 +161,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
   黙って素通りする。** 設計は
   [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
+- **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
+  作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
+  `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、
+  `scripts/`の修正はマージしただけでは反映されない。`scripts/lib/launcher-scripts-sync.sh`の
+  `warn_launcher_scripts_stale`が起動前に差分を警告する（個人設定の警告と同じく、
+  **警告するだけで自動pullはしない**）。経路の表は
+  [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒
@@ -182,6 +219,12 @@ pnpm test:unit   # vitestのみ
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の
 起動を行う。`next dev` を直接叩くとGitHubからのWebhookがローカルに届かない。
 
+`pnpm dev:develop`（[../scripts/start-develop-dev.sh](../scripts/start-develop-dev.sh)・#1289）は、
+`develop`の最新状態を専用worktree（`~/apps/issue-deck-worktrees/develop`・detached HEAD）へ取り直し、
+固定ポート`4000`で開発サーバーを常駐させる。Issueごとの開発サーバーが映すのは実装中のブランチだけで、
+マージ済みが積み上がった`develop`を見る場所が別に要るため
+（[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を開発サーバーで見る」）。
+
 ポートフォワード設定（[../scripts/setup-lan-access.sh](../scripts/setup-lan-access.sh)）はWindowsの
 管理者権限を要求するため、`ISSUE_DECK_SKIP_LAN_SETUP=1` が設定されている場合はスキップする
 （ワンクリック起動経路でUAC待ちから戻らずdevサーバーが起動しなくなるため。#1094。詳細は
@@ -195,6 +238,7 @@ pnpm test:unit   # vitestのみ
 セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
 古いworktreeを開き直したときに自動で埋まる。
 
-追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
-`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
+追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/secrets-manifest.tsv`・
+`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
+マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。

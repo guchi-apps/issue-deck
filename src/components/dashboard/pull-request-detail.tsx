@@ -1,25 +1,29 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { ExternalLink, GitPullRequest, GitPullRequestDraft, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
   BranchBadge,
   CiStateBadge,
   PullRequestMetaBadge,
+  PullRequestStateIcon,
   formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { canMergeFromDeck } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
-  OpenPullRequest,
+  PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
   PullRequestEvent,
   PullRequestReviewState,
@@ -27,7 +31,7 @@ import type {
 
 type PullRequestDetailProps = {
   /** 一覧で選択中のPR。未選択ならnull */
-  pullRequest: OpenPullRequest | null;
+  pullRequest: PullRequestSummary | null;
   /** 本文・コメント。取得前・取得失敗時はnull */
   detail: PullRequestDetailData | null;
   isLoading: boolean;
@@ -105,9 +109,10 @@ function EventItem({
 /**
  * 選択中PRの本文・コメントを表示する（#1087）。
  *
- * ヘッダーに出す情報（タイトル・ブランチ・CI状態・作者）は一覧が持っている`OpenPullRequest`から
- * 描き、APIで追加取得するのは本文・差分統計・コメントだけにしている。一覧を開いた時点で
- * 分かっていることを再取得しないぶん、PRを選んでから表示までが速い。
+ * ヘッダーに出す情報（タイトル・ブランチ・CI状態・作者）は`PullRequestSummary`から描く。
+ * 一覧から選んだ場合は一覧が既に持っているものをそのまま使うので、PRを選んでから表示までが速い。
+ * 画面内のリンクから直接開いた場合は一覧に項目が無いため、詳細APIが返す`summary`が親経由で
+ * 渡ってくる（#1260）。
  */
 export function PullRequestDetail({
   pullRequest,
@@ -121,15 +126,30 @@ export function PullRequestDetail({
   style,
   footerSpacing = false,
 }: PullRequestDetailProps) {
+  // 画面内のリンクから一覧に無いPRを開いた場合、ヘッダーの材料（summary）が届くまで
+  // 選択中PRはnullのまま。「PRを選ぶと〜」ではなく読み込み中・失敗として見せる（#1260）。
   if (!pullRequest) {
     return (
-      <div
-        className={cn("flex flex-col items-center justify-center overflow-hidden", className)}
-        style={style}
-      >
-        <p className="px-4 text-center text-sm text-muted-foreground">
-          PRを選ぶと本文とコメントを表示します。
-        </p>
+      <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
+        <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+          {headerLeading}
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-muted-foreground">
+            {error ? "Pull Requestを開けませんでした" : isLoading ? "読み込み中..." : "Pull Request"}
+          </p>
+        </header>
+        {error ? (
+          <p className="px-4 py-3 text-sm text-destructive">{error}</p>
+        ) : isLoading ? (
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        ) : (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            PRを選ぶと本文とコメントを表示します。
+          </p>
+        )}
       </div>
     );
   }
@@ -137,6 +157,8 @@ export function PullRequestDetail({
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   // 取得結果が選択中PRのものか（切り替え直後に前のPRの本文を出さないための保険）
   const currentDetail = detail && detail.id === pullRequest.id ? detail : null;
+  // 詳細は`mergeable`を持つため、CI失敗とコンフリクトの両方の修復ボタンを出せる（#1293）。
+  const repairKinds = repairKindsFor(pullRequest, currentDetail?.mergeable);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -144,25 +166,18 @@ export function PullRequestDetail({
         {headerLeading}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start gap-2">
-            {pullRequest.draft ? (
-              <GitPullRequestDraft
-                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                aria-label="ドラフト"
-              />
-            ) : (
-              <GitPullRequest
-                className="mt-0.5 size-4 shrink-0 text-green-600"
-                aria-label="オープン"
-              />
-            )}
+            <PullRequestStateIcon pullRequest={pullRequest} className="mt-0.5 size-4 shrink-0" />
+            <h1 className="min-w-0 flex-1 text-sm font-semibold">
+              #{pullRequest.number} {pullRequest.title}
+            </h1>
             <a
               href={pullRequest.htmlUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-w-0 flex-1 text-sm font-semibold hover:underline"
+              className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+              aria-label={`#${pullRequest.number} をGitHubで開く`}
             >
-              #{pullRequest.number} {pullRequest.title}
-              <ExternalLink className="ml-1 inline size-3 text-muted-foreground" />
+              <ExternalLink className="size-3.5" />
             </a>
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -187,19 +202,30 @@ export function PullRequestDetail({
             <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
             {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
             {pullRequest.linkedIssueNumber !== null && (
-              <a
+              <GithubReferenceLink
                 href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
-                target="_blank"
-                rel="noopener noreferrer"
+                reference={{
+                  repositoryFullName: pullRequest.repositoryFullName,
+                  number: pullRequest.linkedIssueNumber,
+                  kind: "issue",
+                }}
                 className="text-xs text-primary hover:underline"
               >
                 Issue #{pullRequest.linkedIssueNumber}
-              </a>
+              </GithubReferenceLink>
             )}
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {pullRequest.draft ? (
+            {pullRequest.merged ? (
+              <span className="inline-flex w-fit items-center rounded-full bg-purple-600/15 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-600 dark:text-purple-400">
+                マージ済み
+              </span>
+            ) : pullRequest.state === "closed" ? (
+              <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
+                クローズ済み
+              </span>
+            ) : pullRequest.draft ? (
               <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
             ) : (
               <CiStateBadge ciState={pullRequest.ciState} />
@@ -219,6 +245,11 @@ export function PullRequestDetail({
             <span className="text-xs text-muted-foreground">
               {formatElapsed(pullRequest.createdAt)}
             </span>
+            <PullRequestRepairButtons
+              repositoryFullName={pullRequest.repositoryFullName}
+              pullRequestNumber={pullRequest.number}
+              kinds={repairKinds}
+            />
             {canMergeFromDeck(pullRequest) && (
               <PullRequestMergeButton
                 pullRequest={pullRequest}

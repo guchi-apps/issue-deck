@@ -1,11 +1,28 @@
 "use client";
 
-import { Check, CircleAlert, Clock, ExternalLink, Loader2 } from "lucide-react";
+import { Check, CircleAlert, Clock, ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { parseGithubReferenceUrl } from "@/lib/github-reference";
+import { repairKindsFor, type RepairKind } from "@/lib/github/pull-request-repair";
 import { cn } from "@/lib/utils";
 import type { CiState, ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-release-status";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
+
+/**
+ * リンク先がどこかを示すアイコン。リリース進捗のリンクにはPR（アプリ内で開く）と
+ * GitHub Actionsの実行ログ（アプリ内に対応する画面が無く別タブで開く）が混在するため、
+ * 行き先を取り違えないよう出し分ける（#1260）。
+ */
+function LinkDestinationIcon({ href }: { href: string }) {
+  return parseGithubReferenceUrl(href) ? (
+    <GitPullRequest className="size-3.5" />
+  ) : (
+    <ExternalLink className="size-3.5" />
+  );
+}
 
 /**
  * 「本番デプロイ」段がstate: "done"（デプロイ成功）で表示される条件と同じかどうかを判定する。
@@ -36,6 +53,13 @@ type Step = {
   changelog?: string;
   /** マージ待ちPRの最新コミットのCI状態。バッジとして表示する */
   ciState?: CiState | null;
+  /** マージ待ちPRがbaseとコンフリクトしているか。判定中・取得できない場合はnull */
+  mergeable?: boolean | null;
+  /**
+   * この段のマージ待ちPRを直すボタンの対象（#1293）。CI失敗・コンフリクトで止まっている段に、
+   * その場で自動修復を起動する導線を添えるために持つ。
+   */
+  repair?: { pullRequestNumber: number; kinds: RepairKind[] };
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
@@ -70,6 +94,35 @@ function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
       {CI_STATE_LABEL[ciState]}
     </span>
   );
+}
+
+/**
+ * マージ待ちPRがbaseとコンフリクトしていることを示すピル。CI状態と同じ並びに出す。
+ */
+function ConflictBadge({ mergeable }: { mergeable: boolean | null | undefined }) {
+  if (mergeable !== false) return null;
+
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
+      コンフリクトあり
+    </span>
+  );
+}
+
+/**
+ * 段に紐づくマージ待ちPRから、自動修復ボタンの対象を組み立てる（#1293）。
+ * 出す種類が無ければ`undefined`を返し、段に何も添えない。
+ */
+function repairForPullRequest(pullRequest: {
+  number: number;
+  ciState: CiState | null;
+  mergeable: boolean | null;
+}): Step["repair"] {
+  const kinds = repairKindsFor(
+    { state: "open", draft: false, ciState: pullRequest.ciState },
+    pullRequest.mergeable,
+  );
+  return kinds.length > 0 ? { pullRequestNumber: pullRequest.number, kinds } : undefined;
 }
 
 /**
@@ -108,6 +161,8 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
     steps[1].ciState = bump.ciState;
+    steps[1].mergeable = bump.mergeable;
+    steps[1].repair = repairForPullRequest(bump);
     if (!waitingCi) {
       steps[1].action = {
         href: bump.url,
@@ -133,6 +188,8 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[2].state = "done";
     steps[3].state = "action";
     steps[3].ciState = release.ciState;
+    steps[3].mergeable = release.mergeable;
+    steps[3].repair = repairForPullRequest(release);
     steps[3].note = "内容を確認して「merge commit」でマージしてください。";
     steps[3].action = {
       href: release.url,
@@ -210,9 +267,15 @@ function StepIcon({ state, compact }: { state: StepState; compact: boolean }) {
 export function ReleaseProgress({
   status,
   compact = false,
+  repoFullName = null,
 }: {
   status: AvailableReleaseStatus;
   compact?: boolean;
+  /**
+   * 表示中のリリース対象リポジトリ（`owner/repo`）。自動修復ボタンの起動先を決めるのに使う。
+   * 渡さない場合はボタンを出さない（進捗表示そのものはリポジトリ名なしでも成立するため）。
+   */
+  repoFullName?: string | null;
 }) {
   const steps = buildSteps(status);
   const { workflowRun } = status;
@@ -237,10 +300,21 @@ export function ReleaseProgress({
                 {step.label}
               </span>
               <CiStateBadge ciState={step.ciState} />
+              <ConflictBadge mergeable={step.mergeable} />
               {step.note && step.state !== "action" && (
                 <span className={cn("text-xs text-muted-foreground")}>{step.note}</span>
               )}
             </div>
+            {/* CI失敗・コンフリクトで止まっている段には、その場で自動修復を起動する
+                ボタンを添える（#1293）。本番へのリリースPRもここに現れる。 */}
+            {step.repair && repoFullName && (
+              <PullRequestRepairButtons
+                repositoryFullName={repoFullName}
+                pullRequestNumber={step.repair.pullRequestNumber}
+                kinds={step.repair.kinds}
+                className="ml-6"
+              />
+            )}
             {step.detail && (
               <div className="ml-6 flex flex-col gap-0.5">
                 <span className="text-xs font-medium text-muted-foreground">判断根拠</span>
@@ -258,10 +332,8 @@ export function ReleaseProgress({
               </div>
             )}
             {step.action && (
-              <a
+              <GithubReferenceLink
                 href={step.action.href}
-                target="_blank"
-                rel="noopener noreferrer"
                 className={cn(
                   "ml-6 inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium",
                   step.state === "error"
@@ -270,24 +342,22 @@ export function ReleaseProgress({
                   text,
                 )}
               >
-                <ExternalLink className="size-3.5" />
+                <LinkDestinationIcon href={step.action.href} />
                 {step.action.label}
-              </a>
+              </GithubReferenceLink>
             )}
             {step.link && (
-              <a
+              <GithubReferenceLink
                 href={step.link.href}
-                target="_blank"
-                rel="noopener noreferrer"
                 className={cn("ml-6 inline-flex items-center gap-1 text-primary hover:underline", "text-xs")}
               >
                 {step.link.pending ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
-                  <ExternalLink className="size-3.5" />
+                  <LinkDestinationIcon href={step.link.href} />
                 )}
                 {step.link.label}
-              </a>
+              </GithubReferenceLink>
             )}
             {step.note && step.state === "action" && (
               <span className="ml-6 text-xs text-muted-foreground">{step.note}</span>

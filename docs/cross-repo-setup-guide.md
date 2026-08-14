@@ -87,6 +87,8 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `reusable-claude-conflict-resolve.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect-conflicts`／`resolve-conflicts`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-ci-fix.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`・`package-manager`・`node-version`で、ビルド検証に要るダミー環境変数は`build-env`で、修正後の検証手順の説明は`verify-commands`で指定する。**Nodeのセットアップは要るが依存のインストールは不要**なリポジトリ（検証が`node --check`だけで`node_modules`を要さない等）は`install-dependencies: false`を渡す。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
 | `reusable-claude-ci-fix.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect`／`fix`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
+| `claude-pr-repair.yml` | Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）のCI失敗・コンフリクトを、issue-deckの画面のボタンから修復する（`workflow_dispatch`のみ）。**トリガー定義のみ**を持ち、本体は`reusable-claude-pr-repair.yml`を`uses:`で呼ぶ（#1293） | **コピーではなく薄いcallerを置く。** 指定する入力は`claude-ci-fix.yml`と同じものに加え、自身の`workflow_dispatch`入力を`pr-number`・`mode`として渡す。導入は任意（画面のボタンからの修復を使わないリポジトリでは不要） |
+| `reusable-claude-pr-repair.yml` | 上記のジョブ本体（`on: workflow_call`）。`repair`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
@@ -193,8 +195,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 ことがある（`curl`が許可されているのに2行に分けて書いて拒否された実例がある）。
 
 **この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
-`reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
-allowed-tools.test.ts`が一致をテストしている。
+`reusable-claude-conflict-resolve.yml`・`reusable-claude-pr-repair.yml`の4ファイルで同一に
+保つ。** `src/lib/workflows/allowed-tools.test.ts`が一致をテストしている。
 
 **Pythonはランナー標準のものを使う。** `setup-python`は入れていないため、CIが
 `actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える
@@ -776,7 +778,60 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
-| `OP_SERVICE_ACCOUNT_TOKEN` | issue-deck自身のSignaly（社内通知）連携で使う1Password Service Accountトークン | マルチエージェント運用そのものには不要。issue-deckの`ci.yml`/`deploy.yml`/`release.yml`固有の設定であり、他リポジトリで導入する必然性はない |
+| `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン。issue-deckでは現在プレビュー環境系（`deploy-preview.yml`・`cleanup-preview.yml`・`preview-logs.yml`）のみが使う | マルチエージェント運用そのものには不要。`ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外したため、これらでは不要になった |
+
+### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
+
+`deploy.yml`・`release.yml`・`ci.yml`が使う値は、以前は実行のたびに1Passwordから取得していた。
+1Passwordサービスアカウントの日次レート制限（**1Passwordアカウント全体で1,000リクエスト/日**、
+サービスアカウントを分けても分割されない）を使い切ってデプロイが止まったため、実行時の取得先を
+GitHubへ移した。GitHub側のsecret/variableにはレート制限が無い。
+
+**1Passwordは引き続き「人が管理する唯一の正」**であり、対応表は
+[`.github/secrets-manifest.tsv`](../.github/secrets-manifest.tsv)にある。値を変更したときは
+`scripts/sync-github-secrets.sh`で同期する（このスクリプトが使う`op`は個人アカウントの
+セッションであり、サービスアカウントの枠を消費しない）。
+
+`issue-deck`は**PUBLICリポジトリでActionsのログが誰でも読める**。variableはマスクされないため、
+公開されても害が無いと確認できた値だけをvariableにしている。接続先の構成情報（ホスト・ポート・
+ユーザー名・DB名）は単体では資格情報でなくとも、VPSへの攻撃面になるためsecretに置く。
+
+| 種別 | 名前 |
+|---|---|
+| Secret（接続・認証） | `SSH_PRIVATE_KEY`・`HOST`・`USERNAME`・`SSH_PORT`・`TARGET_DIR` |
+| Secret（DB） | `DB_USER`・`DB_PASSWORD`・`DB_HOST`・`DB_PORT`・`DB_NAME`・`MIGRATE_DB_USER`・`MIGRATE_DB_PASSWORD` |
+| Secret（アプリ） | `SUPABASE_SERVICE_ROLE_KEY`・`APP_GITHUB_APP_PRIVATE_KEY_BASE64`・`APP_GITHUB_WEBHOOK_SECRET`・`APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY`・`APP_GITHUB_OAUTH_CLIENT_ID`・`APP_GITHUB_OAUTH_CLIENT_SECRET`・`ALLOWED_EMAILS`・`DISPATCH_SECRET`・`SIGNALY_WEBHOOK_URL` |
+| Variable（公開されても害が無い値） | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`・`NEXT_PUBLIC_GITHUB_APP_SLUG`・`APP_GITHUB_APP_ID`・`PORT` |
+| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET` |
+
+#### `GITHUB_` で始まる名前は使えない
+
+**GitHubはsecret・variableとも`GITHUB_`で始まる名前を予約しており、作成しようとすると
+HTTP 422で拒否される**（`Secret names must not start with GITHUB_.`）。実際にこれで同期が
+28件中16件目で止まった。
+
+そのためGitHub側では`APP_`を前置した名前で保存し、ワークフロー側で本来の環境変数名へ
+読み替える。アプリのコードやサーバー側`.env`が使う名前は変わらない。
+
+| 環境変数名（アプリが使う名前） | GitHub側の名前 |
+|---|---|
+| `GITHUB_APP_ID` | `APP_GITHUB_APP_ID` |
+| `GITHUB_APP_PRIVATE_KEY_BASE64` | `APP_GITHUB_APP_PRIVATE_KEY_BASE64` |
+| `GITHUB_WEBHOOK_SECRET` | `APP_GITHUB_WEBHOOK_SECRET` |
+| `GITHUB_USER_TOKEN_ENCRYPTION_KEY` | `APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY` |
+| `GITHUB_OAUTH_CLIENT_ID` | `APP_GITHUB_OAUTH_CLIENT_ID` |
+| `GITHUB_OAUTH_CLIENT_SECRET` | `APP_GITHUB_OAUTH_CLIENT_SECRET` |
+
+対応は`.github/secrets-manifest.tsv`の`GH_NAME`列が持つ。`NEXT_PUBLIC_GITHUB_APP_SLUG`は
+`GITHUB_`で始まらないため読み替え不要。
+
+
+最後の2つは、以前はorganization secretと1Passwordの両方に同じ値があり二重管理になっていた。
+**同名のrepo secretを作るとorganization secretを覆い隠す**ため、repo側には作らない。
+
+なお`guchi-apps`はGitHub Freeのorganizationであり、**organization secretはprivateリポジトリからは
+利用できない**（publicリポジトリのみ）。共通値をorganization secretへ集約できるのはpublicな
+14リポジトリまでで、privateな11リポジトリはrepository secretとして個別に持つ必要がある。
 
 ### 変数 `APP_BASE_URL`
 
@@ -1122,7 +1177,7 @@ gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
 ランチャーが起動する。手順は
 [docs/multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「対象リポジトリを増やす」を参照。
 
-以下は**「このPC」（メインPCのWSL）からワンクリックで起動したい場合**の話。対応させるには2つ要る。
+以下は**「起動コマンドをコピー」で貼って起動したい場合**の話（「このPC」＝`issuedeck://`は#1263で廃止）。対応させるには2つ要る。
 
 1. リポジトリに`scripts/start-issue.sh`を置き、**ローカル起動プロトコル**に適合させる
 2. 各自の環境の対応表（`~/.config/issue-deck/local-repos.conf`）に、そのリポジトリのチェックアウト先を書く

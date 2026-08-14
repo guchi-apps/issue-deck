@@ -2,15 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLocalSessionCommand,
-  buildLocalSessionUrl,
   canStartLocalSession,
   isSupportedLocalSessionContract,
   LOCAL_SESSION_CONTRACT_VERSION,
-  LOCAL_SESSION_REGISTER_COMMAND,
-  LOCAL_SESSION_TEST_ISSUE_NUMBER,
-  LOCAL_SESSION_TEST_REPOSITORY,
-  LOCAL_SESSION_TEST_URL,
-  LOCAL_SESSION_URL_SCHEME,
   parseLocalSessionContractVersion,
   parseRepositoryFullName,
 } from "@/lib/local-session";
@@ -54,37 +48,10 @@ describe("parseRepositoryFullName", () => {
   });
 });
 
-describe("buildLocalSessionUrl", () => {
-  it("issuedeck://start/<owner>/<repo>/<番号> を組み立てる", () => {
-    expect(buildLocalSessionUrl("guchi-apps/issue-deck", 1049)).toBe(
-      "issuedeck://start/guchi-apps/issue-deck/1049",
-    );
-  });
-
-  it("スキーム名は定数と一致する", () => {
-    expect(buildLocalSessionUrl("guchi-apps/issue-deck", 1)).toContain(
-      `${LOCAL_SESSION_URL_SCHEME}://`,
-    );
-  });
-
-  it.each([
-    ["0", 0],
-    ["負数", -1],
-    ["小数", 1.5],
-    ["NaN", Number.NaN],
-  ])("Issue番号が%sならnullを返す", (_name, issueNumber) => {
-    expect(buildLocalSessionUrl("guchi-apps/issue-deck", issueNumber)).toBeNull();
-  });
-
-  it("リポジトリ名が不正ならnullを返す", () => {
-    expect(buildLocalSessionUrl("guchi-apps/issue deck", 1049)).toBeNull();
-  });
-});
-
 describe("buildLocalSessionCommand", () => {
-  it("URL経路と同じstart-local-session.shを同じ引数で呼ぶ", () => {
+  it("サブPCのpollerが呼ぶのと同じstart-local-session.shを同じ引数で呼ぶ", () => {
     expect(buildLocalSessionCommand("guchi-apps/issue-deck", 1049)).toBe(
-      "~/.local/share/issue-deck/start-local-session.sh guchi-apps issue-deck 1049",
+      "~/apps/issue-deck/scripts/start-local-session.sh guchi-apps issue-deck 1049",
     );
   });
 
@@ -132,31 +99,6 @@ describe("isSupportedLocalSessionContract", () => {
 
   it("宣言が無い場合は対応していないとみなす", () => {
     expect(isSupportedLocalSessionContract(null)).toBe(false);
-  });
-});
-
-describe("LOCAL_SESSION_REGISTER_COMMAND", () => {
-  it("WSLのターミナルへそのまま貼れる1行になっている", () => {
-    expect(LOCAL_SESSION_REGISTER_COMMAND).toBe(
-      'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"',
-    );
-  });
-
-  it("改行を含まない（複数行だと貼り付け時に途中で実行される）", () => {
-    expect(LOCAL_SESSION_REGISTER_COMMAND).not.toContain("\n");
-  });
-});
-
-describe("LOCAL_SESSION_TEST_URL", () => {
-  // 経路確認用のURLだけ別に組み立てると、URLの形式を変えたときに片方だけ古くなる。
-  it("buildLocalSessionUrlと同じ形式である", () => {
-    expect(LOCAL_SESSION_TEST_URL).toBe(
-      buildLocalSessionUrl(LOCAL_SESSION_TEST_REPOSITORY, LOCAL_SESSION_TEST_ISSUE_NUMBER),
-    );
-  });
-
-  it("実体が作られないよう、実在しない番号を使う", () => {
-    expect(LOCAL_SESSION_TEST_URL).toBe("issuedeck://start/guchi-apps/issue-deck/99999");
   });
 });
 

@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
     maxConcurrency: parsePositiveInt(payload?.maxConcurrency),
     agentVersion:
       typeof payload?.agentVersion === "string" ? payload.agentVersion.slice(0, 191) : null,
+    // **申告していない（古いpoller）と「撮れない」を区別する**（#1268）。boolean以外はnull
+    screenshotCapable:
+      typeof payload?.screenshotCapable === "boolean" ? payload.screenshotCapable : null,
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

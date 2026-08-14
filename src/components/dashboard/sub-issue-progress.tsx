@@ -2,6 +2,7 @@
 
 import { CornerLeftUp } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { resolveSubIssueProgress, summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,7 @@ type SubIssueProgressProps = {
   relations: SubIssueRelations;
 };
 
-/** 1件ぶんの行。番号・タイトル・進捗を並べ、クリックでGitHubのIssueを開く */
+/** 1件ぶんの行。番号・タイトル・進捗を並べ、クリックでそのIssueをIssueDeck内で開く */
 function SubIssueRow({ issue }: { issue: SubIssue }) {
   const statusKey = resolveSubIssueProgress(issue);
   const def = getProgressStatusDef(statusKey);
@@ -26,10 +27,8 @@ function SubIssueRow({ issue }: { issue: SubIssue }) {
   const isDone = statusKey === "done";
 
   return (
-    <a
+    <GithubReferenceLink
       href={issue.htmlUrl}
-      target="_blank"
-      rel="noopener noreferrer"
       className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted"
     >
       <span className="shrink-0 font-mono text-muted-foreground">#{issue.number}</span>
@@ -45,7 +44,7 @@ function SubIssueRow({ issue }: { issue: SubIssue }) {
         <Icon className="size-3" aria-hidden="true" />
         {def.label}
       </span>
-    </a>
+    </GithubReferenceLink>
   );
 }
 
@@ -62,16 +61,14 @@ export function SubIssueProgress({ relations }: SubIssueProgressProps) {
       {parent && (
         <div>
           <h2 className="mb-2 text-sm font-semibold">親Issue</h2>
-          <a
+          <GithubReferenceLink
             href={parent.htmlUrl}
-            target="_blank"
-            rel="noopener noreferrer"
             className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted"
           >
             <CornerLeftUp className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="shrink-0 font-mono text-muted-foreground">#{parent.number}</span>
             <span className="min-w-0 flex-1 truncate">{parent.title}</span>
-          </a>
+          </GithubReferenceLink>
         </div>
       )}
 

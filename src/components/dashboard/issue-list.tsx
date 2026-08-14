@@ -1,14 +1,31 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Archive, CircleCheck, CircleDot, CircleSlash, Lock, MessageSquare, Star } from "lucide-react";
+import {
+  Archive,
+  CheckSquare,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  Lock,
+  MessageSquare,
+  Star,
+} from "lucide-react";
 
+import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
+import {
+  resolveIssueExecutionTarget,
+  type IssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
+import { findSessionForIssue, shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
@@ -108,7 +125,52 @@ export function IssueList({
   groupByRepo = false,
   view,
 }: IssueListProps) {
-  const runningByIssueId = useIssuesWorkflowRunning(issues);
+  // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
+  // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
+  // ポーリングのフックより先に求める必要がある。
+  const dispatch = useDispatchState(true);
+  const executionTargetByIssueId = useMemo(() => {
+    const map = new Map<string, IssueExecutionTarget>();
+    for (const issue of issues) {
+      map.set(
+        issue.id,
+        resolveIssueExecutionTarget({
+          repositoryFullName: issue.repositoryFullName,
+          issueNumber: issue.number,
+          labels: issue.labels,
+          jobs: dispatch.jobs,
+          sessions: dispatch.sessions,
+        }),
+      );
+    }
+    return map;
+  }, [issues, dispatch.jobs, dispatch.sessions]);
+  // セッションの様子（#1264）。入力待ち・終了・異常終了だけを一覧へ出す
+  const sessionLabelByIssueId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const issue of issues) {
+      const session = findSessionForIssue(
+        dispatch.sessions,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const label = session ? shortIssueSessionLabel(session) : null;
+      if (label) map.set(issue.id, label);
+    }
+    return map;
+  }, [issues, dispatch.sessions]);
+  const actionsUnexpectedIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, target] of executionTargetByIssueId) {
+      if (!target.expectsActionsRun) ids.add(id);
+    }
+    return ids;
+  }, [executionTargetByIssueId]);
+  const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
+  // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
+  // Issueを開く。選択モードのときだけチェックボックスを出す
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
   const issueIds = useMemo(() => issues.map((issue) => issue.id), [issues]);
@@ -129,6 +191,20 @@ export function IssueList({
   );
   const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
 
+  function toggleSelected(issueId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(issueId)) next.delete(issueId);
+      else next.add(issueId);
+      return next;
+    });
+  }
+
+  function exitSelecting() {
+    setIsSelecting(false);
+    setSelectedIds(new Set());
+  }
+
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
     return (
       <li
@@ -140,14 +216,24 @@ export function IssueList({
       >
         <button
           type="button"
-          onClick={() => onSelectIssue(issue)}
+          onClick={() => (isSelecting ? toggleSelected(issue.id) : onSelectIssue(issue))}
           className={cn(
             "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
-            selectedIssueId === issue.id && "border-l-primary bg-accent",
+            selectedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
+            isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
           )}
         >
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              {isSelecting && (
+                <Checkbox
+                  checked={selectedIds.has(issue.id)}
+                  aria-label={`#${issue.number}を選択`}
+                  className="mr-1"
+                  // 行のonClickが選択を切り替えるので、二重に反応させない
+                  onClick={(event) => event.preventDefault()}
+                />
+              )}
               <IssueStateIcon issue={issue} />
               {showRepoName && (
                 <>
@@ -167,6 +253,8 @@ export function IssueList({
                 projectStatus={issue.projectStatus}
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
+                executionTarget={executionTargetByIssueId.get(issue.id)}
+                sessionLabel={sessionLabelByIssueId.get(issue.id) ?? null}
               />
               {issue.favorite && (
                 <Star
@@ -234,8 +322,31 @@ export function IssueList({
             <h2 className="text-sm font-semibold">{title}</h2>
             <p className="text-xs text-muted-foreground">{issues.length}件</p>
           </div>
-          <Star className="size-4 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            {/* 夜にまとめて積んで順に流すための入口（#1266） */}
+            <button
+              type="button"
+              aria-label={isSelecting ? "選択をやめる" : "まとめて選択"}
+              title={isSelecting ? "選択をやめる" : "まとめてサブPCへ積む"}
+              onClick={() => (isSelecting ? exitSelecting() : setIsSelecting(true))}
+              className={cn(
+                "rounded-md p-1 hover:bg-accent",
+                isSelecting ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              <CheckSquare className="size-4" />
+            </button>
+            <Star className="size-4 text-muted-foreground" />
+          </div>
         </div>
+      )}
+
+      {isSelecting && (
+        <BulkDispatchBar
+          issues={issues.filter((issue) => selectedIds.has(issue.id))}
+          dispatch={dispatch}
+          onDone={exitSelecting}
+        />
       )}
 
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが

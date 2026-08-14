@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   nextEscalatedState,
+  parseDispatchSessionActivity,
   parseDispatchSessionReport,
+  parsePreviewUrl,
+  parseRemoteControlUrl,
   parseSessionName,
   resolveRepositoryFullName,
   resolveSessionState,
@@ -184,5 +187,60 @@ describe("parseDispatchSessionReport", () => {
     expect(parseDispatchSessionReport(null)).toBeNull();
     expect(parseDispatchSessionReport("x")).toBeNull();
     expect(parseDispatchSessionReport([])).toBeNull();
+  });
+});
+
+describe("parseDispatchSessionActivity", () => {
+  it("フックのイベント名を内部の表現へ写す", () => {
+    expect(parseDispatchSessionActivity("waiting_input")).toBe("WAITING_INPUT");
+    expect(parseDispatchSessionActivity("responded")).toBe("RESPONDED");
+  });
+
+  it("知らない値はnull（受け口が黙って別の状態にしない）", () => {
+    expect(parseDispatchSessionActivity("stalled")).toBeNull();
+    expect(parseDispatchSessionActivity("")).toBeNull();
+    expect(parseDispatchSessionActivity(undefined)).toBeNull();
+    expect(parseDispatchSessionActivity(123)).toBeNull();
+  });
+});
+
+describe("parseRemoteControlUrl", () => {
+  it("claude.aiのhttps URLだけを通す", () => {
+    expect(parseRemoteControlUrl("https://claude.ai/code/session%5F01ABC")).toBe(
+      "https://claude.ai/code/session%5F01ABC",
+    );
+  });
+
+  it.each([
+    ["別ホスト", "https://example.com/code/x"],
+    ["サブドメイン偽装", "https://claude.ai.example.com/code/x"],
+    ["http", "http://claude.ai/code/x"],
+    ["javascript:", "javascript:alert(1)"],
+    ["URLでない", "not a url"],
+    ["空文字", ""],
+  ])("%sは受け付けない（画面にリンクとして出すため）", (_name, input) => {
+    expect(parseRemoteControlUrl(input)).toBeNull();
+  });
+
+  it("長すぎる値は受け付けない", () => {
+    expect(parseRemoteControlUrl(`https://claude.ai/${"a".repeat(600)}`)).toBeNull();
+  });
+});
+
+describe("parsePreviewUrl", () => {
+  it("tailnet内のhttp URLだけを通す", () => {
+    expect(parsePreviewUrl("http://subpc.tail5210f2.ts.net:4123")).toBe(
+      "http://subpc.tail5210f2.ts.net:4123/",
+    );
+  });
+
+  it.each([
+    ["tailnet外", "http://example.com:4123"],
+    ["ts.netを含むだけの別ホスト", "http://evil-ts.net.example.com:4123"],
+    ["https（証明書が未有効なので出ない形）", "https://subpc.tail5210f2.ts.net:4123"],
+    ["URLでない", "subpc:4123"],
+    ["空文字", ""],
+  ])("%sは受け付けない", (_name, input) => {
+    expect(parsePreviewUrl(input)).toBeNull();
   });
 });

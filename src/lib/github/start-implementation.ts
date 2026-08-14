@@ -1,4 +1,4 @@
-import { isApprovalPending, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import { isApprovalPending, isManualStepIssue, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { isProgressLabel } from "@/lib/issue-status";
 import type { Issue, IssueLabel } from "@/types/issue";
@@ -108,6 +108,13 @@ export function startImplementationOptionsFromLabels(labels: IssueLabel[]): Star
  * 未着手（進捗が`Ready`で、承認待ちでもない）openなissueでのみ
  * 「実装を開始」ボタンを表示する。着手済みissueでは通常のコメント欄から
  * 追加対応(additional)を依頼できるため、このボタンは初回起動専用。
+ *
+ * **手作業Issue（`71.manual-step`）では出さない（#1280）。** 手作業Issueは定義上
+ * エージェントが代行できない作業で、進捗も`Ready`のまま留まるため、この条件だけでは
+ * 「まだ誰も着手していないIssue」と区別が付かず、実装エージェントへ送る導線が
+ * 主ボタンとして出てしまう。押しても実装対象が無く、`Implementation`へ進んだ結果
+ * 「手作業待ち」ビューでの見え方も壊れる。手作業Issueの出口は
+ * `canCompleteManualStep`側の「手作業を完了してクローズ」。
  */
 export function canStartImplementation(
   issue: Pick<Issue, "state" | "labels" | "projectStatus">,
@@ -115,7 +122,8 @@ export function canStartImplementation(
   return (
     issue.state === "open" &&
     getWorkflowStepIndex(issue) === null &&
-    !isApprovalPending(issue.labels)
+    !isApprovalPending(issue.labels) &&
+    !isManualStepIssue(issue.labels)
   );
 }
 

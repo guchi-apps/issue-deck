@@ -52,38 +52,72 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 > 先行のshopping-list・dayspanには最初から入っている。
 
 上の表はGitHub Actions側の自動化についてのもの。**ローカルのワンクリック起動**（issue-deckの画面の
-「ローカルで開始」）は別の軸で、対応可否は各リポジトリの`scripts/start-issue.sh`の冒頭に置いた
-マーカー行が決める。
+「ローカルで開始」）は別の軸で、**#1224以降は起動先ごとにさらに2つへ分かれている**。
 
-| リポジトリ | ローカル起動プロトコル |
-|---|---|
-| `guchi-apps/issue-deck` | v2 |
-| `guchi-apps/dayspan` | v1 |
-| `guchi-apps/shopping-list` | — |
-| `guchi-apps/meisai-lab` | — |
-| `guchi-apps/car-care` | — |
-| `guchi-apps/subscription-lists` | — |
-| `guchi-apps/asset-manager` | — |
-| `guchi-apps/portfolio` | — |
-| `guchi-apps/solitaire` | — |
-| `guchi-apps/myroom` | — |
-| `guchi-apps/signaly` | — |
+| 起動先 | 起動できる条件 | 正の所在 |
+|---|---|---|
+| 起動コマンドをコピー（WSL・SSH） | 対象リポジトリの`scripts/start-issue.sh`が**マーカー行**（`# issue-deck-local-session: vN`）を宣言している | マーカー行そのもの |
+| サブPC（`subpc`） | サブPCにcloneされ、対応表（`~/.config/issue-deck/local-repos.conf`）に載っている。**マーカー行は要らない** | サブPCの申告 |
+
+**マーカー行が無いことは「未対応」を意味しない**（#1224）。宣言していないリポジトリはissue-deck側の
+汎用ランチャー（`scripts/generic-start-issue.sh`）が起こし、宣言しているリポジトリだけが自前の
+スクリプトで起動する。判定の詳細は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)
+「「実行できるリポジトリ」の判定」を参照。
+
+| リポジトリ | 起動コマンド（マーカー行） | サブPC |
+|---|---|---|
+| `guchi-apps/issue-deck` | v2 | ○ |
+| `guchi-apps/dayspan` | —（※） | ○ |
+| `guchi-apps/shopping-list` | —（※） | ○ |
+| `guchi-apps/meisai-lab` | — | ○ |
+| `guchi-apps/car-care` | — | ○ |
+| `guchi-apps/subscription-lists` | — | ○ |
+| `guchi-apps/asset-manager` | — | ○ |
+| `guchi-apps/portfolio` | — | ○（※2） |
+| `guchi-apps/solitaire` | — | ○（※2） |
+| `guchi-apps/myroom` | — | ○（※2） |
+| `guchi-apps/signaly` | — | ○（※2） |
+| `guchi-apps/clip-hive` | — | 保留 |
+
+※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
+両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
+起動する。
+
+※2 `portfolio`・`myroom`・`signaly`・`solitaire`は#1276で追加した。本体チェックアウトに
+`.env.local`／`.env`は置いていないが、**先行7件もissue-deck以外は同じく置いていない**（2026-08-14に実測）。
+汎用ランチャーは既定で開発サーバーを起動せず（#1224）、envが無ければ`supply_env_files`は何もしないため、
+セッションの起動には影響しない。開発サーバーを動かすセッションでだけ配置する。
+
+サブPC列は**2026-08-14時点の申告11件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
+入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。単に未着手だったため#1276で追加し、
+あわせてポート帯も確保した（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——
+載っていないと汎用ランチャーの既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。
+
+`clip-hive`は`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため、起動はできても`11.local`の
+付与とProject Statusの遷移が成立せず、対応可否を保留している（#1224）。サブPCの対応表にも、その理由を
+コメントとして書いたうえで無効化した行を置いてある。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
-v1のままのリポジトリもこれまでどおり動く（v2で増えたのはWindows Terminalが無い環境向けの
-tmux出口とポート帯の既定値。#1178）。
+v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
+tmux出口とポート帯の既定値。#1178）。現時点でマーカー行を宣言しているのはissue-deck自身だけで、
+CIが`scripts/check-local-session-contract.sh`で適合を検査している。
 
-**この表は要約であって真実の源ではない。** 正はマーカー行そのもので、次のコマンドが実態を読む。
+**この表は要約であって真実の源ではない。** 実態は起動先ごとに次で読む。
 
 ```bash
+# 起動コマンド: マーカー行を読む。宣言の無いリポジトリは ○（汎用ランチャーで起動する）と出る
 scripts/check-local-session-contract.sh --all
+
+# サブPC: 申告を読む。サブPC上で実行する
+journalctl --user -u issue-deck-dispatch-poller
 ```
 
 Actions側の対応とローカル起動の対応は**必ずしも一致しない**。導入順が「ワークフロー→ローカル」に
 なるため、Actionsは対応済みでローカルは未対応、という状態が普通に発生する。
 
 約束の内容と移植手順は [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)
-「ローカル起動プロトコル v1」を参照。
+「ローカル起動プロトコル v2」を参照。サブPCへ対象を増やす手順は
+[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「対象リポジトリを増やす（サブPC側の作業）」。
 
 ## sync-state マーカー（ワークフロー同期状態の記録）
 
@@ -171,6 +205,7 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 | `claude-ci-fix.yml` | `reusable-claude-ci-fix.yml` | 2026-08-11（#1066。issue-deck側のみ。他リポジトリへの適用は別Issue） |
 | `claude-conflict-resolve.yml` | `reusable-claude-conflict-resolve.yml` | 2026-08-11（#1066。issue-deck側のみ。他リポジトリへの適用は別Issue） |
 | `claude-review-develop.yml` | `reusable-claude-review-develop.yml` | 2026-08-11（#1078。issue-deck側のみ。他リポジトリへの適用は別Issue） |
+| `claude-pr-repair.yml` | `reusable-claude-pr-repair.yml` | 2026-08-14（#1293。新規のため最初から再利用可能ワークフローとして作成。issue-deck側のみ） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 

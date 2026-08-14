@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  canStartImplementation,
   isSelectableLabelName,
   startImplementationCommentBody,
   startImplementationDisabledReason,
@@ -74,5 +75,33 @@ describe("isSelectableLabelName", () => {
     expect(isSelectableLabelName("00.check-user")).toBe(false);
     expect(isSelectableLabelName("00.qa-answered")).toBe(false);
     expect(isSelectableLabelName("02.wip")).toBe(false);
+  });
+});
+
+describe("canStartImplementation", () => {
+  function makeIssue(labelNames: string[]): Parameters<typeof canStartImplementation>[0] {
+    return {
+      state: "open",
+      labels: labelNames.map((name) => ({ name, color: "000000", description: null })),
+      projectStatus: null,
+    };
+  }
+
+  it("未着手のopenなIssueでは表示する", () => {
+    expect(canStartImplementation(makeIssue([]))).toBe(true);
+  });
+
+  it("承認待ち（00.check-user）のIssueでは表示しない", () => {
+    expect(canStartImplementation(makeIssue([CHECK_USER_LABEL]))).toBe(false);
+  });
+
+  // 手作業Issueは進捗が`Ready`のまま留まるため、この判定を入れないと
+  // 実装エージェントへ送る主ボタンが出続ける（#1280）
+  it("手作業Issue（71.manual-step）では表示しない", () => {
+    expect(canStartImplementation(makeIssue([MANUAL_STEP_LABEL]))).toBe(false);
+  });
+
+  it("closedなIssueでは表示しない", () => {
+    expect(canStartImplementation({ ...makeIssue([]), state: "closed" })).toBe(false);
   });
 });

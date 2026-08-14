@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import type {
-  OpenPullRequest,
+  PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
   PullRequestEvent,
 } from "@/types/pull-request";
 
-function makePullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequest {
+function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
     id: "guchi-apps/issue-deck#42",
     repositoryFullName: "guchi-apps/issue-deck",
@@ -19,6 +19,8 @@ function makePullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequ
     htmlUrl: "https://github.com/guchi-apps/issue-deck/pull/42",
     authorLogin: "claude",
     draft: false,
+    state: "open",
+    merged: false,
     baseRef: "develop",
     headRef: "issue-1087",
     kind: "issue",
@@ -48,6 +50,7 @@ function makeEvent(overrides: Partial<PullRequestEvent> = {}): PullRequestEvent 
 function makeDetail(overrides: Partial<PullRequestDetailData> = {}): PullRequestDetailData {
   return {
     id: "guchi-apps/issue-deck#42",
+    summary: makePullRequest(),
     body: "## 実装内容\n\nPR詳細ペインを追加した。",
     additions: 120,
     deletions: 8,
@@ -61,7 +64,7 @@ function makeDetail(overrides: Partial<PullRequestDetailData> = {}): PullRequest
 
 function renderDetail(
   overrides: Partial<{
-    pullRequest: OpenPullRequest | null;
+    pullRequest: PullRequestSummary | null;
     detail: PullRequestDetailData | null;
     isLoading: boolean;
     error: string | null;
@@ -150,5 +153,40 @@ describe("PullRequestDetail", () => {
   it("取得に失敗したときはエラーを表示する", () => {
     renderDetail({ detail: null, error: "リクエストに失敗しました (502)" });
     expect(screen.getByText("リクエストに失敗しました (502)")).toBeTruthy();
+  });
+
+  // 画面内のリンクからは一覧に載っていないPR（マージ済み・クローズ済み）も開ける（#1260）
+  it("マージ済みPRはその旨を出し、マージボタンを出さない", () => {
+    renderDetail({
+      pullRequest: makePullRequest({ state: "closed", merged: true }),
+      detail: makeDetail({ mergeable: null }),
+    });
+    expect(screen.getByText("マージ済み")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  it("マージされずクローズされたPRはその旨を出し、マージボタンを出さない", () => {
+    renderDetail({
+      pullRequest: makePullRequest({ state: "closed", merged: false }),
+      detail: makeDetail({ mergeable: null }),
+    });
+    expect(screen.getByText("クローズ済み")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  it("summaryが未取得のうちは読み込み中として見せる（PRを選ぶ促しは出さない）", () => {
+    renderDetail({ pullRequest: null, detail: null, isLoading: true });
+    expect(screen.getByText("読み込み中...")).toBeTruthy();
+    expect(screen.queryByText("PRを選ぶと本文とコメントを表示します。")).toBeNull();
+  });
+
+  it("summaryを取得できなかった場合はエラーを表示する", () => {
+    renderDetail({
+      pullRequest: null,
+      detail: null,
+      error: "このPull Requestは見つかりませんでした",
+    });
+    expect(screen.getByText("Pull Requestを開けませんでした")).toBeTruthy();
+    expect(screen.getByText("このPull Requestは見つかりませんでした")).toBeTruthy();
   });
 });

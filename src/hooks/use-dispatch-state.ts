@@ -7,6 +7,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
@@ -23,6 +24,11 @@ import {
 export type DispatchState = {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
+  /**
+   * 起動後のtmuxセッション（#1217）。APIは以前から返していたが画面へ出していなかった。
+   * Issueの実行先の解決（#1262・`resolveIssueExecutionTarget`）がこれを使う。
+   */
+  sessions: DispatchSessionView[];
   concurrency: number;
 };
 
@@ -40,6 +46,13 @@ async function readErrorMessage(res: Response): Promise<string> {
   // APIは拒否理由を利用者向けの文言で返す（#1179）。そのまま出すのが最も情報量が多い
   return json.message ?? `リクエストに失敗しました (${res.status})`;
 }
+
+/**
+ * `useDispatchState`の戻り値。**同じ画面で複数のコンポーネントが必要とする場合は、
+ * 親で1回だけ呼んでこの型で配る**（#1262）。取得口を増やすと同じ画面のためにポーリングが
+ * 何本も走る。
+ */
+export type DispatchStateHandle = ReturnType<typeof useDispatchState>;
 
 export function useDispatchState(enabled: boolean) {
   const [state, setState] = useState<DispatchState | null>(null);
@@ -160,6 +173,7 @@ export function useDispatchState(enabled: boolean) {
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
+    sessions: state?.sessions ?? [],
     concurrency: state?.concurrency ?? null,
     error,
     setError,

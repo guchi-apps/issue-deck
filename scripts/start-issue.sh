@@ -80,6 +80,12 @@ source "$ROOT/scripts/lib/progress-report.sh"
 # 個人設定・共有知識がメインPCとサブPCで取り残されていないかの警告（#1190）。
 # shellcheck source=scripts/lib/personal-config-sync.sh
 source "$ROOT/scripts/lib/personal-config-sync.sh"
+# 本体の作業ツリーの scripts/ が origin/develop より古いままになっていないかの警告（#1274）。
+# shellcheck source=scripts/lib/launcher-scripts-sync.sh
+source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
+# 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
+# shellcheck source=scripts/lib/prompt-context.sh
+source "$ROOT/scripts/lib/prompt-context.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -159,6 +165,10 @@ done
 # 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
 # 取り込めていない場合に警告する（#1190）。起動は止めない。
 warn_personal_config_drift
+
+# 起動スクリプト・フックの実体は本体の作業ツリーにあり、worktreeを作り直しても新しくならない。
+# developへ入った修正が反映されていない場合に警告する（#1274）。起動は止めない。
+warn_launcher_scripts_stale "$ROOT"
 
 mkdir -p "$PROMPT_DIR"
 
@@ -396,11 +406,15 @@ prepare_issue() {
   (cd "$WORKTREE_DIR" && pnpm install)
 
   echo "#$n: 起動用プロンプトを生成しています..."
+  # 起動プロンプトへ差し込む「今の状況」（#1267）。集めるだけで判断はしない
+  local issue_relations concurrent_work
+  issue_relations="$(prompt_context_relations "guchi-apps/issue-deck" "$n")"
+  concurrent_work="$(prompt_context_concurrent "guchi-apps/issue-deck" "$n" "$WORKTREE_DIR" develop)"
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
   local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -409,6 +423,8 @@ issue_json_path, template_path, dev_port, sslip_url, dev_log = sys.argv[1], sys.
 # 嘘にならないよう、この値で文面を分ける。
 prepare_only = sys.argv[6] == "1"
 worktree_dir = sys.argv[7]
+issue_relations = sys.argv[8]
+concurrent_work = sys.argv[9]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -418,10 +434,16 @@ with open(template_path, encoding="utf-8") as f:
 label_names = {l["name"] for l in issue.get("labels", [])}
 labels = ", ".join(sorted(label_names)) or "(なし)"
 
+# 別端末から見るための案内。**メインPC（WSL）はsslip.io、サブPCはtailscale serve**（#1265）で
+# 経路が違うため、決め打ちで書かない。tailnetのURLは起動時にしか分からない（ホスト名が
+# ホスト依存）ので、起動ログの行を見るよう促す。
 if sslip_url:
     sslip_note = f"（スマホ等、同一LAN上の別端末から確認する場合は`{sslip_url}`を使う）"
 else:
-    sslip_note = ""
+    sslip_note = (
+        "（別端末から確認する場合は、起動ログの「開発サーバーをtailnetへ公開しました」の行に"
+        "出ているtailnetのURLを使う。出ていなければこのホストからは公開できていない）"
+    )
 
 if prepare_only:
     dev_server_state = (
@@ -444,7 +466,8 @@ if "23.preview-required" in label_names:
         "PRを作成する**前**に次の手順を行ってください。\n\n"
         "1. `http://localhost:{port}` で実際の画面を確認する"
         "（{dev_server_state}）{sslip_note}\n"
-        "2. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
+        "2. 確認した画面・操作手順と**別端末から開けるURL**をユーザーに提示し、問題ないか"
+        "明示的な承認を得る（ユーザーは外出先のスマホから開くため、`localhost`のURLでは届かない）\n"
         "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
         "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
     ).format(port=dev_port, sslip_note=sslip_note, dev_server_state=dev_server_state)
@@ -493,6 +516,8 @@ result = (
     .replace("{{ISSUE_LABELS}}", labels)
     .replace("{{ISSUE_BODY}}", issue.get("body") or "(本文なし)")
     .replace("{{ISSUE_COMMENTS}}", comment_text)
+    .replace("{{ISSUE_RELATIONS}}", issue_relations or "（取得できませんでした）")
+    .replace("{{CONCURRENT_WORK}}", concurrent_work or "（取得できませんでした）")
     .replace("{{DEV_PORT}}", dev_port)
     .replace("{{PREVIEW_INSTRUCTIONS}}", preview_instructions)
     .replace("{{SCREENSHOT_INSTRUCTIONS}}", screenshot_instructions)

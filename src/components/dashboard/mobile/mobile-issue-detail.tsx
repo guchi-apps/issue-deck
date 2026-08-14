@@ -47,6 +47,20 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
+import {
+  findDispatchJobForIssue,
+  isActiveDispatchJobStatus,
+  resolveDefaultDispatchHost,
+} from "@/lib/dispatch/dispatch-job";
+import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import {
+  LocalSessionApprovalNotice,
+  LocalSessionCommentNotice,
+} from "@/components/dashboard/local-session-notice";
+import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
+import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
+import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -72,6 +86,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   approveCommentBody,
+  canCompleteManualStep,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -160,9 +175,37 @@ export function MobileIssueDetail({
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
-  const startDisabledReason = startImplementationDisabledReason(
+  // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
+  // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
+  const actionsDisabledReason = startImplementationDisabledReason(
     repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
   );
+  // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
+  const dispatch = useDispatchState(true);
+  const dispatchJob = findDispatchJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const defaultDispatchHost = resolveDefaultDispatchHost({
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+  });
+  const startLabel = defaultDispatchHost ? `${defaultDispatchHost}で開始` : "GitHub Actionsで開始";
+  // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
+  const issueSession = findSessionForIssue(
+    dispatch.sessions,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const executionTarget = resolveIssueExecutionTarget({
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+    labels: issue.labels,
+    jobs: dispatch.jobs,
+    sessions: dispatch.sessions,
+  });
   const {
     createComment,
     updateComment,
@@ -432,12 +475,18 @@ export function MobileIssueDetail({
             /* スマホではヘッダーに置けるのがこの▶だけなので、実行先（GitHub Actions／
                サブPC）もここで選ばせる（#1248） */
             includeDispatchTargets
+            dispatch={dispatch}
+            actionsDisabledReason={actionsDisabledReason}
+            comments={comments}
+            subIssueRelations={subIssueRelations}
+            /* `localSessionCommand`は渡さない。ターミナルへ貼るためのものなので、
+               スマホでコピーできても貼る先が無い（#1263） */
             renderTrigger={(isSubmitting) => (
               <button
                 type="button"
-                disabled={isSubmitting || startDisabledReason !== null}
-                aria-label="実装を開始"
-                title={startDisabledReason ?? undefined}
+                disabled={isSubmitting}
+                aria-label={startLabel}
+                title={startLabel}
                 className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
               >
                 {isSubmitting ? (
@@ -629,7 +678,12 @@ export function MobileIssueDetail({
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
         </div>
 
-        <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
+        <WorkflowStatusSteps
+          labels={issue.labels}
+          projectStatus={issue.projectStatus}
+          executionTarget={executionTarget}
+        />
+        {issueSession && <IssueSessionStatus session={issueSession} align="start" />}
         <div className="flex flex-wrap items-center gap-2">
           {qaAnswerPending && (
             <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -755,33 +809,36 @@ export function MobileIssueDetail({
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
             includeDispatchTargets
+            dispatch={dispatch}
+            actionsDisabledReason={actionsDisabledReason}
+            comments={comments}
+            subIssueRelations={subIssueRelations}
             renderTrigger={(isSubmitting) => (
-              <Button
-                className="w-full"
-                disabled={isSubmitting || startDisabledReason !== null}
-                title={startDisabledReason ?? undefined}
-              >
+              <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                実装を開始
+                {startLabel}
               </Button>
             )}
           />
         )}
 
-        {/* サブPCへのディスパッチ（#1180）。**「このPC」は出さない。** `issuedeck://`は
-            ブラウザを開いている端末のWindowsに登録されたハンドラを踏むもので、スマホからは
-            押しても何も起きない。サブPCの申告が無ければこの導線ごと出ない */}
+        {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
+            兼ねる。サブPCの申告が無ければこの導線ごと出ない */}
         <StartLocalSessionButton
           issue={issue}
           onIssueUpdated={onIssueUpdated}
-          onFirstLaunch={() => undefined}
-          hasLocalStartScript={
-            repositories.find((repo) => repo.fullName === issue.repositoryFullName)
-              ?.hasLocalStartScript
-          }
-          includeLocalTarget={false}
           fullWidth
+          dispatch={dispatch}
         />
+
+        {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
+        {canCompleteManualStep(issue) && (
+          <ManualStepPanel
+            isSubmitting={isSubmitting}
+            onComplete={() => handleClose("completed")}
+            onSkip={() => handleClose("not_planned")}
+          />
+        )}
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
@@ -812,6 +869,11 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            localSessionNotice={
+              executionTarget.expectsActionsRun ? undefined : (
+                <LocalSessionApprovalNotice session={issueSession} />
+              )
+            }
             mergeApprovalPending={isMergeApprovalPending(issue, comments)}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
@@ -836,6 +898,11 @@ export function MobileIssueDetail({
           />
 
           <div className="mt-4 flex flex-col gap-2">
+            {/* PC側と同じ理由でここにも出す（#1287）。外出先から書く経路こそ、
+                届いていないことに気づきにくい */}
+            {!executionTarget.expectsActionsRun && (
+              <LocalSessionCommentNotice session={issueSession} />
+            )}
             <MentionTextarea
               placeholder="コメントを追加..."
               className="min-h-20"

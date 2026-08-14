@@ -74,8 +74,9 @@ fi
 #
 # 判定・組み立て・シェルへ返す値の生成をすべてpython3側に寄せる。フックのJSONを
 # シェルでパースする（grep -o 等）と、値に引用符や改行が入った時点で壊れるため。
-# 標準出力の1行目を「送るか（`send <イベント名>` / `skip`）」、2行目以降をpayloadとして返す。
-# イベント名を返すのは、シェル側がセッションの状態として記録するため（#1256）。
+# 標準出力の1行目を「送るか（`send <イベント名> [remote-controlのURL]` / `skip`）」、
+# 2行目以降をpayloadとして返す。イベント名を返すのはシェル側がセッションの状態として記録する
+# ため（#1256）、URLを返すのはissue-deckの画面へ渡すため（#1264）。
 # ---------------------------------------------------------------------------
 export HOOK_JSON
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
@@ -83,6 +84,9 @@ export NOTIFY_REPO_NAME="$REPO_NAME"
 export NOTIFY_REPO_SLUG="$REPO_SLUG"
 export NOTIFY_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}"
 export NOTIFY_CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
+# tailnetへ公開した開発サーバー（#1265）。run-issue-session.shがexportしている。
+# 入力待ちの通知に載せると、気づいた側がその場で画面を開ける
+export NOTIFY_PREVIEW_URL="${ISSUE_DECK_PREVIEW_URL:-}"
 
 # tmuxのセッション名。`tmux attach -t <名前>` でそのまま繋げるよう、通知に載せる。
 # tmuxの外で起動した場合は空になる。
@@ -119,16 +123,21 @@ notification_type = hook.get("notification_type", "")
 #
 # `state_event` はシェル側が状態ファイルへ記録する値（#1256）。回収の判定はこの2値だけを見て
 # 「人の入力待ちか、応答が終わっているか」を決めるため、表示用のラベルとは別に返す。
+#
+# `activity` はissue-deckの画面へ渡す値（#1264）。状態ファイル用の`state_event`と別に持つのは、
+# 片方がホスト内の回収判定、もう片方が画面表示という別々の用途のため。
 if event == "Stop":
     emoji = "✅"
     color = "#57f287"
     label = "応答終了"
     state_event = "Stop"
+    activity = "responded"
 elif event == "Notification" and notification_type == "permission_prompt":
     emoji = "🙋"
     color = "#faa61a"
     label = "入力待ち"
     state_event = "permission_prompt"
+    activity = "waiting_input"
 else:
     print("skip")
     sys.exit(0)
@@ -213,6 +222,13 @@ if host_name:
 fields.append({"name": "Event", "value": label, "inline": True})
 if tmux_session:
     fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
+preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
+if preview_url:
+    # 1フィールド1リンクを守る（`signaly_link`のコメント参照）
+    fields.append(
+        {"name": "開発環境", "value": signaly_link("画面を開く", preview_url), "inline": False}
+    )
+
 if remote_url:
     fields.append({
         "name": "Remote Control",
@@ -225,7 +241,7 @@ if remote_url:
     # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
     fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
 
-print("send", state_event)
+print("send", state_event, activity, remote_url or "-")
 print(json.dumps({"title": title, "color": color, "fields": fields}))
 PY
 )"
@@ -236,23 +252,55 @@ if [[ -z "$result" ]]; then
 fi
 
 decision_line="$(printf '%s' "$result" | head -1)"
-decision="${decision_line%% *}"
+# 形式: `send <状態イベント> <activity> <remote-controlのURL または "-">`
+read -r decision STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 if [[ "$decision" != "send" ]]; then
   exit 0
 fi
+[[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
 
 # セッションの状態を記録する（#1256）。**送信より先に行う。**
 # webhookが未設定でも・Signalyが落ちていても、回収の判定材料はホストに残る必要がある。
 # tmuxの外で起動したセッション（セッション名が空）は回収の対象外なので記録しない。
-STATE_EVENT=""
-if [[ "$decision_line" == *" "* ]]; then
-  STATE_EVENT="${decision_line#* }"
-fi
 if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
   declare -F session_state_record_event >/dev/null 2>&1; then
   session_state_record_event "$NOTIFY_TMUX_SESSION" "$STATE_EVENT" ||
     echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
 fi
+
+# issue-deckの画面へも同じ様子を渡す（#1264）。**Signalyへの通知だけだと、通知を消した時点で
+# 承認待ちであることを知る手段が無くなる。** 宛先と鍵はpollerと同じ`dispatch.env`から読む。
+# 未設定・失敗のいずれでも実装は止めない（このスクリプトの約束）。
+report_activity_to_issue_deck() {
+  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
+  [[ -f "$env_file" ]] || return 0
+  local app_base_url dispatch_secret
+  # shellcheck disable=SC1090
+  app_base_url="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${APP_BASE_URL:-}")"
+  # shellcheck disable=SC1090
+  dispatch_secret="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${DISPATCH_SECRET:-}")"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$REPO_SLUG" && -n "$ISSUE_NUMBER" ]] || return 0
+
+  local body
+  body="$(ACTIVITY="$ACTIVITY" REMOTE_URL="$REMOTE_URL" REPO_SLUG="$REPO_SLUG" \
+    ISSUE_NUMBER="$ISSUE_NUMBER" python3 -c '
+import json, os
+print(json.dumps({
+    "repository": os.environ["REPO_SLUG"],
+    "issue": int(os.environ["ISSUE_NUMBER"]),
+    "activity": os.environ["ACTIVITY"],
+    "remoteControlUrl": os.environ.get("REMOTE_URL") or None,
+}))' 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 0
+
+  curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}/api/dispatch/sessions/activity" >/dev/null 2>&1 ||
+    echo "session-notify: issue-deckへの様子の報告に失敗しました（実装は続行します）" >&2
+}
+report_activity_to_issue_deck
 
 if [[ -z "$WEBHOOK_URL" ]]; then
   # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。

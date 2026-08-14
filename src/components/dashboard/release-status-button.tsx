@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Rocket } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import {
   AlertDialog,
@@ -247,7 +248,11 @@ export function ReleaseStatusButton({
                       )}
                     </span>
                   </div>
-                  <ReleaseProgress status={releaseStatus} compact />
+                  <ReleaseProgress
+                    status={releaseStatus}
+                    compact
+                    repoFullName={releaseRepoFullName}
+                  />
                   <Button
                     size="sm"
                     variant="outline"
@@ -278,14 +283,9 @@ export function ReleaseStatusButton({
               <ul className="flex flex-col gap-1 text-xs">
                 {pendingReleaseIssues.map((issue) => (
                   <li key={issue.id}>
-                    <a
-                      href={issue.htmlUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
+                    <GithubReferenceLink href={issue.htmlUrl} className="hover:underline">
                       #{issue.number} {issue.title}
-                    </a>
+                    </GithubReferenceLink>
                   </li>
                 ))}
               </ul>
@@ -303,23 +303,16 @@ export function ReleaseStatusButton({
               <ul className="flex flex-col gap-1 text-xs">
                 {otherPullRequestsWithIssue.map((pr) => (
                   <li key={pr.number} className="flex flex-col gap-0.5">
-                    <a
-                      href={pr.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
+                    <GithubReferenceLink href={pr.url} className="hover:underline">
                       #{pr.number} {pr.title}
-                    </a>
+                    </GithubReferenceLink>
                     {pr.linkedIssue ? (
-                      <a
+                      <GithubReferenceLink
                         href={pr.linkedIssue.htmlUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="pl-3 text-muted-foreground hover:underline"
                       >
                         → #{pr.linkedIssue.number} {pr.linkedIssue.title}
-                      </a>
+                      </GithubReferenceLink>
                     ) : (
                       <span className="pl-3 text-muted-foreground">
                         紐づくIssueが見つかりませんでした（未起票の可能性があります）

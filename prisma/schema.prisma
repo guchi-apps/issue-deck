@@ -12,14 +12,14 @@ datasource db {
 // SupabaseのユーザーID（auth.users.id）を外部キーとして紐付ける。
 
 model User {
-  id                String  @id @default(cuid())
-  supabaseUserId    String  @unique
-  githubUserId      Int     @unique
-  githubLogin       String  @unique
-  name              String?
-  email             String?
-  image             String?
-  githubAccessToken String? @db.Text
+  id                 String  @id @default(cuid())
+  supabaseUserId     String  @unique
+  githubUserId       Int     @unique
+  githubLogin        String  @unique
+  name               String?
+  email              String?
+  image              String?
+  githubAccessToken  String? @db.Text
   // 失効時に自動延長を試みるためのrefresh_token（githubAccessToken同様に暗号化して保存）。
   // Supabase Auth側の設定によっては払い出されず、その場合はnullのまま（現状どおり再ログイン導線にフォールバック）
   githubRefreshToken String? @db.Text
@@ -82,24 +82,24 @@ model UserInstallation {
 }
 
 model Repository {
-  id                 String    @id @default(cuid())
-  githubRepositoryId Int       @unique
-  installationId     String
-  ownerLogin         String
-  name               String
-  fullName           String
-  private            Boolean
-  htmlUrl            String
-  archived           Boolean   @default(false)
-  defaultBranch      String
+  id                  String    @id @default(cuid())
+  githubRepositoryId  Int       @unique
+  installationId      String
+  ownerLogin          String
+  name                String
+  fullName            String
+  private             Boolean
+  htmlUrl             String
+  archived            Boolean   @default(false)
+  defaultBranch       String
   // claude-issue-dispatch.ymlの存在有無による近似的な対応判定（#720）。DBに保存し、
   // リポジトリ同期のタイミング（GitHub Appインストール時・リポジトリ再同期時）で更新する。
-  hasClaudeWorkflow  Boolean   @default(false)
+  hasClaudeWorkflow   Boolean   @default(false)
   // ローカル起動プロトコルへの適合（#1073）。scripts/start-issue.sh 冒頭のマーカー行で判定する。
   // hasClaudeWorkflowとは軸が違う（あちらはActions側の対応）。導入順が「ワークフロー→ローカル」に
   // なるため、片方だけ対応済みという状態が普通に起きる。
-  hasLocalStartScript Boolean  @default(false)
-  lastSyncedAt       DateTime?
+  hasLocalStartScript Boolean   @default(false)
+  lastSyncedAt        DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,17 +307,17 @@ model GithubApiUsageBucket {
 // claudeModel: claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの値。
 // "auto"の場合は--modelを付与せずclaude-code-action側のデフォルトモデルに委ねる（#622）。
 model AppSetting {
-  id             Int      @id @default(1)
-  autoRetryLimit Int      @default(0)
-  claudeModel    String   @default("auto")
+  id                  Int      @id @default(1)
+  autoRetryLimit      Int      @default(0)
+  claudeModel         String   @default("auto")
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
-  claudeModelAssist String @default("auto")
+  claudeModelAssist   String   @default("auto")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の2は#1177の実測
   // （Athlon 200GE 2C/4Tで並行3本が上限、実運用の快適さでは2本）にもとづく。
-  dispatchConcurrency Int  @default(2)
-  updatedAt      DateTime @updatedAt
+  dispatchConcurrency Int      @default(2)
+  updatedAt           DateTime @updatedAt
 }
 
 // Fine-grained PAT（例: secrets.WORKFLOW_PAT）等、有効期限を追跡したいトークンの管理台帳。
@@ -401,20 +401,25 @@ model DispatchJob {
 // `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
 // 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
 model DispatchHost {
-  id              String   @id @default(cuid())
-  name            String   @unique
+  id                String   @id @default(cuid())
+  name              String   @unique
   // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
   // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
-  repositories    String   @db.Text
+  repositories      String   @db.Text
   // ホストの受け口が扱えるローカル起動プロトコルの上限版数
   // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
-  contractVersion Int?
+  contractVersion   Int?
   // ホスト側が申告する同時実行数の上限。AppSetting.dispatchConcurrencyとminを取る
-  maxConcurrency  Int?
+  maxConcurrency    Int?
   // pollerのバージョン。受け口が古いまま動いているかの手掛かり
-  agentVersion    String?
+  agentVersion      String?
+  // スクリーンショットを撮れるか（#1268）。Playwrightのブラウザ本体が入っているかで判定する。
+  // **`null`は「申告していない」**（古いpoller）で、`false`（撮れない）とは区別する。
+  // 無人実行では依存の追加をその場で確認する相手がいないため、撮れないホストで
+  // `24.screenshot-required`を選ばせると必ず詰まる
+  screenshotCapable Boolean?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
-  lastSeenAt      DateTime
+  lastSeenAt        DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -430,7 +435,7 @@ model DispatchHost {
 // 文字列から状態を推定する方式は既に実地で誤判定している（#1219・#1223）。入力待ち・完了・停滞は
 // Claude Codeのフックが担当し（#1219）、こちらはフックが飛ばない「プロセスの死・消失」だけを見る。
 model DispatchSession {
-  id                 String               @id @default(cuid())
+  id                 String                @id @default(cuid())
   // 報告してきたホスト名（DispatchHost.nameと対応）
   host               String
   tmuxSessionName    String
@@ -446,6 +451,20 @@ model DispatchSession {
   escalatedState     DispatchSessionState?
   escalatedAt        DateTime?
 
+  // セッション自身がフック（#1219）から報告してくる直近の様子（#1264）。pollerが見ている
+  // tmuxのメタデータでは分からない「人の入力を待っているか」を、画面へ出すために持つ。
+  //
+  // **古い値が残り続けないことが前提。** WAITING_INPUTはStopフック（RESPONDEDへ遷移）か、
+  // セッションの消滅（pollerの報告でEXITED/FAILED/GONEになる）のどちらかで必ず解ける。
+  activity         DispatchSessionActivity?
+  activityAt       DateTime?
+  // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので、
+  // 通知（Signaly）だけでなく画面にも出す。取れないこともある（Claude Codeの内部ファイル依存）
+  remoteControlUrl String?                  @db.Text
+  // tailscale serveでtailnetへ出した開発サーバーのURL（#1265）。スマホから画面を見る唯一の
+  // 出口なので画面へ出す。`23.preview-required`が付いたセッションでだけ埋まる
+  previewUrl       String?                  @db.Text
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -458,6 +477,18 @@ model DispatchSession {
 //
 // **引き上げるのはFAILEDだけ。** GONEは人が作業を終えて畳んだ場合と区別が付かず、むしろ
 // そちらの方が多いため、鳴らすとノイズになって本当の異常終了が埋もれる。
+// セッション自身がフックから報告してくる様子（#1264）。
+//
+// WAITING_INPUT=承認プロンプト・AskUserQuestionで人の入力を待っている /
+// RESPONDED=応答が終わった（無人で回すセッションでは実質「作業完了」）。
+//
+// **停滞・完了の判定には使わない。** これは「今この瞬間セッションが何をしているか」で、
+// 実装の進捗はProject Statusが唯一の正（docs/progress-status-architecture.md）。
+enum DispatchSessionActivity {
+  WAITING_INPUT
+  RESPONDED
+}
+
 enum DispatchSessionState {
   ALIVE
   EXITED

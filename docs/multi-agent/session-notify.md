@@ -69,7 +69,8 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
 ## 通知の中身
 
 載せるのは Issue番号・リポジトリ名・ホスト名・イベント種別・`tmux attach`のコマンド・
-IssueのURL・Remote ControlのURL（取れたときだけ）。
+IssueのURL・Remote ControlのURL（取れたときだけ）・**開発環境のURL**（#1265。
+`23.preview-required`のセッションで`tailscale serve`が通っているときだけ）。
 
 **応答テキスト（`Stop`フックの`last_assistant_message`）は載せない。** 応答本文には
 Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。それを外部サービスである
@@ -127,7 +128,7 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
 
 | 通知 | 1Passwordのフィールド | 環境変数 | 設定場所 |
 | --- | --- | --- | --- |
-| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | `.github/ci.env.tpl`・`.github/deploy.env.tpl` |
+| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | GitHubのrepository secret（正は1Password。対応は`.github/secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh`。#1302） |
 | セッション状態 | `apps/issue-deck` の `session-webhook-url` | `SESSION_NOTIFY_WEBHOOK_URL` | `~/.config/issue-deck/notify.env` |
 
 分ける理由。
@@ -204,6 +205,38 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 フック設定に書くのは「`session-notify.sh`を呼ぶ」ことだけで、どのイベントを送るかの判定は
 スクリプト側に置いている。判定を2箇所に分けると、必ずどちらかが古くなる。
 
+## 実際に動くのは本体の作業ツリーのスクリプト（#1274）
+
+**フックが呼ぶ`session-notify.sh`は、worktreeのコピーではなく本体リポジトリの作業ツリー
+（`~/apps/issue-deck/scripts/`）のものである。** 生成されるフック設定の`command`は絶対パスで、
+`run-issue-session.sh`自身の置き場所（`$SCRIPT_DIR`）を指す。`start-issue.sh`は本体の
+`scripts/`から`run-issue-session.sh`を呼ぶため、経路の全体がこうなる。
+
+| 実行されるもの | どこから |
+| --- | --- |
+| `start-issue.sh` | 本体の作業ツリー |
+| `run-issue-session.sh` | 本体の作業ツリー（`start-issue.sh`が絶対パスで呼ぶ） |
+| `session-notify.sh` | 本体の作業ツリー（フック設定の`command`が絶対パス） |
+| 実装対象のコード | worktree（`origin/develop`から作られる） |
+
+ここに**worktreeだけが新しくなる**という非対称がある。`start-issue.sh`は起動のたびに
+`git fetch origin develop`してからworktreeを作るが、「本体の作業ツリーには一切触れない」ことを
+約束しているのでmergeはしない。**本体の作業ツリーを新しくするのは人の`git pull`だけ。**
+
+そのため`session-notify.sh`をdevelopへマージしても、pullするまで実際に飛ぶ通知は古いままになる。
+#1274はこれを踏んだもので、#1247でリンク書式を直した数時間後の通知が、依然として旧書式
+（`Links`フィールドに生URL）で届いていた。**スクリプト側には何の兆候も出ない**ため、直したはずの
+不具合を再度Issueとして起票することになる。
+
+対策として、起動時に本体の`scripts/`が`origin/develop`と違っていれば警告を出す
+（[scripts/lib/launcher-scripts-sync.sh](../../scripts/lib/launcher-scripts-sync.sh)）。
+`start-issue.sh`・`generic-start-issue.sh`の両方から呼ぶ。**警告だけで、起動は止めないし
+自動でpullもしない**（本体の作業ツリーに触れないという約束を、起動スクリプト側から破らない）。
+`ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK=1`で黙らせられる。
+
+セッション通知に限らず、`scripts/`配下を直したときは**本体の作業ツリーへpullするまで反映されない**
+と考えること。worktreeを作り直しても新しくならない。
+
 ## 通知の障害でセッションを止めない
 
 通知経路の障害で実装が止まるのは本末転倒なので、`session-notify.sh`は**何が起きても
@@ -245,9 +278,68 @@ tmuxのスクロールバックに残る。
 - 実装の進捗はProject Statusが唯一の正として持つ
   （[progress-status-architecture.md](../progress-status-architecture.md)）
 
-「入力待ち」はそのどちらでもない一時的な状態で、issue-deckのDBへ入れると、
-セッションが落ちたときに誰も消せない古い状態が残る。通知として飛ばして終わらせるのが
-一番安い。issue-deckの画面に出す必要が実運用で出てきたら、そのとき改めて設計する。
+## 画面にも同じ様子を渡す（#1264）
+
+当初この節は「『入力待ち』はissue-deckのDBへ入れると、セッションが落ちたときに誰も消せない
+古い状態が残る。通知として飛ばして終わらせるのが一番安い」としていた。**#1264で必要が出たので
+設計し直した。**
+
+必要になった理由は、**通知を消した時点で承認待ちであることを知る手段が無くなる**こと。
+サブPCで`21.plan-required`のIssueを起こすと計画はセッション内のPlan modeで止まるが、
+issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions側の計画提示ステップだけ）、
+唯一の合図がプッシュ通知だった。
+
+そこで`session-notify.sh`が、Signalyへの通知と同じタイミングで
+`POST /api/dispatch/sessions/activity`へも投げる。
+
+| 送るもの | 値 |
+| --- | --- |
+| `repository` / `issue` | 引数で渡っているもの |
+| `activity` | `waiting_input`（`permission_prompt`）/ `responded`（`Stop`） |
+| `remoteControlUrl` | 取れたときだけ。受け口は**`https://claude.ai/`配下しか受け付けない** |
+| `previewUrl` | セッション起動時に`run-issue-session.sh`が別途1回だけ送る（#1265）。受け口は**tailnet内（`*.ts.net`）のhttp URLしか受け付けない** |
+
+宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）はpollerと同じ`~/.config/issue-deck/dispatch.env`
+から読む。**未設定でも失敗しても実装は止めない**（このスクリプトの約束）。設定していない
+ホストでは通知だけが飛び、画面に出ないだけになる。
+
+### 古い「入力待ち」が残らない担保
+
+当初の懸念（誰も消せない古い状態が残る）は、解ける経路を2つ持たせることで潰している。
+
+| 経路 | 何が起きるか |
+| --- | --- |
+| `Stop`フック | `RESPONDED`へ遷移する。応答が終われば必ず飛ぶ |
+| pollerの1巡（既定60秒） | セッションが消えれば`EXITED`/`FAILED`/`GONE`になる |
+
+**画面側は状態（poller）を様子（フック）より優先する**（`summarizeIssueSession`）。
+セッションが落ちていれば、`WAITING_INPUT`の報告が残っていても「入力待ち」とは出さない。
+入力を待つ相手がもういないため。
+
+### 受け口はpollerの一括報告と分ける
+
+pollerが叩く`POST /api/dispatch/sessions`は「そのホストで今見えているセッションの全て」を
+前提に、含まれない行を`GONE`へ倒す。**フックの1件を同じ経路へ流すと、他のセッションが全部
+消えたことになる**ため、`/activity`を別に置いている。
+
+`/activity`は**行が無ければ何もしない**（`updated: 0`を返して200）。フックはpollerより先に
+飛びうるが、行を作るとフック側が知らない`host`・`tmuxSessionName`に嘘の値が入る。1巡待てば
+pollerが作るので、取りこぼしても次のフックで載る。
+
+### 「ここへ書いても届かない」を、承認欄だけでなくコメント欄にも出す（#1287）
+
+`11.local`が付いている間、Issueへ何を書いても無人実行は反応せず、走っているClaude Code自身にも
+コメントを取りに行く仕組みは無い。#1264はこれを**承認欄**（`LocalSessionApprovalNotice`）に
+出したが、**承認欄は承認待ちのときしか描かれない**。実装中に追加の指示や訂正を書く方がむしろ
+多く、そちらは何の合図も無いまま埋もれる。そこでコメント入力欄にも同じ案内を置く
+（`LocalSessionCommentNotice`）。
+
+- 枠と「Remote Controlで開く」の導線は`local-session-notice.tsx`の内部コンポーネントで共有し、
+  **文面だけを分ける**。片方だけ直して食い違うのを防ぐ
+- 出す条件は承認欄と同じ`executionTarget.expectsActionsRun === false`。Actionsで走っている
+  Issueではコメントが実際に効くので出さない
+- **セッションが見つからなくても案内自体は出す。** 届かないことは`11.local`が決めており、
+  セッションの記録が取れているかとは独立している。取れていないときはリンクだけが消える
 
 ## 既知の制約
 

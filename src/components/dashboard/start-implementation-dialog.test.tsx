@@ -50,6 +50,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     contractVersion: 2,
     online: true,
     lastSeenAt: "2026-08-14T00:00:00Z",
+    screenshotCapable: true,
     ...overrides,
   };
 }
@@ -85,7 +86,14 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   } as Issue;
 }
 
-function renderDialog(props: { includeDispatchTargets?: boolean; issue?: Issue } = {}) {
+function renderDialog(
+  props: {
+    includeDispatchTargets?: boolean;
+    issue?: Issue;
+    actionsDisabledReason?: string | null;
+    localSessionCommand?: string | null;
+  } = {},
+) {
   return render(
     <StartImplementationDialog
       issue={props.issue ?? makeIssue()}
@@ -94,6 +102,8 @@ function renderDialog(props: { includeDispatchTargets?: boolean; issue?: Issue }
       open
       onOpenChange={vi.fn()}
       includeDispatchTargets={props.includeDispatchTargets}
+      actionsDisabledReason={props.actionsDisabledReason ?? null}
+      localSessionCommand={props.localSessionCommand ?? null}
     />,
   );
 }
@@ -130,20 +140,119 @@ describe("StartImplementationDialog", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it("申告しているホストが無ければ、実行先を選ばせる設定でも選択欄を出さない", () => {
+  it("申告しているホストが無くても、手元へ貼る出口があるので選択欄は出す（#1263）", () => {
     renderDialog({ includeDispatchTargets: true });
 
-    expect(screen.queryByText("実行先")).toBeNull();
+    expect(screen.queryByText("実行先")).not.toBeNull();
+    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ })).not.toBeNull();
   });
 
-  it("申告があれば実行先を選べ、既定はGitHub Actionsのまま", () => {
+  it("申告があれば実行先を選べ、既定はサブPC（#1262）", () => {
     dispatchState.hosts = [makeHost()];
+    renderDialog({ includeDispatchTargets: true });
+
+    expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+  });
+
+  it("選べるホストが無ければ既定はGitHub Actionsへ落ちる（#1262）", () => {
+    dispatchState.hosts = [makeHost({ online: false })];
     renderDialog({ includeDispatchTargets: true });
 
     expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
-    expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("Actionsが使えないリポジトリでも、トリガーは押せてサブPCで開始できる（#1262）", async () => {
+    dispatchState.hosts = [makeHost()];
+    renderDialog({
+      includeDispatchTargets: true,
+      actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
+    });
+
+    // Actionsの選択肢だけが落ち、既定のサブPCでそのまま開始できる
+    expect((screen.getByRole("radio", { name: /GitHub Actions/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    clickStart();
+
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("Actionsを選んでいて使えない場合は開始できず、理由を出す（#1262）", () => {
+    renderDialog({
+      includeDispatchTargets: true,
+      actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
+    });
+
+    // 理由はGitHub Actionsの選択肢の説明として出る（重複して別行に出さない）
+    expect(screen.getByRole("radio", { name: /issue-deckの自動化workflowが見つかりません/ })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  describe("手元へ貼る出口（#1263）", () => {
+    const writeText = vi.fn();
+
+    beforeEach(() => {
+      writeText.mockReset().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+    });
+
+    it("実装プロンプトをコピーすると、11.localを付け進捗も報告する", async () => {
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }));
+      fireEvent.click(screen.getByRole("button", { name: "コピーする" }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      // ランチャーを通らないので、二重起動の停止と盤面の追従はここで行う
+      await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
+      expect(updateIssue.mock.calls[0][0].labels).toContain(LOCAL_LABEL_NAME);
+      await waitFor(() => expect(setProgressStatus).toHaveBeenCalledTimes(1));
+      expect(createComment).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+      // Issueの中身が入った文面であること
+      expect(writeText.mock.calls[0][0]).toContain("#1248");
+    });
+
+    it("クリップボードが使えない環境ではラベルも進捗も動かさない", async () => {
+      writeText.mockRejectedValue(new Error("denied"));
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }));
+      fireEvent.click(screen.getByRole("button", { name: "コピーする" }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(setProgressStatus).not.toHaveBeenCalled();
+    });
+
+    it("起動コマンドは渡されていなければ選択肢に出さない", () => {
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.queryByRole("radio", { name: /起動コマンドをコピー/ })).toBeNull();
+    });
+
+    it("起動コマンドのコピーでは11.localを付けない（受け口側が同じことをするため）", async () => {
+      renderDialog({ includeDispatchTargets: true, localSessionCommand: "run.sh a b 1" });
+
+      fireEvent.click(screen.getByRole("radio", { name: /起動コマンドをコピー/ }));
+      fireEvent.click(screen.getByRole("button", { name: "コピーする" }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith("run.sh a b 1"));
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(setProgressStatus).not.toHaveBeenCalled();
+    });
   });
 
   it("サブPCを選ぶとジョブを積み、11.localを付け、@claudeコメントは投稿しない", async () => {

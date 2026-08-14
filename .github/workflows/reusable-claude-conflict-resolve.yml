@@ -107,6 +107,16 @@ on:
         required: false
         type: string
         default: ""
+      issue-number:
+        description: >-
+          手動実行(workflow_dispatch)時の対象Issue番号。指定するとそのIssueの
+          develop向けPR1件だけを対象にし、未指定なら従来どおり全OPEN PRを走査する。
+          呼び出し元が自身のworkflow_dispatch入力を渡す(再利用ワークフロー内の
+          inputsコンテキストはworkflow_callのinputsを指し、呼び出し元の
+          workflow_dispatch入力は見えないため。claude-ci-fix.ymlと同じ)。
+        required: false
+        type: string
+        default: ""
 
 jobs:
   detect-conflicts:
@@ -121,13 +131,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
         run: |
           set -e
+          # issue_numberが指定された手動実行(issue-deckの画面のボタン。#1293)では、
+          # そのIssueのdevelop向けPR1件だけを対象にする。押した対象と無関係なPRまで
+          # 解消しにいかないようにするため。
+          if [ -n "${INPUT_ISSUE_NUMBER:-}" ]; then
+            TARGET_HEAD="issue-$INPUT_ISSUE_NUMBER"
+            echo "手動実行のため issue #$INPUT_ISSUE_NUMBER のPR($TARGET_HEAD)のみを対象にします"
           # pull_requestトリガー(opened/reopened)の場合は、トリガー元のPR1件のみを
           # 対象にする(ヘッダのコメント参照、#814)。それ以外(push/schedule/
-          # workflow_dispatch)は従来通りdevelop向けの全OPEN PRを対象にする。
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
+          # 入力なしのworkflow_dispatch)は従来通りdevelop向けの全OPEN PRを対象にする。
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            PR_NUMBER="$EVENT_PR_NUMBER"
           fi
 
           # mergeableの判定はGitHub側で非同期に計算されるため、対象PR(群)のうち
@@ -135,7 +154,9 @@ jobs:
           # それをコンフリクトなしと誤判定しないよう10秒間隔・最大6回(計1分程度)まで
           # ポーリングして再取得する。
           for i in 1 2 3 4 5 6; do
-            if [ -n "${PR_NUMBER:-}" ]; then
+            if [ -n "${TARGET_HEAD:-}" ]; then
+              PRS_JSON="$(gh pr list --head "$TARGET_HEAD" --base develop --state open --json number,headRefName,mergeable)"
+            elif [ -n "${PR_NUMBER:-}" ]; then
               PRS_JSON="$(gh pr view "$PR_NUMBER" --json number,headRefName,mergeable | jq -c '[.]')"
             else
               PRS_JSON="$(gh pr list --base develop --state open --json number,headRefName,mergeable)"

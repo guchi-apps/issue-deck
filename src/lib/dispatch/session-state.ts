@@ -33,6 +33,71 @@ import { parseRepositoryFullName } from "@/lib/local-session";
  */
 export type DispatchSessionState = "ALIVE" | "EXITED" | "FAILED" | "GONE";
 
+/**
+ * セッション自身がフック（#1219）から報告してくる様子（#1264）。
+ *
+ * pollerが見ているtmuxのメタデータでは**人の入力を待っているかどうかが分からない**。
+ * そこだけをフックから受け取る。境界は`gates.md`の「フックが飛ぶか」と同じで、
+ * ここに入るのはセッションが生きている間しか飛ばないものに限る。
+ *
+ * **古い値が残り続けないことが前提。** `WAITING_INPUT`は`Stop`フック（`RESPONDED`へ）か、
+ * セッションの消滅（pollerの報告で`EXITED`/`FAILED`/`GONE`へ）のどちらかで必ず解ける。
+ */
+export type DispatchSessionActivity = "WAITING_INPUT" | "RESPONDED";
+
+/** フックが送ってくる1件ぶんの報告 */
+export type DispatchSessionActivityReport = {
+  repositoryFullName: string;
+  issueNumber: number;
+  activity: DispatchSessionActivity;
+  /** `claude --remote-control`のURL。取れないこともある */
+  remoteControlUrl: string | null;
+};
+
+/** フックのイベント名（`session-notify.sh`が送る値）を内部の表現へ写す */
+export function parseDispatchSessionActivity(value: unknown): DispatchSessionActivity | null {
+  if (value === "waiting_input") return "WAITING_INPUT";
+  if (value === "responded") return "RESPONDED";
+  return null;
+}
+
+/**
+ * プレビューのURLとして受け入れる形（#1265）。**tailnet内のhttp URLだけを通す。**
+ *
+ * `tailscale serve`はHTTPS証明書が未有効なため`--http`（平文）でしか出せず、ホスト名は
+ * MagicDNSの`*.ts.net`になる。ここを緩めると、共有シークレットを持つ相手から任意のリンクを
+ * 画面へ差し込まれる。
+ */
+export function parsePreviewUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:") return null;
+  if (!url.hostname.endsWith(".ts.net")) return null;
+  return url.toString();
+}
+
+/**
+ * Remote ControlのURLとして受け入れる形。**`https://claude.ai/`配下だけを通す。**
+ * 画面にリンクとして出す値なので、任意のURLを受け取ると共有シークレットを持つ相手から
+ * 好きなリンクを差し込まれることになる。
+ */
+export function parseRemoteControlUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "claude.ai") return null;
+  return url.toString();
+}
+
 /** pollerが1セッションについて報告してくる生の値 */
 export type DispatchSessionReport = {
   tmuxSessionName: string;
@@ -53,6 +118,12 @@ export type DispatchSessionView = {
   exitStatus: number | null;
   firstSeenAt: string;
   lastReportedAt: string;
+  /** 直近の様子（#1264）。報告が無ければ`null` */
+  activity: DispatchSessionActivity | null;
+  activityAt: string | null;
+  remoteControlUrl: string | null;
+  /** tailnetへ出した開発サーバーのURL（#1265）。`23.preview-required`のセッションでだけ埋まる */
+  previewUrl: string | null;
 };
 
 /**

@@ -59,6 +59,11 @@ export type DispatchHostView = {
   contractVersion: number | null;
   online: boolean;
   lastSeenAt: string;
+  /**
+   * スクリーンショットを撮れるか（#1268）。**`null`は「申告していない」**（古いpoller）で、
+   * `false`（撮れない）とは区別する。判定材料が無いことを理由に選択肢を塞がないため。
+   */
+  screenshotCapable: boolean | null;
 };
 
 /**
@@ -274,6 +279,44 @@ export function findDispatchJobForIssue(
 
   const byNewest = [...mine].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return byNewest.find((job) => isActiveDispatchJobStatus(job.status)) ?? byNewest[0];
+}
+
+/**
+ * 既定の実行先を決める（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
+ *
+ * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばし、
+ * 1つも無ければ`null`＝GitHub Actionsを返す。判定は`resolveDispatchTargetRejection`と同じものを
+ * 使う。**ボタンの文言とダイアログの既定選択が別々に決まると、押す前に見えていた実行先と
+ * 実際に起動する先がずれる。**
+ */
+export function resolveDefaultDispatchHost(params: {
+  hosts: readonly DispatchHostView[];
+  repositoryFullName: string;
+  hasActiveJob: boolean;
+}): string | null {
+  const { hosts, repositoryFullName, hasActiveJob } = params;
+  return (
+    hosts.find(
+      (host) => resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob }) === null,
+    )?.name ?? null
+  );
+}
+
+/**
+ * そのホストで`24.screenshot-required`を選べるか（#1268）。
+ *
+ * 選べない理由を返す。選べるなら`null`。**申告していないホスト（古いpoller）は塞がない** —
+ * 判定材料が無いことと「撮れない」ことは違う。
+ *
+ * 無人実行では依存の追加をその場で確認する相手がいないため（CLAUDE.md）、撮れないホストで
+ * このラベルを付けると**実行できないまま止まる**。押す前に理由を出す。
+ */
+export function resolveScreenshotRejection(host: DispatchHostView | null): string | null {
+  if (!host) return null;
+  if (host.screenshotCapable === false) {
+    return `${host.name}にPlaywrightのブラウザが入っていないため、スクリーンショットを取得できません。`;
+  }
+  return null;
 }
 
 /** 起動が届かなかったジョブに残す理由（timeoutの内訳） */

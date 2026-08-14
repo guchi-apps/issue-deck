@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
+import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
@@ -40,8 +41,10 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { useOpenPullRequests } from "@/hooks/use-open-pull-requests";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { buildFollowupIssueBody } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
@@ -58,7 +61,7 @@ import {
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
 import type { Issue, NavViewId } from "@/types/issue";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -97,6 +100,8 @@ export function IssueDeckShell({
     toggleLabel,
     toggleRepo,
   } = useIssueFilters();
+  const { openIssue: openIssueUrl, openPullRequest: openPullRequestUrl } =
+    useReferenceNavigation();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const searchParams = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
@@ -395,15 +400,20 @@ export function IssueDeckShell({
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
   }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
 
-  // 詳細を開いているPR（#1087）。一覧の取得前・マージ済み・リポジトリ絞り込みで対象外に
-  // なった場合はnullになり、詳細は「PRを選ぶと〜」の空状態に戻る。
-  const selectedPullRequest = useMemo(
-    () => filteredPullRequests.find((pullRequest) => pullRequest.id === filters.pr) ?? null,
-    [filteredPullRequests, filters.pr],
-  );
-  const pullRequestDetail = usePullRequestDetail(selectedPullRequest);
+  const pullRequestDetail = usePullRequestDetail(filters.pr);
 
-  function handlePullRequestMerged(pullRequest: OpenPullRequest) {
+  // 詳細を開いているPR（#1087）。一覧に載っていれば一覧の項目をそのまま使い（CI状態まで
+  // 揃っていて即座に描ける）、載っていない場合は詳細APIが返す`summary`で補う。後者は
+  // 画面内のリンクからマージ済み・クローズ済みのPRを開いた場合の経路（#1260）。
+  const selectedPullRequest = useMemo(() => {
+    if (!filters.pr) return null;
+    const fromList = filteredPullRequests.find((pullRequest) => pullRequest.id === filters.pr);
+    if (fromList) return fromList;
+    // 取得中・別のPRへ切り替えた直後に前のPRのヘッダーが残らないよう、idの一致を確認する。
+    return pullRequestDetail.detail?.id === filters.pr ? pullRequestDetail.detail.summary : null;
+  }, [filteredPullRequests, filters.pr, pullRequestDetail.detail]);
+
+  function handlePullRequestMerged(pullRequest: PullRequestSummary) {
     setMergedPullRequests((prev) => ({
       ids:
         prev.fetchedAt === openPullRequests.fetchedAt
@@ -414,6 +424,29 @@ export function IssueDeckShell({
     // マージしたPRの詳細は用済みなので閉じて一覧へ戻す（スマホでは一覧画面へ戻る）。
     if (filters.pr === pullRequest.id) selectPullRequest(null);
     openPullRequests.refresh();
+  }
+
+  /**
+   * 画面内のIssue・PRリンクをIssueDeckの中で開く（#1260）。
+   *
+   * GitHubは`/issues/<番号>`でPRも開けるため（Issueとの番号空間が共通）、`kind`が`issue`でも
+   * 実際はPRのことがある。まずDBキャッシュのIssueから探し、見つからない場合はPRとして
+   * 開き直す。連携していないリポジトリなど本当に開けない参照は、PR詳細がエラーを出す。
+   */
+  function openReference(reference: GithubReference) {
+    if (reference.kind === "issue") {
+      const issue = issues.find(
+        (item) =>
+          item.repositoryFullName === reference.repositoryFullName &&
+          item.number === reference.number,
+      );
+      if (issue) {
+        setSelectedIssue(issue);
+        openIssueUrl(issue.id);
+        return;
+      }
+    }
+    openPullRequestUrl(buildPullRequestId(reference.repositoryFullName, reference.number));
   }
 
   function handleSelectView(view: NavViewId) {
@@ -525,342 +558,348 @@ export function IssueDeckShell({
   const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
 
   return (
-    <div className="flex h-full flex-col">
-      <TopBar
-        currentUser={currentUser}
-        filters={filters}
-        setFilter={setFilter}
-        groupByRepo={groupByRepo}
-        onChangeGroupByRepo={setGroupByRepo}
-        assigneeOptions={assigneeOptions}
-        onCreateIssue={() =>
-          openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
-        }
-        onAskQuestion={() =>
-          openAskRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
-        }
-        selectedRepoFullName={filters.repos[0] ?? null}
-        repositories={repositories}
-        issues={issues}
-        isSidebarCollapsed={isSidebarCollapsed}
-        onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-        onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
-      />
+    <GithubReferenceNavigationProvider openReference={openReference}>
+      <div className="flex h-full flex-col">
+        <TopBar
+          currentUser={currentUser}
+          filters={filters}
+          setFilter={setFilter}
+          groupByRepo={groupByRepo}
+          onChangeGroupByRepo={setGroupByRepo}
+          assigneeOptions={assigneeOptions}
+          onCreateIssue={() =>
+            openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+          }
+          onAskQuestion={() =>
+            openAskRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+          }
+          selectedRepoFullName={filters.repos[0] ?? null}
+          repositories={repositories}
+          issues={issues}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+          onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+        />
 
-      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
-        {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
-        <div className="flex flex-1 flex-col overflow-hidden md:hidden">
-          <div className="flex-1 overflow-hidden">
-            {isMobileScreenPending ? (
-              <MobileScreenSkeleton />
-            ) : (
-              <>
-                {mobileScreen.kind === "home" && (
-                  <MobileHomeScreen
-                    overviewStats={overviewStats}
-                    navCounts={navCounts}
-                    onSelectQuickView={selectQuickView}
-                    favoriteRepositories={repositories.filter((repo) => repo.favorite)}
-                    onSelectRepository={selectRepository}
-                    quickFilters={quickFilters}
-                    onSelectQuickFilter={handleSelectQuickFilterMobile}
-                    onDeleteQuickFilter={handleDeleteQuickFilter}
-                    onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-                    onSelectPullRequests={selectPullRequests}
-                  />
-                )}
-
-                {mobileScreen.kind === "pull-requests" &&
-                  // PRを選んでいる間は同じ画面枠をPR詳細に差し替える。PR一覧はスマホの
-                  // ボトムナビにタブを持たないドリルダウン画面のため、一覧→詳細も
-                  // mscreenを増やさず選択状態（prクエリ）だけで切り替える（#1087）。
-                  (selectedPullRequest ? (
-                    <MobilePullRequestDetailScreen
-                      pullRequest={selectedPullRequest}
-                      detail={pullRequestDetail.detail}
-                      isLoading={pullRequestDetail.isLoading}
-                      error={pullRequestDetail.error}
-                      onRefresh={pullRequestDetail.refresh}
-                      onMerged={() => handlePullRequestMerged(selectedPullRequest)}
-                      onBack={() => selectPullRequest(null)}
+        <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+          {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
+          <div className="flex flex-1 flex-col overflow-hidden md:hidden">
+            <div className="flex-1 overflow-hidden">
+              {isMobileScreenPending ? (
+                <MobileScreenSkeleton />
+              ) : (
+                <>
+                  {mobileScreen.kind === "home" && (
+                    <MobileHomeScreen
+                      overviewStats={overviewStats}
+                      navCounts={navCounts}
+                      onSelectQuickView={selectQuickView}
+                      favoriteRepositories={repositories.filter((repo) => repo.favorite)}
+                      onSelectRepository={selectRepository}
+                      quickFilters={quickFilters}
+                      onSelectQuickFilter={handleSelectQuickFilterMobile}
+                      onDeleteQuickFilter={handleDeleteQuickFilter}
+                      onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+                      onSelectPullRequests={selectPullRequests}
                     />
-                  ) : (
-                    <MobilePullRequestsScreen
-                      pullRequests={filteredPullRequests}
-                      failedRepositories={openPullRequests.failedRepositories}
-                      fetchedAt={openPullRequests.fetchedAt}
-                      isLoading={openPullRequests.isLoading}
-                      error={openPullRequests.error}
-                      onRefresh={openPullRequests.refresh}
+                  )}
+
+                  {mobileScreen.kind === "pull-requests" &&
+                    // PRを選んでいる間は同じ画面枠をPR詳細に差し替える。PR一覧はスマホの
+                    // ボトムナビにタブを持たないドリルダウン画面のため、一覧→詳細も
+                    // mscreenを増やさず選択状態（prクエリ）だけで切り替える（#1087）。
+                    // 判定に使うのは選択中PRそのものではなくprクエリ。一覧に無いPRを
+                    // リンクから開いた場合、summaryが届くまで一覧へ戻ってしまうため（#1260）。
+                    (filters.pr ? (
+                      <MobilePullRequestDetailScreen
+                        pullRequest={selectedPullRequest}
+                        detail={pullRequestDetail.detail}
+                        isLoading={pullRequestDetail.isLoading}
+                        error={pullRequestDetail.error}
+                        onRefresh={pullRequestDetail.refresh}
+                        onMerged={() =>
+                          selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
+                        }
+                        onBack={() => selectPullRequest(null)}
+                      />
+                    ) : (
+                      <MobilePullRequestsScreen
+                        pullRequests={filteredPullRequests}
+                        failedRepositories={openPullRequests.failedRepositories}
+                        fetchedAt={openPullRequests.fetchedAt}
+                        isLoading={openPullRequests.isLoading}
+                        error={openPullRequests.error}
+                        onRefresh={openPullRequests.refresh}
+                        onBack={goBack}
+                        onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
+                        onMerged={handlePullRequestMerged}
+                      />
+                    ))}
+
+                  {mobileScreen.kind === "issues" && (
+                    <MobileIssuesScreen
+                      issues={issues}
+                      currentUserLogin={currentUserLogin}
+                      labelSummary={labelSummary}
+                      assigneeOptions={assigneeOptions}
+                      selectedIssueId={mobileScreen.returnToIssueId}
+                      view={mobileScreen.view}
+                      labels={mobileScreen.labels}
+                      state={mobileScreen.state}
+                      assignee={mobileScreen.assignee}
+                      sort={mobileScreen.sort}
+                      onChangeView={(view) => updateListFilters({ view })}
+                      onChangeFilters={(filters) => updateListFilters(filters)}
+                      onSelectIssue={selectIssue}
+                      onCreateIssue={() => openCreateDialog()}
+                      onAskQuestion={() => openAskRepoQuestionDialog()}
+                      onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                    />
+                  )}
+
+                  {mobileScreen.kind === "repos" && (
+                    <MobileReposScreen
+                      repositories={repositories}
+                      onSelectRepository={selectRepository}
+                      onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+                      onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                      onSetRepositoryFavorite={handleSetRepositoryFavorite}
+                    />
+                  )}
+
+                  {mobileScreen.kind === "settings" && (
+                    <MobileSettingsScreen
+                      currentUser={currentUser}
+                      onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+                    />
+                  )}
+
+                  {mobileScreen.kind === "repo-detail" && (
+                    <MobileRepoIssuesScreen
+                      repository={mobileScreen.repository}
+                      issues={issues}
+                      currentUserLogin={currentUserLogin}
+                      selectedIssueId={mobileScreen.returnToIssueId}
+                      view={mobileScreen.view}
+                      labels={mobileScreen.labels}
+                      state={mobileScreen.state}
+                      assignee={mobileScreen.assignee}
+                      sort={mobileScreen.sort}
+                      onChangeView={(view) => updateListFilters({ view })}
+                      onChangeFilters={(filters) => updateListFilters(filters)}
+                      onSelectIssue={selectIssue}
                       onBack={goBack}
-                      onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
-                      onMerged={handlePullRequestMerged}
+                      onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
+                      onAskQuestion={() =>
+                        openAskRepoQuestionDialog(mobileScreen.repository.fullName)
+                      }
                     />
-                  ))}
+                  )}
 
-                {mobileScreen.kind === "issues" && (
-                  <MobileIssuesScreen
-                    issues={issues}
-                    currentUserLogin={currentUserLogin}
-                    labelSummary={labelSummary}
-                    assigneeOptions={assigneeOptions}
-                    selectedIssueId={mobileScreen.returnToIssueId}
-                    view={mobileScreen.view}
-                    labels={mobileScreen.labels}
-                    state={mobileScreen.state}
-                    assignee={mobileScreen.assignee}
-                    sort={mobileScreen.sort}
-                    onChangeView={(view) => updateListFilters({ view })}
-                    onChangeFilters={(filters) => updateListFilters(filters)}
-                    onSelectIssue={selectIssue}
-                    onCreateIssue={() => openCreateDialog()}
-                    onAskQuestion={() => openAskRepoQuestionDialog()}
-                    onBack={mobileScreen.origin === "home" ? goBack : undefined}
-                  />
-                )}
+                  {mobileScreen.kind === "issue-detail" && (
+                    <MobileIssueDetail
+                      issue={mobileScreen.issue}
+                      issues={issues}
+                      repositories={visibleRepositories}
+                      currentUserLogin={currentUserLogin}
+                      onBack={goBack}
+                      onEdit={setEditingIssue}
+                      onIssueUpdated={handleIssueUpdated}
+                      onIssueDeleted={handleIssueDeleted}
+                      onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                      onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
+                      onCreateFollowupIssue={openFollowupIssueDialog}
+                      onSelectRepository={selectRepositoryByFullName}
+                    />
+                  )}
+                </>
+              )}
+            </div>
 
-                {mobileScreen.kind === "repos" && (
-                  <MobileReposScreen
-                    repositories={repositories}
-                    onSelectRepository={selectRepository}
-                    onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-                    onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-                    onSetRepositoryFavorite={handleSetRepositoryFavorite}
-                  />
-                )}
-
-                {mobileScreen.kind === "settings" && (
-                  <MobileSettingsScreen
-                    currentUser={currentUser}
-                    onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
-                  />
-                )}
-
-                {mobileScreen.kind === "repo-detail" && (
-                  <MobileRepoIssuesScreen
-                    repository={mobileScreen.repository}
-                    issues={issues}
-                    currentUserLogin={currentUserLogin}
-                    selectedIssueId={mobileScreen.returnToIssueId}
-                    view={mobileScreen.view}
-                    labels={mobileScreen.labels}
-                    state={mobileScreen.state}
-                    assignee={mobileScreen.assignee}
-                    sort={mobileScreen.sort}
-                    onChangeView={(view) => updateListFilters({ view })}
-                    onChangeFilters={(filters) => updateListFilters(filters)}
-                    onSelectIssue={selectIssue}
-                    onBack={goBack}
-                    onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-                    onAskQuestion={() =>
-                      openAskRepoQuestionDialog(mobileScreen.repository.fullName)
-                    }
-                  />
-                )}
-
-                {mobileScreen.kind === "issue-detail" && (
-                  <MobileIssueDetail
-                    issue={mobileScreen.issue}
-                    issues={issues}
-                    repositories={visibleRepositories}
-                    currentUserLogin={currentUserLogin}
-                    onBack={goBack}
-                    onEdit={setEditingIssue}
-                    onIssueUpdated={handleIssueUpdated}
-                    onIssueDeleted={handleIssueDeleted}
-                    onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-                    onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
-                    onCreateFollowupIssue={openFollowupIssueDialog}
-                    onSelectRepository={selectRepositoryByFullName}
-                  />
-                )}
-              </>
-            )}
+            <MobileBottomNav active={activeBottomNavTab} onSelect={selectTab} />
           </div>
 
-          <MobileBottomNav active={activeBottomNavTab} onSelect={selectTab} />
+          {/* PC: 左カラム（ナビゲーション）。手動で開閉・幅調整ができる（#381） */}
+          {!isSidebarCollapsed && (
+            <>
+              <SidebarNav
+                activeView={filters.view}
+                onSelectView={handleSelectView}
+                activePane={filters.pane}
+                onSelectPane={selectPane}
+                navCounts={navCounts}
+                repositories={repositories}
+                selectedRepoFullNames={filters.repos}
+                onSelectRepository={(repo) => toggleRepo(repo.fullName)}
+                onClearRepository={() => setFilter("repos", [])}
+                onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+                onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                onSetRepositoryFavorite={handleSetRepositoryFavorite}
+                labelSummary={labelSummary}
+                selectedLabels={filters.labels}
+                onSelectLabel={(label) => toggleLabel(label.name)}
+                onClearLabels={() => setFilter("labels", [])}
+                quickFilters={quickFilters}
+                onSelectQuickFilter={handleSelectQuickFilter}
+                onDeleteQuickFilter={handleDeleteQuickFilter}
+                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+                className="hidden shrink-0 border-r md:flex"
+                style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
+              />
+              <ResizeHandle onDragStart={sidebarWidth.handleDragStart} className="hidden md:block" />
+            </>
+          )}
+
+          {filters.pane === "pull-requests" ? (
+            /* PC: マージ待ちPR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
+               揃えている（#1058・#1087） */
+            <>
+              <PullRequestList
+                pullRequests={filteredPullRequests}
+                failedRepositories={openPullRequests.failedRepositories}
+                fetchedAt={openPullRequests.fetchedAt}
+                isLoading={openPullRequests.isLoading}
+                error={openPullRequests.error}
+                onRefresh={openPullRequests.refresh}
+                selectedPullRequestId={filters.pr}
+                onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
+                onMerged={handlePullRequestMerged}
+                className="hidden shrink-0 border-r md:flex"
+                style={{ width: pullRequestListWidth.width, maxWidth: "50vw" }}
+              />
+              <ResizeHandle
+                onDragStart={pullRequestListWidth.handleDragStart}
+                className="hidden md:block"
+              />
+              <PullRequestDetail
+                pullRequest={selectedPullRequest}
+                detail={pullRequestDetail.detail}
+                isLoading={pullRequestDetail.isLoading}
+                error={pullRequestDetail.error}
+                onRefresh={pullRequestDetail.refresh}
+                onMerged={() =>
+                  selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
+                }
+                className="hidden flex-1 md:flex"
+              />
+            </>
+          ) : (
+            <>
+              {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
+              <IssueList
+                title={getNavViewLabel(filters.view)}
+                issues={filteredIssues}
+                selectedIssueId={selectedIssue?.id ?? null}
+                onSelectIssue={setSelectedIssue}
+                showSearch={false}
+                scrollKey={issueListScrollKey}
+                groupByRepo={groupByRepo}
+                view={filters.view}
+                className="hidden shrink-0 border-r md:flex"
+                style={{ width: issueListWidth.width, maxWidth: "50vw" }}
+              />
+              <ResizeHandle onDragStart={issueListWidth.handleDragStart} className="hidden md:block" />
+
+              {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
+              <div className="hidden flex-1 overflow-hidden md:flex">
+                <IssueDetail
+                  issue={selectedIssue}
+                  issues={issues}
+                  repositories={visibleRepositories}
+                  currentUserLogin={currentUserLogin}
+                  onEdit={setEditingIssue}
+                  onIssueUpdated={handleIssueUpdated}
+                  onIssueDeleted={handleIssueDeleted}
+                  onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                  onCreateFollowupIssue={openFollowupIssueDialog}
+                  onSelectRepository={(repositoryFullName) =>
+                    setFilters({ repos: [repositoryFullName] })
+                  }
+                />
+              </div>
+              {selectedIssue && (
+                <>
+                  <ResizeHandle
+                    onDragStart={propertiesPanelWidth.handleDragStart}
+                    className="hidden xl:block"
+                  />
+                  <div
+                    className="hidden shrink-0 border-l xl:block"
+                    style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
+                  >
+                    <IssuePropertiesPanel
+                      issue={selectedIssue}
+                      repositories={visibleRepositories}
+                      onIssueUpdated={handleIssueUpdated}
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
 
-        {/* PC: 左カラム（ナビゲーション）。手動で開閉・幅調整ができる（#381） */}
-        {!isSidebarCollapsed && (
-          <>
-            <SidebarNav
-              activeView={filters.view}
-              onSelectView={handleSelectView}
-              activePane={filters.pane}
-              onSelectPane={selectPane}
-              navCounts={navCounts}
-              repositories={repositories}
-              selectedRepoFullNames={filters.repos}
-              onSelectRepository={(repo) => toggleRepo(repo.fullName)}
-              onClearRepository={() => setFilter("repos", [])}
-              onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-              onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-              onSetRepositoryFavorite={handleSetRepositoryFavorite}
-              labelSummary={labelSummary}
-              selectedLabels={filters.labels}
-              onSelectLabel={(label) => toggleLabel(label.name)}
-              onClearLabels={() => setFilter("labels", [])}
-              quickFilters={quickFilters}
-              onSelectQuickFilter={handleSelectQuickFilter}
-              onDeleteQuickFilter={handleDeleteQuickFilter}
-              onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-              className="hidden shrink-0 border-r md:flex"
-              style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
-            />
-            <ResizeHandle onDragStart={sidebarWidth.handleDragStart} className="hidden md:block" />
-          </>
-        )}
-
-        {filters.pane === "pull-requests" ? (
-          /* PC: マージ待ちPR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
-             揃えている（#1058・#1087） */
-          <>
-            <PullRequestList
-              pullRequests={filteredPullRequests}
-              failedRepositories={openPullRequests.failedRepositories}
-              fetchedAt={openPullRequests.fetchedAt}
-              isLoading={openPullRequests.isLoading}
-              error={openPullRequests.error}
-              onRefresh={openPullRequests.refresh}
-              selectedPullRequestId={filters.pr}
-              onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
-              onMerged={handlePullRequestMerged}
-              className="hidden shrink-0 border-r md:flex"
-              style={{ width: pullRequestListWidth.width, maxWidth: "50vw" }}
-            />
-            <ResizeHandle
-              onDragStart={pullRequestListWidth.handleDragStart}
-              className="hidden md:block"
-            />
-            <PullRequestDetail
-              pullRequest={selectedPullRequest}
-              detail={pullRequestDetail.detail}
-              isLoading={pullRequestDetail.isLoading}
-              error={pullRequestDetail.error}
-              onRefresh={pullRequestDetail.refresh}
-              onMerged={() =>
-                selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
-              }
-              className="hidden flex-1 md:flex"
-            />
-          </>
-        ) : (
-          <>
-            {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
-            <IssueList
-              title={getNavViewLabel(filters.view)}
-              issues={filteredIssues}
-              selectedIssueId={selectedIssue?.id ?? null}
-              onSelectIssue={setSelectedIssue}
-              showSearch={false}
-              scrollKey={issueListScrollKey}
-              groupByRepo={groupByRepo}
-              view={filters.view}
-              className="hidden shrink-0 border-r md:flex"
-              style={{ width: issueListWidth.width, maxWidth: "50vw" }}
-            />
-            <ResizeHandle onDragStart={issueListWidth.handleDragStart} className="hidden md:block" />
-
-            {/* PC: 右カラム（Issue詳細 + プロパティパネル） */}
-            <div className="hidden flex-1 overflow-hidden md:flex">
-              <IssueDetail
-                issue={selectedIssue}
-                issues={issues}
-                repositories={visibleRepositories}
-                currentUserLogin={currentUserLogin}
-                onEdit={setEditingIssue}
-                onIssueUpdated={handleIssueUpdated}
-                onIssueDeleted={handleIssueDeleted}
-                onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-                onCreateFollowupIssue={openFollowupIssueDialog}
-                onSelectRepository={(repositoryFullName) =>
-                  setFilters({ repos: [repositoryFullName] })
-                }
-              />
-            </div>
-            {selectedIssue && (
-              <>
-                <ResizeHandle
-                  onDragStart={propertiesPanelWidth.handleDragStart}
-                  className="hidden xl:block"
-                />
-                <div
-                  className="hidden shrink-0 border-l xl:block"
-                  style={{ width: propertiesPanelWidth.width, maxWidth: "50vw" }}
-                >
-                  <IssuePropertiesPanel
-                    issue={selectedIssue}
-                    repositories={visibleRepositories}
-                    onIssueUpdated={handleIssueUpdated}
-                  />
-                </div>
-              </>
-            )}
-          </>
-        )}
+        <CreateIssueDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          repositories={visibleRepositories}
+          defaultRepositoryFullName={createDialogRepo}
+          defaultBody={createDialogBody}
+          issues={issues}
+          onCreated={handleIssueCreated}
+        />
+        <AskRepoQuestionDialog
+          open={askDialogOpen}
+          onOpenChange={setAskDialogOpen}
+          repositories={visibleRepositories}
+          defaultRepositoryFullName={askDialogRepo}
+          onCreated={handleIssueCreated}
+        />
+        <QuickFilterDialog
+          open={quickFilterDialogOpen}
+          onOpenChange={setQuickFilterDialogOpen}
+          // 保存対象はIssueの絞り込み条件だけ。表示中のペイン（filters.pane）は絞り込み条件では
+          // ないため、QuickFilterには含めない。
+          filters={{
+            view: filters.view,
+            q: filters.q,
+            repos: filters.repos,
+            state: filters.state,
+            labels: filters.labels,
+            assignee: filters.assignee,
+            sort: filters.sort,
+          }}
+          onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
+        />
+        <AppSettingsDialog
+          open={appSettingsDialogOpen}
+          autoRetryLimit={autoRetryLimit}
+          claudeModel={claudeModel}
+          claudeModelAssist={claudeModelAssist}
+          dispatchConcurrency={dispatchConcurrency}
+          onOpenChange={setAppSettingsDialogOpen}
+          onUpdated={(next) => {
+            setAutoRetryLimit(next.autoRetryLimit);
+            setClaudeModel(next.claudeModel);
+            setClaudeModelAssist(next.claudeModelAssist);
+            setDispatchConcurrency(next.dispatchConcurrency);
+          }}
+        />
+        <EditIssueDialog
+          open={editingIssue !== null}
+          onOpenChange={(open) => {
+            if (!open) setEditingIssue(null);
+          }}
+          issue={editingIssue}
+          issues={issues}
+          onUpdated={handleIssueUpdated}
+        />
+        <CheckUserToastViewport
+          toasts={checkUserToasts}
+          onSelectIssue={handleSelectCheckUserToastIssue}
+          onDismiss={handleDismissCheckUserToast}
+        />
       </div>
-
-      <CreateIssueDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        repositories={visibleRepositories}
-        defaultRepositoryFullName={createDialogRepo}
-        defaultBody={createDialogBody}
-        issues={issues}
-        onCreated={handleIssueCreated}
-      />
-      <AskRepoQuestionDialog
-        open={askDialogOpen}
-        onOpenChange={setAskDialogOpen}
-        repositories={visibleRepositories}
-        defaultRepositoryFullName={askDialogRepo}
-        onCreated={handleIssueCreated}
-      />
-      <QuickFilterDialog
-        open={quickFilterDialogOpen}
-        onOpenChange={setQuickFilterDialogOpen}
-        // 保存対象はIssueの絞り込み条件だけ。表示中のペイン（filters.pane）は絞り込み条件では
-        // ないため、QuickFilterには含めない。
-        filters={{
-          view: filters.view,
-          q: filters.q,
-          repos: filters.repos,
-          state: filters.state,
-          labels: filters.labels,
-          assignee: filters.assignee,
-          sort: filters.sort,
-        }}
-        onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
-      />
-      <AppSettingsDialog
-        open={appSettingsDialogOpen}
-        autoRetryLimit={autoRetryLimit}
-        claudeModel={claudeModel}
-        claudeModelAssist={claudeModelAssist}
-        dispatchConcurrency={dispatchConcurrency}
-        onOpenChange={setAppSettingsDialogOpen}
-        onUpdated={(next) => {
-          setAutoRetryLimit(next.autoRetryLimit);
-          setClaudeModel(next.claudeModel);
-          setClaudeModelAssist(next.claudeModelAssist);
-          setDispatchConcurrency(next.dispatchConcurrency);
-        }}
-      />
-      <EditIssueDialog
-        open={editingIssue !== null}
-        onOpenChange={(open) => {
-          if (!open) setEditingIssue(null);
-        }}
-        issue={editingIssue}
-        issues={issues}
-        onUpdated={handleIssueUpdated}
-      />
-      <CheckUserToastViewport
-        toasts={checkUserToasts}
-        onSelectIssue={handleSelectCheckUserToastIssue}
-        onDismiss={handleDismissCheckUserToast}
-      />
-    </div>
+    </GithubReferenceNavigationProvider>
   );
 }

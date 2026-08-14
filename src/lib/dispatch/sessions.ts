@@ -5,6 +5,7 @@ import {
   nextEscalatedState,
   resolveSessionState,
   shouldEscalateSession,
+  type DispatchSessionActivity,
   type DispatchSessionReport,
   type DispatchSessionState,
   type DispatchSessionView,
@@ -33,7 +34,50 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     exitStatus: session.exitStatus,
     firstSeenAt: session.firstSeenAt.toISOString(),
     lastReportedAt: session.lastReportedAt.toISOString(),
+    activity: (session.activity as DispatchSessionActivity | null) ?? null,
+    activityAt: session.activityAt?.toISOString() ?? null,
+    remoteControlUrl: session.remoteControlUrl,
+    previewUrl: session.previewUrl,
   };
+}
+
+/**
+ * セッション自身がフック（#1219）から報告してくる様子を記録する（#1264）。
+ *
+ * **pollerの一括報告（`reportDispatchSessions`）とは別の入口にする。** あちらは「そのホストで
+ * 今見えているセッションの全て」を前提に、含まれない行を`GONE`へ倒す。フックの1件を同じ
+ * 経路へ流すと、他のセッションが全部消えたことになる。
+ *
+ * **セッションの行が無ければ何もしない。** フックはpollerより先に飛びうるが、行を作ると
+ * `host`・`tmuxSessionName`をフック側が知らないため嘘の値が入る。1巡（既定60秒）待てば
+ * pollerが作るので、取りこぼしても次のフックで載る。
+ */
+export async function recordDispatchSessionActivity(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  /** 様子。URLだけを報告する呼び出し（#1265のプレビュー公開時）では省略する */
+  activity?: DispatchSessionActivity | null;
+  remoteControlUrl?: string | null;
+  previewUrl?: string | null;
+  now?: Date;
+}): Promise<{ updated: number }> {
+  const now = params.now ?? new Date();
+  const result = await db.dispatchSession.updateMany({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      // 終わったセッションの行に「入力待ち」を後から書かない
+      state: "ALIVE",
+    },
+    data: {
+      // **渡された項目だけを書く。** URLが取れなかった回で既存の値を消さない
+      // （Claude Codeの内部ファイル依存で欠けうる。プレビューは公開時の1回しか報告しない）
+      ...(params.activity ? { activity: params.activity, activityAt: now } : {}),
+      ...(params.remoteControlUrl ? { remoteControlUrl: params.remoteControlUrl } : {}),
+      ...(params.previewUrl ? { previewUrl: params.previewUrl } : {}),
+    },
+  });
+  return { updated: result.count };
 }
 
 /**
