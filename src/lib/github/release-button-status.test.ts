@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
+import {
+  describeReleaseStatusBadge,
+  resolveFailedReleaseWorkflow,
+  summarizeReleaseButtonStatus,
+  summarizeReleaseStatus,
+  type ReleaseStatusSummaryInput,
+} from "@/lib/github/release-button-status";
 import type { ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-release-status";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
@@ -171,5 +177,160 @@ describe("summarizeReleaseButtonStatus", () => {
         }),
       ),
     ).toBe("error");
+  });
+});
+
+function summaryInput(
+  overrides: Partial<ReleaseStatusSummaryInput> = {},
+): ReleaseStatusSummaryInput {
+  return {
+    workflowRun: null,
+    deployWorkflowRun: null,
+    bumpPullRequest: null,
+    releasePullRequestOpen: false,
+    releasePending: false,
+    ...overrides,
+  };
+}
+
+describe("summarizeReleaseStatus", () => {
+  it("何も動いていなければidleを返す", () => {
+    expect(summarizeReleaseStatus(summaryInput())).toBe("idle");
+  });
+
+  it("develop→mainのPRがオープン中はaction_requiredを返す", () => {
+    expect(summarizeReleaseStatus(summaryInput({ releasePullRequestOpen: true }))).toBe(
+      "action_required",
+    );
+  });
+
+  it("バンプPRのCIがpendingの間はprogressing、通過後はaction_requiredを返す", () => {
+    expect(summarizeReleaseStatus(summaryInput({ bumpPullRequest: { ciState: "pending" } }))).toBe(
+      "progressing",
+    );
+    expect(summarizeReleaseStatus(summaryInput({ bumpPullRequest: { ciState: "success" } }))).toBe(
+      "action_required",
+    );
+  });
+
+  it("PRが無くてもリリースworkflowが実行中ならprogressingを返す", () => {
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({ workflowRun: { status: "in_progress", conclusion: null } }),
+      ),
+    ).toBe("progressing");
+  });
+
+  it("失敗はマージ待ちより優先してerrorを返す", () => {
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({
+          releasePullRequestOpen: true,
+          deployWorkflowRun: { status: "completed", conclusion: "failure" },
+        }),
+      ),
+    ).toBe("error");
+  });
+});
+
+describe("resolveFailedReleaseWorkflow", () => {
+  it("失敗していなければnullを返す", () => {
+    expect(
+      resolveFailedReleaseWorkflow(
+        summaryInput({ workflowRun: { status: "completed", conclusion: "success" } }),
+      ),
+    ).toBeNull();
+  });
+
+  it("本番デプロイの失敗をリリースworkflowの失敗より優先して返す", () => {
+    expect(
+      resolveFailedReleaseWorkflow(
+        summaryInput({
+          workflowRun: { status: "completed", conclusion: "failure" },
+          deployWorkflowRun: { status: "completed", conclusion: "failure" },
+        }),
+      ),
+    ).toBe("deploy");
+  });
+
+  it("リリースworkflowだけが失敗している場合はreleaseを返す", () => {
+    expect(
+      resolveFailedReleaseWorkflow(
+        summaryInput({ workflowRun: { status: "completed", conclusion: "failure" } }),
+      ),
+    ).toBe("release");
+  });
+});
+
+describe("describeReleaseStatusBadge", () => {
+  it("idleはバッジを出さない", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "idle",
+        failedWorkflow: null,
+        mergeTarget: null,
+        ciState: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("マージ待ちはマージ先を文言に含める", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "action_required",
+        failedWorkflow: null,
+        mergeTarget: "main",
+        ciState: "success",
+      }),
+    ).toEqual({ label: "mainへマージ待ち", tone: "action" });
+    expect(
+      describeReleaseStatusBadge({
+        status: "action_required",
+        failedWorkflow: null,
+        mergeTarget: "develop",
+        ciState: "success",
+      }),
+    ).toEqual({ label: "developへマージ待ち", tone: "action" });
+  });
+
+  it("マージ待ちPRのチェックが落ちている場合はマージ先よりチェック失敗を優先する（#1059）", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "action_required",
+        failedWorkflow: null,
+        mergeTarget: "main",
+        ciState: "failure",
+      }),
+    ).toEqual({ label: "チェック失敗", tone: "error" });
+  });
+
+  it("失敗はデプロイとリリースworkflowで文言を書き分ける", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "error",
+        failedWorkflow: "deploy",
+        mergeTarget: null,
+        ciState: null,
+      }),
+    ).toEqual({ label: "デプロイ失敗", tone: "error" });
+    expect(
+      describeReleaseStatusBadge({
+        status: "error",
+        failedWorkflow: "release",
+        mergeTarget: null,
+        ciState: null,
+      }),
+    ).toEqual({ label: "リリース失敗", tone: "error" });
+  });
+
+  it("進行中は実施中を返す", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "progressing",
+        failedWorkflow: null,
+        mergeTarget: null,
+        ciState: null,
+      }),
+    ).toEqual({ label: "実施中", tone: "progressing" });
   });
 });

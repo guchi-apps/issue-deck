@@ -59,10 +59,11 @@ import { IssueSessionStatus } from "@/components/dashboard/issue-session-status"
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
+  LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -214,6 +215,9 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
+  // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
+  const sessionWaitingInput = isSessionWaitingInput(issueSession);
   const executionTarget = resolveIssueExecutionTarget({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -917,10 +921,13 @@ export function MobileIssueDetail({
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
             localSessionNotice={
-              executionTarget.expectsActionsRun ? undefined : (
+              executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
+                <LocalSessionWaitingInputNotice session={issueSession} />
+              ) : (
                 <LocalSessionApprovalNotice session={issueSession} />
               )
             }
+            sessionWaitingInput={sessionWaitingInput}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
