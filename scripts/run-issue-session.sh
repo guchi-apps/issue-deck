@@ -54,6 +54,18 @@ source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 # セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
 source "$SCRIPT_DIR/lib/agent-language.sh"
+# 本体の作業ツリーの scripts/ が古いままになっていないかの警告（#1274）。
+# shellcheck source=scripts/lib/launcher-scripts-sync.sh
+source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
+
+# start-issue.sh・generic-start-issue.sh も同じ警告を出しているが、そちらは呼び出し元プロセスの
+# 標準出力に出るだけで、tmux経由（`tmux new-session -d`）で起動した場合はそのまま誰にも見られずに
+# 消える。新しいtmuxのpaneは呼び出し元とは別のptyで、直後にこのスクリプトの出力だけが流れ込む
+# ため、呼び出し元の警告を引き継がない。サブPCのpollerが起動する経路（無人）ではなおさら、
+# 呼び出し元の標準出力はjournalctlにしか残らずtmuxをattachしたユーザーからは見えない。ここでも
+# 同じ警告を出し、実際にユーザーが見る画面（tmuxのpane）に確実に載せる（#1426）。
+ISSUE_DECK_ROOT="$(dirname "$SCRIPT_DIR")"
+warn_launcher_scripts_stale "$ISSUE_DECK_ROOT"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
 # **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
