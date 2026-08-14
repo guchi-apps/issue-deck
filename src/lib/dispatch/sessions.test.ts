@@ -187,6 +187,60 @@ describe("reportDispatchSessions", () => {
     expect(result.escalated).toBe(0);
   });
 
+  /**
+   * #1353。行は`(host, tmuxSessionName)`で引き、名前はIssueごとに固定で、消えた行も24時間残す。
+   * そのため**同じIssueで起動し直すと前のセッションの行がそのまま再利用される**。
+   * 入力待ちのまま畳んだセッションのオレンジのバッジが、次のセッションの起動直後に復活していた。
+   */
+  describe("同じ名前で立ち上がり直した行（#1353）", () => {
+    it("前のセッションが残した入力待ち・Remote ControlのURLを捨てる", async () => {
+      findMany
+        .mockResolvedValueOnce([
+          existingRow({
+            state: "GONE",
+            activity: "WAITING_INPUT",
+            activityAt: new Date("2026-08-14T09:00:00.000Z"),
+            remoteControlUrl: "https://claude.ai/code/old",
+          }),
+        ])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            state: "ALIVE",
+            activity: null,
+            activityAt: null,
+            remoteControlUrl: null,
+            firstSeenAt: NOW,
+          }),
+        }),
+      );
+    });
+
+    it("プレビューURLは残す（報告は起動時の1回だけで、捨てると二度と載らない）", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ state: "GONE" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("previewUrl");
+    });
+
+    it("ALIVEが続いている間は同じセッションなので捨てない", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ state: "ALIVE", activity: "WAITING_INPUT" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
+    });
+  });
+
   it("別ホストの行には触らない", async () => {
     findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 

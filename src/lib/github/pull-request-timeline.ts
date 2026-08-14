@@ -18,37 +18,41 @@ export type GithubApiTimelineEvent = {
 };
 
 /**
- * timelineイベント一覧のうち最新のcross-reference（同一リポジトリのPRからの`#番号`参照）を抽出する。
- * 該当が無ければnull。
+ * timelineイベント一覧からcross-reference（同一リポジトリのPRからの`#番号`参照）をすべて抽出する。
+ * 同じPRが複数回参照されることがあるため番号でdedupeし、番号の昇順で返す（#1339）。
  */
-export function extractCrossReferencedPullRequestLink(
+export function extractCrossReferencedPullRequestLinks(
   events: GithubApiTimelineEvent[],
   owner: string,
   repo: string,
-): PullRequestLink | null {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const issue = events[i].source?.issue;
-    if (events[i].event !== "cross-referenced" || !issue?.pull_request) continue;
+): PullRequestLink[] {
+  const byNumber = new Map<number, PullRequestLink>();
+
+  for (const event of events) {
+    const issue = event.source?.issue;
+    if (event.event !== "cross-referenced" || !issue?.pull_request) continue;
     if (issue.repository && issue.repository.full_name !== `${owner}/${repo}`) continue;
-    return { url: issue.html_url, number: issue.number };
+    if (byNumber.has(issue.number)) continue;
+    byNumber.set(issue.number, { url: issue.html_url, number: issue.number });
   }
-  return null;
+
+  return [...byNumber.values()].sort((a, b) => a.number - b.number);
 }
 
 /**
- * コメントURLパース（`extractLatestPullRequestLink`）で見つからなかった場合のフォールバック。
+ * コメントURLパース（`extractPullRequestLinks`）で1件も見つからなかった場合のフォールバック。
  * PR本文中の`#番号`参照はGitHubがcross-reference（timelineイベント）として自動記録するため、
  * 報告コメントの投稿有無やPRのブランチ命名規約に依存せず対応PRを検出できる。
  */
-export async function fetchCrossReferencedPullRequestLink(
+export async function fetchCrossReferencedPullRequestLinks(
   owner: string,
   repo: string,
   issueNumber: number,
   token: string,
-): Promise<PullRequestLink | null> {
+): Promise<PullRequestLink[]> {
   const events = await fetchAllPages<GithubApiTimelineEvent>(
     `${GITHUB_API}/repos/${owner}/${repo}/issues/${issueNumber}/timeline?per_page=100`,
     token,
   );
-  return extractCrossReferencedPullRequestLink(events, owner, repo);
+  return extractCrossReferencedPullRequestLinks(events, owner, repo);
 }

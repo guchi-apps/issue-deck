@@ -5,6 +5,8 @@ import {
   PROGRESS_STATUSES,
   getProgressStatusIndex,
   hasActiveProgress,
+  isNextReleaseIssue,
+  isReleasePendingIssue,
   matchProjectStatus,
   parseProgressStatusKey,
   resolveProgressStatus,
@@ -106,5 +108,32 @@ describe("parseProgressStatusKey", () => {
     for (const status of PROGRESS_STATUSES) {
       expect(parseProgressStatusKey(status.key)).toBe(status.key);
     }
+  });
+});
+
+describe("isNextReleaseIssue", () => {
+  it("`Develop`にいるopenなIssueだけを今回の反映対象とみなす", () => {
+    expect(isNextReleaseIssue({ projectStatus: "Develop", state: "open" })).toBe(true);
+    expect(isNextReleaseIssue({ projectStatus: "Release", state: "open" })).toBe(false);
+    expect(isNextReleaseIssue({ projectStatus: "Implementation", state: "open" })).toBe(false);
+  });
+
+  it("closedなIssueは`Develop`に残っていても対象にしない（#1348）", () => {
+    // リリース時にDoneへ一括遷移させる対象（GET /api/progress）はopenだけを返すため、
+    // closedのまま`Develop`に残っているIssueは何度リリースしても反映されない
+    expect(isNextReleaseIssue({ projectStatus: "Develop", state: "closed" })).toBe(false);
+  });
+});
+
+describe("isReleasePendingIssue", () => {
+  it("`Develop`・`Release`にいるopenなIssueを本番反映待ちとみなす", () => {
+    expect(isReleasePendingIssue({ projectStatus: "Develop", state: "open" })).toBe(true);
+    expect(isReleasePendingIssue({ projectStatus: "Release", state: "open" })).toBe(true);
+    expect(isReleasePendingIssue({ projectStatus: "Done", state: "open" })).toBe(false);
+  });
+
+  it("closedなIssueは件数に数えない（#1348）", () => {
+    expect(isReleasePendingIssue({ projectStatus: "Develop", state: "closed" })).toBe(false);
+    expect(isReleasePendingIssue({ projectStatus: "Release", state: "closed" })).toBe(false);
   });
 });

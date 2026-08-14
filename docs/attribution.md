@@ -71,6 +71,28 @@ Claude Codeへの指示文で本文を組み立てるコメント（計画提示
 によるPR側への投稿は、`comment-thread.tsx`が表示するIssueコメントスレッドに現れないためマーカー
 付与の対象外。
 
+## ローカルセッションのコメントは本人名義になる（マーカーで表示上ボットへ寄せる）
+
+サブPC・手元のClaude Codeセッション（`scripts/start-issue.sh`・`scripts/start-reviewer.sh`）は
+`gh`がユーザー個人の認証で動くため、エージェントが投稿したIssueコメントもGitHub上は**ユーザー本人
+名義**になる。無人実行（`github-actions[bot]`名義）と違い、login名からはボットの発言と本人の発言を
+区別できない。
+
+そのため`comment-thread.tsx`がlogin名の一致だけで「自分の発言」と判定していた頃は、ローカル
+セッションの実装完了報告がユーザー自身の吹き出し（右寄せ）として表示されていた（issue #1346）。
+現在は`comment-source.ts`の`isMarkedAutomationComment()`が**本文のマーカーだけ**で自動投稿かを
+判定し、自分の名義でも左寄せのボット表示にしている。
+
+- ローカルセッションのプロンプト（`scripts/prompts/implementation-agent.md`・
+  `generic-implementation-agent.md`・`review-agent.md`）が、投稿するコメントの末尾に
+  `<!-- issue-deck-agent:planner|implementer|reviewer -->`を付けるよう指示している
+- 判定に使うのは**マーカーが明示された種別だけ**。書き出しの絵文字による推測（`emoji-fallback`）は
+  含めない。含めるとユーザー本人が🔧などで書き始めたコメントまでボット扱いになる
+- 役割を持たない`<!-- issue-deck-source:project-status-dispatch -->`は対象外。カンバンのドラッグ
+  起点の起動コメントは、逆に**操作した人間へ寄せて**表示する（#1026・前掲の`posted-by`マーカー）
+- **プロンプト遵守が前提の仕組みで、強制はできない。** マーカーの無いコメント（この対応より前の
+  ローカルセッションの投稿を含む）は従来どおり本人の発言として右寄せで表示される
+
 ## `no-trigger`マーカー（ワークフロー起動条件の除外。投稿元マーカーとは別概念）
 
 上記の「コメント投稿元マーカー」は投稿されたコメントが**どの処理由来か**を判別してUI表示に使う

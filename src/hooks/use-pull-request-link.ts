@@ -2,30 +2,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { extractLatestPullRequestLink, type PullRequestLink } from "@/lib/github/pull-request-link";
+import { extractPullRequestLinks, type PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssueComment } from "@/types/issue";
 
+const EMPTY_LINKS: PullRequestLink[] = [];
+
 /**
- * まずコメント本文からのURLパース（追加通信なし）で対応PRを探し、見つからない場合のみ
- * Issue Timeline APIのcross-referenceフォールバック（`/api/issues/pull-request-link`）へ問い合わせる。
+ * Issueの対応PRのリンクを返す（#1339で複数対応）。
+ *
+ * まずコメント本文からのURLパース（追加通信なし）で対応PRを探し、**1件も見つからない場合のみ**
+ * Issue Timeline APIのcross-referenceフォールバック（`/api/issues/pull-request-link`）へ
+ * 問い合わせる。コメントで1件でも見つかればフォールバックしないのは、GitHub APIの消費を
+ * 増やさないため（コメントに書かれていないPRを取りこぼす可能性は残るが、無人実行は
+ * PRごとに報告コメントを投稿するので実運用では揃う）。
  */
-export function usePullRequestLink(
+export function usePullRequestLinks(
   repositoryFullName: string | null,
   issueNumber: number | null,
   comments: IssueComment[],
-): PullRequestLink | null {
+): PullRequestLink[] {
   const [owner, repo] = repositoryFullName ? repositoryFullName.split("/") : [null, null];
 
-  const commentLink = useMemo(
-    () => (owner && repo ? extractLatestPullRequestLink(comments, owner, repo) : null),
+  const commentLinks = useMemo(
+    () => (owner && repo ? extractPullRequestLinks(comments, owner, repo) : EMPTY_LINKS),
     [comments, owner, repo],
   );
-  const [fallbackLink, setFallbackLink] = useState<PullRequestLink | null>(null);
+  const [fallbackLinks, setFallbackLinks] = useState<PullRequestLink[]>(EMPTY_LINKS);
 
   useEffect(() => {
-    if (commentLink || !owner || !repo || !issueNumber) {
+    if (commentLinks.length > 0 || !owner || !repo || !issueNumber) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFallbackLink(null);
+      setFallbackLinks(EMPTY_LINKS);
       return;
     }
 
@@ -36,9 +43,9 @@ export function usePullRequestLink(
       signal: controller.signal,
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { link: PullRequestLink | null } | null) => {
+      .then((data: { links: PullRequestLink[] } | null) => {
         if (cancelled || !data) return;
-        setFallbackLink(data.link);
+        setFallbackLinks(data.links);
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -48,7 +55,7 @@ export function usePullRequestLink(
       cancelled = true;
       controller.abort();
     };
-  }, [commentLink, owner, repo, issueNumber]);
+  }, [commentLinks, owner, repo, issueNumber]);
 
-  return commentLink ?? fallbackLink;
+  return commentLinks.length > 0 ? commentLinks : fallbackLinks;
 }

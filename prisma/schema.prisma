@@ -354,6 +354,23 @@ enum DispatchJobStatus {
   CANCELED
 }
 
+// ジョブの種別（#1332）。**LAUNCHだけが「セッションを立てる」ジョブ**で、残りは既に立っている
+// セッションを操作する制御ジョブ。
+//
+// **別モデルにせず同じテーブルへ載せているのは、claim・報告・タイムアウト・画面表示の一式が
+// そのまま使えるため**（受信経路も認証も同じで、寿命だけが短い）。分けると同じ仕組みを
+// もう1セット持つことになる。
+//
+// INTERRUPT=`tmux send-keys -t <セッション名> C-c`（走っている処理を中断する。セッションは残る）/
+// KILL=`tmux kill-session -t <セッション名>`（セッションごと畳む）。
+// **poller側はセッション名をジョブのrepositoryFullName/issueNumberから組み立て直し、
+// 受け取った名前と一致しなければ実行しない**（任意コマンド実行の経路にしないため）。
+enum DispatchJobKind {
+  LAUNCH
+  INTERRUPT
+  KILL
+}
+
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
 //
 // 方式がpull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが
@@ -367,11 +384,17 @@ model DispatchJob {
   issueNumber        Int
   // 起動先として指定されたホスト名（DispatchHost.nameと対応）
   targetHost         String
+  // 何をするジョブか（#1332）。既存行はすべて起動ジョブなのでLAUNCHが既定
+  kind               DispatchJobKind   @default(LAUNCH)
   status             DispatchJobStatus @default(QUEUED)
   // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
   // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは
   // 複数のNULLを許すため、終了したジョブは同じIssueで何件でも並べられる。
   // アプリ側の存在チェックだけに頼ると、二重クリックの競合で二重起動が通る。
+  //
+  // **種別ごとに名前空間を分ける**（#1332。制御ジョブは `interrupt:owner/repo#番号`）。
+  // 制御ジョブでnullにすると起動ジョブとは衝突しない代わりに、スマホでの連打ぶんだけ
+  // `C-c`が積まれる。前置きを付ければ衝突せず、「未処理の停止は1件まで」も同時に守れる。
   activeKey          String?           @unique
   // 画面から積んだユーザー（User.id）。Userを消してもジョブの履歴は残すためFKは張らない
   requestedByUserId  String?
@@ -393,6 +416,7 @@ model DispatchJob {
 
   @@index([status])
   @@index([targetHost, status])
+  @@index([targetHost, status, kind])
   @@index([repositoryFullName, issueNumber])
 }
 
@@ -423,6 +447,11 @@ model DispatchHost {
   // 無人実行では依存の追加をその場で確認する相手がいないため、撮れないホストで
   // `24.screenshot-required`を選ばせると必ず詰まる
   screenshotCapable Boolean?
+  // 走っているセッションを画面から操作できるか（#1332）。pollerが対応版で申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**。`screenshotCapable`とは逆で、
+  // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
+  // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
+  sessionControlCapable Boolean?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt        DateTime
 
@@ -459,8 +488,9 @@ model DispatchSession {
   // セッション自身がフック（#1219）から報告してくる直近の様子（#1264）。pollerが見ている
   // tmuxのメタデータでは分からない「人の入力を待っているか」を、画面へ出すために持つ。
   //
-  // **古い値が残り続けないことが前提。** WAITING_INPUTはStopフック（RESPONDEDへ遷移）か、
-  // セッションの消滅（pollerの報告でEXITED/FAILED/GONEになる）のどちらかで必ず解ける。
+  // **古い値が残り続けないことが前提。** WAITING_INPUTはStopフック（RESPONDEDへ遷移）で解ける。
+  // セッションが消えた場合は表示側が状態を優先するだけで値は残るため、同じ名前で立ち上がり直した
+  // 行では報告の受け口（reportDispatchSessions・isRevivedSession）が捨てる（#1353）。
   activity         DispatchSessionActivity?
   activityAt       DateTime?
   // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので、

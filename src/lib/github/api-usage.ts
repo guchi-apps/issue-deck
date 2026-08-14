@@ -25,7 +25,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export const GITHUB_API_FEATURES = [
   { key: "issue_list_workflow_running", label: "一覧の実行状況ポーリング" },
   { key: "issue_detail_workflow_run", label: "詳細の実行状況ポーリング" },
-  { key: "pull_request_ci", label: "PRのCI状態ポーリング" },
+  // 元はCI状態だけを返していたが、#1339でタイトル・状態もあわせて返すようになった。
+  // 消費するリクエスト数は変わっていないため、過去の集計と分断しないようキーは据え置く。
+  { key: "pull_request_ci", label: "Issueの対応PRの取得" },
   { key: "pull_request_link_fallback", label: "PR紐付けのフォールバック検索" },
   { key: "release_status", label: "リリース進捗ポーリング" },
   { key: "release_pending_merges", label: "mainマージ待ち確認" },

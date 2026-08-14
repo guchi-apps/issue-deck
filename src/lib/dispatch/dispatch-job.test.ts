@@ -7,20 +7,24 @@ import {
   buildDispatchActiveKey,
   describeDispatchEnqueueRejection,
   describeDispatchJobStatus,
+  describeSessionControlRejection,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
   findBlockingSession,
   findDispatchJobForIssue,
+  findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isCancelableDispatchJobStatus,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostName,
   parseDispatchHostRepositories,
+  parseDispatchJobKind,
   parseDispatchReportStatus,
   parseDispatchTarget,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
   resolveScreenshotRejection,
+  resolveSessionControlRejection,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -418,6 +422,7 @@ describe("findDispatchJobForIssue", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1180,
       targetHost: "subpc",
+      kind: "LAUNCH",
       status: "QUEUED",
       message: null,
       tmuxSessionName: null,
@@ -451,6 +456,186 @@ describe("findDispatchJobForIssue", () => {
     ];
     expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("new");
   });
+
+  // 混ざると、停止を押した瞬間に「未完了ジョブがある」と見なされて起動が塞がる（#1332）
+  it("制御ジョブ（停止・終了）は拾わない", () => {
+    const jobs = [job({ id: "control", kind: "INTERRUPT" })];
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
+    expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("control");
+  });
+
+  it("制御ジョブの側は起動ジョブを拾わない", () => {
+    const jobs = [job({ id: "launch", kind: "LAUNCH" })];
+    expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
+  });
+});
+
+describe("セッションの操作（#1332）", () => {
+  function host(
+    overrides: Partial<Pick<DispatchHostView, "online" | "sessionControlCapable">> = {},
+  ): Pick<DispatchHostView, "online" | "sessionControlCapable"> {
+    return { online: true, sessionControlCapable: true, ...overrides };
+  }
+
+  function sessionState(state: DispatchSessionView["state"]): Pick<DispatchSessionView, "state"> {
+    return { state };
+  }
+
+  describe("parseDispatchJobKind", () => {
+    // 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
+    it("省略時は起動ジョブ", () => {
+      expect(parseDispatchJobKind(undefined)).toBe("LAUNCH");
+      expect(parseDispatchJobKind(null)).toBe("LAUNCH");
+      expect(parseDispatchJobKind("launch")).toBe("LAUNCH");
+    });
+
+    it("停止・終了を受け入れ、それ以外は弾く", () => {
+      expect(parseDispatchJobKind("interrupt")).toBe("INTERRUPT");
+      expect(parseDispatchJobKind("kill")).toBe("KILL");
+      expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
+      expect(parseDispatchJobKind("restart")).toBeNull();
+      expect(parseDispatchJobKind(1)).toBeNull();
+    });
+  });
+
+  describe("buildDispatchActiveKey", () => {
+    // 前置きを付けないと、停止のジョブが起動ジョブとunique制約でぶつかる
+    it("種別ごとに名前空間を分ける", () => {
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332)).toBe(
+        "guchi-apps/issue-deck#1332",
+      );
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332, "LAUNCH")).toBe(
+        "guchi-apps/issue-deck#1332",
+      );
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332, "INTERRUPT")).toBe(
+        "interrupt:guchi-apps/issue-deck#1332",
+      );
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332, "KILL")).toBe(
+        "kill:guchi-apps/issue-deck#1332",
+      );
+    });
+  });
+
+  describe("resolveSessionControlRejection", () => {
+    it("生きているセッションなら停止も終了もできる", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE"),
+          kind: "INTERRUPT",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    // 古いpollerは`kind`を読まず、制御ジョブを起動ジョブとして解釈してしまう
+    it("申告していないpollerでは操作させない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host({ sessionControlCapable: null }),
+          session: sessionState("ALIVE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("session_control_unsupported");
+    });
+
+    it("応答していないホストは理由が先に立つ", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host({ online: false }),
+          session: sessionState("ALIVE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("host_offline");
+    });
+
+    // 終了したペインが残っているセッションは「閉じる」で片付けられる
+    it("終了済みのセッションは停止できないが閉じられる", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("EXITED"),
+          kind: "INTERRUPT",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("session_not_alive");
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("EXITED"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    it("消えたセッション・記録の無いセッションは操作できない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("GONE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("session_not_found");
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: null,
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("session_not_found");
+    });
+
+    // スマホでの連打が、そのぶんの`C-c`にならないようにする
+    it("未処理の操作があれば重ねて積ませない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE"),
+          kind: "INTERRUPT",
+          hasActiveControlJob: true,
+        }),
+      ).toBe("already_queued");
+    });
+  });
+
+  describe("describeDispatchJobStatus", () => {
+    // 「起動しました」のままだと、停止を押したのに起動したように読める
+    it("制御ジョブは種別に合わせた文言になる", () => {
+      expect(describeDispatchJobStatus("QUEUED", "INTERRUPT").label).toBe("停止を送信しました");
+      expect(describeDispatchJobStatus("SUCCEEDED", "INTERRUPT").label).toBe("停止を送りました");
+      expect(describeDispatchJobStatus("SUCCEEDED", "KILL").label).toBe("セッションを閉じました");
+      expect(describeDispatchJobStatus("SUCCEEDED").label).toBe("起動しました");
+    });
+
+    // 止めたかったものが既に無いだけで、何も壊れていない
+    it("対象が無かった場合は赤くしない", () => {
+      expect(describeDispatchJobStatus("SKIPPED", "KILL").tone).toBe("muted");
+    });
+  });
+
+  describe("describeSessionControlRejection", () => {
+    it("pollerが古い場合は何をすれば押せるようになるかまで書く", () => {
+      const message = describeSessionControlRejection("session_control_unsupported", {
+        hostName: "subpc",
+        kind: "KILL",
+      });
+      expect(message).toContain("subpc");
+      expect(message).toContain("poller");
+    });
+  });
 });
 
 describe("resolveScreenshotRejection（#1268）", () => {
@@ -462,6 +647,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       online: true,
       lastSeenAt: "2026-08-14T00:00:00Z",
       screenshotCapable: true,
+      sessionControlCapable: true,
       ...overrides,
     };
   }

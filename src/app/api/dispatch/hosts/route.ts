@@ -45,6 +45,10 @@ export async function POST(request: NextRequest) {
     // **申告していない（古いpoller）と「撮れない」を区別する**（#1268）。boolean以外はnull
     screenshotCapable:
       typeof payload?.screenshotCapable === "boolean" ? payload.screenshotCapable : null,
+    // セッションの操作（#1332）に対応したpollerだけが送ってくる。**未申告はnull＝非対応扱い**で、
+    // 制御ジョブを配らない（古いpollerは`kind`を読まず、起動ジョブとして解釈してしまう）
+    sessionControlCapable:
+      typeof payload?.sessionControl === "boolean" ? payload.sessionControl : null,
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

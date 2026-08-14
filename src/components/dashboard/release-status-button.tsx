@@ -23,7 +23,7 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { resolveProgressStatus } from "@/lib/issue-progress";
+import { isNextReleaseIssue, isReleasePendingIssue } from "@/lib/issue-progress";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -75,8 +75,7 @@ export function ReleaseStatusButton({
   const releasePendingIssueCountByRepo = useMemo(() => {
     const map = new Map<string, number>();
     issues.forEach((issue) => {
-      const status = resolveProgressStatus(issue);
-      if (status !== "develop" && status !== "release") return;
+      if (!isReleasePendingIssue(issue)) return;
       map.set(issue.repositoryFullName, (map.get(issue.repositoryFullName) ?? 0) + 1);
     });
     return map;
@@ -98,9 +97,7 @@ export function ReleaseStatusButton({
   const pendingReleaseIssues = useMemo(
     () =>
       issues.filter(
-        (issue) =>
-          issue.repositoryFullName === releaseRepoFullName &&
-          resolveProgressStatus(issue) === "develop",
+        (issue) => issue.repositoryFullName === releaseRepoFullName && isNextReleaseIssue(issue),
       ),
     [issues, releaseRepoFullName],
   );

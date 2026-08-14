@@ -117,6 +117,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+- **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
+  対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
+  `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ
+  フォールバックする（`/api/issues/pull-request-link`）。タイトル・状態・CI状態は番号を渡して
+  `GET /api/issues/pull-requests`で引き、消費はPR1件あたり1リクエスト（openかつdraftでなければ
+  CI状態を足して2）。**コメント中のPR URLは単なる言及も混ざるため**、PR側から推定した対応Issue番号
+  （`extractLinkedIssueNumber`）が別のIssueを指すものは
+  [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の`selectIssuePullRequests`が落とす
+  （推定できない`null`は残す）。**マージはIssueではなくPRに紐づく操作なので、ボタンは
+  [`components/dashboard/issue-pull-request-list.tsx`](../src/components/dashboard/issue-pull-request-list.tsx)
+  の各行の中だけにあり、画面上部の操作列・スマホのヘッダーには置かない。** 「コメント欄まで
+  下げなくても押せる」という#1288の要件は、この一覧をIssue本文より上に置くことで満たしている。
+  ポーリングするのはマージ待ち かつ CI実行中のときだけで、CIが確定したら自分で止まる
+  （`hooks/use-issue-pull-requests.ts`）。
 - **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
   （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
   一覧・PR詳細・ロケットアイコンのリリース進捗に出る。**どのワークフローを起動するかの判定は
@@ -148,7 +162,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   #1311の起動抑止がそのぶん解けないため。trapを通らない経路はpollerが従来どおり拾う）。
   画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
-  同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
+  同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
+  立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
+  **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
+  受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
@@ -187,6 +204,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   よう、選べない理由は`lib/dispatch/dispatch-job.ts`の純粋関数を両者が共有する（同ファイルは
   Prismaに触れないため、クライアントコンポーネントからimportできる。`lib/dispatch/jobs.ts`は
   できない）。
+- **順番待ちのIssueは「未着手」ではなく「実行中」に出す**（#1347）。押してからサブPCの
+  セッションが`Implementation`を報告するまで進捗Statusは`Ready`のままで、そのままだと
+  起動済みのIssueが未着手ビューに居座り、そこから同じIssueをもう一度選んでしまう。
+  Issue一覧（`lib/issues-for-user.ts`）が`DispatchJob.activeKey`（未完了の間だけ
+  `owner/repo#番号`が入るunique列）を1本引いて`Issue.dispatchPendingAt`へ合流させ、
+  振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
+  **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
+  引く側を`lib/dispatch/pending-dispatch.ts`に分けているのは、`lib/dispatch/jobs.ts`が
+  セッション経由でGitHub Appの認証（読み込み時点で`GITHUB_APP_*`を要求する）を引きずるため。
+  Issue一覧にその資格情報を要求させない。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

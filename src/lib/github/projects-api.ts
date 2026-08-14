@@ -212,6 +212,11 @@ const ISSUE_PROJECT_ITEMS_PAGE_SIZE = 20;
 export type IssueProjectState = {
   /** IssueのGraphQL node ID。Projectへ追加する際の`contentId`に使う */
   issueNodeId: string;
+  /**
+   * Issueがopenかどうか。closedなIssueの進捗を巻き戻さないための判定に使う（#1348）。
+   * `item`が無い（盤面へ未登録）場合でも判断できるよう、アイテム側ではなくIssue側から取る。
+   */
+  issueOpen: boolean;
   /** 指定したProjectにおけるアイテム。未登録ならnull */
   item: ProjectItemSnapshot | null;
 };
@@ -237,6 +242,7 @@ export async function findIssueProjectState(
     repository: {
       issue: {
         id: string;
+        state: string;
         projectItems: { nodes: (RawItem & { project: { id: string } })[] };
       } | null;
     } | null;
@@ -246,6 +252,7 @@ export async function findIssueProjectState(
       repository(owner: $owner, name: $repo) {
         issue(number: $number) {
           id
+          state
           projectItems(first: $first) {
             nodes { project { id } ${ITEM_FIELDS} }
           }
@@ -260,7 +267,7 @@ export async function findIssueProjectState(
   if (!issue) return null;
 
   const node = issue.projectItems.nodes.find((item) => item.project.id === projectId);
-  return { issueNodeId: issue.id, item: toSnapshot(node) };
+  return { issueNodeId: issue.id, issueOpen: issue.state === "OPEN", item: toSnapshot(node) };
 }
 
 /**

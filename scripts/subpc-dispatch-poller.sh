@@ -10,6 +10,11 @@
 #     → scripts/start-local-session.sh → 対象リポジトリの scripts/start-issue.sh
 #     → tmuxセッションが立つ（以降の進捗は start-issue.sh が POST /api/progress へ報告する）
 #
+# ジョブには種別（`kind`）があり、立ったあとのセッションを操作するものも同じキューで流れる（#1332）。
+#
+#   INTERRUPT … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
+#   KILL      … `tmux kill-session -t <セッション名>`（セッションごと畳む）
+#
 # **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
 # （#1176）。issue-deck側からSSHでキックする経路は採れない。
 #
@@ -36,6 +41,7 @@
 #   DISPATCH_SECRET                 共有シークレット（issue-deck側の同名の環境変数と同じ値）
 #   DISPATCH_HOST_NAME              このホストの名前（省略時は `hostname -s`）
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
+#   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は60）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
@@ -48,7 +54,9 @@ set -euo pipefail
 
 # このpollerのバージョン。issue-deckへ申告し、受け口が古いまま動いていないかの手掛かりにする。
 # **約束を変えたら上げる**（issue-deck側は表示するだけで、値による分岐は持たない）。
-DISPATCH_POLLER_VERSION="1"
+#
+# 2: ジョブの種別（`kind`）を読み、走っているセッションの停止・終了を実行する（#1332）。
+DISPATCH_POLLER_VERSION="2"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -59,6 +67,9 @@ source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # 進捗報告の設定漏れを起動時に1度だけ知らせるために読む（#1236。報告そのものはランチャーが行う）。
 # shellcheck source=scripts/lib/progress-report.sh
 source "$SCRIPT_DIR/lib/progress-report.sh"
+# セッションを畳んだときの状態ファイルの後始末に使う（#1332。reap-sessions.shと同じ扱い）。
+# shellcheck source=scripts/lib/session-state.sh
+source "$SCRIPT_DIR/lib/session-state.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
@@ -133,6 +144,19 @@ require_positive_int() {
 
 POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 60)"
 LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPATCH_LAUNCH_TIMEOUT_SECONDS:-}" 900)"
+
+# 生かしておく実装セッションの上限（#1361）。
+#
+# `AppSetting.dispatchConcurrency` は**ジョブの払い出しにしか効かない**（tmuxが立った時点で
+# ジョブは`succeeded`）ため、生きているセッションの本数には上限が無い。回収（reap-sessions.sh）は
+# 「判定できなければ畳まない」設計で、IssueがOPENだったり人の入力待ちのセッションは正当に残るので、
+# 入口を絞らない限り本数は単調に増える。2026-08-14には34本まで積み上がり、サブPCが
+# メモリ枯渇で停止した（SSHもコンソールも応答せず、Magic SysRqでの再起動が要った）。
+#
+# 上限はホストの搭載メモリで決まる。サブPC（13.9GB）では実測で1セッション約390MBに加え、
+# 開発サーバーが最大3本（#1177）走るため、12本で1〜2割の余裕を残す見当。
+# 別のホストへ載せるときは搭載メモリに合わせて dispatch.env で変える。
+MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSIONS:-}" 12)"
 
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
@@ -240,13 +264,16 @@ announce() {
   local repositories payload
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
 
+  # `sessionControl`は「セッションの停止・終了（#1332）を実行できる」という申告。
+  # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
+  # 読まないため、受け取ると起動ジョブとして解釈してセッションを立ててしまう。
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \
     --argjson contractVersion "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" \
     --arg agentVersion "$DISPATCH_POLLER_VERSION" \
     --argjson screenshotCapable "$(screenshot_capable)" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -413,6 +440,83 @@ report_sessions() {
   return 0
 }
 
+# セッション名を組み立てる（#1224の重複起動ガードと#1332の制御ジョブで共有）。
+# 規約は`<リポジトリ名>-issue-<番号>`（docs/multi-agent/local-quick-start.md「セッション名」）。
+expected_session_name() {
+  local repo="$1" issue_number="$2"
+  printf '%s' "${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
+}
+
+# --- セッションの操作（#1332）------------------------------------------------
+# 画面から積まれた「停止」「閉じる」を実行する。
+#
+# **サーバーから届いたセッション名をtmuxへ渡さない。** 名前はジョブの owner/repo/Issue番号から
+# こちら側で組み立て直し（起動時の重複ガードと同じ式）、届いた名前とは**照合にだけ**使う。
+# ここを緩めると、共有シークレットを持つ相手が任意のtmuxターゲットを指定できる経路になる。
+#
+# 実行するのは決め打ちの2つだけで、送るキーも固定の`C-c`のみ。**文字列は送らない**
+# （docs/multi-agent/gates.md。選択フォームへ本文＋Enterを送って勝手に回答させた事故がある）。
+run_control_job() {
+  local job_id="$1" kind="$2" repo="$3" issue_number="$4" requested_session="$5"
+  local session action
+
+  session="$(expected_session_name "$repo" "$issue_number")"
+
+  # 組み立てた名前そのものも確かめる（リポジトリ名が空などで壊れた形になっていないか）。
+  if [[ ! "$session" =~ ^[A-Za-z0-9_-]+-issue-[1-9][0-9]*$ ]]; then
+    report_job "$job_id" failed "セッション名を組み立てられませんでした: $session"
+    return 0
+  fi
+  # 画面が指したセッションと、こちらが導出したセッションが一致しない場合は実行しない。
+  if [[ -n "$requested_session" && "$requested_session" != "$session" ]]; then
+    report_job "$job_id" failed \
+      "指定されたセッション名が一致しません（指定: $requested_session / 対象: $session）"
+    return 0
+  fi
+
+  if ! tmux has-session -t "=$session" 2>/dev/null; then
+    # **失敗ではなく見送り。** 止めたかったものが既に無いだけで、何も壊れていない（#1229と同じ扱い）
+    report_job "$job_id" skipped "対象のtmuxセッションがありません: $session" "$session"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため実行しません（$kind → $session）"
+    return 0
+  fi
+
+  case "$kind" in
+    INTERRUPT)
+      action="停止（C-c）"
+      # **`send-keys`の`-t`はペインを指すため、末尾の`:`が要る**（`=$session`だけだと
+      # `can't find pane` で失敗する。tmux 3.4で確認）。`=`は完全一致、`:`は「そのセッションの
+      # 現在のウィンドウのアクティブなペイン」で、attachして押した場合と同じ宛先になる。
+      if ! tmux send-keys -t "=$session:" C-c 2>/dev/null; then
+        report_job "$job_id" failed "$action を送れませんでした: $session" "$session"
+        return 0
+      fi
+      ;;
+    KILL)
+      action="セッションの終了"
+      if ! tmux kill-session -t "=$session" 2>/dev/null; then
+        report_job "$job_id" failed "$action に失敗しました: $session" "$session"
+        return 0
+      fi
+      # 状態ファイルを残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように
+      # 見える（reap-sessions.shと同じ後始末）。
+      session_state_remove "$session"
+      ;;
+    *)
+      report_job "$job_id" failed "未知のジョブ種別です: $kind"
+      return 0
+      ;;
+  esac
+
+  echo "  $action を実行しました: $session"
+  report_job "$job_id" succeeded "$action を実行しました: $session" "$session"
+  return 0
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -420,19 +524,29 @@ report_sessions() {
 # 組み立てると規約がずれた瞬間に「起動したのに失敗と報告する」誤判定になる。
 run_job() {
   local job_json="$1"
-  local job_id owner repo full_name issue_number
+  local job_id owner repo full_name issue_number kind requested_session
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
+  # 古いissue-deckは`kind`を返さない。**その場合は従来どおりの起動ジョブとして扱う**
+  kind="$(printf '%s' "$job_json" | jq -r '.kind // "LAUNCH"')"
+  requested_session="$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
-  echo "ジョブ $job_id: $full_name #$issue_number"
+  echo "ジョブ $job_id: $full_name #$issue_number（$kind）"
 
   # 受け取った値をサブPC側でも検証する（多層防御）。issue-deck側で検証済みでも、
   # ここが最後にパス・シェル引数として使う場所なので改めて確かめる。
   if ! local_session_validate_target "$owner" "$repo" "$issue_number" 2>/dev/null; then
     report_job "$job_id" failed "受け取った owner/repo/Issue番号が不正です: $full_name #$issue_number"
+    return 0
+  fi
+
+  # 起動しないジョブ（#1332）はここで終わる。**cloneの有無や版数は問わない**
+  # （既に立っているセッションを操作するだけで、リポジトリには触らない）。
+  if [[ "$kind" != "LAUNCH" ]]; then
+    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session"
     return 0
   fi
 
@@ -453,7 +567,7 @@ run_job() {
   # 番号の衝突はほぼ確実に起きる。セッション名の規約は`<リポジトリ名>-issue-<番号>`
   # （docs/multi-agent/local-quick-start.md「セッション名」）。
   local before after new_sessions expected_session
-  expected_session="${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
+  expected_session="$(expected_session_name "$repo" "$issue_number")"
   before="$(tmux_session_names)"
   if printf '%s\n' "$before" | grep -qxF "$expected_session"; then
     # **失敗ではなく見送り（#1229）。** ガードが正常に働いた結果で、何も壊れていない。
@@ -509,6 +623,16 @@ run_job() {
   rm -f "$output_file"
 }
 
+# 生きている実装セッションの本数（#1361）。
+#
+# 数えるのは `<リポジトリ名>-issue-<番号>` に一致するものだけ。この仕組みが作ったセッションの
+# 名前の形で、report_sessions が送る対象と同じ。人が手で立てたセッションまで数えると、
+# この仕組みと関係のない事情でジョブが取れなくなる。
+count_issue_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-issue-[1-9][0-9]*$' || true
+}
+
 # --- 1巡 ----------------------------------------------------------------------
 # 申告 → claim → 起動。**1巡の失敗でプロセスを終わらせない**（常駐時は次の巡で復帰できる）。
 run_once() {
@@ -533,8 +657,26 @@ run_once() {
     return 0
   fi
 
+  # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
+  # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。
+  #
+  # 取りに行かなくても起動ジョブは消えない。`expireStaleDispatchJobs()` が掃くのは CLAIMED と
+  # RUNNING、それに古びた制御ジョブ（#1332）だけで、QUEUEDの起動ジョブは対象外のため、
+  # 空きができた次の巡でそのまま取りに行ける。
+  #
+  # **上限に達していても取りに行くのをやめない**（#1332）。`maxJobs: 0`で「起動ジョブは要らない」
+  # と伝え、停止・終了の制御ジョブだけを受け取る。上限に達しているのは**セッションを畳みたい
+  # ときそのもの**で、ここで何も取りに行かないと、画面から押した停止が届かないまま5分で失効する。
+  local live_sessions claim_max_jobs
+  live_sessions="$(count_issue_sessions)"
+  claim_max_jobs="$MAX_JOBS"
+  if [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
+    echo "セッションが上限に達しているため、起動ジョブは取りに行きません（$live_sessions/$MAX_SESSIONS 本）。"
+    claim_max_jobs=0
+  fi
+
   local claim_payload jobs_json job_count job
-  claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$MAX_JOBS" \
+  claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$claim_max_jobs" \
     '{host: $host, maxJobs: $maxJobs}')"
   if ! api_call POST /api/dispatch/claim "$claim_payload"; then
     report_api_failure "ジョブの取得に失敗しました"

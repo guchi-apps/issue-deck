@@ -79,6 +79,11 @@ export function filterIssuesByView(
         // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、他の条件より優先する
         // （#978）。
         if (view === "in-progress" && issue.qaAnswerPendingAt) return true;
+        // サブPCへ積んだジョブが未完了の間も、進捗Statusは起動したセッションが報告するまで
+        // `Ready`のまま。押した直後のIssueが「未着手」に居座ると、そこから同じIssueを
+        // もう一度選んでしまうため、「実行中」へ移す（#1347）。
+        if (view === "in-progress" && issue.dispatchPendingAt) return true;
+        if (view === "not-started" && issue.dispatchPendingAt) return false;
         if (viewStatuses && viewStatuses.length > 0) {
           if (!viewStatuses.includes(resolveProgressStatus(issue))) return false;
         }
@@ -306,6 +311,8 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
     a.state === b.state &&
     // Project Statusが変われば進捗表示も変わるため、再描画の判定に含める（#991）
     a.projectStatus === b.projectStatus &&
+    // 順番待ちの開始・終了でビューの振り分けが変わるため同様に含める（#1347）
+    a.dispatchPendingAt === b.dispatchPendingAt &&
     a.commentCount === b.commentCount &&
     a.updatedAt === b.updatedAt &&
     a.favorite === b.favorite &&

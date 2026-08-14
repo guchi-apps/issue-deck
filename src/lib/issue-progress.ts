@@ -151,6 +151,35 @@ export function resolveProgressStatus(issue: ProgressSource): ProgressStatusKey 
   return matchProjectStatus(issue.projectStatus) ?? "ready";
 }
 
+/**
+ * リリース関連の表示で使う、進捗＋Issueの開閉。
+ * `state`は`@/types/issue`の`IssueState`と同じ形だが、この層は表示用のIssue型にも
+ * DBの行にも依存しないでおきたいためリテラルで受ける。
+ */
+export type ReleaseIssueSource = ProgressSource & { state: "open" | "closed" };
+
+/**
+ * develop→mainのリリースで今回mainへ反映される（＝`Develop`にいる）Issueかどうか。
+ *
+ * **closedなIssueを含めない。** リリース時に`Done`へ一括遷移させる対象を引く
+ * `queryIssuesByProgressStatus`（`GET /api/progress?status=...`）はopenなIssueしか
+ * 返さないため、closedのままStatusが`Develop`に残っているIssueを画面だけが数え続けると、
+ * 実際には決して反映されないIssueが「今回反映する内容」に永久に並ぶ（#1348）。
+ */
+export function isNextReleaseIssue(issue: ReleaseIssueSource): boolean {
+  return issue.state === "open" && resolveProgressStatus(issue) === "develop";
+}
+
+/**
+ * 本番反映待ち（`Develop`・`Release`）のIssueかどうか。件数バッジに使う。
+ * closedを除く理由は`isNextReleaseIssue`と同じ（#1348）。
+ */
+export function isReleasePendingIssue(issue: ReleaseIssueSource): boolean {
+  if (issue.state !== "open") return false;
+  const status = resolveProgressStatus(issue);
+  return status === "develop" || status === "release";
+}
+
 /** 進捗状態の遷移順における位置。比較に使う */
 export function getProgressStatusIndex(key: ProgressStatusKey): number {
   return PROGRESS_STATUSES.findIndex((status) => status.key === key);
