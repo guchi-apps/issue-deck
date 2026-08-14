@@ -153,7 +153,7 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
-   * 走っているセッションへの操作（停止・終了）を積む（#1332）。
+   * 走っているセッションへの操作（停止・終了・追加指示）を積む（#1332・#1012）。
    *
    * **失敗の理由を`error`（共有）へ入れず、戻り値で返す。** `error`は起動ボタンの下に
    * 出ているため、停止に失敗した理由がそちらへ出ると、押した場所と表示が離れて話が通じない。
@@ -166,7 +166,9 @@ export function useDispatchState(enabled: boolean) {
       repositoryFullName: string;
       issueNumber: number;
       hostName: string;
-      kind: "interrupt" | "kill";
+      kind: "interrupt" | "kill" | "instruction";
+      /** `kind`が`instruction`のときの本文（#1012）。1行・500文字まで */
+      instruction?: string;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -178,6 +180,7 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             host: params.hostName,
             kind: params.kind,
+            instruction: params.instruction,
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };

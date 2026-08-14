@@ -375,6 +375,7 @@ enum DispatchJobKind {
   INTERRUPT
   KILL
   QUESTION
+  INSTRUCTION
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -421,6 +422,14 @@ model DispatchJob {
   // 失敗理由・結果の要約。**画面にそのまま出す前提**。「投げたのに何も起きない」を避けるため、
   // clone未登録・版数不一致・tmux起動失敗といった理由をここへ入れて返す
   message            String?           @db.Text
+  // 走っているセッションへ流す追加指示の本文（#1012。`kind`が`INSTRUCTION`のときだけ入る）。
+  //
+  // **改行を含まない1行だけを受ける。** 複数行は確定キーの解釈が画面の実装に依存する。
+  // 長い指示はIssueコメントに書き、ここへは「コメントを読んでから続けて」の1行を流す。
+  //
+  // **組み立てるのは人だけで、実行体が状況から本文を決めて自動送信する経路は作らない**
+  // （docs/multi-agent/gates.md）。画面のプリセットも、押すのは人という点は変わらない。
+  instruction        String?           @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -463,6 +472,12 @@ model DispatchHost {
   // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
   // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
   sessionControlCapable Boolean?
+  // 走っているセッションへ追加指示を流せるか（#1012）。3段階プロトコル
+  // （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）を実装したpollerだけが申告する。
+  // **`sessionControlCapable`とは別に持つ**。あちらは固定の`C-c`と`kill-session`しか送らないのに対し、
+  // こちらは**内容のある文字列**を送るため、対応版でないpollerへ配ると事故の質が違う
+  // （`null`＝未申告は「できない」として扱うのは同じ）
+  instructionCapable Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。

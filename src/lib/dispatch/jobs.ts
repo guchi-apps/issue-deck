@@ -22,6 +22,7 @@ import {
   SESSION_CONTROL_JOB_KINDS,
   type DispatchEnqueueRejection,
   type DispatchHostView,
+  type DispatchJobKind,
   type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
@@ -55,6 +56,7 @@ function toJobView(job: DispatchJob): DispatchJobView {
     kind: job.kind,
     status: job.status,
     message: job.message,
+    instruction: job.instruction,
     tmuxSessionName: job.tmuxSessionName,
     createdAt: job.createdAt.toISOString(),
     claimedAt: job.claimedAt?.toISOString() ?? null,
@@ -72,6 +74,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     lastSeenAt: host.lastSeenAt.toISOString(),
     screenshotCapable: host.screenshotCapable,
     sessionControlCapable: host.sessionControlCapable,
+    instructionCapable: host.instructionCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
   };
@@ -225,7 +228,7 @@ export type EnqueueSessionControlJobResult =
   | { ok: false; rejection: SessionControlRejection; message: string };
 
 /**
- * 走っているセッションへの操作（停止・終了）を積む（#1332）。
+ * 走っているセッションへの操作（停止・終了・追加指示）を積む（#1332・#1012）。
  *
  * **起動ジョブと同じキューに載せる。** 受信経路・認証・状態報告・タイムアウトの一式が
  * そのまま使えるため、pollerにもissue-deckにも新しい経路を作らずに済む。
@@ -238,8 +241,13 @@ export async function enqueueSessionControlJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
-  /** **`INTERRUPT`・`KILL`に限る。** 質問ジョブ（#1294）はこの経路に載らない */
+  /** **`INTERRUPT`・`KILL`・`INSTRUCTION`に限る。** 質問ジョブ（#1294）はこの経路に載らない */
   kind: SessionControlJobKind;
+  /**
+   * 追加指示の本文（#1012）。**`kind`が`INSTRUCTION`のときは必須**で、呼び出し元が
+   * `parseSessionInstruction`を通した値を渡す（検証はpoller側でも重ねて行う）。
+   */
+  instruction?: string | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueSessionControlJobResult> {
@@ -272,6 +280,7 @@ export async function enqueueSessionControlJob(params: {
       ? {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           sessionControlCapable: host.sessionControlCapable,
+          instructionCapable: host.instructionCapable,
         }
       : null,
     session,
@@ -295,6 +304,8 @@ export async function enqueueSessionControlJob(params: {
           params.kind,
         ),
         requestedByUserId: params.requestedByUserId,
+        // 追加指示の本文（#1012）。それ以外の種別ではnullのまま
+        instruction: params.kind === "INSTRUCTION" ? (params.instruction ?? null) : null,
         // どのセッションを指した操作かを残す。**pollerはこの名前をそのまま使わず突き合わせる**
         tmuxSessionName: session?.tmuxSessionName ?? null,
       },
@@ -339,13 +350,21 @@ export async function claimDispatchJobs(params: {
 
   // **セッションの操作に対応していないpollerには制御ジョブを配らない**（#1332）。
   // 古いpollerは`kind`を読まないため、受け取ると起動ジョブとして解釈して
-  // セッションを立ててしまう（「閉じる」を押して起動する）
-  if (host?.sessionControlCapable === true) {
+  // セッションを立ててしまう（「閉じる」を押して起動する）。
+  //
+  // **申告は種別で分けて見る**（#1012）。停止・終了（固定の`C-c`と`kill-session`）に対応した
+  // pollerでも、内容のある文字列を送る3段階プロトコルは別の実装で、そちらは
+  // `instructionCapable`を申告したホストにだけ配る（申告していないpollerは未知の種別として
+  // `failed`で返すため、配ると追加指示が必ず失敗として残る）。
+  const controlKinds: DispatchJobKind[] = [];
+  if (host?.sessionControlCapable === true) controlKinds.push("INTERRUPT", "KILL");
+  if (host?.instructionCapable === true) controlKinds.push("INSTRUCTION");
+  if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
         targetHost: params.hostName,
         status: "QUEUED",
-        kind: { in: [...SESSION_CONTROL_JOB_KINDS] },
+        kind: { in: controlKinds },
       },
       orderBy: { createdAt: "asc" },
       take: MAX_CONTROL_JOBS_PER_CLAIM,
@@ -580,6 +599,8 @@ export async function announceDispatchHost(params: {
   screenshotCapable: boolean | null;
   /** 走っているセッションを操作できるか（#1332）。申告していない古いpollerでは`null`＝非対応 */
   sessionControlCapable: boolean | null;
+  /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
+  instructionCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
    * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
@@ -598,6 +619,7 @@ export async function announceDispatchHost(params: {
     agentVersion: params.agentVersion,
     screenshotCapable: params.screenshotCapable,
     sessionControlCapable: params.sessionControlCapable,
+    instructionCapable: params.instructionCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
     lastSeenAt: now,

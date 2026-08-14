@@ -21,6 +21,7 @@ import {
   parseDispatchJobKind,
   parseDispatchReportStatus,
   parseDispatchTarget,
+  parseSessionInstruction,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
   resolveScreenshotRejection,
@@ -433,6 +434,7 @@ describe("findDispatchJobForIssue", () => {
       kind: "LAUNCH",
       status: "QUEUED",
       message: null,
+      instruction: null,
       tmuxSessionName: null,
       createdAt: "2026-08-14T00:00:00.000Z",
       claimedAt: null,
@@ -487,9 +489,11 @@ describe("findDispatchJobForIssue", () => {
 
 describe("セッションの操作（#1332）", () => {
   function host(
-    overrides: Partial<Pick<DispatchHostView, "online" | "sessionControlCapable">> = {},
-  ): Pick<DispatchHostView, "online" | "sessionControlCapable"> {
-    return { online: true, sessionControlCapable: true, ...overrides };
+    overrides: Partial<
+      Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable">
+    > = {},
+  ): Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable"> {
+    return { online: true, sessionControlCapable: true, instructionCapable: true, ...overrides };
   }
 
   function sessionState(state: DispatchSessionView["state"]): Pick<DispatchSessionView, "state"> {
@@ -504,14 +508,42 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind("launch")).toBe("LAUNCH");
     });
 
-    it("停止・終了・質問を受け入れ、それ以外は弾く", () => {
+    it("停止・終了・質問・追加指示を受け入れ、それ以外は弾く", () => {
       expect(parseDispatchJobKind("interrupt")).toBe("INTERRUPT");
       expect(parseDispatchJobKind("kill")).toBe("KILL");
       // 種別としては読めるが、積む受け口（POST /api/dispatch）はまだ開いていない（#1294）
       expect(parseDispatchJobKind("question")).toBe("QUESTION");
+      expect(parseDispatchJobKind("instruction")).toBe("INSTRUCTION");
       expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
       expect(parseDispatchJobKind("restart")).toBeNull();
       expect(parseDispatchJobKind(1)).toBeNull();
+    });
+  });
+
+  describe("parseSessionInstruction（#1012）", () => {
+    it("1行の本文は前後の空白を落として通す", () => {
+      expect(parseSessionInstruction("  計画を承認します。実装に進んでください。  ")).toBe(
+        "計画を承認します。実装に進んでください。",
+      );
+    });
+
+    // 複数行は確定キーの解釈が画面の実装に依存し、途中の改行が意図せず1回目の送信になりうる
+    it("改行・タブ・制御文字を含む本文は弾く", () => {
+      expect(parseSessionInstruction("1行目\n2行目")).toBeNull();
+      expect(parseSessionInstruction("前\r後")).toBeNull();
+      expect(parseSessionInstruction("前\t後")).toBeNull();
+      // 端末へ生のエスケープシーケンスを流す経路にしない
+      expect(parseSessionInstruction("\u001b[31m赤\u001b[0m")).toBeNull();
+      expect(parseSessionInstruction("消\u007f")).toBeNull();
+    });
+
+    it("空・空白だけ・長すぎる本文・文字列以外は弾く", () => {
+      expect(parseSessionInstruction("")).toBeNull();
+      expect(parseSessionInstruction("   ")).toBeNull();
+      expect(parseSessionInstruction("あ".repeat(501))).toBeNull();
+      expect(parseSessionInstruction("あ".repeat(500))).toHaveLength(500);
+      expect(parseSessionInstruction(undefined)).toBeNull();
+      expect(parseSessionInstruction(42)).toBeNull();
     });
   });
 
@@ -529,6 +561,9 @@ describe("セッションの操作（#1332）", () => {
       );
       expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332, "KILL")).toBe(
         "kill:guchi-apps/issue-deck#1332",
+      );
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1012, "INSTRUCTION")).toBe(
+        "instruction:guchi-apps/issue-deck#1012",
       );
     });
 
@@ -620,6 +655,47 @@ describe("セッションの操作（#1332）", () => {
       ).toBe("session_not_found");
     });
 
+    // #1012。停止・終了に対応していても、内容のある文字列を送るのは別の実装
+    it("追加指示は instructionCapable を申告したホストにだけ送れる", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE"),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+      expect(
+        resolveSessionControlRejection({
+          host: host({ instructionCapable: null }),
+          session: sessionState("ALIVE"),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("instruction_unsupported");
+      // 逆向きも独立している（停止・終了に未対応でも追加指示は送れる）
+      expect(
+        resolveSessionControlRejection({
+          host: host({ sessionControlCapable: null }),
+          session: sessionState("ALIVE"),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    // 死んだペインには送る相手がいない
+    it("終了済みのセッションには追加指示を送れない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("EXITED"),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("session_not_alive");
+    });
+
     // スマホでの連打が、そのぶんの`C-c`にならないようにする
     it("未処理の操作があれば重ねて積ませない", () => {
       expect(
@@ -670,6 +746,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       lastSeenAt: "2026-08-14T00:00:00Z",
       screenshotCapable: true,
       sessionControlCapable: true,
+      instructionCapable: true,
       maxSessions: 12,
       liveSessions: 0,
       ...overrides,
