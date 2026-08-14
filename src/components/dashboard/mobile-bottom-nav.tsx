@@ -1,13 +1,18 @@
 "use client";
 
-import { FolderGit2, Home, ListChecks, Settings } from "lucide-react";
+import { GitPullRequest, Home, ListChecks, Settings } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+// タブのidは`mscreen`クエリの値そのもの（`selectTab`が`navigate({ screen: tab })`へ
+// そのまま渡す）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
+// （→リポジトリを選ぶとそのリポジトリのIssue一覧）になる（#1436）。idを`issues`にすると
+// 全リポジトリ横断のIssue一覧（`mscreen=issues`）と衝突し、既存URLの意味が変わってしまう。
+// その横断一覧はフッターから外し、ホームからのドリルダウンだけで開く。
 const items = [
   { id: "home", label: "ホーム", icon: Home },
-  { id: "repos", label: "リポジトリ", icon: FolderGit2 },
-  { id: "issues", label: "Issue", icon: ListChecks },
+  { id: "repos", label: "Issue", icon: ListChecks },
+  { id: "pull-requests", label: "PR", icon: GitPullRequest },
   { id: "settings", label: "設定", icon: Settings },
 ] as const;
 

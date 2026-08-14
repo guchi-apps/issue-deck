@@ -87,7 +87,9 @@ export function MobileReposScreen({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-center justify-between border-b p-4">
-        <h1 className="text-base font-semibold">リポジトリ</h1>
+        {/* フッターの「Issue」タブが開く画面なので、見出しもラベルに揃える（#1436）。
+            中身はリポジトリ一覧のままで、リポジトリを選ぶとそのIssue一覧へ進む */}
+        <h1 className="text-base font-semibold">Issue</h1>
         <button
           type="button"
           onClick={() => setIsEditingRepoVisibility((prev) => !prev)}

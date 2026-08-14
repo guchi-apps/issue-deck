@@ -134,6 +134,9 @@ export function IssueDeckShell({
     isPending: isMobileScreenPending,
     selectTab,
     selectPullRequests,
+    // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
+    // タブ切り替えで、履歴を積まない（#1436）
+    selectPullRequestView: selectMobilePullRequestView,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -640,6 +643,9 @@ export function IssueDeckShell({
                     ) : (
                       <MobilePullRequestsScreen
                         view={filters.prview}
+                        navCounts={pullRequestNavCounts}
+                        origin={mobileScreen.origin}
+                        onChangeView={selectMobilePullRequestView}
                         pullRequests={filteredPullRequests}
                         failedRepositories={openPullRequests.failedRepositories}
                         fetchedAt={openPullRequests.fetchedAt}

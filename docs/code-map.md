@@ -119,6 +119,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `prview`が`all`のため、そのまま渡すと毎回クローズ済みまで取りに行ってしまう）、
   **一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の部分集合なので、
   狭める向きで取り直すのは消費にしかならない）。
+- **スマホのフッターは「ホーム／Issue／PR／設定」で、タブのidは`mscreen`の値そのもの**（#1436）。
+  「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧（→リポジトリ別Issue一覧）。
+  全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
+  「よくつかうフィルター」「保存したフィルター」からのドリルダウンだけにした（点灯するタブは
+  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。**PRタブから開くときの
+  ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
+  しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
+  すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
+  同じく履歴を積まない（`selectPullRequestView`）。
 - **左メニューのPR項目は状態別の3ビューで、母集団を決めるのは「全てのPR」だけ**（#1312）。
   ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。

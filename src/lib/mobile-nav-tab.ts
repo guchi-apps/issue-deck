@@ -6,14 +6,22 @@ import type { MobileScreen } from "@/hooks/use-mobile-screen";
 // 開いたのにホームが選択中に見える不整合があった（#414）。
 export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab {
   switch (screen.kind) {
+    case "home":
+    case "settings":
+      return screen.kind;
+    // 「Issue」タブが開くのはリポジトリ一覧で、リポジトリ別Issue一覧はその先（#1436）
+    case "repos":
     case "repo-detail":
       return "repos";
+    // PR一覧は#1058ではホームからのドリルダウンだったが、#1436でタブを持つようになった
+    case "pull-requests":
+      return "pull-requests";
+    // 全リポジトリ横断のIssue一覧はフッターから外し、ホームの「よくつかうフィルター」
+    // 「保存したフィルター」「概要」からのドリルダウンだけにした（#1436）。
+    // 辿ってきた導線に合わせてホームを点灯させる。
+    case "issues":
+      return "home";
     case "issue-detail":
       return resolveBottomNavTab(screen.back);
-    // マージ待ちPR一覧はホームからのドリルダウンで、対応するタブを持たない（#1058）
-    case "pull-requests":
-      return "home";
-    default:
-      return screen.kind;
   }
 }
