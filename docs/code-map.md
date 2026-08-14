@@ -110,6 +110,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「このPC」導線のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
+- **個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体は`guchi-apps/claude-config`にあり、
+  両機は`~/.claude/`側をsymlinkにして同じファイルを見る**（#1190）。issue-deckが持つのは
+  「取り残しに気づく手当て」だけで、`scripts/lib/personal-config-sync.sh`の
+  `warn_personal_config_drift`を`start-issue.sh`・`generic-start-issue.sh`が起動前に呼ぶ。
+  **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
+  黙って素通りする。** 設計は
+  [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒
