@@ -543,7 +543,13 @@ export function CreateIssueDialog({
           // ラベル・コメント数の変化は、作成時と同じ経路（onCreated）で呼び出し側へ渡す。
           // 既存分があれば更新されるため、同じIssueが二重に並ぶことはない
           onIssueUpdated={(updated) => {
-            setStartTargetIssue(updated);
+            // **閉じた後に届いた更新で開き直さない**（#1434）。この`startTargetIssue`は
+            // 表示するIssueと開閉状態を兼ねており、素直に代入すると`null`（閉じた状態）へ
+            // 戻したものが復活する。サブPCを選んだ場合、ダイアログはジョブを積めた時点で
+            // 閉じ、その後に`11.local`の付与（GitHubへの往復）の結果がここへ届くため、
+            // 閉じた1秒ほど後に実行先の選択が出し直されていた。しかも積んだジョブで
+            // 選んだホスト自体が塞がるため、選んだ実行先が消えた状態で開き直っていた。
+            setStartTargetIssue((prev) => (prev ? updated : prev));
             onCreated(updated);
           }}
           onCommentCreated={() => {}}
