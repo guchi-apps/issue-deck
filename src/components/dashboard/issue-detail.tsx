@@ -30,7 +30,6 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
-import { LocalSessionSetupDialog } from "@/components/dashboard/local-session-setup-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
@@ -164,7 +163,6 @@ export function IssueDetail({
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
-  const [isLocalSessionSetupOpen, setIsLocalSessionSetupOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -420,9 +418,8 @@ export function IssueDetail({
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
   });
-  // ローカル起動の導線（ボタン・コマンドのコピー・セットアップ手順）は、対象リポジトリが
-  // ローカル起動プロトコルに適合しているときだけ出す（#1073）。3つとも同じ条件にしないと、
-  // 「ボタンは無いのにセットアップ手順だけ見られる」といった食い違いが出る。
+  // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
+  // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
     ? buildLocalSessionCommand(issue.repositoryFullName, issue.number)
     : null;
@@ -464,6 +461,8 @@ export function IssueDetail({
                   includeDispatchTargets
                   dispatch={dispatch}
                   actionsDisabledReason={actionsDisabledReason}
+                  comments={comments}
+                  localSessionCommand={localSessionCommand}
                   renderTrigger={(isSubmitting) => (
                     <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
@@ -499,8 +498,6 @@ export function IssueDetail({
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
-                onFirstLaunch={() => setIsLocalSessionSetupOpen(true)}
-                hasLocalStartScript={currentRepository?.hasLocalStartScript}
                 dispatch={dispatch}
               />
               <Button variant="outline" size="sm" asChild>
@@ -540,24 +537,6 @@ export function IssueDetail({
                     <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
                   </DropdownMenuItem>
-                  {localSessionCommand && (
-                    <>
-                      <DropdownMenuItem
-                        className="whitespace-nowrap text-xs"
-                        onSelect={() => void navigator.clipboard.writeText(localSessionCommand)}
-                      >
-                        <Copy className="size-3.5" />
-                        ローカル起動コマンドをコピー
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="whitespace-nowrap text-xs"
-                        onSelect={() => setIsLocalSessionSetupOpen(true)}
-                      >
-                        <Wrench className="size-3.5" />
-                        ローカル起動のセットアップ
-                      </DropdownMenuItem>
-                    </>
-                  )}
                   <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
                     <Pencil className="size-3.5" />
                     編集
@@ -826,13 +805,6 @@ export function IssueDetail({
         </SheetContent>
       </Sheet>
 
-      {localSessionCommand && (
-        <LocalSessionSetupDialog
-          open={isLocalSessionSetupOpen}
-          onOpenChange={setIsLocalSessionSetupOpen}
-          localSessionCommand={localSessionCommand}
-        />
-      )}
 
       <DeleteIssueDialog
         open={isDeleteDialogOpen}

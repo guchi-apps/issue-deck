@@ -463,6 +463,9 @@ export function MobileIssueDetail({
             includeDispatchTargets
             dispatch={dispatch}
             actionsDisabledReason={actionsDisabledReason}
+            comments={comments}
+            /* `localSessionCommand`は渡さない。ターミナルへ貼るためのものなので、
+               スマホでコピーできても貼る先が無い（#1263） */
             renderTrigger={(isSubmitting) => (
               <button
                 type="button"
@@ -792,6 +795,7 @@ export function MobileIssueDetail({
             includeDispatchTargets
             dispatch={dispatch}
             actionsDisabledReason={actionsDisabledReason}
+            comments={comments}
             renderTrigger={(isSubmitting) => (
               <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
@@ -801,18 +805,11 @@ export function MobileIssueDetail({
           />
         )}
 
-        {/* サブPCへのディスパッチ（#1180）。**「このPC」は出さない。** `issuedeck://`は
-            ブラウザを開いている端末のWindowsに登録されたハンドラを踏むもので、スマホからは
-            押しても何も起きない。サブPCの申告が無ければこの導線ごと出ない */}
+        {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
+            兼ねる。サブPCの申告が無ければこの導線ごと出ない */}
         <StartLocalSessionButton
           issue={issue}
           onIssueUpdated={onIssueUpdated}
-          onFirstLaunch={() => undefined}
-          hasLocalStartScript={
-            repositories.find((repo) => repo.fullName === issue.repositoryFullName)
-              ?.hasLocalStartScript
-          }
-          includeLocalTarget={false}
           fullWidth
           dispatch={dispatch}
         />

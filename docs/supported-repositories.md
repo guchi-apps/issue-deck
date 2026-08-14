@@ -56,7 +56,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 
 | 起動先 | 起動できる条件 | 正の所在 |
 |---|---|---|
-| このPC（`issuedeck://` → WSL） | 対象リポジトリの`scripts/start-issue.sh`が**マーカー行**（`# issue-deck-local-session: vN`）を宣言している | マーカー行そのもの |
+| 起動コマンドをコピー（WSL・SSH） | 対象リポジトリの`scripts/start-issue.sh`が**マーカー行**（`# issue-deck-local-session: vN`）を宣言している | マーカー行そのもの |
 | サブPC（`subpc`） | サブPCにcloneされ、対応表（`~/.config/issue-deck/local-repos.conf`）に載っている。**マーカー行は要らない** | サブPCの申告 |
 
 **マーカー行が無いことは「未対応」を意味しない**（#1224）。宣言していないリポジトリはissue-deck側の
@@ -64,7 +64,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 スクリプトで起動する。判定の詳細は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)
 「「実行できるリポジトリ」の判定」を参照。
 
-| リポジトリ | このPC（マーカー行） | サブPC |
+| リポジトリ | 起動コマンド（マーカー行） | サブPC |
 |---|---|---|
 | `guchi-apps/issue-deck` | v2 | ○ |
 | `guchi-apps/dayspan` | —（※） | ○ |
@@ -97,7 +97,7 @@ CIが`scripts/check-local-session-contract.sh`で適合を検査している。
 **この表は要約であって真実の源ではない。** 実態は起動先ごとに次で読む。
 
 ```bash
-# このPC: マーカー行を読む。宣言の無いリポジトリは ○（汎用ランチャーで起動する）と出る
+# 起動コマンド: マーカー行を読む。宣言の無いリポジトリは ○（汎用ランチャーで起動する）と出る
 scripts/check-local-session-contract.sh --all
 
 # サブPC: 申告を読む。サブPC上で実行する

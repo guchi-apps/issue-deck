@@ -197,25 +197,18 @@ pollerをsystemd timerではなく**常駐サービス**にしているのはこ
 Issue詳細の「ローカルで開始」を、**起動先の選択**に変えている
 （[src/components/dashboard/start-local-session-button.tsx](../../src/components/dashboard/start-local-session-button.tsx)）。
 
+> **「このPC」（`issuedeck://`）は#1263で廃止した。** ここに書いてあった「起動先を選ぶ」は、
+> 現在はサブPCの選択と、手元へ貼るためのコピー（実装プロンプト／起動コマンド）になっている。
+> 経緯は[local-quick-start.md](local-quick-start.md)「「このPC」を廃止した経緯」を参照。
+
 | 起動先 | 経路 | 使える場面 |
 |---|---|---|
-| このPC | `issuedeck://`プロトコル → WSLの受け口（#1049） | メインPCでブラウザを開いているときだけ |
 | サブPC（申告のあったホスト） | ジョブをキューに積む | **スマホからでも押せる。メインPCが起動していなくてよい** |
+| GitHub Actions | `@claude`の定型コメント | サブPCが使えないときのフォールバック |
+| 実装プロンプトをコピー | クリップボード | 手元でVS Codeを既に開いているとき |
 
-**申告しているホストが1台も無ければ、従来どおり単独のボタンのまま**にしている。申告さえあれば
-（応答が途絶えていても）メニューになり、選べない理由はその場に出る。
-
-### スマホの詳細画面には「このPC」を出さない
-
-**サブPC起動の主な用途は外出先のスマホ**（#1180）なので、スマホ用のIssue詳細
-（`components/dashboard/mobile/mobile-issue-detail.tsx`）にも導線を置く。ただし
-**「このPC」は候補に入れない。** `issuedeck://`はブラウザを開いている端末のWindowsに登録された
-ハンドラを踏むもので、スマホから押しても黙って何も起きない（未登録かどうかは検知できない。
-#1088）。押せる場所に置くこと自体が誤解になる。
-
-その結果、起動先が1つだけになる場面が2つできる（PCでサブPC未申告＝このPCのみ、スマホ＝
-サブPCのみ）。**どちらもメニューにせず単独のボタンにする。** 選択肢が1つのメニューを開かせる
-意味が無いため。スマホでサブPCの申告が無ければ、導線ごと出ない。
+**申告しているホストが1台だけなら、メニューにせず単独のボタンにする。** 選択肢が1つのメニューを
+開かせる意味が無いため。申告が1台も無ければ、このボタンの導線ごと出ない。
 
 ### スマホの「実装を開始」からも起動先を選べる（#1248）
 
@@ -224,7 +217,8 @@ Issue詳細の「ローカルで開始」を、**起動先の選択**に変え�
 [`start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx)に
 `includeDispatchTargets`を追加し、このダイアログでもオプション（`21.plan-required`等）と一緒に
 **実行先（GitHub Actions／申告のあるホスト）を選べる**ようにしている。PCでは
-ツールバーに「実装を開始」と「ローカルで開始」が並ぶため、既定は従来どおりGitHub Actionsのみ。
+ツールバーに「実装を開始」と「サブPCで開始」が並ぶ。**#1262でPCのツールバーでも実行先を選べる
+ようにし、既定はサブPCへ寄せた。**
 
 起動のさせ方は実行先で違う。
 
@@ -346,26 +340,20 @@ Actions UIに相当するものが無いため、次の3つで追う。
 URLとステータスコードは切り詰めずに残るので、どの経路が何で落ちたかは判断できる。全文が要る場合は
 同じURLを`curl`で直接叩く。
 
-## 受け口の複製に注意（#1179で増えた）
+## 受け口の複製は無くなった（#1263）
 
-メインPC（WSL）のワンクリック起動は、`register-issuedeck-protocol.ps1`が
-`~/.local/share/issue-deck/`へ複製した受け口を使う（#1076）。**受け口が
-`lib/local-repo-resolve.sh`をsourceするようになったため、複製の中身が
-「1ファイル」から「受け口＋`lib/`」に変わった。**
+かつてメインPC（WSL）のワンクリック起動は、`register-issuedeck-protocol.ps1`が
+`~/.local/share/issue-deck/`へ複製した受け口を使っていた（#1076）。受け口の中身が変わるたびに
+登録スクリプトの再実行が必要で、忘れると陳腐化する問題があった（#1085・#1089）。
 
-したがって**この変更を取り込んだら、メインPCで登録スクリプトの再実行が必要**。
-
-```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)"
-```
-
-再実行を忘れた場合、受け口は**黙って失敗せず**「登録スクリプトを再実行してください」と案内して
-止まる。#1085と同じ性質の変更で、#1089が「画面側から検知する手段が無い」と記録しているケース。
+**「このPC」の廃止（#1263）で複製する主体がいなくなり、この問題ごと消えている。** 現在
+`scripts/start-local-session.sh`を呼ぶのは、サブPCのpollerと「起動コマンドをコピー」で貼られた
+1行だけで、どちらもチェックアウトを直接指す。
 
 ## 関連
 
 - [#1176](https://github.com/guchi-apps/issue-deck/issues/1176) 実装実行基盤をサブPCへ移行する（親）
 - [#1180](https://github.com/guchi-apps/issue-deck/issues/1180) 起動先（このPC / subpc）を選べるようにする
-- [local-quick-start.md](local-quick-start.md) メインPCのワンクリック起動とローカル起動プロトコル
+- [local-quick-start.md](local-quick-start.md) ローカルセッションの起動とローカル起動プロトコル
 - [generic-launcher.md](generic-launcher.md) 対象リポジトリに何も置かずに起動する汎用ランチャー（#1224）
 - [progress-status-architecture.md](../progress-status-architecture.md) 進捗の唯一の正はProject Status
