@@ -31,4 +31,8 @@ CLAUDE_CODE_OAUTH_TOKEN=op://apps/issue-deck/claude-code-oauth-token
 
 PROGRESS_REPORT_SECRET=op://apps/issue-deck/progress-report-secret
 
+# サブPCへのディスパッチAPIの共有シークレット（#1179）。進捗報告とは別の値にする
+# （あちらは全リポジトリのActionsから参照できるorganization secretのため）
+DISPATCH_SECRET=op://apps/issue-deck/dispatch-secret
+
 SIGNALY_WEBHOOK_URL=op://apps/issue-deck/ci-webhook-url

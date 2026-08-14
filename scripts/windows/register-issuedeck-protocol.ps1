@@ -14,6 +14,9 @@
   リポジトリの作業ディレクトリを直接叩く形にすると、そこが別Issueのブランチに
   切り替わっている間はファイルが存在せず起動できない。
 
+  **受け口が使うライブラリ（scripts/lib/local-repo-resolve.sh）も一緒に複製する**（#1179）。
+  受け口は自分と同じ位置の lib/ を source するため、これを配らないと起動できない。
+
   issue-deck側のハンドラ・受け口を更新したときは、このスクリプトを再実行して複製を更新する。
 #>
 
@@ -33,6 +36,10 @@ if ([string]::IsNullOrWhiteSpace($distro)) {
 }
 # WSL側で受け口スクリプトを置く場所。issuedeck-protocol.ps1 の $launcher と同じ値にする。
 $launcherWslPath = "~/.local/share/issue-deck/start-local-session.sh"
+# 受け口が source するライブラリ（#1179）。**受け口から見て `lib/` という同じ相対位置**に
+# 置くことで、リポジトリ内（scripts/lib/）でも複製先でも同じ1行で解決できる。
+$launcherLibDirWslPath = "~/.local/share/issue-deck/lib"
+$launcherLibWslPath = "$launcherLibDirWslPath/local-repo-resolve.sh"
 
 if ($Unregister) {
     if (Test-Path $registryKey) {
@@ -46,8 +53,8 @@ if ($Unregister) {
         Write-Host "ハンドラを削除しました: $installedHandler"
     }
     try {
-        & wsl.exe -d $distro -- bash -lc "rm -f $launcherWslPath" 2>$null | Out-Null
-        Write-Host "受け口スクリプトを削除しました: $launcherWslPath（WSL側）"
+        & wsl.exe -d $distro -- bash -lc "rm -f $launcherWslPath; rm -rf $launcherLibDirWslPath" 2>$null | Out-Null
+        Write-Host "受け口スクリプトとライブラリを削除しました: $launcherWslPath / $launcherLibDirWslPath（WSL側）"
     } catch {
         Write-Warning "受け口スクリプトの削除に失敗しました: $launcherWslPath"
     }
@@ -82,28 +89,57 @@ function ConvertTo-WslPath([string]$windowsPath) {
     return $null
 }
 
-$sourceLauncher = Join-Path $PSScriptRoot "..\start-local-session.sh"
-if (-not (Test-Path $sourceLauncher)) {
-    throw "受け口スクリプトが見つかりません: $sourceLauncher"
-}
-$sourceLauncherWsl = ConvertTo-WslPath $sourceLauncher
-if (-not $sourceLauncherWsl) {
-    Write-Warning "受け口スクリプトのWSL上のパスを特定できませんでした。WSL側で次を実行してください:"
-    Write-Warning "  install -D -m 755 <リポジトリ>/scripts/start-local-session.sh $launcherWslPath"
-} elseif ($sourceLauncherWsl.Contains("'")) {
-    Write-Warning "複製元のパスに ' が含まれるため自動配置を見送りました: $sourceLauncherWsl"
-} else {
+# WSL側の固定の場所へ1ファイル複製する。受け口本体とライブラリで同じ手順を使う（#1179）。
+# `install -D` は複製先の親ディレクトリごと作るため、lib/ を先に作っておく必要はない。
+function Install-WslFile {
+    param(
+        [string]$SourcePath,
+        [string]$DestWslPath,
+        [string]$Mode,
+        [string]$Label,
+        [string]$RepoRelativePath
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        throw "$Label が見つかりません: $SourcePath"
+    }
+    $sourceWsl = ConvertTo-WslPath $SourcePath
+    if (-not $sourceWsl) {
+        Write-Warning "$Label のWSL上のパスを特定できませんでした。WSL側で次を実行してください:"
+        Write-Warning "  install -D -m $Mode <リポジトリ>/$RepoRelativePath $DestWslPath"
+        return
+    }
+    if ($sourceWsl.Contains("'")) {
+        Write-Warning "複製元のパスに ' が含まれるため自動配置を見送りました: $sourceWsl"
+        return
+    }
     try {
-        & wsl.exe -d $distro -- bash -lc "install -D -m 755 '$sourceLauncherWsl' $launcherWslPath" 2>$null | Out-Null
+        & wsl.exe -d $distro -- bash -lc "install -D -m $Mode '$sourceWsl' $DestWslPath" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "受け口スクリプトを配置しました: $launcherWslPath（複製元: $sourceLauncherWsl）"
+            Write-Host "$Label を配置しました: $DestWslPath（複製元: $sourceWsl）"
         } else {
-            Write-Warning "受け口スクリプトの配置に失敗しました（複製元: $sourceLauncherWsl）。"
+            Write-Warning "$Label の配置に失敗しました（複製元: $sourceWsl）。"
         }
     } catch {
-        Write-Warning "受け口スクリプトの配置に失敗しました（複製元: $sourceLauncherWsl）。"
+        Write-Warning "$Label の配置に失敗しました（複製元: $sourceWsl）。"
     }
 }
+
+Install-WslFile `
+    -SourcePath (Join-Path $PSScriptRoot "..\start-local-session.sh") `
+    -DestWslPath $launcherWslPath `
+    -Mode "755" `
+    -Label "受け口スクリプト" `
+    -RepoRelativePath "scripts/start-local-session.sh"
+
+# 受け口はこのライブラリを source する。**配り忘れると受け口が起動できない**ので、
+# 受け口本体と必ずセットで複製する（#1179）。
+Install-WslFile `
+    -SourcePath (Join-Path $PSScriptRoot "..\lib\local-repo-resolve.sh") `
+    -DestWslPath $launcherLibWslPath `
+    -Mode "755" `
+    -Label "受け口のライブラリ" `
+    -RepoRelativePath "scripts/lib/local-repo-resolve.sh"
 
 # powershell.exe の実体を絶対パスで埋め込む（レジストリからの起動時にPATHへ依存しないため）。
 $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"

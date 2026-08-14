@@ -64,20 +64,32 @@ cd \\wsl.localhost\Ubuntu\home\<ユーザー名>\apps\issue-deck
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\register-issuedeck-protocol.ps1
 ```
 
-登録スクリプトは2つの複製を作る。
+登録スクリプトは3つの複製を作る。
 
 | 複製するもの | 複製先 | 理由 |
 | --- | --- | --- |
 | `scripts/windows/issuedeck-protocol.ps1` | `%LOCALAPPDATA%\issue-deck\` | WSL上のパス（`\\wsl.localhost\...`）を直接登録すると、WSLが停止した状態からの初回起動でパス解決に失敗しうる |
 | `scripts/start-local-session.sh` | WSLの`~/.local/share/issue-deck/` | リポジトリの作業ディレクトリを直接叩くと、そこが別Issueのブランチに切り替わっている間はファイルが存在せず起動できない（#1076） |
+| `scripts/lib/local-repo-resolve.sh` | WSLの`~/.local/share/issue-deck/lib/` | 受け口がリポジトリの解決・検証をこのライブラリに任せているため（#1179）。**受け口だけを複製しても起動しない** |
 
-**どちらかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+**いずれかを変更したときは、登録スクリプトを再実行して複製を更新する。**
+
+> **#1179を取り込んだ環境では、登録スクリプトの再実行が必須。**
+> 受け口が`lib/`をsourceするようになり、複製の中身が「1ファイル」から「受け口＋`lib/`」へ
+> 変わった。再実行しないと`issuedeck://`からの起動が失敗する。#1085と同じ性質の変更で、
+> 画面側から検知する手段が無いこと自体は#1089に記録がある。
+> 受け口は黙って失敗せず、「登録スクリプトを再実行してください」と案内して止まる。
+
+受け口は自分と同じ位置の`lib/`を探す（`$(dirname "${BASH_SOURCE[0]}")/lib/`）。リポジトリ内の
+`scripts/lib/`と複製先の`~/.local/share/issue-deck/lib/`が同じ相対位置になるため、経路によらず
+同じ1行で解決できる。**ライブラリからリポジトリ内のファイルを参照しないこと**（複製先には
+チェックアウトが無い）。
 
 受け口の複製元は`$PSScriptRoot`から辿る。`\\wsl.localhost\<ディストロ>\...`と`\\wsl$\<ディストロ>\...`は
 そのまま読み替え、それ以外（Cドライブ等から実行した場合）は`wslpath -u`に任せる。特定できない
 場合は警告を出すので、表示された`install`コマンドをWSL側で実行する。
 
-解除は`-Unregister`を付けて実行する。両方の複製とレジストリ登録が消える。
+解除は`-Unregister`を付けて実行する。3つの複製（`lib/`ごと）とレジストリ登録が消える。
 
 動作確認は、ブラウザのアドレスバーに`issuedeck://start/guchi-apps/issue-deck/99999`を入力する。
 新しいタブが開いて「issue #99999 の取得に失敗しました」で止まれば、レジストリ登録からWSLの
@@ -430,7 +442,12 @@ URL経路と同じものを動かすためだが、複製を作るのは登録�
 ```bash
 install -D -m 755 ~/apps/issue-deck/scripts/start-local-session.sh \
   ~/.local/share/issue-deck/start-local-session.sh
+install -D -m 755 ~/apps/issue-deck/scripts/lib/local-repo-resolve.sh \
+  ~/.local/share/issue-deck/lib/local-repo-resolve.sh
 ```
+
+**受け口とライブラリは必ずセットで置く。** 受け口だけを置くと、実行時に
+「`lib/local-repo-resolve.sh`がありません」で停止する。
 
 ## セットアップ手順を画面から見せる
 

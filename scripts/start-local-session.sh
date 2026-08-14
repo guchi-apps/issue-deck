@@ -13,6 +13,10 @@
 #
 # 引数はブラウザ経由で外部から渡りうるため、ハンドラ側で検証済みでも改めて検証する
 # （多層防御。片側の検証が緩んでもここで止まる）。
+#
+# リポジトリの解決・検証は lib/local-repo-resolve.sh が持つ。サブPCのディスパッチpoller
+# （scripts/subpc-dispatch-poller.sh）が「自分が実行できるリポジトリ」を申告する際に
+# **同じ判定を使う**ためで、判定を二重に持つと申告と実際の起動可否がずれる（#1179）。
 
 set -euo pipefail
 
@@ -31,6 +35,21 @@ usage() {
   echo "Usage: scripts/start-local-session.sh <owner> <repo> <issue番号>" >&2
 }
 
+# 判定を共有するライブラリ。**リポジトリ内でも複製先でも同じ相対位置**に置く。
+# 複製先（~/.local/share/issue-deck/）へは register-issuedeck-protocol.ps1 が
+# このスクリプトと一緒に lib/ ごと配る。古い複製には lib/ が無いため、
+# 「何が起きているのか分からない失敗」にせず、再登録を案内して止める。
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+if [[ ! -f "$LIB_DIR/local-repo-resolve.sh" ]]; then
+  echo "Error: $LIB_DIR/local-repo-resolve.sh がありません。" >&2
+  echo "  受け口の複製が古い可能性があります。issue-deckのリポジトリで次を実行し、" >&2
+  echo "  プロトコル登録をやり直してください:" >&2
+  echo "    powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"\$(wslpath -w ~/apps/issue-deck/scripts/windows/register-issuedeck-protocol.ps1)\"" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/local-repo-resolve.sh
+source "$LIB_DIR/local-repo-resolve.sh"
+
 if [[ $# -ne 3 ]]; then
   usage
   exit 1
@@ -40,94 +59,18 @@ OWNER="$1"
 REPO="$2"
 ISSUE_NUMBER="$3"
 
-# src/lib/local-session.ts の OWNER_OR_REPO_PATTERN と同じ文字集合に揃える。
-# 片側だけを緩めると、緩めた側が単独で穴になる。
-if [[ ! "$OWNER" =~ ^[A-Za-z0-9._-]+$ || ! "$REPO" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "Error: owner・repoに使えない文字が含まれています: $OWNER/$REPO" >&2
-  exit 1
-fi
-# `.`を許可しているため `.` `..` 自体が通る。パスの一部として使うので明示的に弾く。
-if [[ "$OWNER" =~ ^\.+$ || "$REPO" =~ ^\.+$ ]]; then
-  echo "Error: owner・repoにディレクトリ参照は指定できません: $OWNER/$REPO" >&2
-  exit 1
-fi
-if [[ ! "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: issue番号は正の整数で指定してください: $ISSUE_NUMBER" >&2
-  exit 1
-fi
+local_session_validate_target "$OWNER" "$REPO" "$ISSUE_NUMBER" || exit 1
 
 FULL_NAME="$OWNER/$REPO"
 
-# リポジトリ→ローカルのチェックアウト先の対応表。
-# 既定はissue-deck自身のみ。他リポジトリを足す場合は設定ファイルに1行ずつ書く
-# （`owner/repo<空白>絶対パス`。`#`始まりはコメント）。パスに空白を含んでもよい
-# （最初の空白までをリポジトリ名、残りをパスとして扱う）。
-CONFIG_FILE="${ISSUE_DECK_LOCAL_REPOS_CONFIG:-$HOME/.config/issue-deck/local-repos.conf}"
-
-resolve_repo_path() {
-  local target="$1"
-  if [[ -f "$CONFIG_FILE" ]]; then
-    local line name path
-    # `read -r name path _` だとパスが空白で切れるため、1行読んで最初の空白で2分割する。
-    # 併せてCRLFの改行と行末の空白も落とす（Windows側のエディタで編集されうるため）。
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="${line%$'\r'}"
-      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-      [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
-      name="${BASH_REMATCH[1]}"
-      path="${BASH_REMATCH[2]}"
-      path="${path%"${path##*[![:space:]]}"}"
-      if [[ "$name" == "$target" ]]; then
-        # 設定ファイル側の `~` はシェル展開されないため自前で展開する。
-        printf '%s\n' "${path/#\~/$HOME}"
-        return 0
-      fi
-    done <"$CONFIG_FILE"
-  fi
-  if [[ "$target" == "guchi-apps/issue-deck" ]]; then
-    printf '%s\n' "$HOME/apps/issue-deck"
-    return 0
-  fi
-  return 1
-}
-
-if ! REPO_PATH="$(resolve_repo_path "$FULL_NAME")"; then
-  echo "Error: $FULL_NAME のローカルチェックアウト先が分かりません。" >&2
-  echo "  $CONFIG_FILE に次の形式で追記してください:" >&2
-  echo "    $FULL_NAME /home/$(whoami)/apps/$REPO" >&2
+# 対応表の解決からプロトコル版数の確認まで（4段階）をまとめて行う。
+# 黙って失敗させず、何を直せばよいかまで出して止める。
+if ! local_repo_check "$FULL_NAME"; then
+  local_repo_print_error "$FULL_NAME"
   exit 1
 fi
-
-if [[ ! -d "$REPO_PATH" ]]; then
-  echo "Error: $FULL_NAME のチェックアウト先が存在しません: $REPO_PATH" >&2
-  exit 1
-fi
-
-LAUNCHER="$REPO_PATH/scripts/start-issue.sh"
-if [[ ! -x "$LAUNCHER" && ! -f "$LAUNCHER" ]]; then
-  echo "Error: $FULL_NAME には scripts/start-issue.sh がありません（$LAUNCHER）。" >&2
-  echo "  ワンクリック起動に対応しているのは、このスクリプトを持つリポジトリだけです。" >&2
-  exit 1
-fi
-
-# ローカル起動プロトコルの版数を確かめる（#1073）。ファイルがあっても約束を守っているとは
-# 限らず、守っていないと起動してから無言で固まる（ISSUE_DECK_SKIP_LAN_SETUPを解釈しない
-# リポジトリでは、UACを承認しても待ちから戻らない）。押した先で固まるより、ここで止める。
-# 版数は src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と揃える。
-SUPPORTED_CONTRACT_VERSION=2
-DECLARED_VERSION="$(grep -oP '^#\s*issue-deck-local-session:\s*v\K[0-9]+' "$LAUNCHER" | head -1 || true)"
-if [[ -z "$DECLARED_VERSION" ]]; then
-  echo "Error: $FULL_NAME はローカル起動プロトコルに対応していません。" >&2
-  echo "  $LAUNCHER の冒頭に次の1行を足し、約束を満たすようにしてください:" >&2
-  echo "    # issue-deck-local-session: v$SUPPORTED_CONTRACT_VERSION" >&2
-  echo "  約束の内容は issue-deck の docs/multi-agent/local-quick-start.md を参照してください。" >&2
-  exit 1
-fi
-if [[ "$DECLARED_VERSION" -gt "$SUPPORTED_CONTRACT_VERSION" ]]; then
-  echo "Error: $FULL_NAME が宣言する v$DECLARED_VERSION は、この受け口が扱える v$SUPPORTED_CONTRACT_VERSION より新しいです。" >&2
-  echo "  issue-deck側を更新してから、register-issuedeck-protocol.ps1 を再実行してください。" >&2
-  exit 1
-fi
+REPO_PATH="$LOCAL_REPO_PATH"
+LAUNCHER="$LOCAL_REPO_LAUNCHER"
 
 echo "#$ISSUE_NUMBER: $FULL_NAME（$REPO_PATH）のセッションを起動します..."
 cd "$REPO_PATH"

@@ -1,0 +1,41 @@
+[Unit]
+# サブPCのディスパッチpoller（#1179）。issue-deckのジョブキューを一定間隔でポーリングし、
+# 取れたジョブのClaude Codeセッションを起動する。
+#
+# **ポーリング間隔はこのunitではなく `~/.config/issue-deck/dispatch.env` の
+# `DISPATCH_POLL_INTERVAL_SECONDS` で決める**（#1179のコメント）。起動までの遅延が実運用で
+# 許容できるかは動かしてみないと分からず、当たりを付ける実験ができる形にしておく必要がある。
+# systemd timerに間隔を持たせると、変更のたびにunitの編集と`daemon-reload`が要るうえ、
+# pollerの他の設定と置き場所が分かれる。
+Description=issue-deck dispatch poller
+Documentation=https://github.com/guchi-apps/issue-deck/blob/develop/docs/multi-agent/subpc-dispatch.md
+After=network-online.target
+Wants=network-online.target
+
+# 設定不備で即死を繰り返す場合に、無限に再起動し続けないようにする。
+# **[Service]ではなく[Unit]に置く**（systemd 229以降の位置。[Service]に書くと無視される）。
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# 共有シークレットは chmod 600 のファイルから読む。1Password から毎回 `op run` で
+# 引くのは重すぎるため、あらかじめ書き出しておいた値をここで読む形にしている
+# （生成手順は dispatch.env.example のコメントを参照）。
+# **このファイルを変更したら `systemctl --user restart` が要る**（起動時に読むため）。
+EnvironmentFile=%h/.config/issue-deck/dispatch.env
+
+# tmux はログインシェルを経由しないため PATH が落ちる（#1177・#1178）。
+# poller 自身が使う curl/jq/tmux はシステム側にあるが、この先で起動される
+# start-issue.sh は node/pnpm/claude を必要とする。`bash -lc` でログインシェルを
+# 明示し、~/.profile 系（PATH は ~/.profile.local）をまとめて読ませる。
+ExecStart=/bin/bash -lc '%h/apps/issue-deck/scripts/subpc-dispatch-poller.sh'
+
+# 落ちても復帰させる。1巡の失敗ではプロセスを終わらせない作りなので、ここへ来るのは
+# 設定不備（起動直後に終了する）か想定外の異常のどちらか。
+Restart=always
+RestartSec=30s
+
+[Install]
+WantedBy=default.target
