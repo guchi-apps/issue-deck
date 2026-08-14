@@ -43,6 +43,7 @@ import {
 import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
@@ -757,6 +758,21 @@ export function MobileIssueDetail({
             )}
           />
         )}
+
+        {/* サブPCへのディスパッチ（#1180）。**「このPC」は出さない。** `issuedeck://`は
+            ブラウザを開いている端末のWindowsに登録されたハンドラを踏むもので、スマホからは
+            押しても何も起きない。サブPCの申告が無ければこの導線ごと出ない */}
+        <StartLocalSessionButton
+          issue={issue}
+          onIssueUpdated={onIssueUpdated}
+          onFirstLaunch={() => undefined}
+          hasLocalStartScript={
+            repositories.find((repo) => repo.fullName === issue.repositoryFullName)
+              ?.hasLocalStartScript
+          }
+          includeLocalTarget={false}
+          fullWidth
+        />
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>
