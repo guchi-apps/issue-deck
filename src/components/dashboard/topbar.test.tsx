@@ -12,6 +12,7 @@ vi.mock("next/navigation", () => ({
 const baseFilters: IssueFilters = {
   view: "all",
   pane: "issues",
+  prview: "all",
   pr: null,
   q: "",
   repos: [],

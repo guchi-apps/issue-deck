@@ -3,9 +3,10 @@
 import { ChevronLeft } from "lucide-react";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
 
 type MobilePullRequestsScreenProps = {
+  view: PullRequestViewId;
   pullRequests: PullRequestSummary[];
   failedRepositories: string[];
   fetchedAt: string | null;
@@ -19,10 +20,11 @@ type MobilePullRequestsScreenProps = {
 };
 
 /**
- * スマホのマージ待ちPR一覧画面（#1058）。PC版と同じ`PullRequestList`をそのまま使い、
+ * スマホのPR一覧画面（#1058）。PC版と同じ`PullRequestList`をそのまま使い、
  * ヘッダー左に戻る導線を差し込むだけにしている（一覧の中身に画面幅固有の出し分けが無いため）。
  */
 export function MobilePullRequestsScreen({
+  view,
   pullRequests,
   failedRepositories,
   fetchedAt,
@@ -35,6 +37,7 @@ export function MobilePullRequestsScreen({
 }: MobilePullRequestsScreenProps) {
   return (
     <PullRequestList
+      view={view}
       pullRequests={pullRequests}
       failedRepositories={failedRepositories}
       fetchedAt={fetchedAt}

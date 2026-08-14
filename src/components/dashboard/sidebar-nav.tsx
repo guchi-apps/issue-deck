@@ -8,7 +8,6 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
-  GitPullRequest,
   Lock,
   Plus,
   Settings2,
@@ -21,8 +20,10 @@ import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
+import type { PullRequestViewId } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import { Separator } from "@/components/ui/separator";
@@ -33,7 +34,9 @@ type SidebarNavProps = {
   onSelectView: (view: NavViewId) => void;
   /** 中央カラムに表示中のペイン。Issueビューの選択状態はIssueペインのときだけ表示する */
   activePane: DashboardPane;
-  onSelectPane: (pane: DashboardPane) => void;
+  /** PRペインで表示中の状態別ビュー（#1312） */
+  activePullRequestView: PullRequestViewId;
+  onSelectPullRequestView: (view: PullRequestViewId) => void;
   navCounts: Record<NavViewId, number>;
   repositories: ConnectedRepository[];
   selectedRepoFullNames?: string[];
@@ -58,7 +61,8 @@ export function SidebarNav({
   activeView,
   onSelectView,
   activePane,
-  onSelectPane,
+  activePullRequestView,
+  onSelectPullRequestView,
   navCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -142,21 +146,29 @@ export function SidebarNav({
       <div>
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Pull Request</h2>
         <ul className="flex flex-col gap-0.5">
-          <li>
-            <button
-              type="button"
-              onClick={() => onSelectPane("pull-requests")}
-              className={cn(
-                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                activePane === "pull-requests" && "bg-accent font-medium",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <GitPullRequest className="size-3.5 text-muted-foreground" />
-                マージ待ちPR
-              </span>
-            </button>
-          </li>
+          {pullRequestViews.map((view) => {
+            const Icon = pullRequestViewIcons[view.id];
+            return (
+              <li key={view.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectPullRequestView(view.id)}
+                  title={view.description}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                    activePane === "pull-requests" &&
+                      activePullRequestView === view.id &&
+                      "bg-accent font-medium",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon className="size-3.5 text-muted-foreground" />
+                    {view.label}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 

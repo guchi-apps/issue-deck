@@ -8,7 +8,9 @@ import {
   isNavViewId,
   resolveStateOnViewChange,
 } from "@/lib/nav-views";
+import { DEFAULT_PULL_REQUEST_VIEW, isPullRequestViewId } from "@/lib/pull-request-views";
 import type { NavViewId } from "@/types/issue";
+import type { PullRequestViewId } from "@/types/pull-request";
 
 export type IssueSort = "updated" | "created";
 export type IssueStateFilter = "all" | "open" | "closed";
@@ -25,6 +27,10 @@ export type IssueFilters = {
   view: NavViewId;
   pane: DashboardPane;
   /**
+   * PRペインで表示している状態別ビュー（#1312）。`pr`と同じくPC・スマホで同じクエリを使う。
+   */
+  prview: PullRequestViewId;
+  /**
    * PRペインで詳細を開いているPRのid（`<owner>/<repo>#<番号>`）。未選択はnull。
    * PC・スマホで同じクエリを使う（スマホは選択中かどうかで一覧と詳細の画面を切り替える）。
    */
@@ -40,6 +46,7 @@ export type IssueFilters = {
 const DEFAULT_FILTERS: IssueFilters = {
   view: "all",
   pane: "issues",
+  prview: DEFAULT_PULL_REQUEST_VIEW,
   pr: null,
   q: "",
   repos: [],
@@ -86,6 +93,7 @@ export function useIssueFilters() {
 
   const filters = useMemo<IssueFilters>(() => {
     const viewParam = searchParams.get("view");
+    const prViewParam = searchParams.get("prview");
     const stateParam = searchParams.get("state");
     const labelsParam = searchParams.get("labels");
     const reposParam = searchParams.get("repos");
@@ -96,6 +104,7 @@ export function useIssueFilters() {
     return {
       view,
       pane: searchParams.get("pane") === "pull-requests" ? "pull-requests" : "issues",
+      prview: isPullRequestViewId(prViewParam) ? prViewParam : DEFAULT_FILTERS.prview,
       pr: searchParams.get("pr"),
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
@@ -149,11 +158,13 @@ export function useIssueFilters() {
     [setFilters, filters.view, filters.state, isStateExplicit],
   );
 
-  const selectPane = useCallback(
-    (pane: DashboardPane) => {
-      // ペインを切り替えるときは選択中PRを畳む。PRは開きっぱなしにする対象ではなく
+  // 左メニューのPull Requestセクションからの遷移（#1312）。ペインとビューを1回のURL更新で
+  // まとめて反映する（setFilterを2回呼ぶと後の1回が前の1回の変更を落とす）。
+  const selectPullRequestView = useCallback(
+    (prview: PullRequestViewId) => {
+      // ビューを切り替えるときは選択中PRを畳む。PRは開きっぱなしにする対象ではなく
       // （マージすれば一覧から消える）、戻ってきたときに存在しないPRの詳細が残るのを避ける。
-      setFilters({ pane, pr: null });
+      setFilters({ pane: "pull-requests", prview, pr: null });
     },
     [setFilters],
   );
@@ -191,7 +202,7 @@ export function useIssueFilters() {
     setFilter,
     setFilters,
     selectView,
-    selectPane,
+    selectPullRequestView,
     selectPullRequest,
     toggleLabel,
     toggleRepo,

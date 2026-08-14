@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPullRequest,
   extractLinkedIssueNumber,
+  filterPullRequestsByView,
   groupPullRequestsByRepository,
   canMergeFromDeck,
   mergeWarnings,
+  scopeForPullRequestView,
   sortOpenPullRequests,
+  sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -102,25 +105,110 @@ describe("sortOpenPullRequests", () => {
   });
 });
 
+describe("sortPullRequestsByUpdated", () => {
+  it("更新が新しい順に並べる", () => {
+    const sorted = sortPullRequestsByUpdated([
+      pullRequest({ number: 2, updatedAt: "2026-08-03T00:00:00Z" }),
+      pullRequest({ number: 1, updatedAt: "2026-08-01T00:00:00Z" }),
+      pullRequest({ number: 3, updatedAt: "2026-08-02T00:00:00Z" }),
+    ]);
+    expect(sorted.map((pr) => pr.number)).toEqual([2, 3, 1]);
+  });
+
+  it("元の配列を破壊しない", () => {
+    const input = [
+      pullRequest({ number: 1, updatedAt: "2026-08-01T00:00:00Z" }),
+      pullRequest({ number: 2, updatedAt: "2026-08-03T00:00:00Z" }),
+    ];
+    sortPullRequestsByUpdated(input);
+    expect(input.map((pr) => pr.number)).toEqual([1, 2]);
+  });
+});
+
+describe("filterPullRequestsByView", () => {
+  it("allはクローズ済みも含めてそのまま返す", () => {
+    const pullRequests = [
+      pullRequest({ number: 1 }),
+      pullRequest({ number: 2, state: "closed", merged: true, ciState: "unknown" }),
+    ];
+    expect(filterPullRequestsByView(pullRequests, "all")).toEqual(pullRequests);
+  });
+
+  it("完了はCIが確定したopenなPRだけを返す", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, ciState: "success" }),
+      pullRequest({ number: 2, ciState: "failure" }),
+      pullRequest({ number: 3, ciState: "pending" }),
+      pullRequest({ number: 4, ciState: "unknown" }),
+      pullRequest({ number: 5, draft: true, ciState: "unknown" }),
+    ];
+    expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([
+      1, 2,
+    ]);
+  });
+
+  // ドラフトはCI状態を取得していないので常にunknown。CI状態を取得したが確定していないPRと
+  // 同じく「まだ判断できない」ため処理中側へ入れる。
+  it("処理中はCI待ち・CI状態不明・ドラフトを返す", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, ciState: "success" }),
+      pullRequest({ number: 2, ciState: "failure" }),
+      pullRequest({ number: 3, ciState: "pending" }),
+      pullRequest({ number: 4, ciState: "unknown" }),
+      pullRequest({ number: 5, draft: true, ciState: "unknown" }),
+      pullRequest({ number: 6, draft: true, ciState: "success" }),
+    ];
+    expect(filterPullRequestsByView(pullRequests, "in-progress").map((pr) => pr.number)).toEqual([
+      3, 4, 5, 6,
+    ]);
+  });
+
+  it("処理中と完了でopenなPRを過不足なく二分する", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, ciState: "success" }),
+      pullRequest({ number: 2, ciState: "pending" }),
+      pullRequest({ number: 3, draft: true, ciState: "unknown" }),
+      pullRequest({ number: 4, ciState: "failure" }),
+      // closedはどちらにも入らない（母集団はopenのみ）
+      pullRequest({ number: 5, state: "closed", merged: true, ciState: "unknown" }),
+    ];
+    const inProgress = filterPullRequestsByView(pullRequests, "in-progress");
+    const completed = filterPullRequestsByView(pullRequests, "completed");
+
+    expect([...inProgress, ...completed].map((pr) => pr.number).sort()).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("scopeForPullRequestView", () => {
+  it("クローズ済みまで取りに行くのは全てのPRビューだけ", () => {
+    expect(scopeForPullRequestView("all")).toBe("all");
+    expect(scopeForPullRequestView("in-progress")).toBe("open");
+    expect(scopeForPullRequestView("completed")).toBe("open");
+  });
+});
+
 describe("groupPullRequestsByRepository", () => {
   it("最も古いPRを持つリポジトリを先頭に並べる", () => {
-    const groups = groupPullRequestsByRepository([
-      pullRequest({
-        repositoryFullName: "guchi-apps/dayspan",
-        number: 10,
-        createdAt: "2026-08-05T00:00:00Z",
-      }),
-      pullRequest({
-        repositoryFullName: "guchi-apps/issue-deck",
-        number: 20,
-        createdAt: "2026-08-01T00:00:00Z",
-      }),
-      pullRequest({
-        repositoryFullName: "guchi-apps/dayspan",
-        number: 11,
-        createdAt: "2026-08-02T00:00:00Z",
-      }),
-    ]);
+    const groups = groupPullRequestsByRepository(
+      [
+        pullRequest({
+          repositoryFullName: "guchi-apps/dayspan",
+          number: 10,
+          createdAt: "2026-08-05T00:00:00Z",
+        }),
+        pullRequest({
+          repositoryFullName: "guchi-apps/issue-deck",
+          number: 20,
+          createdAt: "2026-08-01T00:00:00Z",
+        }),
+        pullRequest({
+          repositoryFullName: "guchi-apps/dayspan",
+          number: 11,
+          createdAt: "2026-08-02T00:00:00Z",
+        }),
+      ],
+      "in-progress",
+    );
 
     // dayspanの最古は08-02、issue-deckの最古は08-01なのでissue-deckが先
     expect(groups.map((group) => group.repositoryFullName)).toEqual([
@@ -128,6 +216,39 @@ describe("groupPullRequestsByRepository", () => {
       "guchi-apps/dayspan",
     ]);
     expect(groups[1].pullRequests.map((pr) => pr.number)).toEqual([11, 10]);
+  });
+
+  // 全てのPRビューはマージ済みを含むため、作成が古い順だと完了済みの古いPRが先頭を占める（#1312）
+  it("全てのPRビューでは更新が新しい順に並べる", () => {
+    const groups = groupPullRequestsByRepository(
+      [
+        pullRequest({
+          repositoryFullName: "guchi-apps/dayspan",
+          number: 10,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-08-05T00:00:00Z",
+        }),
+        pullRequest({
+          repositoryFullName: "guchi-apps/issue-deck",
+          number: 20,
+          createdAt: "2025-01-01T00:00:00Z",
+          updatedAt: "2026-08-01T00:00:00Z",
+        }),
+        pullRequest({
+          repositoryFullName: "guchi-apps/dayspan",
+          number: 11,
+          createdAt: "2026-02-01T00:00:00Z",
+          updatedAt: "2026-08-02T00:00:00Z",
+        }),
+      ],
+      "all",
+    );
+
+    expect(groups.map((group) => group.repositoryFullName)).toEqual([
+      "guchi-apps/dayspan",
+      "guchi-apps/issue-deck",
+    ]);
+    expect(groups[0].pullRequests.map((pr) => pr.number)).toEqual([10, 11]);
   });
 });
 

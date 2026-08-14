@@ -6,26 +6,35 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
+  fetchClosedPullRequests,
   fetchOpenPullRequests,
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
-import type { OpenPullRequestsResponse, PullRequestSummary } from "@/types/pull-request";
+import type {
+  PullRequestListResponse,
+  PullRequestListScope,
+  PullRequestSummary,
+} from "@/types/pull-request";
 
-export function GET() {
-  return withGithubApiFeature("pull_request_list", handleGET);
+export function GET(request: Request) {
+  return withGithubApiFeature("pull_request_list", () => handleGET(request));
 }
 
-async function handleGET() {
+async function handleGET(request: Request) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // 既定はマージ待ち（open）のみ。`scope=all`のときだけクローズ済みも足す（#1312）。
+  const scope: PullRequestListScope =
+    new URL(request.url).searchParams.get("scope") === "all" ? "all" : "open";
+
   // 一覧の母集団はIssue一覧と揃えて「連携済みリポジトリ」全体とし、そこからユーザーが
   // 左メニューで非表示にしたもの（HiddenRepository）とアーカイブ済みを除く。
-  // 1リポジトリにつき1回GitHub APIを呼ぶため、母集団の広さがそのまま取得コストになる。
-  // 自動ポーリングを持たせていない（画面を開いたときと手動更新のみ）のはこのため。
+  // 1リポジトリにつき1回（`scope=all`なら2回）GitHub APIを呼ぶため、母集団の広さがそのまま
+  // 取得コストになる。自動ポーリングを持たせていない（画面を開いたときと手動更新のみ）のはこのため。
   const hiddenRepositoryIds = (
     await db.hiddenRepository.findMany({ where: { userId }, select: { repositoryId: true } })
   ).map((row) => row.repositoryId);
@@ -41,7 +50,7 @@ async function handleGET() {
   });
 
   if (repositories.length === 0) {
-    const empty: OpenPullRequestsResponse = {
+    const empty: PullRequestListResponse = {
       pullRequests: [],
       fetchedAt: new Date().toISOString(),
       failedRepositories: [],
@@ -66,23 +75,29 @@ async function handleGET() {
     repositories.map(async (repository): Promise<PullRequestSummary[]> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
-        const pullRequests = await fetchOpenPullRequests(
-          repository.ownerLogin,
-          repository.name,
+        const context = {
+          ownerLogin: repository.ownerLogin,
+          name: repository.name,
+          fullName: repository.fullName,
+          private: repository.private,
           token,
-        );
+        };
 
-        return await Promise.all(
-          pullRequests.map((pullRequest) =>
-            toOpenPullRequest(pullRequest, {
-              ownerLogin: repository.ownerLogin,
-              name: repository.name,
-              fullName: repository.fullName,
-              private: repository.private,
-              token,
-            }),
-          ),
-        );
+        // クローズ済みはCI状態を取りに行かないぶん、増えるAPI呼び出しはリポジトリあたり1回だけ。
+        // openと並行に投げて、`scope=all`のときだけ待ち時間が伸びることのないようにする。
+        const [openPullRequests, closedPullRequests] = await Promise.all([
+          fetchOpenPullRequests(repository.ownerLogin, repository.name, token),
+          scope === "all"
+            ? fetchClosedPullRequests(repository.ownerLogin, repository.name, token)
+            : Promise.resolve<GithubApiOpenPullRequest[]>([]),
+        ]);
+
+        return [
+          ...(await Promise.all(
+            openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
+          )),
+          ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
+        ];
       } catch (error) {
         // 1リポジトリの取得失敗で一覧全体を落とさない。取れなかったことは画面へ返す。
         console.error(`[GET /api/pull-requests] ${repository.fullName}:`, error);
@@ -92,7 +107,7 @@ async function handleGET() {
     }),
   );
 
-  const response: OpenPullRequestsResponse = {
+  const response: PullRequestListResponse = {
     pullRequests: results.flat(),
     fetchedAt: new Date().toISOString(),
     failedRepositories: failedRepositories.sort((a, b) => a.localeCompare(b)),
@@ -100,15 +115,17 @@ async function handleGET() {
   return NextResponse.json(response);
 }
 
+type RepositoryContext = {
+  ownerLogin: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  token: string;
+};
+
 async function toOpenPullRequest(
   pullRequest: GithubApiOpenPullRequest,
-  repository: {
-    ownerLogin: string;
-    name: string;
-    fullName: string;
-    private: boolean;
-    token: string;
-  },
+  repository: RepositoryContext,
 ): Promise<PullRequestSummary> {
   // CI状態はPR1件につき1回（check-runsが100件を超えるrefではページ数ぶん）APIを消費する。
   // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いてunknownにする。
@@ -121,6 +138,23 @@ async function toOpenPullRequest(
         repository.token,
       );
 
-  // この一覧はopenのPRしか取得しないため、マージ済みは存在しない。
+  // openのPRにマージ済みは存在しない。
   return toPullRequestSummary(pullRequest, repository, { merged: false, ciState });
+}
+
+/**
+ * クローズ済み（マージ済み・却下）のPRを一覧の形へ変換する（#1312）。
+ *
+ * **CI状態は取得せず`unknown`のまま返す。** 取得にはPR1件あたり1回APIを消費するのに対し、
+ * 既に閉じたPRのCIは「見て何かする」対象ではないため。マージ済みかどうかは
+ * 一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧のレスポンスに含まれない）。
+ */
+function toClosedPullRequest(
+  pullRequest: GithubApiOpenPullRequest,
+  repository: RepositoryContext,
+): PullRequestSummary {
+  return toPullRequestSummary(pullRequest, repository, {
+    merged: pullRequest.merged_at !== null,
+    ciState: "unknown",
+  });
 }
