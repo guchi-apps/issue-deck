@@ -4,7 +4,6 @@ import { useState } from "react";
 
 import { GitMerge, Loader2 } from "lucide-react";
 
-import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,19 +31,15 @@ type IssueMergeButtonProps = {
   isMerged?: boolean;
   /** マージ失敗時のエラーメッセージ。ボタンの手前にインライン表示する */
   error?: string | null;
-  /** trueならボタンの手前にCI状態バッジを並べる */
-  showCiStatus?: boolean;
-  /** スマホのヘッダーに置くときはアイコンだけの丸ボタンにする */
-  appearance?: "button" | "icon";
   className?: string;
 };
 
 /**
  * Issue画面から対応PRをマージするボタン（#1288）。
  *
- * コメント欄のマージ待ちカードと画面上部の操作列の両方から同じ操作を出すため、ボタンと確認
- * ダイアログをこのコンポーネントに切り出している。マージ済みかどうかは呼び出し側が持ち、
- * どちらから押しても両方が「マージ済み」になるようにする。
+ * 置き場所は対応PR一覧（`issue-pull-request-list.tsx`）の各行の中だけで、Issue画面には
+ * その一覧が2箇所（本文の上・コメント欄のマージ待ちカード）出る（#1339）。マージ済みかどうかは
+ * 呼び出し側が持ち、どちらから押しても両方が「マージ済み」になるようにする。
  *
  * PR一覧・PR詳細画面のマージボタンは`PullRequestMergeButton`（`pull-request-merge-button.tsx`）で、
  * `PullRequestSummary`を前提に警告付きの確認を出す別物。Issue画面はPR番号しか持たないためこちらを使う。
@@ -57,8 +52,6 @@ export function IssueMergeButton({
   isMerging,
   isMerged,
   error,
-  showCiStatus = false,
-  appearance = "button",
   className,
 }: IssueMergeButtonProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -72,46 +65,22 @@ export function IssueMergeButton({
     if (ok) onMerged?.();
   }
 
-  const label = merged
-    ? "マージ済み"
-    : ciStatus === "in_progress"
-      ? "CI実行中のためマージできません"
-      : "マージする";
-
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)}>
       {error && <span className="truncate text-xs text-destructive">{error}</span>}
-      {showCiStatus && <PullRequestCiStatusBadge status={ciStatus ?? null} />}
-      {appearance === "icon" ? (
-        <button
-          type="button"
-          aria-label={label}
-          title={label}
-          disabled={disabled}
-          onClick={() => setIsConfirmOpen(true)}
-          className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
-        >
-          {busy ? (
-            <Loader2 className="size-5 animate-spin" />
-          ) : (
-            <GitMerge className="size-5" />
-          )}
-        </button>
-      ) : (
-        <Button
-          size="sm"
-          onClick={() => setIsConfirmOpen(true)}
-          disabled={disabled}
-          // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
-          // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
-          // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
-          // やめ、色関連のみに絞ることで回避する。
-          className="transition-colors"
-        >
-          {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
-          {merged ? "マージ済み" : "マージする"}
-        </Button>
-      )}
+      <Button
+        size="sm"
+        onClick={() => setIsConfirmOpen(true)}
+        disabled={disabled}
+        // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
+        // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
+        // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
+        // やめ、色関連のみに絞ることで回避する。
+        className="transition-colors"
+      >
+        {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
+        {merged ? "マージ済み" : "マージする"}
+      </Button>
 
       <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
         <AlertDialogContent>

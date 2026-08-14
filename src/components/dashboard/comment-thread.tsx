@@ -16,8 +16,7 @@ import {
 } from "lucide-react";
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
-import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
-import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
+import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -53,13 +52,16 @@ import {
 } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
-import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
+import type { IssuePullRequest } from "@/types/pull-request";
 
 /** この文字数を超えるコメント本文にのみAI要約の生成ボタンを表示する */
 const LONG_COMMENT_THRESHOLD = 400;
+
+/** マージ済みのPRがまだ無いときに使う空集合。毎レンダーの再生成を避ける */
+const EMPTY_MERGED_NUMBERS: ReadonlySet<number> = new Set();
 
 type CommentThreadProps = {
   comments: IssueComment[];
@@ -79,10 +81,10 @@ type CommentThreadProps = {
   localSessionNotice?: ReactNode;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
-  /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク。取得できない場合はnull */
-  pullRequestLink?: PullRequestLink | null;
-  /** mergeApprovalPending時に対応PRの最新コミットのCI状態を併せて表示する。取得できない場合はnull */
-  pullRequestCiStatus?: PullRequestCiStatus | null;
+  /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク（#1339で複数対応） */
+  pullRequestLinks?: PullRequestLink[];
+  /** 対応PRのタイトル・状態・CI状態。取得前は空配列 */
+  pullRequests?: IssuePullRequest[];
   /** 直近の「実行ログ:」リンクが指すGitHub Actions実行の状態。取得できない場合はnull */
   workflowRun?: WorkflowRunInfo | null;
   /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
@@ -95,7 +97,7 @@ type CommentThreadProps = {
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
-  onMergePullRequest?: () => Promise<boolean> | boolean;
+  onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
@@ -104,10 +106,12 @@ type CommentThreadProps = {
   isMergingPullRequest?: boolean;
   /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
   mergePullRequestError?: string | null;
-  /** trueの場合、対応PRはマージ済みとして扱う（画面上部のマージボタンから押された場合も含む・#1288） */
-  pullRequestMerged?: boolean;
-  /** この欄のマージボタンからマージが成功したときに呼ばれる（画面上部のマージボタンと状態を揃えるため） */
-  onPullRequestMerged?: () => void;
+  /** 直近にマージを実行したPR番号。実行中の表示とエラーの表示先を決める */
+  mergeTargetNumber?: number | null;
+  /** マージ済みとして扱うPR番号（本文の上のマージボタンから押された場合も含む・#1288/#1339） */
+  mergedPullRequestNumbers?: ReadonlySet<number>;
+  /** この欄のマージボタンからマージが成功したときに呼ばれる（本文の上の一覧と状態を揃えるため） */
+  onPullRequestMerged?: (pullRequestNumber: number) => void;
   /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
   targetCommentIndex?: number;
   /** targetCommentIndexが指すコメントの要素に設定するref */
@@ -193,12 +197,13 @@ function ApprovalActions({
   isRequestingPrFix,
   isMergingPullRequest,
   mergePullRequestError,
-  pullRequestMerged,
+  mergeTargetNumber,
+  mergedPullRequestNumbers,
   onPullRequestMerged,
   isFallbackNotice,
   mergeApprovalPending,
-  pullRequestLink,
-  pullRequestCiStatus,
+  pullRequestLinks,
+  pullRequests,
   repositoryFullName,
   issueSuggestions,
   localSessionNotice,
@@ -208,7 +213,7 @@ function ApprovalActions({
   onWithdraw: () => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
-  onMergePullRequest?: () => Promise<boolean> | boolean;
+  onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
@@ -216,12 +221,13 @@ function ApprovalActions({
   isRequestingPrFix?: boolean;
   isMergingPullRequest?: boolean;
   mergePullRequestError?: string | null;
-  pullRequestMerged?: boolean;
-  onPullRequestMerged?: () => void;
+  mergeTargetNumber?: number | null;
+  mergedPullRequestNumbers?: ReadonlySet<number>;
+  onPullRequestMerged?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
-  pullRequestLink?: PullRequestLink | null;
-  pullRequestCiStatus?: PullRequestCiStatus | null;
+  pullRequestLinks?: PullRequestLink[];
+  pullRequests?: IssuePullRequest[];
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   localSessionNotice?: ReactNode;
@@ -233,14 +239,17 @@ function ApprovalActions({
   const [prFixReason, setPrFixReason] = useState("");
   const [prFixValidationError, setPrFixValidationError] = useState<string | null>(null);
   const [isPrFixTextUploading, setIsPrFixTextUploading] = useState(false);
-  // マージ済みかどうかは画面上部のマージボタン（#1288）と共有する。上部から押されたときは
-  // 親から`pullRequestMerged`で伝わり、この欄から押したときは`onPullRequestMerged`で親へ伝える。
-  // 親を持たない使い方でも表示が切り替わるよう、この欄の押下は自前の状態にも残す。
-  const [isMergedHere, setIsMergedHere] = useState(false);
-  const isMerged = isMergedHere || Boolean(pullRequestMerged);
+  // マージ済みかどうかは本文の上の対応PR一覧（#1288・#1339）と共有する。上の一覧から
+  // 押されたときは親から`mergedPullRequestNumbers`で伝わり、この欄から押したときは
+  // `onPullRequestMerged`で親へ伝える。親を持たない使い方でも表示が切り替わるよう、
+  // この欄の押下は自前の状態にも残す。
+  const [mergedHere, setMergedHere] = useState<ReadonlySet<number>>(EMPTY_MERGED_NUMBERS);
+  const mergedNumbers = new Set([...mergedHere, ...(mergedPullRequestNumbers ?? [])]);
+  const isMerged =
+    mergedNumbers.size > 0 &&
+    (pullRequestLinks ?? []).every((link) => mergedNumbers.has(link.number));
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
   const prFixBusy = Boolean(isRequestingPrFix);
-  const mergeBusy = Boolean(isMergingPullRequest);
 
   function changeText(value: string) {
     setText(value);
@@ -285,9 +294,9 @@ function ApprovalActions({
     setPrFixValidationError(null);
   }
 
-  function handleMerged() {
-    setIsMergedHere(true);
-    onPullRequestMerged?.();
+  function handleMerged(pullRequestNumber: number) {
+    setMergedHere((prev) => new Set([...prev, pullRequestNumber]));
+    onPullRequestMerged?.(pullRequestNumber);
   }
 
   if (mergeApprovalPending) {
@@ -308,29 +317,21 @@ function ApprovalActions({
             </p>
           </>
         )}
-        {pullRequestLink && (
-          <GithubReferenceLink
-            href={pullRequestLink.url}
-            className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2"
-          >
-            対応PR #{pullRequestLink.number}
-          </GithubReferenceLink>
-        )}
-        {onMergePullRequest && (
-          <IssueMergeButton
-            className="mt-2"
-            onMerge={onMergePullRequest}
-            onMerged={handleMerged}
-            pullRequestNumber={pullRequestLink?.number ?? null}
-            ciStatus={pullRequestCiStatus}
-            isMerging={mergeBusy}
-            isMerged={isMerged}
-            showCiStatus
-          />
-        )}
-        {onMergePullRequest && mergePullRequestError && (
-          <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
-        )}
+        {/* 対応PRとマージボタンは、本文の上に出しているのと同じ一覧で出す（#1339）。
+            マージはPR単位の操作なので、どのPRをマージするのかを行として示す */}
+        <IssuePullRequestList
+          variant="plain"
+          className="mt-2"
+          links={pullRequestLinks ?? []}
+          pullRequests={pullRequests ?? []}
+          mergeApprovalPending
+          onMerge={onMergePullRequest}
+          onMerged={handleMerged}
+          mergedNumbers={mergedNumbers}
+          mergeTargetNumber={mergeTargetNumber}
+          isMerging={isMergingPullRequest}
+          mergeError={mergePullRequestError}
+        />
         {onRequestPrFix && !isMerged && (
           <>
             <Separator className="my-3" />
@@ -458,8 +459,8 @@ export function CommentThread({
   approvalPending,
   localSessionNotice,
   mergeApprovalPending,
-  pullRequestLink,
-  pullRequestCiStatus,
+  pullRequestLinks,
+  pullRequests,
   workflowRun,
   workflowRunCommentId,
   onApprove,
@@ -475,7 +476,8 @@ export function CommentThread({
   isRequestingPrFix,
   isMergingPullRequest,
   mergePullRequestError,
-  pullRequestMerged,
+  mergeTargetNumber,
+  mergedPullRequestNumbers,
   onPullRequestMerged,
   targetCommentIndex,
   targetCommentRef,
@@ -521,11 +523,12 @@ export function CommentThread({
             isRequestingPrFix={isRequestingPrFix}
             isMergingPullRequest={isMergingPullRequest}
             mergePullRequestError={mergePullRequestError}
-            pullRequestMerged={pullRequestMerged}
+            mergeTargetNumber={mergeTargetNumber}
+            mergedPullRequestNumbers={mergedPullRequestNumbers}
             onPullRequestMerged={onPullRequestMerged}
             mergeApprovalPending={mergeApprovalPending}
-            pullRequestLink={pullRequestLink}
-            pullRequestCiStatus={pullRequestCiStatus}
+            pullRequestLinks={pullRequestLinks}
+            pullRequests={pullRequests}
             repositoryFullName={repositoryFullName}
             issueSuggestions={issueSuggestions}
           />
@@ -735,12 +738,13 @@ export function CommentThread({
                   isRequestingPrFix={isRequestingPrFix}
                   isMergingPullRequest={isMergingPullRequest}
                   mergePullRequestError={mergePullRequestError}
-                  pullRequestMerged={pullRequestMerged}
+                  mergeTargetNumber={mergeTargetNumber}
+                  mergedPullRequestNumbers={mergedPullRequestNumbers}
                   onPullRequestMerged={onPullRequestMerged}
                   isFallbackNotice={isFallbackNotice}
                   mergeApprovalPending={mergeApprovalPending}
-                  pullRequestLink={pullRequestLink}
-                  pullRequestCiStatus={pullRequestCiStatus}
+                  pullRequestLinks={pullRequestLinks}
+                  pullRequests={pullRequests}
                   repositoryFullName={repositoryFullName}
                   issueSuggestions={issueSuggestions}
                 />
@@ -765,12 +769,13 @@ export function CommentThread({
           isRequestingPrFix={isRequestingPrFix}
           isMergingPullRequest={isMergingPullRequest}
           mergePullRequestError={mergePullRequestError}
-          pullRequestMerged={pullRequestMerged}
+          mergeTargetNumber={mergeTargetNumber}
+          mergedPullRequestNumbers={mergedPullRequestNumbers}
           onPullRequestMerged={onPullRequestMerged}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
-          pullRequestLink={pullRequestLink}
-          pullRequestCiStatus={pullRequestCiStatus}
+          pullRequestLinks={pullRequestLinks}
+          pullRequests={pullRequests}
           repositoryFullName={repositoryFullName}
           issueSuggestions={issueSuggestions}
         />

@@ -27,11 +27,10 @@ import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
-import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
+import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
-import { PullRequestLinkBadge } from "@/components/dashboard/pull-request-link-badge";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
@@ -75,8 +74,8 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
-import { usePullRequestCiStatus } from "@/hooks/use-pull-request-ci-status";
-import { usePullRequestLink } from "@/hooks/use-pull-request-link";
+import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
+import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
@@ -105,6 +104,9 @@ import { closedStateLabel } from "@/lib/issue-state-reason";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
+
+/** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
+const EMPTY_MERGED_NUMBERS: ReadonlySet<number> = new Set();
 
 type IssueDetailProps = {
   issue: Issue | null;
@@ -179,14 +181,15 @@ export function IssueDetail({
     [issues, issue],
   );
   const qaAnswerPending = isQaAnswerPending(comments);
-  const pullRequestLink = usePullRequestLink(
+  const pullRequestLinks = usePullRequestLinks(
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
     comments,
   );
-  const { status: pullRequestCiStatus } = usePullRequestCiStatus(
+  const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
     issue?.repositoryFullName ?? null,
-    pullRequestLink,
+    issue?.number ?? null,
+    pullRequestLinks,
     issue ? isMergeApprovalPending(issue, comments) : false,
   );
   const {
@@ -194,11 +197,17 @@ export function IssueDetail({
     isSubmitting: isMergingPullRequest,
     error: mergePullRequestError,
   } = usePullRequestMergeMutation();
-  // マージ済みの表示は画面上部とコメント欄のマージボタンで共有する（#1288）。
-  // 対象PR番号で持つことで、別のIssueへ切り替えたときに持ち越さない
-  const [mergedPullRequestNumber, setMergedPullRequestNumber] = useState<number | null>(null);
-  const isPullRequestMerged =
-    pullRequestLink !== null && mergedPullRequestNumber === pullRequestLink.number;
+  // マージ済みの表示は、対応PR一覧を出している2箇所（本文の上・コメント欄のマージ待ちカード）で
+  // 共有する。GitHub側の反映を待つ間だけの楽観表示なので、どのIssueで押したかを一緒に持ち、
+  // 別のIssueへ切り替えたときに持ち越さない
+  const [mergedPullRequests, setMergedPullRequests] = useState<{
+    issueKey: string;
+    numbers: ReadonlySet<number>;
+  } | null>(null);
+  const [mergeTargetNumber, setMergeTargetNumber] = useState<number | null>(null);
+  const issueKey = issue ? `${issue.repositoryFullName}#${issue.number}` : "";
+  const mergedPullRequestNumbers =
+    mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -388,14 +397,23 @@ export function IssueDetail({
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
   }
 
-  async function handleMergePullRequest(): Promise<boolean> {
-    if (!issue || !pullRequestLink) return false;
+  async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
+    if (!issue) return false;
+    setMergeTargetNumber(pullRequestNumber);
     const [owner, repo] = issue.repositoryFullName.split("/");
-    return mergePullRequest({ owner, repo, number: pullRequestLink.number });
+    return mergePullRequest({ owner, repo, number: pullRequestNumber });
   }
 
-  function handlePullRequestMerged() {
-    setMergedPullRequestNumber(pullRequestLink?.number ?? null);
+  function handlePullRequestMerged(pullRequestNumber: number) {
+    setMergedPullRequests((prev) => ({
+      issueKey,
+      numbers: new Set([
+        ...(prev?.issueKey === issueKey ? prev.numbers : []),
+        pullRequestNumber,
+      ]),
+    }));
+    // 楽観表示のあと、GitHub側の状態（マージ済み・CI）を取り直して実データへ寄せる
+    refreshPullRequests();
   }
 
   if (!issue) {
@@ -486,19 +504,8 @@ export function IssueDetail({
             {/* 詳細ペインが狭いときやボタンが増えたときに「GitHubで開く」等が
                 横へはみ出して見えなくならないよう、この行は折り返す（#998） */}
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-              {/* マージ待ちのときは、コメント欄まで下げなくても押せるようここにも出す（#1288） */}
-              {mergeApprovalPending && pullRequestLink && (
-                <IssueMergeButton
-                  onMerge={handleMergePullRequest}
-                  onMerged={handlePullRequestMerged}
-                  pullRequestNumber={pullRequestLink.number}
-                  ciStatus={pullRequestCiStatus}
-                  isMerging={isMergingPullRequest}
-                  isMerged={isPullRequestMerged}
-                  error={mergePullRequestError}
-                  showCiStatus
-                />
-              )}
+              {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
+                  対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
               {canStartImplementation(issue) && (
                 <StartImplementationDialog
                   issue={issue}
@@ -682,13 +689,26 @@ export function IssueDetail({
                 Claudeの回答待ち
               </span>
             )}
-            <PullRequestLinkBadge link={pullRequestLink} approvalPending={isApprovalPending(issue.labels)} />
             <CancelWorkflowRunButton
               run={workflowRun}
               runId={workflowRunId}
               repositoryFullName={issue.repositoryFullName}
             />
           </div>
+
+          {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
+              コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339） */}
+          <IssuePullRequestList
+            links={pullRequestLinks}
+            pullRequests={pullRequests}
+            mergeApprovalPending={mergeApprovalPending}
+            onMerge={handleMergePullRequest}
+            onMerged={handlePullRequestMerged}
+            mergedNumbers={mergedPullRequestNumbers}
+            mergeTargetNumber={mergeTargetNumber}
+            isMerging={isMergingPullRequest}
+            mergeError={mergePullRequestError}
+          />
 
           {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
           {canCompleteManualStep(issue) && (
@@ -742,8 +762,8 @@ export function IssueDetail({
                 )
               }
               mergeApprovalPending={mergeApprovalPending}
-              pullRequestLink={pullRequestLink}
-              pullRequestCiStatus={pullRequestCiStatus}
+              pullRequestLinks={pullRequestLinks}
+              pullRequests={pullRequests}
               workflowRun={workflowRun}
               workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}
@@ -759,7 +779,8 @@ export function IssueDetail({
               isRequestingPrFix={isCommentSubmitting}
               isMergingPullRequest={isMergingPullRequest}
               mergePullRequestError={mergePullRequestError}
-              pullRequestMerged={isPullRequestMerged}
+              mergeTargetNumber={mergeTargetNumber}
+              mergedPullRequestNumbers={mergedPullRequestNumbers}
               onPullRequestMerged={handlePullRequestMerged}
               targetCommentIndex={targetCommentIndex}
               targetCommentRef={targetCommentRef}
