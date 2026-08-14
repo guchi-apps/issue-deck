@@ -21,6 +21,27 @@
 - **main版 != develop版**（バンプPRが既にdevelopへマージ済み）: develop→mainのPRが無いことを
   確認したうえで新規に作成する。
 
+## バージョンを上げ忘れたまま main へ入るのを防ぐ（#1367）
+
+`deploy.yml`の`tag`ジョブは`package.json`の`version`から`v<version>`タグを作る。同名のタグが
+別のコミットに既に存在すると
+`::error::Tag vX.Y.Z already exists on <SHA>, but HEAD is <SHA>.` で落ち、`build`・`deploy`は
+`needs: tag`のためまとめて止まる。**mainへマージした後で初めて失敗が分かる**という失敗の仕方に
+なり、本番デプロイが止まったまま残る（上記の自動化を使わず手動でリリースしたsolitaireで実際に
+踏んでいる）。
+
+これを`main`宛PRのCIで先に落とすのが`version-tag-check.yml`（本体は
+`reusable-version-tag-check.yml`）である。判定は`deploy.yml`と同じで、`v<version>`タグが
+HEAD以外のコミットに存在すれば失敗させる。バージョンが既存タグの最新より前の場合は警告のみ
+（ビルドは壊れないため）。
+
+- **main宛PRでのみ実行する。** featureブランチのバージョンは直前のリリースのままで、対応する
+  タグが必ず存在するため、developへ広げるとdevelopへの全PRが赤くなる。
+- **`deploy.yml`側のチェックは残す。** こちらはPRという経路にしか効かないため、最後の砦は
+  あちらに置いたままにする。
+- 上記の自動化（バンプPR → develop→mainのPR）を通る限りバージョンは必ず上がっているため、この
+  チェックが落ちるのは手動でPRを作った場合か、バンプPRを飛ばした場合になる。
+
 ## バージョンの上げ幅の判定
 
 issueのラベルではなく、main/develop間の実際のコード差分の内容から判定する。専用のClaude
