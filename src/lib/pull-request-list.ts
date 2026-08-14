@@ -109,6 +109,39 @@ export function scopeForPullRequestView(view: PullRequestViewId): PullRequestLis
   return view === "all" ? "all" : "open";
 }
 
+/**
+ * 左メニュー「Pull Request」セクションに出す件数（#1389）。`null`は「件数を出さない」。
+ */
+export type PullRequestNavCounts = Record<PullRequestViewId, number | null>;
+
+/**
+ * ビューごとの件数を数える（#1389）。Issue側の`computeNavCounts`と同じく、渡すのは
+ * ビューの絞り込みを掛ける前・それ以外（リポジトリ絞り込みなど）は掛けた後の集合にする。
+ * そうしないとメニューの件数と一覧の件数が食い違う。
+ *
+ * `null`になるのは次の2つ。
+ *
+ * - **未取得**（`loaded`がfalse）: PR一覧はDBキャッシュを持たず取得に時間がかかるため、
+ *   取得前に`0`を出すと「PRが無い」と読めてしまう。
+ * - **「全てのPR」**: 母集団が`scope`（open だけか、直近のクローズ済みまで含むか）に依存し、
+ *   「全PR数」として読める数にならない。「処理中」「完了」の2つでopenなPRを過不足なく
+ *   二分するので、件数としてはこの2つで足りる。
+ *
+ * 「処理中」「完了」は`filterPullRequestsByView`が`state === "open"`のPRしか通さないため、
+ * 渡された集合がどちらの`scope`の取得結果でも同じ値になる。
+ */
+export function computePullRequestNavCounts(
+  pullRequests: PullRequestSummary[],
+  loaded: boolean,
+): PullRequestNavCounts {
+  if (!loaded) return { all: null, "in-progress": null, completed: null };
+  return {
+    all: null,
+    "in-progress": filterPullRequestsByView(pullRequests, "in-progress").length,
+    completed: filterPullRequestsByView(pullRequests, "completed").length,
+  };
+}
+
 /** ビューごとの、リポジトリ内・リポジトリ間の並び順（#1312） */
 export function sortPullRequestsForView(
   pullRequests: PullRequestSummary[],

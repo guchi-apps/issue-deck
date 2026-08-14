@@ -23,18 +23,20 @@ type UsePullRequestsResult = {
  * Pull Requestをリポジトリ横断で取得する。
  *
  * `scope`が`open`ならマージ待ちのPRだけ、`all`ならクローズ済み（マージ済み・却下）も直近ぶんだけ
- * 含める（#1312）。**再取得が走るのは`scope`が変わったときだけ**で、「処理中」「完了」の
+ * 含める（#1312）。**再取得が走るのは母集団が広がったときだけ**で、「処理中」「完了」の
  * ビュー切り替えは同じ取得結果をクライアント側で絞るだけなのでGitHub APIを叩き直さない。
  *
- * **自動ポーリングは行わない。** 1回の取得で「リポジトリ数 + draft以外のopen PR数」ぶんのGitHub API
- * を消費するため（[/api/pull-requests](../app/api/pull-requests/route.ts)）、他のポーリング系
- * フック（use-pull-request-ci-status等が対象1件を追うのとは規模が違う）と同じ間隔で回すと
+ * **一度`all`まで広げた母集団は狭めない。** `open`は`all`の部分集合なので、PRペインを離れて
+ * 要求が`open`へ戻るたびに取り直すと、ペインを出入りするだけでGitHub APIを消費してしまう（#1389）。
+ *
+ * **ダッシュボードを開いている間は常に有効で、自動ポーリングは行わない。** 左メニューの件数表示
+ * （#1389）のため、PRペインを開いていなくてもマウント時に1回だけ取得する。1回の取得で
+ * 「リポジトリ数 + draft以外のopen PR数」ぶんのGitHub APIを消費するため
+ * （[/api/pull-requests](../app/api/pull-requests/route.ts)）、他のポーリング系フック
+ * （use-pull-request-ci-status等が対象1件を追うのとは規模が違う）と同じ間隔で回すと
  * レート消費が読めなくなる。画面を開いたときとユーザーの明示的な更新操作でのみ取得する。
  */
-export function usePullRequests(
-  enabled: boolean,
-  scope: PullRequestListScope,
-): UsePullRequestsResult {
+export function usePullRequests(scope: PullRequestListScope): UsePullRequestsResult {
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
@@ -42,12 +44,15 @@ export function usePullRequests(
   const [error, setError] = useState<string | null>(null);
   // refreshで再取得させるためのキー。増やすと下のeffectが再実行される。
   const [reloadKey, setReloadKey] = useState(0);
+  // 実際に取得する母集団。要求が狭まっても`all`のまま据え置く（#1389）。effectで追従させると
+  // 狭い方の取得が1回走ってから広げ直すことになるため、レンダー中に調整する
+  // （Reactの「propsの変化に合わせてstateを調整する」パターン）。
+  const [fetchScope, setFetchScope] = useState<PullRequestListScope>(scope);
+  if (scope === "all" && fetchScope === "open") setFetchScope("all");
 
   const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
 
   useEffect(() => {
-    if (!enabled) return;
-
     let cancelled = false;
     const controller = new AbortController();
 
@@ -55,7 +60,7 @@ export function usePullRequests(
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/pull-requests?scope=${scope}`, {
+        const res = await fetch(`/api/pull-requests?scope=${fetchScope}`, {
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -86,7 +91,7 @@ export function usePullRequests(
       cancelled = true;
       controller.abort();
     };
-  }, [enabled, scope, reloadKey]);
+  }, [fetchScope, reloadKey]);
 
   return { pullRequests, failedRepositories, fetchedAt, isLoading, error, refresh };
 }

@@ -60,7 +60,11 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
-import { filterPullRequestsByView, scopeForPullRequestView } from "@/lib/pull-request-list";
+import {
+  computePullRequestNavCounts,
+  filterPullRequestsByView,
+  scopeForPullRequestView,
+} from "@/lib/pull-request-list";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -374,14 +378,16 @@ export function IssueDeckShell({
     [repositories],
   );
 
-  // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから
-  // 取得するため、PRペイン（PC）またはPR画面（スマホ）を開いている間だけ有効にする。
-  // 母集団の広さはビューが決める（「全てのPR」だけクローズ済みも取りに行く。#1312）。
+  // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
+  // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
+  // 取得する（自動ポーリングは無く、マウント時と明示的な更新操作のときだけ）。
+  // 母集団の広さはビューが決める（「全てのPR」だけクローズ済みも取りに行く。#1312）。ただし
+  // ペインを開いていない間は`open`を要求する。既定のprviewが`all`のため、そのまま渡すと
+  // 件数に使わないクローズ済みまで毎回取りに行ってしまう。
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
   const openPullRequests = usePullRequests(
-    isPullRequestPaneActive,
-    scopeForPullRequestView(filters.prview),
+    isPullRequestPaneActive ? scopeForPullRequestView(filters.prview) : "open",
   );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
   // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
@@ -396,17 +402,30 @@ export function IssueDeckShell({
     [mergedPullRequests, openPullRequests.fetchedAt],
   );
 
-  // 状態別ビューの絞り込み（#1312）に加え、左メニューでリポジトリを絞り込んでいるときは
-  // PR一覧も同じ絞り込みに従わせる。
-  const filteredPullRequests = useMemo(() => {
-    const visible = filterPullRequestsByView(
-      openPullRequests.pullRequests,
-      filters.prview,
-    ).filter((pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id));
+  // マージ済みで伏せたPRを除き、左メニューでリポジトリを絞り込んでいるときはPR一覧も同じ
+  // 絞り込みに従わせた集合。状態別ビュー（#1312）を掛ける前のこれを、一覧と左メニューの件数
+  // （#1389）の共通の母集団にする。Issue側のnavCountsと同じで、ここを揃えておかないと
+  // メニューの件数と一覧に並ぶ件数が食い違う。
+  const visiblePullRequests = useMemo(() => {
+    const visible = openPullRequests.pullRequests.filter(
+      (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
+    );
     return filters.repos.length === 0
       ? visible
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
-  }, [openPullRequests.pullRequests, filters.prview, filters.repos, hiddenPullRequestIds]);
+  }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
+
+  const filteredPullRequests = useMemo(
+    () => filterPullRequestsByView(visiblePullRequests, filters.prview),
+    [visiblePullRequests, filters.prview],
+  );
+
+  // 左メニュー「Pull Request」セクションの件数（#1389）。取得前に0を出さないよう、
+  // 1度でも取得できたか（fetchedAt）を渡す。
+  const pullRequestNavCounts = useMemo(
+    () => computePullRequestNavCounts(visiblePullRequests, openPullRequests.fetchedAt !== null),
+    [visiblePullRequests, openPullRequests.fetchedAt],
+  );
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
 
@@ -601,6 +620,7 @@ export function IssueDeckShell({
                     <MobileHomeScreen
                       overviewStats={overviewStats}
                       navCounts={navCounts}
+                      pullRequestNavCounts={pullRequestNavCounts}
                       onSelectQuickView={selectQuickView}
                       favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                       onSelectRepository={selectRepository}
@@ -738,6 +758,7 @@ export function IssueDeckShell({
                 activePullRequestView={filters.prview}
                 onSelectPullRequestView={selectPullRequestView}
                 navCounts={navCounts}
+                pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
                 onSelectRepository={(repo) => toggleRepo(repo.fullName)}
