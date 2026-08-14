@@ -172,6 +172,26 @@ describe("GET /api/repositories/release-pending-merges", () => {
     ]);
   });
 
+  it("リリースPRのCIがpending中はマージ待ちではなく実行中として返す（#1433）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+    fetchRefCiState.mockResolvedValue("pending");
+
+    const response = await GET();
+    const json = await response.json();
+
+    // CI実行中はまだマージできないため、ヘッダーのオレンジのバッジ件数から外す。
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+      },
+    ]);
+  });
+
   it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
     fetchOpenPullRequestsForBase.mockImplementation(
       openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: BUMP_PR }),

@@ -27,8 +27,8 @@ export type ReleaseStatusSummaryInput = {
   deployWorkflowRun: WorkflowRunState | null;
   /** developへのマージ待ちバンプPR。オープン中でなければnull */
   bumpPullRequest: { ciState: CiState | null } | null;
-  /** develop→mainのPRがオープン中か */
-  releasePullRequestOpen: boolean;
+  /** mainへのマージ待ちdevelop→mainのPR。オープン中でなければnull */
+  releasePullRequest: { ciState: CiState | null } | null;
   /** developだけbump済みでdevelop→mainのPRが未作成の過渡状態か */
   releasePending: boolean;
 };
@@ -56,23 +56,30 @@ export function resolveFailedReleaseWorkflow(
 
 /**
  * リリースの状態を4値サマリへ畳む（#542）。`release-progress.tsx`の`buildSteps`とは意図的に
- * 判定ロジックを分離しているが、bump PRの「要操作」判定基準（CIが`pending`でなくなった時点）
- * だけは揃えている。develop→main PRのマージ待ちのみを主対象としつつ、CI通過後もbump PRが
+ * 判定ロジックを分離しているが、マージ待ちPRの「要操作」判定基準（CIが`pending`でなくなった
+ * 時点）だけは揃えている。develop→main PRのマージ待ちのみを主対象としつつ、CI通過後もbump PRが
  * 残り続けるauto-merge滞留も「要操作」に含める（#542でのフィードバックを反映）。
  * `workflowRun`（`release-develop-to-main.yml`自体の最新実行）が失敗している場合も、
  * `deployWorkflowRun`と同じ優先度で`error`とする（#727）。
+ *
+ * **CIが実行中の間は、develop→main PRがオープンでも「要操作」にしない**（#1433）。PRが作られた
+ * 直後はまだマージできず、押しても弾かれる操作を強調して促すことになるため。元はbump PRだけが
+ * この基準を持っていたが、develop→main PRも同じ基準に揃えた。`unknown`（`Checks: read`が無い・
+ * check-runsが0件・取得失敗）は「要操作」のまま残す。CI状態が取れないだけでマージの導線が
+ * 消えてしまわないようにするため。
  */
 export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): ReleaseButtonStatus {
-  const { workflowRun, deployWorkflowRun, bumpPullRequest, releasePullRequestOpen, releasePending } =
+  const { workflowRun, deployWorkflowRun, bumpPullRequest, releasePullRequest, releasePending } =
     input;
 
   if (resolveFailedReleaseWorkflow(input)) return "error";
 
-  if (releasePullRequestOpen) return "action_required";
+  if (releasePullRequest && releasePullRequest.ciState !== "pending") return "action_required";
   if (bumpPullRequest && bumpPullRequest.ciState !== "pending") return "action_required";
 
   if (isRunning(workflowRun)) return "progressing";
   if (isRunning(deployWorkflowRun)) return "progressing";
+  if (releasePullRequest) return "progressing";
   if (bumpPullRequest) return "progressing";
   if (releasePending) return "progressing";
 
@@ -92,7 +99,10 @@ export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): Re
       status.phase === "bump_pr_open" && status.bumpPullRequest
         ? { ciState: status.bumpPullRequest.ciState }
         : null,
-    releasePullRequestOpen: status.phase === "release_pr_open",
+    releasePullRequest:
+      status.phase === "release_pr_open" && status.releasePullRequest
+        ? { ciState: status.releasePullRequest.ciState }
+        : null,
     releasePending: status.phase === "release_pending",
   });
 }
