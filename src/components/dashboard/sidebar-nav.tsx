@@ -20,6 +20,7 @@ import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
@@ -38,6 +39,8 @@ type SidebarNavProps = {
   activePullRequestView: PullRequestViewId;
   onSelectPullRequestView: (view: PullRequestViewId) => void;
   navCounts: Record<NavViewId, number>;
+  /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
+  pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
   selectedRepoFullNames?: string[];
   onSelectRepository?: (repository: ConnectedRepository) => void;
@@ -64,6 +67,7 @@ export function SidebarNav({
   activePullRequestView,
   onSelectPullRequestView,
   navCounts,
+  pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
   onSelectRepository,
@@ -148,6 +152,7 @@ export function SidebarNav({
         <ul className="flex flex-col gap-0.5">
           {pullRequestViews.map((view) => {
             const Icon = pullRequestViewIcons[view.id];
+            const count = pullRequestNavCounts[view.id];
             return (
               <li key={view.id}>
                 <button
@@ -165,6 +170,7 @@ export function SidebarNav({
                     <Icon className="size-3.5 text-muted-foreground" />
                     {view.label}
                   </span>
+                  {count !== null && <span className="text-xs text-muted-foreground">{count}</span>}
                 </button>
               </li>
             );

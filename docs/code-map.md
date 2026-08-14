@@ -96,6 +96,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
   `hooks/use-pull-requests.ts`）。
+- **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
+  1回だけ取得する**（#1389）。件数を出すのは「処理中のPR」「完了したPR」だけで、
+  **「全てのPR」には出さない**（母集団が`scope`＝「openだけか、直近のクローズ済みまで含むか」に
+  依存し、「全PR数」として読める数にならないため）。件数は
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
+  数え、渡すのは一覧と同じ母集団（マージ済みで伏せたPRとリポジトリ絞り込みを適用し、状態別
+  ビューは適用する前）にする。取得前は0ではなく件数そのものを出さない。
+  取得コストを増やさないため、PRペインを開いていない間の`scope`は`open`に固定し（既定の
+  `prview`が`all`のため、そのまま渡すと毎回クローズ済みまで取りに行ってしまう）、
+  **一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の部分集合なので、
+  狭める向きで取り直すのは消費にしかならない）。
 - **左メニューのPR項目は状態別の3ビューで、母集団を決めるのは「全てのPR」だけ**（#1312）。
   ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
