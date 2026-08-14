@@ -1,5 +1,4 @@
-import { db } from "@/lib/db";
-import { getInstallationToken } from "@/lib/github/app-auth";
+import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { addIssueLabels, createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
@@ -64,14 +63,10 @@ export async function escalateFailedSession(params: {
   if (!parsed) return false;
 
   try {
-    const repository = await db.repository.findFirst({
-      where: { fullName: params.repositoryFullName },
-      include: { installation: true },
-    });
-    // issue-deckが接続していないリポジトリ。ホスト側では実行できても、こちらから書く手段が無い
-    if (!repository) return false;
-
-    const token = await getInstallationToken(repository.installation.installationId);
+    // issue-deckが接続していないリポジトリではnullが返る。ホスト側では実行できても、
+    // こちらから書く手段が無い
+    const token = await resolveInstallationToken(params.repositoryFullName);
+    if (!token) return false;
 
     await createComment(parsed.owner, parsed.repo, params.issueNumber, token, {
       body: buildSessionFailedCommentBody({

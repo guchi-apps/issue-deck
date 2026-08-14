@@ -122,6 +122,78 @@ as a parameter - it will read the plan from the file you wrote」とある。実
 なお人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として
 扱うのでそのまま通る。
 
+## 受付と締めもIssueのコメントへ残す（#1119）
+
+計画（#1342）を自動で載せるようにしても、**Issueのコメント欄だけを見て追える範囲はActionsに
+届いていなかった**。無人実行のコメントと突き合わせると穴は2つある。
+
+| Actionsのコメント | ローカルの状況 |
+| --- | --- |
+| 受付コメント（モード判定の直後・`guide`。#75） | **無かった。** 起動からエージェントの最初の投稿まで、画面には何も出ない |
+| 計画コメント | ✅ `ExitPlanMode`のフック（#1342・`session-plan.ts`） |
+| 完了報告コメント | プロンプトの「Issueに残す記録」に**項目自体が無かった**（計画・判断・中断だけ） |
+| PR作成／developへのマージ | ✅ `issue-labels.yml`。GitHub側のイベントで動くので経路が同じ |
+| 失敗時のフォールバック通知 | 異常終了だけ ✅（#1217・`session-escalation.ts`）。**正常に終わって何も投稿しなかった場合**は拾えない |
+
+埋め方は3つで、どれも投稿するのはissue-deck（GitHub App名義）。**サブPCにGitHubの認証を
+持たせない**ための一本化は#1342と同じ。
+
+```text
+run-issue-session.sh（claudeの起動直前）
+  → POST /api/dispatch/sessions/started → 受付コメント（session-start.ts）
+… セッション …
+run-issue-session.sh の cleanup（trap） → POST /api/dispatch/sessions/ended
+poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/sessions
+  → どちらも markDispatchSessionEnded / reportDispatchSessions
+     → 記録が何も無ければ締めコメント（session-wrapup.ts）
+```
+
+### 受付をエージェントに任せない
+
+**Actions側が受付を独立したシェルステップに置いているのと同じ理由**（#75）。エージェント自身に
+委ねると、調査に時間がかかった場合や途中で行き詰まった場合に「依頼を受け取ったこと」自体が
+伝わらない。ローカルではさらに、Actions UIに相当する実行ログが無いぶん「押したのに何も
+起きていない」と区別が付かない。そのため受付コメントには`tmux attach -t <セッション名>`を必ず
+載せ、様子を見に行ける先を最初の1件で渡す。
+
+- 役割の表示は`guide`（案内ボット）で、Actionsの受付と揃える（#860）。受付はモードによらず
+  案内であって、実装作業そのものの報告ではない
+- **重複は抑止しない。** 1起動につき1件で、Actionsもdispatchのたびに受付を出すので挙動が揃う。
+  同じIssueで起こし直したことがコメントの並びから分かる方が、追う側にとって都合がよい
+- 投げるのは`claude`の**起動直前**。`claude`はフォアグラウンドで走るので、それより後ろに置くと
+  セッションが終わるまで投稿されない
+
+### 締めコメントは「記録が1件も無いとき」だけ
+
+完了報告はプロンプトの指示、つまりエージェントが従うかどうかに依存していて担保が無い（#1342で
+計画に同じ問題があったのと同じ構図）。そこでセッションが消えた時点でIssueを見に行き、
+そのセッションの間に何も残っていなければ締めのコメントを書く。
+
+- **`00.check-user`は付けない。** ローカルは人が横にいる前提で、意図的に畳んだだけで要確認バッジが
+  立つのは過剰。人の判断が要る異常終了は#1217が`00.check-user`込みで拾うので穴にはならない
+- **重複はDBの列ではなくマーカーで防ぐ。** 呼び出し経路が`trap`（`/sessions/ended`）とpollerの
+  巡回の2つあり、どちらも同じセッションについて呼びうる。`session-wrapup.ts`は**自分の
+  `<!-- issue-deck:session-wrapup -->`も「記録あり」に数える**ので、2回目は投稿しない。
+  `DispatchSession`へ列を足せば済む話ではあるが、マイグレーションは`CLAUDE.md`の自動マージ
+  不可カテゴリなので、足さずに済む形を選んだ
+- **基準時刻は受付コメントの投稿時刻**で、`DispatchSession.firstSeenAt`はその代替に留める。
+  `firstSeenAt`はpollerが最初に見た時刻で、起動から最大1巡（既定60秒）遅れる。その差の間に
+  計画が出ると「記録なし」と誤判定する
+- 数えるのはマーカーを持つコメントだけで、**人が書いたコメントは数えない**。ここで見たいのは
+  セッションが何をしたかで、`11.local`が付いている間、人のコメントはそもそもセッションに
+  届かない（#1287）
+
+### プロンプト側にも完了報告を書く
+
+自動化は「何も残らなかった」を検出するだけで、中身のある完了報告の代わりにはならない。
+`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`の「Issueに残す記録」に
+**完了報告**（PRのURL・変更の要約・テスト内容）を必須項目として足してある。粒度は無人実行の
+`.github/prompts/implement.md`に揃えた。あわせて「着手した旨は投稿しない」（受付が自動で出るため）
+も書いてある。
+
+**文面を変えたら`node scripts/generate-prompt-templates.mjs`を実行する**
+（`src/lib/prompts/templates.generated.ts`。ずれは`src/lib/prompts/templates.test.ts`が検出する）。
+
 ## 飛ばすのは2種類だけ
 
 `--permission-mode auto`（#1205）により承認プロンプトは激減しているので、飛ばすのは

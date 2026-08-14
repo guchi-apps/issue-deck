@@ -226,6 +226,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
   同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
+  **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
+  受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
+  （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
+  終了時に締めのコメントを書く（`lib/dispatch/session-wrapup.ts`。`/sessions/ended`とpollerの
+  巡回の両方から呼ばれるが、**自分のマーカーを「記録あり」に数えるので投稿は1回**。
+  `00.check-user`は付けない）。インストールトークンの取得は
+  `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
