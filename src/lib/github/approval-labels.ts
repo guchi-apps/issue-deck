@@ -10,6 +10,17 @@ export const CHECK_USER_LABEL = "00.check-user";
 export const PLAN_REQUIRED_LABEL = "21.plan-required";
 
 /**
+ * エージェントが代行できないユーザー自身の手作業が必要であることを示すラベル（#1240）。
+ *
+ * `00.check-user`と併用しないのが運用上の取り決め。併用すると承認・修正ボタン
+ * （`isApprovalPending`）が出てしまい、押しても実行する@claudeコメントの宛先が無い。
+ * また00番台のラベルは一覧カードの表示から除外される（`isAttentionLabel`）ため、
+ * 盤面で手作業Issueだと見分けられなくなる。運用ルールは
+ * docs/multi-agent/labels.md「デプロイ後などに残るユーザーの手作業はIssueとして起票する」。
+ */
+export const MANUAL_STEP_LABEL = "71.manual-step";
+
+/**
  * 質問への回答のみが完了した状態であることを示すラベル（00.check-userと常に併用し、
  * 単独では意味を持たない）。claude-issue-dispatch.ymlのmode=plan・mode=additionalが、
  * 直近の@claudeコメントを「単なる質問・確認」と判定した場合に付与する（#887）。
@@ -93,11 +104,15 @@ export type LabelFilterPreset = {
  */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
+  { key: "manual-step", label: "手作業待ち", labels: [MANUAL_STEP_LABEL] },
   {
     key: "not-started",
     label: "未着手",
     labels: [],
-    excludeLabels: [CHECK_USER_LABEL],
+    // 手作業Issueはエージェントが着手することが無く、ユーザーが実行するまで`Ready`に居続ける。
+    // 除外しないと「次にどれへ着手させるか」を選ぶビューへ恒久的に溜まるため、確認待ちと
+    // 同じく専用ビュー（manual-step）側に寄せる（#1240）。
+    excludeLabels: [CHECK_USER_LABEL, MANUAL_STEP_LABEL],
     statuses: ["ready"],
   },
   {
