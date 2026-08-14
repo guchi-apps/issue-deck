@@ -22,10 +22,10 @@ import {
   SESSION_CONTROL_JOB_KINDS,
   type DispatchEnqueueRejection,
   type DispatchHostView,
-  type DispatchJobKind,
   type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
+  type SessionControlJobKind,
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 
@@ -236,7 +236,8 @@ export async function enqueueSessionControlJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
-  kind: Exclude<DispatchJobKind, "LAUNCH">;
+  /** **`INTERRUPT`・`KILL`に限る。** 質問ジョブ（#1294）はこの経路に載らない */
+  kind: SessionControlJobKind;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueSessionControlJobResult> {
@@ -361,6 +362,11 @@ export async function claimDispatchJobs(params: {
   const available = Math.min(limit - running, params.maxJobs);
   if (available <= 0) return claimed;
 
+  // **質問ジョブ（`QUESTION`、#1294）はどのpollerにも配らない。** 種別を明示して引くため
+  // ここに混ざることは無いが、意図として書いておく。現行のpollerは未知の種別を
+  // 「未知のジョブ種別です」として`failed`で返す（`scripts/subpc-dispatch-poller.sh`）ので、
+  // 実行側が来ていない段階で配ると質問が必ず失敗として残る。払い出しはStep 3（別Issue）で、
+  // poller側の対応申告（`sessionControlCapable`と同じ形）とセットで開ける。
   const candidates = await db.dispatchJob.findMany({
     where: { targetHost: params.hostName, status: "QUEUED", kind: "LAUNCH" },
     orderBy: { createdAt: "asc" },

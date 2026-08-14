@@ -365,10 +365,16 @@ enum DispatchJobStatus {
 // KILL=`tmux kill-session -t <セッション名>`（セッションごと畳む）。
 // **poller側はセッション名をジョブのrepositoryFullName/issueNumberから組み立て直し、
 // 受け取った名前と一致しなければ実行しない**（任意コマンド実行の経路にしないため）。
+//
+// QUESTION（#1294）はセッションを立てず、読み取り専用の質問応答を1回走らせて回答コメントを
+// 投稿するジョブ。**activeKeyを取らない**（下記`activeKey`のコメント参照）。
+// **まだ積む経路も払い出し口も無い**（器だけを先に入れている）。実行はStep 3（別Issue）で、
+// poller側の対応申告とセットで開ける。
 enum DispatchJobKind {
   LAUNCH
   INTERRUPT
   KILL
+  QUESTION
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -395,6 +401,11 @@ model DispatchJob {
   // **種別ごとに名前空間を分ける**（#1332。制御ジョブは `interrupt:owner/repo#番号`）。
   // 制御ジョブでnullにすると起動ジョブとは衝突しない代わりに、スマホでの連打ぶんだけ
   // `C-c`が積まれる。前置きを付ければ衝突せず、「未処理の停止は1件まで」も同時に守れる。
+  //
+  // **質問ジョブ（QUESTION）だけはnullのままにする**（#1294）。「未完了は1件まで」は実装ジョブの
+  // 二重起動を防ぐための制約で、質問には当てはまらない。ここで枠を取ると、
+  // **実装ジョブが走っているIssueに質問を積めなくなる**（質問はまさに実装中に割り込んで
+  // 聞くための機能なので、それでは意味が無い）。
   activeKey          String?           @unique
   // 画面から積んだユーザー（User.id）。Userを消してもジョブの履歴は残すためFKは張らない
   requestedByUserId  String?

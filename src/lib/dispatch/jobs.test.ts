@@ -434,6 +434,22 @@ describe("claimDispatchJobs の制御ジョブ", () => {
       expect.objectContaining({ where: expect.objectContaining({ kind: "LAUNCH" }) }),
     );
   });
+
+  // #1294。現行のpollerは未知の種別を「未知のジョブ種別です」として失敗で返すため、
+  // 実行側が来ていない段階で配ると質問が必ず失敗として残る（払い出しはStep 3で開ける）
+  it("質問ジョブは払い出さない", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    const claimQueries = dispatchJobFindMany.mock.calls
+      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
+      .filter((where) => where.targetHost !== undefined);
+    for (const where of claimQueries) {
+      const kind = where.kind as { in?: string[] } | string | undefined;
+      const kinds = typeof kind === "object" && kind?.in ? kind.in : [kind];
+      expect(kinds).not.toContain("QUESTION");
+    }
+  });
 });
 
 /**

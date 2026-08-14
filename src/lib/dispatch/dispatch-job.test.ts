@@ -397,6 +397,14 @@ describe("describeDispatchJobStatus", () => {
     expect(skipped.tone).not.toBe("error");
     expect(skipped.label).toBe("起動済みのため見送り");
   });
+
+  // 質問ジョブのsucceededは「回答コメントが投稿された」までを指す（#1294）。起動ジョブとは
+  // 寿命の意味が違うため、「起動しました」では何が終わったのか分からない
+  it("質問ジョブは「起動しました」ではなく「回答しました」と書く", () => {
+    expect(describeDispatchJobStatus("SUCCEEDED", "QUESTION").label).toBe("回答しました");
+    expect(describeDispatchJobStatus("RUNNING", "QUESTION").label).toBe("回答中");
+    expect(describeDispatchJobStatus("FAILED", "QUESTION").tone).toBe("error");
+  });
 });
 
 describe("isCancelableDispatchJobStatus", () => {
@@ -464,6 +472,13 @@ describe("findDispatchJobForIssue", () => {
     expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("control");
   });
 
+  // 質問は実装中に割り込んで聞くための機能なので、拾うと質問した瞬間に実装の起動が塞がる（#1294）
+  it("質問ジョブはどちらの側も拾わない", () => {
+    const jobs = [job({ id: "question", kind: "QUESTION" })];
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
+    expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
+  });
+
   it("制御ジョブの側は起動ジョブを拾わない", () => {
     const jobs = [job({ id: "launch", kind: "LAUNCH" })];
     expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
@@ -489,9 +504,11 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind("launch")).toBe("LAUNCH");
     });
 
-    it("停止・終了を受け入れ、それ以外は弾く", () => {
+    it("停止・終了・質問を受け入れ、それ以外は弾く", () => {
       expect(parseDispatchJobKind("interrupt")).toBe("INTERRUPT");
       expect(parseDispatchJobKind("kill")).toBe("KILL");
+      // 種別としては読めるが、積む受け口（POST /api/dispatch）はまだ開いていない（#1294）
+      expect(parseDispatchJobKind("question")).toBe("QUESTION");
       expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
       expect(parseDispatchJobKind("restart")).toBeNull();
       expect(parseDispatchJobKind(1)).toBeNull();
@@ -513,6 +530,11 @@ describe("セッションの操作（#1332）", () => {
       expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1332, "KILL")).toBe(
         "kill:guchi-apps/issue-deck#1332",
       );
+    });
+
+    // キーを取ると、実装ジョブが走っているIssueに質問を積めなくなる（#1294）
+    it("質問ジョブはキーを取らない", () => {
+      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1294, "QUESTION")).toBeNull();
     });
   });
 
