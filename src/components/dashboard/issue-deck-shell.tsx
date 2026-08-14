@@ -45,7 +45,7 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
-import { buildFollowupIssueBody } from "@/lib/github/followup-issue";
+import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
@@ -140,7 +140,7 @@ export function IssueDeckShell({
   } = useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
-  const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
+  const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
   const [askDialogOpen, setAskDialogOpen] = useState(false);
   const [askDialogRepo, setAskDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -186,7 +186,7 @@ export function IssueDeckShell({
 
   function openCreateDialog(defaultRepositoryFullName?: string | null) {
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
-    setCreateDialogBody(null);
+    setCreateDialogBodyPrefix(null);
     setCreateDialogOpen(true);
   }
 
@@ -197,9 +197,10 @@ export function IssueDeckShell({
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
+  // 元Issueの情報は入力欄ではなく固定接頭辞として渡し、入力欄は空のまま始める（#1322）。
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
-    setCreateDialogBody(buildFollowupIssueBody(issue));
+    setCreateDialogBodyPrefix(buildFollowupIssueBodyPrefix(issue));
     setCreateDialogOpen(true);
   }
 
@@ -854,7 +855,7 @@ export function IssueDeckShell({
           onOpenChange={setCreateDialogOpen}
           repositories={visibleRepositories}
           defaultRepositoryFullName={createDialogRepo}
-          defaultBody={createDialogBody}
+          bodyPrefix={createDialogBodyPrefix}
           issues={issues}
           onCreated={handleIssueCreated}
         />
