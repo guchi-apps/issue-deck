@@ -40,6 +40,12 @@ import { StartLocalSessionButton } from "@/components/dashboard/start-local-sess
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
+import {
+  findDispatchJobForIssue,
+  isActiveDispatchJobStatus,
+  resolveDefaultDispatchHost,
+} from "@/lib/dispatch/dispatch-job";
+import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +64,7 @@ import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-ind
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
@@ -152,6 +159,10 @@ export function IssueDetail({
     notConfigured: commentCleanupNotConfigured,
     generate: generateCommentCleanup,
   } = useIssueBodyCleanup();
+  // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）。
+  // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
+  // 同じ画面のためにポーリングが何本も走る
+  const dispatch = useDispatchState(true);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isLocalSessionSetupOpen, setIsLocalSessionSetupOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
@@ -381,7 +392,34 @@ export function IssueDetail({
   }
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
-  const startDisabledReason = startImplementationDisabledReason(currentRepository?.hasClaudeWorkflow);
+  // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
+  // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
+  const actionsDisabledReason = startImplementationDisabledReason(
+    currentRepository?.hasClaudeWorkflow,
+  );
+  // 押す前に実行先が分かるよう、ボタンの文言を既定の実行先そのものにする（#1262）。
+  // 既定の決め方はダイアログ側と同じ関数を使う
+  const dispatchJob = findDispatchJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const defaultDispatchHost = resolveDefaultDispatchHost({
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+  });
+  const startLabel = defaultDispatchHost
+    ? `${defaultDispatchHost}で開始`
+    : "GitHub Actionsで開始";
+  // 着手後もどちらで動いているかが分かるようにする（#1262）
+  const executionTarget = resolveIssueExecutionTarget({
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+    labels: issue.labels,
+    jobs: dispatch.jobs,
+    sessions: dispatch.sessions,
+  });
   // ローカル起動の導線（ボタン・コマンドのコピー・セットアップ手順）は、対象リポジトリが
   // ローカル起動プロトコルに適合しているときだけ出す（#1073）。3つとも同じ条件にしないと、
   // 「ボタンは無いのにセットアップ手順だけ見られる」といった食い違いが出る。
@@ -423,14 +461,13 @@ export function IssueDetail({
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
                   onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  includeDispatchTargets
+                  dispatch={dispatch}
+                  actionsDisabledReason={actionsDisabledReason}
                   renderTrigger={(isSubmitting) => (
-                    <Button
-                      size="sm"
-                      disabled={isSubmitting || startDisabledReason !== null}
-                      title={startDisabledReason ?? undefined}
-                    >
+                    <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                      実装を開始
+                      {startLabel}
                     </Button>
                   )}
                 />
@@ -464,6 +501,7 @@ export function IssueDetail({
                 onIssueUpdated={onIssueUpdated}
                 onFirstLaunch={() => setIsLocalSessionSetupOpen(true)}
                 hasLocalStartScript={currentRepository?.hasLocalStartScript}
+                dispatch={dispatch}
               />
               <Button variant="outline" size="sm" asChild>
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
@@ -605,7 +643,11 @@ export function IssueDetail({
             </span>
           </div>
 
-          <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
+          <WorkflowStatusSteps
+            labels={issue.labels}
+            projectStatus={issue.projectStatus}
+            executionTarget={executionTarget}
+          />
           <div className="flex flex-wrap items-center gap-2">
             {qaAnswerPending && (
               <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">

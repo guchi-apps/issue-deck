@@ -11,7 +11,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import {
   describeDispatchEnqueueRejection,
@@ -50,6 +50,11 @@ type StartLocalSessionButtonProps = {
   includeLocalTarget?: boolean;
   /** 縦積みのレイアウト（スマホの詳細画面）向けに、ボタンを幅いっぱいにする */
   fullWidth?: boolean;
+  /**
+   * 親が既に取得しているディスパッチ状態（#1262）。渡すと自前で取得しない。
+   * **同じ画面に取得口を増やさないため**、Issue詳細では親で1回だけ取得して配る。
+   */
+  dispatch?: DispatchStateHandle;
 };
 
 /**
@@ -86,6 +91,7 @@ export function StartLocalSessionButton({
   hasLocalStartScript,
   includeLocalTarget,
   fullWidth,
+  dispatch: injectedDispatch,
 }: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
 
@@ -95,8 +101,10 @@ export function StartLocalSessionButton({
   const hasLocalTarget = includeLocalTarget !== false && canStartLocalSession(hasLocalStartScript);
   // closedなIssueは起動しても実装対象が無い。リポジトリ名が壊れている場合はURLを組み立てられない
   const isAvailable = sessionUrl !== null && issue.state === "open";
-  // フックは早期returnより前に、常に同じ順で呼ぶ必要がある。導線を出さない場合は取得もしない
-  const dispatch = useDispatchState(isAvailable);
+  // フックは早期returnより前に、常に同じ順で呼ぶ必要がある。導線を出さない場合は取得もしない。
+  // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
+  const ownDispatch = useDispatchState(injectedDispatch === undefined && isAvailable);
+  const dispatch = injectedDispatch ?? ownDispatch;
 
   if (!sessionUrl || !isAvailable) return null;
   // 関数宣言は巻き上げられるため、上のnarrowingがhandleStartHere内へ伝わらない。改めて束ね直す。

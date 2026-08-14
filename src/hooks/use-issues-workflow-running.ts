@@ -24,11 +24,22 @@ const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null, runId: 
  * `05.develop`・`09.main`はマージ完了後の定常状態で実行は走らないため、GitHub APIの消費を抑える
  * 目的で対象から除外している。
  */
-export function useIssuesWorkflowRunning(issues: Issue[]): RunningMap {
+export function useIssuesWorkflowRunning(
+  issues: Issue[],
+  /**
+   * ポーリングから外すIssueのid（#1262）。**サブPCで走っているIssueを渡す。**
+   * そちらはGitHub Actionsの実行が最初から存在しないため、問い合わせても常に「無し」が返る。
+   * 一覧に並ぶ件数だけ20秒ごとに叩くので、外さないとGitHub APIを空振りで消費し続ける。
+   */
+  excludedIssueIds?: ReadonlySet<string>,
+): RunningMap {
   const [running, setRunning] = useState<RunningMap>({});
   const knownRunIdsRef = useRef<Map<string, number>>(new Map());
   const candidates = issues.filter(
-    (issue) => hasActiveWorkflowStep(issue) && !isApprovalPending(issue.labels),
+    (issue) =>
+      hasActiveWorkflowStep(issue) &&
+      !isApprovalPending(issue.labels) &&
+      !excludedIssueIds?.has(issue.id),
   );
   const candidateKey = candidates
     .map((issue) => issue.id)
