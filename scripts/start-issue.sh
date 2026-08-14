@@ -475,9 +475,13 @@ if prepare_only:
         "`.env.local`に設定済みなので、そのまま`pnpm dev`でよい）"
     ).format(worktree=worktree_dir, port=dev_port)
 else:
+    # 開発サーバーは一定時間アクセスが無いと回収される（#1223）。落ちていることを想定外の事故と
+    # 受け取って調査に入られると無駄なので、起こし方まで先に伝えておく。
     dev_server_state = (
-        "このworktree用の開発サーバーはセッション開始時に自動起動済み（ログ: `{dev_log}`）"
-    ).format(dev_log=dev_log)
+        "このworktree用の開発サーバーはセッション開始時に自動起動済み（ログ: `{dev_log}`）。"
+        "ただし**一定時間アクセスが無いと自動で停止される**ため、画面確認のときに繋がらなければ "
+        "`cd {worktree} && pnpm dev` で起こしてよい（停止した理由はログの末尾に残っている）"
+    ).format(dev_log=dev_log, worktree=worktree_dir)
 
 if "23.preview-required" in label_names:
     preview_instructions = (
