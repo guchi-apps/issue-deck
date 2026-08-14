@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseAutoRetryLimit, parseClaudeModel } from "@/lib/app-settings";
+import {
+  DISPATCH_CONCURRENCY_MAX,
+  DISPATCH_CONCURRENCY_MIN,
+  parseAutoRetryLimit,
+  parseClaudeModel,
+  parseDispatchConcurrency,
+} from "@/lib/app-settings";
 
 describe("parseAutoRetryLimit", () => {
   it("範囲内の整数はそのまま返す", () => {
@@ -18,6 +24,27 @@ describe("parseAutoRetryLimit", () => {
     expect(parseAutoRetryLimit("3")).toBeNull();
     expect(parseAutoRetryLimit(null)).toBeNull();
     expect(parseAutoRetryLimit(undefined)).toBeNull();
+  });
+});
+
+describe("parseDispatchConcurrency", () => {
+  it("範囲内の整数はそのまま返す", () => {
+    expect(parseDispatchConcurrency(DISPATCH_CONCURRENCY_MIN)).toBe(DISPATCH_CONCURRENCY_MIN);
+    expect(parseDispatchConcurrency(2)).toBe(2);
+    expect(parseDispatchConcurrency(DISPATCH_CONCURRENCY_MAX)).toBe(DISPATCH_CONCURRENCY_MAX);
+  });
+
+  it("0以下は受け付けない（0にすると起動できないまま滞留するため）", () => {
+    expect(parseDispatchConcurrency(0)).toBeNull();
+    expect(parseDispatchConcurrency(-1)).toBeNull();
+  });
+
+  it("上限を超える値・整数でない値はnullを返す", () => {
+    expect(parseDispatchConcurrency(DISPATCH_CONCURRENCY_MAX + 1)).toBeNull();
+    expect(parseDispatchConcurrency(1.5)).toBeNull();
+    expect(parseDispatchConcurrency("2")).toBeNull();
+    expect(parseDispatchConcurrency(null)).toBeNull();
+    expect(parseDispatchConcurrency(undefined)).toBeNull();
   });
 });
 

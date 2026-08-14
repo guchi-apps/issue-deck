@@ -1,0 +1,28 @@
+[Unit]
+# サブPCのディスパッチpoller（#1179）。issue-deckのジョブキューを1巡ぶんだけ処理する。
+# 間隔と再起動は issue-deck-dispatch-poller.timer に任せる（常駐しない）。
+Description=issue-deck dispatch poller (1 巡)
+Documentation=https://github.com/guchi-apps/issue-deck/blob/develop/docs/multi-agent/subpc-dispatch.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# 共有シークレットは chmod 600 のファイルから読む。1Password から毎分 `op run` で
+# 引くのは重すぎるため、起動時に生成しておいた値をここで読む形にしている
+# （生成手順は dispatch.env.example のコメントを参照）。
+EnvironmentFile=%h/.config/issue-deck/dispatch.env
+
+# tmux はログインシェルを経由しないため PATH が落ちる（#1177・#1178）。
+# poller 自身が使う curl/jq/tmux はシステム側にあるが、この先で起動される
+# start-issue.sh は node/pnpm/claude を必要とする。`bash -lc` でログインシェルを
+# 明示し、~/.profile 系（PATH は ~/.profile.local）をまとめて読ませる。
+ExecStart=/bin/bash -lc '%h/apps/issue-deck/scripts/subpc-dispatch-poller.sh'
+
+# 1巡が長引いてもtimerの次の発火と重ならないよう、余裕を持って打ち切る。
+# worktree作成とpnpm installを含めても数分で終わる（#1177の実測）。
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=default.target

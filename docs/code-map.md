@@ -96,6 +96,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   統合する。タイトル・ブランチ・CI状態など**一覧が既に持っている情報はこのAPIで返さない**
   （画面のヘッダーは一覧の項目から描く）。こちらも自動ポーリングは無い
   （`hooks/use-pull-request-detail.ts`）。
+- **サブPCへのディスパッチはpull型で、書き込み経路は`/api/dispatch/*`の1本。** 画面はジョブを
+  `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
+  tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。
+  **ジョブの`succeeded`は「tmuxセッションが立った」までで、実装の完了ではない**（以降の進捗は
+  Project Statusが持つ）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
+  `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
+  判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
+  [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

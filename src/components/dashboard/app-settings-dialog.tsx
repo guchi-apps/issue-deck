@@ -26,20 +26,27 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   CLAUDE_MODEL_OPTIONS,
+  DISPATCH_CONCURRENCY_MAX,
+  DISPATCH_CONCURRENCY_MIN,
   type ClaudeModel,
 } from "@/lib/app-settings";
+
+export type AppSettingsValues = {
+  autoRetryLimit: number;
+  claudeModel: ClaudeModel;
+  claudeModelAssist: ClaudeModel;
+  dispatchConcurrency: number;
+};
 
 type AppSettingsDialogProps = {
   open: boolean;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  dispatchConcurrency: number;
   onOpenChange: (open: boolean) => void;
-  onUpdated: (
-    autoRetryLimit: number,
-    claudeModel: ClaudeModel,
-    claudeModelAssist: ClaudeModel,
-  ) => void;
+  // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
+  onUpdated: (values: AppSettingsValues) => void;
 };
 
 export function AppSettingsDialog({
@@ -47,15 +54,23 @@ export function AppSettingsDialog({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  dispatchConcurrency: initialDispatchConcurrency,
   onOpenChange,
   onUpdated,
 }: AppSettingsDialogProps) {
-  const { updateAutoRetryLimit, updateClaudeModel, isSubmitting, error, setError } =
-    useAppSettingsMutations();
+  const {
+    updateAutoRetryLimit,
+    updateClaudeModel,
+    updateDispatchConcurrency,
+    isSubmitting,
+    error,
+    setError,
+  } = useAppSettingsMutations();
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
 
   useEffect(() => {
     if (!open) return;
@@ -64,15 +79,33 @@ export function AppSettingsDialog({
     setAutoRetryLimit(initialAutoRetryLimit);
     setClaudeModel(initialClaudeModel);
     setClaudeModelAssist(initialClaudeModelAssist);
+    setDispatchConcurrency(initialDispatchConcurrency);
     setError(null);
-  }, [open, initialAutoRetryLimit, initialClaudeModel, initialClaudeModelAssist, setError]);
+  }, [
+    open,
+    initialAutoRetryLimit,
+    initialClaudeModel,
+    initialClaudeModelAssist,
+    initialDispatchConcurrency,
+    setError,
+  ]);
+
+  const isValid =
+    Number.isInteger(autoRetryLimit) &&
+    autoRetryLimit >= AUTO_RETRY_LIMIT_MIN &&
+    autoRetryLimit <= AUTO_RETRY_LIMIT_MAX &&
+    Number.isInteger(dispatchConcurrency) &&
+    dispatchConcurrency >= DISPATCH_CONCURRENCY_MIN &&
+    dispatchConcurrency <= DISPATCH_CONCURRENCY_MAX;
 
   async function handleSubmit() {
     const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
     if (!autoRetryOk) return;
     const claudeModelOk = await updateClaudeModel(claudeModel, claudeModelAssist);
     if (!claudeModelOk) return;
-    onUpdated(autoRetryLimit, claudeModel, claudeModelAssist);
+    const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
+    if (!dispatchOk) return;
+    onUpdated({ autoRetryLimit, claudeModel, claudeModelAssist, dispatchConcurrency });
     onOpenChange(false);
   }
 
@@ -145,6 +178,21 @@ export function AppSettingsDialog({
             質問への回答とサブIssueへの分割で使用するモデルです。実装ほどの精度を必要としないため、
             より軽いモデルを選ぶとコストを抑えられます。
           </p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
+            <Input
+              id="dispatch-concurrency"
+              type="number"
+              min={DISPATCH_CONCURRENCY_MIN}
+              max={DISPATCH_CONCURRENCY_MAX}
+              value={dispatchConcurrency}
+              onChange={(e) => setDispatchConcurrency(Number(e.target.value))}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            サブPCへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
+            合わせて変えられるよう設定値にしています（既定の2は現在のCPUでの実測値）。
+          </p>
           <Separator />
 
           <WorkflowTagStatusSection open={open} />
@@ -158,12 +206,7 @@ export function AppSettingsDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={
-              isSubmitting ||
-              autoRetryLimit < AUTO_RETRY_LIMIT_MIN ||
-              autoRetryLimit > AUTO_RETRY_LIMIT_MAX ||
-              !Number.isInteger(autoRetryLimit)
-            }
+            disabled={isSubmitting || !isValid}
           >
             {isSubmitting ? "保存中..." : "保存"}
           </Button>

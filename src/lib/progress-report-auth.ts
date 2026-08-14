@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared-secret-auth";
 
 /**
  * 進捗報告API（`POST /api/progress`）の認証（#991 Phase 2）。
@@ -9,16 +9,13 @@ import { timingSafeEqual } from "node:crypto";
  *
  * 値は`PROGRESS_REPORT_SECRET`。GitHub側にはorganization secretとして置き、各リポジトリの
  * ワークフローから参照する。
+ *
+ * **ディスパッチAPI（#1179）はこの値を流用せず、別の`DISPATCH_SECRET`を持つ**
+ * （src/lib/dispatch/dispatch-auth.ts）。こちらは全リポジトリのActionsから参照できる値で、
+ * 「サブPCでジョブを取れる」権限まで同じ値に載せると権限の粒度が分けられなくなるため。
+ * Bearer検証の実装自体は`src/lib/shared-secret-auth.ts`で共有している。
  */
-export type ProgressReportAuthResult = "ok" | "unauthorized" | "not_configured";
-
-function safeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a);
-  const bBuf = Buffer.from(b);
-  // timingSafeEqualは長さが違うと例外を投げるため、先に長さで弾く（長さの漏洩は許容する）
-  if (aBuf.length !== bBuf.length) return false;
-  return timingSafeEqual(aBuf, bBuf);
-}
+export type ProgressReportAuthResult = SharedSecretAuthResult;
 
 /**
  * `Authorization: Bearer <secret>` を検証する。
@@ -29,11 +26,5 @@ function safeEqual(a: string, b: string): boolean {
 export function authorizeProgressReport(
   authorizationHeader: string | null,
 ): ProgressReportAuthResult {
-  const secret = process.env.PROGRESS_REPORT_SECRET;
-  if (!secret) return "not_configured";
-
-  const prefix = "Bearer ";
-  if (!authorizationHeader || !authorizationHeader.startsWith(prefix)) return "unauthorized";
-
-  return safeEqual(authorizationHeader.slice(prefix.length), secret) ? "ok" : "unauthorized";
+  return authorizeBearerSecret(authorizationHeader, process.env.PROGRESS_REPORT_SECRET);
 }

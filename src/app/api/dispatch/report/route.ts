@@ -1,0 +1,62 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
+import { reportDispatchJob } from "@/lib/dispatch/jobs";
+
+/** メッセージは画面にそのまま出る。長文が流れ込まないよう頭で切る */
+const MAX_MESSAGE_LENGTH = 2000;
+
+/**
+ * pollerからのジョブ状態の報告（#1179）。`running` / `succeeded` / `failed` の3つ。
+ *
+ * **`succeeded`は「tmuxセッションが立ち上がった」まで**を意味し、実装の完了ではない。
+ * 実装の進捗は`POST /api/progress`（Project Status）が唯一の正として持つ
+ * （docs/progress-status-architecture.md）。ここで実装完了まで追うと情報が二重になる。
+ *
+ * `timeout`・`canceled`はissue-deck側だけが付ける状態なので、ここでは受け付けない。
+ */
+export async function POST(request: NextRequest) {
+  const auth = authorizeDispatch(request.headers.get("authorization"));
+  if (auth === "not_configured") {
+    return NextResponse.json({ error: "not_configured" }, { status: 503 });
+  }
+  if (auth === "unauthorized") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const payload = await request.json().catch(() => null);
+  const jobId = typeof payload?.jobId === "string" && payload.jobId !== "" ? payload.jobId : null;
+  const hostName = parseDispatchHostName(payload?.host);
+  const status = parseDispatchReportStatus(payload?.status);
+  if (!jobId || !hostName || !status) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const message =
+    typeof payload?.message === "string" ? payload.message.slice(0, MAX_MESSAGE_LENGTH) : null;
+  const tmuxSessionName =
+    typeof payload?.tmuxSessionName === "string" && payload.tmuxSessionName !== ""
+      ? payload.tmuxSessionName.slice(0, 191)
+      : null;
+
+  const result = await reportDispatchJob({ jobId, hostName, status, message, tmuxSessionName });
+
+  if (!result.ok) {
+    // `already_finished`（タイムアウト済みのジョブへ遅れて報告が届いた）はpoller側の異常では
+    // ないため、200で「反映しなかった」とだけ伝える。/api/progressと同じ扱い方
+    if (result.reason === "already_finished") {
+      return NextResponse.json(
+        { ok: true, applied: false, reason: result.reason },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const status = result.reason === "not_found" ? 404 : 403;
+    return NextResponse.json({ error: result.reason }, { status });
+  }
+
+  return NextResponse.json(
+    { ok: true, applied: true, job: result.job },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}

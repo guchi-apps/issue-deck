@@ -48,6 +48,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [Phase 7: 無人実行でのスクリーンショット撮影・画像埋め込み](multi-agent/screenshots.md) | Playwrightによる撮影とIssueコメントへの埋め込み |
 | [PRコンフリクト・CI失敗の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml` |
 | [画面からのローカルセッション起動](multi-agent/local-quick-start.md) | `issuedeck://`プロトコル経由でWSLのClaude Codeセッションをワンクリック起動する仕組み、初回セットアップ、セキュリティ上の前提 |
+| [サブPCへのディスパッチ](multi-agent/subpc-dispatch.md) | pull型のジョブキュー、実行可能リポジトリの申告、同時実行数の上限、サブPC側のpollerとsystemd |
 
 ## 段階的導入計画
 
