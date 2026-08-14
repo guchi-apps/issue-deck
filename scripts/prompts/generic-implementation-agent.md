@@ -137,6 +137,7 @@ PR作成の前後で改めて `gh issue view {{ISSUE_NUMBER}} --repo {{REPOSITOR
 
 - `main` / `{{BASE_BRANCH}}` への直接コミット・push
 - 他Issueのブランチ・worktreeの編集
+- **担当Issue以外の実装。** 作業中に見つけた別件を新規Issueとして起票するのは構いませんが、**起票したIssueをこのセッション・このブランチで実装しないでください**。進捗の遷移とcloseはブランチ名`issue-<番号>`だけを見ており、無人実行の停止フラグ（`11.local`）と画面のセッション表示は起動時に渡されたIssue番号にしか付きません。混ぜると起票したIssueは未着手のまま取り残され、同時にそのIssueへの無人実行を止めるものが無くなります。実施するなら、そのIssue用に別セッションを起こしてください
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
 - 共有知識リポジトリ（`~/apps/_docs`）の編集・コミット
