@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findMany = vi.fn();
+const findUnique = vi.fn();
 const upsert = vi.fn();
 const updateMany = vi.fn();
 const deleteMany = vi.fn();
 const escalateFailedSession = vi.fn();
+const postSessionWrapupComment = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     dispatchSession: {
       get findMany() {
         return findMany;
+      },
+      get findUnique() {
+        return findUnique;
       },
       get upsert() {
         return upsert;
@@ -28,6 +33,12 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/dispatch/session-escalation", () => ({
   get escalateFailedSession() {
     return escalateFailedSession;
+  },
+}));
+
+vi.mock("@/lib/dispatch/session-wrapup", () => ({
+  get postSessionWrapupComment() {
+    return postSessionWrapupComment;
   },
 }));
 
@@ -67,7 +78,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   // 1回目は既存行の取得、2回目は保存後の読み直し
   findMany.mockResolvedValue([]);
+  findUnique.mockResolvedValue(existingRow());
   escalateFailedSession.mockResolvedValue(true);
+  postSessionWrapupComment.mockResolvedValue(false);
 });
 
 describe("reportDispatchSessions", () => {
@@ -93,6 +106,26 @@ describe("reportDispatchSessions", () => {
         }),
         data: expect.objectContaining({ state: "GONE" }),
       }),
+    );
+  });
+
+  /**
+   * #1119。`SIGKILL`・ホストの再起動で`trap`（`markDispatchSessionEnded`）を通らなかった
+   * セッションを、ここで拾う。**報告に含まれていた行は締めない**（まだ生きている）。
+   */
+  it("報告から消えた行についてだけ締めコメントを試みる", async () => {
+    findMany
+      .mockResolvedValueOnce([
+        existingRow(),
+        existingRow({ id: "row-2", tmuxSessionName: "dayspan-issue-5", issueNumber: 5 }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(postSessionWrapupComment).toHaveBeenCalledTimes(1);
+    expect(postSessionWrapupComment).toHaveBeenCalledWith(
+      expect.objectContaining({ tmuxSessionName: "dayspan-issue-5", issueNumber: 5 }),
     );
   });
 
@@ -289,11 +322,39 @@ describe("markDispatchSessionEnded", () => {
   // pollerがまだ1巡していないなど、対象の行が無いことは普通に起きる
   it("対象の行が無ければ0件を返す（例外にしない）", async () => {
     updateMany.mockResolvedValue({ count: 0 });
+    findUnique.mockResolvedValue(null);
     const result = await markDispatchSessionEnded({
       hostName: "subpc",
       tmuxSessionName: "issue-deck-issue-1321",
       now: NOW,
     });
     expect(result).toEqual({ updated: 0 });
+  });
+
+  /**
+   * #1119。何も記録を残さずに終わったセッションを締める。投稿するかどうか（記録が残っているか）の
+   * 判定は`session-wrapup.ts`側なので、ここでは「呼ぶ／呼ばない」だけを見る。
+   */
+  it("ALIVEから倒したときに締めコメントを試みる", async () => {
+    await markDispatchSessionEnded({
+      hostName: "subpc",
+      tmuxSessionName: "issue-deck-issue-1217",
+      now: NOW,
+    });
+    expect(postSessionWrapupComment).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1217,
+      hostName: "subpc",
+      tmuxSessionName: "issue-deck-issue-1217",
+      firstSeenAt: NOW,
+      now: NOW,
+    });
+  });
+
+  // 二重に報告された2回目は0件になる。ここで締めるとGitHubへの往復だけが増える
+  it("既にGONEなら締めコメントを試みない", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    await markDispatchSessionEnded({ hostName: "subpc", tmuxSessionName: "s", now: NOW });
+    expect(postSessionWrapupComment).not.toHaveBeenCalled();
   });
 });

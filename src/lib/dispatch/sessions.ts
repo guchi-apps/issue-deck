@@ -12,6 +12,7 @@ import {
   type DispatchSessionView,
 } from "@/lib/dispatch/session-state";
 import { escalateFailedSession } from "@/lib/dispatch/session-escalation";
+import { postSessionWrapupComment } from "@/lib/dispatch/session-wrapup";
 
 /**
  * 起動後のtmuxセッションの状態（#1217）のDB操作。
@@ -105,6 +106,16 @@ export async function markDispatchSessionEnded(params: {
   now?: Date;
 }): Promise<{ updated: number }> {
   const now = params.now ?? new Date();
+  // 締めコメント（#1119）の判定に`repositoryFullName`・`issueNumber`・`firstSeenAt`が要る。
+  // `updateMany`は更新後の行を返さないので、倒す前に読んでおく
+  const target = await db.dispatchSession.findUnique({
+    where: {
+      host_tmuxSessionName: {
+        host: params.hostName,
+        tmuxSessionName: params.tmuxSessionName,
+      },
+    },
+  });
   const result = await db.dispatchSession.updateMany({
     where: {
       host: params.hostName,
@@ -119,6 +130,20 @@ export async function markDispatchSessionEnded(params: {
       escalatedState: null,
     },
   });
+
+  // **実際に`ALIVE`から倒した1回だけ締める（#1119）。** 二重に報告されても2回目は0件なので、
+  // ここを通らない。投稿するかどうか（記録が残っているか）の判定は`session-wrapup.ts`側。
+  if (result.count > 0 && target) {
+    await postSessionWrapupComment({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName: params.hostName,
+      tmuxSessionName: params.tmuxSessionName,
+      firstSeenAt: target.firstSeenAt,
+      now,
+    });
+  }
+
   return { updated: result.count };
 }
 
@@ -211,9 +236,10 @@ export async function reportDispatchSessions(params: {
   // 報告に含まれなくなった行はGONEへ倒す。**削除しない。**
   // 引き上げ済みかどうか（escalatedState）を覚えておく必要があるのと、画面が「終わった
   // セッション」を出せるようにするため。
-  const goneNames = existing
-    .filter((row) => !reportedNames.has(row.tmuxSessionName) && row.state !== "GONE")
-    .map((row) => row.tmuxSessionName);
+  const goneRows = existing.filter(
+    (row) => !reportedNames.has(row.tmuxSessionName) && row.state !== "GONE",
+  );
+  const goneNames = goneRows.map((row) => row.tmuxSessionName);
   if (goneNames.length > 0) {
     await db.dispatchSession.updateMany({
       where: { host: params.hostName, tmuxSessionName: { in: goneNames } },
@@ -224,6 +250,23 @@ export async function reportDispatchSessions(params: {
         // 前回の記録が残っていると2回目の引き上げが起きない
         escalatedState: null,
       },
+    });
+  }
+
+  // 何も記録を残さずに終わったセッションを締める（#1119）。**`markDispatchSessionEnded`と
+  // 二重に呼ばれうるが、投稿は1回で済む**（`session-wrapup.ts`が自分のマーカーを「記録あり」に
+  // 数える）。ここを残しておかないと、`SIGKILL`・ホストの再起動で`trap`を通らなかったセッションを
+  // 拾えない（#1321の多層防御と同じ理由）。
+  //
+  // **引き上げ（`escalations`）と同じく、失敗で報告APIを落とさない。**
+  for (const row of goneRows) {
+    await postSessionWrapupComment({
+      repositoryFullName: row.repositoryFullName,
+      issueNumber: row.issueNumber,
+      hostName: params.hostName,
+      tmuxSessionName: row.tmuxSessionName,
+      firstSeenAt: row.firstSeenAt,
+      now,
     });
   }
 
