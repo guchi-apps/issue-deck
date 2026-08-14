@@ -776,7 +776,38 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
-| `OP_SERVICE_ACCOUNT_TOKEN` | issue-deck自身のSignaly（社内通知）連携で使う1Password Service Accountトークン | マルチエージェント運用そのものには不要。issue-deckの`ci.yml`/`deploy.yml`/`release.yml`固有の設定であり、他リポジトリで導入する必然性はない |
+| `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン。issue-deckでは現在プレビュー環境系（`deploy-preview.yml`・`cleanup-preview.yml`・`preview-logs.yml`）のみが使う | マルチエージェント運用そのものには不要。`ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外したため、これらでは不要になった |
+
+### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
+
+`deploy.yml`・`release.yml`・`ci.yml`が使う値は、以前は実行のたびに1Passwordから取得していた。
+1Passwordサービスアカウントの日次レート制限（**1Passwordアカウント全体で1,000リクエスト/日**、
+サービスアカウントを分けても分割されない）を使い切ってデプロイが止まったため、実行時の取得先を
+GitHubへ移した。GitHub側のsecret/variableにはレート制限が無い。
+
+**1Passwordは引き続き「人が管理する唯一の正」**であり、対応表は
+[`.github/secrets-manifest.tsv`](../.github/secrets-manifest.tsv)にある。値を変更したときは
+`scripts/sync-github-secrets.sh`で同期する（このスクリプトが使う`op`は個人アカウントの
+セッションであり、サービスアカウントの枠を消費しない）。
+
+`issue-deck`は**PUBLICリポジトリでActionsのログが誰でも読める**。variableはマスクされないため、
+公開されても害が無いと確認できた値だけをvariableにしている。接続先の構成情報（ホスト・ポート・
+ユーザー名・DB名）は単体では資格情報でなくとも、VPSへの攻撃面になるためsecretに置く。
+
+| 種別 | 名前 |
+|---|---|
+| Secret（接続・認証） | `SSH_PRIVATE_KEY`・`HOST`・`USERNAME`・`SSH_PORT`・`TARGET_DIR` |
+| Secret（DB） | `DB_USER`・`DB_PASSWORD`・`DB_HOST`・`DB_PORT`・`DB_NAME`・`MIGRATE_DB_USER`・`MIGRATE_DB_PASSWORD` |
+| Secret（アプリ） | `SUPABASE_SERVICE_ROLE_KEY`・`GITHUB_APP_PRIVATE_KEY_BASE64`・`GITHUB_WEBHOOK_SECRET`・`GITHUB_USER_TOKEN_ENCRYPTION_KEY`・`GITHUB_OAUTH_CLIENT_ID`・`GITHUB_OAUTH_CLIENT_SECRET`・`ALLOWED_EMAILS`・`DISPATCH_SECRET`・`SIGNALY_WEBHOOK_URL` |
+| Variable（公開されても害が無い値） | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`・`NEXT_PUBLIC_GITHUB_APP_SLUG`・`GITHUB_APP_ID`・`PORT` |
+| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET` |
+
+最後の2つは、以前はorganization secretと1Passwordの両方に同じ値があり二重管理になっていた。
+**同名のrepo secretを作るとorganization secretを覆い隠す**ため、repo側には作らない。
+
+なお`guchi-apps`はGitHub Freeのorganizationであり、**organization secretはprivateリポジトリからは
+利用できない**（publicリポジトリのみ）。共通値をorganization secretへ集約できるのはpublicな
+14リポジトリまでで、privateな11リポジトリはrepository secretとして個別に持つ必要がある。
 
 ### 変数 `APP_BASE_URL`
 
