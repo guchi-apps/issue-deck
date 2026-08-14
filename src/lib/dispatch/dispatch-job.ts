@@ -32,6 +32,36 @@ export function isActiveDispatchJobStatus(status: DispatchJobStatus): boolean {
 }
 
 /**
+ * 画面へ返すジョブ。DBの行をそのまま出さず、必要な項目だけを整える。
+ *
+ * **型をここ（DBに触らない側）に置く**のは、クライアントコンポーネント（#1180の起動先選択）が
+ * `jobs.ts`をimportせずに同じ形を参照できるようにするため。`jobs.ts`はPrismaクライアントを
+ * 読み込むため、そちらをimportするとブラウザ向けのバンドルへ入ってしまう。
+ */
+export type DispatchJobView = {
+  id: string;
+  repositoryFullName: string;
+  issueNumber: number;
+  targetHost: string;
+  status: DispatchJobStatus;
+  message: string | null;
+  tmuxSessionName: string | null;
+  createdAt: string;
+  claimedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+/** 画面へ返すホスト。実行可能リポジトリは配列に展開し、生存判定も済ませて渡す */
+export type DispatchHostView = {
+  name: string;
+  repositories: string[];
+  contractVersion: number | null;
+  online: boolean;
+  lastSeenAt: string;
+};
+
+/**
  * ホストが生存していると見なす猶予（ミリ秒）。pollerのポーリング間隔は60秒なので、
  * 一時的な取りこぼしでofflineに倒れないよう数回分の余裕を取る。
  */
@@ -167,6 +197,83 @@ export function describeDispatchEnqueueRejection(
     case "already_queued":
       return "このIssueには実行中または待機中のジョブが既にあります。";
   }
+}
+
+/**
+ * 起動先として選べない理由を、**押される前に**判定する（#1180）。
+ *
+ * 判定の並びと理由の文言は`enqueueDispatchJob`（`jobs.ts`）と同じものを使う。片方だけで
+ * 判定を持つと、画面では押せるのにAPIが拒否する（またはその逆）状態が生まれる。ここは
+ * 「押せてしまわないようにする」ための先出しで、**最終的な拒否はAPI側が行う**
+ * （申告が古い・押した瞬間にホストが落ちる、といったずれは避けられない）。
+ */
+export function resolveDispatchTargetRejection(params: {
+  host: Pick<DispatchHostView, "online" | "repositories"> | null | undefined;
+  repositoryFullName: string;
+  hasActiveJob: boolean;
+}): DispatchEnqueueRejection | null {
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (!params.host.repositories.includes(params.repositoryFullName)) {
+    return "repository_not_runnable";
+  }
+  if (params.hasActiveJob) return "already_queued";
+  return null;
+}
+
+/**
+ * ジョブの状態の見せ方（#1180）。**`succeeded`は「tmuxセッションが立ち上がった」まで**で
+ * 実装の完了ではないため、「完了」ではなく「起動しました」と書く。以降の進捗は
+ * Project Statusが持つ唯一の正（progress-status-architecture.md）。
+ */
+export type DispatchJobTone = "pending" | "running" | "success" | "error" | "muted";
+
+export function describeDispatchJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "起動中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "起動しました", tone: "success" };
+    case "FAILED":
+      return { label: "失敗", tone: "error" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/** 画面から取り消せる状態か（`running`は途中で止めると中途半端なworktreeが残るため不可） */
+export function isCancelableDispatchJobStatus(status: DispatchJobStatus): boolean {
+  return status === "QUEUED" || status === "CLAIMED";
+}
+
+/**
+ * あるIssueについて画面に出すジョブを1件選ぶ（#1180）。
+ *
+ * 未完了のものを最優先し、無ければ直近に作られたものを返す。**終わったジョブも出す**のは、
+ * 押した結果（起動した・失敗した）が消えると「押しても何も起きなかった」と区別が付かないため。
+ * APIが返す範囲そのものが直近24時間に絞られている（`FINISHED_JOB_RETENTION_MS`）。
+ */
+export function findDispatchJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  const mine = jobs.filter(
+    (job) => job.repositoryFullName === repositoryFullName && job.issueNumber === issueNumber,
+  );
+  if (mine.length === 0) return null;
+
+  const byNewest = [...mine].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return byNewest.find((job) => isActiveDispatchJobStatus(job.status)) ?? byNewest[0];
 }
 
 /** 起動が届かなかったジョブに残す理由（timeoutの内訳） */

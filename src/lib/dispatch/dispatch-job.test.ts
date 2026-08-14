@@ -4,8 +4,11 @@ import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
   describeDispatchEnqueueRejection,
+  describeDispatchJobStatus,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
+  findDispatchJobForIssue,
   isActiveDispatchJobStatus,
+  isCancelableDispatchJobStatus,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostName,
@@ -13,6 +16,8 @@ import {
   parseDispatchReportStatus,
   parseDispatchTarget,
   resolveDispatchConcurrency,
+  resolveDispatchTargetRejection,
+  type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 
 describe("parseDispatchTarget", () => {
@@ -164,5 +169,116 @@ describe("describeDispatchEnqueueRejection", () => {
       }),
     ).toContain("guchi-apps/shopping-list");
     expect(describeDispatchEnqueueRejection("already_queued", { hostName: "subpc" })).not.toBe("");
+  });
+});
+
+describe("resolveDispatchTargetRejection", () => {
+  const host = { online: true, repositories: ["guchi-apps/issue-deck"] };
+  const repositoryFullName = "guchi-apps/issue-deck";
+
+  it("実行できる組み合わせならnull（＝選べる）", () => {
+    expect(resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob: false })).toBe(
+      null,
+    );
+  });
+
+  it("申告が無い・応答していないホストは選ばせない", () => {
+    expect(
+      resolveDispatchTargetRejection({ host: null, repositoryFullName, hasActiveJob: false }),
+    ).toBe("host_unknown");
+    expect(
+      resolveDispatchTargetRejection({
+        host: { ...host, online: false },
+        repositoryFullName,
+        hasActiveJob: false,
+      }),
+    ).toBe("host_offline");
+  });
+
+  it("cloneされていないリポジトリと、未完了ジョブがあるIssueも選ばせない", () => {
+    expect(
+      resolveDispatchTargetRejection({
+        host: { ...host, repositories: [] },
+        repositoryFullName,
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_not_runnable");
+    expect(resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob: true })).toBe(
+      "already_queued",
+    );
+  });
+
+  // 画面とAPIで並びが違うと、画面では押せるのにAPIが別の理由で断る状態が生まれる
+  it("判定の並びはenqueueDispatchJobと同じ（ホストの状態が先）", () => {
+    expect(
+      resolveDispatchTargetRejection({
+        host: { online: false, repositories: [] },
+        repositoryFullName,
+        hasActiveJob: true,
+      }),
+    ).toBe("host_offline");
+  });
+});
+
+describe("describeDispatchJobStatus", () => {
+  // succeededは「tmuxセッションが立ち上がった」までで、実装の完了ではない
+  it("succeededを「完了」とは書かない", () => {
+    expect(describeDispatchJobStatus("SUCCEEDED").label).toBe("起動しました");
+  });
+
+  it("失敗と応答なしは同じ扱い（どちらも起動が届いていない）", () => {
+    expect(describeDispatchJobStatus("FAILED").tone).toBe("error");
+    expect(describeDispatchJobStatus("TIMEOUT").tone).toBe("error");
+  });
+});
+
+describe("isCancelableDispatchJobStatus", () => {
+  it("running以降は取り消せない（中途半端なworktreeが残るため）", () => {
+    expect(isCancelableDispatchJobStatus("QUEUED")).toBe(true);
+    expect(isCancelableDispatchJobStatus("CLAIMED")).toBe(true);
+    expect(isCancelableDispatchJobStatus("RUNNING")).toBe(false);
+    expect(isCancelableDispatchJobStatus("SUCCEEDED")).toBe(false);
+  });
+});
+
+describe("findDispatchJobForIssue", () => {
+  function job(overrides: Partial<DispatchJobView>): DispatchJobView {
+    return {
+      id: "job",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1180,
+      targetHost: "subpc",
+      status: "QUEUED",
+      message: null,
+      tmuxSessionName: null,
+      createdAt: "2026-08-14T00:00:00.000Z",
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("他のIssue・他のリポジトリのジョブは拾わない", () => {
+    const jobs = [job({ id: "other-issue", issueNumber: 1179 }), job({ id: "mine" })];
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("mine");
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/car-care", 1180)).toBeNull();
+  });
+
+  it("未完了のジョブを、より新しい終了済みジョブより優先する", () => {
+    const jobs = [
+      job({ id: "finished", status: "FAILED", createdAt: "2026-08-14T01:00:00.000Z" }),
+      job({ id: "active", status: "QUEUED", createdAt: "2026-08-14T00:00:00.000Z" }),
+    ];
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("active");
+  });
+
+  // 押した結果が消えると「押しても何も起きなかった」と区別が付かない
+  it("未完了が無ければ直近のジョブを返す", () => {
+    const jobs = [
+      job({ id: "old", status: "SUCCEEDED", createdAt: "2026-08-13T00:00:00.000Z" }),
+      job({ id: "new", status: "FAILED", createdAt: "2026-08-14T00:00:00.000Z" }),
+    ];
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("new");
   });
 });
