@@ -87,6 +87,8 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `reusable-claude-conflict-resolve.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect-conflicts`／`resolve-conflicts`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-ci-fix.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`・`package-manager`・`node-version`で、ビルド検証に要るダミー環境変数は`build-env`で、修正後の検証手順の説明は`verify-commands`で指定する。**Nodeのセットアップは要るが依存のインストールは不要**なリポジトリ（検証が`node --check`だけで`node_modules`を要さない等）は`install-dependencies: false`を渡す。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
 | `reusable-claude-ci-fix.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect`／`fix`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
+| `claude-pr-repair.yml` | Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）のCI失敗・コンフリクトを、issue-deckの画面のボタンから修復する（`workflow_dispatch`のみ）。**トリガー定義のみ**を持ち、本体は`reusable-claude-pr-repair.yml`を`uses:`で呼ぶ（#1293） | **コピーではなく薄いcallerを置く。** 指定する入力は`claude-ci-fix.yml`と同じものに加え、自身の`workflow_dispatch`入力を`pr-number`・`mode`として渡す。導入は任意（画面のボタンからの修復を使わないリポジトリでは不要） |
+| `reusable-claude-pr-repair.yml` | 上記のジョブ本体（`on: workflow_call`）。`repair`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
@@ -193,8 +195,8 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 ことがある（`curl`が許可されているのに2行に分けて書いて拒否された実例がある）。
 
 **この許可リストは`reusable-issue-dispatch.yml`・`reusable-claude-ci-fix.yml`・
-`reusable-claude-conflict-resolve.yml`の3ファイルで同一に保つ。** `src/lib/workflows/
-allowed-tools.test.ts`が一致をテストしている。
+`reusable-claude-conflict-resolve.yml`・`reusable-claude-pr-repair.yml`の4ファイルで同一に
+保つ。** `src/lib/workflows/allowed-tools.test.ts`が一致をテストしている。
 
 **Pythonはランナー標準のものを使う。** `setup-python`は入れていないため、CIが
 `actions/setup-python`でバージョンを固定している場合はズレる可能性がある。厳密に揃える

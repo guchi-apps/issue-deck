@@ -1,0 +1,65 @@
+name: Claude PR Repair
+
+# 対応Issueを持たないPull Request（バージョンバンプPR・develop→mainのリリースPR）が
+# CI失敗またはコンフリクトで止まっているとき、issue-deckの画面のボタンから
+# Claude Codeによる自動修復を起動するためのワークフロー（#1293）。
+#
+# **トリガー定義のみ**を持ち、ジョブ本体はreusable-claude-pr-repair.ymlへ切り出してある。
+# 他リポジトリからも同じ実体を呼べるようにするため（方式は#934、先行例は#940・#945・#1066）。
+# issue-deck自身はローカルパス参照(./)を使い、他アプリはタグ固定(@workflows/vX)で参照する
+# カナリア構成にする。
+#
+# **workflow_dispatchのみ**で、自動検知のトリガーは持たない。CI失敗・コンフリクトを検知して
+# 自動で走る経路は claude-ci-fix.yml（#807）・claude-conflict-resolve.yml（#315）が持って
+# おり、そちらと二重に走らせないため。起動元はissue-deckの`POST /api/pull-requests/repair`
+# （画面の「CI失敗を自動修正」「コンフリクトを自動解消」ボタン）。
+#
+# 注意: workflow_dispatchの受け口はデフォルトブランチのワークフロー定義から解決されるため、
+# このファイルがデフォルトブランチ（issue-deckでは develop）へ入るまでは起動できない。
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "対象のPull Request番号"
+        required: true
+        type: string
+      mode:
+        description: "修復の種類"
+        required: true
+        type: choice
+        options:
+          - ci
+          - conflict
+
+jobs:
+  pr-repair:
+    uses: ./.github/workflows/reusable-claude-pr-repair.yml
+    # issue-deckは唯一pnpmを使うリポジトリ（他の全アプリはnpm）。既定は多数派のnpmのため明示する。
+    with:
+      runtime-setup: node-db
+      package-manager: pnpm
+      # 再利用ワークフロー内のinputsコンテキストはworkflow_callのinputsを指すため、
+      # 呼び出し元のworkflow_dispatch入力はここで明示的に渡す。
+      pr-number: ${{ inputs.pr_number }}
+      mode: ${{ inputs.mode }}
+      # プロンプトの「- 修復後、」に続けてそのまま埋め込まれるため、文末まで含めて書く。
+      # YAMLの折りたたみ(>-)は改行を半角スペースへ変換し日本語の途中に空白が入るため、1行で書く。
+      verify-commands: "`pnpm test`（lint・typecheck・unit testを実行）と `pnpm build:ci` を実行し、いずれも問題がないことを確認する（DBサーバーは実際には起動していないが、環境変数はこのステップに既に設定済みのため`.github/workflows/ci.yml`のbuildステップと同様に成功するはず）"
+      # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
+      # プレースホルダー値を使う（実際の外部サービスには接続しない）。
+      # 実シークレットはここに書かない（secrets: inheritで別途渡る）。
+      build-env: |
+        DATABASE_URL=mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+        NEXT_PUBLIC_SUPABASE_URL=https://ci-placeholder.supabase.co
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-placeholder
+        GITHUB_APP_ID=123456
+        GITHUB_APP_PRIVATE_KEY_BASE64=Y2ktcGxhY2Vob2xkZXI=
+        NEXT_PUBLIC_GITHUB_APP_SLUG=ci-placeholder
+        GITHUB_WEBHOOK_SECRET=ci-placeholder
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// 実装・自動修正・コンフリクト解消の3つの再利用可能ワークフローは、Claude Codeに
+// 実装・自動修正・コンフリクト解消・PRの自動修復の再利用可能ワークフローは、Claude Codeに
 // 渡す許可ツールを同一に保つ必要がある（#1147）。ここが食い違うと「CIは自動修正
 // できるのに実装はできない」といった不揃いな挙動になる。
 //
@@ -14,6 +14,7 @@ const WORKFLOWS = [
   "reusable-issue-dispatch.yml",
   "reusable-claude-ci-fix.yml",
   "reusable-claude-conflict-resolve.yml",
+  "reusable-claude-pr-repair.yml",
 ] as const;
 
 function readWorkflow(name: string): string {
@@ -29,13 +30,14 @@ function extractImplementAllowedTools(source: string): string {
 }
 
 describe("再利用可能ワークフローの許可ツール", () => {
-  it("3つのワークフローで完全に一致している", () => {
-    const [dispatch, ciFix, conflict] = WORKFLOWS.map((name) =>
+  it("すべてのワークフローで完全に一致している", () => {
+    const [dispatch, ...others] = WORKFLOWS.map((name) =>
       extractImplementAllowedTools(readWorkflow(name)),
     );
 
-    expect(ciFix).toBe(dispatch);
-    expect(conflict).toBe(dispatch);
+    for (const allowedTools of others) {
+      expect(allowedTools).toBe(dispatch);
+    }
   });
 
   it("package-manager で出し分けるのはパッケージマネージャ本体だけ", () => {

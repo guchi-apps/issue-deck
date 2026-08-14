@@ -21,6 +21,7 @@ const OWNERS: Record<string, string> = {
   "question.md": "reusable-issue-dispatch.yml",
   "ci-fix.md": "reusable-claude-ci-fix.yml",
   "conflict-resolve.md": "reusable-claude-conflict-resolve.yml",
+  "pr-repair.md": "reusable-claude-pr-repair.yml",
   "review-develop.md": "reusable-claude-review-develop.yml",
 };
 
@@ -113,6 +114,10 @@ describe("無人実行プロンプト", () => {
       RUN_URL: "https://example.test/run/1",
       PACKAGE_MANAGER: "npm",
       VERIFY_COMMANDS: "npm run lint",
+      BASE_REF: "main",
+      HEAD_REF: "develop",
+      WORK_BRANCH: "pr-repair/37-1",
+      PUSH_MODE: "pull-request",
     };
 
     for (const [name, workflow] of Object.entries(OWNERS)) {

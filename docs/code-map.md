@@ -109,6 +109,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+- **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
+  （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
+  一覧・PR詳細・ロケットアイコンのリリース進捗に出る。**どのワークフローを起動するかの判定は
+  サーバー側**（[`lib/github/pull-request-repair.ts`](../src/lib/github/pull-request-repair.ts)）
+  で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
+  Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
+  振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)

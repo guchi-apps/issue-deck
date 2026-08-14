@@ -10,6 +10,11 @@ export type ReleasePullRequest = {
   url: string;
   title: string;
   ciState: CiState | null;
+  /**
+   * コンフリクトの有無。GitHubが判定中・取得できなかった場合はnull（#1293）。
+   * `false`のときだけ「コンフリクトあり」と自動解消ボタンを出す。
+   */
+  mergeable: boolean | null;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {

@@ -122,7 +122,7 @@ export function MobileReleaseSheet({
                   )}
                 </span>
               </div>
-              <ReleaseProgress status={releaseStatus} />
+              <ReleaseProgress status={releaseStatus} repoFullName={repository.fullName} />
               <Button
                 variant="outline"
                 disabled={isTriggeringRelease}

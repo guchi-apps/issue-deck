@@ -94,7 +94,7 @@ GitHub Actionsは`${{ }}`を1つでも含む文字列を、**ブロック全体�
 
 **develop向けPRの自動レビュー（`claude-review-develop.yml`）は対象外とし、`--model`を指定しない
 既定のままにしている。** レビュー品質の低下は自動マージ不可判定の見落としに直結し、コスト削減と
-釣り合わないため。`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
+釣り合わないため。`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-pr-repair.yml`・
 `shared-knowledge-propose.yml`・`release-develop-to-main.yml`も同様に`--model`を指定していない
 （そもそもこの設定を参照していない）。
 
@@ -109,7 +109,7 @@ GitHub Actionsは`${{ }}`を1つでも含む文字列を、**ブロック全体�
 
 対象は`claude-issue-dispatch.yml`の4ステップ（計画提示・分割・質問応答・実装）に加え、
 `claude-review-develop.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
-`shared-knowledge-propose.yml`・`release-develop-to-main.yml`の各1ステップ。
+`claude-pr-repair.yml`・`shared-knowledge-propose.yml`・`release-develop-to-main.yml`の各1ステップ。
 
 **このスクリプトはジョブを失敗させない。** 計測は補助情報であり、`execution_file`が無い・
 `claude-code-action`側のJSONスキーマが変わった・`jq`が失敗した場合でも、本来の処理（実装・

@@ -1,0 +1,486 @@
+name: Reusable Claude PR Repair
+
+# 対応Issueを持たないPull Requestが、CI失敗またはbaseブランチとのコンフリクトで
+# 止まっているときに、Claude Codeで自動修復するワークフローのジョブ本体（#1293）。
+# トリガー定義は呼び出し元の claude-pr-repair.yml が持ち、ここは on: workflow_call のみ。
+#
+# 既存の reusable-claude-ci-fix.yml（#807）・reusable-claude-conflict-resolve.yml（#315）が
+# 扱うのは develop 向けの `issue-<番号>` PRだけで、次の2種類は対象外だった。
+#   - バージョンバンプPR（`release/vX.Y.Z` → develop）
+#   - develop→main のリリースPR（#812で「別途検討」として明示的に除外）
+# どちらも対応する単一のIssueが無いため、報告先・リトライ管理の前提が既存2つと合わない。
+# 本ワークフローは報告先を**対象PR自身のコメント**に置くことでこの差を埋める。
+#
+# **headブランチへ直接pushできるかどうかで2通りの動きをする。**
+#   - head が develop / main（保護ブランチ）: 直接pushできないため、headから
+#     `pr-repair/<PR番号>-<run_id>` ブランチを切って修復し、head向けのPRを作成する。
+#     develop→main のリリースPRの場合、修復内容はまずdevelopへ入る形になる。
+#     そのPRのマージは人が行う（リリース進行中のdevelopへ無人でマージを重ねない）。
+#   - それ以外（バンプPR等）: 既存2ワークフローと同じくheadブランチへ直接pushする。
+#
+# **自動検知のトリガーは持たない（workflow_dispatchのみ）。** 検知して自動で走る経路は
+# 既存2ワークフローが持っており、そちらと二重に走らせない。本ワークフローは
+# issue-deckの画面のボタン（`POST /api/pull-requests/repair`）から起動される。
+# 毎回人が押す前提のため、リトライ上限のような無限ループ防止機構は置いていない。
+#
+# リポジトリ差はinputsで吸収する（意味は reusable-claude-ci-fix.yml と同じ）。
+# 呼び出し元は secrets: inherit で WORKFLOW_PAT・CLAUDE_CODE_OAUTH_TOKEN を渡すこと。
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: "対象のPull Request番号"
+        required: true
+        type: string
+      mode:
+        description: "修復の種類: ci（CI失敗の修正） / conflict（コンフリクトの解消）"
+        required: true
+        type: string
+      runtime-setup:
+        description: "ランタイム準備のプリセット: node-db / node / minimal"
+        required: false
+        type: string
+        default: minimal
+      package-manager:
+        description: "パッケージマネージャ: npm / pnpm"
+        required: false
+        type: string
+        default: npm
+      node-version:
+        description: "セットアップするNode.jsのバージョン。未指定なら24"
+        required: false
+        type: string
+        default: ""
+      install-dependencies:
+        description: >-
+          ランタイム準備で依存関係をインストールするか。runtime-setup が minimal 以外のときのみ効く。
+        required: false
+        type: boolean
+        default: true
+      build-env:
+        description: >-
+          Claude Codeステップに設定するビルド検証用の環境変数（複数行の KEY=VALUE）。
+          値はワークフローログに残りうるCI専用のプレースホルダーに限り、
+          実シークレットは絶対に渡さないこと（実シークレットは secrets: inherit で渡る）。
+          値に改行を含めることはできない。
+        required: false
+        type: string
+        default: ""
+      verify-commands:
+        description: >-
+          修復後の検証手順の説明。プロンプトの「- 修復後、」に続けてそのまま埋め込まれるため、
+          文末まで含む完全な文で渡すこと。未指定なら
+          「.github/workflows/ci.yml を読んで同じコマンドを実行する」旨の文面へ
+          フォールバックする。
+        required: false
+        type: string
+        default: ""
+      prompts-ref:
+        description: >-
+          プロンプト(.github/prompts/)の取得元とするissue-deckのref。
+          未指定なら呼び出し元リポジトリの.github/prompts/を使う(issue-deck自身はこちら)。
+          他リポジトリから呼ぶ場合は uses: と同じタグを指定する。
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    # 同じPRに対する修復を直列化する。既存2ワークフローのconcurrencyグループ
+    # （issue-dispatch-<Issue番号>-branch）とは対象ブランチが重ならないため独立させる。
+    concurrency:
+      group: pr-repair-${{ inputs.pr-number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # 後続のgit push、および.github/workflows/配下の修正に備え、workflow書き込み権限を持つ
+          # PAT（secrets.WORKFLOW_PAT）でcheckoutする（既存2ワークフローと同じ理由）。
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
+        # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための
+        # 取得経路（reusable-issue-dispatch.ymlと同じ仕組み、#960）。
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 共有ファイルの参照先を決める
+        env:
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROMPTS_REF" ]; then
+            ROOT=.shared-prompts
+          else
+            ROOT=.
+          fi
+
+          DIR="$ROOT/.github/prompts"
+          if [ ! -d "$DIR" ]; then
+            echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
+            exit 1
+          fi
+          echo "プロンプトの参照先: $DIR"
+          echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
+          # 使用量出力スクリプト(#903)。プロンプトと違い必須ではないため、無くても落とさない。
+          USAGE="$ROOT/.github/scripts/summarize-claude-usage.sh"
+          if [ -x "$USAGE" ]; then
+            echo "使用量出力スクリプト: $USAGE"
+          else
+            echo "使用量出力スクリプト $USAGE が無いため、使用量のJob Summary出力はスキップします"
+            USAGE=""
+          fi
+          echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
+
+      - name: pushの認証をWORKFLOW_PATに固定する
+        # claude-code-actionは実行時にactions/checkoutが残した認証情報を削除するため、
+        # push専用URL（remote.origin.pushurl）にPATを固定して.github/workflows/配下を含む
+        # pushのremote rejectedを防ぐ（既存2ワークフローの同名ステップと同じ理由、#662）。
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+
+      - name: 対象PRの状態を確認し、作業方針を決める
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          MODE: ${{ inputs.mode }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          if [ "$MODE" != "ci" ] && [ "$MODE" != "conflict" ]; then
+            echo "::error::mode は ci または conflict のみです（受け取った値: $MODE）"
+            exit 1
+          fi
+
+          PR_JSON="$(gh pr view "$PR_NUMBER" --json number,url,title,state,isDraft,mergeable,baseRefName,headRefName,headRefOid)"
+          PR_STATE="$(echo "$PR_JSON" | jq -r '.state')"
+          IS_DRAFT="$(echo "$PR_JSON" | jq -r '.isDraft')"
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.baseRefName')"
+          HEAD_REF="$(echo "$PR_JSON" | jq -r '.headRefName')"
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.headRefOid')"
+          PR_URL="$(echo "$PR_JSON" | jq -r '.url')"
+
+          if [ "$PR_STATE" != "OPEN" ] || [ "$IS_DRAFT" = "true" ]; then
+            echo "PRがopenでない、またはドラフトのため何もしません（state=$PR_STATE draft=$IS_DRAFT）"
+            echo "should_repair=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$MODE" = "conflict" ]; then
+            # mergeableはGitHub側で非同期に計算されるため、UNKNOWNの間は
+            # 「コンフリクトなし」と誤判定しないよう10秒間隔・最大6回まで待つ
+            # （reusable-claude-conflict-resolve.ymlのdetect-conflictsと同じ扱い）。
+            for i in 1 2 3 4 5 6; do
+              MERGEABLE="$(gh pr view "$PR_NUMBER" --json mergeable --jq '.mergeable')"
+              if [ "$MERGEABLE" != "UNKNOWN" ]; then
+                break
+              fi
+              echo "mergeable判定が未計算のため10秒待って再取得します（試行 $i/6）"
+              sleep 10
+            done
+            if [ "$MERGEABLE" != "CONFLICTING" ]; then
+              echo "コンフリクトしていないため何もしません（mergeable=$MERGEABLE）"
+              echo "should_repair=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            # 現在のHEADに対するチェックの結果を確認する。ワークフロー名を決め打ちにせず
+            # 「このPRのheadコミットに対してpull_requestイベントで走ったrun」を全部見る。
+            # 対象PRはリポジトリごとにCIのワークフロー名が異なりうるため（#1047の経路）。
+            RUNS_JSON="$(gh run list --branch "$HEAD_REF" --json databaseId,conclusion,headSha,event,name --limit 40 \
+              | jq -c --arg sha "$HEAD_SHA" '[.[] | select(.headSha == $sha and .event == "pull_request")]')"
+            if [ "$(echo "$RUNS_JSON" | jq 'length')" -eq 0 ]; then
+              echo "現在のHEADに対する実行結果がまだ取得できないため何もしません"
+              echo "should_repair=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            FAILED_IDS="$(echo "$RUNS_JSON" | jq -r '[.[] | select(.conclusion == "failure") | .databaseId] | .[0:3] | .[]')"
+            if [ -z "$FAILED_IDS" ]; then
+              echo "現在のHEADで失敗している実行が無いため何もしません（着手までの間に直った可能性があります）"
+              echo "should_repair=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # 改行区切りのまま後続ステップへ渡す（複数行outputはGITHUB_OUTPUTのヒアドキュメント形式）。
+            {
+              echo 'failed_run_ids<<__IDS_EOF__'
+              echo "$FAILED_IDS"
+              echo '__IDS_EOF__'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+          # develop・mainへは直接pushできない（ブランチ保護・運用ルールの両方）。
+          # headがそれらの場合は修復用ブランチを切り、head向けのPRを作る形にする。
+          case "$HEAD_REF" in
+            develop|main)
+              WORK_BRANCH="pr-repair/${PR_NUMBER}-${RUN_ID}"
+              PUSH_MODE="pull-request"
+              ;;
+            *)
+              WORK_BRANCH="$HEAD_REF"
+              PUSH_MODE="direct"
+              ;;
+          esac
+
+          echo "対象PR #$PR_NUMBER（$HEAD_REF → $BASE_REF） mode=$MODE push=$PUSH_MODE branch=$WORK_BRANCH"
+          {
+            echo "should_repair=true"
+            echo "pr_url=$PR_URL"
+            echo "base_ref=$BASE_REF"
+            echo "head_ref=$HEAD_REF"
+            echo "work_branch=$WORK_BRANCH"
+            echo "push_mode=$PUSH_MODE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 作業ブランチを用意する
+        if: steps.state.outputs.should_repair == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          HEAD_REF: ${{ steps.state.outputs.head_ref }}
+          BASE_REF: ${{ steps.state.outputs.base_ref }}
+          WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
+          PUSH_MODE: ${{ steps.state.outputs.push_mode }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$HEAD_REF" "$BASE_REF"
+          git checkout "$HEAD_REF"
+          git reset --hard "origin/$HEAD_REF"
+          if [ "$PUSH_MODE" = "pull-request" ]; then
+            git checkout -b "$WORK_BRANCH"
+          fi
+
+      - name: 対応開始をPRへコメントする
+        if: steps.state.outputs.should_repair == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          MODE: ${{ inputs.mode }}
+          WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "ci" ]; then
+            BODY="🛠️ CIの失敗を \`${WORK_BRANCH}\` ブランチで自動修正します。"
+          else
+            BODY="🔀 コンフリクトを \`${WORK_BRANCH}\` ブランチで自動解消します。"
+          fi
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-pr-repair -->'
+          gh pr comment "$PR_NUMBER" --body "$BODY"
+
+      - name: 実行前のコメント数を記録する
+        id: before
+        if: steps.state.outputs.should_repair == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          COUNT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: 失敗したジョブ・ステップのログを取得する
+        if: steps.state.outputs.should_repair == 'true' && inputs.mode == 'ci'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED_RUN_IDS: ${{ steps.state.outputs.failed_run_ids }}
+        run: |
+          set -euo pipefail
+          : > /tmp/ci-failed-log.txt
+          while IFS= read -r run_id; do
+            [ -z "$run_id" ] && continue
+            echo "===== run $run_id =====" >> /tmp/ci-failed-log.txt
+            gh run view "$run_id" --log-failed >> /tmp/ci-failed-log.txt || true
+          done <<< "$FAILED_RUN_IDS"
+          echo "取得したログの行数: $(wc -l < /tmp/ci-failed-log.txt)"
+
+      - name: Setup pnpm
+        if: steps.state.outputs.should_repair == 'true' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: steps.state.outputs.should_repair == 'true' && inputs.runtime-setup != 'minimal'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version || '24' }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: 依存関係をインストールする
+        if: steps.state.outputs.should_repair == 'true' && inputs.runtime-setup != 'minimal' && inputs.install-dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: ビルド検証用の環境変数を設定する
+        # Claude Codeエージェントが修復結果をビルドで検証できるようにするためのCI専用
+        # プレースホルダー。実シークレットは渡さない前提（inputs.build-envのdescription参照）。
+        if: steps.state.outputs.should_repair == 'true' && inputs.build-env != ''
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in \#*) continue ;; esac
+            if ! printf '%s' "$line" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*='; then
+              echo "::error::build-env の行が KEY=VALUE 形式ではありません: $line"
+              exit 1
+            fi
+            # 環境変数名だけをログに出す（値はプレースホルダーの想定だが、念のため出力しない）
+            echo "設定: ${line%%=*}"
+            echo "$line" >> "$GITHUB_ENV"
+          done <<< "$BUILD_ENV"
+
+      - name: 修復プロンプトを組み立てる
+        # プロンプト本文は.github/prompts/pr-repair.mdに置き、ここで動的な値を埋めたうえで
+        # 環境変数に格納する（既存2ワークフローと同じ仕組み、#907）。
+        # `${{ }}`を含む文字列ブロックにかかる21,000バイト上限を構造的に回避する（#901の経路）。
+        if: steps.state.outputs.should_repair == 'true'
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+          MODE: ${{ inputs.mode }}
+          BASE_REF: ${{ steps.state.outputs.base_ref }}
+          HEAD_REF: ${{ steps.state.outputs.head_ref }}
+          WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
+          PUSH_MODE: ${{ steps.state.outputs.push_mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERIFY_COMMANDS_INPUT: ${{ inputs.verify-commands }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERIFY_COMMANDS_INPUT" ]; then
+            VERIFY_COMMANDS="$VERIFY_COMMANDS_INPUT"
+          else
+            VERIFY_COMMANDS='`.github/workflows/ci.yml` を読み、CIが実行している検証コマンドと同じものを実行して、問題がないことを確認する'
+          fi
+          export VERIFY_COMMANDS
+
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/pr-repair.md"
+          # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
+          # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+          # envsubstの置換対象を変数リストで明示指定し、プロンプト本文中の他の$表記を巻き込まない
+          # ようにする。
+          {
+            echo 'PROMPT_PR_REPAIR<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${REPOSITORY} ${PR_NUMBER} ${PR_URL} ${MODE} ${BASE_REF} ${HEAD_REF} ${WORK_BRANCH} ${PUSH_MODE} ${RUN_URL} ${VERIFY_COMMANDS}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Claude Code（PRの自動修復）
+        id: claude_pr_repair
+        if: steps.state.outputs.should_repair == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          # git pushの認証は前段の「pushの認証をWORKFLOW_PATに固定する」ステップが設定する
+          # remote.origin.pushurlで完結しており、このステップのGH_TOKENには依存しない。
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # バンプPR・リリースPRはclaude[bot]やgithub-actions[bot]が作成するため、
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#814と同じ対処）。
+          allowed_bots: "claude[bot]"
+          show_full_output: true
+          # 実装が使う検証コマンドの許可リスト。**再利用可能ワークフロー
+          # (reusable-issue-dispatch / reusable-claude-ci-fix /
+          # reusable-claude-conflict-resolve / 本ファイル)で同一に保つこと。**
+          # ここだけ食い違うと「CIは自動修正できるのに実装はできない」といった
+          # 不揃いな挙動になる(#1147)。出し分けるのはパッケージマネージャ本体だけ(#931)。
+          claude_args: >-
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
+          prompt: ${{ env.PROMPT_PR_REPAIR }}
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（PRの自動修復））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_pr_repair.outputs.execution_file != ''
+        run: |
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（PRの自動修復）" "${{ steps.claude_pr_repair.outputs.execution_file }}"
+
+      - name: 修復結果を検証し、報告が確認できない場合はフォールバック通知する
+        # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
+        # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
+        # そのため後続のステップとして独立に結果を確認する（既存2ワークフローと同じ考え方）。
+        if: always() && steps.state.outputs.should_repair == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          BEFORE_COUNT: ${{ steps.before.outputs.comment_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments | length')"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため、完了または停止の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
+          FALLBACK_BODY="⚠️ 自動修復ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や修復の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-pr-repair -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          gh pr comment "$PR_NUMBER" --body "$FALLBACK_BODY"
+
+      - name: 未使用の修復ブランチを片付ける
+        # push方式がpull-requestの場合、修復用ブランチはリモートへpushされて初めて意味を持つ。
+        # 自動修復を断念した場合はローカルにしか存在しないため掃除は不要だが、pushされた
+        # ものの結果PRが作られなかった場合だけ、行き場の無いブランチがリモートに残る。
+        # 対応するPRが無いpr-repair/<PR番号>-<run_id>ブランチを削除する。
+        if: always() && steps.state.outputs.push_mode == 'pull-request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
+        run: |
+          set -e
+          # gitのremote認証はclaude-code-actionに消されうるため、存在確認も削除もgh（API）で行う。
+          if ! gh api "repos/$GH_REPO/git/ref/heads/$WORK_BRANCH" > /dev/null 2>&1; then
+            echo "リモートに $WORK_BRANCH は存在しないため何もしません"
+            exit 0
+          fi
+          PR_COUNT="$(gh pr list --head "$WORK_BRANCH" --state all --json number --jq 'length')"
+          if [ "$PR_COUNT" -gt 0 ]; then
+            echo "$WORK_BRANCH にはPRが存在するため残します"
+            exit 0
+          fi
+          echo "PRが作られなかった $WORK_BRANCH を削除します"
+          gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$WORK_BRANCH" \
+            || echo "::warning::$WORK_BRANCH の削除に失敗しました"

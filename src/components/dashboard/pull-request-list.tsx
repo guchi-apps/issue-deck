@@ -13,8 +13,10 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -57,6 +59,9 @@ function PullRequestCard({
   onMerged: () => void;
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
+  // 一覧は`mergeable`を持たない（PR1件につき単体取得が1回増えるため取っていない）。
+  // コンフリクトの修復ボタンは`mergeable`を持つ詳細ペイン・リリース進捗の側に出す。
+  const repairKinds = repairKindsFor(pullRequest, undefined);
 
   return (
     <li
@@ -118,6 +123,11 @@ function PullRequestCard({
           {pullRequest.authorLogin}
         </span>
         <span className="text-xs text-muted-foreground">{formatElapsed(pullRequest.createdAt)}</span>
+        <PullRequestRepairButtons
+          repositoryFullName={pullRequest.repositoryFullName}
+          pullRequestNumber={pullRequest.number}
+          kinds={repairKinds}
+        />
         {canMergeFromDeck(pullRequest) && (
           <PullRequestMergeButton
             pullRequest={pullRequest}

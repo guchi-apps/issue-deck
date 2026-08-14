@@ -12,6 +12,7 @@ import {
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
+  fetchPullRequestMergeable,
   fetchRefCiState,
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
@@ -94,9 +95,15 @@ async function handleGET(request: NextRequest) {
       }));
 
     // バンプPR・develop→mainのPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
-    const [bumpCiState, releaseCiState] = await Promise.all([
+    // コンフリクト有無（`mergeable`）も同じ条件でPR1件につき1回だけ取る。自動解消ボタンを
+    // 出すかどうかの判定に必要で、PRが開いていない間は取得しない（#1293）。
+    const [bumpCiState, releaseCiState, bumpMergeable, releaseMergeable] = await Promise.all([
       bumpPr ? fetchRefCiState(owner, repo, bumpPr.head.ref, token) : Promise.resolve(null),
       releasePr ? fetchRefCiState(owner, repo, releasePr.head.ref, token) : Promise.resolve(null),
+      bumpPr ? fetchPullRequestMergeable(owner, repo, bumpPr.number, token) : Promise.resolve(null),
+      releasePr
+        ? fetchPullRequestMergeable(owner, repo, releasePr.number, token)
+        : Promise.resolve(null),
     ]);
 
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
@@ -126,6 +133,7 @@ async function handleGET(request: NextRequest) {
             url: bumpPr.html_url,
             title: bumpPr.title,
             ciState: bumpCiState,
+            mergeable: bumpMergeable,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -137,6 +145,7 @@ async function handleGET(request: NextRequest) {
             url: releasePr.html_url,
             title: releasePr.title,
             ciState: releaseCiState,
+            mergeable: releaseMergeable,
           }
         : null,
       otherPullRequests,

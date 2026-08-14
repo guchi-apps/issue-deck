@@ -14,10 +14,12 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { canMergeFromDeck } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
@@ -155,6 +157,8 @@ export function PullRequestDetail({
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   // 取得結果が選択中PRのものか（切り替え直後に前のPRの本文を出さないための保険）
   const currentDetail = detail && detail.id === pullRequest.id ? detail : null;
+  // 詳細は`mergeable`を持つため、CI失敗とコンフリクトの両方の修復ボタンを出せる（#1293）。
+  const repairKinds = repairKindsFor(pullRequest, currentDetail?.mergeable);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -241,6 +245,11 @@ export function PullRequestDetail({
             <span className="text-xs text-muted-foreground">
               {formatElapsed(pullRequest.createdAt)}
             </span>
+            <PullRequestRepairButtons
+              repositoryFullName={pullRequest.repositoryFullName}
+              pullRequestNumber={pullRequest.number}
+              kinds={repairKinds}
+            />
             {canMergeFromDeck(pullRequest) && (
               <PullRequestMergeButton
                 pullRequest={pullRequest}
