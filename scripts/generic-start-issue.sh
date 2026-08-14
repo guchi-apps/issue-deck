@@ -445,7 +445,11 @@ build_env_prefix() {
   prefix+="export ISSUE_DECK_DEV_SERVER=0; "
   prefix+="export ISSUE_DECK_WORKTREE_BASE=$(printf '%q' "$WORKTREE_BASE"); "
   prefix+="export ISSUE_DECK_DEV_COMMAND=$(printf '%q' "$DEV_COMMAND"); "
-  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE; do
+  # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
+  # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
+  # 記述子に載らず、回収の対象にならない。
+  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE \
+    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

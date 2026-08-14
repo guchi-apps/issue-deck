@@ -117,6 +117,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「このPC」導線のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
+- **起動したセッションの後始末はpollerの1巡に相乗りさせ、常駐プロセスを増やさない。**
+  `scripts/reap-dev-servers.sh`が開発サーバーを（#1223）、`scripts/reap-sessions.sh`が作業の
+  終わったtmuxセッションそのものを畳む（#1256）。判定材料は`scripts/lib/session-state.sh`が
+  読み書きする状態ファイル（`~/.local/state/issue-deck/sessions/`。`run-issue-session.sh`が
+  起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
+  **画面（`capture-pane`）の内容は読まない**。設計は
+  [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体は`guchi-apps/claude-config`にあり、
   両機は`~/.claude/`側をsymlinkにして同じファイルを見る**（#1190）。issue-deckが持つのは
   「取り残しに気づく手当て」だけで、`scripts/lib/personal-config-sync.sh`の

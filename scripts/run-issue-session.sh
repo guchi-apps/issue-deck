@@ -45,6 +45,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 開発サーバーの止め方は回収スクリプト（scripts/reap-dev-servers.sh）と共有する（#1223）。
 # shellcheck source=scripts/lib/dev-server.sh
 source "$SCRIPT_DIR/lib/dev-server.sh"
+# セッションの状態ファイル（#1256）。回収スクリプト（scripts/reap-sessions.sh）と共有する。
+# shellcheck source=scripts/lib/session-state.sh
+source "$SCRIPT_DIR/lib/session-state.sh"
+
+# tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
+# **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
+# （回収は`tmux kill-session`で行うため、tmuxの外のセッションには手が届かない）。
+TMUX_SESSION_NAME=""
+if [[ -n "${TMUX:-}" ]]; then
+  TMUX_SESSION_NAME="$(tmux display-message -p '#S' 2>/dev/null || true)"
+fi
 
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
@@ -95,6 +106,12 @@ cleanup() {
     dev_server_stop_group "$DEV_PGID"
   fi
   rm -f "$DEV_PID_FILE"
+
+  # セッションの状態ファイル（#1256）も片付ける。残すと、次に同じ名前で立ったセッションが
+  # 前回の`Stop`を引き継いだように見え、起動直後に回収の条件を満たしてしまう。
+  if [[ -n "$TMUX_SESSION_NAME" ]]; then
+    session_state_remove "$TMUX_SESSION_NAME"
+  fi
 }
 trap cleanup EXIT HUP TERM
 
@@ -145,6 +162,20 @@ fi
 # 通知（#1219）用に owner/repo を取り出す。IssueのURLを組み立てるためだけに使うので、
 # 取れなくても（リモート未設定・SSH形式でない等）通知からリンクが消えるだけにする。
 REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+
+# セッションの回収（#1256）用の記述子。回収スクリプトはtmuxのセッション名しか手掛かりを
+# 持たないため、worktreeの場所と対応Issueをここで残しておく。
+#
+# **`reapable`が1のセッションだけを自動回収の対象にする。** 1を渡すのはpollerがジョブとして
+# 起動した経路だけ（scripts/subpc-dispatch-poller.sh の run_job）で、手元のターミナルから
+# 直接起動したセッションには渡らない。issue-deck側にジョブとして残らないセッションを
+# 巻き込まないための線引きで、判定材料ではなく**起動経路そのもの**で切る。
+if [[ -n "$TMUX_SESSION_NAME" ]]; then
+  if ! session_state_write_descriptor "$TMUX_SESSION_NAME" "$PWD" "$REPO_SLUG" "$ISSUE_NUMBER" \
+    "${ISSUE_DECK_SESSION_REAPABLE:-0}"; then
+    echo "#$ISSUE_NUMBER: 情報: セッションの状態ファイルを書けなかったため、このセッションは自動回収の対象になりません（$(session_state_dir)）。" >&2
+  fi
+fi
 
 # セッションの状態をSignalyへ通知するフック（#1219）。
 #

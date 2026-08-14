@@ -63,6 +63,8 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
+# 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
+SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
 
 ANNOUNCE_ONLY=0
 DRY_RUN=0
@@ -255,6 +257,22 @@ reap_dev_servers() {
   return 0
 }
 
+# --- セッションの回収（#1256）---------------------------------------------------
+# 作業が終わった実装セッション（tmuxセッションと`claude`プロセス）そのものを畳む。
+# 開発サーバーの回収と同じく、**判断は挟まない計器**（docs/multi-agent/gates.md）で、畳む条件は
+# すべて回収スクリプト側にある。ここは「呼ぶ」だけを持つ。
+#
+# 猶予の分数は `SESSION_IDLE_MINUTES`（dispatch.env）で変えられる。dispatch.envは `set -a` 付きで
+# 読んでいるため、そのまま環境変数として回収スクリプトへ届く。
+reap_sessions() {
+  if [[ ! -f "$SESSION_REAPER" ]]; then
+    return 0
+  fi
+  # **回収の失敗でポーリングを止めない**（開発サーバーの回収・申告・報告と同じ扱い）。
+  bash "$SESSION_REAPER" || echo "Error: セッションの回収に失敗しました。" >&2
+  return 0
+}
+
 # --- ジョブの実行 -------------------------------------------------------------
 report_job() {
   local job_id="$1" status="$2" message="${3:-}" session="${4:-}"
@@ -419,10 +437,16 @@ run_job() {
   # 落ちないようにするため。
   # 起動が固まってもポーリングごと止まらないよう上限を掛ける。冷えた状態からの依存インストールを
   # 含めても数分で終わる（#1177の実測）ため、既定の15分は十分な余裕がある。
+  #
+  # `ISSUE_DECK_SESSION_REAPABLE=1` は「このセッションはジョブとして起動した」という印で、
+  # 自動回収（#1256）の対象になるのはこれが付いたセッションだけ。**この経路でしか渡さない。**
+  # 手元のターミナルから直接`start-issue.sh`を叩いたセッションはissue-deck側にジョブとして
+  # 残らないため、勝手に畳むと「なぜ消えたのか」を画面から辿れない。
   local output_file launch_status
   output_file="$(mktemp)"
   set +e
-  timeout "$LAUNCH_TIMEOUT" bash "$LAUNCHER" "$owner" "$repo" "$issue_number" \
+  ISSUE_DECK_SESSION_REAPABLE=1 \
+    timeout "$LAUNCH_TIMEOUT" bash "$LAUNCHER" "$owner" "$repo" "$issue_number" \
     </dev/null >"$output_file" 2>&1
   launch_status=$?
   set -e
@@ -456,6 +480,11 @@ run_once() {
   # **claimより先に行う。** subpcは並行3本が上限（#1177）で、掴んだままの開発サーバーがあると
   # 新しいジョブを取っても起こせない。取りに行く前に空けておく。
   reap_dev_servers
+
+  # 作業が終わったセッションそのものを畳む（#1256）。**開発サーバーの回収の後に行う。**
+  # 畳めば`run-issue-session.sh`のtrapが開発サーバーも止めるが、trapを通れなかったぶんは
+  # 次の巡で孤児として回収される。
+  reap_sessions
 
   # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
   # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
