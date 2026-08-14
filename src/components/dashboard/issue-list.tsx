@@ -1,11 +1,22 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Archive, CircleCheck, CircleDot, CircleSlash, Lock, MessageSquare, Star } from "lucide-react";
+import {
+  Archive,
+  CheckSquare,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  Lock,
+  MessageSquare,
+  Star,
+} from "lucide-react";
 
+import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
@@ -156,6 +167,10 @@ export function IssueList({
     return ids;
   }, [executionTargetByIssueId]);
   const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
+  // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
+  // Issueを開く。選択モードのときだけチェックボックスを出す
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
   const issueIds = useMemo(() => issues.map((issue) => issue.id), [issues]);
@@ -176,6 +191,20 @@ export function IssueList({
   );
   const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
 
+  function toggleSelected(issueId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(issueId)) next.delete(issueId);
+      else next.add(issueId);
+      return next;
+    });
+  }
+
+  function exitSelecting() {
+    setIsSelecting(false);
+    setSelectedIds(new Set());
+  }
+
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
     return (
       <li
@@ -187,14 +216,24 @@ export function IssueList({
       >
         <button
           type="button"
-          onClick={() => onSelectIssue(issue)}
+          onClick={() => (isSelecting ? toggleSelected(issue.id) : onSelectIssue(issue))}
           className={cn(
             "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
-            selectedIssueId === issue.id && "border-l-primary bg-accent",
+            selectedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
+            isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
           )}
         >
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              {isSelecting && (
+                <Checkbox
+                  checked={selectedIds.has(issue.id)}
+                  aria-label={`#${issue.number}を選択`}
+                  className="mr-1"
+                  // 行のonClickが選択を切り替えるので、二重に反応させない
+                  onClick={(event) => event.preventDefault()}
+                />
+              )}
               <IssueStateIcon issue={issue} />
               {showRepoName && (
                 <>
@@ -283,8 +322,31 @@ export function IssueList({
             <h2 className="text-sm font-semibold">{title}</h2>
             <p className="text-xs text-muted-foreground">{issues.length}件</p>
           </div>
-          <Star className="size-4 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            {/* 夜にまとめて積んで順に流すための入口（#1266） */}
+            <button
+              type="button"
+              aria-label={isSelecting ? "選択をやめる" : "まとめて選択"}
+              title={isSelecting ? "選択をやめる" : "まとめてサブPCへ積む"}
+              onClick={() => (isSelecting ? exitSelecting() : setIsSelecting(true))}
+              className={cn(
+                "rounded-md p-1 hover:bg-accent",
+                isSelecting ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              <CheckSquare className="size-4" />
+            </button>
+            <Star className="size-4 text-muted-foreground" />
+          </div>
         </div>
+      )}
+
+      {isSelecting && (
+        <BulkDispatchBar
+          issues={issues.filter((issue) => selectedIds.has(issue.id))}
+          dispatch={dispatch}
+          onDone={exitSelecting}
+        />
       )}
 
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが

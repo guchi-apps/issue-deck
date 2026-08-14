@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { AccountMenuDialog } from "@/components/dashboard/account-menu-dialog";
+import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
 import { ReleaseStatusButton } from "@/components/dashboard/release-status-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -235,6 +236,9 @@ export function TopBar({
         <Plus />
         新規Issue
       </Button>
+
+      {/* サブPCで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
+      <DispatchQueueButton />
 
       <ReleaseStatusButton
         repositories={repositories}
