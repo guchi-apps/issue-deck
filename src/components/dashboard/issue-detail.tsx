@@ -44,6 +44,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import { LocalSessionApprovalNotice } from "@/components/dashboard/local-session-approval-notice";
+import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +75,7 @@ import { usePullRequestLink } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   approveCommentBody,
+  canCompleteManualStep,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -649,6 +651,15 @@ export function IssueDetail({
               repositoryFullName={issue.repositoryFullName}
             />
           </div>
+
+          {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
+          {canCompleteManualStep(issue) && (
+            <ManualStepPanel
+              isSubmitting={isSubmitting}
+              onComplete={() => handleClose("completed")}
+              onSkip={() => handleClose("not_planned")}
+            />
+          )}
 
           <Separator />
 

@@ -21,6 +21,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { cn } from "@/lib/utils";
@@ -59,9 +60,12 @@ export function StartLocalSessionButton({
 }: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
 
-  // closedなIssueは起動しても実装対象が無い。リポジトリ名が壊れている場合は起動先へ渡せない
+  // closedなIssueは起動しても実装対象が無い。リポジトリ名が壊れている場合は起動先へ渡せない。
+  // 手作業Issue（`71.manual-step`）も同じく起動先が無い（実行者が人）ので出さない（#1280）
   const isAvailable =
-    parseRepositoryFullName(issue.repositoryFullName) !== null && issue.state === "open";
+    parseRepositoryFullName(issue.repositoryFullName) !== null &&
+    issue.state === "open" &&
+    !isManualStepIssue(issue.labels);
   // フックは早期returnより前に、常に同じ順で呼ぶ必要がある。導線を出さない場合は取得もしない。
   // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
   const ownDispatch = useDispatchState(injectedDispatch === undefined && isAvailable);
