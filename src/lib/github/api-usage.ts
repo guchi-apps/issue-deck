@@ -30,7 +30,9 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_ci", label: "Issueの対応PRの取得" },
   { key: "pull_request_link_fallback", label: "PR紐付けのフォールバック検索" },
   { key: "release_status", label: "リリース進捗ポーリング" },
-  { key: "release_pending_merges", label: "mainマージ待ち確認" },
+  // 元は「mainマージ待ち確認」だったが、#1117でリリース状況（実行中・失敗も含む）を返す
+  // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
+  { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "issue_comments", label: "コメント取得" },
