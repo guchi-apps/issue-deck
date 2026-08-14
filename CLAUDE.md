@@ -121,7 +121,7 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 - タイトル: `[手作業] <実行する場所>: <やること>`
 - 本文: 「やること（コピペで実行できるコマンド）」「実行する場所」「なぜエージェントが実施しないか」「放置するとどうなるか」「完了の確認方法」「関連（起点Issue・PR）」
 - 起点IssueへGitHubネイティブのサブIssueとして紐付け、起点IssueとPRにリンクをコメントする
-- issue-deckのサイドメニューの「手作業待ち」ビュー（`view=manual-step`）に集まる。実行したユーザーがcloseする
+- issue-deckのサイドメニューの「手作業待ち」ビュー（`view=manual-step`）に集まる。**エージェントへ送り直すIssueではないため実装開始の導線は出ず**、実行したユーザーがIssue詳細の「手作業を完了してクローズ」でcloseする（進捗Statusは`Ready`のままでよい）
 
 判断基準・本文テンプレートの全文・設計理由は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「デプロイ後などに残るユーザーの手作業はIssueとして起票する」を参照。
 

@@ -84,6 +84,9 @@ export NOTIFY_REPO_NAME="$REPO_NAME"
 export NOTIFY_REPO_SLUG="$REPO_SLUG"
 export NOTIFY_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}"
 export NOTIFY_CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
+# tailnetへ公開した開発サーバー（#1265）。run-issue-session.shがexportしている。
+# 入力待ちの通知に載せると、気づいた側がその場で画面を開ける
+export NOTIFY_PREVIEW_URL="${ISSUE_DECK_PREVIEW_URL:-}"
 
 # tmuxのセッション名。`tmux attach -t <名前>` でそのまま繋げるよう、通知に載せる。
 # tmuxの外で起動した場合は空になる。
@@ -219,6 +222,13 @@ if host_name:
 fields.append({"name": "Event", "value": label, "inline": True})
 if tmux_session:
     fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
+preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
+if preview_url:
+    # 1フィールド1リンクを守る（`signaly_link`のコメント参照）
+    fields.append(
+        {"name": "開発環境", "value": signaly_link("画面を開く", preview_url), "inline": False}
+    )
+
 if remote_url:
     fields.append({
         "name": "Remote Control",

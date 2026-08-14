@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   approveCommentBody,
+  canCompleteManualStep,
   isLabelFilterPresetActive,
   isMergeApprovalPending,
   isQaOnlyApprovalPending,
@@ -268,6 +269,22 @@ describe("withRollbackFailureNotice", () => {
   it("元のエラーメッセージにラベル復元失敗の案内を追記する", () => {
     expect(withRollbackFailureNotice("GitHub連携が必要です。再ログインしてください。")).toBe(
       "GitHub連携が必要です。再ログインしてください。 ラベルの復元にも失敗しました。手動でご確認ください。",
+    );
+  });
+});
+
+describe("canCompleteManualStep", () => {
+  it("openな手作業Issueでは完了の導線を出す", () => {
+    expect(canCompleteManualStep({ state: "open", labels: [makeLabel("71.manual-step")] })).toBe(true);
+  });
+
+  it("手作業ラベルが無いIssueでは出さない", () => {
+    expect(canCompleteManualStep({ state: "open", labels: [makeLabel("65.docs")] })).toBe(false);
+  });
+
+  it("closed済みのIssueでは出さない", () => {
+    expect(canCompleteManualStep({ state: "closed", labels: [makeLabel("71.manual-step")] })).toBe(
+      false,
     );
   });
 });

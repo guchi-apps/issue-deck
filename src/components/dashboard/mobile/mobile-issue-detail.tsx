@@ -58,6 +58,7 @@ import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
 } from "@/components/dashboard/local-session-notice";
+import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +86,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   approveCommentBody,
+  canCompleteManualStep,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -826,6 +828,15 @@ export function MobileIssueDetail({
           fullWidth
           dispatch={dispatch}
         />
+
+        {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
+        {canCompleteManualStep(issue) && (
+          <ManualStepPanel
+            isSubmitting={isSubmitting}
+            onComplete={() => handleClose("completed")}
+            onSkip={() => handleClose("not_planned")}
+          />
+        )}
 
         <div>
           <h2 className="mb-2 text-sm font-semibold">説明</h2>

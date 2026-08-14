@@ -375,13 +375,22 @@ preview_instructions = (
 )
 
 if "23.preview-required" in label_names:
+    # このラベルが付いたセッションでは、ランチャーが開発サーバーを起動し tailscale serve で
+    # tailnetへ出している（#1265）。**起動URLは起動ログに出ている実際の値を使うこと。**
+    # ここでホスト名を決め打ちすると、別ホストで起こしたときに嘘になる。
     preview_instructions = (
-        "このIssueには`23.preview-required`ラベルが付いています。実装・テストが完了したら、"
-        "PRを作成する**前**に次の手順を行ってください。\n\n"
-        f"1. `cd {worktree_dir} && {dev_command}` で開発サーバーを起動し、"
-        f"`http://localhost:{dev_port}` で実際の画面を確認する\n"
-        "2. 確認した画面・操作手順をユーザーに提示し、問題ないか明示的な承認を得る\n"
-        "3. 承認が得られてから初めてPRを作成する"
+        "このIssueには`23.preview-required`ラベルが付いています。**開発サーバーは"
+        "このセッションの起動時に自動で立ち上がっており、tailnet内から見られるよう"
+        "公開されています**（起動ログの「開発サーバーをtailnetへ公開しました」の行にURLが"
+        "出ています。公開できなかった場合はその旨が出ています）。\n\n"
+        "実装・テストが完了したら、PRを作成する**前**に次の手順を行ってください。\n\n"
+        "1. 起動ログに出ているtailnetのURL（`http://<ホスト名>.ts.net:"
+        f"{dev_port}`）で実際の画面を確認する。公開されていない場合は "
+        f"`http://localhost:{dev_port}` を使う\n"
+        "2. 確認した画面・操作手順と**そのURLをそのまま**ユーザーに提示し、問題ないか"
+        "明示的な承認を得る（ユーザーは外出先のスマホから開くため、`localhost`のURLでは"
+        "届かない）\n"
+        "3. 承認が得られてから初めてPRを作成する。PR本文の「確認方法」にも同じURLを書く"
     )
 
 if "24.screenshot-required" in label_names:
@@ -445,11 +454,23 @@ fi
 SAFE_REPO="${REPO//[^A-Za-z0-9_-]/-}"
 SESSION_NAME="$SAFE_REPO-issue-$ISSUE_NUMBER"
 
+# 開発サーバーを起動するか（#1224・#1265）。
+#
+# **既定は起動しない。** サブPCは2C/4Tで、リポジトリ数ぶんのdevサーバーを常駐させる前提が
+# 置けない（#1177の実測）。ただし`23.preview-required`は「PR作成前に画面を確認する」ラベルで、
+# 起動していなければ確認そのものが成立しない。**そのラベルが付いたセッションだけ起動し、
+# tailnetへも出す**（#1265）。
+DEV_SERVER_FLAG=0
+if printf '%s\n' "$ISSUE_LABELS" | grep -Fxq "23.preview-required"; then
+  DEV_SERVER_FLAG=1
+  echo "#$ISSUE_NUMBER: 23.preview-required が付いているため開発サーバーを起動します（tailnetへも公開します）。"
+fi
+
 # tmuxのセッションはtmuxサーバー側の環境を引き継ぐため、このプロセスのexportが届くとは限らない。
-# 値は%qでクォートして埋める。**開発サーバーは起動しない**ので ISSUE_DECK_DEV_SERVER=0 を渡す。
+# 値は%qでクォートして埋める。
 build_env_prefix() {
   local var value prefix=""
-  prefix+="export ISSUE_DECK_DEV_SERVER=0; "
+  prefix+="export ISSUE_DECK_DEV_SERVER=$DEV_SERVER_FLAG; "
   prefix+="export ISSUE_DECK_WORKTREE_BASE=$(printf '%q' "$WORKTREE_BASE"); "
   prefix+="export ISSUE_DECK_DEV_COMMAND=$(printf '%q' "$DEV_COMMAND"); "
   # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。

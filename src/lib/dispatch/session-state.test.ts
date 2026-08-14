@@ -4,6 +4,7 @@ import {
   nextEscalatedState,
   parseDispatchSessionActivity,
   parseDispatchSessionReport,
+  parsePreviewUrl,
   parseRemoteControlUrl,
   parseSessionName,
   resolveRepositoryFullName,
@@ -223,5 +224,23 @@ describe("parseRemoteControlUrl", () => {
 
   it("長すぎる値は受け付けない", () => {
     expect(parseRemoteControlUrl(`https://claude.ai/${"a".repeat(600)}`)).toBeNull();
+  });
+});
+
+describe("parsePreviewUrl", () => {
+  it("tailnet内のhttp URLだけを通す", () => {
+    expect(parsePreviewUrl("http://subpc.tail5210f2.ts.net:4123")).toBe(
+      "http://subpc.tail5210f2.ts.net:4123/",
+    );
+  });
+
+  it.each([
+    ["tailnet外", "http://example.com:4123"],
+    ["ts.netを含むだけの別ホスト", "http://evil-ts.net.example.com:4123"],
+    ["https（証明書が未有効なので出ない形）", "https://subpc.tail5210f2.ts.net:4123"],
+    ["URLでない", "subpc:4123"],
+    ["空文字", ""],
+  ])("%sは受け付けない", (_name, input) => {
+    expect(parsePreviewUrl(input)).toBeNull();
   });
 });
