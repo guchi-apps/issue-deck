@@ -2,6 +2,8 @@ import type { DispatchHost, DispatchJob } from "@prisma/client";
 
 import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
+import { listDispatchSessions } from "@/lib/dispatch/sessions";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
@@ -328,11 +330,15 @@ const FINISHED_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 export async function listDispatchState(now: Date = new Date()): Promise<{
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
+  sessions: DispatchSessionView[];
   concurrency: number;
 }> {
   await expireStaleDispatchJobs(now);
 
-  const [hosts, jobs, concurrency] = await Promise.all([
+  // セッション（#1217）を専用のエンドポイントではなくここへ足しているのは、画面側が
+  // `GET /api/dispatch`と`use-dispatch-state.ts`の1本で状態を読んでいるため。取得口を
+  // 増やすと、同じ画面のためにポーリングが2本走ることになる。
+  const [hosts, jobs, sessions, concurrency] = await Promise.all([
     db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
     db.dispatchJob.findMany({
       where: {
@@ -344,12 +350,14 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    listDispatchSessions(now),
     getDispatchConcurrency(),
   ]);
 
   return {
     hosts: hosts.map((host) => toHostView(host, now)),
     jobs: jobs.map(toJobView),
+    sessions,
     concurrency,
   };
 }
