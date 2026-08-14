@@ -37,10 +37,10 @@ import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
-  START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsToAdd,
   startImplementationOptionsFromLabels,
+  visibleStartImplementationOptions,
   type StartImplementationOptionKey,
 } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
@@ -107,9 +107,12 @@ type StartImplementationDialogProps = {
 };
 
 /**
- * 「実装を開始」ボタン押下時に、計画・開発環境起動・スクリーンショットの要否を
+ * 「実装を開始」ボタン押下時に、計画・マージ前確認・開発環境起動・スクリーンショットの要否を
  * 選択させるダイアログ。選択されたオプションに対応するラベルを付与したうえで、
  * 実装エージェントを起動する。
+ *
+ * オプションは実行先で出し分ける（#1317・`visibleStartImplementationOptions`）。撮影は
+ * GitHub Actionsを選んだときだけ出る。「計画が必要」の初期状態はIssueの種別ラベルから決まる。
  *
  * `renderTrigger`を渡すと自前のトリガーボタンから開閉する（Issue詳細画面）。
  * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面、
@@ -254,6 +257,11 @@ export function StartImplementationDialog({
   const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
   // 選んだホストでスクリーンショットを撮れない場合（#1268）。**申告していないホストは塞がない**
   const screenshotRejection = resolveScreenshotRejection(selectedHost);
+  // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
+  const visibleOptions = visibleStartImplementationOptions({
+    isActionsTarget: effectiveTarget.kind === "actions",
+    options,
+  });
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -449,7 +457,7 @@ export function StartImplementationDialog({
           <DialogDescription>必要なオプションを選択してから実装を開始してください。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          {START_IMPLEMENTATION_OPTIONS.map((option) => {
+          {visibleOptions.map((option) => {
             // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
             // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
             const unavailable =

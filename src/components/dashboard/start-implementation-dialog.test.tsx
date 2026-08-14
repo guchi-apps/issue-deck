@@ -331,6 +331,68 @@ describe("StartImplementationDialog", () => {
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
   });
 
+  describe("オプションの出し分け（#1317）", () => {
+    // サブPC・ローカル実行はtailscale serveで実物の画面を見られるため、撮影は無人実行専用にする
+    it("サブPCが既定のときはスクリーンショットのオプションを出さない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.queryByText("スクリーンショットが必要")).toBeNull();
+      expect(screen.queryByText("開発環境を起動する")).not.toBeNull();
+    });
+
+    it("GitHub Actionsを選ぶとスクリーンショットのオプションが出る", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /GitHub Actions/ }));
+
+      expect(screen.queryByText("スクリーンショットが必要")).not.toBeNull();
+    });
+
+    // 隠すと、付いてしまったラベルをこのダイアログから外せなくなる
+    it("既に24.screenshot-requiredが付いていればサブPCでも出す", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({
+          labels: [{ name: "24.screenshot-required", color: "d4c5f9", description: null }],
+        }),
+      });
+
+      expect(screen.queryByText("スクリーンショットが必要")).not.toBeNull();
+    });
+
+    it("新機能のIssueでは「計画が必要」にチェックが入った状態で開き、そのままラベルが付く", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "50.feature", color: "0052cc", description: null }] }),
+      });
+
+      expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).getAttribute("data-state")).toBe(
+        "checked",
+      );
+      fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+      clickStart();
+
+      await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+      expect(updateIssue.mock.calls[0][0].labels).toContain(PLAN_REQUIRED_LABEL);
+    });
+
+    it("バグ修正のIssueではチェックが入らない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "30.bug", color: "b60205", description: null }] }),
+      });
+
+      expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).getAttribute("data-state")).toBe(
+        "unchecked",
+      );
+    });
+  });
+
   describe("押した直後の選択欄（#1318）", () => {
     beforeEach(() => {
       dispatchState.hosts = [makeHost()];
