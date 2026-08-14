@@ -6,9 +6,16 @@ const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchJobFindUnique = vi.fn();
 const dispatchJobUpdateMany = vi.fn();
+const dispatchJobCount = vi.fn();
+const appSettingFindUnique = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
+    appSetting: {
+      get findUnique() {
+        return appSettingFindUnique;
+      },
+    },
     dispatchHost: {
       get findUnique() {
         return dispatchHostFindUnique;
@@ -32,6 +39,9 @@ vi.mock("@/lib/db", () => ({
       get updateMany() {
         return dispatchJobUpdateMany;
       },
+      get count() {
+        return dispatchJobCount;
+      },
     },
   },
 }));
@@ -42,7 +52,8 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
   escalateFailedSession: vi.fn(),
 }));
 
-const { enqueueDispatchJob, reportDispatchJob } = await import("./jobs");
+const { claimDispatchJobs, enqueueDispatchJob, enqueueSessionControlJob, reportDispatchJob } =
+  await import("./jobs");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 const REPOSITORY = "guchi-apps/issue-deck";
@@ -53,6 +64,9 @@ function host(overrides: Record<string, unknown> = {}) {
     repositories: JSON.stringify([REPOSITORY]),
     // 生存判定の窓（5分）の内側
     lastSeenAt: new Date(NOW.getTime() - 30_000),
+    // セッションの操作（#1332）に対応したpoller
+    sessionControlCapable: true,
+    maxConcurrency: null,
     ...overrides,
   };
 }
@@ -82,6 +96,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   // expireStaleDispatchJobs が最初に走る。期限切れのジョブは無い前提
   dispatchJobFindMany.mockResolvedValue([]);
+  dispatchJobCount.mockResolvedValue(0);
+  appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
   dispatchHostFindUnique.mockResolvedValue(host());
   dispatchSessionFindFirst.mockResolvedValue(null);
   dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
@@ -241,6 +257,183 @@ describe("reportDispatchJob の skipped", () => {
     expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ tmuxSessionName: "issue-deck-issue-1229" }),
+      }),
+    );
+  });
+});
+
+/**
+ * #1332。走っているセッションへの操作を同じキューに載せる。**起動ジョブとは通す条件が違う**
+ * （cloneの有無は問わない代わりに、対象のセッションとpollerの対応が要る）。
+ */
+describe("enqueueSessionControlJob", () => {
+  async function control(kind: "INTERRUPT" | "KILL" = "INTERRUPT") {
+    return enqueueSessionControlJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1332,
+      hostName: "subpc",
+      kind,
+      requestedByUserId: null,
+      now: NOW,
+    });
+  }
+
+  beforeEach(() => {
+    dispatchSessionFindFirst.mockResolvedValue(
+      aliveSession({ tmuxSessionName: "issue-deck-issue-1332", issueNumber: 1332 }),
+    );
+  });
+
+  it("生きているセッションがあれば積める", async () => {
+    const result = await control();
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "INTERRUPT",
+          status: "QUEUED",
+          // 起動ジョブ（`owner/repo#番号`）とぶつからない名前空間
+          activeKey: "interrupt:guchi-apps/issue-deck#1332",
+          // どのセッションを指した操作か。pollerはこの名前をそのまま使わず突き合わせる
+          tmuxSessionName: "issue-deck-issue-1332",
+        }),
+      }),
+    );
+  });
+
+  // 古いpollerは`kind`を読まないため、受け取ると起動ジョブとして解釈してセッションを立てる
+  it("セッションの操作に対応していないpollerへは積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ sessionControlCapable: null }));
+    const result = await control("KILL");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("session_control_unsupported");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("そのホストにセッションの記録が無ければ積まない", async () => {
+    dispatchSessionFindFirst.mockResolvedValue(null);
+    const result = await control("KILL");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("session_not_found");
+  });
+
+  // 終了したペインが残っているセッションは「閉じる」で片付けられる
+  it("終了済みのセッションは停止できないが閉じられる", async () => {
+    dispatchSessionFindFirst.mockResolvedValue(
+      aliveSession({ state: "EXITED", issueNumber: 1332 }),
+    );
+
+    const interrupt = await control("INTERRUPT");
+    expect(interrupt.ok).toBe(false);
+    if (!interrupt.ok) expect(interrupt.rejection).toBe("session_not_alive");
+
+    const kill = await control("KILL");
+    expect(kill.ok).toBe(true);
+  });
+
+  // スマホでの連打が、そのぶんの`C-c`にならないようにする（unique制約が止める）
+  it("同じ種別の未処理の操作があれば積まない", async () => {
+    dispatchJobCreate.mockRejectedValue(new Error("Unique constraint failed"));
+    const result = await control();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("already_queued");
+  });
+});
+
+/**
+ * #1332。制御ジョブは**起動より先に・同時実行数の枠外で**払い出す。tmuxを1回叩くだけで
+ * 重くないうえ、起動待ちの後ろに並ばせると止めたいときほど待たされる。
+ */
+describe("claimDispatchJobs の制御ジョブ", () => {
+  function queuedJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1332,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      message: null,
+      tmuxSessionName: null,
+      createdAt: NOW,
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("同時実行数が埋まっていても制御ジョブは払い出す", async () => {
+    // 起動ジョブで枠が埋まっている状態
+    dispatchJobCount.mockResolvedValue(2);
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | string | undefined;
+      if (typeof kind === "object" && kind?.in) {
+        return [queuedJob({ id: "control-1", kind: "KILL" })];
+      }
+      // 1回目はexpireStaleDispatchJobs、起動ジョブの候補は空
+      return [];
+    });
+
+    const claimed = await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(claimed.map((job) => job.id)).toEqual(["control-1"]);
+  });
+
+  it("対応していないホストには制御ジョブを配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ sessionControlCapable: null }));
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    // 制御ジョブを取りに行く問い合わせ自体が無いこと（失効を掃く問い合わせは種別を見るので除く）
+    const claimQueries = dispatchJobFindMany.mock.calls
+      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
+      .filter((where) => where.targetHost !== undefined);
+    expect(claimQueries.length).toBeGreaterThan(0);
+    for (const where of claimQueries) {
+      expect(where.kind).toBe("LAUNCH");
+    }
+  });
+
+  // 枠を消費させると、停止を1回押しただけで次の起動が詰まる
+  it("枠の計算に数えるのは起動ジョブだけ", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    expect(dispatchJobCount).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ kind: "LAUNCH" }) }),
+    );
+  });
+});
+
+/**
+ * #1332。**待たせるほど危険になる操作**なので、届かなかった制御ジョブは短い時間で落とす
+ * （何時間も後に届いた`C-c`は、そのとき走っている別の作業を止める）。
+ */
+describe("expireStaleDispatchJobs の制御ジョブ", () => {
+  it("取りに来られないままのQUEUEDをTIMEOUTにする", async () => {
+    dispatchJobFindMany.mockResolvedValue([
+      { id: "control-1", status: "QUEUED", kind: "INTERRUPT" },
+    ]);
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+    dispatchSessionFindFirst.mockResolvedValue(null);
+
+    await enqueue();
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "control-1", status: "QUEUED" },
+        data: expect.objectContaining({ status: "TIMEOUT", activeKey: null }),
       }),
     );
   });

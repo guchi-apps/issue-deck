@@ -1,8 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { parseDispatchHostName, parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
-import { enqueueDispatchJob, listDispatchState } from "@/lib/dispatch/jobs";
+import {
+  parseDispatchHostName,
+  parseDispatchJobKind,
+  parseDispatchTarget,
+} from "@/lib/dispatch/dispatch-job";
+import {
+  enqueueDispatchJob,
+  enqueueSessionControlJob,
+  listDispatchState,
+} from "@/lib/dispatch/jobs";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
@@ -35,6 +43,9 @@ export async function GET() {
  *
  * **実行できない組み合わせは積む前に弾き、理由を本文で返す**（「ディスパッチ前に弾く」。
  * #1179のコメント）。無言で失敗すると、無人実行では何も起きないまま終わってしまう。
+ *
+ * `kind`（#1332）を省略すると従来どおりの起動ジョブ。`interrupt`・`kill`は既に立っている
+ * セッションへの操作で、**同じ経路に載せる**（受信経路・認証・状態報告を増やさないため）。
  */
 export async function POST(request: NextRequest) {
   const guarded = previewModeGuard();
@@ -48,8 +59,30 @@ export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const target = parseDispatchTarget(payload?.repository, payload?.issue);
   const hostName = parseDispatchHostName(payload?.host);
-  if (!target || !hostName) {
+  const kind = parseDispatchJobKind(payload?.kind);
+  if (!target || !hostName || !kind) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  if (kind !== "LAUNCH") {
+    const controlResult = await enqueueSessionControlJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      kind,
+      requestedByUserId: userId,
+    });
+    if (!controlResult.ok) {
+      const status = controlResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: controlResult.rejection, message: controlResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: controlResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const result = await enqueueDispatchJob({

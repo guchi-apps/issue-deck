@@ -45,6 +45,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     online: true,
     lastSeenAt: "2026-08-14T00:00:00Z",
     screenshotCapable: true,
+    sessionControlCapable: true,
     ...overrides,
   };
 }
@@ -55,6 +56,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1049,
     targetHost: "subpc",
+    kind: "LAUNCH",
     status: "QUEUED",
     message: null,
     tmuxSessionName: null,

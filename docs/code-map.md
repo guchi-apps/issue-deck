@@ -145,7 +145,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   受け口は`POST /api/dispatch/sessions/activity`（pollerの一括報告とは別。あちらは含まれない
   行を`GONE`へ倒すため）。画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
-  同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
+  同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
+  立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
+  **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
+  受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
