@@ -25,14 +25,18 @@ export type DispatchJobStatus =
  * - `LAUNCH` … セッションを立てる（従来のジョブ）
  * - `INTERRUPT` … 走っている処理を中断する（`tmux send-keys … C-c`）。セッションは残る
  * - `KILL` … セッションごと畳む（`tmux kill-session`）
+ * - `QUESTION` … 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する（#1294）。
+ *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
  */
-export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL";
+export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL" | "QUESTION";
 
 /** 既に立っているセッションを操作するジョブ（起動しないジョブ） */
-export const SESSION_CONTROL_JOB_KINDS: readonly DispatchJobKind[] = ["INTERRUPT", "KILL"];
+export const SESSION_CONTROL_JOB_KINDS = ["INTERRUPT", "KILL"] as const;
 
-export function isSessionControlJobKind(kind: DispatchJobKind): boolean {
-  return SESSION_CONTROL_JOB_KINDS.includes(kind);
+export type SessionControlJobKind = (typeof SESSION_CONTROL_JOB_KINDS)[number];
+
+export function isSessionControlJobKind(kind: DispatchJobKind): kind is SessionControlJobKind {
+  return (SESSION_CONTROL_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
@@ -41,6 +45,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === undefined || value === null || value === "launch") return "LAUNCH";
   if (value === "interrupt") return "INTERRUPT";
   if (value === "kill") return "KILL";
+  if (value === "question") return "QUESTION";
   return null;
 }
 
@@ -168,12 +173,30 @@ export function parseDispatchTarget(
  * `interrupt:owner/repo#番号`のように前置きする。制御ジョブでnullにすると起動ジョブとは
  * 衝突しない代わりに、スマホでの連打ぶんだけ`C-c`が積まれる。前置きなら衝突せず、
  * 「同じIssueに未処理の停止は1件まで」もDBが保証する。
+ *
+ * **質問ジョブ（`QUESTION`）だけは`null`を返す**（#1294）。「未完了は1件まで」は実装ジョブの
+ * 二重起動を防ぐための制約で、質問には当てはまらない。ここでキーを取ると
+ * **実装ジョブが走っているIssueに質問を積めなくなる**（質問はまさに実装中に割り込んで聞くための
+ * 機能なので、それでは意味が無い）。同じIssueに質問が並ぶこと自体は害にならない。
  */
+// 質問以外は必ずキーを持つ。**呼び出し元（Issue一覧の順番待ち表示など）に不要なnull分岐を
+// 増やさないよう、種別を渡さない・質問以外を渡す呼び方では`string`を返す**とオーバーロードで示す
+export function buildDispatchActiveKey(
+  repositoryFullName: string,
+  issueNumber: number,
+  kind?: Exclude<DispatchJobKind, "QUESTION">,
+): string;
+export function buildDispatchActiveKey(
+  repositoryFullName: string,
+  issueNumber: number,
+  kind: DispatchJobKind,
+): string | null;
 export function buildDispatchActiveKey(
   repositoryFullName: string,
   issueNumber: number,
   kind: DispatchJobKind = "LAUNCH",
-): string {
+): string | null {
+  if (kind === "QUESTION") return null;
   const target = `${repositoryFullName}#${issueNumber}`;
   return kind === "LAUNCH" ? target : `${kind.toLowerCase()}:${target}`;
 }
@@ -316,7 +339,7 @@ export type SessionControlRejection =
 
 export function describeSessionControlRejection(
   rejection: SessionControlRejection,
-  context: { hostName: string; kind: DispatchJobKind },
+  context: { hostName: string; kind: SessionControlJobKind },
 ): string {
   const label =
     context.kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
@@ -347,7 +370,7 @@ export function describeSessionControlRejection(
 export function resolveSessionControlRejection(params: {
   host: Pick<DispatchHostView, "online" | "sessionControlCapable"> | null | undefined;
   session: Pick<DispatchSessionView, "state"> | null | undefined;
-  kind: DispatchJobKind;
+  kind: SessionControlJobKind;
   hasActiveControlJob: boolean;
 }): SessionControlRejection | null {
   if (!params.host) return "host_unknown";
@@ -434,12 +457,13 @@ export type DispatchJobTone = "pending" | "running" | "success" | "error" | "mut
 
 export function describeDispatchJobStatus(
   status: DispatchJobStatus,
-  /** 制御ジョブ（#1332）は「起動しました」では意味が通らないため、種別で文言を変える */
+  /** 制御ジョブ（#1332）・質問ジョブ（#1294）は「起動しました」では意味が通らないため、種別で文言を変える */
   kind: DispatchJobKind = "LAUNCH",
 ): {
   label: string;
   tone: DispatchJobTone;
 } {
+  if (kind === "QUESTION") return describeQuestionJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -470,6 +494,38 @@ export function describeDispatchJobStatus(
  * **押してから効くまでの間（`QUEUED`）を「送信しました」と出す。** pull型なので最大で
  * ポーリング間隔（既定60秒）は何も起きず、そこを黙っていると押せていないように見える。
  */
+/**
+ * 質問ジョブ（#1294）の状態の見せ方。
+ *
+ * **起動ジョブと寿命の意味が違う。** 起動ジョブの`succeeded`は「tmuxセッションが立った」までで、
+ * そこから先はProject Statusが持つ。質問ジョブにはその続きが無く、
+ * **`succeeded`は「回答コメントが投稿された」まで**を指す。だから「起動しました」ではなく
+ * 「回答しました」と書く（実行はStep 3。文言の出し分けだけを先に入れている）。
+ */
+function describeQuestionJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "回答中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "回答しました", tone: "success" };
+    case "FAILED":
+      return { label: "回答できませんでした", tone: "error" };
+    case "SKIPPED":
+      return { label: "回答を見送りました", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
 function describeSessionControlJobStatus(
   status: DispatchJobStatus,
   kind: DispatchJobKind,

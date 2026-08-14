@@ -60,7 +60,9 @@ export function DispatchJobStatus({
   /** 横並びのツールバー（PC）では右寄せ、縦積みの詳細画面（スマホ）では左寄せ */
   align?: "start" | "end";
 }) {
-  const { label, tone } = describeDispatchJobStatus(job.status);
+  // 種別を必ず渡す。省略すると起動ジョブ扱いになり、種別が増えたときに文言が黙って
+  // 「起動しました」になる（#1294）
+  const { label, tone } = describeDispatchJobStatus(job.status, job.kind);
   // 状態ごとに「いつの話か」を示す時刻は変わる。終わっていれば終了時刻、動いていれば開始時刻
   const timestamp = job.finishedAt ?? job.startedAt ?? job.createdAt;
   const textAlign = align === "end" ? "text-right" : "text-left";
