@@ -459,8 +459,9 @@ model DispatchSession {
   // セッション自身がフック（#1219）から報告してくる直近の様子（#1264）。pollerが見ている
   // tmuxのメタデータでは分からない「人の入力を待っているか」を、画面へ出すために持つ。
   //
-  // **古い値が残り続けないことが前提。** WAITING_INPUTはStopフック（RESPONDEDへ遷移）か、
-  // セッションの消滅（pollerの報告でEXITED/FAILED/GONEになる）のどちらかで必ず解ける。
+  // **古い値が残り続けないことが前提。** WAITING_INPUTはStopフック（RESPONDEDへ遷移）で解ける。
+  // セッションが消えた場合は表示側が状態を優先するだけで値は残るため、同じ名前で立ち上がり直した
+  // 行では報告の受け口（reportDispatchSessions・isRevivedSession）が捨てる（#1353）。
   activity         DispatchSessionActivity?
   activityAt       DateTime?
   // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので、

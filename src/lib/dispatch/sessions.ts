@@ -2,6 +2,7 @@ import type { DispatchSession } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import {
+  isRevivedSession,
   nextEscalatedState,
   resolveSessionState,
   shouldEscalateSession,
@@ -158,6 +159,7 @@ export async function reportDispatchSessions(params: {
     const previousEscalated = (previous?.escalatedState ?? null) as DispatchSessionState | null;
     const escalate = shouldEscalateSession(previousEscalated, state);
     const escalatedState = nextEscalatedState(previousEscalated, state, escalate);
+    const revived = isRevivedSession(previous?.state as DispatchSessionState | undefined, state);
 
     await db.dispatchSession.upsert({
       where: {
@@ -186,6 +188,13 @@ export async function reportDispatchSessions(params: {
         lastReportedAt: now,
         escalatedState,
         ...(escalate ? { escalatedAt: now } : {}),
+        // 立ち上がり直した行は、前のセッションが残した様子を捨てる（#1353）。
+        // **`previewUrl`だけは残す。** あれはworktreeに固定のポートを指すので次のセッションでも
+        // 繋がる一方、報告は起動時の1回だけで、その時点の行が`GONE`だと（`ALIVE`の行しか
+        // 更新しないため）捨てられて二度と載らない。
+        ...(revived
+          ? { activity: null, activityAt: null, remoteControlUrl: null, firstSeenAt: now }
+          : {}),
       },
     });
 
