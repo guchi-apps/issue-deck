@@ -4,6 +4,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 
 /**
  * 実行キューの要約（#1266）。
@@ -124,7 +125,7 @@ export function describeDispatchQueueStall(
   if (blocked.length === 0) return null;
 
   const names = blocked
-    .map((capacity) => `${capacity.hostName}（${capacity.live}/${capacity.max}本）`)
+    .map((capacity) => `${formatDispatchHostName(capacity.hostName)}（${capacity.live}/${capacity.max}本）`)
     .join("・");
   return `${names}がセッション本数の上限に達しているため、順番待ちは進みません。作業が終わったセッションが畳まれると自動で再開します。`;
 }
@@ -144,7 +145,7 @@ export function describeDispatchJobWaitReason(
   const host = hosts.find((candidate) => candidate.name === job.targetHost);
   // 落ちているホストは「上限で待っている」のではなく「取りに来られない」。別の話として扱う
   if (!host || !host.online || !isDispatchHostAtSessionCapacity(host)) return null;
-  return `${host.name}のセッションが上限（${host.liveSessions}/${host.maxSessions}本）に達しているため、まだ起動できません。作業が終わったセッションが畳まれると順に起動します。`;
+  return `${formatDispatchHostName(host.name)}のセッションが上限（${host.liveSessions}/${host.maxSessions}本）に達しているため、まだ起動できません。作業が終わったセッションが畳まれると順に起動します。`;
 }
 
 /** まとめて取り消せるジョブ（`queued`・`claimed`まで。`running`は途中で止めると中途半端なworktreeが残る） */

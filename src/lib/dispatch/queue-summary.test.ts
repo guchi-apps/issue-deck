@@ -136,7 +136,7 @@ describe("describeDispatchQueueStall", () => {
 
   it("上限に達しているホストがあれば理由を出す", () => {
     expect(describeDispatchQueueStall(queued, [host({ liveSessions: 12 })])).toContain(
-      "subpc（12/12本）",
+      "サブPC（12/12本）",
     );
   });
 

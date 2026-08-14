@@ -1,3 +1,4 @@
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
@@ -77,7 +78,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     return {
       ...base,
       tone: "error",
-      label: `${session.host}のセッションが異常終了しました`,
+      label: `${formatDispatchHostName(session.host)}のセッションが異常終了しました`,
       detail: session.exitStatus === null ? null : `終了コード ${session.exitStatus}`,
       // 落ちたセッションのRemote Controlは開いても意味が無い
       remoteControlUrl: null,
@@ -88,7 +89,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     return {
       ...base,
       tone: "done",
-      label: `${session.host}のセッションは終了しました`,
+      label: `${formatDispatchHostName(session.host)}のセッションは終了しました`,
       detail: null,
       remoteControlUrl: null,
       previewUrl: null,
@@ -100,7 +101,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       ...base,
       at: session.activityAt ?? session.lastReportedAt,
       tone: "waiting",
-      label: `${session.host}のセッションが入力を待っています`,
+      label: `${formatDispatchHostName(session.host)}のセッションが入力を待っています`,
       detail: "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
     };
   }
@@ -111,7 +112,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       ...base,
       at: session.activityAt ?? session.lastReportedAt,
       tone: "running",
-      label: `${session.host}のセッションが作業中です`,
+      label: `${formatDispatchHostName(session.host)}のセッションが作業中です`,
       detail: "直前の入力に答えたあと、作業を続けています",
     };
   }
@@ -120,14 +121,14 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       ...base,
       at: session.activityAt ?? session.lastReportedAt,
       tone: "running",
-      label: `${session.host}のセッションは応答を終えています`,
+      label: `${formatDispatchHostName(session.host)}のセッションは応答を終えています`,
       detail: "作業が終わっている場合と、次の指示を待っている場合があります",
     };
   }
   return {
     ...base,
     tone: "running",
-    label: `${session.host}で実行中`,
+    label: `${formatDispatchHostName(session.host)}で実行中`,
     detail: null,
   };
 }

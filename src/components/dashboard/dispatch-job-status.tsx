@@ -9,6 +9,7 @@ import {
   type DispatchJobTone,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +88,7 @@ export function DispatchJobStatus({
         )}
       >
         <ToneIcon tone={tone} />
-        {job.targetHost}で{label}
+        {formatDispatchHostName(job.targetHost)}で{label}
       </span>
       <span className="text-muted-foreground">{formatRelativeDate(timestamp)}</span>
       {isCancelableDispatchJobStatus(job.status) && (

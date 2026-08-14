@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -66,7 +67,9 @@ export function buildSessionPlanCommentBody(params: {
     ? `${plan.slice(0, PLAN_BODY_LIMIT)}\n\n（長すぎるため以降を省略しました。全文はRemote Controlで確認してください）`
     : plan;
 
-  const where = params.hostName ? `${params.hostName}のセッション` : "ローカルのセッション";
+  const where = params.hostName
+    ? `${formatDispatchHostName(params.hostName)}のセッション`
+    : "ローカルのセッション";
 
   const lines: string[] = [];
   // 手で投稿していたときと同じ位置・同じ形で残す。並行して走る他セッションのマージで計画の

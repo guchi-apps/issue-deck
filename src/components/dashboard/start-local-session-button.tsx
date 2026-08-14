@@ -22,6 +22,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
@@ -40,7 +41,7 @@ type StartLocalSessionButtonProps = {
    *
    * **「実装を開始」ダイアログのトリガーが同じ画面に出ているときは`false`にする。**
    * あちらのトリガーは既定の実行先を文言にしている（#1262）ため、サブPCが既定なら
-   * 「subpcで開始」というボタンが2つ並ぶ。`false`のときは積んだジョブの状態表示だけを残す。
+   * 「サブPCで開始」というボタンが2つ並ぶ。`false`のときは積んだジョブの状態表示だけを残す。
    */
   showStartButton?: boolean;
   /**
@@ -61,7 +62,7 @@ type StartLocalSessionButtonProps = {
  * ため（順番待ち・起動中・失敗。#1248）。
  *
  * **起動ボタンは、「実装を開始」ダイアログのトリガーが同じ画面に無いときだけ出す**（#1349）。
- * あちらのトリガーは既定の実行先を文言にしている（#1262）ので、両方出すと「subpcで開始」が
+ * あちらのトリガーは既定の実行先を文言にしている（#1262）ので、両方出すと「サブPCで開始」が
  * 2つ並ぶ。逆に、着手済み・承認待ちでダイアログが消える状態（`canStartImplementation`が
  * `false`）では**ここが唯一のサブPC起動の導線**になるため、消してしまうと落ちたセッションを
  * 立て直せなくなる。
@@ -158,7 +159,7 @@ export function StartLocalSessionButton({
           disabled={isBusy || onlyHostRejection !== null}
         >
           {isBusy ? <Loader2 className="animate-spin" /> : <Server />}
-          {onlyHost.name}で開始
+          {formatDispatchHostName(onlyHost.name)}で開始
         </Button>
       ) : (
         <DropdownMenu>
@@ -270,7 +271,7 @@ function DispatchHostMenuItem({
         repositoryFullName,
         session: blockingSession,
       })
-    : `ジョブを積みます。${host.name}が取りに来た時点で起動します（${load}）`;
+    : `ジョブを積みます。${formatDispatchHostName(host.name)}が取りに来た時点で起動します（${load}）`;
 
   return (
     <DropdownMenuItem
@@ -280,7 +281,7 @@ function DispatchHostMenuItem({
     >
       <span className="flex items-center gap-2 font-medium">
         <Server className="size-3.5" />
-        {host.name}
+        {formatDispatchHostName(host.name)}
       </span>
       <span className="whitespace-normal text-xs text-muted-foreground">{description}</span>
     </DropdownMenuItem>

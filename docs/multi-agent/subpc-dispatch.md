@@ -239,7 +239,7 @@ pollerが取りに行かないだけなので、画面には**「順番待ち」
 
 | 場所 | 出すもの |
 |---|---|
-| 実行キューのポップオーバー | `subpcのセッション 12/12` と、順番待ちが進まない理由（`describeDispatchQueueStall`） |
+| 実行キューのポップオーバー | `サブPCのセッション 12/12` と、順番待ちが進まない理由（`describeDispatchQueueStall`） |
 | Issue詳細のジョブの状態 | 押した本人が見ている場所に同じ理由（`describeDispatchJobWaitReason`） |
 
 **割り当ての判定はpoller側のまま**で、issue-deckはこの値を表示にしか使わない。サブPCのtmuxを
@@ -406,6 +406,27 @@ Issue詳細の「ローカルで開始」を、**起動先の選択**に変え�
 
 **申告しているホストが1台だけなら、メニューにせず単独のボタンにする。** 選択肢が1つのメニューを
 開かせる意味が無いため。申告が1台も無ければ、このボタンの導線ごと出ない。
+
+### ホスト名は表示するときだけ日本語表記に直す（#1416）
+
+ホスト名（`DispatchHost.name`）は`hostname`そのままの識別子で、pollerの申告・tmux・
+`local-repos.conf`・DBの照合キーを兼ねている。**識別子は変えられないが、人が読む場所に`subpc`と
+いう綴りが出るのは表記として揃っていない**ため、表示の直前に
+[src/lib/dispatch/host-label.ts](../../src/lib/dispatch/host-label.ts)の
+`formatDispatchHostName()`で置き換える（`subpc` → `サブPC`）。対応表に無いホストはそのまま出す。
+
+適用するのは**地の文だけ**にする。次のものは識別子のまま残す。コピーしてそのまま使う値だからで、
+表記を揃えるために書き換えると動かないコマンドを案内することになる。
+
+- バッククォートで囲んだコード引用（`tmux attach`の相手、異常終了コメントの`- ホスト: \`subpc\``）
+- ファイル名・ディレクトリ名（`scripts/subpc-dispatch-poller.sh`・`deploy/subpc/`）
+- 設定値（`DISPATCH_HOST_NAME=subpc`）・MagicDNSの短い名前・`ssh subpc`
+- APIへ送る`hostName`とDBの値
+
+Signalyのセッション通知（`scripts/session-notify.sh`）のタイトルも同じ表記に揃えているが、
+**あちらは同じ対応表の写しを持っている**。通知を組み立てる時点でホスト名しか手元に無く、
+issue-deckへ問い合わせる経路も無い（通知は起動先が落ちていても届く必要がある）ため。片方だけ
+足すと表記がずれるので、対応表を増やすときは両方に入れる。
 
 ### スマホの「実装を開始」からも起動先を選べる（#1248）
 

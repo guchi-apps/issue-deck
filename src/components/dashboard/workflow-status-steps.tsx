@@ -98,7 +98,7 @@ export function WorkflowStepBadge({
     executionTarget && !executionTarget.expectsActionsRun
       ? describeIssueExecutionTarget(executionTarget)
       : null;
-  // 実行先とセッションの様子は両方出す（例:「subpc・入力待ち」）。どちらが欠けても意味が変わる
+  // 実行先とセッションの様子は両方出す（例:「サブPC・入力待ち」）。どちらが欠けても意味が変わる
   const localSuffix = [targetLabel, sessionLabel].filter(Boolean).join("・") || null;
   const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
   const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;

@@ -67,7 +67,7 @@ describe("summarizeIssueSession", () => {
   it("ALIVEで様子の報告が無ければ実行中", () => {
     const s = summarizeIssueSession(session());
     expect(s.tone).toBe("running");
-    expect(s.label).toContain("subpcで実行中");
+    expect(s.label).toContain("サブPCで実行中");
   });
 
   it("入力待ちはRemote Controlの案内を添える", () => {

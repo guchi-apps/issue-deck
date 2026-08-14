@@ -43,6 +43,7 @@ import {
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
@@ -453,7 +454,7 @@ export function IssueDetail({
     blockingSession,
   });
   const startLabel = defaultDispatchHost
-    ? `${defaultDispatchHost}で開始`
+    ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
     : "GitHub Actionsで開始";
   // 着手後もどちらで動いているかが分かるようにする（#1262）
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
@@ -552,7 +553,7 @@ export function IssueDetail({
               {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
                   起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
                   あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                  「subpcで開始」が2つ並ぶ */}
+                  「サブPCで開始」が2つ並ぶ */}
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}

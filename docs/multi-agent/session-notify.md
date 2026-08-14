@@ -262,7 +262,7 @@ printf '{"hook_event_name":"Stop","session_id":"manual-test"}' \
   | scripts/session-notify.sh 1231 issue-deck guchi-apps/issue-deck
 ```
 
-- 成功: Signalyのセッション通知チャンネルに `✅ [issue-deck #1231] 応答終了 (subpc)` が届く。
+- 成功: Signalyのセッション通知チャンネルに `✅ [issue-deck #1231] 応答終了 (サブPC)` が届く。
   標準出力・標準エラーには何も出ない
 - 失敗: `session-notify: Signalyへの通知に失敗しました（実装は続行します）` がstderrに出る。
   URLが誤り・値にエラーメッセージが混入している・Signalyが落ちている、のいずれか

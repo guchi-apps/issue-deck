@@ -1,3 +1,4 @@
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
@@ -302,21 +303,21 @@ export function describeDispatchEnqueueRejection(
 ): string {
   switch (rejection) {
     case "host_unknown":
-      return `${context.hostName} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
-      return `${context.hostName} が応答していません（最後の申告から時間が経ちすぎています）。`;
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
     case "repository_not_runnable":
-      return `${context.repositoryFullName ?? "このリポジトリ"} は ${context.hostName} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
+      return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
     case "already_queued":
       return "このIssueには実行中または待機中のジョブが既にあります。";
     case "session_alive": {
       // **セッション名まで出す。** 畳むにはサブPCでその名前を指す必要があり、名前が無いと
       // 「押せないが、どうすれば押せるようになるか分からない」で終わる
       const where = context.session
-        ? `${context.session.host}で「${context.session.tmuxSessionName}」`
+        ? `${formatDispatchHostName(context.session.host)}で「${context.session.tmuxSessionName}」`
         : "起動先で このIssueのセッション";
       const how = context.session
-        ? `${context.session.host}で \`tmux kill-session -t ${context.session.tmuxSessionName}\` を実行してください`
+        ? `${formatDispatchHostName(context.session.host)}で \`tmux kill-session -t ${context.session.tmuxSessionName}\` を実行してください`
         : "起動先でtmuxセッションを畳んでください";
       // 畳んでも次のセッション報告（既定60秒間隔）が届くまでは押せないままになる。#1321で解消予定
       return `${where}が動いています。作り直す場合は${how}（畳んでから押せるようになるまで最大1分ほどかかります）。`;
@@ -367,15 +368,15 @@ export function describeSessionControlRejection(
     context.kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
   switch (rejection) {
     case "host_unknown":
-      return `${context.hostName} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
-      return `${context.hostName} が応答していません（最後の申告から時間が経ちすぎています）。`;
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
     case "session_control_unsupported":
       // **何をすれば押せるようになるかまで書く。** pollerはサブPC側の作業ツリーから動くため、
       // 更新するのは人の作業になる（issue-deck側を新しくしても解消しない）
-      return `${context.hostName} のpollerがセッションの操作に対応していません（更新してから押せるようになります）。`;
+      return `${formatDispatchHostName(context.hostName)} のpollerがセッションの操作に対応していません（更新してから押せるようになります）。`;
     case "session_not_found":
-      return `${context.hostName} にこのIssueのセッションが見当たりません。`;
+      return `${formatDispatchHostName(context.hostName)} にこのIssueのセッションが見当たりません。`;
     case "session_not_alive":
       return "このセッションは既に終了しています。";
     case "already_queued":
@@ -670,7 +671,7 @@ export function resolveDefaultDispatchHost(params: {
 export function resolveScreenshotRejection(host: DispatchHostView | null): string | null {
   if (!host) return null;
   if (host.screenshotCapable === false) {
-    return `${host.name}にPlaywrightのブラウザが入っていないため、スクリーンショットを取得できません。`;
+    return `${formatDispatchHostName(host.name)}にPlaywrightのブラウザが入っていないため、スクリーンショットを取得できません。`;
   }
   return null;
 }
