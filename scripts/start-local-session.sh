@@ -114,7 +114,7 @@ fi
 # 限らず、守っていないと起動してから無言で固まる（ISSUE_DECK_SKIP_LAN_SETUPを解釈しない
 # リポジトリでは、UACを承認しても待ちから戻らない）。押した先で固まるより、ここで止める。
 # 版数は src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と揃える。
-SUPPORTED_CONTRACT_VERSION=1
+SUPPORTED_CONTRACT_VERSION=2
 DECLARED_VERSION="$(grep -oP '^#\s*issue-deck-local-session:\s*v\K[0-9]+' "$LAUNCHER" | head -1 || true)"
 if [[ -z "$DECLARED_VERSION" ]]; then
   echo "Error: $FULL_NAME はローカル起動プロトコルに対応していません。" >&2
@@ -202,6 +202,11 @@ export ISSUE_DECK_SKIP_LAN_SETUP=1
 # 定義上どのリポジトリ単独でも決められないため、全リポジトリを知る唯一の場所であるここが持つ
 # （#1073）。実際、issue-deckとshopping-listが同じ4000帯のまま衝突していた。
 # 表に無いリポジトリへは渡さず、そのリポジトリの既定に任せる。
+#
+# **各リポジトリのstart-issue.sh側の既定値も、この表と同じ値に揃える**（#1178）。ターミナル
+# 直叩き・tmux経路はここを通らずベース値が渡らないため、既定値がずれていると同じIssueでも
+# 起動経路によってポートが変わり、1台に複数リポジトリのセッションが常駐するマシン
+# （サブPC）では他リポジトリの帯と衝突する。
 case "$FULL_NAME" in
   guchi-apps/issue-deck) export ISSUE_DECK_DEV_PORT_BASE=4000 ;;
   guchi-apps/shopping-list) export ISSUE_DECK_DEV_PORT_BASE=5000 ;;

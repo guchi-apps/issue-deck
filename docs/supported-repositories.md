@@ -57,7 +57,7 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 
 | リポジトリ | ローカル起動プロトコル |
 |---|---|
-| `guchi-apps/issue-deck` | v1 |
+| `guchi-apps/issue-deck` | v2 |
 | `guchi-apps/dayspan` | v1 |
 | `guchi-apps/shopping-list` | — |
 | `guchi-apps/meisai-lab` | — |
@@ -68,6 +68,10 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/solitaire` | — |
 | `guchi-apps/myroom` | — |
 | `guchi-apps/signaly` | — |
+
+**版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
+v1のままのリポジトリもこれまでどおり動く（v2で増えたのはWindows Terminalが無い環境向けの
+tmux出口とポート帯の既定値。#1178）。
 
 **この表は要約であって真実の源ではない。** 正はマーカー行そのもので、次のコマンドが実態を読む。
 

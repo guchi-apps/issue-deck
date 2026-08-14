@@ -126,6 +126,10 @@ describe("isSupportedLocalSessionContract", () => {
     expect(isSupportedLocalSessionContract(LOCAL_SESSION_CONTRACT_VERSION + 1)).toBe(false);
   });
 
+  it("古い版数のリポジトリも受け入れる（版を上げても他リポジトリを切り捨てない。#1178）", () => {
+    expect(isSupportedLocalSessionContract(1)).toBe(true);
+  });
+
   it("宣言が無い場合は対応していないとみなす", () => {
     expect(isSupportedLocalSessionContract(null)).toBe(false);
   });
