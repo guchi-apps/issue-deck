@@ -27,6 +27,11 @@ CONFIG_FILE="${ISSUE_DECK_LOCAL_REPOS_CONFIG:-$HOME/.config/issue-deck/local-rep
 # 名前を変えるときは src/lib/local-session.ts・scripts/start-local-session.sh も揃える。
 REQUIRED_ENV_VARS=(ISSUE_DECK_SKIP_LAN_SETUP ISSUE_DECK_DEV_PORT_BASE)
 
+# v2で増えた約束のうち、存在チェックで見られるもの（#1178）。
+# **v2以上を宣言しているリポジトリにだけ課す。** 受け口はv1のリポジトリも受け入れるため、
+# v1のままのものをここで違反扱いにしない。
+V2_REQUIRED_TOKENS=(tmux)
+
 # src/lib/local-session.ts が持つ版数を正とする。画面と検査で版数がずれないようにするため、
 # シェル側で数字を二重に書かない。
 expected_version() {
@@ -66,6 +71,15 @@ check_script() {
       problems+=("$var を解釈していません")
     fi
   done
+
+  if [[ -n "$declared" && "$declared" -ge 2 ]]; then
+    local token
+    for token in "${V2_REQUIRED_TOKENS[@]}"; do
+      if ! grep -q "$token" "$script_path"; then
+        problems+=("v$declared を宣言していますが $token を使う出口がありません")
+      fi
+    done
+  fi
 
   if [[ ${#problems[@]} -eq 0 ]]; then
     echo "  ✓ $label: v${declared}"

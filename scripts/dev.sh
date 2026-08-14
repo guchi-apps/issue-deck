@@ -13,6 +13,18 @@ fi
 
 PORT="${PORT:-3000}"
 
+# 待ち受けアドレス（#1178）。**未指定なら `-H` を渡さない。**
+# `next dev` は既定で全インターフェース（IPv4/IPv6の両方）を待ち受けるため、Tailscale経由で
+# 他端末（iPhone等）から画面を見るのはこの既定のままで成立する。`-H 0.0.0.0` を明示すると
+# 逆にIPv4だけに絞られ、tailnetのIPv6アドレスからは見えなくなる。
+# 127.0.0.1 に閉じたいときや、特定のインターフェースだけに出したいときに指定する。
+DEV_HOST="${ISSUE_DECK_DEV_HOST:-}"
+HOST_ARGS=()
+if [ -n "$DEV_HOST" ]; then
+  HOST_ARGS=(-H "$DEV_HOST")
+  echo "開発サーバーの待ち受けアドレスを ${DEV_HOST} に固定します（ISSUE_DECK_DEV_HOST）。" >&2
+fi
+
 # 同一LAN上の別端末（スマホ等）からsslip.io経由でアクセスできるよう、
 # Windows側のポートフォワーディングをベストエフォートで設定する（失敗してもdevサーバー起動は続行する）。
 #
@@ -34,4 +46,5 @@ else
   echo "GITHUB_WEBHOOK_PROXY_URL が未設定のため、smee client は起動しません。" >&2
 fi
 
-next dev -p "${PORT}"
+# set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
+next dev -p "${PORT}" ${HOST_ARGS[@]+"${HOST_ARGS[@]}"}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# issue-deck-local-session: v1
+# issue-deck-local-session: v2
 #
 # Issueごとに専用ブランチ・git worktreeを作成し、実装エージェント用のClaude Codeセッションを起動する
 #
@@ -13,6 +13,7 @@
 #   scripts/start-issue.sh --prepare-only <issue番号> [issue番号...]
 #   scripts/start-issue.sh --recreate <issue番号>      既存worktreeを捨ててdevelopから作り直す
 #   scripts/start-issue.sh --no-recreate <issue番号>   作り直しの確認を出さず必ず再利用する
+#   scripts/start-issue.sh --no-tmux <issue番号>       tmuxを使わずこのターミナルで起動する
 #
 # --prepare-only はworktree・ブランチ・起動用プロンプトの準備だけを行い、開発サーバーも
 # Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
@@ -30,9 +31,23 @@
 # 起きない。進捗ラベルは #991 Phase 5（#1010）で廃止しており、報告先はissue-deckの
 # 進捗報告API（`POST /api/progress`）だけになっている。
 #
+# セッションの出口（どこでClaude Codeを走らせるか）は**tmuxがあるかどうかだけ**で決まる（#1178）。
+#
+#   tmuxがある  Issueごとの新しいtmuxセッション（単一Issueならそのままアタッチする）
+#   tmuxが無い  このターミナル（複数Issue指定時は準備だけ行い、手動実行を案内する）
+#
+# ターミナルを閉じてもSSHが切れてもセッションが残るため、外出先の端末からTailscale SSHで
+# 入って実装を始める使い方（#1176 Phase 1）が成立する。WSLでも同じ経路を使う。
+# このターミナルで動かしたい場合は `--no-tmux` を付ける。
+#
+# **Windows Terminalの新しいタブを開く出口は持たない。** 以前は複数Issue指定時に
+# `wt.exe -w 0 new-tab` を使っていたが、tmuxで代替できるうえ、Windowsに依存しない経路へ
+# 寄せたほうが起動元（サブPC・SSH・無人実行）を選ばないため削除した。
+#
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
-#   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定なら既定の4000）
+#   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定ならissue-deckの帯=4000）
+#   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら全インターフェース）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -44,8 +59,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Windows Terminalのタブ名に出すリポジトリ名。複数リポジトリ・複数Issueのタブを同時に開くため、
-# 「どのリポジトリのどのIssueか」がタブだけで分かるようにする（#1105）。
+# 端末のタイトル・tmuxのセッション名に出すリポジトリ名。複数リポジトリ・複数Issueのセッションを
+# 同時に開くため、「どのリポジトリのどのIssueか」が名前だけで分かるようにする（#1105）。
 REPO_NAME="$(basename -s .git "$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null || true)")"
 if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
   REPO_NAME="$(basename "$ROOT")"
@@ -57,24 +72,37 @@ PROMPT_DIR="$WORKTREE_BASE/.prompts"
 # shellcheck source=scripts/lib/worktree-status.sh
 source "$ROOT/scripts/lib/worktree-status.sh"
 
-# 端末のタイトル（Windows Terminalのタブ名）を書き換える。worktree作成・pnpm installの間も
-# どのIssueの準備中かがタブから分かるようにする（#1105）。この後Claude Codeが起動すると、
-# 同じ書式の`--name`（scripts/run-issue-session.sh）が引き継ぐ。
+# 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
+# タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
+# （scripts/run-issue-session.sh）が引き継ぐ。
 # 端末以外へ出力しているときは、エスケープシーケンスがログに混ざるだけなので何もしない。
 set_terminal_title() {
   [[ -t 1 ]] || return 0
   printf '\033]0;%s\007' "$1"
 }
 
+# tmuxのセッション名（#1178）。端末のタイトル（`<リポジトリ名> #<番号>`）と同じ内容を、tmuxで使える
+# 文字だけで表す。`.`・`:`はtmuxのターゲット指定（`session:window.pane`）の区切りとして
+# 解釈されるためセッション名に使えず、空白と`#`も指定のたびにクォートが要る。
+# サブPCはissue-deck専用機ではなく他リポジトリのセッションも並ぶため、リポジトリ名を含める。
+tmux_session_name() {
+  local n="$1"
+  local safe_repo="${REPO_NAME//[^A-Za-z0-9_-]/-}"
+  printf '%s-issue-%s' "$safe_repo" "$n"
+}
+
 PREPARE_ONLY=0
 # マージ済みIssueのworktreeを作り直すかどうか。auto=マージ済みを検出したら対話で尋ねる（#1100）
 RECREATE_MODE=auto
+# セッションの出口。auto=tmuxがあればtmux、無ければこのターミナル（#1178）
+TMUX_MODE=auto
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
     --recreate) RECREATE_MODE=always ;;
     --no-recreate) RECREATE_MODE=never ;;
+    --no-tmux) TMUX_MODE=classic ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
@@ -86,7 +114,7 @@ set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 SKIP_LAN_SETUP="${ISSUE_DECK_SKIP_LAN_SETUP:-0}"
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] <issue番号> [issue番号...]" >&2
+  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] [--no-tmux] <issue番号> [issue番号...]" >&2
   exit 1
 fi
 
@@ -436,6 +464,12 @@ prepare_issue() {
   # 開発サーバーのポートをIssueごとに一意にする（複数worktreeで同時にpnpm devしても衝突しないように）。
   # ワンクリック起動からはissue-deck側の受け口がベース値を渡してくる。リポジトリごとの帯を
   # 一箇所で管理するための約束で（#1073）、渡されない場合は既定の4000を使う。
+  #
+  # **既定値はissue-deck自身の帯（4000）と一致させる**（#1178）。ターミナル直叩き・tmux経路は
+  # 受け口を通らずベース値が渡ってこないため、既定値が帯とずれていると、同じIssue番号でも
+  # 起動経路によって別のポートになる。1台のマシンに複数リポジトリのセッションが常駐する
+  # サブPCでは、そのずれがそのまま他リポジトリの帯との衝突になる。帯の一覧は
+  # docs/multi-agent/local-quick-start.md を参照。
   DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
   if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
     # `sed`で消して追記する形にすると、再開のたびに先頭改行が積もって空行が増える（実測で
@@ -452,6 +486,13 @@ prepare_issue() {
   elif [[ "$SKIP_LAN_SETUP" != "0" ]]; then
     # ワンクリック起動経路。UACを承認しても待ちから戻らずタブが固まるため行わない（#1076）。
     echo "#$n: LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh $DEV_PORT を実行してください）。"
+  elif ! command -v powershell.exe >/dev/null 2>&1; then
+    # WSL以外（サブPCのUbuntu等）。ここで必要だったのはWSL2の内部NATを越えるための
+    # Windows側ポートフォワーディングで、素のLinuxには対応物が無い。開発サーバーは最初から
+    # 全インターフェースで待ち受けるため、同一LAN・tailnetの端末からそのまま見える（#1178）。
+    # setup-lan-access.sh も同じ判定で何もせず終わるが、ここで分けておくと何が行われなかったかが
+    # ログに残る。
+    echo "#$n: LANアクセス設定はスキップします（WSL以外の環境では不要。開発サーバーは全インターフェースで待ち受けます）。"
   else
     echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
     if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
@@ -570,6 +611,19 @@ PY
   rm -f "$issue_json_file"
 }
 
+# tmuxセッションへ引き継ぐ環境変数（#1178）。新しいセッションはtmuxサーバー側の環境を
+# 引き継ぐため、このプロセスのexportがそのまま届くとは限らない。値は%qでクォートして埋める。
+# 設定されているものだけを渡し、未設定のものは新しいシェル側の既定に任せる。
+build_env_prefix() {
+  local var value prefix=""
+  for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP ISSUE_DECK_DEV_HOST; do
+    value="${!var:-}"
+    [[ -n "$value" ]] || continue
+    prefix+="export $var=$(printf '%q' "$value"); "
+  done
+  printf '%s' "$prefix"
+}
+
 # 単一worktree内で開発サーバー起動〜claude起動〜終了時のdevサーバー停止までを行う
 # run-issue-session.sh を起動するコマンド文字列を作る（PROMPT_FILEのパスのみを埋め込み、
 # Issue本文・コメントなどの外部由来テキストはコマンド文字列に直接展開しない）。
@@ -578,7 +632,55 @@ build_claude_cmd() {
   local worktree_dir="$2"
   local dev_port="$3"
   local prompt_file="$4"
-  printf "cd %q && bash %q %q %q %q" "$worktree_dir" "$ROOT/scripts/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
+  printf "%scd %q && bash %q %q %q %q" "$(build_env_prefix)" "$worktree_dir" "$ROOT/scripts/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
+}
+
+# tmuxの新しいセッションでrun-issue-session.shを起動する（#1178）。
+start_tmux_session() {
+  local n="$1" session="$2" worktree_dir="$3" cmd="$4"
+
+  # 同名のセッションが動いていれば作らない。再開（#1076）で2回目に起動したときに、
+  # 前のセッションを残したまま同じIssueのセッションが二重に立つのを防ぐ。
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    # ただし後述の`remain-on-exit`で残した「死んだペインだけのセッション」は、動いているのでは
+    # なく前回の終了の痕跡なので、最後の出力を見せてから畳んで作り直す。残したままだと
+    # 再実行しても「既に動いています」で止まり、二度と起動できない。
+    local alive_panes
+    alive_panes="$(tmux list-panes -s -t "=$session" -F '#{pane_dead}' 2>/dev/null | grep -cv '^1$' || true)"
+    if [[ "${alive_panes:-0}" -eq 0 ]]; then
+      # tmux 3.2以降は異常終了時だけ残る。3.2未満（`on`へフォールバックした環境）では
+      # 正常終了でも残るため、「異常終了した」とは断定しない。終了コードは下の出力に出る。
+      echo "#$n: 前回のtmuxセッション「$session」は終了したまま残っていました。最後の出力:"
+      # capture-paneはペイン指定なので、セッション指定の`=`接頭辞ではなく`<セッション名>:`
+      # （そのセッションの現在のウィンドウ＝アクティブなペイン）で指す。
+      tmux capture-pane -p -t "$session:" 2>/dev/null | grep -v '^$' | tail -n 15 | sed 's/^/    /' || true
+      tmux kill-session -t "=$session" >/dev/null 2>&1 || true
+    else
+      echo "#$n: tmuxセッション「$session」は既に動いています。新しくは起動しません。"
+      return 0
+    fi
+  fi
+
+  # tmuxはコマンドを既定シェルで直接実行し、**ログインシェルとしては起動しない**。
+  # `~/.profile`系が読まれずPATHに`~/.local/bin`が乗らないため、そのままではclaudeが
+  # 見つからずセッションが即死する（#1177で実際に踏んだ）。`bash -lc`を明示して、
+  # node/pnpm/claude/gh とトークン類をまとめてログインシェルに解決させる。個別にPATHを
+  # 足す方法もあるが、後から増えた環境変数を取りこぼす。
+  if ! tmux new-session -d -s "$session" -c "$worktree_dir" "bash -lc $(printf '%q' "$cmd")"; then
+    echo "Error: tmuxセッション「$session」の起動に失敗しました。" >&2
+    return 1
+  fi
+
+  # 異常終了時にペインを残す。既定ではコマンドの終了と同時にセッションごと消えるため、
+  # **エラーメッセージが一切残らない**（#1177で原因究明に手間取った）。`failed`はtmux 3.2以降で、
+  # 異常終了のときだけ残す。古いtmux（メインPCのWSLは3.0a）では`unknown value`で失敗するため、
+  # 常に残す`on`へ落とす。この場合は正常終了でもセッションが残るが、次回同じIssueで起動した
+  # ときに上の分岐が畳んで作り直すので、溜まったまま起動できなくなることはない。
+  #
+  # これはウィンドウのオプションなので、対象はセッション名ではなく`<セッション名>:`
+  # （＝そのセッションの現在のウィンドウ）で指す。セッション指定の`=`接頭辞は付かない。
+  tmux set-option -t "$session:" -w remain-on-exit failed >/dev/null 2>&1 ||
+    tmux set-option -t "$session:" -w remain-on-exit on >/dev/null 2>&1 || true
 }
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
@@ -592,6 +694,51 @@ if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
+# セッションの出口を決める（#1178）。**tmuxがあれば必ずtmux。**
+# Windows Terminalのタブを開く出口は持たない（WSLでもtmuxを使う）。
+TMUX_AVAILABLE=0
+if command -v tmux >/dev/null 2>&1; then
+  TMUX_AVAILABLE=1
+fi
+
+LAUNCHER=tmux
+if [[ "$TMUX_MODE" == "classic" || "$TMUX_AVAILABLE" -eq 0 ]]; then
+  if [[ "$TMUX_MODE" != "classic" ]]; then
+    echo "警告: tmux が見つからないため、このターミナルで起動します（切断するとセッションも終了します）。" >&2
+  fi
+  LAUNCHER=classic
+fi
+
+if [[ "$LAUNCHER" == "tmux" ]]; then
+  # Issueごとに独立したtmuxセッションを立てる。ターミナルを閉じてもSSHが切れても残るため、
+  # 外出先の端末から入って実装を始め、切断して後から戻る使い方ができる（#1176 Phase 1）。
+  for n in "$@"; do
+    prepare_issue "$n"
+    session="$(tmux_session_name "$n")"
+    echo "#$n: tmuxセッション「$session」で開発サーバーとClaude Codeセッションを起動します..."
+    start_tmux_session "$n" "$session" "$WORKTREE_DIR" \
+      "$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
+  done
+
+  echo
+  echo "起動したセッションはこのターミナルを閉じても（SSHが切れても）動き続けます。"
+  # 単一Issueで、端末があり、まだtmuxの外にいる場合はそのままアタッチする。ターミナルから
+  # 直接叩いたときに、これまでどおり目の前でセッションが始まったように見える。
+  if [[ $# -eq 1 && -t 0 && -t 1 && -z "${TMUX:-}" ]]; then
+    echo "アタッチします（切り離すには Ctrl-b d）..."
+    exec tmux attach-session -t "=$(tmux_session_name "$1")"
+  fi
+  for n in "$@"; do
+    if [[ -n "${TMUX:-}" ]]; then
+      # tmuxの中からは入れ子でアタッチできない。今いるクライアントの切り替えを案内する。
+      echo "  #$n: tmux switch-client -t $(tmux_session_name "$n")"
+    else
+      echo "  #$n: tmux attach -t $(tmux_session_name "$n")"
+    fi
+  done
+  exit 0
+fi
+
 if [[ $# -eq 1 ]]; then
   n="$1"
   prepare_issue "$n"
@@ -600,21 +747,10 @@ if [[ $# -eq 1 ]]; then
   exec bash "$ROOT/scripts/run-issue-session.sh" "$n" "$DEV_PORT" "$PROMPT_FILE"
 fi
 
-# 複数issue指定時は、それぞれ独立したセッションを同時に使うため新しいWindows Terminalタブで起動する。
-WT_AVAILABLE=0
-if command -v wt.exe >/dev/null 2>&1; then
-  WT_AVAILABLE=1
-fi
-DISTRO="${WSL_DISTRO_NAME:-}"
-
+# tmuxが無い環境で複数Issueを指定した場合。1つのターミナルでは1セッションしか動かせないため、
+# 準備だけを行い、残りは手動実行に委ねる（別々のターミナルで叩けば並行できる）。
 for n in "$@"; do
   prepare_issue "$n"
-  if [[ "$WT_AVAILABLE" -eq 1 && -n "$DISTRO" ]]; then
-    echo "#$n: 新しいWindows Terminalタブで開発サーバーを自動起動し、セッションを起動します..."
-    cmd="$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
-    wt.exe -w 0 new-tab --title "$REPO_NAME #$n" -- wsl.exe -d "$DISTRO" -- bash -lc "$cmd"
-  else
-    echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
-    echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""
-  fi
+  echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
+  echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""
 done
