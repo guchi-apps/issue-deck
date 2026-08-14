@@ -837,6 +837,67 @@ GitHub側へ切り替わる**ため、全リポジトリを一斉に切り替え
 マニフェストへ項目を足したのに`env:`へ足し忘れると、検証ワークフローがその項目を見ないまま
 「OK」を出してしまうため。
 
+### 共通値はorganizationへ寄せる（#1307）
+
+複数リポジトリが同じ `op://` を参照している値は、organization secret / organization variable として
+**1回だけ**設定する。対応表は [`.github/org-secrets-manifest.tsv`](../.github/org-secrets-manifest.tsv)。
+
+**GitHub Team（2026-08-14に切り替え）が前提。** GitHub Freeではorganization secretをprivateリポジトリ
+から参照できず、org共通化ができなかった（#1011に整理あり）。Teamへの引き上げで、privateリポジトリの
+ブランチ保護と合わせて2つの制約が同時に外れた。
+
+投入は同期スクリプトで行う（`admin:org` スコープが要る）。
+
+```bash
+op signin
+scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv --dry-run
+scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
+```
+
+| organizationでの名前 | 参照しているリポジトリ数 | 種別 |
+|---|---|---|
+| `SERVER_HOST`・`SERVER_SSH_PORT` | 15 | secret |
+| `SERVER_USERNAME` | 14 | secret |
+| `SERVER_SSH_PRIVATE_KEY` | 13 | secret |
+| `SHARED_DB_HOST`・`SHARED_DB_PORT`・`SHARED_DB_USER`・`SHARED_DB_PASSWORD` | 9 | secret |
+| `SHARED_DB_MIGRATE_USER`・`SHARED_DB_MIGRATE_PASSWORD` | 5 | secret |
+| `SUPABASE_PROJECT_URL`・`SUPABASE_PUBLISHABLE_KEY` | 8 | variable（公開値） |
+
+1リポジトリでしか使わない値（実測115件）は各リポジトリのrepository secretに置く。
+
+#### 環境変数名がリポジトリごとに違っても吸収できる
+
+同じ値を別の名前で受けているリポジトリが実際にある。
+
+| 同じ `op://` 参照 | 使われている環境変数名 |
+|---|---|
+| `Server/host` | `HOST` / `SSH_HOST` |
+| `Server/username` | `USERNAME` / `SSH_USERNAME` |
+| `Supabase/project-url` | `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_URL` |
+| `Supabase/publishable-key` | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_PUBLISHABLE_KEY` |
+
+各リポジトリのマニフェストで `scope=inherit` とし、`GH_NAME`列にorganization側の名前を書く。
+`scripts/generate-workflow-env-block.sh` が `HOST: ${{ secrets.SERVER_HOST }}` のように読み替えた
+`env:` ブロックを生成する。
+
+```
+# car-care の .github/secrets-manifest.tsv（抜粋）
+HOST	inherit	secret	SERVER_HOST	-
+DB_PASSWORD	inherit	secret	SHARED_DB_PASSWORD	-
+DB_NAME	repo	secret	DB_NAME	op://apps/Car/db-name
+```
+
+#### SSH鍵の参照が3通りに割れていた
+
+```
+op://apps/githubaction-sshkey/private_key?ssh-format=openssh   ← 13リポジトリ
+op://apps/githubaction-sshkey/private_key                       ← 1リポジトリ
+op://apps/githubaction-sshkey/PRIVATE_KEY                       ← 1リポジトリ
+```
+
+`?ssh-format=openssh` の有無で取得される形式が変わる。organizationへ寄せる際、多数派かつ
+issue-deckで実績のある **openssh 付きに統一**した。
+
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 
 `deploy.yml`・`release.yml`・`ci.yml`が使う値は、以前は実行のたびに1Passwordから取得していた。
