@@ -124,11 +124,10 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
   - **GitHub Actions実行（無人）**: ワークフロー終了と同時にdevサーバーも消えるため、実装エージェント
     自身が確認物を用意することはできない。この制約により、以前はPR作成自体をブロックして
     `00.check-user`を付与し停止していたが、`24.screenshot-required`と同様の理由（確認ゲートをPR作成前
-    ではなくdevelopへのマージ前に移す）で#813にてPR作成をブロックしない方式に変更した。#832で
-    Fly.io Machines上のプレビュー環境（#826・#830・#831）への接続が完了してからは、PR作成後に
-    `claude-issue-dispatch.yml`の`deploy-preview`ジョブが実装ブランチを実際にデプロイし、
-    `notify-preview-url`ジョブが実際に開けるプレビューURLを完了報告コメントとは別のコメントとして
-    Issueへ通知する（詳細はdocs/preview-environment.md参照）。developへの
+    ではなくdevelopへのマージ前に移す）で#813にてPR作成をブロックしない方式に変更した。一時期は#832でFly.io Machines上のプレビュー環境（#826・#830・#831）へ接続し、
+    無人実行から実際に開けるプレビューURLを通知していたが、#1265でサブPC上のローカルセッションが
+    `tailscale serve`でtailnetへ開発環境を出す方式へ移行したため、Fly.io側は#1308で廃止した。
+    現在は無人実行からプレビューURLを発行する経路は無い。developへの
     マージ前確認は後述の「developへのマージ前確認要否をIssueラベルでトグルする」の`risk-check`
     ジョブがゲートする。
 

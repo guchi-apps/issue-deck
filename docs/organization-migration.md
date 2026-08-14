@@ -185,7 +185,7 @@ archivedな大学系7件（thesis系・tyuujitu系）は個人の資産であり
 移行の心理的ハードルを下げるうえで重要なので、確認済みの範囲を明記しておく。
 
 - **VPSデプロイ**: `scp`でアーカイブを転送して`tar`展開する方式。`deploy.yml`・`deploy-preview.yml`・
-  `deploy/`・`Dockerfile`に対する`git clone|pull|remote|fetch`の検索ヒットは**0件**で、
+  `deploy/`・`Dockerfile`（後三者は#1308で廃止）に対する`git clone|pull|remote|fetch`の検索ヒットは**0件**で、
   VPS上にリポジトリのクローンが存在しない。ownerが変わっても何も起きない。
 - **アプリの本番コード**: ownerのハードコードなし。ownerはGitHub Appのインストール情報から取得して
   DB（`GithubInstallation.accountLogin` / `Repository.ownerLogin`）へ永続化し、各APIはそこから読む。

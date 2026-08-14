@@ -11,8 +11,10 @@ name: Claude Issue Dispatch (reusable)
 #   runtime-setup:   node-db(Next.js+DB) / node(Next.js) / minimal(素のJS)
 #   package-manager: npm(既定) / pnpm    ※issue-deckのみpnpm、他の全アプリはnpm
 #
-# プレビュー系ジョブ(deploy-preview / notify-preview-url)は、Fly.io設定がアプリ固有のため
-# ここには含めずcaller側に残す。必要な値は本ワークフローのoutputsとして公開する。
+# プレビュー系ジョブは、設定がアプリ固有のためここには含めずcaller側に残す。必要な値は
+# 本ワークフローのoutputs(preview_required・final_mode)として公開する。issue-deck自身の
+# Fly.ioプレビューは#1308で廃止したが、shopping-listなど自前のdeploy-preview.ymlを持つ
+# リポジトリがこれらのoutputsを使うため、outputs自体は残している。
 #
 # 既知の制約: services(MySQLコンテナ)はジョブ全体に紐づく仕様のため条件分岐できず、
 # runtime-setup: minimal のリポジトリでも起動する。解消にはジョブ分割が必要。
@@ -184,12 +186,11 @@ name: Claude Issue Dispatch (reusable)
 # この分離により、実測で全runの54%を占めていたmode=skipのrunが、concurrency枠もサービス
 # コンテナもactionのダウンロードも消費しなくなる。
 #
-# 上記3段に加え、23.preview-requiredが付いたissueをimplement/additionalモードで処理した場合に限り、
-# dispatch完了後に deploy-preview → notify-preview-url の2ジョブが動く(#832)。deploy-previewは
-# deploy-preview.yml(#831)をworkflow_callで呼び出し実装ブランチをFly.io Machines上へデプロイし、
-# notify-preview-urlがその結果(実URLまたは失敗)をIssueへ別コメントとして通知する。本番DBダンプ・
-# fly deployを含み数分かかるため、dispatchジョブ内のClaude Codeステップの完了報告とは非同期に
-# (完了後の別コメントとして)通知する構成にしている。詳細はdocs/preview-environment.md参照。
+# 上記3段に加え、caller側がプレビュー系ジョブを持つ場合は、23.preview-requiredが付いたissueを
+# implement/additionalモードで処理したときにdispatch完了後にそれらが動く(#832)。issue-deck自身の
+# Fly.ioプレビューは使われなくなったため#1308で廃止しており、issue-deckのcallerにこれらのジョブは
+# 無い。issue-deckの23.preview-requiredは、サブPC上のローカルセッションがtailscale serveで
+# tailnetへ開発環境を出す方式に移行した(#1265)。
 
 
 on:
@@ -632,7 +633,7 @@ jobs:
     concurrency:
       group: issue-dispatch-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}-${{ needs.triage.outputs.lane }}
       cancel-in-progress: false
-    # deploy-previewジョブ(#832)が、順番待ちの間にIssueの状態が変わってmode=skipへ倒された
+    # caller側のプレビュー系ジョブ(#832)が、順番待ちの間にIssueの状態が変わってmode=skipへ倒された
     # ケース(下記「triageの判定結果を引き継ぐ」ステップの陳腐化チェック参照)を判別するための
     # 出力。triageジョブのoutputs.modeは待機前の判定のままのため、これを見ずに待機後の値を
     # 使う必要がある。
