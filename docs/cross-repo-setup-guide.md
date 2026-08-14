@@ -1353,6 +1353,35 @@ scripts/check-local-session-contract.sh --all
 **8件すべて`npm`。** `pnpm`はissue-deck自身と`dayspan`だけで、これが#1147
 （許可ツールが`pnpm`固定だった不具合）が長く発覚しなかった理由でもある。
 
+## 付録: 4リポジトリの設定値一覧（#1011 Phase 6・#1379の実績）
+
+privateの3件（#1011）と、#1047の起票後に作られた`aide`（#1379）を追加した際の実績値。
+
+| リポジトリ | `runtime-setup` | `package-manager` | `node-version` | 決め手 |
+|---|---|---|---|---|
+| `clip-hive` | `node-db` | npm | `"20.19"` | `prisma/`あり |
+| `ops-dashboard` | **`node`** | npm | **`"22.23.1"`** | `prisma/`が無い。バージョンは`.nvmrc` |
+| `db-console` | `node-db` | npm | **`"22.23.1"`** | `prisma/`あり。バージョンは`.nvmrc` |
+| `aide` | `node` | npm | **`"24"`** | `prisma/`が無い。依存ゼロだが`npm ci`は要る |
+
+**`.nvmrc`を使うリポジトリでは、そこから手で写す。** CIは`node-version-file`で`.nvmrc`を読めるが、
+共有ワークフローは`node-version`入力しか見ない。`ops-dashboard`・`db-console`がこれに当たる。
+
+**依存ゼロでも`minimal`にはしない**（`aide`）。`minimal`は`npm ci`ごとスキップするため、
+`devDependencies`にしか無いTypeScriptが入らず`npm run typecheck`が通らなくなる。`minimal`が正しいのは
+`solitaire`のようにロックファイルすら無い場合と、`myroom`のようにルートの依存が空スタブの場合。
+
+### この4件で新しく出た差異
+
+| 観点 | 出たリポジトリ | 内容 |
+|---|---|---|
+| `postinstall`が環境変数を要求する | `db-console` | `prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、`npm ci`ごと落ちる。上記チェックリスト参照 |
+| ビルドがプレースホルダー環境変数を要求する | `db-console` | 素の`npm run build`が`/auth/callback`で`ERR_INVALID_URL`。CIと同じ値をAGENTS.mdへ書いた |
+| ブランチ命名が違う | `ops-dashboard` | `feature/<番号>-<説明>`。この命名では対象Issueを特定できず進捗が遷移しない |
+| デフォルトブランチが`main` | `db-console` | `develop`へ変更した。変更前に`develop...main`のファイル差分が空であることを実測する |
+| ラベルがGitHub既定のまま | `aide` | 旧世代の進捗ラベルすら無い。控える作業は不要で、既定ラベルは役割が重複するため削除した |
+| auto-merge・rulesetが無い | `aide` | 有効化と`protect develop`の作成が要る。必須チェックの名前はリポジトリのCIのジョブ名に合わせる |
+
 ### 検証コマンドの実績
 
 **「Next.jsなら`lint`・`typecheck`・`test`・`build`が揃っている」とは限らない。**
