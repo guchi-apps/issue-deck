@@ -5,7 +5,6 @@ import { type RefObject, useState, type ReactNode } from "react";
 import {
   Ban,
   Check,
-  GitMerge,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -18,9 +17,9 @@ import {
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
-import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import {
@@ -105,6 +104,10 @@ type CommentThreadProps = {
   isMergingPullRequest?: boolean;
   /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
   mergePullRequestError?: string | null;
+  /** trueの場合、対応PRはマージ済みとして扱う（画面上部のマージボタンから押された場合も含む・#1288） */
+  pullRequestMerged?: boolean;
+  /** この欄のマージボタンからマージが成功したときに呼ばれる（画面上部のマージボタンと状態を揃えるため） */
+  onPullRequestMerged?: () => void;
   /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
   targetCommentIndex?: number;
   /** targetCommentIndexが指すコメントの要素に設定するref */
@@ -190,6 +193,8 @@ function ApprovalActions({
   isRequestingPrFix,
   isMergingPullRequest,
   mergePullRequestError,
+  pullRequestMerged,
+  onPullRequestMerged,
   isFallbackNotice,
   mergeApprovalPending,
   pullRequestLink,
@@ -211,6 +216,8 @@ function ApprovalActions({
   isRequestingPrFix?: boolean;
   isMergingPullRequest?: boolean;
   mergePullRequestError?: string | null;
+  pullRequestMerged?: boolean;
+  onPullRequestMerged?: () => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   pullRequestLink?: PullRequestLink | null;
@@ -226,8 +233,11 @@ function ApprovalActions({
   const [prFixReason, setPrFixReason] = useState("");
   const [prFixValidationError, setPrFixValidationError] = useState<string | null>(null);
   const [isPrFixTextUploading, setIsPrFixTextUploading] = useState(false);
-  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
-  const [isMerged, setIsMerged] = useState(false);
+  // マージ済みかどうかは画面上部のマージボタン（#1288）と共有する。上部から押されたときは
+  // 親から`pullRequestMerged`で伝わり、この欄から押したときは`onPullRequestMerged`で親へ伝える。
+  // 親を持たない使い方でも表示が切り替わるよう、この欄の押下は自前の状態にも残す。
+  const [isMergedHere, setIsMergedHere] = useState(false);
+  const isMerged = isMergedHere || Boolean(pullRequestMerged);
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
   const prFixBusy = Boolean(isRequestingPrFix);
   const mergeBusy = Boolean(isMergingPullRequest);
@@ -275,11 +285,9 @@ function ApprovalActions({
     setPrFixValidationError(null);
   }
 
-  async function confirmMerge() {
-    if (!onMergePullRequest) return;
-    const ok = await onMergePullRequest();
-    setIsMergeConfirmOpen(false);
-    if (ok) setIsMerged(true);
+  function handleMerged() {
+    setIsMergedHere(true);
+    onPullRequestMerged?.();
   }
 
   if (mergeApprovalPending) {
@@ -309,40 +317,16 @@ function ApprovalActions({
           </GithubReferenceLink>
         )}
         {onMergePullRequest && (
-          <div className="mt-2 flex items-center gap-2">
-            <PullRequestCiStatusBadge status={pullRequestCiStatus ?? null} />
-            <Button
-              size="sm"
-              onClick={() => setIsMergeConfirmOpen(true)}
-              disabled={mergeBusy || isMerged || pullRequestCiStatus === "in_progress"}
-              // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
-              // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
-              // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
-              // やめ、色関連のみに絞ることで回避する。
-              className="transition-colors"
-            >
-              {mergeBusy ? <Loader2 className="animate-spin" /> : <GitMerge />}
-              {isMerged ? "マージ済み" : "マージする"}
-            </Button>
-
-            <AlertDialog open={isMergeConfirmOpen} onOpenChange={setIsMergeConfirmOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Pull Requestをマージしますか？</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {pullRequestLink ? `対応PR #${pullRequestLink.number}を` : "対応PRを"}
-                    マージコミットでdevelopへマージします。この操作は取り消せません。
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={mergeBusy}>キャンセル</AlertDialogCancel>
-                  <AlertDialogAction onClick={confirmMerge} disabled={mergeBusy}>
-                    マージする
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <IssueMergeButton
+            className="mt-2"
+            onMerge={onMergePullRequest}
+            onMerged={handleMerged}
+            pullRequestNumber={pullRequestLink?.number ?? null}
+            ciStatus={pullRequestCiStatus}
+            isMerging={mergeBusy}
+            isMerged={isMerged}
+            showCiStatus
+          />
         )}
         {onMergePullRequest && mergePullRequestError && (
           <p className="mt-1 text-sm text-destructive">{mergePullRequestError}</p>
@@ -491,6 +475,8 @@ export function CommentThread({
   isRequestingPrFix,
   isMergingPullRequest,
   mergePullRequestError,
+  pullRequestMerged,
+  onPullRequestMerged,
   targetCommentIndex,
   targetCommentRef,
   commentSummary,
@@ -535,6 +521,8 @@ export function CommentThread({
             isRequestingPrFix={isRequestingPrFix}
             isMergingPullRequest={isMergingPullRequest}
             mergePullRequestError={mergePullRequestError}
+            pullRequestMerged={pullRequestMerged}
+            onPullRequestMerged={onPullRequestMerged}
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}
@@ -747,6 +735,8 @@ export function CommentThread({
                   isRequestingPrFix={isRequestingPrFix}
                   isMergingPullRequest={isMergingPullRequest}
                   mergePullRequestError={mergePullRequestError}
+                  pullRequestMerged={pullRequestMerged}
+                  onPullRequestMerged={onPullRequestMerged}
                   isFallbackNotice={isFallbackNotice}
                   mergeApprovalPending={mergeApprovalPending}
                   pullRequestLink={pullRequestLink}
@@ -775,6 +765,8 @@ export function CommentThread({
           isRequestingPrFix={isRequestingPrFix}
           isMergingPullRequest={isMergingPullRequest}
           mergePullRequestError={mergePullRequestError}
+          pullRequestMerged={pullRequestMerged}
+          onPullRequestMerged={onPullRequestMerged}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
           pullRequestLink={pullRequestLink}
