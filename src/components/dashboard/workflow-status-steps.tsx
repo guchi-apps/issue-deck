@@ -22,7 +22,10 @@ type ProgressProps = {
   projectStatus?: string | null;
 };
 
-type WorkflowStatusStepsProps = ProgressProps;
+type WorkflowStatusStepsProps = ProgressProps & {
+  /** このIssueがどこで走っているか（#1262）。着手後もPC・スマホの詳細から実行先が分かるようにする */
+  executionTarget?: IssueExecutionTarget;
+};
 
 type WorkflowStepBadgeProps = ProgressProps & {
   /**
@@ -161,12 +164,22 @@ export function WorkflowStepBadge({
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
  */
-export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowStatusStepsProps) {
+export function WorkflowStatusSteps({
+  labels,
+  projectStatus = null,
+  executionTarget,
+}: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
   const currentStep = WORKFLOW_STEPS[currentIndex];
+  // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
+  // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
+  const targetLabel =
+    executionTarget && !executionTarget.expectsActionsRun
+      ? describeIssueExecutionTarget(executionTarget)
+      : null;
 
   return (
     <div>
@@ -228,10 +241,16 @@ export function WorkflowStatusSteps({ labels, projectStatus = null }: WorkflowSt
           })}
         </div>
       </div>
+      {targetLabel && (
+        <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground md:block">
+          {targetLabel}で実行中
+        </p>
+      )}
       <p className="mt-1.5 text-center text-[11px] md:hidden">
         <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
           {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
         </span>
+        {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
         {approvalPending && (
           <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
             ユーザー確認待ち

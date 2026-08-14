@@ -276,6 +276,27 @@ export function findDispatchJobForIssue(
   return byNewest.find((job) => isActiveDispatchJobStatus(job.status)) ?? byNewest[0];
 }
 
+/**
+ * 既定の実行先を決める（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
+ *
+ * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばし、
+ * 1つも無ければ`null`＝GitHub Actionsを返す。判定は`resolveDispatchTargetRejection`と同じものを
+ * 使う。**ボタンの文言とダイアログの既定選択が別々に決まると、押す前に見えていた実行先と
+ * 実際に起動する先がずれる。**
+ */
+export function resolveDefaultDispatchHost(params: {
+  hosts: readonly DispatchHostView[];
+  repositoryFullName: string;
+  hasActiveJob: boolean;
+}): string | null {
+  const { hosts, repositoryFullName, hasActiveJob } = params;
+  return (
+    hosts.find(
+      (host) => resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob }) === null,
+    )?.name ?? null
+  );
+}
+
 /** 起動が届かなかったジョブに残す理由（timeoutの内訳） */
 export function describeDispatchTimeout(status: "CLAIMED" | "RUNNING"): string {
   return status === "CLAIMED"

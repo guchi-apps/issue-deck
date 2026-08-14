@@ -85,7 +85,13 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   } as Issue;
 }
 
-function renderDialog(props: { includeDispatchTargets?: boolean; issue?: Issue } = {}) {
+function renderDialog(
+  props: {
+    includeDispatchTargets?: boolean;
+    issue?: Issue;
+    actionsDisabledReason?: string | null;
+  } = {},
+) {
   return render(
     <StartImplementationDialog
       issue={props.issue ?? makeIssue()}
@@ -94,6 +100,7 @@ function renderDialog(props: { includeDispatchTargets?: boolean; issue?: Issue }
       open
       onOpenChange={vi.fn()}
       includeDispatchTargets={props.includeDispatchTargets}
+      actionsDisabledReason={props.actionsDisabledReason ?? null}
     />,
   );
 }
@@ -136,14 +143,50 @@ describe("StartImplementationDialog", () => {
     expect(screen.queryByText("実行先")).toBeNull();
   });
 
-  it("申告があれば実行先を選べ、既定はGitHub Actionsのまま", () => {
+  it("申告があれば実行先を選べ、既定はサブPC（#1262）", () => {
     dispatchState.hosts = [makeHost()];
+    renderDialog({ includeDispatchTargets: true });
+
+    expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+  });
+
+  it("選べるホストが無ければ既定はGitHub Actionsへ落ちる（#1262）", () => {
+    dispatchState.hosts = [makeHost({ online: false })];
     renderDialog({ includeDispatchTargets: true });
 
     expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
-    expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("Actionsが使えないリポジトリでも、トリガーは押せてサブPCで開始できる（#1262）", async () => {
+    dispatchState.hosts = [makeHost()];
+    renderDialog({
+      includeDispatchTargets: true,
+      actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
+    });
+
+    // Actionsの選択肢だけが落ち、既定のサブPCでそのまま開始できる
+    expect((screen.getByRole("radio", { name: /GitHub Actions/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    clickStart();
+
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("Actionsを選んでいて使えない場合は開始できず、理由を出す（#1262）", () => {
+    renderDialog({
+      includeDispatchTargets: true,
+      actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
+    });
+
+    expect(screen.getByText("issue-deckの自動化workflowが見つかりません")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("サブPCを選ぶとジョブを積み、11.localを付け、@claudeコメントは投稿しない", async () => {

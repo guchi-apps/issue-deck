@@ -47,6 +47,13 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
+import {
+  findDispatchJobForIssue,
+  isActiveDispatchJobStatus,
+  resolveDefaultDispatchHost,
+} from "@/lib/dispatch/dispatch-job";
+import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -160,9 +167,31 @@ export function MobileIssueDetail({
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
-  const startDisabledReason = startImplementationDisabledReason(
+  // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
+  // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
+  const actionsDisabledReason = startImplementationDisabledReason(
     repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
   );
+  // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
+  const dispatch = useDispatchState(true);
+  const dispatchJob = findDispatchJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const defaultDispatchHost = resolveDefaultDispatchHost({
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+  });
+  const startLabel = defaultDispatchHost ? `${defaultDispatchHost}で開始` : "GitHub Actionsで開始";
+  const executionTarget = resolveIssueExecutionTarget({
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+    labels: issue.labels,
+    jobs: dispatch.jobs,
+    sessions: dispatch.sessions,
+  });
   const {
     createComment,
     updateComment,
@@ -432,12 +461,14 @@ export function MobileIssueDetail({
             /* スマホではヘッダーに置けるのがこの▶だけなので、実行先（GitHub Actions／
                サブPC）もここで選ばせる（#1248） */
             includeDispatchTargets
+            dispatch={dispatch}
+            actionsDisabledReason={actionsDisabledReason}
             renderTrigger={(isSubmitting) => (
               <button
                 type="button"
-                disabled={isSubmitting || startDisabledReason !== null}
-                aria-label="実装を開始"
-                title={startDisabledReason ?? undefined}
+                disabled={isSubmitting}
+                aria-label={startLabel}
+                title={startLabel}
                 className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
               >
                 {isSubmitting ? (
@@ -629,7 +660,11 @@ export function MobileIssueDetail({
           <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
         </div>
 
-        <WorkflowStatusSteps labels={issue.labels} projectStatus={issue.projectStatus} />
+        <WorkflowStatusSteps
+          labels={issue.labels}
+          projectStatus={issue.projectStatus}
+          executionTarget={executionTarget}
+        />
         <div className="flex flex-wrap items-center gap-2">
           {qaAnswerPending && (
             <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -755,14 +790,12 @@ export function MobileIssueDetail({
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
             includeDispatchTargets
+            dispatch={dispatch}
+            actionsDisabledReason={actionsDisabledReason}
             renderTrigger={(isSubmitting) => (
-              <Button
-                className="w-full"
-                disabled={isSubmitting || startDisabledReason !== null}
-                title={startDisabledReason ?? undefined}
-              >
+              <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                実装を開始
+                {startLabel}
               </Button>
             )}
           />
@@ -781,6 +814,7 @@ export function MobileIssueDetail({
           }
           includeLocalTarget={false}
           fullWidth
+          dispatch={dispatch}
         />
 
         <div>

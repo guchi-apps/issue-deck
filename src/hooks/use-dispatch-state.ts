@@ -47,6 +47,13 @@ async function readErrorMessage(res: Response): Promise<string> {
   return json.message ?? `リクエストに失敗しました (${res.status})`;
 }
 
+/**
+ * `useDispatchState`の戻り値。**同じ画面で複数のコンポーネントが必要とする場合は、
+ * 親で1回だけ呼んでこの型で配る**（#1262）。取得口を増やすと同じ画面のためにポーリングが
+ * 何本も走る。
+ */
+export type DispatchStateHandle = ReturnType<typeof useDispatchState>;
+
 export function useDispatchState(enabled: boolean) {
   const [state, setState] = useState<DispatchState | null>(null);
   const [error, setError] = useState<string | null>(null);

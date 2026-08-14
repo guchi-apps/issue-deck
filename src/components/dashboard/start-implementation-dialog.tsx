@@ -17,7 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
@@ -25,6 +25,7 @@ import {
   describeDispatchEnqueueRejection,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
+  resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
   type DispatchEnqueueRejection,
   type DispatchHostView,
@@ -62,6 +63,18 @@ type StartImplementationDialogProps = {
    * GitHub Actionsだけになるため）。
    */
   includeDispatchTargets?: boolean;
+  /**
+   * 親が既に取得しているディスパッチ状態（#1262）。渡すとこのダイアログは自前で取得しない。
+   * **同じ画面に取得口を増やさないため**、Issue詳細では親で1回だけ取得して配る。
+   */
+  dispatch?: DispatchStateHandle;
+  /**
+   * GitHub Actionsを実行先として選べない理由（`claude-issue-dispatch.yml`が無い等・#976）。
+   *
+   * **トリガーボタンごと無効化してはいけない**（#1262）。実行先の選択がこのダイアログの中に
+   * ある以上、押せないとサブPCでの起動まで塞がる。ここへ渡してActionsの選択肢だけを落とす。
+   */
+  actionsDisabledReason?: string | null;
 };
 
 /**
@@ -92,12 +105,19 @@ export function StartImplementationDialog({
   open: openProp,
   onOpenChange: onOpenChangeProp,
   includeDispatchTargets,
+  dispatch: injectedDispatch,
+  actionsDisabledReason = null,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const [options, setOptions] = useState(START_IMPLEMENTATION_DEFAULT_OPTIONS);
-  /** 起動先のホスト名。`null`はGitHub Actions（既定） */
-  const [targetHost, setTargetHost] = useState<string | null>(null);
+  /**
+   * 起動先のホスト名。`null`はGitHub Actions、`undefined`は**まだ選んでいない**（既定に従う）。
+   *
+   * 既定を`null`（Actions）で持たないのは、**開いた時点ではホストの一覧がまだ届いていない**
+   * ことがあるため。「未選択」を別の値にしておけば、届いた時点で既定がサブPCへ寄る（#1262）。
+   */
+  const [targetHost, setTargetHost] = useState<string | null | undefined>(undefined);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
   const {
     createComment,
@@ -105,8 +125,12 @@ export function StartImplementationDialog({
     error: commentMutationError,
   } = useIssueCommentMutations();
   const { setProgressStatus } = useProgressStatusMutation();
-  // 開いている間だけ取得する。閉じているダイアログのためにポーリングを増やさない
-  const dispatch = useDispatchState(includeDispatchTargets === true && open);
+  // 開いている間だけ取得する。閉じているダイアログのためにポーリングを増やさない。
+  // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
+  const ownDispatch = useDispatchState(
+    injectedDispatch === undefined && includeDispatchTargets === true && open,
+  );
+  const dispatch = injectedDispatch ?? ownDispatch;
   const isSubmitting = isUpdatingIssue || isCreatingComment || dispatch.isSubmitting;
   const error = labelMutationError ?? commentMutationError ?? dispatch.error;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
@@ -123,24 +147,41 @@ export function StartImplementationDialog({
     // を経由しないため、この効果で同期する。open自体の変化にのみ紐づく一度きりの処理であり、
     // ループや連鎖的な再レンダリングは発生しない。
     setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current));
-    // 実行先は前回の選択を持ち越さない。既定（GitHub Actions）から選び直させる
-    setTargetHost(null);
+    // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
+    setTargetHost(undefined);
   }, [open]);
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
   // 申告しているホストが無ければ選択欄ごと出さない（選択肢がGitHub Actionsだけになる）
   const showTargets = includeDispatchTargets === true && dispatch.hosts.length > 0;
-  const selectedHost = targetHost
-    ? (dispatch.hosts.find((host) => host.name === targetHost) ?? null)
+  /**
+   * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
+   * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばす。
+   */
+  const defaultTargetHost = showTargets
+    ? resolveDefaultDispatchHost({
+        hosts: dispatch.hosts,
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob,
+      })
     : null;
-  const selectedRejection: DispatchEnqueueRejection | null = targetHost
+  const effectiveTargetHost = targetHost === undefined ? defaultTargetHost : targetHost;
+
+  const selectedHost = effectiveTargetHost
+    ? (dispatch.hosts.find((host) => host.name === effectiveTargetHost) ?? null)
+    : null;
+  const selectedRejection: DispatchEnqueueRejection | null = effectiveTargetHost
     ? resolveDispatchTargetRejection({
         host: selectedHost,
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob,
       })
     : null;
+  // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
+  // **トリガーではなくここで止める**（#1262）
+  const blockedReason =
+    effectiveTargetHost === null ? actionsDisabledReason : null;
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -232,8 +273,8 @@ export function StartImplementationDialog({
     const currentIssue = await applyOptionLabels();
     if (!currentIssue) return;
 
-    if (targetHost) {
-      await startOnHost(currentIssue, targetHost);
+    if (effectiveTargetHost) {
+      await startOnHost(currentIssue, effectiveTargetHost);
       return;
     }
     await startOnActions(currentIssue);
@@ -269,8 +310,9 @@ export function StartImplementationDialog({
             <StartTargetOption
               icon={<Cloud className="size-3.5" />}
               name="GitHub Actions"
-              description="無人実行のワークフローを起動します"
-              selected={targetHost === null}
+              description={actionsDisabledReason ?? "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）"}
+              selected={effectiveTargetHost === null}
+              disabled={actionsDisabledReason !== null}
               onSelect={() => setTargetHost(null)}
             />
             {dispatch.hosts.map((host) => (
@@ -279,20 +321,24 @@ export function StartImplementationDialog({
                 host={host}
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
-                selected={targetHost === host.name}
+                selected={effectiveTargetHost === host.name}
                 onSelect={() => setTargetHost(host.name)}
               />
             ))}
           </div>
         )}
         <ApiErrorMessage message={error} />
+        {blockedReason && <p className="text-sm text-destructive">{blockedReason}</p>}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={isSubmitting}>
               キャンセル
             </Button>
           </DialogClose>
-          <Button onClick={handleStart} disabled={isSubmitting || selectedRejection !== null}>
+          <Button
+            onClick={handleStart}
+            disabled={isSubmitting || selectedRejection !== null || blockedReason !== null}
+          >
             開始する
           </Button>
         </DialogFooter>
