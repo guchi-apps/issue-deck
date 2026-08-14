@@ -472,6 +472,7 @@ export function IssueDetail({
                   actionsDisabledReason={actionsDisabledReason}
                   comments={comments}
                   localSessionCommand={localSessionCommand}
+                  subIssueRelations={subIssueRelations}
                   renderTrigger={(isSubmitting) => (
                     <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}

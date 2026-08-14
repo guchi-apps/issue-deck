@@ -25,6 +25,22 @@ import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.g
 const PROVIDED_BY_SESSION = "（貼り付け先のセッションで用意してください）";
 
 /**
+ * 並行状況（#1267）。**ブラウザからはgitもghも叩けない**ので、ここでは埋められない。
+ * 黙って空にすると「並行しているものは無い」と読まれるため、取得していないことを明示する。
+ */
+const CONCURRENT_WORK_UNAVAILABLE = [
+  "（この文面はブラウザからコピーされたものなので、並行状況は取得できていません）",
+  "",
+  "着手前に自分で確認してください。",
+  "",
+  "```bash",
+  "git fetch origin && git log --oneline -5 origin/develop   # developの先端",
+  "gh pr list --repo {{REPOSITORY}} --base develop --state open   # 未マージPR",
+  "tmux list-sessions   # 同じホストで走っている他セッション",
+  "```",
+].join("\n");
+
+/**
  * 冒頭に足す但し書き。テンプレート本体は「ランチャーが起動した」前提で書かれているため、
  * **何が済んでいて何が済んでいないか**をここで明示しないと、worktreeが既にあるものとして
  * 進んでしまう。
@@ -79,6 +95,23 @@ function formatComments(
     .join("\n\n");
 }
 
+/**
+ * 親子Issueの一覧（#1267）。**子Issueを起こしたときに親の背景が丸ごと落ちる**のを防ぐ。
+ * 取得できていない場合は、無いのか取っていないのかが分かる文言にする。
+ */
+function formatRelations(
+  relations: readonly { number: number; title: string; state: string; relation: "parent" | "sub" }[] | undefined,
+): string {
+  if (relations === undefined) return "（この経路では取得していません）";
+  if (relations.length === 0) return "(親子関係のあるIssueはありません)";
+  return relations
+    .map(
+      (relation) =>
+        `- ${relation.relation === "parent" ? "親" : "子"}: #${relation.number} ${relation.title}（${relation.state}）`,
+    )
+    .join("\n");
+}
+
 export function buildImplementationPrompt(params: {
   repositoryFullName: string;
   issueNumber: number;
@@ -86,8 +119,10 @@ export function buildImplementationPrompt(params: {
   body: string | null;
   labels: readonly { name: string }[];
   comments: readonly { author: { login: string }; createdAtLabel: string; body: string }[];
+  /** 親子Issue（#1267）。省略すると「取得していません」と出す */
+  relations?: readonly { number: number; title: string; state: string; relation: "parent" | "sub" }[];
 }): string {
-  const { repositoryFullName, issueNumber, title, body, labels, comments } = params;
+  const { repositoryFullName, issueNumber, title, body, labels, comments, relations } = params;
   const labelNames = new Set(labels.map((label) => label.name));
 
   const replacements: Record<string, string> = {
@@ -97,6 +132,10 @@ export function buildImplementationPrompt(params: {
     "{{ISSUE_LABELS}}": [...labelNames].sort().join(", ") || "(なし)",
     "{{ISSUE_BODY}}": body?.trim() ? body : "(本文なし)",
     "{{ISSUE_COMMENTS}}": formatComments(comments),
+    "{{ISSUE_RELATIONS}}": formatRelations(relations),
+    "{{CONCURRENT_WORK}}": CONCURRENT_WORK_UNAVAILABLE.split("{{REPOSITORY}}").join(
+      repositoryFullName,
+    ),
     "{{WORKTREE_DIR}}": PROVIDED_BY_SESSION,
     "{{BASE_BRANCH}}": PROVIDED_BY_SESSION,
     "{{PACKAGE_MANAGER}}": PROVIDED_BY_SESSION,

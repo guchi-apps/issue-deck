@@ -109,3 +109,38 @@ describe("buildImplementationPrompt", () => {
     ).toContain("11.local, 51.improvement");
   });
 });
+
+describe("並行状況と親子Issue（#1267）", () => {
+  it("親子を渡さなければ「取得していません」と出す（無いのか取っていないのかを区別する）", () => {
+    expect(buildImplementationPrompt(BASE)).toContain("（この経路では取得していません）");
+  });
+
+  it("親子が空配列なら「ありません」と出す", () => {
+    expect(buildImplementationPrompt({ ...BASE, relations: [] })).toContain(
+      "(親子関係のあるIssueはありません)",
+    );
+  });
+
+  it("親と子を並べる", () => {
+    const prompt = buildImplementationPrompt({
+      ...BASE,
+      relations: [
+        { number: 1261, title: "親のタイトル", state: "open", relation: "parent" },
+        { number: 1268, title: "子のタイトル", state: "closed", relation: "sub" },
+      ],
+    });
+    expect(prompt).toContain("- 親: #1261 親のタイトル（open）");
+    expect(prompt).toContain("- 子: #1268 子のタイトル（closed）");
+  });
+
+  // ブラウザからはgitもghも叩けない。黙って空にすると「並行しているものは無い」と読まれる
+  it("並行状況は取得できない旨と、自分で確認するコマンドを出す", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).toContain("並行状況は取得できていません");
+    expect(prompt).toContain("gh pr list --repo guchi-apps/issue-deck");
+  });
+
+  it("画像はWebFetchで読むよう促す", () => {
+    expect(buildImplementationPrompt(BASE)).toContain("`WebFetch`でそのURLを読んでください");
+  });
+});

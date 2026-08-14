@@ -18,9 +18,27 @@ export const GENERIC_IMPLEMENTATION_AGENT_TEMPLATE = `あなたは\`{{REPOSITORY
 
 {{ISSUE_BODY}}
 
+### 関連するIssue
+
+{{ISSUE_RELATIONS}}
+
 ### 既存コメント
 
 {{ISSUE_COMMENTS}}
+
+### 本文・コメントに画像が貼られている場合
+
+issue-deckから貼られた画像は\`.../api/issues/images/<UUID>\`形式のURLになっています。**この文面には
+画像そのものは含まれていません。** 不具合の再現画面やデザイン案など、内容の理解に画像が要ると
+判断した場合は\`WebFetch\`でそのURLを読んでください（認証は不要です）。
+
+### 並行して動いているもの
+
+{{CONCURRENT_WORK}}
+
+**計画・着手・PR作成の前に必ず目を通してください。** 他のセッションのマージで前提が無効になる
+ことが実際に起きています（[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）。
+同じ領域を触っている作業があれば、衝突する前に方針を調整するかIssueコメントで相談します。
 
 ## 作業環境
 

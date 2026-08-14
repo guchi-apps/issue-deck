@@ -475,6 +475,7 @@ export function MobileIssueDetail({
             dispatch={dispatch}
             actionsDisabledReason={actionsDisabledReason}
             comments={comments}
+            subIssueRelations={subIssueRelations}
             /* `localSessionCommand`は渡さない。ターミナルへ貼るためのものなので、
                スマホでコピーできても貼る先が無い（#1263） */
             renderTrigger={(isSubmitting) => (
@@ -808,6 +809,7 @@ export function MobileIssueDetail({
             dispatch={dispatch}
             actionsDisabledReason={actionsDisabledReason}
             comments={comments}
+            subIssueRelations={subIssueRelations}
             renderTrigger={(isSubmitting) => (
               <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
