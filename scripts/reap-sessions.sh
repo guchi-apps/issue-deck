@@ -159,8 +159,14 @@ reap_one() {
   event_name="${BASH_REMATCH[2]}"
 
   # `permission_prompt`が最後なら、承認プロンプト・AskUserQuestionを出したまま人を待っている。
+  # `working`なら、その入力に答えて作業へ戻ったまま応答が終わっていない（#1357）。
+  # **どちらも畳まない**（`Stop`以外は畳まない、が判定の本体）。
   if [[ "$event_name" != "Stop" ]]; then
-    hold "$session" "人の入力待ち（最後のイベントが $event_name）"
+    if [[ "$event_name" == "working" ]]; then
+      hold "$session" "入力に答えて作業中（応答終了の記録がまだ無い）"
+    else
+      hold "$session" "人の入力待ち（最後のイベントが $event_name）"
+    fi
     return 0
   fi
 

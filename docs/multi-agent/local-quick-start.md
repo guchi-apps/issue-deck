@@ -508,7 +508,7 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 | ファイル | 書く人 | 中身 |
 | --- | --- | --- |
 | `<セッション名>.session` | `run-issue-session.sh`（起動時） | worktreeの場所・対応Issue・`reapable` |
-| `<セッション名>.event` | `session-notify.sh`（フック） | `<epoch> <Stop\|permission_prompt>` |
+| `<セッション名>.event` | `session-notify.sh`（フック） | `<epoch> <Stop\|permission_prompt\|working>` |
 
 **キーをtmuxのセッション名にする。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られる。
@@ -518,7 +518,7 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 | --- | --- | --- |
 | 1 | 記述子があり`reapable=1` | ジョブとして起動したセッションだけを対象にする。手元のターミナルから直接起動した分・他リポジトリの作業用セッションは記述子が無い |
 | 2 | ペインが生きている | 死んだペインは`remain-on-exit failed`が残した異常終了の証拠。最後の出力を読めるうちは消さない |
-| 3 | 最後のイベントが`Stop` | `permission_prompt`が後なら承認プロンプト・`AskUserQuestion`の表示中＝人の入力待ち |
+| 3 | 最後のイベントが`Stop` | `permission_prompt`が後なら承認プロンプト・`AskUserQuestion`の表示中＝人の入力待ち。`working`が後ならそれに答えて作業へ戻ったところ（#1357） |
 | 4 | その`Stop`から`SESSION_IDLE_MINUTES`以上 | **`Stop`＝作業完了ではない。** レビュー結果待ち・追加指示での再開も`Stop`を出す |
 | 5 | Issueに`11.local`が付いていない | 実装エージェントが引き渡し時に自分で外すラベル。付いている間はローカルで作業中 |
 | 6 | IssueがCLOSED、または`issue-<番号>`のPRがマージ済み | 成果物が本流に入っていない |

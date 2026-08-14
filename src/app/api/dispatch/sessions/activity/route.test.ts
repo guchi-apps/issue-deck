@@ -65,6 +65,23 @@ describe("POST /api/dispatch/sessions/activity", () => {
     expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
   });
 
+  // #1357。承認に答えて作業へ戻ったことの報告。**`00.check-user`には触らない**
+  // （外してよいかの判断は`Stop`のときだけホスト側が持つ）
+  it("作業再開の報告を受け付ける", async () => {
+    const res = await POST(
+      postRequest({ ...target, activity: "working" }, "Bearer secret-value"),
+    );
+    expect(res.status).toBe(200);
+    expect(recordDispatchSessionActivity).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1342,
+      activity: "WORKING",
+      remoteControlUrl: null,
+      previewUrl: null,
+    });
+    expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
+  });
+
   /**
    * #1342。**外してよいかの判断はホスト側（`.plan`の印）が持つ。** `Stop`はturnごとに飛ぶため、
    * 受け口が勝手に外すと人が別の理由で付けた`00.check-user`まで落ちる。

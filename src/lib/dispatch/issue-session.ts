@@ -60,7 +60,8 @@ export function findSessionForIssue(
  *
  * **`WAITING_INPUT`が意味を持つのは`ALIVE`の間だけ。** セッションが落ちれば入力を待つ相手が
  * いないので、状態の方を優先する。これが「古い入力待ちが残り続けない」ことの担保になっている
- * （もう一方の担保は`Stop`フックによる`RESPONDED`への遷移）。
+ * （残りの担保は`PostToolUse`フックによる`WORKING`への遷移＝#1357と、`Stop`フックによる
+ * `RESPONDED`への遷移）。
  */
 export function summarizeIssueSession(session: DispatchSessionView): IssueSessionSummary {
   const base = {
@@ -101,6 +102,17 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       tone: "waiting",
       label: `${session.host}のセッションが入力を待っています`,
       detail: "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
+    };
+  }
+  // 承認プロンプトに答えて作業へ戻った直後（#1357）。**`RESPONDED`と混ぜない。**
+  // 混ぜると「応答を終えています」と出て、実際には走っているセッションを終わったように見せる。
+  if (session.activity === "WORKING") {
+    return {
+      ...base,
+      at: session.activityAt ?? session.lastReportedAt,
+      tone: "running",
+      label: `${session.host}のセッションが作業中です`,
+      detail: "直前の入力に答えたあと、作業を続けています",
     };
   }
   if (session.activity === "RESPONDED") {
