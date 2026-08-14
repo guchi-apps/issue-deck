@@ -78,6 +78,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
+- **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
+  ラベル・担当者と並ぶ位置にあり
+  （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
+  PCの常時表示パネルと狭い画面の「プロパティ」シートが同じコンポーネントを使う）、
+  `POST /api/issues/progress-status`へ投げる。**この経路は実行を起動しない。**
+  GitHub Projectsのカンバンでカードをドラッグした場合と違い、書くのがissue-deck自身の
+  GitHub Appで、かつ`reportProgressStatus`がDBキャッシュを同時に更新するため、
+  `projects_v2_item` Webhookを受けた`maybeDispatchFromProjectStatus`が`isOwnAppSender`と
+  「遷移前後が同じ」の両方で止まる。実装の起動は「実装を開始」ボタンに一本化したままにしている
+  （プルダウンの選択だけで無人実行が始まると誤操作の影響が大きいため）。
+  失敗理由の日本語化は[`lib/progress-report-message.ts`](../src/lib/progress-report-message.ts)に
+  切り出してある（`lib/github/report-progress.ts`は`db`込みでクライアントからimportできない）。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
@@ -96,6 +108,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
   `hooks/use-pull-requests.ts`）。
+- **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
+  1回だけ取得する**（#1389）。件数を出すのは「処理中のPR」「完了したPR」だけで、
+  **「全てのPR」には出さない**（母集団が`scope`＝「openだけか、直近のクローズ済みまで含むか」に
+  依存し、「全PR数」として読める数にならないため）。件数は
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
+  数え、渡すのは一覧と同じ母集団（マージ済みで伏せたPRとリポジトリ絞り込みを適用し、状態別
+  ビューは適用する前）にする。取得前は0ではなく件数そのものを出さない。
+  取得コストを増やさないため、PRペインを開いていない間の`scope`は`open`に固定し（既定の
+  `prview`が`all`のため、そのまま渡すと毎回クローズ済みまで取りに行ってしまう）、
+  **一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の部分集合なので、
+  狭める向きで取り直すのは消費にしかならない）。
 - **左メニューのPR項目は状態別の3ビューで、母集団を決めるのは「全てのPR」だけ**（#1312）。
   ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
@@ -170,7 +193,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
   **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
   受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
-  `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
+  `expireStaleDispatchJobs`が掃く遅延評価。**セッション本数の上限（#1361）で待っていることは、
+  pollerが申告する`maxSessions`/`liveSessions`から画面に出す**（#1394。文言は
+  `lib/dispatch/queue-summary.ts`。**割り当ての判定はpoller側のままで、issue-deckは表示にしか
+  使わない**）。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
@@ -193,6 +219,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
   黙って素通りする。** 設計は
   [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
+- **エージェントの出力を日本語に揃える指示は、起動フラグとプロンプト本文の二層で持つ**（#1395）。
+  文面の正は`scripts/lib/agent-language.sh`で、`run-issue-session.sh`・`start-reviewer.sh`が
+  `--append-system-prompt`で渡す。そこを通らない無人実行のために、同じ文面を`.github/prompts/`・
+  `scripts/prompts/`の「## 出力言語」にも置いている。**片方だけ変えない。** 設計は
+  [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)。
 - **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
   作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
   `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、

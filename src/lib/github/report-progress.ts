@@ -9,6 +9,7 @@ import {
   type ProjectStatusField,
 } from "@/lib/github/projects-api";
 import { getProgressStatusDef, type ProgressStatusKey } from "@/lib/issue-progress";
+import type { ProgressReportFailureReason } from "@/lib/progress-report-message";
 
 /**
  * 進捗の変化をGitHub Projects v2のStatusへ反映する（#991 Phase 2）。
@@ -19,21 +20,14 @@ import { getProgressStatusDef, type ProgressStatusKey } from "@/lib/issue-progre
  * docs/progress-status-architecture.md。
  */
 
-/** 報告の結果。呼び出し側は失敗しても処理を止めない前提のため、理由を返して判断材料にする */
+/**
+ * 報告の結果。呼び出し側は失敗しても処理を止めない前提のため、理由を返して判断材料にする。
+ * 理由ごとの意味と画面表示用の日本語は`@/lib/progress-report-message`にある
+ * （画面から呼ぶ経路がこのモジュール＝`db`込みをimportせずに済むよう分けている）。
+ */
 export type ProgressReportResult =
   | { applied: true; from: string | null; to: string }
-  /** PROJECT_V2_OWNER・PROJECT_V2_NUMBERが未設定でProject連携そのものを行わない */
-  | { applied: false; reason: "project_disabled" }
-  /** issue-deckが接続していないリポジトリ */
-  | { applied: false; reason: "unknown_repository" }
-  /** ProjectにStatusフィールド（単一選択）が無い、または対象の選択肢が無い */
-  | { applied: false; reason: "unknown_status" }
-  /** GitHub上にIssueが無い（削除・移動済み）か、Projectへの追加に失敗した */
-  | { applied: false; reason: "not_in_project" }
-  /** closedなIssueを`Done`より手前へ巻き戻す報告だったため書かなかった（#1348） */
-  | { applied: false; reason: "issue_closed" }
-  /** 既に同じStatusだったため書き込まなかった */
-  | { applied: false; reason: "unchanged" };
+  | { applied: false; reason: ProgressReportFailureReason };
 
 /**
  * Statusフィールドのid群のキャッシュ。Projectの選択肢を編集しない限り不変だが、

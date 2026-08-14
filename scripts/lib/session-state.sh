@@ -100,7 +100,12 @@ session_state_field() {
   return 1
 }
 
-# フックのイベント（`Stop` / `permission_prompt`）を記録する。毎回上書きし、最後の1件だけを残す。
+# フックのイベント（`Stop` / `permission_prompt` / `working`）を記録する。
+# 毎回上書きし、最後の1件だけを残す。
+#
+# `working`は「入力待ちに人が答えて作業へ戻った」（#1357）。**記録すること自体が間引きの要**で、
+# `session-notify.sh`は`permission_prompt`が残っている`PostToolUse`だけを扱うため、1回書いた
+# 時点で以降のツール実行では何もしなくなる。
 session_state_record_event() {
   local session="$1" event="$2" file content
   file="$(session_state_event_file "$session")" || return 1

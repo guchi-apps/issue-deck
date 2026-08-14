@@ -10,6 +10,12 @@
 
 コミットメッセージ・PRタイトル・PR本文・issueコメントを日本語で書くこと、コミットのAuthorを`Claude Code <claude-code@example.com>`にすること、ラベルの付け替え手順といった作業手順レベルの規約は、各ワークフローのプロンプト（`.github/workflows/claude-issue-dispatch.yml`・`.github/workflows/claude-review-develop.yml`）とローカルセッション用のプロンプト（`scripts/prompts/`）に記載している。ここには、それらに含まれていない横断的な判断基準のみを記載する。
 
+### 出力言語
+
+エージェントの出力は日本語で書く。対象は成果物（コミットメッセージ・PR・Issueコメント）だけでなく、**応答本文・作業の要約・TODO・提示する計画・ツール実行時の説明といった画面に出る文章も含む**。コード・識別子・ファイルパス・コマンド・設定値・ログやエラーメッセージの引用は原文（英語）のままでよい。
+
+指示文の正は`scripts/lib/agent-language.sh`にあり、ローカルセッションは起動時に`--append-system-prompt`で受け取る（`scripts/run-issue-session.sh`・`scripts/start-reviewer.sh`）。無人実行はそこを通らないため、同じ文面を各プロンプトの「## 出力言語」にも置いている（`.github/prompts/`・`scripts/prompts/`）。**文面を変えるときは両方を揃える**（#1395、[docs/multi-agent/prompts-and-models.md](docs/multi-agent/prompts-and-models.md)）。
+
 ### 依存関係の追加
 
 新しい依存関係（パッケージ・ライブラリ・ツール）を追加する前には、必ずユーザーに確認を取る。`package.json`への追記や`pnpm add`等の実行は、確認が取れてから行う。
@@ -53,6 +59,7 @@ GitHub Actions上の無人実行では、その場で確認を取る相手がい
 - 実装中に得た知見は、次の基準で置き場所を分ける。**迷った場合はアプリ固有として扱う。**
   - **アプリ固有**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに依存する）→ 実装PRに同梱して`docs/`または`CLAUDE.md`へ書く。
   - **全アプリ共通**（対象リポジトリを差し替えても内容が成立し、数週間以上有効で、根拠を示せる）→ 共有知識リポジトリへ直接書かず、対応Issueへ「追加提案」コメントを投稿するにとどめる。
+- ローカルセッションのメモリ（`~/.claude/projects/<slug>/memory/`）は機体ローカルで、メインPC・サブPC間で同期されず、GitHub Actionsの無人実行には存在しない。恒久的に価値がある内容は上の基準で昇格させる（判断基準は [docs/multi-agent/personal-config-sync.md](docs/multi-agent/personal-config-sync.md)「メモリを同期せず『昇格』させる」）。
 - 提案コメントの書式・審査の4観点（再利用性・正確性・重複・恒久性）・反映までの流れは [docs/shared-knowledge.md](docs/shared-knowledge.md) の「9. 共有知識更新フロー」を参照。承認された提案のみ、`.github/workflows/shared-knowledge-propose.yml`が共有知識リポジトリへのPull Requestに変換し、最終的なマージは人間が行う。
 - シークレットの実値・個人情報・一時的な障害情報は、アプリ固有・共通のいずれにも記録しない。
 
@@ -108,7 +115,7 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 6. `Release` — mainへPR作成・マージ中
 7. `Done` — mainへマージ完了。**この時点でissueをclose**する
 
-Statusを進めるのはissue-deckだけで、各ワークフロー・ローカルセッションは進捗報告API（`POST /api/progress`）へ報告する。**`gh issue edit`で進捗を付け替えることはできない。** 人が動かす場合はカンバンのカードをドラッグするか、issue-deckの画面のボタンを使う。
+Statusを進めるのはissue-deckだけで、各ワークフロー・ローカルセッションは進捗報告API（`POST /api/progress`）へ報告する。**`gh issue edit`で進捗を付け替えることはできない。** 人が動かす場合はカンバンのカードをドラッグするか、issue-deckの画面のボタン、またはIssue詳細の右パネル（プロパティ）の「進捗」セレクトを使う。**右パネルのセレクトは状態を書き換えるだけで実行を起動しない**（起動を伴うのはカンバンのドラッグと「実装を開始」ボタン）。
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。
 

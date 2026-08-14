@@ -228,6 +228,32 @@ pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッション
 上限はホストの搭載メモリで決まる性質のものなので、アプリ設定ではなくホスト側の`dispatch.env`に
 置いている。サブPC（13.9GB）では実測で1セッション約390MB、加えて開発サーバーが最大3本走る。
 
+#### 上限で待っていることを画面から分かるようにする（#1394）
+
+pollerが取りに行かないだけなので、画面には**「順番待ち」としか出ない**。同時実行数（`実行中 n/上限`）は
+出ていても、待たせているのはそちらではないため、正常に上限で待っている状態と、pollerが落ちて
+ジョブが宙に浮いている状態が画面上で区別できなかった。
+
+そこでpollerが申告（`POST /api/dispatch/hosts`）に`maxSessions`（上限）と`liveSessions`
+（申告した時点の本数）を載せ、`DispatchHost`へ写す。出す場所は2つ。
+
+| 場所 | 出すもの |
+|---|---|
+| 実行キューのポップオーバー | `subpcのセッション 12/12` と、順番待ちが進まない理由（`describeDispatchQueueStall`） |
+| Issue詳細のジョブの状態 | 押した本人が見ている場所に同じ理由（`describeDispatchJobWaitReason`） |
+
+**割り当ての判定はpoller側のまま**で、issue-deckはこの値を表示にしか使わない。サブPCのtmuxを
+見られるのはpollerだけなので、こちらに判定を持たせると申告と実際の挙動が必ずずれる（「実行できない
+リポジトリ」の申告と同じ考え方）。
+
+- **申告するのは1巡の入口で数えた本数。** この後の回収（`reap_sessions`）で減ったぶんは次の巡の
+  申告に乗る。回収を待ってから申告する形にすると、回収が長引いたぶんだけ生存報告が遅れ、
+  応答していないホストとして扱われうる。ずれは最大でポーリング間隔（既定60秒）ぶん
+- **`null`（未申告＝古いpoller）と0本は区別する。** 判定材料が無いまま0本として並べると、
+  実際には埋まっているホストが空いているように見える。未申告のホストは一覧に出さない
+- **応答していないホストは「上限で待っている」に数えない。** 取りに来られないだけで、別の話
+  （そちらは従来どおり`online`の表示が持つ）
+
 ### タイムアウトに定期実行の仕組みを持たない
 
 期限切れの判定は`expireStaleDispatchJobs()`（[src/lib/dispatch/jobs.ts](../../src/lib/dispatch/jobs.ts)）が
@@ -493,7 +519,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・セッションの本数と上限も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 

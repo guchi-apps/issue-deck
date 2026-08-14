@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # 実装セッションの状態をSignalyへ通知するフックスクリプト（#1219）。
 #
-# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`）から呼ばれ、フックのstdinに来る
-# JSONを読んで1件処理する。設定は run-issue-session.sh が生成する settings JSON 側にあり、
-# このスクリプトを直接叩くのは検証のときだけ。
+# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`）から呼ばれ、
+# フックのstdinに来るJSONを読んで1件処理する。設定は run-issue-session.sh が生成する
+# settings JSON 側にあり、このスクリプトを直接叩くのは検証のときだけ。
 #
-# 扱うイベントは3つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
+# 扱うイベントは4つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
 # 書き、判断を2箇所に分けない）。
 #
 #   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
 #   Stop                            応答終了  → 同上（＋計画の承認待ちを解く。#1342）
 #   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
+#   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
 #
 # `ExitPlanMode`でSignalyへ送らないのは、直後に承認プロンプトの`Notification`が必ず飛び、
-# 同じ「入力待ち」が二重になるため。
+# 同じ「入力待ち」が二重になるため。`PostToolUse`で送らないのは、人が答えたことは
+# その人が既に知っているため（通知の価値が無く、数だけ増える）。
+#
+# **`PostToolUse`は「人が承認プロンプトに答えた」ことを知る唯一の手掛かり**（#1357）。答えた
+# こと自体を知らせるフックは無いが、承認したツールは必ず走るので、その直後に飛ぶ。ただし
+# **ツールの実行ごとに飛ぶ**ため、状態ファイル（`lib/session-state.sh`の`.event`）を見て
+# 「直前が`permission_prompt`のとき」だけに間引く。
 #
 # 使い方（フックのcommandとして）:
 #   scripts/session-notify.sh <Issue番号> <リポジトリ名> [owner/repo]   （JSONはstdinから）
@@ -81,6 +88,37 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-state.sh" ]]; then
   source "$SCRIPT_DIR/lib/session-state.sh" || true
 fi
 
+# tmuxのセッション名。状態ファイルのキーであり、`tmux attach -t <名前>` でそのまま繋げるよう
+# 通知にも載せる。tmuxの外で起動した場合は空になる。
+NOTIFY_TMUX_SESSION=""
+if [[ -n "${TMUX:-}" ]]; then
+  NOTIFY_TMUX_SESSION="$(tmux display-message -p '#S' 2>/dev/null || true)"
+fi
+export NOTIFY_TMUX_SESSION
+
+# 状態ファイルに残っている最後のイベント（`Stop` / `permission_prompt` / `working`）。
+# **`PostToolUse`を間引くための判定材料**（#1357）。
+NOTIFY_LAST_STATE_EVENT=""
+if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_read_event >/dev/null 2>&1; then
+  _last_event_line="$(session_state_read_event "$NOTIFY_TMUX_SESSION" 2>/dev/null || true)"
+  if [[ "$_last_event_line" =~ ^[0-9]+[[:space:]]+([A-Za-z_]+) ]]; then
+    NOTIFY_LAST_STATE_EVENT="${BASH_REMATCH[1]}"
+  fi
+  unset _last_event_line
+fi
+export NOTIFY_LAST_STATE_EVENT
+
+# **`PostToolUse`のほとんどをここで捨てる**（#1357）。ツールの実行ごとに飛ぶイベントなので、
+# 毎回python3を起こしてHTTPまで進むと実装セッションを目に見えて遅くする。
+#
+# ここでの文字列一致は**判定の複製ではなく、python3を起こす価値があるかの前捌き**（`ExitPlanMode`の
+# `NOTIFY_PLAN_BASE_SHA`と同じ扱い）。外れた場合はpython側の判定へ落ちるだけで、結果は変わらない。
+# 「`PostToolUse`だと確実に読めて、かつ直前が入力待ちではない」ときにしか打ち切らない。
+if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\" ]] &&
+  [[ "$NOTIFY_LAST_STATE_EVENT" != "permission_prompt" ]]; then
+  exit 0
+fi
+
 # ---------------------------------------------------------------------------
 # 送るかどうかの判定とpayloadの組み立て
 #
@@ -89,6 +127,7 @@ fi
 # 標準出力の1行目を「何をするか」、2行目以降をpayloadとして返す。
 #
 #   send <状態イベント> <activity> <remote-controlのURL|->   Signalyへ通知する（payloadはSignaly用）
+#   quiet <状態イベント> <activity>                          issue-deckへだけ報告する（#1357）
 #   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用）
 #   skip                                                    何もしない
 #
@@ -104,14 +143,6 @@ export NOTIFY_CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
 # tailnetへ公開した開発サーバー（#1265）。run-issue-session.shがexportしている。
 # 入力待ちの通知に載せると、気づいた側がその場で画面を開ける
 export NOTIFY_PREVIEW_URL="${ISSUE_DECK_PREVIEW_URL:-}"
-
-# tmuxのセッション名。`tmux attach -t <名前>` でそのまま繋げるよう、通知に載せる。
-# tmuxの外で起動した場合は空になる。
-NOTIFY_TMUX_SESSION=""
-if [[ -n "${TMUX:-}" ]]; then
-  NOTIFY_TMUX_SESSION="$(tmux display-message -p '#S' 2>/dev/null || true)"
-fi
-export NOTIFY_TMUX_SESSION
 
 # 計画コメントの先頭に残す前提コミット（#1342）。手でIssueへ投稿していたときと同じ形
 # （`<!-- plan-base: <SHA> -->`）を保ち、`git log <SHA>..origin/develop`で前提の変化を
@@ -276,6 +307,21 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
         "planBaseSha": os.environ.get("NOTIFY_PLAN_BASE_SHA") or None,
         "hostName": host_name or None,
     }))
+    sys.exit(0)
+
+# 人が承認プロンプト・質問に答えて作業へ戻ったこと（#1357）。
+#
+# **答えたことを直接知らせるフックは無い。** 承認したツールは必ず走るので、その`PostToolUse`を
+# 「答えた合図」として使う。ただしツールの実行ごとに飛ぶため、**直前の状態が`permission_prompt`の
+# ときだけ**扱う（シェル側が状態ファイルから読んで渡してくる）。1回報告すれば状態ファイルは
+# `working`になるので、続くツールの実行では自然に止まる。
+#
+# **Signalyへは送らない。** 答えたのは人自身で、通知を受け取る意味が無い。
+if event == "PostToolUse":
+    if os.environ.get("NOTIFY_LAST_STATE_EVENT", "") != "permission_prompt":
+        print("skip")
+        sys.exit(0)
+    print("quiet", "working", "working")
     sys.exit(0)
 
 # 飛ばすのは「本当に人の判断が要るもの」と「完了」の2つだけ（#1219）。
@@ -444,7 +490,8 @@ report_plan_to_issue_deck() {
 }
 
 decision_line="$(printf '%s' "$result" | head -1)"
-# 形式: `send <状態イベント> <activity> <URL または "-">` / `plan <URL または "-">` / `skip`
+# 形式: `send <状態イベント> <activity> <URL または "-">` / `quiet <状態イベント> <activity>` /
+#       `plan <URL または "-">` / `skip`
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
@@ -452,7 +499,7 @@ if [[ "$decision" == "plan" ]]; then
   exit 0
 fi
 
-if [[ "$decision" != "send" ]]; then
+if [[ "$decision" != "send" && "$decision" != "quiet" ]]; then
   exit 0
 fi
 read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
@@ -509,6 +556,12 @@ print(json.dumps({
   fi
 }
 report_activity_to_issue_deck
+
+# 作業再開の報告（#1357）はここまで。**Signalyへは送らない**（答えたのは人自身で、
+# 同じことを通知し返す意味が無い）。
+if [[ "$decision" == "quiet" ]]; then
+  exit 0
+fi
 
 if [[ -z "$WEBHOOK_URL" ]]; then
   # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。

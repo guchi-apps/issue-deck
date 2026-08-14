@@ -9,6 +9,14 @@ function parsePositiveInt(value: unknown): number | null {
 }
 
 /**
+ * 生きているセッションの本数（#1394）。**0を弾かない**ので`parsePositiveInt`とは分ける。
+ * 「1本も無い」は正常な申告で、`null`（申告していない古いpoller）とは意味が違う。
+ */
+function parseNonNegativeInt(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/**
  * ホストからの申告（#1179）。「自分が実行できるリポジトリの一覧」と生存報告を兼ねる。
  *
  * **ここに実行可能リポジトリを持つのは、ジョブの割り当て可否を決める情報だから**（#1176の
@@ -49,6 +57,11 @@ export async function POST(request: NextRequest) {
     // 制御ジョブを配らない（古いpollerは`kind`を読まず、起動ジョブとして解釈してしまう）
     sessionControlCapable:
       typeof payload?.sessionControl === "boolean" ? payload.sessionControl : null,
+    // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
+    // 起動ジョブを取りに行かない**（#1361）ので、これが無いと画面は「順番待ちのまま進まない」
+    // 理由を出せない。判定は引き続きpoller側が持ち、ここは写しを受け取るだけ
+    maxSessions: parsePositiveInt(payload?.maxSessions),
+    liveSessions: parseNonNegativeInt(payload?.liveSessions),
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

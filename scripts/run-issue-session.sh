@@ -51,6 +51,9 @@ source "$SCRIPT_DIR/lib/session-state.sh"
 # 開発サーバーをtailnetへ出す（#1265）。回収スクリプトと共有する。
 # shellcheck source=scripts/lib/tailscale-serve.sh
 source "$SCRIPT_DIR/lib/tailscale-serve.sh"
+# セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
+# shellcheck source=scripts/lib/agent-language.sh
+source "$SCRIPT_DIR/lib/agent-language.sh"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
 # **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
@@ -259,6 +262,11 @@ else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
 
+# 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
+# 依存せず、このスクリプトから起こしたセッションの応答を日本語に揃える。文面と未対応時の扱いは
+# scripts/lib/agent-language.sh を参照。
+append_language_system_prompt "#$ISSUE_NUMBER: "
+
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
 REPO_NAME="$(basename -s .git "$(git config --get remote.origin.url 2>/dev/null || true)")"
@@ -292,7 +300,8 @@ if [[ -n "$TMUX_SESSION_NAME" ]]; then
   fi
 fi
 
-# セッションの状態をSignalyへ通知するフック（#1219）と、提示した計画をIssueへ残すフック（#1342）。
+# セッションの状態をSignalyへ通知するフック（#1219）、提示した計画をIssueへ残すフック（#1342）、
+# 承認に答えて作業へ戻ったことをissue-deckへ伝えるフック（#1357）。
 #
 # **`--settings` で渡すことで、このスクリプトから起動したセッションにだけ適用する。**
 # `~/.claude/settings.json` に書くとメインPCの対話セッションでも通知が飛んで邪魔になる。
@@ -317,6 +326,12 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # `PreToolUse`だけmatcherを付ける（#1342）。**計画本文（`tool_input.plan`）が手に入るのは
   # `ExitPlanMode`のこのフックだけ**で、承認プロンプトの`Notification`には入っていない。
   # matcherを付けずに全ツールで呼ぶと、`Read`・`Bash`のたびにスクリプトが起動する。
+  #
+  # **`PostToolUse`はmatcherを付けず全ツールで呼ぶ**（#1357）。これは「人が承認プロンプトに
+  # 答えた」ことを知る唯一の手掛かりで、承認が要るツールは`Bash`・`Write`・`WebFetch`・
+  # `AskUserQuestion`・MCPのツールと広く、絞ると答えたのに入力待ちのままになる組み合わせが残る。
+  # 代わりに`session-notify.sh`が状態ファイルを見て「直前が入力待ちのとき」以外を即座に捨てる
+  # （HTTPどころかpython3も起こさない）。
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -331,6 +346,9 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
         "matcher": "ExitPlanMode",
         "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
       }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ]
   }
 }
@@ -362,7 +380,29 @@ fi
 # - 実装エージェントは起動直後にファイルを読むため、渡した後にプロンプトが再生成されても
 #   （同じIssueで再起動した場合など）最新の内容で動く
 # - `ps` の出力にIssue本文が丸ごと出るのを避けられる
-KICKOFF_PROMPT="Issue #$ISSUE_NUMBER の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+#
+# ただし番号とファイルパスだけだと、後からセッションを開いた人には「何の実装だったか」が
+# 分からない（#1405）。そこでタイトルだけをこの1行に載せる。**載せるのはタイトルまでで、
+# 本文は載せない**（`ps`に本文が出るのを避ける上の理由は残っている。本文はプロンプトファイルを
+# 読めば分かる）。
+#
+# タイトルは呼び出し元から引数で受け取らず、**プロンプトファイルから読む**。呼び出し元
+# （start-issue.sh・generic-start-issue.sh）はtmuxへ渡すコマンド文字列にプロンプトファイルの
+# パスしか埋めない方針で、Issue由来のテキストをそこへ持ち込まないため。
+# `- タイトル: `の行はissue-deck用（scripts/prompts/implementation-agent.md）と汎用
+# （scripts/prompts/generic-implementation-agent.md）の両テンプレートで共通なので、
+# どちらのランチャー経由でも同じ処理で取れる。**読めなければタイトル無しの従来の文面へ落とす**
+# （書式が変わってもセッションの起動は止めない）。
+ISSUE_TITLE=""
+if [[ -f "$PROMPT_FILE" ]]; then
+  ISSUE_TITLE="$(sed -n 's/^- タイトル: *//p' "$PROMPT_FILE" | head -n 1)"
+fi
+
+if [[ -n "$ISSUE_TITLE" ]]; then
+  KICKOFF_PROMPT="Issue #$ISSUE_NUMBER「$ISSUE_TITLE」の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+else
+  KICKOFF_PROMPT="Issue #$ISSUE_NUMBER の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+fi
 
 # 貼り直し用に、渡すプロンプトを起動前に必ず表示しておく。起動直後のセッションが何も始めない
 # 場合（初回起動時のフォルダ信頼確認など、こちらから制御できない要因で失われうる）に、

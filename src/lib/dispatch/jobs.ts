@@ -72,6 +72,8 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     lastSeenAt: host.lastSeenAt.toISOString(),
     screenshotCapable: host.screenshotCapable,
     sessionControlCapable: host.sessionControlCapable,
+    maxSessions: host.maxSessions,
+    liveSessions: host.liveSessions,
   };
 }
 
@@ -578,6 +580,13 @@ export async function announceDispatchHost(params: {
   screenshotCapable: boolean | null;
   /** 走っているセッションを操作できるか（#1332）。申告していない古いpollerでは`null`＝非対応 */
   sessionControlCapable: boolean | null;
+  /**
+   * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
+   * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
+   * 申告していない古いpollerでは`null`。
+   */
+  maxSessions: number | null;
+  liveSessions: number | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -589,6 +598,8 @@ export async function announceDispatchHost(params: {
     agentVersion: params.agentVersion,
     screenshotCapable: params.screenshotCapable,
     sessionControlCapable: params.sessionControlCapable,
+    maxSessions: params.maxSessions,
+    liveSessions: params.liveSessions,
     lastSeenAt: now,
   };
 

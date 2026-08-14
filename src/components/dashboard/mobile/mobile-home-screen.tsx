@@ -4,6 +4,7 @@ import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,8 @@ import type { ConnectedRepository } from "@/types/repository";
 type MobileHomeScreenProps = {
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
+  /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
+  pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
@@ -35,6 +38,7 @@ const quickFilterViews = [
 export function MobileHomeScreen({
   overviewStats,
   navCounts,
+  pullRequestNavCounts,
   onSelectQuickView,
   favoriteRepositories,
   onSelectRepository,
@@ -131,15 +135,21 @@ export function MobileHomeScreen({
           <ul className="flex flex-col gap-1">
             {pullRequestViews.map((view) => {
               const Icon = pullRequestViewIcons[view.id];
+              const count = pullRequestNavCounts[view.id];
               return (
                 <li key={view.id}>
                   <button
                     type="button"
                     onClick={() => onSelectPullRequests(view.id)}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
-                    <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                    {view.label}
+                    <span className="flex items-center gap-2">
+                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                      {view.label}
+                    </span>
+                    {count !== null && (
+                      <span className="text-xs text-muted-foreground">{count}</span>
+                    )}
                   </button>
                 </li>
               );

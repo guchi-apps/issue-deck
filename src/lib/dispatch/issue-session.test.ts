@@ -79,6 +79,14 @@ describe("summarizeIssueSession", () => {
     expect(s.detail).toContain("Remote Control");
   });
 
+  // #1357。承認に答えた直後をRESPONDEDで表すと「応答を終えています」と出てしまう
+  it("入力に答えて作業へ戻った報告は、作業中として出す（入力待ちでも応答終了でもない）", () => {
+    const s = summarizeIssueSession(session({ activity: "WORKING" }));
+    expect(s.tone).toBe("running");
+    expect(s.label).toContain("作業中");
+    expect(s.detail).not.toContain("次の指示");
+  });
+
   it("応答終了は「終わっている場合と次の指示待ちの場合がある」と断る", () => {
     const s = summarizeIssueSession(session({ activity: "RESPONDED" }));
     expect(s.tone).toBe("running");
@@ -116,6 +124,9 @@ describe("summarizeIssueSession", () => {
       expect(summarizeIssueSession({ ...view, activity: "RESPONDED" }).at).toBe(
         "2026-08-14T09:00:00.000Z",
       );
+      expect(summarizeIssueSession({ ...view, activity: "WORKING" }).at).toBe(
+        "2026-08-14T09:00:00.000Z",
+      );
     });
 
     it("様子の報告が無ければpollerが最後に見た時刻", () => {
@@ -144,6 +155,7 @@ describe("shortIssueSessionLabel", () => {
   it("通常の実行中は出さない（一覧が情報で埋まる）", () => {
     expect(shortIssueSessionLabel(session())).toBeNull();
     expect(shortIssueSessionLabel(session({ activity: "RESPONDED" }))).toBeNull();
+    expect(shortIssueSessionLabel(session({ activity: "WORKING" }))).toBeNull();
   });
 
   it("入力待ち・終了・異常終了だけを出す", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ListOrdered, Loader2, X } from "lucide-react";
+import { AlertTriangle, ListOrdered, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -13,7 +13,9 @@ import {
 import {
   cancelableDispatchJobs,
   describeDispatchQueueLoad,
+  describeDispatchQueueStall,
   summarizeDispatchQueue,
+  summarizeDispatchSessionCapacity,
 } from "@/lib/dispatch/queue-summary";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
@@ -35,6 +37,9 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+  // 起動を実際に止めているのはセッション本数の上限（#1361）で、同時実行数では説明できない（#1394）
+  const capacities = summarizeDispatchSessionCapacity(dispatch.hosts);
+  const stall = describeDispatchQueueStall(summary, dispatch.hosts);
 
   // 申告しているホストが1台も無ければ、キューという概念自体が無い
   if (dispatch.hosts.length === 0) return null;
@@ -70,6 +75,35 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
           <p className="text-sm font-medium">実行キュー</p>
           <p className="text-xs text-muted-foreground">{describeDispatchQueueLoad(summary)}</p>
         </div>
+
+        {/*
+          セッションの本数と上限（#1394）。**同時実行数の隣に並べて出す。** 名前が似ていて
+          役割が違う2つの上限を別の場所に置くと、どちらが起動を止めているのか読み取れない。
+          申告していない古いpollerのホストはここに出ない（`summarizeDispatchSessionCapacity`）
+        */}
+        {capacities.length > 0 && (
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {capacities.map((capacity) => (
+              <li
+                key={capacity.hostName}
+                className={cn(
+                  "text-xs text-muted-foreground",
+                  capacity.atCapacity && "text-destructive",
+                )}
+              >
+                {capacity.hostName}のセッション {capacity.live}/{capacity.max}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}
+        {stall && (
+          <p className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{stall}</span>
+          </p>
+        )}
 
         {summary.activeCount === 0 && summary.failed.length === 0 && (
           <p className="mt-2 text-xs text-muted-foreground">

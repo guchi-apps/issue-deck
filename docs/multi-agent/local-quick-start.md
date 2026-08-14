@@ -74,6 +74,9 @@
 `scripts/generate-prompt-templates.mjs`がTSへ書き出したものを画面が読む。デプロイの成果物に
 `scripts/prompts/`が入っていないため生成物をコミットして運び、ずれていないことは
 `src/lib/prompts/templates.test.ts`が検証する。**文面を2か所に分けると必ず片方が古くなる。**
+`scripts/prompts/generic-implementation-agent.md`を編集したら、コミット前に
+`node scripts/generate-prompt-templates.mjs`を実行して生成物も一緒にコミットする
+（忘れると`pnpm test:unit`がこのテストで落ちる）。
 
 起動コマンドのコピーは、**対象リポジトリがローカル起動プロトコルに適合しているときだけ**出す
 （貼った先で受け口が止まるだけの選択肢を並べないため）。スマホの画面では出さない（貼る先が無い）。
@@ -508,7 +511,7 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 | ファイル | 書く人 | 中身 |
 | --- | --- | --- |
 | `<セッション名>.session` | `run-issue-session.sh`（起動時） | worktreeの場所・対応Issue・`reapable` |
-| `<セッション名>.event` | `session-notify.sh`（フック） | `<epoch> <Stop\|permission_prompt>` |
+| `<セッション名>.event` | `session-notify.sh`（フック） | `<epoch> <Stop\|permission_prompt\|working>` |
 
 **キーをtmuxのセッション名にする。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られる。
@@ -518,7 +521,7 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 | --- | --- | --- |
 | 1 | 記述子があり`reapable=1` | ジョブとして起動したセッションだけを対象にする。手元のターミナルから直接起動した分・他リポジトリの作業用セッションは記述子が無い |
 | 2 | ペインが生きている | 死んだペインは`remain-on-exit failed`が残した異常終了の証拠。最後の出力を読めるうちは消さない |
-| 3 | 最後のイベントが`Stop` | `permission_prompt`が後なら承認プロンプト・`AskUserQuestion`の表示中＝人の入力待ち |
+| 3 | 最後のイベントが`Stop` | `permission_prompt`が後なら承認プロンプト・`AskUserQuestion`の表示中＝人の入力待ち。`working`が後ならそれに答えて作業へ戻ったところ（#1357） |
 | 4 | その`Stop`から`SESSION_IDLE_MINUTES`以上 | **`Stop`＝作業完了ではない。** レビュー結果待ち・追加指示での再開も`Stop`を出す |
 | 5 | Issueに`11.local`が付いていない | 実装エージェントが引き渡し時に自分で外すラベル。付いている間はローカルで作業中 |
 | 6 | IssueがCLOSED、または`issue-<番号>`のPRがマージ済み | 成果物が本流に入っていない |
@@ -575,6 +578,7 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 | 項目 | 結果 |
 |---|---|
 | 全インターフェースを待ち受けている状態でserveを足す | **競合しない。** エラーも出ず、FQDNでのアクセスは通る |
+| 逆順（serveが残っている状態で開発サーバーを起こす） | **`EADDRINUSE`で起動できない**（#1350で遭遇）。詳細は下記 |
 | 生IPでのアクセス | **404になる。** serveがtailnet IPのそのポートを取り、Hostヘッダーで振り分けるため |
 | HTTPS | `CertDomains: None`（未有効）のため`--https`は使えず**`--http`一択** |
 | 権限 | `OperatorUser: None`のためsudoが要る。`/etc/sudoers.d/tailscale-serve`で`serve`だけNOPASSWDにしてある |
@@ -584,6 +588,22 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 
 撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
 `scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+
+**順番が逆になると起動しない。** serveだけが残っているポート（掃かれる前や、前のセッションの
+残骸）で`pnpm dev`を起こすと、`listen EADDRINUSE :::<ポート>`で落ちる。serveはtailnet IPを
+**具体的なアドレスとして**掴んでいる（`ss -ltnp`に`100.x.x.x:<ポート>`と`[fd7a:...]:<ポート>`が並ぶ）
+のに対し、`next dev`は既定で`::`＝全アドレスを要求するため、IPv6側でぶつかる。逆順（serveを
+後から足す）が競合しないのは、serveの側が「使われていない特定アドレス」を取りに行くだけだから。
+
+セッション起動時の開発サーバーがこれで死んでいた場合、`.dev-servers/issue-<番号>.log`の末尾に
+`EADDRINUSE`が残る。起こし直すときは待ち受けを127.0.0.1に閉じればよい。
+
+```bash
+ISSUE_DECK_DEV_HOST=127.0.0.1 pnpm dev
+```
+
+**serveは`localhost:<ポート>`へproxyするので、これでもtailnetのFQDNからは従来どおり見える**
+（#1350で実測）。serveを消して回るより副作用が小さい。
 
 ### allowedDevOriginsに載せる必要がある
 
@@ -737,13 +757,20 @@ Issue本文とコメント全件は元から展開している。そこに落ち
 中身そのものではなく、次の1行だけにする（#1105）。
 
 ```text
-Issue #<番号> の実装を開始してください。あなたへの指示は <プロンプトファイルのパス> にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。
+Issue #<番号>「<Issueのタイトル>」の実装を開始してください。あなたへの指示は <プロンプトファイルのパス> にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。
 ```
 
 - **届かなかったときに貼り直せる。** 数KBのプロンプト全文を貼り直すのは現実的でない。起動前に
   この1行を必ず端末へ表示しておく
 - プロンプトファイルを読むのは起動後なので、渡した後に再生成された場合でも最新の内容で動く
 - `ps`の出力にIssue本文が丸ごと出るのを避けられる
+
+**載せるのはタイトルまでで、本文は載せない**（#1405）。番号とファイルパスだけだと、後から
+セッションを開いた人には何の実装だったかが分からない一方、本文まで載せると`ps`に出るのを
+避けた上の理由が消える。タイトルは呼び出し元から引数で受け取らず、`run-issue-session.sh`が
+プロンプトファイルの`- タイトル: `行から読む（tmuxへ渡すコマンド文字列にIssue由来のテキストを
+持ち込まないため。この行は汎用ランチャーのテンプレートにもあるので両経路で効く）。
+**読めなかった場合はタイトル無しの従来の文面へ落とす**ので、書式が変わっても起動は止まらない。
 
 「確認を待たずに着手する」ことは、プロンプトファイル側（`scripts/prompts/implementation-agent.md`）
 にも明記している。ここが曖昧だと、セッションは開いたのに指示待ちで止まる。

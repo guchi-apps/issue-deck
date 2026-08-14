@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyPullRequest,
+  computePullRequestNavCounts,
   extractLinkedIssueNumber,
   filterPullRequestsByView,
   groupPullRequestsByRepository,
@@ -184,6 +185,53 @@ describe("scopeForPullRequestView", () => {
     expect(scopeForPullRequestView("all")).toBe("all");
     expect(scopeForPullRequestView("in-progress")).toBe("open");
     expect(scopeForPullRequestView("completed")).toBe("open");
+  });
+});
+
+describe("computePullRequestNavCounts", () => {
+  it("処理中・完了の件数を数え、全てのPRは件数を出さない", () => {
+    const counts = computePullRequestNavCounts(
+      [
+        pullRequest({ number: 1, ciState: "success" }),
+        pullRequest({ number: 2, ciState: "failure" }),
+        pullRequest({ number: 3, ciState: "pending" }),
+        pullRequest({ number: 4, draft: true, ciState: "unknown" }),
+        pullRequest({ number: 5, state: "closed", merged: true, ciState: "unknown" }),
+      ],
+      true,
+    );
+
+    expect(counts).toEqual({ all: null, "in-progress": 2, completed: 2 });
+  });
+
+  it("未取得のときはどのビューも件数を出さない", () => {
+    expect(computePullRequestNavCounts([], false)).toEqual({
+      all: null,
+      "in-progress": null,
+      completed: null,
+    });
+  });
+
+  it("取得済みでPRが1件も無ければ0を出す", () => {
+    expect(computePullRequestNavCounts([], true)).toEqual({
+      all: null,
+      "in-progress": 0,
+      completed: 0,
+    });
+  });
+
+  // クローズ済みまで取得した結果を渡しても、openなPRしか数えないので値は変わらない。
+  it("母集団にクローズ済みが含まれていても件数は変わらない", () => {
+    const openOnly = [pullRequest({ number: 1, ciState: "success" })];
+    const withClosed = [
+      ...openOnly,
+      pullRequest({ number: 2, state: "closed", merged: true, ciState: "unknown" }),
+      pullRequest({ number: 3, state: "closed", merged: false, ciState: "unknown" }),
+    ];
+
+    expect(computePullRequestNavCounts(withClosed, true)).toEqual(
+      computePullRequestNavCounts(openOnly, true),
+    );
   });
 });
 
