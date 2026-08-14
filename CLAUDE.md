@@ -59,6 +59,7 @@ GitHub Actions上の無人実行では、その場で確認を取る相手がい
 - 実装中に得た知見は、次の基準で置き場所を分ける。**迷った場合はアプリ固有として扱う。**
   - **アプリ固有**（このリポジトリのコード・スキーマ・画面・ラベル・ワークフローに依存する）→ 実装PRに同梱して`docs/`または`CLAUDE.md`へ書く。
   - **全アプリ共通**（対象リポジトリを差し替えても内容が成立し、数週間以上有効で、根拠を示せる）→ 共有知識リポジトリへ直接書かず、対応Issueへ「追加提案」コメントを投稿するにとどめる。
+- ローカルセッションのメモリ（`~/.claude/projects/<slug>/memory/`）は機体ローカルで、メインPC・サブPC間で同期されず、GitHub Actionsの無人実行には存在しない。恒久的に価値がある内容は上の基準で昇格させる（判断基準は [docs/multi-agent/personal-config-sync.md](docs/multi-agent/personal-config-sync.md)「メモリを同期せず『昇格』させる」）。
 - 提案コメントの書式・審査の4観点（再利用性・正確性・重複・恒久性）・反映までの流れは [docs/shared-knowledge.md](docs/shared-knowledge.md) の「9. 共有知識更新フロー」を参照。承認された提案のみ、`.github/workflows/shared-knowledge-propose.yml`が共有知識リポジトリへのPull Requestに変換し、最終的なマージは人間が行う。
 - シークレットの実値・個人情報・一時的な障害情報は、アプリ固有・共通のいずれにも記録しない。
 

@@ -74,6 +74,9 @@
 `scripts/generate-prompt-templates.mjs`がTSへ書き出したものを画面が読む。デプロイの成果物に
 `scripts/prompts/`が入っていないため生成物をコミットして運び、ずれていないことは
 `src/lib/prompts/templates.test.ts`が検証する。**文面を2か所に分けると必ず片方が古くなる。**
+`scripts/prompts/generic-implementation-agent.md`を編集したら、コミット前に
+`node scripts/generate-prompt-templates.mjs`を実行して生成物も一緒にコミットする
+（忘れると`pnpm test:unit`がこのテストで落ちる）。
 
 起動コマンドのコピーは、**対象リポジトリがローカル起動プロトコルに適合しているときだけ**出す
 （貼った先で受け口が止まるだけの選択肢を並べないため）。スマホの画面では出さない（貼る先が無い）。
