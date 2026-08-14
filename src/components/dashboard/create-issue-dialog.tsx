@@ -39,6 +39,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
   isSelectableLabelName,
   planRequiredDefaultForLabels,
@@ -99,6 +100,11 @@ type CreateIssueDialogProps = {
   defaultRepositoryFullName?: string | null;
   defaultTitle?: string | null;
   defaultBody?: string | null;
+  /**
+   * 本文の先頭に固定で付くテキスト（引き継ぎ元の情報など・#1322）。
+   * 入力欄には入れず読み取り専用で表示し、作成時に入力内容の前へ連結する。
+   */
+  bodyPrefix?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
 };
@@ -110,6 +116,7 @@ export function CreateIssueDialog({
   defaultRepositoryFullName,
   defaultTitle,
   defaultBody,
+  bodyPrefix,
   issues,
   onCreated,
 }: CreateIssueDialogProps) {
@@ -188,6 +195,8 @@ export function CreateIssueDialog({
     setError(null);
     hasUserSetAssignee.current = draft.assignee !== null;
     hasUserSetPlanRequired.current = false;
+    // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
+    // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
     setRestorableDraft(
       readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
     );
@@ -277,7 +286,7 @@ export function CreateIssueDialog({
     const issue = await createIssue({
       repositoryFullName,
       title,
-      body,
+      body: composeIssueBody(bodyPrefix, body),
       labels: selectedLabels,
       assignee,
     });
@@ -306,7 +315,7 @@ export function CreateIssueDialog({
     const issue = await createIssue({
       repositoryFullName,
       title,
-      body,
+      body: composeIssueBody(bodyPrefix, body),
       labels: selectedLabels,
       assignee,
     });
@@ -390,6 +399,18 @@ export function CreateIssueDialog({
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="create-issue-body">本文</Label>
+              {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
+                  入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
+              {bodyPrefix && (
+                <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    以下は本文の先頭に自動で付きます（編集不可）
+                  </p>
+                  <p className="mt-1 text-xs break-all whitespace-pre-wrap text-foreground">
+                    {bodyPrefix.trim()}
+                  </p>
+                </div>
+              )}
               <MentionTextarea
                 id="create-issue-body"
                 value={body}
