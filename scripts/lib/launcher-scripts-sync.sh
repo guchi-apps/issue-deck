@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # 本体リポジトリの作業ツリーにある `scripts/` が `origin/develop` と違っていたら警告する（#1274）。
 #
-# scripts/start-issue.sh と scripts/generic-start-issue.sh の両方から source する。
-# このファイル自体は実行せず、source して使う。
+# scripts/start-issue.sh・scripts/generic-start-issue.sh・scripts/run-issue-session.sh の
+# いずれからも source する。このファイル自体は実行せず、source して使う。
+#
+# **`warn_launcher_scripts_stale` の呼び出し自体は start-issue.sh・generic-start-issue.sh と
+# run-issue-session.sh の両方に置く（#1426）。** start-issue.sh 側の呼び出しは、tmuxで新しい
+# セッションを起動する（`tmux new-session -d`）より前の、呼び出し元プロセス自身の標準出力に
+# 出るだけで、そのpaneは呼び出し元とは別のptyとして作られるため引き継がれない。サブPCのpollerが
+# 起動する経路（無人）ではその標準出力はjournalctlにしか残らず、tmuxをattachしたユーザーからは
+# 見えない。run-issue-session.sh側の呼び出しは実際にそのtmuxのpaneの中で動くため、ここでも
+# 同じ警告を出すことで、ユーザーが実際に見る画面に確実に載せる。
 #
 # ## なぜ必要か
 #
@@ -37,7 +45,8 @@ LAUNCHER_SYNC_REF="${ISSUE_DECK_LAUNCHER_SYNC_REF:-origin/develop}"
 # 本体の `scripts/` が `origin/develop` と違っていれば警告を出す。
 # 戻り値は常に0（呼び出し側を `set -e` で落とさない）。
 #
-# 第1引数は本体リポジトリのパス（start-issue.sh・generic-start-issue.sh の $ROOT）。
+# 第1引数は本体リポジトリのパス（start-issue.sh・generic-start-issue.sh の $ROOT、
+# run-issue-session.sh では自身の SCRIPT_DIR の親ディレクトリ）。
 warn_launcher_scripts_stale() {
   [[ "${ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK:-0}" == "1" ]] && return 0
 
