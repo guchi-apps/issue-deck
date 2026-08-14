@@ -18,11 +18,11 @@ type RunningMap = Record<string, RunningState>;
 const NOT_RUNNING: RunningState = { isRunning: false, currentStep: null, runId: null };
 
 /**
- * 一覧に表示中のIssueのうち、実行が進行し得る実装状況ラベル（01.planning / 02.wip / 03.d:marge / 07.m:marge）が
- * 付き承認待ち（00.check-user）でないものについて、対応するGitHub Actions実行が進行中かどうかを
- * ポーリングする。
- * `05.develop`・`09.main`はマージ完了後の定常状態で実行は走らないため、GitHub APIの消費を抑える
- * 目的で対象から除外している。
+ * 一覧に表示中のIssueのうち、実行が進行し得るProject Status（Planning / Implementation /
+ * Develop PR / Release）にあり承認待ち（00.check-user）でないものについて、対応する
+ * GitHub Actions実行が進行中かどうかをポーリングする。
+ * `Develop`・`Done`はマージ完了後の定常状態で実行は走らないため、GitHub APIの消費を抑える
+ * 目的で対象から除外している（判定は`hasActiveWorkflowStep`＝`PROGRESS_STATUSES`の`active`）。
  */
 export function useIssuesWorkflowRunning(
   issues: Issue[],

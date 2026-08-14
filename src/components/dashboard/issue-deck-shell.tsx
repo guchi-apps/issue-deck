@@ -38,14 +38,14 @@ import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
-import { useOpenPullRequests } from "@/hooks/use-open-pull-requests";
+import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
-import { buildFollowupIssueBody } from "@/lib/github/followup-issue";
+import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
@@ -60,6 +60,7 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
+import { filterPullRequestsByView, scopeForPullRequestView } from "@/lib/pull-request-list";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
@@ -95,7 +96,7 @@ export function IssueDeckShell({
     setFilter,
     setFilters,
     selectView,
-    selectPane,
+    selectPullRequestView,
     selectPullRequest,
     toggleLabel,
     toggleRepo,
@@ -139,7 +140,7 @@ export function IssueDeckShell({
   } = useMobileScreen(issues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
-  const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
+  const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
   const [askDialogOpen, setAskDialogOpen] = useState(false);
   const [askDialogRepo, setAskDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -185,7 +186,7 @@ export function IssueDeckShell({
 
   function openCreateDialog(defaultRepositoryFullName?: string | null) {
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
-    setCreateDialogBody(null);
+    setCreateDialogBodyPrefix(null);
     setCreateDialogOpen(true);
   }
 
@@ -196,9 +197,10 @@ export function IssueDeckShell({
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
+  // 元Issueの情報は入力欄ではなく固定接頭辞として渡し、入力欄は空のまま始める（#1322）。
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
-    setCreateDialogBody(buildFollowupIssueBody(issue));
+    setCreateDialogBodyPrefix(buildFollowupIssueBodyPrefix(issue));
     setCreateDialogOpen(true);
   }
 
@@ -372,11 +374,15 @@ export function IssueDeckShell({
     [repositories],
   );
 
-  // マージ待ちPR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから
+  // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから
   // 取得するため、PRペイン（PC）またはPR画面（スマホ）を開いている間だけ有効にする。
+  // 母集団の広さはビューが決める（「全てのPR」だけクローズ済みも取りに行く。#1312）。
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
-  const openPullRequests = useOpenPullRequests(isPullRequestPaneActive);
+  const openPullRequests = usePullRequests(
+    isPullRequestPaneActive,
+    scopeForPullRequestView(filters.prview),
+  );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
   // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
   // （マージできていなければまた一覧に現れる）。
@@ -390,15 +396,17 @@ export function IssueDeckShell({
     [mergedPullRequests, openPullRequests.fetchedAt],
   );
 
-  // 左メニューでリポジトリを絞り込んでいるときは、PR一覧も同じ絞り込みに従わせる。
+  // 状態別ビューの絞り込み（#1312）に加え、左メニューでリポジトリを絞り込んでいるときは
+  // PR一覧も同じ絞り込みに従わせる。
   const filteredPullRequests = useMemo(() => {
-    const visible = openPullRequests.pullRequests.filter(
-      (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
-    );
+    const visible = filterPullRequestsByView(
+      openPullRequests.pullRequests,
+      filters.prview,
+    ).filter((pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id));
     return filters.repos.length === 0
       ? visible
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
-  }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
+  }, [openPullRequests.pullRequests, filters.prview, filters.repos, hiddenPullRequestIds]);
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
 
@@ -624,6 +632,7 @@ export function IssueDeckShell({
                       />
                     ) : (
                       <MobilePullRequestsScreen
+                        view={filters.prview}
                         pullRequests={filteredPullRequests}
                         failedRepositories={openPullRequests.failedRepositories}
                         fetchedAt={openPullRequests.fetchedAt}
@@ -726,7 +735,8 @@ export function IssueDeckShell({
                 activeView={filters.view}
                 onSelectView={handleSelectView}
                 activePane={filters.pane}
-                onSelectPane={selectPane}
+                activePullRequestView={filters.prview}
+                onSelectPullRequestView={selectPullRequestView}
                 navCounts={navCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
@@ -751,10 +761,11 @@ export function IssueDeckShell({
           )}
 
           {filters.pane === "pull-requests" ? (
-            /* PC: マージ待ちPR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
+            /* PC: PR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
                揃えている（#1058・#1087） */
             <>
               <PullRequestList
+                view={filters.prview}
                 pullRequests={filteredPullRequests}
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}
@@ -844,7 +855,7 @@ export function IssueDeckShell({
           onOpenChange={setCreateDialogOpen}
           repositories={visibleRepositories}
           defaultRepositoryFullName={createDialogRepo}
-          defaultBody={createDialogBody}
+          bodyPrefix={createDialogBodyPrefix}
           issues={issues}
           onCreated={handleIssueCreated}
         />

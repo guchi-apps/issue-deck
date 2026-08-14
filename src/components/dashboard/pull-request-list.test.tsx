@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const repositoryFullName = overrides.repositoryFullName ?? "guchi-apps/issue-deck";
@@ -32,6 +32,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
 }
 
 type RenderOverrides = Partial<{
+  view: PullRequestViewId;
   isLoading: boolean;
   error: string | null;
   failedRepositories: string[];
@@ -42,6 +43,7 @@ type RenderOverrides = Partial<{
 function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrides = {}) {
   return render(
     <PullRequestList
+      view={overrides.view ?? "in-progress"}
       pullRequests={pullRequests}
       failedRepositories={overrides.failedRepositories ?? []}
       fetchedAt="2026-08-11T10:30:00Z"
@@ -59,9 +61,13 @@ describe("PullRequestList", () => {
     cleanup();
   });
 
-  it("PRが無いときは空状態を表示する", () => {
+  it("PRが無いときはビューに応じた空状態を表示する", () => {
     renderList([]);
-    expect(screen.getByText("マージ待ちのPull Requestはありません。")).toBeTruthy();
+    expect(screen.getByText("処理中のPull Requestはありません。")).toBeTruthy();
+
+    cleanup();
+    renderList([], { view: "all" });
+    expect(screen.getByText("Pull Requestはありません。")).toBeTruthy();
   });
 
   it("リポジトリごとにグループ化し、件数を表示する", () => {
@@ -139,7 +145,7 @@ describe("PullRequestList", () => {
   it("エラー時はメッセージを表示し、空状態は出さない", () => {
     renderList([], { error: "リクエストに失敗しました (502)" });
     expect(screen.getByText("リクエストに失敗しました (502)")).toBeTruthy();
-    expect(screen.queryByText("マージ待ちのPull Requestはありません。")).toBeNull();
+    expect(screen.queryByText("処理中のPull Requestはありません。")).toBeNull();
   });
 
   it("PR番号をタイトルの前に表示し、GitHubのPRへのリンクを併記する", () => {

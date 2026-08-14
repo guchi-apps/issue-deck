@@ -31,7 +31,7 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
   },
 }));
 
-const { reportDispatchSessions } = await import("./sessions");
+const { markDispatchSessionEnded, reportDispatchSessions } = await import("./sessions");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 
@@ -193,5 +193,53 @@ describe("reportDispatchSessions", () => {
     await reportDispatchSessions({ hostName: "subpc", sessions: [], now: NOW });
 
     expect(findMany).toHaveBeenNthCalledWith(1, { where: { host: "subpc" } });
+  });
+});
+
+/**
+ * #1321。セッション自身が畳まれた瞬間に送ってくる1件。**pollerの一括報告を待たずに
+ * `ALIVE`を降ろすためだけの入口**で、異常終了の判定はpollerの担当のまま。
+ */
+describe("markDispatchSessionEnded", () => {
+  beforeEach(() => {
+    updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("そのホストのそのセッションだけをGONEへ倒す", async () => {
+    const result = await markDispatchSessionEnded({
+      hostName: "subpc",
+      tmuxSessionName: "issue-deck-issue-1321",
+      now: NOW,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-1321",
+        // 二重に報告されても2回目は0件。pollerが先にFAILEDを書いていればそれを消さない
+        state: "ALIVE",
+      },
+      data: { state: "GONE", lastReportedAt: NOW, escalatedState: null },
+    });
+    expect(result).toEqual({ updated: 1 });
+  });
+
+  // 同名で起動し直して再び落ちたときに、2回目の引き上げが起きなくなる
+  it("引き上げの記録も落とす", async () => {
+    await markDispatchSessionEnded({ hostName: "subpc", tmuxSessionName: "s", now: NOW });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ escalatedState: null }) }),
+    );
+  });
+
+  // pollerがまだ1巡していないなど、対象の行が無いことは普通に起きる
+  it("対象の行が無ければ0件を返す（例外にしない）", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    const result = await markDispatchSessionEnded({
+      hostName: "subpc",
+      tmuxSessionName: "issue-deck-issue-1321",
+      now: NOW,
+    });
+    expect(result).toEqual({ updated: 0 });
   });
 });

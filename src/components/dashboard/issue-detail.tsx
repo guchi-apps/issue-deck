@@ -703,19 +703,21 @@ export function IssueDetail({
 
           <IssueAiSummary issue={issue} />
 
-          <Separator />
-
-          <div>
-            <h2 className="mb-2 text-sm font-semibold">説明</h2>
-            <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
-          </div>
-
+          {/* 子イシューの進捗はAI要約と説明の間に置く（#1340）。説明より上に出すことで、
+              本文を読み始める前に分割済みの子イシューがあることに気付ける */}
           {hasSubIssueRelations && (
             <>
               <Separator />
               <SubIssueProgress relations={subIssueRelations} />
             </>
           )}
+
+          <Separator />
+
+          <div>
+            <h2 className="mb-2 text-sm font-semibold">説明</h2>
+            <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+          </div>
 
           <Separator />
 

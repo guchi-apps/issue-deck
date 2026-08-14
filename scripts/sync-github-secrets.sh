@@ -14,11 +14,19 @@
 #   scripts/sync-github-secrets.sh
 #   scripts/sync-github-secrets.sh --only SIGNALY_WEBHOOK_URL,HOST
 #
-# 必要な権限: gh の `repo` スコープ（repo secret/variable の書き込み）
+#   # organizationの共通値（#1307）。admin:org スコープが要る
+#   scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv --dry-run
+#   scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
+#
+# 必要な権限:
+#   repo項目 … gh の `repo` スコープ
+#   org項目  … gh の `admin:org` スコープ
 set -euo pipefail
 
 REPO="${REPO:-guchi-apps/issue-deck}"
-MANIFEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/secrets-manifest.tsv"
+ORG="${ORG:-guchi-apps}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MANIFEST="$REPO_ROOT/.github/secrets-manifest.tsv"
 DRY_RUN=false
 ONLY=""
 
@@ -26,6 +34,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=true; shift ;;
     --repo) REPO="$2"; shift 2 ;;
+    --org) ORG="$2"; shift 2 ;;
+    --manifest)
+      # 相対パスならリポジトリルートからの相対として解釈する
+      case "$2" in
+        /*) MANIFEST="$2" ;;
+        *)  MANIFEST="$REPO_ROOT/$2" ;;
+      esac
+      shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -66,7 +82,7 @@ while IFS=$'\t' read -r key scope kind gh_name source; do
   fi
 
   if [[ "$scope" == "inherit" ]]; then
-    echo "skip   $key（organization secretを使用するため同期しない）"
+    echo "skip   $key（organizationの $gh_name を使うため同期しない）"
     skipped=$((skipped + 1))
     continue
   fi
@@ -85,7 +101,8 @@ while IFS=$'\t' read -r key scope kind gh_name source; do
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "dry    $key -> $kind ($REPO) $gh_name ${#value}文字"
+    if [[ "$scope" == "org" ]]; then dry_target="org:$ORG"; else dry_target="$REPO"; fi
+    echo "dry    $key -> $kind ($dry_target) $gh_name ${#value}文字"
     synced=$((synced + 1))
     continue
   fi
@@ -96,11 +113,23 @@ while IFS=$'\t' read -r key scope kind gh_name source; do
   # 1件の失敗でスクリプト全体を止めない。以前は set -e により最初の失敗で即終了し、
   # 残りを試さないまま集計も出さずに終わっていた（GITHUB_ プレフィックスが予約名で
   # 弾かれた際に、28件中16件目で静かに止まった）。
-  case "$kind" in
-    secret) push_err="$(printf '%s' "$value" | gh secret set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
-    var)    push_err="$(printf '%s' "$value" | gh variable set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
-    *) echo "FAIL   $key（不明なKIND: $kind）" >&2; failed=$((failed + 1)); continue ;;
-  esac
+  # organization項目は可視性 all で入れる。privateリポジトリからも参照できるのは
+  # GitHub Team以降（2026-08-14に切り替え済み）。Freeでは参照できずorg共通化ができなかった。
+  if [[ "$scope" == "org" ]]; then
+    target="org:$ORG"
+    case "$kind" in
+      secret) push_err="$(printf '%s' "$value" | gh secret set "$gh_name" --org "$ORG" --visibility all 2>&1)" && rc=0 || rc=$? ;;
+      var)    push_err="$(printf '%s' "$value" | gh variable set "$gh_name" --org "$ORG" --visibility all 2>&1)" && rc=0 || rc=$? ;;
+      *) echo "FAIL   $key（不明なKIND: $kind）" >&2; failed=$((failed + 1)); continue ;;
+    esac
+  else
+    target="$REPO"
+    case "$kind" in
+      secret) push_err="$(printf '%s' "$value" | gh secret set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
+      var)    push_err="$(printf '%s' "$value" | gh variable set "$gh_name" --repo "$REPO" 2>&1)" && rc=0 || rc=$? ;;
+      *) echo "FAIL   $key（不明なKIND: $kind）" >&2; failed=$((failed + 1)); continue ;;
+    esac
+  fi
 
   if [[ "$rc" -ne 0 ]]; then
     # 値そのものは出力しない。ghのエラー文のみを見せる。
@@ -110,9 +139,9 @@ while IFS=$'\t' read -r key scope kind gh_name source; do
   fi
 
   if [[ "$key" == "$gh_name" ]]; then
-    echo "ok     $key -> $kind ($REPO)"
+    echo "ok     $key -> $kind ($target)"
   else
-    echo "ok     $key -> $kind ($REPO) ※GitHub側の名前は $gh_name"
+    echo "ok     $key -> $kind ($target) ※GitHub側の名前は $gh_name"
   fi
   synced=$((synced + 1))
 done < "$MANIFEST"

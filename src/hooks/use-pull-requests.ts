@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { PullRequestSummary, OpenPullRequestsResponse } from "@/types/pull-request";
+import type {
+  PullRequestListResponse,
+  PullRequestListScope,
+  PullRequestSummary,
+} from "@/types/pull-request";
 
-type UseOpenPullRequestsResult = {
+type UsePullRequestsResult = {
   pullRequests: PullRequestSummary[];
   /** 取得に失敗したリポジトリのfullName（部分的な欠落を画面に出すため） */
   failedRepositories: string[];
@@ -16,14 +20,21 @@ type UseOpenPullRequestsResult = {
 };
 
 /**
- * マージ待ち（open）のPull Requestをリポジトリ横断で取得する。
+ * Pull Requestをリポジトリ横断で取得する。
  *
- * **自動ポーリングは行わない。** 1回の取得で「リポジトリ数 + draft以外のPR数」ぶんのGitHub API
+ * `scope`が`open`ならマージ待ちのPRだけ、`all`ならクローズ済み（マージ済み・却下）も直近ぶんだけ
+ * 含める（#1312）。**再取得が走るのは`scope`が変わったときだけ**で、「処理中」「完了」の
+ * ビュー切り替えは同じ取得結果をクライアント側で絞るだけなのでGitHub APIを叩き直さない。
+ *
+ * **自動ポーリングは行わない。** 1回の取得で「リポジトリ数 + draft以外のopen PR数」ぶんのGitHub API
  * を消費するため（[/api/pull-requests](../app/api/pull-requests/route.ts)）、他のポーリング系
  * フック（use-pull-request-ci-status等が対象1件を追うのとは規模が違う）と同じ間隔で回すと
  * レート消費が読めなくなる。画面を開いたときとユーザーの明示的な更新操作でのみ取得する。
  */
-export function useOpenPullRequests(enabled: boolean): UseOpenPullRequestsResult {
+export function usePullRequests(
+  enabled: boolean,
+  scope: PullRequestListScope,
+): UsePullRequestsResult {
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
@@ -44,7 +55,9 @@ export function useOpenPullRequests(enabled: boolean): UseOpenPullRequestsResult
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/pull-requests", { signal: controller.signal });
+        const res = await fetch(`/api/pull-requests?scope=${scope}`, {
+          signal: controller.signal,
+        });
         if (!res.ok) {
           const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
           throw new Error(
@@ -53,7 +66,7 @@ export function useOpenPullRequests(enabled: boolean): UseOpenPullRequestsResult
               : `リクエストに失敗しました (${res.status})`,
           );
         }
-        const data: OpenPullRequestsResponse = await res.json();
+        const data: PullRequestListResponse = await res.json();
         if (cancelled) return;
         setPullRequests(data.pullRequests);
         setFailedRepositories(data.failedRepositories);
@@ -73,7 +86,7 @@ export function useOpenPullRequests(enabled: boolean): UseOpenPullRequestsResult
       cancelled = true;
       controller.abort();
     };
-  }, [enabled, reloadKey]);
+  }, [enabled, scope, reloadKey]);
 
   return { pullRequests, failedRepositories, fetchedAt, isLoading, error, refresh };
 }

@@ -223,6 +223,19 @@ export function nextEscalatedState(
 export const DISPATCH_SESSION_NAME_MAX_LENGTH = 191;
 
 /**
+ * tmuxセッション名として受け入れる形。**長さだけを見る。**
+ *
+ * `<リポジトリ名>-issue-<番号>`以外の名前を弾かないのは、この値が行の照合キーにしか使われず、
+ * 一致しなければ何も起きないため（`parseSessionName`は名前からIssueを割り出す用途で、
+ * そちらは当てが外れると無関係なIssueへコメントしうるので厳しく見ている）。
+ */
+export function parseDispatchSessionName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (value.length === 0 || value.length > DISPATCH_SESSION_NAME_MAX_LENGTH) return null;
+  return value;
+}
+
+/**
  * pollerから届いた1件を検証する。**issue-deck側でも検証をやり直す**（多層防御）。
  * 値はIssueコメントの投稿先を決めるのに使われるため、ここが最後の砦になる。
  */
@@ -230,11 +243,8 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
   if (typeof value !== "object" || value === null) return null;
   const input = value as Record<string, unknown>;
 
-  const tmuxSessionName = input.tmuxSessionName;
-  if (typeof tmuxSessionName !== "string") return null;
-  if (tmuxSessionName.length === 0 || tmuxSessionName.length > DISPATCH_SESSION_NAME_MAX_LENGTH) {
-    return null;
-  }
+  const tmuxSessionName = parseDispatchSessionName(input.tmuxSessionName);
+  if (!tmuxSessionName) return null;
 
   const repositoryFullName = input.repositoryFullName;
   if (typeof repositoryFullName !== "string") return null;

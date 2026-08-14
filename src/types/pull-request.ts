@@ -14,8 +14,9 @@ export type PullRequestKind =
 /**
  * 一覧・詳細のヘッダーを描くのに必要なPR1件ぶんの情報。
  *
- * 一覧（`/api/pull-requests`）はマージ待ち（open）のPRしか返さないが、画面内のリンクから
- * 開くPRはマージ済み・クローズ済みでもありうる（#1260）。そのため`state`・`merged`を持ち、
+ * 一覧（`/api/pull-requests`）は既定ではマージ待ち（open）のPRしか返さないが、画面内のリンクから
+ * 開くPRはマージ済み・クローズ済みでもありうる（#1260）し、「全てのPR」ビューでは一覧にも
+ * closedが載る（#1312）。そのため`state`・`merged`を持ち、
  * 詳細（`/api/pull-requests/detail`）も同じ形をあわせて返す。
  */
 export type PullRequestSummary = {
@@ -45,7 +46,27 @@ export type PullRequestSummary = {
   updatedAt: string;
 };
 
-export type OpenPullRequestsResponse = {
+/**
+ * 一覧APIが取りに行く母集団（#1312）。
+ *
+ * `open`はマージ待ちのPRだけ、`all`はそこへクローズ済み（マージ済み・却下）を直近ぶんだけ足す。
+ * クライアント側のビュー（処理中・完了）はどちらも`open`の結果を絞るだけなので、
+ * ビューを切り替えてもGitHub APIを叩き直さない。
+ */
+export type PullRequestListScope = "open" | "all";
+
+/**
+ * 左メニューの「Pull Request」セクションで選べる状態別ビュー（#1312）。
+ *
+ * - `all` … マージ済み・クローズ済みも含む全件
+ * - `in-progress` … CIの結果待ち（ドラフト・CI状態不明を含む）。待つしかないPR
+ * - `completed` … CIが確定したopenなPR（マージできる、または失敗している）。手を動かすべきPR
+ *
+ * `in-progress`と`completed`でopenなPRを過不足なく二分する。
+ */
+export type PullRequestViewId = "all" | "in-progress" | "completed";
+
+export type PullRequestListResponse = {
   pullRequests: PullRequestSummary[];
   /** 取得時刻（ISO8601）。一覧のヘッダーに「最終更新」として表示する */
   fetchedAt: string;
