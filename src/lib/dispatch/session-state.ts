@@ -40,8 +40,18 @@ export type DispatchSessionState = "ALIVE" | "EXITED" | "FAILED" | "GONE";
  * そこだけをフックから受け取る。境界は`gates.md`の「フックが飛ぶか」と同じで、
  * ここに入るのはセッションが生きている間しか飛ばないものに限る。
  *
- * **古い値が残り続けないことが前提。** `WAITING_INPUT`は`Stop`フック（`RESPONDED`へ）か、
- * セッションの消滅（pollerの報告で`EXITED`/`FAILED`/`GONE`へ）のどちらかで必ず解ける。
+ * **古い値が残り続けないことが前提。** `WAITING_INPUT`が解けるのは次の3つ。
+ *
+ * 1. `Stop`フック（`RESPONDED`へ）
+ * 2. セッションの消滅（pollerの報告で`EXITED`/`FAILED`/`GONE`へ。**表示が状態を優先するだけで、
+ *    列の値自体は残る**）
+ * 3. 同じ名前で立ち上がり直したときの破棄（`isRevivedSession`。#1353）
+ *
+ * 3が無いと、2で残った値が起動し直した次のセッションへそのまま引き継がれる。
+ *
+ * **フックが飛ぶ範囲より細かい状態は表せない。** 承認プロンプトに人が答えても何のフックも
+ * 飛ばないため、`WAITING_INPUT`は「答えた瞬間」ではなく「そのターンが終わった時（`Stop`）」に
+ * 解ける。答えた後の作業中も入力待ちに見える窓がここに残っている（#1353で別Issueへ切り出し）。
  */
 export type DispatchSessionActivity = "WAITING_INPUT" | "RESPONDED";
 
@@ -217,6 +227,31 @@ export function nextEscalatedState(
   if (escalated) return nextState;
   if (nextState !== "FAILED") return null;
   return escalatedState;
+}
+
+/**
+ * その報告で、行が**別のセッションのものとして立ち上がり直した**か（#1353）。
+ *
+ * セッションの行は`(host, tmuxSessionName)`で引く。名前は`<リポジトリ名>-issue-<番号>`固定で、
+ * 消えた行も24時間残す（`GONE_SESSION_RETENTION_MS`）ため、**同じIssueで起動し直すと前の
+ * セッションの行がそのまま再利用される**。ここで前のセッションの`activity`を引き継ぐと、
+ * 入力待ちのまま畳んだセッションのオレンジの「入力を待っています」が、次のセッションの
+ * 起動直後に何事も無かったように復活する（#1353で報告された症状）。
+ *
+ * `run-issue-session.sh`の`cleanup`がホスト側の状態ファイルを消しているのと同じ理由
+ * （#1256「残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように見える」）を、
+ * DBの行にも適用する。
+ *
+ * **`ALIVE`でなくなった行が`ALIVE`へ戻る瞬間だけを見る。** `ALIVE`が続いている間は同じ
+ * セッションなので触らない。ペインが死んで残っているだけの`EXITED`/`FAILED`から戻ることは
+ * 無い（死んだペインは生き返らない）が、`GONE`（報告に含まれなくなった）からは戻りうる。
+ */
+export function isRevivedSession(
+  previousState: DispatchSessionState | undefined | null,
+  nextState: DispatchSessionState,
+): boolean {
+  if (!previousState) return false;
+  return previousState !== "ALIVE" && nextState === "ALIVE";
 }
 
 /** ホスト名として許す長さ。DBの列と報告の受け口で同じ上限を使う */

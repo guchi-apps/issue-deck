@@ -152,6 +152,46 @@ export function useDispatchState(enabled: boolean) {
     [],
   );
 
+  /**
+   * 走っているセッションへの操作（停止・終了）を積む（#1332）。
+   *
+   * **失敗の理由を`error`（共有）へ入れず、戻り値で返す。** `error`は起動ボタンの下に
+   * 出ているため、停止に失敗した理由がそちらへ出ると、押した場所と表示が離れて話が通じない。
+   *
+   * 送信の直後に画面を変えないのは、積んだジョブが次の取得で`jobs`へ現れ、
+   * そちらが「送信しました」を出すため（起動と同じ扱い）。
+   */
+  const sendSessionControl = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+      kind: "interrupt" | "kill";
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            host: params.hostName,
+            kind: params.kind,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        setReloadKey((key) => key + 1);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [],
+  );
+
   const cancel = useCallback(async (jobId: string): Promise<boolean> => {
     setIsSubmitting(true);
     setError(null);
@@ -179,6 +219,7 @@ export function useDispatchState(enabled: boolean) {
     setError,
     isSubmitting,
     enqueue,
+    sendSessionControl,
     cancel,
   };
 }

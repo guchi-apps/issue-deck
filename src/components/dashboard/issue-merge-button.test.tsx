@@ -49,16 +49,8 @@ describe("IssueMergeButton", () => {
     expect(button.disabled).toBe(true);
   });
 
-  it("アイコン表示でもラベルからマージ操作だと分かる", () => {
-    render(<IssueMergeButton onMerge={async () => true} appearance="icon" />);
-    expect(screen.getByRole("button", { name: "マージする" })).not.toBeNull();
-  });
-
-  it("アイコン表示ではCI実行中に押せない理由をラベルで示す", () => {
-    render(<IssueMergeButton onMerge={async () => true} appearance="icon" ciStatus="in_progress" />);
-    const button = screen.getByRole("button", {
-      name: "CI実行中のためマージできません",
-    }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+  it("マージ失敗のエラーはボタンの手前にインライン表示する", () => {
+    render(<IssueMergeButton onMerge={async () => true} error="コンフリクトしています" />);
+    expect(screen.getByText("コンフリクトしています")).not.toBeNull();
   });
 });

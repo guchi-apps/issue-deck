@@ -35,7 +35,7 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 - **detect-conflicts**: developとコンフリクトしている（`mergeable`が`CONFLICTING`）PRを対応
   Issue番号の配列として検出する。トリガーが`pull_request`の場合は`gh pr view`でトリガー元のPR
-  1件のみを対象にし、それ以外（`push`/`schedule`/`workflow_dispatch`）は
+  1件のみを対象にし、それ以外（`workflow_run`/`schedule`/`workflow_dispatch`）は
   `gh pr list --base develop --state open --json number,headRefName,mergeable`でdevelop向けの
   全OPEN PRを取得し、ブランチ命名規約`issue-<番号>`（`scripts/start-issue.sh`が作成）に従うものを
   対象にする（#814）。
@@ -47,20 +47,26 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 ### トリガー
 
-- `push`（`develop`）: developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、最も速報性が
-  高い経路としてその都度検知する。
+- `workflow_run`（`CI` / `requested` / `develop`）: developへ新たな変更が入るとOPENなPRが
+  コンフリクトしうるため、最も速報性が高い経路としてその都度検知する。本来は`push`（`develop`）で
+  直接受けたいところだが、`claude-code-action`が`push`イベントに対応していない（後述）ため、
+  `push`（`develop`）で走る`ci.yml`の実行がキューされた時点（`requested`）を代理のpush通知として
+  使う（#1330）。`completed`ではなく`requested`にするのは、CIの完走を待つ分だけ検知が遅れるのを
+  避けるためで、コンフリクト検知自体はCIの成否と無関係なので待つ必要がない。`branches: develop`は
+  トリガー元のワークフロー実行の`head_branch`に対する条件なので、develop向けPRの`pull_request`で
+  走るCI（`head_branch`は`issue-<番号>`）はここには入らない。
 - `pull_request`（`develop`向け、`opened`/`reopened`）: develop向けPRが作成された直後、既に
   developとコンフリクトした状態で生まれるケース（issue #715）を即座に拾うため。`synchronize`
   （PRへの追加push毎）は含めない。実装エージェントが1つのIssueに対して何度も細かくpushする間、
   毎回`detect-conflicts`から`resolve-conflicts`のmatrixジョブが走ると、`resolve-conflicts`が
   使う同じ`issue-dispatch-<番号>-branch`concurrencyグループ内で実装ステップ自体と噛み合い
   キューが詰まる懸念があるため。developが動いてPRがコンフリクトに変化するケースは既存の
-  `push`（`develop`）トリガーでカバーされる。このトリガーはトリガー元のPR自身が既に
+  `workflow_run`（`develop`）トリガーでカバーされる。このトリガーはトリガー元のPR自身が既に
   コンフリクトしていないかだけを見ればよく、develop向けの他PRの状態まで見る必要はない。
   1回のワークフロー実行内のmatrix全ジョブのチェックはトリガーしたPRのチェック一覧に紐付いて
   表示されるため、以前は全件スキャンしていたことで、たまたま同じタイミングでコンフリクト
   していた無関係な他PRのチェックまで表示されてしまう不具合があった（#814で修正）。
-- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、push・pull_request
+- `schedule`（15分おき）: GitHubの`mergeable`判定は非同期に計算されるため、workflow_run・pull_request
   直後の検知時点ではまだ計算が終わっておらず`UNKNOWN`のままの場合がある。`detect-conflicts`の
   ポーリング（下記）でも解消しきれなかった取りこぼしを拾い直す安全網として、`issue-labels.yml`の
   各scheduleジョブと同じ間隔で走査する。
@@ -73,13 +79,33 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 `UNKNOWN`（判定計算未完了）のものが残っている間、10秒間隔・最大6回（計1分程度）ポーリングして
 再取得する。`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、
 「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。
-このポーリングは`push`・`schedule`トリガーの既存挙動にも同様に効く。
+このポーリングは`workflow_run`・`schedule`トリガーの既存挙動にも同様に効く。
 
 develop向けPRは`claude[bot]`（Claude Code GitHub App）が作成するため、`pull_request`トリガーでの
 `resolve-conflicts`ジョブの`claude-code-action`ステップはactorが`claude[bot]`になる。
 `claude-code-action`は既定でbot起点の実行を拒否するため、`allowed_bots`で明示的に許可している
 （`claude-review-develop.yml`等と同じ対処。#814）。指定するのは`issue-deck[bot],claude[bot]`の
 2つで、後述の「画面のボタンからの起動」を通すために`issue-deck[bot]`が要る（#1328）。
+
+### `claude-code-action`が対応しているトリガーイベント
+
+`claude-code-action`の`claude-code-action`ステップは、実行時に`GITHUB_EVENT_NAME`を見て以下の
+10種類**以外**なら`Unsupported event type: <イベント名>`を投げて即失敗する（`src/github/context.ts`の
+`parseGitHubContext`）。**ワークフローのトリガーにこれ以外のイベントを書いてはいけない。**
+
+`issues` / `issue_comment` / `pull_request` / `pull_request_target` / `pull_request_review` /
+`pull_request_review_comment` / `workflow_dispatch` / `repository_dispatch` / `schedule` /
+`workflow_run`
+
+`push`はこの一覧に含まれない。`v1.0.100`〜`v1.0.192`および`main`のいずれの時点でも含まれていない
+ため、「以前は動いていたが対応をやめた」のではなく最初から非対応であり、`@v1`を古いタグへ固定しても
+直らない（#1330）。この制約は`push`をトリガーにしたい全ワークフロー共通で、回避には
+**そのpushで走る別ワークフローの`workflow_run`を代理通知として購読する**方法を使う
+（前述のコンフリクト自動解消の`CI` / `requested`はこの形）。
+
+`workflow_run`は**デフォルトブランチ上のワークフローファイル**でのみ発火する点に注意する。
+このリポジトリのデフォルトブランチは`develop`なので、`workflow_run`トリガーの追加・変更はdevelopへ
+マージした時点で有効になる（言い換えると、PR上では発火しないため実地の確認はマージ後にしかできない）。
 
 ### 既存の実装ワークフローとの競合回避
 

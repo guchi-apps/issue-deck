@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  extractCrossReferencedPullRequestLink,
+  extractCrossReferencedPullRequestLinks,
   type GithubApiTimelineEvent,
 } from "@/lib/github/pull-request-timeline";
 
@@ -33,39 +33,45 @@ function crossReferencedEvent(
   };
 }
 
-describe("extractCrossReferencedPullRequestLink", () => {
+describe("extractCrossReferencedPullRequestLinks", () => {
   it("同一リポジトリのPRからのcross-referenceを抽出する", () => {
     const events = [crossReferencedEvent()];
-    expect(extractCrossReferencedPullRequestLink(events, "m-guchi", "issue-deck")).toEqual({
-      url: "https://github.com/m-guchi/issue-deck/pull/616",
-      number: 616,
-    });
+    expect(extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck")).toEqual([
+      { url: "https://github.com/m-guchi/issue-deck/pull/616", number: 616 },
+    ]);
   });
 
-  it("複数のcross-referenceがある場合は最新（配列末尾）のものを採用する", () => {
+  it("複数のcross-referenceがある場合は全件を番号の昇順で返す（#1339）", () => {
     const events = [
-      crossReferencedEvent({ number: 600, html_url: "https://github.com/m-guchi/issue-deck/pull/600" }),
       crossReferencedEvent({ number: 616, html_url: "https://github.com/m-guchi/issue-deck/pull/616" }),
+      crossReferencedEvent({ number: 600, html_url: "https://github.com/m-guchi/issue-deck/pull/600" }),
     ];
-    expect(extractCrossReferencedPullRequestLink(events, "m-guchi", "issue-deck")?.number).toBe(616);
+    expect(
+      extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck").map((l) => l.number),
+    ).toEqual([600, 616]);
+  });
+
+  it("同じPRが複数回参照されていても1件にまとめる（#1339）", () => {
+    const events = [crossReferencedEvent(), crossReferencedEvent()];
+    expect(extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck")).toHaveLength(1);
   });
 
   it("cross-referenced以外のイベントは無視する", () => {
     const events: GithubApiTimelineEvent[] = [{ event: "labeled" }, crossReferencedEvent()];
-    expect(extractCrossReferencedPullRequestLink(events, "m-guchi", "issue-deck")).not.toBeNull();
+    expect(extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck")).toHaveLength(1);
   });
 
   it("参照元がPRではなくIssueの場合は無視する", () => {
     const events = [crossReferencedEvent({ isPullRequest: false })];
-    expect(extractCrossReferencedPullRequestLink(events, "m-guchi", "issue-deck")).toBeNull();
+    expect(extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck")).toEqual([]);
   });
 
   it("別リポジトリからのcross-referenceは無視する", () => {
     const events = [crossReferencedEvent({ repositoryFullName: "other-owner/other-repo" })];
-    expect(extractCrossReferencedPullRequestLink(events, "m-guchi", "issue-deck")).toBeNull();
+    expect(extractCrossReferencedPullRequestLinks(events, "m-guchi", "issue-deck")).toEqual([]);
   });
 
-  it("該当イベントが無ければnullを返す", () => {
-    expect(extractCrossReferencedPullRequestLink([], "m-guchi", "issue-deck")).toBeNull();
+  it("該当イベントが無ければ空配列を返す", () => {
+    expect(extractCrossReferencedPullRequestLinks([], "m-guchi", "issue-deck")).toEqual([]);
   });
 });

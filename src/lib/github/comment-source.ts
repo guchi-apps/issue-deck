@@ -63,14 +63,28 @@ export function extractCommentSourceId(
 /**
  * claude-issue-dispatch.yml内のモード（計画・実装・分割・案内）を区別するための新規マーカー
  * （`<!-- issue-deck-agent:<role> -->`）。issue-deck-sourceとは別軸（source＝どのワークフローか、
- * agent＝その中のどの役割か）として併記する。plan-type/qa-answer/fallback-noticeで既に一意に
- * 判別できるロール（planner/splitter（計画確定分）/responder/error-notifier）には付与しない。
+ * agent＝その中のどの役割か）として併記する。
+ *
+ * 無人実行では、plan-type/qa-answer/fallback-noticeで既に一意に判別できるロールに重ねて
+ * 付与する必要はない。一方、**ローカル（サブPC）セッションはこのマーカーだけが手掛かりになる**。
+ * `gh`がユーザー本人のトークンで動くためlogin名が人間と同じになり、マーカーが無いと画面上
+ * ボットの発言と本人の発言を区別できないため（#1346）、計画は`planner`、レビュー・統合は
+ * `reviewer`を明示的に付ける（`scripts/prompts/`の各プロンプト）。
  */
-export const COMMENT_AGENT_MARKER_ROLES = ["implementer", "splitter", "guide"] as const;
+export const COMMENT_AGENT_MARKER_ROLES = [
+  "planner",
+  "implementer",
+  "splitter",
+  "guide",
+  "reviewer",
+] as const;
 
 export type CommentAgentMarkerRole = (typeof COMMENT_AGENT_MARKER_ROLES)[number];
 
-const AGENT_MARKER_PATTERN = /<!-- issue-deck-agent:(implementer|splitter|guide) -->/;
+// 役割を足したときに正規表現の更新を忘れないよう、一覧から組み立てる
+const AGENT_MARKER_PATTERN = new RegExp(
+  `<!-- issue-deck-agent:(${COMMENT_AGENT_MARKER_ROLES.join("|")}) -->`,
+);
 
 /** 指定したコメントからissue-deck-agentマーカーの役割を読み取る。マーカーが無ければnull */
 export function extractAgentMarker(
@@ -176,6 +190,37 @@ export function commentAgentRole(resolved: ResolvedCommentSource): CommentAgentR
       return resolved.role;
     case "unknown-automation":
       return null;
+  }
+}
+
+/**
+ * 本文のマーカーだけで「人ではなく自動投稿である」と断定できるコメントかどうか。
+ *
+ * ローカル（サブPC）セッションのClaude Codeは`gh`がユーザー本人のトークンを使うため、
+ * 投稿者のlogin名では本人の発言と区別できない。login名を見ずに本文だけで判定するのが
+ * この関数で、画面はこれを使って自分の名義のコメントでもボットの吹き出し（左寄せ）で
+ * 表示する（#1346）。
+ *
+ * **断定に使うのはマーカーが明示された種別だけ**で、書き出しの絵文字による推測
+ * （`emoji-fallback`）とlogin名に依存する`unknown-automation`は含めない。前者を含めると、
+ * ユーザー本人が🔧などで書き始めたコメントまでボット扱いになる。
+ *
+ * カンバンのドラッグ起点の起動コメント（`issue-deck-source:project-status-dispatch`）は
+ * 役割を持たず、実際に操作した人間へ寄せて表示する（#1026）ため、ここでもfalseになる。
+ */
+export function isMarkedAutomationComment(resolved: ResolvedCommentSource | null): boolean {
+  if (!resolved) return false;
+  switch (resolved.kind) {
+    case "fallback-notice":
+    case "qa-answer":
+    case "plan":
+    case "agent":
+      return true;
+    case "source":
+      return SOURCE_ID_ROLES[resolved.id] != null;
+    case "emoji-fallback":
+    case "unknown-automation":
+      return false;
   }
 }
 

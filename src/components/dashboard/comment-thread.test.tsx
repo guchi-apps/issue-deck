@@ -122,6 +122,72 @@ describe("CommentThread 左右の吹き出し", () => {
     const row = screen.getByText("他の人のコメント").closest("li")?.querySelector(":scope > div");
     expect(row?.className).not.toContain("flex-row-reverse");
   });
+
+  // ローカル（サブPC）セッションのコメントは`gh`がユーザー本人のトークンで動くため、
+  // currentUserLoginと同じlogin名で投稿される（#1346）
+  it("currentUserLoginと一致してもagentマーカー付きならボットとして左寄せになる", () => {
+    render(
+      <CommentThread
+        comments={[
+          makeComment({
+            author: { login: "m-guchi" },
+            body: "実装が完了しました\n\n<!-- issue-deck-agent:implementer -->",
+          }),
+        ]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("実装が完了しました").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).not.toContain("flex-row-reverse");
+    expect(screen.getByText("実装ボット")).not.toBeNull();
+  });
+
+  it("currentUserLoginと一致し書き出しが絵文字なだけのコメントは右寄せのままになる", () => {
+    render(
+      <CommentThread
+        comments={[makeComment({ author: { login: "m-guchi" }, body: "🔧 自分で直しました" })]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("🔧 自分で直しました").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).toContain("flex-row-reverse");
+    expect(screen.getByText("m-guchi")).not.toBeNull();
+  });
+
+  // カンバンのドラッグ起点の起動コメントは、操作した人間へ寄せて表示する（#1026）
+  it("project-status-dispatchマーカー付きコメントは自分の名義なら右寄せのままになる", () => {
+    render(
+      <CommentThread
+        comments={[
+          makeComment({
+            author: { login: "m-guchi" },
+            body: "@claude 実装を開始してください\n\n<!-- issue-deck-source:project-status-dispatch -->",
+          }),
+        ]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen
+      .getByText("@claude 実装を開始してください")
+      .closest("li")
+      ?.querySelector(":scope > div");
+    expect(row?.className).toContain("flex-row-reverse");
+  });
 });
 
 describe("CommentThread AI要約の表示位置", () => {
@@ -164,7 +230,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
@@ -185,7 +251,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
     expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
 
-  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 画面上部のマージボタンと状態を揃える）", async () => {
+  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 本文の上の対応PR一覧と状態を揃える）", async () => {
     const onPullRequestMerged = vi.fn();
     render(
       <CommentThread
@@ -197,7 +263,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
@@ -211,11 +277,11 @@ describe("CommentThread PRマージ待ちの表示", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
 
     await waitFor(() => {
-      expect(onPullRequestMerged).toHaveBeenCalledTimes(1);
+      expect(onPullRequestMerged).toHaveBeenCalledWith(674);
     });
   });
 
-  it("画面上部のマージボタンから押された場合（pullRequestMerged）もマージ済みの表示になる（#1288）", () => {
+  it("本文の上のマージボタンから押された場合（mergedPullRequestNumbers）もマージ済みの表示になる（#1288・#1339）", () => {
     render(
       <CommentThread
         comments={[]}
@@ -226,13 +292,13 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
         onRequestPrFix={async () => {}}
         onMergePullRequest={async () => true}
-        pullRequestMerged
+        mergedPullRequestNumbers={new Set([674])}
       />,
     );
 
@@ -261,8 +327,19 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
-        pullRequestCiStatus={pullRequestCiStatus}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
+        pullRequests={[
+          {
+            number: 674,
+            htmlUrl: "https://github.com/m-guchi/issue-deck/pull/674",
+            title: "対応PRのタイトル",
+            state: "open",
+            draft: false,
+            merged: false,
+            ciStatus: pullRequestCiStatus,
+            linkedIssueNumber: 1288,
+          },
+        ]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
