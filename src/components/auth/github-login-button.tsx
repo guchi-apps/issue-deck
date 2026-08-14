@@ -6,7 +6,7 @@ import { LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { startGithubOAuth } from "@/lib/supabase/github-oauth";
 
-export function GithubLoginButton() {
+export function GithubLoginButton({ disabled = false }: { disabled?: boolean }) {
   const searchParams = useSearchParams();
 
   async function handleLogin() {
@@ -15,7 +15,7 @@ export function GithubLoginButton() {
   }
 
   return (
-    <Button className="w-full" onClick={handleLogin}>
+    <Button className="w-full" onClick={handleLogin} disabled={disabled}>
       <LogIn />
       GitHubで始める
     </Button>
