@@ -23,6 +23,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   describeDispatchEnqueueRejection,
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
@@ -31,6 +32,7 @@ import {
   type DispatchEnqueueRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
@@ -186,18 +188,27 @@ export function StartImplementationDialog({
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   // 「このPC」を廃止して手元の出口がコピーになったため（#1263）、申告しているホストが無くても
   // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
   const showTargets = includeDispatchTargets === true;
   /**
    * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
-   * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばす。
+   * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある・
+   * 既にセッションが動いている）は飛ばす。
    */
   const defaultTargetHost = showTargets
     ? resolveDefaultDispatchHost({
         hosts: dispatch.hosts,
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob,
+        blockingSession,
       })
     : null;
   const defaultTarget: StartTarget = defaultTargetHost
@@ -216,6 +227,7 @@ export function StartImplementationDialog({
           host: selectedHost,
           repositoryFullName: issue.repositoryFullName,
           hasActiveJob,
+          blockingSession,
         })
       : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
@@ -430,6 +442,7 @@ export function StartImplementationDialog({
                 host={host}
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
+                blockingSession={blockingSession}
                 selected={effectiveTarget.kind === "host" && effectiveTarget.host === host.name}
                 onSelect={() => setTarget({ kind: "host", host: host.name })}
               />
@@ -496,18 +509,29 @@ function DispatchHostOption({
   host,
   repositoryFullName,
   hasActiveJob,
+  blockingSession,
   selected,
   onSelect,
 }: {
   host: DispatchHostView;
   repositoryFullName: string;
   hasActiveJob: boolean;
+  blockingSession: DispatchSessionView | null;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const rejection = resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob });
+  const rejection = resolveDispatchTargetRejection({
+    host,
+    repositoryFullName,
+    hasActiveJob,
+    blockingSession,
+  });
   const description = rejection
-    ? describeDispatchEnqueueRejection(rejection, { hostName: host.name, repositoryFullName })
+    ? describeDispatchEnqueueRejection(rejection, {
+        hostName: host.name,
+        repositoryFullName,
+        session: blockingSession,
+      })
     : `ジョブを積みます。${host.name}が取りに来た時点で起動します`;
 
   return (

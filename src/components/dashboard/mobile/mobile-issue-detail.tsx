@@ -50,6 +50,7 @@ import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
@@ -188,10 +189,19 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）。判定はAPI側
+  // （`enqueueDispatchJob`）と同じものを使う
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   const defaultDispatchHost = resolveDefaultDispatchHost({
     hosts: dispatch.hosts,
     repositoryFullName: issue.repositoryFullName,
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+    blockingSession,
   });
   const startLabel = defaultDispatchHost ? `${defaultDispatchHost}で開始` : "GitHub Actionsで開始";
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
