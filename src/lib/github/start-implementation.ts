@@ -46,28 +46,76 @@ export const START_IMPLEMENTATION_OPTIONS: {
   {
     key: "planRequired",
     label: "計画が必要",
-    description: "実装前にPlan modeで計画を提示し、承認を得てから実装を進めます",
+    description:
+      "実装前にPlan modeで計画を提示し、承認を得てから実装を進めます（新機能・改善のIssueでは既定でON）",
     githubLabel: PLAN_REQUIRED_LABEL,
   },
   {
     key: "mergeConfirmRequired",
     label: "マージ前に確認が必要",
-    description: "developへのマージ前に必ずユーザーの確認を挟んでから進めます",
+    description:
+      "内容によらず、developへのマージ前に必ず自分で差分を確認します（認証・DB・本番設定・Actions・Secrets・課金の変更は指定しなくても自動で止まります）",
     githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
   },
   {
     key: "previewRequired",
     label: "開発環境を起動する",
-    description: "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます",
+    description:
+      "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます（サブPC実行ならtailnet経由でスマホからも開けます）",
     githubLabel: PREVIEW_REQUIRED_LABEL,
   },
   {
     key: "screenshotRequired",
     label: "スクリーンショットが必要",
-    description: "PR作成前に変更箇所のスクリーンショットを取得し、確認してもらってから実装を進めます",
+    description:
+      "PR作成前に変更箇所のスクリーンショットを取得し、Issueへ貼ります（無人実行は終了と同時にdevサーバーが消えるため、画面を見る唯一の手段）",
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
   },
 ];
+
+/**
+ * 計画フェーズを既定でONにするIssue種別ラベル（#1317）。
+ *
+ * **「何をどう作るか」に選択の余地がある種別だけを挙げる。** バグ修正・軽微な修正・文書整理は
+ * 直すべき箇所が決まっており、計画を挟んでも承認待ちの往復が増えるだけで判断が変わらない。
+ * ここに無い種別（未選択も含む）は従来どおり既定でOFFになる。
+ */
+export const PLAN_REQUIRED_DEFAULT_TYPE_LABELS = ["50.feature", "51.improvement", "62.design"];
+
+/**
+ * Issueの種別ラベルから「計画が必要」の既定値を求める（#1317）。
+ *
+ * **見るのは種別ラベルだけで、`21.plan-required`自体の有無は見ない。** 種別を選び直したときに
+ * 既定を付け外しの両方向へ追従させるため（Issue作成画面）。既に付いているラベルを尊重するかどうかは
+ * 呼び出し側で判断する。どちらの画面でも、ユーザーが自分でチェックを触った後は上書きしない。
+ */
+export function planRequiredDefaultForLabels(labelNames: readonly string[]): boolean {
+  return labelNames.some((name) => PLAN_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
+}
+
+/**
+ * 実行先に応じて、ダイアログに出すオプションを絞る（#1317）。
+ *
+ * **スクリーンショットはGitHub Actions（無人実行）のときだけ出す。** サブPC実行・ローカル実行では
+ * `tailscale serve`で開発サーバーそのものをtailnetへ出せる（#1265）ため、スマホからでも実物の画面を
+ * 確認でき、撮影は重いだけで得るものが無い。無人実行はワークフロー終了と同時にdevサーバーが消え、
+ * Fly.ioのプレビュー環境も#1308で廃止したため、撮影が画面を見る唯一の手段として残る。
+ *
+ * **既にチェックが入っている場合は実行先によらず出す。** 隠すと、付いてしまったラベルを
+ * このダイアログから外せなくなる（`resolveScreenshotRejection`で無効化する側と同じ考え方）。
+ */
+export function visibleStartImplementationOptions({
+  isActionsTarget,
+  options,
+}: {
+  isActionsTarget: boolean;
+  options: StartImplementationOptions;
+}): typeof START_IMPLEMENTATION_OPTIONS {
+  return START_IMPLEMENTATION_OPTIONS.filter(
+    (option) =>
+      option.key !== "screenshotRequired" || isActionsTarget || options.screenshotRequired,
+  );
+}
 
 /** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
 const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
@@ -95,11 +143,20 @@ export function startImplementationLabelsToAdd(options: StartImplementationOptio
   );
 }
 
-/** issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める */
+/**
+ * issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める。
+ *
+ * 「計画が必要」だけは種別ラベルからの既定（#1317）も見る。`21.plan-required`が付いていなくても、
+ * 新機能・改善のIssueではチェックが入った状態で開く。
+ */
 export function startImplementationOptionsFromLabels(labels: IssueLabel[]): StartImplementationOptions {
-  const labelNames = new Set(labels.map((label) => label.name));
+  const labelNames = labels.map((label) => label.name);
+  const attached = new Set(labelNames);
   return START_IMPLEMENTATION_OPTIONS.reduce((options, option) => {
-    options[option.key] = labelNames.has(option.githubLabel);
+    options[option.key] =
+      option.key === "planRequired"
+        ? attached.has(PLAN_REQUIRED_LABEL) || planRequiredDefaultForLabels(labelNames)
+        : attached.has(option.githubLabel);
     return options;
   }, {} as StartImplementationOptions);
 }

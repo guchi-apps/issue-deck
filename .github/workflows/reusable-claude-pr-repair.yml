@@ -413,7 +413,12 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # バンプPR・リリースPRはclaude[bot]やgithub-actions[bot]が作成するため、
           # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#814と同じ対処）。
-          allowed_bots: "claude[bot]"
+          #
+          # issue-deck[bot]も併せて許可する（#1328）。本ワークフローはissue-deckの画面の
+          # 修復ボタン（#1293）からのworkflow_dispatchでしか起動せず、その起動は
+          # GitHub Appのインストールトークンで行うためactorが常にissue-deck[bot]になる。
+          # ここに無いと全ての起動が`Workflow initiated by non-human actor: issue-deck`で失敗する。
+          allowed_bots: "issue-deck[bot],claude[bot]"
           show_full_output: true
           # 実装が使う検証コマンドの許可リスト。**再利用可能ワークフロー
           # (reusable-issue-dispatch / reusable-claude-ci-fix /

@@ -38,8 +38,10 @@ import {
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
+import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
   isSelectableLabelName,
+  planRequiredDefaultForLabels,
   START_IMPLEMENTATION_OPTIONS,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
@@ -71,6 +73,21 @@ export function mergeSuggestedLabels(prev: string[], suggested: string[]): strin
     ...prev.filter((name) => !isSelectableLabelName(name)),
     ...new Set(suggested.filter(isSelectableLabelName)),
   ];
+}
+
+/**
+ * 種別ラベル（`50.feature`等）の選択に「計画が必要」を追従させた結果を返す（#1317）。
+ * 既に一致していれば`null`を返し、呼び出し側の書き込み自体を止める（再レンダリングの連鎖を作らない）。
+ *
+ * バグ修正から新機能へ選び直したときに付き、逆に選び直したときに外れる必要があるため、
+ * 付け外しの**両方向**を扱う。ユーザーが自分でチェックを触った後に呼ばないのは呼び出し側の責務。
+ */
+export function syncPlanRequiredLabel(selectedLabels: string[]): string[] | null {
+  const shouldSelect = planRequiredDefaultForLabels(selectedLabels);
+  if (shouldSelect === selectedLabels.includes(PLAN_REQUIRED_LABEL)) return null;
+  return shouldSelect
+    ? [...selectedLabels, PLAN_REQUIRED_LABEL]
+    : selectedLabels.filter((name) => name !== PLAN_REQUIRED_LABEL);
 }
 
 const DEFAULT_ASSIGNEE = "m-guchi";
@@ -106,6 +123,11 @@ export function CreateIssueDialog({
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   const hasUserSetAssignee = useRef(false);
+  /**
+   * 「計画が必要」のチェックをユーザー自身が触ったか（#1317）。
+   * 触った後は種別ラベルからの既定で上書きしない（担当者欄と同じ扱い）。
+   */
+  const hasUserSetPlanRequired = useRef(false);
   /**
    * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ実行先の選択を出す。**
    * このダイアログ自体は閉じているので、実行先の選択はDialogの外側に並べて描画する。
@@ -165,6 +187,7 @@ export function CreateIssueDialog({
     setIsImageUploading(false);
     setError(null);
     hasUserSetAssignee.current = draft.assignee !== null;
+    hasUserSetPlanRequired.current = false;
     setRestorableDraft(
       readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
     );
@@ -186,6 +209,18 @@ export function CreateIssueDialog({
     }
   }, [open, assignees]);
 
+  useEffect(() => {
+    if (!open || hasUserSetPlanRequired.current) return;
+    // 種別ラベル（50.feature等）の選択に「計画が必要」を追従させる（#1317）。ラベル選択欄・
+    // 「タイトル・ラベルを自動生成」・下書きの復元のどこから種別が変わっても同じ既定になるよう、
+    // 個々の操作ではなく選択済みラベルの変化に紐づける。既定と一致した時点でnullが返り書き込みが
+    // 止まるため、連鎖的な再レンダリングは起きない。ユーザーがチェックを触った後は上書きしない。
+    const next = syncPlanRequiredLabel(selectedLabels);
+    if (!next) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedLabels(next);
+  }, [open, selectedLabels]);
+
   function handleRestoreDraft() {
     if (!restorableDraft) return;
     setRepositoryFullName(defaultRepositoryFullName ?? restorableDraft.repositoryFullName);
@@ -204,9 +239,13 @@ export function CreateIssueDialog({
     setSelectedLabels([]);
     setAssignee(null);
     hasUserSetAssignee.current = false;
+    hasUserSetPlanRequired.current = false;
   }
 
   function toggleLabel(name: string) {
+    // 「計画が必要」はチェックボックスからしか来ない（ラベル選択欄からは除外されている）ため、
+    // ここで触ったことを記録すれば、以降は種別ラベルからの既定で上書きされない（#1317）
+    if (name === PLAN_REQUIRED_LABEL) hasUserSetPlanRequired.current = true;
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );

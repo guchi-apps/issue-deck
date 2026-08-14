@@ -4,9 +4,13 @@ import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, PLAN_REQUIRED_LABEL } from "@/lib/
 import {
   canStartImplementation,
   isSelectableLabelName,
+  planRequiredDefaultForLabels,
+  START_IMPLEMENTATION_DEFAULT_OPTIONS,
   startImplementationCommentBody,
   startImplementationDisabledReason,
   startImplementationLabelsToAdd,
+  startImplementationOptionsFromLabels,
+  visibleStartImplementationOptions,
 } from "@/lib/github/start-implementation";
 
 describe("startImplementationCommentBody", () => {
@@ -42,6 +46,86 @@ describe("startImplementationLabelsToAdd", () => {
         mergeConfirmRequired: false,
       }),
     ).toEqual([PLAN_REQUIRED_LABEL]);
+  });
+});
+
+describe("planRequiredDefaultForLabels", () => {
+  it("新機能・改善・デザインの種別では計画を既定でONにする（#1317）", () => {
+    expect(planRequiredDefaultForLabels(["50.feature"])).toBe(true);
+    expect(planRequiredDefaultForLabels(["51.improvement"])).toBe(true);
+    expect(planRequiredDefaultForLabels(["62.design"])).toBe(true);
+  });
+
+  it("バグ修正・軽微な修正・文書整理の種別では計画を既定でOFFにする（#1317）", () => {
+    expect(planRequiredDefaultForLabels(["30.bug"])).toBe(false);
+    expect(planRequiredDefaultForLabels(["60.chore"])).toBe(false);
+    expect(planRequiredDefaultForLabels(["65.docs"])).toBe(false);
+  });
+
+  it("種別ラベルが無ければ従来どおりOFFにする", () => {
+    expect(planRequiredDefaultForLabels([])).toBe(false);
+    expect(planRequiredDefaultForLabels(["80.Priority: High"])).toBe(false);
+  });
+
+  // 種別を選び直したときに付け外しの両方向へ追従させるため、21.plan-required自体は見ない
+  it("21.plan-requiredが付いているだけでは既定をONにしない", () => {
+    expect(planRequiredDefaultForLabels([PLAN_REQUIRED_LABEL])).toBe(false);
+  });
+});
+
+describe("startImplementationOptionsFromLabels", () => {
+  function makeLabels(names: string[]) {
+    return names.map((name) => ({ name, color: "000000", description: null }));
+  }
+
+  it("付与済みのオプションラベルをそのまま初期選択にする", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["24.screenshot-required"]))).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      screenshotRequired: true,
+    });
+  });
+
+  it("21.plan-requiredが未付与でも、新機能のIssueなら計画にチェックを入れて開く（#1317）", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["50.feature"]))).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      planRequired: true,
+    });
+  });
+
+  it("バグ修正のIssueでも、既に21.plan-requiredが付いていれば尊重する", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["30.bug", PLAN_REQUIRED_LABEL]))).toEqual(
+      { ...START_IMPLEMENTATION_DEFAULT_OPTIONS, planRequired: true },
+    );
+  });
+
+  it("バグ修正のIssueでは計画にチェックを入れない", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["30.bug"]))).toEqual(
+      START_IMPLEMENTATION_DEFAULT_OPTIONS,
+    );
+  });
+});
+
+describe("visibleStartImplementationOptions", () => {
+  function keysFor(isActionsTarget: boolean, screenshotRequired: boolean) {
+    return visibleStartImplementationOptions({
+      isActionsTarget,
+      options: { ...START_IMPLEMENTATION_DEFAULT_OPTIONS, screenshotRequired },
+    }).map((option) => option.key);
+  }
+
+  // サブPC・ローカル実行はtailscale serveで実物の画面を見られるため撮影は不要（#1265・#1317）
+  it("GitHub Actions以外を選んでいる場合、スクリーンショットのオプションを出さない", () => {
+    expect(keysFor(false, false)).not.toContain("screenshotRequired");
+    expect(keysFor(false, false)).toContain("previewRequired");
+  });
+
+  it("GitHub Actionsを選んでいる場合はスクリーンショットのオプションを出す", () => {
+    expect(keysFor(true, false)).toContain("screenshotRequired");
+  });
+
+  // 隠すと、既に付いてしまったラベルをこのダイアログから外せなくなる
+  it("既にチェックが入っている場合は実行先によらず出す", () => {
+    expect(keysFor(false, true)).toContain("screenshotRequired");
   });
 });
 
