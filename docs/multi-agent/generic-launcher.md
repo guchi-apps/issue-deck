@@ -148,23 +148,51 @@ GitHub上のファイルの有無ではなく、実際にcloneされ起動でき
 
 ```bash
 # 1. clone（worktreeの置き場は起動時に ~/apps/<repo>-worktrees が作られる）
-git clone git@github.com:guchi-apps/<repo>.git ~/apps/<repo>
+gh repo clone guchi-apps/<repo> ~/apps/<repo>
 
-# 2. env を置く（1Passwordから。テンプレートは各リポジトリの .env.example 等を参照）
-cd ~/apps/<repo> && op inject -i .env.tpl -o .env.local   # リポジトリによって名前が違う
+# 2. 依存インストール（初回だけ。worktree側は起動時に毎回入る）
+cd ~/apps/<repo> && npm ci   # または pnpm install。package.json が無ければ不要
 
-# 3. 依存インストール（初回だけ。worktree側は起動時に毎回入る）
-npm ci   # または pnpm install
-
-# 4. 対応表へ追記
+# 3. 対応表へ追記
 $EDITOR ~/.config/issue-deck/local-repos.conf
 
-# 5. 申告に載ることを確認する
+# 4. 申告に載ることを確認する
 ~/apps/issue-deck/scripts/subpc-dispatch-poller.sh --announce-only
 ```
 
+**`git clone git@github.com:...`（SSH形式）では通らない。** サブPCの`~/.ssh/`には`authorized_keys`と
+`known_hosts`しか無く、GitHubへ出ていくための秘密鍵が無い。既存リポジトリのremoteもすべてHTTPSで、
+認証は`gh auth`のトークンが持っている。**秘密鍵を置いてSSH形式に揃える案は採らない**——トークンで
+足りており、鍵を1つ増やすと管理対象が増えるだけのため。
+
+対応表を追記しただけなら**pollerの再起動は要らない**。`local_repo_list_runnable()`は申告のたびに
+`local-repos.conf`を読み直す（再起動が要るのは後述の、issue-deck側スクリプトを差し替えたとき）。
+
 ポート帯だけはissue-deck側の[scripts/local-repo-ports.conf](../../scripts/local-repo-ports.conf)へ
-追記する（1台に複数リポジトリのセッションが常駐するため、帯が重なると衝突する）。
+追記する（1台に複数リポジトリのセッションが常駐するため、帯が重なると衝突する）。**サブPC側の作業より
+先に確保しておく。** 載っていないと`local_repo_port_base()`が何も返さず、汎用ランチャーの既定
+`3000 + Issue番号`に落ちて、未登録のリポジトリ同士が同じ帯に相乗りする。
+
+### envは既定では置かない
+
+**手順にenvの配置を含めない。** サブPC上で`.env.local`／`.env`を持っているのは`issue-deck`だけで、
+他は1つも持っていない（2026-08-14に実測）。汎用ランチャーは既定で開発サーバーを起動せず、envが無ければ
+`supply_env_files`は何もしないため、セッションの起動には影響しない。**開発サーバーを動かす必要が出た
+セッションでだけ置く。**
+
+置くときも`op inject -i .env.tpl -o .env.local`を機械的に叩かないこと。**`.env.tpl`の位置づけは
+リポジトリごとに違う。** `portfolio`のものはデプロイ／CI用の束で、そのまま流し込むとローカル開発が
+本番を向く。
+
+```text
+NEXT_PUBLIC_SUPABASE_URL=op://apps/Supabase/project-url      # 本番（開発用は dev-project-url）
+SSH_PRIVATE_KEY=op://apps/githubaction-sshkey/private_key     # デプロイ用
+DEPLOY_PATH=op://apps/portfolio/deploy-path                   # デプロイ用
+```
+
+READMEに「1Passwordは本番デプロイ・CIにのみ使用します」と明記されているのはこのため。
+`dayspan`・`car-care`はそもそも`.env.tpl`を持たず`.env.local.example`だけで、開発用の値は手で入れる。
+**まず対象リポジトリのREADMEで`.env.tpl`が何用かを確かめる。**
 
 ### この仕組みを取り込むとき（サブPC側）
 
@@ -173,9 +201,13 @@ git -C ~/apps/issue-deck pull
 systemctl --user restart issue-deck-dispatch-poller.service
 ```
 
-**pollerの再起動が要る。** 常駐しているのは`subpc-dispatch-poller.sh`のプロセスで、bashは実行中の
-スクリプトファイルを読み進めながら動くため、`git pull`でファイルが差し替わると走行中のプロセスが
-壊れうる。再起動すれば新しい判定（＝汎用ランチャーを使う申告）で動き出す。
+**スクリプトを差し替えたときはpollerの再起動が要る。** 常駐しているのは`subpc-dispatch-poller.sh`の
+プロセスで、bashは実行中のスクリプトファイルを読み進めながら動くため、`git pull`でファイルが
+差し替わると走行中のプロセスが壊れうる。再起動すれば新しい判定（＝汎用ランチャーを使う申告）で
+動き出す。
+
+**対応表（`local-repos.conf`）への追記だけなら再起動は要らない**——申告のたびに読み直されるため。
+再起動が要るのは、この`git pull`のようにissue-deck側のスクリプトが変わったときに限られる。
 
 ### マルチエージェント運用に未対応のリポジトリ
 
