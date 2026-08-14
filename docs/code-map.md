@@ -131,6 +131,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
   黙って素通りする。** 設計は
   [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
+- **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
+  作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
+  `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、
+  `scripts/`の修正はマージしただけでは反映されない。`scripts/lib/launcher-scripts-sync.sh`の
+  `warn_launcher_scripts_stale`が起動前に差分を警告する（個人設定の警告と同じく、
+  **警告するだけで自動pullはしない**）。経路の表は
+  [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒

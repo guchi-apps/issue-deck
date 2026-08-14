@@ -67,6 +67,9 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 # 個人設定・共有知識の同期の取り残しの警告も同じく共有する（#1190）。
 # shellcheck source=scripts/lib/personal-config-sync.sh
 source "$SCRIPT_DIR/lib/personal-config-sync.sh"
+# 起動スクリプト自身（issue-deckの本体の作業ツリー）が古いままの場合の警告（#1274）。
+# shellcheck source=scripts/lib/launcher-scripts-sync.sh
+source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -133,6 +136,10 @@ fi
 # 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
 # 取り込めていない場合に警告する（#1190）。起動は止めない。
 warn_personal_config_drift
+
+# このランチャー自身（issue-deckの本体の作業ツリー）がdevelopより古い場合に警告する（#1274）。
+# 起動対象のリポジトリではなく、起動する側のスクリプトを見る。
+warn_launcher_scripts_stale "$ROOT"
 
 WORKTREE_BASE="${ISSUE_DECK_GENERIC_WORKTREE_BASE:-$HOME/apps/$REPO-worktrees}"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
