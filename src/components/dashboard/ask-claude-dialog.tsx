@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -64,13 +65,16 @@ export function AskClaudeDialog({ issue, onCommentCreated, onIssueUpdated, rende
             コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。
           </DialogDescription>
         </DialogHeader>
-        <Textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="質問内容を入力してください"
-          rows={4}
-          autoFocus
-        />
+        <div className="flex flex-col gap-2">
+          <Textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="質問内容を入力してください"
+            rows={4}
+            autoFocus
+          />
+          <BodyCleanupButton value={question} onCleaned={setQuestion} disabled={isSubmitting} />
+        </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={isSubmitting}>

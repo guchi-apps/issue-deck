@@ -10,7 +10,6 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
-  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -23,6 +22,7 @@ import {
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
@@ -66,7 +66,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
-import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -162,12 +161,6 @@ export function IssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
-  const {
-    isGenerating: isCleaningUpComment,
-    error: commentCleanupError,
-    notConfigured: commentCleanupNotConfigured,
-    generate: generateCommentCleanup,
-  } = useIssueBodyCleanup();
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）。
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
@@ -256,12 +249,6 @@ export function IssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
-  }
-
-  async function handleGenerateCommentCleanup() {
-    const result = await generateCommentCleanup(newCommentBody);
-    if (!result) return;
-    setNewCommentBody(result.text);
   }
 
   async function handleAskClaudeFromComposer() {
@@ -819,26 +806,7 @@ export function IssueDetail({
                   }
                 }}
               />
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="w-fit"
-                  disabled={!newCommentBody.trim() || isCleaningUpComment}
-                  onClick={handleGenerateCommentCleanup}
-                >
-                  {isCleaningUpComment ? <Loader2 className="animate-spin" /> : <Mic />}
-                  音声入力を整理
-                </Button>
-                {commentCleanupNotConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていません
-                  </p>
-                )}
-                {commentCleanupError && (
-                  <p className="text-xs text-destructive">{commentCleanupError}</p>
-                )}
-              </div>
+              <BodyCleanupButton value={newCommentBody} onCleaned={setNewCommentBody} />
               <div className="flex flex-wrap justify-end gap-2">
                 {canCreateFollowupFromComment(issue) && (
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>

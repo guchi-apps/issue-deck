@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -194,6 +195,11 @@ export function AskRepoQuestionDialog({
               placeholder="質問内容を入力してください"
               className="min-h-32 md:text-sm"
               autoFocus
+            />
+            <BodyCleanupButton
+              value={question}
+              onCleaned={setQuestion}
+              disabled={isSubmitting}
             />
           </div>
 
