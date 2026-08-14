@@ -221,6 +221,21 @@ report_api_failure() {
 # 「自分が実行できるリポジトリ」を申告する。issue-deck側はこの一覧を信じて割り当てるため、
 # **start-local-session.sh と同じ4つの検証を通ったものだけ**を載せる（判定は共有ライブラリ）。
 # 併せて生存報告も兼ねており、途絶えたホストはissue-deck側でofflineとして扱われる。
+# スクリーンショットを撮れるか（#1268）。**Playwrightのブラウザ本体があるかで見る。**
+# リポジトリごとのnode_modulesではなくここを見るのは、ブラウザ本体の置き場が共通で、
+# どのリポジトリが入れたかに依存しないため。
+#
+# `PLAYWRIGHT_BROWSERS_PATH`が設定されていればそちらを優先する（公式の環境変数）。
+# **判定できない場合は「撮れない」と申告する。** 撮れると言って詰まるより、選ばせない方が軽い。
+screenshot_capable() {
+  local dir="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+  if [[ -d "$dir" ]] && compgen -G "$dir/*" >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 announce() {
   local repositories payload
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
@@ -230,7 +245,8 @@ announce() {
     --argjson repositories "$repositories" \
     --argjson contractVersion "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" \
     --arg agentVersion "$DISPATCH_POLLER_VERSION" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion}')"
+    --argjson screenshotCapable "$(screenshot_capable)" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"

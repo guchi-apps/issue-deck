@@ -27,6 +27,7 @@ import {
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
+  resolveScreenshotRejection,
   type DispatchEnqueueRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
@@ -220,6 +221,8 @@ export function StartImplementationDialog({
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
   // **トリガーではなくここで止める**（#1262）
   const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
+  // 選んだホストでスクリーンショットを撮れない場合（#1268）。**申告していないホストは塞がない**
+  const screenshotRejection = resolveScreenshotRejection(selectedHost);
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -390,20 +393,33 @@ export function StartImplementationDialog({
           <DialogDescription>必要なオプションを選択してから実装を開始してください。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          {START_IMPLEMENTATION_OPTIONS.map((option) => (
-            <div key={option.key} className="flex items-start gap-2">
-              <Checkbox
-                id={`start-implementation-${option.key}`}
-                checked={options[option.key]}
-                onCheckedChange={() => toggleOption(option.key)}
-                className="mt-0.5"
-              />
-              <Label htmlFor={`start-implementation-${option.key}`} className="flex-col items-start gap-0.5">
-                {option.label}
-                <span className="text-xs font-normal text-muted-foreground">{option.description}</span>
-              </Label>
-            </div>
-          ))}
+          {START_IMPLEMENTATION_OPTIONS.map((option) => {
+            // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
+            // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
+            const unavailable =
+              option.key === "screenshotRequired" && screenshotRejection !== null;
+            const disabled = unavailable && !options[option.key];
+            return (
+              <div key={option.key} className="flex items-start gap-2">
+                <Checkbox
+                  id={`start-implementation-${option.key}`}
+                  checked={options[option.key]}
+                  disabled={disabled}
+                  onCheckedChange={() => toggleOption(option.key)}
+                  className="mt-0.5"
+                />
+                <Label
+                  htmlFor={`start-implementation-${option.key}`}
+                  className={cn("flex-col items-start gap-0.5", disabled && "opacity-50")}
+                >
+                  {option.label}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {unavailable ? screenshotRejection : option.description}
+                  </span>
+                </Label>
+              </div>
+            );
+          })}
         </div>
         {showTargets && (
           <div className="flex flex-col gap-2">

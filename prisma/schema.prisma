@@ -401,20 +401,25 @@ model DispatchJob {
 // `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
 // 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
 model DispatchHost {
-  id              String   @id @default(cuid())
-  name            String   @unique
+  id                String   @id @default(cuid())
+  name              String   @unique
   // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
   // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
-  repositories    String   @db.Text
+  repositories      String   @db.Text
   // ホストの受け口が扱えるローカル起動プロトコルの上限版数
   // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
-  contractVersion Int?
+  contractVersion   Int?
   // ホスト側が申告する同時実行数の上限。AppSetting.dispatchConcurrencyとminを取る
-  maxConcurrency  Int?
+  maxConcurrency    Int?
   // pollerのバージョン。受け口が古いまま動いているかの手掛かり
-  agentVersion    String?
+  agentVersion      String?
+  // スクリーンショットを撮れるか（#1268）。Playwrightのブラウザ本体が入っているかで判定する。
+  // **`null`は「申告していない」**（古いpoller）で、`false`（撮れない）とは区別する。
+  // 無人実行では依存の追加をその場で確認する相手がいないため、撮れないホストで
+  // `24.screenshot-required`を選ばせると必ず詰まる
+  screenshotCapable Boolean?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
-  lastSeenAt      DateTime
+  lastSeenAt        DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
