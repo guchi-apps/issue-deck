@@ -196,6 +196,25 @@ git tag --list 'workflows/*'
 
 issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）を参照し、常に最新の内容で動く。他リポジトリはタグ固定のため、issue-deck側の変更は**新しいタグを切り、各リポジトリのcallerを1行更新するPRを出す**まで波及しない。issue-deckが先に壊れて他リポジトリには届かない、カナリア構成である（#934）。
 
+### タグが記録しないもの — `on:`と`with:`はcallerが持つコピー（#1366）
+
+`@<タグ>`がバージョン記録として機能するのは**ジョブ本体（`reusable-*.yml`側）だけ**である。callerが自分で持つ以下の2つは、issue-deck側の同名ファイルからコピーした断片であり、**タグを上げても波及しないうえ、ずれていても`uses:`の行を見る限り検知できない。**
+
+- `on:`（トリガー定義）
+- `with:`（リポジトリ固有の入力値）
+
+`with:`はリポジトリごとに異なるのが正常なので差分があっても問題にならないが、**`on:`は原則として全リポジトリで同じであるべき**で、ここがずれると「参照先は最新なのに起動経路だけ古い」という状態になる。#1366では、issue-deck側で`push`（`develop`）→`workflow_run`（`CI` / `requested`）へ直した（#1330・#1365）あとも、guchi-apps/dayspan・guchi-apps/shopping-listのcallerには`push`が残り、`Unsupported event type: push`で失敗し続けていた。
+
+**issue-deck側でトリガーを変更したら、そのワークフローの全callerを横断して確認する。**
+
+```bash
+# 例: claude-conflict-resolve.yml のトリガーを全リポジトリで確認する
+for r in $(gh repo list guchi-apps --limit 50 --json name --jq '.[].name'); do
+  c=$(gh api "repos/guchi-apps/$r/contents/.github/workflows/claude-conflict-resolve.yml" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+  [ -n "$c" ] && echo "== $r" && echo "$c" | sed -n '/^on:/,/^jobs:/p'
+done
+```
+
 移行済みのワークフローは以下のとおり。
 
 | ワークフロー | 実体 | 移行時期 |

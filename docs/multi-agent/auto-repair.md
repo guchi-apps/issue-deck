@@ -106,6 +106,14 @@ develop向けPRは`claude[bot]`（Claude Code GitHub App）が作成するため
 `workflow_run`は**デフォルトブランチ上のワークフローファイル**でのみ発火する点に注意する。
 このリポジトリのデフォルトブランチは`develop`なので、`workflow_run`トリガーの追加・変更はdevelopへ
 マージした時点で有効になる（言い換えると、PR上では発火しないため実地の確認はマージ後にしかできない）。
+他リポジトリへ展開する場合も、そのリポジトリのデフォルトブランチが`develop`であることを先に確認する
+（`main`がデフォルトなら、mainへ反映されるまで有効にならない）。
+
+**このトリガーの修正は他リポジトリへ自動では波及しない。** 参照方式（`reusable-*.yml`を`uses:`で
+呼ぶ薄いcaller）に移行済みでも、`on:`はcallerが自分で持つコピーであり`@<タグ>`のバージョン記録の
+対象外のため、issue-deck側を直しても各リポジトリのcallerには`push`が残る（#1366で
+guchi-apps/dayspan・guchi-apps/shopping-listが実際にこの状態だった）。全callerを横断して確認する
+手順は[docs/supported-repositories.md](../supported-repositories.md)「タグが記録しないもの」を参照。
 
 ### 既存の実装ワークフローとの競合回避
 
