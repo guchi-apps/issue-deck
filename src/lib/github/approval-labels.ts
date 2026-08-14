@@ -1,7 +1,7 @@
 import type { IssueStateFilter } from "@/hooks/use-issue-filters";
 import { commentAgentRole, resolveCommentSource } from "@/lib/github/comment-source";
 import { resolveProgressStatus, type ProgressSource, type ProgressStatusKey } from "@/lib/issue-progress";
-import type { IssueComment, IssueLabel, LabelNavViewId } from "@/types/issue";
+import type { Issue, IssueComment, IssueLabel, LabelNavViewId } from "@/types/issue";
 
 /** ユーザーの確認・指示が必要であることを示すラベル */
 export const CHECK_USER_LABEL = "00.check-user";
@@ -19,6 +19,22 @@ export const PLAN_REQUIRED_LABEL = "21.plan-required";
  * docs/multi-agent/labels.md「デプロイ後などに残るユーザーの手作業はIssueとして起票する」。
  */
 export const MANUAL_STEP_LABEL = "71.manual-step";
+
+/** ユーザー自身の手作業を待っているIssueかどうか（#1240・#1280） */
+export function isManualStepIssue(labels: IssueLabel[]): boolean {
+  return labels.some((label) => label.name === MANUAL_STEP_LABEL);
+}
+
+/**
+ * 手作業Issueに「完了してクローズ」の導線を出すかどうか（#1280）。
+ *
+ * 手作業Issueは`Develop`→`Done`のリリースフローに乗らないため、実行したユーザーが
+ * closeするまでopenのまま残り続ける。closeが「…」メニューの奥にしか無いと、
+ * 実行し終えた後に何をすればよいかが画面から読み取れない。
+ */
+export function canCompleteManualStep(issue: Pick<Issue, "state" | "labels">): boolean {
+  return issue.state === "open" && isManualStepIssue(issue.labels);
+}
 
 /**
  * 質問への回答のみが完了した状態であることを示すラベル（00.check-userと常に併用し、
