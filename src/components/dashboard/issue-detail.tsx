@@ -43,7 +43,10 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
-import { LocalSessionApprovalNotice } from "@/components/dashboard/local-session-approval-notice";
+import {
+  LocalSessionApprovalNotice,
+  LocalSessionCommentNotice,
+} from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
@@ -728,6 +731,12 @@ export function IssueDetail({
             />
 
             <div className="mt-4 flex flex-col gap-2">
+              {/* ローカルで走っているIssueでは、ここへ書いたコメントがセッションへ届かない
+                  （#1287）。承認欄の案内（#1264）は承認待ちのときしか出ないが、届かないのは
+                  承認コメントに限らないため、入力欄そのものにも出す */}
+              {!executionTarget.expectsActionsRun && (
+                <LocalSessionCommentNotice session={issueSession} />
+              )}
               <MentionTextarea
                 placeholder="コメントを追加..."
                 className="min-h-20"

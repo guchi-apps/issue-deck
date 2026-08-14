@@ -54,7 +54,10 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
-import { LocalSessionApprovalNotice } from "@/components/dashboard/local-session-approval-notice";
+import {
+  LocalSessionApprovalNotice,
+  LocalSessionCommentNotice,
+} from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
@@ -895,6 +898,11 @@ export function MobileIssueDetail({
           />
 
           <div className="mt-4 flex flex-col gap-2">
+            {/* PC側と同じ理由でここにも出す（#1287）。外出先から書く経路こそ、
+                届いていないことに気づきにくい */}
+            {!executionTarget.expectsActionsRun && (
+              <LocalSessionCommentNotice session={issueSession} />
+            )}
             <MentionTextarea
               placeholder="コメントを追加..."
               className="min-h-20"
