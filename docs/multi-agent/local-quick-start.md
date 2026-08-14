@@ -584,7 +584,7 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 Supabaseのリダイレクト許可リストもホスト名の形でしか通らない（生IPは元から使えない）。
 
 撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
-`scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+`scripts/reap-dev-servers.sh`が**転送先（`localhost:<ポート>`）に待ち受けの無いserveを孤児として**掃く。
 
 **順番が逆になると起動しない。** serveだけが残っているポート（掃かれる前や、前のセッションの
 残骸）で`pnpm dev`を起こすと、`listen EADDRINUSE :::<ポート>`で落ちる。serveはtailnet IPを
@@ -601,6 +601,37 @@ ISSUE_DECK_DEV_HOST=127.0.0.1 pnpm dev
 
 **serveは`localhost:<ポート>`へproxyするので、これでもtailnetのFQDNからは従来どおり見える**
 （#1350で実測）。serveを消して回るより副作用が小さい。
+
+#### 孤児の判定は「転送先に待ち受けが居るか」で行う（#1403）
+
+**「そのポートに待ち受けが居るか」では判定できない。** `tailscale serve`自身がtailnetの
+アドレスでそのポートを待ち受けるため、serveが残っている限り`ss`には必ず行が出る。当初の実装は
+行の有無で現役と判定しており、**孤児を一件も撤去できていなかった**。2026-08-14に16件が滞留し、
+上記のとおり、そのポートを使うworktreeでは`pnpm dev`が`EADDRINUSE`で起動できなくなっていた。
+**ポートはworktreeごとに固定（ベース値＋Issue番号）なので、詰まったポートは再利用のたびに
+詰まり続ける。**
+
+判定は`dev_server_loopback_listening`（`scripts/lib/dev-server.sh`）が持ち、`ss -tlnH`の
+**Local Address列（4番目のフィールド）だけ**を見て、ループバック（`127.x` / `[::1]`）か
+ワイルドカード（`*` / `0.0.0.0` / `[::]`）に張られたものだけを転送先と数える。
+
+```
+# serveだけが残っているポート（＝孤児）
+LISTEN 0 4096               100.81.154.79:5403 0.0.0.0:*
+LISTEN 0 4096 [fd7a:115c:a1e0::7701:9acb]:5403    [::]:*
+
+# next devが上がっているポート（＝現役）。ワイルドカードなので `*:5403` に見える
+LISTEN 0  511                           *:5403     *:*
+```
+
+**行全体をgrepしてはいけない。** IPv4の行はPeer Address列が`0.0.0.0:*`なので、`0.0.0.0:`を
+含む正規表現はserve自身の行にも当たり、やはり全件が現役判定になる。
+
+**撤去は2回連続で孤児と判定したときだけ行う。** `run-issue-session.sh`は開発サーバーを起こした
+直後にserveを張るが、`next dev`が実際にbindするまでには数秒かかる。pollerの1巡（既定60秒）が
+その隙間に当たると、起動中のセッションのserveを外してしまう。そこで1回目は
+`~/apps/issue-deck-worktrees/.dev-servers/orphan-serve-strikes`へ記録するだけにしている
+（手で流して即座に片付けたいときは2回続けて実行する。`--dry-run`はこの記録を書き換えない）。
 
 ### allowedDevOriginsに載せる必要がある
 

@@ -14,6 +14,10 @@
 #   ISSUE_DECK_WORKTREE_BASE   worktreeの置き場（既定: ~/apps/issue-deck-worktrees）
 #   DEV_SERVER_IDLE_MINUTES    アイドルとみなすまでの分数（既定: 60・0で無効）
 #
+# 開発サーバーの回収に加えて、**繋がる先が居なくなった`tailscale serve`の公開（#1265）も撤去する**。
+# こちらは起動途中のセッションを巻き込まないよう、**2回連続で孤児と判定したときだけ撤去する**
+# （#1403）。手で流して溜まった分を片付けるときは2回続けて実行する。
+#
 # **対象は`issue-<番号>.pid`だけ**（下のglob）。`develop.pid`（scripts/start-develop-dev.sh・#1289）は
 # 意図して常駐させる開発サーバーで、親を持たない（PPID==1）ぶん孤児の条件に必ず当てはまるため、
 # ここに含めると起動した直後に止められる。**globを緩めない。**
@@ -106,27 +110,65 @@ stop_one() {
 # tailnetへの公開（#1265）のうち、**繋がる先がもう無いもの**を外す。
 #
 # ポートとIssueの対応をここでは持たない（PIDファイルにポートを記録していない）ため、
-# **今serveされているポートを列挙し、localhostで誰も待ち受けていないものを孤児とみなす**。
-# セッションがSIGKILLで落ちてcleanupを通らなかった場合もここで拾える。
+# **今serveされているポートを列挙し、転送先（`localhost:<ポート>`）で誰も待ち受けていないものを
+# 孤児とみなす**。セッションがSIGKILLで落ちてcleanupを通らなかった場合もここで拾える。
+# 判定そのものは `dev_server_loopback_listening`（scripts/lib/dev-server.sh）が持つ。
 #
-# 外し忘れると、次に同じポートを使うセッションが立つまで繋がらないURLがtailnet上に残る。
+# 外し忘れると繋がらないURLがtailnet上に残るだけでなく、**そのポートが恒久的に使えなくなる**。
+# serveはtailnet IPを具体的なアドレスとして掴むため、`::`を要求する`next dev`は
+# `EADDRINUSE`で起動できない（#1403・docs/multi-agent/local-quick-start.md）。
+#
+# **2回連続で孤児と判定したときだけ撤去する（#1403）。** run-issue-session.shは開発サーバーを
+# 起こした直後にserveを張るが、`next dev`が実際にbindするまでには数秒〜十数秒かかる。
+# pollerの1巡（既定60秒）がその隙間に当たると、起動中のセッションのserveを外してしまう。
+# 1回目は $SERVE_STRIKE_FILE に記録するだけにして、次の巡でも待ち受けが無いものを撤去する。
+SERVE_STRIKE_FILE="$DEV_SERVER_DIR/orphan-serve-strikes"
+
 reap_orphan_serves() {
   local port removed=0
+  local -A struck=()
+  local -a next_strikes=()
+
+  if [[ -f "$SERVE_STRIKE_FILE" ]]; then
+    while read -r port; do
+      # `[[ ... ]] && ...` にすると、数字でない行でループ本体の終了ステータスが1になり
+      # errexitでスクリプトごと落ちる。ifで書く
+      if [[ "$port" =~ ^[1-9][0-9]*$ ]]; then
+        struck["$port"]=1
+      fi
+    done <"$SERVE_STRIKE_FILE"
+  fi
+
   while read -r port; do
     [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
-    # 待ち受けが居るなら現役。`ss`が無い環境では判定できないので触らない
-    command -v ss >/dev/null 2>&1 || return 0
-    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
+    # 転送先に待ち受けが居るなら現役。`ss`が無い環境でも同じ扱い（触らない）
+    if dev_server_loopback_listening "$port"; then
+      continue
+    fi
+    # 1回目は記録だけ。起動途中のセッションを巻き込まないための猶予
+    if [[ -z "${struck[$port]:-}" ]]; then
+      next_strikes+=("$port")
+      echo "  情報: tailnetへの公開（ポート $port）は転送先（localhost:$port）に待ち受けがありません。次の回も同じなら撤去します。"
       continue
     fi
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "  [dry-run] tailnetへの公開（ポート $port）は待ち受けが無いため撤去する対象です"
+      echo "  [dry-run] tailnetへの公開（ポート $port）は転送先（localhost:$port）に待ち受けが無いため撤去する対象です"
       continue
     fi
     tailscale_serve_unpublish "$port"
-    echo "  tailnetへの公開（ポート $port）を撤去しました: 待ち受けが無い（孤児）"
+    echo "  tailnetへの公開（ポート $port）を撤去しました: 転送先（localhost:$port）に待ち受けが無い（孤児）"
     removed=$((removed + 1))
   done < <(tailscale_serve_ports)
+
+  # **--dry-run では記録も書き換えない。** 判定だけ表示する約束なので、次の実行の挙動も変えない
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    if [[ "${#next_strikes[@]}" -gt 0 ]]; then
+      printf '%s\n' "${next_strikes[@]}" >"$SERVE_STRIKE_FILE"
+    else
+      rm -f "$SERVE_STRIKE_FILE"
+    fi
+  fi
+
   [[ "$removed" -eq 0 ]] || echo "tailnetへの公開を撤去しました: $removed 件"
 }
 
