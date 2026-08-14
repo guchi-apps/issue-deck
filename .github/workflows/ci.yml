@@ -158,13 +158,25 @@ jobs:
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: シークレットを解決する
+        if: steps.status.outputs.should_notify == 'true'
+        uses: ./.github/actions/load-secrets
+        with:
+          only: SIGNALY_WEBHOOK_URL
+          secrets-json: ${{ toJSON(secrets) }}
+          vars-json: ${{ toJSON(vars) }}
+          # issue-deckは#1302・#1308で1Password依存を外しており、このsecretは存在しない。
+          # 空が渡るとアクションはフォールバックを試みない。他リポジトリでは値が入るため、
+          # GitHub側の投入が済むまで1Passwordから解決される（#1307の段階的な移行のため）。
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
       - name: Signaly に通知
         if: steps.status.outputs.should_notify == 'true'
         # 通知はCIの合否そのものではない。ここが失敗してもrun全体を落とさない
         # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302）。
         continue-on-error: true
         env:
-          SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: issue-deck
           NOTIFY_KIND: CI
           NOTIFY_STATUS: ${{ steps.status.outputs.result }}

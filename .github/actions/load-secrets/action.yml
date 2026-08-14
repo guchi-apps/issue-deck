@@ -1,0 +1,131 @@
+name: Load secrets
+description: >-
+  .github/secrets-manifest.tsv に従い、GitHubのsecret/variable または 1Password から
+  環境変数を組み立てる。片方で解決できない項目はもう片方から補う。
+
+# なぜこのアクションがあるか（#1306）
+#
+# 以前は各ワークフローが実行のたびに1Passwordから全値を読んでいたが、1Passwordサービス
+# アカウントの日次レート制限（**1Passwordアカウント全体で1,000リクエスト/日**。サービス
+# アカウントを分けても分割されない）を使い切り、フリート全体のデプロイが止まった（#1302）。
+#
+# issue-deck自身は#1302・#1308でGitHub側へ移行済みだが、他リポジトリの移行（#1307）では
+# 「GitHub側の投入が済んだリポジトリから順に切り替わる」状態を作りたい。一斉に切り替えず
+# 済むよう、供給元を両対応にしてフォールバックできるようにする。
+#
+# 対応表（環境変数名 ↔ GitHub側の名前 ↔ 1Password上の場所）はマニフェストが持つ。
+# GitHubは `GITHUB_` で始まる名前を予約しており作成できないため、GitHub側だけ別名になる
+# 項目がある。その読み替えもこのアクションが吸収するので、呼び出し側は本来の環境変数名
+# だけを意識すればよい。
+
+inputs:
+  manifest:
+    description: 対応表のパス
+    required: false
+    default: .github/secrets-manifest.tsv
+  prefer:
+    description: 優先する供給元（github / 1password）
+    required: false
+    default: github
+  secrets-json:
+    description: 呼び出し側の ${{ toJSON(secrets) }}
+    required: true
+  vars-json:
+    description: 呼び出し側の ${{ toJSON(vars) }}
+    required: true
+  op-token:
+    description: 1Passwordへフォールバックする場合のService Accountトークン。空ならフォールバックしない
+    required: false
+    default: ""
+  only:
+    description: カンマ区切りで対象を絞る（空なら全件）
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # ---- prefer: github ----
+    - name: GitHubから解決する
+      id: gh-primary
+      if: inputs.prefer == 'github'
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        SECRETS_JSON: ${{ inputs.secrets-json }}
+        VARS_JSON: ${{ inputs.vars-json }}
+        ONLY: ${{ inputs.only }}
+      run: |
+        missing="$(bash "$GITHUB_ACTION_PATH/resolve-from-github.sh")"
+        echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+    - name: 未解決分の1Password参照を書き出す
+      id: opfile-secondary
+      if: inputs.prefer == 'github' && steps.gh-primary.outputs.missing != '' && inputs.op-token != ''
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        KEYS: ${{ steps.gh-primary.outputs.missing }}
+        OUT: ${{ runner.temp }}/load-secrets-fallback.env.tpl
+      run: |
+        created="$(bash "$GITHUB_ACTION_PATH/write-op-env-file.sh")"
+        echo "created=$created" >> "$GITHUB_OUTPUT"
+
+    - name: 1Passwordから補う
+      if: inputs.prefer == 'github' && steps.opfile-secondary.outputs.created == 'true'
+      uses: 1password/load-secrets-action@v4
+      with:
+        export-env: true
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_ENV_FILE: ${{ runner.temp }}/load-secrets-fallback.env.tpl
+
+    # ---- prefer: 1password ----
+    - name: 1Password参照を書き出す
+      id: opfile-primary
+      if: inputs.prefer == '1password' && inputs.op-token != ''
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        # onlyが空のときは全件。write-op-env-file.shはKEYSが空だと何も書かないため、
+        # 全件を意味する指定としてマニフェストのKEY一覧をそのまま渡す。
+        OUT: ${{ runner.temp }}/load-secrets-primary.env.tpl
+        ONLY_INPUT: ${{ inputs.only }}
+      run: |
+        if [ -n "$ONLY_INPUT" ]; then
+          KEYS="$ONLY_INPUT"
+        else
+          KEYS="$(awk -F'\t' '!/^#/ && NF==5 {printf "%s%s", sep, $1; sep=","}' "$MANIFEST")"
+        fi
+        export KEYS
+        created="$(bash "$GITHUB_ACTION_PATH/write-op-env-file.sh")"
+        echo "created=$created" >> "$GITHUB_OUTPUT"
+
+    - name: 1Passwordから解決する
+      if: inputs.prefer == '1password' && steps.opfile-primary.outputs.created == 'true'
+      uses: 1password/load-secrets-action@v4
+      with:
+        export-env: true
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_ENV_FILE: ${{ runner.temp }}/load-secrets-primary.env.tpl
+
+    - name: 未解決分をGitHubから補う
+      if: inputs.prefer == '1password'
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        SECRETS_JSON: ${{ inputs.secrets-json }}
+        VARS_JSON: ${{ inputs.vars-json }}
+        ONLY: ${{ inputs.only }}
+        # 1Passwordで解決済みの項目は上書きしない
+        SKIP_PRESENT: "true"
+      run: bash "$GITHUB_ACTION_PATH/resolve-from-github.sh" >/dev/null
+
+    # ---- 検証 ----
+    - name: すべて解決できたかを検証する
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        ONLY: ${{ inputs.only }}
+      run: bash "$GITHUB_ACTION_PATH/verify.sh"

@@ -458,6 +458,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `ci.yml` | lint・型チェック・テスト・ビルドを実行するCI本体 | 対象リポジトリごとに固有の内容のため、そのままの移植ではなく参考にする程度 |
 | `deploy.yml` | `main`へのpushをトリガーにしたPM2デプロイ | issue-deck固有の本番環境向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
+| `load-secrets-check.yml` | シークレットの供給元（GitHub／1Password）を検証する（`workflow_dispatch`）。本番には触れず、解決できたかどうかと解決できなかった項目名だけを報告する（#1306） | **展開時に有用。** 対象リポジトリへGitHub側のsecret/variableを投入したあと、`deploy.yml`を切り替える前にこれで確認できる |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 
 ## 2. ラベル体系
@@ -776,6 +777,38 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
+
+### シークレットの供給元を切り替える（#1306）
+
+`.github/actions/load-secrets` は、`.github/secrets-manifest.tsv` に従って**GitHubのsecret/variable
+または1Passwordから**環境変数を組み立てる複合アクション。片方で解決できない項目はもう片方から補う。
+
+```yaml
+      - name: Checkout code           # ローカルパスのアクションのため先にcheckoutが要る
+        uses: actions/checkout@v4
+
+      - name: シークレットを解決する
+        uses: ./.github/actions/load-secrets
+        with:
+          # only を省略するとマニフェストの全項目が対象
+          only: SIGNALY_WEBHOOK_URL
+          secrets-json: ${{ toJSON(secrets) }}
+          vars-json: ${{ toJSON(vars) }}
+          # 空を渡すとフォールバックしない
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+```
+
+`prefer`（既定`github`）で優先する供給元を選ぶ。**GitHub側の投入が済んでいないリポジトリは
+1Passwordのまま動き、投入が済んだ順に自動でGitHub側へ切り替わる**ため、全リポジトリを一斉に
+切り替える必要がない。
+
+1Passwordへフォールバックする際は、**未解決の項目だけ**を並べた一時テンプレートを生成して渡す。
+テンプレート全体を渡すと不要な項目まで取りに行き、日次レート制限を無駄に消費するため。
+
+`GITHUB_`で始まる名前の読み替え（`GH_NAME`列）はアクションが吸収するので、呼び出し側は本来の
+環境変数名だけを意識すればよい。
+
+解決できなかった項目は**名前だけ**が報告される。値はログに出ない。
 
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 
