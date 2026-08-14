@@ -51,6 +51,9 @@ source "$SCRIPT_DIR/lib/session-state.sh"
 # 開発サーバーをtailnetへ出す（#1265）。回収スクリプトと共有する。
 # shellcheck source=scripts/lib/tailscale-serve.sh
 source "$SCRIPT_DIR/lib/tailscale-serve.sh"
+# セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
+# shellcheck source=scripts/lib/agent-language.sh
+source "$SCRIPT_DIR/lib/agent-language.sh"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
 # **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
@@ -258,6 +261,11 @@ if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
 else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
+
+# 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
+# 依存せず、このスクリプトから起こしたセッションの応答を日本語に揃える。文面と未対応時の扱いは
+# scripts/lib/agent-language.sh を参照。
+append_language_system_prompt "#$ISSUE_NUMBER: "
 
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。

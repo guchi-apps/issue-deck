@@ -60,6 +60,36 @@ GitHub Actionsは`${{ }}`を1つでも含む文字列を、**ブロック全体�
 上限超過でCIを落とし、85%超過で警告する。他のワークフロー（`claude-review-develop.yml`等）の
 プロンプトは今もYAML内に置いているため、加筆時はこの警告を確認する。
 
+## 出力言語をどこで効かせているか（#1395）
+
+エージェントの出力を日本語に揃える指示は、**起動フラグとプロンプト本文の二層**で持っている。
+
+| 層 | 正の所在 | 効く範囲 |
+|---|---|---|
+| 起動フラグ | [scripts/lib/agent-language.sh](../../scripts/lib/agent-language.sh) の`AGENT_LANGUAGE_SYSTEM_PROMPT`を`--append-system-prompt`で渡す | サブPCのローカルセッション（`run-issue-session.sh`・`start-reviewer.sh`から起こしたもの） |
+| プロンプト本文 | 各プロンプトの「## 出力言語」（`.github/prompts/`・`scripts/prompts/`） | 無人実行を含む全経路 |
+
+**文面は2か所に同じものを置いている。変えるときは両方を揃える。** 片方だけ変えると、起動経路に
+よって指示が食い違う。
+
+二層にしているのは、それぞれ穴が違うため。
+
+- これまで応答本文を日本語にしていたのは個人設定（`~/.claude/CLAUDE.md`）の1行だけで、
+  メインPC・サブPCで同期が遅れていると効かず（[personal-config-sync.md](personal-config-sync.md)）、
+  無人実行では読まれない。リポジトリ側の規約として持ち直したのが今回の変更
+- 起動フラグはサブPCのセッションに確実に効くが、GitHub Actionsの無人実行は
+  `run-issue-session.sh`を通らないため届かない
+- プロンプト本文は全経路に届くが、長い指示の一部として埋もれる
+
+`--append-system-prompt` を解釈しない古いClaude Codeへ渡すと起動ごと失敗するため、`--name`・
+`--remote-control` と同じく`claude --help`にフラグがあるときだけ付ける。無い場合は情報行を出して
+素通りし、プロンプト本文側で受ける。
+
+> **契約マーカー（`# issue-deck-local-session: vN`）を宣言するリポジトリを増やす場合は注意。**
+> 宣言していないリポジトリはissue-deckの`run-issue-session.sh`を共有するのでそのまま効くが、
+> 宣言したリポジトリは自前の起動スクリプトを使うため、同じ手当てをそちら側にも入れる必要がある
+> （[generic-launcher.md](generic-launcher.md)）。現状の宣言はissue-deck自身のみ。
+
 ## 使用するモデルの設定（#622）
 
 `claude-issue-dispatch.yml`の各モード（計画提示・分割・質問応答・実装/追加対応）の

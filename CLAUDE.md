@@ -10,6 +10,12 @@
 
 コミットメッセージ・PRタイトル・PR本文・issueコメントを日本語で書くこと、コミットのAuthorを`Claude Code <claude-code@example.com>`にすること、ラベルの付け替え手順といった作業手順レベルの規約は、各ワークフローのプロンプト（`.github/workflows/claude-issue-dispatch.yml`・`.github/workflows/claude-review-develop.yml`）とローカルセッション用のプロンプト（`scripts/prompts/`）に記載している。ここには、それらに含まれていない横断的な判断基準のみを記載する。
 
+### 出力言語
+
+エージェントの出力は日本語で書く。対象は成果物（コミットメッセージ・PR・Issueコメント）だけでなく、**応答本文・作業の要約・TODO・提示する計画・ツール実行時の説明といった画面に出る文章も含む**。コード・識別子・ファイルパス・コマンド・設定値・ログやエラーメッセージの引用は原文（英語）のままでよい。
+
+指示文の正は`scripts/lib/agent-language.sh`にあり、ローカルセッションは起動時に`--append-system-prompt`で受け取る（`scripts/run-issue-session.sh`・`scripts/start-reviewer.sh`）。無人実行はそこを通らないため、同じ文面を各プロンプトの「## 出力言語」にも置いている（`.github/prompts/`・`scripts/prompts/`）。**文面を変えるときは両方を揃える**（#1395、[docs/multi-agent/prompts-and-models.md](docs/multi-agent/prompts-and-models.md)）。
+
 ### 依存関係の追加
 
 新しい依存関係（パッケージ・ライブラリ・ツール）を追加する前には、必ずユーザーに確認を取る。`package.json`への追記や`pnpm add`等の実行は、確認が取れてから行う。
