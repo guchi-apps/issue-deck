@@ -77,6 +77,9 @@ source "$ROOT/scripts/lib/env-file-sync.sh"
 # 起動時の進捗（Project Status）報告も同じく汎用ランチャーと共有する（#1236）。
 # shellcheck source=scripts/lib/progress-report.sh
 source "$ROOT/scripts/lib/progress-report.sh"
+# 個人設定・共有知識がメインPCとサブPCで取り残されていないかの警告（#1190）。
+# shellcheck source=scripts/lib/personal-config-sync.sh
+source "$ROOT/scripts/lib/personal-config-sync.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -152,6 +155,10 @@ for n in "$@"; do
     exit 1
   fi
 done
+
+# 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
+# 取り込めていない場合に警告する（#1190）。起動は止めない。
+warn_personal_config_drift
 
 mkdir -p "$PROMPT_DIR"
 
@@ -500,7 +507,11 @@ PY
 # 設定されているものだけを渡し、未設定のものは新しいシェル側の既定に任せる。
 build_env_prefix() {
   local var value prefix=""
-  for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP ISSUE_DECK_DEV_HOST; do
+  # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
+  # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
+  # 記述子に載らず、回収の対象にならない。
+  for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP \
+    ISSUE_DECK_DEV_HOST ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

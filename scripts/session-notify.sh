@@ -55,10 +55,18 @@ fi
 # 送信先はセッション通知専用のチャンネル（1Passwordの session-webhook-url）で、
 # CI/デプロイ通知の SIGNALY_WEBHOOK_URL とは別物（#1231）。
 # 旧名のまま設定されている既存インストールを壊さないよう、未設定のときだけ旧名へ落とす。
+#
+# **未設定でもここでは終わらない**（#1256）。webhookの設定はSignalyへ送るかどうかを決めるだけで、
+# セッションの状態をホストへ記録する処理（回収の判定材料）はそれとは独立している。
+# 通知を設定していないホストでもセッションが畳まれるようにするため、判定は送信の直前まで下げた。
 WEBHOOK_URL="${SESSION_NOTIFY_WEBHOOK_URL:-${SIGNALY_WEBHOOK_URL:-}}"
-if [[ -z "$WEBHOOK_URL" ]]; then
-  # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路。
-  exit 0
+
+# セッションの状態ファイル（#1256）。読み書きの作法は回収スクリプトと共有する。
+# **無くても通知は続ける**（このスクリプトはセッションを止めないことが最優先）。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-state.sh" ]]; then
+  # shellcheck source=scripts/lib/session-state.sh
+  source "$SCRIPT_DIR/lib/session-state.sh" || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -66,7 +74,8 @@ fi
 #
 # 判定・組み立て・シェルへ返す値の生成をすべてpython3側に寄せる。フックのJSONを
 # シェルでパースする（grep -o 等）と、値に引用符や改行が入った時点で壊れるため。
-# 標準出力の1行目を「送るか（send/skip）」、2行目以降をpayloadとして返す。
+# 標準出力の1行目を「送るか（`send <イベント名>` / `skip`）」、2行目以降をpayloadとして返す。
+# イベント名を返すのは、シェル側がセッションの状態として記録するため（#1256）。
 # ---------------------------------------------------------------------------
 export HOOK_JSON
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
@@ -107,14 +116,19 @@ notification_type = hook.get("notification_type", "")
 #
 # **Notification / idle_prompt は捨てる。** 応答終了から60秒アイドルすると発火するので、
 # 直前のStopと必ず二重になる。通知が多すぎると意味を失う。
+#
+# `state_event` はシェル側が状態ファイルへ記録する値（#1256）。回収の判定はこの2値だけを見て
+# 「人の入力待ちか、応答が終わっているか」を決めるため、表示用のラベルとは別に返す。
 if event == "Stop":
     emoji = "✅"
     color = "#57f287"
     label = "応答終了"
+    state_event = "Stop"
 elif event == "Notification" and notification_type == "permission_prompt":
     emoji = "🙋"
     color = "#faa61a"
     label = "入力待ち"
+    state_event = "permission_prompt"
 else:
     print("skip")
     sys.exit(0)
@@ -147,6 +161,26 @@ if session_id:
     except Exception:
         remote_url = ""
 
+def signaly_link(text, url):
+    """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
+
+    Signalyがfieldsの値でリンクにできるのは `[text](url)` のマスクドリンク記法だけで、
+    生URLを置いても自動ではリンクにならない（Signalyの`docs/webhook.md`・
+    `frontend/app.js`の`renderFieldValue`）。
+
+    ただし`renderFieldValue`は `[text](url)` を
+    `<a href="..." target="_blank" rel="noopener noreferrer">` へ置換した**あとで**
+    `_..._` を `<em>` へ変換するため、生成後のHTMLに残る `_blank` のアンダースコアと
+    URL中のアンダースコアが対になり、hrefとtarget属性ごと壊れる（#1234で観測した
+    `</em>`の混入はこれ）。つまり1つの値に含まれるアンダースコアが2個以上あると壊れる。
+
+    URL中の `_` を `%5F` にしておけば値に残るアンダースコアは `_blank` の1個だけになり、
+    対にならないので壊れない。`%5F` は `_` のパーセントエンコードなので、URLとしての
+    指す先は変わらない。
+    """
+    return f"[{text}]({url.replace('_', '%5F')})"
+
+
 title_parts = [emoji]
 if repo_name and issue_number:
     title_parts.append(f"[{repo_name} #{issue_number}]")
@@ -160,31 +194,38 @@ title = " ".join(title_parts)
 # **応答テキスト（hook の last_assistant_message）は載せない。**
 # Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうるものを、外部サービスである
 # Signalyへ出す経路を最初から作らない。中身はremote-controlのURLから見る。
+#
+# **リンクは1つのフィールドに1つだけ入れる。** マスクドリンク1つにつき `target="_blank"` 由来の
+# アンダースコアが1個増えるため、同じ値に2つ並べると `_` が対になって両方壊れる
+# （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
+# `·`で連結していて、これに該当していた（#1247）。
 fields = []
+repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 if repo_name:
     fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
 if issue_number:
-    fields.append({"name": "Issue", "value": f"#{issue_number}", "inline": True})
+    issue_value = f"#{issue_number}"
+    if repo_slug:
+        issue_value = signaly_link(issue_value, f"https://github.com/{repo_slug}/issues/{issue_number}")
+    fields.append({"name": "Issue", "value": issue_value, "inline": True})
 if host_name:
     fields.append({"name": "Host", "value": host_name, "inline": True})
 fields.append({"name": "Event", "value": label, "inline": True})
 if tmux_session:
     fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
-
-links = []
-repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
-if repo_slug and issue_number:
-    links.append(f"[Issue #{issue_number}](https://github.com/{repo_slug}/issues/{issue_number})")
 if remote_url:
-    # bridgeSessionId は `session_XXX` のようにアンダースコアを含む。`[text](url)` の
-    # マスクドリンク記法で埋め込むと、Signaly側のMarkdown変換がURL中のアンダースコアを
-    # 斜体（`<em>`）の区切りと誤認し、URLに`</em>`が混入して壊れることが確認された（#1234）。
-    # 生URLのまま出せば自動リンク検出に任せられ、この誤認を避けられる。
-    links.append(f"セッションを開く（remote-control）: {remote_url}")
-if links:
-    fields.append({"name": "Links", "value": " · ".join(links), "inline": False})
+    fields.append({
+        "name": "Remote Control",
+        "value": signaly_link("セッションを開く", remote_url),
+        "inline": False,
+    })
+    # 生URLも別フィールドで残す。**スマホのプッシュ通知の本文はSignaly側がMarkdownを
+    # 除去する**（`backend/push.py`の`_plain_text`）ので、マスクドリンクだけだと
+    # プッシュ通知には表示名しか出ずURLが消える。手でコピーする経路を残しておく。
+    # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
+    fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
 
-print("send")
+print("send", state_event)
 print(json.dumps({"title": title, "color": color, "fields": fields}))
 PY
 )"
@@ -194,10 +235,30 @@ if [[ -z "$result" ]]; then
   exit 0
 fi
 
-decision="$(printf '%s' "$result" | head -1)"
+decision_line="$(printf '%s' "$result" | head -1)"
+decision="${decision_line%% *}"
 if [[ "$decision" != "send" ]]; then
   exit 0
 fi
+
+# セッションの状態を記録する（#1256）。**送信より先に行う。**
+# webhookが未設定でも・Signalyが落ちていても、回収の判定材料はホストに残る必要がある。
+# tmuxの外で起動したセッション（セッション名が空）は回収の対象外なので記録しない。
+STATE_EVENT=""
+if [[ "$decision_line" == *" "* ]]; then
+  STATE_EVENT="${decision_line#* }"
+fi
+if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_record_event >/dev/null 2>&1; then
+  session_state_record_event "$NOTIFY_TMUX_SESSION" "$STATE_EVENT" ||
+    echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+fi
+
+if [[ -z "$WEBHOOK_URL" ]]; then
+  # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。
+  exit 0
+fi
+
 payload="$(printf '%s' "$result" | tail -n +2)"
 if [[ -z "$payload" ]]; then
   exit 0

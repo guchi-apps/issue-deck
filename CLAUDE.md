@@ -113,6 +113,18 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 `Release`・`Done`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細は[docs/multi-agent/release.md](docs/multi-agent/release.md)参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
 
+### ユーザーの手作業が残る場合は新規Issueとして起票する（`71.manual-step`ラベル）
+
+実装の結果として、エージェントが代行できないユーザー自身の操作（本番サーバー上の`.env`の書き換え、GitHub Appの権限追加、1Passwordでのトークン発行、外部サービスの管理画面での設定など）が残る場合、**PR本文の「注意点」やIssueコメントに書くだけで終わらせず、その手作業を単独の新規Issueとして起票する。** 書くだけではPRがマージされ元のIssueが`Done`でcloseされた時点で追跡できなくなる。
+
+- ラベル: `71.manual-step`（`00.check-user`とは併用しない）
+- タイトル: `[手作業] <実行する場所>: <やること>`
+- 本文: 「やること（コピペで実行できるコマンド）」「実行する場所」「なぜエージェントが実施しないか」「放置するとどうなるか」「完了の確認方法」「関連（起点Issue・PR）」
+- 起点IssueへGitHubネイティブのサブIssueとして紐付け、起点IssueとPRにリンクをコメントする
+- issue-deckのサイドメニューの「手作業待ち」ビュー（`view=manual-step`）に集まる。実行したユーザーがcloseする
+
+判断基準・本文テンプレートの全文・設計理由は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「デプロイ後などに残るユーザーの手作業はIssueとして起票する」を参照。
+
 ### 自動マージ不可カテゴリ（`00.check-user`付与対象）
 
 以下に該当する変更は、レビュー・統合エージェントが自動マージせず`00.check-user`を付与し、ユーザーの確認を待つ。

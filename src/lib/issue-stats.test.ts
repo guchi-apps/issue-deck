@@ -373,7 +373,7 @@ describe("time-dependent stats", () => {
       ]);
     });
 
-    it("view=not-startedは進捗がReadyかつ00.check-userを持たないIssueのみ返す", () => {
+    it("view=not-startedは進捗がReadyかつ00.check-user・71.manual-stepを持たないIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", labels: [] }),
         makeIssue({ id: "2", labels: [{ name: "00.check-user", color: "red", description: null }] }),
@@ -383,10 +383,28 @@ describe("time-dependent stats", () => {
           id: "5",
           labels: [{ name: "51.improvement", color: "purple", description: null }],
         }),
+        makeIssue({
+          id: "6",
+          labels: [{ name: "71.manual-step", color: "d876e3", description: null }],
+        }),
       ];
       expect(filterIssuesByView(issues, "not-started", null).map((issue) => issue.id)).toEqual([
         "1",
         "5",
+      ]);
+    });
+
+    it("view=manual-stepは71.manual-stepが付いたIssueのみ返す（進捗は問わない）", () => {
+      const manualStepLabel = { name: "71.manual-step", color: "d876e3", description: null };
+      const issues = [
+        makeIssue({ id: "1", labels: [manualStepLabel] }),
+        makeIssue({ id: "2", labels: [] }),
+        // 実装が進んだ後に起票された手作業Issueもあるため、進捗では絞り込まない
+        makeIssue({ id: "3", labels: [manualStepLabel], projectStatus: "Implementation" }),
+      ];
+      expect(filterIssuesByView(issues, "manual-step", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "3",
       ]);
     });
 
@@ -475,6 +493,7 @@ describe("time-dependent stats", () => {
         favorites: 1,
         "recently-added": 1,
         "check-user": 1,
+        "manual-step": 0,
         "not-started": 1,
         "in-progress": 0,
         "release-pending": 0,

@@ -15,6 +15,19 @@
     `--label "21.plan-required"`を付ける
   - 元Issueに`23.preview-required`または`24.screenshot-required`が付いており、かつそのサブIssue
     が画面に関わる変更を含む場合は、該当するラベルを引き継ぐ
+  - **作成したら、GitHubネイティブのサブIssueとして元Issueへ紐付ける。** 次の2コマンドを使う。
+
+    ```
+    gh api repos/${REPOSITORY}/issues/<子の番号> --jq .id
+    gh api repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/sub_issues --method POST -F sub_issue_id=<上で得たid>
+    ```
+
+    `sub_issue_id`に渡すのは1つ目のコマンドで得られる**数値ID**で、URLに出るIssue番号ではない。
+    **`gh api`の直後は必ず`repos/`で始まるパスを置く**（許可ツールが`Bash(gh api repos/:*)`の
+    前方一致で判定されるため、`--method`を先に書くと権限拒否になる）。
+    親子関係の正はこのネイティブの関係で、本文の「分割元: #番号」は人が読む補助でしかない。
+    紐付けておくと、元Issueを開いたときに子がどこまで終わったのかが一目で分かる。
+    **紐付けに失敗しても分割自体は止めず、次のサブIssueの作成へ進む**（後から手で紐付けられる）
   - 一度に作成するサブIssueは目安として6件程度までとする。計画がそれを超える数の分割を
     提案している場合、無理に全部作らず作成できた分にとどめ、残りは後述の親Issueコメントで
     「追って検討が必要」である旨を明記する

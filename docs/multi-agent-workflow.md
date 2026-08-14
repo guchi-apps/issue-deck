@@ -40,7 +40,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | ファイル | 内容 |
 |---|---|
 | [ブランチ・worktree運用とエージェントの役割](multi-agent/branching.md) | Issueごとのブランチ・worktree分離、エージェントの責務、共有知識層、ブランチ保護 |
-| [Issueラベルによる状態管理とトグル](multi-agent/labels.md) | ラベルの状態遷移、計画フェーズ・プレビュー・スクリーンショット・マージ前確認の各トグル、サブIssue分割、自動マージ可否の判定 |
+| [Issueラベルによる状態管理とトグル](multi-agent/labels.md) | ラベルの状態遷移、計画フェーズ・プレビュー・スクリーンショット・マージ前確認の各トグル、サブIssue分割、自動マージ可否の判定、ユーザーの手作業のIssue化（`71.manual-step`） |
 | [Phase 5: @claudeコメント起点の完全自動化](multi-agent/dispatch.md) | `claude-issue-dispatch.yml`の全体。トリガー、詰まりからの再開、通知コメント、権限モード、既知の制約 |
 | [計画フェーズの信頼性と実装runへの引き継ぎ](multi-agent/dispatch-plan.md) | 計画提示ステップのフォールバック・自己リトライ、計画runの調査結果を実装runへ渡す仕組み |
 | [プロンプトの配置・使用モデル・使用量の可視化](multi-agent/prompts-and-models.md) | `.github/prompts/`の構成と式テンプレート長上限、実装用／補助用モデルの設定、Job Summaryへの使用量出力 |
@@ -51,6 +51,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [サブPCへのディスパッチ](multi-agent/subpc-dispatch.md) | pull型のジョブキュー、実行可能リポジトリの申告、同時実行数の上限、サブPC側のpollerとsystemd |
 | [汎用ランチャー](multi-agent/generic-launcher.md) | 対象リポジトリに何も置かずにサブPCで起動する仕組み。リポジトリ固有の値の解決方法、起動可否の判定、対象リポジトリの増やし方 |
 | [関門と計器（実装セッションを監督する仕組み）](multi-agent/gates.md) | 監督のための役を増やさず、判断が要る関門と判断が要らない計器に分けて配る整理。計画の関門、セッションの停滞計測、並行セッションを俯瞰する手当て |
+| [個人設定（グローバルルール・個人skill）の同期](multi-agent/personal-config-sync.md) | メインPCとサブPCで`~/.claude/CLAUDE.md`・個人skillの実体を1つにするsymlink方式、取り残しの検知 |
 | [実装セッションの状態通知とRemote Control](multi-agent/session-notify.md) | フック（`Notification`・`Stop`）によるSignalyへの即時通知、飛ばすイベントの選別、`--remote-control`で外出先から答える経路 |
 
 ## 段階的導入計画

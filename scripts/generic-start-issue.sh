@@ -64,6 +64,9 @@ source "$SCRIPT_DIR/lib/env-file-sync.sh"
 # 起動時の進捗（Project Status）報告も issue-deck 自身のランチャーと共有する（#1236）。
 # shellcheck source=scripts/lib/progress-report.sh
 source "$SCRIPT_DIR/lib/progress-report.sh"
+# 個人設定・共有知識の同期の取り残しの警告も同じく共有する（#1190）。
+# shellcheck source=scripts/lib/personal-config-sync.sh
+source "$SCRIPT_DIR/lib/personal-config-sync.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -126,6 +129,10 @@ if [[ -n "$PACKAGE_MANAGER" ]] && ! command -v "$PACKAGE_MANAGER" >/dev/null 2>&
   echo "  nvmを使っている場合、非対話シェルでは ~/.bashrc が読まれません（#1085）。" >&2
   exit 1
 fi
+
+# 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
+# 取り込めていない場合に警告する（#1190）。起動は止めない。
+warn_personal_config_drift
 
 WORKTREE_BASE="${ISSUE_DECK_GENERIC_WORKTREE_BASE:-$HOME/apps/$REPO-worktrees}"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
@@ -438,7 +445,11 @@ build_env_prefix() {
   prefix+="export ISSUE_DECK_DEV_SERVER=0; "
   prefix+="export ISSUE_DECK_WORKTREE_BASE=$(printf '%q' "$WORKTREE_BASE"); "
   prefix+="export ISSUE_DECK_DEV_COMMAND=$(printf '%q' "$DEV_COMMAND"); "
-  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE; do
+  # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
+  # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
+  # 記述子に載らず、回収の対象にならない。
+  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE \
+    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

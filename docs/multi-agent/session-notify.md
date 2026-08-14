@@ -26,11 +26,23 @@ tmuxの実装セッション（run-issue-session.sh が起動）
   │ 応答終了                        → Stop フック
   ↓
 scripts/session-notify.sh（フックのstdinでJSONを受け取る）
+  ├→ ~/.local/state/issue-deck/sessions/<tmuxセッション名>.event へ最後のイベントを記録（#1256）
   ↓ webhook（~/.config/issue-deck/notify.env の SESSION_NOTIFY_WEBHOOK_URL）
 Signaly → スマホ・メインPCへ通知
   ↓ 通知に載っているURLを開く
 claude.ai/code/<セッション> （--remote-control）→ その場で答える
 ```
+
+### 通知とは別に、ホストへも記録する（#1256）
+
+セッションの自動回収は「最後の`Stop`からどれだけ経ったか」「今は人の入力待ちか」を判定材料に
+するが、**通知を投げるだけではホストに何も残らない**。そこで`session-notify.sh`は、送信の前に
+`<epoch> <Stop|permission_prompt>`の1行を状態ファイルへ書く。
+
+**記録はwebhookの設定より前に行う。** 送信先の判定を先に置くと、通知を設定していないホストで
+記録も行われず、回収がまったく効かなくなる。記録の失敗は1行のログに留め、通知もセッションも
+止めない。書式と使い道は
+[作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 
 ## 飛ばすのは2種類だけ
 
@@ -62,6 +74,51 @@ IssueのURL・Remote ControlのURL（取れたときだけ）。
 **応答テキスト（`Stop`フックの`last_assistant_message`）は載せない。** 応答本文には
 Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。それを外部サービスである
 Signalyへ出す経路を最初から作らない。中身はRemote ControlのURLから見る。
+
+## fieldsの値にリンクを載せるときの制約（#1234・#1247）
+
+**Signalyのfieldsの値でリンクになるのは`[表示名](URL)`のマスクドリンク記法だけで、生URLを
+置いても自動ではリンクにならない。** そのうえで、次の2つを守らないと表示が壊れる。
+
+1. **URLに`_`を含めない**（含む場合は`%5F`へパーセントエンコードする）
+2. **1つの値にリンクを2つ以上入れない**
+
+理由はSignaly側のレンダラ（`frontend/app.js`の`renderFieldValue`）の処理順にある。
+`[表示名](URL)`を`<a href="..." target="_blank" rel="noopener noreferrer">`へ置換した**あとで**
+`_..._`を`<em>`へ変換するため、**生成後のHTMLに残る`_blank`の`_`が、値の中の他の`_`と対になる**。
+対になった時点でhrefとtarget属性ごと壊れる。
+
+```text
+[セッションを開く](https://claude.ai/code/session_01ABC)
+→ <a href="https://claude.ai/code/session<em>01ABC" target="</em>blank" ...>
+```
+
+つまり「値に残る`_`が2個以上」が壊れる条件で、マスクドリンク1つにつき`_blank`の`_`が1個増える。
+Remote ControlのURL（`session_XXX`）は`_`を1個持つので、素直にマスクドリンクへ入れると必ず対になる。
+
+- #1234では、これを避けるためにマスクドリンクをやめて生URLに戻した。しかしSignalyには
+  自動リンク検出が無いためリンクにならず、しかもIssueリンク（マスクドリンク）と同じ値へ
+  `·`で連結していたので、結局`_blank`と`session_`が対になって両方壊れていた（#1247）
+- #1247では、URL中の`_`を`%5F`にしたうえでマスクドリンクへ戻し、IssueリンクとセッションURLを
+  別々のフィールドへ分けた。`%5F`は`_`のパーセントエンコードなので指す先は変わらない
+- 生URLも`Remote Control URL`フィールドに別途載せている。**スマホのプッシュ通知の本文は
+  Signaly側がMarkdownを除去する**ため（`backend/push.py`の`_plain_text`）、マスクドリンクだけだと
+  プッシュ通知には表示名しか残らずURLが消える。単独の値なら`_`は1個だけなので壊れない
+
+実機で確認した結果（#1247）。
+
+| 書式 | カードでリンクになるか | 開けるか |
+| --- | --- | --- |
+| `[表示名](.../session%5FXXX)` | なる | 開く |
+| `[表示名](.../session_XXX)` | なる | **開かない**（hrefに`<em>`が混入する） |
+| 生URL `.../session_XXX` | **ならない** | — |
+| `[表示名](URLに_なし)` | なる | 開く |
+
+`scripts/session-notify.sh`の`signaly_link()`がこのエンコードを行う。**fieldsへリンクを足す
+ときは必ずこの関数を通し、1フィールド1リンクを保つこと。**
+
+CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run](...)`はURLに`_`を
+含まないため、この問題は起きていない。
 
 ## CI/デプロイ通知とチャンネルを分ける
 
