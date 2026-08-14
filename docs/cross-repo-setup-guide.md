@@ -70,7 +70,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 
 | 方式 | 対象ワークフロー | やること |
 |---|---|---|
-| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
+| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`・`claude-pr-repair.yml`・`version-tag-check.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
 | コピー方式（未移行） | `shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
 
 参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
@@ -90,6 +90,8 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `claude-pr-repair.yml` | Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）のCI失敗・コンフリクトを、issue-deckの画面のボタンから修復する（`workflow_dispatch`のみ）。**トリガー定義のみ**を持ち、本体は`reusable-claude-pr-repair.yml`を`uses:`で呼ぶ（#1293） | **コピーではなく薄いcallerを置く。** 指定する入力は`claude-ci-fix.yml`と同じものに加え、自身の`workflow_dispatch`入力を`pr-number`・`mode`として渡す。導入は任意（画面のボタンからの修復を使わないリポジトリでは不要） |
 | `reusable-claude-pr-repair.yml` | 上記のジョブ本体（`on: workflow_call`）。`repair`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
+| `version-tag-check.yml` | `main`宛のPRの時点で、リリースタグ（`vX.Y.Z`）がバージョンを上げないまま重複しないかを検査する（#1367）。**トリガー定義のみ**を持ち、本体は`reusable-version-tag-check.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`で、タグの接頭辞は`tag-prefix`で指定する（既定は`package.json`・`.version`・`v`）。**トリガーを`develop`へ広げないこと**（featureブランチのバージョンは直前のリリースのままでタグが必ず存在するため、developへの全PRが赤くなる） |
+| `reusable-version-tag-check.yml` | 上記のジョブ本体（`on: workflow_call`）。`version-tag-check`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
@@ -419,13 +421,22 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v6` | 上記 | 使用量出力スクリプトも共有側から解決するよう修正（#964） |
 | `workflows/v7` | 上記 | Organization `guchi-apps` への移行後に作成（#1009 Phase 4） |
 | `workflows/v8` | 上記 | Phase 5 の前。ラベル遷移とStatus報告の両方を行う最後の版 |
-| `workflows/v9` | 上記 | **現時点の最新タグ。** #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124）。`guchi-apps/dayspan`・`guchi-apps/shopping-list`が参照している |
+| `workflows/v9` | 上記 | #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124） |
+| `workflows/v10`〜`workflows/v15` | 上記 + `reusable-release-develop-to-main.yml`・`reusable-claude-pr-repair.yml` | この表では個別に追えていない。内訳は`git log --oneline <前のタグ>..workflows/vN`で確認する |
+| `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | **このPRの時点では未作成。** #1367。developへのマージ後に作成し、各リポジトリへ`version-tag-check.yml`のcallerを配る |
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
 > 「タグを上げる順序 — callerが先、ラベル削除が後」を参照）。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
+
+> **再利用可能ワークフローを新しく増やしたときは、初回の配置だけ手作業になる**（#1367）。
+> `propagate-workflow-tag.yml`（画面の設定ダイアログから起動する配布）が行うのは、対象リポジトリに
+> **既にある**ワークフローファイルの`@workflows/vN`・`prompts-ref`を新しいタグへ書き換えることだけで
+> （`.github/scripts/propagate-workflow-tag.sh`の`sed`）、**新しいcallerファイルを追加はしない。**
+> 各リポジトリへ最初の1回を置くところまでは、`71.manual-step`のIssueとして起票して人が行う。
+> 2回目以降（タグの追随）は配布の対象に自動で乗る。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。

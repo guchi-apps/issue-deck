@@ -1,0 +1,99 @@
+name: Reusable version tag check
+
+# main宛のPRの時点で「バージョンを上げ忘れていないか」を検査する再利用可能ワークフロー（#1367）。
+#
+# **なぜ要るか。** `deploy.yml`の`tag`ジョブは`package.json`の`version`から`v<version>`タグを
+# 作るが、同名のタグが別のコミットに既に存在すると
+# `::error::Tag vX.Y.Z already exists on <SHA>, but HEAD is <SHA>.` で落ちる。
+# `build`・`deploy`は`needs: tag`のためまとめて止まり、**mainへマージした後に初めて失敗が分かる**。
+# `reusable-release-develop-to-main.yml`の冒頭にあるとおり、solitaireの手動リリースで実際に
+# 踏んでいる。ここでは同じ条件をmainへ入る前に判定して、develop→mainのPRのCIで落とす。
+#
+# **`deploy.yml`側のチェックは残す。** こちらはPRという経路にしか効かないため、最後の砦は
+# あちらに置いたままにする。
+#
+# **develop宛のPRでは呼ばないこと。** feature ブランチのバージョンは直前のリリースのままで、
+# 対応するタグが必ず存在するため、developへの全PRが赤くなる。落とすべきなのはmainへ入る直前だけ。
+#
+# 呼び出し元ごとの差異は`reusable-release-develop-to-main.yml`と同じ名前のinputで吸収する
+# （ルートに`package.json`が無いリポジトリがあるため）。
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: "バージョンを読み取るファイル（既定: package.json）"
+        required: false
+        type: string
+        default: package.json
+      version-query:
+        description: "バージョンを取り出すjq式（既定: .version）"
+        required: false
+        type: string
+        default: .version
+      tag-prefix:
+        description: "リリースタグの接頭辞（既定: v。`v3.12.0`のような形を想定）"
+        required: false
+        type: string
+        default: v
+
+# **concurrency と permissions は呼び出し元（caller）が持つ。** 再利用可能ワークフローの
+# トップレベルに置くと、呼び出し時に startup_failure になりうる（#1181）。
+jobs:
+  version-tag-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # タグの一覧が要る。fetch-depth: 0 でないとタグが取れず、重複を検出できないまま
+          # 「問題なし」と報告してしまう
+          fetch-depth: 0
+
+      - name: リリースタグの重複を確認する
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$VERSION_FILE" ]; then
+            echo "::error::$VERSION_FILE が見つかりません。version-file を指定してください"
+            exit 1
+          fi
+
+          VERSION="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::$VERSION_FILE から $VERSION_QUERY でバージョンを読み取れませんでした"
+            exit 1
+          fi
+
+          TAG="${TAG_PREFIX}${VERSION}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            # 注釈付きタグではタグオブジェクトのSHAが返るため、コミットへ解決してから比べる
+            # （deploy.yml が作るのは軽量タグだが、手で切られたタグが混ざりうる）
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+              echo "タグ ${TAG} は既にこのコミットを指しています"
+              exit 0
+            fi
+
+            echo "::error::タグ ${TAG} は既に ${TAG_SHA} に存在します。このままmainへマージすると deploy.yml のタグ作成が失敗し、本番デプロイが止まります。先に ${VERSION_FILE} のバージョンを上げてください（release-develop-to-main.yml がバージョンbump用のPRを作ります）"
+            exit 1
+          fi
+
+          # ビルドは壊れないためブロックはしないが、バージョンが下がっている（過去のタグより
+          # 小さい）場合はリリース順が入れ替わるため知らせる
+          LATEST="$(git tag --list "${TAG_PREFIX}[0-9]*" | sed "s|^${TAG_PREFIX}||" | sort -V | tail -n 1)"
+          if [ -n "$LATEST" ]; then
+            HIGHEST="$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -n 1)"
+            if [ "$HIGHEST" != "$VERSION" ]; then
+              echo "::warning::${VERSION_FILE} のバージョン ${VERSION} は、既存タグの最新 ${TAG_PREFIX}${LATEST} より前です。意図した値か確認してください"
+            fi
+          fi
+
+          echo "OK: タグ ${TAG} はまだ存在しません"
