@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import {
+  isSessionControlJobKind,
   parseDispatchHostName,
   parseDispatchJobKind,
   parseDispatchTarget,
@@ -46,6 +47,8 @@ export async function GET() {
  *
  * `kind`（#1332）を省略すると従来どおりの起動ジョブ。`interrupt`・`kill`は既に立っている
  * セッションへの操作で、**同じ経路に載せる**（受信経路・認証・状態報告を増やさないため）。
+ * `question`（#1294）は種別としては存在するが、**まだここでは受け付けない**（実行するpollerが
+ * 無い段階で積めるようにすると、`QUEUED`のまま誰も取りに来ないジョブが残る。開けるのはStep 3）。
  */
 export async function POST(request: NextRequest) {
   const guarded = previewModeGuard();
@@ -64,7 +67,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  if (kind !== "LAUNCH") {
+  // 質問ジョブ（#1294）を積む経路はまだ無い（種別と保存の形だけを先に入れている）。
+  // 受け口をここで開けると、実行するpollerが無いまま`QUEUED`のジョブだけが積まれる
+  if (kind === "QUESTION") {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  if (isSessionControlJobKind(kind)) {
     const controlResult = await enqueueSessionControlJob({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,

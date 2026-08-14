@@ -63,6 +63,16 @@ describe("summarizeDispatchQueue", () => {
     expect(summary.activeCount).toBe(0);
     expect(summary.failed).toHaveLength(0);
   });
+
+  // 起動ジョブ以外は同時実行数の枠を使わない（#1332の制御ジョブと同じ理由。#1294）
+  it("制御ジョブと質問ジョブは数えない", () => {
+    const summary = summarizeDispatchQueue(
+      [job({ id: "control", kind: "INTERRUPT" }), job({ id: "question", kind: "QUESTION" })],
+      2,
+    );
+    expect(summary.activeCount).toBe(0);
+    expect(summary.queued).toHaveLength(0);
+  });
 });
 
 describe("describeDispatchQueueLoad", () => {

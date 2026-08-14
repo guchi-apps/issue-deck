@@ -6,9 +6,12 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 [docs/cross-repo-automation.md](cross-repo-automation.md)、実際に導入する際の手順は
 [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)を参照。
 
-ここに挙がっていない**privateリポジトリ**（`ops-dashboard`・`vps`・`db-console`・`clip-hive`）を
-対象に加えられるかは、GitHubのプランとアカウント種別に依存する。判断材料は
-[docs/organization-migration.md](organization-migration.md)を参照。
+**privateリポジトリも対象にできる。** organizationは`team`プランのため、organization secretが
+privateリポジトリから参照でき、privateでもブランチ保護が効く（2026-08-15に`clip-hive`で実測。
+無人実行が`PROGRESS_REPORT_SECRET`で進捗報告APIを叩けている）。#1011が前提に挙げていた制約は
+解消済みで、残るのは導入作業だけになった。判断の経緯は
+[docs/organization-migration.md](organization-migration.md)を参照。ここに挙がっていないprivate
+リポジトリ（`vps`）は#1011配下で順次導入する。
 
 「対応」の実態はワークフローファイル一式・ラベル体系・CLAUDE.md・ブランチ運用・Secretsなど
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
@@ -30,6 +33,10 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/solitaire` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1055, guchi-apps/solitaire#23 | #1047の6周目。**`runtime-setup: minimal`を使った唯一の周**（`dependencies`・`devDependencies`のどちらも無く、`package-lock.json`も`pnpm-lock.yaml`も無い素のJS）。`node`/`node-db`にするとロックファイル不在で`npm ci`が落ちるが、`minimal`では`npm ci`・Playwrightインストール・DB準備の各ステップが`runtime-setup != 'minimal'`の条件で丸ごとスキップされる。`node-version: "20"`（`ci.yml`準拠）は`runtime-setup`と独立した軸で、`cache:`を付けずに`setup-node`を呼ぶだけのためロックファイル無しでも失敗しない。**検証コマンドは`npm test`（`node --test tests`）と`npm run build`の2つだけで、どちらもラッパー無しで無人実行から使える**（car-care・asset-manager・portfolioと違い`.env`も1Passwordも要らない）。`npm start`が`python3 -m http.server`である点、テストは`node:test`/`node:assert`で書く点、**`24.screenshot-required`は`minimal`だとPlaywrightが入らず無人実行では成立しない**点をCLAUDE.mdに明記。旧世代の`10.`/`19.`優先度ラベル削除で失われる分は#11・#12へ`89.Priority: low`を付け直した（進捗ラベルはopen issueに1件も付いておらず復元は不要だった） |
 | `guchi-apps/myroom` | 対応済み | **参照**（2つとも`@workflows/v10`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1056, guchi-apps/myroom#111 | #1047の7周目。**Python + Node の2層構成**（それまでの6周は全てNode単体）。バックエンドはルートで`pytest tests/ -q`（`DB_MOCK=true`）、フロントエンドは**`frontend/`サブディレクトリ**で`typecheck`・`test`・`build`・`lint`。**`cd frontend`を忘れるとフロントエンドのコマンドは動かない**ため、CLAUDE.mdに実行場所をコマンドごとに明記した。`runtime-setup: minimal`（準備ステップは全てリポジトリルートで動くが、ルートの`package.json`はバージョン管理用scriptのみで依存を持たず、`package-lock.json`も空のスタブ`"packages": {}`。実際の依存は`frontend/`にあり、そこへ入るのは実装エージェント自身の仕事）。**`package-manager: npm`は`minimal`でも必要**で、実装ステップの許可ツールの出し分け（#1147）がこの値を見るため、`pnpm`にすると`npm`・`node`が許可されず`frontend/`の検証ができなくなる。Pythonは#1147で`python`・`pip`・`pytest`が常時許可されたが、**`setup-python`は入らずランナー標準のPythonを使う**ためCIの3.11固定とはズレうる。`.gitignore`への共有ディレクトリ追加（#1151）を最初から入れた最初のリポジトリ |
 | `guchi-apps/signaly` | 対応済み | **参照**（2つとも`@workflows/v10`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1057, guchi-apps/signaly#113 | #1047の8周目（最終周）。**8リポジトリで唯一Nodeが一切無い**（`package.json`がルートにも`frontend/`にも無く、`frontend/`は素のHTML/JS、`scripts/`は全てPythonかbash）。そのため**`node-version`を指定しない唯一のリポジトリ**（他7件は全て指定）。`package-manager`は使わないが**既定値の`npm`のままにする**——`pnpm`にすると実装ステップで`node`が許可されなくなる（#1147）。**`workflows/v10`未満へ下げてはいけない。** v9までは許可ツールが`pnpm`固定で`python`・`pip`・`pytest`のいずれも実行できず、**検証手段がPythonのテストしか無い**（Lintも無い）このリポジトリでは検証が一切できなくなる。テストは`DB_NAME=ci_signaly python -m unittest discover -s backend -p 'test_*.py' -v`で、**`DB_NAME`を忘れると`backend/database.py`のimport時点で落ちる**（実際のDB接続はせず全てモック）。バージョンは`package.json`ではなく`version.json`で`scripts/bump_version.py`経由 |
+| `guchi-apps/clip-hive` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1376, guchi-apps/clip-hive#21 | **#1011（Phase 6）の1周目で、privateリポジトリを載せた最初の例。** Next.js + Prisma + MariaDB/MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`（このリポジトリのCIはサービスコンテナを使わず、ビルド時の`DATABASE_URL`にプレースホルダを渡している）。`lint`・`typecheck`・`build:ci`・`db:migrate:deploy`をすべて持ち、共有ワークフローと過不足なく噛み合う唯一のリポジトリだったため1周目に選んだ。**`npm test`は`lint && typecheck`の別名**でテストランナーは動かず、`npm run dev`は`scripts/ensure-mysql.sh`とローカルの`.env.local`を要求して無人実行では使えない点をCLAUDE.mdに明記した。旧世代ラベルは`05.develop`が#15に付いており、削除前に控えて書き戻した |
+| `guchi-apps/ops-dashboard` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1377, guchi-apps/ops-dashboard#64 | #1011（Phase 6）の2周目。**`runtime-setup: node`をprivateで初めて使った周**（`prisma/`を持たずDBを使わない）。`package-manager: npm`・`node-version: "22.23.1"`。**`node-version`は`.nvmrc`から手で写す**——CIは`node-version-file`で`.nvmrc`を読むが、共有ワークフローはこの入力しか見ない。`test`・`typecheck`のnpm scriptを持たず、CIが`npx tsc --noEmit`を直接叩いているため、AGENTS.mdへ実際の検証コマンド（`lint`・`npx tsc --noEmit`・`build`）を書いた。**ブランチ命名が`feature/<番号>-<説明>`だった唯一のリポジトリ**で、この命名ではワークフローが対象Issueを特定できず進捗が一切遷移しないため、`issue-<番号>`へ揃えることをAGENTS.mdに明記した（既存の`feature/`ブランチ8本は、マージ済みかどうかの判断が要り作業中のものを巻き込む恐れがあるため触っていない）。旧世代ラベルは`07.m:marge`が#26に付いていたが、盤面では既に`Release`になっており書き戻しは不要だった |
+| `guchi-apps/db-console` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1378, guchi-apps/db-console#19 | #1011（Phase 6）の3周目。**デフォルトブランチが`main`だった唯一のリポジトリ**で、`develop`へ変更した（`issues`・`issue_comment`はデフォルトブランチのワークフローしか起動しない）。変更前に`develop...main`のファイル差分が空であること——mainの内容はすべてdevelopに含まれ、コミット数の差8件はdevelop→mainのマージコミットだけであること——を実測した。`runtime-setup: node-db`・`package-manager: npm`・`node-version: "22.23.1"`（`.nvmrc`準拠）。**`prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、postinstallの`prisma generate`ごと`npm ci`が落ちていた**ため、未設定時は接続できないプレースホルダーへ倒す形へ直した（共有ワークフローの依存インストールはDATABASE_URLを渡さない。car-care・clip-hive・dayspanは元から未設定でも通る作りで、`env()`を必須にしていたのはここだけ）。`npm run build`は素だと`/auth/callback`で`ERR_INVALID_URL`になるため、CIと同じプレースホルダーを渡す実行例をAGENTS.mdに書いた。CIのDBは他アプリの`mysql:8.0`ではなく`mariadb:10.11`。旧世代ラベルは`05.develop`が#13に付いており、削除前に控えて書き戻した |
+| `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**フリートで唯一のNode 24**（`ci.yml`・`engines`とも。他は20〜22帯）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`は入れていない（guchi-apps/aide#6が同じ範囲を扱っているため） |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
@@ -77,7 +84,10 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/solitaire` | — | ○（※2） |
 | `guchi-apps/myroom` | — | ○（※2） |
 | `guchi-apps/signaly` | — | ○（※2） |
-| `guchi-apps/clip-hive` | — | 保留 |
+| `guchi-apps/clip-hive` | — | ○（※3） |
+| `guchi-apps/ops-dashboard` | — | ○（※3） |
+| `guchi-apps/db-console` | — | ○（※3） |
+| `guchi-apps/aide` | — | ○（※3） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -88,14 +98,17 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 汎用ランチャーは既定で開発サーバーを起動せず（#1224）、envが無ければ`supply_env_files`は何もしないため、
 セッションの起動には影響しない。開発サーバーを動かすセッションでだけ配置する。
 
-サブPC列は**2026-08-14時点の申告11件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
+サブPC列は**2026-08-15時点の申告15件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
 入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。単に未着手だったため#1276で追加し、
 あわせてポート帯も確保した（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——
 載っていないと汎用ランチャーの既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。
 
-`clip-hive`は`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため、起動はできても`11.local`の
-付与とProject Statusの遷移が成立せず、対応可否を保留している（#1224）。サブPCの対応表にも、その理由を
-コメントとして書いたうえで無効化した行を置いてある。
+※3 `clip-hive`は#1376、`ops-dashboard`は#1377、`db-console`は#1378、`aide`は#1379で追加した
+（`aide`以外はprivate）。
+`ops-dashboard`はサブPCへcloneはされていたが対応表に載っておらず、`clip-hive`・`db-console`はcloneも
+されていなかった。ポート帯も`clip-hive`の10000以外は未確保だったため、あわせて足した（17000・18000）。**`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため
+`11.local`の付与とProject Statusの遷移が成立せず保留していた**（#1224）が、両方を導入して前提が揃ったため、
+サブPCの対応表でコメントアウトされていた行を有効化した。ポート帯（10000）は#1224の時点で確保済み。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
@@ -195,6 +208,25 @@ git tag --list 'workflows/*'
 ```
 
 issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）を参照し、常に最新の内容で動く。他リポジトリはタグ固定のため、issue-deck側の変更は**新しいタグを切り、各リポジトリのcallerを1行更新するPRを出す**まで波及しない。issue-deckが先に壊れて他リポジトリには届かない、カナリア構成である（#934）。
+
+### タグが記録しないもの — `on:`と`with:`はcallerが持つコピー（#1366）
+
+`@<タグ>`がバージョン記録として機能するのは**ジョブ本体（`reusable-*.yml`側）だけ**である。callerが自分で持つ以下の2つは、issue-deck側の同名ファイルからコピーした断片であり、**タグを上げても波及しないうえ、ずれていても`uses:`の行を見る限り検知できない。**
+
+- `on:`（トリガー定義）
+- `with:`（リポジトリ固有の入力値）
+
+`with:`はリポジトリごとに異なるのが正常なので差分があっても問題にならないが、**`on:`は原則として全リポジトリで同じであるべき**で、ここがずれると「参照先は最新なのに起動経路だけ古い」という状態になる。#1366では、issue-deck側で`push`（`develop`）→`workflow_run`（`CI` / `requested`）へ直した（#1330・#1365）あとも、guchi-apps/dayspan・guchi-apps/shopping-listのcallerには`push`が残り、`Unsupported event type: push`で失敗し続けていた。
+
+**issue-deck側でトリガーを変更したら、そのワークフローの全callerを横断して確認する。**
+
+```bash
+# 例: claude-conflict-resolve.yml のトリガーを全リポジトリで確認する
+for r in $(gh repo list guchi-apps --limit 50 --json name --jq '.[].name'); do
+  c=$(gh api "repos/guchi-apps/$r/contents/.github/workflows/claude-conflict-resolve.yml" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+  [ -n "$c" ] && echo "== $r" && echo "$c" | sed -n '/^on:/,/^jobs:/p'
+done
+```
 
 移行済みのワークフローは以下のとおり。
 

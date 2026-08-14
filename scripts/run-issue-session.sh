@@ -292,7 +292,7 @@ if [[ -n "$TMUX_SESSION_NAME" ]]; then
   fi
 fi
 
-# セッションの状態をSignalyへ通知するフック（#1219）。
+# セッションの状態をSignalyへ通知するフック（#1219）と、提示した計画をIssueへ残すフック（#1342）。
 #
 # **`--settings` で渡すことで、このスクリプトから起動したセッションにだけ適用する。**
 # `~/.claude/settings.json` に書くとメインPCの対話セッションでも通知が飛んで邪魔になる。
@@ -314,6 +314,9 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 値はいずれもこのスクリプトが組み立てた識別子（数字・リポジトリ名・パス）で、
   # 外部由来のテキストはここへ流さない。
   HOOK_COMMAND="'$NOTIFY_SCRIPT' '$ISSUE_NUMBER' '$REPO_NAME' '$REPO_SLUG'"
+  # `PreToolUse`だけmatcherを付ける（#1342）。**計画本文（`tool_input.plan`）が手に入るのは
+  # `ExitPlanMode`のこのフックだけ**で、承認プロンプトの`Notification`には入っていない。
+  # matcherを付けずに全ツールで呼ぶと、`Read`・`Bash`のたびにスクリプトが起動する。
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -322,6 +325,12 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
+      }
     ]
   }
 }

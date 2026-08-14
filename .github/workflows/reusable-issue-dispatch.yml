@@ -80,10 +80,18 @@ name: Claude Issue Dispatch (reusable)
 #      塞ぐ。順番待ち中に付与された場合もdispatchジョブの陳腐化チェックで拾って中止する。
 #
 # issue-detail.tsx等の「Claudeに質問する」ダイアログ(src/lib/github/ask-claude.ts)が投稿する
-# `@claude 質問: `で始まるコメントは、コード変更を伴わない読み取り専用の質問応答(mode=ask)として
+# 質問コメントは、コード変更を伴わない読み取り専用の質問応答(mode=ask)として
 # 扱う。実装状況(実装中・承認待ち・PR作成後・クローズ済み等、上記いずれの状態でも)によらず常に
 # 最優先で割り込み、ラベル変更・ブランチ作成・コミット・PR作成は一切行わずIssueへの回答コメントの
 # 投稿のみを行う(#216)。
+#
+# 質問かどうかの識別は`<!-- issue-deck-question -->`マーカー(QUESTION_COMMENT_MARKER)で行う
+# (#1294)。従来は起動トリガーそのものである`@claude 質問: `プレフィックスで判定していたが、
+# それだと同じコメントをサブPC側でも処理させた時点で必ず二重に回答するため、「Issueに残す質問
+# コメント」と「Actionsを起こすトリガー」を別の軸にした。Actionsに答えさせる形の本文は従来どおり
+# `@claude 質問: `で始まる(このワークフローをタグ固定で参照する他リポジトリの古い版が、
+# プレフィックスしか見ないため)。サブPCで答えさせる場合は`@claude`を含めない本文になり、
+# 上記triageジョブのif条件(startsWith(comment.body, '@claude'))に掛からず起動しない。
 #
 # issue-<番号>ブランチが既に存在する場合でも、issue_commentトリガー(人間からの明示的な
 # @claudeコメント)であれば、以下のいずれかに該当する限りmode=additional(既存ブランチへの
@@ -429,13 +437,17 @@ jobs:
           echo "$LABELS" | grep -qx "23.preview-required" && PREVIEW_REQUIRED=true
           echo "preview_required=$PREVIEW_REQUIRED" >> "$GITHUB_OUTPUT"
 
-          # issue-detail.tsx等の「Claudeに質問する」ダイアログが投稿する定型プレフィックス
-          # （ASK_CLAUDE_COMMENT_PREFIX、src/lib/github/ask-claude.ts）で始まるコメントかを判定する。
-          # 該当する場合、実装状況（実装中・承認待ち・PR作成後等）によらず常に最優先で読み取り専用の
-          # 質問応答モード(mode=ask)へ割り込む。
+          # issue-detail.tsx等の「Claudeに質問する」ダイアログ（src/lib/github/ask-claude.ts）が
+          # 投稿した質問コメントかを判定する。該当する場合、実装状況（実装中・承認待ち・PR作成後等）
+          # によらず常に最優先で読み取り専用の質問応答モード(mode=ask)へ割り込む。
+          #
+          # 判定材料はマーカー（QUESTION_COMMENT_MARKER）と旧形式のプレフィックス
+          # （ASK_CLAUDE_COMMENT_PREFIX）の両方（#1294）。マーカーへ移す前に投稿された質問コメントが
+          # Issueに残っているため、旧形式も引き続き質問として扱う。
           IS_ASK=false
           case "$COMMENT_BODY" in
             "@claude 質問: "*) IS_ASK=true ;;
+            *"<!-- issue-deck-question -->"*) IS_ASK=true ;;
           esac
 
           # ブランチが既に存在する場合の分岐(labeled/unlabeledイベントは人間からの明示的な

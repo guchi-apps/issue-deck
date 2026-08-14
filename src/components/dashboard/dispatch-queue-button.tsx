@@ -123,7 +123,8 @@ function QueueSection({
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
       <ul className="mt-1 flex flex-col gap-1">
         {jobs.map((job, index) => {
-          const status = describeDispatchJobStatus(job.status);
+          // 種別を必ず渡す（#1294。省略すると種別が増えたときに文言が黙って「起動しました」になる）
+          const status = describeDispatchJobStatus(job.status, job.kind);
           return (
             <li key={job.id} className="flex items-start gap-2 text-xs">
               {showOrder && (
