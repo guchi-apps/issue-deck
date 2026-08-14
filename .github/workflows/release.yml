@@ -39,14 +39,26 @@ jobs:
     runs-on: ubuntu-latest
     needs: release
     if: always()
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: 不足分を1Passwordから補う
+        if: always()
+        uses: ./.github/actions/load-secrets
+        with:
+          only: SIGNALY_WEBHOOK_URL
+          # issue-deckは#1302・#1308で1Password依存を外しており、このsecretは存在しない。
+          # 空が渡るとアクションは1Passwordを一切触らない。他リポジトリでは値が入るため、
+          # GitHub側の投入が済むまで1Passwordから補われる（#1307の段階的な移行のため）。
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
       - name: Signaly に通知
         env:
-          SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}
           NOTIFY_APP: issue-deck
           NOTIFY_KIND: リリース
