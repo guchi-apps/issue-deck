@@ -36,6 +36,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     checkUserLabeledAt: null,
     qaAnswerPendingAt: null,
     lastCommentAt: null,
+    dispatchPendingAt: null,
     projectStatus: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
     favorite: false,
@@ -271,6 +272,14 @@ describe("reconcileIssues", () => {
     const result = reconcileIssues([], [nextIssue]);
     expect(result[0]).toBe(nextIssue);
   });
+
+  // 順番待ちの開始・終了でビューの振り分けが変わるため、参照を使い回すと一覧が追従しない
+  it("dispatchPendingAtが変わったIssueは新しいオブジェクトを採用する（#1347）", () => {
+    const prevIssue = makeIssue({ id: "1", dispatchPendingAt: null });
+    const nextIssue = makeIssue({ id: "1", dispatchPendingAt: "2026-01-09T00:00:00.000Z" });
+    const result = reconcileIssues([prevIssue], [nextIssue]);
+    expect(result[0]).toBe(nextIssue);
+  });
 });
 
 describe("detectNewlyCheckUserIssues", () => {
@@ -392,6 +401,38 @@ describe("time-dependent stats", () => {
         "1",
         "5",
       ]);
+    });
+
+    it("サブPCへ積んだ未完了ジョブがあるIssueは、進捗がReadyでもnot-startedではなくin-progressに出る（#1347）", () => {
+      const dispatchPendingAt = "2026-01-09T00:00:00.000Z";
+      const issues = [
+        makeIssue({ id: "1", dispatchPendingAt }),
+        makeIssue({ id: "2", dispatchPendingAt: null }),
+      ];
+      expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
+        "1",
+      ]);
+      expect(filterIssuesByView(issues, "not-started", null).map((issue) => issue.id)).toEqual([
+        "2",
+      ]);
+    });
+
+    it("順番待ちでもuser確認待ち・手作業のビューの母集団は変えない（#1347）", () => {
+      const dispatchPendingAt = "2026-01-09T00:00:00.000Z";
+      const issues = [
+        makeIssue({
+          id: "1",
+          dispatchPendingAt,
+          labels: [{ name: "00.check-user", color: "red", description: null }],
+        }),
+        makeIssue({
+          id: "2",
+          dispatchPendingAt,
+          labels: [{ name: "71.manual-step", color: "d876e3", description: null }],
+        }),
+      ];
+      expect(filterIssuesByView(issues, "check-user", null).map((issue) => issue.id)).toEqual(["1"]);
+      expect(filterIssuesByView(issues, "manual-step", null).map((issue) => issue.id)).toEqual(["2"]);
     });
 
     it("view=manual-stepは71.manual-stepが付いたIssueのみ返す（進捗は問わない）", () => {
