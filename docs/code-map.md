@@ -104,6 +104,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
+- **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
+  `scripts/start-issue.sh`を持つリポジトリ（issue-deck自身）だけが自前のスクリプトで起動し、
+  それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
+  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
+  **画面の`canStartLocalSession`は「このPC」導線のゲートに限定**しており、サブPC導線はサブPCの
+  申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒

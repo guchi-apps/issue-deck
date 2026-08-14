@@ -12,16 +12,25 @@
 # 実際のパスは環境ごとに違うため、このファイルはリポジトリに置くサンプル。
 # コピーして自分の環境に合わせて書き換えること。
 #
-# 注意: ここに書いただけでは起動しない。対象リポジトリの scripts/start-issue.sh が
-# 「ローカル起動プロトコル」に適合している必要がある（冒頭のマーカー行で宣言する）。
-# 適合状況は次で確認できる。
+# ここに書いてcloneが実在すれば、サブPCからは起動できる（#1224）。マーカー行
+# （ローカル起動プロトコル）を宣言していないリポジトリは、issue-deck側の汎用ランチャー
+# （scripts/generic-start-issue.sh）が起こす。対象リポジトリ側には何も追加しない。
+#
+# 「このPC」経由（issuedeck:// → WSL）の起動だけは、従来どおり対象リポジトリの
+# scripts/start-issue.sh が「ローカル起動プロトコル」に適合している必要がある。
+# 適合状況と、どちらの方式で起動するかは次で確認できる。
 #
 #   scripts/check-local-session-contract.sh --all
 #
-# 契約の内容は docs/multi-agent/local-quick-start.md を参照。
+# 対象リポジトリを増やす手順は docs/multi-agent/generic-launcher.md を参照。
 
-guchi-apps/issue-deck     /home/<ユーザー名>/apps/issue-deck
-guchi-apps/dayspan        /home/<ユーザー名>/apps/dayspan
+guchi-apps/issue-deck          /home/<ユーザー名>/apps/issue-deck
+guchi-apps/dayspan             /home/<ユーザー名>/apps/dayspan
+guchi-apps/shopping-list       /home/<ユーザー名>/apps/shopping-list
+guchi-apps/car-care            /home/<ユーザー名>/apps/car-care
+guchi-apps/asset-manager       /home/<ユーザー名>/apps/asset-manager
+guchi-apps/meisai-lab          /home/<ユーザー名>/apps/meisai-lab
+guchi-apps/subscription-lists  /home/<ユーザー名>/apps/subscription-lists
 
-# 未対応のリポジトリは、書いても受け口の段階で停止する（起動して固まるよりは安全）。
-#guchi-apps/shopping-list  /home/<ユーザー名>/apps/shopping-list
+# clone していないリポジトリを書いても、起動時とpollerの申告の両方で弾かれる
+# （チェックアウト先が実在しないため）。書き得ではあるが、実態と揃えておく方が読みやすい。

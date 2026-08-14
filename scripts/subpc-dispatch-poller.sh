@@ -360,12 +360,17 @@ run_job() {
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
   # （そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない）。
-  local before after new_sessions
+  #
+  # **リポジトリ名まで含めて突き合わせる**（#1224）。Issue番号はリポジトリごとに振られるため、
+  # 番号だけ（`*-issue-<番号>`）で見ると、別リポジトリの同じ番号のセッションが動いているだけで
+  # 起動を断ってしまう。起動できるリポジトリが1つだった間は表に出なかったが、増やした時点で
+  # 番号の衝突はほぼ確実に起きる。セッション名の規約は`<リポジトリ名>-issue-<番号>`
+  # （docs/multi-agent/local-quick-start.md「セッション名」）。
+  local before after new_sessions expected_session
+  expected_session="${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
   before="$(tmux_session_names)"
-  if printf '%s\n' "$before" | grep -qx ".*-issue-$issue_number" 2>/dev/null; then
-    local existing
-    existing="$(printf '%s\n' "$before" | grep -x ".*-issue-$issue_number" | head -1)"
-    report_job "$job_id" failed "同じIssueのtmuxセッションが既に動いています: $existing" "$existing"
+  if printf '%s\n' "$before" | grep -qxF "$expected_session"; then
+    report_job "$job_id" failed "同じIssueのtmuxセッションが既に動いています: $expected_session" "$expected_session"
     return 0
   fi
 

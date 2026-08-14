@@ -9,7 +9,15 @@
 #     → issuedeck://start/<owner>/<repo>/<番号>
 #     → scripts/windows/issuedeck-protocol.cmd（Windows側のプロトコルハンドラ）
 #     → wt.exe → wsl.exe → このスクリプト
-#     → 対象リポジトリの scripts/start-issue.sh
+#     → 対象リポジトリの scripts/start-issue.sh または汎用ランチャー
+#
+#   issue-deckの画面（サブPCで開始）
+#     → ジョブキュー → scripts/subpc-dispatch-poller.sh → このスクリプト
+#
+# 出口は2つある（#1224）。判定は lib/local-repo-resolve.sh が持つ。
+#
+#   contract  対象リポジトリが契約適合の scripts/start-issue.sh を持つ → それを exec する
+#   generic   持たない                                                → 汎用ランチャーを exec する
 #
 # 引数はブラウザ経由で外部から渡りうるため、ハンドラ側で検証済みでも改めて検証する
 # （多層防御。片側の検証が緩んでもここで止まる）。
@@ -71,31 +79,12 @@ if ! local_repo_check "$FULL_NAME"; then
 fi
 REPO_PATH="$LOCAL_REPO_PATH"
 LAUNCHER="$LOCAL_REPO_LAUNCHER"
+LAUNCH_MODE="$LOCAL_REPO_MODE"
 
 echo "#$ISSUE_NUMBER: $FULL_NAME（$REPO_PATH）のセッションを起動します..."
 cd "$REPO_PATH"
 
-# 対象リポジトリが必要とするパッケージマネージャを判定する。リポジトリごとに違うため
-# （issue-deck・dayspanはpnpm、shopping-listはnpmで依存インストールもしない）、pnpmを
-# 無条件に必須化すると壊れる。判定は宣言 → ロックファイル → package.json の順で確からしい
-# ものを採る。Node系でないリポジトリでは何も要求しない。
-detect_package_manager() {
-  local dir="$1"
-  if [[ -f "$dir/package.json" ]]; then
-    local declared
-    declared="$(grep -oP '"packageManager"\s*:\s*"\K[a-z]+' "$dir/package.json" | head -1 || true)"
-    if [[ -n "$declared" ]]; then
-      printf '%s\n' "$declared"
-      return 0
-    fi
-  fi
-  if [[ -f "$dir/pnpm-lock.yaml" ]]; then printf 'pnpm\n'; return 0; fi
-  if [[ -f "$dir/yarn.lock" ]]; then printf 'yarn\n'; return 0; fi
-  if [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]]; then printf 'bun\n'; return 0; fi
-  if [[ -f "$dir/package-lock.json" || -f "$dir/package.json" ]]; then printf 'npm\n'; return 0; fi
-  printf '\n'
-}
-
+# 判定は lib/local-repo-resolve.sh と共有する（汎用ランチャーも同じ関数を使う）。
 PACKAGE_MANAGER="$(detect_package_manager "$REPO_PATH")"
 
 # wt.exeから開いたタブは `bash -lc`（非対話シェル）で始まる。Ubuntuの ~/.bashrc は冒頭で
@@ -142,21 +131,28 @@ done
 export ISSUE_DECK_SKIP_LAN_SETUP=1
 
 # 開発サーバーのポートは「ベース値 + Issue番号」で採番される。どのリポジトリがどの帯を使うかは
-# 定義上どのリポジトリ単独でも決められないため、全リポジトリを知る唯一の場所であるここが持つ
-# （#1073）。実際、issue-deckとshopping-listが同じ4000帯のまま衝突していた。
+# 定義上どのリポジトリ単独でも決められないため、全リポジトリを知る唯一の場所であるissue-deckが
+# 持つ（#1073）。実際、issue-deckとshopping-listが同じ4000帯のまま衝突していた。
+# 対応表は scripts/local-repo-ports.conf（#1224で`case`文から移した）。
 # 表に無いリポジトリへは渡さず、そのリポジトリの既定に任せる。
 #
-# **各リポジトリのstart-issue.sh側の既定値も、この表と同じ値に揃える**（#1178）。ターミナル
-# 直叩き・tmux経路はここを通らずベース値が渡らないため、既定値がずれていると同じIssueでも
-# 起動経路によってポートが変わり、1台に複数リポジトリのセッションが常駐するマシン
+# **契約適合のリポジトリでは、start-issue.sh側の既定値もこの表と同じ値に揃える**（#1178）。
+# ターミナル直叩き・tmux経路はここを通らずベース値が渡らないため、既定値がずれていると同じ
+# Issueでも起動経路によってポートが変わり、1台に複数リポジトリのセッションが常駐するマシン
 # （サブPC）では他リポジトリの帯と衝突する。
-case "$FULL_NAME" in
-  guchi-apps/issue-deck) export ISSUE_DECK_DEV_PORT_BASE=4000 ;;
-  guchi-apps/shopping-list) export ISSUE_DECK_DEV_PORT_BASE=5000 ;;
-  guchi-apps/dayspan) export ISSUE_DECK_DEV_PORT_BASE=6000 ;;
-esac
+if DEV_PORT_BASE="$(local_repo_port_base "$FULL_NAME")"; then
+  export ISSUE_DECK_DEV_PORT_BASE="$DEV_PORT_BASE"
+fi
 
-# start-issue.shはworktree作成〜devサーバー起動〜claude起動まで自前で面倒を見る。
-# execで置き換えるため、以降のtrapはstart-issue.sh側の挙動に委ねる。
+# execで置き換えるため、以降のtrapは起動先の挙動に委ねる。
 trap - EXIT
+
+if [[ "$LAUNCH_MODE" == "generic" ]]; then
+  # 汎用ランチャー（#1224）。対象リポジトリには何も追加しない代わりに、worktree作成〜env供給〜
+  # 依存インストール〜プロンプト生成〜tmux起動までをissue-deck側で面倒を見る。
+  exec bash "$LAUNCHER" "$OWNER" "$REPO" "$ISSUE_NUMBER"
+fi
+
+# 契約適合のリポジトリは自前のstart-issue.shがworktree作成〜devサーバー起動〜claude起動まで
+# 面倒を見る。
 exec bash "$LAUNCHER" "$ISSUE_NUMBER"

@@ -24,7 +24,8 @@ scripts/subpc-dispatch-poller.sh（systemd service・常駐）
   ↓
 scripts/start-local-session.sh <owner> <repo> <番号>
   ↓
-<対象リポジトリ>/scripts/start-issue.sh <番号>
+<対象リポジトリ>/scripts/start-issue.sh <番号>       ← 契約適合のリポジトリ（issue-deck自身）
+  または scripts/generic-start-issue.sh              ← それ以外（汎用ランチャー・#1224）
   ↓
 tmuxセッションが立つ → 以降の進捗は POST /api/progress（Project Status）が持つ
 ```
@@ -81,8 +82,13 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 | 層 | 仕組み | 何を防ぐか |
 |---|---|---|
 | DB | `DispatchJob.activeKey`（`owner/repo#番号`）に`@unique` | 画面からの二重クリック。MySQLはunique indexに複数のNULLを許すため、終了時にnullへ戻せば「未完了は1件まで」が成立する |
-| poller | 起動前に`tmux has-session`相当の確認 | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
+| poller | 起動前に`<リポジトリ名>-issue-<番号>`のtmuxセッションがあるかを確認 | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
 | ラベル | 既存の`11.local` | 無人実行（`claude-issue-dispatch.yml`）との二重起動（#1097） |
+
+pollerの確認は、**リポジトリ名まで含めて突き合わせる**（#1224）。Issue番号はリポジトリごとに
+振られるため、番号だけ（`*-issue-<番号>`）で見ると、別リポジトリの同じ番号のセッションが動いて
+いるだけで起動を断ってしまう。起動できるリポジトリが1つだった間は表に出なかったが、増やした
+時点で番号の衝突はほぼ確実に起きる。
 
 ## 「実行できないリポジトリ」はディスパッチ前に弾く
 
@@ -93,15 +99,19 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 その場で`gh repo clone`して自動対応する案は採らない。冷えた状態からの依存インストールに時間が
 かかるうえ、リポジトリによってはDBセットアップも要り、無人実行の前提として重すぎるため。
 
-申告に載るのは、`scripts/start-local-session.sh`と**同じ4つの検証**を通ったものだけ。
+申告に載るのは、`scripts/start-local-session.sh`と**同じ検証**を通ったものだけ。
 
 1. `~/.config/issue-deck/local-repos.conf`に記載がある
 2. チェックアウト先のディレクトリが実在する
-3. `scripts/start-issue.sh`が存在する
-4. 宣言しているローカル起動プロトコルの版数が、受け口の対応範囲に収まる（#1073）
+3. `scripts/start-issue.sh`がマーカー行を宣言している場合は、その版数が受け口の対応範囲に収まる（#1073）
 
 **判定は[scripts/lib/local-repo-resolve.sh](../../scripts/lib/local-repo-resolve.sh)が持ち、
 受け口とpollerが同じ関数を呼ぶ。** 判定を二重に持つと、申告と実際の起動可否が必ずずれる。
+
+**マーカー行の宣言は必要条件ではない**（#1224）。宣言していないリポジトリはissue-deck側の汎用
+ランチャー（`scripts/generic-start-issue.sh`）で起動する。以前は宣言を必須にしていたため、
+cloneも対応表への記載も済んでいるdayspanが申告に載らず、**実際に起動できるリポジトリが
+issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](generic-launcher.md)。
 
 申告と実態がずれる可能性は残る（申告後にcloneを消した、`git pull`で版数が変わった等）。その場合は
 **ディスパッチが失敗した理由をジョブの結果として画面へ返す**。ここを省くと、無人実行では何も
@@ -285,4 +295,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/apps/iss
 - [#1176](https://github.com/guchi-apps/issue-deck/issues/1176) 実装実行基盤をサブPCへ移行する（親）
 - [#1180](https://github.com/guchi-apps/issue-deck/issues/1180) 起動先（このPC / subpc）を選べるようにする
 - [local-quick-start.md](local-quick-start.md) メインPCのワンクリック起動とローカル起動プロトコル
+- [generic-launcher.md](generic-launcher.md) 対象リポジトリに何も置かずに起動する汎用ランチャー（#1224）
 - [progress-status-architecture.md](../progress-status-architecture.md) 進捗の唯一の正はProject Status

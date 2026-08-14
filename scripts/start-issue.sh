@@ -71,6 +71,9 @@ PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
 # shellcheck source=scripts/lib/worktree-status.sh
 source "$ROOT/scripts/lib/worktree-status.sh"
+# 本体の .env.local からworktreeへ環境変数を供給する処理は、汎用ランチャー（#1224）と共有する。
+# shellcheck source=scripts/lib/env-file-sync.sh
+source "$ROOT/scripts/lib/env-file-sync.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -304,77 +307,6 @@ report_start_progress() {
     echo "#$n: 進捗を $desired として報告しました。"
   else
     echo "#$n: 警告: 進捗（$desired）の報告に失敗しました（HTTP $code）。issue-deckの画面から進めてください。" >&2
-  fi
-}
-
-# 本体の .env.local にあってworktree側に無いキーだけを、値ごと追記する（#1099）。
-# worktreeの .env.local は作成時のコピーで固定されるため、本体に後から足した環境変数が
-# 既存のworktreeへ届かず、本体と違う挙動で画面確認をすることになっていた。
-# 既存キーの値には触れない（ローカルで書き換えている場合を壊さないため）。値はログに出さず、
-# 追記したキー名だけを表示する。
-sync_missing_env_keys() {
-  local issue_number="$1"
-  local source_file="$2"
-  local target_file="$3"
-  # 補完に失敗してもセッションの起動自体は妨げない（起動できない方が困るため）。
-  local added
-  if ! added="$(python3 - "$source_file" "$target_file" <<'PY'
-import pathlib
-import re
-import sys
-
-source_path = pathlib.Path(sys.argv[1])
-target_path = pathlib.Path(sys.argv[2])
-
-# PORTはworktreeごとに採番して別途書き込むため、同期の対象から外す。
-EXCLUDED_KEYS = {"PORT"}
-
-ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
-# コメントアウトされた代入は「意図的に無効化している」とみなし、上書き復活させない。
-COMMENTED_ASSIGNMENT = re.compile(r"^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
-
-source_lines = source_path.read_text(encoding="utf-8").splitlines()
-target_text = target_path.read_text(encoding="utf-8")
-
-existing = set()
-for line in target_text.splitlines():
-    matched = ASSIGNMENT.match(line) or COMMENTED_ASSIGNMENT.match(line)
-    if matched:
-        existing.add(matched.group(1))
-
-added_keys = []
-appended_lines = []
-for i, line in enumerate(source_lines):
-    matched = ASSIGNMENT.match(line)
-    if not matched:
-        continue
-    key = matched.group(1)
-    if key in EXCLUDED_KEYS or key in existing:
-        continue
-    # 何のためのキーかが分かるよう、直前の連続するコメント行も一緒に持っていく。
-    start = i
-    while start > 0 and source_lines[start - 1].lstrip().startswith("#"):
-        start -= 1
-    appended_lines.extend(source_lines[start:i])
-    appended_lines.append(line)
-    added_keys.append(key)
-
-if appended_lines:
-    if target_text and not target_text.endswith("\n"):
-        target_text += "\n"
-    if target_text and not target_text.endswith("\n\n"):
-        target_text += "\n"
-    target_path.write_text(target_text + "\n".join(appended_lines) + "\n", encoding="utf-8")
-
-# 値は出力しない（キー名のみ）。
-sys.stdout.write(" ".join(added_keys))
-PY
-  )"; then
-    echo "警告: $target_file の不足キーの補完に失敗しました。本体の .env.local と見比べてください。" >&2
-    return 0
-  fi
-  if [[ -n "$added" ]]; then
-    echo "#$issue_number: .env.local に不足していたキーを本体から追記しました: $added"
   fi
 }
 

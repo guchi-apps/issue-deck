@@ -24,6 +24,10 @@ export const LOCAL_START_SCRIPT_PATH = "scripts/start-issue.sh";
  * `ISSUE_DECK_SKIP_LAN_SETUP`を解釈せず、押すとUACを承認しても待ちから戻らずタブが固まる。
  * マーカーまで見ることで、その最悪ケースをボタンを出す前に弾く。
  *
+ * **これがゲートするのは「このPC」（`issuedeck://`）の導線だけ**（#1224）。サブPCへの
+ * ディスパッチは、マーカー行を持たないリポジトリを汎用ランチャーで起動できるため、
+ * サブPCの申告だけで判定する（`canStartLocalSession`のコメントを参照）。
+ *
  * 内容の取得はContents APIで、**存在確認とマーカー確認が1回のリクエストで済む**。
  */
 export async function fetchLocalStartScriptSupported(
