@@ -3,10 +3,11 @@
 import { ChevronLeft } from "lucide-react";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
-import type { OpenPullRequest, PullRequestDetail as PullRequestDetailData } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestDetail as PullRequestDetailData } from "@/types/pull-request";
 
 type MobilePullRequestDetailScreenProps = {
-  pullRequest: OpenPullRequest;
+  /** 一覧に無いPRをリンクから開いた場合、summaryが届くまではnull（#1260） */
+  pullRequest: PullRequestSummary | null;
   detail: PullRequestDetailData | null;
   isLoading: boolean;
   error: string | null;

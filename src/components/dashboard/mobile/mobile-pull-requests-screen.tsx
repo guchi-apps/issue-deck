@@ -3,10 +3,10 @@
 import { ChevronLeft } from "lucide-react";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobilePullRequestsScreenProps = {
-  pullRequests: OpenPullRequest[];
+  pullRequests: PullRequestSummary[];
   failedRepositories: string[];
   fetchedAt: string | null;
   isLoading: boolean;
@@ -14,8 +14,8 @@ type MobilePullRequestsScreenProps = {
   onRefresh: () => void;
   onBack: () => void;
   /** PRを選んだとき。スマホでは同じ画面枠のままPR詳細へ切り替える（#1087） */
-  onSelectPullRequest: (pullRequest: OpenPullRequest) => void;
-  onMerged: (pullRequest: OpenPullRequest) => void;
+  onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
 };
 
 /**

@@ -3,9 +3,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
-function makePullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequest {
+function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const repositoryFullName = overrides.repositoryFullName ?? "guchi-apps/issue-deck";
   const number = overrides.number ?? 1;
   return {
@@ -17,6 +17,8 @@ function makePullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequ
     htmlUrl: `https://github.com/${repositoryFullName}/pull/${number}`,
     authorLogin: "claude",
     draft: false,
+    state: "open",
+    merged: false,
     baseRef: "develop",
     headRef: `issue-${number}`,
     kind: "issue",
@@ -34,10 +36,10 @@ type RenderOverrides = Partial<{
   error: string | null;
   failedRepositories: string[];
   selectedPullRequestId: string | null;
-  onSelectPullRequest: (pullRequest: OpenPullRequest) => void;
+  onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
 }>;
 
-function renderList(pullRequests: OpenPullRequest[], overrides: RenderOverrides = {}) {
+function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrides = {}) {
   return render(
     <PullRequestList
       pullRequests={pullRequests}

@@ -1,5 +1,6 @@
-import { ExternalLink } from "lucide-react";
+import { GitPullRequest } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import { cn } from "@/lib/utils";
 
@@ -14,10 +15,8 @@ export function PullRequestLinkBadge({ link, approvalPending }: PullRequestLinkB
   if (!link) return null;
 
   return (
-    <a
+    <GithubReferenceLink
       href={link.url}
-      target="_blank"
-      rel="noreferrer"
       className={cn(
         "inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors hover:opacity-80 md:min-h-0 md:px-2.5",
         approvalPending
@@ -25,9 +24,9 @@ export function PullRequestLinkBadge({ link, approvalPending }: PullRequestLinkB
           : "bg-muted text-muted-foreground ring-border",
       )}
     >
+      <GitPullRequest className="size-3" />
       対応PR #{link.number}
-      <ExternalLink className="size-3" />
       {approvalPending && "・要確認"}
-    </a>
+    </GithubReferenceLink>
   );
 }

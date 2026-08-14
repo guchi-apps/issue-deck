@@ -1,4 +1,4 @@
-import type { OpenPullRequest, PullRequestKind } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestKind } from "@/types/pull-request";
 
 /** Issue専用ブランチの命名規約（`scripts/start-issue.sh`が作成する`issue-<番号>`） */
 const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
@@ -55,7 +55,7 @@ export function extractLinkedIssueNumber(pullRequest: {
  * 作成が古い順（＝最も長くマージを待っている順）に並べる。作成日時が同じ場合は
  * リポジトリ名・PR番号で安定させる。
  */
-export function sortOpenPullRequests(pullRequests: OpenPullRequest[]): OpenPullRequest[] {
+export function sortOpenPullRequests(pullRequests: PullRequestSummary[]): PullRequestSummary[] {
   return [...pullRequests].sort((a, b) => {
     const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     if (diff !== 0) return diff;
@@ -67,7 +67,7 @@ export function sortOpenPullRequests(pullRequests: OpenPullRequest[]): OpenPullR
 export type PullRequestRepositoryGroup = {
   repositoryFullName: string;
   repositoryPrivate: boolean;
-  pullRequests: OpenPullRequest[];
+  pullRequests: PullRequestSummary[];
 };
 
 /**
@@ -75,7 +75,7 @@ export type PullRequestRepositoryGroup = {
  * 昇順で、リポジトリ名順ではない。滞留が長いリポジトリを上に出すため。
  */
 export function groupPullRequestsByRepository(
-  pullRequests: OpenPullRequest[],
+  pullRequests: PullRequestSummary[],
 ): PullRequestRepositoryGroup[] {
   const groups = new Map<string, PullRequestRepositoryGroup>();
   for (const pullRequest of sortOpenPullRequests(pullRequests)) {
@@ -101,16 +101,19 @@ export function groupPullRequestsByRepository(
  * マージする、Auto-mergeの完了を待たずに今すぐ入れる、といった操作のためだけにGitHubへ
  * 移動する必要があった。「そのままマージしてよいか」の判断材料は`mergeWarnings`が文言で返し、
  * 実行前に確認を挟む形にしている。draftだけはGitHub側がマージを受け付けないため対象外。
+ *
+ * 画面内のリンクからマージ済み・クローズ済みのPRも開けるようになったため（#1260）、
+ * openでないPRも対象外にする。
  */
-export function canMergeFromDeck(pullRequest: OpenPullRequest): boolean {
-  return !pullRequest.draft;
+export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
+  return pullRequest.state === "open" && !pullRequest.draft;
 }
 
 /**
  * そのままマージすると意図しない結果になりうる状態の説明。空配列なら確認なしでマージしてよい。
  * 画面はこの内容を確認ダイアログに並べる。
  */
-export function mergeWarnings(pullRequest: OpenPullRequest): string[] {
+export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   const warnings: string[] = [];
   if (pullRequest.ciState === "failure") {
     warnings.push("CIが失敗しています。");

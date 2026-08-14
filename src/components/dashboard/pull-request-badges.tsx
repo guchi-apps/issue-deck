@@ -1,8 +1,10 @@
 "use client";
 
+import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } from "lucide-react";
+
 import type { CiState } from "@/lib/github/release-api";
 import { cn } from "@/lib/utils";
-import type { PullRequestKind } from "@/types/pull-request";
+import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
 
 const CI_STATE_LABEL: Record<CiState, string> = {
   pending: "CI実行中",
@@ -56,6 +58,31 @@ export function BranchBadge({ baseRef, headRef }: { baseRef: string; headRef: st
       <code className="truncate rounded bg-muted px-1 py-0.5">{baseRef}</code>
     </span>
   );
+}
+
+/**
+ * PRの状態アイコン。マージ待ち一覧はopenのPRしか並ばないが、画面内のリンクから開いたPRは
+ * マージ済み・クローズ済みでもありうるため、4状態を区別する（#1260）。
+ */
+export function PullRequestStateIcon({
+  pullRequest,
+  className,
+}: {
+  pullRequest: Pick<PullRequestSummary, "state" | "merged" | "draft">;
+  className?: string;
+}) {
+  if (pullRequest.merged) {
+    return <GitMerge className={cn("text-purple-600", className)} aria-label="マージ済み" />;
+  }
+  if (pullRequest.state === "closed") {
+    return (
+      <GitPullRequestClosed className={cn("text-destructive", className)} aria-label="クローズ済み" />
+    );
+  }
+  if (pullRequest.draft) {
+    return <GitPullRequestDraft className={cn("text-muted-foreground", className)} aria-label="ドラフト" />;
+  }
+  return <GitPullRequest className={cn("text-green-600", className)} aria-label="オープン" />;
 }
 
 /** 一覧・詳細で共通の補助バッジ（ドラフト・Auto-merge有効） */

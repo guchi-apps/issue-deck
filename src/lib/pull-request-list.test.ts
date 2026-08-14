@@ -8,9 +8,9 @@ import {
   mergeWarnings,
   sortOpenPullRequests,
 } from "@/lib/pull-request-list";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
-function pullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequest {
+function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
     id: "guchi-apps/issue-deck#1",
     repositoryFullName: "guchi-apps/issue-deck",
@@ -20,6 +20,8 @@ function pullRequest(overrides: Partial<OpenPullRequest> = {}): OpenPullRequest 
     htmlUrl: "https://github.com/guchi-apps/issue-deck/pull/1",
     authorLogin: "claude",
     draft: false,
+    state: "open",
+    merged: false,
     baseRef: "develop",
     headRef: "issue-1",
     kind: "issue",
@@ -139,6 +141,12 @@ describe("canMergeFromDeck", () => {
 
   it("draftはGitHub側がマージを受け付けないため対象にしない", () => {
     expect(canMergeFromDeck(pullRequest({ draft: true }))).toBe(false);
+  });
+
+  // 画面内のリンクからマージ済み・クローズ済みのPRも開けるようになったため（#1260）
+  it("openでないPRは対象にしない", () => {
+    expect(canMergeFromDeck(pullRequest({ state: "closed", merged: true }))).toBe(false);
+    expect(canMergeFromDeck(pullRequest({ state: "closed", merged: false }))).toBe(false);
   });
 });
 

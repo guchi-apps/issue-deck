@@ -96,13 +96,31 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   必要になった時点でキャッシュ層の追加を再検討する。
   取得コストは「対象リポジトリ数 + draft以外のPR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
-  `hooks/use-open-pull-requests.ts`）。
-- **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、一覧でPRを選んだ
-  ときだけ取得する。** 会話コメント・レビュー・レビューコメントの3エンドポイントを
+  `hooks/use-open-pull-requests.ts`）。**この一覧が返すのは今もopenのPRだけ**で、マージ済み・
+  クローズ済みのPRは下記の詳細API経由でしか表示しない。
+- **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、PRを選んだ・
+  画面内のリンクからPRを開いたときだけ取得する。** 会話コメント・レビュー・レビューコメントの
+  3エンドポイントを
   [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
-  統合する。タイトル・ブランチ・CI状態など**一覧が既に持っている情報はこのAPIで返さない**
-  （画面のヘッダーは一覧の項目から描く）。こちらも自動ポーリングは無い
-  （`hooks/use-pull-request-detail.ts`）。
+  統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
+  ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
+  **一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・クローズ済みのPRも
+  開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
+  選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
+  一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
+  の`toPullRequestSummary`で同じ形に揃える。
+- **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
+  `<a href="https://github.com/...">`のまま出しておき、
+  [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
+  が通常クリックだけを奪ってアプリ内遷移に差し替える（Ctrl/⌘クリック・中クリックはGitHubを開ける）。
+  遷移の実体は`IssueDeckShell`の`openReference`だけが持ち、Markdown本文の中のような深い位置へは
+  contextで配る（`github-reference-navigation.tsx`）。**providerが無い場所では素の外部リンクに
+  戻るだけ**なので、ダイアログ単体のテストでも壊れない。GitHubは`/issues/<番号>`でPRも開けるため、
+  Issue参照はまずDBキャッシュのIssueを探し、無ければPRとして開き直す。PC（`pane`・`pr`）と
+  スマホ（`mscreen`・`missue`）は現在地の持ち方が別なので、**両方を1回の`router.replace`で
+  進める**（`hooks/use-reference-navigation.ts`。2回に分けると後の1回が前の1回の変更を落とす）。
+  「GitHubで開く」ボタン・Actionsの実行ログ・GitHub Appのインストールは、アプリ内に対応する
+  画面が無いため外部リンクのまま残している。
 - **サブPCへのディスパッチはpull型で、書き込み経路は`/api/dispatch/*`の1本。** 画面はジョブを
   `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
   tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。
