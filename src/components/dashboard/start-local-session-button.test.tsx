@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 const updateIssue = vi.fn();
@@ -21,7 +22,7 @@ const cancel = vi.fn();
 let dispatchState: {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
-  sessions: never[];
+  sessions: DispatchSessionView[];
   concurrency: number | null;
   error: string | null;
 };
@@ -61,6 +62,24 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     claimedAt: null,
     startedAt: null,
     finishedAt: null,
+    ...overrides,
+  };
+}
+
+function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+  return {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1049",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1049,
+    state: "ALIVE",
+    exitStatus: null,
+    firstSeenAt: "2026-08-14T00:00:00Z",
+    lastReportedAt: "2026-08-14T00:05:00Z",
+    activity: null,
+    activityAt: null,
+    remoteControlUrl: null,
+    previewUrl: null,
     ...overrides,
   };
 }
@@ -212,6 +231,42 @@ describe("StartLocalSessionButton", () => {
       fireEvent.click(screen.getByRole("button", { name: /subpcで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
       expect(updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+  // #1311。起動済みのIssueをもう一度積んでも、poller側で見送られるだけで何も起きない
+  describe("起動済み（セッション生存中）のIssue", () => {
+    it("ボタンを押せず、セッション名と畳み方を本文で出す", () => {
+      dispatchState.hosts = [makeHost()];
+      dispatchState.sessions = [makeSession()];
+      renderButton();
+
+      const button = screen.getByRole("button", { name: /subpcで開始/ });
+      expect(button.hasAttribute("disabled")).toBe(true);
+      expect(screen.getByText(/issue-deck-issue-1049/)).not.toBeNull();
+      expect(screen.getByText(/kill-session/)).not.toBeNull();
+    });
+
+    // 死んだペインのセッションはstart-issue.shが畳んで作り直す。止めると起動できなくなる
+    it("終了したセッションしか無ければ従来どおり押せる", () => {
+      dispatchState.hosts = [makeHost()];
+      dispatchState.sessions = [makeSession({ state: "EXITED" })];
+      renderButton();
+
+      expect(
+        screen.getByRole("button", { name: /subpcで開始/ }).hasAttribute("disabled"),
+      ).toBe(false);
+    });
+
+    // pollerが落ちている間、行はALIVEのまま古びる。報告が無いことと「動いている」ことは違う
+    it("報告が途絶えたホストのセッションでは塞がない", () => {
+      dispatchState.hosts = [makeHost({ online: false })];
+      dispatchState.sessions = [makeSession()];
+      renderButton();
+
+      // 押せないこと自体は変わらないが、理由はホストの応答（従来どおり）になる
+      expect(screen.getByText(/応答していません/)).not.toBeNull();
+      expect(screen.queryByText(/kill-session/)).toBeNull();
     });
   });
 

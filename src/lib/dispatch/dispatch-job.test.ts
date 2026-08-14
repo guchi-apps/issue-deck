@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
   describeDispatchEnqueueRejection,
   describeDispatchJobStatus,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   isCancelableDispatchJobStatus,
@@ -150,6 +153,8 @@ describe("parseDispatchReportStatus", () => {
     expect(parseDispatchReportStatus("running")).toBe("running");
     expect(parseDispatchReportStatus("succeeded")).toBe("succeeded");
     expect(parseDispatchReportStatus("failed")).toBe("failed");
+    // 起動を見送ったときの報告（#1229）
+    expect(parseDispatchReportStatus("skipped")).toBe("skipped");
   });
 
   it("issue-deck側だけが付ける状態は受け付けない", () => {
@@ -172,27 +177,53 @@ describe("describeDispatchEnqueueRejection", () => {
     ).toContain("guchi-apps/shopping-list");
     expect(describeDispatchEnqueueRejection("already_queued", { hostName: "subpc" })).not.toBe("");
   });
+
+  // #1311。畳むにはセッション名を指す必要があるため、名前が無いと押せない理由だけが残る
+  it("セッション生存の理由には、セッション名と畳み方が入る", () => {
+    const message = describeDispatchEnqueueRejection("session_alive", {
+      hostName: "subpc",
+      session: { host: "subpc", tmuxSessionName: "issue-deck-issue-1311" },
+    });
+    expect(message).toContain("issue-deck-issue-1311");
+    expect(message).toContain("kill-session");
+  });
+
+  it("セッションの情報が無くても文言が壊れない", () => {
+    expect(describeDispatchEnqueueRejection("session_alive", { hostName: "subpc" })).not.toBe("");
+  });
 });
 
 describe("resolveDispatchTargetRejection", () => {
   const host = { online: true, repositories: ["guchi-apps/issue-deck"] };
   const repositoryFullName = "guchi-apps/issue-deck";
+  const blockingSession = { host: "subpc", tmuxSessionName: "issue-deck-issue-1311" };
 
   it("実行できる組み合わせならnull（＝選べる）", () => {
-    expect(resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob: false })).toBe(
-      null,
-    );
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBe(null);
   });
 
   it("申告が無い・応答していないホストは選ばせない", () => {
     expect(
-      resolveDispatchTargetRejection({ host: null, repositoryFullName, hasActiveJob: false }),
+      resolveDispatchTargetRejection({
+        host: null,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
     ).toBe("host_unknown");
     expect(
       resolveDispatchTargetRejection({
         host: { ...host, online: false },
         repositoryFullName,
         hasActiveJob: false,
+        blockingSession: null,
       }),
     ).toBe("host_offline");
   });
@@ -203,22 +234,144 @@ describe("resolveDispatchTargetRejection", () => {
         host: { ...host, repositories: [] },
         repositoryFullName,
         hasActiveJob: false,
+        blockingSession: null,
       }),
     ).toBe("repository_not_runnable");
-    expect(resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob: true })).toBe(
-      "already_queued",
-    );
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: true,
+        blockingSession: null,
+      }),
+    ).toBe("already_queued");
+  });
+
+  // #1311。起動済みのIssueをもう一度積んでも、poller側で見送られるだけで何も起きない
+  it("セッションが動いているIssueは選ばせない", () => {
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession,
+      }),
+    ).toBe("session_alive");
   });
 
   // 画面とAPIで並びが違うと、画面では押せるのにAPIが別の理由で断る状態が生まれる
-  it("判定の並びはenqueueDispatchJobと同じ（ホストの状態が先）", () => {
+  it("判定の並びはenqueueDispatchJobと同じ（ホストの状態が先・セッションは最後）", () => {
     expect(
       resolveDispatchTargetRejection({
         host: { online: false, repositories: [] },
         repositoryFullName,
         hasActiveJob: true,
+        blockingSession,
       }),
     ).toBe("host_offline");
+    // 両方あてはまるときは、押した直後から見えているジョブの方を出す
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: true,
+        blockingSession,
+      }),
+    ).toBe("already_queued");
+  });
+});
+
+describe("findBlockingSession", () => {
+  const repositoryFullName = "guchi-apps/issue-deck";
+  const hosts = [{ name: "subpc", online: true }];
+
+  function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+    return {
+      host: "subpc",
+      tmuxSessionName: "issue-deck-issue-1311",
+      repositoryFullName,
+      issueNumber: 1311,
+      state: "ALIVE",
+      exitStatus: null,
+      firstSeenAt: "2026-08-14T10:00:00.000Z",
+      lastReportedAt: "2026-08-14T10:05:00.000Z",
+      activity: null,
+      activityAt: null,
+      remoteControlUrl: null,
+      previewUrl: null,
+      ...overrides,
+    };
+  }
+
+  it("生きているセッションを返す", () => {
+    expect(
+      findBlockingSession({ sessions: [session()], hosts, repositoryFullName, issueNumber: 1311 }),
+    ).not.toBe(null);
+  });
+
+  // 死んだペインのセッションはstart-issue.shが畳んで作り直す。ここで止めると起動できなくなる
+  it("終了・異常終了・消失したセッションは止めない", () => {
+    for (const state of ["EXITED", "FAILED", "GONE"] as const) {
+      expect(
+        findBlockingSession({
+          sessions: [session({ state })],
+          hosts,
+          repositoryFullName,
+          issueNumber: 1311,
+        }),
+      ).toBe(null);
+    }
+  });
+
+  // pollerが落ちている間、行はALIVEのまま古びる。判定材料が無いことと「動いている」ことは違う
+  it("報告が途絶えたホストのセッションは止めない", () => {
+    expect(
+      findBlockingSession({
+        sessions: [session()],
+        hosts: [{ name: "subpc", online: false }],
+        repositoryFullName,
+        issueNumber: 1311,
+      }),
+    ).toBe(null);
+    // 申告そのものが無いホストも同じ扱い
+    expect(
+      findBlockingSession({ sessions: [session()], hosts: [], repositoryFullName, issueNumber: 1311 }),
+    ).toBe(null);
+  });
+
+  it("別のIssue・別のリポジトリのセッションは止めない", () => {
+    expect(
+      findBlockingSession({
+        sessions: [session({ issueNumber: 1312 })],
+        hosts,
+        repositoryFullName,
+        issueNumber: 1311,
+      }),
+    ).toBe(null);
+    // Issue番号はリポジトリごとに振られるため、番号だけで突き合わせてはいけない（#1224と同じ理由）
+    expect(
+      findBlockingSession({
+        sessions: [session({ repositoryFullName: "guchi-apps/dayspan" })],
+        hosts,
+        repositoryFullName,
+        issueNumber: 1311,
+      }),
+    ).toBe(null);
+  });
+
+  // 各pollerは自分のtmuxしか見ないため、別ホストへの二重起動は向こう側では防げない
+  it("別ホストで動いているセッションでも止める", () => {
+    expect(
+      findBlockingSession({
+        sessions: [session({ host: "otherpc" })],
+        hosts: [
+          { name: "subpc", online: true },
+          { name: "otherpc", online: true },
+        ],
+        repositoryFullName,
+        issueNumber: 1311,
+      })?.host,
+    ).toBe("otherpc");
   });
 });
 
@@ -232,6 +385,14 @@ describe("describeDispatchJobStatus", () => {
     expect(describeDispatchJobStatus("FAILED").tone).toBe("error");
     expect(describeDispatchJobStatus("TIMEOUT").tone).toBe("error");
   });
+
+  // #1229。正常に働いた安全機構を赤くすると、起動できなかったのかどうか判断できない
+  it("見送りは失敗として見せない", () => {
+    const skipped = describeDispatchJobStatus("SKIPPED");
+    expect(skipped.tone).toBe("muted");
+    expect(skipped.tone).not.toBe("error");
+    expect(skipped.label).toBe("起動済みのため見送り");
+  });
 });
 
 describe("isCancelableDispatchJobStatus", () => {
@@ -240,6 +401,13 @@ describe("isCancelableDispatchJobStatus", () => {
     expect(isCancelableDispatchJobStatus("CLAIMED")).toBe(true);
     expect(isCancelableDispatchJobStatus("RUNNING")).toBe(false);
     expect(isCancelableDispatchJobStatus("SUCCEEDED")).toBe(false);
+    // 見送りは終わった状態（#1229）。取り消す対象は残っていない
+    expect(isCancelableDispatchJobStatus("SKIPPED")).toBe(false);
+  });
+
+  // 見送られたジョブが未完了のままだと、activeKeyが残って次のジョブを積めなくなる
+  it("見送りは未完了ではない", () => {
+    expect(isActiveDispatchJobStatus("SKIPPED")).toBe(false);
   });
 });
 

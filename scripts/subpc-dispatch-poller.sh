@@ -303,11 +303,24 @@ report_job() {
       + (if $message == "" then {} else {message: $message} end)
       + (if $tmuxSessionName == "" then {} else {tmuxSessionName: $tmuxSessionName} end)')"
 
-  if ! api_call POST /api/dispatch/report "$payload"; then
-    # **報告の失敗で処理を止めない。** issue-deckが単一障害点にならないようにする取り決め
-    # （/api/progress と同じ）。報告が届かないジョブはissue-deck側のタイムアウトが拾う。
-    report_api_failure "ジョブ状態の報告に失敗しました（$job_id → $status）"
+  if api_call POST /api/dispatch/report "$payload"; then
+    return 0
   fi
+
+  # 受け口が`skipped`（#1229）を知らない版数だと400で弾かれる。**pollerとissue-deckは
+  # 別々に更新される**（pollerは本体の作業ツリー＝developを追い、issue-deckの画面はmainから
+  # 動く）ため、こちらが先に新しくなる期間が必ずある。そのまま諦めると、起動を見送ったジョブが
+  # `RUNNING`のまま残り、10分後にタイムアウトで「応答なし」になる。
+  # **見送りは失敗より軽い事実なので、失敗としてなら報告できる間はそちらで報告する。**
+  if [[ "$status" == "skipped" && "$API_RESPONSE_STATUS" == "400" ]]; then
+    echo "  受け口が skipped を受け付けないため failed で報告します（issue-deckの版数が古い）" >&2
+    report_job "$job_id" failed "$message" "$session"
+    return 0
+  fi
+
+  # **報告の失敗で処理を止めない。** issue-deckが単一障害点にならないようにする取り決め
+  # （/api/progress と同じ）。報告が届かないジョブはissue-deck側のタイムアウトが拾う。
+  report_api_failure "ジョブ状態の報告に失敗しました（$job_id → $status）"
 }
 
 tmux_session_names() {
@@ -352,6 +365,12 @@ report_sessions() {
 
   # セッションごとにコマンドを起動せず、1回のlist-panesで全ペインを取る。
   # `pane_dead_status`は死んだペインの終了コード（tmux 3.0aのmanに記載あり）。
+  #
+  # **区切りのタブはANSI-Cクォート（`$'...'`）で実タブとして渡す。** tmuxはフォーマット
+  # 文字列の`\t`を展開せず、リテラルの`\`と`t`をそのまま出す（3.0a・3.4で確認）。通常の
+  # シングルクォートで書くと1行が丸ごと`session_name`へ入り、次の正規表現に一致せず
+  # **全ペインが捨てられて常に0件**になる（#1241。0件でも空配列を送る設計のためエラーにも
+  # ならず、静かに送り続ける）。
   while IFS=$'\t' read -r session_name pane_dead pane_status; do
     [[ -n "$session_name" ]] || continue
     [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
@@ -373,7 +392,7 @@ report_sessions() {
       --argjson paneDeadStatus "$status_json" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus}')")
-  done < <(tmux list-panes -a -F '#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
+  done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
   # （実装セッションは1ペインだが、人が分割した場合に取りこぼさないため）。
@@ -437,7 +456,10 @@ run_job() {
   expected_session="${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
   before="$(tmux_session_names)"
   if printf '%s\n' "$before" | grep -qxF "$expected_session"; then
-    report_job "$job_id" failed "同じIssueのtmuxセッションが既に動いています: $expected_session" "$expected_session"
+    # **失敗ではなく見送り（#1229）。** ガードが正常に働いた結果で、何も壊れていない。
+    # `failed`で報告すると画面が赤い「失敗」になり、ログと突き合わせるまで起動できなかったのか
+    # どうか判断できない（#1224で実際に起きた）
+    report_job "$job_id" skipped "同じIssueのtmuxセッションが既に動いています: $expected_session" "$expected_session"
     return 0
   fi
 

@@ -17,6 +17,7 @@ import {
   resolveDispatchConcurrency,
   type DispatchEnqueueRejection,
   type DispatchHostView,
+  type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
 } from "@/lib/dispatch/dispatch-job";
@@ -132,12 +133,16 @@ export async function enqueueDispatchJob(params: {
   await expireStaleDispatchJobs(now);
 
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
-  const reject = (rejection: DispatchEnqueueRejection): EnqueueDispatchJobResult => ({
+  const reject = (
+    rejection: DispatchEnqueueRejection,
+    session?: Pick<DispatchSessionView, "host" | "tmuxSessionName">,
+  ): EnqueueDispatchJobResult => ({
     ok: false,
     rejection,
     message: describeDispatchEnqueueRejection(rejection, {
       hostName: params.hostName,
       repositoryFullName: params.repositoryFullName,
+      session,
     }),
   });
 
@@ -145,6 +150,33 @@ export async function enqueueDispatchJob(params: {
   if (!isDispatchHostOnline(host.lastSeenAt, now)) return reject("host_offline");
   if (!parseDispatchHostRepositories(host.repositories).includes(params.repositoryFullName)) {
     return reject("repository_not_runnable");
+  }
+
+  // 既に動いているセッションがあれば積ませない（#1311）。**画面側の`findBlockingSession`と
+  // 同じ判定をここでも行う。** 一括投入（`bulk-dispatch-bar.tsx`）は個々のIssueの判定を
+  // API側へ委ねているため、画面だけに置くとそちらが素通りする。
+  //
+  // 判定の材料がDBの行かビューかの違いだけで、中身は`findBlockingSession`と揃えている
+  // （`ALIVE`に限る・所属ホストが応答している場合だけ止める・ホストは問わない）。ホストの
+  // 生存判定を`host.online`ではなく`isDispatchHostOnline`で行うのは、上のhost_offlineの
+  // 判定と同じ理由（サーバー側は生の`lastSeenAt`を持っている）。
+  const aliveSession = await db.dispatchSession.findFirst({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      state: "ALIVE",
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+  if (aliveSession) {
+    // 別ホストで動いている場合もあるため、積み先のホストではなくセッションの所属ホストを見る
+    const sessionHost =
+      aliveSession.host === host.name
+        ? host
+        : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } });
+    if (sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)) {
+      return reject("session_alive", aliveSession);
+    }
   }
 
   try {
@@ -229,6 +261,13 @@ export type ReportDispatchJobResult =
  * （以降の進捗はProject Statusが持つ唯一の正）。ここで実装完了まで追おうとすると、
  * セッションの終了検知という別の仕組みが要るうえ、Project Statusと情報が重複する。
  */
+/** 報告の値と、DBへ入れる終了状態の対応。`running`だけは扱いが違うので含めない */
+const REPORT_STATUS_TO_JOB_STATUS = {
+  succeeded: "SUCCEEDED",
+  failed: "FAILED",
+  skipped: "SKIPPED",
+} as const satisfies Record<Exclude<DispatchReportStatus, "running">, DispatchJobStatus>;
+
 export async function reportDispatchJob(params: {
   jobId: string;
   hostName: string;
@@ -254,7 +293,9 @@ export async function reportDispatchJob(params: {
     data.startedAt = job.startedAt ?? now;
     data.heartbeatAt = now;
   } else {
-    data.status = params.status === "succeeded" ? "SUCCEEDED" : "FAILED";
+    // `skipped`（#1229）も終了として扱う。**起動しなかっただけで、そのジョブは終わっている。**
+    // ここを未完了のままにすると、activeKeyが残って次のジョブを積めなくなる
+    data.status = REPORT_STATUS_TO_JOB_STATUS[params.status];
     data.finishedAt = now;
     // 終了したら次のジョブを積めるようにする
     data.activeKey = null;

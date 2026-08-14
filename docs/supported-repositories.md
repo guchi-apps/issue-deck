@@ -236,10 +236,10 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
   実装され、`scripts/capture-screenshots.mjs`によるPlaywright撮影が動くようになった。issue-deckの
   実装（Claude Codeステップのプロンプト内で撮影）とは異なり、実装ステップの後段に独立したシェル
   ステップとして持つ構成のため、この部分はissue-deckからの同期対象ではない
-- **プレビュー環境（`23.preview-required`）はissue-deckとFly.ioアプリを共有している**:
-  `fly.toml`の`app`がissue-deckと同じ`issue-deck-preview`で、かつconcurrencyグループが
-  リポジトリごとに別のため、後からデプロイした側の内容で上書きされる。shopping-listのIssueで
-  案内されたプレビューURLがissue-deckの画面を表示する状態が実際に発生する。複数プレビュー環境の
-  同時起動による解消は#892で検討する
+- **プレビュー環境（`23.preview-required`）**: 以前はissue-deckとFly.ioアプリ
+  （`issue-deck-preview`）を共有しており、後からデプロイした側の内容で上書きされる問題があった。
+  issue-deck側はサブPCの`tailscale serve`方式へ移行（#1265）してFly.io構成を廃止した（#1308）ため、
+  共有による衝突は起きなくなった。**shopping-listには自前の`deploy-preview.yml`が残っている**ので、
+  こちらも使われているかどうかを確認して要否を判断する
 - `claude-ci-fix.yml`: pnpm/Prisma/Next.js前提のセットアップとビルド用プレースホルダー環境変数を
   削除し、検証コマンドを`npm run check`とmanifestのJSON検証へ置換（guchi-apps/shopping-list#62で導入）

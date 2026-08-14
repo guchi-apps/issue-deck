@@ -1,3 +1,4 @@
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /**
@@ -14,6 +15,7 @@ export type DispatchJobStatus =
   | "RUNNING"
   | "SUCCEEDED"
   | "FAILED"
+  | "SKIPPED"
   | "TIMEOUT"
   | "CANCELED";
 
@@ -171,10 +173,13 @@ export function resolveDispatchConcurrency(
 }
 
 /** pollerが報告してよい状態。`timeout`・`canceled`はissue-deck側だけが付ける */
-export type DispatchReportStatus = "running" | "succeeded" | "failed";
+export type DispatchReportStatus = "running" | "succeeded" | "failed" | "skipped";
 
 export function parseDispatchReportStatus(value: unknown): DispatchReportStatus | null {
   if (value === "running" || value === "succeeded" || value === "failed") return value;
+  // 起動を見送ったときの報告（#1229）。**古いpollerは送ってこない**ため、受け口だけが先に
+  // 新しくなっても従来どおり動く
+  if (value === "skipped") return value;
   return null;
 }
 
@@ -186,11 +191,17 @@ export type DispatchEnqueueRejection =
   | "host_unknown"
   | "host_offline"
   | "repository_not_runnable"
-  | "already_queued";
+  | "already_queued"
+  | "session_alive";
 
 export function describeDispatchEnqueueRejection(
   rejection: DispatchEnqueueRejection,
-  context: { hostName: string; repositoryFullName?: string },
+  context: {
+    hostName: string;
+    repositoryFullName?: string;
+    /** `session_alive`のときに、既に動いているセッションの居場所を添えるための情報 */
+    session?: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+  },
 ): string {
   switch (rejection) {
     case "host_unknown":
@@ -201,6 +212,18 @@ export function describeDispatchEnqueueRejection(
       return `${context.repositoryFullName ?? "このリポジトリ"} は ${context.hostName} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
     case "already_queued":
       return "このIssueには実行中または待機中のジョブが既にあります。";
+    case "session_alive": {
+      // **セッション名まで出す。** 畳むにはサブPCでその名前を指す必要があり、名前が無いと
+      // 「押せないが、どうすれば押せるようになるか分からない」で終わる
+      const where = context.session
+        ? `${context.session.host}で「${context.session.tmuxSessionName}」`
+        : "起動先で このIssueのセッション";
+      const how = context.session
+        ? `${context.session.host}で \`tmux kill-session -t ${context.session.tmuxSessionName}\` を実行してください`
+        : "起動先でtmuxセッションを畳んでください";
+      // 畳んでも次のセッション報告（既定60秒間隔）が届くまでは押せないままになる。#1321で解消予定
+      return `${where}が動いています。作り直す場合は${how}（畳んでから押せるようになるまで最大1分ほどかかります）。`;
+    }
   }
 }
 
@@ -216,6 +239,8 @@ export function resolveDispatchTargetRejection(params: {
   host: Pick<DispatchHostView, "online" | "repositories"> | null | undefined;
   repositoryFullName: string;
   hasActiveJob: boolean;
+  /** 既に動いているセッション（`findBlockingSession`の戻り値）。無ければ`null` */
+  blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
 }): DispatchEnqueueRejection | null {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
@@ -223,7 +248,46 @@ export function resolveDispatchTargetRejection(params: {
     return "repository_not_runnable";
   }
   if (params.hasActiveJob) return "already_queued";
+  // **セッションの判定は未完了ジョブの後ろ。** 両方あてはまる場合は、押した直後から見えている
+  // ジョブの方が利用者にとって直近の事実で、そちらを出す方が話が通じる
+  if (params.blockingSession) return "session_alive";
   return null;
+}
+
+/**
+ * そのIssueの起動を止めるべきセッションを探す（#1311）。
+ *
+ * 起動済みのIssueをもう一度積むと、pollerの重複起動ガードに弾かれるまで（実測で最大75秒）
+ * 待たされたうえで何も起きない。**押した時点で無駄だと分かるものは押させない。**
+ *
+ * 判定は3つ。
+ *
+ * - **`ALIVE`だけを見る。** `paneDead`のセッションは`EXITED`/`FAILED`になるが、そちらは
+ *   前回の終了の痕跡で、`start-issue.sh`は畳んで作り直す。ここで止めると**二度と起動できなくなる**
+ * - **所属ホストが応答している場合だけ止める。** pollerが落ちている間、行は`ALIVE`のまま
+ *   古びる（`GONE`へ倒すのは「報告に含まれなかった」ときだけ）。判定材料が無いことと
+ *   「動いている」ことは違う（`resolveScreenshotRejection`と同じ立場）
+ * - **ホストは問わない。** ホストAで動いているIssueをホストBへ積むのは、各pollerが自分の
+ *   tmuxしか見ないため向こう側では防げない
+ *
+ * `issue-execution-target.ts`の`newestSessionForIssue`とは別に持つ。あちらは「実行先を知る」
+ * ためにALIVEを**優先**する（無ければ終了済みも返す）が、ここはALIVEに**限る**必要がある。
+ */
+export function findBlockingSession(params: {
+  sessions: readonly DispatchSessionView[];
+  hosts: readonly Pick<DispatchHostView, "name" | "online">[];
+  repositoryFullName: string;
+  issueNumber: number;
+}): DispatchSessionView | null {
+  return (
+    params.sessions.find(
+      (session) =>
+        session.state === "ALIVE" &&
+        session.repositoryFullName === params.repositoryFullName &&
+        session.issueNumber === params.issueNumber &&
+        (params.hosts.find((host) => host.name === session.host)?.online ?? false),
+    ) ?? null
+  );
 }
 
 /**
@@ -248,6 +312,11 @@ export function describeDispatchJobStatus(status: DispatchJobStatus): {
       return { label: "起動しました", tone: "success" };
     case "FAILED":
       return { label: "失敗", tone: "error" };
+    // 起動を見送っただけで、何も壊れていない（#1229）。**赤くしない。**
+    // 正常に働いた安全機構を「失敗」として見せると、ログと突き合わせるまで起動できなかったのか
+    // どうか判断できない（#1224で実際に起きた）
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":
       return { label: "応答なし", tone: "error" };
     case "CANCELED":
@@ -284,7 +353,8 @@ export function findDispatchJobForIssue(
 /**
  * 既定の実行先を決める（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
  *
- * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばし、
+ * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある・
+ * 既にセッションが動いている）は飛ばし、
  * 1つも無ければ`null`＝GitHub Actionsを返す。判定は`resolveDispatchTargetRejection`と同じものを
  * 使う。**ボタンの文言とダイアログの既定選択が別々に決まると、押す前に見えていた実行先と
  * 実際に起動する先がずれる。**
@@ -293,11 +363,18 @@ export function resolveDefaultDispatchHost(params: {
   hosts: readonly DispatchHostView[];
   repositoryFullName: string;
   hasActiveJob: boolean;
+  blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
 }): string | null {
-  const { hosts, repositoryFullName, hasActiveJob } = params;
+  const { hosts, repositoryFullName, hasActiveJob, blockingSession } = params;
   return (
     hosts.find(
-      (host) => resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob }) === null,
+      (host) =>
+        resolveDispatchTargetRejection({
+          host,
+          repositoryFullName,
+          hasActiveJob,
+          blockingSession,
+        }) === null,
     )?.name ?? null
   );
 }

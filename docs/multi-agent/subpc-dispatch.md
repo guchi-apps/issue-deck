@@ -113,13 +113,36 @@ pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッション
 既にセッションが立っていた場合に二重実行になる。`timeout`・`failed`を理由付きで画面に出すまでが
 このキューの責務で、Actionsへ回すかどうかは人が判断する。
 
-## 重複起動の防止（3層）
+## 重複起動の防止（4層）
 
 | 層 | 仕組み | 何を防ぐか |
 |---|---|---|
 | DB | `DispatchJob.activeKey`（`owner/repo#番号`）に`@unique` | 画面からの二重クリック。MySQLはunique indexに複数のNULLを許すため、終了時にnullへ戻せば「未完了は1件まで」が成立する |
-| poller | 起動前に`<リポジトリ名>-issue-<番号>`のtmuxセッションがあるかを確認 | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
+| セッション | `DispatchSession`に`ALIVE`の行があれば積ませない（#1311） | **起動が終わった後の再クリック。** `activeKey`はジョブの終了時に外れるため、`SUCCEEDED`になった時点でボタンは再び押せる状態に戻る |
+| poller | 起動前に`<リポジトリ名>-issue-<番号>`のtmuxセッションがあるかを確認し、あれば`skipped`で報告する（#1229） | **手元のターミナルから直接起動した分。** そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない |
 | ラベル | 既存の`11.local` | 無人実行（`claude-issue-dispatch.yml`）との二重起動（#1097） |
+
+セッションの層を足してもpollerの層は残す。**画面の判定はセッション報告の間隔ぶん必ず遅れる**
+（実測で最大75秒。`sleep`の60秒に1巡の実処理の約14秒が乗る）ので、最後に実物のtmuxを見る層が要る。
+
+pollerの層が見送ったジョブは`SKIPPED`（画面では灰色の「起動済みのため見送り」）になる。**`FAILED`にしない**
+（#1229）。正常に働いた安全機構を赤い「失敗」として見せると、ログと突き合わせるまで起動できなかったのか
+どうか判断できない（#1224で実際に起きた）。対応表に無いリポジトリ・cloneが無いといった設定不備は、
+利用者が直すべき異常なので従来どおり`FAILED`のまま。
+
+**pollerとissue-deckは別々に更新される。** pollerは本体の作業ツリー（develop）を追い、issue-deckの画面は
+mainから動くため、`skipped`を送るpollerが先に動き始める期間がある。受け口が400で弾いた場合はpoller側が
+`failed`で報告し直す（`report_job`）。そのまま諦めると、見送ったジョブが`RUNNING`のまま残って10分後に
+「応答なし」になる。
+
+セッションの層の判定は3つ（`findBlockingSession`）。
+
+- **`ALIVE`だけを見る。** `paneDead`のセッションは`EXITED`/`FAILED`になるが、そちらは前回の
+  終了の痕跡で、`start-issue.sh`は畳んで作り直す。ここで止めると**二度と起動できなくなる**
+- **所属ホストが応答している場合だけ止める。** pollerが落ちている間、行は`ALIVE`のまま古びる
+  （`GONE`へ倒すのは「報告に含まれなかった」ときだけ）。判定材料が無いことと「動いている」ことは違う
+- **ホストは問わない。** ホストAで動いているIssueをホストBへ積むのは、各pollerが自分のtmuxしか
+  見ないため向こう側では防げない
 
 pollerの確認は、**リポジトリ名まで含めて突き合わせる**（#1224）。Issue番号はリポジトリごとに
 振られるため、番号だけ（`*-issue-<番号>`）で見ると、別リポジトリの同じ番号のセッションが動いて
@@ -261,8 +284,11 @@ Issue詳細の「ローカルで開始」を、**起動先の選択**に変え�
 
 判定は`resolveDispatchTargetRejection`（[src/lib/dispatch/dispatch-job.ts](../../src/lib/dispatch/dispatch-job.ts)）が持ち、
 **理由の並びも文言も`enqueueDispatchJob`と同じものを使う**。画面とAPIで判定が分かれると、
-「画面では押せるのにAPIが断る」状態が生まれる。押せない理由は4つ（申告が無い・応答していない・
-そのリポジトリを実行できない・未完了ジョブが既にある）。
+「画面では押せるのにAPIが断る」状態が生まれる。押せない理由は5つ（申告が無い・応答していない・
+そのリポジトリを実行できない・未完了ジョブが既にある・既にセッションが動いている）。
+
+**API側（`enqueueDispatchJob`）の判定を省かない。** 一括投入（`bulk-dispatch-bar.tsx`）は
+個々のIssueの判定をAPI側へ委ねているため、画面だけに置くとそちらが素通りする。
 
 **先出しであって、最終的な拒否はAPI側が行う。** 申告は最大5分古く（`DISPATCH_HOST_ONLINE_WINDOW_MS`）、
 押した瞬間にホストが落ちることもある。画面側の判定は「押せてしまわないようにする」ためのもの。
@@ -321,7 +347,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
-| `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` の報告 |
+| `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告 |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 

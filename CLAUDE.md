@@ -70,6 +70,7 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 
 - `main`/`develop`への直接コミット・push
 - 他Issueのブランチ・worktreeの編集
+- **担当Issue以外の実装。** 作業中に別件を新規Issueとして起票するのはよいが、そのIssueをこのセッション・このブランチで実装しない。進捗の遷移・closeはブランチ名`issue-<番号>`だけを見ており、無人実行の停止フラグ（`11.local`）と画面のセッション表示は起動時に渡されたIssue番号だけに付くため、別Issueを混ぜると起票したIssueは`Ready`のまま取り残され、同時に無人実行の二重起動を止めるものが無くなる。実施するなら別セッションを起こす（[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「セッション中に作った新しいIssueは、そのセッションで実施しない」）
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
 

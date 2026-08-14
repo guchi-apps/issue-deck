@@ -27,6 +27,7 @@ import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
+import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
@@ -38,6 +39,7 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import {
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
@@ -192,6 +194,11 @@ export function IssueDetail({
     isSubmitting: isMergingPullRequest,
     error: mergePullRequestError,
   } = usePullRequestMergeMutation();
+  // マージ済みの表示は画面上部とコメント欄のマージボタンで共有する（#1288）。
+  // 対象PR番号で持つことで、別のIssueへ切り替えたときに持ち越さない
+  const [mergedPullRequestNumber, setMergedPullRequestNumber] = useState<number | null>(null);
+  const isPullRequestMerged =
+    pullRequestLink !== null && mergedPullRequestNumber === pullRequestLink.number;
 
   async function handleClose(stateReason: "completed" | "not_planned") {
     if (!issue) return;
@@ -387,6 +394,10 @@ export function IssueDetail({
     return mergePullRequest({ owner, repo, number: pullRequestLink.number });
   }
 
+  function handlePullRequestMerged() {
+    setMergedPullRequestNumber(pullRequestLink?.number ?? null);
+  }
+
   if (!issue) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -396,6 +407,7 @@ export function IssueDetail({
   }
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
+  const mergeApprovalPending = isMergeApprovalPending(issue, comments);
   // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
   // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
   const actionsDisabledReason = startImplementationDisabledReason(
@@ -408,10 +420,19 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）。判定はAPI側
+  // （`enqueueDispatchJob`）と同じものを使う
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   const defaultDispatchHost = resolveDefaultDispatchHost({
     hosts: dispatch.hosts,
     repositoryFullName: issue.repositoryFullName,
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+    blockingSession,
   });
   const startLabel = defaultDispatchHost
     ? `${defaultDispatchHost}で開始`
@@ -465,6 +486,19 @@ export function IssueDetail({
             {/* 詳細ペインが狭いときやボタンが増えたときに「GitHubで開く」等が
                 横へはみ出して見えなくならないよう、この行は折り返す（#998） */}
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              {/* マージ待ちのときは、コメント欄まで下げなくても押せるようここにも出す（#1288） */}
+              {mergeApprovalPending && pullRequestLink && (
+                <IssueMergeButton
+                  onMerge={handleMergePullRequest}
+                  onMerged={handlePullRequestMerged}
+                  pullRequestNumber={pullRequestLink.number}
+                  ciStatus={pullRequestCiStatus}
+                  isMerging={isMergingPullRequest}
+                  isMerged={isPullRequestMerged}
+                  error={mergePullRequestError}
+                  showCiStatus
+                />
+              )}
               {canStartImplementation(issue) && (
                 <StartImplementationDialog
                   issue={issue}
@@ -707,7 +741,7 @@ export function IssueDetail({
                   <LocalSessionApprovalNotice session={issueSession} />
                 )
               }
-              mergeApprovalPending={isMergeApprovalPending(issue, comments)}
+              mergeApprovalPending={mergeApprovalPending}
               pullRequestLink={pullRequestLink}
               pullRequestCiStatus={pullRequestCiStatus}
               workflowRun={workflowRun}
@@ -725,6 +759,8 @@ export function IssueDetail({
               isRequestingPrFix={isCommentSubmitting}
               isMergingPullRequest={isMergingPullRequest}
               mergePullRequestError={mergePullRequestError}
+              pullRequestMerged={isPullRequestMerged}
+              onPullRequestMerged={handlePullRequestMerged}
               targetCommentIndex={targetCommentIndex}
               targetCommentRef={targetCommentRef}
               commentSummary={commentSummary}

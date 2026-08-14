@@ -23,6 +23,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   describeDispatchEnqueueRejection,
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
@@ -31,14 +32,15 @@ import {
   type DispatchEnqueueRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
-  START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsToAdd,
   startImplementationOptionsFromLabels,
+  visibleStartImplementationOptions,
   type StartImplementationOptionKey,
 } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
@@ -105,9 +107,12 @@ type StartImplementationDialogProps = {
 };
 
 /**
- * 「実装を開始」ボタン押下時に、計画・開発環境起動・スクリーンショットの要否を
+ * 「実装を開始」ボタン押下時に、計画・マージ前確認・開発環境起動・スクリーンショットの要否を
  * 選択させるダイアログ。選択されたオプションに対応するラベルを付与したうえで、
  * 実装エージェントを起動する。
+ *
+ * オプションは実行先で出し分ける（#1317・`visibleStartImplementationOptions`）。撮影は
+ * GitHub Actionsを選んだときだけ出る。「計画が必要」の初期状態はIssueの種別ラベルから決まる。
  *
  * `renderTrigger`を渡すと自前のトリガーボタンから開閉する（Issue詳細画面）。
  * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面、
@@ -148,6 +153,15 @@ export function StartImplementationDialog({
    * 「未選択」を別の値にしておけば、届いた時点で既定がサブPCへ寄る（#1262）。
    */
   const [target, setTarget] = useState<StartTarget | undefined>(undefined);
+  /**
+   * このダイアログから起動した実行先（#1318）。**押してから閉じ切るまでの間だけ入る。**
+   *
+   * 押した結果で選択欄が書き変わらないようにするために持つ。サブPCへ積んだ直後は、
+   * 自分が積んだジョブのせいでそのホストが`already_queued`で塞がり、既定の実行先が
+   * GitHub Actionsへ移る。閉じるまでの一瞬でも「サブPCの選択肢が消えてGitHub Actionsが
+   * 既定として光った開始画面」が見えてしまい、どちらで起動したのか分からなくなる。
+   */
+  const [startedTarget, setStartedTarget] = useState<StartTarget | null>(null);
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -181,29 +195,48 @@ export function StartImplementationDialog({
     setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current));
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
+    setStartedTarget(null);
     setCopied(false);
   }, [open]);
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   // 「このPC」を廃止して手元の出口がコピーになったため（#1263）、申告しているホストが無くても
   // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
   const showTargets = includeDispatchTargets === true;
   /**
+   * 未完了ジョブを理由に選択肢を塞ぐか（#1318）。**このダイアログから積んだ直後は塞がない。**
+   *
+   * 自分が押した結果で自分の選択肢が消えても、利用者には何の情報にもならない。閉じ切るまでの
+   * 間だけの話で、開き直せば通常どおり「実行中または待機中のジョブが既にあります」として塞がる。
+   */
+  const blocksByActiveJob = hasActiveJob && startedTarget === null;
+  /**
    * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
-   * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばす。
+   * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある・
+   * 既にセッションが動いている）は飛ばす。
    */
   const defaultTargetHost = showTargets
     ? resolveDefaultDispatchHost({
         hosts: dispatch.hosts,
         repositoryFullName: issue.repositoryFullName,
-        hasActiveJob,
+        hasActiveJob: blocksByActiveJob,
+        blockingSession,
       })
     : null;
   const defaultTarget: StartTarget = defaultTargetHost
     ? { kind: "host", host: defaultTargetHost }
     : { kind: "actions" };
-  const effectiveTarget = target ?? defaultTarget;
+  // 押した実行先を最優先にする。ホストの一覧が遅れて届いても、積んだジョブで既定が動いても、
+  // 押した後の表示が別の実行先へ移らない（#1318）
+  const effectiveTarget = startedTarget ?? target ?? defaultTarget;
   const isCopyTarget = effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command";
 
   const selectedHost =
@@ -215,7 +248,8 @@ export function StartImplementationDialog({
       ? resolveDispatchTargetRejection({
           host: selectedHost,
           repositoryFullName: issue.repositoryFullName,
-          hasActiveJob,
+          hasActiveJob: blocksByActiveJob,
+          blockingSession,
         })
       : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
@@ -223,6 +257,11 @@ export function StartImplementationDialog({
   const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
   // 選んだホストでスクリーンショットを撮れない場合（#1268）。**申告していないホストは塞がない**
   const screenshotRejection = resolveScreenshotRejection(selectedHost);
+  // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
+  const visibleOptions = visibleStartImplementationOptions({
+    isActionsTarget: effectiveTarget.kind === "actions",
+    options,
+  });
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -230,6 +269,17 @@ export function StartImplementationDialog({
     } else {
       setInternalOpen(nextOpen);
     }
+  }
+
+  /**
+   * 実行先を選び直す。**押した実行先のピン留めも解く**（#1318）。
+   * コピーの後はダイアログが開いたまま残るため、続けて別の出口を選べる必要がある。
+   */
+  function selectTarget(next: StartTarget) {
+    setStartedTarget(null);
+    setTarget(next);
+    // 直前のコピーの結果を、選び直した先の結果として見せない
+    setCopied(false);
   }
 
   function toggleOption(key: StartImplementationOptionKey) {
@@ -292,8 +342,16 @@ export function StartImplementationDialog({
       issueNumber: issue.number,
       hostName,
     });
-    // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）
-    if (!enqueued) return;
+    // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）。
+    // ピン留めも解き、拒否された時点の状態で選択欄を出し直す（#1318）
+    if (!enqueued) {
+      setStartedTarget(null);
+      return;
+    }
+
+    // **積めた時点で閉じる**（#1318）。この後の`11.local`の付与はGitHubへの往復で、
+    // 開いたまま待つと、その間ずっと「もう積んである」前提の選択欄が見えることになる。
+    handleOpenChange(false);
 
     // `11.local`は**積めたときだけ**付ける。拒否されたのにラベルだけ残ると、
     // 無人実行（claude-issue-dispatch.yml）までそのIssueに触れなくなる。
@@ -307,7 +365,6 @@ export function StartImplementationDialog({
       });
       if (updated) onIssueUpdated(updated);
     }
-    handleOpenChange(false);
   }
 
   /**
@@ -370,8 +427,15 @@ export function StartImplementationDialog({
   }
 
   async function handleStart() {
+    // 押した時点の実行先を固定する（#1318）。以降の再描画（オプションのラベル付与・
+    // ジョブの追加・ポーリングでのホストの入れ替わり）で選択が動かないようにする
+    setStartedTarget(effectiveTarget);
+
     const currentIssue = await applyOptionLabels();
-    if (!currentIssue) return;
+    if (!currentIssue) {
+      setStartedTarget(null);
+      return;
+    }
 
     if (effectiveTarget.kind === "host") {
       await startOnHost(currentIssue, effectiveTarget.host);
@@ -393,7 +457,7 @@ export function StartImplementationDialog({
           <DialogDescription>必要なオプションを選択してから実装を開始してください。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          {START_IMPLEMENTATION_OPTIONS.map((option) => {
+          {visibleOptions.map((option) => {
             // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
             // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
             const unavailable =
@@ -429,9 +493,10 @@ export function StartImplementationDialog({
                 key={host.name}
                 host={host}
                 repositoryFullName={issue.repositoryFullName}
-                hasActiveJob={hasActiveJob}
+                hasActiveJob={blocksByActiveJob}
+                blockingSession={blockingSession}
                 selected={effectiveTarget.kind === "host" && effectiveTarget.host === host.name}
-                onSelect={() => setTarget({ kind: "host", host: host.name })}
+                onSelect={() => selectTarget({ kind: "host", host: host.name })}
               />
             ))}
             <StartTargetOption
@@ -443,7 +508,7 @@ export function StartImplementationDialog({
               }
               selected={effectiveTarget.kind === "actions"}
               disabled={actionsDisabledReason !== null}
-              onSelect={() => setTarget({ kind: "actions" })}
+              onSelect={() => selectTarget({ kind: "actions" })}
             />
             {/* 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263） */}
             <StartTargetOption
@@ -451,7 +516,7 @@ export function StartImplementationDialog({
               name="実装プロンプトをコピー"
               description="開いているClaude Codeセッションへ貼ります。11.localの付与と進捗の報告も行います"
               selected={effectiveTarget.kind === "copy-prompt"}
-              onSelect={() => setTarget({ kind: "copy-prompt" })}
+              onSelect={() => selectTarget({ kind: "copy-prompt" })}
             />
             {localSessionCommand && (
               <StartTargetOption
@@ -459,7 +524,7 @@ export function StartImplementationDialog({
                 name="起動コマンドをコピー"
                 description="ターミナルへ貼ると、worktreeの作成から新しいセッションの起動までを行います"
                 selected={effectiveTarget.kind === "copy-command"}
-                onSelect={() => setTarget({ kind: "copy-command" })}
+                onSelect={() => selectTarget({ kind: "copy-command" })}
               />
             )}
           </div>
@@ -496,18 +561,29 @@ function DispatchHostOption({
   host,
   repositoryFullName,
   hasActiveJob,
+  blockingSession,
   selected,
   onSelect,
 }: {
   host: DispatchHostView;
   repositoryFullName: string;
   hasActiveJob: boolean;
+  blockingSession: DispatchSessionView | null;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const rejection = resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob });
+  const rejection = resolveDispatchTargetRejection({
+    host,
+    repositoryFullName,
+    hasActiveJob,
+    blockingSession,
+  });
   const description = rejection
-    ? describeDispatchEnqueueRejection(rejection, { hostName: host.name, repositoryFullName })
+    ? describeDispatchEnqueueRejection(rejection, {
+        hostName: host.name,
+        repositoryFullName,
+        session: blockingSession,
+      })
     : `ジョブを積みます。${host.name}が取りに来た時点で起動します`;
 
   return (

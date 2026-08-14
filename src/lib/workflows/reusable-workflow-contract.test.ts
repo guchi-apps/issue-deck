@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // 再利用可能ワークフロー（on: workflow_call）を呼ぶときの権限の契約を固定する（#1181）。
 //
-// **トップレベルの concurrency・permissions は原因ではない。** 実際 deploy-preview.yml は
+// **トップレベルの concurrency・permissions は原因ではない。** 実際 deploy-preview.yml（#1308で廃止）は
 // concurrency を、reusable-issue-labels.yml は permissions をトップレベルに持ちながら
 // 正常に呼び出せている。startup_failure の真因は権限の超過だけだった。
 //
