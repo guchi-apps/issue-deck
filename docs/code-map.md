@@ -125,7 +125,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
   tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。
   **ジョブの`succeeded`は「tmuxセッションが立った」までで、実装の完了ではない**（以降の進捗は
-  Project Statusが持つ）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
+  Project Statusが持つ）。その後のセッションは`DispatchSession`が持ち、**tmuxのメタデータ
+  （poller）とフック（#1219）の両方から埋まる**。入力待ちとRemote ControlのURLはフック側で、
+  受け口は`POST /api/dispatch/sessions/activity`（pollerの一括報告とは別。あちらは含まれない
+  行を`GONE`へ倒すため）。画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
   `expireStaleDispatchJobs`が掃く遅延評価。「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。

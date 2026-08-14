@@ -53,7 +53,10 @@ import {
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
+import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import { LocalSessionApprovalNotice } from "@/components/dashboard/local-session-approval-notice";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
+import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -185,6 +188,12 @@ export function MobileIssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
   });
   const startLabel = defaultDispatchHost ? `${defaultDispatchHost}で開始` : "GitHub Actionsで開始";
+  // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
+  const issueSession = findSessionForIssue(
+    dispatch.sessions,
+    issue.repositoryFullName,
+    issue.number,
+  );
   const executionTarget = resolveIssueExecutionTarget({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -668,6 +677,7 @@ export function MobileIssueDetail({
           projectStatus={issue.projectStatus}
           executionTarget={executionTarget}
         />
+        {issueSession && <IssueSessionStatus session={issueSession} align="start" />}
         <div className="flex flex-wrap items-center gap-2">
           {qaAnswerPending && (
             <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
@@ -843,6 +853,11 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            localSessionNotice={
+              executionTarget.expectsActionsRun ? undefined : (
+                <LocalSessionApprovalNotice session={issueSession} />
+              )
+            }
             mergeApprovalPending={isMergeApprovalPending(issue, comments)}
             pullRequestLink={pullRequestLink}
             pullRequestCiStatus={pullRequestCiStatus}

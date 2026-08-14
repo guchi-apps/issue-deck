@@ -14,6 +14,7 @@ import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
+import { findSessionForIssue, shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
@@ -133,6 +134,20 @@ export function IssueList({
     }
     return map;
   }, [issues, dispatch.jobs, dispatch.sessions]);
+  // セッションの様子（#1264）。入力待ち・終了・異常終了だけを一覧へ出す
+  const sessionLabelByIssueId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const issue of issues) {
+      const session = findSessionForIssue(
+        dispatch.sessions,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const label = session ? shortIssueSessionLabel(session) : null;
+      if (label) map.set(issue.id, label);
+    }
+    return map;
+  }, [issues, dispatch.sessions]);
   const actionsUnexpectedIssueIds = useMemo(() => {
     const ids = new Set<string>();
     for (const [id, target] of executionTargetByIssueId) {
@@ -200,6 +215,7 @@ export function IssueList({
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
                 executionTarget={executionTargetByIssueId.get(issue.id)}
+                sessionLabel={sessionLabelByIssueId.get(issue.id) ?? null}
               />
               {issue.favorite && (
                 <Star

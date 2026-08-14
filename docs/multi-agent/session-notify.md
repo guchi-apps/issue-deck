@@ -277,9 +277,52 @@ tmuxのスクロールバックに残る。
 - 実装の進捗はProject Statusが唯一の正として持つ
   （[progress-status-architecture.md](../progress-status-architecture.md)）
 
-「入力待ち」はそのどちらでもない一時的な状態で、issue-deckのDBへ入れると、
-セッションが落ちたときに誰も消せない古い状態が残る。通知として飛ばして終わらせるのが
-一番安い。issue-deckの画面に出す必要が実運用で出てきたら、そのとき改めて設計する。
+## 画面にも同じ様子を渡す（#1264）
+
+当初この節は「『入力待ち』はissue-deckのDBへ入れると、セッションが落ちたときに誰も消せない
+古い状態が残る。通知として飛ばして終わらせるのが一番安い」としていた。**#1264で必要が出たので
+設計し直した。**
+
+必要になった理由は、**通知を消した時点で承認待ちであることを知る手段が無くなる**こと。
+サブPCで`21.plan-required`のIssueを起こすと計画はセッション内のPlan modeで止まるが、
+issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions側の計画提示ステップだけ）、
+唯一の合図がプッシュ通知だった。
+
+そこで`session-notify.sh`が、Signalyへの通知と同じタイミングで
+`POST /api/dispatch/sessions/activity`へも投げる。
+
+| 送るもの | 値 |
+| --- | --- |
+| `repository` / `issue` | 引数で渡っているもの |
+| `activity` | `waiting_input`（`permission_prompt`）/ `responded`（`Stop`） |
+| `remoteControlUrl` | 取れたときだけ。受け口は**`https://claude.ai/`配下しか受け付けない** |
+
+宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）はpollerと同じ`~/.config/issue-deck/dispatch.env`
+から読む。**未設定でも失敗しても実装は止めない**（このスクリプトの約束）。設定していない
+ホストでは通知だけが飛び、画面に出ないだけになる。
+
+### 古い「入力待ち」が残らない担保
+
+当初の懸念（誰も消せない古い状態が残る）は、解ける経路を2つ持たせることで潰している。
+
+| 経路 | 何が起きるか |
+| --- | --- |
+| `Stop`フック | `RESPONDED`へ遷移する。応答が終われば必ず飛ぶ |
+| pollerの1巡（既定60秒） | セッションが消えれば`EXITED`/`FAILED`/`GONE`になる |
+
+**画面側は状態（poller）を様子（フック）より優先する**（`summarizeIssueSession`）。
+セッションが落ちていれば、`WAITING_INPUT`の報告が残っていても「入力待ち」とは出さない。
+入力を待つ相手がもういないため。
+
+### 受け口はpollerの一括報告と分ける
+
+pollerが叩く`POST /api/dispatch/sessions`は「そのホストで今見えているセッションの全て」を
+前提に、含まれない行を`GONE`へ倒す。**フックの1件を同じ経路へ流すと、他のセッションが全部
+消えたことになる**ため、`/activity`を別に置いている。
+
+`/activity`は**行が無ければ何もしない**（`updated: 0`を返して200）。フックはpollerより先に
+飛びうるが、行を作るとフック側が知らない`host`・`tmuxSessionName`に嘘の値が入る。1巡待てば
+pollerが作るので、取りこぼしても次のフックで載る。
 
 ## 既知の制約
 
