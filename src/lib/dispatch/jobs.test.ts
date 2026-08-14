@@ -4,6 +4,8 @@ const dispatchHostFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
 const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
+const dispatchJobFindUnique = vi.fn();
+const dispatchJobUpdateMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -24,6 +26,12 @@ vi.mock("@/lib/db", () => ({
       get findMany() {
         return dispatchJobFindMany;
       },
+      get findUnique() {
+        return dispatchJobFindUnique;
+      },
+      get updateMany() {
+        return dispatchJobUpdateMany;
+      },
     },
   },
 }));
@@ -34,7 +42,7 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
   escalateFailedSession: vi.fn(),
 }));
 
-const { enqueueDispatchJob } = await import("./jobs");
+const { enqueueDispatchJob, reportDispatchJob } = await import("./jobs");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 const REPOSITORY = "guchi-apps/issue-deck";
@@ -161,5 +169,79 @@ describe("enqueueDispatchJob のセッション生存ガード", () => {
     expect(result.rejection).toBe("host_offline");
     // ホストで断った時点でセッションは見に行かない
     expect(dispatchSessionFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1229。**見送りは失敗でも成功でもない第3の結果。** ただし「終わったジョブ」ではあるので、
+ * `activeKey`を外して次を積めるようにする必要がある。
+ */
+describe("reportDispatchJob の skipped", () => {
+  const CLAIMED_JOB = {
+    id: "job-1",
+    repositoryFullName: REPOSITORY,
+    issueNumber: 1229,
+    targetHost: "subpc",
+    status: "CLAIMED",
+    claimedByHost: "subpc",
+    message: null,
+    tmuxSessionName: null,
+    createdAt: NOW,
+    claimedAt: NOW,
+    startedAt: null,
+    finishedAt: null,
+  };
+
+  beforeEach(() => {
+    dispatchJobFindUnique.mockResolvedValue(CLAIMED_JOB);
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  async function report(status: "succeeded" | "failed" | "skipped") {
+    return reportDispatchJob({
+      jobId: "job-1",
+      hostName: "subpc",
+      status,
+      message: "同じIssueのtmuxセッションが既に動いています: issue-deck-issue-1229",
+      tmuxSessionName: "issue-deck-issue-1229",
+      now: NOW,
+    });
+  }
+
+  it("SKIPPEDとして終了させ、activeKeyを外す", async () => {
+    await report("skipped");
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "SKIPPED",
+          finishedAt: NOW,
+          // 外さないと同じIssueに次のジョブを積めなくなる
+          activeKey: null,
+        }),
+      }),
+    );
+  });
+
+  it("失敗・成功の扱いは変わっていない", async () => {
+    await report("failed");
+    expect(dispatchJobUpdateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }),
+    );
+
+    await report("succeeded");
+    expect(dispatchJobUpdateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCEEDED" }) }),
+    );
+  });
+
+  // 見送ったセッション名を残す。どのセッションのせいで見送られたかが画面から分かる
+  it("既に動いていたセッション名を残す", async () => {
+    await report("skipped");
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tmuxSessionName: "issue-deck-issue-1229" }),
+      }),
+    );
   });
 });

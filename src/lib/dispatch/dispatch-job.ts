@@ -15,6 +15,7 @@ export type DispatchJobStatus =
   | "RUNNING"
   | "SUCCEEDED"
   | "FAILED"
+  | "SKIPPED"
   | "TIMEOUT"
   | "CANCELED";
 
@@ -172,10 +173,13 @@ export function resolveDispatchConcurrency(
 }
 
 /** pollerが報告してよい状態。`timeout`・`canceled`はissue-deck側だけが付ける */
-export type DispatchReportStatus = "running" | "succeeded" | "failed";
+export type DispatchReportStatus = "running" | "succeeded" | "failed" | "skipped";
 
 export function parseDispatchReportStatus(value: unknown): DispatchReportStatus | null {
   if (value === "running" || value === "succeeded" || value === "failed") return value;
+  // 起動を見送ったときの報告（#1229）。**古いpollerは送ってこない**ため、受け口だけが先に
+  // 新しくなっても従来どおり動く
+  if (value === "skipped") return value;
   return null;
 }
 
@@ -308,6 +312,11 @@ export function describeDispatchJobStatus(status: DispatchJobStatus): {
       return { label: "起動しました", tone: "success" };
     case "FAILED":
       return { label: "失敗", tone: "error" };
+    // 起動を見送っただけで、何も壊れていない（#1229）。**赤くしない。**
+    // 正常に働いた安全機構を「失敗」として見せると、ログと突き合わせるまで起動できなかったのか
+    // どうか判断できない（#1224で実際に起きた）
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":
       return { label: "応答なし", tone: "error" };
     case "CANCELED":

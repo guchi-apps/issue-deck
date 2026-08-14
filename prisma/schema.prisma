@@ -339,12 +339,17 @@ model FineGrainedToken {
 //
 // **SUCCEEDEDは「tmuxセッションが立ち上がった」までを意味し、実装の完了ではない。**
 // 以降の進捗はProject Status（POST /api/progress）が持つ唯一の正で、ここでは追わない。
+// SKIPPEDは「起動する必要が無かった」（#1229）。既にそのIssueのtmuxセッションが動いていた
+// ためpollerが起動を見送った場合で、**失敗でも成功でもない第3の結果**。FAILEDへ寄せると
+// 正常に働いた安全機構が画面上は赤い「失敗」に見え、SUCCEEDEDへ寄せると「起動した」と
+// 「既に動いていた」が後からログで区別できなくなる。
 enum DispatchJobStatus {
   QUEUED
   CLAIMED
   RUNNING
   SUCCEEDED
   FAILED
+  SKIPPED
   TIMEOUT
   CANCELED
 }

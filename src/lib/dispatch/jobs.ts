@@ -17,6 +17,7 @@ import {
   resolveDispatchConcurrency,
   type DispatchEnqueueRejection,
   type DispatchHostView,
+  type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
 } from "@/lib/dispatch/dispatch-job";
@@ -260,6 +261,13 @@ export type ReportDispatchJobResult =
  * （以降の進捗はProject Statusが持つ唯一の正）。ここで実装完了まで追おうとすると、
  * セッションの終了検知という別の仕組みが要るうえ、Project Statusと情報が重複する。
  */
+/** 報告の値と、DBへ入れる終了状態の対応。`running`だけは扱いが違うので含めない */
+const REPORT_STATUS_TO_JOB_STATUS = {
+  succeeded: "SUCCEEDED",
+  failed: "FAILED",
+  skipped: "SKIPPED",
+} as const satisfies Record<Exclude<DispatchReportStatus, "running">, DispatchJobStatus>;
+
 export async function reportDispatchJob(params: {
   jobId: string;
   hostName: string;
@@ -285,7 +293,9 @@ export async function reportDispatchJob(params: {
     data.startedAt = job.startedAt ?? now;
     data.heartbeatAt = now;
   } else {
-    data.status = params.status === "succeeded" ? "SUCCEEDED" : "FAILED";
+    // `skipped`（#1229）も終了として扱う。**起動しなかっただけで、そのジョブは終わっている。**
+    // ここを未完了のままにすると、activeKeyが残って次のジョブを積めなくなる
+    data.status = REPORT_STATUS_TO_JOB_STATUS[params.status];
     data.finishedAt = now;
     // 終了したら次のジョブを積めるようにする
     data.activeKey = null;
