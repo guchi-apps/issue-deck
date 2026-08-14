@@ -72,6 +72,7 @@ skillを増やしても張り直しが要らないため。ディレクトリの
 `~/apps/claude-config/check-sync.sh`が、次を確認する。
 
 - コミットしていない変更がある
+- upstreamが無い（GitHubへ一度もpushしていない＝もう一方のマシンからcloneできない）
 - pushしていないコミットがある（もう一方のマシンに届いていない）
 - originより遅れている（もう一方のマシンの更新を取り込んでいない）
 - `~/.claude/`側のsymlinkが張られていない
@@ -100,7 +101,23 @@ skillを増やしても張り直しが要らないため。ディレクトリの
 
 ## セットアップ
 
-各マシンで1回だけ。
+### 0. リポジトリを作る（最初の1台で1回だけ）
+
+`~/apps/claude-config`をローカルに作っただけでは、もう一方のマシンからは見えない。
+**GitHubへ作成してpushするまでが「1台目のセットアップ」**で、これが済むまで2台目は
+`git clone`から着手できない。
+
+```bash
+gh repo create guchi-apps/claude-config --private --source ~/apps/claude-config --push
+```
+
+作成済みかどうかは`check-sync.sh`が答える。`upstream が設定されていません`と出ている
+あいだは、まだGitHubへ届いていない（＝2台目のセットアップに進めない）状態。
+
+> `gh repo create`はローカルのClaude Codeセッションでは権限分類に拒否されるため、
+> エージェントには代行できない。ユーザー自身が実行する（#1252）。
+
+### 1. 各マシンへ適用する（マシンごとに1回だけ）
 
 ```bash
 git clone https://github.com/guchi-apps/claude-config.git ~/apps/claude-config
@@ -108,11 +125,26 @@ cd ~/apps/claude-config
 ./install.sh
 ```
 
+1台目（既に`~/apps/claude-config`がある側）は`git clone`を飛ばして`./install.sh`だけでよい。
+
 `install.sh`は既存の`~/.claude/CLAUDE.md`・`~/.claude/skills/`を
 `~/.claude-config-backups/<日時>/`へ退避してからsymlinkを張る。既存の内容がリポジトリと
 違う場合は**中断する**（そのマシンにしか無い編集を、古い内容のsymlinkで上書きしないため）。
 
+`~/.claude/`配下の書き換えもエージェントには代行できない（同じく権限分類に拒否される）ため、
+`install.sh`の実行はどちらのマシンでもユーザー自身が行う。手順をスクリプト1本にまとめて
+あるのはこのため。
+
 サブPC側の手順は`guchi-apps/subpc-setup`のREADMEにも記載している。
+
+### セットアップが済んでいないことの検知
+
+`check-sync.sh`は「同期の遅れ」だけでなく「そもそも適用していない」も同じ形で報告する
+（`upstream が設定されていません`・`symlink になっていません`）。起動スクリプトから毎回
+呼ばれるため、**セットアップを途中で止めたまま忘れる**という失敗の仕方はしない。
+
+実際に#1190では、リポジトリの作成pushとサブPCへの`install.sh`適用が残ったまま完了扱いに
+なり、メインPC側の適用（#1252）が`git clone`の時点で着手不能になっていた。
 
 ## 関連
 
