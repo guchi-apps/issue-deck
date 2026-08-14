@@ -420,6 +420,51 @@ model DispatchHost {
   updatedAt DateTime @updatedAt
 }
 
+// 起動後のtmuxセッションの状態（#1217）。サブPCのpollerが1巡ごとに報告する。
+//
+// **DispatchJobを伸ばさず別のモデルにしているのは、寿命が違うため。** ジョブは「起動の記録」で
+// tmuxセッションが立った時点でSUCCEEDEDになり終わる（`run_job()`がそう報告する）。そこへ
+// セッションの生存を混ぜると、未完了ジョブを1件に制限しているactiveKeyの意味が壊れる。
+//
+// **画面（capture-pane）の内容は持たない。** 実装中のコード・環境変数が映りうるうえ、画面の
+// 文字列から状態を推定する方式は既に実地で誤判定している（#1219・#1223）。入力待ち・完了・停滞は
+// Claude Codeのフックが担当し（#1219）、こちらはフックが飛ばない「プロセスの死・消失」だけを見る。
+model DispatchSession {
+  id                 String               @id @default(cuid())
+  // 報告してきたホスト名（DispatchHost.nameと対応）
+  host               String
+  tmuxSessionName    String
+  repositoryFullName String
+  issueNumber        Int
+  state              DispatchSessionState
+  // 異常終了したときの終了コード（tmuxの`#{pane_dead_status}`）。原因の手掛かりとして残す
+  exitStatus         Int?
+  firstSeenAt        DateTime
+  lastReportedAt     DateTime
+  // どの状態で引き上げ済みか。pollerは60秒ごとに同じ報告を送るため、これが無いと毎分コメントが増える。
+  // FAILED以外へ移ったらnullへ戻し、復帰後に再び落ちた場合の2回目を拾えるようにする
+  escalatedState     DispatchSessionState?
+  escalatedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([host, tmuxSessionName])
+  @@index([state])
+}
+
+// ALIVE=ペインが生きている / EXITED=正常終了して残っている / FAILED=異常終了して残っている /
+// GONE=報告に含まれなくなった（セッションが消えた）。
+//
+// **引き上げるのはFAILEDだけ。** GONEは人が作業を終えて畳んだ場合と区別が付かず、むしろ
+// そちらの方が多いため、鳴らすとノイズになって本当の異常終了が埋もれる。
+enum DispatchSessionState {
+  ALIVE
+  EXITED
+  FAILED
+  GONE
+}
+
 model IssueLabel {
   id            String  @id @default(cuid())
   issueId       String

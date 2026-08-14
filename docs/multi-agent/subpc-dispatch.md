@@ -46,6 +46,22 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 ここで実装完了まで追うと、セッションの終了検知という別の仕組みが要るうえ、Project Statusと
 情報が二重になる。ジョブキューの責務は「起動を届けること」に閉じている。
 
+### 立ち上がった後のセッションは別のモデルで見る（#1217）
+
+ジョブの寿命が起動までで終わるということは、**立った後のセッションを見ている口が無い**ということでもある。
+そこは`DispatchSession`が担当し、pollerが1巡ごとに`POST /api/dispatch/sessions`で
+「そのホストで今見えている、Issueに紐づくtmuxセッションの全て」を報告する。ジョブへ相乗りさせないのは
+寿命が違うためで、同じ行に混ぜると`activeKey`（未完了ジョブを1件に制限するunique制約）の意味が壊れる。
+
+見るのは**`pane_dead`と`#{pane_dead_status}`（終了コード）だけ**で、画面（`capture-pane`）の内容は
+読まない。入力待ち・完了・停滞はClaude Codeのフックが担当し（#1219）、こちらはフックが飛ばない
+「プロセスの死・消失」に絞る。切り分けの根拠は[gates.md](gates.md)。
+
+**`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
+試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
+ときだけ異常終了として扱い、Issueコメントと`00.check-user`で引き上げる。消失は人が畳んだ場合と
+区別が付かないので引き上げない。
+
 取り消せるのは`queued`と`claimed`まで。`running`はworktreeの作成や依存インストールの最中で、
 途中で止めると中途半端なworktreeとブランチが残る（後始末は`scripts/cleanup-worktrees.sh`）。
 
@@ -96,6 +112,12 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 「実行できるリポジトリの一覧」は**ジョブの割り当て可否を決める情報なのでissue-deck側**に持つ。
 ホストの死活・CPU・メモリ・tmuxセッション一覧は[ops-dashboard#34](https://github.com/guchi-apps/ops-dashboard/issues/34)側で扱う。
 サブPCはissue-deck専用機ではなく、他リポジトリの作業セッションも並ぶため。
+
+**この切り分けは#1217のセッション報告でも守る。** 報告に載せるのは`<リポジトリ名>-issue-<番号>`に
+一致し、かつ`local-repos.conf`から`owner/repo`を**一意に**解決できたセッションだけで、ホスト上の
+無関係なtmuxセッションは送らない。セッション名にownerが含まれないため、別ownerに同名のリポジトリが
+あるとどちらのIssueか決められない。**曖昧なときは送らない**（当てずっぽうに選ぶと、無関係なIssueへ
+引き上げのコメントを投稿することになる）。
 
 ## 同時実行数の上限
 
@@ -178,11 +200,12 @@ pull型を採った以上、押してから起動が始まるまでポーリン�
 | ルート | 認証 | 用途 |
 |---|---|---|
 | `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否 |
-| `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・同時実行数 |
+| `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告 |
+| `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 
