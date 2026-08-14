@@ -10,7 +10,9 @@ import {
   isNavViewId,
   resolveStateOnViewChange,
 } from "@/lib/nav-views";
+import { DEFAULT_PULL_REQUEST_VIEW } from "@/lib/pull-request-views";
 import type { Issue, NavViewId } from "@/types/issue";
+import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { QuickFilter } from "@/types/quick-filter";
 
@@ -31,7 +33,8 @@ export type MobileScreen =
     }
   | { kind: "repos" }
   | { kind: "settings" }
-  // マージ待ちPR一覧（#1058）。ホームからのドリルダウンで、ボトムナビのタブは持たない
+  // PR一覧（#1058）。ホームからのドリルダウンで、ボトムナビのタブは持たない。
+  // どの状態別ビューを見ているかは`prview`クエリ（PCと共有）が持つ（#1312）
   | { kind: "pull-requests" }
   | {
       kind: "repo-detail";
@@ -167,6 +170,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         assignee?: string | null;
         sort?: IssueSort | null;
         origin?: "tab" | "home" | null;
+        /** PR一覧の状態別ビュー（#1312）。PCと同じ`prview`クエリを共有する */
+        prview?: PullRequestViewId | null;
       },
       options?: { silent?: boolean },
     ) => {
@@ -227,6 +232,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         params.delete("mfrom");
       }
 
+      // 既定値と同じprviewはクエリに残さない（PC側のapplyFilterParamと同じ運用）。
+      // 未指定（undefined）のときは現在の値をそのまま引き継ぐ。
+      if (next.prview === DEFAULT_PULL_REQUEST_VIEW) {
+        params.delete("prview");
+      } else if (next.prview) {
+        params.set("prview", next.prview);
+      }
+
       const url = `${pathname}?${params.toString()}`;
 
       // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
@@ -246,9 +259,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
   const selectTab = useCallback((tab: MobileBottomNavTab) => navigate({ screen: tab }), [navigate]);
 
-  // ホームからマージ待ちPR一覧へ遷移する（#1058）。Issueの絞り込み条件は引き継がない。
+  // ホームからPR一覧へ遷移する（#1058）。Issueの絞り込み条件は引き継がない。
+  // どの状態別ビューを開くかはホームで選んだ項目が決める（#1312）。
   const selectPullRequests = useCallback(
-    () => navigate({ screen: "pull-requests" }),
+    (prview: PullRequestViewId) => navigate({ screen: "pull-requests", prview }),
     [navigate],
   );
 

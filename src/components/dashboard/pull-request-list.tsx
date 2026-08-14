@@ -18,11 +18,14 @@ import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
+import { getPullRequestView } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
 
 type PullRequestListProps = {
+  /** 表示中の状態別ビュー（#1312）。見出し・空状態の文言・並び順がこれで決まる */
+  view: PullRequestViewId;
   pullRequests: PullRequestSummary[];
   failedRepositories: string[];
   fetchedAt: string | null;
@@ -141,13 +144,14 @@ function PullRequestCard({
 }
 
 /**
- * マージ待ち（open）のPull Requestをリポジトリ横断で一覧表示する（#1058）。
+ * Pull Requestをリポジトリ横断で一覧表示する（#1058）。何を集めた一覧かは`view`が決める（#1312）。
  *
  * Issue一覧と違い、このデータはDBキャッシュではなく都度GitHub APIから取得している。
  * open PRは常時0〜数件しか存在しない運用のため、`PullRequest`テーブルとWebhook同期を
  * 持たずに済ませている（背景は docs/code-map.md を参照）。
  */
 export function PullRequestList({
+  view,
   pullRequests,
   failedRepositories,
   fetchedAt,
@@ -162,14 +166,17 @@ export function PullRequestList({
   style,
   footerSpacing = false,
 }: PullRequestListProps) {
-  const groups = groupPullRequestsByRepository(pullRequests);
+  const groups = groupPullRequestsByRepository(pullRequests, view);
+  const { title, description, emptyMessage } = getPullRequestView(view);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         {headerLeading}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold">マージ待ちPR</h1>
+          <h1 className="truncate text-sm font-semibold" title={description}>
+            {title}
+          </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{pullRequests.length}件</span>
             {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
@@ -198,7 +205,7 @@ export function PullRequestList({
 
         {!error && pullRequests.length === 0 && (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isLoading ? "読み込み中..." : "マージ待ちのPull Requestはありません。"}
+            {isLoading ? "読み込み中..." : emptyMessage}
           </p>
         )}
 

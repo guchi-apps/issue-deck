@@ -1,12 +1,14 @@
 "use client";
 
-import { FolderGit2, GitPullRequest, Plus, SlidersHorizontal, X } from "lucide-react";
+import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { NavViewId, OverviewStat } from "@/types/issue";
+import type { PullRequestViewId } from "@/types/pull-request";
 import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -20,7 +22,7 @@ type MobileHomeScreenProps = {
   onSelectQuickFilter: (quickFilter: QuickFilter) => void;
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
-  onSelectPullRequests: () => void;
+  onSelectPullRequests: (view: PullRequestViewId) => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -127,16 +129,21 @@ export function MobileHomeScreen({
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">Pull Request</h2>
           <ul className="flex flex-col gap-1">
-            <li>
-              <button
-                type="button"
-                onClick={onSelectPullRequests}
-                className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-              >
-                <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
-                マージ待ちPR
-              </button>
-            </li>
+            {pullRequestViews.map((view) => {
+              const Icon = pullRequestViewIcons[view.id];
+              return (
+                <li key={view.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPullRequests(view.id)}
+                    className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+                  >
+                    <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    {view.label}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
 

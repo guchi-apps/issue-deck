@@ -1,4 +1,9 @@
-import type { PullRequestSummary, PullRequestKind } from "@/types/pull-request";
+import type {
+  PullRequestKind,
+  PullRequestListScope,
+  PullRequestSummary,
+  PullRequestViewId,
+} from "@/types/pull-request";
 
 /** Issue専用ブランチの命名規約（`scripts/start-issue.sh`が作成する`issue-<番号>`） */
 const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
@@ -64,6 +69,56 @@ export function sortOpenPullRequests(pullRequests: PullRequestSummary[]): PullRe
   });
 }
 
+/**
+ * 更新が新しい順に並べる。更新日時が同じ場合はリポジトリ名・PR番号で安定させる。
+ * マージ済みを含む「全てのPR」ビュー向け（#1312）。作成が古い順のままだと、何年も前に
+ * 完了したPRが先頭を占めて履歴として読めなくなる。
+ */
+export function sortPullRequestsByUpdated(
+  pullRequests: PullRequestSummary[],
+): PullRequestSummary[] {
+  return [...pullRequests].sort((a, b) => {
+    const diff = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    if (diff !== 0) return diff;
+    const byRepo = a.repositoryFullName.localeCompare(b.repositoryFullName);
+    return byRepo !== 0 ? byRepo : a.number - b.number;
+  });
+}
+
+/**
+ * ビューごとの絞り込み（#1312）。母集団の広さ（closedを取りに行くか）は
+ * `scopeForPullRequestView`が決め、ここは受け取った一覧を絞るだけ。
+ *
+ * ドラフトとCI状態不明を`in-progress`側へ入れているのは、どちらも「まだ結果が確定していない」
+ * ためにマージの判断ができない点で同じだから（ドラフトはCI状態を取得していないので常に`unknown`）。
+ */
+export function filterPullRequestsByView(
+  pullRequests: PullRequestSummary[],
+  view: PullRequestViewId,
+): PullRequestSummary[] {
+  if (view === "all") return pullRequests;
+  return pullRequests.filter((pullRequest) => {
+    if (pullRequest.state !== "open") return false;
+    const completed = !pullRequest.draft && ["success", "failure"].includes(pullRequest.ciState);
+    return view === "completed" ? completed : !completed;
+  });
+}
+
+/** ビューを表示するために一覧APIへ要求する母集団（#1312） */
+export function scopeForPullRequestView(view: PullRequestViewId): PullRequestListScope {
+  return view === "all" ? "all" : "open";
+}
+
+/** ビューごとの、リポジトリ内・リポジトリ間の並び順（#1312） */
+export function sortPullRequestsForView(
+  pullRequests: PullRequestSummary[],
+  view: PullRequestViewId,
+): PullRequestSummary[] {
+  return view === "all"
+    ? sortPullRequestsByUpdated(pullRequests)
+    : sortOpenPullRequests(pullRequests);
+}
+
 export type PullRequestRepositoryGroup = {
   repositoryFullName: string;
   repositoryPrivate: boolean;
@@ -71,14 +126,16 @@ export type PullRequestRepositoryGroup = {
 };
 
 /**
- * リポジトリごとにまとめる。グループの並び順は「そのリポジトリで最も古いPRの作成日時」の
- * 昇順で、リポジトリ名順ではない。滞留が長いリポジトリを上に出すため。
+ * リポジトリごとにまとめる。グループの並び順はリポジトリ名順ではなく、`view`が決める並びで
+ * 最初に来るPRを持つリポジトリから順に並ぶ。マージ待ち系のビューは「最も古いPRの作成日時」の
+ * 昇順で、滞留が長いリポジトリを上に出す。「全てのPR」だけは更新が新しい順。
  */
 export function groupPullRequestsByRepository(
   pullRequests: PullRequestSummary[],
+  view: PullRequestViewId,
 ): PullRequestRepositoryGroup[] {
   const groups = new Map<string, PullRequestRepositoryGroup>();
-  for (const pullRequest of sortOpenPullRequests(pullRequests)) {
+  for (const pullRequest of sortPullRequestsForView(pullRequests, view)) {
     const existing = groups.get(pullRequest.repositoryFullName);
     if (existing) {
       existing.pullRequests.push(pullRequest);
@@ -90,7 +147,7 @@ export function groupPullRequestsByRepository(
       });
     }
   }
-  // sortOpenPullRequestsの結果を順に詰めているため、Mapの挿入順が既に「最も古いPRの順」になる。
+  // 並べ替え済みの結果を順に詰めているため、Mapの挿入順が既にグループの並び順になる。
   return [...groups.values()];
 }
 

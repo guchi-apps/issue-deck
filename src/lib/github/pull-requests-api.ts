@@ -3,7 +3,7 @@ import { fetchAllPages } from "@/lib/github/pagination";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 /**
- * `GET /repos/{owner}/{repo}/pulls` のレスポンスのうち、マージ待ちPR一覧で使うフィールド。
+ * `GET /repos/{owner}/{repo}/pulls` のレスポンスのうち、PR一覧で使うフィールド。
  *
  * `release-api.ts`の`GithubApiPullRequest`はリリースフロー判定に必要な最小限（番号・タイトル・
  * head.ref）だけを持つ別物で、こちらは一覧表示に必要なdraft・base・作者・Auto-merge・
@@ -15,10 +15,15 @@ export type GithubApiOpenPullRequest = {
   title: string;
   body: string | null;
   draft: boolean;
-  /** `open` / `closed`。一覧取得は常にopenだが、単体取得ではclosedも返る */
+  /** `open` / `closed` */
   state: string;
   created_at: string;
   updated_at: string;
+  /**
+   * マージされた時刻。マージされていなければnull。
+   * 一覧取得のレスポンスには単体取得の`merged`が無いため、closedなPRのマージ済み判定はこれを使う。
+   */
+  merged_at: string | null;
   user: { login: string } | null;
   base: { ref: string };
   head: { ref: string; sha: string };
@@ -30,6 +35,14 @@ export type GithubApiOpenPullRequest = {
 const PER_PAGE = 50;
 
 /**
+ * 1リポジトリあたりに取得するクローズ済みPRの上限（#1312）。
+ *
+ * 「全てのPR」ビューが求めているのは直近の完了分を振り返れることで、履歴の全件表示ではない。
+ * ページングすると1リポジトリで何十回もAPIを消費しうるため、更新が新しい順の1ページで打ち切る。
+ */
+const CLOSED_PER_PAGE = 30;
+
+/**
  * 指定リポジトリのオープンなPull Requestを取得する。baseブランチでは絞り込まない
  * （`release-api.ts`の`fetchOpenPullRequestsForBase`はリリースフロー判定用にbase固定で取る）。
  */
@@ -38,7 +51,34 @@ export async function fetchOpenPullRequests(
   repo: string,
   token: string,
 ): Promise<GithubApiOpenPullRequest[]> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=open&sort=created&direction=asc&per_page=${PER_PAGE}`;
+  return fetchPullRequestPage(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=open&sort=created&direction=asc&per_page=${PER_PAGE}`,
+    token,
+  );
+}
+
+/**
+ * 指定リポジトリのクローズ済み（マージ済み・却下）Pull Requestを、更新が新しい順に取得する（#1312）。
+ *
+ * openと分けて取っているのは、`state=all`の1回で済ませると`per_page`の枠を古いclosedが埋めて
+ * openを取りこぼすため（このエンドポイントは作成順ソートしか安定して効かない）。
+ * ページングはせず`CLOSED_PER_PAGE`件で打ち切る。
+ */
+export async function fetchClosedPullRequests(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<GithubApiOpenPullRequest[]> {
+  return fetchPullRequestPage(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${CLOSED_PER_PAGE}`,
+    token,
+  );
+}
+
+async function fetchPullRequestPage(
+  url: string,
+  token: string,
+): Promise<GithubApiOpenPullRequest[]> {
   const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");

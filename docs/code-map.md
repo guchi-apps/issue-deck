@@ -88,24 +88,32 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
   報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
   まとめて載せる（`addMissingProjectItems`）。
-- **マージ待ちPR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
+- **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
   （#1058の調査時点で全連携リポジトリ合計0件）、DBキャッシュを持つ効果より
-  スキーマ・Webhook設定を増やさない方が勝つと判断した。マージ済みPRの履歴や既読管理が
-  必要になった時点でキャッシュ層の追加を再検討する。
-  取得コストは「対象リポジトリ数 + draft以外のPR数」回のAPI呼び出しで、母集団が広いぶん
+  スキーマ・Webhook設定を増やさない方が勝つと判断した。
+  取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
-  `hooks/use-open-pull-requests.ts`）。**この一覧が返すのは今もopenのPRだけ**で、マージ済み・
-  クローズ済みのPRは下記の詳細API経由でしか表示しない。
+  `hooks/use-pull-requests.ts`）。
+- **左メニューのPR項目は状態別の3ビューで、母集団を決めるのは「全てのPR」だけ**（#1312）。
+  ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
+  「処理中のPR」（CI待ち・ドラフト・CI状態不明）と「完了したPR」（CIがsuccess/failure）は
+  **同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えてもGitHub APIを叩き直さない。
+  「全てのPR」だけが`?scope=all`でクローズ済みも取りに行き、そのぶん増えるのはリポジトリあたり
+  1回（`state=closed&sort=updated`を1ページ・30件、**closedのCI状態は取得しない**）。
+  マージ済みかどうかは一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧に無い）。
+  並び順も「全てのPR」だけ更新が新しい順で、他は作成が古い順＝滞留が長い順。
+  マージ済みPRの一覧を「直近30件」を超えて遡りたくなった時点で、キャッシュ層の追加を再検討する。
 - **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、PRを選んだ・
   画面内のリンクからPRを開いたときだけ取得する。** 会話コメント・レビュー・レビューコメントの
   3エンドポイントを
   [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
   統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
   ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
-  **一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・クローズ済みのPRも
-  開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
+  **「処理中」「完了」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
+  クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
