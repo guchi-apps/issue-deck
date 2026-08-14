@@ -7,8 +7,13 @@ import { Archive, CircleCheck, CircleDot, CircleSlash, Lock, MessageSquare, Star
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Input } from "@/components/ui/input";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
+import {
+  resolveIssueExecutionTarget,
+  type IssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
@@ -108,7 +113,34 @@ export function IssueList({
   groupByRepo = false,
   view,
 }: IssueListProps) {
-  const runningByIssueId = useIssuesWorkflowRunning(issues);
+  // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
+  // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
+  // ポーリングのフックより先に求める必要がある。
+  const dispatch = useDispatchState(true);
+  const executionTargetByIssueId = useMemo(() => {
+    const map = new Map<string, IssueExecutionTarget>();
+    for (const issue of issues) {
+      map.set(
+        issue.id,
+        resolveIssueExecutionTarget({
+          repositoryFullName: issue.repositoryFullName,
+          issueNumber: issue.number,
+          labels: issue.labels,
+          jobs: dispatch.jobs,
+          sessions: dispatch.sessions,
+        }),
+      );
+    }
+    return map;
+  }, [issues, dispatch.jobs, dispatch.sessions]);
+  const actionsUnexpectedIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, target] of executionTargetByIssueId) {
+      if (!target.expectsActionsRun) ids.add(id);
+    }
+    return ids;
+  }, [executionTargetByIssueId]);
+  const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
   const issueIds = useMemo(() => issues.map((issue) => issue.id), [issues]);
@@ -167,6 +199,7 @@ export function IssueList({
                 projectStatus={issue.projectStatus}
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
+                executionTarget={executionTargetByIssueId.get(issue.id)}
               />
               {issue.favorite && (
                 <Star

@@ -7,6 +7,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
@@ -23,6 +24,11 @@ import {
 export type DispatchState = {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
+  /**
+   * 起動後のtmuxセッション（#1217）。APIは以前から返していたが画面へ出していなかった。
+   * Issueの実行先の解決（#1262・`resolveIssueExecutionTarget`）がこれを使う。
+   */
+  sessions: DispatchSessionView[];
   concurrency: number;
 };
 
@@ -160,6 +166,7 @@ export function useDispatchState(enabled: boolean) {
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
+    sessions: state?.sessions ?? [],
     concurrency: state?.concurrency ?? null,
     error,
     setError,

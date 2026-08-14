@@ -1,5 +1,9 @@
 import { Check, CircleAlert, MessageCircleQuestion } from "lucide-react";
 
+import {
+  describeIssueExecutionTarget,
+  type IssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
@@ -31,6 +35,13 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * 投稿されていない状態かどうか（@/lib/github/ask-claudeのisQaAnswerPending相当）
    */
   qaAnswerPending?: boolean;
+  /**
+   * このIssueがどこで走っているか（#1262）。**省略時は従来どおりActionsの実行を期待する。**
+   *
+   * サブPC実行では実行ログのリンクを含むコメントがPR作成まで出ないため、これが無いと
+   * `runId`がnullのまま「起動待ち」を出し続けてしまう。
+   */
+  executionTarget?: IssueExecutionTarget;
 };
 
 const BADGE_SIZE = 18;
@@ -49,6 +60,7 @@ export function WorkflowStepBadge({
   projectStatus = null,
   running,
   qaAnswerPending = false,
+  executionTarget,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -62,13 +74,23 @@ export function WorkflowStepBadge({
   // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
   // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
   // ポーリング結果が未取得（running未定義）のうちは判定しない
+  // Actionsの実行を期待してよい場合にだけ「起動待ち」を判定する（#1262）。サブPC実行では
+  // 実行が最初から存在しないため、ここを見ないと実装中ずっと誤警告が出続ける。
   const awaitingDispatch =
+    executionTarget?.expectsActionsRun !== false &&
     running !== undefined &&
     !isRunning &&
     running.runId === null &&
     isDispatchedStatusKey(resolveProgressStatus({ projectStatus }));
   const simpleStep = isRunning ? getSimpleStepLabel(running?.currentStep ?? null) : null;
-  const stepText = `${step.label}${simpleStep ? `（${simpleStep}）` : awaitingDispatch ? "（起動待ち）" : ""}`;
+  // 実行先が分かっている場合はそれを出す。押す前だけでなく**着手後も**どちらで動いているかが
+  // 分かるようにするため（#1262）。実行中のステップ名が出せるならそちらを優先する
+  const targetLabel =
+    executionTarget && !executionTarget.expectsActionsRun
+      ? describeIssueExecutionTarget(executionTarget)
+      : null;
+  const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : targetLabel);
+  const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"
     : showQaAnswerPending
@@ -84,7 +106,9 @@ export function WorkflowStepBadge({
             ? "（Claudeの回答待ち）"
             : awaitingDispatch
               ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
-              : ""
+              : targetLabel
+                ? `（${targetLabel}で実行中）`
+                : ""
       }`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
     >
