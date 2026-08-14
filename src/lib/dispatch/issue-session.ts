@@ -19,6 +19,14 @@ export type IssueSessionSummary = {
   tone: IssueSessionTone;
   /** 見出しの文言 */
   label: string;
+  /**
+   * 見出しに添える時刻（ISO文字列）。**その文言が何時のことなのかを指す**（#1353）。
+   *
+   * 入力待ち・応答終了はフックが報告してきた時刻（`activityAt`）で、それ以外はpollerが
+   * 最後に見た時刻（`lastReportedAt`）。pollerは1巡ごとに`lastReportedAt`を更新するので、
+   * こちらを入力待ちに添えると**何時間前の入力待ちでも「たった今」と出る**。
+   */
+  at: string;
   /** 補足（終了コード等）。無ければnull */
   detail: string | null;
   /** スマホから答えるための出口。取れていなければnull */
@@ -57,6 +65,7 @@ export function findSessionForIssue(
 export function summarizeIssueSession(session: DispatchSessionView): IssueSessionSummary {
   const base = {
     session,
+    at: session.lastReportedAt,
     remoteControlUrl: session.remoteControlUrl,
     // セッションが終われば`tailscale serve`も撤去されている（cleanupとpollerの回収）。
     // 開いても繋がらないURLを残さない
@@ -88,6 +97,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
   if (session.activity === "WAITING_INPUT") {
     return {
       ...base,
+      at: session.activityAt ?? session.lastReportedAt,
       tone: "waiting",
       label: `${session.host}のセッションが入力を待っています`,
       detail: "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
@@ -96,6 +106,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
   if (session.activity === "RESPONDED") {
     return {
       ...base,
+      at: session.activityAt ?? session.lastReportedAt,
       tone: "running",
       label: `${session.host}のセッションは応答を終えています`,
       detail: "作業が終わっている場合と、次の指示を待っている場合があります",

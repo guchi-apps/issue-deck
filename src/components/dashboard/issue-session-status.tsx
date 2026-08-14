@@ -146,7 +146,9 @@ export function IssueSessionStatus({
       >
         <ToneIcon tone={summary.tone} />
         {summary.label}
-        <span className="opacity-70">{formatRelativeDate(session.lastReportedAt)}</span>
+        {/* 添える時刻は文言に合わせる（#1353）。pollerが1巡ごとに更新するlastReportedAtを
+            入力待ちに添えると、何時間前の入力待ちでも「たった今」に見える */}
+        <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
       </span>
       {/* 理由・案内はホバーではなく本文として出す（主な用途が外出先のスマホでホバーが無い） */}
       {summary.detail && (

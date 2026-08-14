@@ -389,6 +389,26 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(claimed.map((job) => job.id)).toEqual(["control-1"]);
   });
 
+  // セッションが上限（#1361）に達したpollerは`maxJobs: 0`で取りに来る。
+  // **そういうときこそ停止・終了は届かないと困る**（届かないと5分で失効する）
+  it("起動ジョブが要らない（maxJobs: 0）と言われても制御ジョブは渡す", async () => {
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | string | undefined;
+      if (typeof kind === "object" && kind?.in) {
+        return [queuedJob({ id: "control-1", kind: "INTERRUPT" })];
+      }
+      return [];
+    });
+
+    const claimed = await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(claimed.map((job) => job.id)).toEqual(["control-1"]);
+    // 起動ジョブの候補は引きに行かない
+    const launchQueries = dispatchJobFindMany.mock.calls
+      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
+      .filter((where) => where.kind === "LAUNCH");
+    expect(launchQueries).toEqual([]);
+  });
+
   it("対応していないホストには制御ジョブを配らない", async () => {
     dispatchHostFindUnique.mockResolvedValue(host({ sessionControlCapable: null }));
     dispatchJobFindMany.mockResolvedValue([]);

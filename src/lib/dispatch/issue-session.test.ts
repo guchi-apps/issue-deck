@@ -102,6 +102,39 @@ describe("summarizeIssueSession", () => {
     expect(s.remoteControlUrl).toBeNull();
   });
 
+  // #1353。pollerは1巡ごとにlastReportedAtを更新するため、これを入力待ちに添えると
+  // 何時間前の入力待ちでも「たった今」に見える
+  describe("見出しに添える時刻（#1353）", () => {
+    it("入力待ち・応答終了はフックが報告してきた時刻を指す", () => {
+      const view = session({
+        activityAt: "2026-08-14T09:00:00.000Z",
+        lastReportedAt: "2026-08-14T12:00:00.000Z",
+      });
+      expect(summarizeIssueSession({ ...view, activity: "WAITING_INPUT" }).at).toBe(
+        "2026-08-14T09:00:00.000Z",
+      );
+      expect(summarizeIssueSession({ ...view, activity: "RESPONDED" }).at).toBe(
+        "2026-08-14T09:00:00.000Z",
+      );
+    });
+
+    it("様子の報告が無ければpollerが最後に見た時刻", () => {
+      expect(summarizeIssueSession(session({ lastReportedAt: "2026-08-14T12:00:00.000Z" })).at).toBe(
+        "2026-08-14T12:00:00.000Z",
+      );
+    });
+
+    it("終了・異常終了もpollerが最後に見た時刻（終わった時刻に相当する）", () => {
+      const view = session({
+        state: "FAILED",
+        activity: "WAITING_INPUT",
+        activityAt: "2026-08-14T09:00:00.000Z",
+        lastReportedAt: "2026-08-14T12:00:00.000Z",
+      });
+      expect(summarizeIssueSession(view).at).toBe("2026-08-14T12:00:00.000Z");
+    });
+  });
+
   it("終了コードが取れなければ補足を出さない", () => {
     expect(summarizeIssueSession(session({ state: "FAILED" })).detail).toBeNull();
   });

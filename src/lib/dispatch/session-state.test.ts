@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isRevivedSession,
   nextEscalatedState,
   parseDispatchSessionActivity,
   parseDispatchSessionName,
@@ -266,5 +267,27 @@ describe("parsePreviewUrl", () => {
     ["空文字", ""],
   ])("%sは受け付けない", (_name, input) => {
     expect(parsePreviewUrl(input)).toBeNull();
+  });
+});
+
+describe("isRevivedSession（#1353）", () => {
+  it("消えていた行がALIVEへ戻る時だけ真", () => {
+    expect(isRevivedSession("GONE", "ALIVE")).toBe(true);
+    expect(isRevivedSession("EXITED", "ALIVE")).toBe(true);
+    expect(isRevivedSession("FAILED", "ALIVE")).toBe(true);
+  });
+
+  it("ALIVEが続いている間は偽（同じセッション）", () => {
+    expect(isRevivedSession("ALIVE", "ALIVE")).toBe(false);
+  });
+
+  it("ALIVE以外へ移るときは偽", () => {
+    expect(isRevivedSession("ALIVE", "GONE")).toBe(false);
+    expect(isRevivedSession("GONE", "FAILED")).toBe(false);
+  });
+
+  it("行がまだ無ければ偽（作る側で初期値が入る）", () => {
+    expect(isRevivedSession(null, "ALIVE")).toBe(false);
+    expect(isRevivedSession(undefined, "ALIVE")).toBe(false);
   });
 });

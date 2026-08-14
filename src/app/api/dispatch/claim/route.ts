@@ -28,10 +28,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // pollerが一度に処理できる本数。指定が無ければ1本ずつ取る（上限側は同時実行数が守る）
+  // pollerが一度に処理できる本数。指定が無ければ1本ずつ取る（上限側は同時実行数が守る）。
+  //
+  // **`0`は「起動ジョブは要らない」**（#1332 × #1361）。セッションが上限に達したホストは
+  // 新しいセッションを立てられないが、**そういうときこそ停止・終了は届かないと困る**ため、
+  // 制御ジョブだけを取りに来る。取りに来ないと、届かない操作が5分で失効する
   const requested = payload?.maxJobs;
   const maxJobs =
-    typeof requested === "number" && Number.isInteger(requested) && requested > 0
+    typeof requested === "number" && Number.isInteger(requested) && requested >= 0
       ? Math.min(requested, 10)
       : 1;
 
