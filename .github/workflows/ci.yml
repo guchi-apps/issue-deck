@@ -165,8 +165,8 @@ jobs:
         uses: ./.github/actions/load-secrets
         with:
           only: SIGNALY_WEBHOOK_URL
-          secrets-json: "{}"
-          vars-json: "{}"
+          secrets-json: ${{ toJSON(secrets) }}
+          vars-json: ${{ toJSON(vars) }}
 
       - name: Signaly に通知
         if: steps.status.outputs.should_notify == 'true'
