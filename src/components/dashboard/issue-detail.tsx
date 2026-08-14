@@ -39,6 +39,7 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import {
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
@@ -419,10 +420,19 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）。判定はAPI側
+  // （`enqueueDispatchJob`）と同じものを使う
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   const defaultDispatchHost = resolveDefaultDispatchHost({
     hosts: dispatch.hosts,
     repositoryFullName: issue.repositoryFullName,
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+    blockingSession,
   });
   const startLabel = defaultDispatchHost
     ? `${defaultDispatchHost}で開始`

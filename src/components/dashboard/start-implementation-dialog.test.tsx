@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { Issue, IssueComment } from "@/types/issue";
@@ -29,6 +30,8 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
 let dispatchState: {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
+  // 起動済み（セッション生存中）のIssueを積ませない判定（#1311）が読む
+  sessions: DispatchSessionView[];
   concurrency: number | null;
   error: string | null;
 };
@@ -140,7 +143,7 @@ function clickStart() {
 
 describe("StartImplementationDialog", () => {
   beforeEach(() => {
-    dispatchState = { hosts: [], jobs: [], concurrency: 2, error: null };
+    dispatchState = { hosts: [], jobs: [], sessions: [], concurrency: 2, error: null };
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
