@@ -72,8 +72,9 @@ function formatRelativeDate(iso: string) {
   return `${diffDays}日前`;
 }
 
-// 進捗系ラベル（00.check-user、01.planning〜09.main）はカード右上のWorkflowStepBadgeで
-// 既に表現されているため、下部のラベル一覧からは除外する
+// 00番台の要対応ラベル（00.check-user）と、廃止済みの進捗ラベル（01〜09番台。#991 Phase 5・#1010）が
+// 他リポジトリに残っていた場合は、カード右上のWorkflowStepBadgeが進捗を表現するため
+// 下部のラベル一覧からは除外する
 function nonStatusLabels(labels: IssueLabel[]) {
   return labels.filter((label) => !isAttentionLabel(label.name) && matchStatusStep(label.name) === null);
 }
