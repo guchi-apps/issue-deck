@@ -18,7 +18,9 @@ GitHub Actions上の無人実行では、その場で確認を取る相手がい
 
 ### シークレットの扱い
 
-- APIキー・トークン・パスワード等の実シークレットをリポジトリにコミットしない。コミットしてよいのは、値を空にしたサンプル（`.env.example`・`.env.local.example`）と、1Passwordの`op://vault/item/field`形式の参照だけを書いたテンプレート（`.github/*.env.tpl`）に限る。実値は`.gitignore`済みの`.env*`と1Password側にのみ置く。
+- APIキー・トークン・パスワード等の実シークレットをリポジトリにコミットしない。コミットしてよいのは、値を空にしたサンプル（`.env.example`・`.env.local.example`）と、1Passwordの`op://vault/item/field`形式の参照だけを書いたテンプレート（`.github/*.env.tpl`・`.github/secrets-manifest.tsv`）に限る。実値は`.gitignore`済みの`.env*`と1Password側にのみ置く。
+- **1Passwordは「人が管理する唯一の正」だが、GitHub Actionsの実行時の取得先ではない**（#1302）。1Passwordサービスアカウントには日次レート制限（1Passwordアカウント全体で1,000リクエスト/日。サービスアカウントを分けても分割されない）があり、実行のたびに読むとフリート全体のデプロイが止まる。`ci.yml`・`deploy.yml`・`release.yml`はGitHubのsecret/variableから取得する。対応表は`.github/secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh`（値を変更したときだけ実行する）。
+- **このリポジトリはPUBLICでActionsのログが誰でも読める。** GitHubのvariableはマスクされないため、公開されても害が無いと確認できた値だけをvariableにする。ホスト名・ポート・ユーザー名・DB名のような接続先の構成情報は、単体では資格情報でなくともsecretに置く。
 - 実シークレットの値を、コミットメッセージ・PR本文・Issueコメント・ワークフローのログなど、リポジトリやGitHub上に残る場所へ出力しない。
 - 既存のシークレット・環境変数の設定変更が必要になった場合は、自動で進めず`00.check-user`を付与してユーザーの確認を待つ（後述の「自動マージ不可カテゴリ」にも該当する）。
 

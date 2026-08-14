@@ -128,7 +128,7 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
 
 | 通知 | 1Passwordのフィールド | 環境変数 | 設定場所 |
 | --- | --- | --- | --- |
-| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | `.github/ci.env.tpl`・`.github/deploy.env.tpl` |
+| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | GitHubのrepository secret（正は1Password。対応は`.github/secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh`。#1302） |
 | セッション状態 | `apps/issue-deck` の `session-webhook-url` | `SESSION_NOTIFY_WEBHOOK_URL` | `~/.config/issue-deck/notify.env` |
 
 分ける理由。

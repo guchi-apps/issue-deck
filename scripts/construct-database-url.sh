@@ -23,6 +23,9 @@ DB_CONNECTION_LIMIT="${DB_CONNECTION_LIMIT:-3}"
 export DATABASE_URL="mysql://${DB_USER_ENC}:${DB_PASSWORD_ENC}@${DB_HOST}:${DB_PORT}/${DB_NAME}?connection_limit=${DB_CONNECTION_LIMIT}"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
+  # issue-deckはPUBLICリポジトリでActionsのログが誰でも読める。DATABASE_URLはパスワードを
+  # URLエンコードして埋め込むため、元の値のままのマスクでは覆えないことがある。明示的に伏せる。
+  echo "::add-mask::${DATABASE_URL}"
   echo "DATABASE_URL=${DATABASE_URL}" >> "$GITHUB_ENV"
 fi
 
@@ -33,6 +36,7 @@ if [[ -n "${MIGRATE_DB_USER:-}" && -n "${MIGRATE_DB_PASSWORD:-}" ]]; then
   export MIGRATE_DATABASE_URL="mysql://${MIGRATE_DB_USER_ENC}:${MIGRATE_DB_PASSWORD_ENC}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
   if [[ -n "${GITHUB_ENV:-}" ]]; then
+    echo "::add-mask::${MIGRATE_DATABASE_URL}"
     echo "MIGRATE_DATABASE_URL=${MIGRATE_DATABASE_URL}" >> "$GITHUB_ENV"
   fi
 fi

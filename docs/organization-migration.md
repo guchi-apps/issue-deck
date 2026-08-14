@@ -399,8 +399,9 @@ Appをpublic（"Any account"）にする以外に方法がない。今回はそ�
      （開発Appはプレビュー環境が使用）。
    - App ID・秘密鍵・Webhook URLは移管しても変わらないはずだが、GitHubのドキュメントに
      明記が無い。移管後に控えた値と一致するかを確認し、変わっていれば`.env`・1Password・
-     `.github/deploy.env.tpl`が指す1Passwordのitem（`apps/issue-deck`の`github-app-id`・
-     `github-app-private-key-base64`・`github-app-slug`）を更新する。
+     `.github/secrets-manifest.tsv`が指す1Passwordのitem（`apps/issue-deck`の`github-app-id`・
+     `github-app-private-key-base64`・`github-app-slug`）を更新し、
+     `scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。
 
 5. **Appを`guchi-apps`へインストールする。** App設定ページの**Install App**から`guchi-apps`を選び、
    **All repositories**（または対象を明示選択）でインストールする。

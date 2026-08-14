@@ -238,6 +238,7 @@ pnpm test:unit   # vitestのみ
 セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
 古いworktreeを開き直したときに自動で埋まる。
 
-追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/deploy.env.tpl`・
-`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。詳細は共有知識の
+追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/secrets-manifest.tsv`・
+`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
+マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。

@@ -90,15 +90,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Load secrets from 1Password
-        uses: 1password/load-secrets-action@v4
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          OP_ENV_FILE: .github/deploy.env.tpl
-
       - name: Construct DATABASE_URL
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          MIGRATE_DB_USER: ${{ secrets.MIGRATE_DB_USER }}
+          MIGRATE_DB_PASSWORD: ${{ secrets.MIGRATE_DB_PASSWORD }}
         run: bash scripts/construct-database-url.sh
 
       - name: Setup pnpm
@@ -118,12 +118,12 @@ jobs:
         env:
           NODE_ENV: production
           DATABASE_URL: ${{ env.DATABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-          GITHUB_APP_ID: ${{ env.GITHUB_APP_ID }}
-          GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.GITHUB_APP_PRIVATE_KEY_BASE64 }}
-          NEXT_PUBLIC_GITHUB_APP_SLUG: ${{ env.NEXT_PUBLIC_GITHUB_APP_SLUG }}
-          GITHUB_WEBHOOK_SECRET: ${{ env.GITHUB_WEBHOOK_SECRET }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          GITHUB_APP_ID: ${{ vars.APP_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY_BASE64: ${{ secrets.APP_GITHUB_APP_PRIVATE_KEY_BASE64 }}
+          NEXT_PUBLIC_GITHUB_APP_SLUG: ${{ vars.NEXT_PUBLIC_GITHUB_APP_SLUG }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.APP_GITHUB_WEBHOOK_SECRET }}
 
       - name: Create archive
         run: |
@@ -159,77 +159,77 @@ jobs:
           name: build-artifact
           path: ./
 
-      - name: Load secrets from 1Password
-        uses: 1password/load-secrets-action@v4
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          OP_ENV_FILE: .github/deploy.env.tpl
-
       - name: Construct DATABASE_URL
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          MIGRATE_DB_USER: ${{ secrets.MIGRATE_DB_USER }}
+          MIGRATE_DB_PASSWORD: ${{ secrets.MIGRATE_DB_PASSWORD }}
         run: bash scripts/construct-database-url.sh
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
         with:
-          key: ${{ env.SSH_PRIVATE_KEY }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           known_hosts: placeholder
           if_key_exists: replace
 
       - name: Add known hosts
         run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
         env:
-          HOST: ${{ env.HOST }}
-          SSH_PORT: ${{ env.SSH_PORT }}
+          HOST: ${{ secrets.HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
 
       - name: Upload archive
         run: scp -P "${SSH_PORT}" deploy.tar.gz "${USERNAME}@${HOST}:${TARGET_DIR}/deploy.tar.gz"
         env:
-          HOST: ${{ env.HOST }}
-          USERNAME: ${{ env.USERNAME }}
-          SSH_PORT: ${{ env.SSH_PORT }}
-          TARGET_DIR: ${{ env.TARGET_DIR }}
+          HOST: ${{ secrets.HOST }}
+          USERNAME: ${{ secrets.USERNAME }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
 
       - name: Deploy and restart
         uses: appleboy/ssh-action@v1
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
           MIGRATE_DATABASE_URL: ${{ env.MIGRATE_DATABASE_URL }}
-          DB_USER: ${{ env.DB_USER }}
-          DB_PASSWORD: ${{ env.DB_PASSWORD }}
-          DB_HOST: ${{ env.DB_HOST }}
-          DB_PORT: ${{ env.DB_PORT }}
-          DB_NAME: ${{ env.DB_NAME }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
-          GITHUB_APP_ID: ${{ env.GITHUB_APP_ID }}
-          GITHUB_APP_PRIVATE_KEY_BASE64: ${{ env.GITHUB_APP_PRIVATE_KEY_BASE64 }}
-          NEXT_PUBLIC_GITHUB_APP_SLUG: ${{ env.NEXT_PUBLIC_GITHUB_APP_SLUG }}
-          GITHUB_WEBHOOK_SECRET: ${{ env.GITHUB_WEBHOOK_SECRET }}
-          GITHUB_USER_TOKEN_ENCRYPTION_KEY: ${{ env.GITHUB_USER_TOKEN_ENCRYPTION_KEY }}
-          GITHUB_OAUTH_CLIENT_ID: ${{ env.GITHUB_OAUTH_CLIENT_ID }}
-          GITHUB_OAUTH_CLIENT_SECRET: ${{ env.GITHUB_OAUTH_CLIENT_SECRET }}
-          ALLOWED_EMAILS: ${{ env.ALLOWED_EMAILS }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GITHUB_APP_ID: ${{ vars.APP_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY_BASE64: ${{ secrets.APP_GITHUB_APP_PRIVATE_KEY_BASE64 }}
+          NEXT_PUBLIC_GITHUB_APP_SLUG: ${{ vars.NEXT_PUBLIC_GITHUB_APP_SLUG }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.APP_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_USER_TOKEN_ENCRYPTION_KEY: ${{ secrets.APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY }}
+          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.APP_GITHUB_OAUTH_CLIENT_ID }}
+          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.APP_GITHUB_OAUTH_CLIENT_SECRET }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # 進捗管理に使うGitHub Projects v2の場所(#991)。シークレットではないためリポジトリ変数から取る。
           # 未設定ならProject連携を行わない(進捗は従来どおり進捗ラベルで判定する)
           PROJECT_V2_OWNER: ${{ vars.PROJECT_V2_OWNER }}
           PROJECT_V2_NUMBER: ${{ vars.PROJECT_V2_NUMBER }}
           # 進捗報告API(POST /api/progress)の共有シークレット(#991 Phase 2)。
           # 各ワークフローはorganization secretの同名の値でこのAPIを叩く
-          PROGRESS_REPORT_SECRET: ${{ env.PROGRESS_REPORT_SECRET }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
           # サブPCへのディスパッチAPIの共有シークレット(#1179)。進捗報告とは別の値にする
           # (あちらは全リポジトリのActionsから参照できるorganization secretのため)
-          DISPATCH_SECRET: ${{ env.DISPATCH_SECRET }}
-          TARGET_DIR: ${{ env.TARGET_DIR }}
-          APP_PORT: ${{ env.PORT }}
+          DISPATCH_SECRET: ${{ secrets.DISPATCH_SECRET }}
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+          APP_PORT: ${{ vars.PORT }}
         with:
-          host: ${{ env.HOST }}
-          username: ${{ env.USERNAME }}
-          key: ${{ env.SSH_PRIVATE_KEY }}
-          port: ${{ env.SSH_PORT }}
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
           envs: DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,ALLOWED_EMAILS,CLAUDE_CODE_OAUTH_TOKEN,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,DISPATCH_SECRET,TARGET_DIR,APP_PORT
           script: |
             set -euo pipefail
@@ -333,17 +333,9 @@ jobs:
           fi
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
-      - name: Load secrets from 1Password
-        uses: 1password/load-secrets-action@v4
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          OP_ENV_FILE: .github/deploy.env.tpl
-
       - name: Signaly に通知
         env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: issue-deck
           NOTIFY_KIND: デプロイ
           NOTIFY_STATUS: ${{ steps.status.outputs.result }}
@@ -358,17 +350,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Load secrets from 1Password
-        uses: 1password/load-secrets-action@v4
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          OP_ENV_FILE: .github/deploy.env.tpl
-
       - name: Signaly に通知
         env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}
           NOTIFY_APP: issue-deck
           NOTIFY_KIND: リリース

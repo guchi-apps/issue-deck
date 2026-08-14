@@ -259,8 +259,9 @@ issue-deck自身よりもむしろ導入は容易**（DBなし・ビルドなし
   存在しない。issue-deckと同じ`github.actor`のwrite権限確認で十分と考えられる。
 - **Secrets配布（上記3）**: shopping-listには既に**1Password Service Accountベースのシークレット
   注入機構**が稼働している（GitHub Secretsには`OP_SERVICE_ACCOUNT_TOKEN`のみを置き、実値は
-  `1password/load-secrets-action@v4` + `.github/ci.env.tpl`・`.github/deploy.env.tpl`の
-  `op://apps/...`参照で注入する方式）。`CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`も同じ経路で
+  `1password/load-secrets-action@v4` + `.github/*.env.tpl`の`op://apps/...`参照で注入する方式）。
+  なおissue-deck自身は#1302で`ci.yml`/`deploy.yml`/`release.yml`の1Password依存を外し、
+  実行時の取得先をGitHubのsecret/variableへ移した（日次レート制限の枯渇でデプロイが止まったため）。`CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`も同じ経路で
   1Passwordに置いて注入できるため、**IssueDeck側にActions Secrets書き込み権限を追加せずに済む**。
   これは上記3で挙げた「IssueDeckがGitHub API経由でSecretsを直接設定する」方式の代替として、
   少なくともm-guchi配下のリポジトリ群には現実的な選択肢になる（他リポジトリも同じ1Password運用に
