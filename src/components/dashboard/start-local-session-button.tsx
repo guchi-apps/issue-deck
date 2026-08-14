@@ -22,6 +22,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
@@ -210,6 +211,9 @@ export function StartLocalSessionButton({
           align={fullWidth ? "start" : "end"}
           isSubmitting={dispatch.isSubmitting}
           onCancel={() => void dispatch.cancel(job.id)}
+          // 「順番待ち」のまま進まないときの理由（#1394）。上限で待っているのか、
+          // pollerが落ちているのかを、押した本人が見ている場所で区別できるようにする
+          waitReason={describeDispatchJobWaitReason(job, dispatch.hosts)}
         />
       )}
       {(error || dispatch.error) && (

@@ -56,7 +56,8 @@ set -euo pipefail
 # **約束を変えたら上げる**（issue-deck側は表示するだけで、値による分岐は持たない）。
 #
 # 2: ジョブの種別（`kind`）を読み、走っているセッションの停止・終了を実行する（#1332）。
-DISPATCH_POLLER_VERSION="2"
+# 3: セッションの本数と上限（#1361）を申告に載せ、画面が待機の理由を出せるようにする（#1394）。
+DISPATCH_POLLER_VERSION="3"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -260,26 +261,48 @@ screenshot_capable() {
   fi
 }
 
+# 生きている実装セッションの本数（#1361）。
+#
+# 数えるのは `<リポジトリ名>-issue-<番号>` に一致するものだけ。この仕組みが作ったセッションの
+# 名前の形で、report_sessions が送る対象と同じ。人が手で立てたセッションまで数えると、
+# この仕組みと関係のない事情でジョブが取れなくなる。
+count_issue_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-issue-[1-9][0-9]*$' || true
+}
+
 announce() {
-  local repositories payload
+  local repositories payload live_sessions
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
+  # **申告するのは1巡の入口で数えた本数**（#1394）。この後の回収（reap_sessions）で減ったぶんは
+  # 次の巡の申告に乗る。画面に出すのは「最後に申告した時点」の数字で、判定そのものは
+  # 引き続き claim の直前で数え直す（下の run_once）。回収を待ってから申告する形にすると、
+  # 回収が長引いたぶんだけ生存報告が遅れ、応答していないホストとして扱われうる。
+  live_sessions="$(count_issue_sessions)"
 
   # `sessionControl`は「セッションの停止・終了（#1332）を実行できる」という申告。
   # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
   # 読まないため、受け取ると起動ジョブとして解釈してセッションを立ててしまう。
+  #
+  # `maxSessions`・`liveSessions`は**画面へ出すためだけの申告**（#1394）。上限に達している間は
+  # 起動ジョブを取りに行かない（#1361）ため、これが無いと画面は「順番待ちのまま進まない」理由を
+  # 出せず、pollerが落ちている状態と区別が付かない。**issue-deck側はこの値で割り当てを判定しない**
+  # （サブPCのtmuxを見られるのはこちらだけで、向こうに判定を置くと必ずずれる）。
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \
     --argjson contractVersion "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" \
     --arg agentVersion "$DISPATCH_POLLER_VERSION" \
     --argjson screenshotCapable "$(screenshot_capable)" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true}')"
+    --argjson maxSessions "$MAX_SESSIONS" \
+    --argjson liveSessions "$live_sessions" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
     return 1
   fi
-  echo "申告しました: $HOST_NAME → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
+  echo "申告しました: $HOST_NAME（セッション $live_sessions/$MAX_SESSIONS） → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
   return 0
 }
 
@@ -621,16 +644,6 @@ run_job() {
     report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message"
   fi
   rm -f "$output_file"
-}
-
-# 生きている実装セッションの本数（#1361）。
-#
-# 数えるのは `<リポジトリ名>-issue-<番号>` に一致するものだけ。この仕組みが作ったセッションの
-# 名前の形で、report_sessions が送る対象と同じ。人が手で立てたセッションまで数えると、
-# この仕組みと関係のない事情でジョブが取れなくなる。
-count_issue_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null |
-    grep -cE '^.+-issue-[1-9][0-9]*$' || true
 }
 
 # --- 1巡 ----------------------------------------------------------------------

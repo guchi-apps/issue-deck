@@ -104,7 +104,29 @@ export type DispatchHostView = {
    * 配ると、古いpollerは`kind`を読まないため起動ジョブとして解釈してしまう。
    */
   sessionControlCapable: boolean | null;
+  /**
+   * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
+   *
+   * **同時実行数（`concurrency`）とは別物。** あちらはジョブの払い出しにしか効かず、ジョブは
+   * tmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
+   * 上限に達している間、pollerは起動ジョブを取りに行かない（制御ジョブだけを受け取る）。
+   *
+   * **`null`は「申告していない」**（古いpoller）。0本であることとは区別する。
+   */
+  maxSessions: number | null;
+  liveSessions: number | null;
 };
+
+/**
+ * ホストがセッション本数の上限に達しているか（#1394）。
+ *
+ * **判定材料が揃っているときだけ真を返す。** 申告していない古いpollerでは`null`が入るため、
+ * そこで「達している」と決めると、実際には動いているホストに止まっている旨の説明が出る。
+ */
+export function isDispatchHostAtSessionCapacity(host: DispatchHostView): boolean {
+  if (host.maxSessions === null || host.liveSessions === null) return false;
+  return host.liveSessions >= host.maxSessions;
+}
 
 /**
  * ホストが生存していると見なす猶予（ミリ秒）。pollerのポーリング間隔は60秒なので、
