@@ -430,6 +430,13 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > 「タグを上げる順序 — callerが先、ラベル削除が後」を参照）。
 
 タグの一覧は `git tag --list 'workflows/*'`、各リポジトリが参照中のバージョンは対象リポジトリのcallerファイルで確認する（[docs/supported-repositories.md](supported-repositories.md)「参照方式のワークフローは sync-state の対象外」を参照）。
+
+> **再利用可能ワークフローを新しく増やしたときは、初回の配置だけ手作業になる**（#1367）。
+> `propagate-workflow-tag.yml`（画面の設定ダイアログから起動する配布）が行うのは、対象リポジトリに
+> **既にある**ワークフローファイルの`@workflows/vN`・`prompts-ref`を新しいタグへ書き換えることだけで
+> （`.github/scripts/propagate-workflow-tag.sh`の`sed`）、**新しいcallerファイルを追加はしない。**
+> 各リポジトリへ最初の1回を置くところまでは、`71.manual-step`のIssueとして起票して人が行う。
+> 2回目以降（タグの追随）は配布の対象に自動で乗る。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
