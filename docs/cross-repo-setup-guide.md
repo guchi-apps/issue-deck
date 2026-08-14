@@ -1078,6 +1078,14 @@ rm -rf .shared-context .shared-prompts
       含むか）
 - [ ] **lint・型チェック・テスト・ビルドコマンド**
 - [ ] **DBマイグレーション・シードの要否とコマンド**（DBを使わないリポジトリではステップごと削除）
+- [ ] **`postinstall`が環境変数を要求しないか**（参照方式でも必要）。共有ワークフローの
+      「依存関係をインストールする」ステップは`npm ci`を**環境変数なしで**実行する。Prisma 7 の
+      `prisma.config.ts`で`datasource.url`を`env("DATABASE_URL")`にしていると、未設定の時点で
+      configの読み込みが失敗し、`postinstall`の`prisma generate`ごと`npm ci`が落ちる。
+      **無人実行の実装モードが依存インストールで必ず止まる**ので、対象リポジトリ側で未設定時の
+      フォールバックを持たせる（`db-console`で実際に踏んだ。#1378。`car-care`・`clip-hive`・
+      `dayspan`は元から未設定でも通る作り）。`DATABASE_URL`が渡るのは
+      `24.screenshot-required`付きの実行のマイグレーション・シードのステップだけである点に注意する
 - [ ] **画面確認・スクリーンショット撮影の要否**（対象がWebアプリでない場合はそもそも不要。Webアプリ
       でも、CIバイパス用の認証機構が無いと`24.screenshot-required`は成立しない）
 - [ ] **`risk-check`ジョブの自動マージ不可判定パターン**（ディレクトリ構成に応じたパスパターンの
