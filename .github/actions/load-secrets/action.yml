@@ -1,0 +1,107 @@
+name: Load secrets
+description: >-
+  .github/secrets-manifest.tsv の項目のうち、呼び出し側がジョブの env: で供給していない
+  ものを1Passwordから補う。GitHub側へ移行済みのリポジトリは1Passwordを一切触らない。
+
+# なぜこのアクションがあるか（#1306）
+#
+# 以前は各ワークフローが実行のたびに1Passwordから全値を読んでいたが、1Passwordサービス
+# アカウントの日次レート制限（**1Passwordアカウント全体で1,000リクエスト/日**。サービス
+# アカウントを分けても分割されない）を使い切り、フリート全体のデプロイが止まった（#1302）。
+#
+# issue-deck自身は#1302・#1308でGitHub側へ移行済みだが、他リポジトリの移行（#1307）では
+# 「GitHub側の投入が済んだリポジトリから順に切り替わる」状態を作りたい。一斉に切り替えず
+# 済むよう、足りない分だけを1Passwordから補えるようにする。
+#
+# ---
+#
+# **GitHub側の値は呼び出し側がジョブの `env:` で明示的に渡す。**
+# このアクションは `secrets` コンテキストを丸ごと受け取らない。
+#
+# 当初は `secrets-json: ${{ toJSON(secrets) }}` で渡してアクション側でマニフェストを見て
+# 選ぶ設計にしたが、**その形にするとワークフローのrunがaction_requiredになり、ジョブが
+# 1つも作られなくなる**（PR #1315で3回とも再現。ローカル複合アクションの参照自体は無罪で、
+# toJSON(secrets)を入力へ渡した場合のみ発生することを切り分けで確認した）。
+#
+# 明示的に書く分だけ記述は増えるが、どの値がどこから来るかがワークフローを読めば分かる
+# 利点もある。マニフェストとのズレは scripts/check-load-secrets-env-block.sh が検出する。
+#
+# 注意: 複合アクションのステップはジョブの `env:` を引き継ぐが、呼び出し**ステップ**の
+# `env:` は引き継がない。呼び出し側は必ずジョブレベルに書く。
+
+inputs:
+  manifest:
+    description: 対応表のパス
+    required: false
+    default: .github/secrets-manifest.tsv
+  prefer:
+    description: >-
+      github（既定）… 呼び出し側のenvを使い、足りない分だけ1Passwordから補う。
+      1password … マニフェストの対象を1Passwordから読み、envの値を上書きする。
+    required: false
+    default: github
+  op-token:
+    description: 1Passwordから補う場合のService Accountトークン。空なら1Passwordを触らない
+    required: false
+    default: ""
+  only:
+    description: カンマ区切りで対象を絞る（空ならマニフェスト全件）
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: 供給されていない項目を洗い出す
+      id: detect
+      if: inputs.prefer == 'github'
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        ONLY: ${{ inputs.only }}
+      run: |
+        missing="$(bash "$GITHUB_ACTION_PATH/detect-missing.sh")"
+        echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+    - name: 1Passwordから補う分の参照を書き出す
+      id: opfile
+      if: inputs.op-token != ''
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        OUT: ${{ runner.temp }}/load-secrets.env.tpl
+        PREFER: ${{ inputs.prefer }}
+        ONLY_INPUT: ${{ inputs.only }}
+        MISSING: ${{ steps.detect.outputs.missing }}
+      run: |
+        # prefer=github なら不足分だけ、prefer=1password なら対象全件。
+        # 不足分だけに絞るのは、テンプレート全体を渡すと不要な項目まで取りに行き
+        # 日次レート制限を無駄に消費するため（#1302の枯渇の一因がまさにそれだった）。
+        if [ "$PREFER" = "1password" ]; then
+          if [ -n "$ONLY_INPUT" ]; then
+            KEYS="$ONLY_INPUT"
+          else
+            KEYS="$(awk -F'\t' '!/^#/ && NF==5 {printf "%s%s", sep, $1; sep=","}' "$MANIFEST")"
+          fi
+        else
+          KEYS="$MISSING"
+        fi
+        export KEYS
+        created="$(bash "$GITHUB_ACTION_PATH/write-op-env-file.sh")"
+        echo "created=$created" >> "$GITHUB_OUTPUT"
+
+    - name: 1Passwordから読み込む
+      if: steps.opfile.outputs.created == 'true'
+      uses: 1password/load-secrets-action@v4
+      with:
+        export-env: true
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.op-token }}
+        OP_ENV_FILE: ${{ runner.temp }}/load-secrets.env.tpl
+
+    - name: すべて揃ったかを検証する
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        ONLY: ${{ inputs.only }}
+      run: bash "$GITHUB_ACTION_PATH/verify.sh"
