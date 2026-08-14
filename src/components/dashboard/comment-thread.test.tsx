@@ -122,6 +122,72 @@ describe("CommentThread 左右の吹き出し", () => {
     const row = screen.getByText("他の人のコメント").closest("li")?.querySelector(":scope > div");
     expect(row?.className).not.toContain("flex-row-reverse");
   });
+
+  // ローカル（サブPC）セッションのコメントは`gh`がユーザー本人のトークンで動くため、
+  // currentUserLoginと同じlogin名で投稿される（#1346）
+  it("currentUserLoginと一致してもagentマーカー付きならボットとして左寄せになる", () => {
+    render(
+      <CommentThread
+        comments={[
+          makeComment({
+            author: { login: "m-guchi" },
+            body: "実装が完了しました\n\n<!-- issue-deck-agent:implementer -->",
+          }),
+        ]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("実装が完了しました").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).not.toContain("flex-row-reverse");
+    expect(screen.getByText("実装ボット")).not.toBeNull();
+  });
+
+  it("currentUserLoginと一致し書き出しが絵文字なだけのコメントは右寄せのままになる", () => {
+    render(
+      <CommentThread
+        comments={[makeComment({ author: { login: "m-guchi" }, body: "🔧 自分で直しました" })]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen.getByText("🔧 自分で直しました").closest("li")?.querySelector(":scope > div");
+    expect(row?.className).toContain("flex-row-reverse");
+    expect(screen.getByText("m-guchi")).not.toBeNull();
+  });
+
+  // カンバンのドラッグ起点の起動コメントは、操作した人間へ寄せて表示する（#1026）
+  it("project-status-dispatchマーカー付きコメントは自分の名義なら右寄せのままになる", () => {
+    render(
+      <CommentThread
+        comments={[
+          makeComment({
+            author: { login: "m-guchi" },
+            body: "@claude 実装を開始してください\n\n<!-- issue-deck-source:project-status-dispatch -->",
+          }),
+        ]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen
+      .getByText("@claude 実装を開始してください")
+      .closest("li")
+      ?.querySelector(":scope > div");
+    expect(row?.className).toContain("flex-row-reverse");
+  });
 });
 
 describe("CommentThread AI要約の表示位置", () => {

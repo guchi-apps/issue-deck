@@ -7,6 +7,7 @@ import {
   extractAgentMarker,
   extractCommentSourceId,
   extractPlanType,
+  isMarkedAutomationComment,
   resolveCommentSource,
 } from "@/lib/github/comment-source";
 import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
@@ -53,6 +54,15 @@ describe("extractAgentMarker", () => {
     );
     expect(extractAgentMarker({ body: "ご案内します\n\n<!-- issue-deck-agent:guide -->" })).toBe(
       "guide",
+    );
+  });
+
+  it("ローカルセッション向けのplanner・reviewerも読み取る（#1346）", () => {
+    expect(extractAgentMarker({ body: "計画です\n\n<!-- issue-deck-agent:planner -->" })).toBe(
+      "planner",
+    );
+    expect(extractAgentMarker({ body: "審査結果です\n\n<!-- issue-deck-agent:reviewer -->" })).toBe(
+      "reviewer",
     );
   });
 
@@ -191,6 +201,32 @@ describe("commentAgentRole", () => {
 
   it("unknown-automationはnullを返す（汎用ボット扱い）", () => {
     expect(commentAgentRole({ kind: "unknown-automation" })).toBeNull();
+  });
+});
+
+describe("isMarkedAutomationComment", () => {
+  it("マーカーが明示された種別は自動投稿と断定する", () => {
+    expect(isMarkedAutomationComment({ kind: "fallback-notice" })).toBe(true);
+    expect(isMarkedAutomationComment({ kind: "qa-answer" })).toBe(true);
+    expect(isMarkedAutomationComment({ kind: "plan", planType: "implement" })).toBe(true);
+    expect(isMarkedAutomationComment({ kind: "agent", role: "implementer" })).toBe(true);
+    expect(isMarkedAutomationComment({ kind: "source", id: "claude-review-develop" })).toBe(true);
+  });
+
+  it("書き出しの絵文字による推測では断定しない（本人のコメントを誤ってボット扱いにしないため）", () => {
+    expect(isMarkedAutomationComment({ kind: "emoji-fallback", role: "implementer" })).toBe(false);
+  });
+
+  it("login名に依存するunknown-automationでは断定しない", () => {
+    expect(isMarkedAutomationComment({ kind: "unknown-automation" })).toBe(false);
+  });
+
+  it("カンバンのドラッグ起点の起動コメントは断定しない（操作した人間へ寄せるため・#1026）", () => {
+    expect(isMarkedAutomationComment({ kind: "source", id: "project-status-dispatch" })).toBe(false);
+  });
+
+  it("役割の解決結果が無い（null）場合はfalse", () => {
+    expect(isMarkedAutomationComment(null)).toBe(false);
   });
 });
 

@@ -49,6 +49,7 @@ import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-
 import {
   COMMENT_AGENT_PROFILES,
   commentAgentRole,
+  isMarkedAutomationComment,
   resolveCommentSource,
 } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
@@ -575,7 +576,13 @@ export function CommentThread({
           const source = resolveCommentSource(comment, comment.author.login);
           const role = source ? commentAgentRole(source) : null;
           const profile = role ? COMMENT_AGENT_PROFILES[role] : null;
-          const isSelf = currentUserLogin != null && comment.author.login === currentUserLogin;
+          // ローカル（サブPC）セッションのコメントはユーザー本人のlogin名で投稿されるため、
+          // login名の一致だけで自分の発言と判定すると実装ボットの報告が右寄せになる（#1346）。
+          // 本文のマーカーで自動投稿と断定できるものは、自分の名義でもボットとして左に出す。
+          const isSelf =
+            currentUserLogin != null &&
+            comment.author.login === currentUserLogin &&
+            !isMarkedAutomationComment(source);
           const headerName = isSelf || !profile ? comment.author.login : profile.label;
           const timeLabel = (
             <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
