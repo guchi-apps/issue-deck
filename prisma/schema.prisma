@@ -456,6 +456,9 @@ model DispatchSession {
   // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので、
   // 通知（Signaly）だけでなく画面にも出す。取れないこともある（Claude Codeの内部ファイル依存）
   remoteControlUrl String?                  @db.Text
+  // tailscale serveでtailnetへ出した開発サーバーのURL（#1265）。スマホから画面を見る唯一の
+  // 出口なので画面へ出す。`23.preview-required`が付いたセッションでだけ埋まる
+  previewUrl       String?                  @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

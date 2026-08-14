@@ -37,6 +37,7 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     activity: (session.activity as DispatchSessionActivity | null) ?? null,
     activityAt: session.activityAt?.toISOString() ?? null,
     remoteControlUrl: session.remoteControlUrl,
+    previewUrl: session.previewUrl,
   };
 }
 
@@ -54,8 +55,10 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
 export async function recordDispatchSessionActivity(params: {
   repositoryFullName: string;
   issueNumber: number;
-  activity: DispatchSessionActivity;
-  remoteControlUrl: string | null;
+  /** 様子。URLだけを報告する呼び出し（#1265のプレビュー公開時）では省略する */
+  activity?: DispatchSessionActivity | null;
+  remoteControlUrl?: string | null;
+  previewUrl?: string | null;
   now?: Date;
 }): Promise<{ updated: number }> {
   const now = params.now ?? new Date();
@@ -67,10 +70,11 @@ export async function recordDispatchSessionActivity(params: {
       state: "ALIVE",
     },
     data: {
-      activity: params.activity,
-      activityAt: now,
-      // URLが取れなかった回で既存の値を消さない（Claude Codeの内部ファイル依存で欠けうる）
+      // **渡された項目だけを書く。** URLが取れなかった回で既存の値を消さない
+      // （Claude Codeの内部ファイル依存で欠けうる。プレビューは公開時の1回しか報告しない）
+      ...(params.activity ? { activity: params.activity, activityAt: now } : {}),
       ...(params.remoteControlUrl ? { remoteControlUrl: params.remoteControlUrl } : {}),
+      ...(params.previewUrl ? { previewUrl: params.previewUrl } : {}),
     },
   });
   return { updated: result.count };

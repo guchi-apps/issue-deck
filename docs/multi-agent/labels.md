@@ -113,6 +113,11 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
   - **ラベルなし（デフォルト）**: 実装エージェントは、画面に関わる変更を行った場合PR本文の「確認方法」に開発サーバーのURL（`http://localhost:<ポート>`）とアクセス手順を記載するだけで、承認待ちなしにそのままPR作成まで進める。
   - **ラベルあり**: PRを作成する**前**に、実際に開発サーバーを起動してURLをユーザーに提示し、画面を確認してもらったうえで明示的な承認を得てからPRを作成する（`21.plan-required`と同様の承認ゲート）。
 - 承認の得方は実行形態により異なる。
+  - **サブPC実行**: ラベルが付いているセッションだけ開発サーバーを起動し、`tailscale serve`で
+    tailnetへ出す（#1265）。**提示するURLは`localhost`ではなく`http://<ホスト名>.<tailnet>.ts.net:<ポート>`**
+    （主な用途が外出先のスマホで、`localhost`では届かない）。URLはプロンプト・Signalyの通知・
+    issue-deckのIssue詳細の3か所に出る。詳細は[local-quick-start.md](local-quick-start.md)
+    「Tailscale経由でスマホから画面を見る」
   - **ローカル実行**: 実際に到達可能な開発サーバーが起動しているため、`21.plan-required`と同じ考え方で
     PRを作成する**前**に提示・応答待ちのゲートとして機能する。提示後にそのまま応答を止めて、
     ユーザーからの返信（承認）を待つ。

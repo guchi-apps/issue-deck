@@ -62,6 +62,26 @@ export function parseDispatchSessionActivity(value: unknown): DispatchSessionAct
 }
 
 /**
+ * プレビューのURLとして受け入れる形（#1265）。**tailnet内のhttp URLだけを通す。**
+ *
+ * `tailscale serve`はHTTPS証明書が未有効なため`--http`（平文）でしか出せず、ホスト名は
+ * MagicDNSの`*.ts.net`になる。ここを緩めると、共有シークレットを持つ相手から任意のリンクを
+ * 画面へ差し込まれる。
+ */
+export function parsePreviewUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:") return null;
+  if (!url.hostname.endsWith(".ts.net")) return null;
+  return url.toString();
+}
+
+/**
  * Remote ControlのURLとして受け入れる形。**`https://claude.ai/`配下だけを通す。**
  * 画面にリンクとして出す値なので、任意のURLを受け取ると共有シークレットを持つ相手から
  * 好きなリンクを差し込まれることになる。
@@ -102,6 +122,8 @@ export type DispatchSessionView = {
   activity: DispatchSessionActivity | null;
   activityAt: string | null;
   remoteControlUrl: string | null;
+  /** tailnetへ出した開発サーバーのURL（#1265）。`23.preview-required`のセッションでだけ埋まる */
+  previewUrl: string | null;
 };
 
 /**

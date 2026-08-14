@@ -69,7 +69,8 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
 ## 通知の中身
 
 載せるのは Issue番号・リポジトリ名・ホスト名・イベント種別・`tmux attach`のコマンド・
-IssueのURL・Remote ControlのURL（取れたときだけ）。
+IssueのURL・Remote ControlのURL（取れたときだけ）・**開発環境のURL**（#1265。
+`23.preview-required`のセッションで`tailscale serve`が通っているときだけ）。
 
 **応答テキスト（`Stop`フックの`last_assistant_message`）は載せない。** 応答本文には
 Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。それを外部サービスである
@@ -296,6 +297,7 @@ issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions
 | `repository` / `issue` | 引数で渡っているもの |
 | `activity` | `waiting_input`（`permission_prompt`）/ `responded`（`Stop`） |
 | `remoteControlUrl` | 取れたときだけ。受け口は**`https://claude.ai/`配下しか受け付けない** |
+| `previewUrl` | セッション起動時に`run-issue-session.sh`が別途1回だけ送る（#1265）。受け口は**tailnet内（`*.ts.net`）のhttp URLしか受け付けない** |
 
 宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）はpollerと同じ`~/.config/issue-deck/dispatch.env`
 から読む。**未設定でも失敗しても実装は止めない**（このスクリプトの約束）。設定していない

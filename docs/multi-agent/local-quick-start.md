@@ -481,6 +481,33 @@ WSLで必要だったLANアクセス設定（`setup-lan-access.sh`）は、WSL2�
 **`-H 0.0.0.0`を明示してはいけない。** 既定（未指定）はIPv4/IPv6の両方を待ち受けるが、
 `0.0.0.0`を渡すとIPv4だけに絞られ、tailnetのIPv6アドレスから見えなくなる。
 
+### それでも`tailscale serve`を通す（#1265）
+
+**「全インターフェースを待ち受ける」のはNext.jsの挙動で、全リポジトリの前提にはできない。**
+汎用ランチャー（#1224）が起こすのはリポジトリごとに違う開発サーバーで、Viteのように既定が
+localhostのみのものがある。そこで`23.preview-required`のセッションでは
+`scripts/lib/tailscale-serve.sh`が一律に`tailscale serve`を通し、**待ち受けが何であっても同じ
+形のURLになる**ようにしている。
+
+```bash
+sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
+```
+
+実測して分かっていること（#1261・#1265）。
+
+| 項目 | 結果 |
+|---|---|
+| 全インターフェースを待ち受けている状態でserveを足す | **競合しない。** エラーも出ず、FQDNでのアクセスは通る |
+| 生IPでのアクセス | **404になる。** serveがtailnet IPのそのポートを取り、Hostヘッダーで振り分けるため |
+| HTTPS | `CertDomains: None`（未有効）のため`--https`は使えず**`--http`一択** |
+| 権限 | `OperatorUser: None`のためsudoが要る。`/etc/sudoers.d/tailscale-serve`で`serve`だけNOPASSWDにしてある |
+
+**生IPが404になるのは実害が無い。** 出すURLは常にFQDN（`http://<ホスト名>.<tailnet>.ts.net:<ポート>`）で、
+Supabaseのリダイレクト許可リストもホスト名の形でしか通らない（生IPは元から使えない）。
+
+撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
+`scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+
 ### allowedDevOriginsに載せる必要がある
 
 localhost以外のホスト名で開くと、開発サーバーの内部リソース（`/_next/*`とHMRのWebSocket）が

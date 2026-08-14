@@ -106,14 +106,19 @@ issue-deck本体チェックアウトの`.env.local`だけから読むと、**�
 `ISSUE_SESSION_MAIN_CHECKOUT`・`ISSUE_SESSION_DEV_PORT`・`ISSUE_SESSION_PACKAGE_MANAGER`が渡る。
 **フックの失敗は警告に留めて起動を続ける**（フックが原因でセッションごと立たない方が困る）。
 
-## 開発サーバーは既定で起動しない
+## 開発サーバーは既定で起動しない（`23.preview-required`のときだけ起こす）
 
 サブPCは2C/4T（同時実行の既定が2なのもこの実測による・#1177）で、**リポジトリ数ぶんのdevサーバーを
 常駐させる前提が置けない。** ポートはenvファイルへ書き込むので、画面確認が必要なセッションだけ
 中で起動する（生成されるプロンプトにも起動コマンドを書いている）。
 
-実装は`run-issue-session.sh`の`ISSUE_DECK_DEV_SERVER=0`。issue-deck自身の経路（`start-issue.sh`）は
-これまでどおり起動する。
+**ただし`23.preview-required`が付いている場合は起動する**（#1265）。あのラベルは「PR作成前に
+画面を確認する」ためのもので、起動していなければ確認そのものが成立しない。あわせて
+`tailscale serve`でtailnetへ出し、**スマホから開けるURL**をプロンプト・Signalyの通知・
+issue-deckの画面へ渡す（`localhost`のURLでは外出先から届かない）。
+
+実装は`run-issue-session.sh`の`ISSUE_DECK_DEV_SERVER`で、汎用ランチャーがラベルを見て
+`0`か`1`を渡す。issue-deck自身の経路（`start-issue.sh`）はこれまでどおり常に起動する。
 
 ## 「実行できるリポジトリ」の判定
 

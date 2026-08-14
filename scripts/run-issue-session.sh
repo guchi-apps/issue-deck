@@ -48,6 +48,9 @@ source "$SCRIPT_DIR/lib/dev-server.sh"
 # セッションの状態ファイル（#1256）。回収スクリプト（scripts/reap-sessions.sh）と共有する。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
+# 開発サーバーをtailnetへ出す（#1265）。回収スクリプトと共有する。
+# shellcheck source=scripts/lib/tailscale-serve.sh
+source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
 # **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
@@ -87,6 +90,42 @@ if [[ -f "$DEV_PID_FILE" ]]; then
 fi
 
 DEV_PGID=""
+PREVIEW_URL=""
+
+# 公開したURLをissue-deckの画面へ渡す（#1265）。**スマホから画面を見る唯一の出口**なので、
+# ターミナルのログだけに出しても届かない。宛先と鍵はpollerと同じ`dispatch.env`から読む。
+# 受け口は`session-notify.sh`と共有（`POST /api/dispatch/sessions/activity`）。
+# **未設定でも失敗してもセッションは止めない。**
+report_preview_url_to_issue_deck() {
+  local preview_url="$1"
+  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
+  [[ -f "$env_file" ]] || return 0
+
+  local app_base_url dispatch_secret repo_slug body
+  # shellcheck disable=SC1090
+  app_base_url="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${APP_BASE_URL:-}")"
+  # shellcheck disable=SC1090
+  dispatch_secret="$(source "$env_file" >/dev/null 2>&1; printf '%s' "${DISPATCH_SECRET:-}")"
+  repo_slug="$(git config --get remote.origin.url 2>/dev/null |
+    sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$repo_slug" ]] || return 0
+
+  body="$(PREVIEW_URL="$preview_url" REPO_SLUG="$repo_slug" ISSUE_NUMBER="$ISSUE_NUMBER" python3 -c '
+import json, os
+print(json.dumps({
+    "repository": os.environ["REPO_SLUG"],
+    "issue": int(os.environ["ISSUE_NUMBER"]),
+    "previewUrl": os.environ["PREVIEW_URL"],
+}))' 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 0
+
+  curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}/api/dispatch/sessions/activity" >/dev/null 2>&1 ||
+    echo "#$ISSUE_NUMBER: 情報: プレビューURLをissue-deckへ報告できませんでした（実装は続行します）。" >&2
+}
 
 cleanup() {
   # **errexitを切ってから始める（#1223）。** cleanupはtmuxのペインが破棄された後にも呼ばれ、
@@ -106,6 +145,11 @@ cleanup() {
     dev_server_stop_group "$DEV_PGID"
   fi
   rm -f "$DEV_PID_FILE"
+
+  # tailnetへの公開（#1265）も撤去する。**セッションが落ちても設定だけ残る**ため、
+  # ここで外し忘れると次に同じポートを使うセッションが古い相手へ繋がる。
+  # trapを通れない経路で残った分は reap-dev-servers.sh が回収する。
+  tailscale_serve_unpublish "$DEV_PORT"
 
   # セッションの状態ファイル（#1256）も片付ける。残すと、次に同じ名前で立ったセッションが
   # 前回の`Stop`を引き継いだように見え、起動直後に回収の条件を満たしてしまう。
@@ -129,6 +173,16 @@ else
   # set -m によりバックグラウンドジョブは新しいプロセスグループを持ち、そのPGIDは先頭プロセスのPIDと一致する。
   DEV_PGID="$DEV_PID"
   echo "$DEV_PID" >"$DEV_PID_FILE"
+
+  # tailnetへ出す（#1265）。**バインドは変えない**（localhostのまま`tailscale serve`が
+  # プロキシする）。使えないホスト（メインPCのWSL等）では黙って何もしない。
+  PREVIEW_URL="$(tailscale_serve_publish "$DEV_PORT" || true)"
+  if [[ -n "$PREVIEW_URL" ]]; then
+    echo "#$ISSUE_NUMBER: 開発サーバーをtailnetへ公開しました: $PREVIEW_URL"
+    report_preview_url_to_issue_deck "$PREVIEW_URL"
+  else
+    echo "#$ISSUE_NUMBER: 情報: tailnetへの公開は行いません（tailscale serveが使えないホストです）。"
+  fi
 fi
 
 # 全アプリ共通の共有知識リポジトリ（guchi-apps/docs）をローカルにcloneしてある場合は、
@@ -263,4 +317,9 @@ PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
 
 echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
+# tailnetへ公開したURLをフック（#1219）からも読めるようにする（#1265）。フックはclaudeの
+# 子プロセスなので、ここでexportしておけば通知にも載せられる。**セッション通知は入力待ちで
+# 飛ぶ**ので、そこにプレビューのURLがあると、気づいた側がその場で画面を開ける。
+export ISSUE_DECK_PREVIEW_URL="$PREVIEW_URL"
+
 claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$KICKOFF_PROMPT"
