@@ -26,11 +26,23 @@ tmuxの実装セッション（run-issue-session.sh が起動）
   │ 応答終了                        → Stop フック
   ↓
 scripts/session-notify.sh（フックのstdinでJSONを受け取る）
+  ├→ ~/.local/state/issue-deck/sessions/<tmuxセッション名>.event へ最後のイベントを記録（#1256）
   ↓ webhook（~/.config/issue-deck/notify.env の SESSION_NOTIFY_WEBHOOK_URL）
 Signaly → スマホ・メインPCへ通知
   ↓ 通知に載っているURLを開く
 claude.ai/code/<セッション> （--remote-control）→ その場で答える
 ```
+
+### 通知とは別に、ホストへも記録する（#1256）
+
+セッションの自動回収は「最後の`Stop`からどれだけ経ったか」「今は人の入力待ちか」を判定材料に
+するが、**通知を投げるだけではホストに何も残らない**。そこで`session-notify.sh`は、送信の前に
+`<epoch> <Stop|permission_prompt>`の1行を状態ファイルへ書く。
+
+**記録はwebhookの設定より前に行う。** 送信先の判定を先に置くと、通知を設定していないホストで
+記録も行われず、回収がまったく効かなくなる。記録の失敗は1行のログに留め、通知もセッションも
+止めない。書式と使い道は
+[作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 
 ## 飛ばすのは2種類だけ
 

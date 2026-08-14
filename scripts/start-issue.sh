@@ -507,7 +507,11 @@ PY
 # 設定されているものだけを渡し、未設定のものは新しいシェル側の既定に任せる。
 build_env_prefix() {
   local var value prefix=""
-  for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP ISSUE_DECK_DEV_HOST; do
+  # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
+  # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
+  # 記述子に載らず、回収の対象にならない。
+  for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP \
+    ISSUE_DECK_DEV_HOST ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
