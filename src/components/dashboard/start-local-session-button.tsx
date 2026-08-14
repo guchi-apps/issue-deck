@@ -35,6 +35,14 @@ type StartLocalSessionButtonProps = {
   /** 縦積みのレイアウト（スマホの詳細画面）向けに、ボタンを幅いっぱいにする */
   fullWidth?: boolean;
   /**
+   * 起動ボタン自体を出すか（#1349・既定は出す）。
+   *
+   * **「実装を開始」ダイアログのトリガーが同じ画面に出ているときは`false`にする。**
+   * あちらのトリガーは既定の実行先を文言にしている（#1262）ため、サブPCが既定なら
+   * 「subpcで開始」というボタンが2つ並ぶ。`false`のときは積んだジョブの状態表示だけを残す。
+   */
+  showStartButton?: boolean;
+  /**
    * 親が既に取得しているディスパッチ状態（#1262）。渡すと自前で取得しない。
    * **同じ画面に取得口を増やさないため**、Issue詳細では親で1回だけ取得して配る。
    */
@@ -48,8 +56,14 @@ type StartLocalSessionButtonProps = {
  * VS Codeを自分で開いているので、必要なのはセッションを丸ごと立てることではなく開いている
  * セッションへ貼れる文面で、そちらは「実装を開始」ダイアログの実行先に並べている。
  *
- * このボタンが残っているのは、**ダイアログが閉じたあとに積んだ結果を出す場所が要る**ため
- * （順番待ち・起動中・失敗。#1248）。起動そのものはダイアログからでもここからでも行える。
+ * このコンポーネントが残っているのは、**ダイアログが閉じたあとに積んだ結果を出す場所が要る**
+ * ため（順番待ち・起動中・失敗。#1248）。
+ *
+ * **起動ボタンは、「実装を開始」ダイアログのトリガーが同じ画面に無いときだけ出す**（#1349）。
+ * あちらのトリガーは既定の実行先を文言にしている（#1262）ので、両方出すと「subpcで開始」が
+ * 2つ並ぶ。逆に、着手済み・承認待ちでダイアログが消える状態（`canStartImplementation`が
+ * `false`）では**ここが唯一のサブPC起動の導線**になるため、消してしまうと落ちたセッションを
+ * 立て直せなくなる。
  *
  * `11.local`は**積めたときだけ**付ける。拒否されたのにラベルだけ残ると、無人実行まで
  * そのIssueに触れなくなる。
@@ -58,6 +72,7 @@ export function StartLocalSessionButton({
   issue,
   onIssueUpdated,
   fullWidth,
+  showStartButton = true,
   dispatch: injectedDispatch,
 }: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
@@ -133,7 +148,7 @@ export function StartLocalSessionButton({
 
   return (
     <>
-      {onlyHost ? (
+      {!showStartButton ? null : onlyHost ? (
         <Button
           variant="outline"
           size={fullWidth ? "default" : "sm"}
@@ -178,8 +193,9 @@ export function StartLocalSessionButton({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {/* 単独ボタンでは理由をtitle属性に隠せない（スマホにホバーが無い）ため本文で出す */}
-      {onlyHostRejection && (
+      {/* 単独ボタンでは理由をtitle属性に隠せない（スマホにホバーが無い）ため本文で出す。
+          ボタンを出していないときは「押せない理由」を出す相手がいないので添えない */}
+      {showStartButton && onlyHostRejection && (
         <p className={textClassName}>
           {describeDispatchEnqueueRejection(onlyHostRejection, {
             hostName: onlyHost?.name ?? "",

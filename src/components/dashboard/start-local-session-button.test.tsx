@@ -121,8 +121,8 @@ function label(name: string): IssueLabel {
   return { name, color: "#000000", description: null } as IssueLabel;
 }
 
-function renderButton(issue = makeIssue()) {
-  return render(<StartLocalSessionButton issue={issue} onIssueUpdated={vi.fn()} />);
+function renderButton(issue = makeIssue(), props: { showStartButton?: boolean } = {}) {
+  return render(<StartLocalSessionButton issue={issue} onIssueUpdated={vi.fn()} {...props} />);
 }
 
 /**
@@ -294,6 +294,41 @@ describe("StartLocalSessionButton", () => {
 
       expect(screen.getByText(/subpcで失敗/)).not.toBeNull();
       expect(screen.getByText("start-issue.sh が見つかりません")).not.toBeNull();
+    });
+  });
+
+  // #1349。「実装を開始」のトリガーは既定の実行先を文言にしている（#1262）ため、同じ画面に
+  // 両方出すと「subpcで開始」が2つ並ぶ
+  describe("起動ボタンを出さない場合（showStartButton={false}）", () => {
+    it("起動ボタンを出さない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderButton(makeIssue(), { showStartButton: false });
+
+      expect(screen.queryByRole("button", { name: /subpcで開始/ })).toBeNull();
+    });
+
+    it("サブPCが2台以上でも起動先のメニューを出さない", () => {
+      dispatchState.hosts = [makeHost(), makeHost({ name: "subpc2" })];
+      renderButton(makeIssue(), { showStartButton: false });
+
+      expect(screen.queryByRole("button", { name: /サブPCで開始/ })).toBeNull();
+    });
+
+    // このコンポーネントが残っている理由（#1248）。ダイアログは積んだ時点で閉じる
+    it("積んだジョブの状態は変わらず出す", () => {
+      dispatchState.hosts = [makeHost()];
+      dispatchState.jobs = [makeJob()];
+      renderButton(makeIssue(), { showStartButton: false });
+
+      expect(screen.getByText(/順番待ち/)).not.toBeNull();
+    });
+
+    // 押す相手がいない以上、「押せない理由」だけが残ると何のことか分からない
+    it("押せない理由は出さない", () => {
+      dispatchState.hosts = [makeHost({ online: false })];
+      renderButton(makeIssue(), { showStartButton: false });
+
+      expect(screen.queryByText(/応答していません/)).toBeNull();
     });
   });
 });
