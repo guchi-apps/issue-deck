@@ -38,6 +38,7 @@
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は60）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
+#   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
 #
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
@@ -57,6 +58,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
+# 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
+REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 
 ANNOUNCE_ONLY=0
 DRY_RUN=0
@@ -219,6 +222,23 @@ announce() {
     return 1
   fi
   echo "申告しました: $HOST_NAME → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
+  return 0
+}
+
+# --- 開発サーバーの回収（#1223）-------------------------------------------------
+# セッションを畳んでも残った開発サーバー（孤児）と、作業が終わってアイドルな開発サーバーを止める。
+# **判断は挟まない計器**（docs/multi-agent/gates.md）で、止める条件はすべて回収スクリプト側にある。
+# ここは「呼ぶ」だけを持ち、判定を2か所に分けない。
+#
+# アイドル判定の分数は `DEV_SERVER_IDLE_MINUTES`（dispatch.env）で変えられる。dispatch.envは
+# `set -a` 付きで読んでいるため、そのまま環境変数として回収スクリプトへ届く。
+reap_dev_servers() {
+  if [[ ! -f "$REAPER" ]]; then
+    return 0
+  fi
+  # **回収の失敗でポーリングを止めない。** 次の巡で拾い直せるうえ、ここで止めるとジョブの
+  # 取得そのものが行われなくなる（申告・報告と同じ扱い）。
+  bash "$REAPER" || echo "Error: 開発サーバーの回収に失敗しました。" >&2
   return 0
 }
 
@@ -418,6 +438,11 @@ run_job() {
 # 申告 → claim → 起動。**1巡の失敗でプロセスを終わらせない**（常駐時は次の巡で復帰できる）。
 run_once() {
   announce || return 1
+
+  # 終わった実装セッションの開発サーバーを回収する（#1223）。
+  # **claimより先に行う。** subpcは並行3本が上限（#1177）で、掴んだままの開発サーバーがあると
+  # 新しいジョブを取っても起こせない。取りに行く前に空けておく。
+  reap_dev_servers
 
   # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
   # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
