@@ -53,12 +53,18 @@ export function DispatchJobStatus({
   onCancel,
   isSubmitting,
   align = "end",
+  waitReason = null,
 }: {
   job: DispatchJobView;
   onCancel: () => void;
   isSubmitting: boolean;
   /** 横並びのツールバー（PC）では右寄せ、縦積みの詳細画面（スマホ）では左寄せ */
   align?: "start" | "end";
+  /**
+   * 順番待ちのまま進まない理由（#1394）。**「順番待ち」だけでは、正常に上限で待っているのか
+   * pollerが落ちているのかが区別できない。** 判定は`describeDispatchJobWaitReason`が持つ。
+   */
+  waitReason?: string | null;
 }) {
   // 種別を必ず渡す。省略すると起動ジョブ扱いになり、種別が増えたときに文言が黙って
   // 「起動しました」になる（#1294）
@@ -97,6 +103,10 @@ export function DispatchJobStatus({
       )}
       {job.message && (tone === "error" || job.status === "CANCELED") && (
         <p className={cn("w-full break-words text-muted-foreground", textAlign)}>{job.message}</p>
+      )}
+      {/* 失敗ではないので配色は本文のまま。押した人が待ち時間の理由を読めればよい（#1394） */}
+      {waitReason && (
+        <p className={cn("w-full break-words text-muted-foreground", textAlign)}>{waitReason}</p>
       )}
     </div>
   );

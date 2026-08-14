@@ -39,6 +39,8 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: NOW.toISOString(),
     screenshotCapable: true,
     sessionControlCapable: true,
+    maxSessions: 12,
+    liveSessions: 0,
     ...overrides,
   };
 }

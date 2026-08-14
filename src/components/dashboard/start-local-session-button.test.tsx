@@ -46,6 +46,8 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: "2026-08-14T00:00:00Z",
     screenshotCapable: true,
     sessionControlCapable: true,
+    maxSessions: 12,
+    liveSessions: 0,
     ...overrides,
   };
 }

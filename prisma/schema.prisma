@@ -463,6 +463,17 @@ model DispatchHost {
   // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
   // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
   sessionControlCapable Boolean?
+  // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
+  // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
+  // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
+  //
+  // 上限はホストの搭載メモリで決まる性質のものなのでアプリ設定には持たず、サブPCの
+  // `dispatch.env`（`DISPATCH_MAX_SESSIONS`）が正。ここに持つのは**画面へ出すための写し**で、
+  // 判定には使わない（サブPCのtmuxを見られるのはpollerだけで、こちらに判定を置くとずれる）。
+  // **`null`は「申告していない」**（古いpoller）＝上限そのものが不明という意味で、
+  // `liveSessions`が0であることとは区別する
+  maxSessions       Int?
+  liveSessions      Int?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt        DateTime
 
