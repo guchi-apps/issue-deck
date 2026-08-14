@@ -26,7 +26,7 @@ tmuxの実装セッション（run-issue-session.sh が起動）
   │ 応答終了                        → Stop フック
   ↓
 scripts/session-notify.sh（フックのstdinでJSONを受け取る）
-  ↓ webhook（~/.config/issue-deck/notify.env の SIGNALY_WEBHOOK_URL）
+  ↓ webhook（~/.config/issue-deck/notify.env の SESSION_NOTIFY_WEBHOOK_URL）
 Signaly → スマホ・メインPCへ通知
   ↓ 通知に載っているURLを開く
 claude.ai/code/<セッション> （--remote-control）→ その場で答える
@@ -63,14 +63,75 @@ IssueのURL・Remote ControlのURL（取れたときだけ）。
 Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。それを外部サービスである
 Signalyへ出す経路を最初から作らない。中身はRemote ControlのURLから見る。
 
+## CI/デプロイ通知とチャンネルを分ける
+
+セッション通知は**CI/デプロイ通知とは別のSignalyチャンネル・別の1Passwordフィールド**を使う
+（#1231）。
+
+| 通知 | 1Passwordのフィールド | 環境変数 | 設定場所 |
+| --- | --- | --- | --- |
+| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | `.github/ci.env.tpl`・`.github/deploy.env.tpl` |
+| セッション状態 | `apps/issue-deck` の `session-webhook-url` | `SESSION_NOTIFY_WEBHOOK_URL` | `~/.config/issue-deck/notify.env` |
+
+分ける理由。
+
+- **性質が違う。** CI/デプロイ通知は結果の記録で、見逃してもGitHubに残る。セッションの
+  入力待ちは今すぐ人が答えないとセッションが止まる。混ぜると、後者を後者として扱えない
+- **頻度が違う。** `Stop`は応答ごとに発火し、`21.plan-required`のIssueではturnごとに飛ぶ
+  （後述の既知の制約）。CIのチャンネルに混ぜると、リリース失敗の通知が埋もれる
+- 全アプリ共通の運用でも、ログイン通知は`login-webhook-url`としてCI/デプロイ通知と
+  別チャンネルに分けている。種類ごとにチャンネルを分けるのが既定
+
+**Signalyでのチャンネル作成と1Passwordへのフィールド登録は人間の作業で、エージェントは
+実行できない。**
+
 ## セットアップ
 
-1. `deploy/subpc/notify.env.example` を `~/.config/issue-deck/notify.env` へ置き、
-   1PasswordからwebhookのURLを書き出す（手順はファイル内のコメント参照）。**chmod 600。**
-2. それだけ。フックの設定は`run-issue-session.sh`が起動のたびに生成する。
+1. **【人間】** Signalyにセッション通知用のチャンネルを作り、Webhook URLをコピーする。
+   CI/デプロイ用のチャンネルを再利用しない
+2. **【人間】** 1Passwordの`apps/issue-deck`に`session-webhook-url`として登録する
+3. `deploy/subpc/notify.env.example` を `~/.config/issue-deck/notify.env` へ置き
+   （**chmod 600**）、1Passwordから値を書き出す。
+
+   ```bash
+   install -D -m 600 deploy/subpc/notify.env.example ~/.config/issue-deck/notify.env
+   WH=$(op read "op://apps/issue-deck/session-webhook-url") || exit 1
+   [ -n "$WH" ] || exit 1
+   printf 'SESSION_NOTIFY_WEBHOOK_URL=%s\n' "$WH" >> ~/.config/issue-deck/notify.env
+   ```
+
+   **代入を`export`と分けること・`2>&1`を付けないこと。** `export WH=$(op read ... 2>&1)`
+   と書くと、返るのは`export`の終了コードなので`op`の失敗を検出できず、エラーメッセージが
+   値に混入してそのままwebhook URLとして書き込まれる（#1231で実際に踏んだ）。中間ファイル
+   （`/tmp`等）を介さないのも、消す前に他ユーザーから読まれうるため
+4. **書き出した直後に手で1回発火させ、届くことを確認する**（次節）
+5. フックの設定は`run-issue-session.sh`が起動のたびに生成するので、他にやることは無い
 
 **この設定をしていないPCでは、`session-notify.sh`は黙って何もしない。** メインPCで同じ
 リポジトリのセッションを起動しても通知は飛ばない。
+
+`SESSION_NOTIFY_WEBHOOK_URL`が未設定のときは旧名の`SIGNALY_WEBHOOK_URL`も読む。#1231より前に
+設定した`notify.env`をそのまま動かすための互換で、新規に設定するときは新しい名前を使う。
+
+## 設定したら1回手で発火させる
+
+`session-notify.sh`はフックから呼ばれる限り**何が起きても`exit 0`で返す**（後述）。
+つまり**設定が壊れていても、セッション側には何の兆候も出ない。** 気づける唯一の機会が、
+手で叩いたときのstderrなので、設定・変更のたびに1回実行する。
+
+```bash
+printf '{"hook_event_name":"Stop","session_id":"manual-test"}' \
+  | scripts/session-notify.sh 1231 issue-deck guchi-apps/issue-deck
+```
+
+- 成功: Signalyのセッション通知チャンネルに `✅ [issue-deck #1231] 応答終了 (subpc)` が届く。
+  標準出力・標準エラーには何も出ない
+- 失敗: `session-notify: Signalyへの通知に失敗しました（実装は続行します）` がstderrに出る。
+  URLが誤り・値にエラーメッセージが混入している・Signalyが落ちている、のいずれか
+
+`SESSION_NOTIFY_DRY_RUN=1`を付けると送信せずにpayloadだけを出力する。**これはpayloadの
+組み立てまでしか見ておらず、webhook URLが正しいかは検証されない**（#1231で壊れていたのは
+まさにURL側だった）。届くことの確認には必ず実際に発火させる。
 
 ## フックはこのスクリプトから起動したセッションにだけ適用する
 
