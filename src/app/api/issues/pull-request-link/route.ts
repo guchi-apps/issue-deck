@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
-import { fetchCrossReferencedPullRequestLink } from "@/lib/github/pull-request-timeline";
+import { fetchCrossReferencedPullRequestLinks } from "@/lib/github/pull-request-timeline";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -43,8 +43,8 @@ async function handleGET(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const link = await fetchCrossReferencedPullRequestLink(owner, repo, Number(numberParam), token);
-    return NextResponse.json({ link });
+    const links = await fetchCrossReferencedPullRequestLinks(owner, repo, Number(numberParam), token);
+    return NextResponse.json({ links });
   } catch (error) {
     if (error instanceof GithubApiError && error.status === 404) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });

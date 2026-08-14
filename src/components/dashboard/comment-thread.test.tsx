@@ -230,7 +230,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
@@ -251,7 +251,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
     expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
 
-  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 画面上部のマージボタンと状態を揃える）", async () => {
+  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 本文の上の対応PR一覧と状態を揃える）", async () => {
     const onPullRequestMerged = vi.fn();
     render(
       <CommentThread
@@ -263,7 +263,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
@@ -277,11 +277,11 @@ describe("CommentThread PRマージ待ちの表示", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
 
     await waitFor(() => {
-      expect(onPullRequestMerged).toHaveBeenCalledTimes(1);
+      expect(onPullRequestMerged).toHaveBeenCalledWith(674);
     });
   });
 
-  it("画面上部のマージボタンから押された場合（pullRequestMerged）もマージ済みの表示になる（#1288）", () => {
+  it("本文の上のマージボタンから押された場合（mergedPullRequestNumbers）もマージ済みの表示になる（#1288・#1339）", () => {
     render(
       <CommentThread
         comments={[]}
@@ -292,13 +292,13 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
         onRequestPrFix={async () => {}}
         onMergePullRequest={async () => true}
-        pullRequestMerged
+        mergedPullRequestNumbers={new Set([674])}
       />,
     );
 
@@ -327,8 +327,19 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
-        pullRequestCiStatus={pullRequestCiStatus}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
+        pullRequests={[
+          {
+            number: 674,
+            htmlUrl: "https://github.com/m-guchi/issue-deck/pull/674",
+            title: "対応PRのタイトル",
+            state: "open",
+            draft: false,
+            merged: false,
+            ciStatus: pullRequestCiStatus,
+            linkedIssueNumber: 1288,
+          },
+        ]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}

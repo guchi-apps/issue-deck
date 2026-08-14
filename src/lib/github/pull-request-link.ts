@@ -9,20 +9,33 @@ export type PullRequestLink = {
   number: number;
 };
 
-/** コメント一覧のうち最新の対応PRリンクを抽出する。該当リンクがなければnull */
-export function extractLatestPullRequestLink(
+/**
+ * コメント一覧に現れる対応PRリンクをすべて抽出する（#1339）。
+ *
+ * 1つのIssueに複数のPRがぶら下がることがあるため、最新1件ではなく全件を返す。同じPRが
+ * 複数のコメントで言及されるのが普通（実装の報告・レビューの報告）なので番号でdedupeし、
+ * 番号の昇順＝作成順に近い並びで返す。
+ *
+ * ここで拾えるのは「同一リポジトリのPRのURLがコメントに書かれている」ことだけで、そのPRが
+ * 本当にこのIssueの対応PRかは判断できない（「#1327を参考に」のような言及も混ざる）。
+ * 実際に対応PRとして扱うかどうかの絞り込みは`lib/issue-pull-requests.ts`が、GitHubから
+ * 取得したPRのブランチ名・タイトル・本文を見て行う。
+ */
+export function extractPullRequestLinks(
   comments: IssueComment[],
   owner: string,
   repo: string,
-): PullRequestLink | null {
-  for (let i = comments.length - 1; i >= 0; i -= 1) {
-    const matches = [...comments[i].body.matchAll(PR_URL_PATTERN)];
-    for (let j = matches.length - 1; j >= 0; j -= 1) {
-      const match = matches[j];
-      if (match[1] === owner && match[2] === repo) {
-        return { url: match[0], number: Number(match[3]) };
-      }
+): PullRequestLink[] {
+  const byNumber = new Map<number, PullRequestLink>();
+
+  for (const comment of comments) {
+    for (const match of comment.body.matchAll(PR_URL_PATTERN)) {
+      if (match[1] !== owner || match[2] !== repo) continue;
+      const number = Number(match[3]);
+      if (byNumber.has(number)) continue;
+      byNumber.set(number, { url: match[0], number });
     }
   }
-  return null;
+
+  return [...byNumber.values()].sort((a, b) => a.number - b.number);
 }

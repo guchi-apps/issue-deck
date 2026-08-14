@@ -1,3 +1,4 @@
+import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { CiState } from "@/lib/github/release-api";
 
 /** マージ待ちPRの種別。リポジトリ横断の一覧で「何を待っているPRか」を一目で区別するために使う */
@@ -44,6 +45,37 @@ export type PullRequestSummary = {
   ciState: CiState;
   createdAt: string;
   updatedAt: string;
+};
+
+/**
+ * Issue画面の「対応PR」1件ぶんの情報（#1339）。
+ *
+ * 1つのIssueに複数のPRがぶら下がりうるため、Issue画面はこれを配列で持つ。
+ * `PullRequestSummary`（PR一覧・PR詳細向け）は作者・base/head・Auto-merge等まで持つが、
+ * Issue画面が要るのは「どのPRか・マージできるか」だけなので別の型にしている。
+ * CI状態も`PullRequestSummary`の`CiState`ではなく、マージボタンと同じ
+ * `PullRequestCiStatus`（`lib/github/pull-request-ci.ts`）に揃える。
+ */
+export type IssuePullRequest = {
+  number: number;
+  htmlUrl: string;
+  title: string;
+  /** open（マージ待ち）かclosed（マージ済み・却下）か */
+  state: "open" | "closed";
+  draft: boolean;
+  /** マージ済みか。`state`がclosedのときだけtrueになりうる */
+  merged: boolean;
+  /**
+   * headコミットのCI状態。openかつdraftでないPRでのみ取得し、それ以外はnull
+   * （closedやdraftでCIを見ても判断に使わないため、1リクエストを使わない）
+   */
+  ciStatus: PullRequestCiStatus | null;
+  /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
+  linkedIssueNumber: number | null;
+};
+
+export type IssuePullRequestListResponse = {
+  pullRequests: IssuePullRequest[];
 };
 
 /**
