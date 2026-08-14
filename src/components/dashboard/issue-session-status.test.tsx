@@ -101,7 +101,7 @@ describe("IssueSessionStatus", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
 
     expect(screen.getByText("たった今")).toBeTruthy();
-    expect(screen.getByText(/subpcで実行中/)).toBeTruthy();
+    expect(screen.getByText(/サブPCで実行中/)).toBeTruthy();
   });
 
   it("入力待ちのときだけRemote Controlの導線を出す", () => {
@@ -219,10 +219,10 @@ describe("IssueSessionStatus のセッション操作", () => {
   });
 
   it("失敗の理由はその場に出す", async () => {
-    sendSessionControl.mockResolvedValue({ ok: false, message: "subpc が応答していません。" });
+    sendSessionControl.mockResolvedValue({ ok: false, message: "サブPC が応答していません。" });
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
 
-    expect(await screen.findByText("subpc が応答していません。")).not.toBeNull();
+    expect(await screen.findByText("サブPC が応答していません。")).not.toBeNull();
   });
 });

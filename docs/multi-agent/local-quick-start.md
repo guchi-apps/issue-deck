@@ -556,7 +556,8 @@ WSLで必要だったLANアクセス設定（`setup-lan-access.sh`）は、WSL2�
 
 `next dev`は**既定で全インターフェース（IPv4/IPv6の両方）を待ち受ける**ため、tailnet内の端末から
 `http://<ホスト名>:<ポート>`でそのまま見える。閉じたいときだけ`ISSUE_DECK_DEV_HOST`で待ち受け
-アドレスを指定する（`dev.sh`が`next dev -H`へ渡す）。
+アドレスを指定する（`dev.sh`が`next dev -H`へ渡す）。**例外は`tailscale serve`でそのポートを
+公開しているときで、未設定でも`127.0.0.1`に閉じる**（#1329・後述）。
 
 **`-H 0.0.0.0`を明示してはいけない。** 既定（未指定）はIPv4/IPv6の両方を待ち受けるが、
 `0.0.0.0`を渡すとIPv4だけに絞られ、tailnetのIPv6アドレスから見えなくなる。
@@ -578,7 +579,7 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 | 項目 | 結果 |
 |---|---|
 | 全インターフェースを待ち受けている状態でserveを足す | **競合しない。** エラーも出ず、FQDNでのアクセスは通る |
-| 逆順（serveが残っている状態で開発サーバーを起こす） | **`EADDRINUSE`で起動できない**（#1350で遭遇）。詳細は下記 |
+| 逆順（serveが残っている状態で開発サーバーを起こす） | **`EADDRINUSE`で起動できない**（#1350で遭遇）。待ち受けを`127.0.0.1`へ倒して避けている（#1329）。詳細は下記 |
 | 生IPでのアクセス | **404になる。** serveがtailnet IPのそのポートを取り、Hostヘッダーで振り分けるため |
 | HTTPS | `CertDomains: None`（未有効）のため`--https`は使えず**`--http`一択** |
 | 権限 | `OperatorUser: None`のためsudoが要る。`/etc/sudoers.d/tailscale-serve`で`serve`だけNOPASSWDにしてある |
@@ -587,7 +588,7 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 Supabaseのリダイレクト許可リストもホスト名の形でしか通らない（生IPは元から使えない）。
 
 撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
-`scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+`scripts/reap-dev-servers.sh`が**転送先（`localhost:<ポート>`）に待ち受けの無いserveを孤児として**掃く。
 
 **順番が逆になると起動しない。** serveだけが残っているポート（掃かれる前や、前のセッションの
 残骸）で`pnpm dev`を起こすと、`listen EADDRINUSE :::<ポート>`で落ちる。serveはtailnet IPを
@@ -595,15 +596,63 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 のに対し、`next dev`は既定で`::`＝全アドレスを要求するため、IPv6側でぶつかる。逆順（serveを
 後から足す）が競合しないのは、serveの側が「使われていない特定アドレス」を取りに行くだけだから。
 
-セッション起動時の開発サーバーがこれで死んでいた場合、`.dev-servers/issue-<番号>.log`の末尾に
-`EADDRINUSE`が残る。起こし直すときは待ち受けを127.0.0.1に閉じればよい。
+#### serveが出ているポートでは待ち受けを`127.0.0.1`へ倒す（#1329）
 
-```bash
-ISSUE_DECK_DEV_HOST=127.0.0.1 pnpm dev
+上の順序依存は、**初回だけ成功して起こし直せない**という形で表に出た。セッションは
+「devサーバー→serve」の順で始まるので初回は通るが、devサーバーだけがアイドルで回収される
+（#1223）と、次に`pnpm dev`を叩いたときはserveが残っている側の順序になる。tailnetへ公開して
+いるworktreeでは、案内どおりのコマンドがそのまま失敗していた（`23.preview-required`の画面を
+出せなくなる）。
+
+そこで**serveが出ているポートでは待ち受けを`127.0.0.1`に閉じる**ことにした。競合しなくなり、
+順序に依存しなくなる。
+
+| 場所 | 何をするか |
+|---|---|
+| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定でも、`tailscale_serve_published <ポート>`が真なら`-H 127.0.0.1`を渡す。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
+| `scripts/run-issue-session.sh` | serveを張れるホストなら、開発サーバーを起こす前に`ISSUE_DECK_DEV_HOST=127.0.0.1`をexportする。セッション開始時点から閉じるので、そもそもぶつかる状態を作らない |
+
+- **serveは`localhost:<ポート>`へproxyするので、閉じてもtailnetのURLからは従来どおり見える**
+  （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する。
+- **serveを張る順番は変えていない。** 先に張ると、`ISSUE_DECK_DEV_HOST`を見ない他リポジトリの
+  開発サーバー（汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり
+  「devサーバー→serve」の順で、待ち受けもそのリポジトリの既定のまま。
+- `tailscale serve`が使えないホスト（メインPCのWSL等）では判定が常に偽になり、待ち受けは既定
+  （全インターフェース）のまま。tailnetからは直接見える。
+- 閉じている間は、**tailnet以外（同一LANの生IP・sslip.io）からは見えない**。サブPCで別端末から
+  見る経路はserveのFQDNなので実害は無いが、LAN内から直に叩きたいときは
+  `ISSUE_DECK_DEV_HOST`を明示するか、serveを外す。
+
+#### 孤児の判定は「転送先に待ち受けが居るか」で行う（#1403）
+
+**「そのポートに待ち受けが居るか」では判定できない。** `tailscale serve`自身がtailnetの
+アドレスでそのポートを待ち受けるため、serveが残っている限り`ss`には必ず行が出る。当初の実装は
+行の有無で現役と判定しており、**孤児を一件も撤去できていなかった**。2026-08-14に16件が滞留し、
+上記のとおり、そのポートを使うworktreeでは`pnpm dev`が`EADDRINUSE`で起動できなくなっていた。
+**ポートはworktreeごとに固定（ベース値＋Issue番号）なので、詰まったポートは再利用のたびに
+詰まり続ける。**
+
+判定は`dev_server_loopback_listening`（`scripts/lib/dev-server.sh`）が持ち、`ss -tlnH`の
+**Local Address列（4番目のフィールド）だけ**を見て、ループバック（`127.x` / `[::1]`）か
+ワイルドカード（`*` / `0.0.0.0` / `[::]`）に張られたものだけを転送先と数える。
+
+```
+# serveだけが残っているポート（＝孤児）
+LISTEN 0 4096               100.81.154.79:5403 0.0.0.0:*
+LISTEN 0 4096 [fd7a:115c:a1e0::7701:9acb]:5403    [::]:*
+
+# next devが上がっているポート（＝現役）。ワイルドカードなので `*:5403` に見える
+LISTEN 0  511                           *:5403     *:*
 ```
 
-**serveは`localhost:<ポート>`へproxyするので、これでもtailnetのFQDNからは従来どおり見える**
-（#1350で実測）。serveを消して回るより副作用が小さい。
+**行全体をgrepしてはいけない。** IPv4の行はPeer Address列が`0.0.0.0:*`なので、`0.0.0.0:`を
+含む正規表現はserve自身の行にも当たり、やはり全件が現役判定になる。
+
+**撤去は2回連続で孤児と判定したときだけ行う。** `run-issue-session.sh`は開発サーバーを起こした
+直後にserveを張るが、`next dev`が実際にbindするまでには数秒かかる。pollerの1巡（既定60秒）が
+その隙間に当たると、起動中のセッションのserveを外してしまう。そこで1回目は
+`~/apps/issue-deck-worktrees/.dev-servers/orphan-serve-strikes`へ記録するだけにしている
+（手で流して即座に片付けたいときは2回続けて実行する。`--dry-run`はこの記録を書き換えない）。
 
 ### allowedDevOriginsに載せる必要がある
 

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
-import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
+import { requestSessionCheckUser, resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import {
   parseDispatchSessionActivity,
   parsePreviewUrl,
@@ -42,21 +42,39 @@ export async function POST(request: NextRequest) {
   // だけで、入力待ちであること自体は画面に出す価値がある
   const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
   const previewUrl = parsePreviewUrl(payload?.previewUrl);
-  // 計画の承認待ち（`00.check-user`）を解いてよいかどうか（#1342）。**判断はホスト側が持つ。**
-  // 「このセッションが計画を投稿してラベルを付けた」印はホストの状態ファイルにあり
-  // （`scripts/lib/session-state.sh`の`.plan`）、こちらはその報告を受け取るだけ。
-  // `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で付けた`00.check-user`まで落とす
+  // 自分で付けた`00.check-user`を解いてよいかどうか（#1342・#1417）。**判断はホスト側が持つ。**
+  // 「このセッションがラベルを付けた」印はホストの状態ファイルにあり
+  // （`scripts/lib/session-state.sh`の`.check-user`）、こちらはその報告を受け取るだけ。
+  // `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で付けた`00.check-user`まで落とす。
+  // **キー名が`planResolved`のままなのは、サブPCとissue-deck本体のデプロイ順がずれても
+  // 壊れないようにするため**（#1417で意味を計画以外の入力待ちにも広げた）
   const planResolved = payload?.planResolved === true;
+  // セッションが入力待ちに入ったこと（#1417）。質問・権限の承認プロンプト・プレビューや
+  // スクリーンショットの承認依頼は、ローカルセッションではどれもこの形になる
+  const checkUserRequested = payload?.checkUserRequested === true;
   // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）は
   // `activity`を伴わない**ので、そちらを必須にはできない
-  if (!target || (!activity && !remoteControlUrl && !previewUrl && !planResolved)) {
+  if (
+    !target ||
+    (!activity && !remoteControlUrl && !previewUrl && !planResolved && !checkUserRequested)
+  ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  // **DBの更新より先に行う。** ラベルはGitHub側の状態で、画面の様子（DB）が書けたかどうかとは
+  // 独立している。失敗しても報告自体は受け付ける（`postSessionPlan`と同じく例外は投げない）。
+  // 付ける側と外す側は排他（フックが載せるイベントが別）だが、**両方来た場合は付ける方を
+  // 後に実行して「確認待ちが残る」側へ倒す**。余分に残ったラベルは画面の承認ボタンで外せるが、
+  // 付き損なうと人を待っていること自体が画面から消える
   if (planResolved) {
-    // **DBの更新より先に行う。** ラベルはGitHub側の状態で、画面の様子（DB）が書けたかどうかとは
-    // 独立している。失敗しても報告自体は受け付ける（`postSessionPlan`と同じく例外は投げない）
     await resolveSessionPlanCheckUser({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+    });
+  }
+
+  if (checkUserRequested) {
+    await requestSessionCheckUser({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
     });

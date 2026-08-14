@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const recordDispatchSessionActivity = vi.fn();
 const resolveSessionPlanCheckUser = vi.fn();
+const requestSessionCheckUser = vi.fn();
 
 vi.mock("@/lib/dispatch/sessions", () => ({
   get recordDispatchSessionActivity() {
@@ -12,6 +13,9 @@ vi.mock("@/lib/dispatch/sessions", () => ({
 vi.mock("@/lib/dispatch/session-plan", () => ({
   get resolveSessionPlanCheckUser() {
     return resolveSessionPlanCheckUser;
+  },
+  get requestSessionCheckUser() {
+    return requestSessionCheckUser;
   },
 }));
 
@@ -32,6 +36,7 @@ beforeEach(() => {
   process.env.DISPATCH_SECRET = "secret-value";
   recordDispatchSessionActivity.mockResolvedValue({ updated: 1 });
   resolveSessionPlanCheckUser.mockResolvedValue(true);
+  requestSessionCheckUser.mockResolvedValue(true);
 });
 
 describe("POST /api/dispatch/sessions/activity", () => {
@@ -63,10 +68,11 @@ describe("POST /api/dispatch/sessions/activity", () => {
       previewUrl: null,
     });
     expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
+    expect(requestSessionCheckUser).not.toHaveBeenCalled();
   });
 
-  // #1357。承認に答えて作業へ戻ったことの報告。**`00.check-user`には触らない**
-  // （外してよいかの判断は`Stop`のときだけホスト側が持つ）
+  // #1357。承認に答えて作業へ戻ったことの報告。**印が無ければ`00.check-user`には触らない**
+  // （外してよいかの判断はホスト側が持つ）
   it("作業再開の報告を受け付ける", async () => {
     const res = await POST(
       postRequest({ ...target, activity: "working" }, "Bearer secret-value"),
@@ -109,5 +115,42 @@ describe("POST /api/dispatch/sessions/activity", () => {
     const res = await POST(postRequest({ ...target, planResolved: true }, "Bearer secret-value"));
     expect(res.status).toBe(200);
     expect(resolveSessionPlanCheckUser).toHaveBeenCalled();
+  });
+
+  /**
+   * #1417。入力待ち（質問・プレビューやスクリーンショットの承認依頼）に入ったことの報告。
+   * ローカルセッションではこれが「ユーザーに聞いて止まっている」ことを知る唯一の合図になる。
+   */
+  it("checkUserRequestedが真なら00.check-userを付ける", async () => {
+    const res = await POST(
+      postRequest(
+        { ...target, activity: "waiting_input", checkUserRequested: true },
+        "Bearer secret-value",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(requestSessionCheckUser).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1342,
+    });
+    expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
+  });
+
+  it("checkUserRequestedが偽なら付けない", async () => {
+    await POST(
+      postRequest(
+        { ...target, activity: "waiting_input", checkUserRequested: false },
+        "Bearer secret-value",
+      ),
+    );
+    expect(requestSessionCheckUser).not.toHaveBeenCalled();
+  });
+
+  it("checkUserRequestedだけでも受け付ける", async () => {
+    const res = await POST(
+      postRequest({ ...target, checkUserRequested: true }, "Bearer secret-value"),
+    );
+    expect(res.status).toBe(200);
+    expect(requestSessionCheckUser).toHaveBeenCalled();
   });
 });

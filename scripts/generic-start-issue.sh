@@ -397,7 +397,9 @@ if "23.preview-required" in label_names:
         f"`http://localhost:{dev_port}` を使う\n"
         "2. 確認した画面・操作手順と**そのURLをそのまま**ユーザーに提示し、問題ないか"
         "明示的な承認を得る（ユーザーは外出先のスマホから開くため、`localhost`のURLでは"
-        "届かない）\n"
+        "届かない）。**承認可否は`AskUserQuestion`で尋ねること。** そうするとフックが自動で"
+        "`00.check-user`を付け、issue-deckの画面の「ユーザーの確認待ち」に出ます"
+        "（答えた時点で自動的に外れます。#1417）\n"
         "3. 承認が得られてから初めてPRを作成する。PR本文の「確認方法」にも同じURLを書く"
     )
 
@@ -406,6 +408,8 @@ if "24.screenshot-required" in label_names:
         "このIssueには`24.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
         "PRを作成する**前**に変更箇所のスクリーンショットを取得し、ユーザーの承認を得てから"
         "PRを作成してください（新規依存関係の追加が必要な場合は、追加前に必ず確認する）。"
+        "**承認可否は`AskUserQuestion`で尋ねること。** そうするとフックが自動で`00.check-user`を付け、"
+        "issue-deckの画面の「ユーザーの確認待ち」に出ます（答えた時点で自動的に外れます。#1417）"
     )
 else:
     screenshot_instructions = (

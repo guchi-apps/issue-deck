@@ -17,8 +17,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useReleasePendingMerges, type ReleasePendingMerge } from "@/hooks/use-release-pending-merges";
 import { useReleaseStatus } from "@/hooks/use-release-status";
+import {
+  useRepositoryReleaseStatuses,
+  type RepositoryReleaseStatus,
+} from "@/hooks/use-repository-release-statuses";
+import { describeReleaseStatusBadge } from "@/lib/github/release-button-status";
 import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
@@ -60,15 +64,23 @@ export function ReleaseStatusButton({
   );
 
   const {
-    data: pendingMerges,
+    data: releaseStatuses,
     refetch: refetchPendingMerges,
-  } = useReleasePendingMerges(releasableRepositories.length > 0);
-  const pendingMergeByRepo = useMemo(() => {
-    const map = new Map<string, ReleasePendingMerge>();
-    (pendingMerges ?? []).forEach((merge) => map.set(merge.repoFullName, merge));
+  } = useRepositoryReleaseStatuses(releasableRepositories.length > 0);
+  const releaseStatusByRepo = useMemo(() => {
+    const map = new Map<string, RepositoryReleaseStatus>();
+    (releaseStatuses ?? []).forEach((releaseStatus) =>
+      map.set(releaseStatus.repoFullName, releaseStatus),
+    );
     return map;
-  }, [pendingMerges]);
-  const pendingMergeCount = pendingMerges?.length ?? 0;
+  }, [releaseStatuses]);
+  // バッジの件数は「人の操作を待っているもの」だけを数える。実行中・失敗まで数に混ぜると
+  // 「いくつマージすればよいか」が読めなくなるため（#1117で実行中も返すようになった）。
+  const pendingMerges = useMemo(
+    () => (releaseStatuses ?? []).filter((releaseStatus) => releaseStatus.pendingMerge != null),
+    [releaseStatuses],
+  );
+  const pendingMergeCount = pendingMerges.length;
   const hasPendingMerges = pendingMergeCount > 0;
   // リポジトリごとに複数Issueが1つのバンプPR／リリースPRへまとめて乗る運用のため、
   // 「リリース待ちが何個あるか」はPR件数ではなくIssue件数で表す（#1214）。
@@ -82,7 +94,9 @@ export function ReleaseStatusButton({
   }, [issues]);
   // CI失敗はマージ待ちより強い通知にする。ポップオーバーを開かずに気づけるのはこのドットだけのため、
   // 1件でも失敗があれば色を変える（#1059）。
-  const hasCiFailure = (pendingMerges ?? []).some((merge) => merge.ciState === "failure");
+  const hasCiFailure = pendingMerges.some(
+    (releaseStatus) => releaseStatus.pendingMerge?.ciState === "failure",
+  );
 
   const {
     data: releaseStatus,
@@ -171,7 +185,16 @@ export function ReleaseStatusButton({
             </h3>
             <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
               {releasableRepositories.map((repo) => {
-                const pending = pendingMergeByRepo.get(repo.fullName);
+                const repoReleaseStatus = releaseStatusByRepo.get(repo.fullName);
+                // 文言はモバイルのリポジトリ一覧と同じ純関数から得る（#1117）。
+                const releaseBadge = repoReleaseStatus
+                  ? describeReleaseStatusBadge({
+                      status: repoReleaseStatus.status,
+                      failedWorkflow: repoReleaseStatus.failedWorkflow,
+                      mergeTarget: repoReleaseStatus.pendingMerge?.mergeTarget ?? null,
+                      ciState: repoReleaseStatus.pendingMerge?.ciState ?? null,
+                    })
+                  : null;
                 const issueCount = releasePendingIssueCountByRepo.get(repo.fullName) ?? 0;
                 return (
                   <li key={repo.id}>
@@ -191,20 +214,18 @@ export function ReleaseStatusButton({
                           </span>
                         )}
                       </span>
-                      {pending && (
+                      {releaseBadge && (
                         <span
                           className={cn(
                             "shrink-0",
-                            pending.ciState === "failure"
+                            releaseBadge.tone === "error"
                               ? "text-destructive"
-                              : "text-amber-700 dark:text-amber-400",
+                              : releaseBadge.tone === "action"
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-sky-700 dark:text-sky-400",
                           )}
                         >
-                          {pending.ciState === "failure"
-                            ? "チェック失敗"
-                            : pending.mergeTarget === "main"
-                              ? "mainへ待ち"
-                              : "developへ待ち"}
+                          {releaseBadge.label}
                         </span>
                       )}
                     </button>

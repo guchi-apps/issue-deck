@@ -189,7 +189,7 @@ describe("StartImplementationDialog", () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
-    expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
       "false",
     );
@@ -294,7 +294,7 @@ describe("StartImplementationDialog", () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
-    fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
     clickStart();
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
@@ -315,7 +315,7 @@ describe("StartImplementationDialog", () => {
     enqueue.mockResolvedValue(false);
     renderDialog({ includeDispatchTargets: true });
 
-    fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
     clickStart();
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
@@ -328,7 +328,7 @@ describe("StartImplementationDialog", () => {
 
     // チェックボックスの並びはSTART_IMPLEMENTATION_OPTIONSの表示順（先頭が「計画が必要」）
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
-    fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
     clickStart();
 
     await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -344,7 +344,7 @@ describe("StartImplementationDialog", () => {
 
       expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
       // 既定はサブPC。作成直後にGitHub Actionsへ固定されないこと自体がこの変更の目的
-      expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
     });
 
     it("作成時に付いたラベルは選択状態として引き継ぎ、付け直しのPATCHは投げない", async () => {
@@ -406,7 +406,7 @@ describe("StartImplementationDialog", () => {
       expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).getAttribute("data-state")).toBe(
         "checked",
       );
-      fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -447,7 +447,7 @@ describe("StartImplementationDialog", () => {
       expect(enqueue).toHaveBeenCalledTimes(1);
       // 閉じ切るまでの間（閉じるアニメーション中）も中身は描画され続ける
       rerenderSame();
-      const subpc = screen.getByRole("radio", { name: /subpc/ });
+      const subpc = screen.getByRole("radio", { name: /^サブPC/ });
       expect(subpc.getAttribute("aria-checked")).toBe("true");
       expect(subpc.hasAttribute("disabled")).toBe(false);
       expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
@@ -461,7 +461,7 @@ describe("StartImplementationDialog", () => {
       updateIssue.mockReturnValue(new Promise(() => {}));
       renderDialog({ includeDispatchTargets: true, onOpenChange });
 
-      fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       clickStart();
 
       await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
@@ -477,7 +477,7 @@ describe("StartImplementationDialog", () => {
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(onOpenChange).not.toHaveBeenCalled();
-      expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
     });
   });
 
@@ -485,10 +485,10 @@ describe("StartImplementationDialog", () => {
     dispatchState.hosts = [makeHost({ repositories: ["guchi-apps/dayspan"] })];
     renderDialog({ includeDispatchTargets: true });
 
-    const option = screen.getByRole("radio", { name: /subpc/ });
+    const option = screen.getByRole("radio", { name: /^サブPC/ });
     expect(option.hasAttribute("disabled")).toBe(true);
     expect(
-      screen.getByText(/guchi-apps\/issue-deck は subpc で実行できません/),
+      screen.getByText(/guchi-apps\/issue-deck は サブPC で実行できません/),
     ).not.toBeNull();
   });
 });

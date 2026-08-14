@@ -54,6 +54,18 @@ source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 # セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
 source "$SCRIPT_DIR/lib/agent-language.sh"
+# 本体の作業ツリーの scripts/ が古いままになっていないかの警告（#1274）。
+# shellcheck source=scripts/lib/launcher-scripts-sync.sh
+source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
+
+# start-issue.sh・generic-start-issue.sh も同じ警告を出しているが、そちらは呼び出し元プロセスの
+# 標準出力に出るだけで、tmux経由（`tmux new-session -d`）で起動した場合はそのまま誰にも見られずに
+# 消える。新しいtmuxのpaneは呼び出し元とは別のptyで、直後にこのスクリプトの出力だけが流れ込む
+# ため、呼び出し元の警告を引き継がない。サブPCのpollerが起動する経路（無人）ではなおさら、
+# 呼び出し元の標準出力はjournalctlにしか残らずtmuxをattachしたユーザーからは見えない。ここでも
+# 同じ警告を出し、実際にユーザーが見る画面（tmuxのpane）に確実に載せる（#1426）。
+ISSUE_DECK_ROOT="$(dirname "$SCRIPT_DIR")"
+warn_launcher_scripts_stale "$ISSUE_DECK_ROOT"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
 # **tmuxの外で起動した場合は空。** そのときは状態ファイルを書かず、自動回収の対象にもしない
@@ -226,6 +238,22 @@ trap cleanup EXIT HUP TERM
 if [[ "$DEV_SERVER_ENABLED" == "0" ]]; then
   echo "#$ISSUE_NUMBER: 開発サーバーは起動しません（画面確認が必要になったら worktree で \`$DEV_COMMAND\` を実行してください。ポート $DEV_PORT は env に設定済みです）。"
 else
+  # tailnetへ出す経路では、開発サーバーの待ち受けを`127.0.0.1`へ閉じる（#1329）。
+  # `tailscale serve`は公開したポートを自ノードのtailnetアドレスで実際にlistenするため、
+  # `::`を要求する`next dev`とは同じポートで両立しない。「devサーバー→serve」の順なら初回だけは
+  # 成功するが、**devサーバーだけが回収（#1223）された後は`EADDRINUSE`で起こし直せない。**
+  # ここで先に閉じておけば順序に依存しなくなる。
+  #
+  # **serveを張るのは後のまま。** 先に張ると、この変数を見ない他リポジトリの開発サーバー
+  # （汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり「devサーバー→serve」の順で、
+  # 待ち受けもそのリポジトリの既定のまま。
+  #
+  # 明示指定があればそちらを尊重する。`dev.sh`も同じ判定を単独で持つため（手で`pnpm dev`を
+  # 叩き直す経路のため）、ここが渡らなくても結果は同じになる。
+  if [[ -z "${ISSUE_DECK_DEV_HOST:-}" ]] && tailscale_serve_available; then
+    export ISSUE_DECK_DEV_HOST="127.0.0.1"
+  fi
+
   echo "#$ISSUE_NUMBER: 開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
   # stdinを/dev/nullにするのは必須（#1094）。set -m によりこのジョブはバックグラウンドの
   # プロセスグループになるため、配下のプロセスが端末（tty）から読もうとするとカーネルが
@@ -238,8 +266,9 @@ else
   DEV_PGID="$DEV_PID"
   echo "$DEV_PID" >"$DEV_PID_FILE"
 
-  # tailnetへ出す（#1265）。**バインドは変えない**（localhostのまま`tailscale serve`が
-  # プロキシする）。使えないホスト（メインPCのWSL等）では黙って何もしない。
+  # tailnetへ出す（#1265）。`tailscale serve`が`localhost:<ポート>`へプロキシする。
+  # **待ち受けは上で`127.0.0.1`へ閉じてある**（#1329）。使えないホスト（メインPCのWSL等）では
+  # 黙って何もしない（そのとき待ち受けも既定のままなので、tailnetからは直接見える）。
   PREVIEW_URL="$(tailscale_serve_publish "$DEV_PORT" || true)"
   if [[ -n "$PREVIEW_URL" ]]; then
     echo "#$ISSUE_NUMBER: 開発サーバーをtailnetへ公開しました: $PREVIEW_URL"

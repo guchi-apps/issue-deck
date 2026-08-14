@@ -161,6 +161,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
+  詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、ロケットアイコンの
+  ポップオーバー・モバイルのリリースシートが使う。1回でGitHub APIを7〜8回消費するため、
+  開いている間だけポーリングする。横断のサマリは`GET /api/repositories/release-pending-merges`
+  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーのロケットアイコンのバッジと
+  **モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
+  （`idle`/`progressing`/`action_required`/`error`）と表示文言は、どちらの経路も
+  [`lib/github/release-button-status.ts`](../src/lib/github/release-button-status.ts)の
+  `summarizeReleaseStatus`・`describeReleaseStatusBadge`だけを通す**（画面ごとに分岐を書くと
+  同じ状態が別の言葉で出る）。横断のサマリは**版数（`package.json`）を取りに行かないため
+  `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）を判定しない**。
+  リポジトリあたり2リクエスト増えるのに対し、その状態はほぼ常にリリースworkflowのrunが
+  実行中か失敗として現れるため。`idle`のリポジトリは応答に含めない。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -168,11 +181,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   遷移の実体は`IssueDeckShell`の`openReference`だけが持ち、Markdown本文の中のような深い位置へは
   contextで配る（`github-reference-navigation.tsx`）。**providerが無い場所では素の外部リンクに
   戻るだけ**なので、ダイアログ単体のテストでも壊れない。GitHubは`/issues/<番号>`でPRも開けるため、
-  Issue参照はまずDBキャッシュのIssueを探し、無ければPRとして開き直す。PC（`pane`・`pr`）と
-  スマホ（`mscreen`・`missue`）は現在地の持ち方が別なので、**両方を1回の`router.replace`で
+  Issue参照はまずDBキャッシュのIssueを探し、無ければPRとして開き直す。PC（`pane`・`pr`・`issue`）と
+  スマホ（`mscreen`・`missue`）は現在地の持ち方が別なので、**両方を1回のURL更新で
   進める**（`hooks/use-reference-navigation.ts`。2回に分けると後の1回が前の1回の変更を落とす）。
   「GitHubで開く」ボタン・Actionsの実行ログ・GitHub Appのインストールは、アプリ内に対応する
   画面が無いため外部リンクのまま残している。
+- **現在地はURLクエリが正で、履歴を積むのは現在地が変わる操作だけ**（#1396）。URL更新は
+  [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`に
+  集約し、画面遷移（スマホの`mscreen`・`missue`、PCの`view`・`pane`・`prview`・`pr`・`issue`）は
+  `router.push`、絞り込み条件（`q`・`state`・`labels`・`assignee`・`sort`・`repos`、スマホの
+  絞り込みシート内の操作）は`router.replace`にする。**絞り込みまで積むと、戻る操作が条件の
+  巻き戻しに費やされて前の画面へ着かない**（特に`q`は1文字ごとに積まれる）。結果が今のURLと
+  同じ更新は行わない（同じURLを積むと戻る操作が2回必要になる）。
+- **PC版の選択中Issueも`issue`クエリが正**（#1396）。stateで持つとIssueを開く操作が履歴に
+  載らず、戻る操作でアプリの外へ出る。`IssueDeckShell`の`selectedIssue`は
+  `issues`＋`issue`クエリからの派生値で、ポーリングや編集の結果は`issues`の更新だけで追従する
+  （**選択中Issueに個別の更新処理を足さない**）。`?issue=<id>`で直接開けるのは#688から。
+- **アプリ内の「戻る」（ヘッダーの戻るボタン・右スワイプ）は、自分が積んだ履歴があれば
+  `router.back()`で巻き戻す**（#1396）。押すたびに新しいエントリを積むと、戻る操作が往復を
+  積み上げるだけになりブラウザ・OSの戻るが前の画面へ着かなくなる。共有URLで詳細画面をいきなり
+  開いた場合は巻き戻せる履歴が無く、そこで`router.back()`を呼ぶとアプリの外へ出てしまうため、
+  戻り先を計算して遷移するフォールバックを残してある。判別に使う深さは
+  [`lib/history-stack.ts`](../src/lib/history-stack.ts)が数え、**ズレは必ずフォールバック側
+  （アプリの外へ出さない側）に倒れる**ようにしている。ダイアログ（Issue作成・編集・設定）は
+  履歴に載せない。戻る操作で入力中の本文が消える方が損失が大きいため。
 - **サブPCへのディスパッチはpull型で、書き込み経路は`/api/dispatch/*`の1本。** 画面はジョブを
   `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
   tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。

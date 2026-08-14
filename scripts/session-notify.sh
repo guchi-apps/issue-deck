@@ -9,9 +9,16 @@
 # 書き、判断を2箇所に分けない）。
 #
 #   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
-#   Stop                            応答終了  → 同上（＋計画の承認待ちを解く。#1342）
+#                                               （＋`00.check-user`を付ける。#1417）
+#   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）
 #   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
 #   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
+#                                               （＋`00.check-user`を解く。#1417）
+#
+# **`00.check-user`を付け外しするのは、自分が付けたときだけ**（印は`lib/session-state.sh`の
+# `<セッション名>.check-user`）。Issueに書かれた「Claudeがユーザーに質問したとき」
+# 「開発環境のリンクを提示したとき」「スクリーンショットを提示したとき」は、ローカルセッションでは
+# どれも「入力待ちで止まる」という同じ形になるため、契機を分けずに扱う（#1417）。
 #
 # `ExitPlanMode`でSignalyへ送らないのは、直後に承認プロンプトの`Notification`が必ず飛び、
 # 同じ「入力待ち」が二重になるため。`PostToolUse`で送らないのは、人が答えたことは
@@ -183,6 +190,14 @@ repo_name = os.environ.get("NOTIFY_REPO_NAME", "")
 repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 host_name = os.environ.get("NOTIFY_HOST_NAME", "")
 tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
+
+# 通知のタイトルに出すホストの表記（#1416）。**issue-deck側の`src/lib/dispatch/host-label.ts`と
+# 同じ対応表を持つ。** ここは通知を組み立てる時点でホスト名しか持っておらず、issue-deckへ問い
+# 合わせる経路も無い（通知は起動先が落ちていても届く必要がある）ため、写しを置く方を選んでいる。
+# **APIへ送る`hostName`と「Host」フィールドは識別子のまま**にする（照合キーであり、`ssh`・
+# `tmux`の相手でもある）。
+HOST_DISPLAY_NAMES = {"subpc": "サブPC"}
+host_display_name = HOST_DISPLAY_NAMES.get(host_name.lower(), host_name)
 
 
 def resolve_remote_url():
@@ -384,7 +399,7 @@ elif repo_name:
     title_parts.append(f"[{repo_name}]")
 title_parts.append(label)
 if host_name:
-    title_parts.append(f"({host_name})")
+    title_parts.append(f"({host_display_name})")
 title = " ".join(title_parts)
 
 # **応答テキスト（hook の last_assistant_message）は載せない。**
@@ -479,14 +494,17 @@ report_plan_to_issue_deck() {
     return 0
   fi
   [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
-  # **投稿できたときだけ印を残す。** ラベルを外すのは印があるときだけなので、投稿できて
-  # いないのに印を残すと、人が別の理由で付けた`00.check-user`を落としに行くことになる。
-  # tmuxの外で起動したセッションは印を置く場所（キーがtmuxのセッション名）が無い
-  if [[ -n "$NOTIFY_TMUX_SESSION" ]] &&
-    declare -F session_state_mark_plan_pending >/dev/null 2>&1; then
-    session_state_mark_plan_pending "$NOTIFY_TMUX_SESSION" ||
-      echo "session-notify: 計画の承認待ちを記録できませんでした（実装は続行します）" >&2
-  fi
+  mark_check_user_pending
+}
+
+# **付けられたときだけ印を残す。** ラベルを外すのは印があるときだけなので、付けられて
+# いないのに印を残すと、人が別の理由で付けた`00.check-user`を落としに行くことになる。
+# tmuxの外で起動したセッションは印を置く場所（キーがtmuxのセッション名）が無い
+mark_check_user_pending() {
+  [[ -n "$NOTIFY_TMUX_SESSION" ]] || return 0
+  declare -F session_state_mark_check_user_pending >/dev/null 2>&1 || return 0
+  session_state_mark_check_user_pending "$NOTIFY_TMUX_SESSION" ||
+    echo "session-notify: ユーザーの確認待ちを記録できませんでした（実装は続行します）" >&2
 }
 
 decision_line="$(printf '%s' "$result" | head -1)"
@@ -505,13 +523,28 @@ fi
 read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 [[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
 
-# 計画の承認待ち（`00.check-user`）を解いてよいか（#1342）。**印があるときだけ。**
+# このセッションが入力待ちに入ったこと（#1417）。**`00.check-user`を付けるのはここだけ。**
+# `Notification / permission_prompt`はAskUserQuestionの質問と権限の承認プロンプトで飛ぶ、
+# 「エージェントが人に聞いて止まっている」ことを知る唯一のフックで、
+# Issue #1417の「質問したとき」「開発環境のリンクを提示したとき」「スクリーンショットを
+# 提示したとき」はローカルセッションではすべてこの形になる。
+CHECK_USER_REQUESTED=0
+if [[ "$STATE_EVENT" == "permission_prompt" ]]; then
+  CHECK_USER_REQUESTED=1
+fi
+
+# 自分で付けた`00.check-user`を解いてよいか（#1342・#1417）。**印があるときだけ。**
 # `Stop`はturnごとに飛ぶので、無条件に外すと人が別の理由で付けたラベルまで落とす。
-PLAN_RESOLVED=0
-if [[ "$STATE_EVENT" == "Stop" && -n "$NOTIFY_TMUX_SESSION" ]] &&
-  declare -F session_state_plan_pending >/dev/null 2>&1 &&
-  session_state_plan_pending "$NOTIFY_TMUX_SESSION"; then
-  PLAN_RESOLVED=1
+#
+# 解く契機は2つ。`working`（＝人が承認プロンプト・質問に答えて作業へ戻った。#1357）が本命で、
+# Issue #1417の「ユーザーが質問に返信したとき」「計画を承認・修正したとき」に対応する。
+# `Stop`は保険で、計画を却下されて`PostToolUse`が飛ばなかった場合など、答えたことを
+# `working`で拾えなかった経路を拾う。
+CHECK_USER_RESOLVED=0
+if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_check_user_pending >/dev/null 2>&1 &&
+  session_state_check_user_pending "$NOTIFY_TMUX_SESSION"; then
+  CHECK_USER_RESOLVED=1
 fi
 
 # セッションの状態を記録する（#1256）。**送信より先に行う。**
@@ -526,21 +559,26 @@ fi
 # issue-deckの画面へも同じ様子を渡す（#1264）。**Signalyへの通知だけだと、通知を消した時点で
 # 承認待ちであることを知る手段が無くなる。**
 #
-# `Stop`のときは、計画の承認待ちを解いてよいか（#1342）も一緒に伝える。**受け口を分けないのは、
-# 「応答が終わった」と「計画の確認は終わった」が同じイベントで、往復を2回にする理由が無いため。**
+# `00.check-user`の付け外し（#1342・#1417）も同じ往復に載せる。**受け口を分けないのは、
+# 「今どうしている」と「確認待ちに入った／出た」が同じイベントで、往復を2回にする理由が
+# 無いため。** JSONのキーが`planResolved`のままなのは、issue-deck本体とサブPCのデプロイ順が
+# ずれても壊れないようにするため（意味は#1417で「このセッションが付けた`00.check-user`を
+# 外してよい」へ広げた）。
 report_activity_to_issue_deck() {
   [[ -n "$REPO_SLUG" && -n "$ISSUE_NUMBER" ]] || return 0
 
   local body
   body="$(ACTIVITY="$ACTIVITY" REMOTE_URL="$REMOTE_URL" REPO_SLUG="$REPO_SLUG" \
-    ISSUE_NUMBER="$ISSUE_NUMBER" PLAN_RESOLVED="$PLAN_RESOLVED" python3 -c '
+    ISSUE_NUMBER="$ISSUE_NUMBER" CHECK_USER_RESOLVED="$CHECK_USER_RESOLVED" \
+    CHECK_USER_REQUESTED="$CHECK_USER_REQUESTED" python3 -c '
 import json, os
 print(json.dumps({
     "repository": os.environ["REPO_SLUG"],
     "issue": int(os.environ["ISSUE_NUMBER"]),
     "activity": os.environ["ACTIVITY"],
     "remoteControlUrl": os.environ.get("REMOTE_URL") or None,
-    "planResolved": os.environ.get("PLAN_RESOLVED") == "1",
+    "planResolved": os.environ.get("CHECK_USER_RESOLVED") == "1",
+    "checkUserRequested": os.environ.get("CHECK_USER_REQUESTED") == "1",
 }))' 2>/dev/null || true)"
 
   if ! post_to_issue_deck /api/dispatch/sessions/activity "$body"; then
@@ -548,11 +586,14 @@ print(json.dumps({
     return 0
   fi
   [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
+  if [[ "$CHECK_USER_REQUESTED" == "1" ]]; then
+    mark_check_user_pending
+  fi
   # **報告できたときだけ印を消す。** 消してから失敗すると、ラベルが付いたまま外す手掛かりが
   # 無くなる。残っていれば次の`Stop`でもう一度外しに行ける（既に外れていても404は無視される）
-  if [[ "$PLAN_RESOLVED" == "1" ]] &&
-    declare -F session_state_clear_plan_pending >/dev/null 2>&1; then
-    session_state_clear_plan_pending "$NOTIFY_TMUX_SESSION" || true
+  if [[ "$CHECK_USER_RESOLVED" == "1" ]] &&
+    declare -F session_state_clear_check_user_pending >/dev/null 2>&1; then
+    session_state_clear_check_user_pending "$NOTIFY_TMUX_SESSION" || true
   fi
 }
 report_activity_to_issue_deck

@@ -10,7 +10,6 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
-  Mic,
   MoreHorizontal,
   Pencil,
   Play,
@@ -23,6 +22,7 @@ import {
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
@@ -43,14 +43,16 @@ import {
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
+  LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,7 +68,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
-import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -162,12 +163,6 @@ export function IssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
-  const {
-    isGenerating: isCleaningUpComment,
-    error: commentCleanupError,
-    notConfigured: commentCleanupNotConfigured,
-    generate: generateCommentCleanup,
-  } = useIssueBodyCleanup();
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）。
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
@@ -256,12 +251,6 @@ export function IssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
-  }
-
-  async function handleGenerateCommentCleanup() {
-    const result = await generateCommentCleanup(newCommentBody);
-    if (!result) return;
-    setNewCommentBody(result.text);
   }
 
   async function handleAskClaudeFromComposer() {
@@ -453,7 +442,7 @@ export function IssueDetail({
     blockingSession,
   });
   const startLabel = defaultDispatchHost
-    ? `${defaultDispatchHost}で開始`
+    ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
     : "GitHub Actionsで開始";
   // 着手後もどちらで動いているかが分かるようにする（#1262）
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
@@ -462,6 +451,9 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
+  // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
+  const sessionWaitingInput = isSessionWaitingInput(issueSession);
   const executionTarget = resolveIssueExecutionTarget({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -552,7 +544,7 @@ export function IssueDetail({
               {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
                   起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
                   あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                  「subpcで開始」が2つ並ぶ */}
+                  「サブPCで開始」が2つ並ぶ */}
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
@@ -766,10 +758,13 @@ export function IssueDetail({
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
               localSessionNotice={
-                executionTarget.expectsActionsRun ? undefined : (
+                executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
+                  <LocalSessionWaitingInputNotice session={issueSession} />
+                ) : (
                   <LocalSessionApprovalNotice session={issueSession} />
                 )
               }
+              sessionWaitingInput={sessionWaitingInput}
               mergeApprovalPending={mergeApprovalPending}
               pullRequestLinks={pullRequestLinks}
               pullRequests={pullRequests}
@@ -819,26 +814,7 @@ export function IssueDetail({
                   }
                 }}
               />
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="w-fit"
-                  disabled={!newCommentBody.trim() || isCleaningUpComment}
-                  onClick={handleGenerateCommentCleanup}
-                >
-                  {isCleaningUpComment ? <Loader2 className="animate-spin" /> : <Mic />}
-                  音声入力を整理
-                </Button>
-                {commentCleanupNotConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていません
-                  </p>
-                )}
-                {commentCleanupError && (
-                  <p className="text-xs text-destructive">{commentCleanupError}</p>
-                )}
-              </div>
+              <BodyCleanupButton value={newCommentBody} onCleaned={setNewCommentBody} />
               <div className="flex flex-wrap justify-end gap-2">
                 {canCreateFollowupFromComment(issue) && (
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>

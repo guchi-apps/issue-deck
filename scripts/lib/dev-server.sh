@@ -8,7 +8,7 @@
 # このファイル自体は実行せず、source して使う。
 #
 # `/proc` を読むためLinux専用。読めない環境では `dev_server_pid_matches` が常に偽を返し、
-# **何も止めない側（安全側）に倒れる**。実行基盤はsubpc（Ubuntu）とWSLのいずれもLinux。
+# **何も止めない側（安全側）に倒れる**。実行基盤はサブPC（Ubuntu）とWSLのいずれもLinux。
 
 # 開発サーバーのログへ1行追記する。**止める前に必ず呼ぶ。**
 #
@@ -41,6 +41,34 @@ dev_server_pid_matches() {
   cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
   [[ -n "$cwd" && "$cwd" == "$worktree_dir" ]] || return 1
   return 0
+}
+
+# `tailscale serve`の転送先（`localhost:<ポート>`）に待ち受けが居るかを判定する（#1403）。
+#
+# **「そのポートに待ち受けが居るか」では判定できない。** `tailscale serve`自身がそのポートを
+# tailnetのアドレス（`100.x.x.x:<ポート>`・`[fd7a:...]:<ポート>`）で待ち受けるため、serveが
+# 残っている限り`ss`には必ず行が出る。孤児かどうかを行の有無で見ていた元の実装は、この条件が
+# 常に真になり**孤児を一件も撤去できていなかった**（#1403で16件が滞留し、同じポートを使う
+# worktreeの`pnpm dev`が`EADDRINUSE`で起動できなくなった）。
+#
+# 見るのはLocal Address列だけで、ループバック（`127.x` / `[::1]`）かワイルドカード
+# （`*` / `0.0.0.0` / `[::]`）に張られたものだけを「転送先」と数える。**行全体をgrepしても
+# いけない**（IPv4の行はPeer Address列が`0.0.0.0:*`なので、`0.0.0.0:`を含む正規表現は
+# serve自身の行にも当たる）。`ss -tlnH`のLocal Address列は4番目のフィールド。
+#
+# `ss`が無い環境では判定できないため、**待ち受けが居る側（＝撤去しない安全側）に倒す**。
+dev_server_loopback_listening() {
+  local port="$1" addr
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  while read -r addr; do
+    # 末尾の `:<ポート>` を落とす（IPv6は `[fd7a:...]:5403` の形なので後方一致で外す）
+    addr="${addr%:*}"
+    case "$addr" in
+      '*' | '0.0.0.0' | '[::]' | '[::1]' | 127.*) return 0 ;;
+    esac
+  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
+  return 1
 }
 
 # 開発サーバーをプロセスグループごと止める。**止まったことを確認するところまでを1つの処理にする。**

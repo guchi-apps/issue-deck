@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findSessionForIssue,
+  isSessionWaitingInput,
   shortIssueSessionLabel,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
@@ -67,7 +68,7 @@ describe("summarizeIssueSession", () => {
   it("ALIVEで様子の報告が無ければ実行中", () => {
     const s = summarizeIssueSession(session());
     expect(s.tone).toBe("running");
-    expect(s.label).toContain("subpcで実行中");
+    expect(s.label).toContain("サブPCで実行中");
   });
 
   it("入力待ちはRemote Controlの案内を添える", () => {
@@ -182,4 +183,27 @@ describe("プレビューURL（#1265）", () => {
       expect(s.previewUrl).toBeNull();
     },
   );
+});
+
+/**
+ * #1417。承認欄のボタンを引っ込めるかどうかの判断に使う。
+ * **落ちたセッションの`WAITING_INPUT`は待つ相手がいない古い値**なので、ここまで隠すと
+ * 画面から`00.check-user`を外す手段が無くなる。
+ */
+describe("isSessionWaitingInput", () => {
+  it("生きているセッションが入力待ちのときだけ真", () => {
+    expect(isSessionWaitingInput(session({ state: "ALIVE", activity: "WAITING_INPUT" }))).toBe(true);
+    expect(isSessionWaitingInput(session({ state: "ALIVE", activity: "WORKING" }))).toBe(false);
+    expect(isSessionWaitingInput(session({ state: "ALIVE", activity: "RESPONDED" }))).toBe(false);
+  });
+
+  it("落ちたセッションの入力待ちは真としない", () => {
+    expect(isSessionWaitingInput(session({ state: "FAILED", activity: "WAITING_INPUT" }))).toBe(false);
+    expect(isSessionWaitingInput(session({ state: "EXITED", activity: "WAITING_INPUT" }))).toBe(false);
+    expect(isSessionWaitingInput(session({ state: "GONE", activity: "WAITING_INPUT" }))).toBe(false);
+  });
+
+  it("セッションが無ければ偽", () => {
+    expect(isSessionWaitingInput(null)).toBe(false);
+  });
 });

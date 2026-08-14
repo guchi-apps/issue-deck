@@ -1,4 +1,5 @@
 import type { ReleaseStatus } from "@/hooks/use-release-status";
+import type { CiState } from "@/lib/github/release-api";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
@@ -11,38 +12,137 @@ type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
  */
 export type ReleaseButtonStatus = "idle" | "progressing" | "action_required" | "error";
 
+/** リリースworkflow・本番デプロイworkflowの実行。判定に使う2つのフィールドだけを見る */
+type WorkflowRunState = { status: string; conclusion: string | null };
+
 /**
- * `AvailableReleaseStatus`からヘッダーのRocketボタン表示用の状態サマリを算出する（#542）。
- * `release-progress.tsx`の`buildSteps`とは意図的に判定ロジックを分離しているが、bump PRの
- * 「要操作」判定基準（CIが`pending`でなくなった時点）だけは揃えている。develop→main PRの
- * マージ待ちのみを主対象としつつ、CI通過後もbump PRが残り続けるauto-merge滞留も
- * 「要操作」に含める（#542でのフィードバックを反映）。
+ * 4値サマリの判定に必要な最小の入力。`ReleaseStatus`（＝`/api/repositories/release`の戻り値）
+ * を組み立てずに判定できるよう、リポジトリ横断で状態を返す
+ * `/api/repositories/release-pending-merges`からも同じ判定を通せる形にしている（#1117）。
+ */
+export type ReleaseStatusSummaryInput = {
+  /** `release-develop-to-main.yml`の最新実行 */
+  workflowRun: WorkflowRunState | null;
+  /** mainブランチ上の`deploy.yml`の最新実行 */
+  deployWorkflowRun: WorkflowRunState | null;
+  /** developへのマージ待ちバンプPR。オープン中でなければnull */
+  bumpPullRequest: { ciState: CiState | null } | null;
+  /** develop→mainのPRがオープン中か */
+  releasePullRequestOpen: boolean;
+  /** developだけbump済みでdevelop→mainのPRが未作成の過渡状態か */
+  releasePending: boolean;
+};
+
+function hasFailed(run: WorkflowRunState | null): boolean {
+  return run != null && run.status === "completed" && run.conclusion !== "success";
+}
+
+function isRunning(run: WorkflowRunState | null): boolean {
+  return run != null && run.status !== "completed";
+}
+
+/**
+ * サマリが`error`になる原因がどちらの実行かを返す。`error`でなければnull。
+ * 一覧のバッジで「デプロイ失敗」と「リリース失敗」を書き分けるのに使う（#1117）。
+ * 優先順位は`summarizeReleaseStatus`の判定順と同じ（本番デプロイを先に見る）。
+ */
+export function resolveFailedReleaseWorkflow(
+  input: ReleaseStatusSummaryInput,
+): "deploy" | "release" | null {
+  if (hasFailed(input.deployWorkflowRun)) return "deploy";
+  if (hasFailed(input.workflowRun)) return "release";
+  return null;
+}
+
+/**
+ * リリースの状態を4値サマリへ畳む（#542）。`release-progress.tsx`の`buildSteps`とは意図的に
+ * 判定ロジックを分離しているが、bump PRの「要操作」判定基準（CIが`pending`でなくなった時点）
+ * だけは揃えている。develop→main PRのマージ待ちのみを主対象としつつ、CI通過後もbump PRが
+ * 残り続けるauto-merge滞留も「要操作」に含める（#542でのフィードバックを反映）。
  * `workflowRun`（`release-develop-to-main.yml`自体の最新実行）が失敗している場合も、
  * `deployWorkflowRun`と同じ優先度で`error`とする（#727）。
  */
-export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): ReleaseButtonStatus {
-  const { phase, bumpPullRequest: bump, deployWorkflowRun, workflowRun } = status;
+export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): ReleaseButtonStatus {
+  const { workflowRun, deployWorkflowRun, bumpPullRequest, releasePullRequestOpen, releasePending } =
+    input;
 
-  if (deployWorkflowRun && deployWorkflowRun.status === "completed" && deployWorkflowRun.conclusion !== "success") {
-    return "error";
-  }
+  if (resolveFailedReleaseWorkflow(input)) return "error";
 
-  if (workflowRun && workflowRun.status === "completed" && workflowRun.conclusion !== "success") {
-    return "error";
-  }
+  if (releasePullRequestOpen) return "action_required";
+  if (bumpPullRequest && bumpPullRequest.ciState !== "pending") return "action_required";
 
-  if (phase === "release_pr_open") {
-    return "action_required";
-  }
-
-  if (phase === "bump_pr_open" && bump && bump.ciState !== "pending") {
-    return "action_required";
-  }
-
-  if (workflowRun && workflowRun.status !== "completed") return "progressing";
-  if (deployWorkflowRun && deployWorkflowRun.status !== "completed") return "progressing";
-  if (phase === "bump_pr_open") return "progressing";
-  if (phase === "release_pending") return "progressing";
+  if (isRunning(workflowRun)) return "progressing";
+  if (isRunning(deployWorkflowRun)) return "progressing";
+  if (bumpPullRequest) return "progressing";
+  if (releasePending) return "progressing";
 
   return "idle";
+}
+
+/**
+ * `AvailableReleaseStatus`からヘッダーのRocketボタン表示用の状態サマリを算出する（#542）。
+ * `phase`はバンプPRをdevelop→mainのPRより優先して決まるため、その優先順位を保ったまま
+ * `summarizeReleaseStatus`の入力へ移し替える。
+ */
+export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): ReleaseButtonStatus {
+  return summarizeReleaseStatus({
+    workflowRun: status.workflowRun,
+    deployWorkflowRun: status.deployWorkflowRun,
+    bumpPullRequest:
+      status.phase === "bump_pr_open" && status.bumpPullRequest
+        ? { ciState: status.bumpPullRequest.ciState }
+        : null,
+    releasePullRequestOpen: status.phase === "release_pr_open",
+    releasePending: status.phase === "release_pending",
+  });
+}
+
+/** マージ待ちPRのマージ先。"main": develop→mainのPR、"develop": バンプPR（#979） */
+export type ReleaseMergeTarget = "main" | "develop";
+
+/** バッジの見た目。呼び出し側で配色に対応付ける */
+export type ReleaseStatusBadgeTone = "progressing" | "action" | "error";
+
+export type ReleaseStatusBadge = { label: string; tone: ReleaseStatusBadgeTone };
+
+/**
+ * リリース状況を一覧のバッジ1つ（文言＋トーン）へ畳む（#1117）。
+ * モバイルのリポジトリ一覧とPCヘッダーのポップオーバーが同じ文言を出すよう、表示側では
+ * 分岐を持たずこの関数だけを通す。`idle`は何も出さない（静止している状態にバッジを出すと
+ * 一覧が常時埋まってしまい、動いているものが目立たなくなるため）。
+ */
+export function describeReleaseStatusBadge(input: {
+  status: ReleaseButtonStatus;
+  /** `error`のとき、どちらの実行が失敗しているか */
+  failedWorkflow: "deploy" | "release" | null;
+  /** マージ待ちPRのマージ先。マージ待ちでなければnull */
+  mergeTarget: ReleaseMergeTarget | null;
+  /** マージ待ちPRのCI状態。マージ待ちでなければnull */
+  ciState: CiState | null;
+}): ReleaseStatusBadge | null {
+  const { status, failedWorkflow, mergeTarget, ciState } = input;
+
+  if (status === "idle") return null;
+
+  // マージできない状態にあること自体を優先して出す。「マージすればよい」と「チェックが
+  // 落ちていて直す必要がある」を取り違えさせないため（#1059）。
+  if (ciState === "failure") return { label: "チェック失敗", tone: "error" };
+
+  if (status === "error") {
+    return { label: failedWorkflow === "deploy" ? "デプロイ失敗" : "リリース失敗", tone: "error" };
+  }
+
+  if (status === "action_required") {
+    return {
+      label:
+        mergeTarget === "develop"
+          ? "developへマージ待ち"
+          : mergeTarget === "main"
+            ? "mainへマージ待ち"
+            : "マージ待ち",
+      tone: "action",
+    };
+  }
+
+  return { label: "実施中", tone: "progressing" };
 }
