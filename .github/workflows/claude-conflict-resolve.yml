@@ -32,7 +32,9 @@ name: Claude Conflict Resolve
 #   pull_request直後の検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。
 #   detect-conflictsのポーリングでも解消しきれなかった取りこぼしを拾い直す
 #   安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
-# - workflow_dispatch: 手動実行用
+# - workflow_dispatch: 手動実行用。issue_numberを指定するとそのIssueのdevelop向けPR
+#   1件だけを対象にする(未指定なら従来どおり全件走査)。issue-deckの画面の
+#   「コンフリクトを自動解消」ボタンがこの経路で起動する(#1293)
 
 on:
   push:
@@ -46,7 +48,12 @@ on:
       - develop
   schedule:
     - cron: "*/15 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "対象のIssue番号（未指定ならdevelop向けの全OPEN PRを走査する）"
+        required: false
+        type: string
 
 jobs:
   conflict-resolve:
@@ -55,6 +62,9 @@ jobs:
     with:
       runtime-setup: node-db
       package-manager: pnpm
+      # 再利用ワークフロー内のinputsコンテキストはworkflow_callのinputsを指すため、
+      # 呼び出し元のworkflow_dispatch入力はここで明示的に渡す（claude-ci-fix.ymlと同じ）。
+      issue-number: ${{ inputs.issue_number }}
       # プロンプトの「- 解消後、」に続けてそのまま埋め込まれるため、文末まで含めて書く。
       # YAMLの折りたたみ(>-)は改行を半角スペースへ変換し日本語の途中に空白が入るため、1行で書く。
       verify-commands: "`pnpm test`（lint・typecheckを実行）と `pnpm build:ci` を実行し、問題がないことを確認する（DBサーバーは実際には起動していないが、環境変数はこのステップに既に設定済みのため`.github/workflows/ci.yml`のbuildステップと同様に成功するはず）"

@@ -248,7 +248,11 @@ export function ReleaseStatusButton({
                       )}
                     </span>
                   </div>
-                  <ReleaseProgress status={releaseStatus} compact />
+                  <ReleaseProgress
+                    status={releaseStatus}
+                    compact
+                    repoFullName={releaseRepoFullName}
+                  />
                   <Button
                     size="sm"
                     variant="outline"

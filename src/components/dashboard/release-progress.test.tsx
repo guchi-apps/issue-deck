@@ -22,10 +22,19 @@ function makeStatus(overrides: Partial<AvailableReleaseStatus>): AvailableReleas
   };
 }
 
-function statusWithReleaseCi(ciState: CiState | null): AvailableReleaseStatus {
+function statusWithReleaseCi(
+  ciState: CiState | null,
+  mergeable: boolean | null = null,
+): AvailableReleaseStatus {
   return makeStatus({
     phase: "release_pr_open",
-    releasePullRequest: { number: 42, url: "https://example.com/pr/42", title: "release", ciState },
+    releasePullRequest: {
+      number: 42,
+      url: "https://example.com/pr/42",
+      title: "release",
+      ciState,
+      mergeable,
+    },
   });
 }
 
@@ -72,6 +81,7 @@ describe("ReleaseProgress CI状態バッジ", () => {
             url: "https://example.com/pr/7",
             title: "bump",
             ciState: "failure",
+            mergeable: null,
             version: "1.1.0",
             reason: null,
             changelog: null,
@@ -96,6 +106,7 @@ describe("ReleaseProgress 更新履歴表示", () => {
         url: "https://example.com/pr/7",
         title: "bump",
         ciState: null,
+        mergeable: null,
         version: "1.1.0",
         reason,
         changelog,
@@ -115,5 +126,56 @@ describe("ReleaseProgress 更新履歴表示", () => {
     render(<ReleaseProgress status={statusWithBump("判断根拠のテキスト", null)} />);
     expect(screen.getByText("判断根拠のテキスト")).not.toBeNull();
     expect(screen.queryByText("更新履歴（利用者向け）")).toBeNull();
+  });
+});
+
+describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("本番へのリリースPRのCIが失敗しているとCI修正ボタンを出す", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("failure")} repoFullName="owner/repo" />);
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).not.toBeNull();
+  });
+
+  it("本番へのリリースPRがコンフリクトしていると解消ボタンとバッジを出す", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("success", false)} repoFullName="owner/repo" />);
+    expect(screen.getByText("コンフリクトあり")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).not.toBeNull();
+  });
+
+  it("CIが通っていてコンフリクトも無ければボタンを出さない", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("success", true)} repoFullName="owner/repo" />);
+    expect(screen.queryByRole("button", { name: "CI失敗を自動修正" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+  });
+
+  it("repoFullNameが渡されない場合は起動先が決まらないためボタンを出さない", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("failure", false)} />);
+    expect(screen.queryByRole("button", { name: "CI失敗を自動修正" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+  });
+
+  it("バンプPR（develop向け）のCI失敗にも同じボタンを出す", () => {
+    render(
+      <ReleaseProgress
+        status={makeStatus({
+          phase: "bump_pr_open",
+          bumpPullRequest: {
+            number: 7,
+            url: "https://example.com/pr/7",
+            title: "bump",
+            ciState: "failure",
+            mergeable: null,
+            version: "1.1.0",
+            reason: null,
+            changelog: null,
+          },
+        })}
+        repoFullName="owner/repo"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).not.toBeNull();
   });
 });

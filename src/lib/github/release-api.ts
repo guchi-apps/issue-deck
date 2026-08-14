@@ -209,6 +209,27 @@ export async function fetchRefCiState(
   return resolveCiStateFromCheckRuns(runs);
 }
 
+/**
+ * マージ待ちPRのコンフリクト有無だけを取り出す（#1293）。
+ *
+ * `mergeable`はPRの単体取得でしか返らず、GitHub側で非同期に計算されるため判定前は`null`。
+ * リリース進捗では「コンフリクトあり」の表示と自動解消ボタンの出し分けにしか使わないので、
+ * `fetchRefCiState`が取得失敗を`unknown`へ縮退させるのと同じく、失敗しても例外にせず
+ * `null`（＝判定できていない）として扱う。
+ */
+export async function fetchPullRequestMergeable(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<boolean | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
+  const res = await githubFetch(url, token).catch(() => null);
+  if (!res || !res.ok) return null;
+  const data: { mergeable?: boolean | null } = await res.json().catch(() => ({}));
+  return data.mergeable ?? null;
+}
+
 /** 「Release develop to main」workflowをdevelopブランチを対象に手動起動する */
 export async function dispatchReleaseWorkflow(
   owner: string,

@@ -38,6 +38,7 @@ export const GITHUB_API_FEATURES = [
   { key: "comment_write", label: "コメントの投稿・編集・削除" },
   { key: "workflow_cancel", label: "実行のキャンセル" },
   { key: "pull_request_merge", label: "PRのマージ" },
+  { key: "pull_request_repair", label: "PRの自動修復の起動" },
   { key: "release_dispatch", label: "リリースの起動" },
   { key: "progress_report", label: "進捗のProject反映" },
   { key: "sync", label: "Issueの再同期" },

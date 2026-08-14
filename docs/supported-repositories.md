@@ -205,6 +205,7 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 | `claude-ci-fix.yml` | `reusable-claude-ci-fix.yml` | 2026-08-11（#1066。issue-deck側のみ。他リポジトリへの適用は別Issue） |
 | `claude-conflict-resolve.yml` | `reusable-claude-conflict-resolve.yml` | 2026-08-11（#1066。issue-deck側のみ。他リポジトリへの適用は別Issue） |
 | `claude-review-develop.yml` | `reusable-claude-review-develop.yml` | 2026-08-11（#1078。issue-deck側のみ。他リポジトリへの適用は別Issue） |
+| `claude-pr-repair.yml` | `reusable-claude-pr-repair.yml` | 2026-08-14（#1293。新規のため最初から再利用可能ワークフローとして作成。issue-deck側のみ） |
 
 導入時の改変内容は各ワークフローファイル冒頭のコメントに記載されている。主な差異は以下のとおり。
 
