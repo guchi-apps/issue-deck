@@ -19,8 +19,8 @@ issue-deck（VPS）からサブPCへジョブを届ける方式として、SSH�
 issue-deckの画面「サブPCで開始」
   ↓ POST /api/dispatch          ジョブをキューに積む
 （キュー: DispatchJob テーブル）
-  ↑ POST /api/dispatch/claim    60秒ごとのポーリング（共有シークレット認証）
-scripts/subpc-dispatch-poller.sh（systemd timer）
+  ↑ POST /api/dispatch/claim    一定間隔のポーリング（共有シークレット認証）
+scripts/subpc-dispatch-poller.sh（systemd service・常駐）
   ↓
 scripts/start-local-session.sh <owner> <repo> <番号>
   ↓
@@ -107,6 +107,23 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 
 ホスト側が`maxConcurrency`を申告している場合は**小さい方**を採る。
 
+## ポーリング間隔も設定値にする
+
+`~/.config/issue-deck/dispatch.env`の`DISPATCH_POLL_INTERVAL_SECONDS`（既定60秒）。
+**コードにもsystemdのunitにも埋め込まない**（#1179のコメント）。
+
+ここが「画面のボタンを押してから起動が始まるまでの待ち時間」を決める。pull型を採った以上この
+遅延は避けられず、**実運用で許容できるかは動かしてみないと分からない**。許容できないと分かった
+場合はpush型やハイブリッド（普段はpull、起動時だけVPSから軽い通知）を検討することになるため、
+まず当たりを付ける実験ができる形にしておく。
+
+pollerをsystemd timerではなく**常駐サービス**にしているのはこのため。timerに間隔を持たせると、
+変更のたびにunitの編集と`daemon-reload`が要り、pollerの他の設定と置き場所も分かれる。
+落ちたときの復帰は`Restart=always`が持ち、1巡が固まってポーリングごと止まらないよう起動処理には
+`timeout`（`DISPATCH_LAUNCH_TIMEOUT_SECONDS`・既定15分）を掛けている。
+
+60秒間隔でissue-deck側にかかる負荷は1分あたりHTTP 2回・DBクエリ数件で、無視できる。
+
 ## API
 
 | ルート | 認証 | 用途 |
@@ -142,13 +159,16 @@ $EDITOR ~/.config/issue-deck/dispatch.env   # APP_BASE_URL と DISPATCH_SECRET �
 
 # 3. systemdへ登録（ユーザー単位。sudo不要）
 mkdir -p ~/.config/systemd/user
-cp ~/apps/issue-deck/deploy/subpc/issue-deck-dispatch-poller.{service,timer} ~/.config/systemd/user/
+cp ~/apps/issue-deck/deploy/subpc/issue-deck-dispatch-poller.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now issue-deck-dispatch-poller.timer
+systemctl --user enable --now issue-deck-dispatch-poller.service
 
-# 4. ログアウトしても動き続けるようにする（timerはログインセッションに紐づくため）
+# 4. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
 sudo loginctl enable-linger "$USER"
 ```
+
+**`dispatch.env`を変更したら`systemctl --user restart issue-deck-dispatch-poller.service`**。
+常駐プロセスが起動時に読むため、書き換えただけでは反映されない。
 
 `DISPATCH_SECRET`は1Password（`apps/issue-deck`）から書き出す。**毎分`op run`は挟まない**
 （1Password CLIの起動コストがポーリング間隔に対して重すぎる）。手順は`dispatch.env.example`の
@@ -164,7 +184,7 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
 
-`systemctl --user list-timers issue-deck-dispatch-poller.timer` で次回の発火時刻を確認できる。
+`systemctl --user status issue-deck-dispatch-poller.service` で常駐しているかを確認できる。
 
 ## 受け口の複製に注意（#1179で増えた）
 
