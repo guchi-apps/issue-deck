@@ -16,6 +16,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROMPT_TEMPLATE="$ROOT/scripts/prompts/review-agent.md"
 
+# セッションの出力言語（#1395）。実装セッション（scripts/run-issue-session.sh）と共有する。
+# shellcheck source=scripts/lib/agent-language.sh
+source "$ROOT/scripts/lib/agent-language.sh"
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "Error: gh コマンドが見つかりません。" >&2
   exit 1
@@ -130,6 +134,9 @@ if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
 else
   echo "共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
+
+# 出力言語（#1395）。実装セッションと同じ文面・同じ扱い（scripts/lib/agent-language.sh）。
+append_language_system_prompt
 
 # 権限モード（#1205）。既定は `auto`。実装セッション（run-issue-session.sh）と同じ理由・同じ
 # 環境変数で切り替える。レビュー・統合エージェントも`gh pr view`・`gh pr merge`等のBashコマンドを

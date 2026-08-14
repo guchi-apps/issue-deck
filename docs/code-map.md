@@ -216,6 +216,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
   黙って素通りする。** 設計は
   [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
+- **エージェントの出力を日本語に揃える指示は、起動フラグとプロンプト本文の二層で持つ**（#1395）。
+  文面の正は`scripts/lib/agent-language.sh`で、`run-issue-session.sh`・`start-reviewer.sh`が
+  `--append-system-prompt`で渡す。そこを通らない無人実行のために、同じ文面を`.github/prompts/`・
+  `scripts/prompts/`の「## 出力言語」にも置いている。**片方だけ変えない。** 設計は
+  [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)。
 - **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
   作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
   `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、
