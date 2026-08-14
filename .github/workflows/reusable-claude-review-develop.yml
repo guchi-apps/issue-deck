@@ -13,11 +13,9 @@ name: Reusable Claude Code Review (develop向けPR)
 #   skipされ、レビュー自体が行われないまま放置される事故につながるため)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
 #   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
-#   付与の有無を確認する。該当時は00.check-userを
-#   付与し、判定理由をissueにコメント投稿する(#94, #366)。ただしこのpush開始時点で
-#   既に00.check-userが付いていた場合はコメント投稿のみ省略する(ラベルは毎回再付与する)。
-#   実装エージェントが同一PRへ連続してpushする間、同内容の確認要求コメントが繰り返し
-#   投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
+#   付与の有無を確認する(#94, #366)。**判定するだけで、00.check-userの付与と理由コメントの
+#   投稿は行わない**(#1406。実際に反映するのは最後のauto-mergeジョブ)。判定結果は
+#   risky・reasons・already-check-userの各outputで渡す。
 #   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
@@ -31,15 +29,23 @@ name: Reusable Claude Code Review (develop向けPR)
 #   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
 #   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
 #   実行しないまま success で終わる(ステップもジョブも成功扱いになる点に注意)。
-#   その場合もrisk-checkが .github/workflows/** の変更を検知して00.check-userを付与するため
-#   自動マージはされない。詳細は docs/multi-agent/labels.md
+#   その場合もrisk-checkが .github/workflows/** の変更を検知した結果をauto-mergeが反映して
+#   00.check-userを付与するため自動マージはされない。詳細は docs/multi-agent/labels.md
 #   「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」参照
 # - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
 #   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
 #   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
-#   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)
-# - auto-merge: risk-check/claude-reviewの結果、対応Issueに00.check-userが
-#   付いていなければ gh pr merge --auto --merge を実行する
+#   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)。
+#   auto-mergeごとスキップされる経路では機械的リスク判定の理由も一緒に投稿する(#1406)
+# - auto-merge: **まず機械的リスク判定(risk-check)の結果を反映する**。該当していれば
+#   00.check-userを付与し、判定理由をissueにコメント投稿する(#94, #366, #1406)。ただし
+#   このpush開始時点で既に00.check-userが付いていた場合はコメント投稿のみ省略する
+#   (ラベルは毎回再付与する)。実装エージェントが同一PRへ連続してpushする間、同内容の確認要求
+#   コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
+#   そのうえで、対応Issueに00.check-userが付いていなければ gh pr merge --auto --merge を実行する。
+#   付与をこの最後のジョブまで遅らせているのは、risk-checkの時点で付けると、そのあとに走る
+#   claude-review(数分)のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では
+#   「CI実行中」としてマージボタンが押せない時間が続くため(#1406)
 # - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
 #   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
@@ -160,12 +166,18 @@ jobs:
     needs: [identify-issue, wait-for-ci]
     runs-on: ubuntu-latest
     permissions:
-      issues: write
+      issues: read
     outputs:
-      # 機械的リスク判定に該当したか(00.check-user付与の有無と一致する)
+      # 機械的リスク判定に該当したか(auto-mergeジョブでの00.check-user付与の有無と一致する)
       risky: ${{ steps.risk.outputs.risky }}
       # 後続のclaude-reviewを実行するか(#992)。riskyより広い条件で立つ
       needs-review: ${{ steps.risk.outputs.needs-review }}
+      # 該当した理由(複数行)。auto-mergeジョブが投稿するコメントの本文になる(#1406)
+      reasons: ${{ steps.risk.outputs.reasons }}
+      # このpush開始時点で既に00.check-userが付いていたか。重複コメント抑止(#594)の判定に使う。
+      # auto-mergeジョブ側で読み直すと、claude-review自身が付けたラベルを見て理由コメントを
+      # 取りこぼすため、判定材料はこの時点の状態のまま渡す(#1406)
+      already-check-user: ${{ steps.risk.outputs.already-check-user }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -292,24 +304,29 @@ jobs:
             fi
           fi
 
+          # ここでは判定するだけで、00.check-userの付与と理由コメントの投稿は行わない(#1406)。
+          # 付与はワークフロー終盤のauto-mergeジョブが行う。ここで付けると、その後に走る
+          # claude-review(数分)・auto-mergeのcheck-runが残ったままユーザーへ通知が飛び、
+          # issue-deckの画面では「CI実行中」としてマージボタンが押せない時間が続くため。
           if [ "$RISKY" = "true" ]; then
-            echo "リスクありと判定:"
+            echo "リスクありと判定(00.check-userの付与はauto-mergeジョブで行う):"
             echo "$REASONS"
-            if [ -n "$ISSUE_NUMBER" ]; then
-              gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-              # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)
-              if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
-                echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
-              else
-                COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
-                COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
-                COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
-                gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
-              fi
-            fi
           else
             echo "機械的リスク判定: 該当なし"
           fi
+
+          # 判定結果を後続ジョブへ渡す。理由は複数行になるためヒアドキュメント記法を使う。
+          # 区切りはREASONS本文と衝突しないようrun idを含める。
+          ALREADY_CHECK_USER=false
+          if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+            ALREADY_CHECK_USER=true
+          fi
+          {
+            echo "already-check-user=${ALREADY_CHECK_USER}"
+            echo "reasons<<RISK_REASONS_EOF_${GITHUB_RUN_ID}"
+            echo "$REASONS"
+            echo "RISK_REASONS_EOF_${GITHUB_RUN_ID}"
+          } >> "$GITHUB_OUTPUT"
 
           # ここから、後続のclaude-reviewを実行するかどうかのゲート判定(#992)。
           # develop向けPRの大半は2〜5ファイル・数百行以内の小規模かつ低リスクな変更で、
@@ -537,24 +554,36 @@ jobs:
           "$CLAUDE_USAGE_SCRIPT" "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
 
   claude-review-fallback:
-    needs: [identify-issue, claude-review]
+    needs: [identify-issue, risk-check, claude-review]
     if: always() && needs.claude-review.result == 'failure'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       issues: write
     steps:
+      # claude-reviewが失敗するとauto-mergeはスキップされ、そこへ移した機械的リスク判定の
+      # 反映ステップ(#1406)ごと落ちる。00.check-user自体はこのジョブが付けるので保留は
+      # 担保されるが、理由だけが消えてしまうため、該当していればここで一緒に伝える。
       - name: 自動レビュー失敗をPRに通知する
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          RISKY: ${{ needs.risk-check.outputs.risky }}
+          REASONS: ${{ needs.risk-check.outputs.reasons }}
         run: |
           set -e
           gh pr comment "$PR_NUMBER" --body "⚠️ 自動レビュー（claude-review）が実行できませんでした。Actionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
           if [ -n "$ISSUE_NUMBER" ]; then
             gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+            COMMENT_BODY="⚠️ 自動レビュー（claude-review）が実行できなかったため、developへのマージ前にユーザーの確認が必要です。"
+            if [ "$RISKY" = "true" ]; then
+              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"機械的リスク判定にも以下の理由で該当しています。"
+              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+            fi
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
 
   auto-merge:
@@ -580,7 +609,41 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # 機械的リスク判定の結果(00.check-user・理由コメント)をここで反映するため(#1406)
+      issues: write
     steps:
+      # 機械的リスク判定(risk-check)の結果を、ワークフローの最後のジョブであるここで反映する(#1406)。
+      # risk-checkの時点で付けると、そのあとに走るclaude-review(数分)とこのジョブのcheck-runが
+      # 残ったまま通知だけが飛び、issue-deckの画面ではCI実行中としてマージボタンが押せない。
+      # 付与の直後に下のステップがラベルを読み直すので、自動マージ可否の判定は従来どおり
+      # 「ラベルが付いていればスキップ」で成立する。
+      #
+      # トークンは github.token を使う(マージ実行のステップだけWORKFLOW_PAT)。
+      # ラベル付与・コメント投稿の名義を従来のgithub-actions[bot]から変えないため
+      # (docs/attribution.md)。
+      - name: 機械的リスク判定の結果を反映する
+        if: needs.risk-check.outputs.risky == 'true' && needs.identify-issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          REASONS: ${{ needs.risk-check.outputs.reasons }}
+          ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
+        run: |
+          set -e
+          gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
+          # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)。
+          # 判定材料はrisk-checkが掴んだpush開始時点の状態で、ここで読み直さない。読み直すと
+          # claude-review自身が付けたラベルを見て、理由コメントを取りこぼす(#1406)
+          if [ "$ALREADY_CHECK_USER" = "true" ]; then
+            echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
+          else
+            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
+          fi
+
       # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
       # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の
       # ワークフローを起動しない」というGitHub仕様の影響を受け、issue-labels.ymlの

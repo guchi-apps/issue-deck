@@ -228,7 +228,7 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメントに埋め込んだ
   うえで通常どおり完了処理（PR作成）まで進める（PR作成自体はブロックしない。スクリーンショットは
   PR側ではなくIssue側のスレッドに集約する、#589）。ただし developへの
-  実際のマージは`risk-check`ジョブが`00.check-user`を付与するため、人間がスクリーンショットを
+  実際のマージは`risk-check`ジョブの判定を受けて`auto-merge`ジョブが`00.check-user`を付与するため、人間がスクリーンショットを
   確認するまで保留される（#567）。詳細はPhase7参照。
 - `23.preview-required`が付いているissueをPhase5経由（無人実行）で処理する場合（対応済み、#813・
   #832）: `24.screenshot-required`と同様の考え方で、それを理由にPR作成をブロックしない方式に
@@ -239,5 +239,5 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   無人実行から実際に開けるプレビューURLを自動投稿するようになったが、#1265でサブPC上の
   ローカルセッションが`tailscale serve`でtailnetへ開発環境を出す方式へ移行したため、Fly.io側は
   #1308で廃止した。現在、無人実行からプレビューURLを発行する経路は無い。developへの実際のマージは
-  `risk-check`ジョブが`23.preview-required`を検知して`00.check-user`を付与するため、人間が画面を
+  `risk-check`ジョブが`23.preview-required`を検知し`auto-merge`ジョブが`00.check-user`を付与するため、人間が画面を
   確認するまで保留される点は変わらない。
