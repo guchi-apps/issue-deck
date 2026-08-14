@@ -62,6 +62,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
+- **Issueの親子関係（GitHubネイティブのサブIssue）もキャッシュせず、詳細を開いたときだけ取得する**
+  （`/api/issues/sub-issues`・[`lib/github/sub-issues-api.ts`](../src/lib/github/sub-issues-api.ts)）。
+  DBへ持たせるとGitHub Appの`sub_issues` Webhookイベント購読の追加（GitHub App設定の手作業変更）と
+  スキーマ変更が要るのに対し、得られるのは詳細1回あたり1クエリぶんの節約でしかない。子の
+  `projectStatus`だけはDBキャッシュから合流させ、進捗の内訳を出す（`lib/sub-issue-progress.ts`）。
+  **一覧にはバッジを出していない**（IssueごとにGraphQLを1回叩くN+1になるため）。運用は
+  [multi-agent/labels.md](multi-agent/labels.md)。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
   判定は必ず [`lib/issue-progress.ts`](../src/lib/issue-progress.ts) の `resolveProgressStatus`
   を通す（Status名を直接見ない）。Statusは`projects_v2_item`

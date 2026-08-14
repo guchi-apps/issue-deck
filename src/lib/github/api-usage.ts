@@ -32,6 +32,7 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_list", label: "マージ待ちPR一覧の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "issue_comments", label: "コメント取得" },
+  { key: "sub_issues", label: "子Issueの取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
   { key: "issue_write", label: "Issueの作成・更新・削除・移動" },
   { key: "comment_write", label: "コメントの投稿・編集・削除" },

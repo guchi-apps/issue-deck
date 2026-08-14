@@ -31,6 +31,33 @@ export type IssueMilestone = {
   progressPercent: number;
 };
 
+/**
+ * 親子関係で結ばれたIssue1件。`GET /api/issues/sub-issues`が返す。
+ *
+ * 番号・タイトル・stateはGitHub（ネイティブのサブIssue関係）から、`projectStatus`だけを
+ * ローカルDBのキャッシュから合流させている。DBに無い相手（同期対象外・古すぎてキャッシュに
+ * 載っていない）でもリンクとタイトルは欠けない。
+ */
+export type SubIssue = {
+  number: number;
+  title: string;
+  state: IssueState;
+  htmlUrl: string;
+  /**
+   * GitHub Projects v2のStatus。DBキャッシュに無い場合はnull。
+   * 進捗の判定は@/lib/issue-progressのresolveProgressStatusを通すこと
+   */
+  projectStatus: string | null;
+};
+
+/** 選択中のIssueから見た親子関係。どちらも無い場合がふつうにある */
+export type SubIssueRelations = {
+  parent: SubIssue | null;
+  children: SubIssue[];
+  /** GitHub上の子の総数。`children.length`より多い場合、取得しきれていない分がある */
+  childCount: number;
+};
+
 export type Issue = {
   id: string;
   number: number;
