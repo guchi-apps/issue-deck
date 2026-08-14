@@ -184,6 +184,63 @@ describe("CommentThread PRマージ待ちの表示", () => {
     expect(screen.queryByText("Pull Requestのマージが必要です")).toBeNull();
     expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
+
+  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 画面上部のマージボタンと状態を揃える）", async () => {
+    const onPullRequestMerged = vi.fn();
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+        onPullRequestMerged={onPullRequestMerged}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
+
+    await waitFor(() => {
+      expect(onPullRequestMerged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("画面上部のマージボタンから押された場合（pullRequestMerged）もマージ済みの表示になる（#1288）", () => {
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        pullRequestLink={{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+        pullRequestMerged
+      />,
+    );
+
+    expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    expect(screen.queryByText("修正を依頼する")).toBeNull();
+    const button = screen.getByRole("button", { name: /マージ済み/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
 });
 
 describe("CommentThread PRマージ待ちのCI状態とマージボタン", () => {
