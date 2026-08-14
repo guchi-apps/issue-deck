@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useState } from "react";
+import { type RefObject, useState, type ReactNode } from "react";
 
 import {
   Ban,
@@ -76,6 +76,8 @@ type CommentThreadProps = {
   isUpdating?: boolean;
   /** trueの場合、直近のbotコメントの下に承認・修正・取り下げボタン（またはPRマージ案内）を表示する（00.check-userラベルが付いているissue用） */
   approvalPending?: boolean;
+  /** サブPC実行中に承認が空振りすることを伝える案内（#1264） */
+  localSessionNotice?: ReactNode;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
   /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク。取得できない場合はnull */
@@ -194,6 +196,7 @@ function ApprovalActions({
   pullRequestCiStatus,
   repositoryFullName,
   issueSuggestions,
+  localSessionNotice,
 }: {
   onApprove: (text?: string) => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
@@ -214,6 +217,7 @@ function ApprovalActions({
   pullRequestCiStatus?: PullRequestCiStatus | null;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
+  localSessionNotice?: ReactNode;
 }) {
   const [text, setText] = useState("");
   const [textValidationError, setTextValidationError] = useState<string | null>(null);
@@ -379,6 +383,9 @@ function ApprovalActions({
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
       <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
+      {/* サブPCで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
+          反応しない（#1264）。押しても何も起きないことを、押す前に出す */}
+      {localSessionNotice}
       {isFallbackNotice ? (
         <div className="flex flex-wrap justify-end gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
@@ -465,6 +472,7 @@ export function CommentThread({
   onDelete,
   isUpdating,
   approvalPending,
+  localSessionNotice,
   mergeApprovalPending,
   pullRequestLink,
   pullRequestCiStatus,
@@ -515,7 +523,8 @@ export function CommentThread({
         <p className="text-sm text-muted-foreground">まだコメントはありません</p>
         {approvalPending && onApprove && onReject && onWithdraw && (
           <ApprovalActions
-            onApprove={onApprove}
+            localSessionNotice={localSessionNotice}
+          onApprove={onApprove}
             onReject={onReject}
             onWithdraw={onWithdraw}
             onRequestPrFix={onRequestPrFix}
@@ -724,7 +733,8 @@ export function CommentThread({
               </div>
               {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
                 <ApprovalActions
-                  onApprove={onApprove}
+                  localSessionNotice={localSessionNotice}
+          onApprove={onApprove}
                   onReject={onReject}
                   onWithdraw={onWithdraw}
                   onRequestContinuation={onRequestContinuation}
@@ -751,6 +761,7 @@ export function CommentThread({
       </ul>
       {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === -1 && (
         <ApprovalActions
+          localSessionNotice={localSessionNotice}
           onApprove={onApprove}
           onReject={onReject}
           onWithdraw={onWithdraw}

@@ -45,6 +45,11 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * `runId`がnullのまま「起動待ち」を出し続けてしまう。
    */
   executionTarget?: IssueExecutionTarget;
+  /**
+   * セッションの様子の短い表現（#1264・`shortIssueSessionLabel`）。
+   * **入力待ち・終了・異常終了のときだけ渡ってくる**（通常の実行中は一覧が情報で埋まるため出さない）。
+   */
+  sessionLabel?: string | null;
 };
 
 const BADGE_SIZE = 18;
@@ -64,6 +69,7 @@ export function WorkflowStepBadge({
   running,
   qaAnswerPending = false,
   executionTarget,
+  sessionLabel = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -92,7 +98,9 @@ export function WorkflowStepBadge({
     executionTarget && !executionTarget.expectsActionsRun
       ? describeIssueExecutionTarget(executionTarget)
       : null;
-  const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : targetLabel);
+  // 実行先とセッションの様子は両方出す（例:「subpc・入力待ち」）。どちらが欠けても意味が変わる
+  const localSuffix = [targetLabel, sessionLabel].filter(Boolean).join("・") || null;
+  const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
   const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"
@@ -109,8 +117,8 @@ export function WorkflowStepBadge({
             ? "（Claudeの回答待ち）"
             : awaitingDispatch
               ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
-              : targetLabel
-                ? `（${targetLabel}で実行中）`
+              : localSuffix
+                ? `（${localSuffix}）`
                 : ""
       }`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
