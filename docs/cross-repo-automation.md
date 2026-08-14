@@ -19,7 +19,10 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   `23.preview-required`・`24.screenshot-required`に対応するラベル）を付与する。リポジトリ固有の
   前提を含まない。
 - `src/lib/github/ask-claude.ts`: 「Claudeに質問する」ボタン押下時に`@claude 質問: <本文>`という
-  定型コメントを投稿する。回答コメントは`<!-- issue-deck-qa-answer -->`マーカーで識別する。
+  定型コメントを投稿する。質問コメントは末尾の`<!-- issue-deck-question -->`マーカー、回答コメントは
+  `<!-- issue-deck-qa-answer -->`マーカーで識別する（#1294。「質問である」ことの識別と「Actionsを
+  起こすトリガー」は別の軸で、後者は本文の先頭が`@claude`かどうかで決まる。詳細は
+  [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)）。
   こちらもリポジトリ固有の前提を含まない。
 - どちらも投稿するのはコメントとラベルのみで、実際にコメントを解釈して実装まで進める処理は
   持たない。つまりアプリ側は「起動トリガーを送る」役割に閉じており、他リポジトリでこのボタンを
