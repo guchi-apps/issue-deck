@@ -35,7 +35,12 @@ export function summarizeDispatchQueue(
   jobs: readonly DispatchJobView[],
   concurrency: number | null,
 ): DispatchQueueSummary {
-  const byOldest = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // **起動ジョブだけを数える**（#1332）。セッションの停止・終了は同時実行数の枠を使わず、
+  // tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
+  // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る
+  const byOldest = [...jobs]
+    .filter((job) => job.kind === "LAUNCH")
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const running = byOldest.filter(isRunningStatus);
   const queued = byOldest.filter((job) => job.status === "QUEUED");

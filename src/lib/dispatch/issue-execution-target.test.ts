@@ -33,6 +33,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: REPO,
     issueNumber: 1,
     targetHost: "subpc",
+    kind: "LAUNCH",
     status: "QUEUED",
     message: null,
     tmuxSessionName: null,

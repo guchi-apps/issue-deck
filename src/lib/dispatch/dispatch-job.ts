@@ -20,6 +20,31 @@ export type DispatchJobStatus =
   | "CANCELED";
 
 /**
+ * ジョブの種別（#1332）。Prismaの`DispatchJobKind`と同じ並び。
+ *
+ * - `LAUNCH` … セッションを立てる（従来のジョブ）
+ * - `INTERRUPT` … 走っている処理を中断する（`tmux send-keys … C-c`）。セッションは残る
+ * - `KILL` … セッションごと畳む（`tmux kill-session`）
+ */
+export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL";
+
+/** 既に立っているセッションを操作するジョブ（起動しないジョブ） */
+export const SESSION_CONTROL_JOB_KINDS: readonly DispatchJobKind[] = ["INTERRUPT", "KILL"];
+
+export function isSessionControlJobKind(kind: DispatchJobKind): boolean {
+  return SESSION_CONTROL_JOB_KINDS.includes(kind);
+}
+
+/** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
+export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
+  // **省略時は`LAUNCH`。** 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
+  if (value === undefined || value === null || value === "launch") return "LAUNCH";
+  if (value === "interrupt") return "INTERRUPT";
+  if (value === "kill") return "KILL";
+  return null;
+}
+
+/**
  * 「まだ終わっていない」状態。この間だけ`activeKey`が入り、同じIssueに対して
  * 2件目を積めない（unique制約でDBが保証する）。
  */
@@ -45,6 +70,8 @@ export type DispatchJobView = {
   repositoryFullName: string;
   issueNumber: number;
   targetHost: string;
+  /** 何をするジョブか（#1332）。省略しない（画面が起動ジョブと制御ジョブを取り違えないため） */
+  kind: DispatchJobKind;
   status: DispatchJobStatus;
   message: string | null;
   tmuxSessionName: string | null;
@@ -66,6 +93,12 @@ export type DispatchHostView = {
    * `false`（撮れない）とは区別する。判定材料が無いことを理由に選択肢を塞がないため。
    */
   screenshotCapable: boolean | null;
+  /**
+   * 走っているセッションを画面から操作できるか（#1332）。**`null`（未申告＝古いpoller）は
+   * 「できない」として扱う**。`screenshotCapable`とは逆で、判定材料が無いまま制御ジョブを
+   * 配ると、古いpollerは`kind`を読まないため起動ジョブとして解釈してしまう。
+   */
+  sessionControlCapable: boolean | null;
 };
 
 /**
@@ -88,6 +121,15 @@ export const DISPATCH_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
  * 潰すため、claimのタイムアウトと同じ幅を取る。
  */
 export const DISPATCH_HEARTBEAT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * 積んだまま取りに来られない制御ジョブ（#1332）を見限るまでの時間（ミリ秒）。
+ *
+ * **起動ジョブと違い、待たせるほど危険になる。** `QUEUED`のまま残った`C-c`が何時間も後に
+ * 届くと、そのときセッションでは別の作業が走っている。ポーリング間隔（既定60秒）の
+ * 数回ぶんを過ぎたら「届かなかった」として落とす。
+ */
+export const DISPATCH_CONTROL_QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** ホスト名に許可する文字。パスやtmuxのターゲット指定に混ざらない範囲へ絞る */
 const HOST_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
@@ -121,9 +163,19 @@ export function parseDispatchTarget(
 /**
  * 未完了ジョブの一意キー。`DispatchJob.activeKey`に入れ、終了時にnullへ戻す。
  * MySQLのunique indexは複数のNULLを許すため、これで「未完了は1件まで」が成立する。
+ *
+ * **種別ごとに名前空間を分ける**（#1332）。起動ジョブは従来どおり`owner/repo#番号`で、制御ジョブは
+ * `interrupt:owner/repo#番号`のように前置きする。制御ジョブでnullにすると起動ジョブとは
+ * 衝突しない代わりに、スマホでの連打ぶんだけ`C-c`が積まれる。前置きなら衝突せず、
+ * 「同じIssueに未処理の停止は1件まで」もDBが保証する。
  */
-export function buildDispatchActiveKey(repositoryFullName: string, issueNumber: number): string {
-  return `${repositoryFullName}#${issueNumber}`;
+export function buildDispatchActiveKey(
+  repositoryFullName: string,
+  issueNumber: number,
+  kind: DispatchJobKind = "LAUNCH",
+): string {
+  const target = `${repositoryFullName}#${issueNumber}`;
+  return kind === "LAUNCH" ? target : `${kind.toLowerCase()}:${target}`;
 }
 
 /** 申告が届いてから一定時間内なら生存とみなす */
@@ -228,6 +280,89 @@ export function describeDispatchEnqueueRejection(
 }
 
 /**
+ * 制御ジョブ（#1332）の呼び方。**画面のボタンとジョブの状態表示で同じ言葉を使う。**
+ * 押したボタンと画面に出る文言が違うと、届いたのかどうかが分からなくなる。
+ */
+export const SESSION_CONTROL_LABELS = {
+  INTERRUPT: {
+    /** ボタンの文言 */
+    action: "停止",
+    /** 積んだ直後（まだ届いていない） */
+    sending: "停止を送信しました",
+    /** poller側で実行できた */
+    done: "停止を送りました",
+    /** 実行できなかった */
+    failed: "停止できませんでした",
+  },
+  KILL: {
+    action: "セッションを閉じる",
+    sending: "セッションの終了を送信しました",
+    done: "セッションを閉じました",
+    failed: "セッションを閉じられませんでした",
+  },
+} as const satisfies Record<"INTERRUPT" | "KILL", Record<string, string>>;
+
+/**
+ * セッションを操作できない理由（#1332）。**画面にそのまま出す前提**で、
+ * 起動側の`DispatchEnqueueRejection`と同じ立場のもの。
+ */
+export type SessionControlRejection =
+  | "host_unknown"
+  | "host_offline"
+  | "session_control_unsupported"
+  | "session_not_found"
+  | "session_not_alive"
+  | "already_queued";
+
+export function describeSessionControlRejection(
+  rejection: SessionControlRejection,
+  context: { hostName: string; kind: DispatchJobKind },
+): string {
+  const label =
+    context.kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
+  switch (rejection) {
+    case "host_unknown":
+      return `${context.hostName} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${context.hostName} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "session_control_unsupported":
+      // **何をすれば押せるようになるかまで書く。** pollerはサブPC側の作業ツリーから動くため、
+      // 更新するのは人の作業になる（issue-deck側を新しくしても解消しない）
+      return `${context.hostName} のpollerがセッションの操作に対応していません（更新してから押せるようになります）。`;
+    case "session_not_found":
+      return `${context.hostName} にこのIssueのセッションが見当たりません。`;
+    case "session_not_alive":
+      return "このセッションは既に終了しています。";
+    case "already_queued":
+      return `このIssueには未処理の${label.action}が既にあります。`;
+  }
+}
+
+/**
+ * セッションを操作できるか、**押される前に**判定する（#1332）。
+ *
+ * 判定の並びと文言は`enqueueSessionControlJob`（`jobs.ts`）と同じものを使う。画面だけに置くと
+ * 「押せるのにAPIが拒否する」（その逆も）が生まれるのは、起動側（#1180）と同じ。
+ */
+export function resolveSessionControlRejection(params: {
+  host: Pick<DispatchHostView, "online" | "sessionControlCapable"> | null | undefined;
+  session: Pick<DispatchSessionView, "state"> | null | undefined;
+  kind: DispatchJobKind;
+  hasActiveControlJob: boolean;
+}): SessionControlRejection | null {
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.sessionControlCapable !== true) return "session_control_unsupported";
+  if (!params.session) return "session_not_found";
+  // **`INTERRUPT`は生きているセッションにしか意味が無い。** `KILL`は逆に、終了したペインが
+  // 残っている（`EXITED`/`FAILED`）セッションを片付ける用途があるので許す
+  if (params.session.state === "GONE") return "session_not_found";
+  if (params.kind === "INTERRUPT" && params.session.state !== "ALIVE") return "session_not_alive";
+  if (params.hasActiveControlJob) return "already_queued";
+  return null;
+}
+
+/**
  * 起動先として選べない理由を、**押される前に**判定する（#1180）。
  *
  * 判定の並びと理由の文言は`enqueueDispatchJob`（`jobs.ts`）と同じものを使う。片方だけで
@@ -297,10 +432,15 @@ export function findBlockingSession(params: {
  */
 export type DispatchJobTone = "pending" | "running" | "success" | "error" | "muted";
 
-export function describeDispatchJobStatus(status: DispatchJobStatus): {
+export function describeDispatchJobStatus(
+  status: DispatchJobStatus,
+  /** 制御ジョブ（#1332）は「起動しました」では意味が通らないため、種別で文言を変える */
+  kind: DispatchJobKind = "LAUNCH",
+): {
   label: string;
   tone: DispatchJobTone;
 } {
+  if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
       return { label: "順番待ち", tone: "pending" };
@@ -324,6 +464,38 @@ export function describeDispatchJobStatus(status: DispatchJobStatus): {
   }
 }
 
+/**
+ * 制御ジョブ（#1332）の状態の見せ方。
+ *
+ * **押してから効くまでの間（`QUEUED`）を「送信しました」と出す。** pull型なので最大で
+ * ポーリング間隔（既定60秒）は何も起きず、そこを黙っていると押せていないように見える。
+ */
+function describeSessionControlJobStatus(
+  status: DispatchJobStatus,
+  kind: DispatchJobKind,
+): { label: string; tone: DispatchJobTone } {
+  const label =
+    kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
+  switch (status) {
+    case "QUEUED":
+    case "CLAIMED":
+    case "RUNNING":
+      return { label: label.sending, tone: "pending" };
+    case "SUCCEEDED":
+      return { label: label.done, tone: "success" };
+    case "FAILED":
+      return { label: label.failed, tone: "error" };
+    // 操作しようとしたセッションが既に無かった場合（poller側の`skipped`）。
+    // **止めたかったものが止まっているので赤くしない**
+    case "SKIPPED":
+      return { label: "セッションは既にありませんでした", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "起動先へ届きませんでした", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
 /** 画面から取り消せる状態か（`running`は途中で止めると中途半端なworktreeが残るため不可） */
 export function isCancelableDispatchJobStatus(status: DispatchJobStatus): boolean {
   return status === "QUEUED" || status === "CLAIMED";
@@ -341,8 +513,37 @@ export function findDispatchJobForIssue(
   repositoryFullName: string,
   issueNumber: number,
 ): DispatchJobView | null {
+  // **起動ジョブに限る**（#1332）。呼び出し元は戻り値の未完了判定をそのまま
+  // 「起動を塞ぐか」（`hasActiveJob`）に使うため、制御ジョブが混ざると停止を押した瞬間に
+  // 起動が押せなくなる。制御ジョブは`findSessionControlJobForIssue`が返す
+  return findJobForIssue(jobs, repositoryFullName, issueNumber, (job) => job.kind === "LAUNCH");
+}
+
+/**
+ * あるIssueについて画面に出す制御ジョブ（#1332）を1件選ぶ。
+ * 選び方は`findDispatchJobForIssue`と同じで、対象が制御ジョブ（`INTERRUPT`/`KILL`）になる。
+ */
+export function findSessionControlJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(jobs, repositoryFullName, issueNumber, (job) =>
+    isSessionControlJobKind(job.kind),
+  );
+}
+
+function findJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+  matches: (job: DispatchJobView) => boolean,
+): DispatchJobView | null {
   const mine = jobs.filter(
-    (job) => job.repositoryFullName === repositoryFullName && job.issueNumber === issueNumber,
+    (job) =>
+      job.repositoryFullName === repositoryFullName &&
+      job.issueNumber === issueNumber &&
+      matches(job),
   );
   if (mine.length === 0) return null;
 
@@ -394,6 +595,16 @@ export function resolveScreenshotRejection(host: DispatchHostView | null): strin
     return `${host.name}にPlaywrightのブラウザが入っていないため、スクリーンショットを取得できません。`;
   }
   return null;
+}
+
+/**
+ * 取りに来られないまま失効した制御ジョブ（#1332）に残す理由。
+ *
+ * **時間が経った操作は届けない方が安全。** 何時間も後に`C-c`が着弾すると、そのとき
+ * セッションでは別の作業が走っている。
+ */
+export function describeDispatchControlTimeout(): string {
+  return "起動先が取りに来なかったため取り消しました（pollerが動いているか確認してください）。";
 }
 
 /** 起動が届かなかったジョブに残す理由（timeoutの内訳） */

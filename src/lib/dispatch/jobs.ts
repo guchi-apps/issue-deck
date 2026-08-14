@@ -7,19 +7,26 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
+  describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
   describeDispatchTimeout,
+  describeSessionControlRejection,
   DISPATCH_CLAIM_TIMEOUT_MS,
+  DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
   DISPATCH_HEARTBEAT_TIMEOUT_MS,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostRepositories,
   resolveDispatchConcurrency,
+  resolveSessionControlRejection,
+  SESSION_CONTROL_JOB_KINDS,
   type DispatchEnqueueRejection,
   type DispatchHostView,
+  type DispatchJobKind,
   type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
+  type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 
 /**
@@ -45,6 +52,7 @@ function toJobView(job: DispatchJob): DispatchJobView {
     repositoryFullName: job.repositoryFullName,
     issueNumber: job.issueNumber,
     targetHost: job.targetHost,
+    kind: job.kind,
     status: job.status,
     message: job.message,
     tmuxSessionName: job.tmuxSessionName,
@@ -63,6 +71,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     online: isDispatchHostOnline(host.lastSeenAt, now),
     lastSeenAt: host.lastSeenAt.toISOString(),
     screenshotCapable: host.screenshotCapable,
+    sessionControlCapable: host.sessionControlCapable,
   };
 }
 
@@ -80,6 +89,7 @@ async function getDispatchConcurrency(): Promise<number> {
 export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<number> {
   const claimDeadline = new Date(now.getTime() - DISPATCH_CLAIM_TIMEOUT_MS);
   const heartbeatDeadline = new Date(now.getTime() - DISPATCH_HEARTBEAT_TIMEOUT_MS);
+  const controlDeadline = new Date(now.getTime() - DISPATCH_CONTROL_QUEUE_TIMEOUT_MS);
 
   const stale = await db.dispatchJob.findMany({
     where: {
@@ -88,14 +98,21 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         { status: "RUNNING", heartbeatAt: { lt: heartbeatDeadline } },
         // heartbeatが一度も届かないままRUNNINGになっている場合はstartedAtで測る
         { status: "RUNNING", heartbeatAt: null, startedAt: { lt: heartbeatDeadline } },
+        // 取りに来られないまま古びた制御ジョブ（#1332）。**起動ジョブと違い、待たせるほど
+        // 危険になる**（何時間も後に届いた`C-c`は、そのとき走っている別の作業を止める）
+        {
+          status: "QUEUED",
+          kind: { in: [...SESSION_CONTROL_JOB_KINDS] },
+          createdAt: { lt: controlDeadline },
+        },
       ],
     },
-    select: { id: true, status: true },
+    select: { id: true, status: true, kind: true },
   });
 
   let expired = 0;
   for (const job of stale) {
-    if (job.status !== "CLAIMED" && job.status !== "RUNNING") continue;
+    if (job.status !== "CLAIMED" && job.status !== "RUNNING" && job.status !== "QUEUED") continue;
     // 掃いている間にpollerが報告してくる可能性があるため、状態を条件に含めて更新する。
     // 0件で落ちるのは「先に報告が届いた」ということなので、そのまま無視してよい。
     const result = await db.dispatchJob.updateMany({
@@ -104,7 +121,10 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         status: "TIMEOUT",
         activeKey: null,
         finishedAt: now,
-        message: describeDispatchTimeout(job.status),
+        message:
+          job.status === "QUEUED"
+            ? describeDispatchControlTimeout()
+            : describeDispatchTimeout(job.status),
       },
     });
     expired += result.count;
@@ -198,13 +218,106 @@ export async function enqueueDispatchJob(params: {
   }
 }
 
+export type EnqueueSessionControlJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: SessionControlRejection; message: string };
+
+/**
+ * 走っているセッションへの操作（停止・終了）を積む（#1332）。
+ *
+ * **起動ジョブと同じキューに載せる。** 受信経路・認証・状態報告・タイムアウトの一式が
+ * そのまま使えるため、pollerにもissue-deckにも新しい経路を作らずに済む。
+ *
+ * **対象は`DispatchSession`にある（＝pollerが報告してきた）セッションだけ。** 画面が知らない
+ * セッション名を受け取ってtmuxへ渡す経路は作らない。実行するpoller側でも、ジョブの
+ * リポジトリとIssue番号からセッション名を組み立て直して突き合わせる（多層防御）。
+ */
+export async function enqueueSessionControlJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  kind: Exclude<DispatchJobKind, "LAUNCH">;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueSessionControlJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: SessionControlRejection): EnqueueSessionControlJobResult => ({
+    ok: false,
+    rejection,
+    message: describeSessionControlRejection(rejection, {
+      hostName: params.hostName,
+      kind: params.kind,
+    }),
+  });
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const session = await db.dispatchSession.findFirst({
+    where: {
+      host: params.hostName,
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+
+  // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）。
+  // ホストの生存判定だけはサーバー側が生の`lastSeenAt`を持っているため、ここで解決してから渡す
+  const rejection = resolveSessionControlRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          sessionControlCapable: host.sessionControlCapable,
+        }
+      : null,
+    session,
+    kind: params.kind,
+    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
+    hasActiveControlJob: false,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: params.kind,
+        status: "QUEUED",
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          params.kind,
+        ),
+        requestedByUserId: params.requestedByUserId,
+        // どのセッションを指した操作かを残す。**pollerはこの名前をそのまま使わず突き合わせる**
+        tmuxSessionName: session?.tmuxSessionName ?? null,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    // activeKeyのunique制約違反＝同じ種別の未処理の操作が既にある。スマホでの連打が
+    // そのぶんの`C-c`になるのをここで止める
+    return reject("already_queued");
+  }
+}
+
 /**
  * サブPCがジョブを取る。
  *
  * **`updateMany`の更新件数で確定させる楽観的な取り方**にしている。`where`に
  * `status: QUEUED`を含めるため、取り合いが起きても片方が0件で落ちるだけで、
  * トランザクションもロックも要らない。
+ *
+ * 制御ジョブ（#1332）は**起動ジョブより先に・同時実行数の枠外で**払い出す。tmuxを1回叩くだけで
+ * 重くないうえ、起動待ちの後ろに並ばせると**止めたいときほど待たされる**（1巡で取る本数は
+ * 既定1本なので、待っている起動ジョブの数だけポーリング間隔が積み上がる）。
  */
+/** 1巡で払い出す制御ジョブの上限。溜まっていても1巡で捌ける範囲に留める */
+const MAX_CONTROL_JOBS_PER_CLAIM = 10;
+
 export async function claimDispatchJobs(params: {
   hostName: string;
   maxJobs: number;
@@ -219,30 +332,62 @@ export async function claimDispatchJobs(params: {
     host?.maxConcurrency ?? null,
   );
 
+  const claimed: DispatchJobView[] = [];
+
+  // **セッションの操作に対応していないpollerには制御ジョブを配らない**（#1332）。
+  // 古いpollerは`kind`を読まないため、受け取ると起動ジョブとして解釈して
+  // セッションを立ててしまう（「閉じる」を押して起動する）
+  if (host?.sessionControlCapable === true) {
+    const controls = await db.dispatchJob.findMany({
+      where: {
+        targetHost: params.hostName,
+        status: "QUEUED",
+        kind: { in: [...SESSION_CONTROL_JOB_KINDS] },
+      },
+      orderBy: { createdAt: "asc" },
+      take: MAX_CONTROL_JOBS_PER_CLAIM,
+    });
+    claimed.push(...(await claimCandidates(controls, params.hostName, now)));
+  }
+
   const running = await db.dispatchJob.count({
-    where: { targetHost: params.hostName, status: { in: ["CLAIMED", "RUNNING"] } },
+    where: {
+      targetHost: params.hostName,
+      status: { in: ["CLAIMED", "RUNNING"] },
+      // 制御ジョブは枠を消費しない（上のコメント）
+      kind: "LAUNCH",
+    },
   });
   const available = Math.min(limit - running, params.maxJobs);
-  if (available <= 0) return [];
+  if (available <= 0) return claimed;
 
   const candidates = await db.dispatchJob.findMany({
-    where: { targetHost: params.hostName, status: "QUEUED" },
+    where: { targetHost: params.hostName, status: "QUEUED", kind: "LAUNCH" },
     orderBy: { createdAt: "asc" },
     take: available,
   });
+  claimed.push(...(await claimCandidates(candidates, params.hostName, now)));
+  return claimed;
+}
 
+/** 候補を1件ずつ`QUEUED`を条件に更新して確定させる（取り合いは0件で落ちるだけ） */
+async function claimCandidates(
+  candidates: DispatchJob[],
+  hostName: string,
+  now: Date,
+): Promise<DispatchJobView[]> {
   const claimed: DispatchJobView[] = [];
   for (const candidate of candidates) {
     const result = await db.dispatchJob.updateMany({
       where: { id: candidate.id, status: "QUEUED" },
-      data: { status: "CLAIMED", claimedByHost: params.hostName, claimedAt: now },
+      data: { status: "CLAIMED", claimedByHost: hostName, claimedAt: now },
     });
     if (result.count === 0) continue;
     claimed.push(
       toJobView({
         ...candidate,
         status: "CLAIMED",
-        claimedByHost: params.hostName,
+        claimedByHost: hostName,
         claimedAt: now,
       }),
     );
@@ -425,6 +570,8 @@ export async function announceDispatchHost(params: {
   agentVersion: string | null;
   /** スクリーンショットを撮れるか（#1268）。申告していない古いpollerでは`null` */
   screenshotCapable: boolean | null;
+  /** 走っているセッションを操作できるか（#1332）。申告していない古いpollerでは`null`＝非対応 */
+  sessionControlCapable: boolean | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -435,6 +582,7 @@ export async function announceDispatchHost(params: {
     maxConcurrency: params.maxConcurrency,
     agentVersion: params.agentVersion,
     screenshotCapable: params.screenshotCapable,
+    sessionControlCapable: params.sessionControlCapable,
     lastSeenAt: now,
   };
 

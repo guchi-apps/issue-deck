@@ -13,6 +13,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
     targetHost: "subpc",
+    kind: "LAUNCH",
     status: "QUEUED",
     message: null,
     tmuxSessionName: null,
