@@ -84,9 +84,11 @@ while IFS=$'\t' read -r key scope kind source; do
     continue
   fi
 
+  # gh secret set / gh variable set は --body を省略すると標準入力から値を読む。
+  # --body で渡すとプロセス一覧やシェル履歴に値が載るため、必ず標準入力を使う。
   case "$kind" in
-    secret) printf '%s' "$value" | gh secret set "$key" --repo "$REPO" --body-file - ;;
-    var)    printf '%s' "$value" | gh variable set "$key" --repo "$REPO" --body-file - ;;
+    secret) printf '%s' "$value" | gh secret set "$key" --repo "$REPO" ;;
+    var)    printf '%s' "$value" | gh variable set "$key" --repo "$REPO" ;;
     *) echo "FAIL   $key（不明なKIND: $kind）" >&2; failed=$((failed + 1)); continue ;;
   esac
   echo "ok     $key -> $kind ($REPO)"
