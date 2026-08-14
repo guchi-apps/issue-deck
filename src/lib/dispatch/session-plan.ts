@@ -166,7 +166,7 @@ export async function requestSessionCheckUser(params: {
   if (!parsed) return false;
 
   try {
-    const token = await resolveToken(params.repositoryFullName);
+    const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
     await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
