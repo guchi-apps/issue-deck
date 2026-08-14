@@ -575,6 +575,7 @@ sudo -n tailscale serve --bg --http=<ポート> localhost:<ポート>
 | 項目 | 結果 |
 |---|---|
 | 全インターフェースを待ち受けている状態でserveを足す | **競合しない。** エラーも出ず、FQDNでのアクセスは通る |
+| 逆順（serveが残っている状態で開発サーバーを起こす） | **`EADDRINUSE`で起動できない**（#1350で遭遇）。詳細は下記 |
 | 生IPでのアクセス | **404になる。** serveがtailnet IPのそのポートを取り、Hostヘッダーで振り分けるため |
 | HTTPS | `CertDomains: None`（未有効）のため`--https`は使えず**`--http`一択** |
 | 権限 | `OperatorUser: None`のためsudoが要る。`/etc/sudoers.d/tailscale-serve`で`serve`だけNOPASSWDにしてある |
@@ -584,6 +585,22 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 
 撤去は`run-issue-session.sh`のcleanupが行い、trapを通れずに残った分は
 `scripts/reap-dev-servers.sh`が**待ち受けの無いserveを孤児として**掃く。
+
+**順番が逆になると起動しない。** serveだけが残っているポート（掃かれる前や、前のセッションの
+残骸）で`pnpm dev`を起こすと、`listen EADDRINUSE :::<ポート>`で落ちる。serveはtailnet IPを
+**具体的なアドレスとして**掴んでいる（`ss -ltnp`に`100.x.x.x:<ポート>`と`[fd7a:...]:<ポート>`が並ぶ）
+のに対し、`next dev`は既定で`::`＝全アドレスを要求するため、IPv6側でぶつかる。逆順（serveを
+後から足す）が競合しないのは、serveの側が「使われていない特定アドレス」を取りに行くだけだから。
+
+セッション起動時の開発サーバーがこれで死んでいた場合、`.dev-servers/issue-<番号>.log`の末尾に
+`EADDRINUSE`が残る。起こし直すときは待ち受けを127.0.0.1に閉じればよい。
+
+```bash
+ISSUE_DECK_DEV_HOST=127.0.0.1 pnpm dev
+```
+
+**serveは`localhost:<ポート>`へproxyするので、これでもtailnetのFQDNからは従来どおり見える**
+（#1350で実測）。serveを消して回るより副作用が小さい。
 
 ### allowedDevOriginsに載せる必要がある
 

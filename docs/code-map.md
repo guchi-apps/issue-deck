@@ -78,6 +78,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
+- **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
+  ラベル・担当者と並ぶ位置にあり
+  （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
+  PCの常時表示パネルと狭い画面の「プロパティ」シートが同じコンポーネントを使う）、
+  `POST /api/issues/progress-status`へ投げる。**この経路は実行を起動しない。**
+  GitHub Projectsのカンバンでカードをドラッグした場合と違い、書くのがissue-deck自身の
+  GitHub Appで、かつ`reportProgressStatus`がDBキャッシュを同時に更新するため、
+  `projects_v2_item` Webhookを受けた`maybeDispatchFromProjectStatus`が`isOwnAppSender`と
+  「遷移前後が同じ」の両方で止まる。実装の起動は「実装を開始」ボタンに一本化したままにしている
+  （プルダウンの選択だけで無人実行が始まると誤操作の影響が大きいため）。
+  失敗理由の日本語化は[`lib/progress-report-message.ts`](../src/lib/progress-report-message.ts)に
+  切り出してある（`lib/github/report-progress.ts`は`db`込みでクライアントからimportできない）。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
