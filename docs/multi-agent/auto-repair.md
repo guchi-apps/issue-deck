@@ -77,8 +77,9 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 
 develop向けPRは`claude[bot]`（Claude Code GitHub App）が作成するため、`pull_request`トリガーでの
 `resolve-conflicts`ジョブの`claude-code-action`ステップはactorが`claude[bot]`になる。
-`claude-code-action`は既定でbot起点の実行を拒否するため、`allowed_bots: "claude[bot]"`を指定して
-明示的に許可している（`claude-review-develop.yml`等と同じ対処。#814）。
+`claude-code-action`は既定でbot起点の実行を拒否するため、`allowed_bots`で明示的に許可している
+（`claude-review-develop.yml`等と同じ対処。#814）。指定するのは`issue-deck[bot],claude[bot]`の
+2つで、後述の「画面のボタンからの起動」を通すために`issue-deck[bot]`が要る（#1328）。
 
 ### 既存の実装ワークフローとの競合回避
 
@@ -218,3 +219,13 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
 - **`workflow_dispatch`の受け口はデフォルトブランチのワークフロー定義から解決される。**
   issue-deckのデフォルトブランチは`develop`のため、新しいワークフローはdevelopへマージされる
   まで404になり、ボタンを押しても起動しない。
+- **起動先のワークフローには`allowed_bots`に`issue-deck[bot]`が要る（#1328）。** この導線は
+  GitHub Appのインストールトークンで`workflow_dispatch`するため、起動した実行のactorは
+  操作したのが人間でも常に`issue-deck[bot]`になる。`claude-code-action`は自前の非人間アクター
+  拒否（`checkHumanActor`）を`github.actor`だけで判定するため、`allowed_bots`に無いと
+  `Workflow initiated by non-human actor: issue-deck (type: Bot)`で必ず失敗する。**この失敗は
+  ワークフローが起動して途中まで進んだうえでのものなので、画面上はボタンが正常に働いたように
+  見える**（起動自体は成功しているため）。#1293で導線を足した時点では
+  `reusable-claude-conflict-resolve.yml`・`reusable-claude-pr-repair.yml`が`claude[bot]`のみ、
+  `reusable-claude-ci-fix.yml`は指定自体が無く、3つとも押しても効かない状態だった。
+  **今後この導線から起動するワークフローを増やすときは`allowed_bots`への追加を忘れないこと。**
