@@ -59,21 +59,26 @@ const STATUS_FIELD = {
   optionIdByName: new Map([
     ["Implementation", "opt-impl"],
     ["Develop", "opt-develop"],
+    ["Done", "opt-done"],
   ]),
 };
 
 /** 盤面に載っている状態 */
-function onBoard(status: string | null, itemId = "item-1") {
+function onBoard(status: string | null, itemId = "item-1", issueOpen = true) {
   return {
     issueNodeId: "I_issue1",
-    item: { itemId, repositoryDatabaseId: 100, issueNumber: 1007, status },
+    issueOpen,
+    item: { itemId, repositoryDatabaseId: 100, issueNumber: 1007, issueOpen, status },
   };
 }
 
 /** Issueは存在するが盤面には無い状態 */
-const NOT_ON_BOARD = { issueNodeId: "I_issue1", item: null };
+const NOT_ON_BOARD = { issueNodeId: "I_issue1", issueOpen: true, item: null };
 
-function report(issueNumber = 1007, status: "implementation" | "release" = "implementation") {
+function report(
+  issueNumber = 1007,
+  status: "implementation" | "release" | "develop" | "done" = "implementation",
+) {
   return reportProgressStatus({
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber,
@@ -206,6 +211,29 @@ describe("reportProgressStatus", () => {
     expect(findIssueProjectState).not.toHaveBeenCalled();
     expect(addProjectItem).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("closedなIssueを`Done`より手前へ戻す報告は書き込まない（#1348）", async () => {
+    // `Done`でcloseされた後に、同じブランチからdevelopへPRがマージされた場合に起きる
+    findIssueProjectState.mockResolvedValue(onBoard("Done", "item-1", false));
+
+    const result = await report(1007, "develop");
+
+    expect(result).toEqual({ applied: false, reason: "issue_closed" });
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("closedなIssueでも`done`の報告は書き込む（closeが先に走るため）", async () => {
+    findIssueProjectState.mockResolvedValue(onBoard("Release", "item-1", false));
+
+    const result = await report(1007, "done");
+
+    expect(result).toEqual({ applied: true, from: "Release", to: "Done" });
+    expect(updateProjectItemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ optionId: "opt-done" }),
+      "token",
+    );
   });
 
   it("Statusフィールドの取得は繰り返しの報告でキャッシュされる", async () => {

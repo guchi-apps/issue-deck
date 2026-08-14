@@ -30,6 +30,8 @@ export type ProgressReportResult =
   | { applied: false; reason: "unknown_status" }
   /** GitHub上にIssueが無い（削除・移動済み）か、Projectへの追加に失敗した */
   | { applied: false; reason: "not_in_project" }
+  /** closedなIssueを`Done`より手前へ巻き戻す報告だったため書かなかった（#1348） */
+  | { applied: false; reason: "issue_closed" }
   /** 既に同じStatusだったため書き込まなかった */
   | { applied: false; reason: "unchanged" };
 
@@ -109,6 +111,22 @@ export async function reportProgressStatus(params: {
   );
   // GitHub上にIssueが存在しない（削除・移動済み）
   if (!state) return { applied: false, reason: "not_in_project" };
+
+  // closedなIssueの進捗は`Done`以外へ動かさない（#1348）。
+  //
+  // `Done`でcloseされた後も、同じブランチ（issue-<番号>）からdevelopへPRがマージされると
+  // issue-labels.ymlのdevelop-pr-mergedがブランチ名だけを見て`develop`を報告するため、
+  // closedのままStatusが`Develop`へ巻き戻る。**この状態からは二度と`Done`へ戻れない。**
+  // 一括遷移の対象を引く`queryIssuesByProgressStatus`はopenなIssueしか返さず、以降の
+  // リリースが何度走ってもこのIssueを拾わないため、盤面の「本番へ反映する内容」に
+  // 恒久的に残り続ける（#1181が実際にこうなった）。
+  //
+  // `done`だけを通すのは、main-pr-mergedが「closeしてから`done`を報告する」順序で
+  // 動いているため（.github/workflows/reusable-issue-labels.yml）。ここで一律に弾くと
+  // 正規のDone遷移そのものが書き込めなくなる。
+  if (!state.issueOpen && params.status !== "done") {
+    return { applied: false, reason: "issue_closed" };
+  }
 
   // 盤面に無ければ載せる。Project WorkflowsのAuto-addはプランごとに設定できる
   // リポジトリ数の上限があり、対象リポジトリ全体には届かないため（#1036）
