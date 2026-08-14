@@ -86,5 +86,5 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 
 ## 未解決の課題・申し送り事項
 
-- Claude Code CLIの起動オプション（`--permission-mode`の具体的な値、`--add-dir`等）は実装時に`claude --help`で最新仕様を確認する。特に無人実行（Phase3以降）で全チェックを無効化するようなフラグ（例: `--dangerously-skip-permissions`）を使うのは、意図しない破壊的操作のリスクがあるため避け、ローカル実行は`acceptEdits`（人間が横にいる前提）、GitHub Actions実行は`claude-code-action`側の許可ツールリスト等で制御する方針とする。
+- Claude Code CLIの起動オプション（`--permission-mode`の具体的な値、`--add-dir`等）は実装時に`claude --help`で最新仕様を確認する。特に無人実行（Phase3以降）で全チェックを無効化するようなフラグ（例: `--dangerously-skip-permissions`・`--permission-mode bypassPermissions`）を使うのは、意図しない破壊的操作のリスクがあるため避け、GitHub Actions実行は`claude-code-action`側の許可ツールリスト等で制御する方針とする。ローカル実行の権限モードは当初`acceptEdits`（人間が横にいる前提）としていたが、既定を`auto`へ変更した（#1205。切り替えは`ISSUE_DECK_CLAUDE_PERMISSION_MODE`。詳細は[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「権限モードは環境変数で切り替える」）。
 - VS Code拡張（Claude Code for VS Code）側に「起動時に初期プロンプトを自動投入する」公式な方法は確認できていない。Phase1では「ターミナルで`claude "プロンプト"`として起動し、その結果としてVS Codeが開く」形（またはVS Codeは別途手動で開く）を落としどころとする想定。
