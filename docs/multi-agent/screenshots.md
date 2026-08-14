@@ -119,11 +119,10 @@ PRコメントに埋め込んでいたが、視覚確認・承認をイシュー
 develop向けPRのマージ前には、`risk-check`ジョブが`24.screenshot-required`ラベルの有無を見て
 常に`00.check-user`を付与するため（「developへのマージ前確認要否をIssueラベルでトグルする」・
 「自動マージ可否の判定方法」参照、#567）、撮影したスクリーンショットを人間が確認するまで
-developへは自動マージされない。`23.preview-required`についても、無人実行環境から実際に
-到達可能なプレビューURLを提供できない制約自体はFly.io Machines上のプレビュー環境（#826・#830・
-#831）と`claude-issue-dispatch.yml`への接続（#832）により対応済みで、Phase5の説明のとおり
-`00.check-user`で停止せずPR作成まで進めたうえで、実デプロイ後に実際に開けるプレビューURLを
-別コメントで通知する運用になっている。詳細はdocs/preview-environment.md参照。
+developへは自動マージされない。`23.preview-required`についても、Phase5の説明のとおり
+`00.check-user`で停止せずPR作成まで進める運用は変わらない。一時期はFly.io Machines上のプレビュー
+環境（#826・#830・#831・#832）から実URLを通知していたが、#1265でサブPC上のローカルセッションが
+`tailscale serve`でtailnetへ開発環境を出す方式へ移行し、Fly.io側は#1308で廃止した。
 
 #### CIバイパス用ユーザーとダミーデータの紐付け
 

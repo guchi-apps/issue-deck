@@ -77,7 +77,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 
 | ファイル | 役割 | 主な改変ポイント（技術スタックが異なる場合） |
 |---|---|---|
-| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義とプレビュー系ジョブのみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系の`deploy-preview`／`notify-preview-url`ジョブはFly.io設定がアプリ固有のため、caller側に置いて対象リポジトリの`deploy-preview.yml`を呼ぶ |
+| `claude-issue-dispatch.yml` | `@claude`コメントを起点に、計画提示／実装／PR作成／質問応答／スクリーンショット撮影までを無人実行する。**トリガー定義のみ**を持ち、本体は`reusable-issue-dispatch.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`（`node-db`/`node`/`minimal`）・`package-manager`（`npm`/`pnpm`）で指定する（下記「再利用可能ワークフローの参照」）。プレビュー系ジョブを持つ場合は設定がアプリ固有のためcaller側に置く（issue-deck自身のFly.ioプレビューは#1308で廃止済み） |
 | `reusable-issue-dispatch.yml` | 上記のジョブ本体（`on: workflow_call`）。`triage`／`dispatch`／`notify-failure`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する。`.github/prompts/`配下は`prompts-ref`で取得元を指定する（下記「プロンプトの取得元」。**指定しないと呼び出し元側の`.github/prompts/`が読まれ、無ければ落ちる**） |
 | `issue-labels.yml` | `Planning`〜`Done`の進捗（Project Status）の状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
@@ -457,9 +457,6 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 |---|---|---|
 | `ci.yml` | lint・型チェック・テスト・ビルドを実行するCI本体 | 対象リポジトリごとに固有の内容のため、そのままの移植ではなく参考にする程度 |
 | `deploy.yml` | `main`へのpushをトリガーにしたPM2デプロイ | issue-deck固有の本番環境向け。不要 |
-| `deploy-preview.yml` | 本番DBダンプをサニタイズしてFly.io Machine上にIssueごとのプレビュー環境をデプロイする（`workflow_dispatch`／`workflow_call`） | issue-deck固有のFly.io Machine構成向け。不要 |
-| `cleanup-preview.yml` | `deploy-preview.yml`が作ったIssueごとのプレビューアプリを破棄する（PRクローズ・Issueクローズ・ラベル解除・アイドル5分での定期掃除） | 同上。`deploy-preview.yml`を導入する場合のみ対で必要 |
-| `preview-logs.yml` | デプロイを伴わず、プレビュー環境のMachineのログだけを取得する（`workflow_dispatch`） | issue-deck固有のFly.io Machine構成向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 
@@ -630,7 +627,7 @@ jobs:
 
 | ファイル | トップレベル | 状態 |
 |---|---|---|
-| `deploy-preview.yml` | `concurrency` あり | `workflow_call` で呼ばれて**正常動作** |
+| `deploy-preview.yml`（#1308で廃止） | `concurrency` あり | `workflow_call` で呼ばれて**正常動作**していた |
 | `reusable-issue-labels.yml` | `permissions` あり | 同上 |
 
 **`startup_failure` は原因が分かりにくい。** ジョブが作られないためログが無く、
@@ -778,7 +775,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む） | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushをGitHub仕様上許可できないため必須 |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
-| `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン。issue-deckでは現在プレビュー環境系（`deploy-preview.yml`・`cleanup-preview.yml`・`preview-logs.yml`）のみが使う | マルチエージェント運用そのものには不要。`ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外したため、これらでは不要になった |
+| `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
 
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 

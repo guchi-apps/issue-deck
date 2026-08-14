@@ -353,13 +353,11 @@ gh issue create --title "[手作業] <実行する場所>: <やること>" --lab
 - Issueに`23.preview-required`ラベルが付いている場合（`24.screenshot-required`の有無を
   問わない）: 上記「責務」に記載の完了処理（新規PR作成またはPRコメント投稿）まで通常どおり
   進めてください。それを理由にPR作成自体をブロックする必要はありません。
-  実際に開けるプレビューURLの発行（Fly.io Machines上へのデプロイ、`.github/workflows/
-  deploy-preview.yml`、#831）は、このClaude Codeステップとは別のジョブ
-  （`deploy-preview`・`notify-preview-url`）がこのステップの完了後に自動的に行い、
-  デプロイ完了後にプレビューURLを別コメントとしてIssueへ追加で投稿します（本番DBの
-  ダンプ・サニタイズ・fly deployを含み数分かかるため、このClaude Codeステップの中で
-  同期的に待つことはできません）。そのためこのステップ自身がプレビューURLを取得・
-  推測して埋め込む必要はなく、最後の完了報告コメントには「プレビュー環境の準備が
+  実際に開ける開発環境の提供は、サブPC上のローカルセッションが`tailscale serve`で
+  tailnetへ出す方式に移行しています（#1265）。無人実行（GitHub Actions）側から
+  プレビューURLを発行する仕組みは#1308で廃止しました。そのためこのステップ自身が
+  プレビューURLを取得・推測して埋め込む必要はなく、最後の完了報告コメントには
+  「プレビュー環境の準備が
   完了次第、別コメントでURLをお知らせします」といった趣旨の一文を添えるだけで
   十分です。developへのマージ前確認は`claude-review-develop.yml`のrisk-checkジョブが
   `23.preview-required`を検知して常に`00.check-user`を付与する形でゲートするため、この
