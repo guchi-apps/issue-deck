@@ -20,6 +20,9 @@
 # deploy/subpc/notify.env.example を参照。設定していない環境では黙って何もしない
 # （通知を設定していないPCでもセッションの起動を妨げないため）。
 #
+# 送信先の変数は `SESSION_NOTIFY_WEBHOOK_URL`。旧名の `SIGNALY_WEBHOOK_URL` も互換のため
+# 読むが、新規に設定するときは新しい名前を使う（#1231）。
+#
 # 検証用の環境変数:
 #   SESSION_NOTIFY_DRY_RUN=1   送信せず、送るはずのpayloadを標準出力へ出す
 
@@ -49,7 +52,11 @@ if [[ -f "$NOTIFY_ENV_FILE" ]]; then
   set +a
 fi
 
-if [[ -z "${SIGNALY_WEBHOOK_URL:-}" ]]; then
+# 送信先はセッション通知専用のチャンネル（1Passwordの session-webhook-url）で、
+# CI/デプロイ通知の SIGNALY_WEBHOOK_URL とは別物（#1231）。
+# 旧名のまま設定されている既存インストールを壊さないよう、未設定のときだけ旧名へ落とす。
+WEBHOOK_URL="${SESSION_NOTIFY_WEBHOOK_URL:-${SIGNALY_WEBHOOK_URL:-}}"
+if [[ -z "$WEBHOOK_URL" ]]; then
   # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路。
   exit 0
 fi
@@ -169,7 +176,11 @@ repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 if repo_slug and issue_number:
     links.append(f"[Issue #{issue_number}](https://github.com/{repo_slug}/issues/{issue_number})")
 if remote_url:
-    links.append(f"[セッションを開く（remote-control）]({remote_url})")
+    # bridgeSessionId は `session_XXX` のようにアンダースコアを含む。`[text](url)` の
+    # マスクドリンク記法で埋め込むと、Signaly側のMarkdown変換がURL中のアンダースコアを
+    # 斜体（`<em>`）の区切りと誤認し、URLに`</em>`が混入して壊れることが確認された（#1234）。
+    # 生URLのまま出せば自動リンク検出に任せられ、この誤認を避けられる。
+    links.append(f"セッションを開く（remote-control）: {remote_url}")
 if links:
     fields.append({"name": "Links", "value": " · ".join(links), "inline": False})
 
@@ -201,7 +212,7 @@ fi
 if ! curl -fsS --max-time 10 \
   -H "Content-Type: application/json" \
   -d "$payload" \
-  "$SIGNALY_WEBHOOK_URL" >/dev/null 2>&1; then
+  "$WEBHOOK_URL" >/dev/null 2>&1; then
   # 失敗理由をURLごと出すとwebhookのシークレットがセッションのログに残る。1行に留める。
   echo "session-notify: Signalyへの通知に失敗しました（実装は続行します）" >&2
 fi

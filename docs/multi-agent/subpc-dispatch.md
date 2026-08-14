@@ -58,6 +58,17 @@ queued ──claim──> claimed ──起動開始──> running ──> succ
 読まない。入力待ち・完了・停滞はClaude Codeのフックが担当し（#1219）、こちらはフックが飛ばない
 「プロセスの死・消失」に絞る。切り分けの根拠は[gates.md](gates.md)。
 
+### 開発サーバーの回収も1巡に相乗りさせる（#1223）
+
+pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッションが畳まれても残った開発サーバー
+（孤児）と、作業が終わってアイドルな開発サーバー**を止める。claimより先に行うのは、掴んだままの
+開発サーバーがあると新しいジョブを取っても起こせないため（サブPCは並行3本が上限）。
+
+**常駐プロセスを増やさないためにここへ乗せている。** 判定は回収スクリプト側が全て持ち、poller側は
+呼ぶだけにする（判定を2か所に分けない）。閾値は`DEV_SERVER_IDLE_MINUTES`（既定60・0で無効）。
+判定の中身と、そもそもなぜ孤児が生まれるのかは
+[開発サーバーは終了時に止め、残った分は回収する](local-quick-start.md#開発サーバーは終了時に止め残った分は回収する)を参照。
+
 **`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
 試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
 ときだけ異常終了として扱い、Issueコメントと`00.check-user`で引き上げる。消失は人が畳んだ場合と
@@ -228,13 +239,23 @@ Bearer検証の実装自体は[src/lib/shared-secret-auth.ts](../../src/lib/shar
 未設定は`unauthorized`（401）ではなく`not_configured`（503）で返し、poller側が「設定漏れ」と
 「値の不一致」を切り分けられるようにしている。
 
+**ただし`dispatch.env`には`PROGRESS_REPORT_SECRET`も置く**（#1236）。分けるのは*値*であって
+*置き場*ではない。ジョブを取るのがpollerなら、進捗（Project Status）を報告するのは起動した
+ランチャーで、サブPCのissue-deckチェックアウトは**アプリを動かすためのものではないため
+`.env.local`のキーが空**（`.env.local.example`を写しただけの状態）。ここに無いと、
+**セッションは立つのに進捗が`Ready`のまま動かない**という、いちばん気づきにくい壊れ方をする。
+ランチャーの探索順は 環境変数 → 本体の`.env.local` → このファイル
+（[scripts/lib/progress-report.sh](../../scripts/lib/progress-report.sh)）。
+
 ## サブPC側のセットアップ
 
 ```bash
 # 1. 設定ファイル（chmod 600。実値はコミットしない）
 install -D -m 600 ~/apps/issue-deck/deploy/subpc/dispatch.env.example \
   ~/.config/issue-deck/dispatch.env
-$EDITOR ~/.config/issue-deck/dispatch.env   # APP_BASE_URL と DISPATCH_SECRET を埋める
+# APP_BASE_URL・DISPATCH_SECRET・PROGRESS_REPORT_SECRET を埋める。
+# PROGRESS_REPORT_SECRET が空だと、セッションは立つのに進捗が動かない（#1236）。
+$EDITOR ~/.config/issue-deck/dispatch.env
 
 # 2. 申告だけ試す（ジョブは取らない）
 ~/apps/issue-deck/scripts/subpc-dispatch-poller.sh --announce-only
@@ -265,6 +286,7 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | pollerが何をしたか | `journalctl --user -u issue-deck-dispatch-poller -n 50` |
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
+| 進捗（Project Status）が動かない理由 | 同じjournal。pollerは起動時に鍵の有無を1度だけ確かめ、無ければ警告を出す（#1236）。個々の起動でスキップした場合はランチャーの出力に理由が出る |
 
 `systemctl --user status issue-deck-dispatch-poller.service` で常駐しているかを確認できる。
 

@@ -2,6 +2,8 @@
 # Issue専用worktreeの開発サーバー（pnpm dev）をバックグラウンドで自動起動したうえで、
 # Claude Codeセッションをフォアグラウンドで実行するラッパー。
 # セッション終了時（正常終了・ターミナルclose・kill等）にtrapで開発サーバーも自動停止する。
+# trapを通れない経路（SIGKILL・ホストの再起動）で残った分は、scripts/reap-dev-servers.sh が
+# 別途回収する（#1223）。**このtrapが唯一の後始末ではない。**
 #
 # 使い方:
 #   scripts/run-issue-session.sh <issue番号> <devポート> <プロンプトファイルパス>
@@ -40,6 +42,10 @@ PROMPT_FILE="$3"
 # スクリプトなので、カレントディレクトリ基準では自分のscripts/を指せない。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 開発サーバーの止め方は回収スクリプト（scripts/reap-dev-servers.sh）と共有する（#1223）。
+# shellcheck source=scripts/lib/dev-server.sh
+source "$SCRIPT_DIR/lib/dev-server.sh"
+
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
 DEV_LOG="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.log"
@@ -52,15 +58,19 @@ mkdir -p "$DEV_SERVER_DIR"
 
 # 前回のセッションがタブの強制終了などでtrapを通らずに終わると、開発サーバーが残ったまま
 # ポートを掴んでいることがある。再開時（#1076）にpnpm devが起動できなくなるため先に止める。
+#
+# **PIDファイルのPIDが再利用されている場合は触らない**（#1223）。ここはプロセスグループごと
+# killする箇所なので、PIDファイルが指す相手が本当にこのworktreeの開発サーバーかを確かめる。
 if [[ -f "$DEV_PID_FILE" ]]; then
-  STALE_PID="$(cat "$DEV_PID_FILE")"
-  if [[ "$STALE_PID" =~ ^[0-9]+$ ]] && kill -0 "$STALE_PID" 2>/dev/null; then
+  STALE_PID="$(cat "$DEV_PID_FILE" 2>/dev/null || true)"
+  if dev_server_pid_matches "$STALE_PID" "$PWD"; then
     echo "#$ISSUE_NUMBER: 前回の開発サーバー（PID $STALE_PID）が残っているため停止します..."
-    kill -TERM "-$STALE_PID" 2>/dev/null || kill -TERM "$STALE_PID" 2>/dev/null || true
-    for _ in $(seq 1 10); do
-      kill -0 "$STALE_PID" 2>/dev/null || break
-      sleep 0.5
-    done
+    dev_server_log_event "$DEV_LOG" "セッションの再開に伴い、前回の開発サーバー（PID $STALE_PID）を停止します。"
+    dev_server_stop_group "$STALE_PID" ||
+      echo "警告: #$ISSUE_NUMBER: 前回の開発サーバー（PID $STALE_PID）を停止できませんでした。ポート $DEV_PORT が空かないかもしれません。" >&2
+  elif [[ -n "$STALE_PID" ]] && kill -0 "$STALE_PID" 2>/dev/null; then
+    # 生きてはいるが別人。無関係なプロセスグループを撃つほうが危ないので触らない。
+    echo "#$ISSUE_NUMBER: 情報: PIDファイルのPID（$STALE_PID）はこのworktreeの開発サーバーではないため、停止しません。" >&2
   fi
   rm -f "$DEV_PID_FILE"
 fi
@@ -68,9 +78,21 @@ fi
 DEV_PGID=""
 
 cleanup() {
-  if [[ -n "$DEV_PGID" ]]; then
+  # **errexitを切ってから始める（#1223）。** cleanupはtmuxのペインが破棄された後にも呼ばれ、
+  # そのときのstdoutは既に無いptyを指す。書き込みはEIOで失敗し、`set -e`のままだと最初の
+  # echoでcleanupごと打ち切られる。**実際にこれで`kill`にも`rm`にも到達せず、開発サーバーが
+  # 孤児として残っていた**（tmuxのkill-sessionでtrapは正しく発火しており、発火しないのではなく
+  # 打ち切られていた。実測の詳細はdocs/multi-agent/local-quick-start.md）。
+  set +e
+  # HUPで入った後、シェルの終了時にEXITでもう一度入る。停止とログを二重に行わないよう自分を外す。
+  trap - EXIT HUP TERM
+
+  if [[ -n "$DEV_PGID" ]] && dev_server_pid_matches "$DEV_PGID" "$PWD"; then
+    # **記録はptyではなくログファイルへ残す。** 無人実行では「なぜ開発サーバーが落ちているのか」が
+    # ここにしか残らない。stdoutへも出すが、届かなくても止めない。
+    dev_server_log_event "$DEV_LOG" "セッションの終了に伴い開発サーバー（プロセスグループ $DEV_PGID）を停止します。再び画面確認が必要になったら \`cd $PWD && $DEV_COMMAND\` で起こしてください。"
     echo "#$ISSUE_NUMBER: 開発サーバー（プロセスグループ $DEV_PGID）を停止しています..."
-    kill -TERM "-$DEV_PGID" 2>/dev/null || true
+    dev_server_stop_group "$DEV_PGID"
   fi
   rm -f "$DEV_PID_FILE"
 }

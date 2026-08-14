@@ -72,12 +72,18 @@ issue-deck自身の経路と共有している。**片方だけが直る状態�
 ### 進捗報告の鍵はサブPCでは`.env.local`に無いことがある
 
 `11.local`の付与と`POST /api/progress`の報告は、issue-deck自身の経路（`start-issue.sh`）と同じく
-worktree作成より**先**に行う。宛先と鍵（`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`）は
-issue-deck本体チェックアウトの`.env.local`から読むが、**サブPCのチェックアウトはアプリを動かす
-ためのものではないため、`.env.local`の値が空のことがある**（実際に空だった）。その場合は
-`~/.config/issue-deck/dispatch.env`を見る（[deploy/subpc/dispatch.env.example](../../deploy/subpc/dispatch.env.example)）。
+worktree作成より**先**に行う。宛先と鍵（`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`）を
+issue-deck本体チェックアウトの`.env.local`だけから読むと、**サブPCのチェックアウトはアプリを
+動かすためのものではないため空のことがある**（実際に空だった）。そのため
+`~/.config/issue-deck/dispatch.env`も見る（[deploy/subpc/dispatch.env.example](../../deploy/subpc/dispatch.env.example)）。
 
 どちらにも無ければ報告をスキップして起動は続ける。**起動できないより、記録が遅れる方が軽い。**
+
+**この解決は[scripts/lib/progress-report.sh](../../scripts/lib/progress-report.sh)が持ち、
+汎用ランチャーとissue-deck自身の`start-issue.sh`が共有する**（#1236）。当初は汎用ランチャー側に
+だけ置いたため、**issue-deck自身のIssueをサブPCで起動したときだけ進捗が`Ready`のまま**という
+状態になっていた。同じ約束を2か所に書くと、片方だけが直った時点でそこが穴になる
+（`local-repo-resolve.sh`・`env-file-sync.sh`と同じ理由）。
 
 ### envは1Password経由ではなく本体チェックアウトからコピーする
 
