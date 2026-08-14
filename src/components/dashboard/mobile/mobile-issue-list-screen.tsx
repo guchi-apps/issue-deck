@@ -177,6 +177,8 @@ export function MobileIssueListScreen({
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabNavViews.map((navView) => {
           const count = navCounts[navView.id] ?? 0;
+          // 確認待ちの強調は件数バッジだけに閉じる（#1443）。タブ自体をamberに塗ると
+          // 選択中タブ（primary）と役割が混ざるうえ、ラベル文字まで色が変わってしまう。
           const isCheckUserHighlighted = navView.id === "check-user" && count > 0;
           const badgeClassName = cn(
             "text-xs text-muted-foreground",
@@ -201,11 +203,7 @@ export function MobileIssueListScreen({
                 }}
                 type="button"
                 onClick={() => onChangeView(navView.id)}
-                className={cn(
-                  "flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
-                  isCheckUserHighlighted &&
-                    "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
-                )}
+                className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground"
               >
                 {navView.label}
                 <span className={badgeClassName}>{count}</span>
@@ -217,8 +215,6 @@ export function MobileIssueListScreen({
                 className={cn(
                   "pointer-events-none absolute inset-0 flex h-10 shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 text-sm whitespace-nowrap text-muted-foreground",
                   "border-primary/20 bg-primary/10 text-primary",
-                  isCheckUserHighlighted &&
-                    "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-500",
                 )}
                 style={{ opacity: overlayOpacity, transition: tabOverlayTransition }}
               >

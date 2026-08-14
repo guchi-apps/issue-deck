@@ -93,25 +93,18 @@ export function MobileHomeScreen({
             {quickFilterViews.map((view) => {
               const Icon = navViewIcons[view.id];
               // ユーザーの確認待ちが1件以上あるときは、ヘッダー下フィルターと
-              // 同じ配色（amber）で強調する（#742）。
+              // 同じ配色（amber）で強調する（#742）。強調するのは件数バッジだけで、行の
+              // 背景・ラベル文字・アイコンは通常のまま置く（#1443・サイドバーと揃える）。
               const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
               return (
                 <li key={view.id}>
                   <button
                     type="button"
                     onClick={() => onSelectQuickView(view.id)}
-                    className={cn(
-                      "flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent",
-                      isCheckUserHighlighted && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
-                    )}
+                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
                   >
                     <span className="flex items-center gap-2">
-                      <Icon
-                        className={cn(
-                          "size-3.5 text-muted-foreground",
-                          isCheckUserHighlighted && "text-amber-600 dark:text-amber-500",
-                        )}
-                      />
+                      <Icon className="size-3.5 text-muted-foreground" />
                       {view.label}
                     </span>
                     <span

@@ -102,7 +102,9 @@ export function SidebarNav({
           {navViews.map((view) => {
             const Icon = navViewIcons[view.id];
             // ユーザーの確認待ちが1件以上あるときは、スマホのヘッダー下フィルターと
-            // 同じ配色（amber）で強調する（#742）。
+            // 同じ配色（amber）で強調する（#742）。強調するのは件数バッジだけで、行の背景・
+            // ラベル文字・アイコンは通常のまま置く（#1443）。行全体を塗ると選択中の行と
+            // 見分けがつきにくく、他のビューとの間で文字色も揃わないため。
             const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
             return (
               <Fragment key={view.id}>
@@ -118,16 +120,10 @@ export function SidebarNav({
                     className={cn(
                       "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                       activeView === view.id && activePane === "issues" && "bg-accent font-medium",
-                      isCheckUserHighlighted && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
                     )}
                   >
                     <span className="flex items-center gap-2">
-                      <Icon
-                        className={cn(
-                          "size-3.5 text-muted-foreground",
-                          isCheckUserHighlighted && "text-amber-600 dark:text-amber-500",
-                        )}
-                      />
+                      <Icon className="size-3.5 text-muted-foreground" />
                       {view.label}
                     </span>
                     <span
