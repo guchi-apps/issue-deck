@@ -4,9 +4,9 @@
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
-> **「このPC」（`issuedeck://`経由のWSL起動）はこの仕組みの対象外。** そちらは従来どおり、対象
-> リポジトリが契約適合の`scripts/start-issue.sh`を持っている場合だけ起動できる
-> （[local-quick-start.md](local-quick-start.md)）。広げたのはサブPCからの起動だけ。
+> **「起動コマンドをコピー」経由の起動はこの仕組みの対象外。** そちらは対象リポジトリが契約適合の
+> `scripts/start-issue.sh`を持っている場合だけ起動できる（[local-quick-start.md](local-quick-start.md)）。
+> 広げたのはサブPCからの起動だけ。#1263で廃止した「このPC」（`issuedeck://`）も同様だった。
 
 ## なぜ必要だったか
 
@@ -127,17 +127,18 @@ issue-deck本体チェックアウトの`.env.local`だけから読むと、**�
 | 4 | 宣言している版数が受け口の対応範囲に収まる | **宣言している場合のみ**課す |
 
 汎用ランチャーが配られていない環境（`~/.local/share/issue-deck/`へ複製された受け口）では、
-従来どおり3・4を課す。「このPC」経由の起動を広げるのは#1224の範囲外で、`ok`にしてしまうと
+従来どおり3・4を課す。手元からの起動を広げるのは#1224の範囲外で、`ok`にしてしまうと
 押した先で「ランチャーが無い」と言われるだけになるため。
 
 ### 画面のゲートは起動先ごとに分ける
 
 | 起動先 | 判定材料 |
 | --- | --- |
-| このPC | `Repository.hasLocalStartScript`（GitHub上のマーカー行・#1073） |
+| 起動コマンドをコピー | `Repository.hasLocalStartScript`（GitHub上のマーカー行・#1073） |
 | サブPC | サブPCの申告（`resolveDispatchTargetRejection`） |
 
-`canStartLocalSession(hasLocalStartScript)`は**「このPC」導線のゲートに限定した**（#1224）。
+`canStartLocalSession(hasLocalStartScript)`は**「起動コマンドをコピー」のゲートに限定した**
+（#1224。「このPC」を廃止した#1263以降も同じ）。
 GitHub上のファイルの有無ではなく、実際にcloneされ起動できるかを申告しているサブPC側の情報の方が
 正確なため。マーカー行を持たないリポジトリのIssueでも、サブPCが申告していれば「サブPCで開始」が出る。
 

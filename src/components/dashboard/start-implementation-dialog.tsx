@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Cloud, Server } from "lucide-react";
+import { Check, ClipboardCopy, Cloud, Server, Terminal } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -31,6 +31,7 @@ import {
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
+import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   START_IMPLEMENTATION_OPTIONS,
@@ -41,6 +42,19 @@ import {
 } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueComment } from "@/types/issue";
+
+/**
+ * 実行先（#1263）。**起動する2つと、貼り付けるための2つがある。**
+ *
+ * 「このPC」（`issuedeck://`）を廃止したので、手元で作業する場合の出口はコピーになる。
+ * 起動と同じ場所に並べるのは、**利用者にとってはどれも「このIssueの実装をどこで始めるか」の
+ * 選択で、オプション（21〜24）の選び方も共通**のため。
+ */
+export type StartTarget =
+  | { kind: "host"; host: string }
+  | { kind: "actions" }
+  | { kind: "copy-prompt" }
+  | { kind: "copy-command" };
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -75,6 +89,13 @@ type StartImplementationDialogProps = {
    * ある以上、押せないとサブPCでの起動まで塞がる。ここへ渡してActionsの選択肢だけを落とす。
    */
   actionsDisabledReason?: string | null;
+  /** 「実装プロンプトをコピー」に載せるコメント。省略時はコメントなしとして組み立てる */
+  comments?: readonly IssueComment[];
+  /**
+   * 「ローカル起動コマンドをコピー」で渡すコマンド（`buildLocalSessionCommand`の結果）。
+   * `null`・省略ならその選択肢を出さない（ローカル起動プロトコルに適合していないリポジトリ・#1073）。
+   */
+  localSessionCommand?: string | null;
 };
 
 /**
@@ -107,17 +128,21 @@ export function StartImplementationDialog({
   includeDispatchTargets,
   dispatch: injectedDispatch,
   actionsDisabledReason = null,
+  comments = [],
+  localSessionCommand = null,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const [options, setOptions] = useState(START_IMPLEMENTATION_DEFAULT_OPTIONS);
   /**
-   * 起動先のホスト名。`null`はGitHub Actions、`undefined`は**まだ選んでいない**（既定に従う）。
+   * 選んだ実行先。`undefined`は**まだ選んでいない**（既定に従う）。
    *
-   * 既定を`null`（Actions）で持たないのは、**開いた時点ではホストの一覧がまだ届いていない**
-   * ことがあるため。「未選択」を別の値にしておけば、届いた時点で既定がサブPCへ寄る（#1262）。
+   * 既定を実体で持たないのは、**開いた時点ではホストの一覧がまだ届いていない**ことがあるため。
+   * 「未選択」を別の値にしておけば、届いた時点で既定がサブPCへ寄る（#1262）。
    */
-  const [targetHost, setTargetHost] = useState<string | null | undefined>(undefined);
+  const [target, setTarget] = useState<StartTarget | undefined>(undefined);
+  /** コピーした直後だけ文言を変え、押したことが分かるようにする */
+  const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
   const {
     createComment,
@@ -148,13 +173,15 @@ export function StartImplementationDialog({
     // ループや連鎖的な再レンダリングは発生しない。
     setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current));
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
-    setTargetHost(undefined);
+    setTarget(undefined);
+    setCopied(false);
   }, [open]);
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
-  // 申告しているホストが無ければ選択欄ごと出さない（選択肢がGitHub Actionsだけになる）
-  const showTargets = includeDispatchTargets === true && dispatch.hosts.length > 0;
+  // 「このPC」を廃止して手元の出口がコピーになったため（#1263）、申告しているホストが無くても
+  // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
+  const showTargets = includeDispatchTargets === true;
   /**
    * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
    * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある）は飛ばす。
@@ -166,22 +193,27 @@ export function StartImplementationDialog({
         hasActiveJob,
       })
     : null;
-  const effectiveTargetHost = targetHost === undefined ? defaultTargetHost : targetHost;
+  const defaultTarget: StartTarget = defaultTargetHost
+    ? { kind: "host", host: defaultTargetHost }
+    : { kind: "actions" };
+  const effectiveTarget = target ?? defaultTarget;
+  const isCopyTarget = effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command";
 
-  const selectedHost = effectiveTargetHost
-    ? (dispatch.hosts.find((host) => host.name === effectiveTargetHost) ?? null)
-    : null;
-  const selectedRejection: DispatchEnqueueRejection | null = effectiveTargetHost
-    ? resolveDispatchTargetRejection({
-        host: selectedHost,
-        repositoryFullName: issue.repositoryFullName,
-        hasActiveJob,
-      })
-    : null;
+  const selectedHost =
+    effectiveTarget.kind === "host"
+      ? (dispatch.hosts.find((host) => host.name === effectiveTarget.host) ?? null)
+      : null;
+  const selectedRejection: DispatchEnqueueRejection | null =
+    effectiveTarget.kind === "host"
+      ? resolveDispatchTargetRejection({
+          host: selectedHost,
+          repositoryFullName: issue.repositoryFullName,
+          hasActiveJob,
+        })
+      : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
   // **トリガーではなくここで止める**（#1262）
-  const blockedReason =
-    effectiveTargetHost === null ? actionsDisabledReason : null;
+  const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -269,12 +301,64 @@ export function StartImplementationDialog({
     handleOpenChange(false);
   }
 
+  /**
+   * 手元のセッションへ貼るための文面をクリップボードへ渡す（#1263）。
+   *
+   * **`11.local`の付与と進捗の報告はここで行う。** 貼り付け先のセッションを起動するのは人間で、
+   * ランチャーを通らないため、これをやらないと無人実行と二重に走りうるうえ盤面も動かない。
+   * 起動コマンドのコピーでは行わない（そちらは`start-local-session.sh`が同じことをする）。
+   */
+  async function copyForLocalSession(currentIssue: Issue, kind: "copy-prompt" | "copy-command") {
+    const text =
+      kind === "copy-command"
+        ? localSessionCommand
+        : buildImplementationPrompt({
+            repositoryFullName: issue.repositoryFullName,
+            issueNumber: issue.number,
+            title: issue.title,
+            body: issue.body,
+            labels: currentIssue.labels,
+            comments,
+          });
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // クリップボードが使えない環境（権限拒否・非セキュアコンテキスト）では、ラベルや進捗を
+      // 動かさずに終える。コピーできていないのに着手済みの状態になる方が困る
+      return;
+    }
+    setCopied(true);
+
+    if (kind === "copy-prompt") {
+      const nextNames = labelNamesWithLocal(currentIssue.labels);
+      if (nextNames) {
+        const updated = await updateIssue({
+          repositoryFullName: issue.repositoryFullName,
+          number: issue.number,
+          labels: nextNames,
+        });
+        if (updated) onIssueUpdated(updated);
+      }
+      await setProgressStatus({
+        repositoryFullName: issue.repositoryFullName,
+        number: issue.number,
+        status: options.planRequired ? "planning" : "implementation",
+      });
+    }
+  }
+
   async function handleStart() {
     const currentIssue = await applyOptionLabels();
     if (!currentIssue) return;
 
-    if (effectiveTargetHost) {
-      await startOnHost(currentIssue, effectiveTargetHost);
+    if (effectiveTarget.kind === "host") {
+      await startOnHost(currentIssue, effectiveTarget.host);
+      return;
+    }
+    if (effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command") {
+      await copyForLocalSession(currentIssue, effectiveTarget.kind);
       return;
     }
     await startOnActions(currentIssue);
@@ -307,28 +391,52 @@ export function StartImplementationDialog({
         {showTargets && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">実行先</p>
-            <StartTargetOption
-              icon={<Cloud className="size-3.5" />}
-              name="GitHub Actions"
-              description={actionsDisabledReason ?? "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）"}
-              selected={effectiveTargetHost === null}
-              disabled={actionsDisabledReason !== null}
-              onSelect={() => setTargetHost(null)}
-            />
             {dispatch.hosts.map((host) => (
               <DispatchHostOption
                 key={host.name}
                 host={host}
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
-                selected={effectiveTargetHost === host.name}
-                onSelect={() => setTargetHost(host.name)}
+                selected={effectiveTarget.kind === "host" && effectiveTarget.host === host.name}
+                onSelect={() => setTarget({ kind: "host", host: host.name })}
               />
             ))}
+            <StartTargetOption
+              icon={<Cloud className="size-3.5" />}
+              name="GitHub Actions"
+              description={
+                actionsDisabledReason ??
+                "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）"
+              }
+              selected={effectiveTarget.kind === "actions"}
+              disabled={actionsDisabledReason !== null}
+              onSelect={() => setTarget({ kind: "actions" })}
+            />
+            {/* 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263） */}
+            <StartTargetOption
+              icon={<ClipboardCopy className="size-3.5" />}
+              name="実装プロンプトをコピー"
+              description="開いているClaude Codeセッションへ貼ります。11.localの付与と進捗の報告も行います"
+              selected={effectiveTarget.kind === "copy-prompt"}
+              onSelect={() => setTarget({ kind: "copy-prompt" })}
+            />
+            {localSessionCommand && (
+              <StartTargetOption
+                icon={<Terminal className="size-3.5" />}
+                name="起動コマンドをコピー"
+                description="ターミナルへ貼ると、worktreeの作成から新しいセッションの起動までを行います"
+                selected={effectiveTarget.kind === "copy-command"}
+                onSelect={() => setTarget({ kind: "copy-command" })}
+              />
+            )}
           </div>
         )}
         <ApiErrorMessage message={error} />
-        {blockedReason && <p className="text-sm text-destructive">{blockedReason}</p>}
+        {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
+            一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
+        {blockedReason && !showTargets && (
+          <p className="text-sm text-destructive">{blockedReason}</p>
+        )}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={isSubmitting}>
@@ -339,7 +447,7 @@ export function StartImplementationDialog({
             onClick={handleStart}
             disabled={isSubmitting || selectedRejection !== null || blockedReason !== null}
           >
-            開始する
+            {isCopyTarget ? (copied ? "コピーしました" : "コピーする") : "開始する"}
           </Button>
         </DialogFooter>
       </DialogContent>

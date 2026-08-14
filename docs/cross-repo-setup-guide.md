@@ -1122,7 +1122,7 @@ gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
 ランチャーが起動する。手順は
 [docs/multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「対象リポジトリを増やす」を参照。
 
-以下は**「このPC」（メインPCのWSL）からワンクリックで起動したい場合**の話。対応させるには2つ要る。
+以下は**「起動コマンドをコピー」で貼って起動したい場合**の話（「このPC」＝`issuedeck://`は#1263で廃止）。対応させるには2つ要る。
 
 1. リポジトリに`scripts/start-issue.sh`を置き、**ローカル起動プロトコル**に適合させる
 2. 各自の環境の対応表（`~/.config/issue-deck/local-repos.conf`）に、そのリポジトリのチェックアウト先を書く
