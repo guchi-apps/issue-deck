@@ -16,6 +16,12 @@ import { parseRepositoryFullName } from "@/lib/local-session";
  * ここがGitHub App名義でIssueへ書く。経路は`session-escalation.ts`（異常終了の引き上げ）と同じで、
  * サブPCにGitHubの認証を持たせないための一本化
  * （[docs/progress-status-architecture.md](../../../docs/progress-status-architecture.md)）に倣う。
+ *
+ * #1417で、計画以外の入力待ち（質問・プレビューやスクリーンショットの承認依頼）でも同じ経路で
+ * `00.check-user`を付け外しするようになったため、このファイルは「ローカルセッションからの
+ * `00.check-user`操作」全般を扱う。付く・外れるタイミングの一覧は
+ * [docs/multi-agent/labels.md](../../../docs/multi-agent/labels.md)
+ * 「`00.check-user`が付く・外れるタイミング」を参照。
  */
 
 /** 自動投稿された計画コメントであることを示すマーカー */
@@ -155,10 +161,45 @@ export async function postSessionPlan(params: {
 }
 
 /**
- * 計画の承認待ちを解く（`00.check-user`を外す）。
+ * ローカルの実装セッションが入力待ちに入ったことを受けて`00.check-user`を付ける（#1417）。
  *
- * 呼ぶのは`Stop`フックの報告（`POST /api/dispatch/sessions/activity`）で、**自分が付けたと
- * 分かっているときだけ**（ホスト側の印。`scripts/lib/session-state.sh`の`.plan`）。
+ * 呼ぶのは`Notification / permission_prompt`フックの報告
+ * （`POST /api/dispatch/sessions/activity`）。**コメントは投稿しない** — 承認プロンプトや
+ * 質問はturnの途中で何度も起きるもので、そのたびにIssueへ書くとノイズにしかならない。
+ * 何を聞かれているかはRemote Controlで見る（画面には`LocalSessionApprovalNotice`が導線を出す）。
+ *
+ * 計画の提示（`postSessionPlan`）と違い本文が無いぶん、**ラベルだけが「人を待っている」ことの
+ * 唯一の記録**になる。付けたことはホスト側にも印として残り（`scripts/lib/session-state.sh`の
+ * `.check-user`）、人が答えた時点で`resolveSessionPlanCheckUser`が外す。
+ */
+export async function requestSessionCheckUser(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<boolean> {
+  const parsed = parseRepositoryFullName(params.repositoryFullName);
+  if (!parsed) return false;
+
+  try {
+    const token = await resolveToken(params.repositoryFullName);
+    if (!token) return false;
+
+    await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
+    return true;
+  } catch (error) {
+    console.error(
+      `[dispatch] セッションの確認待ちを記録できませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+    return false;
+  }
+}
+
+/**
+ * 自分で付けた`00.check-user`を外す（#1342・#1417）。
+ *
+ * 呼ぶのは`PostToolUse`（人が答えて作業へ戻った）・`Stop`（保険）フックの報告
+ * （`POST /api/dispatch/sessions/activity`）で、**自分が付けたと分かっているときだけ**
+ * （ホスト側の印。`scripts/lib/session-state.sh`の`.check-user`）。
  * `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で付けた`00.check-user`まで落とす。
  *
  * 人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として

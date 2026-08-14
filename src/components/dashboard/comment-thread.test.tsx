@@ -507,3 +507,51 @@ describe("CommentThread PRマージ待ちの修正を依頼するテキスト入
     expect(onRequestPrFix).toHaveBeenCalledWith("CIが失敗しています");
   });
 });
+
+/**
+ * #1417。走っているローカルセッションが入力待ちの間は、承認・修正を押しても
+ * コメントが残るだけでセッションには届かない（`11.local`で無人実行も動かない）。
+ * ボタンを引っ込め、唯一効く出口である案内だけを出す。
+ */
+describe("CommentThread セッションが入力待ちのとき", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderWaitingInput(overrides: { mergeApprovalPending?: boolean } = {}) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        sessionWaitingInput
+        localSessionNotice={<p>Remote Controlから伝えてください</p>}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        mergeApprovalPending={overrides.mergeApprovalPending}
+      />,
+    );
+  }
+
+  it("承認・修正・取り下げボタンの代わりに案内を出す", () => {
+    renderWaitingInput();
+    expect(screen.getByText("セッションが入力を待っています")).not.toBeNull();
+    expect(screen.getByText("Remote Controlから伝えてください")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "承認" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "修正" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取り下げ" })).toBeNull();
+  });
+
+  // PRのマージはGitHub側の操作で、`11.local`中でも実際に効く。そちらを優先する
+  it("PRマージ待ちのときはマージ案内を優先する", () => {
+    renderWaitingInput({ mergeApprovalPending: true });
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+    expect(screen.queryByText("セッションが入力を待っています")).toBeNull();
+  });
+});

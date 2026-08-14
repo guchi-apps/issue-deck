@@ -132,6 +132,18 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
   };
 }
 
+/**
+ * そのセッションが今まさに人の入力を待って止まっているか（#1417）。
+ *
+ * 承認欄のボタンを引っ込めてRemote Controlへ寄せる判断に使う。**`ALIVE`でなければfalse**。
+ * 落ちたセッションの`WAITING_INPUT`は待つ相手がいない古い値で、そのときまでボタンを消すと
+ * 画面から`00.check-user`を外す手段が無くなる（`summarizeIssueSession`が状態を優先するのと同じ理由）。
+ */
+export function isSessionWaitingInput(session: DispatchSessionView | null): boolean {
+  if (!session) return false;
+  return session.state === "ALIVE" && session.activity === "WAITING_INPUT";
+}
+
 /** 一覧のバッジなど、1語で出したい場所向けの短い表現。通常の実行中はnull（出さない） */
 export function shortIssueSessionLabel(session: DispatchSessionView): string | null {
   if (session.state === "FAILED") return "異常終了";
