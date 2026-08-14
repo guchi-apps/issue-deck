@@ -357,37 +357,52 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 フック設定に書くのは「`session-notify.sh`を呼ぶ」ことだけで、どのイベントを送るかの判定は
 スクリプト側に置いている。判定を2箇所に分けると、必ずどちらかが古くなる。
 
-## 実際に動くのは本体の作業ツリーのスクリプト（#1274）
+## セッション側のスクリプトは`origin/develop`の同期コピーから走らせる（#1274・#1438）
 
-**フックが呼ぶ`session-notify.sh`は、worktreeのコピーではなく本体リポジトリの作業ツリー
-（`~/apps/issue-deck/scripts/`）のものである。** 生成されるフック設定の`command`は絶対パスで、
-`run-issue-session.sh`自身の置き場所（`$SCRIPT_DIR`）を指す。`start-issue.sh`は本体の
-`scripts/`から`run-issue-session.sh`を呼ぶため、経路の全体がこうなる。
+**フックが呼ぶ`session-notify.sh`は、worktreeのコピーではない。** 生成されるフック設定の
+`command`は絶対パスで、`run-issue-session.sh`自身の置き場所（`$SCRIPT_DIR`）を指す。
+つまり「`run-issue-session.sh`をどこから呼んだか」が、そのセッションのフックの版を決める。
 
-| 実行されるもの | どこから |
-| --- | --- |
-| `start-issue.sh` | 本体の作業ツリー |
-| `run-issue-session.sh` | 本体の作業ツリー（`start-issue.sh`が絶対パスで呼ぶ） |
-| `session-notify.sh` | 本体の作業ツリー（フック設定の`command`が絶対パス） |
-| 実装対象のコード | worktree（`origin/develop`から作られる） |
-
-ここに**worktreeだけが新しくなる**という非対称がある。`start-issue.sh`は起動のたびに
+もともとは本体リポジトリの作業ツリー（`~/apps/issue-deck/scripts/`）から呼んでいて、そこに
+**worktreeだけが新しくなる**という非対称があった。`start-issue.sh`は起動のたびに
 `git fetch origin develop`してからworktreeを作るが、「本体の作業ツリーには一切触れない」ことを
 約束しているのでmergeはしない。**本体の作業ツリーを新しくするのは人の`git pull`だけ。**
 
-そのため`session-notify.sh`をdevelopへマージしても、pullするまで実際に飛ぶ通知は古いままになる。
+そのため`session-notify.sh`をdevelopへマージしても、pullするまで実際の挙動は古いままになる。
 #1274はこれを踏んだもので、#1247でリンク書式を直した数時間後の通知が、依然として旧書式
-（`Links`フィールドに生URL）で届いていた。**スクリプト側には何の兆候も出ない**ため、直したはずの
-不具合を再度Issueとして起票することになる。
+（`Links`フィールドに生URL）で届いていた。#1438も同じで、承認と同時に`00.check-user`を外す
+仕組み（#1357・#1417）を入れた後も、古い作業ツリーのホストでは**`PostToolUse`のフック設定
+そのものが生成されず**、承認しても応答終了（`Stop`）まで外れなかった。
+**スクリプト側には何の兆候も出ない**ため、直したはずの不具合を再度Issueとして起票することになる。
 
-対策として、起動時に本体の`scripts/`が`origin/develop`と違っていれば警告を出す
-（[scripts/lib/launcher-scripts-sync.sh](../../scripts/lib/launcher-scripts-sync.sh)）。
-`start-issue.sh`・`generic-start-issue.sh`の両方から呼ぶ。**警告だけで、起動は止めないし
-自動でpullもしない**（本体の作業ツリーに触れないという約束を、起動スクリプト側から破らない）。
-`ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK=1`で黙らせられる。
+そこで#1438から、**セッションと一緒に動くものだけは`origin/develop`から取り出した同期コピー
+（`~/.cache/issue-deck/launcher-scripts/<SHA>/scripts/`）を走らせる**
+（[scripts/lib/launcher-scripts-sync.sh](../../scripts/lib/launcher-scripts-sync.sh)の
+`resolve_launcher_scripts_dir`）。作業ツリーには一切触れないまま、フックの中身だけが新しくなる。
 
-セッション通知に限らず、`scripts/`配下を直したときは**本体の作業ツリーへpullするまで反映されない**
-と考えること。worktreeを作り直しても新しくならない。
+| 実行されるもの | どこから |
+| --- | --- |
+| `start-issue.sh`・`generic-start-issue.sh` | 本体の作業ツリー（人が叩く入口なので、ここは変えられない） |
+| `run-issue-session.sh` | 同期コピー（作れなかった場合は本体の作業ツリー） |
+| `session-notify.sh`・`scripts/lib/` | 同上（`run-issue-session.sh`が自分の`$SCRIPT_DIR`から読むため自動で揃う） |
+| プロンプトのひな形（`scripts/prompts/`） | 同上（セッションへそのまま渡るものなので同じ扱い） |
+| サブPCのpoller（`subpc-dispatch-poller.sh`） | 本体の作業ツリー（systemdが起動する常駐プロセス） |
+| 実装対象のコード | worktree（`origin/develop`から作られる） |
+
+**同期コピーを使うのは「本体の作業ツリーが単に古いだけ」と確かめられたときに限る。**
+`scripts/`に未コミットの変更があるか、HEADが`origin/develop`に含まれていない（＝手元のブランチに
+しか無い変更がある）場合は、これまでどおり作業ツリーのものを走らせる。**起動スクリプトが、人が
+今書いているものを黙って無かったことにしてはいけない。** gitが無い・fetchできない・展開に失敗
+したといった場合もすべて作業ツリーに落ちる（起動を止める理由にはしない）。
+
+古いコピーは30日触られていないものだけを消す。**走っているセッションのフックはそのコピーを
+何時間も読み続ける**ため、使用中のものを消さないことを優先する。
+
+作業ツリーが`origin/develop`と違うこと自体は引き続き警告する（#1274・#1426。`start-issue.sh`と
+`run-issue-session.sh`の両方から呼び、後者はtmuxのpaneに確実に出す）。**入口のスクリプトと
+pollerは作業ツリーのままなので、警告が要らなくなったわけではない。**
+`ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK=1`を付けると、警告も同期コピーも止まる（手元のものを
+そのまま走らせたいときの逃げ道）。
 
 ## 通知の障害でセッションを止めない
 

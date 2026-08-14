@@ -66,7 +66,6 @@ if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
   REPO_NAME="$(basename "$ROOT")"
 fi
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
-PROMPT_TEMPLATE="$ROOT/scripts/prompts/implementation-agent.md"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
 
 # shellcheck source=scripts/lib/worktree-status.sh
@@ -86,6 +85,14 @@ source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
 # 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
 # shellcheck source=scripts/lib/prompt-context.sh
 source "$ROOT/scripts/lib/prompt-context.sh"
+
+# セッションと一緒に動くもの（run-issue-session.sh・session-notify.sh・プロンプトのひな形）を
+# どこから読むかを決める（#1438）。本体の作業ツリーが単に古いだけの場合は origin/develop の
+# 同期コピーを使い、フックとプロンプトだけが古いまま動き続けるのを防ぐ。**判断に迷ったら
+# 作業ツリー**で、手元に未コミットの変更があればこれまでどおりそちらを使う（詳細はlib側の冒頭）。
+# 引数の検証より前に置くのは、ここで PROMPT_TEMPLATE の場所が決まるため。
+resolve_launcher_scripts_dir "$ROOT"
+PROMPT_TEMPLATE="$LAUNCHER_SCRIPTS_DIR/prompts/implementation-agent.md"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -168,7 +175,17 @@ warn_personal_config_drift
 
 # 起動スクリプト・フックの実体は本体の作業ツリーにあり、worktreeを作り直しても新しくならない。
 # developへ入った修正が反映されていない場合に警告する（#1274）。起動は止めない。
+# **同期コピーを使えた場合も警告自体は出す**（start-issue.sh自身とプロンプトのひな形は
+# 作業ツリーから読むため。文面はlib側で出し分ける）。
 warn_launcher_scripts_stale "$ROOT"
+
+if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
+  echo "情報: セッション側のスクリプトとプロンプトのひな形は $LAUNCHER_SYNC_REF の同期コピー（${LAUNCHER_SCRIPTS_SHA:0:7}）から読みます（#1438）。"
+  # tmux経由（build_env_prefix）だけでなく、tmuxが無い環境の`exec bash ...`でも同じものが
+  # 届くようexportしておく。run-issue-session.sh はこの2つで自分の素性を知る
+  export ISSUE_DECK_LAUNCHER_SCRIPTS_SHA="$LAUNCHER_SCRIPTS_SHA"
+  export ISSUE_DECK_LAUNCHER_ROOT="$ROOT"
+fi
 
 mkdir -p "$PROMPT_DIR"
 
@@ -549,6 +566,13 @@ build_env_prefix() {
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
   done
+  # 同期コピーから起動した場合の情報（#1438）。run-issue-session.sh は自分の置き場所しか
+  # 知らないため、**本体の作業ツリーがどこかと、同期コピーで走っていることをここから渡す**。
+  # 渡さないと、tmuxのpaneに出す警告（#1426）が本体の作業ツリーを見に行けなくなる。
+  if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
+    prefix+="export ISSUE_DECK_LAUNCHER_SCRIPTS_SHA=$(printf '%q' "$LAUNCHER_SCRIPTS_SHA"); "
+    prefix+="export ISSUE_DECK_LAUNCHER_ROOT=$(printf '%q' "$ROOT"); "
+  fi
   printf '%s' "$prefix"
 }
 
@@ -560,7 +584,7 @@ build_claude_cmd() {
   local worktree_dir="$2"
   local dev_port="$3"
   local prompt_file="$4"
-  printf "%scd %q && bash %q %q %q %q" "$(build_env_prefix)" "$worktree_dir" "$ROOT/scripts/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
+  printf "%scd %q && bash %q %q %q %q" "$(build_env_prefix)" "$worktree_dir" "$LAUNCHER_SCRIPTS_DIR/run-issue-session.sh" "$issue_number" "$dev_port" "$prompt_file"
 }
 
 # tmuxの新しいセッションでrun-issue-session.shを起動する（#1178）。
@@ -672,7 +696,7 @@ if [[ $# -eq 1 ]]; then
   prepare_issue "$n"
   echo "#$n: 開発サーバーを自動起動し、Claude Codeセッションを起動します（このターミナルで実行）..."
   cd "$WORKTREE_DIR"
-  exec bash "$ROOT/scripts/run-issue-session.sh" "$n" "$DEV_PORT" "$PROMPT_FILE"
+  exec bash "$LAUNCHER_SCRIPTS_DIR/run-issue-session.sh" "$n" "$DEV_PORT" "$PROMPT_FILE"
 fi
 
 # tmuxが無い環境で複数Issueを指定した場合。1つのターミナルでは1セッションしか動かせないため、
@@ -680,5 +704,5 @@ fi
 for n in "$@"; do
   prepare_issue "$n"
   echo "#$n: worktreeの準備ができました。以下を手動で実行してください:"
-  echo "  cd \"$WORKTREE_DIR\" && bash \"$ROOT/scripts/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""
+  echo "  cd \"$WORKTREE_DIR\" && bash \"$LAUNCHER_SCRIPTS_DIR/run-issue-session.sh\" \"$n\" \"$DEV_PORT\" \"$PROMPT_FILE\""
 done

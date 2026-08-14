@@ -64,7 +64,14 @@ source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 # ため、呼び出し元の警告を引き継がない。サブPCのpollerが起動する経路（無人）ではなおさら、
 # 呼び出し元の標準出力はjournalctlにしか残らずtmuxをattachしたユーザーからは見えない。ここでも
 # 同じ警告を出し、実際にユーザーが見る画面（tmuxのpane）に確実に載せる（#1426）。
-ISSUE_DECK_ROOT="$(dirname "$SCRIPT_DIR")"
+#
+# **同期コピー（#1438）から起動された場合、自分の置き場所は本体の作業ツリーではない。**
+# 判定する相手を見失わないよう、本体の作業ツリーの場所は呼び出し元が
+# `ISSUE_DECK_LAUNCHER_ROOT`で渡してくる（渡って来なければ従来どおり自分の親を見る）。
+ISSUE_DECK_ROOT="${ISSUE_DECK_LAUNCHER_ROOT:-$(dirname "$SCRIPT_DIR")}"
+if [[ -n "${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:-}" ]]; then
+  echo "#$ISSUE_NUMBER: 情報: このセッションのスクリプトとフックは ${LAUNCHER_SYNC_REF} の同期コピー（${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:0:7}）から実行しています（#1438）。"
+fi
 warn_launcher_scripts_stale "$ISSUE_DECK_ROOT"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
