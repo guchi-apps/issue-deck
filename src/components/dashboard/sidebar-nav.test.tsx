@@ -14,7 +14,10 @@ const NAV_COUNTS = Object.fromEntries(navViews.map((view) => [view.id, 0])) as R
   number
 >;
 
-function renderSidebar(pullRequestNavCounts: PullRequestNavCounts) {
+function renderSidebar(
+  pullRequestNavCounts: PullRequestNavCounts,
+  navCounts: Record<NavViewId, number> = NAV_COUNTS,
+) {
   render(
     <SidebarNav
       activeView="all"
@@ -22,7 +25,7 @@ function renderSidebar(pullRequestNavCounts: PullRequestNavCounts) {
       activePane="issues"
       activePullRequestView="all"
       onSelectPullRequestView={() => {}}
-      navCounts={NAV_COUNTS}
+      navCounts={navCounts}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -60,6 +63,19 @@ describe("SidebarNav", () => {
     renderSidebar({ all: null, "in-progress": 3, completed: 1 });
 
     expect(pullRequestNavItem("all").textContent).toBe(getPullRequestView("all").label);
+  });
+
+  // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。
+  it("確認待ちが残っていても強調するのは件数バッジだけにする", () => {
+    renderSidebar(
+      { all: null, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, "check-user": 2 },
+    );
+
+    const button = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
+    expect(button.className).not.toContain("amber");
+    const badge = screen.getByText("2");
+    expect(badge.className).toContain("bg-amber-500");
   });
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
