@@ -169,7 +169,11 @@ repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 if repo_slug and issue_number:
     links.append(f"[Issue #{issue_number}](https://github.com/{repo_slug}/issues/{issue_number})")
 if remote_url:
-    links.append(f"[セッションを開く（remote-control）]({remote_url})")
+    # bridgeSessionId は `session_XXX` のようにアンダースコアを含む。`[text](url)` の
+    # マスクドリンク記法で埋め込むと、Signaly側のMarkdown変換がURL中のアンダースコアを
+    # 斜体（`<em>`）の区切りと誤認し、URLに`</em>`が混入して壊れることが確認された（#1234）。
+    # 生URLのまま出せば自動リンク検出に任せられ、この誤認を避けられる。
+    links.append(f"セッションを開く（remote-control）: {remote_url}")
 if links:
     fields.append({"name": "Links", "value": " · ".join(links), "inline": False})
 
