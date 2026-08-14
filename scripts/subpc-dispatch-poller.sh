@@ -120,6 +120,10 @@ LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPAT
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
 # **シークレットはコマンドライン引数に置かない**（`ps` で他プロセスから見えるため）。
 # `--header @-` で標準入力から渡す。
+API_RESPONSE_BODY=""
+API_RESPONSE_STATUS="000"
+API_RESPONSE_URL=""
+
 api_call() {
   local method="$1" path="$2" body="${3:-}"
   local response_file status
@@ -144,24 +148,53 @@ api_call() {
 
   API_RESPONSE_BODY="$(cat "$response_file")"
   API_RESPONSE_STATUS="${status:-000}"
+  API_RESPONSE_URL="$BASE_URL$path"
   [[ "$API_RESPONSE_STATUS" =~ ^2 ]]
 }
 
+# レスポンスボディをログの1行に収まる形へ整える（#1210）。
+#
+# **ボディをそのまま出すとログが潰れる。** 本番が404や502を返すとNext.jsのエラーページの
+# HTML（約10KB・改行入り）がそのまま返り、pollerは毎分動くため
+# `journalctl -u issue-deck-dispatch-poller` がHTMLで埋まって本来見たい失敗理由が読めなくなる。
+#
+# 改行・タブを空白へ潰して1行にしたうえで、先頭 $LOG_BODY_MAX_CHARS 文字までに切り詰める。
+# JSONのエラーレスポンス（`{"error":"..."}`）はこの長さに収まるため情報は落ちず、HTMLでも
+# 先頭の `<!DOCTYPE html>` が見えれば「APIではなくページが返っている＝ルートが無い」と判断できる。
+LOG_BODY_MAX_CHARS=200
+summarize_response_body() {
+  local body="$1"
+  body="$(printf '%s' "$body" | tr '\n\r\t' '   ' | tr -s ' ')"
+  body="${body#"${body%%[![:space:]]*}"}"
+  body="${body%"${body##*[![:space:]]}"}"
+  if [[ -z "$body" ]]; then
+    printf '(本文なし)'
+  elif (( ${#body} > LOG_BODY_MAX_CHARS )); then
+    # 切り詰めたことが分かるよう末尾に印を付ける。
+    printf '%s…' "${body:0:LOG_BODY_MAX_CHARS}"
+  else
+    printf '%s' "$body"
+  fi
+}
+
 # APIが答えられない理由を、次に何を直せばよいかが分かる形で出す。
+# **切り詰めるのはボディだけで、URLとステータスコードは必ず残す**（どの経路が何で落ちたかが
+# 分からなくなると、切り詰めた意味が無い）。
 report_api_failure() {
   local label="$1"
+  local target="${API_RESPONSE_URL:-$BASE_URL}"
   case "$API_RESPONSE_STATUS" in
     503)
-      echo "Error: $label: issue-deck側で DISPATCH_SECRET が未設定です（503）。" >&2
+      echo "Error: $label: issue-deck側で DISPATCH_SECRET が未設定です（503 $target）。" >&2
       ;;
     401)
-      echo "Error: $label: DISPATCH_SECRET の値が一致しません（401）。$DISPATCH_ENV_FILE を確認してください。" >&2
+      echo "Error: $label: DISPATCH_SECRET の値が一致しません（401 $target）。$DISPATCH_ENV_FILE を確認してください。" >&2
       ;;
     000)
-      echo "Error: $label: $BASE_URL へ接続できませんでした。" >&2
+      echo "Error: $label: $target へ接続できませんでした。" >&2
       ;;
     *)
-      echo "Error: $label: HTTP $API_RESPONSE_STATUS $API_RESPONSE_BODY" >&2
+      echo "Error: $label: HTTP $API_RESPONSE_STATUS $target $(summarize_response_body "$API_RESPONSE_BODY")" >&2
       ;;
   esac
 }

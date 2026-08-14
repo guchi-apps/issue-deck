@@ -186,6 +186,12 @@ Actions UIに相当するものが無いため、次の3つで追う。
 
 `systemctl --user status issue-deck-dispatch-poller.service` で常駐しているかを確認できる。
 
+**API呼び出しが失敗したときのレスポンスボディは、1行に潰したうえで先頭200文字までしか出ない**
+（末尾の`…`が切り詰めた印・#1210）。本番が404や502を返すとNext.jsのエラーページのHTML（約10KB）が
+そのまま返り、pollerは毎分動くためjournaldがHTMLで埋まって本来見たい失敗理由が読めなくなるため。
+URLとステータスコードは切り詰めずに残るので、どの経路が何で落ちたかは判断できる。全文が要る場合は
+同じURLを`curl`で直接叩く。
+
 ## 受け口の複製に注意（#1179で増えた）
 
 メインPC（WSL）のワンクリック起動は、`register-issuedeck-protocol.ps1`が
