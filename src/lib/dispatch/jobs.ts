@@ -358,9 +358,14 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
  * ホストからの申告を保存する（実行可能リポジトリ＋生存報告）。
  *
  * 申告する内容はサブPC側が`~/.config/issue-deck/local-repos.conf`を走査し、
- * `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけ
+ * `scripts/start-local-session.sh`と同じ検証を通ったものだけ
  * （`scripts/lib/local-repo-resolve.sh`で共有）。issue-deck側はここで検証をやり直さず、
  * 受け取った一覧をそのまま「割り当ててよい対象」として使う。
+ *
+ * **`Repository.hasLocalStartScript`（GitHub上のマーカー行）とは無関係**（#1224）。マーカー行を
+ * 持たないリポジトリもサブPC側の汎用ランチャーで起動できるため、そちらで絞り込むと
+ * 「実際には起動できるのに割り当てられない」ことになる。実際にcloneされ起動できるかを
+ * 知っているのは申告する側だけ。
  */
 export async function announceDispatchHost(params: {
   hostName: string;

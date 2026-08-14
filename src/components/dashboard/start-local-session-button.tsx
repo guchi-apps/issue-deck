@@ -35,6 +35,9 @@ type StartLocalSessionButtonProps = {
   /**
    * 対象リポジトリがローカル起動プロトコルに適合しているか（#1073）。
    * リポジトリ情報が見つからない場合は`undefined`。そのときは隠さない。
+   *
+   * **効くのは「このPC」の候補だけ**（#1224）。サブPCは汎用ランチャーでマーカー行を
+   * 持たないリポジトリも起動できるため、こちらでは見ない。
    */
   hasLocalStartScript?: boolean;
   /**
@@ -69,8 +72,12 @@ type StartLocalSessionButtonProps = {
  * 起動前に付け、サブPCは積めたかどうかが分かるので**積めたときだけ**付ける（拒否されたのに
  * ラベルだけ残ると、無人実行までそのIssueに触れなくなる）。
  *
- * ローカル起動プロトコルに適合していないリポジトリでは出さない（#1073）。押しても受け口の
- * 段階で停止するだけで、押せること自体が誤解を招くため。
+ * **起動先ごとに可否の判定材料が違う**（#1224）。ここを1つのゲートにまとめない。
+ *
+ * | 起動先 | 判定材料 | 理由 |
+ * |---|---|---|
+ * | このPC | `hasLocalStartScript`（GitHub上のマーカー行・#1073） | 対象リポジトリの`start-issue.sh`をそのまま呼ぶ経路なので、適合していなければ受け口で止まる |
+ * | サブPC | サブPCの申告（`resolveDispatchTargetRejection`） | 汎用ランチャーでマーカー行の無いリポジトリも起動できる。**実際にcloneされ起動できるかを知っているのはサブPC側だけ** |
  */
 export function StartLocalSessionButton({
   issue,
@@ -83,8 +90,11 @@ export function StartLocalSessionButton({
   const { updateIssue, isSubmitting, error } = useIssueMutations();
 
   const sessionUrl = buildLocalSessionUrl(issue.repositoryFullName, issue.number);
-  const isAvailable =
-    sessionUrl !== null && issue.state === "open" && canStartLocalSession(hasLocalStartScript);
+  // 「このPC」を候補に入れるか。呼び出し側の指定（スマホでは入れない）と、対象リポジトリが
+  // ローカル起動プロトコルに適合しているか（#1073）の両方を満たしたときだけ
+  const hasLocalTarget = includeLocalTarget !== false && canStartLocalSession(hasLocalStartScript);
+  // closedなIssueは起動しても実装対象が無い。リポジトリ名が壊れている場合はURLを組み立てられない
+  const isAvailable = sessionUrl !== null && issue.state === "open";
   // フックは早期returnより前に、常に同じ順で呼ぶ必要がある。導線を出さない場合は取得もしない
   const dispatch = useDispatchState(isAvailable);
 
@@ -134,7 +144,6 @@ export function StartLocalSessionButton({
     if (enqueued) await ensureLocalLabel();
   }
 
-  const hasLocalTarget = includeLocalTarget !== false;
   // 起動先が1つしか無いならメニューを開かせない。メインPCで見ているときのサブPC未申告
   // （このPCのみ）と、スマホから見ているとき（サブPCのみ）の両方がここに当たる
   const onlyHost =

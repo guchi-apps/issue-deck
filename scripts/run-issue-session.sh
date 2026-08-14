@@ -6,8 +6,15 @@
 # 使い方:
 #   scripts/run-issue-session.sh <issue番号> <devポート> <プロンプトファイルパス>
 #
-# 呼び出し元（start-issue.sh）が事前に対象worktreeディレクトリへcdしている前提で、
-# カレントディレクトリを基準に pnpm dev を起動する。
+# 呼び出し元（start-issue.sh・generic-start-issue.sh）が事前に対象worktreeディレクトリへ
+# cdしている前提で、カレントディレクトリを基準に開発サーバーを起動する。
+#
+# 環境変数:
+#   ISSUE_DECK_DEV_SERVER=0    開発サーバーを起動しない（既定は起動する）
+#   ISSUE_DECK_DEV_COMMAND     開発サーバーの起動コマンド（既定は `pnpm dev`）
+#
+# **汎用ランチャー経由（#1224）では既定で起動しない。** サブPCは2C/4Tで、リポジトリ数ぶんの
+# devサーバーを常駐させる前提が置けない（#1177の実測）。必要なセッションだけ中で起動する。
 #
 # セッションには `--name "<リポジトリ名> #<Issue番号>"` を付ける。Claude Codeはこの名前を
 # ターミナルのタイトル（OSC 0）にも出すため、タブを複数開いてもどのリポジトリのどのIssueを
@@ -33,6 +40,9 @@ WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
 DEV_LOG="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.log"
 DEV_PID_FILE="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.pid"
+
+DEV_SERVER_ENABLED="${ISSUE_DECK_DEV_SERVER:-1}"
+DEV_COMMAND="${ISSUE_DECK_DEV_COMMAND:-pnpm dev}"
 
 mkdir -p "$DEV_SERVER_DIR"
 
@@ -62,17 +72,21 @@ cleanup() {
 }
 trap cleanup EXIT HUP TERM
 
-echo "#$ISSUE_NUMBER: 開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
-# stdinを/dev/nullにするのは必須（#1094）。set -m によりこのジョブはバックグラウンドの
-# プロセスグループになるため、配下のプロセスが端末（tty）から読もうとするとカーネルが
-# SIGTTINを送り、プロセスグループごと停止（ps上は T）して誰も再開しない。
-# 実際にsetup-lan-access.shが起動するpowershell.exeがこれを踏み、devサーバーが
-# 起動しないまま止まっていた。出力はログへ逃がしていたが、stdinがttyのままだった。
-pnpm dev </dev/null >"$DEV_LOG" 2>&1 &
-DEV_PID=$!
-# set -m によりバックグラウンドジョブは新しいプロセスグループを持ち、そのPGIDは先頭プロセスのPIDと一致する。
-DEV_PGID="$DEV_PID"
-echo "$DEV_PID" >"$DEV_PID_FILE"
+if [[ "$DEV_SERVER_ENABLED" == "0" ]]; then
+  echo "#$ISSUE_NUMBER: 開発サーバーは起動しません（画面確認が必要になったら worktree で \`$DEV_COMMAND\` を実行してください。ポート $DEV_PORT は env に設定済みです）。"
+else
+  echo "#$ISSUE_NUMBER: 開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
+  # stdinを/dev/nullにするのは必須（#1094）。set -m によりこのジョブはバックグラウンドの
+  # プロセスグループになるため、配下のプロセスが端末（tty）から読もうとするとカーネルが
+  # SIGTTINを送り、プロセスグループごと停止（ps上は T）して誰も再開しない。
+  # 実際にsetup-lan-access.shが起動するpowershell.exeがこれを踏み、devサーバーが
+  # 起動しないまま止まっていた。出力はログへ逃がしていたが、stdinがttyのままだった。
+  $DEV_COMMAND </dev/null >"$DEV_LOG" 2>&1 &
+  DEV_PID=$!
+  # set -m によりバックグラウンドジョブは新しいプロセスグループを持ち、そのPGIDは先頭プロセスのPIDと一致する。
+  DEV_PGID="$DEV_PID"
+  echo "$DEV_PID" >"$DEV_PID_FILE"
+fi
 
 # 全アプリ共通の共有知識リポジトリ（guchi-apps/docs）をローカルにcloneしてある場合は、
 # --add-dir でworktree外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md

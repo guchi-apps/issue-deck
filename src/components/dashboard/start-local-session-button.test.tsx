@@ -138,7 +138,7 @@ describe("StartLocalSessionButton", () => {
     expect(screen.getByRole("button", { name: /ローカルで開始/ })).not.toBeNull();
   });
 
-  it("ローカル起動プロトコルに適合していないリポジトリでは表示しない（#1073）", () => {
+  it("ローカル起動プロトコルに適合しておらず、申告しているホストも無ければ表示しない（#1073）", () => {
     const { container } = render(
       <StartLocalSessionButton
         issue={makeIssue()}
@@ -149,6 +149,46 @@ describe("StartLocalSessionButton", () => {
     );
 
     expect(container.innerHTML).toBe("");
+  });
+
+  it("ローカル起動プロトコルに適合していなくても、サブPCが実行できると申告していれば出す（#1224）", () => {
+    // 汎用ランチャーでマーカー行の無いリポジトリも起動できるため、GitHub上のファイルの有無で
+    // サブPC導線まで消さない。実際に起動できるかを知っているのはサブPC側の申告だけ
+    dispatchState = { hosts: [makeHost()], jobs: [], concurrency: 2, error: null };
+
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={false}
+      />,
+    );
+
+    // 「このPC」は候補に入らないため、メニューではなく単独のボタンになる
+    const button = screen.getByRole("button", { name: /subpcで開始/i });
+    expect(button.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("適合していないリポジトリを実行できないホストしか無ければ、押せない理由を出す（#1224）", () => {
+    dispatchState = {
+      hosts: [makeHost({ repositories: ["guchi-apps/dayspan"] })],
+      jobs: [],
+      concurrency: 2,
+      error: null,
+    };
+
+    render(
+      <StartLocalSessionButton
+        issue={makeIssue()}
+        onIssueUpdated={vi.fn()}
+        onFirstLaunch={onFirstLaunch}
+        hasLocalStartScript={false}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /subpcで開始/i });
+    expect(button.hasAttribute("disabled")).toBe(true);
   });
 
   it("リポジトリ情報が無い場合は表示する（誤って導線を消さない）", () => {

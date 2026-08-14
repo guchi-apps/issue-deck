@@ -1116,7 +1116,12 @@ gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
 ここまではGitHub Actions側の話。**issue-deckの画面からローカルのClaude Codeセッションをワンクリックで
 起動する**経路は別立てで、対応するかどうかもリポジトリごとに選べる。Actions側の導入とは独立している。
 
-対応させるには2つ要る。
+**サブPCからの起動だけなら、リポジトリ側の作業は要らない**（#1224）。サブPCの対応表
+（`~/.config/issue-deck/local-repos.conf`）へチェックアウト先を書けば、issue-deck側の汎用
+ランチャーが起動する。手順は
+[docs/multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「対象リポジトリを増やす」を参照。
+
+以下は**「このPC」（メインPCのWSL）からワンクリックで起動したい場合**の話。対応させるには2つ要る。
 
 1. リポジトリに`scripts/start-issue.sh`を置き、**ローカル起動プロトコル**に適合させる
 2. 各自の環境の対応表（`~/.config/issue-deck/local-repos.conf`）に、そのリポジトリのチェックアウト先を書く

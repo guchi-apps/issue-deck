@@ -8,6 +8,18 @@
 # issue-deckへ申告し、issue-deck側はその一覧を信じてジョブを割り当てる。申告の判定と実際の
 # 起動時の判定がずれると、「申告どおりに投げたのに起動しない」という最悪の形で表面化する。
 #
+# ## 起動方式は2つある（#1224）
+#
+# | 方式 | 使う実体 | 対象 |
+# | --- | --- | --- |
+# | contract | 対象リポジトリの `scripts/start-issue.sh`（マーカー行を宣言しているもの） | issue-deck自身 |
+# | generic | issue-deck側の `scripts/generic-start-issue.sh`（汎用ランチャー） | それ以外 |
+#
+# マーカー行（ローカル起動プロトコル・#1073）は**起動できることの必要条件ではなくなった**。
+# 宣言しているリポジトリは自前のスクリプトで、していないリポジトリは汎用ランチャーで起動する。
+# 対象リポジトリを1つ増やすたびに700行のスクリプトを移植する運用に見合わないため
+# （docs/multi-agent/generic-launcher.md）。
+#
 # ## 複製されて使われる
 #
 # 受け口は `register-issuedeck-protocol.ps1` によって
@@ -29,6 +41,78 @@ LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION=2
 # 書式は `owner/repo<空白>絶対パス`（`#`始まりはコメント）。scripts/local-repos.conf.example 参照。
 local_repos_config_file() {
   printf '%s\n' "${ISSUE_DECK_LOCAL_REPOS_CONFIG:-$HOME/.config/issue-deck/local-repos.conf}"
+}
+
+# このライブラリと同じ場所に配られているファイルを指す（リポジトリ内なら `scripts/`、
+# 複製先なら `~/.local/share/issue-deck/`）。**リポジトリのチェックアウトを前提にしない**。
+local_session_share_dir() {
+  (cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+}
+
+# 汎用ランチャー（#1224）。マーカー行を宣言していないリポジトリはこれで起動する。
+#
+# **複製先（`~/.local/share/issue-deck/`）には配られていない場合がある。** そのときは
+# 従来どおりマーカー行を必須とする側に落ちる（「このPC」経由の起動は#1224の対象外で、
+# 増やすのはサブPCからの起動だけ）。存在しないまま`ok`にすると、押した先で
+# 「ランチャーが無い」と言われるだけになる。
+local_repo_generic_launcher() {
+  printf '%s\n' "$(local_session_share_dir)/generic-start-issue.sh"
+}
+
+# 開発サーバーのポート帯（ベース値）の対応表。**どのリポジトリがどの帯を使うかは定義上
+# どのリポジトリ単独でも決められない**ため、全リポジトリを知るissue-deck側が持つ（#1073）。
+# 元は受け口の`case`文だったが、対象リポジトリが増えたので設定ファイルへ移した（#1224）。
+local_repo_ports_config_file() {
+  local candidate
+  for candidate in \
+    "${ISSUE_DECK_LOCAL_REPO_PORTS_CONFIG:-}" \
+    "$(local_session_share_dir)/local-repo-ports.conf" \
+    "$HOME/.config/issue-deck/local-repo-ports.conf"; do
+    [[ -n "$candidate" && -f "$candidate" ]] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+# 対応表からポート帯のベース値を引く。載っていなければ何も返さない
+# （そのリポジトリの既定に任せる。勝手な値を渡すと帯が二重管理になる）。
+local_repo_port_base() {
+  local target="$1" config_file line name value
+  config_file="$(local_repo_ports_config_file)" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]*$ ]] || continue
+    name="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    if [[ "$name" == "$target" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done <"$config_file"
+  return 1
+}
+
+# 対象リポジトリが必要とするパッケージマネージャを判定する。リポジトリごとに違うため
+# （issue-deck・dayspanはpnpm、他はnpm）、pnpmを無条件に必須化すると壊れる。判定は
+# 宣言 → ロックファイル → package.json の順で確からしいものを採る。
+# Node系でないリポジトリでは何も返さない（何も要求しない）。
+detect_package_manager() {
+  local dir="$1"
+  if [[ -f "$dir/package.json" ]]; then
+    local declared
+    declared="$(grep -oP '"packageManager"\s*:\s*"\K[a-z]+' "$dir/package.json" | head -1 || true)"
+    if [[ -n "$declared" ]]; then
+      printf '%s\n' "$declared"
+      return 0
+    fi
+  fi
+  if [[ -f "$dir/pnpm-lock.yaml" ]]; then printf 'pnpm\n'; return 0; fi
+  if [[ -f "$dir/yarn.lock" ]]; then printf 'yarn\n'; return 0; fi
+  if [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]]; then printf 'bun\n'; return 0; fi
+  if [[ -f "$dir/package-lock.json" || -f "$dir/package.json" ]]; then printf 'npm\n'; return 0; fi
+  printf '\n'
 }
 
 # owner・repo・Issue番号の検証。引数はブラウザやHTTPのレスポンス経由で外部から渡りうるため、
@@ -95,7 +179,8 @@ local_repo_declared_contract_version() {
 # 結果は次のグローバルへ入れる（複数の値を返すため。サブシェルを挟むと呼び出し側で使えない）。
 #   LOCAL_REPO_STATUS   ok | not_configured | missing_dir | no_launcher | no_contract | contract_too_new
 #   LOCAL_REPO_PATH     チェックアウト先（解決できた場合）
-#   LOCAL_REPO_LAUNCHER そのリポジトリの scripts/start-issue.sh
+#   LOCAL_REPO_LAUNCHER 実際に起動するスクリプト（方式によって中身が変わる）
+#   LOCAL_REPO_MODE     contract（対象リポジトリのstart-issue.sh） | generic（汎用ランチャー）
 #   LOCAL_REPO_VERSION  宣言されている版数（読めた場合）
 #
 # ok のときだけ 0 を返す。
@@ -104,6 +189,7 @@ local_repo_check() {
   LOCAL_REPO_STATUS=""
   LOCAL_REPO_PATH=""
   LOCAL_REPO_LAUNCHER=""
+  LOCAL_REPO_MODE=""
   LOCAL_REPO_VERSION=""
 
   if ! LOCAL_REPO_PATH="$(local_repo_resolve_path "$full_name")"; then
@@ -115,26 +201,44 @@ local_repo_check() {
     return 1
   fi
 
-  LOCAL_REPO_LAUNCHER="$LOCAL_REPO_PATH/scripts/start-issue.sh"
-  if [[ ! -x "$LOCAL_REPO_LAUNCHER" && ! -f "$LOCAL_REPO_LAUNCHER" ]]; then
+  local repo_launcher="$LOCAL_REPO_PATH/scripts/start-issue.sh"
+  if [[ -f "$repo_launcher" ]]; then
+    LOCAL_REPO_VERSION="$(local_repo_declared_contract_version "$repo_launcher")"
+  fi
+
+  # マーカー行を宣言しているリポジトリは、これまでどおり自前のスクリプトで起動する。
+  # 自前で起動元の事情（LANアクセス設定・ポート帯・devサーバー）を吸収する約束をしており、
+  # 汎用ランチャーへ回すと**そのリポジトリが持つ手当てを黙って捨てる**ことになる。
+  if [[ -n "$LOCAL_REPO_VERSION" ]]; then
+    if [[ "$LOCAL_REPO_VERSION" -gt "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" ]]; then
+      LOCAL_REPO_LAUNCHER="$repo_launcher"
+      LOCAL_REPO_STATUS="contract_too_new"
+      return 1
+    fi
+    LOCAL_REPO_LAUNCHER="$repo_launcher"
+    LOCAL_REPO_MODE="contract"
+    LOCAL_REPO_STATUS="ok"
+    return 0
+  fi
+
+  # 宣言が無いリポジトリは汎用ランチャーで起動する（#1224）。ランチャーが配られていない
+  # 環境（複製先の受け口）では、従来どおりマーカー行が無いことを理由に止める。
+  local generic_launcher
+  generic_launcher="$(local_repo_generic_launcher)"
+  if [[ -f "$generic_launcher" ]]; then
+    LOCAL_REPO_LAUNCHER="$generic_launcher"
+    LOCAL_REPO_MODE="generic"
+    LOCAL_REPO_STATUS="ok"
+    return 0
+  fi
+
+  LOCAL_REPO_LAUNCHER="$repo_launcher"
+  if [[ ! -f "$repo_launcher" ]]; then
     LOCAL_REPO_STATUS="no_launcher"
-    return 1
-  fi
-
-  # ファイルがあっても約束を守っているとは限らず、守っていないと起動してから無言で固まる
-  # （#1073）。押した先で固まるより、ここで止める。
-  LOCAL_REPO_VERSION="$(local_repo_declared_contract_version "$LOCAL_REPO_LAUNCHER")"
-  if [[ -z "$LOCAL_REPO_VERSION" ]]; then
+  else
     LOCAL_REPO_STATUS="no_contract"
-    return 1
   fi
-  if [[ "$LOCAL_REPO_VERSION" -gt "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" ]]; then
-    LOCAL_REPO_STATUS="contract_too_new"
-    return 1
-  fi
-
-  LOCAL_REPO_STATUS="ok"
-  return 0
+  return 1
 }
 
 # local_repo_check の結果を人が読める形で標準エラーへ出す。
@@ -154,15 +258,18 @@ local_repo_print_error() {
     missing_dir)
       echo "Error: $full_name のチェックアウト先が存在しません: $LOCAL_REPO_PATH" >&2
       ;;
-    no_launcher)
-      echo "Error: $full_name には scripts/start-issue.sh がありません（$LOCAL_REPO_LAUNCHER）。" >&2
-      echo "  ワンクリック起動に対応しているのは、このスクリプトを持つリポジトリだけです。" >&2
-      ;;
-    no_contract)
-      echo "Error: $full_name はローカル起動プロトコルに対応していません。" >&2
-      echo "  $LOCAL_REPO_LAUNCHER の冒頭に次の1行を足し、約束を満たすようにしてください:" >&2
+    no_launcher | no_contract)
+      # 汎用ランチャー（#1224）が配られていれば、ここには来ない。来るのは複製先の受け口
+      # （「このPC」経由の起動）だけなので、案内も複製先向けに書く。
+      echo "Error: $full_name はこの経路では起動できません。" >&2
+      echo "  $LOCAL_REPO_LAUNCHER にローカル起動プロトコルのマーカー行がなく、" >&2
+      echo "  汎用ランチャー（$(local_repo_generic_launcher)）も配られていません。" >&2
+      echo "  「このPC」経由の起動を使う場合は、対象リポジトリの scripts/start-issue.sh の冒頭に" >&2
+      echo "  次の1行を足し、約束を満たすようにしてください:" >&2
       echo "    # issue-deck-local-session: v$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" >&2
       echo "  約束の内容は issue-deck の docs/multi-agent/local-quick-start.md を参照してください。" >&2
+      echo "  サブPCからの起動であれば、issue-deckのチェックアウトを最新化すれば汎用ランチャーで起動できます" >&2
+      echo "  （docs/multi-agent/generic-launcher.md）。" >&2
       ;;
     contract_too_new)
       echo "Error: $full_name が宣言する v$LOCAL_REPO_VERSION は、この受け口が扱える v$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION より新しいです。" >&2
@@ -178,11 +285,16 @@ local_repo_print_error() {
 local_repo_status_summary() {
   local full_name="$1"
   case "$LOCAL_REPO_STATUS" in
-    ok) printf '%s\n' "$full_name は起動できます（$LOCAL_REPO_PATH・v$LOCAL_REPO_VERSION）" ;;
+    ok)
+      if [[ "$LOCAL_REPO_MODE" == "generic" ]]; then
+        printf '%s\n' "$full_name は起動できます（$LOCAL_REPO_PATH・汎用ランチャー）"
+      else
+        printf '%s\n' "$full_name は起動できます（$LOCAL_REPO_PATH・v$LOCAL_REPO_VERSION）"
+      fi
+      ;;
     not_configured) printf '%s\n' "$full_name のチェックアウト先が対応表にありません（$(local_repos_config_file)）" ;;
     missing_dir) printf '%s\n' "$full_name のチェックアウト先が存在しません: $LOCAL_REPO_PATH" ;;
-    no_launcher) printf '%s\n' "$full_name に scripts/start-issue.sh がありません: $LOCAL_REPO_LAUNCHER" ;;
-    no_contract) printf '%s\n' "$full_name はローカル起動プロトコルに対応していません（マーカー行がありません）" ;;
+    no_launcher | no_contract) printf '%s\n' "$full_name はこの経路では起動できません（マーカー行も汎用ランチャーもありません）" ;;
     contract_too_new) printf '%s\n' "$full_name が宣言する v$LOCAL_REPO_VERSION は、この受け口が扱える v$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION より新しいです" ;;
     *) printf '%s\n' "$full_name の状態を判定できませんでした" ;;
   esac
