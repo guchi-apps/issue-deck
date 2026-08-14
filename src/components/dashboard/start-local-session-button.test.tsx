@@ -43,6 +43,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     contractVersion: 2,
     online: true,
     lastSeenAt: "2026-08-14T00:00:00Z",
+    screenshotCapable: true,
     ...overrides,
   };
 }

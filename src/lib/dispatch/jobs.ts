@@ -61,6 +61,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     contractVersion: host.contractVersion,
     online: isDispatchHostOnline(host.lastSeenAt, now),
     lastSeenAt: host.lastSeenAt.toISOString(),
+    screenshotCapable: host.screenshotCapable,
   };
 }
 
@@ -381,6 +382,8 @@ export async function announceDispatchHost(params: {
   contractVersion: number | null;
   maxConcurrency: number | null;
   agentVersion: string | null;
+  /** スクリーンショットを撮れるか（#1268）。申告していない古いpollerでは`null` */
+  screenshotCapable: boolean | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -390,6 +393,7 @@ export async function announceDispatchHost(params: {
     contractVersion: params.contractVersion,
     maxConcurrency: params.maxConcurrency,
     agentVersion: params.agentVersion,
+    screenshotCapable: params.screenshotCapable,
     lastSeenAt: now,
   };
 
