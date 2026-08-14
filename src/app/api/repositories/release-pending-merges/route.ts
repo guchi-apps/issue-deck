@@ -132,14 +132,16 @@ async function handleGET() {
           // develop→mainのPRを優先する上記の方針に合わせ、そちらがオープン中の間は
           // バンプPRを見ない（`/api/repositories/release`の`phase`とは優先順位が逆になる）。
           bumpPullRequest: !releasePr && bumpPr ? { ciState: bumpCiState } : null,
-          releasePullRequestOpen: releasePr != null,
+          releasePullRequest: releasePr ? { ciState: releaseCiState } : null,
           releasePending: false,
         };
         const status = summarizeReleaseStatus(summaryInput);
         if (status === "idle") return null;
 
         let pendingMerge: ReleasePendingMerge | null = null;
-        if (releasePr && releaseCiState) {
+        if (releasePr && releaseCiState && releaseCiState !== "pending") {
+          // CI実行中はまだマージできないため、マージ待ちとして数えない（#1433）。
+          // `summarizeReleaseStatus`のaction_required判定基準・バンプPR側の条件と揃える。
           pendingMerge = {
             mergeTarget: "main",
             pullRequestNumber: releasePr.number,

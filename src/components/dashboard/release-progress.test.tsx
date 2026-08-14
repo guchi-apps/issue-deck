@@ -93,6 +93,30 @@ describe("ReleaseProgress CI状態バッジ", () => {
   });
 });
 
+describe("ReleaseProgress mainへマージ段の導線（#1433）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("CI実行中はオレンジのマージ導線を出さず、控えめな確認リンクだけを出す", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("pending")} />);
+
+    expect(screen.queryByText("develop→main PR #42 をタップしてmainへマージ")).toBeNull();
+    expect(screen.queryByText("内容を確認して「merge commit」でマージしてください。")).toBeNull();
+    expect(screen.getByText("develop→main PR #42 を確認")).not.toBeNull();
+  });
+
+  it.each(["success", "failure", "unknown", null] as const)(
+    "CIが%s（実行中ではない）ならマージ導線を出す",
+    (ciState) => {
+      render(<ReleaseProgress status={statusWithReleaseCi(ciState)} />);
+
+      expect(screen.getByText("develop→main PR #42 をタップしてmainへマージ")).not.toBeNull();
+      expect(screen.queryByText("develop→main PR #42 を確認")).toBeNull();
+    },
+  );
+});
+
 describe("ReleaseProgress 更新履歴表示", () => {
   afterEach(() => {
     cleanup();

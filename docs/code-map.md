@@ -174,6 +174,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）を判定しない**。
   リポジトリあたり2リクエスト増えるのに対し、その状態はほぼ常にリリースworkflowのrunが
   実行中か失敗として現れるため。`idle`のリポジトリは応答に含めない。
+  **マージ待ちPRを「要操作」（オレンジ強調）にする基準は、バンプPR・develop→mainのリリースPRの
+  どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
+  マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
+  取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
+  なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
+  ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
