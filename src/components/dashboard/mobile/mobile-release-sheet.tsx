@@ -23,7 +23,7 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { resolveProgressStatus } from "@/lib/issue-progress";
+import { isNextReleaseIssue } from "@/lib/issue-progress";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -58,9 +58,7 @@ export function MobileReleaseSheet({
   const pendingReleaseIssues = useMemo(
     () =>
       issues.filter(
-        (issue) =>
-          issue.repositoryFullName === repository.fullName &&
-          resolveProgressStatus(issue) === "develop",
+        (issue) => issue.repositoryFullName === repository.fullName && isNextReleaseIssue(issue),
       ),
     [issues, repository.fullName],
   );
