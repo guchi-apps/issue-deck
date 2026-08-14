@@ -12,6 +12,7 @@
 #                                               （＋`00.check-user`を付ける。#1417）
 #   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）
 #   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
+#                                               （＋この時点で「入力待ち」として記録する。#1438）
 #   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
 #                                               （＋`00.check-user`を解く。#1417）
 #
@@ -514,6 +515,21 @@ decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
   report_plan_to_issue_deck "$(printf '%s' "$result" | tail -n +2)"
+  # **計画を出した時点で、このセッションは人の答えを待っている**（#1438）。承認プロンプトの
+  # `Notification`が飛ぶのを待たずにここで記録する。
+  #
+  # 記録しておかないと、承認の直後の`PostToolUse`が「直前が入力待ちではない」として
+  # 捨てられ（#1357の間引き）、承認したのに`00.check-user`が応答終了（`Stop`）まで
+  # 外れない。`Notification`はここまでの実測では必ず飛んでいるが、**外れるかどうかが
+  # 別のフックの有無に依存している状態を残さない**（承認と同時に外れることが、
+  # 画面から見て「承認が効いた」ことの唯一の合図）。
+  #
+  # `permission_prompt`は回収（`reap-sessions.sh`）から見ても「人を待っている」で、
+  # `Stop`以外は畳まれないため、早く記録して困ることは無い。
+  if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_record_event >/dev/null 2>&1; then
+    session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
+      echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+  fi
   exit 0
 fi
 

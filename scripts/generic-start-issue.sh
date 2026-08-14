@@ -137,9 +137,18 @@ fi
 # 取り込めていない場合に警告する（#1190）。起動は止めない。
 warn_personal_config_drift
 
+# セッション側のスクリプト（run-issue-session.sh・session-notify.sh）をどこから走らせるかを
+# 決める（#1438）。start-issue.sh と同じ扱いで、起動対象のリポジトリではなく起動する側
+# （issue-deckの本体の作業ツリー）を見る。
+resolve_launcher_scripts_dir "$ROOT"
+
 # このランチャー自身（issue-deckの本体の作業ツリー）がdevelopより古い場合に警告する（#1274）。
 # 起動対象のリポジトリではなく、起動する側のスクリプトを見る。
 warn_launcher_scripts_stale "$ROOT"
+
+if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
+  echo "情報: セッション側のスクリプトは $LAUNCHER_SYNC_REF の同期コピー（${LAUNCHER_SCRIPTS_SHA:0:7}）から実行します（#1438）。"
+fi
 
 WORKTREE_BASE="${ISSUE_DECK_GENERIC_WORKTREE_BASE:-$HOME/apps/$REPO-worktrees}"
 PROMPT_DIR="$WORKTREE_BASE/.prompts"
@@ -322,7 +331,9 @@ run_repo_hook issue_session_after_install
 PROMPT_TEMPLATE="$WORKTREE_DIR/scripts/prompts/implementation-agent.md"
 PROMPT_TEMPLATE_SOURCE="対象リポジトリ"
 if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
-  PROMPT_TEMPLATE="$SCRIPT_DIR/prompts/generic-implementation-agent.md"
+  # 汎用テンプレートはセッションへそのまま渡るものなので、フックと同じく同期コピーから読む
+  # （#1438。同期コピーを使わない場合は $SCRIPT_DIR と同じ場所を指す）
+  PROMPT_TEMPLATE="$LAUNCHER_SCRIPTS_DIR/prompts/generic-implementation-agent.md"
   PROMPT_TEMPLATE_SOURCE="issue-deckの汎用テンプレート"
 fi
 if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
@@ -496,11 +507,17 @@ build_env_prefix() {
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
   done
+  # 同期コピーから起動した場合の情報（#1438）。run-issue-session.sh は自分の置き場所しか
+  # 知らないため、本体の作業ツリーの場所とあわせてここから渡す
+  if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
+    prefix+="export ISSUE_DECK_LAUNCHER_SCRIPTS_SHA=$(printf '%q' "$LAUNCHER_SCRIPTS_SHA"); "
+    prefix+="export ISSUE_DECK_LAUNCHER_ROOT=$(printf '%q' "$ROOT"); "
+  fi
   printf '%s' "$prefix"
 }
 
 SESSION_CMD="$(printf "%scd %q && bash %q %q %q %q" "$(build_env_prefix)" "$WORKTREE_DIR" \
-  "$SCRIPT_DIR/run-issue-session.sh" "$ISSUE_NUMBER" "$DEV_PORT" "$PROMPT_FILE")"
+  "$LAUNCHER_SCRIPTS_DIR/run-issue-session.sh" "$ISSUE_NUMBER" "$DEV_PORT" "$PROMPT_FILE")"
 
 if [[ "$TMUX_MODE" == "classic" ]] || ! command -v tmux >/dev/null 2>&1; then
   if [[ "$TMUX_MODE" != "classic" ]]; then

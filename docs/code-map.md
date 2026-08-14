@@ -269,12 +269,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `--append-system-prompt`で渡す。そこを通らない無人実行のために、同じ文面を`.github/prompts/`・
   `scripts/prompts/`の「## 出力言語」にも置いている。**片方だけ変えない。** 設計は
   [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)。
-- **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
-  作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
-  `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、
-  `scripts/`の修正はマージしただけでは反映されない。`scripts/lib/launcher-scripts-sync.sh`の
-  `warn_launcher_scripts_stale`が起動前に差分を警告する（個人設定の警告と同じく、
-  **警告するだけで自動pullはしない**）。経路の表は
+- **セッションと一緒に動くスクリプト（`run-issue-session.sh`・`session-notify.sh`・
+  `scripts/lib/`・`scripts/prompts/`）は、`origin/develop`から取り出した同期コピーから走る**
+  （#1274・#1438）。worktreeは毎回`origin/develop`から作られるのに、本体の作業ツリー
+  （`~/apps/issue-deck/scripts/`）を新しくするのは人の`git pull`だけで、`scripts/`の修正は
+  マージしただけでは反映されなかった（#1438は、承認と同時に`00.check-user`を外すフック設定が
+  生成されないという形でこれを踏んだ）。`scripts/lib/launcher-scripts-sync.sh`の
+  `resolve_launcher_scripts_dir`が置き場所を決め、`warn_launcher_scripts_stale`が差分を警告する。
+  **同期コピーを使うのは作業ツリーが単に古いだけのときに限り、未コミットの変更があれば
+  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 入口の`start-issue.sh`と
+  pollerは作業ツリーのまま。経路の表は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
