@@ -198,7 +198,8 @@ v2の検査は**v2以上を宣言しているリポジトリにだけ課す**。
 
 そのままコピーで済むのは、事前バリデーション・worktreeの作成と再利用・sslip.ioの設定・
 python3によるプロンプト生成ブロック全体・tmux出口（出口の判定・セッション名の組み立て・
-`bash -lc`・`remain-on-exit`）・`claude --permission-mode acceptEdits`の起動フラグ。
+`bash -lc`・`remain-on-exit`）・`claude --permission-mode "$PERMISSION_MODE"`の起動フラグ
+（既定値の決め方は後述の[権限モードは環境変数で切り替える](#権限モードは環境変数で切り替える)）。
 
 ## ヘッドレス（tmux）で起動する
 
@@ -573,6 +574,46 @@ Issue #<番号> の実装を開始してください。あなたへの指示は 
 （`Is this a project you created or one you trust?`）が出ること」だけだが、**承認時にプロンプトが
 失われると確定させたわけではない**。信頼確認はこちらから自動化するものではないため、原因を
 追うのではなく、貼り直せる形にして先へ進めるようにしている。
+
+## 権限モードは環境変数で切り替える
+
+`run-issue-session.sh`（実装セッション）と`start-reviewer.sh`（レビュー・統合セッション）は、
+`claude --permission-mode`へ渡す値を`ISSUE_DECK_CLAUDE_PERMISSION_MODE`から取り、**既定を`auto`
+とする**（#1205）。
+
+```bash
+PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+claude --permission-mode "$PERMISSION_MODE" ...
+```
+
+元の既定だった`acceptEdits`は**ファイル編集だけを自動承認し、Bashコマンドは都度確認する**。
+そのためセッションは`npx tsc --noEmit`・`npx vitest run`・`python3`・`gh issue comment`のたびに
+停止し、人が承認しないと進まない（#1179の実装セッションでは1回の実装で6回以上停止した）。
+サブPCでの無人実行・外出先からの起動は、この状態では成立しない。
+
+代償は**人が個々のコマンドを目視する機会が失われる**ことで、これは取り戻せない。それでも`auto`を
+既定とするのは、後段に防御が残っているため。
+
+- 変更は必ずPull Requestになり、`claude-review-develop.yml`のレビューを通る
+- DBスキーマ・認証・本番設定・Secrets等は自動マージ不可カテゴリとして`00.check-user`で止まる
+- worktreeがIssueごとに分離されており、他Issueの作業を壊さない
+
+運用上の約束。
+
+- 慎重に進めたいときは`ISSUE_DECK_CLAUDE_PERMISSION_MODE=acceptEdits`で従来の挙動に戻せる。
+  ワンクリック起動の経路でもtmuxが`bash -lc`でログインシェルを経由するため、`~/.bashrc`等に
+  `export`しておけば効く
+- **`bypassPermissions`を既定にはしない。** すべての権限チェックを飛ばすため、破壊的な操作も
+  無確認で通る
+- 値の妥当性検査は**claude側に任せる**。issue-deck側で受け付ける値を列挙すると、claudeの更新で
+  ずれる。不正な値を渡した場合はclaudeが起動時にエラーで落ちるだけで、意図しないモードで
+  動き出すことはない（`--permission-mode nonexistent`は
+  `option '--permission-mode <mode>' argument 'nonexistent' is invalid.`（＋許可値の一覧）を出して
+  終了コード1で落ちる）
+
+なお[セキュリティ上の前提](#セキュリティ上の前提)のとおり、プロトコル経由の起動は
+「心当たりのないタブが開いたら閉じる」で受けている。`auto`ではその開いてしまったセッションが
+コマンドを確認なしで実行できるため、**閉じる判断は早いほどよい**。
 
 ## タブは非対話シェルで始まる（nvmが読まれない）
 
