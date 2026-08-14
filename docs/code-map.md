@@ -187,6 +187,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   よう、選べない理由は`lib/dispatch/dispatch-job.ts`の純粋関数を両者が共有する（同ファイルは
   Prismaに触れないため、クライアントコンポーネントからimportできる。`lib/dispatch/jobs.ts`は
   できない）。
+- **順番待ちのIssueは「未着手」ではなく「実行中」に出す**（#1347）。押してからサブPCの
+  セッションが`Implementation`を報告するまで進捗Statusは`Ready`のままで、そのままだと
+  起動済みのIssueが未着手ビューに居座り、そこから同じIssueをもう一度選んでしまう。
+  Issue一覧（`lib/issues-for-user.ts`）が`DispatchJob.activeKey`（未完了の間だけ
+  `owner/repo#番号`が入るunique列）を1本引いて`Issue.dispatchPendingAt`へ合流させ、
+  振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
+  **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
+  引く側を`lib/dispatch/pending-dispatch.ts`に分けているのは、`lib/dispatch/jobs.ts`が
+  セッション経由でGitHub Appの認証（読み込み時点で`GITHUB_APP_*`を要求する）を引きずるため。
+  Issue一覧にその資格情報を要求させない。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

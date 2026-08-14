@@ -89,6 +89,15 @@ export type Issue = {
   /** 実際に最後にコメントが投稿された日時（ISO8601）。Webhook経由で未取得の場合はnull */
   lastCommentAt: string | null;
   /**
+   * サブPCへ積んだ実行ジョブ（#1179）が未完了の間だけ入る、積んだ日時（ISO8601）。
+   * 対象は`DispatchJob.activeKey`が入っている間＝QUEUED・CLAIMED・RUNNING（#1347）。
+   *
+   * 順番待ちの間、進捗Statusはセッションが起動して報告するまで`Ready`のままなので、
+   * これが無いと「未着手」ビューに居座る。値を入れるのはジョブを引く側
+   * （@/lib/issues-for-user・@/lib/github/sync-issues）で、マッパーの既定はnull
+   */
+  dispatchPendingAt: string | null;
+  /**
    * GitHub Projects v2のStatus（例: "Implementation"）。Projectに未登録のIssueはnull。
    * 進捗状態を判定するときはこの値を直接見ず、@/lib/issue-progressのresolveProgressStatusを
    * 通すこと（Statusがnullなら進捗ラベルへフォールバックする）
