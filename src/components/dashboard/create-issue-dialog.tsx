@@ -6,6 +6,7 @@ import { Bot, ChevronDown, Loader2, Mic } from "lucide-react";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -27,8 +28,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useIssueBodyCleanup } from "@/hooks/use-issue-body-cleanup";
-import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
-import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   clearIssueDraft,
   readRestorableIssueDraft,
@@ -39,14 +38,13 @@ import {
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
-import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
   isSelectableLabelName,
   START_IMPLEMENTATION_OPTIONS,
-  startImplementationCommentBody,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -99,12 +97,6 @@ export function CreateIssueDialog({
   onCreated,
 }: CreateIssueDialogProps) {
   const { createIssue, isSubmitting, error, setError } = useIssueMutations();
-  const {
-    createComment,
-    isSubmitting: isCreatingStartComment,
-    error: startCommentError,
-  } = useIssueCommentMutations();
-  const { setProgressStatus } = useProgressStatusMutation();
 
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   const [title, setTitle] = useState("");
@@ -114,6 +106,11 @@ export function CreateIssueDialog({
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   const hasUserSetAssignee = useRef(false);
+  /**
+   * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ実行先の選択を出す。**
+   * このダイアログ自体は閉じているので、実行先の選択はDialogの外側に並べて描画する。
+   */
+  const [startTargetIssue, setStartTargetIssue] = useState<Issue | null>(null);
 
   const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -126,9 +123,11 @@ export function CreateIssueDialog({
     () => groupRepositoriesByWorkflowStatus(repositories),
     [repositories],
   );
-  const startDisabledReason = startImplementationDisabledReason(
-    repositories.find((repo) => repo.fullName === repositoryFullName)?.hasClaudeWorkflow,
-  );
+  // 「作成+実装開始」で作成したIssueの実行先を選ばせるための情報（#1323）。判定の材料は
+  // Issue詳細画面（issue-detail.tsx）と同じで、リポジトリ情報が無い場合は塞がない側に倒す
+  const startTargetRepository = startTargetIssue
+    ? repositories.find((repo) => repo.fullName === startTargetIssue.repositoryFullName)
+    : undefined;
   const selectableLabels = useMemo(
     () => labels.filter((label) => isSelectableLabelName(label.name)),
     [labels],
@@ -251,10 +250,18 @@ export function CreateIssueDialog({
     }
   }
 
-  // 「作成+実装開始」ボタン押下時: 実装オプションの選択はこの画面のチェックボックスで
-  // 既に完了しているため、Issue詳細画面の「実装を開始」ダイアログと同じオプション選択画面を
-  // 再度挟まず、選択済みラベルのままIssueを作成し、続けて進捗（Status）の書き込みと
-  // 実装開始の定型コメントの投稿を行う（#774。進捗ラベルの付与は #991 Phase 5 で廃止した）。
+  /**
+   * 「作成+実装開始」ボタン押下時（#774・#1323）。
+   *
+   * Issueを作成したうえで、**実行先だけを選ぶ「実装を開始」ダイアログへ渡す**。
+   * 実装オプション（`21.plan-required`等）はこの画面のチェックボックスで選び済みで、作成時に
+   * ラベルとして付いた状態で渡るため、そちらは出さない（`showOptions={false}`）。
+   *
+   * **以前はここで直接`@claude`コメントを投稿していた（#774）。** 起動先を選ぶ余地が無く、
+   * 作成したIssueは必ずGitHub Actionsで走っていた。サブPCで始めたい場合は、いったん作成して
+   * Issue詳細を開き直すしかなかったため、既定がサブPCの実行先選択を挟む（#1323）。
+   * 起動そのもの（`@claude`コメント・ジョブの積み込み・進捗の報告）はダイアログ側が行う。
+   */
   async function handleCreateAndStart() {
     if (!repositoryFullName || !title.trim()) return;
     const issue = await createIssue({
@@ -266,252 +273,266 @@ export function CreateIssueDialog({
     });
     if (!issue) return;
 
-    // カンバンを追従させる（#991 Phase 3）。**進捗ラベルを廃止した後はこの書き込みが
-    // 着手状態を示す唯一の手段**（#1010）。盤面に未登録なら進捗報告API側が載せてから書く
-    // （#1036）。失敗しても、少し後にワークフローが同じ状態を報告するため追いつく。
-    await setProgressStatus({
-      repositoryFullName,
-      number: issue.number,
-      status: selectedLabels.includes(PLAN_REQUIRED_LABEL) ? "planning" : "implementation",
-    });
-
-    const [owner, repo] = repositoryFullName.split("/");
-    const comment = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: startImplementationCommentBody(selectedLabels.includes(PLAN_REQUIRED_LABEL)),
-    });
-
     resetForm();
     clearIssueDraft();
     onOpenChange(false);
-    onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
+    onCreated(issue);
+    setStartTargetIssue(issue);
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-lg"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>新しいIssueを作成</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent
+          className="sm:max-w-lg"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>新しいIssueを作成</DialogTitle>
+          </DialogHeader>
 
-        {restorableDraft && (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-            <span>保存された下書きがあります</span>
-            <Button variant="outline" size="xs" onClick={handleRestoreDraft}>
-              復元する
-            </Button>
-          </div>
-        )}
+          {restorableDraft && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
+              <span>保存された下書きがあります</span>
+              <Button variant="outline" size="xs" onClick={handleRestoreDraft}>
+                復元する
+              </Button>
+            </div>
+          )}
 
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-repo">リポジトリ</Label>
-            <Select value={repositoryFullName} onValueChange={setRepositoryFullName}>
-              <SelectTrigger id="create-issue-repo" className="w-full">
-                <SelectValue placeholder="リポジトリを選択" />
-              </SelectTrigger>
-              <SelectContent>
-                {registeredRepositories.length > 0 && (
-                  <SelectGroup>
-                    {unregisteredRepositories.length > 0 && <SelectLabel>登録済み</SelectLabel>}
-                    {registeredRepositories.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.fullName}>
-                        {repo.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-                {unregisteredRepositories.length > 0 && (
-                  <SelectGroup>
-                    {registeredRepositories.length > 0 && <SelectLabel>未登録</SelectLabel>}
-                    {unregisteredRepositories.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.fullName}>
-                        {repo.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-repo">リポジトリ</Label>
+              <Select value={repositoryFullName} onValueChange={setRepositoryFullName}>
+                <SelectTrigger id="create-issue-repo" className="w-full">
+                  <SelectValue placeholder="リポジトリを選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  {registeredRepositories.length > 0 && (
+                    <SelectGroup>
+                      {unregisteredRepositories.length > 0 && <SelectLabel>登録済み</SelectLabel>}
+                      {registeredRepositories.map((repo) => (
+                        <SelectItem key={repo.id} value={repo.fullName}>
+                          {repo.fullName}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {unregisteredRepositories.length > 0 && (
+                    <SelectGroup>
+                      {registeredRepositories.length > 0 && <SelectLabel>未登録</SelectLabel>}
+                      {unregisteredRepositories.map((repo) => (
+                        <SelectItem key={repo.id} value={repo.fullName}>
+                          {repo.fullName}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-title">タイトル</Label>
-            <Input
-              id="create-issue-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Issueのタイトル"
-              className="md:text-sm"
-              autoFocus
-            />
-          </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-title">タイトル</Label>
+              <Input
+                id="create-issue-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Issueのタイトル"
+                className="md:text-sm"
+                autoFocus
+              />
+            </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-body">本文</Label>
-            <MentionTextarea
-              id="create-issue-body"
-              value={body}
-              onChange={setBody}
-              issueSuggestions={issueSuggestions}
-              onUploadingChange={setIsImageUploading}
-              repositoryFullName={repositoryFullName}
-              placeholder="詳細を入力（任意）"
-              className="min-h-32 md:text-sm"
-            />
-            <div className="flex flex-wrap gap-2">
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={!body.trim() || isCleaningUpBody}
-                  onClick={handleGenerateBodyCleanup}
-                >
-                  {isCleaningUpBody ? <Loader2 className="animate-spin" /> : <Mic />}
-                  音声入力を整理
-                </Button>
-                {bodyCleanupNotConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていません
-                  </p>
-                )}
-                {bodyCleanupError && <p className="text-xs text-destructive">{bodyCleanupError}</p>}
-              </div>
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={!body.trim() || !repositoryFullName || isMetaLoading || isSuggesting}
-                  onClick={handleGenerateSuggestion}
-                >
-                  {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
-                  タイトル・ラベルを自動生成
-                </Button>
-                {suggestNotConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていません
-                  </p>
-                )}
-                {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-body">本文</Label>
+              <MentionTextarea
+                id="create-issue-body"
+                value={body}
+                onChange={setBody}
+                issueSuggestions={issueSuggestions}
+                onUploadingChange={setIsImageUploading}
+                repositoryFullName={repositoryFullName}
+                placeholder="詳細を入力（任意）"
+                className="min-h-32 md:text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={!body.trim() || isCleaningUpBody}
+                    onClick={handleGenerateBodyCleanup}
+                  >
+                    {isCleaningUpBody ? <Loader2 className="animate-spin" /> : <Mic />}
+                    音声入力を整理
+                  </Button>
+                  {bodyCleanupNotConfigured && (
+                    <p className="text-xs text-muted-foreground">
+                      Claudeのトークンが設定されていません
+                    </p>
+                  )}
+                  {bodyCleanupError && <p className="text-xs text-destructive">{bodyCleanupError}</p>}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={!body.trim() || !repositoryFullName || isMetaLoading || isSuggesting}
+                    onClick={handleGenerateSuggestion}
+                  >
+                    {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+                    タイトル・ラベルを自動生成
+                  </Button>
+                  {suggestNotConfigured && (
+                    <p className="text-xs text-muted-foreground">
+                      Claudeのトークンが設定されていません
+                    </p>
+                  )}
+                  {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>ラベル</Label>
-            <LabelPicker
-              labels={selectableLabels}
-              selectedNames={selectedLabels}
-              onToggle={toggleLabel}
-              isLoading={isMetaLoading}
-              trigger={
-                <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
-                  {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
-                  <ChevronDown className="size-3.5" />
-                </Button>
-              }
-            />
-            {selectedLabels.filter(isSelectableLabelName).length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {selectedLabels.filter(isSelectableLabelName).map((name) => {
-                  const label = labels.find((l) => l.name === name);
-                  return (
-                    <span
-                      key={name}
-                      className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                      style={getLabelBadgeStyle(label?.color ?? "#64748b")}
-                    >
-                      {name}
+            <div className="flex flex-col gap-1.5">
+              <Label>ラベル</Label>
+              <LabelPicker
+                labels={selectableLabels}
+                selectedNames={selectedLabels}
+                onToggle={toggleLabel}
+                isLoading={isMetaLoading}
+                trigger={
+                  <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                    {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                }
+              />
+              {selectedLabels.filter(isSelectableLabelName).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {selectedLabels.filter(isSelectableLabelName).map((name) => {
+                    const label = labels.find((l) => l.name === name);
+                    return (
+                      <span
+                        key={name}
+                        className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                        style={getLabelBadgeStyle(label?.color ?? "#64748b")}
+                      >
+                        {name}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {START_IMPLEMENTATION_OPTIONS.map((option) => (
+                <div key={option.key} className="flex items-start gap-2">
+                  <Checkbox
+                    id={`create-issue-option-${option.key}`}
+                    checked={selectedLabels.includes(option.githubLabel)}
+                    onCheckedChange={() => toggleLabel(option.githubLabel)}
+                    className="mt-0.5"
+                  />
+                  <Label
+                    htmlFor={`create-issue-option-${option.key}`}
+                    className="flex-col items-start gap-0.5"
+                  >
+                    {option.label}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {option.description}
                     </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                  </Label>
+                </div>
+              ))}
+            </div>
 
-          <div className="flex flex-col gap-3">
-            {START_IMPLEMENTATION_OPTIONS.map((option) => (
-              <div key={option.key} className="flex items-start gap-2">
-                <Checkbox
-                  id={`create-issue-option-${option.key}`}
-                  checked={selectedLabels.includes(option.githubLabel)}
-                  onCheckedChange={() => toggleLabel(option.githubLabel)}
-                  className="mt-0.5"
-                />
-                <Label
-                  htmlFor={`create-issue-option-${option.key}`}
-                  className="flex-col items-start gap-0.5"
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-assignee">担当者</Label>
+              <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
+                <SelectTrigger
+                  id="create-issue-assignee"
+                  className="h-9 w-full"
+                  disabled={isMetaLoading}
                 >
-                  {option.label}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {option.description}
-                  </span>
-                </Label>
-              </div>
-            ))}
+                  <SelectValue placeholder="担当者を選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">未設定</SelectItem>
+                  {assignees.map((login) => (
+                    <SelectItem key={login} value={login}>
+                      {login}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <ApiErrorMessage message={error} />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-assignee">担当者</Label>
-            <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
-              <SelectTrigger
-                id="create-issue-assignee"
-                className="h-9 w-full"
-                disabled={isMetaLoading}
-              >
-                <SelectValue placeholder="担当者を選択" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">未設定</SelectItem>
-                {assignees.map((login) => (
-                  <SelectItem key={login} value={login}>
-                    {login}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <ApiErrorMessage message={error ?? startCommentError} />
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            キャンセル
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={handleCreateAndStart}
-            disabled={
-              isSubmitting ||
-              isCreatingStartComment ||
-              !repositoryFullName ||
-              !title.trim() ||
-              isImageUploading ||
-              startDisabledReason !== null
-            }
-            title={startDisabledReason ?? undefined}
-          >
-            {isSubmitting || isCreatingStartComment ? "作成中..." : "作成+実装開始"}
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
-          >
-            {isSubmitting ? "作成中..." : "作成"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              キャンセル
+            </Button>
+            {/* Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
+                実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
+                理由はダイアログのGitHub Actionsの選択肢の説明として出す */}
+            <Button
+              variant="secondary"
+              onClick={handleCreateAndStart}
+              disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
+            >
+              {isSubmitting ? "作成中..." : "作成+実装開始"}
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
+            >
+              {isSubmitting ? "作成中..." : "作成"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* 作成直後の実行先選択（#1323）。既定はサブPCで、GitHub Actionsはフォールバック。
+          作成フォームは閉じているため、Dialogの外側に並べて描画する */}
+      {startTargetIssue && (
+        <StartImplementationDialog
+          issue={startTargetIssue}
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setStartTargetIssue(null);
+          }}
+          // ラベル・コメント数の変化は、作成時と同じ経路（onCreated）で呼び出し側へ渡す。
+          // 既存分があれば更新されるため、同じIssueが二重に並ぶことはない
+          onIssueUpdated={(updated) => {
+            setStartTargetIssue(updated);
+            onCreated(updated);
+          }}
+          onCommentCreated={() => {}}
+          includeDispatchTargets
+          showOptions={false}
+          actionsDisabledReason={startImplementationDisabledReason(
+            startTargetRepository?.hasClaudeWorkflow,
+          )}
+          localSessionCommand={
+            canStartLocalSession(startTargetRepository?.hasLocalStartScript)
+              ? buildLocalSessionCommand(
+                  startTargetIssue.repositoryFullName,
+                  startTargetIssue.number,
+                )
+              : null
+          }
+          // 作成した直後なのでコメントも親子関係も無い。「取得していません」と書かせないよう空で渡す
+          subIssueRelations={{ parent: null, children: [], childCount: 0 }}
+        />
+      )}
+    </>
   );
 }

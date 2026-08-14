@@ -102,6 +102,17 @@ type StartImplementationDialogProps = {
    * `null`・省略ならその選択肢を出さない（ローカル起動プロトコルに適合していないリポジトリ・#1073）。
    */
   localSessionCommand?: string | null;
+  /**
+   * オプション（`21.plan-required`等）のチェックボックスを出すか（既定は出す）。
+   *
+   * **Issue作成画面の「作成+実装開始」から開く場合だけ`false`にする**（#1323）。あちらは
+   * 同じオプションを作成フォームのチェックボックスで既に選ばせており、作成時にラベルとして
+   * 付いた状態でこのダイアログへ来る。同じ選択を2画面続けて出すと、どちらが効くのか分からない。
+   *
+   * 隠しても選択状態はIssueのラベルから同期されるため、`21.plan-required`の有無で進捗を
+   * `Planning`と`Implementation`へ出し分ける判定はそのまま働く。
+   */
+  showOptions?: boolean;
 };
 
 /**
@@ -110,8 +121,9 @@ type StartImplementationDialogProps = {
  * 実装エージェントを起動する。
  *
  * `renderTrigger`を渡すと自前のトリガーボタンから開閉する（Issue詳細画面）。
- * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面、
- * Issue作成直後に自動で開く用途）。
+ * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面の
+ * 「作成+実装開始」が、作成直後にこのダイアログを開く用途・#1323）。その経路では
+ * オプションを作成フォームで選び済みなので`showOptions={false}`で実行先だけを選ばせる。
  *
  * `includeDispatchTargets`を渡すと**実行先も選べる**（#1248）。起動のさせ方は経路で違う。
  *
@@ -137,6 +149,7 @@ export function StartImplementationDialog({
   comments = [],
   localSessionCommand = null,
   subIssueRelations,
+  showOptions = true,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -247,6 +260,9 @@ export function StartImplementationDialog({
 
     const currentNames = issue.labels.map((label) => label.name);
     const nextNames = [...new Set([...currentNames, ...labelsToAdd])];
+    // 既に全部付いているなら書き込まない。Issue作成画面から来た場合（#1323）は作成時に
+    // 付与済みで毎回ここに当たるため、増えないPATCHを投げないようにする
+    if (nextNames.length === currentNames.length) return issue;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
@@ -390,37 +406,43 @@ export function StartImplementationDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>実装を開始</DialogTitle>
-          <DialogDescription>必要なオプションを選択してから実装を開始してください。</DialogDescription>
+          <DialogDescription>
+            {showOptions
+              ? "必要なオプションを選択してから実装を開始してください。"
+              : "実行先を選択してから実装を開始してください。"}
+          </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
-          {START_IMPLEMENTATION_OPTIONS.map((option) => {
-            // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
-            // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
-            const unavailable =
-              option.key === "screenshotRequired" && screenshotRejection !== null;
-            const disabled = unavailable && !options[option.key];
-            return (
-              <div key={option.key} className="flex items-start gap-2">
-                <Checkbox
-                  id={`start-implementation-${option.key}`}
-                  checked={options[option.key]}
-                  disabled={disabled}
-                  onCheckedChange={() => toggleOption(option.key)}
-                  className="mt-0.5"
-                />
-                <Label
-                  htmlFor={`start-implementation-${option.key}`}
-                  className={cn("flex-col items-start gap-0.5", disabled && "opacity-50")}
-                >
-                  {option.label}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {unavailable ? screenshotRejection : option.description}
-                  </span>
-                </Label>
-              </div>
-            );
-          })}
-        </div>
+        {showOptions && (
+          <div className="flex flex-col gap-3">
+            {START_IMPLEMENTATION_OPTIONS.map((option) => {
+              // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
+              // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
+              const unavailable =
+                option.key === "screenshotRequired" && screenshotRejection !== null;
+              const disabled = unavailable && !options[option.key];
+              return (
+                <div key={option.key} className="flex items-start gap-2">
+                  <Checkbox
+                    id={`start-implementation-${option.key}`}
+                    checked={options[option.key]}
+                    disabled={disabled}
+                    onCheckedChange={() => toggleOption(option.key)}
+                    className="mt-0.5"
+                  />
+                  <Label
+                    htmlFor={`start-implementation-${option.key}`}
+                    className={cn("flex-col items-start gap-0.5", disabled && "opacity-50")}
+                  >
+                    {option.label}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {unavailable ? screenshotRejection : option.description}
+                    </span>
+                  </Label>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {showTargets && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">実行先</p>
