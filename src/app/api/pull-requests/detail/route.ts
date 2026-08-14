@@ -7,11 +7,13 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
+import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchPullRequest,
   fetchPullRequestReviewComments,
   fetchPullRequestReviews,
 } from "@/lib/github/pull-requests-api";
+import { fetchRefCiState } from "@/lib/github/release-api";
 import type { PullRequestDetail } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
@@ -19,9 +21,13 @@ export function GET(request: NextRequest) {
 }
 
 /**
- * PR1件の本文とコメントを取得する。一覧（`/api/pull-requests`）と同じくキャッシュせず
- * 都度GitHub APIから読む。1回で4リクエスト（PR本体・会話コメント・レビュー・レビューコメント）を
- * 消費するため、呼ぶのはユーザーが一覧でPRを選んだときだけ（ポーリングはしない）。
+ * PR1件のヘッダー情報・本文・コメントを取得する。一覧（`/api/pull-requests`）と同じく
+ * キャッシュせず都度GitHub APIから読む。1回で4リクエスト（PR本体・会話コメント・レビュー・
+ * レビューコメント）、openなPRではCI状態を足して5リクエストを消費するため、呼ぶのは
+ * ユーザーがPRを選んだ・画面内のリンクからPRを開いたときだけ（ポーリングはしない）。
+ *
+ * 一覧に載っていないPR（マージ済み・クローズ済み）も画面内のリンクから開けるようにしたため
+ * （#1260）、ヘッダー表示用の`summary`もあわせて返す。
  */
 async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
@@ -60,8 +66,20 @@ async function handleGET(request: NextRequest) {
       fetchPullRequestReviewComments(owner, repo, number, token),
     ]);
 
+    // CI状態はまだマージ・レビューの判断が要るPRでしか意味を持たない。closedなPRや
+    // draftでは追加の1リクエストを使わずunknownのままにする（一覧側と同じ方針）。
+    const ciState =
+      pullRequest.state === "open" && !pullRequest.draft
+        ? await fetchRefCiState(owner, repo, pullRequest.head.sha, token)
+        : "unknown";
+
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,
+      summary: toPullRequestSummary(
+        pullRequest,
+        { fullName: repository.fullName, private: repository.private },
+        { merged: pullRequest.merged, ciState },
+      ),
       body: pullRequest.body ?? "",
       additions: pullRequest.additions,
       deletions: pullRequest.deletions,

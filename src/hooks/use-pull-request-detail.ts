@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { OpenPullRequest, PullRequestDetail } from "@/types/pull-request";
+import { parsePullRequestId } from "@/lib/github-reference";
+import type { PullRequestDetail } from "@/types/pull-request";
 
 type UsePullRequestDetailResult = {
   detail: PullRequestDetail | null;
@@ -14,13 +15,15 @@ type UsePullRequestDetailResult = {
 /**
  * 選択中PRの本文・コメントを取得する（#1087）。
  *
+ * 引数は一覧の項目ではなくPRのid（`<owner>/<repo>#<番号>`）にしている。画面内のリンクから
+ * 開いたPRは一覧（マージ待ちのみ）に載っていないことがあり、そこでも詳細を出せるようにする
+ * ため（#1260）。ヘッダーに必要な情報は応答の`summary`に入っている。
+ *
  * 一覧（`use-open-pull-requests.ts`）と同じく**自動ポーリングしない**。1件の取得で
- * GitHub APIを4回消費するうえ、PRの本文やコメントは開いている間に何度も変わるものではない。
+ * GitHub APIを4〜5回消費するうえ、PRの本文やコメントは開いている間に何度も変わるものではない。
  * 新しいコメントを取り込みたいときは詳細ヘッダーの更新ボタン（`refresh`）を使う。
  */
-export function usePullRequestDetail(
-  pullRequest: OpenPullRequest | null,
-): UsePullRequestDetailResult {
+export function usePullRequestDetail(pullRequestId: string | null): UsePullRequestDetailResult {
   const [detail, setDetail] = useState<PullRequestDetail | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,26 +31,25 @@ export function usePullRequestDetail(
 
   const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
 
-  const repositoryFullName = pullRequest?.repositoryFullName ?? null;
-  const number = pullRequest?.number ?? null;
-
   useEffect(() => {
-    if (!repositoryFullName || number === null) return;
+    const parsed = pullRequestId ? parsePullRequestId(pullRequestId) : null;
+    if (!parsed) return;
 
     let cancelled = false;
     const controller = new AbortController();
 
     async function load() {
+      if (!parsed) return;
       // 別のPRへ切り替えた直後に前のPRの本文が残って見えないよう、取得前に必ず伏せる。
       setDetail(null);
       setError(null);
       setIsLoading(true);
       try {
-        const [owner, repo] = (repositoryFullName ?? "").split("/");
+        const [owner, repo] = parsed.repositoryFullName.split("/");
         const params = new URLSearchParams({
           owner,
           repo,
-          number: String(number),
+          number: String(parsed.number),
         });
         const res = await fetch(`/api/pull-requests/detail?${params.toString()}`, {
           signal: controller.signal,
@@ -57,7 +59,9 @@ export function usePullRequestDetail(
           throw new Error(
             data.error === "github_api_error" && data.message
               ? data.message
-              : `リクエストに失敗しました (${res.status})`,
+              : res.status === 404
+                ? "このPull Requestは見つかりませんでした（連携していないリポジトリの可能性があります）"
+                : `リクエストに失敗しました (${res.status})`,
           );
         }
         const data: PullRequestDetail = await res.json();
@@ -78,7 +82,7 @@ export function usePullRequestDetail(
       cancelled = true;
       controller.abort();
     };
-  }, [repositoryFullName, number, reloadKey]);
+  }, [pullRequestId, reloadKey]);
 
   return { detail, isLoading, error, refresh };
 }

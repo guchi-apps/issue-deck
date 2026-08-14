@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
@@ -296,14 +297,12 @@ function ApprovalActions({
           </>
         )}
         {pullRequestLink && (
-          <a
+          <GithubReferenceLink
             href={pullRequestLink.url}
-            target="_blank"
-            rel="noreferrer"
             className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2"
           >
             対応PR #{pullRequestLink.number}
-          </a>
+          </GithubReferenceLink>
         )}
         {onMergePullRequest && (
           <div className="mt-2 flex items-center gap-2">

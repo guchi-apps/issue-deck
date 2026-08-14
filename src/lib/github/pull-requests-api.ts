@@ -15,6 +15,8 @@ export type GithubApiOpenPullRequest = {
   title: string;
   body: string | null;
   draft: boolean;
+  /** `open` / `closed`。一覧取得は常にopenだが、単体取得ではclosedも返る */
+  state: string;
   created_at: string;
   updated_at: string;
   user: { login: string } | null;
@@ -56,6 +58,8 @@ export type GithubApiPullRequestDetail = GithubApiOpenPullRequest & {
   deletions: number;
   changed_files: number;
   commits: number;
+  /** マージ済みか。一覧取得のレスポンスには含まれず、単体取得でのみ返る */
+  merged: boolean;
   /** マージ可否。GitHub側が判定中の間はnullが返る */
   mergeable: boolean | null;
   /** `clean` / `dirty`（コンフリクト）/ `blocked` / `unstable` / `behind` / `draft` / `unknown` */

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { OpenPullRequest, OpenPullRequestsResponse } from "@/types/pull-request";
+import type { PullRequestSummary, OpenPullRequestsResponse } from "@/types/pull-request";
 
 type UseOpenPullRequestsResult = {
-  pullRequests: OpenPullRequest[];
+  pullRequests: PullRequestSummary[];
   /** 取得に失敗したリポジトリのfullName（部分的な欠落を画面に出すため） */
   failedRepositories: string[];
   /** 最終取得時刻（ISO8601）。未取得はnull */
@@ -24,7 +24,7 @@ type UseOpenPullRequestsResult = {
  * レート消費が読めなくなる。画面を開いたときとユーザーの明示的な更新操作でのみ取得する。
  */
 export function useOpenPullRequests(enabled: boolean): UseOpenPullRequestsResult {
-  const [pullRequests, setPullRequests] = useState<OpenPullRequest[]>([]);
+  const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);

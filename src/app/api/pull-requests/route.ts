@@ -4,13 +4,13 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchOpenPullRequests,
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
-import { classifyPullRequest, extractLinkedIssueNumber } from "@/lib/pull-request-list";
-import type { OpenPullRequest, OpenPullRequestsResponse } from "@/types/pull-request";
+import type { OpenPullRequestsResponse, PullRequestSummary } from "@/types/pull-request";
 
 export function GET() {
   return withGithubApiFeature("pull_request_list", handleGET);
@@ -63,7 +63,7 @@ async function handleGET() {
   const failedRepositories: string[] = [];
 
   const results = await Promise.all(
-    repositories.map(async (repository): Promise<OpenPullRequest[]> => {
+    repositories.map(async (repository): Promise<PullRequestSummary[]> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
         const pullRequests = await fetchOpenPullRequests(
@@ -109,10 +109,7 @@ async function toOpenPullRequest(
     private: boolean;
     token: string;
   },
-): Promise<OpenPullRequest> {
-  const baseRef = pullRequest.base.ref;
-  const headRef = pullRequest.head.ref;
-
+): Promise<PullRequestSummary> {
   // CI状態はPR1件につき1回（check-runsが100件を超えるrefではページ数ぶん）APIを消費する。
   // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いてunknownにする。
   const ciState = pullRequest.draft
@@ -124,26 +121,6 @@ async function toOpenPullRequest(
         repository.token,
       );
 
-  return {
-    id: `${repository.fullName}#${pullRequest.number}`,
-    repositoryFullName: repository.fullName,
-    repositoryPrivate: repository.private,
-    number: pullRequest.number,
-    title: pullRequest.title,
-    htmlUrl: pullRequest.html_url,
-    authorLogin: pullRequest.user?.login ?? "unknown",
-    draft: pullRequest.draft,
-    baseRef,
-    headRef,
-    kind: classifyPullRequest({ baseRef, headRef }),
-    linkedIssueNumber: extractLinkedIssueNumber({
-      headRef,
-      title: pullRequest.title,
-      body: pullRequest.body,
-    }),
-    autoMergeEnabled: pullRequest.auto_merge !== null,
-    ciState,
-    createdAt: pullRequest.created_at,
-    updatedAt: pullRequest.updated_at,
-  };
+  // この一覧はopenのPRしか取得しないため、マージ済みは存在しない。
+  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState });
 }

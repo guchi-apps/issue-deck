@@ -1,12 +1,14 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { ExternalLink, GitPullRequest, GitPullRequestDraft, Lock, RefreshCw } from "lucide-react";
+import { ExternalLink, Lock, RefreshCw } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
   BranchBadge,
   CiStateBadge,
   PullRequestMetaBadge,
+  PullRequestStateIcon,
   formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
@@ -16,10 +18,10 @@ import { Button } from "@/components/ui/button";
 import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
-import type { OpenPullRequest } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type PullRequestListProps = {
-  pullRequests: OpenPullRequest[];
+  pullRequests: PullRequestSummary[];
   failedRepositories: string[];
   fetchedAt: string | null;
   isLoading: boolean;
@@ -28,9 +30,9 @@ type PullRequestListProps = {
   /** 詳細を表示中のPRのid。未選択・詳細を持たない画面ではnull */
   selectedPullRequestId?: string | null;
   /** PRを選んだとき（詳細の表示）。渡さない場合もタイトルのリンクからGitHubは開ける */
-  onSelectPullRequest?: (pullRequest: OpenPullRequest) => void;
+  onSelectPullRequest?: (pullRequest: PullRequestSummary) => void;
   /** マージが成功したとき。一覧から伏せる・再取得するといった後始末は親が行う */
-  onMerged?: (pullRequest: OpenPullRequest) => void;
+  onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -49,9 +51,9 @@ function PullRequestCard({
   onSelect,
   onMerged,
 }: {
-  pullRequest: OpenPullRequest;
+  pullRequest: PullRequestSummary;
   selected: boolean;
-  onSelect?: (pullRequest: OpenPullRequest) => void;
+  onSelect?: (pullRequest: PullRequestSummary) => void;
   onMerged: () => void;
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
@@ -64,14 +66,7 @@ function PullRequestCard({
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
-        {pullRequest.draft ? (
-          <GitPullRequestDraft
-            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-            aria-label="ドラフト"
-          />
-        ) : (
-          <GitPullRequest className="mt-0.5 size-4 shrink-0 text-green-600" aria-label="オープン" />
-        )}
+        <PullRequestStateIcon pullRequest={pullRequest} className="mt-0.5 size-4 shrink-0" />
         {/* 「#番号 タイトル」の並びはIssue一覧（issue-list.tsx）に揃えている。
             行末に番号を置くとタイトルが長いときに見切れて、PRの識別子が読めなくなるため。
             タイトルは詳細を開くボタンで、GitHubへは右のアイコンから開く（#1087）。 */}
@@ -97,14 +92,17 @@ function PullRequestCard({
         <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
         {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
         {pullRequest.linkedIssueNumber !== null && (
-          <a
+          <GithubReferenceLink
             href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
-            target="_blank"
-            rel="noopener noreferrer"
+            reference={{
+              repositoryFullName: pullRequest.repositoryFullName,
+              number: pullRequest.linkedIssueNumber,
+              kind: "issue",
+            }}
             className="text-xs text-primary hover:underline"
           >
             Issue #{pullRequest.linkedIssueNumber}
-          </a>
+          </GithubReferenceLink>
         )}
       </div>
 
