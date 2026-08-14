@@ -77,8 +77,13 @@ type CommentThreadProps = {
   isUpdating?: boolean;
   /** trueの場合、直近のbotコメントの下に承認・修正・取り下げボタン（またはPRマージ案内）を表示する（00.check-userラベルが付いているissue用） */
   approvalPending?: boolean;
-  /** サブPC実行中に承認が空振りすることを伝える案内（#1264） */
+  /** サブPC実行中に承認が空振りすることを伝える案内（#1264・#1417） */
   localSessionNotice?: ReactNode;
+  /**
+   * trueの場合、承認・修正・取り下げボタンを出さずlocalSessionNoticeだけを表示する（#1417）。
+   * 走っているローカルセッションが入力待ちで、どのボタンも効かない状態を表す。
+   */
+  sessionWaitingInput?: boolean;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
   /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク（#1339で複数対応） */
@@ -173,6 +178,7 @@ function ApprovalActions({
   onPullRequestMerged,
   isFallbackNotice,
   mergeApprovalPending,
+  sessionWaitingInput,
   pullRequestLinks,
   pullRequests,
   repositoryFullName,
@@ -197,6 +203,7 @@ function ApprovalActions({
   onPullRequestMerged?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
+  sessionWaitingInput?: boolean;
   pullRequestLinks?: PullRequestLink[];
   pullRequests?: IssuePullRequest[];
   repositoryFullName: string;
@@ -268,6 +275,17 @@ function ApprovalActions({
   function handleMerged(pullRequestNumber: number) {
     setMergedHere((prev) => new Set([...prev, pullRequestNumber]));
     onPullRequestMerged?.(pullRequestNumber);
+  }
+
+  // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
+  // **PRマージ待ちを優先するのは、あちらはGitHub側の操作で`11.local`中でも実際に効くため。**
+  if (sessionWaitingInput && !mergeApprovalPending) {
+    return (
+      <div className="mt-3 rounded-lg border border-dashed p-3">
+        <p className="mb-2 text-sm font-medium">セッションが入力を待っています</p>
+        {localSessionNotice}
+      </div>
+    );
   }
 
   if (mergeApprovalPending) {
@@ -429,6 +447,7 @@ export function CommentThread({
   isUpdating,
   approvalPending,
   localSessionNotice,
+  sessionWaitingInput,
   mergeApprovalPending,
   pullRequestLinks,
   pullRequests,
@@ -498,6 +517,7 @@ export function CommentThread({
             mergedPullRequestNumbers={mergedPullRequestNumbers}
             onPullRequestMerged={onPullRequestMerged}
             mergeApprovalPending={mergeApprovalPending}
+            sessionWaitingInput={sessionWaitingInput}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
             repositoryFullName={repositoryFullName}
@@ -720,6 +740,7 @@ export function CommentThread({
                   onPullRequestMerged={onPullRequestMerged}
                   isFallbackNotice={isFallbackNotice}
                   mergeApprovalPending={mergeApprovalPending}
+                  sessionWaitingInput={sessionWaitingInput}
                   pullRequestLinks={pullRequestLinks}
                   pullRequests={pullRequests}
                   repositoryFullName={repositoryFullName}
@@ -751,6 +772,7 @@ export function CommentThread({
           onPullRequestMerged={onPullRequestMerged}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
+          sessionWaitingInput={sessionWaitingInput}
           pullRequestLinks={pullRequestLinks}
           pullRequests={pullRequests}
           repositoryFullName={repositoryFullName}

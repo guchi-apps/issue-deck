@@ -51,6 +51,48 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 別途設けている。走査対象はissue-deckの進捗問い合わせAPIから引くため、**issue-deckへ疎通
 できない間このジョブは何も見つけられない**（ラベルという代替の判断材料はもう無い）。
 
+## `00.check-user`が付く・外れるタイミング（#1417）
+
+`00.check-user`は「ユーザーの確認・指示が要る」ことを表す唯一のラベルで、**付け外しをする実行体が
+無人実行のワークフロー・issue-deckの画面・ローカルセッションのフックの3経路に分かれている**。
+個々の理由はそれぞれのコードのコメントにあるが、全体を見渡せる場所が無いとどこかが欠けていても
+気付けないため、ここを一覧の正とする。個別の設計理由は各項目のリンク先を参照。
+
+### 付くタイミング
+
+| 契機 | 無人実行（GitHub Actions） | ローカル・サブPC実行 |
+| --- | --- | --- |
+| エージェントがユーザーに質問した | `reusable-issue-dispatch.yml`が回答コメントの投稿後に`00.check-user`＋`00.qa-answered`を付与（#887） | `Notification / permission_prompt`フックが`POST /api/dispatch/sessions/activity`へ`checkUserRequested`を報告し、`requestSessionCheckUser`が付与（#1417） |
+| 計画を提示した | 計画コメントの投稿後に付与（`.github/prompts/plan.md`） | `PreToolUse(ExitPlanMode)`フックが計画をIssueへ投稿して付与（#1342） |
+| PRを作成し、自動マージされなかった | `reusable-claude-review-develop.yml`の`risk-check`（機械的判定・`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`）と`claude-review`（意味的判定）が付与（後述「自動マージ可否の判定方法」） | 同じ（PR作成後はレビュー・統合側の担当） |
+| 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
+| スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
+| 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
+
+### 外れるタイミング
+
+| 契機 | 外す実行体 |
+| --- | --- |
+| ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
+| ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
+| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`が進捗の遷移とあわせて外す（#266） |
+| ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
+| ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
+| Issueがcloseされた | `reusable-issue-labels.yml`の`cleanup-on-close`（#464） |
+
+### ローカルセッションで守っている約束（#1342・#1417）
+
+- **外すのは自分で付けたときだけ。** `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で
+  付けた`00.check-user`まで落とす。付けた事実はホスト側の状態ファイル
+  （`scripts/lib/session-state.sh`の`<セッション名>.check-user`）に印として残し、印があるときしか
+  外しに行かない。
+- **入力待ちではコメントを投稿しない。** 承認プロンプトや質問はturnの途中で何度も起きるもので、
+  そのたびにIssueへ書くとノイズにしかならない。何を聞かれているかはRemote Controlで見る。
+  計画の提示（`ExitPlanMode`）だけは本文をコメントとして残す。
+- **入力待ちの間は画面の承認・修正ボタンを出さない。** `11.local`が付いている間、押しても
+  コメントが残るだけで走っているセッションには届かない（`LocalSessionWaitingInputNotice`）。
+  セッションが落ちていれば従来どおりボタンを出す — 画面から`00.check-user`を外す手段を残すため。
+
 ## 画面のチェックボックス4つの使い分け（#1317）
 
 issue-deckの「新しいIssueを作成」「実装を開始」ダイアログには、下記4つのラベルをチェックボックスとして出している（定義は`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`1か所で、両方の画面が同じ配列を読む）。どれも**エージェントを止める場所が違うだけ**で、迷ったら「どこで自分が見たいか」で選ぶ。
