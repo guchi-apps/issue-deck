@@ -70,14 +70,14 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
 - 大規模な依存関係の更新
 
 判定方法:
-- 一次判定（機械的）: 同一ワークフロー内の`risk-check`ジョブが`git diff --name-only origin/develop...HEAD`のパスパターンで既に判定済み（該当時は対応Issueへの00.check-user付与も完了している）
+- 一次判定（機械的）: 同一ワークフロー内の`risk-check`ジョブが`git diff --name-only origin/develop...HEAD`のパスパターンで既に判定済み（ただし**00.check-userの付与と理由コメントの投稿はこの時点ではまだ行われていない**。最後の`auto-merge`ジョブがまとめて反映する。#1406）
 - 二次判定（意味的、あなたの担当）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
 
 該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を両方実行してください
 （ラベル付与だけでなくコメント投稿も必須。ユーザーがissue画面を見て理由が分かるようにするため）。
 - `gh issue edit <対応Issue番号> --add-label "00.check-user"`
 - `gh issue comment <対応Issue番号> --body "..."` で、該当すると判断した理由を日本語で
-  issueにコメント投稿する（risk-checkジョブが既にコメント済みの理由と重複してもよい。
+  issueにコメント投稿する（`auto-merge`ジョブが後から投稿するrisk-checkの理由と重複してもよい。
   あなたの判定はrisk-checkとは独立した二次判定のため）。コメント本文の末尾に、投稿元を
   示す`<!-- issue-deck-source:claude-review-develop -->`マーカーを必ず付与すること
 
