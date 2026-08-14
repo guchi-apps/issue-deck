@@ -81,6 +81,47 @@ export async function recordDispatchSessionActivity(params: {
 }
 
 /**
+ * セッション自身が「畳まれた」ことを終了時に報告してきたときの記録（#1321）。
+ *
+ * **pollerの一括報告を待たずに`ALIVE`を降ろすためだけの入口。** #1311で生きているセッションの
+ * あるIssueは起動を押せなくしたため、`tmux kill-session`で畳んだ直後に「畳んだのにまだ押せない」
+ * 時間が最大75秒（`sleep`の60秒＋1巡の実処理の約14秒）生まれていた。報告するのは
+ * `scripts/run-issue-session.sh`の`cleanup`（`trap ... EXIT HUP TERM`）。
+ *
+ * **終了コードは受け取らず、`FAILED`にも`EXITED`にもしない。** `tmux kill-session`ではHUPで
+ * trapに入るため、そこで拾える終了コードは「セッションが異常終了したか」を表さない。ここから
+ * `FAILED`を書けるようにすると、**畳んだだけのセッションでIssueコメント＋`00.check-user`の
+ * 引き上げが起きる**。異常終了の判定はpollerの担当のまま（`remain-on-exit`で死んだペインが
+ * 残っている場合は、次の巡回で`EXITED`/`FAILED`へ上書きされる。`escalatedState`をここで
+ * 落としているため、引き上げも従来どおり働く）。
+ *
+ * **`ALIVE`の行だけを倒す。** 二重に報告されても2回目は0件で、pollerが先に`FAILED`を
+ * 書いていればそれを消さない。
+ */
+export async function markDispatchSessionEnded(params: {
+  hostName: string;
+  tmuxSessionName: string;
+  now?: Date;
+}): Promise<{ updated: number }> {
+  const now = params.now ?? new Date();
+  const result = await db.dispatchSession.updateMany({
+    where: {
+      host: params.hostName,
+      tmuxSessionName: params.tmuxSessionName,
+      state: "ALIVE",
+    },
+    data: {
+      state: "GONE",
+      lastReportedAt: now,
+      // 消えた時点で引き上げの記録は落とす（`reportDispatchSessions`のGONE化と同じ理由）。
+      // 同じ名前で起動し直して落ちたときに、2回目の引き上げが起きなくなる
+      escalatedState: null,
+    },
+  });
+  return { updated: result.count };
+}
+
+/**
  * 消えたセッションの行を残しておく期間。
  *
  * すぐ消さないのは、**画面が「さっきまで動いていたセッションが終わった」ことを出せるようにする**
