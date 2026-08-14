@@ -8,6 +8,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import {
   describeDispatchEnqueueRejection,
+  findBlockingSession,
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
 } from "@/lib/dispatch/dispatch-job";
@@ -43,8 +44,9 @@ export function BulkDispatchBar({
   const host = resolveDefaultDispatchHost({
     hosts: dispatch.hosts,
     repositoryFullName: issues[0]?.repositoryFullName ?? "",
-    // 個々のIssueの未完了ジョブは下で1件ずつ見る。ここでは「そもそも積めるホストか」だけ
+    // 個々のIssueの未完了ジョブ・セッションは下で1件ずつ見る。ここでは「そもそも積めるホストか」だけ
     hasActiveJob: false,
+    blockingSession: null,
   });
 
   async function enqueueAll() {
@@ -58,18 +60,29 @@ export function BulkDispatchBar({
     // 積む順がそのまま実行順になるので、選択の並び（＝一覧の並び）のまま送る
     for (const issue of issues) {
       const hostView = dispatch.hosts.find((candidate) => candidate.name === host) ?? null;
+      // **セッションの生存はここでも見る（#1311）。** 未完了ジョブと違い、こちらはAPI側に
+      // 弾かれても「積めなかった理由」が1件ずつ返るだけで、押す前に分かる方が親切。
+      // 最終判定はAPI側（`enqueueDispatchJob`）が行う点は未完了ジョブと同じ
+      const blockingSession = findBlockingSession({
+        sessions: dispatch.sessions,
+        hosts: dispatch.hosts,
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+      });
       const rejection = resolveDispatchTargetRejection({
         host: hostView,
         repositoryFullName: issue.repositoryFullName,
         // 未完了ジョブの有無はAPI側が最終判定する（`activeKey`のunique制約）。ここでは
         // 「そのリポジトリを実行できるか」までを先に見る
         hasActiveJob: false,
+        blockingSession,
       });
       if (rejection) {
         skipped.push(
           `#${issue.number}: ${describeDispatchEnqueueRejection(rejection, {
             hostName: host,
             repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
           })}`,
         );
         continue;

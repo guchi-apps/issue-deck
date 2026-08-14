@@ -72,6 +72,12 @@ jobs:
       - name: Local session contract check
         run: scripts/check-local-session-contract.sh
 
+      # マニフェストへ項目を足したのに load-secrets-check.yml の env: へ足し忘れると、
+      # 検証ワークフローがその項目を見ないまま「OK」を出す。検証していないのに
+      # 検証したように見えるのを防ぐ（#1306）。
+      - name: Load secrets env block check
+        run: scripts/check-load-secrets-env-block.sh
+
   # ワークフローの式テンプレート長（21,000バイト）超過を検出する（#901）。
   # 超過するとワークフローファイル自体が無効になり、issue_comment等のトリガーが
   # 一切発火しなくなるため、developへ入る前に落とす。
@@ -127,6 +133,10 @@ jobs:
     needs: [lint-and-build]
     if: always()
     runs-on: ubuntu-latest
+    # GitHub側の値はここで明示的に渡す。複合アクションのステップはジョブの env: を
+    # 引き継ぐが、呼び出しステップの env: は引き継がない。
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -157,6 +167,16 @@ jobs:
           else
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: 不足分を1Passwordから補う
+        if: steps.status.outputs.should_notify == 'true'
+        uses: ./.github/actions/load-secrets
+        with:
+          only: SIGNALY_WEBHOOK_URL
+          # issue-deckは#1302・#1308で1Password依存を外しており、このsecretは存在しない。
+          # 空が渡るとアクションは1Passwordを一切触らない。他リポジトリでは値が入るため、
+          # GitHub側の投入が済むまで1Passwordから補われる（#1307の段階的な移行のため）。
+          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
         if: steps.status.outputs.should_notify == 'true'

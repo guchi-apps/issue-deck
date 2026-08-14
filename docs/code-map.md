@@ -242,3 +242,8 @@ pnpm test:unit   # vitestのみ
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
 マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
+
+ワークフローが実行時に値を組み立てる経路は`.github/actions/load-secrets`（複合アクション）にある。
+マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、
+片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
+`.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。

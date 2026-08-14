@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { Issue, IssueComment } from "@/types/issue";
@@ -29,6 +30,8 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
 let dispatchState: {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
+  // 起動済み（セッション生存中）のIssueを積ませない判定（#1311）が読む
+  sessions: DispatchSessionView[];
   concurrency: number | null;
   error: string | null;
 };
@@ -51,6 +54,23 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     online: true,
     lastSeenAt: "2026-08-14T00:00:00Z",
     screenshotCapable: true,
+    ...overrides,
+  };
+}
+
+function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+  return {
+    id: "job-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1248,
+    targetHost: "subpc",
+    status: "QUEUED",
+    message: null,
+    tmuxSessionName: null,
+    createdAt: "2026-08-14T00:00:00Z",
+    claimedAt: null,
+    startedAt: null,
+    finishedAt: null,
     ...overrides,
   };
 }
@@ -93,21 +113,30 @@ function renderDialog(
     actionsDisabledReason?: string | null;
     localSessionCommand?: string | null;
     showOptions?: boolean;
+    onOpenChange?: (open: boolean) => void;
   } = {},
 ) {
-  return render(
+  const issue = props.issue ?? makeIssue();
+  const onIssueUpdated = vi.fn();
+  const onCommentCreated = vi.fn();
+  const onOpenChange = props.onOpenChange ?? vi.fn();
+  const element = () => (
     <StartImplementationDialog
-      issue={props.issue ?? makeIssue()}
-      onIssueUpdated={vi.fn()}
-      onCommentCreated={vi.fn()}
+      issue={issue}
+      onIssueUpdated={onIssueUpdated}
+      onCommentCreated={onCommentCreated}
       open
-      onOpenChange={vi.fn()}
+      onOpenChange={onOpenChange}
       includeDispatchTargets={props.includeDispatchTargets}
       actionsDisabledReason={props.actionsDisabledReason ?? null}
       localSessionCommand={props.localSessionCommand ?? null}
       showOptions={props.showOptions}
-    />,
+    />
   );
+  const result = render(element());
+  // ディスパッチ状態（モック）の変化は、再描画されないと画面へ出ない。
+  // 押した後の見え方を確かめるテストで使う
+  return { ...result, rerenderSame: () => result.rerender(element()) };
 }
 
 function clickStart() {
@@ -116,7 +145,7 @@ function clickStart() {
 
 describe("StartImplementationDialog", () => {
   beforeEach(() => {
-    dispatchState = { hosts: [], jobs: [], concurrency: 2, error: null };
+    dispatchState = { hosts: [], jobs: [], sessions: [], concurrency: 2, error: null };
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
@@ -328,6 +357,61 @@ describe("StartImplementationDialog", () => {
       expect(createComment.mock.calls[0][0].body).toBe("@claude 計画を立案してください");
       expect(setProgressStatus.mock.calls[0][0].status).toBe("planning");
       expect(updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("押した直後の選択欄（#1318）", () => {
+    beforeEach(() => {
+      dispatchState.hosts = [makeHost()];
+      // 積んだジョブは次の取得で返ってくる。押した直後は`already_queued`の判定材料になる
+      enqueue.mockImplementation(async () => {
+        dispatchState.jobs = [makeJob()];
+        return true;
+      });
+    });
+
+    it("自分が積んだジョブで選択がGitHub Actionsへ移らない", async () => {
+      const onOpenChange = vi.fn();
+      const { rerenderSame } = renderDialog({ includeDispatchTargets: true, onOpenChange });
+
+      // 既定（サブPC）のまま押す。押していないGitHub Actionsが既定として光ってはいけない
+      clickStart();
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      // 閉じ切るまでの間（閉じるアニメーション中）も中身は描画され続ける
+      rerenderSame();
+      const subpc = screen.getByRole("radio", { name: /subpc/ });
+      expect(subpc.getAttribute("aria-checked")).toBe("true");
+      expect(subpc.hasAttribute("disabled")).toBe(false);
+      expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+        "false",
+      );
+    });
+
+    it("ジョブを積めた時点で閉じ、11.localの付与を待たない", async () => {
+      const onOpenChange = vi.fn();
+      // GitHubへの往復が終わらないまま開き続けないこと
+      updateIssue.mockReturnValue(new Promise(() => {}));
+      renderDialog({ includeDispatchTargets: true, onOpenChange });
+
+      fireEvent.click(screen.getByRole("radio", { name: /subpc/ }));
+      clickStart();
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
+    });
+
+    it("積めなかった場合は開いたまま、通常どおりの選択欄に戻す", async () => {
+      enqueue.mockResolvedValue(false);
+      const onOpenChange = vi.fn();
+      renderDialog({ includeDispatchTargets: true, onOpenChange });
+
+      clickStart();
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(screen.getByRole("radio", { name: /subpc/ }).getAttribute("aria-checked")).toBe("true");
     });
   });
 

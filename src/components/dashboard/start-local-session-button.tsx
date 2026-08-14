@@ -15,12 +15,14 @@ import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import {
   describeDispatchEnqueueRejection,
+  findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDispatchTargetRejection,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -75,6 +77,13 @@ export function StartLocalSessionButton({
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
+  // 起動済み（セッション生存中）のIssueは積ませない（#1311）
+  const blockingSession = findBlockingSession({
+    sessions: dispatch.sessions,
+    hosts: dispatch.hosts,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
   const isBusy = isSubmitting || dispatch.isSubmitting;
 
   /**
@@ -108,6 +117,7 @@ export function StartLocalSessionButton({
         host: onlyHost,
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob,
+        blockingSession,
       })
     : null;
 
@@ -161,6 +171,7 @@ export function StartLocalSessionButton({
                 concurrency={dispatch.concurrency}
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
+                blockingSession={blockingSession}
                 onSelect={() => void handleDispatch(host.name)}
               />
             ))}
@@ -173,6 +184,7 @@ export function StartLocalSessionButton({
           {describeDispatchEnqueueRejection(onlyHostRejection, {
             hostName: onlyHost?.name ?? "",
             repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
           })}
         </p>
       )}
@@ -201,6 +213,7 @@ function DispatchHostMenuItem({
   concurrency,
   repositoryFullName,
   hasActiveJob,
+  blockingSession,
   onSelect,
 }: {
   host: DispatchHostView;
@@ -208,9 +221,15 @@ function DispatchHostMenuItem({
   concurrency: number | null;
   repositoryFullName: string;
   hasActiveJob: boolean;
+  blockingSession: DispatchSessionView | null;
   onSelect: () => void;
 }) {
-  const rejection = resolveDispatchTargetRejection({ host, repositoryFullName, hasActiveJob });
+  const rejection = resolveDispatchTargetRejection({
+    host,
+    repositoryFullName,
+    hasActiveJob,
+    blockingSession,
+  });
   const hostJobs = jobs.filter((job) => job.targetHost === host.name);
   const running = hostJobs.filter(
     (job) => job.status === "CLAIMED" || job.status === "RUNNING",
@@ -226,7 +245,11 @@ function DispatchHostMenuItem({
     .join("・");
 
   const description = rejection
-    ? describeDispatchEnqueueRejection(rejection, { hostName: host.name, repositoryFullName })
+    ? describeDispatchEnqueueRejection(rejection, {
+        hostName: host.name,
+        repositoryFullName,
+        session: blockingSession,
+      })
     : `ジョブを積みます。${host.name}が取りに来た時点で起動します（${load}）`;
 
   return (
