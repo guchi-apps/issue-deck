@@ -73,23 +73,28 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 | `guchi-apps/car-care` | — | ○ |
 | `guchi-apps/subscription-lists` | — | ○ |
 | `guchi-apps/asset-manager` | — | ○ |
-| `guchi-apps/portfolio` | — | —（#1276） |
-| `guchi-apps/solitaire` | — | —（#1276） |
-| `guchi-apps/myroom` | — | —（#1276） |
-| `guchi-apps/signaly` | — | —（#1276） |
+| `guchi-apps/portfolio` | — | ○（※2） |
+| `guchi-apps/solitaire` | — | ○（※2） |
+| `guchi-apps/myroom` | — | ○（※2） |
+| `guchi-apps/signaly` | — | ○（※2） |
 | `guchi-apps/clip-hive` | — | 保留 |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
 起動する。
 
-サブPC列は**2026-08-14時点の申告7件**（pollerのログで直接実測）。`portfolio`・`solitaire`・`myroom`・
-`signaly`は#1224のロールアウト対象に入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。
-単に未着手として、サブPCへ追加する作業を#1276で追跡している。ポート帯だけは先に確保した
-（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——載っていないと汎用ランチャーの
-既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。`clip-hive`は`claude-issue-dispatch.yml`・`issue-labels.yml`を
-持たないため、起動はできても`11.local`の付与とProject Statusの遷移が成立せず、対応可否を保留している
-（#1224）。
+※2 `portfolio`・`myroom`・`signaly`・`solitaire`は#1276で追加した。本体チェックアウトの
+`.env.local`／`.env`はまだ置いていないため、セッションは立つが**開発サーバーの起動には別途配置が要る**
+（#1277）。
+
+サブPC列は**2026-08-14時点の申告11件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
+入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。単に未着手だったため#1276で追加し、
+あわせてポート帯も確保した（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——
+載っていないと汎用ランチャーの既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。
+
+`clip-hive`は`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため、起動はできても`11.local`の
+付与とProject Statusの遷移が成立せず、対応可否を保留している（#1224）。サブPCの対応表にも、その理由を
+コメントとして書いたうえで無効化した行を置いてある。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
