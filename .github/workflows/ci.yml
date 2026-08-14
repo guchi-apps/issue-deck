@@ -1,5 +1,13 @@
 name: CI
 
+# 注意: claude-conflict-resolve.ymlが、このワークフローの`workflow_run`(CI / requested /
+# develop)を「developへのpush」の代理通知として購読している(#1330。claude-code-actionが
+# pushイベントに対応していないため直接pushで受けられない)。したがって
+# - ワークフロー名(`CI`)
+# - `push: branches: [develop]`トリガー
+# を変更・削除すると、コンフリクト自動解消の最速検知経路が無言で止まる(scheduleの15分
+# おきの安全網だけが残る)。変更する場合はclaude-conflict-resolve.ymlも合わせて直す。
+
 on:
   pull_request:
     branches:

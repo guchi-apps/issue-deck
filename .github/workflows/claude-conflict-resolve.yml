@@ -14,21 +14,32 @@ name: Claude Conflict Resolve
 # 他アプリには波及しない「カナリア」構成にする(#934)。
 #
 # トリガー:
-# - push(develop): developへ新たな変更が入るとOPENなPRがコンフリクトしうるため、
-#   その都度検知する(最も速報性が高い経路)
+# - workflow_run(CI / requested / develop): developへ新たな変更が入るとOPENなPRが
+#   コンフリクトしうるため、その都度検知する(最も速報性が高い経路)。
+#   本来はpush(develop)で直接受けたいが、claude-code-actionはpushイベントに対応して
+#   おらず`Unsupported event type: push`で必ず失敗する(#1330。対応するのはissues /
+#   issue_comment / pull_request / pull_request_target / pull_request_review /
+#   pull_request_review_comment / workflow_dispatch / repository_dispatch /
+#   schedule / workflow_runの10種類のみ)。ci.ymlがpush(develop)で走るため、その
+#   `requested`(=CI実行がキューされた時点)を代理のpush通知として使う。completedでは
+#   なくrequestedにするのは、CIの完走を待つ分だけ検知が遅れるのを避けるためで、
+#   コンフリクト検知自体はCIの成否と無関係なため待つ必要がない。
+#   なお workflow_run は「デフォルトブランチ上のワークフローファイル」でのみ発火する。
+#   このリポジトリのデフォルトブランチはdevelopなので、developへマージした時点で有効。
 # - pull_request(develop向け、opened/reopened): develop向けPRが作成された時点で
 #   既にdevelopとコンフリクトしているケース(issue #715)を即座に拾うため。
 #   synchronize(PRへの追加push毎)は含めない。実装エージェントが1つのIssueに対して
 #   何度も細かくpushする間、毎回detect-conflicts→resolve-conflictsのmatrixジョブが
 #   走ると、resolve-conflictsが使う同じissue-dispatch-<番号>-branch concurrency
 #   グループ内で実装ステップ自体と噛み合いキューが詰まる懸念があるため。developが
-#   動いてPRがコンフリクトに変化するケースは既存のpush(develop)トリガーでカバーされる。
+#   動いてPRがコンフリクトに変化するケースは既存のworkflow_run(develop)トリガーで
+#   カバーされる。
 #   このトリガーはトリガー元のPR自身が既にコンフリクトしていないかだけを見ればよく、
 #   develop向けの他PRの状態まで見る必要はない。1回のワークフロー実行内のmatrix全ジョブの
 #   チェックはトリガーしたPRのチェック一覧に紐付いて表示されるため、全件スキャンすると
 #   たまたま同じタイミングでコンフリクトしていた無関係な他PRのチェックまで表示されて
 #   しまう不具合があった(#814)
-# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、push・
+# - schedule(15分おき): GitHubのmergeable判定は非同期に計算されるため、workflow_run・
 #   pull_request直後の検知時点ではまだ計算が終わっておらずUNKNOWNのままの場合がある。
 #   detect-conflictsのポーリングでも解消しきれなかった取りこぼしを拾い直す
 #   安全網として、issue-labels.ymlの各scheduleジョブと同じ間隔で走査する
@@ -37,7 +48,11 @@ name: Claude Conflict Resolve
 #   「コンフリクトを自動解消」ボタンがこの経路で起動する(#1293)
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - requested
     branches:
       - develop
   pull_request:
