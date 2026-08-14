@@ -441,6 +441,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#1328）。
+          # workflow_run（CIの完了）で起動する場合のactorはCIを起こしたpushの実行者のため
+          # 従来は人間で通っていたが、issue-deckの画面の「CI失敗を自動修正」ボタン（#1293）は
+          # GitHub Appのインストールトークンでworkflow_dispatchするためactorが
+          # issue-deck[bot]になり、指定が無いと`Workflow initiated by non-human actor`で
+          # 必ず失敗する。claude[bot]名義のpushでCIが失敗した場合も同様に通す
+          # （reusable-claude-conflict-resolve.yml・reusable-claude-pr-repair.ymlと揃える）。
+          allowed_bots: "issue-deck[bot],claude[bot]"
           show_full_output: true
           # 実装が使う検証コマンドの許可リスト。**3つの再利用可能ワークフロー
           # (reusable-issue-dispatch / reusable-claude-ci-fix /
