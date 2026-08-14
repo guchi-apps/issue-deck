@@ -49,6 +49,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [PRコンフリクト・CI失敗の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml` |
 | [画面からのローカルセッション起動](multi-agent/local-quick-start.md) | `issuedeck://`プロトコル経由でWSLのClaude Codeセッションをワンクリック起動する仕組み、初回セットアップ、セキュリティ上の前提 |
 | [サブPCへのディスパッチ](multi-agent/subpc-dispatch.md) | pull型のジョブキュー、実行可能リポジトリの申告、同時実行数の上限、サブPC側のpollerとsystemd |
+| [関門と計器（実装セッションを監督する仕組み）](multi-agent/gates.md) | 監督のための役を増やさず、判断が要る関門と判断が要らない計器に分けて配る整理。計画の関門、セッションの停滞計測、並行セッションを俯瞰する手当て |
 
 ## 段階的導入計画
 
