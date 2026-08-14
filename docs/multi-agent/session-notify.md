@@ -204,6 +204,38 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 フック設定に書くのは「`session-notify.sh`を呼ぶ」ことだけで、どのイベントを送るかの判定は
 スクリプト側に置いている。判定を2箇所に分けると、必ずどちらかが古くなる。
 
+## 実際に動くのは本体の作業ツリーのスクリプト（#1274）
+
+**フックが呼ぶ`session-notify.sh`は、worktreeのコピーではなく本体リポジトリの作業ツリー
+（`~/apps/issue-deck/scripts/`）のものである。** 生成されるフック設定の`command`は絶対パスで、
+`run-issue-session.sh`自身の置き場所（`$SCRIPT_DIR`）を指す。`start-issue.sh`は本体の
+`scripts/`から`run-issue-session.sh`を呼ぶため、経路の全体がこうなる。
+
+| 実行されるもの | どこから |
+| --- | --- |
+| `start-issue.sh` | 本体の作業ツリー |
+| `run-issue-session.sh` | 本体の作業ツリー（`start-issue.sh`が絶対パスで呼ぶ） |
+| `session-notify.sh` | 本体の作業ツリー（フック設定の`command`が絶対パス） |
+| 実装対象のコード | worktree（`origin/develop`から作られる） |
+
+ここに**worktreeだけが新しくなる**という非対称がある。`start-issue.sh`は起動のたびに
+`git fetch origin develop`してからworktreeを作るが、「本体の作業ツリーには一切触れない」ことを
+約束しているのでmergeはしない。**本体の作業ツリーを新しくするのは人の`git pull`だけ。**
+
+そのため`session-notify.sh`をdevelopへマージしても、pullするまで実際に飛ぶ通知は古いままになる。
+#1274はこれを踏んだもので、#1247でリンク書式を直した数時間後の通知が、依然として旧書式
+（`Links`フィールドに生URL）で届いていた。**スクリプト側には何の兆候も出ない**ため、直したはずの
+不具合を再度Issueとして起票することになる。
+
+対策として、起動時に本体の`scripts/`が`origin/develop`と違っていれば警告を出す
+（[scripts/lib/launcher-scripts-sync.sh](../../scripts/lib/launcher-scripts-sync.sh)）。
+`start-issue.sh`・`generic-start-issue.sh`の両方から呼ぶ。**警告だけで、起動は止めないし
+自動でpullもしない**（本体の作業ツリーに触れないという約束を、起動スクリプト側から破らない）。
+`ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK=1`で黙らせられる。
+
+セッション通知に限らず、`scripts/`配下を直したときは**本体の作業ツリーへpullするまで反映されない**
+と考えること。worktreeを作り直しても新しくならない。
+
 ## 通知の障害でセッションを止めない
 
 通知経路の障害で実装が止まるのは本末転倒なので、`session-notify.sh`は**何が起きても

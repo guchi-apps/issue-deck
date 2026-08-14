@@ -80,6 +80,9 @@ source "$ROOT/scripts/lib/progress-report.sh"
 # 個人設定・共有知識がメインPCとサブPCで取り残されていないかの警告（#1190）。
 # shellcheck source=scripts/lib/personal-config-sync.sh
 source "$ROOT/scripts/lib/personal-config-sync.sh"
+# 本体の作業ツリーの scripts/ が origin/develop より古いままになっていないかの警告（#1274）。
+# shellcheck source=scripts/lib/launcher-scripts-sync.sh
+source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -159,6 +162,10 @@ done
 # 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
 # 取り込めていない場合に警告する（#1190）。起動は止めない。
 warn_personal_config_drift
+
+# 起動スクリプト・フックの実体は本体の作業ツリーにあり、worktreeを作り直しても新しくならない。
+# developへ入った修正が反映されていない場合に警告する（#1274）。起動は止めない。
+warn_launcher_scripts_stale "$ROOT"
 
 mkdir -p "$PROMPT_DIR"
 
