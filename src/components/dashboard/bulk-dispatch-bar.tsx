@@ -12,6 +12,7 @@ import {
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import type { Issue } from "@/types/issue";
 
@@ -133,7 +134,7 @@ export function BulkDispatchBar({
           onClick={() => void enqueueAll()}
         >
           {isSubmitting ? <Loader2 className="animate-spin" /> : <Server />}
-          {host ? `${host}へ順に積む` : "積める起動先がありません"}
+          {host ? `${formatDispatchHostName(host)}へ順に積む` : "積める起動先がありません"}
         </Button>
       </div>
       {result && <p className="whitespace-pre-wrap text-xs text-destructive">{result}</p>}

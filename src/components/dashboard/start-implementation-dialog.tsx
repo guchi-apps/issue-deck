@@ -32,6 +32,7 @@ import {
   type DispatchEnqueueRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
@@ -606,12 +607,12 @@ function DispatchHostOption({
         repositoryFullName,
         session: blockingSession,
       })
-    : `ジョブを積みます。${host.name}が取りに来た時点で起動します`;
+    : `ジョブを積みます。${formatDispatchHostName(host.name)}が取りに来た時点で起動します`;
 
   return (
     <StartTargetOption
       icon={<Server className="size-3.5" />}
-      name={host.name}
+      name={formatDispatchHostName(host.name)}
       description={description}
       selected={selected}
       disabled={rejection !== null}

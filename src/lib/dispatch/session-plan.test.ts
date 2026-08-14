@@ -22,7 +22,7 @@ describe("buildSessionPlanCommentBody", () => {
     // **リンクは計画本文より後ろに置く**（Issue #1342 の「その下にも別途」）
     expect(body.indexOf("- あれをする")).toBeLessThan(body.indexOf("Remote Controlで開く"));
     expect(body).toContain(SESSION_PLAN_MARKER);
-    expect(body).toContain("subpcのセッションが承認を待っています");
+    expect(body).toContain("サブPCのセッションが承認を待っています");
   });
 
   /**

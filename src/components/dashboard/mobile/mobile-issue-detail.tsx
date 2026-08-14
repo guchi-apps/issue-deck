@@ -54,6 +54,7 @@ import {
   isActiveDispatchJobStatus,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
@@ -204,7 +205,9 @@ export function MobileIssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
     blockingSession,
   });
-  const startLabel = defaultDispatchHost ? `${defaultDispatchHost}で開始` : "GitHub Actionsで開始";
+  const startLabel = defaultDispatchHost
+    ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
+    : "GitHub Actionsで開始";
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
   const issueSession = findSessionForIssue(
     dispatch.sessions,

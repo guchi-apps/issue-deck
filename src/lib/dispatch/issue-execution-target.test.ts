@@ -137,8 +137,14 @@ describe("resolveIssueExecutionTarget", () => {
 });
 
 describe("describeIssueExecutionTarget", () => {
-  it("ホスト名が分かればそれを出す", () => {
-    expect(describeIssueExecutionTarget({ host: "subpc", expectsActionsRun: false })).toBe("subpc");
+  it("ホスト名が分かればそれを出す（表記は日本語に直す・#1416）", () => {
+    expect(describeIssueExecutionTarget({ host: "subpc", expectsActionsRun: false })).toBe("サブPC");
+  });
+
+  it("対応表に無いホストはそのまま出す", () => {
+    expect(describeIssueExecutionTarget({ host: "otherpc", expectsActionsRun: false })).toBe(
+      "otherpc",
+    );
   });
 
   it("ホスト名が分からず11.localだけなら「ローカル」", () => {

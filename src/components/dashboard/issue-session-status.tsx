@@ -32,6 +32,7 @@ import {
   resolveSessionControlRejection,
   SESSION_CONTROL_LABELS,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   summarizeIssueSession,
   type IssueSessionTone,
@@ -248,7 +249,7 @@ export function IssueSessionStatus({
           <AlertDialogHeader>
             <AlertDialogTitle>このセッションを閉じますか？</AlertDialogTitle>
             <AlertDialogDescription>
-              {session.host}の「{session.tmuxSessionName}」を終了します。作業中の内容は
+              {formatDispatchHostName(session.host)}の「{session.tmuxSessionName}」を終了します。作業中の内容は
               コミットされず、worktreeはそのまま残ります。
             </AlertDialogDescription>
           </AlertDialogHeader>

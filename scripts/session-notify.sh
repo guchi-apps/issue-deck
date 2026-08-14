@@ -184,6 +184,14 @@ repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 host_name = os.environ.get("NOTIFY_HOST_NAME", "")
 tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
 
+# 通知のタイトルに出すホストの表記（#1416）。**issue-deck側の`src/lib/dispatch/host-label.ts`と
+# 同じ対応表を持つ。** ここは通知を組み立てる時点でホスト名しか持っておらず、issue-deckへ問い
+# 合わせる経路も無い（通知は起動先が落ちていても届く必要がある）ため、写しを置く方を選んでいる。
+# **APIへ送る`hostName`と「Host」フィールドは識別子のまま**にする（照合キーであり、`ssh`・
+# `tmux`の相手でもある）。
+HOST_DISPLAY_NAMES = {"subpc": "サブPC"}
+host_display_name = HOST_DISPLAY_NAMES.get(host_name.lower(), host_name)
+
 
 def resolve_remote_url():
     """remote-controlのURL（best-effort）。
@@ -384,7 +392,7 @@ elif repo_name:
     title_parts.append(f"[{repo_name}]")
 title_parts.append(label)
 if host_name:
-    title_parts.append(f"({host_name})")
+    title_parts.append(f"({host_display_name})")
 title = " ".join(title_parts)
 
 # **応答テキスト（hook の last_assistant_message）は載せない。**

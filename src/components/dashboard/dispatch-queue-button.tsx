@@ -10,6 +10,7 @@ import {
   isCancelableDispatchJobStatus,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   cancelableDispatchJobs,
   describeDispatchQueueLoad,
@@ -91,7 +92,7 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
                   capacity.atCapacity && "text-destructive",
                 )}
               >
-                {capacity.hostName}のセッション {capacity.live}/{capacity.max}
+                {formatDispatchHostName(capacity.hostName)}のセッション {capacity.live}/{capacity.max}
               </li>
             ))}
           </ul>
@@ -176,7 +177,8 @@ function QueueSection({
                     status.tone === "error" && "text-destructive",
                   )}
                 >
-                  {job.targetHost}・{status.label}・{formatRelativeDate(job.createdAt)}
+                  {formatDispatchHostName(job.targetHost)}・{status.label}・
+                  {formatRelativeDate(job.createdAt)}
                 </span>
                 {/* 失敗理由はホバーではなく本文で出す（主な用途が外出先のスマホ） */}
                 {job.message && (

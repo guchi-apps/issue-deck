@@ -1,4 +1,5 @@
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 
@@ -47,7 +48,7 @@ export type IssueExecutionTarget = {
 
 /** 画面に出す実行先の短い名前。ホスト名が分かればそれを、分からなければ経路の種別を返す */
 export function describeIssueExecutionTarget(target: IssueExecutionTarget): string {
-  if (target.host) return target.host;
+  if (target.host) return formatDispatchHostName(target.host);
   return target.expectsActionsRun ? "Actions" : "ローカル";
 }
 

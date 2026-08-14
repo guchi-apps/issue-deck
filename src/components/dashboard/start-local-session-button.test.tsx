@@ -152,7 +152,7 @@ describe("StartLocalSessionButton", () => {
     it("申告があれば出す（マーカー行の有無は問わない・#1224）", () => {
       dispatchState.hosts = [makeHost()];
       renderButton();
-      expect(screen.getByRole("button", { name: /subpcで開始/ })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
     });
 
     it("closeされたIssueでは出さない（起動しても実装対象が無いため）", () => {
@@ -175,7 +175,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(true);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /subpcで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
     });
 
@@ -190,7 +190,7 @@ describe("StartLocalSessionButton", () => {
       dispatchState.hosts = [makeHost({ online: false })];
       renderButton();
 
-      expect(screen.getByRole("button", { name: /subpcで開始/ }).hasAttribute("disabled")).toBe(
+      expect(screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled")).toBe(
         true,
       );
       expect(screen.getByText(/応答していません/)).not.toBeNull();
@@ -200,7 +200,7 @@ describe("StartLocalSessionButton", () => {
       dispatchState.hosts = [makeHost({ repositories: ["guchi-apps/other"] })];
       renderButton();
 
-      expect(screen.getByRole("button", { name: /subpcで開始/ }).hasAttribute("disabled")).toBe(
+      expect(screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled")).toBe(
         true,
       );
     });
@@ -212,7 +212,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(true);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /subpcで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
       await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
       expect(updateIssue.mock.calls[0][0].labels).toContain("11.local");
     });
@@ -222,7 +222,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(false);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /subpcで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
       expect(updateIssue).not.toHaveBeenCalled();
     });
@@ -232,7 +232,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(true);
       renderButton(makeIssue({ labels: [label("11.local")] }));
 
-      fireEvent.click(screen.getByRole("button", { name: /subpcで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
       expect(updateIssue).not.toHaveBeenCalled();
     });
@@ -245,7 +245,7 @@ describe("StartLocalSessionButton", () => {
       dispatchState.sessions = [makeSession()];
       renderButton();
 
-      const button = screen.getByRole("button", { name: /subpcで開始/ });
+      const button = screen.getByRole("button", { name: /サブPCで開始/ });
       expect(button.hasAttribute("disabled")).toBe(true);
       expect(screen.getByText(/issue-deck-issue-1049/)).not.toBeNull();
       expect(screen.getByText(/kill-session/)).not.toBeNull();
@@ -258,7 +258,7 @@ describe("StartLocalSessionButton", () => {
       renderButton();
 
       expect(
-        screen.getByRole("button", { name: /subpcで開始/ }).hasAttribute("disabled"),
+        screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled"),
       ).toBe(false);
     });
 
@@ -294,19 +294,19 @@ describe("StartLocalSessionButton", () => {
       ];
       renderButton();
 
-      expect(screen.getByText(/subpcで失敗/)).not.toBeNull();
+      expect(screen.getByText(/サブPCで失敗/)).not.toBeNull();
       expect(screen.getByText("start-issue.sh が見つかりません")).not.toBeNull();
     });
   });
 
   // #1349。「実装を開始」のトリガーは既定の実行先を文言にしている（#1262）ため、同じ画面に
-  // 両方出すと「subpcで開始」が2つ並ぶ
+  // 両方出すと「サブPCで開始」が2つ並ぶ
   describe("起動ボタンを出さない場合（showStartButton={false}）", () => {
     it("起動ボタンを出さない", () => {
       dispatchState.hosts = [makeHost()];
       renderButton(makeIssue(), { showStartButton: false });
 
-      expect(screen.queryByRole("button", { name: /subpcで開始/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /サブPCで開始/ })).toBeNull();
     });
 
     it("サブPCが2台以上でも起動先のメニューを出さない", () => {

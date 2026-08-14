@@ -171,7 +171,7 @@ describe("parseDispatchReportStatus", () => {
 describe("describeDispatchEnqueueRejection", () => {
   it("理由ごとに、次に何を見ればよいかが分かる日本語を返す", () => {
     expect(describeDispatchEnqueueRejection("host_offline", { hostName: "subpc" })).toContain(
-      "subpc",
+      "サブPC",
     );
     expect(
       describeDispatchEnqueueRejection("repository_not_runnable", {
@@ -654,7 +654,7 @@ describe("セッションの操作（#1332）", () => {
         hostName: "subpc",
         kind: "KILL",
       });
-      expect(message).toContain("subpc");
+      expect(message).toContain("サブPC");
       expect(message).toContain("poller");
     });
   });
