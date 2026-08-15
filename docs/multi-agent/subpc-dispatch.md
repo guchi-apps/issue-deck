@@ -553,6 +553,39 @@ pollerが取りに行かないだけなので、画面には**「順番待ち」
 - **応答していないホストは「上限で待っている」に数えない。** 取りに来られないだけで、別の話
   （そちらは従来どおり`online`の表示が持つ）
 
+#### 本数の内訳とリソース使用率も申告する（#1567）
+
+上の`liveSessions`は本数しか出しておらず、**その6本が何なのかを見る場所がアプリ内に無かった**
+（`tmux ls`かops-dashboardを開くことになる）。CPU・メモリも同様で、「もう1本起こしてよいか」を
+判断するたびに別のアプリへ移る必要があった。
+
+そこで2つを実行キューのポップオーバー（PC）とホーム画面（スマホ）へ出す。表示は
+[`src/components/dashboard/dispatch-host-panel.tsx`](../../src/components/dashboard/dispatch-host-panel.tsx)が
+両方で共有する。
+
+- **セッションの一覧は新しいデータを増やしていない。** `DispatchSession`（#1217）は以前から
+  `GET /api/dispatch`が返しており、画面に出していなかっただけ。出すのは`ALIVE`と`FAILED`だけで、
+  `EXITED`・`GONE`（畳んだもの）は落とす。24時間ぶん残るため、並べると今動いているものが埋もれる。
+  逆に`FAILED`を残すのは、**セッションの異常終了はこの一覧を除くとキューのどこにも出ない**ため
+  （「直近の失敗」に出るのはジョブの失敗で、あちらはtmuxが立った時点で終わっている）
+- **リソース使用率は申告に相乗りさせる**（`metrics`）。新しい常駐プロセス・systemd unitは増やさない。
+  取るのはCPU（`/proc/stat`を1秒あけて2回）・メモリ（`/proc/meminfo`の`MemAvailable`）・
+  `/`のディスク（`df`）の3つで、**取り方はops-dashboardの`scripts/host-stats/agent.sh`に合わせている**
+  （同じホストの同じ数字が2つのアプリで食い違うと、どちらを信じてよいか分からなくなる）
+- **どれか1つでも取れなければ`metrics`ごと`null`で送る**（部分採用しない）。受け口
+  （`parseDispatchHostMetrics`）も1項目でも壊れていれば全体を落とし、`DispatchHost`の5列を
+  まとめて`null`へ戻す。部分的に0が入ると、取れなかった項目が「空いている」と読めてしまう
+- **申告が無いホスト・応答していないホストではメーターを出さない。** 0%として並べると、
+  実際には埋まっているホストが空いているように見える（`liveSessions`の`null`と同じ考え方）
+- **使用率で何かを止めることはしない。** 起動を止めているのは引き続き`maxSessions`と同時実行数
+  だけで、これは人が判断するための計器（[gates.md](gates.md)）
+
+**ops-dashboardとの境界はここで引き直した。** 従来は「ホストの死活・CPU・メモリ・tmuxセッション
+一覧はops-dashboardの担当で、issue-deckには持ち込まない」としていた。新しい線は
+**「この仕組みが起こすセッションの起動可否に効くか」**で、issue-deckが持つのは上の2つに限る。
+サービス・プロセス・温度・ネットワーク・履歴といったホスト全体の監視は引き続きops-dashboardの
+担当で、**数値が食い違ったときの正もあちら**（こちらは申告の巡ごとの単発値で履歴を持たない）。
+
 ### タイムアウトに定期実行の仕組みを持たない
 
 期限切れの判定は`expireStaleDispatchJobs()`（[src/lib/dispatch/jobs.ts](../../src/lib/dispatch/jobs.ts)）が
@@ -964,7 +997,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`の起動ジョブ・横断質問のみ。#1541） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 

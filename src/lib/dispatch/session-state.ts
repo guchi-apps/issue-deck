@@ -151,6 +151,14 @@ export type DispatchSessionView = {
   tmuxSessionName: string;
   repositoryFullName: string;
   issueNumber: number;
+  /**
+   * Issueのタイトル（#1567）。**既定は`null`。**キャッシュ済みのIssueから引けたときだけ入る
+   * （実行キューのジョブの行と同じ扱い＝`DispatchJobView.issueTitle`）。
+   *
+   * 引けなければ番号だけを出す。「（タイトル不明）」のような穴埋めは、実際のタイトルと
+   * 紛らわしいので入れない。
+   */
+  issueTitle: string | null;
   state: DispatchSessionState;
   exitStatus: number | null;
   firstSeenAt: string;

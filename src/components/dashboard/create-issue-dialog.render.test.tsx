@@ -97,6 +97,7 @@ function makeHost(): DispatchHostView {
     crossRepoQuestionCapable: true,
     maxSessions: 12,
     liveSessions: 0,
+    metrics: null,
   };
 }
 

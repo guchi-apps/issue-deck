@@ -16,6 +16,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     tmuxSessionName: "issue-deck-issue-1287",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1287,
+    issueTitle: null,
     state: "ALIVE",
     exitStatus: null,
     activity: null,
