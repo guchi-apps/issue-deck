@@ -140,6 +140,32 @@ export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter(
   (view) => view.id === "question",
 );
 
+/**
+ * スマホのIssue一覧で選べるビュー（#1645）。「すべてのIssue」の次にユーザーの確認待ちを置き、
+ * 対応が必要なIssueを最初に見つけられるようにする（#714）。
+ *
+ * 「お気に入り」「最近追加した」は出さない（#873）。「本番反映待ち」「直近本番に反映した」も、
+ * 左メニュー（`sidebarIssueNavViews`）と揃えて外す（#1645）。どちらもviewクエリとしては生きて
+ * おり、ホーム画面のクイックビューからは今までどおり開ける。
+ */
+export const mobileListNavViews: NavView[] = [
+  baseNavViews[0],
+  ...labelNavViews.filter((view) => !["release-pending", "recently-merged"].includes(view.id)),
+];
+
+/**
+ * スマホのIssue一覧に並べるビュー（#1645）。`mobileListNavViews`に無いビュー
+ * （ホーム画面のクイックビューから開いた「本番反映待ち」など）で開かれたときだけ、
+ * そのビューを末尾へ足す。
+ *
+ * 足さないと、選択中を示すものが画面から消えるうえ、スワイプの隣接判定
+ * （`getAdjacentNavViewId`）が現在地を見つけられず左右どちらへも移動できなくなる。
+ */
+export function resolveMobileListNavViews(view: NavViewId): NavView[] {
+  if (mobileListNavViews.some((navView) => navView.id === view)) return mobileListNavViews;
+  return [...mobileListNavViews, getNavView(view)];
+}
+
 /** 左メニュー「Issue」セクション。並びは広い順→絞った順（#1613） */
 export const sidebarIssueNavViews: NavView[] = ["all", "favorites", "not-started", "in-progress"]
   .map((id) => navViews.find((view) => view.id === id))
