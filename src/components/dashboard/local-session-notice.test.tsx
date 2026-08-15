@@ -17,6 +17,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1287,
     issueTitle: null,
+    issueId: null,
     state: "ALIVE",
     exitStatus: null,
     activity: null,

@@ -39,6 +39,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1567,
     issueTitle: "サブPC上のセッション表示とリソース使用率の表示機能",
+    issueId: null,
     state: "ALIVE",
     exitStatus: null,
     firstSeenAt: NOW.toISOString(),
@@ -140,6 +141,47 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost({ metrics: null })]} sessions={[]} />);
     expect(screen.queryByText("34%")).toBeNull();
     expect(screen.getByText("セッション 2/12")).toBeTruthy();
+  });
+
+  // 画面に出ているIssueを開くのに、一覧へ戻って番号で探し直す必要があった（#1625）
+  it("Issueのidが引けていれば、タイトルを押してそのIssueを開ける", () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ issueId: "issue-1567" })]}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+
+    const button = screen.getByLabelText(
+      "#1567 サブPC上のセッション表示とリソース使用率の表示機能をissue-deckで開く",
+    );
+    button.click();
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-1567");
+  });
+
+  // 同期前・GitHub Appを外したリポジトリではidが引けない。押しても何も起きないリンクは出さない
+  it("Issueのidが引けていない行はリンクにしない", () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ issueId: null })]}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
+  });
+
+  // スマホのホーム画面など、遷移先を持たない置き方でも表示だけは従来どおり出す
+  it("遷移の受け取り手が無ければタイトルはただの文字列のまま", () => {
+    render(
+      <DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession({ issueId: "issue-1567" })]} />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("ホストが2台以上なら、それぞれのセッションを自分のカードの下に出す", () => {

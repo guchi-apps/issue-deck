@@ -34,6 +34,8 @@ type MobileHomeScreenProps = {
   onSelectPullRequests: (view: PullRequestViewId) => void;
   /** 「ブランチ」画面を開く（#1455） */
   onSelectFlow: () => void;
+  /** 「実行中のセッション」の行のタイトルを押したときの遷移（#1625）。Issue詳細を開く */
+  onOpenIssue: (issueId: string) => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -56,6 +58,7 @@ export function MobileHomeScreen({
   onSaveQuickFilter,
   onSelectPullRequests,
   onSelectFlow,
+  onOpenIssue,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -102,7 +105,7 @@ export function MobileHomeScreen({
           サブPCに余力があるのかを見る手段がなかった。PCの実行キューと同じ
           `DispatchHostPanel`を置き、順番待ちの件数だけを1行添える
         */}
-        <DispatchHostSection />
+        <DispatchHostSection onOpenIssue={onOpenIssue} />
 
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
@@ -265,7 +268,7 @@ export function MobileHomeScreen({
  * **申告しているホストが1台も無ければ節ごと出さない**（PCの実行キューのボタンと同じ判定）。
  * ディスパッチを使っていない環境で、空の見出しだけが残らないようにする。
  */
-function DispatchHostSection() {
+function DispatchHostSection({ onOpenIssue }: { onOpenIssue: (issueId: string) => void }) {
   const dispatch = useDispatchState(true);
   if (dispatch.hosts.length === 0) return null;
 
@@ -277,7 +280,11 @@ function DispatchHostSection() {
         <h2 className="text-sm font-semibold">実行中のセッション</h2>
         <span className="text-xs text-muted-foreground">{describeDispatchQueueLoad(summary)}</span>
       </div>
-      <DispatchHostPanel hosts={dispatch.hosts} sessions={dispatch.sessions} />
+      <DispatchHostPanel
+        hosts={dispatch.hosts}
+        sessions={dispatch.sessions}
+        onOpenIssue={onOpenIssue}
+      />
     </div>
   );
 }
