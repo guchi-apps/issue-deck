@@ -165,6 +165,8 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 上記カテゴリに該当するかどうかによらず、Issueに`22.merge-confirm-required`ラベルが付いている場合も、develop向けPRへのpushのたびに常に`00.check-user`が付与され自動マージがスキップされる（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
 
+**「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
+
 ### PR本文テンプレート
 
 `develop`宛のPRには以下を記載する。

@@ -135,3 +135,54 @@ describe("propagate-workflow-tag.sh の書き換え", () => {
     expect(needsUpdate(dir, "workflows/v12")).toBe(true);
   });
 });
+
+/**
+ * 自動マージの分岐（#1602）。GitHub API を伴うため実行はできないので、**分岐の構造と
+ * 順序**を固定する。ここが崩れると、Issueだけが14件残る・PRが二重に作られる・
+ * 1件の失敗で残りの配布が止まる、のいずれかになる。
+ */
+describe("propagate-workflow-tag.sh の自動マージ", () => {
+  const source = readFileSync(SCRIPT, "utf8");
+
+  it("既定は自動マージしない（単体で叩いたときにマージまで進めない）", () => {
+    expect(source).toContain('AUTO_MERGE="${AUTO_MERGE:-false}"');
+  });
+
+  it("自動マージのときはIssueを作らず workflow-tag/ のブランチを使う", () => {
+    // マージ後に人が閉じるだけのIssueが、配布のたびにリポジトリ数ぶん残るのを避ける
+    const autoMergeBranch = source.indexOf('BRANCH="workflow-tag/${TAG#workflows/}"');
+    const issueCreate = source.indexOf("gh issue create");
+
+    expect(autoMergeBranch).toBeGreaterThan(-1);
+    // Issue作成は else 側（自動マージしない場合）にだけある
+    expect(issueCreate).toBeGreaterThan(autoMergeBranch);
+    expect(source.match(/gh issue create/g)).toHaveLength(1);
+  });
+
+  it("ブランチ名はタグから作られる", () => {
+    const branch = execFileSync(
+      "bash",
+      ["-c", 'TAG="workflows/v19"; printf %s "workflow-tag/${TAG#workflows/}"'],
+      { encoding: "utf8" },
+    );
+
+    expect(branch).toBe("workflow-tag/v19");
+  });
+
+  it("自動マージは予約（--auto）を先に試し、駄目ならその場でマージする", () => {
+    // 必須チェックを持つリポジトリではCIの成功を待たせたい。予約が使えないリポジトリだけ
+    // その場でマージする
+    const auto = source.indexOf("gh pr merge \"$PR_URL\" --squash --delete-branch --auto");
+    const direct = source.indexOf('elif gh pr merge "$PR_URL" --squash --delete-branch');
+
+    expect(auto).toBeGreaterThan(-1);
+    expect(direct).toBeGreaterThan(auto);
+  });
+
+  it("マージできなくてもPRを残して警告にとどめる（配布全体を止めない）", () => {
+    expect(source).toContain("::warning::$REPO: 自動マージできませんでした");
+    // fail() を呼ぶと非0で返り、呼び出し元が失敗件数に数えて全体をエラーにしてしまう
+    const warningBlock = source.slice(source.indexOf("gh pr merge"));
+    expect(warningBlock).not.toContain("fail ");
+  });
+});

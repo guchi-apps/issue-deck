@@ -1,147 +1,361 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Check, GitPullRequestArrow, Loader2, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  GitPullRequestArrow,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useWorkflowTags } from "@/hooks/use-workflow-tags";
-import type { WorkflowTagStatus as Status } from "@/lib/workflow-tags";
+import {
+  propagationTargets,
+  shortWorkflowTag,
+  workflowTagGroup,
+  type WorkflowTagStatus as Status,
+} from "@/lib/workflow-tags";
 
 /**
- * 各リポジトリが参照している共有ワークフローのタグを一覧する（#985）。
+ * 各リポジトリが参照している共有ワークフローのタグを一覧し、更新を起こす（#985・#1173）。
  *
  * **なぜ画面に出すか。** 共有ワークフローは`uses:`のタグ固定で配っており、issue-deck側を
  * 直しても各リポジトリのcallerを上げるまで反映されない。**上げ忘れても何も起きないため
  * 気づけない。** 実際`workflows/v10`はcar-careだけに配られ、他9リポジトリは`v9`のまま
  * だった（#1147の修正が届いていない状態）。
+ *
+ * **一覧は状態でグループ分けする**（#1602）。14リポジトリが同じ文言（「`v18`」「`v19`へ未更新」）
+ * を繰り返すだけの一覧は、何件が未更新なのかを数えないと分からなかった。状態は見出しへ、
+ * タグは`v18 → v19`の1表現へ寄せ、最新のものは既定でたたむ。
  */
-function statusLabel(status: Status, latest: string | null): { text: string; tone: string } {
-  if (status.mismatched) {
-    // 古いかどうかとは別種の異常。新しいワークフローで古いプロンプトが動く
-    return { text: "uses と prompts-ref が不一致", tone: "text-destructive" };
-  }
-  if (status.outdated) {
-    return { text: `${latest ?? "最新"} へ未更新`, tone: "text-amber-500" };
-  }
-  return { text: "最新", tone: "text-muted-foreground" };
+
+/** 参照しているタグ。同じタグに揃っていれば1つ、混在していれば全部を出す */
+function summarizeTags(status: Status): string {
+  return [...new Set(status.refs.map((ref) => shortWorkflowTag(ref.uses)))].join(" / ");
 }
 
-/** 同じタグに揃っていれば1つ、混在していれば全部を出す */
-function summarizeTags(status: Status): string {
-  const tags = [...new Set(status.refs.map((ref) => ref.uses))];
-  return tags.join(" / ");
+/** 件数のチップ。0件のものは出さない（並ぶだけで読み取る手間が増える） */
+function CountChip({
+  count,
+  label,
+  tone,
+}: {
+  count: number;
+  label: string;
+  tone: "warn" | "pending" | "ok";
+}) {
+  if (count === 0) return null;
+
+  const toneClass =
+    tone === "warn"
+      ? "border-amber-500/40 text-amber-600 dark:text-amber-500"
+      : tone === "pending"
+        ? "border-border text-muted-foreground"
+        : "border-border text-muted-foreground";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${toneClass}`}
+    >
+      {label} {count}
+    </span>
+  );
+}
+
+/** 一覧の1行。左からアイコン・リポジトリ名・タグ・（あれば）補足 */
+function RepositoryRow({
+  status,
+  latest,
+  running,
+}: {
+  status: Status;
+  latest: string | null;
+  running: boolean;
+}) {
+  const group = workflowTagGroup(status);
+  const to = latest ? shortWorkflowTag(latest) : null;
+
+  return (
+    <li className="flex items-center gap-2 text-xs">
+      {group === "latest" ? (
+        <Check className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : group === "pull-request" ? (
+        <GitPullRequestArrow className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : running ? (
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+      ) : (
+        <AlertTriangle
+          className={`size-3.5 shrink-0 ${status.mismatched ? "text-destructive" : "text-amber-500"}`}
+        />
+      )}
+
+      <span className="truncate">{status.fullName}</span>
+
+      <span className="ml-auto flex shrink-0 items-center gap-1.5 tabular-nums">
+        <span className="text-muted-foreground">{summarizeTags(status)}</span>
+        {group !== "latest" && to && (
+          <>
+            <span className="text-muted-foreground">→</span>
+            <span className="font-medium text-amber-600 dark:text-amber-500">{to}</span>
+          </>
+        )}
+        {status.mismatched && (
+          <span className="text-destructive">uses と prompts-ref が不一致</span>
+        )}
+        {status.updatePullRequest && (
+          <a
+            className="inline-flex items-center gap-0.5 underline underline-offset-2"
+            href={status.updatePullRequest.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            PR #{status.updatePullRequest.number}
+            <ExternalLink className="size-3" />
+          </a>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** グループの見出し。右へ細い罫線を伸ばして区切りにする */
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+      <span className="shrink-0">{children}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
 }
 
 export function WorkflowTagStatusSection({ open }: { open: boolean }) {
-  const { overview, isLoading, error, reload } = useWorkflowTags(open);
-  const [isPropagating, setIsPropagating] = useState(false);
+  const { overview, isLoading, error, isRunning, reload, markDispatched } = useWorkflowTags(open);
+  const [autoMerge, setAutoMerge] = useState(true);
+  const [isDispatching, setIsDispatching] = useState(false);
   const [propagateMessage, setPropagateMessage] = useState<string | null>(null);
   const [propagateError, setPropagateError] = useState<string | null>(null);
+  const [showLatest, setShowLatest] = useState(false);
 
-  const targets = (overview?.repositories ?? []).filter(
-    (status) => status.outdated || status.mismatched,
-  );
+  const repositories = overview?.repositories ?? [];
+  const targets = propagationTargets(repositories);
+  const pending = repositories.filter((status) => workflowTagGroup(status) === "pull-request");
+  const upToDate = repositories.filter((status) => workflowTagGroup(status) === "latest");
+  const latestLabel = overview?.latest ? shortWorkflowTag(overview.latest) : null;
+  const run = overview?.propagation ?? null;
 
   async function handlePropagate() {
-    setIsPropagating(true);
+    setIsDispatching(true);
     setPropagateMessage(null);
     setPropagateError(null);
     try {
-      const res = await fetch("/api/workflow-tags/propagate", { method: "POST" });
-      if (!res.ok) throw new Error(`起動に失敗しました (${res.status})`);
+      const res = await fetch("/api/workflow-tags/propagate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoMerge }),
+      });
+      const result: {
+        dispatched: boolean;
+        tag: string | null;
+        repositories: string[];
+        message?: string;
+      } = await res.json().catch(() => ({ dispatched: false, tag: null, repositories: [] }));
 
-      const result: { dispatched: boolean; tag: string | null; repositories: string[] } =
-        await res.json();
-      setPropagateMessage(
-        result.dispatched
-          ? `${result.repositories.length}件のリポジトリへ ${result.tag} のPRを作成しています。GitHub Actionsの完了後、各リポジトリでPRを確認してください。`
-          : "更新が必要なリポジトリはありません。",
-      );
+      if (!res.ok) throw new Error(result.message ?? `起動に失敗しました (${res.status})`);
+
+      if (result.dispatched) {
+        // runが見えるまでのあいだも実行中として扱わせる（この間に押せると二重起動になる）
+        markDispatched();
+        setPropagateMessage(
+          autoMerge
+            ? `${result.repositories.length}件のリポジトリへ ${result.tag} のPRを作成しています。CIが通り次第、自動でマージされます。`
+            : `${result.repositories.length}件のリポジトリへ ${result.tag} のPRを作成しています。GitHub Actionsの完了後、各リポジトリでPRを確認してください。`,
+        );
+      } else {
+        setPropagateMessage(result.message ?? "更新が必要なリポジトリはありません。");
+        reload();
+      }
     } catch (err) {
       setPropagateError(err instanceof Error ? err.message : String(err));
     } finally {
-      setIsPropagating(false);
+      setIsDispatching(false);
     }
   }
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">共有ワークフローのバージョン</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={reload}
-          disabled={isLoading}
-          aria-label="再取得"
-        >
-          <RefreshCw className={isLoading ? "animate-spin" : undefined} />
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {latestLabel && (
+            <span className="rounded-full border px-2 py-0.5 text-[11px] tabular-nums">
+              最新 {latestLabel}
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={reload}
+            disabled={isLoading}
+            aria-label="再取得"
+          >
+            <RefreshCw className={isLoading ? "animate-spin" : undefined} />
+          </Button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {propagateError && <p className="text-sm text-destructive">{propagateError}</p>}
 
       {!error && isLoading && !overview && (
         <p className="text-xs text-muted-foreground">読み込み中...</p>
       )}
 
-      {overview && (
-        <>
-          <p className="text-xs text-muted-foreground">
-            issue-deck側の最新: {overview.latest ?? "（取得できませんでした）"}
-          </p>
+      {overview && !overview.latest && (
+        <p className="text-xs text-muted-foreground">
+          issue-deck側の最新タグを取得できませんでした。
+        </p>
+      )}
 
-          {overview.repositories.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              共有ワークフローを参照しているリポジトリはありません。
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {overview.repositories.map((status) => {
-                const label = statusLabel(status, overview.latest);
-                const ok = !status.outdated && !status.mismatched;
-                return (
-                  <li key={status.fullName} className="flex items-center gap-2 text-xs">
-                    {ok ? (
-                      <Check className="size-3.5 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <AlertTriangle className={`size-3.5 shrink-0 ${label.tone}`} />
-                    )}
-                    <span className="truncate">{status.fullName}</span>
-                    <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-                      {summarizeTags(status)}
-                    </span>
-                    {!ok && <span className={`shrink-0 ${label.tone}`}>{label.text}</span>}
-                  </li>
-                );
-              })}
-            </ul>
+      {overview && repositories.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          共有ワークフローを参照しているリポジトリはありません。
+        </p>
+      )}
+
+      {repositories.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <CountChip count={targets.length} label="未更新" tone="warn" />
+            <CountChip count={pending.length} label="更新PR待ち" tone="pending" />
+            <CountChip count={upToDate.length} label="最新" tone="ok" />
+          </div>
+
+          {targets.length > 0 && (
+            <>
+              <GroupLabel>更新が必要（{targets.length}）</GroupLabel>
+              <ul className="flex flex-col gap-1">
+                {targets.map((status) => (
+                  <RepositoryRow
+                    key={status.fullName}
+                    status={status}
+                    latest={overview?.latest ?? null}
+                    running={isRunning}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
+
+          {pending.length > 0 && (
+            <>
+              <GroupLabel>更新PRの確認待ち（{pending.length}）</GroupLabel>
+              <ul className="flex flex-col gap-1">
+                {pending.map((status) => (
+                  <RepositoryRow
+                    key={status.fullName}
+                    status={status}
+                    latest={overview?.latest ?? null}
+                    running={false}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
+
+          {upToDate.length > 0 && (
+            <Collapsible open={showLatest} onOpenChange={setShowLatest}>
+              <GroupLabel>
+                <CollapsibleTrigger className="inline-flex items-center gap-0.5 hover:underline">
+                  <ChevronRight
+                    className={`size-3 transition-transform ${showLatest ? "rotate-90" : ""}`}
+                  />
+                  最新（{upToDate.length}）
+                </CollapsibleTrigger>
+              </GroupLabel>
+              <CollapsibleContent>
+                <ul className="flex flex-col gap-1">
+                  {upToDate.map((status) => (
+                    <RepositoryRow
+                      key={status.fullName}
+                      status={status}
+                      latest={overview?.latest ?? null}
+                      running={false}
+                    />
+                  ))}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </>
       )}
 
       {targets.length > 0 && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-1 w-full"
-          onClick={handlePropagate}
-          disabled={isPropagating}
-        >
-          {isPropagating ? <Loader2 className="animate-spin" /> : <GitPullRequestArrow />}
-          {targets.length}件のリポジトリへ更新PRを作成
-        </Button>
+        <>
+          <Button
+            variant="default"
+            size="sm"
+            className="mt-1 w-full"
+            onClick={handlePropagate}
+            disabled={isDispatching || isRunning}
+          >
+            {isDispatching || isRunning ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <GitPullRequestArrow />
+            )}
+            {isRunning
+              ? "更新を実行中..."
+              : `${targets.length}件を ${latestLabel ?? "最新"} へ更新する`}
+          </Button>
+
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Checkbox
+              checked={autoMerge}
+              onCheckedChange={(checked) => setAutoMerge(checked === true)}
+              disabled={isDispatching || isRunning}
+            />
+            作成したPRを自動でマージする
+          </label>
+        </>
+      )}
+
+      {isRunning && run && (
+        <p className="text-xs text-muted-foreground">
+          各リポジトリへPRを作成しています。{" "}
+          <a
+            className="inline-flex items-center gap-0.5 underline underline-offset-2"
+            href={run.htmlUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            実行を見る
+            <ExternalLink className="size-3" />
+          </a>
+        </p>
       )}
 
       {propagateMessage && <p className="text-xs text-muted-foreground">{propagateMessage}</p>}
-      {propagateError && <p className="text-sm text-destructive">{propagateError}</p>}
 
-      <p className="text-xs text-muted-foreground">
-        各リポジトリの<code>.github/workflows/</code>が参照しているタグです。issue-deck側の改善は、
-        参照タグを上げるまで反映されません。<strong>uses と prompts-ref が食い違うと、新しい
-        ワークフローで古いプロンプトが使われます。</strong>
-        作成されるのはPRまでで、<strong>マージは行いません</strong>（Actionsの変更は内容の確認が要るため）。
-      </p>
+      <Collapsible>
+        <CollapsibleTrigger className="mt-1 border-t pt-1.5 text-left text-xs text-muted-foreground hover:underline">
+          この操作について
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <p className="mt-1 text-xs text-muted-foreground">
+            各リポジトリの<code>.github/workflows/</code>が参照しているタグです。issue-deck側の改善は、
+            参照タグを上げるまで反映されません。<strong>uses と prompts-ref が食い違うと、新しい
+            ワークフローで古いプロンプトが使われます。</strong>
+            更新は各リポジトリへPRを作る形で行います。<strong>自動マージを外すと、PRの作成までで
+            止まります</strong>（その場合は各リポジトリでPRを確認してマージしてください）。
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }

@@ -6,11 +6,20 @@
 #
 # **このスクリプトは1リポジトリの失敗で全体を止めない前提で書かれている。** 呼び出し元が
 # 戻り値を見て件数を数えるため、失敗時は非0で返すこと。
+#
+# `AUTO_MERGE=true`（既定）のときはIssueを作らず、PRを作ってマージまで進める（#1602）。
+# 書き換えるのは`@workflows/vN`と`prompts-ref`だけの機械的な置換で、配るタグ自体は
+# issue-deck側で人の確認を通してから切っているため、ここに人の操作を挟んでも判断材料は
+# 増えない。**Issueを作らないのは、マージ後に人が閉じるだけのIssueが配布のたびに
+# リポジトリ数ぶん残るため。**
 set -uo pipefail
 
 REPO="$1"          # owner/repo
 TAG="$2"           # workflows/vN
 SOURCE_REPO="$3"   # 共有ワークフローの提供元（guchi-apps/issue-deck）
+
+# 呼び出し元（propagate-workflow-tag.yml）が環境変数で渡す。単体で叩いたときは自動マージしない
+AUTO_MERGE="${AUTO_MERGE:-false}"
 
 fail() {
   echo "  $1" >&2
@@ -58,7 +67,13 @@ fi
 
 CHANGED="$(git diff --name-only | sed 's|.github/workflows/||' | tr '\n' ' ')"
 
-ISSUE_BODY="$(cat <<EOF
+if [ "$AUTO_MERGE" = "true" ]; then
+  # Issueを作らないぶん、ブランチ名にタグを入れて何のブランチかを分かるようにする。
+  # `issue-*`ではないため、配布先の`issue-labels.yml`（push on issue-*）は動かない
+  ISSUE_NUMBER=""
+  BRANCH="workflow-tag/${TAG#workflows/}"
+else
+  ISSUE_BODY="$(cat <<EOF
 共有ワークフローの参照タグを **\`$TAG\`** へ上げる。
 
 issue-deck 側の改善は、**各リポジトリの参照タグを上げるまで反映されない。** 上げ忘れても
@@ -83,24 +98,61 @@ $SOURCE_REPO の画面から一括作成されたIssueです。
 EOF
 )"
 
-ISSUE_URL="$(gh issue create --repo "$REPO" \
-  --title "共有ワークフローの参照を$TAGへ上げる" \
-  --body "$ISSUE_BODY" 2>/dev/null)" || fail "Issueの作成に失敗しました"
+  ISSUE_URL="$(gh issue create --repo "$REPO" \
+    --title "共有ワークフローの参照を$TAGへ上げる" \
+    --body "$ISSUE_BODY" 2>/dev/null)" || fail "Issueの作成に失敗しました"
 
-ISSUE_NUMBER="${ISSUE_URL##*/}"
-BRANCH="issue-$ISSUE_NUMBER"
+  ISSUE_NUMBER="${ISSUE_URL##*/}"
+  BRANCH="issue-$ISSUE_NUMBER"
+fi
 
 git checkout --quiet -b "$BRANCH" || fail "ブランチを作成できません"
 git add -A
 
-COMMIT_MESSAGE="$(printf '共有ワークフローの参照を%sへ上げる\n\nissue-deck側の改善は、各リポジトリの参照タグを上げるまで反映されない。\nuses: と prompts-ref は必ず同じ値にする（片方だけ上げると新しいワークフローで\n古いプロンプトが使われる）。\n\n#%s\n' "$TAG" "$ISSUE_NUMBER")"
+if [ -n "$ISSUE_NUMBER" ]; then
+  COMMIT_TRAILER="$(printf '\n#%s\n' "$ISSUE_NUMBER")"
+else
+  COMMIT_TRAILER=""
+fi
+
+COMMIT_MESSAGE="$(printf '共有ワークフローの参照を%sへ上げる\n\nissue-deck側の改善は、各リポジトリの参照タグを上げるまで反映されない。\nuses: と prompts-ref は必ず同じ値にする（片方だけ上げると新しいワークフローで\n古いプロンプトが使われる）。\n%s' "$TAG" "$COMMIT_TRAILER")"
 git commit --quiet -m "$COMMIT_MESSAGE" || fail "コミットに失敗しました"
 
-git push --quiet -u origin "$BRANCH" || fail "pushに失敗しました"
+# 自動マージのブランチ名はタグごとに固定のため、前回マージされずに閉じたPRの残骸が
+# 残っていることがある。**中身は毎回このスクリプトが作り直すもの**なので上書きしてよい
+git push --quiet -u origin "$BRANCH" \
+  || git push --quiet --force-with-lease -u origin "$BRANCH" \
+  || fail "pushに失敗しました"
+
+if [ -n "$ISSUE_NUMBER" ]; then
+  PR_BODY="$(printf '## 対応Issue\n\n#%s\n\n## 実装内容\n\n参照タグを **`%s`** へ上げた。**`uses:` と `prompts-ref` を同じ値にしてある。**\n\n変更対象: %s\n変更前の参照: %s\n\n## 確認方法\n\nこのPRの Actions で `labels / wip-on-push` が成功すること。\n\n## 注意点\n\n**このPRは自動マージしない設定で作成された。** 内容を確認して手でマージする。\n\n---\n\n%s の画面から一括作成されたPRです。\n' "$ISSUE_NUMBER" "$TAG" "$CHANGED" "$BEFORE" "$SOURCE_REPO")"
+else
+  PR_BODY="$(printf '## 実装内容\n\n参照タグを **`%s`** へ上げた。**`uses:` と `prompts-ref` を同じ値にしてある。**\n\n変更対象: %s\n変更前の参照: %s\n\n## 確認方法\n\nこのPRの Actions が成功すること。\n\n## 注意点\n\n**このPRはCIの通過後に自動マージされる。** 書き換えは `@workflows/vN` と `prompts-ref` の\n置換だけで、配るタグ自体は %s 側で確認済みのもの。\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' "$TAG" "$CHANGED" "$BEFORE" "$SOURCE_REPO" "$SOURCE_REPO")"
+fi
 
 PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
   --title "共有ワークフローの参照を$TAGへ上げる" \
-  --body "$(printf '## 対応Issue\n\n#%s\n\n## 実装内容\n\n参照タグを **`%s`** へ上げた。**`uses:` と `prompts-ref` を同じ値にしてある。**\n\n変更対象: %s\n変更前の参照: %s\n\n## 確認方法\n\nこのPRの Actions で `labels / wip-on-push` が成功すること。\n\n## 注意点\n\n**GitHub Actions の変更のため、自動マージ不可カテゴリに該当する。**\n\n---\n\n%s の画面から一括作成されたPRです。\n' "$ISSUE_NUMBER" "$TAG" "$CHANGED" "$BEFORE" "$SOURCE_REPO")" 2>/dev/null)" \
+  --body "$PR_BODY" 2>/dev/null)" \
   || fail "PRの作成に失敗しました"
 
 echo "  作成しました: $PR_URL"
+
+if [ "$AUTO_MERGE" != "true" ]; then
+  exit 0
+fi
+
+# **自動マージの予約を優先する。** 必須チェックを持つリポジトリではCIの成功後にマージされる。
+# 予約にはリポジトリ側で auto-merge が有効になっている必要があるため、まず有効化を試みる
+# （権限が無ければ黙って次へ進む）
+gh api -X PATCH "repos/$REPO" -F allow_auto_merge=true >/dev/null 2>&1 || true
+
+if gh pr merge "$PR_URL" --squash --delete-branch --auto >/dev/null 2>&1; then
+  echo "  自動マージを予約しました"
+elif gh pr merge "$PR_URL" --squash --delete-branch >/dev/null 2>&1; then
+  # 必須チェックが無いリポジトリでは予約が「既にマージ可能」として断られる。その場で通す
+  echo "  マージしました"
+else
+  # ここで失敗してもPRは残っている。人がマージすれば従来と同じ結果になるため、
+  # スクリプト自体は成功として返す（1件の失敗で残りの配布を止めない）
+  echo "::warning::$REPO: 自動マージできませんでした。PRを残します: $PR_URL"
+fi
