@@ -65,6 +65,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: null,
     instruction: null,
     tmuxSessionName: null,
+    queuePriority: 0,
     createdAt: "2026-08-14T00:00:00Z",
     claimedAt: null,
     startedAt: null,

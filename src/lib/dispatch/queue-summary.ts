@@ -1,6 +1,7 @@
 import {
   isActiveDispatchJobStatus,
   isDispatchHostAtSessionCapacity,
+  isSessionLaunchJobKind,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -12,8 +13,9 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
  * GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順に流す**形にしたため
  * （#1261）、「今どこまで進んでいて、あと何本待っているか」を1か所で見られる必要が出た。
  *
- * **順番はcreatedAtの昇順で、払い出し（`claimDispatchJob`）と同じ。** キューは
- * 積んだ順に流れるので、画面の並びと実際に走る順が一致する。
+ * **並びは払い出し（`claimDispatchJob`）と同じ。** `queuePriority`の降順 → `createdAt`の
+ * 昇順で、画面に見えている順番と実際に走る順番が一致する。`queuePriority`は既定0なので、
+ * 「先頭へ上げる」（#1541）を押していないキューは従来どおり積んだ順に流れる。
  */
 
 /** 未完了ジョブのうち、実際に走っているとみなす状態 */
@@ -38,18 +40,25 @@ export function summarizeDispatchQueue(
   jobs: readonly DispatchJobView[],
   concurrency: number | null,
 ): DispatchQueueSummary {
-  // **起動ジョブだけを数える**（#1332）。セッションの停止・終了は同時実行数の枠を使わず、
-  // tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
-  // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る
-  const byOldest = [...jobs]
-    .filter((job) => job.kind === "LAUNCH")
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // **同時実行数の枠を使うジョブだけを数える**（#1332・#1544）。セッションの停止・終了は
+  // 枠を使わず、tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
+  // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る。
+  // 逆に**横断質問（#1454）は`LAUNCH`と同じ枠で走る**ので数える（`claimDispatchJobs`の空きの
+  // 計算と同じ集合＝`SESSION_LAUNCH_JOB_KINDS`。ずれると、枠が埋まっていても「実行中 0/2」と出る）
+  const launchJobs = [...jobs].filter((job) => isSessionLaunchJobKind(job.kind));
 
-  const running = byOldest.filter(isRunningStatus);
-  const queued = byOldest.filter((job) => job.status === "QUEUED");
-  const failed = byOldest
+  // 走る順。`queuePriority`が同じなら積んだ順（既定は全件0なので従来と同じ並びになる）
+  const byRunOrder = [...launchJobs].sort(
+    (a, b) => b.queuePriority - a.queuePriority || a.createdAt.localeCompare(b.createdAt),
+  );
+
+  const running = byRunOrder.filter(isRunningStatus);
+  const queued = byRunOrder.filter((job) => job.status === "QUEUED");
+  // **終わったものは走る順ではなく新しい順に出す。** 「直近の失敗」で見たいのは順番ではなく
+  // 直近かどうかで、先頭へ上げたジョブが後から失敗したときに古い失敗より上へ来てしまう
+  const failed = launchJobs
     .filter((job) => job.status === "FAILED" || job.status === "TIMEOUT")
-    .reverse();
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return {
     running,
@@ -141,7 +150,9 @@ export function describeDispatchJobWaitReason(
   job: DispatchJobView,
   hosts: readonly DispatchHostView[],
 ): string | null {
-  if (job.status !== "QUEUED" || job.kind !== "LAUNCH") return null;
+  // 横断質問セッション（#1454）もtmuxセッションを立て、pollerのセッション本数
+  // （`count_issue_sessions`は`<repo>-issue-<番号>`を数える）に入るため同じ理由で待たされる（#1544）
+  if (job.status !== "QUEUED" || !isSessionLaunchJobKind(job.kind)) return null;
   const host = hosts.find((candidate) => candidate.name === job.targetHost);
   // 落ちているホストは「上限で待っている」のではなく「取りに来られない」。別の話として扱う
   if (!host || !host.online || !isDispatchHostAtSessionCapacity(host)) return null;

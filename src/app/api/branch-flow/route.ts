@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { lookupBranchRefs } from "@/lib/github/branches-api";
+import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { ACTIVE_ISSUE_PROGRESS_STATUSES, issueBranchName } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import type { BranchFlowResponse, RepositoryBranchStatus } from "@/types/branch-flow";
@@ -19,6 +20,8 @@ export function GET() {
  * 「ブランチとPRの流れ」画面のうち、**PRからは分からない部分だけ**をここで取りに行く。
  * PRの一覧は`/api/pull-requests`が、Issueの情報はDBキャッシュが既に持っているため、
  * この画面のために増えるGitHub APIの消費は**リポジトリあたり1回**（GraphQL）だけ。
+ * リリース用workflowの有無だけは追加で問い合わせるが、10分間プロセス内にキャッシュされ、
+ * ヘッダーのリリース状態取得と共有される（#1538）。
  *
  * 問い合わせるのは「進行中のIssueに対応するブランチ（`issue-<番号>`）が実在するか」と
  * 「`main`と`develop`の差分」。ブランチの列挙はしない（理由は`lib/github/branches-api.ts`）。
@@ -95,18 +98,28 @@ async function handleGET() {
       const checkedBranches = branchesByRepositoryId.get(repository.id) ?? [];
       try {
         const token = await tokenFor(repository.installation.installationId);
-        const lookup = await lookupBranchRefs(
-          repository.ownerLogin,
-          repository.name,
-          checkedBranches,
-          token,
-        );
+        const [lookup, hasReleaseWorkflow] = await Promise.all([
+          lookupBranchRefs(repository.ownerLogin, repository.name, checkedBranches, token),
+          // 「リリースする」を出してよいかは、リリース用workflowの有無で決める（#1538）。
+          // `claude-issue-dispatch.yml`の有無（`hasClaudeWorkflow`）で代用していたため、
+          // Claude運用に載っているだけでリリース用workflowを持たないリポジトリにもボタンが
+          // 出て、押すとdispatchが404で失敗していた。
+          // 判定はヘッダーのロケットボタン（`/api/repositories/release`）と同じ関数を通す。
+          // プロセス内に10分キャッシュされ、多くの場合そのポーリングと共有されるため、
+          // この画面のためのGitHub API消費はほとんど増えない。取れなかった場合はfalseへ
+          // 縮退させ、押せない側へ倒す。
+          releaseWorkflowExists(repository.ownerLogin, repository.name, token).catch((error) => {
+            console.error(`[GET /api/branch-flow] release workflow ${repository.fullName}:`, error);
+            return false;
+          }),
+        ]);
 
         return {
           repositoryFullName: repository.fullName,
           checkedBranches,
           existingBranches: lookup.existingBranches,
           developVsMain: lookup.developVsMain,
+          hasReleaseWorkflow,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。取れなかったことだけを返す。

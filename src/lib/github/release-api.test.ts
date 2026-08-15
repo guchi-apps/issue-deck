@@ -3,7 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchRefCiState, resolveCiStateFromCheckRuns } from "@/lib/github/release-api";
 
 function jsonResponse(status: number, body: unknown) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    // check-runsの取得はETagの条件付きGETを通る（#1531）。ETagを返さない応答として振る舞わせ、
+    // このファイルのテストがプロセス内キャッシュに依存しないようにする
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
 }
 
 /** `page`クエリの値ごとにレスポンスを返すfetchスタブ。呼ばれたページ番号も記録する */

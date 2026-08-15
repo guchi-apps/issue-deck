@@ -13,7 +13,6 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 
-import { AccountMenuDialog } from "@/components/dashboard/account-menu-dialog";
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
 import { ReleaseStatusButton } from "@/components/dashboard/release-status-button";
 import { Button } from "@/components/ui/button";
@@ -58,7 +57,7 @@ type TopBarProps = {
   issues: Issue[];
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  onOpenAppSettings: () => void;
+  onOpenSettings: () => void;
 };
 
 export function TopBar({
@@ -75,9 +74,8 @@ export function TopBar({
   issues,
   isSidebarCollapsed,
   onToggleSidebar,
-  onOpenAppSettings,
+  onOpenSettings,
 }: TopBarProps) {
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   // 検索欄はURL（filters.q）に直接バインドすると、1文字入力するたびにrouter.replaceによる
   // ナビゲーションが走り入力が遅く感じられる（#1024）。入力自体はローカルstateで即時反映し、
@@ -250,7 +248,8 @@ export function TopBar({
       <button
         type="button"
         className="flex items-center gap-1 rounded-md p-1 hover:bg-accent"
-        onClick={() => setAccountMenuOpen(true)}
+        onClick={onOpenSettings}
+        title="設定"
       >
         <UserAvatar
           login={currentUser?.login ?? "?"}
@@ -259,13 +258,6 @@ export function TopBar({
         />
         <ChevronDown className="size-3 text-muted-foreground" />
       </button>
-
-      <AccountMenuDialog
-        open={accountMenuOpen}
-        onOpenChange={setAccountMenuOpen}
-        currentUser={currentUser}
-        onOpenAppSettings={onOpenAppSettings}
-      />
     </header>
   );
 }

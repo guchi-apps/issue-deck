@@ -20,7 +20,7 @@ src/
     dashboard/      メイン画面
     github/setup    GitHub Appインストール後の受け口
   components/
-    dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用）
+    dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
     ui/             shadcn/uiの生成物。手で書き換えない
   hooks/            use-* のクライアントフック。データ取得・更新はここに集約する
   lib/
@@ -46,6 +46,15 @@ deploy/             PM2の ecosystem.config.js
   `search-query.ts` などがこの形。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
+  区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
+  PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
+  スマホの設定画面（[`mobile/mobile-settings-screen.tsx`](../src/components/dashboard/mobile/mobile-settings-screen.tsx)）が
+  同じ配列と同じセクションコンポーネントを読む。**片方の画面にだけ項目を足さない。**
+  区分は機能の性質で割っており、**保存を押すまで効かない設定値は「実行設定」、押した瞬間に
+  GitHub Actionsが走る操作は「フリート運用」**へ入れる。混ぜると「保存ボタンがどこまで効くのか
+  分からない」という元の状態に戻る。読み取り系のデータ取得は
+  [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)へ集約する。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
@@ -121,8 +130,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （#1058の調査時点で全連携リポジトリ合計0件）、DBキャッシュを持つ効果より
   スキーマ・Webhook設定を増やさない方が勝つと判断した。
   取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
-  1回が重い。そのため**自動ポーリングを持たせていない**（画面を開いたときと手動更新のみ。
-  `hooks/use-pull-requests.ts`）。
+  1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
+  （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
+  `hooks/use-pull-requests.ts`。#1531）。
+- **10秒間隔で回せるのは、GitHubへの取得がETagの条件付きGETを通っているから**（#1531。
+  [`lib/github/conditional-request.ts`](../src/lib/github/conditional-request.ts)）。
+  GitHubのREST APIは`If-None-Match`付きのリクエストが`304 Not Modified`を返したとき、
+  **その分をレート制限に計上しない**。素で10秒ポーリングすると26リポジトリ×360回/時で
+  インストール当たりの上限（5,000回/時）を約2倍超過し、PR一覧だけでなくIssue同期・CI状態・
+  マージまで巻き添えで失敗する。通しているのはPR一覧（`fetchOpenPullRequests` /
+  `fetchClosedPullRequests`）とCI状態（`fetchRefCiState`のcheck-runs）の2経路で、
+  変化が無い間の消費は実質ゼロになる。キャッシュはプロセス内メモリのLRU（上限500件。
+  check-runsのURLはhead SHAごとに増えるため）で、`api-usage`と同じく単一プロセス前提。
+  **キャッシュの古さが表示に出ることはない**——毎回GitHubへ問い合わせており、本文をキャッシュから
+  返すのはGitHub自身が「変わっていない」と答えたときだけ。キーはURLのみでトークンを含めないが、
+  権限の無いリポジトリには304ではなく404が返るため、別インストールの内容は漏れない。
+  **304は使用量（`api-usage`）にも計上しない**ので、設定画面の「GitHub API使用量」の
+  `pull_request_list`は実際に消費した回数を表す。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数を出すのは「処理中のPR」「完了したPR」だけで、
   **「全てのPR」には出さない**（母集団が`scope`＝「openだけか、直近のクローズ済みまで含むか」に
@@ -187,7 +211,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `delete_branch_on_merge`も有効にしたが、**ブランチ数に依存しない作りのままにしてある**）。
   代わりに
   **進行中のIssueに対応するブランチ（`issue-<番号>`）だけをGraphQLのエイリアスで名指しして引く**。
-  PR一覧と同じく**自動ポーリングを持たず**、画面を開いたときと更新ボタンのときだけ走る
+  **自動ポーリングは持たず**、画面を開いたときと更新ボタンのときだけ走る
   （`hooks/use-branch-flow.ts`。一度取った内容は画面を離れても保持する）。
   この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
   「どのバージョンで本番へ出たか」を出せないため。組み立ては
@@ -229,7 +253,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `## 前提条件`に別Issueへの参照が入るため見出しの中だけを読む。一般のサブIssueは表示しない。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
-  openなバンプPRが無い・未リリースの変更がある）で、**すべて画面が既に持っている情報**から決まる。
+  openなバンプPRが無い・未リリースの変更がある）で決まる。
+  **「リリース用workflowがある」は`release-develop-to-main.yml`の実在で判定する**（#1538）。
+  当初は`claude-issue-dispatch.yml`の有無（`Repository.hasClaudeWorkflow`）で代用していたが、
+  この2つは一致しない——Claude運用には載っていてもリリースフローを持たないリポジトリ
+  （例: clip-hive）でボタンが出てしまい、押すとdispatchが404で失敗した。判定はヘッダーの
+  ロケットボタンと同じ`releaseWorkflowExists`（プロセス内に10分キャッシュ）を`GET /api/branch-flow`
+  から通し、結果を`RepositoryBranchStatus.hasReleaseWorkflow`として返す。**取得できていない
+  リポジトリはfalse（＝出さない）へ倒す。** さらに`POST /api/repositories/release`側でも起動前に
+  同じ判定を行い、workflowが無ければ`release_workflow_missing`を返して日本語の文言を出す
+  （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
   起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
   同じ結果になるようにしてある。**流れ画面が持つのは起動だけ**で、4段の進捗とmainへのマージ導線は
@@ -351,7 +384,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `expireStaleDispatchJobs`が掃く遅延評価。**セッション本数の上限（#1361）で待っていることは、
   pollerが申告する`maxSessions`/`liveSessions`から画面に出す**（#1394。文言は
   `lib/dispatch/queue-summary.ts`。**割り当ての判定はpoller側のままで、issue-deckは表示にしか
-  使わない**）。「どのリポジトリを起動できるか」はサブPCが申告し、
+  使わない**）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
+  （#1541。`POST /api/dispatch/<id>/prioritize`。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
+  **見えている順番と走る順番を一致させる**。任意の並べ替えは持たない）。
+  「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
@@ -365,13 +401,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   終わったtmuxセッションそのものを畳む（#1256）。判定材料は`scripts/lib/session-state.sh`が
   読み書きする状態ファイル（`~/.local/state/issue-deck/sessions/`。`run-issue-session.sh`が
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
-  **画面（`capture-pane`）の内容は読まない**。設計は
+  **画面（`capture-pane`）の内容は読まない**。**PRを作り`11.local`も外した引き渡し済みの
+  セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
+  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
   `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+  **`run-issue-session.sh`が同じ置き場を見るのは「`*.jsonl`が1つでもあるか」だけ**
+  （#1541。`claude --continue`を付けるかの判定で、**中身は開かない**）。名前の導き方が変われば
+  ヒットしなくなり、新規会話で始まるだけなので、上のルールの主旨（内部仕様への依存を広げない）は
+  守れている。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
   `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ

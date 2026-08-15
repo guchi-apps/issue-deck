@@ -254,6 +254,49 @@ export function useDispatchState(enabled: boolean) {
     }
   }, []);
 
+  /**
+   * 順番待ちのジョブを先頭へ上げる（#1541）。
+   *
+   * **成功したらポーリングを待たずに手元の並びも直す。** 次の取得まで最大20秒あり、
+   * その間に並びが変わらないと押せていないように見える。サーバー側の値と同じ規則
+   * （同じホストの順番待ちの最大値+1）で置き換えるので、取り直しても並びは変わらない。
+   */
+  const prioritize = useCallback(async (jobId: string): Promise<boolean> => {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dispatch/${encodeURIComponent(jobId)}/prioritize`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      setState((prev) => {
+        if (!prev) return prev;
+        const target = prev.jobs.find((job) => job.id === jobId);
+        if (!target) return prev;
+        const top = prev.jobs.reduce(
+          (max, job) =>
+            job.targetHost === target.targetHost && job.status === "QUEUED"
+              ? Math.max(max, job.queuePriority)
+              : max,
+          0,
+        );
+        return {
+          ...prev,
+          jobs: prev.jobs.map((job) =>
+            job.id === jobId ? { ...job, queuePriority: top + 1 } : job,
+          ),
+        };
+      });
+      setReloadKey((key) => key + 1);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, []);
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
@@ -266,5 +309,6 @@ export function useDispatchState(enabled: boolean) {
     sendSessionControl,
     cancel,
     dismiss,
+    prioritize,
   };
 }

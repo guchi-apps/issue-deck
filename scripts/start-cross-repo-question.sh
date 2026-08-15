@@ -16,9 +16,11 @@
 # ## 実装セッション（generic-start-issue.sh）との違い
 #
 #   worktree        作らない。**読み取り専用**なのでブランチもコミットも要らない
-#   cwd             質問ごとの空ディレクトリ（~/apps/issue-deck-worktrees/.questions/<repo>-<番号>）。
+#   cwd             リポジトリごとに固定の空ディレクトリ
+#                   （~/apps/issue-deck-worktrees/.questions/_session-<repo>）。
 #                   どれか1つのリポジトリをcwdにすると、そのリポジトリのCLAUDE.mdだけが
-#                   最初から効いてしまい、横断の質問なのに視点が偏る
+#                   最初から効いてしまい、横断の質問なのに視点が偏る。**質問Issueごとには
+#                   分けない**（毎回フォルダの信頼確認が出るため。#1529）
 #   開発サーバー    起動しない
 #   書き込みツール  `--disallowedTools`で封じる（プロンプトの指示だけに頼らない）
 #   成果物          質問Issueへ投稿する回答コメント1件だけ
@@ -124,9 +126,22 @@ echo "#$ISSUE_NUMBER: 参照するリポジトリ: ${#REFERENCE_DIRS[@]}件"
 # **どのリポジトリでもない空のディレクトリをcwdにする。** 実装セッションのworktreeや
 # リポジトリ本体をcwdにすると、そこだけが「主」になって横断の視点が偏るうえ、
 # 他セッションが編集中の作業ツリーへ書き込む余地を残すことになる。
+#
+# **質問Issueごとには分けず、リポジトリごとの固定名にする**（#1529）。Claude Codeのフォルダの
+# 信頼確認（`Is this a project you created or one you trust?`）はディレクトリ単位で
+# `~/.claude.json`に記録されるため、質問のたびに新しいディレクトリを作ると毎回聞かれる。
+# **信頼確認が出ている間はフックが1つも飛ばない**（#1465）ので、Signalyへの通知も出ず、
+# 端末を見ていないと止まっていることに気づけない。固定すれば人が1回答えるだけで済む。
+# `~/.claude.json`を機械が書き換えないので「信頼確認そのものは自動化しない」という
+# 取り決め（docs/multi-agent/session-notify.md）とも衝突しない。
+#
+# 粒度をリポジトリごとにしているのは、会話履歴とメモリ（`~/.claude/projects/<cwd>/`）が
+# cwd単位で置かれるため。全質問で1つにすると`/resume`の一覧に無関係なリポジトリの質問まで
+# 並ぶので、共有の範囲を同じリポジトリの質問に限る。
 QUESTION_BASE="${ISSUE_DECK_QUESTION_BASE:-$HOME/apps/issue-deck-worktrees/.questions}"
 SAFE_REPO="${REPO//[^A-Za-z0-9_-]/-}"
-SESSION_DIR="$QUESTION_BASE/$SAFE_REPO-$ISSUE_NUMBER"
+# 接頭辞`_session-`で、以前の質問ごとのディレクトリ（`<repo>-<番号>`）と名前がぶつからない。
+SESSION_DIR="$QUESTION_BASE/_session-$SAFE_REPO"
 PROMPT_DIR="$QUESTION_BASE/.prompts"
 PROMPT_FILE="$PROMPT_DIR/$SAFE_REPO-$ISSUE_NUMBER.md"
 mkdir -p "$SESSION_DIR" "$PROMPT_DIR"

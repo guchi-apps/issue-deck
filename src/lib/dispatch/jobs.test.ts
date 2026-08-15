@@ -5,6 +5,7 @@ const dispatchSessionFindFirst = vi.fn();
 const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchJobFindUnique = vi.fn();
+const dispatchJobFindFirst = vi.fn();
 const dispatchJobUpdateMany = vi.fn();
 const dispatchJobCount = vi.fn();
 const appSettingFindUnique = vi.fn();
@@ -36,6 +37,9 @@ vi.mock("@/lib/db", () => ({
       get findUnique() {
         return dispatchJobFindUnique;
       },
+      get findFirst() {
+        return dispatchJobFindFirst;
+      },
       get updateMany() {
         return dispatchJobUpdateMany;
       },
@@ -58,6 +62,7 @@ const {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
+  prioritizeDispatchJob,
   reportDispatchJob,
 } = await import("./jobs");
 
@@ -109,6 +114,7 @@ beforeEach(() => {
   appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
   dispatchHostFindUnique.mockResolvedValue(host());
   dispatchSessionFindFirst.mockResolvedValue(null);
+  dispatchJobFindFirst.mockResolvedValue(null);
   dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
     id: "job-1",
     status: "QUEUED",
@@ -604,6 +610,28 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     );
   });
 
+  // #1541。**画面（summarizeDispatchQueue）と同じ並びで引く。** ずれると、画面に見えている
+  // 順番と実際に走る順番が食い違う。制御ジョブは枠外で先に配られるので、順番の概念が無い
+  it("起動ジョブは先頭へ上げた順→積んだ順で引き、制御ジョブは積んだ順のまま", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    const orderByFor = (kinds: string[]) =>
+      dispatchJobFindMany.mock.calls
+        .map((call) => call[0] as { where?: Record<string, unknown>; orderBy?: unknown })
+        .find(
+          (args) =>
+            JSON.stringify((args.where?.kind as { in?: string[] })?.in ?? []) ===
+            JSON.stringify(kinds),
+        )?.orderBy;
+
+    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION"])).toEqual([
+      { queuePriority: "desc" },
+      { createdAt: "asc" },
+    ]);
+    expect(orderByFor(["INTERRUPT", "KILL", "INSTRUCTION"])).toEqual({ createdAt: "asc" });
+  });
+
   // #1294。現行のpollerは未知の種別を「未知のジョブ種別です」として失敗で返すため、
   // 実行側が来ていない段階で配ると質問が必ず失敗として残る（払い出しはStep 3で開ける）
   it("質問ジョブは払い出さない", async () => {
@@ -707,6 +735,122 @@ describe("dismissDispatchJob", () => {
     dispatchJobFindUnique.mockResolvedValue(null);
 
     const result = await dismissDispatchJob({ jobId: "missing", now: NOW });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+/**
+ * 先頭へ上げる（#1541）。夜にまとめて積んだあと「これを次に流したい」が出てくるが、
+ * キューは`createdAt`の昇順で固定されていて、取り消して積み直すと最後尾へ回るだけだった。
+ */
+describe("prioritizeDispatchJob", () => {
+  function queuedJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      message: null,
+      instruction: null,
+      tmuxSessionName: null,
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      dismissedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("同じホストの順番待ちの最大値+1を入れる", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(queuedJob())
+      .mockResolvedValueOnce(queuedJob({ queuePriority: 4 }));
+    dispatchJobFindFirst.mockResolvedValue({ queuePriority: 3 });
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await prioritizeDispatchJob({ jobId: "job-1" });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "QUEUED" },
+      data: { queuePriority: 4 },
+    });
+    // 他ホストの値に引きずられないよう、絞り込みはtargetHostを含む
+    expect(dispatchJobFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ targetHost: "subpc", status: "QUEUED" }),
+      }),
+    );
+  });
+
+  it("先頭へ上げるのが初めてなら1になる", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(queuedJob())
+      .mockResolvedValueOnce(queuedJob({ queuePriority: 1 }));
+    dispatchJobFindFirst.mockResolvedValue({ queuePriority: 0 });
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    await prioritizeDispatchJob({ jobId: "job-1" });
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { queuePriority: 1 } }),
+    );
+  });
+
+  // 走り始めたジョブの並びを書き換えても意味が無い
+  it.each(["CLAIMED", "RUNNING", "SUCCEEDED", "FAILED"])(
+    "順番待ち以外（%s）は上げられない",
+    async (status) => {
+      dispatchJobFindUnique.mockResolvedValue(queuedJob({ status }));
+
+      const result = await prioritizeDispatchJob({ jobId: "job-1" });
+
+      expect(result).toMatchObject({ ok: false, reason: "not_prioritizable" });
+      expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  // 制御ジョブは同時実行数の枠外で起動ジョブより先に配られるので、順番の概念が無い
+  it.each(["INTERRUPT", "KILL", "INSTRUCTION"])("制御ジョブ（%s）は上げられない", async (kind) => {
+    dispatchJobFindUnique.mockResolvedValue(queuedJob({ kind }));
+
+    const result = await prioritizeDispatchJob({ jobId: "job-1" });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_prioritizable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  // 横断質問セッションは起動ジョブと同じ枠で走るので、順番がある
+  it("横断質問ジョブは上げられる", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(queuedJob({ kind: "CROSS_REPO_QUESTION" }))
+      .mockResolvedValueOnce(queuedJob({ kind: "CROSS_REPO_QUESTION", queuePriority: 1 }));
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await prioritizeDispatchJob({ jobId: "job-1" });
+
+    expect(result.ok).toBe(true);
+  });
+
+  // 押した瞬間にpollerが持っていった場合。updateManyが0件で落ちる
+  it("押した直後に払い出されたら断る", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedJob());
+    dispatchJobUpdateMany.mockResolvedValue({ count: 0 });
+
+    const result = await prioritizeDispatchJob({ jobId: "job-1" });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_prioritizable" });
+  });
+
+  it("存在しないIDはnot_found", async () => {
+    dispatchJobFindUnique.mockResolvedValue(null);
+
+    const result = await prioritizeDispatchJob({ jobId: "missing" });
 
     expect(result).toEqual({ ok: false, reason: "not_found" });
   });

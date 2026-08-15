@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
@@ -10,6 +9,8 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
+import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -134,7 +135,17 @@ export function IssueDeckShell({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
-  const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // PC（SettingsDialog）とスマホ（MobileSettingsScreen）のどちらから保存されても
+  // 同じstateへ反映する（#1539）
+  function handleAppSettingsUpdated(next: AppSettingsValues) {
+    setAutoRetryLimit(next.autoRetryLimit);
+    setClaudeModel(next.claudeModel);
+    setClaudeModelAssist(next.claudeModelAssist);
+    setDispatchConcurrency(next.dispatchConcurrency);
+  }
+
   const {
     mobileScreen,
     isPending: isMobileScreenPending,
@@ -385,7 +396,7 @@ export function IssueDeckShell({
 
   // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
   // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
-  // 取得する（自動ポーリングは無く、マウント時と明示的な更新操作のときだけ）。
+  // 取得する（マウント時と明示的な更新操作、および「完了したPR」ビューの自動更新のときだけ）。
   // 母集団の広さはビューが決める（「全てのPR」だけクローズ済みも取りに行く。#1312）。ただし
   // ペインを開いていない間は`open`を要求する。既定のprviewが`all`のため、そのまま渡すと
   // 件数に使わないクローズ済みまで毎回取りに行ってしまう。
@@ -394,12 +405,17 @@ export function IssueDeckShell({
   // 「ブランチとPRの流れ」（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
+  // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
+  // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
+  // しているのは、取得1回のコストが「リポジトリ数 + draft以外のopen PR数」だから。
+  const autoRefreshPullRequests = isPullRequestPaneActive && filters.prview === "completed";
   const openPullRequests = usePullRequests(
     isFlowPaneActive
       ? "all"
       : isPullRequestPaneActive
         ? scopeForPullRequestView(filters.prview)
         : "open",
+    autoRefreshPullRequests,
   );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
   // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
@@ -639,7 +655,7 @@ export function IssueDeckShell({
           issues={issues}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-          onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+          onOpenSettings={() => setSettingsDialogOpen(true)}
         />
 
         <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -753,7 +769,11 @@ export function IssueDeckShell({
                   {mobileScreen.kind === "settings" && (
                     <MobileSettingsScreen
                       currentUser={currentUser}
-                      onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+                      autoRetryLimit={autoRetryLimit}
+                      claudeModel={claudeModel}
+                      claudeModelAssist={claudeModelAssist}
+                      dispatchConcurrency={dispatchConcurrency}
+                      onUpdated={handleAppSettingsUpdated}
                     />
                   )}
 
@@ -975,19 +995,15 @@ export function IssueDeckShell({
           }}
           onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
         />
-        <AppSettingsDialog
-          open={appSettingsDialogOpen}
+        <SettingsDialog
+          open={settingsDialogOpen}
+          onOpenChange={setSettingsDialogOpen}
+          currentUser={currentUser}
           autoRetryLimit={autoRetryLimit}
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
           dispatchConcurrency={dispatchConcurrency}
-          onOpenChange={setAppSettingsDialogOpen}
-          onUpdated={(next) => {
-            setAutoRetryLimit(next.autoRetryLimit);
-            setClaudeModel(next.claudeModel);
-            setClaudeModelAssist(next.claudeModelAssist);
-            setDispatchConcurrency(next.dispatchConcurrency);
-          }}
+          onUpdated={handleAppSettingsUpdated}
         />
         <EditIssueDialog
           open={editingIssue !== null}

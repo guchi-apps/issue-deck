@@ -17,6 +17,11 @@ export function releaseErrorMessage(
   if (errorCode === "github_reauth_required") {
     return "GitHub連携が必要です。再ログインしてください。";
   }
+  // リリース用workflowを持たないリポジトリ（#1538）。GitHubの生の404本文を出しても
+  // 何が足りないのか読み取れないため、必要なファイル名まで含めて言い切る。
+  if (errorCode === "release_workflow_missing") {
+    return "このリポジトリにはリリース用workflow（release-develop-to-main.yml）がありません。";
+  }
   if (errorCode === "github_api_error" && message) {
     return message;
   }
