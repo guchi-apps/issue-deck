@@ -146,7 +146,10 @@ function TaskCheckbox({
 
 const components: Components = {
   a: (props) => <MarkdownLink {...props} />,
-  img: (props) => <MarkdownImage {...props} />,
+  // `node`を捨てているのは、react-markdownがhastのノードも渡してくるため。そのままDOMへ
+  // 流すと`node="[object Object]"`という無効な属性になる（#1499）。MarkdownImageは残りの
+  // propsを`<img>`へ流すので、ここで落とす必要がある。
+  img: ({ node, ...props }) => <MarkdownImage {...props} />,
   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
   ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
@@ -155,7 +158,8 @@ const components: Components = {
       {children}
     </blockquote>
   ),
-  code: ({ className, children, ...props }) => (
+  // `img`と同じく`node`を捨てる（#1499）。
+  code: ({ node, className, children, ...props }) => (
     <code {...props} className={cn("rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem]", className)}>
       {children}
     </code>
