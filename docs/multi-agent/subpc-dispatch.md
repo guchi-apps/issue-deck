@@ -617,6 +617,32 @@ pollerが取りに行かないだけなので、画面には**「順番待ち」
 既にセッションが立っていた場合に二重実行になる。`timeout`・`failed`を理由付きで画面に出すまでが
 このキューの責務で、Actionsへ回すかどうかは人が判断する。
 
+### 起動ジョブは落とす前にセッションを見る（#1620）
+
+**報告が届かなかったことは、起動できなかったことを意味しない。** pollerの`report_job`は報告に
+失敗しても最大3回で諦める（`REPORT_RETRY_ATTEMPTS`）ため、tmuxセッションは立っているのに
+`succeeded`だけが届かないジョブができる。#1620では`curl: (28) Connection timed out`が1回起きた
+だけで、10分後に「起動処理からの応答が途絶えました」としてタイムアウトし、**同じIssueが実行
+キューの「実行中」（セッション一覧）と「直近の失敗」に同時に並んだ**。
+
+そのため`expireStaleDispatchJobs()`は、起動ジョブ（`SESSION_LAUNCH_JOB_KINDS`の`CLAIMED`・
+`RUNNING`）を落とす前に、同じホスト・リポジトリ・Issue番号の`ALIVE`なセッションを探す
+（`findSessionsForStaleLaunchJobs`）。見つかれば`TIMEOUT`ではなく`SUCCEEDED`として畳み、
+報告に入っていたはずのtmuxセッション名を補う。
+
+- **探すのは報告が新しいセッションだけ**（`lastReportedAt`がホストの生存判定と同じ5分の窓の内側）。
+  pollerごと落ちていれば`ALIVE`の行はそのまま古びて残るため、古い報告で「起動できていた」と
+  決めると、本当に落ちた起動を成功として隠すことになる
+- **制御ジョブは救済しない。** あちらはtmuxを1回叩いて終わるので、セッションが動いていることは
+  `C-c`が届いた証拠にならない
+- 表示側（`summarizeDispatchQueue`）には同じ判定を置かない。2か所に持つと片方が緩んだ時点で
+  そこが穴になる（[gates.md](gates.md)と同じ考え方）
+
+**残っている穴**: pollerは起動中にheartbeatを送らない（`report_job running`は起動の直前に1回だけ）。
+pollerの起動の上限は15分（`DISPATCH_LAUNCH_TIMEOUT_SECONDS`）なのに対しissue-deck側は10分
+（`DISPATCH_HEARTBEAT_TIMEOUT_MS`）で見限るため、10分以上かかる起動はセッションが立つ前に
+タイムアウトし、この救済も効かない。実測は数十秒〜数分（#1177）なので現状は表に出ていない。
+
 ## 重複起動の防止（4層）
 
 | 層 | 仕組み | 何を防ぐか |
