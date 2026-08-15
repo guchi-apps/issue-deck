@@ -438,21 +438,22 @@ pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッション
 判定の中身と、そもそもなぜ孤児が生まれるのかは
 [開発サーバーは終了時に止め、残った分は回収する](local-quick-start.md#開発サーバーは終了時に止め残った分は回収する)を参照。
 
-### 孤児の定期掃除だけはpollerの外に置く（#1525）
+### 孤児の在庫はPIDファイルだけでは足りない（#1525）
 
-上の回収は**pollerの1巡に相乗りしているぶん、pollerごと止まると一緒に止まる**。入口が
-`.dev-servers/issue-<番号>.pid`だけなので、PIDファイルが残らなかった孤児（SIGKILL・ホストの
-強制再起動・worktreeごと削除）も取りこぼす。実際に2026-08-15、孤児9本が約5〜6GBを占有して
-ホストがOOMに至った（#1523）。
+上の回収の**在庫は`.dev-servers/issue-<番号>.pid`だけ**で、これを書くのは
+`scripts/run-issue-session.sh`しかない。実装エージェントが案内どおり手で起こし直した2本目は
+PIDファイルにもログにも載らず、**存在自体が見えないまま残り続ける**。2026-08-15にはこの
+取りこぼしが積み上がり、ホストがOOMでSSHごと応答不能になった（#1523）。
 
-そこで`scripts/sweep-orphan-dev-servers.sh`を**独立したsystemd timer**（既定1時間ごと・
-`deploy/subpc/issue-deck-dev-server-sweep.timer`）から呼ぶ。入口は`ss -tlnp`で、**実際にポートを
-掴んでいるプロセス**から入るためPIDファイルに依存しない。
+そこで`reap-dev-servers.sh`に`/proc`の走査を足し、**動いているプロセスそのものから入る経路**を
+1つ増やした。**systemd timerは新設していない。** 問題は掃除の周期ではなく在庫の取り方だったので、
+周期を足しても同じ役が2つになるだけになる（[関門と計器](gates.md)「計器」）。猶予は
+`DEV_SERVER_ORPHAN_GRACE_MINUTES`（既定30・0で無効）。判定の中身は
+[PIDファイルに載らない孤児](local-quick-start.md#pidファイルに載らない孤児をprocの走査で拾う1525)を参照。
 
-**ここは常駐プロセスを増やさない原則の例外にあたる**が、増えるのは常駐ではなく1時間に1度・
-数百ミリ秒で終わるoneshotで、かつ**pollerが落ちている場合を拾うことがこの段の存在意義**なので、
-pollerに相乗りさせては目的を果たせない。猶予は`DEV_SERVER_ORPHAN_GRACE_MINUTES`（既定30・0で無効）。
-判定の中身は[定期掃除](local-quick-start.md#定期掃除scriptssweep-orphan-dev-serverssh1525)を参照。
+**コマンドラインの部分一致でプロセスを探さない。** `claude`はプロンプト全文をargvに持つため、
+`ps -eo pid,args | grep next-server`はIssue本文にその語がある担当セッション自身に当たる
+（#1523で実際に踏んだ）。`/proc/<pid>/cmdline`をNUL区切りで読み、argvの位置で判定する。
 
 **`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
 試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
@@ -1006,13 +1007,7 @@ cp ~/apps/issue-deck/deploy/subpc/issue-deck-dispatch-poller.service ~/.config/s
 systemctl --user daemon-reload
 systemctl --user enable --now issue-deck-dispatch-poller.service
 
-# 4. 孤児の開発サーバーの定期掃除（#1525。pollerとは独立した経路なので別に登録する）
-cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.service ~/.config/systemd/user/
-cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.timer ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now issue-deck-dev-server-sweep.timer
-
-# 5. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
+# 4. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -1030,7 +1025,6 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | 見たいもの | 見る場所 |
 |---|---|
 | pollerが何をしたか | `journalctl --user -u issue-deck-dispatch-poller -n 50` |
-| 孤児の開発サーバーを掃除したか | `journalctl -t issue-deck-dev-server-sweep -n 50`（#1525。`logger`で残すのでunitを問わず追える） |
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
 | 進捗（Project Status）が動かない理由 | 同じjournal。pollerは起動時に鍵の有無を1度だけ確かめ、無ければ警告を出す（#1236）。個々の起動でスキップした場合はランチャーの出力に理由が出る |
