@@ -46,14 +46,14 @@ Claude Codeは動き続けるし（skillの執筆自体がメインPCのObsidian
 | 方式 | 採らなかった理由 |
 |---|---|
 | `guchi-apps/docs`（`~/apps/_docs`）に相乗り | あそこは複数アプリのエージェントが「共有知識」として読む場所。個人設定が混ざると、エージェントがどれを共有知識として扱うか判断できなくなる |
-| `guchi-apps/subpc-setup`に相乗り | サブPC固有の構成管理であり、かつ「公開/共有される可能性」を前提に作られている。両機共通の個人ルールの置き場所として役割が合わない |
+| `guchi-apps/subpc`に相乗り | サブPC固有の構成管理であり、かつ「公開/共有される可能性」を前提に作られている。両機共通の個人ルールの置き場所として役割が合わない |
 | `chezmoi`等のdotfiles管理ツール | 同期対象が2つだけなのに、テンプレート・状態管理という新しい概念が増える。必要になってから移行しても遅くない |
 
 ### 同期対象に含めないもの
 
 `~/.claude/.credentials.json`（認証情報）・`settings.json`（テーマや通知など機体ごとに
 違ってよいもの）・`projects/`・`history.jsonl`・`sessions/`（セッションの実行時状態）。
-`subpc-setup`の`setup.sh`が認証情報を扱わない方針なのと揃えている。
+`subpc`の`setup.sh`が認証情報を扱わない方針なのと揃えている。
 
 ## メモリを同期せず「昇格」させる
 
@@ -188,7 +188,7 @@ cd ~/apps/claude-config
 `install.sh`の実行はどちらのマシンでもユーザー自身が行う。手順をスクリプト1本にまとめて
 あるのはこのため。
 
-サブPC側の手順は`guchi-apps/subpc-setup`のREADMEにも記載している。
+サブPC側の手順は`guchi-apps/subpc`のREADMEにも記載している。
 
 ### セットアップが済んでいないことの検知
 
@@ -199,9 +199,24 @@ cd ~/apps/claude-config
 実際に#1190では、リポジトリの作成pushとサブPCへの`install.sh`適用が残ったまま完了扱いに
 なり、メインPC側の適用（#1252）が`git clone`の時点で着手不能になっていた。
 
+## サブPCの構成そのものの反映（#1616）
+
+ここで扱っているのは個人設定（`~/.claude/`）と共有知識（`~/apps/_docs`）の同期で、
+**サブPCのOS側の構成（`/etc`・apt・systemd・`~/.bashrc`）は別の経路で反映される。**
+
+`guchi-apps/subpc`（旧`subpc-setup`）の`main`へマージすると、**サブPC上に常駐する
+セルフホストランナー**が`scripts/setup-apply.sh`を実行して実機へ反映する。VPSのように
+GitHub ActionsからSSHで入る形を採れないのは、サブPCがOSの`sshd`を無効化して
+Tailscale SSHへ一本化しており、公開IPも持たないため（[subpc-dispatch.md](subpc-dispatch.md)の
+「なぜpull型なのか」と同じ制約）。`netplan`のapplyと再起動だけは自動化していない。
+
+**`~/apps/issue-deck`（本体の作業ツリー）はこの経路の対象ではない。** サブPCのpollerと
+起動スクリプトは本体の作業ツリーから動くが、それを`origin/develop`へ追従させる仕組みは
+まだ無い（現状の手当ては#1274の警告と、セッション側だけ同期コピーから読む#1438まで）。
+
 ## 関連
 
 - [ブランチ・worktree運用とエージェントの役割](branching.md) 共有知識層の位置づけ
 - [shared-knowledge.md](../shared-knowledge.md) `~/apps/_docs`（全アプリ共通の共有知識）の設計
 - `guchi-apps/claude-config` 個人設定の実体
-- `guchi-apps/subpc-setup` サブPCの構成管理
+- `guchi-apps/subpc` サブPCの構成管理（`main`へのマージで実機へ自動反映される）

@@ -230,8 +230,10 @@ main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`か�
 
 - `guchi-apps/issue-deck` — 配置済み。ローカルパス参照（`./.github/workflows/reusable-*.yml`）で
   常に最新を使うカナリア
-- `guchi-apps/vps` — `deploy.yml`はあるが`tag`ジョブが無く、リリースタグを作らない。守るものが無い
-- `docs`・`subpc-setup`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
+- `guchi-apps/vps`・`guchi-apps/subpc` — `deploy.yml`はあるが`tag`ジョブが無く、リリースタグを
+  作らない。守るものが無い（`subpc`の`deploy.yml`はサブPC上のセルフホストランナーで動く。
+  guchi-apps/issue-deck#1616）
+- `docs`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
   `sensor_260218`・`wifi-speed` — `deploy.yml`を持たない
 
 **新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
