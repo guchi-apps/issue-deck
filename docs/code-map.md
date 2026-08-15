@@ -20,7 +20,7 @@ src/
     dashboard/      メイン画面
     github/setup    GitHub Appインストール後の受け口
   components/
-    dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用）
+    dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
     ui/             shadcn/uiの生成物。手で書き換えない
   hooks/            use-* のクライアントフック。データ取得・更新はここに集約する
   lib/
@@ -46,6 +46,15 @@ deploy/             PM2の ecosystem.config.js
   `search-query.ts` などがこの形。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
+  区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
+  PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
+  スマホの設定画面（[`mobile/mobile-settings-screen.tsx`](../src/components/dashboard/mobile/mobile-settings-screen.tsx)）が
+  同じ配列と同じセクションコンポーネントを読む。**片方の画面にだけ項目を足さない。**
+  区分は機能の性質で割っており、**保存を押すまで効かない設定値は「実行設定」、押した瞬間に
+  GitHub Actionsが走る操作は「フリート運用」**へ入れる。混ぜると「保存ボタンがどこまで効くのか
+  分からない」という元の状態に戻る。読み取り系のデータ取得は
+  [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)へ集約する。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
