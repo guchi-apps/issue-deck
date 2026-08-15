@@ -142,3 +142,43 @@ developへは自動マージされない。`23.preview-required`についても�
 を`24.screenshot-required`の有無によらず毎回実行していたが、撮影しないissueでは完全に無駄な
 処理のため、chromiumダウンロード（数分かかる）と同様にstate stepが出力する
 `screenshot_required`が`true`の場合のみ実行するよう変更した（#319）。
+
+## ローカルセッションで撮る（#1468）
+
+`24.screenshot-required`が付いたIssueをローカルセッションで進める場合、上記の
+`scripts/capture-issue-screenshots.sh`は`screenshots`ブランチへのpushまで行ってしまうため、
+承認前の画面確認には重い。`scripts/capture-screenshots.mjs`だけを手元の開発サーバーへ向けて
+呼べばよいが、次の3つで引っかかる。
+
+### 1. CIバイパスは開発サーバー側にもシークレットが要る
+
+`.env.local`の`CI_LOGIN_BYPASS_SECRET`は空で配られている（`.env.local.example`由来）。
+`isCiBypassRequest`はサーバー側の環境変数とCookieの値を突き合わせるため、**撮影スクリプトに
+渡すだけでは足りず、開発サーバー自身が同じ値を持っている必要がある**。
+
+`.env.local`を書き換えずに済ませるなら、環境変数を付けて`next dev`を直接起こす。
+
+```bash
+CI_LOGIN_BYPASS_SECRET=<任意の値> pnpm exec next dev -p 5468 -H 127.0.0.1
+CI_LOGIN_BYPASS_SECRET=<同じ値> node scripts/capture-screenshots.mjs http://127.0.0.1:5468 <出力先> "after:/dashboard?issue=<githubIssueId>#top:desktop"
+```
+
+**`pnpm dev`（`scripts/dev.sh`）ではこの手が効かない。** あちらは`set -a; source .env.local`で
+読み直すため、空の値で上書きされる。`next dev`を直接呼べば、Next.jsは既にプロセス環境にある
+変数を`.env`系のファイルで上書きしないので値が残る。
+
+### 2. Next.js 16は同じディレクトリで2つ目の`next dev`を拒否する
+
+`Another next dev server is already running.`で即座に終了する（ポートを変えても同じ）。
+セッション起動時の開発サーバーを一度止めてから起こし、確認が済んだら`pnpm dev`で戻す。
+
+### 3. 画面の状態はDBの行として作る
+
+サブPCのジョブ・セッションの表示（`DispatchJobStatus`・`IssueSessionStatus`）は
+`DispatchJob`・`DispatchSession`・`DispatchHost`の行を見ている。開発DB
+（`app_issue_deck_dev`）は通常空なので、`pnpm db:seed:ci`でダミーのリポジトリ・Issueを入れた
+うえで、確認したい状態に対応する行を自分で作る（生存セッションがあれば「サブPCで開始」は
+押せない状態になる、など）。PC版の詳細は`?issue=<githubIssueId>`で直接開ける（スマホの
+`missue`と同じ識別子）。
+
+**開発DBはworktree間で共有している。** 確認が終わったら投入した行を消して元に戻す。
