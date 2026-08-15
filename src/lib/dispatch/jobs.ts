@@ -9,6 +9,7 @@ import {
   buildDispatchActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
+  describeCrossRepoQuestionRejection,
   describeDispatchTimeout,
   describeSessionControlRejection,
   DISPATCH_CLAIM_TIMEOUT_MS,
@@ -17,9 +18,11 @@ import {
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostRepositories,
+  resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
   resolveSessionControlRejection,
   SESSION_CONTROL_JOB_KINDS,
+  type CrossRepoQuestionRejection,
   type DispatchEnqueueRejection,
   type DispatchHostView,
   type DispatchJobKind,
@@ -75,6 +78,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     screenshotCapable: host.screenshotCapable,
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
+    crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
   };
@@ -219,6 +223,95 @@ export async function enqueueDispatchJob(params: {
   } catch {
     // activeKeyのunique制約違反＝同じIssueの未完了ジョブが既にある。二重クリックの競合を
     // 含めてここで確実に止まる（アプリ側の存在チェックだけでは競合をすり抜ける）
+    return reject("already_queued");
+  }
+}
+
+export type EnqueueCrossRepoQuestionJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: CrossRepoQuestionRejection; message: string };
+
+/**
+ * 複数リポジトリ横断の質問セッション（#1454）を積む。
+ *
+ * **起動ジョブ（`enqueueDispatchJob`）とは判定が違う。** 記録先リポジトリがサブPCに
+ * cloneされているかは問わない（worktreeを作らず、記録先へは`gh issue comment`で書くだけ）。
+ * 代わりに「参照できるリポジトリが1件以上あるか」と「pollerが横断質問に対応しているか」を見る。
+ */
+export async function enqueueCrossRepoQuestionJob(params: {
+  /** 質問Issueの置き場所（`question`リポジトリなど）。**参照範囲とは無関係** */
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueCrossRepoQuestionJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: CrossRepoQuestionRejection): EnqueueCrossRepoQuestionJobResult => ({
+    ok: false,
+    rejection,
+    message: describeCrossRepoQuestionRejection(rejection, { hostName: params.hostName }),
+  });
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+
+  // そのIssueで既にセッションが動いていれば積ませない（#1311と同じ層）。判定の材料が
+  // DBの行かビューかの違いだけで、中身は`findBlockingSession`と揃えている
+  const aliveSession = await db.dispatchSession.findFirst({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      state: "ALIVE",
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+  const sessionHost = aliveSession
+    ? aliveSession.host === host?.name
+      ? host
+      : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } })
+    : null;
+  const blockingSession =
+    aliveSession && sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)
+      ? aliveSession
+      : null;
+
+  // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）
+  const rejection = resolveCrossRepoQuestionRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          crossRepoQuestionCapable: host.crossRepoQuestionCapable,
+          repositories: parseDispatchHostRepositories(host.repositories),
+        }
+      : null,
+    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
+    hasActiveJob: false,
+    blockingSession,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "CROSS_REPO_QUESTION",
+        status: "QUEUED",
+        // **実装ジョブとは名前空間を分ける**（`cross_repo_question:owner/repo#番号`）。同じ
+        // 質問Issueへの二重起動だけを止め、実装中のIssueへ質問を積むことは妨げない
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "CROSS_REPO_QUESTION",
+        ),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
     return reject("already_queued");
   }
 }
@@ -372,12 +465,18 @@ export async function claimDispatchJobs(params: {
     claimed.push(...(await claimCandidates(controls, params.hostName, now)));
   }
 
+  // **横断質問（#1454）は起動ジョブと同じ枠で扱う。** tmuxセッションを立てるジョブなので、
+  // 制御ジョブのように枠外へ出すとセッション本数の見積もりが崩れる。対応を申告していない
+  // pollerには配らない（古いpollerは未知の種別として`failed`で返すため、質問が必ず失われる）
+  const launchKinds: DispatchJobKind[] = ["LAUNCH"];
+  if (host?.crossRepoQuestionCapable === true) launchKinds.push("CROSS_REPO_QUESTION");
+
   const running = await db.dispatchJob.count({
     where: {
       targetHost: params.hostName,
       status: { in: ["CLAIMED", "RUNNING"] },
       // 制御ジョブは枠を消費しない（上のコメント）
-      kind: "LAUNCH",
+      kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] },
     },
   });
   const available = Math.min(limit - running, params.maxJobs);
@@ -389,7 +488,7 @@ export async function claimDispatchJobs(params: {
   // 実行側が来ていない段階で配ると質問が必ず失敗として残る。払い出しはStep 3（別Issue）で、
   // poller側の対応申告（`sessionControlCapable`と同じ形）とセットで開ける。
   const candidates = await db.dispatchJob.findMany({
-    where: { targetHost: params.hostName, status: "QUEUED", kind: "LAUNCH" },
+    where: { targetHost: params.hostName, status: "QUEUED", kind: { in: launchKinds } },
     orderBy: { createdAt: "asc" },
     take: available,
   });
@@ -601,6 +700,8 @@ export async function announceDispatchHost(params: {
   sessionControlCapable: boolean | null;
   /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
   instructionCapable: boolean | null;
+  /** 横断質問セッションを起こせるか（#1454）。申告していないpollerでは`null`＝非対応 */
+  crossRepoQuestionCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
    * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
@@ -620,6 +721,7 @@ export async function announceDispatchHost(params: {
     screenshotCapable: params.screenshotCapable,
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
+    crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
     lastSeenAt: now,

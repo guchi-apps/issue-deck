@@ -52,8 +52,13 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
   escalateFailedSession: vi.fn(),
 }));
 
-const { claimDispatchJobs, enqueueDispatchJob, enqueueSessionControlJob, reportDispatchJob } =
-  await import("./jobs");
+const {
+  claimDispatchJobs,
+  enqueueCrossRepoQuestionJob,
+  enqueueDispatchJob,
+  enqueueSessionControlJob,
+  reportDispatchJob,
+} = await import("./jobs");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 const REPOSITORY = "guchi-apps/issue-deck";
@@ -67,6 +72,8 @@ function host(overrides: Record<string, unknown> = {}) {
     // セッションの操作（#1332）に対応したpoller
     sessionControlCapable: true,
     instructionCapable: true,
+    // 横断質問（#1454）に対応したpoller
+    crossRepoQuestionCapable: true,
     maxConcurrency: null,
     ...overrides,
   };
@@ -377,6 +384,76 @@ describe("enqueueSessionControlJob", () => {
  * #1332。制御ジョブは**起動より先に・同時実行数の枠外で**払い出す。tmuxを1回叩くだけで
  * 重くないうえ、起動待ちの後ろに並ばせると止めたいときほど待たされる。
  */
+/**
+ * #1454。**起動ジョブとは判定が違う。** 記録先リポジトリがサブPCにcloneされている必要は無く
+ * （worktreeを作らず、記録先へは`gh issue comment`で書くだけ）、代わりに参照できるリポジトリが
+ * 1件以上あることとpollerの対応を見る。
+ */
+describe("enqueueCrossRepoQuestionJob", () => {
+  const QUESTION_REPOSITORY = "guchi-apps/question";
+
+  async function enqueueQuestion() {
+    return enqueueCrossRepoQuestionJob({
+      repositoryFullName: QUESTION_REPOSITORY,
+      issueNumber: 12,
+      hostName: "subpc",
+      requestedByUserId: null,
+      now: NOW,
+    });
+  }
+
+  it("記録先がサブPCにcloneされていなくても積める", async () => {
+    // 申告に載っているのはissue-deckだけ＝`question`リポジトリはcloneされていない
+    const result = await enqueueQuestion();
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "CROSS_REPO_QUESTION",
+          repositoryFullName: QUESTION_REPOSITORY,
+          // 実装ジョブとは名前空間を分ける（実装中のIssueへも質問を積めるように）
+          activeKey: "cross_repo_question:guchi-apps/question#12",
+        }),
+      }),
+    );
+  });
+
+  it("横断質問に対応していないpollerへは積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ crossRepoQuestionCapable: null }));
+    const result = await enqueueQuestion();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("cross_repo_question_unsupported");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("参照できるリポジトリが1つも無ければ積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ repositories: "[]" }));
+    const result = await enqueueQuestion();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("no_runnable_repositories");
+  });
+
+  it("同じ質問Issueのセッションが動いていれば積まない", async () => {
+    dispatchSessionFindFirst.mockResolvedValue(
+      aliveSession({ repositoryFullName: QUESTION_REPOSITORY, issueNumber: 12 }),
+    );
+    const result = await enqueueQuestion();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("session_alive");
+  });
+
+  it("申告が届いていないホストには積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(null);
+    const result = await enqueueQuestion();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("host_unknown");
+  });
+});
+
 describe("claimDispatchJobs の制御ジョブ", () => {
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -454,7 +531,16 @@ describe("claimDispatchJobs の制御ジョブ", () => {
 
     const kinds = claimedKinds();
     expect(kinds.length).toBeGreaterThan(0);
-    expect(kinds).toEqual(kinds.map(() => "LAUNCH"));
+    // 引きに行くのはセッションを立てる種別（#1454で横断質問が加わった）だけで、制御ジョブは無い
+    for (const kind of kinds) {
+      const list =
+        typeof kind === "object" && kind !== null && "in" in kind
+          ? (kind as { in: string[] }).in
+          : [kind];
+      expect(list).not.toContain("INTERRUPT");
+      expect(list).not.toContain("KILL");
+      expect(list).not.toContain("INSTRUCTION");
+    }
   });
 
   // #1012。停止・終了は固定の`C-c`だけを送るのに対し、追加指示は内容のある文字列を送る。
@@ -478,12 +564,42 @@ describe("claimDispatchJobs の制御ジョブ", () => {
   });
 
   // 枠を消費させると、停止を1回押しただけで次の起動が詰まる
-  it("枠の計算に数えるのは起動ジョブだけ", async () => {
+  // 数えるのはセッションを立てるジョブ（起動・横断質問。#1454）だけで、制御ジョブは枠を消費しない
+  it("枠の計算に数えるのはセッションを立てるジョブだけ", async () => {
     dispatchJobFindMany.mockResolvedValue([]);
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
 
     expect(dispatchJobCount).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ kind: "LAUNCH" }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({ kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] } }),
+      }),
+    );
+  });
+
+  // #1454。**申告したホストにだけ配る。** 古いpollerは未知の種別として失敗で返すため、
+  // 配ると質問が必ず失われる
+  it("横断質問は申告したホストにだけ払い出す", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(dispatchJobFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "QUEUED",
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] },
+        }),
+      }),
+    );
+
+    vi.clearAllMocks();
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchJobCount.mockResolvedValue(0);
+    appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
+    dispatchHostFindUnique.mockResolvedValue(host({ crossRepoQuestionCapable: null }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(dispatchJobFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "QUEUED", kind: { in: ["LAUNCH"] } }),
+      }),
     );
   });
 

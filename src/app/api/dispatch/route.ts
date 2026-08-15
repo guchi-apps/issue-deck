@@ -9,6 +9,7 @@ import {
   parseSessionInstruction,
 } from "@/lib/dispatch/dispatch-job";
 import {
+  enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
   listDispatchState,
@@ -51,6 +52,8 @@ export async function GET() {
  * `instruction`のときは本文（`instruction`）が要り、`parseSessionInstruction`を通らなければ400。
  * `question`（#1294）は種別としては存在するが、**まだここでは受け付けない**（実行するpollerが
  * 無い段階で積めるようにすると、`QUEUED`のまま誰も取りに来ないジョブが残る。開けるのはStep 3）。
+ * `cross_repo_question`（#1454）は受け付ける。こちらはpoller側の実行（`start-cross-repo-question.sh`）と
+ * 対応の申告（`crossRepoQuestion`）が揃っており、申告のあるホストにしか払い出さない。
  */
 export async function POST(request: NextRequest) {
   const guarded = previewModeGuard();
@@ -73,6 +76,29 @@ export async function POST(request: NextRequest) {
   // 受け口をここで開けると、実行するpollerが無いまま`QUEUED`のジョブだけが積まれる
   if (kind === "QUESTION") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // 横断質問（#1454）。**起動ジョブとは判定が違う**（記録先リポジトリがサブPCにcloneされて
+  // いる必要は無く、代わりに参照できるリポジトリが1件以上あることとpollerの対応を見る）ため、
+  // `enqueueDispatchJob`とは別の関数へ振る
+  if (kind === "CROSS_REPO_QUESTION") {
+    const questionResult = await enqueueCrossRepoQuestionJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      requestedByUserId: userId,
+    });
+    if (!questionResult.ok) {
+      const status = questionResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: questionResult.rejection, message: questionResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: questionResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   if (isSessionControlJobKind(kind)) {

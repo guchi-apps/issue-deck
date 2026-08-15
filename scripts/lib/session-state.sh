@@ -83,12 +83,18 @@ session_state_write_file() {
 }
 
 # 起動時の記述子を書く。`reapable`が1のセッションだけが自動回収の対象になる。
+#
+# `kind`（第6引数・省略時は`implementation`）は回収の判定を分けるためのもの（#1454）。
+# 横断質問セッション（`question`）はworktreeを持たないため、実装セッション向けの
+# 「worktreeがcleanでpush済み」という条件を当てるとどれにも当たらず、永久に残ってしまう。
+# **古い記述子には`kind`が無い**（読む側は空を`implementation`として扱う）。
 session_state_write_descriptor() {
   local session="$1" worktree="$2" repository="$3" issue_number="$4" reapable="$5"
+  local kind="${6:-implementation}"
   local file content
   file="$(session_state_descriptor_file "$session")" || return 1
-  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nstartedAt=%s\n' \
-    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$(date +%s)"
+  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nkind=%s\nstartedAt=%s\n' \
+    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$kind" "$(date +%s)"
   session_state_write_file "$file" "$content"
 }
 

@@ -130,6 +130,12 @@ export function useDispatchState(enabled: boolean) {
       repositoryFullName: string;
       issueNumber: number;
       hostName: string;
+      /**
+       * 起動の種別。省略時は実装セッション（`LAUNCH`）。横断質問（#1454）だけが
+       * `cross_repo_question`を渡す。**セッションを立てる種別に限る**（停止・終了・追加指示は
+       * `sendSessionControl`が扱う）
+       */
+      kind?: "cross_repo_question";
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);
@@ -141,6 +147,7 @@ export function useDispatchState(enabled: boolean) {
             repository: params.repositoryFullName,
             issue: params.issueNumber,
             host: params.hostName,
+            kind: params.kind,
           }),
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));

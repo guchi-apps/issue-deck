@@ -55,6 +55,7 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
@@ -717,6 +718,8 @@ export function MobileIssueDetail({
         {issueSession && (
           <IssueSessionStatus session={issueSession} dispatch={dispatch} align="start" />
         )}
+        {/* 横断質問（#1454）を積んでからセッションが立つまでの間だけ出る */}
+        <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="start" />
         <div className="flex flex-wrap items-center gap-2">
           {qaAnswerPending && (
             <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">

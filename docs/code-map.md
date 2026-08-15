@@ -250,6 +250,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
+  **複数リポジトリ横断の質問もこのキューで流す**（#1454。`kind`は`CROSS_REPO_QUESTION`）。
+  Actionsは1リポジトリしかチェックアウトしないため横断できず、サブPC限定の導線になる。
+  質問Issueは記録先リポジトリ（既定は名前が`question`のもの）に普通のIssueとして作り、
+  ランチャー（`scripts/start-cross-repo-question.sh`）は**worktreeを作らず**、実行できる
+  全リポジトリを`--add-dir`で読み取り用に渡す（書き込み系ツールは`--disallowedTools`で封じる）。
+  回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
+  そのまま働く。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
   **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
   受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
