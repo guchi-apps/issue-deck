@@ -59,11 +59,22 @@ session_state_reason_file() {
 #
 # #1342では計画の提示（`ExitPlanMode`）だけが印を付けていたためファイル名も`.plan`だったが、
 # #1417で入力待ち（`Notification`）も同じ印を使うようになったため`.check-user`へ改めた。
-# 改名をまたいだセッションは印を1度失う（＝自分で付けた`00.check-user`を外せなくなる）が、
-# 画面の承認・修正ボタンからも外せるため実害は無いと判断している。
 session_state_check_user_file() {
   session_state_name_ok "${1:-}" || return 1
   printf '%s/%s.check-user' "$(session_state_dir)" "$1"
+}
+
+# 旧名（#1417より前）の印。**読むときだけ見る**（新しく書くのは`.check-user`だけ）。
+#
+# 改名をまたいだセッションが印を1度失うのは#1417の時点では実害無しと判断していたが、
+# **1つのセッションの中で新旧のスクリプトが混ざる経路ができたため、読む側だけ互換を持たせる**
+# （#1456）。`.claude/settings.json`から呼ぶ`PostToolUse`はworktreeの新しいスクリプトを走らせる
+# 一方、`Notification`・`ExitPlanMode`のフックは本体の作業ツリー（古いことがある）のものが
+# 走る。印を`.plan`で書かれたセッションで`.check-user`しか見ないと、**承認しても
+# `00.check-user`が外れない**という、まさに直したい症状がそのまま残る。
+session_state_legacy_check_user_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.plan' "$(session_state_dir)" "$1"
 }
 
 # 書きかけを読まれないよう、一時ファイルへ書いてから置き換える。
@@ -129,17 +140,24 @@ session_state_mark_check_user_pending() {
 }
 
 # 自分で付けた `00.check-user` の印があるか。**あるときだけラベルを外す**。
+# 旧名（`.plan`）も見る（#1456。`session_state_legacy_check_user_file`のコメント参照）。
 session_state_check_user_pending() {
-  local session="$1" file
+  local session="$1" file legacy
   file="$(session_state_check_user_file "$session")" || return 1
-  [[ -f "$file" ]]
+  legacy="$(session_state_legacy_check_user_file "$session")" || return 1
+  [[ -f "$file" || -f "$legacy" ]]
 }
 
 # 印を消す（ラベルを外し終えたとき）。無ければ何もしない。
+# **新旧どちらの名前も消す。** 片方だけ残すと、次の`Stop`が毎回ラベルを外しに行く。
 session_state_clear_check_user_pending() {
   local session="$1" file
-  file="$(session_state_check_user_file "$session")" || return 1
-  rm -f "$file" 2>/dev/null || true
+  for file in \
+    "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
+    "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
+    [[ -n "$file" ]] || continue
+    rm -f "$file" 2>/dev/null || true
+  done
   return 0
 }
 
@@ -172,7 +190,8 @@ session_state_remove() {
     "$(session_state_descriptor_file "$session" 2>/dev/null || true)" \
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
-    "$(session_state_check_user_file "$session" 2>/dev/null || true)"; do
+    "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
+    "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
   done
