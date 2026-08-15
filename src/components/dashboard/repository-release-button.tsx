@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { useNow } from "@/hooks/use-now";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { requestRelease } from "@/lib/release-request";
@@ -56,7 +56,6 @@ export function RepositoryReleaseButton({
   onTriggered,
 }: RepositoryReleaseButtonProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [successOpen, setSuccessOpen] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
@@ -75,8 +74,10 @@ export function RepositoryReleaseButton({
     try {
       await requestRelease(repositoryFullName, bumpKind ?? undefined);
       setTriggeredAt(new Date().toISOString());
+      // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前は「リリースを起動しました」の
+      // ダイアログを続けて出していたが、閉じた先のボタンが「リリース起動中…」へ変わることで
+      // 起動できたことは分かるため、OKを押させるだけの一手間だった。
       setConfirmOpen(false);
-      setSuccessOpen(true);
       onTriggered();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -149,24 +150,6 @@ export function RepositoryReleaseButton({
               }}
             >
               {isTriggering ? "起動中..." : "起動する"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={successOpen} onOpenChange={setSuccessOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>リリースを起動しました</AlertDialogTitle>
-            <AlertDialogDescription>
-              バンプPRが作られるとこの画面に現れます。それまでボタンは「リリース起動中…」のまま
-              押せません。CIの進行やmainへのマージ待ちは、この画面と（詳しくは）ヘッダーの
-              リリースボタンで追えます。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction className={buttonVariants({ variant: "default" })}>
-              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
