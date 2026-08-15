@@ -191,7 +191,7 @@ dev_server_tree_root() {
     parent="$(ps -o ppid= -p "$root" 2>/dev/null | tr -d '[:space:]')"
     [[ "$parent" =~ ^[1-9][0-9]*$ ]] || break
     [[ "$parent" -gt 1 ]] || break
-    cwd="$(readlink "/proc/$parent/cwd" 2>/dev/null || true)"
+    cwd="$(dev_server_cwd_of "$parent" || true)"
     [[ "$cwd" == "$worktree_dir" ]] || break
     dev_server_process_looks_like_dev "$parent" || break
     root="$parent"
@@ -199,7 +199,7 @@ dev_server_tree_root() {
 
   pgid="$(ps -o pgid= -p "$root" 2>/dev/null | tr -d '[:space:]')"
   if [[ "$pgid" =~ ^[1-9][0-9]*$ ]] && [[ "$pgid" != "$root" ]]; then
-    cwd="$(readlink "/proc/$pgid/cwd" 2>/dev/null || true)"
+    cwd="$(dev_server_cwd_of "$pgid" || true)"
     if [[ "$cwd" == "$worktree_dir" ]] && dev_server_process_looks_like_dev "$pgid"; then
       root="$pgid"
     fi
@@ -284,7 +284,11 @@ dev_server_stop_by_port() {
 
   while read -r pid; do
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
-    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+    # `dev_server_cwd_of`を使うのは、**worktreeを消した後にも引けるようにする**ため（#1525）。
+    # 消えたディレクトリを指すcwdは`readlink`が` (deleted)`を付けて返すので、生のまま比べると
+    # 一致しない。cleanup-worktrees.shは消す前に呼ぶが、前回の削除で取りこぼした分をここで
+    # 拾えるかどうかが変わる。
+    cwd="$(dev_server_cwd_of "$pid" || true)"
     [[ "$cwd" == "$worktree_dir" ]] || continue
     root="$(dev_server_tree_root "$pid" "$worktree_dir")"
     # 同じ木を二度撃たない（1つのポートに複数のPIDがぶら下がることがある）
