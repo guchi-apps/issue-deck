@@ -130,11 +130,19 @@ dispatch_env_value() {
   (source "$env_file" >/dev/null 2>&1; printf '%s' "${!name:-}")
 }
 
-# issue-deckへ報告するときの`owner/repo`。remoteのURLから導く（取れなければ空を返し、
-# 呼び出し側が「報告しない」を選ぶ）。
+# issue-deckへ報告するときの`owner/repo`。remoteのURLから導く。
+#
+# **cwdがgitリポジトリでない場合は呼び出し元が渡した`ISSUE_DECK_REPO_SLUG`を使う**（#1454）。
+# 横断質問セッションのcwdはどのリポジトリでもない作業ディレクトリなので、remoteからは何も
+# 取れない。フォールバックが無いと呼び出し側が一律に「報告しない」を選び、受付コメント
+# （#1119）が質問Issueへ1件も出ないまま黙って終わっていた（#1530）。
+#
+# どちらも取れなければ空を返し、呼び出し側が「報告しない」を選ぶ。
 current_repo_slug() {
-  git config --get remote.origin.url 2>/dev/null |
-    sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true
+  local slug
+  slug="$(git config --get remote.origin.url 2>/dev/null |
+    sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+  printf '%s' "${slug:-${ISSUE_DECK_REPO_SLUG:-}}"
 }
 
 # 報告に載せるホスト名。**pollerの決め方（`DISPATCH_HOST_NAME`→`hostname -s`）と揃える。**
@@ -403,11 +411,12 @@ fi
 
 # 通知（#1219）用に owner/repo を取り出す。IssueのURLを組み立てるためだけに使うので、
 # 取れなくても（リモート未設定・SSH形式でない等）通知からリンクが消えるだけにする。
-REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
-# cwdがgitリポジトリでない場合（横断質問セッション。#1454）は呼び出し元が渡した値を使う。
+#
 # セッションの状態報告（#1217）とIssueへの報告はこの値でIssueを特定するため、空だと
-# セッションが画面へ出ない。
-REPO_SLUG="${REPO_SLUG:-${ISSUE_DECK_REPO_SLUG:-}}"
+# セッションが画面へ出ない。**導出は`current_repo_slug`に一本化する。** ここだけ同じ式を
+# 写して持っていたため、#1454でcwdがgitリポジトリでない経路を足したときにフォールバックが
+# ここにしか入らず、報告用の2つの関数が取り残された（#1530）。
+REPO_SLUG="$(current_repo_slug)"
 
 # セッションの回収（#1256）用の記述子。回収スクリプトはtmuxのセッション名しか手掛かりを
 # 持たないため、worktreeの場所と対応Issueをここで残しておく。

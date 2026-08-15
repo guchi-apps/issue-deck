@@ -332,6 +332,20 @@ cwd単位（`~/.claude/projects/<cwd>/`）に置かれ、`/resume`の一覧に�
 種別は状態ファイルの記述子（`kind=question`）が持つ（[scripts/lib/session-state.sh](../../scripts/lib/session-state.sh)）。
 **古い記述子には`kind`が無い**ので、読む側は空を実装セッションとして扱う。
 
+#### issue-deckへ報告する`owner/repo`は`current_repo_slug()`から取る（#1530）
+
+cwdがどのリポジトリでもないため、**`git remote`からは`owner/repo`が取れない。** 記録先は
+起動側（[scripts/start-cross-repo-question.sh](../../scripts/start-cross-repo-question.sh)）が
+`ISSUE_DECK_REPO_SLUG`で渡しており、
+[scripts/run-issue-session.sh](../../scripts/run-issue-session.sh)の`current_repo_slug()`が
+remote→この環境変数の順で解決する。**issue-deckへ報告する処理を足すときは、`git remote`から
+直に導かずこの関数を使う。**
+
+#1530はこれを踏んだもので、受付コメント（#1119）とプレビューURLの報告が`git remote`から
+直に導いていたため、質問セッションでは`owner/repo`が空になり**エラーも出さずに報告を
+やめていた**（`guchi-apps/question`の受付コメントが1件も無かった）。報告系は「取れなければ
+報告しない」で失敗を握り潰す作りなので、フォールバックの取りこぼしは黙って消える。
+
 #### 回答は`<!-- issue-deck-qa-answer -->`付きのコメントで返す
 
 既存の`QA_ANSWER_MARKER`をそのまま使うため、画面の「回答待ち」表示とワンボタンクローズ
