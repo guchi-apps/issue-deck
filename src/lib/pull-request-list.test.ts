@@ -8,6 +8,7 @@ import {
   groupPullRequestsByRepository,
   canMergeFromDeck,
   mergeWarnings,
+  requiresUserMerge,
   scopeForPullRequestView,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
@@ -31,6 +32,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     kind: "issue",
     linkedIssueNumber: 1,
     autoMergeEnabled: false,
+    linkedIssueCheckUser: false,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -343,5 +345,67 @@ describe("mergeWarnings", () => {
       "CIがまだ実行中です。",
       "Auto-mergeが有効です。待てばCI通過後に自動でマージされます。",
     ]);
+  });
+});
+
+describe("requiresUserMerge", () => {
+  it("対応Issueに00.check-userが付いたIssue対応PRはユーザーのマージが必要", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true }))).toBe(true);
+  });
+
+  it("対応Issueに00.check-userが無ければ出さない（判定がまだ確定していない）", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: false }))).toBe(false);
+  });
+
+  it("develop→mainのリリースPRは常にユーザーのマージが必要", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({
+          kind: "release",
+          baseRef: "main",
+          headRef: "develop",
+          linkedIssueNumber: null,
+          linkedIssueCheckUser: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("バージョンバンプPRはAuto-mergeでdevelopへ入るため出さない", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({ kind: "version-bump", headRef: "release/v2.19.0", linkedIssueCheckUser: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("規約から外れたブランチのPRは判定材料が無いため出さない", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({ kind: "other", headRef: "feature/foo", linkedIssueCheckUser: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("Auto-merge有効なPRは待てば入るため出さない", () => {
+    expect(
+      requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, autoMergeEnabled: true })),
+    ).toBe(false);
+  });
+
+  it("ドラフト・クローズ済み・マージ済みには出さない", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, draft: true }))).toBe(false);
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, state: "closed" }))).toBe(
+      false,
+    );
+    expect(
+      requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, state: "closed", merged: true })),
+    ).toBe(false);
+  });
+
+  it("CIの状態によらず出す（自動でマージされないことはCIの結果と無関係）", () => {
+    for (const ciState of ["pending", "success", "failure", "unknown"] as const) {
+      expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, ciState }))).toBe(true);
+    }
   });
 });

@@ -47,7 +47,18 @@ describe("toPullRequestSummary", () => {
       linkedIssueNumber: 1260,
       autoMergeEnabled: false,
       ciState: "success",
+      // 呼び出し側が渡さなければ「対応Issueに00.check-userは付いていない」扱い（#1469）
+      linkedIssueCheckUser: false,
     });
+  });
+
+  it("対応Issueの00.check-userを呼び出し側から受け取る（#1469）", () => {
+    const summary = toPullRequestSummary(apiPullRequest(), repository, {
+      merged: false,
+      ciState: "success",
+      linkedIssueCheckUser: true,
+    });
+    expect(summary.linkedIssueCheckUser).toBe(true);
   });
 
   it("closedなPRとマージ済みを区別する", () => {

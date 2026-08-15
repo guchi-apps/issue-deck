@@ -41,6 +41,17 @@ export type PullRequestSummary = {
   linkedIssueNumber: number | null;
   /** GitHubのAuto-mergeが有効か（＝CI通過後に自動でマージされる見込みか） */
   autoMergeEnabled: boolean;
+  /**
+   * 対応Issue（`linkedIssueNumber`）に`00.check-user`が付いているか。対応Issueを特定できない
+   * 場合・DBキャッシュに無い場合は`false`。
+   *
+   * develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
+   * `claude-review-develop.yml`（`risk-check` → `auto-merge`）と、その経路を持たないリポジトリ
+   * 向けの保険（`reusable-issue-labels.yml`の`develop-pr-opened`。#1470）で、どちらも結論を
+   * **PRではなく対応Issueの`00.check-user`**として書く。PR画面はこれを合流させて
+   * 「ユーザーのマージが必要です」を出す（#1469。判定は`requiresUserMerge`）。
+   */
+  linkedIssueCheckUser: boolean;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
   createdAt: string;

@@ -85,6 +85,21 @@ export function PullRequestStateIcon({
   return <GitPullRequest className={cn("text-green-600", className)} aria-label="オープン" />;
 }
 
+/**
+ * 自動ではマージされないPRに出す注意書き（#1469）。判定は`requiresUserMerge`だけを通す。
+ *
+ * 配色のamberは、このアプリで「ユーザーの確認待ち」（`00.check-user`）に使っている色に揃えている
+ * （`manual-step-panel.tsx`のコメント・`issue-pull-request-list.tsx`）。CI状態やAuto-mergeの
+ * バッジと同じ灰色にすると、待っていれば片付く状態と区別が付かない。
+ */
+export function UserMergeRequiredBadge() {
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+      ユーザーのマージが必要です
+    </span>
+  );
+}
+
 /** 一覧・詳細で共通の補助バッジ（ドラフト・Auto-merge有効） */
 export function PullRequestMetaBadge({ children }: { children: React.ReactNode }) {
   return (

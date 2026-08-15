@@ -11,6 +11,7 @@ import {
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
+import { checkUserIssueKey, fetchCheckUserIssueKeys } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
   PullRequestListScope,
@@ -72,7 +73,7 @@ async function handleGET(request: Request) {
   const failedRepositories: string[] = [];
 
   const results = await Promise.all(
-    repositories.map(async (repository): Promise<PullRequestSummary[]> => {
+    repositories.map(async (repository): Promise<RepositoryPullRequests> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
         const context = {
@@ -92,28 +93,58 @@ async function handleGET(request: Request) {
             : Promise.resolve<GithubApiOpenPullRequest[]>([]),
         ]);
 
-        return [
-          ...(await Promise.all(
-            openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
-          )),
-          ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
-        ];
+        return {
+          repositoryId: repository.id,
+          pullRequests: [
+            ...(await Promise.all(
+              openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
+            )),
+            ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
+          ],
+        };
       } catch (error) {
         // 1リポジトリの取得失敗で一覧全体を落とさない。取れなかったことは画面へ返す。
         console.error(`[GET /api/pull-requests] ${repository.fullName}:`, error);
         failedRepositories.push(repository.fullName);
-        return [];
+        return { repositoryId: repository.id, pullRequests: [] };
       }
     }),
   );
 
+  // 対応Issueの`00.check-user`を合流させる（#1469）。GitHub APIは消費せず、DBキャッシュを
+  // 全リポジトリぶんまとめて1クエリ引くだけ。
+  const checkUserKeys = await fetchCheckUserIssueKeys(
+    results.map((result) => ({
+      repositoryId: result.repositoryId,
+      issueNumbers: result.pullRequests
+        .map((pullRequest) => pullRequest.linkedIssueNumber)
+        .filter((number): number is number => number !== null),
+    })),
+  );
+  for (const result of results) {
+    for (const pullRequest of result.pullRequests) {
+      pullRequest.linkedIssueCheckUser =
+        pullRequest.linkedIssueNumber !== null &&
+        checkUserKeys.has(checkUserIssueKey(result.repositoryId, pullRequest.linkedIssueNumber));
+    }
+  }
+
   const response: PullRequestListResponse = {
-    pullRequests: results.flat(),
+    pullRequests: results.flatMap((result) => result.pullRequests),
     fetchedAt: new Date().toISOString(),
     failedRepositories: failedRepositories.sort((a, b) => a.localeCompare(b)),
   };
   return NextResponse.json(response);
 }
+
+/**
+ * リポジトリ1件ぶんの取得結果。`00.check-user`の合流に`repositoryId`が要るため、
+ * summaryの配列だけでなくどのリポジトリのものかも持たせる（#1469）。
+ */
+type RepositoryPullRequests = {
+  repositoryId: string;
+  pullRequests: PullRequestSummary[];
+};
 
 type RepositoryContext = {
   ownerLogin: string;

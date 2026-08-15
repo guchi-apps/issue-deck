@@ -200,6 +200,35 @@ export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
 }
 
 /**
+ * 自動ではマージされず、ユーザーが手でマージする必要があるPRか（#1469）。
+ *
+ * develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
+ * `claude-review-develop.yml`（`risk-check` → `auto-merge`）だけで、そのcallerを持たない
+ * リポジトリでは`reusable-issue-labels.yml`の`develop-pr-opened`がPR作成時に保険として
+ * 確定させる（#1470）。**どちらも結論をPRではなく対応Issueの`00.check-user`として書く**ため、
+ * ここでは`linkedIssueCheckUser`をその確定結果として読む。
+ *
+ * - `release`（develop→main）は`CLAUDE.md`の自動マージ不可カテゴリで、常にユーザーがマージする。
+ * - `version-bump`（`release/vX.Y.Z`→develop）は`release-develop-to-main.yml`がAuto-mergeで
+ *   developへ入れるため対象外。
+ * - `other`（規約から外れたブランチ）は判定材料が無いため出さない。対応Issueの推定が
+ *   タイトル・本文の`#123`参照頼りになり、単なる言及を拾って誤検知しうる。
+ * - Auto-merge有効なPRは待てば入るので出さない。
+ * - **CIの結果は見ない。** #1433がCI実行中を「要操作」から外しているのは押しても弾かれる
+ *   ボタンの強調についてで、こちらは「自動ではマージされない」という事実の表示にあたる。
+ *
+ * `00.check-user`は計画の承認待ち・質問の回答待ちでも付く汎用ラベルだが、ここで見るのは
+ * 「そのIssueにopenなdevelop向けPRがある」場面に限られるため、マージ保留以外の意味にならない。
+ * 理由別のラベル（`01.check-merge`）が入ったら、この関数の中だけを差し替えればよい。
+ */
+export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
+  if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) return false;
+  if (pullRequest.autoMergeEnabled) return false;
+  if (pullRequest.kind === "release") return true;
+  return pullRequest.kind === "issue" && pullRequest.linkedIssueCheckUser;
+}
+
+/**
  * そのままマージすると意図しない結果になりうる状態の説明。空配列なら確認なしでマージしてよい。
  * 画面はこの内容を確認ダイアログに並べる。
  */

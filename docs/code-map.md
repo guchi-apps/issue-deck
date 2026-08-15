@@ -153,6 +153,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   マージ済みかどうかは一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧に無い）。
   並び順も「全てのPR」だけ更新が新しい順で、他は作成が古い順＝滞留が長い順。
   マージ済みPRの一覧を「直近30件」を超えて遡りたくなった時点で、キャッシュ層の追加を再検討する。
+- **「ユーザーのマージが必要です」の判定は
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`requiresUserMerge`だけを通す**
+  （#1469）。develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定
+  させるのは`claude-review-develop.yml`と、その経路を持たないリポジトリ向けの保険
+  （`reusable-issue-labels.yml`の`develop-pr-opened`。#1470）で、**どちらも結論をPRではなく
+  対応Issueの`00.check-user`として書く**。PR一覧・PR詳細はGitHub APIからPRを取るだけでは
+  これを知れないため、[`lib/pull-request-check-user.ts`](../src/lib/pull-request-check-user.ts)が
+  IssueのDBキャッシュを1クエリ引いて`PullRequestSummary.linkedIssueCheckUser`へ合流させる
+  （**GitHub APIの消費は増えない**）。develop→mainのリリースPRは`kind`だけで常に対象、
+  バージョンバンプPRはAuto-mergeで入るため対象外。理由別のラベル（`01.check-merge`。
+  [multi-agent/labels.md](multi-agent/labels.md)）が入ったら、差し替えるのはこの関数の中だけ。
 - **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、PRを選んだ・
   画面内のリンクからPRを開いたときだけ取得する。** 会話コメント・レビュー・レビューコメントの
   3エンドポイントを
