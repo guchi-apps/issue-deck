@@ -3,12 +3,10 @@
 import { useMemo, useRef, useState } from "react";
 
 import {
-  Archive,
   Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
-  Lock,
   MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
@@ -23,21 +21,23 @@ import {
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
-import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
-import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
+import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
+import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
+import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
-import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
+import {
+  IssuePullRequestList,
+  IssuePullRequestStateCounts,
+} from "@/components/dashboard/issue-pull-request-list";
+import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
-import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import {
   findBlockingSession,
   findDispatchJobForIssue,
@@ -45,9 +45,6 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
-import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
-import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -56,7 +53,6 @@ import {
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -106,7 +102,11 @@ import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/githu
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
-import { closedStateLabel } from "@/lib/issue-state-reason";
+import {
+  selectVisiblePullRequestLinks,
+  summarizeIssuePullRequestStates,
+} from "@/lib/issue-pull-requests";
+import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -472,6 +472,14 @@ export function IssueDetail({
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
     ? buildLocalSessionCommand(issue.repositoryFullName, issue.number)
     : null;
+  // 対応PRのセクションは、一覧が実際に描く行が1件以上あるときだけ出す（#1577）。
+  // 判定を`IssuePullRequestList`と共有しないと、行が無いのに空の枠だけが残る
+  const visiblePullRequestLinks = selectVisiblePullRequestLinks(pullRequestLinks, pullRequests);
+  const pullRequestSummary = summarizeIssuePullRequestStates(
+    pullRequests,
+    visiblePullRequestLinks.length,
+  );
+  const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -483,254 +491,204 @@ export function IssueDetail({
         data-capture-scroll-bottom
         className="flex-1 overflow-y-auto overscroll-contain"
       >
-        <div className="flex flex-col gap-4 p-4">
-          {/* ヘッダーは「リポジトリ名＋操作ボタン」の1行と、その下の状態表示の2段（#1468）。
-              状態表示（`w-full`）をボタン列へ混ぜると、ボタン列が縦に膨らんでリポジトリ名の
-              行から押し出される */}
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => onSelectRepository(issue.repositoryFullName)}
-                  className="hover:text-foreground hover:underline"
-                  title="このリポジトリでフィルター"
-                >
-                  {issue.repositoryFullName}
-                </button>
-                {issue.repositoryArchived && (
-                  <Archive className="size-3.5" aria-label="アーカイブ済み" />
-                )}
-                {issue.repositoryPrivate && <Lock className="size-3.5" aria-label="プライベート" />}
-              </span>
-              {/* 詳細ペインが狭いときやボタンが増えたときに「GitHubで開く」等が
-                  横へはみ出して見えなくならないよう、この行は折り返す（#998） */}
-              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
-                    対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
-                {canStartImplementation(issue) && (
-                  <StartImplementationDialog
-                    issue={issue}
-                    onIssueUpdated={onIssueUpdated}
-                    onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
-                    includeDispatchTargets
-                    dispatch={dispatch}
-                    actionsDisabledReason={actionsDisabledReason}
-                    comments={comments}
-                    localSessionCommand={localSessionCommand}
-                    subIssueRelations={subIssueRelations}
-                    renderTrigger={(isSubmitting) => (
-                      <Button size="sm" disabled={isSubmitting}>
-                        {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                        {startLabel}
-                      </Button>
-                    )}
-                  />
-                )}
-                {canAskClaude(issue) && (
-                  <AskClaudeDialog
-                    issue={issue}
-                    onIssueUpdated={onIssueUpdated}
-                    onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
-                    renderTrigger={(isSubmitting) => (
-                      <Button variant="outline" size="sm" disabled={isSubmitting}>
-                        {isSubmitting ? <Loader2 className="animate-spin" /> : <MessageCircleQuestion />}
-                        Claudeに質問する
-                      </Button>
-                    )}
-                  />
-                )}
-                {canCloseAskRepoQuestion(issue, comments) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isSubmitting}
-                    onClick={() => handleClose("completed")}
-                  >
-                    <XCircle />
-                    質問を終えてクローズ
-                  </Button>
-                )}
-                {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
-                    起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
-                    あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                    「サブPCで開始」が2つ並ぶ */}
-                <StartLocalSessionButton
+        {/* ヘッダーはスクロールしても残る（#1577）。中身の状態はここでは持たず、
+            操作ボタンだけを渡す */}
+        <IssueDetailHeader
+          issue={issue}
+          onSelectRepository={onSelectRepository}
+          actions={
+            <>
+              {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
+                  対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
+              {canStartImplementation(issue) && (
+                <StartImplementationDialog
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
-                  showStartButton={!canStartImplementation(issue)}
-                  showJobStatus={false}
+                  onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  includeDispatchTargets
                   dispatch={dispatch}
-                />
-                <Button variant="outline" size="sm" asChild>
-                  <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
-                    GitHubで開く
-                    <ExternalLink />
-                  </a>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="xl:hidden"
-                  aria-label="プロパティ"
-                  onClick={() => setIsPropertiesOpen(true)}
-                >
-                  <SlidersHorizontal />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-                  onClick={() => onToggleFavorite(issue)}
-                >
-                  <Star className={cn(issue.favorite && "fill-yellow-400 text-yellow-400")} />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <MoreHorizontal />
+                  actionsDisabledReason={actionsDisabledReason}
+                  comments={comments}
+                  localSessionCommand={localSessionCommand}
+                  subIssueRelations={subIssueRelations}
+                  renderTrigger={(isSubmitting) => (
+                    <Button size="sm" disabled={isSubmitting}>
+                      {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
+                      {startLabel}
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-fit min-w-0">
-                    <DropdownMenuItem
-                      className="whitespace-nowrap text-xs"
-                      onSelect={() => onCreateFollowupIssue(issue)}
-                    >
-                      <FilePlus2 className="size-3.5" />
-                      引き継いでIssueを作成
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
-                      <Pencil className="size-3.5" />
-                      編集
-                    </DropdownMenuItem>
-                    {issue.state === "open" ? (
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
-                          <XCircle className="size-3.5" />
-                          クローズする
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuPortal>
-                          <DropdownMenuSubContent className="w-fit min-w-0">
-                            <DropdownMenuItem
-                              className="whitespace-nowrap text-xs"
-                              disabled={isSubmitting}
-                              onSelect={() => handleClose("completed")}
-                            >
-                              完了としてクローズ
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="whitespace-nowrap text-xs"
-                              disabled={isSubmitting}
-                              onSelect={() => handleClose("not_planned")}
-                            >
-                              計画外としてクローズ
-                            </DropdownMenuItem>
-                          </DropdownMenuSubContent>
-                        </DropdownMenuPortal>
-                      </DropdownMenuSub>
-                    ) : (
-                      <DropdownMenuItem
-                        className="whitespace-nowrap text-xs"
-                        disabled={isSubmitting}
-                        onSelect={handleReopen}
-                      >
-                        <RotateCcw className="size-3.5" />
-                        再オープンする
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem
-                      className="whitespace-nowrap text-xs"
-                      variant="destructive"
-                      disabled={isSubmitting}
-                      onSelect={() => {
-                        setDeleteError(null);
-                        setIsDeleteDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 className="size-3.5" />
-                      Issueを削除
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-            {/* 積んだジョブの状態はボタン列の外（1段下）に出す（#1468）。取り消しもここから押す */}
-            {dispatchJob && (
-              <DispatchJobStatus
-                job={dispatchJob}
-                isSubmitting={dispatch.isSubmitting}
-                onCancel={() => void dispatch.cancel(dispatchJob.id)}
-                waitReason={describeDispatchJobWaitReason(dispatchJob, dispatch.hosts)}
-              />
-            )}
-          </div>
-
-          <h1 className="text-lg font-semibold break-words">
-            #{issue.number} {issue.title}
-          </h1>
-
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-              {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
-            </Badge>
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              作成者 <UserAvatar login={issue.author.login} /> {issue.author.login}
-            </span>
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              担当者{" "}
-              {issue.assignee ? (
-                <>
-                  <UserAvatar login={issue.assignee.login} /> {issue.assignee.login}
-                </>
-              ) : (
-                "未設定"
+                  )}
+                />
               )}
-            </span>
-            <span className="text-muted-foreground">
-              作成日 {new Date(issue.createdAt).toLocaleDateString("ja-JP")}
-            </span>
-            <span className="text-muted-foreground">
-              更新日 {new Date(issue.updatedAt).toLocaleDateString("ja-JP")}
-            </span>
-          </div>
+              {canAskClaude(issue) && (
+                <AskClaudeDialog
+                  issue={issue}
+                  onIssueUpdated={onIssueUpdated}
+                  onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  renderTrigger={(isSubmitting) => (
+                    <Button variant="outline" size="sm" disabled={isSubmitting}>
+                      {isSubmitting ? <Loader2 className="animate-spin" /> : <MessageCircleQuestion />}
+                      Claudeに質問する
+                    </Button>
+                  )}
+                />
+              )}
+              {canCloseAskRepoQuestion(issue, comments) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={() => handleClose("completed")}
+                >
+                  <XCircle />
+                  質問を終えてクローズ
+                </Button>
+              )}
+              {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
+                  起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
+                  あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
+                  「サブPCで開始」が2つ並ぶ */}
+              <StartLocalSessionButton
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                showStartButton={!canStartImplementation(issue)}
+                showJobStatus={false}
+                dispatch={dispatch}
+              />
+              {/* 主操作（開始・質問）と同じ大きさで並べない（#1577）。常時出る補助的な導線なので
+                  アイコンだけにして、主操作の位置が折り返しで動くのを減らす */}
+              <Button variant="outline" size="icon" aria-label="GitHubで開く" title="GitHubで開く" asChild>
+                <a href={issue.htmlUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink />
+                </a>
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="xl:hidden"
+                aria-label="プロパティ"
+                onClick={() => setIsPropertiesOpen(true)}
+              >
+                <SlidersHorizontal />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                onClick={() => onToggleFavorite(issue)}
+              >
+                <Star className={cn(issue.favorite && "fill-yellow-400 text-yellow-400")} />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-fit min-w-0">
+                  <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
+                    onSelect={() => onCreateFollowupIssue(issue)}
+                  >
+                    <FilePlus2 className="size-3.5" />
+                    引き継いでIssueを作成
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
+                    <Pencil className="size-3.5" />
+                    編集
+                  </DropdownMenuItem>
+                  {issue.state === "open" ? (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
+                        <XCircle className="size-3.5" />
+                        クローズする
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent className="w-fit min-w-0">
+                          <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
+                            disabled={isSubmitting}
+                            onSelect={() => handleClose("completed")}
+                          >
+                            完了としてクローズ
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="whitespace-nowrap text-xs"
+                            disabled={isSubmitting}
+                            onSelect={() => handleClose("not_planned")}
+                          >
+                            計画外としてクローズ
+                          </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  ) : (
+                    <DropdownMenuItem
+                      className="whitespace-nowrap text-xs"
+                      disabled={isSubmitting}
+                      onSelect={handleReopen}
+                    >
+                      <RotateCcw className="size-3.5" />
+                      再オープンする
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
+                    variant="destructive"
+                    disabled={isSubmitting}
+                    onSelect={() => {
+                      setDeleteError(null);
+                      setIsDeleteDialogOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Issueを削除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          }
+        />
 
-          <WorkflowStatusSteps
-            labels={issue.labels}
-            projectStatus={issue.projectStatus}
+        <div className="flex flex-col gap-3 p-4">
+          {/* 進捗・ジョブ・セッション・回答待ち・実行キャンセルを1枚に集約する（#1577）。
+              走っているものが1つも無いIssueでは何も描かない */}
+          <IssueStatusCard
+            issue={issue}
+            dispatch={dispatch}
+            dispatchJob={dispatchJob}
+            issueSession={issueSession}
             executionTarget={executionTarget}
+            workflowRun={workflowRun}
+            workflowRunId={workflowRunId}
+            qaAnswerPending={qaAnswerPending}
           />
-          {issueSession && (
-            <IssueSessionStatus session={issueSession} dispatch={dispatch} align="end" />
-          )}
-          {/* 横断質問（#1454）を積んでからセッションが立つまでの間だけ出る */}
-          <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="end" />
-          <div className="flex flex-wrap items-center gap-2">
-            {qaAnswerPending && (
-              <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
-                <MessageCircleQuestion className="size-3" />
-                Claudeの回答待ち
-              </span>
-            )}
-            <CancelWorkflowRunButton
-              run={workflowRun}
-              runId={workflowRunId}
-              repositoryFullName={issue.repositoryFullName}
-            />
-          </div>
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
-              コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339） */}
-          <IssuePullRequestList
-            links={pullRequestLinks}
-            pullRequests={pullRequests}
-            mergeApprovalPending={mergeApprovalPending}
-            onMerge={handleMergePullRequest}
-            onMerged={handlePullRequestMerged}
-            mergedNumbers={mergedPullRequestNumbers}
-            mergeTargetNumber={mergeTargetNumber}
-            isMerging={isMergingPullRequest}
-            mergeError={mergePullRequestError}
-          />
+              コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
+              既定では畳み、マージ待ちのときだけ開いたままにする（#1577） */}
+          {visiblePullRequestLinks.length > 0 && (
+            <IssueDetailSection
+              id="pull-requests"
+              title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
+              count={pullRequestSummary.total}
+              forceOpen={mergeApprovalPending}
+              tone={mergeApprovalPending ? "attention" : "default"}
+              summary={<IssuePullRequestStateCounts buckets={pullRequestSummary.buckets} />}
+            >
+              <IssuePullRequestList
+                variant="plain"
+                links={pullRequestLinks}
+                pullRequests={pullRequests}
+                mergeApprovalPending={mergeApprovalPending}
+                onMerge={handleMergePullRequest}
+                onMerged={handlePullRequestMerged}
+                mergedNumbers={mergedPullRequestNumbers}
+                mergeTargetNumber={mergeTargetNumber}
+                isMerging={isMergingPullRequest}
+                mergeError={mergePullRequestError}
+              />
+            </IssueDetailSection>
+          )}
 
           {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
           {canCompleteManualStep(issue) && (
@@ -741,24 +699,53 @@ export function IssueDetail({
             />
           )}
 
-          <Separator />
-
-          <IssueAiSummary issue={issue} />
-
-          {/* 子イシューの進捗はAI要約と説明の間に置く（#1340）。説明より上に出すことで、
-              本文を読み始める前に分割済みの子イシューがあることに気付ける */}
+          {/* 子イシューの進捗は説明より上に出す（#1340）。本文を読み始める前に分割済みの
+              子イシューがあることに気付けるよう、畳んでいても完了率は見えるようにする */}
           {hasSubIssueRelations && (
-            <>
-              <Separator />
-              <SubIssueProgress relations={subIssueRelations} />
-            </>
+            <IssueDetailSection
+              id="sub-issues"
+              title={subIssueRelations.children.length > 0 ? "子Issue" : "親Issue"}
+              count={subIssueRelations.childCount}
+              summary={
+                subIssueRelations.children.length > 0 ? (
+                  <>
+                    <span
+                      className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
+                      role="progressbar"
+                      aria-valuenow={subIssueSummary.percent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="子Issueの完了率"
+                    >
+                      <span
+                        className="block h-full rounded-full bg-primary"
+                        style={{ width: `${subIssueSummary.percent}%` }}
+                      />
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {subIssueSummary.done} / {subIssueSummary.total} 完了
+                    </span>
+                  </>
+                ) : (
+                  <span className="truncate text-xs text-muted-foreground">
+                    #{subIssueRelations.parent?.number} {subIssueRelations.parent?.title}
+                  </span>
+                )
+              }
+            >
+              <SubIssueProgress relations={subIssueRelations} showHeading={false} />
+            </IssueDetailSection>
           )}
 
+          <IssueAiSummarySection issue={issue} />
+
           <Separator />
 
+          {/* 説明とコメントだけが本来の見出しの重さを持つ（#1577）。補助情報（対応PR・子Issue・
+              AI要約）は畳めるセクションの小さなラベルにしてあり、形で主従が読み取れる */}
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold">説明</h2>
+              <h2 className="text-base font-semibold">説明</h2>
               {/* 本文にタスクリストがあるときだけ進捗を出す。手作業Issueの「やること」を
                   消し込みながら進めるための目印（#1486） */}
               {taskList.progress.total > 0 && (
@@ -780,7 +767,7 @@ export function IssueDetail({
 
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">
+              <h2 className="text-base font-semibold">
                 コメント <span className="text-muted-foreground">{issue.commentCount}</span>
               </h2>
             </div>

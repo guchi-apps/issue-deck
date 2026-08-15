@@ -4,6 +4,7 @@ import {
   canMergeIssuePullRequest,
   issuePullRequestStateLabel,
   selectIssuePullRequests,
+  summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import type { IssuePullRequest } from "@/types/pull-request";
 
@@ -74,5 +75,37 @@ describe("issuePullRequestStateLabel", () => {
     [pullRequest({ state: "closed", merged: true, draft: true }), "merged"],
   ])("状態を1つのラベルに畳む", (pr, expected) => {
     expect(issuePullRequestStateLabel(pr)).toBe(expected);
+  });
+});
+
+describe("summarizeIssuePullRequestStates", () => {
+  it("状態ごとに数え、進んだ状態から順に並べる", () => {
+    const summary = summarizeIssuePullRequestStates(
+      [
+        pullRequest({ number: 1, draft: true }),
+        pullRequest({ number: 2 }),
+        pullRequest({ number: 3, state: "closed", merged: true }),
+        pullRequest({ number: 4, state: "closed", merged: true }),
+      ],
+      4,
+    );
+    expect(summary.total).toBe(4);
+    expect(summary.buckets).toEqual([
+      { state: "merged", count: 2 },
+      { state: "open", count: 1 },
+      { state: "draft", count: 1 },
+    ]);
+  });
+
+  it("詳細が1件も取れていなくても件数は出す（畳んだ行から対応PRの存在が消えないように）", () => {
+    const summary = summarizeIssuePullRequestStates([], 6);
+    expect(summary.total).toBe(6);
+    expect(summary.buckets).toEqual([]);
+  });
+
+  it("総数は詳細の件数ではなくリンクの件数を正とする", () => {
+    const summary = summarizeIssuePullRequestStates([pullRequest()], 3);
+    expect(summary.total).toBe(3);
+    expect(summary.buckets).toEqual([{ state: "open", count: 1 }]);
   });
 });

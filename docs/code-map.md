@@ -104,6 +104,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
+- **PCのIssue詳細は「固定ヘッダー → 実行状況カード → 折りたためる補助情報 → 説明・コメント」の
+  4層**（#1577。[`components/dashboard/issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）。
+  積み上がった上部の表示を整理したもので、次の3点が判断の要る箇所。
+  - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
+    スクロール領域の先頭で`sticky`。**実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
+    アイコン、編集・クローズ・削除は`⋯`へ寄せる（増やすと折り返しで主操作の位置が動く。#998）。
+    メタは`Open`・作成者・更新（相対時刻）だけで、**担当者と日付はプロパティパネルに置く**（重複を作らない）。
+  - **実行状況カード**（[`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)）は
+    進捗ステップ・積んだジョブ・セッション・横断質問・Claudeの回答待ち・実行キャンセルを1枚に集める。
+    **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
+    （`getWorkflowStepIndex`・`findDispatchJobForIssue`・`findCrossRepoQuestionJobForIssue`など）を使う。
+    片方だけ条件が変わると空の枠が残る。
+  - **対応PR・親子Issue・AI要約は既定で畳む**
+    （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
+    `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
+    **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
+    畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
 - **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
   ラベル・担当者と並ぶ位置にあり
   （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
@@ -283,8 +300,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
   起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
-  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作まで。**
-  4段の進捗はヘッダー側（`ReleaseProgress`）に残す——ここで状態まで追うと取得を増やさない前提が崩れる。
+  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作と、
+  本番デプロイの状態まで。** バンプPR作成→develop反映→PR作成→mainへマージの4段の進捗は
+  ヘッダー側（`ReleaseProgress`）に残す——ここで全部を追うと取得を増やさない前提が崩れる。
+  **本番デプロイだけを例外にしているのは、PRの情報だけでは誤ったことを言ってしまうから**（#1579）。
+  リリースPRがマージされた瞬間に束の見出しが「◯/◯に本番反映」へ変わっていたが、見ているのは
+  mainへマージされた事実だけで、そこから`deploy.yml`が数分走り、失敗すればmainに入ったまま
+  本番へは出ない。**デプロイが済むまで「本番反映」と書かない**ようにし、実行中・失敗・待ちを
+  束の見出しと畳んだ1行に出す（デプロイ中・失敗のリポジトリは初回に自動で開く）。
+  取得は専用の軽いエンドポイント`GET /api/branch-flow/deploy`（mainブランチの`deploy.yml`の
+  最新run 1件。`fetchLatestDeployWorkflowRun`）で、**リリース用workflowを持つリポジトリだけ**を
+  対象にする。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
+  runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
+  場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
+  打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。
+  **この画面で唯一の自動更新がここ**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
+  30秒ごと）。消費が釣り合うのは、リポジトリあたりREST 1回であることと、
+  `fetchLatestWorkflowRun`がETagの条件付きGETを通す（変化が無ければ304でレート制限を消費しない）
+  ため。ブランチ状況とPR一覧は従来どおり手動更新のまま。
   **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
   数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
   （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
@@ -450,6 +483,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
   読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
   足すと同じ役が2つになる）。
+- **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
+  worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
+  既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は
+  `scripts/lib/fleet-status.sh`の純粋関数にあり、tmux・gh・gitを叩くのは入口だけなので、
+  出力を固定したfixtureで検証できる（`src/lib/fleet-status.test.ts`）。**LLMを使わず、
+  画面（`capture-pane`）も読まない計器**で、判断はしない。計画が前提としたSHAからの変化を見せる
+  `scripts/lib/plan-base.sh`（`<!-- plan-base: <SHA> -->`。**止めず、見せるだけ**）と対で、
+  設計は[multi-agent/gates.md](multi-agent/gates.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

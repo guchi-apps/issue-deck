@@ -6,6 +6,8 @@ import {
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type {
+  BranchFlowDeployRun,
+  BranchFlowDeployState,
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
@@ -15,6 +17,7 @@ import type {
   BranchFlowRepository,
   BranchFlowRepositorySummary,
   RepositoryBranchStatus,
+  RepositoryDeployStatus,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -91,6 +94,13 @@ export type BuildBranchFlowInput = {
   issues: BranchFlowIssueSource[];
   /** `GET /api/branch-flow`の結果。未取得のリポジトリはPRだけから組み立てる */
   branchStatuses: RepositoryBranchStatus[];
+  /**
+   * `GET /api/branch-flow/deploy`の結果（#1579）。未取得のリポジトリはデプロイの状態を出さない
+   * （＝マージ済みの束は従来どおり「◯/◯に本番反映」のまま）。
+   */
+  deployStatuses?: RepositoryDeployStatus[];
+  /** 現在時刻（ミリ秒）。デプロイ待ちの打ち切り判定に使う。テストから注入する */
+  now?: number;
 };
 
 export type BranchFlow = {
@@ -118,6 +128,10 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
   const branchStatusByRepo = new Map(
     input.branchStatuses.map((status) => [status.repositoryFullName, status]),
   );
+  const deployRunByRepo = new Map(
+    (input.deployStatuses ?? []).map((status) => [status.repositoryFullName, status.deployRun]),
+  );
+  const now = input.now ?? Date.now();
 
   const repositories = input.repositories.map((repository) =>
     buildRepository({
@@ -127,6 +141,8 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
       ),
       issues: input.issues.filter((issue) => issue.repositoryFullName === repository.fullName),
       branchStatus: branchStatusByRepo.get(repository.fullName) ?? null,
+      deployRun: deployRunByRepo.get(repository.fullName) ?? null,
+      now,
     }),
   );
 
@@ -138,11 +154,15 @@ function buildRepository({
   pullRequests,
   issues,
   branchStatus,
+  deployRun,
+  now,
 }: {
   repository: { fullName: string; private: boolean };
   pullRequests: PullRequestSummary[];
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
+  deployRun: BranchFlowDeployRun | null;
+  now: number;
 }): BranchFlowRepository {
   // リリースPR（develop→main）はレーンではなく幹の一部なので、作業レーンからは外す。
   // マージ済みのリリースPRは「今どうなっているか」を表さないため、openなものだけを出す。
@@ -197,12 +217,20 @@ function buildRepository({
     ]),
   );
 
+  // 本番デプロイの状態は、いちばん新しくmainへ入ったリリースに対してだけ決まる（#1579）
+  const deployState = resolveDeployState({
+    deployRun,
+    releaseMergedAt: releases.at(-1)?.pullRequest.mergedAt ?? null,
+    now,
+  });
+
   const { activeLanes, releaseGroups, unassignedLanes } = groupLanesByRelease({
     lanes,
     releases,
     openReleasePullRequest: releasePullRequest,
     openBumpPullRequest: bumpPullRequest,
     unreleasedCommits: branchStatus?.developVsMain?.aheadBy ?? 0,
+    deployState,
   });
 
   const openLanePullRequests = lanePullRequests.filter(
@@ -228,6 +256,7 @@ function buildRepository({
     // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
+    deploy: deployState,
   };
 
   // リリース用workflow（`release-develop-to-main.yml`）を実際に持つリポジトリだけで押させる
@@ -278,6 +307,27 @@ type MergedRelease = {
   pullRequest: PullRequestSummary;
 };
 
+/**
+ * リポジトリごとの「直近でmainへ入ったリリースPRのマージ時刻」（#1579）。
+ *
+ * デプロイの状態を決めるのに要るのはこの1点だけなので、**流れ図を組み立てずに取り出せる形**で
+ * 出しておく。デプロイ状況の取得（`hooks/use-deploy-status.ts`）が「まだ追いかける必要があるか」を
+ * 自分で判断するために使う。
+ */
+export function latestReleaseMergedAtByRepository(
+  pullRequests: PullRequestSummary[],
+): Map<string, string> {
+  const byRepository = new Map<string, string>();
+  for (const pullRequest of pullRequests) {
+    if (pullRequest.kind !== "release" || pullRequest.mergedAt === null) continue;
+    const current = byRepository.get(pullRequest.repositoryFullName);
+    if (current === undefined || current < pullRequest.mergedAt) {
+      byRepository.set(pullRequest.repositoryFullName, pullRequest.mergedAt);
+    }
+  }
+  return byRepository;
+}
+
 function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
   return pullRequests
     .filter((pullRequest) => pullRequest.kind === "release" && pullRequest.mergedAt !== null)
@@ -288,6 +338,54 @@ function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
       pullRequest,
     }))
     .sort((a, b) => a.mergedAt - b.mergedAt);
+}
+
+/**
+ * mainへマージしてから、そのデプロイ実行が現れるまで「デプロイ待ち」と出し続ける上限（#1579）。
+ *
+ * **`deploy.yml`がmainへのpushで走らないリポジトリでは、待っている実行が永久に現れない。**
+ * その場合まで「待ち」と言い続けると、いつまでも本番の状態を言い当てられないバッジが残るため、
+ * この時間を過ぎたら判定できなかったもの（＝従来どおりの表示）へ縮退させる。
+ */
+const DEPLOY_WAIT_LIMIT_MS = 15 * 60 * 1000;
+
+/**
+ * mainへ入った変更が本番へ届いたかを、`deploy.yml`の最新実行から判定する（#1579）。
+ *
+ * **リリースPRのマージ＝本番反映ではない。** マージの後に`deploy.yml`が数分走り、その結果が
+ * 出るまで本番には出ていない。画面はマージした瞬間に「◯/◯に本番反映」と言い切っていたため、
+ * デプロイが実行中なのか落ちたのかが分からなかった（Issue #1579）。
+ *
+ * 突き合わせは**リリースPRのマージ時刻と実行の開始時刻の比較だけ**で行う。mainへのpushで走る
+ * workflowなので、そのマージ以降に始まった実行が今回のデプロイになる。追加の取得は要らない。
+ *
+ * 判定できない場合（実行を1件も取得できない・比較する版が無い）はnullを返し、画面は
+ * 従来の表示のままにする——**間違った状態を出すより「何も言わない」方がよい。**
+ */
+export function resolveDeployState({
+  deployRun,
+  releaseMergedAt,
+  now,
+}: {
+  deployRun: BranchFlowDeployRun | null;
+  /** いちばん新しくmainへ入ったリリースPRのマージ時刻（ISO8601）。無ければnull */
+  releaseMergedAt: string | null;
+  now: number;
+}): BranchFlowDeployState | null {
+  if (deployRun === null) return null;
+
+  if (releaseMergedAt !== null) {
+    const mergedAt = new Date(releaseMergedAt).getTime();
+    if (new Date(deployRun.createdAt).getTime() < mergedAt) {
+      // 今回のマージに対する実行がまだ現れていない。上限を過ぎたら判定を諦める
+      return now - mergedAt < DEPLOY_WAIT_LIMIT_MS ? { kind: "waiting", htmlUrl: null } : null;
+    }
+  }
+
+  if (deployRun.status !== "completed") return { kind: "running", htmlUrl: deployRun.htmlUrl };
+  return deployRun.conclusion === "success"
+    ? { kind: "success", htmlUrl: deployRun.htmlUrl }
+    : { kind: "failure", htmlUrl: deployRun.htmlUrl };
 }
 
 /**
@@ -310,6 +408,7 @@ function groupLanesByRelease({
   openReleasePullRequest,
   openBumpPullRequest,
   unreleasedCommits,
+  deployState,
 }: {
   lanes: BranchFlowLane[];
   releases: MergedRelease[];
@@ -317,6 +416,8 @@ function groupLanesByRelease({
   /** openなバージョンバンプPR。先頭（未リリース）の束へ幹の一部として乗せる（#1548） */
   openBumpPullRequest: PullRequestSummary | null;
   unreleasedCommits: number;
+  /** 本番デプロイの状態。**いちばん新しくmainへ入った束にだけ乗せる**（#1579） */
+  deployState: BranchFlowDeployState | null;
 }): {
   activeLanes: BranchFlowLane[];
   releaseGroups: BranchFlowReleaseGroup[];
@@ -366,10 +467,14 @@ function groupLanesByRelease({
         pullRequest: openReleasePullRequest,
         bumpPullRequest: openBumpPullRequest,
         mergedAt: null,
+        // まだmainへ入っていない束にデプロイの状態は無い
+        deploy: null,
         lanes: pendingLanes.sort(compareLanes),
       }),
     );
   }
+
+  const latestReleaseNumber = releases.at(-1)?.pullRequestNumber ?? null;
 
   // 本番へ出た束は新しい順。中身が1本も無い版は、画面に出しても線が増えるだけなので作らない
   for (const release of [...releases].reverse()) {
@@ -383,6 +488,8 @@ function groupLanesByRelease({
         // 本番へ出た束にバンプPRは出さない（版の見出しがそれを表している）
         bumpPullRequest: null,
         mergedAt: release.pullRequest.mergedAt,
+        // 判定に使うのはmainの最新の実行なので、それ以前の版については何も言えない（#1579）
+        deploy: release.pullRequestNumber === latestReleaseNumber ? deployState : null,
         lanes: groupLanes.sort(compareLanes),
       }),
     );

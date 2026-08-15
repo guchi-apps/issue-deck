@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import { buildBranchFlow, type BranchFlowIssueSource } from "@/lib/branch-flow";
-import type { RepositoryBranchStatus } from "@/types/branch-flow";
+import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 const REPO = "guchi-apps/issue-deck";
@@ -55,6 +55,8 @@ function renderFlow(input: {
   pullRequests?: PullRequestSummary[];
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
+  deployStatuses?: RepositoryDeployStatus[];
+  now?: number;
   failedRepositories?: string[];
   onRefresh?: () => void;
 }) {
@@ -63,6 +65,8 @@ function renderFlow(input: {
     pullRequests: input.pullRequests ?? [],
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
+    deployStatuses: input.deployStatuses,
+    now: input.now,
   });
 
   return render(
@@ -914,6 +918,137 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.getByText("developへマージ待ち")).toBeTruthy();
       expect(screen.getByText("マージする")).toBeTruthy();
+    });
+  });
+  describe("本番デプロイの状態（#1579）", () => {
+    const MERGED_AT = "2026-08-15T10:00:00Z";
+    const NOW = new Date("2026-08-15T10:01:00Z").getTime();
+
+    const released = [
+      makeReleasePullRequest({
+        number: 1573,
+        title: "v3.22.0をmainへリリースする",
+        state: "closed",
+        merged: true,
+        mergedAt: MERGED_AT,
+      }),
+      makePullRequest({
+        number: 1570,
+        headRef: "issue-1524",
+        linkedIssueNumber: 1524,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-15T09:00:00Z",
+      }),
+    ];
+
+    function deployStatuses(
+      overrides: Partial<RepositoryDeployStatus["deployRun"] & object> = {},
+    ): RepositoryDeployStatus[] {
+      return [
+        {
+          repositoryFullName: REPO,
+          deployRun: {
+            status: "completed",
+            conclusion: "success",
+            htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+            createdAt: "2026-08-15T10:00:30Z",
+            ...overrides,
+          },
+        },
+      ];
+    }
+
+    it("デプロイ実行中は「本番へデプロイ中」を出し、まだ本番反映とは書かない", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({ status: "in_progress", conclusion: null }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("本番へデプロイ中")).toBeTruthy();
+      expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
+      expect(screen.queryByText("8/15に本番反映")).toBeNull();
+      // 畳んだ1行にも出す（開かなくても気づけるように）
+      expect(screen.getByText("デプロイ中")).toBeTruthy();
+    });
+
+    it("デプロイ失敗は実行ログへのリンク付きで出す", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({ conclusion: "failure" }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      // 畳んだ1行（ボタンなのでリンクにしない）と束の見出しの2か所に出る
+      const badges = screen.getAllByText("デプロイ失敗");
+      expect(badges).toHaveLength(2);
+      expect(badges.some((badge) => badge.closest("a") === null)).toBe(true);
+      expect(
+        badges.map((badge) => badge.closest("a")?.getAttribute("href")),
+      ).toContain(`https://github.com/${REPO}/actions/runs/1`);
+      expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
+    });
+
+    it("デプロイ成功のときだけ「本番反映」と書き、裏付けのバッジを添える", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses(),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.getByText("デプロイ成功")).toBeTruthy();
+    });
+
+    it("状態が分からないときは従来どおりの表示のまま", () => {
+      renderFlow({ pullRequests: released, branchStatuses: [branchStatus()], now: NOW });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.queryByText("デプロイ成功")).toBeNull();
+    });
+
+    it("mainへのマージ待ちは「mainへマージ待ち」と出す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
+    });
+
+    it("CI実行中はまだマージできないので「リリース中」のままにする", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "pending",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      // 畳んだ1行と束の見出しの2か所に出る
+      expect(screen.getAllByText("リリース中").length).toBeGreaterThan(1);
     });
   });
 });
