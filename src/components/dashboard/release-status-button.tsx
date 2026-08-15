@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Rocket } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { ReleaseBumpKindSelect } from "@/components/dashboard/release-bump-kind-select";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import {
   AlertDialog,
@@ -31,6 +32,7 @@ import {
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { isNextReleaseIssue, isReleasePendingIssue } from "@/lib/issue-progress";
+import type { BumpKind } from "@/lib/semver-bump";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -60,6 +62,8 @@ export function ReleaseStatusButton({
   const [open, setOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
+  // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
+  const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
     releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)?.fullName ??
       releasableRepositories[0]?.fullName ??
@@ -150,12 +154,21 @@ export function ReleaseStatusButton({
   }, [releaseStatus, issues, releaseRepoFullName]);
 
   async function handleTriggerRelease() {
-    const ok = await triggerRelease();
+    const ok = await triggerRelease(bumpKind ?? undefined);
     if (ok) {
+      setReleaseConfirmOpen(false);
       setReleaseSuccessOpen(true);
       void refetchPendingMerges();
     }
   }
+
+  // 既に何かが進行中（バンプPR・リリースPRがある、またはworkflow実行中）なら起動させない（#1548）。
+  // 押しても既存のPRがあるぶんは作り直されず、バージョン判定のClaude実行だけが余分に走る。
+  // 判定はこのポップオーバーが既に取得している状態から行うため、追加のGitHub API消費は無い。
+  const releaseInFlight =
+    releaseStatus?.available === true &&
+    (releaseStatus.phase !== "none" ||
+      (releaseStatus.workflowRun != null && releaseStatus.workflowRun.status !== "completed"));
 
   if (releasableRepositories.length === 0) return null;
 
@@ -296,12 +309,23 @@ export function ReleaseStatusButton({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={isTriggeringRelease}
+                    disabled={isTriggeringRelease || releaseInFlight}
                     onClick={() => setReleaseConfirmOpen(true)}
                   >
-                    <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
-                    {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
+                    <Rocket
+                      className={isTriggeringRelease || releaseInFlight ? "animate-pulse" : undefined}
+                    />
+                    {isTriggeringRelease
+                      ? "起動中..."
+                      : releaseInFlight
+                        ? "リリース実行中"
+                        : "リリースworkflowを起動"}
                   </Button>
+                  {releaseInFlight && (
+                    <p className="text-xs text-muted-foreground">
+                      進行中のリリースが終わるまで起動できません。
+                    </p>
+                  )}
                 </>
               )}
             </div>
@@ -317,6 +341,16 @@ export function ReleaseStatusButton({
               {releaseRepoFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* 上げ幅の選択は「ブランチとPRの流れ」画面の起動ボタンと同じコンポーネント（#1548）。
+              現在のバージョンはこの画面が既に取得しているmain側の版を渡す */}
+          <ReleaseBumpKindSelect
+            value={bumpKind}
+            onChange={setBumpKind}
+            currentVersion={
+              releaseStatus?.available ? (releaseStatus.mainVersion ?? null) : null
+            }
+            disabled={isTriggeringRelease}
+          />
           {pendingReleaseIssues.length > 0 ? (
             <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
               <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
@@ -363,9 +397,21 @@ export function ReleaseStatusButton({
               </ul>
             </div>
           )}
+          {/* 起動が失敗しても閉じない形にしたぶん、理由はダイアログの中に出す（#1548）。
+              上げ幅の指定に未対応のリポジトリはここで気づける */}
+          {releaseStatusError && <p className="text-xs text-destructive">{releaseStatusError}</p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleTriggerRelease}>起動する</AlertDialogAction>
+            <AlertDialogCancel disabled={isTriggeringRelease}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isTriggeringRelease}
+              onClick={(event) => {
+                // 結果を待たずに閉じると連打で複数回dispatchできてしまう（#1548）
+                event.preventDefault();
+                void handleTriggerRelease();
+              }}
+            >
+              {isTriggeringRelease ? "起動中..." : "起動する"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -10,6 +10,7 @@ import {
   PullRequestStateIcon,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
+import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
 import { DEVELOP_BRANCH, MAIN_BRANCH, isClosedLane, type BranchFlow } from "@/lib/branch-flow";
@@ -283,17 +284,93 @@ function LaneRow({
 }
 
 /**
+ * リリース待ちのPRをこの画面からマージするボタン（#1548）。
+ *
+ * マージ操作そのものは一覧・詳細と同じ`PullRequestMergeButton`に任せる。**mainへのPRは
+ * `mergeWarnings`が本番デプロイの警告を必ず返すため、押すと確認ダイアログを通る。**
+ */
+function ReleaseMergeButton({
+  pullRequest,
+  onMerged,
+}: {
+  pullRequest: PullRequestSummary;
+  onMerged: () => void;
+}) {
+  return (
+    <PullRequestMergeButton
+      pullRequest={pullRequest}
+      onMerged={onMerged}
+      className="shrink-0"
+      variant="outline"
+    />
+  );
+}
+
+/**
+ * 未リリースの束に乗っているバージョンバンプPR（`release/vX.Y.Z`→develop。#1548）。
+ *
+ * **作業レーンとしては描かない。** バンプPRの本文には今回のリリース対象issueが並ぶため、
+ * レーンとして扱うと無関係なIssueがそのレーンの「対応Issue」「関連」としてぶら下がる。
+ * ここでは幹の一部として、版・PR・CI状態・待っているマージ先だけを1行で出す。
+ *
+ * マージボタンは**Auto-mergeが効いていないとき（＝滞留しているとき）だけ**出す。
+ * 待てば入るものにボタンを出すと、押す必要がないものまで押させることになる。
+ */
+function BumpPullRequestLine({
+  pullRequest,
+  version,
+  onMerged,
+}: {
+  pullRequest: PullRequestSummary;
+  version: string | null;
+  onMerged: () => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-purple-500/60 bg-purple-500/5 px-2 py-1.5">
+      <span className="shrink-0 text-xs font-medium text-purple-700 dark:text-purple-300">
+        バージョンバンプ{version ? ` v${version}` : ""}
+      </span>
+      <PullRequestStateIcon pullRequest={pullRequest} className="size-3.5 shrink-0" />
+      <GithubReferenceLink
+        href={pullRequest.htmlUrl}
+        reference={{
+          repositoryFullName: pullRequest.repositoryFullName,
+          number: pullRequest.number,
+          kind: "pull",
+        }}
+        className="min-w-0 max-w-full break-words text-xs hover:underline"
+      >
+        #{pullRequest.number} {pullRequest.title}
+      </GithubReferenceLink>
+      {pullRequest.state === "open" && <CiStateBadge ciState={pullRequest.ciState} />}
+      {pullRequest.autoMergeEnabled ? (
+        <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
+      ) : (
+        <span className="shrink-0 text-xs text-muted-foreground">developへマージ待ち</span>
+      )}
+      {!pullRequest.autoMergeEnabled && (
+        <ReleaseMergeButton pullRequest={pullRequest} onMerged={onMerged} />
+      )}
+    </div>
+  );
+}
+
+/**
  * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
  *
  * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
  * 実線とひし形、まだ出ていない版は破線と中抜きのひし形で描く。
+ *
+ * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
  */
 function ReleaseGroupHeader({
   group,
   releaseButton,
+  onRefresh,
 }: {
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  onRefresh: () => void;
 }) {
   const released = group.mergedAt !== null;
 
@@ -329,12 +406,28 @@ function ReleaseGroupHeader({
             </span>
           ) : (
             <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
-              {group.pullRequest ? "リリース中" : "本番未反映"}
+              {group.pullRequest
+                ? "リリース中"
+                : group.bumpPullRequest
+                  ? "バージョンバンプ中"
+                  : "本番未反映"}
             </span>
+          )}
+          {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
+              `mergeWarnings`が返す警告で必ず確認ダイアログを通る */}
+          {group.pullRequest && group.pullRequest.state === "open" && (
+            <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onRefresh} />
           )}
           {releaseButton}
         </div>
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
+        {group.bumpPullRequest && (
+          <BumpPullRequestLine
+            pullRequest={group.bumpPullRequest}
+            version={group.version}
+            onMerged={onRefresh}
+          />
+        )}
       </div>
     </li>
   );
@@ -435,11 +528,13 @@ function ReleaseFlowGraph({
             key={group.key}
             repositoryFullName={repository.repositoryFullName}
             group={group}
+            onRefresh={onRefresh}
             releaseButton={
               index === 0 && repository.canTriggerRelease ? (
                 <RepositoryReleaseButton
                   repositoryFullName={repository.repositoryFullName}
                   pendingIssues={pendingIssues}
+                  currentVersion={repository.release.latestVersion}
                   onTriggered={onRefresh}
                 />
               ) : undefined
@@ -511,14 +606,16 @@ function ReleaseGroupHeaderWithLanes({
   repositoryFullName,
   group,
   releaseButton,
+  onRefresh,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  onRefresh: () => void;
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} />
+      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onRefresh={onRefresh} />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} />

@@ -14,7 +14,19 @@ name: Release develop to main
 #
 # バンプPRの作成は人間の確認なしに走るため、scheduleでの自動起動はしない。
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      bump_kind:
+        # バージョンの上げ幅を人が決められるようにするための入口（#1548）。issue-deckの画面
+        # （リリース起動の確認ダイアログ）から渡す。**バンプPRはCI通過後にauto-mergeで
+        # developへ入るため、PRが出てから上げ幅を直す時間は実質無い。** 起動する時点で
+        # 決められるようにして、直す必要そのものを無くしている。
+        # 既定の`auto`は従来どおりコード差分からClaudeが判定する。
+        description: "バージョンの上げ幅（autoならコード差分から自動判定）"
+        required: false
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major]
   # バンプPRがdevelopへ（auto-mergeで）マージされ、バージョンが変わったときに再起動して
   # develop→mainのPRを自動作成する。通常のフィーチャーpushではpackage.jsonが変わらないため
   # 起動しない。
@@ -31,8 +43,12 @@ jobs:
   release:
     uses: ./.github/workflows/reusable-release-develop-to-main.yml
     # issue-deckはルートのpackage.jsonにversionを持ち、"version" lifecycleスクリプトも
-    # 定義しているため、inputsは全て既定値でよい（version-file: package.json /
-    # version-query: .version / bump-command: 空）。
+    # 定義しているため、バージョンの読み書きに関するinputsは既定値でよい
+    # （version-file: package.json / version-query: .version / bump-command: 空）。
+    with:
+      # pushトリガー（バンプPRのマージ）で起動したときは`inputs`自体が無いため空文字を渡す。
+      # そちらの実行はdevelop→mainのPR作成だけを行い、上げ幅を使わない（#1548）。
+      bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 通常のワークフローではjobが
     # workflowレベルの既定を上回る指定をしてよいが、再利用可能ワークフローでは

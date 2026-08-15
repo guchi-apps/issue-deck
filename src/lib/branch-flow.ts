@@ -150,7 +150,19 @@ function buildRepository({
     pullRequests.find(
       (pullRequest) => pullRequest.kind === "release" && pullRequest.state === "open",
     ) ?? null;
-  const lanePullRequests = pullRequests.filter((pullRequest) => pullRequest.kind !== "release");
+
+  // **バージョンバンプPR（`release/vX.Y.Z`→develop）も幹の一部**（#1548）。レーンとして扱うと、
+  // PR本文に並ぶ「今回のリリース対象issue」の番号を`linkedIssueNumbers`が拾い、無関係なIssueが
+  // そのレーンの「対応Issue」「関連」としてぶら下がる（#1547で実際にそう見えていた）。
+  // マージ済みのバンプPRは出さない——どの版で本番へ出たかはリリースの束の見出しが表しているため。
+  const bumpPullRequest =
+    pullRequests.find(
+      (pullRequest) => pullRequest.kind === "version-bump" && pullRequest.state === "open",
+    ) ?? null;
+
+  const lanePullRequests = pullRequests.filter(
+    (pullRequest) => pullRequest.kind !== "release" && pullRequest.kind !== "version-bump",
+  );
 
   // 実在が確認できた作業ブランチ。PRを持たないものだけがレーンを増やす（PRを持つブランチは
   // PR側から拾えるため）。確認していないブランチについては何も言えないので触れない。
@@ -189,6 +201,7 @@ function buildRepository({
     lanes,
     releases,
     openReleasePullRequest: releasePullRequest,
+    openBumpPullRequest: bumpPullRequest,
     unreleasedCommits: branchStatus?.developVsMain?.aheadBy ?? 0,
   });
 
@@ -197,11 +210,17 @@ function buildRepository({
   );
   const summary: BranchFlowRepositorySummary = {
     activeLaneCount: activeLanes.filter((lane) => !isClosedLane(lane)).length,
-    hasCiFailure: [...openLanePullRequests, ...(releasePullRequest ? [releasePullRequest] : [])].some(
-      (pullRequest) => pullRequest.ciState === "failure",
-    ),
+    // バンプPRもレーンから外したぶんここで数える（#1548）。CIが落ちたバンプPRは
+    // auto-mergeが効かず止まっている状態そのもので、畳んだ行から気づけないと困る。
+    hasCiFailure: [
+      ...openLanePullRequests,
+      ...(releasePullRequest ? [releasePullRequest] : []),
+      ...(bumpPullRequest ? [bumpPullRequest] : []),
+    ].some((pullRequest) => pullRequest.ciState === "failure"),
     needsUserMerge: openLanePullRequests.some(requiresUserMerge),
-    releaseInProgress: releasePullRequest !== null,
+    // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
+    // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
+    releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
   };
 
   // リリース用workflow（`release-develop-to-main.yml`）を実際に持つリポジトリだけで押させる
@@ -228,7 +247,7 @@ function buildRepository({
     canTriggerRelease:
       canRelease &&
       releasePullRequest === null &&
-      !openLanePullRequests.some((pullRequest) => pullRequest.kind === "version-bump") &&
+      bumpPullRequest === null &&
       (branchStatus?.developVsMain?.aheadBy ?? 0) > 0,
     orphanIssues: issues
       .filter(
@@ -282,11 +301,14 @@ function groupLanesByRelease({
   lanes,
   releases,
   openReleasePullRequest,
+  openBumpPullRequest,
   unreleasedCommits,
 }: {
   lanes: BranchFlowLane[];
   releases: MergedRelease[];
   openReleasePullRequest: PullRequestSummary | null;
+  /** openなバージョンバンプPR。先頭（未リリース）の束へ幹の一部として乗せる（#1548） */
+  openBumpPullRequest: PullRequestSummary | null;
   unreleasedCommits: number;
 }): {
   activeLanes: BranchFlowLane[];
@@ -315,14 +337,27 @@ function groupLanesByRelease({
   }
 
   const releaseGroups: BranchFlowReleaseGroup[] = [];
-  if (pendingLanes.length > 0 || openReleasePullRequest !== null || unreleasedCommits > 0) {
+  if (
+    pendingLanes.length > 0 ||
+    openReleasePullRequest !== null ||
+    openBumpPullRequest !== null ||
+    unreleasedCommits > 0
+  ) {
     releaseGroups.push(
       toReleaseGroup({
         key: "unreleased",
-        version: openReleasePullRequest
-          ? (VERSION_PATTERN.exec(openReleasePullRequest.title)?.[1] ?? null)
-          : null,
+        // 版はリリースPRのタイトルから取り、まだ無ければバンプPRのブランチ名（`release/vX.Y.Z`）
+        // から取る（#1548）。バンプ中は次に出る版が既に決まっているため、「次のリリース」より
+        // 版数を出すほうが状況を表す。
+        version:
+          (openReleasePullRequest
+            ? (VERSION_PATTERN.exec(openReleasePullRequest.title)?.[1] ?? null)
+            : null) ??
+          (openBumpPullRequest
+            ? (VERSION_PATTERN.exec(openBumpPullRequest.headRef)?.[1] ?? null)
+            : null),
         pullRequest: openReleasePullRequest,
+        bumpPullRequest: openBumpPullRequest,
         mergedAt: null,
         lanes: pendingLanes.sort(compareLanes),
       }),
@@ -338,6 +373,8 @@ function groupLanesByRelease({
         key: `release-${release.pullRequestNumber}`,
         version: release.version,
         pullRequest: release.pullRequest,
+        // 本番へ出た束にバンプPRは出さない（版の見出しがそれを表している）
+        bumpPullRequest: null,
         mergedAt: release.pullRequest.mergedAt,
         lanes: groupLanes.sort(compareLanes),
       }),

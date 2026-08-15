@@ -265,8 +265,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
   起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
-  同じ結果になるようにしてある。**流れ画面が持つのは起動だけ**で、4段の進捗とmainへのマージ導線は
-  ヘッダー側（`ReleaseProgress`）に残す——ここで状態まで追うと取得を増やさない前提が崩れる。
+  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作まで。**
+  4段の進捗はヘッダー側（`ReleaseProgress`）に残す——ここで状態まで追うと取得を増やさない前提が崩れる。
+  **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
+  数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
+  （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
+  起動時刻は端末のlocalStorageへ置き、判定は[`lib/release-trigger-guard.ts`](../src/lib/release-trigger-guard.ts)。
+  **10分で失効させる**のは、workflowが失敗してバンプPRが1本も作られなかったときにボタンが
+  二度と押せなくなるのを防ぐため。サーバー側に押下を記録しないのは、問い合わせるとこの画面の
+  前提（取得を増やさない）が崩れるから。ヘッダー側は取得済みの`phase`・runで同じ判定ができるため、
+  そちらは進行中なら起動ボタンを無効にする。
+  **mainへのマージもこの画面から行える**（#1548）。束の見出しのマージボタンは一覧・詳細と同じ
+  `PullRequestMergeButton`（`POST /api/issues/pull-request-merge`。merge commit）で、
+  `mergeWarnings`がbase`main`のPRに「本番デプロイが走る」警告を必ず返すため確認ダイアログを通る。
+  マージ成功後は「マージ済み」で無効のまま残す——再取得が終わるまでの数秒に押せると、
+  2回目のマージ要求が飛ぶため。
+  **バージョンバンプPR（`release/vX.Y.Z`→develop）はレーンではなく幹として描く**（#1548）。
+  レーンとして扱っていたころは、バンプPR本文に並ぶ「今回のリリース対象issue」を
+  `linkedIssueNumbers`が拾い、無関係なIssueが対応Issue・関連としてぶら下がっていた。
+  openなバンプPRは未リリースの束の`bumpPullRequest`に入り、束の版もそのブランチ名から決まる。
+  マージ済みのバンプPRは表示しない（どの版で本番へ出たかは束の見出しが表しているため）。
+  この行のマージボタンは**Auto-mergeが効いていないとき（＝滞留しているとき）だけ**出す。
   **「どのバージョンで本番へ出たか」は、追加の取得をせずPRのマージ時刻だけで決める。**
   develop→mainのリリースPRはマージ時点のdevelopをそのままmainへ入れるので、作業PRが
   developへ入った後**最初にマージされたリリースPR**がその変更を運んだことになる。版はその
@@ -405,6 +424,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
   `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **開発サーバーの掃除だけはpollerの外にも段を持つ**（#1525）。`scripts/reap-dev-servers.sh`の
+  入口は`.dev-servers/issue-<番号>.pid`だけで、PIDファイルが残らなかった孤児と**pollerごと
+  止まっている**場合を取りこぼす。`scripts/sweep-orphan-dev-servers.sh`は`ss -tlnp`で実際に
+  ポートを掴んでいるプロセスから入り、systemd timer（`deploy/subpc/issue-deck-dev-server-sweep.timer`）が
+  1時間ごとに呼ぶ。止め方は`scripts/lib/dev-server.sh`を共有する（**止め方を増やさない**）。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

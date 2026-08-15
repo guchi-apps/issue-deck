@@ -561,9 +561,9 @@ describe("バージョンごとの束（releaseGroups）", () => {
   });
 
   it("リリースPRのマージ時刻の前後で、どの束に入るかが決まる", () => {
+    // バンプPR（release/v3.8.6）は#1548でレーンから外したため、ここには現れない
     expect(repository.releaseGroups[0].lanes.map((lane) => lane.branchName).sort()).toEqual([
       "issue-137",
-      "release/v3.8.6",
     ]);
     expect(repository.releaseGroups[1].lanes.map((lane) => lane.branchName)).toEqual(["issue-am"]);
   });
@@ -774,6 +774,75 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
       ],
     });
     expect(repository.canTriggerRelease).toBe(false);
+  });
+});
+
+describe("バージョンバンプPRの扱い（#1548）", () => {
+  const openBump = pullRequest({
+    number: 1547,
+    title: "v3.21.0をリリースする",
+    headRef: "release/v3.21.0",
+    kind: "version-bump",
+    // バンプPR本文には今回のリリース対象issueが並ぶため、参照Issueが付く
+    linkedIssueNumber: 1503,
+    linkedIssueNumbers: [1503, 1527, 1528],
+    state: "open",
+    autoMergeEnabled: true,
+    ciState: "pending",
+  });
+
+  const flow = build({
+    pullRequests: [
+      openBump,
+      pullRequest({ number: 1545, headRef: "issue-1541", linkedIssueNumber: 1541, state: "open" }),
+    ],
+    issues: [issue({ number: 1541, projectStatus: "Develop PR" })],
+    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0 } })],
+  });
+  const [repository] = flow.repositories;
+
+  it("作業レーンには現れない（無関係なIssueがぶら下がるのを防ぐ）", () => {
+    expect(allLanes(repository).map((lane) => lane.branchName)).not.toContain("release/v3.21.0");
+  });
+
+  it("未リリースの束が幹の一部として持つ", () => {
+    expect(repository.releaseGroups[0].bumpPullRequest?.number).toBe(1547);
+  });
+
+  it("束の版はバンプPRのブランチ名から決まる", () => {
+    expect(repository.releaseGroups[0].version).toBe("3.21.0");
+  });
+
+  it("リリース進行中として畳んだ行に出す", () => {
+    expect(repository.summary.releaseInProgress).toBe(true);
+  });
+
+  it("CIが落ちたバンプPRはCI失敗として拾う", () => {
+    const failing = build({
+      pullRequests: [pullRequest({ ...openBump, ciState: "failure" })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0 } })],
+    }).repositories[0];
+    expect(failing.summary.hasCiFailure).toBe(true);
+  });
+
+  it("マージ済みのバンプPRはどこにも出さない（版の見出しが表すため）", () => {
+    const merged = build({
+      pullRequests: [
+        pullRequest({
+          number: 1547,
+          headRef: "release/v3.21.0",
+          kind: "version-bump",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-15T01:00:00Z",
+        }),
+      ],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0 } })],
+    }).repositories[0];
+
+    expect(allLanes(merged).map((lane) => lane.branchName)).toEqual([]);
+    expect(merged.releaseGroups[0].bumpPullRequest).toBeNull();
   });
 });
 
