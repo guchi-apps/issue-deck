@@ -309,17 +309,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **「リリース用workflowがある」は`release-develop-to-main.yml`の実在で判定する**（#1538）。
   当初は`claude-issue-dispatch.yml`の有無（`Repository.hasClaudeWorkflow`）で代用していたが、
   この2つは一致しない——Claude運用には載っていてもリリースフローを持たないリポジトリ
-  （例: clip-hive）でボタンが出てしまい、押すとdispatchが404で失敗した。判定はヘッダーの
-  ロケットボタンと同じ`releaseWorkflowExists`（プロセス内に10分キャッシュ）を`GET /api/branch-flow`
+  （例: clip-hive）でボタンが出てしまい、押すとdispatchが404で失敗した。判定は
+  `POST /api/repositories/release`と同じ`releaseWorkflowExists`（プロセス内に10分キャッシュ）を`GET /api/branch-flow`
   から通し、結果を`RepositoryBranchStatus.hasReleaseWorkflow`として返す。**取得できていない
   リポジトリはfalse（＝出さない）へ倒す。** さらに`POST /api/repositories/release`側でも起動前に
   同じ判定を行い、workflowが無ければ`release_workflow_missing`を返して日本語の文言を出す
   （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
-  起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
+  起動そのものはスマホのリリースシートと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
-  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作と、
-  本番デプロイの状態まで。** バンプPR作成→develop反映→PR作成→mainへマージの4段の進捗は
-  ヘッダー側（`ReleaseProgress`）に残す——ここで全部を追うと取得を増やさない前提が崩れる。
+  同じ結果になるようにしてある。**PCでリリースを起動できるのはこの画面だけ**（#1614でヘッダーの
+  ロケットボタンを通知ベルへ置き換えた）。**流れ画面が持つのは起動と、取得済みのPRだけで成立する
+  操作と、本番デプロイの状態まで。** バンプPR作成→develop反映→PR作成→mainへマージの4段の進捗
+  （`ReleaseProgress`）はPCでは出さず、スマホのリリースシートにだけ残る——ここで全部を追うと
+  取得を増やさない前提が崩れる。PCで段階まで見たいときはGitHub Actionsの実行ログを開く。
   **本番デプロイだけを例外にしているのは、PRの情報だけでは誤ったことを言ってしまうから**（#1579）。
   リリースPRがマージされた瞬間に束の見出しが「◯/◯に本番反映」へ変わっていたが、見ているのは
   mainへマージされた事実だけで、そこから`deploy.yml`が数分走り、失敗すればmainに入ったまま
@@ -341,8 +343,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時刻は端末のlocalStorageへ置き、判定は[`lib/release-trigger-guard.ts`](../src/lib/release-trigger-guard.ts)。
   **10分で失効させる**のは、workflowが失敗してバンプPRが1本も作られなかったときにボタンが
   二度と押せなくなるのを防ぐため。サーバー側に押下を記録しないのは、問い合わせるとこの画面の
-  前提（取得を増やさない）が崩れるから。ヘッダー側は取得済みの`phase`・runで同じ判定ができるため、
-  そちらは進行中なら起動ボタンを無効にする。
+  前提（取得を増やさない）が崩れるから。
   **mainへのマージもこの画面から行える**（#1548）。束の見出しのマージボタンは一覧・詳細と同じ
   `PullRequestMergeButton`（`POST /api/issues/pull-request-merge`。merge commit）で、
   `mergeWarnings`がbase`main`のPRに「本番デプロイが走る」警告を必ず返すため確認ダイアログを通る。
@@ -379,16 +380,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （`hooks/use-issue-pull-requests.ts`）。
 - **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
   （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
-  一覧・PR詳細・ロケットアイコンのリリース進捗に出る。**どのワークフローを起動するかの判定は
+  一覧・PR詳細・スマホのリリースシートの進捗に出る。**どのワークフローを起動するかの判定は
   サーバー側**（[`lib/github/pull-request-repair.ts`](../src/lib/github/pull-request-repair.ts)）
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
-  詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、ロケットアイコンの
-  ポップオーバー・モバイルのリリースシートが使う。1回でGitHub APIを7〜8回消費するため、
-  開いている間だけポーリングする。横断のサマリは`GET /api/repositories/release-pending-merges`
-  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーのロケットアイコンのバッジと
+  詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、**モバイルの
+  リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを
+  7〜8回消費するため、開いている間だけポーリングする。横断のサマリは
+  `GET /api/repositories/release-pending-merges`
+  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーの通知ベル（後述）と
   **モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
   （`idle`/`progressing`/`action_required`/`error`）と表示文言は、どちらの経路も
   [`lib/github/release-button-status.ts`](../src/lib/github/release-button-status.ts)の
@@ -403,6 +405,26 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
   なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
   ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
+- **PCヘッダー右端の通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
+  （#1614。[`components/dashboard/notification-button.tsx`](../src/components/dashboard/notification-button.tsx)）。
+  元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
+  同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
+  リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「完了したPR」と同じ
+  母集団）／`71.manual-step`の4区分。
+  - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
+    作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
+    `filterPullRequestsByView`から得る。ここで独自判定を書くと、同じ状態が画面ごとに別の言葉で出る。
+  - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
+    リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
+  - **同じ操作を2行に出さない。** リリースのマージ待ちとして出したPRと、確認待ちとして出した
+    Issueに紐づくPRは、PRの区分から落とす（Issue詳細に`issue-merge-button.tsx`があるので
+    操作は失われず、左メニューの「確認待ち」件数とも食い違わない）。
+  - **自動で進行中のもの（`progressing`・Auto-merge有効でCI成功）は出さない。** 人が何も
+    しなくてよいものを並べるとベルを開く意味が薄れる。
+  - **TopBarの絞り込みには追随しない。** 横断で見る場所なので、Issue側と同じく絞り込み前の
+    集合を渡す（`IssueDeckShell`の`notifiablePullRequests`）。
+  - **スマホは対象外**（ヘッダー自体が`hidden md:flex`）。スマホの確認待ち・手作業待ちは
+    ホーム画面の件数、リリースはリポジトリ画面のシートという別経路のまま。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)

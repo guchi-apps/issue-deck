@@ -52,6 +52,7 @@ import { buildBranchFlow, latestReleaseMergedAtByRepository } from "@/lib/branch
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
+import type { NotificationTarget } from "@/lib/notifications";
 import {
   applyIssueFilters,
   computeFilterLabelSummary,
@@ -442,6 +443,18 @@ export function IssueDeckShell({
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
   }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
 
+  // ヘッダーの通知ベル（#1614）に渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
+  // ベルはリポジトリ横断で「いま人が動かないと止まるもの」を見る場所で、Issue側（絞り込み前の
+  // `issues`を渡している）と揃えないと、絞り込んだ瞬間にPRだけ消えて件数の意味が変わる。
+  // 伏せたPR（マージ済みで消したもの）だけは除く。
+  const notifiablePullRequests = useMemo(
+    () =>
+      openPullRequests.pullRequests.filter(
+        (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
+      ),
+    [openPullRequests.pullRequests, hiddenPullRequestIds],
+  );
+
   const filteredPullRequests = useMemo(
     () => filterPullRequestsByView(visiblePullRequests, filters.prview),
     [visiblePullRequests, filters.prview],
@@ -541,6 +554,19 @@ export function IssueDeckShell({
       }
     }
     openPullRequestUrl(buildPullRequestId(reference.repositoryFullName, reference.number));
+  }
+
+  /** ヘッダーの通知ベル（#1614）の項目を押したときの遷移 */
+  function openNotificationTarget(target: NotificationTarget) {
+    if (target.kind === "issue") {
+      openIssueUrl(target.issueId);
+      return;
+    }
+    if (target.kind === "pull-request") {
+      openPullRequestUrl(target.pullRequestId);
+      return;
+    }
+    selectFlowPane();
   }
 
   async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
@@ -695,9 +721,12 @@ export function IssueDeckShell({
           onAskQuestion={() =>
             openAskRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
           }
-          selectedRepoFullName={filters.repos[0] ?? null}
           repositories={repositories}
           issues={issues}
+          pullRequests={notifiablePullRequests}
+          onOpenNotificationTarget={openNotificationTarget}
+          onOpenCheckUserView={() => selectView("check-user")}
+          onOpenFlow={selectFlowPane}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
           onOpenSettings={() => setSettingsDialogOpen(true)}

@@ -104,7 +104,7 @@ async function handleGET() {
           // `claude-issue-dispatch.yml`の有無（`hasClaudeWorkflow`）で代用していたため、
           // Claude運用に載っているだけでリリース用workflowを持たないリポジトリにもボタンが
           // 出て、押すとdispatchが404で失敗していた。
-          // 判定はヘッダーのロケットボタン（`/api/repositories/release`）と同じ関数を通す。
+          // 判定は起動側（`/api/repositories/release`）と同じ関数を通す。
           // プロセス内に10分キャッシュされ、多くの場合そのポーリングと共有されるため、
           // この画面のためのGitHub API消費はほとんど増えない。取れなかった場合はfalseへ
           // 縮退させ、押せない側へ倒す。
