@@ -34,8 +34,9 @@ GitHub Apps > Permissions）でのみ確認でき、コードからは導けな�
 | Issue完全削除 | `issues-api.ts`（GraphQLの`deleteIssue`） | `POST /graphql`（`deleteIssue`ミューテーション） | Issues: Read and write（`deleteIssue`はIssues権限で足り、Administrationは不要） |
 | **Issue移動** | `issues-api.ts`（GraphQLの`transferIssue`） | `POST /graphql`（`transferIssue`ミューテーション） | **Administration: Read and write（他に選択肢なし）** |
 | リポジトリ同期 | `src/lib/github/sync-issues.ts` | `issues-api.ts`経由で上記と同じ | Issues: Read and write |
-| リリースPR一覧・ワークフロー実行状況・package.json取得・ワークフローdispatch | `src/lib/github/release-api.ts` | `/actions/workflows/*`、`/contents/package.json`、`/pulls`、`/commits/{ref}/check-runs`、`/actions/workflows/*/dispatches` | Actions: Read and write / Pull requests: Read / Contents: Read / Checks: Read |
-| ワークフロー実行の取得・ジョブ取得・キャンセル・強制キャンセル、PR取得、check-runs取得 | `src/lib/github/actions-api.ts` | `/actions/runs/{id}*`、`/pulls/{number}`、`/commits/{ref}/check-runs` | Actions: Read and write / Pull requests: Read / Checks: Read |
+| リリースPR一覧・ワークフロー実行状況・package.json取得・ワークフローdispatch | `src/lib/github/release-api.ts` | `/actions/workflows/*`、`/contents/package.json`、`/pulls`、`/actions/workflows/*/dispatches` | Actions: Read and write / Pull requests: Read / Contents: Read |
+| **CI状態（PRのChecks集約）** | `src/lib/github/check-rollup.ts`（GraphQLの`Commit.statusCheckRollup`） | `POST /graphql` | Checks: Read（外部CIのcommit statusまで見るなら Commit statuses: Read も） |
+| ワークフロー実行の取得・ジョブ取得・キャンセル・強制キャンセル、PR取得 | `src/lib/github/actions-api.ts` | `/actions/runs/{id}*`、`/pulls/{number}` | Actions: Read and write / Pull requests: Read |
 | rate_limit取得 | `src/lib/github/rate-limit.ts` | `/rate_limit` | 権限不要（メタデータ相当） |
 | インストール情報・リポジトリ一覧取得（セットアップ画面） | `src/app/github/setup/route.ts` | `/app/installations/{id}`、`/installation/repositories` | Metadata: Read（Appインストール時に自動付与） |
 

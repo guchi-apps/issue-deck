@@ -1,3 +1,4 @@
+import { fetchCheckRollup } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -144,15 +145,6 @@ export type CiState = "pending" | "success" | "failure" | "unknown";
 
 type CheckRun = { status: string; conclusion: string | null };
 
-/** check-runsの1ページあたりの取得件数（GitHub APIの上限） */
-const CHECK_RUNS_PAGE_SIZE = 100;
-
-/**
- * check-runsを取得するページ数の上限。暴走防止のガードであり、通常のrefは1ページに収まる
- * （`develop`でも実測94件）。上限に当たった場合は取得できた範囲で判定する。
- */
-const CHECK_RUNS_MAX_PAGES = 10;
-
 /** チェックとして「通った」とみなすconclusion */
 const PASSABLE_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
@@ -168,36 +160,26 @@ export function resolveCiStateFromCheckRuns(runs: CheckRun[]): CiState {
 }
 
 /**
- * check-runsの1ページ分を取得する。取得できなければ`null`（呼び出し側で`unknown`へ縮退させる）。
- *
- * PR一覧と同じくETagによる条件付きGETを通す（#1531）。CIが動いていないrefでは304が返り、
- * レート制限を消費しない。
+ * GitHub自身の集約結果（`statusCheckRollup.state`）を`CiState`へ写す。チェックが100件を
+ * 超えていて1件ずつ見られなかったときだけ使う。
  */
-async function fetchCheckRunsPage(
-  owner: string,
-  repo: string,
-  ref: string,
-  token: string,
-  page: number,
-): Promise<{ totalCount: number; runs: CheckRun[] } | null> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}/check-runs?per_page=${CHECK_RUNS_PAGE_SIZE}&page=${page}`;
-  const result = await githubFetchJsonWithEtag<{
-    total_count?: number;
-    check_runs?: CheckRun[];
-  }>(url, token).catch(() => null);
-  if (!result || !result.ok) return null;
-  return { totalCount: result.data.total_count ?? 0, runs: result.data.check_runs ?? [] };
+function ciStateFromRollupState(state: string | null): CiState {
+  if (state === "success") return "success";
+  if (state === "pending" || state === "expected") return "pending";
+  if (state === "failure" || state === "error") return "failure";
+  return "unknown";
 }
 
 /**
- * 指定ref（ブランチ名/SHA）のGitHub Actionsチェック（check-runs）を集約したCI状態を返す。
+ * 指定ref（ブランチ名/SHA）のチェックを集約したCI状態を返す。
  * `Checks: read`権限が無い等で取得に失敗した場合は例外を投げず`unknown`を返す（進捗表示は
  * あくまで補助情報のため、CI状態が取れなくてもマージ用URL自体は表示できるようにする）。
  *
- * **1ページ（100件）で打ち切らず、`total_count`を見て全ページを取得する。** refに紐づく
- * check-runsはCIワークフローだけでなく、その時点で走った全ワークフローのジョブを含むため
- * 容易に100件を超える（`develop`で実測94件）。打ち切ると、取得できなかった範囲の失敗を
- * 静かに取りこぼして`success`を返してしまう（#1061）。
+ * **GitHubがそのコミットのChecksとして数えるものだけを見る**（`lib/github/check-rollup.ts`）。
+ * RESTの`/commits/{sha}/check-runs`はSHAに紐づくジョブを分け隔てなく返すため、無人実行の
+ * ワークフロー（`issues`・`issue_comment`・`workflow_dispatch`・`workflow_run`・`schedule`起動）
+ * まで混ざり、GitHubの画面ではCI成功・マージ可能なのにissue-deckだけ「CI失敗」「CI実行中」に
+ * なっていた（#1578）。
  */
 export async function fetchRefCiState(
   owner: string,
@@ -205,29 +187,11 @@ export async function fetchRefCiState(
   ref: string,
   token: string,
 ): Promise<CiState> {
-  const first = await fetchCheckRunsPage(owner, repo, ref, token, 1);
-  if (!first) return "unknown";
-
-  const runs = [...first.runs];
-  const pageCount = Math.min(
-    Math.ceil(first.totalCount / CHECK_RUNS_PAGE_SIZE),
-    CHECK_RUNS_MAX_PAGES,
-  );
-
-  if (pageCount > 1) {
-    const rest = await Promise.all(
-      Array.from({ length: pageCount - 1 }, (_, index) =>
-        fetchCheckRunsPage(owner, repo, ref, token, index + 2),
-      ),
-    );
-    // 1ページでも欠けると「失敗が無い」と誤判定しうるため、部分的な結果では判定しない。
-    if (rest.some((page) => page === null)) return "unknown";
-    for (const page of rest) {
-      if (page) runs.push(...page.runs);
-    }
-  }
-
-  return resolveCiStateFromCheckRuns(runs);
+  const rollup = await fetchCheckRollup(owner, repo, ref, token);
+  if (!rollup) return "unknown";
+  // 100件を超えるrefでは1件ずつ見られないため、GitHubの集約値をそのまま使う。
+  if (!rollup.checks) return ciStateFromRollupState(rollup.state);
+  return resolveCiStateFromCheckRuns(rollup.checks);
 }
 
 /**

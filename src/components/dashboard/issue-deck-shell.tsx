@@ -528,16 +528,25 @@ export function IssueDeckShell({
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
 
-  // 詳細を開いているPR（#1087）。一覧に載っていれば一覧の項目をそのまま使い（CI状態まで
-  // 揃っていて即座に描ける）、載っていない場合は詳細APIが返す`summary`で補う。後者は
-  // 画面内のリンクからマージ済み・クローズ済みのPRを開いた場合の経路（#1260）。
+  // 詳細を開いているPR（#1087）。一覧に載っていれば一覧の項目を使い（CI状態まで揃っていて
+  // 即座に描ける）、載っていない場合は詳細APIが返す`summary`で補う。後者は画面内のリンクから
+  // マージ済み・クローズ済みのPRを開いた場合の経路（#1260）。
+  //
+  // **両方あるときは取得が新しい方を採る**（#1578）。一覧は「完了したPR」ビューを見ている間しか
+  // 自動更新されず、詳細ヘッダーの更新ボタンは詳細しか取り直さない。一覧を無条件に優先すると、
+  // 更新を押してCIが通ったことを取り直しても、一覧を開いた時点の「CI失敗」が出たまま消えなかった。
   const selectedPullRequest = useMemo(() => {
     if (!filters.pr) return null;
     const fromList = filteredPullRequests.find((pullRequest) => pullRequest.id === filters.pr);
-    if (fromList) return fromList;
     // 取得中・別のPRへ切り替えた直後に前のPRのヘッダーが残らないよう、idの一致を確認する。
-    return pullRequestDetail.detail?.id === filters.pr ? pullRequestDetail.detail.summary : null;
-  }, [filteredPullRequests, filters.pr, pullRequestDetail.detail]);
+    const detail =
+      pullRequestDetail.detail?.id === filters.pr ? pullRequestDetail.detail : null;
+    if (!detail) return fromList ?? null;
+    if (!fromList) return detail.summary;
+    return openPullRequests.fetchedAt && openPullRequests.fetchedAt > detail.fetchedAt
+      ? fromList
+      : detail.summary;
+  }, [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail]);
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
     setMergedPullRequests((prev) => ({

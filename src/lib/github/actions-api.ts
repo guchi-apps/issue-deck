@@ -112,23 +112,3 @@ export async function mergePullRequest(
   }
 }
 
-export type GithubApiCheckRun = {
-  status: "queued" | "in_progress" | "completed" | string;
-  conclusion: string | null;
-};
-
-export async function fetchCheckRuns(
-  owner: string,
-  repo: string,
-  ref: string,
-  token: string,
-): Promise<GithubApiCheckRun[]> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${ref}/check-runs`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
-  }
-  const data: { check_runs: GithubApiCheckRun[] } = await res.json();
-  return data.check_runs;
-}

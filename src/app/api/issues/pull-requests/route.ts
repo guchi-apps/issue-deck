@@ -2,16 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { fetchCheckRuns } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
-import { summarizePullRequestCiStatus } from "@/lib/github/pull-request-ci";
+import { toPullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import {
   fetchPullRequest,
   type GithubApiPullRequestDetail,
 } from "@/lib/github/pull-requests-api";
+import { fetchRefCiState } from "@/lib/github/release-api";
 import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
 import type { IssuePullRequest, IssuePullRequestListResponse } from "@/types/pull-request";
 
@@ -49,7 +49,7 @@ async function toIssuePullRequest(
   // 1リクエストを使わずnullのままにする（`/api/pull-requests/detail`と同じ方針）。
   const ciStatus =
     pullRequest.state === "open" && !pullRequest.draft
-      ? summarizePullRequestCiStatus(await fetchCheckRuns(owner, repo, pullRequest.head.sha, token))
+      ? toPullRequestCiStatus(await fetchRefCiState(owner, repo, pullRequest.head.sha, token))
       : null;
 
   return {

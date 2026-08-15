@@ -203,14 +203,29 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **その分をレート制限に計上しない**。素で10秒ポーリングすると26リポジトリ×360回/時で
   インストール当たりの上限（5,000回/時）を約2倍超過し、PR一覧だけでなくIssue同期・CI状態・
   マージまで巻き添えで失敗する。通しているのはPR一覧（`fetchOpenPullRequests` /
-  `fetchClosedPullRequests`）とCI状態（`fetchRefCiState`のcheck-runs）の2経路で、
-  変化が無い間の消費は実質ゼロになる。キャッシュはプロセス内メモリのLRU（上限500件。
-  check-runsのURLはhead SHAごとに増えるため）で、`api-usage`と同じく単一プロセス前提。
+  `fetchClosedPullRequests`）で、変化が無い間の消費は実質ゼロになる。キャッシュはプロセス内
+  メモリのLRU（上限500件）で、`api-usage`と同じく単一プロセス前提。
+  **CI状態（`fetchRefCiState`）は#1578でGraphQLへ移したのでこの経路を通らない。**
+  条件付きGETが使えなくなるが、消費先がRESTと別枠の5,000ポイント/時になり、PR1件あたりの
+  問い合わせも最大3回（check-runsのページング）から1回に減るため、RESTの枠はむしろ空く。
   **キャッシュの古さが表示に出ることはない**——毎回GitHubへ問い合わせており、本文をキャッシュから
   返すのはGitHub自身が「変わっていない」と答えたときだけ。キーはURLのみでトークンを含めないが、
   権限の無いリポジトリには304ではなく404が返るため、別インストールの内容は漏れない。
   **304は使用量（`api-usage`）にも計上しない**ので、設定画面の「GitHub API使用量」の
   `pull_request_list`は実際に消費した回数を表す。
+- **CI状態は「GitHubがそのコミットのChecksとして数えるもの」だけを見る**（#1578。
+  [`lib/github/check-rollup.ts`](../src/lib/github/check-rollup.ts) → `fetchRefCiState`）。
+  **RESTの`/commits/{sha}/check-runs`を使ってはいけない。** あれはSHAに紐づくジョブを分け隔てなく
+  返すため、`issues`・`issue_comment`・`workflow_dispatch`・`workflow_run`・`schedule`で起動した
+  無人実行のワークフローまで混ざる。issue-deckの`develop`は無人実行が常時走っており、リリースPR
+  （headが`develop`そのもの）のheadコミットには**58件のワークフロー実行・218件のcheck-run**が
+  ぶら下がっていて、GitHubがChecksとして数えるのは`pull_request`・`push`起動の**5件・27件**
+  だけだった（v3.22.0のリリースPR #1573で実測）。残りまで集約していたため、無関係な自動化の
+  キャンセル1件で「CI失敗」・実行中1件で「CI実行中」になり、GitHubの画面では成功・マージ可能なのに
+  issue-deckだけが失敗を出していた。GraphQLの`Commit.statusCheckRollup`はGitHubの画面が出している
+  ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
+  以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
+  優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
@@ -257,10 +272,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
   ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
   **「処理中」「完了」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
-  クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
-  選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
+  クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+  **両方あるときは`fetchedAt`が新しい方を使う**（#1578。`issue-deck-shell.tsx`の
+  `selectedPullRequest`）。一覧を無条件に優先していたころは、詳細ヘッダーの更新ボタンが
+  詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
+  CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
+  残り続けていた。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
   ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -420,8 +439,6 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
   マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
   取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
-  なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
-  ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
 - **PCヘッダー右端の通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
   （#1614。[`components/dashboard/notification-button.tsx`](../src/components/dashboard/notification-button.tsx)）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
