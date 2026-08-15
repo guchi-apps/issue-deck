@@ -6,9 +6,12 @@
 #   scripts/reap-sessions.sh                    条件を満たすセッションを畳む
 #   scripts/reap-sessions.sh --dry-run          判定だけ表示し、何も畳まない
 #   scripts/reap-sessions.sh --idle-minutes 90  猶予（分）を指定する（0で回収を行わない）
+#   scripts/reap-sessions.sh --handoff-idle-minutes 60   引き渡し済みの猶予を指定する
 #
 # 環境変数:
 #   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定60・0で無効）
+#   SESSION_HANDOFF_IDLE_MINUTES  PRを作り`11.local`も外した（引き渡し済みの）セッション専用の
+#                                 猶予（既定30・0でこの経路だけ無効。#1541）
 #   ISSUE_DECK_SESSION_STATE_DIR  状態ファイルの置き場（既定は ~/.local/state/issue-deck/sessions）
 #
 # ## なぜ要るか
@@ -39,6 +42,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-state.sh"
 
 IDLE_MINUTES="${SESSION_IDLE_MINUTES:-60}"
+# 引き渡し済み（PRを作り`11.local`も外した）セッション専用の猶予（#1541）。
+# CLOSED／マージ済みは「もう何も起きない」が確定しているのに対し、引き渡し済みはCI失敗の
+# 指摘が返る余地があるため、段差を付ける。0でこの経路だけを無効にできる。
+HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-30}"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -51,8 +58,12 @@ while [[ $# -gt 0 ]]; do
       IDLE_MINUTES="${2:-}"
       shift 2 || true
       ;;
+    --handoff-idle-minutes)
+      HANDOFF_IDLE_MINUTES="${2:-}"
+      shift 2 || true
+      ;;
     *)
-      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>]" >&2
+      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>]" >&2
       exit 1
       ;;
   esac
@@ -62,6 +73,10 @@ done
 # 不正な値で猶予が0分になり、応答が終わった直後のセッションを次々畳むのを防ぐ。
 if [[ ! "$IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 猶予は0以上の整数（分）で指定してください: $IDLE_MINUTES" >&2
+  exit 1
+fi
+if [[ ! "$HANDOFF_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "Error: 引き渡し済みの猶予は0以上の整数（分）で指定してください: $HANDOFF_IDLE_MINUTES" >&2
   exit 1
 fi
 
@@ -84,6 +99,7 @@ fi
 
 NOW="$(date +%s)"
 IDLE_SECONDS=$((IDLE_MINUTES * 60))
+HANDOFF_IDLE_SECONDS=$((HANDOFF_IDLE_MINUTES * 60))
 CHECKED=0
 CANDIDATES=0
 REAPED=0
@@ -137,7 +153,7 @@ reap_one() {
   local session="$1"
   local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
-  local dirty remote_branches issue_info issue_state issue_labels merged_pr reason
+  local dirty remote_branches issue_info issue_state issue_labels merged_pr open_pr reason
 
   # 記述子が無いセッションには触らない。**これが「巻き込んではいけないもの」への線引き**で、
   # 他リポジトリの作業用セッション・人が手で立てたセッション・この仕組みより前から動いている
@@ -271,23 +287,47 @@ reap_one() {
 
   # 成果物が本流に入ったか、Issue自体が終わっているか。
   # **`22.merge-confirm-required`の特別扱いは要らない。** 人がマージするまでPRはopenのままなので、
-  # この条件で自動的に残る（ラベルを見る箇所を増やさない）。
+  # マージ済みの経路では自動的に残る（ラベルを見る箇所を増やさない）。
   if [[ "$issue_state" == "CLOSED" ]]; then
     reason="Issue #$issue_number はCLOSED"
   else
     merged_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state merged \
       --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-    if [[ -z "$merged_pr" ]]; then
-      hold "$session" "IssueがOPENで、issue-$issue_number のPRもまだマージされていない"
-      return 0
+    if [[ -n "$merged_pr" ]]; then
+      reason="PR #$merged_pr がマージ済み"
+    else
+      # 引き渡し済み（#1541）。**PRを作り、`11.local`も外した**（条件5を通っている）＝
+      # レビュー・統合エージェントへ渡し終えた状態で、このセッションでもう作業しないという
+      # 実装エージェント自身の宣言にあたる。マージまで残すと、人の確認待ちのPRを抱えた
+      # セッションが本数の上限（#1361）を埋めて、後続のジョブが流れなくなる。
+      #
+      # **畳んでも失うものは無い。** worktreeはcleanでpush済み（条件7）、worktreeそのものは
+      # 残り、呼び戻せば前回の会話の続きから再開する（#1541・run-issue-session.sh の
+      # `--continue`）。マージ済み・CLOSEDより猶予を長く取るのは、CI失敗の指摘が返る余地が
+      # こちらにだけ残っているため。
+      if [[ "$HANDOFF_IDLE_SECONDS" -eq 0 ]]; then
+        hold "$session" "IssueがOPENで、issue-$issue_number のPRもまだマージされていない"
+        return 0
+      fi
+      open_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
+        --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+      if [[ -z "$open_pr" ]]; then
+        hold "$session" "IssueがOPENで、issue-$issue_number のPRがまだ作られていない"
+        return 0
+      fi
+      if [[ "$idle_for" -lt "$HANDOFF_IDLE_SECONDS" ]]; then
+        # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+        hold "$session" "PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+        return 0
+      fi
+      reason="PR #$open_pr を作成しレビューへ引き渡し済み"
     fi
-    reason="PR #$merged_pr がマージ済み"
   fi
 
   # --- 畳む ---
   reason="$reason・最後の応答終了から$((idle_for / 60))分・worktreeはcleanでpush済み"
   fold_session "$session" "$repository" "$issue_number" "$reason" \
-    "もう一度作業する場合は、issue-deckの画面から起動し直してください（worktree: $worktree）。"
+    "もう一度作業する場合は、issue-deckの画面から起動し直してください。前回の会話の続きから再開します（worktree: $worktree）。"
   return 0
 }
 
@@ -297,4 +337,4 @@ while IFS= read -r session_name; do
   reap_one "$session_name"
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
-echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分）"
+echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分）"

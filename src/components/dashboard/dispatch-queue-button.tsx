@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ListOrdered, Loader2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, ListOrdered, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -28,8 +28,12 @@ import { cn } from "@/lib/utils";
  * 「今どこまで進んでいて、あと何本待っているか」を1か所で見られる必要が出た。従来はジョブの
  * 状態がIssue詳細のボタンの下にしか出ず、**キュー全体を見る場所が無かった**。
  *
- * **並びは`createdAt`の昇順で、払い出し（`claimDispatchJob`）と同じ。** 画面の順番と実際に
- * 走る順番が一致する。
+ * **並びは払い出し（`claimDispatchJob`）と同じ。** `queuePriority`の降順 → `createdAt`の昇順で、
+ * 画面の順番と実際に走る順番が一致する。
+ *
+ * **「順番待ち」の2行目以降の↑は先頭へ上げる操作**（#1541）。夜にまとめて積んだあと
+ * 「これを次に流したい」が出てくるが、キューは積んだ順で固定されていて、取り消して積み直すと
+ * 最後尾へ回るだけだった。先頭の行に出さないのは、押しても何も変わらないため。
  *
  * 取り消せるのは`QUEUED`と`CLAIMED`まで。`RUNNING`はworktreeの作成や依存インストールの最中で、
  * 途中で止めると中途半端なworktreeとブランチが残る（#1179の取り決めをそのまま守る）。
@@ -126,7 +130,13 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
         )}
 
         <QueueSection title="実行中" jobs={summary.running} onCancel={dispatch.cancel} />
-        <QueueSection title="順番待ち" jobs={summary.queued} onCancel={dispatch.cancel} showOrder />
+        <QueueSection
+          title="順番待ち"
+          jobs={summary.queued}
+          onCancel={dispatch.cancel}
+          onPrioritize={dispatch.prioritize}
+          showOrder
+        />
         <QueueSection title="直近の失敗" jobs={summary.failed} onDismiss={dispatch.dismiss} />
 
         {cancelable.length > 0 && (
@@ -168,6 +178,7 @@ function QueueSection({
   jobs,
   onCancel = null,
   onDismiss = null,
+  onPrioritize = null,
   showOrder = false,
 }: {
   title: string;
@@ -183,6 +194,12 @@ function QueueSection({
    * 実行中のものを消せてしまう。渡すのは「直近の失敗」だけ。
    */
   onDismiss?: ((jobId: string) => Promise<boolean>) | null;
+  /**
+   * 先頭へ上げる操作（#1541）。渡すのは「順番待ち」だけで、**先頭の行には出さない**
+   * （押しても何も変わらない）。`onCancel`・`onDismiss`とpropsを分けているのと同じ理由で
+   * 独立させている。
+   */
+  onPrioritize?: ((jobId: string) => Promise<boolean>) | null;
   showOrder?: boolean;
 }) {
   if (jobs.length === 0) return null;
@@ -219,6 +236,17 @@ function QueueSection({
                   <span className="block whitespace-normal text-muted-foreground">{job.message}</span>
                 )}
               </span>
+              {onPrioritize && index > 0 && (
+                <button
+                  type="button"
+                  aria-label={`#${job.issueNumber}のジョブを先頭へ上げる`}
+                  title="先頭へ上げる（次に実行されます）"
+                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => void onPrioritize(job.id)}
+                >
+                  <ArrowUp className="size-3.5" />
+                </button>
+              )}
               {onCancel && isCancelableDispatchJobStatus(job.status) && (
                 <button
                   type="button"

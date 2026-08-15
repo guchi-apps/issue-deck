@@ -273,6 +273,15 @@ else
   BASE_BRANCH="$(resolve_base_branch || true)"
 fi
 
+# 前回の会話を引き継ぐかどうか（#1541）。**worktreeを新規に作った場合は引き継がない。**
+# 会話履歴はworktreeではなくcwdのパスに紐づいて残るため、worktreeを消して作り直しても
+# ここを塞がないと古い前提のまま再開する。再利用したときだけ呼び出し元の指定に従う。
+if [[ "$REUSED_WORKTREE" -eq 1 ]]; then
+  export ISSUE_DECK_CLAUDE_RESUME="${ISSUE_DECK_CLAUDE_RESUME:-1}"
+else
+  export ISSUE_DECK_CLAUDE_RESUME=0
+fi
+
 # --- envファイル --------------------------------------------------------------
 # 本体チェックアウトの .env.local / .env をworktreeへ供給する。再開時は既存を尊重し、
 # 不足キーだけを補う（#1099）。どちらも無いリポジトリでは何もしない。
@@ -524,8 +533,10 @@ build_env_prefix() {
   # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
   # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
   # 記述子に載らず、回収の対象にならない。
+  # ISSUE_DECK_CLAUDE_RESUME は前回の会話を引き継ぐかどうか（#1541）。worktreeの扱いを見て
+  # 上で決めた値で、tmuxの中まで届かないと新規worktreeでも再開してしまう。
   for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE \
-    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
+    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_RESUME; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

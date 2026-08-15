@@ -21,6 +21,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: null,
     instruction: null,
     tmuxSessionName: null,
+    queuePriority: 0,
     createdAt: "2026-08-14T00:00:00.000Z",
     claimedAt: null,
     startedAt: null,
@@ -57,6 +58,37 @@ describe("summarizeDispatchQueue", () => {
       2,
     );
     expect(summary.queued.map((j) => j.id)).toEqual(["a", "b", "c"]);
+  });
+
+  // 先頭へ上げる（#1541）。払い出し（claimDispatchJob）と同じ並びでないと、画面に見えている
+  // 順番と実際に走る順番が食い違う
+  it("先頭へ上げたジョブは、積んだ順より先に並べる", () => {
+    const summary = summarizeDispatchQueue(
+      [
+        job({ id: "a", createdAt: "2026-08-14T01:00:00.000Z" }),
+        job({ id: "b", createdAt: "2026-08-14T02:00:00.000Z" }),
+        job({ id: "c", createdAt: "2026-08-14T03:00:00.000Z", queuePriority: 1 }),
+      ],
+      2,
+    );
+    expect(summary.queued.map((j) => j.id)).toEqual(["c", "a", "b"]);
+  });
+
+  // 「直近の失敗」で見たいのは順番ではなく直近かどうか
+  it("先頭へ上げたあと失敗しても、直近の失敗は新しい順のまま", () => {
+    const summary = summarizeDispatchQueue(
+      [
+        job({
+          id: "old",
+          status: "FAILED",
+          createdAt: "2026-08-14T01:00:00.000Z",
+          queuePriority: 5,
+        }),
+        job({ id: "new", status: "FAILED", createdAt: "2026-08-14T02:00:00.000Z" }),
+      ],
+      2,
+    );
+    expect(summary.failed.map((j) => j.id)).toEqual(["new", "old"]);
   });
 
   it("CLAIMEDとRUNNINGは実行中として数える", () => {

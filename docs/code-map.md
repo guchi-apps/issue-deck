@@ -366,7 +366,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `expireStaleDispatchJobs`が掃く遅延評価。**セッション本数の上限（#1361）で待っていることは、
   pollerが申告する`maxSessions`/`liveSessions`から画面に出す**（#1394。文言は
   `lib/dispatch/queue-summary.ts`。**割り当ての判定はpoller側のままで、issue-deckは表示にしか
-  使わない**）。「どのリポジトリを起動できるか」はサブPCが申告し、
+  使わない**）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
+  （#1541。`POST /api/dispatch/<id>/prioritize`。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
+  **見えている順番と走る順番を一致させる**。任意の並べ替えは持たない）。
+  「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
@@ -380,13 +383,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   終わったtmuxセッションそのものを畳む（#1256）。判定材料は`scripts/lib/session-state.sh`が
   読み書きする状態ファイル（`~/.local/state/issue-deck/sessions/`。`run-issue-session.sh`が
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
-  **画面（`capture-pane`）の内容は読まない**。設計は
+  **画面（`capture-pane`）の内容は読まない**。**PRを作り`11.local`も外した引き渡し済みの
+  セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
+  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
   `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+  **`run-issue-session.sh`が同じ置き場を見るのは「`*.jsonl`が1つでもあるか」だけ**
+  （#1541。`claude --continue`を付けるかの判定で、**中身は開かない**）。名前の導き方が変われば
+  ヒットしなくなり、新規会話で始まるだけなので、上のルールの主旨（内部仕様への依存を広げない）は
+  守れている。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
   `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ

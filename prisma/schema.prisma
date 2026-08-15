@@ -440,6 +440,16 @@ model DispatchJob {
   // **未完了のジョブには入れない**（`dismissDispatchJob`が弾く）。走っているものを表示だけ
   // 消せると、動いている実体が画面のどこにも出ないまま残る。止めたいなら取り消しを使う。
   dismissedAt        DateTime?
+  // 順番待ちの中で先に払い出す度合い（#1541）。大きいほど先。既定は0で、同じ値なら
+  // `createdAt`の昇順＝積んだ順に流れるため、**既存行の並びは変わらない**。
+  //
+  // 画面の「先頭へ上げる」（`prioritizeDispatchJob`）が、同じホストの`QUEUED`の最大値+1を
+  // 入れる。**任意の並べ替えは持たない。** 主な用途が外出先のスマホで、ドラッグでの並べ替えは
+  // 操作が難しいうえ、実際の要求は「これを次に流したい」の1点に尽きる。
+  //
+  // 払い出し（`claimDispatchJob`）と画面（`summarizeDispatchQueue`）は**同じ並び**で読む。
+  // ここがずれると、画面に見えている順番と実際に走る順番が食い違う。
+  queuePriority      Int               @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -447,6 +457,7 @@ model DispatchJob {
   @@index([status])
   @@index([targetHost, status])
   @@index([targetHost, status, kind])
+  @@index([targetHost, status, kind, queuePriority])
   @@index([repositoryFullName, issueNumber])
 }
 

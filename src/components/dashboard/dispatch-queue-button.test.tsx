@@ -10,6 +10,7 @@ const NOW = new Date("2026-08-15T12:00:00.000Z");
 
 const dismiss = vi.fn();
 const cancel = vi.fn();
+const prioritize = vi.fn();
 
 function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
   return {
@@ -39,6 +40,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: "tmuxの起動に失敗しました。",
     instruction: null,
     tmuxSessionName: null,
+    queuePriority: 0,
     createdAt: NOW.toISOString(),
     claimedAt: null,
     startedAt: null,
@@ -60,6 +62,7 @@ function makeDispatch(jobs: DispatchJobView[]): DispatchStateHandle {
     sendSessionControl: vi.fn(),
     cancel,
     dismiss,
+    prioritize,
   } as unknown as DispatchStateHandle;
 }
 
@@ -73,6 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   dismiss.mockResolvedValue(true);
   cancel.mockResolvedValue(true);
+  prioritize.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -121,5 +125,68 @@ describe("DispatchQueueButton の失敗の表示を消す", () => {
     await waitFor(() => expect(dismiss).toHaveBeenCalledTimes(2));
     expect(dismiss).toHaveBeenCalledWith("job-1");
     expect(dismiss).toHaveBeenCalledWith("job-2");
+  });
+});
+
+/**
+ * #1541。夜にまとめて積んだあと「これを次に流したい」が出てくるが、キューは積んだ順で
+ * 固定されていて、取り消して積み直すと最後尾へ回るだけだった。
+ */
+describe("DispatchQueueButton の先頭へ上げる", () => {
+  function queued(id: string, issueNumber: number, overrides: Partial<DispatchJobView> = {}) {
+    return makeJob({ id, issueNumber, status: "QUEUED", finishedAt: null, ...overrides });
+  }
+
+  // 共通の`openQueue`は「直近の失敗」の描画を待つが、順番待ちだけのキューにはその節が出ない
+  async function openQueued(jobs: DispatchJobView[]) {
+    render(<DispatchQueueButton dispatch={makeDispatch(jobs)} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+  }
+
+  it("2行目以降の↑はprioritizeを呼ぶ", async () => {
+    await openQueued([
+      queued("job-1", 1601, { createdAt: "2026-08-15T01:00:00.000Z" }),
+      queued("job-2", 1602, { createdAt: "2026-08-15T02:00:00.000Z" }),
+    ]);
+
+    fireEvent.click(screen.getByLabelText("#1602のジョブを先頭へ上げる"));
+
+    expect(prioritize).toHaveBeenCalledWith("job-2");
+    // 取り消し・表示消しとは別の操作。同じ行に並ぶので取り違えないことを確かめる
+    expect(cancel).not.toHaveBeenCalled();
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  // 押しても何も変わらない
+  it("先頭の行には↑を出さない", async () => {
+    await openQueued([
+      queued("job-1", 1601, { createdAt: "2026-08-15T01:00:00.000Z" }),
+      queued("job-2", 1602, { createdAt: "2026-08-15T02:00:00.000Z" }),
+    ]);
+
+    expect(screen.queryByLabelText("#1601のジョブを先頭へ上げる")).toBeNull();
+  });
+
+  // 画面の並びは払い出し（claimDispatchJob）と同じでなければならない
+  it("先頭へ上げたジョブが1番に出て、その行には↑が出ない", async () => {
+    await openQueued([
+      queued("job-1", 1601, { createdAt: "2026-08-15T01:00:00.000Z" }),
+      queued("job-2", 1602, { createdAt: "2026-08-15T02:00:00.000Z", queuePriority: 1 }),
+    ]);
+
+    expect(screen.queryByLabelText("#1602のジョブを先頭へ上げる")).toBeNull();
+    expect(screen.getByLabelText("#1601のジョブを先頭へ上げる")).toBeDefined();
+  });
+
+  // 終わったジョブの順番を入れ替えても意味が無い
+  it("実行中・直近の失敗には↑を出さない", async () => {
+    await openQueue([
+      makeJob({ id: "job-1", issueNumber: 1603, status: "RUNNING", finishedAt: null }),
+      makeJob({ id: "job-2", issueNumber: 1604 }),
+    ]);
+
+    expect(screen.queryByLabelText("#1603のジョブを先頭へ上げる")).toBeNull();
+    expect(screen.queryByLabelText("#1604のジョブを先頭へ上げる")).toBeNull();
   });
 });

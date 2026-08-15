@@ -12,8 +12,9 @@
 # cdしている前提で、カレントディレクトリを基準に開発サーバーを起動する。
 #
 # 環境変数:
-#   ISSUE_DECK_DEV_SERVER=0    開発サーバーを起動しない（既定は起動する）
-#   ISSUE_DECK_DEV_COMMAND     開発サーバーの起動コマンド（既定は `pnpm dev`）
+#   ISSUE_DECK_DEV_SERVER=0     開発サーバーを起動しない（既定は起動する）
+#   ISSUE_DECK_DEV_COMMAND      開発サーバーの起動コマンド（既定は `pnpm dev`）
+#   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める（#1541。既定は引き継ぐ）
 #
 # **汎用ランチャー経由（#1224）では既定で起動しない。** サブPCは2C/4Tで、リポジトリ数ぶんの
 # devサーバーを常駐させる前提が置けない（#1177の実測）。必要なセッションだけ中で起動する。
@@ -537,15 +538,55 @@ if [[ -f "$PROMPT_FILE" ]]; then
 fi
 
 if [[ -n "$ISSUE_TITLE" ]]; then
-  KICKOFF_PROMPT="Issue #$ISSUE_NUMBER「$ISSUE_TITLE」の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+  ISSUE_LABEL="Issue #$ISSUE_NUMBER「$ISSUE_TITLE」"
 else
-  KICKOFF_PROMPT="Issue #$ISSUE_NUMBER の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+  ISSUE_LABEL="Issue #$ISSUE_NUMBER"
+fi
+
+# 畳んだセッションを前回の続きから再開する（#1541）。
+#
+# `claude -c/--continue` は「そのディレクトリで最後に動いた会話」を継続する。会話履歴は
+# **cwdごと**に `<設定ディレクトリ>/projects/<パスの英数字以外を - へ置いた名前>/<session-id>.jsonl`
+# へ残り、セッションを畳んでも消えない。worktreeも畳んでは消えないので、**同じworktreeで起動し直す
+# だけで前回の会話へ戻せる**。#1256の自動回収で畳まれたセッションを呼び戻す経路がこれになる。
+#
+# **session idはどこにも持たない。** 「issue-deck側にホストのローカルファイルの識別子を
+# 持ち込まない」という取り決め（docs/multi-agent/subpc-dispatch.md）はそのままで、判断材料は
+# ランチャーが既に知っている「worktreeを再利用したか、新規に作ったか」だけで足りる。
+#
+# 条件は2つとも満たすこと。**どちらか欠ければ従来どおり新規会話**（安全側）。
+#
+# 1. `ISSUE_DECK_CLAUDE_RESUME` が `0` でない。呼び出し元（start-issue.sh・
+#    generic-start-issue.sh）は**worktreeを新規に作った・作り直した経路で `0` を渡す**。
+#    `--recreate` で作り直したのに前回の文脈が戻るのを防ぐのが主目的で、worktreeを消しても
+#    会話履歴はcwdのパスに紐づいて残るため、ここを塞がないと古い前提のまま再開する
+# 2. cwdに対応する会話履歴のディレクトリに `*.jsonl` が1つ以上ある。ディレクトリ名の導き方は
+#    Claude Code側の都合なので、**変わればヒットしなくなるだけ**で、壊れずに従来の挙動へ落ちる
+RESUME_CONVERSATION=0
+if [[ "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
+  CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
+  if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
+    RESUME_CONVERSATION=1
+    CLAUDE_EXTRA_ARGS+=(--continue)
+  fi
+fi
+
+if [[ "$RESUME_CONVERSATION" == "1" ]]; then
+  # **「実装を開始してください」を渡してはいけない。** 前回の会話が載った状態でこの1行を渡すと、
+  # 済んだ作業を最初からやり直しかねない。代わりに、前回以降に増えたもの（Issueコメント・
+  # レビュー指摘）を読ませてから続きへ入らせる。
+  KICKOFF_PROMPT="${ISSUE_LABEL}のセッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --comments で前回以降に追加されたコメント・レビュー指摘を確認し、$PROMPT_FILE を読み直したうえで、残っている作業を続けてください。"
+else
+  KICKOFF_PROMPT="${ISSUE_LABEL}の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
 fi
 
 # 貼り直し用に、渡すプロンプトを起動前に必ず表示しておく。起動直後のセッションが何も始めない
 # 場合（初回起動時のフォルダ信頼確認など、こちらから制御できない要因で失われうる）に、
 # ここからコピーすれば実装を始められる。
 echo
+if [[ "$RESUME_CONVERSATION" == "1" ]]; then
+  echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（--continue）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
+fi
 echo "#$ISSUE_NUMBER: セッションへ次の1行を渡します。もし起動直後に何も始まらなければ、この行を貼り付けてください。"
 echo "  $KICKOFF_PROMPT"
 echo
