@@ -547,6 +547,35 @@ export function IssueDeckShell({
     }
   }
 
+  /**
+   * 設定の「表示」区分の「すべて表示」「すべて非表示」（#1552）。
+   *
+   * 1件ずつのトグルを人数分投げると連携数ぶんのリクエストになるため、一括専用の`PUT`へ
+   * まとめる。渡ってくるのは`selectRepositoriesToToggle`が絞った**実際に変わる行だけ**。
+   */
+  async function handleSetRepositoriesHidden(targets: ConnectedRepository[], hidden: boolean) {
+    if (targets.length === 0) return;
+    const targetIds = targets.map((repository) => repository.id);
+
+    setRepositories((prev) =>
+      prev.map((repo) => (targetIds.includes(repo.id) ? { ...repo, hidden } : repo)),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/hidden", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryIds: targetIds, hidden }),
+      });
+      if (!response.ok) throw new Error("failed to update hidden repositories");
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update hidden repositories", error);
+      setRepositories((prev) =>
+        prev.map((repo) => (targetIds.includes(repo.id) ? { ...repo, hidden: !hidden } : repo)),
+      );
+    }
+  }
+
   async function handleSetRepositoryFavorite(repository: ConnectedRepository, favorite: boolean) {
     setRepositories((prev) =>
       prev.map((repo) => (repo.id === repository.id ? { ...repo, favorite } : repo)),
@@ -773,6 +802,9 @@ export function IssueDeckShell({
                       claudeModel={claudeModel}
                       claudeModelAssist={claudeModelAssist}
                       dispatchConcurrency={dispatchConcurrency}
+                      repositories={repositories}
+                      onSetRepositoryHidden={handleSetRepositoryHidden}
+                      onSetRepositoriesHidden={handleSetRepositoriesHidden}
                       onUpdated={handleAppSettingsUpdated}
                     />
                   )}
@@ -1003,6 +1035,9 @@ export function IssueDeckShell({
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
           dispatchConcurrency={dispatchConcurrency}
+          repositories={repositories}
+          onSetRepositoryHidden={handleSetRepositoryHidden}
+          onSetRepositoriesHidden={handleSetRepositoriesHidden}
           onUpdated={handleAppSettingsUpdated}
         />
         <EditIssueDialog
