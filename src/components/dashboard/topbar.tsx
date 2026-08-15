@@ -133,7 +133,8 @@ export function TopBar({
         )}
       </Button>
 
-      <div className="flex items-center gap-2 pr-4 text-sm font-semibold">
+      {/* ヘッダーが狭いときに「Issue」「Deck」の2行へ折り返されないようにする（#1373） */}
+      <div className="flex shrink-0 items-center gap-2 pr-4 text-sm font-semibold whitespace-nowrap">
         <LayoutDashboard className="size-5 text-primary" />
         Issue Deck
       </div>
