@@ -17,6 +17,13 @@ import type { SubIssue, SubIssueRelations } from "@/types/issue";
 
 type SubIssueProgressProps = {
   relations: SubIssueRelations;
+  /**
+   * 「子Issue N」の見出しと完了率のバーを自分で描くか（既定: true）。
+   *
+   * PCの詳細（#1577）は折りたたみセクションの見出し行に件数と完了率を出しており、開いた中で
+   * 同じものを繰り返さないためにfalseを渡す。スマホの詳細は従来どおり自分で描く。
+   */
+  showHeading?: boolean;
 };
 
 /** 1件ぶんの行。番号・タイトル・進捗を並べ、クリックでそのIssueをIssueDeck内で開く */
@@ -48,7 +55,7 @@ function SubIssueRow({ issue }: { issue: SubIssue }) {
   );
 }
 
-export function SubIssueProgress({ relations }: SubIssueProgressProps) {
+export function SubIssueProgress({ relations, showHeading = true }: SubIssueProgressProps) {
   const { parent, children, childCount } = relations;
   if (!parent && children.length === 0) return null;
 
@@ -60,7 +67,9 @@ export function SubIssueProgress({ relations }: SubIssueProgressProps) {
     <div className="space-y-3">
       {parent && (
         <div>
-          <h2 className="mb-2 text-sm font-semibold">親Issue</h2>
+          <h2 className={cn("mb-2 font-semibold", showHeading ? "text-sm" : "text-xs text-muted-foreground")}>
+            親Issue
+          </h2>
           <GithubReferenceLink
             href={parent.htmlUrl}
             className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted"
@@ -74,25 +83,30 @@ export function SubIssueProgress({ relations }: SubIssueProgressProps) {
 
       {children.length > 0 && (
         <div>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">
-              子Issue <span className="text-muted-foreground">{childCount}</span>
-            </h2>
-            <span className="text-xs text-muted-foreground">
-              {summary.done} / {summary.total} 完了
-            </span>
-          </div>
+          {/* 見出しと完了率は、折りたたみセクションで使うときはセクション側が出す（#1577） */}
+          {showHeading && (
+            <>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">
+                  子Issue <span className="text-muted-foreground">{childCount}</span>
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {summary.done} / {summary.total} 完了
+                </span>
+              </div>
 
-          <div
-            className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-            role="progressbar"
-            aria-valuenow={summary.percent}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label="子Issueの完了率"
-          >
-            <div className="h-full bg-primary" style={{ width: `${summary.percent}%` }} />
-          </div>
+              <div
+                className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-valuenow={summary.percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="子Issueの完了率"
+              >
+                <div className="h-full bg-primary" style={{ width: `${summary.percent}%` }} />
+              </div>
+            </>
+          )}
 
           <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
             {summary.buckets.map((bucket) => (
