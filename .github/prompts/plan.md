@@ -99,6 +99,14 @@ GitHub純正の画像CDNではないため自動では読み込めません。�
   実行への追跡用リンク
   `実行ログ: ${RUN_URL}`、
   投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず追記する
+- **計画コメント本文の冒頭に、その計画が前提としたコミットを`<!-- plan-base: <SHA> -->`の形で
+  残す**（#1215）。SHAは`git rev-parse HEAD`で取る（このワークフローは`develop`を
+  checkoutしているため、これがdevelopの先端になる）。並行して走る他セッションのマージで計画の
+  前提が無効になることが実際に起きているため、承認から実装着手までに何が変わったかを
+  `git log <SHA>..origin/develop --oneline`で辿れるようにする。着手時の表示は
+  `scripts/lib/plan-base.sh`が行い、**止めはせず必ず見せる**
+  （[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）。
+  ローカルセッションの計画では`ExitPlanMode`のフックが同じマーカーを自動で付けている（#1342）
 - 投稿後、`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "01.check-plan"`
   を実行する（既に付いていても無害なので毎回実行してよい）。`01.check-plan`は「計画の承認待ち」を
   表す理由ラベル（#1490）で、**リポジトリに定義が無ければ付けなくてよい**

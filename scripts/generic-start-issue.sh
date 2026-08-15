@@ -356,6 +356,24 @@ source "$SCRIPT_DIR/lib/prompt-context.sh"
 ISSUE_RELATIONS="$(prompt_context_relations "$FULL_NAME" "$ISSUE_NUMBER")"
 CONCURRENT_WORK="$(prompt_context_concurrent "$FULL_NAME" "$ISSUE_NUMBER" "$WORKTREE_DIR" "${BASE_BRANCH:-develop}")"
 
+# 計画の前提（`<!-- plan-base: <SHA> -->`）から、ベースブランチへ入った変更（#1215）。
+# **止めず、見せるだけ。** マーカーが無いIssue（計画フェーズを経ていない・古い計画）では
+# 何も足さずに通常どおり起動する。`$ISSUE_JSON` は `--json ...,comments` 付きで取得済み。
+# shellcheck source=scripts/lib/plan-base.sh
+source "$SCRIPT_DIR/lib/plan-base.sh"
+PLAN_BASE_SHA="$(printf '%s' "$ISSUE_JSON" | plan_base_sha_from_comments)"
+if [[ -n "$PLAN_BASE_SHA" ]]; then
+  git -C "$REPO_PATH" fetch origin "${BASE_BRANCH:-develop}" --quiet 2>/dev/null || true
+  PLAN_BASE_LINES="$(plan_base_changes "$REPO_PATH" "$PLAN_BASE_SHA" "${BASE_BRANCH:-develop}")"
+  echo "#$ISSUE_NUMBER: 計画の前提（plan-base ${PLAN_BASE_SHA:0:7}）以降に origin/${BASE_BRANCH:-develop} へ入った変更:"
+  printf '%s\n' "$PLAN_BASE_LINES" | sed "s/^/#$ISSUE_NUMBER:   /"
+  # 端末に出すだけにしない。再開したエージェント自身が読む必要がある（既存の
+  # `{{CONCURRENT_WORK}}` へ相乗りするので、プロンプトのひな形は変えなくてよい）
+  # `$( )` は末尾の改行を落とすため、行頭に自分で改行を足す（足さないと直前の行へ繋がる）
+  CONCURRENT_WORK+=$'\n'"- 計画の前提（\`plan-base: ${PLAN_BASE_SHA:0:7}\`）以降に\`origin/${BASE_BRANCH:-develop}\`へ入った変更:"$'\n'
+  CONCURRENT_WORK+="$(printf '%s\n' "$PLAN_BASE_LINES" | sed 's/^/  - /')"$'\n'
+fi
+
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています（$PROMPT_TEMPLATE_SOURCE）..."
 DEV_COMMAND="${PACKAGE_MANAGER:-npm} run dev"
 if [[ "$PACKAGE_MANAGER" == "pnpm" || "$PACKAGE_MANAGER" == "bun" ]]; then
