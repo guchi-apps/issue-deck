@@ -46,6 +46,9 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   { key: "release_dispatch", label: "リリースの起動" },
   { key: "secrets_sync", label: "シークレット同期の起動" },
+  // 元は「Issueの再同期」(`sync`)として計上していたが、実態は共有ワークフローのタグ確認で、
+  // 消費量も大きかったため#1503で分けた（同時にGraphQLへ寄せて消費自体を減らしている）
+  { key: "workflow_tags", label: "共有ワークフローのタグ確認" },
   { key: "progress_report", label: "進捗のProject反映" },
   { key: "sync", label: "Issueの再同期" },
   { key: "repo_sync", label: "リポジトリの再同期" },
