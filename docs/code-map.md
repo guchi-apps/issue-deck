@@ -424,11 +424,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
   `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
-- **開発サーバーの掃除だけはpollerの外にも段を持つ**（#1525）。`scripts/reap-dev-servers.sh`の
-  入口は`.dev-servers/issue-<番号>.pid`だけで、PIDファイルが残らなかった孤児と**pollerごと
-  止まっている**場合を取りこぼす。`scripts/sweep-orphan-dev-servers.sh`は`ss -tlnp`で実際に
-  ポートを掴んでいるプロセスから入り、systemd timer（`deploy/subpc/issue-deck-dev-server-sweep.timer`）が
-  1時間ごとに呼ぶ。止め方は`scripts/lib/dev-server.sh`を共有する（**止め方を増やさない**）。
+- **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
+  だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
+  `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。
+  **プロセスの特定はコマンドラインの部分一致で行わない**——`claude`はプロンプト全文をargvに持ち、
+  Issue本文の`next-server`という記述に`grep`が当たった実績がある（#1523）。判定は
+  `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
+  読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
+  足すと同じ役が2つになる）。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

@@ -43,6 +43,44 @@ dev_server_pid_matches() {
   return 0
 }
 
+# そのPIDが開発サーバーの起動コマンド（`pnpm dev`など）かどうかを、**argvの位置**で判定する（#1525）。
+#
+# **コマンドラインの部分一致で探してはいけない。** `claude`はプロンプト全文をargvに持ち、そこには
+# Issueの本文がそのまま入る。#1523の調査で`ps -eo pid,args | grep next-server`を叩いたところ、
+# **#1524を担当している`claude`プロセス自身がヒットした**（本文中の`next-server`という記述に
+# 当たったため）。同じ罠は scripts/lib/worktree-status.sh にも書かれている。
+#
+# `/proc/<pid>/cmdline`はNUL区切りなので、argvを要素として正確に取り出せる。要素そのものが
+# `dev`と**一致**することを求めるため、本文に`pnpm dev`と書かれていても（それは1つの長い要素の
+# 一部でしかなく）当たらない。見るのは先頭3つまで。`node`のようなインタプリタが1つ前に入る形も
+# あるため、位置に幅を持たせている。
+#
+#   node /path/to/pnpm dev   /   pnpm dev   /   npm run dev   /   yarn dev   /   next dev
+dev_server_is_dev_command() {
+  local pid="$1" i arg base
+  local -a argv=()
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  while IFS= read -r -d '' arg; do
+    argv+=("$arg")
+    # 判定に要るのは先頭5つまで。プロンプト全文のような巨大なargvを読み切らない
+    [[ "${#argv[@]}" -lt 5 ]] || break
+  done <"/proc/$pid/cmdline"
+
+  for ((i = 0; i < ${#argv[@]} && i < 3; i++)); do
+    base="${argv[i]##*/}"
+    case "$base" in
+      pnpm | pnpm.cjs | npm | npm-cli.js | yarn | yarn.js | bun | next) ;;
+      *) continue ;;
+    esac
+    [[ "${argv[i + 1]:-}" == "dev" ]] && return 0
+    if [[ "${argv[i + 1]:-}" == "run" && "${argv[i + 2]:-}" == "dev" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # そのPIDのカレントディレクトリ。取れなければ1を返す。
 #
 # **worktreeごと消えている場合、`readlink`は` (deleted)`を付けて返す**（#1525）。
