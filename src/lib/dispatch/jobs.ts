@@ -52,11 +52,18 @@ import {
 // importできない。型だけを再輸出して、サーバー側の呼び出し元が経路を意識せずに使えるようにする。
 export type { DispatchHostView, DispatchJobView };
 
-function toJobView(job: DispatchJob): DispatchJobView {
+/**
+ * @param issueTitle Issueのタイトル（#1519）。**既定は`null`。**
+ *   引けるのは一覧取得（`listDispatchState`）だけで、そこは1クエリでまとめて解決する。
+ *   ジョブを積んだ直後の戻り値のためだけにenqueueごとへクエリを1本足すことはしない
+ *   （画面は積んだジョブを楽観的に差し込むが、次の取得＝未完了がある間は5秒でタイトルが埋まる）。
+ */
+function toJobView(job: DispatchJob, issueTitle: string | null = null): DispatchJobView {
   return {
     id: job.id,
     repositoryFullName: job.repositoryFullName,
     issueNumber: job.issueNumber,
+    issueTitle,
     targetHost: job.targetHost,
     kind: job.kind,
     status: job.status,
@@ -764,6 +771,63 @@ export async function dismissDispatchJob(params: {
 /** 終了したジョブを画面に残す期間。押した結果がすぐ消えると、失敗に気づけない */
 const FINISHED_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+/** タイトルの引き当てに使うキー。`DispatchJob`側はリポジトリのidを持たないのでfullNameで組む */
+function issueTitleKey(repositoryFullName: string, issueNumber: number): string {
+  return `${repositoryFullName}#${issueNumber}`;
+}
+
+/**
+ * ジョブが指すIssueのタイトルを、**DBのキャッシュからまとめて引く**（#1519）。
+ *
+ * 実行キューの行に番号しか出ないと、何のジョブが積まれているのかがGitHubを開くまで分からない。
+ *
+ * - **ジョブ1件ごとに引かない。** ここは`GET /api/dispatch`＝ポーリング先（未完了ジョブがある間は
+ *   5秒間隔）で、最大100件ぶんのクエリを毎回投げるわけにはいかない。リポジトリを1回、
+ *   Issueを`(repositoryId, number)`のunique indexで1回の計2本に抑える
+ * - **引けなかったものは黙って落とす**（呼び出し側で`null`になる）。同期前のIssueや、
+ *   GitHub Appを外したリポジトリのジョブがこれにあたる。タイトルが引けないだけで
+ *   キュー全体が見えなくなる方が害が大きい
+ */
+async function resolveDispatchIssueTitles(
+  jobs: readonly Pick<DispatchJob, "repositoryFullName" | "issueNumber">[],
+): Promise<Map<string, string>> {
+  const titles = new Map<string, string>();
+  if (jobs.length === 0) return titles;
+
+  const numbersByRepository = new Map<string, Set<number>>();
+  for (const job of jobs) {
+    const numbers = numbersByRepository.get(job.repositoryFullName) ?? new Set<number>();
+    numbers.add(job.issueNumber);
+    numbersByRepository.set(job.repositoryFullName, numbers);
+  }
+
+  // `Repository.fullName`は`@@unique([installationId, fullName])`の一部なので、同じfullNameの行が
+  // インストール違いで複数あり得る。**全部を対象にして構わない**（同じIssueなのでタイトルも同じ）
+  const repositories = await db.repository.findMany({
+    where: { fullName: { in: [...numbersByRepository.keys()] } },
+    select: { id: true, fullName: true },
+  });
+  if (repositories.length === 0) return titles;
+
+  const issues = await db.issue.findMany({
+    where: {
+      OR: repositories.map((repository) => ({
+        repositoryId: repository.id,
+        number: { in: [...(numbersByRepository.get(repository.fullName) ?? [])] },
+      })),
+    },
+    select: { number: true, title: true, repositoryId: true },
+  });
+
+  const fullNameById = new Map(repositories.map((repository) => [repository.id, repository.fullName]));
+  for (const issue of issues) {
+    const fullName = fullNameById.get(issue.repositoryId);
+    if (!fullName) continue;
+    titles.set(issueTitleKey(fullName, issue.number), issue.title);
+  }
+  return titles;
+}
+
 /**
  * 画面が必要とするディスパッチの状態一式（#1180の起動先選択・状態表示が使う）。
  * ホストの申告と未完了ジョブ、直近に終わったジョブをまとめて返す。
@@ -798,9 +862,17 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     getDispatchConcurrency(),
   ]);
 
+  // タイトルの引き当て（#1519）は**ジョブが確定してから**。上の`Promise.all`へ入れられない
+  // （どのIssueを引くかがジョブの一覧に依存する）。ジョブが0件ならクエリも投げない
+  const issueTitles = await resolveDispatchIssueTitles(jobs);
+
   return {
     hosts: hosts.map((host) => toHostView(host, now)),
-    jobs: jobs.map(toJobView),
+    // **`jobs.map(toJobView)`と書かない。** `Array#map`は第2引数にindexを渡すため、
+    // それがそのままタイトルになってしまう
+    jobs: jobs.map((job) =>
+      toJobView(job, issueTitles.get(issueTitleKey(job.repositoryFullName, job.issueNumber)) ?? null),
+    ),
     sessions,
     concurrency,
   };

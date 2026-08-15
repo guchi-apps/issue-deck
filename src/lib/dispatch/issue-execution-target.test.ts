@@ -32,6 +32,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     id: "job-1",
     repositoryFullName: REPO,
     issueNumber: 1,
+    issueTitle: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "QUEUED",
