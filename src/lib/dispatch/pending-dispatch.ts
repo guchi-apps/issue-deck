@@ -19,7 +19,7 @@ import { db } from "@/lib/db";
  *
  * ここでは期限切れジョブの掃除（`expireStaleDispatchJobs`）を呼ばない。Issue一覧は10秒ごとに
  * 読まれるため、掃除を兼ねると読み取りのたびに書き込みが走る。掃除は`GET /api/dispatch`
- * （画面を開いていれば60秒以内に来る）に任せる。
+ * （画面を開いていれば30秒以内に来る）に任せる。
  */
 export async function getPendingDispatchAtByIssue(): Promise<Map<string, Date>> {
   const jobs = await db.dispatchJob.findMany({

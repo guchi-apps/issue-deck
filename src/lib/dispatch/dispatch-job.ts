@@ -246,7 +246,7 @@ export function isDispatchHostAtSessionCapacity(host: DispatchHostView): boolean
 }
 
 /**
- * ホストが生存していると見なす猶予（ミリ秒）。pollerのポーリング間隔は60秒なので、
+ * ホストが生存していると見なす猶予（ミリ秒）。pollerのポーリング間隔は既定30秒なので、
  * 一時的な取りこぼしでofflineに倒れないよう数回分の余裕を取る。
  */
 export const DISPATCH_HOST_ONLINE_WINDOW_MS = 5 * 60 * 1000;
@@ -270,7 +270,7 @@ export const DISPATCH_HEARTBEAT_TIMEOUT_MS = 10 * 60 * 1000;
  * 積んだまま取りに来られない制御ジョブ（#1332）を見限るまでの時間（ミリ秒）。
  *
  * **起動ジョブと違い、待たせるほど危険になる。** `QUEUED`のまま残った`C-c`が何時間も後に
- * 届くと、そのときセッションでは別の作業が走っている。ポーリング間隔（既定60秒）の
+ * 届くと、そのときセッションでは別の作業が走っている。ポーリング間隔（既定30秒）の
  * 数回ぶんを過ぎたら「届かなかった」として落とす。
  */
 export const DISPATCH_CONTROL_QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -435,7 +435,7 @@ export function describeDispatchEnqueueRejection(
       const how = context.session
         ? `${formatDispatchHostName(context.session.host)}で \`tmux kill-session -t ${context.session.tmuxSessionName}\` を実行してください`
         : "起動先でtmuxセッションを畳んでください";
-      // 畳んでも次のセッション報告（既定60秒間隔）が届くまでは押せないままになる。#1321で解消予定
+      // 畳んでも次のセッション報告（既定30秒間隔）が届くまでは押せないままになる。#1321で解消予定
       return `${where}が動いています。作り直す場合は${how}（畳んでから押せるようになるまで最大1分ほどかかります）。`;
     }
   }
@@ -756,7 +756,7 @@ export function describeDispatchJobStatus(
  * 制御ジョブ（#1332）の状態の見せ方。
  *
  * **押してから効くまでの間（`QUEUED`）を「送信しました」と出す。** pull型なので最大で
- * ポーリング間隔（既定60秒）は何も起きず、そこを黙っていると押せていないように見える。
+ * ポーリング間隔（既定30秒）は何も起きず、そこを黙っていると押せていないように見える。
  */
 /**
  * 質問ジョブ（#1294）の状態の見せ方。

@@ -520,7 +520,7 @@ model DispatchHost {
   // （起動を止めているのは引き続き`maxSessions`と同時実行数）。
   //
   // **ホスト全体の監視はops-dashboardの担当のまま**で、ここに持つのはこの仕組みが
-  // 起こすセッションの起動可否に効く3つ（CPU・メモリ・`/`のディスク）だけ。サービス・
+  // 起こすセッションの起動可否に効くもの（CPU・メモリ・SWAP・`/`のディスク）だけ。サービス・
   // プロセス・温度・ネットワーク・履歴はあちらにしか無い（境界は
   // `src/app/api/dispatch/hosts/route.ts`のコメント）。
   //
@@ -532,6 +532,13 @@ model DispatchHost {
   memoryTotalMb     Int?
   diskUsedGb        Float?
   diskTotalGb       Float?
+  // SWAP（#1624）。**上の5つの「まとめて入るかまとめてnullか」には含めない。** SWAPを持たない
+  // ホストとSWAPを申告しない古いpollerがどちらもありうるため、必須にするとCPU・メモリ・
+  // ディスクごと消える。この2つは対で入るか、対でnullか。
+  // **総量0（SWAPを持たない）はnullと区別する**（申告は届いている）が、画面ではどちらも
+  // 行ごと出さない（`describeDispatchHostMetrics`）
+  swapUsedMb        Int?
+  swapTotalMb       Int?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt        DateTime
 
