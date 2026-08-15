@@ -126,6 +126,48 @@ describe("summarizeDispatchQueue", () => {
     expect(summary.activeCount).toBe(0);
     expect(summary.queued).toHaveLength(0);
   });
+
+  // 横断質問（#1454）は`LAUNCH`と同じ枠で走る（`claimDispatchJobs`）。数えないと、枠が
+  // 埋まっているのに「実行中 0/2」と出る（#1544）
+  it("横断質問ジョブも実行中・順番待ちとして数える", () => {
+    const summary = summarizeDispatchQueue(
+      [
+        job({ id: "running", kind: "CROSS_REPO_QUESTION", status: "RUNNING" }),
+        job({
+          id: "queued",
+          kind: "CROSS_REPO_QUESTION",
+          createdAt: "2026-08-14T02:00:00.000Z",
+        }),
+      ],
+      2,
+    );
+    expect(summary.running.map((j) => j.id)).toEqual(["running"]);
+    expect(summary.queued.map((j) => j.id)).toEqual(["queued"]);
+    expect(summary.activeCount).toBe(2);
+  });
+
+  it("横断質問ジョブと起動ジョブは走る順で1つに並べる", () => {
+    const summary = summarizeDispatchQueue(
+      [
+        job({ id: "launch", createdAt: "2026-08-14T02:00:00.000Z" }),
+        job({
+          id: "question",
+          kind: "CROSS_REPO_QUESTION",
+          createdAt: "2026-08-14T01:00:00.000Z",
+        }),
+      ],
+      2,
+    );
+    expect(summary.queued.map((j) => j.id)).toEqual(["question", "launch"]);
+  });
+
+  it("横断質問ジョブの失敗も直近の失敗に出す", () => {
+    const summary = summarizeDispatchQueue(
+      [job({ id: "question", kind: "CROSS_REPO_QUESTION", status: "FAILED" })],
+      2,
+    );
+    expect(summary.failed.map((j) => j.id)).toEqual(["question"]);
+  });
 });
 
 describe("describeDispatchQueueLoad", () => {
@@ -209,6 +251,15 @@ describe("describeDispatchJobWaitReason", () => {
     expect(
       describeDispatchJobWaitReason(job({ kind: "KILL" }), [host({ liveSessions: 12 })]),
     ).toBeNull();
+  });
+
+  // 横断質問セッション（#1454）も`<repo>-issue-<番号>`のtmuxセッションとして数えられ、
+  // 実装セッションと同じ上限で待たされる（#1544）
+  it("横断質問ジョブにも理由を添える", () => {
+    const reason = describeDispatchJobWaitReason(job({ kind: "CROSS_REPO_QUESTION" }), [
+      host({ liveSessions: 12 }),
+    ]);
+    expect(reason).toContain("上限（12/12本）");
   });
 
   it("宛先のホストが申告に無ければ添えない", () => {

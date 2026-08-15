@@ -3,6 +3,7 @@
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { findCrossRepoQuestionJobForIssue } from "@/lib/dispatch/dispatch-job";
+import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -40,6 +41,9 @@ export function CrossRepoQuestionJobStatus({
       }}
       isSubmitting={dispatch.isSubmitting}
       align={align}
+      // 「順番待ち」のまま進まない理由（#1394・#1544）。横断質問セッションも実装セッションと
+      // 同じ枠・同じセッション本数の上限で待つので、押した本人が見ている場所に理由を出す
+      waitReason={describeDispatchJobWaitReason(job, dispatch.hosts)}
     />
   );
 }

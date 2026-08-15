@@ -23,6 +23,7 @@ import {
   resolveDispatchConcurrency,
   resolveSessionControlRejection,
   SESSION_CONTROL_JOB_KINDS,
+  SESSION_LAUNCH_JOB_KINDS,
   type CrossRepoQuestionRejection,
   type DispatchEnqueueRejection,
   type DispatchHostView,
@@ -477,8 +478,9 @@ export async function claimDispatchJobs(params: {
     where: {
       targetHost: params.hostName,
       status: { in: ["CLAIMED", "RUNNING"] },
-      // 制御ジョブは枠を消費しない（上のコメント）
-      kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] },
+      // 制御ジョブは枠を消費しない（上のコメント）。**画面（`summarizeDispatchQueue`）も
+      // 同じ集合を数える**（#1544）
+      kind: { in: [...SESSION_LAUNCH_JOB_KINDS] },
     },
   });
   const available = Math.min(limit - running, params.maxJobs);
@@ -643,7 +645,7 @@ export type PrioritizeDispatchJobResult =
   | { ok: false; reason: "not_found" | "not_prioritizable"; message?: string };
 
 /** 「先頭へ上げる」を受け付ける種別。セッションを立てるジョブ＝順番の概念があるものだけ */
-const PRIORITIZABLE_JOB_KINDS: DispatchJobKind[] = ["LAUNCH", "CROSS_REPO_QUESTION"];
+const PRIORITIZABLE_JOB_KINDS: readonly DispatchJobKind[] = SESSION_LAUNCH_JOB_KINDS;
 
 /**
  * 順番待ちのジョブを先頭へ上げる（#1541）。
@@ -689,7 +691,7 @@ export async function prioritizeDispatchJob(params: {
     where: {
       targetHost: job.targetHost,
       status: "QUEUED",
-      kind: { in: PRIORITIZABLE_JOB_KINDS },
+      kind: { in: [...PRIORITIZABLE_JOB_KINDS] },
     },
     orderBy: { queuePriority: "desc" },
     select: { queuePriority: true },

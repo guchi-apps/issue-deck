@@ -59,6 +59,25 @@ export function isSessionControlJobKind(kind: DispatchJobKind): kind is SessionC
   return (SESSION_CONTROL_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
+/**
+ * tmuxセッションを立てるジョブ＝**同時実行数の枠を消費するジョブ**（#1544）。
+ *
+ * 払い出しの空き計算（`claimDispatchJobs`）・画面の実行キュー（`summarizeDispatchQueue`）・
+ * 「先頭へ上げる」（`prioritizeDispatchJob`）は、**すべて同じ集合を見る必要がある**。
+ * 枠の計算だけが`CROSS_REPO_QUESTION`を含み画面が`LAUNCH`しか数えていなかったため、
+ * 横断質問セッションが枠を埋めていても「実行中 0/2」と出ていた（#1454の追加が画面へ
+ * 反映されていなかった）。
+ *
+ * 制御ジョブ（`SESSION_CONTROL_JOB_KINDS`）は含めない。あちらは**枠外で先に配られる**（#1332）。
+ */
+export const SESSION_LAUNCH_JOB_KINDS = ["LAUNCH", "CROSS_REPO_QUESTION"] as const;
+
+export type SessionLaunchJobKind = (typeof SESSION_LAUNCH_JOB_KINDS)[number];
+
+export function isSessionLaunchJobKind(kind: DispatchJobKind): kind is SessionLaunchJobKind {
+  return (SESSION_LAUNCH_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
+}
+
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
 export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   // **省略時は`LAUNCH`。** 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
