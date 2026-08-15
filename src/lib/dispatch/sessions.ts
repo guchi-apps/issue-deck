@@ -37,9 +37,10 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     tmuxSessionName: session.tmuxSessionName,
     repositoryFullName: session.repositoryFullName,
     issueNumber: session.issueNumber,
-    // タイトルの引き当ては`listDispatchState`（jobs.ts）が一括で行う（#1567）。ここで引くと
-    // セッション1件ごとにクエリが増えるうえ、jobs.ts → sessions.ts の依存が逆流する
+    // タイトルとidの引き当ては`listDispatchState`（jobs.ts）が一括で行う（#1567・#1625）。
+    // ここで引くとセッション1件ごとにクエリが増えるうえ、jobs.ts → sessions.ts の依存が逆流する
     issueTitle: null,
+    issueId: null,
     state: session.state as DispatchSessionState,
     exitStatus: session.exitStatus,
     firstSeenAt: session.firstSeenAt.toISOString(),

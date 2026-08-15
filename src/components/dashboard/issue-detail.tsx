@@ -33,6 +33,7 @@ import {
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -106,6 +107,7 @@ import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
+import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -421,6 +423,9 @@ export function IssueDetail({
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
+  // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
+  const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
   // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
   // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
   const actionsDisabledReason = startImplementationDisabledReason(
@@ -677,6 +682,13 @@ export function IssueDetail({
             >
               <IssuePullRequestList
                 variant="plain"
+                /* なぜ自動マージされず自分の操作が要るのかを、マージボタンと同じ枠の中に
+                   出す（#1631）。理由はコメントの奥にしかなく、押す場所から離れていた */
+                notice={
+                  mergeApprovalPending ? (
+                    <MergeCheckReasonNotice reasons={mergeCheckReasons} />
+                  ) : undefined
+                }
                 links={pullRequestLinks}
                 pullRequests={pullRequests}
                 mergeApprovalPending={mergeApprovalPending}
@@ -792,6 +804,7 @@ export function IssueDetail({
               }
               sessionWaitingInput={sessionWaitingInput}
               mergeApprovalPending={mergeApprovalPending}
+              mergeCheckReasons={mergeCheckReasons}
               pullRequestLinks={pullRequestLinks}
               pullRequests={pullRequests}
               workflowRun={workflowRun}

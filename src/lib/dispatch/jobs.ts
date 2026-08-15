@@ -62,12 +62,23 @@ export type { DispatchHostView, DispatchJobView };
  *   ジョブを積んだ直後の戻り値のためだけにenqueueごとへクエリを1本足すことはしない
  *   （画面は積んだジョブを楽観的に差し込むが、次の取得＝未完了がある間は5秒でタイトルが埋まる）。
  */
-function toJobView(job: DispatchJob, issueTitle: string | null = null): DispatchJobView {
+/**
+ * DBの行を画面向けの形へ。
+ *
+ * **引き当てたIssue（`issue`）はオブジェクトで受け取る。** 位置引数で足すと、`jobs.map(toJobView)`と
+ * 書いたときに`Array#map`の第2引数（index）がそのまま入る事故が起きる（`listDispatchState`の
+ * コメント参照）。
+ */
+function toJobView(
+  job: DispatchJob,
+  issue: { id: string; title: string } | null = null,
+): DispatchJobView {
   return {
     id: job.id,
     repositoryFullName: job.repositoryFullName,
     issueNumber: job.issueNumber,
-    issueTitle,
+    issueTitle: issue?.title ?? null,
+    issueId: issue?.id ?? null,
     targetHost: job.targetHost,
     kind: job.kind,
     status: job.status,
@@ -877,15 +888,17 @@ export async function dismissDispatchJob(params: {
 /** 終了したジョブを画面に残す期間。押した結果がすぐ消えると、失敗に気づけない */
 const FINISHED_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 
-/** タイトルの引き当てに使うキー。`DispatchJob`側はリポジトリのidを持たないのでfullNameで組む */
+/** 引き当てに使うキー。`DispatchJob`側はリポジトリのidを持たないのでfullNameで組む */
 function issueTitleKey(repositoryFullName: string, issueNumber: number): string {
   return `${repositoryFullName}#${issueNumber}`;
 }
 
 /**
- * ジョブが指すIssueのタイトルを、**DBのキャッシュからまとめて引く**（#1519）。
+ * ジョブ・セッションが指すIssueを、**DBのキャッシュからまとめて引く**（#1519）。
  *
  * 実行キューの行に番号しか出ないと、何のジョブが積まれているのかがGitHubを開くまで分からない。
+ * **idも一緒に返す**のは、行のタイトルをissue-deckのIssue詳細への導線にするため（#1625）。
+ * 詳細を開く口は`?issue=<id>`でidを取るので、番号だけでは飛べない。
  *
  * - **ジョブ1件ごとに引かない。** ここは`GET /api/dispatch`＝ポーリング先（未完了ジョブがある間は
  *   5秒間隔）で、最大100件ぶんのクエリを毎回投げるわけにはいかない。リポジトリを1回、
@@ -894,10 +907,10 @@ function issueTitleKey(repositoryFullName: string, issueNumber: number): string 
  *   GitHub Appを外したリポジトリのジョブがこれにあたる。タイトルが引けないだけで
  *   キュー全体が見えなくなる方が害が大きい
  */
-async function resolveDispatchIssueTitles(
+async function resolveDispatchIssues(
   targets: readonly { repositoryFullName: string; issueNumber: number }[],
-): Promise<Map<string, string>> {
-  const titles = new Map<string, string>();
+): Promise<Map<string, { id: string; title: string }>> {
+  const titles = new Map<string, { id: string; title: string }>();
   if (targets.length === 0) return titles;
 
   const numbersByRepository = new Map<string, Set<number>>();
@@ -908,7 +921,9 @@ async function resolveDispatchIssueTitles(
   }
 
   // `Repository.fullName`は`@@unique([installationId, fullName])`の一部なので、同じfullNameの行が
-  // インストール違いで複数あり得る。**全部を対象にして構わない**（同じIssueなのでタイトルも同じ）
+  // インストール違いで複数あり得る。**全部を対象にして構わない**（同じIssueなのでタイトルも同じ）。
+  // idはインストールごとに別の行になるためどれか1つに決まるが、画面はそのidのIssueを一覧から
+  // 引けなければ何も開かないだけで、表示は壊れない（#1625）
   const repositories = await db.repository.findMany({
     where: { fullName: { in: [...numbersByRepository.keys()] } },
     select: { id: true, fullName: true },
@@ -922,14 +937,14 @@ async function resolveDispatchIssueTitles(
         number: { in: [...(numbersByRepository.get(repository.fullName) ?? [])] },
       })),
     },
-    select: { number: true, title: true, repositoryId: true },
+    select: { id: true, number: true, title: true, repositoryId: true },
   });
 
   const fullNameById = new Map(repositories.map((repository) => [repository.id, repository.fullName]));
   for (const issue of issues) {
     const fullName = fullNameById.get(issue.repositoryId);
     if (!fullName) continue;
-    titles.set(issueTitleKey(fullName, issue.number), issue.title);
+    titles.set(issueTitleKey(fullName, issue.number), { id: issue.id, title: issue.title });
   }
   return titles;
 }
@@ -968,25 +983,28 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     getDispatchConcurrency(),
   ]);
 
-  // タイトルの引き当て（#1519）は**ジョブとセッションが確定してから**。上の`Promise.all`へ
+  // Issueの引き当て（#1519・#1625）は**ジョブとセッションが確定してから**。上の`Promise.all`へ
   // 入れられない（どのIssueを引くかが一覧に依存する）。0件ならクエリも投げない。
   //
   // **ジョブとセッションを1回にまとめる**（#1567）。セッションの行にもタイトルを出すが、
   // 別々に引くと同じリポジトリ・同じIssueを2度読むことになる（同じIssueを指すことが多い）
-  const issueTitles = await resolveDispatchIssueTitles([...jobs, ...sessions]);
+  const resolvedIssues = await resolveDispatchIssues([...jobs, ...sessions]);
 
   return {
     hosts: hosts.map((host) => toHostView(host, now)),
     // **`jobs.map(toJobView)`と書かない。** `Array#map`は第2引数にindexを渡すため、
-    // それがそのままタイトルになってしまう
+    // それがそのまま引き当て済みのIssueとして渡ってしまう
     jobs: jobs.map((job) =>
-      toJobView(job, issueTitles.get(issueTitleKey(job.repositoryFullName, job.issueNumber)) ?? null),
+      toJobView(
+        job,
+        resolvedIssues.get(issueTitleKey(job.repositoryFullName, job.issueNumber)) ?? null,
+      ),
     ),
-    sessions: sessions.map((session) => ({
-      ...session,
-      issueTitle:
-        issueTitles.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null,
-    })),
+    sessions: sessions.map((session) => {
+      const issue =
+        resolvedIssues.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null;
+      return { ...session, issueTitle: issue?.title ?? null, issueId: issue?.id ?? null };
+    }),
     concurrency,
   };
 }

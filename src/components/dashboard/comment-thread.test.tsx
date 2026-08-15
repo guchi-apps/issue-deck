@@ -219,6 +219,43 @@ describe("CommentThread PRマージ待ちの表示", () => {
     cleanup();
   });
 
+  it("自動マージされなかった理由を案内の下に出し、マージ後は出さない（#1631）", async () => {
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        mergeCheckReasons={{
+          source: "review",
+          items: ["GitHub Actionsワークフローの変更 (.github/workflows/**)"],
+          postedAtLabel: "3分前",
+        }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+
+    expect(screen.getByText("自動マージされなかった理由")).not.toBeNull();
+    expect(screen.getByText("GitHub Actionsワークフローの変更 (.github/workflows/**)")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    });
+    // マージし終えた後も理由が残ると、まだ操作が要るように読める
+    expect(screen.queryByText("自動マージされなかった理由")).toBeNull();
+  });
+
   it("マージ実行後は「マージが必要です」ではなく完了の表示に切り替わる", async () => {
     render(
       <CommentThread
