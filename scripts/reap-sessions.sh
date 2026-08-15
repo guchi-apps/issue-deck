@@ -7,6 +7,7 @@
 #   scripts/reap-sessions.sh --dry-run          判定だけ表示し、何も畳まない
 #   scripts/reap-sessions.sh --idle-minutes 90  猶予（分）を指定する（0で回収を行わない）
 #   scripts/reap-sessions.sh --handoff-idle-minutes 60   引き渡し済みの猶予を指定する
+#   scripts/reap-sessions.sh --question-idle-minutes 45  質問セッションの放置の猶予を指定する
 #
 # 環境変数:
 #   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定60・0で無効）
@@ -14,6 +15,9 @@
 #                                 まだの）セッション専用の猶予（既定30・0でこの経路だけ無効）。
 #                                 PRを作って引き渡した場合（#1541）と、PRを作らずに終わった
 #                                 場合（#1600）の両方に効く
+#   QUESTION_SESSION_IDLE_MINUTES 横断質問セッション（kind=question）専用の猶予（既定30・
+#                                 0でこの経路だけ無効＝従来どおり質問IssueがCLOSEDになるまで
+#                                 残す）。**質問IssueがOPENのままでも畳む**（#1648）
 #   ISSUE_DECK_SESSION_STATE_DIR  状態ファイルの置き場（既定は ~/.local/state/issue-deck/sessions）
 #
 # ## なぜ要るか
@@ -48,6 +52,12 @@ IDLE_MINUTES="${SESSION_IDLE_MINUTES:-60}"
 # CLOSED／マージ済みは「もう何も起きない」が確定しているのに対し、こちらはCI失敗の指摘が
 # 返る余地・人が続きを聞く余地があるため、段差を付ける。0でこの経路だけを無効にできる。
 HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-30}"
+# 横断質問セッション（`kind=question`）専用の猶予（#1648）。**質問IssueがOPENのままでも畳む。**
+# 追い質問を送らないまま忘れられたセッションは、質問Issueを閉じる人がいない限り永久に残り、
+# 本数の上限（DISPATCH_MAX_SESSIONS・#1361）を1本ずつ埋める。実装セッションと違って
+# worktreeもコミットも持たないため、畳んでも失うのは会話の文脈だけで、取り返しがつく。
+# 0でこの経路だけを無効にできる（従来どおりCLOSEDになるまで残す）。
+QUESTION_IDLE_MINUTES="${QUESTION_SESSION_IDLE_MINUTES:-30}"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -64,8 +74,12 @@ while [[ $# -gt 0 ]]; do
       HANDOFF_IDLE_MINUTES="${2:-}"
       shift 2 || true
       ;;
+    --question-idle-minutes)
+      QUESTION_IDLE_MINUTES="${2:-}"
+      shift 2 || true
+      ;;
     *)
-      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>]" >&2
+      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>] [--question-idle-minutes <分>]" >&2
       exit 1
       ;;
   esac
@@ -79,6 +93,10 @@ if [[ ! "$IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$HANDOFF_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 引き渡し済みの猶予は0以上の整数（分）で指定してください: $HANDOFF_IDLE_MINUTES" >&2
+  exit 1
+fi
+if [[ ! "$QUESTION_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "Error: 質問セッションの猶予は0以上の整数（分）で指定してください: $QUESTION_IDLE_MINUTES" >&2
   exit 1
 fi
 
@@ -102,6 +120,7 @@ fi
 NOW="$(date +%s)"
 IDLE_SECONDS=$((IDLE_MINUTES * 60))
 HANDOFF_IDLE_SECONDS=$((HANDOFF_IDLE_MINUTES * 60))
+QUESTION_IDLE_SECONDS=$((QUESTION_IDLE_MINUTES * 60))
 CHECKED=0
 CANDIDATES=0
 REAPED=0
@@ -155,6 +174,7 @@ reap_one() {
   local session="$1"
   local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
+  local idle_minutes idle_seconds
   local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
   local merged_pr open_pr handoff_reason handoff_hold reason
 
@@ -217,32 +237,52 @@ reap_one() {
 
   # 猶予。**`Stop`＝作業完了ではない。** レビュー結果待ちで止まっているセッションも、追加指示を
   # 受けて再開するセッションも`Stop`を出すため、ここで時間を置く。
+  #
+  # 横断質問セッションだけ別の値を使う（#1648）。質問には「終わった」と分かる事実（PR・マージ）が
+  # 無く、放置されたぶんがそのまま本数の上限（#1361）を埋めるため、実装セッションより短く取る。
+  # `QUESTION_SESSION_IDLE_MINUTES=0`はこの経路を無効にする指定なので、そのときは従来どおり
+  # 共通の猶予で判定する（下の質問ブロックがCLOSEDのときだけ畳む）。
+  idle_minutes="$IDLE_MINUTES"
+  idle_seconds="$IDLE_SECONDS"
+  if [[ "$kind" == "question" && "$QUESTION_IDLE_MINUTES" -gt 0 ]]; then
+    idle_minutes="$QUESTION_IDLE_MINUTES"
+    idle_seconds="$QUESTION_IDLE_SECONDS"
+  fi
   idle_for=$((NOW - event_at))
-  if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
+  if [[ "$idle_for" -lt "$idle_seconds" ]]; then
     # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-    hold "$session" "最後の応答終了から猶予（${IDLE_MINUTES}分）が経っていない"
+    hold "$session" "最後の応答終了から猶予（${idle_minutes}分）が経っていない"
     return 0
   fi
 
   # --- 横断質問セッション（#1454）はここで決める ---
   # **worktreeを持たず、コミットもpushもしない**（読み取り専用で、成果物は質問Issueへ投稿した
   # 回答コメントだけ）。実装セッション向けの「worktreeがcleanでpush済み」を当てると必ず
-  # 「確認できない」に落ちて永久に残るため、質問Issueが閉じられたかどうかだけで決める。
+  # 「確認できない」に落ちて永久に残るため、質問Issueの状態と放置の猶予だけで決める。
   if [[ "$kind" == "question" ]]; then
     if ! issue_state="$(gh issue view "$issue_number" --repo "$repository" \
       --json state --jq '.state' 2>/dev/null)"; then
       hold "$session" "質問Issueの状態を取得できない（$repository #$issue_number）"
       return 0
     fi
-    if [[ "$issue_state" != "CLOSED" ]]; then
-      # **開いている間は畳まない。** 追い質問はこのセッションへ追加指示として送れる（#1012）ので、
-      # 聞き終わったかどうかを知っているのは人だけ。質問Issueを閉じることが終了の合図になる。
+    if [[ "$issue_state" == "CLOSED" ]]; then
+      fold_session "$session" "$repository" "$issue_number" \
+        "質問Issue #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
+        "もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
+      return 0
+    fi
+    if [[ "$QUESTION_IDLE_MINUTES" -eq 0 ]]; then
+      # 放置の猶予を無効にしている場合だけ、従来どおり質問Issueのcloseを待つ。
       hold "$session" "質問Issue #$issue_number がまだOPEN（閉じると畳みます）"
       return 0
     fi
+    # **OPENでも畳む**（#1648）。追い質問はこのセッションへ追加指示として送れる（#1012）が、
+    # 送られないまま忘れられると、質問Issueを閉じる人がいない限り永久に残る。畳んでも失うのは
+    # 会話の文脈だけ（worktreeもコミットも持たない）で、回答コメントは質問Issueに残っている。
+    # 今すぐ畳みたいときは、画面のセッション表示の「終了」を押せば猶予を待たずに済む。
     fold_session "$session" "$repository" "$issue_number" \
-      "質問Issue #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
-      "もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
+      "質問Issue #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${QUESTION_IDLE_MINUTES}分）" \
+      "続きを聞く場合は、issue-deckの「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
     return 0
   fi
 
@@ -364,4 +404,4 @@ while IFS= read -r session_name; do
   reap_one "$session_name"
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
-echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分）"
+echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分）"
