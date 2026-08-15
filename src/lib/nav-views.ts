@@ -1,8 +1,8 @@
 import {
   Clock,
   GitMerge,
+  Inbox,
   ListChecks,
-  ListTodo,
   MessageCircleQuestionMark,
   PlayCircle,
   Rocket,
@@ -70,7 +70,9 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
   "manual-step": Wrench,
   question: MessageCircleQuestionMark,
-  "not-started": ListTodo,
+  // 「すべてのIssue」（ListChecks）と並ぶため、同じ線画に見えるListTodoは使わない（#1613）。
+  // 受け皿の絵（Inbox）なら「まだ手を付けていないものが溜まっている場所」としても読める。
+  "not-started": Inbox,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
   "recently-merged": GitMerge,
@@ -112,6 +114,36 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
  * ラベルベースのビューも含め、すべてviewクエリ1つで表現する。
  */
 export const navViews: NavView[] = [...baseNavViews, ...labelNavViews];
+
+/**
+ * PC左メニューに出すIssueビューのグループ（#1613）。
+ *
+ * `navViews`は「viewクエリとして存在するビューの一覧」で、スマホのタブ・スワイプ順や件数の
+ * 計算も同じ配列を見る。**左メニューに何をどの順で出すかはそれとは別の判断**なので、ここで
+ * 別に持つ。ここから外したビュー（`recently-added`・`release-pending`・`recently-merged`）も
+ * viewクエリとしては生きており、スマホのタブや既存リンクからは今までどおり開ける。
+ *
+ * `attention`は「エージェントが止まっていて人が動くまで進まないもの」だけを置く枠で、
+ * 見出しを付けず先頭に固定する。ここに他のビューを足すと、上から順に見て手を動かせば
+ * 盤面が進む、という読み方が崩れる。
+ */
+export const sidebarAttentionNavViews: NavView[] = labelNavViews.filter((view) =>
+  ["check-user", "manual-step"].includes(view.id),
+);
+
+/**
+ * 要対応の枠とIssueの枠のあいだに置くビュー（#1613）。「質問」は人が読む先だが承認の待ちでは
+ * ないため要対応には入れず、Issueの絞り込みとも性質が違うので独立させる。
+ * 「ブランチ」（`pane=flow`）はビューではないので、ここではなく画面側で並べる。
+ */
+export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter(
+  (view) => view.id === "question",
+);
+
+/** 左メニュー「Issue」セクション。並びは広い順→絞った順（#1613） */
+export const sidebarIssueNavViews: NavView[] = ["all", "favorites", "not-started", "in-progress"]
+  .map((id) => navViews.find((view) => view.id === id))
+  .filter((view): view is NavView => view !== undefined);
 
 export const navViewIcons: Record<NavViewId, LucideIcon> = {
   all: ListChecks,

@@ -992,3 +992,14 @@ export function describeDispatchTimeout(status: "CLAIMED" | "RUNNING"): string {
     ? "起動先がジョブを取得したまま開始しませんでした（ホストが停止した可能性があります）。"
     : "起動処理からの応答が途絶えました。tmuxセッションが残っていないか確認してください。";
 }
+
+/**
+ * 完了の報告だけが届かなかった起動ジョブに残す理由（#1620）。
+ *
+ * pollerは報告に失敗しても再送しない（`report_job`は数回試して諦める）ため、tmuxセッションは
+ * 立っているのに`RUNNING`のまま残るジョブができる。それをそのままタイムアウトさせると、
+ * **同じIssueが実行キューの「実行中」（セッション一覧）と「直近の失敗」に同時に出る。**
+ */
+export function describeDispatchReportLost(tmuxSessionName: string): string {
+  return `起動先からの完了報告が届きませんでしたが、tmuxセッション ${tmuxSessionName} が動いているため起動できたものとして扱います。`;
+}

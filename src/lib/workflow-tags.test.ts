@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canStartPropagation,
   evaluateWorkflowTags,
   extractWorkflowTagRef,
+  findWorkflowTagPullRequest,
+  isPropagationRunning,
   latestWorkflowTag,
   parseWorkflowTagVersion,
+  propagationTargets,
+  shortWorkflowTag,
+  workflowTagGroup,
+  workflowTagPullRequestTitle,
+  type WorkflowTagStatus,
 } from "@/lib/workflow-tags";
 
 // 実際の caller の形（guchi-apps/car-care の claude-issue-dispatch.yml より）
@@ -143,5 +151,143 @@ describe("evaluateWorkflowTags", () => {
     const status = evaluateWorkflowTags("guchi-apps/car-care", [ref("workflows/v11")], null);
 
     expect(status.outdated).toBe(false);
+  });
+
+  it("更新PRを渡せばそのまま持つ（既定は null）", () => {
+    const withoutPr = evaluateWorkflowTags(
+      "guchi-apps/car-care",
+      [ref("workflows/v11")],
+      "workflows/v12",
+    );
+    const withPr = evaluateWorkflowTags(
+      "guchi-apps/car-care",
+      [ref("workflows/v11")],
+      "workflows/v12",
+      { number: 42, url: "https://github.com/guchi-apps/car-care/pull/42" },
+    );
+
+    expect(withoutPr.updatePullRequest).toBeNull();
+    expect(withPr.updatePullRequest?.number).toBe(42);
+  });
+});
+
+describe("findWorkflowTagPullRequest", () => {
+  const pr = (number: number, title: string) => ({
+    number,
+    title,
+    url: `https://github.com/guchi-apps/car-care/pull/${number}`,
+  });
+
+  it("最新タグへの更新PRを見つける", () => {
+    const found = findWorkflowTagPullRequest(
+      [pr(41, "ダッシュボードの表示を直す"), pr(42, workflowTagPullRequestTitle("workflows/v19"))],
+      "workflows/v19",
+    );
+
+    expect(found).toEqual({
+      number: 42,
+      url: "https://github.com/guchi-apps/car-care/pull/42",
+    });
+  });
+
+  it("古いタグへの更新PRは対象にしない", () => {
+    // v18へ上げるPRが残ったまま最新がv19になった状態。これを「作成済み」と扱うと、
+    // v19への更新が永久に始まらない
+    const found = findWorkflowTagPullRequest(
+      [pr(42, workflowTagPullRequestTitle("workflows/v18"))],
+      "workflows/v19",
+    );
+
+    expect(found).toBeNull();
+  });
+
+  it("最新タグが分からなければ null", () => {
+    expect(
+      findWorkflowTagPullRequest([pr(42, workflowTagPullRequestTitle("workflows/v19"))], null),
+    ).toBeNull();
+  });
+});
+
+describe("propagationTargets / workflowTagGroup", () => {
+  const status = (overrides: Partial<WorkflowTagStatus>): WorkflowTagStatus => ({
+    fullName: "guchi-apps/car-care",
+    refs: [],
+    outdated: false,
+    mismatched: false,
+    updatePullRequest: null,
+    ...overrides,
+  });
+
+  it("更新PRが既にopenのリポジトリは対象から外す", () => {
+    // **連続押下の根本対策。** マージされるまで参照タグは古いままなので、除外しないと
+    // 押すたびに同じリポジトリへ2本目のPRが作られる（#1602）
+    const targets = propagationTargets([
+      status({ fullName: "guchi-apps/aide", outdated: true }),
+      status({
+        fullName: "guchi-apps/car-care",
+        outdated: true,
+        updatePullRequest: { number: 42, url: "https://example.test/pull/42" },
+      }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/aide"]);
+  });
+
+  it("不一致だけのリポジトリも対象に含める", () => {
+    const targets = propagationTargets([status({ mismatched: true })]);
+
+    expect(targets).toHaveLength(1);
+  });
+
+  it("最新のリポジトリは対象に含めない", () => {
+    expect(propagationTargets([status({})])).toHaveLength(0);
+  });
+
+  it("グループは 最新 / 更新PR待ち / 未更新 に分かれる", () => {
+    expect(workflowTagGroup(status({}))).toBe("latest");
+    expect(workflowTagGroup(status({ outdated: true }))).toBe("outdated");
+    expect(
+      workflowTagGroup(
+        status({ outdated: true, updatePullRequest: { number: 1, url: "https://example.test" } }),
+      ),
+    ).toBe("pull-request");
+  });
+});
+
+describe("canStartPropagation", () => {
+  const run = (status: string, conclusion: string | null = null) => ({
+    status,
+    conclusion,
+    htmlUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+    createdAt: "2026-08-15T10:00:00.000Z",
+  });
+
+  it("実行中は起動させない", () => {
+    // 起動は数秒で返るのにPRが出来上がるまでは数分かかる。その間に押せると二重起動になる
+    for (const status of ["queued", "in_progress", "waiting", "requested"]) {
+      expect(canStartPropagation(run(status)).allowed, status).toBe(false);
+      expect(isPropagationRunning(run(status)), status).toBe(true);
+    }
+  });
+
+  it("完了していれば起動してよい（成否は問わない）", () => {
+    expect(canStartPropagation(run("completed", "success")).allowed).toBe(true);
+    expect(canStartPropagation(run("completed", "failure")).allowed).toBe(true);
+    expect(isPropagationRunning(run("completed", "failure"))).toBe(false);
+  });
+
+  it("1度も動いていなければ起動してよい", () => {
+    expect(canStartPropagation(null).allowed).toBe(true);
+    expect(isPropagationRunning(null)).toBe(false);
+  });
+});
+
+describe("shortWorkflowTag", () => {
+  it("接頭辞を落として版数だけにする", () => {
+    expect(shortWorkflowTag("workflows/v19")).toBe("v19");
+  });
+
+  it("形式が違えばそのまま返す", () => {
+    expect(shortWorkflowTag("v19")).toBe("v19");
   });
 });

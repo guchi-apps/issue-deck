@@ -146,7 +146,7 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 - 「前提条件」には**実行するデバイス・カレントディレクトリ・Gitブランチ・先に完了している必要があるIssue／PR・その他の前提**を書く。実行する側は別の端末の前でこれを読むため、どれか一つでも欠けると実行してよいかを判断できない。**Gitブランチは原則`develop`**（本体チェックアウトがdevelopのため。例外は`develop`を持たないリポジトリと本番へデプロイ済みのコードを触る作業で、その場合だけ`main`）
 - 「完了の確認方法」には**確認用のコマンドと期待する出力、または画面のどこに何が出ていれば完了か**を書く（「動作を確認する」で終わらせない）
 - 起点IssueへGitHubネイティブのサブIssueとして紐付け、起点IssueとPRにリンクをコメントする
-- issue-deckのサイドメニューの「手作業待ち」ビュー（`view=manual-step`）に集まる。**エージェントへ送り直すIssueではないため実装開始の導線は出ず**、実行したユーザーがIssue詳細の「手作業を完了してクローズ」でcloseする（進捗Statusは`Ready`のままでよい）
+- issue-deckのサイドメニューの「ユーザーの作業待ち」ビュー（`view=manual-step`）に集まる。**エージェントへ送り直すIssueではないため実装開始の導線は出ず**、実行したユーザーがIssue詳細の「手作業を完了してクローズ」でcloseする（進捗Statusは`Ready`のままでよい）
 
 判断基準・本文テンプレートの全文・設計理由は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「デプロイ後などに残るユーザーの手作業はIssueとして起票する」を参照。
 
@@ -164,6 +164,8 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 - `develop`→`main`のマージ
 
 上記カテゴリに該当するかどうかによらず、Issueに`22.merge-confirm-required`ラベルが付いている場合も、develop向けPRへのpushのたびに常に`00.check-user`が付与され自動マージがスキップされる（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
+
+**「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 
 ### PR本文テンプレート
 

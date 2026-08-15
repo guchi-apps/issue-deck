@@ -83,6 +83,7 @@ const {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
+  expireStaleDispatchJobs,
   listDispatchState,
   prioritizeDispatchJob,
   reportDispatchJob,
@@ -690,6 +691,123 @@ describe("expireStaleDispatchJobs の制御ジョブ", () => {
         where: { id: "control-1", status: "QUEUED" },
         data: expect.objectContaining({ status: "TIMEOUT", activeKey: null }),
       }),
+    );
+  });
+});
+
+/**
+ * #1620。pollerは`succeeded`の報告に失敗しても再送を諦めるため、tmuxセッションは立っているのに
+ * ジョブが`RUNNING`のまま残ることがある。そのままタイムアウトさせると、同じIssueが実行キューの
+ * 「実行中」（セッション一覧）と「直近の失敗」に同時に出る。
+ */
+describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
+  function staleLaunchJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      status: "RUNNING",
+      kind: "LAUNCH",
+      targetHost: "subpc",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      tmuxSessionName: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+    dispatchSessionFindMany.mockResolvedValue([]);
+  });
+
+  it("セッションが動いていればSUCCEEDEDとして畳み、セッション名を補う", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "RUNNING" },
+      data: expect.objectContaining({
+        status: "SUCCEEDED",
+        activeKey: null,
+        finishedAt: NOW,
+        tmuxSessionName: "issue-deck-issue-1311",
+      }),
+    });
+  });
+
+  // claim直後に報告が届かなかった場合も同じ（`running`と`succeeded`の両方を落とすと起きる）
+  it("CLAIMEDのままでもセッションが動いていれば救済する", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ status: "CLAIMED" })]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCEEDED" }) }),
+    );
+  });
+
+  it("セッションが無ければ従来どおりTIMEOUTにする", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
+    );
+  });
+
+  // pollerごと落ちていれば`ALIVE`の行はそのまま古びて残る。古い報告で成功と決めない
+  it("探すのは報告が新しいALIVEのセッションだけ", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchSessionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          state: "ALIVE",
+          lastReportedAt: { gte: new Date(NOW.getTime() - 5 * 60 * 1000) },
+          OR: [{ host: "subpc", repositoryFullName: REPOSITORY, issueNumber: 1311 }],
+        }),
+      }),
+    );
+  });
+
+  // 制御ジョブはtmuxを1回叩いて終わる。セッションが動いていることは届いた証拠にならない
+  it("制御ジョブは救済しない", async () => {
+    dispatchJobFindMany.mockResolvedValue([
+      staleLaunchJob({ id: "control-1", status: "QUEUED", kind: "INTERRUPT" }),
+    ]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchSessionFindMany).not.toHaveBeenCalled();
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
     );
   });
 });

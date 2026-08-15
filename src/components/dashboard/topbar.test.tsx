@@ -36,9 +36,12 @@ function renderTopBar(setFilter: SetFilter, filters: IssueFilters = baseFilters)
       assigneeOptions={[]}
       onCreateIssue={() => {}}
       onAskQuestion={() => {}}
-      selectedRepoFullName={null}
       repositories={[]}
       issues={[]}
+      pullRequests={[]}
+      onOpenNotificationTarget={() => {}}
+      onOpenCheckUserView={() => {}}
+      onOpenFlow={() => {}}
       isSidebarCollapsed={false}
       onToggleSidebar={() => {}}
       onOpenSettings={() => {}}
@@ -87,9 +90,12 @@ describe("TopBar 検索欄", () => {
         assigneeOptions={[]}
         onCreateIssue={() => {}}
         onAskQuestion={() => {}}
-        selectedRepoFullName={null}
         repositories={[]}
         issues={[]}
+        pullRequests={[]}
+        onOpenNotificationTarget={() => {}}
+        onOpenCheckUserView={() => {}}
+        onOpenFlow={() => {}}
         isSidebarCollapsed={false}
         onToggleSidebar={() => {}}
         onOpenSettings={() => {}}

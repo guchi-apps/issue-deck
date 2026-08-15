@@ -433,6 +433,19 @@ reap_sessions() {
 }
 
 # --- ジョブの実行 -------------------------------------------------------------
+# ジョブ状態の報告を再送する回数と間隔（#1620）。
+#
+# **1回の失敗で諦めると、届かなかった報告はタイムアウトの「失敗」になる。** 実際に
+# `curl: (28) Connection timed out` が1回起きただけで、tmuxセッションは立っているのに
+# ジョブが10分後に「応答が途絶えました」として残った。issue-deck側にも救済を入れている
+# （`findSessionsForStaleLaunchJobs`）が、そちらは10分待って初めて効くうえ、セッションを
+# 立てない報告（`skipped`・`failed`）は救えない。まずここで届けきる。
+#
+# 間隔はポーリング間隔（60秒）を食い潰さない範囲に収める。再起動・デプロイでの短い断は
+# これで越えられ、長く落ちている場合はどのみち次のタイムアウト救済に任せる。
+REPORT_RETRY_ATTEMPTS=3
+REPORT_RETRY_INTERVAL=5
+
 report_job() {
   local job_id="$1" status="$2" message="${3:-}" session="${4:-}"
   local payload
@@ -446,9 +459,22 @@ report_job() {
       + (if $message == "" then {} else {message: $message} end)
       + (if $tmuxSessionName == "" then {} else {tmuxSessionName: $tmuxSessionName} end)')"
 
-  if api_call POST /api/dispatch/report "$payload"; then
-    return 0
-  fi
+  local attempt
+  for (( attempt = 1; attempt <= REPORT_RETRY_ATTEMPTS; attempt++ )); do
+    if api_call POST /api/dispatch/report "$payload"; then
+      return 0
+    fi
+    # **再送するのは繋がらなかった場合と5xxだけ。** 401（鍵の不一致）・400（受け口が
+    # 知らない値）は何度送っても同じ結果で、下の`skipped`→`failed`の読み替えを遅らせるだけ。
+    case "$API_RESPONSE_STATUS" in
+      000 | 5??) ;;
+      *) break ;;
+    esac
+    if (( attempt < REPORT_RETRY_ATTEMPTS )); then
+      echo "  報告に失敗しました（$status・$attempt/$REPORT_RETRY_ATTEMPTS）。${REPORT_RETRY_INTERVAL}秒後に再送します。" >&2
+      sleep "$REPORT_RETRY_INTERVAL"
+    fi
+  done
 
   # 受け口が`skipped`（#1229）を知らない版数だと400で弾かれる。**pollerとissue-deckは
   # 別々に更新される**（pollerは本体の作業ツリー＝developを追い、issue-deckの画面はmainから
@@ -462,8 +488,10 @@ report_job() {
   fi
 
   # **報告の失敗で処理を止めない。** issue-deckが単一障害点にならないようにする取り決め
-  # （/api/progress と同じ）。報告が届かないジョブはissue-deck側のタイムアウトが拾う。
-  report_api_failure "ジョブ状態の報告に失敗しました（$job_id → $status）"
+  # （/api/progress と同じ）。ここまで来た報告はissue-deck側のタイムアウトが拾う。起動が
+  # 成功していた場合は、そのときセッションが動いているかを見て成功として畳まれる（#1620）。
+  # 再送を打ち切った場合（401など）と全部使い切った場合を区別できるよう、実際の試行回数を出す
+  report_api_failure "ジョブ状態の報告に失敗しました（$job_id → $status。$(( attempt > REPORT_RETRY_ATTEMPTS ? REPORT_RETRY_ATTEMPTS : attempt ))回試行）"
 }
 
 tmux_session_names() {
