@@ -10,8 +10,12 @@
 ISSUE_DECK_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
 
 # ブランチ issue-<番号> をheadとするマージ済みPRの番号を出力する（無ければ何も出力しない）。
-# gh の失敗（ネットワーク断・未認証）も「マージ済みPRなし」として扱う。判定できないときに
-# 削除側へ倒れないようにするため。
+# gh の失敗（ネットワーク断・未認証）も「マージ済みPRなし」として扱う。
+#
+# **これは「消してよいか」の判定には使わない**（#1192）。消して失われるものが無いことは
+# worktree_dirty_count と worktree_commits_not_in_develop だけで決まり、PRの有無はそこへ
+# 何も足さない。start-issue.sh は「マージ済みのブランチで再開していないか」の警告に、
+# cleanup-worktrees.sh は削除理由の表示に使う。
 worktree_merged_pr() {
   local n="$1"
   gh pr list --repo "$ISSUE_DECK_REPO" --head "issue-$n" --state merged \
@@ -31,6 +35,20 @@ worktree_dirty_count() {
 worktree_branch_in_develop() {
   local root="$1" branch="$2"
   git -C "$root" merge-base --is-ancestor "$branch" "origin/develop" 2>/dev/null
+}
+
+# origin/develop に入っていないコミットの件数を出力する（＝worktreeを消すと失われるコミットの数）。
+# 0 なら worktree を消しても失われるコミットは無い。**worktreeを作っただけで1コミットもしていない
+# 場合もここは0になる**（#1192）。
+#
+# 判定できなかった場合（origin/develop が無い・ブランチが無い等）は**何も出力しない**。
+# 呼び出し側は空を「判定不能」として残す側（安全側）へ倒すこと。0を返すと消す側へ倒れてしまう。
+#
+# worktree_branch_in_develop と同じことを件数で見ている。件数は「何件失われるか」を表示に
+# 使えるぶん掃除側に向く。
+worktree_commits_not_in_develop() {
+  local root="$1" branch="$2"
+  git -C "$root" rev-list --count "origin/develop..$branch" 2>/dev/null || true
 }
 
 # そのIssueのセッション（run-issue-session.sh）または開発サーバーが動いているか。
