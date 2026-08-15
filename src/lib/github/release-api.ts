@@ -1,3 +1,4 @@
+import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
@@ -153,7 +154,12 @@ export function resolveCiStateFromCheckRuns(runs: CheckRun[]): CiState {
   return "success";
 }
 
-/** check-runsの1ページ分を取得する。取得できなければ`null`（呼び出し側で`unknown`へ縮退させる） */
+/**
+ * check-runsの1ページ分を取得する。取得できなければ`null`（呼び出し側で`unknown`へ縮退させる）。
+ *
+ * PR一覧と同じくETagによる条件付きGETを通す（#1531）。CIが動いていないrefでは304が返り、
+ * レート制限を消費しない。
+ */
 async function fetchCheckRunsPage(
   owner: string,
   repo: string,
@@ -162,10 +168,12 @@ async function fetchCheckRunsPage(
   page: number,
 ): Promise<{ totalCount: number; runs: CheckRun[] } | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}/check-runs?per_page=${CHECK_RUNS_PAGE_SIZE}&page=${page}`;
-  const res = await githubFetch(url, token).catch(() => null);
-  if (!res || !res.ok) return null;
-  const data: { total_count?: number; check_runs?: CheckRun[] } = await res.json().catch(() => ({}));
-  return { totalCount: data.total_count ?? 0, runs: data.check_runs ?? [] };
+  const result = await githubFetchJsonWithEtag<{
+    total_count?: number;
+    check_runs?: CheckRun[];
+  }>(url, token).catch(() => null);
+  if (!result || !result.ok) return null;
+  return { totalCount: result.data.total_count ?? 0, runs: result.data.check_runs ?? [] };
 }
 
 /**
