@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { ExternalLink, Lock, RefreshCw } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -178,6 +178,16 @@ export function PullRequestList({
   const groups = groupPullRequestsByRepository(pullRequests, view);
   const { title, description, emptyMessage } = getPullRequestView(view);
 
+  // 押した行を即座にハイライトするための楽観表示（#1597）。Issue一覧（issue-list.tsx）と
+  // 同じ仕組みで、理由もそちらのコメントに書いてある。
+  const [optimisticSelectedId, setOptimisticSelectedId] = useState<string | null>(null);
+  const [syncedSelectedId, setSyncedSelectedId] = useState(selectedPullRequestId);
+  if (selectedPullRequestId !== syncedSelectedId) {
+    setSyncedSelectedId(selectedPullRequestId);
+    setOptimisticSelectedId(null);
+  }
+  const highlightedId = optimisticSelectedId ?? selectedPullRequestId;
+
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
@@ -241,8 +251,14 @@ export function PullRequestList({
                 <PullRequestCard
                   key={pullRequest.id}
                   pullRequest={pullRequest}
-                  selected={selectedPullRequestId === pullRequest.id}
-                  onSelect={onSelectPullRequest}
+                  selected={highlightedId === pullRequest.id}
+                  onSelect={
+                    onSelectPullRequest &&
+                    ((selectedPullRequest) => {
+                      setOptimisticSelectedId(selectedPullRequest.id);
+                      onSelectPullRequest(selectedPullRequest);
+                    })
+                  }
                   onMerged={() => onMerged?.(pullRequest)}
                 />
               ))}

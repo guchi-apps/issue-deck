@@ -28,7 +28,6 @@ import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-rep
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
 import { MobilePullRequestDetailScreen } from "@/components/dashboard/mobile/mobile-pull-request-detail-screen";
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
-import { MobileScreenSkeleton } from "@/components/dashboard/mobile/mobile-screen-skeleton";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
@@ -149,7 +148,6 @@ export function IssueDeckShell({
 
   const {
     mobileScreen,
-    isPending: isMobileScreenPending,
     selectTab,
     selectPullRequests,
     // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
@@ -709,164 +707,158 @@ export function IssueDeckShell({
           {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
           <div className="flex flex-1 flex-col overflow-hidden md:hidden">
             <div className="flex-1 overflow-hidden">
-              {isMobileScreenPending ? (
-                <MobileScreenSkeleton />
-              ) : (
-                <>
-                  {mobileScreen.kind === "home" && (
-                    <MobileHomeScreen
-                      overviewStats={overviewStats}
-                      navCounts={navCounts}
-                      pullRequestNavCounts={pullRequestNavCounts}
-                      onSelectQuickView={selectQuickView}
-                      favoriteRepositories={repositories.filter((repo) => repo.favorite)}
-                      onSelectRepository={selectRepository}
-                      quickFilters={quickFilters}
-                      onSelectQuickFilter={handleSelectQuickFilterMobile}
-                      onDeleteQuickFilter={handleDeleteQuickFilter}
-                      onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-                      onSelectPullRequests={selectPullRequests}
-                      onSelectFlow={selectMobileFlow}
-                    />
-                  )}
+              {mobileScreen.kind === "home" && (
+                <MobileHomeScreen
+                  overviewStats={overviewStats}
+                  navCounts={navCounts}
+                  pullRequestNavCounts={pullRequestNavCounts}
+                  onSelectQuickView={selectQuickView}
+                  favoriteRepositories={repositories.filter((repo) => repo.favorite)}
+                  onSelectRepository={selectRepository}
+                  quickFilters={quickFilters}
+                  onSelectQuickFilter={handleSelectQuickFilterMobile}
+                  onDeleteQuickFilter={handleDeleteQuickFilter}
+                  onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
+                  onSelectPullRequests={selectPullRequests}
+                  onSelectFlow={selectMobileFlow}
+                />
+              )}
 
-                  {mobileScreen.kind === "flow" && (
-                    <MobileFlowScreen
-                      flow={branchFlow}
-                      fetchedAt={branchFlowStatus.fetchedAt}
-                      isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
-                      error={branchFlowStatus.error ?? openPullRequests.error}
-                      failedRepositories={branchFlowStatus.failedRepositories}
-                      onRefresh={() => {
-                        branchFlowStatus.refresh();
-                        openPullRequests.refresh();
-                        deployStatus.refresh();
-                      }}
-                      onBack={goBack}
-                    />
-                  )}
+              {mobileScreen.kind === "flow" && (
+                <MobileFlowScreen
+                  flow={branchFlow}
+                  fetchedAt={branchFlowStatus.fetchedAt}
+                  isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+                  error={branchFlowStatus.error ?? openPullRequests.error}
+                  failedRepositories={branchFlowStatus.failedRepositories}
+                  onRefresh={() => {
+                    branchFlowStatus.refresh();
+                    openPullRequests.refresh();
+                    deployStatus.refresh();
+                  }}
+                  onBack={goBack}
+                />
+              )}
 
-                  {mobileScreen.kind === "pull-requests" &&
-                    // PRを選んでいる間は同じ画面枠をPR詳細に差し替える。PR一覧はスマホの
-                    // ボトムナビにタブを持たないドリルダウン画面のため、一覧→詳細も
-                    // mscreenを増やさず選択状態（prクエリ）だけで切り替える（#1087）。
-                    // 判定に使うのは選択中PRそのものではなくprクエリ。一覧に無いPRを
-                    // リンクから開いた場合、summaryが届くまで一覧へ戻ってしまうため（#1260）。
-                    (filters.pr ? (
-                      <MobilePullRequestDetailScreen
-                        pullRequest={selectedPullRequest}
-                        detail={pullRequestDetail.detail}
-                        isLoading={pullRequestDetail.isLoading}
-                        error={pullRequestDetail.error}
-                        onRefresh={pullRequestDetail.refresh}
-                        onMerged={() =>
-                          selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
-                        }
-                        // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
-                        onBack={() => goBackOrFallback(() => selectPullRequest(null))}
-                      />
-                    ) : (
-                      <MobilePullRequestsScreen
-                        view={filters.prview}
-                        navCounts={pullRequestNavCounts}
-                        origin={mobileScreen.origin}
-                        onChangeView={selectMobilePullRequestView}
-                        pullRequests={filteredPullRequests}
-                        failedRepositories={openPullRequests.failedRepositories}
-                        fetchedAt={openPullRequests.fetchedAt}
-                        isLoading={openPullRequests.isLoading}
-                        error={openPullRequests.error}
-                        onRefresh={openPullRequests.refresh}
-                        onBack={goBack}
-                        onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
-                        onMerged={handlePullRequestMerged}
-                      />
-                    ))}
+              {mobileScreen.kind === "pull-requests" &&
+                // PRを選んでいる間は同じ画面枠をPR詳細に差し替える。PR一覧はスマホの
+                // ボトムナビにタブを持たないドリルダウン画面のため、一覧→詳細も
+                // mscreenを増やさず選択状態（prクエリ）だけで切り替える（#1087）。
+                // 判定に使うのは選択中PRそのものではなくprクエリ。一覧に無いPRを
+                // リンクから開いた場合、summaryが届くまで一覧へ戻ってしまうため（#1260）。
+                (filters.pr ? (
+                  <MobilePullRequestDetailScreen
+                    pullRequest={selectedPullRequest}
+                    detail={pullRequestDetail.detail}
+                    isLoading={pullRequestDetail.isLoading}
+                    error={pullRequestDetail.error}
+                    onRefresh={pullRequestDetail.refresh}
+                    onMerged={() =>
+                      selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
+                    }
+                    // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
+                    onBack={() => goBackOrFallback(() => selectPullRequest(null))}
+                  />
+                ) : (
+                  <MobilePullRequestsScreen
+                    view={filters.prview}
+                    navCounts={pullRequestNavCounts}
+                    origin={mobileScreen.origin}
+                    onChangeView={selectMobilePullRequestView}
+                    pullRequests={filteredPullRequests}
+                    failedRepositories={openPullRequests.failedRepositories}
+                    fetchedAt={openPullRequests.fetchedAt}
+                    isLoading={openPullRequests.isLoading}
+                    error={openPullRequests.error}
+                    onRefresh={openPullRequests.refresh}
+                    onBack={goBack}
+                    onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
+                    onMerged={handlePullRequestMerged}
+                  />
+                ))}
 
-                  {mobileScreen.kind === "issues" && (
-                    <MobileIssuesScreen
-                      issues={issues}
-                      currentUserLogin={currentUserLogin}
-                      labelSummary={labelSummary}
-                      assigneeOptions={assigneeOptions}
-                      selectedIssueId={mobileScreen.returnToIssueId}
-                      view={mobileScreen.view}
-                      labels={mobileScreen.labels}
-                      state={mobileScreen.state}
-                      assignee={mobileScreen.assignee}
-                      sort={mobileScreen.sort}
-                      onChangeView={(view) => updateListFilters({ view })}
-                      onChangeFilters={(filters) => updateListFilters(filters)}
-                      onSelectIssue={selectIssue}
-                      onCreateIssue={() => openCreateDialog()}
-                      onAskQuestion={() => openAskRepoQuestionDialog()}
-                      onBack={mobileScreen.origin === "home" ? goBack : undefined}
-                    />
-                  )}
+              {mobileScreen.kind === "issues" && (
+                <MobileIssuesScreen
+                  issues={issues}
+                  currentUserLogin={currentUserLogin}
+                  labelSummary={labelSummary}
+                  assigneeOptions={assigneeOptions}
+                  selectedIssueId={mobileScreen.returnToIssueId}
+                  view={mobileScreen.view}
+                  labels={mobileScreen.labels}
+                  state={mobileScreen.state}
+                  assignee={mobileScreen.assignee}
+                  sort={mobileScreen.sort}
+                  onChangeView={(view) => updateListFilters({ view })}
+                  onChangeFilters={(filters) => updateListFilters(filters)}
+                  onSelectIssue={selectIssue}
+                  onCreateIssue={() => openCreateDialog()}
+                  onAskQuestion={() => openAskRepoQuestionDialog()}
+                  onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                />
+              )}
 
-                  {mobileScreen.kind === "repos" && (
-                    <MobileReposScreen
-                      repositories={repositories}
-                      onSelectRepository={selectRepository}
-                      onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-                      onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
-                      onSetRepositoryFavorite={handleSetRepositoryFavorite}
-                    />
-                  )}
+              {mobileScreen.kind === "repos" && (
+                <MobileReposScreen
+                  repositories={repositories}
+                  onSelectRepository={selectRepository}
+                  onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
+                  onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
+                  onSetRepositoryFavorite={handleSetRepositoryFavorite}
+                />
+              )}
 
-                  {mobileScreen.kind === "settings" && (
-                    <MobileSettingsScreen
-                      currentUser={currentUser}
-                      autoRetryLimit={autoRetryLimit}
-                      claudeModel={claudeModel}
-                      claudeModelAssist={claudeModelAssist}
-                      dispatchConcurrency={dispatchConcurrency}
-                      repositories={repositories}
-                      onSetRepositoryHidden={handleSetRepositoryHidden}
-                      onSetRepositoriesHidden={handleSetRepositoriesHidden}
-                      onUpdated={handleAppSettingsUpdated}
-                    />
-                  )}
+              {mobileScreen.kind === "settings" && (
+                <MobileSettingsScreen
+                  currentUser={currentUser}
+                  autoRetryLimit={autoRetryLimit}
+                  claudeModel={claudeModel}
+                  claudeModelAssist={claudeModelAssist}
+                  dispatchConcurrency={dispatchConcurrency}
+                  repositories={repositories}
+                  onSetRepositoryHidden={handleSetRepositoryHidden}
+                  onSetRepositoriesHidden={handleSetRepositoriesHidden}
+                  onUpdated={handleAppSettingsUpdated}
+                />
+              )}
 
-                  {mobileScreen.kind === "repo-detail" && (
-                    <MobileRepoIssuesScreen
-                      repository={mobileScreen.repository}
-                      issues={issues}
-                      currentUserLogin={currentUserLogin}
-                      selectedIssueId={mobileScreen.returnToIssueId}
-                      view={mobileScreen.view}
-                      labels={mobileScreen.labels}
-                      state={mobileScreen.state}
-                      assignee={mobileScreen.assignee}
-                      sort={mobileScreen.sort}
-                      onChangeView={(view) => updateListFilters({ view })}
-                      onChangeFilters={(filters) => updateListFilters(filters)}
-                      onSelectIssue={selectIssue}
-                      onBack={goBack}
-                      onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-                      onAskQuestion={() =>
-                        openAskRepoQuestionDialog(mobileScreen.repository.fullName)
-                      }
-                    />
-                  )}
+              {mobileScreen.kind === "repo-detail" && (
+                <MobileRepoIssuesScreen
+                  repository={mobileScreen.repository}
+                  issues={issues}
+                  currentUserLogin={currentUserLogin}
+                  selectedIssueId={mobileScreen.returnToIssueId}
+                  view={mobileScreen.view}
+                  labels={mobileScreen.labels}
+                  state={mobileScreen.state}
+                  assignee={mobileScreen.assignee}
+                  sort={mobileScreen.sort}
+                  onChangeView={(view) => updateListFilters({ view })}
+                  onChangeFilters={(filters) => updateListFilters(filters)}
+                  onSelectIssue={selectIssue}
+                  onBack={goBack}
+                  onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
+                  onAskQuestion={() =>
+                    openAskRepoQuestionDialog(mobileScreen.repository.fullName)
+                  }
+                />
+              )}
 
-                  {mobileScreen.kind === "issue-detail" && (
-                    <MobileIssueDetail
-                      issue={mobileScreen.issue}
-                      issues={issues}
-                      repositories={visibleRepositories}
-                      currentUserLogin={currentUserLogin}
-                      onBack={goBack}
-                      onEdit={setEditingIssue}
-                      onIssueUpdated={handleIssueUpdated}
-                      onIssueDeleted={handleIssueDeleted}
-                      onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-                      onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
-                      onCreateFollowupIssue={openFollowupIssueDialog}
-                      onSelectRepository={selectRepositoryByFullName}
-                    />
-                  )}
-                </>
+              {mobileScreen.kind === "issue-detail" && (
+                <MobileIssueDetail
+                  issue={mobileScreen.issue}
+                  issues={issues}
+                  repositories={visibleRepositories}
+                  currentUserLogin={currentUserLogin}
+                  onBack={goBack}
+                  onEdit={setEditingIssue}
+                  onIssueUpdated={handleIssueUpdated}
+                  onIssueDeleted={handleIssueDeleted}
+                  onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
+                  onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
+                  onCreateFollowupIssue={openFollowupIssueDialog}
+                  onSelectRepository={selectRepositoryByFullName}
+                />
               )}
             </div>
 
