@@ -353,7 +353,13 @@ export function IssueList({
   }
 
   return (
-    <div className={cn("flex h-full flex-col", className)} style={style}>
+    // min-h-0が無いと、この要素を`flex-1`で縦に並べたとき（スマホのIssue一覧）に
+    // Issue件数ぶんの高さまで縮まなくなる（#1665）。flexアイテムの`min-height: auto`は
+    // 「中身の最小サイズ」に解決され、内側の`<ul>`がoverflow-y-autoでも外側のこの要素は
+    // overflowがvisibleなので0まで縮まない。結果、下に並ぶ兄弟（下端の絞り込み行）が
+    // 親のoverflow-hiddenの外へ押し出され、件数が多いときだけ消えて見えた。
+    // PullRequestListが同じ症状を出さないのは、ルートにoverflow-hiddenがあるため。
+    <div className={cn("flex h-full min-h-0 flex-col", className)} style={style}>
       {showSearch && (
         <div className="border-b p-3">
           <Input placeholder="キーワードで検索" />

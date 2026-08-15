@@ -120,3 +120,14 @@ describe("IssueListの選択ハイライト（#1597）", () => {
     expect(rowOf(1).className).not.toContain("border-l-primary");
   });
 });
+
+describe("IssueListの縦方向の縮小（#1665）", () => {
+  it("ルートにmin-h-0が付いている", () => {
+    // jsdomはレイアウトを計算しないため、クラスの有無で守る。
+    // このクラスが外れると、`flex-1`で縦に並べたスマホのIssue一覧で、
+    // Issue件数が多いときに下端の絞り込み行が画面外へ押し出される。
+    const { container } = renderList({ className: "flex-1" });
+
+    expect((container.firstChild as HTMLElement).className).toContain("min-h-0");
+  });
+});
