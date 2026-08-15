@@ -35,8 +35,14 @@ describe("resolveBottomNavTab", () => {
   it("タブ画面はそのままのタブを返す", () => {
     expect(resolveBottomNavTab({ kind: "home" })).toBe("home");
     expect(resolveBottomNavTab({ kind: "repos" })).toBe("repos");
-    expect(resolveBottomNavTab({ kind: "settings" })).toBe("settings");
     expect(resolveBottomNavTab({ kind: "pull-requests", origin: "tab" })).toBe("pull-requests");
+    // ブランチは#1638でタブになった（旧「設定」の枠）
+    expect(resolveBottomNavTab({ kind: "flow" })).toBe("flow");
+  });
+
+  // 設定はフッターから外し、ホームのヘッダーの歯車から開く画面になった（#1638）
+  it("設定画面ではどのタブも点灯させない", () => {
+    expect(resolveBottomNavTab({ kind: "settings" })).toBeNull();
   });
 
   it("リポジトリ別Issue一覧では「Issue」タブ（repos）を返す", () => {

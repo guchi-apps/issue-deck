@@ -81,6 +81,7 @@ const repositories = [
 function renderScreen() {
   return render(
     <MobileSettingsScreen
+      onBack={vi.fn()}
       currentUser={{ login: "octocat", name: "Octo Cat", image: null }}
       autoRetryLimit={2}
       claudeModel="auto"

@@ -13,6 +13,7 @@ import {
   Star,
 } from "lucide-react";
 
+import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { Input } from "@/components/ui/input";
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -86,10 +87,10 @@ export function MobileReposScreen({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex shrink-0 items-center justify-between border-b p-4">
+      <header className="flex shrink-0 items-center gap-1 border-b py-2 pr-2 pl-4">
         {/* フッターの「Issue」タブが開く画面なので、見出しもラベルに揃える（#1436）。
             中身はリポジトリ一覧のままで、リポジトリを選ぶとそのIssue一覧へ進む */}
-        <h1 className="text-base font-semibold">Issue</h1>
+        <h1 className="flex-1 text-base font-semibold">Issue</h1>
         <button
           type="button"
           onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
@@ -110,6 +111,8 @@ export function MobileReposScreen({
         >
           <Settings2 className="size-4" />
         </button>
+        {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端に固定する */}
+        <MobileDispatchStatusButton />
       </header>
 
       <div className="shrink-0 p-4">

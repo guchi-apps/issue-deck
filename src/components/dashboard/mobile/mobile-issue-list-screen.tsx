@@ -5,10 +5,12 @@ import type { ReactNode, TouchEvent } from "react";
 import { ArrowLeft, MessageCircleQuestion, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
+import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 import { baseNavViews, getAdjacentNavViewId, labelNavViews } from "@/lib/nav-views";
@@ -85,6 +87,9 @@ export function MobileIssueListScreen({
   children,
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  // ヘッダーの実行状況（#1638）と一覧の実行先の解決（#1262）が同じものを見るため、
+  // この画面で1回だけ取って両方へ配る（取得口を増やさない＝`use-dispatch-state.ts`の取り決め）
+  const dispatch = useDispatchState(true);
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
   const swipeFilterHandlers = useSwipeFilterView((direction) => {
     // タブの表示順（tabNavViews）で隣接判定する。navViews順のままだと、
@@ -164,6 +169,8 @@ export function MobileIssueListScreen({
             <SlidersHorizontal className="size-4" />
           </button>
           {headerActions}
+          {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端で全画面そろえる */}
+          <MobileDispatchStatusButton dispatch={dispatch} />
         </div>
       </header>
 
@@ -240,6 +247,7 @@ export function MobileIssueListScreen({
         scrollKey={scrollKey}
         groupByRepo={groupByRepo}
         view={view}
+        dispatch={dispatch}
       />
 
       <MobileIssueFilterSheet

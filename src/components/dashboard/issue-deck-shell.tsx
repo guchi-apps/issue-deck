@@ -156,7 +156,7 @@ export function IssueDeckShell({
     // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
     // タブ切り替えで、履歴を積まない（#1436）
     selectPullRequestView: selectMobilePullRequestView,
-    selectFlow: selectMobileFlow,
+    selectSettings: selectMobileSettings,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -721,7 +721,8 @@ export function IssueDeckShell({
     }
   }
 
-  const activeBottomNavTab: MobileBottomNavTab = resolveBottomNavTab(mobileScreen);
+  // 設定画面のように、フッターに対応するタブが無い画面ではnullになる（#1638）
+  const activeBottomNavTab: MobileBottomNavTab | null = resolveBottomNavTab(mobileScreen);
 
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
@@ -767,7 +768,7 @@ export function IssueDeckShell({
                   onDeleteQuickFilter={handleDeleteQuickFilter}
                   onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
                   onSelectPullRequests={selectPullRequests}
-                  onSelectFlow={selectMobileFlow}
+                  onOpenSettings={selectMobileSettings}
                 />
               )}
 
@@ -783,7 +784,6 @@ export function IssueDeckShell({
                     openPullRequests.refresh();
                     deployStatus.refresh();
                   }}
-                  onBack={goBack}
                 />
               )}
 
@@ -857,6 +857,7 @@ export function IssueDeckShell({
 
               {mobileScreen.kind === "settings" && (
                 <MobileSettingsScreen
+                  onBack={goBack}
                   currentUser={currentUser}
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
