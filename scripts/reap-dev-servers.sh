@@ -225,6 +225,54 @@ reap_orphan_serves() {
   [[ "$removed" -eq 0 ]] || echo "tailnetへの公開を撤去しました: $removed 件"
 }
 
+# 待ち受けが全インターフェースに出ていないか警告する（#1526）。**孤児かどうかとは独立に見る。**
+#
+# 開発サーバーの待ち受けは`127.0.0.1`が既定になった（scripts/dev.sh）が、**worktreeは分岐した
+# 時点のスクリプトを持ち続ける**ため、#1329より前に作られたworktreeで手で`pnpm dev`を叩くと
+# 従来どおり全インターフェースに出る。Tailscaleに参加しているホストではtailnet上の他端末から
+# 到達できてしまうので、pollerの1巡で見つけて知らせる。
+#
+# `/proc`の走査（`reap_untracked_dev_servers`）はargvの位置から入るためポート番号を持たず、
+# `dev_server_wildcard_listening`にそのまま渡せない。ここは元の
+# `scripts/sweep-orphan-dev-servers.sh`（developで削られた#1525・#1526）と同じく`ss -tlnp`から
+# 入り、Local Address列からポートを、cwdからリポジトリ名とIssue番号を決める。
+#
+# **止めない。** 掃除の判定材料はtmuxセッションの有無と猶予だけに保つ（画面確認中のものを
+# 誤って撃たない）。**worktreeのログにも書かない**（ログのmtimeはアイドル判定の材料で、
+# ここで毎回書くとアイドルでの回収が永久に成立しなくなる）。
+warn_wildcard_listening() {
+  command -v ss >/dev/null 2>&1 || return 0
+
+  local local_addr proc_info pid port cwd leaf worktree_base issue_number repo
+  local -A seen_pid=()
+
+  while read -r local_addr proc_info; do
+    [[ "$proc_info" =~ pid=([0-9]+) ]] || continue
+    pid="${BASH_REMATCH[1]}"
+    # 同じプロセスがIPv4/IPv6の両方で待ち受けていることがある。1回だけ見る
+    [[ -z "${seen_pid[$pid]:-}" ]] || continue
+    seen_pid["$pid"]=1
+
+    port="${local_addr##*:}"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
+
+    cwd="$(dev_server_cwd_of "$pid" || true)"
+    [[ -n "$cwd" ]] || continue
+    leaf="${cwd##*/}"
+    worktree_base="${cwd%/*}"
+    [[ "$leaf" =~ ^issue-([1-9][0-9]*)$ ]] || continue
+    issue_number="${BASH_REMATCH[1]}"
+    [[ "${worktree_base##*/}" =~ ^(.+)-worktrees$ ]] || continue
+    repo="${BASH_REMATCH[1]}"
+
+    dev_server_wildcard_listening "$port" || continue
+    echo "警告: 開発サーバーがポート $port を全インターフェースで待ち受けています（$repo #$issue_number）。tailnet上の他端末から到達できます（#1526）。"
+    echo "      $cwd の scripts/dev.sh が古い可能性があります。git -C $cwd merge origin/develop で取り込むか、worktreeを作り直してください。"
+  done < <(ss -tlnpH 2>/dev/null | awk '{ rest = ""; for (i = 5; i <= NF; i++) rest = rest $i; print $4, rest }')
+
+  return 0
+}
+
 # 在庫の第3の経路: `/proc`の走査（#1525）。PIDファイルに載っていない開発サーバーを見つける。
 #
 # ## 探し方（**コマンドラインの部分一致で探さない**）
@@ -415,5 +463,8 @@ fi
 # PIDファイルに載っていない分（#1525）。**PIDファイルの経路の後に走らせる。** 先に走らせると、
 # PIDファイルのある開発サーバーをこちらが止めてしまい、PIDファイルだけが残る
 reap_untracked_dev_servers
+
+# 全インターフェースへの待ち受け警告（#1526）。停止とは無関係なので順序は問わない。
+warn_wildcard_listening
 
 echo "開発サーバーを確認しました: $CHECKED 件（PIDファイル）＋ $UNTRACKED 件（PIDファイルに無い孤児）・停止 $STOPPED 件・アイドル判定 ${IDLE_MINUTES}分・定期掃除の猶予 ${ORPHAN_GRACE_MINUTES}分"

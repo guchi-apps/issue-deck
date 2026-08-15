@@ -47,7 +47,7 @@
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
 #   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定ならissue-deckの帯=4000）
-#   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら全インターフェース）
+#   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら127.0.0.1・#1526）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -430,11 +430,13 @@ prepare_issue() {
     echo "#$n: LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh $DEV_PORT を実行してください）。"
   elif ! command -v powershell.exe >/dev/null 2>&1; then
     # WSL以外（サブPCのUbuntu等）。ここで必要だったのはWSL2の内部NATを越えるための
-    # Windows側ポートフォワーディングで、素のLinuxには対応物が無い。開発サーバーは最初から
-    # 全インターフェースで待ち受けるため、同一LAN・tailnetの端末からそのまま見える（#1178）。
+    # Windows側ポートフォワーディングで、素のLinuxには対応物が無い。
     # setup-lan-access.sh も同じ判定で何もせず終わるが、ここで分けておくと何が行われなかったかが
     # ログに残る。
-    echo "#$n: LANアクセス設定はスキップします（WSL以外の環境では不要。開発サーバーは全インターフェースで待ち受けます）。"
+    #
+    # **開発サーバーの待ち受けは`127.0.0.1`に閉じている（#1526）。** 別端末から見る経路は
+    # `tailscale serve`のFQDNで、LANの生IPからは見えない。
+    echo "#$n: LANアクセス設定はスキップします（WSL以外の環境では不要。開発サーバーは 127.0.0.1 に閉じており、別端末からは tailscale serve のURLで見ます）。"
   else
     echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
     if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
