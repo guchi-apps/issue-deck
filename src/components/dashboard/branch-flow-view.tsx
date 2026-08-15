@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronRight, Lock, RefreshCw, TriangleAlert, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleAlert,
+  Clock,
+  Loader2,
+  Lock,
+  RefreshCw,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
@@ -18,6 +28,8 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
+  BranchFlowDeployState,
+  BranchFlowDeployStateKind,
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
@@ -78,6 +90,93 @@ function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
     >
       {label}
     </span>
+  );
+}
+
+/**
+ * 本番デプロイの状態を表すピル（#1579）。
+ *
+ * **mainへマージしただけでは本番に出ていない。** リリースの束の見出しでは長い方の文言
+ * （「本番へデプロイ中」）、畳んだ1行では短い方（「デプロイ中」）を使う。
+ */
+const DEPLOY_STATE_LABEL: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "デプロイ待ち",
+  running: "本番へデプロイ中",
+  success: "デプロイ成功",
+  failure: "デプロイ失敗",
+};
+
+const DEPLOY_STATE_LABEL_COMPACT: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "デプロイ待ち",
+  running: "デプロイ中",
+  success: "デプロイ成功",
+  failure: "デプロイ失敗",
+};
+
+/** 配色はリリースの横線（purple）・失敗（destructive）・成功（green）に合わせる */
+const DEPLOY_STATE_CLASS: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "bg-muted text-muted-foreground ring-border",
+  running: "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300",
+  success:
+    "bg-green-500/10 text-green-700 ring-green-600/50 dark:text-green-400 dark:ring-green-500/50",
+  failure: "bg-destructive/15 font-medium text-destructive ring-destructive",
+};
+
+function DeployStateIcon({ kind }: { kind: BranchFlowDeployStateKind }) {
+  switch (kind) {
+    case "running":
+      return <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />;
+    case "success":
+      return <Check className="size-3 shrink-0" aria-hidden="true" />;
+    case "failure":
+      return <CircleAlert className="size-3 shrink-0" aria-hidden="true" />;
+    default:
+      return <Clock className="size-3 shrink-0" aria-hidden="true" />;
+  }
+}
+
+function DeployStateBadge({
+  deploy,
+  compact = false,
+  linkToRun = true,
+}: {
+  deploy: BranchFlowDeployState | null;
+  /** 畳んだ1行向けの短い文言にする */
+  compact?: boolean;
+  /**
+   * 実行ログへのリンクにするか。**畳んだ1行はそれ自体が`<button>`なので必ずfalseにする**
+   * （ボタンの中にリンクを入れられない）。
+   */
+  linkToRun?: boolean;
+}) {
+  if (!deploy) return null;
+
+  const label = (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
+  const content = (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+        DEPLOY_STATE_CLASS[deploy.kind],
+      )}
+    >
+      <DeployStateIcon kind={deploy.kind} />
+      {label}
+    </span>
+  );
+
+  // 実行ログはアプリ内に対応する画面が無いので別タブで開く（`release-progress.tsx`と同じ）
+  return deploy.htmlUrl && linkToRun ? (
+    <a
+      href={deploy.htmlUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="shrink-0 hover:underline"
+      title="GitHub Actionsで実行ログを開く"
+    >
+      {content}
+    </a>
+  ) : (
+    content
   );
 }
 
@@ -373,6 +472,15 @@ function ReleaseGroupHeader({
   onRefresh: () => void;
 }) {
   const released = group.mergedAt !== null;
+  // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
+  // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
+  const inProduction = group.deploy === null || group.deploy.kind === "success";
+  // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
+  // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
+  const waitingUserMerge =
+    group.pullRequest !== null &&
+    group.pullRequest.state === "open" &&
+    group.pullRequest.ciState !== "pending";
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
@@ -401,16 +509,33 @@ function ReleaseGroupHeader({
             {group.version ? `v${group.version}` : released ? "リリース済み" : "次のリリース"}
           </span>
           {released ? (
-            <span className="text-xs text-muted-foreground">
-              {group.mergedAt && `${formatDate(group.mergedAt)}に本番反映`}
-            </span>
+            <>
+              {!inProduction && <DeployStateBadge deploy={group.deploy} />}
+              <span className="text-xs text-muted-foreground">
+                {group.mergedAt &&
+                  `${formatDate(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
+              </span>
+              {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
+              {inProduction && <DeployStateBadge deploy={group.deploy} />}
+            </>
           ) : (
-            <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
-              {group.pullRequest
-                ? "リリース中"
-                : group.bumpPullRequest
-                  ? "バージョンバンプ中"
-                  : "本番未反映"}
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+                waitingUserMerge
+                  ? // mainへのマージだけは人が行う。待っているのが人の操作であることを、
+                    // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
+                    "bg-amber-500/15 font-medium text-amber-700 ring-amber-500 dark:text-amber-400"
+                  : "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300",
+              )}
+            >
+              {waitingUserMerge
+                ? "mainへマージ待ち"
+                : group.pullRequest
+                  ? "リリース中"
+                  : group.bumpPullRequest
+                    ? "バージョンバンプ中"
+                    : "本番未反映"}
             </span>
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
@@ -643,9 +768,13 @@ function RepositorySummaryRow({
 }) {
   const { summary } = repository;
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  // 成功したデプロイは畳んだ行に出さない（静止している状態でバッジを埋めない。#1579）
+  const deploy =
+    summary.deploy && summary.deploy.kind !== "success" ? summary.deploy : null;
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
+    deploy !== null ||
     unreleasedCommits > 0 ||
     repository.orphanIssues.length > 0;
 
@@ -692,6 +821,9 @@ function RepositorySummaryRow({
           リリース中
         </span>
       )}
+      {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
+      <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+
       {/* リリースPRのマージ待ちはリリース中のピルが表すので、重ねて出さない */}
       {summary.needsUserMerge && (
         <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
@@ -716,10 +848,16 @@ function RepositorySummaryRow({
   );
 }
 
-/** 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510） */
+/**
+ * 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510）。
+ *
+ * **デプロイ中も含める**（#1579）。押す操作は無いが、mainへマージしてから本番へ出るまでの間は
+ * 「今どこまで来ているか」を見に来る時間そのもので、畳んだままだと見に来た意味が無い。
+ */
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
-  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress;
+  const deploying = summary.deploy !== null && summary.deploy.kind !== "success";
+  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress || deploying;
 }
 
 /**
