@@ -7,6 +7,7 @@ import {
   buildDispatchActiveKey,
   describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
+  describeDispatchJobKind,
   describeDispatchJobStatus,
   describeSessionControlRejection,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
@@ -31,6 +32,7 @@ import {
   resolveScreenshotRejection,
   resolveSessionControlRejection,
   type DispatchHostView,
+  type DispatchJobKind,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 
@@ -412,6 +414,40 @@ describe("describeDispatchJobStatus", () => {
   });
 });
 
+/** #1519。実行キューの行に出す種別チップの文言 */
+describe("describeDispatchJobKind", () => {
+  // 状態ラベルだけでは、QUEUEDのときに起動と横断質問がどちらも「順番待ち」になり区別が付かない
+  it("順番待ちの起動と横断質問を種別で見分けられる", () => {
+    expect(describeDispatchJobStatus("QUEUED", "LAUNCH").label).toBe(
+      describeDispatchJobStatus("QUEUED", "CROSS_REPO_QUESTION").label,
+    );
+    expect(describeDispatchJobKind("LAUNCH")).toBe("実装");
+    expect(describeDispatchJobKind("CROSS_REPO_QUESTION")).toBe("横断質問");
+  });
+
+  // 押したボタンとキューに出る言葉が違うと、それが自分の押したものか分からなくなる
+  it("制御ジョブはボタンの文言（SESSION_CONTROL_LABELS.action）と揃える", () => {
+    expect(describeDispatchJobKind("INTERRUPT")).toBe("停止");
+    expect(describeDispatchJobKind("KILL")).toBe("セッションを閉じる");
+    expect(describeDispatchJobKind("INSTRUCTION")).toBe("追加指示を送る");
+  });
+
+  // 「チップが無い＝実装」という暗黙のルールを覚えなくて済むよう、全種別に文言を持たせる
+  it("すべての種別に空でない文言がある", () => {
+    const kinds: DispatchJobKind[] = [
+      "LAUNCH",
+      "INTERRUPT",
+      "KILL",
+      "QUESTION",
+      "INSTRUCTION",
+      "CROSS_REPO_QUESTION",
+    ];
+    for (const kind of kinds) {
+      expect(describeDispatchJobKind(kind).length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe("isCancelableDispatchJobStatus", () => {
   it("running以降は取り消せない（中途半端なworktreeが残るため）", () => {
     expect(isCancelableDispatchJobStatus("QUEUED")).toBe(true);
@@ -434,6 +470,7 @@ describe("findDispatchJobForIssue", () => {
       id: "job",
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1180,
+      issueTitle: null,
       targetHost: "subpc",
       kind: "LAUNCH",
       status: "QUEUED",
@@ -920,6 +957,7 @@ describe("横断質問（#1454）", () => {
         id: "question-1",
         repositoryFullName: "guchi-apps/question",
         issueNumber: 12,
+        issueTitle: null,
         targetHost: "subpc",
         kind: "CROSS_REPO_QUESTION",
         status: "QUEUED",

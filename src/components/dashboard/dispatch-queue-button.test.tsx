@@ -34,6 +34,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     id: "job-1",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1479,
+    issueTitle: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "FAILED",
@@ -188,5 +189,131 @@ describe("DispatchQueueButton の先頭へ上げる", () => {
 
     expect(screen.queryByLabelText("#1603のジョブを先頭へ上げる")).toBeNull();
     expect(screen.queryByLabelText("#1604のジョブを先頭へ上げる")).toBeNull();
+  });
+});
+
+/**
+ * #1519。従来は`issue-deck #1519`と番号しか出ておらず、何のジョブが積まれているのかが
+ * GitHubを開くまで分からなかった。
+ */
+describe("DispatchQueueButton の行の内容", () => {
+  async function openWith(jobs: DispatchJobView[], sectionTitle: string) {
+    render(<DispatchQueueButton dispatch={makeDispatch(jobs)} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText(sectionTitle)).toBeDefined());
+  }
+
+  it("Issueのタイトルを番号と一緒に出す", async () => {
+    await openWith(
+      [
+        makeJob({
+          status: "QUEUED",
+          finishedAt: null,
+          issueNumber: 1519,
+          issueTitle: "実行キューの状態を可視化する",
+        }),
+      ],
+      "順番待ち",
+    );
+
+    expect(screen.getByText("#1519 実行キューの状態を可視化する")).toBeDefined();
+  });
+
+  // 同期前のIssueやGitHub Appを外したリポジトリでは引けない。従来と同じ見た目に戻す
+  it("タイトルが引けなければ番号だけを出す（穴埋めの文言を出さない）", async () => {
+    await openWith(
+      [makeJob({ status: "QUEUED", finishedAt: null, issueNumber: 1519, issueTitle: null })],
+      "順番待ち",
+    );
+
+    expect(screen.getByText("#1519")).toBeDefined();
+  });
+
+  // QUEUEDのときは状態ラベルがどちらも「順番待ち」になり、状態だけでは見分けられない
+  it("種別チップで起動と横断質問を見分けられる", async () => {
+    await openWith(
+      [
+        makeJob({ id: "job-1", status: "QUEUED", finishedAt: null, issueNumber: 1601 }),
+        makeJob({
+          id: "job-2",
+          status: "QUEUED",
+          finishedAt: null,
+          issueNumber: 1602,
+          kind: "CROSS_REPO_QUESTION",
+          createdAt: "2026-08-15T13:00:00.000Z",
+        }),
+      ],
+      "順番待ち",
+    );
+
+    expect(screen.getByText("実装")).toBeDefined();
+    expect(screen.getByText("横断質問")).toBeDefined();
+  });
+});
+
+/**
+ * #1519。制御ジョブは届くまでpull型ぶん最大60秒かかるのに、キューのどこにも出ていなかった
+ * （#1544で枠の数え方から外したのは正しいが、表示まで消える必要は無い）。
+ */
+describe("DispatchQueueButton の送信中の操作", () => {
+  async function openControls(jobs: DispatchJobView[]) {
+    render(<DispatchQueueButton dispatch={makeDispatch(jobs)} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("送信中の操作")).toBeDefined());
+  }
+
+  it("未処理の停止を別の節に出す", async () => {
+    await openControls([
+      makeJob({
+        id: "job-1",
+        kind: "INTERRUPT",
+        status: "QUEUED",
+        message: null,
+        finishedAt: null,
+        issueNumber: 1332,
+        issueTitle: "走っているセッションを止める",
+      }),
+    ]);
+
+    expect(screen.getByText("停止")).toBeDefined();
+    expect(screen.getByText("#1332 走っているセッションを止める")).toBeDefined();
+    // 枠を使わないことの注記が無いと「実行中 0/2」との辻褄が合わないように見える
+    expect(screen.getByText("同時実行数の枠は使わず、先に届きます。")).toBeDefined();
+    // 積まれていないと言い切らない
+    expect(screen.queryByText(/積まれているジョブはありません/)).toBeNull();
+  });
+
+  // 届くまで最大1分あるため、何を送ったのか見えないと送り直してよいか判断できない（#1012）
+  it("追加指示は本文も出す", async () => {
+    await openControls([
+      makeJob({
+        id: "job-1",
+        kind: "INSTRUCTION",
+        status: "QUEUED",
+        message: null,
+        instruction: "Issueのコメントを読んでから続けて",
+        finishedAt: null,
+      }),
+    ]);
+
+    expect(screen.getByText("「Issueのコメントを読んでから続けて」")).toBeDefined();
+  });
+
+  // 実行中はworktreeの作成途中で、制御ジョブはそもそも取り消しの対象外
+  it("取り消し・先頭へ上げるは出さない", async () => {
+    await openControls([
+      makeJob({
+        id: "job-1",
+        kind: "KILL",
+        status: "QUEUED",
+        message: null,
+        finishedAt: null,
+        issueNumber: 1332,
+      }),
+    ]);
+
+    expect(screen.queryByLabelText("#1332のジョブを取り消す")).toBeNull();
+    expect(screen.queryByLabelText("#1332のジョブを先頭へ上げる")).toBeNull();
+    expect(screen.queryByText(/まとめて取り消す/)).toBeNull();
   });
 });

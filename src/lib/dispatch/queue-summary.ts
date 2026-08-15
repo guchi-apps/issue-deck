@@ -1,6 +1,7 @@
 import {
   isActiveDispatchJobStatus,
   isDispatchHostAtSessionCapacity,
+  isSessionControlJobKind,
   isSessionLaunchJobKind,
   type DispatchHostView,
   type DispatchJobView,
@@ -30,6 +31,17 @@ export type DispatchQueueSummary = {
   queued: DispatchJobView[];
   /** 直近24時間に失敗・タイムアウトしたもの（新しい順） */
   failed: DispatchJobView[];
+  /**
+   * まだ届いていない制御ジョブ＝停止・セッション終了・追加指示（#1519）。積んだ順。
+   *
+   * **`running`・`queued`とは別に持ち、件数にも数えない。** 制御ジョブは同時実行数の枠を
+   * 使わず、枠外で先に払い出される（#1332・#1544）。ここを混ぜると「実行中 3/2」のような
+   * 数え方になる。それでも一覧に出すのは、pull型ぶん届くまで最大60秒あり、その間
+   * **積んだことがキューのどこにも出ない**ため（「押したのに何も起きない」に見える）。
+   *
+   * 終わったものは入れない。結果はそのIssueのセッション表示（`issue-session-status.tsx`）に出る。
+   */
+  controls: DispatchJobView[];
   /** 同時実行数の上限。ホストの申告と設定の小さい方が入る（不明ならnull） */
   concurrency: number | null;
   /** バッジに出す件数。走っている数＋待っている数 */
@@ -60,10 +72,17 @@ export function summarizeDispatchQueue(
     .filter((job) => job.status === "FAILED" || job.status === "TIMEOUT")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
+  // 制御ジョブ（#1519）。**未完了のものだけ**を、`launchJobs`とは別に組む。数える集合
+  // （`activeCount`・`describeDispatchQueueLoad`・`cancelableDispatchJobs`）へは入れない
+  const controls = [...jobs]
+    .filter((job) => isSessionControlJobKind(job.kind) && isActiveDispatchJobStatus(job.status))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
   return {
     running,
     queued,
     failed,
+    controls,
     concurrency,
     activeCount: running.length + queued.length,
   };
