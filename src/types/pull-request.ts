@@ -1,3 +1,4 @@
+import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { CiState } from "@/lib/github/release-api";
 
@@ -66,6 +67,12 @@ export type PullRequestSummary = {
    * 「ユーザーのマージが必要です」を出す（#1469。判定は`requiresUserMerge`）。
    */
   linkedIssueCheckUser: boolean;
+  /**
+   * 対応Issueの`00.check-user`が付いている理由（`01.check-*`。#1490）。理由ラベルが
+   * 配られていないリポジトリ・`00.check-user`が付いていない場合は`null`で、そのときは
+   * `linkedIssueCheckUser`だけを見る従来の判定へフォールバックする（`requiresUserMerge`）。
+   */
+  linkedIssueCheckReason: CheckUserReason | null;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
   createdAt: string;

@@ -1,4 +1,4 @@
-import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
+import { isProgressLabel } from "@/lib/issue-status";
 
 const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -32,7 +32,7 @@ function truncate(text: string, maxLength: number): string {
 
 /** 00〜09番台のラベルはユーザーチェック・進捗管理用（CLAUDE.md参照）のため、自動生成の選択対象から除外する。 */
 function isSelectableLabel(name: string): boolean {
-  return !isAttentionLabel(name) && matchStatusStep(name) === null;
+  return !isProgressLabel(name);
 }
 
 /** Issue本文と選択可能なラベル一覧から、タイトル・ラベル提案生成用プロンプトを組み立てる。 */

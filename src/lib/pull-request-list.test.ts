@@ -36,6 +36,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueNumbers: [],
     autoMergeEnabled: false,
     linkedIssueCheckUser: false,
+    linkedIssueCheckReason: null,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -382,6 +383,30 @@ describe("requiresUserMerge", () => {
 
   it("対応Issueに00.check-userが無ければ出さない（判定がまだ確定していない）", () => {
     expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: false }))).toBe(false);
+  });
+
+  it("理由ラベルが読めるなら01.check-mergeのときだけ出す（#1490）", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({ linkedIssueCheckUser: true, linkedIssueCheckReason: "merge" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("理由が計画の承認待ち・質問の回答待ちなら出さない（#1490）", () => {
+    for (const reason of ["plan", "input", "blocked", "answered"] as const) {
+      expect(
+        requiresUserMerge(
+          pullRequest({ linkedIssueCheckUser: true, linkedIssueCheckReason: reason }),
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("理由ラベルが配られていないリポジトリでは00.check-userの有無で判定する（#1490）", () => {
+    expect(
+      requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, linkedIssueCheckReason: null })),
+    ).toBe(true);
   });
 
   it("develop→mainのリリースPRは常にユーザーのマージが必要", () => {

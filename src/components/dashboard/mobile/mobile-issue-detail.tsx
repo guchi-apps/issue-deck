@@ -90,6 +90,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   approveCommentBody,
   canCompleteManualStep,
+  checkUserReason,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -923,6 +924,7 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            checkUserReason={checkUserReason(issue.labels)}
             localSessionNotice={
               executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
                 <LocalSessionWaitingInputNotice session={issueSession} />

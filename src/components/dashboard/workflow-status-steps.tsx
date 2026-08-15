@@ -6,7 +6,11 @@ import {
 } from "@/lib/dispatch/issue-execution-target";
 import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { isApprovalPending } from "@/lib/github/approval-labels";
+import {
+  checkUserReason,
+  CHECK_USER_REASON_TEXT,
+  isApprovalPending,
+} from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
@@ -88,6 +92,9 @@ export function WorkflowStepBadge({
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
+  // 何を求められているかを添える（#1490）。理由ラベルが配られていないリポジトリではnullになり、
+  // 従来どおり「ユーザーの確認待ち」だけを出す
+  const reason = checkUserReason(labels);
   const showQaAnswerPending = qaAnswerPending && !approvalPending;
   const step = WORKFLOW_STEPS[currentIndex];
   const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
@@ -136,7 +143,7 @@ export function WorkflowStepBadge({
     <span
       title={`${step.projectStatus} ${step.label}${
         approvalPending
-          ? "（ユーザーの確認待ち）"
+          ? `（ユーザーの確認待ち${reason ? `・${CHECK_USER_REASON_TEXT[reason]}` : ""}）`
           : showQaAnswerPending
             ? "（Claudeの回答待ち）"
             : awaitingDispatch
@@ -202,6 +209,12 @@ export function WorkflowStatusSteps({
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
+  // 何を求められているかをバッジへ添える（#1490）。理由ラベルが配られていないリポジトリでは
+  // nullになり、従来どおり「ユーザー確認待ち」だけを出す
+  const reason = checkUserReason(labels);
+  const approvalPendingText = reason
+    ? `ユーザー確認待ち・${CHECK_USER_REASON_TEXT[reason]}`
+    : "ユーザー確認待ち";
   const currentStep = WORKFLOW_STEPS[currentIndex];
   // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
   // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
@@ -262,7 +275,7 @@ export function WorkflowStatusSteps({
                 </span>
                 {showApprovalPending && (
                   <span className="hidden whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 md:inline-block dark:text-amber-400">
-                    ユーザー確認待ち
+                    {approvalPendingText}
                   </span>
                 )}
               </div>
@@ -282,7 +295,7 @@ export function WorkflowStatusSteps({
         {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
         {approvalPending && (
           <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-            ユーザー確認待ち
+            {approvalPendingText}
           </span>
         )}
       </p>

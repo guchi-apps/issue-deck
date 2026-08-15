@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   approveCommentBody,
   canCompleteManualStep,
+  checkUserReason,
+  isCheckUserReasonLabel,
+  labelsWithCheckUserReason,
   isLabelFilterPresetActive,
   isMergeApprovalPending,
   isQaOnlyApprovalPending,
@@ -286,5 +289,136 @@ describe("canCompleteManualStep", () => {
     expect(canCompleteManualStep({ state: "closed", labels: [makeLabel("71.manual-step")] })).toBe(
       false,
     );
+  });
+});
+
+describe("checkUserReason（#1490）", () => {
+  it("00.check-userが無ければ、理由ラベルが残っていてもnullを返す", () => {
+    // 外し忘れた理由ラベルが単独で残っていても、画面が誤った表示をしないようにするため
+    expect(checkUserReason([makeLabel("01.check-plan")])).toBeNull();
+  });
+
+  it("00.check-userとのANDで理由を返す", () => {
+    expect(checkUserReason([makeLabel("00.check-user"), makeLabel("01.check-merge")])).toBe("merge");
+    expect(checkUserReason([makeLabel("00.check-user"), makeLabel("01.check-input")])).toBe("input");
+    expect(checkUserReason([makeLabel("00.check-user"), makeLabel("01.check-blocked")])).toBe(
+      "blocked",
+    );
+  });
+
+  it("理由ラベルが配られていないリポジトリではnullを返す（従来の推測へフォールバックする）", () => {
+    expect(checkUserReason([makeLabel("00.check-user")])).toBeNull();
+  });
+
+  it("リネーム移行中は旧名00.qa-answeredもansweredとして読む", () => {
+    expect(checkUserReason([makeLabel("00.check-user"), makeLabel("00.qa-answered")])).toBe(
+      "answered",
+    );
+    expect(checkUserReason([makeLabel("00.check-user"), makeLabel("01.check-answered")])).toBe(
+      "answered",
+    );
+  });
+
+  it("複数付いていた場合は優先順（plan > merge > blocked > input > answered）で1つに決める", () => {
+    expect(
+      checkUserReason([
+        makeLabel("00.check-user"),
+        makeLabel("01.check-answered"),
+        makeLabel("01.check-merge"),
+        makeLabel("01.check-plan"),
+      ]),
+    ).toBe("plan");
+  });
+});
+
+describe("isCheckUserReasonLabel（#1490）", () => {
+  it("01.check-*と旧名00.qa-answeredだけを理由ラベルとして扱う", () => {
+    expect(isCheckUserReasonLabel("01.check-plan")).toBe(true);
+    expect(isCheckUserReasonLabel("00.qa-answered")).toBe(true);
+    expect(isCheckUserReasonLabel("00.check-user")).toBe(false);
+    expect(isCheckUserReasonLabel("02.wip")).toBe(false);
+  });
+});
+
+describe("labelsWithCheckUserReason（#1490）", () => {
+  it("理由を1枚に付け替え、他の理由ラベル（旧名含む）を落とす", () => {
+    expect(
+      labelsWithCheckUserReason(
+        [
+          makeLabel("11.local"),
+          makeLabel("00.check-user"),
+          makeLabel("00.qa-answered"),
+          makeLabel("01.check-input"),
+        ],
+        "blocked",
+      ),
+    ).toEqual(["11.local", "00.check-user", "01.check-blocked"]);
+  });
+
+  it("00.check-userが付いていなければ付ける", () => {
+    expect(labelsWithCheckUserReason([makeLabel("bug")], "plan")).toEqual([
+      "bug",
+      "00.check-user",
+      "01.check-plan",
+    ]);
+  });
+});
+
+describe("理由ラベルがある場合の既存判定（#1490）", () => {
+  it("isMergeApprovalPendingは01.check-mergeだけでtrueになる（進捗・コメントを見ない）", () => {
+    expect(
+      isMergeApprovalPending({
+        labels: [makeLabel("00.check-user"), makeLabel("01.check-merge")],
+        projectStatus: "Implementation",
+      }),
+    ).toBe(true);
+  });
+
+  it("isMergeApprovalPendingは他の理由ラベルではfalseになる（進捗がDevelop PRでも）", () => {
+    expect(
+      isMergeApprovalPending({
+        labels: [makeLabel("00.check-user"), makeLabel("01.check-plan")],
+        projectStatus: "Develop PR",
+      }),
+    ).toBe(false);
+  });
+
+  it("answeredだけは従来の推測へフォールバックする（回答済みとマージ待ちは同時に成立しうる）", () => {
+    // リネーム前の既存データ（00.qa-answered）でマージ待ちの表示が消えないようにするため
+    expect(
+      isMergeApprovalPending({
+        labels: [makeLabel("00.check-user"), makeLabel("00.qa-answered")],
+        projectStatus: "Develop PR",
+      }),
+    ).toBe(true);
+    expect(
+      isMergeApprovalPending({
+        labels: [makeLabel("00.check-user"), makeLabel("01.check-answered")],
+        projectStatus: "Develop PR",
+      }),
+    ).toBe(true);
+  });
+
+  it("isQaOnlyApprovalPendingは新名01.check-answeredでも成立する", () => {
+    expect(
+      isQaOnlyApprovalPending([makeLabel("00.check-user"), makeLabel("01.check-answered")]),
+    ).toBe(true);
+  });
+
+  it("approveCommentBodyは01.check-planでも計画承認の文言になる", () => {
+    expect(approveCommentBody([makeLabel("00.check-user"), makeLabel("01.check-plan")])).toBe(
+      "@claude 計画を承認しました。実装を進めてください。",
+    );
+  });
+
+  it("labelsAfterApproval・labelsAfterRejectionは01.check-*も外す", () => {
+    const labels = [
+      makeLabel("00.check-user"),
+      makeLabel("01.check-plan"),
+      makeLabel("21.plan-required"),
+      makeLabel("bug"),
+    ];
+    expect(labelsAfterApproval(labels)).toEqual(["bug"]);
+    expect(labelsAfterRejection(labels)).toEqual(["21.plan-required", "bug"]);
   });
 });

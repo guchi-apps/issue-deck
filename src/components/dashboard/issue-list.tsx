@@ -30,7 +30,7 @@ import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
-import { isAttentionLabel, matchStatusStep } from "@/lib/issue-status";
+import { isProgressLabel } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
@@ -74,11 +74,11 @@ function formatRelativeDate(iso: string) {
   return `${diffDays}日前`;
 }
 
-// 00番台の要対応ラベル（00.check-user）と、廃止済みの進捗ラベル（01〜09番台。#991 Phase 5・#1010）が
-// 他リポジトリに残っていた場合は、カード右上のWorkflowStepBadgeが進捗を表現するため
-// 下部のラベル一覧からは除外する
+// 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
+// （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
+// WorkflowStepBadgeが進捗と確認待ちの理由を表現するため、下部のラベル一覧からは除外する
 function nonStatusLabels(labels: IssueLabel[]) {
-  return labels.filter((label) => !isAttentionLabel(label.name) && matchStatusStep(label.name) === null);
+  return labels.filter((label) => !isProgressLabel(label.name));
 }
 
 function IssueStateIcon({ issue }: { issue: Issue }) {

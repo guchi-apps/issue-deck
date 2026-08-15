@@ -1,7 +1,10 @@
+import {
+  addCheckUserWithReason,
+  removeCheckUserWithReason,
+} from "@/lib/dispatch/check-user-labels";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
-import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
-import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
+import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /**
@@ -104,7 +107,7 @@ export function buildSessionPlanCommentBody(params: {
 }
 
 /**
- * 計画をIssueへ投稿し、`00.check-user`を付ける。
+ * 計画をIssueへ投稿し、`00.check-user`と理由ラベル`01.check-plan`を付ける（#1490）。
  *
  * **失敗しても例外を投げない。** 呼び出し元はフックからの報告を受けているだけで、失敗しても
  * セッション側にできることは何も無い（`session-notify.sh`は何が起きても`exit 0`で返す）。
@@ -135,7 +138,7 @@ export async function postSessionPlan(params: {
 
     // ラベルは**追加**する。`updateIssue`の`labels`は全置換で、既に付いている
     // `21.plan-required`・`11.local`を巻き込んで落としてしまう
-    await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "plan");
     return true;
   } catch (error) {
     console.error(
@@ -147,7 +150,8 @@ export async function postSessionPlan(params: {
 }
 
 /**
- * ローカルの実装セッションが入力待ちに入ったことを受けて`00.check-user`を付ける（#1417）。
+ * ローカルの実装セッションが入力待ちに入ったことを受けて`00.check-user`と理由ラベル
+ * `01.check-input`を付ける（#1417・#1490）。
  *
  * 呼ぶのは`Notification / permission_prompt`フックの報告
  * （`POST /api/dispatch/sessions/activity`）。**コメントは投稿しない** — 承認プロンプトや
@@ -169,7 +173,7 @@ export async function requestSessionCheckUser(params: {
     const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
-    await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "input");
     return true;
   } catch (error) {
     console.error(
@@ -181,7 +185,7 @@ export async function requestSessionCheckUser(params: {
 }
 
 /**
- * 自分で付けた`00.check-user`を外す（#1342・#1417）。
+ * 自分で付けた`00.check-user`を、理由ラベルごと外す（#1342・#1417・#1490）。
  *
  * 呼ぶのは`PostToolUse`（人が答えて作業へ戻った）・`Stop`（保険）フックの報告
  * （`POST /api/dispatch/sessions/activity`）で、**自分が付けたと分かっているときだけ**
@@ -202,13 +206,7 @@ export async function resolveSessionPlanCheckUser(params: {
     const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
-    await removeIssueLabel(
-      parsed.owner,
-      parsed.repo,
-      params.issueNumber,
-      token,
-      CHECK_USER_LABEL,
-    );
+    await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token);
     return true;
   } catch (error) {
     console.error(

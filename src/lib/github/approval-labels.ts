@@ -37,11 +37,117 @@ export function canCompleteManualStep(issue: Pick<Issue, "state" | "labels">): b
 }
 
 /**
- * 質問への回答のみが完了した状態であることを示すラベル（00.check-userと常に併用し、
- * 単独では意味を持たない）。claude-issue-dispatch.ymlのmode=plan・mode=additionalが、
- * 直近の@claudeコメントを「単なる質問・確認」と判定した場合に付与する（#887）。
+ * `00.check-user`が付いている理由（#1490）。**`00.check-user`とのANDでしか読まない。**
+ *
+ * `00.check-user`は「人の対応が要る」ことしか表さないため、画面は理由を周辺情報から推測して
+ * いた（`isMergeApprovalPending`が進捗Statusに加えて直近botコメントの発信元まで見ているのが
+ * その典型で、#728の巻き戻りを埋めるための後付け）。理由を`01.`帯の補助ラベルで併用する。
+ *
+ * | 理由 | ユーザーがやること | エージェントの状態 |
+ * | --- | --- | --- |
+ * | `plan` | 計画を承認する／修正を依頼する | 待機 |
+ * | `input` | 質問・確認に答える | 待機 |
+ * | `merge` | PRをマージする | 待機 |
+ * | `blocked` | 続け方を指示する | 停止 |
+ * | `answered` | 回答を読む | 待っていない |
+ *
+ * 設計の全文は docs/multi-agent/labels.md「理由を表す`01.check-*`ラベル」。
  */
-export const QA_ANSWERED_LABEL = "00.qa-answered";
+export type CheckUserReason = "plan" | "input" | "merge" | "blocked" | "answered";
+
+/**
+ * ラベル判定に必要なのは名前だけ。DBから引いた`{ name }`だけの行（`pull-request-check-user.ts`）
+ * もそのまま渡せるようにする。
+ */
+type LabelNames = readonly Pick<IssueLabel, "name">[];
+
+/** 理由ごとのラベル名。`01.`帯は`00.check-user`に併用する補助ラベルで、単独では意味を持たない */
+export const CHECK_USER_REASON_LABELS: Record<CheckUserReason, string> = {
+  plan: "01.check-plan",
+  input: "01.check-input",
+  merge: "01.check-merge",
+  blocked: "01.check-blocked",
+  answered: "01.check-answered",
+};
+
+/**
+ * 質問への回答のみが完了した状態であることを示すラベルの**旧名**（#887）。
+ * `01.check-answered`へのリネーム中は、**読む側だけが新旧どちらの名前も受け付ける**（#1490）。
+ * リネームは`gh label edit "00.qa-answered" --name "01.check-answered"`で、付いているIssueから
+ * 外れずにその場で名前が変わる。
+ */
+export const LEGACY_QA_ANSWERED_LABEL = "00.qa-answered";
+
+/**
+ * 理由は常に1枚だが、付け替えの取りこぼしなどで複数付いた場合に読む順を固定する。
+ * 「人が次に何をすればよいか」が曖昧にならないよう、行動が重いものから並べる。
+ */
+const CHECK_USER_REASON_PRIORITY: readonly CheckUserReason[] = [
+  "plan",
+  "merge",
+  "blocked",
+  "input",
+  "answered",
+];
+
+/** 一覧カードのバッジなど、短く添えるときの文言 */
+export const CHECK_USER_REASON_TEXT: Record<CheckUserReason, string> = {
+  plan: "計画の承認",
+  input: "質問への回答",
+  merge: "PRのマージ",
+  blocked: "続け方の指示",
+  answered: "回答の確認",
+};
+
+/** 承認カードの見出し */
+export const CHECK_USER_REASON_HEADING: Record<CheckUserReason, string> = {
+  plan: "計画の承認が必要です",
+  input: "質問への回答が必要です",
+  merge: "Pull Requestのマージが必要です",
+  blocked: "続け方の指示が必要です",
+  answered: "回答を確認してください",
+};
+
+/** `00.check-user`の理由を表すラベルか（旧名`00.qa-answered`を含む） */
+export function isCheckUserReasonLabel(name: string): boolean {
+  if (name === LEGACY_QA_ANSWERED_LABEL) return true;
+  return Object.values(CHECK_USER_REASON_LABELS).includes(name);
+}
+
+function hasCheckUserReasonLabel(names: Set<string>, reason: CheckUserReason): boolean {
+  if (names.has(CHECK_USER_REASON_LABELS[reason])) return true;
+  // リネーム移行中は旧名も「回答済み」として読む
+  return reason === "answered" && names.has(LEGACY_QA_ANSWERED_LABEL);
+}
+
+/**
+ * `00.check-user`が付いている理由を読む（#1490）。
+ *
+ * **`00.check-user`が無ければ必ずnullを返す**（理由ラベルとのANDでしか読まない）。外し忘れた
+ * 理由ラベルが単独で残っていても、画面が誤った表示をしないようにするため。
+ * 理由ラベルが配られていないリポジトリでも常にnullになり、呼び出し側は従来どおりの推測へ
+ * フォールバックする。
+ */
+export function checkUserReason(labels: LabelNames): CheckUserReason | null {
+  if (!isApprovalPending(labels)) return null;
+  const names = new Set(labels.map((label) => label.name));
+  return CHECK_USER_REASON_PRIORITY.find((reason) => hasCheckUserReasonLabel(names, reason)) ?? null;
+}
+
+/**
+ * 理由を`reason`の1枚に付け替えたあとの、あるべきラベル名の集合を返す（#1490）。
+ *
+ * **理由は常に1枚**なので、既に付いている他の理由ラベル（旧名を含む）は落とす。返すのは
+ * 「あるべき集合」であって全置換の指示ではない。`updateIssue`の`labels`は全置換で、その間に
+ * 他の経路が付けたラベルを巻き込むため、呼び出し側はこれと現状の差分からadd/removeを組み立てる
+ * （`src/lib/dispatch/check-user-labels.ts`）。
+ */
+export function labelsWithCheckUserReason(labels: IssueLabel[], reason: CheckUserReason): string[] {
+  const kept = labels
+    .map((label) => label.name)
+    .filter((name) => name !== CHECK_USER_LABEL && !isCheckUserReasonLabel(name));
+  return [...kept, CHECK_USER_LABEL, CHECK_USER_REASON_LABELS[reason]];
+}
 
 /**
  * claude-issue-dispatch.ymlのissue_commentトリガーを起動させないためのマーカー（#566）。
@@ -65,7 +171,7 @@ function withNoTriggerMarkerIfPlanPending(labels: IssueLabel[], body: string): s
   return isPlanApprovalPending(labels) ? `${body}\n${NO_TRIGGER_MARKER}` : body;
 }
 
-export function isApprovalPending(labels: IssueLabel[]): boolean {
+export function isApprovalPending(labels: LabelNames): boolean {
   return labels.some((label) => label.name === CHECK_USER_LABEL);
 }
 
@@ -73,11 +179,13 @@ export function isApprovalPending(labels: IssueLabel[]): boolean {
  * 00.check-userが「実装・計画の承認待ち」ではなく「質問への回答のみを確認してほしいだけ」の
  * 状態かどうかを判定する。21.plan-requiredが付いている間は計画そのものへの承認待ちが実体として
  * 残っているため、isPlanApprovalPendingを優先しfalseを返す。
+ *
+ * 判定は`checkUserReason`（`01.check-answered`と旧名`00.qa-answered`のどちらでも成立する）を
+ * 通す（#1490）。
  */
 export function isQaOnlyApprovalPending(labels: IssueLabel[]): boolean {
-  if (!isApprovalPending(labels)) return false;
   if (isPlanApprovalPending(labels)) return false;
-  return labels.some((label) => label.name === QA_ANSWERED_LABEL);
+  return checkUserReason(labels) === "answered";
 }
 
 export type LabelFilterPreset = {
@@ -194,12 +302,20 @@ export function resolveLabelFilterPresetSelection(
  * 押すと本来のPRマージ待ち文言ではなく「実装を進めてください」という汎用の確認文言が
  * 投稿されてしまう。直近のbotコメントの発信元（レビューボットかどうか）を見ることで、
  * 進捗の一時的な状態に依存せず判定する。
+ *
+ * **理由ラベル（`01.check-*`）が読めるならそれだけで判定し、上の推測は使わない**（#1490）。
+ * 例外は`answered`で、これは「エージェントは待っていない・回答を読むだけ」を表すだけであり、
+ * PRのマージ待ちと同時に成立しうる（質問に答えた時点でPRは開いたまま）。理由が`answered`の
+ * ときと、理由ラベルが配られていないリポジトリでは従来どおり推測へフォールバックする。
  */
 export function isMergeApprovalPending(
   issue: ProgressSource & { labels: IssueLabel[] },
   comments: Pick<IssueComment, "body" | "author">[] = [],
 ): boolean {
   if (!isApprovalPending(issue.labels)) return false;
+  const reason = checkUserReason(issue.labels);
+  if (reason === "merge") return true;
+  if (reason !== null && reason !== "answered") return false;
   if (isLatestSourcedCommentFromReviewer(comments)) return true;
   const status = resolveProgressStatus(issue);
   return status === "develop-pr" || status === "release";
@@ -220,24 +336,26 @@ function isLatestSourcedCommentFromReviewer(
 
 /**
  * 承認時に外すラベル名の配列を返す（00.check-userに加え、計画承認待ちなら21.plan-requiredも外す。
- * 00.qa-answeredは00.check-userとの併用でのみ意味を持つ消費済みフラグのため、常にあわせて外す）
+ * 理由ラベル（`01.check-*`と旧名`00.qa-answered`）は00.check-userとの併用でのみ意味を持つため、
+ * 常にあわせて外す）
  */
 export function labelsAfterApproval(labels: IssueLabel[]): string[] {
   return labels
     .map((label) => label.name)
     .filter(
-      (name) => name !== CHECK_USER_LABEL && name !== PLAN_REQUIRED_LABEL && name !== QA_ANSWERED_LABEL,
+      (name) =>
+        name !== CHECK_USER_LABEL && name !== PLAN_REQUIRED_LABEL && !isCheckUserReasonLabel(name),
     );
 }
 
 /**
- * 却下（UI上のボタン表記は「修正」）時に外すラベル名の配列を返す（00.check-user・
- * 00.qa-answeredを外す。21.plan-requiredは計画の再提示が必要なため残す）
+ * 却下（UI上のボタン表記は「修正」）時に外すラベル名の配列を返す（00.check-userと理由ラベル
+ * （`01.check-*`・旧名`00.qa-answered`）を外す。21.plan-requiredは計画の再提示が必要なため残す）
  */
 export function labelsAfterRejection(labels: IssueLabel[]): string[] {
   return labels
     .map((label) => label.name)
-    .filter((name) => name !== CHECK_USER_LABEL && name !== QA_ANSWERED_LABEL);
+    .filter((name) => name !== CHECK_USER_LABEL && !isCheckUserReasonLabel(name));
 }
 
 /**
@@ -252,7 +370,8 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * user.githubAccessToken使用）を承認ラベル更新の直後に送ることで、
  * issue_commentトリガー経由で実装を確実に再開させる。
  *
- * 21.plan-requiredによる計画承認待ちの場合、00.qa-answeredによる「質問への回答のみ確認待ち」の
+ * 21.plan-required（または理由ラベル`01.check-plan`）による計画承認待ちの場合、
+ * `01.check-answered`（旧名`00.qa-answered`）による「質問への回答のみ確認待ち」の
  * 場合、それ以外（画面確認待ち・フォールバックエラー通知など）の汎用確認待ちの場合の3通りで
  * 文言を出し分ける（優先順位はこの順、#887）。質問のみ回答済みの場合は、実装承認待ちではないため
  * 「実装を進めてください」を含まない文言にする。
@@ -263,7 +382,7 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * 指定が無ければ従来どおり定型文のみを返す。
  */
 export function approveCommentBody(labels: IssueLabel[], text?: string): string {
-  const followUp = isPlanApprovalPending(labels)
+  const followUp = isPlanApprovalPending(labels) || checkUserReason(labels) === "plan"
     ? "計画を承認しました。実装を進めてください。"
     : isQaOnlyApprovalPending(labels)
       ? "回答を確認しました。"
