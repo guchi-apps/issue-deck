@@ -164,6 +164,44 @@ describe("shortIssueSessionLabel", () => {
     expect(shortIssueSessionLabel(session({ state: "EXITED" }))).toBe("終了");
     expect(shortIssueSessionLabel(session({ state: "FAILED" }))).toBe("異常終了");
   });
+
+  it("まだ開始していないセッションも出す（人が端末で答えるまで進まない。#1465）", () => {
+    expect(shortIssueSessionLabel(session({ activity: "NOT_STARTED" }))).toBe("未開始");
+  });
+});
+
+/**
+ * #1465。フォルダの信頼確認で止まっている間はセッションが始まっておらず、Remote Controlも
+ * 繋がっていない。答えられる場所（端末）を出さないと、画面から辿れる出口が無くなる。
+ */
+describe("まだ開始していないセッション（#1465）", () => {
+  it("待ちとして出し、tmuxのセッション名を添える", () => {
+    const s = summarizeIssueSession(
+      session({
+        activity: "NOT_STARTED",
+        activityAt: "2026-08-14T00:05:00.000Z",
+        tmuxSessionName: "issue-deck-issue-1465",
+      }),
+    );
+    expect(s.tone).toBe("waiting");
+    expect(s.label).toContain("まだ開始していません");
+    expect(s.detail).toContain("tmux attach -t issue-deck-issue-1465");
+    expect(s.at).toBe("2026-08-14T00:05:00.000Z");
+  });
+
+  it("Remote ControlのURLは出さない（まだ繋がっていない）", () => {
+    const s = summarizeIssueSession(
+      session({
+        activity: "NOT_STARTED",
+        remoteControlUrl: "https://claude.ai/code/session_abc",
+      }),
+    );
+    expect(s.remoteControlUrl).toBeNull();
+  });
+
+  it("承認ボタンを引っ込める入力待ち（#1417）とは別に扱う", () => {
+    expect(isSessionWaitingInput(session({ activity: "NOT_STARTED" }))).toBe(false);
+  });
 });
 
 describe("プレビューURL（#1265）", () => {

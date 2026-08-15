@@ -6,6 +6,8 @@ const upsert = vi.fn();
 const updateMany = vi.fn();
 const deleteMany = vi.fn();
 const escalateFailedSession = vi.fn();
+const escalateNotStartedSession = vi.fn();
+const resolveNotStartedSession = vi.fn();
 const postSessionWrapupComment = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -33,6 +35,12 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/dispatch/session-escalation", () => ({
   get escalateFailedSession() {
     return escalateFailedSession;
+  },
+  get escalateNotStartedSession() {
+    return escalateNotStartedSession;
+  },
+  get resolveNotStartedSession() {
+    return resolveNotStartedSession;
   },
 }));
 
@@ -80,6 +88,8 @@ beforeEach(() => {
   findMany.mockResolvedValue([]);
   findUnique.mockResolvedValue(existingRow());
   escalateFailedSession.mockResolvedValue(true);
+  escalateNotStartedSession.mockResolvedValue(true);
+  resolveNotStartedSession.mockResolvedValue(true);
   postSessionWrapupComment.mockResolvedValue(false);
 });
 
@@ -271,6 +281,93 @@ describe("reportDispatchSessions", () => {
       await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
 
       expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
+    });
+  });
+
+  /**
+   * #1465。フォルダの信頼確認で止まっている間はフックが1つも飛ばないため、pollerが持ち込む
+   * `claudeStarting`だけが判断材料になる。**入り直さない**ことが、毎分コメントが増えないことの担保。
+   */
+  describe("Claude Codeが開始していないセッション（#1465）", () => {
+    it("NOT_STARTEDを立て、Issueへ知らせて00.check-userを付ける", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+
+      const result = await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ claudeStarting: true })],
+        now: NOW,
+      });
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ activity: "NOT_STARTED", activityAt: NOW }),
+        }),
+      );
+      expect(escalateNotStartedSession).toHaveBeenCalledWith(
+        expect.objectContaining({ tmuxSessionName: "issue-deck-issue-1217", issueNumber: 1217 }),
+      );
+      expect(result.escalated).toBe(1);
+    });
+
+    it("同じ報告が続く間は知らせ直さない", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ activity: "NOT_STARTED" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ claudeStarting: true })],
+        now: NOW,
+      });
+
+      expect(escalateNotStartedSession).not.toHaveBeenCalled();
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
+    });
+
+    it("人が答えて開始したら、様子を戻して00.check-userを外す", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ activity: "NOT_STARTED" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ claudeStarting: false })],
+        now: NOW,
+      });
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ activity: null, activityAt: null }),
+        }),
+      );
+      expect(resolveNotStartedSession).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: 1217 }),
+      );
+    });
+
+    it("報告しないpoller（古いホスト）では何もしない", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ activity: "NOT_STARTED" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(escalateNotStartedSession).not.toHaveBeenCalled();
+      expect(resolveNotStartedSession).not.toHaveBeenCalled();
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
+    });
+
+    it("知らせられなくても件数に数えないだけで、報告そのものは成功する", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+      escalateNotStartedSession.mockResolvedValue(false);
+
+      const result = await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ claudeStarting: true })],
+        now: NOW,
+      });
+
+      expect(result.escalated).toBe(0);
     });
   });
 

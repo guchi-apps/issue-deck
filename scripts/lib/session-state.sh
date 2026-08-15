@@ -2,10 +2,13 @@
 # 実装セッション（tmux）の状態ファイル（#1256）。
 #
 # 誰が書いて誰が読むか:
-#   scripts/run-issue-session.sh  起動時に記述子（<セッション名>.session）を書き、終了時に消す
+#   scripts/run-issue-session.sh  起動時に記述子（<セッション名>.session）と、Claude Codeがまだ
+#                                 開始していない印（<セッション名>.starting、#1465）を書き、終了時に消す
 #   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）と
-#                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く
+#                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
+#                                 `SessionStart`では`.starting`を消す（#1465）
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む
+#   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）
 #
 # **キーはtmuxのセッション名。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 # リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られるため
@@ -49,6 +52,47 @@ session_state_event_file() {
 session_state_reason_file() {
   session_state_name_ok "${1:-}" || return 1
   printf '%s/%s.reason' "$(session_state_dir)" "$1"
+}
+
+# Claude Codeがまだ開始していないことの印（#1465）。
+# `run-issue-session.sh`が`claude`を起動する直前に置き、`SessionStart`フックが消す。
+#
+# **これが残っていること自体が「起動確認で止まっている」の唯一の計器。** 初めてクローンした
+# リポジトリでは起動直後にフォルダの信頼確認（`Is this a project you created or one you trust?`）が
+# 出て、答えるまでセッションが始まらない。この間はフックが1つも飛ばないため、フックを待つ
+# 仕組み（#1219・#1264）では画面に何も出ず、操作が止まったまま気づけない。
+#
+# 中身は置いた時刻（epoch秒）で、pollerが猶予（既定180秒）を過ぎたかどうかの判定に使う。
+# 起動には数秒かかるので、置いた直後を止まっていると扱わない。
+session_state_starting_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.starting' "$(session_state_dir)" "$1"
+}
+
+session_state_mark_starting() {
+  local session="$1" file content
+  file="$(session_state_starting_file "$session")" || return 1
+  printf -v content '%s\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+# 印を消す（Claude Codeが開始した）。無ければ何もしない。
+session_state_clear_starting() {
+  local session="$1" file
+  file="$(session_state_starting_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
+# 印を置いた時刻（epoch秒）を返す。印が無い・読めない場合は非0で返る。
+session_state_starting_since() {
+  local session="$1" file line
+  file="$(session_state_starting_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  line="$(head -1 "$file" 2>/dev/null || true)"
+  [[ "$line" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$line"
 }
 
 # このセッションが `00.check-user` を付けたことの印（#1342・#1417）。
@@ -197,6 +241,7 @@ session_state_remove() {
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
+    "$(session_state_starting_file "$session" 2>/dev/null || true)" \
     "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true

@@ -58,8 +58,15 @@ export type DispatchSessionState = "ALIVE" | "EXITED" | "FAILED" | "GONE";
  * **`WORKING`は「答えた直後」にしか報告されない。** `PostToolUse`はツールの実行ごとに飛ぶため、
  * ホスト側（`scripts/lib/session-state.sh`の`.event`）で「直前が`permission_prompt`のとき」だけに
  * 間引いている。作業中ずっと届く値ではないので、これを使って停滞を測らない。
+ *
+ * **`NOT_STARTED`だけはフックではなくpollerが報告する**（#1465）。Claude Codeの起動確認
+ * （初めてクローンしたリポジトリで出るフォルダの信頼確認）で止まっている間は、まだ
+ * セッションが始まっていないためフックが1つも飛ばず、**画面には何も出ないまま操作が
+ * 止まる**。そこだけは「フックが飛ばないこと自体」を計器にするしかない。判定材料は
+ * ホスト側の印（`scripts/lib/session-state.sh`の`.starting`。ランチャーが起動直前に置き、
+ * `SessionStart`フックが消す）で、画面の文字列は読まない。
  */
-export type DispatchSessionActivity = "WAITING_INPUT" | "WORKING" | "RESPONDED";
+export type DispatchSessionActivity = "WAITING_INPUT" | "WORKING" | "RESPONDED" | "NOT_STARTED";
 
 /** フックが送ってくる1件ぶんの報告 */
 export type DispatchSessionActivityReport = {
@@ -70,7 +77,12 @@ export type DispatchSessionActivityReport = {
   remoteControlUrl: string | null;
 };
 
-/** フックのイベント名（`session-notify.sh`が送る値）を内部の表現へ写す */
+/**
+ * フックのイベント名（`session-notify.sh`が送る値）を内部の表現へ写す。
+ *
+ * **`NOT_STARTED`はここでは受け取らない**（#1465）。あれはpollerの一括報告
+ * （`claudeStarting`）だけが立てる値で、フックから送られてくることは無い。
+ */
 export function parseDispatchSessionActivity(value: unknown): DispatchSessionActivity | null {
   if (value === "waiting_input") return "WAITING_INPUT";
   if (value === "working") return "WORKING";
@@ -123,6 +135,14 @@ export type DispatchSessionReport = {
   paneDead: boolean;
   /** 死んだペインのプロセスの終了コード。取得できない場合はnull */
   paneDeadStatus: number | null;
+  /**
+   * Claude Code本体がまだ開始していないまま、猶予（poller側の既定3分）を過ぎているか（#1465）。
+   *
+   * **`undefined`（項目そのものが無い）と`false`は別物。** 送ってこないのは`.starting`の印を
+   * 置かない古いランチャー・古いpollerで、そのホストについては何も判断できない。`false`は
+   * 「新しいpollerが見たうえで、止まってはいない」で、これを受けて`NOT_STARTED`を解く。
+   */
+  claudeStarting?: boolean;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -261,6 +281,42 @@ export function isRevivedSession(
   return previousState !== "ALIVE" && nextState === "ALIVE";
 }
 
+/**
+ * 「まだ開始していない」（`NOT_STARTED`）をどう書き換えるか（#1465）。
+ *
+ * - `none` … 触らない
+ * - `enter` … `NOT_STARTED`へ入る。**この遷移でだけ引き上げる**（Issueコメント＋`00.check-user`）
+ * - `leave` … `NOT_STARTED`から出る（人が答えてClaude Codeが始まった）。付けた`00.check-user`を外す
+ */
+export type StartingActivityTransition = "none" | "enter" | "leave";
+
+/**
+ * pollerの`claudeStarting`から、その行の`activity`をどう動かすかを決める。
+ *
+ * **`ALIVE`のときしか動かさない。** 終わったセッションに「まだ開始していない」を書いても
+ * 待つ相手がいない（`recordDispatchSessionActivity`が`ALIVE`の行だけを更新するのと同じ理由）。
+ *
+ * **入り直しは起こさない。** `enter`は`NOT_STARTED`ではない行にだけ返す。pollerは60秒ごとに
+ * 同じ報告を送ってくるので、これが無いと毎分コメントが増える（`shouldEscalateSession`と同じ形）。
+ *
+ * **`WAITING_INPUT`等が既に立っている行は上書きしない。** フックが飛んだ＝Claude Codeは
+ * 始まっているので、印が消し損ねているだけと見て、フック側の値を信じる。
+ */
+export function resolveStartingActivityTransition(params: {
+  state: DispatchSessionState;
+  /** 直前の`activity`。立ち上がり直した行（`isRevivedSession`）ではnullを渡す */
+  previousActivity: DispatchSessionActivity | null;
+  claudeStarting: boolean | undefined;
+}): StartingActivityTransition {
+  if (params.claudeStarting === undefined) return "none";
+  if (params.state !== "ALIVE") return "none";
+  if (params.claudeStarting) {
+    if (params.previousActivity === null) return "enter";
+    return "none";
+  }
+  return params.previousActivity === "NOT_STARTED" ? "leave" : "none";
+}
+
 /** ホスト名として許す長さ。DBの列と報告の受け口で同じ上限を使う */
 export const DISPATCH_SESSION_NAME_MAX_LENGTH = 191;
 
@@ -306,11 +362,21 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     paneDeadStatus = rawStatus;
   }
 
+  // 古いpollerは送ってこない（#1465）。**無い場合は`undefined`のまま残す**（`false`へ倒すと、
+  // 判断材料を持っていないホストの報告が`NOT_STARTED`を解いてしまう）
+  const rawStarting = input.claudeStarting;
+  let claudeStarting: boolean | undefined;
+  if (rawStarting !== null && rawStarting !== undefined) {
+    if (typeof rawStarting !== "boolean") return null;
+    claudeStarting = rawStarting;
+  }
+
   return {
     tmuxSessionName,
     repositoryFullName,
     issueNumber,
     paneDead: input.paneDead,
     paneDeadStatus,
+    ...(claudeStarting === undefined ? {} : { claudeStarting }),
   };
 }

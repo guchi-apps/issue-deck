@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # 実装セッションの状態をSignalyへ通知するフックスクリプト（#1219）。
 #
-# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`）から呼ばれ、
+# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`・`SessionStart`）から呼ばれ、
 # フックのstdinに来るJSONを読んで1件処理する。設定は run-issue-session.sh が生成する
 # settings JSON 側にあり、このスクリプトを直接叩くのは検証のときだけ。
 #
-# 扱うイベントは4つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
+# 扱うイベントは5つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
 # 書き、判断を2箇所に分けない）。
 #
 #   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
@@ -15,6 +15,8 @@
 #                                               （＋この時点で「入力待ち」として記録する。#1438）
 #   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
 #                                               （＋`00.check-user`を解く。#1417）
+#   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
+#                                               **Signalyへもissue-deckへも送らない**
 #
 # **`00.check-user`を付け外しするのは、自分が付けたときだけ**（印は`lib/session-state.sh`の
 # `<セッション名>.check-user`）。Issueに書かれた「Claudeがユーザーに質問したとき」
@@ -115,6 +117,24 @@ if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_read_event >/dev/
   unset _last_event_line
 fi
 export NOTIFY_LAST_STATE_EVENT
+
+# 「まだ開始していない」印（`lib/session-state.sh`の`.starting`）を消す（#1465）。
+#
+# ランチャーが`claude`の起動直前に置いた印が消えないまま猶予（既定180秒）を過ぎると、pollerが
+# それをissue-deckへ報告し、画面に「まだ開始していません」と出て`00.check-user`が付く。
+# 消す本来の契機は`SessionStart`だが、**どのイベントでも消す。** フックが1つでも飛んだ時点で
+# Claude Codeは開始しており、`SessionStart`だけに任せると、そのフックが何らかの理由で飛ばない
+# 環境（古いClaude Code等）で正常なセッションのたびに誤って引き上げることになる。
+if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_clear_starting >/dev/null 2>&1; then
+  session_state_clear_starting "$NOTIFY_TMUX_SESSION" || true
+fi
+
+# セッションが始まった（#1465）。**印を消す以外にやることは無いので、ここで打ち切る。**
+# 開始したこと自体は人にとって新しい情報ではない（画面には既に起動の受付コメントが出ている）
+# ため、Signalyへもissue-deckへも送らない（python3もHTTPも起こさない）。
+if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"SessionStart\" ]]; then
+  exit 0
+fi
 
 # **`PostToolUse`のほとんどをここで捨てる**（#1357）。ツールの実行ごとに飛ぶイベントなので、
 # 毎回python3を起こしてHTTPまで進むと実装セッションを目に見えて遅くする。
