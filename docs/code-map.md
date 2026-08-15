@@ -89,6 +89,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `cn()`へ`text-sm`を渡すとtailwind-mergeがベースの`text-base`を消してしまう点に注意。
   取りこぼし対策として、[`app/globals.css`](../src/app/globals.css) に`md`未満で16pxを
   下回らせないルールを置いている。
+- **Issueの作成と単一リポジトリへの質問は同じダイアログ**（#1641。
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)）。先頭の
+  「種別」（Issue／質問）で切り替え、**本文の入力欄・画像添付・`#123`のIssue補完・ラベル選択は
+  どちらでも同じ部品**（`MentionTextarea`）を使う。種別で変わるのはタイトル（質問は
+  `buildAskRepoQuestionTitle`で質問文から機械生成し、入力させない）・担当者の有無・
+  リポジトリの絞り込み（質問は`claude-issue-dispatch.yml`導入済みのみ）・作成後の動き
+  （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容から種別を
+  自動判定してはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
+  Issueとして無人実行に乗る（逆もある）ため、押した時点で確定する形にしている。
+  **横断質問（#1454）はここに混ぜず、
+  [`cross-repo-question-dialog.tsx`](../src/components/dashboard/cross-repo-question-dialog.tsx)
+  として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
+  サブPCの質問セッションで、リポジトリの絞り込み条件（ワークフロー不要）も実行先の選択も
+  別物になるため。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 

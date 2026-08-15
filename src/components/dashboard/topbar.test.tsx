@@ -35,7 +35,7 @@ function renderTopBar(setFilter: SetFilter, filters: IssueFilters = baseFilters)
       onChangeGroupByRepo={() => {}}
       assigneeOptions={[]}
       onCreateIssue={() => {}}
-      onAskQuestion={() => {}}
+      onAskCrossRepoQuestion={() => {}}
       repositories={[]}
       issues={[]}
       pullRequests={[]}
@@ -90,7 +90,7 @@ describe("TopBar 検索欄", () => {
         onChangeGroupByRepo={() => {}}
         assigneeOptions={[]}
         onCreateIssue={() => {}}
-        onAskQuestion={() => {}}
+        onAskCrossRepoQuestion={() => {}}
         repositories={[]}
         issues={[]}
         pullRequests={[]}

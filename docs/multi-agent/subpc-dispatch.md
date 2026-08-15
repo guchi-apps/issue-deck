@@ -306,7 +306,7 @@ pollerは`instruction: true`を別に申告し、`claim`はそれが真のホス
 立て、全リポジトリを`--add-dir`で参照させて答えさせる**。
 
 ```text
-issue-deckの画面「質問する」→「複数のリポジトリ（横断）」
+issue-deckの画面「横断質問」（PCはヘッダー・スマホはIssue一覧の「？」）
   ↓ 記録先リポジトリに質問Issueを作成（タイトルは既存と同じ `[質問] ` 接頭辞）
   ↓ `@claude`を含まない質問コメントを投稿（Actionsは起きない。#1294の軸分離）
   ↓ POST /api/dispatch（kind=cross_repo_question）
