@@ -1,3 +1,4 @@
+import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { fetchAllPages } from "@/lib/github/pagination";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -75,16 +76,22 @@ export async function fetchClosedPullRequests(
   );
 }
 
+/**
+ * PR一覧の1ページ分を取得する。**ETagによる条件付きGET**を通すため、変化が無い間は
+ * レート制限を消費しない（#1531。「完了したPR」ビューの10秒ポーリングの前提）。
+ */
 async function fetchPullRequestPage(
   url: string,
   token: string,
 ): Promise<GithubApiOpenPullRequest[]> {
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  const result = await githubFetchJsonWithEtag<GithubApiOpenPullRequest[]>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
   }
-  return res.json();
+  return result.data;
 }
 
 /**

@@ -10,8 +10,15 @@ type GithubFetchOptions = {
   /**
    * 使用量として計上するかどうか（既定はtrue）。
    * `/rate_limit`のようにレート制限を消費しないエンドポイントではfalseにする。
+   * 応答を見てから計上したい場合（条件付きリクエストの304。`conditional-request.ts`）も
+   * falseにして、呼び出し側で`recordGithubApiCall`を呼ぶ。
    */
   record?: boolean;
+  /**
+   * 追加のリクエストヘッダ。`If-None-Match`のように呼び出しごとに変わるものを渡す。
+   * `Authorization`・`Accept`・`Content-Type`はここで上書きしない。
+   */
+  headers?: Record<string, string>;
 };
 
 /** GETの試行回数（初回を含む）。再試行の待ち時間は下の配列（ミリ秒） */
@@ -38,7 +45,7 @@ export async function githubFetch(
   token: string,
   options: GithubFetchOptions = {},
 ): Promise<Response> {
-  const { method = "GET", body, record = true } = options;
+  const { method = "GET", body, record = true, headers: extraHeaders } = options;
 
   if (record) {
     recordGithubApiCall(url);
@@ -51,6 +58,7 @@ export async function githubFetch(
       return await fetch(url, {
         method,
         headers: {
+          ...extraHeaders,
           Authorization: `Bearer ${token}`,
           Accept: "application/vnd.github+json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
