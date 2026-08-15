@@ -31,7 +31,7 @@ function isSummaryStale(state: SummaryHandle["state"]): boolean {
   );
 }
 
-/** 見出しを除いた要約の中身。スマホの詳細と、PCの折りたたみセクションで共有する */
+/** 見出しを除いた要約の中身。折りたたみセクションの中身として使う */
 function IssueAiSummaryBody({
   state,
   isLoading,
@@ -66,36 +66,11 @@ function IssueAiSummaryBody({
   );
 }
 
-/** 見出し＋要約を常に開いた形で出す。スマホの詳細（`mobile-issue-detail.tsx`）で使う */
-export function IssueAiSummary({ issue }: IssueAiSummaryProps) {
-  const handle = useIssueSummary(issue);
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-          <Bot className="size-4" />
-          AI要約
-        </h2>
-        {handle.state?.summary && (
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={handle.isGenerating}
-            onClick={handle.generate}
-          >
-            {handle.isGenerating ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-            再生成
-          </Button>
-        )}
-      </div>
-      <IssueAiSummaryBody {...handle} />
-    </div>
-  );
-}
-
 /**
- * PCのIssue詳細向けに、AI要約を折りたたみセクションとして出す（#1577）。
+ * Issue詳細のAI要約を折りたたみセクションとして出す（#1577）。
+ *
+ * **スマホの詳細も同じものを使う**（#1646）。以前は常に開いた`IssueAiSummary`を出していたが、
+ * 未生成のときほど「見出し＋生成ボタン＋区切り線」が縦を占め、本題の説明を画面外へ押し出していた。
  *
  * **フックはここで1回だけ呼ぶ。** 畳んだ行に出す状態（未生成・生成済み・生成中）は
  * `useIssueSummary`が持っているため、親が要約の有無を知るには親でも同じフックを呼ぶことになり、

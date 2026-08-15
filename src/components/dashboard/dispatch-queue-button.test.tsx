@@ -37,6 +37,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1479,
     issueTitle: null,
+    issueId: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "FAILED",
@@ -254,7 +255,7 @@ describe("DispatchQueueButton の行の内容", () => {
 });
 
 /**
- * #1519。制御ジョブは届くまでpull型ぶん最大60秒かかるのに、キューのどこにも出ていなかった
+ * #1519。制御ジョブは届くまでpull型ぶん最大30秒かかるのに、キューのどこにも出ていなかった
  * （#1544で枠の数え方から外したのは正しいが、表示まで消える必要は無い）。
  */
 describe("DispatchQueueButton の送信中の操作", () => {
@@ -332,6 +333,7 @@ describe("DispatchQueueButton のホスト表示", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1567,
       issueTitle: "サブPC上のセッション表示",
+      issueId: null,
       state: "ALIVE",
       exitStatus: null,
       firstSeenAt: NOW.toISOString(),
@@ -360,6 +362,8 @@ describe("DispatchQueueButton のホスト表示", () => {
           memoryTotalMb: 32_650,
           diskUsedGb: 219.4,
           diskTotalGb: 468.2,
+          swapUsedMb: 1_024,
+          swapTotalMb: 8_192,
         },
       }),
       [makeSession()],
@@ -376,5 +380,63 @@ describe("DispatchQueueButton のホスト表示", () => {
     openWithHost(makeHost(), []);
 
     expect(screen.getByText(/GitHub Actionsでの無人実行はここには出ません/)).toBeTruthy();
+  });
+});
+
+/**
+ * #1625。ここに出ているIssueを開くには、ポップオーバーを閉じて一覧から番号で探し直すしか
+ * なかった。右端のアイコン（Remote Control・開発サーバー）がissue-deckの外へ出る導線なのに対し、
+ * タイトルはこの画面の中でIssue詳細を開く。
+ */
+describe("DispatchQueueButton の行からIssueを開く", () => {
+  it("ジョブの行のタイトルを押すとIssueを開き、ポップオーバーを閉じる", async () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchQueueButton
+        dispatch={makeDispatch([
+          makeJob({
+            status: "QUEUED",
+            finishedAt: null,
+            issueNumber: 1519,
+            issueTitle: "実行キューの状態を可視化する",
+            issueId: "issue-1519",
+          }),
+        ])}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    fireEvent.click(
+      screen.getByLabelText("#1519 実行キューの状態を可視化するをissue-deckで開く"),
+    );
+
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-1519");
+    // 開いたまま後ろの画面だけが変わると、何が起きたのか分からない
+    await waitFor(() => expect(screen.queryByText("順番待ち")).toBeNull());
+  });
+
+  it("Issueのidが引けていない行はリンクにしない", async () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchQueueButton
+        dispatch={makeDispatch([
+          makeJob({
+            status: "QUEUED",
+            finishedAt: null,
+            issueNumber: 1519,
+            issueTitle: "実行キューの状態を可視化する",
+            issueId: null,
+          }),
+        ])}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    expect(screen.queryByLabelText(/をissue-deckで開く/)).toBeNull();
+    expect(screen.getByText("#1519 実行キューの状態を可視化する")).toBeDefined();
   });
 });

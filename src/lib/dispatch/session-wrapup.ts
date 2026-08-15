@@ -50,7 +50,7 @@ const RECORD_MARKER_PREFIXES = [
  *
  * **受付コメント（#1119）の投稿時刻を基準にする。** あれは`claude`の起動直前に投稿されるので、
  * セッションの開始そのものを指す。`DispatchSession.firstSeenAt`はpollerが最初に見た時刻で、
- * 起動から最大1巡（既定60秒）遅れる。その差の間に計画が出ると「記録なし」と誤判定するため、
+ * 起動から最大1巡（既定30秒）遅れる。その差の間に計画が出ると「記録なし」と誤判定するため、
  * 受付コメントがあればそちらを優先し、無ければ`firstSeenAt`へ落とす。
  */
 export function resolveSessionRecordSince(

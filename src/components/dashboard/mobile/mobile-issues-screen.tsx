@@ -30,7 +30,7 @@ type MobileIssuesScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
-  onAskQuestion: () => void;
+  onAskCrossRepoQuestion: () => void;
   onBack?: () => void;
 };
 
@@ -49,7 +49,7 @@ export function MobileIssuesScreen({
   onChangeFilters,
   onSelectIssue,
   onCreateIssue,
-  onAskQuestion,
+  onAskCrossRepoQuestion,
   onBack,
 }: MobileIssuesScreenProps) {
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
@@ -104,7 +104,7 @@ export function MobileIssuesScreen({
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
       onCreateIssue={onCreateIssue}
-      onAskQuestion={onAskQuestion}
+      onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
     />

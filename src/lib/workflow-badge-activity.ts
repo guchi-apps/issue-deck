@@ -37,7 +37,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 /**
  * セッションの報告がこれより古ければ、`ALIVE`でも動いているとみなさない。
  *
- * pollerは1巡（既定60秒）ごとに`lastReportedAt`を更新するため、5分の無音はサブPC側が
+ * pollerは1巡（既定30秒）ごとに`lastReportedAt`を更新するため、5分の無音はサブPC側が
  * 落ちている（あるいはpollerが止まっている）ことを意味する。**この歯止めが無いと、サブPCが
  * 落ちたIssueのバッジが誰も止められないまま回り続ける**（状態は`GONE`にならない。`GONE`へ
  * 進めるのもpollerの報告のため）。

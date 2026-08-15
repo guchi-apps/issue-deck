@@ -14,7 +14,12 @@ const VALID = {
   memoryTotalMb: 32_650,
   diskUsedGb: 219.4,
   diskTotalGb: 468.2,
+  swapUsedMb: 1_024,
+  swapTotalMb: 8_192,
 };
+
+/** SWAPを申告しない古いpollerの申告（#1624） */
+const { swapUsedMb: _swapUsed, swapTotalMb: _swapTotal, ...WITHOUT_SWAP } = VALID;
 
 function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
   return {
@@ -73,6 +78,30 @@ describe("parseDispatchHostMetrics", () => {
     expect(parseDispatchHostMetrics({ ...VALID, memoryUsedMb: VALID.memoryTotalMb + 1 })).toBeNull();
     expect(parseDispatchHostMetrics({ ...VALID, diskUsedGb: VALID.diskTotalGb + 1 })).toBeNull();
   });
+
+  // SWAPだけは「まとめて」に含めない（#1624）。必須にすると、SWAPを申告しない古いpollerで
+  // CPU・メモリ・ディスクごと消える
+  it("SWAPを申告しない申告でも、他の5つは通す（SWAPは対でnull）", () => {
+    expect(parseDispatchHostMetrics(WITHOUT_SWAP)).toEqual({
+      ...WITHOUT_SWAP,
+      swapUsedMb: null,
+      swapTotalMb: null,
+    });
+  });
+
+  // SWAPを持たないホスト（swapoff）の正常な申告。メモリ・ディスクと違い総量0で落とさない
+  it("総量0のSWAPは通す", () => {
+    expect(parseDispatchHostMetrics({ ...VALID, swapUsedMb: 0, swapTotalMb: 0 })).toMatchObject({
+      swapUsedMb: 0,
+      swapTotalMb: 0,
+    });
+  });
+
+  it("SWAPが片方だけ・壊れている申告は全体をnullにする", () => {
+    expect(parseDispatchHostMetrics({ ...WITHOUT_SWAP, swapTotalMb: 8_192 })).toBeNull();
+    expect(parseDispatchHostMetrics({ ...VALID, swapUsedMb: "1024" })).toBeNull();
+    expect(parseDispatchHostMetrics({ ...VALID, swapUsedMb: VALID.swapTotalMb + 1 })).toBeNull();
+  });
 });
 
 describe("resolveHostMetricTone", () => {
@@ -87,9 +116,29 @@ describe("resolveHostMetricTone", () => {
 });
 
 describe("describeDispatchHostMetrics", () => {
-  it("CPU・メモリ・ディスクの3行を返す", () => {
+  it("CPU・メモリ・SWAP・ディスクの4行を返す", () => {
     const rows = describeDispatchHostMetrics(host());
-    expect(rows?.map((row) => row.label)).toEqual(["CPU", "メモリ", "ディスク"]);
+    expect(rows?.map((row) => row.label)).toEqual(["CPU", "メモリ", "SWAP", "ディスク"]);
+  });
+
+  it("SWAPはメモリと同じくGB表記の実数を添える", () => {
+    const swap = describeDispatchHostMetrics(host())?.[2];
+    expect(swap?.detail).toBe("1.0 / 8.0 GB");
+    expect(Math.round(swap?.percent ?? 0)).toBe(13);
+    expect(swap?.tone).toBe("normal");
+  });
+
+  // 0%のメーターでは「SWAPが空いている」と「SWAPが無い」を見分けられない（#1624）
+  it("SWAPが未申告・総量0のホストではSWAPの行を出さない", () => {
+    const notReported = describeDispatchHostMetrics(
+      host({ metrics: { ...VALID, swapUsedMb: null, swapTotalMb: null } }),
+    );
+    expect(notReported?.map((row) => row.label)).toEqual(["CPU", "メモリ", "ディスク"]);
+
+    const swapOff = describeDispatchHostMetrics(
+      host({ metrics: { ...VALID, swapUsedMb: 0, swapTotalMb: 0 } }),
+    );
+    expect(swapOff?.map((row) => row.label)).toEqual(["CPU", "メモリ", "ディスク"]);
   });
 
   it("メモリはGB表記の実数を添え、割合から重さを決める", () => {

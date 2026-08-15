@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
+import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { AccountSection } from "@/components/dashboard/settings/account-section";
 import {
@@ -22,6 +23,11 @@ import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
+  /**
+   * 設定の一覧から前の画面へ戻る（#1638）。フッターのタブから外し、ホームのヘッダーの
+   * 歯車から開く画面になったため、区分の中だけでなくトップレベルにも戻る導線が要る。
+   */
+  onBack: () => void;
   currentUser: CurrentUser | null;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
@@ -39,6 +45,7 @@ type MobileSettingsScreenProps = {
  * 表示が食い違うことがない。器（全画面かダイアログか）だけがPCと違う。
  */
 export function MobileSettingsScreen({
+  onBack,
   currentUser,
   autoRetryLimit,
   claudeModel,
@@ -60,18 +67,18 @@ export function MobileSettingsScreen({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex shrink-0 items-center gap-2 border-b p-4">
-        {activeSection && (
-          <button
-            type="button"
-            onClick={() => setSection(null)}
-            className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
-            aria-label="戻る"
-          >
-            <ChevronLeft className="size-5" />
-          </button>
-        )}
-        <h1 className="text-base font-semibold">{activeSection?.label ?? "設定"}</h1>
+      <header className="flex shrink-0 items-center gap-2 border-b py-2 pr-2 pl-4">
+        {/* 区分の中では一覧へ、一覧では前の画面へ戻る（#1638。フッターにタブが無くなった） */}
+        <button
+          type="button"
+          onClick={() => (activeSection ? setSection(null) : onBack())}
+          className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          aria-label="戻る"
+        >
+          <ChevronLeft className="size-5" />
+        </button>
+        <h1 className="flex-1 text-base font-semibold">{activeSection?.label ?? "設定"}</h1>
+        <MobileDispatchStatusButton />
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">

@@ -2,6 +2,7 @@
 
 import { ExternalLink, Monitor } from "lucide-react";
 
+import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -58,16 +59,28 @@ const SESSION_TEXT_CLASS: Record<IssueSessionTone, string> = {
 export function DispatchHostPanel({
   hosts,
   sessions,
+  onOpenIssue,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
+  /**
+   * セッションの行のタイトルから、そのIssueの詳細を開く（#1625）。渡さなければタイトルは
+   * ただの文字列のまま（従来の表示）。**Issueのidが引けている行にだけリンクを出す**ので、
+   * 押しても何も起きない行は生まれない。
+   */
+  onOpenIssue?: (issueId: string) => void;
 }) {
   if (hosts.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
       {hosts.map((host) => (
-        <HostCard key={host.name} host={host} sessions={selectHostSessions(sessions, host.name)} />
+        <HostCard
+          key={host.name}
+          host={host}
+          sessions={selectHostSessions(sessions, host.name)}
+          onOpenIssue={onOpenIssue}
+        />
       ))}
     </div>
   );
@@ -76,9 +89,11 @@ export function DispatchHostPanel({
 function HostCard({
   host,
   sessions,
+  onOpenIssue,
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
+  onOpenIssue?: (issueId: string) => void;
 }) {
   const metrics = describeDispatchHostMetrics(host);
   const atCapacity = isDispatchHostAtSessionCapacity(host);
@@ -124,7 +139,11 @@ function HostCard({
       {sessions.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
           {sessions.map((session) => (
-            <SessionRow key={session.tmuxSessionName} session={session} />
+            <SessionRow
+              key={session.tmuxSessionName}
+              session={session}
+              onOpenIssue={onOpenIssue}
+            />
           ))}
         </ul>
       )}
@@ -165,7 +184,13 @@ function MetricRow({
   );
 }
 
-function SessionRow({ session }: { session: DispatchSessionView }) {
+function SessionRow({
+  session,
+  onOpenIssue,
+}: {
+  session: DispatchSessionView;
+  onOpenIssue?: (issueId: string) => void;
+}) {
   const summary = summarizeIssueSession(session);
   const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
 
@@ -176,11 +201,16 @@ function SessionRow({ session }: { session: DispatchSessionView }) {
         className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", SESSION_TONE_CLASS[summary.tone])}
       />
       <span className="min-w-0 flex-1">
-        {/* 幅が狭いので長いタイトルはホバーで補う（キューの行と同じ扱い） */}
-        <span className="block truncate font-medium" title={session.issueTitle ?? undefined}>
-          #{session.issueNumber}
-          {session.issueTitle ? ` ${session.issueTitle}` : ""}
-        </span>
+        {/*
+          タイトルはそのIssueの詳細への導線（#1625）。右のアイコンがRemote Control・開発サーバー
+          という**issue-deckの外**へ出る導線なのに対し、こちらはこの画面の中で開く
+        */}
+        <DispatchIssueTitle
+          issueNumber={session.issueNumber}
+          issueTitle={session.issueTitle}
+          issueId={session.issueId}
+          onOpenIssue={onOpenIssue}
+        />
         <span className={cn("block truncate", SESSION_TEXT_CLASS[summary.tone])}>
           {repoName}・{summary.shortLabel}・{formatRelativeDate(summary.at)}
         </span>

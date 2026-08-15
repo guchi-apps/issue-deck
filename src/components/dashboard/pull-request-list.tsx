@@ -47,6 +47,8 @@ type PullRequestListProps = {
   headerLeading?: React.ReactNode;
   /** ヘッダーと一覧の間に差し込む行（スマホのビュー切り替えタブ。#1436） */
   headerBelow?: React.ReactNode;
+  /** ヘッダーの右端に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
+  headerActions?: React.ReactNode;
   className?: string;
   style?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる（#677と同じ理由） */
@@ -171,6 +173,7 @@ export function PullRequestList({
   onMerged,
   headerLeading,
   headerBelow,
+  headerActions,
   className,
   style,
   footerSpacing = false,
@@ -211,6 +214,7 @@ export function PullRequestList({
           <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
           更新
         </Button>
+        {headerActions}
       </header>
 
       {headerBelow}

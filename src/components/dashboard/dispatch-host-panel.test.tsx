@@ -27,6 +27,8 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
       memoryTotalMb: 32_650,
       diskUsedGb: 219.4,
       diskTotalGb: 468.2,
+      swapUsedMb: 1_024,
+      swapTotalMb: 8_192,
     },
     ...overrides,
   };
@@ -39,6 +41,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1567,
     issueTitle: "サブPC上のセッション表示とリソース使用率の表示機能",
+    issueId: null,
     state: "ALIVE",
     exitStatus: null,
     firstSeenAt: NOW.toISOString(),
@@ -72,6 +75,35 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
     expect(screen.getByText("サブPC")).toBeTruthy();
     expect(screen.getByText("セッション 2/12")).toBeTruthy();
+    expect(screen.getByText("34%")).toBeTruthy();
+    expect(screen.getByText("39%・12.4 / 31.9 GB")).toBeTruthy();
+    // SWAP（#1624）。メモリが埋まった後の余力はここにしか出ない
+    expect(screen.getByText("13%・1.0 / 8.0 GB")).toBeTruthy();
+    expect(screen.getByText("SWAP")).toBeTruthy();
+  });
+
+  // SWAPを持たないホスト・SWAPを申告しない古いpollerで0%のメーターを並べると、
+  // 「SWAPが空いている」と「SWAPが無い」を見分けられない（#1624）
+  it("SWAPが未申告のホストではSWAPの行を出さず、他の3つは出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({
+            metrics: {
+              cpuPercent: 34,
+              memoryUsedMb: 12_698,
+              memoryTotalMb: 32_650,
+              diskUsedGb: 219.4,
+              diskTotalGb: 468.2,
+              swapUsedMb: null,
+              swapTotalMb: null,
+            },
+          }),
+        ]}
+        sessions={[]}
+      />,
+    );
+    expect(screen.queryByText("SWAP")).toBeNull();
     expect(screen.getByText("34%")).toBeTruthy();
     expect(screen.getByText("39%・12.4 / 31.9 GB")).toBeTruthy();
   });
@@ -140,6 +172,47 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost({ metrics: null })]} sessions={[]} />);
     expect(screen.queryByText("34%")).toBeNull();
     expect(screen.getByText("セッション 2/12")).toBeTruthy();
+  });
+
+  // 画面に出ているIssueを開くのに、一覧へ戻って番号で探し直す必要があった（#1625）
+  it("Issueのidが引けていれば、タイトルを押してそのIssueを開ける", () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ issueId: "issue-1567" })]}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+
+    const button = screen.getByLabelText(
+      "#1567 サブPC上のセッション表示とリソース使用率の表示機能をissue-deckで開く",
+    );
+    button.click();
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-1567");
+  });
+
+  // 同期前・GitHub Appを外したリポジトリではidが引けない。押しても何も起きないリンクは出さない
+  it("Issueのidが引けていない行はリンクにしない", () => {
+    const onOpenIssue = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ issueId: null })]}
+        onOpenIssue={onOpenIssue}
+      />,
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
+  });
+
+  // スマホのホーム画面など、遷移先を持たない置き方でも表示だけは従来どおり出す
+  it("遷移の受け取り手が無ければタイトルはただの文字列のまま", () => {
+    render(
+      <DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession({ issueId: "issue-1567" })]} />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("ホストが2台以上なら、それぞれのセッションを自分のカードの下に出す", () => {

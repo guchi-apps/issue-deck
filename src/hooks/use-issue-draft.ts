@@ -5,7 +5,15 @@ import { useEffect } from "react";
 const DRAFT_STORAGE_KEY = "issue-create-draft";
 const SAVE_DEBOUNCE_MS = 500;
 
+/**
+ * 作成する種別（#1641）。Issueと質問は同じフォームを共有し、この値で入力項目と作成後の動きが変わる。
+ * 下書きにも持たせて、復元したときに書いていたときの種別へ戻す。
+ */
+export type IssueDraftKind = "issue" | "question";
+
 export type IssueDraft = {
+  /** #1641以前に保存された下書きには無いため、読み出し時に`issue`へ寄せる */
+  kind: IssueDraftKind;
   repositoryFullName: string;
   title: string;
   body: string;
@@ -27,7 +35,8 @@ export function readIssueDraft(): IssueDraft | null {
   const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY);
   if (stored === null) return null;
   try {
-    return JSON.parse(stored) as IssueDraft;
+    const parsed = JSON.parse(stored) as Partial<IssueDraft>;
+    return { ...parsed, kind: parsed.kind === "question" ? "question" : "issue" } as IssueDraft;
   } catch (error) {
     console.error("[use-issue-draft] failed to parse stored draft", error);
     return null;
@@ -57,6 +66,7 @@ export type IssueDraftDefaults = {
 // 復元はreadRestorableIssueDraftの結果をユーザーが明示的に選んだ場合のみ行う。
 export function resolveInitialIssueDraft(defaults: IssueDraftDefaults): IssueDraft {
   return {
+    kind: "issue",
     repositoryFullName: defaults.defaultRepositoryFullName ?? "",
     title: defaults.defaultTitle ?? "",
     body: defaults.defaultBody ?? "",

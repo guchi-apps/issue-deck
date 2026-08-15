@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
@@ -217,6 +217,43 @@ describe("CommentThread AI要約の表示位置", () => {
 describe("CommentThread PRマージ待ちの表示", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it("自動マージされなかった理由を案内の下に出し、マージ後は出さない（#1631）", async () => {
+    render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending
+        mergeCheckReasons={{
+          source: "review",
+          items: ["GitHub Actionsワークフローの変更 (.github/workflows/**)"],
+          postedAtLabel: "3分前",
+        }}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+
+    expect(screen.getByText("自動マージされなかった理由")).not.toBeNull();
+    expect(screen.getByText("GitHub Actionsワークフローの変更 (.github/workflows/**)")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    });
+    // マージし終えた後も理由が残ると、まだ操作が要るように読める
+    expect(screen.queryByText("自動マージされなかった理由")).toBeNull();
   });
 
   it("マージ実行後は「マージが必要です」ではなく完了の表示に切り替わる", async () => {
@@ -587,5 +624,88 @@ describe("CommentThread 承認カードの見出し（#1490）", () => {
   it("理由ラベルが配られていないリポジトリでは従来の見出しに戻る", () => {
     renderApprovalCard();
     expect(screen.getByText("ユーザーの承認が必要です")).not.toBeNull();
+  });
+});
+
+/**
+ * #1639。承認・PRマージのカードは「最後のbotコメント」の直下に差し込んでいたが、
+ * その判定はissue-deckのGitHub Appのlogin名だけを見ており、`github-actions[bot]`名義の
+ * 進捗通知やローカルセッションの報告（ユーザー本人のlogin名で投稿される・#1346）が
+ * 後に続くと、カードが一覧の途中に埋もれていた。常に末尾へ出す。
+ */
+describe("CommentThread 承認カードの表示位置（#1639）", () => {
+  // カードを差し込む位置の判定は`issue-deck[bot]`のlogin名を見ていたため、
+  // App slugを設定しないと不具合を再現できない
+  const originalSlug = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG;
+
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_GITHUB_APP_SLUG = "issue-deck";
+  });
+
+  afterEach(() => {
+    if (originalSlug === undefined) delete process.env.NEXT_PUBLIC_GITHUB_APP_SLUG;
+    else process.env.NEXT_PUBLIC_GITHUB_APP_SLUG = originalSlug;
+    cleanup();
+  });
+
+  function renderWithTrailingComments(props: { mergeApprovalPending?: boolean } = {}) {
+    return render(
+      <CommentThread
+        comments={[
+          makeComment({
+            id: "1",
+            author: { login: "issue-deck[bot]" },
+            body: "🔍 計画を作成しました\n\n<!-- issue-deck-plan-type:implement -->",
+          }),
+          makeComment({
+            id: "2",
+            author: { login: "github-actions[bot]" },
+            body: "進捗を更新しました\n\n<!-- issue-deck-source:issue-labels -->",
+          }),
+          makeComment({
+            id: "3",
+            author: { login: "m-guchi" },
+            body: "最後のコメント本文",
+          }),
+        ]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        mergeApprovalPending={props.mergeApprovalPending}
+        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+      />,
+    );
+  }
+
+  it("PRマージ待ちのカードは最後のコメントより後ろに表示する", () => {
+    renderWithTrailingComments({ mergeApprovalPending: true });
+
+    const lastComment = screen.getByText("最後のコメント本文");
+    const card = screen.getByText("Pull Requestのマージが必要です");
+    // Node.DOCUMENT_POSITION_FOLLOWING: lastComment より後ろに card がある
+    expect(lastComment.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // コメント一覧の項目の中ではなく、一覧の外（末尾）に出す
+    expect(card.closest("li")).toBeNull();
+  });
+
+  it("承認待ちのカードも最後のコメントより後ろに表示する", () => {
+    renderWithTrailingComments();
+
+    const lastComment = screen.getByText("最後のコメント本文");
+    const card = screen.getByText("ユーザーの承認が必要です");
+    expect(lastComment.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(card.closest("li")).toBeNull();
   });
 });

@@ -3,16 +3,12 @@
 import { useMemo, useRef, useState } from "react";
 
 import {
-  Archive,
   ArrowLeft,
   ArrowRightLeft,
   Bot,
-  CircleAlert,
   ExternalLink,
   FilePlus2,
-  FolderGit2,
   Loader2,
-  Lock,
   MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
@@ -21,21 +17,26 @@ import {
   RotateCcw,
   Star,
   Trash2,
-  X,
   XCircle,
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
-import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { IssueAiSummary } from "@/components/dashboard/issue-ai-summary";
-import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
+import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
+import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
+import {
+  IssuePullRequestList,
+  IssuePullRequestStateCounts,
+} from "@/components/dashboard/issue-pull-request-list";
+import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
-import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MobileIssuePropertiesSection } from "@/components/dashboard/mobile/mobile-issue-properties-section";
+import { MobileIssueSummaryCard } from "@/components/dashboard/mobile/mobile-issue-summary-card";
+import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import {
   moveDestinationRepositories,
@@ -45,8 +46,6 @@ import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-la
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
-import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
   findBlockingSession,
@@ -55,8 +54,6 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
-import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -65,7 +62,6 @@ import {
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -77,16 +73,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
-import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   approveCommentBody,
   canCompleteManualStep,
@@ -110,14 +98,16 @@ import {
 import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
-import { closedStateLabel } from "@/lib/issue-state-reason";
-import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
-import { getLabelBadgeStyle } from "@/lib/label-color";
+import {
+  selectVisiblePullRequestLinks,
+  summarizeIssuePullRequestStates,
+} from "@/lib/issue-pull-requests";
+import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
+import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
@@ -183,6 +173,9 @@ export function MobileIssueDetail({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
+  // 「Claudeに質問する」は⋯メニューから開くので、開閉はここで持つ（#1646）。
+  // `DropdownMenuItem`をトリガーにすると、メニューが閉じた時点でダイアログごと消える
+  const [isAskDialogOpen, setIsAskDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
   // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
@@ -241,8 +234,6 @@ export function MobileIssueDetail({
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
-  const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
-    useIssueRepoMeta(issue.repositoryFullName);
   const issueSuggestions = useMemo(
     () => getRepoIssueSuggestions(issues, issue.repositoryFullName),
     [issues, issue.repositoryFullName],
@@ -250,6 +241,8 @@ export function MobileIssueDetail({
   const qaAnswerPending = isQaAnswerPending(comments);
   const pullRequestLinks = usePullRequestLinks(issue.repositoryFullName, issue.number, comments);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
+  const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
   const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
@@ -273,6 +266,14 @@ export function MobileIssueDetail({
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
   const swipeBackHandlers = useSwipeBack(onBack);
+  // 対応PRのセクションは、一覧が実際に描く行が1件以上あるときだけ出す（#1577）。
+  // 判定を`IssuePullRequestList`と共有しないと、行が無いのに空の枠だけが残る
+  const visiblePullRequestLinks = selectVisiblePullRequestLinks(pullRequestLinks, pullRequests);
+  const pullRequestSummary = summarizeIssuePullRequestStates(
+    pullRequests,
+    visiblePullRequestLinks.length,
+  );
+  const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
 
   async function toggleLabel(name: string) {
     const current = issue.labels.map((label) => label.name);
@@ -500,71 +501,12 @@ export function MobileIssueDetail({
         >
           #{issue.number} {issue.title}
         </button>
-        {/* マージボタンはIssue単位ではなくPR単位の操作なので、ヘッダーではなく
-            対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
-        {canStartImplementation(issue) && (
-          <StartImplementationDialog
-            issue={issue}
-            onIssueUpdated={onIssueUpdated}
-            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
-            /* スマホではヘッダーに置けるのがこの▶だけなので、実行先（GitHub Actions／
-               サブPC）もここで選ばせる（#1248） */
-            includeDispatchTargets
-            dispatch={dispatch}
-            actionsDisabledReason={actionsDisabledReason}
-            comments={comments}
-            subIssueRelations={subIssueRelations}
-            /* `localSessionCommand`は渡さない。ターミナルへ貼るためのものなので、
-               スマホでコピーできても貼る先が無い（#1263） */
-            renderTrigger={(isSubmitting) => (
-              <button
-                type="button"
-                disabled={isSubmitting}
-                aria-label={startLabel}
-                title={startLabel}
-                className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="size-5 animate-spin" />
-                ) : (
-                  <Play className="size-5" />
-                )}
-              </button>
-            )}
-          />
-        )}
-        {canAskClaude(issue) && (
-          <AskClaudeDialog
-            issue={issue}
-            onIssueUpdated={onIssueUpdated}
-            onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
-            renderTrigger={(isSubmitting) => (
-              <button
-                type="button"
-                disabled={isSubmitting}
-                aria-label="Claudeに質問する"
-                className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="size-5 animate-spin" />
-                ) : (
-                  <MessageCircleQuestion className="size-5" />
-                )}
-              </button>
-            )}
-          />
-        )}
-        {canCloseAskRepoQuestion(issue, comments) && (
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={() => handleClose("completed")}
-            aria-label="質問を終えてクローズ"
-            className="-m-3 rounded-full p-3 text-primary active:bg-muted disabled:opacity-50"
-          >
-            <XCircle className="size-5" />
-          </button>
-        )}
+        {/* ヘッダーに残す操作は★と⋯だけにする（#1646）。以前は▶（実装を開始）と?（Claudeに
+            質問する）も並べていたが、▶は本文の全幅ボタンと表示条件が同一（`canStartImplementation`）で
+            必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
+            タイトルに120pxしか残らなかった。どちらも操作自体は消さず、▶は本文のボタンへ一本化し、
+            ?と「質問を終えてクローズ」は下の⋯メニューへ移した。
+            マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
         <button
           type="button"
           onClick={() => onToggleFavorite(issue)}
@@ -588,6 +530,26 @@ export function MobileIssueDetail({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-0">
+            {/* ヘッダーから移した2つ（#1646）。先頭へ置き、押す回数の多い順を保つ */}
+            {canAskClaude(issue) && (
+              <DropdownMenuItem
+                className="whitespace-nowrap text-xs"
+                onSelect={() => setIsAskDialogOpen(true)}
+              >
+                <MessageCircleQuestion className="size-3.5" />
+                Claudeに質問する
+              </DropdownMenuItem>
+            )}
+            {canCloseAskRepoQuestion(issue, comments) && (
+              <DropdownMenuItem
+                className="whitespace-nowrap text-xs"
+                disabled={isSubmitting}
+                onSelect={() => handleClose("completed")}
+              >
+                <XCircle className="size-3.5" />
+                質問を終えてクローズ
+              </DropdownMenuItem>
+            )}
             {issue.state === "open" && (
               <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
                 <a
@@ -686,174 +648,23 @@ export function MobileIssueDetail({
         data-capture-scroll-bottom
         className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
       >
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <FolderGit2 className="size-3.5" />
-          <button
-            type="button"
-            onClick={() => onSelectRepository(issue.repositoryFullName)}
-            className="hover:text-foreground hover:underline"
-          >
-            {issue.repositoryFullName}
-          </button>
-          {issue.repositoryArchived && (
-            <Archive className="size-3" aria-label="アーカイブ済み" />
-          )}
-          {issue.repositoryPrivate && <Lock className="size-3" aria-label="プライベート" />}
-        </span>
+        {/* リポジトリ・タイトル・状態・進捗・担当者・コメント数・更新・ラベルを1枚へ畳む（#1646）。
+            以前はこれらが独立した6ブロックとして縦に並び、説明が初期表示から押し出されていた */}
+        <MobileIssueSummaryCard issue={issue} onSelectRepository={onSelectRepository} />
 
-        <h1 className="text-lg font-semibold break-words">
-          #{issue.number} {issue.title}
-        </h1>
-
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <Badge variant={issue.state === "open" ? "default" : "secondary"}>
-            {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
-          </Badge>
-          <span>作成日 {new Date(issue.createdAt).toLocaleDateString("ja-JP")}</span>
-          <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
-        </div>
-
-        <WorkflowStatusSteps
-          labels={issue.labels}
-          projectStatus={issue.projectStatus}
+        {/* 進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルを
+            1枚に集約する（#1577）。PCの詳細と同じものを使う。走っているものが1つも無いIssueでは
+            カードごと描かれない */}
+        <IssueStatusCard
+          issue={issue}
+          dispatch={dispatch}
+          dispatchJob={dispatchJob}
+          issueSession={issueSession}
           executionTarget={executionTarget}
+          workflowRun={workflowRun}
+          workflowRunId={workflowRunId}
+          qaAnswerPending={qaAnswerPending}
         />
-        {issueSession && (
-          <IssueSessionStatus session={issueSession} dispatch={dispatch} align="start" />
-        )}
-        {/* 横断質問（#1454）を積んでからセッションが立つまでの間だけ出る */}
-        <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="start" />
-        <div className="flex flex-wrap items-center gap-2">
-          {qaAnswerPending && (
-            <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
-              <MessageCircleQuestion className="size-3" />
-              Claudeの回答待ち
-            </span>
-          )}
-          <CancelWorkflowRunButton
-            run={workflowRun}
-            runId={workflowRunId}
-            repositoryFullName={issue.repositoryFullName}
-          />
-        </div>
-
-        {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
-            コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339） */}
-        <IssuePullRequestList
-          links={pullRequestLinks}
-          pullRequests={pullRequests}
-          mergeApprovalPending={mergeApprovalPending}
-          onMerge={handleMergePullRequest}
-          onMerged={handlePullRequestMerged}
-          mergedNumbers={mergedPullRequestNumbers}
-          mergeTargetNumber={mergeTargetNumber}
-          isMerging={isMergingPullRequest}
-          mergeError={mergePullRequestError}
-        />
-
-        <div className="flex items-center gap-6">
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">作成者</p>
-            <span className="flex items-center gap-1.5 text-sm">
-              <UserAvatar login={issue.author.login} />
-              {issue.author.login}
-            </span>
-          </div>
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">担当者</p>
-            <Select
-              value={issue.assignee?.login ?? "__none__"}
-              onValueChange={(value) => handleAssigneeChange(value === "__none__" ? null : value)}
-            >
-              <SelectTrigger
-                className="h-auto gap-1 border-none bg-transparent p-0 text-sm shadow-none hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent"
-                disabled={isMetaLoading || isSubmitting}
-              >
-                <SelectValue placeholder="担当者を選択">
-                  <span className="flex items-center gap-1.5">
-                    {issue.assignee && <UserAvatar login={issue.assignee.login} />}
-                    {issue.assignee?.login ?? "未設定"}
-                  </span>
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">未設定</SelectItem>
-                {repoAssignees.map((login) => (
-                  <SelectItem key={login} value={login}>
-                    <UserAvatar login={login} />
-                    {login}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">ラベル</h2>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {issue.labels.map((label) => {
-              const step = matchStatusStep(label.name);
-              const attention = isAttentionLabel(label.name);
-              return (
-                <span
-                  key={label.name}
-                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                  style={getLabelBadgeStyle(label.color)}
-                  title={step ? `${label.name}（ステップ${step}/${STATUS_STEP_MAX}）` : undefined}
-                >
-                  {attention && <CircleAlert className="size-3 shrink-0" aria-hidden="true" />}
-                  {step && (
-                    <span
-                      className="h-1.5 w-5 overflow-hidden rounded-full bg-border"
-                      aria-hidden="true"
-                    >
-                      <span
-                        className="block h-full rounded-full"
-                        style={{
-                          width: `${(step / STATUS_STEP_MAX) * 100}%`,
-                          backgroundColor: label.color,
-                        }}
-                      />
-                    </span>
-                  )}
-                  {label.name}
-                  <button
-                    type="button"
-                    onClick={() => toggleLabel(label.name)}
-                    disabled={isSubmitting}
-                    aria-label={`${label.name}を削除`}
-                    className="relative -m-1.5 rounded-full p-1.5 after:absolute after:-inset-2.5 hover:opacity-70 disabled:opacity-50"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              );
-            })}
-            <LabelPicker
-              labels={repoLabels}
-              selectedNames={issue.labels.map((label) => label.name)}
-              onToggle={toggleLabel}
-              isLoading={isMetaLoading}
-              trigger={
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  aria-label="ラベルを追加"
-                  className="flex size-11 items-center justify-center rounded-full border text-muted-foreground disabled:opacity-50"
-                >
-                  <Plus className="size-4" />
-                </button>
-              }
-            />
-          </div>
-        </div>
-
-        <Separator />
-
-        <IssueAiSummary issue={issue} />
-
-        <Separator />
 
         {canStartImplementation(issue) && (
           <StartImplementationDialog
@@ -883,6 +694,9 @@ export function MobileIssueDetail({
           onIssueUpdated={onIssueUpdated}
           fullWidth
           showStartButton={!canStartImplementation(issue)}
+          /* 積んだジョブの状態は`IssueStatusCard`が出すので、ここでは出さない（#1646）。
+             両方に出すと「順番待ち」が同じ画面に2つ並ぶ。PCの詳細と同じ渡し方 */
+          showJobStatus={false}
           dispatch={dispatch}
         />
 
@@ -895,18 +709,93 @@ export function MobileIssueDetail({
           />
         )}
 
-        {/* 子イシューの進捗はAI要約と説明の間に置く（#1340）。モバイルでは実装開始などの
-            操作導線を上に残したいため、説明のすぐ上へ差し込む */}
-        {hasSubIssueRelations && (
-          <>
-            <SubIssueProgress relations={subIssueRelations} />
-            <Separator />
-          </>
+        {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
+            コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
+            既定では畳み、マージ待ちのときだけ開いたままにする（#1577・#1646） */}
+        {visiblePullRequestLinks.length > 0 && (
+          <IssueDetailSection
+            id="pull-requests"
+            title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
+            count={pullRequestSummary.total}
+            forceOpen={mergeApprovalPending}
+            tone={mergeApprovalPending ? "attention" : "default"}
+            summary={<IssuePullRequestStateCounts buckets={pullRequestSummary.buckets} />}
+          >
+            <IssuePullRequestList
+              variant="plain"
+              /* 自動マージされなかった理由をマージボタンと同じ枠の中に出す（#1631）。PCと同じ */
+              notice={
+                mergeApprovalPending ? (
+                  <MergeCheckReasonNotice reasons={mergeCheckReasons} />
+                ) : undefined
+              }
+              links={pullRequestLinks}
+              pullRequests={pullRequests}
+              mergeApprovalPending={mergeApprovalPending}
+              onMerge={handleMergePullRequest}
+              onMerged={handlePullRequestMerged}
+              mergedNumbers={mergedPullRequestNumbers}
+              mergeTargetNumber={mergeTargetNumber}
+              isMerging={isMergingPullRequest}
+              mergeError={mergePullRequestError}
+            />
+          </IssueDetailSection>
         )}
 
+        {/* 子イシューの進捗は説明より上に出す（#1340）。畳んでいても完了率は行に残す（#1646） */}
+        {hasSubIssueRelations && (
+          <IssueDetailSection
+            id="sub-issues"
+            title={subIssueRelations.children.length > 0 ? "子Issue" : "親Issue"}
+            count={subIssueRelations.childCount}
+            summary={
+              subIssueRelations.children.length > 0 ? (
+                <>
+                  <span
+                    className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-valuenow={subIssueSummary.percent}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="子Issueの完了率"
+                  >
+                    <span
+                      className="block h-full rounded-full bg-primary"
+                      style={{ width: `${subIssueSummary.percent}%` }}
+                    />
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {subIssueSummary.done} / {subIssueSummary.total} 完了
+                  </span>
+                </>
+              ) : (
+                <span className="truncate text-xs text-muted-foreground">
+                  #{subIssueRelations.parent?.number} {subIssueRelations.parent?.title}
+                </span>
+              )
+            }
+          >
+            <SubIssueProgress relations={subIssueRelations} showHeading={false} />
+          </IssueDetailSection>
+        )}
+
+        <IssueAiSummarySection issue={issue} />
+
+        {/* 担当者・ラベル・日付は「変えたいときに触るもの」なので畳んでおく（#1646） */}
+        <MobileIssuePropertiesSection
+          issue={issue}
+          isSubmitting={isSubmitting}
+          onToggleLabel={toggleLabel}
+          onAssigneeChange={handleAssigneeChange}
+        />
+
+        <Separator />
+
+        {/* 見出しの重さを持つのは説明とコメントだけにする（#1577・#1646）。補助情報は
+            折りたたみの小さなラベルになっており、形だけで主従が読み取れる */}
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">説明</h2>
+            <h2 className="text-base font-semibold">説明</h2>
             {/* 本文にタスクリストがあるときだけ進捗を出す（#1486） */}
             {taskList.progress.total > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
@@ -926,7 +815,7 @@ export function MobileIssueDetail({
         <Separator />
 
         <div>
-          <h2 className="mb-3 text-sm font-semibold">
+          <h2 className="mb-3 text-base font-semibold">
             コメント <span className="text-muted-foreground">{issue.commentCount}</span>
           </h2>
           <CommentThread
@@ -950,6 +839,7 @@ export function MobileIssueDetail({
             }
             sessionWaitingInput={sessionWaitingInput}
             mergeApprovalPending={mergeApprovalPending}
+            mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
             workflowRun={workflowRun}
@@ -1066,6 +956,15 @@ export function MobileIssueDetail({
         issue={issue}
         open={isSummaryDialogOpen}
         onOpenChange={setIsSummaryDialogOpen}
+      />
+
+      {/* トリガーは⋯メニューの項目なので、ここではダイアログ本体だけを置く（#1646） */}
+      <AskClaudeDialog
+        issue={issue}
+        open={isAskDialogOpen}
+        onOpenChange={setIsAskDialogOpen}
+        onIssueUpdated={onIssueUpdated}
+        onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
       />
     </div>
   );

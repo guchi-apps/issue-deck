@@ -83,12 +83,47 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
+  進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
+  [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
+  対応PR・子Issue・AI要約・プロパティは
+  [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
+  折りたたみへ入れる。**どちらかの画面にだけ状態表示を足さない。** 足すとPCとスマホで
+  「何が起きているか」の答えが食い違い、片方でしか気付けない状態が生まれる。
+  スマホ側で新たに増えたのは、上部の
+  [`mobile/mobile-issue-summary-card.tsx`](../src/components/dashboard/mobile/mobile-issue-summary-card.tsx)（読む専用）と
+  [`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)（編集の口）で、
+  **この2つに同じ値を両方出さない**のが分け方の要点（サマリーは読むだけ・編集は折りたたみ）。
+  `IssueDetailSection`の開閉状態は`issue-detail.section.<id>`のlocalStorageで**セクションごとに1つ**
+  持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
+  **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
+  `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **スマホのIssue詳細のヘッダーに操作を足さない**（#1646）。置けるのは`←`・タイトル・`★`・`⋯`だけで、
+  それ以上並べると390px幅でタイトルが読めなくなる（以前は`▶`と`?`があり、タイトルに120pxしか
+  残っていなかった）。**本文に同じ操作があるものはヘッダーに置かない**（`▶`は
+  `canStartImplementation`が本文の全幅ボタンと同一条件で必ず二重になっていた）。増やす場合は
+  `⋯`メニューへ入れる。**ダイアログを`⋯`から開くときはトリガーを`DropdownMenuItem`にせず**、
+  親が`open`・`onOpenChange`を持つ（メニューが閉じるとトリガーごと外れ、ダイアログも消える）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
   `cn()`へ`text-sm`を渡すとtailwind-mergeがベースの`text-base`を消してしまう点に注意。
   取りこぼし対策として、[`app/globals.css`](../src/app/globals.css) に`md`未満で16pxを
   下回らせないルールを置いている。
+- **Issueの作成と単一リポジトリへの質問は同じダイアログ**（#1641。
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)）。先頭の
+  「種別」（Issue／質問）で切り替え、**本文の入力欄・画像添付・`#123`のIssue補完・ラベル選択は
+  どちらでも同じ部品**（`MentionTextarea`）を使う。種別で変わるのはタイトル（質問は
+  `buildAskRepoQuestionTitle`で質問文から機械生成し、入力させない）・担当者の有無・
+  リポジトリの絞り込み（質問は`claude-issue-dispatch.yml`導入済みのみ）・作成後の動き
+  （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容から種別を
+  自動判定してはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
+  Issueとして無人実行に乗る（逆もある）ため、押した時点で確定する形にしている。
+  **横断質問（#1454）はここに混ぜず、
+  [`cross-repo-question-dialog.tsx`](../src/components/dashboard/cross-repo-question-dialog.tsx)
+  として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
+  サブPCの質問セッションで、リポジトリの絞り込み条件（ワークフロー不要）も実行先の選択も
+  別物になるため。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 
@@ -173,9 +208,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`sidebarAttentionNavViews`・
   `sidebarQuestionNavViews`・`sidebarIssueNavViews`、
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
-  `navViews`はスマホのタブ・スワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
+  `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
   左メニューから外した「最近追加した」「本番反映待ち」「直近本番に反映した」「完了したPR」は
-  viewクエリとしては生きており、スマホと既存リンクからは今までどおり開ける。
+  viewクエリとしては生きており、既存リンクとスマホのホーム画面のクイックビューからは
+  今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
@@ -220,11 +256,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `all`を要求するのは「ブランチとPRの流れ」を開いている間だけ（マージ済みPRとブランチの
   突き合わせに要る）。**一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の
   部分集合なので、狭める向きで取り直すのは消費にしかならない）。
-- **スマホのフッターは「ホーム／Issue／PR／設定」で、タブのidは`mscreen`の値そのもの**（#1436）。
-  「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧（→リポジトリ別Issue一覧）。
+- **スマホのIssue一覧で絞り込みを操作する行は、画面の上ではなく下端（フッタータブのすぐ上）に
+  置く**（#1645。[`mobile/mobile-issue-list-screen.tsx`](../src/components/dashboard/mobile/mobile-issue-list-screen.tsx)）。
+  元は上部の横スクロールタブだったが、片手で持つと親指が届かず、押して開くシートは下から出るため
+  視線と指が上下に往復していた。**現在のビューはボタン1つに畳み**、押すと
+  [`mobile-issue-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-issue-view-sheet.tsx)が
+  全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
+  ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
+  一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃えて「本番反映待ち」
+  「直近本番に反映した」を外すが、**ホーム画面のクイックビューからはそれらのビューで開かれうる**
+  ため、現在のビューが一覧に無いときだけ末尾へ足す（足さないと選択中の表示もスワイプ移動先も
+  失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
+  （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
+  同じシートにあっても数えない。
+- **スマホのフッターは「ホーム／Issue／PR／ブランチ」で、タブのidは`mscreen`の値そのもの**
+  （#1436・#1638）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
+  （→リポジトリ別Issue一覧）。
   全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
   「よくつかうフィルター」「保存したフィルター」からのドリルダウンだけにした（点灯するタブは
-  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。**PRタブから開くときの
+  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。
+  **4枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
+  1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
+  98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
+  `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
+  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。**PRタブから開くときの
   ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
@@ -261,8 +316,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
-- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
-  ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
+- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
+  新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
   **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
   （[`lib/github/branches-api.ts`](../src/lib/github/branches-api.ts)）。消費は**リポジトリあたり
@@ -529,7 +584,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。**PRを作り`11.local`も外した引き渡し済みの
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
-  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
+  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。**横断質問セッションは
+  質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
+  こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
   だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。

@@ -212,3 +212,77 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     expect(screen.queryByText("実装を開始")).toBeNull();
   });
 });
+
+/**
+ * #1641。「リポジトリに質問する」を新規作成ダイアログの種別として統合したもの。
+ * 本文欄・画像添付・ラベルはIssueと共有し、種別で変わるのはタイトル・担当者・作成後の動きだけ。
+ */
+describe("CreateIssueDialog の種別「質問」", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue({ title: "[質問] 認証の流れを教えて" }));
+    commentMutations.createComment.mockResolvedValue({ id: "c1" });
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    commentMutations.createComment.mockReset();
+  });
+
+  function selectQuestion() {
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+  }
+
+  it("質問ではタイトル欄・担当者・「作成+実装開始」を出さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+    selectQuestion();
+
+    expect(screen.queryByLabelText("タイトル")).toBeNull();
+    expect(screen.queryByLabelText("担当者")).toBeNull();
+    expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
+    expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
+  });
+
+  // 質問でも画像を貼れて`#123`のIssue補完が効くこと（この統合の主目的）
+  it("本文の入力欄はIssueと同じもので、画像添付を出す", () => {
+    render(<Harness onCreated={vi.fn()} />);
+    selectQuestion();
+
+    expect(screen.getByLabelText("質問内容")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
+  });
+
+  it("タイトルは質問文から自動で作り、プレビューとして見せる", () => {
+    render(<Harness onCreated={vi.fn()} />);
+    selectQuestion();
+
+    expect(screen.getByText("質問内容から自動で作られます")).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("質問内容"), {
+      target: { value: "認証の流れを教えて" },
+    });
+    expect(screen.getByText("[質問] 認証の流れを教えて")).not.toBeNull();
+  });
+
+  it("Issueを作成したうえで、Actionsを起こす質問コメントを投稿する", async () => {
+    const onCreated = vi.fn();
+    render(<Harness onCreated={onCreated} />);
+    selectQuestion();
+
+    fireEvent.change(screen.getByLabelText("質問内容"), {
+      target: { value: "認証の流れを教えて" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "質問する" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    expect(createIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "[質問] 認証の流れを教えて", assignee: null }),
+    );
+    await waitFor(() => expect(commentMutations.createComment).toHaveBeenCalledTimes(1));
+    expect(commentMutations.createComment.mock.calls[0][0].body).toContain("@claude 質問: ");
+    // 投稿したコメントぶんを数えたIssueを呼び出し側へ渡す（一覧のコメント数がずれない）
+    await waitFor(() =>
+      expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ commentCount: 1 })),
+    );
+  });
+});
