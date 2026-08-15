@@ -9,6 +9,7 @@ import {
   CiStateBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
+  UserMergeRequiredBadge,
   formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
@@ -17,7 +18,11 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
+import {
+  canMergeFromDeck,
+  groupPullRequestsByRepository,
+  requiresUserMerge,
+} from "@/lib/pull-request-list";
 import { getPullRequestView } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -123,6 +128,7 @@ function PullRequestCard({
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
         {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
+        {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <UserAvatar login={pullRequest.authorLogin} className="size-4" />
           {pullRequest.authorLogin}

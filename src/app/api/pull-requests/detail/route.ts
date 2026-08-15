@@ -14,6 +14,8 @@ import {
   fetchPullRequestReviews,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
+import { checkUserIssueKey, fetchCheckUserIssueKeys } from "@/lib/pull-request-check-user";
+import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
 import type { PullRequestDetail } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
@@ -73,12 +75,31 @@ async function handleGET(request: NextRequest) {
         ? await fetchRefCiState(owner, repo, pullRequest.head.sha, token)
         : "unknown";
 
+    // 対応Issueの`00.check-user`を合流させる（#1469）。GitHub APIは消費せず、DBキャッシュを
+    // 1件引くだけ。番号の推定は一覧と同じ純粋関数を通す。
+    const linkedIssueNumber = extractLinkedIssueNumber({
+      headRef: pullRequest.head.ref,
+      title: pullRequest.title,
+      body: pullRequest.body,
+    });
+    const checkUserKeys = await fetchCheckUserIssueKeys(
+      linkedIssueNumber === null
+        ? []
+        : [{ repositoryId: repository.id, issueNumbers: [linkedIssueNumber] }],
+    );
+
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,
       summary: toPullRequestSummary(
         pullRequest,
         { fullName: repository.fullName, private: repository.private },
-        { merged: pullRequest.merged, ciState },
+        {
+          merged: pullRequest.merged,
+          ciState,
+          linkedIssueCheckUser:
+            linkedIssueNumber !== null &&
+            checkUserKeys.has(checkUserIssueKey(repository.id, linkedIssueNumber)),
+        },
       ),
       body: pullRequest.body ?? "",
       additions: pullRequest.additions,

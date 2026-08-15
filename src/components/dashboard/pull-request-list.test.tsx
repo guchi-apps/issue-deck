@@ -24,6 +24,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     kind: "issue",
     linkedIssueNumber: number,
     autoMergeEnabled: false,
+    linkedIssueCheckUser: false,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -99,6 +100,27 @@ describe("PullRequestList", () => {
     expect(screen.getAllByRole("button", { name: "マージする" })).toHaveLength(2);
     expect(screen.getByText("CI実行中")).toBeTruthy();
     expect(screen.getByText("Auto-merge有効")).toBeTruthy();
+  });
+
+  it("自動でマージされないPRには「ユーザーのマージが必要です」を出す（#1469）", () => {
+    renderList([
+      // 対応Issueに00.check-userが付いた実装PR
+      makePullRequest({ number: 1, linkedIssueCheckUser: true }),
+      // develop→mainのリリースPR（常に人がマージする）
+      makePullRequest({
+        number: 2,
+        kind: "release",
+        baseRef: "main",
+        headRef: "develop",
+        linkedIssueNumber: null,
+      }),
+    ]);
+    expect(screen.getAllByText("ユーザーのマージが必要です")).toHaveLength(2);
+  });
+
+  it("判定が確定していないPRには出さない（#1469）", () => {
+    renderList([makePullRequest({ linkedIssueCheckUser: false })]);
+    expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
