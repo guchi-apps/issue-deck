@@ -726,6 +726,30 @@ export function findBlockingSession(params: {
 }
 
 /**
+ * そのIssueの実行が**もう始まっているか**（#1667）。開始の導線を出すかどうかの判定に使う。
+ *
+ * **未完了のジョブ（順番待ち・受け取り済み・起動中）か、生きているセッションがあれば`true`。**
+ * どちらも既存の判定（`isActiveDispatchJobStatus`・`findBlockingSession`）をそのまま読む。
+ *
+ * 積んだ直後のIssueは、進捗（Project Status）がまだ`Ready`のままで
+ * （報告するのは起動したランチャー側・#1236）、`canStartImplementation`は`true`を返し続ける。
+ * そのうえ**自分が積んだジョブでサブPCが塞がるため既定の実行先がGitHub Actionsへ移り**、
+ * 「順番待ち」の真下に押せる「GitHub Actionsで開始」が並ぶ。押せば二重に走る。
+ *
+ * **失敗・取り消し・起動済みで終わったジョブでは`false`に戻る**（未完了ではなくなる）。
+ * 落ちたセッションを立て直す導線まで塞がない。
+ */
+export function isIssueExecutionPending(params: {
+  /** そのIssueへ積んだ起動ジョブ（`findDispatchJobForIssue`の結果） */
+  job: Pick<DispatchJobView, "status"> | null;
+  /** 動いているセッション（`findBlockingSession`の結果） */
+  blockingSession: DispatchSessionView | null;
+}): boolean {
+  if (params.job !== null && isActiveDispatchJobStatus(params.job.status)) return true;
+  return params.blockingSession !== null;
+}
+
+/**
  * ジョブの状態の見せ方（#1180）。**`succeeded`は「tmuxセッションが立ち上がった」まで**で
  * 実装の完了ではないため、「完了」ではなく「起動しました」と書く。以降の進捗は
  * Project Statusが持つ唯一の正（progress-status-architecture.md）。
