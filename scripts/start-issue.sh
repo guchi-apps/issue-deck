@@ -189,6 +189,11 @@ fi
 
 mkdir -p "$PROMPT_DIR"
 
+# 前回の会話を引き継ぐかどうか（#1541）の**呼び出し元の指定**。Issueごとに上書きするため、
+# ループに入る前にここで控えておく（複数のIssueを一度に渡せるので、前のIssueの判定が
+# 次のIssueへ漏れないようにする）。実際の値は prepare_issue がworktreeの扱いを見て決める。
+CLAUDE_RESUME_REQUESTED="${ISSUE_DECK_CLAUDE_RESUME:-1}"
+
 # マージ済みPRを持つ既存worktreeを作り直すかどうかを決める（#1100）。作り直す場合のみ0を返す。
 # 判断材料と、作り直さない場合の理由もここで表示する。
 decide_recreate() {
@@ -361,6 +366,15 @@ prepare_issue() {
       echo "       マージ済みのブランチが残っているだけなら scripts/cleanup-worktrees.sh --issue $n で掃除できます。" >&2
       exit 1
     fi
+  fi
+
+  # 前回の会話を引き継ぐかどうか（#1541）。**worktreeを新規に作った・作り直した場合は引き継がない。**
+  # 会話履歴はworktreeではなくcwdのパスに紐づいて残るため、`--recreate`で作り直しても
+  # ここを塞がないと古い前提のまま再開する。再利用したときだけ呼び出し元の指定に従う。
+  if [[ "$reuse_worktree" -eq 1 ]]; then
+    export ISSUE_DECK_CLAUDE_RESUME="$CLAUDE_RESUME_REQUESTED"
+  else
+    export ISSUE_DECK_CLAUDE_RESUME=0
   fi
 
   # 再開時は既存の .env.local を尊重する（ローカルで書き換えている場合があるため）。
@@ -583,8 +597,11 @@ build_env_prefix() {
   # ISSUE_DECK_SESSION_REAPABLE / ISSUE_DECK_SESSION_STATE_DIR はセッションの自動回収（#1256）用。
   # 前者はpollerがジョブとして起動した経路でだけ渡ってくる印で、tmuxの中まで届かないと
   # 記述子に載らず、回収の対象にならない。
+  # ISSUE_DECK_CLAUDE_RESUME は前回の会話を引き継ぐかどうか（#1541）。prepare_issue が
+  # worktreeの扱いを見て決めた値で、tmuxの中まで届かないと新規worktreeでも再開してしまう。
   for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP \
-    ISSUE_DECK_DEV_HOST ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR; do
+    ISSUE_DECK_DEV_HOST ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR \
+    ISSUE_DECK_CLAUDE_RESUME; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

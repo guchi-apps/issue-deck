@@ -12,8 +12,9 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
  * GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順に流す**形にしたため
  * （#1261）、「今どこまで進んでいて、あと何本待っているか」を1か所で見られる必要が出た。
  *
- * **順番はcreatedAtの昇順で、払い出し（`claimDispatchJob`）と同じ。** キューは
- * 積んだ順に流れるので、画面の並びと実際に走る順が一致する。
+ * **並びは払い出し（`claimDispatchJob`）と同じ。** `queuePriority`の降順 → `createdAt`の
+ * 昇順で、画面に見えている順番と実際に走る順番が一致する。`queuePriority`は既定0なので、
+ * 「先頭へ上げる」（#1541）を押していないキューは従来どおり積んだ順に流れる。
  */
 
 /** 未完了ジョブのうち、実際に走っているとみなす状態 */
@@ -41,15 +42,20 @@ export function summarizeDispatchQueue(
   // **起動ジョブだけを数える**（#1332）。セッションの停止・終了は同時実行数の枠を使わず、
   // tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
   // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る
-  const byOldest = [...jobs]
-    .filter((job) => job.kind === "LAUNCH")
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const launchJobs = [...jobs].filter((job) => job.kind === "LAUNCH");
 
-  const running = byOldest.filter(isRunningStatus);
-  const queued = byOldest.filter((job) => job.status === "QUEUED");
-  const failed = byOldest
+  // 走る順。`queuePriority`が同じなら積んだ順（既定は全件0なので従来と同じ並びになる）
+  const byRunOrder = [...launchJobs].sort(
+    (a, b) => b.queuePriority - a.queuePriority || a.createdAt.localeCompare(b.createdAt),
+  );
+
+  const running = byRunOrder.filter(isRunningStatus);
+  const queued = byRunOrder.filter((job) => job.status === "QUEUED");
+  // **終わったものは走る順ではなく新しい順に出す。** 「直近の失敗」で見たいのは順番ではなく
+  // 直近かどうかで、先頭へ上げたジョブが後から失敗したときに古い失敗より上へ来てしまう
+  const failed = launchJobs
     .filter((job) => job.status === "FAILED" || job.status === "TIMEOUT")
-    .reverse();
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return {
     running,

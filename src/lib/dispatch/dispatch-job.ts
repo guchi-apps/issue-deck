@@ -134,6 +134,13 @@ export type DispatchJobView = {
    */
   instruction: string | null;
   tmuxSessionName: string | null;
+  /**
+   * 順番待ちの中で先に払い出す度合い（#1541。大きいほど先）。
+   *
+   * **画面はこれで並べ替えたうえで、値そのものは出さない。** 押した結果は「1番になった」
+   * という並びの変化として見えれば十分で、数値を出すと意味を説明する必要が出る。
+   */
+  queuePriority: number;
   createdAt: string;
   claimedAt: string | null;
   startedAt: string | null;

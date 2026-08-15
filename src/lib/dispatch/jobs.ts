@@ -62,6 +62,7 @@ function toJobView(job: DispatchJob): DispatchJobView {
     message: job.message,
     instruction: job.instruction,
     tmuxSessionName: job.tmuxSessionName,
+    queuePriority: job.queuePriority,
     createdAt: job.createdAt.toISOString(),
     claimedAt: job.claimedAt?.toISOString() ?? null,
     startedAt: job.startedAt?.toISOString() ?? null,
@@ -488,9 +489,12 @@ export async function claimDispatchJobs(params: {
   // 「未知のジョブ種別です」として`failed`で返す（`scripts/subpc-dispatch-poller.sh`）ので、
   // 実行側が来ていない段階で配ると質問が必ず失敗として残る。払い出しはStep 3（別Issue）で、
   // poller側の対応申告（`sessionControlCapable`と同じ形）とセットで開ける。
+  // **並びは`queuePriority`降順 →`createdAt`昇順**（#1541）。既定は全件0なので、既存の
+  // 「積んだ順」がそのまま残る。画面（`summarizeDispatchQueue`）も同じ並びで出すので、
+  // 見えている順番と実際に走る順番が一致する。
   const candidates = await db.dispatchJob.findMany({
     where: { targetHost: params.hostName, status: "QUEUED", kind: { in: launchKinds } },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ queuePriority: "desc" }, { createdAt: "asc" }],
     take: available,
   });
   claimed.push(...(await claimCandidates(candidates, params.hostName, now)));
@@ -628,6 +632,81 @@ export async function cancelDispatchJob(params: {
   });
   if (result.count === 0) {
     return { ok: false, reason: "not_cancelable", message: "このジョブは既に終了しています。" };
+  }
+
+  const updated = await db.dispatchJob.findUnique({ where: { id: job.id } });
+  return updated ? { ok: true, job: toJobView(updated) } : { ok: false, reason: "not_found" };
+}
+
+export type PrioritizeDispatchJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; reason: "not_found" | "not_prioritizable"; message?: string };
+
+/** 「先頭へ上げる」を受け付ける種別。セッションを立てるジョブ＝順番の概念があるものだけ */
+const PRIORITIZABLE_JOB_KINDS: DispatchJobKind[] = ["LAUNCH", "CROSS_REPO_QUESTION"];
+
+/**
+ * 順番待ちのジョブを先頭へ上げる（#1541）。
+ *
+ * 夜にまとめて積んだあと「これを次に流したい」が出てくるが、キューは`createdAt`の昇順で
+ * 固定されていて、取り消して積み直すと最後尾へ回るだけだった。
+ *
+ * **任意の並べ替えは持たない。** 主な用途が外出先のスマホで、ドラッグでの並べ替えは操作が
+ * 難しいうえ、実際の要求は「これを次に流したい」の1点に尽きる。1ボタンなら押した結果が
+ * 「1番になる」で明確になる。
+ *
+ * **同じホストの`QUEUED`の最大値+1を入れる（単調増加）。** 連打しても順位が入れ替わるだけで、
+ * 値が飽和しない範囲で素直に働く。全件を採番し直す形にすると、押すたびに順番待ちの行数ぶんの
+ * 更新が走るうえ、その最中に届いたclaimが中途半端な並びを読む。
+ *
+ * **制御ジョブ（`INTERRUPT`・`KILL`・`INSTRUCTION`）は受け付けない。** あちらは同時実行数の
+ * 枠外で起動ジョブより先に配られる（`claimDispatchJob`）ので、順番という概念がそもそも無い。
+ */
+export async function prioritizeDispatchJob(params: {
+  jobId: string;
+}): Promise<PrioritizeDispatchJobResult> {
+  const job = await db.dispatchJob.findUnique({ where: { id: params.jobId } });
+  if (!job) return { ok: false, reason: "not_found" };
+
+  if (job.status !== "QUEUED") {
+    return {
+      ok: false,
+      reason: "not_prioritizable",
+      message: "順番待ちのジョブだけを先頭へ上げられます。",
+    };
+  }
+  if (!PRIORITIZABLE_JOB_KINDS.includes(job.kind)) {
+    return {
+      ok: false,
+      reason: "not_prioritizable",
+      message: "このジョブには順番がありません（停止・終了・追加指示は先に届きます）。",
+    };
+  }
+
+  // 同じホストの順番待ちだけを見る。ホストごとに独立したキューなので、他ホストの値に
+  // 引きずられて無駄に大きな値が入るのを避ける。
+  const top = await db.dispatchJob.findFirst({
+    where: {
+      targetHost: job.targetHost,
+      status: "QUEUED",
+      kind: { in: PRIORITIZABLE_JOB_KINDS },
+    },
+    orderBy: { queuePriority: "desc" },
+    select: { queuePriority: true },
+  });
+
+  // **`QUEUED`のままであることを条件に更新する。** 押した瞬間にpollerが持っていった場合は
+  // 0件で落ち、走り始めたジョブの並びを書き換えずに済む。
+  const result = await db.dispatchJob.updateMany({
+    where: { id: job.id, status: "QUEUED" },
+    data: { queuePriority: (top?.queuePriority ?? 0) + 1 },
+  });
+  if (result.count === 0) {
+    return {
+      ok: false,
+      reason: "not_prioritizable",
+      message: "このジョブは既に実行が始まっています。",
+    };
   }
 
   const updated = await db.dispatchJob.findUnique({ where: { id: job.id } });
