@@ -175,6 +175,27 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 `src/lib/issue-status.ts`の`matchStatusStep`が理由ラベルを除外していないと、Issue詳細の
 ラベル欄に「ステップ1/9」の進捗バーが誤って描画される。
 
+#### `01.check-merge`の「なぜ」はコメントにしか無い（#1631）
+
+理由ラベルが表すのは**ユーザーに何を求めているか**（＝PRをマージすること）までで、
+**なぜ自動マージされなかったか**は表さない。その「なぜ」の記録は
+`reusable-claude-review-develop.yml`の`auto-merge`ジョブが投稿するIssueコメント
+（「⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。」＋箇条書き。
+末尾に`<!-- issue-deck-source:claude-review-develop -->`）**だけ**にある。
+
+issue-deckのIssue詳細は、マージ待ちのときこのコメントを読んでマージボタンと同じ枠の中へ理由を
+出す（`src/lib/merge-check-reasons.ts`の`resolveMergeCheckReasons`と
+`src/components/dashboard/merge-check-reason-notice.tsx`）。**判定をやり直しているのではなく、
+既にある判定結果を読んでいるだけ。** issue-deckはPRの差分を持っていないため、パスパターンに
+よるリスク判定をクライアントで再現するとワークフローの判定と食い違う表示ができてしまう。
+
+- **ワークフロー側の文面を変えるとこの表示が黙って落ちる。** 変えるときは
+  `src/lib/merge-check-reasons.test.ts`が持つ実文面の固定値もあわせて更新する。
+- 理由コメントは、そのpush開始時点で既に`00.check-user`が付いていると投稿されない（#594）。
+  その場合は`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`から
+  理由を組み立て、どれも無ければ「理由の記録が見つかりませんでした」と出す。
+  **理由を推測で埋めない。**
+
 ## 画面のチェックボックス5つの使い分け（#1317）
 
 issue-deckの「実装を開始」ダイアログには、下記5つのラベルをチェックボックスとして出している（定義は`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`）。どれも**エージェントを止める場所が違うだけ**で、迷ったら「どこで自分が見たいか」で選ぶ。
