@@ -238,7 +238,8 @@ export type LabelFilterPreset = {
  */
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
-  { key: "manual-step", label: "手作業待ち", labels: [MANUAL_STEP_LABEL] },
+  // 表示名は「ユーザーの確認待ち」と対にして、どちらも人が動くまで進まないことを揃える（#1613）
+  { key: "manual-step", label: "ユーザーの作業待ち", labels: [MANUAL_STEP_LABEL] },
   // 「リポジトリに質問する」で作られた質問Issueの置き場（#1514）。回答を読み終えて承認を押すと
   // `00.check-user`が外れ、Statusは`Ready`のままなので、専用ビューが無いと「未着手」へ戻る。
   // 完了の合図はcloseなので、openな質問Issueが全部ここに並ぶ（既定のstate=openのまま）。

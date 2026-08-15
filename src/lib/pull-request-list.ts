@@ -1,6 +1,5 @@
 import type {
   PullRequestKind,
-  PullRequestListScope,
   PullRequestSummary,
   PullRequestViewId,
 } from "@/types/pull-request";
@@ -101,8 +100,8 @@ export function sortOpenPullRequests(pullRequests: PullRequestSummary[]): PullRe
 
 /**
  * 更新が新しい順に並べる。更新日時が同じ場合はリポジトリ名・PR番号で安定させる。
- * マージ済みを含む「全てのPR」ビュー向け（#1312）。作成が古い順のままだと、何年も前に
- * 完了したPRが先頭を占めて履歴として読めなくなる。
+ * 「すべてのPR」ビュー向け（#1312）。滞留の長さで並べる他のビューと違い、こちらは
+ * 「いま何が動いたか」を追う一覧なので、直近に動いたPRを上に出す。
  */
 export function sortPullRequestsByUpdated(
   pullRequests: PullRequestSummary[],
@@ -119,6 +118,10 @@ export function sortPullRequestsByUpdated(
  * ビューごとの絞り込み（#1312）。母集団の広さ（closedを取りに行くか）は
  * `scopeForPullRequestView`が決め、ここは受け取った一覧を絞るだけ。
  *
+ * **どのビューもopenなPRしか通さない**（#1613）。「すべてのPR」もマージ済み・クローズ済みを
+ * 含めるのをやめたため、`scope`が`all`の取得結果（ブランチ画面が要求する）を渡しても
+ * 一覧の内容は変わらない。
+ *
  * ドラフトとCI状態不明を`in-progress`側へ入れているのは、どちらも「まだ結果が確定していない」
  * ためにマージの判断ができない点で同じだから（ドラフトはCI状態を取得していないので常に`unknown`）。
  */
@@ -126,18 +129,14 @@ export function filterPullRequestsByView(
   pullRequests: PullRequestSummary[],
   view: PullRequestViewId,
 ): PullRequestSummary[] {
-  if (view === "all") return pullRequests;
   return pullRequests.filter((pullRequest) => {
     if (pullRequest.state !== "open") return false;
+    if (view === "all") return true;
     const completed = !pullRequest.draft && ["success", "failure"].includes(pullRequest.ciState);
     return view === "completed" ? completed : !completed;
   });
 }
 
-/** ビューを表示するために一覧APIへ要求する母集団（#1312） */
-export function scopeForPullRequestView(view: PullRequestViewId): PullRequestListScope {
-  return view === "all" ? "all" : "open";
-}
 
 /**
  * 左メニュー「Pull Request」セクションに出す件数（#1389）。`null`は「件数を出さない」。
@@ -149,16 +148,12 @@ export type PullRequestNavCounts = Record<PullRequestViewId, number | null>;
  * ビューの絞り込みを掛ける前・それ以外（リポジトリ絞り込みなど）は掛けた後の集合にする。
  * そうしないとメニューの件数と一覧の件数が食い違う。
  *
- * `null`になるのは次の2つ。
+ * `null`になるのは**未取得**（`loaded`がfalse）のときだけ。PR一覧はDBキャッシュを持たず取得に
+ * 時間がかかるため、取得前に`0`を出すと「PRが無い」と読めてしまう。
  *
- * - **未取得**（`loaded`がfalse）: PR一覧はDBキャッシュを持たず取得に時間がかかるため、
- *   取得前に`0`を出すと「PRが無い」と読めてしまう。
- * - **「全てのPR」**: 母集団が`scope`（open だけか、直近のクローズ済みまで含むか）に依存し、
- *   「全PR数」として読める数にならない。「処理中」「完了」の2つでopenなPRを過不足なく
- *   二分するので、件数としてはこの2つで足りる。
- *
- * 「処理中」「完了」は`filterPullRequestsByView`が`state === "open"`のPRしか通さないため、
- * 渡された集合がどちらの`scope`の取得結果でも同じ値になる。
+ * 「すべてのPR」は以前、母集団が`scope`（openだけか、直近のクローズ済みまで含むか）に依存して
+ * 「全PR数」として読める数にならないため件数を出していなかった（#1389）。openなPRだけを出す
+ * ビューになったので（#1613）、どの`scope`の取得結果を渡しても同じ値になり、件数を出せる。
  */
 export function computePullRequestNavCounts(
   pullRequests: PullRequestSummary[],
@@ -166,7 +161,7 @@ export function computePullRequestNavCounts(
 ): PullRequestNavCounts {
   if (!loaded) return { all: null, "in-progress": null, completed: null };
   return {
-    all: null,
+    all: filterPullRequestsByView(pullRequests, "all").length,
     "in-progress": filterPullRequestsByView(pullRequests, "in-progress").length,
     completed: filterPullRequestsByView(pullRequests, "completed").length,
   };
@@ -262,6 +257,37 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
     return pullRequest.linkedIssueCheckReason === "merge";
   }
   return pullRequest.linkedIssueCheckUser;
+}
+
+/**
+ * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613）。
+ *
+ * `requiresUserMerge`なPRのうち、**対応Issueが同じ一覧に並んでいないものだけ**を返す。
+ * develop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`の
+ * コメント参照）ので、そのままでは同じ案件がIssueとPRで二重に並ぶ。逆に、develop→mainの
+ * リリースPRは対応Issueを持たないため、除外しなければどの確認待ちにも現れない。これが
+ * この一覧にPRを混ぜる主な理由。
+ *
+ * @param checkUserIssues 「ユーザーの確認待ち」ビューに並んでいるIssue（リポジトリ名と番号だけ見る）
+ */
+export function pullRequestsAwaitingUserMerge(
+  pullRequests: PullRequestSummary[],
+  checkUserIssues: readonly { repositoryFullName: string; number: number }[],
+): PullRequestSummary[] {
+  const listedIssues = new Set(
+    checkUserIssues.map((issue) => `${issue.repositoryFullName}#${issue.number}`),
+  );
+  return sortOpenPullRequests(
+    pullRequests.filter((pullRequest) => {
+      if (!requiresUserMerge(pullRequest)) return false;
+      // 本文の`#番号`参照から拾った2件目以降（`linkedIssueNumbers`）は単なる言及のことがあり、
+      // それで重複と見なすと確認待ちからPRが消えてしまうため、対応Issueの1件だけで判定する。
+      if (pullRequest.linkedIssueNumber === null) return true;
+      return !listedIssues.has(
+        `${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`,
+      );
+    }),
+  );
 }
 
 /**

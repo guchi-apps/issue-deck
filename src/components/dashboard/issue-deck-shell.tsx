@@ -15,6 +15,7 @@ import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
+import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import {
   MobileBottomNav,
@@ -67,10 +68,11 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
+import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import {
   computePullRequestNavCounts,
   filterPullRequestsByView,
-  scopeForPullRequestView,
+  pullRequestsAwaitingUserMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -360,6 +362,17 @@ export function IssueDeckShell({
     () => computeOverviewStats(topbarFilteredIssues, topbarFilteredIssuesIgnoringState),
     [topbarFilteredIssues, topbarFilteredIssuesIgnoringState],
   );
+  // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
+  // どのビューを表示していても求める。
+  const checkUserIssues = useMemo(
+    () => filterIssuesByView(topbarFilteredIssues, "check-user", currentUserLogin, issues),
+    [topbarFilteredIssues, issues, currentUserLogin],
+  );
+  // 「ユーザーの作業待ち」の内訳（#1613）。起点Issueを引くための母集団は絞り込み前の全Issue。
+  const manualStepAttention = useMemo(
+    () => computeManualStepAttention(topbarFilteredIssues, issues),
+    [topbarFilteredIssues, issues],
+  );
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -397,9 +410,6 @@ export function IssueDeckShell({
   // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
   // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
   // 取得する（マウント時と明示的な更新操作、および「完了したPR」ビューの自動更新のときだけ）。
-  // 母集団の広さはビューが決める（「全てのPR」だけクローズ済みも取りに行く。#1312）。ただし
-  // ペインを開いていない間は`open`を要求する。既定のprviewが`all`のため、そのまま渡すと
-  // 件数に使わないクローズ済みまで毎回取りに行ってしまう。
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
   // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
@@ -408,13 +418,14 @@ export function IssueDeckShell({
   // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
   // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
   // しているのは、取得1回のコストが「リポジトリ数 + draft以外のopen PR数」だから。
+  // 「完了したPR」は左メニューから外した（#1613）が、`prview=completed`のURLは生きており
+  // 自動更新もそのまま。既定の「すべてのPR」へ広げるとペインを開いている間ずっと10秒間隔で
+  // 叩き続けることになり、GitHub APIのレート制限に触れるため広げていない。
   const autoRefreshPullRequests = isPullRequestPaneActive && filters.prview === "completed";
+  // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
+  // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
   const openPullRequests = usePullRequests(
-    isFlowPaneActive
-      ? "all"
-      : isPullRequestPaneActive
-        ? scopeForPullRequestView(filters.prview)
-        : "open",
+    isFlowPaneActive ? "all" : "open",
     autoRefreshPullRequests,
   );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
@@ -465,6 +476,13 @@ export function IssueDeckShell({
   const pullRequestNavCounts = useMemo(
     () => computePullRequestNavCounts(visiblePullRequests, openPullRequests.fetchedAt !== null),
     [visiblePullRequests, openPullRequests.fetchedAt],
+  );
+
+  // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものは
+  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。
+  const mergePendingPullRequests = useMemo(
+    () => pullRequestsAwaitingUserMerge(visiblePullRequests, checkUserIssues),
+    [visiblePullRequests, checkUserIssues],
   );
 
   // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
@@ -905,6 +923,8 @@ export function IssueDeckShell({
                 onSelectPullRequestView={selectPullRequestView}
                 onSelectFlow={selectFlowPane}
                 navCounts={navCounts}
+                checkUserPullRequestCount={mergePendingPullRequests.length}
+                manualStepAttention={manualStepAttention}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
@@ -992,6 +1012,15 @@ export function IssueDeckShell({
                 scrollKey={issueListScrollKey}
                 groupByRepo={groupByRepo}
                 view={filters.view}
+                // ユーザーがマージするしかないPRは、確認待ちの一覧の先頭に出す（#1613）
+                pinnedSection={
+                  filters.view === "check-user" ? (
+                    <MergePendingPullRequests
+                      pullRequests={mergePendingPullRequests}
+                      onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
+                    />
+                  ) : undefined
+                }
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: issueListWidth.width, maxWidth: "50vw" }}
               />
