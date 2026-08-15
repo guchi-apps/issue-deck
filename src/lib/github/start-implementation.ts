@@ -80,7 +80,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "artifactRequired",
     label: "アーティファクトで見た目を出す",
     description:
-      "コードを書き始める前に見た目を自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
+      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
     githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
 ];
