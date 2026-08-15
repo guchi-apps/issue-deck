@@ -8,6 +8,8 @@ import type { RepositoryBranchStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 const REPO = "guchi-apps/issue-deck";
+/** サマリー行に出るリポジトリ名（`owner/`は落とす） */
+const REPO_SHORT = "issue-deck";
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const number = overrides.number ?? 1;
@@ -38,13 +40,29 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
   };
 }
 
+/** develop→mainのリリースPR */
+function makeReleasePullRequest(overrides: Partial<PullRequestSummary>): PullRequestSummary {
+  return makePullRequest({
+    baseRef: "main",
+    headRef: "develop",
+    kind: "release",
+    linkedIssueNumber: null,
+    ...overrides,
+  });
+}
+
 function renderFlow(input: {
   pullRequests?: PullRequestSummary[];
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
+  failedRepositories?: string[];
+  hasClaudeWorkflow?: boolean;
+  onRefresh?: () => void;
 }) {
   const flow = buildBranchFlow({
-    repositories: [{ fullName: REPO, private: false }],
+    repositories: [
+      { fullName: REPO, private: false, hasClaudeWorkflow: input.hasClaudeWorkflow ?? false },
+    ],
     pullRequests: input.pullRequests ?? [],
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
@@ -56,285 +74,551 @@ function renderFlow(input: {
       fetchedAt="2026-08-15T10:30:00Z"
       isLoading={false}
       error={null}
-      failedRepositories={[]}
-      onRefresh={vi.fn()}
+      failedRepositories={input.failedRepositories ?? []}
+      onRefresh={input.onRefresh ?? vi.fn()}
     />,
   );
+}
+
+/** 既定では畳まれているため、中身を見るテストは先に開く */
+function openRepository() {
+  fireEvent.click(screen.getByText(REPO_SHORT));
+}
+
+function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): RepositoryBranchStatus {
+  return {
+    repositoryFullName: REPO,
+    checkedBranches: ["main", "develop"],
+    existingBranches: ["main", "develop"],
+    developVsMain: null,
+    ...overrides,
+  };
 }
 
 describe("BranchFlowView", () => {
   afterEach(() => cleanup());
 
-  it("Issue・ブランチ・PRを1本のレーンとして並べる", () => {
-    renderFlow({
-      pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454", linkedIssueNumber: 1454 })],
-      issues: [
-        {
-          number: 1454,
-          title: "複数リポジトリ横断質問",
-          repositoryFullName: REPO,
-          state: "open",
-          projectStatus: "Implementation",
-        },
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["main", "develop", "issue-1454"],
-          existingBranches: ["main", "develop", "issue-1454"],
-          developVsMain: { aheadBy: 12, behindBy: 0 },
-        },
-      ],
+  describe("畳む・開く", () => {
+    it("既定ではリポジトリを1行に畳み、中身は出さない", () => {
+      renderFlow({
+        pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454" })],
+        branchStatuses: [
+          branchStatus({
+            checkedBranches: ["issue-1454"],
+            existingBranches: ["issue-1454"],
+          }),
+        ],
+      });
+
+      expect(screen.getByText(REPO_SHORT)).toBeTruthy();
+      expect(screen.getByText("進行中1")).toBeTruthy();
+      expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
-    expect(screen.getByText("issue-1454")).toBeTruthy();
-    expect(screen.getByText("#1461 PRのタイトル")).toBeTruthy();
-    expect(screen.getByText(/Issue #1454/)).toBeTruthy();
-    expect(screen.getByText("実装中")).toBeTruthy();
-    expect(screen.getByText("未リリース 12コミット")).toBeTruthy();
-  });
+    it("クリックで開き、もう一度クリックで閉じる", () => {
+      renderFlow({
+        pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454" })],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
 
-  it("PRが無いブランチは「PR未作成」として出す", () => {
-    renderFlow({
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["develop", "issue-1455"],
-          existingBranches: ["develop", "issue-1455"],
-          developVsMain: null,
-        },
-      ],
+      openRepository();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      openRepository();
+      expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
-    expect(screen.getByText("PR未作成")).toBeTruthy();
-    expect(screen.getByText("issue-1455")).toBeTruthy();
-  });
+    it("CIが失敗しているリポジトリは最初から開いておく", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({ number: 1461, headRef: "issue-1454", ciState: "failure" }),
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
 
-  it("本番へ出た作業は既定で畳み、トグルで開ける", () => {
-    renderFlow({
-      pullRequests: [
-        makePullRequest({
-          number: 1452,
-          title: "v3.17.0をmainへリリースする",
-          baseRef: "main",
-          headRef: "develop",
-          kind: "release",
-          linkedIssueNumber: null,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-10T00:00:00Z",
-        }),
-        makePullRequest({
-          number: 1460,
-          headRef: "issue-1456",
-          linkedIssueNumber: 1456,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-01T00:00:00Z",
-        }),
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["develop"],
-          existingBranches: ["develop"],
-          developVsMain: { aheadBy: 1, behindBy: 0 },
-        },
-      ],
+      // サマリー行のピルと、開いた先のPR行のCI状態の両方に出る
+      expect(screen.getAllByText("CI失敗").length).toBeGreaterThan(0);
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
     });
 
-    expect(screen.queryByText("issue-1456")).toBeNull();
-    expect(screen.getByText("完了した作業1件は隠しています。")).toBeTruthy();
+    it("ユーザーのマージを待っているリポジトリも最初から開く", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({
+            number: 1461,
+            headRef: "issue-1454",
+            linkedIssueCheckUser: true,
+            linkedIssueCheckReason: "merge",
+          }),
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
 
-    fireEvent.click(screen.getByText("完了も表示"));
-    expect(screen.getByText("issue-1456")).toBeTruthy();
-    expect(screen.getByText("developへマージ済み")).toBeTruthy();
-  });
-
-  it("developへ入っただけで本番未反映の作業は、既定で見えている", () => {
-    renderFlow({
-      pullRequests: [
-        makePullRequest({
-          number: 1452,
-          title: "v3.17.0をmainへリリースする",
-          baseRef: "main",
-          headRef: "develop",
-          kind: "release",
-          linkedIssueNumber: null,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-01T00:00:00Z",
-        }),
-        makePullRequest({
-          number: 1460,
-          headRef: "issue-1456",
-          linkedIssueNumber: 1456,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-10T00:00:00Z",
-        }),
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["develop"],
-          existingBranches: ["develop"],
-          developVsMain: { aheadBy: 3, behindBy: 0 },
-        },
-      ],
+      expect(screen.getByText("ユーザーのマージが必要")).toBeTruthy();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
     });
 
-    // トグルを押さずに見える
-    expect(screen.getByText("issue-1456")).toBeTruthy();
-    expect(screen.getByText("main未反映")).toBeTruthy();
-  });
-
-  it("ブランチもPRも無い実装中のIssueを別枠で出す", () => {
-    renderFlow({
-      issues: [
-        {
-          number: 1450,
-          title: "何も上がっていないIssue",
-          repositoryFullName: REPO,
-          state: "open",
-          projectStatus: "Implementation",
-        },
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["main", "develop"],
-          existingBranches: ["main", "develop"],
-          developVsMain: null,
-        },
-      ],
+    it("動きの無いリポジトリも1行で並べる", () => {
+      renderFlow({ branchStatuses: [branchStatus()] });
+      expect(screen.getByText(REPO_SHORT)).toBeTruthy();
+      expect(screen.getByText("動きなし")).toBeTruthy();
     });
 
-    expect(screen.getByText("ブランチもPRも見つからないIssue")).toBeTruthy();
-    expect(screen.getByText(/Issue #1450/)).toBeTruthy();
-  });
-
-  it("本番へ出た作業は、どのバージョンで反映されたかを出す", () => {
-    renderFlow({
-      pullRequests: [
-        makePullRequest({
-          number: 1452,
-          title: "v3.17.0をmainへリリースする",
-          baseRef: "main",
-          headRef: "develop",
-          kind: "release",
-          linkedIssueNumber: null,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-10T00:00:00Z",
-        }),
-        makePullRequest({
-          number: 1400,
-          headRef: "issue-1400",
-          linkedIssueNumber: 1400,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-01T00:00:00Z",
-        }),
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["main", "develop"],
-          existingBranches: ["main", "develop"],
-          developVsMain: { aheadBy: 0, behindBy: 0 },
-        },
-      ],
+    it("ブランチ状況を取得できなかったことはサマリー行に出す", () => {
+      renderFlow({ failedRepositories: [REPO] });
+      expect(screen.getByText("ブランチ状況を取得できず")).toBeTruthy();
     });
 
-    // mainの現在の版はヘッダー側に出る
-    expect(screen.getByText("v3.17.0")).toBeTruthy();
+    it("「すべて開く」で全リポジトリを開く", () => {
+      renderFlow({
+        pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454" })],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
 
-    fireEvent.click(screen.getByText("完了も表示"));
-    expect(screen.getByText("v3.17.0で本番反映")).toBeTruthy();
+      expect(screen.queryByText("issue-1454")).toBeNull();
+      fireEvent.click(screen.getByText("すべて開く"));
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      fireEvent.click(screen.getByText("すべて閉じる"));
+      expect(screen.queryByText("issue-1454")).toBeNull();
+    });
   });
 
-  it("1本のPRが複数のIssueを扱う場合、2件目以降を関連Issueとして並べる", () => {
-    renderFlow({
-      pullRequests: [
-        makePullRequest({
-          number: 1461,
-          headRef: "issue-1454",
-          linkedIssueNumber: 1454,
-          linkedIssueNumbers: [1454, 1460],
-        }),
-      ],
-      issues: [
-        {
-          number: 1454,
-          title: "主となるIssue",
-          repositoryFullName: REPO,
-          state: "open",
-          projectStatus: "Implementation",
-        },
-        {
-          number: 1460,
-          title: "一緒に直したIssue",
-          repositoryFullName: REPO,
-          state: "open",
-          projectStatus: "Implementation",
-        },
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["issue-1454", "issue-1460"],
-          existingBranches: ["issue-1454"],
-          developVsMain: null,
-        },
-      ],
+  describe("流れ図", () => {
+    it("Issue・ブランチ・PRを1本のレーンとして並べる", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({ number: 1461, headRef: "issue-1454", linkedIssueNumber: 1454 }),
+        ],
+        issues: [
+          {
+            number: 1454,
+            title: "複数リポジトリ横断質問",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Implementation",
+          },
+        ],
+        branchStatuses: [
+          branchStatus({
+            checkedBranches: ["issue-1454"],
+            existingBranches: ["issue-1454"],
+            developVsMain: { aheadBy: 12, behindBy: 0 },
+          }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.getByText("#1461 PRのタイトル")).toBeTruthy();
+      expect(screen.getByText(/Issue #1454/)).toBeTruthy();
+      expect(screen.getByText("実装中")).toBeTruthy();
+      expect(screen.getByText("未リリース 12コミット")).toBeTruthy();
     });
 
-    expect(screen.getByText(/Issue #1454/)).toBeTruthy();
-    expect(screen.getByText("関連")).toBeTruthy();
-    expect(screen.getByText(/Issue #1460/)).toBeTruthy();
-    // 関連として出したIssueを「ブランチもPRも見つからない」側へ重複させない
-    expect(screen.queryByText("ブランチもPRも見つからないIssue")).toBeNull();
-  });
+    it("mainにしか無いコミット数は出さない（リリースのマージコミットで必ず増えるだけのため）", () => {
+      renderFlow({
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 26 } })],
+      });
 
-  it("同じIssueでもブランチが違えばレーンを分けて出す", () => {
-    renderFlow({
-      pullRequests: [
-        makePullRequest({ number: 10, headRef: "issue-1455", linkedIssueNumber: 1455 }),
-        makePullRequest({
-          number: 11,
-          headRef: "fix/1455-followup",
-          kind: "other",
-          linkedIssueNumber: 1455,
-        }),
-      ],
-      issues: [
-        {
-          number: 1455,
-          title: "可視化する",
-          repositoryFullName: REPO,
-          state: "open",
-          projectStatus: "Implementation",
-        },
-      ],
-      branchStatuses: [
-        {
-          repositoryFullName: REPO,
-          checkedBranches: ["issue-1455"],
-          existingBranches: ["issue-1455"],
-          developVsMain: null,
-        },
-      ],
+      openRepository();
+      expect(screen.queryByText(/未取り込み/)).toBeNull();
     });
 
-    expect(screen.getByText("issue-1455")).toBeTruthy();
-    expect(screen.getByText("fix/1455-followup")).toBeTruthy();
-    // 同じIssueが両方のレーンに出る
-    expect(screen.getAllByText(/Issue #1455/)).toHaveLength(2);
+    it("PRが無いブランチは「PR未作成」として出す", () => {
+      renderFlow({
+        branchStatuses: [
+          branchStatus({
+            checkedBranches: ["develop", "issue-1455"],
+            existingBranches: ["develop", "issue-1455"],
+          }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("PR未作成")).toBeTruthy();
+      expect(screen.getByText("issue-1455")).toBeTruthy();
+    });
+
+    it("マージ済みのレーンには状態のピルを出さず、バージョンの束で表す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-10T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 1460,
+            headRef: "issue-1456",
+            linkedIssueNumber: 1456,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0 } })],
+      });
+
+      openRepository();
+      // v3.17.0の束の中に並ぶ。トグルを押さなくても見える
+      expect(screen.getByText("issue-1456")).toBeTruthy();
+      // 畳んだ行の現在の版と、束の見出しの両方に出る
+      expect(screen.getAllByText("v3.17.0")).toHaveLength(2);
+      expect(screen.getByText("このバージョンに乗った変更 1件")).toBeTruthy();
+      // 旧表示のピルはもう出さない
+      expect(screen.queryByText("developへマージ済み")).toBeNull();
+      expect(screen.queryByText("v3.17.0で本番反映")).toBeNull();
+    });
+
+    it("本番未反映の束は「リリース中」または「本番未反映」として先頭に出す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 1460,
+            headRef: "issue-1456",
+            linkedIssueNumber: 1456,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-10T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      openRepository();
+      expect(screen.getByText("本番未反映")).toBeTruthy();
+      expect(screen.getByText("issue-1456")).toBeTruthy();
+      expect(screen.getByText("このバージョンに乗る変更 1件")).toBeTruthy();
+    });
+
+    it("既定はひとつ前の版まで出し、それ以前はボタンで開く", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 900,
+            title: "v3.15.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+          makeReleasePullRequest({
+            number: 910,
+            title: "v3.16.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-05T00:00:00Z",
+          }),
+          makeReleasePullRequest({
+            number: 920,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-10T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 800,
+            headRef: "issue-800",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-07-31T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 905,
+            headRef: "issue-905",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-03T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 915,
+            headRef: "issue-915",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-08T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+
+      openRepository();
+      expect(screen.getByText("issue-915")).toBeTruthy();
+      expect(screen.getByText("issue-905")).toBeTruthy();
+      expect(screen.queryByText("issue-800")).toBeNull();
+
+      fireEvent.click(screen.getByText("さらに前のバージョンを表示（1件）"));
+      expect(screen.getByText("issue-800")).toBeTruthy();
+    });
+
+    it("PRと同じ題のIssueはタイトルを繰り返さない", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({
+            number: 1461,
+            title: "リリースタグの重複を検査する",
+            headRef: "issue-1454",
+            linkedIssueNumber: 1454,
+          }),
+        ],
+        issues: [
+          {
+            number: 1454,
+            title: "リリースタグの重複を検査する",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Implementation",
+          },
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("Issue #1454")).toBeTruthy();
+      expect(screen.getByText("（PRと同じ題）")).toBeTruthy();
+    });
+
+    it("タイトルを出せない関連Issueは番号だけを1行に並べる", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({
+            number: 1461,
+            headRef: "issue-1454",
+            linkedIssueNumber: 1454,
+            linkedIssueNumbers: [1454, 55, 1459],
+          }),
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("関連")).toBeTruthy();
+      expect(screen.getByText("#55")).toBeTruthy();
+      expect(screen.getByText("#1459")).toBeTruthy();
+      expect(screen.queryByText("一覧に無いIssue")).toBeNull();
+    });
+
+    it("ブランチもPRも無い実装中のIssueを別枠で出す", () => {
+      renderFlow({
+        issues: [
+          {
+            number: 1450,
+            title: "何も上がっていないIssue",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Implementation",
+          },
+        ],
+        branchStatuses: [branchStatus()],
+      });
+
+      openRepository();
+      expect(screen.getByText("ブランチもPRも見つからないIssue")).toBeTruthy();
+      expect(screen.getByText(/Issue #1450/)).toBeTruthy();
+    });
+
+    it("同じIssueでもブランチが違えばレーンを分けて出す", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({ number: 10, headRef: "issue-1455", linkedIssueNumber: 1455 }),
+          makePullRequest({
+            number: 11,
+            headRef: "fix/1455-followup",
+            kind: "other",
+            linkedIssueNumber: 1455,
+          }),
+        ],
+        issues: [
+          {
+            number: 1455,
+            title: "可視化する",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Implementation",
+          },
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1455"], existingBranches: ["issue-1455"] }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("issue-1455")).toBeTruthy();
+      expect(screen.getByText("fix/1455-followup")).toBeTruthy();
+      expect(screen.getAllByText(/Issue #1455/)).toHaveLength(2);
+    });
+
+    it("表示できるリポジトリが無いときは空状態を出す", () => {
+      const flow = buildBranchFlow({
+        repositories: [],
+        pullRequests: [],
+        issues: [],
+        branchStatuses: [],
+      });
+      render(
+        <BranchFlowView
+          flow={flow}
+          fetchedAt={null}
+          isLoading={false}
+          error={null}
+          failedRepositories={[]}
+          onRefresh={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("表示できるリポジトリがありません。")).toBeTruthy();
+    });
   });
 
-  it("動きのあるリポジトリが無いときは空状態を出す", () => {
-    renderFlow({});
-    expect(screen.getByText("進行中の作業があるリポジトリはありません。")).toBeTruthy();
+  describe("手作業Issue", () => {
+    const manualStepIssue: BranchFlowIssueSource = {
+      number: 184,
+      title: "[手作業] VPS: リダイレクトを外す",
+      repositoryFullName: REPO,
+      state: "open",
+      projectStatus: "Ready",
+      labels: ["71.manual-step"],
+      body: "## 関連\n\n- 起点Issue #1454",
+    };
+
+    it("起点Issueのレーンにぶら下げる", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({ number: 1461, headRef: "issue-1454", linkedIssueNumber: 1454 }),
+        ],
+        issues: [
+          {
+            number: 1454,
+            title: "リダイレクトの整理",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Implementation",
+          },
+          manualStepIssue,
+        ],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+      expect(screen.getByText("未完了")).toBeTruthy();
+    });
+
+    it("完了した手作業は薄く出す", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({ number: 1461, headRef: "issue-1454", linkedIssueNumber: 1454 }),
+        ],
+        issues: [{ ...manualStepIssue, state: "closed" }],
+        branchStatuses: [
+          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("完了")).toBeTruthy();
+    });
+  });
+
+  describe("リリース起動ボタン", () => {
+    const unreleased = branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } });
+
+    it("未リリースの変更があり、リリース用workflowを持つときだけ出す", () => {
+      renderFlow({ hasClaudeWorkflow: true, branchStatuses: [unreleased] });
+      openRepository();
+      expect(screen.getByText("リリースする")).toBeTruthy();
+    });
+
+    it("リリース用workflowが無ければ出さない", () => {
+      renderFlow({ hasClaudeWorkflow: false, branchStatuses: [unreleased] });
+      openRepository();
+      expect(screen.queryByText("リリースする")).toBeNull();
+    });
+
+    it("未リリースの変更が無ければ出さない", () => {
+      renderFlow({
+        hasClaudeWorkflow: true,
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0 } })],
+      });
+      openRepository();
+      expect(screen.queryByText("リリースする")).toBeNull();
+    });
+
+    it("リリースPRが動いている間は出さない", () => {
+      renderFlow({
+        hasClaudeWorkflow: true,
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 183,
+            title: "v3.8.6をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+      openRepository();
+      expect(screen.queryByText("リリースする")).toBeNull();
+      expect(screen.getByText("リリース中")).toBeTruthy();
+    });
+
+    it("押すと今回反映する内容を確認ダイアログに出す", () => {
+      renderFlow({
+        hasClaudeWorkflow: true,
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 1460,
+            headRef: "issue-1456",
+            linkedIssueNumber: 1456,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-10T00:00:00Z",
+          }),
+        ],
+        issues: [
+          {
+            number: 1456,
+            title: "本番へ出したい変更",
+            repositoryFullName: REPO,
+            state: "closed",
+            projectStatus: "Develop",
+          },
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      openRepository();
+      fireEvent.click(screen.getByText("リリースする"));
+
+      expect(screen.getByText("リリースworkflowを起動しますか？")).toBeTruthy();
+      expect(screen.getByText("今回反映する内容")).toBeTruthy();
+      expect(screen.getByText("#1456 本番へ出したい変更")).toBeTruthy();
+    });
   });
 });
