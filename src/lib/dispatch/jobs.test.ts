@@ -54,6 +54,7 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
 
 const {
   claimDispatchJobs,
+  dismissDispatchJob,
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
@@ -640,5 +641,73 @@ describe("expireStaleDispatchJobs の制御ジョブ", () => {
         data: expect.objectContaining({ status: "TIMEOUT", activeKey: null }),
       }),
     );
+  });
+});
+
+/**
+ * #1479。終了したジョブは24時間表示され続けるため、対処が済んだ失敗を畳めないと新しい失敗が
+ * 古いものに埋もれる。**行は消さず`dismissedAt`を入れるだけ**で、失敗理由は後から追える。
+ */
+describe("dismissDispatchJob", () => {
+  function failedJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "FAILED",
+      message: "tmuxの起動に失敗しました。",
+      instruction: null,
+      tmuxSessionName: null,
+      createdAt: NOW,
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: NOW,
+      dismissedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("終了したジョブにはdismissedAtを入れる", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(failedJob())
+      .mockResolvedValueOnce(failedJob({ dismissedAt: NOW }));
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await dismissDispatchJob({ jobId: "job-1", now: NOW });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", dismissedAt: null },
+      data: { dismissedAt: NOW },
+    });
+  });
+
+  it("既に消してあれば書き込まずに成功を返す（連打で失敗させない）", async () => {
+    dispatchJobFindUnique.mockResolvedValue(failedJob({ dismissedAt: NOW }));
+
+    const result = await dismissDispatchJob({ jobId: "job-1", now: NOW });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  // 走っているものを表示だけ消せると、動いている実体が画面のどこにも出ないまま残る
+  it.each(["QUEUED", "CLAIMED", "RUNNING"])("未完了（%s）は消せない", async (status) => {
+    dispatchJobFindUnique.mockResolvedValue(failedJob({ status, finishedAt: null }));
+
+    const result = await dismissDispatchJob({ jobId: "job-1", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_dismissable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("存在しないIDはnot_found", async () => {
+    dispatchJobFindUnique.mockResolvedValue(null);
+
+    const result = await dismissDispatchJob({ jobId: "missing", now: NOW });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
   });
 });

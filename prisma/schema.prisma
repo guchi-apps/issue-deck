@@ -431,6 +431,15 @@ model DispatchJob {
   // **組み立てるのは人だけで、実行体が状況から本文を決めて自動送信する経路は作らない**
   // （docs/multi-agent/gates.md）。画面のプリセットも、押すのは人という点は変わらない。
   instruction        String?           @db.Text
+  // 画面から失敗の表示を消した時刻（#1479）。入っている行は`GET /api/dispatch`が返さない。
+  //
+  // **行そのものは消さない。** 失敗理由（`message`）は後から原因を追うときの唯一の手掛かりで、
+  // 表示を片付けたいだけの操作で履歴まで失わせない。終了したジョブは元々24時間で画面から
+  // 落ちる（`FINISHED_JOB_RETENTION_MS`）ので、これはその24時間を待たずに畳むための印。
+  //
+  // **未完了のジョブには入れない**（`dismissDispatchJob`が弾く）。走っているものを表示だけ
+  // 消せると、動いている実体が画面のどこにも出ないまま残る。止めたいなら取り消しを使う。
+  dismissedAt        DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

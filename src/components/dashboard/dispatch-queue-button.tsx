@@ -33,6 +33,10 @@ import { cn } from "@/lib/utils";
  *
  * 取り消せるのは`QUEUED`と`CLAIMED`まで。`RUNNING`はworktreeの作成や依存インストールの最中で、
  * 途中で止めると中途半端なworktreeとブランチが残る（#1179の取り決めをそのまま守る）。
+ *
+ * **「直近の失敗」の×は取り消しではなく表示を消す操作**（#1479）。終了したジョブは24時間
+ * 出続けるため、対処が済んだ失敗を畳めないと、新しい失敗が古いものに埋もれる。消しても
+ * DBの行と失敗理由は残る（`dismissDispatchJob`）。
  */
 export function DispatchQueueButton({ dispatch: injected }: { dispatch?: DispatchStateHandle }) {
   const own = useDispatchState(injected === undefined);
@@ -51,6 +55,13 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
     // 1件ずつ順に投げる。**まとめて投げると、拒否された理由がどれのものか分からなくなる**
     for (const job of cancelable) {
       await dispatch.cancel(job.id);
+    }
+  }
+
+  async function dismissAllFailed() {
+    // 取り消しと同じく1件ずつ順に投げる（#1479）
+    for (const job of summary.failed) {
+      await dispatch.dismiss(job.id);
     }
   }
 
@@ -116,7 +127,7 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
 
         <QueueSection title="実行中" jobs={summary.running} onCancel={dispatch.cancel} />
         <QueueSection title="順番待ち" jobs={summary.queued} onCancel={dispatch.cancel} showOrder />
-        <QueueSection title="直近の失敗" jobs={summary.failed} onCancel={null} />
+        <QueueSection title="直近の失敗" jobs={summary.failed} onDismiss={dispatch.dismiss} />
 
         {cancelable.length > 0 && (
           <Button
@@ -130,6 +141,22 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
             まとめて取り消す（{cancelable.length}件）
           </Button>
         )}
+        {/*
+          失敗が1件だけなら行の×で足りるので出さない。溜まったときにだけ、1件ずつ押させない
+          ための導線として出す
+        */}
+        {summary.failed.length > 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 w-full text-muted-foreground"
+            disabled={dispatch.isSubmitting}
+            onClick={() => void dismissAllFailed()}
+          >
+            {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <X />}
+            失敗の表示をすべて消す（{summary.failed.length}件）
+          </Button>
+        )}
         {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}
       </PopoverContent>
     </Popover>
@@ -139,16 +166,23 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
 function QueueSection({
   title,
   jobs,
-  onCancel,
+  onCancel = null,
+  onDismiss = null,
   showOrder = false,
 }: {
   title: string;
   jobs: DispatchJobView[];
   /**
-   * `null`なら取り消しボタンを出さない（終わったジョブ）。渡した場合も、**取り消せる状態の
+   * 省略すると取り消しボタンを出さない（終わったジョブ）。渡した場合も、**取り消せる状態の
    * 行にだけ**ボタンを出す（`RUNNING`はworktreeの作成途中で、止めると中途半端な状態が残る）。
    */
-  onCancel: ((jobId: string) => Promise<boolean>) | null;
+  onCancel?: ((jobId: string) => Promise<boolean>) | null;
+  /**
+   * 表示を消す操作（#1479）。**`onCancel`とpropsを分けている。** 同じ×印でも、片方は走る前の
+   * ジョブを止める操作、もう片方は終わったジョブの表示を畳むだけの操作で、取り違えると
+   * 実行中のものを消せてしまう。渡すのは「直近の失敗」だけ。
+   */
+  onDismiss?: ((jobId: string) => Promise<boolean>) | null;
   showOrder?: boolean;
 }) {
   if (jobs.length === 0) return null;
@@ -191,6 +225,17 @@ function QueueSection({
                   aria-label={`#${job.issueNumber}のジョブを取り消す`}
                   className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => void onCancel(job.id)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+              {onDismiss && (
+                <button
+                  type="button"
+                  aria-label={`#${job.issueNumber}の失敗の表示を消す`}
+                  title="表示を消す（失敗の記録は残ります）"
+                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => void onDismiss(job.id)}
                 >
                   <X className="size-3.5" />
                 </button>
