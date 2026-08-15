@@ -1522,8 +1522,13 @@ jobs:
 
       - name: Claude Code（質問応答）
         id: claude_question
-        # コードやIssueの状態を一切変更しない読み取り専用モード。ラベル変更・ブランチ作成・
-        # コミット・PR作成は許可しない（allowedToolsにEdit/Write/Bash(git ...)を含めない）。
+        # コードを変更しない読み取り専用モード。ブランチ作成・コミット・PR作成・既存Issueの
+        # ラベル変更や状態変更は許可しない（allowedToolsにEdit/Write/Bash(git ...)/
+        # Bash(gh issue edit ...)を含めない）。
+        # **例外は新規Issueの起票だけ**(#1528)。質問に答える過程で見つけた別件を、回答コメントに
+        # 書くだけで終わらせるとどのカンバンにも残らず追跡できなくなるため、計画提示ステップ
+        # (#735)と同じルール（`70.confirm`付き・起点を明記・目安3件まで）で起票を許可する。
+        # ルール本文は.github/prompts/question.md側に置く。
         if: steps.state.outputs.mode == 'ask'
         uses: anthropics/claude-code-action@v1
         env:
@@ -1535,7 +1540,7 @@ jobs:
           allowed_bots: "issue-deck[bot]"
           show_full_output: true
           claude_args: |
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"
             ${{ steps.claude_model.outputs.assist_model_flag }}
           prompt: ${{ env.PROMPT_QUESTION }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（質問応答））

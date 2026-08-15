@@ -155,6 +155,16 @@ forgetで行い、投稿に失敗してもClaudeアプリへの遷移自体は�
   失敗が実際に発生した（Issue #70で確認）。読み取り専用の調査コマンドを許可リストに加えて解消した。
   `gh issue create`は、元Issueのスコープ外の関連事項を独立Issueとして提案・起票できるようにするため
   追加した（#735。詳細は上記「実装範囲が広いIssueをサブIssueに分割する」節末尾を参照）。
+- **質問応答ステップ**: `--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"`。
+  コード変更ツール（Edit/Write）と`gh issue edit`・`gh issue close`は許可しない。質問された
+  Issue自体の進行を動かさないため、**既存Issueに対しては回答コメントを投稿するだけ**にする。
+  `gh issue create`だけは例外で、質問に答える過程で見つけた別件を起票できるようにするために
+  許可した（#1528）。回答コメントに書くだけで終わらせるとどのカンバンにも残らず追跡できなくなる
+  ためで、ルール（`70.confirm`付き・「起点: #<質問Issue番号>」を明記・目安3件まで・起票しても
+  実装はしない）は計画提示ステップ（#735）に揃えてある。本文は
+  [.github/prompts/question.md](../../.github/prompts/question.md)。ローカルの横断質問セッション
+  （[subpc-dispatch.md](subpc-dispatch.md)）も同じルールで、あちらは`--disallowedTools`側で
+  `Edit,Write,NotebookEdit`を封じている
 - **実装ステップ**: `--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。

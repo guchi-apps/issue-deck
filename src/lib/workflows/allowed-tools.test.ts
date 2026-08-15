@@ -29,6 +29,17 @@ function extractImplementAllowedTools(source: string): string {
   return matches[0] as string;
 }
 
+// 質問応答（mode=ask）用の許可リストだけを取り出す。同じファイルには計画提示・分割用の
+// 読み取り専用リストもあるため、`gh pr diff`（計画提示と質問応答だけが持つ）を含み
+// `gh issue edit`（計画提示だけが持つ）を含まないもの、という条件で一意に絞る。
+function extractQuestionAllowedTools(source: string): string {
+  const matches = (source.match(/--allowedTools "Bash\(gh issue view[^"]*"/g) ?? []).filter(
+    (entry) => entry.includes("Bash(gh pr diff:*)") && !entry.includes("Bash(gh issue edit:*)"),
+  );
+  expect(matches).toHaveLength(1);
+  return matches[0] as string;
+}
+
 describe("再利用可能ワークフローの許可ツール", () => {
   it("すべてのワークフローで完全に一致している", () => {
     const [dispatch, ...others] = WORKFLOWS.map((name) =>
@@ -111,6 +122,24 @@ describe("再利用可能ワークフローの許可ツール", () => {
     for (const list of readOnly.filter((entry) => entry.includes("Bash(gh api:*)"))) {
       expect(list).toContain("Bash(gh pr view:*)");
       expect(list).toContain("Bash(gh pr diff:*)");
+    }
+  });
+
+  it("質問応答でも新規Issueの起票を許可している", () => {
+    // 質問に答える過程で見つけた別件を、回答コメントに書くだけで終わらせるとどのカンバンにも
+    // 残らず追跡できなくなる（#1528）。計画提示ステップ（#735）と同じ扱いで起票だけ許可する。
+    const allowedTools = extractQuestionAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    expect(allowedTools).toContain("Bash(gh issue create:*)");
+  });
+
+  it("質問応答は既存Issueのラベル・状態を変更できない", () => {
+    // 起票を許可したのは「別件を残せるようにする」ためで、質問されたIssue自体の進行を
+    // 動かすためではない。`gh issue edit`（ラベル）・`gh issue close`は許可しない。
+    const allowedTools = extractQuestionAllowedTools(readWorkflow(WORKFLOWS[0]));
+
+    for (const tool of ["Bash(gh issue edit:*)", "Bash(gh issue close:*)", "Edit", "Write"]) {
+      expect(allowedTools).not.toContain(tool);
     }
   });
 
