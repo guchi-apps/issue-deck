@@ -58,7 +58,19 @@ function blob(name: string, text: string | null = CALLER) {
 }
 
 function ok(body: unknown) {
-  return { ok: true, status: 200, json: async () => body };
+  // ETagの条件付きGET（配布ワークフローのrun取得）が`headers.get`を読むため付ける。
+  // etagを返さなければプロセス内キャッシュには入らず、テスト間で持ち越さない
+  return { ok: true, status: 200, json: async () => body, headers: new Headers() };
+}
+
+/** 配布ワークフローの実行（`propagate-workflow-tag.yml`の最新run） */
+function run(status: string, conclusion: string | null = null) {
+  return {
+    status,
+    conclusion,
+    html_url: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+    created_at: "2026-08-15T10:00:00.000Z",
+  };
 }
 
 type GraphqlCall = { query: string; variables: Record<string, unknown> };
@@ -70,14 +82,28 @@ function graphqlCalls(): GraphqlCall[] {
     .map((call) => (call[2] as { body: GraphqlCall }).body);
 }
 
+type RouteHandlers = {
+  tags?: string[] | null;
+  entries?: Record<string, unknown[]>;
+  /** リポジトリごとのopenなPR（更新PRの検知に使う） */
+  pullRequests?: Record<string, { number: number; title: string; url: string }[]>;
+  /** 配布ワークフローの最新run。省略すると「1度も動いていない」 */
+  latestRun?: ReturnType<typeof run> | null;
+};
+
 /**
- * GraphQLの応答を組み立てる簡易ルータ。
+ * GitHubの応答を組み立てる簡易ルータ。
  *
- * 実装は「最新タグ」と「リポジトリごとのTree」の2種類のクエリしか投げないため、
- * クエリ文字列で見分ける。Treeの応答はエイリアス（`r0`・`r1`…）に対応付けて返す。
+ * 実装が投げるのは「最新タグ」「リポジトリごとのTreeとopen PR」のGraphQL 2種類と、
+ * 配布ワークフローの最新runを取るRESTだけ。クエリ文字列とURLで見分ける。
+ * Treeの応答はエイリアス（`r0`・`r1`…）に対応付けて返す。
  */
-function route(handlers: { tags?: string[] | null; entries?: Record<string, unknown[]> }) {
+function route(handlers: RouteHandlers) {
   return (url: string, _token: string, options?: { body?: GraphqlCall }) => {
+    if (String(url).includes("/actions/workflows/")) {
+      const runs = handlers.latestRun ? [handlers.latestRun] : [];
+      return Promise.resolve(ok({ workflow_runs: runs }));
+    }
     if (!String(url).endsWith("/graphql")) return Promise.resolve(ok({}));
 
     const body = options?.body;
@@ -95,7 +121,8 @@ function route(handlers: { tags?: string[] | null; entries?: Record<string, unkn
       const index = match[1];
       const fullName = `${variables[`owner${index}`]}/${variables[`name${index}`]}`;
       const entries = handlers.entries?.[fullName] ?? [blob("claude-issue-dispatch.yml")];
-      data[`r${index}`] = { object: { entries } };
+      const nodes = handlers.pullRequests?.[fullName] ?? [];
+      data[`r${index}`] = { object: { entries }, pullRequests: { nodes } };
     }
     return Promise.resolve(ok({ data }));
   };
@@ -190,7 +217,8 @@ describe("collectWorkflowTags", () => {
     expect(overview.repositories).toHaveLength(3);
     // 最新タグ用の1本と、3リポジトリぶんをまとめた1本だけ
     expect(graphqlCalls()).toHaveLength(2);
-    expect(githubFetch.mock.calls).toHaveLength(2);
+    // GraphQLの2本＋配布ワークフローの最新run（REST・ETagの条件付きGET）の1本
+    expect(githubFetch.mock.calls).toHaveLength(3);
   });
 
   it("タグ取得に失敗しても結果を返し、latest は null になる", async () => {
@@ -249,9 +277,11 @@ describe("collectWorkflowTags", () => {
 
     await collectWorkflowTags("user-1");
 
-    const treeCalls = githubFetch.mock.calls.filter(
-      (call) => !(call[2] as { body: GraphqlCall }).body.query.includes("refPrefix"),
-    );
+    const treeCalls = githubFetch.mock.calls.filter((call) => {
+      // 配布ワークフローの最新runはRESTで、bodyを持たない
+      const body = (call[2] as { body?: GraphqlCall } | undefined)?.body;
+      return body !== undefined && !body.query.includes("refPrefix");
+    });
     expect(treeCalls).toHaveLength(2);
     expect(treeCalls.map((call) => call[1])).toEqual(["token-42", "token-99"]);
   });
@@ -261,7 +291,7 @@ describe("collectWorkflowTags", () => {
 
     const overview = await collectWorkflowTags("user-1");
 
-    expect(overview).toEqual({ latest: null, repositories: [] });
+    expect(overview).toEqual({ latest: null, repositories: [], propagation: null });
     expect(githubFetch).not.toHaveBeenCalled();
   });
 });
@@ -289,9 +319,9 @@ describe("dispatchPropagation", () => {
   it("古いリポジトリを対象にワークフローを起動する", async () => {
     withDispatch({ ok: true, status: 204 });
 
-    const result = await dispatchPropagation("user-1");
+    const result = await dispatchPropagation("user-1", true);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       dispatched: true,
       tag: "workflows/v12",
       repositories: ["guchi-apps/car-care"],
@@ -303,6 +333,7 @@ describe("dispatchPropagation", () => {
     expect((post?.[2] as { body: { inputs: Record<string, string> } }).body.inputs).toEqual({
       tag: "workflows/v12",
       repositories: '["guchi-apps/car-care"]',
+      auto_merge: "true",
     });
   });
 
@@ -310,7 +341,7 @@ describe("dispatchPropagation", () => {
     // 何もしないrunが履歴に残ると紛らわしい
     githubFetch.mockImplementation(route({ tags: ["workflows/v11"] }));
 
-    const result = await dispatchPropagation("user-1");
+    const result = await dispatchPropagation("user-1", true);
 
     expect(result.dispatched).toBe(false);
     const posts = githubFetch.mock.calls.filter((call) => String(call[0]).includes("/dispatches"));
@@ -321,9 +352,9 @@ describe("dispatchPropagation", () => {
     // 全リポジトリを対象にしてしまうと、意図しない一斉配布になる
     githubFetch.mockImplementation(route({ tags: null }));
 
-    const result = await dispatchPropagation("user-1");
+    const result = await dispatchPropagation("user-1", true);
 
-    expect(result).toEqual({ dispatched: false, tag: null, repositories: [] });
+    expect(result).toMatchObject({ dispatched: false, tag: null, repositories: [] });
   });
 
   it("uses と prompts-ref が不一致のリポジトリも対象にする", async () => {
@@ -338,7 +369,7 @@ describe("dispatchPropagation", () => {
       { entries: { "guchi-apps/car-care": [blob("claude-issue-dispatch.yml", mismatched)] } },
     );
 
-    const result = await dispatchPropagation("user-1");
+    const result = await dispatchPropagation("user-1", true);
 
     // 最新タグと同じでも、prompts-ref がずれていれば配り直す必要がある
     expect(result.dispatched).toBe(true);
@@ -348,6 +379,59 @@ describe("dispatchPropagation", () => {
   it("起動に失敗したら例外を投げる", async () => {
     withDispatch({ ok: false, status: 403, text: async () => "forbidden" });
 
-    await expect(dispatchPropagation("user-1")).rejects.toThrow();
+    await expect(dispatchPropagation("user-1", true)).rejects.toThrow();
+  });
+
+  it("実行中なら起動しない（連続押下の防止）", async () => {
+    // 起動は数秒で返るのにPRが出来上がるまでは数分かかる。画面のボタンを無効にするだけでは
+    // リロード後・別のタブから押せてしまうため、サーバー側でも断る（#1602）
+    withDispatch({ ok: true, status: 204 }, { latestRun: run("in_progress") });
+
+    const result = await dispatchPropagation("user-1", true);
+
+    expect(result).toMatchObject({ dispatched: false, reason: "running" });
+    const posts = githubFetch.mock.calls.filter((call) => String(call[0]).includes("/dispatches"));
+    expect(posts).toHaveLength(0);
+  });
+
+  it("直近の実行が完了していれば起動する", async () => {
+    withDispatch({ ok: true, status: 204 }, { latestRun: run("completed", "success") });
+
+    const result = await dispatchPropagation("user-1", true);
+
+    expect(result.dispatched).toBe(true);
+  });
+
+  it("更新PRが既にopenのリポジトリは対象に含めない", async () => {
+    // 含めると同じリポジトリへ2本目のIssueとPRが作られる
+    withDispatch(
+      { ok: true, status: 204 },
+      {
+        pullRequests: {
+          "guchi-apps/car-care": [
+            {
+              number: 42,
+              title: "共有ワークフローの参照をworkflows/v12へ上げる",
+              url: "https://github.com/guchi-apps/car-care/pull/42",
+            },
+          ],
+        },
+      },
+    );
+
+    const result = await dispatchPropagation("user-1", true);
+
+    expect(result).toMatchObject({ dispatched: false, reason: "no_targets" });
+  });
+
+  it("自動マージを外すとその指定で起動する", async () => {
+    withDispatch({ ok: true, status: 204 });
+
+    await dispatchPropagation("user-1", false);
+
+    const post = githubFetch.mock.calls.find((call) => String(call[0]).includes("/dispatches"));
+    expect((post?.[2] as { body: { inputs: Record<string, string> } }).body.inputs.auto_merge).toBe(
+      "false",
+    );
   });
 });
