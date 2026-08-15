@@ -37,8 +37,8 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 | `guchi-apps/solitaire` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1055, guchi-apps/solitaire#23 | #1047の6周目。**`runtime-setup: minimal`を使った唯一の周**（`dependencies`・`devDependencies`のどちらも無く、`package-lock.json`も`pnpm-lock.yaml`も無い素のJS）。`node`/`node-db`にするとロックファイル不在で`npm ci`が落ちるが、`minimal`では`npm ci`・Playwrightインストール・DB準備の各ステップが`runtime-setup != 'minimal'`の条件で丸ごとスキップされる。`node-version: "20"`（`ci.yml`準拠）は`runtime-setup`と独立した軸で、`cache:`を付けずに`setup-node`を呼ぶだけのためロックファイル無しでも失敗しない。**検証コマンドは`npm test`（`node --test tests`）と`npm run build`の2つだけで、どちらもラッパー無しで無人実行から使える**（car-care・asset-manager・portfolioと違い`.env`も1Passwordも要らない）。`npm start`が`python3 -m http.server`である点、テストは`node:test`/`node:assert`で書く点、**`24.screenshot-required`は`minimal`だとPlaywrightが入らず無人実行では成立しない**点をCLAUDE.mdに明記。旧世代の`10.`/`19.`優先度ラベル削除で失われる分は#11・#12へ`89.Priority: low`を付け直した（進捗ラベルはopen issueに1件も付いておらず復元は不要だった） |
 | `guchi-apps/myroom` | 対応済み | **参照**（2つとも`@workflows/v10`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1056, guchi-apps/myroom#111 | #1047の7周目。**Python + Node の2層構成**（それまでの6周は全てNode単体）。バックエンドはルートで`pytest tests/ -q`（`DB_MOCK=true`）、フロントエンドは**`frontend/`サブディレクトリ**で`typecheck`・`test`・`build`・`lint`。**`cd frontend`を忘れるとフロントエンドのコマンドは動かない**ため、CLAUDE.mdに実行場所をコマンドごとに明記した。`runtime-setup: minimal`（準備ステップは全てリポジトリルートで動くが、ルートの`package.json`はバージョン管理用scriptのみで依存を持たず、`package-lock.json`も空のスタブ`"packages": {}`。実際の依存は`frontend/`にあり、そこへ入るのは実装エージェント自身の仕事）。**`package-manager: npm`は`minimal`でも必要**で、実装ステップの許可ツールの出し分け（#1147）がこの値を見るため、`pnpm`にすると`npm`・`node`が許可されず`frontend/`の検証ができなくなる。Pythonは#1147で`python`・`pip`・`pytest`が常時許可されたが、**`setup-python`は入らずランナー標準のPythonを使う**ためCIの3.11固定とはズレうる。`.gitignore`への共有ディレクトリ追加（#1151）を最初から入れた最初のリポジトリ |
 | `guchi-apps/signaly` | 対応済み | **参照**（2つとも`@workflows/v10`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1057, guchi-apps/signaly#113 | #1047の8周目（最終周）。**8リポジトリで唯一Nodeが一切無い**（`package.json`がルートにも`frontend/`にも無く、`frontend/`は素のHTML/JS、`scripts/`は全てPythonかbash）。そのため**`node-version`を指定しない唯一のリポジトリ**（他7件は全て指定）。`package-manager`は使わないが**既定値の`npm`のままにする**——`pnpm`にすると実装ステップで`node`が許可されなくなる（#1147）。**`workflows/v10`未満へ下げてはいけない。** v9までは許可ツールが`pnpm`固定で`python`・`pip`・`pytest`のいずれも実行できず、**検証手段がPythonのテストしか無い**（Lintも無い）このリポジトリでは検証が一切できなくなる。テストは`DB_NAME=ci_signaly python -m unittest discover -s backend -p 'test_*.py' -v`で、**`DB_NAME`を忘れると`backend/database.py`のimport時点で落ちる**（実際のDB接続はせず全てモック）。バージョンは`package.json`ではなく`version.json`で`scripts/bump_version.py`経由 |
-| `guchi-apps/clip-hive` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1376, guchi-apps/clip-hive#21 | **#1011（Phase 6）の1周目で、privateリポジトリを載せた最初の例。** Next.js + Prisma + MariaDB/MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`（このリポジトリのCIはサービスコンテナを使わず、ビルド時の`DATABASE_URL`にプレースホルダを渡している）。`lint`・`typecheck`・`build:ci`・`db:migrate:deploy`をすべて持ち、共有ワークフローと過不足なく噛み合う唯一のリポジトリだったため1周目に選んだ。**`npm test`は`lint && typecheck`の別名**でテストランナーは動かず、`npm run dev`は`scripts/ensure-mysql.sh`とローカルの`.env.local`を要求して無人実行では使えない点をCLAUDE.mdに明記した。旧世代ラベルは`05.develop`が#15に付いており、削除前に控えて書き戻した |
-| `guchi-apps/ops-dashboard` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1377, guchi-apps/ops-dashboard#64 | #1011（Phase 6）の2周目。**`runtime-setup: node`をprivateで初めて使った周**（`prisma/`を持たずDBを使わない）。`package-manager: npm`・`node-version: "22.23.1"`。**`node-version`は`.nvmrc`から手で写す**——CIは`node-version-file`で`.nvmrc`を読むが、共有ワークフローはこの入力しか見ない。`test`・`typecheck`のnpm scriptを持たず、CIが`npx tsc --noEmit`を直接叩いているため、AGENTS.mdへ実際の検証コマンド（`lint`・`npx tsc --noEmit`・`build`）を書いた。**ブランチ命名が`feature/<番号>-<説明>`だった唯一のリポジトリ**で、この命名ではワークフローが対象Issueを特定できず進捗が一切遷移しないため、`issue-<番号>`へ揃えることをAGENTS.mdに明記した（既存の`feature/`ブランチ8本は、マージ済みかどうかの判断が要り作業中のものを巻き込む恐れがあるため触っていない）。旧世代ラベルは`07.m:marge`が#26に付いていたが、盤面では既に`Release`になっており書き戻しは不要だった |
+| `guchi-apps/clip-hive` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1376, #1591, guchi-apps/clip-hive#21, guchi-apps/clip-hive#31 | **#1011（Phase 6）の1周目で、privateリポジトリを載せた最初の例。** Next.js + Prisma + MariaDB/MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`（このリポジトリのCIはサービスコンテナを使わず、ビルド時の`DATABASE_URL`にプレースホルダを渡している）。`lint`・`typecheck`・`build:ci`・`db:migrate:deploy`をすべて持ち、共有ワークフローと過不足なく噛み合う唯一のリポジトリだったため1周目に選んだ。**`npm test`は`lint && typecheck`の別名**でテストランナーは動かず、`npm run dev`は`scripts/ensure-mysql.sh`とローカルの`.env.local`を要求して無人実行では使えない点をCLAUDE.mdに明記した。旧世代ラベルは`05.develop`が#15に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/clip-hive#31・#32）——`preversion`（`npm test`）を持つため、callerに`bump-command`で`--ignore-scripts`を渡している（後述「`release-develop-to-main.yml`の配布状況」） |
+| `guchi-apps/ops-dashboard` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1377, #1591, guchi-apps/ops-dashboard#64, guchi-apps/ops-dashboard#81 | #1011（Phase 6）の2周目。**`runtime-setup: node`をprivateで初めて使った周**（`prisma/`を持たずDBを使わない）。`package-manager: npm`・`node-version: "22.23.1"`。**`node-version`は`.nvmrc`から手で写す**——CIは`node-version-file`で`.nvmrc`を読むが、共有ワークフローはこの入力しか見ない。`test`・`typecheck`のnpm scriptを持たず、CIが`npx tsc --noEmit`を直接叩いているため、AGENTS.mdへ実際の検証コマンド（`lint`・`npx tsc --noEmit`・`build`）を書いた。**ブランチ命名が`feature/<番号>-<説明>`だった唯一のリポジトリ**で、この命名ではワークフローが対象Issueを特定できず進捗が一切遷移しないため、`issue-<番号>`へ揃えることをAGENTS.mdに明記した（既存の`feature/`ブランチ8本は、マージ済みかどうかの判断が要り作業中のものを巻き込む恐れがあるため触っていない）。旧世代ラベルは`07.m:marge`が#26に付いていたが、盤面では既に`Release`になっており書き戻しは不要だった。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/ops-dashboard#81・#84）——`preversion`を持たないためcallerの`with:`は`bump-kind`だけで済み、あわせて`"version"` lifecycleスクリプト（`scripts/version-changelog.mjs`）を新設して更新履歴（`src/data/changelog.ts`）がバンプPRに入るようにした |
 | `guchi-apps/db-console` | 対応済み | **参照**（3つとも`@workflows/v18`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`release-develop-to-main.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1378, #1551, guchi-apps/db-console#19, guchi-apps/db-console#28 | #1011（Phase 6）の3周目。**デフォルトブランチが`main`だった唯一のリポジトリ**で、`develop`へ変更した（`issues`・`issue_comment`はデフォルトブランチのワークフローしか起動しない）。変更前に`develop...main`のファイル差分が空であること——mainの内容はすべてdevelopに含まれ、コミット数の差8件はdevelop→mainのマージコミットだけであること——を実測した。`runtime-setup: node-db`・`package-manager: npm`・`node-version: "22.23.1"`（`.nvmrc`準拠）。**`prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、postinstallの`prisma generate`ごと`npm ci`が落ちていた**ため、未設定時は接続できないプレースホルダーへ倒す形へ直した（共有ワークフローの依存インストールはDATABASE_URLを渡さない。car-care・clip-hive・dayspanは元から未設定でも通る作りで、`env()`を必須にしていたのはここだけ）。`npm run build`は素だと`/auth/callback`で`ERR_INVALID_URL`になるため、CIと同じプレースホルダーを渡す実行例をAGENTS.mdに書いた。CIのDBは他アプリの`mysql:8.0`ではなく`mariadb:10.11`。旧世代ラベルは`05.develop`が#13に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1551で後から足した**（guchi-apps/db-console#28・#29）——導入の周では入れておらず、issue-deckの画面のリリースボタンが出ない唯一の対応済みリポジトリになっていた。callerに`with:`は渡していない（ルートの`package.json`の`.version`・npm・更新履歴ファイル無しで、3つのinputはすべて既定値でよい）。`claude-review-develop.yml`は今回も入れていない（develop向けPRの自動マージは、他アプリのDBを直接操作する管理コンソールという性質から保留のまま） |
 | `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**フリートで唯一のNode 24**（`ci.yml`・`engines`とも。他は20〜22帯）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`はこの周では入れず、後からguchi-apps/aide#6（クローズ済み）で`@workflows/v18`参照のcallerが追加された（2026-08-15に実測） |
 
@@ -151,13 +151,53 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 
 2026-08-15時点の実測。
 
-| 配布済み | `issue-deck`（ローカルパス参照）・`shopping-list`・`dayspan`（この2つはコピー方式）・`car-care`・`meisai-lab`・`asset-manager`・`subscription-lists`・`portfolio`・`solitaire`・`myroom`・`signaly`・`aide`・**`db-console`**（#1551で追加） |
+| 配布済み | `issue-deck`（ローカルパス参照）・`shopping-list`・`dayspan`（この2つはコピー方式）・`car-care`・`meisai-lab`・`asset-manager`・`subscription-lists`・`portfolio`・`solitaire`・`myroom`・`signaly`・`aide`・`db-console`（#1551で追加）・**`clip-hive`・`ops-dashboard`**（#1591で追加） |
 |---|---|
-| **未配布** | `clip-hive`・`ops-dashboard` |
+| **未配布** | なし（対応済みリポジトリすべてに行き渡った） |
 
 **未配布のリポジトリではリリースボタンが出ない。** 押せないだけでなく、develop→mainのリリースPRも
 バージョンbumpも自動化されないため、リリースは手作業になる（手作業リリースはタグ重複などの
 リポジトリ固有の制約を毎回踏む。[multi-agent/release.md](multi-agent/release.md)参照）。
+
+### `npm version` は依存関係の無いところで走る（#1591）
+
+**共有ワークフローはバージョンbumpのために依存関係をインストールしない。**
+`reusable-release-develop-to-main.yml`には`setup-node`も`npm ci`も無く、`actions/checkout`直後の
+チェックアウトでいきなり`npm version <新版> --no-git-tag-version`を叩く。そのため
+**`preversion`にテスト・Lintを置いているリポジトリは、既定のbumpコマンドでは必ず落ちる。**
+
+```
+> eslint
+sh: 1: eslint: not found
+npm error code 127
+npm error command sh -c npm test
+```
+
+該当するのは`preversion: npm test`を持つ`meisai-lab`と`clip-hive`の2件で、どちらも
+callerで同じ`bump-command`を渡して回避している（`--ignore-scripts`が更新履歴を書く
+`version`フックまで止めてしまうため、その中身を明示的に実行して補う）。
+
+```yaml
+bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts && npm_package_version="$NEW_VERSION" node scripts/version-changelog.mjs
+```
+
+**`preversion`自体は消さない。** ローカルで`npm version`を叩いたときのガードとして機能しており、
+品質確認はバンプPR上のCIでも行われる。逆に、これから`version` lifecycleを足すリポジトリでは
+**`preversion`を作らず、`version`フックから呼ぶスクリプトもNode標準モジュールだけで書く**
+（#1591の`ops-dashboard`はこの形にしたため`bump-command`が要らなかった）。
+
+### 更新履歴の自動追記（`RELEASE_CHANGELOG`）の対応状況
+
+共有ワークフローは、mainとdevelopのコード差分から利用者向けの更新履歴を生成し、
+`"version"` lifecycleスクリプトへ`RELEASE_CHANGELOG`環境変数として渡す（#800）。
+受け取る側を持つかどうかはリポジトリごとに違う。
+
+| `"version"`スクリプトあり | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で`RELEASE_CHANGELOG`対応へ改修）・**`ops-dashboard`**（#1591で新設） |
+|---|---|
+| 無し（バージョンだけが上がる） | `issue-deck`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
+
+**生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
+内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
 
 ```bash
 # 配置状況の確認
