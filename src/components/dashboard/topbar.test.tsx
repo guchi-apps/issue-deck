@@ -41,7 +41,7 @@ function renderTopBar(setFilter: SetFilter, filters: IssueFilters = baseFilters)
       issues={[]}
       isSidebarCollapsed={false}
       onToggleSidebar={() => {}}
-      onOpenAppSettings={() => {}}
+      onOpenSettings={() => {}}
     />,
   );
 }
@@ -92,7 +92,7 @@ describe("TopBar 検索欄", () => {
         issues={[]}
         isSidebarCollapsed={false}
         onToggleSidebar={() => {}}
-        onOpenAppSettings={() => {}}
+        onOpenSettings={() => {}}
       />,
     );
 

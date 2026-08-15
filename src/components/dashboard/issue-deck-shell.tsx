@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
@@ -10,6 +9,8 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
+import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -134,7 +135,17 @@ export function IssueDeckShell({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
-  const [appSettingsDialogOpen, setAppSettingsDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // PC（SettingsDialog）とスマホ（MobileSettingsScreen）のどちらから保存されても
+  // 同じstateへ反映する（#1539）
+  function handleAppSettingsUpdated(next: AppSettingsValues) {
+    setAutoRetryLimit(next.autoRetryLimit);
+    setClaudeModel(next.claudeModel);
+    setClaudeModelAssist(next.claudeModelAssist);
+    setDispatchConcurrency(next.dispatchConcurrency);
+  }
+
   const {
     mobileScreen,
     isPending: isMobileScreenPending,
@@ -644,7 +655,7 @@ export function IssueDeckShell({
           issues={issues}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-          onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+          onOpenSettings={() => setSettingsDialogOpen(true)}
         />
 
         <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -758,7 +769,11 @@ export function IssueDeckShell({
                   {mobileScreen.kind === "settings" && (
                     <MobileSettingsScreen
                       currentUser={currentUser}
-                      onOpenAppSettings={() => setAppSettingsDialogOpen(true)}
+                      autoRetryLimit={autoRetryLimit}
+                      claudeModel={claudeModel}
+                      claudeModelAssist={claudeModelAssist}
+                      dispatchConcurrency={dispatchConcurrency}
+                      onUpdated={handleAppSettingsUpdated}
                     />
                   )}
 
@@ -980,19 +995,15 @@ export function IssueDeckShell({
           }}
           onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
         />
-        <AppSettingsDialog
-          open={appSettingsDialogOpen}
+        <SettingsDialog
+          open={settingsDialogOpen}
+          onOpenChange={setSettingsDialogOpen}
+          currentUser={currentUser}
           autoRetryLimit={autoRetryLimit}
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
           dispatchConcurrency={dispatchConcurrency}
-          onOpenChange={setAppSettingsDialogOpen}
-          onUpdated={(next) => {
-            setAutoRetryLimit(next.autoRetryLimit);
-            setClaudeModel(next.claudeModel);
-            setClaudeModelAssist(next.claudeModelAssist);
-            setDispatchConcurrency(next.dispatchConcurrency);
-          }}
+          onUpdated={handleAppSettingsUpdated}
         />
         <EditIssueDialog
           open={editingIssue !== null}
