@@ -160,6 +160,26 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     enqueue.mockReset();
   });
 
+  it("作成フォームには実装オプションのチェックボックスを出さない（#1580）", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryByText("計画が必要")).toBeNull();
+    expect(screen.queryByText("アーティファクトで見た目を出す")).toBeNull();
+  });
+
+  it("作成後に開く「実装を開始」ダイアログでオプションを選ばせる（#1580）", async () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
+
+    await screen.findByText("実装を開始");
+    expect(screen.queryByText("計画が必要")).not.toBeNull();
+    // 実行先はサブPCが既定なので、無人実行専用の撮影は出ない（visibleStartImplementationOptions）
+    expect(screen.queryByText("アーティファクトで見た目を出す")).not.toBeNull();
+  });
+
   it("サブPCで開始した後、11.localの付与が返ってきても実行先の選択を開き直さない（#1434）", async () => {
     // `11.local`の付与（GitHubへの往復）は、ダイアログが閉じた後に返る
     let resolveUpdate: ((issue: Issue) => void) | undefined;
