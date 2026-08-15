@@ -34,7 +34,8 @@ name: Issue Progress (reusable)
 # gh issue edit の --remove-label は、Issueに未付与なだけなら呼んでも無害(冪等)。ただし
 # 対象リポジトリにラベル定義自体が無いと exit 1 になりジョブ全体が落ちる(#975。展開先
 # リポジトリのラベル1つの欠落だけで発生する)。そのため`00.check-user`の除去では
-# `gh label list`の結果と突き合わせ、実在する場合だけ呼び出している。
+# `gh label list`の結果と突き合わせ、実在する場合だけ呼び出している。`00.check-user`の理由を
+# 表す`01.check-*`(#1490)も同じ作法で扱い、付ける・外すのは常に`00.check-user`と同じ場所。
 #
 # develop-pr-mergedジョブは、claude-review-develop.ymlのauto-mergeジョブが有効化する
 # GitHub Auto-merge機能による実際のマージ(必須ステータスチェック通過後にGitHub側が
@@ -205,11 +206,26 @@ jobs:
             if [ "$AUTO_MERGE_PATH" != "true" ]; then
               # 対象リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
               # ジョブごと落ちる(#975)。実在する場合だけ呼ぶ(develop-pr-mergedと同じ作法)。
-              if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-                gh issue edit "$n" --add-label "00.check-user"
+              # ユーザーがマージする状態なので、理由は`01.check-merge`(#1490)。理由は常に1枚
+              # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+              REASON_LABEL="01.check-merge"
+              DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+              LABEL_ARGS=()
+              for name in "00.check-user" "$REASON_LABEL"; do
+                if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                  LABEL_ARGS+=(--add-label "$name")
+                else
+                  echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+                fi
+              done
+              for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+                if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                  LABEL_ARGS+=(--remove-label "$name")
+                fi
+              done
+              if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
+                gh issue edit "$n" "${LABEL_ARGS[@]}"
                 note=$'\n\n'"⚠️ このリポジトリには自動マージ可否を判定するワークフロー（\`claude-review-develop.yml\`）が無いため、このPRが自動でマージされることはありません。内容を確認したうえでマージしてください。"
-              else
-                echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
               fi
             fi
             gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL$note"$'\n\n<!-- issue-deck-source:issue-labels -->'
@@ -269,8 +285,18 @@ jobs:
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
-            if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-              gh issue edit "$n" --remove-label "00.check-user"
+            # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+            # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+            # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+            DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+            REMOVE_ARGS=()
+            for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+              if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                REMOVE_ARGS+=(--remove-label "$name")
+              fi
+            done
+            if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${REMOVE_ARGS[@]}"
             else
               echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
             fi
@@ -361,16 +387,22 @@ jobs:
             exit 0
           fi
 
-          check_user_exists=false
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            check_user_exists=true
-          fi
+          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          REMOVE_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
           transitioned=""
           for n in $numbers; do
             pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
             if [ -n "$pr_url" ]; then
-              if [ "$check_user_exists" = "true" ]; then
-                gh issue edit "$n" --remove-label "00.check-user"
+              if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+                gh issue edit "$n" "${REMOVE_ARGS[@]}"
               fi
               gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
               transitioned="${transitioned}${n}"$'\n'
@@ -543,14 +575,20 @@ jobs:
             exit 0
           fi
 
-          check_user_exists=false
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            check_user_exists=true
-          fi
+          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          REMOVE_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
           transitioned=""
           for n in $numbers; do
-            if [ "$check_user_exists" = "true" ]; then
-              gh issue edit "$n" --remove-label "00.check-user"
+            if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${REMOVE_ARGS[@]}"
             fi
             gh issue close "$n"
             transitioned="${transitioned}${n}"$'\n'
@@ -611,10 +649,20 @@ jobs:
       GH_REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: 00.check-user を除去する
+      - name: 00.check-user と理由ラベルを除去する
         run: |
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            gh issue edit "$ISSUE_NUMBER" --remove-label "00.check-user"
+          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          REMOVE_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${REMOVE_ARGS[@]}"
           else
             echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
           fi

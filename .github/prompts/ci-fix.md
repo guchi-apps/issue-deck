@@ -65,8 +65,11 @@ CIの失敗自体がインフラ側の一時的な問題（外部サービス障
 `gh issue comment ${ISSUE_NUMBER} --body "..."` で
 CI失敗の内容と自動修正を断念した理由を日本語で報告し（コメント本文の末尾に、
 投稿元を示す`<!-- issue-deck-source:claude-ci-fix -->`マーカーを必ず付与すること）、
-`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user"`
-を実行して停止してください。
+`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "01.check-blocked"`
+を実行して停止してください。`01.check-blocked`は「続け方の指示待ち（エージェントは停止して
+いる）」を表す理由ラベル（#1490）で、**リポジトリに定義が無ければ付けなくてよい**
+（`gh label list --json name --jq '.[].name' --limit 200`で確認する）。他の`01.check-*`が
+付いていれば外す（理由は常に1枚）。
 
 ## 禁止事項
 - `main`/`develop`への直接コミット・push

@@ -1339,12 +1339,26 @@ jobs:
 
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
-          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
-          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-          else
-            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          REASON_LABEL="01.check-blocked"
+          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
+          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
+          # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            else
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
           fi
 
       - name: 分割前のコメント数を記録する
@@ -1442,12 +1456,26 @@ jobs:
           FALLBACK_BODY=$'⚠️ Issueの分割に失敗した可能性があります。サブIssueの作成中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、コメント投稿まで到達できなかったと考えられます。\n\nお手数ですが、`@claude` とコメントして再実行するか、必要であれば人間が直接Issueを分割してください。'
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:splitter -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
-          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
-          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --add-label "00.check-user"
-          else
-            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          REASON_LABEL="01.check-blocked"
+          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
+          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
+          # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            else
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} "${LABEL_ARGS[@]}"
           fi
 
       - name: 質問前のコメント数を記録する
@@ -1669,9 +1697,10 @@ jobs:
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
         run: ${{ inputs.package-manager }} exec playwright install --with-deps chromium
 
-      - name: 00.qa-answered を除去する（実装着手時）
+      - name: 01.check-answered（旧名 00.qa-answered）を除去する（実装着手時）
         # 質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で付与されうる
-        # 00.qa-answeredを、実際に実装着手へ進んだ時点で古い状態が残らないよう除去する。
+        # 01.check-answered（旧名00.qa-answered。#1490）を、実際に実装着手へ進んだ時点で
+        # 古い状態が残らないよう除去する。
         # 展開先リポジトリにこのラベル自体が定義されていない場合でもジョブ全体を落とさないよう、
         # 除去前にリポジトリのラベル一覧と突き合わせる(#975)。
         #
@@ -1683,8 +1712,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.qa-answered"; then
-            gh issue edit ${{ steps.state.outputs.issue_number }} --remove-label "00.qa-answered"
+          # リネーム移行中は新旧どちらの名前も外す(#1490)。他の理由ラベルはここでは触らない
+          # ——`00.check-user`が残ったまま理由だけ消すと、画面が理由を読めなくなるため。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          REMOVE_ARGS=()
+          for name in 00.qa-answered 01.check-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+            gh issue edit ${{ steps.state.outputs.issue_number }} "${REMOVE_ARGS[@]}"
           else
             echo "::warning::ラベル '00.qa-answered' がリポジトリに存在しないため除去をスキップします"
           fi
@@ -2049,12 +2087,26 @@ jobs:
 
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
-          # 展開先リポジトリに00.check-userラベル自体が定義されていない場合でもこのステップを
-          # 落とさないよう、付与前にリポジトリのラベル一覧と突き合わせる(#975)。
-          if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
-            gh issue edit "$ISSUE_NUMBER" --add-label "00.check-user"
-          else
-            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+          REASON_LABEL="01.check-blocked"
+          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
+          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
+          # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            else
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
           fi
 
       - name: 実装後フックを実行する（post-implement-script）

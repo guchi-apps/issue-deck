@@ -79,7 +79,11 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
 
 該当すると判定し、かつ対応Issue番号が特定できている場合のみ、以下を両方実行してください
 （ラベル付与だけでなくコメント投稿も必須。ユーザーがissue画面を見て理由が分かるようにするため）。
-- `gh issue edit <対応Issue番号> --add-label "00.check-user"`
+- `gh issue edit <対応Issue番号> --add-label "00.check-user" --add-label "01.check-merge"`
+  （`01.check-merge`は「ユーザーがPRをマージする」ことを表す理由ラベル。#1490。
+  **リポジトリに定義が無ければ付けなくてよい**。
+  `gh label list --json name --jq '.[].name' --limit 200`で確認する。
+  他の`01.check-*`が付いていれば外す＝理由は常に1枚）
 - `gh issue comment <対応Issue番号> --body "..."` で、該当すると判断した理由を日本語で
   issueにコメント投稿する（`auto-merge`ジョブが後から投稿するrisk-checkの理由と重複してもよい。
   あなたの判定はrisk-checkとは独立した二次判定のため）。コメント本文の末尾に、投稿元を
@@ -129,7 +133,8 @@ PRのマージ可否とは独立しており、提案を却下したことを理
 
 ## 禁止事項
 - PRのマージ・承認（Approve）は行わない
-- 進捗（Project Status）の変更は行わない（ラベル操作は`00.check-user`の付与のみ許可）
+- 進捗（Project Status）の変更は行わない（ラベル操作は`00.check-user`と理由ラベル
+  `01.check-merge`の付与、および他の`01.check-*`の除去のみ許可）
 - コードの直接修正は行わない（レビューコメントの投稿のみ）
 - `.shared-context/`配下（共有知識リポジトリ）の編集・コミット。共有知識への反映は
   developマージ後に別のワークフローがPull Requestとして行い、最終的なマージは人間が行う

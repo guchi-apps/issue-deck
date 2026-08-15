@@ -55,7 +55,13 @@
    - 二次判定（意味的）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
 4. 該当する場合
    - マージしない
-   - `gh pr edit <PR番号> --add-label "00.check-user"` を付与する（進捗（Project Status）は変更しない）
+   - `gh pr edit <PR番号> --add-label "00.check-user"` を付与する（進捗（Project Status）は変更しない）。
+     対応Issueが特定できる場合は、Issue側にも
+     `gh issue edit <対応Issue番号> --add-label "00.check-user" --add-label "01.check-merge"`
+     を実行する。`01.check-merge`は「ユーザーがPRをマージする」ことを表す理由ラベル（#1490）で、
+     **リポジトリに定義が無ければ付けなくてよい**
+     （`gh label list --json name --jq '.[].name' --limit 200`で確認する）。
+     画面が読むのはIssue側のラベルなので、PRだけに付けても確認待ちの理由は表示されない
    - 該当理由をPRコメントに記載する
    - 次のPRの処理に進む
 5. 非該当の場合
