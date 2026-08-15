@@ -10,11 +10,13 @@
 #   scripts/reap-sessions.sh --question-idle-minutes 45  質問セッションの放置の猶予を指定する
 #
 # 環境変数:
-#   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定60・0で無効）
+#   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定5・0で無効）。
+#                                 効くのはIssueがCLOSED・PRがマージ済みの経路
 #   SESSION_HANDOFF_IDLE_MINUTES  `11.local`を外してローカル作業を終えた（＝マージもcloseも
-#                                 まだの）セッション専用の猶予（既定30・0でこの経路だけ無効）。
+#                                 まだの）セッション専用の猶予（既定5・0でこの経路だけ無効）。
 #                                 PRを作って引き渡した場合（#1541）と、PRを作らずに終わった
-#                                 場合（#1600）の両方に効く
+#                                 場合（#1600）の両方に効く。**SESSION_IDLE_MINUTESとは
+#                                 独立**で、こちらの経路ではこの値だけを見る（#1649）
 #   QUESTION_SESSION_IDLE_MINUTES 横断質問セッション（kind=question）専用の猶予（既定30・
 #                                 0でこの経路だけ無効＝従来どおり質問IssueがCLOSEDになるまで
 #                                 残す）。**質問IssueがOPENのままでも畳む**（#1648）
@@ -47,11 +49,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
 
-IDLE_MINUTES="${SESSION_IDLE_MINUTES:-60}"
+# IssueがCLOSED・PRがマージ済みの経路で使う猶予（#1256）。既定を60から5へ下げた（#1649）。
+# 畳めるセッションが残っている時間は、そのまま本数の上限（DISPATCH_MAX_SESSIONS・#1361）を
+# 埋めて新規セッションの待ち時間になる。サブPCで1.7日・134件を5分で畳んだ実測では、畳んだ後に
+# 呼び戻したケースが1件も無かった（そもそも畳んでも`--continue`で会話の続きから再開できる）。
+IDLE_MINUTES="${SESSION_IDLE_MINUTES:-5}"
 # ローカル作業を終えた（`11.local`を外した）セッション専用の猶予（#1541・#1600）。
-# CLOSED／マージ済みは「もう何も起きない」が確定しているのに対し、こちらはCI失敗の指摘が
-# 返る余地・人が続きを聞く余地があるため、段差を付ける。0でこの経路だけを無効にできる。
-HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-30}"
+# **共通猶予（IDLE_MINUTES）とは独立で、この経路ではこちらだけを見る**（#1649）。以前は共通猶予を
+# 通過したうえでさらにこの値を見るAND判定で、実効が max(IDLE, HANDOFF) になっており、既定の
+# 60/30では30が一度も効いていなかった（「CLOSED・マージ済みより長めに取る」という段差は成立して
+# いなかった）。横断質問セッション（QUESTION_SESSION_IDLE_MINUTES）と同じ置き換え方式に揃える。
+# 0でこの経路だけを無効にできる。
+HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-5}"
 # 横断質問セッション（`kind=question`）専用の猶予（#1648）。**質問IssueがOPENのままでも畳む。**
 # 追い質問を送らないまま忘れられたセッションは、質問Issueを閉じる人がいない限り永久に残り、
 # 本数の上限（DISPATCH_MAX_SESSIONS・#1361）を1本ずつ埋める。実装セッションと違って
@@ -174,7 +183,7 @@ reap_one() {
   local session="$1"
   local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
-  local idle_minutes idle_seconds
+  local idle_minutes idle_seconds gate_minutes gate_seconds
   local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
   local merged_pr open_pr handoff_reason handoff_hold reason
 
@@ -249,9 +258,20 @@ reap_one() {
     idle_seconds="$QUESTION_IDLE_SECONDS"
   fi
   idle_for=$((NOW - event_at))
-  if [[ "$idle_for" -lt "$idle_seconds" ]]; then
+
+  # **実装セッションの猶予は経路ごとに違う**（CLOSED・マージ済みは`IDLE_MINUTES`、ローカル作業を
+  # 終えた引き渡し済みは`HANDOFF_IDLE_MINUTES`。#1649）。ここで見るのはそのうち短い方だけで、
+  # 「どの経路でも畳めない」ときに`gh`を叩かずに落とすための足切りにあたる（条件は安い順、の維持）。
+  # 実際の判定は下の各経路で行う。
+  gate_minutes="$idle_minutes"
+  gate_seconds="$idle_seconds"
+  if [[ "$kind" != "question" && "$HANDOFF_IDLE_SECONDS" -gt 0 && "$HANDOFF_IDLE_SECONDS" -lt "$gate_seconds" ]]; then
+    gate_minutes="$HANDOFF_IDLE_MINUTES"
+    gate_seconds="$HANDOFF_IDLE_SECONDS"
+  fi
+  if [[ "$idle_for" -lt "$gate_seconds" ]]; then
     # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-    hold "$session" "最後の応答終了から猶予（${idle_minutes}分）が経っていない"
+    hold "$session" "最後の応答終了から猶予（${gate_minutes}分）が経っていない"
     return 0
   fi
 
@@ -339,12 +359,24 @@ reap_one() {
   # 成果物が本流に入ったか、Issue自体が終わっているか。
   # **`22.merge-confirm-required`の特別扱いは要らない。** 人がマージするまでPRはopenのままなので、
   # マージ済みの経路では自動的に残る（ラベルを見る箇所を増やさない）。
+  #
+  # **この2経路（CLOSED・マージ済み）が見るのは`IDLE_MINUTES`**（#1649）。上の足切りは短い方の
+  # 猶予で通しているため、ここで改めて共通猶予を確かめる。
   if [[ "$issue_state" == "CLOSED" ]]; then
+    if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
+      # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+      hold "$session" "Issue #$issue_number はCLOSEDだが、猶予（${IDLE_MINUTES}分）が経っていない"
+      return 0
+    fi
     reason="Issue #$issue_number はCLOSED"
   else
     merged_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state merged \
       --json number --jq '.[0].number // empty' 2>/dev/null || true)"
     if [[ -n "$merged_pr" ]]; then
+      if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
+        hold "$session" "PR #$merged_pr はマージ済みだが、猶予（${IDLE_MINUTES}分）が経っていない"
+        return 0
+      fi
       reason="PR #$merged_pr がマージ済み"
     else
       # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（条件5を通っている）＝
@@ -355,8 +387,12 @@ reap_one() {
       #
       # **畳んでも失うものは無い。** worktreeはcleanでpush済み（条件7）、worktreeそのものは
       # 残り、呼び戻せば前回の会話の続きから再開する（#1541・run-issue-session.sh の
-      # `--continue`）。マージ済み・CLOSEDより猶予を長く取るのは、CI失敗の指摘が返る余地が
-      # こちらにだけ残っているため。
+      # `--continue`）。
+      #
+      # **猶予は`HANDOFF_IDLE_MINUTES`だけで決める**（#1649）。以前は共通猶予も併せて満たす必要が
+      # あり、実効が max(IDLE, HANDOFF) になっていた。「CI失敗の指摘が返る余地があるので
+      # マージ済み・CLOSEDより長く取る」という段差も置いていたが、サブPCでの実測（1.7日・134件）で
+      # 畳んだ後に呼び戻したケースが1件も無かったため取り下げ、短い側を指定できるようにした。
       if [[ "$HANDOFF_IDLE_SECONDS" -eq 0 ]]; then
         hold "$session" "IssueがOPENで、issue-$issue_number のPRもまだマージされていない"
         return 0
