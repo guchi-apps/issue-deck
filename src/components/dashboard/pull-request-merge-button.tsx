@@ -32,6 +32,11 @@ type PullRequestMergeButtonProps = {
  *
  * CIが落ちている・実行中・Auto-merge待ちといった「そのまま押すと意図とずれうる」状態では
  * 確認ダイアログを挟む（`mergeWarnings`）。CI通過済みで待ちが無いPRは1クリックでマージする。
+ * **mainへのPRは常に確認を挟む**——`mergeWarnings`が本番デプロイが走る旨の警告を必ず返すため（#1548）。
+ *
+ * マージが通ったあとは「マージ済み」で無効のまま残す（#1548）。`onMerged`で再取得を促しても、
+ * 一覧が入れ替わるまでの数秒はボタンが押せる状態で残り、そこを押すと2回目のマージ要求が飛ぶ
+ * （GitHubは405で弾くが、画面にはエラーだけが出る）。
  */
 export function PullRequestMergeButton({
   pullRequest,
@@ -41,13 +46,17 @@ export function PullRequestMergeButton({
 }: PullRequestMergeButtonProps) {
   const { mergePullRequest, isSubmitting, error } = usePullRequestMergeMutation();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isMerged, setIsMerged] = useState(false);
   const warnings = mergeWarnings(pullRequest);
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
 
   async function runMerge() {
     const merged = await mergePullRequest({ owner, repo, number: pullRequest.number });
     setConfirmOpen(false);
-    if (merged) onMerged();
+    if (merged) {
+      setIsMerged(true);
+      onMerged();
+    }
   }
 
   return (
@@ -57,10 +66,10 @@ export function PullRequestMergeButton({
         size="sm"
         variant={variant}
         className="h-7 shrink-0"
-        disabled={isSubmitting}
+        disabled={isSubmitting || isMerged}
         onClick={() => (warnings.length > 0 ? setConfirmOpen(true) : runMerge())}
       >
-        {isSubmitting ? "マージ中..." : "マージする"}
+        {isMerged ? "マージ済み" : isSubmitting ? "マージ中..." : "マージする"}
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

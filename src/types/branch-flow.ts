@@ -137,6 +137,14 @@ export type BranchFlowReleaseGroup = {
   version: string | null;
   /** develop→mainのPR。まだリリースPRが無い（これから出す）束ではnull */
   pullRequest: PullRequestSummary | null;
+  /**
+   * openなバージョンバンプPR（`release/vX.Y.Z`→develop。#1548）。**先頭（未リリース）の束にだけ入る。**
+   *
+   * バンプPRは幹の一部なので作業レーンには出さない。レーンとして扱っていたころは、PR本文に並ぶ
+   * 「今回のリリース対象issue」の番号を`linkedIssueNumbers`が拾い、無関係なIssueが対応Issue・関連
+   * としてぶら下がっていた。マージ済みのバンプPRは持たない（どの版で出たかは束の見出しが表す）。
+   */
+  bumpPullRequest: PullRequestSummary | null;
   /** mainへ入った日時（ISO8601）。**nullなら未リリース**（進行中またはこれから） */
   mergedAt: string | null;
   lanes: BranchFlowLane[];
@@ -157,7 +165,10 @@ export type BranchFlowRepositorySummary = {
   hasCiFailure: boolean;
   /** ユーザーがマージするしかないopenなPRがある（リリースPRを除く） */
   needsUserMerge: boolean;
-  /** openなリリースPRがある（develop→mainのマージ待ち） */
+  /**
+   * リリースが進行中（openなリリースPR、またはopenなバージョンバンプPRがある）。
+   * バンプPRを作業レーンから外した（#1548）ぶん、ここで数える。
+   */
   releaseInProgress: boolean;
 };
 

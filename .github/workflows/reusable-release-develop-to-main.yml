@@ -31,6 +31,15 @@ on:
         required: false
         type: string
         default: .version
+      bump-kind:
+        # 画面（issue-deck）から指定された上げ幅（#1548）。`auto`・空文字は自動判定。
+        # **判定ステップ自体は指定があっても走らせる。** 上げ幅と一緒に利用者向けの更新履歴
+        # （changelog → RELEASE_CHANGELOG）を作っているため、飛ばすと更新履歴が空になる。
+        # 指定があれば判定結果を上書きし、判断根拠に指定した旨を残す。
+        description: "バージョンの上げ幅（auto/空なら自動判定。patch/minor/majorで固定）"
+        required: false
+        type: string
+        default: ""
       bump-command:
         description: >-
           バージョンを書き換えるコマンド。空なら
@@ -255,6 +264,8 @@ jobs:
           # run:本文に直接展開せずenv経由でのみ参照する
           # (.github/workflows/issue-labels.ymlと同じ、script injectionを避ける方針)。
           STRUCTURED_OUTPUT: ${{ steps.version-decision.outputs.structured_output }}
+          # 画面から指定された上げ幅（#1548）。自動判定の結果より優先する。
+          SPECIFIED_BUMP_KIND: ${{ inputs.bump-kind }}
         run: |
           set -e
 
@@ -272,6 +283,23 @@ jobs:
               BUMP_KIND=patch
               REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
               CHANGELOG=""
+              ;;
+          esac
+
+          # 画面から上げ幅を指定して起動した場合は、自動判定の結果をそれで上書きする（#1548）。
+          # **判定の結果は捨てずに判断根拠へ残す。** 後からバンプPRを見たときに、指定した版で
+          # 入ったのか自動判定どおりだったのかを読み取れるようにするため。
+          case "$SPECIFIED_BUMP_KIND" in
+            major|minor|patch)
+              echo "画面から指定された上げ幅（$SPECIFIED_BUMP_KIND）で、自動判定の結果（$BUMP_KIND）を上書きします"
+              # 改行はprintfで作る。**YAMLのブロックスカラーの中に列1で始まる行を置くと
+              # そこでブロックが終わってしまう**ため、run:本文に生の改行を書かない。
+              REASON="$(printf 'issue-deckの画面から%sを指定しました（コード差分からの自動判定は%s）。\n\n%s' "$SPECIFIED_BUMP_KIND" "$BUMP_KIND" "$REASON")"
+              BUMP_KIND="$SPECIFIED_BUMP_KIND"
+              ;;
+            ""|auto) ;;
+            *)
+              echo "::warning::bump-kind の値が不正なため無視します（指定値: '$SPECIFIED_BUMP_KIND'）"
               ;;
           esac
 

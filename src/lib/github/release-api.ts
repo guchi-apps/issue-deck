@@ -1,6 +1,7 @@
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import type { BumpKind } from "@/lib/semver-bump";
 
 /** 「develop→mainのリリースフロー」を自動化するworkflowのファイル名（release-develop-to-main.yml） */
 export const RELEASE_WORKFLOW_FILE = "release-develop-to-main.yml";
@@ -238,14 +239,26 @@ export async function fetchPullRequestMergeable(
   return data.mergeable ?? null;
 }
 
-/** 「Release develop to main」workflowをdevelopブランチを対象に手動起動する */
+/**
+ * 「Release develop to main」workflowをdevelopブランチを対象に手動起動する。
+ *
+ * `bumpKind`を渡すとバージョンの上げ幅を`bump_kind` inputとして指定する（#1548）。
+ * **未指定のときはinputそのものを送らない。** `bump_kind`を持たない世代のcallerを置いている
+ * リポジトリでも、従来どおり（自動判定での起動）動き続ける必要があるため。指定した場合に
+ * そうしたリポジトリを叩くとGitHubが422（`Unexpected inputs provided`）を返し、
+ * 呼び出し側がそれを`bump_kind_unsupported`として画面へ伝える。
+ */
 export async function dispatchReleaseWorkflow(
   owner: string,
   repo: string,
   token: string,
+  bumpKind?: BumpKind,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
-  const res = await githubFetch(url, token, { method: "POST", body: { ref: "develop" } });
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    body: { ref: "develop", ...(bumpKind ? { inputs: { bump_kind: bumpKind } } : {}) },
+  });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

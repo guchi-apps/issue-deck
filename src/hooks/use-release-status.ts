@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
+import type { BumpKind } from "@/lib/semver-bump";
 
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
 export type CiState = "pending" | "success" | "failure" | "unknown";
@@ -185,14 +186,15 @@ export function useReleaseStatus(
     };
   }, [enabled, repoFullName, reloadKey, idlePollIntervalMs]);
 
-  async function triggerRelease(): Promise<boolean> {
+  /** `bumpKind`を渡すとバージョンの上げ幅を指定する。省略時は自動判定（#1548） */
+  async function triggerRelease(bumpKind?: BumpKind): Promise<boolean> {
     if (!repoFullName) return false;
 
     setIsTriggering(true);
     setError(null);
     try {
       // 起動そのものは「ブランチとPRの流れ」画面のボタンと同じ関数を通す（#1510）
-      await requestRelease(repoFullName);
+      await requestRelease(repoFullName, bumpKind);
       // 起動直後に状態を取り直して、実行中runやバンプPRの出現を素早く反映する。
       setReloadKey((k) => k + 1);
       return true;
