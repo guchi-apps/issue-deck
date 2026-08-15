@@ -17,6 +17,7 @@ import {
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isCancelableDispatchJobStatus,
+  isIssueExecutionPending,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostName,
@@ -385,6 +386,53 @@ describe("findBlockingSession", () => {
         issueNumber: 1311,
       })?.host,
     ).toBe("otherpc");
+  });
+});
+
+describe("isIssueExecutionPending", () => {
+  function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+    return {
+      host: "subpc",
+      tmuxSessionName: "issue-deck-issue-1667",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1667,
+      issueTitle: null,
+      issueId: null,
+      state: "ALIVE",
+      exitStatus: null,
+      firstSeenAt: "2026-08-15T10:00:00.000Z",
+      lastReportedAt: "2026-08-15T10:05:00.000Z",
+      activity: null,
+      activityAt: null,
+      remoteControlUrl: null,
+      previewUrl: null,
+      ...overrides,
+    };
+  }
+
+  it("何も走っていなければ開始の導線を出す", () => {
+    expect(isIssueExecutionPending({ job: null, blockingSession: null })).toBe(false);
+  });
+
+  // #1667。積んだ直後は進捗がまだReadyのままなので、この判定が無いと開始ボタンが残る
+  it("未完了のジョブがあれば走っているとみなす", () => {
+    for (const status of ACTIVE_DISPATCH_JOB_STATUSES) {
+      expect(isIssueExecutionPending({ job: { status }, blockingSession: null })).toBe(true);
+    }
+  });
+
+  // 失敗・取り消しで導線が戻らないと、落ちたセッションを立て直せなくなる
+  it("終わったジョブでは出す（起動済み・失敗・取り消し・応答なし・見送り）", () => {
+    for (const status of ["SUCCEEDED", "FAILED", "CANCELED", "TIMEOUT", "SKIPPED"] as const) {
+      expect(isIssueExecutionPending({ job: { status }, blockingSession: null })).toBe(false);
+    }
+  });
+
+  // ジョブの寿命は「tmuxが立った」までなので、SUCCEEDEDの後はセッション側で判定する
+  it("セッションが生きていれば走っているとみなす", () => {
+    expect(
+      isIssueExecutionPending({ job: { status: "SUCCEEDED" }, blockingSession: session() }),
+    ).toBe(true);
   });
 });
 

@@ -51,6 +51,7 @@ import {
   findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
+  isIssueExecutionPending,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -203,6 +204,10 @@ export function MobileIssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
     blockingSession,
   });
+  // もう走り始めているIssueでは開始の導線を出さない（#1667）。積んだ直後は進捗がまだ
+  // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の真下に
+  // 押せる「GitHub Actionsで開始」が全幅で残っていた
+  const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
   // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
   // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
   const startLabel = !dispatch.isLoaded
@@ -680,7 +685,7 @@ export function MobileIssueDetail({
           qaAnswerPending={qaAnswerPending}
         />
 
-        {canStartImplementation(issue) && (
+        {canStartImplementation(issue) && !executionPending && (
           <StartImplementationDialog
             issue={issue}
             onIssueUpdated={onIssueUpdated}
@@ -702,12 +707,12 @@ export function MobileIssueDetail({
         {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
             兼ねる。サブPCの申告が無ければこの導線ごと出ない。
             起動ボタンは、すぐ上の「実装を開始」（既定の実行先を文言にしている・#1262）が
-            出ていないときだけ出す（#1349） */}
+            出ていないときだけ出す（#1349）。もう走っているIssueではどちらも出さない（#1667） */}
         <StartLocalSessionButton
           issue={issue}
           onIssueUpdated={onIssueUpdated}
           fullWidth
-          showStartButton={!canStartImplementation(issue)}
+          showStartButton={!canStartImplementation(issue) && !executionPending}
           /* 積んだジョブの状態は`IssueStatusCard`が出すので、ここでは出さない（#1646）。
              両方に出すと「順番待ち」が同じ画面に2つ並ぶ。PCの詳細と同じ渡し方 */
           showJobStatus={false}
