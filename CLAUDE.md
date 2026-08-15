@@ -81,6 +81,16 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
 
+### すでに実装済み・対応不要のIssueは実装せず、報告して止まる
+
+起票から時間が経ったIssueは、**別のIssue・PRで先に対応されていたり、前提の変更で問題自体が消えていることがある**（#1601）。その場合は無理にファイルを変更せず、根拠を添えて報告し、続け方の指示を待つ。既に満たされている要求へ重ねて実装すると、既存の実装と競合し、レビューの手間だけが増える。
+
+- **推測で決めない。** `develop`の最新コードを実際に読み、要求が満たされていることを確かめる。根拠として**該当ファイルのパスと行番号**、および対応したPull Request・コミット・Issue番号のいずれかを示せること
+- **満たされているのが要求の一部だけなら、残りは実装する。** 全体として満たされている場合だけ止まる
+- **コミット・push・PR作成をしない。** 空コミットも、辻褄合わせの変更も入れない。**Issueもcloseしない**（closeするか別の要件として作り直すかはユーザーが決める）
+- 止まり方は実行経路で違う。無人実行は`gh issue comment`で報告したうえで`00.check-user`＋`01.check-blocked`を付けて停止する（`.github/prompts/implement.md`・`plan.md`）。ローカル実行は端末でユーザーへ確認しつつ、同じ内容をIssueコメントにも残す（`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`）
+- 理由ラベルが`01.check-plan`でなく`01.check-blocked`なのは、ユーザーがやることが「計画の承認」ではなく「続け方の指示」だから（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「理由を表す`01.check-*`ラベル」）
+
 ### レビュー・統合エージェントの禁止事項
 
 - `main`への直接マージ・push
