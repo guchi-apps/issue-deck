@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
-import { CircleDashed, GitBranch, Lock, RefreshCw, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ChevronRight, Lock, RefreshCw, TriangleAlert, Wrench } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
@@ -10,8 +10,9 @@ import {
   PullRequestStateIcon,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
+import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
-import { DEVELOP_BRANCH, MAIN_BRANCH, isCompletedLane, type BranchFlow } from "@/lib/branch-flow";
+import { DEVELOP_BRANCH, MAIN_BRANCH, isClosedLane, type BranchFlow } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -19,8 +20,8 @@ import type {
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
-  BranchFlowRelease,
-  BranchFlowReleaseState,
+  BranchFlowManualStep,
+  BranchFlowReleaseGroup,
   BranchFlowRepository,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -41,12 +42,15 @@ type BranchFlowViewProps = {
   footerSpacing?: boolean;
 };
 
-// レーンはすべてdevelopへ向かう作業なので、「マージ済み」だけでは本番へ出たのかが読めない。
-// developまで来たことを明示し、本番へ出たかどうかは`ReleaseStateBadge`が受け持つ。
-const LANE_STATUS_LABEL: Record<BranchFlowLaneStatus, string> = {
+/**
+ * まだどのバージョンにも乗っていないレーンの状態（#1510）。
+ *
+ * マージ済みのレーンにはバッジを出さない——**どのリリースの横線の下にいるか**が
+ * 「developへマージ済み」「main未反映」「vX.Y.Zで本番反映」をまとめて表すため。
+ */
+const LANE_STATUS_LABEL: Partial<Record<BranchFlowLaneStatus, string>> = {
   "no-pull-request": "PR未作成",
   open: "マージ待ち",
-  merged: "developへマージ済み",
   closed: "クローズ（未マージ）",
 };
 
@@ -54,40 +58,14 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** 幹（main・develop）のノード。レーンの合流先が何かを明示する */
-function TrunkNode({ name, version }: { name: string; version?: string | null }) {
-  return (
-    <div className="flex items-center gap-2 py-1">
-      <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-      <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-semibold">{name}</code>
-      {version && <span className="text-xs text-muted-foreground">v{version}</span>}
-    </div>
-  );
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
 }
 
-/**
- * マージ済みの作業がどのバージョンで本番へ出たか（#1455）。
- *
- * developへのマージだけでは本番に出ていないため、「マージ済み」と「本番反映済み」は別に出す。
- * 版を断定できない場合（取得しているクローズ済みPRの範囲より古い）は、
- * 誤った版を出さずに「バージョン不明」と表示する。
- */
-function ReleaseStateBadge({ state }: { state: BranchFlowReleaseState }) {
-  if (state.kind === "pending") {
-    return <PullRequestMetaBadge>main未反映</PullRequestMetaBadge>;
-  }
-  if (state.kind === "unknown") {
-    return <PullRequestMetaBadge>本番反映のバージョン不明</PullRequestMetaBadge>;
-  }
-  return (
-    <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
-      {state.version ? `v${state.version}で本番反映` : "本番反映済み"}
-    </span>
-  );
-}
-
-/** レーンの状態を表すピル。進行中（マージ待ち）だけ色を付ける */
+/** レーンの状態を表すピル。マージ待ちだけ色を付ける */
 function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
+  const label = LANE_STATUS_LABEL[status];
+  if (!label) return null;
   return (
     <span
       className={cn(
@@ -97,7 +75,7 @@ function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
           : "bg-muted text-muted-foreground ring-border",
       )}
     >
-      {LANE_STATUS_LABEL[status]}
+      {label}
     </span>
   );
 }
@@ -105,34 +83,107 @@ function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
 function IssueLine({
   repositoryFullName,
   issue,
-  prefix,
+  /** 同じレーンのPRのタイトル。一致するときはタイトルを繰り返さない（#1510） */
+  pullRequestTitle,
 }: {
   repositoryFullName: string;
   issue: BranchFlowIssueRef;
-  /** 「関連Issue」のように、対応Issueと区別する見出しを付ける場合 */
-  prefix?: string;
+  pullRequestTitle?: string;
 }) {
+  const sameTitle = issue.title !== null && issue.title === pullRequestTitle;
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-      {prefix && <span className="shrink-0 text-xs text-muted-foreground">{prefix}</span>}
       <GithubReferenceLink
         href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
         reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
-        className="min-w-0 max-w-full truncate text-xs text-primary hover:underline"
+        className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
       >
         Issue #{issue.number}
-        {issue.title ? ` ${issue.title}` : ""}
+        {issue.title && !sameTitle ? ` ${issue.title}` : ""}
       </GithubReferenceLink>
+      {sameTitle && <span className="text-xs text-muted-foreground">（PRと同じ題）</span>}
       {issue.progress && (
         <PullRequestMetaBadge>{getProgressStatusDef(issue.progress).label}</PullRequestMetaBadge>
       )}
-      {issue.state === null && <PullRequestMetaBadge>一覧に無いIssue</PullRequestMetaBadge>}
-      {issue.state === "closed" && <PullRequestMetaBadge>クローズ済み</PullRequestMetaBadge>}
+      {issue.state === null && <span className="text-xs text-muted-foreground">一覧に無い</span>}
+      {issue.state === "closed" && <span className="text-xs text-muted-foreground">クローズ済み</span>}
+    </div>
+  );
+}
+
+/**
+ * 1本のPRが複数のIssueを扱っている場合の2件目以降（#1455）。
+ *
+ * **タイトルを出せないもの（DBキャッシュに無い）は番号だけを1行へまとめる**（#1510）。
+ * 本文の`#番号`は単なる言及も混ざり、中身が分からないまま1件1行を占めていたため。
+ */
+function RelatedIssuesLine({
+  repositoryFullName,
+  issues,
+}: {
+  repositoryFullName: string;
+  issues: BranchFlowIssueRef[];
+}) {
+  if (issues.length === 0) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="shrink-0 text-xs text-muted-foreground">関連</span>
+      {issues.map((issue) => (
+        <GithubReferenceLink
+          key={issue.number}
+          href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
+          reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
+          className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+        >
+          #{issue.number}
+          {issue.title ? ` ${issue.title}` : ""}
+        </GithubReferenceLink>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * このレーンから残った手作業Issue（#1510）。
+ *
+ * 未完了のamberは`00.check-user`と同じ「人の操作を待っている」色に揃えている
+ * （`pull-request-badges.tsx`の`UserMergeRequiredBadge`と同じ理由）。
+ */
+function ManualStepLine({
+  repositoryFullName,
+  manualStep,
+}: {
+  repositoryFullName: string;
+  manualStep: BranchFlowManualStep;
+}) {
+  const isOpen = manualStep.state === "open";
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <Wrench
+        className={cn("size-3 shrink-0", isOpen ? "text-amber-600" : "text-muted-foreground")}
+        aria-hidden="true"
+      />
+      <GithubReferenceLink
+        href={`https://github.com/${repositoryFullName}/issues/${manualStep.number}`}
+        reference={{ repositoryFullName, number: manualStep.number, kind: "issue" }}
+        className={cn(
+          "min-w-0 max-w-full break-words text-xs hover:underline",
+          isOpen ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+        )}
+      >
+        手作業 #{manualStep.number} {manualStep.title}
+      </GithubReferenceLink>
+      <span className="shrink-0 text-xs text-muted-foreground">{isOpen ? "未完了" : "完了"}</span>
     </div>
   );
 }
 
 function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
+  const kindLabel = pullRequestKindLabel(pullRequest.kind);
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <PullRequestStateIcon pullRequest={pullRequest} className="size-3.5 shrink-0" />
@@ -143,7 +194,7 @@ function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
           number: pullRequest.number,
           kind: "pull",
         }}
-        className="min-w-0 max-w-full truncate text-xs font-medium hover:underline"
+        className="min-w-0 max-w-full break-words text-xs font-medium hover:underline"
       >
         #{pullRequest.number} {pullRequest.title}
       </GithubReferenceLink>
@@ -153,15 +204,19 @@ function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
         pullRequest.state === "open" && <CiStateBadge ciState={pullRequest.ciState} />
       )}
       {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
+      {/* 種類は「今どうなっているか」ではないので、状態のピルと同じ強さで出さない（#1510） */}
+      {kindLabel && pullRequest.kind !== "issue" && (
+        <span className="shrink-0 text-xs text-muted-foreground">{kindLabel}</span>
+      )}
     </div>
   );
 }
 
 /**
- * `develop`へ向かう作業1本。「ブランチ → PR → Issue」を上から下へ並べる。
+ * 流れ図の1行。`develop`のレールから右へ出る枝として描く（#1510）。
  *
- * 横に並べるとスマホ幅で必ず折り返して読めなくなるため、1レーンを縦の小さなブロックにして
- * 幹からの枝として描いている。
+ * developへ入っているレーンは塗りつぶしの点、まだ入っていないレーンは破線の枝と
+ * 中抜きの点にして、「戻ってきたかどうか」を形で見せる。
  */
 function LaneRow({
   repositoryFullName,
@@ -170,187 +225,418 @@ function LaneRow({
   repositoryFullName: string;
   lane: BranchFlowLane;
 }) {
-  const kindLabel = pullRequestKindLabel(lane.kind);
+  const merged = lane.status === "merged";
+  const headPullRequest = lane.pullRequests[0] ?? null;
 
   return (
-    <li className="relative py-1.5">
-      {/* 幹（左の縦線）からこのレーンへ伸びる枝 */}
-      <span aria-hidden="true" className="absolute -left-3 top-4 h-px w-3 bg-border" />
+    <li className="relative py-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-[0.85rem] left-[2.25rem] w-[0.85rem] max-sm:left-[1.75rem] max-sm:w-[0.7rem]",
+          merged ? "border-t border-border" : "border-t border-dashed border-border",
+        )}
+      />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-[0.6rem] left-[calc(2.25rem-3px)] size-[7px] rounded-full max-sm:left-[calc(1.75rem-3px)]",
+          merged ? "bg-primary" : "border-[1.5px] border-primary bg-background",
+        )}
+      />
+
       <div className="flex flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          {lane.pullRequests.length === 0 ? (
-            <CircleDashed className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          ) : (
-            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          )}
           <code className="min-w-0 max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs">
             {lane.branchName}
           </code>
           <LaneStatusBadge status={lane.status} />
-          {lane.releaseState && <ReleaseStateBadge state={lane.releaseState} />}
-          {kindLabel && lane.kind !== "issue" && (
-            <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>
-          )}
         </div>
 
         {lane.pullRequests.map((pullRequest) => (
-          <div key={pullRequest.id} className="pl-5">
-            <PullRequestLine pullRequest={pullRequest} />
-          </div>
+          <PullRequestLine key={pullRequest.id} pullRequest={pullRequest} />
         ))}
 
-        <div className="flex flex-col gap-1 pl-5">
-          {lane.issue ? (
-            <IssueLine repositoryFullName={repositoryFullName} issue={lane.issue} />
-          ) : (
-            <span className="text-xs text-muted-foreground">対応Issue不明</span>
-          )}
-          {/* 1本のPRが複数のIssueを扱っている場合。本文の言及も混ざるため「関連」と明示する */}
-          {lane.relatedIssues.map((issue) => (
-            <IssueLine
-              key={issue.number}
-              repositoryFullName={repositoryFullName}
-              issue={issue}
-              prefix="関連"
-            />
-          ))}
-        </div>
+        {lane.issue ? (
+          <IssueLine
+            repositoryFullName={repositoryFullName}
+            issue={lane.issue}
+            pullRequestTitle={headPullRequest?.title}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">対応Issue不明</span>
+        )}
+        <RelatedIssuesLine
+          repositoryFullName={repositoryFullName}
+          issues={lane.relatedIssues}
+        />
+        {lane.manualSteps.map((manualStep) => (
+          <ManualStepLine
+            key={manualStep.number}
+            repositoryFullName={repositoryFullName}
+            manualStep={manualStep}
+          />
+        ))}
       </div>
     </li>
   );
 }
 
-/** `develop` → `main`（リリース）の区間 */
-function ReleaseSection({ release }: { release: BranchFlowRelease }) {
-  const aheadBy = release.comparison?.aheadBy ?? null;
+/**
+ * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
+ *
+ * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
+ * 実線とひし形、まだ出ていない版は破線と中抜きのひし形で描く。
+ */
+function ReleaseGroupHeader({
+  group,
+  releaseButton,
+}: {
+  group: BranchFlowReleaseGroup;
+  releaseButton?: React.ReactNode;
+}) {
+  const released = group.mergedAt !== null;
 
   return (
-    <ul className="ml-2 border-l pl-3">
-      <li className="relative py-1.5">
-        <span aria-hidden="true" className="absolute -left-3 top-4 h-px w-3 bg-border" />
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <code className="rounded bg-muted px-1.5 py-0.5">{DEVELOP_BRANCH}</code>
-            <span aria-hidden="true">→</span>
-            <code className="rounded bg-muted px-1.5 py-0.5">{MAIN_BRANCH}</code>
-            <span>
-              {aheadBy === null
-                ? "差分は取得できませんでした"
-                : aheadBy === 0
-                  ? "未リリースの変更はありません"
-                  : `未リリース ${aheadBy}コミット`}
+    <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-[1.15rem] left-[0.5rem] w-[2.6rem] max-sm:left-[0.4rem] max-sm:w-[2rem]",
+          released ? "border-t-2 border-purple-500" : "border-t-2 border-dashed border-purple-500",
+        )}
+      />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-[calc(1.15rem-4px)] left-[calc(0.5rem-3px)] size-2 rotate-45 max-sm:left-[calc(0.4rem-3px)]",
+          released ? "bg-purple-500" : "border-2 border-purple-500 bg-background",
+        )}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute top-[calc(1.15rem-3px)] left-[calc(2.25rem-3px)] size-[7px] rounded-full bg-purple-500 max-sm:left-[calc(1.75rem-3px)]"
+      />
+
+      <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold text-purple-700 dark:text-purple-300">
+            {group.version ? `v${group.version}` : released ? "リリース済み" : "次のリリース"}
+          </span>
+          {released ? (
+            <span className="text-xs text-muted-foreground">
+              {group.mergedAt && `${formatDate(group.mergedAt)}に本番反映`}
             </span>
-            {(release.comparison?.behindBy ?? 0) > 0 && (
-              <PullRequestMetaBadge>
-                mainに{release.comparison?.behindBy}コミットの未取り込みあり
-              </PullRequestMetaBadge>
-            )}
-          </div>
-          {release.pullRequest ? (
-            <PullRequestLine pullRequest={release.pullRequest} />
           ) : (
-            aheadBy !== null &&
-            aheadBy > 0 && (
-              <span className="text-xs text-muted-foreground">リリースPRは未作成です。</span>
-            )
+            <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
+              {group.pullRequest ? "リリース中" : "本番未反映"}
+            </span>
           )}
+          {releaseButton}
         </div>
-      </li>
-    </ul>
+        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
+      </div>
+    </li>
   );
 }
 
-function RepositoryCard({
-  repository,
-  showCompleted,
-}: {
-  repository: BranchFlowRepository;
-  showCompleted: boolean;
-}) {
-  const lanes = showCompleted
-    ? repository.lanes
-    : repository.lanes.filter((lane) => !isCompletedLane(lane));
-  const hiddenLaneCount = repository.lanes.length - lanes.length;
+/** バージョンの束に何件乗っているか。手作業が残っていればそれも出す */
+function ReleaseGroupNote({ group }: { group: BranchFlowReleaseGroup }) {
+  const released = group.mergedAt !== null;
+  const parts = [
+    `このバージョンに乗${released ? "った" : "る"}変更 ${group.lanes.length}件`,
+    ...(group.openManualStepCount > 0 ? [`残っている手作業 ${group.openManualStepCount}件`] : []),
+  ];
 
   return (
-    <section className="border-b last:border-b-0">
-      <h2 className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-4 py-2 text-xs font-semibold backdrop-blur">
-        <span
-          className="size-2 shrink-0 rounded-full"
-          style={{ backgroundColor: getRepoColor(repository.repositoryFullName) }}
-          aria-hidden="true"
-        />
-        <span className="truncate">{repository.repositoryFullName}</span>
-        {repository.repositoryPrivate && (
-          <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Private" />
+    <li className="pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+      {parts.join(" ・ ")}
+    </li>
+  );
+}
+
+/**
+ * `main`と`develop`の2本のレールに、リリースの横線と作業ブランチの枝を並べた図（#1510）。
+ *
+ * **gitのコミットグラフではない。** 実際の分岐点やマージ順序は描かず、
+ * 「どのバージョンにどのブランチ・PR・Issueが含まれるか」だけを縦に並べた模式図で、
+ * 束の作り方は`lib/branch-flow.ts`が持つ（追加のGitHub API取得は無い）。
+ *
+ * 作業ブランチごとに列を増やすとスマホ幅で必ず溢れるため、**レールは2本に固定**し、
+ * レールが占める幅もPC 3.35rem・スマホ 2.6remの固定にしている。横スクロールは出ない。
+ */
+function ReleaseFlowGraph({
+  repository,
+  showClosed,
+  showAllVersions,
+  onShowAllVersions,
+  onRefresh,
+}: {
+  repository: BranchFlowRepository;
+  showClosed: boolean;
+  showAllVersions: boolean;
+  onShowAllVersions: () => void;
+  onRefresh: () => void;
+}) {
+  const activeLanes = showClosed
+    ? repository.activeLanes
+    : repository.activeLanes.filter((lane) => !isClosedLane(lane));
+  const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
+
+  // 既定で出すのは「未リリース」と「ひとつ前の版」まで。それ以前はボタンで開く（#1510）
+  const visibleGroups = showAllVersions
+    ? repository.releaseGroups
+    : repository.releaseGroups.slice(0, 2);
+  const hiddenGroupCount = repository.releaseGroups.length - visibleGroups.length;
+
+  const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
+  const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
+    ? repository.releaseGroups[0].lanes
+    : []
+  ).flatMap((lane) => (lane.issue ? [lane.issue] : []));
+
+  return (
+    <div className="relative px-4 py-3">
+      <div className="flex items-center gap-3 pb-2 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-purple-500" />
+          {MAIN_BRANCH}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-primary" />
+          {DEVELOP_BRANCH}
+        </span>
+        {unreleasedCommits !== null && unreleasedCommits > 0 && (
+          <span>未リリース {unreleasedCommits}コミット</span>
         )}
-      </h2>
+      </div>
 
-      <div className="px-4 py-3">
-        <TrunkNode name={MAIN_BRANCH} version={repository.release.latestVersion} />
-        <ReleaseSection release={repository.release} />
-        <TrunkNode name={DEVELOP_BRANCH} />
+      <ul className="relative">
+        {/* 2本のレール。行の高さによらず端まで伸ばす */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]"
+        />
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]"
+        />
 
-        {lanes.length === 0 ? (
-          <p className="ml-2 border-l pl-3 py-2 text-xs text-muted-foreground">
-            developへ向かっている作業はありません。
-          </p>
-        ) : (
-          <ul className="ml-2 border-l pl-3">
-            {lanes.map((lane) => (
+        {activeLanes.map((lane) => (
+          <LaneRow
+            key={lane.key}
+            repositoryFullName={repository.repositoryFullName}
+            lane={lane}
+          />
+        ))}
+
+        {visibleGroups.map((group, index) => (
+          <ReleaseGroupHeaderWithLanes
+            key={group.key}
+            repositoryFullName={repository.repositoryFullName}
+            group={group}
+            releaseButton={
+              index === 0 && repository.canTriggerRelease ? (
+                <RepositoryReleaseButton
+                  repositoryFullName={repository.repositoryFullName}
+                  pendingIssues={pendingIssues}
+                  onTriggered={onRefresh}
+                />
+              ) : undefined
+            }
+          />
+        ))}
+
+        {repository.unassignedLanes.length > 0 && (
+          <>
+            <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+              どの版で本番へ出たか特定できない変更 {repository.unassignedLanes.length}件
+              （取得したPRの範囲より古いもの）
+            </li>
+            {repository.unassignedLanes.map((lane) => (
               <LaneRow
                 key={lane.key}
                 repositoryFullName={repository.repositoryFullName}
                 lane={lane}
               />
             ))}
+          </>
+        )}
+
+        {(hiddenGroupCount > 0 || hiddenClosedCount > 0) && (
+          <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
+            {hiddenGroupCount > 0 && (
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onShowAllVersions}>
+                さらに前のバージョンを表示（{hiddenGroupCount}件）
+              </Button>
+            )}
+            {hiddenClosedCount > 0 && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                クローズ（未マージ）{hiddenClosedCount}件は隠しています
+              </span>
+            )}
+          </li>
+        )}
+
+        {activeLanes.length === 0 && repository.releaseGroups.length === 0 && (
+          <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+            developへ向かっている作業はありません。
+          </li>
+        )}
+      </ul>
+
+      {repository.orphanIssues.length > 0 && (
+        <div className="mt-3 rounded-md border border-dashed p-3">
+          <p className="flex items-center gap-1.5 text-xs font-medium">
+            <TriangleAlert className="size-3.5 text-amber-600" aria-hidden="true" />
+            ブランチもPRも見つからないIssue
+          </p>
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {repository.orphanIssues.map((issue) => (
+              <li key={issue.number}>
+                <IssueLine
+                  repositoryFullName={repository.repositoryFullName}
+                  issue={issue}
+                />
+              </li>
+            ))}
           </ul>
-        )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-        {hiddenLaneCount > 0 && (
-          <p className="ml-2 border-l pl-3 pt-1 text-xs text-muted-foreground">
-            完了した作業{hiddenLaneCount}件は隠しています。
-          </p>
-        )}
-
-        {repository.orphanIssues.length > 0 && (
-          <div className="mt-3 rounded-md border border-dashed p-3">
-            <p className="flex items-center gap-1.5 text-xs font-medium">
-              <TriangleAlert className="size-3.5 text-amber-600" aria-hidden="true" />
-              ブランチもPRも見つからないIssue
-            </p>
-            <ul className="mt-1.5 flex flex-col gap-1">
-              {repository.orphanIssues.map((issue) => (
-                <li key={issue.number}>
-                  <IssueLine
-                    repositoryFullName={repository.repositoryFullName}
-                    issue={issue}
-                  />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {!repository.branchesLoaded && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            ブランチ状況を取得できていないため、PRのあるブランチだけを表示しています。
-          </p>
-        )}
-      </div>
-    </section>
+function ReleaseGroupHeaderWithLanes({
+  repositoryFullName,
+  group,
+  releaseButton,
+}: {
+  repositoryFullName: string;
+  group: BranchFlowReleaseGroup;
+  releaseButton?: React.ReactNode;
+}) {
+  return (
+    <>
+      <ReleaseGroupHeader group={group} releaseButton={releaseButton} />
+      {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
+      {group.lanes.map((lane) => (
+        <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} />
+      ))}
+    </>
   );
 }
 
 /**
- * Issue・ブランチ・PRの関係を、リポジトリごとの「流れ」として1画面で見せる（#1455）。
+ * 畳んだときの1行（#1510）。
+ *
+ * **右側に出すのは「手が要るか」だけ。** 8リポジトリを1画面へ収めるための行なので、
+ * ここで詳細を語らない。リポジトリ名は`owner/`を落とし、フル名は`title`属性に持たせる。
+ */
+function RepositorySummaryRow({
+  repository,
+  branchesFailed,
+  isOpen,
+  onToggle,
+}: {
+  repository: BranchFlowRepository;
+  branchesFailed: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const { summary } = repository;
+  const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  const hasAnything =
+    summary.activeLaneCount > 0 ||
+    summary.releaseInProgress ||
+    unreleasedCommits > 0 ||
+    repository.orphanIssues.length > 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+      className={cn(
+        "flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2 text-left hover:bg-accent/50",
+        isOpen && "bg-muted/60",
+      )}
+    >
+      <ChevronRight
+        className={cn("size-3 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
+        aria-hidden="true"
+      />
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: getRepoColor(repository.repositoryFullName) }}
+        aria-hidden="true"
+      />
+      <span className="truncate text-xs font-semibold" title={repository.repositoryFullName}>
+        {repository.repositoryFullName.split("/").at(-1)}
+      </span>
+      {repository.repositoryPrivate && (
+        <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Private" />
+      )}
+      {repository.release.latestVersion && (
+        <span className="shrink-0 text-xs text-muted-foreground">
+          v{repository.release.latestVersion}
+        </span>
+      )}
+
+      <span className="flex-1" />
+
+      {summary.hasCiFailure && (
+        <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
+          CI失敗
+        </span>
+      )}
+      {summary.releaseInProgress && (
+        <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
+          リリース中
+        </span>
+      )}
+      {/* リリースPRのマージ待ちはリリース中のピルが表すので、重ねて出さない */}
+      {summary.needsUserMerge && (
+        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+          ユーザーのマージが必要
+        </span>
+      )}
+      {summary.activeLaneCount > 0 && (
+        <span className="shrink-0 text-xs text-muted-foreground">
+          進行中{summary.activeLaneCount}
+        </span>
+      )}
+      {unreleasedCommits > 0 && !summary.releaseInProgress && (
+        <span className="shrink-0 text-xs text-muted-foreground">未リリース{unreleasedCommits}</span>
+      )}
+      {branchesFailed && (
+        <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>
+      )}
+      {!hasAnything && !branchesFailed && (
+        <span className="shrink-0 text-xs text-muted-foreground">動きなし</span>
+      )}
+    </button>
+  );
+}
+
+/** 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510） */
+function needsAttention(repository: BranchFlowRepository): boolean {
+  const { summary } = repository;
+  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress;
+}
+
+/**
+ * Issue・ブランチ・PRの関係を、リポジトリごとの「流れ」として1画面で見せる（#1455・#1510）。
  *
  * Issue一覧・PR一覧はどちらも「一方から他方を辿る」導線しか持たず、
  * 「どのIssueがどのブランチのどのPRになっていて、どこまで来ているのか」を俯瞰できなかった。
- * ここでは`main ← develop ← 各作業ブランチ`という運用どおりの縦の流れに沿って並べ、
- * 1レーンに Issue・ブランチ・PR・CI状態をまとめて出す。
  *
- * 組み立ては`lib/branch-flow.ts`の純粋関数が行い、この層は描画だけを持つ。
+ * **既定は全リポジトリを1行に畳む**（#1510）。8リポジトリを扱う画面なのに1画面へ2件しか
+ * 入らず、動きの無いリポジトリまでフルサイズで「何も無い」と言っていたため。
+ * 手が要るもの（CI失敗・ユーザーのマージ待ち・リリース中）だけを初回に開く。
+ *
+ * 展開した中身は`ReleaseFlowGraph`が持つ。組み立ては`lib/branch-flow.ts`の純粋関数が行い、
+ * この層は描画だけを持つ。
  */
 export function BranchFlowView({
   flow,
@@ -364,8 +650,33 @@ export function BranchFlowView({
   style,
   footerSpacing = false,
 }: BranchFlowViewProps) {
-  // 完了した作業まで出すと、動いている作業が下へ押し流されて読めなくなるため既定では畳む。
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
+  const [showClosed, setShowClosed] = useState(false);
+  const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
+  // 初回に一度だけ自動で開く。以降の再取得でユーザーの開閉を上書きしない
+  const autoOpenedRef = useRef(false);
+
+  const attentionRepositories = flow.repositories.filter(needsAttention);
+
+  useEffect(() => {
+    if (autoOpenedRef.current || flow.repositories.length === 0) return;
+    autoOpenedRef.current = true;
+    setOpenRepositories(
+      new Set(flow.repositories.filter(needsAttention).map((repo) => repo.repositoryFullName)),
+    );
+  }, [flow.repositories]);
+
+  function toggleRepository(fullName: string) {
+    setOpenRepositories((prev) => {
+      const next = new Set(prev);
+      if (next.has(fullName)) next.delete(fullName);
+      else next.add(fullName);
+      return next;
+    });
+  }
+
+  const allOpen =
+    flow.repositories.length > 0 && openRepositories.size === flow.repositories.length;
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -380,6 +691,9 @@ export function BranchFlowView({
           </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{flow.repositories.length}リポジトリ</span>
+            {attentionRepositories.length > 0 && (
+              <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
+            )}
             {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
           </p>
         </div>
@@ -387,9 +701,23 @@ export function BranchFlowView({
           size="sm"
           variant="ghost"
           className="h-8 shrink-0"
-          onClick={() => setShowCompleted((prev) => !prev)}
+          onClick={() =>
+            setOpenRepositories(
+              allOpen
+                ? new Set()
+                : new Set(flow.repositories.map((repo) => repo.repositoryFullName)),
+            )
+          }
         >
-          {showCompleted ? "完了を隠す" : "完了も表示"}
+          {allOpen ? "すべて閉じる" : "すべて開く"}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 shrink-0"
+          onClick={() => setShowClosed((prev) => !prev)}
+        >
+          {showClosed ? "クローズを隠す" : "クローズも表示"}
         </Button>
         <Button
           size="sm"
@@ -406,31 +734,40 @@ export function BranchFlowView({
       <div className="flex-1 overflow-y-auto overscroll-contain">
         {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 
-        {failedRepositories.length > 0 && (
-          <p className="border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
-            ブランチ状況を取得できなかったリポジトリがあります: {failedRepositories.join(", ")}
-          </p>
-        )}
-
         {!error && flow.repositories.length === 0 && (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isLoading ? "読み込み中..." : "進行中の作業があるリポジトリはありません。"}
+            {isLoading ? "読み込み中..." : "表示できるリポジトリがありません。"}
           </p>
         )}
 
-        {flow.repositories.map((repository) => (
-          <RepositoryCard
-            key={repository.repositoryFullName}
-            repository={repository}
-            showCompleted={showCompleted}
-          />
-        ))}
-
-        {flow.quietRepositories.length > 0 && (
-          <p className="px-4 py-3 text-xs text-muted-foreground">
-            動きのないリポジトリ（{flow.quietRepositories.length}件）は表示していません。
-          </p>
-        )}
+        {flow.repositories.map((repository) => {
+          const isOpen = openRepositories.has(repository.repositoryFullName);
+          return (
+            <section key={repository.repositoryFullName}>
+              <RepositorySummaryRow
+                repository={repository}
+                branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
+                isOpen={isOpen}
+                onToggle={() => toggleRepository(repository.repositoryFullName)}
+              />
+              {isOpen && (
+                <div className="border-b">
+                  <ReleaseFlowGraph
+                    repository={repository}
+                    showClosed={showClosed}
+                    showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
+                    onShowAllVersions={() =>
+                      setAllVersionsRepositories(
+                        (prev) => new Set([...prev, repository.repositoryFullName]),
+                      )
+                    }
+                    onRefresh={onRefresh}
+                  />
+                </div>
+              )}
+            </section>
+          );
+        })}
 
         {footerSpacing && <div className="h-14" aria-hidden="true" />}
       </div>

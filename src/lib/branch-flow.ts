@@ -1,11 +1,19 @@
+import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { resolveProgressStatus, type ProgressStatusKey } from "@/lib/issue-progress";
-import { classifyPullRequest, extractLinkedIssueNumber } from "@/lib/pull-request-list";
+import {
+  classifyPullRequest,
+  extractLinkedIssueNumber,
+  requiresUserMerge,
+} from "@/lib/pull-request-list";
 import type {
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
+  BranchFlowManualStep,
+  BranchFlowReleaseGroup,
   BranchFlowReleaseState,
   BranchFlowRepository,
+  BranchFlowRepositorySummary,
   RepositoryBranchStatus,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -43,28 +51,22 @@ export function issueBranchName(issueNumber: number): string {
 const VERSION_PATTERN = /v(\d+\.\d+\.\d+)/;
 
 /**
- * 完了として畳んでよいレーン（既定では隠す）。
+ * 既定では隠すレーン（#1510）。
  *
- * **区切りはdevelopへのマージではなく、mainへの反映に置く。** developへ入っただけの変更は
- * まだ本番に出ておらず、次のリリースに乗る「進行中の作業」なので既定で見えている必要がある
- * （このリポジトリ群ではブランチをマージ後も消さないため、残っているブランチの大半は
- * 本番へ出たあとの残骸で、そちらは畳んでよい）。
- *
- * 本番へ出たか判定できない場合（リリースPRを取得できていない）は畳む側に倒す。
- * 判定できないものを全部出すと、リリース運用をしていないリポジトリで一覧が埋まってしまう。
+ * **区切りは「本番へ出たか」ではなく「まだ流れているか」に置く。** バージョンごとの束
+ * （`BranchFlowReleaseGroup`）が「どの版で本番へ出たか」を表すようになったため、
+ * マージ済みのレーンを畳む必要はもう無い。既定で隠すのは、どこにも合流しないまま終わった
+ * **未マージのクローズ**だけ。
  */
-export function isCompletedLane(lane: BranchFlowLane): boolean {
-  if (lane.status === "closed") return true;
-  return lane.status === "merged" && lane.releaseState?.kind !== "pending";
+export function isClosedLane(lane: BranchFlowLane): boolean {
+  return lane.status === "closed";
 }
 
-/** レーンの並び順。手を動かす必要があるものから順に並べる */
+/** どのバージョンにも乗っていないレーンの並び順。手を動かす必要があるものから並べる */
 function laneOrder(lane: BranchFlowLane): number {
   if (lane.status === "open") return 0;
   if (lane.status === "no-pull-request") return 1;
-  // developには入ったが本番未反映＝次のリリース待ち。完了済みより前に置く
-  if (lane.status === "merged" && lane.releaseState?.kind === "pending") return 2;
-  return lane.status === "closed" ? 3 : 4;
+  return 2;
 }
 
 /** 進捗の判定に必要な最小限のIssue。表示用の`Issue`型からそのまま渡せる */
@@ -74,10 +76,19 @@ export type BranchFlowIssueSource = {
   repositoryFullName: string;
   state: "open" | "closed";
   projectStatus: string | null;
+  /** 手作業Issueの起点を引くために使う（#1510）。DBキャッシュ由来 */
+  body?: string | null;
+  /** ラベル名だけ。手作業Issue（`71.manual-step`）の判定に使う（#1510） */
+  labels?: string[];
 };
 
 export type BuildBranchFlowInput = {
-  repositories: { fullName: string; private: boolean }[];
+  repositories: {
+    fullName: string;
+    private: boolean;
+    /** リリース用workflowを持つか。「リリースする」を出すかの前提（#1510） */
+    hasClaudeWorkflow?: boolean;
+  }[];
   pullRequests: PullRequestSummary[];
   issues: BranchFlowIssueSource[];
   /** `GET /api/branch-flow`の結果。未取得のリポジトリはPRだけから組み立てる */
@@ -85,12 +96,12 @@ export type BuildBranchFlowInput = {
 };
 
 export type BranchFlow = {
-  repositories: BranchFlowRepository[];
   /**
-   * 表示すべき動きが何も無かったリポジトリ。カードを出すと画面が空のカードで埋まるため
-   * 除いているが、「集計から漏れている」のではないことを画面に出せるよう名前は返す。
+   * 表示対象のリポジトリ。**動きの無いリポジトリも除かない**（#1510）。
+   * 既定で1行に畳むようになったため、隠す理由が「場所を取るから」でなくなり、
+   * 隠すと「集計から漏れていないか」を画面で確かめられなくなる方が問題になった。
    */
-  quietRepositories: string[];
+  repositories: BranchFlowRepository[];
 };
 
 /**
@@ -110,42 +121,18 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
     input.branchStatuses.map((status) => [status.repositoryFullName, status]),
   );
 
-  const repositories: BranchFlowRepository[] = [];
-  const quietRepositories: string[] = [];
-
-  for (const repository of input.repositories) {
-    const built = buildRepository({
+  const repositories = input.repositories.map((repository) =>
+    buildRepository({
       repository,
       pullRequests: input.pullRequests.filter(
         (pullRequest) => pullRequest.repositoryFullName === repository.fullName,
       ),
       issues: input.issues.filter((issue) => issue.repositoryFullName === repository.fullName),
       branchStatus: branchStatusByRepo.get(repository.fullName) ?? null,
-    });
-
-    if (isQuiet(built)) {
-      quietRepositories.push(repository.fullName);
-    } else {
-      repositories.push(built);
-    }
-  }
-
-  return { repositories, quietRepositories };
-}
-
-/**
- * 出すものが何も無いリポジトリか。
- *
- * `develop`が`main`より進んでいる（＝未リリースの変更がある）場合は、レーンが1本も無くても
- * 「リリース待ち」という状態そのものが情報なので、静かとはみなさない。
- */
-function isQuiet(repository: BranchFlowRepository): boolean {
-  return (
-    repository.lanes.length === 0 &&
-    repository.orphanIssues.length === 0 &&
-    repository.release.pullRequest === null &&
-    (repository.release.comparison?.aheadBy ?? 0) === 0
+    }),
   );
+
+  return { repositories };
 }
 
 function buildRepository({
@@ -154,7 +141,7 @@ function buildRepository({
   issues,
   branchStatus,
 }: {
-  repository: { fullName: string; private: boolean };
+  repository: { fullName: string; private: boolean; hasClaudeWorkflow?: boolean };
   pullRequests: PullRequestSummary[];
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
@@ -180,16 +167,16 @@ function buildRepository({
 
   const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
   const releases = collectReleases(pullRequests);
-  const lanes = [...laneKeys]
-    .map((key) =>
-      buildLane({
-        branchName: key,
-        pullRequests: lanePullRequests.filter((pullRequest) => pullRequest.headRef === key),
-        issueByNumber,
-        releases,
-      }),
-    )
-    .sort(compareLanes);
+  const manualStepsByIssue = collectManualSteps(issues);
+  const lanes = [...laneKeys].map((key) =>
+    buildLane({
+      branchName: key,
+      pullRequests: lanePullRequests.filter((pullRequest) => pullRequest.headRef === key),
+      issueByNumber,
+      releases,
+      manualStepsByIssue,
+    }),
+  );
 
   // どこかのレーンに現れたIssueは「関連が見つからない」側に出さない。**関連として出したぶんも
   // 含める**——1本のPRが複数のIssueを扱っている場合、2件目以降も画面には現れているため。
@@ -200,6 +187,27 @@ function buildRepository({
     ]),
   );
 
+  const { activeLanes, releaseGroups, unassignedLanes } = groupLanesByRelease({
+    lanes,
+    releases,
+    openReleasePullRequest: releasePullRequest,
+    unreleasedCommits: branchStatus?.developVsMain?.aheadBy ?? 0,
+  });
+
+  const openLanePullRequests = lanePullRequests.filter(
+    (pullRequest) => pullRequest.state === "open",
+  );
+  const summary: BranchFlowRepositorySummary = {
+    activeLaneCount: activeLanes.filter((lane) => !isClosedLane(lane)).length,
+    hasCiFailure: [...openLanePullRequests, ...(releasePullRequest ? [releasePullRequest] : [])].some(
+      (pullRequest) => pullRequest.ciState === "failure",
+    ),
+    needsUserMerge: openLanePullRequests.some(requiresUserMerge),
+    releaseInProgress: releasePullRequest !== null,
+  };
+
+  const canRelease = repository.hasClaudeWorkflow ?? false;
+
   return {
     repositoryFullName: repository.fullName,
     repositoryPrivate: repository.private,
@@ -208,11 +216,23 @@ function buildRepository({
       comparison: branchStatus?.developVsMain ?? null,
       latestVersion: releases.at(-1)?.version ?? null,
     },
-    lanes,
+    activeLanes,
+    releaseGroups,
+    unassignedLanes,
+    summary,
+    canRelease,
+    // openなバンプPRがある間は、リリースworkflowを起こし直すと二重に走る。
+    // 未リリースの変更が無い場合も押させない（出すものが無い）。
+    canTriggerRelease:
+      canRelease &&
+      releasePullRequest === null &&
+      !openLanePullRequests.some((pullRequest) => pullRequest.kind === "version-bump") &&
+      (branchStatus?.developVsMain?.aheadBy ?? 0) > 0,
     orphanIssues: issues
       .filter(
         (issue) =>
           issue.state === "open" &&
+          !isManualStepIssue(issue) &&
           ACTIVE_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
           !linkedIssueNumbers.has(issue.number),
       )
@@ -227,6 +247,7 @@ type MergedRelease = {
   mergedAt: number;
   version: string | null;
   pullRequestNumber: number;
+  pullRequest: PullRequestSummary;
 };
 
 function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
@@ -236,8 +257,171 @@ function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
       mergedAt: new Date(pullRequest.mergedAt as string).getTime(),
       version: VERSION_PATTERN.exec(pullRequest.title)?.[1] ?? null,
       pullRequestNumber: pullRequest.number,
+      pullRequest,
     }))
     .sort((a, b) => a.mergedAt - b.mergedAt);
+}
+
+/**
+ * レーンを「どのバージョンで本番へ出たか」の束へ分ける（#1510）。
+ *
+ * 束の作り方は`resolveReleaseState`が既に済ませているので、ここはその結果で仕分けるだけ。
+ * **追加のGitHub API取得は要らない。**
+ *
+ * - まだdevelopへ入っていないレーン（マージ待ち・PR未作成・未マージのクローズ）は`activeLanes`
+ * - developへ入ったが本番未反映のレーンは、先頭の束（未リリース）
+ * - 本番へ出たレーンは、それを運んだリリースPRごとの束
+ * - どの版か特定できないレーン（取得したPRの範囲より古い）は`unassignedLanes`
+ *
+ * 先頭の未リリースの束は、**中身が空でもリリースPRか未リリースのコミットがあれば作る**——
+ * 「これから何を出すのか」を置く場所であり、「リリースする」ボタンの居場所でもあるため。
+ */
+function groupLanesByRelease({
+  lanes,
+  releases,
+  openReleasePullRequest,
+  unreleasedCommits,
+}: {
+  lanes: BranchFlowLane[];
+  releases: MergedRelease[];
+  openReleasePullRequest: PullRequestSummary | null;
+  unreleasedCommits: number;
+}): {
+  activeLanes: BranchFlowLane[];
+  releaseGroups: BranchFlowReleaseGroup[];
+  unassignedLanes: BranchFlowLane[];
+} {
+  const activeLanes: BranchFlowLane[] = [];
+  const pendingLanes: BranchFlowLane[] = [];
+  const unassignedLanes: BranchFlowLane[] = [];
+  const lanesByRelease = new Map<number, BranchFlowLane[]>();
+
+  for (const lane of lanes) {
+    if (lane.status !== "merged") {
+      activeLanes.push(lane);
+      continue;
+    }
+    // マージ時刻が無い（`releaseState`がnull）レーンも、版を決められない点は`unknown`と同じ
+    if (lane.releaseState === null || lane.releaseState.kind === "unknown") {
+      unassignedLanes.push(lane);
+    } else if (lane.releaseState.kind === "pending") {
+      pendingLanes.push(lane);
+    } else {
+      const number = lane.releaseState.pullRequestNumber;
+      lanesByRelease.set(number, [...(lanesByRelease.get(number) ?? []), lane]);
+    }
+  }
+
+  const releaseGroups: BranchFlowReleaseGroup[] = [];
+  if (pendingLanes.length > 0 || openReleasePullRequest !== null || unreleasedCommits > 0) {
+    releaseGroups.push(
+      toReleaseGroup({
+        key: "unreleased",
+        version: openReleasePullRequest
+          ? (VERSION_PATTERN.exec(openReleasePullRequest.title)?.[1] ?? null)
+          : null,
+        pullRequest: openReleasePullRequest,
+        mergedAt: null,
+        lanes: pendingLanes.sort(compareLanes),
+      }),
+    );
+  }
+
+  // 本番へ出た束は新しい順。中身が1本も無い版は、画面に出しても線が増えるだけなので作らない
+  for (const release of [...releases].reverse()) {
+    const groupLanes = lanesByRelease.get(release.pullRequestNumber);
+    if (!groupLanes || groupLanes.length === 0) continue;
+    releaseGroups.push(
+      toReleaseGroup({
+        key: `release-${release.pullRequestNumber}`,
+        version: release.version,
+        pullRequest: release.pullRequest,
+        mergedAt: release.pullRequest.mergedAt,
+        lanes: groupLanes.sort(compareLanes),
+      }),
+    );
+  }
+
+  return {
+    activeLanes: activeLanes.sort(compareLanes),
+    releaseGroups,
+    unassignedLanes: unassignedLanes.sort(compareLanes),
+  };
+}
+
+function toReleaseGroup(
+  group: Omit<BranchFlowReleaseGroup, "openManualStepCount">,
+): BranchFlowReleaseGroup {
+  return {
+    ...group,
+    openManualStepCount: group.lanes.reduce(
+      (count, lane) =>
+        count + lane.manualSteps.filter((manualStep) => manualStep.state === "open").length,
+      0,
+    ),
+  };
+}
+
+function isManualStepIssue(issue: BranchFlowIssueSource): boolean {
+  return (issue.labels ?? []).includes(MANUAL_STEP_LABEL);
+}
+
+/**
+ * 手作業Issue（`71.manual-step`）を、起点Issueの番号ごとにまとめる（#1510）。
+ *
+ * 手作業Issueの本文は`## 関連`の見出しに起点Issueの番号を書く決まり
+ * （[docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)）なので、そこを読む。
+ * 見出しが無い場合だけ「起点」の語を含む行へ落とす——**本文の先頭から最初の`#番号`を
+ * 拾うのは誤り**で、`## 前提条件`に「#1461がdevelopへマージされた後」のような
+ * 別のIssueへの参照が入るため。
+ */
+function collectManualSteps(
+  issues: BranchFlowIssueSource[],
+): Map<number, BranchFlowManualStep[]> {
+  const byOrigin = new Map<number, BranchFlowManualStep[]>();
+
+  for (const issue of issues) {
+    if (!isManualStepIssue(issue)) continue;
+    const origin = extractManualStepOrigin(issue.body ?? null);
+    if (origin === null || origin === issue.number) continue;
+    byOrigin.set(origin, [
+      ...(byOrigin.get(origin) ?? []),
+      { number: issue.number, title: issue.title, state: issue.state },
+    ]);
+  }
+
+  for (const manualSteps of byOrigin.values()) {
+    // 未完了を先に、あとは番号の新しい順。手を動かす必要があるものが上に来る
+    manualSteps.sort((a, b) => {
+      if (a.state !== b.state) return a.state === "open" ? -1 : 1;
+      return b.number - a.number;
+    });
+  }
+
+  return byOrigin;
+}
+
+const ISSUE_REFERENCE_PATTERN = /#(\d+)/;
+const RELATED_HEADING_PATTERN = /^##\s*関連\s*$/;
+const HEADING_PATTERN = /^##\s/;
+
+/** 手作業Issueの本文から起点Issueの番号を取る。見つからなければnull */
+export function extractManualStepOrigin(body: string | null): number | null {
+  if (!body) return null;
+  const lines = body.split("\n");
+
+  const headingIndex = lines.findIndex((line) => RELATED_HEADING_PATTERN.test(line.trim()));
+  if (headingIndex >= 0) {
+    const rest = lines.slice(headingIndex + 1);
+    const nextHeading = rest.findIndex((line) => HEADING_PATTERN.test(line));
+    const section = (nextHeading === -1 ? rest : rest.slice(0, nextHeading)).join("\n");
+    const number = ISSUE_REFERENCE_PATTERN.exec(section)?.[1];
+    if (number) return Number(number);
+  }
+
+  const originLine = lines.find((line) => line.includes("起点"));
+  const fromOriginLine = originLine ? ISSUE_REFERENCE_PATTERN.exec(originLine)?.[1] : undefined;
+  return fromOriginLine ? Number(fromOriginLine) : null;
 }
 
 /**
@@ -273,11 +457,13 @@ function buildLane({
   pullRequests,
   issueByNumber,
   releases,
+  manualStepsByIssue,
 }: {
   branchName: string;
   pullRequests: PullRequestSummary[];
   issueByNumber: Map<number, BranchFlowIssueSource>;
   releases: MergedRelease[];
+  manualStepsByIssue: Map<number, BranchFlowManualStep[]>;
 }): BranchFlowLane {
   // openなPRを先頭に、あとは更新が新しい順。1本のブランチで作り直した2本目のPRがある場合に、
   // 「今生きているPR」が先に来るようにする。
@@ -318,6 +504,8 @@ function buildLane({
     ),
     status: resolveLaneStatus(sorted),
     releaseState: mergedAt === undefined ? null : resolveReleaseState(mergedAt, releases),
+    // 手作業は「対応Issueから生まれたもの」なので、関連Issueぶんまでは拾わない
+    manualSteps: issueNumber === null ? [] : (manualStepsByIssue.get(issueNumber) ?? []),
     updatedAt: sorted[0]?.updatedAt ?? null,
   };
 }
