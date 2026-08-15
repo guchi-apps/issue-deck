@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   groupRepositoriesByWorkflowStatus,
   mergeSuggestedLabels,
-  syncPlanRequiredLabel,
 } from "@/components/dashboard/create-issue-dialog";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { ConnectedRepository } from "@/types/repository";
@@ -31,7 +30,7 @@ describe("mergeSuggestedLabels", () => {
     expect(mergeSuggestedLabels(prev, suggested)).toEqual(["60.chore"]);
   });
 
-  it("実装オプション用ラベル（チェックボックス選択分）はリセットせず維持する", () => {
+  it("実装オプション用ラベル（「実装を開始」ダイアログで選ぶ分）はリセットせず維持する", () => {
     const prev = ["bug", PLAN_REQUIRED_LABEL];
     const suggested = ["60.chore"];
 
@@ -47,26 +46,6 @@ describe("mergeSuggestedLabels", () => {
 
   it("生成結果に重複があっても1つにまとめる", () => {
     expect(mergeSuggestedLabels([], ["60.chore", "60.chore"])).toEqual(["60.chore"]);
-  });
-});
-
-describe("syncPlanRequiredLabel", () => {
-  it("新機能の種別を選ぶと計画のラベルを足す（#1317）", () => {
-    expect(syncPlanRequiredLabel(["50.feature"])).toEqual(["50.feature", PLAN_REQUIRED_LABEL]);
-  });
-
-  it("バグ修正へ選び直すと計画のラベルを外す（付け外しの両方向を扱う）", () => {
-    expect(syncPlanRequiredLabel(["30.bug", PLAN_REQUIRED_LABEL])).toEqual(["30.bug"]);
-  });
-
-  it("既定と一致していればnullを返し、書き込み自体を止める", () => {
-    expect(syncPlanRequiredLabel(["30.bug"])).toBeNull();
-    expect(syncPlanRequiredLabel(["50.feature", PLAN_REQUIRED_LABEL])).toBeNull();
-    expect(syncPlanRequiredLabel([])).toBeNull();
-  });
-
-  it("種別以外のラベルには反応しない", () => {
-    expect(syncPlanRequiredLabel(["80.Priority: High"])).toBeNull();
   });
 });
 

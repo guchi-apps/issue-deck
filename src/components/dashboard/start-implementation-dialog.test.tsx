@@ -121,7 +121,6 @@ function renderDialog(
     issue?: Issue;
     actionsDisabledReason?: string | null;
     localSessionCommand?: string | null;
-    showOptions?: boolean;
     onOpenChange?: (open: boolean) => void;
   } = {},
 ) {
@@ -139,7 +138,6 @@ function renderDialog(
       includeDispatchTargets={props.includeDispatchTargets}
       actionsDisabledReason={props.actionsDisabledReason ?? null}
       localSessionCommand={props.localSessionCommand ?? null}
-      showOptions={props.showOptions}
     />
   );
   const result = render(element());
@@ -342,26 +340,26 @@ describe("StartImplementationDialog", () => {
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
   });
 
-  describe("Issue作成画面から開く場合（#1323）", () => {
-    it("オプションのチェックボックスを出さず、実行先だけを選ばせる", () => {
+  describe("Issue作成画面から開く場合（#1323・#1580）", () => {
+    it("オプションと実行先の両方を選ばせる", () => {
       dispatchState.hosts = [makeHost()];
-      renderDialog({ includeDispatchTargets: true, showOptions: false });
+      renderDialog({ includeDispatchTargets: true });
 
-      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
-      // 既定はサブPC。作成直後にGitHub Actionsへ固定されないこと自体がこの変更の目的
+      // オプションは作成フォームでは選ばせず、この画面だけで選ぶ（#1580）
+      expect(screen.queryByText("計画が必要")).not.toBeNull();
+      // 既定はサブPC。作成直後にGitHub Actionsへ固定されないこと自体が#1323の目的
       expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
     });
 
-    it("作成時に付いたラベルは選択状態として引き継ぎ、付け直しのPATCHは投げない", async () => {
+    it("既に付いているラベルは選択状態として引き継ぎ、付け直しのPATCHは投げない", async () => {
       renderDialog({
         includeDispatchTargets: true,
-        showOptions: false,
         issue: makeIssue({ labels: [{ name: PLAN_REQUIRED_LABEL, color: "ededed" }] as Issue["labels"] }),
       });
 
       clickStart();
 
-      // 「計画が必要」は作成フォームで選ばれてラベルとして付いている。文面と進捗はそれに従う
+      // 「計画が必要」は既にラベルとして付いている。文面と進捗はそれに従う
       await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
       expect(createComment.mock.calls[0][0].body).toBe("@claude 計画を立案してください");
       expect(setProgressStatus.mock.calls[0][0].status).toBe("planning");
