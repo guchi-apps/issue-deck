@@ -31,7 +31,7 @@ src/
   proxy.ts          リクエスト前段の処理（後述）
 prisma/schema.prisma
 scripts/            開発・CI用スクリプト（dev.sh ほか）
-deploy/             PM2の ecosystem.config.js
+deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は docs/production-memory.md）
 ```
 
 規約として守られていること。
