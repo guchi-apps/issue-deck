@@ -682,6 +682,22 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 **並びは`createdAt`の昇順で、払い出し（`claimDispatchJob`の`orderBy`）と同じ。** 画面に見えて
 いる順番と実際に走る順番が一致する。
 
+### 直近の失敗は×で消せる（#1479）
+
+終了したジョブは24時間出続ける（`FINISHED_JOB_RETENTION_MS`）。押した結果がすぐ消えると
+失敗に気づけないための猶予だが、**対処が済んだ失敗を畳めないと、新しい失敗が古いものに埋もれる**。
+「直近の失敗」の行の×（`POST /api/dispatch/<id>/dismiss`）でその1件を、2件以上あるときは
+「失敗の表示をすべて消す」でまとめて消せる。
+
+- **消えるのは表示だけで、`DispatchJob`の行と失敗理由（`message`）は残す。** 後から原因を追う
+  ときの唯一の手掛かりを、表示を片付けたいだけの操作で失わせない。実体は`dismissedAt`が入り、
+  `listDispatchState`が返さなくなるだけ
+- **未完了のジョブは消せない**（`dismissDispatchJob`が弾く）。走っているものを表示だけ消せると、
+  動いている実体が画面のどこにも出ないまま残る。止めたいなら取り消し（`cancel`）を使う。
+  同じ×印でも役割が違うため、`QueueSection`のpropsも`onCancel`／`onDismiss`で分けている
+- 消した失敗はIssue詳細のジョブ状態表示（`dispatch-job-status.tsx`）からも同時に消える。
+  どちらも`GET /api/dispatch`の同じ`jobs`を読んでいるため
+
 ### まとめて積むときはオプションを選ばせない
 
 `21.plan-required`等は**Issueごとに要否が違う**ので、一括で決める方が事故になる。必要なIssueは

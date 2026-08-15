@@ -241,15 +241,21 @@ export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
  * - **CIの結果は見ない。** #1433がCI実行中を「要操作」から外しているのは押しても弾かれる
  *   ボタンの強調についてで、こちらは「自動ではマージされない」という事実の表示にあたる。
  *
- * `00.check-user`は計画の承認待ち・質問の回答待ちでも付く汎用ラベルだが、ここで見るのは
- * 「そのIssueにopenなdevelop向けPRがある」場面に限られるため、マージ保留以外の意味にならない。
- * 理由別のラベル（`01.check-merge`）が入ったら、この関数の中だけを差し替えればよい。
+ * **理由ラベル（`01.check-*`）が読めるならそれで判定する**（#1490）。`01.check-merge`だけを
+ * マージ待ちとして扱い、計画の承認待ち・質問の回答待ちで付いた`00.check-user`は除く。
+ * 理由ラベルが配られていないリポジトリでは`linkedIssueCheckReason`が`null`になり、
+ * 従来どおり`00.check-user`の有無だけで判定する。そちらでも、ここで見るのは「そのIssueに
+ * openなdevelop向けPRがある」場面に限られるため、マージ保留以外の意味にはなりにくい。
  */
 export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
   if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) return false;
   if (pullRequest.autoMergeEnabled) return false;
   if (pullRequest.kind === "release") return true;
-  return pullRequest.kind === "issue" && pullRequest.linkedIssueCheckUser;
+  if (pullRequest.kind !== "issue") return false;
+  if (pullRequest.linkedIssueCheckReason !== null) {
+    return pullRequest.linkedIssueCheckReason === "merge";
+  }
+  return pullRequest.linkedIssueCheckUser;
 }
 
 /**

@@ -1,5 +1,9 @@
+import {
+  addCheckUserWithReason,
+  removeCheckUserWithReason,
+} from "@/lib/dispatch/check-user-labels";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
-import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
+import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /**
@@ -19,9 +23,6 @@ const SESSION_FAILED_MARKER = "<!-- supervisor:session-failed -->";
 
 /** Claude Codeが開始しないまま止まっていることを知らせたマーカー（#1465） */
 const SESSION_NOT_STARTED_MARKER = "<!-- supervisor:session-not-started -->";
-
-/** ユーザーの確認が必要であることを示すラベル */
-const CHECK_USER_LABEL = "00.check-user";
 
 export function buildSessionFailedCommentBody(params: {
   hostName: string;
@@ -76,7 +77,8 @@ export function buildSessionNotStartedCommentBody(params: {
 }
 
 /**
- * Claude Codeが開始しないまま止まっていることをIssueへ知らせ、`00.check-user`を付ける（#1465）。
+ * Claude Codeが開始しないまま止まっていることをIssueへ知らせ、`00.check-user`と理由ラベル
+ * `01.check-blocked`を付ける（#1465・#1490）。
  *
  * **`escalateFailedSession`と同じく、失敗しても例外を投げない。** 呼び出し元
  * （`reportDispatchSessions`）は状態を保存し終えており、ここで落としてもpollerにできることは無い。
@@ -101,7 +103,7 @@ export async function escalateNotStartedSession(params: {
       }),
     });
 
-    await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "blocked");
     return true;
   } catch (error) {
     console.error(
@@ -113,7 +115,8 @@ export async function escalateNotStartedSession(params: {
 }
 
 /**
- * 起動確認に人が答えてClaude Codeが始まったので、上で付けた`00.check-user`を外す（#1465）。
+ * 起動確認に人が答えてClaude Codeが始まったので、上で付けた`00.check-user`を理由ラベルごと
+ * 外す（#1465・#1490）。
  *
  * **外すのは自分で付けたときだけ**という約束（`session-plan.ts`）はここでも同じで、
  * 呼び出し元は`NOT_STARTED`から出る遷移でだけ呼ぶ。`NOT_STARTED`を立てたのはこの経路しか
@@ -134,7 +137,7 @@ export async function resolveNotStartedSession(params: {
     if (!token) return false;
 
     // 人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`は404を成功として扱う
-    await removeIssueLabel(parsed.owner, parsed.repo, params.issueNumber, token, CHECK_USER_LABEL);
+    await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token);
     return true;
   } catch (error) {
     console.error(
@@ -146,7 +149,7 @@ export async function resolveNotStartedSession(params: {
 }
 
 /**
- * 異常終了をIssueへ知らせ、`00.check-user`を付ける。
+ * 異常終了をIssueへ知らせ、`00.check-user`と理由ラベル`01.check-blocked`を付ける（#1490）。
  *
  * **失敗しても例外を投げない。** 呼び出し元（`reportDispatchSessions`）は既に状態を保存し終えており、
  * ここで落としてもpollerにできることは何も無い。成否を真偽値で返して記録だけ残す。
@@ -177,7 +180,7 @@ export async function escalateFailedSession(params: {
 
     // ラベルは**追加**する。`updateIssue`の`labels`は全置換で、既に付いている
     // `21.plan-required`・`11.local`を巻き込んで落としてしまう
-    await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "blocked");
     return true;
   } catch (error) {
     console.error(

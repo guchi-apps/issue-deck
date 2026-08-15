@@ -28,3 +28,24 @@ describe("isAttentionLabel / matchStatusStep との整合性", () => {
     }
   });
 });
+
+describe("01.check-*（00.check-userの理由ラベル。#1490）", () => {
+  it("進捗ステップとして扱わない（詳細のラベル欄に「ステップ1/9」の進捗バーを出さないため）", () => {
+    for (const name of [
+      "01.check-plan",
+      "01.check-input",
+      "01.check-merge",
+      "01.check-blocked",
+      "01.check-answered",
+    ]) {
+      expect(matchStatusStep(name)).toBeNull();
+    }
+    // 番号の形が同じでも、廃止済みの進捗ラベルは従来どおりステップとして読む
+    expect(matchStatusStep("01.planning")).toBe(1);
+  });
+
+  it("要対応ラベルとして扱う（一覧カードのラベル一覧・ラベル選択欄から外す）", () => {
+    expect(isAttentionLabel("01.check-plan")).toBe(true);
+    expect(isProgressLabel("01.check-plan")).toBe(true);
+  });
+});

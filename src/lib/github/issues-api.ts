@@ -161,6 +161,10 @@ export async function updateIssue(
  * `updateIssue`の`labels`は**全置換**で、渡さなかったラベルが消える。既に付いている
  * `21.plan-required`・`11.local`などを巻き込んで落とすため、1つ足したいだけの用途には使えない。
  * GitHubの追加専用エンドポイントを使い、既に付いている場合も安全（重複しない）にする。
+ *
+ * **戻り値は追加後にIssueへ付いているラベル名。** GitHubがこのレスポンスで返してくれるので、
+ * 「他に何が付いているか」を知るための追加のAPI呼び出しが要らない
+ * （`src/lib/dispatch/check-user-labels.ts`が理由ラベルの付け替えに使う。#1490）。
  */
 export async function addIssueLabels(
   owner: string,
@@ -168,13 +172,35 @@ export async function addIssueLabels(
   number: number,
   token: string,
   labels: string[],
-): Promise<void> {
-  await requestJson(
+): Promise<string[]> {
+  const after = (await requestJson(
     `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/labels`,
     token,
     "POST",
     { labels },
+  )) as { name?: unknown }[] | undefined;
+  if (!Array.isArray(after)) return [];
+  return after.map((label) => label.name).filter((name): name is string => typeof name === "string");
+}
+
+/**
+ * リポジトリに**定義されている**ラベル名の集合を返す（#1490）。
+ *
+ * ラベルの付与エンドポイント（`addIssueLabels`）は、リポジトリに存在しないラベル名を渡すと
+ * **その場でラベルを作ってしまう**（色も説明も無いまま増える）。無人実行のワークフローが
+ * `gh label list --json name | grep -qx`で存在を確かめてから付けているのと同じガードを、
+ * issue-deck本体の経路にも置くためのもの。
+ */
+export async function fetchRepositoryLabelNames(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<Set<string>> {
+  const labels = await fetchAllPages<{ name: string }>(
+    `${GITHUB_API}/repos/${owner}/${repo}/labels?per_page=100`,
+    token,
   );
+  return new Set(labels.map((label) => label.name));
 }
 
 /**
@@ -186,6 +212,9 @@ export async function addIssueLabels(
  * **付いていないラベルを外そうとしたときの404は成功として扱う。** 呼び出し側（計画の承認待ちを
  * 解く経路）にとって「既に外れている」は望んだ結果そのもので、人が画面の承認ボタンで先に
  * 外した場合に必ず起きる。ラベル自体がリポジトリに存在しない場合も同じ404で返る。
+ *
+ * **戻り値は除去後にIssueへ残っているラベル名**（404のときはnull）。`addIssueLabels`と同じく
+ * GitHubがレスポンスで返すため、続けて外すものを決めるための追加のAPI呼び出しが要らない。
  */
 export async function removeIssueLabel(
   owner: string,
@@ -193,15 +222,19 @@ export async function removeIssueLabel(
   number: number,
   token: string,
   label: string,
-): Promise<void> {
+): Promise<string[] | null> {
   try {
-    await requestJson(
+    const after = (await requestJson(
       `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(label)}`,
       token,
       "DELETE",
-    );
+    )) as { name?: unknown }[] | undefined;
+    if (!Array.isArray(after)) return [];
+    return after
+      .map((item) => item.name)
+      .filter((name): name is string => typeof name === "string");
   } catch (error) {
-    if (error instanceof GithubApiError && error.status === 404) return;
+    if (error instanceof GithubApiError && error.status === 404) return null;
     throw error;
   }
 }

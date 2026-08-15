@@ -555,3 +555,37 @@ describe("CommentThread セッションが入力待ちのとき", () => {
     expect(screen.queryByText("セッションが入力を待っています")).toBeNull();
   });
 });
+
+describe("CommentThread 承認カードの見出し（#1490）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderApprovalCard(reason?: "plan" | "input" | "blocked" | "answered") {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        checkUserReason={reason ?? null}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+      />,
+    );
+  }
+
+  it("理由ラベルが読めれば、何を求められているかを見出しに出す", () => {
+    renderApprovalCard("plan");
+    expect(screen.getByText("計画の承認が必要です")).not.toBeNull();
+  });
+
+  it("理由ラベルが配られていないリポジトリでは従来の見出しに戻る", () => {
+    renderApprovalCard();
+    expect(screen.getByText("ユーザーの承認が必要です")).not.toBeNull();
+  });
+});

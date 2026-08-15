@@ -11,7 +11,7 @@ import {
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
-import { checkUserIssueKey, fetchCheckUserIssueKeys } from "@/lib/pull-request-check-user";
+import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
   PullRequestListScope,
@@ -111,9 +111,9 @@ async function handleGET(request: Request) {
     }),
   );
 
-  // 対応Issueの`00.check-user`を合流させる（#1469）。GitHub APIは消費せず、DBキャッシュを
-  // 全リポジトリぶんまとめて1クエリ引くだけ。
-  const checkUserKeys = await fetchCheckUserIssueKeys(
+  // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
+  // 消費せず、DBキャッシュを全リポジトリぶんまとめて1クエリ引くだけ。
+  const checkUserReasons = await fetchCheckUserIssueReasons(
     results.map((result) => ({
       repositoryId: result.repositoryId,
       issueNumbers: result.pullRequests
@@ -123,9 +123,12 @@ async function handleGET(request: Request) {
   );
   for (const result of results) {
     for (const pullRequest of result.pullRequests) {
-      pullRequest.linkedIssueCheckUser =
-        pullRequest.linkedIssueNumber !== null &&
-        checkUserKeys.has(checkUserIssueKey(result.repositoryId, pullRequest.linkedIssueNumber));
+      const key =
+        pullRequest.linkedIssueNumber === null
+          ? null
+          : checkUserIssueKey(result.repositoryId, pullRequest.linkedIssueNumber);
+      pullRequest.linkedIssueCheckUser = key !== null && checkUserReasons.has(key);
+      pullRequest.linkedIssueCheckReason = key === null ? null : (checkUserReasons.get(key) ?? null);
     }
   }
 

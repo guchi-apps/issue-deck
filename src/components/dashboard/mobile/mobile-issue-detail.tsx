@@ -90,6 +90,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   approveCommentBody,
   canCompleteManualStep,
+  checkUserReason,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -118,6 +119,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
+import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
@@ -161,6 +163,7 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
+  const taskList = useIssueTaskList(issue, onIssueUpdated);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
   const commentSummary = useIssueCommentSummaries(issue);
@@ -902,8 +905,22 @@ export function MobileIssueDetail({
         )}
 
         <div>
-          <h2 className="mb-2 text-sm font-semibold">説明</h2>
-          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">説明</h2>
+            {/* 本文にタスクリストがあるときだけ進捗を出す（#1486） */}
+            {taskList.progress.total > 0 && (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                タスク {taskList.progress.completed} / {taskList.progress.total} 完了
+              </span>
+            )}
+          </div>
+          <ApiErrorMessage message={taskList.error} />
+          <MarkdownBody
+            content={taskList.body}
+            repositoryFullName={issue.repositoryFullName}
+            onToggleTask={taskList.toggleTask}
+            isTaskToggling={taskList.isToggling}
+          />
         </div>
 
         <Separator />
@@ -923,6 +940,7 @@ export function MobileIssueDetail({
             onDelete={handleDeleteComment}
             isUpdating={isCommentSubmitting}
             approvalPending={isApprovalPending(issue.labels)}
+            checkUserReason={checkUserReason(issue.labels)}
             localSessionNotice={
               executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
                 <LocalSessionWaitingInputNotice session={issueSession} />

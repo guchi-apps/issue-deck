@@ -76,7 +76,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 次の内容は端末に出すだけでなく、`gh issue comment {{ISSUE_NUMBER}}`でIssueにも投稿してください。
 
 - **計画**（`21.plan-required`が付いている場合）: 端末で提示するのと同じ内容（アプローチ・変更範囲・懸念点）をIssueコメントにも投稿する。承認を受けて内容を修正した場合は、実装に着手するまでに修正後の計画も投稿する。**計画コメントの冒頭に、その計画が前提とした`origin/develop`のSHAを`<!-- plan-base: <SHA> -->`の形で残す**（`git rev-parse origin/develop`）。並行して走る他セッションのマージで計画の前提が無効になることが実際に起きているため、後から`git log <SHA>..origin/develop --oneline`で何が変わったかを辿れるようにする（[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）
-  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`を付けます**（#1342）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
+  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
 - **完了報告**（必須）: Pull Requestを作成したら、最後に`gh issue comment {{ISSUE_NUMBER}}`で完了報告を投稿する。**PRを作っただけで終えないでください。** 内容は次の3つで、粒度は無人実行の完了報告（`.github/prompts/implement.md`）に揃える
   - 作成したPull RequestのURL
   - どのような変更を行ったかの要約（触ったファイル・対応内容が使用者に伝わる程度の箇条書き）
@@ -152,6 +152,7 @@ gh issue create --title "[手作業] <実行する場所>: <やること>" --lab
 - タイトルは`[手作業] <実行する場所>: <やること>`の形にする（例: `[手作業] VPS: issue-deckの.envにPROGRESS_REPORT_SECRETを追加する`）
 - ラベルは`71.manual-step`を付ける。**`00.check-user`は付けない**（手作業Issueには承認して再開させる実装フローが無く、承認ボタンの宛先が無いため）
 - 本文には `## 前提条件`・`## やること`（コピペで実行できるコマンド）・`## なぜエージェントが実施しないか`・`## 放置するとどうなるか`・`## 完了の確認方法`・`## 関連`（起点Issue `#{{ISSUE_NUMBER}}`・対応PR）の見出しをすべて入れる
+- `## やること`は、**手順が2つ以上あるなら`- [ ]`のチェックリストにする**（1手順＝1項目）。コマンドはその項目の下にインデントしたコードブロックで書く。実行する人が途中まで進めた記録になり、GitHubでもissue-deckの画面でもクリックして消し込める（#1486）
 - `## 前提条件`には次を箇条書きで書く。**実行するのは別の端末の前にいる人で、どれか一つでも欠けると実行してよいか判断できません**
   - 実行するデバイス（サブPC / メインPC / VPS / ブラウザ など。SSHが要るなら接続コマンドも）
   - カレントディレクトリ（`cd`する場所。リポジトリでの作業でなければ「不要」）

@@ -11,7 +11,7 @@ import { dispatchPropagation } from "@/lib/github/workflow-tags";
  * ここで作るのはPRまでで、内容を見てマージするのは人間の操作。
  */
 export function POST() {
-  return withGithubApiFeature("sync", () => handlePOST());
+  return withGithubApiFeature("workflow_tags", () => handlePOST());
 }
 
 async function handlePOST() {

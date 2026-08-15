@@ -29,6 +29,18 @@ describe("WorkflowStatusSteps", () => {
     expect(screen.getAllByText("ユーザー確認待ち").length).toBeGreaterThan(0);
   });
 
+  it("理由ラベルが付いていれば、何を求められているかを添える（#1490）", () => {
+    render(
+      <WorkflowStatusSteps
+        labels={labels("00.check-user", "01.check-plan")}
+        projectStatus="Planning"
+      />,
+    );
+    expect(screen.getAllByText("ユーザー確認待ち・計画の承認").length).toBeGreaterThan(0);
+    // 理由が付いた場合は従来の文言だけの表示に戻さない
+    expect(screen.queryByText("ユーザー確認待ち")).toBeNull();
+  });
+
   it("各ステップの円にaria-currentが付き、完了済みステップと現在ステップが判別できる", () => {
     render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop PR" />);
     const items = screen.getAllByRole("listitem");

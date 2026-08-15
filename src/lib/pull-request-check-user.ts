@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
-import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import {
+  CHECK_USER_LABEL,
+  checkUserReason,
+  type CheckUserReason,
+} from "@/lib/github/approval-labels";
 
 /**
  * PRの対応Issueに`00.check-user`が付いているかを、IssueのDBキャッシュから引く（#1469）。
@@ -21,24 +25,28 @@ export type CheckUserIssueTarget = {
   issueNumbers: number[];
 };
 
-/** `fetchCheckUserIssueKeys`が返すSetのキー。リポジトリを跨いで番号が衝突しないようにする */
+/** `fetchCheckUserIssueReasons`が返すMapのキー。リポジトリを跨いで番号が衝突しないようにする */
 export function checkUserIssueKey(repositoryId: string, issueNumber: number): string {
   return `${repositoryId}#${issueNumber}`;
 }
 
 /**
- * `00.check-user`が付いているIssueの{@link checkUserIssueKey}の集合を返す。
+ * `00.check-user`が付いているIssueについて、{@link checkUserIssueKey} → 理由（#1490）のMapを返す。
+ * **Mapに載っていること自体が`00.check-user`が付いていること**を表し、値は理由ラベル
+ * （`01.check-*`）が読めなければ`null`になる。
  *
  * 番号だけの`in`で引くとリポジトリを跨いで同じ番号のIssueを拾ってしまうため、
  * リポジトリごとの`OR`で引き、返ってきた行の`(repositoryId, number)`の組で突き合わせる。
+ *
+ * 理由を読むためにラベル名も引くが、**クエリの本数は増えない**（同じ1クエリのincludeが増えるだけ）。
  */
-export async function fetchCheckUserIssueKeys(
+export async function fetchCheckUserIssueReasons(
   targets: CheckUserIssueTarget[],
-): Promise<Set<string>> {
+): Promise<Map<string, CheckUserReason | null>> {
   const conditions = targets
     .map((target) => ({ repositoryId: target.repositoryId, numbers: [...new Set(target.issueNumbers)] }))
     .filter((target) => target.numbers.length > 0);
-  if (conditions.length === 0) return new Set();
+  if (conditions.length === 0) return new Map();
 
   const rows = await db.issue.findMany({
     where: {
@@ -48,8 +56,13 @@ export async function fetchCheckUserIssueKeys(
       })),
       labels: { some: { name: CHECK_USER_LABEL } },
     },
-    select: { repositoryId: true, number: true },
+    select: { repositoryId: true, number: true, labels: { select: { name: true } } },
   });
 
-  return new Set(rows.map((row) => checkUserIssueKey(row.repositoryId, row.number)));
+  return new Map(
+    rows.map((row) => [
+      checkUserIssueKey(row.repositoryId, row.number),
+      checkUserReason(row.labels),
+    ]),
+  );
 }
