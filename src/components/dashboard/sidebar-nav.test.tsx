@@ -26,6 +26,7 @@ function renderSidebar(
       activePane="issues"
       activePullRequestView="all"
       onSelectPullRequestView={() => {}}
+      onSelectFlow={() => {}}
       navCounts={navCounts}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
@@ -64,6 +65,7 @@ function renderSidebarWithRepositories(
       activePane="issues"
       activePullRequestView="all"
       onSelectPullRequestView={() => {}}
+      onSelectFlow={() => {}}
       navCounts={NAV_COUNTS}
       pullRequestNavCounts={{ all: null, "in-progress": 0, completed: 0 }}
       repositories={repositories}

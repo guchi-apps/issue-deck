@@ -4,6 +4,7 @@ import {
   classifyPullRequest,
   computePullRequestNavCounts,
   extractLinkedIssueNumber,
+  extractLinkedIssueNumbers,
   filterPullRequestsByView,
   groupPullRequestsByRepository,
   canMergeFromDeck,
@@ -27,10 +28,12 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     draft: false,
     state: "open",
     merged: false,
+    mergedAt: null,
     baseRef: "develop",
     headRef: "issue-1",
     kind: "issue",
     linkedIssueNumber: 1,
+    linkedIssueNumbers: [],
     autoMergeEnabled: false,
     linkedIssueCheckUser: false,
     ciState: "success",
@@ -85,6 +88,30 @@ describe("extractLinkedIssueNumber", () => {
     expect(
       extractLinkedIssueNumber({ headRef: "release/v2.19.0", title: "v2.19.0", body: null }),
     ).toBeNull();
+  });
+});
+
+describe("extractLinkedIssueNumbers", () => {
+  it("参照をすべて確度の高い順に返す（ブランチ名→タイトル→本文）", () => {
+    expect(
+      extractLinkedIssueNumbers({
+        headRef: "issue-1058",
+        title: "#624 と #625 をまとめて直す",
+        body: "対応Issue: #625 #700",
+      }),
+    ).toEqual([1058, 624, 625, 700]);
+  });
+
+  it("同じ番号は1度だけ返す", () => {
+    expect(
+      extractLinkedIssueNumbers({ headRef: "issue-624", title: "#624 の対応", body: "#624" }),
+    ).toEqual([624]);
+  });
+
+  it("手掛かりが無ければ空配列を返す", () => {
+    expect(
+      extractLinkedIssueNumbers({ headRef: "release/v2.19.0", title: "v2.19.0", body: null }),
+    ).toEqual([]);
   });
 });
 

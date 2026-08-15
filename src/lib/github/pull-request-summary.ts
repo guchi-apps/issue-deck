@@ -1,7 +1,7 @@
 import { buildPullRequestId } from "@/lib/github-reference";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
-import { classifyPullRequest, extractLinkedIssueNumber } from "@/lib/pull-request-list";
+import { classifyPullRequest, extractLinkedIssueNumbers } from "@/lib/pull-request-list";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -25,6 +25,13 @@ export function toPullRequestSummary(
 ): PullRequestSummary {
   const baseRef = pullRequest.base.ref;
   const headRef = pullRequest.head.ref;
+  // 1本のPRが複数のIssueを扱うことがあるため、参照はすべて拾って確度の高い順に持つ（#1455）。
+  // 本文までは画面へ送らないので、抽出はこの層で済ませる。
+  const linkedIssueNumbers = extractLinkedIssueNumbers({
+    headRef,
+    title: pullRequest.title,
+    body: pullRequest.body,
+  });
 
   return {
     id: buildPullRequestId(repository.fullName, pullRequest.number),
@@ -37,14 +44,12 @@ export function toPullRequestSummary(
     draft: pullRequest.draft,
     state: pullRequest.state === "closed" ? "closed" : "open",
     merged: options.merged,
+    mergedAt: pullRequest.merged_at,
     baseRef,
     headRef,
     kind: classifyPullRequest({ baseRef, headRef }),
-    linkedIssueNumber: extractLinkedIssueNumber({
-      headRef,
-      title: pullRequest.title,
-      body: pullRequest.body,
-    }),
+    linkedIssueNumber: linkedIssueNumbers[0] ?? null,
+    linkedIssueNumbers,
     autoMergeEnabled: pullRequest.auto_merge !== null,
     linkedIssueCheckUser: options.linkedIssueCheckUser ?? false,
     ciState: options.ciState,

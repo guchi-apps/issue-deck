@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
+  GitBranch,
   Lock,
   Plus,
   Settings2,
@@ -38,6 +39,8 @@ type SidebarNavProps = {
   /** PRペインで表示中の状態別ビュー（#1312） */
   activePullRequestView: PullRequestViewId;
   onSelectPullRequestView: (view: PullRequestViewId) => void;
+  /** 「ブランチとPRの流れ」を開く（#1455） */
+  onSelectFlow: () => void;
   navCounts: Record<NavViewId, number>;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
@@ -66,6 +69,7 @@ export function SidebarNav({
   activePane,
   activePullRequestView,
   onSelectPullRequestView,
+  onSelectFlow,
   navCounts,
   pullRequestNavCounts,
   repositories,
@@ -190,6 +194,26 @@ export function SidebarNav({
               </li>
             );
           })}
+        </ul>
+      </div>
+
+      <div>
+        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">フロー</h2>
+        <ul className="flex flex-col gap-0.5">
+          <li>
+            <button
+              type="button"
+              onClick={onSelectFlow}
+              title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                activePane === "flow" && "bg-accent font-medium",
+              )}
+            >
+              <GitBranch className="size-3.5 text-muted-foreground" />
+              ブランチとPRの流れ
+            </button>
+          </li>
         </ul>
       </div>
 
