@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASK_CLAUDE_COMMENT_PREFIX,
   ASK_REPO_QUESTION_TITLE_PREFIX,
+  ASK_REPO_QUESTION_TITLE_PREFIX_LEGACY,
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
@@ -117,8 +118,22 @@ describe("isAskRepoQuestionIssue", () => {
     );
   });
 
+  it("接頭辞は`[質問] `になっている（#1514）", () => {
+    expect(ASK_REPO_QUESTION_TITLE_PREFIX).toBe("[質問] ");
+  });
+
+  it("旧接頭辞（`質問: `）で作られた既存Issueもtrueと判定する（#1514）", () => {
+    expect(
+      isAskRepoQuestionIssue({ title: `${ASK_REPO_QUESTION_TITLE_PREFIX_LEGACY}質問内容` }),
+    ).toBe(true);
+  });
+
   it("それ以外のタイトルはfalseと判定する", () => {
     expect(isAskRepoQuestionIssue({ title: "通常のIssueタイトル" })).toBe(false);
+  });
+
+  it("接頭辞がタイトルの途中に現れるだけの場合はfalseと判定する", () => {
+    expect(isAskRepoQuestionIssue({ title: "設計の質問: をどう扱うか" })).toBe(false);
   });
 });
 

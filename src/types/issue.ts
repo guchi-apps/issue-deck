@@ -111,12 +111,18 @@ export type Issue = {
 };
 
 /**
- * 運用ラベル（00.check-userやワークフロー状況ラベル）で絞り込むビューのID。
- * 「自分の担当」などのビューと同じくviewクエリで表現し、URLの持ち方を揃える。
+ * 運用ラベル（00.check-userやワークフロー状況ラベル）・進捗Status・Issueの性質で
+ * 絞り込む定型ビューのID。「自分の担当」などのビューと同じくviewクエリで表現し、
+ * URLの持ち方を揃える。
+ *
+ * 名前のとおりラベル起点で始まったが、進捗ラベルの廃止（#991 Phase 5）でStatus起点の
+ * ビューが加わり、`question`（#1514）はタイトル接頭辞で判定する。判定材料はビューごとに
+ * 異なるが、URLと件数の扱いを揃えるため同じ枠にまとめている。
  */
 export const LABEL_NAV_VIEW_IDS = [
   "check-user",
   "manual-step",
+  "question",
   "not-started",
   "in-progress",
   "release-pending",

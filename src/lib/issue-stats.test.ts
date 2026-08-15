@@ -547,6 +547,64 @@ describe("time-dependent stats", () => {
       ]);
     });
 
+    it("view=questionは質問Issue（新旧どちらの接頭辞も）のみ返す（#1514）", () => {
+      const issues = [
+        makeIssue({ id: "1", title: "[質問] このリポジトリの構成を教えて" }),
+        makeIssue({ id: "2", title: "質問: 旧形式のタイトル" }),
+        makeIssue({ id: "3", title: "通常のIssue" }),
+        // タイトルの途中に現れるだけのものは質問ではない
+        makeIssue({ id: "4", title: "設計の質問: をどう扱うか" }),
+      ];
+      expect(filterIssuesByView(issues, "question", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "2",
+      ]);
+    });
+
+    it("質問Issueは進捗によらずnot-started・in-progressから除外される（#1514）", () => {
+      const issues = [
+        makeIssue({ id: "1", title: "[質問] 未着手のまま残る質問" }),
+        makeIssue({ id: "2", title: "通常のIssue" }),
+        // 回答待ちの質問Issueも「実行中」ではなく「質問」に出す（#978の特例より優先する）
+        makeIssue({
+          id: "3",
+          title: "[質問] 回答待ちの質問",
+          qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
+        }),
+        // 通常のIssueへ質問した場合の回答待ちは、従来どおり「実行中」に出る（#978）
+        makeIssue({
+          id: "4",
+          title: "通常のIssueへの質問",
+          qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
+        }),
+      ];
+      // 4は通常のIssueなので、回答待ちで「実行中」に出つつ進捗がReadyのまま「未着手」にも残る
+      // （#978から変わらない既存の挙動）。質問Issueだけが両方から消える。
+      expect(filterIssuesByView(issues, "not-started", null).map((issue) => issue.id)).toEqual([
+        "2",
+        "4",
+      ]);
+      expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
+        "4",
+      ]);
+      expect(filterIssuesByView(issues, "question", null).map((issue) => issue.id)).toEqual([
+        "1",
+        "3",
+      ]);
+    });
+
+    it("質問Issueもユーザーの確認待ちビューには出す（#1514）", () => {
+      const issues = [
+        makeIssue({
+          id: "1",
+          title: "[質問] 回答が届いた質問",
+          labels: [{ name: "00.check-user", color: "red", description: null }],
+        }),
+        makeIssue({ id: "2", title: "[質問] 確認待ちではない質問" }),
+      ];
+      expect(filterIssuesByView(issues, "check-user", null).map((issue) => issue.id)).toEqual(["1"]);
+    });
+
     it("view=recently-mergedはリポジトリごとに最新リリース分のみ返す", () => {
       const doneStatus = "Done";
       const issues = [
@@ -633,6 +691,7 @@ describe("time-dependent stats", () => {
         "recently-added": 1,
         "check-user": 1,
         "manual-step": 0,
+        question: 0,
         "not-started": 1,
         "in-progress": 0,
         "release-pending": 0,

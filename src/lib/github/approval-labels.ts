@@ -208,6 +208,16 @@ export type LabelFilterPreset = {
    */
   statuses?: ProgressStatusKey[];
   /**
+   * 質問Issue（`isAskRepoQuestionIssue`＝タイトルが`[質問] `/`質問: `で始まる）だけに
+   * 絞り込む（#1514）。質問であることはラベルにもStatusにも現れないため、専用の条件にしている。
+   */
+  questionOnly?: boolean;
+  /**
+   * 質問Issueを除外する（#1514）。質問Issueは実装フローに乗らないまま`Ready`に居続けるため、
+   * 除外しないと「次にどれへ着手させるか」を選ぶビューへ恒久的に溜まる。
+   */
+  excludeQuestions?: boolean;
+  /**
    * プリセット選択時に適用するstateフィルター（省略時はstateを変更しない）。
    * `Done`（本番反映済）はマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」プリセットはデフォルトのopen絞り込みのままだと該当issueが
@@ -229,20 +239,28 @@ export type LabelFilterPreset = {
 export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
   { key: "manual-step", label: "手作業待ち", labels: [MANUAL_STEP_LABEL] },
+  // 「リポジトリに質問する」で作られた質問Issueの置き場（#1514）。回答を読み終えて承認を押すと
+  // `00.check-user`が外れ、Statusは`Ready`のままなので、専用ビューが無いと「未着手」へ戻る。
+  // 完了の合図はcloseなので、openな質問Issueが全部ここに並ぶ（既定のstate=openのまま）。
+  { key: "question", label: "質問", labels: [], questionOnly: true },
   {
     key: "not-started",
     label: "未着手",
     labels: [],
     // 手作業Issueはエージェントが着手することが無く、ユーザーが実行するまで`Ready`に居続ける。
     // 除外しないと「次にどれへ着手させるか」を選ぶビューへ恒久的に溜まるため、確認待ちと
-    // 同じく専用ビュー（manual-step）側に寄せる（#1240）。
+    // 同じく専用ビュー（manual-step）側に寄せる（#1240）。質問Issueも同じ理由で除外する（#1514）。
     excludeLabels: [CHECK_USER_LABEL, MANUAL_STEP_LABEL],
+    excludeQuestions: true,
     statuses: ["ready"],
   },
   {
     key: "in-progress",
     label: "実行中",
     labels: [],
+    // 回答待ちの質問Issueは`qaAnswerPendingAt`でここへ来ていたが（#978）、質問ビューへ寄せる
+    // （#1514）。通常の実装Issueへ`@claude 質問:`した場合の回答待ちは引き続きここに出る。
+    excludeQuestions: true,
     statuses: ["planning", "implementation", "develop-pr"],
   },
   {

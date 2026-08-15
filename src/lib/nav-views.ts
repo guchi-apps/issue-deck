@@ -3,6 +3,7 @@ import {
   GitMerge,
   ListChecks,
   ListTodo,
+  MessageCircleQuestionMark,
   PlayCircle,
   Rocket,
   Star,
@@ -35,6 +36,13 @@ export type NavView = {
    */
   statuses?: readonly ProgressStatusKey[];
   /**
+   * 質問Issue（`isAskRepoQuestionIssue`）だけに絞り込むビューかどうか（#1514）。
+   * 質問であることはラベルにもStatusにも現れないため、専用の条件にしている。
+   */
+  questionOnly?: boolean;
+  /** 質問Issueを除外するビューかどうか（#1514） */
+  excludeQuestions?: boolean;
+  /**
    * このビューが要求する状態フィルター。stateクエリ未指定時の既定値になるほか、
    * ビュー切り替え時には明示的に選ばれていたstateも上書きして自動で適用する（#475）。
    * `Done`（本番反映済）はマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
@@ -61,6 +69,7 @@ export type NavView = {
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
   "manual-step": Wrench,
+  question: MessageCircleQuestionMark,
   "not-started": ListTodo,
   "in-progress": PlayCircle,
   "release-pending": Rocket,
@@ -91,6 +100,8 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   labels: preset.labels,
   excludeLabels: preset.excludeLabels,
   statuses: preset.statuses,
+  questionOnly: preset.questionOnly,
+  excludeQuestions: preset.excludeQuestions,
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
   groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),
