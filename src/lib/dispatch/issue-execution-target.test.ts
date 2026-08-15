@@ -36,6 +36,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     kind: "LAUNCH",
     status: "QUEUED",
     message: null,
+    instruction: null,
     tmuxSessionName: null,
     createdAt: "2026-08-14T00:00:00.000Z",
     claimedAt: null,

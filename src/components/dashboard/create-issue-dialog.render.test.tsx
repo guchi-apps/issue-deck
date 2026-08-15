@@ -93,6 +93,7 @@ function makeHost(): DispatchHostView {
     lastSeenAt: "2026-08-14T00:00:00Z",
     screenshotCapable: true,
     sessionControlCapable: true,
+    instructionCapable: true,
     maxSessions: 12,
     liveSessions: 0,
   };

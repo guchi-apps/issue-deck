@@ -28,11 +28,20 @@ export type DispatchJobStatus =
  * - `KILL` … セッションごと畳む（`tmux kill-session`）
  * - `QUESTION` … 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する（#1294）。
  *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
+ * - `INSTRUCTION` … 走っているセッションへ追加指示を1行流す（#1012）。pollerが3段階プロトコル
+ *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る
  */
-export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL" | "QUESTION";
+export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL" | "QUESTION" | "INSTRUCTION";
 
-/** 既に立っているセッションを操作するジョブ（起動しないジョブ） */
-export const SESSION_CONTROL_JOB_KINDS = ["INTERRUPT", "KILL"] as const;
+/**
+ * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
+ *
+ * **払い出しの可否は種別ごとに違う。** `INTERRUPT`・`KILL`は`sessionControlCapable`、
+ * `INSTRUCTION`は`instructionCapable`を申告したホストにだけ配る（`claimDispatchJobs`）。
+ * 前者が送るのは固定の`C-c`だけなのに対し、後者は**内容のある文字列**を送るため、
+ * 対応していないpollerへ渡したときの事故の質が違う。
+ */
+export const SESSION_CONTROL_JOB_KINDS = ["INTERRUPT", "KILL", "INSTRUCTION"] as const;
 
 export type SessionControlJobKind = (typeof SESSION_CONTROL_JOB_KINDS)[number];
 
@@ -47,7 +56,33 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "interrupt") return "INTERRUPT";
   if (value === "kill") return "KILL";
   if (value === "question") return "QUESTION";
+  if (value === "instruction") return "INSTRUCTION";
   return null;
+}
+
+/**
+ * 追加指示の本文の上限（#1012）。長い指示はIssueコメントに書き、ここへは
+ * 「コメントを読んでから続けて」の1行を流す運用にする。
+ */
+export const SESSION_INSTRUCTION_MAX_LENGTH = 500;
+
+/**
+ * 走っているセッションへ流す追加指示の本文を検証する（#1012）。**受け口とpollerの両方で行う。**
+ *
+ * - **改行を含まない1行に限る。** 複数行は確定キーの解釈が画面の実装に依存し、
+ *   途中の改行が意図せず1回目の送信になりうる
+ * - **制御文字・ESCを弾く。** `tmux send-keys -l`はリテラル送出だが、ここを端末へ生の
+ *   エスケープシーケンスを流す経路にはしない（`\u0000`〜`\u001f`に改行・タブ・ESCが含まれる）
+ *
+ * 通れば前後の空白を落とした本文を、通らなければ`null`を返す。
+ */
+export function parseSessionInstruction(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > SESSION_INSTRUCTION_MAX_LENGTH) return null;
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return null;
+  return trimmed;
 }
 
 /**
@@ -80,6 +115,13 @@ export type DispatchJobView = {
   kind: DispatchJobKind;
   status: DispatchJobStatus;
   message: string | null;
+  /**
+   * 追加指示の本文（#1012。`kind`が`INSTRUCTION`のときだけ入る）。
+   *
+   * **画面に出すために返す。** pull型なので届くまで最大1分ほどかかり、その間に何を送ったのかが
+   * 見えないと、送り直してよいのか（同じ指示が二重に届かないか）判断できない。
+   */
+  instruction: string | null;
   tmuxSessionName: string | null;
   createdAt: string;
   claimedAt: string | null;
@@ -105,6 +147,14 @@ export type DispatchHostView = {
    * 配ると、古いpollerは`kind`を読まないため起動ジョブとして解釈してしまう。
    */
   sessionControlCapable: boolean | null;
+  /**
+   * 走っているセッションへ追加指示を流せるか（#1012）。3段階プロトコルを実装したpollerだけが
+   * 申告する。**`null`（未申告）は「できない」として扱う**（`sessionControlCapable`と同じ）。
+   *
+   * **`sessionControlCapable`と分けて持つ。** あちらが送るのは固定の`C-c`だけなのに対し、
+   * こちらは**内容のある文字列**を送るため、対応していないpollerへ渡したときの事故の質が違う。
+   */
+  instructionCapable: boolean | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -346,7 +396,13 @@ export const SESSION_CONTROL_LABELS = {
     done: "セッションを閉じました",
     failed: "セッションを閉じられませんでした",
   },
-} as const satisfies Record<"INTERRUPT" | "KILL", Record<string, string>>;
+  INSTRUCTION: {
+    action: "追加指示を送る",
+    sending: "追加指示を送信しました",
+    done: "追加指示を送りました",
+    failed: "追加指示を送れませんでした",
+  },
+} as const satisfies Record<SessionControlJobKind, Record<string, string>>;
 
 /**
  * セッションを操作できない理由（#1332）。**画面にそのまま出す前提**で、
@@ -356,6 +412,7 @@ export type SessionControlRejection =
   | "host_unknown"
   | "host_offline"
   | "session_control_unsupported"
+  | "instruction_unsupported"
   | "session_not_found"
   | "session_not_alive"
   | "already_queued";
@@ -364,8 +421,7 @@ export function describeSessionControlRejection(
   rejection: SessionControlRejection,
   context: { hostName: string; kind: SessionControlJobKind },
 ): string {
-  const label =
-    context.kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
+  const label = SESSION_CONTROL_LABELS[context.kind];
   switch (rejection) {
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
@@ -375,6 +431,10 @@ export function describeSessionControlRejection(
       // **何をすれば押せるようになるかまで書く。** pollerはサブPC側の作業ツリーから動くため、
       // 更新するのは人の作業になる（issue-deck側を新しくしても解消しない）
       return `${formatDispatchHostName(context.hostName)} のpollerがセッションの操作に対応していません（更新してから押せるようになります）。`;
+    case "instruction_unsupported":
+      // **停止・終了とは別に断る**（#1012）。あちらに対応していても、文字列を送る3段階
+      // プロトコルはpollerを更新しないと入らない
+      return `${formatDispatchHostName(context.hostName)} のpollerが追加指示の送信に対応していません（更新してから押せるようになります）。`;
     case "session_not_found":
       return `${formatDispatchHostName(context.hostName)} にこのIssueのセッションが見当たりません。`;
     case "session_not_alive":
@@ -391,19 +451,29 @@ export function describeSessionControlRejection(
  * 「押せるのにAPIが拒否する」（その逆も）が生まれるのは、起動側（#1180）と同じ。
  */
 export function resolveSessionControlRejection(params: {
-  host: Pick<DispatchHostView, "online" | "sessionControlCapable"> | null | undefined;
+  host:
+    | Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable">
+    | null
+    | undefined;
   session: Pick<DispatchSessionView, "state"> | null | undefined;
   kind: SessionControlJobKind;
   hasActiveControlJob: boolean;
 }): SessionControlRejection | null {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
-  if (params.host.sessionControlCapable !== true) return "session_control_unsupported";
+  // **対応の申告は種別で分けて見る**（#1012）。停止・終了に対応していても、内容のある文字列を
+  // 送る3段階プロトコルは別に申告が要る
+  if (params.kind === "INSTRUCTION") {
+    if (params.host.instructionCapable !== true) return "instruction_unsupported";
+  } else if (params.host.sessionControlCapable !== true) {
+    return "session_control_unsupported";
+  }
   if (!params.session) return "session_not_found";
-  // **`INTERRUPT`は生きているセッションにしか意味が無い。** `KILL`は逆に、終了したペインが
-  // 残っている（`EXITED`/`FAILED`）セッションを片付ける用途があるので許す
+  // **`INTERRUPT`・`INSTRUCTION`は生きているセッションにしか意味が無い**（死んだペインには
+  // 送る相手がいない）。`KILL`は逆に、終了したペインが残っている（`EXITED`/`FAILED`）
+  // セッションを片付ける用途があるので許す
   if (params.session.state === "GONE") return "session_not_found";
-  if (params.kind === "INTERRUPT" && params.session.state !== "ALIVE") return "session_not_alive";
+  if (params.kind !== "KILL" && params.session.state !== "ALIVE") return "session_not_alive";
   if (params.hasActiveControlJob) return "already_queued";
   return null;
 }
@@ -553,8 +623,9 @@ function describeSessionControlJobStatus(
   status: DispatchJobStatus,
   kind: DispatchJobKind,
 ): { label: string; tone: DispatchJobTone } {
-  const label =
-    kind === "KILL" ? SESSION_CONTROL_LABELS.KILL : SESSION_CONTROL_LABELS.INTERRUPT;
+  const label = isSessionControlJobKind(kind)
+    ? SESSION_CONTROL_LABELS[kind]
+    : SESSION_CONTROL_LABELS.INTERRUPT;
   switch (status) {
     case "QUEUED":
     case "CLAIMED":
@@ -566,8 +637,16 @@ function describeSessionControlJobStatus(
       return { label: label.failed, tone: "error" };
     // 操作しようとしたセッションが既に無かった場合（poller側の`skipped`）。
     // **止めたかったものが止まっているので赤くしない**
+    //
+    // **追加指示（#1012）の`skipped`は意味が違う。** 3段階プロトコルの状態確認で
+    // 「いま送ってはいけない」と判断した（承認プロンプト表示中・作業中・入力欄に打ちかけが
+    // ある）ときで、セッションは動いている。理由はジョブの`message`に入るので、
+    // ここでは「送らなかった」ことだけを言い、断定しない
     case "SKIPPED":
-      return { label: "セッションは既にありませんでした", tone: "muted" };
+      return {
+        label: kind === "INSTRUCTION" ? "送信を見送りました" : "セッションは既にありませんでした",
+        tone: "muted",
+      };
     case "TIMEOUT":
       return { label: "起動先へ届きませんでした", tone: "error" };
     case "CANCELED":

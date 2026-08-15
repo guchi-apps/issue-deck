@@ -12,8 +12,9 @@
 #
 # ジョブには種別（`kind`）があり、立ったあとのセッションを操作するものも同じキューで流れる（#1332）。
 #
-#   INTERRUPT … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
-#   KILL      … `tmux kill-session -t <セッション名>`（セッションごと畳む）
+#   INTERRUPT   … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
+#   KILL        … `tmux kill-session -t <セッション名>`（セッションごと畳む）
+#   INSTRUCTION … 人が書いた1行を入力欄へ送る（#1012）。**3段階プロトコル**（下記）で送る
 #
 # **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
 # （#1176）。issue-deck側からSSHでキックする経路は採れない。
@@ -57,7 +58,8 @@ set -euo pipefail
 #
 # 2: ジョブの種別（`kind`）を読み、走っているセッションの停止・終了を実行する（#1332）。
 # 3: セッションの本数と上限（#1361）を申告に載せ、画面が待機の理由を出せるようにする（#1394）。
-DISPATCH_POLLER_VERSION="3"
+# 4: 追加指示（`INSTRUCTION`）を3段階プロトコルで送る（#1012）。
+DISPATCH_POLLER_VERSION="4"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -284,6 +286,10 @@ announce() {
   # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
   # 読まないため、受け取ると起動ジョブとして解釈してセッションを立ててしまう。
   #
+  # `instruction`は「追加指示（#1012）を3段階プロトコルで送れる」という申告。**`sessionControl`とは
+  # 別に持つ。** あちらが送るのは固定の`C-c`だけなのに対し、こちらは内容のある文字列を送るため、
+  # 実装が入っていないpollerへ配ると（未知の種別として`failed`になり）指示が必ず失われる。
+  #
   # `maxSessions`・`liveSessions`は**画面へ出すためだけの申告**（#1394）。上限に達している間は
   # 起動ジョブを取りに行かない（#1361）ため、これが無いと画面は「順番待ちのまま進まない」理由を
   # 出せず、pollerが落ちている状態と区別が付かない。**issue-deck側はこの値で割り当てを判定しない**
@@ -296,7 +302,7 @@ announce() {
     --argjson screenshotCapable "$(screenshot_capable)" \
     --argjson maxSessions "$MAX_SESSIONS" \
     --argjson liveSessions "$live_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -470,18 +476,187 @@ expected_session_name() {
   printf '%s' "${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
 }
 
-# --- セッションの操作（#1332）------------------------------------------------
-# 画面から積まれた「停止」「閉じる」を実行する。
+# --- 追加指示の送出（#1012・3段階プロトコル）------------------------------------
+# `docs/multi-agent/gates.md`は`send-keys`での文字列・確定キーの送出を禁じている。事故は
+# 「選択フォームの表示中に本文＋Enterを送り、1問目が既定の選択肢で勝手に回答済みになった」。
+# ここではその禁止を、**同じgates.mdが定めた3段階プロトコルの形でだけ**開ける。
+#
+#   1. 状態確認   … 状態ファイル・画面の両方で「いま送ってよい」ことを確かめる
+#   2. 本文のみ送出 … `send-keys -l`（リテラル）。**Enterは送らない**
+#   3. 反映の再確認 … 送った本文が入力欄に現れたことを確かめる
+#   4. 確定キーを別送 … ここで初めて`Enter`
+#
+# **どの段で止まってもEnterは送らない。** 確かめられないときは必ず「送らない」側へ倒す
+# （Claude Codeの画面が変わって想定の形が見つからない場合も同じ）。
+
+# 入力欄のプロンプト記号。**これ単体を根拠にしない。** 選択フォームのカーソルも同じ記号で、
+# 見分けが付かない（それがこのプロトコルの前提）。決め手は状態ファイル（段1a）と、
+# 送った本文が実際に入力欄へ現れたという肯定的な確認（段3）の2つ。
+INSTRUCTION_PROMPT_MARK=$'❯'
+# 処理中に画面の下端へ出るヒント。**これがある間は作業中**なので送らない。
+INSTRUCTION_BUSY_HINT="esc to interrupt"
+# ヒントを探す範囲（画面の下端から数えた行数）。**画面全体を見ない。** 会話の本文に同じ文字列が
+# 映っているだけで送れなくなる。入力欄の枠とヒントは実測でいちばん下の4行に収まる。
+INSTRUCTION_STATUS_LINES=4
+# 段3で突き合わせる本文の先頭文字数。**全文では突き合わせない**（入力欄は折り返すため、
+# 長い本文は`❯`の行に収まらない）。狙いは「入力欄に入ったか」の確認で、全文一致は要らない。
+INSTRUCTION_VERIFY_PREFIX_CHARS=16
+# 反映を待つ回数と間隔（合計およそ2秒）。TUIの再描画は送出の直後には終わっていない。
+INSTRUCTION_VERIFY_ATTEMPTS=10
+INSTRUCTION_VERIFY_INTERVAL="0.2"
+
+# 入力欄の行（最後の`❯`の行）を返す。無ければ空。
+instruction_input_line() {
+  local session="$1"
+  tmux capture-pane -p -t "=$session:" 2>/dev/null |
+    grep -F "$INSTRUCTION_PROMPT_MARK" | tail -1
+}
+
+# 段1: いま送ってよい状態か。送ってよければ0、そうでなければ理由を標準出力に出して1を返す。
+#
+# **`capture-pane`の内容を読むのはこの機能だけ。** #1217のセッション報告は「画面の内容は
+# 読まない」で通しており、その線は維持する（読んだ内容で決めてよいのは「送ってよい／送らない」の
+# 一方向だけで、内容から次に送るものを決めることはしない）。
+instruction_ready() {
+  local session="$1" event last_event pane input_line rest
+
+  # 1a. 状態ファイル（#1219・#1357）。**最後のイベントが`Stop`のときだけ送る。**
+  # `permission_prompt`は承認プロンプト・`AskUserQuestion`の表示中で、事故が起きたのはまさに
+  # この状態。`working`は作業中。**記録が無いときも送らない**（判定材料が無い＝確かめられない）。
+  if ! event="$(session_state_read_event "$session")" || [[ -z "$event" ]]; then
+    echo "セッションの状態が記録されていないため送りませんでした（フックが動いていない可能性があります）"
+    return 1
+  fi
+  last_event="${event##* }"
+  case "$last_event" in
+    Stop) ;;
+    permission_prompt)
+      echo "承認プロンプトまたは選択フォームの表示中のため送りませんでした（答えるのはRemote Controlから行ってください）"
+      return 1
+      ;;
+    *)
+      echo "セッションが作業中のため送りませんでした（最後のイベント: $last_event）"
+      return 1
+      ;;
+  esac
+
+  pane="$(tmux capture-pane -p -t "=$session:" 2>/dev/null || true)"
+  if [[ -z "$pane" ]]; then
+    echo "セッションの画面を読み取れなかったため送りませんでした"
+    return 1
+  fi
+
+  # 1b. 処理中のヒントが出ていないこと。状態ファイルは最後のフックの時点までしか表さないため、
+  # フックの間に走り出した処理はここで捕まえる。
+  if printf '%s' "$pane" | tail -n "$INSTRUCTION_STATUS_LINES" | grep -qF "$INSTRUCTION_BUSY_HINT"; then
+    echo "セッションが処理中のため送りませんでした"
+    return 1
+  fi
+
+  # 1c. 入力欄が空であること。打ちかけの本文があると連結され、**前回の失敗で残った文字列も
+  # ここで捕まる**（段3で止めたとき、こちらは追加のキーを送らずに残す）。
+  input_line="$(instruction_input_line "$session")"
+  if [[ -z "$input_line" ]]; then
+    echo "入力欄が見つからなかったため送りませんでした（想定と違う画面が出ています）"
+    return 1
+  fi
+  rest="${input_line#*"$INSTRUCTION_PROMPT_MARK"}"
+  # **Claude Codeは空の入力欄をU+00A0（NO-BREAK SPACE）で埋める。** `[[:space:]]`はこれに
+  # 当たらないため、先に落とさないと空の入力欄が「打ちかけあり」に見える（実測で確認）。
+  rest="${rest//$'\u00a0'/}"
+  if [[ -n "${rest//[[:space:]]/}" ]]; then
+    echo "入力欄に未送信の文字が残っているため送りませんでした"
+    return 1
+  fi
+
+  return 0
+}
+
+# 段3: 送った本文が入力欄に現れたか。現れれば0。
+instruction_reflected() {
+  local session="$1" body="$2" prefix attempt input_line
+  prefix="${body:0:$INSTRUCTION_VERIFY_PREFIX_CHARS}"
+  for ((attempt = 0; attempt < INSTRUCTION_VERIFY_ATTEMPTS; attempt++)); do
+    input_line="$(instruction_input_line "$session")"
+    if [[ -n "$input_line" && "$input_line" == *"$prefix"* ]]; then
+      return 0
+    fi
+    sleep "$INSTRUCTION_VERIFY_INTERVAL"
+  done
+  return 1
+}
+
+# 追加指示を1件送る。**このプロトコルの全体がここに閉じている。**
+send_session_instruction() {
+  local job_id="$1" session="$2" body="$3" reason
+
+  if [[ -z "$body" ]]; then
+    report_job "$job_id" failed "追加指示の本文が空です" "$session"
+    return 0
+  fi
+  # 受け口（`parseSessionInstruction`）と同じ検証を重ねる。**ここが最後に端末へ渡す場所**なので、
+  # issue-deck側で検証済みでも改めて確かめる（多層防御。セッション名の突き合わせと同じ立場）。
+  if [[ "$body" == *$'\n'* || "$body" =~ [[:cntrl:]] ]]; then
+    report_job "$job_id" failed "追加指示の本文に改行または制御文字が含まれています" "$session"
+    return 0
+  fi
+  if ((${#body} > 500)); then
+    report_job "$job_id" failed "追加指示の本文が長すぎます（${#body}文字）" "$session"
+    return 0
+  fi
+
+  # 段1: 状態確認
+  if ! reason="$(instruction_ready "$session")"; then
+    # **失敗ではなく見送り。** 安全機構が正常に働いた結果で、何も壊れていない（#1229と同じ扱い）。
+    # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
+    echo "  追加指示を見送りました: $reason"
+    report_job "$job_id" skipped "$reason" "$session"
+    return 0
+  fi
+
+  # 段2: 本文のみ送出（Enterは送らない）。`-l`はリテラル送出で、`--`以降を値として扱わせる
+  # （`-l`が無いと`Enter`のようなキー名として解釈されうる）。
+  if ! tmux send-keys -t "=$session:" -l -- "$body" 2>/dev/null; then
+    report_job "$job_id" failed "追加指示の本文を送れませんでした: $session" "$session"
+    return 0
+  fi
+
+  # 段3: 反映の再確認。**ここで止まったら追加のキーは一切送らない。** 本文がどこへ入ったのか
+  # 分からない状態で消しにいく（`C-u`など）のは、事故の元をもう1つ増やすことになる。
+  if ! instruction_reflected "$session" "$body"; then
+    report_job "$job_id" failed \
+      "本文が入力欄に反映されたことを確認できなかったため、Enterを送っていません。入力欄に文字が残っている可能性があります（tmux attach -t $session で確認してください）" \
+      "$session"
+    return 0
+  fi
+
+  # 段4: 確定キーを別送
+  if ! tmux send-keys -t "=$session:" Enter 2>/dev/null; then
+    report_job "$job_id" failed \
+      "本文は入力欄に入りましたが、確定キーを送れませんでした（tmux attach -t $session で確認してください）" \
+      "$session"
+    return 0
+  fi
+
+  echo "  追加指示を送りました: $session"
+  report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+  return 0
+}
+
+# --- セッションの操作（#1332・#1012）--------------------------------------------
+# 画面から積まれた「停止」「閉じる」「追加指示」を実行する。
 #
 # **サーバーから届いたセッション名をtmuxへ渡さない。** 名前はジョブの owner/repo/Issue番号から
 # こちら側で組み立て直し（起動時の重複ガードと同じ式）、届いた名前とは**照合にだけ**使う。
 # ここを緩めると、共有シークレットを持つ相手が任意のtmuxターゲットを指定できる経路になる。
 #
-# 実行するのは決め打ちの2つだけで、送るキーも固定の`C-c`のみ。**文字列は送らない**
+# 停止・終了で実行するのは決め打ちの2つだけで、送るキーも固定の`C-c`のみ。
+# **文字列を送るのは`INSTRUCTION`だけ**で、そちらは上の3段階プロトコルを通す
 # （docs/multi-agent/gates.md。選択フォームへ本文＋Enterを送って勝手に回答させた事故がある）。
 run_control_job() {
   local job_id="$1" kind="$2" repo="$3" issue_number="$4" requested_session="$5"
-  local session action
+  local instruction="${6:-}"
+  local session action reason
 
   session="$(expected_session_name "$repo" "$issue_number")"
 
@@ -505,10 +680,23 @@ run_control_job() {
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  --dry-run のため実行しません（$kind → $session）"
+    # 追加指示は「いま送ってよい状態か」の判定こそが要なので、そこだけは確認して見せる
+    # （送出はしない）。手元で判定を確かめるときの唯一の手段になる。
+    if [[ "$kind" == "INSTRUCTION" ]]; then
+      if reason="$(instruction_ready "$session")"; then
+        echo "  段1（状態確認）: 送ってよい状態です"
+      else
+        echo "  段1（状態確認）: $reason"
+      fi
+    fi
     return 0
   fi
 
   case "$kind" in
+    INSTRUCTION)
+      send_session_instruction "$job_id" "$session" "$instruction"
+      return 0
+      ;;
     INTERRUPT)
       action="停止（C-c）"
       # **`send-keys`の`-t`はペインを指すため、末尾の`:`が要る**（`=$session`だけだと
@@ -547,13 +735,15 @@ run_control_job() {
 # 組み立てると規約がずれた瞬間に「起動したのに失敗と報告する」誤判定になる。
 run_job() {
   local job_json="$1"
-  local job_id owner repo full_name issue_number kind requested_session
+  local job_id owner repo full_name issue_number kind requested_session instruction
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
   # 古いissue-deckは`kind`を返さない。**その場合は従来どおりの起動ジョブとして扱う**
   kind="$(printf '%s' "$job_json" | jq -r '.kind // "LAUNCH"')"
   requested_session="$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')"
+  # 追加指示の本文（#1012）。`INSTRUCTION`以外では空
+  instruction="$(printf '%s' "$job_json" | jq -r '.instruction // ""')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -569,7 +759,7 @@ run_job() {
   # 起動しないジョブ（#1332）はここで終わる。**cloneの有無や版数は問わない**
   # （既に立っているセッションを操作するだけで、リポジトリには触らない）。
   if [[ "$kind" != "LAUNCH" ]]; then
-    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session"
+    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session" "$instruction"
     return 0
   fi
 
