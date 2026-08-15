@@ -180,6 +180,22 @@ while read -r local_addr proc_info; do
 
   CHECKED=$((CHECKED + 1))
 
+  # 待ち受けが全インターフェースに出ていないか（#1526）。**孤児かどうかとは独立に見る。**
+  #
+  # 待ち受けの既定は`127.0.0.1`になったが（scripts/dev.sh）、**worktreeは分岐した時点の
+  # スクリプトを持ち続ける**ため、#1329より前に作られたworktreeで手で`pnpm dev`を叩くと従来どおり
+  # 外へ出る（#1526の時点で、閉じる判定を持たないworktreeが125件中65件あった）。セッション経由の
+  # 起動は`run-issue-session.sh`の`ISSUE_DECK_DEV_HOST`で塞がるが、手で起こし直す経路は塞げない。
+  # **ここは実際にポートを掴んでいるプロセスから入るので、PIDファイルの有無によらず見つかる。**
+  #
+  # **止めない。** 掃除の判定材料はtmuxセッションの有無と猶予だけに保つ（画面確認中のものを
+  # 誤って撃たない）。**worktreeのログにも書かない**（ログのmtimeは`reap-dev-servers.sh`の
+  # アイドル判定の材料で、ここで毎回書くとアイドルでの回収が永久に成立しなくなる）。
+  if dev_server_wildcard_listening "$port"; then
+    sweep_log "警告: 開発サーバーがポート $port を全インターフェースで待ち受けています（$repo #$issue_number）。tailnet上の他端末から到達できます（#1526）。"
+    sweep_log "      $cwd の scripts/dev.sh が古い可能性があります。git -C $cwd merge origin/develop で取り込むか、worktreeを作り直してください。"
+  fi
+
   # 撃つのはプロセスグループ。`set -m`で起動した開発サーバーは`pnpm dev`がリーダーになる
   # （run-issue-session.sh）。リーダーが同じworktreeに居ることまで確かめる
   pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"

@@ -675,14 +675,18 @@ worktreeが125件中65件あった。セッション経由の起動は`run-issue
 `ISSUE_DECK_DEV_HOST`を無条件にexportするので塞がる（この変数は#1178から解釈されるため、
 古い`dev.sh`にも効く）が、**そのworktreeで手で`pnpm dev`を叩く経路は塞げない。**
 
-そこで`scripts/reap-dev-servers.sh`（pollerが1巡ごとに呼ぶ）が、生きている開発サーバーの
-待ち受けを見て、ワイルドカード（`*` / `0.0.0.0` / `[::]`）なら警告を出す。判定は
+そこで`scripts/sweep-orphan-dev-servers.sh`（systemd timerが定期実行する・#1525）が、
+待ち受けを見てワイルドカード（`*` / `0.0.0.0` / `[::]`）なら警告を出す。判定は
 `dev_server_wildcard_listening`（`scripts/lib/dev-server.sh`）が持ち、**具体的なtailnetアドレス
 （`100.x` / `[fd7a:...]`）は`tailscale serve`自身の待ち受けなので拾わない。**
 
-- **止めはしない。** 回収の判断材料はアイドルと孤児だけに保つ（画面確認中のものを誤って撃たない）。
-- **worktreeのログには書かない。** ログのmtimeがアイドル判定の材料なので、毎巡書くとアイドルでの
-  回収が永久に成立しなくなる。
+- **置き場は`reap-dev-servers.sh`ではなくこちら。** あちらの入口は`.dev-servers/*.pid`だけで、
+  PIDファイルが無い開発サーバーを取りこぼす。こちらは`ss -tlnp`から入るため、**実際にポートを
+  掴んでいるものは必ず通る**。警告は記録が残ることに意味があるので、取りこぼしの少ない側に置く。
+- **止めはしない。** 掃除の判断材料はtmuxセッションの有無と猶予だけに保つ（画面確認中のものを
+  誤って撃たない）。孤児かどうかとは独立に、確認したすべての開発サーバーについて見る。
+- **worktreeのログには書かない。** ログのmtimeは`reap-dev-servers.sh`のアイドル判定の材料なので、
+  ここで書くとアイドルでの回収が永久に成立しなくなる。警告は`sweep_log`でsyslogに残る。
 - 警告が出たら、そのworktreeで`git merge origin/develop`して`dev.sh`を新しくするか、worktreeを
   作り直す。
 
