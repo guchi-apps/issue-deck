@@ -21,8 +21,12 @@ on:
     branches:
       - develop
       - main
+  # closedはcleanup-on-close(00.check-userの除去・スクリーンショットの掃除)、
+  # opened/editedはmanual-step-label(タイトルが`[手作業]`のIssueへの71.manual-step付与・#1492)が使う。
+  # **トリガー定義はcaller側にしか無いため、他リポジトリでopened/editedを拾うにはそちらのcallerにも
+  # 同じ追記が要る**(タグを上げるだけでは届かない。docs/cross-repo-setup-guide.md)。
   issues:
-    types: [closed]
+    types: [opened, edited, closed]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}

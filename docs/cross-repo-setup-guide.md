@@ -142,6 +142,14 @@ jobs:
 **この`secrets:`が効くのは、報告ステップを含むタグ（`workflows/v6`より後）を参照している場合のみ。**
 `v6`以前のタグには報告ステップ自体が無いため、渡しても何も起きない（エラーにもならない）。
 
+> **タグを上げてもトリガーは増えない。** `on:`はcaller側にしか無いため、再利用可能ワークフロー側で
+> 新しいイベントを使うジョブが増えても、対象リポジトリのcallerに同じイベントを書き足すまでそのジョブは
+> 一度も走らない。`propagate-workflow-tag.yml`が書き換えるのは`@workflows/vN`と`prompts-ref`だけで、
+> `on:`には触れない（`.github/scripts/propagate-workflow-tag.sh`の`sed`）。
+> 該当するのは`manual-step-label`ジョブ（#1492。`issues: types: [opened, edited]`が必要。無いと
+> タイトルが`[手作業]`のIssueへ`71.manual-step`が自動で付かない）で、issue-deck側の
+> `issue-labels.yml`は`types: [opened, edited, closed]`になっている。
+
 `claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
 
 ```yaml
