@@ -22,7 +22,10 @@ import {
   useRepositoryReleaseStatuses,
   type RepositoryReleaseStatus,
 } from "@/hooks/use-repository-release-statuses";
-import { describeReleaseStatusBadge } from "@/lib/github/release-button-status";
+import {
+  describeReleaseStatusBadge,
+  releaseAttentionRank,
+} from "@/lib/github/release-button-status";
 import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
@@ -74,6 +77,23 @@ export function ReleaseStatusButton({
     );
     return map;
   }, [releaseStatuses]);
+  // 人の操作を待っているリポジトリを一覧の上へ寄せる（#1495）。一覧は`max-h-40`のスクロール領域で、
+  // リポジトリ名順のままだとマージ待ちが下側に隠れて開いてから探すことになるため。
+  // `sort`は安定ソートなので、同順位のものは元の並び（リポジトリ名順）のまま残る。
+  const sortedRepositories = useMemo(
+    () =>
+      [...releasableRepositories].sort((a, b) => {
+        const rankOf = (repoFullName: string) => {
+          const repoReleaseStatus = releaseStatusByRepo.get(repoFullName);
+          return releaseAttentionRank({
+            status: repoReleaseStatus?.status ?? null,
+            ciState: repoReleaseStatus?.pendingMerge?.ciState ?? null,
+          });
+        };
+        return rankOf(a.fullName) - rankOf(b.fullName);
+      }),
+    [releasableRepositories, releaseStatusByRepo],
+  );
   // バッジの件数は「人の操作を待っているもの」だけを数える。実行中・失敗まで数に混ぜると
   // 「いくつマージすればよいか」が読めなくなるため（#1117で実行中も返すようになった）。
   const pendingMerges = useMemo(
@@ -149,9 +169,11 @@ export function ReleaseStatusButton({
             setReleaseRepoFullName((prev) =>
               prev && releasableRepositories.some((repo) => repo.fullName === prev)
                 ? prev
-                : (releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)
+                : // 画面で選択中のリポジトリを優先し、対象外だったときは並べ替え後の先頭
+                  // （＝もっとも対応が要るもの）を選ぶ（#1495）。
+                  (releasableRepositories.find((repo) => repo.fullName === selectedRepoFullName)
                     ?.fullName ??
-                    releasableRepositories[0]?.fullName ??
+                    sortedRepositories[0]?.fullName ??
                     null),
             );
             void refetchPendingMerges();
@@ -184,7 +206,7 @@ export function ReleaseStatusButton({
               リリース{hasPendingMerges ? `（${pendingMergeCount}件）` : ""}
             </h3>
             <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
-              {releasableRepositories.map((repo) => {
+              {sortedRepositories.map((repo) => {
                 const repoReleaseStatus = releaseStatusByRepo.get(repo.fullName);
                 // 文言はモバイルのリポジトリ一覧と同じ純関数から得る（#1117）。
                 const releaseBadge = repoReleaseStatus

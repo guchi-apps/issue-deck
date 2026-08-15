@@ -1,6 +1,7 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
+import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
@@ -60,9 +61,10 @@ export function filterIssuesByView(
     case "all":
       return issues;
     default: {
-      // 定型ビューの絞り込み条件は3種類。進捗（実行中・本番反映待ちなど）はProject Status
+      // 定型ビューの絞り込み条件は4種類。進捗（実行中・本番反映待ちなど）はProject Status
       // のOR一致（#991 Phase 5）、条件系（ユーザーの確認待ち）はラベルのOR一致、
-      // 「未着手」のように特定ラベルの不在で定義するものはexcludeLabelsの不一致で絞り込む。
+      // 「未着手」のように特定ラベルの不在で定義するものはexcludeLabelsの不一致、
+      // 質問Issueかどうか（#1514）はタイトル接頭辞で絞り込む。
       const navView = getNavView(view);
       const viewLabels = navView.labels;
       const excludeLabels = navView.excludeLabels;
@@ -70,14 +72,22 @@ export function filterIssuesByView(
       const hasNoCondition =
         (!viewLabels || viewLabels.length === 0) &&
         (!excludeLabels || excludeLabels.length === 0) &&
-        (!viewStatuses || viewStatuses.length === 0);
+        (!viewStatuses || viewStatuses.length === 0) &&
+        !navView.questionOnly &&
+        !navView.excludeQuestions;
       if (hasNoCondition) return issues;
 
       const matchesView = (issue: Issue) => {
+        // 質問Issueの振り分け（#1514）。**他のどの特例よりも先に判定する。** 特に
+        // excludeQuestionsを下のqaAnswerPendingAt特例より後ろに置くと、回答待ちの質問Issueが
+        // 「実行中」へ抜けてしまう。
+        const isQuestion = isAskRepoQuestionIssue(issue);
+        if (navView.questionOnly && !isQuestion) return false;
+        if (navView.excludeQuestions && isQuestion) return false;
         // 「リポジトリに質問する」等（@claude 質問: コメント）の回答待ちは、進捗を進めない
         // （付与元のmode=askは進捗の報告を行わない）ため、Statusだけでは実行中ビューに
         // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、他の条件より優先する
-        // （#978）。
+        // （#978）。質問Issue自体は上で除外済みで、ここに残るのは通常のIssueへ質問した場合。
         if (view === "in-progress" && issue.qaAnswerPendingAt) return true;
         // サブPCへ積んだジョブが未完了の間も、進捗Statusは起動したセッションが報告するまで
         // `Ready`のまま。押した直後のIssueが「未着手」に居座ると、そこから同じIssueを

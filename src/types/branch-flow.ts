@@ -49,6 +49,20 @@ export type BranchFlowResponse = {
  */
 export type BranchFlowLaneStatus = "no-pull-request" | "open" | "merged" | "closed";
 
+/**
+ * レーンに残っている手作業Issue（`71.manual-step`。#1510）。
+ *
+ * **GitHubネイティブのサブIssue関係は使わない。** 親子関係はDBへキャッシュしておらず
+ * （`/api/issues/sub-issues`はIssue詳細を開いたときだけ取る）、持たせるにはGitHub Appの
+ * `sub_issues`Webhook購読の追加とスキーマ変更が要る。手作業Issueは本文の`## 関連`へ
+ * 起点Issueの番号を書く決まりなので、**DBキャッシュにある本文からの推定で足りる**。
+ */
+export type BranchFlowManualStep = {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+};
+
 /** レーンに紐づくIssue。DBキャッシュに無いIssueでも番号だけは出せるようにする */
 export type BranchFlowIssueRef = {
   number: number;
@@ -95,11 +109,51 @@ export type BranchFlowLane = {
   status: BranchFlowLaneStatus;
   /**
    * 本番（main）へ届いているか。**マージ済みのレーンでのみ意味を持ち**、
-   * まだマージされていないレーンではnull。
+   * まだマージされていないレーンではnull。どのリリースの束へ入れるかもこれで決まる。
    */
   releaseState: BranchFlowReleaseState | null;
+  /** このレーンの対応Issueから生まれた手作業Issue（#1510）。無ければ空配列 */
+  manualSteps: BranchFlowManualStep[];
   /** 並び順に使う代表日時（PRがあればその更新日時、無ければnull） */
   updatedAt: string | null;
+};
+
+/**
+ * リリース1回ぶんの束（#1510）。「このバージョンに何が乗ったか」を表す。
+ *
+ * 画面はこれを横線1本として描き、`lanes`をその下にぶら下げる。束の作り方は
+ * `resolveReleaseState`と同じ計算——作業PRがdevelopへ入った後、最初にマージされた
+ * リリースPRがその変更を運んだ——なので、**追加のGitHub API取得は要らない**。
+ */
+export type BranchFlowReleaseGroup = {
+  /** 一覧のkey */
+  key: string;
+  /** 版。リリースPRのタイトルから取れなかった場合はnull */
+  version: string | null;
+  /** develop→mainのPR。まだリリースPRが無い（これから出す）束ではnull */
+  pullRequest: PullRequestSummary | null;
+  /** mainへ入った日時（ISO8601）。**nullなら未リリース**（進行中またはこれから） */
+  mergedAt: string | null;
+  lanes: BranchFlowLane[];
+  /** この束に残っている未完了の手作業Issueの件数 */
+  openManualStepCount: number;
+};
+
+/**
+ * 畳んだ1行（サマリー行）に出す集計（#1510）。
+ *
+ * **「手が要るか」だけを表す。** 進行中の本数のような量の情報と、CI失敗・マージ待ちのような
+ * 手を動かす必要がある情報を分けて持ち、後者を既定で開く条件にも使う。
+ */
+export type BranchFlowRepositorySummary = {
+  /** まだどのバージョンにも乗っていないレーンの本数（クローズ済みを除く） */
+  activeLaneCount: number;
+  /** CIが失敗しているopenなPRがある */
+  hasCiFailure: boolean;
+  /** ユーザーがマージするしかないopenなPRがある（リリースPRを除く） */
+  needsUserMerge: boolean;
+  /** openなリリースPRがある（develop→mainのマージ待ち） */
+  releaseInProgress: boolean;
 };
 
 /** `develop` → `main` のリリースレーン */
@@ -118,8 +172,26 @@ export type BranchFlowRepository = {
   repositoryFullName: string;
   repositoryPrivate: boolean;
   release: BranchFlowRelease;
-  /** `develop`へ向かう作業レーン。未完了を先に、完了済みを後ろに並べる */
-  lanes: BranchFlowLane[];
+  /**
+   * まだどのバージョンにも乗っていない作業レーン（#1510）。マージ待ち・PR未作成・
+   * 未マージのままクローズ。図のいちばん上に置く。
+   */
+  activeLanes: BranchFlowLane[];
+  /** バージョンごとの束。**新しい順**で、先頭が未リリース（進行中またはこれから）の束 */
+  releaseGroups: BranchFlowReleaseGroup[];
+  /**
+   * developへは入ったが、どの版で本番へ出たか特定できなかったレーン。
+   * 取得しているクローズ済みPRの範囲より古いもの。図のいちばん下へまとめる。
+   */
+  unassignedLanes: BranchFlowLane[];
+  summary: BranchFlowRepositorySummary;
+  /** リリース用workflowを持つか。「リリースする」を出してよいリポジトリの前提 */
+  canRelease: boolean;
+  /**
+   * いま「リリースする」を押してよいか（#1510）。リリース用workflowがあり、
+   * openなリリースPRもバンプPRも無く、未リリースの変更が1つ以上ある場合だけtrue。
+   */
+  canTriggerRelease: boolean;
   /**
    * 実装が進んでいるはずなのにブランチもPRも見つからないIssue。
    * 「関連が付いていない」ことを隠さないために出す。

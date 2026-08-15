@@ -145,11 +145,27 @@ export function resolveCrossRepoQuestionRepository(
  * 「リポジトリに質問する」ダイアログ（AskRepoQuestionDialog）がIssueタイトルに付与する接頭辞。
  * このタイトルを持つIssueかどうかで、質問フロー由来のIssueかを判定する（#885）。
  */
-export const ASK_REPO_QUESTION_TITLE_PREFIX = "質問: ";
+export const ASK_REPO_QUESTION_TITLE_PREFIX = "[質問] ";
+
+/**
+ * 上記接頭辞の**旧形式**（#1514で`[質問] `へ変更する前のもの）。
+ *
+ * **判定では引き続き受け付ける。** 既にGitHub上に作られている質問Issueのタイトルは
+ * この形のままで、片方しか見ないと既存分が「質問」ビューにも詳細画面のワンボタンクローズにも
+ * 出てこなくなる。タイトルの一括リネームは行わない（判定が両対応なら不要なうえ、GitHub側への
+ * 一括書き込みになる）。受け入れを消せるのは、旧形式の質問Issueが全てcloseされたあと。
+ *
+ * なおコメント側のトリガー接頭辞`ASK_CLAUDE_COMMENT_PREFIX`（`@claude 質問: `）は別物で、
+ * 他リポジトリのワークフローの起動条件と対になっているため変更していない。
+ */
+export const ASK_REPO_QUESTION_TITLE_PREFIX_LEGACY = "質問: ";
 
 /** 「リポジトリに質問する」ダイアログ経由で作成されたIssueかどうかを判定する */
 export function isAskRepoQuestionIssue(issue: Pick<Issue, "title">): boolean {
-  return issue.title.startsWith(ASK_REPO_QUESTION_TITLE_PREFIX);
+  return (
+    issue.title.startsWith(ASK_REPO_QUESTION_TITLE_PREFIX) ||
+    issue.title.startsWith(ASK_REPO_QUESTION_TITLE_PREFIX_LEGACY)
+  );
 }
 
 /**

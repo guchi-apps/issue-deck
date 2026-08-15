@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBranchFlow, isCompletedLane, type BranchFlowIssueSource } from "@/lib/branch-flow";
-import type { RepositoryBranchStatus } from "@/types/branch-flow";
+import {
+  buildBranchFlow,
+  extractManualStepOrigin,
+  isClosedLane,
+  type BranchFlowIssueSource,
+} from "@/lib/branch-flow";
+import type { BranchFlowLane, BranchFlowRepository, RepositoryBranchStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
+
+/**
+ * レーンはバージョンごとの束へ分かれて返るため（#1510）、
+ * 束の分かれ方に関心が無いテストはここで平らに戻す。
+ */
+function allLanes(repository: BranchFlowRepository): BranchFlowLane[] {
+  return [
+    ...repository.activeLanes,
+    ...repository.releaseGroups.flatMap((group) => group.lanes),
+    ...repository.unassignedLanes,
+  ];
+}
 
 const REPO = "guchi-apps/issue-deck";
 
@@ -85,13 +102,13 @@ describe("buildBranchFlow", () => {
     });
 
     const [repository] = flow.repositories;
-    expect(repository.lanes).toHaveLength(1);
-    expect(repository.lanes[0]).toMatchObject({
+    expect(allLanes(repository)).toHaveLength(1);
+    expect(allLanes(repository)[0]).toMatchObject({
       branchName: "issue-1455",
       status: "no-pull-request",
       kind: "issue",
     });
-    expect(repository.lanes[0].issue).toMatchObject({
+    expect(allLanes(repository)[0].issue).toMatchObject({
       number: 1455,
       title: "可視化する",
       progress: "implementation",
@@ -118,7 +135,7 @@ describe("buildBranchFlow", () => {
         }),
       ],
     });
-    expect(left.repositories[0].lanes[0].status).toBe("merged");
+    expect(allLanes(left.repositories[0])[0].status).toBe("merged");
   });
 
   it("ブランチ状況を取得できなかったリポジトリでも、PRだけで組み立てる", () => {
@@ -130,7 +147,7 @@ describe("buildBranchFlow", () => {
     });
 
     expect(flow.repositories[0].branchesLoaded).toBe(false);
-    expect(flow.repositories[0].lanes[0].status).toBe("merged");
+    expect(allLanes(flow.repositories[0])[0].status).toBe("merged");
   });
 
   it("未マージでクローズされたPRはclosedになる", () => {
@@ -138,7 +155,7 @@ describe("buildBranchFlow", () => {
       pullRequests: [pullRequest({ state: "closed", merged: false })],
       branchStatuses: [branchStatus()],
     });
-    expect(flow.repositories[0].lanes[0].status).toBe("closed");
+    expect(allLanes(flow.repositories[0])[0].status).toBe("closed");
   });
 
   it("同じブランチに複数のPRがあるとき、生きているPRを先頭に置く", () => {
@@ -155,7 +172,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus({ checkedBranches: ["issue-100"], existingBranches: ["issue-100"] })],
     });
 
-    const [lane] = flow.repositories[0].lanes;
+    const [lane] = allLanes(flow.repositories[0]);
     expect(lane.pullRequests.map((item) => item.number)).toEqual([11, 10]);
     expect(lane.status).toBe("open");
   });
@@ -177,7 +194,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus()],
     });
 
-    const lanes = flow.repositories[0].lanes;
+    const lanes = allLanes(flow.repositories[0]);
     expect(lanes.map((lane) => lane.branchName).sort()).toEqual(["fix/1455-followup", "issue-1455"]);
     // どちらのレーンも同じIssueを指す
     expect(lanes.every((lane) => lane.issue?.number === 1455)).toBe(true);
@@ -200,7 +217,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus()],
     });
 
-    const [lane] = flow.repositories[0].lanes;
+    const [lane] = allLanes(flow.repositories[0]);
     expect(lane.issue?.number).toBe(1455);
     expect(lane.relatedIssues.map((item) => item.number)).toEqual([1460]);
     // 関連として出したIssueは「ブランチもPRも見つからない」側へ重複させない
@@ -215,7 +232,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus()],
     });
 
-    expect(flow.repositories[0].lanes[0]).toMatchObject({
+    expect(allLanes(flow.repositories[0])[0]).toMatchObject({
       branchName: "hotfix/typo",
       issue: null,
       kind: "other",
@@ -228,7 +245,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus()],
     });
 
-    expect(flow.repositories[0].lanes[0].issue).toEqual({
+    expect(allLanes(flow.repositories[0])[0].issue).toEqual({
       number: 999,
       title: null,
       progress: null,
@@ -253,14 +270,17 @@ describe("buildBranchFlow", () => {
     const [repository] = flow.repositories;
     expect(repository.release.pullRequest?.number).toBe(500);
     expect(repository.release.comparison).toEqual({ aheadBy: 12, behindBy: 0 });
-    expect(repository.lanes).toEqual([]);
+    expect(allLanes(repository)).toEqual([]);
+    // 幹に置いたリリースPRは、未リリースの束の見出しとして出す
+    expect(repository.releaseGroups[0].pullRequest?.number).toBe(500);
+    expect(repository.summary.releaseInProgress).toBe(true);
   });
 
   it("バージョンバンプのブランチも規約どおり分類する", () => {
     const flow = build({
       branchStatuses: [branchStatus({ checkedBranches: ["release/v3.18.0"], existingBranches: ["release/v3.18.0"] })],
     });
-    expect(flow.repositories[0].lanes[0].kind).toBe("version-bump");
+    expect(allLanes(flow.repositories[0])[0].kind).toBe("version-bump");
   });
 
   it("実装中なのにブランチもPRも無いIssueを別枠で出す", () => {
@@ -301,14 +321,15 @@ describe("buildBranchFlow", () => {
       ],
     });
 
-    expect(flow.repositories[0].lanes.map((lane) => lane.status)).toEqual([
+    // マージ済みのレーンはバージョンの束へ移るので、上段に残るのは流れている作業だけ
+    expect(flow.repositories[0].activeLanes.map((lane) => lane.status)).toEqual([
       "open",
       "no-pull-request",
-      "merged",
     ]);
+    expect(allLanes(flow.repositories[0]).map((lane) => lane.status)).toContain("merged");
   });
 
-  it("動きの無いリポジトリはカードを出さず、名前だけ返す", () => {
+  it("動きの無いリポジトリも1行ぶんは返す（既定で畳むので隠す理由が無い）", () => {
     const flow = buildBranchFlow({
       repositories: [
         { fullName: REPO, private: false },
@@ -327,16 +348,31 @@ describe("buildBranchFlow", () => {
       ],
     });
 
-    expect(flow.repositories.map((item) => item.repositoryFullName)).toEqual([REPO]);
-    expect(flow.quietRepositories).toEqual(["guchi-apps/quiet"]);
+    expect(flow.repositories.map((item) => item.repositoryFullName)).toEqual([
+      REPO,
+      "guchi-apps/quiet",
+    ]);
+    const quiet = flow.repositories[1];
+    expect(quiet.activeLanes).toEqual([]);
+    expect(quiet.releaseGroups).toEqual([]);
+    expect(quiet.summary).toEqual({
+      activeLaneCount: 0,
+      hasCiFailure: false,
+      needsUserMerge: false,
+      releaseInProgress: false,
+    });
   });
 
-  it("未リリースの変更があるリポジトリはレーンが無くても出す", () => {
+  it("未リリースの変更があれば、レーンが無くても未リリースの束を作る", () => {
     const flow = build({
       branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
     });
-    expect(flow.repositories).toHaveLength(1);
-    expect(flow.quietRepositories).toEqual([]);
+    expect(flow.repositories[0].releaseGroups).toHaveLength(1);
+    expect(flow.repositories[0].releaseGroups[0]).toMatchObject({
+      key: "unreleased",
+      mergedAt: null,
+      lanes: [],
+    });
   });
 
   it("マージ済みの作業が、どのバージョンで本番へ出たかを解決する", () => {
@@ -396,7 +432,7 @@ describe("buildBranchFlow", () => {
       branchStatuses: [branchStatus()],
     });
 
-    const byBranch = new Map(flow.repositories[0].lanes.map((lane) => [lane.branchName, lane]));
+    const byBranch = new Map(allLanes(flow.repositories[0]).map((lane) => [lane.branchName, lane]));
     expect(byBranch.get("issue-910")?.releaseState).toEqual({
       kind: "released",
       version: "3.17.0",
@@ -417,7 +453,7 @@ describe("buildBranchFlow", () => {
       pullRequests: [pullRequest({ state: "open" })],
       branchStatuses: [branchStatus({ checkedBranches: ["issue-100"], existingBranches: ["issue-100"] })],
     });
-    expect(flow.repositories[0].lanes[0].releaseState).toBeNull();
+    expect(allLanes(flow.repositories[0])[0].releaseState).toBeNull();
   });
 
   it("リリースPRを1件も取得できていないときは版を断定しない", () => {
@@ -427,8 +463,11 @@ describe("buildBranchFlow", () => {
       ],
       branchStatuses: [branchStatus()],
     });
-    expect(flow.repositories[0].lanes[0].releaseState).toEqual({ kind: "unknown" });
+    expect(allLanes(flow.repositories[0])[0].releaseState).toEqual({ kind: "unknown" });
     expect(flow.repositories[0].release.latestVersion).toBeNull();
+    // 版が分からないレーンは、どの束にも入れずに別枠へ出す
+    expect(flow.repositories[0].unassignedLanes).toHaveLength(1);
+    expect(flow.repositories[0].releaseGroups).toEqual([]);
   });
 
   it("存在を確認できなかったブランチはレーンを作らない", () => {
@@ -441,32 +480,110 @@ describe("buildBranchFlow", () => {
       ],
     });
 
-    expect(flow.repositories[0].lanes).toEqual([]);
+    expect(allLanes(flow.repositories[0])).toEqual([]);
     expect(flow.repositories[0].orphanIssues.map((item) => item.number)).toEqual([1470]);
   });
 });
 
-describe("isCompletedLane", () => {
-  /** リリース: v3.16.0（08-05）→ 以降にdevelopへ入ったものは本番未反映 */
-  const release = pullRequest({
-    number: 900,
-    title: "v3.16.0をmainへリリースする",
+
+/**
+ * `asset-manager`の実データと同じ形（#1510）。
+ * v3.8.6 に #182・#181・#180、v3.8.5 に #177・#176 が乗り、
+ * v3.8.6のリリースPR #183 はまだopen。
+ */
+function releasePullRequest(overrides: Partial<PullRequestSummary>): PullRequestSummary {
+  return pullRequest({
     baseRef: "main",
     headRef: "develop",
     kind: "release",
     linkedIssueNumber: null,
-    state: "closed",
-    merged: true,
-    mergedAt: "2026-08-05T00:00:00Z",
+    ...overrides,
+  });
+}
+
+describe("バージョンごとの束（releaseGroups）", () => {
+  const flow = build({
+    pullRequests: [
+      releasePullRequest({
+        number: 183,
+        title: "v3.8.6をmainへリリースする",
+        state: "open",
+        ciState: "pending",
+      }),
+      releasePullRequest({
+        number: 178,
+        title: "v3.8.5をmainへリリースする",
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-14T12:00:00Z",
+      }),
+      // v3.8.6に乗る（v3.8.5のリリース後にdevelopへ入った）
+      pullRequest({
+        number: 182,
+        headRef: "release/v3.8.6",
+        kind: "version-bump",
+        linkedIssueNumber: null,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-15T01:00:00Z",
+      }),
+      pullRequest({
+        number: 181,
+        headRef: "issue-137",
+        linkedIssueNumber: 137,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-15T00:30:00Z",
+      }),
+      // v3.8.5に乗った
+      pullRequest({
+        number: 176,
+        headRef: "issue-am",
+        linkedIssueNumber: 175,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-14T09:00:00Z",
+      }),
+      // まだマージしていない
+      pullRequest({ number: 187, headRef: "issue-186", linkedIssueNumber: 186, state: "open" }),
+    ],
+    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 6, behindBy: 26 } })],
+  });
+  const [repository] = flow.repositories;
+
+  it("未リリースの束を先頭に、本番へ出た束を新しい順に並べる", () => {
+    expect(repository.releaseGroups.map((group) => group.version)).toEqual(["3.8.6", "3.8.5"]);
+    expect(repository.releaseGroups[0].mergedAt).toBeNull();
+    expect(repository.releaseGroups[0].pullRequest?.number).toBe(183);
+    expect(repository.releaseGroups[1].mergedAt).toBe("2026-08-14T12:00:00Z");
   });
 
-  it("完了として畳むのは、本番へ出たものと未マージでクローズしたものだけ", () => {
+  it("リリースPRのマージ時刻の前後で、どの束に入るかが決まる", () => {
+    expect(repository.releaseGroups[0].lanes.map((lane) => lane.branchName).sort()).toEqual([
+      "issue-137",
+      "release/v3.8.6",
+    ]);
+    expect(repository.releaseGroups[1].lanes.map((lane) => lane.branchName)).toEqual(["issue-am"]);
+  });
+
+  it("まだdevelopへ入っていないレーンはどの束にも入れない", () => {
+    expect(repository.activeLanes.map((lane) => lane.branchName)).toEqual(["issue-186"]);
+    expect(repository.summary.activeLaneCount).toBe(1);
+  });
+});
+
+describe("isClosedLane", () => {
+  it("既定で隠すのは未マージのクローズだけ。マージ済みは束に入るので隠さない", () => {
     const flow = build({
       pullRequests: [
-        release,
-        // マージ待ち
+        releasePullRequest({
+          number: 900,
+          title: "v3.16.0をmainへリリースする",
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-05T00:00:00Z",
+        }),
         pullRequest({ number: 1, headRef: "issue-1", linkedIssueNumber: 1 }),
-        // 本番へ出た（リリース前にdevelopへ入った）
         pullRequest({
           number: 2,
           headRef: "issue-2",
@@ -475,16 +592,6 @@ describe("isCompletedLane", () => {
           merged: true,
           mergedAt: "2026-08-01T00:00:00Z",
         }),
-        // developには入ったが本番未反映
-        pullRequest({
-          number: 3,
-          headRef: "issue-3",
-          linkedIssueNumber: 3,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-10T00:00:00Z",
-        }),
-        // 未マージでクローズ
         pullRequest({
           number: 4,
           headRef: "issue-4",
@@ -496,15 +603,206 @@ describe("isCompletedLane", () => {
       branchStatuses: [branchStatus()],
     });
 
-    const lanes = flow.repositories[0].lanes;
-    expect(lanes.filter(isCompletedLane).map((lane) => lane.branchName).sort()).toEqual([
-      "issue-2",
+    const [repository] = flow.repositories;
+    expect(repository.activeLanes.filter(isClosedLane).map((lane) => lane.branchName)).toEqual([
       "issue-4",
     ]);
-    // 本番未反映のものは畳まず、マージ待ちの次に並べる
-    expect(lanes.filter((lane) => !isCompletedLane(lane)).map((lane) => lane.branchName)).toEqual([
-      "issue-1",
-      "issue-3",
+    // 本番へ出たものは畳まず、v3.16.0の束の中に見える
+    expect(repository.releaseGroups[0].lanes.map((lane) => lane.branchName)).toEqual(["issue-2"]);
+  });
+});
+
+describe("手作業Issueの紐づけ", () => {
+  const manualStepBody = [
+    "## 前提条件",
+    "",
+    "- 先に #1461 がdevelopへマージされていること",
+    "",
+    "## 関連",
+    "",
+    "- 起点Issue #137",
+    "- 対応PR #181",
+  ].join("\n");
+
+  function buildWithManualStep(overrides: Partial<BranchFlowIssueSource> = {}) {
+    return build({
+      issues: [
+        issue({ number: 137, title: "利用規約を整理" }),
+        issue({
+          number: 184,
+          title: "[手作業] VPS: リダイレクトを外す",
+          projectStatus: "Ready",
+          labels: ["71.manual-step"],
+          body: manualStepBody,
+          ...overrides,
+        }),
+      ],
+      pullRequests: [
+        pullRequest({
+          number: 181,
+          headRef: "issue-137",
+          linkedIssueNumber: 137,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-15T00:30:00Z",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+  }
+
+  it("本文の「## 関連」が指す起点Issueのレーンへぶら下げる", () => {
+    const [repository] = buildWithManualStep().repositories;
+    const [lane] = allLanes(repository);
+    expect(lane.issue?.number).toBe(137);
+    expect(lane.manualSteps).toEqual([
+      { number: 184, title: "[手作業] VPS: リダイレクトを外す", state: "open" },
     ]);
+  });
+
+  it("束には未完了の手作業の件数を持たせる", () => {
+    const open = buildWithManualStep().repositories[0];
+    expect(open.unassignedLanes[0].manualSteps).toHaveLength(1);
+    // 版を決められないレーンでも紐づけ自体は効く
+    const done = buildWithManualStep({ state: "closed" }).repositories[0];
+    expect(done.unassignedLanes[0].manualSteps[0].state).toBe("closed");
+  });
+
+  it("手作業Issueは「ブランチもPRも見つからないIssue」に混ぜない", () => {
+    const flow = build({
+      issues: [
+        issue({
+          number: 184,
+          title: "[手作業] VPS: リダイレクトを外す",
+          projectStatus: "Implementation",
+          labels: ["71.manual-step"],
+          body: manualStepBody,
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+    expect(flow.repositories[0].orphanIssues).toEqual([]);
+  });
+});
+
+describe("extractManualStepOrigin", () => {
+  it("「## 関連」の最初の#番号を起点として読む", () => {
+    const body = [
+      "## 前提条件",
+      "- #999 がマージ済みであること",
+      "## 関連",
+      "- 起点Issue #137",
+      "- 対応PR #181",
+    ].join("\n");
+    expect(extractManualStepOrigin(body)).toBe(137);
+  });
+
+  it("見出しが無い場合は「起点」を含む行から読む", () => {
+    expect(extractManualStepOrigin("起点: #1510\n\n何かの説明 #2000")).toBe(1510);
+  });
+
+  it("手掛かりが無ければnull", () => {
+    expect(extractManualStepOrigin("VPSで作業する。#999 は無関係。")).toBeNull();
+    expect(extractManualStepOrigin(null)).toBeNull();
+  });
+});
+
+describe("リリース起動の可否（canTriggerRelease）", () => {
+  const repositories = [{ fullName: REPO, private: false, hasClaudeWorkflow: true }];
+
+  function buildRelease(input: {
+    pullRequests?: PullRequestSummary[];
+    aheadBy?: number;
+    hasClaudeWorkflow?: boolean;
+  }) {
+    return buildBranchFlow({
+      repositories: input.hasClaudeWorkflow === false
+        ? [{ fullName: REPO, private: false, hasClaudeWorkflow: false }]
+        : repositories,
+      pullRequests: input.pullRequests ?? [],
+      issues: [],
+      branchStatuses: [
+        branchStatus({ developVsMain: { aheadBy: input.aheadBy ?? 3, behindBy: 0 } }),
+      ],
+    }).repositories[0];
+  }
+
+  it("未リリースの変更があり、リリースPRもバンプPRも無ければ押せる", () => {
+    expect(buildRelease({}).canTriggerRelease).toBe(true);
+  });
+
+  it("リリース用workflowを持たないリポジトリでは押せない", () => {
+    expect(buildRelease({ hasClaudeWorkflow: false }).canTriggerRelease).toBe(false);
+  });
+
+  it("未リリースの変更が無ければ押せない", () => {
+    expect(buildRelease({ aheadBy: 0 }).canTriggerRelease).toBe(false);
+  });
+
+  it("openなリリースPRがあれば押せない", () => {
+    const repository = buildRelease({
+      pullRequests: [
+        releasePullRequest({ number: 183, title: "v3.8.6をmainへリリースする", state: "open" }),
+      ],
+    });
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  it("openなバンプPRがあれば押せない（起こし直すと二重に走る）", () => {
+    const repository = buildRelease({
+      pullRequests: [
+        pullRequest({
+          number: 182,
+          headRef: "release/v3.8.6",
+          kind: "version-bump",
+          linkedIssueNumber: null,
+          state: "open",
+        }),
+      ],
+    });
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+});
+
+describe("サマリー行の集計", () => {
+  it("CI失敗とユーザーのマージ待ちを拾う", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({ number: 1, headRef: "issue-1", linkedIssueNumber: 1, ciState: "failure" }),
+        pullRequest({
+          number: 2,
+          headRef: "issue-2",
+          linkedIssueNumber: 2,
+          linkedIssueCheckUser: true,
+          linkedIssueCheckReason: "merge",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(flow.repositories[0].summary).toEqual({
+      activeLaneCount: 2,
+      hasCiFailure: true,
+      needsUserMerge: true,
+      releaseInProgress: false,
+    });
+  });
+
+  it("マージ済みのPRのCI失敗は数えない（もう手を動かす対象ではない）", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 1,
+          headRef: "issue-1",
+          linkedIssueNumber: 1,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-01T00:00:00Z",
+          ciState: "failure",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+    expect(flow.repositories[0].summary.hasCiFailure).toBe(false);
   });
 });

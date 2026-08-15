@@ -452,7 +452,12 @@ export function IssueDeckShell({
           .filter((repo) => filters.repos.length === 0 || filters.repos.includes(repo.fullName)),
         // 左メニューのリポジトリ絞り込み・マージ直後に伏せたPRを反映済みの集合
         pullRequests: visiblePullRequests,
-        issues,
+        // 本文とラベルは手作業Issue（71.manual-step）の紐づけに使う（#1510）。
+        // どちらもDBキャッシュ由来で、渡すのに追加の取得は要らない
+        issues: issues.map((issue) => ({
+          ...issue,
+          labels: issue.labels.map((label) => label.name),
+        })),
         branchStatuses: branchFlowStatus.branchStatuses,
       }),
     [visibleRepositories, filters.repos, visiblePullRequests, issues, branchFlowStatus.branchStatuses],

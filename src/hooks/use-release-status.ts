@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
+
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
 export type CiState = "pending" | "success" | "failure" | "unknown";
 
@@ -66,19 +68,8 @@ export type ReleaseStatus =
       otherPullRequests: OtherPullRequest[];
     };
 
-function errorMessageForResponse(
-  status: number,
-  errorCode: string | undefined,
-  message: string | undefined,
-): string {
-  if (errorCode === "github_reauth_required") {
-    return "GitHub連携が必要です。再ログインしてください。";
-  }
-  if (errorCode === "github_api_error" && message) {
-    return message;
-  }
-  return `リクエストに失敗しました (${status})`;
-}
+/** 取得側のエラー文言。起動側（`requestRelease`）と同じ関数を使う（#1510） */
+const errorMessageForResponse = releaseErrorMessage;
 
 /**
  * シートを開いている間のポーリング間隔（ミリ秒）。
@@ -196,18 +187,12 @@ export function useReleaseStatus(
 
   async function triggerRelease(): Promise<boolean> {
     if (!repoFullName) return false;
-    const [owner, repo] = repoFullName.split("/");
 
     setIsTriggering(true);
     setError(null);
     try {
-      const res = await fetch("/api/repositories/release", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(errorMessageForResponse(res.status, json.error, json.message));
+      // 起動そのものは「ブランチとPRの流れ」画面のボタンと同じ関数を通す（#1510）
+      await requestRelease(repoFullName);
       // 起動直後に状態を取り直して、実行中runやバンプPRの出現を素早く反映する。
       setReloadKey((k) => k + 1);
       return true;

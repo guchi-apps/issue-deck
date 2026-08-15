@@ -107,13 +107,58 @@ jobs:
   wip-on-push:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # 「この push の内容が既にdevelopへマージ済みか」を調べるため、コミットに紐づくPRを読む。
+    # ワークフロー先頭の permissions: には contents が無いので、ジョブ側で明示する
+    # (develop-pr-openedと同じ形)。
+    permissions:
+      issues: write
+      pull-requests: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.sha }}
     steps:
       - name: 対象issueを特定する
         id: transition
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
-            echo "issue_numbers=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          if [[ ! "$GITHUB_REF_NAME" =~ ^issue-([0-9]+)$ ]]; then
+            exit 0
           fi
+          n="${BASH_REMATCH[1]}"
+
+          # **既にdevelopへマージ済みのpushでは`implementation`を報告しない**(#1511)。
+          #
+          # このジョブの実行は、pushそのものではなくGitHub側がrunを作った時刻に起きる。
+          # #1503では`git push`(07:48:41)に対してrunの作成が07:59:29までずれ込み、その間に
+          # develop-pr-opened(07:49)・develop-pr-merged(07:51)が先に走ってStatusを
+          # `Develop`まで進めていた。後から動いた当ジョブが`implementation`を報告した結果、
+          # マージ済みのIssueが`Implementation`へ巻き戻った。**この巻き戻りは自力で戻らない**
+          # ——develop-merge-sweepが拾うのは`Develop PR`にいるIssueだけで、
+          # `Implementation`は対象外のため。
+          #
+          # 判定は「このコミットを先端とする、同じブランチからdevelopへのマージ済みPRがあるか」。
+          # `.head.ref`まで見るのは、developの先端から切ったブランチを**コミット前に**pushした
+          # 場合を巻き込まないため(そのSHAはdevelopのマージコミットでもあり、ブランチ名を見ないと
+          # 「マージ済み」と誤判定する)。マージ後の追加対応でpushされた新しいコミットには
+          # マージ済みPRが紐づかないため、`Develop` -> `Implementation`という正規の戻り
+          # (reusable-issue-dispatch.ymlのmode=additional)は妨げない。
+          #
+          # 問い合わせに失敗した場合は報告する側へ倒す(fail-open)。Statusのズレは盤面から直せるが、
+          # 報告しなければ実装中のIssueが`Ready`のまま残り、着手が見えなくなるため。
+          merged=""
+          merged="$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" 2>/dev/null |
+            jq --arg branch "$GITHUB_REF_NAME" \
+              '[.[] | select(.merged_at != null and .base.ref == "develop" and .head.ref == $branch)] | length' \
+              2>/dev/null)" || merged=""
+          if [[ ! "$merged" =~ ^[0-9]+$ ]]; then
+            echo "::warning::$HEAD_SHA に紐づくPRを取得できませんでした。マージ済みではないものとして報告します"
+          elif [ "$merged" -gt 0 ]; then
+            echo "このpushの内容は既にdevelopへマージ済みのため、issue #$n を Implementation へ戻しません"
+            exit 0
+          fi
+
+          echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
 
       - name: Project Status を報告する
         if: steps.transition.outputs.issue_numbers != ''

@@ -141,3 +141,35 @@ describe("MarkdownBody のタスクリスト", () => {
     }
   });
 });
+
+// react-markdownは各コンポーネントへhastのノード（node）も渡してくる。DOMへ流すと
+// `node="[object Object]"`という無効な属性になるので、どの要素でも落としておく（#1499）。
+describe("MarkdownBody のDOM属性", () => {
+  it("描画したHTMLにnode属性が残らない", () => {
+    const { container } = render(
+      <GithubReferenceNavigationProvider openReference={vi.fn()}>
+        <MarkdownBody
+          content={[
+            "`ssh vps`を実行する。",
+            "",
+            "```bash",
+            "ssh vps",
+            "```",
+            "",
+            "![図](https://example.com/a.png)",
+            "",
+            "[リンク](https://example.com)",
+            "",
+            "- [ ] タスク",
+            "",
+            "| 見出し |",
+            "| --- |",
+            "| 値 |",
+          ].join("\n")}
+        />
+      </GithubReferenceNavigationProvider>,
+    );
+
+    expect(container.querySelectorAll("[node]")).toHaveLength(0);
+  });
+});
