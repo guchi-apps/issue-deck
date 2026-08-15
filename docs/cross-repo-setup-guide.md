@@ -424,6 +424,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v9` | 上記 | #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124） |
 | `workflows/v10`〜`workflows/v15` | 上記 + `reusable-release-develop-to-main.yml`・`reusable-claude-pr-repair.yml` | この表では個別に追えていない。内訳は`git log --oneline <前のタグ>..workflows/vN`で確認する |
 | `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
+| `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
