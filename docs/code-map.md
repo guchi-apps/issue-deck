@@ -173,9 +173,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`sidebarAttentionNavViews`・
   `sidebarQuestionNavViews`・`sidebarIssueNavViews`、
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
-  `navViews`はスマホのタブ・スワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
+  `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
   左メニューから外した「最近追加した」「本番反映待ち」「直近本番に反映した」「完了したPR」は
-  viewクエリとしては生きており、スマホと既存リンクからは今までどおり開ける。
+  viewクエリとしては生きており、既存リンクとスマホのホーム画面のクイックビューからは
+  今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
@@ -220,6 +221,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `all`を要求するのは「ブランチとPRの流れ」を開いている間だけ（マージ済みPRとブランチの
   突き合わせに要る）。**一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の
   部分集合なので、狭める向きで取り直すのは消費にしかならない）。
+- **スマホのIssue一覧で絞り込みを操作する行は、画面の上ではなく下端（フッタータブのすぐ上）に
+  置く**（#1645。[`mobile/mobile-issue-list-screen.tsx`](../src/components/dashboard/mobile/mobile-issue-list-screen.tsx)）。
+  元は上部の横スクロールタブだったが、片手で持つと親指が届かず、押して開くシートは下から出るため
+  視線と指が上下に往復していた。**現在のビューはボタン1つに畳み**、押すと
+  [`mobile-issue-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-issue-view-sheet.tsx)が
+  全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
+  ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
+  一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃えて「本番反映待ち」
+  「直近本番に反映した」を外すが、**ホーム画面のクイックビューからはそれらのビューで開かれうる**
+  ため、現在のビューが一覧に無いときだけ末尾へ足す（足さないと選択中の表示もスワイプ移動先も
+  失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
+  （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
+  同じシートにあっても数えない。
 - **スマホのフッターは「ホーム／Issue／PR／設定」で、タブのidは`mscreen`の値そのもの**（#1436）。
   「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧（→リポジトリ別Issue一覧）。
   全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
