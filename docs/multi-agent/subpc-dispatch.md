@@ -508,6 +508,25 @@ PIDファイルにもログにも載らず、**存在自体が見えないまま
 - **`22.merge-confirm-required`の特別扱いは引き続き持たない。** マージ済みの経路では人がマージする
   まで残り、こちらの経路では猶予を過ぎたら畳まれる。どちらもラベルを見ていない
 
+#### PRを作らずに終わったセッションも畳む（#1600）
+
+#1541を入れてもなお、条件6の3経路（CLOSED・マージ済み・PRがopen）は**すべてPRかIssueのcloseを
+見ている**。子Issueへの分割・調査だけ・「対応不要」の結論で終わったセッションは`issue-<番号>`の
+PRを最後まで作らないため、**どの経路にも当たらず永久に残る**。#1523のセッションは実際にこれで
+半日残り、その間ずっと本数の上限（#1361）を1本ぶん埋めていた。
+
+そこで第4の経路として、**このセッションのコミットが手元に1つも残っていない**場合も畳む。
+
+- **判定材料はGitHubではなくgit。** 条件7で取っている`git branch -r --contains HEAD`から
+  自分のトピックブランチ（`origin/issue-<番号>`）を除き、1つでも残ればHEADは本流に入っている
+  （あるいは最初からコミットが無い）。GitHub側には「PRを作らずに終わった」ことを示す事実が
+  無いので、**手元に成果物が残っているかどうか**で決めるしかない
+- **独自のコミットが残っているときは従来どおり残す。** push済みなのにPRが無い＝作り忘れの
+  可能性があり、畳むと人が気付く機会を失う。「判定できないときは畳まない」の側に倒す
+- **猶予は#1541と共有する**（`SESSION_HANDOFF_IDLE_MINUTES`）。どちらも「`11.local`を外して
+  ローカル作業を終えたが、マージもcloseもされていない」という同じ状態で、知りたい閾値も同じ。
+  0にすると両方が止まる
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
@@ -1051,6 +1070,29 @@ sudo loginctl enable-linger "$USER"
 `DISPATCH_SECRET`は1Password（`apps/issue-deck`）から書き出す。**毎分`op run`は挟まない**
 （1Password CLIの起動コストがポーリング間隔に対して重すぎる）。手順は`dispatch.env.example`の
 コメントを参照。サブPCはGUIが無いためサービスアカウント方式（#1177）。
+
+### pollerが動かすのは`~/apps/issue-deck`のスクリプト（developへのマージだけでは効かない）
+
+unitの`ExecStart`は`~/apps/issue-deck/scripts/subpc-dispatch-poller.sh`で、そこから呼ばれる
+`reap-sessions.sh`・`reap-dev-servers.sh`・ランチャーも**同じチェックアウトのもの**
+（`SCRIPT_DIR`基準）。このチェックアウトを自動で更新する仕組みは無いため、**`develop`へ
+マージしただけではサブPCの挙動は変わらない**。worktree（`~/apps/issue-deck-worktrees/*`）で
+`--dry-run`を試して直っていても、動いているのは別の版であることがある。
+
+```bash
+# 実際に動いている版がどれだけ遅れているか
+git -C ~/apps/issue-deck fetch --quiet origin develop
+git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop   # 0でなければ古い
+
+# 取り込む。回収スクリプトは1巡ごとに起動し直されるので即座に効くが、poller本体は
+# 常駐プロセスが読み込み中のファイルなので、pullしたらrestartまでを1組で行う
+git -C ~/apps/issue-deck pull --ff-only
+systemctl --user restart issue-deck-dispatch-poller.service
+```
+
+2026-08-15に#1523を調べたときは97コミット遅れており、#1454（横断質問セッションの回収）と
+#1541（引き渡し済みの回収）がどちらもサブPCでは効いていなかった。**回収まわりを直したら、
+この更新まで含めて1つの作業と考える。**
 
 ## ログをどこで見るか
 

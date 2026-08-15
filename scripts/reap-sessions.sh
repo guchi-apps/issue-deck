@@ -10,8 +10,10 @@
 #
 # 環境変数:
 #   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定60・0で無効）
-#   SESSION_HANDOFF_IDLE_MINUTES  PRを作り`11.local`も外した（引き渡し済みの）セッション専用の
-#                                 猶予（既定30・0でこの経路だけ無効。#1541）
+#   SESSION_HANDOFF_IDLE_MINUTES  `11.local`を外してローカル作業を終えた（＝マージもcloseも
+#                                 まだの）セッション専用の猶予（既定30・0でこの経路だけ無効）。
+#                                 PRを作って引き渡した場合（#1541）と、PRを作らずに終わった
+#                                 場合（#1600）の両方に効く
 #   ISSUE_DECK_SESSION_STATE_DIR  状態ファイルの置き場（既定は ~/.local/state/issue-deck/sessions）
 #
 # ## なぜ要るか
@@ -42,9 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-state.sh"
 
 IDLE_MINUTES="${SESSION_IDLE_MINUTES:-60}"
-# 引き渡し済み（PRを作り`11.local`も外した）セッション専用の猶予（#1541）。
-# CLOSED／マージ済みは「もう何も起きない」が確定しているのに対し、引き渡し済みはCI失敗の
-# 指摘が返る余地があるため、段差を付ける。0でこの経路だけを無効にできる。
+# ローカル作業を終えた（`11.local`を外した）セッション専用の猶予（#1541・#1600）。
+# CLOSED／マージ済みは「もう何も起きない」が確定しているのに対し、こちらはCI失敗の指摘が
+# 返る余地・人が続きを聞く余地があるため、段差を付ける。0でこの経路だけを無効にできる。
 HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-30}"
 DRY_RUN=0
 
@@ -153,7 +155,8 @@ reap_one() {
   local session="$1"
   local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
-  local dirty remote_branches issue_info issue_state issue_labels merged_pr open_pr reason
+  local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
+  local merged_pr open_pr handoff_reason handoff_hold reason
 
   # 記述子が無いセッションには触らない。**これが「巻き込んではいけないもの」への線引き**で、
   # 他リポジトリの作業用セッション・人が手で立てたセッション・この仕組みより前から動いている
@@ -269,6 +272,14 @@ reap_one() {
     return 0
   fi
 
+  # HEADを含むリモート追跡ブランチのうち、**自分のトピックブランチ以外**（#1600）。
+  # 1つでもあれば、このセッションのコミットは手元に残っていない（本流へ入っているか、
+  # そもそも1つも作っていないか）。`origin/HEAD -> origin/develop`の別名行は数えない。
+  other_remote_branches="$(printf '%s\n' "$remote_branches" \
+    | sed 's/^[[:space:]*]*//' \
+    | grep -v -- ' -> ' \
+    | grep -vFx "origin/issue-$issue_number" || true)"
+
   # --- 作業が終わっているか（GitHub側の事実） ---
   # `11.local`はランチャーが起動時に付け、**実装エージェントが引き渡し時に自分で外す**ラベル
   # （scripts/prompts/implementation-agent.md）。付いている間はローカルで作業中なので畳まない。
@@ -296,10 +307,11 @@ reap_one() {
     if [[ -n "$merged_pr" ]]; then
       reason="PR #$merged_pr がマージ済み"
     else
-      # 引き渡し済み（#1541）。**PRを作り、`11.local`も外した**（条件5を通っている）＝
-      # レビュー・統合エージェントへ渡し終えた状態で、このセッションでもう作業しないという
-      # 実装エージェント自身の宣言にあたる。マージまで残すと、人の確認待ちのPRを抱えた
-      # セッションが本数の上限（#1361）を埋めて、後続のジョブが流れなくなる。
+      # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（条件5を通っている）＝
+      # このセッションでもう作業しないという実装エージェント自身の宣言にあたる。ここから先は
+      # PRを作ったか（#1541）・作らずに終わったか（#1600）で理由だけが分かれる。マージまで
+      # 残すと、人の確認待ちのPRを抱えたセッションが本数の上限（#1361）を埋めて、後続の
+      # ジョブが流れなくなる。
       #
       # **畳んでも失うものは無い。** worktreeはcleanでpush済み（条件7）、worktreeそのものは
       # 残り、呼び戻せば前回の会話の続きから再開する（#1541・run-issue-session.sh の
@@ -311,16 +323,31 @@ reap_one() {
       fi
       open_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
         --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-      if [[ -z "$open_pr" ]]; then
+      if [[ -n "$open_pr" ]]; then
+        handoff_reason="PR #$open_pr を作成しレビューへ引き渡し済み"
+        handoff_hold="PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+      elif [[ -n "$other_remote_branches" ]]; then
+        # **PRを作らずに終わったセッション**（#1600）。子Issueへの分割・調査だけ・
+        # 「対応不要」の結論のいずれかで終わると、`issue-<番号>`のPRは最後まで作られない。
+        # 上の3経路（CLOSED・マージ済み・PRがopen）はどれもPRかIssueのcloseを見ているため、
+        # この形のセッションはどれにも当たらず**永久に残る**（#1523のセッションが実際に残った）。
+        #
+        # 見分けるのは**手元に残った成果物**で、GitHub側の状態ではない。HEADが自分の
+        # トピックブランチ以外のリモートブランチに含まれている＝このセッションのコミットは
+        # 1つも残っていないので、畳んでも失うものが無い。独自のコミットが残っている場合は
+        # 「PRを作り忘れた」可能性があるため、下の`hold`で従来どおり残す。
+        handoff_reason="PRを作らずにローカル作業を終えている（このセッションのコミットが残っていない）"
+        handoff_hold="ローカル作業を終えてから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+      else
         hold "$session" "IssueがOPENで、issue-$issue_number のPRがまだ作られていない"
         return 0
       fi
       if [[ "$idle_for" -lt "$HANDOFF_IDLE_SECONDS" ]]; then
         # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-        hold "$session" "PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+        hold "$session" "$handoff_hold"
         return 0
       fi
-      reason="PR #$open_pr を作成しレビューへ引き渡し済み"
+      reason="$handoff_reason"
     fi
   fi
 
