@@ -23,8 +23,17 @@ type AskClaudeDialogProps = {
   issue: Issue;
   onCommentCreated: (comment: IssueComment) => void;
   onIssueUpdated: (issue: Issue) => void;
-  /** トリガーボタンを自前で描画したい場合に指定する（Issue詳細画面での利用を想定） */
-  renderTrigger: (isSubmitting: boolean) => ReactNode;
+  /**
+   * トリガーボタンを自前で描画したい場合に指定する（Issue詳細画面での利用を想定）。
+   *
+   * **メニュー項目から開く場合は省略し、`open`・`onOpenChange`で制御する**（#1646）。
+   * `DropdownMenuItem`をトリガーにすると、メニューが閉じた時点でトリガーごと外れて
+   * ダイアログも一緒に消える。
+   */
+  renderTrigger?: (isSubmitting: boolean) => ReactNode;
+  /** 開閉を親が持つ場合に指定する。省略時はこのコンポーネントが自分で持つ */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -32,8 +41,17 @@ type AskClaudeDialogProps = {
  * コード変更やブランチ作成を伴わない読み取り専用の質問として、定型プレフィックス
  * 付きのコメントを投稿する（claude-issue-dispatch.ymlのmode=ask判定に使う）。
  */
-export function AskClaudeDialog({ issue, onCommentCreated, onIssueUpdated, renderTrigger }: AskClaudeDialogProps) {
-  const [open, setOpen] = useState(false);
+export function AskClaudeDialog({
+  issue,
+  onCommentCreated,
+  onIssueUpdated,
+  renderTrigger,
+  open: controlledOpen,
+  onOpenChange,
+}: AskClaudeDialogProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
   const [question, setQuestion] = useState("");
   const { createComment, isSubmitting } = useIssueCommentMutations();
 
@@ -57,7 +75,7 @@ export function AskClaudeDialog({ issue, onCommentCreated, onIssueUpdated, rende
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{renderTrigger(isSubmitting)}</DialogTrigger>
+      {renderTrigger && <DialogTrigger asChild>{renderTrigger(isSubmitting)}</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Claudeに質問する</DialogTitle>

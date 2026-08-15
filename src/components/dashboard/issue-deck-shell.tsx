@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
+import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
   CheckUserToastViewport,
@@ -168,8 +168,8 @@ export function IssueDeckShell({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
-  const [askDialogOpen, setAskDialogOpen] = useState(false);
-  const [askDialogRepo, setAskDialogRepo] = useState<string | null>(null);
+  const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
+  const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
   const [checkUserToasts, setCheckUserToasts] = useState<CheckUserToastItem[]>([]);
 
@@ -217,9 +217,11 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
-  function openAskRepoQuestionDialog(repositoryFullName?: string | null) {
-    setAskDialogRepo(repositoryFullName ?? null);
-    setAskDialogOpen(true);
+  // 単一リポジトリへの質問は新規作成ダイアログの「質問」種別に統合済みで、こちらは横断専用
+  // （#1641）。回答するのがサブPCの質問セッションで、実行先の選択も要るため入口を分けている
+  function openCrossRepoQuestionDialog(repositoryFullName?: string | null) {
+    setCrossQuestionDialogRepo(repositoryFullName ?? null);
+    setCrossQuestionDialogOpen(true);
   }
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
@@ -737,8 +739,8 @@ export function IssueDeckShell({
           onCreateIssue={() =>
             openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
           }
-          onAskQuestion={() =>
-            openAskRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+          onAskCrossRepoQuestion={() =>
+            openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
           }
           repositories={repositories}
           issues={issues}
@@ -842,7 +844,7 @@ export function IssueDeckShell({
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
                   onCreateIssue={() => openCreateDialog()}
-                  onAskQuestion={() => openAskRepoQuestionDialog()}
+                  onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onBack={mobileScreen.origin === "home" ? goBack : undefined}
                 />
               )}
@@ -888,8 +890,8 @@ export function IssueDeckShell({
                   onSelectIssue={selectIssue}
                   onBack={goBack}
                   onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-                  onAskQuestion={() =>
-                    openAskRepoQuestionDialog(mobileScreen.repository.fullName)
+                  onAskCrossRepoQuestion={() =>
+                    openCrossRepoQuestionDialog(mobileScreen.repository.fullName)
                   }
                 />
               )}
@@ -1077,11 +1079,12 @@ export function IssueDeckShell({
           issues={issues}
           onCreated={handleIssueCreated}
         />
-        <AskRepoQuestionDialog
-          open={askDialogOpen}
-          onOpenChange={setAskDialogOpen}
+        <CrossRepoQuestionDialog
+          open={crossQuestionDialogOpen}
+          onOpenChange={setCrossQuestionDialogOpen}
           repositories={visibleRepositories}
-          defaultRepositoryFullName={askDialogRepo}
+          defaultRepositoryFullName={crossQuestionDialogRepo}
+          issues={issues}
           onCreated={handleIssueCreated}
         />
         <QuickFilterDialog

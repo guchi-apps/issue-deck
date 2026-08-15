@@ -142,10 +142,30 @@ export function resolveCrossRepoQuestionRepository(
 }
 
 /**
- * 「リポジトリに質問する」ダイアログ（AskRepoQuestionDialog）がIssueタイトルに付与する接頭辞。
+ * 質問フローがIssueタイトルに付与する接頭辞。
  * このタイトルを持つIssueかどうかで、質問フロー由来のIssueかを判定する（#885）。
  */
 export const ASK_REPO_QUESTION_TITLE_PREFIX = "[質問] ";
+
+/** 質問文から機械的に組み立てるIssueタイトルの、接頭辞を除いた最大長 */
+const ASK_REPO_QUESTION_TITLE_MAX_LENGTH = 40;
+
+/**
+ * 質問文からIssueタイトルを機械的に生成する（Claudeによる自動生成は行わない）。
+ * 改行・連続空白は1つの半角スペースにまとめ、長い質問は末尾を省略記号で丸める。
+ *
+ * **単一リポジトリへの質問（新規作成ダイアログの「質問」種別・#1641）と横断質問
+ * （CrossRepoQuestionDialog・#1454）で共有する。** どちらも同じ接頭辞で作られた質問Issueとして
+ * `isAskRepoQuestionIssue`に拾われる必要があるため、生成はここ1か所に置く。
+ */
+export function buildAskRepoQuestionTitle(question: string): string {
+  const normalized = question.trim().replace(/\s+/g, " ");
+  const truncated =
+    normalized.length > ASK_REPO_QUESTION_TITLE_MAX_LENGTH
+      ? `${normalized.slice(0, ASK_REPO_QUESTION_TITLE_MAX_LENGTH)}…`
+      : normalized;
+  return `${ASK_REPO_QUESTION_TITLE_PREFIX}${truncated}`;
+}
 
 /**
  * 上記接頭辞の**旧形式**（#1514で`[質問] `へ変更する前のもの）。

@@ -58,8 +58,11 @@ type MobileIssueListScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onCreateIssue: () => void;
-  /** 指定時は「リポジトリに質問する」FABをあわせて表示する（#691） */
-  onAskQuestion?: () => void;
+  /**
+   * 指定時は「複数リポジトリに質問する」FABをあわせて表示する（#1454）。
+   * 単一リポジトリへの質問は「＋」の新規作成（種別「質問」）へ統合済み（#1641）。
+   */
+  onAskCrossRepoQuestion?: () => void;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -88,7 +91,7 @@ export function MobileIssueListScreen({
   onChangeFilters,
   onSelectIssue,
   onCreateIssue,
-  onAskQuestion,
+  onAskCrossRepoQuestion,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
@@ -302,11 +305,11 @@ export function MobileIssueListScreen({
 
       {/* 下端の絞り込み行（高さ約74px）と重ならない位置へ上げる（#1645） */}
       <div className="absolute right-4 bottom-22 flex items-center gap-2">
-        {onAskQuestion && (
+        {onAskCrossRepoQuestion && (
           <button
             type="button"
-            onClick={onAskQuestion}
-            aria-label="リポジトリに質問する"
+            onClick={onAskCrossRepoQuestion}
+            aria-label="複数リポジトリに質問する"
             className="flex size-12 items-center justify-center rounded-full border bg-background shadow-lg"
           >
             <MessageCircleQuestion className="size-5" />

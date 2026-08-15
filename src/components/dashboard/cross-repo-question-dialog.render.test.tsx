@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
+import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -85,11 +85,6 @@ function makeQuestionRepository(): ConnectedRepository {
   };
 }
 
-/** 「複数のリポジトリ（横断）」へ切り替える */
-function switchToCrossRepo() {
-  fireEvent.click(screen.getByRole("button", { name: "複数のリポジトリ（横断）" }));
-}
-
 function makeRepository(): ConnectedRepository {
   return {
     id: "1",
@@ -104,29 +99,13 @@ function makeRepository(): ConnectedRepository {
   };
 }
 
-describe("AskRepoQuestionDialog", () => {
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("質問内容の入力欄に「音声入力を整理」ボタンを表示する", () => {
-    render(
-      <AskRepoQuestionDialog
-        open
-        onOpenChange={() => {}}
-        repositories={[makeRepository()]}
-        onCreated={() => {}}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /音声入力を整理/ })).not.toBeNull();
-  });
-});
-
 /**
  * #1454。**GitHub Actionsは1リポジトリしかチェックアウトしない**ため、横断質問はサブPCの
  * 質問セッションだけが実行できる。押せない状態は押す前に理由を出す。
+ *
+ * #1641で単一リポジトリの質問は新規作成ダイアログへ移り、このダイアログは横断専用になった。
  */
-describe("AskRepoQuestionDialog の横断質問", () => {
+describe("CrossRepoQuestionDialog", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
     dispatchState.error = null;
@@ -138,18 +117,32 @@ describe("AskRepoQuestionDialog の横断質問", () => {
 
   function renderDialog(repositories: ConnectedRepository[]) {
     render(
-      <AskRepoQuestionDialog
+      <CrossRepoQuestionDialog
         open
         onOpenChange={() => {}}
         repositories={repositories}
+        issues={[]}
         onCreated={() => {}}
       />,
     );
   }
 
+  it("質問の範囲を選ばせず、常に横断として開く（#1641）", () => {
+    renderDialog([makeRepository(), makeQuestionRepository()]);
+    expect(screen.getByText("複数リポジトリに質問する")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "1つのリポジトリ" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "複数のリポジトリ（横断）" })).toBeNull();
+  });
+
+  // 質問でも画像添付・Issue補完を使えるようにするため、入力欄は新規作成ダイアログと同じ部品にした
+  it("質問内容の入力欄に「音声入力を整理」と画像添付を表示する（#1641）", () => {
+    renderDialog([makeRepository(), makeQuestionRepository()]);
+    expect(screen.getByRole("button", { name: /音声入力を整理/ })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
+  });
+
   it("参照範囲は「サブPCにある全リポジトリ」で、件数を出す", () => {
     renderDialog([makeRepository(), makeQuestionRepository()]);
-    switchToCrossRepo();
     expect(screen.getByText(/サブPCにある全リポジトリ（\s*2件）/)).not.toBeNull();
   });
 
@@ -157,7 +150,6 @@ describe("AskRepoQuestionDialog の横断質問", () => {
   it("横断質問に対応していないpollerでは理由を出して押させない", () => {
     dispatchState.hosts = [makeHost({ crossRepoQuestionCapable: null })];
     renderDialog([makeRepository(), makeQuestionRepository()]);
-    switchToCrossRepo();
 
     expect(screen.getByText(/横断質問に対応していません/)).not.toBeNull();
     const submit = screen.getByRole("button", { name: "質問する" }) as HTMLButtonElement;
@@ -167,7 +159,6 @@ describe("AskRepoQuestionDialog の横断質問", () => {
   it("申告しているホストが無ければ押させない", () => {
     dispatchState.hosts = [];
     renderDialog([makeRepository(), makeQuestionRepository()]);
-    switchToCrossRepo();
 
     const submit = screen.getByRole("button", { name: "質問する" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
@@ -176,7 +167,6 @@ describe("AskRepoQuestionDialog の横断質問", () => {
   // 記録先は`claude-issue-dispatch.yml`の有無で絞らない（回答するのはActionsではないため）
   it("ワークフローが無いリポジトリも記録先に選べる", () => {
     renderDialog([makeQuestionRepository()]);
-    switchToCrossRepo();
     expect(screen.queryByText(/claude-issue-dispatch.ymlが導入されている/)).toBeNull();
   });
 });
