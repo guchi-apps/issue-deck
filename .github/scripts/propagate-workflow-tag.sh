@@ -119,10 +119,21 @@ COMMIT_MESSAGE="$(printf '共有ワークフローの参照を%sへ上げる\n\n
 git commit --quiet -m "$COMMIT_MESSAGE" || fail "コミットに失敗しました"
 
 # 自動マージのブランチ名はタグごとに固定のため、前回マージされずに閉じたPRの残骸が
-# 残っていることがある。**中身は毎回このスクリプトが作り直すもの**なので上書きしてよい
-git push --quiet -u origin "$BRANCH" \
-  || git push --quiet --force-with-lease -u origin "$BRANCH" \
-  || fail "pushに失敗しました"
+# 残っていることがある。**中身は毎回このスクリプトが作り直すもの**なので上書きしてよい。
+#
+# **上書きには期待値の明示が要る。** cloneは`--depth 1 --branch "$DEFAULT_BRANCH"`の
+# 単一ブランチcloneで、このブランチの追跡refを持たない。素の`--force-with-lease`は
+# 追跡refを比較対象にするため`stale info`で断られ、追跡refを手で作っても
+# remoteのfetch refspecの対象外なので同じく断られる（実測）。いま見えているリモートの
+# 値を期待値として渡すことで、「取得してから今までに動いていないこと」だけを担保して押す。
+if ! git push --quiet -u origin "$BRANCH"; then
+  git fetch --quiet --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+    || fail "pushに失敗しました（残っているブランチも取得できません）"
+
+  REMOTE_SHA="$(git rev-parse "refs/remotes/origin/$BRANCH")" || fail "pushに失敗しました"
+  git push --quiet --force-with-lease="$BRANCH:$REMOTE_SHA" -u origin "$BRANCH" \
+    || fail "pushに失敗しました"
+fi
 
 if [ -n "$ISSUE_NUMBER" ]; then
   PR_BODY="$(printf '## 対応Issue\n\n#%s\n\n## 実装内容\n\n参照タグを **`%s`** へ上げた。**`uses:` と `prompts-ref` を同じ値にしてある。**\n\n変更対象: %s\n変更前の参照: %s\n\n## 確認方法\n\nこのPRの Actions で `labels / wip-on-push` が成功すること。\n\n## 注意点\n\n**このPRは自動マージしない設定で作成された。** 内容を確認して手でマージする。\n\n---\n\n%s の画面から一括作成されたPRです。\n' "$ISSUE_NUMBER" "$TAG" "$CHANGED" "$BEFORE" "$SOURCE_REPO")"

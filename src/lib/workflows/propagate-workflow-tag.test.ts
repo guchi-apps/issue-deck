@@ -179,6 +179,55 @@ describe("propagate-workflow-tag.sh の自動マージ", () => {
     expect(direct).toBeGreaterThan(auto);
   });
 
+  it("残骸ブランチの上書きは期待値を明示した --force-with-lease で行う", () => {
+    // 素の`--force-with-lease`は追跡refを比較対象にするが、単一ブランチcloneはこのブランチの
+    // 追跡refを持たないため`stale info`で断られる（下の実測テスト）
+    expect(source).toContain('--force-with-lease="$BRANCH:$REMOTE_SHA"');
+    expect(source).toContain('git fetch --quiet --depth 1 origin "+refs/heads/$BRANCH:');
+  });
+
+  it("残骸ブランチが残っていても上書きできる（実際にpushして確かめる）", () => {
+    // スクリプトと同じ手順を、ローカルのbareリポジトリ相手に再現する。
+    // **素の --force-with-lease では stale info になる**ため、ここが通ることが復旧の条件
+    const dir = mkdtempSync(join(tmpdir(), "propagate-push-"));
+    workspace = dir;
+    const sh = (script: string, cwd: string) =>
+      execFileSync("bash", ["-c", script], { cwd, encoding: "utf8" });
+
+    sh(
+      [
+        "git init -q --bare remote.git",
+        "git init -q seed",
+        'cd seed && git config user.email a@b.c && git config user.name t',
+        "echo base > f && git add -A && git commit -qm base && git branch -M develop",
+        "git push -q ../remote.git develop",
+        // 前回の配布で残ったブランチ（PRが閉じられただけでブランチは残っている状態）
+        "git checkout -q -b workflow-tag/v19 && echo stale > f && git commit -qam stale",
+        "git push -q ../remote.git workflow-tag/v19",
+      ].join(" && "),
+      dir,
+    );
+    sh("git clone -q --branch develop remote.git work", dir);
+
+    const work = join(dir, "work");
+    sh(
+      [
+        "git config user.email a@b.c && git config user.name t",
+        "git checkout -q -b workflow-tag/v19 && echo new > f && git commit -qam new",
+        // ここからがスクリプトのpush部分と同じ流れ
+        'if ! git push --quiet -u origin workflow-tag/v19 2>/dev/null; then',
+        '  git fetch --quiet --depth 1 origin "+refs/heads/workflow-tag/v19:refs/remotes/origin/workflow-tag/v19"',
+        '  REMOTE_SHA="$(git rev-parse refs/remotes/origin/workflow-tag/v19)"',
+        '  git push --quiet --force-with-lease="workflow-tag/v19:$REMOTE_SHA" -u origin workflow-tag/v19',
+        "fi",
+      ].join("\n"),
+      work,
+    );
+
+    const pushed = sh("git show workflow-tag/v19:f", join(dir, "remote.git"));
+    expect(pushed.trim()).toBe("new");
+  });
+
   it("マージできなくてもPRを残して警告にとどめる（配布全体を止めない）", () => {
     expect(source).toContain("::warning::$REPO: 自動マージできませんでした");
     // fail() を呼ぶと非0で返り、呼び出し元が失敗件数に数えて全体をエラーにしてしまう
