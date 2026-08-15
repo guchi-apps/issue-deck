@@ -41,7 +41,12 @@ export const START_IMPLEMENTATION_DEFAULT_OPTIONS: StartImplementationOptions = 
   mergeConfirmRequired: false,
 };
 
-/** 「実装を開始」ダイアログで選択できるオプションの定義（表示順） */
+/**
+ * 「実装を開始」ダイアログで選択できるオプションの定義（表示順）。
+ *
+ * **「計画が必要」と「アーティファクトで見た目を出す」を先頭2つに置いている**（#1623）。
+ * ダイアログでは2列に並ぶため、実装に着手する前に承認をもらう2枚が1行目で揃う。
+ */
 export const START_IMPLEMENTATION_OPTIONS: {
   key: StartImplementationOptionKey;
   label: string;
@@ -54,6 +59,13 @@ export const START_IMPLEMENTATION_OPTIONS: {
     description:
       "実装前にPlan modeで計画を提示し、承認を得てから実装を進めます（新機能・改善のIssueでは既定でON）",
     githubLabel: PLAN_REQUIRED_LABEL,
+  },
+  {
+    key: "artifactRequired",
+    label: "アーティファクトで見た目を出す",
+    description:
+      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
+    githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
   {
     key: "mergeConfirmRequired",
@@ -75,13 +87,6 @@ export const START_IMPLEMENTATION_OPTIONS: {
     description:
       "PR作成前に変更箇所のスクリーンショットを取得し、Issueへ貼ります（無人実行は終了と同時にdevサーバーが消えるため、画面を見る唯一の手段）",
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
-  },
-  {
-    key: "artifactRequired",
-    label: "アーティファクトで見た目を出す",
-    description:
-      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
-    githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
 ];
 
