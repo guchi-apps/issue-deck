@@ -5,11 +5,13 @@ import type { ReactNode, TouchEvent } from "react";
 import { ArrowLeft, ChevronUp, MessageCircleQuestion, Plus, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
+import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueViewSheet } from "@/components/dashboard/mobile/mobile-issue-view-sheet";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 import {
@@ -100,6 +102,10 @@ export function MobileIssueListScreen({
   // ことがあるため、そのビューだけは一時的に足す（#1645）。
   const navViewsForList = useMemo(() => resolveMobileListNavViews(view), [view]);
 
+  // ヘッダーの実行状況（#1638）と一覧の実行先の解決（#1262）が同じものを見るため、
+  // この画面で1回だけ取って両方へ配る（取得口を増やさない＝`use-dispatch-state.ts`の取り決め）
+  const dispatch = useDispatchState(true);
+
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
   const swipeFilterHandlers = useSwipeFilterView((direction) => {
     // 一覧での表示順（navViewsForList）で隣接判定する。navViews順のままだと、
@@ -171,7 +177,11 @@ export function MobileIssueListScreen({
             {[meta, getNavViewLabel(view), `${issues.length}件`].filter(Boolean).join("・")}
           </p>
         </div>
-        {headerActions && <div className="flex shrink-0 items-center gap-1">{headerActions}</div>}
+        <div className="flex shrink-0 items-center gap-1">
+          {headerActions}
+          {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端で全画面そろえる */}
+          <MobileDispatchStatusButton dispatch={dispatch} />
+        </div>
       </header>
 
       <IssueList
@@ -188,6 +198,7 @@ export function MobileIssueListScreen({
         scrollKey={scrollKey}
         groupByRepo={groupByRepo}
         view={view}
+        dispatch={dispatch}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。

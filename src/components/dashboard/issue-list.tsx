@@ -18,7 +18,7 @@ import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { useNow } from "@/hooks/use-now";
@@ -70,6 +70,12 @@ type IssueListProps = {
    * 確認すべきものが残っているのに「該当するIssueがありません」だけになると逆に読み違える。
    */
   pinnedSection?: ReactNode;
+  /**
+   * ディスパッチの状態（#1638）。**同じ画面で既に取っているなら渡す**（#1262の取り決め）。
+   * スマホのIssue一覧はヘッダーの実行状況ボタンと一覧が同じものを見るため、画面側で1回
+   * 取って両方へ配っている。省略時はこの一覧が自分で取りに行く（PCの一覧は従来どおり）。
+   */
+  dispatch?: DispatchStateHandle;
 };
 
 function formatRelativeDate(iso: string) {
@@ -134,11 +140,13 @@ export function IssueList({
   groupByRepo = false,
   view,
   pinnedSection,
+  dispatch: injectedDispatch,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
   // ポーリングのフックより先に求める必要がある。
-  const dispatch = useDispatchState(true);
+  const ownDispatch = useDispatchState(injectedDispatch === undefined);
+  const dispatch = injectedDispatch ?? ownDispatch;
   const executionTargetByIssueId = useMemo(() => {
     const map = new Map<string, IssueExecutionTarget>();
     for (const issue of issues) {

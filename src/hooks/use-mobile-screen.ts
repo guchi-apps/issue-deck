@@ -33,13 +33,15 @@ export type MobileScreen =
       origin: "tab" | "home";
     }
   | { kind: "repos" }
+  // 設定（#1638でボトムナビから外し、ホームのヘッダー右上の歯車から開く画面になった）。
+  // `mscreen=settings`のURLはそのまま生きている
   | { kind: "settings" }
   // PR一覧（#1058）。どの状態別ビューを見ているかは`prview`クエリ（PCと共有）が持つ（#1312）。
   // #1436でボトムナビのタブを持つようになったため、Issue一覧と同じく遷移元（`origin`）で
   // 戻る導線の有無を切り替える（ホームの「Pull Request」からのドリルダウンでのみ出す）
   | { kind: "pull-requests"; origin: "tab" | "home" }
-  // ブランチ（#1455）。ボトムナビのタブは4つのまま増やさず（#1436）、
-  // ホームからのドリルダウンだけで開く
+  // ブランチ（#1455）。当初はホームからのドリルダウンだけで開く画面だったが、
+  // #1638でボトムナビの4枠目（旧「設定」）を受け取り、タブから直接開く画面になった
   | { kind: "flow" }
   | {
       kind: "repo-detail";
@@ -176,8 +178,9 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     (
       next: {
         // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
-        // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）
-        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail" | "flow";
+        // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）。
+        // `settings`も#1638でタブから外れ、ホームのヘッダーから開く画面になった
+        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail" | "settings";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -314,9 +317,9 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen],
   );
 
-  // ホームから「ブランチ」画面へ遷移する（#1455）。Issue・PRの絞り込み条件は持たない画面
-  // なので、渡すのは画面種別だけ。戻る導線はヘッダーの戻るボタン（goBack）が受け持つ。
-  const selectFlow = useCallback(() => navigate({ screen: "flow" }), [navigate]);
+  // ホームのヘッダーから設定画面へ遷移する（#1638）。フッターのタブから外したため、
+  // `selectTab`ではなくこちらを使う。戻る導線はヘッダーの戻るボタン（goBack）が受け持つ。
+  const selectSettings = useCallback(() => navigate({ screen: "settings" }), [navigate]);
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -490,7 +493,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectTab,
     selectPullRequests,
     selectPullRequestView,
-    selectFlow,
+    selectSettings,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

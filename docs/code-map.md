@@ -269,11 +269,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
   （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
   同じシートにあっても数えない。
-- **スマホのフッターは「ホーム／Issue／PR／設定」で、タブのidは`mscreen`の値そのもの**（#1436）。
-  「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧（→リポジトリ別Issue一覧）。
+- **スマホのフッターは「ホーム／Issue／PR／ブランチ」で、タブのidは`mscreen`の値そのもの**
+  （#1436・#1638）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
+  （→リポジトリ別Issue一覧）。
   全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
   「よくつかうフィルター」「保存したフィルター」からのドリルダウンだけにした（点灯するタブは
-  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。**PRタブから開くときの
+  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。
+  **4枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
+  1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
+  98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
+  `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
+  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。**PRタブから開くときの
   ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
@@ -310,8 +316,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
-- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
-  ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
+- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
+  新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
   **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
   （[`lib/github/branches-api.ts`](../src/lib/github/branches-api.ts)）。消費は**リポジトリあたり
