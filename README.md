@@ -53,6 +53,8 @@ pnpm dev
 
 `main`ブランチへのpushをトリガーに、GitHub Actions（`.github/workflows/deploy.yml`）経由で本番サーバーへPM2（`deploy/ecosystem.config.js`）でデプロイされる。
 
+PM2のメモリ設定（ヒープ上限・`max_memory_restart`）を触る場合は、値の根拠と再起動ループが起きたときの調べ方を [docs/production-memory.md](./docs/production-memory.md) にまとめてある。
+
 ## ドキュメント
 
 - コードの地図（どこに何があるか）: [docs/code-map.md](./docs/code-map.md)
