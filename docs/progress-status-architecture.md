@@ -152,6 +152,38 @@ Issueの完了判定をそこへ持ち込まない。
 **`Done`のIssueへ追加作業が必要になった場合は、新しいIssueを立てる。** closeされたIssueへ
 作業を積み増すと、そのdevelopの変更はどのリリースの対象一覧にも出てこない。
 
+#### push起点の報告は、runの作成が遅れるとマージ済みのIssueを巻き戻す（#1511）
+
+**ワークフローの報告順は、イベントの発生順ではなくGitHubがrunを作った順で決まる。**
+`wip-on-push`（`.github/workflows/reusable-issue-labels.yml`）は`issue-<番号>`ブランチへの
+pushで`implementation`を報告するが、このrunの作成が遅れると、既に先へ進んだStatusを
+後から上書きする。
+
+#1503で実測した並び。
+
+| 時刻(UTC) | 出来事 | 報告 |
+| --- | --- | --- |
+| 07:48:41 | `issue-1503`へpush | （runの作成が遅延） |
+| 07:49:19 | develop向けPR #1507 をopen | `develop-pr` |
+| 07:51:35 | PR #1507 をdevelopへマージ | `develop` |
+| 07:59:29 | 07:48:41のpushのrunがようやく作られる | **`implementation`** |
+
+**この巻き戻りは自力で戻らない。** `develop-merge-sweep`が拾い直すのは`Develop PR`にいる
+Issueだけで、`Implementation`は対象外。リリース時の一括遷移（`Develop`・`Release`を`Done`へ）も
+拾わないため、マージ済みのIssueが実装中の列に残り続ける。
+
+対処は`wip-on-push`側に入れてある。**pushされたコミットを先端とする、同じブランチから
+developへのマージ済みPRが既にあれば報告しない。** `.head.ref`まで見るのは、developの先端から
+切ったブランチをコミット前にpushした場合を巻き込まないため（そのSHAはdevelopのマージコミット
+でもあるため、ブランチ名を見ないと「マージ済み」と誤判定する）。マージ後の追加対応で
+pushされた新しいコミットにはマージ済みPRが紐づかないので、`Develop` → `Implementation`という
+正規の戻り（`reusable-issue-dispatch.yml`の`mode=additional`）は妨げない。
+
+**報告の成否はHTTPコードだけでは分からない点にも注意する。** `POST /api/progress`は
+反映されなかった場合（Project未導入・盤面へ未登録・既に同じStatus）も200で
+`{"applied": false, "reason": ...}`を返す仕様で、各ワークフローは`-o /dev/null`で本文を
+捨てているため、ログの「報告しました」は「届いた」以上の意味を持たない。
+
 ## 目標アーキテクチャ
 
 ```
