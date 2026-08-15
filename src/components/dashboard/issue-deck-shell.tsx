@@ -37,6 +37,7 @@ import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
+import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
@@ -48,7 +49,7 @@ import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
-import { buildBranchFlow } from "@/lib/branch-flow";
+import { buildBranchFlow, latestReleaseMergedAtByRepository } from "@/lib/branch-flow";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
@@ -458,6 +459,15 @@ export function IssueDeckShell({
   // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
   const branchFlowStatus = useBranchFlow(isFlowPaneActive);
 
+  // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
+  // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
+  // その1点だけを渡す（フック側が自分でポーリングの要否を決める）。
+  const latestReleaseMergedAt = useMemo(
+    () => latestReleaseMergedAtByRepository(visiblePullRequests),
+    [visiblePullRequests],
+  );
+  const deployStatus = useDeployStatus(isFlowPaneActive, latestReleaseMergedAt);
+
   // Issue・ブランチ・PRを1本の流れへ束ねたモデル（#1455）。PRとIssueは既存の取得結果を
   // そのまま使い、新しくGitHubへ問い合わせるのはブランチ状況だけにしている。
   const branchFlow = useMemo(
@@ -475,8 +485,16 @@ export function IssueDeckShell({
           labels: issue.labels.map((label) => label.name),
         })),
         branchStatuses: branchFlowStatus.branchStatuses,
+        deployStatuses: deployStatus.deployStatuses,
       }),
-    [visibleRepositories, filters.repos, visiblePullRequests, issues, branchFlowStatus.branchStatuses],
+    [
+      visibleRepositories,
+      filters.repos,
+      visiblePullRequests,
+      issues,
+      branchFlowStatus.branchStatuses,
+      deployStatus.deployStatuses,
+    ],
   );
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
@@ -722,6 +740,7 @@ export function IssueDeckShell({
                       onRefresh={() => {
                         branchFlowStatus.refresh();
                         openPullRequests.refresh();
+                        deployStatus.refresh();
                       }}
                       onBack={goBack}
                     />
@@ -900,6 +919,7 @@ export function IssueDeckShell({
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();
+                deployStatus.refresh();
               }}
               className="hidden flex-1 md:flex"
             />

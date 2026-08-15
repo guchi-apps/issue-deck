@@ -78,6 +78,13 @@ export type ReleaseWorkflowRun = {
   createdAt: string;
 };
 
+/**
+ * 最新の実行を1件だけ取る。**ETagの条件付きGETを通す**（#1579）。
+ *
+ * この取得はリリース進捗のポーリング（`/api/repositories/release`・`release-pending-merges`）と、
+ * 「ブランチとPRの流れ」画面のデプロイ状況（`/api/branch-flow/deploy`）から繰り返し呼ばれる。
+ * 実行が進んでいない間は304が返り、その分は**GitHubのレート制限を消費しない**（`conditional-request.ts`）。
+ */
 async function fetchLatestWorkflowRun(
   owner: string,
   repo: string,
@@ -87,16 +94,17 @@ async function fetchLatestWorkflowRun(
 ): Promise<ReleaseWorkflowRun | null> {
   const qs = query ? `&${query}` : "";
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1${qs}`;
-  const res = await githubFetch(url, token);
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
-  }
-  const data: {
+  const result = await githubFetchJsonWithEtag<{
     workflow_runs?: Array<{ status: string; conclusion: string | null; html_url: string; created_at: string }>;
-  } = await res.json();
-  const run = data.workflow_runs?.[0];
+  }>(url, token);
+  if (!result.ok) {
+    if (result.status === 404) return null;
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  const run = result.data.workflow_runs?.[0];
   if (!run) return null;
   return {
     status: run.status,

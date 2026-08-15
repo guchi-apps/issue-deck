@@ -4,9 +4,16 @@ import {
   buildBranchFlow,
   extractManualStepOrigin,
   isClosedLane,
+  latestReleaseMergedAtByRepository,
   type BranchFlowIssueSource,
 } from "@/lib/branch-flow";
-import type { BranchFlowLane, BranchFlowRepository, RepositoryBranchStatus } from "@/types/branch-flow";
+import type {
+  BranchFlowDeployRun,
+  BranchFlowLane,
+  BranchFlowRepository,
+  RepositoryBranchStatus,
+  RepositoryDeployStatus,
+} from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -81,12 +88,16 @@ function build(input: {
   pullRequests?: PullRequestSummary[];
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
+  deployStatuses?: RepositoryDeployStatus[];
+  now?: number;
 }) {
   return buildBranchFlow({
     repositories: REPOSITORIES,
     pullRequests: input.pullRequests ?? [],
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
+    deployStatuses: input.deployStatuses,
+    now: input.now,
   });
 }
 
@@ -362,6 +373,7 @@ describe("buildBranchFlow", () => {
       hasCiFailure: false,
       needsUserMerge: false,
       releaseInProgress: false,
+      deploy: null,
     });
   });
 
@@ -846,6 +858,189 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
   });
 });
 
+describe("本番デプロイの状態（#1579）", () => {
+  const MERGED_AT = "2026-08-15T10:00:00Z";
+  const JUST_AFTER_MERGE = new Date("2026-08-15T10:01:00Z").getTime();
+
+  /** mainへ入ったリリースPRと、その版に乗った作業レーン1本 */
+  const RELEASED = [
+    pullRequest({
+      number: 1573,
+      title: "v3.22.0をmainへリリースする",
+      baseRef: "main",
+      headRef: "develop",
+      kind: "release",
+      linkedIssueNumber: null,
+      state: "closed",
+      merged: true,
+      mergedAt: MERGED_AT,
+    }),
+    pullRequest({
+      number: 1570,
+      headRef: "issue-1524",
+      linkedIssueNumber: 1524,
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-08-15T09:00:00Z",
+    }),
+  ];
+
+  function deployRun(overrides: Partial<BranchFlowDeployRun> = {}): RepositoryDeployStatus[] {
+    return [
+      {
+        repositoryFullName: REPO,
+        deployRun: {
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+          // 既定は「マージの後に始まった実行」
+          createdAt: "2026-08-15T10:00:30Z",
+          ...overrides,
+        },
+      },
+    ];
+  }
+
+  function releasedGroup(deployStatuses?: RepositoryDeployStatus[], now = JUST_AFTER_MERGE) {
+    const [repository] = build({
+      pullRequests: RELEASED,
+      branchStatuses: [branchStatus()],
+      deployStatuses,
+      now,
+    }).repositories;
+    return repository;
+  }
+
+  it("マージ後に始まった実行が終わっていなければ「実行中」", () => {
+    const repository = releasedGroup(deployRun({ status: "in_progress", conclusion: null }));
+    expect(repository.releaseGroups[0].deploy).toEqual({
+      kind: "running",
+      htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+    });
+    // 畳んだ1行にも同じ状態を出す
+    expect(repository.summary.deploy?.kind).toBe("running");
+  });
+
+  it("成功していれば「成功」（ここで初めて本番反映と言ってよい）", () => {
+    expect(releasedGroup(deployRun()).releaseGroups[0].deploy?.kind).toBe("success");
+  });
+
+  it("失敗・キャンセルは「失敗」（mainには入ったが本番には出ていない）", () => {
+    expect(releasedGroup(deployRun({ conclusion: "failure" })).releaseGroups[0].deploy?.kind).toBe(
+      "failure",
+    );
+    expect(releasedGroup(deployRun({ conclusion: "cancelled" })).releaseGroups[0].deploy?.kind).toBe(
+      "failure",
+    );
+  });
+
+  it("最新の実行がマージより古ければ「デプロイ待ち」（実行がまだ現れていない）", () => {
+    const repository = releasedGroup(deployRun({ createdAt: "2026-08-14T00:00:00Z" }));
+    expect(repository.releaseGroups[0].deploy).toEqual({ kind: "waiting", htmlUrl: null });
+  });
+
+  it("待っても実行が現れないまま15分を過ぎたら、状態を出すのをやめる", () => {
+    // mainへのpushでデプロイしないリポジトリで、永久に「待ち」と言い続けないため
+    const repository = releasedGroup(
+      deployRun({ createdAt: "2026-08-14T00:00:00Z" }),
+      new Date("2026-08-15T10:16:00Z").getTime(),
+    );
+    expect(repository.releaseGroups[0].deploy).toBeNull();
+  });
+
+  it("実行を取得できていなければ状態を出さない（従来どおりの表示に戻す）", () => {
+    const repository = releasedGroup(undefined);
+    expect(repository.releaseGroups[0].deploy).toBeNull();
+    expect(repository.summary.deploy).toBeNull();
+  });
+
+  it("状態が乗るのはいちばん新しい版の束だけ（前の版のデプロイ結果は分からない）", () => {
+    const [repository] = build({
+      pullRequests: [
+        ...RELEASED,
+        pullRequest({
+          number: 1400,
+          title: "v3.21.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "develop",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-10T00:00:00Z",
+        }),
+        pullRequest({
+          number: 1390,
+          headRef: "issue-1380",
+          linkedIssueNumber: 1380,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-09T00:00:00Z",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+      deployStatuses: deployRun({ status: "in_progress", conclusion: null }),
+      now: JUST_AFTER_MERGE,
+    }).repositories;
+
+    const [latest, previous] = repository.releaseGroups;
+    expect(latest.version).toBe("3.22.0");
+    expect(latest.deploy?.kind).toBe("running");
+    expect(previous.version).toBe("3.21.0");
+    expect(previous.deploy).toBeNull();
+  });
+
+  it("直近のリリースのマージ時刻をリポジトリごとに取り出せる（ポーリングの要否判定に使う）", () => {
+    const merged = latestReleaseMergedAtByRepository([
+      ...RELEASED,
+      pullRequest({
+        number: 1400,
+        title: "v3.21.0をmainへリリースする",
+        baseRef: "main",
+        headRef: "develop",
+        kind: "release",
+        linkedIssueNumber: null,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-08-10T00:00:00Z",
+      }),
+      // openなリリースPRはまだmainへ入っていないので数えない
+      pullRequest({
+        number: 1600,
+        baseRef: "main",
+        headRef: "develop",
+        kind: "release",
+        linkedIssueNumber: null,
+        state: "open",
+      }),
+    ]);
+
+    expect(merged.get(REPO)).toBe(MERGED_AT);
+  });
+
+  it("まだmainへ入っていない束には状態を出さない", () => {
+    const [repository] = build({
+      pullRequests: [
+        pullRequest({
+          number: 1600,
+          title: "v3.23.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "develop",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "open",
+        }),
+      ],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      deployStatuses: deployRun(),
+      now: JUST_AFTER_MERGE,
+    }).repositories;
+
+    expect(repository.releaseGroups[0].mergedAt).toBeNull();
+    expect(repository.releaseGroups[0].deploy).toBeNull();
+  });
+});
+
 describe("サマリー行の集計", () => {
   it("CI失敗とユーザーのマージ待ちを拾う", () => {
     const flow = build({
@@ -867,6 +1062,7 @@ describe("サマリー行の集計", () => {
       hasCiFailure: true,
       needsUserMerge: true,
       releaseInProgress: false,
+      deploy: null,
     });
   });
 
