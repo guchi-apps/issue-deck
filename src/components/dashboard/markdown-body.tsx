@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentProps } from "react";
+import { useMemo, useState, type ComponentProps } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -10,6 +10,11 @@ import remarkGfm from "remark-gfm";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
+import {
+  rehypeTaskListItems,
+  TASK_ITEM_ATTRIBUTE,
+  TASK_LINE_ATTRIBUTE,
+} from "@/lib/rehype-task-list-items";
 import { remarkTrimCjkAutolink } from "@/lib/remark-trim-cjk-autolink";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +108,42 @@ function MarkdownLink({ children, href, title }: ComponentProps<"a">) {
   );
 }
 
+export type TaskToggleHandler = (line: number, checked: boolean) => void;
+
+const TASK_CHECKBOX_CLASS = "mr-1.5 size-3.5 shrink-0 translate-y-[0.15em] accent-primary";
+
+/**
+ * クリックできるタスクリストのチェックボックス（#1486）。
+ *
+ * `onToggle`にはこの項目が書かれている**元Markdownの行番号**を渡す（`rehypeTaskListItems`が
+ * 付けたもの）。呼び出し側はその行だけを書き換えてIssue本文を更新する。
+ */
+function TaskCheckbox({
+  line,
+  checked,
+  disabled,
+  onToggle,
+}: {
+  line: number;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: TaskToggleHandler;
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={(event) => onToggle(line, event.target.checked)}
+      aria-label={checked ? "このタスクのチェックを外す" : "このタスクにチェックを付ける"}
+      className={cn(
+        TASK_CHECKBOX_CLASS,
+        "cursor-pointer disabled:cursor-progress disabled:opacity-60",
+      )}
+    />
+  );
+}
+
 const components: Components = {
   a: (props) => <MarkdownLink {...props} />,
   img: (props) => <MarkdownImage {...props} />,
@@ -132,15 +173,63 @@ const components: Components = {
   ),
   th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-medium">{children}</th>,
   td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+  // タスク項目は箇条書きのマーカーを消し、チェックボックスを行頭に置く（GitHubと同じ見た目）。
+  // 親の`ul`が`pl-5`なので、消したマーカーのぶんだけインデントを戻す。
+  li: ({ children, node }) =>
+    node?.properties?.[TASK_ITEM_ATTRIBUTE] === true ? (
+      <li className="-ml-5 list-none">{children}</li>
+    ) : (
+      <li>{children}</li>
+    ),
+  // トグルを渡されていない場合（コメント・PR本文・AI要約）は表示のみ。`rehypeSanitize`の
+  // 既定スキーマが`input`へ`disabled`を強制するので、ここでも読み取り専用のまま描く。
+  input: ({ node, ...props }) =>
+    typeof node?.properties?.[TASK_LINE_ATTRIBUTE] === "number" ? (
+      <input type="checkbox" checked={props.checked === true} disabled readOnly className={TASK_CHECKBOX_CLASS} />
+    ) : (
+      <input {...props} />
+    ),
 };
 
 type MarkdownBodyProps = {
   content: string;
   className?: string;
   repositoryFullName?: string;
+  /**
+   * タスクリストのチェックをクリックできるようにする（#1486）。渡さない場合は表示のみ。
+   * 引数は元Markdownでの行番号と、クリック後のチェック状態。
+   */
+  onToggleTask?: TaskToggleHandler;
+  /** トグルの送信中。連打で本文の更新が競合しないよう、その間はチェックを受け付けない */
+  isTaskToggling?: boolean;
 };
 
-export function MarkdownBody({ content, className, repositoryFullName }: MarkdownBodyProps) {
+export function MarkdownBody({
+  content,
+  className,
+  repositoryFullName,
+  onToggleTask,
+  isTaskToggling = false,
+}: MarkdownBodyProps) {
+  const mergedComponents = useMemo<Components>(() => {
+    if (!onToggleTask) return components;
+    return {
+      ...components,
+      input: ({ node, ...props }) => {
+        const line = node?.properties?.[TASK_LINE_ATTRIBUTE];
+        if (typeof line !== "number") return <input {...props} />;
+        return (
+          <TaskCheckbox
+            line={line}
+            checked={props.checked === true}
+            disabled={isTaskToggling}
+            onToggle={onToggleTask}
+          />
+        );
+      },
+    };
+  }, [onToggleTask, isTaskToggling]);
+
   return (
     <div className={cn("font-body text-[0.9375rem] leading-[1.9] break-words", className)}>
       <ReactMarkdown
@@ -150,8 +239,11 @@ export function MarkdownBody({ content, className, repositoryFullName }: Markdow
           [rehypeLinkifyIssueRefs, { repositoryFullName }],
           rehypeAbsolutizeRelativeUrls,
           [rehypeSanitize, sanitizeSchema],
+          // sanitizeの後に置く。`hast-util-sanitize`は`position`を保つので行番号を取れ、
+          // 後から付けるのでスキーマへ`data-task-line`の許可を足さずに済む（#1486）
+          rehypeTaskListItems,
         ]}
-        components={components}
+        components={mergedComponents}
       >
         {content}
       </ReactMarkdown>
