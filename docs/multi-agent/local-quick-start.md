@@ -411,6 +411,25 @@ node /…/bin/pnpm dev              ← プロセスグループリーダー
 グループへ広げるのはリーダーが開発サーバーに見えるときに限る。`claude`はコマンドラインの
 判定に当たらないため、cwdが同じworktreeでも遡りが止まる。
 
+**リーダーだけが先に死ぬことがある。** `pnpm dev`が落ちて`next dev`と`next-server`（実測843MB）が
+残る形で、#1523の調査中に実際に踏んでいる。この状態では`dev_server_pid_matches`が
+「リーダーが生きていること」を要求するため判定できず、安全側に倒れて何も止まらない。
+ポートから引く経路はここを拾える。リーダーのPIDはもう`/proc`に無いので上のグループ拡張が
+効かず、**遡りが止まった`next dev`が木の頂点になる**（実地で確認済み）。残った
+`sh -c`・`bash scripts/dev.sh`は子が終われば自分も終わる。
+
+### プロセスの特定に`ps`・`pgrep`の部分一致を使わない（#1524）
+
+**`claude`はプロンプト全文をコマンドラインに持つ。** Issue本文に`next-server`と書いてあれば
+`ps | grep next-server`はその`claude`自身に当たる（#1523の調査で実際にヒットした）。
+`worktree_session_running`が`pgrep -f "run-issue-session\.sh $n "`と末尾の空白まで含めて
+絞っているのも同じ理由（#1224）。
+
+止める相手を決めるときは次の2つだけを見る。どちらも部分一致ではない。
+
+- `ss -tlnpH "sport = :<ポート>"`が返すソケットの持ち主（そのポートで待ち受けている当人）
+- `/proc/<pid>/cmdline`をNUL区切りで読んだargv[0]・argv[1]（`dev_server_process_looks_like_dev`）
+
 **止めきれなかったPIDのPIDファイルは消さない**（#1524）。`reap-dev-servers.sh`はPIDファイルを
 走査するため、消してしまうと以降その孤児は誰の目にも留まらなくなる。
 

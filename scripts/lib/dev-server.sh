@@ -178,6 +178,12 @@ dev_server_process_looks_like_dev() {
 # 開発サーバーは一式が1つのプロセスグループになるため、リーダーが開発サーバーに見えるなら
 # それが木の頂点でよい。エージェントが手で起こした場合はリーダーが`claude`になるが、
 # そちらはコマンドラインの判定で外れるので広がらない。
+#
+# **リーダーだけが先に死んでいることがある**（#1523の調査中に実地で踏んだ形）。そのPIDは
+# もう`/proc`に無いのでcwdが読めず、拡張は起きない。頂点は遡りが止まった`next dev`になり、
+# その子孫（`next-server`）まで止まる。残った`sh -c`・`bash scripts/dev.sh`は子が終われば
+# 自分も終わる。**`dev_server_stop_group`ではここを止められない**（リーダーが生きていることを
+# 要求するため判定に失敗し、安全側に倒れて何もしない）。
 dev_server_tree_root() {
   local pid="$1" worktree_dir="$2" root parent cwd pgid
   root="$pid"
