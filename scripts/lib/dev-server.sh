@@ -71,6 +71,30 @@ dev_server_loopback_listening() {
   return 1
 }
 
+# そのポートがワイルドカード（全インターフェース）で待ち受けているかを判定する（#1526）。
+#
+# 開発サーバーの待ち受けは`127.0.0.1`が既定になった（`scripts/dev.sh`）が、**worktreeは分岐した
+# 時点のスクリプトを持ち続ける**ため、#1329より前に作られたworktreeで手で`pnpm dev`を叩くと
+# 従来どおり全インターフェースに出る。Tailscaleに参加しているホストではtailnet上の他端末から
+# 到達できてしまうので、回収の巡回（scripts/reap-dev-servers.sh）で見つけて知らせる。
+#
+# **具体的なアドレス（`100.x` / `[fd7a:...]`）は対象外。** それは`tailscale serve`自身の
+# 待ち受けで、意図した公開にあたる。拾うのは`*` / `0.0.0.0` / `[::]`だけ。
+#
+# `ss`が無い環境では判定できないため、**出ていない側（＝警告しない安全側）に倒す**。
+dev_server_wildcard_listening() {
+  local port="$1" addr
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  command -v ss >/dev/null 2>&1 || return 1
+  while read -r addr; do
+    addr="${addr%:*}"
+    case "$addr" in
+      '*' | '0.0.0.0' | '[::]') return 0 ;;
+    esac
+  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
+  return 1
+}
+
 # 開発サーバーをプロセスグループごと止める。**止まったことを確認するところまでを1つの処理にする。**
 #
 # `pnpm dev` は `next dev` → `next-server` と子を持つ。TERMを撃ちっぱなしにすると、

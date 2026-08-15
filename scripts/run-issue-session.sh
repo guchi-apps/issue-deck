@@ -313,21 +313,28 @@ trap cleanup EXIT HUP TERM
 if [[ "$DEV_SERVER_ENABLED" == "0" ]]; then
   echo "#$ISSUE_NUMBER: 開発サーバーは起動しません（画面確認が必要になったら worktree で \`$DEV_COMMAND\` を実行してください。ポート $DEV_PORT は env に設定済みです）。"
 else
-  # tailnetへ出す経路では、開発サーバーの待ち受けを`127.0.0.1`へ閉じる（#1329）。
-  # `tailscale serve`は公開したポートを自ノードのtailnetアドレスで実際にlistenするため、
-  # `::`を要求する`next dev`とは同じポートで両立しない。「devサーバー→serve」の順なら初回だけは
-  # 成功するが、**devサーバーだけが回収（#1223）された後は`EADDRINUSE`で起こし直せない。**
-  # ここで先に閉じておけば順序に依存しなくなる。
+  # 開発サーバーの待ち受けを`127.0.0.1`へ閉じる（#1329・#1526）。理由は2つある。
+  #
+  # 1. **意図しない公開を作らない（#1526）。** `next dev`の既定は全インターフェースで、
+  #    Tailscaleに参加しているホストではtailnet上の他端末からそのまま到達できてしまう。
+  # 2. `tailscale serve`は公開したポートを自ノードのtailnetアドレスで実際にlistenするため、
+  #    `::`を要求する`next dev`とは同じポートで両立しない。「devサーバー→serve」の順なら初回だけは
+  #    成功するが、**devサーバーだけが回収（#1223）された後は`EADDRINUSE`で起こし直せない。**
+  #    先に閉じておけば順序に依存しなくなる。
+  #
+  # **`tailscale serve`が使えるかで分けない（#1526）。** 以前は使えるホストのときだけ閉じていたが、
+  # 1.の理由は使えないホストにも等しく当てはまる。ここを無条件にしておくと、**#1329より前に
+  # 作られたworktree（自前の`scripts/dev.sh`に閉じる判定を持たない）でも、この経路からの起動は
+  # 閉じる**（`ISSUE_DECK_DEV_HOST`自体は#1178から解釈されるため）。
   #
   # **serveを張るのは後のまま。** 先に張ると、この変数を見ない他リポジトリの開発サーバー
   # （汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり「devサーバー→serve」の順で、
   # 待ち受けもそのリポジトリの既定のまま。
   #
-  # 明示指定があればそちらを尊重する。`dev.sh`も同じ判定を単独で持つため（手で`pnpm dev`を
+  # 明示指定があればそちらを尊重する。`dev.sh`は同じ既定を単独でも持つため（手で`pnpm dev`を
   # 叩き直す経路のため）、ここが渡らなくても結果は同じになる。
-  if [[ -z "${ISSUE_DECK_DEV_HOST:-}" ]] && tailscale_serve_available; then
-    export ISSUE_DECK_DEV_HOST="127.0.0.1"
-  fi
+  : "${ISSUE_DECK_DEV_HOST:=127.0.0.1}"
+  export ISSUE_DECK_DEV_HOST
 
   echo "#$ISSUE_NUMBER: 開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
   # stdinを/dev/nullにするのは必須（#1094）。set -m によりこのジョブはバックグラウンドの

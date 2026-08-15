@@ -107,6 +107,41 @@ stop_one() {
   return 0
 }
 
+# worktreeに書かれている開発サーバーのポートを返す（読めなければ空）。
+# ランチャーが起動時に`PORT`を書き込む（scripts/update-env-file.sh）。環境ファイルの名前は
+# リポジトリによって違う（issue-deckは`.env.local`・汎用ランチャーは`.env`のこともある）ため両方見る。
+port_of_worktree() {
+  local worktree_dir="$1" env_file port
+  for env_file in "$worktree_dir/.env.local" "$worktree_dir/.env"; do
+    [[ -f "$env_file" ]] || continue
+    port="$(sed -n -E 's/^[[:space:]]*PORT=["'"'"']?([0-9]+)["'"'"']?[[:space:]]*$/\1/p' "$env_file" 2>/dev/null | head -1)"
+    if [[ "$port" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s' "$port"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# 待ち受けが全インターフェースに出ている開発サーバーを知らせる（#1526）。
+#
+# 待ち受けの既定は`127.0.0.1`になったが（scripts/dev.sh）、**worktreeは分岐した時点の
+# スクリプトを持ち続ける**ため、#1329より前に作られたworktreeで手で`pnpm dev`を叩くと従来どおり
+# 外へ出る。セッション経由の起動は`run-issue-session.sh`の`ISSUE_DECK_DEV_HOST`で塞がるが、
+# 手で起こし直す経路はどこにも掛からない。poller が毎巡ここを通るので、見つけたら知らせる。
+#
+# **止めない。** 回収の判断材料はアイドルと孤児だけに保つ（誤検知で画面確認中のものを撃たない）。
+# **worktreeのログにも書かない。** ログのmtimeがアイドル判定の材料なので、ここで書くと
+# 毎巡mtimeが更新され、アイドルでの回収が永久に成立しなくなる。
+warn_if_exposed() {
+  local issue_number="$1" worktree_dir="$2" port
+  port="$(port_of_worktree "$worktree_dir")"
+  [[ -n "$port" ]] || return 0
+  dev_server_wildcard_listening "$port" || return 0
+  echo "  #$issue_number: 警告: 開発サーバーがポート $port を全インターフェースで待ち受けています。tailnet上の他端末から到達できます（#1526）。" >&2
+  echo "  #$issue_number:       $worktree_dir の scripts/dev.sh が古い可能性があります。git -C $worktree_dir merge origin/develop で取り込むか、worktreeを作り直してください。" >&2
+}
+
 # tailnetへの公開（#1265）のうち、**繋がる先がもう無いもの**を外す。
 #
 # ポートとIssueの対応をここでは持たない（PIDファイルにポートを記録していない）ため、
@@ -211,6 +246,9 @@ for pid_file in "$DEV_SERVER_DIR"/issue-*.pid; do
     stop_one "$issue_number" "$pid" "$log_file" "$worktree_dir" "セッションが終了しても残っていた（孤児）"
     continue
   fi
+
+  # ここまで来たものは「生きていて、これからも動かし続ける」開発サーバー。外へ出ていたら知らせる（#1526）。
+  warn_if_exposed "$issue_number" "$worktree_dir"
 
   # アイドル（第1段階）。**判定材料は開発サーバーのログのmtimeだけ。**
   # `next dev` はリクエストと再コンパイルのたびに書くため、「誰もその画面を見ていない」の

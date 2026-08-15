@@ -4,10 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-# 待ち受けアドレスの既定を決めるために`tailscale serve`の状態を見る（#1329）。
-# shellcheck source=scripts/lib/tailscale-serve.sh
-source "$SCRIPT_DIR/lib/tailscale-serve.sh"
-
 # next devは.env.localを自動読込するが、このスクリプト自身（bash）は読み込まないため明示的に読む。
 if [ -f .env.local ]; then
   set -a
@@ -42,32 +38,38 @@ if [ -z "${CI_LOGIN_BYPASS_SECRET:-}" ]; then
   echo '案内: 開発DBが空だと画面には何も表示されません。`pnpm db:seed:dev` でダミーデータと開発用ログインを用意できます（#1473）。' >&2
 fi
 
-# 待ち受けアドレス（#1178）。**未指定なら原則 `-H` を渡さない。**
-# `next dev` は既定で全インターフェース（IPv4/IPv6の両方）を待ち受けるため、Tailscale経由で
-# 他端末（iPhone等）から画面を見るのはこの既定のままで成立する。`-H 0.0.0.0` を明示すると
-# 逆にIPv4だけに絞られ、tailnetのIPv6アドレスからは見えなくなる。
-# 127.0.0.1 に閉じたいときや、特定のインターフェースだけに出したいときに指定する。
-DEV_HOST="${ISSUE_DECK_DEV_HOST:-}"
-DEV_HOST_REASON="ISSUE_DECK_DEV_HOST"
-
-# **例外は、このポートが`tailscale serve`で公開されているとき（#1329）。**
-# serveは公開したポートを自ノードのtailnetアドレスで実際にlistenするため、`::`を要求する
-# `next dev`とは両立せず、`listen EADDRINUSE :::<ポート>` で起動できない。順序に依存していて、
-# 「devサーバー→serve」の順で始まったセッションでも、devサーバーだけが回収（#1223）された後は
-# 二度と起こし直せなかった。ここで既定を倒しておけば、案内どおりの `pnpm dev` がそのまま通る。
+# 待ち受けアドレス（#1178・#1329・#1526）。**未指定なら常に `127.0.0.1` に閉じる。**
 #
-# **serveは`localhost:<ポート>`へproxyするので、閉じてもtailnetのURLからは従来どおり見える。**
-# `tailscale serve`が使えないホスト（メインPCのWSL等）では判定が常に偽になり、既定は変わらない。
-if [ -z "$DEV_HOST" ] && tailscale_serve_published "$PORT"; then
-  DEV_HOST="127.0.0.1"
-  DEV_HOST_REASON="tailscale serve がポート ${PORT} を公開中のため。tailnetのURLからは引き続き見えます"
+# `next dev` の既定は全インターフェース（`::`）で、tailnetにも同一LANにもそのまま出る。#1178では
+# それを「Tailscale経由でスマホから画面を見るための既定」として受け入れ、閉じるほうを例外
+# （`ISSUE_DECK_DEV_HOST`の明示指定か、そのポートが`tailscale serve`で公開中のとき・#1329）に
+# していた。**しかし閉じる側が条件付きだったため、条件を満たさない起動が意図せず外へ出ていた**
+# （#1526。issue-1309のdevサーバーだけが`*:5309`で待ち受け、tailnet上の他端末から到達できた）。
+# worktreeは分岐した時点のこのスクリプトを持ち続けるので、条件を後から足しても遡っては効かない。
+#
+# そこで**既定と例外の向きを反転させる**。未指定なら閉じ、開けたいときだけ明示する。
+#
+# - tailnetへ出す経路は`tailscale serve`（`localhost:<ポート>`へproxy）に一本化してある。
+#   **閉じてもtailnetのURLからは引き続き見える**（scripts/lib/tailscale-serve.sh・#1265）。
+# - #1329が避けていた`EADDRINUSE`（serveが残っているポートで`::`を要求して落ちる）も、
+#   より広いこの既定に吸収されるので、serveの公開状態を見る分岐は持たない。
+# - 開けたいときは`ISSUE_DECK_DEV_HOST`を渡す。**`0.0.0.0`はIPv4だけに絞られる**ため、
+#   従来の全インターフェースに戻すなら`::`を指定する。
+DEV_HOST="${ISSUE_DECK_DEV_HOST:-127.0.0.1}"
+HOST_ARGS=(-H "$DEV_HOST")
+if [ -n "${ISSUE_DECK_DEV_HOST:-}" ]; then
+  echo "開発サーバーの待ち受けアドレスを ${DEV_HOST} に固定します（ISSUE_DECK_DEV_HOST の指定）。" >&2
+else
+  echo "開発サーバーの待ち受けアドレスを ${DEV_HOST} に固定します（既定・#1526）。tailnetからは tailscale serve のURLで見えます。外へ出すときは ISSUE_DECK_DEV_HOST=:: を指定してください。" >&2
 fi
 
-HOST_ARGS=()
-if [ -n "$DEV_HOST" ]; then
-  HOST_ARGS=(-H "$DEV_HOST")
-  echo "開発サーバーの待ち受けアドレスを ${DEV_HOST} に固定します（${DEV_HOST_REASON}）。" >&2
-fi
+# 待ち受けがループバックに閉じているか。閉じているならLANアクセス設定を行っても届かない（後述）。
+dev_host_is_loopback() {
+  case "$1" in
+    127.* | ::1 | '[::1]' | localhost) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # 同一LAN上の別端末（スマホ等）からsslip.io経由でアクセスできるよう、
 # Windows側のポートフォワーディングをベストエフォートで設定する（失敗してもdevサーバー起動は続行する）。
@@ -75,7 +77,13 @@ fi
 # ワンクリック起動（scripts/start-local-session.sh）から始まったセッションでは
 # ISSUE_DECK_SKIP_LAN_SETUP=1 が環境変数として届く。この経路（wt.exeで開いたタブ）では
 # UACを承認しても待ちから戻らず、devサーバーが起動しないまま止まるため行わない（#1094）。
-if [ "${ISSUE_DECK_SKIP_LAN_SETUP:-0}" != "0" ]; then
+#
+# **待ち受けがループバックに閉じているときも行わない（#1526）。** 転送先が
+# `<WSLのIP>:<ポート>` なので、閉じたままフォワーディングだけ設定しても繋がらず、
+# **繋がらない理由はWindows側にもWSL側にも出ない。** 設定しない旨と開け方をここで案内する。
+if dev_host_is_loopback "$DEV_HOST"; then
+  echo "LANアクセス設定は行いません（待ち受けが ${DEV_HOST} に閉じているため、ポートフォワーディングを設定しても届きません）。LAN内の別端末から見るときは ISSUE_DECK_DEV_HOST=0.0.0.0 を指定して起動し直してください。" >&2
+elif [ "${ISSUE_DECK_SKIP_LAN_SETUP:-0}" != "0" ]; then
   echo "LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh ${PORT} を実行してください）。" >&2
 else
   bash "$(dirname "${BASH_SOURCE[0]}")/setup-lan-access.sh" "${PORT}" || echo "警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
@@ -90,5 +98,5 @@ else
   echo "GITHUB_WEBHOOK_PROXY_URL が未設定のため、smee client は起動しません。" >&2
 fi
 
-# set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
-next dev -p "${PORT}" ${HOST_ARGS[@]+"${HOST_ARGS[@]}"}
+# HOST_ARGS は必ず `-H <アドレス>` の2要素（#1526で既定を持たせたため空にならない）。
+next dev -p "${PORT}" "${HOST_ARGS[@]}"

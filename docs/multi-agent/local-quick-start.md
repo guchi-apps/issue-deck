@@ -447,6 +447,7 @@ scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで
 | ポート | `4000`（帯のベース値+0） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない |
 | ログ | `~/apps/issue-deck-worktrees/.dev-servers/develop.log` | Issueごとの開発サーバーと同じ置き場 |
 | 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、そのまま対象外になる |
+| tailnetへの公開 | `tailscale serve --http=4000 localhost:4000`（#1526） | 待ち受けは`127.0.0.1`に閉じる。公開範囲をTailscaleのACLが保証し、「意図した公開」と「閉じ忘れ」が見分けられる |
 
 **既定はバックグラウンド起動で、`nohup`によりSSHを切っても残る。** Tailscale SSHでサブPCに入って
 叩き、そのまま外出先やスマホから画面を開く使い方（#1176 Phase 1と同じ狙い）を前提にしている。
@@ -459,13 +460,23 @@ scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで
 worktreeにブランチが乗っている・未コミットの変更があるときは**黙って捨てずにエラーで止める**。
 ここは`develop`を映すための場所で、作業場所ではない。
 
-### tailnet内の端末からはMagicDNSの名前で開く
+### tailnetへは`tailscale serve`で出す（#1526）
 
-起動時とデフォルトの`--status`が、MagicDNSの名前（`http://<ホスト名>.<tailnet>.ts.net:4000`）と
-tailnet IPの両方を表示する。**開くのはMagicDNSの名前のほう。** 生のtailnet IPは
-`next.config.ts`の`allowedDevOrigins`（`**.ts.net`）に当たらず、画面のHTMLは出ても`/_next/*`が
-403になる（#1289で実測）。IPで開きたい場合は`.env.local`の`ISSUE_DECK_DEV_ALLOWED_ORIGINS`へ足す
-（[allowedDevOriginsに載せる必要がある](#alloweddevoriginsに載せる必要がある)を参照）。
+**待ち受けは`127.0.0.1`に閉じ、外から開けるのは`tailscale serve`のFQDN1本だけ**
+（`http://<ホスト名>.<tailnet>.ts.net:4000`）。起動時と`--status`はこのURLを表示する。
+
+以前は`next dev`の既定（全インターフェース）のまま出しており、tailnet IPとMagicDNSの名前を
+両方表示していた。ただしそれだと**同一LANの生IPからも見え、「意図して公開したもの」と
+「閉じ忘れ」が区別できない**。#1526で`scripts/dev.sh`の既定を`127.0.0.1`にしたのに合わせ、
+Issueごとのセッションと同じserve方式へ寄せた。
+
+- **生のtailnet IPでは開けない。** serveはHostヘッダーで振り分けるため404になる。そもそも
+  `next.config.ts`の`allowedDevOrigins`（`**.ts.net`）にも当たらず、画面のHTMLが出ても
+  `/_next/*`が403になっていた（#1289で実測）。開けないURLを並べないよう、**表示もFQDNだけにした**。
+- `--stop`と起動し直しのたびにserveを撤去する。**撤去し忘れると繋がらないURLが残るだけでなく、
+  そのポートで`next dev`を起こせなくなる**（#1403）。`--foreground`も同じで、Ctrl-Cで撤去される
+  （そのため`exec`していない）。
+- `tailscale serve`が使えないホストでは公開せず、`http://localhost:4000`だけを表示する。
 
 ### マイグレーションは既定で適用する。失敗したら必ず直す
 
@@ -573,13 +584,54 @@ WSLで必要だったLANアクセス設定（`setup-lan-access.sh`）は、WSL2�
 `start-issue.sh`は`powershell.exe`が無い環境を検出してスキップする（`ISSUE_DECK_SKIP_LAN_SETUP`を
 渡す必要はない。渡した場合も従来どおりスキップする）。
 
-`next dev`は**既定で全インターフェース（IPv4/IPv6の両方）を待ち受ける**ため、tailnet内の端末から
-`http://<ホスト名>:<ポート>`でそのまま見える。閉じたいときだけ`ISSUE_DECK_DEV_HOST`で待ち受け
-アドレスを指定する（`dev.sh`が`next dev -H`へ渡す）。**例外は`tailscale serve`でそのポートを
-公開しているときで、未設定でも`127.0.0.1`に閉じる**（#1329・後述）。
+### 待ち受けは`127.0.0.1`に閉じる（#1526）
 
-**`-H 0.0.0.0`を明示してはいけない。** 既定（未指定）はIPv4/IPv6の両方を待ち受けるが、
-`0.0.0.0`を渡すとIPv4だけに絞られ、tailnetのIPv6アドレスから見えなくなる。
+**開発サーバーの待ち受けアドレスの既定は`127.0.0.1`で、外から開くのは`tailscale serve`のURL経由に
+一本化してある**（`scripts/dev.sh`）。`next dev`自体の既定は全インターフェース（`::`）で、tailnetにも
+同一LANにもそのまま出てしまう。
+
+以前（#1178）はその既定を「Tailscale経由でスマホから見るための既定」として受け入れ、閉じるほうを
+例外にしていた。**しかし閉じる側が条件付きだったため、条件を満たさない起動が意図せず外へ出ていた。**
+
+| 以前の「閉じる」条件 | 満たさない例 |
+| --- | --- |
+| `run-issue-session.sh`が`ISSUE_DECK_DEV_HOST=127.0.0.1`をexport（`tailscale serve`が使えるホストのみ） | 手で`pnpm dev`を叩き直した起動 |
+| `dev.sh`が`tailscale_serve_published <ポート>`を見て閉じる（#1329） | serveを張っていないポート（`23.preview-required`でないセッション）・#1329より前に作られたworktree |
+
+#1526で実際に見つかったのは、issue-1309のdevサーバーだけが`*:5309`で待ち受け、**tailnet上の他端末から
+到達できていた**という状態だった。そのworktreeの`scripts/dev.sh`は#1329より前の版で、閉じる判定を
+そもそも持っていない。
+
+そこで**既定と例外の向きを反転させた**。未指定なら閉じ、開けたいときだけ`ISSUE_DECK_DEV_HOST`で
+明示する。
+
+```bash
+ISSUE_DECK_DEV_HOST=:: pnpm dev   # 従来どおり全インターフェースに出す
+```
+
+- **`0.0.0.0`は全インターフェースではない。** IPv4だけに絞られ、tailnetのIPv6アドレスからは
+  見えなくなる。全部に出したいなら`::`を渡す。
+- 閉じている間は`setup-lan-access.sh`（WSLのポートフォワーディング）も**行わない**。転送先が
+  `<WSLのIP>:<ポート>`なので、閉じたまま設定しても繋がらず、繋がらない理由がどこにも出ない。
+  LAN内から直に叩きたいときは`ISSUE_DECK_DEV_HOST=0.0.0.0`を指定する（案内は起動ログに出る）。
+
+#### 古いworktreeには遡って効かない
+
+**worktreeは分岐した時点の`scripts/dev.sh`を持ち続ける。** #1526の時点で、閉じる判定を持たない
+worktreeが125件中65件あった。セッション経由の起動は`run-issue-session.sh`が
+`ISSUE_DECK_DEV_HOST`を無条件にexportするので塞がる（この変数は#1178から解釈されるため、
+古い`dev.sh`にも効く）が、**そのworktreeで手で`pnpm dev`を叩く経路は塞げない。**
+
+そこで`scripts/reap-dev-servers.sh`（pollerが1巡ごとに呼ぶ）が、生きている開発サーバーの
+待ち受けを見て、ワイルドカード（`*` / `0.0.0.0` / `[::]`）なら警告を出す。判定は
+`dev_server_wildcard_listening`（`scripts/lib/dev-server.sh`）が持ち、**具体的なtailnetアドレス
+（`100.x` / `[fd7a:...]`）は`tailscale serve`自身の待ち受けなので拾わない。**
+
+- **止めはしない。** 回収の判断材料はアイドルと孤児だけに保つ（画面確認中のものを誤って撃たない）。
+- **worktreeのログには書かない。** ログのmtimeがアイドル判定の材料なので、毎巡書くとアイドルでの
+  回収が永久に成立しなくなる。
+- 警告が出たら、そのworktreeで`git merge origin/develop`して`dev.sh`を新しくするか、worktreeを
+  作り直す。
 
 ### それでも`tailscale serve`を通す（#1265）
 
@@ -626,18 +678,23 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 そこで**serveが出ているポートでは待ち受けを`127.0.0.1`に閉じる**ことにした。競合しなくなり、
 順序に依存しなくなる。
 
+**この条件付きの判定は#1526で不要になった**（待ち受けの既定そのものが`127.0.0.1`になったため）。
+`scripts/dev.sh`はもう`tailscale_serve_published`を見ておらず、より広い既定が同じ効果を持つ。
+ここは経緯として残す。今の担当は次のとおり。
+
 | 場所 | 何をするか |
 |---|---|
-| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定でも、`tailscale_serve_published <ポート>`が真なら`-H 127.0.0.1`を渡す。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
-| `scripts/run-issue-session.sh` | serveを張れるホストなら、開発サーバーを起こす前に`ISSUE_DECK_DEV_HOST=127.0.0.1`をexportする。セッション開始時点から閉じるので、そもそもぶつかる状態を作らない |
+| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定なら`-H 127.0.0.1`を渡す（#1526）。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
+| `scripts/run-issue-session.sh` | 開発サーバーを起こす前に`ISSUE_DECK_DEV_HOST=127.0.0.1`をexportする（#1526で無条件にした）。セッション開始時点から閉じるので、そもそもぶつかる状態を作らない。**#1329より前に作られたworktreeにも効く**唯一の経路 |
 
 - **serveは`localhost:<ポート>`へproxyするので、閉じてもtailnetのURLからは従来どおり見える**
   （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する。
 - **serveを張る順番は変えていない。** 先に張ると、`ISSUE_DECK_DEV_HOST`を見ない他リポジトリの
   開発サーバー（汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり
   「devサーバー→serve」の順で、待ち受けもそのリポジトリの既定のまま。
-- `tailscale serve`が使えないホスト（メインPCのWSL等）では判定が常に偽になり、待ち受けは既定
-  （全インターフェース）のまま。tailnetからは直接見える。
+- `tailscale serve`が使えないホスト（メインPCのWSL等）でも、**待ち受けは閉じる**（#1526で
+  ホストによる分岐をやめた）。そのぶんtailnetから直接は見えなくなるので、外から見るなら
+  `ISSUE_DECK_DEV_HOST=::`を明示する。
 - 閉じている間は、**tailnet以外（同一LANの生IP・sslip.io）からは見えない**。サブPCで別端末から
   見る経路はserveのFQDNなので実害は無いが、LAN内から直に叩きたいときは
   `ISSUE_DECK_DEV_HOST`を明示するか、serveを外す。
