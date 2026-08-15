@@ -7,6 +7,7 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
  * 実行キューの要約（#1266）。
@@ -133,6 +134,32 @@ export function summarizeDispatchSessionCapacity(
       max: host.maxSessions as number,
       atCapacity: isDispatchHostAtSessionCapacity(host),
     }));
+}
+
+/**
+ * そのホストで見せるセッション（#1567）。
+ *
+ * **`ALIVE`と`FAILED`だけを出す。** `EXITED`・`GONE`は人が作業を終えて畳んだ場合がほとんどで、
+ * 24時間ぶん残っている（`GONE_SESSION_RETENTION_MS`）。それを並べると、今動いているものが
+ * 終わったものに埋もれる。逆に`FAILED`を落とさないのは、**セッションの異常終了はこの一覧を
+ * 除くとキューのどこにも出ない**ため（「直近の失敗」に出るのはジョブの失敗で、あちらは
+ * tmuxが立った時点で終わっている）。
+ *
+ * 並びは生きているものが先で、その中では新しい報告が上。
+ */
+export function selectHostSessions(
+  sessions: readonly DispatchSessionView[],
+  hostName: string,
+): DispatchSessionView[] {
+  return sessions
+    .filter(
+      (session) =>
+        session.host === hostName && (session.state === "ALIVE" || session.state === "FAILED"),
+    )
+    .sort((a, b) => {
+      if (a.state !== b.state) return a.state === "ALIVE" ? -1 : 1;
+      return b.lastReportedAt.localeCompare(a.lastReportedAt);
+    });
 }
 
 /**

@@ -50,6 +50,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     crossRepoQuestionCapable: true,
     maxSessions: 12,
     liveSessions: 0,
+    metrics: null,
     ...overrides,
   };
 }
@@ -81,6 +82,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     tmuxSessionName: "issue-deck-issue-1049",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1049,
+    issueTitle: null,
     state: "ALIVE",
     exitStatus: null,
     firstSeenAt: "2026-08-14T00:00:00Z",

@@ -2,7 +2,13 @@
 
 import { FolderGit2, GitBranch, Plus, SlidersHorizontal, X } from "lucide-react";
 
+import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { Card } from "@/components/ui/card";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
+import {
+  describeDispatchQueueLoad,
+  summarizeDispatchQueue,
+} from "@/lib/dispatch/queue-summary";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
@@ -89,6 +95,14 @@ export function MobileHomeScreen({
             )}
           </div>
         </div>
+
+        {/*
+          ホストの様子（#1567）。**スマホには実行キューを開く入口が無い**（ヘッダーの
+          ボタンは`hidden md:flex`のトップバーにしかない）ため、外出先では何が動いているのか・
+          サブPCに余力があるのかを見る手段がなかった。PCの実行キューと同じ
+          `DispatchHostPanel`を置き、順番待ちの件数だけを1行添える
+        */}
+        <DispatchHostSection />
 
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
@@ -237,6 +251,33 @@ export function MobileHomeScreen({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * ホームに出すホストの様子（#1567）。
+ *
+ * **ここで`useDispatchState`を呼ぶ。** スマホの各画面は`issue-deck-shell.tsx`が条件付きで
+ * 1つだけmountするため、Issue詳細（`mobile-issue-detail.tsx`）と同時に走ることはなく、
+ * ポーリングが二重にならない。
+ *
+ * **申告しているホストが1台も無ければ節ごと出さない**（PCの実行キューのボタンと同じ判定）。
+ * ディスパッチを使っていない環境で、空の見出しだけが残らないようにする。
+ */
+function DispatchHostSection() {
+  const dispatch = useDispatchState(true);
+  if (dispatch.hosts.length === 0) return null;
+
+  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+
+  return (
+    <div className="px-4 pb-4">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">実行中のセッション</h2>
+        <span className="text-xs text-muted-foreground">{describeDispatchQueueLoad(summary)}</span>
+      </div>
+      <DispatchHostPanel hosts={dispatch.hosts} sessions={dispatch.sessions} />
     </div>
   );
 }

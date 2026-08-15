@@ -21,6 +21,14 @@ export type IssueSessionSummary = {
   /** 見出しの文言 */
   label: string;
   /**
+   * ホスト名を含まない短い言い方（#1567）。**`label`と同じ分岐で作る。**
+   *
+   * ホストのセッション一覧（`dispatch-host-panel.tsx`）のように、既にホスト名が見出しに
+   * 出ている場所で使う。別の関数として持つと、状態が増えたときに片方だけ更新されて
+   * 同じ状態が2通りの言い方で出る。
+   */
+  shortLabel: string;
+  /**
    * 見出しに添える時刻（ISO文字列）。**その文言が何時のことなのかを指す**（#1353）。
    *
    * 入力待ち・応答終了はフックが報告してきた時刻（`activityAt`）で、それ以外はpollerが
@@ -79,6 +87,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       ...base,
       tone: "error",
       label: `${formatDispatchHostName(session.host)}のセッションが異常終了しました`,
+      shortLabel: "異常終了",
       detail: session.exitStatus === null ? null : `終了コード ${session.exitStatus}`,
       // 落ちたセッションのRemote Controlは開いても意味が無い
       remoteControlUrl: null,
@@ -90,6 +99,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       ...base,
       tone: "done",
       label: `${formatDispatchHostName(session.host)}のセッションは終了しました`,
+      shortLabel: "終了",
       detail: null,
       remoteControlUrl: null,
       previewUrl: null,
@@ -105,6 +115,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       at: session.activityAt ?? session.lastReportedAt,
       tone: "waiting",
       label: `${formatDispatchHostName(session.host)}のセッションがまだ開始していません`,
+      shortLabel: "まだ開始していません",
       detail: `フォルダの信頼確認（Is this a project you created or one you trust?）などで止まっている可能性があります。\`tmux attach -t ${session.tmuxSessionName}\`で答えてください`,
       // 繋がっていないURLを出さない（起動時に取れた値が残っていることがある）
       remoteControlUrl: null,
@@ -116,6 +127,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       at: session.activityAt ?? session.lastReportedAt,
       tone: "waiting",
       label: `${formatDispatchHostName(session.host)}のセッションが入力を待っています`,
+      shortLabel: "入力を待っています",
       detail: "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
     };
   }
@@ -127,6 +139,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       at: session.activityAt ?? session.lastReportedAt,
       tone: "running",
       label: `${formatDispatchHostName(session.host)}のセッションが作業中です`,
+      shortLabel: "作業中",
       detail: "直前の入力に答えたあと、作業を続けています",
     };
   }
@@ -136,6 +149,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       at: session.activityAt ?? session.lastReportedAt,
       tone: "running",
       label: `${formatDispatchHostName(session.host)}のセッションは応答を終えています`,
+      shortLabel: "応答を終えています",
       detail: "作業が終わっている場合と、次の指示を待っている場合があります",
     };
   }
@@ -143,6 +157,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     ...base,
     tone: "running",
     label: `${formatDispatchHostName(session.host)}で実行中`,
+    shortLabel: "実行中",
     detail: null,
   };
 }

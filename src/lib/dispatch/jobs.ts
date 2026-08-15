@@ -2,6 +2,7 @@ import type { DispatchHost, DispatchJob } from "@prisma/client";
 
 import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
+import type { DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
@@ -91,6 +92,22 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
+    // 5列は「まとめて入るかまとめてnullか」で保存されている（#1567）。読むときも同じ扱いにし、
+    // 1つでも欠けていれば使用率そのものを出さない（欠けた項目が0＝空きに見えるのを避ける）
+    metrics:
+      host.cpuPercent === null ||
+      host.memoryUsedMb === null ||
+      host.memoryTotalMb === null ||
+      host.diskUsedGb === null ||
+      host.diskTotalGb === null
+        ? null
+        : {
+            cpuPercent: host.cpuPercent,
+            memoryUsedMb: host.memoryUsedMb,
+            memoryTotalMb: host.memoryTotalMb,
+            diskUsedGb: host.diskUsedGb,
+            diskTotalGb: host.diskTotalGb,
+          },
   };
 }
 
@@ -789,16 +806,16 @@ function issueTitleKey(repositoryFullName: string, issueNumber: number): string 
  *   キュー全体が見えなくなる方が害が大きい
  */
 async function resolveDispatchIssueTitles(
-  jobs: readonly Pick<DispatchJob, "repositoryFullName" | "issueNumber">[],
+  targets: readonly { repositoryFullName: string; issueNumber: number }[],
 ): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
-  if (jobs.length === 0) return titles;
+  if (targets.length === 0) return titles;
 
   const numbersByRepository = new Map<string, Set<number>>();
-  for (const job of jobs) {
-    const numbers = numbersByRepository.get(job.repositoryFullName) ?? new Set<number>();
-    numbers.add(job.issueNumber);
-    numbersByRepository.set(job.repositoryFullName, numbers);
+  for (const target of targets) {
+    const numbers = numbersByRepository.get(target.repositoryFullName) ?? new Set<number>();
+    numbers.add(target.issueNumber);
+    numbersByRepository.set(target.repositoryFullName, numbers);
   }
 
   // `Repository.fullName`は`@@unique([installationId, fullName])`の一部なので、同じfullNameの行が
@@ -862,9 +879,12 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     getDispatchConcurrency(),
   ]);
 
-  // タイトルの引き当て（#1519）は**ジョブが確定してから**。上の`Promise.all`へ入れられない
-  // （どのIssueを引くかがジョブの一覧に依存する）。ジョブが0件ならクエリも投げない
-  const issueTitles = await resolveDispatchIssueTitles(jobs);
+  // タイトルの引き当て（#1519）は**ジョブとセッションが確定してから**。上の`Promise.all`へ
+  // 入れられない（どのIssueを引くかが一覧に依存する）。0件ならクエリも投げない。
+  //
+  // **ジョブとセッションを1回にまとめる**（#1567）。セッションの行にもタイトルを出すが、
+  // 別々に引くと同じリポジトリ・同じIssueを2度読むことになる（同じIssueを指すことが多い）
+  const issueTitles = await resolveDispatchIssueTitles([...jobs, ...sessions]);
 
   return {
     hosts: hosts.map((host) => toHostView(host, now)),
@@ -873,7 +893,11 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     jobs: jobs.map((job) =>
       toJobView(job, issueTitles.get(issueTitleKey(job.repositoryFullName, job.issueNumber)) ?? null),
     ),
-    sessions,
+    sessions: sessions.map((session) => ({
+      ...session,
+      issueTitle:
+        issueTitles.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null,
+    })),
     concurrency,
   };
 }
@@ -912,6 +936,12 @@ export async function announceDispatchHost(params: {
    */
   maxSessions: number | null;
   liveSessions: number | null;
+  /**
+   * 申告した時点のリソース使用率（#1567）。**画面へ出すための写しで、割り当ての判定には
+   * 使わない**（`maxSessions`と同じ立場）。申告していない・取得に失敗した巡では`null`で、
+   * その場合は5列すべてを`null`へ戻す（前回の値を残すと、古い数字が現在の値として出る）。
+   */
+  metrics: DispatchHostMetrics | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -927,6 +957,13 @@ export async function announceDispatchHost(params: {
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
+    // 申告が無ければ5列とも`null`へ戻す（#1567）。**前回の値を残さない。**
+    // 残すと、metricsを送らなくなったpollerの古い数字が現在の値として出続ける
+    cpuPercent: params.metrics?.cpuPercent ?? null,
+    memoryUsedMb: params.metrics?.memoryUsedMb ?? null,
+    memoryTotalMb: params.metrics?.memoryTotalMb ?? null,
+    diskUsedGb: params.metrics?.diskUsedGb ?? null,
+    diskTotalGb: params.metrics?.diskTotalGb ?? null,
     lastSeenAt: now,
   };
 

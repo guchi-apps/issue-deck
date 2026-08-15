@@ -300,14 +300,68 @@ cross_repo_question_capable() {
   fi
 }
 
+# ホストのリソース使用率（#1567）。画面（実行キュー・スマホのホーム）へ出すためだけの申告で、
+# **issue-deck側はこの値で何も判定しない**（起動を止めているのは DISPATCH_MAX_SESSIONS と
+# 同時実行数だけ）。
+#
+# **取り方はops-dashboardの`scripts/host-stats/agent.sh`に合わせている。** 同じホストの同じ数字が
+# 2つのアプリで食い違うと、どちらを信じてよいか分からなくなる。ホスト全体の監視（サービス・
+# プロセス・温度・ネットワーク・履歴）は引き続きあちらの担当で、こちらは3つだけ。
+#
+# **どれか1つでも取れなければ何も出力しない**（呼び出し側が`metrics`ごと落とす）。部分的に0が
+# 入ると、取れなかった項目が「空いている」と読めてしまう。
+collect_host_metrics() {
+  local cpu_first cpu_second cpu_percent mem_total_mb mem_used_mb disk_total_gb disk_used_gb
+
+  # CPUは瞬間値が取れないため、/proc/stat のアイドル時間と全体の累積を1秒あけて2回読み、
+  # その差分から出す。1巡60秒に対する1秒なので、claimの開始が1秒遅れるだけ
+  cpu_first="$(awk '/^cpu / { idle = $5 + $6; total = 0; for (i = 2; i <= NF; i++) total += $i; print idle, total; exit }' /proc/stat 2>/dev/null)" || return 1
+  [[ -n "$cpu_first" ]] || return 1
+  sleep 1
+  cpu_second="$(awk '/^cpu / { idle = $5 + $6; total = 0; for (i = 2; i <= NF; i++) total += $i; print idle, total; exit }' /proc/stat 2>/dev/null)" || return 1
+  [[ -n "$cpu_second" ]] || return 1
+  cpu_percent="$(awk -v first="$cpu_first" -v second="$cpu_second" 'BEGIN {
+    split(first, a, " "); split(second, b, " ");
+    idle = b[1] - a[1]; total = b[2] - a[2];
+    if (total <= 0) exit 1;
+    value = (1 - idle / total) * 100;
+    if (value < 0) value = 0; if (value > 100) value = 100;
+    printf "%.1f", value;
+  }')" || return 1
+  [[ -n "$cpu_percent" ]] || return 1
+
+  # MemAvailable は「実際に割り当て可能な量」で、キャッシュぶんを空きとして数える。
+  # free と MemFree の差で使用量を出すと、キャッシュを使い切ったホストが常に満杯に見える
+  mem_total_mb="$(awk '/^MemTotal:/ { printf "%d", $2 / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
+  mem_used_mb="$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { printf "%d", (total - $2) / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
+  [[ -n "$mem_total_mb" && -n "$mem_used_mb" ]] || return 1
+
+  # worktreeと開発サーバーで埋まるのは `/` なので、そこ1本だけを見る（#1223・#1525）
+  disk_total_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $2 / 1048576 }')" || return 1
+  disk_used_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $3 / 1048576 }')" || return 1
+  [[ -n "$disk_total_gb" && -n "$disk_used_gb" ]] || return 1
+
+  jq -n \
+    --argjson cpuPercent "$cpu_percent" \
+    --argjson memoryUsedMb "$mem_used_mb" \
+    --argjson memoryTotalMb "$mem_total_mb" \
+    --argjson diskUsedGb "$disk_used_gb" \
+    --argjson diskTotalGb "$disk_total_gb" \
+    '{cpuPercent: $cpuPercent, memoryUsedMb: $memoryUsedMb, memoryTotalMb: $memoryTotalMb, diskUsedGb: $diskUsedGb, diskTotalGb: $diskTotalGb}'
+}
+
 announce() {
-  local repositories payload live_sessions
+  local repositories payload live_sessions metrics
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
   # **申告するのは1巡の入口で数えた本数**（#1394）。この後の回収（reap_sessions）で減ったぶんは
   # 次の巡の申告に乗る。画面に出すのは「最後に申告した時点」の数字で、判定そのものは
   # 引き続き claim の直前で数え直す（下の run_once）。回収を待ってから申告する形にすると、
   # 回収が長引いたぶんだけ生存報告が遅れ、応答していないホストとして扱われうる。
   live_sessions="$(count_issue_sessions)"
+
+  # 取れなければ空にし、下で`null`として送る（#1567）。issue-deck側はそれを「申告なし」として
+  # 5列をnullへ戻すため、**取れなくなった巡で古い数字が残り続けることはない**
+  metrics="$(collect_host_metrics 2>/dev/null)" || metrics=""
 
   # `sessionControl`は「セッションの停止・終了（#1332）を実行できる」という申告。
   # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
@@ -321,6 +375,10 @@ announce() {
   # 起動ジョブを取りに行かない（#1361）ため、これが無いと画面は「順番待ちのまま進まない」理由を
   # 出せず、pollerが落ちている状態と区別が付かない。**issue-deck側はこの値で割り当てを判定しない**
   # （サブPCのtmuxを見られるのはこちらだけで、向こうに判定を置くと必ずずれる）。
+  #
+  # `metrics`も**画面へ出すためだけの申告**（#1567）。「もう1本起こしてよいか」を判断するのに
+  # ops-dashboardを開かなくて済むようにするためのもので、こちらも判定には使わない。
+  # 取れなければ`null`（＝申告なし）。
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \
@@ -330,7 +388,8 @@ announce() {
     --argjson maxSessions "$MAX_SESSIONS" \
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
+    --argjson metrics "${metrics:-null}" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
