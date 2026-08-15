@@ -189,4 +189,28 @@ describe("IssuePullRequestList", () => {
     );
     expect(screen.getAllByText("コンフリクトしています")).toHaveLength(1);
   });
+
+  it("noticeで渡した案内を一覧と同じ枠の中に出す（#1631）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest()]}
+        mergeApprovalPending
+        notice={<p>自動マージされなかった理由</p>}
+      />,
+    );
+    expect(screen.getByText("自動マージされなかった理由")).not.toBeNull();
+  });
+
+  it("対応PRが無ければnoticeも描かない（枠ごと出さない）", () => {
+    const { container } = render(
+      <IssuePullRequestList
+        links={[]}
+        pullRequests={[]}
+        mergeApprovalPending
+        notice={<p>自動マージされなかった理由</p>}
+      />,
+    );
+    expect(container.textContent).toBe("");
+  });
 });

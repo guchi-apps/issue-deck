@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { GitPullRequest } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -39,6 +41,12 @@ type IssuePullRequestListProps = {
    * 入れ物の中へ置くときに使う（枠が二重になるのを避ける）。
    */
   variant?: "card" | "plain";
+  /**
+   * 一覧の先頭（`card`なら見出しの下）へ差し込む案内。マージ待ちの理由（#1631）を、
+   * PC・スマホのどちらでも**マージボタンと同じ枠の中**へ出すための口。枠の外へ置くと、
+   * `card`では箱が2つ縦に並んで見え、どちらの操作に対する説明なのかが読み取れなくなる。
+   */
+  notice?: ReactNode;
   className?: string;
 };
 
@@ -119,6 +127,7 @@ export function IssuePullRequestList({
   isMerging,
   mergeError,
   variant = "card",
+  notice,
   className,
 }: IssuePullRequestListProps) {
   const detailByNumber = new Map(pullRequests.map((pr) => [pr.number, pr]));
@@ -140,6 +149,7 @@ export function IssuePullRequestList({
           対応PR{mergeApprovalPending && "・マージ待ち"}
         </p>
       )}
+      {notice}
       <ul className="flex flex-col gap-2">
         {visibleLinks.map((link) => {
           const detail = detailByNumber.get(link.number);
