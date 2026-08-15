@@ -140,6 +140,24 @@ describe("IssueSessionStatus のセッション操作", () => {
     ).toBe(false);
   });
 
+  /**
+   * #1557。ボタンの文言だけでは、押すまで「処理だけ止まる」のか「セッションごと終わる」のかが
+   * 分からず、実際に問われた。**並んでいるときにしか迷いようがない**ので、停止を出している
+   * ときだけ添える。
+   */
+  it("2つが並ぶときは違いを添える", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+
+    expect(screen.getByText(/今動いている処理だけを止めます/)).not.toBeNull();
+    expect(screen.getByText(/セッションごと終了します/)).not.toBeNull();
+  });
+
+  it("停止を出さないセッションには違いの説明も出さない", () => {
+    render(<IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />);
+
+    expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
+  });
+
   it("停止を押すとそのセッションのホストへ積む", async () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     fireEvent.click(screen.getByRole("button", { name: "停止" }));

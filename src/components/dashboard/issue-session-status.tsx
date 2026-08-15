@@ -258,6 +258,23 @@ export function IssueSessionStatus({
           </Button>
         )}
       </div>
+      {/* 2つの違いを画面に出す（#1557）。ボタンの文言だけでは、押すまで「動いている処理だけが
+          止まる」のか「セッションごと終わる」のかが分からず、実際に問われた。
+          ホバーではなく本文として出すのは上の理由・案内と同じ立場（スマホにホバーが無い）。
+          並んでいるときにしか迷いようがないので、停止を出しているときだけ添える */}
+      {showInterrupt && (
+        <p
+          className={cn(
+            "w-full break-words text-xs text-muted-foreground",
+            align === "end" ? "text-right" : "text-left",
+          )}
+        >
+          「{SESSION_CONTROL_LABELS.INTERRUPT.action}
+          」は今動いている処理だけを止めます（セッションは残るので、追加指示で続けられます）。「
+          {SESSION_CONTROL_LABELS.KILL.action}
+          」はセッションごと終了します（worktreeは残るので、次に起動すると前回の続きから再開します）。
+        </p>
+      )}
       {/* 本文を書く場所。**押した人が書いた1行だけを送る**（実行体が組み立てる経路は無い） */}
       {showInstruction && instructionOpen && (
         <div className="flex w-full flex-col gap-1.5">
@@ -395,7 +412,8 @@ export function IssueSessionStatus({
             <AlertDialogTitle>このセッションを閉じますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {formatDispatchHostName(session.host)}の「{session.tmuxSessionName}」を終了します。作業中の内容は
-              コミットされず、worktreeはそのまま残ります。
+              コミットされず、worktreeはそのまま残ります。次にこのIssueで起動したときは、前回の会話の
+              続きから再開します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
