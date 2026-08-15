@@ -116,6 +116,15 @@ describe("buildImplementationPrompt", () => {
     expect(prompt).toContain("実装後にPR本文へURLを貼る必要はありません");
   });
 
+  // #1632: 見た目の合意はPCだけでは足りず、スマホ幅の崩れは実装後に発覚すると作り直しになる
+  it("ラベルの有無によらずPC・スマホ(iPhone 15)の2画面を求める", () => {
+    for (const labels of [[], [{ name: "25.artifact-required" }]]) {
+      const prompt = buildImplementationPrompt({ ...BASE, labels });
+      expect(prompt).toContain("iPhone 15 = 幅393px × 高さ852px");
+      expect(prompt).toContain("2画面");
+    }
+  });
+
   it("ラベルを並べる（無ければ「(なし)」）", () => {
     expect(buildImplementationPrompt({ ...BASE, labels: [] })).toContain("(なし)");
     expect(
