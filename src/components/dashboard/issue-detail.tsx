@@ -77,6 +77,7 @@ import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
+import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
@@ -140,6 +141,7 @@ export function IssueDetail({
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
+  const taskList = useIssueTaskList(issue, onIssueUpdated);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
   const commentSummary = useIssueCommentSummaries(issue);
@@ -754,8 +756,23 @@ export function IssueDetail({
           <Separator />
 
           <div>
-            <h2 className="mb-2 text-sm font-semibold">説明</h2>
-            <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">説明</h2>
+              {/* 本文にタスクリストがあるときだけ進捗を出す。手作業Issueの「やること」を
+                  消し込みながら進めるための目印（#1486） */}
+              {taskList.progress.total > 0 && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  タスク {taskList.progress.completed} / {taskList.progress.total} 完了
+                </span>
+              )}
+            </div>
+            <ApiErrorMessage message={taskList.error} />
+            <MarkdownBody
+              content={taskList.body}
+              repositoryFullName={issue.repositoryFullName}
+              onToggleTask={taskList.toggleTask}
+              isTaskToggling={taskList.isToggling}
+            />
           </div>
 
           <Separator />
