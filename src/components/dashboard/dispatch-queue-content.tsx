@@ -53,17 +53,16 @@ import { cn } from "@/lib/utils";
  * 全種別に出す（`実装`／`横断質問`ほか）。**`QUEUED`のときは状態ラベルがどちらも「順番待ち」**に
  * なるため、状態だけでは起動と横断質問を見分けられない。
  *
- * **そのタイトルはIssue詳細への導線でもある**（#1625）。ここに出ているIssueを開くのに一覧へ
- * 戻って探し直す必要があった。**開いている器を閉じてから遷移するのは呼び出し側の役目**——
- * 開いたまま後ろの画面だけが変わると何が起きたのか分からないため、`onOpenIssue`には
- * 閉じる処理を挟んだものを渡す。
+ * **行のタイトルはIssue詳細への導線でもある**（#1625）。ここに出ているIssueを開くのに一覧へ
+ * 戻って探し直す必要があった。**`onOpenIssue`を渡さなければ従来どおり文字列のまま**
+ * （呼び出し側がポップオーバー・シートを閉じてから遷移するかどうかを決められるよう、
+ * ここでは閉じる操作をせずそのまま呼ぶ）。
  */
 export function DispatchQueueContent({
   dispatch,
   onOpenIssue,
 }: {
   dispatch: DispatchStateHandle;
-  /** 行のタイトルからIssue詳細を開く（#1625）。渡さなければタイトルはただの文字列のまま */
   onOpenIssue?: (issueId: string) => void;
 }) {
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
@@ -295,8 +294,8 @@ function QueueSection({
                     {describeDispatchJobKind(job.kind)}
                   </span>
                   {/*
-                    幅が決まった器（ポップオーバー・シート）に出すので、長いタイトルはホバーで補う。
-                    タイトルはそのIssueの詳細への導線でもある（#1625）
+                    幅が決まった器（ポップオーバー・シート）に出すので、長いタイトルは
+                    ホバーで補う。タイトルはそのIssueの詳細への導線でもある（#1625）
                   */}
                   <DispatchIssueTitle
                     className="min-w-0"
