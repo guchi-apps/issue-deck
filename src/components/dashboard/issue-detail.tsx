@@ -452,9 +452,13 @@ export function IssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
     blockingSession,
   });
-  const startLabel = defaultDispatchHost
-    ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
-    : "GitHub Actionsで開始";
+  // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
+  // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
+  const startLabel = !dispatch.isLoaded
+    ? "実装を開始"
+    : defaultDispatchHost
+      ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
+      : "GitHub Actionsで開始";
   // 着手後もどちらで動いているかが分かるようにする（#1262）
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
   const issueSession = findSessionForIssue(
