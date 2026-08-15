@@ -1034,7 +1034,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
     repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
     issueFindMany.mockResolvedValue([
       {
-        id: "issue-1519",
+        githubIssueId: BigInt(3021519),
         number: 1519,
         title: "実行キューの状態を可視化する",
         repositoryId: "repo-1",
@@ -1044,8 +1044,10 @@ describe("listDispatchState のIssueタイトル解決", () => {
     const state = await listDispatchState(NOW);
 
     expect(state.jobs[0].issueTitle).toBe("実行キューの状態を可視化する");
-    // 画面はこのidでIssue詳細を開く（#1625）。番号だけでは飛べない
-    expect(state.jobs[0].issueId).toBe("issue-1519");
+    // 画面はこのidでIssue詳細を開く（#1625）。番号だけでは飛べない。
+    // **DBの行id（cuid）ではなく`String(githubIssueId)`**（#1671）。画面の`Issue.id`は
+    // `dbIssueToDisplayIssue`が同じ形で作っており、行idを返すと一覧のどれにも一致しない
+    expect(state.jobs[0].issueId).toBe("3021519");
   });
 
   // セッションの行のタイトルもIssueへの導線になる（#1625）。ジョブと同じ1回の引き当てで賄う
@@ -1070,7 +1072,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
     repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
     issueFindMany.mockResolvedValue([
       {
-        id: "issue-1519",
+        githubIssueId: BigInt(3021519),
         number: 1519,
         title: "実行キューの状態を可視化する",
         repositoryId: "repo-1",
@@ -1080,7 +1082,8 @@ describe("listDispatchState のIssueタイトル解決", () => {
     const state = await listDispatchState(NOW);
 
     expect(state.sessions[0].issueTitle).toBe("実行キューの状態を可視化する");
-    expect(state.sessions[0].issueId).toBe("issue-1519");
+    // ジョブの行と同じく`String(githubIssueId)`（#1671）
+    expect(state.sessions[0].issueId).toBe("3021519");
   });
 
   // 同期前のIssue・GitHub Appを外したリポジトリでは普通に起きる。ここで落とすとキュー全体が消える
@@ -1109,14 +1112,17 @@ describe("listDispatchState のIssueタイトル解決", () => {
       { id: "repo-2", fullName: "guchi-apps/dayspan" },
     ]);
     issueFindMany.mockResolvedValue([
-      { number: 1519, title: "issue-deck側", repositoryId: "repo-1" },
-      { number: 1519, title: "dayspan側", repositoryId: "repo-2" },
+      { githubIssueId: BigInt(3021519), number: 1519, title: "issue-deck側", repositoryId: "repo-1" },
+      { githubIssueId: BigInt(4051519), number: 1519, title: "dayspan側", repositoryId: "repo-2" },
     ]);
 
     const state = await listDispatchState(NOW);
 
     expect(state.jobs.find((job) => job.id === "job-1")?.issueTitle).toBe("issue-deck側");
     expect(state.jobs.find((job) => job.id === "job-2")?.issueTitle).toBe("dayspan側");
+    // idも取り違えない（リンク先が別リポジトリのIssueになる。#1671）
+    expect(state.jobs.find((job) => job.id === "job-1")?.issueId).toBe("3021519");
+    expect(state.jobs.find((job) => job.id === "job-2")?.issueId).toBe("4051519");
   });
 
   // ここはポーリング先（未完了ジョブがある間は5秒間隔）。ジョブ1件ごとに引かない

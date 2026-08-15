@@ -160,9 +160,9 @@ export type DispatchSessionView = {
    */
   issueTitle: string | null;
   /**
-   * DBキャッシュのIssueのid（#1625）。タイトルと同じく`listDispatchState`が一括で引き当てる。
+   * Issueのid（#1625）。タイトルと同じく`listDispatchState`が一括で引き当てる。
    * 行のタイトルからIssue詳細を開くために使い、**引けなければ`null`＝リンクにしない**
-   * （`DispatchJobView.issueId`と同じ扱い）。
+   * （`DispatchJobView.issueId`と同じ扱い）。**識別子も同じ`String(githubIssueId)`**（#1671）。
    */
   issueId: string | null;
   state: DispatchSessionState;

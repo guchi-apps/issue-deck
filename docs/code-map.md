@@ -135,6 +135,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 
 - **Issueの一次情報源はGitHub、MySQLはキャッシュ。** `lib/github/sync-issues.ts` が取得結果を
   `Issue` テーブルへupsertする。画面の一覧はDBを読む。
+- **画面が使うIssueの識別子は`String(githubIssueId)`で、`Issue`テーブルの行id（cuid）ではない**（#1671）。
+  `lib/github/issue-mapper.ts`の`dbIssueToDisplayIssue`が`id: String(row.githubIssueId)`で作り、
+  URLの`?issue=`・`?missue=`もこれで引く（`hooks/use-reference-navigation.ts`）。**サーバー側から
+  「このIssueを開くid」を返すときは、`select: { id: true }`ではなく`githubIssueId`を返すこと。**
+  行idを返しても型は`string`で通り、リンクは描かれるが、押しても一覧のどのIssueにも一致しない。
+  そのときPCは詳細ペインが閉じるだけ、スマホは`use-mobile-screen.ts`がホーム画面へ落とすため、
+  「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
 - 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
