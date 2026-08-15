@@ -652,7 +652,7 @@ pnpm exec prisma migrate status                     # "Database schema is up to 
 
 pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて**満たすセッションだけを
 `tmux kill-session`で畳む。閾値は`~/.config/issue-deck/dispatch.env`の`SESSION_IDLE_MINUTES`
-（既定60・**0で無効**）。手元で確かめるときは`scripts/reap-sessions.sh --dry-run`。
+（既定5・**0で無効**。#1649で60から下げた）。手元で確かめるときは`scripts/reap-sessions.sh --dry-run`。
 
 **横断質問セッション（`kind=question`・#1454）は条件5〜7を見ない**（worktreeもPRも持たないため、
 当てるとどれにも当たらず永久に残る）。代わりに条件4と質問Issueの状態だけで決め、猶予も専用の
@@ -679,17 +679,24 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 | 1 | 記述子があり`reapable=1` | ジョブとして起動したセッションだけを対象にする。手元のターミナルから直接起動した分・他リポジトリの作業用セッションは記述子が無い |
 | 2 | ペインが生きている | 死んだペインは`remain-on-exit failed`が残した異常終了の証拠。最後の出力を読めるうちは消さない |
 | 3 | 最後のイベントが`Stop` | `permission_prompt`が後なら承認プロンプト・`AskUserQuestion`の表示中＝人の入力待ち。`working`が後ならそれに答えて作業へ戻ったところ（#1357） |
-| 4 | その`Stop`から`SESSION_IDLE_MINUTES`以上（質問セッションは`QUESTION_SESSION_IDLE_MINUTES`以上） | **`Stop`＝作業完了ではない。** レビュー結果待ち・追加指示での再開も`Stop`を出す |
+| 4 | その`Stop`から猶予以上（条件6のどの経路で畳むかで見る値が違う。質問セッションは`QUESTION_SESSION_IDLE_MINUTES`以上） | **`Stop`＝作業完了ではない。** レビュー結果待ち・追加指示での再開も`Stop`を出す |
 | 5 | Issueに`11.local`が付いていない | 実装エージェントが引き渡し時に自分で外すラベル。付いている間はローカルで作業中 |
-| 6 | IssueがCLOSED、`issue-<番号>`のPRがマージ済み、または`Stop`から`SESSION_HANDOFF_IDLE_MINUTES`以上経ったうえで**PRがopenで存在する**（#1541）か**このセッションのコミットが1つも残っていない**（#1600） | 成果物が手元に残ったまま、どこにも出ていない |
+| 6 | IssueがCLOSEDか`issue-<番号>`のPRがマージ済みで`SESSION_IDLE_MINUTES`以上経った、または`SESSION_HANDOFF_IDLE_MINUTES`以上経ったうえで**PRがopenで存在する**（#1541）か**このセッションのコミットが1つも残っていない**（#1600） | 成果物が手元に残ったまま、どこにも出ていない |
 | 7 | worktreeがcleanで、コミットがすべて`origin`にある | 畳むと取り返せない |
 
 - **`gh`・`git`が失敗したときは必ず「畳まない」側へ倒す。** 判定できない＝残す。
 - **条件6の3つ目は「レビューへ引き渡し済み」**（#1541）。PRを作り、`11.local`も外した（条件5）
   状態で、実装エージェント自身が「このセッションでもう作業しない」と宣言したことにあたる。
   マージまで残すと、人の確認待ちのPRを抱えたセッションが本数の上限（#1361）を埋めて、
-  後続のジョブが流れなくなる。猶予を別建て（`SESSION_HANDOFF_IDLE_MINUTES`・既定30・**0でこの
-  経路だけ無効**）にしているのは、CI失敗の指摘が返る余地がこちらにだけ残っているため。
+  後続のジョブが流れなくなる。猶予は別建て（`SESSION_HANDOFF_IDLE_MINUTES`・既定5・**0でこの
+  経路だけ無効**）で、**`SESSION_IDLE_MINUTES`とは独立**（#1649。この経路では
+  `SESSION_HANDOFF_IDLE_MINUTES`だけを見る）。
+- **経路ごとに独立させたのは、以前が`max`だったため**（#1649）。引き渡し済みの経路は共通猶予を
+  通過したうえでさらに別建ての猶予を見るAND判定で、実効が
+  `max(SESSION_IDLE_MINUTES, SESSION_HANDOFF_IDLE_MINUTES)`になっていた。既定の60/30では30が
+  一度も効かず（実効60分）、「CI失敗の指摘が返る余地があるのでCLOSED・マージ済みより長めに取る」
+  という段差も成立していなかった。段差そのものも、サブPCでの実測（1.7日・134件の回収で
+  **畳んだ後に呼び戻したケースが0件**）を根拠に取り下げ、既定を60/30から5/5へ下げている。
 - **条件6の4つ目は「PRを作らずに終わった」**（#1600）。子Issueへの分割・調査だけ・「対応不要」の
   結論で終わったセッションは、`issue-<番号>`のPRが最後まで作られない。3つ目までは
   どれもPRかIssueのcloseを見ているため、この形は**どの経路にも当たらず永久に残る**
