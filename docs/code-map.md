@@ -44,6 +44,23 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+- **画面の現在地を表すURLクエリの更新は
+  [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
+  だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの
+  `router.push`はRSCのリクエストを伴い、`/dashboard`は認証Cookieを読む動的ページで
+  クライアントのRouter Cacheに残らないため、クエリを1つ変えるたびに`DashboardPage`
+  （Issue全件のDB取得を含む）がサーバーで再実行される。`useSearchParams()`はその応答が
+  返るまで更新されないので、Issueを選んでからハイライトが動くまでその往復を待つことになる。
+  `navigateParams`はネイティブのHistory API（Next.jsがパッチ済みの
+  `window.history.pushState`/`replaceState`）でクエリだけをクライアント側で更新する。
+  **前提は「そのクエリをサーバー側で読んでいないこと」**で、`/dashboard`のページは
+  `searchParams`を受け取っていない。サーバーでクエリを読むようになったら、この前提が壊れる
+  （URLを変えても表示が更新されない）ため、`navigateParams`を`router.push`へ戻すか
+  必要なところに`router.refresh()`を足すこと。
+  なお、この更新はReactのトランジション（低優先度の更新）として入るので、**一覧の選択
+  ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
+  行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
+  押した行が反応しない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。

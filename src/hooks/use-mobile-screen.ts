@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useTransition } from "react";
+import { useCallback, useMemo } from "react";
 
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
 import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
@@ -67,7 +67,6 @@ const PULL_REQUEST_TAB_DEFAULT_VIEW: PullRequestViewId = "in-progress";
 export function useMobileScreen(issues: Issue[], repositories: ConnectedRepository[]) {
   const searchParams = useSearchParams();
   const { navigateParams, goBackOrFallback } = useHistoryNavigation();
-  const [isPending, startTransition] = useTransition();
 
   const screenParam = searchParams.get("mscreen");
   const repoParam = searchParams.get("mrepo");
@@ -267,15 +266,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         }
       };
 
-      // 画面遷移用のクエリ変更はページ全体のデータ再取得を伴うため、遷移完了までに間が
-      // 生じうる。startTransitionでラップしisPendingを公開し、その間はスケルトンを表示する（#221）。
-      // ただし絞り込みシート内での連続操作（silent）はスクリーン種別を変えず、都度スケルトンで
-      // 画面を差し替えるとシートごとアンマウントされ選択を続けられなくなるため、対象外とする（#393）。
-      // 履歴も同じ切り分けで、画面が変わる遷移だけ積む。絞り込みまで積むと、戻る操作が条件の
-      // 巻き戻しに費やされて前の画面へ着かなくなる（#1396）。
+      // 画面が変わる遷移だけ履歴を積む。絞り込みシート内での連続操作（silent）まで積むと、
+      // 戻る操作が条件の巻き戻しに費やされて前の画面へ着かなくなる（#1396）。
+      //
+      // 以前はここでstartTransitionを掛け、遷移が終わるまで全画面スケルトンを出していた（#221）。
+      // URLの更新がサーバーを往復しなくなり待ちが無くなったため（#1597・use-history-navigation）、
+      // スケルトンごと外している。
       navigateParams(mutate, {
         history: options?.history ?? (options?.silent ? "replace" : "push"),
-        wrap: options?.silent ? undefined : startTransition,
       });
     },
     [navigateParams],
@@ -489,7 +487,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
   return {
     mobileScreen,
-    isPending,
     selectTab,
     selectPullRequests,
     selectPullRequestView,
