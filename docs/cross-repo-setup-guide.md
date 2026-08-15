@@ -423,7 +423,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v8` | 上記 | Phase 5 の前。ラベル遷移とStatus報告の両方を行う最後の版 |
 | `workflows/v9` | 上記 | #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124） |
 | `workflows/v10`〜`workflows/v15` | 上記 + `reusable-release-develop-to-main.yml`・`reusable-claude-pr-repair.yml` | この表では個別に追えていない。内訳は`git log --oneline <前のタグ>..workflows/vN`で確認する |
-| `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | **このPRの時点では未作成。** #1367。developへのマージ後に作成し、各リポジトリへ`version-tag-check.yml`のcallerを配る |
+| `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
@@ -437,6 +437,13 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > （`.github/scripts/propagate-workflow-tag.sh`の`sed`）、**新しいcallerファイルを追加はしない。**
 > 各リポジトリへ最初の1回を置くところまでは、`71.manual-step`のIssueとして起票して人が行う。
 > 2回目以降（タグの追随）は配布の対象に自動で乗る。
+>
+> **初回配置を`propagate-workflow-tag.yml`へ寄せていないのは、「どのリポジトリへ置くべきか」の
+> 判定がワークフローごとに違うため**（#1459）。`version-tag-check.yml`は`deploy.yml`が
+> `vX.Y.Z`タグを作るリポジトリだけが対象で、タグを作らないリポジトリ（`guchi-apps/vps`）には
+> 守るものが無い。`claude-pr-repair.yml`・`shared-knowledge-propose.yml`は導入自体が任意。
+> 配布側に持たせると「全リポジトリへ一律に配る」挙動にしかできず、対象の判断を毎回人が
+> やり直すことになる。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。

@@ -51,6 +51,46 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 > done
 > ```
 
+## `version-tag-check.yml`の配布状況
+
+上の表の「導入済み自動化ワークフロー」列は無人実行（計画〜実装〜レビュー）のワークフローについて
+のもので、`version-tag-check.yml`はそれとは対象の決まり方が違うため、ここに分けて記録する。
+
+`version-tag-check.yml`（本体は`reusable-version-tag-check.yml`。#1367）は、バージョンを上げ忘れた
+ままdevelop→mainをマージしたときに`deploy.yml`の`tag`ジョブが落ちて本番デプロイが止まるのを、
+main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`から`vX.Y.Z`タグを作るリポジトリ」だけ**
+で、無人実行を入れているかどうかとは独立している。
+
+配った14リポジトリ（#1459。`@workflows/v16`）は次のとおり。
+
+| リポジトリ | `with:`に渡す入力 |
+|---|---|
+| `shopping-list`・`dayspan`・`meisai-lab`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`solitaire`・`clip-hive`・`ops-dashboard`・`db-console`・`aide` | なし（既定値の`package.json`・`.version`・`v`） |
+| `myroom` | `version-file: frontend/package.json`（`deploy.yml`が`./frontend/package.json`を読む） |
+| `signaly` | `version-file: version.json`（バージョンが`version.json`で`scripts/bump_version.py`経由） |
+
+**対象外**
+
+- `guchi-apps/issue-deck` — 配置済み。ローカルパス参照（`./.github/workflows/reusable-*.yml`）で
+  常に最新を使うカナリア
+- `guchi-apps/vps` — `deploy.yml`はあるが`tag`ジョブが無く、リリースタグを作らない。守るものが無い
+- `docs`・`subpc-setup`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
+  `sensor_260218`・`wifi-speed` — `deploy.yml`を持たない
+
+**新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
+配布（`propagate-workflow-tag.yml`）は既存ファイルのタグを書き換えるだけで、callerの新規追加は
+行わない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローのタグ運用」）。
+
+```bash
+# 配置状況の確認
+for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
+         portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide; do
+  echo -n "$r: "
+  gh api "repos/guchi-apps/$r/contents/.github/workflows/version-tag-check.yml" --jq .name \
+    2>/dev/null || echo "未配置"
+done
+```
+
 ## ローカル起動プロトコルの適合状況
 
 > **`.gitignore`の`/.shared-context/`・`/.shared-prompts/`は全リポジトリで必要。** 無人実行の
