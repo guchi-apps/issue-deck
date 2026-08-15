@@ -677,6 +677,36 @@ allowedDevOrigins: ["localhost", "127.0.0.1", "**.sslip.io", "**.ts.net", ...ext
 MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開く場合はワイルドカードに当たらない。
 `.env.local`の`ISSUE_DECK_DEV_ALLOWED_ORIGINS`にカンマ区切りで足す（開発サーバーにしか効かない）。
 
+### 開発サーバーでログインできないとき（#1419）
+
+ログインボタンを押すと`https://ci-placeholder.supabase.co/auth/v1/authorize?...`へ飛んで画面が
+真っ白になっていた。**サブPCの本体チェックアウトの`.env.local`に、CIワークフローが使うダミー値
+（`https://ci-placeholder.supabase.co` / `ci-placeholder`）がそのまま入っていた**のが原因。
+
+ログインに要るのは次の3つで、**どれが欠けても最後まで通らない**。
+
+| 設定 | 場所 | 欠けたときに起きること |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `.env.local` | `signInWithOAuth()`が存在しないホストへ飛ばし、画面が真っ白になる |
+| `ALLOWED_EMAILS` | `.env.local` | 認証は通るが`/auth/callback`の`isEmailAllowed()`が偽になり`?error=not_allowed`で戻る |
+| リダイレクト先の許可 | Supabaseダッシュボード（Redirect URLs） | Supabase側で弾かれ、コールバックまで戻ってこない。**worktreeごとにポートが違う**ため`http://<ホスト名>.<tailnet>.ts.net:*/auth/callback`のようにポートをワイルドカードで登録する |
+
+**`ALLOWED_EMAILS`は実際のSupabaseの値より先に入れる。** 空のまま実プロジェクトへ繋ぐと、
+`/auth/callback`が許可外ユーザーとしてSupabase Authユーザーの削除（`admin.auth.admin.deleteUser`）へ
+進む経路に入る。Supabaseプロジェクトは他アプリ（asset-manager等）と共用のため、順序を守る。
+
+気づけるようにしてあるのは2箇所（#1419）。判定の実体は`src/lib/supabase/config.ts`。
+
+- **ログイン画面**: 未設定ならボタンを押せなくし、どのキーが足りないかをカード内に出す。
+- **開発サーバーの起動ログ**: `scripts/dev.sh`が起動時に警告を1行出す（`.dev-servers/issue-<番号>.log`の
+  先頭付近に残るので、画面を開く前に気づける）。起動自体は止めない。
+
+**直す場所は本体チェックアウト（`~/apps/issue-deck/.env.local`）。** worktreeの`.env.local`は
+そこからのコピーなので、本体がダミー値だと以降作るworktreeすべてが同じ状態になる。既存worktreeへは
+`scripts/lib/env-file-sync.sh`がセッションの再開時に追従させる。**通常は既存キーの値に触らないが、
+CI用プレースホルダ（`ci-placeholder`）が入っている値だけは本体の実値で置き換える**（誰も意図して
+入れない値のため）。反映にはそのworktreeのセッションを起こし直す（＝開発サーバーの再起動）が要る。
+
 ## セキュリティ上の前提
 
 プロトコルを登録すると、この起動経路は**任意のWebページから叩ける**ようになる。悪意ある

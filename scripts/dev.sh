@@ -18,6 +18,24 @@ fi
 
 PORT="${PORT:-3000}"
 
+# ログインに要る値が揃っているかを起動時に見せる（#1419）。
+# 揃っていないとログインボタンを押した先が存在しないURL（`https://ci-placeholder.supabase.co/...`）
+# になり画面が真っ白になるが、**ブラウザ側には何も出ないため原因に辿り着けなかった。**
+# ログイン画面にも同じ判定を出しているが（`src/lib/supabase/config.ts`）、
+# `.dev-servers/issue-<番号>.log`に残ると画面を開く前に気づける。**起動は止めない**
+# （ログインが要らない画面の確認はこのままでもできる）。
+CI_PLACEHOLDER_MARKER="ci-placeholder"
+missing_auth_env=()
+for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ALLOWED_EMAILS; do
+  value="${!key:-}"
+  if [ -z "$value" ] || [[ "$value" == *"$CI_PLACEHOLDER_MARKER"* ]]; then
+    missing_auth_env+=("$key")
+  fi
+done
+if [ "${#missing_auth_env[@]}" -gt 0 ]; then
+  echo "警告: ログインに必要な環境変数が未設定です（${missing_auth_env[*]}）。この状態ではログインできません（#1419）。.env.local を確認してください。" >&2
+fi
+
 # 待ち受けアドレス（#1178）。**未指定なら原則 `-H` を渡さない。**
 # `next dev` は既定で全インターフェース（IPv4/IPv6の両方）を待ち受けるため、Tailscale経由で
 # 他端末（iPhone等）から画面を見るのはこの既定のままで成立する。`-H 0.0.0.0` を明示すると
