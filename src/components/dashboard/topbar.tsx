@@ -53,7 +53,8 @@ type TopBarProps = {
   onChangeGroupByRepo: (value: boolean) => void;
   assigneeOptions: string[];
   onCreateIssue: () => void;
-  onAskQuestion: () => void;
+  /** 複数リポジトリ横断の質問（#1454）。単一リポジトリへの質問は新規作成ダイアログ側（#1641） */
+  onAskCrossRepoQuestion: () => void;
   repositories: ConnectedRepository[];
   issues: Issue[];
   /** 通知ベル（#1614）に出すマージ待ちPR。画面が既に取得済みの一覧をそのまま使う */
@@ -77,7 +78,7 @@ export function TopBar({
   onChangeGroupByRepo,
   assigneeOptions,
   onCreateIssue,
-  onAskQuestion,
+  onAskCrossRepoQuestion,
   repositories,
   issues,
   pullRequests,
@@ -239,14 +240,16 @@ export function TopBar({
         </Popover>
       </div>
 
-      <Button variant="outline" size="sm" className="text-xs" onClick={onAskQuestion}>
+      {/* 単一リポジトリへの質問は「新規」の中（種別「質問」）へ移した（#1641）。
+          ここに残すのは、実行先も参照範囲も別物の横断質問だけ */}
+      <Button variant="outline" size="sm" className="text-xs" onClick={onAskCrossRepoQuestion}>
         <MessageCircleQuestion />
-        質問する
+        横断質問
       </Button>
 
       <Button size="sm" className="text-xs" onClick={onCreateIssue}>
         <Plus />
-        新規Issue
+        新規
       </Button>
 
       {/* サブPCで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
