@@ -38,8 +38,24 @@ dev_server_pid_matches() {
   kill -0 "$pid" 2>/dev/null || return 1
   pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
   [[ "$pgid" == "$pid" ]] || return 1
-  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  cwd="$(dev_server_cwd_of "$pid" || true)"
   [[ -n "$cwd" && "$cwd" == "$worktree_dir" ]] || return 1
+  return 0
+}
+
+# そのPIDのカレントディレクトリ。取れなければ1を返す。
+#
+# **worktreeごと消えている場合、`readlink`は` (deleted)`を付けて返す**（#1525）。
+# 「ディレクトリが消えたのに開発サーバーだけ残っている」は孤児のうちでも最も回収したい形
+# （worktreeを消しても`pnpm dev`はポートとメモリを掴んだまま動き続ける）なので、印を落として
+# 比較できるようにする。落とさないと`dev_server_pid_matches`が常に偽になり、
+# reap-dev-servers.shは「別人」と見なしてPIDファイルだけ消し、プロセスは永久に残る。
+dev_server_cwd_of() {
+  local pid="$1" cwd
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ -n "$cwd" ]] || return 1
+  printf '%s' "${cwd%" (deleted)"}"
   return 0
 }
 
