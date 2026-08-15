@@ -4,10 +4,11 @@ import type { MobileScreen } from "@/hooks/use-mobile-screen";
 // ドリルダウン先の画面（リポジトリ別Issue一覧・Issue詳細）でも、どのタブから辿ってきたかを
 // ボトムナビでハイライトする。以前は一律で「ホーム」を点灯させており、リポジトリタブから
 // 開いたのにホームが選択中に見える不整合があった（#414）。
-export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab {
+//
+// **`null`はどのタブも点灯させない**（#1638）。フッターに対応するタブが無い画面（設定）がある。
+export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | null {
   switch (screen.kind) {
     case "home":
-    case "settings":
       return screen.kind;
     // 「Issue」タブが開くのはリポジトリ一覧で、リポジトリ別Issue一覧はその先（#1436）
     case "repos":
@@ -21,10 +22,13 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab {
     // 辿ってきた導線に合わせてホームを点灯させる。
     case "issues":
       return "home";
-    // 「ブランチ」画面もホームからのドリルダウン（#1455）。PRタブを点灯させると
-    // タブが開く画面（PR一覧）と表示中の画面が食い違うため、辿ってきたホームを点灯させる。
+    // 「ブランチ」画面は#1455ではホームからのドリルダウンだったが、#1638でタブになった
     case "flow":
-      return "home";
+      return "flow";
+    // 設定はフッターから外し、ホームのヘッダー右上から開く画面になった（#1638）。
+    // 対応するタブが無いので、どれも点灯させない。
+    case "settings":
+      return null;
     case "issue-detail":
       return resolveBottomNavTab(screen.back);
   }

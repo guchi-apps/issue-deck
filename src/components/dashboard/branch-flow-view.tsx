@@ -49,6 +49,8 @@ type BranchFlowViewProps = {
   onRefresh: () => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
+  /** 見出しの右に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
+  headerActions?: React.ReactNode;
   className?: string;
   style?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる */
@@ -964,6 +966,7 @@ export function BranchFlowView({
   failedRepositories,
   onRefresh,
   headerLeading,
+  headerActions,
   className,
   style,
   footerSpacing = false,
@@ -998,22 +1001,31 @@ export function BranchFlowView({
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+      {/*
+        スマホ（`md`未満）ではヘッダーを2段にする（#1638）。1段のままだと、見出しと
+        「すべて開く」「クローズも表示」「更新」＋実行状況で幅を食い合い、見出しと
+        「◯リポジトリ・◯時点」が数文字まで潰れる。PCは従来どおり1段
+      */}
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3 md:flex-nowrap">
         {headerLeading}
-        <div className="min-w-0 flex-1">
-          <h1
-            className="truncate text-sm font-semibold"
-            title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
-          >
-            ブランチ
-          </h1>
-          <p className="truncate text-xs text-muted-foreground">
-            <span>{flow.repositories.length}リポジトリ</span>
-            {attentionRepositories.length > 0 && (
-              <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
-            )}
-            {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
-          </p>
+        <div className="flex min-w-0 flex-1 basis-full items-center gap-2 md:basis-auto">
+          <div className="min-w-0 flex-1">
+            <h1
+              className="truncate text-sm font-semibold"
+              title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
+            >
+              ブランチ
+            </h1>
+            <p className="truncate text-xs text-muted-foreground">
+              <span>{flow.repositories.length}リポジトリ</span>
+              {attentionRepositories.length > 0 && (
+                <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
+              )}
+              {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+            </p>
+          </div>
+          {/* 見出しと同じ段に置く（#1638）。実行状況はどの画面でも1段目の右端で揃える */}
+          {headerActions}
         </div>
         <Button
           size="sm"

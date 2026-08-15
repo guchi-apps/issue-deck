@@ -1,14 +1,9 @@
 "use client";
 
-import { FolderGit2, GitBranch, Plus, SlidersHorizontal, X } from "lucide-react";
+import { FolderGit2, Plus, Settings, SlidersHorizontal, X } from "lucide-react";
 
-import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
+import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { Card } from "@/components/ui/card";
-import { useDispatchState } from "@/hooks/use-dispatch-state";
-import {
-  describeDispatchQueueLoad,
-  summarizeDispatchQueue,
-} from "@/lib/dispatch/queue-summary";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
@@ -32,10 +27,8 @@ type MobileHomeScreenProps = {
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
-  /** 「ブランチ」画面を開く（#1455） */
-  onSelectFlow: () => void;
-  /** 「実行中のセッション」の行のタイトルを押したときの遷移（#1625）。Issue詳細を開く */
-  onOpenIssue: (issueId: string) => void;
+  /** 設定画面を開く（#1638。フッターのタブから外し、このヘッダーの歯車が入口になった） */
+  onOpenSettings: () => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -57,13 +50,27 @@ export function MobileHomeScreen({
   onDeleteQuickFilter,
   onSaveQuickFilter,
   onSelectPullRequests,
-  onSelectFlow,
-  onOpenIssue,
+  onOpenSettings,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="shrink-0 border-b p-4">
-        <span className="text-base font-semibold">Issue Deck</span>
+      {/*
+        ヘッダー右上に実行状況と設定を置く（#1638）。実行状況はどの画面のヘッダーにも同じ
+        位置で出すが、**設定はホームだけ**——毎日押すものではないぶんをフッターの1枠から
+        降ろした側なので、他の画面のヘッダーまで占領させない
+      */}
+      <header className="flex shrink-0 items-center gap-1 border-b py-2 pr-2 pl-4">
+        <span className="flex-1 text-base font-semibold">Issue Deck</span>
+        <MobileDispatchStatusButton />
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          title="設定"
+          aria-label="設定"
+          className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Settings className="size-5" />
+        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
@@ -100,12 +107,10 @@ export function MobileHomeScreen({
         </div>
 
         {/*
-          ホストの様子（#1567）。**スマホには実行キューを開く入口が無い**（ヘッダーの
-          ボタンは`hidden md:flex`のトップバーにしかない）ため、外出先では何が動いているのか・
-          サブPCに余力があるのかを見る手段がなかった。PCの実行キューと同じ
-          `DispatchHostPanel`を置き、順番待ちの件数だけを1行添える
+          ホストの様子はここに節として置いていた（#1567）。**#1638でヘッダー右上の実行状況へ
+          移した。** ホームを開かないと見られない制約が無くなり、同じものを2か所に出す理由も
+          無くなったため。縦に長い節が消えたぶん、フィルターとPRが1画面目に収まる
         */}
-        <DispatchHostSection onOpenIssue={onOpenIssue} />
 
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
@@ -170,17 +175,11 @@ export function MobileHomeScreen({
           </ul>
         </div>
 
-        <div className="px-4 pb-4">
-          <h2 className="mb-2 text-sm font-semibold">フロー</h2>
-          <button
-            type="button"
-            onClick={onSelectFlow}
-            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-          >
-            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-            ブランチ
-          </button>
-        </div>
+        {/*
+          「フロー」の節（ブランチ1件）はここにあった（#1455）。**#1638でフッターのタブに
+          なったため畳んでいる**——1タップで開ける入口があるのに、同じ画面への導線を
+          ホームにも残すと押す場所が2つに割れる
+        */}
 
         {favoriteRepositories.length > 0 && (
           <div className="px-4 pb-4">
@@ -254,37 +253,6 @@ export function MobileHomeScreen({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * ホームに出すホストの様子（#1567）。
- *
- * **ここで`useDispatchState`を呼ぶ。** スマホの各画面は`issue-deck-shell.tsx`が条件付きで
- * 1つだけmountするため、Issue詳細（`mobile-issue-detail.tsx`）と同時に走ることはなく、
- * ポーリングが二重にならない。
- *
- * **申告しているホストが1台も無ければ節ごと出さない**（PCの実行キューのボタンと同じ判定）。
- * ディスパッチを使っていない環境で、空の見出しだけが残らないようにする。
- */
-function DispatchHostSection({ onOpenIssue }: { onOpenIssue: (issueId: string) => void }) {
-  const dispatch = useDispatchState(true);
-  if (dispatch.hosts.length === 0) return null;
-
-  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
-
-  return (
-    <div className="px-4 pb-4">
-      <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">実行中のセッション</h2>
-        <span className="text-xs text-muted-foreground">{describeDispatchQueueLoad(summary)}</span>
-      </div>
-      <DispatchHostPanel
-        hosts={dispatch.hosts}
-        sessions={dispatch.sessions}
-        onOpenIssue={onOpenIssue}
-      />
     </div>
   );
 }
