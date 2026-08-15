@@ -1,4 +1,7 @@
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+// 型だけのimport（コンパイル時に消える）。`host-metrics.ts`側も`DispatchHostView`を
+// 型としてしか使わないため、実行時の循環importにはならない
+import type { DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
@@ -220,6 +223,15 @@ export type DispatchHostView = {
    */
   maxSessions: number | null;
   liveSessions: number | null;
+  /**
+   * 申告した時点のリソース使用率（#1567）。**申告していなければ`null`**（古いpoller・
+   * 取得に失敗した巡）。5つの値はまとめて入るかまとめて`null`かのどちらかで、
+   * 部分的には埋まらない（`parseDispatchHostMetrics`）。
+   *
+   * **割り当ての判定には使わない。** 起動を止めているのは`maxSessions`と同時実行数だけで、
+   * こちらは画面へ出すための写し。
+   */
+  metrics: DispatchHostMetrics | null;
 };
 
 /**

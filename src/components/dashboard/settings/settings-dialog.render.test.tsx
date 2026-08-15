@@ -67,6 +67,33 @@ vi.mock("@/hooks/use-account-actions", () => ({
 }));
 
 const onUpdated = vi.fn();
+const onSetRepositoryHidden = vi.fn();
+const onSetRepositoriesHidden = vi.fn();
+
+const repositories = [
+  {
+    id: "repo-1",
+    name: "issue-deck",
+    fullName: "guchi-apps/issue-deck",
+    private: false,
+    archived: false,
+    hasClaudeWorkflow: true,
+    hasLocalStartScript: true,
+    hidden: false,
+    favorite: false,
+  },
+  {
+    id: "repo-2",
+    name: "car-care",
+    fullName: "guchi-apps/car-care",
+    private: true,
+    archived: false,
+    hasClaudeWorkflow: true,
+    hasLocalStartScript: false,
+    hidden: true,
+    favorite: false,
+  },
+];
 
 function renderDialog() {
   return render(
@@ -78,6 +105,9 @@ function renderDialog() {
       claudeModel="auto"
       claudeModelAssist="haiku"
       dispatchConcurrency={2}
+      repositories={repositories}
+      onSetRepositoryHidden={onSetRepositoryHidden}
+      onSetRepositoriesHidden={onSetRepositoriesHidden}
       onUpdated={onUpdated}
     />,
   );
@@ -92,10 +122,10 @@ afterEach(() => {
 });
 
 describe("SettingsDialog", () => {
-  it("4つの区分をタブとして出し、既定では実行設定を開く（#1539）", () => {
+  it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
     renderDialog();
 
-    for (const label of ["アカウント", "実行設定", "フリート運用", "状態"]) {
+    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
@@ -131,6 +161,51 @@ describe("SettingsDialog", () => {
       claudeModelAssist: "haiku",
       dispatchConcurrency: 2,
     });
+  });
+
+  it("表示の区分でチェックを外すと、そのリポジトリを非表示にする（#1552）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+
+    expect(screen.getByText(/2件中/).textContent).toBe("2件中1件を表示中");
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    // チェックが入っている＝表示中。1件目（issue-deck）は表示、2件目（car-care）は非表示。
+    expect(checkboxes[0].getAttribute("aria-checked")).toBe("true");
+    expect(checkboxes[1].getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(checkboxes[0]);
+    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
+  });
+
+  it("表示の区分は行のどこを押しても切り替わり、二重に切り替わらない（#1552）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+
+    // チェックボックスそのものではなくリポジトリ名を押す
+    fireEvent.click(screen.getByText("issue-deck"));
+    expect(onSetRepositoryHidden).toHaveBeenCalledTimes(1);
+    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
+
+    // チェックボックスを押したときも1回だけ（行のクリックへ伝播させない）
+    onSetRepositoryHidden.mockClear();
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(onSetRepositoryHidden).toHaveBeenCalledTimes(1);
+    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[1], false);
+  });
+
+  it("表示の区分の一括操作は、状態が変わる行だけを渡す（#1552）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "すべて表示" }));
+    expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[1]], false);
+
+    fireEvent.click(screen.getByRole("button", { name: "すべて非表示" }));
+    expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
   });
 
   it("状態の区分では使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {

@@ -17,9 +17,13 @@
 #
 # 既定はバックグラウンド起動。**Tailscale SSHで入って叩き、SSHを切ってもそのまま残る**
 # （`nohup`でSIGHUPを無視する）。tailnet内の端末からは
-# `http://<MagicDNSの名前>:<ポート>` で開ける。`next dev`は既定で全インターフェース
-# （IPv4/IPv6の両方）を待ち受けるため、待ち受けアドレスの指定は不要
-# （docs/multi-agent/local-quick-start.md「Tailscale経由でスマホから画面を見る」）。
+# `http://<MagicDNSの名前>:<ポート>` で開ける。
+#
+# **tailnetへ出す手段は`tailscale serve`（#1526）。** 以前は`next dev`の既定（全インターフェース）
+# のまま出していたが、それだと同一LANの生IPからも見え、「意図して公開したもの」と「閉じ忘れ」の
+# 区別が付かなかった。#1526で`scripts/dev.sh`の既定を`127.0.0.1`にしたのに合わせ、ここも
+# Issueごとのセッションと同じくserveの`localhost:<ポート>`へのproxyで出す。公開範囲は
+# TailscaleのACLが保証する（docs/multi-agent/local-quick-start.md「Tailscale経由でスマホから画面を見る」）。
 #
 # 環境変数:
 #   ISSUE_DECK_WORKTREE_BASE      worktreeの置き場（既定: ~/apps/issue-deck-worktrees）
@@ -48,6 +52,9 @@ source "$SCRIPT_DIR/lib/dev-server.sh"
 # 本体の .env.local からworktreeへ環境変数を供給する処理も、ランチャー群と共有する（#1099）。
 # shellcheck source=scripts/lib/env-file-sync.sh
 source "$SCRIPT_DIR/lib/env-file-sync.sh"
+# tailnetへの公開もIssueごとのセッションと同じ関数で行う（#1265・#1526）。
+# shellcheck source=scripts/lib/tailscale-serve.sh
+source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 
 # 本体チェックアウト（`git worktree add`を実行する側）。**このスクリプト自身の位置からは
 # 決めない。** developのworktreeの中から叩かれることがあり、その場合 `$SCRIPT_DIR/..` は
@@ -100,47 +107,34 @@ running_pid() {
   fi
 }
 
-# tailnet内の他の端末（スマホ・メインPC）から開けるURLを表示する。
-# Tailscaleが無い・落ちている環境でも起動そのものは妨げない。
+# tailnetへ公開する（#1526）。成功したらURLを返し、失敗しても起動そのものは妨げない。
+# **待ち受けは`127.0.0.1`に閉じている**ので、外から開けるのはこのURLだけになる。
+publish_to_tailnet() {
+  tailscale_serve_publish "$DEV_PORT" || true
+}
+
+# 今このポートが公開されているならそのURLを返す（`--status`用）。公開が無ければ何も出さない。
+current_preview_url() {
+  local host
+  tailscale_serve_published "$DEV_PORT" || return 0
+  host="$(tailscale_serve_hostname)"
+  [[ -n "$host" ]] || return 0
+  printf 'http://%s:%s' "$host" "$DEV_PORT"
+}
+
+# アクセスURLを表示する。
+#
+# **出すのはMagicDNSのFQDN1本だけ（#1526）。** `tailscale serve`はHostヘッダーで振り分けるため
+# 生のtailnet IPでは404になり、そもそも next.config.ts の allowedDevOrigins（`**.ts.net`）にも
+# 当たらない。開けないURLを並べると、繋がらないときにどれを試せばよいか分からなくなる。
 print_urls() {
+  local preview_url="${1:-}"
   echo "  http://localhost:$DEV_PORT"
-  command -v tailscale >/dev/null 2>&1 || return 0
-  local status_json
-  status_json="$(tailscale status --json 2>/dev/null || true)"
-  [[ -n "$status_json" ]] || return 0
-  local host_names
-  host_names="$(printf '%s' "$status_json" | python3 -c '
-import json
-import sys
-
-try:
-    self_node = json.load(sys.stdin).get("Self") or {}
-except Exception:
-    sys.exit(0)
-
-# MagicDNSの名前（末尾のドットは落とす）とtailnet IPの両方を出す。MagicDNSが無効な
-# tailnetでもIPなら開けるため、片方だけに寄せない。開いたときの制約が違うので種別も添える。
-lines = []
-dns_name = (self_node.get("DNSName") or "").rstrip(".")
-if dns_name:
-    lines.append("dns\t" + dns_name)
-lines.extend("ip\t" + ip for ip in (self_node.get("TailscaleIPs") or []))
-print("\n".join(lines))
-' 2>/dev/null || true)"
-  local kind name
-  while IFS=$'\t' read -r kind name; do
-    [[ -n "$name" ]] || continue
-    local url="http://$name:$DEV_PORT"
-    # IPv6は角括弧で囲まないとURLとして開けない。
-    [[ "$name" == *:* ]] && url="http://[$name]:$DEV_PORT"
-    if [[ "$kind" == "dns" ]]; then
-      echo "  $url  （tailnet内の端末からはこのURLを使う）"
-    else
-      # 生のtailnet IPは next.config.ts の allowedDevOrigins（`**.ts.net`）に当たらないため、
-      # 画面のHTMLは出ても `/_next/*` が403になる（実測）。MagicDNSが使えないときの逃げ道。
-      echo "  $url  （MagicDNSが使えない場合のみ。.env.localのISSUE_DECK_DEV_ALLOWED_ORIGINSに足さないと/_next/*が403になる）"
-    fi
-  done <<<"$host_names"
+  if [[ -n "$preview_url" ]]; then
+    echo "  $preview_url  （tailnet内の端末からはこのURLを使う）"
+  else
+    echo "  （tailnetへの公開はありません。tailscale serve が使えないホストか、公開に失敗しています）"
+  fi
 }
 
 # 今チェックアウトしているコミットを1行で表す。どの時点のdevelopを見ているのかが、
@@ -151,6 +145,10 @@ head_summary() {
 
 stop_server() {
   local pid
+  # tailnetへの公開（#1526）は、プロセスが居ようが居まいが先に外す。**残すと繋がらないURLが
+  # tailnet上に残るだけでなく、そのポートで次に`next dev`を起こせなくなる**（#1403）。
+  # 起動し直す経路（下の「入れ替え」）からもここを通るが、その後すぐ張り直すので実害は無い。
+  tailscale_serve_unpublish "$DEV_PORT"
   pid="$(running_pid)"
   if [[ -z "$pid" ]]; then
     # 生きてはいるが別人のPIDファイルは消すだけにする（プロセスグループごと撃つ処理なので、
@@ -185,7 +183,7 @@ case "$MODE" in
     fi
     echo "  ログ: $DEV_LOG"
     if [[ -n "$pid" ]]; then
-      print_urls
+      print_urls "$(current_preview_url)"
     fi
     exit 0
     ;;
@@ -288,10 +286,16 @@ fi
 
 if [[ "$FOREGROUND" -eq 1 ]]; then
   echo "develop用の開発サーバーをこの端末で起動します（Ctrl-Cで停止）。"
+  # **`exec`しない（#1526）。** tailnetへの公開を終了時に撤去する必要があり、`exec`でシェルを
+  # 置き換えるとtrapが残らない。Ctrl-Cはフォアグラウンドのプロセスグループ全体へ届くので、
+  # 開発サーバーはこれまでどおり止まる。
+  trap 'tailscale_serve_unpublish "$DEV_PORT"' EXIT INT TERM
+  FOREGROUND_PREVIEW_URL="$(publish_to_tailnet)"
   echo "アクセスURL:"
-  print_urls
+  print_urls "$FOREGROUND_PREVIEW_URL"
   cd "$WORKTREE_DIR"
-  exec $DEV_COMMAND
+  $DEV_COMMAND
+  exit $?
 fi
 
 echo "develop用の開発サーバーをポート $DEV_PORT でバックグラウンド起動しています（ログ: $DEV_LOG）..."
@@ -317,9 +321,12 @@ if [[ -z "$(running_pid)" ]]; then
   exit 1
 fi
 
+# tailnetへ出す（#1526）。**待ち受けは`127.0.0.1`に閉じている**ので、起動を確かめてから張る。
+PREVIEW_URL="$(publish_to_tailnet)"
+
 echo
 echo "起動しました（PID $(running_pid)）。アクセスURL:"
-print_urls
+print_urls "$PREVIEW_URL"
 echo
 echo "  状態の確認: scripts/start-develop-dev.sh --status"
 echo "  停止:       scripts/start-develop-dev.sh --stop"

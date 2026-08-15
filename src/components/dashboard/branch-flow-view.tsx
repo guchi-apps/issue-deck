@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronRight, Lock, RefreshCw, TriangleAlert, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleAlert,
+  Clock,
+  Loader2,
+  Lock,
+  RefreshCw,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
@@ -18,6 +28,8 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
+  BranchFlowDeployState,
+  BranchFlowDeployStateKind,
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
@@ -78,6 +90,93 @@ function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
     >
       {label}
     </span>
+  );
+}
+
+/**
+ * 本番デプロイの状態を表すピル（#1579）。
+ *
+ * **mainへマージしただけでは本番に出ていない。** リリースの束の見出しでは長い方の文言
+ * （「本番へデプロイ中」）、畳んだ1行では短い方（「デプロイ中」）を使う。
+ */
+const DEPLOY_STATE_LABEL: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "デプロイ待ち",
+  running: "本番へデプロイ中",
+  success: "デプロイ成功",
+  failure: "デプロイ失敗",
+};
+
+const DEPLOY_STATE_LABEL_COMPACT: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "デプロイ待ち",
+  running: "デプロイ中",
+  success: "デプロイ成功",
+  failure: "デプロイ失敗",
+};
+
+/** 配色はリリースの横線（purple）・失敗（destructive）・成功（green）に合わせる */
+const DEPLOY_STATE_CLASS: Record<BranchFlowDeployStateKind, string> = {
+  waiting: "bg-muted text-muted-foreground ring-border",
+  running: "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300",
+  success:
+    "bg-green-500/10 text-green-700 ring-green-600/50 dark:text-green-400 dark:ring-green-500/50",
+  failure: "bg-destructive/15 font-medium text-destructive ring-destructive",
+};
+
+function DeployStateIcon({ kind }: { kind: BranchFlowDeployStateKind }) {
+  switch (kind) {
+    case "running":
+      return <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />;
+    case "success":
+      return <Check className="size-3 shrink-0" aria-hidden="true" />;
+    case "failure":
+      return <CircleAlert className="size-3 shrink-0" aria-hidden="true" />;
+    default:
+      return <Clock className="size-3 shrink-0" aria-hidden="true" />;
+  }
+}
+
+function DeployStateBadge({
+  deploy,
+  compact = false,
+  linkToRun = true,
+}: {
+  deploy: BranchFlowDeployState | null;
+  /** 畳んだ1行向けの短い文言にする */
+  compact?: boolean;
+  /**
+   * 実行ログへのリンクにするか。**畳んだ1行はそれ自体が`<button>`なので必ずfalseにする**
+   * （ボタンの中にリンクを入れられない）。
+   */
+  linkToRun?: boolean;
+}) {
+  if (!deploy) return null;
+
+  const label = (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
+  const content = (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+        DEPLOY_STATE_CLASS[deploy.kind],
+      )}
+    >
+      <DeployStateIcon kind={deploy.kind} />
+      {label}
+    </span>
+  );
+
+  // 実行ログはアプリ内に対応する画面が無いので別タブで開く（`release-progress.tsx`と同じ）
+  return deploy.htmlUrl && linkToRun ? (
+    <a
+      href={deploy.htmlUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="shrink-0 hover:underline"
+      title="GitHub Actionsで実行ログを開く"
+    >
+      {content}
+    </a>
+  ) : (
+    content
   );
 }
 
@@ -155,9 +254,12 @@ function RelatedIssuesLine({
 function ManualStepLine({
   repositoryFullName,
   manualStep,
+  /** 起点のブランチ名。レーンから離して出すとき（#1586）だけ添える */
+  branchName,
 }: {
   repositoryFullName: string;
   manualStep: BranchFlowManualStep;
+  branchName?: string;
 }) {
   const isOpen = manualStep.state === "open";
 
@@ -178,6 +280,49 @@ function ManualStepLine({
         手作業 #{manualStep.number} {manualStep.title}
       </GithubReferenceLink>
       <span className="shrink-0 text-xs text-muted-foreground">{isOpen ? "未完了" : "完了"}</span>
+      {branchName && (
+        <>
+          <span className="shrink-0 text-xs text-muted-foreground">起点</span>
+          <code className="min-w-0 max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs">
+            {branchName}
+          </code>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 畳んだ束に残っている未完了の手作業（#1586）。
+ *
+ * 既定の表示を「次のリリースに乗る分」までに絞ったことで、本番へ出た版に紐づく手作業も
+ * 一緒に隠れる。**手作業は版が出た後も残る作業**なので、束の外へ出して常に見せる。
+ * 完了済みは残作業ではないため、畳んだ束と一緒に隠したままにする。
+ */
+function RemainingManualSteps({
+  repositoryFullName,
+  manualSteps,
+}: {
+  repositoryFullName: string;
+  manualSteps: { manualStep: BranchFlowManualStep; branchName: string }[];
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+        <Wrench className="size-3.5" aria-hidden="true" />
+        リリース済みの変更に残っている手作業
+      </p>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {manualSteps.map(({ manualStep, branchName }) => (
+          <li key={manualStep.number}>
+            <ManualStepLine
+              repositoryFullName={repositoryFullName}
+              manualStep={manualStep}
+              branchName={branchName}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -373,6 +518,15 @@ function ReleaseGroupHeader({
   onRefresh: () => void;
 }) {
   const released = group.mergedAt !== null;
+  // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
+  // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
+  const inProduction = group.deploy === null || group.deploy.kind === "success";
+  // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
+  // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
+  const waitingUserMerge =
+    group.pullRequest !== null &&
+    group.pullRequest.state === "open" &&
+    group.pullRequest.ciState !== "pending";
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
@@ -401,16 +555,33 @@ function ReleaseGroupHeader({
             {group.version ? `v${group.version}` : released ? "リリース済み" : "次のリリース"}
           </span>
           {released ? (
-            <span className="text-xs text-muted-foreground">
-              {group.mergedAt && `${formatDate(group.mergedAt)}に本番反映`}
-            </span>
+            <>
+              {!inProduction && <DeployStateBadge deploy={group.deploy} />}
+              <span className="text-xs text-muted-foreground">
+                {group.mergedAt &&
+                  `${formatDate(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
+              </span>
+              {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
+              {inProduction && <DeployStateBadge deploy={group.deploy} />}
+            </>
           ) : (
-            <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
-              {group.pullRequest
-                ? "リリース中"
-                : group.bumpPullRequest
-                  ? "バージョンバンプ中"
-                  : "本番未反映"}
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+                waitingUserMerge
+                  ? // mainへのマージだけは人が行う。待っているのが人の操作であることを、
+                    // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
+                    "bg-amber-500/15 font-medium text-amber-700 ring-amber-500 dark:text-amber-400"
+                  : "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300",
+              )}
+            >
+              {waitingUserMerge
+                ? "mainへマージ待ち"
+                : group.pullRequest
+                  ? "リリース中"
+                  : group.bumpPullRequest
+                    ? "バージョンバンプ中"
+                    : "本番未反映"}
             </span>
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
@@ -457,6 +628,10 @@ function ReleaseGroupNote({ group }: { group: BranchFlowReleaseGroup }) {
  *
  * 作業ブランチごとに列を増やすとスマホ幅で必ず溢れるため、**レールは2本に固定**し、
  * レールが占める幅もPC 3.35rem・スマホ 2.6remの固定にしている。横スクロールは出ない。
+ *
+ * **既定で出すのは「次のリリースに乗る分」まで**（#1586）。本番へ出た版の束は、いま何が出るのかを
+ * 押し下げるだけなのでボタンで開くまで畳む。ただし**未完了の手作業だけは畳んでも別枠で出す**——
+ * 版が出た後も残る作業で、隠すと画面のどこにも現れなくなるため。
  */
 function ReleaseFlowGraph({
   repository,
@@ -476,11 +651,30 @@ function ReleaseFlowGraph({
     : repository.activeLanes.filter((lane) => !isClosedLane(lane));
   const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
 
-  // 既定で出すのは「未リリース」と「ひとつ前の版」まで。それ以前はボタンで開く（#1510）
+  // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
+  // 特定できないレーンは、すでに済んだ変更なのでボタンで開くまで出さない。
   const visibleGroups = showAllVersions
     ? repository.releaseGroups
-    : repository.releaseGroups.slice(0, 2);
-  const hiddenGroupCount = repository.releaseGroups.length - visibleGroups.length;
+    : repository.releaseGroups.filter((group) => group.mergedAt === null);
+  const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
+  const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
+
+  // 畳んだぶんに残っている手作業だけは別枠で出す（#1586）。束を開いているときは
+  // レーンにぶら下がって出るので、ここでは出さない（二重に出さないため）
+  const hiddenLanes = [
+    ...hiddenGroups.flatMap((group) => group.lanes),
+    ...(showAllVersions ? [] : repository.unassignedLanes),
+  ];
+  const remainingManualSteps = hiddenLanes
+    .flatMap((lane) =>
+      lane.manualSteps
+        .filter((manualStep) => manualStep.state === "open")
+        .map((manualStep) => ({ manualStep, branchName: lane.branchName })),
+    )
+    .filter(
+      (entry, index, all) =>
+        all.findIndex((other) => other.manualStep.number === entry.manualStep.number) === index,
+    );
 
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
   const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
@@ -542,13 +736,13 @@ function ReleaseFlowGraph({
           />
         ))}
 
-        {repository.unassignedLanes.length > 0 && (
+        {unassignedLanes.length > 0 && (
           <>
             <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-              どの版で本番へ出たか特定できない変更 {repository.unassignedLanes.length}件
+              どの版で本番へ出たか特定できない変更 {unassignedLanes.length}件
               （取得したPRの範囲より古いもの）
             </li>
-            {repository.unassignedLanes.map((lane) => (
+            {unassignedLanes.map((lane) => (
               <LaneRow
                 key={lane.key}
                 repositoryFullName={repository.repositoryFullName}
@@ -558,11 +752,11 @@ function ReleaseFlowGraph({
           </>
         )}
 
-        {(hiddenGroupCount > 0 || hiddenClosedCount > 0) && (
+        {(hiddenGroups.length > 0 || hiddenClosedCount > 0) && (
           <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
-            {hiddenGroupCount > 0 && (
+            {hiddenGroups.length > 0 && (
               <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onShowAllVersions}>
-                さらに前のバージョンを表示（{hiddenGroupCount}件）
+                リリース済みのバージョンを表示（{hiddenGroups.length}件）
               </Button>
             )}
             {hiddenClosedCount > 0 && (
@@ -573,12 +767,19 @@ function ReleaseFlowGraph({
           </li>
         )}
 
-        {activeLanes.length === 0 && repository.releaseGroups.length === 0 && (
+        {activeLanes.length === 0 && visibleGroups.length === 0 && unassignedLanes.length === 0 && (
           <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
             developへ向かっている作業はありません。
           </li>
         )}
       </ul>
+
+      {remainingManualSteps.length > 0 && (
+        <RemainingManualSteps
+          repositoryFullName={repository.repositoryFullName}
+          manualSteps={remainingManualSteps}
+        />
+      )}
 
       {repository.orphanIssues.length > 0 && (
         <div className="mt-3 rounded-md border border-dashed p-3">
@@ -643,10 +844,15 @@ function RepositorySummaryRow({
 }) {
   const { summary } = repository;
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  // 成功したデプロイは畳んだ行に出さない（静止している状態でバッジを埋めない。#1579）
+  const deploy =
+    summary.deploy && summary.deploy.kind !== "success" ? summary.deploy : null;
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
+    deploy !== null ||
     unreleasedCommits > 0 ||
+    summary.openManualStepCount > 0 ||
     repository.orphanIssues.length > 0;
 
   return (
@@ -692,10 +898,19 @@ function RepositorySummaryRow({
           リリース中
         </span>
       )}
+      {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
+      <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+
       {/* リリースPRのマージ待ちはリリース中のピルが表すので、重ねて出さない */}
       {summary.needsUserMerge && (
         <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
           ユーザーのマージが必要
+        </span>
+      )}
+      {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする */}
+      {summary.openManualStepCount > 0 && (
+        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+          手作業{summary.openManualStepCount}
         </span>
       )}
       {summary.activeLaneCount > 0 && (
@@ -716,10 +931,16 @@ function RepositorySummaryRow({
   );
 }
 
-/** 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510） */
+/**
+ * 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510）。
+ *
+ * **デプロイ中も含める**（#1579）。押す操作は無いが、mainへマージしてから本番へ出るまでの間は
+ * 「今どこまで来ているか」を見に来る時間そのもので、畳んだままだと見に来た意味が無い。
+ */
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
-  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress;
+  const deploying = summary.deploy !== null && summary.deploy.kind !== "success";
+  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress || deploying;
 }
 
 /**
@@ -784,7 +1005,7 @@ export function BranchFlowView({
             className="truncate text-sm font-semibold"
             title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
           >
-            ブランチとPRの流れ
+            ブランチ
           </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{flow.repositories.length}リポジトリ</span>

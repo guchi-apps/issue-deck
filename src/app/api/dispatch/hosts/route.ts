@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
+import { parseDispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import { announceDispatchHost } from "@/lib/dispatch/jobs";
 
 function parsePositiveInt(value: unknown): number | null {
@@ -20,8 +21,21 @@ function parseNonNegativeInt(value: unknown): number | null {
  * ホストからの申告（#1179）。「自分が実行できるリポジトリの一覧」と生存報告を兼ねる。
  *
  * **ここに実行可能リポジトリを持つのは、ジョブの割り当て可否を決める情報だから**（#1176の
- * コメント）。ホストの死活・CPU・メモリ・tmuxセッション一覧はops-dashboard#34の担当で、
- * issue-deckには持ち込まない。
+ * コメント）。
+ *
+ * **ops-dashboardとの境界は#1567で引き直した。** 従来は「ホストの死活・CPU・メモリ・tmux
+ * セッション一覧はops-dashboard#34の担当で、issue-deckには持ち込まない」としていたが、
+ * 「もう1本セッションを起こしてよいか」を判断するたびに別のアプリを開くことになっていた。
+ * 新しい線は**「この仕組みが起こすセッションの起動可否に効くか」**で、issue-deckが持つのは
+ * 次の2つに限る。
+ *
+ * - この仕組みが起こしたtmuxセッションそのもの（`DispatchSession`。#1217から持っている）
+ * - 起動可否の判断材料になる3つの使用率（CPU・メモリ・`/`のディスク。`metrics`）
+ *
+ * サービス・プロセス・温度・ネットワーク・履歴といったホスト全体の監視は引き続き
+ * ops-dashboardの担当で、こちらには持ち込まない。**数値が食い違ったときの正もあちら**
+ * （取り方は`ops-dashboard`の`scripts/host-stats/agent.sh`に合わせてあるが、こちらは
+ * 申告の巡ごとの単発値で履歴を持たない）。
  *
  * 申告する側（`scripts/subpc-dispatch-poller.sh`）は`local-repos.conf`を走査し、
  * `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる（検証は
@@ -71,6 +85,9 @@ export async function POST(request: NextRequest) {
     // 理由を出せない。判定は引き続きpoller側が持ち、ここは写しを受け取るだけ
     maxSessions: parsePositiveInt(payload?.maxSessions),
     liveSessions: parseNonNegativeInt(payload?.liveSessions),
+    // リソース使用率（#1567）。**1つでも壊れていれば全体を`null`にする**
+    // （`parseDispatchHostMetrics`）。部分的に採用すると、取れなかった項目が0＝空きに見える
+    metrics: parseDispatchHostMetrics(payload?.metrics),
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

@@ -10,6 +10,8 @@ import {
   canMergeIssuePullRequest,
   issuePullRequestStateLabel,
   type IssuePullRequestStateLabel,
+  type IssuePullRequestSummary,
+  selectVisiblePullRequestLinks,
 } from "@/lib/issue-pull-requests";
 import { cn } from "@/lib/utils";
 import type { IssuePullRequest } from "@/types/pull-request";
@@ -69,6 +71,30 @@ function IssuePullRequestStateBadge({ pullRequest }: { pullRequest: IssuePullReq
 }
 
 /**
+ * 状態ごとの件数バッジ（例:「マージ済み 5」「Open 1」）。
+ *
+ * 対応PRを畳んだ行（#1577）に出して、開かなくても「どこまで進んだか」が分かるようにする。
+ * 詳細が1件も取れていないときは`buckets`が空になり、何も描かない（件数はセクションの見出しが出す）。
+ */
+export function IssuePullRequestStateCounts({ buckets }: { buckets: IssuePullRequestSummary["buckets"] }) {
+  return (
+    <>
+      {buckets.map((bucket) => (
+        <span
+          key={bucket.state}
+          className={cn(
+            "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+            STATE_CLASS[bucket.state],
+          )}
+        >
+          {STATE_LABEL[bucket.state]} {bucket.count}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
  * Issueの対応PRを一覧で表示し、マージボタンを**そのPRの行の中に**置く（#1339）。
  *
  * 1つのIssueに複数のPRがぶら下がりうるようになったため、マージボタンをIssue単位の位置
@@ -95,12 +121,8 @@ export function IssuePullRequestList({
   variant = "card",
   className,
 }: IssuePullRequestListProps) {
-  // 詳細が取れた分だけ`links`より情報が多いが、無関係PRを落とす絞り込み
-  // （selectIssuePullRequests）を通っているのは`pullRequests`のほうなので、
-  // 詳細が1件でも取れている場合はそちらを正とする
   const detailByNumber = new Map(pullRequests.map((pr) => [pr.number, pr]));
-  const visibleLinks =
-    pullRequests.length > 0 ? links.filter((link) => detailByNumber.has(link.number)) : links;
+  const visibleLinks = selectVisiblePullRequestLinks(links, pullRequests);
 
   if (visibleLinks.length === 0) return null;
 

@@ -47,7 +47,7 @@
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
 #   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定ならissue-deckの帯=4000）
-#   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら全インターフェース）
+#   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら127.0.0.1・#1526）
 #
 # 前提:
 #   - gh コマンドで認証済みであること
@@ -85,6 +85,9 @@ source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
 # 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
 # shellcheck source=scripts/lib/prompt-context.sh
 source "$ROOT/scripts/lib/prompt-context.sh"
+# 計画が前提としたコミットからの陳腐化検知（#1215）。**止めず、見せるだけ**。
+# shellcheck source=scripts/lib/plan-base.sh
+source "$ROOT/scripts/lib/plan-base.sh"
 # worktreeを作り直す前に開発サーバーを止める（#1524）。止め方は run-issue-session.sh・
 # reap-dev-servers.sh・cleanup-worktrees.sh と共有する。
 # shellcheck source=scripts/lib/dev-server.sh
@@ -430,11 +433,13 @@ prepare_issue() {
     echo "#$n: LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh $DEV_PORT を実行してください）。"
   elif ! command -v powershell.exe >/dev/null 2>&1; then
     # WSL以外（サブPCのUbuntu等）。ここで必要だったのはWSL2の内部NATを越えるための
-    # Windows側ポートフォワーディングで、素のLinuxには対応物が無い。開発サーバーは最初から
-    # 全インターフェースで待ち受けるため、同一LAN・tailnetの端末からそのまま見える（#1178）。
+    # Windows側ポートフォワーディングで、素のLinuxには対応物が無い。
     # setup-lan-access.sh も同じ判定で何もせず終わるが、ここで分けておくと何が行われなかったかが
     # ログに残る。
-    echo "#$n: LANアクセス設定はスキップします（WSL以外の環境では不要。開発サーバーは全インターフェースで待ち受けます）。"
+    #
+    # **開発サーバーの待ち受けは`127.0.0.1`に閉じている（#1526）。** 別端末から見る経路は
+    # `tailscale serve`のFQDNで、LANの生IPからは見えない。
+    echo "#$n: LANアクセス設定はスキップします（WSL以外の環境では不要。開発サーバーは 127.0.0.1 に閉じており、別端末からは tailscale serve のURLで見ます）。"
   else
     echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
     if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
@@ -455,6 +460,26 @@ prepare_issue() {
   local issue_relations concurrent_work
   issue_relations="$(prompt_context_relations "guchi-apps/issue-deck" "$n")"
   concurrent_work="$(prompt_context_concurrent "guchi-apps/issue-deck" "$n" "$WORKTREE_DIR" develop)"
+
+  # 計画の前提（`<!-- plan-base: <SHA> -->`）からdevelopへ入った変更（#1215）。
+  # **再開時こそ効く。** 計画を出してから承認されるまでの間に他セッションのマージが入ると、
+  # 承認された計画の前提が既に無効になっていることがある（#1200 で2回起きた）。
+  # `$issue_json` は上で `--json ...,comments` 付きで取得済みなので、ghの呼び出しは増やさない。
+  local plan_base_sha plan_base_lines
+  plan_base_sha="$(printf '%s' "$issue_json" | plan_base_sha_from_comments)"
+  if [[ -n "$plan_base_sha" ]]; then
+    # `origin/develop` が古いと変化を見落とす。再利用経路ではまだfetchしていないことがある
+    # （fetchするのは新規作成時と作り直しの判定時だけ）ので、ここで最新化する。
+    git -C "$ROOT" fetch origin develop --quiet 2>/dev/null || true
+    plan_base_lines="$(plan_base_changes "$ROOT" "$plan_base_sha" develop)"
+    echo "#$n: 計画の前提（plan-base ${plan_base_sha:0:7}）以降に origin/develop へ入った変更:"
+    printf '%s\n' "$plan_base_lines" | sed "s/^/#$n:   /"
+    # **端末に出すだけにしない。** 再開したエージェント自身が読む必要がある。既存の
+    # `{{CONCURRENT_WORK}}`へ相乗りするので、プロンプトのひな形は変えなくてよい。
+    # `$( )` は末尾の改行を落とすため、行頭に自分で改行を足す（足さないと直前の行へ繋がる）
+    concurrent_work+=$'\n'"- 計画の前提（\`plan-base: ${plan_base_sha:0:7}\`）以降に\`origin/develop\`へ入った変更:"$'\n'
+    concurrent_work+="$(printf '%s\n' "$plan_base_lines" | sed 's/^/  - /')"$'\n'
+  fi
   local issue_json_file
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"

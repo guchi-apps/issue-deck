@@ -44,6 +44,23 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+- **画面の現在地を表すURLクエリの更新は
+  [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
+  だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの
+  `router.push`はRSCのリクエストを伴い、`/dashboard`は認証Cookieを読む動的ページで
+  クライアントのRouter Cacheに残らないため、クエリを1つ変えるたびに`DashboardPage`
+  （Issue全件のDB取得を含む）がサーバーで再実行される。`useSearchParams()`はその応答が
+  返るまで更新されないので、Issueを選んでからハイライトが動くまでその往復を待つことになる。
+  `navigateParams`はネイティブのHistory API（Next.jsがパッチ済みの
+  `window.history.pushState`/`replaceState`）でクエリだけをクライアント側で更新する。
+  **前提は「そのクエリをサーバー側で読んでいないこと」**で、`/dashboard`のページは
+  `searchParams`を受け取っていない。サーバーでクエリを読むようになったら、この前提が壊れる
+  （URLを変えても表示が更新されない）ため、`navigateParams`を`router.push`へ戻すか
+  必要なところに`router.refresh()`を足すこと。
+  なお、この更新はReactのトランジション（低優先度の更新）として入るので、**一覧の選択
+  ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
+  行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
+  押した行が反応しない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
@@ -55,6 +72,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   GitHub Actionsが走る操作は「フリート運用」**へ入れる。混ぜると「保存ボタンがどこまで効くのか
   分からない」という元の状態に戻る。読み取り系のデータ取得は
   [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)へ集約する。
+  **「表示」区分（#1552）はそのどちらでもない「ユーザーごとの画面の見え方」**で、
+  切り替えた時点で即座に効き、GitHubには何も起こらない。中身はリポジトリの表示・非表示
+  （[`settings/repository-visibility-section.tsx`](../src/components/dashboard/settings/repository-visibility-section.tsx)）で、
+  実体は既存の`HiddenRepository`。**切り替える口は左メニュー（`sidebar-nav.tsx`）・スマホの
+  リポジトリ画面（`mobile-repos-screen.tsx`）・この区分の3か所あるが、状態を持つのは
+  `IssueDeckShell`の`repositories`だけ**なので、どこで変えても他へその場で伝わる。
+  一括操作（すべて表示・すべて非表示）だけは`PUT /api/repositories/hidden`にまとめ、
+  1件ずつのトグルは従来の`POST`/`DELETE`のまま。件数の数え方と一括の対象決定は
+  [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
+  **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
+  Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
@@ -93,6 +121,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
+- **PCのIssue詳細は「固定ヘッダー → 実行状況カード → 折りたためる補助情報 → 説明・コメント」の
+  4層**（#1577。[`components/dashboard/issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）。
+  積み上がった上部の表示を整理したもので、次の3点が判断の要る箇所。
+  - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
+    スクロール領域の先頭で`sticky`。**実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
+    アイコン、編集・クローズ・削除は`⋯`へ寄せる（増やすと折り返しで主操作の位置が動く。#998）。
+    メタは`Open`・作成者・更新（相対時刻）だけで、**担当者と日付はプロパティパネルに置く**（重複を作らない）。
+  - **実行状況カード**（[`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)）は
+    進捗ステップ・積んだジョブ・セッション・横断質問・Claudeの回答待ち・実行キャンセルを1枚に集める。
+    **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
+    （`getWorkflowStepIndex`・`findDispatchJobForIssue`・`findCrossRepoQuestionJobForIssue`など）を使う。
+    片方だけ条件が変わると空の枠が残る。
+  - **対応PR・親子Issue・AI要約は既定で畳む**
+    （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
+    `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
+    **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
+    畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
 - **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
   ラベル・担当者と並ぶ位置にあり
   （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
@@ -199,7 +244,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
-- **「ブランチとPRの流れ」（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
+- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
   ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
   **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
@@ -235,8 +280,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `BranchFlowRepositorySummary`）で、以降の再取得ではユーザーの開閉を上書きしない。
   **展開した中身は「バージョンへ何が合流したか」の流れ図**（#1510）。`main`と`develop`の
   2本の縦レールに対し、**横線1本がリリース（develop→mainのマージ）**で、その下にぶら下がる枝が
-  その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**未リリースの束と
-  ひとつ前の版まで**で、それ以前は「さらに前のバージョンを表示」で開く。この形にしたことで
+  その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**次のリリースに乗る分まで**
+  （未リリースの束＋まだdevelopへ向かっているレーン）で、本番へ出た版の束と「どの版で出たか
+  特定できないレーン」は「リリース済みのバージョンを表示」で開く（#1586。#1510当初は
+  ひとつ前の版まで出していたが、済んだ変更が「次に何が出るか」を押し下げていた）。
+  **畳んだぶんに残る未完了の手作業（`71.manual-step`）だけは束の外へ出して常に見せる**——
+  版が出た後も残る作業で、畳んだ束と一緒に隠すと画面のどこにも現れなくなるため。
+  同じ理由で、畳んだリポジトリ行にも件数（`BranchFlowRepositorySummary.openManualStepCount`）を
+  出す。**ただし初回に自動で開く条件には加えない**（手作業はこの画面で押すものではない）。
+  この形にしたことで
   「developへマージ済み」「main未反映」「vX.Y.Zで本番反映」のピルは**どの横線の下にいるか**が
   表すようになり、レーンに残るピルは上段（マージ待ち・PR未作成・クローズ）だけになった。
   レールが占める幅は固定（PC 3.35rem・スマホ 2.6rem）なので、スマホでも横スクロールは出ない。
@@ -265,8 +317,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
   起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
-  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作まで。**
-  4段の進捗はヘッダー側（`ReleaseProgress`）に残す——ここで状態まで追うと取得を増やさない前提が崩れる。
+  同じ結果になるようにしてある。**流れ画面が持つのは起動と、取得済みのPRだけで成立する操作と、
+  本番デプロイの状態まで。** バンプPR作成→develop反映→PR作成→mainへマージの4段の進捗は
+  ヘッダー側（`ReleaseProgress`）に残す——ここで全部を追うと取得を増やさない前提が崩れる。
+  **本番デプロイだけを例外にしているのは、PRの情報だけでは誤ったことを言ってしまうから**（#1579）。
+  リリースPRがマージされた瞬間に束の見出しが「◯/◯に本番反映」へ変わっていたが、見ているのは
+  mainへマージされた事実だけで、そこから`deploy.yml`が数分走り、失敗すればmainに入ったまま
+  本番へは出ない。**デプロイが済むまで「本番反映」と書かない**ようにし、実行中・失敗・待ちを
+  束の見出しと畳んだ1行に出す（デプロイ中・失敗のリポジトリは初回に自動で開く）。
+  取得は専用の軽いエンドポイント`GET /api/branch-flow/deploy`（mainブランチの`deploy.yml`の
+  最新run 1件。`fetchLatestDeployWorkflowRun`）で、**リリース用workflowを持つリポジトリだけ**を
+  対象にする。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
+  runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
+  場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
+  打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。
+  **この画面で唯一の自動更新がここ**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
+  30秒ごと）。消費が釣り合うのは、リポジトリあたりREST 1回であることと、
+  `fetchLatestWorkflowRun`がETagの条件付きGETを通す（変化が無ければ304でレート制限を消費しない）
+  ため。ブランチ状況とPR一覧は従来どおり手動更新のまま。
   **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
   数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
   （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
@@ -424,11 +492,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
   `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
-- **開発サーバーの掃除だけはpollerの外にも段を持つ**（#1525）。`scripts/reap-dev-servers.sh`の
-  入口は`.dev-servers/issue-<番号>.pid`だけで、PIDファイルが残らなかった孤児と**pollerごと
-  止まっている**場合を取りこぼす。`scripts/sweep-orphan-dev-servers.sh`は`ss -tlnp`で実際に
-  ポートを掴んでいるプロセスから入り、systemd timer（`deploy/subpc/issue-deck-dev-server-sweep.timer`）が
-  1時間ごとに呼ぶ。止め方は`scripts/lib/dev-server.sh`を共有する（**止め方を増やさない**）。
+- **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
+  だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
+  `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。
+  **プロセスの特定はコマンドラインの部分一致で行わない**——`claude`はプロンプト全文をargvに持ち、
+  Issue本文の`next-server`という記述に`grep`が当たった実績がある（#1523）。判定は
+  `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
+  読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
+  足すと同じ役が2つになる）。
+- **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
+  worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
+  既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は
+  `scripts/lib/fleet-status.sh`の純粋関数にあり、tmux・gh・gitを叩くのは入口だけなので、
+  出力を固定したfixtureで検証できる（`src/lib/fleet-status.test.ts`）。**LLMを使わず、
+  画面（`capture-pane`）も読まない計器**で、判断はしない。計画が前提としたSHAからの変化を見せる
+  `scripts/lib/plan-base.sh`（`<!-- plan-base: <SHA> -->`。**止めず、見せるだけ**）と対で、
+  設計は[multi-agent/gates.md](multi-agent/gates.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

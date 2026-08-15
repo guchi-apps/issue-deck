@@ -438,21 +438,22 @@ pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッション
 判定の中身と、そもそもなぜ孤児が生まれるのかは
 [開発サーバーは終了時に止め、残った分は回収する](local-quick-start.md#開発サーバーは終了時に止め残った分は回収する)を参照。
 
-### 孤児の定期掃除だけはpollerの外に置く（#1525）
+### 孤児の在庫はPIDファイルだけでは足りない（#1525）
 
-上の回収は**pollerの1巡に相乗りしているぶん、pollerごと止まると一緒に止まる**。入口が
-`.dev-servers/issue-<番号>.pid`だけなので、PIDファイルが残らなかった孤児（SIGKILL・ホストの
-強制再起動・worktreeごと削除）も取りこぼす。実際に2026-08-15、孤児9本が約5〜6GBを占有して
-ホストがOOMに至った（#1523）。
+上の回収の**在庫は`.dev-servers/issue-<番号>.pid`だけ**で、これを書くのは
+`scripts/run-issue-session.sh`しかない。実装エージェントが案内どおり手で起こし直した2本目は
+PIDファイルにもログにも載らず、**存在自体が見えないまま残り続ける**。2026-08-15にはこの
+取りこぼしが積み上がり、ホストがOOMでSSHごと応答不能になった（#1523）。
 
-そこで`scripts/sweep-orphan-dev-servers.sh`を**独立したsystemd timer**（既定1時間ごと・
-`deploy/subpc/issue-deck-dev-server-sweep.timer`）から呼ぶ。入口は`ss -tlnp`で、**実際にポートを
-掴んでいるプロセス**から入るためPIDファイルに依存しない。
+そこで`reap-dev-servers.sh`に`/proc`の走査を足し、**動いているプロセスそのものから入る経路**を
+1つ増やした。**systemd timerは新設していない。** 問題は掃除の周期ではなく在庫の取り方だったので、
+周期を足しても同じ役が2つになるだけになる（[関門と計器](gates.md)「計器」）。猶予は
+`DEV_SERVER_ORPHAN_GRACE_MINUTES`（既定30・0で無効）。判定の中身は
+[PIDファイルに載らない孤児](local-quick-start.md#pidファイルに載らない孤児をprocの走査で拾う1525)を参照。
 
-**ここは常駐プロセスを増やさない原則の例外にあたる**が、増えるのは常駐ではなく1時間に1度・
-数百ミリ秒で終わるoneshotで、かつ**pollerが落ちている場合を拾うことがこの段の存在意義**なので、
-pollerに相乗りさせては目的を果たせない。猶予は`DEV_SERVER_ORPHAN_GRACE_MINUTES`（既定30・0で無効）。
-判定の中身は[定期掃除](local-quick-start.md#定期掃除scriptssweep-orphan-dev-serverssh1525)を参照。
+**コマンドラインの部分一致でプロセスを探さない。** `claude`はプロンプト全文をargvに持つため、
+`ps -eo pid,args | grep next-server`はIssue本文にその語がある担当セッション自身に当たる
+（#1523で実際に踏んだ）。`/proc/<pid>/cmdline`をNUL区切りで読み、argvの位置で判定する。
 
 **`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
 試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
@@ -507,6 +508,25 @@ pollerに相乗りさせては目的を果たせない。猶予は`DEV_SERVER_OR
 - **`22.merge-confirm-required`の特別扱いは引き続き持たない。** マージ済みの経路では人がマージする
   まで残り、こちらの経路では猶予を過ぎたら畳まれる。どちらもラベルを見ていない
 
+#### PRを作らずに終わったセッションも畳む（#1600）
+
+#1541を入れてもなお、条件6の3経路（CLOSED・マージ済み・PRがopen）は**すべてPRかIssueのcloseを
+見ている**。子Issueへの分割・調査だけ・「対応不要」の結論で終わったセッションは`issue-<番号>`の
+PRを最後まで作らないため、**どの経路にも当たらず永久に残る**。#1523のセッションは実際にこれで
+半日残り、その間ずっと本数の上限（#1361）を1本ぶん埋めていた。
+
+そこで第4の経路として、**このセッションのコミットが手元に1つも残っていない**場合も畳む。
+
+- **判定材料はGitHubではなくgit。** 条件7で取っている`git branch -r --contains HEAD`から
+  自分のトピックブランチ（`origin/issue-<番号>`）を除き、1つでも残ればHEADは本流に入っている
+  （あるいは最初からコミットが無い）。GitHub側には「PRを作らずに終わった」ことを示す事実が
+  無いので、**手元に成果物が残っているかどうか**で決めるしかない
+- **独自のコミットが残っているときは従来どおり残す。** push済みなのにPRが無い＝作り忘れの
+  可能性があり、畳むと人が気付く機会を失う。「判定できないときは畳まない」の側に倒す
+- **猶予は#1541と共有する**（`SESSION_HANDOFF_IDLE_MINUTES`）。どちらも「`11.local`を外して
+  ローカル作業を終えたが、マージもcloseもされていない」という同じ状態で、知りたい閾値も同じ。
+  0にすると両方が止まる
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
@@ -552,6 +572,39 @@ pollerが取りに行かないだけなので、画面には**「順番待ち」
   実際には埋まっているホストが空いているように見える。未申告のホストは一覧に出さない
 - **応答していないホストは「上限で待っている」に数えない。** 取りに来られないだけで、別の話
   （そちらは従来どおり`online`の表示が持つ）
+
+#### 本数の内訳とリソース使用率も申告する（#1567）
+
+上の`liveSessions`は本数しか出しておらず、**その6本が何なのかを見る場所がアプリ内に無かった**
+（`tmux ls`かops-dashboardを開くことになる）。CPU・メモリも同様で、「もう1本起こしてよいか」を
+判断するたびに別のアプリへ移る必要があった。
+
+そこで2つを実行キューのポップオーバー（PC）とホーム画面（スマホ）へ出す。表示は
+[`src/components/dashboard/dispatch-host-panel.tsx`](../../src/components/dashboard/dispatch-host-panel.tsx)が
+両方で共有する。
+
+- **セッションの一覧は新しいデータを増やしていない。** `DispatchSession`（#1217）は以前から
+  `GET /api/dispatch`が返しており、画面に出していなかっただけ。出すのは`ALIVE`と`FAILED`だけで、
+  `EXITED`・`GONE`（畳んだもの）は落とす。24時間ぶん残るため、並べると今動いているものが埋もれる。
+  逆に`FAILED`を残すのは、**セッションの異常終了はこの一覧を除くとキューのどこにも出ない**ため
+  （「直近の失敗」に出るのはジョブの失敗で、あちらはtmuxが立った時点で終わっている）
+- **リソース使用率は申告に相乗りさせる**（`metrics`）。新しい常駐プロセス・systemd unitは増やさない。
+  取るのはCPU（`/proc/stat`を1秒あけて2回）・メモリ（`/proc/meminfo`の`MemAvailable`）・
+  `/`のディスク（`df`）の3つで、**取り方はops-dashboardの`scripts/host-stats/agent.sh`に合わせている**
+  （同じホストの同じ数字が2つのアプリで食い違うと、どちらを信じてよいか分からなくなる）
+- **どれか1つでも取れなければ`metrics`ごと`null`で送る**（部分採用しない）。受け口
+  （`parseDispatchHostMetrics`）も1項目でも壊れていれば全体を落とし、`DispatchHost`の5列を
+  まとめて`null`へ戻す。部分的に0が入ると、取れなかった項目が「空いている」と読めてしまう
+- **申告が無いホスト・応答していないホストではメーターを出さない。** 0%として並べると、
+  実際には埋まっているホストが空いているように見える（`liveSessions`の`null`と同じ考え方）
+- **使用率で何かを止めることはしない。** 起動を止めているのは引き続き`maxSessions`と同時実行数
+  だけで、これは人が判断するための計器（[gates.md](gates.md)）
+
+**ops-dashboardとの境界はここで引き直した。** 従来は「ホストの死活・CPU・メモリ・tmuxセッション
+一覧はops-dashboardの担当で、issue-deckには持ち込まない」としていた。新しい線は
+**「この仕組みが起こすセッションの起動可否に効くか」**で、issue-deckが持つのは上の2つに限る。
+サービス・プロセス・温度・ネットワーク・履歴といったホスト全体の監視は引き続きops-dashboardの
+担当で、**数値が食い違ったときの正もあちら**（こちらは申告の巡ごとの単発値で履歴を持たない）。
 
 ### タイムアウトに定期実行の仕組みを持たない
 
@@ -772,14 +825,15 @@ Issue作成画面の「作成+実装開始」は、**作成後にその場で`@c
 起動先が常にGitHub Actionsに固定されていた（#774）。サブPCで始めたい場合は、いったん作成して
 Issue詳細を開き直し、そちらの導線から起動し直すしかなかった。
 
-現在は、Issueを作成したあとに同じ`StartImplementationDialog`を`showOptions={false}`で開き、
-**実行先だけを選ばせる**（既定はサブPC）。起動そのもの（`@claude`コメント・ジョブの積み込み・
+現在は、Issueを作成したあとに同じ`StartImplementationDialog`を開き、**オプションと実行先を
+選ばせる**（実行先の既定はサブPC）。起動そのもの（`@claude`コメント・ジョブの積み込み・
 `11.local`・進捗の報告）はすべてダイアログ側が行い、作成画面は起動処理を持たない。
 
-- **オプション（`21.plan-required`等）のチェックボックスは出さない。** 作成フォームで同じものを
-  選ばせており、作成時にラベルとして付いた状態でダイアログへ渡る。同じ選択を2画面続けて出すと、
-  どちらが効くのか分からなくなる。選択状態はIssueのラベルから同期されるため、
-  `Planning`と`Implementation`の出し分けはそのまま働く。
+- **オプション（`21.plan-required`等）を選ぶのはこのダイアログだけ**（#1580）。以前は作成
+  フォームにも同じチェックボックスを出し、こちらは`showOptions={false}`で隠していたが、
+  起票の時点では実行先も実施時期も決まっておらず選びようがないため作成フォーム側を廃した。
+  「計画が必要」の初期値は作成時に付けた種別ラベル（`50.feature`等）から決まるので、
+  `Planning`と`Implementation`の出し分けもそのまま働く。
 - **`claude-issue-dispatch.yml`が無いリポジトリでも「作成+実装開始」を無効化しない**（#1262と
   同じ判断）。実行先の選択がこの先のダイアログにある以上、ボタンごと塞ぐとサブPCでの起動まで
   塞がる。理由はダイアログのGitHub Actionsの選択肢の説明として出す。
@@ -964,7 +1018,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`の起動ジョブ・横断質問のみ。#1541） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 
@@ -1006,13 +1060,7 @@ cp ~/apps/issue-deck/deploy/subpc/issue-deck-dispatch-poller.service ~/.config/s
 systemctl --user daemon-reload
 systemctl --user enable --now issue-deck-dispatch-poller.service
 
-# 4. 孤児の開発サーバーの定期掃除（#1525。pollerとは独立した経路なので別に登録する）
-cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.service ~/.config/systemd/user/
-cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.timer ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now issue-deck-dev-server-sweep.timer
-
-# 5. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
+# 4. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -1023,6 +1071,29 @@ sudo loginctl enable-linger "$USER"
 （1Password CLIの起動コストがポーリング間隔に対して重すぎる）。手順は`dispatch.env.example`の
 コメントを参照。サブPCはGUIが無いためサービスアカウント方式（#1177）。
 
+### pollerが動かすのは`~/apps/issue-deck`のスクリプト（developへのマージだけでは効かない）
+
+unitの`ExecStart`は`~/apps/issue-deck/scripts/subpc-dispatch-poller.sh`で、そこから呼ばれる
+`reap-sessions.sh`・`reap-dev-servers.sh`・ランチャーも**同じチェックアウトのもの**
+（`SCRIPT_DIR`基準）。このチェックアウトを自動で更新する仕組みは無いため、**`develop`へ
+マージしただけではサブPCの挙動は変わらない**。worktree（`~/apps/issue-deck-worktrees/*`）で
+`--dry-run`を試して直っていても、動いているのは別の版であることがある。
+
+```bash
+# 実際に動いている版がどれだけ遅れているか
+git -C ~/apps/issue-deck fetch --quiet origin develop
+git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop   # 0でなければ古い
+
+# 取り込む。回収スクリプトは1巡ごとに起動し直されるので即座に効くが、poller本体は
+# 常駐プロセスが読み込み中のファイルなので、pullしたらrestartまでを1組で行う
+git -C ~/apps/issue-deck pull --ff-only
+systemctl --user restart issue-deck-dispatch-poller.service
+```
+
+2026-08-15に#1523を調べたときは97コミット遅れており、#1454（横断質問セッションの回収）と
+#1541（引き渡し済みの回収）がどちらもサブPCでは効いていなかった。**回収まわりを直したら、
+この更新まで含めて1つの作業と考える。**
+
 ## ログをどこで見るか
 
 Actions UIに相当するものが無いため、次の3つで追う。
@@ -1030,7 +1101,6 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | 見たいもの | 見る場所 |
 |---|---|
 | pollerが何をしたか | `journalctl --user -u issue-deck-dispatch-poller -n 50` |
-| 孤児の開発サーバーを掃除したか | `journalctl -t issue-deck-dev-server-sweep -n 50`（#1525。`logger`で残すのでunitを問わず追える） |
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
 | 進捗（Project Status）が動かない理由 | 同じjournal。pollerは起動時に鍵の有無を1度だけ確かめ、無ければ警告を出す（#1236）。個々の起動でスキップした場合はランチャーの出力に理由が出る |

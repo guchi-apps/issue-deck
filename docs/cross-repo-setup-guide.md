@@ -434,6 +434,12 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
 | `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 | `workflows/v18` | 上記 | #1490。`00.check-user`を付ける全経路が、その理由を表す`01.check-*`もあわせて付けるようになった版。あわせて`claude-review-develop`・`claude-ci-fix`・`claude-conflict-resolve`・`release-develop-to-main`の`gh issue edit`に`gh label list`ガードを入れた。**このタグを配るまで、対象リポジトリでは理由ラベルが付かない**（`00.check-user`だけが付く従来どおりの動作） |
+| `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く） |
+
+> **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
+> `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
+> 他のcallerが`v18`のままでも新規ファイルだけ`v19`（`bump_kind`対応込み）で置いた。
+> 既存callerの引き上げ（#1565）とは作業が別で、揃えて置くと引き上げ対象を自分で増やすことになる。
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
@@ -616,7 +622,7 @@ RESTで「ディレクトリ一覧」→「ファイルごとの内容」と読�
 約4秒**で揃う（[`lib/github/workflow-tags.ts`](../src/lib/github/workflow-tags.ts)）。
 GraphQLのレート制限はRESTと別枠のため、RESTの5,000回/時も消費しない。
 
-同じ手は「ブランチとPRの流れ」でも使っている（#1455。[code-map.md](code-map.md)）。
+同じ手は「ブランチ」画面でも使っている（#1455。[code-map.md](code-map.md)）。
 **リポジトリ数・ファイル数に比例して往復が増える作りにしない**のが共通の判断。
 
 まとめ取りで注意する点は2つ。
@@ -721,7 +727,9 @@ YAMLとしては妥当なので構文チェックも通る。**推測で直す�
 スクリプトを起動すること。** これが更新履歴フック（`RELEASE_CHANGELOG`）の土台になっている
 （`npm pkg set`ではlifecycleスクリプトが起動しない）。
 
-**ルートに`package.json`が無いと`npm version`が使えない。** その場合だけ`bump-command`を渡す。
+`bump-command`が要るのは次の2つのどちらかに当てはまるときで、それ以外は既定値でよい。
+
+**1. ルートに`package.json`が無い**（`npm version`がそのままでは使えない）
 
 ```yaml
 # myroom: frontend/ のpackage.jsonを対象にする（バージョン番号を受け取る）
@@ -729,6 +737,29 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend
 # signaly: Pythonのスクリプトで version.json を書き換える（上げ幅を受け取る）
 bump-command: python3 scripts/bump_version.py "$BUMP_KIND"
 ```
+
+**2. `preversion`に依存関係を要するコマンドがある**（#1591）
+
+**共有ワークフローはバージョンbumpのために依存関係をインストールしない。**
+`reusable-release-develop-to-main.yml`には`setup-node`も`npm ci`も無く、`actions/checkout`直後の
+チェックアウトでいきなり`npm version`を叩く。`preversion: npm test`（`eslint && tsc`）を持つ
+リポジトリでは、これが`node_modules`不在で走って`npm error code 127`（`eslint: not found`）に
+なり、bumpステップごと落ちる。
+
+```yaml
+# meisai-lab・clip-hive: preversion を止め、version フックの中身は明示的に実行して補う
+bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts && npm_package_version="$NEW_VERSION" node scripts/version-changelog.mjs
+```
+
+`--ignore-scripts`は更新履歴を書く`version`フックまで止めてしまうため、その中身を直接呼ぶ。
+**このとき`npm_package_version`を明示的に渡す**——スクリプトはnpm lifecycle経由で実行される
+前提でバージョン番号をこの環境変数から読むため、直接実行では空になる。
+`version`フック内の`git add`は、共有ワークフローがbumpコミット前に`git add -A`するため不要。
+
+**`preversion`自体は消さない。** ローカルで`npm version`を叩いたときのガードとして機能しており、
+品質確認はバンプPR上のCIでも行われる。逆に、**これから`version` lifecycleを足すリポジトリでは
+`preversion`を作らない**（`ops-dashboard`はこの形にしたため`bump-command`が要らなかった）。
+`version`フックから呼ぶスクリプトも、Node標準モジュールだけで書くこと。
 
 **スクリプトによって受け取る引数が違う。** 次の3つが環境変数で渡るので、実装に合わせて選ぶ。
 

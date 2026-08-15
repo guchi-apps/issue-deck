@@ -42,13 +42,28 @@ export function useHistoryNavigation() {
    * 現在のクエリを起点に`mutate`で書き換えて遷移する。
    *
    * 結果が現在のURLと同じなら何もしない。同じURLを積むと、戻る操作を2回押さないと画面が
-   * 変わらなくなるため。`wrap`には`startTransition`のような遷移のラッパーを渡せる。
+   * 変わらなくなるため。
+   *
+   * **URLの更新には`router.push`/`router.replace`ではなくネイティブのHistory APIを使う**
+   * （#1597）。App Routerの`router.push`はRSCのリクエストを伴い、`/dashboard`は認証Cookieを
+   * 読む動的ページでクライアントのRouter Cacheに残らないため、クエリを変えるたびに
+   * `DashboardPage`（Issue全件のDB取得を含む）がサーバーで再実行される。`useSearchParams()`は
+   * その応答が返るまで更新されないので、**Issueをクリックしてから選択が反映されるまで
+   * サーバーの往復を待つ**ことになっていた（開発DBのIssue 52件で1回あたり約100〜200ms・
+   * 約64KB。本番の件数ではさらに伸びる）。
+   *
+   * Next.jsはApp Routerのマウント時に`window.history.pushState`/`replaceState`をパッチして
+   * おり、呼ぶと`usePathname`/`useSearchParams`だけをクライアント側で更新する（RSCの取得は
+   * 走らない）。Next内部の履歴state（`__NA`と内部ツリー）も新しいエントリへ引き継がれるため、
+   * 戻る・進む（popstate）は従来どおり動く。
+   *
+   * **前提は「このURLクエリをサーバー側で読んでいないこと」**。`/dashboard`のページは
+   * `searchParams`を受け取っておらず、クエリが変わっても描画結果は変わらない（＝往復しても
+   * 得るものが無い）。将来サーバー側でクエリを読むようになったら、この関数を`router.push`へ
+   * 戻すか、必要なところだけ`router.refresh()`を足すこと。
    */
   const navigateParams = useCallback(
-    (
-      mutate: (params: URLSearchParams) => void,
-      options: { history: HistoryMode; wrap?: (run: () => void) => void },
-    ) => {
+    (mutate: (params: URLSearchParams) => void, options: { history: HistoryMode }) => {
       const params = new URLSearchParams(searchParams.toString());
       const before = params.toString();
       mutate(params);
@@ -56,18 +71,14 @@ export function useHistoryNavigation() {
       if (after === before) return;
 
       const url = after ? `${pathname}?${after}` : pathname;
-      const run =
-        options.history === "push"
-          ? () => {
-              recordHistoryPush();
-              router.push(url, { scroll: false });
-            }
-          : () => router.replace(url, { scroll: false });
-
-      if (options.wrap) options.wrap(run);
-      else run();
+      if (options.history === "push") {
+        recordHistoryPush();
+        window.history.pushState(null, "", url);
+      } else {
+        window.history.replaceState(null, "", url);
+      }
     },
-    [router, pathname, searchParams],
+    [pathname, searchParams],
   );
 
   /**

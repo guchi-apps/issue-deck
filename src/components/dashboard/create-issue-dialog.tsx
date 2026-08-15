@@ -9,7 +9,6 @@ import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -38,12 +37,9 @@ import {
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
-import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
   isSelectableLabelName,
-  planRequiredDefaultForLabels,
-  START_IMPLEMENTATION_OPTIONS,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { getLabelBadgeStyle } from "@/lib/label-color";
@@ -74,21 +70,6 @@ export function mergeSuggestedLabels(prev: string[], suggested: string[]): strin
     ...prev.filter((name) => !isSelectableLabelName(name)),
     ...new Set(suggested.filter(isSelectableLabelName)),
   ];
-}
-
-/**
- * 種別ラベル（`50.feature`等）の選択に「計画が必要」を追従させた結果を返す（#1317）。
- * 既に一致していれば`null`を返し、呼び出し側の書き込み自体を止める（再レンダリングの連鎖を作らない）。
- *
- * バグ修正から新機能へ選び直したときに付き、逆に選び直したときに外れる必要があるため、
- * 付け外しの**両方向**を扱う。ユーザーが自分でチェックを触った後に呼ばないのは呼び出し側の責務。
- */
-export function syncPlanRequiredLabel(selectedLabels: string[]): string[] | null {
-  const shouldSelect = planRequiredDefaultForLabels(selectedLabels);
-  if (shouldSelect === selectedLabels.includes(PLAN_REQUIRED_LABEL)) return null;
-  return shouldSelect
-    ? [...selectedLabels, PLAN_REQUIRED_LABEL]
-    : selectedLabels.filter((name) => name !== PLAN_REQUIRED_LABEL);
 }
 
 const DEFAULT_ASSIGNEE = "m-guchi";
@@ -131,13 +112,8 @@ export function CreateIssueDialog({
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   const hasUserSetAssignee = useRef(false);
   /**
-   * 「計画が必要」のチェックをユーザー自身が触ったか（#1317）。
-   * 触った後は種別ラベルからの既定で上書きしない（担当者欄と同じ扱い）。
-   */
-  const hasUserSetPlanRequired = useRef(false);
-  /**
-   * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ実行先の選択を出す。**
-   * このダイアログ自体は閉じているので、実行先の選択はDialogの外側に並べて描画する。
+   * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ「実装を開始」を出す。**
+   * このダイアログ自体は閉じているので、そちらはDialogの外側に並べて描画する。
    */
   const [startTargetIssue, setStartTargetIssue] = useState<Issue | null>(null);
 
@@ -187,7 +163,6 @@ export function CreateIssueDialog({
     setIsImageUploading(false);
     setError(null);
     hasUserSetAssignee.current = draft.assignee !== null;
-    hasUserSetPlanRequired.current = false;
     // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
     // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
     setRestorableDraft(
@@ -211,24 +186,14 @@ export function CreateIssueDialog({
     }
   }, [open, assignees]);
 
-  useEffect(() => {
-    if (!open || hasUserSetPlanRequired.current) return;
-    // 種別ラベル（50.feature等）の選択に「計画が必要」を追従させる（#1317）。ラベル選択欄・
-    // 「タイトル・ラベルを自動生成」・下書きの復元のどこから種別が変わっても同じ既定になるよう、
-    // 個々の操作ではなく選択済みラベルの変化に紐づける。既定と一致した時点でnullが返り書き込みが
-    // 止まるため、連鎖的な再レンダリングは起きない。ユーザーがチェックを触った後は上書きしない。
-    const next = syncPlanRequiredLabel(selectedLabels);
-    if (!next) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedLabels(next);
-  }, [open, selectedLabels]);
-
   function handleRestoreDraft() {
     if (!restorableDraft) return;
     setRepositoryFullName(defaultRepositoryFullName ?? restorableDraft.repositoryFullName);
     setTitle(restorableDraft.title);
     setBody(restorableDraft.body);
-    setSelectedLabels(restorableDraft.selectedLabels);
+    // 実装オプション用ラベル（`21.plan-required`等）は#1580でこの画面から選べなくなったが、
+    // それ以前に保存された下書きには残っている。画面に出ないラベルが黙って付かないよう濾す
+    setSelectedLabels(restorableDraft.selectedLabels.filter(isSelectableLabelName));
     setAssignee(restorableDraft.assignee);
     hasUserSetAssignee.current = restorableDraft.assignee !== null;
     setRestorableDraft(null);
@@ -241,13 +206,9 @@ export function CreateIssueDialog({
     setSelectedLabels([]);
     setAssignee(null);
     hasUserSetAssignee.current = false;
-    hasUserSetPlanRequired.current = false;
   }
 
   function toggleLabel(name: string) {
-    // 「計画が必要」はチェックボックスからしか来ない（ラベル選択欄からは除外されている）ため、
-    // ここで触ったことを記録すれば、以降は種別ラベルからの既定で上書きされない（#1317）
-    if (name === PLAN_REQUIRED_LABEL) hasUserSetPlanRequired.current = true;
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
@@ -288,9 +249,9 @@ export function CreateIssueDialog({
   /**
    * 「作成+実装開始」ボタン押下時（#774・#1323）。
    *
-   * Issueを作成したうえで、**実行先だけを選ぶ「実装を開始」ダイアログへ渡す**。
-   * 実装オプション（`21.plan-required`等）はこの画面のチェックボックスで選び済みで、作成時に
-   * ラベルとして付いた状態で渡るため、そちらは出さない（`showOptions={false}`）。
+   * Issueを作成したうえで、**実装オプションと実行先を選ぶ「実装を開始」ダイアログへ渡す**。
+   * オプションは作成フォームでは選ばせず（#1580）、こちらのダイアログだけで選ぶ。
+   * 「計画が必要」の初期値は、作成時に付けた種別ラベル（`50.feature`等）から決まる。
    *
    * **以前はここで直接`@claude`コメントを投稿していた（#774）。** 起動先を選ぶ余地が無く、
    * 作成したIssueは必ずGitHub Actionsで走っていた。サブPCで始めたい場合は、いったん作成して
@@ -462,27 +423,10 @@ export function CreateIssueDialog({
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
-              {START_IMPLEMENTATION_OPTIONS.map((option) => (
-                <div key={option.key} className="flex items-start gap-2">
-                  <Checkbox
-                    id={`create-issue-option-${option.key}`}
-                    checked={selectedLabels.includes(option.githubLabel)}
-                    onCheckedChange={() => toggleLabel(option.githubLabel)}
-                    className="mt-0.5"
-                  />
-                  <Label
-                    htmlFor={`create-issue-option-${option.key}`}
-                    className="flex-col items-start gap-0.5"
-                  >
-                    {option.label}
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {option.description}
-                    </span>
-                  </Label>
-                </div>
-              ))}
-            </div>
+            {/* 実装オプション（`21.plan-required`等）はここでは選ばせない（#1580）。
+                どこでエージェントを止めるかの指定で、実行先が決まって初めて意味が決まるものが
+                混ざっている（撮影は無人実行専用・アーティファクトはローカル実行専用）。
+                起票の時点では実行先も実施時期も未定なので、「実装を開始」ダイアログで選ぶ */}
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="create-issue-assignee">担当者</Label>
@@ -531,8 +475,8 @@ export function CreateIssueDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* 作成直後の実行先選択（#1323）。既定はサブPCで、GitHub Actionsはフォールバック。
-          作成フォームは閉じているため、Dialogの外側に並べて描画する */}
+      {/* 作成直後のオプション・実行先の選択（#1323・#1580）。実行先の既定はサブPCで、
+          GitHub Actionsはフォールバック。作成フォームは閉じているため、Dialogの外側に並べて描画する */}
       {startTargetIssue && (
         <StartImplementationDialog
           issue={startTargetIssue}
@@ -554,7 +498,6 @@ export function CreateIssueDialog({
           }}
           onCommentCreated={() => {}}
           includeDispatchTargets
-          showOptions={false}
           actionsDisabledReason={startImplementationDisabledReason(
             startTargetRepository?.hasClaudeWorkflow,
           )}

@@ -515,6 +515,23 @@ model DispatchHost {
   // `liveSessions`が0であることとは区別する
   maxSessions       Int?
   liveSessions      Int?
+  // 申告した時点のリソース使用率（#1567）。「もう1本セッションを起こしてよいか」を
+  // issue-deckの画面だけで判断できるようにするための写しで、**判定には一切使わない**
+  // （起動を止めているのは引き続き`maxSessions`と同時実行数）。
+  //
+  // **ホスト全体の監視はops-dashboardの担当のまま**で、ここに持つのはこの仕組みが
+  // 起こすセッションの起動可否に効く3つ（CPU・メモリ・`/`のディスク）だけ。サービス・
+  // プロセス・温度・ネットワーク・履歴はあちらにしか無い（境界は
+  // `src/app/api/dispatch/hosts/route.ts`のコメント）。
+  //
+  // **`null`は「申告していない」**（古いpoller・取得に失敗した巡）で、0（空いている）とは
+  // 区別する。5つは**まとめて入るかまとめてnullか**のどちらかで、部分的には埋まらない
+  // （受け口の`parseDispatchHostMetrics`が全体を落とす）
+  cpuPercent        Float?
+  memoryUsedMb      Int?
+  memoryTotalMb     Int?
+  diskUsedGb        Float?
+  diskTotalGb       Float?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt        DateTime
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const NOW = new Date("2026-08-15T12:00:00.000Z");
 
@@ -25,6 +26,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     crossRepoQuestionCapable: true,
     maxSessions: 12,
     liveSessions: 0,
+    metrics: null,
     ...overrides,
   };
 }
@@ -315,5 +317,64 @@ describe("DispatchQueueButton の送信中の操作", () => {
     expect(screen.queryByLabelText("#1332のジョブを取り消す")).toBeNull();
     expect(screen.queryByLabelText("#1332のジョブを先頭へ上げる")).toBeNull();
     expect(screen.queryByText(/まとめて取り消す/)).toBeNull();
+  });
+});
+
+/**
+ * #1567。ポップオーバーがキューだけでなく「サブPCが今どうなっているか」も映すようになった。
+ * 従来はセッションの本数しか出ておらず、その中身とホストの余力は別のアプリでしか見られなかった。
+ */
+describe("DispatchQueueButton のホスト表示", () => {
+  function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+    return {
+      host: "subpc",
+      tmuxSessionName: "issue-deck-issue-1567",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1567,
+      issueTitle: "サブPC上のセッション表示",
+      state: "ALIVE",
+      exitStatus: null,
+      firstSeenAt: NOW.toISOString(),
+      lastReportedAt: NOW.toISOString(),
+      activity: null,
+      activityAt: null,
+      remoteControlUrl: null,
+      previewUrl: null,
+      ...overrides,
+    };
+  }
+
+  function openWithHost(host: DispatchHostView, sessions: DispatchSessionView[]) {
+    const dispatch = { ...makeDispatch([]), hosts: [host], sessions } as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+  }
+
+  it("使用率と動いているセッションをキューと同じ場所に出す", () => {
+    openWithHost(
+      makeHost({
+        liveSessions: 1,
+        metrics: {
+          cpuPercent: 34,
+          memoryUsedMb: 12_698,
+          memoryTotalMb: 32_650,
+          diskUsedGb: 219.4,
+          diskTotalGb: 468.2,
+        },
+      }),
+      [makeSession()],
+    );
+
+    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("セッション 1/12")).toBeTruthy();
+    expect(screen.getByText("34%")).toBeTruthy();
+    expect(screen.getByText("#1567 サブPC上のセッション表示")).toBeTruthy();
+  });
+
+  // 同じ「実行」でも経路が別で、出ていないことを止まっていると読まれないようにする
+  it("GitHub Actionsの無人実行はここに出ないことを但し書きで出す", () => {
+    openWithHost(makeHost(), []);
+
+    expect(screen.getByText(/GitHub Actionsでの無人実行はここには出ません/)).toBeTruthy();
   });
 });

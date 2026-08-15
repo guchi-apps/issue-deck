@@ -302,6 +302,7 @@ describe("findBlockingSession", () => {
       tmuxSessionName: "issue-deck-issue-1311",
       repositoryFullName,
       issueNumber: 1311,
+      issueTitle: null,
       state: "ALIVE",
       exitStatus: null,
       firstSeenAt: "2026-08-14T10:00:00.000Z",
@@ -792,6 +793,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       crossRepoQuestionCapable: true,
       maxSessions: 12,
       liveSessions: 0,
+      metrics: null,
       ...overrides,
     };
   }
@@ -848,6 +850,7 @@ describe("横断質問（#1454）", () => {
       crossRepoQuestionCapable: true,
       maxSessions: 12,
       liveSessions: 0,
+      metrics: null,
       ...overrides,
     };
   }

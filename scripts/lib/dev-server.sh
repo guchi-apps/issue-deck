@@ -47,6 +47,49 @@ dev_server_pid_matches() {
   return 0
 }
 
+# そのPIDが開発サーバーの起動コマンド（`pnpm dev`など）かどうかを、**argvの位置**で判定する（#1525）。
+#
+# **コマンドラインの部分一致で探してはいけない。** `claude`はプロンプト全文をargvに持ち、そこには
+# Issueの本文がそのまま入る。#1523の調査で`ps -eo pid,args | grep next-server`を叩いたところ、
+# **#1524を担当している`claude`プロセス自身がヒットした**（本文中の`next-server`という記述に
+# 当たったため）。同じ罠は scripts/lib/worktree-status.sh にも書かれている。
+#
+# `/proc/<pid>/cmdline`はNUL区切りなので、argvを要素として正確に取り出せる。要素そのものが
+# `dev`と**一致**することを求めるため、本文に`pnpm dev`と書かれていても（それは1つの長い要素の
+# 一部でしかなく）当たらない。見るのは先頭3つまで。`node`のようなインタプリタが1つ前に入る形も
+# あるため、位置に幅を持たせている。
+#
+#   node /path/to/pnpm dev   /   pnpm dev   /   npm run dev   /   yarn dev   /   next dev
+#
+# **`dev_server_process_looks_like_dev`（#1524）とは役割が違う。** あちらは「親を遡るのをどこで
+# やめるか」を決める**緩い**判定で、`next-server`のような子も真になる。こちらは`/proc`全体を
+# 走査する**入口**なので、`dev`という引数まで求めて厳しく絞る（`next build`のような別の用途で
+# 動いているプロセスを候補にしない）。**入口を緩めない。**
+dev_server_is_dev_command() {
+  local pid="$1" i arg base
+  local -a argv=()
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  while IFS= read -r -d '' arg; do
+    argv+=("$arg")
+    # 判定に要るのは先頭5つまで。プロンプト全文のような巨大なargvを読み切らない
+    [[ "${#argv[@]}" -lt 5 ]] || break
+  done <"/proc/$pid/cmdline"
+
+  for ((i = 0; i < ${#argv[@]} && i < 3; i++)); do
+    base="${argv[i]##*/}"
+    case "$base" in
+      pnpm | pnpm.cjs | npm | npm-cli.js | yarn | yarn.js | bun | next) ;;
+      *) continue ;;
+    esac
+    [[ "${argv[i + 1]:-}" == "dev" ]] && return 0
+    if [[ "${argv[i + 1]:-}" == "run" && "${argv[i + 2]:-}" == "dev" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # そのPIDのカレントディレクトリ。取れなければ1を返す。
 #
 # **worktreeごと消えている場合、`readlink`は` (deleted)`を付けて返す**（#1525）。
@@ -86,6 +129,30 @@ dev_server_loopback_listening() {
     addr="${addr%:*}"
     case "$addr" in
       '*' | '0.0.0.0' | '[::]' | '[::1]' | 127.*) return 0 ;;
+    esac
+  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
+  return 1
+}
+
+# そのポートがワイルドカード（全インターフェース）で待ち受けているかを判定する（#1526）。
+#
+# 開発サーバーの待ち受けは`127.0.0.1`が既定になった（`scripts/dev.sh`）が、**worktreeは分岐した
+# 時点のスクリプトを持ち続ける**ため、#1329より前に作られたworktreeで手で`pnpm dev`を叩くと
+# 従来どおり全インターフェースに出る。Tailscaleに参加しているホストではtailnet上の他端末から
+# 到達できてしまうので、回収の巡回（scripts/reap-dev-servers.sh）で見つけて知らせる。
+#
+# **具体的なアドレス（`100.x` / `[fd7a:...]`）は対象外。** それは`tailscale serve`自身の
+# 待ち受けで、意図した公開にあたる。拾うのは`*` / `0.0.0.0` / `[::]`だけ。
+#
+# `ss`が無い環境では判定できないため、**出ていない側（＝警告しない安全側）に倒す**。
+dev_server_wildcard_listening() {
+  local port="$1" addr
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  command -v ss >/dev/null 2>&1 || return 1
+  while read -r addr; do
+    addr="${addr%:*}"
+    case "$addr" in
+      '*' | '0.0.0.0' | '[::]') return 0 ;;
     esac
   done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
   return 1

@@ -31,6 +31,49 @@ export type RepositoryBranchStatus = {
   hasReleaseWorkflow: boolean;
 };
 
+/**
+ * mainブランチ上の本番デプロイworkflow（`deploy.yml`）の最新実行（#1579）。
+ * `GET /api/branch-flow/deploy`が返す。取得できなければnull（`deploy.yml`が無い・権限が無い等）。
+ */
+export type BranchFlowDeployRun = {
+  /** queued | in_progress | completed など */
+  status: string;
+  /** success | failure | cancelled | null（未完了時） */
+  conclusion: string | null;
+  htmlUrl: string;
+  createdAt: string;
+};
+
+/** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
+export type RepositoryDeployStatus = {
+  repositoryFullName: string;
+  deployRun: BranchFlowDeployRun | null;
+};
+
+export type BranchFlowDeployResponse = {
+  repositories: RepositoryDeployStatus[];
+  /** 取得時刻（ISO8601） */
+  fetchedAt: string;
+};
+
+/**
+ * mainへマージした変更が本番へ届いたか（#1579）。
+ *
+ * - `waiting` … マージ済みだが、今回のデプロイ実行がまだ現れていない
+ * - `running` … デプロイ実行中
+ * - `success` … デプロイ成功（＝ここで初めて「本番反映」と言ってよい）
+ * - `failure` … デプロイが失敗した（**mainには入ったが本番には出ていない**）
+ *
+ * 判定できない場合（実行を1件も取得できない）は`null`にし、画面は従来の表示のままにする。
+ */
+export type BranchFlowDeployStateKind = "waiting" | "running" | "success" | "failure";
+
+export type BranchFlowDeployState = {
+  kind: BranchFlowDeployStateKind;
+  /** 実行ログのURL。`waiting`（実行がまだ現れていない）ではnull */
+  htmlUrl: string | null;
+};
+
 export type BranchFlowResponse = {
   repositories: RepositoryBranchStatus[];
   /** 取得時刻（ISO8601）。画面のヘッダーに「〜時点」として出す */
@@ -147,6 +190,12 @@ export type BranchFlowReleaseGroup = {
   bumpPullRequest: PullRequestSummary | null;
   /** mainへ入った日時（ISO8601）。**nullなら未リリース**（進行中またはこれから） */
   mergedAt: string | null;
+  /**
+   * この版の本番デプロイの状態（#1579）。**いちばん新しくmainへ入った束にだけ入る。**
+   * 判定に使うのはmainブランチの`deploy.yml`の最新実行なので、それより前の版については
+   * 何も言えない（＝null）。`mergedAt`がnullの束（未リリース）でも常にnull。
+   */
+  deploy: BranchFlowDeployState | null;
   lanes: BranchFlowLane[];
   /** この束に残っている未完了の手作業Issueの件数 */
   openManualStepCount: number;
@@ -166,10 +215,23 @@ export type BranchFlowRepositorySummary = {
   /** ユーザーがマージするしかないopenなPRがある（リリースPRを除く） */
   needsUserMerge: boolean;
   /**
+   * このリポジトリに残っている未完了の手作業Issue（`71.manual-step`）の件数（#1586）。
+   *
+   * **既定の表示を「次のリリースに乗る分」まで畳んだぶん、ここで数える。** 手作業は
+   * 本番へ出た版に紐づいたまま残ることがあり、畳んだ行に出さないと開くまで気づけない。
+   * 同じIssueが複数レーンに現れても1件として数える。
+   */
+  openManualStepCount: number;
+  /**
    * リリースが進行中（openなリリースPR、またはopenなバージョンバンプPRがある）。
    * バンプPRを作業レーンから外した（#1548）ぶん、ここで数える。
    */
   releaseInProgress: boolean;
+  /**
+   * 直近のリリースの本番デプロイの状態（#1579）。畳んだ1行に「デプロイ中」「デプロイ失敗」を
+   * 出すために持つ。**mainへマージした後もここが動いている間はまだ本番へ出ていない。**
+   */
+  deploy: BranchFlowDeployState | null;
 };
 
 /** `develop` → `main` のリリースレーン */

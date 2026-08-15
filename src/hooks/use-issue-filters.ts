@@ -22,7 +22,7 @@ export type IssueStateFilter = "all" | "open" | "closed";
  * 直交する。ただしURLの持ち方を揃えたいのと、ビュー切り替えと同時に1回のURL更新で
  * 反映したい（別フックに分けると2回のrouter.replaceが競合する）ため、ここで一緒に扱う。
  *
- * `flow`はIssue・ブランチ・PRの関係を1画面で見る「ブランチとPRの流れ」（#1455）。
+ * `flow`はIssue・ブランチ・PRの関係を1画面で見る「ブランチ」画面（#1455）。
  * 一覧と詳細の2カラムを持たず、中央〜右を1カラムで使う。
  */
 export type DashboardPane = "issues" | "pull-requests" | "flow";
@@ -214,7 +214,7 @@ export function useIssueFilters() {
     [setFilters],
   );
 
-  // 左メニューの「ブランチとPRの流れ」への遷移（#1455）。この画面はPRの選択状態を持たない
+  // 左メニューの「ブランチ」画面への遷移（#1455）。この画面はPRの選択状態を持たない
   // ので、開くときに選択中PRを畳んでおく（戻ってきたときに前のPRが残らないようにする）。
   const selectFlowPane = useCallback(() => {
     setFilters({ pane: "flow", pr: null });

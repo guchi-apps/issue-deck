@@ -1,3 +1,4 @@
+import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssuePullRequest } from "@/types/pull-request";
 
 /**
@@ -40,4 +41,58 @@ export function issuePullRequestStateLabel(
   if (pullRequest.merged) return "merged";
   if (pullRequest.state === "closed") return "closed";
   return pullRequest.draft ? "draft" : "open";
+}
+
+/**
+ * 画面に出す対応PRのリンクだけを残す。
+ *
+ * 並びの正は`links`（コメント本文・timelineから得たPR番号）だが、詳細が1件でも取れている場合は
+ * 無関係PRを落とす絞り込み（`selectIssuePullRequests`）を通った`pullRequests`のほうを正とする。
+ * 一覧の描画（`IssuePullRequestList`）と、セクションを出すかどうかの判定（#1577）で同じ結果に
+ * なる必要があるため、判定をここに一本化している。
+ */
+export function selectVisiblePullRequestLinks(
+  links: PullRequestLink[],
+  pullRequests: IssuePullRequest[],
+): PullRequestLink[] {
+  if (pullRequests.length === 0) return links;
+  const numbers = new Set(pullRequests.map((pullRequest) => pullRequest.number));
+  return links.filter((link) => numbers.has(link.number));
+}
+
+/** 畳んだ対応PRセクションの1行に出す内訳（#1577） */
+export type IssuePullRequestSummary = {
+  /** 対応PRの総数。並びの正である`links`の件数と一致する */
+  total: number;
+  /** 状態ごとの件数。0件の状態は含めず、`STATE_ORDER`の順に並ぶ */
+  buckets: { state: IssuePullRequestStateLabel; count: number }[];
+};
+
+/** 内訳を出す順。進んだ状態ほど左に来るようにして、ざっと見て「どこまで進んだか」が分かるようにする */
+const STATE_ORDER: IssuePullRequestStateLabel[] = ["merged", "open", "draft", "closed"];
+
+/**
+ * 対応PRを畳んだときに出す内訳（#1577）。
+ *
+ * **`total`は`linkCount`（コメント・timelineから拾ったPR番号の件数）を正とする。** 状態の内訳は
+ * 詳細（`pullRequests`）が取れた分だけなので、取得前・取得失敗時は`buckets`が空になり件数だけが出る。
+ * 詳細が取れていないことを理由に件数まで消すと、畳んだ行から対応PRの存在自体が見えなくなる。
+ */
+export function summarizeIssuePullRequestStates(
+  pullRequests: IssuePullRequest[],
+  linkCount: number,
+): IssuePullRequestSummary {
+  const counts = new Map<IssuePullRequestStateLabel, number>();
+  for (const pullRequest of pullRequests) {
+    const state = issuePullRequestStateLabel(pullRequest);
+    counts.set(state, (counts.get(state) ?? 0) + 1);
+  }
+
+  return {
+    total: linkCount,
+    buckets: STATE_ORDER.filter((state) => (counts.get(state) ?? 0) > 0).map((state) => ({
+      state,
+      count: counts.get(state) ?? 0,
+    })),
+  };
 }

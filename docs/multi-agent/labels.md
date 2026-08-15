@@ -69,6 +69,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 | 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
 | スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
 | 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
+| すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
 
 ### 外れるタイミング
@@ -121,7 +122,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 | `01.check-plan` | 計画を承認する／修正を依頼する | 待機 | 計画を提示した |
 | `01.check-input` | 質問・確認に答える | 待機 | 質問した／開発環境・スクリーンショットを提示した |
 | `01.check-merge` | PRをマージする | 待機 | 自動マージされなかった／判定経路が無いリポジトリのPR |
-| `01.check-blocked` | 続け方を指示する | **停止** | 依存追加・行き詰まり・セッション異常終了・起動確認で停止 |
+| `01.check-blocked` | 続け方を指示する | **停止** | 依存追加・行き詰まり・セッション異常終了・起動確認で停止／すでに実装済みで実装不要と判断して停止 |
 | `01.check-answered` | 回答を読む | **待っていない** | ユーザーの質問へエージェントが回答した（既存`00.qa-answered`のリネーム） |
 
 - **`01.check-input`と`01.check-answered`は向きが逆で、統合しない。** 前者は「エージェントが
@@ -158,7 +159,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 | 質問・確認の入力待ちに入った | `01.check-input` | `session-plan.ts`の`requestSessionCheckUser`（ローカル。無人実行に入力待ちは無い） |
 | ユーザーの質問へ回答した | `01.check-answered` | `.github/prompts/plan.md`・`implement.md`（無人実行） |
 | PRが自動マージされなかった／判定経路が無い | `01.check-merge` | `reusable-claude-review-develop.yml`の`auto-merge`・`auto-merge-fallback`、`reusable-issue-labels.yml`の`develop-pr-opened`、`.github/prompts/review-develop.md` |
-| 行き詰まり・依存追加・異常終了で停止した | `01.check-blocked` | `reusable-issue-dispatch.yml`のフォールバック3か所、`reusable-claude-ci-fix.yml`・`reusable-claude-conflict-resolve.yml`・`reusable-claude-review-develop.yml`のレビュー失敗、`reusable-release-develop-to-main.yml`、`session-escalation.ts`（ローカル） |
+| 行き詰まり・依存追加・異常終了で停止した／すでに実装済みで実装不要と判断して停止した | `01.check-blocked` | `.github/prompts/implement.md`・`plan.md`（実装済み判断。#1601）、`reusable-issue-dispatch.yml`のフォールバック3か所、`reusable-claude-ci-fix.yml`・`reusable-claude-conflict-resolve.yml`・`reusable-claude-review-develop.yml`のレビュー失敗、`reusable-release-develop-to-main.yml`、`session-escalation.ts`（ローカル） |
 
 **未配布のリポジトリで壊れないようにする作法は、付ける側の経路で違う。**
 
@@ -174,9 +175,11 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 `src/lib/issue-status.ts`の`matchStatusStep`が理由ラベルを除外していないと、Issue詳細の
 ラベル欄に「ステップ1/9」の進捗バーが誤って描画される。
 
-## 画面のチェックボックス4つの使い分け（#1317）
+## 画面のチェックボックス5つの使い分け（#1317）
 
-issue-deckの「新しいIssueを作成」「実装を開始」ダイアログには、下記4つのラベルをチェックボックスとして出している（定義は`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`1か所で、両方の画面が同じ配列を読む）。どれも**エージェントを止める場所が違うだけ**で、迷ったら「どこで自分が見たいか」で選ぶ。
+issue-deckの「実装を開始」ダイアログには、下記5つのラベルをチェックボックスとして出している（定義は`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`）。どれも**エージェントを止める場所が違うだけ**で、迷ったら「どこで自分が見たいか」で選ぶ。
+
+**選ぶのは実装を始めるときだけで、「新しいIssueを作成」ダイアログには出さない**（#1580）。5つのうち撮影は無人実行専用・アーティファクトはローカル実行専用で、**実行先が決まって初めて意味が決まる**ものが混ざっている。起票の時点では実行先も実施時期も未定なため、起票のたびに5項目を読ませても選びようがない。作成画面の「作成+実装開始」からも、続けて開く「実装を開始」ダイアログで選ぶ（`src/components/dashboard/create-issue-dialog.tsx`）。ラベル選択欄からも除外している（`isSelectableLabelName`）ので、作成時にこの5つが付くことはない。
 
 | 選択肢 | ラベル | 止まる場所 | 選ぶ基準 |
 |---|---|---|---|
@@ -200,7 +203,8 @@ Issueによっては実装前に設計・アプローチのすり合わせ（Cla
 - ラベル `21.plan-required`（新規作成予定）の有無で実装エージェントが分岐する。
   - **ラベルなし（デフォルト）**: 実装エージェントはそのまま実装に入る。
   - **ラベルあり**: 実装エージェントは実装前に計画（アプローチ・変更範囲・懸念点）をまとめて提示し、承認を得てから実装に入る。
-- **チェックボックスの初期値はIssueの種別ラベルから決める**（#1317・`planRequiredDefaultForLabels`）。`50.feature`・`51.improvement`・`62.design`が付いていれば既定でON、それ以外（`30.bug`・`60.chore`・`65.docs`や種別未選択）は従来どおりOFF。**あくまで初期値で、チェックを自分で触った後は種別を変えても上書きしない**（Issue作成画面は担当者欄と同じ`hasUserSet`の扱い）。種別を選び直したときは付け外しの両方向へ追従する。
+- **チェックボックスの初期値はIssueの種別ラベルから決める**（#1317・`planRequiredDefaultForLabels`）。`50.feature`・`51.improvement`・`62.design`が付いていれば既定でON、それ以外（`30.bug`・`60.chore`・`65.docs`や種別未選択）は従来どおりOFF。判定は「実装を開始」ダイアログを開いた時点のIssueのラベルに対して行う（`startImplementationOptionsFromLabels`）ため、**起票時に`21.plan-required`を付けておく必要は無い**（#1580）。**あくまで初期値で、チェックを自分で触った後は上書きしない。**
+  - 「実装を開始」ダイアログを通らない起動経路（カンバンのドラッグ・一括投入バー）では、この既定は効かない。ドラッグは`Ready`→`Planning`へ落とせば計画になり、そのときWebhook側が`21.plan-required`を付ける（`src/app/api/webhooks/github/route.ts`）。一括投入バーはもともとオプションを選ばせない設計なので、計画を挟みたいIssueは個別に「実装を開始」から積む。
   - 既定を変えたいときは`START_IMPLEMENTATION_OPTIONS`と同じファイルの`PLAN_REQUIRED_DEFAULT_TYPE_LABELS`に種別ラベル名を足し引きする。判定はラベル名の完全一致で、他リポジトリの種別ラベルが同じ命名でなければ既定はOFFのまま（誤って計画ゲートを掛けるより、掛からない方が軽い）。
 - 「承認待ち」を表す専用ラベル `00.check-user`（ユーザーの確認・指示が必要）を計画承認待ちの合図としても使う。
 - 実行形態による承認方法の違い:
@@ -304,7 +308,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 
 グローバルCLAUDE.mdの方針（Playwright等のブラウザ自動操作はトークン消費が大きいため明示指示がある場合のみ実施）に合わせ、実装エージェントによるスクリーンショットの自動取得はデフォルトで行わない。視覚的な確認と承認をPR作成前のゲートにしたいIssueにはラベルで個別に有効化する。
 
-**このラベルは無人実行（GitHub Actions）専用と考えてよい**（#1317）。サブPC実行・ローカル実行では`tailscale serve`で開発サーバーそのものをスマホから開けるため（#1265）、撮影しても実物を触るより得られるものは少ない。「実装を開始」ダイアログも、実行先にGitHub Actionsを選んでいるときだけこのチェックボックスを出す（既にラベルが付いている場合は、外せなくならないよう実行先によらず出す）。「新しいIssueを作成」ダイアログでは常に出す — あちらの「作成+実装開始」は`@claude`コメントによる無人実行の起動しかないため。
+**このラベルは無人実行（GitHub Actions）専用と考えてよい**（#1317）。サブPC実行・ローカル実行では`tailscale serve`で開発サーバーそのものをスマホから開けるため（#1265）、撮影しても実物を触るより得られるものは少ない。「実装を開始」ダイアログも、実行先にGitHub Actionsを選んでいるときだけこのチェックボックスを出す（既にラベルが付いている場合は、外せなくならないよう実行先によらず出す）。
 
 - ラベル `24.screenshot-required` の有無で分岐する。
   - **ラベルなし（デフォルト）**: スクリーンショットの自動取得は行わない。
@@ -322,8 +326,6 @@ Claude Codeのアーティファクト（claude.aiにホストされる自己完
 ローカルセッションのツールで、無人実行（GitHub Actions）からは作れない。「実装を開始」ダイアログは
 **実行先にGitHub Actions以外を選んでいるときだけ**このチェックボックスを出す（既にラベルが付いている
 場合は、外せなくならないよう実行先によらず出す。`visibleStartImplementationOptions`）。
-「新しいIssueを作成」ダイアログでは`24`と同じく常に出す。あちらは作成だけして後からローカルで
-起こす使い方があり、作成時点で実行先が決まらないため。
 
 - ラベル `25.artifact-required` の有無で分岐する。
   - **ラベルなし（デフォルト）**: アーティファクトは作らない。

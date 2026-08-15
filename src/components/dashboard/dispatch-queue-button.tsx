@@ -2,6 +2,7 @@
 
 import { AlertTriangle, ArrowUp, ListOrdered, Loader2, X } from "lucide-react";
 
+import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -17,7 +18,6 @@ import {
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
   summarizeDispatchQueue,
-  summarizeDispatchSessionCapacity,
 } from "@/lib/dispatch/queue-summary";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,10 @@ import { cn } from "@/lib/utils";
  *
  * **並びは払い出し（`claimDispatchJob`）と同じ。** `queuePriority`の降順 → `createdAt`の昇順で、
  * 画面の順番と実際に走る順番が一致する。
+ *
+ * **先頭にホストの様子を出す**（#1567・`dispatch-host-panel.tsx`）。従来はセッションの本数
+ * （`サブPCのセッション 6/12`）しか出ておらず、その6本が何なのかとホストの余力を見るには
+ * `tmux ls`かops-dashboardを開くしかなかった。
  *
  * **「順番待ち」の2行目以降の↑は先頭へ上げる操作**（#1541）。夜にまとめて積んだあと
  * 「これを次に流したい」が出てくるが、キューは積んだ順で固定されていて、取り消して積み直すと
@@ -52,8 +56,6 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
-  // 起動を実際に止めているのはセッション本数の上限（#1361）で、同時実行数では説明できない（#1394）
-  const capacities = summarizeDispatchSessionCapacity(dispatch.hosts);
   const stall = describeDispatchQueueStall(summary, dispatch.hosts);
 
   // 申告しているホストが1台も無ければ、キューという概念自体が無い
@@ -107,32 +109,29 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+      {/*
+        ホストの様子（#1567）を足したぶん縦に伸びるため、`w-96`へ広げて画面からはみ出す
+        ぶんはポップオーバーの中でスクロールさせる。セッション上限（既定12本）まで並ぶと
+        キューの節が画面外へ出る
+      */}
+      <PopoverContent
+        align="end"
+        className="max-h-[70vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto"
+      >
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-medium">実行キュー</p>
           <p className="text-xs text-muted-foreground">{describeDispatchQueueLoad(summary)}</p>
         </div>
 
         {/*
-          セッションの本数と上限（#1394）。**同時実行数の隣に並べて出す。** 名前が似ていて
-          役割が違う2つの上限を別の場所に置くと、どちらが起動を止めているのか読み取れない。
-          申告していない古いpollerのホストはここに出ない（`summarizeDispatchSessionCapacity`）
+          ホストの様子（#1567）。セッション本数と上限（#1394）・リソース使用率・そのホストで
+          動いているセッションを1枚にまとめている。**同時実行数の隣に並べて出す**のは従来と
+          同じ理由で、名前が似ていて役割が違う2つの上限を別の場所に置くと、どちらが起動を
+          止めているのか読み取れないため
         */}
-        {capacities.length > 0 && (
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {capacities.map((capacity) => (
-              <li
-                key={capacity.hostName}
-                className={cn(
-                  "text-xs text-muted-foreground",
-                  capacity.atCapacity && "text-destructive",
-                )}
-              >
-                {formatDispatchHostName(capacity.hostName)}のセッション {capacity.live}/{capacity.max}
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="mt-2">
+          <DispatchHostPanel hosts={dispatch.hosts} sessions={dispatch.sessions} />
+        </div>
 
         {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}
         {stall && (
@@ -200,6 +199,16 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
             失敗の表示をすべて消す（{summary.failed.length}件）
           </Button>
         )}
+        {/*
+          このキューが何を映しているかの但し書き（#1567）。**GitHub Actionsでの無人実行は
+          ここには出ない**（`DispatchJob`を通らずGitHub側で走り、実行中かどうかはIssue一覧の
+          バッジ＝`use-issues-workflow-running.ts`が示す）。同じ「実行」でも経路が別なので、
+          出ていないことを止まっていると読まれないよう画面上で答えておく
+        */}
+        <p className="mt-3 border-t pt-2 text-[11px] text-muted-foreground">
+          このキューはサブPCのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
+        </p>
+
         {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}
       </PopoverContent>
     </Popover>

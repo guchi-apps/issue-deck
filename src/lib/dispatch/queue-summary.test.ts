@@ -6,9 +6,11 @@ import {
   describeDispatchJobWaitReason,
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
+  selectHostSessions,
   summarizeDispatchQueue,
   summarizeDispatchSessionCapacity,
 } from "@/lib/dispatch/queue-summary";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
   return {
@@ -44,6 +46,26 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     crossRepoQuestionCapable: true,
     maxSessions: 12,
     liveSessions: 3,
+    metrics: null,
+    ...overrides,
+  };
+}
+
+function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+  return {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    issueTitle: null,
+    state: "ALIVE",
+    exitStatus: null,
+    firstSeenAt: "2026-08-14T00:00:00.000Z",
+    lastReportedAt: "2026-08-14T00:00:00.000Z",
+    activity: null,
+    activityAt: null,
+    remoteControlUrl: null,
+    previewUrl: null,
     ...overrides,
   };
 }
@@ -341,5 +363,43 @@ describe("cancelableDispatchJobs", () => {
       2,
     );
     expect(cancelableDispatchJobs(summary).map((j) => j.id).sort()).toEqual(["c", "q"]);
+  });
+});
+
+describe("selectHostSessions", () => {
+  it("そのホストのセッションだけを返す", () => {
+    const sessions = [
+      session({ tmuxSessionName: "a" }),
+      session({ tmuxSessionName: "b", host: "mainpc" }),
+    ];
+    expect(selectHostSessions(sessions, "subpc").map((s) => s.tmuxSessionName)).toEqual(["a"]);
+  });
+
+  // 畳んだセッションは24時間残るため、並べると今動いているものが埋もれる。
+  // 異常終了だけは残す（セッションの異常終了はこの一覧を除くとキューのどこにも出ない）
+  it("ALIVEとFAILEDだけを出し、EXITED・GONEは落とす", () => {
+    const sessions = [
+      session({ tmuxSessionName: "alive", state: "ALIVE" }),
+      session({ tmuxSessionName: "failed", state: "FAILED" }),
+      session({ tmuxSessionName: "exited", state: "EXITED" }),
+      session({ tmuxSessionName: "gone", state: "GONE" }),
+    ];
+    expect(selectHostSessions(sessions, "subpc").map((s) => s.tmuxSessionName)).toEqual([
+      "alive",
+      "failed",
+    ]);
+  });
+
+  it("生きているものが先、その中では新しい報告が上", () => {
+    const sessions = [
+      session({ tmuxSessionName: "old", lastReportedAt: "2026-08-14T01:00:00.000Z" }),
+      session({ tmuxSessionName: "failed", state: "FAILED", lastReportedAt: "2026-08-14T09:00:00.000Z" }),
+      session({ tmuxSessionName: "new", lastReportedAt: "2026-08-14T05:00:00.000Z" }),
+    ];
+    expect(selectHostSessions(sessions, "subpc").map((s) => s.tmuxSessionName)).toEqual([
+      "new",
+      "old",
+      "failed",
+    ]);
   });
 });

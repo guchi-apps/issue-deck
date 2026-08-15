@@ -61,6 +61,23 @@ vi.mock("@/hooks/use-account-actions", () => ({
   useAccountActions: () => ({ handleLogout: vi.fn(), handleDeleteAccount: vi.fn() }),
 }));
 
+const onSetRepositoryHidden = vi.fn();
+const onSetRepositoriesHidden = vi.fn();
+
+const repositories = [
+  {
+    id: "repo-1",
+    name: "issue-deck",
+    fullName: "guchi-apps/issue-deck",
+    private: false,
+    archived: false,
+    hasClaudeWorkflow: true,
+    hasLocalStartScript: true,
+    hidden: false,
+    favorite: false,
+  },
+];
+
 function renderScreen() {
   return render(
     <MobileSettingsScreen
@@ -69,6 +86,9 @@ function renderScreen() {
       claudeModel="auto"
       claudeModelAssist="haiku"
       dispatchConcurrency={2}
+      repositories={repositories}
+      onSetRepositoryHidden={onSetRepositoryHidden}
+      onSetRepositoriesHidden={onSetRepositoriesHidden}
       onUpdated={vi.fn()}
     />,
   );
@@ -83,10 +103,10 @@ afterEach(() => {
 });
 
 describe("MobileSettingsScreen", () => {
-  it("PCの設定ダイアログと同じ4区分を一覧に出す（#1539）", () => {
+  it("PCの設定ダイアログと同じ区分を一覧に出す（#1539・#1552）", () => {
     renderScreen();
 
-    for (const label of ["アカウント", "実行設定", "フリート運用", "状態"]) {
+    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     // 一覧の時点では中身を出さない（ドリルダウン式）
@@ -102,5 +122,16 @@ describe("MobileSettingsScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
     expect(screen.getByRole("button", { name: /フリート運用/ })).toBeTruthy();
+  });
+
+  it("表示の区分でもPCと同じリポジトリ一覧を出す（#1552）", () => {
+    renderScreen();
+
+    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+
+    expect(screen.getByText(/1件中/).textContent).toBe("1件中1件を表示中");
+
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
   });
 });

@@ -202,4 +202,18 @@ describe("PullRequestList", () => {
     expect(rows[0].className).not.toContain("border-l-primary");
     expect(rows[1].className).toContain("border-l-primary");
   });
+
+  // 選択の正はURLクエリで、その反映はトランジション（低優先度）で入るため、親から
+  // selectedPullRequestIdが返ってくるのは1テンポあと（#1597。Issue一覧と同じ）。
+  it("押した行は、親から選択中PRが渡ってくる前にハイライトされる", () => {
+    renderList([makePullRequest({ number: 42 }), makePullRequest({ number: 43 })], {
+      onSelectPullRequest: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /#43 PRのタイトル/ }));
+
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0].className).not.toContain("border-l-primary");
+    expect(rows[1].className).toContain("border-l-primary");
+  });
 });

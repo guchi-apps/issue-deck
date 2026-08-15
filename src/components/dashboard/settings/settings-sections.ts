@@ -1,4 +1,4 @@
-import { Activity, Boxes, SlidersHorizontal, UserRound } from "lucide-react";
+import { Activity, Boxes, Eye, SlidersHorizontal, UserRound } from "lucide-react";
 
 /**
  * 設定の区分（#1539）。**唯一の定義がここ**で、PCの左タブとスマホの一覧が同じ配列を読む。
@@ -6,9 +6,19 @@ import { Activity, Boxes, SlidersHorizontal, UserRound } from "lucide-react";
  * 区分は機能の「性質」で割っている。設定値（保存を押すまで効かない）と即時実行
  * （押した瞬間にGitHub Actionsが走る）が同じ画面に混ざっていたことが、
  * 「保存ボタンがどこまで効くのか分からない」という元の問題だった。
+ *
+ * 「表示」（#1552）はそのどちらでもない**ユーザーごとの画面の見え方**で、切り替えた時点で
+ * 即座に効き、GitHub側には何も起こらない。実行設定・フリート運用のどちらへ混ぜても
+ * 区分の説明と食い違うため、別区分にしている。
  */
 export const SETTINGS_SECTIONS = [
   { key: "account", label: "アカウント", icon: UserRound, description: "ログイン中のアカウント" },
+  {
+    key: "display",
+    label: "表示",
+    icon: Eye,
+    description: "画面に出すリポジトリ",
+  },
   {
     key: "execution",
     label: "実行設定",
