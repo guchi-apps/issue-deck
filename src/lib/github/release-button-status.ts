@@ -156,3 +156,27 @@ export function describeReleaseStatusBadge(input: {
 
   return { label: "実施中", tone: "progressing" };
 }
+
+/**
+ * リリース一覧での並び順の優先度を返す（#1495）。**小さいほど上に出す。**
+ * リポジトリ名順のまま並べると、人の操作を待っているものが一覧の途中に埋もれて
+ * 「開いてから探す」必要があるため、`describeReleaseStatusBadge`のトーンと同じ順序
+ * （error → action → progressing → バッジ無し）で手前へ寄せる。
+ *
+ * 失敗（`error`・CI失敗）はマージ待ちと同じく人の対応が要るうえ、より強い通知として
+ * 既にヘッダーのドットの色を変えている（#1059）ため、マージ待ちより上に置く。
+ * 同順位のものは呼び出し側で安定ソートし、元の並び（リポジトリ名順）を保つ。
+ */
+export function releaseAttentionRank(input: {
+  /** リポジトリのリリース状態。未取得ならnull（＝静止扱い） */
+  status: ReleaseButtonStatus | null;
+  /** マージ待ちPRのCI状態。マージ待ちでなければnull */
+  ciState: CiState | null;
+}): number {
+  const { status, ciState } = input;
+
+  if (status == null || status === "idle") return 3;
+  if (ciState === "failure" || status === "error") return 0;
+  if (status === "action_required") return 1;
+  return 2;
+}
