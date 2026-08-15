@@ -24,17 +24,20 @@ export type PullRequestView = {
 export const pullRequestViews: PullRequestView[] = [
   {
     id: "all",
-    label: "全てのPR",
-    title: "全てのプルリクエスト",
-    description: "マージ済み・クローズ済みを含む全てのPull Request",
-    emptyMessage: "Pull Requestはありません。",
+    label: "すべてのPR",
+    // マージ済み・クローズ済みを含めていたが、開いているPRだけに絞った（#1613）。左メニューは
+    // 「いま動いているもの」を見る場所で、履歴の振り返りはGitHub側で足りるため。マージ済みPRは
+    // Issueやブランチ画面のリンクから開けば今までどおり詳細を見られる（#1260）。
+    title: "オープンなプルリクエスト",
+    description: "開いている全てのPull Request（ドラフト・マージ待ちを含む）",
+    emptyMessage: "開いているPull Requestはありません。",
   },
   {
     id: "in-progress",
-    label: "処理中のPR",
-    title: "処理中のプルリクエスト",
+    label: "実行中",
+    title: "実行中のプルリクエスト",
     description: "CIの結果待ちのPull Request（ドラフト・CI状態不明を含む）",
-    emptyMessage: "処理中のPull Requestはありません。",
+    emptyMessage: "実行中のPull Requestはありません。",
   },
   {
     id: "completed",
@@ -46,10 +49,21 @@ export const pullRequestViews: PullRequestView[] = [
 ];
 
 /**
- * `prview`クエリ未指定時のビュー。画面内のリンクから直接PRを開く経路（#1260）は`prview`を
- * 指定しないため、マージ済みでも一覧に載る`all`を既定にしている。
+ * `prview`クエリ未指定時のビュー。3つの中で母集団がいちばん広い`all`を既定にしている。
+ * 画面内のリンクから直接PRを開く経路（#1260）は`prview`を指定しないが、詳細の取得は一覧では
+ * なくPRのidで行うため、`all`がopenだけになっても（#1613）マージ済みPRを開ける。
  */
 export const DEFAULT_PULL_REQUEST_VIEW: PullRequestViewId = "all";
+
+/**
+ * PC左メニュー「Pull Request」セクションに出すビュー（#1613）。
+ * 「完了したPR」は外した。CIが確定したPRは「すべてのPR」にマージ待ちとして並び、
+ * ユーザーがマージするしかないものは「ユーザーの確認待ち」へ出るため、独立した入口を
+ * 持たなくても拾える。`prview=completed`のURLは今までどおり開ける。
+ */
+export const sidebarPullRequestViews: PullRequestView[] = pullRequestViews.filter((view) =>
+  ["all", "in-progress"].includes(view.id),
+);
 
 export const pullRequestViewIcons: Record<PullRequestViewId, LucideIcon> = {
   all: GitPullRequest,

@@ -67,11 +67,11 @@ describe("PullRequestList", () => {
 
   it("PRが無いときはビューに応じた空状態を表示する", () => {
     renderList([]);
-    expect(screen.getByText("処理中のPull Requestはありません。")).toBeTruthy();
+    expect(screen.getByText("実行中のPull Requestはありません。")).toBeTruthy();
 
     cleanup();
     renderList([], { view: "all" });
-    expect(screen.getByText("Pull Requestはありません。")).toBeTruthy();
+    expect(screen.getByText("開いているPull Requestはありません。")).toBeTruthy();
   });
 
   it("リポジトリごとにグループ化し、件数を表示する", () => {

@@ -9,8 +9,8 @@ import {
   groupPullRequestsByRepository,
   canMergeFromDeck,
   mergeWarnings,
+  pullRequestsAwaitingUserMerge,
   requiresUserMerge,
-  scopeForPullRequestView,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
@@ -157,12 +157,13 @@ describe("sortPullRequestsByUpdated", () => {
 });
 
 describe("filterPullRequestsByView", () => {
-  it("allはクローズ済みも含めてそのまま返す", () => {
+  // 「すべてのPR」はマージ済み・クローズ済みを含めるのをやめた（#1613）
+  it("allはopenなPRだけを返す", () => {
     const pullRequests = [
       pullRequest({ number: 1 }),
       pullRequest({ number: 2, state: "closed", merged: true, ciState: "unknown" }),
     ];
-    expect(filterPullRequestsByView(pullRequests, "all")).toEqual(pullRequests);
+    expect(filterPullRequestsByView(pullRequests, "all").map((pr) => pr.number)).toEqual([1]);
   });
 
   it("完了はCIが確定したopenなPRだけを返す", () => {
@@ -210,16 +211,8 @@ describe("filterPullRequestsByView", () => {
   });
 });
 
-describe("scopeForPullRequestView", () => {
-  it("クローズ済みまで取りに行くのは全てのPRビューだけ", () => {
-    expect(scopeForPullRequestView("all")).toBe("all");
-    expect(scopeForPullRequestView("in-progress")).toBe("open");
-    expect(scopeForPullRequestView("completed")).toBe("open");
-  });
-});
-
 describe("computePullRequestNavCounts", () => {
-  it("処理中・完了の件数を数え、全てのPRは件数を出さない", () => {
+  it("実行中・完了の件数を数え、すべてのPRはopenな全件を数える（#1613）", () => {
     const counts = computePullRequestNavCounts(
       [
         pullRequest({ number: 1, ciState: "success" }),
@@ -231,7 +224,7 @@ describe("computePullRequestNavCounts", () => {
       true,
     );
 
-    expect(counts).toEqual({ all: null, "in-progress": 2, completed: 2 });
+    expect(counts).toEqual({ all: 4, "in-progress": 2, completed: 2 });
   });
 
   it("未取得のときはどのビューも件数を出さない", () => {
@@ -244,7 +237,7 @@ describe("computePullRequestNavCounts", () => {
 
   it("取得済みでPRが1件も無ければ0を出す", () => {
     expect(computePullRequestNavCounts([], true)).toEqual({
-      all: null,
+      all: 0,
       "in-progress": 0,
       completed: 0,
     });
@@ -327,6 +320,68 @@ describe("groupPullRequestsByRepository", () => {
       "guchi-apps/issue-deck",
     ]);
     expect(groups[0].pullRequests.map((pr) => pr.number)).toEqual([10, 11]);
+  });
+});
+
+describe("pullRequestsAwaitingUserMerge", () => {
+  // 対応Issueを持たないリリースPRは、これが無いとどの確認待ちにも現れない（#1613）
+  it("対応Issueが確認待ちの一覧に居ないマージ待ちPRだけを返す", () => {
+    const release = pullRequest({
+      number: 100,
+      kind: "release",
+      baseRef: "main",
+      headRef: "develop",
+      linkedIssueNumber: null,
+    });
+    const listed = pullRequest({
+      number: 101,
+      linkedIssueNumber: 1590,
+      linkedIssueCheckReason: "merge",
+      linkedIssueCheckUser: true,
+    });
+    const notListed = pullRequest({
+      number: 102,
+      linkedIssueNumber: 1600,
+      linkedIssueCheckReason: "merge",
+      linkedIssueCheckUser: true,
+    });
+
+    const result = pullRequestsAwaitingUserMerge(
+      [release, listed, notListed],
+      [{ repositoryFullName: "guchi-apps/issue-deck", number: 1590 }],
+    );
+
+    expect(result.map((pr) => pr.number)).toEqual([100, 102]);
+  });
+
+  it("マージ待ちでないPRは返さない", () => {
+    const result = pullRequestsAwaitingUserMerge(
+      [
+        pullRequest({ number: 1, linkedIssueCheckUser: false }),
+        pullRequest({ number: 2, autoMergeEnabled: true, linkedIssueCheckUser: true }),
+        pullRequest({ number: 3, state: "closed", merged: true, linkedIssueCheckUser: true }),
+      ],
+      [],
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  // リポジトリが違えば同じ番号でも別のIssue
+  it("重複の判定はリポジトリと番号の組で行う", () => {
+    const result = pullRequestsAwaitingUserMerge(
+      [
+        pullRequest({
+          number: 5,
+          linkedIssueNumber: 12,
+          linkedIssueCheckReason: "merge",
+          linkedIssueCheckUser: true,
+        }),
+      ],
+      [{ repositoryFullName: "guchi-apps/car-care", number: 12 }],
+    );
+
+    expect(result.map((pr) => pr.number)).toEqual([5]);
   });
 });
 

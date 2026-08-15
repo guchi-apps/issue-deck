@@ -16,13 +16,20 @@ import {
   Star,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
-import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import {
+  navViewIcons,
+  sidebarAttentionNavViews,
+  sidebarIssueNavViews,
+  sidebarQuestionNavViews,
+} from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
+import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -42,6 +49,13 @@ type SidebarNavProps = {
   /** 「ブランチとPRの流れ」を開く（#1455） */
   onSelectFlow: () => void;
   navCounts: Record<NavViewId, number>;
+  /**
+   * 「ユーザーの確認待ち」へ一緒に出す、ユーザーのマージ待ちPRの件数（#1613）。
+   * 対応Issueが同じ一覧に並ぶPRは含まない（`pullRequestsAwaitingUserMerge`）。
+   */
+  checkUserPullRequestCount: number;
+  /** 「ユーザーの作業待ち」の内訳（#1613）。いま実行できるものがあるときだけ強調する */
+  manualStepAttention: ManualStepAttention;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
@@ -71,6 +85,8 @@ export function SidebarNav({
   onSelectPullRequestView,
   onSelectFlow,
   navCounts,
+  checkUserPullRequestCount,
+  manualStepAttention,
   pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -117,103 +133,148 @@ export function SidebarNav({
   const showSelectedRepoSeparator =
     selectedRepositories.length > 0 && unselectedRepositories.length > 0;
 
+  // ユーザーの確認待ちには、対応Issueを持たないマージ待ちPR（develop→mainのリリースPRなど）も
+  // 数に含める（#1613）。一覧側も同じ集合を先頭に出す。
+  const checkUserCount = navCounts["check-user"] + checkUserPullRequestCount;
+
+  /** 要対応・Issue・PRで見た目を揃えるための1行 */
+  function navRow({
+    key,
+    label,
+    icon: Icon,
+    active,
+    onClick,
+    count,
+    highlighted = false,
+    title,
+  }: {
+    key: string;
+    label: string;
+    icon: LucideIcon;
+    active: boolean;
+    onClick: () => void;
+    /** nullなら件数を出さない */
+    count?: number | null;
+    /** 件数バッジをamberで強調するか（人が動くまで進まないものだけ） */
+    highlighted?: boolean;
+    title?: string;
+  }) {
+    return (
+      <li key={key}>
+        <button
+          type="button"
+          onClick={onClick}
+          title={title}
+          className={cn(
+            "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+            active && "bg-accent font-medium",
+          )}
+        >
+          <span className="flex items-center gap-2">
+            <Icon className="size-3.5 text-muted-foreground" />
+            {label}
+          </span>
+          {count !== null && count !== undefined && (
+            <span
+              className={cn(
+                "text-xs text-muted-foreground",
+                // 強調するのは件数バッジだけで、行の背景・ラベル文字・アイコンは通常のまま
+                // 置く（#1443）。行全体を塗ると選択中の行と見分けがつきにくく、他のビューとの
+                // 間で文字色も揃わないため。
+                highlighted &&
+                  "flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-white",
+              )}
+            >
+              {count}
+            </span>
+          )}
+        </button>
+      </li>
+    );
+  }
+
   return (
     <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)} style={style}>
-      <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">全体</h2>
+      {/* 人が動くまで進まないもの（#1613）。見出しを付けず最上段に固定し、上から順に
+          手を動かせば盤面が進む並びにする */}
+      <div className="flex flex-col gap-1">
         <ul className="flex flex-col gap-0.5">
-          {navViews.map((view) => {
-            const Icon = navViewIcons[view.id];
-            // ユーザーの確認待ちが1件以上あるときは、スマホのヘッダー下フィルターと
-            // 同じ配色（amber）で強調する（#742）。強調するのは件数バッジだけで、行の背景・
-            // ラベル文字・アイコンは通常のまま置く（#1443）。行全体を塗ると選択中の行と
-            // 見分けがつきにくく、他のビューとの間で文字色も揃わないため。
-            const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
-            return (
-              <Fragment key={view.id}>
-                {view.id === labelNavViews[0]?.id && (
-                  <li aria-hidden="true">
-                    <Separator className="my-1" />
-                  </li>
-                )}
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => onSelectView(view.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                      activeView === view.id && activePane === "issues" && "bg-accent font-medium",
-                    )}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      {view.label}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-xs text-muted-foreground",
-                        isCheckUserHighlighted &&
-                          "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
-                      )}
-                    >
-                      {navCounts[view.id]}
-                    </span>
-                  </button>
-                </li>
-              </Fragment>
-            );
+          {sidebarAttentionNavViews.map((view) =>
+            navRow({
+              key: view.id,
+              label: view.label,
+              icon: navViewIcons[view.id],
+              active: activeView === view.id && activePane === "issues",
+              onClick: () => onSelectView(view.id),
+              count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
+              // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
+              // あるときだけで、デプロイ待ちしか無い間は強調しない（#1613）。
+              highlighted:
+                view.id === "check-user"
+                  ? checkUserCount > 0
+                  : manualStepAttention.actionable > 0,
+              title:
+                view.id === "manual-step"
+                  ? `いま実行できる: ${manualStepAttention.actionable}件 / 本番反映待ち: ${manualStepAttention.waitingForRelease}件`
+                  : undefined,
+            }),
+          )}
+        </ul>
+
+        <Separator className="my-1" />
+
+        <ul className="flex flex-col gap-0.5">
+          {sidebarQuestionNavViews.map((view) =>
+            navRow({
+              key: view.id,
+              label: view.label,
+              icon: navViewIcons[view.id],
+              active: activeView === view.id && activePane === "issues",
+              onClick: () => onSelectView(view.id),
+              count: navCounts[view.id],
+            }),
+          )}
+          {navRow({
+            key: "flow",
+            label: "ブランチ",
+            icon: GitBranch,
+            active: activePane === "flow",
+            onClick: onSelectFlow,
+            title: "Issue・ブランチ・Pull Requestの関係とマージ先までの流れ",
           })}
+        </ul>
+      </div>
+
+      <div>
+        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Issue</h2>
+        <ul className="flex flex-col gap-0.5">
+          {sidebarIssueNavViews.map((view) =>
+            navRow({
+              key: view.id,
+              label: view.label,
+              icon: navViewIcons[view.id],
+              active: activeView === view.id && activePane === "issues",
+              onClick: () => onSelectView(view.id),
+              count: navCounts[view.id],
+            }),
+          )}
         </ul>
       </div>
 
       <div>
         <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Pull Request</h2>
         <ul className="flex flex-col gap-0.5">
-          {pullRequestViews.map((view) => {
-            const Icon = pullRequestViewIcons[view.id];
-            const count = pullRequestNavCounts[view.id];
-            return (
-              <li key={view.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectPullRequestView(view.id)}
-                  title={view.description}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                    activePane === "pull-requests" &&
-                      activePullRequestView === view.id &&
-                      "bg-accent font-medium",
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-3.5 text-muted-foreground" />
-                    {view.label}
-                  </span>
-                  {count !== null && <span className="text-xs text-muted-foreground">{count}</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-
-      <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">フロー</h2>
-        <ul className="flex flex-col gap-0.5">
-          <li>
-            <button
-              type="button"
-              onClick={onSelectFlow}
-              title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                activePane === "flow" && "bg-accent font-medium",
-              )}
-            >
-              <GitBranch className="size-3.5 text-muted-foreground" />
-              ブランチとPRの流れ
-            </button>
-          </li>
+          {sidebarPullRequestViews.map((view) =>
+            navRow({
+              key: view.id,
+              label: view.label,
+              icon: pullRequestViewIcons[view.id],
+              active: activePane === "pull-requests" && activePullRequestView === view.id,
+              onClick: () => onSelectPullRequestView(view.id),
+              count: pullRequestNavCounts[view.id],
+              title: view.description,
+            }),
+          )}
         </ul>
       </div>
 
