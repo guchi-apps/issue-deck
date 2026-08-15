@@ -12,7 +12,8 @@ import { recordSecretsSyncReport } from "@/lib/secrets-sync-runs";
  * （`POST /api/progress`と同じ理由・同じ値を使う）。
  *
  * **受け取るのは件数と、失敗した項目の名前だけ。** 値そのものも値の長さも受け取らない
- * （長さも手がかりになる）。数値以外で受けるのはリポジトリ名・実行URL・KEY名に限り、
+ * （長さも手がかりになる）。数値以外で受けるのはリポジトリ名・実行URL・KEY名・補足文（`message`。
+ * 同期処理が始まる前に落ちた場合など、件数だけでは何も伝わらないときの理由）に限り、
  * KEY名は`normalizeOnlyKeys`と同じ字種検証を通す。
  *
  * **呼び出し側はこのAPIの失敗でワークフローを止めない**取り決め（`POST /api/progress`と同じ）。
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
     skipped: toCount(payload?.skipped),
     failed: toCount(payload?.failed),
     failedKeys,
+    message: toMessage(payload?.message),
   });
 
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
@@ -61,4 +63,10 @@ export async function POST(request: NextRequest) {
 
 function toCount(value: unknown): number {
   return Number.isInteger(value) && (value as number) >= 0 ? (value as number) : 0;
+}
+
+// 画面にそのまま出るため、長さの上限だけ設ける（値そのものは元々ここに乗らない）
+function toMessage(value: unknown): string | null {
+  if (typeof value !== "string" || value === "") return null;
+  return value.slice(0, 500);
 }

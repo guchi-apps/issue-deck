@@ -127,7 +127,20 @@ export function canStartSecretsSync(
 export function formatSecretsSyncResult(run: SecretSyncRunView): string {
   if (run.status === "QUEUED") return "実行中...";
   if (run.status === "TIMEOUT") {
-    return "結果の報告がありませんでした（GitHub Actionsの実行ログを確認してください）";
+    return run.message ?? "結果の報告がありませんでした（GitHub Actionsの実行ログを確認してください）";
+  }
+
+  // 件数が全て0のFAILEDは「同期処理そのものが始まる前に落ちた」ことを意味し、
+  // 件数の表示だけでは何も伝わらない（ワークフロー未配布・PATの権限不足など）。
+  // その場合はmessageに理由が入っているので、件数の代わりにそれを見せる
+  if (
+    run.status === "FAILED" &&
+    run.message &&
+    run.syncedCount === 0 &&
+    run.skippedCount === 0 &&
+    run.failedCount === 0
+  ) {
+    return run.message;
   }
 
   const counts = `同期=${run.syncedCount} スキップ=${run.skippedCount} 失敗=${run.failedCount}`;
