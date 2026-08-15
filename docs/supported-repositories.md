@@ -51,6 +51,34 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 > done
 > ```
 
+## `claude-review-develop.yml`の配布状況（#1470）
+
+develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
+`claude-review-develop.yml`（本体は`reusable-claude-review-develop.yml`）**だけ**である。
+`risk-check`が機械的に判定し、`auto-merge`が`00.check-user`の付与と`gh pr merge --auto`に
+反映する（[multi-agent/labels.md](multi-agent/labels.md)「自動マージ可否の判定方法」）。
+
+**上の表の「導入済み自動化ワークフロー」列を見れば分かるとおり、このcallerを持つリポジトリは
+少数である。** 2026-08-15時点で持つのは次の3つだけ。
+
+| 配布済み | `issue-deck`（ローカルパス参照）・`dayspan`・`shopping-list` |
+|---|---|
+| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab` |
+
+**未配布のリポジトリでは、develop向けPRは一切自動マージされない。** #1470の時点では
+`00.check-user`も付かなかったため、13本のPRが判定されないまま開いたまま残っていた
+（`dayspan`・`shopping-list`は0本）。この穴は`reusable-issue-labels.yml`の`develop-pr-opened`に
+保険を入れて塞いだ（callerが無ければPR作成時に`00.check-user`を付ける）が、
+**保険が効いても自動マージは効かない**——未配布リポジトリのPRは常にユーザーが手でマージする。
+
+```bash
+# 配置状況の確認
+for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+  gh api "repos/guchi-apps/$r/contents/.github/workflows/claude-review-develop.yml" \
+    --jq .name >/dev/null 2>&1 && echo "$r: あり"
+done
+```
+
 ## `version-tag-check.yml`の配布状況
 
 上の表の「導入済み自動化ワークフロー」列は無人実行（計画〜実装〜レビュー）のワークフローについて
