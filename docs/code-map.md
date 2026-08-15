@@ -288,6 +288,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
+  ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
+  `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ
+  **ブランチの現在SHAがそのPRの`head.sha`と一致する**ものだけを消し、`develop`など名前で
+  保護する。今後のぶんはリポジトリ設定`delete_branch_on_merge`（適用は
+  `scripts/set-delete-branch-on-merge.sh`）が自動で消す。**リモートブランチを消すと無人実行の
+  mode判定が変わる**点を含め、設計は[multi-agent/branching.md](multi-agent/branching.md)。
 - **個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体は`guchi-apps/claude-config`にあり、
   両機は`~/.claude/`側をsymlinkにして同じファイルを見る**（#1190）。issue-deckが持つのは
   「取り残しに気づく手当て」だけで、`scripts/lib/personal-config-sync.sh`の
