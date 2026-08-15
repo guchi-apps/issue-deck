@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   describeReleaseStatusBadge,
+  releaseAttentionRank,
   resolveFailedReleaseWorkflow,
   summarizeReleaseButtonStatus,
   summarizeReleaseStatus,
@@ -355,5 +356,50 @@ describe("describeReleaseStatusBadge", () => {
         ciState: null,
       }),
     ).toEqual({ label: "実施中", tone: "progressing" });
+  });
+});
+
+describe("releaseAttentionRank", () => {
+  it("失敗・マージ待ち・実施中・静止の順に上へ寄せる", () => {
+    const failure = releaseAttentionRank({ status: "error", ciState: null });
+    const ciFailure = releaseAttentionRank({ status: "action_required", ciState: "failure" });
+    const actionRequired = releaseAttentionRank({ status: "action_required", ciState: "success" });
+    const progressing = releaseAttentionRank({ status: "progressing", ciState: null });
+    const idle = releaseAttentionRank({ status: "idle", ciState: null });
+
+    expect(failure).toBe(ciFailure);
+    expect(failure).toBeLessThan(actionRequired);
+    expect(actionRequired).toBeLessThan(progressing);
+    expect(progressing).toBeLessThan(idle);
+  });
+
+  it("状態が取れていないリポジトリは静止と同じ最下位にする", () => {
+    expect(releaseAttentionRank({ status: null, ciState: null })).toBe(
+      releaseAttentionRank({ status: "idle", ciState: null }),
+    );
+  });
+
+  it("同順位のものは安定ソートで元の並びが保たれる", () => {
+    const repositories = [
+      { fullName: "guchi-apps/aide", status: "idle" as const },
+      { fullName: "guchi-apps/asset-manager", status: "action_required" as const },
+      { fullName: "guchi-apps/car-care", status: "idle" as const },
+      { fullName: "guchi-apps/clip-hive", status: "progressing" as const },
+      { fullName: "guchi-apps/dayspan", status: "idle" as const },
+    ];
+
+    const sorted = [...repositories].sort(
+      (a, b) =>
+        releaseAttentionRank({ status: a.status, ciState: null }) -
+        releaseAttentionRank({ status: b.status, ciState: null }),
+    );
+
+    expect(sorted.map((repo) => repo.fullName)).toEqual([
+      "guchi-apps/asset-manager",
+      "guchi-apps/clip-hive",
+      "guchi-apps/aide",
+      "guchi-apps/car-care",
+      "guchi-apps/dayspan",
+    ]);
   });
 });
