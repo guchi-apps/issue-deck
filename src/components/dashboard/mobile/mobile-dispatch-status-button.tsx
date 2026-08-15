@@ -17,6 +17,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
 
 /**
@@ -34,34 +35,29 @@ import { summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
  * 取得口を増やさないという取り決めに従い、渡された場合は自分では取りに行かない
  * （`dispatch-queue-button.tsx`と同じ形）。
  *
+ * **行のタイトルからIssue詳細へ飛べる**（#1625）。押したらシートを閉じてから遷移するのはPCの
+ * ポップオーバーと同じ。遷移はURLを書き換えるだけの`useReferenceNavigation`で足りるため、
+ * **置いた画面からpropsで配ってもらわず自分で呼ぶ**——このボタンはヘッダーを持つ画面すべてに
+ * 置くので、配ると渡し忘れた画面だけ行が押せないという食い違いが生まれる
+ * （`dispatch-issue-title.tsx`が避けたかった状態そのもの）。
+ * ただし**呼ぶのはシートの中身（`SheetBody`）だけ**にしてある。あちらはルーターを要求する
+ * （`useRouter`）ので、常に描かれる側で呼ぶと、このボタンを含む画面のテストがすべて
+ * ルーターのマウントを求められる。開いていないシートの中身はRadixが描かない。
+ *
  * **申告しているホストが1台も無ければ何も出さない**（PCの実行キューのボタンと同じ判定）。
  * ディスパッチを使っていない環境で、押しても空のシートしか出ないアイコンを残さない。
- *
- * **行のタイトルはIssue詳細への導線でもある**（#1625）。押したらシートを閉じてから遷移する
- * （PCのポップオーバー`dispatch-queue-button.tsx`と同じ形）。
  */
 export function MobileDispatchStatusButton({
   dispatch: injected,
-  onOpenIssue,
 }: {
   dispatch?: DispatchStateHandle;
-  /** 行のタイトルからIssue詳細を開く（#1625）。渡さなければタイトルはただの文字列のまま */
-  onOpenIssue?: (issueId: string) => void;
 }) {
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
-  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
   const [open, setOpen] = useState(false);
+  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
 
   if (dispatch.hosts.length === 0) return null;
-
-  // Issueへ飛ぶ操作は、開いたまま後ろの画面だけが変わると何が起きたのか分からないので閉じる
-  const openIssue = onOpenIssue
-    ? (issueId: string) => {
-        setOpen(false);
-        onOpenIssue(issueId);
-      }
-    : undefined;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -77,7 +73,7 @@ export function MobileDispatchStatusButton({
       </SheetTrigger>
       {/*
         ホストの様子とキューを合わせると縦に伸びるため、画面の高さの85%までにして中を
-        スクロールさせる。`svh`なのはiOS SafariのアドレスバーぶんでSheetが画面外へ
+        スクロールさせる。`svh`なのはiOS Safariのアドレスバーぶんでシートが画面外へ
         はみ出さないようにするため
       */}
       <SheetContent side="bottom" className="max-h-[85svh] gap-2 overflow-y-auto p-4 pb-8">
@@ -87,8 +83,34 @@ export function MobileDispatchStatusButton({
             {describeDispatchQueueTitle(summary)}
           </SheetDescription>
         </SheetHeader>
-        <DispatchQueueContent dispatch={dispatch} onOpenIssue={openIssue} />
+        <SheetBody dispatch={dispatch} onClose={() => setOpen(false)} />
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * シートの中身。**開いている間しか描かれない**ので、ここでルーターを要求するフック
+ * （`useReferenceNavigation`）を呼ぶ。閉じている側で呼ぶと、このボタンを置いた画面すべての
+ * テストがルーターのマウントを求めることになる。
+ */
+function SheetBody({
+  dispatch,
+  onClose,
+}: {
+  dispatch: DispatchStateHandle;
+  onClose: () => void;
+}) {
+  const { openIssue } = useReferenceNavigation();
+
+  return (
+    <DispatchQueueContent
+      dispatch={dispatch}
+      // 開いたまま後ろの画面だけが変わると何が起きたのか分からないので、閉じてから遷移する
+      onOpenIssue={(issueId) => {
+        onClose();
+        openIssue(issueId);
+      }}
+    />
   );
 }

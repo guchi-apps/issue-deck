@@ -773,8 +773,6 @@ export function IssueDeckShell({
                   onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
                   onSelectPullRequests={selectPullRequests}
                   onOpenSettings={selectMobileSettings}
-                  /* ヘッダー右上の実行状況の行のタイトルからIssue詳細を開く（#1625） */
-                  onOpenIssue={openIssueUrl}
                 />
               )}
 
