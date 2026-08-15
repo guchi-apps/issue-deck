@@ -428,6 +428,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **警告するだけで起動は止めず、リポジトリが無い環境（Actions・セットアップ前）では
   黙って素通りする。** 設計は
   [multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)。
+- **セッションへ最初に渡す文面は`run-issue-session.sh`が組み立てる。** 渡すのはプロンプト
+  ファイルの中身ではなく「そのファイルを読んで着手せよ」の1文（#1105）と、**概要・オプション・
+  開発環境の3行**（#1559。`scripts/lib/kickoff-prompt.sh`）。**概要は先頭150文字までの抜粋で、
+  本文全文は載せない**（`ps`に出るのを避ける#1405の判断を引き継ぐ）。オプションの日本語名は
+  画面（`src/lib/github/start-implementation.ts`の`START_IMPLEMENTATION_OPTIONS`）と同じもので、
+  ずれは`src/lib/prompts/kickoff-prompt.test.ts`が検出する。設計は
+  [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **エージェントの出力を日本語に揃える指示は、起動フラグとプロンプト本文の二層で持つ**（#1395）。
   文面の正は`scripts/lib/agent-language.sh`で、`run-issue-session.sh`・`start-reviewer.sh`が
   `--append-system-prompt`で渡す。そこを通らない無人実行のために、同じ文面を`.github/prompts/`・
