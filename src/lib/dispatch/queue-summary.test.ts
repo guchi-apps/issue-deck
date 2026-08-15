@@ -18,6 +18,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
     issueTitle: null,
+    issueId: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "QUEUED",
@@ -58,6 +59,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
     issueTitle: null,
+    issueId: null,
     state: "ALIVE",
     exitStatus: null,
     firstSeenAt: "2026-08-14T00:00:00.000Z",
@@ -193,7 +195,7 @@ describe("summarizeDispatchQueue", () => {
   });
 
   /**
-   * #1519。制御ジョブは枠を使わないので数えないが（#1544）、pull型ぶん届くまで最大60秒あり、
+   * #1519。制御ジョブは枠を使わないので数えないが（#1544）、pull型ぶん届くまで最大30秒あり、
    * その間キューのどこにも出ないと「押したのに何も起きない」に見える。
    * **一覧には出すが、数えない**という分け方が壊れていないことを確かめる。
    */

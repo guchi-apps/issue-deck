@@ -11,6 +11,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1468,
     issueTitle: null,
+    issueId: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "SUCCEEDED",

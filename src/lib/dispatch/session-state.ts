@@ -159,6 +159,12 @@ export type DispatchSessionView = {
    * 紛らわしいので入れない。
    */
   issueTitle: string | null;
+  /**
+   * DBキャッシュのIssueのid（#1625）。タイトルと同じく`listDispatchState`が一括で引き当てる。
+   * 行のタイトルからIssue詳細を開くために使い、**引けなければ`null`＝リンクにしない**
+   * （`DispatchJobView.issueId`と同じ扱い）。
+   */
+  issueId: string | null;
   state: DispatchSessionState;
   exitStatus: number | null;
   firstSeenAt: string;
@@ -233,8 +239,8 @@ export function resolveSessionState(params: {
 /**
  * 引き上げ（Issueコメント＋`00.check-user`）を行うか。
  *
- * **`FAILED`へ遷移した時だけ真。** 同じ状態が続く間は偽（pollerは60秒ごとに同じ報告を送ってくるので、
- * 状態だけで判定すると毎分コメントが増える）。`escalatedState`に「どの状態で引き上げ済みか」を
+ * **`FAILED`へ遷移した時だけ真。** 同じ状態が続く間は偽（pollerは1巡ごとに同じ報告を送ってくるので、
+ * 状態だけで判定すると巡のたびにコメントが増える）。`escalatedState`に「どの状態で引き上げ済みか」を
  * 持たせ、それと比べる。
  *
  * 一度復帰して再び落ちた場合（`FAILED` → `ALIVE` → `FAILED`）は改めて引き上げる。
@@ -304,8 +310,8 @@ export type StartingActivityTransition = "none" | "enter" | "leave";
  * **`ALIVE`のときしか動かさない。** 終わったセッションに「まだ開始していない」を書いても
  * 待つ相手がいない（`recordDispatchSessionActivity`が`ALIVE`の行だけを更新するのと同じ理由）。
  *
- * **入り直しは起こさない。** `enter`は`NOT_STARTED`ではない行にだけ返す。pollerは60秒ごとに
- * 同じ報告を送ってくるので、これが無いと毎分コメントが増える（`shouldEscalateSession`と同じ形）。
+ * **入り直しは起こさない。** `enter`は`NOT_STARTED`ではない行にだけ返す。pollerは1巡ごとに
+ * 同じ報告を送ってくるので、これが無いと巡のたびにコメントが増える（`shouldEscalateSession`と同じ形）。
  *
  * **`WAITING_INPUT`等が既に立っている行は上書きしない。** フックが飛んだ＝Claude Codeは
  * 始まっているので、印が消し損ねているだけと見て、フック側の値を信じる。

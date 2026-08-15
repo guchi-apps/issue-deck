@@ -1,6 +1,7 @@
 "use client";
 
 import { ListOrdered } from "lucide-react";
+import { useState } from "react";
 
 import {
   DispatchQueueBadge,
@@ -20,17 +21,37 @@ import { describeDispatchQueueLoad, summarizeDispatchQueue } from "@/lib/dispatc
  *
  * **中身は`dispatch-queue-content.tsx`にあり、スマホのヘッダー（`mobile-dispatch-status-button.tsx`）と
  * 共有する**（#1638）。ここが持つのはトリガーのボタンとポップオーバーの器だけ。
+ *
+ * **そのタイトルはIssue詳細への導線でもある**（#1625）。ここに出ているIssueを開くのに一覧へ
+ * 戻って探し直す必要があった。押したらポップオーバーを閉じてから遷移するので、
+ * **`open`を自分で持つ**（通知ベル`notification-button.tsx`と同じ形）。
  */
-export function DispatchQueueButton({ dispatch: injected }: { dispatch?: DispatchStateHandle }) {
+export function DispatchQueueButton({
+  dispatch: injected,
+  onOpenIssue,
+}: {
+  dispatch?: DispatchStateHandle;
+  /** 行のタイトルからIssue詳細を開く（#1625）。渡さなければタイトルはただの文字列のまま */
+  onOpenIssue?: (issueId: string) => void;
+}) {
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
+  const [open, setOpen] = useState(false);
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
 
   // 申告しているホストが1台も無ければ、キューという概念自体が無い
   if (dispatch.hosts.length === 0) return null;
 
+  // Issueへ飛ぶ操作は、開いたまま後ろの画面だけが変わると何が起きたのか分からないので閉じる
+  const openIssue = onOpenIssue
+    ? (issueId: string) => {
+        setOpen(false);
+        onOpenIssue(issueId);
+      }
+    : undefined;
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -57,7 +78,7 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
         </div>
 
         <div className="mt-2">
-          <DispatchQueueContent dispatch={dispatch} />
+          <DispatchQueueContent dispatch={dispatch} onOpenIssue={openIssue} />
         </div>
       </PopoverContent>
     </Popover>

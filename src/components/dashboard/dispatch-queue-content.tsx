@@ -3,6 +3,7 @@
 import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
+import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
@@ -51,8 +52,19 @@ import { cn } from "@/lib/utils";
  * 出ておらず、何のジョブが積まれているのかがGitHubを開くまで分からなかった。種別チップは
  * 全種別に出す（`実装`／`横断質問`ほか）。**`QUEUED`のときは状態ラベルがどちらも「順番待ち」**に
  * なるため、状態だけでは起動と横断質問を見分けられない。
+ *
+ * **行のタイトルはIssue詳細への導線でもある**（#1625）。ここに出ているIssueを開くのに一覧へ
+ * 戻って探し直す必要があった。**`onOpenIssue`を渡さなければ従来どおり文字列のまま**
+ * （呼び出し側がポップオーバー・シートを閉じてから遷移するかどうかを決められるよう、
+ * ここでは閉じる操作をせずそのまま呼ぶ）。
  */
-export function DispatchQueueContent({ dispatch }: { dispatch: DispatchStateHandle }) {
+export function DispatchQueueContent({
+  dispatch,
+  onOpenIssue,
+}: {
+  dispatch: DispatchStateHandle;
+  onOpenIssue?: (issueId: string) => void;
+}) {
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
   const stall = describeDispatchQueueStall(summary, dispatch.hosts);
   const cancelable = cancelableDispatchJobs(summary);
@@ -79,7 +91,11 @@ export function DispatchQueueContent({ dispatch }: { dispatch: DispatchStateHand
         同じ理由で、名前が似ていて役割が違う2つの上限を別の場所に置くと、どちらが起動を
         止めているのか読み取れないため
       */}
-      <DispatchHostPanel hosts={dispatch.hosts} sessions={dispatch.sessions} />
+      <DispatchHostPanel
+        hosts={dispatch.hosts}
+        sessions={dispatch.sessions}
+        onOpenIssue={onOpenIssue}
+      />
 
       {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}
       {stall && (
@@ -99,12 +115,18 @@ export function DispatchQueueContent({ dispatch }: { dispatch: DispatchStateHand
           </p>
         )}
 
-      <QueueSection title="実行中" jobs={summary.running} onCancel={dispatch.cancel} />
+      <QueueSection
+        title="実行中"
+        jobs={summary.running}
+        onCancel={dispatch.cancel}
+        onOpenIssue={onOpenIssue}
+      />
       <QueueSection
         title="順番待ち"
         jobs={summary.queued}
         onCancel={dispatch.cancel}
         onPrioritize={dispatch.prioritize}
+        onOpenIssue={onOpenIssue}
         showOrder
       />
       {/*
@@ -116,8 +138,14 @@ export function DispatchQueueContent({ dispatch }: { dispatch: DispatchStateHand
         title="送信中の操作"
         note="同時実行数の枠は使わず、先に届きます。"
         jobs={summary.controls}
+        onOpenIssue={onOpenIssue}
       />
-      <QueueSection title="直近の失敗" jobs={summary.failed} onDismiss={dispatch.dismiss} />
+      <QueueSection
+        title="直近の失敗"
+        jobs={summary.failed}
+        onDismiss={dispatch.dismiss}
+        onOpenIssue={onOpenIssue}
+      />
 
       {cancelable.length > 0 && (
         <Button
@@ -206,6 +234,7 @@ function QueueSection({
   onCancel = null,
   onDismiss = null,
   onPrioritize = null,
+  onOpenIssue,
   showOrder = false,
 }: {
   title: string;
@@ -229,6 +258,12 @@ function QueueSection({
    * 独立させている。
    */
   onPrioritize?: ((jobId: string) => Promise<boolean>) | null;
+  /**
+   * 行のタイトルからIssue詳細を開く（#1625）。**すべての節へ渡す**（実行中・順番待ち・
+   * 送信中の操作・直近の失敗）。失敗した行こそIssueを開いて経緯を見たいので、節によって
+   * 押せたり押せなかったりしないようにする。
+   */
+  onOpenIssue?: (issueId: string) => void;
   showOrder?: boolean;
 }) {
   if (jobs.length === 0) return null;
@@ -258,11 +293,17 @@ function QueueSection({
                   <span className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground">
                     {describeDispatchJobKind(job.kind)}
                   </span>
-                  {/* 幅が決まった器（ポップオーバー・シート）に出すので、長いタイトルはホバーで補う */}
-                  <span className="min-w-0 truncate font-medium" title={job.issueTitle ?? undefined}>
-                    #{job.issueNumber}
-                    {job.issueTitle ? ` ${job.issueTitle}` : ""}
-                  </span>
+                  {/*
+                    幅が決まった器（ポップオーバー・シート）に出すので、長いタイトルは
+                    ホバーで補う。タイトルはそのIssueの詳細への導線でもある（#1625）
+                  */}
+                  <DispatchIssueTitle
+                    className="min-w-0"
+                    issueNumber={job.issueNumber}
+                    issueTitle={job.issueTitle}
+                    issueId={job.issueId}
+                    onOpenIssue={onOpenIssue}
+                  />
                 </span>
                 <span
                   className={cn(

@@ -31,6 +31,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1638,
     issueTitle: "スマホ画面のレイアウト改善",
+    issueId: "issue-1638",
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "RUNNING",

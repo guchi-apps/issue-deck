@@ -1033,12 +1033,54 @@ describe("listDispatchState のIssueタイトル解決", () => {
     dispatchJobFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([jobRow()]);
     repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
     issueFindMany.mockResolvedValue([
-      { number: 1519, title: "実行キューの状態を可視化する", repositoryId: "repo-1" },
+      {
+        id: "issue-1519",
+        number: 1519,
+        title: "実行キューの状態を可視化する",
+        repositoryId: "repo-1",
+      },
     ]);
 
     const state = await listDispatchState(NOW);
 
     expect(state.jobs[0].issueTitle).toBe("実行キューの状態を可視化する");
+    // 画面はこのidでIssue詳細を開く（#1625）。番号だけでは飛べない
+    expect(state.jobs[0].issueId).toBe("issue-1519");
+  });
+
+  // セッションの行のタイトルもIssueへの導線になる（#1625）。ジョブと同じ1回の引き当てで賄う
+  it("セッションの行にもタイトルとidを載せる", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-1519",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1519,
+        state: "ALIVE",
+        exitStatus: null,
+        firstSeenAt: NOW,
+        lastReportedAt: NOW,
+        activity: null,
+        activityAt: null,
+        remoteControlUrl: null,
+        previewUrl: null,
+      },
+    ]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+    issueFindMany.mockResolvedValue([
+      {
+        id: "issue-1519",
+        number: 1519,
+        title: "実行キューの状態を可視化する",
+        repositoryId: "repo-1",
+      },
+    ]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.sessions[0].issueTitle).toBe("実行キューの状態を可視化する");
+    expect(state.sessions[0].issueId).toBe("issue-1519");
   });
 
   // 同期前のIssue・GitHub Appを外したリポジトリでは普通に起きる。ここで落とすとキュー全体が消える
@@ -1050,6 +1092,8 @@ describe("listDispatchState のIssueタイトル解決", () => {
     const state = await listDispatchState(NOW);
 
     expect(state.jobs[0].issueTitle).toBeNull();
+    // idも無いので、画面はこの行をリンクにしない（押しても何も起きない行を作らない）
+    expect(state.jobs[0].issueId).toBeNull();
   });
 
   // 別リポジトリの同じ番号を取り違えると、まったく違うタイトルが行に出る

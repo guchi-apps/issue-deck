@@ -29,6 +29,8 @@ type MobileHomeScreenProps = {
   onSelectPullRequests: (view: PullRequestViewId) => void;
   /** 設定画面を開く（#1638。フッターのタブから外し、このヘッダーの歯車が入口になった） */
   onOpenSettings: () => void;
+  /** ヘッダー右上の実行状況の行のタイトルを押したときの遷移（#1625）。Issue詳細を開く */
+  onOpenIssue: (issueId: string) => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -51,6 +53,7 @@ export function MobileHomeScreen({
   onSaveQuickFilter,
   onSelectPullRequests,
   onOpenSettings,
+  onOpenIssue,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -61,7 +64,7 @@ export function MobileHomeScreen({
       */}
       <header className="flex shrink-0 items-center gap-1 border-b py-2 pr-2 pl-4">
         <span className="flex-1 text-base font-semibold">Issue Deck</span>
-        <MobileDispatchStatusButton />
+        <MobileDispatchStatusButton onOpenIssue={onOpenIssue} />
         <button
           type="button"
           onClick={onOpenSettings}

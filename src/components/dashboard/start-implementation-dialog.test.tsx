@@ -7,6 +7,10 @@ import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import {
+  MERGE_CONFIRM_REQUIRED_LABEL,
+  PREVIEW_REQUIRED_LABEL,
+} from "@/lib/github/start-implementation";
 import type { Issue, IssueComment } from "@/types/issue";
 
 const updateIssue = vi.fn();
@@ -70,6 +74,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1248,
     issueTitle: null,
+    issueId: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "QUEUED",
@@ -231,8 +236,8 @@ describe("StartImplementationDialog", () => {
       actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
     });
 
-    // 理由はGitHub Actionsの選択肢の説明として出る（重複して別行に出さない）
-    expect(screen.getByRole("radio", { name: /issue-deckの自動化workflowが見つかりません/ })).not.toBeNull();
+    // 理由は選択肢のグリッドの下に出る（#1623。タイルには収まらないため）
+    expect(screen.getByText(/issue-deckの自動化workflowが見つかりません/)).not.toBeNull();
     expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -374,8 +379,8 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      expect(screen.queryByText("スクリーンショットが必要")).toBeNull();
-      expect(screen.queryByText("開発環境を起動する")).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /開発環境を起動する/ })).not.toBeNull();
     });
 
     it("GitHub Actionsを選ぶとスクリーンショットのオプションが出る", () => {
@@ -384,7 +389,7 @@ describe("StartImplementationDialog", () => {
 
       fireEvent.click(screen.getByRole("radio", { name: /GitHub Actions/ }));
 
-      expect(screen.queryByText("スクリーンショットが必要")).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).not.toBeNull();
     });
 
     // 隠すと、付いてしまったラベルをこのダイアログから外せなくなる
@@ -397,7 +402,7 @@ describe("StartImplementationDialog", () => {
         }),
       });
 
-      expect(screen.queryByText("スクリーンショットが必要")).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).not.toBeNull();
     });
 
     it("新機能のIssueでは「計画が必要」にチェックが入った状態で開き、そのままラベルが付く", async () => {
@@ -407,9 +412,9 @@ describe("StartImplementationDialog", () => {
         issue: makeIssue({ labels: [{ name: "50.feature", color: "0052cc", description: null }] }),
       });
 
-      expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).getAttribute("data-state")).toBe(
-        "checked",
-      );
+      expect(
+        screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+      ).toBe("true");
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       clickStart();
 
@@ -424,9 +429,78 @@ describe("StartImplementationDialog", () => {
         issue: makeIssue({ labels: [{ name: "30.bug", color: "b60205", description: null }] }),
       });
 
-      expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).getAttribute("data-state")).toBe(
-        "unchecked",
+      expect(
+        screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+  });
+
+  // 実行先を上・オプションを下に置き、オプションはアイコン付きのチップで選ばせる（#1623）
+  describe("実行先とオプションの並び（#1623）", () => {
+    it("実行先がオプションより前に描画される", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      const headings = screen
+        .getAllByText(/^(実行先|オプション)$/)
+        .map((element) => element.textContent);
+      expect(headings).toEqual(["実行先", "オプション"]);
+    });
+
+    it("実行先のタイルは短い名前を出し、読み上げには正式名称を残す", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true, localSessionCommand: "start-issue 1248" });
+
+      // 4つ横並びにするとタイルの幅が80px弱しか無いため、出す文字は短縮版にする
+      expect(screen.getByRole("radio", { name: "実装プロンプトをコピー" }).textContent).toBe(
+        "プロンプト",
       );
+      expect(screen.getByRole("radio", { name: "起動コマンドをコピー" }).textContent).toBe("コマンド");
+      expect(screen.getByRole("radio", { name: "GitHub Actions" }).textContent).toBe("Actions");
+    });
+
+    it("選択中の実行先の説明をグリッドの下に出す", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.getByText(/サブPCが取りに来た時点で起動します/)).not.toBeNull();
+
+      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+
+      expect(screen.queryByText(/サブPCが取りに来た時点で起動します/)).toBeNull();
+      expect(screen.getByText(/無人実行のワークフローを起動します/)).not.toBeNull();
+    });
+
+    it("オプションはONにしたものだけ説明を出し、押すとラベルも付く", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      // 何も選んでいないうちは、説明の代わりに使い方だけを出す
+      expect(screen.getByText("オプションを押すとONになり、ここに内容が出ます。")).not.toBeNull();
+
+      fireEvent.click(screen.getByRole("checkbox", { name: /開発環境を起動する/ }));
+
+      expect(screen.getByText(/PR作成前に開発サーバーを起動し/)).not.toBeNull();
+      clickStart();
+
+      await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+      expect(updateIssue.mock.calls[0][0].labels).toContain(PREVIEW_REQUIRED_LABEL);
+    });
+
+    it("もう一度押すとOFFに戻り、ラベルも付けない", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      const chip = screen.getByRole("checkbox", { name: /マージ前に確認が必要/ });
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-checked")).toBe("false");
+
+      clickStart();
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(updateIssue.mock.calls[0][0].labels).not.toContain(MERGE_CONFIRM_REQUIRED_LABEL);
     });
   });
 

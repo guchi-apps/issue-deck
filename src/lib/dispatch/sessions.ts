@@ -37,9 +37,10 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     tmuxSessionName: session.tmuxSessionName,
     repositoryFullName: session.repositoryFullName,
     issueNumber: session.issueNumber,
-    // タイトルの引き当ては`listDispatchState`（jobs.ts）が一括で行う（#1567）。ここで引くと
-    // セッション1件ごとにクエリが増えるうえ、jobs.ts → sessions.ts の依存が逆流する
+    // タイトルとidの引き当ては`listDispatchState`（jobs.ts）が一括で行う（#1567・#1625）。
+    // ここで引くとセッション1件ごとにクエリが増えるうえ、jobs.ts → sessions.ts の依存が逆流する
     issueTitle: null,
+    issueId: null,
     state: session.state as DispatchSessionState,
     exitStatus: session.exitStatus,
     firstSeenAt: session.firstSeenAt.toISOString(),
@@ -59,7 +60,7 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
  * 経路へ流すと、他のセッションが全部消えたことになる。
  *
  * **セッションの行が無ければ何もしない。** フックはpollerより先に飛びうるが、行を作ると
- * `host`・`tmuxSessionName`をフック側が知らないため嘘の値が入る。1巡（既定60秒）待てば
+ * `host`・`tmuxSessionName`をフック側が知らないため嘘の値が入る。1巡（既定30秒）待てば
  * pollerが作るので、取りこぼしても次のフックで載る。
  */
 export async function recordDispatchSessionActivity(params: {
@@ -95,7 +96,8 @@ export async function recordDispatchSessionActivity(params: {
  *
  * **pollerの一括報告を待たずに`ALIVE`を降ろすためだけの入口。** #1311で生きているセッションの
  * あるIssueは起動を押せなくしたため、`tmux kill-session`で畳んだ直後に「畳んだのにまだ押せない」
- * 時間が最大75秒（`sleep`の60秒＋1巡の実処理の約14秒）生まれていた。報告するのは
+ * 時間が最大75秒（当時の`sleep`60秒＋1巡の実処理の約14秒）生まれていた。#1624で既定の間隔を
+ * 30秒へ短くしたぶん縮むが、遅れが残ること自体は変わらない。報告するのは
  * `scripts/run-issue-session.sh`の`cleanup`（`trap ... EXIT HUP TERM`）。
  *
  * **終了コードは受け取らず、`FAILED`にも`EXITED`にもしない。** `tmux kill-session`ではHUPで

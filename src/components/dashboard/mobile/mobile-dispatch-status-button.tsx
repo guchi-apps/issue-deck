@@ -1,6 +1,7 @@
 "use client";
 
 import { ListOrdered } from "lucide-react";
+import { useState } from "react";
 
 import {
   DispatchQueueBadge,
@@ -35,20 +36,35 @@ import { summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
  *
  * **申告しているホストが1台も無ければ何も出さない**（PCの実行キューのボタンと同じ判定）。
  * ディスパッチを使っていない環境で、押しても空のシートしか出ないアイコンを残さない。
+ *
+ * **行のタイトルはIssue詳細への導線でもある**（#1625）。押したらシートを閉じてから遷移する
+ * （PCのポップオーバー`dispatch-queue-button.tsx`と同じ形）。
  */
 export function MobileDispatchStatusButton({
   dispatch: injected,
+  onOpenIssue,
 }: {
   dispatch?: DispatchStateHandle;
+  /** 行のタイトルからIssue詳細を開く（#1625）。渡さなければタイトルはただの文字列のまま */
+  onOpenIssue?: (issueId: string) => void;
 }) {
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+  const [open, setOpen] = useState(false);
 
   if (dispatch.hosts.length === 0) return null;
 
+  // Issueへ飛ぶ操作は、開いたまま後ろの画面だけが変わると何が起きたのか分からないので閉じる
+  const openIssue = onOpenIssue
+    ? (issueId: string) => {
+        setOpen(false);
+        onOpenIssue(issueId);
+      }
+    : undefined;
+
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
           type="button"
@@ -71,7 +87,7 @@ export function MobileDispatchStatusButton({
             {describeDispatchQueueTitle(summary)}
           </SheetDescription>
         </SheetHeader>
-        <DispatchQueueContent dispatch={dispatch} />
+        <DispatchQueueContent dispatch={dispatch} onOpenIssue={openIssue} />
       </SheetContent>
     </Sheet>
   );
