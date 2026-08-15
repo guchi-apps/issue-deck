@@ -15,6 +15,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     id: "job-1",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
+    issueTitle: null,
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "QUEUED",
@@ -167,6 +168,65 @@ describe("summarizeDispatchQueue", () => {
       2,
     );
     expect(summary.failed.map((j) => j.id)).toEqual(["question"]);
+  });
+
+  /**
+   * #1519。制御ジョブは枠を使わないので数えないが（#1544）、pull型ぶん届くまで最大60秒あり、
+   * その間キューのどこにも出ないと「押したのに何も起きない」に見える。
+   * **一覧には出すが、数えない**という分け方が壊れていないことを確かめる。
+   */
+  describe("制御ジョブ（送信中の操作）", () => {
+    it("未完了の制御ジョブをcontrolsへ積んだ順に入れる", () => {
+      const summary = summarizeDispatchQueue(
+        [
+          job({ id: "kill", kind: "KILL", createdAt: "2026-08-14T02:00:00.000Z" }),
+          job({ id: "stop", kind: "INTERRUPT", createdAt: "2026-08-14T01:00:00.000Z" }),
+          job({
+            id: "say",
+            kind: "INSTRUCTION",
+            status: "CLAIMED",
+            createdAt: "2026-08-14T03:00:00.000Z",
+          }),
+        ],
+        2,
+      );
+      expect(summary.controls.map((j) => j.id)).toEqual(["stop", "kill", "say"]);
+    });
+
+    // ここを混ぜると「実行中 3/2」のような数え方になる
+    it("controlsは実行中・順番待ち・件数・まとめて取り消しのどれにも混ざらない", () => {
+      const summary = summarizeDispatchQueue(
+        [job({ id: "stop", kind: "INTERRUPT" }), job({ id: "launch", status: "RUNNING" })],
+        2,
+      );
+      expect(summary.controls.map((j) => j.id)).toEqual(["stop"]);
+      expect(summary.queued).toHaveLength(0);
+      expect(summary.running.map((j) => j.id)).toEqual(["launch"]);
+      expect(summary.activeCount).toBe(1);
+      expect(cancelableDispatchJobs(summary)).toHaveLength(0);
+      expect(describeDispatchQueueLoad(summary)).toBe("実行中 1/2");
+    });
+
+    // 終わった制御ジョブの結果は、そのIssueのセッション表示（issue-session-status.tsx）に出る
+    it("終わった制御ジョブは出さない", () => {
+      const summary = summarizeDispatchQueue(
+        [
+          job({ id: "done", kind: "INTERRUPT", status: "SUCCEEDED" }),
+          job({ id: "failed", kind: "KILL", status: "FAILED" }),
+        ],
+        2,
+      );
+      expect(summary.controls).toHaveLength(0);
+      // 制御ジョブの失敗は「直近の失敗」にも出さない（枠を使わないジョブの結果はIssue側が持つ）
+      expect(summary.failed).toHaveLength(0);
+    });
+
+    // 質問ジョブ（#1294）はセッションを立てず、制御ジョブでもない
+    it("質問ジョブはcontrolsにも入れない", () => {
+      const summary = summarizeDispatchQueue([job({ id: "q", kind: "QUESTION" })], 2);
+      expect(summary.controls).toHaveLength(0);
+      expect(summary.activeCount).toBe(0);
+    });
   });
 });
 

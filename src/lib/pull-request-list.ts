@@ -11,6 +11,12 @@ const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 /** バージョンバンプPRのheadブランチ（`release-develop-to-main.yml`が作る`release/vX.Y.Z`） */
 const VERSION_BUMP_BRANCH_PREFIX = "release/v";
 
+/**
+ * 本番のリリース用ブランチ。`lib/branch-flow.ts`の`MAIN_BRANCH`と同じ値だが、あちらが
+ * こちらをimportしているため定数の向きを逆にできず、ここでも持つ。
+ */
+const MAIN_BRANCH = "main";
+
 /** タイトル・本文中の`#123`形式のIssue参照 */
 const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
 
@@ -27,7 +33,7 @@ export function classifyPullRequest(pullRequest: {
   headRef: string;
 }): PullRequestKind {
   const { baseRef, headRef } = pullRequest;
-  if (baseRef === "main" && headRef === "develop") return "release";
+  if (baseRef === MAIN_BRANCH && headRef === "develop") return "release";
   if (headRef.startsWith(VERSION_BUMP_BRANCH_PREFIX)) return "version-bump";
   if (ISSUE_BRANCH_PATTERN.test(headRef)) return "issue";
   return "other";
@@ -264,6 +270,12 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
  */
 export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   const warnings: string[] = [];
+  // mainへのマージは本番へ出す操作そのもので、押した瞬間にdeploy.ymlが走る。CI通過済みで
+  // 待ちが無いPRは1クリックでマージする既定のままだと、確認なしで本番反映まで進んでしまう。
+  // **警告を1つ返すことで、既存の「警告があれば確認ダイアログを挟む」経路に必ず乗せる**（#1548）。
+  if (pullRequest.baseRef === MAIN_BRANCH) {
+    warnings.push("mainへのマージです。マージすると本番デプロイが走ります。");
+  }
   if (pullRequest.ciState === "failure") {
     warnings.push("CIが失敗しています。");
   } else if (pullRequest.ciState === "pending") {

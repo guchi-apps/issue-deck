@@ -18,7 +18,7 @@ export const PREVIEW_REQUIRED_LABEL = "23.preview-required";
 /** PR作成前に開発サーバーを起動し画面確認・承認を必須にするラベル */
 export const SCREENSHOT_REQUIRED_LABEL = "24.screenshot-required";
 
-/** PR作成前に見た目のアーティファクト（自己完結HTML）を公開させるラベル（#1473） */
+/** 実装着手前に見た目のアーティファクト（自己完結HTML）を公開させるラベル（#1473・#1540） */
 export const ARTIFACT_REQUIRED_LABEL = "25.artifact-required";
 
 /** developへのマージ前に必ずユーザー確認を必須にするラベル */
@@ -80,7 +80,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "artifactRequired",
     label: "アーティファクトで見た目を出す",
     description:
-      "PR作成前に見た目を自己完結HTMLのアーティファクトとして公開し、URLをIssueへ貼ります（セッションが消えた後も残りますが、手で書いた再現であって実物ではありません）",
+      "コードを書き始める前に見た目を自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
     githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
 ];

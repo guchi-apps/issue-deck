@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dispatchHostFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
+const dispatchSessionFindMany = vi.fn();
 const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchJobFindUnique = vi.fn();
 const dispatchJobFindFirst = vi.fn();
 const dispatchJobUpdateMany = vi.fn();
 const dispatchJobCount = vi.fn();
+const dispatchHostFindMany = vi.fn();
+const repositoryFindMany = vi.fn();
+const issueFindMany = vi.fn();
 const appSettingFindUnique = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -21,10 +25,27 @@ vi.mock("@/lib/db", () => ({
       get findUnique() {
         return dispatchHostFindUnique;
       },
+      get findMany() {
+        return dispatchHostFindMany;
+      },
+    },
+    // 実行キューの行に出すIssueタイトルの引き当て（#1519）
+    repository: {
+      get findMany() {
+        return repositoryFindMany;
+      },
+    },
+    issue: {
+      get findMany() {
+        return issueFindMany;
+      },
     },
     dispatchSession: {
       get findFirst() {
         return dispatchSessionFindFirst;
+      },
+      get findMany() {
+        return dispatchSessionFindMany;
       },
     },
     dispatchJob: {
@@ -62,6 +83,7 @@ const {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
+  listDispatchState,
   prioritizeDispatchJob,
   reportDispatchJob,
 } = await import("./jobs");
@@ -853,5 +875,111 @@ describe("prioritizeDispatchJob", () => {
     const result = await prioritizeDispatchJob({ jobId: "missing" });
 
     expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+/**
+ * #1519。実行キューの行に番号しか出ないと、何のジョブが積まれているのかがGitHubを開くまで
+ * 分からない。タイトルはDBのIssueキャッシュから**まとめて**引く。
+ */
+describe("listDispatchState のIssueタイトル解決", () => {
+  function jobRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1519,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      message: null,
+      instruction: null,
+      tmuxSessionName: null,
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    dispatchHostFindMany.mockResolvedValue([]);
+    dispatchSessionFindMany.mockResolvedValue([]);
+    repositoryFindMany.mockResolvedValue([]);
+    issueFindMany.mockResolvedValue([]);
+  });
+
+  it("キャッシュにあるタイトルを行へ載せる", async () => {
+    // 1回目はexpireStaleDispatchJobs、2回目が一覧
+    dispatchJobFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([jobRow()]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+    issueFindMany.mockResolvedValue([
+      { number: 1519, title: "実行キューの状態を可視化する", repositoryId: "repo-1" },
+    ]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.jobs[0].issueTitle).toBe("実行キューの状態を可視化する");
+  });
+
+  // 同期前のIssue・GitHub Appを外したリポジトリでは普通に起きる。ここで落とすとキュー全体が消える
+  it("引けなければnullのまま返す", async () => {
+    dispatchJobFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([jobRow()]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+    issueFindMany.mockResolvedValue([]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.jobs[0].issueTitle).toBeNull();
+  });
+
+  // 別リポジトリの同じ番号を取り違えると、まったく違うタイトルが行に出る
+  it("リポジトリが違う同じ番号を取り違えない", async () => {
+    dispatchJobFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        jobRow(),
+        jobRow({ id: "job-2", repositoryFullName: "guchi-apps/dayspan" }),
+      ]);
+    repositoryFindMany.mockResolvedValue([
+      { id: "repo-1", fullName: REPOSITORY },
+      { id: "repo-2", fullName: "guchi-apps/dayspan" },
+    ]);
+    issueFindMany.mockResolvedValue([
+      { number: 1519, title: "issue-deck側", repositoryId: "repo-1" },
+      { number: 1519, title: "dayspan側", repositoryId: "repo-2" },
+    ]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.jobs.find((job) => job.id === "job-1")?.issueTitle).toBe("issue-deck側");
+    expect(state.jobs.find((job) => job.id === "job-2")?.issueTitle).toBe("dayspan側");
+  });
+
+  // ここはポーリング先（未完了ジョブがある間は5秒間隔）。ジョブ1件ごとに引かない
+  it("ジョブが何件あってもクエリは2本まで、0件なら投げない", async () => {
+    dispatchJobFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        jobRow(),
+        jobRow({ id: "job-2", issueNumber: 1541 }),
+        jobRow({ id: "job-3", issueNumber: 1544 }),
+      ]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+
+    await listDispatchState(NOW);
+    expect(repositoryFindMany).toHaveBeenCalledTimes(1);
+    expect(issueFindMany).toHaveBeenCalledTimes(1);
+
+    vi.clearAllMocks();
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchHostFindMany.mockResolvedValue([]);
+    dispatchSessionFindMany.mockResolvedValue([]);
+    appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
+
+    await listDispatchState(NOW);
+    expect(repositoryFindMany).not.toHaveBeenCalled();
+    expect(issueFindMany).not.toHaveBeenCalled();
   });
 });

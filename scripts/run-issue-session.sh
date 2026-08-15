@@ -55,6 +55,9 @@ source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 # セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
 source "$SCRIPT_DIR/lib/agent-language.sh"
+# キックオフ文面へ差し込む概要・オプション・開発環境（#1559）。
+# shellcheck source=scripts/lib/kickoff-prompt.sh
+source "$SCRIPT_DIR/lib/kickoff-prompt.sh"
 # 本体の作業ツリーの scripts/ が古いままになっていないかの警告（#1274）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
@@ -112,8 +115,22 @@ if [[ -f "$DEV_PID_FILE" ]]; then
   rm -f "$DEV_PID_FILE"
 fi
 
+# PIDファイルを持たない残骸も同じ理由で先に止める（#1524）。前回のセッション中に実装エージェントが
+# 手で起こし直した`pnpm dev`はPIDファイルに載らないため、上の判定では見つからない。掴んだままの
+# ポートを空けないと、この後の`pnpm dev`が`EADDRINUSE`で起動できない。
+#
+# **自分で開発サーバーを起こさない設定のときは触らない。** ポートを空ける必要が無いうえ、
+# その場合に走っているのは人が意図して立てたものである可能性が高い（後始末の`cleanup`側は
+# セッションの終わりなのでこの限りではなく、経路によらず止める）。
+if [[ "$DEV_SERVER_ENABLED" != "0" ]]; then
+  dev_server_stop_by_port "$DEV_PORT" "$PWD" "$DEV_LOG" "セッションの再開" ||
+    echo "警告: #$ISSUE_NUMBER: ポート $DEV_PORT を掴んでいた開発サーバーを停止できませんでした。" >&2
+fi
+
 DEV_PGID=""
 PREVIEW_URL=""
+# 開発サーバーを起動したか（#1559）。キックオフ文面の「開発環境」の書き方を分ける
+DEV_SERVER_STARTED=0
 
 # issue-deckへ報告するための設定値を1つ読む。**環境変数が優先で、無ければ`dispatch.env`。**
 # pollerは`set -a`付きでこのファイルをsourceしてから起動するため、poller経由のセッションでは
@@ -285,7 +302,25 @@ cleanup() {
     echo "#$ISSUE_NUMBER: 開発サーバー（プロセスグループ $DEV_PGID）を停止しています..."
     dev_server_stop_group "$DEV_PGID"
   fi
-  rm -f "$DEV_PID_FILE"
+
+  # **PIDファイルを消してよいのは、そのプロセスが本当に居なくなったときだけ**（#1524）。
+  # 止めきれなかった相手のPIDファイルまで消すと、`reap-dev-servers.sh`はPIDファイルを
+  # 走査するため、以降その孤児は誰の目にも留まらなくなる。
+  if [[ -z "$DEV_PGID" ]] || ! kill -0 "$DEV_PGID" 2>/dev/null; then
+    rm -f "$DEV_PID_FILE"
+  fi
+
+  # PIDファイルを持たない開発サーバーをポートから引いて止める（#1524）。
+  #
+  # **このセッションが起こした1本だけを止めても足りない。** 実装エージェントは画面確認のために
+  # `cd <worktree> && pnpm dev` で起こし直してよいことになっており（プロンプトにそう書いてある）、
+  # そうして起きた開発サーバーはPIDファイルを持たない。セッションを畳んでも誰も止めず、
+  # PIDファイルを走査する`reap-dev-servers.sh`からも見えない。#1523でOOM Killerを起こした
+  # 孤児9本はこの経路で溜まったものが含まれる。
+  #
+  # ポートは「ベース値 + Issue番号」で一意なので、そこから引ける。安全側の判定（cwdが対象の
+  # worktreeか・開発サーバーに見えるか）は scripts/lib/dev-server.sh が持つ。
+  dev_server_stop_by_port "$DEV_PORT" "$PWD" "$DEV_LOG" "セッションの終了"
 
   # tailnetへの公開（#1265）も撤去する。**セッションが落ちても設定だけ残る**ため、
   # ここで外し忘れると次に同じポートを使うセッションが古い相手へ繋がる。
@@ -334,6 +369,7 @@ else
   DEV_PID=$!
   # set -m によりバックグラウンドジョブは新しいプロセスグループを持ち、そのPGIDは先頭プロセスのPIDと一致する。
   DEV_PGID="$DEV_PID"
+  DEV_SERVER_STARTED=1
   echo "$DEV_PID" >"$DEV_PID_FILE"
 
   # tailnetへ出す（#1265）。`tailscale serve`が`localhost:<ポート>`へプロキシする。
@@ -530,27 +566,28 @@ fi
 # - `ps` の出力にIssue本文が丸ごと出るのを避けられる
 #
 # ただし番号とファイルパスだけだと、後からセッションを開いた人には「何の実装だったか」が
-# 分からない（#1405）。そこでタイトルだけをこの1行に載せる。**載せるのはタイトルまでで、
-# 本文は載せない**（`ps`に本文が出るのを避ける上の理由は残っている。本文はプロンプトファイルを
-# 読めば分かる）。
+# 分からない（#1405）。そこでタイトルをこの1行に載せる。
 #
 # タイトルは呼び出し元から引数で受け取らず、**プロンプトファイルから読む**。呼び出し元
 # （start-issue.sh・generic-start-issue.sh）はtmuxへ渡すコマンド文字列にプロンプトファイルの
 # パスしか埋めない方針で、Issue由来のテキストをそこへ持ち込まないため。
-# `- タイトル: `の行はissue-deck用（scripts/prompts/implementation-agent.md）と汎用
-# （scripts/prompts/generic-implementation-agent.md）の両テンプレートで共通なので、
-# どちらのランチャー経由でも同じ処理で取れる。**読めなければタイトル無しの従来の文面へ落とす**
-# （書式が変わってもセッションの起動は止めない）。
-ISSUE_TITLE=""
-if [[ -f "$PROMPT_FILE" ]]; then
-  ISSUE_TITLE="$(sed -n 's/^- タイトル: *//p' "$PROMPT_FILE" | head -n 1)"
-fi
+# **読めなければタイトル無しの従来の文面へ落とす**（書式が変わってもセッションの起動は止めない）。
+ISSUE_TITLE="$(kickoff_prompt_field "$PROMPT_FILE" "タイトル")"
 
 if [[ -n "$ISSUE_TITLE" ]]; then
   ISSUE_LABEL="Issue #$ISSUE_NUMBER「$ISSUE_TITLE」"
 else
   ISSUE_LABEL="Issue #$ISSUE_NUMBER"
 fi
+
+# タイトルの次に、**画面を見たときに分かるようにするための事実**を足す（#1559）。
+# 概要・選択されたオプション（21〜25のラベル）・開発環境の3行で、取れたものだけが載る。
+#
+# **本文は全文を載せない。** `ps`にIssue本文が丸ごと出るのを避けるという#1405の理由は残るため、
+# 概要は先頭150文字までの抜粋に限る（`scripts/lib/kickoff-prompt.sh`）。全文が要るときは
+# プロンプトファイルを読む、という前提は変えない。
+KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
+  "$PROMPT_FILE" "$DEV_PORT" "$PREVIEW_URL" "$DEV_SERVER_STARTED" || true)"
 
 # 畳んだセッションを前回の続きから再開する（#1541）。
 #
@@ -589,6 +626,12 @@ else
   KICKOFF_PROMPT="${ISSUE_LABEL}の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
 fi
 
+# 3行は**どちらの文面にも同じものを足す**。再開したセッションでも、画面を見たときに分かる
+# ようにしたいという目的は変わらない。
+if [[ -n "$KICKOFF_CONTEXT" ]]; then
+  KICKOFF_PROMPT+=$'\n\n'"$KICKOFF_CONTEXT"
+fi
+
 # 貼り直し用に、渡すプロンプトを起動前に必ず表示しておく。起動直後のセッションが何も始めない
 # 場合（初回起動時のフォルダ信頼確認など、こちらから制御できない要因で失われうる）に、
 # ここからコピーすれば実装を始められる。
@@ -596,8 +639,10 @@ echo
 if [[ "$RESUME_CONVERSATION" == "1" ]]; then
   echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（--continue）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
 fi
-echo "#$ISSUE_NUMBER: セッションへ次の1行を渡します。もし起動直後に何も始まらなければ、この行を貼り付けてください。"
-echo "  $KICKOFF_PROMPT"
+echo "#$ISSUE_NUMBER: セッションへ次の文面を渡します。もし起動直後に何も始まらなければ、これを貼り付けてください。"
+# 概要・オプション・開発環境（#1559）を足したぶん複数行になる。**インデントを付けない。**
+# そのまま選択してコピーしたものが、余計な空白なしで貼り付けられるようにする
+echo "$KICKOFF_PROMPT"
 echo
 
 # 権限モード（#1205）。既定は `auto`。

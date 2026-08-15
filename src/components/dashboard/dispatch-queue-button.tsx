@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
+  describeDispatchJobKind,
   describeDispatchJobStatus,
   isCancelableDispatchJobStatus,
   type DispatchJobView,
@@ -41,6 +42,11 @@ import { cn } from "@/lib/utils";
  * **「直近の失敗」の×は取り消しではなく表示を消す操作**（#1479）。終了したジョブは24時間
  * 出続けるため、対処が済んだ失敗を畳めないと、新しい失敗が古いものに埋もれる。消しても
  * DBの行と失敗理由は残る（`dismissDispatchJob`）。
+ *
+ * **行はIssueのタイトルと種別を主役にする**（#1519）。従来は`issue-deck #1519`と番号しか
+ * 出ておらず、何のジョブが積まれているのかがGitHubを開くまで分からなかった。種別チップは
+ * 全種別に出す（`実装`／`横断質問`ほか）。**`QUEUED`のときは状態ラベルがどちらも「順番待ち」**に
+ * なるため、状態だけでは起動と横断質問を見分けられない。
  */
 export function DispatchQueueButton({ dispatch: injected }: { dispatch?: DispatchStateHandle }) {
   const own = useDispatchState(injected === undefined);
@@ -76,13 +82,28 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
           type="button"
           className="relative flex items-center gap-1 rounded-md p-1.5 hover:bg-accent"
           aria-label="実行キュー"
-          title={`実行キュー（${describeDispatchQueueLoad(summary)}）`}
+          // 失敗を文言にも出す（#1519）。ドットだけでは「何かある」までしか伝わらない
+          title={`実行キュー（${describeDispatchQueueLoad(summary)}${
+            summary.failed.length > 0 ? `・失敗 ${summary.failed.length}` : ""
+          }）`}
         >
           <ListOrdered className="size-4" />
           {summary.activeCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
               {summary.activeCount}
             </span>
+          )}
+          {/*
+            動いてはいないが、見るべき失敗が残っている状態（#1519）。件数バッジは
+            `activeCount`にしか出ないため、**失敗だけが残っているとボタンが無印**になり、
+            開くまで気づけなかった。件数ではなくドットにしているのは、押して確かめてほしい
+            のが「何件あるか」ではなく「何が失敗したか」のため
+          */}
+          {summary.activeCount === 0 && summary.failed.length > 0 && (
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-destructive"
+            />
           )}
         </button>
       </PopoverTrigger>
@@ -121,13 +142,15 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
           </p>
         )}
 
-        {summary.activeCount === 0 && summary.failed.length === 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            積まれているジョブはありません。Issueの「実装を開始」から積むと、上限
-            {summary.concurrency === null ? "" : `（${summary.concurrency}本）`}
-            まで並行し、あとは順番に流れます。
-          </p>
-        )}
+        {summary.activeCount === 0 &&
+          summary.failed.length === 0 &&
+          summary.controls.length === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              積まれているジョブはありません。Issueの「実装を開始」から積むと、上限
+              {summary.concurrency === null ? "" : `（${summary.concurrency}本）`}
+              まで並行し、あとは順番に流れます。
+            </p>
+          )}
 
         <QueueSection title="実行中" jobs={summary.running} onCancel={dispatch.cancel} />
         <QueueSection
@@ -136,6 +159,16 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
           onCancel={dispatch.cancel}
           onPrioritize={dispatch.prioritize}
           showOrder
+        />
+        {/*
+          まだ届いていない停止・セッション終了・追加指示（#1519）。**上の実行中・順番待ちとは
+          数え方が違う**（同時実行数の枠を使わず、枠外で先に払い出される）ので、注記を添えて
+          別の節にする。ここを混ぜると「実行中 3/2」になる（#1544）
+        */}
+        <QueueSection
+          title="送信中の操作"
+          note="同時実行数の枠は使わず、先に届きます。"
+          jobs={summary.controls}
         />
         <QueueSection title="直近の失敗" jobs={summary.failed} onDismiss={dispatch.dismiss} />
 
@@ -175,6 +208,7 @@ export function DispatchQueueButton({ dispatch: injected }: { dispatch?: Dispatc
 
 function QueueSection({
   title,
+  note = null,
   jobs,
   onCancel = null,
   onDismiss = null,
@@ -182,6 +216,8 @@ function QueueSection({
   showOrder = false,
 }: {
   title: string;
+  /** 節の見出しの下に出す補足（#1519）。「送信中の操作」が枠を使わないことの説明に使う */
+  note?: string | null;
   jobs: DispatchJobView[];
   /**
    * 省略すると取り消しボタンを出さない（終わったジョブ）。渡した場合も、**取り消せる状態の
@@ -207,6 +243,7 @@ function QueueSection({
   return (
     <div className="mt-3">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      {note && <p className="text-[11px] text-muted-foreground/80">{note}</p>}
       <ul className="mt-1 flex flex-col gap-1">
         {jobs.map((job, index) => {
           // 種別を必ず渡す（#1294。省略すると種別が増えたときに文言が黙って「起動しました」になる）
@@ -219,8 +256,20 @@ function QueueSection({
                 </span>
               )}
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">
-                  {job.repositoryFullName.split("/")[1]} #{job.issueNumber}
+                {/*
+                  1行目は**種別・番号・タイトル**（#1519）。番号だけでは何のジョブか分からず、
+                  タイトルは行の中で最も幅が要るのでここへ置く。**引けなければ番号だけ**に戻す
+                  （「（タイトル不明）」のような穴埋めを出すと、実際のタイトルと紛らわしい）
+                */}
+                <span className="flex min-w-0 items-baseline gap-1">
+                  <span className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground">
+                    {describeDispatchJobKind(job.kind)}
+                  </span>
+                  {/* ポップオーバーは`w-80`固定なので、長いタイトルはホバーで補う */}
+                  <span className="min-w-0 truncate font-medium" title={job.issueTitle ?? undefined}>
+                    #{job.issueNumber}
+                    {job.issueTitle ? ` ${job.issueTitle}` : ""}
+                  </span>
                 </span>
                 <span
                   className={cn(
@@ -228,12 +277,22 @@ function QueueSection({
                     status.tone === "error" && "text-destructive",
                   )}
                 >
-                  {formatDispatchHostName(job.targetHost)}・{status.label}・
-                  {formatRelativeDate(job.createdAt)}
+                  {job.repositoryFullName.split("/")[1]}・{formatDispatchHostName(job.targetHost)}・
+                  {status.label}・{formatRelativeDate(job.createdAt)}
                 </span>
                 {/* 失敗理由はホバーではなく本文で出す（主な用途が外出先のスマホ） */}
                 {job.message && (
                   <span className="block whitespace-normal text-muted-foreground">{job.message}</span>
+                )}
+                {/*
+                  追加指示の本文（#1012）。**届くまで最大1分あるので、何を送ったのかが見えないと
+                  送り直してよいか判断できない。** Issue詳細のセッション表示と同じ書式で出す
+                  （`issue-session-status.tsx`）
+                */}
+                {job.instruction && (
+                  <span className="block whitespace-normal text-muted-foreground">
+                    「{job.instruction}」
+                  </span>
                 )}
               </span>
               {onPrioritize && index > 0 && (

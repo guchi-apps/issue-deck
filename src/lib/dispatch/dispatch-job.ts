@@ -140,6 +140,17 @@ export type DispatchJobView = {
   id: string;
   repositoryFullName: string;
   issueNumber: number;
+  /**
+   * Issueのタイトル（#1519）。**DBのIssueキャッシュから引けたときだけ入る。**
+   *
+   * 実行キューの行に番号しか出ないと、番号を覚えていないIssueはGitHubを開くまで何のジョブか
+   * 分からない。夜にまとめて積むと順番待ちが並ぶため、「これを先頭へ上げる」（#1541）を
+   * 押す判断がその場でできなかった。
+   *
+   * **引けなくても`null`で通す**（同期前・GitHub Appを外したリポジトリ）。タイトルが無いことを
+   * 理由に行を落としたり例外にしたりすると、キュー全体が見えなくなる方が害が大きい。
+   */
+  issueTitle: string | null;
   targetHost: string;
   /** 何をするジョブか（#1332）。省略しない（画面が起動ジョブと制御ジョブを取り違えないため） */
   kind: DispatchJobKind;
@@ -446,6 +457,31 @@ export const SESSION_CONTROL_LABELS = {
     failed: "追加指示を送れませんでした",
   },
 } as const satisfies Record<SessionControlJobKind, Record<string, string>>;
+
+/**
+ * ジョブの種別の呼び方（#1519）。実行キューの行に出すチップの文言。
+ *
+ * **すべての種別に文言を持たせる。** 既定の`LAUNCH`だけ無印にすると「チップが無い＝実装」という
+ * 暗黙のルールを覚える必要が出る。状態ラベル（`describeDispatchJobStatus`）だけでは、
+ * **`QUEUED`のときに`LAUNCH`と`CROSS_REPO_QUESTION`がどちらも「順番待ち」**になり区別が付かない。
+ *
+ * 制御ジョブは`SESSION_CONTROL_LABELS`の`action`（＝押したボタンの文言）をそのまま使う。
+ * 押したボタンとキューに出る言葉が違うと、それが自分の押したものかどうか分からなくなる。
+ */
+export function describeDispatchJobKind(kind: DispatchJobKind): string {
+  switch (kind) {
+    case "LAUNCH":
+      return "実装";
+    case "QUESTION":
+      return "質問";
+    case "CROSS_REPO_QUESTION":
+      return "横断質問";
+    case "INTERRUPT":
+    case "KILL":
+    case "INSTRUCTION":
+      return SESSION_CONTROL_LABELS[kind].action;
+  }
+}
 
 /**
  * セッションを操作できない理由（#1332）。**画面にそのまま出す前提**で、

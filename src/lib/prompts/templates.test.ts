@@ -99,6 +99,23 @@ describe("buildImplementationPrompt", () => {
     expect(prompt).toContain("スクリーンショットを取得し、ユーザーの承認を得てから");
   });
 
+  // #1540: 実装が済んでから見せると、見た目がNGだったときに実装がやり直しになる
+  it("25.artifact-requiredが無ければアーティファクトは不要と明記する", () => {
+    expect(buildImplementationPrompt(BASE)).toContain("アーティファクトの作成は不要です");
+  });
+
+  it("25.artifact-requiredが付いていれば実装着手前の公開と承認を求める", () => {
+    const prompt = buildImplementationPrompt({
+      ...BASE,
+      labels: [{ name: "25.artifact-required" }],
+    });
+    expect(prompt).toContain("**コードを書き始める前に**");
+    expect(prompt).toContain("見た目の承認を得てから実装に入ってください");
+    // PR作成前ではないことと、Plan modeとの前後関係を落とさない
+    expect(prompt).toContain("**Plan modeに入る前に公開**");
+    expect(prompt).toContain("実装後にPR本文へURLを貼る必要はありません");
+  });
+
   it("ラベルを並べる（無ければ「(なし)」）", () => {
     expect(buildImplementationPrompt({ ...BASE, labels: [] })).toContain("(なし)");
     expect(

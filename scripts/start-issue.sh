@@ -85,6 +85,10 @@ source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
 # 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
 # shellcheck source=scripts/lib/prompt-context.sh
 source "$ROOT/scripts/lib/prompt-context.sh"
+# worktreeを作り直す前に開発サーバーを止める（#1524）。止め方は run-issue-session.sh・
+# reap-dev-servers.sh・cleanup-worktrees.sh と共有する。
+# shellcheck source=scripts/lib/dev-server.sh
+source "$ROOT/scripts/lib/dev-server.sh"
 
 # セッションと一緒に動くもの（run-issue-session.sh・session-notify.sh・プロンプトのひな形）を
 # どこから読むかを決める（#1438）。本体の作業ツリーが単に古いだけの場合は origin/develop の
@@ -259,6 +263,16 @@ remove_worktree() {
     exit 1
   fi
   echo "#$n: 既存のworktree・ブランチを削除しています..."
+  # **消す前に開発サーバーを止める**（#1524）。作り直しの判定（worktree_session_running）は
+  # PIDファイルと`run-issue-session.sh`のプロセスしか見ないため、実装エージェントが手で
+  # 起こし直した`pnpm dev`はすり抜ける。消えたworktreeを指したまま走り続け、次の起動は
+  # ポートを掴まれて`EADDRINUSE`になる（#1523の孤児）。
+  local dev_port
+  dev_port="$(dev_server_port_for_issue "$n" || true)"
+  if [[ -n "$dev_port" ]]; then
+    dev_server_stop_by_port "$dev_port" "$dir" "$WORKTREE_BASE/.dev-servers/issue-$n.log" "worktreeの作り直し" ||
+      echo "警告: #$n: ポート $dev_port を掴んでいた開発サーバーを停止できませんでした。" >&2
+  fi
   if ! git -C "$ROOT" worktree remove "$dir"; then
     echo "Error: worktreeの削除に失敗しました: $dir" >&2
     exit 1
@@ -536,21 +550,31 @@ else:
         "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
     )
 
-# 見た目のアーティファクト（#1473）。**同じ文面が scripts/generic-start-issue.sh と
+# 見た目のアーティファクト（#1473・#1540）。**出すのは実装着手前**（#1540）。実装が済んでから
+# 見せる形だと、見た目がNGだったときに実装がまるごとやり直しになるため、ゲートをPR作成前から
+# 実装着手前へ移した。実装後の見た目は23.preview-required（実物）が受け持つ。
+# **同じ文面が scripts/generic-start-issue.sh と
 # src/lib/prompts/build-implementation-prompt.ts にもある。** 起動経路によって指示が
 # 変わらないよう、変えるときは3か所そろえる（scripts/lib/agent-language.sh と同じ構造）。
 if "25.artifact-required" in label_names:
     artifact_instructions = (
-        "このIssueには`25.artifact-required`ラベルが付いています。実装・テストが完了したら、"
-        "変更した画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLをIssueコメントと"
-        "PR本文の「確認方法」に貼ってください。\n\n"
-        "- **アーティファクトは手で書いた再現であって実物ではありません。** 実装との差異は"
-        "開発サーバーの実画面で必ず確認し、アーティファクトの承認だけをもって「実装が正しい」と"
-        "扱わないでください。この但し書きはアーティファクト本文の先頭にも書きます\n"
+        "このIssueには`25.artifact-required`ラベルが付いています。**コードを書き始める前に**、"
+        "変更する画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLを提示して"
+        "見た目の承認を得てから実装に入ってください。\n\n"
+        "- **アーティファクトは実装前の見た目案であって実物ではありません。** 承認の意味は"
+        "「この見た目で作ってよい」までで、実装が正しいことの確認にはなりません。実装後の見た目は"
+        "開発サーバーの実画面で確かめてください。この但し書きはアーティファクト本文の先頭にも書きます\n"
+        "- `21.plan-required`が併用されている場合は、**Plan modeに入る前に公開**し、URLを計画本文へ"
+        "含めてください（Plan modeではファイルを書けないためアーティファクトを作れません）。"
+        "計画と見た目を1回のやり取りで承認できます\n"
+        "- `21.plan-required`が付いていない場合は、アーティファクトの提示そのものが承認ゲートです。"
+        "承認可否は`AskUserQuestion`で尋ね（フックが自動で`00.check-user`を付け、答えた時点で"
+        "外れます。#1417）、URLはIssueコメントにも残してください\n"
+        "- 実装後にPR本文へURLを貼る必要はありません。出来上がった画面の確認は開発サーバー"
+        "（`23.preview-required`）の役割です\n"
         "- アーティファクトは既定で非公開です。共有するかどうかを決めるのはユーザーです\n"
         "- 開発サーバーのURLと違い、セッションが終了した後も残ります。スマホなど別端末からの確認に向きます\n"
-        "- 承認可否を尋ねる場合は`AskUserQuestion`を使ってください（フックが自動で`00.check-user`を"
-        "付け、答えた時点で外れます。#1417）"
+        "- アーティファクトを作れるのはローカルセッションだけです（無人実行では作成できません）"
     )
 else:
     artifact_instructions = (

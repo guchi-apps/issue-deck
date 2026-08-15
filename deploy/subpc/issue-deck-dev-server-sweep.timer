@@ -1,0 +1,23 @@
+[Unit]
+# issue-deck-dev-server-sweep.service を定期的に発火させる（#1525）。
+Description=issue-deck orphan dev server sweep timer
+Documentation=https://github.com/guchi-apps/issue-deck/blob/develop/docs/multi-agent/local-quick-start.md
+
+[Timer]
+# **間隔はここに持たせる**（pollerとは逆）。あちらの間隔は「画面のボタンを押してから起動が
+# 始まるまでの待ち時間」を決める調整対象なので設定ファイルに置いたが、こちらは
+# 掃除スクリプト側の猶予（既定30分）が誤爆を防いでおり、実行間隔は当たりを付ける対象ではない。
+#
+# 起動から15分空けるのは、再起動直後にセッションが立ち上がりきる前の掃除を避けるため
+# （猶予との二重の保険）。
+OnBootSec=15min
+OnUnitActiveSec=1h
+
+# ホストが止まっていて発火を逃した分は、次の起動時に1度だけ流す。
+Persistent=true
+
+# 秒単位で正確に走る必要は無い。他のタイマーとまとめて起こしてもらう。
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

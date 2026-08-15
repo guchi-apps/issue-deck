@@ -145,6 +145,29 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 `run-issue-session.sh`のtrapが通り、上の#1321の即時報告が`ALIVE`を降ろす。
 **VPS上のtmuxセッションは対象外**（pollerはサブPCにしか居ない）。
 
+#### 「停止」と「セッションを閉じる」の使い分け（#1557）
+
+画面のボタンは`INTERRUPT`が「停止」、`KILL`が「セッションを閉じる」で、**止まる範囲が違う**。
+
+| | 停止（`INTERRUPT`） | セッションを閉じる（`KILL`） |
+|---|---|---|
+| 実体 | `tmux send-keys C-c`（端末で Ctrl+C を1回押すのと同じ） | `tmux kill-session` |
+| 止まるもの | 今動いている処理（生成中の応答・実行中のツール）だけ | tmuxセッションごと。Claude Codeのプロセスも終わる |
+| 終わった後 | セッションは生きたまま入力待ちに戻る。**追加指示（#1012）で続けられる** | 操作する相手が居なくなる。画面からは消え、状態ファイルも消える |
+| worktree・ブランチ | 残る | 残る（畳むのはtmuxセッションだけ） |
+| もう一度起動したら | ― | worktreeを作り直していなければ`--continue`で**前回の会話の続き**から始まる（[session idは持たず、`--continue`で再開する](#session-idは持たず--continueで再開する1541)） |
+| 確認ダイアログ | 無し（押すと即座に積む） | 有り |
+
+使い分けは「**間違った方向へ進んでいるので割り込んで直したい**」なら停止、「**このセッションはもう
+用が無い（別のことをやらせたい・本数の上限を空けたい）**」なら閉じる。停止したセッションは
+入力待ちのまま残るため、そのまま放置すると本数の枠（#1361）を占め続ける。
+
+**どちらもコミットはしない。** 作業中の変更はworktreeに残るだけで、閉じても消えないかわりに
+自動では保存されない。
+
+この違いは画面にも出している（停止と閉じるが並んでいるときだけ添える1行と、閉じるの確認
+ダイアログ）。**ボタンの文言だけでは押すまで分からず、実際に問われた**（#1557）。
+
 ### 走っているセッションへ追加指示を送る（#1012）
 
 **#1176 Phase 3 の本体。** セッションを保持したまま動かす価値は「承認・CI失敗を既存セッションへ
@@ -415,6 +438,22 @@ pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッション
 判定の中身と、そもそもなぜ孤児が生まれるのかは
 [開発サーバーは終了時に止め、残った分は回収する](local-quick-start.md#開発サーバーは終了時に止め残った分は回収する)を参照。
 
+### 孤児の定期掃除だけはpollerの外に置く（#1525）
+
+上の回収は**pollerの1巡に相乗りしているぶん、pollerごと止まると一緒に止まる**。入口が
+`.dev-servers/issue-<番号>.pid`だけなので、PIDファイルが残らなかった孤児（SIGKILL・ホストの
+強制再起動・worktreeごと削除）も取りこぼす。実際に2026-08-15、孤児9本が約5〜6GBを占有して
+ホストがOOMに至った（#1523）。
+
+そこで`scripts/sweep-orphan-dev-servers.sh`を**独立したsystemd timer**（既定1時間ごと・
+`deploy/subpc/issue-deck-dev-server-sweep.timer`）から呼ぶ。入口は`ss -tlnp`で、**実際にポートを
+掴んでいるプロセス**から入るためPIDファイルに依存しない。
+
+**ここは常駐プロセスを増やさない原則の例外にあたる**が、増えるのは常駐ではなく1時間に1度・
+数百ミリ秒で終わるoneshotで、かつ**pollerが落ちている場合を拾うことがこの段の存在意義**なので、
+pollerに相乗りさせては目的を果たせない。猶予は`DEV_SERVER_ORPHAN_GRACE_MINUTES`（既定30・0で無効）。
+判定の中身は[定期掃除](local-quick-start.md#定期掃除scriptssweep-orphan-dev-serverssh1525)を参照。
+
 **`pane_dead`だけで異常終了と判断しない。** `start-issue.sh`は`remain-on-exit failed`（tmux 3.2以降）を
 試して失敗したら`on`へ落とすため、tmux 3.0aの環境では**正常終了でもペインが残る**。終了コードが非0の
 ときだけ異常終了として扱い、Issueコメントと`00.check-user`で引き上げる。消失は人が畳んだ場合と
@@ -596,10 +635,23 @@ issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](gener
 サブPCはissue-deck専用機ではなく、他リポジトリの作業セッションも並ぶため。
 
 **この切り分けは#1217のセッション報告でも守る。** 報告に載せるのは`<リポジトリ名>-issue-<番号>`に
-一致し、かつ`local-repos.conf`から`owner/repo`を**一意に**解決できたセッションだけで、ホスト上の
-無関係なtmuxセッションは送らない。セッション名にownerが含まれないため、別ownerに同名のリポジトリが
-あるとどちらのIssueか決められない。**曖昧なときは送らない**（当てずっぽうに選ぶと、無関係なIssueへ
-引き上げのコメントを投稿することになる）。
+一致し、かつ`owner/repo`を解決できたセッションだけで、ホスト上の無関係なtmuxセッションは送らない。
+
+`owner/repo`の解決は次の順で行う（`resolve_session_repository`）。
+
+1. **セッションの状態ファイル**（`~/.local/state/issue-deck/sessions/<セッション名>.session`の
+   `repository=`）。ランチャー自身が起動時に書いた値なので、名前から推測するより確実。
+   値が`owner/repo`の形でないときは壊れているとみなして使わない
+2. 取れなければ`local-repos.conf`の一覧の basename と突き合わせる。セッション名にownerが
+   含まれないため、別ownerに同名のリポジトリがあるとどちらのIssueか決められない。**曖昧なときは
+   送らない**（当てずっぽうに選ぶと、無関係なIssueへ引き上げのコメントを投稿することになる）
+
+**1を先に見るのは、横断質問セッション（#1454）の記録先が`local-repos.conf`に載らないため**
+（後述の「記録先リポジトリはcloneされていなくてよい」）。2だけを見ていた間は質問セッションが
+まるごと報告から落ち、画面にも出ず、#1465の「Claude Codeがまだ開始していません」の引き上げも
+一度も働いていなかった（#1537）。**質問セッションこそ、初めて触るリポジトリの参照でフォルダの
+信頼確認に当たりやすく、フックが1つも飛ばないまま止まる**ので、この経路が効かないと止まっている
+こと自体に気づけない。
 
 ## スクリーンショットの可否も申告する（#1268）
 
@@ -767,7 +819,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 
 | 足したもの | 場所 |
 |---|---|
-| キュー全体の一覧 | ヘッダーの「実行キュー」（`dispatch-queue-button.tsx`）。実行中・順番待ち・直近の失敗 |
+| キュー全体の一覧 | ヘッダーの「実行キュー」（`dispatch-queue-button.tsx`）。実行中・順番待ち・送信中の操作（#1519）・直近の失敗 |
 | まとめて積む | Issue一覧の選択モード（`bulk-dispatch-bar.tsx`） |
 | まとめて取り消す | キューのポップオーバー |
 
@@ -779,6 +831,58 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 `LAUNCH`しか数えていなかったため、枠が埋まっていても「実行中 0/2」と出ていた。順番待ちが進まない
 理由（`describeDispatchQueueStall`・`describeDispatchJobWaitReason`）も、枠を使っているジョブを
 数えないまま判断することになる。**枠の計算・画面・「先頭へ上げる」は同じ定数を見る。**
+
+### 行から「何が積まれているか」を読めるようにする（#1519）
+
+当初の行は`issue-deck #1519`・`サブPC`・`順番待ち`・`3分前`で、**Issue番号しか手掛かりが無かった**。
+夜にまとめて積むと順番待ちが並ぶが、番号を覚えていないIssueはGitHubを開くまで内容が分からず、
+「これを先頭へ上げる」（#1541）を押す判断がその場でできない。
+
+行は2行のまま、中身を入れ替えた。
+
+```
+1  [実装] #1519 実行キューの状態を可視化する
+   issue-deck・サブPC・順番待ち・3分前
+```
+
+- **Issueのタイトルを`DispatchJobView.issueTitle`で返す。** 一次情報源はGitHubだがここは
+  DBのIssueキャッシュを読む（`resolveDispatchIssueTitles`）。**ジョブ1件ごとには引かない** —
+  `GET /api/dispatch`は未完了ジョブがある間5秒間隔で叩かれるポーリング先なので、リポジトリを1回・
+  Issueを`(repositoryId, number)`のunique indexで1回の計2本に抑える
+- **引けなければ`null`で、行は番号だけに戻す。** 同期前のIssueやGitHub Appを外したリポジトリでは
+  普通に起きる。「（タイトル不明）」のような穴埋めは実際のタイトルと紛らわしいので出さない。
+  enqueueの戻り値（`toJobView`の既定）も`null`で、画面が楽観的に差し込んだ行のタイトルは
+  次の取得で埋まる
+- **種別チップ（`describeDispatchJobKind`）は全種別に出す。** `LAUNCH`だけ無印にすると
+  「チップが無い＝実装」を覚える必要が出る。制御ジョブの文言は`SESSION_CONTROL_LABELS[kind].action`
+  ＝押したボタンと同じ言葉を使う
+- **状態ラベルだけでは種別を判別できない。** `RUNNING`は「起動中」と「質問セッションを起動中」で
+  分かれるが、**`QUEUED`はどちらも「順番待ち」**になる
+
+### 制御ジョブは「送信中の操作」として出す。ただし数えない（#1519）
+
+停止・セッション終了・追加指示（`SESSION_CONTROL_JOB_KINDS`）は同時実行数の枠を使わないので
+`activeCount`には数えない（上の#1544の取り決めはそのまま）。**が、届くまではpull型ぶん最大60秒
+あり、その間キューのどこにも出ないと「押したのに何も起きない」に見える。**
+
+そこで`DispatchQueueSummary.controls`として**別の配列**に持ち、別の節に出す。
+
+- **`controls`は`running`・`queued`・`activeCount`・`describeDispatchQueueLoad`・
+  `cancelableDispatchJobs`のどれにも混ぜない。** 混ぜた瞬間に「実行中 3/2」になる
+- 節には「同時実行数の枠は使わず、先に届きます。」を添える。数えない理由が読めないと、
+  上の「実行中 2/2」と辻褄が合わないように見える
+- **未完了のものだけ**を出す。終わった制御ジョブの結果は、そのIssueのセッション表示
+  （`issue-session-status.tsx`）が持つ
+- 取り消し・先頭へ上げるは出さない（枠の順番という概念が無い）
+- 追加指示は本文（`instruction`）も出す。何を送ったのかが見えないと、送り直してよいか
+  （同じ指示が二重に届かないか）判断できない（#1012）
+
+### 閉じているボタンでも失敗に気づける（#1519）
+
+件数バッジは`activeCount > 0`のときだけ出るため、**失敗だけが残っている状態はボタンが無印**で、
+ポップオーバーを開くまで気づけなかった。動いていない かつ 失敗があるときは、件数の代わりに
+赤いドットを出す。件数ではなくドットなのは、押して確かめてほしいのが「何件あるか」ではなく
+「何が失敗したか」のため（件数は`title`に入れる）。
 
 ### 直近の失敗は×で消せる（#1479）
 
@@ -902,7 +1006,13 @@ cp ~/apps/issue-deck/deploy/subpc/issue-deck-dispatch-poller.service ~/.config/s
 systemctl --user daemon-reload
 systemctl --user enable --now issue-deck-dispatch-poller.service
 
-# 4. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
+# 4. 孤児の開発サーバーの定期掃除（#1525。pollerとは独立した経路なので別に登録する）
+cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.service ~/.config/systemd/user/
+cp ~/apps/issue-deck/deploy/subpc/issue-deck-dev-server-sweep.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now issue-deck-dev-server-sweep.timer
+
+# 5. ログアウトしても動き続けるようにする（ユーザー単位のserviceはログインセッションに紐づくため）
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -920,6 +1030,7 @@ Actions UIに相当するものが無いため、次の3つで追う。
 | 見たいもの | 見る場所 |
 |---|---|
 | pollerが何をしたか | `journalctl --user -u issue-deck-dispatch-poller -n 50` |
+| 孤児の開発サーバーを掃除したか | `journalctl -t issue-deck-dev-server-sweep -n 50`（#1525。`logger`で残すのでunitを問わず追える） |
 | ジョブが失敗した理由 | issue-deckの画面（ジョブの`message`にそのまま出る） |
 | 起動したセッションの中身 | `tmux attach -t <セッション名>`（セッション名もジョブに記録される） |
 | 進捗（Project Status）が動かない理由 | 同じjournal。pollerは起動時に鍵の有無を1度だけ確かめ、無ければ警告を出す（#1236）。個々の起動でスキップした場合はランチャーの出力に理由が出る |

@@ -70,7 +70,9 @@ set -euo pipefail
 # 4: 追加指示（`INSTRUCTION`）を3段階プロトコルで送る（#1012）。
 # 5: 複数リポジトリ横断の質問セッション（`CROSS_REPO_QUESTION`）を起こす（#1454）。
 # 6: Claude Codeが起動確認（フォルダの信頼確認）で止まっているセッションを報告する（#1465）。
-DISPATCH_POLLER_VERSION="6"
+# 7: セッションの owner/repo を状態ファイルから復元し、`local-repos.conf`に載っていない
+#    リポジトリ（横断質問セッションの記録先）のセッションも報告する（#1537）。
+DISPATCH_POLLER_VERSION="7"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -420,12 +422,34 @@ tmux_session_names() {
 #
 # 読むのはtmuxのメタデータだけなので、pollerに新しい依存（node等）は要らない。
 
-# セッション名（<リポジトリ名>-issue-<番号>）から owner/repo を復元する。
-# **リポジトリ名にownerが含まれない**ため、local-repos.conf の一覧の basename と突き合わせる。
+# セッションの owner/repo を復元する。第1引数はtmuxのセッション名、第2引数はそこから
+# 切り出したリポジトリ名（`<リポジトリ名>-issue-<番号>`の前半）。
+#
+# **まず状態ファイル（`lib/session-state.sh`の記述子）の`repository=`を見る。** 起動した
+# ランチャー自身が書いた値なので、名前から推測するより確実で、`local-repos.conf`に載っていない
+# リポジトリでも取れる。横断質問セッション（#1454）の記録先`guchi-apps/question`は
+# **cloneも`local-repos.conf`への記載も要らない設計**（docs/multi-agent/subpc-dispatch.md
+# 「記録先リポジトリはcloneされていなくてよい」）のため、対応表だけを見ていると質問セッションが
+# まるごと報告から落ち、#1465の「まだ開始していません」も一度も働かなかった（#1537）。
+#
+# 記述子が無い・壊れている場合だけ、従来どおり`local-repos.conf`の一覧の basename と
+# 突き合わせる（人が手で立てたセッション・古いランチャーで起きたセッション）。
 # **候補が2件以上あるときは何も出力しない。** 別ownerに同名のリポジトリがあると、どちらのIssueか
 # 名前だけでは決められず、当てずっぽうに選ぶと**無関係なIssueへ引き上げのコメントを投稿する**。
 resolve_session_repository() {
-  local repo_name="$1" full_name matched="" count=0
+  local session="$1" repo_name="$2" full_name matched="" count=0 descriptor recorded
+
+  descriptor="$(session_state_descriptor_file "$session" 2>/dev/null || true)"
+  if [[ -n "$descriptor" && -f "$descriptor" ]]; then
+    recorded="$(session_state_field "$descriptor" repository 2>/dev/null || true)"
+    # 状態ファイルはいつでも書き換えられうるので、owner/repo の形だけは必ず確かめる
+    # （壊れた値をそのままIssueの宛先にしない。`source`しないのと同じ用心）。
+    if [[ "$recorded" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+      printf '%s\n' "$recorded"
+      return 0
+    fi
+  fi
+
   while IFS= read -r full_name; do
     [[ -n "$full_name" ]] || continue
     if [[ "${full_name#*/}" == "$repo_name" ]]; then
@@ -486,8 +510,8 @@ report_sessions() {
     repo_name="${BASH_REMATCH[1]}"
     issue_number="${BASH_REMATCH[2]}"
 
-    # 対応表から owner/repo を戻せないセッションは送らない（他リポジトリ・曖昧な同名）。
-    full_name="$(resolve_session_repository "$repo_name")" || continue
+    # owner/repo を戻せないセッションは送らない（他リポジトリ・曖昧な同名）。
+    full_name="$(resolve_session_repository "$session_name" "$repo_name")" || continue
 
     local dead_json status_json
     if [[ "$pane_dead" == "1" ]]; then dead_json=true; else dead_json=false; fi
