@@ -8,6 +8,7 @@ import {
   ToastTitle,
   ToastViewport,
 } from "@/components/ui/toast";
+import { checkUserReason, CHECK_USER_REASON_TEXT } from "@/lib/github/approval-labels";
 import type { Issue } from "@/types/issue";
 
 export type CheckUserToastItem = {
@@ -32,29 +33,35 @@ export function CheckUserToastViewport({
 }: CheckUserToastViewportProps) {
   return (
     <ToastProvider duration={TOAST_DURATION_MS} swipeDirection="right">
-      {toasts.map(({ id, issue }) => (
-        <Toast
-          key={id}
-          onOpenChange={(open) => {
-            if (!open) onDismiss(id);
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              onSelectIssue(issue);
-              onDismiss(id);
+      {toasts.map(({ id, issue }) => {
+        // 何を求められているかを添える（#1490）。理由ラベルが配られていないリポジトリでは
+        // nullになり、従来どおり「確認待ちになりました」だけを出す
+        const reason = checkUserReason(issue.labels);
+        return (
+          <Toast
+            key={id}
+            onOpenChange={(open) => {
+              if (!open) onDismiss(id);
             }}
-            className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
           >
-            <ToastTitle className="line-clamp-2">{issue.title}</ToastTitle>
-            <ToastDescription>
-              {issue.repositoryFullName.split("/")[1]} が確認待ちになりました
-            </ToastDescription>
-          </button>
-          <ToastClose />
-        </Toast>
-      ))}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectIssue(issue);
+                onDismiss(id);
+              }}
+              className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+            >
+              <ToastTitle className="line-clamp-2">{issue.title}</ToastTitle>
+              <ToastDescription>
+                {issue.repositoryFullName.split("/")[1]} が確認待ちになりました
+                {reason ? `（${CHECK_USER_REASON_TEXT[reason]}）` : ""}
+              </ToastDescription>
+            </button>
+            <ToastClose />
+          </Toast>
+        );
+      })}
       {/* スマホはボトムナビ（min-h-14）及び「コメント欄へ移動」ボタンと、PCも同ボタンと
           重ならないよう底上げする */}
       <ToastViewport className="bottom-20 md:bottom-16" />

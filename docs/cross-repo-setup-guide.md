@@ -433,6 +433,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v10`〜`workflows/v15` | 上記 + `reusable-release-develop-to-main.yml`・`reusable-claude-pr-repair.yml` | この表では個別に追えていない。内訳は`git log --oneline <前のタグ>..workflows/vN`で確認する |
 | `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
 | `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
+| `workflows/v18` | 上記 | #1490。`00.check-user`を付ける全経路が、その理由を表す`01.check-*`もあわせて付けるようになった版。あわせて`claude-review-develop`・`claude-ci-fix`・`claude-conflict-resolve`・`release-develop-to-main`の`gh issue edit`に`gh label list`ガードを入れた。**このタグを配るまで、対象リポジトリでは理由ラベルが付かない**（`00.check-user`だけが付く従来どおりの動作） |
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
@@ -739,6 +740,10 @@ run: gh issue edit "$ISSUE_NUMBER" --remove-label "02.wip"
 `if: always()`で走るこのステップがジョブごと落とす。** `v9`ではStatusの再報告に置き換わっている
 ため、先にcallerを上げてしまえば問題は起きない。
 
+なお**このガードの非対称は#1490で解消した。** `claude-ci-fix`・`claude-conflict-resolve`に加え、
+同じく保護の無かった`claude-review-develop`・`release-develop-to-main`にも`gh label list`との
+突き合わせを入れてある。上の注意が効くのは`v17`以前を参照しているリポジトリだけ。
+
 正しい順序は次のとおり（`dayspan`・`shopping-list`で実施した手順、#1129）。
 
 1. issue-deck側で`workflows/vN`を切る（**mainから**。developから切らない）
@@ -755,7 +760,15 @@ run: gh issue edit "$ISSUE_NUMBER" --remove-label "02.wip"
 
 ```bash
 gh label create "00.check-user" --color f0883e --description "ユーザーの確認・指示が必要"
-gh label create "00.qa-answered" --color c5def5 --description "質問への回答のみ完了"
+# 00.check-userが付いている理由を表す補助ラベル(#1490)。00.check-userとのANDでしか読まれず、
+# 単独では意味を持たない。未配布のリポジトリでは付与が黙ってスキップされるだけで壊れない。
+gh label create "01.check-plan" --color fef2c0 --description "計画の承認待ち（00.check-userの理由）"
+gh label create "01.check-input" --color fef2c0 --description "質問・確認への回答待ち（00.check-userの理由）"
+gh label create "01.check-merge" --color fef2c0 --description "PRのマージ待ち（00.check-userの理由）"
+gh label create "01.check-blocked" --color fef2c0 --description "続け方の指示待ち。エージェントは停止（00.check-userの理由）"
+# 00.qa-answeredは01.check-answeredへリネームする。gh label editなら付いているIssueから
+# 外れずにその場で名前が変わるため、作り直さずこちらを使う（未作成のリポジトリではcreate）。
+gh label edit "00.qa-answered" --name "01.check-answered" --color fef2c0 --description "回答済み。読むだけで実装は再開しない（00.check-userの理由）"
 gh label create "11.local" --color e99695 --description "ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない"
 gh label create "21.plan-required" --color d4c5f9 --description "計画の確認・承認が必要"
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"

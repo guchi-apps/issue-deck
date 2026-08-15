@@ -43,6 +43,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
+import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/approval-labels";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import {
   COMMENT_AGENT_PROFILES,
@@ -86,6 +87,8 @@ type CommentThreadProps = {
   sessionWaitingInput?: boolean;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
+  /** `00.check-user`が付いている理由（#1490）。承認カードの見出しを出し分ける。読めない場合はnull */
+  checkUserReason?: CheckUserReason | null;
   /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク（#1339で複数対応） */
   pullRequestLinks?: PullRequestLink[];
   /** 対応PRのタイトル・状態・CI状態。取得前は空配列 */
@@ -178,6 +181,7 @@ function ApprovalActions({
   onPullRequestMerged,
   isFallbackNotice,
   mergeApprovalPending,
+  checkUserReason = null,
   sessionWaitingInput,
   pullRequestLinks,
   pullRequests,
@@ -203,6 +207,8 @@ function ApprovalActions({
   onPullRequestMerged?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
+  /** `00.check-user`が付いている理由（#1490）。読めないリポジトリではnull */
+  checkUserReason?: CheckUserReason | null;
   sessionWaitingInput?: boolean;
   pullRequestLinks?: PullRequestLink[];
   pullRequests?: IssuePullRequest[];
@@ -356,7 +362,9 @@ function ApprovalActions({
 
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
-      <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
+      <p className="mb-2 text-sm font-medium">
+        {checkUserReason ? CHECK_USER_REASON_HEADING[checkUserReason] : "ユーザーの承認が必要です"}
+      </p>
       {/* サブPCで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
           反応しない（#1264）。押しても何も起きないことを、押す前に出す */}
       {localSessionNotice}
@@ -446,6 +454,7 @@ export function CommentThread({
   onDelete,
   isUpdating,
   approvalPending,
+  checkUserReason = null,
   localSessionNotice,
   sessionWaitingInput,
   mergeApprovalPending,
@@ -517,6 +526,7 @@ export function CommentThread({
             mergedPullRequestNumbers={mergedPullRequestNumbers}
             onPullRequestMerged={onPullRequestMerged}
             mergeApprovalPending={mergeApprovalPending}
+            checkUserReason={checkUserReason}
             sessionWaitingInput={sessionWaitingInput}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
@@ -740,6 +750,7 @@ export function CommentThread({
                   onPullRequestMerged={onPullRequestMerged}
                   isFallbackNotice={isFallbackNotice}
                   mergeApprovalPending={mergeApprovalPending}
+                  checkUserReason={checkUserReason}
                   sessionWaitingInput={sessionWaitingInput}
                   pullRequestLinks={pullRequestLinks}
                   pullRequests={pullRequests}
@@ -772,6 +783,7 @@ export function CommentThread({
           onPullRequestMerged={onPullRequestMerged}
           isFallbackNotice={isFallbackNotice}
           mergeApprovalPending={mergeApprovalPending}
+          checkUserReason={checkUserReason}
           sessionWaitingInput={sessionWaitingInput}
           pullRequestLinks={pullRequestLinks}
           pullRequests={pullRequests}

@@ -106,12 +106,12 @@ PRオープン・マージという確実なイベントに紐づけて通知し
   コメントが残るだけで走っているセッションには届かない（`LocalSessionWaitingInputNotice`）。
   セッションが落ちていれば従来どおりボタンを出す — 画面から`00.check-user`を外す手段を残すため。
 
-### 理由を表す`01.check-*`ラベル（設計のみ。実装は別Issue。#1469）
+### 理由を表す`01.check-*`ラベル（#1469・#1490）
 
-**まだ実装されていない。** `00.check-user`は上の7契機すべてに同じラベルが付くため、画面は理由を
-周辺情報から推測している（`isMergeApprovalPending`が進捗Status＋直近botコメントの発信元まで
-見ているのがその典型で、#728のとおり進捗が一時的に巻き戻るケースを埋めるための後付け）。
-#1469の計画レビューで、理由を表すラベルを併用する方針を決めた。
+`00.check-user`は上の7契機すべてに同じラベルが付くため、画面は理由を周辺情報から推測していた
+（`isMergeApprovalPending`が進捗Status＋直近botコメントの発信元まで見ているのがその典型で、
+#728のとおり進捗が一時的に巻き戻るケースを埋めるための後付け）。#1469の計画レビューで理由を
+表すラベルを併用する方針を決め、#1490で実装した。
 
 - **`00.`帯 … 人の対応が要ることを表すゲート。** `00.check-user`だけが入る
 - **`01.`帯 … `00.check-user`に併用する補助ラベル。** 単独では意味を持たない
@@ -142,9 +142,37 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 - **外すのは`00.check-user`を外すのと同じ場所**（`labelsAfterApproval`／`labelsAfterRejection`、
   `develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`cleanup-on-close`）。
 - リネームは`gh label edit "00.qa-answered" --name "01.check-answered"`（付いているIssueから
-  外れずにその場で名前が変わる）。移行期間は**読む側だけが新旧どちらの名前も受け付ける**。
+  外れずにその場で名前が変わる）。移行期間は**読む側が新旧どちらの名前も受け付ける**。
+  書く側は「`01.check-answered`があればそれ、無ければ`00.qa-answered`」の順に解決する
+  （どちらか片方に固定すると、配布の前後どちらかで理由が付かない期間が生まれるため）。
 
-導入は「issue-deck側 → 無人実行ワークフロー → 16リポジトリへのラベル配布」の順に段階を分ける。
+導入は「issue-deck側 → 無人実行ワークフロー → 各リポジトリへのラベル配布」の順に段階を分けた。
+前2つは#1490で入っている。**最後のラベル配布まではどのリポジトリでも理由ラベルが付かず、
+画面は従来の推測で動く。**
+
+#### どこが何を付けるか（#1490）
+
+| 契機 | 理由 | 付ける実行体 |
+| --- | --- | --- |
+| 計画を提示した | `01.check-plan` | `.github/prompts/plan.md`（無人実行）／`session-plan.ts`の`postSessionPlan`（ローカル） |
+| 質問・確認の入力待ちに入った | `01.check-input` | `session-plan.ts`の`requestSessionCheckUser`（ローカル。無人実行に入力待ちは無い） |
+| ユーザーの質問へ回答した | `01.check-answered` | `.github/prompts/plan.md`・`implement.md`（無人実行） |
+| PRが自動マージされなかった／判定経路が無い | `01.check-merge` | `reusable-claude-review-develop.yml`の`auto-merge`・`auto-merge-fallback`、`reusable-issue-labels.yml`の`develop-pr-opened`、`.github/prompts/review-develop.md` |
+| 行き詰まり・依存追加・異常終了で停止した | `01.check-blocked` | `reusable-issue-dispatch.yml`のフォールバック3か所、`reusable-claude-ci-fix.yml`・`reusable-claude-conflict-resolve.yml`・`reusable-claude-review-develop.yml`のレビュー失敗、`reusable-release-develop-to-main.yml`、`session-escalation.ts`（ローカル） |
+
+**未配布のリポジトリで壊れないようにする作法は、付ける側の経路で違う。**
+
+- **ワークフロー・プロンプト（`gh`）** … `gh label list --json name --jq '.[].name' --limit 200`
+  と突き合わせ、実在するものだけを`gh issue edit`へ渡す（#975と同じ）。ラベル定義が無いまま
+  `--add-label`／`--remove-label`を呼ぶと`exit 1`でジョブごと落ちるため。
+- **issue-deck本体（GitHub REST）** … `src/lib/dispatch/check-user-labels.ts`。付与エンドポイント
+  （`POST /issues/{n}/labels`）は**存在しないラベル名を渡すとその場で作ってしまう**ので、
+  `fetchRepositoryLabelNames`で定義済みか確かめてから付ける。`00.check-user`は先に単独で付け、
+  理由ラベルの付与が失敗しても巻き添えにしない。
+
+**`01.`帯は廃止済みの進捗ステップラベル（`01.planning`など）と番号の形が同じ。**
+`src/lib/issue-status.ts`の`matchStatusStep`が理由ラベルを除外していないと、Issue詳細の
+ラベル欄に「ステップ1/9」の進捗バーが誤って描画される。
 
 ## 画面のチェックボックス4つの使い分け（#1317）
 

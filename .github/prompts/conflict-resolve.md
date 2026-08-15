@@ -62,8 +62,11 @@ Issueにコメントして個別にコンフリクト解消を依頼する必要
 `gh issue comment ${ISSUE_NUMBER} --body "..."` でコンフリクトの内容と自動解消を
 断念した理由を日本語で報告し（コメント本文の末尾に、投稿元を示す
 `<!-- issue-deck-source:claude-conflict-resolve -->`マーカーを必ず付与すること）、
-`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user"` を実行して停止して
-ください（コミット・pushは行わない）。
+`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "01.check-blocked"`
+を実行して停止してください（コミット・pushは行わない）。`01.check-blocked`は「続け方の指示待ち
+（エージェントは停止している）」を表す理由ラベル（#1490）で、**リポジトリに定義が無ければ
+付けなくてよい**（`gh label list --json name --jq '.[].name' --limit 200`で確認する）。
+他の`01.check-*`が付いていれば外す（理由は常に1枚）。
 
 ## 禁止事項
 - `main`/`develop`への直接コミット・push

@@ -493,6 +493,26 @@ jobs:
           BODY="$BODY"$'\n\n''復旧している場合は、リポジトリのissue-deck画面から手動でリリースを再実行できます。'
           BODY="$BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
 
+          # リリースが失敗して続け方の指示が要る状態なので、理由は`01.check-blocked`(#1490)。
+          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
+          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。ラベルの構成はIssueに
+          # よらず同じなので、対象Issueのループの外で1度だけ組み立てる。
+          REASON_LABEL="01.check-blocked"
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            else
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+
           for NUM in $ISSUE_NUMBERS; do
             # dispatchジョブ側の他の通知と同様、同一runのURLを含むコメントが既にあれば重複通知しない。
             if gh issue view "$NUM" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
@@ -500,5 +520,7 @@ jobs:
               continue
             fi
             gh issue comment "$NUM" --body "$BODY"
-            gh issue edit "$NUM" --add-label "00.check-user"
+            if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+              gh issue edit "$NUM" "${LABEL_ARGS[@]}"
+            fi
           done

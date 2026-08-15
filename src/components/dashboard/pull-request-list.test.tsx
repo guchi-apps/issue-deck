@@ -27,6 +27,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueNumbers: [],
     autoMergeEnabled: false,
     linkedIssueCheckUser: false,
+    linkedIssueCheckReason: null,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",

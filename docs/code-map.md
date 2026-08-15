@@ -427,6 +427,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 [`lib/github/approval-labels.ts`](../src/lib/github/approval-labels.ts)）。
 ボタンの表示条件はIssueのラベルから判定する（[`lib/github/workflow-status.ts`](../src/lib/github/workflow-status.ts)）。
 
+**`00.check-user`が付いている理由（`01.check-*`。#1490）を読むのも`approval-labels.ts`1か所。**
+`checkUserReason`が`00.check-user`とのANDでしか理由を返さないため、外し忘れた理由ラベルが単独で
+残っていても画面は無視する。理由が読めないリポジトリ（ラベル未配布）ではnullになり、
+`isMergeApprovalPending`・`requiresUserMerge`は従来どおりの推測へフォールバックする。
+**理由ラベルを付ける側**は経路が3つに分かれ、ワークフローとプロンプトは`gh label list`と
+突き合わせ、issue-deck本体は[`lib/dispatch/check-user-labels.ts`](../src/lib/dispatch/check-user-labels.ts)
+を通す（付与エンドポイントは存在しないラベル名を渡すとその場で作ってしまうため）。
+一覧は[multi-agent/labels.md](multi-agent/labels.md)「理由を表す`01.check-*`ラベル」。
+
 定型文やマーカーコメントを変更するときは、ワークフロー側のトリガー条件と対になっているため
 両方を確認する。
 

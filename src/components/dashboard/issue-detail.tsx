@@ -85,6 +85,7 @@ import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-muta
 import {
   approveCommentBody,
   canCompleteManualStep,
+  checkUserReason,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
@@ -794,6 +795,7 @@ export function IssueDetail({
               onDelete={handleDeleteComment}
               isUpdating={isCommentSubmitting}
               approvalPending={isApprovalPending(issue.labels)}
+              checkUserReason={checkUserReason(issue.labels)}
               localSessionNotice={
                 executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
                   <LocalSessionWaitingInputNotice session={issueSession} />

@@ -69,9 +69,13 @@ GitHub純正の画像CDNではないため自動では読み込めません。�
     `<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず付与する
   - 計画種別マーカー（`<!-- issue-deck-plan-type:... -->`）は付けない（直前の計画のマーカーが
     そのまま承認判定に使われる想定のため）
-  - 回答コメント投稿後、`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "00.qa-answered"`
-    を必ず実行する（既に付いていても無害）。`00.check-user`・`00.qa-answered`以外のラベル
-    （`21.plan-required`等）は変更しない。理由: `mode=plan`に到達している時点で既存の計画コメントが
+  - 回答コメント投稿後、`00.check-user`と、その理由を表す`01.check-answered`（#1490）を必ず
+    付ける（既に付いていても無害）。**`01.check-answered`は旧名`00.qa-answered`からのリネーム
+    移行中**で、リポジトリによってはまだ旧名のままなので、
+    `gh label list --json name --jq '.[].name' --limit 200`で**存在する方**を確かめてから
+    `gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "<存在する方>"`を実行する
+    （どちらも無ければ`00.check-user`だけ付ける）。他の`01.check-*`が付いていれば外す
+    （理由は常に1枚）。これら以外のラベル（`21.plan-required`等）は変更しない。理由: `mode=plan`に到達している時点で既存の計画コメントが
     存在する＝計画レビューは未完了であり、issue-deck画面の「修正」ボタンは押下時点で質問か修正依頼かを
     区別できないため送信前に機械的に`00.check-user`を外す実装になっている。そのため質問と判定された
     場合に確認待ちラベルが外れたまま復元されず、ユーザーが対応要否を判別できなくなる問題があった
@@ -95,8 +99,11 @@ GitHub純正の画像CDNではないため自動では読み込めません。�
   実行への追跡用リンク
   `実行ログ: ${RUN_URL}`、
   投稿元を示す`<!-- issue-deck-source:claude-issue-dispatch -->`マーカーを必ず追記する
-- 投稿後、`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user"` を実行する
-  （既に付いていても無害なので毎回実行してよい）
+- 投稿後、`gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "01.check-plan"`
+  を実行する（既に付いていても無害なので毎回実行してよい）。`01.check-plan`は「計画の承認待ち」を
+  表す理由ラベル（#1490）で、**リポジトリに定義が無ければ付けなくてよい**
+  （`gh label list --json name --jq '.[].name' --limit 200`で確認する）。他の`01.check-*`が
+  付いていれば外す（理由は常に1枚）
 
 ## 計画コメントに「調査済みの事実」を残す
 承認後の実装は**別のワークフロー実行**として、まっさらな状態から始まります。あなたが今行った

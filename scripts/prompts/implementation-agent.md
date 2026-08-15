@@ -76,7 +76,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 次の内容は端末に出すだけでなく、`gh issue comment {{ISSUE_NUMBER}}`でIssueにも投稿してください。
 
 - **計画**（`21.plan-required`が付いている場合）: 端末で提示するのと同じ内容（アプローチ・変更範囲・懸念点）をIssueコメントにも投稿する。承認を受けて内容を修正した場合は、実装に着手するまでに修正後の計画も投稿する。**計画コメントの冒頭に、その計画が前提とした`origin/develop`のSHAを`<!-- plan-base: <SHA> -->`の形で残す**（`git rev-parse origin/develop`）。並行して走る他セッションのマージで計画の前提が無効になることが実際に起きているため、後から`git log <SHA>..origin/develop --oneline`で何が変わったかを辿れるようにする（[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）
-  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`を付けます**（#1342）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
+  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
 - **完了報告**（必須）: Pull Requestを作成したら、最後に`gh issue comment {{ISSUE_NUMBER}}`で完了報告を投稿する。**PRを作っただけで終えないでください。** 内容は次の3つで、粒度は無人実行の完了報告（`.github/prompts/implement.md`）に揃える
   - 作成したPull RequestのURL
   - どのような変更を行ったかの要約（触ったファイル・対応内容が使用者に伝わる程度の箇条書き）
