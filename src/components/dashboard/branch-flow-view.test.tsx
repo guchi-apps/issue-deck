@@ -778,9 +778,24 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText("リリースする"));
       fireEvent.click(screen.getByText("起動する"));
 
-      await screen.findByText("リリースを起動しました");
-      expect(screen.getByText("リリース起動中…")).toBeTruthy();
+      await screen.findByText("リリース起動中…");
       expect(screen.queryByText("リリースする")).toBeNull();
+    });
+
+    it("起動に成功しても完了のポップアップは出さない（#1590）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+
+      renderFlow({ branchStatuses: [unreleased] });
+      openRepository();
+      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(screen.getByText("起動する"));
+
+      // 確認ダイアログは閉じ、「リリースを起動しました」のダイアログは現れない
+      await screen.findByText("リリース起動中…");
+      expect(screen.queryByText("リリースを起動しました")).toBeNull();
+      expect(screen.queryByText("リリースworkflowを起動しますか？")).toBeNull();
     });
   });
 

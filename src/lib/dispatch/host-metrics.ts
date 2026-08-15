@@ -4,8 +4,11 @@ import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
  * ホストが申告するリソース使用率（#1567）。
  *
  * サブPCで何本セッションを起こしてよいかを判断するのに、従来は**別のアプリ**
- * （ops-dashboard）を開く必要があった。判断に効く3つ（CPU・メモリ・`/`のディスク）だけを
+ * （ops-dashboard）を開く必要があった。判断に効くもの（CPU・メモリ・SWAP・`/`のディスク）だけを
  * pollerの申告に相乗りさせ、実行キューと同じ場所に出す。
+ *
+ * **SWAPは#1624で足した。** メモリが100%に達したホストは、そこから先の余力の有無がSWAPの
+ * 増え方にしか出ず、「もう1本起こしてよいか」をメモリの割合だけでは判断できなかった。
  *
  * **境界は「セッションを起こしてよいかに効くか」**。サービス・プロセス・温度・ネットワーク・
  * 履歴といったホスト全体の監視は引き続きops-dashboardの担当で、こちらへは持ち込まない
@@ -24,6 +27,10 @@ import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
  * **5つはまとめて入るか、まとめて`null`か**のどちらかで、部分的には埋まらない
  * （`parseDispatchHostMetrics`が1つでも壊れていれば全体を落とす）。片方だけ埋まった状態を
  * 許すと、取れなかった項目が0＝空いていると読めてしまう。
+ *
+ * **SWAPの2つだけは、この5つと同じ扱いにできない**（#1624）。SWAPを持たないホストと、
+ * SWAPを申告しない古いpollerがどちらもありうるため、必須にすると**CPU・メモリ・ディスクごと
+ * 消えてしまう**。そのためSWAPは対で`null`になれる（2つとも入るか、2つとも`null`か）。
  */
 export type DispatchHostMetrics = {
   /** 0〜100 */
@@ -32,6 +39,12 @@ export type DispatchHostMetrics = {
   memoryTotalMb: number;
   diskUsedGb: number;
   diskTotalGb: number;
+  /**
+   * SWAP（#1624）。**`null`は「申告していない」**（SWAPを申告しない古いpoller）で、
+   * 総量0（SWAPを持たないホスト・`swapoff`）とは区別する。どちらの場合も画面には出さない。
+   */
+  swapUsedMb: number | null;
+  swapTotalMb: number | null;
 };
 
 function parseFinite(value: unknown, max: number): number | null {
@@ -72,13 +85,41 @@ export function parseDispatchHostMetrics(value: unknown): DispatchHostMetrics | 
   if (memoryTotalMb === 0 || diskTotalGb === 0) return null;
   if (memoryUsedMb > memoryTotalMb || diskUsedGb > diskTotalGb) return null;
 
+  const swap = parseSwap(input);
+  if (swap === "invalid") return null;
+
   return {
     cpuPercent,
     memoryUsedMb: Math.round(memoryUsedMb),
     memoryTotalMb: Math.round(memoryTotalMb),
     diskUsedGb,
     diskTotalGb,
+    swapUsedMb: swap.usedMb,
+    swapTotalMb: swap.totalMb,
   };
+}
+
+/**
+ * SWAPの2つを読む（#1624）。**総量0を落とさない**のがメモリ・ディスクとの違いで、
+ * SWAPを持たないホスト（`swapoff`）の正常な申告だから。0で割らないよう、割合を出すのは
+ * `describeDispatchHostMetrics`側で総量が0でないことを確かめてから。
+ *
+ * - 2つとも送られていない → 申告なし（`null`の対）。**他の5つは落とさない**
+ * - 片方だけ・値が壊れている → `"invalid"`（呼び出し側が`metrics`ごと落とす）
+ */
+function parseSwap(
+  input: Record<string, unknown>,
+): { usedMb: number | null; totalMb: number | null } | "invalid" {
+  if (input.swapUsedMb == null && input.swapTotalMb == null) {
+    return { usedMb: null, totalMb: null };
+  }
+
+  const usedMb = parseFinite(input.swapUsedMb, MAX_MEMORY_MB);
+  const totalMb = parseFinite(input.swapTotalMb, MAX_MEMORY_MB);
+  if (usedMb === null || totalMb === null) return "invalid";
+  if (usedMb > totalMb) return "invalid";
+
+  return { usedMb: Math.round(usedMb), totalMb: Math.round(totalMb) };
 }
 
 /**
@@ -120,6 +161,10 @@ function formatGb(gb: number): string {
  *
  * - 申告が無い（古いpoller・取得に失敗した巡）
  * - ホストが応答していない（`online`がfalse。最後の申告から一定時間が過ぎている）
+ *
+ * **SWAPの行だけは条件付きで出る**（#1624）。申告が無いホストと、SWAPを持たないホスト
+ * （総量0）では行ごと出さない。0%のメーターを並べても「SWAPが空いている」と「SWAPが無い」を
+ * 見分けられず、行が1つ増えるぶん他の3つが読みにくくなるだけのため。
  */
 export function describeDispatchHostMetrics(host: DispatchHostView): DispatchHostMetricRow[] | null {
   const metrics = host.metrics;
@@ -141,11 +186,37 @@ export function describeDispatchHostMetrics(host: DispatchHostView): DispatchHos
       detail: `${formatGb(metrics.memoryUsedMb / 1024)} / ${formatGb(metrics.memoryTotalMb / 1024)} GB`,
       tone: resolveHostMetricTone(memoryPercent),
     },
+    // メモリの直後に置く。SWAPは「メモリが足りたか」の続きとして読むもので、離すと
+    // ディスクの一種のように見える
+    ...describeSwapRow(metrics),
     {
       label: "ディスク",
       percent: diskPercent,
       detail: `${formatGb(metrics.diskUsedGb)} / ${formatGb(metrics.diskTotalGb)} GB`,
       tone: resolveHostMetricTone(diskPercent),
+    },
+  ];
+}
+
+/**
+ * SWAPの行（#1624）。**出せないときは空の配列**で、行そのものが並ばない。
+ *
+ * 出さないのは「申告していない」（対が`null`）と「SWAPを持たない」（総量0）の2つ。
+ * 割合の重さの境目はCPU・メモリと同じ（60%・85%）にしてある。**SWAPだけ別の境目を設けない**のは、
+ * 同じ色が画面の中で違う重さを指すのを避けるため。少しでも使われていること自体を異常として
+ * 見せたいわけではなく（Linuxは平常時も僅かに退避する）、見たいのは「増え続けているか」。
+ */
+function describeSwapRow(metrics: DispatchHostMetrics): DispatchHostMetricRow[] {
+  const { swapUsedMb, swapTotalMb } = metrics;
+  if (swapUsedMb === null || swapTotalMb === null || swapTotalMb === 0) return [];
+
+  const percent = (swapUsedMb / swapTotalMb) * 100;
+  return [
+    {
+      label: "SWAP",
+      percent,
+      detail: `${formatGb(swapUsedMb / 1024)} / ${formatGb(swapTotalMb / 1024)} GB`,
+      tone: resolveHostMetricTone(percent),
     },
   ];
 }

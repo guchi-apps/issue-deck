@@ -4,18 +4,46 @@ import {
   getAdjacentNavViewId,
   getNavViewDefaultGroupByRepo,
   getNavViewDefaultState,
+  navViewIcons,
   navViews,
   resolveStateOnViewChange,
+  sidebarAttentionNavViews,
+  sidebarIssueNavViews,
+  sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 
 describe("navViews", () => {
-  it("「質問」ビューは手作業待ちと未着手のあいだに並ぶ（#1514）", () => {
+  it("「質問」ビューは手作業と未着手のあいだに並ぶ（#1514）", () => {
     const ids = navViews.map((view) => view.id);
     expect(ids.slice(ids.indexOf("manual-step"), ids.indexOf("not-started") + 1)).toEqual([
       "manual-step",
       "question",
       "not-started",
     ]);
+  });
+});
+
+describe("左メニューのグループ（#1613）", () => {
+  it("要対応は人が動くまで進まない2つだけ", () => {
+    expect(sidebarAttentionNavViews.map((view) => view.id)).toEqual(["check-user", "manual-step"]);
+  });
+
+  it("質問は要対応にもIssueにも入れない", () => {
+    expect(sidebarQuestionNavViews.map((view) => view.id)).toEqual(["question"]);
+  });
+
+  it("Issueは広い順に4つ", () => {
+    expect(sidebarIssueNavViews.map((view) => view.id)).toEqual([
+      "all",
+      "favorites",
+      "not-started",
+      "in-progress",
+    ]);
+  });
+
+  // 隣り合う行が同じ線画だとどちらを押しているか分からなくなる
+  it("すべてのIssueと未着手には別のアイコンを使う", () => {
+    expect(navViewIcons.all).not.toBe(navViewIcons["not-started"]);
   });
 });
 

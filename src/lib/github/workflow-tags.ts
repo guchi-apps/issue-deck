@@ -2,11 +2,17 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql } from "@/lib/github/graphql";
+import { fetchLatestWorkflowRun } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
+  canStartPropagation,
   evaluateWorkflowTags,
   extractWorkflowTagRef,
+  findWorkflowTagPullRequest,
   latestWorkflowTag,
+  propagationTargets,
+  type PropagationRun,
+  type WorkflowTagPullRequest,
   type WorkflowTagRef,
   type WorkflowTagStatus,
 } from "@/lib/workflow-tags";
@@ -46,6 +52,13 @@ export type WorkflowTagOverview = {
   /** issue-deck 側の最新タグ。取得に失敗した場合は null */
   latest: string | null;
   repositories: WorkflowTagStatus[];
+  /**
+   * 配布ワークフロー（`propagate-workflow-tag.yml`）の最新の実行。1度も動いていなければ null。
+   *
+   * **押したあとの状態を画面へ残すために取る**（#1602）。実行中は更新ボタンを無効にし、
+   * 画面を開き直しても・別のタブからでも同じ判断ができるようにする。
+   */
+  propagation: PropagationRun | null;
 };
 
 /** GraphQLで読む対象リポジトリ（DBから引いた行のうち、問い合わせに要る項目だけ） */
@@ -63,8 +76,25 @@ type TreeEntry = {
   object: { text?: string | null } | null;
 };
 
+/** GraphQLで一緒に読むopenなPull Request（更新PRが既に有るかの判定に使う） */
+type OpenPullRequest = { number: number; title: string; url: string };
+
 /** エイリアス1つぶんの応答。ディレクトリが無ければ `object` が null になる */
-type RepositoryTree = { object: { entries?: TreeEntry[] | null } | null } | null;
+type RepositoryEntry = {
+  object: { entries?: TreeEntry[] | null } | null;
+  pullRequests?: { nodes?: (OpenPullRequest | null)[] | null } | null;
+} | null;
+
+/** 1リポジトリぶんの読み取り結果 */
+type RepositoryRefs = { refs: WorkflowTagRef[]; pullRequests: OpenPullRequest[] };
+
+/**
+ * 1リポジトリから読むopenなPRの件数。
+ *
+ * 更新PRを見つけるのが目的で、タイトルで絞り込めないため一定件数を読んで突き合わせる。
+ * フリートのリポジトリで同時に開いているPRはせいぜい数件のため、この数で足りる。
+ */
+const OPEN_PULL_REQUESTS_PER_REPOSITORY = 30;
 
 /**
  * issue-deck のタグ一覧から最新の `workflows/vN` を取る。
@@ -112,19 +142,29 @@ async function fetchLatestTag(token: string): Promise<string | null> {
  * 各Blobの`text`まで一度に取る。**共有ワークフローを参照していないファイル
  * （`ci.yml`・`deploy.yml` 等）も本文を見ないと判別できない**が、GraphQLなら
  * 追加の往復無しでまとめて返るため、RESTのようにファイル数ぶん往復せずに済む。
+ *
+ * **openなPRも同じクエリで読む**（#1602）。更新PRが既に有るリポジトリを配布の対象から
+ * 外すため。検索API（`search`）を使わないのは、**インデックスの反映が遅れて
+ * 作ったばかりのPRを取りこぼす**ため——それでは連続押下の防止にならない。
  */
 async function fetchRefsBatch(
   targets: TargetRepository[],
   token: string,
-): Promise<Map<string, WorkflowTagRef[]>> {
+): Promise<Map<string, RepositoryRefs>> {
   const declarations = targets
-    .map((_, index) => `$owner${index}: String!, $name${index}: String!, $expression${index}: String!`)
+    .map(
+      (_, index) =>
+        `$owner${index}: String!, $name${index}: String!, $expression${index}: String!`,
+    )
     .join(", ");
   const selections = targets
     .map(
       (_, index) => `  r${index}: repository(owner: $owner${index}, name: $name${index}) {
     object(expression: $expression${index}) {
       ... on Tree { entries { name type object { ... on Blob { text } } } }
+    }
+    pullRequests(states: OPEN, first: ${OPEN_PULL_REQUESTS_PER_REPOSITORY}, orderBy: { field: CREATED_AT, direction: DESC }) {
+      nodes { number title url }
     }
   }`,
     )
@@ -137,7 +177,7 @@ async function fetchRefsBatch(
     variables[`expression${index}`] = `${target.defaultBranch}:.github/workflows`;
   });
 
-  const data = await githubGraphql<Record<string, RepositoryTree>>(
+  const data = await githubGraphql<Record<string, RepositoryEntry>>(
     token,
     `query(${declarations}) {\n${selections}\n}`,
     variables,
@@ -146,9 +186,10 @@ async function fetchRefsBatch(
     { allowPartialData: true },
   );
 
-  const refsByRepository = new Map<string, WorkflowTagRef[]>();
+  const refsByRepository = new Map<string, RepositoryRefs>();
   targets.forEach((target, index) => {
-    const entries = data[`r${index}`]?.object?.entries ?? [];
+    const repository = data[`r${index}`];
+    const entries = repository?.object?.entries ?? [];
     const refs: WorkflowTagRef[] = [];
     for (const entry of entries) {
       if (entry.type !== "blob" || !entry.name.endsWith(".yml")) continue;
@@ -158,7 +199,11 @@ async function fetchRefsBatch(
       const ref = extractWorkflowTagRef(entry.name, entry.object.text);
       if (ref) refs.push(ref);
     }
-    refsByRepository.set(target.fullName, refs);
+
+    const pullRequests = (repository?.pullRequests?.nodes ?? []).filter(
+      (node): node is OpenPullRequest => node !== null,
+    );
+    refsByRepository.set(target.fullName, { refs, pullRequests });
   });
   return refsByRepository;
 }
@@ -187,7 +232,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
     orderBy: { fullName: "asc" },
   });
 
-  if (repositories.length === 0) return { latest: null, repositories: [] };
+  if (repositories.length === 0) return { latest: null, repositories: [], propagation: null };
 
   // インストールごとにトークンを取り直す。1ユーザーが複数インストールを持つことがある
   const tokens = new Map<number, string>();
@@ -211,7 +256,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
     byInstallation.set(installationId, targets);
   }
 
-  const refsByRepository = new Map<string, WorkflowTagRef[]>();
+  const refsByRepository = new Map<string, RepositoryRefs>();
   for (const [installationId, targets] of byInstallation) {
     const token = await tokenFor(installationId);
     for (let start = 0; start < targets.length; start += REPOSITORIES_PER_QUERY) {
@@ -223,17 +268,56 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
 
   const statuses: WorkflowTagStatus[] = [];
   for (const repository of repositories) {
-    const refs = refsByRepository.get(repository.fullName) ?? [];
+    const result = refsByRepository.get(repository.fullName);
     // 共有ワークフローを参照していないリポジトリは表示しても意味がないため落とす
-    if (refs.length === 0) continue;
-    statuses.push(evaluateWorkflowTags(repository.fullName, refs, latest));
+    if (!result || result.refs.length === 0) continue;
+
+    const updatePullRequest: WorkflowTagPullRequest | null = findWorkflowTagPullRequest(
+      result.pullRequests,
+      latest,
+    );
+    statuses.push(
+      evaluateWorkflowTags(repository.fullName, result.refs, latest, updatePullRequest),
+    );
   }
 
-  return { latest, repositories: statuses };
+  const propagation = await fetchPropagationRun(firstToken);
+
+  return { latest, repositories: statuses, propagation };
+}
+
+/**
+ * 配布ワークフローの最新の実行を取る。**取れなくても一覧は出す**（実行状態が分からない
+ * だけで、参照タグの状況は独立して読めるため）。
+ */
+async function fetchPropagationRun(token: string): Promise<PropagationRun | null> {
+  const [owner, repo] = SOURCE_REPOSITORY.split("/");
+  try {
+    const run = await fetchLatestWorkflowRun(owner!, repo!, PROPAGATE_WORKFLOW_FILE, token);
+    if (!run) return null;
+    return {
+      status: run.status,
+      conclusion: run.conclusion,
+      htmlUrl: run.htmlUrl,
+      createdAt: run.createdAt,
+    };
+  } catch (error) {
+    console.warn(`[workflow-tags] 配布ワークフローの実行を取得できませんでした: ${String(error)}`);
+    return null;
+  }
 }
 
 /** タグ更新PRを一括作成するワークフロー（issue-deck 側） */
 const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
+
+export type DispatchPropagationResult = {
+  dispatched: boolean;
+  tag: string | null;
+  repositories: string[];
+  /** 起動しなかった理由。`running`のときだけ呼び出し側が409にする */
+  reason?: "running" | "no_targets" | "no_tag";
+  message?: string;
+};
 
 /**
  * 更新が必要なリポジトリへ、タグを上げるPRを作るワークフローを起動する（#1173）。
@@ -243,20 +327,46 @@ const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
  *
  * 起動するだけで、PRの作成自体はActions側が行う。ローカルのチェックアウトに依存せず、
  * 同じ処理を手動起動でも使えるようにするため。
+ *
+ * **二重起動はここで止める**（#1602）。画面のボタンを無効にするだけでは、リロード後や
+ * 別のタブからは押せてしまう。実行中かどうかの正はGitHub側のrunなので、それを見て断る。
+ * 更新PRが既にopenのリポジトリを対象から外すのも同じ理由で、仮に起動が重なっても
+ * 同じリポジトリへ2本目のPRは作られない。
+ *
+ * `autoMerge`が真のとき、配布先ではIssueを作らずPRだけを作り、CI通過後に自動マージする
+ * （`.github/scripts/propagate-workflow-tag.sh`）。
  */
 export async function dispatchPropagation(
   userId: string,
-): Promise<{ dispatched: boolean; tag: string | null; repositories: string[] }> {
+  autoMerge: boolean,
+): Promise<DispatchPropagationResult> {
   const overview = await collectWorkflowTags(userId);
-  if (!overview.latest) return { dispatched: false, tag: null, repositories: [] };
+  if (!overview.latest) {
+    return {
+      dispatched: false,
+      tag: null,
+      repositories: [],
+      reason: "no_tag",
+      message: "issue-deck側の最新タグを取得できませんでした。",
+    };
+  }
 
-  const targets = overview.repositories
-    .filter((status) => status.outdated || status.mismatched)
-    .map((status) => status.fullName);
+  const decision = canStartPropagation(overview.propagation);
+  if (!decision.allowed) {
+    return {
+      dispatched: false,
+      tag: overview.latest,
+      repositories: [],
+      reason: decision.reason,
+      message: decision.message,
+    };
+  }
+
+  const targets = propagationTargets(overview.repositories).map((status) => status.fullName);
 
   // 対象が無いのに起動すると、何もしないrunが履歴に残って紛らわしい
   if (targets.length === 0) {
-    return { dispatched: false, tag: overview.latest, repositories: [] };
+    return { dispatched: false, tag: overview.latest, repositories: [], reason: "no_targets" };
   }
 
   const [owner, repo] = SOURCE_REPOSITORY.split("/");
@@ -274,7 +384,12 @@ export async function dispatchPropagation(
     method: "POST",
     body: {
       ref: "main",
-      inputs: { tag: overview.latest, repositories: JSON.stringify(targets) },
+      inputs: {
+        tag: overview.latest,
+        repositories: JSON.stringify(targets),
+        // workflow_dispatchのinputsは文字列で渡す（booleanのinputでも"true"/"false"）
+        auto_merge: autoMerge ? "true" : "false",
+      },
     },
   });
   if (!res.ok) {

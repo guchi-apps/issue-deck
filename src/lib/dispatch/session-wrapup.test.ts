@@ -18,7 +18,7 @@ const FIRST_SEEN = new Date("2026-08-14T10:01:00Z");
 
 describe("resolveSessionRecordSince", () => {
   /**
-   * `firstSeenAt`はpollerが最初に見た時刻で、起動から最大1巡（既定60秒）遅れる。その差の間に
+   * `firstSeenAt`はpollerが最初に見た時刻で、起動から最大1巡（既定30秒）遅れる。その差の間に
    * 計画が出ると「記録なし」と誤判定するため、受付コメントの時刻を優先する。
    */
   it("受付コメントがあればその投稿時刻を基準にする", () => {

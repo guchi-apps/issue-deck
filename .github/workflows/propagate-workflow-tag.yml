@@ -8,8 +8,12 @@ name: Propagate workflow tag
 # 届いていない状態）。検知は#985/PR #1170で画面に出るようにした。ここはその次の段階で、
 # 検知した対象へPRを作るところまでを自動化する。
 #
-# **マージは自動化しない。** Actionsの変更はCLAUDE.mdの自動マージ不可カテゴリに該当する。
-# v12の展開でも、PRを見る過程で.gitignoreの漏れ（#1151）に気づいている。
+# **`auto_merge`が真のときはマージまで自動化する**（#1602）。書き換えるのは`@workflows/vN`と
+# `prompts-ref`の2つだけで、内容は完全に機械的な置換になっている。配るタグ自体はissue-deck側で
+# 人の確認を通してから切っているため、ここに人のマージ操作を挟んでも判断材料は増えない
+# （14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。CLAUDE.mdの自動マージ不可
+# カテゴリに対する例外はこの配布PRだけで、issue-deck自身のPRには一切かからない。
+# 偽にすると従来どおりPRの作成までで止まる。
 #
 # **対象は呼び出し元（issue-deckの画面）が決めて渡す。** ここで再検知すると、画面の表示と
 # 実際の対象がずれる。
@@ -24,6 +28,11 @@ on:
         description: '対象リポジトリのJSON配列（例: ["guchi-apps/car-care"]）'
         required: true
         type: string
+      auto_merge:
+        description: "作成したPRを自動でマージする（偽ならPRの作成までで止める）"
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   # 同じタグの配布が重なると、同じ番号のIssueへ二重にPRを作りうる
@@ -85,6 +94,8 @@ jobs:
           TAG: ${{ inputs.tag }}
           REPOSITORIES: ${{ inputs.repositories }}
           SOURCE_REPOSITORY: ${{ github.repository }}
+          # スクリプトへは文字列で渡す（"true" のときだけ自動マージ）
+          AUTO_MERGE: ${{ inputs.auto_merge }}
         run: |
           set -uo pipefail
 

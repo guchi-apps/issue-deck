@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
+import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import { navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { getPullRequestView } from "@/lib/pull-request-views";
@@ -15,9 +16,15 @@ const NAV_COUNTS = Object.fromEntries(navViews.map((view) => [view.id, 0])) as R
   number
 >;
 
+const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForRelease: 0 };
+
 function renderSidebar(
   pullRequestNavCounts: PullRequestNavCounts,
   navCounts: Record<NavViewId, number> = NAV_COUNTS,
+  {
+    checkUserPullRequestCount = 0,
+    manualStepAttention = NO_MANUAL_STEP,
+  }: { checkUserPullRequestCount?: number; manualStepAttention?: ManualStepAttention } = {},
 ) {
   render(
     <SidebarNav
@@ -28,6 +35,8 @@ function renderSidebar(
       onSelectPullRequestView={() => {}}
       onSelectFlow={() => {}}
       navCounts={navCounts}
+      checkUserPullRequestCount={checkUserPullRequestCount}
+      manualStepAttention={manualStepAttention}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -67,7 +76,9 @@ function renderSidebarWithRepositories(
       onSelectPullRequestView={() => {}}
       onSelectFlow={() => {}}
       navCounts={NAV_COUNTS}
-      pullRequestNavCounts={{ all: null, "in-progress": 0, completed: 0 }}
+      checkUserPullRequestCount={0}
+      manualStepAttention={NO_MANUAL_STEP}
+      pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
       labelSummary={[]}
@@ -97,32 +108,35 @@ function pullRequestNavItem(view: PullRequestViewId) {
 afterEach(() => cleanup());
 
 describe("SidebarNav", () => {
-  it("処理中・完了のPRは件数を出す", () => {
-    renderSidebar({ all: null, "in-progress": 3, completed: 1 });
+  it("実行中のPRは件数を出す", () => {
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
 
     expect(pullRequestNavItem("in-progress").textContent).toContain("3");
-    expect(pullRequestNavItem("completed").textContent).toContain("1");
   });
 
   it("0件でも件数を出す（Issue側の項目と揃える）", () => {
-    renderSidebar({ all: null, "in-progress": 0, completed: 0 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
     expect(pullRequestNavItem("in-progress").textContent).toContain("0");
   });
 
-  // 母集団がscope依存で「全PR数」として読める数にならないため（#1389）。
-  it("全てのPRには件数を出さない", () => {
-    renderSidebar({ all: null, "in-progress": 3, completed: 1 });
+  // openなPRだけを出すビューになり、母集団がscopeに依存しなくなったため（#1613）。
+  it("すべてのPRにも件数を出す", () => {
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
 
-    expect(pullRequestNavItem("all").textContent).toBe(getPullRequestView("all").label);
+    expect(pullRequestNavItem("all").textContent).toContain("4");
+  });
+
+  // 「完了したPR」は左メニューから外した（#1613）。prview=completedのURLは今までどおり開ける。
+  it("完了したPRは出さない", () => {
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
+
+    expect(screen.queryByTitle(getPullRequestView("completed").description)).toBeNull();
   });
 
   // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。
   it("確認待ちが残っていても強調するのは件数バッジだけにする", () => {
-    renderSidebar(
-      { all: null, "in-progress": 0, completed: 0 },
-      { ...NAV_COUNTS, "check-user": 2 },
-    );
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, "check-user": 2 });
 
     const button = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
     expect(button.className).not.toContain("amber");
@@ -130,13 +144,73 @@ describe("SidebarNav", () => {
     expect(badge.className).toContain("bg-amber-500");
   });
 
+  // 対応Issueを持たないリリースPRもユーザーがマージするしかないため（#1613）。
+  it("ユーザーのマージ待ちPRを確認待ちの件数に足す", () => {
+    renderSidebar(
+      { all: 1, "in-progress": 0, completed: 1 },
+      { ...NAV_COUNTS, "check-user": 2 },
+      { checkUserPullRequestCount: 1 },
+    );
+
+    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("3");
+  });
+
+  it("Issueが0件でもマージ待ちPRがあれば確認待ちを強調する", () => {
+    renderSidebar({ all: 1, "in-progress": 0, completed: 1 }, NAV_COUNTS, {
+      checkUserPullRequestCount: 1,
+    });
+
+    const button = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
+    expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+  });
+
+  // 数週間先まで実行できない手作業で橙色が点きっぱなしになると、合図として読めなくなる（#1613）。
+  it("手作業はいま実行できるものがあるときだけ強調する", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, "manual-step": 3 },
+      { manualStepAttention: { total: 3, actionable: 0, waitingForRelease: 3 } },
+    );
+
+    expect(screen.getByText("3").className).not.toContain("bg-amber-500");
+  });
+
+  it("実行できる手作業が1件でもあれば強調する", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, "manual-step": 3 },
+      { manualStepAttention: { total: 3, actionable: 1, waitingForRelease: 2 } },
+    );
+
+    expect(screen.getByText("3").className).toContain("bg-amber-500");
+  });
+
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
   it("未取得のときはどのPRビューにも件数を出さない", () => {
     renderSidebar({ all: null, "in-progress": null, completed: null });
 
-    for (const view of ["all", "in-progress", "completed"] as const) {
+    for (const view of ["all", "in-progress"] as const) {
       expect(pullRequestNavItem(view).textContent).toBe(getPullRequestView(view).label);
     }
+  });
+
+  // 「まず人が動くもの」を上から順に並べる（#1613）
+  it("要対応・質問・ブランチ・Issue・PRの順に並べる", () => {
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
+
+    const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
+      button.textContent?.replace(/\d+$/, "").trim(),
+    );
+    expect(labels.slice(0, 8)).toEqual([
+      "ユーザーの確認待ち",
+      "ユーザーの作業待ち",
+      "質問",
+      "ブランチ",
+      "すべてのIssue",
+      "お気に入り",
+      "未着手",
+      "実行中",
+    ]);
   });
 
   // 連携数が増えると選択中の行がスクロール範囲の外へ出てしまうため（#1480）。

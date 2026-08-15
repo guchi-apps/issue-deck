@@ -7,9 +7,9 @@ import { collectWorkflowTags } from "@/lib/github/workflow-tags";
 /**
  * 各リポジトリが参照している共有ワークフローのタグと、issue-deck 側の最新タグを返す（#985）。
  *
- * **画面を開いたときに1回だけ取得する。** ポーリングはしない。タグを上げるのは日に何度も
- * ある操作ではない。取得はGraphQLでまとめて行うためリクエスト数はリポジトリ数に比例しない
- * （#1503）。
+ * **画面を開いたときに1回だけ取得する。** タグを上げるのは日に何度もある操作ではない。
+ * 例外は配布ワークフローが動いている間で、そのときだけ画面がポーリングする（#1602）。
+ * 取得はGraphQLでまとめて行うためリクエスト数はリポジトリ数に比例しない（#1503）。
  */
 export function GET() {
   return withGithubApiFeature("workflow_tags", () => handleGET());
@@ -22,5 +22,6 @@ async function handleGET() {
   }
 
   const overview = await collectWorkflowTags(userId);
-  return NextResponse.json(overview);
+  // 実行中はポーリングで繰り返し読むため、途中の状態がキャッシュに固定されないようにする
+  return NextResponse.json(overview, { headers: { "Cache-Control": "no-store" } });
 }

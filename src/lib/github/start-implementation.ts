@@ -64,7 +64,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "artifactRequired",
     label: "アーティファクトで見た目を出す",
     description:
-      "コードを書き始める前に見た目を自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
+      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
     githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
   {
@@ -195,7 +195,7 @@ export function startImplementationOptionsFromLabels(labels: IssueLabel[]): Star
  * エージェントが代行できない作業で、進捗も`Ready`のまま留まるため、この条件だけでは
  * 「まだ誰も着手していないIssue」と区別が付かず、実装エージェントへ送る導線が
  * 主ボタンとして出てしまう。押しても実装対象が無く、`Implementation`へ進んだ結果
- * 「手作業待ち」ビューでの見え方も壊れる。手作業Issueの出口は
+ * 「ユーザーの作業待ち」ビューでの見え方も壊れる。手作業Issueの出口は
  * `canCompleteManualStep`側の「手作業を完了してクローズ」。
  */
 export function canStartImplementation(

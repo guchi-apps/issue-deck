@@ -83,6 +83,7 @@ const {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueSessionControlJob,
+  expireStaleDispatchJobs,
   listDispatchState,
   prioritizeDispatchJob,
   reportDispatchJob,
@@ -695,6 +696,123 @@ describe("expireStaleDispatchJobs の制御ジョブ", () => {
 });
 
 /**
+ * #1620。pollerは`succeeded`の報告に失敗しても再送を諦めるため、tmuxセッションは立っているのに
+ * ジョブが`RUNNING`のまま残ることがある。そのままタイムアウトさせると、同じIssueが実行キューの
+ * 「実行中」（セッション一覧）と「直近の失敗」に同時に出る。
+ */
+describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
+  function staleLaunchJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      status: "RUNNING",
+      kind: "LAUNCH",
+      targetHost: "subpc",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      tmuxSessionName: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+    dispatchSessionFindMany.mockResolvedValue([]);
+  });
+
+  it("セッションが動いていればSUCCEEDEDとして畳み、セッション名を補う", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "RUNNING" },
+      data: expect.objectContaining({
+        status: "SUCCEEDED",
+        activeKey: null,
+        finishedAt: NOW,
+        tmuxSessionName: "issue-deck-issue-1311",
+      }),
+    });
+  });
+
+  // claim直後に報告が届かなかった場合も同じ（`running`と`succeeded`の両方を落とすと起きる）
+  it("CLAIMEDのままでもセッションが動いていれば救済する", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ status: "CLAIMED" })]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCEEDED" }) }),
+    );
+  });
+
+  it("セッションが無ければ従来どおりTIMEOUTにする", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
+    );
+  });
+
+  // pollerごと落ちていれば`ALIVE`の行はそのまま古びて残る。古い報告で成功と決めない
+  it("探すのは報告が新しいALIVEのセッションだけ", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchSessionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          state: "ALIVE",
+          lastReportedAt: { gte: new Date(NOW.getTime() - 5 * 60 * 1000) },
+          OR: [{ host: "subpc", repositoryFullName: REPOSITORY, issueNumber: 1311 }],
+        }),
+      }),
+    );
+  });
+
+  // 制御ジョブはtmuxを1回叩いて終わる。セッションが動いていることは届いた証拠にならない
+  it("制御ジョブは救済しない", async () => {
+    dispatchJobFindMany.mockResolvedValue([
+      staleLaunchJob({ id: "control-1", status: "QUEUED", kind: "INTERRUPT" }),
+    ]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchSessionFindMany).not.toHaveBeenCalled();
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
+    );
+  });
+});
+
+/**
  * #1479。終了したジョブは24時間表示され続けるため、対処が済んだ失敗を畳めないと新しい失敗が
  * 古いものに埋もれる。**行は消さず`dismissedAt`を入れるだけ**で、失敗理由は後から追える。
  */
@@ -915,12 +1033,54 @@ describe("listDispatchState のIssueタイトル解決", () => {
     dispatchJobFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([jobRow()]);
     repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
     issueFindMany.mockResolvedValue([
-      { number: 1519, title: "実行キューの状態を可視化する", repositoryId: "repo-1" },
+      {
+        id: "issue-1519",
+        number: 1519,
+        title: "実行キューの状態を可視化する",
+        repositoryId: "repo-1",
+      },
     ]);
 
     const state = await listDispatchState(NOW);
 
     expect(state.jobs[0].issueTitle).toBe("実行キューの状態を可視化する");
+    // 画面はこのidでIssue詳細を開く（#1625）。番号だけでは飛べない
+    expect(state.jobs[0].issueId).toBe("issue-1519");
+  });
+
+  // セッションの行のタイトルもIssueへの導線になる（#1625）。ジョブと同じ1回の引き当てで賄う
+  it("セッションの行にもタイトルとidを載せる", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-1519",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1519,
+        state: "ALIVE",
+        exitStatus: null,
+        firstSeenAt: NOW,
+        lastReportedAt: NOW,
+        activity: null,
+        activityAt: null,
+        remoteControlUrl: null,
+        previewUrl: null,
+      },
+    ]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+    issueFindMany.mockResolvedValue([
+      {
+        id: "issue-1519",
+        number: 1519,
+        title: "実行キューの状態を可視化する",
+        repositoryId: "repo-1",
+      },
+    ]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.sessions[0].issueTitle).toBe("実行キューの状態を可視化する");
+    expect(state.sessions[0].issueId).toBe("issue-1519");
   });
 
   // 同期前のIssue・GitHub Appを外したリポジトリでは普通に起きる。ここで落とすとキュー全体が消える
@@ -932,6 +1092,8 @@ describe("listDispatchState のIssueタイトル解決", () => {
     const state = await listDispatchState(NOW);
 
     expect(state.jobs[0].issueTitle).toBeNull();
+    // idも無いので、画面はこの行をリンクにしない（押しても何も起きない行を作らない）
+    expect(state.jobs[0].issueId).toBeNull();
   });
 
   // 別リポジトリの同じ番号を取り違えると、まったく違うタイトルが行に出る
