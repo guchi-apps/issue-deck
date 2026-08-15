@@ -42,6 +42,12 @@ type MobileIssueFilterSheetProps = {
    */
   groupByRepo?: boolean;
   onChangeGroupByRepo?: (value: boolean) => void;
+  /**
+   * いま効いている絞り込み条件の数（`countActiveIssueFilters`）。1件以上のときだけ
+   * 見出しの右に「すべて解除」を出す（#1645）。
+   */
+  activeFilterCount?: number;
+  onClearFilters?: () => void;
 };
 
 const LABEL_COLLAPSE_THRESHOLD = 8;
@@ -80,6 +86,8 @@ export function MobileIssueFilterSheet({
   sortLocked = false,
   groupByRepo = false,
   onChangeGroupByRepo,
+  activeFilterCount = 0,
+  onClearFilters,
 }: MobileIssueFilterSheetProps) {
   const [showAllLabels, setShowAllLabels] = useState(false);
 
@@ -102,8 +110,18 @@ export function MobileIssueFilterSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto overscroll-contain">
-        <SheetHeader>
+        {/* mr-8はSheetContentが右上に出す閉じるボタンの逃げ */}
+        <SheetHeader className="flex-row items-center justify-between gap-2">
           <SheetTitle>絞り込み・並び替え</SheetTitle>
+          {activeFilterCount > 0 && onClearFilters && (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="mr-8 shrink-0 text-sm text-primary"
+            >
+              すべて解除（{activeFilterCount}）
+            </button>
+          )}
         </SheetHeader>
 
         <div className="flex flex-col gap-6 p-4 pt-0">

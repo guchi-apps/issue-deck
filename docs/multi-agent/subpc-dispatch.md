@@ -353,7 +353,8 @@ tmuxセッションが立つ → 回答は質問Issueへのコメントとして
 | 書き込みツール | 使える | `--disallowedTools "Edit,Write,NotebookEdit"`で**封じる** |
 | 開発サーバー | ラベル次第で起動 | 起動しない |
 | 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件（＋気付いた別件があれば`70.confirm`付きの新規Issue。#1528） |
-| 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED**（gitの判定は当てない） |
+| 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED、またはOPENのまま`QUESTION_SESSION_IDLE_MINUTES`（既定30）放置**（gitの判定は当てない。#1648） |
+| 畳んだ後の再起動 | 前回の会話の続きから再開する（`--continue`・#1541） | **引き継がない**（cwdが質問Issue間で共有されるため。#1648） |
 
 **cwdをどれか1つのリポジトリにしない。** そのリポジトリの`CLAUDE.md`だけが最初から効いて
 横断の視点が偏るうえ、他セッションが編集中の作業ツリーへ書き込む余地を残すことになる。
@@ -395,8 +396,45 @@ remote→この環境変数の順で解決する。**issue-deckへ報告する�
 [scripts/prompts/cross-repo-question-agent.md](../../scripts/prompts/cross-repo-question-agent.md)。
 
 **回答後もセッションは残る。** 追い質問は追加指示（#1012）としてこのセッションへ送れる。
-聞き終わったかどうかを知っているのは人だけなので、**質問Issueを閉じることが終了の合図**になる
-（閉じると次の巡回で畳まれる）。
+聞き終わったら質問Issueを閉じる（次の巡回で畳まれる）。
+
+#### 聞き終わらないまま放置されたセッションも畳む（#1648）
+
+「質問Issueを閉じることが終了の合図」だけでは、**追い質問を送らないまま忘れられたセッションを
+畳む経路が1つも無い**。実装セッションと違ってPRもマージも無く、時間切れも無かったため、質問Issueを
+閉じる人が現れない限り永久に残り、その1本ぶんずっと本数の上限（`DISPATCH_MAX_SESSIONS`・#1361）を
+埋めていた。セッションの積み上がりは2026-08-14にホストをメモリ枯渇で止めた実績がある。
+
+そこで、**質問IssueがOPENのままでも`QUESTION_SESSION_IDLE_MINUTES`（既定30・0でこの経路だけ無効）
+放置されていれば畳む**。判定は[scripts/reap-sessions.sh](../../scripts/reap-sessions.sh)の
+`kind == "question"`のブロックにあり、条件4の猶予もこの値を使う（実装セッションの
+`SESSION_IDLE_MINUTES`より短い）。
+
+- **短くしてよい理由は、畳んでも失うものが会話の文脈だけであること。** worktreeもコミットも
+  持たず、回答コメントは質問Issueに残っている。実装セッションのように「手元にしか無い成果物」が
+  消える余地が無い
+- **`Stop`以外は畳まないという共通ゲートはそのまま。** 承認プロンプト待ち（`permission_prompt`）や
+  作業中（`working`）のセッションは従来どおり残るので、回答の途中で畳まれることはない
+- **「回答は終わったがIssueは記録として残したい」ためのラベルは作らない**（#1648）。
+  Issue詳細のセッション表示の「終了」が、Issueをopenのままセッションだけ畳む操作としてすでに
+  ある（`src/components/dashboard/issue-session-status.tsx`）。ラベル方式は質問Issueの記録先
+  リポジトリ全部へラベルを配る必要があり、回収の判定にラベル分岐を増やす代償に見合わない
+- したがって畳む経路は3つになる。**画面の「終了」**（すぐ）・**質問Issueのclose**（次の巡回）・
+  **放置の猶予**（既定30分）
+
+#### 畳んだ質問セッションは前回の会話を引き継がない（#1648）
+
+実装セッションは畳まれても`--continue`で前回の続きから再開する（#1541）が、**質問セッションでは
+これを無効にしている**（`ISSUE_DECK_CLAUDE_RESUME=0`を
+[scripts/start-cross-repo-question.sh](../../scripts/start-cross-repo-question.sh)が渡す）。
+
+`claude --continue`が拾うのは「そのcwdで最後に動いた会話」で、質問セッションのcwdは**質問Issueごと
+ではなくリポジトリごと**に固定されている（#1529）。引き継ぐと、同じリポジトリへの2回目以降の質問が
+**別の質問Issueの会話の続き**として始まる（キックオフの文面も「前回の会話の続きです」になる）。
+放置の猶予で畳まれる機会が増えるほど踏みやすくなるため、質問セッションは常に新しい会話で始める。
+
+畳まれた後に続きを聞きたい場合は、**新しい質問として聞き直す**（画面の「質問する」）。前回の
+やり取りは質問Issueのコメントに残っているので、必要ならその質問Issueを参照させる。
 
 #### 実装はしないが、Issueの起票はしてよい（#1528）
 
@@ -474,7 +512,8 @@ PIDファイルにもログにも載らず、**存在自体が見えないまま
 判定材料は**フックが残した状態ファイル・tmuxのメタデータ・gitとGitHubの事実だけ**で、
 `capture-pane`の内容は読まない。条件の一覧と、状態ファイルの置き場・書式は
 [作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
-閾値は`SESSION_IDLE_MINUTES`（既定60・0で無効）と`SESSION_HANDOFF_IDLE_MINUTES`（既定30・#1541）。
+閾値は`SESSION_IDLE_MINUTES`（既定60・0で無効）と`SESSION_HANDOFF_IDLE_MINUTES`（既定30・#1541）、
+横断質問セッション専用の`QUESTION_SESSION_IDLE_MINUTES`（既定30・#1648）。
 
 **畳んでよいかを起動経路で切る。** 対象になるのはpollerが`run_job()`で起動したセッションだけで、
 `ISSUE_DECK_SESSION_REAPABLE=1`をランチャー経由でtmuxの中まで渡し、`run-issue-session.sh`が
@@ -1033,7 +1072,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 |---|---|---|
 | 同時に起動する本数を減らす | `AppSetting.dispatchConcurrency`（既定2） | アプリ設定ダイアログ |
 | 生かしておくセッションの本数の天井 | `DISPATCH_MAX_SESSIONS`（既定12） | サブPCの`dispatch.env`（後述） |
-| 終わったセッションを早く畳む | `SESSION_IDLE_MINUTES`・`SESSION_HANDOFF_IDLE_MINUTES` | 同上 |
+| 終わったセッションを早く畳む | `SESSION_IDLE_MINUTES`・`SESSION_HANDOFF_IDLE_MINUTES`・`QUESTION_SESSION_IDLE_MINUTES` | 同上 |
 | 先に流したいIssueを割り込ませる | 実行キューの↑ | 画面 |
 
 ホストが落ちた#1361の直接原因は**セッションの本数**で、そこは`DISPATCH_MAX_SESSIONS`が入口で
