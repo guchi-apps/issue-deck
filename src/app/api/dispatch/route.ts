@@ -6,6 +6,7 @@ import {
   parseDispatchHostName,
   parseDispatchJobKind,
   parseDispatchTarget,
+  parseSessionInstruction,
 } from "@/lib/dispatch/dispatch-job";
 import {
   enqueueDispatchJob,
@@ -45,8 +46,9 @@ export async function GET() {
  * **実行できない組み合わせは積む前に弾き、理由を本文で返す**（「ディスパッチ前に弾く」。
  * #1179のコメント）。無言で失敗すると、無人実行では何も起きないまま終わってしまう。
  *
- * `kind`（#1332）を省略すると従来どおりの起動ジョブ。`interrupt`・`kill`は既に立っている
- * セッションへの操作で、**同じ経路に載せる**（受信経路・認証・状態報告を増やさないため）。
+ * `kind`（#1332）を省略すると従来どおりの起動ジョブ。`interrupt`・`kill`・`instruction`（#1012）は
+ * 既に立っているセッションへの操作で、**同じ経路に載せる**（受信経路・認証・状態報告を増やさないため）。
+ * `instruction`のときは本文（`instruction`）が要り、`parseSessionInstruction`を通らなければ400。
  * `question`（#1294）は種別としては存在するが、**まだここでは受け付けない**（実行するpollerが
  * 無い段階で積めるようにすると、`QUEUED`のまま誰も取りに来ないジョブが残る。開けるのはStep 3）。
  */
@@ -74,11 +76,23 @@ export async function POST(request: NextRequest) {
   }
 
   if (isSessionControlJobKind(kind)) {
+    // 追加指示（#1012）の本文はここで検証する。**pollerでも同じ検証を重ねる**が、
+    // 弾いた理由を人へ返せるのは押した側のこちらだけ（pollerが弾くと、届いてから
+    // 最大1分後にジョブの失敗として出る）
+    let instruction: string | null = null;
+    if (kind === "INSTRUCTION") {
+      instruction = parseSessionInstruction(payload?.instruction);
+      if (!instruction) {
+        return NextResponse.json({ error: "invalid_instruction" }, { status: 400 });
+      }
+    }
+
     const controlResult = await enqueueSessionControlJob({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
       hostName,
       kind,
+      instruction,
       requestedByUserId: userId,
     });
     if (!controlResult.ok) {

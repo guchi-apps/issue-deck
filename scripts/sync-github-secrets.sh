@@ -7,6 +7,13 @@
 #
 # 重要: ここで使う `op` は**個人アカウントのセッション**であり、サービスアカウントの
 # 枠を消費しない。したがってサービスアカウントが枯渇していても実行できる。
+# ただし GitHub Actions（.github/workflows/reusable-sync-secrets.yml。issue-deckの画面の
+# ボタンはここを起動する）から実行する場合だけはサービスアカウントを使うため、
+# **枠を消費する**（項目1件につき1リクエスト）。
+#
+# **出力の書式は変えないこと。** `FAIL   <KEY>...` の行と末尾の `同期=N スキップ=M 失敗=K` は、
+# reusable-sync-secrets.yml がパースして issue-deck の画面へ返す（#1309）。
+# 値そのもの・値の長さは、この経路でも一切出さない。
 #
 # 使い方:
 #   op signin                      # 先に個人アカウントでサインインしておく
@@ -52,7 +59,10 @@ done
 command -v op >/dev/null || { echo "1Password CLI (op) がインストールされていません" >&2; exit 1; }
 command -v gh >/dev/null || { echo "GitHub CLI (gh) がインストールされていません" >&2; exit 1; }
 
-if ! op whoami >/dev/null 2>&1; then
+# サービスアカウント（GitHub Actions）ではサインインの概念が無く、環境変数の
+# OP_SERVICE_ACCOUNT_TOKEN がそのまま資格情報になる。`op signin` を促すのは
+# 対話セッション（ローカルCLI）のときだけ。
+if [[ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] && ! op whoami >/dev/null 2>&1; then
   echo "opにサインインしていません。先に 'op signin' を実行してください。" >&2
   echo "（個人アカウントのセッションを使うため、サービスアカウントの枠は消費しません）" >&2
   exit 1

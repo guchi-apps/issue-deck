@@ -7,8 +7,10 @@ import {
   ExternalLink,
   HandHelping,
   Loader2,
+  MessageSquarePlus,
   Monitor,
   OctagonX,
+  SendHorizonal,
   Square,
 } from "lucide-react";
 
@@ -23,14 +25,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
   describeSessionControlRejection,
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
+  parseSessionInstruction,
   resolveSessionControlRejection,
   SESSION_CONTROL_LABELS,
+  SESSION_INSTRUCTION_MAX_LENGTH,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
@@ -51,9 +56,11 @@ import { cn } from "@/lib/utils";
  * **入力待ちのときはRemote ControlのURLを出す。** これが承認の唯一の出口で、従来はSignalyの
  * 通知の中にしか無く、通知を消すと承認待ちであること自体を知る手段が無くなっていた。
  *
- * **画面から送るのは「停止（C-c）」と「セッションを閉じる」の2つだけで、入力そのものは送らない**
- * （`docs/multi-agent/gates.md`の禁止事項。文字列と確定キーを送って選択フォームに誤答させた
- * 事故がある）。答えるのはRemote Control側の役目のまま。
+ * **人が書いた1行だけを「追加指示」として送れる**（#1012）。pollerが3段階プロトコル
+ * （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送り、承認プロンプトや
+ * 選択フォームが出ている間は送らずに見送る。`docs/multi-agent/gates.md`が禁じているのは
+ * **実行体が判断して内容のある入力を送ること**で、ここで本文を決めるのは人。プリセットも
+ * 押すのは人という点は変わらない。答えを選ばせる操作（選択肢の確定）は引き続きRemote Control側。
  *
  * 実行はサブPCのpollerが次の巡（既定60秒間隔）で行うため、押した直後は「送信しました」を出す。
  *
@@ -66,6 +73,16 @@ const TONE_CLASS: Record<IssueSessionTone, string> = {
   done: "bg-muted text-muted-foreground ring-border",
   error: "bg-destructive/15 text-destructive ring-destructive",
 };
+
+/**
+ * 追加指示の定型文（#1012）。**押すのは人**で、状況を見て自動で選ぶ実行体は作らない
+ * （`docs/multi-agent/gates.md`）。よく使う2つだけを置き、入力欄へ差し込むだけにしている
+ * （そのまま送らないのは、送る前に手直しできる形にしておくため）。
+ */
+const INSTRUCTION_PRESETS = [
+  "計画を承認します。実装に進んでください。",
+  "CIが失敗しています。ログを確認して直してください。",
+] as const;
 
 function ToneIcon({ tone }: { tone: IssueSessionTone }) {
   const className = "size-3.5";
@@ -96,6 +113,10 @@ export function IssueSessionStatus({
   const [confirmingKill, setConfirmingKill] = useState(false);
   // 停止の失敗は押した場所に出す（`dispatch.error`は起動ボタンの下に出るため、そちらへ流さない）
   const [controlError, setControlError] = useState<string | null>(null);
+  // 追加指示（#1012）。入力欄は押されるまで畳んでおく（常時出すと、停止・終了より
+  // 使う機会の少ないものが場所を取る）
+  const [instructionOpen, setInstructionOpen] = useState(false);
+  const [instruction, setInstruction] = useState("");
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const controlJob = findSessionControlJobForIssue(
@@ -116,20 +137,42 @@ export function IssueSessionStatus({
     kind: "KILL",
     hasActiveControlJob,
   });
+  const instructionRejection = resolveSessionControlRejection({
+    host,
+    session,
+    kind: "INSTRUCTION",
+    hasActiveControlJob,
+  });
+  // 送れる本文かどうかは受け口（`POST /api/dispatch`）と同じ関数で判定する。
+  // 画面だけ緩いと、押せたのに400で弾かれる
+  const instructionBody = parseSessionInstruction(instruction);
   // 消えたセッションには操作する相手がいない。`EXITED`/`FAILED`（ペインが残っている）は
   // 「閉じる」で片付けられるため、そちらは出したままにする
   const canControl = session.state !== "GONE";
   const showInterrupt = canControl && session.state === "ALIVE";
+  // 追加指示は生きているセッションにしか送る相手がいない。**対応していないホストでも
+  // ボタンは出したまま無効にし、理由を下に出す**（#1332の「停止」と同じ扱い。導線ごと
+  // 消すと、なぜ送れないのかが画面から分からなくなる）
+  const showInstruction = canControl && session.state === "ALIVE";
 
-  async function send(kind: "interrupt" | "kill") {
+  async function send(kind: "interrupt" | "kill" | "instruction", body?: string) {
     setControlError(null);
     const result = await dispatch.sendSessionControl({
       repositoryFullName: session.repositoryFullName,
       issueNumber: session.issueNumber,
       hostName: session.host,
       kind,
+      instruction: body,
     });
-    if (!result.ok) setControlError(result.message);
+    if (!result.ok) {
+      setControlError(result.message);
+      return;
+    }
+    // 積めたときだけ入力欄を空にして畳む。失敗時に消すと、書き直すのに打ち直しになる
+    if (kind === "instruction") {
+      setInstruction("");
+      setInstructionOpen(false);
+    }
   }
 
   return (
@@ -191,6 +234,18 @@ export function IssueSessionStatus({
             {SESSION_CONTROL_LABELS.INTERRUPT.action}
           </Button>
         )}
+        {/* 追加指示（#1012）。生きているセッションにしか送る相手がいない */}
+        {showInstruction && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={instructionRejection !== null || dispatch.isSubmitting}
+            onClick={() => setInstructionOpen((open) => !open)}
+          >
+            <MessageSquarePlus />
+            {SESSION_CONTROL_LABELS.INSTRUCTION.action}
+          </Button>
+        )}
         {canControl && (
           <Button
             variant="outline"
@@ -203,6 +258,80 @@ export function IssueSessionStatus({
           </Button>
         )}
       </div>
+      {/* 本文を書く場所。**押した人が書いた1行だけを送る**（実行体が組み立てる経路は無い） */}
+      {showInstruction && instructionOpen && (
+        <div className="flex w-full flex-col gap-1.5">
+          <div className="flex w-full gap-2">
+            <Input
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                if (!instructionBody || instructionRejection !== null) return;
+                void send("instruction", instructionBody);
+              }}
+              maxLength={SESSION_INSTRUCTION_MAX_LENGTH}
+              placeholder="セッションへ送る指示（1行）"
+              aria-label="追加指示の本文"
+              disabled={dispatch.isSubmitting}
+            />
+            <Button
+              size="sm"
+              disabled={
+                instructionBody === null ||
+                instructionRejection !== null ||
+                dispatch.isSubmitting
+              }
+              onClick={() => {
+                if (!instructionBody) return;
+                void send("instruction", instructionBody);
+              }}
+            >
+              <SendHorizonal />
+              送信
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {INSTRUCTION_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                variant="ghost"
+                size="sm"
+                className="h-auto px-2 py-1 text-xs"
+                disabled={dispatch.isSubmitting}
+                // **差し込むだけで送らない。** 押した勢いでそのまま届くと、書き直す機会が無い
+                onClick={() => setInstruction(preset)}
+              >
+                {preset}
+              </Button>
+            ))}
+          </div>
+          <p className="w-full break-words text-left text-xs text-muted-foreground">
+            改行は送れません（{SESSION_INSTRUCTION_MAX_LENGTH}
+            文字まで）。長い指示はIssueにコメントし、ここには「コメントを読んでから続けて」と送ってください。
+            届くまで最大1分ほどかかり、承認プロンプトや選択フォームが出ている間は送らずに見送ります。
+          </p>
+        </div>
+      )}
+      {/* 押せない理由は押す前に出す。未処理の操作がある場合は、下のジョブの状態表示が
+          同じことを言うので出さない（`killRejection`と同じ扱い） */}
+      {showInstruction &&
+        instructionRejection !== null &&
+        instructionRejection !== "already_queued" &&
+        instructionRejection !== killRejection && (
+          <p
+            className={cn(
+              "w-full break-words text-xs text-muted-foreground",
+              align === "end" ? "text-right" : "text-left",
+            )}
+          >
+            {describeSessionControlRejection(instructionRejection, {
+              hostName: session.host,
+              kind: "INSTRUCTION",
+            })}
+          </p>
+        )}
       {/* 押せない理由は押す前に出す（#1180の「選べない理由は押す前に出す」と同じ立場）。
           未処理の操作がある場合は、下のジョブの状態表示が同じことを言うので出さない */}
       {canControl && killRejection !== null && killRejection !== "already_queued" && (
@@ -230,7 +359,23 @@ export function IssueSessionStatus({
           )}
         >
           {describeDispatchJobStatus(controlJob.status, controlJob.kind).label}
+          {/* 何を送った（送ろうとしている）のかを出す（#1012）。届くまで間があるため、
+              これが無いと送り直してよいのか判断できない */}
+          {controlJob.instruction && `「${controlJob.instruction}」`}
           {isActiveDispatchJobStatus(controlJob.status) && "（反映まで最大1分ほどかかります）"}
+        </p>
+      )}
+      {/* poller側が返した理由（#1012）。追加指示の見送りは「なぜ送らなかったか」がここにしか
+          残らない（承認プロンプト表示中・作業中・入力欄に打ちかけがある、など）。
+          終わったジョブにだけ出す（送信中に前回の理由が残っていると読み違える） */}
+      {controlJob?.message && !isActiveDispatchJobStatus(controlJob.status) && (
+        <p
+          className={cn(
+            "w-full break-words text-xs text-muted-foreground",
+            align === "end" ? "text-right" : "text-left",
+          )}
+        >
+          {controlJob.message}
         </p>
       )}
       {controlError && (

@@ -327,7 +327,19 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
   );
 }
 
-export function computeLabelSummary(issues: Issue[]): LabelSummary[] {
+export function computeLabelSummary(
+  issues: Issue[],
+  options?: {
+    /**
+     * 渡したissuesに1件も無くても、件数0として一覧に残すラベル名（＝選択中のラベル）。
+     * 絞り込みを適用した集合を基準にすると、選択中のラベルが該当0件になった瞬間に
+     * サイドバーから消えて選択を解除できなくなるため（#1441）。
+     */
+    keepLabelNames?: string[];
+    /** keepLabelNamesの色を引くための、絞り込み前のラベル一覧 */
+    fallbackLabels?: LabelSummary[];
+  },
+): LabelSummary[] {
   const summaryByName = new Map<string, LabelSummary>();
 
   for (const issue of issues) {
@@ -341,5 +353,31 @@ export function computeLabelSummary(issues: Issue[]): LabelSummary[] {
     }
   }
 
+  for (const name of options?.keepLabelNames ?? []) {
+    if (summaryByName.has(name)) continue;
+    const fallback = options?.fallbackLabels?.find((label) => label.name === name);
+    // 色を引けないラベル（絞り込み前にも1件も無い＝手入力のクエリ等）はグレーで表示する
+    summaryByName.set(name, { name, color: fallback?.color ?? "#6e7781", count: 0 });
+  }
+
   return [...summaryByName.values()].sort((a, b) => b.count - a.count);
+}
+
+/**
+ * 左メニュー「ラベル」に出す一覧と件数を求める（#1441）。
+ * 絞り込み前の全Issueから数えると、リポジトリを選んでいても全リポジトリ分の件数が出てしまい、
+ * 同じメニューの「全体」の件数（computeNavCounts）とも食い違う。ラベル以外の絞り込み
+ * （キーワード・リポジトリ・状態・担当者）を適用した集合を基準にする。ラベルの絞り込み自体を
+ * 外すのは、1つ選んだ時点で他のラベルが0件になり選び直せなくなるため。
+ * fallbackLabelsは、選択中のラベルが該当0件になったときに色を引くための絞り込み前の一覧。
+ */
+export function computeFilterLabelSummary(
+  issues: Issue[],
+  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  fallbackLabels?: LabelSummary[],
+): LabelSummary[] {
+  return computeLabelSummary(applyIssueFilters(issues, { ...filters, labels: [] }), {
+    keepLabelNames: filters.labels,
+    fallbackLabels,
+  });
 }

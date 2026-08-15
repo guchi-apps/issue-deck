@@ -542,7 +542,13 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 **畳むと文脈が失われる。** #1178 ではPRのマージ後に追加指示が来て同じセッションを再利用した実績が
 あるため、猶予（条件4）と`11.local`（条件5）で「まだ触る可能性がある間」は残す。それでも畳まれた
 後に追加指示が必要になった場合は、issue-deckの画面から起動し直す（worktreeは残っているため
-再開扱いになる）。
+再開扱いになる）。**`claude --resume`でsession idから文脈を戻す形は採っていない**
+（理由は[subpc-dispatch.md](subpc-dispatch.md#claude---resumeによるsession-idの管理は持たない)）。
+
+**生きている間の追加指示は画面から送れる**（#1012）。Issue詳細のセッション表示の「追加指示を送る」で、
+人が書いた1行を3段階プロトコルで入力欄へ流す。承認プロンプト・選択フォームの表示中や、入力欄に
+打ちかけがあるときは送らずに見送り、理由が画面に出る
+（[subpc-dispatch.md](subpc-dispatch.md#走っているセッションへ追加指示を送る1012)）。
 
 **`11.local`を外さないまま止まったセッションは畳まれない。** `00.check-user`で人へ引き上げて
 止まっているセッションが該当する。これは意図した挙動で、人が見るまで残す。
@@ -670,6 +676,36 @@ allowedDevOrigins: ["localhost", "127.0.0.1", "**.sslip.io", "**.ts.net", ...ext
 
 MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開く場合はワイルドカードに当たらない。
 `.env.local`の`ISSUE_DECK_DEV_ALLOWED_ORIGINS`にカンマ区切りで足す（開発サーバーにしか効かない）。
+
+### 開発サーバーでログインできないとき（#1419）
+
+ログインボタンを押すと`https://ci-placeholder.supabase.co/auth/v1/authorize?...`へ飛んで画面が
+真っ白になっていた。**サブPCの本体チェックアウトの`.env.local`に、CIワークフローが使うダミー値
+（`https://ci-placeholder.supabase.co` / `ci-placeholder`）がそのまま入っていた**のが原因。
+
+ログインに要るのは次の3つで、**どれが欠けても最後まで通らない**。
+
+| 設定 | 場所 | 欠けたときに起きること |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `.env.local` | `signInWithOAuth()`が存在しないホストへ飛ばし、画面が真っ白になる |
+| `ALLOWED_EMAILS` | `.env.local` | 認証は通るが`/auth/callback`の`isEmailAllowed()`が偽になり`?error=not_allowed`で戻る |
+| リダイレクト先の許可 | Supabaseダッシュボード（Redirect URLs） | Supabase側で弾かれ、コールバックまで戻ってこない。**worktreeごとにポートが違う**ため`http://<ホスト名>.<tailnet>.ts.net:*/auth/callback`のようにポートをワイルドカードで登録する |
+
+**`ALLOWED_EMAILS`は実際のSupabaseの値より先に入れる。** 空のまま実プロジェクトへ繋ぐと、
+`/auth/callback`が許可外ユーザーとしてSupabase Authユーザーの削除（`admin.auth.admin.deleteUser`）へ
+進む経路に入る。Supabaseプロジェクトは他アプリ（asset-manager等）と共用のため、順序を守る。
+
+気づけるようにしてあるのは2箇所（#1419）。判定の実体は`src/lib/supabase/config.ts`。
+
+- **ログイン画面**: 未設定ならボタンを押せなくし、どのキーが足りないかをカード内に出す。
+- **開発サーバーの起動ログ**: `scripts/dev.sh`が起動時に警告を1行出す（`.dev-servers/issue-<番号>.log`の
+  先頭付近に残るので、画面を開く前に気づける）。起動自体は止めない。
+
+**直す場所は本体チェックアウト（`~/apps/issue-deck/.env.local`）。** worktreeの`.env.local`は
+そこからのコピーなので、本体がダミー値だと以降作るworktreeすべてが同じ状態になる。既存worktreeへは
+`scripts/lib/env-file-sync.sh`がセッションの再開時に追従させる。**通常は既存キーの値に触らないが、
+CI用プレースホルダ（`ci-placeholder`）が入っている値だけは本体の実値で置き換える**（誰も意図して
+入れない値のため）。反映にはそのworktreeのセッションを起こし直す（＝開発サーバーの再起動）が要る。
 
 ## セキュリティ上の前提
 

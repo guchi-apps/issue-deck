@@ -46,6 +46,12 @@ deploy/             PM2の ecosystem.config.js
   `search-query.ts` などがこの形。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
+  font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
+  元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
+  `cn()`へ`text-sm`を渡すとtailwind-mergeがベースの`text-base`を消してしまう点に注意。
+  取りこぼし対策として、[`app/globals.css`](../src/app/globals.css) に`md`未満で16pxを
+  下回らせないルールを置いている。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 
@@ -119,6 +125,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `prview`が`all`のため、そのまま渡すと毎回クローズ済みまで取りに行ってしまう）、
   **一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の部分集合なので、
   狭める向きで取り直すのは消費にしかならない）。
+- **スマホのフッターは「ホーム／Issue／PR／設定」で、タブのidは`mscreen`の値そのもの**（#1436）。
+  「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧（→リポジトリ別Issue一覧）。
+  全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
+  「よくつかうフィルター」「保存したフィルター」からのドリルダウンだけにした（点灯するタブは
+  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。**PRタブから開くときの
+  ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
+  しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
+  すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
+  同じく履歴を積まない（`selectPullRequestView`）。
 - **左メニューのPR項目は状態別の3ビューで、母集団を決めるのは「全てのPR」だけ**（#1312）。
   ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
@@ -174,6 +189,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）を判定しない**。
   リポジトリあたり2リクエスト増えるのに対し、その状態はほぼ常にリリースworkflowのrunが
   実行中か失敗として現れるため。`idle`のリポジトリは応答に含めない。
+  **マージ待ちPRを「要操作」（オレンジ強調）にする基準は、バンプPR・develop→mainのリリースPRの
+  どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
+  マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
+  取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
+  なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
+  ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -220,6 +241,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
   同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
+  **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
+  受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
+  （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
+  終了時に締めのコメントを書く（`lib/dispatch/session-wrapup.ts`。`/sessions/ended`とpollerの
+  巡回の両方から呼ばれるが、**自分のマーカーを「記録あり」に数えるので投稿は1回**。
+  `00.check-user`は付けない）。インストールトークンの取得は
+  `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
@@ -256,12 +284,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `--append-system-prompt`で渡す。そこを通らない無人実行のために、同じ文面を`.github/prompts/`・
   `scripts/prompts/`の「## 出力言語」にも置いている。**片方だけ変えない。** 設計は
   [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)。
-- **起動スクリプトとセッション通知のフックが実際に動かすのは、worktreeではなく本体リポジトリの
-  作業ツリー（`~/apps/issue-deck/scripts/`）のファイル**（#1274）。worktreeは毎回
-  `origin/develop`から作られるのに、本体の作業ツリーを新しくするのは人の`git pull`だけなので、
-  `scripts/`の修正はマージしただけでは反映されない。`scripts/lib/launcher-scripts-sync.sh`の
-  `warn_launcher_scripts_stale`が起動前に差分を警告する（個人設定の警告と同じく、
-  **警告するだけで自動pullはしない**）。経路の表は
+- **セッションと一緒に動くスクリプト（`run-issue-session.sh`・`session-notify.sh`・
+  `scripts/lib/`・`scripts/prompts/`）は、`origin/develop`から取り出した同期コピーから走る**
+  （#1274・#1438）。worktreeは毎回`origin/develop`から作られるのに、本体の作業ツリー
+  （`~/apps/issue-deck/scripts/`）を新しくするのは人の`git pull`だけで、`scripts/`の修正は
+  マージしただけでは反映されなかった（#1438は、承認と同時に`00.check-user`を外すフック設定が
+  生成されないという形でこれを踏んだ）。`scripts/lib/launcher-scripts-sync.sh`の
+  `resolve_launcher_scripts_dir`が置き場所を決め、`warn_launcher_scripts_stale`が差分を警告する。
+  **同期コピーを使うのは作業ツリーが単に古いだけのときに限り、未コミットの変更があれば
+  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 入口の`start-issue.sh`と
+  pollerは作業ツリーのまま。経路の表は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
@@ -281,6 +313,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   引く側を`lib/dispatch/pending-dispatch.ts`に分けているのは、`lib/dispatch/jobs.ts`が
   セッション経由でGitHub Appの認証（読み込み時点で`GITHUB_APP_*`を要求する）を引きずるため。
   Issue一覧にその資格情報を要求させない。
+- **1Password→GitHubのシークレット同期は、issue-deckが書くのではなく対象リポジトリのActionsを
+  起動する**（#1309）。設定ダイアログの「1Password → GitHub のシークレット同期」から
+  `POST /api/secrets-sync`が`sync-secrets.yml`を`workflow_dispatch`し、1Passwordの読み取りも
+  GitHubへの書き込みも対象リポジトリのAction（`reusable-sync-secrets.yml`が
+  `scripts/sync-github-secrets.sh`をそのまま実行する）の中で完結する。**issue-deckはSecretsを
+  書けないままにする**——16リポジトリを操作する立場のため、書き込み権限を持たせると侵害時の
+  影響範囲が全リポジトリのデプロイ用シークレットに広がる（`docs/cross-repo-automation.md`）。
+  結果は`POST /api/secrets-sync/report`（認証は`PROGRESS_REPORT_SECRET`。進捗報告APIと同じ値）で
+  戻り、`SecretSyncRun`に残る。**保存も表示も件数と失敗した項目名だけで、値も値の長さも持たない**
+  （長さも手がかりになる）。判断は[`lib/secrets-sync.ts`](../src/lib/secrets-sync.ts)の純粋関数、
+  DBとの往復は[`lib/secrets-sync-runs.ts`](../src/lib/secrets-sync-runs.ts)。
+  **CLIから直接叩く経路とActions経由では、消費する1Passwordの枠が違う**——CLIは個人アカウントの
+  セッションで枠を消費しないが、Actionsはサービスアカウント（アカウント全体で1,000件/日）を使う。
+  そのため画面側にキーの絞り込み・確認ダイアログ・クールダウン（直近の成功から10分）を置いている。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

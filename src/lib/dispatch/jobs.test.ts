@@ -66,6 +66,7 @@ function host(overrides: Record<string, unknown> = {}) {
     lastSeenAt: new Date(NOW.getTime() - 30_000),
     // セッションの操作（#1332）に対応したpoller
     sessionControlCapable: true,
+    instructionCapable: true,
     maxConcurrency: null,
     ...overrides,
   };
@@ -267,12 +268,16 @@ describe("reportDispatchJob の skipped", () => {
  * （cloneの有無は問わない代わりに、対象のセッションとpollerの対応が要る）。
  */
 describe("enqueueSessionControlJob", () => {
-  async function control(kind: "INTERRUPT" | "KILL" = "INTERRUPT") {
+  async function control(
+    kind: "INTERRUPT" | "KILL" | "INSTRUCTION" = "INTERRUPT",
+    instruction?: string,
+  ) {
     return enqueueSessionControlJob({
       repositoryFullName: REPOSITORY,
       issueNumber: 1332,
       hostName: "subpc",
       kind,
+      instruction,
       requestedByUserId: null,
       now: NOW,
     });
@@ -298,6 +303,28 @@ describe("enqueueSessionControlJob", () => {
           tmuxSessionName: "issue-deck-issue-1332",
         }),
       }),
+    );
+  });
+
+  // #1012。本文は`INSTRUCTION`のときだけ保存し、それ以外の種別では持たせない
+  it("追加指示は本文を持ち、専用の名前空間で積む", async () => {
+    const result = await control("INSTRUCTION", "計画を承認します。実装に進んでください。");
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "INSTRUCTION",
+          activeKey: "instruction:guchi-apps/issue-deck#1332",
+          instruction: "計画を承認します。実装に進んでください。",
+        }),
+      }),
+    );
+  });
+
+  it("停止・終了には本文を持たせない", async () => {
+    await control("KILL", "紛れ込んだ本文");
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ instruction: null }) }),
     );
   });
 
@@ -409,20 +436,45 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(launchQueries).toEqual([]);
   });
 
-  it("対応していないホストには制御ジョブを配らない", async () => {
-    dispatchHostFindUnique.mockResolvedValue(host({ sessionControlCapable: null }));
+  /** claimが引きに行った種別の一覧（失効を掃く問い合わせは`targetHost`が無いので除く） */
+  function claimedKinds(): unknown[] {
+    return dispatchJobFindMany.mock.calls
+      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
+      .filter((where) => where.targetHost !== undefined)
+      .map((where) => where.kind);
+  }
+
+  it("何も申告していないホストには制御ジョブを配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ sessionControlCapable: null, instructionCapable: null }),
+    );
     dispatchJobFindMany.mockResolvedValue([]);
 
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
 
-    // 制御ジョブを取りに行く問い合わせ自体が無いこと（失効を掃く問い合わせは種別を見るので除く）
-    const claimQueries = dispatchJobFindMany.mock.calls
-      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
-      .filter((where) => where.targetHost !== undefined);
-    expect(claimQueries.length).toBeGreaterThan(0);
-    for (const where of claimQueries) {
-      expect(where.kind).toBe("LAUNCH");
-    }
+    const kinds = claimedKinds();
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(kinds).toEqual(kinds.map(() => "LAUNCH"));
+  });
+
+  // #1012。停止・終了は固定の`C-c`だけを送るのに対し、追加指示は内容のある文字列を送る。
+  // 実装が入っていないpollerへ配ると未知の種別として`failed`になり、指示が必ず失われる
+  it("申告は種別ごとに独立している", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    dispatchHostFindUnique.mockResolvedValue(host({ instructionCapable: null }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(claimedKinds()).toContainEqual({ in: ["INTERRUPT", "KILL"] });
+
+    dispatchJobFindMany.mockClear();
+    dispatchHostFindUnique.mockResolvedValue(host({ sessionControlCapable: null }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(claimedKinds()).toContainEqual({ in: ["INSTRUCTION"] });
+
+    dispatchJobFindMany.mockClear();
+    dispatchHostFindUnique.mockResolvedValue(host());
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(claimedKinds()).toContainEqual({ in: ["INTERRUPT", "KILL", "INSTRUCTION"] });
   });
 
   // 枠を消費させると、停止を1回押しただけで次の起動が詰まる

@@ -34,9 +34,10 @@ export type MobileScreen =
     }
   | { kind: "repos" }
   | { kind: "settings" }
-  // PR一覧（#1058）。ホームからのドリルダウンで、ボトムナビのタブは持たない。
-  // どの状態別ビューを見ているかは`prview`クエリ（PCと共有）が持つ（#1312）
-  | { kind: "pull-requests" }
+  // PR一覧（#1058）。どの状態別ビューを見ているかは`prview`クエリ（PCと共有）が持つ（#1312）。
+  // #1436でボトムナビのタブを持つようになったため、Issue一覧と同じく遷移元（`origin`）で
+  // 戻る導線の有無を切り替える（ホームの「Pull Request」からのドリルダウンでのみ出す）
+  | { kind: "pull-requests"; origin: "tab" | "home" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -49,6 +50,13 @@ export type MobileScreen =
       back: MobileScreen;
     }
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
+
+/**
+ * フッターの「PR」タブから開くときのビュー（#1436）。取得がopenのPRだけで済む
+ * 「処理中のPR」にしてある。`DEFAULT_PULL_REQUEST_VIEW`（`all`）は画面内のリンクから
+ * マージ済みPRを直接開く経路（#1260）のための既定なので、そちらは変えない。
+ */
+const PULL_REQUEST_TAB_DEFAULT_VIEW: PullRequestViewId = "in-progress";
 
 // スマホ画面の現在地をURLクエリ（mscreen/mrepo/missue/mview/mlabels/mstate/massignee/msort）に保持する。
 // ステートのみで管理するとページ更新時に必ずホーム画面へ戻ってしまい、Issue詳細から一覧へ
@@ -152,7 +160,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     if (screenParam === "pull-requests") {
-      return { kind: "pull-requests" };
+      return { kind: "pull-requests", origin };
     }
 
     return { kind: "home" };
@@ -161,7 +169,9 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const navigate = useCallback(
     (
       next: {
-        screen: MobileBottomNavTab | "issue-detail" | "repo-detail" | "pull-requests";
+        // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
+        // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）
+        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -264,13 +274,39 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigateParams],
   );
 
-  const selectTab = useCallback((tab: MobileBottomNavTab) => navigate({ screen: tab }), [navigate]);
+  const selectTab = useCallback(
+    (tab: MobileBottomNavTab) =>
+      navigate(
+        tab === "pull-requests"
+          ? { screen: tab, prview: PULL_REQUEST_TAB_DEFAULT_VIEW }
+          : { screen: tab },
+      ),
+    [navigate],
+  );
 
   // ホームからPR一覧へ遷移する（#1058）。Issueの絞り込み条件は引き継がない。
   // どの状態別ビューを開くかはホームで選んだ項目が決める（#1312）。
+  // フッターのタブから開いた場合と区別して戻る導線を出すため、遷移元を残す（#1436）。
   const selectPullRequests = useCallback(
-    (prview: PullRequestViewId) => navigate({ screen: "pull-requests", prview }),
+    (prview: PullRequestViewId) =>
+      navigate({ screen: "pull-requests", prview, origin: "home" }),
     [navigate],
+  );
+
+  // PR一覧の画面内タブでビューを切り替える（#1436）。Issue一覧のタブ切り替え
+  // （updateListFilters）と同じくsilent＝履歴を積まず、スケルトンも挟まない。
+  // 同じ見た目の操作なのに戻る操作の重みが画面ごとに変わると読めなくなるため（#1396）。
+  const selectPullRequestView = useCallback(
+    (prview: PullRequestViewId) =>
+      navigate(
+        {
+          screen: "pull-requests",
+          prview,
+          origin: mobileScreen.kind === "pull-requests" ? mobileScreen.origin : undefined,
+        },
+        { silent: true },
+      ),
+    [navigate, mobileScreen],
   );
 
   const selectRepository = useCallback(
@@ -445,6 +481,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     isPending,
     selectTab,
     selectPullRequests,
+    selectPullRequestView,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

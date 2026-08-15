@@ -49,7 +49,27 @@ describe("summarizeReleaseButtonStatus", () => {
     ).toBe("idle");
   });
 
-  it("develop→main PRがマージ待ち（release_pr_open）はaction_requiredを返す", () => {
+  it.each(["success", "failure", "unknown"] as const)(
+    "develop→main PRがマージ待ち（release_pr_open）でciStateが%sの場合はaction_requiredを返す",
+    (ciState) => {
+      expect(
+        summarizeReleaseButtonStatus(
+          baseStatus({
+            phase: "release_pr_open",
+            releasePullRequest: {
+              number: 1,
+              url: "https://github.com/example/example/pull/1",
+              title: "release",
+              ciState,
+              mergeable: null,
+            },
+          }),
+        ),
+      ).toBe("action_required");
+    },
+  );
+
+  it("develop→main PRがオープン中でもciStateがpendingの間はprogressingを返す（#1433）", () => {
     expect(
       summarizeReleaseButtonStatus(
         baseStatus({
@@ -58,12 +78,12 @@ describe("summarizeReleaseButtonStatus", () => {
             number: 1,
             url: "https://github.com/example/example/pull/1",
             title: "release",
-            ciState: "success",
+            ciState: "pending",
             mergeable: null,
           },
         }),
       ),
-    ).toBe("action_required");
+    ).toBe("progressing");
   });
 
   it.each(["success", "failure", "unknown"] as const)(
@@ -187,7 +207,7 @@ function summaryInput(
     workflowRun: null,
     deployWorkflowRun: null,
     bumpPullRequest: null,
-    releasePullRequestOpen: false,
+    releasePullRequest: null,
     releasePending: false,
     ...overrides,
   };
@@ -198,10 +218,13 @@ describe("summarizeReleaseStatus", () => {
     expect(summarizeReleaseStatus(summaryInput())).toBe("idle");
   });
 
-  it("develop→mainのPRがオープン中はaction_requiredを返す", () => {
-    expect(summarizeReleaseStatus(summaryInput({ releasePullRequestOpen: true }))).toBe(
-      "action_required",
-    );
+  it("develop→mainのPRのCIがpendingの間はprogressing、通過後はaction_requiredを返す（#1433）", () => {
+    expect(
+      summarizeReleaseStatus(summaryInput({ releasePullRequest: { ciState: "pending" } })),
+    ).toBe("progressing");
+    expect(
+      summarizeReleaseStatus(summaryInput({ releasePullRequest: { ciState: "success" } })),
+    ).toBe("action_required");
   });
 
   it("バンプPRのCIがpendingの間はprogressing、通過後はaction_requiredを返す", () => {
@@ -225,7 +248,7 @@ describe("summarizeReleaseStatus", () => {
     expect(
       summarizeReleaseStatus(
         summaryInput({
-          releasePullRequestOpen: true,
+          releasePullRequest: { ciState: "success" },
           deployWorkflowRun: { status: "completed", conclusion: "failure" },
         }),
       ),

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyIssueFilters,
+  computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -247,6 +248,103 @@ describe("computeLabelSummary", () => {
     expect(computeLabelSummary(issues)).toEqual([
       { name: "bug", color: "red", count: 2 },
       { name: "docs", color: "blue", count: 1 },
+    ]);
+  });
+
+  it("keepLabelNamesに渡したラベルは該当0件でも件数0で残す", () => {
+    const issues = [
+      makeIssue({ id: "1", labels: [{ name: "bug", color: "red", description: null }] }),
+    ];
+    expect(
+      computeLabelSummary(issues, {
+        keepLabelNames: ["docs"],
+        fallbackLabels: [{ name: "docs", color: "blue", count: 5 }],
+      }),
+    ).toEqual([
+      { name: "bug", color: "red", count: 1 },
+      { name: "docs", color: "blue", count: 0 },
+    ]);
+  });
+
+  it("keepLabelNamesのラベルが既に含まれていれば件数を上書きしない", () => {
+    const issues = [
+      makeIssue({ id: "1", labels: [{ name: "bug", color: "red", description: null }] }),
+    ];
+    expect(computeLabelSummary(issues, { keepLabelNames: ["bug"] })).toEqual([
+      { name: "bug", color: "red", count: 1 },
+    ]);
+  });
+});
+
+describe("computeFilterLabelSummary", () => {
+  const issues = [
+    makeIssue({
+      id: "1",
+      repositoryFullName: "owner/repo-a",
+      labels: [{ name: "bug", color: "red", description: null }],
+    }),
+    makeIssue({
+      id: "2",
+      repositoryFullName: "owner/repo-b",
+      labels: [{ name: "bug", color: "red", description: null }],
+    }),
+    makeIssue({
+      id: "3",
+      repositoryFullName: "owner/repo-b",
+      labels: [{ name: "docs", color: "blue", description: null }],
+    }),
+    makeIssue({
+      id: "4",
+      state: "closed",
+      repositoryFullName: "owner/repo-a",
+      labels: [{ name: "bug", color: "red", description: null }],
+    }),
+  ];
+
+  // #1441: リポジトリを選んでも全リポジトリ分の件数が出ていた
+  it("リポジトリを絞り込むと、そのリポジトリのラベルと件数だけを返す", () => {
+    expect(
+      computeFilterLabelSummary(issues, {
+        ...DEFAULT_FILTERS,
+        repos: ["owner/repo-a"],
+        state: "open",
+      }),
+    ).toEqual([{ name: "bug", color: "red", count: 1 }]);
+  });
+
+  it("状態の絞り込みにも追随する", () => {
+    expect(
+      computeFilterLabelSummary(issues, {
+        ...DEFAULT_FILTERS,
+        repos: ["owner/repo-a"],
+        state: "all",
+      }),
+    ).toEqual([{ name: "bug", color: "red", count: 2 }]);
+  });
+
+  it("ラベルの絞り込み自体は適用せず、他のラベルの件数を保つ", () => {
+    expect(
+      computeFilterLabelSummary(issues, {
+        ...DEFAULT_FILTERS,
+        state: "open",
+        labels: ["docs"],
+      }),
+    ).toEqual([
+      { name: "bug", color: "red", count: 2 },
+      { name: "docs", color: "blue", count: 1 },
+    ]);
+  });
+
+  it("選択中のラベルが該当0件になっても、解除できるよう件数0で残す", () => {
+    expect(
+      computeFilterLabelSummary(
+        issues,
+        { ...DEFAULT_FILTERS, repos: ["owner/repo-a"], state: "open", labels: ["docs"] },
+        [{ name: "docs", color: "blue", count: 1 }],
+      ),
+    ).toEqual([
+      { name: "bug", color: "red", count: 1 },
+      { name: "docs", color: "blue", count: 0 },
     ]);
   });
 });

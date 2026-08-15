@@ -1,5 +1,5 @@
-import { db } from "@/lib/db";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -104,23 +104,6 @@ export function buildSessionPlanCommentBody(params: {
 }
 
 /**
- * 対象リポジトリのインストールトークンを取る。issue-deckが接続していないリポジトリでは
- * こちらから書く手段が無いのでnullを返す（`session-escalation.ts`と同じ扱い）。
- */
-async function resolveToken(repositoryFullName: string): Promise<string | null> {
-  const repository = await db.repository.findFirst({
-    where: { fullName: repositoryFullName },
-    include: { installation: true },
-  });
-  if (!repository) return null;
-  // **`app-auth`は動的importにする（#550と同じ理由）。** あちらはモジュール読み込みの時点で
-  // `GITHUB_APP_ID`・`GITHUB_APP_PRIVATE_KEY_BASE64`を要求するため、静的importにすると
-  // 本文の組み立てだけを見たいテストや、GitHub App認証を持たない環境で読み込み自体が失敗する。
-  const { getInstallationToken } = await import("@/lib/github/app-auth");
-  return getInstallationToken(repository.installation.installationId);
-}
-
-/**
  * 計画をIssueへ投稿し、`00.check-user`を付ける。
  *
  * **失敗しても例外を投げない。** 呼び出し元はフックからの報告を受けているだけで、失敗しても
@@ -138,7 +121,7 @@ export async function postSessionPlan(params: {
   if (!parsed) return false;
 
   try {
-    const token = await resolveToken(params.repositoryFullName);
+    const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
     await createComment(parsed.owner, parsed.repo, params.issueNumber, token, {
@@ -183,7 +166,7 @@ export async function requestSessionCheckUser(params: {
   if (!parsed) return false;
 
   try {
-    const token = await resolveToken(params.repositoryFullName);
+    const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
     await addIssueLabels(parsed.owner, parsed.repo, params.issueNumber, token, [CHECK_USER_LABEL]);
@@ -216,7 +199,7 @@ export async function resolveSessionPlanCheckUser(params: {
   if (!parsed) return false;
 
   try {
-    const token = await resolveToken(params.repositoryFullName);
+    const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
     await removeIssueLabel(

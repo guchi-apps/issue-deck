@@ -40,6 +40,8 @@ type PullRequestListProps = {
   onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
+  /** ヘッダーと一覧の間に差し込む行（スマホのビュー切り替えタブ。#1436） */
+  headerBelow?: React.ReactNode;
   className?: string;
   style?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる（#677と同じ理由） */
@@ -162,6 +164,7 @@ export function PullRequestList({
   onSelectPullRequest,
   onMerged,
   headerLeading,
+  headerBelow,
   className,
   style,
   footerSpacing = false,
@@ -193,6 +196,8 @@ export function PullRequestList({
           更新
         </Button>
       </header>
+
+      {headerBelow}
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
         {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}

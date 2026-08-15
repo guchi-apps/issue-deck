@@ -57,6 +57,11 @@ export async function POST(request: NextRequest) {
     // 制御ジョブを配らない（古いpollerは`kind`を読まず、起動ジョブとして解釈してしまう）
     sessionControlCapable:
       typeof payload?.sessionControl === "boolean" ? payload.sessionControl : null,
+    // 追加指示の3段階プロトコル（#1012）に対応したpollerだけが送ってくる。**未申告はnull＝
+    // 非対応扱い**。`sessionControl`と分けるのは、あちらが固定の`C-c`だけを送るのに対し、
+    // こちらは内容のある文字列を送るため、対応していないpollerへ渡したときの事故の質が違うため
+    instructionCapable:
+      typeof payload?.instruction === "boolean" ? payload.instruction : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
     // 起動ジョブを取りに行かない**（#1361）ので、これが無いと画面は「順番待ちのまま進まない」
     // 理由を出せない。判定は引き続きpoller側が持ち、ここは写しを受け取るだけ

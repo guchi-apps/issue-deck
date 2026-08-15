@@ -39,6 +39,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: NOW.toISOString(),
     screenshotCapable: true,
     sessionControlCapable: true,
+    instructionCapable: true,
     maxSessions: 12,
     liveSessions: 0,
     ...overrides,
@@ -206,6 +207,7 @@ describe("IssueSessionStatus のセッション操作", () => {
       kind: "INTERRUPT",
       status: "QUEUED",
       message: null,
+      instruction: null,
       tmuxSessionName: "issue-deck-issue-1353",
       createdAt: "2026-08-14T00:06:00Z",
       claimedAt: null,
@@ -224,5 +226,94 @@ describe("IssueSessionStatus のセッション操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
 
     expect(await screen.findByText("サブPC が応答していません。")).not.toBeNull();
+  });
+
+  /**
+   * #1012。人が書いた1行を走っているセッションへ流す。**本文を決めるのは人**で、
+   * 画面が状況から組み立てて自動送信する経路は無い（docs/multi-agent/gates.md）。
+   */
+  describe("追加指示（#1012）", () => {
+    function openForm() {
+      fireEvent.click(screen.getByRole("button", { name: "追加指示を送る" }));
+      return screen.getByLabelText("追加指示の本文") as HTMLInputElement;
+    }
+
+    it("書いた本文を送る", async () => {
+      render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+      const input = openForm();
+      fireEvent.change(input, { target: { value: "  計画を承認します。  " } });
+      fireEvent.click(screen.getByRole("button", { name: "送信" }));
+
+      await waitFor(() =>
+        expect(sendSessionControl).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "instruction", instruction: "計画を承認します。" }),
+        ),
+      );
+    });
+
+    // 押した勢いでそのまま届くと、書き直す機会が無い
+    it("定型文は差し込むだけで送らない", () => {
+      render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+      const input = openForm();
+      fireEvent.click(screen.getByRole("button", { name: /^計画を承認します/ }));
+
+      expect(input.value).toContain("計画を承認します");
+      expect(sendSessionControl).not.toHaveBeenCalled();
+    });
+
+    it("空の本文では送信できない", () => {
+      render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+      openForm();
+
+      expect(screen.getByRole("button", { name: "送信" }).hasAttribute("disabled")).toBe(true);
+    });
+
+    // 停止・終了に対応していても、内容のある文字列を送るのは別の実装
+    it("追加指示に対応していないpollerでは押せず、理由が出る", () => {
+      render(
+        <IssueSessionStatus
+          session={session()}
+          dispatch={makeDispatch({ hosts: [makeHost({ instructionCapable: null })] })}
+        />,
+      );
+
+      expect(
+        screen.getByRole("button", { name: "追加指示を送る" }).hasAttribute("disabled"),
+      ).toBe(true);
+      expect(screen.getByText(/pollerが追加指示の送信に対応していません/)).not.toBeNull();
+      // 停止・終了はそのまま押せる（申告が独立している）
+      expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(false);
+    });
+
+    it("終了済みのセッションには出さない", () => {
+      render(
+        <IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />,
+      );
+
+      expect(screen.queryByRole("button", { name: "追加指示を送る" })).toBeNull();
+    });
+
+    // 見送りの理由はここにしか残らない（承認プロンプト表示中・打ちかけがある、など）
+    it("pollerが見送った理由を画面に出す", () => {
+      const job: DispatchJobView = {
+        id: "job-2",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1353,
+        targetHost: "subpc",
+        kind: "INSTRUCTION",
+        status: "SKIPPED",
+        message: "承認プロンプトまたは選択フォームの表示中のため送りませんでした",
+        instruction: "計画を承認します。",
+        tmuxSessionName: "issue-deck-issue-1353",
+        createdAt: "2026-08-14T00:06:00Z",
+        claimedAt: null,
+        startedAt: null,
+        finishedAt: "2026-08-14T00:07:00Z",
+      };
+      render(<IssueSessionStatus session={session()} dispatch={makeDispatch({ jobs: [job] })} />);
+
+      expect(screen.getByText(/送信を見送りました/)).not.toBeNull();
+      expect(screen.getByText(/承認プロンプトまたは選択フォームの表示中/)).not.toBeNull();
+    });
   });
 });

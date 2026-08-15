@@ -50,7 +50,7 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
   it("一覧へ戻る遷移ではPC側の選択中Issueを畳む", () => {
     const { result } = renderMobileScreen("mscreen=issue-detail&missue=1001&issue=1001");
 
-    act(() => result.current.selectTab("issues"));
+    act(() => result.current.selectTab("repos"));
 
     expect(push.mock.calls[0][0] as string).not.toContain("issue=1001");
   });

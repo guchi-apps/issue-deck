@@ -64,7 +64,14 @@ source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 # ため、呼び出し元の警告を引き継がない。サブPCのpollerが起動する経路（無人）ではなおさら、
 # 呼び出し元の標準出力はjournalctlにしか残らずtmuxをattachしたユーザーからは見えない。ここでも
 # 同じ警告を出し、実際にユーザーが見る画面（tmuxのpane）に確実に載せる（#1426）。
-ISSUE_DECK_ROOT="$(dirname "$SCRIPT_DIR")"
+#
+# **同期コピー（#1438）から起動された場合、自分の置き場所は本体の作業ツリーではない。**
+# 判定する相手を見失わないよう、本体の作業ツリーの場所は呼び出し元が
+# `ISSUE_DECK_LAUNCHER_ROOT`で渡してくる（渡って来なければ従来どおり自分の親を見る）。
+ISSUE_DECK_ROOT="${ISSUE_DECK_LAUNCHER_ROOT:-$(dirname "$SCRIPT_DIR")}"
+if [[ -n "${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:-}" ]]; then
+  echo "#$ISSUE_NUMBER: 情報: このセッションのスクリプトとフックは ${LAUNCHER_SYNC_REF} の同期コピー（${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:0:7}）から実行しています（#1438）。"
+fi
 warn_launcher_scripts_stale "$ISSUE_DECK_ROOT"
 
 # tmuxのセッション名。セッションの状態ファイルのキーになる（#1256）。
@@ -123,6 +130,22 @@ dispatch_env_value() {
   (source "$env_file" >/dev/null 2>&1; printf '%s' "${!name:-}")
 }
 
+# issue-deckへ報告するときの`owner/repo`。remoteのURLから導く（取れなければ空を返し、
+# 呼び出し側が「報告しない」を選ぶ）。
+current_repo_slug() {
+  git config --get remote.origin.url 2>/dev/null |
+    sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true
+}
+
+# 報告に載せるホスト名。**pollerの決め方（`DISPATCH_HOST_NAME`→`hostname -s`）と揃える。**
+# ずれると照合が外れて黙って0件になる。
+dispatch_host_name() {
+  local host_name
+  host_name="$(dispatch_env_value DISPATCH_HOST_NAME)"
+  [[ -n "$host_name" ]] || host_name="$(hostname -s 2>/dev/null || true)"
+  printf '%s' "$host_name"
+}
+
 # 公開したURLをissue-deckの画面へ渡す（#1265）。**スマホから画面を見る唯一の出口**なので、
 # ターミナルのログだけに出しても届かない。宛先と鍵はpollerと同じ`dispatch.env`から読む。
 # 受け口は`session-notify.sh`と共有（`POST /api/dispatch/sessions/activity`）。
@@ -133,8 +156,7 @@ report_preview_url_to_issue_deck() {
   local app_base_url dispatch_secret repo_slug body
   app_base_url="$(dispatch_env_value APP_BASE_URL)"
   dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
-  repo_slug="$(git config --get remote.origin.url 2>/dev/null |
-    sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+  repo_slug="$(current_repo_slug)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$repo_slug" ]] || return 0
 
   body="$(PREVIEW_URL="$preview_url" REPO_SLUG="$repo_slug" ISSUE_NUMBER="$ISSUE_NUMBER" python3 -c '
@@ -152,6 +174,48 @@ print(json.dumps({
     -d "$body" \
     "${app_base_url%/}/api/dispatch/sessions/activity" >/dev/null 2>&1 ||
     echo "#$ISSUE_NUMBER: 情報: プレビューURLをissue-deckへ報告できませんでした（実装は続行します）。" >&2
+}
+
+# セッションが起動したことをIssueのコメントとして残す（#1119）。
+#
+# **GitHub Actionsの無人実行にはこれがある**（#75の受付コメント）。ローカルセッションには無く、
+# 起動してからエージェントが最初の投稿をするまでIssueの画面には何も出ない。Actions UIに相当する
+# 実行ログもサブPCには無いので、外からは「押したのに何も起きていない」と区別が付かない。
+#
+# **エージェントに任せず、起動スクリプトから投稿する**のもActions側と同じ理由。調査に時間が
+# かかった場合や途中で行き詰まった場合に、「依頼を受け取ったこと」自体が伝わらなくなる。
+#
+# 投稿するのはissue-deck（GitHub App名義）で、ここは報告するだけ。**サブPCにGitHubの認証を
+# 持たせない**ための一本化に倣う。tmuxの外で起動した場合はセッション名が無く、本文に載せる
+# `tmux attach`の相手も無いので何もしない。
+# **未設定でも失敗してもセッションは止めない。**
+report_session_started_to_issue_deck() {
+  [[ -n "$TMUX_SESSION_NAME" ]] || return 0
+
+  local app_base_url dispatch_secret repo_slug host_name body
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  repo_slug="$(current_repo_slug)"
+  host_name="$(dispatch_host_name)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$repo_slug" && -n "$host_name" ]] || return 0
+
+  body="$(REPO_SLUG="$repo_slug" ISSUE_NUMBER="$ISSUE_NUMBER" HOST_NAME="$host_name" \
+    SESSION_NAME="$TMUX_SESSION_NAME" python3 -c '
+import json, os
+print(json.dumps({
+    "repository": os.environ["REPO_SLUG"],
+    "issue": int(os.environ["ISSUE_NUMBER"]),
+    "host": os.environ["HOST_NAME"],
+    "tmuxSessionName": os.environ["SESSION_NAME"],
+}))' 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 0
+
+  curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}/api/dispatch/sessions/started" >/dev/null 2>&1 ||
+    echo "#$ISSUE_NUMBER: 情報: セッションの受付コメントをissue-deckへ報告できませんでした（実装は続行します）。" >&2
 }
 
 # セッションが畳まれたことをその場でissue-deckへ知らせる（#1321）。
@@ -174,10 +238,7 @@ report_session_ended_to_issue_deck() {
   dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
 
-  # ホスト名の決め方はpoller（`DISPATCH_HOST_NAME`→`hostname -s`）と揃える。**ずれると
-  # 照合が外れて黙って0件になる。**
-  host_name="$(dispatch_env_value DISPATCH_HOST_NAME)"
-  [[ -n "$host_name" ]] || host_name="$(hostname -s 2>/dev/null || true)"
+  host_name="$(dispatch_host_name)"
   [[ -n "$host_name" ]] || return 0
 
   body="$(HOST_NAME="$host_name" SESSION_NAME="$TMUX_SESSION_NAME" python3 -c '
@@ -455,6 +516,9 @@ echo
 PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
 
 echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
+# 受付コメント（#1119）は`claude`を起動する直前に投げる。**ここより後ろには置けない**
+# （`claude`はフォアグラウンドで走り、戻ってくるのはセッションが終わったとき）。
+report_session_started_to_issue_deck
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
 # tailnetへ公開したURLをフック（#1219）からも読めるようにする（#1265）。フックはclaudeの
 # 子プロセスなので、ここでexportしておけば通知にも載せられる。**セッション通知は入力待ちで

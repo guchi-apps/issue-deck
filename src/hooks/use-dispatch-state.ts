@@ -34,8 +34,15 @@ export type DispatchState = {
 
 /** 未完了ジョブがある間の取得間隔。押した直後の状態変化を追う */
 const ACTIVE_POLL_INTERVAL_MS = 5_000;
-/** 何も動いていないときの取得間隔。ホストの生存表示を古びさせない程度に落とす */
-const IDLE_POLL_INTERVAL_MS = 60_000;
+/**
+ * 何も動いていないときの取得間隔。
+ *
+ * **GitHub Actionsの実行状況ポーリング（`use-issues-workflow-running.ts`）と同じ20秒に
+ * 揃えている**（#1439）。一覧のバッジの回転はActions側がこのフック、サブPC側がこちらの
+ * セッションを材料にするため、間隔が違うと同じ「実行中」でも実行先によって反映の速さが変わる。
+ * 叩き先は自前の`GET /api/dispatch`（DBの読み取りのみ）で、GitHub APIは消費しない。
+ */
+const IDLE_POLL_INTERVAL_MS = 20_000;
 
 function hasActiveJob(state: DispatchState | null): boolean {
   return state?.jobs.some((job) => isActiveDispatchJobStatus(job.status)) ?? false;
@@ -153,7 +160,7 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
-   * 走っているセッションへの操作（停止・終了）を積む（#1332）。
+   * 走っているセッションへの操作（停止・終了・追加指示）を積む（#1332・#1012）。
    *
    * **失敗の理由を`error`（共有）へ入れず、戻り値で返す。** `error`は起動ボタンの下に
    * 出ているため、停止に失敗した理由がそちらへ出ると、押した場所と表示が離れて話が通じない。
@@ -166,7 +173,9 @@ export function useDispatchState(enabled: boolean) {
       repositoryFullName: string;
       issueNumber: number;
       hostName: string;
-      kind: "interrupt" | "kill";
+      kind: "interrupt" | "kill" | "instruction";
+      /** `kind`が`instruction`のときの本文（#1012）。1行・500文字まで */
+      instruction?: string;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -178,6 +187,7 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             host: params.hostName,
             kind: params.kind,
+            instruction: params.instruction,
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };

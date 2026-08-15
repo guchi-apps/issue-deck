@@ -49,6 +49,7 @@ import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
+  computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCounts,
   computeOverviewStats,
@@ -134,6 +135,9 @@ export function IssueDeckShell({
     isPending: isMobileScreenPending,
     selectTab,
     selectPullRequests,
+    // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
+    // タブ切り替えで、履歴を積まない（#1436）
+    selectPullRequestView: selectMobilePullRequestView,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -339,7 +343,14 @@ export function IssueDeckShell({
     () => computeOverviewStats(topbarFilteredIssues, topbarFilteredIssuesIgnoringState),
     [topbarFilteredIssues, topbarFilteredIssuesIgnoringState],
   );
+  // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
+  // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
+  // 左メニュー「ラベル」に出す一覧と件数（#1441）。TopBarの絞り込みに追随させる。
+  const sidebarLabelSummary = useMemo(
+    () => computeFilterLabelSummary(issues, filters, labelSummary),
+    [issues, filters, labelSummary],
+  );
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
   // PC版Issue一覧のスクロール位置を保存・復元する単位（#773）。絞り込み条件が変われば
@@ -640,6 +651,9 @@ export function IssueDeckShell({
                     ) : (
                       <MobilePullRequestsScreen
                         view={filters.prview}
+                        navCounts={pullRequestNavCounts}
+                        origin={mobileScreen.origin}
+                        onChangeView={selectMobilePullRequestView}
                         pullRequests={filteredPullRequests}
                         failedRepositories={openPullRequests.failedRepositories}
                         fetchedAt={openPullRequests.fetchedAt}
@@ -753,7 +767,7 @@ export function IssueDeckShell({
                 onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
                 onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
                 onSetRepositoryFavorite={handleSetRepositoryFavorite}
-                labelSummary={labelSummary}
+                labelSummary={sidebarLabelSummary}
                 selectedLabels={filters.labels}
                 onSelectLabel={(label) => toggleLabel(label.name)}
                 onClearLabels={() => setFilter("labels", [])}

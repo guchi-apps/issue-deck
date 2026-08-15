@@ -186,15 +186,26 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "done";
-    steps[3].state = "action";
+    // CIが実行中の間はまだマージできないため「進行中」に留め、オレンジのマージ導線を出さない
+    // （#1433。バンプPRの段と同じ基準）。PRの中身は確認しに行けるよう参考リンクだけ添える。
+    const waitingCi = release.ciState === "pending";
+    steps[3].state = waitingCi ? "active" : "action";
     steps[3].ciState = release.ciState;
     steps[3].mergeable = release.mergeable;
     steps[3].repair = repairForPullRequest(release);
-    steps[3].note = "内容を確認して「merge commit」でマージしてください。";
-    steps[3].action = {
-      href: release.url,
-      label: `develop→main PR #${release.number} をタップしてmainへマージ`,
-    };
+    if (waitingCi) {
+      steps[3].link = {
+        href: release.url,
+        label: `develop→main PR #${release.number} を確認`,
+        pending: true,
+      };
+    } else {
+      steps[3].note = "内容を確認して「merge commit」でマージしてください。";
+      steps[3].action = {
+        href: release.url,
+        label: `develop→main PR #${release.number} をタップしてmainへマージ`,
+      };
+    }
   } else if (runActive) {
     // まだPRが現れていないが実行中（起動直後）。最初の段を進行中にする。
     steps[0].state = "active";
