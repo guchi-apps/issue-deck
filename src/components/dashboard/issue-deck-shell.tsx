@@ -744,6 +744,8 @@ export function IssueDeckShell({
           issues={issues}
           pullRequests={notifiablePullRequests}
           onOpenNotificationTarget={openNotificationTarget}
+          /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
+          onOpenIssue={openIssueUrl}
           onOpenCheckUserView={() => selectView("check-user")}
           onOpenFlow={selectFlowPane}
           isSidebarCollapsed={isSidebarCollapsed}

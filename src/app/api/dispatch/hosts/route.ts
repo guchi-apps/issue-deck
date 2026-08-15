@@ -30,7 +30,7 @@ function parseNonNegativeInt(value: unknown): number | null {
  * 次の2つに限る。
  *
  * - この仕組みが起こしたtmuxセッションそのもの（`DispatchSession`。#1217から持っている）
- * - 起動可否の判断材料になる3つの使用率（CPU・メモリ・`/`のディスク。`metrics`）
+ * - 起動可否の判断材料になる使用率（CPU・メモリ・SWAP・`/`のディスク。`metrics`）
  *
  * サービス・プロセス・温度・ネットワーク・履歴といったホスト全体の監視は引き続き
  * ops-dashboardの担当で、こちらには持ち込まない。**数値が食い違ったときの正もあちら**

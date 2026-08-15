@@ -18,6 +18,7 @@ import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
@@ -54,6 +55,7 @@ import {
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
+import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
 import type { IssuePullRequest } from "@/types/pull-request";
@@ -87,6 +89,8 @@ type CommentThreadProps = {
   sessionWaitingInput?: boolean;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
+  /** 自動マージされなかった理由（#1631）。PRマージ待ちの案内へ添える。解決は親が行う */
+  mergeCheckReasons?: MergeCheckReasons | null;
   /** `00.check-user`が付いている理由（#1490）。承認カードの見出しを出し分ける。読めない場合はnull */
   checkUserReason?: CheckUserReason | null;
   /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク（#1339で複数対応） */
@@ -181,6 +185,7 @@ function ApprovalActions({
   onPullRequestMerged,
   isFallbackNotice,
   mergeApprovalPending,
+  mergeCheckReasons = null,
   checkUserReason = null,
   sessionWaitingInput,
   pullRequestLinks,
@@ -207,6 +212,12 @@ function ApprovalActions({
   onPullRequestMerged?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
+  /**
+   * 自動マージされなかった理由（#1631）。`mergeApprovalPending`のときだけ描く。
+   * 解決は親（Issue詳細）が`resolveMergeCheckReasons`で行い、画面上部の対応PRセクションと
+   * **同じ値**を渡す。ここで解決し直すと、上と下で違う理由が出うる
+   */
+  mergeCheckReasons?: MergeCheckReasons | null;
   /** `00.check-user`が付いている理由（#1490）。読めないリポジトリではnull */
   checkUserReason?: CheckUserReason | null;
   sessionWaitingInput?: boolean;
@@ -310,6 +321,11 @@ function ApprovalActions({
             <p className="text-sm text-muted-foreground">
               GitHub上で内容を確認のうえマージしてください。
             </p>
+            {/* なぜ自動マージされなかったのかを、押す前に読める位置へ出す（#1631）。
+                画面上部の対応PRセクションと同じ内容・同じ体裁 */}
+            {mergeCheckReasons && (
+              <MergeCheckReasonNotice reasons={mergeCheckReasons} className="mt-2" />
+            )}
           </>
         )}
         {/* 対応PRとマージボタンは、本文の上に出しているのと同じ一覧で出す（#1339）。
@@ -458,6 +474,7 @@ export function CommentThread({
   localSessionNotice,
   sessionWaitingInput,
   mergeApprovalPending,
+  mergeCheckReasons = null,
   pullRequestLinks,
   pullRequests,
   workflowRun,
@@ -504,45 +521,54 @@ export function CommentThread({
     return <p className="text-sm text-destructive">コメントの取得に失敗しました: {error}</p>;
   }
 
+  const isFallbackNotice =
+    comments.length > 0 && isFallbackNoticeComment(comments[comments.length - 1]);
+
+  // 承認・PRマージのカードは、特定のコメントに紐づく操作ではなくissueの現在の状態に対する
+  // 操作なので、常にコメント一覧の末尾に出す（#1639）。以前は「最後のbotコメント」の直下に
+  // 差し込んでいたが、その判定はissue-deckのGitHub Appのlogin名だけを見ており、
+  // `github-actions[bot]`名義の進捗通知やローカルセッションの報告（ユーザー本人のlogin名で
+  // 投稿される・#1346）が後に続くと、カードが一覧の途中に埋もれて見つけられなかった。
+  const approvalActions =
+    approvalPending && onApprove && onReject && onWithdraw ? (
+      <ApprovalActions
+        localSessionNotice={localSessionNotice}
+        onApprove={onApprove}
+        onReject={onReject}
+        onWithdraw={onWithdraw}
+        onRequestContinuation={onRequestContinuation}
+        onRequestPrFix={onRequestPrFix}
+        onMergePullRequest={onMergePullRequest}
+        isApproving={isApproving}
+        isRejecting={isRejecting}
+        isWithdrawing={isWithdrawing}
+        isRequestingContinuation={isRequestingContinuation}
+        isRequestingPrFix={isRequestingPrFix}
+        isMergingPullRequest={isMergingPullRequest}
+        mergePullRequestError={mergePullRequestError}
+        mergeTargetNumber={mergeTargetNumber}
+        mergedPullRequestNumbers={mergedPullRequestNumbers}
+        onPullRequestMerged={onPullRequestMerged}
+        isFallbackNotice={isFallbackNotice}
+        mergeApprovalPending={mergeApprovalPending}
+        mergeCheckReasons={mergeCheckReasons}
+        checkUserReason={checkUserReason}
+        sessionWaitingInput={sessionWaitingInput}
+        pullRequestLinks={pullRequestLinks}
+        pullRequests={pullRequests}
+        repositoryFullName={repositoryFullName}
+        issueSuggestions={issueSuggestions}
+      />
+    ) : null;
+
   if (comments.length === 0) {
     return (
       <>
         <p className="text-sm text-muted-foreground">まだコメントはありません</p>
-        {approvalPending && onApprove && onReject && onWithdraw && (
-          <ApprovalActions
-            localSessionNotice={localSessionNotice}
-          onApprove={onApprove}
-            onReject={onReject}
-            onWithdraw={onWithdraw}
-            onRequestPrFix={onRequestPrFix}
-            onMergePullRequest={onMergePullRequest}
-            isApproving={isApproving}
-            isRejecting={isRejecting}
-            isWithdrawing={isWithdrawing}
-            isRequestingPrFix={isRequestingPrFix}
-            isMergingPullRequest={isMergingPullRequest}
-            mergePullRequestError={mergePullRequestError}
-            mergeTargetNumber={mergeTargetNumber}
-            mergedPullRequestNumbers={mergedPullRequestNumbers}
-            onPullRequestMerged={onPullRequestMerged}
-            mergeApprovalPending={mergeApprovalPending}
-            checkUserReason={checkUserReason}
-            sessionWaitingInput={sessionWaitingInput}
-            pullRequestLinks={pullRequestLinks}
-            pullRequests={pullRequests}
-            repositoryFullName={repositoryFullName}
-            issueSuggestions={issueSuggestions}
-          />
-        )}
+        {approvalActions}
       </>
     );
   }
-
-  const lastBotCommentIndex = comments.reduce(
-    (foundIndex, comment, index) => (isBotComment(comment.author.login) ? index : foundIndex),
-    -1,
-  );
-  const isFallbackNotice = isFallbackNoticeComment(comments[comments.length - 1]);
 
   function startEdit(comment: IssueComment) {
     setEditingId(comment.id);
@@ -729,68 +755,11 @@ export function CommentThread({
                   )}
                 </div>
               </div>
-              {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === index && (
-                <ApprovalActions
-                  localSessionNotice={localSessionNotice}
-          onApprove={onApprove}
-                  onReject={onReject}
-                  onWithdraw={onWithdraw}
-                  onRequestContinuation={onRequestContinuation}
-                  onRequestPrFix={onRequestPrFix}
-                  onMergePullRequest={onMergePullRequest}
-                  isApproving={isApproving}
-                  isRejecting={isRejecting}
-                  isWithdrawing={isWithdrawing}
-                  isRequestingContinuation={isRequestingContinuation}
-                  isRequestingPrFix={isRequestingPrFix}
-                  isMergingPullRequest={isMergingPullRequest}
-                  mergePullRequestError={mergePullRequestError}
-                  mergeTargetNumber={mergeTargetNumber}
-                  mergedPullRequestNumbers={mergedPullRequestNumbers}
-                  onPullRequestMerged={onPullRequestMerged}
-                  isFallbackNotice={isFallbackNotice}
-                  mergeApprovalPending={mergeApprovalPending}
-                  checkUserReason={checkUserReason}
-                  sessionWaitingInput={sessionWaitingInput}
-                  pullRequestLinks={pullRequestLinks}
-                  pullRequests={pullRequests}
-                  repositoryFullName={repositoryFullName}
-                  issueSuggestions={issueSuggestions}
-                />
-              )}
             </li>
           );
         })}
       </ul>
-      {approvalPending && onApprove && onReject && onWithdraw && lastBotCommentIndex === -1 && (
-        <ApprovalActions
-          localSessionNotice={localSessionNotice}
-          onApprove={onApprove}
-          onReject={onReject}
-          onWithdraw={onWithdraw}
-          onRequestContinuation={onRequestContinuation}
-          onRequestPrFix={onRequestPrFix}
-          onMergePullRequest={onMergePullRequest}
-          isApproving={isApproving}
-          isRejecting={isRejecting}
-          isWithdrawing={isWithdrawing}
-          isRequestingContinuation={isRequestingContinuation}
-          isRequestingPrFix={isRequestingPrFix}
-          isMergingPullRequest={isMergingPullRequest}
-          mergePullRequestError={mergePullRequestError}
-          mergeTargetNumber={mergeTargetNumber}
-          mergedPullRequestNumbers={mergedPullRequestNumbers}
-          onPullRequestMerged={onPullRequestMerged}
-          isFallbackNotice={isFallbackNotice}
-          mergeApprovalPending={mergeApprovalPending}
-          checkUserReason={checkUserReason}
-          sessionWaitingInput={sessionWaitingInput}
-          pullRequestLinks={pullRequestLinks}
-          pullRequests={pullRequests}
-          repositoryFullName={repositoryFullName}
-          issueSuggestions={issueSuggestions}
-        />
-      )}
+      {approvalActions}
 
       <AlertDialog open={deletingId !== null} onOpenChange={(open) => !open && setDeletingId(null)}>
         <AlertDialogContent>

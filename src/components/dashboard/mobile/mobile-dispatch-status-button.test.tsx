@@ -2,6 +2,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// シートの中身はIssue詳細への遷移（#1625）にルーターを要求する。jsdomではApp Routerが
+// マウントされていないため、遷移だけ差し替える
+const openIssue = vi.fn();
+vi.mock("@/hooks/use-reference-navigation", () => ({
+  useReferenceNavigation: () => ({ openIssue, openPullRequest: vi.fn() }),
+}));
+
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -31,6 +38,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1638,
     issueTitle: "スマホ画面のレイアウト改善",
+    issueId: "issue-1638",
     targetHost: "subpc",
     kind: "LAUNCH",
     status: "RUNNING",
@@ -105,5 +113,22 @@ describe("MobileDispatchStatusButton（#1638）", () => {
     expect(screen.getByText(/#1638/)).toBeTruthy();
     // このキューが何を映しているかの但し書き（#1567）
     expect(screen.getByText(/GitHub Actionsでの無人実行はここには出ません/)).toBeTruthy();
+  });
+
+  // 行のタイトルからIssue詳細を開く（#1625）。PCの実行キューと同じ振る舞いにする
+  it("行のタイトルを押すとIssue詳細へ遷移し、シートを閉じる", () => {
+    render(
+      <MobileDispatchStatusButton
+        dispatch={makeDispatch({ hosts: [makeHost()], jobs: [makeJob()] })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "実行状況" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "#1638 スマホ画面のレイアウト改善をissue-deckで開く" }),
+    );
+
+    expect(openIssue).toHaveBeenCalledWith("issue-1638");
+    expect(screen.queryByText(/GitHub Actionsでの無人実行はここには出ません/)).toBeNull();
   });
 });

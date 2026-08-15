@@ -1,11 +1,22 @@
 "use client";
 
-import { Check, ClipboardCopy, Cloud, Server, Terminal } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ClipboardCopy,
+  ClipboardList,
+  Cloud,
+  GitMerge,
+  MonitorPlay,
+  Palette,
+  Server,
+  Terminal,
+  type LucideIcon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -16,7 +27,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -30,10 +40,8 @@ import {
   resolveDispatchTargetRejection,
   resolveScreenshotRejection,
   type DispatchEnqueueRejection,
-  type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
@@ -59,6 +67,43 @@ export type StartTarget =
   | { kind: "actions" }
   | { kind: "copy-prompt" }
   | { kind: "copy-command" };
+
+/** 同じ実行先を指しているか（選択中の判定に使う） */
+function isSameTarget(a: StartTarget, b: StartTarget): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === "host" && b.kind === "host" ? a.host === b.host : true;
+}
+
+/**
+ * 実行先1件ぶんの表示材料（#1623）。**タイルには短い名前しか出さない。**
+ * 4つ横並びにすると1枚あたり80px弱（iPhone 15でダイアログが361pxのとき約78px）しかなく、
+ * 「実装プロンプトをコピー」のような正式名称は入らない。正式名称は`aria-label`と`title`に持たせ、
+ * 説明と選べない理由はグリッドの下に出す。
+ */
+type StartTargetEntry = {
+  key: string;
+  target: StartTarget;
+  icon: LucideIcon;
+  /** 正式名称（読み上げ・グリッド下の見出し） */
+  name: string;
+  /** タイルに出す短い名前 */
+  shortName: string;
+  description: string;
+  /** 選べない理由。`null`なら選べる */
+  rejection: string | null;
+};
+
+/**
+ * オプションのアイコン（#1623）。**定義側（`start-implementation.ts`）ではなくここに置く。**
+ * あちらはAPIルートなどサーバ側からも読まれるため、Reactコンポーネントへ依存させない。
+ */
+const OPTION_ICONS: Record<StartImplementationOptionKey, LucideIcon> = {
+  planRequired: ClipboardList,
+  artifactRequired: Palette,
+  mergeConfirmRequired: GitMerge,
+  previewRequired: MonitorPlay,
+  screenshotRequired: Camera,
+};
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -265,6 +310,84 @@ export function StartImplementationDialog({
     options,
   });
 
+  /**
+   * 実行先のタイル（#1623）。**選べない理由の判定と文言は従来どおりAPI側と同じものを使う。**
+   * 出す場所がタイルの中からグリッドの下へ移っただけで、内容は変えていない。
+   */
+  const targetEntries: StartTargetEntry[] = showTargets
+    ? [
+        ...dispatch.hosts.map((host): StartTargetEntry => {
+          const rejection = resolveDispatchTargetRejection({
+            host,
+            repositoryFullName: issue.repositoryFullName,
+            hasActiveJob: blocksByActiveJob,
+            blockingSession,
+          });
+          const name = formatDispatchHostName(host.name);
+          return {
+            key: `host:${host.name}`,
+            target: { kind: "host", host: host.name },
+            icon: Server,
+            name,
+            shortName: name,
+            description: `ジョブを積みます。${name}が取りに来た時点で起動します`,
+            rejection: rejection
+              ? describeDispatchEnqueueRejection(rejection, {
+                  hostName: host.name,
+                  repositoryFullName: issue.repositoryFullName,
+                  session: blockingSession,
+                })
+              : null,
+          };
+        }),
+        {
+          key: "actions",
+          target: { kind: "actions" },
+          icon: Cloud,
+          name: "GitHub Actions",
+          shortName: "Actions",
+          description: "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）",
+          rejection: actionsDisabledReason,
+        },
+        // 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263）
+        {
+          key: "copy-prompt",
+          target: { kind: "copy-prompt" },
+          icon: ClipboardCopy,
+          name: "実装プロンプトをコピー",
+          shortName: "プロンプト",
+          description: "開いているClaude Codeセッションへ貼ります。11.localの付与と進捗の報告も行います",
+          rejection: null,
+        },
+        ...(localSessionCommand
+          ? [
+              {
+                key: "copy-command",
+                target: { kind: "copy-command" } as StartTarget,
+                icon: Terminal,
+                name: "起動コマンドをコピー",
+                shortName: "コマンド",
+                description:
+                  "ターミナルへ貼ると、worktreeの作成から新しいセッションの起動までを行います",
+                rejection: null,
+              },
+            ]
+          : []),
+      ]
+    : [];
+  const selectedEntry = targetEntries.find((entry) => isSameTarget(entry.target, effectiveTarget)) ?? null;
+  const blockedEntries = targetEntries.filter((entry) => entry.rejection !== null);
+  /**
+   * オプションのグリッドの下に出す説明（#1623）。**ONにしたものと、選べないものだけ出す。**
+   * 全部の説明を常に出すと縦に伸びてしまうため、ONにした内容の確認と、押せない理由の提示に絞る。
+   */
+  const optionHints = visibleOptions.flatMap((option) => {
+    const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
+    if (unavailable) return [{ key: option.key, label: option.label, text: screenshotRejection }];
+    if (!options[option.key]) return [];
+    return [{ key: option.key, label: option.label, text: option.description }];
+  });
+
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
       onOpenChangeProp(nextOpen);
@@ -459,80 +582,68 @@ export function StartImplementationDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>実装を開始</DialogTitle>
-          <DialogDescription>必要なオプションを選択してから実装を開始してください。</DialogDescription>
+          <DialogDescription>
+            実行する場所と必要なオプションを選んでから開始してください。
+          </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
-          {visibleOptions.map((option) => {
-            // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
-            // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
-            const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
-            const disabled = unavailable && !options[option.key];
-            return (
-              <div key={option.key} className="flex items-start gap-2">
-                <Checkbox
-                  id={`start-implementation-${option.key}`}
-                  checked={options[option.key]}
-                  disabled={disabled}
-                  onCheckedChange={() => toggleOption(option.key)}
-                  className="mt-0.5"
-                />
-                <Label
-                  htmlFor={`start-implementation-${option.key}`}
-                  className={cn("flex-col items-start gap-0.5", disabled && "opacity-50")}
-                >
-                  {option.label}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {unavailable ? screenshotRejection : option.description}
-                  </span>
-                </Label>
-              </div>
-            );
-          })}
-        </div>
+        {/* 実行先を先に選ばせる（#1623）。実行先によって出るオプションが変わる（撮影は
+            GitHub Actionsのときだけ・アーティファクトはそれ以外）ため、選ぶ順序としても素直になる */}
         {showTargets && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">実行先</p>
-            {dispatch.hosts.map((host) => (
-              <DispatchHostOption
-                key={host.name}
-                host={host}
-                repositoryFullName={issue.repositoryFullName}
-                hasActiveJob={blocksByActiveJob}
-                blockingSession={blockingSession}
-                selected={effectiveTarget.kind === "host" && effectiveTarget.host === host.name}
-                onSelect={() => selectTarget({ kind: "host", host: host.name })}
-              />
-            ))}
-            <StartTargetOption
-              icon={<Cloud className="size-3.5" />}
-              name="GitHub Actions"
-              description={
-                actionsDisabledReason ??
-                "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）"
-              }
-              selected={effectiveTarget.kind === "actions"}
-              disabled={actionsDisabledReason !== null}
-              onSelect={() => selectTarget({ kind: "actions" })}
-            />
-            {/* 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263） */}
-            <StartTargetOption
-              icon={<ClipboardCopy className="size-3.5" />}
-              name="実装プロンプトをコピー"
-              description="開いているClaude Codeセッションへ貼ります。11.localの付与と進捗の報告も行います"
-              selected={effectiveTarget.kind === "copy-prompt"}
-              onSelect={() => selectTarget({ kind: "copy-prompt" })}
-            />
-            {localSessionCommand && (
-              <StartTargetOption
-                icon={<Terminal className="size-3.5" />}
-                name="起動コマンドをコピー"
-                description="ターミナルへ貼ると、worktreeの作成から新しいセッションの起動までを行います"
-                selected={effectiveTarget.kind === "copy-command"}
-                onSelect={() => selectTarget({ kind: "copy-command" })}
-              />
+            <div role="radiogroup" aria-label="実行先" className="grid grid-cols-4 gap-1.5">
+              {targetEntries.map((entry) => (
+                <StartTargetTile
+                  key={entry.key}
+                  entry={entry}
+                  selected={isSameTarget(entry.target, effectiveTarget)}
+                  onSelect={() => selectTarget(entry.target)}
+                />
+              ))}
+            </div>
+            {/* 選択中の説明。選べない実行先の理由は下でまとめて出すので、ここでは重ねない */}
+            {selectedEntry && selectedEntry.rejection === null && (
+              <p className="text-xs text-muted-foreground">{selectedEntry.description}</p>
             )}
+            {blockedEntries.map((entry) => (
+              <p key={entry.key} className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{entry.name}</span>: {entry.rejection}
+              </p>
+            ))}
           </div>
         )}
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">オプション</p>
+          <div className="grid grid-cols-2 gap-2">
+            {visibleOptions.map((option) => {
+              // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
+              // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
+              const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
+              return (
+                <StartOptionChip
+                  key={option.key}
+                  icon={OPTION_ICONS[option.key]}
+                  label={option.label}
+                  description={unavailable ? (screenshotRejection ?? "") : option.description}
+                  checked={options[option.key]}
+                  disabled={unavailable && !options[option.key]}
+                  onToggle={() => toggleOption(option.key)}
+                />
+              );
+            })}
+          </div>
+          <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+            {optionHints.length > 0 ? (
+              optionHints.map((hint) => (
+                <li key={hint.key}>
+                  <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
+                </li>
+              ))
+            ) : (
+              <li>オプションを押すとONになり、ここに内容が出ます。</li>
+            )}
+          </ul>
+        </div>
         <ApiErrorMessage message={error} />
         {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
             一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
@@ -558,85 +669,87 @@ export function StartImplementationDialog({
 }
 
 /**
- * 起動先1件ぶんの選択肢。**選べない場合は理由を添えて押せなくする**（#1180と同じ扱い）。
- * 理由の判定と文言はAPI側（`enqueueDispatchJob`）と同じものを使う。
+ * 実行先の選択肢1件（#1623）。**アイコンを主役にした正方形のタイルで、4つ横に並べる。**
+ *
+ * 読み上げ・hoverには正式名称と説明（選べない場合は理由）を残す。タイルの中に説明を置かないのは、
+ * 幅が80px弱しか無く、置いても読めないため。**選べない場合に押せなくする扱いは従来どおり**
+ * （#1180）で、理由の判定と文言もAPI側（`enqueueDispatchJob`）と同じものを使っている。
  */
-function DispatchHostOption({
-  host,
-  repositoryFullName,
-  hasActiveJob,
-  blockingSession,
+function StartTargetTile({
+  entry,
   selected,
   onSelect,
 }: {
-  host: DispatchHostView;
-  repositoryFullName: string;
-  hasActiveJob: boolean;
-  blockingSession: DispatchSessionView | null;
+  entry: StartTargetEntry;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const rejection = resolveDispatchTargetRejection({
-    host,
-    repositoryFullName,
-    hasActiveJob,
-    blockingSession,
-  });
-  const description = rejection
-    ? describeDispatchEnqueueRejection(rejection, {
-        hostName: host.name,
-        repositoryFullName,
-        session: blockingSession,
-      })
-    : `ジョブを積みます。${formatDispatchHostName(host.name)}が取りに来た時点で起動します`;
+  const Icon = entry.icon;
+  const disabled = entry.rejection !== null;
 
-  return (
-    <StartTargetOption
-      icon={<Server className="size-3.5" />}
-      name={formatDispatchHostName(host.name)}
-      description={description}
-      selected={selected}
-      disabled={rejection !== null}
-      onSelect={onSelect}
-    />
-  );
-}
-
-/** 実行先の選択肢1件。スマホで押しやすいよう行全体を押せるようにする */
-function StartTargetOption({
-  icon,
-  name,
-  description,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: ReactNode;
-  name: string;
-  description: string;
-  selected: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
+      aria-label={entry.name}
+      title={entry.rejection ?? entry.description}
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex w-full flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left",
-        selected ? "border-primary bg-accent" : "hover:bg-accent",
+        "flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-lg border px-1 py-2 text-center",
+        selected
+          ? "border-primary bg-accent text-foreground ring-1 ring-primary"
+          : "text-muted-foreground hover:bg-accent",
         disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
       )}
     >
-      <span className="flex items-center gap-2 text-sm font-medium">
-        {icon}
-        {name}
-        {selected && <Check className="size-3.5 text-primary" />}
-      </span>
-      <span className="text-xs font-normal text-muted-foreground">{description}</span>
+      <Icon className="size-5" />
+      <span className="text-[10px] leading-tight font-medium">{entry.shortName}</span>
+    </button>
+  );
+}
+
+/**
+ * オプション1件（#1623）。**アイコンとラベルを横に並べた行型のチップ。**
+ *
+ * 実行先（アイコン中心・中央揃え）とわざと形を変えている。同じ見た目のグリッドが上下に続くと、
+ * 「どちらが実行先でどちらがオプションか」が一目で分からなくなるため。説明は`title`と
+ * グリッド下のリストに出す。
+ */
+function StartOptionChip({
+  icon: Icon,
+  label,
+  description,
+  checked,
+  disabled,
+  onToggle,
+}: {
+  icon: LucideIcon;
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      title={description}
+      disabled={disabled}
+      onClick={onToggle}
+      className={cn(
+        "flex min-h-[46px] items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-left",
+        checked ? "border-primary bg-accent" : "hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
+      )}
+    >
+      <Icon className={cn("size-4 shrink-0", checked ? "text-foreground" : "text-muted-foreground")} />
+      <span className="text-[11px] font-medium leading-tight">{label}</span>
+      {/* 押しても幅が動かないよう、OFFのときも場所だけ確保する */}
+      <Check className={cn("ml-auto size-3.5 shrink-0 text-primary", !checked && "invisible")} />
     </button>
   );
 }

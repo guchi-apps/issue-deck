@@ -40,6 +40,7 @@ function renderTopBar(setFilter: SetFilter, filters: IssueFilters = baseFilters)
       issues={[]}
       pullRequests={[]}
       onOpenNotificationTarget={() => {}}
+      onOpenIssue={() => {}}
       onOpenCheckUserView={() => {}}
       onOpenFlow={() => {}}
       isSidebarCollapsed={false}
@@ -94,6 +95,7 @@ describe("TopBar 検索欄", () => {
         issues={[]}
         pullRequests={[]}
         onOpenNotificationTarget={() => {}}
+        onOpenIssue={() => {}}
         onOpenCheckUserView={() => {}}
         onOpenFlow={() => {}}
         isSidebarCollapsed={false}
