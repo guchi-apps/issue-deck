@@ -121,24 +121,35 @@ UNTRACKED=0
 
 # 止める。--dry-run では判定だけ出す。理由は必ずログにも残す（無人実行ではここにしか残らない）。
 #
-# **どの経路（PIDファイル・`/proc`の走査）から来ても、止め方はここ1本にする。** 第1引数は
+# **どの経路（PIDファイル・`/proc`の走査）から来ても、記録と後始末はここ1本にする。** 第1引数は
 # 表示用のラベルで、`/proc`の走査は他リポジトリのIssueも扱うためリポジトリ名を添える。
 # PIDファイルの置き場はログと同じディレクトリなので、パスはログから導ける（#1525）。
+# 第6引数は止め方（`group`／`tree`）で、どちらの実体も scripts/lib/dev-server.sh にある。
 stop_one() {
-  local label="$1" pid="$2" log_file="$3" worktree_dir="$4" reason="$5"
+  local label="$1" pid="$2" log_file="$3" worktree_dir="$4" reason="$5" mode="${6:-group}"
+  local stop_result_ok=0
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  $label: [dry-run] $reason のため停止する対象です（PID $pid）"
     return 0
   fi
 
-  dev_server_log_event "$log_file" "開発サーバー（プロセスグループ $pid）を回収しました: $reason。再び画面確認が必要になったら \`cd $worktree_dir && pnpm dev\` で起こしてください。"
-  if dev_server_stop_group "$pid"; then
+  dev_server_log_event "$log_file" "開発サーバー（$pid）を回収しました: $reason。再び画面確認が必要になったら \`cd $worktree_dir && pnpm dev\` で起こしてください。"
+  # **止め方の使い分け**（実体はどちらも scripts/lib/dev-server.sh）。PIDファイルの経路が指すのは
+  # 必ず`run-issue-session.sh`が`set -m`で起こしたプロセスグループのリーダーなのでグループごと撃つ。
+  # `/proc`の走査が拾うのは手で起こし直した分で、`claude`と同じプロセスグループに居ることがあり、
+  # グループごと撃つとセッション本体を巻き込む。あちらは木でたどる（#1524）。
+  if [[ "$mode" == "tree" ]]; then
+    dev_server_stop_tree "$pid" && stop_result_ok=1
+  else
+    dev_server_stop_group "$pid" && stop_result_ok=1
+  fi
+  if [[ "$stop_result_ok" -eq 1 ]]; then
     echo "  $label: 開発サーバー（PID $pid）を停止しました: $reason"
     STOPPED=$((STOPPED + 1))
   else
     echo "  $label: 警告: 開発サーバー（PID $pid）を停止できませんでした: $reason" >&2
-    dev_server_log_event "$log_file" "開発サーバー（プロセスグループ $pid）はSIGKILLでも停止できませんでした。"
+    dev_server_log_event "$log_file" "開発サーバー（$pid）はSIGKILLでも停止できませんでした。"
     return 0
   fi
   # 今止めたプロセスグループを指しているときだけ消す（PIDの再利用を疑う。判定は経路によらない）
@@ -274,9 +285,9 @@ session_alive() {
 
 reap_untracked_dev_servers() {
   local grace_seconds=$((ORPHAN_GRACE_MINUTES * 60))
-  local proc_dir pid pgid cwd leaf base repo issue_number session etimes reason
+  local proc_dir pid root cwd leaf base repo issue_number session etimes reason
   local worktree_base log_file
-  local -A seen_pgid=()
+  local -A seen_root=()
 
   [[ "$grace_seconds" -gt 0 ]] || return 0
 
@@ -306,18 +317,15 @@ reap_untracked_dev_servers() {
     [[ "$base" =~ ^(.+)-worktrees$ ]] || continue
     repo="${BASH_REMATCH[1]}"
 
-    # 3. プロセスグループごと撃つので、リーダーの素性まで確かめる。`pnpm dev`は
-    #    `bash scripts/dev.sh` → `next dev` → `next-server` と4段あり、リーダーから撃つ必要がある。
-    #    **リーダーが開発サーバーでなければ触らない**（同じworktreeで動く`claude`本体を
-    #    巻き込まないため）。リーダーが先に落ちて子だけ残った場合もここで止まる（#1524の担当）
-    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
-    [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || continue
-    [[ -z "${seen_pgid[$pgid]:-}" ]] || continue
-    seen_pgid["$pgid"]=1
-    if ! dev_server_pid_matches "$pgid" "$cwd" || ! dev_server_is_dev_command "$pgid"; then
-      echo "  $repo #$issue_number: 情報: プロセスグループ $pgid のリーダーが開発サーバーだと確かめられないため触りません。" >&2
-      continue
-    fi
+    # 3. 止める範囲を決める。**プロセスグループごとには撃たない**（#1524）。エージェントが手で
+    #    起こし直した`pnpm dev`は`claude`のプロセスグループに属することがあり、グループごと撃つと
+    #    セッション本体を巻き込む。`dev_server_tree_root`は「cwdが同じworktree」かつ
+    #    「開発サーバーに見える」親までしか遡らないので、`claude`もBashツールのラッパーシェルも
+    #    そこで外れる。**リーダーだけが先に死んでいる形**（#1523で実地に踏んだ）もこれで止まる
+    root="$(dev_server_tree_root "$pid" "$cwd")"
+    [[ "$root" =~ ^[1-9][0-9]*$ ]] || continue
+    [[ -z "${seen_root[$root]:-}" ]] || continue
+    seen_root["$root"]=1
 
     # 4. セッションが在れば現役。PIDファイルに載っていないだけで、誰かが見ている
     session="${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
@@ -327,7 +335,7 @@ reap_untracked_dev_servers() {
 
     # 5. 猶予。**セッションが立つ前の開発サーバーを撃たないための時間で、唯一の誤爆の防波堤。**
     #    開発サーバーとtmuxセッションのどちらが先に立つかは起動経路によって前後する
-    etimes="$(ps -o etimes= -p "$pgid" 2>/dev/null | tr -d '[:space:]')"
+    etimes="$(ps -o etimes= -p "$root" 2>/dev/null | tr -d '[:space:]')"
     [[ "$etimes" =~ ^[0-9]+$ ]] || continue
     if [[ "$etimes" -lt "$grace_seconds" ]]; then
       echo "  $repo #$issue_number: tmuxセッション「$session」はありませんが、起動から $((etimes / 60))分（猶予 ${ORPHAN_GRACE_MINUTES}分）のため見送ります。"
@@ -339,7 +347,7 @@ reap_untracked_dev_servers() {
     UNTRACKED=$((UNTRACKED + 1))
     reason="PIDファイルに無く、tmuxセッション「$session」も無い状態で $((etimes / 60))分動いていた（孤児）"
     log_file="$worktree_base/.dev-servers/issue-$issue_number.log"
-    stop_one "$repo #$issue_number" "$pgid" "$log_file" "$cwd" "$reason"
+    stop_one "$repo #$issue_number" "$root" "$log_file" "$cwd" "$reason" tree
   done
 
   return 0

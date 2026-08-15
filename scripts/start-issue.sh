@@ -85,6 +85,10 @@ source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
 # 起動プロンプトへ差し込む「今の状況」（#1267）。汎用ランチャーと共有する
 # shellcheck source=scripts/lib/prompt-context.sh
 source "$ROOT/scripts/lib/prompt-context.sh"
+# worktreeを作り直す前に開発サーバーを止める（#1524）。止め方は run-issue-session.sh・
+# reap-dev-servers.sh・cleanup-worktrees.sh と共有する。
+# shellcheck source=scripts/lib/dev-server.sh
+source "$ROOT/scripts/lib/dev-server.sh"
 
 # セッションと一緒に動くもの（run-issue-session.sh・session-notify.sh・プロンプトのひな形）を
 # どこから読むかを決める（#1438）。本体の作業ツリーが単に古いだけの場合は origin/develop の
@@ -259,6 +263,16 @@ remove_worktree() {
     exit 1
   fi
   echo "#$n: 既存のworktree・ブランチを削除しています..."
+  # **消す前に開発サーバーを止める**（#1524）。作り直しの判定（worktree_session_running）は
+  # PIDファイルと`run-issue-session.sh`のプロセスしか見ないため、実装エージェントが手で
+  # 起こし直した`pnpm dev`はすり抜ける。消えたworktreeを指したまま走り続け、次の起動は
+  # ポートを掴まれて`EADDRINUSE`になる（#1523の孤児）。
+  local dev_port
+  dev_port="$(dev_server_port_for_issue "$n" || true)"
+  if [[ -n "$dev_port" ]]; then
+    dev_server_stop_by_port "$dev_port" "$dir" "$WORKTREE_BASE/.dev-servers/issue-$n.log" "worktreeの作り直し" ||
+      echo "警告: #$n: ポート $dev_port を掴んでいた開発サーバーを停止できませんでした。" >&2
+  fi
   if ! git -C "$ROOT" worktree remove "$dir"; then
     echo "Error: worktreeの削除に失敗しました: $dir" >&2
     exit 1
