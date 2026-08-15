@@ -1379,7 +1379,12 @@ worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前
 ```bash
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --issue 123 --force  # 残ったものを1件だけ強制削除
 ```
+
+「残すworktree」の各行には**どうすれば消せるか**が1行で出る（#1192）。未コミットの変更や未pushの
+コミットが残っているものは`--issue <番号> --force`で消せる（何が失われるかを表示してから消す）。
+セッションが動いているものは`--force`でも消さないので、先にセッションを終える。
 
 対象・オプション・削除するものの範囲は[branching.md](branching.md)の「ブランチ・worktree運用」を参照。
 
