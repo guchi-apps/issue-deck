@@ -104,6 +104,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `canStartImplementation`が本文の全幅ボタンと同一条件で必ず二重になっていた）。増やす場合は
   `⋯`メニューへ入れる。**ダイアログを`⋯`から開くときはトリガーを`DropdownMenuItem`にせず**、
   親が`open`・`onOpenChange`を持つ（メニューが閉じるとトリガーごと外れ、ダイアログも消える）。
+- **スマホの各画面の縦スクロール領域には`flex-1`を付ける**（#1664）。
+  `flex flex-col overflow-hidden`な画面の中で、ヘッダーの下に置く`overflow-y-auto`の領域が対象。
+  付け忘れても`flex: 0 1 auto`のまま縮小して収まるので**見た目の高さは変わらず、PCのブラウザでは
+  何も起きない**。実害はiOSのホーム画面アプリ（standalone PWA）でだけ出る。高さが「中身の高さから
+  縮んだ結果」として決まるため、ポーリングの更新や画像・コメントの読み込みで中身の高さが変わる
+  たびにスクロール領域の箱ごと再レイアウトされ、スクローラの描画内容が失われる。**レイアウトは
+  正しいのに背景も文字も描かれない領域が残り**、その後Reactが更新した一部（相対時刻など）だけが
+  描き直される、という状態になる。ブラウザで再現しないのはURLバーの伸縮で全面の描き直しが
+  頻繁に起こるため。付け忘れは
+  [`mobile/mobile-screen-scroll-container.test.ts`](../src/components/dashboard/mobile/mobile-screen-scroll-container.test.ts)
+  で検出する（`max-h-`で高さの上限を自前で持つ`SheetContent`や小さな枠は対象外）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
