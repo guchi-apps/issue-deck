@@ -4,8 +4,10 @@ import {
   getAdjacentNavViewId,
   getNavViewDefaultGroupByRepo,
   getNavViewDefaultState,
+  mobileListNavViews,
   navViewIcons,
   navViews,
+  resolveMobileListNavViews,
   resolveStateOnViewChange,
   sidebarAttentionNavViews,
   sidebarIssueNavViews,
@@ -20,6 +22,35 @@ describe("navViews", () => {
       "question",
       "not-started",
     ]);
+  });
+});
+
+describe("スマホの一覧に並べるビュー（#1645）", () => {
+  it("先頭は「すべてのIssue」で、その次がユーザーの確認待ち（#714）", () => {
+    expect(mobileListNavViews.slice(0, 2).map((view) => view.id)).toEqual(["all", "check-user"]);
+  });
+
+  it("お気に入り・最近追加した・本番関連の2ビューは出さない", () => {
+    const ids = mobileListNavViews.map((view) => view.id);
+    expect(ids).not.toContain("favorites");
+    expect(ids).not.toContain("recently-added");
+    expect(ids).not.toContain("release-pending");
+    expect(ids).not.toContain("recently-merged");
+  });
+
+  it("一覧に無いビューで開かれたときだけ、そのビューを末尾へ足す", () => {
+    expect(resolveMobileListNavViews("in-progress")).toBe(mobileListNavViews);
+
+    const resolved = resolveMobileListNavViews("release-pending");
+    expect(resolved).toHaveLength(mobileListNavViews.length + 1);
+    expect(resolved.at(-1)?.id).toBe("release-pending");
+  });
+
+  it("足したビューからも左右のスワイプで隣のビューへ移動できる", () => {
+    const resolved = resolveMobileListNavViews("release-pending");
+
+    expect(getAdjacentNavViewId("release-pending", "prev", resolved)).toBe("in-progress");
+    expect(getAdjacentNavViewId("release-pending", "next", resolved)).toBeNull();
   });
 });
 

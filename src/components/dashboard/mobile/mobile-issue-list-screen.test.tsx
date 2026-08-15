@@ -1,0 +1,125 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
+import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
+import { navViews } from "@/lib/nav-views";
+import type { NavViewId } from "@/types/issue";
+
+// 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える
+vi.mock("@/components/dashboard/issue-list", () => ({
+  IssueList: () => <div data-testid="issue-list" />,
+}));
+
+const NAV_COUNTS = Object.fromEntries(
+  navViews.map((view) => [view.id, view.id === "check-user" ? 3 : 7]),
+) as Record<NavViewId, number>;
+
+const NO_FILTERS: MobileIssueLocalFilters = {
+  state: "open",
+  labels: [],
+  assignee: null,
+  sort: "created",
+};
+
+function renderScreen(
+  overrides: Partial<{
+    view: NavViewId;
+    filters: MobileIssueLocalFilters;
+    onChangeView: (view: NavViewId) => void;
+    onChangeFilters: (filters: MobileIssueLocalFilters) => void;
+  }> = {},
+) {
+  render(
+    <MobileIssueListScreen
+      title="Issue"
+      issues={[]}
+      navCounts={NAV_COUNTS}
+      selectedIssueId={null}
+      view={overrides.view ?? "all"}
+      filters={overrides.filters ?? NO_FILTERS}
+      labelOptions={[]}
+      assigneeOptions={[]}
+      onChangeView={overrides.onChangeView ?? vi.fn()}
+      onChangeFilters={overrides.onChangeFilters ?? vi.fn()}
+      onSelectIssue={vi.fn()}
+      onCreateIssue={vi.fn()}
+      scrollKey="test"
+    />,
+  );
+}
+
+describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("表示中のビュー名と件数をボタンに出す", () => {
+    renderScreen({ view: "in-progress" });
+
+    expect(screen.getByRole("button", { name: /実行中/ }).textContent).toContain("実行中");
+    expect(screen.getByRole("button", { name: /実行中/ }).textContent).toContain("7");
+  });
+
+  it("ヘッダーの件数行にもビュー名を添える", () => {
+    renderScreen({ view: "check-user" });
+
+    expect(screen.getByText("ユーザーの確認待ち・0件")).toBeTruthy();
+  });
+
+  it("絞り込みが効いているときだけ件数バッジを出す", () => {
+    renderScreen();
+    expect(screen.getByRole("button", { name: /絞り込み/ }).textContent).toBe("絞り込み");
+    cleanup();
+
+    renderScreen({
+      filters: { ...NO_FILTERS, state: "closed", labels: ["30.bug"] },
+    });
+    expect(screen.getByRole("button", { name: /絞り込み/ }).textContent).toBe("絞り込み2");
+  });
+
+  it("ビュー選択シートには一覧に出すビューだけを並べ、選ぶと切り替える", () => {
+    const onChangeView = vi.fn();
+    renderScreen({ onChangeView });
+
+    fireEvent.click(screen.getByRole("button", { name: /すべてのIssue/ }));
+
+    expect(screen.getByText("表示するIssue")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /本番反映待ち/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /直近本番に反映した/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /未着手/ }));
+    expect(onChangeView).toHaveBeenCalledWith("not-started");
+  });
+
+  it("一覧に無いビューで開かれた場合は、そのビューもシートに並べる", () => {
+    renderScreen({ view: "release-pending" });
+
+    fireEvent.click(screen.getByRole("button", { name: /本番反映待ち/ }));
+
+    // シートを開くと背景はaria-hiddenになるため、ここで引ける本番反映待ちはシート内の行
+    expect(screen.getByText("表示するIssue")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /本番反映待ち/ }).getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  it("絞り込みシートの「すべて解除」で状態・ラベル・担当者だけを既定へ戻す", () => {
+    const onChangeFilters = vi.fn();
+    renderScreen({
+      filters: { state: "closed", labels: ["30.bug"], assignee: "guchi", sort: "updated" },
+      onChangeFilters,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /絞り込み/ }));
+    fireEvent.click(screen.getByRole("button", { name: /すべて解除/ }));
+
+    expect(onChangeFilters).toHaveBeenCalledWith({
+      state: "open",
+      labels: [],
+      assignee: null,
+      sort: "updated",
+    });
+  });
+});
