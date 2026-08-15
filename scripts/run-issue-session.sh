@@ -422,6 +422,13 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # `AskUserQuestion`・MCPのツールと広く、絞ると答えたのに入力待ちのままになる組み合わせが残る。
   # 代わりに`session-notify.sh`が状態ファイルを見て「直前が入力待ちのとき」以外を即座に捨てる
   # （HTTPどころかpython3も起こさない）。
+  #
+  # **issue-deck自身では`PostToolUse`がworktreeの`.claude/settings.json`にも入っている**（#1456）。
+  # このスクリプト自体が本体の作業ツリーから走るため、そこが古いと`PostToolUse`のフック設定が
+  # そもそも生成されず、承認しても`00.check-user`が`Stop`まで外れなかった。ここを消さないのは、
+  # 汎用ランチャーで起こす他リポジトリには`.claude/settings.json`が無いため。二重に呼ばれても
+  # 上記の間引きで報告は入力待ち1回につき最大1回に収まる
+  # （docs/multi-agent/session-notify.md「`PostToolUse`だけはworktree側の…」）。
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
