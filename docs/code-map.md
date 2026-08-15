@@ -288,6 +288,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
+  1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
+  道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
+  `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
   `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ
