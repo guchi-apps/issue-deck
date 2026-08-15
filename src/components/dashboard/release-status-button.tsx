@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import {
@@ -61,7 +61,6 @@ export function ReleaseStatusButton({
   );
   const [open, setOpen] = useState(false);
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
-  const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
   // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
   const [releaseRepoFullName, setReleaseRepoFullName] = useState<string | null>(
@@ -153,11 +152,13 @@ export function ReleaseStatusButton({
     }));
   }, [releaseStatus, issues, releaseRepoFullName]);
 
+  // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前はここで「リリースを起動しました」の
+  // ダイアログを出していたが、閉じた先のこのメニューに進捗（`ReleaseProgress`）とボタンの
+  // 「リリース実行中」表示がそのまま出るため、OKを押させるだけの一手間だった。
   async function handleTriggerRelease() {
     const ok = await triggerRelease(bumpKind ?? undefined);
     if (ok) {
       setReleaseConfirmOpen(false);
-      setReleaseSuccessOpen(true);
       void refetchPendingMerges();
     }
   }
@@ -412,20 +413,6 @@ export function ReleaseStatusButton({
             >
               {isTriggeringRelease ? "起動中..." : "起動する"}
             </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={releaseSuccessOpen} onOpenChange={setReleaseSuccessOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>リリースを起動しました</AlertDialogTitle>
-            <AlertDialogDescription>
-              進捗はこのメニューに表示されます（マージが必要な段階ではマージ用リンクが出ます）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction className={buttonVariants({ variant: "default" })}>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
