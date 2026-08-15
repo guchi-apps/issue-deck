@@ -83,6 +83,27 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
+  進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
+  [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
+  対応PR・子Issue・AI要約・プロパティは
+  [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
+  折りたたみへ入れる。**どちらかの画面にだけ状態表示を足さない。** 足すとPCとスマホで
+  「何が起きているか」の答えが食い違い、片方でしか気付けない状態が生まれる。
+  スマホ側で新たに増えたのは、上部の
+  [`mobile/mobile-issue-summary-card.tsx`](../src/components/dashboard/mobile/mobile-issue-summary-card.tsx)（読む専用）と
+  [`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)（編集の口）で、
+  **この2つに同じ値を両方出さない**のが分け方の要点（サマリーは読むだけ・編集は折りたたみ）。
+  `IssueDetailSection`の開閉状態は`issue-detail.section.<id>`のlocalStorageで**セクションごとに1つ**
+  持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
+  **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
+  `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **スマホのIssue詳細のヘッダーに操作を足さない**（#1646）。置けるのは`←`・タイトル・`★`・`⋯`だけで、
+  それ以上並べると390px幅でタイトルが読めなくなる（以前は`▶`と`?`があり、タイトルに120pxしか
+  残っていなかった）。**本文に同じ操作があるものはヘッダーに置かない**（`▶`は
+  `canStartImplementation`が本文の全幅ボタンと同一条件で必ず二重になっていた）。増やす場合は
+  `⋯`メニューへ入れる。**ダイアログを`⋯`から開くときはトリガーを`DropdownMenuItem`にせず**、
+  親が`open`・`onOpenChange`を持つ（メニューが閉じるとトリガーごと外れ、ダイアログも消える）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
