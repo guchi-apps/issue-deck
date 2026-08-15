@@ -345,6 +345,8 @@ fi
 # 存在しない場合は --add-dir を付けずにそのまま起動する。
 SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
 CLAUDE_EXTRA_ARGS=()
+# フック設定を生成できたか（#1465）。生成できたときだけ「まだ開始していない」印を置く
+HOOKS_ENABLED=0
 if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
   CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
   echo "#$ISSUE_NUMBER: 共有知識リポジトリを参照可能にします: $SHARED_CONTEXT_DIR"
@@ -478,11 +480,18 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     ],
     "PostToolUse": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ],
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ]
   }
 }
 JSON
   CLAUDE_EXTRA_ARGS+=(--settings "$HOOK_SETTINGS_FILE")
+  # `SessionStart`が飛ぶ＝Claude Codeが開始した（#1465）。この対になる印を`claude`の起動直前に
+  # 置き、フックが消す。**フック設定を生成できたときだけ置く**（置いたまま消す相手がいないと、
+  # 画面に「まだ開始していません」が出続ける）。
+  HOOKS_ENABLED=1
 else
   echo "#$ISSUE_NUMBER: 情報: $NOTIFY_SCRIPT が無いため、セッションの状態通知は行いません。" >&2
 fi
@@ -558,6 +567,21 @@ echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モ�
 # 受付コメント（#1119）は`claude`を起動する直前に投げる。**ここより後ろには置けない**
 # （`claude`はフォアグラウンドで走り、戻ってくるのはセッションが終わったとき）。
 report_session_started_to_issue_deck
+
+# 「Claude Codeがまだ開始していない」印（#1465）。**`claude`を起こす直前に置く。**
+#
+# 初めてクローンしたリポジトリでは、起動直後にフォルダの信頼確認
+# （`Is this a project you created or one you trust?`）が出て、答えるまでセッションが始まらない。
+# **この間はフックが1つも飛ばない**ため、フックを待つ仕組み（#1219・#1264）では画面に何も出ず、
+# 端末を見ていない人には「起動したはずなのに何も起きない」としか分からない（実測: 信頼確認の
+# 表示中は`SessionStart`が飛ばず、答えた直後に飛ぶ）。
+#
+# 印はpollerが読み、猶予を過ぎても残っていればissue-deckへ「まだ開始していない」と報告する。
+# 消すのは`SessionStart`フック（`session-notify.sh`）と、このスクリプトの`cleanup`。
+if [[ "$HOOKS_ENABLED" == "1" && -n "$TMUX_SESSION_NAME" ]]; then
+  session_state_mark_starting "$TMUX_SESSION_NAME" || true
+fi
+
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
 # tailnetへ公開したURLをフック（#1219）からも読めるようにする（#1265）。フックはclaudeの
 # 子プロセスなので、ここでexportしておけば通知にも載せられる。**セッション通知は入力待ちで

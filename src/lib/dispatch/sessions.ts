@@ -5,13 +5,18 @@ import {
   isRevivedSession,
   nextEscalatedState,
   resolveSessionState,
+  resolveStartingActivityTransition,
   shouldEscalateSession,
   type DispatchSessionActivity,
   type DispatchSessionReport,
   type DispatchSessionState,
   type DispatchSessionView,
 } from "@/lib/dispatch/session-state";
-import { escalateFailedSession } from "@/lib/dispatch/session-escalation";
+import {
+  escalateFailedSession,
+  escalateNotStartedSession,
+  resolveNotStartedSession,
+} from "@/lib/dispatch/session-escalation";
 import { postSessionWrapupComment } from "@/lib/dispatch/session-wrapup";
 
 /**
@@ -163,6 +168,7 @@ const GONE_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
  * （送らないと消失を判定できない）。
  *
  * 戻り値の`escalated`は、このリクエストで引き上げ（Issueコメント＋`00.check-user`）を行った件数。
+ * 異常終了（#1217）と、Claude Codeが開始しないまま止まっているセッション（#1465）の合計。
  */
 export async function reportDispatchSessions(params: {
   hostName: string;
@@ -176,6 +182,10 @@ export async function reportDispatchSessions(params: {
   const reportedNames = new Set<string>();
   const escalations: { repositoryFullName: string; issueNumber: number; session: string; exitStatus: number | null }[] =
     [];
+  // Claude Codeが開始しないまま止まっているセッション（#1465）。異常終了の引き上げと同じく、
+  // DBの更新を終えてからまとめて処理する
+  const notStarted: { repositoryFullName: string; issueNumber: number; session: string }[] = [];
+  const notStartedResolved: { repositoryFullName: string; issueNumber: number }[] = [];
 
   for (const report of params.sessions) {
     reportedNames.add(report.tmuxSessionName);
@@ -185,6 +195,14 @@ export async function reportDispatchSessions(params: {
     const escalate = shouldEscalateSession(previousEscalated, state);
     const escalatedState = nextEscalatedState(previousEscalated, state, escalate);
     const revived = isRevivedSession(previous?.state as DispatchSessionState | undefined, state);
+    // 立ち上がり直した行は前のセッションの様子を捨てるので、判定でも捨てた後の値を見る（#1353）
+    const startingTransition = resolveStartingActivityTransition({
+      state,
+      previousActivity: revived
+        ? null
+        : ((previous?.activity ?? null) as DispatchSessionActivity | null),
+      claudeStarting: report.claudeStarting,
+    });
 
     await db.dispatchSession.upsert({
       where: {
@@ -204,6 +222,8 @@ export async function reportDispatchSessions(params: {
         lastReportedAt: now,
         escalatedState,
         escalatedAt: escalate ? now : null,
+        // 1巡目の報告で既に止まっている場合（起動から猶予を過ぎてからpollerが最初に見た場合）
+        ...(startingTransition === "enter" ? { activity: "NOT_STARTED", activityAt: now } : {}),
       },
       update: {
         repositoryFullName: report.repositoryFullName,
@@ -220,8 +240,28 @@ export async function reportDispatchSessions(params: {
         ...(revived
           ? { activity: null, activityAt: null, remoteControlUrl: null, firstSeenAt: now }
           : {}),
+        // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**
+        // （立ち上がり直した行では、捨てた後の状態から立て直す）
+        ...(startingTransition === "enter"
+          ? { activity: "NOT_STARTED" as const, activityAt: now }
+          : {}),
+        ...(startingTransition === "leave" ? { activity: null, activityAt: null } : {}),
       },
     });
+
+    if (startingTransition === "enter") {
+      notStarted.push({
+        repositoryFullName: report.repositoryFullName,
+        issueNumber: report.issueNumber,
+        session: report.tmuxSessionName,
+      });
+    }
+    if (startingTransition === "leave") {
+      notStartedResolved.push({
+        repositoryFullName: report.repositoryFullName,
+        issueNumber: report.issueNumber,
+      });
+    }
 
     if (escalate) {
       escalations.push({
@@ -290,6 +330,23 @@ export async function reportDispatchSessions(params: {
       exitStatus: target.exitStatus,
     });
     if (ok) escalated += 1;
+  }
+
+  // 起動確認で止まっているセッション（#1465）。**引き上げと同じく、失敗で報告APIを落とさない。**
+  for (const target of notStarted) {
+    const ok = await escalateNotStartedSession({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName: params.hostName,
+      tmuxSessionName: target.session,
+    });
+    if (ok) escalated += 1;
+  }
+  for (const target of notStartedResolved) {
+    await resolveNotStartedSession({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+    });
   }
 
   const saved = await db.dispatchSession.findMany({

@@ -114,4 +114,36 @@ describe("formatSecretsSyncResult", () => {
     expect(formatSecretsSyncResult(run({ status: "QUEUED" }))).toBe("実行中...");
     expect(formatSecretsSyncResult(run({ status: "TIMEOUT" }))).toContain("報告がありませんでした");
   });
+
+  it("時間切れにmessageがあればそれを出す", () => {
+    const text = formatSecretsSyncResult(
+      run({ status: "TIMEOUT", message: "カスタムの時間切れ理由" }),
+    );
+    expect(text).toBe("カスタムの時間切れ理由");
+  });
+
+  it("件数が全て0の失敗はmessageを出す（同期処理が始まる前に落ちた場合、件数だけでは何も伝わらない）", () => {
+    const text = formatSecretsSyncResult(
+      run({
+        status: "FAILED",
+        syncedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        message: "sync-secrets.yml がこのリポジトリで見つかりませんでした。",
+      }),
+    );
+    expect(text).toBe("sync-secrets.yml がこのリポジトリで見つかりませんでした。");
+  });
+
+  it("件数がある失敗はmessageがあっても件数側を優先する（項目名の方が具体的なため）", () => {
+    const text = formatSecretsSyncResult(
+      run({
+        status: "FAILED",
+        failedCount: 1,
+        failedKeys: ["PORT"],
+        message: "何かの補足",
+      }),
+    );
+    expect(text).toBe("同期=26 スキップ=2 失敗=1（失敗: PORT）");
+  });
 });

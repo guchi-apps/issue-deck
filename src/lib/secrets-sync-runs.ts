@@ -113,6 +113,8 @@ export type SecretsSyncReport = {
   failed: number;
   /** 失敗した項目の**名前だけ**。値・値の長さは受け取らない */
   failedKeys: string[];
+  /** 件数だけでは何が起きたか分からない場合の補足（同期処理が始まる前に落ちた場合など） */
+  message: string | null;
 };
 
 /**
@@ -136,6 +138,7 @@ export async function recordSecretsSyncReport(report: SecretsSyncReport): Promis
     failedCount: report.failed,
     failedKeys: report.failedKeys.join(","),
     runUrl: report.runUrl,
+    message: report.message,
   } as const;
 
   const queued = await db.secretSyncRun.findFirst({

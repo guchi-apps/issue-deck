@@ -67,7 +67,8 @@ set -euo pipefail
 # 3: セッションの本数と上限（#1361）を申告に載せ、画面が待機の理由を出せるようにする（#1394）。
 # 4: 追加指示（`INSTRUCTION`）を3段階プロトコルで送る（#1012）。
 # 5: 複数リポジトリ横断の質問セッション（`CROSS_REPO_QUESTION`）を起こす（#1454）。
-DISPATCH_POLLER_VERSION="5"
+# 6: Claude Codeが起動確認（フォルダの信頼確認）で止まっているセッションを報告する（#1465）。
+DISPATCH_POLLER_VERSION="6"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -434,6 +435,33 @@ resolve_session_repository() {
   printf '%s\n' "$matched"
 }
 
+# Claude Codeが起動確認で止まっているとみなすまでの猶予（秒。#1465）。
+#
+# 起動には数秒かかり、初回はプラグインの同期や自動更新でもう少し延びる。**短くすると
+# 正常な起動を「止まっている」と報告する**（Issueコメント＋`00.check-user`が付く）ため、
+# 起動にかかる時間より十分長く取る。逆に長くしても、気づくのが遅れるだけで害は無い。
+CLAUDE_START_GRACE_SECONDS="${ISSUE_DECK_CLAUDE_START_GRACE_SECONDS:-180}"
+
+# そのセッションが「Claude Codeをまだ開始していない」状態か（#1465）。
+#
+# 判定材料はランチャーが置く印（`lib/session-state.sh`の`.starting`）だけで、**画面
+# （`capture-pane`）は読まない**（docs/multi-agent/gates.md「計器」。画面の文字列からの推定は
+# 実地で誤判定した実績がある）。印を消すのは`SessionStart`フックなので、残っている＝
+# Claude Codeがまだ開始していない、と確実に言える。
+#
+# 印が無ければ`false`（正常に開始した、または印を置かない古いランチャーで起きたセッション）。
+claude_start_pending() {
+  local session="$1" since now
+  since="$(session_state_starting_since "$session" 2>/dev/null || true)"
+  [[ "$since" =~ ^[0-9]+$ ]] || { printf 'false'; return 0; }
+  now="$(date +%s)"
+  if ((now - since >= CLAUDE_START_GRACE_SECONDS)); then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
 #
 # **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
@@ -469,8 +497,10 @@ report_sessions() {
       --argjson issueNumber "$issue_number" \
       --argjson paneDead "$dead_json" \
       --argjson paneDeadStatus "$status_json" \
+      --argjson claudeStarting "$(claude_start_pending "$session_name")" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
-        issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus}')")
+        issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
+        claudeStarting: $claudeStarting}')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**

@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { AlertTriangle, Ban, Check, CheckCircle2, Clock, Copy, Loader2 } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +11,7 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { formatRelativeDate } from "@/lib/format-relative-date";
+import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,6 +24,12 @@ import { cn } from "@/lib/utils";
  * （**主な用途が外出先のスマホ**で、ホバーが無い）。
  *
  * 配色はCI状態のピル（`pull-request-badges.tsx`の`CiStateBadge`）に揃えている。
+ *
+ * **時刻は相対表現ではなく具体的な日時で出す**（#1468）。「3時間前」では、手元のtmuxで動いている
+ * セッションと突き合わせられない。
+ *
+ * **`tmux attach`のコマンドは行として置かず、状態のピルをクリックしてコピーさせる**（#1468）。
+ * 常時見えていても読むものではなく、ヘッダーの行数を1行消費するだけだった。
  */
 
 const TONE_CLASS: Record<DispatchJobTone, string> = {
@@ -67,12 +74,44 @@ export function DispatchJobStatus({
    */
   waitReason?: string | null;
 }) {
+  const [copied, setCopied] = useState(false);
   // 種別を必ず渡す。省略すると起動ジョブ扱いになり、種別が増えたときに文言が黙って
   // 「起動しました」になる（#1294）
   const { label, tone } = describeDispatchJobStatus(job.status, job.kind);
   // 状態ごとに「いつの話か」を示す時刻は変わる。終わっていれば終了時刻、動いていれば開始時刻
   const timestamp = job.finishedAt ?? job.startedAt ?? job.createdAt;
   const textAlign = align === "end" ? "text-right" : "text-left";
+  // 起動できたセッションの中身を見る唯一の手掛かり（Actions UIに相当するものが無い）。
+  // 行として常時出す代わりに、ピルのクリックでコピーさせる（#1468）
+  const attachCommand =
+    job.status === "SUCCEEDED" && job.tmuxSessionName
+      ? `tmux attach -t ${job.tmuxSessionName}`
+      : null;
+
+  async function handleCopyAttachCommand() {
+    if (!attachCommand) return;
+    try {
+      await navigator.clipboard.writeText(attachCommand);
+    } catch {
+      // クリップボードが使えない環境（権限拒否・非セキュアコンテキスト）では、コピーできて
+      // いないのに成功表示を出さない（`start-implementation-dialog.tsx`と同じ扱い）
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  const pillClassName = cn(
+    "inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 font-medium ring-1 ring-inset",
+    TONE_CLASS[tone],
+  );
+  const pillBody = (
+    <>
+      {copied ? <Check className="size-3.5" /> : <ToneIcon tone={tone} />}
+      {formatDispatchHostName(job.targetHost)}で{label}
+      {attachCommand && !copied && <Copy className="size-3 opacity-60" />}
+    </>
+  );
 
   return (
     <div
@@ -81,26 +120,28 @@ export function DispatchJobStatus({
         align === "end" ? "justify-end" : "justify-start",
       )}
     >
-      <span
-        className={cn(
-          "inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 font-medium ring-1 ring-inset",
-          TONE_CLASS[tone],
-        )}
-      >
-        <ToneIcon tone={tone} />
-        {formatDispatchHostName(job.targetHost)}で{label}
+      {attachCommand ? (
+        <button
+          type="button"
+          onClick={() => void handleCopyAttachCommand()}
+          className={cn(pillClassName, "cursor-pointer hover:opacity-80")}
+          // コマンドそのものはtitleにも出さない（#1468）。画面に出す必要が無いから消した文字列を
+          // ホバーで戻すことになる。押せばコピーできると分かれば足りる
+          title="クリックでtmuxのアタッチコマンドをコピー"
+        >
+          {pillBody}
+        </button>
+      ) : (
+        <span className={pillClassName}>{pillBody}</span>
+      )}
+      {copied && <span className="text-muted-foreground">コピーしました</span>}
+      <span className="text-muted-foreground" title={formatDateTimeFull(timestamp)}>
+        {formatDateTime(timestamp)}
       </span>
-      <span className="text-muted-foreground">{formatRelativeDate(timestamp)}</span>
       {isCancelableDispatchJobStatus(job.status) && (
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={isSubmitting}>
           取り消し
         </Button>
-      )}
-      {/* 起動できたセッションの中身を見る唯一の手掛かり（Actions UIに相当するものが無い） */}
-      {job.status === "SUCCEEDED" && job.tmuxSessionName && (
-        <code className={cn("w-full break-all text-muted-foreground", textAlign)}>
-          tmux attach -t {job.tmuxSessionName}
-        </code>
       )}
       {job.message && (tone === "error" || job.status === "CANCELED") && (
         <p className={cn("w-full break-words text-muted-foreground", textAlign)}>{job.message}</p>

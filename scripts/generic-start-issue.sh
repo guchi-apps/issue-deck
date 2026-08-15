@@ -428,6 +428,28 @@ else:
         "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
     )
 
+# 見た目のアーティファクト（#1473）。**同じ文面が scripts/start-issue.sh と
+# src/lib/prompts/build-implementation-prompt.ts にもある。** 起動経路によって指示が
+# 変わらないよう、変えるときは3か所そろえる（scripts/lib/agent-language.sh と同じ構造）。
+if "25.artifact-required" in label_names:
+    artifact_instructions = (
+        "このIssueには`25.artifact-required`ラベルが付いています。実装・テストが完了したら、"
+        "変更した画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLをIssueコメントと"
+        "PR本文の「確認方法」に貼ってください。\n\n"
+        "- **アーティファクトは手で書いた再現であって実物ではありません。** 実装との差異は"
+        "開発サーバーの実画面で必ず確認し、アーティファクトの承認だけをもって「実装が正しい」と"
+        "扱わないでください。この但し書きはアーティファクト本文の先頭にも書きます\n"
+        "- アーティファクトは既定で非公開です。共有するかどうかを決めるのはユーザーです\n"
+        "- 開発サーバーのURLと違い、セッションが終了した後も残ります。スマホなど別端末からの確認に向きます\n"
+        "- 承認可否を尋ねる場合は`AskUserQuestion`を使ってください（フックが自動で`00.check-user`を"
+        "付け、答えた時点で外れます。#1417）"
+    )
+else:
+    artifact_instructions = (
+        "このIssueには`25.artifact-required`ラベルが付いていないため、"
+        "見た目のアーティファクトの作成は不要です。"
+    )
+
 comments = issue.get("comments", [])
 if comments:
     comment_text = "\n\n".join(
@@ -457,6 +479,7 @@ replacements = {
     "{{DEV_PORT}}": dev_port,
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
+    "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
 }
 result = template
 for placeholder, value in replacements.items():

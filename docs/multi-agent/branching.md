@@ -24,6 +24,67 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - 掃除を`run-issue-session.sh`のtrap（セッション終了時）で自動化はしない。「あとで見返したい」「PRにコメントが付いたら直す」という用途を壊すため、明示的に走らせるコマンドにとどめている。
 - 放置すると効くのはディスクだけではない。#1076でworktreeを再利用するようにしたため、**マージ済みIssueで再開すると、developから分岐し直されていない古いブランチのまま作業を始めてしまう**（以前は「既に存在します」で止まっていた）。そのため`start-issue.sh`は再開時にマージ済みPRの有無を確認し、見つかったら警告する。詳細は[local-quick-start.md](local-quick-start.md)の「マージ済みIssueで再開したときの扱い」。
 
+## マージ済みのリモートブランチを掃除する（#1478）
+
+上の`cleanup-worktrees.sh`が扱うのは**ローカル**のworktreeとブランチだけで、GitHub上のリモート
+ブランチには触れない。そちらは長く放置されており、2026-08-15時点で`guchi-apps/issue-deck`に
+**670ブランチ**（うち`issue-*`が大半）が残っていた。原因は2つで、リポジトリ設定
+`delete_branch_on_merge`が無効だったことと、掃除する仕組みがどこにも無かったこと。
+
+### 今後のぶんは自動で消える
+
+`delete_branch_on_merge`を`guchi-apps`の非fork・非archiveリポジトリ**26件すべて**で有効にした。
+PRをマージした時点でheadブランチがGitHub上から自動的に消える。設定の適用・再確認は
+`scripts/set-delete-branch-on-merge.sh`（既定はdry-run、`--apply`で適用）で行う。
+
+**ローカルのworktree運用には影響しない。** 消えるのはリモートのブランチだけで、worktreeも
+ローカルブランチもそのまま残る。`scripts/lib/worktree-status.sh`は`origin/develop`にコミットが
+含まれるかだけを見ており、リモート作業ブランチの存在を判定材料にしていない。
+
+### 既に残っているぶんは`cleanup-merged-branches.sh`で消す
+
+```bash
+scripts/cleanup-merged-branches.sh                 # 既定。issue-deckをdry-run
+scripts/cleanup-merged-branches.sh --all-repos     # 非forkの全リポジトリをdry-run
+scripts/cleanup-merged-branches.sh --apply --yes   # 実際に削除する
+```
+
+次を**すべて**満たすブランチだけを削除する。1つでも欠けたら残す。
+
+1. 名前が保護対象でない — `main`／`develop`／`master`／デフォルトブランチ／`screenshots`
+   （#255のorphanブランチ）／GitHub上で`protected: true`
+2. そのブランチをheadとするPRが1件以上あり、最新のPRがマージ済み
+3. openなPRのheadでない
+4. **ブランチの現在のSHAが、そのマージ済みPRの`head.sha`と一致する**
+5. `issue-<番号>`形式なら、そのIssueがopenでない（`--include-open-issues`で解除）
+
+**`develop`はdevelop→mainのPRのheadなので、条件2〜4だけでは削除対象に入る。** 条件1の名前に
+よる保護が最後の砦になっている。ここを緩めないこと。
+
+条件4がこの判定の要で、「マージ後に同名ブランチで作業を再開した」ものをAPI 2本
+（branches／pulls）だけで機械的に外せる。issue-deckの実測では、670本のうち647本が削除対象、
+残る23本の内訳は保護3・PR無し5・未マージ4・マージ後に進行4・対応Issueがopen 8だった。
+
+削除は取り消せないため、dry-run既定・実行前の件数表示と確認プロンプト（`--yes`で省略）に加えて、
+削除したブランチ名とSHAをTSVで残す（既定`~/.local/state/issue-deck/deleted-branches.tsv`）。
+消したあとでも次で戻せる。
+
+```bash
+git push origin <SHA>:refs/heads/<ブランチ名>
+```
+
+### ブランチを消すと無人実行のmode判定が変わる
+
+`reusable-issue-dispatch.yml`のmode判定はリモートブランチの存在（`BRANCH_EXISTS`）を見ており、
+**「ブランチがある＋develop向けPRがOPENでない（＝マージ済み）」ときは`mode=skip`で何もしない。**
+ブランチが消えるとこの分岐を抜け、`develop`から新規ブランチを切って実装が始まる。
+
+closedなIssueは手前の`ISSUE_CLOSED`判定で弾かれるので影響を受けないが、**openなIssue
+（`Develop`・`Release`待ちなど）は挙動が変わる**——マージ済みIssueへの`@claude`コメントが、
+今までの「無反応」から「新しいブランチでの実装開始」になる。掃除スクリプトが条件5で
+open Issueのブランチを既定から外しているのはこのためだが、`delete_branch_on_merge`を
+有効にした以上、今後マージするぶんはこの状態が常時発生する。
+
 ## セッション中に作った新しいIssueは、そのセッションで実施しない（#1316）
 
 作業中に別件のIssueを起票すること自体は想定どおり（[labels.md](labels.md)の分割・関連事項の起票・

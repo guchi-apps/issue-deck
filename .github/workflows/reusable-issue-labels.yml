@@ -19,7 +19,7 @@ name: Issue Progress (reusable)
 # Phase 4までは同じ遷移を進捗ラベル(計画検討中〜本番反映済の6つ)にも書いており、Statusが壊れても
 # ラベルから状態を復元できる二重運用になっていた。Phase 5でラベルを廃止したため、このワークフローが
 # 行うのは**issue-deckの進捗報告API(POST /api/progress)への報告だけ**になっている。
-# `00.check-user`(条件系ラベル)の除去だけはラベル操作として残る。Status = 今どこにいるか、
+# `00.check-user`(条件系ラベル)の付け外しだけはラベル操作として残る。Status = 今どこにいるか、
 # Label = どんな性質・条件があるか、という役割分担のため。
 #
 # develop-pr-opened(Develop PR)・develop-pr-merged(Develop)の2ジョブは、
@@ -55,6 +55,12 @@ name: Issue Progress (reusable)
 # その手動マージ自体が確認完了を意味するため、develop-pr-merged・develop-merge-sweep・
 # main-pr-mergedの各ジョブでは進捗の報告とあわせて`00.check-user`も除去する(#266。
 # 除去のタイミングが無く残り続けていた)。
+#
+# **その判定を行うclaude-review-develop.ymlは、全リポジトリにあるわけではない。**
+# 持たないリポジトリではdevelop向けPRの可否が一度も判定されず、自動マージもされないのに
+# `00.check-user`も付かず、PRが開いたまま残る(#1470)。このワークフローは展開済みの全
+# リポジトリが呼ぶ唯一の共通経路なので、develop-pr-openedがcallerの有無を見て、
+# 無ければ「ユーザーのマージが必要」として`00.check-user`を付ける保険を持つ。
 #
 # 報告は`ProgressStatusKey`(src/lib/issue-progress.ts)で送る。ラベル名でもStatus名でもない
 # 状態キーを送るのは、呼び出し側を表記の変更から切り離すため。
@@ -137,19 +143,76 @@ jobs:
       github.event.action == 'opened' &&
       github.event.pull_request.base.ref == 'develop'
     runs-on: ubuntu-latest
+    # 自動マージ判定の経路を調べるため .github/workflows/ の一覧を読む。ワークフロー先頭の
+    # permissions: には contents が無いので、ジョブ側で明示する(cleanup-on-closeと同じ形)。
+    # callerの付与範囲は超えられないが、展開済みの全リポジトリのcallerが contents: write を
+    # 渡していることを確認済み(#1470)。
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       HEAD_REF: ${{ github.head_ref }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
       PR_URL: ${{ github.event.pull_request.html_url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # develop向けPRを「自動マージしてよい」「ユーザーのマージが要る」のどちらかへ確定させるのは
+      # claude-review-develop.yml(risk-check -> auto-merge)だけで、このcallerを持たないリポジトリでは
+      # その判定が一度も走らない。判定が走らなければ自動マージもされないので、そのPRは必ずユーザーが
+      # 手でマージすることになるが、00.check-userが付かないためissue-deckの画面にも「要確認」として
+      # 出ず、PRが開いたまま気付かれずに残る(#1470。実測で12リポジトリ13本が放置されていた)。
+      # ここでcallerの有無を見て、無ければ「ユーザーのマージが必要」と確定させる。
+      # 経路を持つリポジトリでは何もしない——ここで付けるとauto-mergeジョブが
+      # 「00.check-userが付いている」と読んで自動マージを常にスキップしてしまうため。
+      - name: 自動マージ判定の経路があるか調べる
+        id: verdict
+        run: |
+          # 「一覧は取れたがその中に無い」と「一覧自体が取れなかった」を区別する。後者を
+          # 「経路あり」に倒すと放置が再発するため、リトライし切ったら「経路なし」に倒す
+          # (fail-closed)。誤って付いた00.check-userは画面から外せるが、付かないPRは
+          # 気付かれずに残り続ける。
+          listing=""
+          for i in 1 2 3; do
+            if listing="$(gh api "repos/$GH_REPO/contents/.github/workflows?ref=$BASE_REF" --jq '.[].name' 2>/dev/null)" \
+              && [ -n "$listing" ]; then
+              break
+            fi
+            listing=""
+            [ "$i" = 3 ] || sleep 5
+          done
+          if [ -z "$listing" ]; then
+            echo "::warning::.github/workflows/ の一覧を取得できませんでした。自動マージ判定の経路が無いものとして扱います"
+            echo "auto_merge_path=false" >> "$GITHUB_OUTPUT"
+          elif printf '%s\n' "$listing" | grep -qx "claude-review-develop.yml"; then
+            echo "claude-review-develop.yml があるため、マージ可否の判定はそちらに任せます"
+            echo "auto_merge_path=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "claude-review-develop.yml が無いため、このPRはユーザーのマージが必要です"
+            echo "auto_merge_path=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: PR作成をIssueへ通知する
         id: transition
+        env:
+          AUTO_MERGE_PATH: ${{ steps.verdict.outputs.auto_merge_path }}
         run: |
           if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
             n="${BASH_REMATCH[1]}"
-            gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
+            note=""
+            if [ "$AUTO_MERGE_PATH" != "true" ]; then
+              # 対象リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+              # ジョブごと落ちる(#975)。実在する場合だけ呼ぶ(develop-pr-mergedと同じ作法)。
+              if gh label list --json name --jq '.[].name' --limit 200 | grep -qx "00.check-user"; then
+                gh issue edit "$n" --add-label "00.check-user"
+                note=$'\n\n'"⚠️ このリポジトリには自動マージ可否を判定するワークフロー（\`claude-review-develop.yml\`）が無いため、このPRが自動でマージされることはありません。内容を確認したうえでマージしてください。"
+              else
+                echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため付与をスキップします"
+              fi
+            fi
+            gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL$note"$'\n\n<!-- issue-deck-source:issue-labels -->'
             echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
           fi
 

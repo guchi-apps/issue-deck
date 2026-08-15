@@ -96,6 +96,20 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     };
   }
 
+  // Claude Code本体がまだ開始していない（#1465）。**`WAITING_INPUT`と混ぜない。**
+  // 混ぜると「Remote Controlから答えてください」と出るが、セッションが始まっていない以上
+  // Remote Controlは繋がっておらず、画面から辿れる出口がその1つだけになる。
+  if (session.activity === "NOT_STARTED") {
+    return {
+      ...base,
+      at: session.activityAt ?? session.lastReportedAt,
+      tone: "waiting",
+      label: `${formatDispatchHostName(session.host)}のセッションがまだ開始していません`,
+      detail: `フォルダの信頼確認（Is this a project you created or one you trust?）などで止まっている可能性があります。\`tmux attach -t ${session.tmuxSessionName}\`で答えてください`,
+      // 繋がっていないURLを出さない（起動時に取れた値が残っていることがある）
+      remoteControlUrl: null,
+    };
+  }
   if (session.activity === "WAITING_INPUT") {
     return {
       ...base,
@@ -150,5 +164,7 @@ export function shortIssueSessionLabel(session: DispatchSessionView): string | n
   if (session.state === "FAILED") return "異常終了";
   if (session.state === "EXITED" || session.state === "GONE") return "終了";
   if (session.activity === "WAITING_INPUT") return "入力待ち";
+  // 人が端末で答えるまで進まない点は入力待ちと同じなので、一覧にも出す（#1465）
+  if (session.activity === "NOT_STARTED") return "未開始";
   return null;
 }
