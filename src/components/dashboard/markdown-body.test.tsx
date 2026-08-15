@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
@@ -64,5 +65,79 @@ describe("MarkdownBody のリンク", () => {
     expect(click(screen.getByText("公式")).defaultPrevented).toBe(false);
     expect(openReference).not.toHaveBeenCalled();
     expect(runLink.getAttribute("target")).toBe("_blank");
+  });
+});
+
+// チェックボックスに付く行番号は`rehypeTaskListItems`がASTの`position`から取る（#1486）。
+// `rehype-raw`・`rehype-sanitize`を通しても行番号が保たれることを、ここで実際に確かめている。
+describe("MarkdownBody のタスクリスト", () => {
+  const body = ["## やること", "", "- [x] SSHする", "- [ ] .envを直す"].join("\n");
+
+  function renderTasks(content: string, props: Partial<ComponentProps<typeof MarkdownBody>> = {}) {
+    return render(
+      <GithubReferenceNavigationProvider openReference={vi.fn()}>
+        <MarkdownBody content={content} {...props} />
+      </GithubReferenceNavigationProvider>,
+    );
+  }
+
+  function checkboxes(): HTMLInputElement[] {
+    return screen.getAllByRole("checkbox") as HTMLInputElement[];
+  }
+
+  it("onToggleTaskを渡すと、クリックした項目の行番号とチェック後の状態を返す", () => {
+    const onToggleTask = vi.fn();
+    renderTasks(body, { onToggleTask });
+
+    const boxes = checkboxes();
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].checked).toBe(true);
+    expect(boxes[1].checked).toBe(false);
+
+    fireEvent.click(boxes[1]);
+    expect(onToggleTask).toHaveBeenCalledWith(4, true);
+
+    fireEvent.click(boxes[0]);
+    expect(onToggleTask).toHaveBeenCalledWith(3, false);
+  });
+
+  it("入れ子のタスクは親ではなく自分の行番号を返す", () => {
+    const onToggleTask = vi.fn();
+    renderTasks(["- [ ] 親", "  - [ ] 子"].join("\n"), { onToggleTask });
+
+    fireEvent.click(checkboxes()[1]);
+
+    expect(onToggleTask).toHaveBeenCalledWith(2, true);
+  });
+
+  it("コードブロック内の例示はチェックボックスにならず、後続の行番号もずれない", () => {
+    const onToggleTask = vi.fn();
+    renderTasks(["```markdown", "- [ ] 例示", "```", "", "- [ ] 実際のタスク"].join("\n"), {
+      onToggleTask,
+    });
+
+    const boxes = checkboxes();
+    expect(boxes).toHaveLength(1);
+
+    fireEvent.click(boxes[0]);
+    expect(onToggleTask).toHaveBeenCalledWith(5, true);
+  });
+
+  // 連打で本文の更新が競合しないよう、送信が終わるまでは操作させない。
+  // （jsdomのfireEventはdisabledでもchangeを起こせてしまうため、属性そのものを確かめる）
+  it("送信中はチェックを操作できない", () => {
+    renderTasks(body, { onToggleTask: vi.fn(), isTaskToggling: true });
+
+    for (const box of checkboxes()) {
+      expect(box.disabled).toBe(true);
+    }
+  });
+
+  it("onToggleTaskを渡さない場合は今までどおり読み取り専用", () => {
+    renderTasks(body);
+
+    for (const box of checkboxes()) {
+      expect(box.disabled).toBe(true);
+    }
   });
 });

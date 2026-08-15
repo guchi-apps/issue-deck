@@ -227,6 +227,33 @@ export function useDispatchState(enabled: boolean) {
     }
   }, []);
 
+  /**
+   * 終了したジョブの表示を消す（#1479）。取り消し（`cancel`）とは別で、既に終わったものだけが対象。
+   *
+   * **成功したらポーリングを待たずに手元から落とす。** 次の取得まで最大20秒あり、その間
+   * 消えないと押せていないように見える（サーバー側は`dismissedAt`が入っており、取り直しても戻らない）。
+   */
+  const dismiss = useCallback(async (jobId: string): Promise<boolean> => {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dispatch/${encodeURIComponent(jobId)}/dismiss`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      setState((prev) =>
+        prev ? { ...prev, jobs: prev.jobs.filter((job) => job.id !== jobId) } : prev,
+      );
+      setReloadKey((key) => key + 1);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, []);
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
@@ -238,5 +265,6 @@ export function useDispatchState(enabled: boolean) {
     enqueue,
     sendSessionControl,
     cancel,
+    dismiss,
   };
 }

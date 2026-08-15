@@ -15,6 +15,7 @@ import {
   DISPATCH_CLAIM_TIMEOUT_MS,
   DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
   DISPATCH_HEARTBEAT_TIMEOUT_MS,
+  isActiveDispatchJobStatus,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostRepositories,
@@ -633,6 +634,52 @@ export async function cancelDispatchJob(params: {
   return updated ? { ok: true, job: toJobView(updated) } : { ok: false, reason: "not_found" };
 }
 
+export type DismissDispatchJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; reason: "not_found" | "not_dismissable"; message?: string };
+
+/**
+ * 終了したジョブの表示を画面から消す（#1479）。
+ *
+ * 終了したジョブは24時間表示され続ける（`FINISHED_JOB_RETENTION_MS`）。実行キューの
+ * 「直近の失敗」には取り消しに当たる操作が無く、**原因を把握して対処したあとも丸1日消えない**
+ * のがこの関数の理由。
+ *
+ * **行は消さず`dismissedAt`を入れるだけ。** 失敗理由（`message`）は後から原因を追うときの
+ * 唯一の手掛かりで、表示を片付けたいだけの操作で履歴まで失わせない。
+ *
+ * **未完了のジョブは消せない。** 走っているものを表示だけ消せると、動いている実体が画面の
+ * どこにも出ないまま残る。止めたいなら`cancelDispatchJob`の方を使う。
+ */
+export async function dismissDispatchJob(params: {
+  jobId: string;
+  now?: Date;
+}): Promise<DismissDispatchJobResult> {
+  const now = params.now ?? new Date();
+  const job = await db.dispatchJob.findUnique({ where: { id: params.jobId } });
+  if (!job) return { ok: false, reason: "not_found" };
+
+  if (isActiveDispatchJobStatus(job.status)) {
+    return {
+      ok: false,
+      reason: "not_dismissable",
+      message: "まだ終わっていないジョブの表示は消せません。止める場合は取り消してください。",
+    };
+  }
+
+  // **既に消してあっても成功として返す。** 連打やポーリングの行き違いで2回目が届くのは
+  // 想定内で、そこで失敗を出しても押した側にできることが無い
+  if (job.dismissedAt === null) {
+    await db.dispatchJob.updateMany({
+      where: { id: job.id, dismissedAt: null },
+      data: { dismissedAt: now },
+    });
+  }
+
+  const updated = await db.dispatchJob.findUnique({ where: { id: job.id } });
+  return updated ? { ok: true, job: toJobView(updated) } : { ok: false, reason: "not_found" };
+}
+
 /** 終了したジョブを画面に残す期間。押した結果がすぐ消えると、失敗に気づけない */
 const FINISHED_JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -655,6 +702,9 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
     db.dispatchJob.findMany({
       where: {
+        // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、
+        // ここで落ちるのは終了済みのものだけ（`dismissDispatchJob`）
+        dismissedAt: null,
         OR: [
           { status: { in: [...ACTIVE_DISPATCH_JOB_STATUSES] } },
           { finishedAt: { gte: new Date(now.getTime() - FINISHED_JOB_RETENTION_MS) } },
