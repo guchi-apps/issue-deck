@@ -214,6 +214,22 @@ export function IssuePropertiesPanel({
         </Select>
       </section>
 
+      {/* 詳細のヘッダーからは日付を外し、ここへ集約した（#1577）。両方に出すと狭いペインで
+          メタ情報が2行に折り返すだけの重複になる。ヘッダーには相対時刻の「更新」だけが残る */}
+      <section>
+        <h3 className="mb-2 text-xs font-semibold text-muted-foreground">日付</h3>
+        <dl className="flex flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-muted-foreground">作成日</dt>
+            <dd>{new Date(issue.createdAt).toLocaleString("ja-JP")}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-muted-foreground">更新日</dt>
+            <dd>{new Date(issue.updatedAt).toLocaleString("ja-JP")}</dd>
+          </div>
+        </dl>
+      </section>
+
       {issue.milestone && (
         <section>
           <h3 className="mb-2 text-xs font-semibold text-muted-foreground">マイルストーン</h3>

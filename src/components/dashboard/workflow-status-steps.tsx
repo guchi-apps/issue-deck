@@ -233,7 +233,10 @@ export function WorkflowStatusSteps({
             const showApprovalPending = isCurrent && approvalPending;
             const StepIcon = step.icon;
             return (
-              <div key={step.key} className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5">
+              <div
+                key={step.key}
+                className="relative flex min-w-16 flex-1 flex-col items-center gap-1.5 px-1"
+              >
                 {index !== 0 && (
                   <div
                     aria-hidden
@@ -265,9 +268,11 @@ export function WorkflowStatusSteps({
                 >
                   {isDone ? <Check className="size-3.5" /> : <StepIcon className="size-3.5" />}
                 </div>
+                {/* 折り返しを許す（#1577）。`whitespace-nowrap`だと「developへマージ」のような
+                    長いラベルが列からはみ出し、隣のラベルと重なって読めなくなっていた */}
                 <span
                   className={cn(
-                    "hidden whitespace-nowrap text-center text-[11px] md:block",
+                    "hidden text-center text-[11px] leading-tight text-balance md:block",
                     isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
                   )}
                 >
