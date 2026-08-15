@@ -736,6 +736,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 を通す（付与エンドポイントは存在しないラベル名を渡すとその場で作ってしまうため）。
 一覧は[multi-agent/labels.md](multi-agent/labels.md)「理由を表す`01.check-*`ラベル」。
 
+**理由から「次にどこの何を押すか」を組み立てるのは
+[`lib/github/check-user-guidance.ts`](../src/lib/github/check-user-guidance.ts)1か所**（#1663）。
+Remote Controlを開くのか・対応PRをマージするのか・コメント欄の「承認」を押すのかは、理由
+（`01.check-*`）と実行先（無人実行かローカルセッションか）で変わる。表示は
+[`components/dashboard/check-user-reason-notice.tsx`](../src/components/dashboard/check-user-reason-notice.tsx)、
+移動先の目印（`data-check-user-target`）と着地のハイライトは
+[`lib/check-user-focus.ts`](../src/lib/check-user-focus.ts)。**idを使わないのは、PC版と
+スマホ版の詳細が同時にDOMへ乗り、非表示側が選ばれてしまうため。**
+Issue詳細の上部（`IssueStatusCard`）とコメント欄の承認カードの2か所へ**同じ内容を同じ体裁で**出す
+（PC・スマホ共通）。
+
 定型文やマーカーコメントを変更するときは、ワークフロー側のトリガー条件と対になっているため
 両方を確認する。
 
