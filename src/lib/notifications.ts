@@ -147,8 +147,8 @@ function buildReleaseNotifications(
 }
 
 /**
- * 確認待ち（`00.check-user`）の通知。理由ラベル（`01.check-*`）が読めればその文言を出す。
- * 待たせている時間が長い順（＝左メニューの「確認待ち」ビューの並びと同じ考え方）に並べる。
+ * 確認待ち（`00.check-user`）のIssue。PR側の重複除去（同じ操作を2行に出さない）でも
+ * 同じ集合が要るため、通知の組み立てとは別に切り出してある。
  */
 function selectCheckUserIssues(issues: Issue[]): Issue[] {
   return issues.filter(
@@ -157,20 +157,24 @@ function selectCheckUserIssues(issues: Issue[]): Issue[] {
   );
 }
 
+/**
+ * 確認待ちの通知。理由ラベル（`01.check-*`）が読めればその文言を出す。
+ * 並びは呼び出し側で「待たせている時間が長い順」（＝左メニューの「確認待ち」ビューと同じ考え方）。
+ */
 function buildCheckUserNotifications(issues: Issue[]): NotificationItem[] {
   return selectCheckUserIssues(issues).map((issue) => {
-      const reason = checkUserReason(issue.labels);
-      return {
-        id: `check-user:${issue.id}`,
-        group: "check-user",
-        // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）。
-        tone: reason === "answered" ? "info" : "action",
-        title: `#${issue.number} ${issue.title}`,
-        badgeLabel: reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
-        repositoryFullName: issue.repositoryFullName,
-        since: issue.checkUserLabeledAt ?? issue.updatedAt,
-        target: { kind: "issue", issueId: issue.id },
-      } satisfies NotificationItem;
+    const reason = checkUserReason(issue.labels);
+    return {
+      id: `check-user:${issue.id}`,
+      group: "check-user",
+      // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）。
+      tone: reason === "answered" ? "info" : "action",
+      title: `#${issue.number} ${issue.title}`,
+      badgeLabel: reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
+      repositoryFullName: issue.repositoryFullName,
+      since: issue.checkUserLabeledAt ?? issue.updatedAt,
+      target: { kind: "issue", issueId: issue.id },
+    } satisfies NotificationItem;
   });
 }
 
