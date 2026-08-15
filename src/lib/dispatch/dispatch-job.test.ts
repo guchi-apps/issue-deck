@@ -5,11 +5,13 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
+  describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
   describeDispatchJobStatus,
   describeSessionControlRejection,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
   findBlockingSession,
+  findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
@@ -22,6 +24,8 @@ import {
   parseDispatchReportStatus,
   parseDispatchTarget,
   parseSessionInstruction,
+  resolveCrossRepoQuestionRejection,
+  resolveDefaultCrossRepoQuestionHost,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
   resolveScreenshotRejection,
@@ -747,6 +751,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       screenshotCapable: true,
       sessionControlCapable: true,
       instructionCapable: true,
+      crossRepoQuestionCapable: true,
       maxSessions: 12,
       liveSessions: 0,
       ...overrides,
@@ -770,5 +775,163 @@ describe("resolveScreenshotRejection（#1268）", () => {
 
   it("ホストを選んでいない（GitHub Actions等）なら塞がない", () => {
     expect(resolveScreenshotRejection(null)).toBeNull();
+  });
+});
+
+/**
+ * #1454。**起動ジョブ（`resolveDispatchTargetRejection`）とは判定が違う。** 横断質問セッションは
+ * worktreeを作らず、記録先リポジトリへは`gh issue comment`で書くだけなので、記録先が
+ * サブPCにcloneされている必要が無い。代わりに「参照できるリポジトリが1件以上あるか」を見る。
+ */
+describe("横断質問（#1454）", () => {
+  function host(
+    overrides: Partial<
+      Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories">
+    > = {},
+  ): Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories"> {
+    return {
+      online: true,
+      crossRepoQuestionCapable: true,
+      repositories: ["guchi-apps/issue-deck", "guchi-apps/ops-dashboard"],
+      ...overrides,
+    };
+  }
+
+  function hostView(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      repositories: ["guchi-apps/issue-deck"],
+      contractVersion: 1,
+      online: true,
+      lastSeenAt: "2026-08-15T00:00:00Z",
+      screenshotCapable: true,
+      sessionControlCapable: true,
+      instructionCapable: true,
+      crossRepoQuestionCapable: true,
+      maxSessions: 12,
+      liveSessions: 0,
+      ...overrides,
+    };
+  }
+
+  it("種別として受け付ける", () => {
+    expect(parseDispatchJobKind("cross_repo_question")).toBe("CROSS_REPO_QUESTION");
+  });
+
+  // 実装ジョブと名前空間を分ける（実装中のIssueへも質問を積めるように）
+  it("activeKeyは専用の名前空間を持つ", () => {
+    expect(buildDispatchActiveKey("guchi-apps/question", 12, "CROSS_REPO_QUESTION")).toBe(
+      "cross_repo_question:guchi-apps/question#12",
+    );
+  });
+
+  // 起動ジョブと寿命の意味が同じ（succeededは「セッションが立った」まで）ことを文言で示す
+  it("succeededは「起動しました」と読める文言にする", () => {
+    expect(describeDispatchJobStatus("SUCCEEDED", "CROSS_REPO_QUESTION")).toEqual({
+      label: "質問セッションを起動しました",
+      tone: "success",
+    });
+  });
+
+  it("条件が揃っていれば押せる", () => {
+    expect(
+      resolveCrossRepoQuestionRejection({ host: host(), hasActiveJob: false, blockingSession: null }),
+    ).toBeNull();
+  });
+
+  it("記録先がそのホストで実行できるかは問わない", () => {
+    // 申告に`question`リポジトリが無くても押せる（cloneが要らないため）
+    expect(
+      resolveCrossRepoQuestionRejection({
+        host: host({ repositories: ["guchi-apps/issue-deck"] }),
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("参照できるリポジトリが1つも無ければ押せない", () => {
+    expect(
+      resolveCrossRepoQuestionRejection({
+        host: host({ repositories: [] }),
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBe("no_runnable_repositories");
+  });
+
+  // 未申告（古いpoller）は「できない」側へ倒す。配ると未知の種別として失敗し、質問が失われる
+  it("申告していないpollerには押せない", () => {
+    expect(
+      resolveCrossRepoQuestionRejection({
+        host: host({ crossRepoQuestionCapable: null }),
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBe("cross_repo_question_unsupported");
+  });
+
+  it("応答していないホストには押せない", () => {
+    expect(
+      resolveCrossRepoQuestionRejection({
+        host: host({ online: false }),
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBe("host_offline");
+  });
+
+  it("既に動いているセッションがあれば押せない", () => {
+    expect(
+      resolveCrossRepoQuestionRejection({
+        host: host(),
+        hasActiveJob: false,
+        blockingSession: { host: "subpc", tmuxSessionName: "question-issue-12" },
+      }),
+    ).toBe("session_alive");
+  });
+
+  it("理由には何をすれば押せるようになるかを書く", () => {
+    expect(
+      describeCrossRepoQuestionRejection("cross_repo_question_unsupported", { hostName: "subpc" }),
+    ).toContain("更新してから");
+  });
+
+  it("既定の起動先は選べるホストの先頭", () => {
+    expect(
+      resolveDefaultCrossRepoQuestionHost([
+        hostView({ name: "old-host", crossRepoQuestionCapable: null }),
+        hostView({ name: "subpc" }),
+      ]),
+    ).toBe("subpc");
+  });
+
+  it("選べるホストが無ければnull（GitHub Actionsへのフォールバックは無い）", () => {
+    expect(
+      resolveDefaultCrossRepoQuestionHost([hostView({ crossRepoQuestionCapable: false })]),
+    ).toBeNull();
+  });
+
+  // 起動ジョブの未完了判定に混ざると、質問を積んだ瞬間に実装の起動が押せなくなる
+  it("起動ジョブとは別に取り出す", () => {
+    const jobs: DispatchJobView[] = [
+      {
+        id: "question-1",
+        repositoryFullName: "guchi-apps/question",
+        issueNumber: 12,
+        targetHost: "subpc",
+        kind: "CROSS_REPO_QUESTION",
+        status: "QUEUED",
+        message: null,
+        instruction: null,
+        tmuxSessionName: null,
+        createdAt: "2026-08-15T00:00:00Z",
+        claimedAt: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+    ];
+    expect(findCrossRepoQuestionJobForIssue(jobs, "guchi-apps/question", 12)?.id).toBe("question-1");
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/question", 12)).toBeNull();
   });
 });

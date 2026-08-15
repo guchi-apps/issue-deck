@@ -6,11 +6,15 @@ import {
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
+  CROSS_REPO_QUESTION_MARKER,
+  crossRepoQuestionCommentBody,
   isAskClaudeQuestionComment,
   isAskRepoQuestionIssue,
+  isCrossRepoQuestionComment,
   isQaAnswerComment,
   isQaAnswerPending,
   QA_ANSWER_MARKER,
+  resolveCrossRepoQuestionRepository,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
 
@@ -140,5 +144,42 @@ describe("canCloseAskRepoQuestion", () => {
   it("回答待ちの場合はfalseを返す", () => {
     const comments = [{ body: askClaudeCommentBody("質問内容") }];
     expect(canCloseAskRepoQuestion(askIssue, comments)).toBe(false);
+  });
+});
+
+/**
+ * #1454。横断質問は**サブPCの質問セッションが答える**ため、GitHub Actionsを起こさない形の
+ * 本文（`trigger: "none"`）に横断のマーカーを足す。
+ */
+describe("複数リポジトリ横断の質問（#1454）", () => {
+  it("Actionsのトリガーを含まず、質問と横断のマーカーを持つ", () => {
+    const body = crossRepoQuestionCommentBody("issue-deckとops-dashboardの違いは？");
+    expect(body.startsWith("@claude")).toBe(false);
+    expect(body).toContain(QUESTION_COMMENT_MARKER);
+    expect(body).toContain(CROSS_REPO_QUESTION_MARKER);
+    // 質問コメントとしては従来どおり認識される（回答待ちの表示・ワンボタンクローズが効く）
+    expect(isAskClaudeQuestionComment({ body })).toBe(true);
+    expect(isCrossRepoQuestionComment({ body })).toBe(true);
+  });
+
+  it("単一リポジトリの質問は横断とは判定しない", () => {
+    expect(isCrossRepoQuestionComment({ body: askClaudeCommentBody("これは？") })).toBe(false);
+  });
+
+  it("記録先の既定は名前が question のリポジトリ", () => {
+    expect(
+      resolveCrossRepoQuestionRepository(
+        ["guchi-apps/issue-deck", "guchi-apps/question", "guchi-apps/dayspan"],
+        "guchi-apps/issue-deck",
+      ),
+    ).toBe("guchi-apps/question");
+  });
+
+  // まだ作っていない段階でも機能そのものは動く（記録先が従来の既定になるだけ）
+  it("question リポジトリが連携されていなければフォールバックする", () => {
+    expect(
+      resolveCrossRepoQuestionRepository(["guchi-apps/issue-deck"], "guchi-apps/issue-deck"),
+    ).toBe("guchi-apps/issue-deck");
+    expect(resolveCrossRepoQuestionRepository([], null)).toBeNull();
   });
 });

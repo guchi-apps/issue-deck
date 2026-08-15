@@ -16,6 +16,13 @@
 #   KILL        … `tmux kill-session -t <セッション名>`（セッションごと畳む）
 #   INSTRUCTION … 人が書いた1行を入力欄へ送る（#1012）。**3段階プロトコル**（下記）で送る
 #
+# 立てるセッションにも2種類ある（#1454）。
+#
+#   LAUNCH              … 実装セッション。scripts/start-local-session.sh 経由でworktreeを作る
+#   CROSS_REPO_QUESTION … 複数リポジトリ横断の質問セッション。worktreeを作らず、このホストが
+#                         実行できる全リポジトリを読み取り用に参照させる
+#                         （scripts/start-cross-repo-question.sh）
+#
 # **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
 # （#1176）。issue-deck側からSSHでキックする経路は採れない。
 #
@@ -59,7 +66,8 @@ set -euo pipefail
 # 2: ジョブの種別（`kind`）を読み、走っているセッションの停止・終了を実行する（#1332）。
 # 3: セッションの本数と上限（#1361）を申告に載せ、画面が待機の理由を出せるようにする（#1394）。
 # 4: 追加指示（`INSTRUCTION`）を3段階プロトコルで送る（#1012）。
-DISPATCH_POLLER_VERSION="4"
+# 5: 複数リポジトリ横断の質問セッション（`CROSS_REPO_QUESTION`）を起こす（#1454）。
+DISPATCH_POLLER_VERSION="5"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -75,6 +83,9 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 source "$SCRIPT_DIR/lib/session-state.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
+# 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
+# worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
+QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -273,6 +284,17 @@ count_issue_sessions() {
     grep -cE '^.+-issue-[1-9][0-9]*$' || true
 }
 
+# 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
+# 申告した種別のジョブは実行できなければならないため、`true`固定にはしない（pollerだけ
+# 新しくしてランチャーが同期されていない、という状態がありうる）。
+cross_repo_question_capable() {
+  if [[ -f "$QUESTION_LAUNCHER" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 announce() {
   local repositories payload live_sessions
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
@@ -302,7 +324,8 @@ announce() {
     --argjson screenshotCapable "$(screenshot_capable)" \
     --argjson maxSessions "$MAX_SESSIONS" \
     --argjson liveSessions "$live_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
+    --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -756,6 +779,19 @@ run_job() {
     return 0
   fi
 
+  # 横断質問セッション（#1454）。**`local_repo_check`は通さない。** 記録先リポジトリの
+  # cloneは要らず（worktreeを作らず、記録先へは`gh issue comment`で書くだけ）、参照するのは
+  # このホストが実行できる全リポジトリのため。1件も無い場合はランチャー側が理由を出して落ちる。
+  if [[ "$kind" == "CROSS_REPO_QUESTION" ]]; then
+    if [[ ! -f "$QUESTION_LAUNCHER" ]]; then
+      report_job "$job_id" failed "横断質問のランチャーがありません（$QUESTION_LAUNCHER）。"
+      return 0
+    fi
+    launch_and_report "$job_id" "$repo" "$issue_number" "横断質問セッションを起動しています" \
+      bash "$QUESTION_LAUNCHER" "$owner" "$repo" "$issue_number"
+    return 0
+  fi
+
   # 起動しないジョブ（#1332）はここで終わる。**cloneの有無や版数は問わない**
   # （既に立っているセッションを操作するだけで、リポジトリには触らない）。
   if [[ "$kind" != "LAUNCH" ]]; then
@@ -769,6 +805,22 @@ run_job() {
     report_job "$job_id" failed "$(local_repo_status_summary "$full_name")"
     return 0
   fi
+
+  launch_and_report "$job_id" "$repo" "$issue_number" "起動しています（$LOCAL_REPO_PATH）" \
+    bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
+}
+
+# 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
+#
+# **実装セッション（`LAUNCH`）と横断質問セッション（`CROSS_REPO_QUESTION`・#1454）で共有する。**
+# 違うのは走らせるコマンドだけで、重複防止・`running`の報告・差分による成否判定・失敗時の
+# 出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。
+#
+#   $1 ジョブID / $2 リポジトリ名 / $3 Issue番号 / $4 `running`として画面へ出す文言
+#   $5以降 実行するコマンド
+launch_and_report() {
+  local job_id="$1" repo="$2" issue_number="$3" running_message="$4"
+  shift 4
 
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
@@ -791,11 +843,11 @@ run_job() {
   fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "  --dry-run のため起動しません（$LOCAL_REPO_PATH）"
+    echo "  --dry-run のため起動しません（$*）"
     return 0
   fi
 
-  report_job "$job_id" running "起動しています（$LOCAL_REPO_PATH）"
+  report_job "$job_id" running "$running_message"
 
   # 起動の出力は失敗時にジョブの結果として返すため取っておく。
   # stdinを閉じるのは、systemd配下には端末が無く、受け口の異常終了時の `read` 待ちへ
@@ -811,7 +863,7 @@ run_job() {
   output_file="$(mktemp)"
   set +e
   ISSUE_DECK_SESSION_REAPABLE=1 \
-    timeout "$LAUNCH_TIMEOUT" bash "$LAUNCHER" "$owner" "$repo" "$issue_number" \
+    timeout "$LAUNCH_TIMEOUT" "$@" \
     </dev/null >"$output_file" 2>&1
   launch_status=$?
   set -e

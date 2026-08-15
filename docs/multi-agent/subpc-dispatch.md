@@ -96,6 +96,11 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `KILL` | `tmux kill-session -t "=<名前>"` | セッションごと畳む |
 | `QUESTION`（#1294） | （未実装） | 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する |
 | `INSTRUCTION`（#1012） | 3段階プロトコルで人が書いた1行を入力欄へ送る | 走っているセッションへ追加指示を流す |
+| `CROSS_REPO_QUESTION`（#1454） | `scripts/start-cross-repo-question.sh` | 複数リポジトリ横断の質問セッションを立てる |
+
+**`CROSS_REPO_QUESTION`だけはセッションを立てる側**（`LAUNCH`と同じ枠・同じ払い出し経路）で、
+上の4つのように「立っているセッションを操作する」ものではない。詳細は
+[複数リポジトリ横断の質問セッション](#複数リポジトリ横断の質問セッション1454)。
 
 安全側に倒している点が5つある。
 
@@ -237,6 +242,83 @@ session idをDBに持たせると、issue-deckがサブPCのローカルファ�
 **ジョブの寿命の意味が種別で変わる。** 起動ジョブの`succeeded`は「tmuxセッションが立った」までで、
 その先はProject Statusが持つ。質問ジョブにはその続きが無く、`succeeded`は「回答コメントが投稿された」
 まで。画面の文言も種別で分けている（「起動しました」／「回答しました」）。
+
+### 複数リポジトリ横断の質問セッション（#1454）
+
+「issue-deckとops-dashboardで同じ仕組みをどう分けているか」のような**リポジトリをまたぐ問い**は、
+これまでどこにも聞く先が無かった。既存の「リポジトリに質問する」（#691）はGitHub Actionsが答える
+仕組みで、**Actionsは1リポジトリしかチェックアウトしない**ため構造的に横断できない。
+
+サブPCには連携リポジトリのcloneが揃っているので、そこで**読み取り専用のClaude Codeセッションを
+立て、全リポジトリを`--add-dir`で参照させて答えさせる**。
+
+```text
+issue-deckの画面「質問する」→「複数のリポジトリ（横断）」
+  ↓ 記録先リポジトリに質問Issueを作成（タイトルは既存と同じ `質問: ` 接頭辞）
+  ↓ `@claude`を含まない質問コメントを投稿（Actionsは起きない。#1294の軸分離）
+  ↓ POST /api/dispatch（kind=cross_repo_question）
+（キュー: DispatchJob）
+  ↑ claim（crossRepoQuestionCapable を申告したホストにだけ払い出す）
+scripts/subpc-dispatch-poller.sh
+  ↓ scripts/start-cross-repo-question.sh <owner> <repo> <番号>
+tmuxセッションが立つ → 回答は質問Issueへのコメントとして返る
+```
+
+**質問Issueは普通のIssueとして作る。** そのため`DispatchJob.repositoryFullName`/`issueNumber`・
+セッション名の規約（`<リポジトリ名>-issue-<番号>`）・`DispatchSession`・停止/終了（#1332）・
+追加指示（#1012）・Remote Control（#1219）が**すべてそのまま使える**。専用のモデルを作ると
+これらを一式もう1セット持つことになる。
+
+#### 参照範囲は「そのホストが実行できる全リポジトリ」に固定する
+
+**ジョブに参照範囲を載せない**（`DispatchJob`のスキーマを増やさない）。ランチャーは申告と同じ
+`local_repo_list_runnable`（[scripts/lib/local-repo-resolve.sh](../../scripts/lib/local-repo-resolve.sh)）で
+一覧を作るため、画面に出ている件数と実際に渡すディレクトリがずれない。
+**選ばせない**のは、どのリポジトリに答えがあるか分かっているなら横断で聞く必要が無いため。
+
+#### 記録先リポジトリはcloneされていなくてよい
+
+起動ジョブの`repository_not_runnable`に当たる判定を持たない。横断質問セッションはworktreeを
+作らず、記録先へは`gh issue comment`で書くだけなので、**記録先のcloneも`local-repos.conf`への
+記載も要らない**。代わりに「参照できるリポジトリが1件以上あるか」を見る
+（`resolveCrossRepoQuestionRejection`）。
+
+既定の記録先は**名前が`question`のリポジトリ**（`resolveCrossRepoQuestionRepository`）。
+質問Issueが実装対象のリポジトリへ混ざると、そのリポジトリのIssue一覧・カンバンが質問で埋まる。
+設定値（AppSetting・環境変数）を増やさず**リポジトリ名だけを見る**のは、作って連携した時点で
+自動的に既定になるようにするため。**未作成でも機能は動く**（記録先が従来の既定に戻るだけ）。
+
+記録先の選択肢は`claude-issue-dispatch.yml`の有無で絞らない。回答するのはActionsではないため、
+ワークフローを持たない`question`リポジトリでも成立する。
+
+#### 実装セッションとの違い
+
+| | 実装セッション | 横断質問セッション |
+|---|---|---|
+| worktree | 作る | **作らない**（cwdは`~/apps/issue-deck-worktrees/.questions/<repo>-<番号>`の空ディレクトリ） |
+| 参照 | そのリポジトリのworktree | 実行できる全リポジトリの作業ツリー（`--add-dir`） |
+| 書き込みツール | 使える | `--disallowedTools "Edit,Write,NotebookEdit"`で**封じる** |
+| 開発サーバー | ラベル次第で起動 | 起動しない |
+| 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件 |
+| 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED**（gitの判定は当てない） |
+
+**cwdをどれか1つのリポジトリにしない。** そのリポジトリの`CLAUDE.md`だけが最初から効いて
+横断の視点が偏るうえ、他セッションが編集中の作業ツリーへ書き込む余地を残すことになる。
+
+回収の条件を分けているのは、質問セッションにはworktreeが無く、実装セッション向けの
+「worktreeがcleanでpush済み」を当てると**必ず「確認できない」に落ちて永久に残る**ため。
+種別は状態ファイルの記述子（`kind=question`）が持つ（[scripts/lib/session-state.sh](../../scripts/lib/session-state.sh)）。
+**古い記述子には`kind`が無い**ので、読む側は空を実装セッションとして扱う。
+
+#### 回答は`<!-- issue-deck-qa-answer -->`付きのコメントで返す
+
+既存の`QA_ANSWER_MARKER`をそのまま使うため、画面の「回答待ち」表示とワンボタンクローズ
+（`canCloseAskRepoQuestion`）が横断質問でも働く。プロンプトは
+[scripts/prompts/cross-repo-question-agent.md](../../scripts/prompts/cross-repo-question-agent.md)。
+
+**回答後もセッションは残る。** 追い質問は追加指示（#1012）としてこのセッションへ送れる。
+聞き終わったかどうかを知っているのは人だけなので、**質問Issueを閉じることが終了の合図**になる
+（閉じると次の巡回で畳まれる）。
 
 ### 開発サーバーの回収も1巡に相乗りさせる（#1223）
 
@@ -610,12 +692,12 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 
 | ルート | 認証 | 用途 |
 |---|---|---|
-| `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否。`kind`（省略時は起動／`interrupt`／`kill`）で種別を指定する（#1332）。`instruction`は本文（`instruction`）も要る（#1012）。`question`は**まだ受け付けない**（400。#1294） |
+| `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否。`kind`（省略時は起動／`interrupt`／`kill`）で種別を指定する（#1332）。`instruction`は本文（`instruction`）も要る（#1012）。`cross_repo_question`は横断質問セッション（#1454）。`question`は**まだ受け付けない**（400。#1294） |
 | `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・セッションの本数と上限も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 

@@ -352,6 +352,28 @@ else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
 
+# 追加で参照させるディレクトリ（#1454）。改行区切りで受け取り、実在するものだけを --add-dir する。
+# 横断質問セッション（scripts/start-cross-repo-question.sh）が、サブPCにある全リポジトリの
+# チェックアウトをここへ渡す。**実装セッションの経路では空**なので、従来の起動は変わらない。
+if [[ -n "${ISSUE_DECK_EXTRA_DIRS:-}" ]]; then
+  while IFS= read -r extra_dir; do
+    [[ -n "$extra_dir" ]] || continue
+    if [[ ! -d "$extra_dir" ]]; then
+      echo "#$ISSUE_NUMBER: 情報: 参照先が見つからないため飛ばします: $extra_dir" >&2
+      continue
+    fi
+    CLAUDE_EXTRA_ARGS+=(--add-dir "$extra_dir")
+  done <<<"${ISSUE_DECK_EXTRA_DIRS}"
+fi
+
+# 使わせないツール（#1454）。横断質問セッションは読み取り専用なので、
+# `Edit,Write,NotebookEdit`を封じたうえで起動する（回答の投稿に`gh issue comment`が要るため
+# Bashは残す）。**プロンプトの指示だけに頼らず、機械的にも塞ぐ。**
+if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
+  CLAUDE_EXTRA_ARGS+=(--disallowedTools "${ISSUE_DECK_DISALLOWED_TOOLS}")
+  echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: ${ISSUE_DECK_DISALLOWED_TOOLS}"
+fi
+
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
 # 依存せず、このスクリプトから起こしたセッションの応答を日本語に揃える。文面と未対応時の扱いは
 # scripts/lib/agent-language.sh を参照。
@@ -360,6 +382,11 @@ append_language_system_prompt "#$ISSUE_NUMBER: "
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
 REPO_NAME="$(basename -s .git "$(git config --get remote.origin.url 2>/dev/null || true)")"
+# **cwdがgitリポジトリでない場合は呼び出し元が渡す**（#1454）。横断質問セッションのcwdは
+# どのリポジトリでもない作業ディレクトリなので、ここでは何も取れない。
+if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]] && [[ -n "${ISSUE_DECK_REPO_SLUG:-}" ]]; then
+  REPO_NAME="${ISSUE_DECK_REPO_SLUG#*/}"
+fi
 if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
   # リモート未設定でも起動は妨げない。worktreeのディレクトリ名で代用する。
   REPO_NAME="$(basename "$PWD")"
@@ -375,6 +402,10 @@ fi
 # 通知（#1219）用に owner/repo を取り出す。IssueのURLを組み立てるためだけに使うので、
 # 取れなくても（リモート未設定・SSH形式でない等）通知からリンクが消えるだけにする。
 REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+# cwdがgitリポジトリでない場合（横断質問セッション。#1454）は呼び出し元が渡した値を使う。
+# セッションの状態報告（#1217）とIssueへの報告はこの値でIssueを特定するため、空だと
+# セッションが画面へ出ない。
+REPO_SLUG="${REPO_SLUG:-${ISSUE_DECK_REPO_SLUG:-}}"
 
 # セッションの回収（#1256）用の記述子。回収スクリプトはtmuxのセッション名しか手掛かりを
 # 持たないため、worktreeの場所と対応Issueをここで残しておく。
@@ -384,8 +415,9 @@ REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:
 # 直接起動したセッションには渡らない。issue-deck側にジョブとして残らないセッションを
 # 巻き込まないための線引きで、判定材料ではなく**起動経路そのもの**で切る。
 if [[ -n "$TMUX_SESSION_NAME" ]]; then
+  # 第6引数はセッションの種別（#1454）。横断質問セッションは`question`で、回収の条件が変わる
   if ! session_state_write_descriptor "$TMUX_SESSION_NAME" "$PWD" "$REPO_SLUG" "$ISSUE_NUMBER" \
-    "${ISSUE_DECK_SESSION_REAPABLE:-0}"; then
+    "${ISSUE_DECK_SESSION_REAPABLE:-0}" "${ISSUE_DECK_SESSION_KIND:-implementation}"; then
     echo "#$ISSUE_NUMBER: 情報: セッションの状態ファイルを書けなかったため、このセッションは自動回収の対象になりません（$(session_state_dir)）。" >&2
   fi
 fi
