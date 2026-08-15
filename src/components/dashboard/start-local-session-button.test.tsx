@@ -126,8 +126,18 @@ function label(name: string): IssueLabel {
   return { name, color: "#000000", description: null } as IssueLabel;
 }
 
-function renderButton(issue = makeIssue(), props: { showStartButton?: boolean } = {}) {
+function renderButton(
+  issue = makeIssue(),
+  props: { showStartButton?: boolean; showJobStatus?: boolean; fullWidth?: boolean } = {},
+) {
   return render(<StartLocalSessionButton issue={issue} onIssueUpdated={vi.fn()} {...props} />);
+}
+
+/** 押せない理由は、PCではボタンを包むspanのtitleに入る（#1468）。 */
+function startButtonTitle(): string {
+  return (
+    screen.getByRole("button", { name: /サブPCで開始/ }).parentElement?.getAttribute("title") ?? ""
+  );
 }
 
 /**
@@ -189,13 +199,23 @@ describe("StartLocalSessionButton", () => {
       expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
     });
 
-    it("応答していないサブPCではボタンを押せず、理由を本文で出す", () => {
+    // #1468。PCのツールバーでは本文がボタン列を縦に膨らませるためtitleへ寄せた
+    it("応答していないサブPCではボタンを押せず、理由をtitleで出す（PC）", () => {
       dispatchState.hosts = [makeHost({ online: false })];
       renderButton();
 
       expect(screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled")).toBe(
         true,
       );
+      expect(screen.queryByText(/応答していません/)).toBeNull();
+      expect(startButtonTitle()).toMatch(/応答していません/);
+    });
+
+    // スマホにホバーが無い以上、titleへ寄せると理由を読む手段が無くなる
+    it("縦積み（スマホ）では理由を本文で出す", () => {
+      dispatchState.hosts = [makeHost({ online: false })];
+      renderButton(makeIssue(), { fullWidth: true });
+
       expect(screen.getByText(/応答していません/)).not.toBeNull();
     });
 
@@ -243,15 +263,15 @@ describe("StartLocalSessionButton", () => {
 
   // #1311。起動済みのIssueをもう一度積んでも、poller側で見送られるだけで何も起きない
   describe("起動済み（セッション生存中）のIssue", () => {
-    it("ボタンを押せず、セッション名と畳み方を本文で出す", () => {
+    it("ボタンを押せず、セッション名と畳み方をtitleで出す（PC）", () => {
       dispatchState.hosts = [makeHost()];
       dispatchState.sessions = [makeSession()];
       renderButton();
 
       const button = screen.getByRole("button", { name: /サブPCで開始/ });
       expect(button.hasAttribute("disabled")).toBe(true);
-      expect(screen.getByText(/issue-deck-issue-1049/)).not.toBeNull();
-      expect(screen.getByText(/kill-session/)).not.toBeNull();
+      expect(startButtonTitle()).toMatch(/issue-deck-issue-1049/);
+      expect(startButtonTitle()).toMatch(/kill-session/);
     });
 
     // 死んだペインのセッションはstart-issue.shが畳んで作り直す。止めると起動できなくなる
@@ -272,8 +292,8 @@ describe("StartLocalSessionButton", () => {
       renderButton();
 
       // 押せないこと自体は変わらないが、理由はホストの応答（従来どおり）になる
-      expect(screen.getByText(/応答していません/)).not.toBeNull();
-      expect(screen.queryByText(/kill-session/)).toBeNull();
+      expect(startButtonTitle()).toMatch(/応答していません/);
+      expect(startButtonTitle()).not.toMatch(/kill-session/);
     });
   });
 
@@ -299,6 +319,16 @@ describe("StartLocalSessionButton", () => {
 
       expect(screen.getByText(/サブPCで失敗/)).not.toBeNull();
       expect(screen.getByText("start-issue.sh が見つかりません")).not.toBeNull();
+    });
+
+    // #1468。PCのIssue詳細では、親がツールバーの下の行に自分で描画する
+    it("showJobStatus={false}なら状態を出さない（親が別の行に出すため）", () => {
+      dispatchState.hosts = [makeHost()];
+      dispatchState.jobs = [makeJob()];
+      renderButton(makeIssue(), { showJobStatus: false });
+
+      expect(screen.queryByText(/順番待ち/)).toBeNull();
+      expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
     });
   });
 
