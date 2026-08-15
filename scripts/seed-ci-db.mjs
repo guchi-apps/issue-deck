@@ -95,7 +95,14 @@ const APPROVAL_SAMPLE_ISSUES = [
   {
     number: ISSUES_PER_REPOSITORY + 2,
     title: "[CI確認用] PRマージ待ちサンプルIssue",
-    labels: [{ name: "00.check-user", color: "d93f0b" }],
+    // 実運用のマージ待ちと同じラベルの組にする。`01.check-merge`は理由ラベル（#1490）、
+    // `22.merge-confirm-required`はマージ待ちの理由表示（#1631）が読むラベルで、
+    // これが無いと画面の理由欄が「記録が見つかりません」しか再現できない
+    labels: [
+      { name: "00.check-user", color: "d93f0b" },
+      { name: "01.check-merge", color: "d93f0b" },
+      { name: "22.merge-confirm-required", color: "0e8a16" },
+    ],
     projectStatus: "Develop PR",
   },
 ];

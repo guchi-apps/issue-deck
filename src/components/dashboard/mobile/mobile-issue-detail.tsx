@@ -36,6 +36,7 @@ import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import {
   moveDestinationRepositories,
@@ -113,6 +114,7 @@ import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueComments } from "@/hooks/use-issue-comments";
@@ -250,6 +252,8 @@ export function MobileIssueDetail({
   const qaAnswerPending = isQaAnswerPending(comments);
   const pullRequestLinks = usePullRequestLinks(issue.repositoryFullName, issue.number, comments);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
+  const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
   const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
@@ -740,6 +744,12 @@ export function MobileIssueDetail({
         {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
             コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339） */}
         <IssuePullRequestList
+          /* 自動マージされなかった理由をマージボタンと同じ枠の中に出す（#1631）。PCと同じ */
+          notice={
+            mergeApprovalPending ? (
+              <MergeCheckReasonNotice reasons={mergeCheckReasons} />
+            ) : undefined
+          }
           links={pullRequestLinks}
           pullRequests={pullRequests}
           mergeApprovalPending={mergeApprovalPending}
@@ -950,6 +960,7 @@ export function MobileIssueDetail({
             }
             sessionWaitingInput={sessionWaitingInput}
             mergeApprovalPending={mergeApprovalPending}
+            mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
             workflowRun={workflowRun}
