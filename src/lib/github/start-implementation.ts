@@ -18,6 +18,9 @@ export const PREVIEW_REQUIRED_LABEL = "23.preview-required";
 /** PR作成前に開発サーバーを起動し画面確認・承認を必須にするラベル */
 export const SCREENSHOT_REQUIRED_LABEL = "24.screenshot-required";
 
+/** PR作成前に見た目のアーティファクト（自己完結HTML）を公開させるラベル（#1473） */
+export const ARTIFACT_REQUIRED_LABEL = "25.artifact-required";
+
 /** developへのマージ前に必ずユーザー確認を必須にするラベル */
 export const MERGE_CONFIRM_REQUIRED_LABEL = "22.merge-confirm-required";
 
@@ -25,6 +28,7 @@ export type StartImplementationOptionKey =
   | "planRequired"
   | "previewRequired"
   | "screenshotRequired"
+  | "artifactRequired"
   | "mergeConfirmRequired";
 
 export type StartImplementationOptions = Record<StartImplementationOptionKey, boolean>;
@@ -33,6 +37,7 @@ export const START_IMPLEMENTATION_DEFAULT_OPTIONS: StartImplementationOptions = 
   planRequired: false,
   previewRequired: false,
   screenshotRequired: false,
+  artifactRequired: false,
   mergeConfirmRequired: false,
 };
 
@@ -71,6 +76,13 @@ export const START_IMPLEMENTATION_OPTIONS: {
       "PR作成前に変更箇所のスクリーンショットを取得し、Issueへ貼ります（無人実行は終了と同時にdevサーバーが消えるため、画面を見る唯一の手段）",
     githubLabel: SCREENSHOT_REQUIRED_LABEL,
   },
+  {
+    key: "artifactRequired",
+    label: "アーティファクトで見た目を出す",
+    description:
+      "PR作成前に見た目を自己完結HTMLのアーティファクトとして公開し、URLをIssueへ貼ります（セッションが消えた後も残りますが、手で書いた再現であって実物ではありません）",
+    githubLabel: ARTIFACT_REQUIRED_LABEL,
+  },
 ];
 
 /**
@@ -101,6 +113,9 @@ export function planRequiredDefaultForLabels(labelNames: readonly string[]): boo
  * 確認でき、撮影は重いだけで得るものが無い。無人実行はワークフロー終了と同時にdevサーバーが消え、
  * Fly.ioのプレビュー環境も#1308で廃止したため、撮影が画面を見る唯一の手段として残る。
  *
+ * **アーティファクトは逆に、GitHub Actions（無人実行）のときだけ隠す**（#1473）。
+ * アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない。
+ *
  * **既にチェックが入っている場合は実行先によらず出す。** 隠すと、付いてしまったラベルを
  * このダイアログから外せなくなる（`resolveScreenshotRejection`で無効化する側と同じ考え方）。
  */
@@ -111,10 +126,15 @@ export function visibleStartImplementationOptions({
   isActionsTarget: boolean;
   options: StartImplementationOptions;
 }): typeof START_IMPLEMENTATION_OPTIONS {
-  return START_IMPLEMENTATION_OPTIONS.filter(
-    (option) =>
-      option.key !== "screenshotRequired" || isActionsTarget || options.screenshotRequired,
-  );
+  return START_IMPLEMENTATION_OPTIONS.filter((option) => {
+    if (option.key === "screenshotRequired") {
+      return isActionsTarget || options.screenshotRequired;
+    }
+    if (option.key === "artifactRequired") {
+      return !isActionsTarget || options.artifactRequired;
+    }
+    return true;
+  });
 }
 
 /** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */

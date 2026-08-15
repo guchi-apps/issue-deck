@@ -106,6 +106,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
   報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
   まとめて載せる（`addMissingProjectItems`）。
+- **開発環境のDBは既定で空。データを入れる経路は`pnpm db:seed:dev`だけ**（#1473）。
+  実データが入らないのは仕様ではなく`.env.local`のGitHub App設定がCIダミー値のままだからで、
+  同期を何度走らせても`Repository`は0件のまま。`scripts/seed-dev-db.sh`がCI用のシード
+  （`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから投入し、ログイン画面の
+  「開発用ダミーユーザーでログイン」（`src/lib/dev-login.ts`・`/api/dev/login`）で入る。
+  **全worktreeが同じ`app_issue_deck_dev`を共有する**ので投入は1回でよい。ダミーで埋まるのは
+  DBを読む画面だけで、GitHub APIを都度叩く経路（下記のPR一覧・サブIssue）は空のまま。
+  線引きは[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)
+  「開発サーバーにデータが出ないとき」。
 - **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
@@ -284,6 +293,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
   `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+- **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
+  ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
+  `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ
+  **ブランチの現在SHAがそのPRの`head.sha`と一致する**ものだけを消し、`develop`など名前で
+  保護する。今後のぶんはリポジトリ設定`delete_branch_on_merge`（適用は
+  `scripts/set-delete-branch-on-merge.sh`）が自動で消す。**リモートブランチを消すと無人実行の
+  mode判定が変わる**点を含め、設計は[multi-agent/branching.md](multi-agent/branching.md)。
 - **個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体は`guchi-apps/claude-config`にあり、
   両機は`~/.claude/`側をsymlinkにして同じファイルを見る**（#1190）。issue-deckが持つのは
   「取り残しに気づく手当て」だけで、`scripts/lib/personal-config-sync.sh`の

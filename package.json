@@ -20,6 +20,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed:ci": "node scripts/seed-ci-db.mjs",
+    "db:seed:dev": "bash scripts/seed-dev-db.sh",
     "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh",
     "check:workflows": "node scripts/check-workflow-expression-length.mjs"
   },

@@ -566,6 +566,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
+| `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | PR作成前に見た目のアーティファクト公開を必須にする（ローカル実行専用。#1473。**issue-deck以外へはまだ配っていない**） |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする |
 | `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「手作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 
@@ -752,6 +753,8 @@ gh label create "21.plan-required" --color d4c5f9 --description "計画の確認
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
 gh label create "24.screenshot-required" --color d4c5f9 --description "スクリーンショットでの視覚確認・承認が必要"
+# 25.artifact-requiredはローカルセッション専用（無人実行では作れない）のため、他リポジトリへはまだ配っていない（#1473）
+gh label create "25.artifact-required" --color d4c5f9 --description "アーティファクトでの視覚確認・承認が必要"
 gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
 ```
 

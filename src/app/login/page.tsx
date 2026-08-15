@@ -1,9 +1,11 @@
 import { Suspense } from "react";
-import { LayoutDashboard, TriangleAlert } from "lucide-react";
+import { FlaskConical, LayoutDashboard, TriangleAlert } from "lucide-react";
 
 import { GithubLoginButton } from "@/components/auth/github-login-button";
 import { LoginBfcacheReload } from "@/components/auth/login-bfcache-reload";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { isDevLoginEnabled } from "@/lib/dev-login";
 import { isAllowedEmailsConfigured, isSupabaseConfigured } from "@/lib/supabase/config";
 
 export default async function LoginPage({
@@ -17,6 +19,11 @@ export default async function LoginPage({
   // 飛ぶだけで画面が真っ白になる（#1419）。押せなくしたうえで詰まっている場所を出す。
   const supabaseConfigured = isSupabaseConfigured();
   const allowedEmailsConfigured = isAllowedEmailsConfigured();
+
+  // 開発環境にはデータが無いのが既定の状態で、Supabaseの設定が揃っていても画面は空になる（#1473）。
+  // ダミーデータを投入してある場合だけ、その入口をここに出す。サーバー側で判定するため
+  // 本番のHTMLには一切出ない。
+  const devLoginEnabled = isDevLoginEnabled();
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 bg-muted/30 p-4">
@@ -62,6 +69,20 @@ export default async function LoginPage({
           <Suspense fallback={null}>
             <GithubLoginButton disabled={!supabaseConfigured} />
           </Suspense>
+          {devLoginEnabled && (
+            <form action="/api/dev/login" method="post" className="flex flex-col gap-2">
+              <div className="border-t pt-3">
+                <Button type="submit" variant="outline" className="w-full">
+                  <FlaskConical className="size-4" />
+                  開発用ダミーユーザーでログイン
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <code>pnpm db:seed:dev</code>
+                で投入したダミーデータを見るための開発専用の入口です。実際のGitHubのIssueは表示されません。
+              </p>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>

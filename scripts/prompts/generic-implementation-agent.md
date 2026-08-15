@@ -131,6 +131,10 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 {{SCREENSHOT_INSTRUCTIONS}}
 
+## 見た目のアーティファクト
+
+{{ARTIFACT_INSTRUCTIONS}}
+
 ## 依存関係の追加
 
 新しい依存関係（パッケージ・ライブラリ・ツール）を追加する前には、必ずユーザーに確認を取ってください。確認が取れない場合は追加せずに作業を止め、`00.check-user`ラベル（そのリポジトリにあれば）を付けたうえでIssueコメントで相談してください。

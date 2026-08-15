@@ -32,6 +32,7 @@ describe("startImplementationLabelsToAdd", () => {
         planRequired: false,
         previewRequired: false,
         screenshotRequired: false,
+        artifactRequired: false,
         mergeConfirmRequired: false,
       }),
     ).toEqual([]);
@@ -43,6 +44,7 @@ describe("startImplementationLabelsToAdd", () => {
         planRequired: true,
         previewRequired: false,
         screenshotRequired: false,
+        artifactRequired: false,
         mergeConfirmRequired: false,
       }),
     ).toEqual([PLAN_REQUIRED_LABEL]);
@@ -126,6 +128,28 @@ describe("visibleStartImplementationOptions", () => {
   // 隠すと、既に付いてしまったラベルをこのダイアログから外せなくなる
   it("既にチェックが入っている場合は実行先によらず出す", () => {
     expect(keysFor(false, true)).toContain("screenshotRequired");
+  });
+
+  // アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない（#1473）
+  describe("アーティファクト（撮影とは逆向きの出し分け）", () => {
+    function artifactKeysFor(isActionsTarget: boolean, artifactRequired: boolean) {
+      return visibleStartImplementationOptions({
+        isActionsTarget,
+        options: { ...START_IMPLEMENTATION_DEFAULT_OPTIONS, artifactRequired },
+      }).map((option) => option.key);
+    }
+
+    it("GitHub Actionsを選んでいる場合、アーティファクトのオプションを出さない", () => {
+      expect(artifactKeysFor(true, false)).not.toContain("artifactRequired");
+    });
+
+    it("GitHub Actions以外を選んでいる場合はアーティファクトのオプションを出す", () => {
+      expect(artifactKeysFor(false, false)).toContain("artifactRequired");
+    });
+
+    it("既にチェックが入っている場合は実行先によらず出す", () => {
+      expect(artifactKeysFor(true, true)).toContain("artifactRequired");
+    });
   });
 });
 
