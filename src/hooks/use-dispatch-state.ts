@@ -63,6 +63,18 @@ export type DispatchStateHandle = ReturnType<typeof useDispatchState>;
 
 export function useDispatchState(enabled: boolean) {
   const [state, setState] = useState<DispatchState | null>(null);
+  /**
+   * 最初の取得が終わったか（#1666）。**「取得中」ではなく「一度でも確定したか」。**
+   *
+   * `hosts`は取得前も`[]`を返すため、受け取る側からは「申告しているサブPCが1台も無い」と
+   * 区別が付かない。実装開始のダイアログが選択肢を組み立てるのに使っているので、区別が付かないと
+   * サブPC抜きの選択肢を先に出してから差し替えることになる。
+   *
+   * **失敗しても`true`にする。** 取得は20秒間隔で繰り返されるが、届かない間ずっと待たせるより、
+   * 従来どおり（サブPCの選択肢が出ないだけ）で操作できる方が害が小さい。
+   * ポーリングの2回目以降は`false`へ戻さない（戻すと20秒ごとに選択肢が消える）。
+   */
+  const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // enqueue・cancelの直後に取り直すためのキー。増やすと下のeffectが再実行される
@@ -91,6 +103,7 @@ export function useDispatchState(enabled: boolean) {
       } finally {
         inFlight = false;
         if (!cancelled) {
+          setIsLoaded(true);
           timerId = setTimeout(
             poll,
             hasActiveJob(latest) ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
@@ -302,6 +315,7 @@ export function useDispatchState(enabled: boolean) {
     jobs: state?.jobs ?? [],
     sessions: state?.sessions ?? [],
     concurrency: state?.concurrency ?? null,
+    isLoaded,
     error,
     setError,
     isSubmitting,

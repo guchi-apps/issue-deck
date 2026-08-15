@@ -37,6 +37,8 @@ let dispatchState: {
   // 起動済み（セッション生存中）のIssueを積ませない判定（#1311）が読む
   sessions: DispatchSessionView[];
   concurrency: number | null;
+  // 最初の取得が終わったか（#1666）。falseの間は選択肢を出さない
+  isLoaded: boolean;
   error: string | null;
 };
 
@@ -158,7 +160,14 @@ function clickStart() {
 
 describe("StartImplementationDialog", () => {
   beforeEach(() => {
-    dispatchState = { hosts: [], jobs: [], sessions: [], concurrency: 2, error: null };
+    dispatchState = {
+      hosts: [],
+      jobs: [],
+      sessions: [],
+      concurrency: 2,
+      isLoaded: true,
+      error: null,
+    };
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
@@ -556,6 +565,59 @@ describe("StartImplementationDialog", () => {
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(onOpenChange).not.toHaveBeenCalled();
       expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
+  // ホストの一覧が届く前に選択肢を組むと、サブPC抜きの選択欄を出してから差し替えることになる
+  describe("実行先が確定するまで（#1666）", () => {
+    it("選択肢を1つも出さず、開始も押させない", () => {
+      dispatchState.isLoaded = false;
+      renderDialog({ includeDispatchTargets: true });
+
+      // 骨組みは出す（見出しと高さは確定後と同じ）が、押せる選択肢は無い
+      expect(screen.queryByText("実行先")).not.toBeNull();
+      expect(screen.queryAllByRole("radio")).toHaveLength(0);
+      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+    });
+
+    it("確定した時点でサブPCを含む選択肢を出す", () => {
+      dispatchState.isLoaded = false;
+      const { rerenderSame } = renderDialog({ includeDispatchTargets: true });
+
+      dispatchState.isLoaded = true;
+      dispatchState.hosts = [makeHost()];
+      rerenderSame();
+
+      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+
+    // 取得に失敗しても`isLoaded`は立つ。従来どおり（サブPC抜き）で操作できる方が、待たせるより軽い
+    it("申告しているホストが無いと確定した場合は待たせない", () => {
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+
+    // 実行先を選ばせない呼び出し（Issue作成直後の自動オープン等）は、待つ相手がいない
+    it("実行先を選ばせない場合はオプションをそのまま出す", () => {
+      dispatchState.isLoaded = false;
+      renderDialog();
+
+      expect(screen.queryByRole("checkbox", { name: /計画が必要/ })).not.toBeNull();
+      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
     });
   });
 
