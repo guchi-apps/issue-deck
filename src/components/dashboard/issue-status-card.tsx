@@ -3,6 +3,7 @@
 import { MessageCircleQuestion } from "lucide-react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
+import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
@@ -16,6 +17,7 @@ import {
 import type { IssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type { CheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
 
@@ -32,6 +34,14 @@ type IssueStatusCardProps = {
   workflowRunId: number | null;
   /** Claudeへの質問が回答待ちか（`isQaAnswerPending`の結果） */
   qaAnswerPending: boolean;
+  /**
+   * 次にどこの何を押せばよいかの案内（#1663・`resolveCheckUserGuidance`の結果）。
+   *
+   * 解決を親（Issue詳細）に任せているのは、行き先の判定に**このカードが持っていない材料**
+   * （マージ待ちかどうか・対応PRのセクションが描かれているか）が要るため。理由ラベルが
+   * 読めないリポジトリではnullで、従来どおり進捗ステッパーのバッジだけになる。
+   */
+  checkUserGuidance?: CheckUserGuidance | null;
 };
 
 /**
@@ -52,6 +62,7 @@ export function IssueStatusCard({
   workflowRun,
   workflowRunId,
   qaAnswerPending,
+  checkUserGuidance = null,
 }: IssueStatusCardProps) {
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
@@ -72,7 +83,7 @@ export function IssueStatusCard({
     qaAnswerPending ||
     hasCancelableRun;
 
-  if (!hasSteps && !hasActivity) return null;
+  if (!hasSteps && !hasActivity && !checkUserGuidance) return null;
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3">
@@ -83,6 +94,10 @@ export function IssueStatusCard({
           executionTarget={executionTarget}
         />
       )}
+
+      {/* 確認待ちのIssueを開いた直後に、次に押すものが分かるようにする（#1663）。承認カードは
+          コメント欄の末尾にあり、開いた時点では画面に入っていない */}
+      {checkUserGuidance && <CheckUserReasonNotice guidance={checkUserGuidance} />}
 
       {hasActivity && (
         <div className="flex flex-col gap-2 border-t pt-3 empty:hidden">

@@ -7,6 +7,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { IssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import type { Issue } from "@/types/issue";
 
 const NOW = "2026-08-15T12:00:00.000Z";
@@ -123,5 +124,22 @@ describe("IssueStatusCard", () => {
   it("Claudeの回答待ちを同じカードの中に出す", () => {
     renderCard({ qaAnswerPending: true });
     expect(screen.getByText("Claudeの回答待ち")).not.toBeNull();
+  });
+
+  /** #1663。開いた直後に「次にどこの何を押すか」が分かるようにする */
+  it("確認待ちの案内があれば、進捗ステップの下に出す", () => {
+    renderCard({
+      issue: makeIssue({ projectStatus: "Implementation" }),
+      checkUserGuidance: resolveCheckUserGuidance({ reason: "plan", placement: "status" }),
+    });
+    expect(screen.getByText("計画の承認が必要です")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "承認欄へ移動" })).not.toBeNull();
+  });
+
+  it("進捗が無くても、確認待ちの案内があればカードを出す", () => {
+    renderCard({
+      checkUserGuidance: resolveCheckUserGuidance({ reason: "merge", placement: "status" }),
+    });
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
   });
 });

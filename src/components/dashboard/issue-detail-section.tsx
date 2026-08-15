@@ -14,6 +14,13 @@ type IssueDetailSectionProps = {
    * Issueごとに覚えると、開くIssueが変わるたびに既定の「畳む」へ戻り、覚えている意味が無くなる。
    */
   id: string;
+  /**
+   * このセクションの枠へ広げる目印のprops（#1663の`checkUserTargetProps`）。
+   * **開閉状態の保存キー（`id`）とは別物**で、画面内の別の場所からスクロールして
+   * 来るためだけに使う。idではなくdata属性なのは、PC版とスマホ版が同時にDOMへ
+   * 乗るため（`check-user-focus.ts`）。
+   */
+  targetProps?: Record<string, string>;
   title: string;
   /** 見出しに添える件数。0やnullなら出さない */
   count?: number | null;
@@ -39,6 +46,7 @@ type IssueDetailSectionProps = {
  */
 export function IssueDetailSection({
   id,
+  targetProps,
   title,
   count = null,
   summary,
@@ -55,6 +63,7 @@ export function IssueDetailSection({
 
   return (
     <Collapsible
+      {...targetProps}
       open={open}
       onOpenChange={(next) => {
         // 強制的に開いている間の開閉操作は保存へ反映しない（畳めないのに設定だけ変わるのを防ぐ）

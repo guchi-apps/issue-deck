@@ -53,7 +53,11 @@ import {
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
+import {
+  findSessionForIssue,
+  isSessionWaitingInput,
+  summarizeIssueSession,
+} from "@/lib/dispatch/issue-session";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -93,6 +97,7 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
+import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import {
   askClaudeCommentBody,
   canAskClaude,
@@ -107,6 +112,7 @@ import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
+import { checkUserTargetProps } from "@/lib/check-user-focus";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
@@ -489,6 +495,15 @@ export function IssueDetail({
     visiblePullRequestLinks.length,
   );
   const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
+  // 確認待ちのときに、次にどこの何を押せばよいかを上部から案内する（#1663）。行き先の判定に
+  // マージ待ちかどうかと対応PRセクションの有無が要るため、解決はここで行う
+  const checkUserGuidance = resolveCheckUserGuidance({
+    reason: checkUserReason(issue.labels),
+    placement: "status",
+    sessionWaitingInput,
+    remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
+    hasPullRequestSection: visiblePullRequestLinks.length > 0,
+  });
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -670,6 +685,7 @@ export function IssueDetail({
             workflowRun={workflowRun}
             workflowRunId={workflowRunId}
             qaAnswerPending={qaAnswerPending}
+            checkUserGuidance={checkUserGuidance}
           />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
@@ -678,6 +694,8 @@ export function IssueDetail({
           {visiblePullRequestLinks.length > 0 && (
             <IssueDetailSection
               id="pull-requests"
+              /* 上部の案内から「対応PRへ移動」で飛んでくる先（#1663） */
+              targetProps={checkUserTargetProps("pull-requests")}
               title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
               count={pullRequestSummary.total}
               forceOpen={mergeApprovalPending}
