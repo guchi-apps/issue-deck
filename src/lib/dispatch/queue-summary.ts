@@ -1,6 +1,7 @@
 import {
   isActiveDispatchJobStatus,
   isDispatchHostAtSessionCapacity,
+  isSessionLaunchJobKind,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -39,10 +40,12 @@ export function summarizeDispatchQueue(
   jobs: readonly DispatchJobView[],
   concurrency: number | null,
 ): DispatchQueueSummary {
-  // **起動ジョブだけを数える**（#1332）。セッションの停止・終了は同時実行数の枠を使わず、
-  // tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
-  // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る
-  const launchJobs = [...jobs].filter((job) => job.kind === "LAUNCH");
+  // **同時実行数の枠を使うジョブだけを数える**（#1332・#1544）。セッションの停止・終了は
+  // 枠を使わず、tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
+  // 制御ジョブの状態はそのIssueのセッション表示（`issue-session-status.tsx`）に出る。
+  // 逆に**横断質問（#1454）は`LAUNCH`と同じ枠で走る**ので数える（`claimDispatchJobs`の空きの
+  // 計算と同じ集合＝`SESSION_LAUNCH_JOB_KINDS`。ずれると、枠が埋まっていても「実行中 0/2」と出る）
+  const launchJobs = [...jobs].filter((job) => isSessionLaunchJobKind(job.kind));
 
   // 走る順。`queuePriority`が同じなら積んだ順（既定は全件0なので従来と同じ並びになる）
   const byRunOrder = [...launchJobs].sort(
@@ -147,7 +150,9 @@ export function describeDispatchJobWaitReason(
   job: DispatchJobView,
   hosts: readonly DispatchHostView[],
 ): string | null {
-  if (job.status !== "QUEUED" || job.kind !== "LAUNCH") return null;
+  // 横断質問セッション（#1454）もtmuxセッションを立て、pollerのセッション本数
+  // （`count_issue_sessions`は`<repo>-issue-<番号>`を数える）に入るため同じ理由で待たされる（#1544）
+  if (job.status !== "QUEUED" || !isSessionLaunchJobKind(job.kind)) return null;
   const host = hosts.find((candidate) => candidate.name === job.targetHost);
   // 落ちているホストは「上限で待っている」のではなく「取りに来られない」。別の話として扱う
   if (!host || !host.online || !isDispatchHostAtSessionCapacity(host)) return null;
