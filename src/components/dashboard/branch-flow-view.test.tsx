@@ -112,6 +112,11 @@ describe("BranchFlowView", () => {
   });
 
   describe("畳む・開く", () => {
+    it("画面の見出しは「ブランチ」（#1586）", () => {
+      renderFlow({});
+      expect(screen.getByRole("heading", { name: "ブランチ" })).toBeTruthy();
+    });
+
     it("既定ではリポジトリを1行に畳み、中身は出さない", () => {
       renderFlow({
         pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454" })],
@@ -283,7 +288,8 @@ describe("BranchFlowView", () => {
       });
 
       openRepository();
-      // v3.17.0の束の中に並ぶ。トグルを押さなくても見える
+      // リリース済みの束は既定で畳む（#1586）ので、開いてから中身を見る
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
       expect(screen.getByText("issue-1456")).toBeTruthy();
       // 畳んだ行の現在の版と、束の見出しの両方に出る
       expect(screen.getAllByText("v3.17.0")).toHaveLength(2);
@@ -321,7 +327,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("このバージョンに乗る変更 1件")).toBeTruthy();
     });
 
-    it("既定はひとつ前の版まで出し、それ以前はボタンで開く", () => {
+    it("既定は次のリリースの束だけを出し、リリース済みはボタンで開く（#1586）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -371,12 +377,52 @@ describe("BranchFlowView", () => {
       });
 
       openRepository();
-      expect(screen.getByText("issue-915")).toBeTruthy();
-      expect(screen.getByText("issue-905")).toBeTruthy();
+      // 本番へ出た版はひとつ前（v3.17.0）も含めて畳む
+      expect(screen.queryByText("issue-915")).toBeNull();
+      expect(screen.queryByText("issue-905")).toBeNull();
       expect(screen.queryByText("issue-800")).toBeNull();
 
-      fireEvent.click(screen.getByText("さらに前のバージョンを表示（1件）"));
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（3件）"));
+      expect(screen.getByText("issue-915")).toBeTruthy();
+      expect(screen.getByText("issue-905")).toBeTruthy();
       expect(screen.getByText("issue-800")).toBeTruthy();
+    });
+
+    it("次のリリースに乗る分は畳まずに出す（#1586）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 920,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-05T00:00:00Z",
+          }),
+          // v3.17.0より後にdevelopへ入った＝次のリリースに乗る
+          makePullRequest({
+            number: 930,
+            headRef: "issue-930",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-12T00:00:00Z",
+          }),
+          // v3.17.0で本番へ出た
+          makePullRequest({
+            number: 905,
+            headRef: "issue-905",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-03T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("本番未反映")).toBeTruthy();
+      expect(screen.getByText("issue-930")).toBeTruthy();
+      expect(screen.queryByText("issue-905")).toBeNull();
+      expect(screen.getByText("リリース済みのバージョンを表示（1件）")).toBeTruthy();
     });
 
     it("PRと同じ題のIssueはタイトルを繰り返さない", () => {
@@ -550,6 +596,68 @@ describe("BranchFlowView", () => {
 
       openRepository();
       expect(screen.getByText("完了")).toBeTruthy();
+    });
+
+    /**
+     * 本番へ出た版のレーンに手作業がぶら下がっている状況（#1586）。
+     * 束そのものは畳むが、未完了の手作業だけは別枠で出す。
+     */
+    function renderReleasedLaneWithManualStep(manualStepState: "open" | "closed") {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 920,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-10T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 1461,
+            headRef: "issue-1454",
+            linkedIssueNumber: 1454,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-05T00:00:00Z",
+          }),
+        ],
+        issues: [{ ...manualStepIssue, state: manualStepState }],
+        branchStatuses: [branchStatus()],
+      });
+    }
+
+    it("畳んだリリース済みの束に残る未完了の手作業は別枠で出す（#1586）", () => {
+      renderReleasedLaneWithManualStep("open");
+
+      openRepository();
+      // 束もレーンも畳まれている（レーンのPRは出ない）
+      expect(screen.queryByText(/#1461/)).toBeNull();
+      // 手作業だけは別枠に出て、由来のブランチ名が添う
+      expect(screen.getByText("リリース済みの変更に残っている手作業")).toBeTruthy();
+      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+      expect(screen.getByText("起点")).toBeTruthy();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      // 畳んだ行にも件数を出す
+      expect(screen.getByText("手作業1")).toBeTruthy();
+    });
+
+    it("完了した手作業は畳んだ束と一緒に隠す（#1586）", () => {
+      renderReleasedLaneWithManualStep("closed");
+
+      openRepository();
+      expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
+      expect(screen.queryByText(/手作業 #184/)).toBeNull();
+      expect(screen.queryByText("手作業1")).toBeNull();
+    });
+
+    it("束を開いたら別枠は出さず、レーンにぶら下げる（#1586）", () => {
+      renderReleasedLaneWithManualStep("open");
+
+      openRepository();
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
+      expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
     });
   });
 

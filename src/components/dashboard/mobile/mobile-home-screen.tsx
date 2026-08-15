@@ -32,7 +32,7 @@ type MobileHomeScreenProps = {
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
-  /** 「ブランチとPRの流れ」を開く（#1455） */
+  /** 「ブランチ」画面を開く（#1455） */
   onSelectFlow: () => void;
 };
 
@@ -175,7 +175,7 @@ export function MobileHomeScreen({
             className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
           >
             <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-            ブランチとPRの流れ
+            ブランチ
           </button>
         </div>
 

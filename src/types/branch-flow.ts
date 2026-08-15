@@ -166,6 +166,14 @@ export type BranchFlowRepositorySummary = {
   /** ユーザーがマージするしかないopenなPRがある（リリースPRを除く） */
   needsUserMerge: boolean;
   /**
+   * このリポジトリに残っている未完了の手作業Issue（`71.manual-step`）の件数（#1586）。
+   *
+   * **既定の表示を「次のリリースに乗る分」まで畳んだぶん、ここで数える。** 手作業は
+   * 本番へ出た版に紐づいたまま残ることがあり、畳んだ行に出さないと開くまで気づけない。
+   * 同じIssueが複数レーンに現れても1件として数える。
+   */
+  openManualStepCount: number;
+  /**
    * リリースが進行中（openなリリースPR、またはopenなバージョンバンプPRがある）。
    * バンプPRを作業レーンから外した（#1548）ぶん、ここで数える。
    */

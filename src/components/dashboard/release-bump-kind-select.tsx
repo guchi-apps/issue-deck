@@ -26,7 +26,7 @@ type ReleaseBumpKindSelectProps = {
  * 各選択肢に添える基準は`BUMP_KIND_CRITERIA`——**自動判定へ渡している判定基準と同じ文面**で、
  * 人が選ぶときと自動で決まるときで基準が食い違わないようにしている。
  *
- * 起動の導線は2か所（ヘッダーのロケットボタンと「ブランチとPRの流れ」画面）あるため、
+ * 起動の導線は2か所（ヘッダーのロケットボタンと「ブランチ」画面）あるため、
  * `release-request.ts`と同じく**選択UIも1か所に置く**。
  */
 export function ReleaseBumpKindSelect({

@@ -21,7 +21,7 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab {
     // 辿ってきた導線に合わせてホームを点灯させる。
     case "issues":
       return "home";
-    // 「ブランチとPRの流れ」もホームからのドリルダウン（#1455）。PRタブを点灯させると
+    // 「ブランチ」画面もホームからのドリルダウン（#1455）。PRタブを点灯させると
     // タブが開く画面（PR一覧）と表示中の画面が食い違うため、辿ってきたホームを点灯させる。
     case "flow":
       return "home";

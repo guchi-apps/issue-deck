@@ -155,9 +155,12 @@ function RelatedIssuesLine({
 function ManualStepLine({
   repositoryFullName,
   manualStep,
+  /** 起点のブランチ名。レーンから離して出すとき（#1586）だけ添える */
+  branchName,
 }: {
   repositoryFullName: string;
   manualStep: BranchFlowManualStep;
+  branchName?: string;
 }) {
   const isOpen = manualStep.state === "open";
 
@@ -178,6 +181,49 @@ function ManualStepLine({
         手作業 #{manualStep.number} {manualStep.title}
       </GithubReferenceLink>
       <span className="shrink-0 text-xs text-muted-foreground">{isOpen ? "未完了" : "完了"}</span>
+      {branchName && (
+        <>
+          <span className="shrink-0 text-xs text-muted-foreground">起点</span>
+          <code className="min-w-0 max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs">
+            {branchName}
+          </code>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 畳んだ束に残っている未完了の手作業（#1586）。
+ *
+ * 既定の表示を「次のリリースに乗る分」までに絞ったことで、本番へ出た版に紐づく手作業も
+ * 一緒に隠れる。**手作業は版が出た後も残る作業**なので、束の外へ出して常に見せる。
+ * 完了済みは残作業ではないため、畳んだ束と一緒に隠したままにする。
+ */
+function RemainingManualSteps({
+  repositoryFullName,
+  manualSteps,
+}: {
+  repositoryFullName: string;
+  manualSteps: { manualStep: BranchFlowManualStep; branchName: string }[];
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+        <Wrench className="size-3.5" aria-hidden="true" />
+        リリース済みの変更に残っている手作業
+      </p>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {manualSteps.map(({ manualStep, branchName }) => (
+          <li key={manualStep.number}>
+            <ManualStepLine
+              repositoryFullName={repositoryFullName}
+              manualStep={manualStep}
+              branchName={branchName}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -457,6 +503,10 @@ function ReleaseGroupNote({ group }: { group: BranchFlowReleaseGroup }) {
  *
  * 作業ブランチごとに列を増やすとスマホ幅で必ず溢れるため、**レールは2本に固定**し、
  * レールが占める幅もPC 3.35rem・スマホ 2.6remの固定にしている。横スクロールは出ない。
+ *
+ * **既定で出すのは「次のリリースに乗る分」まで**（#1586）。本番へ出た版の束は、いま何が出るのかを
+ * 押し下げるだけなのでボタンで開くまで畳む。ただし**未完了の手作業だけは畳んでも別枠で出す**——
+ * 版が出た後も残る作業で、隠すと画面のどこにも現れなくなるため。
  */
 function ReleaseFlowGraph({
   repository,
@@ -476,11 +526,30 @@ function ReleaseFlowGraph({
     : repository.activeLanes.filter((lane) => !isClosedLane(lane));
   const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
 
-  // 既定で出すのは「未リリース」と「ひとつ前の版」まで。それ以前はボタンで開く（#1510）
+  // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
+  // 特定できないレーンは、すでに済んだ変更なのでボタンで開くまで出さない。
   const visibleGroups = showAllVersions
     ? repository.releaseGroups
-    : repository.releaseGroups.slice(0, 2);
-  const hiddenGroupCount = repository.releaseGroups.length - visibleGroups.length;
+    : repository.releaseGroups.filter((group) => group.mergedAt === null);
+  const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
+  const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
+
+  // 畳んだぶんに残っている手作業だけは別枠で出す（#1586）。束を開いているときは
+  // レーンにぶら下がって出るので、ここでは出さない（二重に出さないため）
+  const hiddenLanes = [
+    ...hiddenGroups.flatMap((group) => group.lanes),
+    ...(showAllVersions ? [] : repository.unassignedLanes),
+  ];
+  const remainingManualSteps = hiddenLanes
+    .flatMap((lane) =>
+      lane.manualSteps
+        .filter((manualStep) => manualStep.state === "open")
+        .map((manualStep) => ({ manualStep, branchName: lane.branchName })),
+    )
+    .filter(
+      (entry, index, all) =>
+        all.findIndex((other) => other.manualStep.number === entry.manualStep.number) === index,
+    );
 
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
   const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
@@ -542,13 +611,13 @@ function ReleaseFlowGraph({
           />
         ))}
 
-        {repository.unassignedLanes.length > 0 && (
+        {unassignedLanes.length > 0 && (
           <>
             <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-              どの版で本番へ出たか特定できない変更 {repository.unassignedLanes.length}件
+              どの版で本番へ出たか特定できない変更 {unassignedLanes.length}件
               （取得したPRの範囲より古いもの）
             </li>
-            {repository.unassignedLanes.map((lane) => (
+            {unassignedLanes.map((lane) => (
               <LaneRow
                 key={lane.key}
                 repositoryFullName={repository.repositoryFullName}
@@ -558,11 +627,11 @@ function ReleaseFlowGraph({
           </>
         )}
 
-        {(hiddenGroupCount > 0 || hiddenClosedCount > 0) && (
+        {(hiddenGroups.length > 0 || hiddenClosedCount > 0) && (
           <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
-            {hiddenGroupCount > 0 && (
+            {hiddenGroups.length > 0 && (
               <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onShowAllVersions}>
-                さらに前のバージョンを表示（{hiddenGroupCount}件）
+                リリース済みのバージョンを表示（{hiddenGroups.length}件）
               </Button>
             )}
             {hiddenClosedCount > 0 && (
@@ -573,12 +642,19 @@ function ReleaseFlowGraph({
           </li>
         )}
 
-        {activeLanes.length === 0 && repository.releaseGroups.length === 0 && (
+        {activeLanes.length === 0 && visibleGroups.length === 0 && unassignedLanes.length === 0 && (
           <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
             developへ向かっている作業はありません。
           </li>
         )}
       </ul>
+
+      {remainingManualSteps.length > 0 && (
+        <RemainingManualSteps
+          repositoryFullName={repository.repositoryFullName}
+          manualSteps={remainingManualSteps}
+        />
+      )}
 
       {repository.orphanIssues.length > 0 && (
         <div className="mt-3 rounded-md border border-dashed p-3">
@@ -647,6 +723,7 @@ function RepositorySummaryRow({
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
     unreleasedCommits > 0 ||
+    summary.openManualStepCount > 0 ||
     repository.orphanIssues.length > 0;
 
   return (
@@ -696,6 +773,12 @@ function RepositorySummaryRow({
       {summary.needsUserMerge && (
         <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
           ユーザーのマージが必要
+        </span>
+      )}
+      {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする */}
+      {summary.openManualStepCount > 0 && (
+        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+          手作業{summary.openManualStepCount}
         </span>
       )}
       {summary.activeLaneCount > 0 && (
@@ -784,7 +867,7 @@ export function BranchFlowView({
             className="truncate text-sm font-semibold"
             title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
           >
-            ブランチとPRの流れ
+            ブランチ
           </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{flow.repositories.length}リポジトリ</span>

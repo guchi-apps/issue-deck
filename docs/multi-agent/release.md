@@ -56,7 +56,7 @@ major/minor/patchのいずれでもない不正な場合はpatchにフォール�
 auto-mergeでdevelopへ入るため、PRが出てから直す時間がほとんど無い（`Allow auto-merge`を切るか
 PRを閉じるところから始める必要がある）。そこで、**起動する時点で上げ幅を選べる**ようにしてある。
 
-- 入口はissue-deckの画面2か所（ヘッダーのロケットボタン／「ブランチとPRの流れ」の
+- 入口はissue-deckの画面2か所（ヘッダーのロケットボタン／「ブランチ」画面の
   「リリースする」）の確認ダイアログ。既定は`auto`で、選ばなければ従来どおり自動判定になる。
 - 画面 → `POST /api/repositories/release`（`bumpKind`） → `workflow_dispatch`の`bump_kind` input
   → callerが`reusable-release-develop-to-main.yml`の`bump-kind`へ渡す、という一本道で届く。
