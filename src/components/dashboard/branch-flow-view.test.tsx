@@ -968,6 +968,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
+      // リリース済みの束は既定で畳む（#1586）ので、開いてから中身を見る
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
       expect(screen.getByText("本番へデプロイ中")).toBeTruthy();
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
       expect(screen.queryByText("8/15に本番反映")).toBeNull();
@@ -984,6 +986,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
+      // リリース済みの束は既定で畳む（#1586）ので、開いてから中身を見る
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
       // 畳んだ1行（ボタンなのでリンクにしない）と束の見出しの2か所に出る
       const badges = screen.getAllByText("デプロイ失敗");
       expect(badges).toHaveLength(2);
@@ -1003,6 +1007,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
+      // リリース済みの束は既定で畳む（#1586）ので、開いてから中身を見る
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
       expect(screen.getByText("8/15に本番反映")).toBeTruthy();
       expect(screen.getByText("デプロイ成功")).toBeTruthy();
     });
@@ -1011,6 +1017,8 @@ describe("BranchFlowView", () => {
       renderFlow({ pullRequests: released, branchStatuses: [branchStatus()], now: NOW });
 
       ensureRepositoryOpen();
+      // リリース済みの束は既定で畳む（#1586）ので、開いてから中身を見る
+      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
       expect(screen.getByText("8/15に本番反映")).toBeTruthy();
       expect(screen.queryByText("デプロイ成功")).toBeNull();
     });
