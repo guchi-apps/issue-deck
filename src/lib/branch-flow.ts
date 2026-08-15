@@ -86,8 +86,6 @@ export type BuildBranchFlowInput = {
   repositories: {
     fullName: string;
     private: boolean;
-    /** リリース用workflowを持つか。「リリースする」を出すかの前提（#1510） */
-    hasClaudeWorkflow?: boolean;
   }[];
   pullRequests: PullRequestSummary[];
   issues: BranchFlowIssueSource[];
@@ -141,7 +139,7 @@ function buildRepository({
   issues,
   branchStatus,
 }: {
-  repository: { fullName: string; private: boolean; hasClaudeWorkflow?: boolean };
+  repository: { fullName: string; private: boolean };
   pullRequests: PullRequestSummary[];
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
@@ -206,7 +204,11 @@ function buildRepository({
     releaseInProgress: releasePullRequest !== null,
   };
 
-  const canRelease = repository.hasClaudeWorkflow ?? false;
+  // リリース用workflow（`release-develop-to-main.yml`）を実際に持つリポジトリだけで押させる
+  // （#1538）。`claude-issue-dispatch.yml`の有無で代用していたころは、Claude運用には載って
+  // いてもリリース用workflowを持たないリポジトリでボタンが出て、押すとdispatchが404になった。
+  // ブランチ状況を取得できていないリポジトリでは判定できないためfalse（＝出さない）。
+  const canRelease = branchStatus?.hasReleaseWorkflow ?? false;
 
   return {
     repositoryFullName: repository.fullName,

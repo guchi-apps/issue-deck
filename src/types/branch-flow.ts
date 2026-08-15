@@ -24,6 +24,11 @@ export type RepositoryBranchStatus = {
   existingBranches: string[];
   /** `main`と`develop`の差分。どちらかのブランチが無いリポジトリではnull */
   developVsMain: BranchComparison | null;
+  /**
+   * リリース用workflow（`release-develop-to-main.yml`）を持つか（#1538）。
+   * 「リリースする」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
+   */
+  hasReleaseWorkflow: boolean;
 };
 
 export type BranchFlowResponse = {
@@ -185,7 +190,10 @@ export type BranchFlowRepository = {
    */
   unassignedLanes: BranchFlowLane[];
   summary: BranchFlowRepositorySummary;
-  /** リリース用workflowを持つか。「リリースする」を出してよいリポジトリの前提 */
+  /**
+   * リリース用workflow（`release-develop-to-main.yml`）を持つか。「リリースする」を
+   * 出してよいリポジトリの前提。**ブランチ状況を取得できていない場合はfalse**（#1538）。
+   */
   canRelease: boolean;
   /**
    * いま「リリースする」を押してよいか（#1510）。リリース用workflowがあり、

@@ -244,7 +244,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `## 前提条件`に別Issueへの参照が入るため見出しの中だけを読む。一般のサブIssueは表示しない。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
-  openなバンプPRが無い・未リリースの変更がある）で、**すべて画面が既に持っている情報**から決まる。
+  openなバンプPRが無い・未リリースの変更がある）で決まる。
+  **「リリース用workflowがある」は`release-develop-to-main.yml`の実在で判定する**（#1538）。
+  当初は`claude-issue-dispatch.yml`の有無（`Repository.hasClaudeWorkflow`）で代用していたが、
+  この2つは一致しない——Claude運用には載っていてもリリースフローを持たないリポジトリ
+  （例: clip-hive）でボタンが出てしまい、押すとdispatchが404で失敗した。判定はヘッダーの
+  ロケットボタンと同じ`releaseWorkflowExists`（プロセス内に10分キャッシュ）を`GET /api/branch-flow`
+  から通し、結果を`RepositoryBranchStatus.hasReleaseWorkflow`として返す。**取得できていない
+  リポジトリはfalse（＝出さない）へ倒す。** さらに`POST /api/repositories/release`側でも起動前に
+  同じ判定を行い、workflowが無ければ`release_workflow_missing`を返して日本語の文言を出す
+  （キャッシュが古い場合の保険。GitHubの生の404本文からは何が足りないのか読み取れないため）。
   起動そのものはヘッダーのロケットボタンと同じ`POST /api/repositories/release`で、
   [`lib/release-request.ts`](../src/lib/release-request.ts)の`requestRelease`に寄せて2か所が
   同じ結果になるようにしてある。**流れ画面が持つのは起動だけ**で、4段の進捗とmainへのマージ導線は
