@@ -192,9 +192,10 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 `"version"` lifecycleスクリプトへ`RELEASE_CHANGELOG`環境変数として渡す（#800）。
 受け取る側を持つかどうかはリポジトリごとに違う。
 
-| `"version"`スクリプトあり | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で`RELEASE_CHANGELOG`対応へ改修）・**`ops-dashboard`**（#1591で新設） |
+| `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設） |
 |---|---|
-| 無し（バージョンだけが上がる） | `issue-deck`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
+| 追記はするが**枠だけ**（`RELEASE_CHANGELOG`を読まない） | `signaly`（`scripts/bump_version.py`が`frontend/changelog.js`へスタブを足す。`bump-command`経由のため`npm`のlifecycleではない） |
+| 何もしない（バージョンだけが上がる） | `issue-deck`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
 
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
