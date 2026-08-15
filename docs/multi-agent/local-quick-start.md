@@ -936,6 +936,28 @@ Issue #<番号>「<Issueのタイトル>」の実装を開始してください�
 - 3行はいずれも**取れなければ黙って落とす**。汎用ランチャー・横断質問セッションも同じ
   `run-issue-session.sh`を通るので、無い項目は行ごと消えるだけで起動は変わらない
 
+#### 文面を手元で確かめるとき
+
+組み立てだけなら`scripts/lib/kickoff-prompt.sh`を直接叩けば足りる（`kickoff_prompt_context_block
+<プロンプトファイル> <ポート> <tailnetのURL> <起動したか>`）。
+
+セッションへ実際に渡る引数まで見たい場合に`run-issue-session.sh`を手で走らせるなら、
+**`TMUX`を外し、`ISSUE_DECK_WORKTREE_BASE`を捨ててよい場所へ向ける**（#1559で実際に踏んだ）。
+tmuxの中でそのまま走らせると、走っているセッションの状態ファイル（#1256）とフック設定を
+Issue番号のキーで上書きし、`POST /api/dispatch/sessions/started`で**Issueに受付コメントまで
+投稿してしまう**（#1119）。`claude`は、引数を表示するだけの実行ファイルを`PATH`の先頭に置いて
+差し替える。
+
+```bash
+env -u TMUX PATH=/tmp/fakebin:$PATH ISSUE_DECK_WORKTREE_BASE=/tmp/wtbase \
+  ISSUE_DECK_DEV_SERVER=0 ISSUE_DECK_CLAUDE_RESUME=0 ISSUE_DECK_CLAUDE_REMOTE_CONTROL=0 \
+  bash scripts/run-issue-session.sh 9999 5999 ../.prompts/issue-<番号>.md
+```
+
+Issue番号とポートも**動いているセッションと別の値**にする。`cleanup`が
+`tailscale_serve_unpublish`で渡されたポートの公開を外すため、同じポートを渡すと動いている
+セッションのtailnetのURL（#1265）が切れる。
+
 「確認を待たずに着手する」ことは、プロンプトファイル側（`scripts/prompts/implementation-agent.md`）
 にも明記している。ここが曖昧だと、セッションは開いたのに指示待ちで止まる。
 
