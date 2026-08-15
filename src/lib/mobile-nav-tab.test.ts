@@ -36,15 +36,24 @@ describe("resolveBottomNavTab", () => {
     expect(resolveBottomNavTab({ kind: "home" })).toBe("home");
     expect(resolveBottomNavTab({ kind: "repos" })).toBe("repos");
     expect(resolveBottomNavTab({ kind: "settings" })).toBe("settings");
-    expect(resolveBottomNavTab(issuesScreen)).toBe("issues");
+    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "tab" })).toBe("pull-requests");
   });
 
-  it("リポジトリ別Issue一覧ではリポジトリタブを返す", () => {
+  it("リポジトリ別Issue一覧では「Issue」タブ（repos）を返す", () => {
     expect(resolveBottomNavTab(repoDetail)).toBe("repos");
   });
 
+  // 全リポジトリ横断のIssue一覧はフッターから外し、ホームからのドリルダウンにした（#1436）
+  it("全リポジトリ横断のIssue一覧ではホームタブを返す", () => {
+    expect(resolveBottomNavTab(issuesScreen)).toBe("home");
+  });
+
+  it("ホームから開いたPR一覧でもPRタブを返す", () => {
+    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "home" })).toBe("pull-requests");
+  });
+
   it("Issue詳細では戻り先の画面に応じたタブを返す", () => {
-    expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: issuesScreen })).toBe("issues");
+    expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: issuesScreen })).toBe("home");
     expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: repoDetail })).toBe("repos");
   });
 });
