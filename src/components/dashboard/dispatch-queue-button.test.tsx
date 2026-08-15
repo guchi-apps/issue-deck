@@ -254,7 +254,7 @@ describe("DispatchQueueButton の行の内容", () => {
 });
 
 /**
- * #1519。制御ジョブは届くまでpull型ぶん最大60秒かかるのに、キューのどこにも出ていなかった
+ * #1519。制御ジョブは届くまでpull型ぶん最大30秒かかるのに、キューのどこにも出ていなかった
  * （#1544で枠の数え方から外したのは正しいが、表示まで消える必要は無い）。
  */
 describe("DispatchQueueButton の送信中の操作", () => {
@@ -360,6 +360,8 @@ describe("DispatchQueueButton のホスト表示", () => {
           memoryTotalMb: 32_650,
           diskUsedGb: 219.4,
           diskTotalGb: 468.2,
+          swapUsedMb: 1_024,
+          swapTotalMb: 8_192,
         },
       }),
       [makeSession()],

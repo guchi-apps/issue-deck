@@ -50,7 +50,7 @@
 #   DISPATCH_HOST_NAME              このホストの名前（省略時は `hostname -s`）
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
-#   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は60）
+#   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
@@ -72,7 +72,8 @@ set -euo pipefail
 # 6: Claude Codeが起動確認（フォルダの信頼確認）で止まっているセッションを報告する（#1465）。
 # 7: セッションの owner/repo を状態ファイルから復元し、`local-repos.conf`に載っていない
 #    リポジトリ（横断質問セッションの記録先）のセッションも報告する（#1537）。
-DISPATCH_POLLER_VERSION="7"
+# 8: 使用率の申告にSWAPを載せ、既定のポーリング間隔を30秒にする（#1624）。
+DISPATCH_POLLER_VERSION="8"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -161,7 +162,10 @@ require_positive_int() {
   printf '%s\n' "$value"
 }
 
-POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 60)"
+# 既定は30秒（#1624で60秒から短くした）。この間隔がそのまま「画面のボタンを押してから起動が
+# 始まるまで」と「実行キューに出る使用率の古さ」の上限になる。1巡でissue-deckへ行くのは
+# HTTP 2回・DBクエリ数件なので、倍にしても負荷は無視できる。
+POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 30)"
 LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPATCH_LAUNCH_TIMEOUT_SECONDS:-}" 900)"
 
 # 生かしておく実装セッションの上限（#1361）。
@@ -306,15 +310,17 @@ cross_repo_question_capable() {
 #
 # **取り方はops-dashboardの`scripts/host-stats/agent.sh`に合わせている。** 同じホストの同じ数字が
 # 2つのアプリで食い違うと、どちらを信じてよいか分からなくなる。ホスト全体の監視（サービス・
-# プロセス・温度・ネットワーク・履歴）は引き続きあちらの担当で、こちらは3つだけ。
+# プロセス・温度・ネットワーク・履歴）は引き続きあちらの担当で、こちらはCPU・メモリ・SWAP・
+# `/`のディスクだけ（SWAPは#1624）。
 #
 # **どれか1つでも取れなければ何も出力しない**（呼び出し側が`metrics`ごと落とす）。部分的に0が
 # 入ると、取れなかった項目が「空いている」と読めてしまう。
 collect_host_metrics() {
   local cpu_first cpu_second cpu_percent mem_total_mb mem_used_mb disk_total_gb disk_used_gb
+  local swap_total_mb swap_used_mb
 
   # CPUは瞬間値が取れないため、/proc/stat のアイドル時間と全体の累積を1秒あけて2回読み、
-  # その差分から出す。1巡60秒に対する1秒なので、claimの開始が1秒遅れるだけ
+  # その差分から出す。1巡30秒に対する1秒なので、claimの開始が1秒遅れるだけ
   cpu_first="$(awk '/^cpu / { idle = $5 + $6; total = 0; for (i = 2; i <= NF; i++) total += $i; print idle, total; exit }' /proc/stat 2>/dev/null)" || return 1
   [[ -n "$cpu_first" ]] || return 1
   sleep 1
@@ -336,6 +342,13 @@ collect_host_metrics() {
   mem_used_mb="$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { printf "%d", (total - $2) / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
   [[ -n "$mem_total_mb" && -n "$mem_used_mb" ]] || return 1
 
+  # SWAP（#1624）。メモリが100%に達したホストは、そこから先の余力がSWAPの増え方にしか出ない。
+  # **SwapTotalが0（SWAPを持たない・`swapoff`）でも申告を落とさない**（issue-deck側が0を
+  # 「SWAPなし」として行ごと出さない）。メモリと違い、0は壊れた値ではなく正常な構成
+  swap_total_mb="$(awk '/^SwapTotal:/ { printf "%d", $2 / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
+  swap_used_mb="$(awk '/^SwapTotal:/ { total = $2 } /^SwapFree:/ { printf "%d", (total - $2) / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
+  [[ -n "$swap_total_mb" && -n "$swap_used_mb" ]] || return 1
+
   # worktreeと開発サーバーで埋まるのは `/` なので、そこ1本だけを見る（#1223・#1525）
   disk_total_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $2 / 1048576 }')" || return 1
   disk_used_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $3 / 1048576 }')" || return 1
@@ -345,9 +358,11 @@ collect_host_metrics() {
     --argjson cpuPercent "$cpu_percent" \
     --argjson memoryUsedMb "$mem_used_mb" \
     --argjson memoryTotalMb "$mem_total_mb" \
+    --argjson swapUsedMb "$swap_used_mb" \
+    --argjson swapTotalMb "$swap_total_mb" \
     --argjson diskUsedGb "$disk_used_gb" \
     --argjson diskTotalGb "$disk_total_gb" \
-    '{cpuPercent: $cpuPercent, memoryUsedMb: $memoryUsedMb, memoryTotalMb: $memoryTotalMb, diskUsedGb: $diskUsedGb, diskTotalGb: $diskTotalGb}'
+    '{cpuPercent: $cpuPercent, memoryUsedMb: $memoryUsedMb, memoryTotalMb: $memoryTotalMb, swapUsedMb: $swapUsedMb, swapTotalMb: $swapTotalMb, diskUsedGb: $diskUsedGb, diskTotalGb: $diskTotalGb}'
 }
 
 announce() {
@@ -441,7 +456,7 @@ reap_sessions() {
 # （`findSessionsForStaleLaunchJobs`）が、そちらは10分待って初めて効くうえ、セッションを
 # 立てない報告（`skipped`・`failed`）は救えない。まずここで届けきる。
 #
-# 間隔はポーリング間隔（60秒）を食い潰さない範囲に収める。再起動・デプロイでの短い断は
+# 間隔はポーリング間隔（既定30秒）を食い潰さない範囲に収める。再起動・デプロイでの短い断は
 # これで越えられ、長く落ちている場合はどのみち次のタイムアウト救済に任せる。
 REPORT_RETRY_ATTEMPTS=3
 REPORT_RETRY_INTERVAL=5

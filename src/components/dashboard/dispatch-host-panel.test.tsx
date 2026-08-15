@@ -27,6 +27,8 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
       memoryTotalMb: 32_650,
       diskUsedGb: 219.4,
       diskTotalGb: 468.2,
+      swapUsedMb: 1_024,
+      swapTotalMb: 8_192,
     },
     ...overrides,
   };
@@ -72,6 +74,35 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
     expect(screen.getByText("サブPC")).toBeTruthy();
     expect(screen.getByText("セッション 2/12")).toBeTruthy();
+    expect(screen.getByText("34%")).toBeTruthy();
+    expect(screen.getByText("39%・12.4 / 31.9 GB")).toBeTruthy();
+    // SWAP（#1624）。メモリが埋まった後の余力はここにしか出ない
+    expect(screen.getByText("13%・1.0 / 8.0 GB")).toBeTruthy();
+    expect(screen.getByText("SWAP")).toBeTruthy();
+  });
+
+  // SWAPを持たないホスト・SWAPを申告しない古いpollerで0%のメーターを並べると、
+  // 「SWAPが空いている」と「SWAPが無い」を見分けられない（#1624）
+  it("SWAPが未申告のホストではSWAPの行を出さず、他の3つは出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({
+            metrics: {
+              cpuPercent: 34,
+              memoryUsedMb: 12_698,
+              memoryTotalMb: 32_650,
+              diskUsedGb: 219.4,
+              diskTotalGb: 468.2,
+              swapUsedMb: null,
+              swapTotalMb: null,
+            },
+          }),
+        ]}
+        sessions={[]}
+      />,
+    );
+    expect(screen.queryByText("SWAP")).toBeNull();
     expect(screen.getByText("34%")).toBeTruthy();
     expect(screen.getByText("39%・12.4 / 31.9 GB")).toBeTruthy();
   });

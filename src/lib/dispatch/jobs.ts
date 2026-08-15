@@ -96,7 +96,8 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
     // 5列は「まとめて入るかまとめてnullか」で保存されている（#1567）。読むときも同じ扱いにし、
-    // 1つでも欠けていれば使用率そのものを出さない（欠けた項目が0＝空きに見えるのを避ける）
+    // 1つでも欠けていれば使用率そのものを出さない（欠けた項目が0＝空きに見えるのを避ける）。
+    // **SWAPの2列はこの5列に含めない**（#1624。欠けていてもCPU・メモリ・ディスクは出す）
     metrics:
       host.cpuPercent === null ||
       host.memoryUsedMb === null ||
@@ -110,6 +111,10 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             memoryTotalMb: host.memoryTotalMb,
             diskUsedGb: host.diskUsedGb,
             diskTotalGb: host.diskTotalGb,
+            // SWAPの2列は上の5列と別扱い（#1624）。**片方だけ入っていれば対でnullへ倒す。**
+            // 使用量だけが残った状態を「総量0のSWAPが埋まっている」と読ませない
+            swapUsedMb: host.swapTotalMb === null ? null : host.swapUsedMb,
+            swapTotalMb: host.swapUsedMb === null ? null : host.swapTotalMb,
           },
   };
 }
@@ -1023,7 +1028,7 @@ export async function announceDispatchHost(params: {
   /**
    * 申告した時点のリソース使用率（#1567）。**画面へ出すための写しで、割り当ての判定には
    * 使わない**（`maxSessions`と同じ立場）。申告していない・取得に失敗した巡では`null`で、
-   * その場合は5列すべてを`null`へ戻す（前回の値を残すと、古い数字が現在の値として出る）。
+   * その場合は7列すべてを`null`へ戻す（前回の値を残すと、古い数字が現在の値として出る）。
    */
   metrics: DispatchHostMetrics | null;
   now?: Date;
@@ -1048,6 +1053,10 @@ export async function announceDispatchHost(params: {
     memoryTotalMb: params.metrics?.memoryTotalMb ?? null,
     diskUsedGb: params.metrics?.diskUsedGb ?? null,
     diskTotalGb: params.metrics?.diskTotalGb ?? null,
+    // SWAPも同じく毎回上書きする（#1624）。**SWAPを申告しないpollerへ戻ったときにnullへ戻す**
+    // 必要があるため、`??`で前回値を残さない
+    swapUsedMb: params.metrics?.swapUsedMb ?? null,
+    swapTotalMb: params.metrics?.swapTotalMb ?? null,
     lastSeenAt: now,
   };
 
