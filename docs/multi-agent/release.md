@@ -78,7 +78,15 @@ PRを閉じるところから始める必要がある）。そこで、**起動�
 
 ```yaml
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      # 上げ幅の指定（#1548）。これを持たないcallerでは画面から指定できない
+      # （docs/supported-repositories.md「callerの`bump_kind`入力の配布状況」）。
+      bump_kind:
+        required: false
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major]
   push:
     branches: [develop]
     paths:

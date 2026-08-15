@@ -434,7 +434,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
 | `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 | `workflows/v18` | 上記 | #1490。`00.check-user`を付ける全経路が、その理由を表す`01.check-*`もあわせて付けるようになった版。あわせて`claude-review-develop`・`claude-ci-fix`・`claude-conflict-resolve`・`release-develop-to-main`の`gh issue edit`に`gh label list`ガードを入れた。**このタグを配るまで、対象リポジトリでは理由ラベルが付かない**（`00.check-user`だけが付く従来どおりの動作） |
-| `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く） |
+| `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く）。**caller側の追加は#1603で12リポジトリの配布PRへ入れた**（[supported-repositories.md](supported-repositories.md)「callerの`bump_kind`入力の配布状況」） |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
