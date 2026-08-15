@@ -12,7 +12,7 @@ const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 const VERSION_BUMP_BRANCH_PREFIX = "release/v";
 
 /** タイトル・本文中の`#123`形式のIssue参照 */
-const ISSUE_REFERENCE_PATTERN = /#(\d+)/;
+const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
 
 /**
  * PRのbase/headブランチから種別を判定する。
@@ -46,14 +46,38 @@ export function extractLinkedIssueNumber(pullRequest: {
   title: string;
   body: string | null;
 }): number | null {
+  return extractLinkedIssueNumbers(pullRequest)[0] ?? null;
+}
+
+/**
+ * PRが参照しているIssue番号を、確度の高い順にすべて返す（#1455）。
+ *
+ * 1本のPRで複数のIssueに対応することがあるため、`extractLinkedIssueNumber`（先頭1件）では
+ * 関連を取りこぼす。先頭は「そのブランチが何の作業か」を最もよく表すもの
+ * （`issue-<番号>`ブランチ名 → タイトル → 本文の順）で、以降は同じ順で拾った参照。
+ *
+ * **本文中の`#番号`は単なる言及も混ざる**ため、2件目以降は「対応Issue」ではなく
+ * 「関連Issue」として扱う（画面もその文言で出す）。
+ */
+export function extractLinkedIssueNumbers(pullRequest: {
+  headRef: string;
+  title: string;
+  body: string | null;
+}): number[] {
+  const numbers: number[] = [];
+  const add = (value: number) => {
+    if (!numbers.includes(value)) numbers.push(value);
+  };
+
   const branchMatch = ISSUE_BRANCH_PATTERN.exec(pullRequest.headRef);
-  if (branchMatch) return Number(branchMatch[1]);
+  if (branchMatch) add(Number(branchMatch[1]));
 
   for (const text of [pullRequest.title, pullRequest.body ?? ""]) {
-    const match = ISSUE_REFERENCE_PATTERN.exec(text);
-    if (match) return Number(match[1]);
+    for (const match of text.matchAll(ISSUE_REFERENCE_PATTERN_GLOBAL)) {
+      add(Number(match[1]));
+    }
   }
-  return null;
+  return numbers;
 }
 
 /**
@@ -197,6 +221,35 @@ export function groupPullRequestsByRepository(
  */
 export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
   return pullRequest.state === "open" && !pullRequest.draft;
+}
+
+/**
+ * 自動ではマージされず、ユーザーが手でマージする必要があるPRか（#1469）。
+ *
+ * develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
+ * `claude-review-develop.yml`（`risk-check` → `auto-merge`）だけで、そのcallerを持たない
+ * リポジトリでは`reusable-issue-labels.yml`の`develop-pr-opened`がPR作成時に保険として
+ * 確定させる（#1470）。**どちらも結論をPRではなく対応Issueの`00.check-user`として書く**ため、
+ * ここでは`linkedIssueCheckUser`をその確定結果として読む。
+ *
+ * - `release`（develop→main）は`CLAUDE.md`の自動マージ不可カテゴリで、常にユーザーがマージする。
+ * - `version-bump`（`release/vX.Y.Z`→develop）は`release-develop-to-main.yml`がAuto-mergeで
+ *   developへ入れるため対象外。
+ * - `other`（規約から外れたブランチ）は判定材料が無いため出さない。対応Issueの推定が
+ *   タイトル・本文の`#123`参照頼りになり、単なる言及を拾って誤検知しうる。
+ * - Auto-merge有効なPRは待てば入るので出さない。
+ * - **CIの結果は見ない。** #1433がCI実行中を「要操作」から外しているのは押しても弾かれる
+ *   ボタンの強調についてで、こちらは「自動ではマージされない」という事実の表示にあたる。
+ *
+ * `00.check-user`は計画の承認待ち・質問の回答待ちでも付く汎用ラベルだが、ここで見るのは
+ * 「そのIssueにopenなdevelop向けPRがある」場面に限られるため、マージ保留以外の意味にならない。
+ * 理由別のラベル（`01.check-merge`）が入ったら、この関数の中だけを差し替えればよい。
+ */
+export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
+  if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) return false;
+  if (pullRequest.autoMergeEnabled) return false;
+  if (pullRequest.kind === "release") return true;
+  return pullRequest.kind === "issue" && pullRequest.linkedIssueCheckUser;
 }
 
 /**

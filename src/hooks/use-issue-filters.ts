@@ -21,8 +21,16 @@ export type IssueStateFilter = "all" | "open" | "closed";
  * Issue一覧とマージ待ちPR一覧は同じ画面内で切り替える別ペインで、Issue用の絞り込み条件とは
  * 直交する。ただしURLの持ち方を揃えたいのと、ビュー切り替えと同時に1回のURL更新で
  * 反映したい（別フックに分けると2回のrouter.replaceが競合する）ため、ここで一緒に扱う。
+ *
+ * `flow`はIssue・ブランチ・PRの関係を1画面で見る「ブランチとPRの流れ」（#1455）。
+ * 一覧と詳細の2カラムを持たず、中央〜右を1カラムで使う。
  */
-export type DashboardPane = "issues" | "pull-requests";
+export type DashboardPane = "issues" | "pull-requests" | "flow";
+
+function parsePane(value: string | null): DashboardPane {
+  if (value === "pull-requests" || value === "flow") return value;
+  return "issues";
+}
 
 export type IssueFilters = {
   view: NavViewId;
@@ -126,7 +134,7 @@ export function useIssueFilters() {
 
     return {
       view,
-      pane: searchParams.get("pane") === "pull-requests" ? "pull-requests" : "issues",
+      pane: parsePane(searchParams.get("pane")),
       prview: isPullRequestViewId(prViewParam) ? prViewParam : DEFAULT_FILTERS.prview,
       pr: searchParams.get("pr"),
       issue: searchParams.get("issue"),
@@ -206,6 +214,12 @@ export function useIssueFilters() {
     [setFilters],
   );
 
+  // 左メニューの「ブランチとPRの流れ」への遷移（#1455）。この画面はPRの選択状態を持たない
+  // ので、開くときに選択中PRを畳んでおく（戻ってきたときに前のPRが残らないようにする）。
+  const selectFlowPane = useCallback(() => {
+    setFilters({ pane: "flow", pr: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -242,6 +256,7 @@ export function useIssueFilters() {
     setFilters,
     selectView,
     selectPullRequestView,
+    selectFlowPane,
     selectPullRequest,
     toggleLabel,
     toggleRepo,

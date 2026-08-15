@@ -21,11 +21,14 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     draft: false,
     state: "open",
     merged: false,
+    mergedAt: null,
     baseRef: "develop",
     headRef: "issue-1087",
     kind: "issue",
     linkedIssueNumber: 1087,
+    linkedIssueNumbers: [],
     autoMergeEnabled: false,
+    linkedIssueCheckUser: false,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -134,6 +137,15 @@ describe("PullRequestDetail", () => {
   it("コンフリクトしているPRは警告を出す", () => {
     renderDetail({ detail: makeDetail({ mergeable: false }) });
     expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+  });
+
+  it("自動でマージされないPRには「ユーザーのマージが必要です」を出す（#1469）", () => {
+    renderDetail({ pullRequest: makePullRequest({ linkedIssueCheckUser: true }) });
+    expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
+    cleanup();
+
+    renderDetail();
+    expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
   });
 
   it("別のPRの取得結果は表示しない", () => {

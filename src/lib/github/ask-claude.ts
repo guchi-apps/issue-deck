@@ -92,6 +92,56 @@ export function isQaAnswerPending(comments: Pick<IssueComment, "body">[]): boole
 }
 
 /**
+ * 複数リポジトリ横断の質問（#1454）であることの目印。**回答するのはサブPCの質問セッションで、
+ * GitHub Actionsではない。**
+ *
+ * `QUESTION_COMMENT_MARKER`と併せて付ける（質問であることの識別はあちらが持ち、こちらは
+ * 「どの経路が答えるか」を画面へ出すためのもの）。本文に`@claude`を含めないため、
+ * `claude-issue-dispatch.yml`のトリガー条件には掛からない。
+ */
+export const CROSS_REPO_QUESTION_MARKER = "<!-- issue-deck-cross-repo-question -->";
+
+/**
+ * 横断質問のコメント本文を組み立てる。**Actionsを起こさない形**（`trigger: "none"`）に
+ * 横断質問のマーカーを足したもの。
+ */
+export function crossRepoQuestionCommentBody(question: string): string {
+  return `${askClaudeCommentBody(question, { trigger: "none" })}\n${CROSS_REPO_QUESTION_MARKER}`;
+}
+
+/** 指定したコメントが横断質問（#1454）かどうかを判定する */
+export function isCrossRepoQuestionComment(comment: Pick<IssueComment, "body">): boolean {
+  return comment.body.includes(CROSS_REPO_QUESTION_MARKER);
+}
+
+/**
+ * 横断質問Issueの既定の置き場所として探すリポジトリ名（#1454）。
+ *
+ * **`owner`は問わず、リポジトリ名だけで探す。** 質問Issueが実装対象のリポジトリへ混ざると、
+ * そのリポジトリのIssue一覧・カンバンが質問で埋まるため、専用リポジトリを既定にしている。
+ * 設定値（AppSetting・環境変数）を増やさないのは、**リポジトリを作って連携した時点で
+ * 自動的に既定になる**ようにするため。
+ */
+export const CROSS_REPO_QUESTION_REPOSITORY_NAME = "question";
+
+/**
+ * 横断質問Issueの記録先として既定で選ぶリポジトリを決める（#1454）。
+ *
+ * 名前が`question`のリポジトリがあればそれ、無ければ`fallback`（呼び出し元が渡す従来の既定＝
+ * 選択中のリポジトリか一覧の先頭）。**`question`リポジトリが未作成でも機能そのものは動く**
+ * ようにするためのフォールバックで、リポジトリ名をもう1つハードコードはしない。
+ */
+export function resolveCrossRepoQuestionRepository(
+  repositoryFullNames: readonly string[],
+  fallback: string | null,
+): string | null {
+  const preferred = repositoryFullNames.find(
+    (fullName) => fullName.split("/")[1] === CROSS_REPO_QUESTION_REPOSITORY_NAME,
+  );
+  return preferred ?? fallback;
+}
+
+/**
  * 「リポジトリに質問する」ダイアログ（AskRepoQuestionDialog）がIssueタイトルに付与する接頭辞。
  * このタイトルを持つIssueかどうかで、質問フロー由来のIssueかを判定する（#885）。
  */

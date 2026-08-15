@@ -376,6 +376,7 @@ enum DispatchJobKind {
   KILL
   QUESTION
   INSTRUCTION
+  CROSS_REPO_QUESTION
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -478,6 +479,11 @@ model DispatchHost {
   // こちらは**内容のある文字列**を送るため、対応版でないpollerへ配ると事故の質が違う
   // （`null`＝未申告は「できない」として扱うのは同じ）
   instructionCapable Boolean?
+  // 複数リポジトリ横断の質問セッション（#1454）を起こせるか。`scripts/start-cross-repo-question.sh`を
+  // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
+  // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として
+  // `failed`になり、質問が必ず失われる）
+  crossRepoQuestionCapable Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
@@ -560,10 +566,15 @@ model DispatchSession {
 //
 // **停滞・完了の判定には使わない。** これは「今この瞬間セッションが何をしているか」で、
 // 実装の進捗はProject Statusが唯一の正（docs/progress-status-architecture.md）。
+//
+// NOT_STARTED=Claude Code本体がまだ開始していない（#1465）。**これだけはフックではなく
+// pollerが立てる。** 初めてクローンしたリポジトリではフォルダの信頼確認で止まり、
+// セッションが始まっていないためフックが1つも飛ばず、画面には何も出ないまま操作が止まる。
 enum DispatchSessionActivity {
   WAITING_INPUT
   WORKING
   RESPONDED
+  NOT_STARTED
 }
 
 enum DispatchSessionState {

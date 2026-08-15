@@ -15,8 +15,9 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
  * |---|---|---|
  * | Actions | `actionsRunning.isRunning === true` | ○ |
  * | Actions | ポーリング結果が未取得（`undefined`）・実行が無い | × |
- * | サブPC | セッションが`ALIVE`で`activity`が`WAITING_INPUT`以外（`null`/`WORKING`/`RESPONDED`） | ○ |
+ * | サブPC | セッションが`ALIVE`で`activity`が`null`/`WORKING`/`RESPONDED` | ○ |
  * | サブPC | セッションが`ALIVE`だが`activity === "WAITING_INPUT"` | × |
+ * | サブPC | セッションが`ALIVE`だが`activity === "NOT_STARTED"`（#1465） | × |
  * | サブPC | `EXITED`/`FAILED`/`GONE` | × |
  * | サブPC | `ALIVE`だが`lastReportedAt`が{@link SESSION_ACTIVITY_STALE_MS}より古い | × |
  * | 共通 | 承認待ち（`00.check-user`） | × |
@@ -78,6 +79,9 @@ function isSessionActivelyWorking(session: WorkflowBadgeSession | null, now: num
   if (!session) return false;
   if (session.state !== "ALIVE") return false;
   if (session.activity === "WAITING_INPUT") return false;
+  // Claude Codeがまだ開始していない（#1465）。tmuxのペインは生きているが、動いているのは
+  // 起動確認の画面だけで、エージェントは1行も動いていない
+  if (session.activity === "NOT_STARTED") return false;
   if (now !== null) {
     const reportedAt = Date.parse(session.lastReportedAt);
     // 解釈できない値は判定材料にしない（古さで消すより、状態の方を信じる）

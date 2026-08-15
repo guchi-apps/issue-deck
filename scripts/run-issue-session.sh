@@ -345,11 +345,35 @@ fi
 # 存在しない場合は --add-dir を付けずにそのまま起動する。
 SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
 CLAUDE_EXTRA_ARGS=()
+# フック設定を生成できたか（#1465）。生成できたときだけ「まだ開始していない」印を置く
+HOOKS_ENABLED=0
 if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
   CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
   echo "#$ISSUE_NUMBER: 共有知識リポジトリを参照可能にします: $SHARED_CONTEXT_DIR"
 else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
+fi
+
+# 追加で参照させるディレクトリ（#1454）。改行区切りで受け取り、実在するものだけを --add-dir する。
+# 横断質問セッション（scripts/start-cross-repo-question.sh）が、サブPCにある全リポジトリの
+# チェックアウトをここへ渡す。**実装セッションの経路では空**なので、従来の起動は変わらない。
+if [[ -n "${ISSUE_DECK_EXTRA_DIRS:-}" ]]; then
+  while IFS= read -r extra_dir; do
+    [[ -n "$extra_dir" ]] || continue
+    if [[ ! -d "$extra_dir" ]]; then
+      echo "#$ISSUE_NUMBER: 情報: 参照先が見つからないため飛ばします: $extra_dir" >&2
+      continue
+    fi
+    CLAUDE_EXTRA_ARGS+=(--add-dir "$extra_dir")
+  done <<<"${ISSUE_DECK_EXTRA_DIRS}"
+fi
+
+# 使わせないツール（#1454）。横断質問セッションは読み取り専用なので、
+# `Edit,Write,NotebookEdit`を封じたうえで起動する（回答の投稿に`gh issue comment`が要るため
+# Bashは残す）。**プロンプトの指示だけに頼らず、機械的にも塞ぐ。**
+if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
+  CLAUDE_EXTRA_ARGS+=(--disallowedTools "${ISSUE_DECK_DISALLOWED_TOOLS}")
+  echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: ${ISSUE_DECK_DISALLOWED_TOOLS}"
 fi
 
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
@@ -360,6 +384,11 @@ append_language_system_prompt "#$ISSUE_NUMBER: "
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
 REPO_NAME="$(basename -s .git "$(git config --get remote.origin.url 2>/dev/null || true)")"
+# **cwdがgitリポジトリでない場合は呼び出し元が渡す**（#1454）。横断質問セッションのcwdは
+# どのリポジトリでもない作業ディレクトリなので、ここでは何も取れない。
+if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]] && [[ -n "${ISSUE_DECK_REPO_SLUG:-}" ]]; then
+  REPO_NAME="${ISSUE_DECK_REPO_SLUG#*/}"
+fi
 if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
   # リモート未設定でも起動は妨げない。worktreeのディレクトリ名で代用する。
   REPO_NAME="$(basename "$PWD")"
@@ -375,6 +404,10 @@ fi
 # 通知（#1219）用に owner/repo を取り出す。IssueのURLを組み立てるためだけに使うので、
 # 取れなくても（リモート未設定・SSH形式でない等）通知からリンクが消えるだけにする。
 REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+# cwdがgitリポジトリでない場合（横断質問セッション。#1454）は呼び出し元が渡した値を使う。
+# セッションの状態報告（#1217）とIssueへの報告はこの値でIssueを特定するため、空だと
+# セッションが画面へ出ない。
+REPO_SLUG="${REPO_SLUG:-${ISSUE_DECK_REPO_SLUG:-}}"
 
 # セッションの回収（#1256）用の記述子。回収スクリプトはtmuxのセッション名しか手掛かりを
 # 持たないため、worktreeの場所と対応Issueをここで残しておく。
@@ -384,8 +417,9 @@ REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null | sed -E 's#^git@[^:
 # 直接起動したセッションには渡らない。issue-deck側にジョブとして残らないセッションを
 # 巻き込まないための線引きで、判定材料ではなく**起動経路そのもの**で切る。
 if [[ -n "$TMUX_SESSION_NAME" ]]; then
+  # 第6引数はセッションの種別（#1454）。横断質問セッションは`question`で、回収の条件が変わる
   if ! session_state_write_descriptor "$TMUX_SESSION_NAME" "$PWD" "$REPO_SLUG" "$ISSUE_NUMBER" \
-    "${ISSUE_DECK_SESSION_REAPABLE:-0}"; then
+    "${ISSUE_DECK_SESSION_REAPABLE:-0}" "${ISSUE_DECK_SESSION_KIND:-implementation}"; then
     echo "#$ISSUE_NUMBER: 情報: セッションの状態ファイルを書けなかったため、このセッションは自動回収の対象になりません（$(session_state_dir)）。" >&2
   fi
 fi
@@ -422,6 +456,13 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # `AskUserQuestion`・MCPのツールと広く、絞ると答えたのに入力待ちのままになる組み合わせが残る。
   # 代わりに`session-notify.sh`が状態ファイルを見て「直前が入力待ちのとき」以外を即座に捨てる
   # （HTTPどころかpython3も起こさない）。
+  #
+  # **issue-deck自身では`PostToolUse`がworktreeの`.claude/settings.json`にも入っている**（#1456）。
+  # このスクリプト自体が本体の作業ツリーから走るため、そこが古いと`PostToolUse`のフック設定が
+  # そもそも生成されず、承認しても`00.check-user`が`Stop`まで外れなかった。ここを消さないのは、
+  # 汎用ランチャーで起こす他リポジトリには`.claude/settings.json`が無いため。二重に呼ばれても
+  # 上記の間引きで報告は入力待ち1回につき最大1回に収まる
+  # （docs/multi-agent/session-notify.md「`PostToolUse`だけはworktree側の…」）。
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -439,11 +480,18 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     ],
     "PostToolUse": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ],
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ]
   }
 }
 JSON
   CLAUDE_EXTRA_ARGS+=(--settings "$HOOK_SETTINGS_FILE")
+  # `SessionStart`が飛ぶ＝Claude Codeが開始した（#1465）。この対になる印を`claude`の起動直前に
+  # 置き、フックが消す。**フック設定を生成できたときだけ置く**（置いたまま消す相手がいないと、
+  # 画面に「まだ開始していません」が出続ける）。
+  HOOKS_ENABLED=1
 else
   echo "#$ISSUE_NUMBER: 情報: $NOTIFY_SCRIPT が無いため、セッションの状態通知は行いません。" >&2
 fi
@@ -519,6 +567,21 @@ echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モ�
 # 受付コメント（#1119）は`claude`を起動する直前に投げる。**ここより後ろには置けない**
 # （`claude`はフォアグラウンドで走り、戻ってくるのはセッションが終わったとき）。
 report_session_started_to_issue_deck
+
+# 「Claude Codeがまだ開始していない」印（#1465）。**`claude`を起こす直前に置く。**
+#
+# 初めてクローンしたリポジトリでは、起動直後にフォルダの信頼確認
+# （`Is this a project you created or one you trust?`）が出て、答えるまでセッションが始まらない。
+# **この間はフックが1つも飛ばない**ため、フックを待つ仕組み（#1219・#1264）では画面に何も出ず、
+# 端末を見ていない人には「起動したはずなのに何も起きない」としか分からない（実測: 信頼確認の
+# 表示中は`SessionStart`が飛ばず、答えた直後に飛ぶ）。
+#
+# 印はpollerが読み、猶予を過ぎても残っていればissue-deckへ「まだ開始していない」と報告する。
+# 消すのは`SessionStart`フック（`session-notify.sh`）と、このスクリプトの`cleanup`。
+if [[ "$HOOKS_ENABLED" == "1" && -n "$TMUX_SESSION_NAME" ]]; then
+  session_state_mark_starting "$TMUX_SESSION_NAME" || true
+fi
+
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
 # tailnetへ公開したURLをフック（#1219）からも読めるようにする（#1265）。フックはclaudeの
 # 子プロセスなので、ここでexportしておけば通知にも載せられる。**セッション通知は入力待ちで

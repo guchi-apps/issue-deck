@@ -45,6 +45,14 @@ type StartLocalSessionButtonProps = {
    */
   showStartButton?: boolean;
   /**
+   * 積んだジョブの状態表示（`DispatchJobStatus`）をここで出すか（#1468・既定は出す）。
+   *
+   * **横並びのツールバーへ埋め込む場合は`false`にする。** 状態表示は`w-full`で、`flex-wrap`の
+   * ツールバーへ混ぜるとボタン列自体が縦に膨らみ、リポジトリ名の行から押し出される。PCの
+   * Issue詳細では親（`issue-detail.tsx`）がツールバーの下の行に自分で描画する。
+   */
+  showJobStatus?: boolean;
+  /**
    * 親が既に取得しているディスパッチ状態（#1262）。渡すと自前で取得しない。
    * **同じ画面に取得口を増やさないため**、Issue詳細では親で1回だけ取得して配る。
    */
@@ -75,6 +83,7 @@ export function StartLocalSessionButton({
   onIssueUpdated,
   fullWidth,
   showStartButton = true,
+  showJobStatus = true,
   dispatch: injectedDispatch,
 }: StartLocalSessionButtonProps) {
   const { updateIssue, isSubmitting, error } = useIssueMutations();
@@ -148,19 +157,39 @@ export function StartLocalSessionButton({
     "text-muted-foreground",
   );
 
+  const rejectionMessage =
+    showStartButton && onlyHostRejection
+      ? describeDispatchEnqueueRejection(onlyHostRejection, {
+          hostName: onlyHost?.name ?? "",
+          repositoryFullName: issue.repositoryFullName,
+          session: blockingSession,
+        })
+      : null;
+
+  const startButton = onlyHost ? (
+    <Button
+      variant="outline"
+      size={fullWidth ? "default" : "sm"}
+      className={fullWidth ? "w-full" : undefined}
+      onClick={() => void handleDispatch(onlyHost.name)}
+      disabled={isBusy || onlyHostRejection !== null}
+    >
+      {isBusy ? <Loader2 className="animate-spin" /> : <Server />}
+      {formatDispatchHostName(onlyHost.name)}で開始
+    </Button>
+  ) : null;
+
   return (
     <>
       {!showStartButton ? null : onlyHost ? (
-        <Button
-          variant="outline"
-          size={fullWidth ? "default" : "sm"}
-          className={fullWidth ? "w-full" : undefined}
-          onClick={() => void handleDispatch(onlyHost.name)}
-          disabled={isBusy || onlyHostRejection !== null}
-        >
-          {isBusy ? <Loader2 className="animate-spin" /> : <Server />}
-          {formatDispatchHostName(onlyHost.name)}で開始
-        </Button>
+        // disabledなボタン自体はマウスイベントを発火しないため、理由を読ませるには包む必要がある
+        rejectionMessage && !fullWidth ? (
+          <span className="inline-flex" title={rejectionMessage}>
+            {startButton}
+          </span>
+        ) : (
+          startButton
+        )
       ) : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -195,18 +224,11 @@ export function StartLocalSessionButton({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {/* 単独ボタンでは理由をtitle属性に隠せない（スマホにホバーが無い）ため本文で出す。
+      {/* 押せない理由は、ホバーの無いスマホ（`fullWidth`）でだけ本文で出す。PCのツールバーでは
+          `w-full`の本文がボタン列を縦に膨らませてしまうのでtitleへ寄せた（#1468）。
           ボタンを出していないときは「押せない理由」を出す相手がいないので添えない */}
-      {showStartButton && onlyHostRejection && (
-        <p className={textClassName}>
-          {describeDispatchEnqueueRejection(onlyHostRejection, {
-            hostName: onlyHost?.name ?? "",
-            repositoryFullName: issue.repositoryFullName,
-            session: blockingSession,
-          })}
-        </p>
-      )}
-      {job && (
+      {rejectionMessage && fullWidth && <p className={textClassName}>{rejectionMessage}</p>}
+      {showJobStatus && job && (
         <DispatchJobStatus
           job={job}
           align={fullWidth ? "start" : "end"}

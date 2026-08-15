@@ -107,12 +107,35 @@ hold() {
   return 0
 }
 
+# 実際に畳む。**必ずログに残す。** 無人実行では「なぜセッションが消えたのか」がここにしか残らない。
+# 判定は呼び出し元が済ませてある（実装セッションと横断質問セッションで条件が違うため。#1454）。
+fold_session() {
+  local session="$1" repository="$2" issue_number="$3" reason="$4" restart_hint="${5:-}"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  $session: [dry-run] 畳む対象です（$repository #$issue_number）: $reason"
+    return 0
+  fi
+
+  if tmux kill-session -t "=$session" 2>/dev/null; then
+    echo "  $session: セッションを畳みました（$repository #$issue_number）: $reason"
+    if [[ -n "$restart_hint" ]]; then
+      echo "    $restart_hint"
+    fi
+    # 状態ファイルを残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように見える。
+    session_state_remove "$session"
+    REAPED=$((REAPED + 1))
+  else
+    echo "  $session: 警告: セッションを畳めませんでした（$repository #$issue_number）" >&2
+  fi
+  return 0
+}
+
 # 1セッションを判定し、条件をすべて満たせば畳む。
 # **条件は安い順に並べる**（tmux → 状態ファイル → git → GitHub API）。手前で残すと決まれば
 # gh を叩かずに済み、毎分のポーリングで無駄なAPI呼び出しをしない。
 reap_one() {
   local session="$1"
-  local descriptor reapable worktree repository issue_number
+  local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
   local dirty remote_branches issue_info issue_state issue_labels merged_pr reason
 
@@ -137,6 +160,9 @@ reap_one() {
   worktree="$(session_state_field "$descriptor" worktree || true)"
   repository="$(session_state_field "$descriptor" repository || true)"
   issue_number="$(session_state_field "$descriptor" issue || true)"
+  # セッションの種別（#1454）。**古い記述子には無い**ので、空は実装セッションとして扱う。
+  kind="$(session_state_field "$descriptor" kind || true)"
+  [[ -n "$kind" ]] || kind="implementation"
   if [[ -z "$worktree" || -z "$repository" || ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
     hold "$session" "記述子の内容が読めない（$descriptor）"
     return 0
@@ -176,6 +202,28 @@ reap_one() {
   if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
     # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
     hold "$session" "最後の応答終了から猶予（${IDLE_MINUTES}分）が経っていない"
+    return 0
+  fi
+
+  # --- 横断質問セッション（#1454）はここで決める ---
+  # **worktreeを持たず、コミットもpushもしない**（読み取り専用で、成果物は質問Issueへ投稿した
+  # 回答コメントだけ）。実装セッション向けの「worktreeがcleanでpush済み」を当てると必ず
+  # 「確認できない」に落ちて永久に残るため、質問Issueが閉じられたかどうかだけで決める。
+  if [[ "$kind" == "question" ]]; then
+    if ! issue_state="$(gh issue view "$issue_number" --repo "$repository" \
+      --json state --jq '.state' 2>/dev/null)"; then
+      hold "$session" "質問Issueの状態を取得できない（$repository #$issue_number）"
+      return 0
+    fi
+    if [[ "$issue_state" != "CLOSED" ]]; then
+      # **開いている間は畳まない。** 追い質問はこのセッションへ追加指示として送れる（#1012）ので、
+      # 聞き終わったかどうかを知っているのは人だけ。質問Issueを閉じることが終了の合図になる。
+      hold "$session" "質問Issue #$issue_number がまだOPEN（閉じると畳みます）"
+      return 0
+    fi
+    fold_session "$session" "$repository" "$issue_number" \
+      "質問Issue #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
+      "もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
     return 0
   fi
 
@@ -237,22 +285,9 @@ reap_one() {
   fi
 
   # --- 畳む ---
-  # **必ずログに残す。** 無人実行では「なぜセッションが消えたのか」がここにしか残らない。
   reason="$reason・最後の応答終了から$((idle_for / 60))分・worktreeはcleanでpush済み"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "  $session: [dry-run] 畳む対象です（$repository #$issue_number）: $reason"
-    return 0
-  fi
-
-  if tmux kill-session -t "=$session" 2>/dev/null; then
-    echo "  $session: セッションを畳みました（$repository #$issue_number）: $reason"
-    echo "    もう一度作業する場合は、issue-deckの画面から起動し直してください（worktree: $worktree）。"
-    # 状態ファイルを残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように見える。
-    session_state_remove "$session"
-    REAPED=$((REAPED + 1))
-  else
-    echo "  $session: 警告: セッションを畳めませんでした（$repository #$issue_number）" >&2
-  fi
+  fold_session "$session" "$repository" "$issue_number" "$reason" \
+    "もう一度作業する場合は、issue-deckの画面から起動し直してください（worktree: $worktree）。"
   return 0
 }
 

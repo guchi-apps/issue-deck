@@ -423,7 +423,8 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v8` | 上記 | Phase 5 の前。ラベル遷移とStatus報告の両方を行う最後の版 |
 | `workflows/v9` | 上記 | #991 Phase 5（#1010）で進捗ラベルを廃止し、Statusを唯一の正にした版。あわせて対象issue取得の警告を「対象なし」と「疎通不可」で出し分ける（#1124） |
 | `workflows/v10`〜`workflows/v15` | 上記 + `reusable-release-develop-to-main.yml`・`reusable-claude-pr-repair.yml` | この表では個別に追えていない。内訳は`git log --oneline <前のタグ>..workflows/vN`で確認する |
-| `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | **このPRの時点では未作成。** #1367。developへのマージ後に作成し、各リポジトリへ`version-tag-check.yml`のcallerを配る |
+| `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
+| `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 
 > **既存リポジトリのタグを`v9`へ上げる場合は順序に注意。** 進捗ラベルが残っているうちは、
 > caller更新 → 動作確認 → ラベル削除の順を守る（下記「2. ラベル体系」の
@@ -437,6 +438,13 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > （`.github/scripts/propagate-workflow-tag.sh`の`sed`）、**新しいcallerファイルを追加はしない。**
 > 各リポジトリへ最初の1回を置くところまでは、`71.manual-step`のIssueとして起票して人が行う。
 > 2回目以降（タグの追随）は配布の対象に自動で乗る。
+>
+> **初回配置を`propagate-workflow-tag.yml`へ寄せていないのは、「どのリポジトリへ置くべきか」の
+> 判定がワークフローごとに違うため**（#1459）。`version-tag-check.yml`は`deploy.yml`が
+> `vX.Y.Z`タグを作るリポジトリだけが対象で、タグを作らないリポジトリ（`guchi-apps/vps`）には
+> 守るものが無い。`claude-pr-repair.yml`・`shared-knowledge-propose.yml`は導入自体が任意。
+> 配布側に持たせると「全リポジトリへ一律に配る」挙動にしかできず、対象の判断を毎回人が
+> やり直すことになる。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
@@ -558,6 +566,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
+| `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | PR作成前に見た目のアーティファクト公開を必須にする（ローカル実行専用。#1473。**issue-deck以外へはまだ配っていない**） |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする |
 | `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「手作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 
@@ -744,6 +753,8 @@ gh label create "21.plan-required" --color d4c5f9 --description "計画の確認
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
 gh label create "24.screenshot-required" --color d4c5f9 --description "スクリーンショットでの視覚確認・承認が必要"
+# 25.artifact-requiredはローカルセッション専用（無人実行では作れない）のため、他リポジトリへはまだ配っていない（#1473）
+gh label create "25.artifact-required" --color d4c5f9 --description "アーティファクトでの視覚確認・承認が必要"
 gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
 ```
 

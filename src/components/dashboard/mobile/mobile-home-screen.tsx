@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderGit2, Plus, SlidersHorizontal, X } from "lucide-react";
+import { FolderGit2, GitBranch, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
@@ -26,6 +26,8 @@ type MobileHomeScreenProps = {
   onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
   onSaveQuickFilter: () => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
+  /** 「ブランチとPRの流れ」を開く（#1455） */
+  onSelectFlow: () => void;
 };
 
 // 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
@@ -47,6 +49,7 @@ export function MobileHomeScreen({
   onDeleteQuickFilter,
   onSaveQuickFilter,
   onSelectPullRequests,
+  onSelectFlow,
 }: MobileHomeScreenProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -148,6 +151,18 @@ export function MobileHomeScreen({
               );
             })}
           </ul>
+        </div>
+
+        <div className="px-4 pb-4">
+          <h2 className="mb-2 text-sm font-semibold">フロー</h2>
+          <button
+            type="button"
+            onClick={onSelectFlow}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+          >
+            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+            ブランチとPRの流れ
+          </button>
         </div>
 
         {favoriteRepositories.length > 0 && (

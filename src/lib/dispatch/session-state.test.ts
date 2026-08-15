@@ -11,6 +11,7 @@ import {
   parseSessionName,
   resolveRepositoryFullName,
   resolveSessionState,
+  resolveStartingActivityTransition,
   shouldEscalateSession,
 } from "./session-state";
 
@@ -212,6 +213,111 @@ describe("parseDispatchSessionReport", () => {
     expect(parseDispatchSessionReport(null)).toBeNull();
     expect(parseDispatchSessionReport("x")).toBeNull();
     expect(parseDispatchSessionReport([])).toBeNull();
+  });
+
+  /**
+   * #1465。`claudeStarting`は新しいpollerだけが送る。**項目が無いことと`false`は別物**で、
+   * 無い場合に`false`を埋めると、判断材料を持っていない古いホストの報告が
+   * `NOT_STARTED`を解いてしまう。
+   */
+  it("claudeStartingは省略できる（項目そのものを増やさない）", () => {
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed).not.toBeNull();
+    expect(parsed && "claudeStarting" in parsed).toBe(false);
+  });
+
+  it("claudeStartingの真偽値をそのまま受け取る", () => {
+    expect(parseDispatchSessionReport({ ...valid, claudeStarting: true })).toEqual({
+      ...valid,
+      claudeStarting: true,
+    });
+    expect(parseDispatchSessionReport({ ...valid, claudeStarting: false })).toEqual({
+      ...valid,
+      claudeStarting: false,
+    });
+  });
+
+  it("claudeStartingが真偽値でなければ弾く", () => {
+    expect(parseDispatchSessionReport({ ...valid, claudeStarting: "true" })).toBeNull();
+    expect(parseDispatchSessionReport({ ...valid, claudeStarting: 1 })).toBeNull();
+  });
+});
+
+/**
+ * #1465。フォルダの信頼確認で止まっている間はフックが1つも飛ばないため、pollerが持ち込む
+ * `claudeStarting`だけが判断材料になる。
+ */
+describe("resolveStartingActivityTransition", () => {
+  const base = {
+    state: "ALIVE" as const,
+    previousActivity: null,
+    claudeStarting: undefined as boolean | undefined,
+  };
+
+  it("報告が無ければ触らない（古いpoller・古いランチャー）", () => {
+    expect(resolveStartingActivityTransition(base)).toBe("none");
+    expect(
+      resolveStartingActivityTransition({ ...base, previousActivity: "NOT_STARTED" }),
+    ).toBe("none");
+  });
+
+  it("止まっていればNOT_STARTEDへ入る", () => {
+    expect(resolveStartingActivityTransition({ ...base, claudeStarting: true })).toBe("enter");
+  });
+
+  it("同じ報告が続く間は入り直さない（毎分コメントが増えないように）", () => {
+    expect(
+      resolveStartingActivityTransition({
+        ...base,
+        claudeStarting: true,
+        previousActivity: "NOT_STARTED",
+      }),
+    ).toBe("none");
+  });
+
+  it("フックが飛んでいる行は上書きしない（Claude Codeは既に始まっている）", () => {
+    expect(
+      resolveStartingActivityTransition({
+        ...base,
+        claudeStarting: true,
+        previousActivity: "WAITING_INPUT",
+      }),
+    ).toBe("none");
+  });
+
+  it("人が答えて始まればNOT_STARTEDから出る", () => {
+    expect(
+      resolveStartingActivityTransition({
+        ...base,
+        claudeStarting: false,
+        previousActivity: "NOT_STARTED",
+      }),
+    ).toBe("leave");
+  });
+
+  it("元からNOT_STARTEDでなければ、止まっていない報告では何もしない", () => {
+    expect(
+      resolveStartingActivityTransition({
+        ...base,
+        claudeStarting: false,
+        previousActivity: "WORKING",
+      }),
+    ).toBe("none");
+    expect(resolveStartingActivityTransition({ ...base, claudeStarting: false })).toBe("none");
+  });
+
+  it("ALIVEでない行は触らない（待つ相手がいない）", () => {
+    expect(
+      resolveStartingActivityTransition({ ...base, state: "FAILED", claudeStarting: true }),
+    ).toBe("none");
+    expect(
+      resolveStartingActivityTransition({
+        ...base,
+        state: "GONE",
+        claudeStarting: false,
+        previousActivity: "NOT_STARTED",
+      }),
+    ).toBe("none");
   });
 });
 

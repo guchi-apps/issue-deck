@@ -30,8 +30,18 @@ export type DispatchJobStatus =
  *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
  * - `INSTRUCTION` … 走っているセッションへ追加指示を1行流す（#1012）。pollerが3段階プロトコル
  *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る
+ * - `CROSS_REPO_QUESTION` … 複数リポジトリ横断の質問セッションを立てる（#1454）。**`QUESTION`とは
+ *   別物**で、あちらは`claude -p`を1回走らせて終わる想定なのに対し、こちらは`LAUNCH`と同じく
+ *   tmuxセッションを立てる（回答後もセッションが残り、追加指示で追い質問ができる）。参照する
+ *   リポジトリは**そのホストが実行できると申告した全部**で、ジョブには載せない
  */
-export type DispatchJobKind = "LAUNCH" | "INTERRUPT" | "KILL" | "QUESTION" | "INSTRUCTION";
+export type DispatchJobKind =
+  | "LAUNCH"
+  | "INTERRUPT"
+  | "KILL"
+  | "QUESTION"
+  | "INSTRUCTION"
+  | "CROSS_REPO_QUESTION";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -57,6 +67,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "kill") return "KILL";
   if (value === "question") return "QUESTION";
   if (value === "instruction") return "INSTRUCTION";
+  if (value === "cross_repo_question") return "CROSS_REPO_QUESTION";
   return null;
 }
 
@@ -155,6 +166,12 @@ export type DispatchHostView = {
    * こちらは**内容のある文字列**を送るため、対応していないpollerへ渡したときの事故の質が違う。
    */
   instructionCapable: boolean | null;
+  /**
+   * 複数リポジトリ横断の質問セッション（#1454）を起こせるか。**`null`（未申告）は「できない」として
+   * 扱う**（`sessionControlCapable`と同じ）。古いpollerは未知の種別を`failed`で返すため、
+   * 配ると質問が必ず失われる。
+   */
+  crossRepoQuestionCapable: boolean | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -506,6 +523,85 @@ export function resolveDispatchTargetRejection(params: {
 }
 
 /**
+ * 複数リポジトリ横断の質問セッション（#1454）を起こせない理由。
+ *
+ * 起動ジョブ（`DispatchEnqueueRejection`）と似ているが、**`repository_not_runnable`が無い**のが
+ * 要点。横断質問セッションはworktreeを作らず、記録先リポジトリには`gh issue comment`で書くだけ
+ * なので、記録先がサブPCにcloneされている必要が無い。代わりに「参照できるリポジトリが1件も無い」
+ * を見る（cloneが1つも無いホストでは、質問に答える材料そのものが無い）。
+ */
+export type CrossRepoQuestionRejection =
+  | "host_unknown"
+  | "host_offline"
+  | "cross_repo_question_unsupported"
+  | "no_runnable_repositories"
+  | "already_queued"
+  | "session_alive";
+
+export function describeCrossRepoQuestionRejection(
+  rejection: CrossRepoQuestionRejection,
+  context: { hostName: string },
+): string {
+  switch (rejection) {
+    case "host_unknown":
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "cross_repo_question_unsupported":
+      // **何をすれば押せるようになるかまで書く**（`session_control_unsupported`と同じ）。
+      // pollerはサブPC側の作業ツリーから動くため、更新するのは人の作業になる
+      return `${formatDispatchHostName(context.hostName)} のpollerが横断質問に対応していません（更新してから押せるようになります）。`;
+    case "no_runnable_repositories":
+      return `${formatDispatchHostName(context.hostName)} に参照できるリポジトリが1つもありません（cloneと \`local-repos.conf\` への記載を確認してください）。`;
+    case "already_queued":
+      return "この質問Issueには実行中または待機中のジョブが既にあります。";
+    case "session_alive":
+      return "この質問Issueのセッションは既に動いています。追加で聞く場合は、そのセッションへ追加指示を送ってください。";
+  }
+}
+
+/**
+ * 横断質問を起こせない理由を、**押される前に**判定する（#1454）。
+ *
+ * 判定の並びと文言は`enqueueCrossRepoQuestionJob`（`jobs.ts`）と同じものを使う。片方だけで
+ * 持つと「画面では押せるのにAPIが断る」状態が生まれるのは、起動側（#1180）・制御側（#1332）と同じ。
+ */
+export function resolveCrossRepoQuestionRejection(params: {
+  host:
+    | Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories">
+    | null
+    | undefined;
+  hasActiveJob: boolean;
+  blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+}): CrossRepoQuestionRejection | null {
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.crossRepoQuestionCapable !== true) return "cross_repo_question_unsupported";
+  if (params.host.repositories.length === 0) return "no_runnable_repositories";
+  if (params.hasActiveJob) return "already_queued";
+  if (params.blockingSession) return "session_alive";
+  return null;
+}
+
+/**
+ * 横断質問の既定の起動先を決める（#1454）。選べるホストが1台も無ければ`null`。
+ *
+ * 起動ジョブの`resolveDefaultDispatchHost`と同じ立場だが、**GitHub Actionsへのフォールバックは
+ * 無い**（Actionsは1リポジトリしかチェックアウトしないため、横断質問はサブPC限定）。
+ */
+export function resolveDefaultCrossRepoQuestionHost(
+  hosts: readonly DispatchHostView[],
+): string | null {
+  return (
+    hosts.find(
+      (host) =>
+        resolveCrossRepoQuestionRejection({ host, hasActiveJob: false, blockingSession: null }) ===
+        null,
+    )?.name ?? null
+  );
+}
+
+/**
  * そのIssueの起動を止めるべきセッションを探す（#1311）。
  *
  * 起動済みのIssueをもう一度積むと、pollerの重複起動ガードに弾かれるまで（実測で最大75秒）
@@ -557,6 +653,7 @@ export function describeDispatchJobStatus(
   tone: DispatchJobTone;
 } {
   if (kind === "QUESTION") return describeQuestionJobStatus(status);
+  if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -612,6 +709,36 @@ function describeQuestionJobStatus(status: DispatchJobStatus): {
       return { label: "回答できませんでした", tone: "error" };
     case "SKIPPED":
       return { label: "回答を見送りました", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * 横断質問ジョブ（#1454）の状態の見せ方。
+ *
+ * **`succeeded`は「質問セッションが立った」まで**で、回答が投稿されたことではない（そこは
+ * `QUESTION`（#1294）と違う）。回答はIssueのコメントとして返るため、そちらを見てもらう。
+ */
+function describeCrossRepoQuestionJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "質問セッションを起動中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "質問セッションを起動しました", tone: "success" };
+    case "FAILED":
+      return { label: "失敗", tone: "error" };
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":
       return { label: "応答なし", tone: "error" };
     case "CANCELED":
@@ -688,6 +815,26 @@ export function findSessionControlJobForIssue(
 ): DispatchJobView | null {
   return findJobForIssue(jobs, repositoryFullName, issueNumber, (job) =>
     isSessionControlJobKind(job.kind),
+  );
+}
+
+/**
+ * あるIssueについて画面に出す横断質問ジョブ（#1454）を1件選ぶ。
+ *
+ * **起動ジョブとは別に返す**（`findDispatchJobForIssue`が`LAUNCH`に限っているのと同じ理由）。
+ * 呼び出し元は起動ジョブの未完了判定を「起動を塞ぐか」に使うため、混ぜると質問を積んだ瞬間に
+ * 実装の起動が押せなくなる。
+ */
+export function findCrossRepoQuestionJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "CROSS_REPO_QUESTION",
   );
 }
 

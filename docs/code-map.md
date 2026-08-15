@@ -106,6 +106,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
   報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
   まとめて載せる（`addMissingProjectItems`）。
+- **開発環境のDBは既定で空。データを入れる経路は`pnpm db:seed:dev`だけ**（#1473）。
+  実データが入らないのは仕様ではなく`.env.local`のGitHub App設定がCIダミー値のままだからで、
+  同期を何度走らせても`Repository`は0件のまま。`scripts/seed-dev-db.sh`がCI用のシード
+  （`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから投入し、ログイン画面の
+  「開発用ダミーユーザーでログイン」（`src/lib/dev-login.ts`・`/api/dev/login`）で入る。
+  **全worktreeが同じ`app_issue_deck_dev`を共有する**ので投入は1回でよい。ダミーで埋まるのは
+  DBを読む画面だけで、GitHub APIを都度叩く経路（下記のPR一覧・サブIssue）は空のまま。
+  線引きは[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)
+  「開発サーバーにデータが出ないとき」。
 - **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
@@ -144,6 +153,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   マージ済みかどうかは一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧に無い）。
   並び順も「全てのPR」だけ更新が新しい順で、他は作成が古い順＝滞留が長い順。
   マージ済みPRの一覧を「直近30件」を超えて遡りたくなった時点で、キャッシュ層の追加を再検討する。
+- **「ユーザーのマージが必要です」の判定は
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`requiresUserMerge`だけを通す**
+  （#1469）。develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定
+  させるのは`claude-review-develop.yml`と、その経路を持たないリポジトリ向けの保険
+  （`reusable-issue-labels.yml`の`develop-pr-opened`。#1470）で、**どちらも結論をPRではなく
+  対応Issueの`00.check-user`として書く**。PR一覧・PR詳細はGitHub APIからPRを取るだけでは
+  これを知れないため、[`lib/pull-request-check-user.ts`](../src/lib/pull-request-check-user.ts)が
+  IssueのDBキャッシュを1クエリ引いて`PullRequestSummary.linkedIssueCheckUser`へ合流させる
+  （**GitHub APIの消費は増えない**）。develop→mainのリリースPRは`kind`だけで常に対象、
+  バージョンバンプPRはAuto-mergeで入るため対象外。理由別のラベル（`01.check-merge`。
+  [multi-agent/labels.md](multi-agent/labels.md)）が入ったら、差し替えるのはこの関数の中だけ。
 - **PRの本文・コメント（`/api/pull-requests/detail`）も同じくキャッシュせず、PRを選んだ・
   画面内のリンクからPRを開いたときだけ取得する。** 会話コメント・レビュー・レビューコメントの
   3エンドポイントを
@@ -155,6 +175,46 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+- **「ブランチとPRの流れ」（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
+  ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
+  俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
+  **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
+  （[`lib/github/branches-api.ts`](../src/lib/github/branches-api.ts)）。消費は**リポジトリあたり
+  1回**（GraphQL。ブランチの存在確認と`main...develop`の差分を1クエリに相乗りさせる）。
+  **ブランチ一覧は列挙しない。** RESTの一覧はアルファベット順・1ページ100件で、ブランチが
+  溜まったリポジトリでは全部読むのに何回もかかるうえ、読めた範囲が名前の並び次第になる
+  （この設計を決めた時点でissue-deckには670のブランチが残っていた。#1478で掃除して
+  `delete_branch_on_merge`も有効にしたが、**ブランチ数に依存しない作りのままにしてある**）。
+  代わりに
+  **進行中のIssueに対応するブランチ（`issue-<番号>`）だけをGraphQLのエイリアスで名指しして引く**。
+  PR一覧と同じく**自動ポーリングを持たず**、画面を開いたときと更新ボタンのときだけ走る
+  （`hooks/use-branch-flow.ts`。一度取った内容は画面を離れても保持する）。
+  この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
+  「どのバージョンで本番へ出たか」を出せないため。組み立ては
+  [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、
+  **レーンはPRのheadブランチと、実在が確認できた作業ブランチの和集合**で作る。
+  **「マージ済みなのにブランチが残っている」は状態として持たない**——設計時は`delete_branch_on_merge`が
+  無効で数百本が該当し、出しても情報にならなかった。掃除の仕組みは#1478が持つ（この画面は
+  ブランチの後始末を扱わない）。
+  **IssueとPRの対応は1対1に限らない。** 同じIssueでもブランチが違えばレーンは分かれ（レーンの
+  キーはブランチ名）、1本のPRが複数のIssueを扱う場合は`PullRequestSummary.linkedIssueNumbers`
+  （`extractLinkedIssueNumbers`が確度の高い順に全参照を返す）の2件目以降を「関連Issue」として
+  同じレーンに並べる。**本文の`#番号`には単なる言及も混ざるため、2件目以降は「対応」ではなく
+  「関連」と呼ぶ。** 関連として画面に出したIssueは「ブランチもPRも見つからないIssue」へ
+  重複させない。
+  **既定で畳む「完了」の区切りは、developへのマージではなくmainへの反映に置く**
+  （`isCompletedLane`）。developへ入っただけの変更は次のリリースに乗る進行中の作業なので
+  既定で見え、本番へ出たものだけが「完了も表示」の裏へ回る。本番へ出たかを判定できない
+  （リリースPRを取得できていない）場合は畳む側に倒す。
+  **「どのバージョンで本番へ出たか」も、追加の取得をせずPRのマージ時刻だけで決める。**
+  develop→mainのリリースPRはマージ時点のdevelopをそのままmainへ入れるので、作業PRが
+  developへ入った後**最初にマージされたリリースPR**がその変更を運んだことになる。版はその
+  リリースPRのタイトル（`v3.17.0をmainへリリースする`。文面は
+  `reusable-release-develop-to-main.yml`が作る）から取る。クローズ済みPRの取得は直近30件で
+  打ち切っているが、作業PRが取得できていればその後のリリースPRも必ず取得できている
+  （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
+  無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
+  「バージョン不明」を出す（誤った版を出さないため）。
 - **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
   対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
   `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ
@@ -250,6 +310,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
+  **複数リポジトリ横断の質問もこのキューで流す**（#1454。`kind`は`CROSS_REPO_QUESTION`）。
+  Actionsは1リポジトリしかチェックアウトしないため横断できず、サブPC限定の導線になる。
+  質問Issueは記録先リポジトリ（既定は名前が`question`のもの）に普通のIssueとして作り、
+  ランチャー（`scripts/start-cross-repo-question.sh`）は**worktreeを作らず**、実行できる
+  全リポジトリを`--add-dir`で読み取り用に渡す（書き込み系ツールは`--disallowedTools`で封じる）。
+  回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
+  そのまま働く。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
   **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
   受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
@@ -272,6 +339,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
+  1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
+  道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
+  `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+- **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
+  ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
+  `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ
+  **ブランチの現在SHAがそのPRの`head.sha`と一致する**ものだけを消し、`develop`など名前で
+  保護する。今後のぶんはリポジトリ設定`delete_branch_on_merge`（適用は
+  `scripts/set-delete-branch-on-merge.sh`）が自動で消す。**リモートブランチを消すと無人実行の
+  mode判定が変わる**点を含め、設計は[multi-agent/branching.md](multi-agent/branching.md)。
 - **個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体は`guchi-apps/claude-config`にあり、
   両機は`~/.claude/`側をsymlinkにして同じファイルを見る**（#1190）。issue-deckが持つのは
   「取り残しに気づく手当て」だけで、`scripts/lib/personal-config-sync.sh`の

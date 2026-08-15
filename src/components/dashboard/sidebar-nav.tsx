@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
+  GitBranch,
   Lock,
   Plus,
   Settings2,
@@ -38,6 +39,8 @@ type SidebarNavProps = {
   /** PRペインで表示中の状態別ビュー（#1312） */
   activePullRequestView: PullRequestViewId;
   onSelectPullRequestView: (view: PullRequestViewId) => void;
+  /** 「ブランチとPRの流れ」を開く（#1455） */
+  onSelectFlow: () => void;
   navCounts: Record<NavViewId, number>;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
@@ -66,6 +69,7 @@ export function SidebarNav({
   activePane,
   activePullRequestView,
   onSelectPullRequestView,
+  onSelectFlow,
   navCounts,
   pullRequestNavCounts,
   repositories,
@@ -90,9 +94,28 @@ export function SidebarNav({
   const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
   const sortedLabelSummary = [...labelSummary].sort((a, b) => a.name.localeCompare(b.name));
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
+  // 「すべて表示する（N）」のNは、いま実際に隠れている件数にする。選択中のリポジトリは
+  // 非表示でも一覧に出すため、hiddenの総数のままだと押しても増えない件数を出してしまう。
+  const collapsedRepoCount = repositories.filter(
+    (repo) => repo.hidden && !selectedRepoFullNames.includes(repo.fullName),
+  ).length;
+  // 選択中のリポジトリは非表示にしていても出す。行が消えると選択だけが残り、その行から
+  // 解除できなくなるため（#1480）。
   const visibleRepositories = showHiddenRepos
     ? repositories
-    : repositories.filter((repo) => !repo.hidden);
+    : repositories.filter((repo) => !repo.hidden || selectedRepoFullNames.includes(repo.fullName));
+  // 選択中のリポジトリを一覧の先頭へ寄せる（#1480）。連携数が増えると選択中の行が
+  // スクロール範囲の外へ出て、どれで絞り込んでいるかが分からなくなるため。グループ内の
+  // 並び（fullNameの昇順）は元のまま保ち、選択が0件なら並びは今までと変わらない。
+  const selectedRepositories = visibleRepositories.filter((repo) =>
+    selectedRepoFullNames.includes(repo.fullName),
+  );
+  const unselectedRepositories = visibleRepositories.filter(
+    (repo) => !selectedRepoFullNames.includes(repo.fullName),
+  );
+  const orderedRepositories = [...selectedRepositories, ...unselectedRepositories];
+  const showSelectedRepoSeparator =
+    selectedRepositories.length > 0 && unselectedRepositories.length > 0;
 
   return (
     <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)} style={style}>
@@ -175,6 +198,26 @@ export function SidebarNav({
       </div>
 
       <div>
+        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">フロー</h2>
+        <ul className="flex flex-col gap-0.5">
+          <li>
+            <button
+              type="button"
+              onClick={onSelectFlow}
+              title="Issue・ブランチ・Pull Requestの関係とマージ先までの流れ"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                activePane === "flow" && "bg-accent font-medium",
+              )}
+            >
+              <GitBranch className="size-3.5 text-muted-foreground" />
+              ブランチとPRの流れ
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div>
         <div className="mb-2 flex items-center justify-between px-2">
           <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
           <div className="flex items-center gap-1">
@@ -229,89 +272,98 @@ export function SidebarNav({
         ) : (
           <>
             <ul className="flex flex-col gap-0.5">
-              {visibleRepositories.map((repo) => {
+              {orderedRepositories.map((repo, index) => {
                 const color = getRepoColor(repo.fullName);
                 return (
-                  <li key={repo.id} className="group/repo flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onSelectRepository?.(repo)}
-                      className={cn(
-                        "flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                        selectedRepoFullNames.includes(repo.fullName) && "bg-accent font-medium",
-                        repo.hidden && "text-muted-foreground",
-                      )}
-                    >
-                      <span className="flex items-center gap-2 truncate">
-                        <span
-                          className="flex size-5 shrink-0 items-center justify-center rounded"
-                          style={{ backgroundColor: `${color}20`, color }}
-                        >
-                          <FolderGit2 className="size-3" />
-                        </span>
-                        <span className="truncate">{repo.name}</span>
-                      </span>
-                      {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
-                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-                          {repo.archived && (
-                            <span title="アーカイブ済み">
-                              <Archive className="size-3" />
-                            </span>
-                          )}
-                          {repo.private && (
-                            <span title="プライベートリポジトリ">
-                              <Lock className="size-3" />
-                            </span>
-                          )}
-                          {!repo.hasClaudeWorkflow && (
-                            <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
-                              <CircleSlash className="size-3" />
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onSetRepositoryFavorite?.(repo, !repo.favorite)}
-                      title={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-                      aria-label={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-                      className={cn(
-                        "shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground",
-                        repo.favorite
-                          ? "text-yellow-500 opacity-100"
-                          : "text-muted-foreground opacity-0 group-hover/repo:opacity-100",
-                      )}
-                    >
-                      <Star className={cn("size-3.5", repo.favorite && "fill-yellow-400")} />
-                    </button>
-                    {isEditingRepoVisibility && (
+                  <Fragment key={repo.id}>
+                    {showSelectedRepoSeparator && index === selectedRepositories.length && (
+                      <li aria-hidden="true">
+                        <Separator className="my-1" />
+                      </li>
+                    )}
+                    <li className="group/repo flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() =>
-                          repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
-                        }
-                        title={repo.hidden ? "表示する" : "非表示にする"}
-                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        onClick={() => onSelectRepository?.(repo)}
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                          selectedRepoFullNames.includes(repo.fullName) && "bg-accent font-medium",
+                          repo.hidden && "text-muted-foreground",
+                        )}
                       >
-                        {repo.hidden ? (
-                          <EyeOff className="size-3.5" />
-                        ) : (
-                          <Eye className="size-3.5" />
+                        <span className="flex items-center gap-2 truncate">
+                          <span
+                            className="flex size-5 shrink-0 items-center justify-center rounded"
+                            style={{ backgroundColor: `${color}20`, color }}
+                          >
+                            <FolderGit2 className="size-3" />
+                          </span>
+                          <span className="truncate">{repo.name}</span>
+                        </span>
+                        {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
+                          <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                            {repo.archived && (
+                              <span title="アーカイブ済み">
+                                <Archive className="size-3" />
+                              </span>
+                            )}
+                            {repo.private && (
+                              <span title="プライベートリポジトリ">
+                                <Lock className="size-3" />
+                              </span>
+                            )}
+                            {!repo.hasClaudeWorkflow && (
+                              <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                                <CircleSlash className="size-3" />
+                              </span>
+                            )}
+                          </span>
                         )}
                       </button>
-                    )}
-                  </li>
+                      <button
+                        type="button"
+                        onClick={() => onSetRepositoryFavorite?.(repo, !repo.favorite)}
+                        title={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                        aria-label={repo.favorite ? "お気に入りから外す" : "お気に入りに追加"}
+                        className={cn(
+                          "shrink-0 rounded-md p-1 hover:bg-accent hover:text-foreground",
+                          repo.favorite
+                            ? "text-yellow-500 opacity-100"
+                            : "text-muted-foreground opacity-0 group-hover/repo:opacity-100",
+                        )}
+                      >
+                        <Star className={cn("size-3.5", repo.favorite && "fill-yellow-400")} />
+                      </button>
+                      {isEditingRepoVisibility && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            repo.hidden ? onShowRepository?.(repo) : onHideRepository?.(repo)
+                          }
+                          title={repo.hidden ? "表示する" : "非表示にする"}
+                          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          {repo.hidden ? (
+                            <EyeOff className="size-3.5" />
+                          ) : (
+                            <Eye className="size-3.5" />
+                          )}
+                        </button>
+                      )}
+                    </li>
+                  </Fragment>
                 );
               })}
             </ul>
-            {hiddenRepoCount > 0 && (
+            {(showHiddenRepos ? hiddenRepoCount > 0 : collapsedRepoCount > 0) && (
               <button
                 type="button"
                 onClick={() => setShowHiddenRepos((prev) => !prev)}
                 className="mt-1 px-2 text-xs text-primary hover:underline"
               >
-                {showHiddenRepos ? "非表示のリポジトリを隠す" : `すべて表示する（${hiddenRepoCount}）`}
+                {showHiddenRepos
+                  ? "非表示のリポジトリを隠す"
+                  : `すべて表示する（${collapsedRepoCount}）`}
               </button>
             )}
           </>

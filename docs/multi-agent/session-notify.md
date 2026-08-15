@@ -64,7 +64,7 @@ ExitPlanMode（計画の提示）
        → POST /api/dispatch/sessions/plan
             → Issueへ計画コメントを投稿（末尾にRemote Controlのリンク）
             → 00.check-user を付与
-       → ホストに「ラベルを付けた」印を残す（<セッション名>.plan）
+       → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
   → 承認プロンプト（Notification）→ 従来どおりの入力待ち通知・画面表示
   → 人がRemote Controlで承認 → 実装 → Stop
        → POST /api/dispatch/sessions/activity に planResolved: true を添える
@@ -112,8 +112,13 @@ as a parameter - it will read the plan from the file you wrote」とある。実
 無条件に外すと人が別の理由で付けた`00.check-user`まで落とすからである。
 
 その印をissue-deckのDB（`DispatchSession`）ではなくホスト側の状態ファイル
-（`<セッション名>.plan`。#1256の仕組み）へ置いているのは、**`/activity`が`ALIVE`の行が無ければ
-何もしない**ため。pollerが1巡する前に計画が出ると記録できず、ラベルだけ付いて外れなくなる。
+（`<セッション名>.check-user`。#1256の仕組み）へ置いているのは、**`/activity`が`ALIVE`の行が
+無ければ何もしない**ため。pollerが1巡する前に計画が出ると記録できず、ラベルだけ付いて外れなくなる。
+
+**印の名前は#1417で`.plan`から`.check-user`へ変えた**（計画の提示以外でも同じ印を使うように
+なったため）。読む側は**旧名の`.plan`も見る**（#1456）。1つのセッションの中で新旧のスクリプトが
+混ざる経路（後述の`.claude/settings.json`）ができたため、書いた側と読む側で名前が食い違うと
+「承認しても外れない」がそのまま再現する。書くのは新しい名前だけで、消すときは両方消す。
 
 計画待ちのまま畳まれたセッションでは、`cleanup`が印ごと消すのでラベルは残る。**これは正しい側の
 取りこぼし**で、人がまだ計画を見ていないことを表す。起こし直せば新しい計画が投稿され、
@@ -207,6 +212,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | ✅ 応答終了 |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | **送らない**（Issueのコメントへ回す） |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | **送らない**（issue-deckの画面へだけ回す） |
+| `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を送った約60秒後に同じ内容がもう1件飛ぶことになる。
@@ -315,7 +321,8 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
    値に混入してそのままwebhook URLとして書き込まれる（#1231で実際に踏んだ）。中間ファイル
    （`/tmp`等）を介さないのも、消す前に他ユーザーから読まれうるため
 4. **書き出した直後に手で1回発火させ、届くことを確認する**（次節）
-5. フックの設定は`run-issue-session.sh`が起動のたびに生成するので、他にやることは無い
+5. フックの設定は`run-issue-session.sh`が起動のたびに生成する（`PostToolUse`だけは
+   リポジトリの`.claude/settings.json`にも入っている。#1456）ので、他にやることは無い
 
 **この設定をしていないPCでは、`session-notify.sh`は黙って何もしない。** メインPCで同じ
 リポジトリのセッションを起動しても通知は飛ばない。
@@ -387,6 +394,7 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 | `session-notify.sh`・`scripts/lib/` | 同上（`run-issue-session.sh`が自分の`$SCRIPT_DIR`から読むため自動で揃う） |
 | プロンプトのひな形（`scripts/prompts/`） | 同上（セッションへそのまま渡るものなので同じ扱い） |
 | サブPCのpoller（`subpc-dispatch-poller.sh`） | 本体の作業ツリー（systemdが起動する常駐プロセス） |
+| `PostToolUse`のフック（#1456） | **worktree**（`.claude/settings.json`。次節） |
 | 実装対象のコード | worktree（`origin/develop`から作られる） |
 
 **同期コピーを使うのは「本体の作業ツリーが単に古いだけ」と確かめられたときに限る。**
@@ -403,6 +411,46 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 pollerは作業ツリーのままなので、警告が要らなくなったわけではない。**
 `ISSUE_DECK_SKIP_SCRIPTS_SYNC_CHECK=1`を付けると、警告も同期コピーも止まる（手元のものを
 そのまま走らせたいときの逃げ道）。
+
+## `PostToolUse`だけはworktree側の`.claude/settings.json`にも置く（#1456）
+
+前節の同期コピー（#1445）には、**それ自体が本体の作業ツリーにあるという穴が残っていた。**
+同期するかどうかを決める`scripts/lib/launcher-scripts-sync.sh`は`~/apps/issue-deck/scripts/`から
+読まれるので、**そこが古い間は同期の仕組みごと存在しない。** つまり「1度pullするまで効かない」
+（#1446）。実際、#1445をdevelopへマージした後もサブPCでは`PostToolUse`のフック設定が生成されず、
+計画を承認しても`00.check-user`が応答終了（`Stop`）まで外れないままだった（#1456）。
+
+**`.claude/settings.json`はリポジトリに入っていて、worktreeは毎回`origin/develop`から作られる。**
+ここに置いたフックだけは、本体の作業ツリーの新しさに一切依存しない。**developへマージした時点で
+次のセッションから効く。**
+
+```text
+.claude/settings.json（worktree＝常に新しい）
+  → PostToolUse → scripts/session-notify-hook.sh（worktreeのもの）
+       → scripts/session-notify.sh（worktreeのもの）
+```
+
+- **足すのは`PostToolUse`だけ。** `Notification`・`Stop`・`PreToolUse`は古い作業ツリーでも
+  生成されるので、ここに置くと**同じ入力待ちがSignalyへ二重に飛ぶ**。`PostToolUse`は
+  古いホストでは生成されない（＝二重にならない）一方、新しいホストでは二重になるが、
+  `session-notify.sh`が「状態ファイルの最後のイベントが`permission_prompt`のとき」以外を即座に
+  捨てるため、報告が飛ぶのは**入力待ち1回につき最大1回**。二重に走っても`/activity`が1回余計に
+  飛ぶだけで、ラベルの除去は冪等（`removeIssueLabel`は404を成功として扱う）
+- **プロジェクト設定はこのリポジトリの全セッションに掛かる。** 人が手元で開いた対話セッションや
+  GitHub Actions上の無人実行まで報告を飛ばさないよう、`session-notify-hook.sh`は
+  **tmuxのセッション名がランチャーの規約（`<リポジトリ名>-issue-<番号>`）に一致し、かつworktreeが
+  `issue-<番号>`ブランチにあるとき**だけ先へ進む。tmuxの外（Actions）は最初の1行で落ちる
+- 引数（Issue番号・リポジトリ名・`owner/repo`）は、生成されるフック設定と違って**書き込む側が
+  いないので、そのworktreeとtmuxのセッション名から引く**
+- **どのイベントを扱うかの判定は`session-notify.sh`のまま**で、`session-notify-hook.sh`が持つのは
+  「誰のセッションか」だけ。判定を2箇所に分けない
+
+`00.check-user`を付けたことの印は、古いホックが旧名（`<セッション名>.plan`）で書いていることが
+あるため、読む側が新旧どちらも見る（前述）。
+
+**他リポジトリ（`dayspan`等）にはこの`.claude/settings.json`が無い**ので、汎用ランチャーで
+起こすセッションは従来どおり本体の作業ツリーの新しさに依存する。`run-issue-session.sh`が
+`PostToolUse`を生成し続けるのはそのため。
 
 ## 通知の障害でセッションを止めない
 
@@ -485,6 +533,39 @@ issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions
 **画面側は状態（poller）を様子（フック）より優先する**（`summarizeIssueSession`）。
 セッションが落ちていれば、`WAITING_INPUT`の報告が残っていても「入力待ち」とは出さない。
 入力を待つ相手がもういないため。
+
+### セッションが始まる前は、フックでは何も分からない（#1465）
+
+**初めてクローンしたリポジトリでは、`claude`の起動直後にフォルダの信頼確認
+（`Is this a project you created or one you trust?`）が出て、答えるまでセッションが始まらない。**
+この間はフックが1つも飛ばない（実測: 信頼確認の表示中は`SessionStart`すら飛ばず、答えた直後に
+飛ぶ）。ここまでの仕組みはすべて「フックが飛ぶこと」を前提にしているため、画面には
+`subpcで実行中`とだけ出たまま何も進まず、端末を見ていない人には気付く手段が無かった。
+
+そこで**「フックが飛ばないこと自体」を計器にする**。`gates.md`の「フックが飛ぶか」という境界の
+外側なので、担当するのはpollerだが、**画面（`capture-pane`）の文字列は読まない**。
+
+| 誰が | 何をするか |
+| --- | --- |
+| `run-issue-session.sh` | `claude`の起動直前に印（`<セッション名>.starting`、中身は置いた時刻）を置く。**フック設定を生成できたときだけ**（消す相手がいないと出続けるため） |
+| `SessionStart`フック | 印を消す。通知もissue-deckへの報告も行わない。**`session-notify.sh`はどのイベントでも印を消す**（フックが1つでも飛べばClaude Codeは開始している。`SessionStart`だけに頼ると、それが飛ばない環境で正常なセッションのたびに誤って引き上げる） |
+| poller（1巡60秒） | 印が猶予（`ISSUE_DECK_CLAUDE_START_GRACE_SECONDS`。既定180秒）を過ぎて残っていれば、セッションの報告に`claudeStarting: true`を載せる |
+| issue-deck | `activity`を`NOT_STARTED`にし、Issueへ「起動確認で止まっている」と投稿して`00.check-user`を付ける（`escalateNotStartedSession`） |
+| issue-deck | 人が答えて印が消えれば（`claudeStarting: false`）`activity`を戻し、付けた`00.check-user`を外す（`resolveNotStartedSession`） |
+
+- **猶予を短くしない。** 起動には数秒〜（自動更新やプラグインの同期を挟むと）もう少しかかる。
+  短くすると正常な起動をIssueコメント＋`00.check-user`で騒ぐことになる。長い側の代償は
+  気付くのが遅れることだけ。
+- **`claudeStarting`は項目が無いことと`false`が別物。** 印を置かない古いランチャー・送らない
+  古いpollerでは項目ごと来ないので、受け口はその報告で`NOT_STARTED`を解かない
+  （`resolveStartingActivityTransition`）。
+- **入り直しはしない。** pollerは60秒ごとに同じ報告を送るため、`NOT_STARTED`ではない行へ
+  遷移するときにだけ投稿する（`shouldEscalateSession`と同じ形）。
+- **画面ではRemote Controlのリンクを出さない。** セッションが始まっていない＝Remote Controlも
+  繋がっていないので、案内するのは`tmux attach -t <セッション名>`だけにする。
+- 信頼確認そのものは自動化しない（それを自動で承認する仕組みは、このリポジトリの外の
+  ディレクトリにも同じ判断を効かせることになる）。**答えるのは人**という前提は変えず、
+  気付けるようにするだけに留める。
 
 ### 止まっていないのに「入力を待っています」と出ていた理由（#1353）
 

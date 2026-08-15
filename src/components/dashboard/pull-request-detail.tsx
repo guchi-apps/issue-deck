@@ -10,6 +10,7 @@ import {
   CiStateBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
+  UserMergeRequiredBadge,
   formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
@@ -20,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { canMergeFromDeck } from "@/lib/pull-request-list";
+import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestSummary,
@@ -233,6 +234,7 @@ export function PullRequestDetail({
             {pullRequest.autoMergeEnabled && (
               <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
             )}
+            {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
             {currentDetail?.mergeable === false && (
               <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
                 コンフリクトあり

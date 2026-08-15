@@ -2,10 +2,13 @@
 # 実装セッション（tmux）の状態ファイル（#1256）。
 #
 # 誰が書いて誰が読むか:
-#   scripts/run-issue-session.sh  起動時に記述子（<セッション名>.session）を書き、終了時に消す
+#   scripts/run-issue-session.sh  起動時に記述子（<セッション名>.session）と、Claude Codeがまだ
+#                                 開始していない印（<セッション名>.starting、#1465）を書き、終了時に消す
 #   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）と
-#                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く
+#                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
+#                                 `SessionStart`では`.starting`を消す（#1465）
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む
+#   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）
 #
 # **キーはtmuxのセッション名。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 # リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られるため
@@ -51,6 +54,47 @@ session_state_reason_file() {
   printf '%s/%s.reason' "$(session_state_dir)" "$1"
 }
 
+# Claude Codeがまだ開始していないことの印（#1465）。
+# `run-issue-session.sh`が`claude`を起動する直前に置き、`SessionStart`フックが消す。
+#
+# **これが残っていること自体が「起動確認で止まっている」の唯一の計器。** 初めてクローンした
+# リポジトリでは起動直後にフォルダの信頼確認（`Is this a project you created or one you trust?`）が
+# 出て、答えるまでセッションが始まらない。この間はフックが1つも飛ばないため、フックを待つ
+# 仕組み（#1219・#1264）では画面に何も出ず、操作が止まったまま気づけない。
+#
+# 中身は置いた時刻（epoch秒）で、pollerが猶予（既定180秒）を過ぎたかどうかの判定に使う。
+# 起動には数秒かかるので、置いた直後を止まっていると扱わない。
+session_state_starting_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.starting' "$(session_state_dir)" "$1"
+}
+
+session_state_mark_starting() {
+  local session="$1" file content
+  file="$(session_state_starting_file "$session")" || return 1
+  printf -v content '%s\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+# 印を消す（Claude Codeが開始した）。無ければ何もしない。
+session_state_clear_starting() {
+  local session="$1" file
+  file="$(session_state_starting_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
+# 印を置いた時刻（epoch秒）を返す。印が無い・読めない場合は非0で返る。
+session_state_starting_since() {
+  local session="$1" file line
+  file="$(session_state_starting_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  line="$(head -1 "$file" 2>/dev/null || true)"
+  [[ "$line" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$line"
+}
+
 # このセッションが `00.check-user` を付けたことの印（#1342・#1417）。
 # **ラベルを外してよいのは自分で付けたときだけ**なので、それをどこかに覚えておく必要がある。
 # issue-deck側のDBではなくホストに置くのは、`/api/dispatch/sessions/activity` が
@@ -59,11 +103,22 @@ session_state_reason_file() {
 #
 # #1342では計画の提示（`ExitPlanMode`）だけが印を付けていたためファイル名も`.plan`だったが、
 # #1417で入力待ち（`Notification`）も同じ印を使うようになったため`.check-user`へ改めた。
-# 改名をまたいだセッションは印を1度失う（＝自分で付けた`00.check-user`を外せなくなる）が、
-# 画面の承認・修正ボタンからも外せるため実害は無いと判断している。
 session_state_check_user_file() {
   session_state_name_ok "${1:-}" || return 1
   printf '%s/%s.check-user' "$(session_state_dir)" "$1"
+}
+
+# 旧名（#1417より前）の印。**読むときだけ見る**（新しく書くのは`.check-user`だけ）。
+#
+# 改名をまたいだセッションが印を1度失うのは#1417の時点では実害無しと判断していたが、
+# **1つのセッションの中で新旧のスクリプトが混ざる経路ができたため、読む側だけ互換を持たせる**
+# （#1456）。`.claude/settings.json`から呼ぶ`PostToolUse`はworktreeの新しいスクリプトを走らせる
+# 一方、`Notification`・`ExitPlanMode`のフックは本体の作業ツリー（古いことがある）のものが
+# 走る。印を`.plan`で書かれたセッションで`.check-user`しか見ないと、**承認しても
+# `00.check-user`が外れない**という、まさに直したい症状がそのまま残る。
+session_state_legacy_check_user_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.plan' "$(session_state_dir)" "$1"
 }
 
 # 書きかけを読まれないよう、一時ファイルへ書いてから置き換える。
@@ -83,12 +138,18 @@ session_state_write_file() {
 }
 
 # 起動時の記述子を書く。`reapable`が1のセッションだけが自動回収の対象になる。
+#
+# `kind`（第6引数・省略時は`implementation`）は回収の判定を分けるためのもの（#1454）。
+# 横断質問セッション（`question`）はworktreeを持たないため、実装セッション向けの
+# 「worktreeがcleanでpush済み」という条件を当てるとどれにも当たらず、永久に残ってしまう。
+# **古い記述子には`kind`が無い**（読む側は空を`implementation`として扱う）。
 session_state_write_descriptor() {
   local session="$1" worktree="$2" repository="$3" issue_number="$4" reapable="$5"
+  local kind="${6:-implementation}"
   local file content
   file="$(session_state_descriptor_file "$session")" || return 1
-  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nstartedAt=%s\n' \
-    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$(date +%s)"
+  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nkind=%s\nstartedAt=%s\n' \
+    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$kind" "$(date +%s)"
   session_state_write_file "$file" "$content"
 }
 
@@ -129,17 +190,24 @@ session_state_mark_check_user_pending() {
 }
 
 # 自分で付けた `00.check-user` の印があるか。**あるときだけラベルを外す**。
+# 旧名（`.plan`）も見る（#1456。`session_state_legacy_check_user_file`のコメント参照）。
 session_state_check_user_pending() {
-  local session="$1" file
+  local session="$1" file legacy
   file="$(session_state_check_user_file "$session")" || return 1
-  [[ -f "$file" ]]
+  legacy="$(session_state_legacy_check_user_file "$session")" || return 1
+  [[ -f "$file" || -f "$legacy" ]]
 }
 
 # 印を消す（ラベルを外し終えたとき）。無ければ何もしない。
+# **新旧どちらの名前も消す。** 片方だけ残すと、次の`Stop`が毎回ラベルを外しに行く。
 session_state_clear_check_user_pending() {
   local session="$1" file
-  file="$(session_state_check_user_file "$session")" || return 1
-  rm -f "$file" 2>/dev/null || true
+  for file in \
+    "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
+    "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
+    [[ -n "$file" ]] || continue
+    rm -f "$file" 2>/dev/null || true
+  done
   return 0
 }
 
@@ -172,7 +240,9 @@ session_state_remove() {
     "$(session_state_descriptor_file "$session" 2>/dev/null || true)" \
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
-    "$(session_state_check_user_file "$session" 2>/dev/null || true)"; do
+    "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
+    "$(session_state_starting_file "$session" 2>/dev/null || true)" \
+    "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
   done

@@ -38,6 +38,9 @@ export type MobileScreen =
   // #1436でボトムナビのタブを持つようになったため、Issue一覧と同じく遷移元（`origin`）で
   // 戻る導線の有無を切り替える（ホームの「Pull Request」からのドリルダウンでのみ出す）
   | { kind: "pull-requests"; origin: "tab" | "home" }
+  // ブランチとPRの流れ（#1455）。ボトムナビのタブは4つのまま増やさず（#1436）、
+  // ホームからのドリルダウンだけで開く
+  | { kind: "flow" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -163,6 +166,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: "pull-requests", origin };
     }
 
+    if (screenParam === "flow") {
+      return { kind: "flow" };
+    }
+
     return { kind: "home" };
   }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
 
@@ -171,7 +178,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       next: {
         // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
         // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）
-        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail";
+        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail" | "flow";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -308,6 +315,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       ),
     [navigate, mobileScreen],
   );
+
+  // ホームから「ブランチとPRの流れ」へ遷移する（#1455）。Issue・PRの絞り込み条件は持たない画面
+  // なので、渡すのは画面種別だけ。戻る導線はヘッダーの戻るボタン（goBack）が受け持つ。
+  const selectFlow = useCallback(() => navigate({ screen: "flow" }), [navigate]);
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -482,6 +493,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectTab,
     selectPullRequests,
     selectPullRequestView,
+    selectFlow,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

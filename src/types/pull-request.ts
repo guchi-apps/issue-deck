@@ -34,13 +34,38 @@ export type PullRequestSummary = {
   state: "open" | "closed";
   /** マージ済みか。`state`がclosedのときだけtrueになりうる */
   merged: boolean;
+  /**
+   * マージされた時刻（ISO8601）。マージされていなければnull。
+   *
+   * 「どのリリースに乗ったか」の判定に使う（#1455）。作業PRがdevelopへ入った時刻と、
+   * develop→mainのリリースPRがマージされた時刻を比べれば、追加のAPI呼び出し無しに
+   * 「その変更がどのバージョンで本番へ出たか」が分かる。
+   */
+  mergedAt: string | null;
   baseRef: string;
   headRef: string;
   kind: PullRequestKind;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
+  /**
+   * このPRが参照しているIssue番号を確度の高い順に並べたもの（#1455）。先頭は
+   * `linkedIssueNumber`と同じで、2件目以降は1本のPRで複数のIssueを扱った場合の残り。
+   * **本文の`#番号`には単なる言及も混ざる**ため、2件目以降は「関連」として扱う。
+   */
+  linkedIssueNumbers: number[];
   /** GitHubのAuto-mergeが有効か（＝CI通過後に自動でマージされる見込みか） */
   autoMergeEnabled: boolean;
+  /**
+   * 対応Issue（`linkedIssueNumber`）に`00.check-user`が付いているか。対応Issueを特定できない
+   * 場合・DBキャッシュに無い場合は`false`。
+   *
+   * develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
+   * `claude-review-develop.yml`（`risk-check` → `auto-merge`）と、その経路を持たないリポジトリ
+   * 向けの保険（`reusable-issue-labels.yml`の`develop-pr-opened`。#1470）で、どちらも結論を
+   * **PRではなく対応Issueの`00.check-user`**として書く。PR画面はこれを合流させて
+   * 「ユーザーのマージが必要です」を出す（#1469。判定は`requiresUserMerge`）。
+   */
+  linkedIssueCheckUser: boolean;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
   createdAt: string;

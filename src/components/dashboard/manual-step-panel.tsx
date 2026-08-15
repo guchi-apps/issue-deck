@@ -52,7 +52,9 @@ export function ManualStepPanel({
         （「開始」ボタンは出しません）。下の説明にある手順を自分で実行してください。
       </p>
       <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
+        <li>「前提条件」（デバイス・ディレクトリ・ブランチ・先に必要なIssue／PR）を満たしているか確かめる</li>
         <li>「やること」の手順を実行する</li>
+        <li>「完了の確認方法」で効いたことを確かめる</li>
         <li>実行結果や気づいた点があればコメントに残す（任意）</li>
         <li>「手作業を完了してクローズ」を押す</li>
       </ol>

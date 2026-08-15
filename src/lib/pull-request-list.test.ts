@@ -4,10 +4,12 @@ import {
   classifyPullRequest,
   computePullRequestNavCounts,
   extractLinkedIssueNumber,
+  extractLinkedIssueNumbers,
   filterPullRequestsByView,
   groupPullRequestsByRepository,
   canMergeFromDeck,
   mergeWarnings,
+  requiresUserMerge,
   scopeForPullRequestView,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
@@ -26,11 +28,14 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     draft: false,
     state: "open",
     merged: false,
+    mergedAt: null,
     baseRef: "develop",
     headRef: "issue-1",
     kind: "issue",
     linkedIssueNumber: 1,
+    linkedIssueNumbers: [],
     autoMergeEnabled: false,
+    linkedIssueCheckUser: false,
     ciState: "success",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -83,6 +88,30 @@ describe("extractLinkedIssueNumber", () => {
     expect(
       extractLinkedIssueNumber({ headRef: "release/v2.19.0", title: "v2.19.0", body: null }),
     ).toBeNull();
+  });
+});
+
+describe("extractLinkedIssueNumbers", () => {
+  it("参照をすべて確度の高い順に返す（ブランチ名→タイトル→本文）", () => {
+    expect(
+      extractLinkedIssueNumbers({
+        headRef: "issue-1058",
+        title: "#624 と #625 をまとめて直す",
+        body: "対応Issue: #625 #700",
+      }),
+    ).toEqual([1058, 624, 625, 700]);
+  });
+
+  it("同じ番号は1度だけ返す", () => {
+    expect(
+      extractLinkedIssueNumbers({ headRef: "issue-624", title: "#624 の対応", body: "#624" }),
+    ).toEqual([624]);
+  });
+
+  it("手掛かりが無ければ空配列を返す", () => {
+    expect(
+      extractLinkedIssueNumbers({ headRef: "release/v2.19.0", title: "v2.19.0", body: null }),
+    ).toEqual([]);
   });
 });
 
@@ -343,5 +372,67 @@ describe("mergeWarnings", () => {
       "CIがまだ実行中です。",
       "Auto-mergeが有効です。待てばCI通過後に自動でマージされます。",
     ]);
+  });
+});
+
+describe("requiresUserMerge", () => {
+  it("対応Issueに00.check-userが付いたIssue対応PRはユーザーのマージが必要", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true }))).toBe(true);
+  });
+
+  it("対応Issueに00.check-userが無ければ出さない（判定がまだ確定していない）", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: false }))).toBe(false);
+  });
+
+  it("develop→mainのリリースPRは常にユーザーのマージが必要", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({
+          kind: "release",
+          baseRef: "main",
+          headRef: "develop",
+          linkedIssueNumber: null,
+          linkedIssueCheckUser: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("バージョンバンプPRはAuto-mergeでdevelopへ入るため出さない", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({ kind: "version-bump", headRef: "release/v2.19.0", linkedIssueCheckUser: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("規約から外れたブランチのPRは判定材料が無いため出さない", () => {
+    expect(
+      requiresUserMerge(
+        pullRequest({ kind: "other", headRef: "feature/foo", linkedIssueCheckUser: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("Auto-merge有効なPRは待てば入るため出さない", () => {
+    expect(
+      requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, autoMergeEnabled: true })),
+    ).toBe(false);
+  });
+
+  it("ドラフト・クローズ済み・マージ済みには出さない", () => {
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, draft: true }))).toBe(false);
+    expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, state: "closed" }))).toBe(
+      false,
+    );
+    expect(
+      requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, state: "closed", merged: true })),
+    ).toBe(false);
+  });
+
+  it("CIの状態によらず出す（自動でマージされないことはCIの結果と無関係）", () => {
+    for (const ciState of ["pending", "success", "failure", "unknown"] as const) {
+      expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, ciState }))).toBe(true);
+    }
   });
 });
