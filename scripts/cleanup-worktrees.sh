@@ -31,6 +31,10 @@ DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
 
 # shellcheck source=scripts/lib/worktree-status.sh
 source "$ROOT/scripts/lib/worktree-status.sh"
+# worktreeを消す前に開発サーバーを止める（#1524）。止め方は run-issue-session.sh・
+# reap-dev-servers.sh と共有する。
+# shellcheck source=scripts/lib/dev-server.sh
+source "$ROOT/scripts/lib/dev-server.sh"
 
 usage() {
   echo "Usage: scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch]"
@@ -187,6 +191,16 @@ for i in "${!target_dirs[@]}"; do
   dir="${target_dirs[$i]}"
   n="${target_numbers[$i]}"
   echo "#$n: worktreeを削除しています（$dir）..."
+  # **消す前に開発サーバーを止める**（#1524）。ここへ来るのは「セッションも開発サーバーも
+  # 動いていない」と判定されたworktreeだが、その判定はPIDファイルと`run-issue-session.sh`の
+  # プロセスしか見ていない。実装エージェントが手で起こし直した`pnpm dev`はどちらにも載らず、
+  # worktreeを消してもcwdを失ったまま走り続ける（#1523の孤児）。ポートから引けば起動経路に
+  # よらず止まる。
+  dev_port="$(dev_server_port_for_issue "$n" || true)"
+  if [[ -n "$dev_port" ]]; then
+    dev_server_stop_by_port "$dev_port" "$dir" "$DEV_SERVER_DIR/issue-$n.log" "worktreeの削除" ||
+      echo "警告: #$n: ポート $dev_port を掴んでいた開発サーバーを停止できませんでした。" >&2
+  fi
   if ! git -C "$ROOT" worktree remove "$dir"; then
     echo "警告: #$n のworktree削除に失敗しました。ブランチはそのまま残します。" >&2
     failed=$((failed + 1))
