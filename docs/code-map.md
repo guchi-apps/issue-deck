@@ -106,6 +106,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   設定できるリポジトリ数の上限があり（Freeは1、Teamでも5）対象リポジトリ全体に届かないため。
   報告時に未登録なら載せ、再同期では`hasClaudeWorkflow`が真のリポジトリのopenなIssueを
   まとめて載せる（`addMissingProjectItems`）。
+- **開発環境のDBは既定で空。データを入れる経路は`pnpm db:seed:dev`だけ**（#1473）。
+  実データが入らないのは仕様ではなく`.env.local`のGitHub App設定がCIダミー値のままだからで、
+  同期を何度走らせても`Repository`は0件のまま。`scripts/seed-dev-db.sh`がCI用のシード
+  （`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから投入し、ログイン画面の
+  「開発用ダミーユーザーでログイン」（`src/lib/dev-login.ts`・`/api/dev/login`）で入る。
+  **全worktreeが同じ`app_issue_deck_dev`を共有する**ので投入は1回でよい。ダミーで埋まるのは
+  DBを読む画面だけで、GitHub APIを都度叩く経路（下記のPR一覧・サブIssue）は空のまま。
+  線引きは[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)
+  「開発サーバーにデータが出ないとき」。
 - **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
