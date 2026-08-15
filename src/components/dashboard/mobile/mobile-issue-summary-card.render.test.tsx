@@ -20,7 +20,7 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     repositoryFullName: "guchi-apps/issue-deck",
     repositoryPrivate: false,
     repositoryArchived: false,
-    author: { login: "m-guchi", avatarUrl: null },
+    author: { login: "m-guchi" },
     assignee: null,
     labels: [],
     milestone: null,
@@ -88,7 +88,7 @@ describe("MobileIssueSummaryCard（#1646）", () => {
   });
 
   it("担当者がいればそちらを出す", () => {
-    renderCard({ assignee: { login: "someone-else", avatarUrl: null } });
+    renderCard({ assignee: { login: "someone-else" } });
 
     expect(screen.getByText("someone-else")).toBeTruthy();
     expect(screen.queryByText("m-guchi")).toBeNull();
