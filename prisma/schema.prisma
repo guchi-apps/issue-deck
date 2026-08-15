@@ -566,10 +566,15 @@ model DispatchSession {
 //
 // **停滞・完了の判定には使わない。** これは「今この瞬間セッションが何をしているか」で、
 // 実装の進捗はProject Statusが唯一の正（docs/progress-status-architecture.md）。
+//
+// NOT_STARTED=Claude Code本体がまだ開始していない（#1465）。**これだけはフックではなく
+// pollerが立てる。** 初めてクローンしたリポジトリではフォルダの信頼確認で止まり、
+// セッションが始まっていないためフックが1つも飛ばず、画面には何も出ないまま操作が止まる。
 enum DispatchSessionActivity {
   WAITING_INPUT
   WORKING
   RESPONDED
+  NOT_STARTED
 }
 
 enum DispatchSessionState {

@@ -212,6 +212,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | ✅ 応答終了 |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | **送らない**（Issueのコメントへ回す） |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | **送らない**（issue-deckの画面へだけ回す） |
+| `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を送った約60秒後に同じ内容がもう1件飛ぶことになる。
@@ -532,6 +533,39 @@ issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions
 **画面側は状態（poller）を様子（フック）より優先する**（`summarizeIssueSession`）。
 セッションが落ちていれば、`WAITING_INPUT`の報告が残っていても「入力待ち」とは出さない。
 入力を待つ相手がもういないため。
+
+### セッションが始まる前は、フックでは何も分からない（#1465）
+
+**初めてクローンしたリポジトリでは、`claude`の起動直後にフォルダの信頼確認
+（`Is this a project you created or one you trust?`）が出て、答えるまでセッションが始まらない。**
+この間はフックが1つも飛ばない（実測: 信頼確認の表示中は`SessionStart`すら飛ばず、答えた直後に
+飛ぶ）。ここまでの仕組みはすべて「フックが飛ぶこと」を前提にしているため、画面には
+`subpcで実行中`とだけ出たまま何も進まず、端末を見ていない人には気付く手段が無かった。
+
+そこで**「フックが飛ばないこと自体」を計器にする**。`gates.md`の「フックが飛ぶか」という境界の
+外側なので、担当するのはpollerだが、**画面（`capture-pane`）の文字列は読まない**。
+
+| 誰が | 何をするか |
+| --- | --- |
+| `run-issue-session.sh` | `claude`の起動直前に印（`<セッション名>.starting`、中身は置いた時刻）を置く。**フック設定を生成できたときだけ**（消す相手がいないと出続けるため） |
+| `SessionStart`フック | 印を消す。通知もissue-deckへの報告も行わない。**`session-notify.sh`はどのイベントでも印を消す**（フックが1つでも飛べばClaude Codeは開始している。`SessionStart`だけに頼ると、それが飛ばない環境で正常なセッションのたびに誤って引き上げる） |
+| poller（1巡60秒） | 印が猶予（`ISSUE_DECK_CLAUDE_START_GRACE_SECONDS`。既定180秒）を過ぎて残っていれば、セッションの報告に`claudeStarting: true`を載せる |
+| issue-deck | `activity`を`NOT_STARTED`にし、Issueへ「起動確認で止まっている」と投稿して`00.check-user`を付ける（`escalateNotStartedSession`） |
+| issue-deck | 人が答えて印が消えれば（`claudeStarting: false`）`activity`を戻し、付けた`00.check-user`を外す（`resolveNotStartedSession`） |
+
+- **猶予を短くしない。** 起動には数秒〜（自動更新やプラグインの同期を挟むと）もう少しかかる。
+  短くすると正常な起動をIssueコメント＋`00.check-user`で騒ぐことになる。長い側の代償は
+  気付くのが遅れることだけ。
+- **`claudeStarting`は項目が無いことと`false`が別物。** 印を置かない古いランチャー・送らない
+  古いpollerでは項目ごと来ないので、受け口はその報告で`NOT_STARTED`を解かない
+  （`resolveStartingActivityTransition`）。
+- **入り直しはしない。** pollerは60秒ごとに同じ報告を送るため、`NOT_STARTED`ではない行へ
+  遷移するときにだけ投稿する（`shouldEscalateSession`と同じ形）。
+- **画面ではRemote Controlのリンクを出さない。** セッションが始まっていない＝Remote Controlも
+  繋がっていないので、案内するのは`tmux attach -t <セッション名>`だけにする。
+- 信頼確認そのものは自動化しない（それを自動で承認する仕組みは、このリポジトリの外の
+  ディレクトリにも同じ判断を効かせることになる）。**答えるのは人**という前提は変えず、
+  気付けるようにするだけに留める。
 
 ### 止まっていないのに「入力を待っています」と出ていた理由（#1353）
 

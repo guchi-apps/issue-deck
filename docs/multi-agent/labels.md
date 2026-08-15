@@ -68,6 +68,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 | 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
 | スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
 | 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
+| Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
 
 ### 外れるタイミング
 
@@ -79,6 +80,7 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
 | Issueがcloseされた | `reusable-issue-labels.yml`の`cleanup-on-close`（#464） |
+| ユーザーが起動確認に答え、Claude Codeが開始した | pollerの次の報告（最大1分）を受けて`resolveNotStartedSession`が外す（#1465）。**この経路だけは印がホストではなくDBの直前の値**（`activity === "NOT_STARTED"`）で、それを立てたのがこの経路しか無いことが「自分で付けた」の根拠になる |
 
 ### ローカルセッションで守っている約束（#1342・#1417）
 

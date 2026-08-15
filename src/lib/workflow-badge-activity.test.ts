@@ -67,6 +67,16 @@ describe("isWorkflowBadgeSpinning", () => {
     ).toBe(false);
   });
 
+  it("まだ開始していないセッションは回さない（#1465）", () => {
+    expect(
+      isWorkflowBadgeSpinning({
+        session: session({ activity: "NOT_STARTED" }),
+        approvalPending: false,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
   it("終わったセッションは回さない", () => {
     for (const state of ["EXITED", "FAILED", "GONE"] as const) {
       expect(
