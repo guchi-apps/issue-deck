@@ -203,9 +203,13 @@ export function MobileIssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
     blockingSession,
   });
-  const startLabel = defaultDispatchHost
-    ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
-    : "GitHub Actionsで開始";
+  // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
+  // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
+  const startLabel = !dispatch.isLoaded
+    ? "実装を開始"
+    : defaultDispatchHost
+      ? `${formatDispatchHostName(defaultDispatchHost)}で開始`
+      : "GitHub Actionsで開始";
   // 起動したセッションの様子（#1264）。ジョブの状態表示は「tmuxが立った」までで終わっている
   const issueSession = findSessionForIssue(
     dispatch.sessions,
@@ -643,10 +647,20 @@ export function MobileIssueDetail({
       {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
           写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
           スクロールして写すための目印 */}
+      {/* flex-1を外さない（#1664）。付けないと`flex: 0 1 auto`のまま＝この領域の高さが
+          「中身の高さから縮んだ結果」として決まる。見た目の高さは同じでも、ポーリングの
+          更新・画像やコメントの読み込みで中身の高さが変わるたびにflexの縮小計算が走り、
+          スクロール領域の箱ごと再レイアウトされる。iOSのホーム画面アプリ（standalone PWA）
+          ではこのときスクローラの描画内容が失われ、レイアウトは正しいのに背景も文字も
+          描かれない領域が残る（その後Reactが更新した「7分前」などの一部だけが描き直される）。
+          ブラウザで再現しないのは、URLバーの伸縮でビューポートが頻繁に変わり全面の描き直しに
+          紛れるため。他のモバイル画面（home/settings/repos/issue-list）はいずれもflex-1を
+          付けており、この画面だけが例外だった。規約は
+          mobile-screen-scroll-container.test.tsで固定している */}
       <div
         ref={scrollContainerRef}
         data-capture-scroll-bottom
-        className="flex flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
+        className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
       >
         {/* リポジトリ・タイトル・状態・進捗・担当者・コメント数・更新・ラベルを1枚へ畳む（#1646）。
             以前はこれらが独立した6ブロックとして縦に並び、説明が初期表示から押し出されていた */}

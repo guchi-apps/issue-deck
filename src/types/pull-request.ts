@@ -186,6 +186,11 @@ export type PullRequestDetail = {
   id: string;
   /** ヘッダー表示用のPR情報。一覧を経由せず開いた場合はこれだけが手掛かりになる */
   summary: PullRequestSummary;
+  /**
+   * 取得時刻（ISO8601）。ヘッダーに出す`summary`を一覧の項目と詳細のどちらから採るかの
+   * 判定に使う（新しい方を採る。#1578）。一覧の`fetchedAt`と同じくサーバー側の時刻。
+   */
+  fetchedAt: string;
   /** PRの本文。未記入なら空文字 */
   body: string;
   additions: number;

@@ -62,6 +62,7 @@ function makeDetail(overrides: Partial<PullRequestDetailData> = {}): PullRequest
     commits: 2,
     mergeable: true,
     events: [makeEvent()],
+    fetchedAt: "2026-08-01T02:00:00.000Z",
     ...overrides,
   };
 }

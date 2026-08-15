@@ -106,15 +106,12 @@ async function handleGET() {
 
         // CI状態は「今マージ待ちにあたるPR」の分だけ取る（1リポジトリにつき最大1回）。
         //
-        // リリースPRのheadは`develop`そのもののため、`develop`のcheck-runsがそのままこのPRの
-        // 状態になる。**CIワークフローだけでなく、その時点でdevelopに対して走った全ワークフローが
-        // 含まれる**（実測でdeploy-preview・dispatch・labelsなど94件）。ワークフロー名でCIを
-        // 特定する方式はファイル名がリポジトリごとに違う（asset-managerはtest.yml）ため採らず、
-        // 集約値をそのまま使う。画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのは
-        // このため。
-        //
-        // なお`fetchRefCiState`はper_page=100の1ページのみを見る。developは既に94件あり、
-        // 100を超えると失敗を取りこぼしうる（#1061）。
+        // リリースPRのheadは`develop`そのもののため、`develop`のチェックがそのままこのPRの
+        // 状態になる。**見るのはGitHubがPRのChecksとして数えるものだけ**で、`issues`や
+        // `workflow_dispatch`で起動した無人実行のワークフローは入らない（#1578。
+        // `lib/github/check-rollup.ts`）。ワークフロー名でCIを特定する方式はファイル名が
+        // リポジトリごとに違う（asset-managerはtest.yml）ため採らず、集約値をそのまま使う。
+        // 画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのはこのため。
         const releaseCiState = releasePr
           ? await fetchRefCiState(repository.ownerLogin, repository.name, "develop", token)
           : null;

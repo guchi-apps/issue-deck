@@ -155,11 +155,14 @@ export type DispatchJobView = {
    */
   issueTitle: string | null;
   /**
-   * DBキャッシュのIssueのid（#1625）。**行のタイトルをissue-deckのIssue詳細への導線にするために返す。**
+   * Issueのid（#1625）。**行のタイトルをissue-deckのIssue詳細への導線にするために返す。**
    *
    * 番号（`issueNumber`）だけでは画面から詳細を開けない。選択中のIssueはidで持っており
    * （`?issue=<id>`）、リポジトリと番号からidを引くのは画面側の仕事ではないため、タイトルと
    * 同じ引き当て（`resolveDispatchIssues`）でここへ入れる。
+   *
+   * **画面の`Issue.id`と同じ`String(githubIssueId)`であること**（#1671）。DBの行id（cuid）を
+   * 入れると一覧のどのIssueにも一致せず、押しても詳細が開かない（スマホはホームへ落ちる）。
    *
    * **引けなければ`null`で、そのときはリンクにしない**（`issueTitle`と同じ条件で揃う）。押しても
    * 何も起きない行を作るより、番号だけのプレーンな行のままにする方がよい。

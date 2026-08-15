@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
@@ -258,6 +259,18 @@ export function StartImplementationDialog({
   // 「このPC」を廃止して手元の出口がコピーになったため（#1263）、申告しているホストが無くても
   // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
   const showTargets = includeDispatchTargets === true;
+  /**
+   * 実行先がまだ確定していないか（#1666）。**確定するまで選択肢を1つも出さない。**
+   *
+   * ホストの一覧は`GET /api/dispatch`が返るまで空で、そのまま組み立てると「サブPCが無い
+   * 選択欄（既定はGitHub Actions）」を先に描いてから、届いた時点でサブPCを足して既定も
+   * 移すことになる。実行先で出るオプションまで変わる（撮影⇄アーティファクト）ため、
+   * 押そうとしていたものが指の下で別物に入れ替わる。
+   *
+   * 一覧が空のまま確定した場合（申告しているサブPCが無い・取得に失敗した）は通常どおり出す。
+   * 待たせるのは「まだ分からない」間だけで、「無いと分かった」後ではない。
+   */
+  const isTargetPending = showTargets && !dispatch.isLoaded;
   /**
    * 未完了ジョブを理由に選択肢を塞ぐか（#1318）。**このダイアログから積んだ直後は塞がない。**
    *
@@ -586,9 +599,11 @@ export function StartImplementationDialog({
             実行する場所と必要なオプションを選んでから開始してください。
           </DialogDescription>
         </DialogHeader>
+        {/* 実行先が確定するまでは、選択肢の代わりに骨組みだけを出す（#1666） */}
+        {isTargetPending && <StartChoicesSkeleton />}
         {/* 実行先を先に選ばせる（#1623）。実行先によって出るオプションが変わる（撮影は
             GitHub Actionsのときだけ・アーティファクトはそれ以外）ため、選ぶ順序としても素直になる */}
-        {showTargets && (
+        {showTargets && !isTargetPending && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">実行先</p>
             <div role="radiogroup" aria-label="実行先" className="grid grid-cols-4 gap-1.5">
@@ -612,38 +627,42 @@ export function StartImplementationDialog({
             ))}
           </div>
         )}
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">オプション</p>
-          <div className="grid grid-cols-2 gap-2">
-            {visibleOptions.map((option) => {
-              // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
-              // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
-              const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
-              return (
-                <StartOptionChip
-                  key={option.key}
-                  icon={OPTION_ICONS[option.key]}
-                  label={option.label}
-                  description={unavailable ? (screenshotRejection ?? "") : option.description}
-                  checked={options[option.key]}
-                  disabled={unavailable && !options[option.key]}
-                  onToggle={() => toggleOption(option.key)}
-                />
-              );
-            })}
+        {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
+        {!isTargetPending && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">オプション</p>
+            <div className="grid grid-cols-2 gap-2">
+              {visibleOptions.map((option) => {
+                // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
+                // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
+                const unavailable =
+                  option.key === "screenshotRequired" && screenshotRejection !== null;
+                return (
+                  <StartOptionChip
+                    key={option.key}
+                    icon={OPTION_ICONS[option.key]}
+                    label={option.label}
+                    description={unavailable ? (screenshotRejection ?? "") : option.description}
+                    checked={options[option.key]}
+                    disabled={unavailable && !options[option.key]}
+                    onToggle={() => toggleOption(option.key)}
+                  />
+                );
+              })}
+            </div>
+            <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+              {optionHints.length > 0 ? (
+                optionHints.map((hint) => (
+                  <li key={hint.key}>
+                    <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
+                  </li>
+                ))
+              ) : (
+                <li>オプションを押すとONになり、ここに内容が出ます。</li>
+              )}
+            </ul>
           </div>
-          <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-            {optionHints.length > 0 ? (
-              optionHints.map((hint) => (
-                <li key={hint.key}>
-                  <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
-                </li>
-              ))
-            ) : (
-              <li>オプションを押すとONになり、ここに内容が出ます。</li>
-            )}
-          </ul>
-        </div>
+        )}
         <ApiErrorMessage message={error} />
         {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
             一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
@@ -656,15 +675,49 @@ export function StartImplementationDialog({
               キャンセル
             </Button>
           </DialogClose>
+          {/* 実行先が確定するまでは押させない（#1666）。押せてしまうと、選ばせていない既定
+              （ホストの一覧が空なのでGitHub Actions）で起動することになる */}
           <Button
             onClick={handleStart}
-            disabled={isSubmitting || selectedRejection !== null || blockedReason !== null}
+            disabled={
+              isSubmitting || isTargetPending || selectedRejection !== null || blockedReason !== null
+            }
           >
             {isCopyTarget ? (copied ? "コピーしました" : "コピーする") : "開始する"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * 実行先が確定するまでの骨組み（#1666）。**選択肢を1つも出さず、場所だけ確保する。**
+ *
+ * 見出しと枚数を本番と同じにしているのは、確定した瞬間にダイアログの高さが変わらないようにするため。
+ * 枚数（実行先4・オプション4）は最も多い場合に合わせてあり、確定後に減ることはあっても増えない。
+ */
+function StartChoicesSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-busy="true">
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">実行先</p>
+        <div className="grid grid-cols-4 gap-1.5">
+          {[0, 1, 2, 3].map((index) => (
+            <Skeleton key={index} className="min-h-[68px] rounded-lg" />
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">実行できる場所を確認しています…</p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">オプション</p>
+        <div className="grid grid-cols-2 gap-2">
+          {[0, 1, 2, 3].map((index) => (
+            <Skeleton key={index} className="min-h-[46px] rounded-full" />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

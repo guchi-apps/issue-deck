@@ -32,6 +32,8 @@ const dispatchState = {
   jobs: [],
   sessions: [],
   concurrency: 2,
+  // 最初の取得が終わったか（#1666）。falseの間は実行先・オプションを出さない
+  isLoaded: true,
   error: null,
   isSubmitting: false,
   enqueue,

@@ -1,0 +1,131 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { fetchCheckRollup } from "@/lib/github/check-rollup";
+
+function stubGraphql(body: unknown, status = 200) {
+  const calls: { url: string; body: string }[] = [];
+  const fetchMock = vi.fn(async (url: string, init?: { body?: string }) => {
+    calls.push({ url, body: init?.body ?? "" });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => null },
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return calls;
+}
+
+function rollupResponse(rollup: unknown) {
+  return { data: { repository: { object: { statusCheckRollup: rollup } } } };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("fetchCheckRollup", () => {
+  it("refを`expression`として渡し、GraphQLへ1回だけ問い合わせる", async () => {
+    const calls = stubGraphql(
+      rollupResponse({ state: "SUCCESS", contexts: { totalCount: 0, nodes: [] } }),
+    );
+
+    await fetchCheckRollup("owner", "repo", "5dd3448", "token");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://api.github.com/graphql");
+    expect(JSON.parse(calls[0]?.body ?? "{}").variables).toEqual({
+      owner: "owner",
+      name: "repo",
+      expression: "5dd3448",
+    });
+  });
+
+  it("GraphQLの大文字の列挙をcheck-runと同じ小文字へ正規化する", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            { __typename: "CheckRun", status: "IN_PROGRESS", conclusion: null },
+            { __typename: "CheckRun", status: "COMPLETED", conclusion: "CANCELLED" },
+          ],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "pending",
+      checks: [
+        { status: "in_progress", conclusion: null },
+        { status: "completed", conclusion: "cancelled" },
+      ],
+    });
+  });
+
+  it("commit status（StatusContext）はcheck-runの形へ寄せる", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            { __typename: "StatusContext", state: "SUCCESS" },
+            { __typename: "StatusContext", state: "ERROR" },
+            { __typename: "StatusContext", state: "PENDING" },
+          ],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "pending",
+      checks: [
+        { status: "completed", conclusion: "success" },
+        { status: "completed", conclusion: "failure" },
+        { status: "pending", conclusion: null },
+      ],
+    });
+  });
+
+  it("チェックが100件を超える場合は1件ずつ返さず、`state`だけを返す", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "SUCCESS",
+        contexts: {
+          totalCount: 218,
+          nodes: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" }],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "success",
+      checks: null,
+    });
+  });
+
+  it("チェックが1件も無いrefでは空の一覧を返す", async () => {
+    stubGraphql(rollupResponse(null));
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: null,
+      checks: [],
+    });
+  });
+
+  it("GraphQLがエラーを返した場合はnullを返す（例外にしない）", async () => {
+    stubGraphql({ errors: [{ message: "Resource not accessible by integration" }] });
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toBeNull();
+  });
+
+  it("HTTPが失敗した場合もnullを返す", async () => {
+    stubGraphql({}, 502);
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toBeNull();
+  });
+});

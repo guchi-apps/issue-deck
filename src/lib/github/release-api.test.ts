@@ -6,30 +6,46 @@ function jsonResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    // check-runsの取得はETagの条件付きGETを通る（#1531）。ETagを返さない応答として振る舞わせ、
-    // このファイルのテストがプロセス内キャッシュに依存しないようにする
     headers: { get: () => null },
     json: async () => body,
     text: async () => JSON.stringify(body),
   };
 }
 
-/** `page`クエリの値ごとにレスポンスを返すfetchスタブ。呼ばれたページ番号も記録する */
-function stubCheckRunPages(pages: Record<number, unknown>, status = 200) {
-  const requestedPages: number[] = [];
+/** `statusCheckRollup`のGraphQL応答を返すfetchスタブ。呼ばれた回数も記録する */
+function stubRollup(
+  rollup: { state: string | null; totalCount: number; nodes: unknown[] } | null,
+  status = 200,
+) {
+  const requestedUrls: string[] = [];
   const fetchMock = vi.fn(async (url: string) => {
-    const page = Number(new URL(url).searchParams.get("page"));
-    requestedPages.push(page);
-    const body = pages[page];
-    if (body === undefined) return jsonResponse(404, {});
-    return jsonResponse(status, body);
+    requestedUrls.push(url);
+    return jsonResponse(status, {
+      data: {
+        repository: {
+          object: rollup
+            ? {
+                statusCheckRollup: {
+                  state: rollup.state,
+                  contexts: { totalCount: rollup.totalCount, nodes: rollup.nodes },
+                },
+              }
+            : { statusCheckRollup: null },
+        },
+      },
+    });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { requestedPages, fetchMock };
+  return { requestedUrls };
 }
 
-function runs(count: number, run: { status: string; conclusion: string | null }) {
-  return Array.from({ length: count }, () => ({ ...run }));
+/** rollupのCheckRunノード（GraphQLは大文字の列挙で返す） */
+function checkRun(status: string, conclusion: string | null) {
+  return { __typename: "CheckRun", status, conclusion };
+}
+
+function checkRuns(count: number, status: string, conclusion: string | null) {
+  return Array.from({ length: count }, () => checkRun(status, conclusion));
 }
 
 const SUCCESS = { status: "completed", conclusion: "success" };
@@ -70,60 +86,72 @@ describe("resolveCiStateFromCheckRuns", () => {
 });
 
 describe("fetchRefCiState", () => {
-  it("100件に収まる場合は1ページしか取得しない", async () => {
-    const { requestedPages } = stubCheckRunPages({
-      1: { total_count: 94, check_runs: runs(94, SUCCESS) },
+  it("GitHubがChecksとして数えるチェックだけを見る（#1578）", async () => {
+    // RESTのcheck-runsと違い、rollupには無人実行のワークフローのジョブが入らない。
+    // developのheadに無関係なキャンセル・実行中が積まれていても、CIが通っていればsuccess。
+    const { requestedUrls } = stubRollup({
+      state: "SUCCESS",
+      totalCount: 5,
+      nodes: [...checkRuns(4, "COMPLETED", "SUCCESS"), checkRun("COMPLETED", "SKIPPED")],
     });
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("success");
-    expect(requestedPages).toEqual([1]);
+    // 問い合わせはGraphQL1回だけ（RESTのページングをしない）
+    expect(requestedUrls).toEqual(["https://api.github.com/graphql"]);
   });
 
-  it("100件を超える場合は全ページを取得し、2ページ目以降の失敗も拾う（#1061）", async () => {
-    // 1ページで打ち切ると、2ページ目にある失敗を取りこぼしてsuccessを返してしまっていた
-    const { requestedPages } = stubCheckRunPages({
-      1: { total_count: 150, check_runs: runs(100, SUCCESS) },
-      2: { total_count: 150, check_runs: [...runs(49, SUCCESS), FAILURE] },
+  it("失敗したチェックがあればfailureを返す", async () => {
+    stubRollup({
+      state: "FAILURE",
+      totalCount: 2,
+      nodes: [checkRun("COMPLETED", "SUCCESS"), checkRun("COMPLETED", "FAILURE")],
     });
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("failure");
-    expect(requestedPages.sort()).toEqual([1, 2]);
   });
 
-  it("2ページ目以降にpendingがあればpendingを返す", async () => {
-    stubCheckRunPages({
-      1: { total_count: 150, check_runs: runs(100, SUCCESS) },
-      2: { total_count: 150, check_runs: [...runs(49, FAILURE), RUNNING] },
+  it("実行中のチェックがあれば、失敗より優先してpendingを返す", async () => {
+    // GitHubの`state`はこの場合FAILUREになるが、issue-deckは確定するまでpendingで扱う（#1433）
+    stubRollup({
+      state: "FAILURE",
+      totalCount: 2,
+      nodes: [checkRun("COMPLETED", "FAILURE"), checkRun("IN_PROGRESS", null)],
     });
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("pending");
   });
 
-  it("2ページ目の取得に失敗した場合は部分的な結果で判定せずunknownを返す", async () => {
-    // 欠けたページに失敗があるかもしれないため、successと誤って返さない
-    stubCheckRunPages({
-      1: { total_count: 150, check_runs: runs(100, SUCCESS) },
-      // page=2 は未定義なので404を返す
+  it("外部CIのcommit status（StatusContext）も数える", async () => {
+    stubRollup({
+      state: "FAILURE",
+      totalCount: 2,
+      nodes: [checkRun("COMPLETED", "SUCCESS"), { __typename: "StatusContext", state: "FAILURE" }],
     });
+
+    await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("failure");
+  });
+
+  it("チェックが100件を超える場合はGitHubの集約値をそのまま使う", async () => {
+    // 1件ずつ見られないぶん、ページングを重ねずGitHub自身の判定へ委ねる
+    stubRollup({
+      state: "FAILURE",
+      totalCount: 120,
+      nodes: checkRuns(100, "COMPLETED", "SUCCESS"),
+    });
+
+    await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("failure");
+  });
+
+  it("チェックが1件も無い場合はunknownを返す", async () => {
+    stubRollup(null);
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("unknown");
   });
 
-  it("1ページ目の取得に失敗した場合はunknownを返す", async () => {
+  it("取得に失敗した場合はunknownを返す", async () => {
+    // 取得できないだけで「失敗」にはしない（マージの導線を消さないため）
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(403, {})));
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("unknown");
-  });
-
-  it("取得ページ数には上限があり、際限なく問い合わせない", async () => {
-    const pages: Record<number, unknown> = {};
-    for (let page = 1; page <= 30; page += 1) {
-      pages[page] = { total_count: 3000, check_runs: runs(100, SUCCESS) };
-    }
-    const { requestedPages } = stubCheckRunPages(pages);
-
-    await fetchRefCiState("owner", "repo", "develop", "token");
-
-    expect(requestedPages).toHaveLength(10);
   });
 });

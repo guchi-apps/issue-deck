@@ -110,6 +110,7 @@ async function handleGET(request: NextRequest) {
       commits: pullRequest.commits,
       mergeable: pullRequest.mergeable,
       events: buildPullRequestEvents({ comments, reviews, reviewComments }),
+      fetchedAt: new Date().toISOString(),
     };
     return NextResponse.json(detail);
   } catch (error) {

@@ -900,6 +900,11 @@ function issueTitleKey(repositoryFullName: string, issueNumber: number): string 
  * **idも一緒に返す**のは、行のタイトルをissue-deckのIssue詳細への導線にするため（#1625）。
  * 詳細を開く口は`?issue=<id>`でidを取るので、番号だけでは飛べない。
  *
+ * **返すidは`Issue.githubIssueId`を文字列にしたもので、DBの行id（cuid）ではない**（#1671）。
+ * 画面が持つ`Issue.id`は`dbIssueToDisplayIssue`が`String(row.githubIssueId)`で作っており、
+ * `?issue=`・`?missue=`もその識別子で引く。行idを渡すと一覧のどのIssueにも一致せず、
+ * PCは詳細ペインが閉じ、スマホはホーム画面へ落ちる（`use-mobile-screen.ts`）。
+ *
  * - **ジョブ1件ごとに引かない。** ここは`GET /api/dispatch`＝ポーリング先（未完了ジョブがある間は
  *   5秒間隔）で、最大100件ぶんのクエリを毎回投げるわけにはいかない。リポジトリを1回、
  *   Issueを`(repositoryId, number)`のunique indexで1回の計2本に抑える
@@ -922,8 +927,7 @@ async function resolveDispatchIssues(
 
   // `Repository.fullName`は`@@unique([installationId, fullName])`の一部なので、同じfullNameの行が
   // インストール違いで複数あり得る。**全部を対象にして構わない**（同じIssueなのでタイトルも同じ）。
-  // idはインストールごとに別の行になるためどれか1つに決まるが、画面はそのidのIssueを一覧から
-  // 引けなければ何も開かないだけで、表示は壊れない（#1625）
+  // 返すidも`githubIssueId`＝GitHub側の識別子なので、どの行を引き当ててもぶれない（#1671）
   const repositories = await db.repository.findMany({
     where: { fullName: { in: [...numbersByRepository.keys()] } },
     select: { id: true, fullName: true },
@@ -937,14 +941,18 @@ async function resolveDispatchIssues(
         number: { in: [...(numbersByRepository.get(repository.fullName) ?? [])] },
       })),
     },
-    select: { id: true, number: true, title: true, repositoryId: true },
+    select: { githubIssueId: true, number: true, title: true, repositoryId: true },
   });
 
   const fullNameById = new Map(repositories.map((repository) => [repository.id, repository.fullName]));
   for (const issue of issues) {
     const fullName = fullNameById.get(issue.repositoryId);
     if (!fullName) continue;
-    titles.set(issueTitleKey(fullName, issue.number), { id: issue.id, title: issue.title });
+    // `githubIssueId`はBigIntなので文字列にしてから渡す（そのままではJSONにも載らない）
+    titles.set(issueTitleKey(fullName, issue.number), {
+      id: String(issue.githubIssueId),
+      title: issue.title,
+    });
   }
   return titles;
 }

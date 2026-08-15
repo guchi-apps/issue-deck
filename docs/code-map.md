@@ -104,6 +104,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `canStartImplementation`が本文の全幅ボタンと同一条件で必ず二重になっていた）。増やす場合は
   `⋯`メニューへ入れる。**ダイアログを`⋯`から開くときはトリガーを`DropdownMenuItem`にせず**、
   親が`open`・`onOpenChange`を持つ（メニューが閉じるとトリガーごと外れ、ダイアログも消える）。
+- **スマホの各画面の縦スクロール領域には`flex-1`を付ける**（#1664）。
+  `flex flex-col overflow-hidden`な画面の中で、ヘッダーの下に置く`overflow-y-auto`の領域が対象。
+  付け忘れても`flex: 0 1 auto`のまま縮小して収まるので**見た目の高さは変わらず、PCのブラウザでは
+  何も起きない**。実害はiOSのホーム画面アプリ（standalone PWA）でだけ出る。高さが「中身の高さから
+  縮んだ結果」として決まるため、ポーリングの更新や画像・コメントの読み込みで中身の高さが変わる
+  たびにスクロール領域の箱ごと再レイアウトされ、スクローラの描画内容が失われる。**レイアウトは
+  正しいのに背景も文字も描かれない領域が残り**、その後Reactが更新した一部（相対時刻など）だけが
+  描き直される、という状態になる。ブラウザで再現しないのはURLバーの伸縮で全面の描き直しが
+  頻繁に起こるため。付け忘れは
+  [`mobile/mobile-screen-scroll-container.test.ts`](../src/components/dashboard/mobile/mobile-screen-scroll-container.test.ts)
+  で検出する（`max-h-`で高さの上限を自前で持つ`SheetContent`や小さな枠は対象外）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
@@ -135,6 +146,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 
 - **Issueの一次情報源はGitHub、MySQLはキャッシュ。** `lib/github/sync-issues.ts` が取得結果を
   `Issue` テーブルへupsertする。画面の一覧はDBを読む。
+- **画面が使うIssueの識別子は`String(githubIssueId)`で、`Issue`テーブルの行id（cuid）ではない**（#1671）。
+  `lib/github/issue-mapper.ts`の`dbIssueToDisplayIssue`が`id: String(row.githubIssueId)`で作り、
+  URLの`?issue=`・`?missue=`もこれで引く（`hooks/use-reference-navigation.ts`）。**サーバー側から
+  「このIssueを開くid」を返すときは、`select: { id: true }`ではなく`githubIssueId`を返すこと。**
+  行idを返しても型は`string`で通り、リンクは描かれるが、押しても一覧のどのIssueにも一致しない。
+  そのときPCは詳細ペインが閉じるだけ、スマホは`use-mobile-screen.ts`がホーム画面へ落とすため、
+  「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
 - 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
@@ -239,14 +257,29 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **その分をレート制限に計上しない**。素で10秒ポーリングすると26リポジトリ×360回/時で
   インストール当たりの上限（5,000回/時）を約2倍超過し、PR一覧だけでなくIssue同期・CI状態・
   マージまで巻き添えで失敗する。通しているのはPR一覧（`fetchOpenPullRequests` /
-  `fetchClosedPullRequests`）とCI状態（`fetchRefCiState`のcheck-runs）の2経路で、
-  変化が無い間の消費は実質ゼロになる。キャッシュはプロセス内メモリのLRU（上限500件。
-  check-runsのURLはhead SHAごとに増えるため）で、`api-usage`と同じく単一プロセス前提。
+  `fetchClosedPullRequests`）で、変化が無い間の消費は実質ゼロになる。キャッシュはプロセス内
+  メモリのLRU（上限500件）で、`api-usage`と同じく単一プロセス前提。
+  **CI状態（`fetchRefCiState`）は#1578でGraphQLへ移したのでこの経路を通らない。**
+  条件付きGETが使えなくなるが、消費先がRESTと別枠の5,000ポイント/時になり、PR1件あたりの
+  問い合わせも最大3回（check-runsのページング）から1回に減るため、RESTの枠はむしろ空く。
   **キャッシュの古さが表示に出ることはない**——毎回GitHubへ問い合わせており、本文をキャッシュから
   返すのはGitHub自身が「変わっていない」と答えたときだけ。キーはURLのみでトークンを含めないが、
   権限の無いリポジトリには304ではなく404が返るため、別インストールの内容は漏れない。
   **304は使用量（`api-usage`）にも計上しない**ので、設定画面の「GitHub API使用量」の
   `pull_request_list`は実際に消費した回数を表す。
+- **CI状態は「GitHubがそのコミットのChecksとして数えるもの」だけを見る**（#1578。
+  [`lib/github/check-rollup.ts`](../src/lib/github/check-rollup.ts) → `fetchRefCiState`）。
+  **RESTの`/commits/{sha}/check-runs`を使ってはいけない。** あれはSHAに紐づくジョブを分け隔てなく
+  返すため、`issues`・`issue_comment`・`workflow_dispatch`・`workflow_run`・`schedule`で起動した
+  無人実行のワークフローまで混ざる。issue-deckの`develop`は無人実行が常時走っており、リリースPR
+  （headが`develop`そのもの）のheadコミットには**58件のワークフロー実行・218件のcheck-run**が
+  ぶら下がっていて、GitHubがChecksとして数えるのは`pull_request`・`push`起動の**5件・27件**
+  だけだった（v3.22.0のリリースPR #1573で実測）。残りまで集約していたため、無関係な自動化の
+  キャンセル1件で「CI失敗」・実行中1件で「CI実行中」になり、GitHubの画面では成功・マージ可能なのに
+  issue-deckだけが失敗を出していた。GraphQLの`Commit.statusCheckRollup`はGitHubの画面が出している
+  ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
+  以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
+  優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
@@ -312,10 +345,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
   ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
   **「処理中」「完了」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
-  クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。一覧から
-  選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
+  クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+  **両方あるときは`fetchedAt`が新しい方を使う**（#1578。`issue-deck-shell.tsx`の
+  `selectedPullRequest`）。一覧を無条件に優先していたころは、詳細ヘッダーの更新ボタンが
+  詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
+  CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
+  残り続けていた。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -475,8 +512,6 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
   マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
   取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
-  なおリリースPRのheadは`develop`そのもので、そのcheck-runsにはCI以外のワークフローも混ざる
-  ため、developで無関係なワークフローが走り出すと一時的に「実施中」へ戻る。
 - **PCヘッダー右端の通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
   （#1614。[`components/dashboard/notification-button.tsx`](../src/components/dashboard/notification-button.tsx)）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
