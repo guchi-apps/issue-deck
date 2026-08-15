@@ -47,8 +47,8 @@ describe("MobilePullRequestsScreen のビュー切り替えタブ（#1436）", (
   it("3つの状態別ビューをタブに出し、件数を持つビューだけ件数を添える", () => {
     renderScreen();
 
-    expect(screen.getByRole("button", { name: /全てのPR/ }).textContent).toBe("全てのPR");
-    expect(screen.getByRole("button", { name: /処理中のPR/ }).textContent).toBe("処理中のPR2");
+    expect(screen.getByRole("button", { name: /すべてのPR/ }).textContent).toBe("すべてのPR");
+    expect(screen.getByRole("button", { name: /実行中/ }).textContent).toBe("実行中2");
     expect(screen.getByRole("button", { name: /完了したPR/ }).textContent).toBe("完了したPR3");
   });
 
@@ -59,7 +59,7 @@ describe("MobilePullRequestsScreen のビュー切り替えタブ（#1436）", (
       screen.getByRole("button", { name: /完了したPR/ }).getAttribute("aria-current"),
     ).toBe("page");
     expect(
-      screen.getByRole("button", { name: /処理中のPR/ }).getAttribute("aria-current"),
+      screen.getByRole("button", { name: /実行中/ }).getAttribute("aria-current"),
     ).toBeNull();
   });
 
@@ -67,7 +67,7 @@ describe("MobilePullRequestsScreen のビュー切り替えタブ（#1436）", (
     const onChangeView = vi.fn();
     renderScreen({ onChangeView });
 
-    fireEvent.click(screen.getByRole("button", { name: /全てのPR/ }));
+    fireEvent.click(screen.getByRole("button", { name: /すべてのPR/ }));
 
     expect(onChangeView).toHaveBeenCalledWith("all");
   });

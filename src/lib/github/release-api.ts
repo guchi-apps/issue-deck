@@ -84,8 +84,12 @@ export type ReleaseWorkflowRun = {
  * この取得はリリース進捗のポーリング（`/api/repositories/release`・`release-pending-merges`）と、
  * 「ブランチとPRの流れ」画面のデプロイ状況（`/api/branch-flow/deploy`）から繰り返し呼ばれる。
  * 実行が進んでいない間は304が返り、その分は**GitHubのレート制限を消費しない**（`conditional-request.ts`）。
+ *
+ * 共有ワークフローの配布（`src/lib/github/workflow-tags.ts`）も同じ理由でここを使う。
+ * リリースとは無関係だが、「最新のrunを1件だけ、条件付きGETで取る」という形が同じため
+ * 実装を分けない（#1602）。
  */
-async function fetchLatestWorkflowRun(
+export async function fetchLatestWorkflowRun(
   owner: string,
   repo: string,
   workflowFile: string,

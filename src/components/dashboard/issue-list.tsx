@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   Archive,
   CheckSquare,
@@ -64,6 +64,12 @@ type IssueListProps = {
    * グループの並び順をrepositoryFullName昇順ではなくclosedAt降順にする。
    */
   view?: NavViewId;
+  /**
+   * 一覧の先頭（ヘッダーの下・スクロール領域の外）へ差し込む枠（#1613）。
+   * 「ユーザーの確認待ち」でマージ待ちPRを並べるために使う。Issueが0件でも描く——
+   * 確認すべきものが残っているのに「該当するIssueがありません」だけになると逆に読み違える。
+   */
+  pinnedSection?: ReactNode;
 };
 
 function formatRelativeDate(iso: string) {
@@ -127,6 +133,7 @@ export function IssueList({
   scrollKey = null,
   groupByRepo = false,
   view,
+  pinnedSection,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
@@ -377,6 +384,8 @@ export function IssueList({
           onDone={exitSelecting}
         />
       )}
+
+      {pinnedSection}
 
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが
           ドキュメント側へ伝播してヘッダー・フッターごと動くのを防ぐ（#607） */}

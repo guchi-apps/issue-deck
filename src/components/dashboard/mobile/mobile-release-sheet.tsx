@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { ReleaseStatus } from "@/hooks/use-release-status";
 import {
@@ -51,7 +51,6 @@ export function MobileReleaseSheet({
   isTriggeringRelease,
 }: MobileReleaseSheetProps) {
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
-  const [releaseSuccessOpen, setReleaseSuccessOpen] = useState(false);
 
   // 誤タップでの起動を防ぐため確認ダイアログを挟む。今回developにマージ済みでmain未反映のIssueを
   // 「今回反映する内容」として一覧表示する（#426）。
@@ -75,13 +74,6 @@ export function MobileReleaseSheet({
       linkedIssue: repoIssues.find((issue) => pr.issueNumbers.includes(issue.number)) ?? null,
     }));
   }, [releaseStatus, issues, repository.fullName]);
-
-  async function handleTriggerRelease() {
-    const ok = await triggerRelease();
-    if (ok) {
-      setReleaseSuccessOpen(true);
-    }
-  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -191,23 +183,9 @@ export function MobileReleaseSheet({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleTriggerRelease}>起動する</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={releaseSuccessOpen} onOpenChange={setReleaseSuccessOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>リリースを起動しました</AlertDialogTitle>
-            <AlertDialogDescription>
-              進捗はこの画面に表示されます（マージが必要な段階ではマージ用リンクが出ます）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction className={buttonVariants({ variant: "default" })}>
-              OK
-            </AlertDialogAction>
+            {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
+                「リリースを起動しました」のダイアログは出さない（#1590） */}
+            <AlertDialogAction onClick={() => void triggerRelease()}>起動する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

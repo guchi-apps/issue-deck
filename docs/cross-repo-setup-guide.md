@@ -434,7 +434,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v16` | 上記 + `reusable-version-tag-check.yml` | #1367。#1381でタグを作成し、#1459で`version-tag-check.yml`のcallerを対象14リポジトリへ配った（[docs/supported-repositories.md](supported-repositories.md)「`version-tag-check.yml`の配布状況」） |
 | `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 | `workflows/v18` | 上記 | #1490。`00.check-user`を付ける全経路が、その理由を表す`01.check-*`もあわせて付けるようになった版。あわせて`claude-review-develop`・`claude-ci-fix`・`claude-conflict-resolve`・`release-develop-to-main`の`gh issue edit`に`gh label list`ガードを入れた。**このタグを配るまで、対象リポジトリでは理由ラベルが付かない**（`00.check-user`だけが付く従来どおりの動作） |
-| `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く） |
+| `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く）。**caller側の追加は#1603で12リポジトリの配布PRへ入れた**（[supported-repositories.md](supported-repositories.md)「callerの`bump_kind`入力の配布状況」） |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
@@ -583,7 +583,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
 | `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | **実装着手前**に見た目のアーティファクト公開・承認を必須にする（ローカル実行専用。#1473・#1540。**issue-deck以外へはまだ配っていない**） |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップ・質問応答ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする（#735・#1528） |
-| `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「手作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
+| `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「ユーザーの作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
@@ -594,18 +594,47 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **issue-deckのアプリ設定ダイアログに「共有ワークフローのバージョン」の節がある**（#985・#1173）。
 各リポジトリが参照しているタグを一覧し、更新が必要なものへPRを一括作成できる。
 
-| 表示 | 意味 |
-|---|---|
-| ✓ | 最新タグを参照している |
-| **`<タグ>` へ未更新** | issue-deck側の改善が届いていない |
-| **`uses` と `prompts-ref` が不一致** | **新しいワークフローで古いプロンプトが使われる。別種の異常** |
+一覧は状態でグループ分けして出す（#1602）。同じ文言が14行並ぶだけの一覧では、何件が
+未更新なのかを数えないと分からなかったため。
 
-**マージは自動化していない。** 作られるのはPRまでで、内容を確認してマージするのは人間の操作
-（Actionsの変更は自動マージ不可カテゴリに該当する）。実際v12の展開では、PRを見る過程で
-`.gitignore`の漏れ（#1151）に気づいている。
+| グループ | 意味 | 行の表示 |
+|---|---|---|
+| **更新が必要** | issue-deck側の改善が届いていない | `v18 → v19`。`uses`と`prompts-ref`の不一致はここに別途出す（**新しいワークフローで古いプロンプトが使われる**別種の異常） |
+| **更新PRの確認待ち** | 更新PRが既にopen。**この行は配布の対象から外れる** | PR番号へのリンク |
+| **最新** | 最新タグを参照している | 既定でたたむ |
 
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
+
+#### 更新PRは既定で自動マージする（#1602）
+
+チェックボックス「作成したPRを自動でマージする」が既定でON。ONのときの配布は次のように動く。
+
+1. 配布先に**Issueを作らず**、`workflow-tag/vN`ブランチでPRだけを作る（マージ後に人が閉じる
+   だけのIssueが、配布のたびにリポジトリ数ぶん残るのを避けるため）
+2. リポジトリのauto-mergeを有効化したうえで、`gh pr merge --auto --squash`で予約する。
+   必須チェックを持つリポジトリでは**CIの成功後にマージされる**
+3. 予約が使えない（auto-mergeを有効化できない・必須チェックが無く「既にマージ可能」と
+   断られる）場合はその場でマージする
+4. どれも通らなければ**PRを残して警告**にとどめる。人がマージすれば従来と同じ結果になり、
+   1件の失敗で残りの配布は止まらない
+
+チェックを外すと従来どおりIssue＋PRの作成までで止まり、マージは人が行う。
+
+**この自動マージはCLAUDE.mdの自動マージ不可カテゴリ（GitHub Actionsの変更）に対する唯一の
+例外で、対象はこの配布PRに限られる。** 差分が`@workflows/vN`と`prompts-ref`の置換だけの
+機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても
+判断材料が増えない。
+
+#### 連続して押せないようにしてある（#1602）
+
+起動は数秒で返るが、PRが出来上がるまでは数分かかる。その間に押せると**同じリポジトリへ
+2本目のPRが作られる**（参照タグはマージされるまで古いままなので、対象からも消えない）。
+そのため次の3か所で止めている。
+
+- 画面: 配布ワークフローの**実行状態を取得して**ボタンを無効にする（画面を開き直しても効く）
+- API: `POST /api/workflow-tags/propagate`が実行中なら`409`で断る
+- 対象の決め方: 更新PRが既にopenのリポジトリを対象から外す（`propagationTargets`）
 
 #### 取得はGraphQLでまとめる（RESTで1ファイルずつ読まない）
 

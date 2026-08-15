@@ -14,13 +14,15 @@ import {
 } from "lucide-react";
 
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
-import { ReleaseStatusButton } from "@/components/dashboard/release-status-button";
+import { NotificationButton } from "@/components/dashboard/notification-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
+import type { NotificationTarget } from "@/lib/notifications";
 import type { Issue } from "@/types/issue";
+import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -52,9 +54,14 @@ type TopBarProps = {
   assigneeOptions: string[];
   onCreateIssue: () => void;
   onAskQuestion: () => void;
-  selectedRepoFullName: string | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
+  /** 通知ベル（#1614）に出すマージ待ちPR。画面が既に取得済みの一覧をそのまま使う */
+  pullRequests: PullRequestSummary[];
+  /** 通知ベルの項目を押したときの遷移 */
+  onOpenNotificationTarget: (target: NotificationTarget) => void;
+  onOpenCheckUserView: () => void;
+  onOpenFlow: () => void;
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
@@ -69,9 +76,12 @@ export function TopBar({
   assigneeOptions,
   onCreateIssue,
   onAskQuestion,
-  selectedRepoFullName,
   repositories,
   issues,
+  pullRequests,
+  onOpenNotificationTarget,
+  onOpenCheckUserView,
+  onOpenFlow,
   isSidebarCollapsed,
   onToggleSidebar,
   onOpenSettings,
@@ -239,10 +249,15 @@ export function TopBar({
       {/* サブPCで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
       <DispatchQueueButton />
 
-      <ReleaseStatusButton
+      {/* リリース専用のロケットボタンを置き換え、ユーザーの操作が必要なものをリポジトリ横断で
+          1か所に集める（#1614）。リリースの起動・マージは「ブランチ」画面が持つ */}
+      <NotificationButton
         repositories={repositories}
-        selectedRepoFullName={selectedRepoFullName}
         issues={issues}
+        pullRequests={pullRequests}
+        onOpenTarget={onOpenNotificationTarget}
+        onOpenCheckUserView={onOpenCheckUserView}
+        onOpenFlow={onOpenFlow}
       />
 
       <button

@@ -159,6 +159,55 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 バージョンbumpも自動化されないため、リリースは手作業になる（手作業リリースはタグ重複などの
 リポジトリ固有の制約を毎回踏む。[multi-agent/release.md](multi-agent/release.md)参照）。
 
+### callerの`bump_kind`入力の配布状況（#1603）
+
+**`@workflows/v19`への引き上げだけでは、画面から上げ幅（major/minor/patch）を指定できない。**
+`reusable-release-develop-to-main.yml`が`bump-kind`を受け取れるようになっても、指定を運ぶのは
+caller側の`workflow_dispatch`の`inputs`で、そこは配布（`propagate-workflow-tag.yml`）が
+書き換える`@workflows/vN`・`prompts-ref`の外にあるため、**タグ配布とは別に手で足す必要がある**
+（#1565の②）。足すまでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる
+（自動判定での起動は従来どおり動く）。
+
+callerに置く形は次の2か所で、`issue-deck`自身の
+[`release-develop-to-main.yml`](../.github/workflows/release-develop-to-main.yml)が手本になる。
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      bump_kind:
+        description: "バージョンの上げ幅（autoならコード差分から自動判定）"
+        required: false
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major]
+
+jobs:
+  release:
+    with:
+      # pushトリガー（バンプPRのマージ）で起動したときは`inputs`自体が無いため空文字を渡す。
+      bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+```
+
+`with:`を持たないcallerでは`with:`ごと足す。`bump-kind`は`version-file`・`bump-command`と
+並べて書けるが、`workflow_dispatch`の入力名は`bump_kind`（アンダースコア）、
+再利用可能ワークフローの入力名は`bump-kind`（ハイフン）で**綴りが違う**。
+
+2026-08-15時点の実測。
+
+| caller対応済み | `issue-deck`・**`clip-hive`・`ops-dashboard`**（#1591。新規配置時に最初からv19+`bump_kind`で置いた）・**`car-care`・`dayspan`・`aide`・`asset-manager`・`myroom`・`subscription-lists`・`shopping-list`・`portfolio`・`signaly`・`solitaire`・`meisai-lab`・`db-console`**（#1603。v19配布PRへ追加コミット。**develop（またはmain）へマージされるまでは効かない**） |
+|---|---|
+| **未対応** | なし |
+
+> **`db-console`は#1565の対象リストから漏れていた。** #1551で後から`release-develop-to-main.yml`を
+> 足したリポジトリで、リストが書かれた時点の11件に入っていなかった。配布状況を数えるときは、
+> 上の「配布済み」の表（callerの実在）を起点にする。
+
+**`workflow_dispatch`はdevelopのworkflow定義を見る。** そのため上げ幅を指定できるようになるのは
+callerがdevelopへマージされた後で、PRブランチにコミットした時点ではまだ指定できない
+（[multi-agent/release.md](multi-agent/release.md)「pushトリガーで起動したときは、ワークフロー
+ファイルもdevelop側のものが使われる」も参照）。
+
 ### `npm version` は依存関係の無いところで走る（#1591）
 
 **共有ワークフローはバージョンbumpのために依存関係をインストールしない。**
@@ -230,8 +279,10 @@ main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`か�
 
 - `guchi-apps/issue-deck` — 配置済み。ローカルパス参照（`./.github/workflows/reusable-*.yml`）で
   常に最新を使うカナリア
-- `guchi-apps/vps` — `deploy.yml`はあるが`tag`ジョブが無く、リリースタグを作らない。守るものが無い
-- `docs`・`subpc-setup`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
+- `guchi-apps/vps`・`guchi-apps/subpc` — `deploy.yml`はあるが`tag`ジョブが無く、リリースタグを
+  作らない。守るものが無い（`subpc`の`deploy.yml`はサブPC上のセルフホストランナーで動く。
+  guchi-apps/issue-deck#1616）
+- `docs`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
   `sensor_260218`・`wifi-speed` — `deploy.yml`を持たない
 
 **新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
