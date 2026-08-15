@@ -10,6 +10,7 @@ import {
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
+import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
@@ -17,6 +18,7 @@ import {
 import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { useSettingsData } from "@/hooks/use-settings-data";
 import type { ClaudeModel } from "@/lib/app-settings";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
@@ -25,6 +27,9 @@ type MobileSettingsScreenProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   dispatchConcurrency: number;
+  repositories: ConnectedRepository[];
+  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
+  onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
   onUpdated: (values: AppSettingsValues) => void;
 };
 
@@ -39,6 +44,9 @@ export function MobileSettingsScreen({
   claudeModel,
   claudeModelAssist,
   dispatchConcurrency,
+  repositories,
+  onSetRepositoryHidden,
+  onSetRepositoriesHidden,
   onUpdated,
 }: MobileSettingsScreenProps) {
   const [section, setSection] = useState<SettingsSectionKey | null>(null);
@@ -114,6 +122,13 @@ export function MobileSettingsScreen({
         )}
 
         {section === "account" && <AccountSection currentUser={currentUser} />}
+        {section === "display" && (
+          <RepositoryVisibilitySection
+            repositories={repositories}
+            onSetRepositoryHidden={onSetRepositoryHidden}
+            onSetRepositoriesHidden={onSetRepositoriesHidden}
+          />
+        )}
         {section === "execution" && (
           <ExecutionSettingsSection
             autoRetryLimit={autoRetryLimit}

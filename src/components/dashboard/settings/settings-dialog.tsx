@@ -9,6 +9,7 @@ import {
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
+import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -19,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useSettingsData } from "@/hooks/use-settings-data";
 import { cn } from "@/lib/utils";
 import type { ClaudeModel } from "@/lib/app-settings";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 type SettingsDialogProps = {
@@ -29,6 +31,9 @@ type SettingsDialogProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   dispatchConcurrency: number;
+  repositories: ConnectedRepository[];
+  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
+  onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
   onUpdated: (values: AppSettingsValues) => void;
 };
 
@@ -47,6 +52,9 @@ export function SettingsDialog({
   claudeModel,
   claudeModelAssist,
   dispatchConcurrency,
+  repositories,
+  onSetRepositoryHidden,
+  onSetRepositoriesHidden,
   onUpdated,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
@@ -102,6 +110,13 @@ export function SettingsDialog({
             </div>
             <div className="p-5">
               {section === "account" && <AccountSection currentUser={currentUser} />}
+              {section === "display" && (
+                <RepositoryVisibilitySection
+                  repositories={repositories}
+                  onSetRepositoryHidden={onSetRepositoryHidden}
+                  onSetRepositoriesHidden={onSetRepositoriesHidden}
+                />
+              )}
               {section === "execution" && (
                 <ExecutionSettingsSection
                   autoRetryLimit={autoRetryLimit}

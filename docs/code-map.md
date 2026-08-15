@@ -55,6 +55,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   GitHub Actionsが走る操作は「フリート運用」**へ入れる。混ぜると「保存ボタンがどこまで効くのか
   分からない」という元の状態に戻る。読み取り系のデータ取得は
   [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)へ集約する。
+  **「表示」区分（#1552）はそのどちらでもない「ユーザーごとの画面の見え方」**で、
+  切り替えた時点で即座に効き、GitHubには何も起こらない。中身はリポジトリの表示・非表示
+  （[`settings/repository-visibility-section.tsx`](../src/components/dashboard/settings/repository-visibility-section.tsx)）で、
+  実体は既存の`HiddenRepository`。**切り替える口は左メニュー（`sidebar-nav.tsx`）・スマホの
+  リポジトリ画面（`mobile-repos-screen.tsx`）・この区分の3か所あるが、状態を持つのは
+  `IssueDeckShell`の`repositories`だけ**なので、どこで変えても他へその場で伝わる。
+  一括操作（すべて表示・すべて非表示）だけは`PUT /api/repositories/hidden`にまとめ、
+  1件ずつのトグルは従来の`POST`/`DELETE`のまま。件数の数え方と一括の対象決定は
+  [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
+  **非表示が効く範囲は左メニュー・PR一覧・「ブランチとPRの流れ」・Issue作成の選択肢までで、
+  Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
   元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
