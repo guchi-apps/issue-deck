@@ -20,6 +20,10 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 ただしワークフローの配布方法には**コピー方式**と**参照方式**の2種類があり、参照方式のものは
 手動記録の対象外とする（後述「参照方式のワークフローは sync-state の対象外」）。
 
+**アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）は下の表に載せない。**
+実装を行わず盤面にも載らないため、表の読み方（載っている＝無人実行で実装が回る）が崩れる。
+扱いは後述「`guchi-apps/question`（質問専用・盤面外）」を参照。
+
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `guchi-apps/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
@@ -50,6 +54,61 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 >   done
 > done
 > ```
+
+## `guchi-apps/question`（質問専用・盤面外）
+
+`guchi-apps/question`は**複数リポジトリ横断の質問Issueの置き場**で（#1454）、アプリのコードを
+持たない。画面の「質問する」→「複数のリポジトリ（横断）」で質問Issueがここに作られ、サブPCの
+読み取り専用セッション（`scripts/start-cross-repo-question.sh`）が回答コメントを投稿する。
+参照するのは「そのホストが実行できると申告した全リポジトリ」のチェックアウトであり、
+このリポジトリの中身ではない。
+
+導入前は**Gitリポジトリが空**（コミット0件）で、ラベルもGitHub既定のまま9個だった。#1527で
+次の状態にした（**最終確認日: 2026-08-15**）。
+
+| 項目 | 内容 |
+|---|---|
+| ワークフロー | **参照**（`@workflows/v18`）: `issue-labels.yml`のみ。`on:`は`issues: [closed]`だけ |
+| ラベル | 質問運用に使う11個（`00.check-user`・`01.check-input`・`01.check-answered`・`01.check-blocked`・`11.local`・`80.Priority: High`・`89.Priority: low`・`90.Close: *`4種）。GitHub既定ラベル9個は削除 |
+| CLAUDE.md | あり（新規作成）。「コードを持たない」「ここで実装しない」「盤面に載らない」を明記 |
+| デフォルトブランチ | `main`のまま（実装しないため`develop`を作らない） |
+| 盤面（Projects Status） | **載せない** |
+
+### 判断の理由
+
+- **盤面に載せない。** 載せる条件は`claude-issue-dispatch.yml`を持つこと（`hasClaudeWorkflow`。
+  `src/lib/github/sync-project-status.ts`）で、実装を行わないこのリポジトリには置いていない。
+  質問Issueは#1514で分離した画面の「質問」ビューで見る。載せたい場合の手段は
+  「`claude-issue-dispatch.yml`を置く」か「issue-deck側の掲載条件を広げる」の2つだが、
+  どちらも質問に実装フローの導線（「実装を開始」・リリース）を持ち込むため採らなかった
+- **ラベルは質問運用に使うものだけ配る。** 実装オプション（`21.plan-required`〜`25.artifact-required`）・
+  分類（`30.bug`・`50.feature`など）・`71.manual-step`・`01.check-plan`・`01.check-merge`は、
+  計画もPRも手作業Issueも発生しないため配っていない。**ラベル一覧はGitHub APIから直接引くため
+  （`src/lib/github/issues-api.ts`）、作った時点で画面のラベル選択に出る。DBの再同期は要らない**
+- **`on:`をIssueのcloseだけに絞る。** `push`・`pull_request`はコードもPRも無く発火しない。
+  `schedule`は盤面を持たないのに15分ごとに`GET /api/progress`を叩くだけになる。
+  `issues: opened/edited`は`manual-step-label`ジョブ（#1492）が対象で、`71.manual-step`が
+  未定義のため`gh issue edit`がexit 1でジョブごと落ちる（#975と同じ失敗）——**タグを上げるときも
+  足さない**
+- **`PROGRESS_REPORT_SECRET`は渡していない**（呼ばれる側で`required: false`）。盤面に載らない
+  ため報告先が無く、報告のステップは警告を出してスキップされる
+
+### v18では理由ラベル`01.check-*`は外れない（#1527で実測）
+
+質問Issueをクローズしたときに効くのは`cleanup-on-close`ジョブだけだが、**`@workflows/v18`の
+時点で外すのは`00.check-user`のみ**である。理由ラベル`01.check-*`もまとめて外す改修（#1490）と
+`manual-step-label`ジョブ（#1492）はdevelopに入っているが、**v18より後のコミットのためタグに
+乗っていない**。
+
+```bash
+# タグと develop の差を見る
+git log workflows/v18..origin/develop --oneline -- .github/workflows/reusable-issue-labels.yml
+```
+
+**これはquestion固有ではない。** 2026-08-15時点で`issue-labels.yml`のcallerを持つリポジトリは
+すべて`@workflows/v18`を参照しており、同じ状態にある。次のタグを切って各callerを上げた時点で
+まとめて解消する（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローの
+タグ運用」）。
 
 ## `claude-review-develop.yml`の配布状況（#1470）
 
