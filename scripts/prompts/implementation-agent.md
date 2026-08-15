@@ -124,6 +124,10 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 {{SCREENSHOT_INSTRUCTIONS}}
 
+## 見た目のアーティファクト
+
+{{ARTIFACT_INSTRUCTIONS}}
+
 ## 実装中に得た知見の記録
 
 実装・調査の過程で、次に同じ領域を触る人・エージェントにとって価値のある非自明な知見を得た場合は、それを残してください。**迷った場合はアプリ固有として扱ってください。**

@@ -707,6 +707,49 @@ MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開�
 CI用プレースホルダ（`ci-placeholder`）が入っている値だけは本体の実値で置き換える**（誰も意図して
 入れない値のため）。反映にはそのworktreeのセッションを起こし直す（＝開発サーバーの再起動）が要る。
 
+### 開発サーバーにデータが出ないとき（#1473）
+
+ログインまで通っても、**開発DBは既定で空なので画面には何も出ない。** これは異常ではなく既定の状態で、
+`23.preview-required`で画面を見ようとすると空の一覧を見ることになる。
+
+原因は「開発環境ではデータを取れない」ではなく設定漏れ。**`.env.local`のGitHub App設定がCI用の
+ダミー値（`GITHUB_APP_ID="123456"` / `NEXT_PUBLIC_GITHUB_APP_SLUG="ci-placeholder"`。`ci.yml`と同じ値）の
+まま**で、GitHub Appのインストール導線が成立せず`GithubInstallation`を1件も作れない。
+`POST /api/sync/issues`は`db.repository`を走査する作りなので、再同期しても永久に0件のままになる。
+`PROJECT_V2_OWNER`/`NUMBER`も未設定で、仮にIssueがあっても進捗は全件「未着手」になる。
+**#1419で直したのはSupabase側だけ**で、GitHub App側は残っていた。
+
+**worktreeごとにDBは分かれていない。** 全worktreeの`DATABASE_URL`が同じ`app_issue_deck_dev`を指すため、
+一度入れれば全worktreeの開発サーバーから見える。
+
+見た目・操作の確認だけならダミーデータで足りる。
+
+```bash
+pnpm db:seed:dev
+```
+
+- CIが使っているダミーデータ（`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから
+  投入する薄いラッパー（`scripts/seed-dev-db.sh`）。リポジトリ5件・Issue 52件が入り、進捗はカンバンの
+  全列へ散る（`SEED_PROFILE=dev`のときだけ効く後処理。**未設定時の挙動はCIと同じで変わらない**）。
+- `CI_LOGIN_BYPASS_SECRET`が空なら生成して`.env.local`へ書き込む。**書き込まれた場合は開発サーバーを
+  起こし直す**（`next dev`は起動時にしか`.env.local`を読まない）。
+- 起こし直すと、ログイン画面に「開発用ダミーユーザーでログイン」ボタンが出る。Supabase Authを経由せず、
+  ダミーデータに紐づくバイパス用ユーザー（`ci-screenshot-bot`）で入る。仕組みはCIのスクリーンショット撮影と
+  同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
+- 接続先がローカル（`localhost`/`127.0.0.1`）でなければ投入せず中止する。既存行を書き換える処理を含むため。
+
+**ダミーで埋まらない範囲がある。** 次はGitHub APIと実インストールが要るので、ダミーデータでは空のまま。
+
+| 埋まる | 埋まらない |
+| --- | --- |
+| Issue一覧・Issue詳細・カンバン・検索・お気に入り | PR一覧（`/api/pull-requests`）・ブランチ |
+| ラベル・進捗（DBキャッシュの値） | サブIssue（`/api/issues/sub-issues`） |
+| コメント（ダミーリポジトリ向けの短絡が`/api/issues/comments`にある） | 再同期（`POST /api/sync/issues`）・Webhook・Projectsへの進捗書き込み |
+
+ここまで含めて実データで見たい場合は、開発用GitHub Appの設定が要る（`PREVIEW_MODE=true`を併用して
+書き込み系APIを塞ぐこと。`src/lib/preview-mode.ts`）。実物が無くても見た目だけ確認したい場合は
+`25.artifact-required`（[labels.md](labels.md)「見た目のアーティファクト要否をIssueラベルでトグルする」）。
+
 ## セキュリティ上の前提
 
 プロトコルを登録すると、この起動経路は**任意のWebページから叩ける**ようになる。悪意ある

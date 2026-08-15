@@ -1,4 +1,5 @@
 import {
+  ARTIFACT_REQUIRED_LABEL,
   PREVIEW_REQUIRED_LABEL,
   SCREENSHOT_REQUIRED_LABEL,
 } from "@/lib/github/start-implementation";
@@ -85,6 +86,27 @@ function screenshotInstructions(labelNames: ReadonlySet<string>): string {
   return `このIssueには\`${SCREENSHOT_REQUIRED_LABEL}\`ラベルが付いていないため、Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。`;
 }
 
+/**
+ * 見た目のアーティファクト（#1473）。
+ *
+ * **同じ文面が`scripts/start-issue.sh`・`scripts/generic-start-issue.sh`にもある。**
+ * 起動経路によって指示が変わらないよう、変えるときは3か所そろえる
+ * （`scripts/lib/agent-language.sh`と同じ構造）。
+ */
+function artifactInstructions(labelNames: ReadonlySet<string>): string {
+  if (labelNames.has(ARTIFACT_REQUIRED_LABEL)) {
+    return [
+      `このIssueには\`${ARTIFACT_REQUIRED_LABEL}\`ラベルが付いています。実装・テストが完了したら、変更した画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLをIssueコメントとPR本文の「確認方法」に貼ってください。`,
+      "",
+      "- **アーティファクトは手で書いた再現であって実物ではありません。** 実装との差異は開発サーバーの実画面で必ず確認し、アーティファクトの承認だけをもって「実装が正しい」と扱わないでください。この但し書きはアーティファクト本文の先頭にも書きます。",
+      "- アーティファクトは既定で非公開です。共有するかどうかを決めるのはユーザーです。",
+      "- 開発サーバーのURLと違い、セッションが終了した後も残ります。スマホなど別端末からの確認に向きます。",
+      "- アーティファクトを作れるのはローカルセッションだけです（無人実行では作成できません）。",
+    ].join("\n");
+  }
+  return `このIssueには\`${ARTIFACT_REQUIRED_LABEL}\`ラベルが付いていないため、見た目のアーティファクトの作成は不要です。`;
+}
+
 /** ランチャー（`generic-start-issue.sh`）が組み立てているコメント欄と同じ書式にそろえる */
 function formatComments(
   comments: readonly { author: { login: string }; createdAtLabel: string; body: string }[],
@@ -143,6 +165,7 @@ export function buildImplementationPrompt(params: {
     "{{DEV_PORT}}": PROVIDED_BY_SESSION,
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshotInstructions(labelNames),
+    "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
   };
 
   const filled = Object.entries(replacements).reduce(

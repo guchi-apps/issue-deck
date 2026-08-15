@@ -6,6 +6,10 @@
 // 実行前に `prisma migrate deploy` でスキーマを適用しておくこと。
 // 使い方: DATABASE_URL=mysql://... node scripts/seed-ci-db.mjs
 //
+// Issue #1473: `SEED_PROFILE=dev` を付けて呼ぶと、ローカル開発向けの後処理を追加で行う
+// （scripts/seed-dev-db.sh 経由）。**未設定時の挙動は一切変えない。** CIのスクリーンショット
+// 撮影が同じスクリプトを使っており、既定の投入内容が変わると撮れる画像まで変わるため。
+//
 // scripts/ci-seed-user.mjs（#257）が作成するCIバイパス用ユーザー（存在する場合）を
 // 投入したGithubInstallationにUserInstallationとして紐付ける(#258)。この紐付けが無いと
 // /dashboardのリポジトリ・Issue取得はいずれもUserInstallation経由の絞り込みで空になり、
@@ -96,6 +100,57 @@ const APPROVAL_SAMPLE_ISSUES = [
   },
 ];
 
+// ローカル開発（`SEED_PROFILE=dev`）でだけ流す後処理（#1473）。
+//
+// 既定の投入だけだと `projectStatus` がほぼ null で、カンバンの列が「未着手」しか埋まらない。
+// 「開発環境を起動してもデータが正しく表示されない」の中身の一つがこれなので、開発用途では
+// 進捗を全列に散らし、リポジトリにも実行導線が出るフラグを立てておく。
+//
+// **`upsert` の `update: {}` は2回目以降なにも書き換えない。** ここは投入済みの行に対して
+// 明示的な更新をかける必要があるため、`updateMany` / `update` を使う。
+//
+// Status名は src/lib/issue-progress.ts の PROGRESS_STATUSES と一致させること
+// （このスクリプトはPrisma経由で直接書き込むためsrc配下をimportしない。上の
+// APPROVAL_SAMPLE_ISSUES と同じ理由）。
+const DEV_PROJECT_STATUS_CYCLE = [
+  "Ready",
+  "Planning",
+  "Implementation",
+  "Develop PR",
+  "Develop",
+  "Release",
+  "Done",
+];
+
+async function applyDevProfile(installation) {
+  // 「実装を開始」「ローカルで開始」の導線は、この2つのフラグが立っているリポジトリにしか出ない。
+  const updatedRepositories = await prisma.repository.updateMany({
+    where: { installationId: installation.id },
+    data: { hasClaudeWorkflow: true, hasLocalStartScript: true },
+  });
+
+  // 承認待ちサンプル（APPROVAL_SAMPLE_ISSUES）は意図した進捗を持たせてあるので触らない。
+  const issues = await prisma.issue.findMany({
+    where: {
+      repository: { installationId: installation.id },
+      number: { lte: ISSUES_PER_REPOSITORY },
+    },
+    orderBy: [{ repositoryId: "asc" }, { number: "asc" }],
+    select: { id: true },
+  });
+
+  for (const [index, issue] of issues.entries()) {
+    await prisma.issue.update({
+      where: { id: issue.id },
+      data: { projectStatus: DEV_PROJECT_STATUS_CYCLE[index % DEV_PROJECT_STATUS_CYCLE.length] },
+    });
+  }
+
+  console.log(
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らしました。`,
+  );
+}
+
 async function main() {
   const installation = await prisma.githubInstallation.upsert({
     where: { installationId: INSTALLATION_ID },
@@ -160,6 +215,10 @@ async function main() {
         await upsertDummyIssue(repository, { ...sample, state: "OPEN" });
       }
     }
+  }
+
+  if (process.env.SEED_PROFILE === "dev") {
+    await applyDevProfile(installation);
   }
 
   console.log("CI用ダミーデータのシードが完了しました。");
