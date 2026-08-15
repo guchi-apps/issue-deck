@@ -12,7 +12,7 @@ const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 const VERSION_BUMP_BRANCH_PREFIX = "release/v";
 
 /** タイトル・本文中の`#123`形式のIssue参照 */
-const ISSUE_REFERENCE_PATTERN = /#(\d+)/;
+const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
 
 /**
  * PRのbase/headブランチから種別を判定する。
@@ -46,14 +46,38 @@ export function extractLinkedIssueNumber(pullRequest: {
   title: string;
   body: string | null;
 }): number | null {
+  return extractLinkedIssueNumbers(pullRequest)[0] ?? null;
+}
+
+/**
+ * PRが参照しているIssue番号を、確度の高い順にすべて返す（#1455）。
+ *
+ * 1本のPRで複数のIssueに対応することがあるため、`extractLinkedIssueNumber`（先頭1件）では
+ * 関連を取りこぼす。先頭は「そのブランチが何の作業か」を最もよく表すもの
+ * （`issue-<番号>`ブランチ名 → タイトル → 本文の順）で、以降は同じ順で拾った参照。
+ *
+ * **本文中の`#番号`は単なる言及も混ざる**ため、2件目以降は「対応Issue」ではなく
+ * 「関連Issue」として扱う（画面もその文言で出す）。
+ */
+export function extractLinkedIssueNumbers(pullRequest: {
+  headRef: string;
+  title: string;
+  body: string | null;
+}): number[] {
+  const numbers: number[] = [];
+  const add = (value: number) => {
+    if (!numbers.includes(value)) numbers.push(value);
+  };
+
   const branchMatch = ISSUE_BRANCH_PATTERN.exec(pullRequest.headRef);
-  if (branchMatch) return Number(branchMatch[1]);
+  if (branchMatch) add(Number(branchMatch[1]));
 
   for (const text of [pullRequest.title, pullRequest.body ?? ""]) {
-    const match = ISSUE_REFERENCE_PATTERN.exec(text);
-    if (match) return Number(match[1]);
+    for (const match of text.matchAll(ISSUE_REFERENCE_PATTERN_GLOBAL)) {
+      add(Number(match[1]));
+    }
   }
-  return null;
+  return numbers;
 }
 
 /**

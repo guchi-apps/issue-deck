@@ -34,6 +34,7 @@ export const GITHUB_API_FEATURES = [
   // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
   { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "pull_request_list", label: "PR一覧の取得" },
+  { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "issue_comments", label: "コメント取得" },
   { key: "sub_issues", label: "子Issueの取得" },

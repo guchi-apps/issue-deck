@@ -155,6 +155,43 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
+- **「ブランチとPRの流れ」（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
+  ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
+  俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
+  **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
+  （[`lib/github/branches-api.ts`](../src/lib/github/branches-api.ts)）。消費は**リポジトリあたり
+  1回**（GraphQL。ブランチの存在確認と`main...develop`の差分を1クエリに相乗りさせる）。
+  **ブランチ一覧は列挙しない。** issue-deckには実際に670のブランチがあり（マージ後の削除を
+  自動化していないため`issue-*`が残り続ける）、RESTの一覧はアルファベット順・1ページ100件なので
+  全部読むとリポジトリあたり7回かかるうえ、読めた範囲が名前の並び次第になる。代わりに
+  **進行中のIssueに対応するブランチ（`issue-<番号>`）だけをGraphQLのエイリアスで名指しして引く**。
+  PR一覧と同じく**自動ポーリングを持たず**、画面を開いたときと更新ボタンのときだけ走る
+  （`hooks/use-branch-flow.ts`。一度取った内容は画面を離れても保持する）。
+  この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
+  「どのバージョンで本番へ出たか」を出せないため。組み立ては
+  [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、
+  **レーンはPRのheadブランチと、実在が確認できた作業ブランチの和集合**で作る。
+  **「マージ済みなのにブランチが残っている」は状態として持たない**——`delete_branch_on_merge`が
+  無効で数百本が該当するため、出しても情報にならない（ブランチの掃除は#1478へ分けた）。
+  **IssueとPRの対応は1対1に限らない。** 同じIssueでもブランチが違えばレーンは分かれ（レーンの
+  キーはブランチ名）、1本のPRが複数のIssueを扱う場合は`PullRequestSummary.linkedIssueNumbers`
+  （`extractLinkedIssueNumbers`が確度の高い順に全参照を返す）の2件目以降を「関連Issue」として
+  同じレーンに並べる。**本文の`#番号`には単なる言及も混ざるため、2件目以降は「対応」ではなく
+  「関連」と呼ぶ。** 関連として画面に出したIssueは「ブランチもPRも見つからないIssue」へ
+  重複させない。
+  **既定で畳む「完了」の区切りは、developへのマージではなくmainへの反映に置く**
+  （`isCompletedLane`）。developへ入っただけの変更は次のリリースに乗る進行中の作業なので
+  既定で見え、本番へ出たものだけが「完了も表示」の裏へ回る。本番へ出たかを判定できない
+  （リリースPRを取得できていない）場合は畳む側に倒す。
+  **「どのバージョンで本番へ出たか」も、追加の取得をせずPRのマージ時刻だけで決める。**
+  develop→mainのリリースPRはマージ時点のdevelopをそのままmainへ入れるので、作業PRが
+  developへ入った後**最初にマージされたリリースPR**がその変更を運んだことになる。版はその
+  リリースPRのタイトル（`v3.17.0をmainへリリースする`。文面は
+  `reusable-release-develop-to-main.yml`が作る）から取る。クローズ済みPRの取得は直近30件で
+  打ち切っているが、作業PRが取得できていればその後のリリースPRも必ず取得できている
+  （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
+  無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
+  「バージョン不明」を出す（誤った版を出さないため）。
 - **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
   対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
   `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ

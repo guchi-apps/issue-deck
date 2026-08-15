@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AppSettingsDialog } from "@/components/dashboard/app-settings-dialog";
 import { AskRepoQuestionDialog } from "@/components/dashboard/ask-repo-question-dialog";
+import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
   CheckUserToastViewport,
   type CheckUserToastItem,
@@ -18,6 +19,7 @@ import {
   MobileBottomNav,
   type MobileBottomNavTab,
 } from "@/components/dashboard/mobile-bottom-nav";
+import { MobileFlowScreen } from "@/components/dashboard/mobile/mobile-flow-screen";
 import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
@@ -33,6 +35,7 @@ import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
+import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
@@ -44,6 +47,7 @@ import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import { buildBranchFlow } from "@/lib/branch-flow";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
@@ -102,6 +106,7 @@ export function IssueDeckShell({
     setFilters,
     selectView,
     selectPullRequestView,
+    selectFlowPane,
     selectPullRequest,
     toggleLabel,
     toggleRepo,
@@ -138,6 +143,7 @@ export function IssueDeckShell({
     // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
     // タブ切り替えで、履歴を積まない（#1436）
     selectPullRequestView: selectMobilePullRequestView,
+    selectFlow: selectMobileFlow,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -385,8 +391,15 @@ export function IssueDeckShell({
   // 件数に使わないクローズ済みまで毎回取りに行ってしまう。
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
+  // 「ブランチとPRの流れ」（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
+  // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
+  const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
   const openPullRequests = usePullRequests(
-    isPullRequestPaneActive ? scopeForPullRequestView(filters.prview) : "open",
+    isFlowPaneActive
+      ? "all"
+      : isPullRequestPaneActive
+        ? scopeForPullRequestView(filters.prview)
+        : "open",
   );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
   // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
@@ -424,6 +437,25 @@ export function IssueDeckShell({
   const pullRequestNavCounts = useMemo(
     () => computePullRequestNavCounts(visiblePullRequests, openPullRequests.fetchedAt !== null),
     [visiblePullRequests, openPullRequests.fetchedAt],
+  );
+
+  // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
+  const branchFlowStatus = useBranchFlow(isFlowPaneActive);
+
+  // Issue・ブランチ・PRを1本の流れへ束ねたモデル（#1455）。PRとIssueは既存の取得結果を
+  // そのまま使い、新しくGitHubへ問い合わせるのはブランチ状況だけにしている。
+  const branchFlow = useMemo(
+    () =>
+      buildBranchFlow({
+        repositories: visibleRepositories
+          .filter((repo) => !repo.archived)
+          .filter((repo) => filters.repos.length === 0 || filters.repos.includes(repo.fullName)),
+        // 左メニューのリポジトリ絞り込み・マージ直後に伏せたPRを反映済みの集合
+        pullRequests: visiblePullRequests,
+        issues,
+        branchStatuses: branchFlowStatus.branchStatuses,
+      }),
+    [visibleRepositories, filters.repos, visiblePullRequests, issues, branchFlowStatus.branchStatuses],
   );
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
@@ -626,6 +658,22 @@ export function IssueDeckShell({
                       onDeleteQuickFilter={handleDeleteQuickFilter}
                       onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
                       onSelectPullRequests={selectPullRequests}
+                      onSelectFlow={selectMobileFlow}
+                    />
+                  )}
+
+                  {mobileScreen.kind === "flow" && (
+                    <MobileFlowScreen
+                      flow={branchFlow}
+                      fetchedAt={branchFlowStatus.fetchedAt}
+                      isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+                      error={branchFlowStatus.error ?? openPullRequests.error}
+                      failedRepositories={branchFlowStatus.failedRepositories}
+                      onRefresh={() => {
+                        branchFlowStatus.refresh();
+                        openPullRequests.refresh();
+                      }}
+                      onBack={goBack}
                     />
                   )}
 
@@ -758,6 +806,7 @@ export function IssueDeckShell({
                 activePane={filters.pane}
                 activePullRequestView={filters.prview}
                 onSelectPullRequestView={selectPullRequestView}
+                onSelectFlow={selectFlowPane}
                 navCounts={navCounts}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
@@ -782,7 +831,22 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "pull-requests" ? (
+          {filters.pane === "flow" ? (
+            /* PC: ブランチとPRの流れ（#1455）。一覧と詳細に分かれないため、中央〜右を
+               1カラムで使う。IssueやPRを選ぶとそれぞれのペインへ遷移する */
+            <BranchFlowView
+              flow={branchFlow}
+              fetchedAt={branchFlowStatus.fetchedAt}
+              isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+              error={branchFlowStatus.error ?? openPullRequests.error}
+              failedRepositories={branchFlowStatus.failedRepositories}
+              onRefresh={() => {
+                branchFlowStatus.refresh();
+                openPullRequests.refresh();
+              }}
+              className="hidden flex-1 md:flex"
+            />
+          ) : filters.pane === "pull-requests" ? (
             /* PC: PR一覧（中央）とPR詳細（右）。Issue一覧・詳細と同じ2カラム構成に
                揃えている（#1058・#1087） */
             <>
