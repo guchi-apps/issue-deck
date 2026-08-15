@@ -46,6 +46,12 @@ deploy/             PM2の ecosystem.config.js
   `search-query.ts` などがこの形。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
+  font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
+  元に戻らない（#1442）。小さくしたい場合は `text-base md:text-sm` のように`md`以上に限定する。
+  `cn()`へ`text-sm`を渡すとtailwind-mergeがベースの`text-base`を消してしまう点に注意。
+  取りこぼし対策として、[`app/globals.css`](../src/app/globals.css) に`md`未満で16pxを
+  下回らせないルールを置いている。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 

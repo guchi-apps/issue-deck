@@ -311,7 +311,9 @@ export function MentionTextarea({
           onDragOver={handleDragOver}
           onDragLeave={() => setIsDraggingOver(false)}
           disabled={disabled}
-          className={cn("text-sm", isDraggingOver && "ring-3 ring-ring/50", className)}
+          // iOS Safariはfont-sizeが16px未満の入力欄にフォーカスすると画面を自動拡大するため、
+          // スマホでは16px（text-base）を下回らせない。md以上（PC）は従来どおり14px（#1442）。
+          className={cn("text-base md:text-sm", isDraggingOver && "ring-3 ring-ring/50", className)}
           {...props}
         />
         {trigger && itemCount > 0 && (

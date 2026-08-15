@@ -98,3 +98,28 @@ describe("MentionTextarea 複数画像アップロード", () => {
     await waitFor(() => expect(onUploadingChange).toHaveBeenLastCalledWith(false));
   });
 });
+
+// iOS Safariはfont-sizeが16px未満の入力欄にフォーカスすると画面全体を自動拡大する（#1442）。
+// jsdomでは実効のfont-sizeを測れないため、スマホ幅で効くクラスの方で担保する。
+describe("MentionTextarea の文字サイズ", () => {
+  it("スマホ幅では16px（text-base）で、小さくするクラスはmd以上にしか付かない", () => {
+    const { container } = render(<Harness />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+
+    expect(textarea.classList.contains("text-base")).toBe(true);
+    expect(textarea.classList.contains("text-sm")).toBe(false);
+    expect(textarea.classList.contains("md:text-sm")).toBe(true);
+  });
+
+  it("呼び出し側がclassNameを渡してもtext-baseが消えない", () => {
+    function Wrapped() {
+      const [value, setValue] = useState("");
+      return <MentionTextarea value={value} onChange={setValue} className="min-h-20" />;
+    }
+    const { container } = render(<Wrapped />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+
+    expect(textarea.classList.contains("text-base")).toBe(true);
+    expect(textarea.classList.contains("text-sm")).toBe(false);
+  });
+});
