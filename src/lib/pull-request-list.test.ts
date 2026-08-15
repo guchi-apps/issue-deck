@@ -368,6 +368,25 @@ describe("mergeWarnings", () => {
     ]);
   });
 
+  it("main宛のPRは、CIが通っていても本番デプロイが走ることを必ず伝える（#1548）", () => {
+    expect(
+      mergeWarnings(
+        pullRequest({ baseRef: "main", headRef: "develop", kind: "release", ciState: "success" }),
+      ),
+    ).toEqual(["mainへのマージです。マージすると本番デプロイが走ります。"]);
+  });
+
+  it("main宛でCIも落ちている場合は両方返す（#1548）", () => {
+    expect(
+      mergeWarnings(
+        pullRequest({ baseRef: "main", headRef: "develop", kind: "release", ciState: "failure" }),
+      ),
+    ).toEqual([
+      "mainへのマージです。マージすると本番デプロイが走ります。",
+      "CIが失敗しています。",
+    ]);
+  });
+
   it("CI未通過とAuto-merge有効は両方並べる", () => {
     expect(mergeWarnings(pullRequest({ ciState: "pending", autoMergeEnabled: true }))).toEqual([
       "CIがまだ実行中です。",

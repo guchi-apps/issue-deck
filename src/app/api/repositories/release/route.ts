@@ -15,8 +15,10 @@ import {
   fetchPullRequestMergeable,
   fetchRefCiState,
 } from "@/lib/github/release-api";
+import { GithubApiError } from "@/lib/github/github-api-error";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { isBumpKind } from "@/lib/semver-bump";
 
 /** バンプPRのブランチ名（`release/v1.2.3`）から次バージョンを取り出す */
 function versionFromBranch(ref: string): string | null {
@@ -174,8 +176,13 @@ async function handlePOST(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const owner = payload?.owner;
   const repo = payload?.repo;
+  // バージョンの上げ幅の指定（#1548）。省略時は従来どおりworkflow内のClaudeが判定する。
+  const bumpKind = payload?.bumpKind;
 
   if (typeof owner !== "string" || typeof repo !== "string") {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  if (bumpKind !== undefined && bumpKind !== null && !isBumpKind(bumpKind)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -194,9 +201,15 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "release_workflow_missing" }, { status: 400 });
     }
 
-    await dispatchReleaseWorkflow(owner, repo, token);
+    await dispatchReleaseWorkflow(owner, repo, token, isBumpKind(bumpKind) ? bumpKind : undefined);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    // 上げ幅を指定したのに、workflowがそのinputを持たないリポジトリ（#1548）。GitHubは
+    // `Unexpected inputs provided`の422で落とす。**起動そのものの失敗と混ぜない**——
+    // 自動判定で押し直せば通る、という次の手が画面から読み取れる必要があるため。
+    if (isBumpKind(bumpKind) && error instanceof GithubApiError && error.status === 422) {
+      return NextResponse.json({ error: "bump_kind_unsupported" }, { status: 400 });
+    }
     console.error(`[POST /api/repositories/release] ${owner}/${repo}:`, error);
     return NextResponse.json(
       { error: "github_api_error", message: error instanceof Error ? error.message : String(error) },

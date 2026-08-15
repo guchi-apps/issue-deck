@@ -82,6 +82,15 @@ function openRepository() {
   fireEvent.click(screen.getByText(REPO_SHORT));
 }
 
+/**
+ * 中身が開いた状態にする。**手が要るリポジトリ（CI失敗・マージ待ち・リリース中）は初回に
+ * 自動で開く**ため、そこで`openRepository`を呼ぶと逆に閉じてしまう（#1548）。
+ */
+function ensureRepositoryOpen() {
+  const row = screen.getByText(REPO_SHORT).closest("button");
+  if (row?.getAttribute("aria-expanded") !== "true") openRepository();
+}
+
 function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): RepositoryBranchStatus {
   return {
     repositoryFullName: REPO,
@@ -94,7 +103,13 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
 }
 
 describe("BranchFlowView", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    // リリース起動の二度押し防止は起動時刻をlocalStorageへ置く（#1548）。
+    // 消さないと後続のテストが「リリース起動中…」の状態から始まる。
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
 
   describe("畳む・開く", () => {
     it("既定ではリポジトリを1行に畳み、中身は出さない", () => {
@@ -621,6 +636,176 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("リリースworkflowを起動しますか？")).toBeTruthy();
       expect(screen.getByText("今回反映する内容")).toBeTruthy();
       expect(screen.getByText("#1456 本番へ出したい変更")).toBeTruthy();
+    });
+
+    it("確認ダイアログで上げ幅を選べる（#1548）", () => {
+      renderFlow({ branchStatuses: [unreleased] });
+      openRepository();
+      fireEvent.click(screen.getByText("リリースする"));
+
+      expect(screen.getByText("バージョンの上げ幅")).toBeTruthy();
+      const options = screen.getAllByRole("radio");
+      expect(options.map((option) => option.textContent?.startsWith("自動判定"))).toContain(true);
+      // 既定は自動判定
+      expect(options[0].getAttribute("aria-checked")).toBe("true");
+
+      fireEvent.click(screen.getByText("minor"));
+      expect(screen.getByText("minor").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect(options[0].getAttribute("aria-checked")).toBe("false");
+    });
+
+    it("起動に成功したら、バンプPRが現れるまで押せないままにする（#1548）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+
+      renderFlow({ branchStatuses: [unreleased] });
+      openRepository();
+      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(screen.getByText("起動する"));
+
+      await screen.findByText("リリースを起動しました");
+      expect(screen.getByText("リリース起動中…")).toBeTruthy();
+      expect(screen.queryByText("リリースする")).toBeNull();
+    });
+  });
+
+  describe("mainへのマージ（#1548）", () => {
+    const unreleased = branchStatus({
+      developVsMain: { aheadBy: 3, behindBy: 0 },
+      hasReleaseWorkflow: true,
+    });
+
+    it("openなリリースPRにはマージボタンを出す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1550,
+            title: "v3.22.0をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("マージする")).toBeTruthy();
+    });
+
+    it("押すと本番デプロイが走る旨の確認を挟む", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1550,
+            title: "v3.22.0をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      ensureRepositoryOpen();
+      fireEvent.click(screen.getByText("マージする"));
+
+      expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
+      expect(
+        screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。"),
+      ).toBeTruthy();
+    });
+
+    it("マージ済みのリリースPR（過去の束）にはマージボタンを出さない", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+          makePullRequest({
+            number: 1460,
+            headRef: "issue-1456",
+            linkedIssueNumber: 1456,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-07-01T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+  });
+
+  describe("バージョンバンプPRの表示（#1548）", () => {
+    function makeBumpPullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
+      return makePullRequest({
+        number: 1547,
+        title: "v3.21.0をリリースする",
+        headRef: "release/v3.21.0",
+        kind: "version-bump",
+        // 本文に並ぶリリース対象issueを拾ってしまう状態を再現する
+        linkedIssueNumber: 1503,
+        linkedIssueNumbers: [1503, 1527],
+        state: "open",
+        autoMergeEnabled: true,
+        ciState: "pending",
+        ...overrides,
+      });
+    }
+
+    const unreleased = branchStatus({
+      developVsMain: { aheadBy: 16, behindBy: 0 },
+      hasReleaseWorkflow: true,
+    });
+
+    it("作業レーンではなく束の見出しの中に出し、無関係なIssueを添えない", () => {
+      renderFlow({
+        pullRequests: [makeBumpPullRequest()],
+        issues: [
+          {
+            number: 1503,
+            title: "共有ワークフローの取得に失敗する",
+            repositoryFullName: REPO,
+            state: "open",
+            projectStatus: "Develop",
+          },
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      ensureRepositoryOpen();
+      // レーンとしてのブランチ名は出さず、幹の1行として版を出す
+      expect(screen.queryByText("release/v3.21.0")).toBeNull();
+      expect(screen.getByText("バージョンバンプ v3.21.0")).toBeTruthy();
+      expect(screen.getByText("バージョンバンプ中")).toBeTruthy();
+      expect(screen.getByText(/#1547 v3.21.0をリリースする/)).toBeTruthy();
+      // バンプPRが拾っていた無関係なIssueは出さない
+      expect(screen.queryByText(/Issue #1503/)).toBeNull();
+    });
+
+    it("Auto-mergeが有効な間はマージボタンを出さない（待てば入るため）", () => {
+      renderFlow({ pullRequests: [makeBumpPullRequest()], branchStatuses: [unreleased] });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("Auto-merge有効")).toBeTruthy();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("Auto-mergeが効かず滞留している場合はマージボタンを出す", () => {
+      renderFlow({
+        pullRequests: [makeBumpPullRequest({ autoMergeEnabled: false, ciState: "success" })],
+        branchStatuses: [unreleased],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("developへマージ待ち")).toBeTruthy();
+      expect(screen.getByText("マージする")).toBeTruthy();
     });
   });
 });
