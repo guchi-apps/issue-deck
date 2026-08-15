@@ -65,6 +65,27 @@ describe("SecretsSyncSection", () => {
     expect(await screen.findByText(/失敗: SIGNALY_WEBHOOK_URL/)).toBeTruthy();
   });
 
+  it("同期処理が始まる前に落ちた失敗（件数が全て0）はmessageを出す", async () => {
+    mockFetch([
+      repository({
+        latestRun: {
+          ...repository().latestRun!,
+          status: "FAILED",
+          syncedCount: 0,
+          skippedCount: 0,
+          failedCount: 0,
+          failedKeys: [],
+          message: "sync-secrets.yml がこのリポジトリで見つかりませんでした。",
+        },
+      }),
+    ]);
+    render(<SecretsSyncSection open />);
+
+    expect(
+      await screen.findByText("sync-secrets.yml がこのリポジトリで見つかりませんでした。"),
+    ).toBeTruthy();
+  });
+
   it("実行中は同期ボタンを押せない（二重起動の防止）", async () => {
     mockFetch([
       repository({ latestRun: { ...repository().latestRun!, status: "QUEUED", finishedAt: null } }),
