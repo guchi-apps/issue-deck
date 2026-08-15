@@ -180,6 +180,21 @@ export function IssueList({
   // セッションの報告が途絶えたまま回り続けるのを止めるための現在時刻（#1439）。
   // 30秒ごとに更新されれば足りる（判定のしきい値は5分）
   const now = useNow();
+  // 押した行を即座にハイライトするための楽観表示（#1597）。選択の正はURLクエリ
+  // （`?issue=`）で、その更新はReactのトランジション＝低優先度の更新として入るため、
+  // 右カラム（IssueDetail・プロパティパネル）の再描画が終わるまでハイライトが動かない。
+  // ここは行のクリックで直接（緊急の更新として）持ち、正の選択が追いついたら捨てる。
+  const [optimisticSelectedId, setOptimisticSelectedId] = useState<string | null>(null);
+  // 正の選択が変わったら楽観表示は用済み。別経路（確認待ちトースト・本文中のIssueリンク）で
+  // 選択が変わった場合も、こちらが古い行を指し続けないようここで揃える。effectで同期すると
+  // 描画が1回余分に走るため、レンダー中に比較して更新する（topbar.tsxの検索欄と同じ形）。
+  const [syncedSelectedIssueId, setSyncedSelectedIssueId] = useState(selectedIssueId);
+  if (selectedIssueId !== syncedSelectedIssueId) {
+    setSyncedSelectedIssueId(selectedIssueId);
+    setOptimisticSelectedId(null);
+  }
+  const highlightedIssueId = optimisticSelectedId ?? selectedIssueId;
+
   // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
   // Issueを開く。選択モードのときだけチェックボックスを出す
   const [isSelecting, setIsSelecting] = useState(false);
@@ -229,10 +244,17 @@ export function IssueList({
       >
         <button
           type="button"
-          onClick={() => (isSelecting ? toggleSelected(issue.id) : onSelectIssue(issue))}
+          onClick={() => {
+            if (isSelecting) {
+              toggleSelected(issue.id);
+              return;
+            }
+            setOptimisticSelectedId(issue.id);
+            onSelectIssue(issue);
+          }}
           className={cn(
             "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
-            selectedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
+            highlightedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
             isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
           )}
         >

@@ -246,6 +246,13 @@ function buildRepository({
       ...(bumpPullRequest ? [bumpPullRequest] : []),
     ].some((pullRequest) => pullRequest.ciState === "failure"),
     needsUserMerge: openLanePullRequests.some(requiresUserMerge),
+    // 既定で出す束を「次のリリースに乗る分」まで畳んだぶん（#1586）、畳んだ行で件数だけ出す。
+    // 本番へ出た版に紐づいたまま残る手作業があるため、リポジトリ全体のレーンから数える。
+    openManualStepCount: countOpenManualSteps([
+      ...activeLanes,
+      ...releaseGroups.flatMap((group) => group.lanes),
+      ...unassignedLanes,
+    ]),
     // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
@@ -500,12 +507,24 @@ function toReleaseGroup(
 ): BranchFlowReleaseGroup {
   return {
     ...group,
-    openManualStepCount: group.lanes.reduce(
-      (count, lane) =>
-        count + lane.manualSteps.filter((manualStep) => manualStep.state === "open").length,
-      0,
-    ),
+    openManualStepCount: countOpenManualSteps(group.lanes),
   };
+}
+
+/**
+ * 未完了の手作業Issueの件数（#1586）。
+ *
+ * **番号で重複を除く。** 同じIssueが複数のブランチで作業された場合、手作業は起点Issue番号で
+ * 引いているためレーンの本数だけ現れ、そのまま数えると二重に数えることになる。
+ */
+export function countOpenManualSteps(lanes: BranchFlowLane[]): number {
+  return new Set(
+    lanes.flatMap((lane) =>
+      lane.manualSteps
+        .filter((manualStep) => manualStep.state === "open")
+        .map((manualStep) => manualStep.number),
+    ),
+  ).size;
 }
 
 function isManualStepIssue(issue: BranchFlowIssueSource): boolean {

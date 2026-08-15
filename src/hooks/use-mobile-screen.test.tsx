@@ -7,16 +7,23 @@ import { recordHistoryPush, resetHistoryStack } from "@/lib/history-stack";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
-const push = vi.fn();
-const replace = vi.fn();
 const back = vi.fn();
 let currentSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace, back }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back }),
   usePathname: () => "/dashboard",
   useSearchParams: () => currentSearchParams,
 }));
+
+// URLの更新はネイティブのHistory APIで行う（#1597。router.pushだとサーバーを往復する）
+const push = vi.spyOn(window.history, "pushState").mockImplementation(() => {});
+const replace = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+
+/** pushState/replaceStateの第3引数（URL） */
+function urlOf(call: unknown[]): string {
+  return String(call[2]);
+}
 
 const issues = [{ id: "1001" }, { id: "1002" }] as unknown as Issue[];
 const repositories = [] as ConnectedRepository[];
@@ -41,7 +48,7 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
 
     expect(push).toHaveBeenCalledTimes(1);
     expect(replace).not.toHaveBeenCalled();
-    const url = push.mock.calls[0][0] as string;
+    const url = urlOf(push.mock.calls[0]);
     expect(url).toContain("mscreen=issue-detail");
     expect(url).toContain("missue=1001");
     expect(url).toContain("issue=1001");
@@ -52,7 +59,7 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
 
     act(() => result.current.selectTab("repos"));
 
-    expect(push.mock.calls[0][0] as string).not.toContain("issue=1001");
+    expect(urlOf(push.mock.calls[0])).not.toContain("issue=1001");
   });
 
   it("絞り込みシート内の操作（silent）は履歴を積まない", () => {
@@ -83,7 +90,7 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
     expect(back).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
     expect(replace).toHaveBeenCalledTimes(1);
-    const url = replace.mock.calls[0][0] as string;
+    const url = urlOf(replace.mock.calls[0]);
     expect(url).toContain("mscreen=issues");
     expect(url).toContain("missue=1001");
   });

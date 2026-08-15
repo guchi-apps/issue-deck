@@ -4,15 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 
-const push = vi.fn();
-const replace = vi.fn();
 let currentSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace, back: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   usePathname: () => "/dashboard",
   useSearchParams: () => currentSearchParams,
 }));
+
+// URLの更新はネイティブのHistory APIで行う（#1597。router.pushだとサーバーを往復する）
+const push = vi.spyOn(window.history, "pushState").mockImplementation(() => {});
+const replace = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+
+/** pushState/replaceStateの第3引数（URL） */
+function urlOf(call: unknown[]): string {
+  return String(call[2]);
+}
 
 function renderFilters(query = "") {
   currentSearchParams = new URLSearchParams(query);
@@ -32,7 +39,7 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
 
     expect(push).toHaveBeenCalledTimes(1);
     expect(replace).not.toHaveBeenCalled();
-    expect(push.mock.calls[0][0]).toContain("view=favorites");
+    expect(urlOf(push.mock.calls[0])).toContain("view=favorites");
   });
 
   it("ビューを切り替えたら選択中Issueも同じ1回の更新で畳む", () => {
@@ -41,7 +48,7 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
     act(() => result.current.selectView("favorites"));
 
     expect(push).toHaveBeenCalledTimes(1);
-    expect(push.mock.calls[0][0]).not.toContain("issue=");
+    expect(urlOf(push.mock.calls[0])).not.toContain("issue=");
   });
 
   it("絞り込み条件（キーワード・状態・ラベル）は履歴を積まない", () => {

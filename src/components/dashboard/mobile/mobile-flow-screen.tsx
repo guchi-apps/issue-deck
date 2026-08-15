@@ -16,7 +16,7 @@ type MobileFlowScreenProps = {
 };
 
 /**
- * スマホの「ブランチとPRの流れ」画面（#1455）。
+ * スマホの「ブランチ」画面（#1455）。
  *
  * PC版と同じ`BranchFlowView`をそのまま使い、ヘッダー左の戻る導線とボトムナビぶんの余白だけを
  * 差し込む（`mobile-pull-requests-screen.tsx`と同じ形）。この画面はボトムナビのタブを持たず
