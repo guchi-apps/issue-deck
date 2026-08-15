@@ -8,6 +8,8 @@
  * ポーリングを持つフックごと持ち込まずにこの関数だけを使う。
  */
 
+import type { BumpKind } from "@/lib/semver-bump";
+
 /** エラーコードを画面に出す文言へ直す。`useReleaseStatus`の取得側と同じ文面に揃えている */
 export function releaseErrorMessage(
   status: number,
@@ -22,6 +24,11 @@ export function releaseErrorMessage(
   if (errorCode === "release_workflow_missing") {
     return "このリポジトリにはリリース用workflow（release-develop-to-main.yml）がありません。";
   }
+  // 上げ幅の指定（`bump_kind`）を受け取れない世代のworkflowを持つリポジトリ（#1548）。
+  // GitHubは`Unexpected inputs provided`の422で落とすが、そのままでは何をすればよいか読めない。
+  if (errorCode === "bump_kind_unsupported") {
+    return "このリポジトリのリリースworkflowは上げ幅の指定に未対応です。自動判定で起動してください。";
+  }
   if (errorCode === "github_api_error" && message) {
     return message;
   }
@@ -31,14 +38,17 @@ export function releaseErrorMessage(
 /**
  * `POST /api/repositories/release`。成功すれば何も返さず、失敗すれば
  * {@link releaseErrorMessage} の文言を持つ`Error`を投げる。
+ *
+ * `bumpKind`を渡すとバージョンの上げ幅をworkflowへ指定する（#1548）。**渡さない場合は
+ * 従来どおりinput無しでdispatchし、workflow内のClaudeがコード差分から判定する。**
  */
-export async function requestRelease(repoFullName: string): Promise<void> {
+export async function requestRelease(repoFullName: string, bumpKind?: BumpKind): Promise<void> {
   const [owner, repo] = repoFullName.split("/");
 
   const res = await fetch("/api/repositories/release", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ owner, repo }),
+    body: JSON.stringify({ owner, repo, ...(bumpKind ? { bumpKind } : {}) }),
   });
   const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));

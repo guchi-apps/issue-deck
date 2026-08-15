@@ -48,9 +48,29 @@ issueのラベルではなく、main/develop間の実際のコード差分の内
 Codeステップ（`claude-code-action`、`--json-schema`による構造化出力）が`git diff origin/main
 origin/develop`・`git log origin/main..origin/develop`を確認し、semverに基づき
 major/minor/patchのいずれかと判断根拠を返す。判定ステップ自体が失敗した場合や、返り値が
-major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。判断が誤っている
-と思われる場合は人間が生成されたPR上でバージョンを直接修正する想定（release-to-mainスキルの
-「迷う場合はユーザーに確認する」に相当）。
+major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。
+
+### 画面から上げ幅を指定する（#1548）
+
+**「生成されたPR上でバージョンを直接修正する」は実際には間に合わない。** バンプPRはCI通過後に
+auto-mergeでdevelopへ入るため、PRが出てから直す時間がほとんど無い（`Allow auto-merge`を切るか
+PRを閉じるところから始める必要がある）。そこで、**起動する時点で上げ幅を選べる**ようにしてある。
+
+- 入口はissue-deckの画面2か所（ヘッダーのロケットボタン／「ブランチとPRの流れ」の
+  「リリースする」）の確認ダイアログ。既定は`auto`で、選ばなければ従来どおり自動判定になる。
+- 画面 → `POST /api/repositories/release`（`bumpKind`） → `workflow_dispatch`の`bump_kind` input
+  → callerが`reusable-release-develop-to-main.yml`の`bump-kind`へ渡す、という一本道で届く。
+- **指定があっても判定ステップは走らせる。** 上げ幅と一緒に利用者向けの更新履歴
+  （`changelog` → `RELEASE_CHANGELOG`）を作っているため、飛ばすと更新履歴が空になる。
+  指定値で判定結果を上書きし、判断根拠（PR本文の「バージョンの判断根拠」）には
+  「issue-deckの画面から◯◯を指定しました（コード差分からの自動判定は△△）」を残す。
+- 画面の選択肢に添える基準（major/minor/patchの説明）は`src/lib/semver-bump.ts`の
+  `BUMP_KIND_CRITERIA`にあり、**判定プロンプトに書いてある基準と同じ文面**にしてある。
+  片方を直すときはもう片方も揃える。
+- **`bump_kind` inputを持たないcallerのリポジトリでは指定できない。** GitHubが422
+  （`Unexpected inputs provided`）を返すため、画面は「上げ幅の指定に未対応です（自動判定で
+  起動してください）」と出す。自動判定での起動はinputを送らないので、未配布のリポジトリでも
+  今までどおり動く。
 
 ## トリガー
 
