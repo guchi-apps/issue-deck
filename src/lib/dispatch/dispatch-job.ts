@@ -154,6 +154,17 @@ export type DispatchJobView = {
    * 理由に行を落としたり例外にしたりすると、キュー全体が見えなくなる方が害が大きい。
    */
   issueTitle: string | null;
+  /**
+   * DBキャッシュのIssueのid（#1625）。**行のタイトルをissue-deckのIssue詳細への導線にするために返す。**
+   *
+   * 番号（`issueNumber`）だけでは画面から詳細を開けない。選択中のIssueはidで持っており
+   * （`?issue=<id>`）、リポジトリと番号からidを引くのは画面側の仕事ではないため、タイトルと
+   * 同じ引き当て（`resolveDispatchIssues`）でここへ入れる。
+   *
+   * **引けなければ`null`で、そのときはリンクにしない**（`issueTitle`と同じ条件で揃う）。押しても
+   * 何も起きない行を作るより、番号だけのプレーンな行のままにする方がよい。
+   */
+  issueId: string | null;
   targetHost: string;
   /** 何をするジョブか（#1332）。省略しない（画面が起動ジョブと制御ジョブを取り違えないため） */
   kind: DispatchJobKind;
