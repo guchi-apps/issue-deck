@@ -622,7 +622,7 @@ RESTで「ディレクトリ一覧」→「ファイルごとの内容」と読�
 約4秒**で揃う（[`lib/github/workflow-tags.ts`](../src/lib/github/workflow-tags.ts)）。
 GraphQLのレート制限はRESTと別枠のため、RESTの5,000回/時も消費しない。
 
-同じ手は「ブランチとPRの流れ」でも使っている（#1455。[code-map.md](code-map.md)）。
+同じ手は「ブランチ」画面でも使っている（#1455。[code-map.md](code-map.md)）。
 **リポジトリ数・ファイル数に比例して往復が増える作りにしない**のが共通の判断。
 
 まとめ取りで注意する点は2つ。

@@ -39,7 +39,7 @@ type SidebarNavProps = {
   /** PRペインで表示中の状態別ビュー（#1312） */
   activePullRequestView: PullRequestViewId;
   onSelectPullRequestView: (view: PullRequestViewId) => void;
-  /** 「ブランチとPRの流れ」を開く（#1455） */
+  /** 「ブランチ」画面を開く（#1455） */
   onSelectFlow: () => void;
   navCounts: Record<NavViewId, number>;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
@@ -211,7 +211,7 @@ export function SidebarNav({
               )}
             >
               <GitBranch className="size-3.5 text-muted-foreground" />
-              ブランチとPRの流れ
+              ブランチ
             </button>
           </li>
         </ul>

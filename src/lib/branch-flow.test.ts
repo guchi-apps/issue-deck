@@ -372,6 +372,7 @@ describe("buildBranchFlow", () => {
       activeLaneCount: 0,
       hasCiFailure: false,
       needsUserMerge: false,
+      openManualStepCount: 0,
       releaseInProgress: false,
       deploy: null,
     });
@@ -1061,9 +1062,43 @@ describe("サマリー行の集計", () => {
       activeLaneCount: 2,
       hasCiFailure: true,
       needsUserMerge: true,
+      openManualStepCount: 0,
       releaseInProgress: false,
       deploy: null,
     });
+  });
+
+  it("未完了の手作業を数える。同じIssueが複数レーンにあっても1件（#1586）", () => {
+    const manualStepBody = ["## 関連", "", "- 起点Issue #137"].join("\n");
+    const flow = build({
+      issues: [
+        issue({ number: 137, title: "利用規約を整理" }),
+        issue({
+          number: 184,
+          title: "[手作業] VPS: リダイレクトを外す",
+          projectStatus: "Ready",
+          labels: ["71.manual-step"],
+          body: manualStepBody,
+        }),
+        issue({
+          number: 185,
+          title: "[手作業] VPS: 旧設定を消す",
+          projectStatus: "Ready",
+          state: "closed",
+          labels: ["71.manual-step"],
+          body: manualStepBody,
+        }),
+      ],
+      // 同じIssueを2本のブランチで扱っている＝手作業も2レーンにぶら下がる
+      pullRequests: [
+        pullRequest({ number: 181, headRef: "issue-137", linkedIssueNumber: 137 }),
+        pullRequest({ number: 182, headRef: "fix/137-followup", linkedIssueNumber: 137 }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    // openの#184だけを、レーンの本数によらず1件として数える
+    expect(flow.repositories[0].summary.openManualStepCount).toBe(1);
   });
 
   it("マージ済みのPRのCI失敗は数えない（もう手を動かす対象ではない）", () => {

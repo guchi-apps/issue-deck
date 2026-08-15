@@ -58,7 +58,7 @@ export function RepositoryVisibilitySection({
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
         チェックを外したリポジトリは、左メニューのリポジトリ一覧・Pull Request一覧・
-        「ブランチとPRの流れ」・Issue作成時のリポジトリ選択肢に出なくなります。
+        「ブランチ」画面・Issue作成時のリポジトリ選択肢に出なくなります。
         <span className="font-medium">Issue一覧と各ビューの件数は変わりません。</span>
       </p>
 

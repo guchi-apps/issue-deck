@@ -341,7 +341,7 @@ export function ReleaseStatusButton({
               {releaseRepoFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {/* 上げ幅の選択は「ブランチとPRの流れ」画面の起動ボタンと同じコンポーネント（#1548）。
+          {/* 上げ幅の選択は「ブランチ」画面の起動ボタンと同じコンポーネント（#1548）。
               現在のバージョンはこの画面が既に取得しているmain側の版を渡す */}
           <ReleaseBumpKindSelect
             value={bumpKind}

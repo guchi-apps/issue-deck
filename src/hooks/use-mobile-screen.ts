@@ -38,7 +38,7 @@ export type MobileScreen =
   // #1436でボトムナビのタブを持つようになったため、Issue一覧と同じく遷移元（`origin`）で
   // 戻る導線の有無を切り替える（ホームの「Pull Request」からのドリルダウンでのみ出す）
   | { kind: "pull-requests"; origin: "tab" | "home" }
-  // ブランチとPRの流れ（#1455）。ボトムナビのタブは4つのまま増やさず（#1436）、
+  // ブランチ（#1455）。ボトムナビのタブは4つのまま増やさず（#1436）、
   // ホームからのドリルダウンだけで開く
   | { kind: "flow" }
   | {
@@ -316,7 +316,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen],
   );
 
-  // ホームから「ブランチとPRの流れ」へ遷移する（#1455）。Issue・PRの絞り込み条件は持たない画面
+  // ホームから「ブランチ」画面へ遷移する（#1455）。Issue・PRの絞り込み条件は持たない画面
   // なので、渡すのは画面種別だけ。戻る導線はヘッダーの戻るボタン（goBack）が受け持つ。
   const selectFlow = useCallback(() => navigate({ screen: "flow" }), [navigate]);
 

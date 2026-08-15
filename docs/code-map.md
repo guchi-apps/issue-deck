@@ -64,7 +64,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   一括操作（すべて表示・すべて非表示）だけは`PUT /api/repositories/hidden`にまとめ、
   1件ずつのトグルは従来の`POST`/`DELETE`のまま。件数の数え方と一括の対象決定は
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
-  **非表示が効く範囲は左メニュー・PR一覧・「ブランチとPRの流れ」・Issue作成の選択肢までで、
+  **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
 - **`input` / `textarea` / `select` の文字サイズをスマホ幅で16px未満にしない。** iOS Safariは
   font-sizeが16px未満の入力欄にフォーカスが入ると画面全体を自動で拡大し、一度拡大すると
@@ -227,7 +227,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   選んだ場合は一覧の項目を優先して使うので、選んでから表示までの速さは変わらない。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
-- **「ブランチとPRの流れ」（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
+- **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`）は、新しく取りに行くのを
   ブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
   **PRからは分からない「そのブランチが実在するか」だけ**を`GET /api/branch-flow`で取る
@@ -263,8 +263,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `BranchFlowRepositorySummary`）で、以降の再取得ではユーザーの開閉を上書きしない。
   **展開した中身は「バージョンへ何が合流したか」の流れ図**（#1510）。`main`と`develop`の
   2本の縦レールに対し、**横線1本がリリース（develop→mainのマージ）**で、その下にぶら下がる枝が
-  その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**未リリースの束と
-  ひとつ前の版まで**で、それ以前は「さらに前のバージョンを表示」で開く。この形にしたことで
+  その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**次のリリースに乗る分まで**
+  （未リリースの束＋まだdevelopへ向かっているレーン）で、本番へ出た版の束と「どの版で出たか
+  特定できないレーン」は「リリース済みのバージョンを表示」で開く（#1586。#1510当初は
+  ひとつ前の版まで出していたが、済んだ変更が「次に何が出るか」を押し下げていた）。
+  **畳んだぶんに残る未完了の手作業（`71.manual-step`）だけは束の外へ出して常に見せる**——
+  版が出た後も残る作業で、畳んだ束と一緒に隠すと画面のどこにも現れなくなるため。
+  同じ理由で、畳んだリポジトリ行にも件数（`BranchFlowRepositorySummary.openManualStepCount`）を
+  出す。**ただし初回に自動で開く条件には加えない**（手作業はこの画面で押すものではない）。
+  この形にしたことで
   「developへマージ済み」「main未反映」「vX.Y.Zで本番反映」のピルは**どの横線の下にいるか**が
   表すようになり、レーンに残るピルは上段（マージ待ち・PR未作成・クローズ）だけになった。
   レールが占める幅は固定（PC 3.35rem・スマホ 2.6rem）なので、スマホでも横スクロールは出ない。

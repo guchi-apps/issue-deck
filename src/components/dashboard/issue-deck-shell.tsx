@@ -403,7 +403,7 @@ export function IssueDeckShell({
   // 件数に使わないクローズ済みまで毎回取りに行ってしまう。
   const isPullRequestPaneActive =
     filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
-  // 「ブランチとPRの流れ」（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
+  // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
   // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
@@ -908,7 +908,7 @@ export function IssueDeckShell({
           )}
 
           {filters.pane === "flow" ? (
-            /* PC: ブランチとPRの流れ（#1455）。一覧と詳細に分かれないため、中央〜右を
+            /* PC: ブランチ（#1455）。一覧と詳細に分かれないため、中央〜右を
                1カラムで使う。IssueやPRを選ぶとそれぞれのペインへ遷移する */
             <BranchFlowView
               flow={branchFlow}

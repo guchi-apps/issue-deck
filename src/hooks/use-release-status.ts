@@ -193,7 +193,7 @@ export function useReleaseStatus(
     setIsTriggering(true);
     setError(null);
     try {
-      // 起動そのものは「ブランチとPRの流れ」画面のボタンと同じ関数を通す（#1510）
+      // 起動そのものは「ブランチ」画面のボタンと同じ関数を通す（#1510）
       await requestRelease(repoFullName, bumpKind);
       // 起動直後に状態を取り直して、実行中runやバンプPRの出現を素早く反映する。
       setReloadKey((k) => k + 1);
