@@ -389,6 +389,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `owner/repo#番号`が入るunique列）を1本引いて`Issue.dispatchPendingAt`へ合流させ、
   振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
   **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
+  同じく**質問Issueは「未着手」「実行中」ではなく専用の「質問」ビューに出す**（#1514）。質問Issueは
+  Projectに載らずStatusが常に`Ready`扱いになり、回答を読んで承認した後は`00.check-user`も外れるため、
+  ビューが無いとcloseするまで「未着手」に居座る。判定材料はタイトル接頭辞
+  （`lib/github/ask-claude.ts`の`isAskRepoQuestionIssue`。`[質問] `と旧形式`質問: `の両方）で、
+  ラベルにもStatusにも現れないため`NavView`の`questionOnly`/`excludeQuestions`という専用条件にしている。
+  **`excludeQuestions`は`qaAnswerPendingAt`の特例より先に判定する**（順序が逆だと回答待ちの質問Issueが
+  「実行中」へ抜ける）。「ユーザーの確認待ち」からは除外しない（回答が届いた合図なので出し続ける）。
   引く側を`lib/dispatch/pending-dispatch.ts`に分けているのは、`lib/dispatch/jobs.ts`が
   セッション経由でGitHub Appの認証（読み込み時点で`GITHUB_APP_*`を要求する）を引きずるため。
   Issue一覧にその資格情報を要求させない。

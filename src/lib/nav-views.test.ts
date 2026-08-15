@@ -8,11 +8,26 @@ import {
   resolveStateOnViewChange,
 } from "@/lib/nav-views";
 
+describe("navViews", () => {
+  it("「質問」ビューは手作業待ちと未着手のあいだに並ぶ（#1514）", () => {
+    const ids = navViews.map((view) => view.id);
+    expect(ids.slice(ids.indexOf("manual-step"), ids.indexOf("not-started") + 1)).toEqual([
+      "manual-step",
+      "question",
+      "not-started",
+    ]);
+  });
+});
+
 describe("getNavViewDefaultState", () => {
   it("状態を要求しないビューはopen、「main反映済(直近)」はall", () => {
     expect(getNavViewDefaultState("all")).toBe("open");
     expect(getNavViewDefaultState("favorites")).toBe("open");
     expect(getNavViewDefaultState("recently-merged")).toBe("all");
+  });
+
+  it("質問ビューは「完了していない質問」を出すためopen（#1514）", () => {
+    expect(getNavViewDefaultState("question")).toBe("open");
   });
 });
 
