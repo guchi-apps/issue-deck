@@ -443,6 +443,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
   読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
   足すと同じ役が2つになる）。
+- **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
+  worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
+  既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は
+  `scripts/lib/fleet-status.sh`の純粋関数にあり、tmux・gh・gitを叩くのは入口だけなので、
+  出力を固定したfixtureで検証できる（`src/lib/fleet-status.test.ts`）。**LLMを使わず、
+  画面（`capture-pane`）も読まない計器**で、判断はしない。計画が前提としたSHAからの変化を見せる
+  `scripts/lib/plan-base.sh`（`<!-- plan-base: <SHA> -->`。**止めず、見せるだけ**）と対で、
+  設計は[multi-agent/gates.md](multi-agent/gates.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
