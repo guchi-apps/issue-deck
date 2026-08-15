@@ -144,6 +144,20 @@
   }
 }
 
+/* iOS Safariはfont-sizeが16px未満のinput・textarea・selectにフォーカスが入ると
+   画面全体を自動で拡大し、一度拡大すると自力では元に戻らない（#1442）。
+   個々の入力欄でtext-sm等を指定してしまう事故を繰り返さないよう、md未満では
+   16pxを下回らせない。Tailwind v4のユーティリティは@layer utilities内にあり、
+   レイヤー外のこのルールはセレクタの詳細度によらずそれらより優先される。
+   キーボードを開かない（＝拡大も起こらない）チェックボックス・ラジオは対象外。 */
+@media (width < 48rem) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    font-size: 1rem;
+  }
+}
+
 /* 角丸四角形のボタン向けローディング表示。animate-spinによる回転は円形にしか
    自然に見えないため、四角形の外周をなぞるようstroke-dashoffsetを動かす（#603）。 */
 @keyframes border-trace {
