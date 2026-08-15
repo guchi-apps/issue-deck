@@ -186,6 +186,14 @@ async function handlePOST(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
+    // 起動前にworkflowの有無を確かめる（#1538）。無いリポジトリでdispatchすると、GitHubの
+    // 生の404本文がそのまま画面へ出て「何が足りないのか」が読み取れないため、ここで止めて
+    // 専用のエラーコードを返す。判定は取得側と同じキャッシュを通るので追加の消費はほぼ無い。
+    const available = await releaseWorkflowExists(owner, repo, token);
+    if (!available) {
+      return NextResponse.json({ error: "release_workflow_missing" }, { status: 400 });
+    }
+
     await dispatchReleaseWorkflow(owner, repo, token);
     return NextResponse.json({ ok: true });
   } catch (error) {

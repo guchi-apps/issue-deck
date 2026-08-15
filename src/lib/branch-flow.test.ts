@@ -68,8 +68,9 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
   return {
     repositoryFullName: REPO,
     checkedBranches: ["main", "develop"],
-          existingBranches: ["main", "develop"],
+    existingBranches: ["main", "develop"],
     developVsMain: null,
+    hasReleaseWorkflow: false,
     ...overrides,
   };
 }
@@ -344,6 +345,7 @@ describe("buildBranchFlow", () => {
           checkedBranches: ["main", "develop"],
           existingBranches: ["main", "develop"],
           developVsMain: { aheadBy: 0, behindBy: 0 },
+          hasReleaseWorkflow: false,
         },
       ],
     });
@@ -708,22 +710,27 @@ describe("extractManualStepOrigin", () => {
 });
 
 describe("リリース起動の可否（canTriggerRelease）", () => {
-  const repositories = [{ fullName: REPO, private: false, hasClaudeWorkflow: true }];
+  const repositories = [{ fullName: REPO, private: false }];
 
   function buildRelease(input: {
     pullRequests?: PullRequestSummary[];
     aheadBy?: number;
-    hasClaudeWorkflow?: boolean;
+    hasReleaseWorkflow?: boolean;
+    /** ブランチ状況そのものが取得できていない場合 */
+    branchStatusMissing?: boolean;
   }) {
     return buildBranchFlow({
-      repositories: input.hasClaudeWorkflow === false
-        ? [{ fullName: REPO, private: false, hasClaudeWorkflow: false }]
-        : repositories,
+      repositories,
       pullRequests: input.pullRequests ?? [],
       issues: [],
-      branchStatuses: [
-        branchStatus({ developVsMain: { aheadBy: input.aheadBy ?? 3, behindBy: 0 } }),
-      ],
+      branchStatuses: input.branchStatusMissing
+        ? []
+        : [
+            branchStatus({
+              developVsMain: { aheadBy: input.aheadBy ?? 3, behindBy: 0 },
+              hasReleaseWorkflow: input.hasReleaseWorkflow ?? true,
+            }),
+          ],
     }).repositories[0];
   }
 
@@ -731,8 +738,14 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     expect(buildRelease({}).canTriggerRelease).toBe(true);
   });
 
-  it("リリース用workflowを持たないリポジトリでは押せない", () => {
-    expect(buildRelease({ hasClaudeWorkflow: false }).canTriggerRelease).toBe(false);
+  it("リリース用workflowを持たないリポジトリでは押せない（#1538）", () => {
+    const repository = buildRelease({ hasReleaseWorkflow: false });
+    expect(repository.canRelease).toBe(false);
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  it("ブランチ状況を取得できていなければ押せない", () => {
+    expect(buildRelease({ branchStatusMissing: true }).canTriggerRelease).toBe(false);
   });
 
   it("未リリースの変更が無ければ押せない", () => {

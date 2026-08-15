@@ -56,13 +56,10 @@ function renderFlow(input: {
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
   failedRepositories?: string[];
-  hasClaudeWorkflow?: boolean;
   onRefresh?: () => void;
 }) {
   const flow = buildBranchFlow({
-    repositories: [
-      { fullName: REPO, private: false, hasClaudeWorkflow: input.hasClaudeWorkflow ?? false },
-    ],
+    repositories: [{ fullName: REPO, private: false }],
     pullRequests: input.pullRequests ?? [],
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
@@ -91,6 +88,7 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
     checkedBranches: ["main", "develop"],
     existingBranches: ["main", "develop"],
     developVsMain: null,
+    hasReleaseWorkflow: false,
     ...overrides,
   };
 }
@@ -541,24 +539,30 @@ describe("BranchFlowView", () => {
   });
 
   describe("リリース起動ボタン", () => {
-    const unreleased = branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } });
+    const unreleased = branchStatus({
+      developVsMain: { aheadBy: 3, behindBy: 0 },
+      hasReleaseWorkflow: true,
+    });
 
     it("未リリースの変更があり、リリース用workflowを持つときだけ出す", () => {
-      renderFlow({ hasClaudeWorkflow: true, branchStatuses: [unreleased] });
+      renderFlow({ branchStatuses: [unreleased] });
       openRepository();
       expect(screen.getByText("リリースする")).toBeTruthy();
     });
 
-    it("リリース用workflowが無ければ出さない", () => {
-      renderFlow({ hasClaudeWorkflow: false, branchStatuses: [unreleased] });
+    it("リリース用workflowが無ければ出さない（#1538）", () => {
+      renderFlow({
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
       openRepository();
       expect(screen.queryByText("リリースする")).toBeNull();
     });
 
     it("未リリースの変更が無ければ出さない", () => {
       renderFlow({
-        hasClaudeWorkflow: true,
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0 } })],
+        branchStatuses: [
+          branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0 }, hasReleaseWorkflow: true }),
+        ],
       });
       openRepository();
       expect(screen.queryByText("リリースする")).toBeNull();
@@ -566,7 +570,6 @@ describe("BranchFlowView", () => {
 
     it("リリースPRが動いている間は出さない", () => {
       renderFlow({
-        hasClaudeWorkflow: true,
         pullRequests: [
           makeReleasePullRequest({
             number: 183,
@@ -583,7 +586,6 @@ describe("BranchFlowView", () => {
 
     it("押すと今回反映する内容を確認ダイアログに出す", () => {
       renderFlow({
-        hasClaudeWorkflow: true,
         pullRequests: [
           makeReleasePullRequest({
             number: 1452,
