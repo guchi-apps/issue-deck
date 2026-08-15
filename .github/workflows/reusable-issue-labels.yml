@@ -79,6 +79,13 @@ name: Issue Progress (reusable)
 # **issue-deckへ届かない間、これらのジョブは対象を1件も見つけられず何もしない。**
 # ラベルという代替の判断材料はもう無い。取りこぼしはissue-deckの復旧後に
 # workflow_dispatch(develop-merge-sweep)またはrun再実行で回収する。
+#
+# manual-step-labelジョブだけは進捗ではなく条件系ラベルを扱う(#1492)。タイトルが`[手作業]`で
+# 始まるIssueへ`71.manual-step`を付ける。このラベルは付いているかどうかでissue-deckの画面が
+# 変わる(「手作業待ち」ビューに並び、エージェントへ送る導線が消え、実行者向けの案内パネルが
+# 出る)ため、付け忘れると**エージェントへ送る導線が出たままの、ただのIssue**になる。
+# 起票経路が3つある(issue-deckの作成ダイアログ・エージェントの`gh issue create`・GitHubから
+# 直接)以上、どの経路も通る最後の地点で担保できるのはIssueのopenイベントだけなので、ここに置く。
 
 
 on:
@@ -585,6 +592,68 @@ jobs:
               echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
             fi
           done <<< "$ISSUE_NUMBERS"
+
+  manual-step-label:
+    # タイトルが`[手作業]`で始まるIssueへ`71.manual-step`を自動で付ける(#1492)。
+    #
+    # 手作業Issueの規約(docs/multi-agent/labels.md「デプロイ後などに残るユーザーの手作業は
+    # Issueとして起票する」)では、タイトルを`[手作業] <実行する場所>: <やること>`に揃え、
+    # ラベルに`71.manual-step`を付けることになっている。**しかしラベルの付与を担保するものが
+    # どこにも無かった。** 実装エージェントはプロンプトの指示に従って`gh issue create --label`を
+    # 付けるだけで、忘れても誰も気付かず、人がissue-deckの作成ダイアログやGitHubから直接
+    # 起票する経路には指示すら届かない。ラベルが無い手作業Issueは「手作業待ち」ビューに
+    # 現れず、Issue詳細でも案内パネル(ManualStepPanel)ではなく「実装を開始」が出るため、
+    # **エージェントへ送れる普通のIssueに見えてしまう。**
+    #
+    # 判定をタイトルに寄せるのは、規約でプレフィックスが決まっており、3つの起票経路すべてで
+    # 同じ形になるため(ラベルと違い、リポジトリにラベル定義が無くても書ける)。
+    #
+    # **付けるだけで、外しはしない。** タイトルからプレフィックスを消したときにラベルまで
+    # 剥がすと、人が意図して付けたラベルをワークフローが取り消すことになる。「付け忘れを
+    # 埋める」以上のことはしない。
+    #
+    # editedも拾うのは、起票時にプレフィックスを付け忘れて後からタイトルを直す経路が実際に
+    # あるため。付与済みなら何もせずに終わるので、本文だけの編集で再発火しても害はない。
+    #
+    # ラベル定義が無いリポジトリでは`gh issue edit --add-label`がexit 1で落ちる(#975)ため、
+    # cleanup-on-closeと同じく`gh label list`と突き合わせてから呼ぶ。ラベルが無いこと自体は
+    # そのリポジトリへラベル体系を配れていないという別の問題なので、警告に留めて落とさない。
+    if: |
+      github.event_name == 'issues' &&
+      (github.event.action == 'opened' || github.event.action == 'edited')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      # タイトルはユーザー入力なので、run:本文へ展開せずenv経由でのみ参照する(script injection対策)
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+    steps:
+      - name: タイトルが[手作業]で始まるIssueへ 71.manual-step を付与する
+        run: |
+          set -euo pipefail
+          prefix='[手作業]'
+          if [ "${ISSUE_TITLE#"$prefix"}" = "$ISSUE_TITLE" ]; then
+            echo "タイトルが $prefix で始まらないため何もしません: $ISSUE_TITLE"
+            exit 0
+          fi
+          # grep -q は一致した時点で終了するため、pipefail下ではgh側がSIGPIPE(141)で落ちて
+          # パイプライン全体の終了ステータスが1になりうる。判定を取り違えないよう、
+          # 出力を変数へ受けてから突き合わせる
+          attached="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+          if grep -qx "71.manual-step" <<< "$attached"; then
+            echo "issue #$ISSUE_NUMBER には既に 71.manual-step が付与されています"
+            exit 0
+          fi
+          defined="$(gh label list --json name --jq '.[].name' --limit 200)"
+          if grep -qx "71.manual-step" <<< "$defined"; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "71.manual-step"
+            echo "issue #$ISSUE_NUMBER へ 71.manual-step を付与しました"
+          else
+            echo "::warning::ラベル '71.manual-step' がリポジトリに存在しないため付与をスキップします"
+          fi
 
   cleanup-on-close:
     # main-pr-mergedのDone遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
