@@ -395,6 +395,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
+- **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
+  [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
+  （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
+  （`formatQuestionListCount`）・左メニューとスマホのホームの色（`countUnconfirmedQuestions`）が
+  同じ関数を通す。**画面ごとに条件を書き足さない。**
+  - **「未確認」は回答が届いていて未読のものだけで、回答待ちは含めない。** 未確認は
+    *いま読める*ものを指す合図で、質問を投げた直後から点けると回答が返ってきたかどうかを
+    そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
+    同じ。開いた時点で既読）に乗せる——質問だけ別の基準を作ると、同じ行の中でドットとラベルが
+    食い違う。
+  - **左メニューの件数は確認済みも含めた総数のままで、色だけが変わる**（`NavCount`の
+    `emphasis="unread"`＝数字の文字色）。塗りつぶしの丸（`emphasis="attention"`）は
+    「人が動くまで進まないもの」（確認待ち・作業待ち）専用で、読めば済む質問を同じ強さで
+    出すと、上から順に手を動かせば盤面が進むという並びの読み方が崩れる。件数の見た目は
+    PC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
+    [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
+  - 総数と未確認の差は、手作業と同じく一覧のヘッダー（`3件・未確認1件`）で説明する。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、

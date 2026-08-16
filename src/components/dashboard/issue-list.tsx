@@ -39,6 +39,11 @@ import {
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import {
+  formatQuestionListCount,
+  resolveQuestionState,
+  type QuestionState,
+} from "@/lib/question-attention";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
 
@@ -166,6 +171,35 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
   );
 }
 
+/**
+ * 質問Issueの状態ラベル（#1796）。**「質問」ビューに限らず、質問Issueが並ぶ行すべてに出す。**
+ * 状態はIssue自体の性質で、どのビューから見ても同じものだから。
+ *
+ * 読み終わったもの（`confirmed`）と質問以外（null）には何も出さない——一覧の大半を占める
+ * 通常のIssueにまでラベルが増えると、隣に並ぶGitHubのラベルが読めなくなる。
+ */
+function QuestionStateBadge({ state }: { state: QuestionState | null }) {
+  if (state !== "unconfirmed" && state !== "waiting") return null;
+  const unconfirmed = state === "unconfirmed";
+  return (
+    <span
+      title={
+        unconfirmed
+          ? "回答が届いていますが、まだ開いていません"
+          : "質問を投げたところで、まだ回答が届いていません"
+      }
+      className={cn(
+        "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+        unconfirmed
+          ? "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
+          : "bg-blue-500/15 text-blue-700 ring-blue-500 dark:text-blue-400",
+      )}
+    >
+      {unconfirmed ? "未確認" : "回答待ち"}
+    </span>
+  );
+}
+
 // グループ表示中は各行のリポジトリ名表示がヘッダーと重複するため省略する（#849）
 function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
   return (
@@ -284,11 +318,16 @@ export function IssueList({
   const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
 
   // 「ユーザーの作業待ち」だけは、左メニューと同じ「いま実行できる件数」を先に出し、
-  // 差である前提待ちを添える（#1763）。他のビューは今までどおり並んでいる行数。
+  // 差である前提待ちを添える（#1763）。「質問」は総数に未確認の内訳を添える（#1796。
+  // 左メニューの数字は総数のままで、色でしか未確認の有無が出ないため）。
+  // 他のビューは今までどおり並んでいる行数。
+  const listedCount = issues.length + pinnedCount;
   const countLabel =
     (view === "manual-step" && manualStepReadiness
       ? formatManualStepListCount(issues, manualStepReadiness)
-      : null) ?? `${issues.length + pinnedCount}件`;
+      : null) ??
+    (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    `${listedCount}件`;
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -391,6 +430,7 @@ export function IssueList({
           </p>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center gap-1">
+              <QuestionStateBadge state={resolveQuestionState(issue)} />
               {nonStatusLabels(issue.labels).map((label) => (
                 <span
                   key={label.name}
