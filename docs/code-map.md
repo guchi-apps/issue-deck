@@ -441,6 +441,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **そのうえで、issue-deckが配る運用自動化のcheck-runは集約に数えない**（#1799。
+  `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
+  CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
+  （`claude-review-develop.yml`）・コンフリクト自動解消・共有知識の提案なども同じheadコミットに
+  check-runを付ける。とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、
+  通ったらマージする**ワークフローなので、`wait-for-ci` → `risk-check` → `claude-review` →
+  `auto-merge`のいずれかがPRの開いている間ずっと実行中で、**自動マージされるPRは一度も
+  「CI通過」を表示できなかった**。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
+  ままで、ボタンが効いていないように見えていた（#1799。PR #1798の実測では`lint-and-build`の
+  完了が13:53:49・`ci.yml`のジョブが出揃ったのが13:53:55なのに対し、`review / auto-merge`の
+  完了はマージ後の13:54:27）。同じ詰まりでマージボタンが押せなかった事例は
+  [multi-agent/labels.md](multi-agent/labels.md)の「`00.check-user`はレビュー完了後に付ける」にもある。
+  外すのはファイル名で分かる運用自動化だけで、`ci.yml`・`deploy.yml`・`version-tag-check.yml`
+  などの検査系、リポジトリ固有のワークフロー、外部CIのcommit statusはそのまま数える
+  （**知らないものは数える**側へ倒し、CIを見落とさないようにする）。除いた結果が空になる場合は
+  除く前をそのまま使う——CIを持たないリポジトリでCI状態が一律「不明」になり、PRが
+  「実行中」ビューから出られなくなるのを避けるため。
 - **コンフリクト有無（`mergeable`）は、そのCI状態と同じ1回のGraphQLで取る**（#1742。
   `fetchPullRequestRollup` → `fetchPullRequestCiState`）。`mergeable`はRESTだとPRの単体取得でしか
   返らないため、PR一覧に出すとPR1件につき1回APIが増える——これが理由でPR一覧は長らく

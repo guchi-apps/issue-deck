@@ -22,6 +22,20 @@ function rollupResponse(rollup: unknown) {
   return { data: { repository: { object: { statusCheckRollup: rollup } } } };
 }
 
+/** GitHub Actions発のcheck-runノード。`workflowFile`はcallerのファイル名（#1799） */
+function checkRun(status: string, conclusion: string | null, workflowFile: string) {
+  return {
+    __typename: "CheckRun",
+    status,
+    conclusion,
+    checkSuite: {
+      workflowRun: {
+        workflow: { resourcePath: `/owner/repo/actions/workflows/${workflowFile}` },
+      },
+    },
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -87,6 +101,75 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "failure" },
         { status: "pending", conclusion: null },
+      ],
+    });
+  });
+
+  it("運用自動化（レビュー・自動マージ等）のcheck-runは集約から外す（#1799）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml"),
+            // CIの完了を待って動くジョブ。数えるとPRが開いている間ずっと「CI実行中」になる。
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml"),
+            checkRun("QUEUED", null, "issue-labels.yml"),
+          ],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "pending",
+      checks: [{ status: "completed", conclusion: "success" }],
+    });
+  });
+
+  it("ワークフローが分からないチェック（外部CI・他のアプリ）は数える", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml"),
+            { __typename: "StatusContext", state: "PENDING" },
+          ],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "pending",
+      checks: [
+        { status: "completed", conclusion: "success" },
+        { status: "pending", conclusion: null },
+      ],
+    });
+  });
+
+  it("運用自動化しか無いリポジトリでは、除く前のチェックをそのまま返す", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "SUCCESS",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "issue-labels.yml"),
+            checkRun("COMPLETED", "SKIPPED", "claude-review-develop.yml"),
+          ],
+        },
+      }),
+    );
+
+    await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
+      state: "success",
+      checks: [
+        { status: "completed", conclusion: "success" },
+        { status: "completed", conclusion: "skipped" },
       ],
     });
   });
