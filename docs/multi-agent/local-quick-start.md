@@ -1504,8 +1504,11 @@ worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前
 ```bash
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run --size  # ディスク使用量も測る（遅い）
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --issue 123 --force  # 残ったものを1件だけ強制削除
 ```
+
+走査中は`走査中 N/M`が出る。169件で20秒ほどかかり、`--size`を付けるとさらに40秒ほど増える（#1680）。
 
 「残すworktree」の各行には**どうすれば消せるか**が1行で出る（#1192）。未コミットの変更や未pushの
 コミットが残っているものは`--issue <番号> --force`で消せる（何が失われるかを表示してから消す）。
