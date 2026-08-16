@@ -1,5 +1,8 @@
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type {
+  DispatchSessionReapReason,
+  DispatchSessionView,
+} from "@/lib/dispatch/session-state";
 
 /**
  * あるIssueに紐づくセッションを1件選び、画面へ出す形にする（#1264）。
@@ -187,6 +190,81 @@ export function isSessionWaitingInput(session: DispatchSessionView | null): bool
 export function compactIssueSessionLabel(session: DispatchSessionView): string {
   const summary = summarizeIssueSession(session);
   return `${formatDispatchHostName(session.host)}・${summary.shortLabel}`;
+}
+
+/**
+ * 自動終了までの残り時間の表示（#1817）。
+ *
+ * サブPCの`scripts/reap-sessions.sh`は、条件をすべて満たしたセッションを猶予（既定5分）の後に
+ * `tmux kill-session`で畳む。**その猶予を待っている間、画面には「応答を終えています」としか
+ * 出ておらず、このまま消えるのか残るのかが読み取れなかった。**
+ *
+ * **判定はここでやり直さない。** 畳む条件にはworktreeがcleanか・コミットがpush済みかという
+ * サブPCのファイルシステムにしか無い事実が含まれ、画面側では同じ判定を組み立てられない。
+ * 組み立てようとすると必ずずれ、**終わらないセッションに終了予告が出る**。ここは運ばれてきた
+ * 予定（`reapAt`・`reapReason`）を言い方に直すだけ。
+ */
+export type SessionReapNotice = {
+  /** ピル・一覧行に出す短い言い方。例:「あと3分で自動終了」 */
+  label: string;
+  /** なぜ終わるのか・畳まれた後どうなるか。1行で添える */
+  detail: string;
+  /** 期限まで1分を切っている（次の巡で畳まれる）か */
+  imminent: boolean;
+};
+
+/** 理由コード（`reap-sessions.sh`が判定した経路）から、画面の言い方へ */
+const REAP_REASON_TEXT: Record<DispatchSessionReapReason, string> = {
+  ISSUE_CLOSED: "Issueがcloseされているため",
+  PR_MERGED: "PRがマージ済みのため",
+  HANDOFF_PR_OPEN: "PRを作成しレビューへ引き渡し済みのため",
+  HANDOFF_NO_PR: "PRを作らずにローカル作業を終えているため",
+  QUESTION_CLOSED: "質問Issueがcloseされているため",
+  QUESTION_IDLE: "質問セッションが放置されているため",
+};
+
+/**
+ * 横断質問セッション（#1454）は畳まれても会話を引き継がない（cwdが質問Issue間で共有される
+ * ため`--continue`が別の質問を拾う。#1648）。**実装セッションと同じ案内を出さない。**
+ */
+const QUESTION_REAP_REASONS = new Set<DispatchSessionReapReason>(["QUESTION_CLOSED", "QUESTION_IDLE"]);
+
+/**
+ * 期限を過ぎた予定を出し続けない上限（ミリ秒）。
+ *
+ * 期限が来れば次の巡（既定30秒）で畳まれるが、回収を止めている（`SESSION_IDLE_MINUTES=0`）・
+ * pollerが古い・落ちている場合は畳まれないまま予定だけが残る。**そのときに「まもなく自動終了」を
+ * 出し続けると、いつまでも終わらない終了予告になる**ので、少し過ぎたら黙る。
+ */
+const REAP_NOTICE_STALE_MS = 2 * 60 * 1000;
+
+export function describeSessionReap(
+  session: DispatchSessionView,
+  now: Date = new Date(),
+): SessionReapNotice | null {
+  // 終わったセッションに終了予告を出さない（`summarizeIssueSession`が状態を優先するのと同じ理由）
+  if (session.state !== "ALIVE") return null;
+  // **時刻と理由が揃っているときだけ出す。** 理由の無い終了予告は、勝手に消されるとしか読めない
+  if (!session.reapAt || !session.reapReason) return null;
+
+  const deadline = new Date(session.reapAt).getTime();
+  if (Number.isNaN(deadline)) return null;
+  const remainingMs = deadline - now.getTime();
+  if (remainingMs < -REAP_NOTICE_STALE_MS) return null;
+
+  // 切り捨て。残り3分10秒を「あと4分」と出すより、早めに言う方が実際の畳まれ方に近い
+  // （pollerの巡は最大30秒遅れるため、期限ちょうどには畳まれない）
+  const minutes = Math.floor(remainingMs / 60_000);
+  const imminent = minutes < 1;
+  const suffix = QUESTION_REAP_REASONS.has(session.reapReason)
+    ? "、このまま操作が無ければ自動で終了します。続きを聞くときは「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
+    : "、このまま操作が無ければ自動で終了します。worktreeは残るので、次に起動すると前回の続きから再開します。";
+
+  return {
+    label: imminent ? "まもなく自動終了" : `あと${minutes}分で自動終了`,
+    detail: `${REAP_REASON_TEXT[session.reapReason]}${suffix}`,
+    imminent,
+  };
 }
 
 /** 一覧のバッジなど、1語で出したい場所向けの短い表現。通常の実行中はnull（出さない） */

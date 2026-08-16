@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import {
   isRevivedSession,
   nextEscalatedState,
+  parseSessionReapReason,
   resolveSessionState,
   resolveStartingActivityTransition,
   shouldEscalateSession,
@@ -49,6 +50,10 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     activityAt: session.activityAt?.toISOString() ?? null,
     remoteControlUrl: session.remoteControlUrl,
     previewUrl: session.previewUrl,
+    // 畳む予定（#1817）。**保存されている理由コードも読み直しで検証する**（列はStringなので、
+    // 古い版が書いた・知らないコードが残っていることがある）
+    reapAt: session.reapAt?.toISOString() ?? null,
+    reapReason: parseSessionReapReason(session.reapReason),
   };
 }
 
@@ -208,6 +213,17 @@ export async function reportDispatchSessions(params: {
         : ((previous?.activity ?? null) as DispatchSessionActivity | null),
       claudeStarting: report.claudeStarting,
     });
+    // 畳む予定（#1817）。**送ってきた巡の値でそのまま置き換える。** 回収スクリプトは毎巡
+    // 判定し直し、条件を満たさなくなれば予定を消すので、前の巡の値を残す意味が無い（残すと
+    // 作業が再開したセッションに終了予告が出たままになる）。
+    // 古いpollerは項目そのものを送ってこない（`undefined`）ので、そのときは触らない。
+    const reap =
+      report.reapAt === undefined
+        ? {}
+        : {
+            reapAt: report.reapAt === null ? null : new Date(report.reapAt),
+            reapReason: report.reapReason ?? null,
+          };
 
     await db.dispatchSession.upsert({
       where: {
@@ -229,6 +245,7 @@ export async function reportDispatchSessions(params: {
         escalatedAt: escalate ? now : null,
         // 1巡目の報告で既に止まっている場合（起動から猶予を過ぎてからpollerが最初に見た場合）
         ...(startingTransition === "enter" ? { activity: "NOT_STARTED", activityAt: now } : {}),
+        ...reap,
       },
       update: {
         repositoryFullName: report.repositoryFullName,
@@ -242,8 +259,17 @@ export async function reportDispatchSessions(params: {
         // **`previewUrl`だけは残す。** あれはworktreeに固定のポートを指すので次のセッションでも
         // 繋がる一方、報告は起動時の1回だけで、その時点の行が`GONE`だと（`ALIVE`の行しか
         // 更新しないため）捨てられて二度と載らない。
+        // **畳む予定（#1817）も捨てる。** 前のセッションに出ていた「あと3分で自動終了」が、
+        // 起動し直した直後のセッションにそのまま出るのを防ぐ（古いpollerで`reap`が空のときも）
         ...(revived
-          ? { activity: null, activityAt: null, remoteControlUrl: null, firstSeenAt: now }
+          ? {
+              activity: null,
+              activityAt: null,
+              remoteControlUrl: null,
+              firstSeenAt: now,
+              reapAt: null,
+              reapReason: null,
+            }
           : {}),
         // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**
         // （立ち上がり直した行では、捨てた後の状態から立て直す）
@@ -251,6 +277,8 @@ export async function reportDispatchSessions(params: {
           ? { activity: "NOT_STARTED" as const, activityAt: now }
           : {}),
         ...(startingTransition === "leave" ? { activity: null, activityAt: null } : {}),
+        // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡の値を入れる）
+        ...reap,
       },
     });
 

@@ -127,6 +127,58 @@ export function parseRemoteControlUrl(value: unknown): string | null {
   return url.toString();
 }
 
+/**
+ * セッションを自動で畳む理由（#1817）。**サブPCの`scripts/reap-sessions.sh`が判定した経路**で、
+ * 値そのものはあちらの`hold_until_reap`が書く。
+ *
+ * **文言は運ばず、コードだけを運ぶ。** 画面に出す言い方をスクリプト側に持たせると、同じ状態が
+ * ログと画面で2通りの言い方になり、直すときに片方だけ変わる（`shortLabel`を`label`と同じ分岐で
+ * 作っているのと同じ理由）。
+ */
+export const SESSION_REAP_REASONS = [
+  /** Issueがcloseされた */
+  "ISSUE_CLOSED",
+  /** `issue-<番号>`のPRがマージされた */
+  "PR_MERGED",
+  /** PRを作り、`11.local`を外してレビューへ引き渡した（#1541） */
+  "HANDOFF_PR_OPEN",
+  /** PRを作らずにローカル作業を終えた（#1600） */
+  "HANDOFF_NO_PR",
+  /** 横断質問セッションで、質問Issueがcloseされた（#1454） */
+  "QUESTION_CLOSED",
+  /** 横断質問セッションが放置されている（#1648） */
+  "QUESTION_IDLE",
+] as const;
+
+export type DispatchSessionReapReason = (typeof SESSION_REAP_REASONS)[number];
+
+/**
+ * 畳む理由として受け入れる値。**知らないコードはnullへ落とす。**
+ *
+ * サブPCのスクリプトは`~/apps/issue-deck`のチェックアウトから走り、issue-deck本体より
+ * 新しいことも古いこともある（`docs/multi-agent/subpc-dispatch.md`）。知らないコードで報告
+ * ごと弾くと、そのホストのセッションが全部「消えた」と判定される（受け口は1件でも壊れていたら
+ * 全体を拒否する）ため、**この項目だけを落として残りは通す。**
+ */
+export function parseSessionReapReason(value: unknown): DispatchSessionReapReason | null {
+  if (typeof value !== "string") return null;
+  return (SESSION_REAP_REASONS as readonly string[]).includes(value)
+    ? (value as DispatchSessionReapReason)
+    : null;
+}
+
+/**
+ * 畳む予定の時刻として受け入れる値（ISO8601）。パースできなければnull。
+ *
+ * 理由コードと同じく、**壊れていてもこの項目だけを落とす**（報告全体は通す）。
+ */
+export function parseSessionReapAt(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 40) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
 /** pollerが1セッションについて報告してくる生の値 */
 export type DispatchSessionReport = {
   tmuxSessionName: string;
@@ -143,6 +195,16 @@ export type DispatchSessionReport = {
    * 「新しいpollerが見たうえで、止まってはいない」で、これを受けて`NOT_STARTED`を解く。
    */
   claudeStarting?: boolean;
+  /**
+   * 自動で畳む予定（#1817）。ISO8601。**猶予待ちのセッションでだけ埋まり、それ以外はnull**。
+   *
+   * `claudeStarting`と同じく、**`undefined`（項目そのものが無い）と`null`は別物**。無いのは
+   * 古いpollerで、そのホストについては何も判断できないため既存の値を触らない。`null`は
+   * 「新しいpollerが見たうえで、畳む予定は無い」で、これを受けて予定を消す。
+   */
+  reapAt?: string | null;
+  /** 畳む理由（#1817）。`reapAt`と対で扱う */
+  reapReason?: DispatchSessionReapReason | null;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -175,6 +237,12 @@ export type DispatchSessionView = {
   remoteControlUrl: string | null;
   /** tailnetへ出した開発サーバーのURL（#1265）。`23.preview-required`のセッションでだけ埋まる */
   previewUrl: string | null;
+  /**
+   * 自動で畳む予定（#1817）。畳む条件が揃い、猶予が経つのを待っているセッションでだけ埋まる。
+   * 画面に出す形にするのは`describeSessionReap`（`issue-session.ts`）。
+   */
+  reapAt: string | null;
+  reapReason: DispatchSessionReapReason | null;
 };
 
 /**
@@ -385,6 +453,15 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     claudeStarting = rawStarting;
   }
 
+  // 畳む予定（#1817）。**壊れていても報告全体は通す**（この項目だけを落とす）。時刻と理由は
+  // 揃って初めて意味を持つので、片方でも読めなければ両方nullにする（理由の無い終了予告を
+  // 画面へ出さない）
+  const hasReapField = "reapAt" in input || "reapReason" in input;
+  const reapAt = parseSessionReapAt(input.reapAt);
+  const reapReason = parseSessionReapReason(input.reapReason);
+  const reap =
+    reapAt === null || reapReason === null ? { reapAt: null, reapReason: null } : { reapAt, reapReason };
+
   return {
     tmuxSessionName,
     repositoryFullName,
@@ -392,5 +469,7 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     paneDead: input.paneDead,
     paneDeadStatus,
     ...(claudeStarting === undefined ? {} : { claudeStarting }),
+    // 古いpollerは送ってこない。`undefined`のまま残すと既存の値を触らない
+    ...(hasReapField ? reap : {}),
   };
 }

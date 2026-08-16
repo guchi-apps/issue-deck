@@ -25,6 +25,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    reapAt: null,
+    reapReason: null,
     firstSeenAt: "2026-08-14T09:00:00.000Z",
     // pollerが1巡ごとに更新するので、生きている限り常に「今」に近い
     lastReportedAt: NOW.toISOString(),
@@ -116,6 +118,42 @@ describe("IssueSessionStatus", () => {
 
     expect(screen.getByText("たった今")).toBeTruthy();
     expect(screen.getByText(/サブPC・実行中/)).toBeTruthy();
+  });
+
+  /**
+   * #1817。猶予待ちの数分間、画面には「応答を終えています」としか出ておらず、このまま消えるのか
+   * 残るのかが読み取れなかった。**畳まずに出す**（次に何が起きるかは、押す気になったときだけ
+   * 要る情報ではない）。
+   */
+  it("自動終了までの残り時間と理由を、畳まずに出す", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    render(
+      <IssueSessionStatus
+        session={session({
+          activity: "RESPONDED",
+          activityAt: NOW.toISOString(),
+          reapAt: "2026-08-14T12:03:30.000Z",
+          reapReason: "PR_MERGED",
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.getByText("あと3分で自動終了")).toBeTruthy();
+    expect(screen.getByText(/PRがマージ済みのため/)).toBeTruthy();
+  });
+
+  it("畳む予定が無ければ残り時間を出さない", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    render(
+      <IssueSessionStatus session={session({ activity: "RESPONDED" })} dispatch={makeDispatch()} />,
+    );
+
+    expect(screen.queryByText(/自動終了/)).toBeNull();
   });
 
   it("入力待ちのときだけRemote Controlの導線を出す", () => {

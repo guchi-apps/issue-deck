@@ -51,6 +51,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    reapAt: null,
+    reapReason: null,
     ...overrides,
   };
 }
@@ -114,6 +116,26 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} />);
     expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
     expect(screen.getByText("issue-deck・実行中・たった今")).toBeTruthy();
+  });
+
+  // #1817。Issue詳細と同じ`describeSessionReap`を通す（同じ状態が画面によって違う言い方に
+  // ならないようにする）。理由の1行はここには出さない（行が2倍になるため）
+  it("自動終了までの残り時間を行の末尾に足す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[
+          makeSession({
+            activity: "RESPONDED",
+            activityAt: NOW.toISOString(),
+            reapAt: new Date(NOW.getTime() + 3 * 60_000 + 30_000).toISOString(),
+            reapReason: "HANDOFF_PR_OPEN",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("あと3分で自動終了")).toBeTruthy();
+    expect(screen.queryByText(/引き渡し済みのため/)).toBeNull();
   });
 
   it("タイトルが引けなければ番号だけを出す（穴埋めの文言を作らない）", () => {

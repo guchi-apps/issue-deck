@@ -785,6 +785,32 @@ claude_start_pending() {
   fi
 }
 
+# 畳む予定（#1817）。回収スクリプト（`reap-sessions.sh`）が「畳む条件は揃っていて、あとは猶予が
+# 経つのを待っているだけ」と判定したセッションにだけ置く状態ファイル（`.reap`）を、そのまま
+# 報告に載せる。
+#
+# **ここでは判定をしない。** 判定材料（worktreeがcleanか・push済みか・Issueとの関係）は
+# 回収スクリプトが持っており、pollerは運ぶだけ（`docs/multi-agent/gates.md`「計器」）。
+# 読めない・無い場合は両方nullで、画面には何も出ない。
+#
+# **報告は毎巡`reap_sessions`の後に行う**ので、載るのは常にその巡の結論になる。
+session_reap_json() {
+  local session="$1" line at reason iso
+  line="$(session_state_read_reap "$session" 2>/dev/null || true)"
+  if [[ ! "$line" =~ ^([0-9]+)[[:space:]]+([A-Z_]+)$ ]]; then
+    printf '{"reapAt":null,"reapReason":null}'
+    return 0
+  fi
+  at="${BASH_REMATCH[1]}"
+  reason="${BASH_REMATCH[2]}"
+  iso="$(date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if [[ -z "$iso" ]]; then
+    printf '{"reapAt":null,"reapReason":null}'
+    return 0
+  fi
+  jq -nc --arg at "$iso" --arg reason "$reason" '{reapAt: $at, reapReason: $reason}'
+}
+
 # そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
 #
 # **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
@@ -821,9 +847,10 @@ report_sessions() {
       --argjson paneDead "$dead_json" \
       --argjson paneDeadStatus "$status_json" \
       --argjson claudeStarting "$(claude_start_pending "$session_name")" \
+      --argjson reap "$(session_reap_json "$session_name")" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
-        claudeStarting: $claudeStarting}')")
+        claudeStarting: $claudeStarting} + $reap')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**

@@ -582,6 +582,18 @@ model DispatchSession {
   // 出口なので画面へ出す。`23.preview-required`が付いたセッションでだけ埋まる
   previewUrl       String?                  @db.Text
 
+  // このセッションを自動で畳む予定（#1817）。**サブPCの`scripts/reap-sessions.sh`が
+  // 「畳む条件はすべて揃っていて、あとは猶予が経つのを待っているだけ」と判定したときだけ埋まる。**
+  //
+  // 判定材料（worktreeがcleanか・コミットがpush済みか）はサブPCのファイルシステムにしか無く、
+  // issue-deck側では同じ判定を組み立てられない。**ここは運ばれてきた結論を持つだけで、
+  // 画面はこれを「あと何分で自動終了」に直して出す**（`lib/dispatch/issue-session.ts`）。
+  //
+  // NULLは「畳む予定が無い（作業中・入力待ち・条件を満たしていない）」で、pollerが毎巡
+  // 上書きする。理由は文言ではなくコード（`PR_MERGED`など）で、文言は画面側に置く
+  reapAt     DateTime?
+  reapReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
