@@ -13,7 +13,8 @@ name: Reusable release develop to main
 # 呼び出し元ごとの差異は3つのinputで吸収する。バージョンの読み取り（version-file・
 # version-query）と、書き込み（bump-command）。**読み取りより書き込みの差異のほうが大きい。**
 # npm version を使う理由は「バージョンを書き換えること」ではなく「"version" lifecycle
-# スクリプトを起動すること」で、これが更新履歴フック（RELEASE_CHANGELOG）の土台になっている。
+# スクリプトを起動すること」で、これが更新履歴フック（RELEASE_CHANGELOG）と使い方フック
+# （RELEASE_USAGE・#1729）の土台になっている。
 # ルートに package.json が無いリポジトリ（myroom・signaly）ではそのままでは使えない。
 #
 # 元の設計（状態はversionフィールドだけから判定する・バンプPRはauto-merge・develop→mainの
@@ -34,7 +35,8 @@ on:
       bump-kind:
         # 画面（issue-deck）から指定された上げ幅（#1548）。`auto`・空文字は自動判定。
         # **判定ステップ自体は指定があっても走らせる。** 上げ幅と一緒に利用者向けの更新履歴
-        # （changelog → RELEASE_CHANGELOG）を作っているため、飛ばすと更新履歴が空になる。
+        # （changelog → RELEASE_CHANGELOG）と使い方（usage → RELEASE_USAGE）を作っている
+        # ため、飛ばすとどちらも空になる。
         # 指定があれば判定結果を上書きし、判断根拠に指定した旨を残す。
         description: "バージョンの上げ幅（auto/空なら自動判定。patch/minor/majorで固定）"
         required: false
@@ -44,8 +46,9 @@ on:
         description: >-
           バージョンを書き換えるコマンド。空なら
           `npm version <新版> --no-git-tag-version` を実行する。
-          NEW_VERSION（例 1.5.9）・BUMP_KIND（patch/minor/major）・RELEASE_CHANGELOG を
-          環境変数で受け取れる。スクリプトが上げ幅を受け取る形なら BUMP_KIND を渡す
+          NEW_VERSION（例 1.5.9）・BUMP_KIND（patch/minor/major）・RELEASE_CHANGELOG・
+          RELEASE_USAGE を環境変数で受け取れる。
+          スクリプトが上げ幅を受け取る形なら BUMP_KIND を渡す
         required: false
         type: string
         default: ""
@@ -202,7 +205,7 @@ jobs:
           allowed_bots: "issue-deck[bot],claude[bot]"
           claude_args: |
             --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
-            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"},"changelog":{"type":"string"}},"required":["bump_kind","reason"]}'
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"},"changelog":{"type":"string"},"usage":{"type":"string"}},"required":["bump_kind","reason"]}'
           prompt: |
             ${{ github.repository }} リポジトリで、mainブランチとdevelopブランチの実際のコード差分の内容から、
             セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅
@@ -235,6 +238,21 @@ jobs:
             更新履歴表示を持つリポジトリが利用するための汎用フックです（`version` lifecycle
             スクリプトへ `RELEASE_CHANGELOG` として渡されます）。持たないリポジトリでは
             生成されるだけで使われません。
+
+            さらに、利用者向けの使い方（usage）も生成してください。changelogが「何が変わったか」を
+            書くのに対し、usageは「どう使うか」を書きます。このリリースで新しくできるように
+            なったことについて、**どこを開く / 何を押す・実行する / どうなれば成功か**が分かる
+            操作手順を、番号付きの箇条書きで3〜5行程度にまとめてください（`1. ` から始まる行を
+            改行で並べる）。次の点を守ること。
+
+            - 利用者が画面で辿れる言葉で書く。実装の詳細・ファイル名・関数名には触れない
+            - 「どうなれば成功か」を必ず1行入れる（画面に何が出れば効いているのか）
+            - 画面の写真は含めない（このワークフローは撮影を行いません）
+            - **画面で使える変化が無いリリース**（内部改善・リファクタリング・不具合修正だけで、
+              操作手順が変わらない場合）は、無理に書かず**空文字にしてください**。空の場合は
+              PR本文にも各リポジトリの更新履歴にも出しません
+            - changelogと同じく、更新履歴表示を持つリポジトリが利用するための汎用フックです
+              （`version` lifecycleスクリプトへ `RELEASE_USAGE` として渡されます）
 
       - name: Claude使用量をJob Summaryに出力する（コード変更内容からバージョンの上げ幅を判定する）
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -275,6 +293,9 @@ jobs:
           REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null || true)"
           # changelogは利用者向けの複数行文章になりうるため平坦化しない
           CHANGELOG="$(echo "$STRUCTURED_OUTPUT" | jq -r '.changelog // empty' 2>/dev/null || true)"
+          # usage（利用者向けの操作手順・#1729）も番号付きの複数行になるため平坦化しない。
+          # 画面で使える変化が無いリリースでは空になる契約で、空のときはPR本文にも出さない
+          USAGE="$(echo "$STRUCTURED_OUTPUT" | jq -r '.usage // empty' 2>/dev/null || true)"
 
           case "$BUMP_KIND" in
             major|minor|patch) ;;
@@ -283,6 +304,7 @@ jobs:
               BUMP_KIND=patch
               REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。実際の変更内容を確認し、必要であればこのPR上でバージョンを修正してください。"
               CHANGELOG=""
+              USAGE=""
               ;;
           esac
 
@@ -314,9 +336,15 @@ jobs:
             echo "$CHANGELOG"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "usage<<USAGE_EOF"
+            echo "$USAGE"
+            echo "USAGE_EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "判定結果: bump_kind=$BUMP_KIND"
           echo "reason: $REASON"
           echo "changelog: $CHANGELOG"
+          echo "usage: $USAGE"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
         if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
@@ -334,6 +362,10 @@ jobs:
           # される）がこの環境変数を読み、自前の更新履歴ファイルを書き換えるという契約にする。
           # issue-deck自身は"version"スクリプトを持たないため、この変数は現状未使用。
           RELEASE_CHANGELOG: ${{ steps.bump.outputs.changelog }}
+          # 同じ契約で渡す、利用者向けの操作手順（#1729）。RELEASE_CHANGELOGが「何が変わったか」、
+          # こちらが「どう使うか」。**両者は必ずセットで扱うこと**——env:とexportのどちらかに
+          # 足し忘れると空文字が渡り、受け取り側では「使い方が無いリリース」と区別できない。
+          RELEASE_USAGE: ${{ steps.bump.outputs.usage }}
         run: |
           set -e
 
@@ -358,8 +390,9 @@ jobs:
           git checkout -b "$BRANCH" origin/develop
 
           # **npm version を使う理由は「バージョンを書き換えること」ではなく、"version"
-          # lifecycleスクリプトを起動すること。** これが更新履歴フック（RELEASE_CHANGELOG）の
-          # 土台になっている（npm pkg set ではlifecycleスクリプトが起動しない）。
+          # lifecycleスクリプトを起動すること。** これが更新履歴フック（RELEASE_CHANGELOG）と
+          # 使い方フック（RELEASE_USAGE）の土台になっている（npm pkg set では
+          # lifecycleスクリプトが起動しない）。
           # --no-git-tag-versionでコミット・タグ作成だけを抑止する。
           #
           # ルートに package.json が無いリポジトリではそのままでは使えないため、
@@ -375,9 +408,10 @@ jobs:
             echo "bump-command を実行します: $BUMP_COMMAND"
             # **NEW_VERSION はこのステップ内で計算したシェル変数のため、exportしないと
             # `bash -c` の子プロセスへ渡らない（#1181で実際に踏んだ）。** BUMP_KIND・
-            # RELEASE_CHANGELOG は env: で渡しているので既に環境変数だが、揃えてexportする。
+            # RELEASE_CHANGELOG・RELEASE_USAGE は env: で渡しているので既に環境変数だが、
+            # 揃えてexportする。
             # myroom で `npm error Invalid version: ` となり、空文字が渡っていることが分かった。
-            export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG
+            export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG RELEASE_USAGE
             bash -c "$BUMP_COMMAND"
           else
             npm version "$NEW_VERSION" --no-git-tag-version
@@ -393,7 +427,7 @@ jobs:
 
           git config user.name "Claude Code"
           git config user.email "claude-code@example.com"
-          # package.json本体に加え、"version" lifecycleスクリプトが更新履歴フックとして
+          # package.json本体に加え、"version" lifecycleスクリプトが更新履歴・使い方のフックとして
           # 新規作成・更新したファイルもバンプコミットへ含める（このステップ開始時点で
           # 作業ツリーはクリーンなので、意図しないファイルを拾うリスクは低い）
           git status --porcelain
@@ -415,6 +449,14 @@ jobs:
               echo "## 更新履歴（生成された利用者向け文言）"
               echo
               echo "$RELEASE_CHANGELOG"
+              echo
+            fi
+            # 使い方は「画面で使える変化があったリリース」でしか生成されない（#1729）。
+            # 空のときに見出しだけ出すと「書き漏らし」に見えるため、セクションごと出さない
+            if [ -n "$RELEASE_USAGE" ]; then
+              echo "## 使い方（生成された利用者向け文言）"
+              echo
+              echo "$RELEASE_USAGE"
               echo
             fi
             echo "## 対象issue"
