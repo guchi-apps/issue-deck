@@ -1,6 +1,5 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { getNavView, navViews } from "@/lib/nav-views";
@@ -283,34 +282,36 @@ export function computeNavCountsForFilters(
 }
 
 /**
- * 概要カードの統計を求める。
- * 「確認待ち」はTopBarの絞り込みを適用した集合（issues）、「24時間以内の本番反映」
- * 「オープンIssue件数」はstate絞り込みを無視した集合（issuesIgnoringState）を基準にする
- * （close済みIssueが対象の指標や、TopBarのstate絞り込みに影響されたくない指標のため）。
+ * スマホのホーム画面の先頭に出す3枚のカード（#1690）。
+ *
+ * **盤面の流れをそのまま並べる。** 「要対応」（人が動くまで進まない）→「実行中」（いま動いている）
+ * →「本番反映待ち」（developまで来ていて本番へ出ていない）の順で、上から読めば今どこに滞留して
+ * いるかが分かる。以前は「確認待ち・24時間以内の本番反映・オープンIssue」だったが、
+ * オープンIssue数は下のメニューの「すべてのIssue」と重複し、24時間以内の本番反映は
+ * 済んだことの振り返りで、どちらも次に何をするかを決める材料にならなかった。
+ *
+ * **件数は数え直さず`navCounts`から引く。** 同じ画面のすぐ下に同じ数字のメニュー行が並ぶため、
+ * 別々に数えると絞り込みの適用範囲がずれた瞬間にカードと行で違う数字が出る。
+ * 「要対応」にマージ待ちPRを足すのもPCの左メニュー（`sidebar-nav.tsx`）と同じ数え方。
+ *
+ * **PCには概要カードが無く、これを使うのはスマホのホームだけ。**
  */
 export function computeOverviewStats(
-  issues: Issue[],
-  issuesIgnoringState: Issue[],
+  navCounts: Record<NavViewId, number>,
+  checkUserPullRequestCount: number,
 ): OverviewStat[] {
-  const checkUserCount = issues.filter((issue) =>
-    issue.labels.some((label) => label.name === CHECK_USER_LABEL),
-  ).length;
-  const recentlyReleasedCount = issuesIgnoringState.filter((issue) => {
-    if (!issue.closedAt) return false;
-    if (resolveProgressStatus(issue) !== "done") return false;
-    return Date.now() - new Date(issue.closedAt).getTime() < DAY_MS;
-  }).length;
-  const openCount = issuesIgnoringState.filter((issue) => issue.state === "open").length;
-
   return [
     {
-      label: "確認待ち",
-      value: String(checkUserCount),
-      diffLabel: "",
+      label: "要対応",
+      value: String(navCounts["check-user"] + checkUserPullRequestCount),
       linkedView: "check-user",
     },
-    { label: "24時間以内の本番反映", value: `${recentlyReleasedCount}件`, diffLabel: "" },
-    { label: "オープンIssue", value: String(openCount), diffLabel: "" },
+    { label: "実行中", value: String(navCounts["in-progress"]), linkedView: "in-progress" },
+    {
+      label: "本番反映待ち",
+      value: String(navCounts["release-pending"]),
+      linkedView: "release-pending",
+    },
   ];
 }
 

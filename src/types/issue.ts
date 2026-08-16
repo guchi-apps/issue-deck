@@ -140,10 +140,10 @@ export const NAV_VIEW_IDS = [
 
 export type NavViewId = (typeof NAV_VIEW_IDS)[number];
 
+/** スマホのホーム画面の先頭に出すカード1枚（#1690。`computeOverviewStats`が組み立てる） */
 export type OverviewStat = {
   label: string;
   value: string;
-  diffLabel: string;
-  /** 指定時、カードをタップすると遷移する先のクイックビュー */
-  linkedView?: NavViewId;
+  /** カードをタップしたときに開くビュー */
+  linkedView: NavViewId;
 };

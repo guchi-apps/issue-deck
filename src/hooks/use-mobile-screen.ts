@@ -15,7 +15,6 @@ import { DEFAULT_PULL_REQUEST_VIEW } from "@/lib/pull-request-views";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
-import type { QuickFilter } from "@/types/quick-filter";
 
 export type MobileScreen =
   | { kind: "home" }
@@ -351,22 +350,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen, view, state, isStateExplicit],
   );
 
-  // ホーム画面の「保存したフィルター」選択時、絞り込み条件をすべて置き換えてIssue一覧へ遷移する。
-  const applyQuickFilter = useCallback(
-    (quickFilter: QuickFilter) =>
-      navigate({
-        screen: "issues",
-        view: quickFilter.view,
-        labels: quickFilter.labels,
-        state: quickFilter.state,
-        assignee: quickFilter.assignee,
-        sort: quickFilter.sort,
-        // ホームの「保存したフィルター」からの遷移のため、戻る導線を有効にする（#525）。
-        origin: "home",
-      }),
-    [navigate],
-  );
-
   const selectIssue = useCallback(
     (issue: Issue) =>
       navigate({
@@ -498,7 +481,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
-    applyQuickFilter,
     updateListFilters,
     goBack,
   };

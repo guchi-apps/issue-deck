@@ -14,7 +14,8 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
-import type { Issue } from "@/types/issue";
+import { NAV_VIEW_IDS } from "@/types/issue";
+import type { Issue, NavViewId } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -781,52 +782,29 @@ describe("time-dependent stats", () => {
   });
 
   describe("computeOverviewStats", () => {
-    it("確認待ち件数・24時間以内の本番反映件数・オープンIssue件数を返す", () => {
-      const doneStatus = "Done";
-      const checkUserLabel = { name: "00.check-user", color: "red", description: null };
-      const issues = [
-        makeIssue({ id: "1", state: "open", labels: [checkUserLabel] }),
-        makeIssue({ id: "2", state: "open", labels: [] }),
-        makeIssue({
-          id: "3",
-          state: "closed",
-          projectStatus: doneStatus,
-          closedAt: "2026-01-09T12:00:00.000Z",
-        }),
-        // 24時間より前にcloseされた分は「24時間以内の本番反映」から除外
-        makeIssue({
-          id: "4",
-          state: "closed",
-          projectStatus: doneStatus,
-          closedAt: "2026-01-08T00:00:00.000Z",
-        }),
-        // Doneではないclose済みIssueは「24時間以内の本番反映」から除外
-        makeIssue({
-          id: "5",
-          state: "closed",
-          labels: [],
-          closedAt: "2026-01-09T12:00:00.000Z",
-        }),
-      ];
-      const issuesIgnoringState = issues;
-      const stats = computeOverviewStats(issues, issuesIgnoringState);
+    // 件数はnavCountsから引くだけなので、Issueの中身ではなく数え上げ済みの値を渡す
+    function makeNavCounts(overrides: Partial<Record<NavViewId, number>> = {}) {
+      const counts = Object.fromEntries(
+        NAV_VIEW_IDS.map((id) => [id, 0]),
+      ) as Record<NavViewId, number>;
+      return { ...counts, ...overrides };
+    }
+
+    it("要対応・実行中・本番反映待ちの3枚を返し、それぞれ遷移先のビューを持つ", () => {
+      const stats = computeOverviewStats(
+        makeNavCounts({ "check-user": 2, "in-progress": 4, "release-pending": 3 }),
+        0,
+      );
       expect(stats).toEqual([
-        { label: "確認待ち", value: "1", diffLabel: "", linkedView: "check-user" },
-        { label: "24時間以内の本番反映", value: "1件", diffLabel: "" },
-        { label: "オープンIssue", value: "2", diffLabel: "" },
+        { label: "要対応", value: "2", linkedView: "check-user" },
+        { label: "実行中", value: "4", linkedView: "in-progress" },
+        { label: "本番反映待ち", value: "3", linkedView: "release-pending" },
       ]);
     });
 
-    it("オープンIssue件数はissuesIgnoringStateを基準に数える（TopBarのstate絞り込みを無視する）", () => {
-      const openIssues = [makeIssue({ id: "1", state: "open" })];
-      const allIssues = [...openIssues, makeIssue({ id: "2", state: "closed" })];
-      const stats = computeOverviewStats(openIssues, allIssues);
-      expect(stats.find((stat) => stat.label === "オープンIssue")).toEqual({
-        label: "オープンIssue",
-        value: "1",
-        diffLabel: "",
-      });
+    it("「要対応」にはユーザーのマージ待ちPRの件数を足す（PCの左メニューと同じ数え方）", () => {
+      const stats = computeOverviewStats(makeNavCounts({ "check-user": 2 }), 3);
+      expect(stats[0]).toEqual({ label: "要対応", value: "5", linkedView: "check-user" });
     });
   });
-
 });
