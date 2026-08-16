@@ -57,10 +57,16 @@ async function handleGET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // 選択肢に出せる（=リリースworkflow導入済みの）リポジトリと同じ条件で全件対象にする。
+  // 母集団は「ブランチ」画面（`/api/branch-flow`）と揃え、リリースworkflowを持つかどうかは
+  // 後段の`releaseWorkflowExists`だけで決める（#1727）。
+  // 元は`hasClaudeWorkflow: true`で先に絞っていたが、これは`claude-issue-dispatch.yml`の有無で
+  // 「リリースworkflow導入済み」を代用していたもので、#1538が「ブランチ」画面のボタンについて
+  // 既に取り除いた代用と同じものだった。無人実行（計画〜実装）を入れずにリリースフローだけを
+  // 載せたリポジトリ（`subpc`・`vps`）では、ボタンは出るのに通知ベルとスマホのバッジにだけ
+  // 出てこない、という食い違いになる。
   const repositories = await db.repository.findMany({
     where: {
-      hasClaudeWorkflow: true,
+      archived: false,
       installation: { userInstallations: { some: { userId } } },
     },
     orderBy: { fullName: "asc" },

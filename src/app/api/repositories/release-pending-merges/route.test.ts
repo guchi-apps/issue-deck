@@ -295,6 +295,23 @@ describe("GET /api/repositories/release-pending-merges", () => {
     expect(fetchLatestDeployWorkflowRun).not.toHaveBeenCalled();
   });
 
+  it("無人実行のworkflow（claude-issue-dispatch.yml）の有無では母集団を絞らない（#1727）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+
+    const response = await GET();
+    const json = await response.json();
+
+    // 絞り込みはアーカイブ済みかどうかとインストールの所属だけ。リリースworkflowを持つ
+    // かどうかは後段の`releaseWorkflowExists`が決める（無人実行を入れずリリースフローだけを
+    // 載せた`subpc`・`vps`が通知から抜け落ちないようにするため）。
+    const where = findMany.mock.calls[0][0].where;
+    expect(where).not.toHaveProperty("hasClaudeWorkflow");
+    expect(where.archived).toBe(false);
+    expect(json.releaseStatuses).toHaveLength(1);
+  });
+
   it("同一installationのトークン取得は1回に抑える", async () => {
     await GET();
 
