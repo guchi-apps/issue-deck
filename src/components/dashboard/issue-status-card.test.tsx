@@ -142,4 +142,49 @@ describe("IssueStatusCard", () => {
     });
     expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
   });
+
+  /**
+   * #1676。起動が成功していてセッションも立っていれば、2つは同じ「サブPCで動いている」ことを
+   * 2行で言っているだけになる。**起動が終わっていないあいだは畳まない**（順番待ちの理由・
+   * 失敗理由・取り消しは`DispatchJobStatus`にしか無い）。
+   */
+  describe("起動ジョブの行を畳む（#1676）", () => {
+    function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+      return {
+        id: "job-launch",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1577,
+        issueTitle: null,
+        issueId: null,
+        targetHost: "subpc",
+        kind: "LAUNCH",
+        status: "SUCCEEDED",
+        queuePriority: 0,
+        message: null,
+        instruction: null,
+        tmuxSessionName: "issue-deck-issue-1577",
+        createdAt: NOW,
+        claimedAt: null,
+        startedAt: null,
+        finishedAt: NOW,
+        ...overrides,
+      };
+    }
+
+    it("起動が成功してセッションが立っていれば、起動の行は出さない", () => {
+      renderCard({ dispatchJob: makeLaunchJob(), issueSession: makeSession() });
+
+      expect(screen.queryByText(/サブPCで起動しました/)).toBeNull();
+      expect(screen.getByText(/サブPC・実行中/)).not.toBeNull();
+    });
+
+    it("順番待ちのあいだは起動の行をそのまま出す", () => {
+      renderCard({
+        dispatchJob: makeLaunchJob({ status: "QUEUED", finishedAt: null }),
+        issueSession: makeSession(),
+      });
+
+      expect(screen.getByText(/サブPCで順番待ち/)).not.toBeNull();
+    });
+  });
 });

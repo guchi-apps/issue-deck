@@ -71,6 +71,14 @@ beforeEach(() => {
   sendSessionControl.mockResolvedValue({ ok: true });
 });
 
+/**
+ * 操作は既定で畳まれている（#1676）。押せる／押せないを見るテストは、まず「操作」で開く。
+ * 開く前に何が出ていないかは`describe("畳んだ状態（#1676）")`で確かめる。
+ */
+function openControls() {
+  fireEvent.click(screen.getByRole("button", { name: /操作/ }));
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -96,7 +104,7 @@ describe("IssueSessionStatus", () => {
     );
 
     expect(screen.getByText("3時間前")).toBeTruthy();
-    expect(screen.getByText(/入力を待っています/)).toBeTruthy();
+    expect(screen.getByText(/サブPC・入力を待っています/)).toBeTruthy();
   });
 
   it("様子の報告が無ければpollerが最後に見た時刻を添える", () => {
@@ -106,7 +114,7 @@ describe("IssueSessionStatus", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
 
     expect(screen.getByText("たった今")).toBeTruthy();
-    expect(screen.getByText(/サブPCで実行中/)).toBeTruthy();
+    expect(screen.getByText(/サブPC・実行中/)).toBeTruthy();
   });
 
   it("入力待ちのときだけRemote Controlの導線を出す", () => {
@@ -136,6 +144,7 @@ describe("IssueSessionStatus", () => {
 describe("IssueSessionStatus のセッション操作", () => {
   it("生きているセッションでは停止と終了を押せる", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    openControls();
 
     expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(false);
     expect(
@@ -150,6 +159,7 @@ describe("IssueSessionStatus のセッション操作", () => {
    */
   it("2つが並ぶときは違いを添える", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    openControls();
 
     expect(screen.getByText(/今動いている処理だけを止めます/)).not.toBeNull();
     expect(screen.getByText(/セッションごと終了します/)).not.toBeNull();
@@ -157,12 +167,14 @@ describe("IssueSessionStatus のセッション操作", () => {
 
   it("停止を出さないセッションには違いの説明も出さない", () => {
     render(<IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />);
+    openControls();
 
     expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
   });
 
   it("停止を押すとそのセッションのホストへ積む", async () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    openControls();
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
 
     await waitFor(() =>
@@ -178,6 +190,7 @@ describe("IssueSessionStatus のセッション操作", () => {
   // 畳むと戻せないため、閉じるだけ確認を挟む
   it("閉じるは確認してから積む", async () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    openControls();
     fireEvent.click(screen.getByRole("button", { name: "セッションを閉じる" }));
 
     expect(sendSessionControl).not.toHaveBeenCalled();
@@ -197,6 +210,7 @@ describe("IssueSessionStatus のセッション操作", () => {
         dispatch={makeDispatch({ hosts: [makeHost({ sessionControlCapable: null })] })}
       />,
     );
+    openControls();
 
     expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/pollerがセッションの操作に対応していません/)).not.toBeNull();
@@ -205,6 +219,7 @@ describe("IssueSessionStatus のセッション操作", () => {
   // 終了したペインが残っているセッションは「閉じる」で片付けられる
   it("終了済みのセッションでは停止を出さない", () => {
     render(<IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />);
+    openControls();
 
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
     expect(
@@ -215,6 +230,8 @@ describe("IssueSessionStatus のセッション操作", () => {
   it("消えたセッションには操作を出さない", () => {
     render(<IssueSessionStatus session={session({ state: "GONE" })} dispatch={makeDispatch()} />);
 
+    // 畳む相手が1つも無いので、開くトグルごと出さない（#1676）
+    expect(screen.queryByRole("button", { name: /操作/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
     expect(screen.queryByRole("button", { name: "セッションを閉じる" })).toBeNull();
   });
@@ -248,6 +265,7 @@ describe("IssueSessionStatus のセッション操作", () => {
   it("失敗の理由はその場に出す", async () => {
     sendSessionControl.mockResolvedValue({ ok: false, message: "サブPC が応答していません。" });
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    openControls();
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
 
     expect(await screen.findByText("サブPC が応答していません。")).not.toBeNull();
@@ -259,6 +277,7 @@ describe("IssueSessionStatus のセッション操作", () => {
    */
   describe("追加指示（#1012）", () => {
     function openForm() {
+      openControls();
       fireEvent.click(screen.getByRole("button", { name: "追加指示を送る" }));
       return screen.getByLabelText("追加指示の本文") as HTMLInputElement;
     }
@@ -301,6 +320,7 @@ describe("IssueSessionStatus のセッション操作", () => {
           dispatch={makeDispatch({ hosts: [makeHost({ instructionCapable: null })] })}
         />,
       );
+      openControls();
 
       expect(
         screen.getByRole("button", { name: "追加指示を送る" }).hasAttribute("disabled"),
@@ -314,6 +334,7 @@ describe("IssueSessionStatus のセッション操作", () => {
       render(
         <IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />,
       );
+      openControls();
 
       expect(screen.queryByRole("button", { name: "追加指示を送る" })).toBeNull();
     });
@@ -343,5 +364,91 @@ describe("IssueSessionStatus のセッション操作", () => {
       expect(screen.getByText(/送信を見送りました/)).not.toBeNull();
       expect(screen.getByText(/承認プロンプトまたは選択フォームの表示中/)).not.toBeNull();
     });
+  });
+});
+
+/**
+ * #1676。スマホのIssue詳細では、このブロックだけで14行を占めてIssue本文が初期表示から
+ * 押し出されていた。**畳むのは「押す気になったときだけ要るもの」に限る**ので、
+ * 出口（Remote Control）と、押した操作の結果は畳まない。
+ */
+describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
+  function launchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+    return {
+      id: "job-launch",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1353,
+      issueTitle: null,
+      issueId: null,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "SUCCEEDED",
+      queuePriority: 0,
+      message: null,
+      instruction: null,
+      tmuxSessionName: "issue-deck-issue-1353",
+      createdAt: "2026-08-14T00:06:00Z",
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: "2026-08-14T00:07:00Z",
+      ...overrides,
+    };
+  }
+
+  it("既定では停止・追加指示・閉じるを出さない", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "追加指示を送る" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "セッションを閉じる" })).toBeNull();
+    // 違いの説明（#1557）も、ボタンを見ているときにしか要らない
+    expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
+    expect(screen.getByRole("button", { name: /操作/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
+  // 入力待ちのときRemote Controlが唯一の出口で、畳むと画面から`00.check-user`を外せない
+  it("出口と次にやることは畳まない", () => {
+    render(
+      <IssueSessionStatus
+        session={session({
+          activity: "WAITING_INPUT",
+          activityAt: NOW.toISOString(),
+          remoteControlUrl: "https://claude.ai/code/session_01ABC",
+          previewUrl: "http://subpc.example.ts.net:5676",
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Remote Controlで開く/ })).not.toBeNull();
+    expect(screen.getByRole("link", { name: /開発環境を開く/ })).not.toBeNull();
+    expect(screen.getByText(/Remote Controlから答えてください/)).not.toBeNull();
+  });
+
+  // 押した直後に自分の操作が畳まれて見えなくなると、送り直してよいのか判断できない
+  it("未処理の操作があるあいだは開いた状態で出す", () => {
+    const job = launchJob({ id: "job-1", kind: "INTERRUPT", status: "QUEUED", finishedAt: null });
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch({ jobs: [job] })} />);
+
+    expect(screen.getByRole("button", { name: "停止" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /操作/ }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  // 起動ジョブの行（「サブPCで起動しました」）はこの行へ畳んでいる
+  it("起動時刻とtmuxのコピーは展開したときに出す", () => {
+    render(
+      <IssueSessionStatus
+        session={session()}
+        dispatch={makeDispatch()}
+        launchJob={launchJob()}
+      />,
+    );
+
+    expect(screen.queryByText(/\d時\d+分に起動|\d+:\d+に起動/)).toBeNull();
+    openControls();
+    expect(screen.getByText(/\d時\d+分に起動|\d+:\d+に起動/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: /tmuxのコマンドをコピー/ })).not.toBeNull();
   });
 });
