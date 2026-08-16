@@ -872,6 +872,13 @@ pnpm test        # lint + typecheck + vitest run
 pnpm test:unit   # vitestのみ
 ```
 
+**shadcn（Radix）の`Select`は、jsdomでそのままでは開けない**（#1733）。`hasPointerCapture`・
+`setPointerCapture`・`releasePointerCapture`・`scrollIntoView`をテスト側で補ってから、
+トリガーへ`keyDown`（`ArrowDown`）を送ると`role="option"`が出て`click`で選べる。補わないと
+ドロップダウンが開かず、選択を伴う画面の挙動をテストできない（`create-issue-dialog.render.test.tsx`の
+`stubPointerApisForSelect`が実装）。トリガーの表示値を読むだけなら
+`getByRole("combobox", { name: ... })`の`textContent`で足り、補う必要は無い。
+
 `pnpm dev` は `next dev` の単純なラッパーではなく、[../scripts/dev.sh](../scripts/dev.sh) が
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の
 起動を行う。`next dev` を直接叩くとGitHubからのWebhookがローカルに届かない。
