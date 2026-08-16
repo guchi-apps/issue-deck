@@ -255,6 +255,34 @@ export function computeNavCounts(
 }
 
 /**
+ * 表示中の絞り込み（状態・ラベル・担当者など）を適用したうえで、ビューごとの件数を数える
+ * （#1689）。絞り込み前の全Issueを数えると、一覧に並ぶ件数と食い違う（例: 状態がopenの
+ * 一覧なのに、ビュー名の隣にclose済みを含めた総数が出る）。
+ *
+ * PC（`issue-deck-shell`）はTopBarの絞り込みを適用した集合を自前で持っており、それを
+ * `computeNavCounts`へ渡すことで同じ結果を得ている。ここは絞り込み済みの集合を再利用
+ * しないスマホの一覧向けに、その組み立てをまとめたもの。
+ *
+ * - 状態（open/closed）の絞り込みだけを外した集合も渡すのは、「直近本番に反映した」の
+ *   ようにclose済みIssueが対象のビューを、現在の状態絞り込みで0件にしないため。
+ * - 「最新リリース」の基準時刻（`filterIssuesByView`のreferenceIssues）は絞り込み前の
+ *   issuesから求める。一覧側も絞り込み前の集合を基準にしているため、揃えないと
+ *   「直近本番に反映した」の件数だけがズレる。
+ */
+export function computeNavCountsForFilters(
+  issues: Issue[],
+  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  currentUserLogin: string | null,
+): Record<NavViewId, number> {
+  return computeNavCounts(
+    applyIssueFilters(issues, filters),
+    applyIssueFilters(issues, { ...filters, state: "all" }),
+    currentUserLogin,
+    issues,
+  );
+}
+
+/**
  * 概要カードの統計を求める。
  * 「確認待ち」はTopBarの絞り込みを適用した集合（issues）、「24時間以内の本番反映」
  * 「オープンIssue件数」はstate絞り込みを無視した集合（issuesIgnoringState）を基準にする

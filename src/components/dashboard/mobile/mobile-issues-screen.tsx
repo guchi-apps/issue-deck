@@ -9,7 +9,7 @@ import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
-  computeNavCounts,
+  computeNavCountsForFilters,
   filterIssuesByView,
   sortIssues,
 } from "@/lib/issue-stats";
@@ -54,23 +54,23 @@ export function MobileIssuesScreen({
 }: MobileIssuesScreenProps) {
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
 
+  // 一覧と件数の両方で使う絞り込み条件。片方だけ条件が欠けると、ビュー名の隣に出る件数と
+  // 実際に並ぶ件数が食い違う（#1689）。
+  const listFilters = useMemo(
+    () => ({ q: "", repos: [] as string[], state, labels, assignee }),
+    [state, labels, assignee],
+  );
+
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
-    const filtered = applyIssueFilters(scoped, {
-      q: "",
-      repos: [],
-      state,
-      labels,
-      assignee,
-    });
-    return sortIssues(filtered, sort, view);
-  }, [issues, view, currentUserLogin, state, labels, assignee, sort]);
+    return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
+  }, [issues, view, currentUserLogin, listFilters, sort]);
 
   // タブごとの該当Issue件数（#880）。「ユーザーの確認待ち」のみだった件数バッジを
-  // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じcomputeNavCountsを使う。
+  // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じ数え方を使う。
   const navCounts = useMemo(
-    () => computeNavCounts(issues, issues, currentUserLogin),
-    [issues, currentUserLogin],
+    () => computeNavCountsForFilters(issues, listFilters, currentUserLogin),
+    [issues, listFilters, currentUserLogin],
   );
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
