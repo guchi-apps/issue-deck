@@ -118,7 +118,7 @@ describe("generateIssueSuggestion", () => {
   });
 
   it("リポジトリに存在しないラベル名は落とす", async () => {
-    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.invalid"] });
+    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.unexpected"] });
 
     const result = await generateIssueSuggestion("dummy-token", {
       body: "本文",

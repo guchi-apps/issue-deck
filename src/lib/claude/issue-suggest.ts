@@ -34,7 +34,8 @@ function truncate(text: string, maxLength: number): string {
 // `isAutoAssignableLabelName`（`src/lib/issue-status.ts`）。`11.local`・`21.plan-required`〜
 // `25.artifact-required`・`71.manual-step`・`90.Close: *`は、本文の内容ではなく運用の都合
 // （誰が対応中か・どのゲートを通すか・なぜcloseしたか）で人やワークフローが付けるラベルで、
-// 本文からの推定で付けてよいものではない。
+// 本文からの推定で付けてよいものではない。**この範囲は#1702で恒久的な仕様として据え置いた**
+// （`71`を別の帯へ移す案・優先度を外す案をどちらも検討したうえで現状維持と決めた）。
 // **プロンプトの候補一覧（buildIssueSuggestPrompt）と応答の後処理（generateIssueSuggestion）は
 // 必ず同じ集合を使う。** プロンプト側だけ絞ると、Claudeが範囲外のラベル名を返したときに
 // 後処理が素通ししてしまう。

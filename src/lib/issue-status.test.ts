@@ -60,10 +60,11 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
     for (const name of [
       "30.bug",
       "31.security",
-      "40.invalid",
+      "40.unexpected",
       "50.feature",
       "51.improvement",
       "60.chore",
+      "61.ops",
       "62.design",
       "65.docs",
       "70.confirm",
