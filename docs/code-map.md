@@ -428,7 +428,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
   （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
-  `hooks/use-pull-requests.ts`。#1531）。
+  `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
+  そちらの間隔でもこの取得が回る**（#1767。両方の要求が重なったときは短い方。
+  [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`shorterAutoRefreshInterval`）。
 - **10秒間隔で回せるのは、GitHubへの取得がETagの条件付きGETを通っているから**（#1531。
   [`lib/github/conditional-request.ts`](../src/lib/github/conditional-request.ts)）。
   GitHubのREST APIは`If-None-Match`付きのリクエストが`304 Not Modified`を返したとき、
@@ -590,8 +592,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `delete_branch_on_merge`も有効にしたが、**ブランチ数に依存しない作りのままにしてある**）。
   代わりに
   **進行中のIssueに対応するブランチ（`issue-<番号>`）だけをGraphQLのエイリアスで名指しして引く**。
-  **自動ポーリングは持たず**、画面を開いたときと更新ボタンのときだけ走る
-  （`hooks/use-branch-flow.ts`。一度取った内容は画面を離れても保持する）。
+  走るのは画面を開いたときと更新ボタンのとき、そして**ユーザーが自動更新の間隔を選んでいれば
+  その周期**（#1767。既定は自動更新しない。`hooks/use-branch-flow.ts`。一度取った内容は
+  画面を離れても保持する）。
   この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
   「どのバージョンで本番へ出たか」を出せないため。組み立ては
   [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、
@@ -667,10 +670,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
   場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
   打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。
-  **この画面で唯一の自動更新がここ**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
+  デプロイ状況は**常に自動更新の対象**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
   30秒ごと）。消費が釣り合うのは、リポジトリあたりREST 1回であることと、
   `fetchLatestWorkflowRun`がETagの条件付きGETを通す（変化が無ければ304でレート制限を消費しない）
-  ため。ブランチ状況とPR一覧は従来どおり手動更新のまま。
+  ため。
   **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
   数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
   （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
@@ -698,6 +701,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
   無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
   「バージョン不明」を出す（誤った版を出さないため）。
+- **ブランチ状況とPR一覧の自動更新は、ユーザーが間隔を選んだときだけ回る**（#1767。
+  更新ボタンの右のメニューで「自動更新しない（既定）／1分／5分／10分」。選択は端末の
+  localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
+  [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)が持つ）。**既定を「自動更新しない」に
+  しているのは1巡の消費が重いから**——ブランチ状況はリポジトリあたりGraphQL 1回、PR一覧は
+  リポジトリあたりREST 2回（ETagで304なら消費0）＋draft以外のopen PRあたりGraphQL 1回で、
+  26リポジトリを1分間隔で回すとGraphQLだけで毎時1,600ポイント前後（上限5,000ポイント/時）になる。
+  回すのは**この画面を開いていて、かつタブが前面にある間だけ**（`hooks/use-auto-refresh.ts`が
+  Page Visibility APIで止め、前面へ戻った時点で次の周期を待たずに取り直す）。
+  **自動更新の取得では読み込み表示（ボタンの無効化・「読み込み中...」）を出さず、更新アイコンの
+  回転（`isRefreshing`）だけを出す。** 周期ごとに操作できなくなるのを避けつつ、画面が勝手に
+  変わったときに何が起きたのかが分かるようにするため。失敗も画面に出さない（次の周期で回復する）。
 - **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
   対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
   `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ

@@ -50,6 +50,12 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import {
+  COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS,
+  normalizeAutoRefreshInterval,
+  shorterAutoRefreshInterval,
+  type AutoRefreshIntervalMs,
+} from "@/lib/auto-refresh";
+import {
   buildBranchFlow,
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
@@ -334,11 +340,24 @@ export function IssueDeckShell({
   const autoRefreshPullRequests =
     (isPullRequestPaneActive && filters.prview === "completed") ||
     pendingCheckUserToasts.length > 0;
+  // ブランチ画面の自動更新の間隔（#1767）。**既定は「自動更新しない」**で、選んだ間隔は
+  // 端末のlocalStorageに残す。1巡でリポジトリ数ぶんのGraphQL（ブランチ状況）とPR一覧の
+  // 取得をまとめて使うため、既定で回すとレート制限の消費が常時上がる。
+  // 保存済みの値は選択肢のいずれかへ正規化する（`normalizeAutoRefreshInterval`）。
+  const [storedFlowAutoRefreshIntervalMs, setFlowAutoRefreshIntervalMs] =
+    usePersistedState<AutoRefreshIntervalMs>("issue-deck:flow-auto-refresh-interval", null);
+  const flowAutoRefreshIntervalMs = normalizeAutoRefreshInterval(storedFlowAutoRefreshIntervalMs);
   // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
   // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
+  // 自動更新の間隔は「完了したPRビュー（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
+  // 短い方（#1767）。どちらの要求も無ければnull＝自動更新しない。
+  const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
+    autoRefreshPullRequests ? COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS : null,
+    isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
+  );
   const openPullRequests = usePullRequests(
     isFlowPaneActive ? "all" : "open",
-    autoRefreshPullRequests,
+    pullRequestAutoRefreshIntervalMs,
   );
 
   useIssuePolling((polledIssues) => {
@@ -585,8 +604,9 @@ export function IssueDeckShell({
   // 出した版ごと画面から消える。
   const mergedPullRequestsLoaded = openPullRequests.loadedScope === "all";
 
-  // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
-  const branchFlowStatus = useBranchFlow(isFlowPaneActive);
+  // ブランチ状況（#1455）。取得はこの画面を開いている間だけ。自動更新はユーザーが間隔を
+  // 選んだときだけ回る（#1767。既定は自動更新しない）。
+  const branchFlowStatus = useBranchFlow(isFlowPaneActive, flowAutoRefreshIntervalMs);
 
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
   // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
@@ -884,9 +904,12 @@ export function IssueDeckShell({
                   flow={branchFlow}
                   fetchedAt={branchFlowStatus.fetchedAt}
                   isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+                  isRefreshing={branchFlowStatus.isRefreshing || openPullRequests.isRefreshing}
                   error={branchFlowStatus.error ?? openPullRequests.error}
                   failedRepositories={branchFlowStatus.failedRepositories}
                   mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+                  autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+                  onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
                   onRefresh={() => {
                     branchFlowStatus.refresh();
                     openPullRequests.refresh();
@@ -925,6 +948,8 @@ export function IssueDeckShell({
                     failedRepositories={openPullRequests.failedRepositories}
                     fetchedAt={openPullRequests.fetchedAt}
                     isLoading={openPullRequests.isLoading}
+                    isRefreshing={openPullRequests.isRefreshing}
+                    autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                     error={openPullRequests.error}
                     onRefresh={openPullRequests.refresh}
                     onBack={goBack}
@@ -1064,11 +1089,15 @@ export function IssueDeckShell({
               flow={branchFlow}
               fetchedAt={branchFlowStatus.fetchedAt}
               isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+              /* 自動更新のぶんも回す（#1767）。ブランチ状況とPR一覧のどちらかが飛んでいれば回る */
+              isRefreshing={branchFlowStatus.isRefreshing || openPullRequests.isRefreshing}
               error={branchFlowStatus.error ?? openPullRequests.error}
               failedRepositories={branchFlowStatus.failedRepositories}
               mergedPullRequestsLoaded={mergedPullRequestsLoaded}
               /* 絞り込みでは無く「展開して見せる」形にする（#1750） */
               expandedRepositoryFullNames={filters.repos}
+              autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+              onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();
@@ -1087,6 +1116,8 @@ export function IssueDeckShell({
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}
                 isLoading={openPullRequests.isLoading}
+                isRefreshing={openPullRequests.isRefreshing}
+                autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                 error={openPullRequests.error}
                 onRefresh={openPullRequests.refresh}
                 selectedPullRequestId={filters.pr}

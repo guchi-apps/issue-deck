@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Clock,
@@ -24,6 +25,18 @@ import {
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AUTO_REFRESH_INTERVAL_OPTIONS,
+  autoRefreshIntervalLabel,
+  type AutoRefreshIntervalMs,
+} from "@/lib/auto-refresh";
 import { DEVELOP_BRANCH, MAIN_BRANCH, isClosedLane, type BranchFlow } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
@@ -45,6 +58,12 @@ type BranchFlowViewProps = {
   flow: BranchFlow;
   fetchedAt: string | null;
   isLoading: boolean;
+  /**
+   * 自動更新も含めて取得が飛んでいるか（#1767）。更新アイコンの回転にだけ使い、
+   * ボタンの無効化・「読み込み中...」には使わない（自動更新のたびに操作できなくなるため）。
+   * 渡されない場合は`isLoading`と同じ扱い。
+   */
+  isRefreshing?: boolean;
   error: string | null;
   /** ブランチ状況を取得できなかったリポジトリ（PRだけで組み立てている） */
   failedRepositories: string[];
@@ -67,6 +86,13 @@ type BranchFlowViewProps = {
    * スマホにはリポジトリ絞り込みが無いため渡さない。
    */
   expandedRepositoryFullNames?: readonly string[];
+  /**
+   * 自動更新の間隔（#1767）。`null`＝自動更新しない。**画面に出す間隔もこの値で、
+   * 「有効かどうか」を別に持たない**——別々に持つと表示と実際の間隔がずれうる。
+   */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
+  /** 自動更新の間隔をメニューから変えたとき（#1767）。渡さない場合はメニューを出さない */
+  onChangeAutoRefreshInterval?: (intervalMs: AutoRefreshIntervalMs) => void;
   onRefresh: () => void;
   /**
    * この画面からPRをマージできたとき（#1756）。**再取得より先にマージ済みとして描くのは
@@ -1082,10 +1108,13 @@ export function BranchFlowView({
   flow,
   fetchedAt,
   isLoading,
+  isRefreshing,
   error,
   failedRepositories,
   mergedPullRequestsLoaded,
   expandedRepositoryFullNames = [],
+  autoRefreshIntervalMs = null,
+  onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
   headerLeading,
@@ -1180,6 +1209,11 @@ export function BranchFlowView({
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
               )}
               {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+              {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
+                  「いま取りに行った」ことしか分からず、次にいつ更新されるかが読めない */}
+              {autoRefreshIntervalMs !== null && (
+                <span>{` ・ 自動更新${autoRefreshIntervalLabel(autoRefreshIntervalMs)}`}</span>
+              )}
             </p>
           </div>
           {/* 見出しと同じ段に置く（#1638）。実行状況はどの画面でも1段目の右端で揃える */}
@@ -1207,16 +1241,55 @@ export function BranchFlowView({
         >
           {showClosed ? "クローズを隠す" : "クローズも表示"}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 shrink-0"
-          disabled={isLoading}
-          onClick={onRefresh}
-        >
-          <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
-          更新
-        </Button>
+        {/* 更新ボタンと自動更新のメニューを1つのまとまりとして並べる（#1767）。
+            ヘッダーは既に「すべて開く」「クローズも表示」で埋まっているため、
+            間隔の選択は独立したボタンにせず更新ボタンの右端へ付ける */}
+        <div className="flex shrink-0 items-center">
+          <Button
+            size="sm"
+            variant="ghost"
+            className={cn("h-8 shrink-0", onChangeAutoRefreshInterval && "rounded-r-none pr-1.5")}
+            disabled={isLoading}
+            onClick={onRefresh}
+          >
+            {/* 回転させる条件は`isRefreshing`（自動更新でも回る。#1767）。ボタンを押せなく
+                するのは手動更新のときだけなので、こちらは`isLoading`のまま */}
+            <RefreshCw className={cn("size-3.5", (isRefreshing ?? isLoading) && "animate-spin")} />
+            更新
+          </Button>
+          {onChangeAutoRefreshInterval && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 shrink-0 rounded-l-none px-1.5"
+                  aria-label={
+                    autoRefreshIntervalMs === null
+                      ? "自動更新の間隔（現在: 自動更新しない）"
+                      : `自動更新の間隔（現在: ${autoRefreshIntervalLabel(autoRefreshIntervalMs)}）`
+                  }
+                >
+                  <ChevronDown className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuRadioGroup
+                  value={String(autoRefreshIntervalMs)}
+                  onValueChange={(value) =>
+                    onChangeAutoRefreshInterval(value === "null" ? null : Number(value))
+                  }
+                >
+                  {AUTO_REFRESH_INTERVAL_OPTIONS.map((option) => (
+                    <DropdownMenuRadioItem key={String(option.value)} value={String(option.value)}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">

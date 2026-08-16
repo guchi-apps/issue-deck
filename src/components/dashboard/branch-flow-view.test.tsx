@@ -62,6 +62,10 @@ function renderFlow(input: {
   /** マージ済みPRまで取得済みか（#1711）。既定は取得済み */
   mergedPullRequestsLoaded?: boolean;
   error?: string | null;
+  isRefreshing?: boolean;
+  /** 自動更新の間隔（#1767）。既定は「自動更新しない」 */
+  autoRefreshIntervalMs?: number | null;
+  onChangeAutoRefreshInterval?: (intervalMs: number | null) => void;
   onRefresh?: () => void;
   /** マージできたときの後始末（#1756）。渡さない場合は`onRefresh`へ縮退する */
   onMerged?: (pullRequest: PullRequestSummary) => void;
@@ -80,9 +84,12 @@ function renderFlow(input: {
       flow={flow}
       fetchedAt="2026-08-15T10:30:00Z"
       isLoading={false}
+      isRefreshing={input.isRefreshing}
       error={input.error ?? null}
       failedRepositories={input.failedRepositories ?? []}
       mergedPullRequestsLoaded={input.mergedPullRequestsLoaded ?? true}
+      autoRefreshIntervalMs={input.autoRefreshIntervalMs ?? null}
+      onChangeAutoRefreshInterval={input.onChangeAutoRefreshInterval}
       onRefresh={input.onRefresh ?? vi.fn()}
       onMerged={input.onMerged}
     />,
@@ -1419,5 +1426,50 @@ describe("選択中リポジトリの展開（#1750）", () => {
     );
 
     expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("BranchFlowView の自動更新（#1767）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("自動更新中は何分間隔なのかをヘッダーに出す", () => {
+    renderFlow({ autoRefreshIntervalMs: 60_000 });
+
+    expect(screen.getByText(/自動更新1分間隔/)).toBeTruthy();
+  });
+
+  it("自動更新しないときは間隔を出さない", () => {
+    renderFlow({ autoRefreshIntervalMs: null });
+
+    expect(screen.queryByText(/自動更新/)).toBeNull();
+  });
+
+  it("自動更新中の取得でも更新アイコンを回す（isLoadingは立てない）", () => {
+    const { container } = renderFlow({ isRefreshing: true });
+
+    // 更新ボタンは押せるまま（自動更新のたびに無効化しない）
+    const refreshButton = screen.getByRole("button", { name: "更新" });
+    expect(refreshButton.hasAttribute("disabled")).toBe(false);
+    expect(container.querySelectorAll(".animate-spin").length).toBe(1);
+  });
+
+  it("取得していない間は更新アイコンを回さない", () => {
+    const { container } = renderFlow({ isRefreshing: false });
+
+    expect(container.querySelectorAll(".animate-spin").length).toBe(0);
+  });
+
+  it("間隔を変える導線は、いまの間隔をラベルに出す", () => {
+    renderFlow({ autoRefreshIntervalMs: 300_000, onChangeAutoRefreshInterval: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "自動更新の間隔（現在: 5分間隔）" })).toBeTruthy();
+  });
+
+  it("間隔を変える手段が無い画面では、その導線を出さない", () => {
+    renderFlow({});
+
+    expect(screen.queryByRole("button", { name: /自動更新の間隔/ })).toBeNull();
   });
 });
