@@ -288,22 +288,22 @@ export function MobileHomeScreen({
         同じ動作のボタンが画面ごとに違う見た目・違う位置にあると探すことになる。位置だけは違い、
         あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上
       */}
-      <div className="absolute right-4 bottom-4 flex items-center gap-2">
+      <div className="absolute right-4 bottom-4 flex items-center gap-3">
         <button
           type="button"
           onClick={onAskCrossRepoQuestion}
           aria-label="複数リポジトリに質問する"
-          className="flex size-12 items-center justify-center rounded-full border bg-background shadow-lg"
+          className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
         >
-          <MessageCircleQuestion className="size-5" />
+          <MessageCircleQuestion className="size-6" />
         </button>
         <button
           type="button"
           onClick={onCreateIssue}
           aria-label="新しいIssueを作成"
-          className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+          className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
         >
-          <Plus className="size-5" />
+          <Plus className="size-6" />
         </button>
       </div>
     </div>
