@@ -269,3 +269,32 @@ describe("MobileIssueDetailのコメント欄の下の操作列（#1770）", () 
     expect(within(composer()).queryByRole("button", { name: "回答を確認してクローズ" })).toBeNull();
   });
 });
+
+/**
+ * 「コメント欄へ移動」ボタン（ScrollToLatestCommentButton）は画面下端から`bottom-4`で
+ * 浮いているため、スクロール領域の中身の下端にそのぶんの余白が無いと、最下部まで
+ * スクロールしたときコメント入力欄の操作列へ重なる（#1793）。
+ *
+ * jsdomでは実寸を測れないので、`mobile-screen-scroll-container.test.ts`（#1664）と同じく
+ * クラスの有無で規約を固定する。
+ */
+describe("Issue詳細の下端の余白（#1793）", () => {
+  /** スクロール領域の目印は撮影用の`data-capture-scroll-bottom`を借りる */
+  function scrollContainer(): HTMLElement {
+    const container = document.querySelector("[data-capture-scroll-bottom]");
+    if (!container) throw new Error("スクロール領域が見つからない");
+    return container as HTMLElement;
+  }
+
+  it("PCは中身のラッパにpb-16がある", () => {
+    renderDetail(buildIssue());
+    // 中身のラッパはヘッダーの次＝スクロール領域の最後の子
+    const content = scrollContainer().lastElementChild;
+    expect(content?.className).toContain("pb-16");
+  });
+
+  it("スマホはスクロール領域にpb-20がある", () => {
+    renderMobileDetail(buildIssue());
+    expect(scrollContainer().className).toContain("pb-20");
+  });
+});
