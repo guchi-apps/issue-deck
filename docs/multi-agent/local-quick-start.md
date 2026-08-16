@@ -1012,6 +1012,34 @@ pnpm db:seed:dev
 書き込み系APIを塞ぐこと。`src/lib/preview-mode.ts`）。実物が無くても見た目だけ確認したい場合は
 `25.artifact-required`（[labels.md](labels.md)「見た目のアーティファクト要否をIssueラベルでトグルする」）。
 
+### 認証の背後にある画面をコマンドだけで確かめる（#1656）
+
+**subpcにGUIは無く、SupabaseのOAuth（GitHub/Google）は外部サイトでの同意を必ず経由する。**
+エージェントはログインを完了できないので、画面検証は上の「開発用ダミーユーザーでログイン」から
+入る。ブラウザを開かなくても、Cookieを持ち回れば`curl`だけでログイン後の画面まで取得できる
+（Playwrightは`24.screenshot-required`のときだけでよい）。
+
+```bash
+# 未ログインの挙動（保護ページはログイン画面へ戻る）
+curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}\n' http://localhost:<ポート>/dashboard
+
+# 開発用ログイン（303 -> /dashboard なら成功。404ならシークレットが空）
+curl -s -c /tmp/cookies.txt -o /dev/null -w '%{http_code} -> %{redirect_url}\n' \
+  -X POST http://localhost:<ポート>/api/dev/login
+
+# ログイン後の画面・API（Cookie無しだとAPIは401）
+curl -s -b /tmp/cookies.txt -o /tmp/page.html -w '%{http_code}\n' http://localhost:<ポート>/dashboard
+curl -s -b /tmp/cookies.txt -o /dev/null -w '%{http_code}\n' 'http://localhost:<ポート>/api/issues?view=all'
+```
+
+**`/api/dev/login`が404を返す・ログイン画面にボタンが出ないときは、そのworktreeの`.env.local`の
+`CI_LOGIN_BYPASS_SECRET`が空。** `.env.local.example`はキーだけを空値で持っており、本体
+チェックアウト側が空ならコピー元も空なので、**新しく作ったworktreeでは空から始まる**のが既定。
+`pnpm db:seed:dev`が生成して書き込むので、上の手順どおり流してから開発サーバーを起こし直す。
+
+全アプリ共通の手順（他アプリで導線が無いときの実装の形・守ること）は個人skill`auth-dev-login`に
+まとめてある。**skillはローカルセッションにしか渡らない**ため、無人実行でも要る内容はここに書く。
+
 ## セキュリティ上の前提
 
 プロトコルを登録すると、この起動経路は**任意のWebページから叩ける**ようになる。悪意ある
