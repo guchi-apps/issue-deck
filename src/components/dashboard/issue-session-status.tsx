@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ChevronDown,
+  Copy,
   ExternalLink,
   HandHelping,
   Loader2,
@@ -36,13 +39,16 @@ import {
   resolveSessionControlRejection,
   SESSION_CONTROL_LABELS,
   SESSION_INSTRUCTION_MAX_LENGTH,
+  type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
+  compactIssueSessionLabel,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +71,18 @@ import { cn } from "@/lib/utils";
  * 実行はサブPCのpollerが次の巡（既定30秒間隔）で行うため、押した直後は「送信しました」を出す。
  *
  * 配色は`dispatch-job-status.tsx`に揃えている。
+ *
+ * **既定では1行に畳む**（#1676）。畳む前は、起動ジョブの行（「サブPCで起動しました」）とこの行が
+ * 同じ「サブPCで動いている」ことを2行で言い、その下に停止・追加指示・閉じるの3ボタンと、
+ * 停止と終了の違いの説明（#1557）が常時並んでいた。スマホのIssue詳細ではこのカードだけで
+ * 14行を占め、Issue本文が初期表示から押し出されていた。
+ *
+ * **畳むのは「押す気になったときだけ要るもの」に限る。** 次のものは畳まない。
+ *
+ * - Remote Controlで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
+ * - セッションの補足（`summary.detail`。「`tmux attach -t …`で答えてください」など次の操作そのもの）
+ * - 押した操作の結果（`controlJob`の状態・pollerが見送った理由・送信の失敗）。届くまで最大1分
+ *   あり、送り直してよいかの判断がここにしかない
  */
 
 const TONE_CLASS: Record<IssueSessionTone, string> = {
@@ -102,12 +120,21 @@ export function IssueSessionStatus({
   session,
   dispatch,
   align = "end",
+  launchJob = null,
 }: {
   session: DispatchSessionView;
   /** 画面で1回だけ取ったディスパッチの状態（#1262）。停止・終了もこの経路で積む */
   dispatch: DispatchStateHandle;
   /** 横並びのツールバー（PC）では右寄せ、縦積み（スマホ）では左寄せ */
   align?: "start" | "end";
+  /**
+   * このセッションを立てた起動ジョブ（#1676）。**渡されたときは、その行をここへ畳む。**
+   *
+   * 渡すかどうかを決めるのは`IssueStatusCard`で、起動が成功しているとき（＝もう
+   * 「順番待ち」「失敗理由」「取り消し」を出す必要が無いとき）だけ渡す。ここでは起動時刻を
+   * 展開側に添えるためだけに使う。
+   */
+  launchJob?: DispatchJobView | null;
 }) {
   const summary = summarizeIssueSession(session);
   const [confirmingKill, setConfirmingKill] = useState(false);
@@ -117,6 +144,14 @@ export function IssueSessionStatus({
   // 使う機会の少ないものが場所を取る）
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
+  /**
+   * 操作の開閉（#1676）。**`null`は「まだ人が触っていない」**で、そのあいだは未処理の
+   * 制御ジョブがあるかどうかに従う（押した直後に自分の操作が畳まれて見えなくなるのを防ぐ）。
+   * 一度押されたらその指示に従う（自動で開き直さない）。
+   */
+  const [controlsOpen, setControlsOpen] = useState<boolean | null>(null);
+  const controlsId = useId();
+  const [copiedAttach, setCopiedAttach] = useState(false);
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const controlJob = findSessionControlJobForIssue(
@@ -154,6 +189,25 @@ export function IssueSessionStatus({
   // ボタンは出したまま無効にし、理由を下に出す**（#1332の「停止」と同じ扱い。導線ごと
   // 消すと、なぜ送れないのかが画面から分からなくなる）
   const showInstruction = canControl && session.state === "ALIVE";
+  // 起動できたセッションの中身を見る唯一の手掛かり（#1468）。畳んだ行のピルはセッションの
+  // 状態を表すものに変わったため、コピーは展開側の明示的なボタンにする
+  const attachCommand =
+    session.state === "ALIVE" ? `tmux attach -t ${session.tmuxSessionName}` : null;
+  // 畳む相手が1つも無ければトグルも出さない（消えたセッションには操作する相手がいない）
+  const hasControls = canControl || attachCommand !== null;
+  const controlsExpanded = controlsOpen ?? hasActiveControlJob;
+
+  async function handleCopyAttachCommand() {
+    if (!attachCommand) return;
+    try {
+      await navigator.clipboard.writeText(attachCommand);
+    } catch {
+      // コピーできていないのに成功表示を出さない（`dispatch-job-status.tsx`と同じ扱い）
+      return;
+    }
+    setCopiedAttach(true);
+    window.setTimeout(() => setCopiedAttach(false), 1500);
+  }
 
   async function send(kind: "interrupt" | "kill" | "instruction", body?: string) {
     setControlError(null);
@@ -182,19 +236,41 @@ export function IssueSessionStatus({
         align === "end" ? "items-end" : "items-start",
       )}
     >
-      <span
+      {/* 畳んだ1行（#1676）。起動ジョブの行（「サブPCで起動しました」）はここへ畳んでいる。
+          文言は`compactIssueSessionLabel`＝ホスト名＋短い言い方で、起動時刻は展開側に添える */}
+      <div
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
-          TONE_CLASS[summary.tone],
+          "flex w-full flex-wrap items-center gap-x-2 gap-y-1",
+          align === "end" ? "justify-end" : "justify-start",
         )}
       >
-        <ToneIcon tone={summary.tone} />
-        {summary.label}
-        {/* 添える時刻は文言に合わせる（#1353）。pollerが1巡ごとに更新するlastReportedAtを
-            入力待ちに添えると、何時間前の入力待ちでも「たった今」に見える */}
-        <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
-      </span>
-      {/* 理由・案内はホバーではなく本文として出す（主な用途が外出先のスマホでホバーが無い） */}
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+            TONE_CLASS[summary.tone],
+          )}
+        >
+          <ToneIcon tone={summary.tone} />
+          {compactIssueSessionLabel(session)}
+          {/* 添える時刻は文言に合わせる（#1353）。pollerが1巡ごとに更新するlastReportedAtを
+              入力待ちに添えると、何時間前の入力待ちでも「たった今」に見える */}
+          <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
+        </span>
+        {hasControls && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={controlsExpanded}
+            aria-controls={controlsId}
+            onClick={() => setControlsOpen(!controlsExpanded)}
+          >
+            操作
+            <ChevronDown className={cn("transition-transform", controlsExpanded && "rotate-180")} />
+          </Button>
+        )}
+      </div>
+      {/* 理由・案内はホバーではなく本文として出す（主な用途が外出先のスマホでホバーが無い）。
+          **畳まない。** 「`tmux attach -t …`で答えてください」のように、次にやることそのもの */}
       {summary.detail && (
         <p
           className={cn(
@@ -205,166 +281,205 @@ export function IssueSessionStatus({
           {summary.detail}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        {summary.remoteControlUrl && (
-          <Button variant="outline" size="sm" asChild>
-            <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
-              Remote Controlで開く
-              <ExternalLink />
-            </a>
-          </Button>
-        )}
-        {/* tailnet内からしか開けない（#1265）。スマホがtailnetにいれば押せる */}
-        {summary.previewUrl && (
-          <Button variant="outline" size="sm" asChild>
-            <a href={summary.previewUrl} target="_blank" rel="noreferrer">
-              <Monitor />
-              開発環境を開く
-            </a>
-          </Button>
-        )}
-        {showInterrupt && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={interruptRejection !== null || dispatch.isSubmitting}
-            onClick={() => void send("interrupt")}
-          >
-            <Square />
-            {SESSION_CONTROL_LABELS.INTERRUPT.action}
-          </Button>
-        )}
-        {/* 追加指示（#1012）。生きているセッションにしか送る相手がいない */}
-        {showInstruction && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={instructionRejection !== null || dispatch.isSubmitting}
-            onClick={() => setInstructionOpen((open) => !open)}
-          >
-            <MessageSquarePlus />
-            {SESSION_CONTROL_LABELS.INSTRUCTION.action}
-          </Button>
-        )}
-        {canControl && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={killRejection !== null || dispatch.isSubmitting}
-            onClick={() => setConfirmingKill(true)}
-          >
-            <OctagonX />
-            {SESSION_CONTROL_LABELS.KILL.action}
-          </Button>
-        )}
-      </div>
-      {/* 2つの違いを画面に出す（#1557）。ボタンの文言だけでは、押すまで「動いている処理だけが
-          止まる」のか「セッションごと終わる」のかが分からず、実際に問われた。
-          ホバーではなく本文として出すのは上の理由・案内と同じ立場（スマホにホバーが無い）。
-          並んでいるときにしか迷いようがないので、停止を出しているときだけ添える */}
-      {showInterrupt && (
-        <p
-          className={cn(
-            "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
-          )}
-        >
-          「{SESSION_CONTROL_LABELS.INTERRUPT.action}
-          」は今動いている処理だけを止めます（セッションは残るので、追加指示で続けられます）。「
-          {SESSION_CONTROL_LABELS.KILL.action}
-          」はセッションごと終了します（worktreeは残るので、次に起動すると前回の続きから再開します）。
-        </p>
-      )}
-      {/* 本文を書く場所。**押した人が書いた1行だけを送る**（実行体が組み立てる経路は無い） */}
-      {showInstruction && instructionOpen && (
-        <div className="flex w-full flex-col gap-1.5">
-          <div className="flex w-full gap-2">
-            <Input
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                event.preventDefault();
-                if (!instructionBody || instructionRejection !== null) return;
-                void send("instruction", instructionBody);
-              }}
-              maxLength={SESSION_INSTRUCTION_MAX_LENGTH}
-              placeholder="セッションへ送る指示（1行）"
-              aria-label="追加指示の本文"
-              disabled={dispatch.isSubmitting}
-            />
-            <Button
-              size="sm"
-              disabled={
-                instructionBody === null ||
-                instructionRejection !== null ||
-                dispatch.isSubmitting
-              }
-              onClick={() => {
-                if (!instructionBody) return;
-                void send("instruction", instructionBody);
-              }}
-            >
-              <SendHorizonal />
-              送信
+      {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、
+          畳むと画面から`00.check-user`を外せなくなる */}
+      {(summary.remoteControlUrl || summary.previewUrl) && (
+        <div className="flex flex-wrap gap-2">
+          {summary.remoteControlUrl && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
+                Remote Controlで開く
+                <ExternalLink />
+              </a>
             </Button>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {INSTRUCTION_PRESETS.map((preset) => (
-              <Button
-                key={preset}
-                variant="ghost"
-                size="sm"
-                className="h-auto px-2 py-1 text-xs"
-                disabled={dispatch.isSubmitting}
-                // **差し込むだけで送らない。** 押した勢いでそのまま届くと、書き直す機会が無い
-                onClick={() => setInstruction(preset)}
-              >
-                {preset}
-              </Button>
-            ))}
-          </div>
-          <p className="w-full break-words text-left text-xs text-muted-foreground">
-            改行は送れません（{SESSION_INSTRUCTION_MAX_LENGTH}
-            文字まで）。長い指示はIssueにコメントし、ここには「コメントを読んでから続けて」と送ってください。
-            届くまで最大1分ほどかかり、承認プロンプトや選択フォームが出ている間は送らずに見送ります。
-          </p>
+          )}
+          {/* tailnet内からしか開けない（#1265）。スマホがtailnetにいれば押せる */}
+          {summary.previewUrl && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={summary.previewUrl} target="_blank" rel="noreferrer">
+                <Monitor />
+                開発環境を開く
+              </a>
+            </Button>
+          )}
         </div>
       )}
-      {/* 押せない理由は押す前に出す。未処理の操作がある場合は、下のジョブの状態表示が
-          同じことを言うので出さない（`killRejection`と同じ扱い） */}
-      {showInstruction &&
-        instructionRejection !== null &&
-        instructionRejection !== "already_queued" &&
-        instructionRejection !== killRejection && (
-          <p
-            className={cn(
-              "w-full break-words text-xs text-muted-foreground",
-              align === "end" ? "text-right" : "text-left",
-            )}
-          >
-            {describeSessionControlRejection(instructionRejection, {
-              hostName: session.host,
-              kind: "INSTRUCTION",
-            })}
-          </p>
-        )}
-      {/* 押せない理由は押す前に出す（#1180の「選べない理由は押す前に出す」と同じ立場）。
-          未処理の操作がある場合は、下のジョブの状態表示が同じことを言うので出さない */}
-      {canControl && killRejection !== null && killRejection !== "already_queued" && (
-        <p
+      {hasControls && controlsExpanded && (
+        <div
+          id={controlsId}
           className={cn(
-            "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
+            "flex w-full flex-col gap-1",
+            align === "end" ? "items-end" : "items-start",
           )}
         >
-          {describeSessionControlRejection(killRejection, {
-            hostName: session.host,
-            kind: "KILL",
-          })}
-        </p>
+          <div className="flex flex-wrap gap-2">
+            {showInterrupt && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={interruptRejection !== null || dispatch.isSubmitting}
+                onClick={() => void send("interrupt")}
+              >
+                <Square />
+                {SESSION_CONTROL_LABELS.INTERRUPT.action}
+              </Button>
+            )}
+            {/* 追加指示（#1012）。生きているセッションにしか送る相手がいない */}
+            {showInstruction && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={instructionRejection !== null || dispatch.isSubmitting}
+                onClick={() => setInstructionOpen((open) => !open)}
+              >
+                <MessageSquarePlus />
+                {SESSION_CONTROL_LABELS.INSTRUCTION.action}
+              </Button>
+            )}
+            {canControl && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={killRejection !== null || dispatch.isSubmitting}
+                onClick={() => setConfirmingKill(true)}
+              >
+                <OctagonX />
+                {SESSION_CONTROL_LABELS.KILL.action}
+              </Button>
+            )}
+          </div>
+          {/* 2つの違いを画面に出す（#1557）。ボタンの文言だけでは、押すまで「動いている処理だけが
+              止まる」のか「セッションごと終わる」のかが分からず、実際に問われた。
+              ホバーではなく本文として出すのは上の理由・案内と同じ立場（スマホにホバーが無い）。
+              並んでいるときにしか迷いようがないので、停止を出しているときだけ添える */}
+          {showInterrupt && (
+            <p
+              className={cn(
+                "w-full break-words text-xs text-muted-foreground",
+                align === "end" ? "text-right" : "text-left",
+              )}
+            >
+              「{SESSION_CONTROL_LABELS.INTERRUPT.action}
+              」は今動いている処理だけを止めます（セッションは残るので、追加指示で続けられます）。「
+              {SESSION_CONTROL_LABELS.KILL.action}
+              」はセッションごと終了します（worktreeは残るので、次に起動すると前回の続きから再開します）。
+            </p>
+          )}
+          {/* 本文を書く場所。**押した人が書いた1行だけを送る**（実行体が組み立てる経路は無い） */}
+          {showInstruction && instructionOpen && (
+            <div className="flex w-full flex-col gap-1.5">
+              <div className="flex w-full gap-2">
+                <Input
+                  value={instruction}
+                  onChange={(event) => setInstruction(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                    event.preventDefault();
+                    if (!instructionBody || instructionRejection !== null) return;
+                    void send("instruction", instructionBody);
+                  }}
+                  maxLength={SESSION_INSTRUCTION_MAX_LENGTH}
+                  placeholder="セッションへ送る指示（1行）"
+                  aria-label="追加指示の本文"
+                  disabled={dispatch.isSubmitting}
+                />
+                <Button
+                  size="sm"
+                  disabled={
+                    instructionBody === null ||
+                    instructionRejection !== null ||
+                    dispatch.isSubmitting
+                  }
+                  onClick={() => {
+                    if (!instructionBody) return;
+                    void send("instruction", instructionBody);
+                  }}
+                >
+                  <SendHorizonal />
+                  送信
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {INSTRUCTION_PRESETS.map((preset) => (
+                  <Button
+                    key={preset}
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-2 py-1 text-xs"
+                    disabled={dispatch.isSubmitting}
+                    // **差し込むだけで送らない。** 押した勢いでそのまま届くと、書き直す機会が無い
+                    onClick={() => setInstruction(preset)}
+                  >
+                    {preset}
+                  </Button>
+                ))}
+              </div>
+              <p className="w-full break-words text-left text-xs text-muted-foreground">
+                改行は送れません（{SESSION_INSTRUCTION_MAX_LENGTH}
+                文字まで）。長い指示はIssueにコメントし、ここには「コメントを読んでから続けて」と送ってください。
+                届くまで最大1分ほどかかり、承認プロンプトや選択フォームが出ている間は送らずに見送ります。
+              </p>
+            </div>
+          )}
+          {/* 押せない理由は押す前に出す。未処理の操作がある場合は、下のジョブの状態表示が
+              同じことを言うので出さない（`killRejection`と同じ扱い） */}
+          {showInstruction &&
+            instructionRejection !== null &&
+            instructionRejection !== "already_queued" &&
+            instructionRejection !== killRejection && (
+              <p
+                className={cn(
+                  "w-full break-words text-xs text-muted-foreground",
+                  align === "end" ? "text-right" : "text-left",
+                )}
+              >
+                {describeSessionControlRejection(instructionRejection, {
+                  hostName: session.host,
+                  kind: "INSTRUCTION",
+                })}
+              </p>
+            )}
+          {/* 押せない理由は押す前に出す（#1180の「選べない理由は押す前に出す」と同じ立場）。
+              未処理の操作がある場合は、下のジョブの状態表示が同じことを言うので出さない */}
+          {canControl && killRejection !== null && killRejection !== "already_queued" && (
+            <p
+              className={cn(
+                "w-full break-words text-xs text-muted-foreground",
+                align === "end" ? "text-right" : "text-left",
+              )}
+            >
+              {describeSessionControlRejection(killRejection, {
+                hostName: session.host,
+                kind: "KILL",
+              })}
+            </p>
+          )}
+          {/* 起動ジョブの行から畳んできたもの（#1676）。時刻は相対表現ではなく具体的な日時で出す
+              （#1468。「3時間前」では手元のtmuxで動いているセッションと突き合わせられない） */}
+          {(launchJob || attachCommand) && (
+            <div
+              className={cn(
+                "flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground",
+                align === "end" ? "justify-end" : "justify-start",
+              )}
+            >
+              {launchJob && (
+                <span title={formatDateTimeFull(launchJob.finishedAt ?? launchJob.createdAt)}>
+                  {formatDateTime(launchJob.finishedAt ?? launchJob.createdAt)}に起動
+                </span>
+              )}
+              {attachCommand && (
+                <Button variant="outline" size="sm" onClick={() => void handleCopyAttachCommand()}>
+                  {copiedAttach ? <Check /> : <Copy />}
+                  {copiedAttach ? "コピーしました" : "tmuxのコマンドをコピー"}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       )}
-      {/* 押した操作がどこまで進んだか。pull型なので届くまで最大1分ほど何も起きない */}
+      {/* 押した操作がどこまで進んだか。pull型なので届くまで最大1分ほど何も起きない。
+          **畳まない**（#1676）。届くまで最大1分あり、送り直してよいかの判断がここにしかない */}
       {controlJob && (
         <p
           className={cn(

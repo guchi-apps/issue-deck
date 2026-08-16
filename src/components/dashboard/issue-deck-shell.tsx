@@ -39,7 +39,7 @@ import { TopBar } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
-import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
+import { useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
@@ -161,7 +161,6 @@ export function IssueDeckShell({
     selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
-    applyQuickFilter: applyMobileQuickFilter,
     updateListFilters,
     goBack,
   } = useMobileScreen(issues, repositories);
@@ -360,10 +359,6 @@ export function IssueDeckShell({
       ),
     [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
   );
-  const overviewStats = useMemo(
-    () => computeOverviewStats(topbarFilteredIssues, topbarFilteredIssuesIgnoringState),
-    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState],
-  );
   // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
   // どのビューを表示していても求める。
   const checkUserIssues = useMemo(
@@ -485,6 +480,13 @@ export function IssueDeckShell({
   const mergePendingPullRequests = useMemo(
     () => pullRequestsAwaitingUserMerge(visiblePullRequests, checkUserIssues),
     [visiblePullRequests, checkUserIssues],
+  );
+
+  // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
+  // すぐ下に並ぶメニューの行と必ず同じ数字になる。
+  const overviewStats = useMemo(
+    () => computeOverviewStats(navCounts, mergePendingPullRequests.length),
+    [navCounts, mergePendingPullRequests.length],
   );
 
   // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
@@ -689,35 +691,22 @@ export function IssueDeckShell({
     }
   }
 
-  function applyQuickFilter(quickFilter: QuickFilter, options?: { history?: HistoryMode }) {
-    setFilters(
-      {
-        view: quickFilter.view,
-        q: quickFilter.q,
-        repos: quickFilter.repos,
-        state: quickFilter.state,
-        labels: quickFilter.labels,
-        assignee: quickFilter.assignee,
-        sort: quickFilter.sort,
-        // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
-        pane: "issues",
-        // 一覧の中身が入れ替わるので選択中Issueも畳む（1回のURL更新にまとめる）。
-        issue: null,
-      },
-      options,
-    );
-  }
-
+  // 保存したフィルター（左メニュー）を適用する。スマホのホーム画面からも呼んでいたが、
+  // ホームから節ごと外したためPCだけの経路になった（#1690）。
   function handleSelectQuickFilter(quickFilter: QuickFilter) {
-    applyQuickFilter(quickFilter);
-  }
-
-  function handleSelectQuickFilterMobile(quickFilter: QuickFilter) {
-    // スマホは続くapplyMobileQuickFilterが同じsearchParamsから次のURLを組み立て直すため、
-    // こちらの更新は後の1回に上書きされる（#1260と同じ理由）。履歴を積むのは実際に画面が
-    // 変わる後者だけにして、1回の操作で戻る操作が2回必要にならないようにする（#1396）。
-    applyQuickFilter(quickFilter, { history: "replace" });
-    applyMobileQuickFilter(quickFilter);
+    setFilters({
+      view: quickFilter.view,
+      q: quickFilter.q,
+      repos: quickFilter.repos,
+      state: quickFilter.state,
+      labels: quickFilter.labels,
+      assignee: quickFilter.assignee,
+      sort: quickFilter.sort,
+      // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
+      pane: "issues",
+      // 一覧の中身が入れ替わるので選択中Issueも畳む（1回のURL更新にまとめる）。
+      issue: null,
+    });
   }
 
   async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
@@ -772,15 +761,18 @@ export function IssueDeckShell({
                 <MobileHomeScreen
                   overviewStats={overviewStats}
                   navCounts={navCounts}
+                  checkUserPullRequestCount={mergePendingPullRequests.length}
+                  manualStepAttention={manualStepAttention}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
+                  onSelectPullRequests={selectPullRequests}
+                  onSelectFlow={() => selectTab("flow")}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
-                  quickFilters={quickFilters}
-                  onSelectQuickFilter={handleSelectQuickFilterMobile}
-                  onDeleteQuickFilter={handleDeleteQuickFilter}
-                  onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
-                  onSelectPullRequests={selectPullRequests}
+                  /* サブPCのカードのセッション行からIssue詳細を開く（#1625） */
+                  onOpenIssue={openIssueUrl}
+                  onCreateIssue={() => openCreateDialog()}
+                  onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onOpenSettings={selectMobileSettings}
                 />
               )}
@@ -862,8 +854,6 @@ export function IssueDeckShell({
                 <MobileReposScreen
                   repositories={repositories}
                   onSelectRepository={selectRepository}
-                  onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-                  onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
                   onSetRepositoryFavorite={handleSetRepositoryFavorite}
                 />
               )}

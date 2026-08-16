@@ -539,6 +539,23 @@ model DispatchHost {
   // 行ごと出さない（`describeDispatchHostMetrics`）
   swapUsedMb        Int?
   swapTotalMb       Int?
+  // pollerが動かしているチェックアウトの鮮度（#1612）。**`agentVersion`とは別物**で、
+  // あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に走っているスクリプトが
+  // どのコミットのものかという事実。
+  //
+  // pollerが動かすのは自分と同じチェックアウト（`SCRIPT_DIR`基準）のスクリプトで、これを
+  // 自動で更新する仕組みは無い。**`develop`へマージしただけでは効かない**のに、効いていない
+  // ことに気付く手掛かりがどこにも無かった（2026-08-15には97コミット遅れており、#1454と
+  // #1541がどちらもサブPCでは一度も働いていなかった）。
+  //
+  // **`null`は「申告していない」**（古いpoller・gitが無い・チェックアウトを読めなかった巡）。
+  // `checkoutBehind`だけは別に`null`になりうる（fetchできず、遅れを数えられなかった場合）。
+  // 数えた遅れがいつ時点のものかは`checkoutFetchedAt`（最後にoriginを見た時刻）で分かる
+  checkoutCommit      String?
+  checkoutBranch      String?
+  checkoutCommittedAt DateTime?
+  checkoutBehind      Int?
+  checkoutFetchedAt   DateTime?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt        DateTime
 

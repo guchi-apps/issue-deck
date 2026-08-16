@@ -2,7 +2,10 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import {
+  WorkflowStatusSteps,
+  WorkflowStepBadge,
+} from "@/components/dashboard/workflow-status-steps";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
@@ -92,5 +95,27 @@ describe("WorkflowStepBadge", () => {
     );
     expect(container.textContent).not.toContain("起動待ち");
     expect(spinner(container)).not.toBeNull();
+  });
+});
+
+/**
+ * #1676。確認待ちのバッジを現在ステップの行へ流し込んでいたため、折り返したときに行間ぶんしか
+ * 空かず、丸みのあるバッジが上の行に貼り付いて見えていた。**段を分けて隙間を持たせる。**
+ */
+describe("WorkflowStatusSteps のスマホ用キャプション", () => {
+  it("確認待ちのバッジは現在ステップの段と分ける", () => {
+    const { container } = render(
+      <WorkflowStatusSteps
+        labels={[{ name: "00.check-user", color: "", description: null }]}
+        projectStatus="Planning"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+      />,
+    );
+
+    const badge = container.querySelector(".md\\:hidden .rounded-full");
+    expect(badge?.textContent).toContain("ユーザー確認待ち");
+    // 同じ`<p>`の中に流し込まない（親が段組みで、隙間は`gap`が持つ）
+    expect(badge?.closest("p")).toBeNull();
+    expect(badge?.parentElement?.className).toContain("gap-1.5");
   });
 });

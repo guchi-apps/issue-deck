@@ -1,4 +1,4 @@
-import { isProgressLabel } from "@/lib/issue-status";
+import { isAutoAssignableLabelName } from "@/lib/issue-status";
 
 const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -30,15 +30,19 @@ function truncate(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength)}...(省略)`;
 }
 
-/** 00〜09番台のラベルはユーザーチェック・進捗管理用（CLAUDE.md参照）のため、自動生成の選択対象から除外する。 */
-function isSelectableLabel(name: string): boolean {
-  return !isProgressLabel(name);
-}
+// 自動生成の選択対象は30〜89番台（71番台を除く）のラベルだけ（#1662）。判定の実体は
+// `isAutoAssignableLabelName`（`src/lib/issue-status.ts`）。`11.local`・`21.plan-required`〜
+// `25.artifact-required`・`71.manual-step`・`90.Close: *`は、本文の内容ではなく運用の都合
+// （誰が対応中か・どのゲートを通すか・なぜcloseしたか）で人やワークフローが付けるラベルで、
+// 本文からの推定で付けてよいものではない。
+// **プロンプトの候補一覧（buildIssueSuggestPrompt）と応答の後処理（generateIssueSuggestion）は
+// 必ず同じ集合を使う。** プロンプト側だけ絞ると、Claudeが範囲外のラベル名を返したときに
+// 後処理が素通ししてしまう。
 
 /** Issue本文と選択可能なラベル一覧から、タイトル・ラベル提案生成用プロンプトを組み立てる。 */
 export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
   const { body, availableLabels } = input;
-  const selectableLabels = availableLabels.filter((label) => isSelectableLabel(label.name));
+  const selectableLabels = availableLabels.filter((label) => isAutoAssignableLabelName(label.name));
 
   const labelsText =
     selectableLabels.length > 0
@@ -130,7 +134,7 @@ export async function generateIssueSuggestion(
 
   const availableByLowerName = new Map(
     input.availableLabels
-      .filter((label) => isSelectableLabel(label.name))
+      .filter((label) => isAutoAssignableLabelName(label.name))
       .map((label) => [label.name.toLowerCase(), label.name]),
   );
   const labels = rawLabels

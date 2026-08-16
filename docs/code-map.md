@@ -83,6 +83,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
+  設定の「状態」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
+  レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
+  同じバーの上に立つ縦の目盛りで示す。** 以前は残量を描いていたので消費が進むほどバーが縮み、
+  経過時間も別の細いバーとして下に並んでいた。**片方だけ旧表示に戻さない**——同じ画面に
+  「伸びるバー」と「縮むバー」が混在すると、どちらの向きで読むのかが行ごとに変わる。
+  shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
+  （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
+  リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
@@ -135,6 +144,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
   サブPCの質問セッションで、リポジトリの絞り込み条件（ワークフロー不要）も実行先の選択も
   別物になるため。
+- **そのダイアログは2ステップで、既定は「内容を書く」だけ**（#1605）。開いた直後に出るのは
+  種別と本文の入力欄で、リポジトリ・タイトル・ラベル・担当者は画面に無い。「次へ」を押すと
+  `POST /api/issues/quick-suggest`が本文からリポジトリ・タイトル・ラベルを決め、値が入った
+  確認ステップ（＝従来のフォームそのもの）へ移る。ステップの初期値と遷移条件は
+  [`lib/quick-issue.ts`](../src/lib/quick-issue.ts)（`resolveInitialQuickStep`・
+  `canProceedFromInput`）。
+  **確認を飛ばして作成する経路を作ってはいけない。** リポジトリを外したまま作ると、押した本人から
+  見えないまま別リポジトリへIssueが立ち、そのリポジトリの無人実行の母集団に入る。**逆に、推定の
+  失敗で作成を止めてもいけない**——トークン未設定（501）・生成失敗のときは値が空のまま確認
+  ステップへ進む（入力ステップの「自分で入力する」も同じ行き先で、こちらはClaudeを呼ばない）。
+  推定APIの中身は「Claudeでリポジトリを決める → そのリポジトリのラベルを取る →
+  既存の`generateIssueSuggestion`でタイトル・ラベルを作る」の3段で、
+  **ラベル候補がリポジトリごとに違うため1回のClaude呼び出しにまとめられない**。
+  リポジトリの推定材料は[`lib/claude/repository-suggest.ts`](../src/lib/claude/repository-suggest.ts)が
+  組み立てる「リポジトリ名＋直近のopen Issueのタイトル数件」で、`Repository`に`description`を
+  足さずに済ませている。**候補一覧に無いフルネームは採らない**（`pickSuggestedRepository`）。
+  **種別（Issue／質問）だけはこの自動化の対象外**で、上のとおり自動判定しない。
+  Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
+  （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 
@@ -228,10 +256,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
   `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
   左メニューから外した「最近追加した」「本番反映待ち」「直近本番に反映した」「完了したPR」は
-  viewクエリとしては生きており、既存リンクとスマホのホーム画面のクイックビューからは
-  今までどおり開ける。
+  viewクエリとしては生きており、既存リンクからは今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
+  **この`sidebar*`はスマホのホーム画面のメニューも使う**（#1690。
+  [`mobile/mobile-home-screen.tsx`](../src/components/dashboard/mobile/mobile-home-screen.tsx)）。
+  以前はホームだけ`navViews`から機械的に作った9項目の平坦な一覧で、PCとどちらが正なのか
+  分からない状態だった。**片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは
+  「リポジトリ（全件）」「ラベル」「よく使うフィルター」の3節だけ（スマホではそれぞれフッターの
+  「Issue」タブと一覧の絞り込みシートが担う）。
+  「本番反映待ち」はホームのメニューには無いが、先頭の「いまの状況」のカードから開ける。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
   一覧の先頭に`MergePendingPullRequests`、選ぶ対象は`pullRequestsAwaitingUserMerge`）。
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
@@ -297,17 +331,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
   ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
   一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃えて「本番反映待ち」
-  「直近本番に反映した」を外すが、**ホーム画面のクイックビューからはそれらのビューで開かれうる**
-  ため、現在のビューが一覧に無いときだけ末尾へ足す（足さないと選択中の表示もスワイプ移動先も
-  失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
+  「直近本番に反映した」を外すが、**ホーム画面のカード（「本番反映待ち」）や既存のURLからは
+  それらのビューで開かれうる**ため、現在のビューが一覧に無いときだけ末尾へ足す
+  （足さないと選択中の表示もスワイプ移動先も失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
   （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
   同じシートにあっても数えない。
 - **スマホのフッターは「ホーム／Issue／PR／ブランチ」で、タブのidは`mscreen`の値そのもの**
   （#1436・#1638）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
   （→リポジトリ別Issue一覧）。
-  全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「概要」
-  「よくつかうフィルター」「保存したフィルター」からのドリルダウンだけにした（点灯するタブは
-  ホーム。判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。
+  全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「いまの状況」の
+  カードとメニューからのドリルダウンだけにした（#1690。点灯するタブはホーム。判定は
+  [`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。
   **4枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
   1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
   98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
@@ -753,6 +787,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 突き合わせ、issue-deck本体は[`lib/dispatch/check-user-labels.ts`](../src/lib/dispatch/check-user-labels.ts)
 を通す（付与エンドポイントは存在しないラベル名を渡すとその場で作ってしまうため）。
 一覧は[multi-agent/labels.md](multi-agent/labels.md)「理由を表す`01.check-*`ラベル」。
+
+**ラベル名の番号帯で「そのラベルをどう扱うか」を決める判定は
+[`lib/issue-status.ts`](../src/lib/issue-status.ts)に集めてある。** 3つあり、用途が違うので
+使い分ける。`isAttentionLabel`＝`00.`帯と`01.check-*`（一覧カードのラベル表示から外す）、
+`isProgressLabel`＝それに廃止済みの`01.`〜`09.`ステップを足したもの（人が選ぶ対象から外す。
+人が選べる範囲そのものは`lib/github/start-implementation.ts`の`isSelectableLabelName`が
+実装オプション用ラベルも足して決める）、`isAutoAssignableLabelName`＝**Claudeがタイトルと
+一緒に推定してよい範囲**（30〜89番台。71番台と番号プレフィックスの無いラベルを除く。#1662）。
+推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを自動生成」だけで、
+プロンプトの候補一覧・応答の後処理（[`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)）と
+画面側のリセット範囲（`create-issue-dialog.tsx`の`mergeSuggestedLabels`）が同じ判定を通る。
+どれか1つでもずれると、範囲外のラベルが付くか、人が選んだラベルが黙って消える。
+理由は[multi-agent/labels.md](multi-agent/labels.md)「Claudeによるラベル自動付与の対象は30〜89番台に限る」。
 
 **理由から「次にどこの何を押すか」を組み立てるのは
 [`lib/github/check-user-guidance.ts`](../src/lib/github/check-user-guidance.ts)1か所**（#1663）。

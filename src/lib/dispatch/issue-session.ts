@@ -174,6 +174,21 @@ export function isSessionWaitingInput(session: DispatchSessionView | null): bool
   return session.state === "ALIVE" && session.activity === "WAITING_INPUT";
 }
 
+/**
+ * 1行に畳んだセッション行の文言（#1676）。例:「サブPC・まだ開始していません」。
+ *
+ * **`summarizeIssueSession`の`shortLabel`にホスト名を添えるだけ**で、状態の分岐をここに増やさない。
+ * 別々に分岐を持つと、状態が増えたときに片方だけ更新されて同じ状態が2通りの言い方で出る
+ * （`shortLabel`を`label`と同じ分岐で作っているのと同じ理由）。
+ *
+ * 使う場所は、起動ジョブの行（「サブPCで起動しました」）をこの行へ畳んだとき。畳む前は
+ * 同じ「サブPCで動いている」ことを2行で言っていた。
+ */
+export function compactIssueSessionLabel(session: DispatchSessionView): string {
+  const summary = summarizeIssueSession(session);
+  return `${formatDispatchHostName(session.host)}・${summary.shortLabel}`;
+}
+
 /** 一覧のバッジなど、1語で出したい場所向けの短い表現。通常の実行中はnull（出さない） */
 export function shortIssueSessionLabel(session: DispatchSessionView): string | null {
   if (session.state === "FAILED") return "異常終了";

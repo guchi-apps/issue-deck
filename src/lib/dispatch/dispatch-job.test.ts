@@ -844,6 +844,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
+      checkout: null,
       ...overrides,
     };
   }
@@ -901,6 +902,7 @@ describe("横断質問（#1454）", () => {
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
+      checkout: null,
       ...overrides,
     };
   }

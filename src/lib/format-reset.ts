@@ -32,6 +32,18 @@ export function formatResetCountdown(resetsAtSeconds: number, nowMs: number): st
   return `あと${hours}時間${minutes}分`;
 }
 
+/**
+ * リセットまでの残り時間を「あと2時間13分でリセット」形式の一文にする。
+ * 使用量メーターの下段は幅が狭く、絶対時刻まで置くと折り返すため、
+ * 画面にはこの一文だけを出し、絶対時刻（`formatResetAt`）はツールチップへ回す。
+ * 期限を過ぎている場合は「まもなくリセット」をそのまま返す（「でリセット」を重ねない）。
+ */
+export function formatResetSentence(resetsAtSeconds: number, nowMs: number): string | null {
+  const countdown = formatResetCountdown(resetsAtSeconds, nowMs);
+  if (countdown === null) return null;
+  return countdown.startsWith("あと") ? `${countdown}でリセット` : countdown;
+}
+
 function isSameLocalDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -79,4 +91,17 @@ export function calcRemainingTimePercent(
   const remainingMs = resetsAtSeconds * 1000 - nowMs;
   const percent = (remainingMs / durationMs) * 100;
   return Math.min(100, Math.max(0, percent));
+}
+
+/**
+ * `calcRemainingTimePercent`の裏返しで、ウィンドウ開始時点を0%・リセット時点を100%とする
+ * 経過時間の割合(0-100)を返す。使用量メーターの目盛りの位置に使う。
+ */
+export function calcElapsedTimePercent(
+  resetsAtSeconds: number,
+  durationMs: number,
+  nowMs: number,
+): number | null {
+  const remaining = calcRemainingTimePercent(resetsAtSeconds, durationMs, nowMs);
+  return remaining === null ? null : 100 - remaining;
 }

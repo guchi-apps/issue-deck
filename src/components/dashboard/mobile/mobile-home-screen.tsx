@@ -1,60 +1,105 @@
 "use client";
 
-import { FolderGit2, Plus, Settings, SlidersHorizontal, X } from "lucide-react";
+import {
+  FolderGit2,
+  GitBranch,
+  MessageCircleQuestion,
+  Plus,
+  Settings,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
+import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { Card } from "@/components/ui/card";
-import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
+import { Separator } from "@/components/ui/separator";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
+import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import {
+  navViewIcons,
+  sidebarAttentionNavViews,
+  sidebarIssueNavViews,
+  sidebarQuestionNavViews,
+} from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
+import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
-import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileHomeScreenProps = {
+  /** 先頭の3枚（#1690。要対応・実行中・本番反映待ち） */
   overviewStats: OverviewStat[];
   navCounts: Record<NavViewId, number>;
+  /**
+   * 「ユーザーの確認待ち」へ一緒に出す、ユーザーのマージ待ちPRの件数（#1690）。
+   * PCの左メニュー（`sidebar-nav.tsx`）と同じ数え方にするために受け取る。
+   */
+  checkUserPullRequestCount: number;
+  /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
+  manualStepAttention: ManualStepAttention;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
+  onSelectPullRequests: (view: PullRequestViewId) => void;
+  /** 「ブランチ」画面を開く（#1455）。ビューではないのでメニューへ直接1行として置く */
+  onSelectFlow: () => void;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
-  quickFilters: QuickFilter[];
-  onSelectQuickFilter: (quickFilter: QuickFilter) => void;
-  onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
-  onSaveQuickFilter: () => void;
-  onSelectPullRequests: (view: PullRequestViewId) => void;
+  /** サブPCのカードのセッション行から、そのIssueの詳細を開く（#1625） */
+  onOpenIssue: (issueId: string) => void;
+  /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
+  onCreateIssue: () => void;
+  onAskCrossRepoQuestion: () => void;
   /** 設定画面を開く（#1638。フッターのタブから外し、このヘッダーの歯車が入口になった） */
   onOpenSettings: () => void;
 };
 
-// 運用ラベルのビュー（ユーザーの確認待ちなど）を先に、「すべてのIssue」を除いた
-// 残りのビューを後ろに並べる。
-const quickFilterViews = [
-  ...labelNavViews,
-  ...navViews.filter((view) => view.id !== "all" && !view.labels),
-];
-
+/**
+ * スマホのホーム画面。
+ *
+ * **並びは「いまの状況 → メニュー → お気に入りリポジトリ」**（#1690）。先頭のダッシュボードで
+ * 盤面とサブPCの様子を掴み、その下のメニューから目的の一覧へ降りる、という読み方にしてある。
+ *
+ * **メニューはPCの左メニュー（`sidebar-nav.tsx`）と同じ配列・同じ並びを使う。** 以前はここだけ
+ * `navViews`から機械的に作った9項目の平坦な一覧で、PCとどちらが正なのか分からない状態だった。
+ * 出す項目を決めているのは`lib/nav-views.ts`・`lib/pull-request-views.ts`の`sidebar*`で、
+ * 片方を足せば両方に出る。
+ *
+ * **PCにある「リポジトリ（全件）」「ラベル」「よく使うフィルター」は置かない。** リポジトリは
+ * フッターの「Issue」タブ（リポジトリ一覧）、ラベルは一覧の絞り込みシートが既に担っており、
+ * ホームに3つ目の入口を作ると押す場所が割れる。
+ */
 export function MobileHomeScreen({
   overviewStats,
   navCounts,
+  checkUserPullRequestCount,
+  manualStepAttention,
   pullRequestNavCounts,
   onSelectQuickView,
+  onSelectPullRequests,
+  onSelectFlow,
   favoriteRepositories,
   onSelectRepository,
-  quickFilters,
-  onSelectQuickFilter,
-  onDeleteQuickFilter,
-  onSaveQuickFilter,
-  onSelectPullRequests,
+  onOpenIssue,
+  onCreateIssue,
+  onAskCrossRepoQuestion,
   onOpenSettings,
 }: MobileHomeScreenProps) {
+  /*
+    ホストの様子（#1690）とヘッダーの実行状況（#1638）の両方が同じ状態を要る。**この画面で1回だけ
+    取り、ボタンへは渡す**（#1262）。渡さないとボタンが自前で取りに行き、同じ画面のために
+    ポーリングが2本走る。
+  */
+  const dispatch = useDispatchState(true);
+  // 確認待ちにはIssueだけでなく、ユーザーがマージするしかないPRも数に含める（PCと同じ）
+  const checkUserCount = navCounts["check-user"] + checkUserPullRequestCount;
+
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       {/*
         ヘッダー右上に実行状況と設定を置く（#1638）。実行状況はどの画面のヘッダーにも同じ
         位置で出すが、**設定はホームだけ**——毎日押すものではないぶんをフッターの1枠から
@@ -67,7 +112,7 @@ export function MobileHomeScreen({
           置く。**ホーム以外の画面には出していない**——理由は`mobile-reload-button.tsx`
         */}
         <MobileReloadButton />
-        <MobileDispatchStatusButton />
+        <MobileDispatchStatusButton dispatch={dispatch} />
         <button
           type="button"
           onClick={onOpenSettings}
@@ -79,113 +124,112 @@ export function MobileHomeScreen({
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain">
+      {/* 最終行が右下の丸ボタンの裏へ入らないよう、下に余白を足す */}
+      <div className="flex-1 overflow-y-auto overscroll-contain pb-20">
+        {/*
+          先頭のダッシュボード（#1690）。盤面の3枚と、サブPCの様子を1枚ずつ。
+          ホストの様子はここへ戻したもので、#1638でヘッダーの実行状況シートへ移していた。
+          **ホームは「いま何が動いているか」のサマリ、ヘッダーはキュー全体（順番待ち・失敗・
+          停止操作）**という切り分けにしてある
+        */}
         <div className="p-4">
-          <h2 className="mb-2 text-sm font-semibold">概要</h2>
+          <h2 className="mb-2 text-sm font-semibold">いまの状況</h2>
           <div className="grid grid-cols-3 gap-2">
-            {overviewStats.map((stat) =>
-              stat.linkedView ? (
-                <button
-                  key={stat.label}
-                  type="button"
-                  onClick={() => onSelectQuickView(stat.linkedView as NavViewId)}
-                  className="w-full text-left"
-                >
-                  <Card className="gap-1 p-3 hover:bg-accent active:bg-accent">
-                    <p className="text-xs text-muted-foreground">{stat.label}</p>
-                    <p className="text-lg font-semibold">{stat.value}</p>
-                    {stat.diffLabel && (
-                      <p className="text-xs text-muted-foreground">{stat.diffLabel}</p>
-                    )}
-                  </Card>
-                </button>
-              ) : (
-                <Card key={stat.label} className="gap-1 p-3">
+            {overviewStats.map((stat) => (
+              <button
+                key={stat.label}
+                type="button"
+                onClick={() => onSelectQuickView(stat.linkedView)}
+                className="w-full text-left"
+              >
+                <Card className="gap-1 p-3 hover:bg-accent active:bg-accent">
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
                   <p className="text-lg font-semibold">{stat.value}</p>
-                  {stat.diffLabel && (
-                    <p className="text-xs text-muted-foreground">{stat.diffLabel}</p>
-                  )}
                 </Card>
-              ),
-            )}
+              </button>
+            ))}
           </div>
+
+          {/* 申告しているホストが1台も無ければ`DispatchHostPanel`は何も描かない */}
+          {dispatch.hosts.length > 0 && (
+            <div className="mt-2">
+              <DispatchHostPanel
+                hosts={dispatch.hosts}
+                sessions={dispatch.sessions}
+                onOpenIssue={onOpenIssue}
+              />
+            </div>
+          )}
         </div>
 
         {/*
-          ホストの様子はここに節として置いていた（#1567）。**#1638でヘッダー右上の実行状況へ
-          移した。** ホームを開かないと見られない制約が無くなり、同じものを2か所に出す理由も
-          無くなったため。縦に長い節が消えたぶん、フィルターとPRが1画面目に収まる
+          人が動くまで進まないもの（#1613と同じ枠）。PCと同じく見出しを付けずメニューの
+          最上段に固定する。ここに他のビューを足すと、上から順に手を動かせば盤面が進む、
+          という読み方が崩れる
         */}
+        <div className="px-4 pb-4">
+          <ul className="flex flex-col gap-1">
+            {sidebarAttentionNavViews.map((view) => (
+              <MobileNavRow
+                key={view.id}
+                label={view.label}
+                icon={navViewIcons[view.id]}
+                onClick={() => onSelectQuickView(view.id)}
+                count={view.id === "check-user" ? checkUserCount : navCounts[view.id]}
+                // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
+                // あるときだけで、デプロイ待ちしか無い間は強調しない（#1613）
+                highlighted={
+                  view.id === "check-user" ? checkUserCount > 0 : manualStepAttention.actionable > 0
+                }
+              />
+            ))}
+          </ul>
+
+          <Separator className="my-2" />
+
+          <ul className="flex flex-col gap-1">
+            {sidebarQuestionNavViews.map((view) => (
+              <MobileNavRow
+                key={view.id}
+                label={view.label}
+                icon={navViewIcons[view.id]}
+                onClick={() => onSelectQuickView(view.id)}
+                count={navCounts[view.id]}
+              />
+            ))}
+            <MobileNavRow label="ブランチ" icon={GitBranch} onClick={onSelectFlow} />
+          </ul>
+        </div>
 
         <div className="px-4 pb-4">
-          <h2 className="mb-2 text-sm font-semibold">よくつかうフィルター</h2>
+          <h2 className="mb-2 text-sm font-semibold">Issue</h2>
           <ul className="flex flex-col gap-1">
-            {quickFilterViews.map((view) => {
-              const Icon = navViewIcons[view.id];
-              // ユーザーの確認待ちが1件以上あるときは、ヘッダー下フィルターと
-              // 同じ配色（amber）で強調する（#742）。強調するのは件数バッジだけで、行の
-              // 背景・ラベル文字・アイコンは通常のまま置く（#1443・サイドバーと揃える）。
-              const isCheckUserHighlighted = view.id === "check-user" && navCounts[view.id] > 0;
-              return (
-                <li key={view.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectQuickView(view.id)}
-                    className="flex min-h-11 w-full items-center justify-between rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      {view.label}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-xs text-muted-foreground",
-                        isCheckUserHighlighted &&
-                          "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
-                      )}
-                    >
-                      {navCounts[view.id]}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+            {sidebarIssueNavViews.map((view) => (
+              <MobileNavRow
+                key={view.id}
+                label={view.label}
+                icon={navViewIcons[view.id]}
+                onClick={() => onSelectQuickView(view.id)}
+                count={navCounts[view.id]}
+              />
+            ))}
           </ul>
         </div>
 
         <div className="px-4 pb-4">
           <h2 className="mb-2 text-sm font-semibold">Pull Request</h2>
           <ul className="flex flex-col gap-1">
-            {pullRequestViews.map((view) => {
-              const Icon = pullRequestViewIcons[view.id];
-              const count = pullRequestNavCounts[view.id];
-              return (
-                <li key={view.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectPullRequests(view.id)}
-                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                      {view.label}
-                    </span>
-                    {count !== null && (
-                      <span className="text-xs text-muted-foreground">{count}</span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
+            {sidebarPullRequestViews.map((view) => (
+              <MobileNavRow
+                key={view.id}
+                label={view.label}
+                icon={pullRequestViewIcons[view.id]}
+                onClick={() => onSelectPullRequests(view.id)}
+                count={pullRequestNavCounts[view.id]}
+              />
+            ))}
           </ul>
         </div>
-
-        {/*
-          「フロー」の節（ブランチ1件）はここにあった（#1455）。**#1638でフッターのタブに
-          なったため畳んでいる**——1タップで開ける入口があるのに、同じ画面への導線を
-          ホームにも残すと押す場所が2つに割れる
-        */}
 
         {favoriteRepositories.length > 0 && (
           <div className="px-4 pb-4">
@@ -214,51 +258,80 @@ export function MobileHomeScreen({
             </ul>
           </div>
         )}
+      </div>
 
-        <div className="px-4 pb-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">保存したフィルター</h2>
-            <button
-              type="button"
-              onClick={onSaveQuickFilter}
-              className="-m-3.5 rounded-full p-3.5 text-muted-foreground hover:text-foreground active:bg-muted"
-              title="現在の検索条件を保存"
-              aria-label="現在の検索条件を保存"
-            >
-              <Plus className="size-4" />
-            </button>
-          </div>
-          {quickFilters.length === 0 ? (
-            <p className="px-2 text-xs text-muted-foreground">
-              よく使う検索条件を保存できます
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {quickFilters.map((quickFilter) => (
-                <li key={quickFilter.id} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onSelectQuickFilter(quickFilter)}
-                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
-                  >
-                    <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{quickFilter.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteQuickFilter(quickFilter)}
-                    title="削除"
-                    aria-label={`${quickFilter.name}を削除`}
-                    className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {/*
+        Issue一覧画面（`mobile-issue-list-screen.tsx`）と**同じ形・同じ順**の丸ボタン（#1690）。
+        同じ動作のボタンが画面ごとに違う見た目・違う位置にあると探すことになる。位置だけは違い、
+        あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上
+      */}
+      <div className="absolute right-4 bottom-4 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onAskCrossRepoQuestion}
+          aria-label="複数リポジトリに質問する"
+          className="flex size-12 items-center justify-center rounded-full border bg-background shadow-lg"
+        >
+          <MessageCircleQuestion className="size-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onCreateIssue}
+          aria-label="新しいIssueを作成"
+          className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        >
+          <Plus className="size-5" />
+        </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * メニューの1行。**見た目はPCの`sidebar-nav.tsx`の`navRow`と揃え、高さだけスマホの
+ * タップ領域（44px）に合わせる。** 選択中の表示は持たない——ホームは現在地ではなく
+ * 入口の一覧で、押せばその画面へ遷移して離れるため。
+ */
+function MobileNavRow({
+  label,
+  icon: Icon,
+  onClick,
+  count,
+  highlighted = false,
+}: {
+  label: string;
+  icon: LucideIcon;
+  onClick: () => void;
+  /** null・未指定なら件数を出さない */
+  count?: number | null;
+  /** 件数バッジをamberで強調するか（人が動くまで進まないものだけ） */
+  highlighted?: boolean;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+      >
+        <span className="flex items-center gap-2">
+          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+          {label}
+        </span>
+        {count !== null && count !== undefined && (
+          <span
+            className={cn(
+              "text-xs text-muted-foreground",
+              // 強調するのは件数バッジだけで、ラベル文字・アイコンは通常のまま置く
+              // （#1443・サイドバーと揃える）
+              highlighted &&
+                "flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-white",
+            )}
+          >
+            {count}
+          </span>
+        )}
+      </button>
+    </li>
   );
 }

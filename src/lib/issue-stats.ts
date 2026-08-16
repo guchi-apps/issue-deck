@@ -1,6 +1,5 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
-import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { getNavView, navViews } from "@/lib/nav-views";
@@ -255,34 +254,64 @@ export function computeNavCounts(
 }
 
 /**
- * 概要カードの統計を求める。
- * 「確認待ち」はTopBarの絞り込みを適用した集合（issues）、「24時間以内の本番反映」
- * 「オープンIssue件数」はstate絞り込みを無視した集合（issuesIgnoringState）を基準にする
- * （close済みIssueが対象の指標や、TopBarのstate絞り込みに影響されたくない指標のため）。
+ * 表示中の絞り込み（状態・ラベル・担当者など）を適用したうえで、ビューごとの件数を数える
+ * （#1689）。絞り込み前の全Issueを数えると、一覧に並ぶ件数と食い違う（例: 状態がopenの
+ * 一覧なのに、ビュー名の隣にclose済みを含めた総数が出る）。
+ *
+ * PC（`issue-deck-shell`）はTopBarの絞り込みを適用した集合を自前で持っており、それを
+ * `computeNavCounts`へ渡すことで同じ結果を得ている。ここは絞り込み済みの集合を再利用
+ * しないスマホの一覧向けに、その組み立てをまとめたもの。
+ *
+ * - 状態（open/closed）の絞り込みだけを外した集合も渡すのは、「直近本番に反映した」の
+ *   ようにclose済みIssueが対象のビューを、現在の状態絞り込みで0件にしないため。
+ * - 「最新リリース」の基準時刻（`filterIssuesByView`のreferenceIssues）は絞り込み前の
+ *   issuesから求める。一覧側も絞り込み前の集合を基準にしているため、揃えないと
+ *   「直近本番に反映した」の件数だけがズレる。
+ */
+export function computeNavCountsForFilters(
+  issues: Issue[],
+  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  currentUserLogin: string | null,
+): Record<NavViewId, number> {
+  return computeNavCounts(
+    applyIssueFilters(issues, filters),
+    applyIssueFilters(issues, { ...filters, state: "all" }),
+    currentUserLogin,
+    issues,
+  );
+}
+
+/**
+ * スマホのホーム画面の先頭に出す3枚のカード（#1690）。
+ *
+ * **盤面の流れをそのまま並べる。** 「要対応」（人が動くまで進まない）→「実行中」（いま動いている）
+ * →「本番反映待ち」（developまで来ていて本番へ出ていない）の順で、上から読めば今どこに滞留して
+ * いるかが分かる。以前は「確認待ち・24時間以内の本番反映・オープンIssue」だったが、
+ * オープンIssue数は下のメニューの「すべてのIssue」と重複し、24時間以内の本番反映は
+ * 済んだことの振り返りで、どちらも次に何をするかを決める材料にならなかった。
+ *
+ * **件数は数え直さず`navCounts`から引く。** 同じ画面のすぐ下に同じ数字のメニュー行が並ぶため、
+ * 別々に数えると絞り込みの適用範囲がずれた瞬間にカードと行で違う数字が出る。
+ * 「要対応」にマージ待ちPRを足すのもPCの左メニュー（`sidebar-nav.tsx`）と同じ数え方。
+ *
+ * **PCには概要カードが無く、これを使うのはスマホのホームだけ。**
  */
 export function computeOverviewStats(
-  issues: Issue[],
-  issuesIgnoringState: Issue[],
+  navCounts: Record<NavViewId, number>,
+  checkUserPullRequestCount: number,
 ): OverviewStat[] {
-  const checkUserCount = issues.filter((issue) =>
-    issue.labels.some((label) => label.name === CHECK_USER_LABEL),
-  ).length;
-  const recentlyReleasedCount = issuesIgnoringState.filter((issue) => {
-    if (!issue.closedAt) return false;
-    if (resolveProgressStatus(issue) !== "done") return false;
-    return Date.now() - new Date(issue.closedAt).getTime() < DAY_MS;
-  }).length;
-  const openCount = issuesIgnoringState.filter((issue) => issue.state === "open").length;
-
   return [
     {
-      label: "確認待ち",
-      value: String(checkUserCount),
-      diffLabel: "",
+      label: "要対応",
+      value: String(navCounts["check-user"] + checkUserPullRequestCount),
       linkedView: "check-user",
     },
-    { label: "24時間以内の本番反映", value: `${recentlyReleasedCount}件`, diffLabel: "" },
-    { label: "オープンIssue", value: String(openCount), diffLabel: "" },
+    { label: "実行中", value: String(navCounts["in-progress"]), linkedView: "in-progress" },
+    {
+      label: "本番反映待ち",
+      value: String(navCounts["release-pending"]),
+      linkedView: "release-pending",
+    },
   ];
 }
 
