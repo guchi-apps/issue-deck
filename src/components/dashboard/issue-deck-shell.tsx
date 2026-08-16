@@ -85,6 +85,7 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
+import { countUnconfirmedQuestions } from "@/lib/question-attention";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -458,6 +459,21 @@ export function IssueDeckShell({
         issues,
       ),
     [issues, filters],
+  );
+  // 未確認（回答が届いていて未読）の質問の件数（#1796）。左メニュー・スマホのホームで
+  // 「質問」の数字の色を変えるためだけに使う（件数そのものは総数のまま）。
+  // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
+  const unconfirmedQuestionCount = useMemo(
+    () =>
+      countUnconfirmedQuestions(
+        filterIssuesByView(
+          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
+          "question",
+          currentUserLogin,
+          issues,
+        ),
+      ),
+    [issues, filters, currentUserLogin],
   );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
@@ -848,6 +864,7 @@ export function IssueDeckShell({
                   navCounts={navCounts}
                   checkUserPullRequestCount={mergePendingPullRequests.length}
                   manualStepAttention={manualStepAttention}
+                  unconfirmedQuestionCount={unconfirmedQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
@@ -1020,6 +1037,7 @@ export function IssueDeckShell({
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
+                unconfirmedQuestionCount={unconfirmedQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}

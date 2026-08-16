@@ -13,6 +13,7 @@ import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
+import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-count";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -26,7 +27,6 @@ import {
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
-import { cn } from "@/lib/utils";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
@@ -42,6 +42,11 @@ type MobileHomeScreenProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
+  /**
+   * 未確認（回答が届いていて未読）の質問Issueの件数（#1796）。
+   * 「質問」の件数は総数のままで、1件以上のときだけ数字の色を変える（PCの左メニューと同じ）。
+   */
+  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
@@ -79,6 +84,7 @@ export function MobileHomeScreen({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
+  unconfirmedQuestionCount,
   pullRequestNavCounts,
   onSelectQuickView,
   onSelectPullRequests,
@@ -182,8 +188,14 @@ export function MobileHomeScreen({
                 count={view.id === "check-user" ? checkUserCount : navCounts[view.id]}
                 // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
                 // あるときだけで、前提待ちしか無い間は強調しない（#1613）
-                highlighted={
-                  view.id === "check-user" ? checkUserCount > 0 : manualStepAttention.actionable > 0
+                emphasis={
+                  (
+                    view.id === "check-user"
+                      ? checkUserCount > 0
+                      : manualStepAttention.actionable > 0
+                  )
+                    ? "attention"
+                    : "none"
                 }
               />
             ))}
@@ -198,7 +210,14 @@ export function MobileHomeScreen({
                 label={view.label}
                 icon={navViewIcons[view.id]}
                 onClick={() => onSelectQuickView(view.id)}
+                // 件数は確認済みも含めた総数のままで、未確認が残っている間だけ色を変える（#1796）
                 count={navCounts[view.id]}
+                emphasis={unconfirmedQuestionCount > 0 ? "unread" : "none"}
+                title={
+                  unconfirmedQuestionCount > 0
+                    ? `回答が届いていてまだ開いていない質問が${unconfirmedQuestionCount}件あります`
+                    : undefined
+                }
               />
             ))}
             <MobileNavRow label="ブランチ" icon={GitBranch} onClick={onSelectFlow} />
@@ -301,40 +320,32 @@ function MobileNavRow({
   icon: Icon,
   onClick,
   count,
-  highlighted = false,
+  emphasis = "none",
+  title,
 }: {
   label: string;
   icon: LucideIcon;
   onClick: () => void;
   /** null・未指定なら件数を出さない */
   count?: number | null;
-  /** 件数バッジをamberで強調するか（人が動くまで進まないものだけ） */
-  highlighted?: boolean;
+  /** 件数の強調（`NavCount`。左メニューと同じ使い分け） */
+  emphasis?: NavCountEmphasis;
+  title?: string;
 }) {
   return (
     <li>
       <button
         type="button"
         onClick={onClick}
+        title={title}
         className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
       >
         <span className="flex items-center gap-2">
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           {label}
         </span>
-        {count !== null && count !== undefined && (
-          <span
-            className={cn(
-              "text-xs text-muted-foreground",
-              // 強調するのは件数バッジだけで、ラベル文字・アイコンは通常のまま置く
-              // （#1443・サイドバーと揃える）
-              highlighted &&
-                "flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-white",
-            )}
-          >
-            {count}
-          </span>
-        )}
+        {/* 強調の使い分けと見た目は`NavCount`（PCの左メニューと共通） */}
+        <NavCount count={count} emphasis={emphasis} />
       </button>
     </li>
   );

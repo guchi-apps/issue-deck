@@ -24,7 +24,12 @@ function renderSidebar(
   {
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
-  }: { checkUserPullRequestCount?: number; manualStepAttention?: ManualStepAttention } = {},
+    unconfirmedQuestionCount = 0,
+  }: {
+    checkUserPullRequestCount?: number;
+    manualStepAttention?: ManualStepAttention;
+    unconfirmedQuestionCount?: number;
+  } = {},
 ) {
   render(
     <SidebarNav
@@ -37,6 +42,7 @@ function renderSidebar(
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
+      unconfirmedQuestionCount={unconfirmedQuestionCount}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -74,6 +80,7 @@ function renderSidebarWithRepositories(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
+      unconfirmedQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -189,6 +196,30 @@ describe("SidebarNav", () => {
     expect(
       screen.getByRole("button", { name: /ユーザーの作業待ち/ }).getAttribute("title"),
     ).toBeNull();
+  });
+
+  // 件数は確認済みも含めた総数のまま、未確認が残っている間だけ色を変える（#1796）。
+  it("未確認の質問があれば件数の文字色を変える（総数は変えない）", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { unconfirmedQuestionCount: 1 },
+    );
+
+    const button = screen.getByRole("button", { name: /質問/ });
+    expect(button.textContent).toContain("3");
+    const badge = screen.getByText("3");
+    expect(badge.className).toContain("text-amber-600");
+    // 要対応（確認待ち・作業待ち）の塗りつぶしの丸とは強さを分ける
+    expect(badge.className).not.toContain("bg-amber-500");
+    expect(button.getAttribute("title")).toContain("1件");
+  });
+
+  it("未確認の質問が無ければ強調しない", () => {
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 3 });
+
+    expect(screen.getByText("3").className).not.toContain("amber");
+    expect(screen.getByRole("button", { name: /質問/ }).getAttribute("title")).toBeNull();
   });
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。

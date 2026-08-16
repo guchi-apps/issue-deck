@@ -198,3 +198,51 @@ describe("絞り込みが効かないビューの注記（#1750）", () => {
     expect(screen.queryByText(/絞り込みは適用外/)).toBeNull();
   });
 });
+
+// #1796: 回答が届いたのに読んでいない質問を、一覧の行だけで見分けられるようにする
+describe("質問Issueの状態ラベル（#1796）", () => {
+  const questions = [
+    makeIssue({ number: 10, title: "[質問] 未確認のもの", commentCount: 2, hasUnreadComments: true }),
+    makeIssue({
+      number: 11,
+      title: "[質問] 回答待ちのもの",
+      commentCount: 1,
+      hasUnreadComments: true,
+      qaAnswerPendingAt: "2026-08-16T00:00:00Z",
+    }),
+    makeIssue({ number: 12, title: "[質問] 確認済みのもの", commentCount: 3 }),
+  ];
+
+  function questionRow(number: number): HTMLElement {
+    const issue = questions.find((item) => item.number === number)!;
+    return screen.getByText(`#${issue.number} ${issue.title}`).closest("button")!;
+  }
+
+  it("回答が届いていて未読なら「未確認」、まだ回答が来ていなければ「回答待ち」を出す", () => {
+    renderList({ issues: questions, view: "question", showHeader: true });
+
+    expect(questionRow(10).textContent).toContain("未確認");
+    expect(questionRow(11).textContent).toContain("回答待ち");
+    expect(questionRow(12).textContent).not.toContain("未確認");
+    expect(questionRow(12).textContent).not.toContain("回答待ち");
+  });
+
+  it("質問Issueでなければラベルを出さない", () => {
+    renderList({ issues: [makeIssue({ number: 20, hasUnreadComments: true })] });
+
+    expect(rowOf(20).textContent).not.toContain("未確認");
+  });
+
+  // 左メニューの数字は総数のままなので、内訳はここでしか読めない
+  it("質問ビューのヘッダーに未確認の件数を添える", () => {
+    renderList({ issues: questions, view: "question", showHeader: true });
+
+    expect(screen.getByText("3件・未確認1件")).toBeTruthy();
+  });
+
+  it("未確認が無ければヘッダーは従来どおりの件数だけにする", () => {
+    renderList({ issues: [questions[2]], view: "question", showHeader: true });
+
+    expect(screen.getByText("1件")).toBeTruthy();
+  });
+});
