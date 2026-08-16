@@ -1,4 +1,5 @@
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
+import { isMergeAwaitingCi } from "@/lib/check-user-notification";
 import {
   CHECK_USER_LABEL,
   CHECK_USER_REASON_TEXT,
@@ -160,17 +161,26 @@ function selectCheckUserIssues(issues: Issue[]): Issue[] {
 /**
  * 確認待ちの通知。理由ラベル（`01.check-*`）が読めればその文言を出す。
  * 並びは呼び出し側で「待たせている時間が長い順」（＝左メニューの「確認待ち」ビューと同じ考え方）。
+ *
+ * **マージを求めているのに対応PRのチェックがまだ確定していないものは「CI実行中」として弱める**
+ * （#1709）。ラベルを付ける側がCIの完了を待たないことがあり、そのまま「PRのマージ」と出すと
+ * 押しても弾かれる操作を要求することになる。判定は`isMergeAwaitingCi`（`ciState`を読むだけ）。
  */
-function buildCheckUserNotifications(issues: Issue[]): NotificationItem[] {
+function buildCheckUserNotifications(
+  issues: Issue[],
+  pullRequests: PullRequestSummary[],
+): NotificationItem[] {
   return selectCheckUserIssues(issues).map((issue) => {
     const reason = checkUserReason(issue.labels);
+    const awaitingCi = isMergeAwaitingCi(issue, pullRequests);
     return {
       id: `check-user:${issue.id}`,
       group: "check-user",
       // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）。
-      tone: reason === "answered" ? "info" : "action",
+      // CIの完了待ちも、いま人が動けるものではないので同じ扱いにする（#1709）。
+      tone: reason === "answered" || awaitingCi ? "info" : "action",
       title: `#${issue.number} ${issue.title}`,
-      badgeLabel: reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
+      badgeLabel: awaitingCi ? "CI実行中" : reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
       repositoryFullName: issue.repositoryFullName,
       since: issue.checkUserLabeledAt ?? issue.updatedAt,
       target: { kind: "issue", issueId: issue.id },
@@ -236,7 +246,7 @@ export function buildNotifications(input: BuildNotificationsInput): Notification
   const { issues, pullRequests, releaseStatuses } = input;
 
   const releaseItems = buildReleaseNotifications(releaseStatuses);
-  const checkUserItems = buildCheckUserNotifications(issues);
+  const checkUserItems = buildCheckUserNotifications(issues, pullRequests);
   const manualStepItems = buildManualStepNotifications(issues);
 
   // PR側から落とす対象を集める。

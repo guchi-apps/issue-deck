@@ -50,6 +50,11 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import { buildBranchFlow, latestReleaseMergedAtByRepository } from "@/lib/branch-flow";
+import {
+  isMergeCheckUser,
+  resolveCheckUserToasts,
+  type PendingCheckUserToast,
+} from "@/lib/check-user-notification";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
@@ -171,6 +176,11 @@ export function IssueDeckShell({
   const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
   const [checkUserToasts, setCheckUserToasts] = useState<CheckUserToastItem[]>([]);
+  // 対応PRのCIが確定するまで出さずに持っておく確認待ち（#1709）。判定は
+  // `resolveCheckUserToasts`が行い、ここは検知した順に積むだけ。
+  const [pendingCheckUserToasts, setPendingCheckUserToasts] = useState<PendingCheckUserToast[]>(
+    [],
+  );
 
   // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
   // サイドバー・Issue一覧・プロパティパネルの3カラムはドラッグで幅を調整できる。
@@ -291,6 +301,34 @@ export function IssueDeckShell({
     };
   }, [displayedIssueId, issues]);
 
+  // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
+  // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
+  // 取得する（マウント時と明示的な更新操作、および「完了したPR」ビューの自動更新のときだけ）。
+  // **Issue一覧のポーリングより前に置く。** 確認待ちトーストの保留（#1709）が、検知した時点の
+  // 取得時刻と再取得の要求のためにこの結果を読むため。
+  const isPullRequestPaneActive =
+    filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
+  // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
+  // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
+  const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
+  // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
+  // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
+  // しているのは、取得1回のコストが「リポジトリ数 + draft以外のopen PR数」だから。
+  // 「完了したPR」は左メニューから外した（#1613）が、`prview=completed`のURLは生きており
+  // 自動更新もそのまま。既定の「すべてのPR」へ広げるとペインを開いている間ずっと10秒間隔で
+  // 叩き続けることになり、GitHub APIのレート制限に触れるため広げていない。
+  // 保留中の確認待ちトーストがある間も自動更新する（#1709）。CIが確定したかどうかは
+  // PR一覧の`ciState`でしか分からないため、取り直さないと保留を解けない。
+  const autoRefreshPullRequests =
+    (isPullRequestPaneActive && filters.prview === "completed") ||
+    pendingCheckUserToasts.length > 0;
+  // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
+  // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
+  const openPullRequests = usePullRequests(
+    isFlowPaneActive ? "all" : "open",
+    autoRefreshPullRequests,
+  );
+
   useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);
 
@@ -298,17 +336,43 @@ export function IssueDeckShell({
     // （画面下部にポコッと表示する方式。#852）。初回マウント時の直前状態（initialIssues）
     // との比較にも同じロジックが使えるため、既に付与済みの確認待ちで毎回通知される問題は
     // 特別分岐なしに回避できる。
+    //
+    // **検知しても即座には出さず、いったん保留の列へ積む**（#1709）。マージを求める確認待ちは
+    // 対応PRのCIが確定するまで出さない（判定は`resolveCheckUserToasts`）。積むと同時に
+    // PR一覧を取り直すのは、作られたばかりのPRが手元の取得結果にまだ載っていないため。
     const newlyCheckUserIssues = detectNewlyCheckUserIssues(issues, reconciledIssues);
-    if (newlyCheckUserIssues.length > 0) {
-      setCheckUserToasts((prev) =>
-        [
-          ...prev,
-          ...newlyCheckUserIssues.map((issue) => ({
-            id: `${issue.id}:${issue.checkUserLabeledAt}`,
-            issue,
-          })),
-        ].slice(-MAX_CHECK_USER_TOASTS),
-      );
+    // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得で「リポジトリ数 +
+    // draft以外のopen PR数」ぶんGitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
+    if (newlyCheckUserIssues.some(isMergeCheckUser)) openPullRequests.refresh();
+    const detectedAt = Date.now();
+    const pending = [
+      ...pendingCheckUserToasts,
+      ...newlyCheckUserIssues.map((issue) => ({
+        id: `${issue.id}:${issue.checkUserLabeledAt}`,
+        issue,
+        pullRequestsFetchedAt: openPullRequests.fetchedAt,
+        detectedAt,
+      })),
+    ].slice(-MAX_CHECK_USER_TOASTS);
+
+    // 保留の振り分けはこのポーリング（10秒ごと）でだけ行う。効果（useEffect）に置くと
+    // 効果の中でのsetStateになるため、外から来た変化を受け取るこの場所へまとめている。
+    // PR一覧の自動更新もこの間隔なので、CIが確定してから最大でも次の周回には出る。
+    if (pending.length > 0) {
+      const { ready, held } = resolveCheckUserToasts(pending, {
+        issues: reconciledIssues,
+        pullRequests: openPullRequests.pullRequests,
+        pullRequestsFetchedAt: openPullRequests.fetchedAt,
+        now: detectedAt,
+      });
+      if (ready.length > 0) {
+        setCheckUserToasts((prev) =>
+          [...prev, ...ready.map(({ id, issue }) => ({ id, issue }))].slice(
+            -MAX_CHECK_USER_TOASTS,
+          ),
+        );
+      }
+      setPendingCheckUserToasts(held);
     }
 
     setIssues(reconciledIssues);
@@ -404,27 +468,6 @@ export function IssueDeckShell({
     [repositories],
   );
 
-  // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
-  // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
-  // 取得する（マウント時と明示的な更新操作、および「完了したPR」ビューの自動更新のときだけ）。
-  const isPullRequestPaneActive =
-    filters.pane === "pull-requests" || mobileScreen.kind === "pull-requests";
-  // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
-  // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
-  const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
-  // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
-  // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
-  // しているのは、取得1回のコストが「リポジトリ数 + draft以外のopen PR数」だから。
-  // 「完了したPR」は左メニューから外した（#1613）が、`prview=completed`のURLは生きており
-  // 自動更新もそのまま。既定の「すべてのPR」へ広げるとペインを開いている間ずっと10秒間隔で
-  // 叩き続けることになり、GitHub APIのレート制限に触れるため広げていない。
-  const autoRefreshPullRequests = isPullRequestPaneActive && filters.prview === "completed";
-  // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
-  // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
-  const openPullRequests = usePullRequests(
-    isFlowPaneActive ? "all" : "open",
-    autoRefreshPullRequests,
-  );
   // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
   // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
   // （マージできていなければまた一覧に現れる）。

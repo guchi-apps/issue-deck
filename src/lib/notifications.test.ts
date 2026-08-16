@@ -182,6 +182,56 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
     expect(hasErrorNotification(items)).toBe(false);
   });
 
+  it("マージ待ちでも対応PRのCIが実行中なら「CI実行中」として弱める", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "issue-100",
+          number: 100,
+          labels: [label("00.check-user"), label("01.check-merge")],
+        }),
+      ],
+      pullRequests: [makePullRequest({ linkedIssueNumber: 100, ciState: "pending" })],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].group).toBe("check-user");
+    expect(items[0].badgeLabel).toBe("CI実行中");
+    expect(items[0].tone).toBe("info");
+  });
+
+  it("対応PRのCIが確定していれば「PRのマージ」として出す", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "issue-100",
+          number: 100,
+          labels: [label("00.check-user"), label("01.check-merge")],
+        }),
+      ],
+      pullRequests: [makePullRequest({ linkedIssueNumber: 100, ciState: "success" })],
+    });
+
+    expect(items[0].badgeLabel).toBe("PRのマージ");
+    expect(items[0].tone).toBe("action");
+  });
+
+  it("計画の承認待ちは対応PRのCIが実行中でも弱めない", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "issue-100",
+          number: 100,
+          labels: [label("00.check-user"), label("01.check-plan")],
+        }),
+      ],
+      pullRequests: [makePullRequest({ linkedIssueNumber: 100, ciState: "pending" })],
+    });
+
+    expect(items[0].badgeLabel).toBe("計画の承認");
+    expect(items[0].tone).toBe("action");
+  });
+
   it("71.manual-stepのopenなIssueを手作業待ちとして出す", () => {
     const items = build({
       issues: [
