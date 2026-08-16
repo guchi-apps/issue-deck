@@ -433,6 +433,12 @@ gh issue create --title "[手作業] <実行する場所>: <やること>" --lab
 - 他Issueのブランチの編集
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
+- **「PRをマージしてください」という意味での`00.check-user`＋`01.check-merge`の自己付与**（#1709）。
+  develop向けPRを自動マージしてよいかを決めるのは`claude-review-develop.yml`で、同ワークフローは
+  `wait-for-ci`でCIの完了を待ってから判定する。PR作成の直後に実装側が付けると、CIが動いている
+  最中に「マージしてください」という通知だけが飛び、開いても押せる操作が無い。作業を止めて
+  相談する場合の`00.check-user`＋`01.check-blocked`（本プロンプトの各所で指示しているもの）は
+  従来どおり付けてよい
 - `.shared-context/`配下（共有知識リポジトリ）の編集・`git add`・コミット
 
 ## コミット・PRの書き方
