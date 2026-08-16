@@ -166,20 +166,36 @@ function formatComments(
     .join("\n\n");
 }
 
+type PromptRelation = {
+  number: number;
+  title: string;
+  state: string;
+  relation: "parent" | "sub";
+  /** その親子が置かれているリポジトリ（`owner/repo`）。省略時は担当Issueと同じとみなす */
+  repositoryFullName?: string;
+};
+
 /**
  * 親子Issueの一覧（#1267）。**子Issueを起こしたときに親の背景が丸ごと落ちる**のを防ぐ。
  * 取得できていない場合は、無いのか取っていないのかが分かる文言にする。
+ *
+ * **別リポジトリの親子は`owner/repo#123`と書く**（#1722）。サブIssueはリポジトリをまたげるのに
+ * `#123`とだけ書くと、受け取ったエージェントの側では自分のリポジトリの無関係なIssueに解決する。
  */
 function formatRelations(
-  relations: readonly { number: number; title: string; state: string; relation: "parent" | "sub" }[] | undefined,
+  relations: readonly PromptRelation[] | undefined,
+  repositoryFullName: string,
 ): string {
   if (relations === undefined) return "（この経路では取得していません）";
   if (relations.length === 0) return "(親子関係のあるIssueはありません)";
   return relations
-    .map(
-      (relation) =>
-        `- ${relation.relation === "parent" ? "親" : "子"}: #${relation.number} ${relation.title}（${relation.state}）`,
-    )
+    .map((relation) => {
+      const ref =
+        relation.repositoryFullName && relation.repositoryFullName !== repositoryFullName
+          ? `${relation.repositoryFullName}#${relation.number}`
+          : `#${relation.number}`;
+      return `- ${relation.relation === "parent" ? "親" : "子"}: ${ref} ${relation.title}（${relation.state}）`;
+    })
     .join("\n");
 }
 
@@ -191,7 +207,7 @@ export function buildImplementationPrompt(params: {
   labels: readonly { name: string }[];
   comments: readonly { author: { login: string }; createdAtLabel: string; body: string }[];
   /** 親子Issue（#1267）。省略すると「取得していません」と出す */
-  relations?: readonly { number: number; title: string; state: string; relation: "parent" | "sub" }[];
+  relations?: readonly PromptRelation[];
 }): string {
   const { repositoryFullName, issueNumber, title, body, labels, comments, relations } = params;
   const labelNames = new Set(labels.map((label) => label.name));
@@ -203,7 +219,7 @@ export function buildImplementationPrompt(params: {
     "{{ISSUE_LABELS}}": [...labelNames].sort().join(", ") || "(なし)",
     "{{ISSUE_BODY}}": body?.trim() ? body : "(本文なし)",
     "{{ISSUE_COMMENTS}}": formatComments(comments),
-    "{{ISSUE_RELATIONS}}": formatRelations(relations),
+    "{{ISSUE_RELATIONS}}": formatRelations(relations, repositoryFullName),
     "{{CONCURRENT_WORK}}": CONCURRENT_WORK_UNAVAILABLE.split("{{REPOSITORY}}").join(
       repositoryFullName,
     ),

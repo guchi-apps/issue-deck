@@ -667,7 +667,11 @@ export function IssueDetail({
           }
         />
 
-        <div className="flex flex-col gap-3 p-4">
+        {/* 下端はpb-16（4rem）を空ける（#1793）。画面下中央に浮いている
+            ScrollToLatestCommentButtonがbottom-4・md:h-7で下端から2.75remを占めるため、
+            p-4（1rem）のままだと最下部までスクロールしたときコメント入力欄の操作列
+            （「コメント」「回答を確認してクローズ」など）へボタンが重なる */}
+        <div className="flex flex-col gap-3 p-4 pb-16">
           {/* 進捗・ジョブ・セッション・回答待ち・実行キャンセルを1枚に集約する（#1577）。
               走っているものが1つも無いIssueでは何も描かない */}
           <IssueStatusCard
@@ -764,7 +768,11 @@ export function IssueDetail({
                 )
               }
             >
-              <SubIssueProgress relations={subIssueRelations} showHeading={false} />
+              <SubIssueProgress
+                relations={subIssueRelations}
+                baseRepositoryFullName={issue.repositoryFullName}
+                showHeading={false}
+              />
             </IssueDetailSection>
           )}
 

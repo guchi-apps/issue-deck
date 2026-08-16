@@ -30,6 +30,7 @@ import {
   formatManualStepListCount,
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
+import { formatQuestionListCount } from "@/lib/question-attention";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
@@ -126,11 +127,14 @@ export function MobileIssueListScreen({
   const pinnedCount = pinned?.count ?? 0;
   const listedCount = issues.length + (pinned?.view === view ? pinnedCount : 0);
   // 「ユーザーの作業待ち」だけは、メニューと同じ「いま実行できる件数」に前提待ちを添える
-  // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ
+  // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ。
+  // 「質問」の未確認の内訳（#1796）も同じ理由でここに出す（PCの一覧ヘッダーと同じ表記）
   const countLabel =
     (view === "manual-step" && manualStepReadiness
       ? formatManualStepListCount(issues, manualStepReadiness)
-      : null) ?? `${listedCount}件`;
+      : null) ??
+    (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    `${listedCount}件`;
   const displayNavCounts = useMemo(() => {
     if (!pinned || pinned.count === 0) return navCounts;
     return { ...navCounts, [pinned.view]: (navCounts[pinned.view] ?? 0) + pinned.count };

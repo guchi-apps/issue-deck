@@ -87,12 +87,10 @@ gh api repos/guchi-apps/issue-deck/issues/<親番号>/sub_issues --method POST -
 （[supported-repositories.md](supported-repositories.md)の配布状況の表がまさにその手書きにあたり、
 「正はcallerファイル」と注記して維持している）。
 
-> **別リポジトリの子Issueは、親から見た進捗が正しく出ない。**
-> `GET /api/issues/sub-issues`は子の`projectStatus`をローカルDBから**親のリポジトリID＋Issue番号**で
-> 引いている（[src/app/api/issues/sub-issues/route.ts](../src/app/api/issues/sub-issues/route.ts)の
-> `attachProjectStatus`）。子が別リポジトリだと、番号が一致する**親リポジトリ側の無関係なIssueの
-> 進捗**を拾いうる。タイトル・状態・リンクはGitHub側を正とするため壊れないが、**進捗の表示だけは
-> 信用しない**。直すなら下記「一括起票機能の設計案」の懸念②を参照。
+別リポジトリの子には、行にリポジトリ名（`car-care`など）が付く。同じリポジトリの子には付かないので、
+**どれが横展開先の子なのかが一覧で見分けられる**。進捗も子が置かれているリポジトリのキャッシュから
+引くため、番号が一致する親リポジトリ側のIssueと取り違えることはない（#1722で修正。それ以前は
+「進捗の表示だけは信用しない」という制約があった）。
 
 ### 4. リポジトリごとに実装する
 
@@ -105,12 +103,22 @@ gh api repos/guchi-apps/issue-deck/issues/<親番号>/sub_issues --method POST -
 片付いた**ときに使う。横展開で「このリポジトリには不要だった」と判断した場合は
 `90.Close: wonfix`のほうが実態に合う。
 
-## 一括起票機能の設計案（未実装）
+## 一括起票機能は作らない（#1722）
 
 上記手順の1〜3のうち、**3（リポジトリごとの起票と紐付け）だけが定型作業**で、対象が14リポジトリ
-あると`gh issue create`と`sub_issues`の往復を14回繰り返すことになる。ここを画面のボタン1つに
-する案を残す。**実装は本ドキュメントのスコープ外**で、#1722 として起票してある（着手要否の判断が
-残っているため`70.confirm`付き）。
+あると`gh issue create`と`sub_issues`の往復を14回繰り返すことになる。ここを画面のボタン1つにする
+案を#1722で検討したが、**作らないと決めた**。
+
+**親リポジトリのローカルセッションが、そのまま手順3を実行できる**ため。ローカルの`gh`はユーザー
+本人のトークンで動くので、親Issueを担当するセッションに「対象リポジトリへ子Issueを立てて紐付けて
+ほしい」と頼めば、上のコマンドをそのまま繰り返す。画面のボタンにして得られるのは往復の削減だけで、
+代わりにラベルの揃い判定・二度押し防止・部分成功の表示を恒久的に抱えることになる。
+
+**無人実行（GitHub Actions）では、UIの有無にかかわらず横展開の起票はできない。** Actionsの
+`GITHUB_TOKEN`は自リポジトリしか触れず（[actions-token-model.md](actions-token-model.md)）、
+一括起票UIを作ってもそこは変わらない。
+
+以下は、当時まとめた設計案の記録。作るとなったら出発点になるが、**現時点で作る予定は無い**。
 
 ### やること
 
@@ -129,8 +137,8 @@ Issue作成ダイアログに「複数のリポジトリへ同じ内容で作る
 | Issue作成 | `createIssue`（[src/lib/github/issues-api.ts](../src/lib/github/issues-api.ts)）・`POST /api/issues` | 単一リポジトリ前提。ループさせる層が無い |
 | 対象リポジトリの一覧 | `Repository.hasClaudeWorkflow`（[prisma/schema.prisma](../prisma/schema.prisma)。`claude-issue-dispatch.yml`の有無で[src/lib/github/repository-sync.ts](../src/lib/github/repository-sync.ts)が立てる） | なし |
 | ラベル一覧 | GitHub APIから直接引く（[src/lib/github/issues-api.ts](../src/lib/github/issues-api.ts)の`/labels`） | リポジトリごとに引き直す必要がある |
-| サブIssueの**読み取り** | `GET /api/issues/sub-issues`・`fetchSubIssueRelations` | — |
-| サブIssueの**書き込み** | **無い**（GETのみ） | `POST /repos/{owner}/{repo}/issues/{n}/sub_issues`を叩く経路の新設 |
+| サブIssueの**読み取り** | `GET /api/issues/sub-issues`・`fetchSubIssueRelations`（別リポジトリの子にも対応済み・#1722） | — |
+| サブIssueの**書き込み** | **無い**（GETのみ）。画面から呼ぶ相手がいないため新設していない | `POST /repos/{owner}/{repo}/issues/{n}/sub_issues`を叩く経路の新設 |
 
 ### 懸念点
 
@@ -138,10 +146,10 @@ Issue作成ダイアログに「複数のリポジトリへ同じ内容で作る
    ため他リポジトリへ配っていない（#1473）など、実際に差がある。存在しないラベルを指定すると
    起票そのものが失敗するため、**選択したリポジトリすべてに存在するラベルだけを選ばせる**か、
    **無いリポジトリでは黙って落とす**かを決める必要がある。前者のほうが事故が少ない
-2. **サブIssueは別リポジトリの子の進捗を正しく出せない**（上記の警告）。一括起票を入れるなら
-   `attachProjectStatus`をリポジトリ横断の引き方へ直すのが前提になる。`GithubSubIssueRef`が
-   `repositoryFullName`を持っていないため、GraphQLのクエリに`repository { nameWithOwner }`を
-   足すところから要る
+2. ~~**サブIssueは別リポジトリの子の進捗を正しく出せない。**~~ **解消済み**（#1722）。
+   `GithubSubIssueRef`・`SubIssue`が`repositoryFullName`を持ち、`attachProjectStatus`は
+   リポジトリごとに引くようになった。一括起票を作るかどうかとは独立に、手作業で立てた
+   別リポジトリの子でも進捗が正しく出る
 3. **部分成功をどう見せるか。** 14リポジトリのうち3件で失敗したときに、成功した11件を巻き戻す
    のは現実的でない。配布PRと同じく「**1件の失敗で残りを止めない**」を採り、失敗した
    リポジトリ名を画面に残して人が再実行する形が既存の流儀に合う
@@ -165,8 +173,6 @@ Issue作成ダイアログに「複数のリポジトリへ同じ内容で作る
 
 ## 未確定・要判断
 
-- 一括起票（#1722）を実装するかどうか（対象リポジトリが増え続けるなら効くが、横展開の頻度そのものが
-  月に何回あるかで割に合うかが変わる）
 - 親Issueをどのリポジトリに置くか。変更の発生元に置く運用にしているが、**アプリを持たない
   `guchi-apps/question`**（横断質問の置き場）へ寄せる案もある。ただしあちらは盤面に載らず
   実装フローの導線も持たないため、追跡の器としては弱い

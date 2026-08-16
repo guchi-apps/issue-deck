@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-count";
 import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
@@ -54,6 +55,11 @@ type SidebarNavProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1613）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
+  /**
+   * 未確認（回答が届いていて未読）の質問Issueの件数（#1796）。
+   * 「質問」の件数は総数のままで、1件以上のときだけ数字の色を変える。
+   */
+  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
@@ -81,6 +87,7 @@ export function SidebarNav({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
+  unconfirmedQuestionCount,
   pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -135,7 +142,7 @@ export function SidebarNav({
     active,
     onClick,
     count,
-    highlighted = false,
+    emphasis = "none",
     title,
   }: {
     key: string;
@@ -145,8 +152,8 @@ export function SidebarNav({
     onClick: () => void;
     /** nullなら件数を出さない */
     count?: number | null;
-    /** 件数バッジをamberで強調するか（人が動くまで進まないものだけ） */
-    highlighted?: boolean;
+    /** 件数の強調（`NavCount`。塗りつぶしの丸は人が動くまで進まないものだけ） */
+    emphasis?: NavCountEmphasis;
     title?: string;
   }) {
     return (
@@ -164,20 +171,8 @@ export function SidebarNav({
             <Icon className="size-3.5 text-muted-foreground" />
             {label}
           </span>
-          {count !== null && count !== undefined && (
-            <span
-              className={cn(
-                "text-xs text-muted-foreground",
-                // 強調するのは件数バッジだけで、行の背景・ラベル文字・アイコンは通常のまま
-                // 置く（#1443）。行全体を塗ると選択中の行と見分けがつきにくく、他のビューとの
-                // 間で文字色も揃わないため。
-                highlighted &&
-                  "flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-white",
-              )}
-            >
-              {count}
-            </span>
-          )}
+          {/* 強調の使い分けと見た目は`NavCount`（スマホのホームと共通） */}
+          <NavCount count={count} emphasis={emphasis} />
         </button>
       </li>
     );
@@ -202,10 +197,10 @@ export function SidebarNav({
               count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
               // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
               // あるときだけで、前提待ちしか無い間は強調しない（#1613）。
-              highlighted:
-                view.id === "check-user"
-                  ? checkUserCount > 0
-                  : manualStepAttention.actionable > 0,
+              emphasis:
+                (view.id === "check-user" ? checkUserCount > 0 : manualStepAttention.actionable > 0)
+                  ? "attention"
+                  : "none",
             }),
           )}
         </ul>
@@ -220,7 +215,13 @@ export function SidebarNav({
               icon: navViewIcons[view.id],
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
+              // 件数は確認済みも含めた総数のままで、未確認が残っている間だけ色を変える（#1796）
               count: navCounts[view.id],
+              emphasis: unconfirmedQuestionCount > 0 ? "unread" : "none",
+              title:
+                unconfirmedQuestionCount > 0
+                  ? `回答が届いていてまだ開いていない質問が${unconfirmedQuestionCount}件あります`
+                  : undefined,
             }),
           )}
           {navRow({

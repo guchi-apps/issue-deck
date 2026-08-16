@@ -1,3 +1,4 @@
+import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import type { Issue, IssueComment } from "@/types/issue";
 
 /**
@@ -81,11 +82,17 @@ export function isAskClaudeQuestionComment(comment: Pick<IssueComment, "body">):
 /**
  * コメント配列（時系列順）を末尾から走査し、直近の質問コメント（isAskClaudeQuestionComment）が
  * 回答コメント（isQaAnswerComment）より後に投稿されている、すなわち「回答待ち」かどうかを判定する。
+ *
+ * **回答できなかったことの通知（フォールバック通知）でも回答待ちを終える**（#1766）。質問への
+ * 回答は、行き詰まりやエラーで回答コメントに到達できないまま終わることがある。回答コメントだけを
+ * 終わりの合図にすると、その質問は画面上いつまでも「Claudeの回答待ち」のままになり、質問Issueの
+ * ワンボタンクローズ（`canCloseAskRepoQuestion`）も出てこない。
  */
 export function isQaAnswerPending(comments: Pick<IssueComment, "body">[]): boolean {
   for (let i = comments.length - 1; i >= 0; i--) {
     const comment = comments[i];
     if (isQaAnswerComment(comment)) return false;
+    if (isFallbackNoticeComment(comment)) return false;
     if (isAskClaudeQuestionComment(comment)) return true;
   }
   return false;

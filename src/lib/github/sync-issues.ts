@@ -4,6 +4,7 @@ import { getPendingDispatchAt } from "@/lib/dispatch/pending-dispatch";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
+import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
@@ -177,6 +178,10 @@ export async function deleteIssueByGithubId(githubIssueId: number): Promise<void
  * （qaAnswerPendingAt）を更新する。質問コメント（isAskClaudeQuestionComment）なら現在時刻を
  * セットし、回答コメント（isQaAnswerComment）ならnullに戻す。それ以外の通常コメントでは
  * 何もしない（既存の状態を維持する）。
+ *
+ * **回答できなかったことの通知（フォールバック通知）でもnullに戻す**（#1766）。回答コメントだけを
+ * 終わりの合図にすると、行き詰まりで回答に到達できなかった質問が一覧・詳細でいつまでも
+ * 「Claudeの回答待ち」のままになる。判定の理由は`isQaAnswerPending`（`ask-claude.ts`）と同じ。
  */
 export async function updateQaAnswerPendingState(
   githubIssueId: number,
@@ -189,7 +194,7 @@ export async function updateQaAnswerPendingState(
     });
     return;
   }
-  if (isQaAnswerComment({ body: commentBody })) {
+  if (isQaAnswerComment({ body: commentBody }) || isFallbackNoticeComment({ body: commentBody })) {
     await db.issue.updateMany({
       where: { githubIssueId: BigInt(githubIssueId) },
       data: { qaAnswerPendingAt: null },

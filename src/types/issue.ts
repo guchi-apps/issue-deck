@@ -44,6 +44,11 @@ export type SubIssue = {
   state: IssueState;
   htmlUrl: string;
   /**
+   * その親子が置かれているリポジトリ（`owner/repo`）。**サブIssueはリポジトリをまたげる**ため、
+   * 番号だけでは相手を特定できない（#1722）。表示のキーも進捗の引き当ても、ここまで含めて突き合わせる
+   */
+  repositoryFullName: string;
+  /**
    * GitHub Projects v2のStatus。DBキャッシュに無い場合はnull。
    * 進捗の判定は@/lib/issue-progressのresolveProgressStatusを通すこと
    */

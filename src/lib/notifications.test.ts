@@ -250,6 +250,51 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
     expect(items[0].group).toBe("manual-step");
     expect(items[0].target).toEqual({ kind: "issue", issueId: "issue-20" });
   });
+
+  it("前提条件が残っている手作業Issueは出さない（#1801）", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "manual-waiting",
+          number: 20,
+          labels: [label("71.manual-step")],
+          body: "## 前提条件\n\n- #30 がmainへ反映された後\n",
+        }),
+        makeIssue({
+          id: "manual-ready",
+          number: 21,
+          labels: [label("71.manual-step")],
+          body: "## 前提条件\n\n- #31 がmainへ反映された後\n",
+        }),
+        // 前提待ち（developまで）と、満たされた前提（mainへ反映済み）の参照先
+        makeIssue({ id: "issue-30", number: 30, projectStatus: "Develop" }),
+        makeIssue({
+          id: "issue-31",
+          number: 31,
+          state: "closed",
+          projectStatus: "Done",
+        }),
+      ],
+    });
+
+    expect(items.map((item) => item.target)).toEqual([{ kind: "issue", issueId: "manual-ready" }]);
+  });
+
+  it("状態を取得できない参照しか無い手作業Issueは出す（強調しすぎる方へ倒す）", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "manual-unknown",
+          number: 20,
+          labels: [label("71.manual-step")],
+          body: "## 前提条件\n\n- other-owner/other-repo#900 の完了後\n",
+        }),
+      ],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].target).toEqual({ kind: "issue", issueId: "manual-unknown" });
+  });
 });
 
 describe("buildNotifications Pull Request", () => {

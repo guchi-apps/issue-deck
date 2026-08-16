@@ -19,6 +19,7 @@ import {
   resolveCrossRepoQuestionRepository,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
+import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
 
 describe("askClaudeCommentBody", () => {
   it("質問文の前後の空白を除去し、プレフィックスとマーカーを付与する", () => {
@@ -109,6 +110,23 @@ describe("isQaAnswerPending", () => {
   it("質問コメントが無い場合はfalseを返す", () => {
     const comments = [{ body: "通常の実装進捗コメント" }];
     expect(isQaAnswerPending(comments)).toBe(false);
+  });
+
+  it("質問コメントの後に回答できなかった通知が投稿された場合はfalseを返す（#1766）", () => {
+    const comments = [
+      { body: askClaudeCommentBody("質問内容") },
+      { body: `⚠️ 質問への回答を投稿できませんでした。\n\n${FALLBACK_NOTICE_MARKER}` },
+    ];
+    expect(isQaAnswerPending(comments)).toBe(false);
+  });
+
+  it("回答できなかった通知の後に質問し直した場合はtrueを返す（#1766）", () => {
+    const comments = [
+      { body: askClaudeCommentBody("質問1") },
+      { body: `⚠️ 質問への回答を投稿できませんでした。\n\n${FALLBACK_NOTICE_MARKER}` },
+      { body: askClaudeCommentBody("質問2") },
+    ];
+    expect(isQaAnswerPending(comments)).toBe(true);
   });
 });
 

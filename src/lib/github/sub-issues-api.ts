@@ -25,6 +25,15 @@ export type GithubSubIssueRef = {
   /** GitHub上のIssueの状態。GraphQLは`OPEN`/`CLOSED`で返すので小文字へ寄せる */
   state: "open" | "closed";
   htmlUrl: string;
+  /**
+   * その親子が置かれているリポジトリ（`owner/repo`）。
+   *
+   * **番号だけでは相手を特定できない**（#1722）。サブIssueはリポジトリをまたげるため、
+   * 別リポジトリの子と親リポジトリの同番号のIssueを取り違える。
+   * 進捗のDB引き当て（`/api/issues/sub-issues`）も画面の行のキーも、番号だけでなく
+   * ここまで含めて突き合わせること。
+   */
+  repositoryFullName: string;
 };
 
 export type GithubSubIssueRelations = {
@@ -41,6 +50,7 @@ type RawIssueRef = {
   title: string;
   state: string;
   url: string;
+  repository: { nameWithOwner: string } | null;
 };
 
 type RawResponse = {
@@ -56,22 +66,28 @@ const QUERY = `
 query($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
   repository(owner: $owner, name: $repo) {
     issue(number: $number) {
-      parent { number title state url }
+      parent { number title state url repository { nameWithOwner } }
       subIssues(first: $first) {
         totalCount
-        nodes { number title state url }
+        nodes { number title state url repository { nameWithOwner } }
       }
     }
   }
 }
 `;
 
-function toRef(raw: RawIssueRef): GithubSubIssueRef {
+/**
+ * `fallbackFullName`は問い合わせ元のリポジトリ。**空文字にはしない**——進捗のDB引き当ては
+ * リポジトリ名で突き合わせるため、空のまま流すと黙って引き当たらなくなる。同じリポジトリの
+ * 親子（大多数）はこのフォールバックで正しい値になる。
+ */
+function toRef(raw: RawIssueRef, fallbackFullName: string): GithubSubIssueRef {
   return {
     number: raw.number,
     title: raw.title,
     state: raw.state === "CLOSED" ? "closed" : "open",
     htmlUrl: raw.url,
+    repositoryFullName: raw.repository?.nameWithOwner || fallbackFullName,
   };
 }
 
@@ -98,9 +114,10 @@ export async function fetchSubIssueRelations(
     return { parent: null, children: [], childCount: 0 };
   }
 
+  const fallbackFullName = `${owner}/${repo}`;
   return {
-    parent: issue.parent ? toRef(issue.parent) : null,
-    children: (issue.subIssues?.nodes ?? []).map(toRef),
+    parent: issue.parent ? toRef(issue.parent, fallbackFullName) : null,
+    children: (issue.subIssues?.nodes ?? []).map((node) => toRef(node, fallbackFullName)),
     childCount: issue.subIssues?.totalCount ?? 0,
   };
 }

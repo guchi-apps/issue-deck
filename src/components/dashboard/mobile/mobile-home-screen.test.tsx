@@ -83,6 +83,7 @@ function renderHome(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
+      unconfirmedQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
@@ -165,6 +166,7 @@ describe("MobileHomeScreen（#1690）", () => {
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
+        unconfirmedQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
@@ -179,6 +181,43 @@ describe("MobileHomeScreen（#1690）", () => {
     );
 
     expect(badgeClassName()).toContain("bg-amber-500");
+  });
+
+  // 件数は確認済みも含めた総数のまま、未確認が残っている間だけ色を変える（#1796・PCと同じ）
+  it("未確認の質問があるときだけ「質問」の件数の文字色を変える", () => {
+    const { rerender } = renderHome({ navCounts: { ...NAV_COUNTS, question: 3 } });
+
+    function badgeClassName() {
+      // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
+      const row = screen.getByRole("button", { name: /^質問\s*3$/ });
+      return row.querySelector("span:last-child")?.className ?? "";
+    }
+
+    expect(badgeClassName()).not.toContain("amber");
+
+    rerender(
+      <MobileHomeScreen
+        overviewStats={OVERVIEW_STATS}
+        navCounts={{ ...NAV_COUNTS, question: 3 }}
+        checkUserPullRequestCount={0}
+        manualStepAttention={NO_MANUAL_STEP}
+        unconfirmedQuestionCount={1}
+        pullRequestNavCounts={PR_NAV_COUNTS}
+        onSelectQuickView={() => {}}
+        onSelectPullRequests={() => {}}
+        onSelectFlow={() => {}}
+        favoriteRepositories={[]}
+        onSelectRepository={() => {}}
+        onOpenIssue={() => {}}
+        onCreateIssue={() => {}}
+        onAskCrossRepoQuestion={() => {}}
+        onOpenSettings={() => {}}
+      />,
+    );
+
+    expect(badgeClassName()).toContain("text-amber-600");
+    // 要対応の塗りつぶしの丸とは強さを分ける
+    expect(badgeClassName()).not.toContain("bg-amber-500");
   });
 
   it("先頭のカードを押すと、そのカードのビューへ遷移する", () => {

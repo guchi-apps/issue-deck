@@ -198,6 +198,16 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 **Issueブランチを`main`へ直接マージすると同じ状態に戻る**ため、両リポジトリの`CLAUDE.md`に
 その旨を書いてある。
 
+> **既定ブランチを`main`に据え置くなら、`delete_branch_on_merge`を切る**（#1786）。
+> `develop`→`main`のリリースPRは**headが`develop`**なので、この設定が`true`だとマージした瞬間に
+> **`develop`ブランチごと消える**。2026-08-16に`vps`・`subpc`の両方で実際に消えた
+> （guchi-apps/vps#84・guchi-apps/subpc#18のマージ直後。guchi-apps/vps#71で気づいた）。
+> GitHubは既定ブランチを削除しないため、**既定が`develop`の他リポジトリでは起きない**。
+> リリース自体は成功して`main`へ反映されるので、その回は何も問題が起きず気づけない——
+> 次のリリースで`push: develop`が発火せず、`ref: develop`のdispatchが404になって初めて分かる。
+> `delete_branch_on_merge: false`にし、rulesetに`deletion`制限も入れて二重に防ぐ
+> （`vps`は`protect develop`（id=20909317）で対応済み）。
+
 **`docs`はリリースフローを入れない**（guchi-apps/docs#15）。各アプリの
 `shared-knowledge-propose.yml`が出す共有知識の追加提案PRは`main`宛に届く
 （`vars.SHARED_CONTEXT_REF || 'main'`）ため、`develop`を挟むと提案PRのマージのたびに`develop`が

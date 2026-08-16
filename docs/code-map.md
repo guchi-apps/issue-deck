@@ -255,6 +255,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   DBへ持たせるとGitHub Appの`sub_issues` Webhookイベント購読の追加（GitHub App設定の手作業変更）と
   スキーマ変更が要るのに対し、得られるのは詳細1回あたり1クエリぶんの節約でしかない。子の
   `projectStatus`だけはDBキャッシュから合流させ、進捗の内訳を出す（`lib/sub-issue-progress.ts`）。
+  **サブIssueはリポジトリをまたげるので、親子は必ず`repositoryFullName`とセットで扱う**（#1722）。
+  進捗のDB引き当ても画面の行のキーも`owner/repo`＋番号で突き合わせること——番号だけだと、別リポジトリの
+  子に**番号が一致する親リポジトリ側の無関係なIssueの進捗**が付く（実際にそうなっていた）。
+  別リポジトリの親子の行にはリポジトリ名を添える（`resolveSubIssueRepositoryLabel`）。
+  横展開の運用は[multi-repo-changes.md](multi-repo-changes.md)。
   **一覧にはバッジを出していない**（IssueごとにGraphQLを1回叩くN+1になるため）。運用は
   [multi-agent/labels.md](multi-agent/labels.md)。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
@@ -390,6 +395,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
+- **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
+  [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
+  （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
+  （`formatQuestionListCount`）・左メニューとスマホのホームの色（`countUnconfirmedQuestions`）が
+  同じ関数を通す。**画面ごとに条件を書き足さない。**
+  - **「未確認」は回答が届いていて未読のものだけで、回答待ちは含めない。** 未確認は
+    *いま読める*ものを指す合図で、質問を投げた直後から点けると回答が返ってきたかどうかを
+    そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
+    同じ。開いた時点で既読）に乗せる——質問だけ別の基準を作ると、同じ行の中でドットとラベルが
+    食い違う。
+  - **左メニューの件数は確認済みも含めた総数のままで、色だけが変わる**（`NavCount`の
+    `emphasis="unread"`＝数字の文字色）。塗りつぶしの丸（`emphasis="attention"`）は
+    「人が動くまで進まないもの」（確認待ち・作業待ち）専用で、読めば済む質問を同じ強さで
+    出すと、上から順に手を動かせば盤面が進むという並びの読み方が崩れる。件数の見た目は
+    PC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
+    [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
+  - 総数と未確認の差は、手作業と同じく一覧のヘッダー（`3件・未確認1件`）で説明する。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
@@ -436,6 +458,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **そのうえで、issue-deckが配る運用自動化のcheck-runは集約に数えない**（#1799。
+  `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
+  CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
+  （`claude-review-develop.yml`）・コンフリクト自動解消・共有知識の提案なども同じheadコミットに
+  check-runを付ける。とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、
+  通ったらマージする**ワークフローなので、`wait-for-ci` → `risk-check` → `claude-review` →
+  `auto-merge`のいずれかがPRの開いている間ずっと実行中で、**自動マージされるPRは一度も
+  「CI通過」を表示できなかった**。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
+  ままで、ボタンが効いていないように見えていた（#1799。PR #1798の実測では`lint-and-build`の
+  完了が13:53:49・`ci.yml`のジョブが出揃ったのが13:53:55なのに対し、`review / auto-merge`の
+  完了はマージ後の13:54:27）。同じ詰まりでマージボタンが押せなかった事例は
+  [multi-agent/labels.md](multi-agent/labels.md)の「`00.check-user`はレビュー完了後に付ける」にもある。
+  外すのはファイル名で分かる運用自動化だけで、`ci.yml`・`deploy.yml`・`version-tag-check.yml`
+  などの検査系、リポジトリ固有のワークフロー、外部CIのcommit statusはそのまま数える
+  （**知らないものは数える**側へ倒し、CIを見落とさないようにする）。除いた結果が空になる場合は
+  除く前をそのまま使う——CIを持たないリポジトリでCI状態が一律「不明」になり、PRが
+  「実行中」ビューから出られなくなるのを避けるため。
 - **コンフリクト有無（`mergeable`）は、そのCI状態と同じ1回のGraphQLで取る**（#1742。
   `fetchPullRequestRollup` → `fetchPullRequestCiState`）。`mergeable`はRESTだとPRの単体取得でしか
   返らないため、PR一覧に出すとPR1件につき1回APIが増える——これが理由でPR一覧は長らく
@@ -707,7 +746,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   母集団）／`71.manual-step`の4区分。
   - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
     作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
-    `filterPullRequestsByView`から得る。ここで独自判定を書くと、同じ状態が画面ごとに別の言葉で出る。
+    `filterPullRequestsByView`・`computeManualStepReadiness`から得る。ここで独自判定を書くと、
+    同じ状態が画面ごとに別の言葉で出る。
+  - **`71.manual-step`は前提条件が満たされたものだけを出す**（#1801。判定は左メニューの
+    「ユーザーの作業待ち」と同じ`computeManualStepReadiness`）。先行する変更が本番へ出るまで
+    実行できない手作業まで並べると、ベルが「いま人が動けば盤面が進むもの」の集まりでなくなり、
+    件数バッジも左メニューの件数（`actionable`だけを数える。#1763）と食い違う。前提待ちの
+    手作業は「ユーザーの作業待ち」ビューに橙の時計付きで残るので、見えなくなるわけではない。
   - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
     **材料を用意するのは`NotificationProvider`だけ**（#1772。

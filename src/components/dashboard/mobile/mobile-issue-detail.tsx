@@ -654,6 +654,10 @@ export function MobileIssueDetail({
           紛れるため。他のモバイル画面（home/settings/repos/issue-list）はいずれもflex-1を
           付けており、この画面だけが例外だった。規約は
           mobile-screen-scroll-container.test.tsで固定している */}
+      {/* pb-20（5rem）も外さない（#1793）。この画面には下端から浮いている要素が2つあり、
+          ScrollToLatestCommentButton（bottom-4・h-11＝下端から3.75rem）と新規作成のFAB
+          （bottom-4・size-12＝下端から4rem）が、最下部までスクロールしたときにコメント
+          入力欄の操作列へ重ならないための余白 */}
       <div
         ref={scrollContainerRef}
         data-capture-scroll-bottom
@@ -792,7 +796,11 @@ export function MobileIssueDetail({
               )
             }
           >
-            <SubIssueProgress relations={subIssueRelations} showHeading={false} />
+            <SubIssueProgress
+              relations={subIssueRelations}
+              baseRepositoryFullName={issue.repositoryFullName}
+              showHeading={false}
+            />
           </IssueDetailSection>
         )}
 

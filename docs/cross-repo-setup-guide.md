@@ -439,6 +439,8 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v17` | 上記 | #1470。`reusable-issue-labels.yml`の`develop-pr-opened`が、`claude-review-develop.yml`を持たないリポジトリで`00.check-user`を付けるようになった版。**このタグを配るまで、対象リポジトリのdevelop向けPRは判定されないまま開いたまま残り続ける** |
 | `workflows/v18` | 上記 | #1490。`00.check-user`を付ける全経路が、その理由を表す`01.check-*`もあわせて付けるようになった版。あわせて`claude-review-develop`・`claude-ci-fix`・`claude-conflict-resolve`・`release-develop-to-main`の`gh issue edit`に`gh label list`ガードを入れた。**このタグを配るまで、対象リポジトリでは理由ラベルが付かない**（`00.check-user`だけが付く従来どおりの動作） |
 | `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く）。**caller側の追加は#1603で12リポジトリの配布PRへ入れた**（[supported-repositories.md](supported-repositories.md)「callerの`bump_kind`入力の配布状況」） |
+| `workflows/v20` | 上記 | #1729（対応PRは#1738）。`reusable-release-develop-to-main.yml`が利用者向けの使い方（操作手順）も生成し、`RELEASE_USAGE`環境変数として`version` lifecycleスクリプトへ渡すようになった版。**タグの作成と画面からの配布は#1739で人が行った。** 配布しても、各アプリの`version`スクリプトが`RELEASE_USAGE`を受け取るまでそのアプリの更新履歴画面には出ない（バンプPR本文とissue-deckのリリースシートには出る）。受け取り方は本ガイドの「`RELEASE_USAGE`（使い方）の受け取り方」、対応状況は[supported-repositories.md](supported-repositories.md)「使い方の自動生成（`RELEASE_USAGE`）の対応状況」 |
+| `workflows/v21` | 上記 | #1766。`reusable-issue-dispatch.yml`の質問応答（`mode=ask`）が、回答の投稿後に自分の受付コメントを削除し、回答できなかった場合はエラー通知ボット名義（`<!-- issue-deck-fallback-notice -->`）で通知するようになった版。回答の検証も件数比較から回答マーカーの有無へ変えた。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリの質問は従来どおり受付コメントが残り、回答できなかった場合の通知も案内ボット名義のままになる（issue-deck側の「回答待ち」解除は配布前でも効く） |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
@@ -1268,6 +1270,16 @@ rm -rf .shared-context .shared-prompts
 - Branch protection: `main`はRequire pull request before merging・Required status checks、
   `develop`は最低限`required_status_checks`（CIジョブ名）を設定する。詳細な設定値・設定コマンド例は
   [docs/multi-agent/branching.md](multi-agent/branching.md)の「ブランチ保護ルール案」を参照
+- **デフォルトブランチを`main`に据え置くリポジトリでは、`delete_branch_on_merge`を`false`にする**（#1786）。
+  `develop`→`main`のリリースPRは**headが`develop`**のため、この設定が`true`だとマージした瞬間に
+  `develop`が自動削除され、次回以降のリリースが成立しなくなる（`push: develop`が発火せず、
+  `ref: develop`のdispatchが404になる）。**既定が`develop`のリポジトリでは起きない**——GitHubは
+  既定ブランチを削除しないため。あわせてrulesetに`deletion`制限を入れると二重に防げる
+
+  ```bash
+  gh api repos/guchi-apps/my-app --jq '"delete_branch_on_merge=\(.delete_branch_on_merge) default_branch=\(.default_branch)"'
+  gh api --method PATCH repos/guchi-apps/my-app -F delete_branch_on_merge=false
+  ```
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
