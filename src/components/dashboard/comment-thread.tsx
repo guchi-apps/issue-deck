@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
+import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -44,7 +45,9 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
-import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/approval-labels";
+import { checkUserTargetProps } from "@/lib/check-user-focus";
+import type { CheckUserReason } from "@/lib/github/approval-labels";
+import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import {
   COMMENT_AGENT_PROFILES,
@@ -294,11 +297,16 @@ function ApprovalActions({
     onPullRequestMerged?.(pullRequestNumber);
   }
 
+  // 次にどこの何を押せばよいか（#1663）。承認カードは行き先そのものなので、移動ボタンは
+  // 出さずボタン名だけが入る（`placement: "approval"`）。理由ラベルが読めなければnullで、
+  // 従来どおり見出しだけになる
+  const guidance = resolveCheckUserGuidance({ reason: checkUserReason, placement: "approval" });
+
   // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
   // **PRマージ待ちを優先するのは、あちらはGitHub側の操作で`11.local`中でも実際に効くため。**
   if (sessionWaitingInput && !mergeApprovalPending) {
     return (
-      <div className="mt-3 rounded-lg border border-dashed p-3">
+      <div {...checkUserTargetProps("approval")} className="mt-3 rounded-lg border border-dashed p-3">
         <p className="mb-2 text-sm font-medium">セッションが入力を待っています</p>
         {localSessionNotice}
       </div>
@@ -307,7 +315,7 @@ function ApprovalActions({
 
   if (mergeApprovalPending) {
     return (
-      <div className="mt-3 rounded-lg border border-dashed p-3">
+      <div {...checkUserTargetProps("approval")} className="mt-3 rounded-lg border border-dashed p-3">
         {isMerged ? (
           <>
             <p className="mb-2 text-sm font-medium">Pull Requestをマージしました</p>
@@ -315,6 +323,14 @@ function ApprovalActions({
               画面表示が更新されるまで少しお待ちください。
             </p>
           </>
+        ) : guidance?.reason === "merge" ? (
+          /* 何を押せばよいか（#1663）と、なぜ自動マージされなかったのか（#1631）を1つの枠に
+             まとめる。理由の詳細は行き先の案内より下に置く */
+          <CheckUserReasonNotice guidance={guidance} className="mb-2">
+            {mergeCheckReasons && (
+              <MergeCheckReasonNotice reasons={mergeCheckReasons} className="bg-background" />
+            )}
+          </CheckUserReasonNotice>
         ) : (
           <>
             <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
@@ -377,10 +393,14 @@ function ApprovalActions({
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-dashed p-3">
-      <p className="mb-2 text-sm font-medium">
-        {checkUserReason ? CHECK_USER_REASON_HEADING[checkUserReason] : "ユーザーの承認が必要です"}
-      </p>
+    <div {...checkUserTargetProps("approval")} className="mt-3 rounded-lg border border-dashed p-3">
+      {/* 理由が読めるなら、押すボタンの案内まで含めて出す（#1663）。読めないリポジトリでは
+          行き先を決められないため、従来どおり見出しだけにする */}
+      {guidance ? (
+        <CheckUserReasonNotice guidance={guidance} className="mb-2" />
+      ) : (
+        <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
+      )}
       {/* サブPCで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
           反応しない（#1264）。押しても何も起きないことを、押す前に出す */}
       {localSessionNotice}

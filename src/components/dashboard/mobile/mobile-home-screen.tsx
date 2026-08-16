@@ -3,6 +3,7 @@
 import { FolderGit2, Plus, Settings, SlidersHorizontal, X } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { Card } from "@/components/ui/card";
 import { labelNavViews, navViewIcons, navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
@@ -61,6 +62,11 @@ export function MobileHomeScreen({
       */}
       <header className="flex shrink-0 items-center gap-1 border-b py-2 pr-2 pl-4">
         <span className="flex-1 text-base font-semibold">Issue Deck</span>
+        {/*
+          画面の更新（#1681）。PWAにはブラウザの再読み込みが無いので、その代わりを1つだけ
+          置く。**ホーム以外の画面には出していない**——理由は`mobile-reload-button.tsx`
+        */}
+        <MobileReloadButton />
         <MobileDispatchStatusButton />
         <button
           type="button"

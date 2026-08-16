@@ -2,13 +2,14 @@
 # マージ済みIssueのworktree・ブランチを掃除する（#1100）
 #
 # 使い方:
-#   scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force]
+#   scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]
 #
 #   --dry-run       判定結果を表示するだけで削除しない
 #   --yes / -y      確認プロンプトを出さずに削除する
 #   --issue <番号>  対象を1つのIssueに絞る
 #   --no-fetch      origin/develop の最新化（git fetch）を行わない
 #   --force         未コミットの変更・未pushのコミットを無視して削除する（--issue 必須）
+#   --size          削除対象のディスク使用量を測って表示する（既定では測らない）
 #
 # 次をすべて満たすworktreeだけを削除対象にする。1つでも欠けたら残す。
 #   - 未コミットの変更が無い
@@ -30,8 +31,14 @@
 # 削除するのは worktree・ローカルブランチ・そのIssue用の生成物（起動用プロンプト、
 # 開発サーバーのログ・PIDファイル）まで。リモートブランチには触れない。
 #
+# **worktreeが100件を超えても数十秒で終わること**を前提に書く（#1680）。1件ずつ `gh` を叩き、
+# 1件ずつ `du` でサイズを測っていた頃は170件で4分以上かかり、その間1行も出力しないため
+# `--dry-run` が固まったようにしか見えなかった。worktreeの数に比例して増える処理を足すときは、
+# まとめて1回で引けないか・進捗を出せるかを先に考える。
+#
 # 環境変数:
 #   ISSUE_DECK_WORKTREE_BASE  worktreeの置き場所（既定: ~/apps/issue-deck-worktrees）
+#   ISSUE_DECK_GH_TIMEOUT     gh の1回の呼び出しに被せる制限時間・秒（既定: 60）
 
 set -euo pipefail
 
@@ -48,13 +55,14 @@ source "$ROOT/scripts/lib/worktree-status.sh"
 source "$ROOT/scripts/lib/dev-server.sh"
 
 usage() {
-  echo "Usage: scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force]"
+  echo "Usage: scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]"
 }
 
 DRY_RUN=0
 ASSUME_YES=0
 DO_FETCH=1
 FORCE=0
+SHOW_SIZE=0
 TARGET_ISSUE=""
 
 while [[ $# -gt 0 ]]; do
@@ -63,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y) ASSUME_YES=1 ;;
     --no-fetch) DO_FETCH=0 ;;
     --force) FORCE=1 ;;
+    --size) SHOW_SIZE=1 ;;
     --issue) shift; TARGET_ISSUE="${1:-}" ;;
     --issue=*) TARGET_ISSUE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -98,6 +107,49 @@ fi
 # 自分の足元を消すと git の内部状態も巻き込むため。
 CURRENT_DIR="$(pwd -P)"
 
+# 走査の進捗表示（#1680）。worktreeが100件を超えると走査に数十秒かかるのに、以前は結果が
+# 出るまで1行も出さなかったため、`--dry-run`が「終わらない」ようにしか見えなかった。
+# 端末では同じ行を上書きし、ファイルへリダイレクトされているときは一定件数ごとに1行だけ出す。
+PROGRESS_EVERY=25
+
+progress_update() {
+  local done_count="$1" total="$2" label="$3"
+  if [[ -t 2 ]]; then
+    printf '\r\033[K走査中 %d/%d %s' "$done_count" "$total" "$label" >&2
+  elif (( done_count % PROGRESS_EVERY == 0 || done_count == total )); then
+    printf '走査中 %d/%d\n' "$done_count" "$total" >&2
+  fi
+}
+
+progress_clear() {
+  if [[ -t 2 ]]; then
+    printf '\r\033[K' >&2
+  fi
+}
+
+# マージ済みPRの番号は削除理由の表示にだけ使う（#1192）。worktreeごとに `gh` を呼ぶと
+# 1件あたり0.5秒前後のAPI往復が件数ぶん積み上がり、170件で1分半を超える（#1680）。
+# 1回の呼び出しでまとめて引いて引き当てる。--issue で1件に絞っているときは、全件を引く方が
+# 高くつくのでその1件だけ引く。
+declare -A merged_pr_by_branch=()
+
+merged_pr_for() {
+  local n="$1"
+  if [[ -n "$TARGET_ISSUE" ]]; then
+    worktree_merged_pr "$n"
+  else
+    echo "${merged_pr_by_branch[issue-$n]:-}"
+  fi
+}
+
+# 削除対象のサイズをまとめて測る（#1680）。worktreeは1件あたり1GB・十数万ファイルあり、`du`は
+# 1件0.2〜0.3秒かかる。100件を超えると走査そのものより高くつくうえ、下に書いたとおり数値自体が
+# 共有分を含んで当てにならないため、既定では測らず `--size` を付けたときだけ測る。
+# 並列にしても3割ほどしか縮まない（ディスクのメタデータ読み出しで詰まる）。
+measure_sizes() {
+  printf '%s\0' "$@" | xargs -0 -r -P 8 -n 1 du -sh 2>/dev/null
+}
+
 # 判定結果。表示は「削除対象 → 残す」の順にまとめるため、いったん配列へ貯める。
 target_dirs=()
 target_numbers=()
@@ -132,6 +184,9 @@ session_stop_hint() {
   fi
 }
 
+# 先に対象のworktreeだけを集める。全体の件数が分からないと進捗を「N/M」で出せないため、
+# 判定と同じループで読み進めない（#1680）。
+managed_dirs=()
 while IFS= read -r line; do
   [[ "$line" == worktree\ * ]] || continue
   dir="${line#worktree }"
@@ -146,6 +201,24 @@ while IFS= read -r line; do
   if [[ -n "$TARGET_ISSUE" && "$n" != "$TARGET_ISSUE" ]]; then
     continue
   fi
+  managed_dirs+=("$dir")
+done < <(git -C "$ROOT" worktree list --porcelain)
+
+scan_total="${#managed_dirs[@]}"
+
+# 対象が無いときはAPIを叩かない。--issue で1件に絞っているときは merged_pr_for が1件だけ引く。
+if [[ -z "$TARGET_ISSUE" && "$scan_total" -gt 0 ]]; then
+  echo "マージ済みPRの一覧を取得しています..."
+  while IFS=$'\t' read -r branch pr; do
+    [[ -n "$branch" ]] || continue
+    merged_pr_by_branch["$branch"]="$pr"
+  done < <(worktree_merged_pr_map)
+fi
+
+for scan_index in "${!managed_dirs[@]}"; do
+  dir="${managed_dirs[$scan_index]}"
+  n="${dir#"$WORKTREE_BASE"/issue-}"
+  progress_update "$((scan_index + 1))" "$scan_total" "#$n"
 
   # ここから下の3つ（実行中のworktree・壊れている・別ブランチ）と、その次のセッション稼働中は
   # **--force でも消さない**。消して失われるのではなく、消すと壊れる・他の作業を巻き込むため。
@@ -199,7 +272,7 @@ while IFS= read -r line; do
     target_dirs+=("$dir")
     target_numbers+=("$n")
     target_forced+=(1)
-    target_notes+=("--force 指定 / $loss_text / $(du -sh "$dir" 2>/dev/null | cut -f1)")
+    target_notes+=("--force 指定 / $loss_text")
     continue
   fi
 
@@ -221,7 +294,7 @@ while IFS= read -r line; do
   fi
 
   # ここまで来たら消して失われるものは無い。マージ済みPRの有無は理由の表示にだけ使う（#1192）。
-  merged_pr="$(worktree_merged_pr "$n")"
+  merged_pr="$(merged_pr_for "$n")"
   if [[ -n "$merged_pr" ]]; then
     reason="PR #$merged_pr マージ済み"
   else
@@ -232,8 +305,23 @@ while IFS= read -r line; do
   target_dirs+=("$dir")
   target_numbers+=("$n")
   target_forced+=(0)
-  target_notes+=("$reason / $(du -sh "$dir" 2>/dev/null | cut -f1)")
-done < <(git -C "$ROOT" worktree list --porcelain)
+  target_notes+=("$reason")
+done
+progress_clear
+
+# サイズは `--size` のときだけ、削除対象のぶんを走査後にまとめて測る（#1680）。
+target_sizes=()
+if [[ "$SHOW_SIZE" -eq 1 && ${#target_dirs[@]} -gt 0 ]]; then
+  echo "削除対象のサイズを集計しています（${#target_dirs[@]}件）..."
+  declare -A size_by_dir=()
+  while IFS=$'\t' read -r size path; do
+    [[ -n "$path" ]] || continue
+    size_by_dir["$path"]="$size"
+  done < <(measure_sizes "${target_dirs[@]}")
+  for dir in "${target_dirs[@]}"; do
+    target_sizes+=("${size_by_dir[$dir]:-不明}")
+  done
+fi
 
 echo ""
 echo "=== 削除対象 (${#target_dirs[@]}件) ==="
@@ -241,11 +329,19 @@ if [[ ${#target_dirs[@]} -eq 0 ]]; then
   echo "  (なし)"
 else
   for i in "${!target_dirs[@]}"; do
-    printf '  #%s  %s\n' "${target_numbers[$i]}" "${target_notes[$i]}"
+    if [[ "$SHOW_SIZE" -eq 1 ]]; then
+      printf '  #%s  %s / %s\n' "${target_numbers[$i]}" "${target_notes[$i]}" "${target_sizes[$i]}"
+    else
+      printf '  #%s  %s\n' "${target_numbers[$i]}" "${target_notes[$i]}"
+    fi
   done
-  # pnpmはnode_modulesの実体をストアへのハードリンクとして持つため、worktreeごとのduは
-  # 他のworktreeと共有している分まで数える。実際に解放されるのはこの合計よりかなり小さい。
-  echo "  ※サイズはpnpmストアとのハードリンク共有分を含むため、実際に解放される容量はこれより小さい"
+  if [[ "$SHOW_SIZE" -eq 1 ]]; then
+    # pnpmはnode_modulesの実体をストアへのハードリンクとして持つため、worktreeごとのduは
+    # 他のworktreeと共有している分まで数える。実際に解放されるのはこの合計よりかなり小さい。
+    echo "  ※サイズはpnpmストアとのハードリンク共有分を含むため、実際に解放される容量はこれより小さい"
+  else
+    echo "  ※ディスク使用量を出すには --size を付ける（1件あたり0.2秒ほどかかるため既定では測らない）"
+  fi
 fi
 
 echo ""

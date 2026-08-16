@@ -165,3 +165,32 @@
     stroke-dashoffset: -100;
   }
 }
+/* 「次の操作」の場所へ移動したあと、着いた枠を一瞬光らせる（#1663）。
+   Issue詳細は縦に長く、承認カードはコメント欄の末尾にあるため、スクロールし終えても
+   どの枠のことなのかが分からない。クラスの付け外しは`src/lib/check-user-focus.ts`が行う。 */
+@keyframes check-user-flash {
+  0%,
+  60% {
+    box-shadow: 0 0 0 3px var(--check-user-flash-ring);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+.check-user-flash {
+  --check-user-flash-ring: color-mix(
+    in oklch,
+    var(--color-amber-500, oklch(0.769 0.188 70.08)) 55%,
+    transparent
+  );
+  animation: check-user-flash 1.6s ease-out;
+}
+
+/* 動きを減らす設定では点滅させず、同じ時間だけリングを出したままにする */
+@media (prefers-reduced-motion: reduce) {
+  .check-user-flash {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--check-user-flash-ring);
+  }
+}

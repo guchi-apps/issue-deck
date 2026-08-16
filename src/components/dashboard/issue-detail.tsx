@@ -43,6 +43,7 @@ import {
   findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
+  isIssueExecutionPending,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -53,7 +54,11 @@ import {
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
+import {
+  findSessionForIssue,
+  isSessionWaitingInput,
+  summarizeIssueSession,
+} from "@/lib/dispatch/issue-session";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -93,6 +98,7 @@ import {
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
+import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import {
   askClaudeCommentBody,
   canAskClaude,
@@ -107,6 +113,7 @@ import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
+import { checkUserTargetProps } from "@/lib/check-user-focus";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
@@ -452,6 +459,10 @@ export function IssueDetail({
     hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
     blockingSession,
   });
+  // もう走り始めているIssueでは開始の導線を出さない（#1667）。積んだ直後は進捗がまだ
+  // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の隣に
+  // 押せる「GitHub Actionsで開始」が残っていた
+  const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
   // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
   // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
   const startLabel = !dispatch.isLoaded
@@ -489,6 +500,15 @@ export function IssueDetail({
     visiblePullRequestLinks.length,
   );
   const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
+  // 確認待ちのときに、次にどこの何を押せばよいかを上部から案内する（#1663）。行き先の判定に
+  // マージ待ちかどうかと対応PRセクションの有無が要るため、解決はここで行う
+  const checkUserGuidance = resolveCheckUserGuidance({
+    reason: checkUserReason(issue.labels),
+    placement: "status",
+    sessionWaitingInput,
+    remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
+    hasPullRequestSection: visiblePullRequestLinks.length > 0,
+  });
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -509,7 +529,7 @@ export function IssueDetail({
             <>
               {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
                   対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
-              {canStartImplementation(issue) && (
+              {canStartImplementation(issue) && !executionPending && (
                 <StartImplementationDialog
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
@@ -555,11 +575,11 @@ export function IssueDetail({
               {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
                   起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
                   あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                  「サブPCで開始」が2つ並ぶ */}
+                  「サブPCで開始」が2つ並ぶ。もう走っているIssueではどちらも出さない（#1667） */}
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
-                showStartButton={!canStartImplementation(issue)}
+                showStartButton={!canStartImplementation(issue) && !executionPending}
                 showJobStatus={false}
                 dispatch={dispatch}
               />
@@ -670,6 +690,7 @@ export function IssueDetail({
             workflowRun={workflowRun}
             workflowRunId={workflowRunId}
             qaAnswerPending={qaAnswerPending}
+            checkUserGuidance={checkUserGuidance}
           />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
@@ -678,6 +699,8 @@ export function IssueDetail({
           {visiblePullRequestLinks.length > 0 && (
             <IssueDetailSection
               id="pull-requests"
+              /* 上部の案内から「対応PRへ移動」で飛んでくる先（#1663） */
+              targetProps={checkUserTargetProps("pull-requests")}
               title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
               count={pullRequestSummary.total}
               forceOpen={mergeApprovalPending}
