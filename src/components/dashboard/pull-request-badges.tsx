@@ -1,10 +1,25 @@
 "use client";
 
-import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } from "lucide-react";
+import {
+  Clock,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  Loader2,
+  Rocket,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 
 import type { CiState } from "@/lib/github/release-api";
 import { cn } from "@/lib/utils";
-import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
+import type {
+  PullRequestDeployStatus,
+  PullRequestDeployStatusKind,
+  PullRequestKind,
+  PullRequestSummary,
+} from "@/types/pull-request";
 
 const CI_STATE_LABEL: Record<CiState, string> = {
   pending: "CI実行中",
@@ -113,6 +128,74 @@ export function UserMergeRequiredBadge() {
     <span className="inline-flex w-fit items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
       ユーザーのマージが必要です
     </span>
+  );
+}
+
+const DEPLOY_STATUS_LABEL: Record<PullRequestDeployStatusKind, string> = {
+  "develop-only": "本番未反映（developまで）",
+  waiting: "デプロイ待ち",
+  running: "本番へデプロイ中",
+  deployed: "本番反映済み",
+  failed: "デプロイ失敗",
+};
+
+const DEPLOY_STATUS_CLASS: Record<PullRequestDeployStatusKind, string> = {
+  "develop-only": "bg-muted text-muted-foreground ring-border",
+  waiting: "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400",
+  running: "bg-primary/15 text-primary ring-primary",
+  deployed: "bg-green-600/15 text-green-700 ring-green-600 dark:text-green-400",
+  failed: "bg-destructive/15 text-destructive ring-destructive",
+};
+
+const DEPLOY_STATUS_ICON: Record<PullRequestDeployStatusKind, LucideIcon> = {
+  "develop-only": GitMerge,
+  waiting: Clock,
+  running: Loader2,
+  deployed: Rocket,
+  failed: TriangleAlert,
+};
+
+/**
+ * このPRが本番へ届いたかを表すピル（#1814）。判定は`resolvePullRequestDeployStatus`だけを通す。
+ *
+ * **`status`がnull（判定できない）なら何も出さない。** 未マージのPR・`deploy.yml`が無い
+ * リポジトリ・取得した範囲より古いPRで「未反映」と言い切らないため（ブランチ画面と同じ方針。#1579）。
+ * デプロイ実行が分かっている状態ではピルごと実行ログへのリンクにする。
+ */
+export function DeployStatusBadge({ status }: { status: PullRequestDeployStatus | null }) {
+  if (status === null) return null;
+
+  const Icon = DEPLOY_STATUS_ICON[status.kind];
+  const label = status.version
+    ? `${DEPLOY_STATUS_LABEL[status.kind]} v${status.version}`
+    : DEPLOY_STATUS_LABEL[status.kind];
+  const className = cn(
+    "inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+    DEPLOY_STATUS_CLASS[status.kind],
+  );
+  const icon = (
+    <Icon className={cn("size-3", status.kind === "running" && "animate-spin")} aria-hidden="true" />
+  );
+
+  if (status.deployRunUrl === null) {
+    return (
+      <span className={className}>
+        {icon}
+        {label}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={status.deployRunUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(className, "hover:underline")}
+      title="デプロイの実行ログを開く"
+    >
+      {icon}
+      {label}
+    </a>
   );
 }
 

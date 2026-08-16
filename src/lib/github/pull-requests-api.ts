@@ -77,6 +77,27 @@ export async function fetchClosedPullRequests(
 }
 
 /**
+ * 指定ブランチをbaseとするクローズ済みPull Requestを、更新が新しい順に取得する（#1814）。
+ *
+ * PR詳細の本番デプロイ表示が「どのリリースがこの変更を運んだか」を決めるのに使う
+ * （`base=main`で呼ぶ）。`fetchClosedPullRequests`との違いはbaseで絞ることだけで、
+ * 件数の打ち切りとETagの条件付きGETは同じ。**ページングはしない**ため、`CLOSED_PER_PAGE`件より
+ * 古いリリースしか関係しないPRは「判定できない」として扱われる
+ * （`lib/pull-request-deploy.ts`）。
+ */
+export async function fetchClosedPullRequestsForBase(
+  owner: string,
+  repo: string,
+  base: string,
+  token: string,
+): Promise<GithubApiOpenPullRequest[]> {
+  return fetchPullRequestPage(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=closed&base=${encodeURIComponent(base)}&sort=updated&direction=desc&per_page=${CLOSED_PER_PAGE}`,
+    token,
+  );
+}
+
+/**
  * PR一覧の1ページ分を取得する。**ETagによる条件付きGET**を通すため、変化が無い間は
  * レート制限を消費しない（#1531。「完了したPR」ビューの10秒ポーリングの前提）。
  */
