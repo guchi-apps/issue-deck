@@ -12,6 +12,7 @@ import {
   groupIssuesByRepository,
   reconcileIssues,
   sortIssues,
+  upsertIssue,
 } from "@/lib/issue-stats";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import { NAV_VIEW_IDS } from "@/types/issue";
@@ -351,6 +352,26 @@ describe("computeFilterLabelSummary", () => {
   });
 });
 
+
+describe("upsertIssue", () => {
+  it("新しく作られたIssueは先頭に足す", () => {
+    const created = makeIssue({ id: "2" });
+    expect(upsertIssue([makeIssue({ id: "1" })], created).map((issue) => issue.id)).toEqual([
+      "2",
+      "1",
+    ]);
+  });
+
+  // 作成直後はポーリングが先に反映していることがあり、足すだけだと同じIssueが2行並ぶ（#449）
+  it("すでにある同じIssueは置き換える", () => {
+    const result = upsertIssue(
+      [makeIssue({ id: "1", title: "取得済み" })],
+      makeIssue({ id: "1", title: "作成した結果" }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("作成した結果");
+  });
+});
 
 describe("reconcileIssues", () => {
   it("内容が変わっていないIssueは直前のオブジェクト参照を再利用する", () => {

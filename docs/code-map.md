@@ -18,6 +18,7 @@ src/
     api/            Route Handler。画面からのデータ取得・更新はすべてここ経由
     auth/callback   Supabase Authのコールバック。Userレコードの作成とトークン保存
     dashboard/      メイン画面
+    issues/new      Issue作成画面を別ウィンドウで開くためのページ（#1728）
     github/setup    GitHub Appインストール後の受け口
   components/
     dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
@@ -63,6 +64,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   押した行が反応しない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **Issueの作成フォームは、ダイアログでも別ウィンドウでも
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)1つだけ**（#1728）。
+  `presentation`（`dialog` / `window`）で外枠（見出し・フッター・オーバーレイの有無）だけを
+  差し替え、項目・2ステップの流れ・作成後の動きは共通のまま使う。**別ウィンドウ用にフォームを
+  もう一つ作らない**——以降の変更を2か所へ入れ続けることになり、片方だけ古くなる。
+  別ウィンドウのページは[`app/issues/new/page.tsx`](../src/app/issues/new/page.tsx)、
+  ウィンドウとしての振る舞い（受け渡し・閉じ方・作成の通知）は
+  [`create-issue-window.tsx`](../src/components/dashboard/create-issue-window.tsx)が持つ。
+  `window.open`では状態を直接渡せないため、書きかけの内容はlocalStorage経由で一度だけ渡す
+  （[`lib/issue-create-window.ts`](../src/lib/issue-create-window.ts)。下書きの自動保存
+  （`use-issue-draft`）とはキーも意味も別物で、あちらは人が「復元する」を選ぶもの）。
+  作成したIssueは`BroadcastChannel`で元のデッキへ伝えて一覧へ加えるが、
+  **選択中のIssueは動かさない**（[`lib/issue-broadcast.ts`](../src/lib/issue-broadcast.ts)）。
+  伝わらなくても一覧のポーリング（10秒）で現れるので、失敗しても作成は止めない。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
