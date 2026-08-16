@@ -34,7 +34,8 @@ function truncate(text: string, maxLength: number): string {
 // `isAutoAssignableLabelName`（`src/lib/issue-status.ts`）。`11.local`・`21.plan-required`〜
 // `25.artifact-required`・`71.manual-step`・`90.Close: *`は、本文の内容ではなく運用の都合
 // （誰が対応中か・どのゲートを通すか・なぜcloseしたか）で人やワークフローが付けるラベルで、
-// 本文からの推定で付けてよいものではない。
+// 本文からの推定で付けてよいものではない。**この範囲は#1702で恒久的な仕様として据え置いた**
+// （`71`を別の帯へ移す案・優先度を外す案をどちらも検討したうえで現状維持と決めた）。
 // **プロンプトの候補一覧（buildIssueSuggestPrompt）と応答の後処理（generateIssueSuggestion）は
 // 必ず同じ集合を使う。** プロンプト側だけ絞ると、Claudeが範囲外のラベル名を返したときに
 // 後処理が素通ししてしまう。
@@ -51,12 +52,18 @@ export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
           .join("\n")
       : "(利用可能なラベルなし)";
 
-  return `以下はこれから作成するGitHub Issueの本文です。この内容から、簡潔で分かりやすい日本語のタイトル案と、下記の「利用可能なラベル一覧」の中から内容に適合するものだけを選んだ配列を提案してください。
+  return `以下はこれから作成するGitHub Issueの本文です。この内容から、簡潔で分かりやすい日本語のタイトル案と、下記の「利用可能なラベル一覧」の中から内容に適合するものを選んだ配列を提案してください。
 
 出力は前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
 {"title": "タイトル案", "labels": ["ラベル名1", "ラベル名2"]}
 
-適合するラベルが無い場合は"labels"を空配列にしてください。"labels"には「利用可能なラベル一覧」に存在するラベル名のみを含めてください。
+"labels"のルール:
+- 「利用可能なラベル一覧」に書かれているラベル名を、説明を付けずそのまま書いてください。
+- **一覧が空でない限り、Issueの種別を表すラベルを必ず1つは選んでください**（不具合の報告なら不具合を表すもの、新しく作りたいものなら新機能を表すもの、既にあるものの改善なら改善を表すもの、といった対応です）。判断に迷う場合も、最も近いものを1つ選んでください。
+- 優先度のように内容から判断できないものは、本文にはっきり書かれているときだけ選んでください。
+- 「利用可能なラベル一覧」が「(利用可能なラベルなし)」の場合だけ、空配列にしてください。
+
+本文に画像のURLが含まれていても、そこからは判断できないので無視してください。
 
 # 本文
 ${truncate(body, MAX_BODY_LENGTH)}
@@ -132,15 +139,42 @@ export async function generateIssueSuggestion(
 
   const { title, labels: rawLabels } = parsed as { title: string; labels: unknown[] };
 
+  const labels = matchSuggestedLabels(rawLabels, input.availableLabels);
+
+  return { title: title.trim(), labels };
+}
+
+/**
+ * Claudeが返したラベル名を、実在するラベル名へ突き合わせる（#1710）。
+ *
+ * **表記の揺れで落とさない。** プロンプトでは`- 30.bug: 不具合`の形で候補を渡しているため、
+ * モデルが箇条書きの記号や説明を付けたまま返すことがある。以前は完全一致だけを見ており、
+ * その場合はラベルが1つも付かないまま（タイトルだけが入った状態で）確認ステップへ進んでいた。
+ * 一方で、**候補に無いラベル名は依然として採らない**（存在しないラベルでの作成はGitHub側で失敗する）。
+ */
+export function matchSuggestedLabels(
+  rawLabels: unknown[],
+  availableLabels: IssueSuggestLabelInput[],
+): string[] {
   const availableByLowerName = new Map(
-    input.availableLabels
+    availableLabels
       .filter((label) => isAutoAssignableLabelName(label.name))
       .map((label) => [label.name.toLowerCase(), label.name]),
   );
-  const labels = rawLabels
+
+  const matched = rawLabels
     .filter((label): label is string => typeof label === "string")
-    .map((label) => availableByLowerName.get(label.toLowerCase()))
+    .map((label) => {
+      // `- 30.bug: 不具合` のような形で返ってきても拾えるよう、記号と説明を落として突き合わせる
+      const normalized = label.trim().replace(/^[-*・]\s*/, "");
+      const candidates = [normalized, normalized.split(/[:：]/)[0].trim()];
+      for (const candidate of candidates) {
+        const found = availableByLowerName.get(candidate.toLowerCase());
+        if (found) return found;
+      }
+      return undefined;
+    })
     .filter((label): label is string => label !== undefined);
 
-  return { title: title.trim(), labels: [...new Set(labels)] };
+  return [...new Set(matched)];
 }

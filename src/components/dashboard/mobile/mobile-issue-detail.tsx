@@ -117,6 +117,7 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
+import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
@@ -161,6 +162,8 @@ export function MobileIssueDetail({
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
+  // 手作業Issueが待っている相手の状況（#1705）。PCの詳細と同じフック・同じ部品を使う
+  const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
   const commentSummary = useIssueCommentSummaries(issue);
@@ -740,6 +743,9 @@ export function MobileIssueDetail({
             isSubmitting={isSubmitting}
             onComplete={() => handleClose("completed")}
             onSkip={() => handleClose("not_planned")}
+            prerequisites={manualStepPrerequisites.prerequisites}
+            prerequisiteSummary={manualStepPrerequisites.summary}
+            repositoryFullName={issue.repositoryFullName}
           />
         )}
 

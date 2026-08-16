@@ -10,6 +10,8 @@ type MobileFlowScreenProps = {
   isLoading: boolean;
   error: string | null;
   failedRepositories: string[];
+  /** マージ済みPRまで取得できているか（#1711）。`BranchFlowView`へそのまま渡す */
+  mergedPullRequestsLoaded: boolean;
   onRefresh: () => void;
 };
 
@@ -29,6 +31,7 @@ export function MobileFlowScreen({
   isLoading,
   error,
   failedRepositories,
+  mergedPullRequestsLoaded,
   onRefresh,
 }: MobileFlowScreenProps) {
   return (
@@ -38,6 +41,7 @@ export function MobileFlowScreen({
       isLoading={isLoading}
       error={error}
       failedRepositories={failedRepositories}
+      mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       onRefresh={onRefresh}
       className="h-full"
       footerSpacing

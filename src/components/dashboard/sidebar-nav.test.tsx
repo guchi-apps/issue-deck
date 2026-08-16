@@ -16,7 +16,7 @@ const NAV_COUNTS = Object.fromEntries(navViews.map((view) => [view.id, 0])) as R
   number
 >;
 
-const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForRelease: 0 };
+const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
 
 function renderSidebar(
   pullRequestNavCounts: PullRequestNavCounts,
@@ -169,7 +169,7 @@ describe("SidebarNav", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
       { ...NAV_COUNTS, "manual-step": 3 },
-      { manualStepAttention: { total: 3, actionable: 0, waitingForRelease: 3 } },
+      { manualStepAttention: { total: 3, actionable: 0, waitingForPrerequisites: 3 } },
     );
 
     expect(screen.getByText("3").className).not.toContain("bg-amber-500");
@@ -179,7 +179,7 @@ describe("SidebarNav", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
       { ...NAV_COUNTS, "manual-step": 3 },
-      { manualStepAttention: { total: 3, actionable: 1, waitingForRelease: 2 } },
+      { manualStepAttention: { total: 3, actionable: 1, waitingForPrerequisites: 2 } },
     );
 
     expect(screen.getByText("3").className).toContain("bg-amber-500");

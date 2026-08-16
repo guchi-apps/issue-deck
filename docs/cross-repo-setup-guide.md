@@ -16,6 +16,10 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
   ブランチ運用など、導入時にそのまま埋めるべき設定項目をチェックリスト形式でまとめる。
 - [docs/supported-repositories.md](supported-repositories.md): 実際に導入済み・検討中のリポジトリの
   **記録簿**。本ガイドに沿って導入したら、この一覧に導入状況を追記する。
+- [docs/multi-repo-changes.md](multi-repo-changes.md): **導入済みのリポジトリ群へ変更を横展開する**
+  ときの進め方（#1698）。本ガイドが「まだ入っていないリポジトリに運用一式を入れる」手順なのに対し、
+  あちらは「もう入っているリポジトリ全体に同じ直しを配る」手順を扱う。Issueを起点に他リポジトリへ
+  PRが自動作成されることは**無い**という前提と、種類ごとの配り方をまとめている。
 - 設計の経緯・issue-deck自身での詳細実装は[docs/multi-agent-workflow.md](multi-agent-workflow.md)を
   参照。
 
@@ -569,13 +573,15 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 
 **このAPIは盤面に無いIssueを自分で載せてから書く**（#1036）ため、再同期を待つ必要はない。
 
-同期スクリプトはissue-deckの全ラベルを配るため、下記9個に加えて`30.bug`・`51.improvement`等の
-分類用ラベルもあわせて作成される。ラベルを個別に作りたい場合は次の`gh label create`を使う。
+同期スクリプトはissue-deckの全ラベルを配るため、下記の条件系ラベルに加えて`30.bug`・
+`51.improvement`等の分類用ラベルもあわせて作成される。番号帯そのものの意味と全ラベルの一覧は
+[multi-agent/labels.md](multi-agent/labels.md)「ラベルの番号帯の設計」を参照。ラベルを個別に
+作りたい場合は次の`gh label create`を使う。
 
 | ラベル | 色 | 説明 | 用途 |
 |---|---|---|---|
 | `00.check-user` | `f0883e` | ユーザーの確認・指示が必要 | 承認待ち・自動マージ保留の合図。他の状態ラベルと併用 |
-| `00.qa-answered` | `c5def5` | 質問への回答のみ完了 | `00.check-user`と常に併用。単なる質問・確認と判定された場合に付与し、承認ボタンの文言を出し分ける |
+| `01.check-*` | `fef2c0` | `00.check-user`が付いた理由（`01.check-plan`・`01.check-input`・`01.check-merge`・`01.check-blocked`・`01.check-answered`の5枚。#1490） | `00.check-user`とのANDでしか読まれず、単独では意味を持たない。未配布のリポジトリでは付与が黙ってスキップされる |
 | `11.local` | `e99695` | ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない | 付いている間`claude-issue-dispatch.yml`が計画・実装・分割・追加対応を行わない（読み取り専用の質問応答のみ例外）。ローカルセッションとの二重起動防止 |
 | `21.plan-required` | `d4c5f9` | 計画の確認・承認が必要 | 実装前にPlan modeでの計画提示を必須にする |
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
@@ -863,6 +869,9 @@ gh label create "24.screenshot-required" --color d4c5f9 --description "スクリ
 # 25.artifact-requiredはローカルセッション専用（無人実行では作れない）のため、他リポジトリへはまだ配っていない（#1473）
 gh label create "25.artifact-required" --color d4c5f9 --description "アーティファクトでの視覚確認・承認が必要"
 gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
+# 71.manual-stepは`manual-step-label`ジョブ(#1492)が参照する。無いリポジトリでは付与が警告付きで
+# スキップされ、手作業Issueが「ユーザーの作業待ち」ビューに現れない。
+gh label create "71.manual-step" --color d876e3 --description "ユーザー自身の手作業が必要（エージェントが代行できない）"
 ```
 
 issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目的のみで使う一般的なラベルも

@@ -159,10 +159,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **ラベル候補がリポジトリごとに違うため1回のClaude呼び出しにまとめられない**。
   リポジトリの推定材料は[`lib/claude/repository-suggest.ts`](../src/lib/claude/repository-suggest.ts)が
   組み立てる「リポジトリ名＋直近のopen Issueのタイトル数件」で、`Repository`に`description`を
-  足さずに済ませている。**候補一覧に無いフルネームは採らない**（`pickSuggestedRepository`）。
+  足さずに済ませている。**タイトルはリポジトリごとに引く**（#1710）。全リポジトリ合算で
+  更新の新しい順に読むと、Issueの多いリポジトリが枠を占め、材料の量の偏りがそのまま推定の
+  偏りになる。**候補一覧に無いフルネームは採らない**（`pickSuggestedRepositories`）。
+  **推定は1件に決め打ちせず、確からしい順に最大3件返す**（#1710）。確認ステップでは選択中の
+  ものを先頭にしたチップとして並べ、1タップで選び直せる（`buildRepositoryChoices`・
+  `selectableSuggestedRepositories`）。**リポジトリ別の画面から開いた場合も推定は行う**——
+  画面が渡すのは「その画面を開いていた」という事実だけで、書いた内容が別のリポジトリの話で
+  あることは普通に起きる。渡された値は選択状態のまま`表示中のリポジトリ`と示し、推定結果は
+  候補として並べる。
   **種別（Issue／質問）だけはこの自動化の対象外**で、上のとおり自動判定しない。
   Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
   （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
+  **ラベルが1つも決まらなかったときは、その旨を画面に出す**（#1710）。空欄と「決められなかった」
+  は見分けが付かず、ラベルの付かないIssueがそのまま作られていた。
+- **ダイアログの中身が横幅を押し広げないよう、`DialogContent`は`grid-cols-[minmax(0,1fr)]`で
+  列を止めてある**（#1710）。暗黙の`auto`トラックは最も長い中身に合わせて伸びるため、
+  折り返さない長い文字列（畳んだ本文に出る画像URL等）が1つあるだけで列がその幅まで広がり、
+  `w-full`の項目とフッターのボタンがまとめて画面外へ出る。スマホ幅で顕在化するが、
+  原因は幅ではなく列の伸び方なので、幅の指定を足しても直らない。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 
@@ -271,11 +286,26 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
   逆にdevelop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`）ので、
   **対応Issueが同じ一覧に並ぶPRは除いて**二重表示を避ける。左メニューの件数も同じ数を足す。
+  **PRを数に足す画面と、PRを一覧に出す画面は必ずセットにする**（#1713）。スマホは件数
+  （ホームの「要対応」・メニューの「ユーザーの確認待ち」）にだけ足して一覧はIssueしか出して
+  おらず、「2件と出ているのに開くと何も無い」状態だった。合流はスマホでは
+  `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
+  ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
+  `pinnedSection`と`pinnedCount`が担う。
 - **「ユーザーの作業待ち」（`71.manual-step`）を橙色にするのは、いま実行できるものがあるときだけ**
   （#1613。[`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
   手作業の多くは起点の変更が本番へ出るまで実行できず、1件でもあれば強調すると数週間先まで
-  点いたままになる。判定は本文`## 関連`の起点Issue（`extractManualStepOrigin`）の進捗で行い、
-  **起点を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+  点いたままになる。判定は本文の`## 前提条件`・`## 関連`に書かれた参照
+  （[`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)）の進捗で行い、
+  **状態を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+- **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
+  [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
+  参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
+  Issueとして見つからなかった番号だけ`/api/issues/pull-requests`でPRとして1回引く
+  （[`hooks/use-manual-step-prerequisites.ts`](../src/hooks/use-manual-step-prerequisites.ts)。
+  同じ番号空間にIssueとPRが同居するため番号だけでは区別できない）。**PRは実装→develop→mainの
+  3段階に載せない**——`IssuePullRequest`はbaseブランチを持たず、マージ済みPRがdevelopまでなのか
+  mainへ届いたのかを言えないため。左メニューの件数と同じ判定を通すので、**数と詳細が食い違わない**。
 - **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
@@ -795,10 +825,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 人が選べる範囲そのものは`lib/github/start-implementation.ts`の`isSelectableLabelName`が
 実装オプション用ラベルも足して決める）、`isAutoAssignableLabelName`＝**Claudeがタイトルと
 一緒に推定してよい範囲**（30〜89番台。71番台と番号プレフィックスの無いラベルを除く。#1662）。
-推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを自動生成」だけで、
+推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを自動生成」と、その2ステップ化で
+足された`POST /api/issues/quick-suggest`で、
 プロンプトの候補一覧・応答の後処理（[`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)）と
 画面側のリセット範囲（`create-issue-dialog.tsx`の`mergeSuggestedLabels`）が同じ判定を通る。
 どれか1つでもずれると、範囲外のラベルが付くか、人が選んだラベルが黙って消える。
+**応答のラベル名は完全一致では突き合わせない**（`matchSuggestedLabels`・#1710）。候補一覧を
+`- 30.bug: 不具合`の形で渡している以上、記号や説明が付いたまま返ることがあり、完全一致だけを
+見ているとその場合にラベルが1つも付かない（タイトルだけが入った状態になる）。
 理由は[multi-agent/labels.md](multi-agent/labels.md)「Claudeによるラベル自動付与の対象は30〜89番台に限る」。
 
 **理由から「次にどこの何を押すか」を組み立てるのは

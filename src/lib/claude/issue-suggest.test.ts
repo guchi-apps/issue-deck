@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildIssueSuggestPrompt, generateIssueSuggestion } from "@/lib/claude/issue-suggest";
+import {
+  buildIssueSuggestPrompt,
+  generateIssueSuggestion,
+  matchSuggestedLabels,
+} from "@/lib/claude/issue-suggest";
 
 describe("buildIssueSuggestPrompt", () => {
   it("本文とラベル一覧（名前・説明）を含むプロンプトを組み立てる", () => {
@@ -118,7 +122,7 @@ describe("generateIssueSuggestion", () => {
   });
 
   it("リポジトリに存在しないラベル名は落とす", async () => {
-    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.invalid"] });
+    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.unexpected"] });
 
     const result = await generateIssueSuggestion("dummy-token", {
       body: "本文",
@@ -126,5 +130,38 @@ describe("generateIssueSuggestion", () => {
     });
 
     expect(result.labels).toEqual(["30.bug"]);
+  });
+});
+
+/**
+ * #1710。プロンプトでは`- 30.bug: 不具合`の形で候補を渡しているため、モデルが記号や説明を
+ * 付けたまま返すことがある。完全一致だけを見ていると、その場合にラベルが1つも付かない。
+ */
+describe("matchSuggestedLabels", () => {
+  const availableLabels = [
+    { name: "30.bug", description: "不具合" },
+    { name: "51.improvement", description: "機能の改善" },
+    { name: "11.local", description: "ローカルで対応中" },
+  ];
+
+  it("そのままのラベル名を突き合わせる", () => {
+    expect(matchSuggestedLabels(["30.bug"], availableLabels)).toEqual(["30.bug"]);
+  });
+
+  it("前後の空白・箇条書きの記号・付いてきた説明を落として突き合わせる", () => {
+    expect(
+      matchSuggestedLabels(
+        [" 30.bug ", "- 51.improvement", "30.bug: 不具合", "・51.improvement：機能の改善"],
+        availableLabels,
+      ),
+    ).toEqual(["30.bug", "51.improvement"]);
+  });
+
+  it("自動付与の対象外のラベルは、名前が一致しても採らない", () => {
+    expect(matchSuggestedLabels(["11.local"], availableLabels)).toEqual([]);
+  });
+
+  it("候補に無いラベル名と文字列以外は採らない", () => {
+    expect(matchSuggestedLabels(["99.unknown", 30, null], availableLabels)).toEqual([]);
   });
 });

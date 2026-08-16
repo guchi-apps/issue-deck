@@ -37,10 +37,16 @@ export function isProgressLabel(labelName: string): boolean {
 // 30〜89番台は不具合・新機能・デザイン・優先度といった「本文の内容から決まる」分類で、
 // ここだけが推定に向く。それ以外は運用の都合で人やワークフローが付けるものなので外す。
 const AUTO_ASSIGNABLE_MIN_BAND = 30;
+// 上限に優先度（`80.`/`89.`）を含めるのは#1702の決定。優先度はバックログ全体との相対で決まる
+// 予定判断で本来は推定に向かないが、本文へ緊急性が書かれているときに拾える利便を優先した。
+// 外せば範囲が30〜70番台の連続した帯になり下の除外も不要になるが、整理のために機能は削らない。
 const AUTO_ASSIGNABLE_MAX_BAND = 89;
 // 71番台（`71.manual-step`）は、タイトルが`[手作業]`で始まるIssueへ`reusable-issue-labels.yml`の
 // `manual-step-label`ジョブが付けるルールベースのラベル（docs/multi-agent/labels.md参照）。
 // 推定で付くと「ユーザーの作業待ち」ビューへ紛れ込み、Issue詳細から実装の導線が消える。
+// **この例外は恒久的な仕様**（#1702）。`71.manual-step`を実行状態の帯（`11.local`の隣）へ移して
+// 例外を無くす案は、約70か所の参照・8リポジトリのラベル改名・14リポジトリへの
+// `reusable-issue-labels.yml`再配布に見合わないため見送っている。
 const AUTO_ASSIGNABLE_EXCLUDED_BAND = 71;
 const NUMBER_BAND_PATTERN = /^(\d{2})\./;
 
