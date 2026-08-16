@@ -42,7 +42,7 @@ type PullRequestListProps = {
   selectedPullRequestId?: string | null;
   /** PRを選んだとき（詳細の表示）。渡さない場合もタイトルのリンクからGitHubは開ける */
   onSelectPullRequest?: (pullRequest: PullRequestSummary) => void;
-  /** マージが成功したとき。一覧から伏せる・再取得するといった後始末は親が行う */
+  /** マージが成功したとき。マージ済みとして反映する・再取得するといった後始末は親が行う */
   onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;

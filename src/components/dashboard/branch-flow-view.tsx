@@ -18,6 +18,7 @@ import {
   CiStateBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
+  UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -25,6 +26,7 @@ import { RepositoryReleaseButton } from "@/components/dashboard/repository-relea
 import { Button } from "@/components/ui/button";
 import { DEVELOP_BRANCH, MAIN_BRANCH, isClosedLane, type BranchFlow } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
+import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
@@ -66,6 +68,14 @@ type BranchFlowViewProps = {
    */
   expandedRepositoryFullNames?: readonly string[];
   onRefresh: () => void;
+  /**
+   * この画面からPRをマージできたとき（#1756）。**再取得より先にマージ済みとして描くのは
+   * 親の仕事**で、それが同じPRを二度マージできないことの根拠になっている
+   * （`lib/pull-request-list.ts`の`applyOptimisticMerges`）。
+   *
+   * 渡されない場合は`onRefresh`だけを呼ぶ（＝再取得が返るまでマージ待ちのまま残る）。
+   */
+  onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   /** 見出しの右に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
@@ -348,8 +358,31 @@ function RemainingManualSteps({
   );
 }
 
-function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
+/**
+ * レーンにぶら下がるPR1行。
+ *
+ * **マージボタンを出すのは「ユーザーがマージするしかないPR」だけ**（#1756）。この画面は
+ * 手が要るものを探すための画面で、畳んだ行にも「ユーザーのマージが必要」を出しているのに、
+ * 開いた先に押せるものが無かった。待てば自動で入るPR（Auto-merge有効・レビュー統合エージェントが
+ * 自動マージするもの）に出すと、押す必要が無いものまで押させることになるため、
+ * 条件はPR一覧と同じ`requiresUserMerge`・`canMergeFromDeck`をそのまま使う
+ * （すぐ下の`BumpPullRequestLine`も同じ方針）。
+ */
+function PullRequestLine({
+  pullRequest,
+  onMerged,
+}: {
+  pullRequest: PullRequestSummary;
+  /**
+   * マージできたとき。**渡さない行にはマージの導線（バッジもボタンも）を出さない。**
+   * リリースの束の見出しはPRの行とは別にマージボタンを持っているため（`ReleaseMergeButton`）、
+   * その下に並べるPRの行へ渡すと同じPRのボタンが2つ出る。
+   */
+  onMerged?: (pullRequest: PullRequestSummary) => void;
+}) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
+  const userMerge = onMerged !== undefined && requiresUserMerge(pullRequest);
+  const canMerge = userMerge && canMergeFromDeck(pullRequest);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -375,6 +408,17 @@ function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
       {kindLabel && pullRequest.kind !== "issue" && (
         <span className="shrink-0 text-xs text-muted-foreground">{kindLabel}</span>
       )}
+      {/* ボタンだけを置くと「なぜ自動で入らないのか」が分からないので、理由のバッジも添える。
+          コンフリクト等でボタンを出せない場合もバッジは出す——押せないこととは別の事実 */}
+      {userMerge && <UserMergeRequiredBadge />}
+      {canMerge && (
+        <PullRequestMergeButton
+          pullRequest={pullRequest}
+          onMerged={() => onMerged?.(pullRequest)}
+          className="shrink-0"
+          variant="outline"
+        />
+      )}
     </div>
   );
 }
@@ -388,9 +432,12 @@ function PullRequestLine({ pullRequest }: { pullRequest: PullRequestSummary }) {
 function LaneRow({
   repositoryFullName,
   lane,
+  onMerged,
 }: {
   repositoryFullName: string;
   lane: BranchFlowLane;
+  /** レーンのPRをこの画面からマージできたとき（#1756） */
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const merged = lane.status === "merged";
   const headPullRequest = lane.pullRequests[0] ?? null;
@@ -421,7 +468,7 @@ function LaneRow({
         </div>
 
         {lane.pullRequests.map((pullRequest) => (
-          <PullRequestLine key={pullRequest.id} pullRequest={pullRequest} />
+          <PullRequestLine key={pullRequest.id} pullRequest={pullRequest} onMerged={onMerged} />
         ))}
 
         {lane.issue ? (
@@ -460,12 +507,12 @@ function ReleaseMergeButton({
   onMerged,
 }: {
   pullRequest: PullRequestSummary;
-  onMerged: () => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
     <PullRequestMergeButton
       pullRequest={pullRequest}
-      onMerged={onMerged}
+      onMerged={() => onMerged(pullRequest)}
       className="shrink-0"
       variant="outline"
     />
@@ -489,7 +536,7 @@ function BumpPullRequestLine({
 }: {
   pullRequest: PullRequestSummary;
   version: string | null;
-  onMerged: () => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-purple-500/60 bg-purple-500/5 px-2 py-1.5">
@@ -532,11 +579,11 @@ function BumpPullRequestLine({
 function ReleaseGroupHeader({
   group,
   releaseButton,
-  onRefresh,
+  onMerged,
 }: {
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
-  onRefresh: () => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
@@ -608,16 +655,17 @@ function ReleaseGroupHeader({
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
               `mergeWarnings`が返す警告で必ず確認ダイアログを通る */}
           {group.pullRequest && group.pullRequest.state === "open" && (
-            <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onRefresh} />
+            <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onMerged} />
           )}
           {releaseButton}
         </div>
+        {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
         {group.bumpPullRequest && (
           <BumpPullRequestLine
             pullRequest={group.bumpPullRequest}
             version={group.version}
-            onMerged={onRefresh}
+            onMerged={onMerged}
           />
         )}
       </div>
@@ -666,13 +714,17 @@ function ReleaseFlowGraph({
   mergedPullRequestsLoaded,
   onShowAllVersions,
   onRefresh,
+  onMerged,
 }: {
   repository: BranchFlowRepository;
   showClosed: boolean;
   showAllVersions: boolean;
   mergedPullRequestsLoaded: boolean;
   onShowAllVersions: () => void;
+  /** リリースworkflowを起こした後の取り直し */
   onRefresh: () => void;
+  /** PRをこの画面からマージできたとき（#1756） */
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const activeLanes = showClosed
     ? repository.activeLanes
@@ -751,6 +803,7 @@ function ReleaseFlowGraph({
             key={lane.key}
             repositoryFullName={repository.repositoryFullName}
             lane={lane}
+            onMerged={onMerged}
           />
         ))}
 
@@ -759,7 +812,7 @@ function ReleaseFlowGraph({
             key={group.key}
             repositoryFullName={repository.repositoryFullName}
             group={group}
-            onRefresh={onRefresh}
+            onMerged={onMerged}
             releaseButton={
               index === 0 && repository.canTriggerRelease ? (
                 <RepositoryReleaseButton
@@ -784,6 +837,7 @@ function ReleaseFlowGraph({
                 key={lane.key}
                 repositoryFullName={repository.repositoryFullName}
                 lane={lane}
+                onMerged={onMerged}
               />
             ))}
           </>
@@ -864,19 +918,24 @@ function ReleaseGroupHeaderWithLanes({
   repositoryFullName,
   group,
   releaseButton,
-  onRefresh,
+  onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
-  onRefresh: () => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onRefresh={onRefresh} />
+      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
-        <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} />
+        <LaneRow
+          key={lane.key}
+          repositoryFullName={repositoryFullName}
+          lane={lane}
+          onMerged={onMerged}
+        />
       ))}
     </>
   );
@@ -1028,6 +1087,7 @@ export function BranchFlowView({
   mergedPullRequestsLoaded,
   expandedRepositoryFullNames = [],
   onRefresh,
+  onMerged,
   headerLeading,
   headerActions,
   className,
@@ -1073,6 +1133,12 @@ export function BranchFlowView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenRepositories((prev) => new Set([...prev, ...names]));
   }, [expandedKey]);
+
+  // マージ後の後始末は親が持つ（#1756）。渡されていない場合は取り直すだけに縮退させる
+  function handleMerged(pullRequest: PullRequestSummary) {
+    if (onMerged) onMerged(pullRequest);
+    else onRefresh();
+  }
 
   function toggleRepository(fullName: string) {
     setOpenRepositories((prev) => {
@@ -1186,6 +1252,7 @@ export function BranchFlowView({
                       )
                     }
                     onRefresh={onRefresh}
+                    onMerged={handleMerged}
                   />
                 </div>
               )}

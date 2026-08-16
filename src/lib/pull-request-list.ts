@@ -319,3 +319,42 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   }
   return warnings;
 }
+
+/** 画面からマージして、まだ取得結果に反映されていないPR（#1756） */
+export type OptimisticMerge = {
+  /** `PullRequestSummary.id`（`<owner>/<repo>#<番号>`） */
+  id: string;
+  /** マージ操作が成功した時刻（ISO8601）。GitHubが記録する時刻とは数秒ずれる */
+  mergedAt: string;
+};
+
+/**
+ * 画面からマージしたPRを、取得が追いつくまでのあいだマージ済みとして扱う（#1756）。
+ *
+ * **マージの成否は押した時点で確定しているのに、それが画面へ届くのは次のPR取得が返ってから**で、
+ * 数秒のあいだ「マージ待ち」のまま残る。以前はこの間だけ一覧から伏せていたが、伏せるのは
+ * PR一覧にとってしか正しくない——ブランチ画面（`lib/branch-flow.ts`）は同じ集合をレーンの
+ * 組み立てに使っているため、PRが消えるとレーンが「PR未作成」に化けていた。
+ *
+ * マージ済みとして差し替えれば、どの画面も「マージした後の状態」を一貫して描ける。
+ * PR一覧・左メニューの件数はopenだけを通すので今までどおり消え（`filterPullRequestsByView`）、
+ * ブランチ画面のレーンは次のリリースの束へ移り、**マージボタンは`canMergeFromDeck`が
+ * falseを返して消える（＝同じPRを二度マージできない）。**
+ *
+ * 反映は呼び出し側が「次の取得が返るまで」に限る（`components/dashboard/issue-deck-shell.tsx`）。
+ * マージできていなければ取得結果にopenのまま現れ、ボタンも戻る。
+ */
+export function applyOptimisticMerges(
+  pullRequests: PullRequestSummary[],
+  merges: readonly OptimisticMerge[],
+): PullRequestSummary[] {
+  if (merges.length === 0) return pullRequests;
+  const mergedAtById = new Map(merges.map((merge) => [merge.id, merge.mergedAt]));
+
+  return pullRequests.map((pullRequest) => {
+    const mergedAt = mergedAtById.get(pullRequest.id);
+    // 取得結果の方が進んでいる（既にマージ済み・クローズ済み）ならそちらを正とする
+    if (mergedAt === undefined || pullRequest.state !== "open") return pullRequest;
+    return { ...pullRequest, state: "closed", merged: true, mergedAt };
+  });
+}

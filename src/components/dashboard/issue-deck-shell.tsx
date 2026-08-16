@@ -83,9 +83,11 @@ import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
 import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import {
+  applyOptimisticMerges,
   computePullRequestNavCounts,
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
+  type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -491,43 +493,42 @@ export function IssueDeckShell({
     [repositories],
   );
 
-  // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
-  // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
-  // （マージできていなければまた一覧に現れる）。
+  // マージ直後はGitHub側の反映を待たずにマージ済みとして描く（#1756）。反映するのは
+  // 「マージした時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を
+  // 正とする（マージできていなければまた一覧に現れる）。
+  //
+  // **以前はここで一覧から伏せていたが、伏せるのはPR一覧にとってしか正しくない**——同じ集合を
+  // ブランチ画面がレーンの組み立てに使っているため、PRが消えるとレーンが「PR未作成」に化けていた。
   const [mergedPullRequests, setMergedPullRequests] = useState<{
-    ids: string[];
+    merges: OptimisticMerge[];
     fetchedAt: string | null;
-  }>({ ids: [], fetchedAt: null });
-  const hiddenPullRequestIds = useMemo(
+  }>({ merges: [], fetchedAt: null });
+  const optimisticMerges = useMemo(
     () =>
-      mergedPullRequests.fetchedAt === openPullRequests.fetchedAt ? mergedPullRequests.ids : [],
+      mergedPullRequests.fetchedAt === openPullRequests.fetchedAt ? mergedPullRequests.merges : [],
     [mergedPullRequests, openPullRequests.fetchedAt],
   );
 
-  // マージ済みで伏せたPRを除き、左メニューでリポジトリを絞り込んでいるときはPR一覧も同じ
+  // マージ済みとして反映したうえで、左メニューでリポジトリを絞り込んでいるときはPR一覧も同じ
   // 絞り込みに従わせた集合。状態別ビュー（#1312）を掛ける前のこれを、一覧と左メニューの件数
   // （#1389）の共通の母集団にする。Issue側のnavCountsと同じで、ここを揃えておかないと
   // メニューの件数と一覧に並ぶ件数が食い違う。
   const visiblePullRequests = useMemo(() => {
-    const visible = openPullRequests.pullRequests.filter(
-      (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
-    );
+    const visible = applyOptimisticMerges(openPullRequests.pullRequests, optimisticMerges);
     return filters.repos.length === 0
       ? visible
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
-  }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
+  }, [openPullRequests.pullRequests, filters.repos, optimisticMerges]);
 
   // リポジトリ横断で見る場所へ渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
   // 渡す先はヘッダーの通知ベル（#1614）・「ユーザーの確認待ち」に並ぶマージ待ちPR・
   // ブランチ画面（#1750）の3つで、どれもリポジトリ横断で「いま人が動かないと止まるもの」を
   // 見る場所。Issue側（絞り込みを適用しないビュー）と揃えないと、絞り込んだ瞬間にPRだけ消えて
-  // 件数の意味が変わる。伏せたPR（マージ済みで消したもの）だけは除く。
+  // 件数の意味が変わる。マージ済みとして先に反映したぶん（#1756）だけは、こちらにも効かせる
+  // ——ブランチ画面のマージボタンが消えるのはこの集合を通ってのことなので、外すと二度押せる。
   const crossRepositoryPullRequests = useMemo(
-    () =>
-      openPullRequests.pullRequests.filter(
-        (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
-      ),
-    [openPullRequests.pullRequests, hiddenPullRequestIds],
+    () => applyOptimisticMerges(openPullRequests.pullRequests, optimisticMerges),
+    [openPullRequests.pullRequests, optimisticMerges],
   );
 
   const filteredPullRequests = useMemo(
@@ -589,7 +590,7 @@ export function IssueDeckShell({
           visibleRepositories.filter((repo) => !repo.archived),
           filters.repos,
         ),
-        // マージ直後に伏せたPRだけを除いた集合（リポジトリ絞り込みは掛けない）
+        // マージ直後のPRをマージ済みとして反映した集合（リポジトリ絞り込みは掛けない）
         pullRequests: crossRepositoryPullRequests,
         // 本文とラベルは手作業Issue（71.manual-step）の紐づけに使う（#1510）。
         // どちらもDBキャッシュ由来で、渡すのに追加の取得は要らない
@@ -633,16 +634,27 @@ export function IssueDeckShell({
   }, [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail]);
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
+    const merge: OptimisticMerge = { id: pullRequest.id, mergedAt: new Date().toISOString() };
     setMergedPullRequests((prev) => ({
-      ids:
-        prev.fetchedAt === openPullRequests.fetchedAt
-          ? [...prev.ids, pullRequest.id]
-          : [pullRequest.id],
+      merges: prev.fetchedAt === openPullRequests.fetchedAt ? [...prev.merges, merge] : [merge],
       fetchedAt: openPullRequests.fetchedAt,
     }));
     // マージしたPRの詳細は用済みなので閉じて一覧へ戻す（スマホでは一覧画面へ戻る）。
     if (filters.pr === pullRequest.id) selectPullRequest(null);
     openPullRequests.refresh();
+  }
+
+  /**
+   * ブランチ画面からマージできたとき（#1756）。
+   *
+   * マージ済みとしての反映（＝同じPRを二度マージできないこと）は`handlePullRequestMerged`が
+   * 担い、ここではこの画面が持つ他の2つの取得——ブランチ状況と本番デプロイ状況——も
+   * 取り直す。ヘッダーの「更新」が3つまとめて取り直しているのと同じ組み合わせ。
+   */
+  function handleBranchFlowMerged(pullRequest: PullRequestSummary) {
+    handlePullRequestMerged(pullRequest);
+    branchFlowStatus.refresh();
+    deployStatus.refresh();
   }
 
   /**
@@ -870,6 +882,7 @@ export function IssueDeckShell({
                     openPullRequests.refresh();
                     deployStatus.refresh();
                   }}
+                  onMerged={handleBranchFlowMerged}
                 />
               )}
 
@@ -1054,6 +1067,7 @@ export function IssueDeckShell({
                 openPullRequests.refresh();
                 deployStatus.refresh();
               }}
+              onMerged={handleBranchFlowMerged}
               className="hidden flex-1 md:flex"
             />
           ) : filters.pane === "pull-requests" ? (
