@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isSubIssueDone,
   resolveSubIssueProgress,
+  resolveSubIssueRepositoryLabel,
   summarizeSubIssueProgress,
 } from "@/lib/sub-issue-progress";
 import type { SubIssue } from "@/types/issue";
@@ -13,6 +14,7 @@ function child(overrides: Partial<SubIssue> = {}): SubIssue {
     title: "子Issue",
     state: "open",
     htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/1",
+    repositoryFullName: "guchi-apps/issue-deck",
     projectStatus: null,
     ...overrides,
   };
@@ -77,5 +79,23 @@ describe("summarizeSubIssueProgress", () => {
       child({ number: 3 }),
     ]);
     expect(summary.percent).toBe(33);
+  });
+});
+
+describe("resolveSubIssueRepositoryLabel", () => {
+  const base = "guchi-apps/issue-deck";
+
+  it("同じリポジトリの親子には何も添えない", () => {
+    expect(resolveSubIssueRepositoryLabel(child({ repositoryFullName: base }), base)).toBeNull();
+  });
+
+  it("別リポジトリの親子にはリポジトリ名（owner抜き）を返す", () => {
+    expect(
+      resolveSubIssueRepositoryLabel(child({ repositoryFullName: "guchi-apps/car-care" }), base),
+    ).toBe("car-care");
+  });
+
+  it("リポジトリが分からない相手には何も添えない（誤ったバッジを出すより無い方がよい）", () => {
+    expect(resolveSubIssueRepositoryLabel(child({ repositoryFullName: "" }), base)).toBeNull();
   });
 });

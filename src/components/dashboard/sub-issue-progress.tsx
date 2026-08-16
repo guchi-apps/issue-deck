@@ -4,7 +4,11 @@ import { CornerLeftUp } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { getProgressStatusDef } from "@/lib/issue-progress";
-import { resolveSubIssueProgress, summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
+import {
+  resolveSubIssueProgress,
+  resolveSubIssueRepositoryLabel,
+  summarizeSubIssueProgress,
+} from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
 import type { SubIssue, SubIssueRelations } from "@/types/issue";
 
@@ -18,6 +22,11 @@ import type { SubIssue, SubIssueRelations } from "@/types/issue";
 type SubIssueProgressProps = {
   relations: SubIssueRelations;
   /**
+   * 開いているIssueのリポジトリ（`owner/repo`）。**これと違うリポジトリの親子にだけ**
+   * リポジトリ名を添える（#1722）。渡さない場合はどの行にも添えない。
+   */
+  baseRepositoryFullName?: string;
+  /**
    * 「子Issue N」の見出しと完了率のバーを自分で描くか（既定: true）。
    *
    * PCの詳細（#1577）は折りたたみセクションの見出し行に件数と完了率を出しており、開いた中で
@@ -26,8 +35,25 @@ type SubIssueProgressProps = {
   showHeading?: boolean;
 };
 
+/**
+ * 別リポジトリの親子であることを示すバッジ（#1722）。**同じリポジトリの行には出さない**——
+ * 全行に並ぶと、見分けるべき別リポジトリの子が埋もれる。
+ */
+function RepositoryBadge({ issue, base }: { issue: SubIssue; base?: string }) {
+  const label = base ? resolveSubIssueRepositoryLabel(issue, base) : null;
+  if (!label) return null;
+  return (
+    <span
+      className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground"
+      title={issue.repositoryFullName}
+    >
+      {label}
+    </span>
+  );
+}
+
 /** 1件ぶんの行。番号・タイトル・進捗を並べ、クリックでそのIssueをIssueDeck内で開く */
-function SubIssueRow({ issue }: { issue: SubIssue }) {
+function SubIssueRow({ issue, base }: { issue: SubIssue; base?: string }) {
   const statusKey = resolveSubIssueProgress(issue);
   const def = getProgressStatusDef(statusKey);
   const Icon = def.icon;
@@ -38,6 +64,7 @@ function SubIssueRow({ issue }: { issue: SubIssue }) {
       href={issue.htmlUrl}
       className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted"
     >
+      <RepositoryBadge issue={issue} base={base} />
       <span className="shrink-0 font-mono text-muted-foreground">#{issue.number}</span>
       <span className={cn("min-w-0 flex-1 truncate", isDone && "text-muted-foreground line-through")}>
         {issue.title}
@@ -55,7 +82,11 @@ function SubIssueRow({ issue }: { issue: SubIssue }) {
   );
 }
 
-export function SubIssueProgress({ relations, showHeading = true }: SubIssueProgressProps) {
+export function SubIssueProgress({
+  relations,
+  baseRepositoryFullName,
+  showHeading = true,
+}: SubIssueProgressProps) {
   const { parent, children, childCount } = relations;
   if (!parent && children.length === 0) return null;
 
@@ -75,6 +106,7 @@ export function SubIssueProgress({ relations, showHeading = true }: SubIssueProg
             className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted"
           >
             <CornerLeftUp className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <RepositoryBadge issue={parent} base={baseRepositoryFullName} />
             <span className="shrink-0 font-mono text-muted-foreground">#{parent.number}</span>
             <span className="min-w-0 flex-1 truncate">{parent.title}</span>
           </GithubReferenceLink>
@@ -117,8 +149,13 @@ export function SubIssueProgress({ relations, showHeading = true }: SubIssueProg
           </div>
 
           <div className="space-y-0.5">
+            {/* キーはリポジトリ込み。**番号だけだと、別リポジトリの同番号の子で衝突する**（#1722） */}
             {children.map((child) => (
-              <SubIssueRow key={child.number} issue={child} />
+              <SubIssueRow
+                key={`${child.repositoryFullName}#${child.number}`}
+                issue={child}
+                base={baseRepositoryFullName}
+              />
             ))}
           </div>
 

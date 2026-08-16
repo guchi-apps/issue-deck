@@ -37,25 +37,51 @@ async function findRepository(userId: string, owner: string, repo: string) {
 
 const EMPTY: SubIssueRelations = { parent: null, children: [], childCount: 0 };
 
+/** DBの引き当てキー。**番号だけでは足りない**（別リポジトリの同番号と混ざる・#1722） */
+function statusKey(repositoryFullName: string, number: number) {
+  return `${repositoryFullName}#${number}`;
+}
+
 /**
  * GitHubから取った親子に、ローカルDBのキャッシュから`projectStatus`だけを合流させる。
  * タイトル・stateはGitHub側を正とするため、**DBに無い相手でもリンクは欠けない**。
+ *
+ * **リポジトリごとに引く**（#1722）。以前は開いているIssueの`repositoryId`だけで引いていたため、
+ * 別リポジトリの子には**番号が一致する親リポジトリ側の無関係なIssueの進捗**が付いていた。
+ * サブIssueはリポジトリをまたげるので、番号だけの突き合わせは成立しない。
+ *
+ * 引く範囲は`findRepository`と同じく、そのユーザーが参照できるインストール配下に限定する。
  */
 async function attachProjectStatus(
-  repositoryId: string,
+  userId: string,
   refs: GithubSubIssueRef[],
 ): Promise<SubIssue[]> {
   if (refs.length === 0) return [];
 
+  const numbersByRepository = new Map<string, number[]>();
+  for (const ref of refs) {
+    const numbers = numbersByRepository.get(ref.repositoryFullName);
+    if (numbers) numbers.push(ref.number);
+    else numbersByRepository.set(ref.repositoryFullName, [ref.number]);
+  }
+
   const rows = await db.issue.findMany({
-    where: { repositoryId, number: { in: refs.map((ref) => ref.number) } },
-    select: { number: true, projectStatus: true },
+    where: {
+      repository: { installation: { userInstallations: { some: { userId } } } },
+      OR: [...numbersByRepository].map(([fullName, numbers]) => ({
+        repository: { fullName },
+        number: { in: numbers },
+      })),
+    },
+    select: { number: true, projectStatus: true, repository: { select: { fullName: true } } },
   });
-  const statusByNumber = new Map(rows.map((row) => [row.number, row.projectStatus]));
+  const statusByKey = new Map(
+    rows.map((row) => [statusKey(row.repository.fullName, row.number), row.projectStatus]),
+  );
 
   return refs.map((ref) => ({
     ...ref,
-    projectStatus: statusByNumber.get(ref.number) ?? null,
+    projectStatus: statusByKey.get(statusKey(ref.repositoryFullName, ref.number)) ?? null,
   }));
 }
 
@@ -88,14 +114,15 @@ async function handleGET(request: NextRequest) {
     const token = await getInstallationTokenLazy(repository.installation.installationId);
     const relations = await fetchSubIssueRelations(token, owner, repo, number);
 
-    const [parent, children] = await Promise.all([
-      attachProjectStatus(repository.id, relations.parent ? [relations.parent] : []),
-      attachProjectStatus(repository.id, relations.children),
+    // 親と子はまとめて1クエリで引く（リポジトリごとの`OR`になるため、分けても得が無い）
+    const withStatus = await attachProjectStatus(userId, [
+      ...(relations.parent ? [relations.parent] : []),
+      ...relations.children,
     ]);
 
     const payload: SubIssueRelations = {
-      parent: parent[0] ?? null,
-      children,
+      parent: relations.parent ? (withStatus[0] ?? null) : null,
+      children: relations.parent ? withStatus.slice(1) : withStatus,
       childCount: relations.childCount,
     };
     return NextResponse.json({ relations: payload });
