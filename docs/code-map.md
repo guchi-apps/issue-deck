@@ -286,6 +286,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
   逆にdevelop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`）ので、
   **対応Issueが同じ一覧に並ぶPRは除いて**二重表示を避ける。左メニューの件数も同じ数を足す。
+  **PRを数に足す画面と、PRを一覧に出す画面は必ずセットにする**（#1713）。スマホは件数
+  （ホームの「要対応」・メニューの「ユーザーの確認待ち」）にだけ足して一覧はIssueしか出して
+  おらず、「2件と出ているのに開くと何も無い」状態だった。合流はスマホでは
+  `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
+  ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
+  `pinnedSection`と`pinnedCount`が担う。
 - **「ユーザーの作業待ち」（`71.manual-step`）を橙色にするのは、いま実行できるものがあるときだけ**
   （#1613。[`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
   手作業の多くは起点の変更が本番へ出るまで実行できず、1件でもあれば強調すると数週間先まで

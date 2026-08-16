@@ -71,6 +71,12 @@ type IssueListProps = {
    */
   pinnedSection?: ReactNode;
   /**
+   * `pinnedSection`に並ぶ件数（#1713）。ヘッダーの「N件」へ合流させる。左メニューの
+   * 「ユーザーの確認待ち」はIssueとマージ待ちPRを足した数を出しているため、ここで足さないと
+   * メニューの件数と一覧の件数だけが食い違う。
+   */
+  pinnedCount?: number;
+  /**
    * ディスパッチの状態（#1638）。**同じ画面で既に取っているなら渡す**（#1262の取り決め）。
    * スマホのIssue一覧はヘッダーの実行状況ボタンと一覧が同じものを見るため、画面側で1回
    * 取って両方へ配っている。省略時はこの一覧が自分で取りに行く（PCの一覧は従来どおり）。
@@ -140,6 +146,7 @@ export function IssueList({
   groupByRepo = false,
   view,
   pinnedSection,
+  pinnedCount = 0,
   dispatch: injectedDispatch,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
@@ -370,7 +377,7 @@ export function IssueList({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="text-xs text-muted-foreground">{issues.length}件</p>
+            <p className="text-xs text-muted-foreground">{issues.length + pinnedCount}件</p>
           </div>
           <div className="flex items-center gap-2">
             {/* 夜にまとめて積んで順に流すための入口（#1266） */}

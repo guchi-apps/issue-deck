@@ -63,6 +63,16 @@ type MobileIssueListScreenProps = {
    * 単一リポジトリへの質問は「＋」の新規作成（種別「質問」）へ統合済み（#1641）。
    */
   onAskCrossRepoQuestion?: () => void;
+  /**
+   * 特定のビューでだけ一覧の先頭に固定表示する要素と、その件数（#1713）。
+   * 「ユーザーの確認待ち」でユーザーのマージを待っているPull Requestを出すのに使う。
+   *
+   * **`count`は表示件数へ必ず合流させる。** ホーム画面の「要対応」とメニューの
+   * 「ユーザーの確認待ち」はIssueとマージ待ちPRを足した数を出しているため、ここで足さないと
+   * 「2件と出ているのに開くと何も無い」という食い違いになる。合流先は`view`に一致する
+   * ビューの件数だけで、他のビューの件数には触らない。
+   */
+  pinned?: { view: NavViewId; count: number; section: ReactNode };
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -92,11 +102,22 @@ export function MobileIssueListScreen({
   onSelectIssue,
   onCreateIssue,
   onAskCrossRepoQuestion,
+  pinned,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [viewSheetOpen, setViewSheetOpen] = useState(false);
+
+  // 固定表示ぶんを件数へ合流させる（#1713）。ヘッダーの「N件」は表示中のビューの分だけ、
+  // ビュー行・ビュー選択シートの件数は対象のビューの分を足す（スワイプ中に見える隣の
+  // ビューの件数も、切り替えた後と同じ数字にするため）。
+  const pinnedCount = pinned?.count ?? 0;
+  const listedCount = issues.length + (pinned?.view === view ? pinnedCount : 0);
+  const displayNavCounts = useMemo(() => {
+    if (!pinned || pinned.count === 0) return navCounts;
+    return { ...navCounts, [pinned.view]: (navCounts[pinned.view] ?? 0) + pinned.count };
+  }, [navCounts, pinned]);
 
   // ホーム画面のクイックビューから、一覧では選べないビュー（本番反映待ちなど）で開かれる
   // ことがあるため、そのビューだけは一時的に足す（#1645）。
@@ -174,7 +195,7 @@ export function MobileIssueListScreen({
           {/* 表示中のビュー名を件数の行にも出す（#1645）。操作は下端の行で行うが、
               一覧をスクロールしている最中に「何を見ているのか」を見上げて確かめられる */}
           <p className="truncate text-xs text-muted-foreground">
-            {[meta, getNavViewLabel(view), `${issues.length}件`].filter(Boolean).join("・")}
+            {[meta, getNavViewLabel(view), `${listedCount}件`].filter(Boolean).join("・")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -199,6 +220,9 @@ export function MobileIssueListScreen({
         groupByRepo={groupByRepo}
         view={view}
         dispatch={dispatch}
+        // ユーザーがマージするしかないPRは、確認待ちの一覧の先頭に出す（#1613・#1713）。
+        // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
+        pinnedSection={pinned?.view === view ? pinned.section : undefined}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。
@@ -237,7 +261,9 @@ export function MobileIssueListScreen({
             >
               <ViewIcon className="size-4 shrink-0" />
               <span className="truncate font-medium">{getNavViewLabel(view)}</span>
-              <span className="shrink-0 text-xs text-primary/70">{navCounts[view] ?? 0}</span>
+              <span className="shrink-0 text-xs text-primary/70">
+                {displayNavCounts[view] ?? 0}
+              </span>
             </span>
             {previewView && PreviewViewIcon && (
               <span
@@ -248,7 +274,7 @@ export function MobileIssueListScreen({
                 <PreviewViewIcon className="size-4 shrink-0" />
                 <span className="truncate font-medium">{previewView.label}</span>
                 <span className="shrink-0 text-xs text-primary/70">
-                  {navCounts[previewView.id] ?? 0}
+                  {displayNavCounts[previewView.id] ?? 0}
                 </span>
               </span>
             )}
@@ -282,7 +308,7 @@ export function MobileIssueListScreen({
         onOpenChange={setViewSheetOpen}
         views={navViewsForList}
         view={view}
-        navCounts={navCounts}
+        navCounts={displayNavCounts}
         onSelect={onChangeView}
       />
 

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
@@ -14,6 +15,7 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobileIssuesScreenProps = {
   issues: Issue[];
@@ -26,6 +28,13 @@ type MobileIssuesScreenProps = {
   state: IssueStateFilter;
   assignee: string | null;
   sort: IssueSort;
+  /**
+   * 「ユーザーの確認待ち」の一覧の先頭に出す、ユーザーのマージを待っているPull Request
+   * （#1613・#1713）。ホーム画面の「要対応」とメニューの件数が数に含めているのと同じ配列を
+   * 受け取る。**数だけを渡して中身を出さないと、押して開いた一覧が空に見える。**
+   */
+  mergePendingPullRequests: PullRequestSummary[];
+  onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
@@ -45,6 +54,8 @@ export function MobileIssuesScreen({
   state,
   assignee,
   sort,
+  mergePendingPullRequests,
+  onSelectPullRequest,
   onChangeView,
   onChangeFilters,
   onSelectIssue,
@@ -107,6 +118,18 @@ export function MobileIssuesScreen({
       onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
+      // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も
+      // `MobileIssueListScreen`がこれを見て行うため、件数と中身が別々にならない
+      pinned={{
+        view: "check-user",
+        count: mergePendingPullRequests.length,
+        section: (
+          <MergePendingPullRequests
+            pullRequests={mergePendingPullRequests}
+            onSelectPullRequest={onSelectPullRequest}
+          />
+        ),
+      }}
     />
   );
 }

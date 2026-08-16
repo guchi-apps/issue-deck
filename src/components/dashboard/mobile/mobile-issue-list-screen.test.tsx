@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
@@ -7,9 +8,12 @@ import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobi
 import { navViews } from "@/lib/nav-views";
 import type { NavViewId } from "@/types/issue";
 
-// 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える
+// 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
+// 先頭の固定枠（#1713）だけは、どのビューで描かれるかをここで確かめるため通す。
 vi.mock("@/components/dashboard/issue-list", () => ({
-  IssueList: () => <div data-testid="issue-list" />,
+  IssueList: ({ pinnedSection }: { pinnedSection?: ReactNode }) => (
+    <div data-testid="issue-list">{pinnedSection}</div>
+  ),
 }));
 
 const NAV_COUNTS = Object.fromEntries(
@@ -29,6 +33,7 @@ function renderScreen(
     filters: MobileIssueLocalFilters;
     onChangeView: (view: NavViewId) => void;
     onChangeFilters: (filters: MobileIssueLocalFilters) => void;
+    pinned: { view: NavViewId; count: number; section: ReactNode };
   }> = {},
 ) {
   render(
@@ -45,10 +50,17 @@ function renderScreen(
       onChangeFilters={overrides.onChangeFilters ?? vi.fn()}
       onSelectIssue={vi.fn()}
       onCreateIssue={vi.fn()}
+      pinned={overrides.pinned}
       scrollKey="test"
     />,
   );
 }
+
+const MERGE_PENDING_PINNED = {
+  view: "check-user" as NavViewId,
+  count: 2,
+  section: <div data-testid="merge-pending">マージ待ちPR</div>,
+};
 
 describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
   afterEach(() => {
@@ -103,6 +115,30 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
     expect(
       screen.getByRole("button", { name: /本番反映待ち/ }).getAttribute("aria-current"),
     ).toBe("true");
+  });
+
+  it("固定表示ぶんを、ヘッダーの件数とビュー行の件数へ合流させる（#1713）", () => {
+    renderScreen({ view: "check-user", pinned: MERGE_PENDING_PINNED });
+
+    // Issueは0件でも、マージ待ちPRが2件あればホーム画面と同じ2件と出す
+    expect(screen.getByText("ユーザーの確認待ち・2件")).toBeTruthy();
+    expect(screen.getByTestId("merge-pending")).toBeTruthy();
+    // ビュー行はビューごとの件数（3件）に固定表示ぶんを足した5件
+    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("5");
+  });
+
+  it("対象ビュー以外では固定表示を出さず、ヘッダーの件数にも足さない（#1713）", () => {
+    renderScreen({ view: "all", pinned: MERGE_PENDING_PINNED });
+
+    expect(screen.getByText("すべてのIssue・0件")).toBeTruthy();
+    expect(screen.queryByTestId("merge-pending")).toBeNull();
+
+    // ただしビュー選択シートの「ユーザーの確認待ち」は合流後の件数を出す。切り替えた途端に
+    // 件数が変わると、確認待ちの件数だけがまた食い違って見える
+    fireEvent.click(screen.getByRole("button", { name: /すべてのIssue/ }));
+    expect(
+      screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent,
+    ).toContain("5");
   });
 
   it("絞り込みシートの「すべて解除」で状態・ラベル・担当者だけを既定へ戻す", () => {
