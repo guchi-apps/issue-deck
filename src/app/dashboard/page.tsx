@@ -7,7 +7,6 @@ import {
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getIssuesForUser } from "@/lib/issues-for-user";
-import { toQuickFilter } from "@/lib/quick-filters";
 
 export default async function DashboardPage() {
   const currentUser = await getCurrentUser();
@@ -50,15 +49,6 @@ export default async function DashboardPage() {
 
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
-  const quickFilters = currentUser
-    ? (
-        await db.quickFilter.findMany({
-          where: { userId: currentUser.id },
-          orderBy: { createdAt: "asc" },
-        })
-      ).map(toQuickFilter)
-    : [];
-
   return (
     <IssueDeckShell
       currentUser={
@@ -78,7 +68,6 @@ export default async function DashboardPage() {
         favorite: favoriteRepositoryIds.has(repo.id),
       }))}
       issues={issues}
-      quickFilters={quickFilters}
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
       claudeModelAssist={claudeModelAssist}

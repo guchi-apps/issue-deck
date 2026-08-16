@@ -95,7 +95,7 @@ export function TopBar({
   // ナビゲーションが走り入力が遅く感じられる（#1024）。入力自体はローカルstateで即時反映し、
   // URLへの反映（＝一覧の絞り込み）はデバウンスして行う。
   const [searchInput, setSearchInput] = useState(filters.q);
-  // クイックフィルター適用等、入力以外の経路でfilters.qが変わった場合はローカルstateを
+  // ブラウザバック等、入力以外の経路でfilters.qが変わった場合はローカルstateを
   // 追随させる（レンダー中に比較・更新することでeffectでの同期に伴うカスケード再レンダーを避ける）。
   const [syncedFiltersQ, setSyncedFiltersQ] = useState(filters.q);
   if (filters.q !== syncedFiltersQ) {

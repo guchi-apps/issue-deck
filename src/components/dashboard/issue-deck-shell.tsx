@@ -32,7 +32,6 @@ import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-p
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
@@ -83,7 +82,6 @@ import {
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
-import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -94,7 +92,6 @@ type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
-  quickFilters: QuickFilter[];
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
@@ -105,7 +102,6 @@ export function IssueDeckShell({
   currentUser,
   repositories: initialRepositories,
   issues: initialIssues,
-  quickFilters: initialQuickFilters,
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
@@ -128,7 +124,6 @@ export function IssueDeckShell({
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
-  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   // PC版の選択中Issueは`issue`クエリ（missueと同じ識別子＝String(githubIssueId)）が正で、
   // 表示するIssueはそこからの派生値（#1396）。stateで持つとIssueを開く操作が履歴に載らず、
   // 戻る操作でアプリの外へ出てしまうため移した。ポーリングや編集でissuesが更新されれば
@@ -139,7 +134,6 @@ export function IssueDeckShell({
     () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
     [issues, filters.issue],
   );
-  const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
@@ -743,36 +737,6 @@ export function IssueDeckShell({
     }
   }
 
-  // 保存したフィルター（左メニュー）を適用する。スマホのホーム画面からも呼んでいたが、
-  // ホームから節ごと外したためPCだけの経路になった（#1690）。
-  function handleSelectQuickFilter(quickFilter: QuickFilter) {
-    setFilters({
-      view: quickFilter.view,
-      q: quickFilter.q,
-      repos: quickFilter.repos,
-      state: quickFilter.state,
-      labels: quickFilter.labels,
-      assignee: quickFilter.assignee,
-      sort: quickFilter.sort,
-      // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
-      pane: "issues",
-      // 一覧の中身が入れ替わるので選択中Issueも畳む（1回のURL更新にまとめる）。
-      issue: null,
-    });
-  }
-
-  async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
-    setQuickFilters((prev) => prev.filter((item) => item.id !== quickFilter.id));
-
-    try {
-      const response = await fetch(`/api/quick-filters/${quickFilter.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("failed to delete quick filter");
-    } catch (error) {
-      console.error("[issue-deck-shell] failed to delete quick filter", error);
-      setQuickFilters((prev) => [...prev, quickFilter]);
-    }
-  }
-
   // 設定画面のように、フッターに対応するタブが無い画面ではnullになる（#1638）
   const activeBottomNavTab: MobileBottomNavTab | null = resolveBottomNavTab(mobileScreen);
 
@@ -998,10 +962,6 @@ export function IssueDeckShell({
                 selectedLabels={filters.labels}
                 onSelectLabel={(label) => toggleLabel(label.name)}
                 onClearLabels={() => setFilter("labels", [])}
-                quickFilters={quickFilters}
-                onSelectQuickFilter={handleSelectQuickFilter}
-                onDeleteQuickFilter={handleDeleteQuickFilter}
-                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
               />
@@ -1147,22 +1107,6 @@ export function IssueDeckShell({
           defaultRepositoryFullName={crossQuestionDialogRepo}
           issues={issues}
           onCreated={handleIssueCreated}
-        />
-        <QuickFilterDialog
-          open={quickFilterDialogOpen}
-          onOpenChange={setQuickFilterDialogOpen}
-          // 保存対象はIssueの絞り込み条件だけ。表示中のペイン（filters.pane）は絞り込み条件では
-          // ないため、QuickFilterには含めない。
-          filters={{
-            view: filters.view,
-            q: filters.q,
-            repos: filters.repos,
-            state: filters.state,
-            labels: filters.labels,
-            assignee: filters.assignee,
-            sort: filters.sort,
-          }}
-          onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
         />
         <SettingsDialog
           open={settingsDialogOpen}

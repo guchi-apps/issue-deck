@@ -12,7 +12,6 @@ import {
   Lock,
   Plus,
   Settings2,
-  SlidersHorizontal,
   Star,
   X,
 } from "lucide-react";
@@ -33,7 +32,6 @@ import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-reques
 import { getRepoColor } from "@/lib/repo-color";
 import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
-import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -69,10 +67,6 @@ type SidebarNavProps = {
   selectedLabels?: string[];
   onSelectLabel?: (label: LabelSummary) => void;
   onClearLabels?: () => void;
-  quickFilters: QuickFilter[];
-  onSelectQuickFilter: (quickFilter: QuickFilter) => void;
-  onDeleteQuickFilter: (quickFilter: QuickFilter) => void;
-  onSaveQuickFilter: () => void;
   className?: string;
   style?: CSSProperties;
 };
@@ -99,10 +93,6 @@ export function SidebarNav({
   selectedLabels = [],
   onSelectLabel,
   onClearLabels,
-  quickFilters,
-  onSelectQuickFilter,
-  onDeleteQuickFilter,
-  onSaveQuickFilter,
   className,
   style,
 }: SidebarNavProps) {
@@ -471,54 +461,6 @@ export function SidebarNav({
         <button type="button" className="mt-1 px-2 text-xs text-primary hover:underline">
           すべてのラベルを見る
         </button>
-      </div>
-
-      <div className="mt-auto">
-        <div className="mb-2 flex items-center justify-between px-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">よく使うフィルター</h2>
-          <button
-            type="button"
-            onClick={onSaveQuickFilter}
-            className="text-muted-foreground hover:text-foreground"
-            title="現在の検索条件を保存"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </div>
-        {quickFilters.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <SlidersHorizontal className="size-3.5 text-muted-foreground" />
-              クイックフィルターを作成
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              よく使う検索条件を保存できます
-            </p>
-          </div>
-        ) : (
-          <ul className="flex flex-col gap-0.5">
-            {quickFilters.map((quickFilter) => (
-              <li key={quickFilter.id} className="group/quick-filter flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => onSelectQuickFilter(quickFilter)}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-                >
-                  <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{quickFilter.name}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteQuickFilter(quickFilter)}
-                  title="削除"
-                  className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover/quick-filter:opacity-100"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </nav>
   );
