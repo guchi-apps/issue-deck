@@ -16,8 +16,7 @@ import {
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
-  fetchPullRequestMergeable,
-  fetchRefCiState,
+  fetchPullRequestCiState,
 } from "@/lib/github/release-api";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
@@ -101,14 +100,12 @@ async function handleGET(request: NextRequest) {
       }));
 
     // バンプPR・develop→mainのPRが開いている間だけCI状態を取得する（マージしてよいかの目安として表示する）。
-    // コンフリクト有無（`mergeable`）も同じ条件でPR1件につき1回だけ取る。自動解消ボタンを
-    // 出すかどうかの判定に必要で、PRが開いていない間は取得しない（#1293）。
-    const [bumpCiState, releaseCiState, bumpMergeable, releaseMergeable] = await Promise.all([
-      bumpPr ? fetchRefCiState(owner, repo, bumpPr.head.ref, token) : Promise.resolve(null),
-      releasePr ? fetchRefCiState(owner, repo, releasePr.head.ref, token) : Promise.resolve(null),
-      bumpPr ? fetchPullRequestMergeable(owner, repo, bumpPr.number, token) : Promise.resolve(null),
+    // コンフリクト有無（`mergeable`）は自動解消ボタンを出すかどうかの判定に必要で（#1293）、
+    // CI状態と**同じ1回のGraphQL**で取れる（#1742）。PRが開いていない間はどちらも取得しない。
+    const [bumpState, releaseState] = await Promise.all([
+      bumpPr ? fetchPullRequestCiState(owner, repo, bumpPr.number, token) : Promise.resolve(null),
       releasePr
-        ? fetchPullRequestMergeable(owner, repo, releasePr.number, token)
+        ? fetchPullRequestCiState(owner, repo, releasePr.number, token)
         : Promise.resolve(null),
     ]);
 
@@ -138,8 +135,8 @@ async function handleGET(request: NextRequest) {
             number: bumpPr.number,
             url: bumpPr.html_url,
             title: bumpPr.title,
-            ciState: bumpCiState,
-            mergeable: bumpMergeable,
+            ciState: bumpState?.ciState ?? null,
+            mergeable: bumpState?.mergeable ?? null,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -151,8 +148,8 @@ async function handleGET(request: NextRequest) {
             number: releasePr.number,
             url: releasePr.html_url,
             title: releasePr.title,
-            ciState: releaseCiState,
-            mergeable: releaseMergeable,
+            ciState: releaseState?.ciState ?? null,
+            mergeable: releaseState?.mergeable ?? null,
           }
         : null,
       otherPullRequests,

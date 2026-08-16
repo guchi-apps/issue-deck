@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCheckRollup } from "@/lib/github/check-rollup";
+import { fetchCheckRollup, fetchPullRequestRollup } from "@/lib/github/check-rollup";
 
 function stubGraphql(body: unknown, status = 200) {
   const calls: { url: string; body: string }[] = [];
@@ -127,5 +127,83 @@ describe("fetchCheckRollup", () => {
     stubGraphql({}, 502);
 
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toBeNull();
+  });
+});
+
+function pullRequestResponse(pullRequest: unknown) {
+  return { data: { repository: { pullRequest } } };
+}
+
+function pullRequestWithRollup(mergeable: string | null, rollup: unknown) {
+  return pullRequestResponse({
+    mergeable,
+    commits: { nodes: [{ commit: { statusCheckRollup: rollup } }] },
+  });
+}
+
+describe("fetchPullRequestRollup", () => {
+  it("CI状態とコンフリクト有無をGraphQL 1回でまとめて取る（#1742）", async () => {
+    const calls = stubGraphql(
+      pullRequestWithRollup("CONFLICTING", {
+        state: "SUCCESS",
+        contexts: {
+          totalCount: 1,
+          nodes: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" }],
+        },
+      }),
+    );
+
+    await expect(fetchPullRequestRollup("owner", "repo", 42, "token")).resolves.toEqual({
+      rollup: { state: "success", checks: [{ status: "completed", conclusion: "success" }] },
+      mergeable: false,
+    });
+    // ref経由（`fetchCheckRollup`）と足して2回にならないこと自体がこの関数の目的。
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]?.body ?? "{}").variables).toEqual({
+      owner: "owner",
+      name: "repo",
+      number: 42,
+    });
+  });
+
+  it("`MERGEABLE`はtrue、`UNKNOWN`（判定中）はnullにする", async () => {
+    stubGraphql(pullRequestWithRollup("MERGEABLE", null));
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
+      rollup: { state: null, checks: [] },
+      mergeable: true,
+    });
+
+    stubGraphql(pullRequestWithRollup("UNKNOWN", null));
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
+      rollup: { state: null, checks: [] },
+      mergeable: null,
+    });
+  });
+
+  it("コミットが取れない場合もチェック無しとして扱う", async () => {
+    stubGraphql(pullRequestResponse({ mergeable: "MERGEABLE", commits: { nodes: [] } }));
+
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
+      rollup: { state: null, checks: [] },
+      mergeable: true,
+    });
+  });
+
+  it("取得に失敗した場合は例外にせず未取得として返す", async () => {
+    stubGraphql({ errors: [{ message: "Resource not accessible by integration" }] });
+
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
+      rollup: null,
+      mergeable: null,
+    });
+  });
+
+  it("PRが見つからない場合も未取得として返す", async () => {
+    stubGraphql(pullRequestResponse(null));
+
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
+      rollup: null,
+      mergeable: null,
+    });
   });
 });

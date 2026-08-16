@@ -12,8 +12,9 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 必要があるため共通化している（#1260）。詳細はリンクから直接開かれることがあり、その場合は
  * 一覧の項目が存在しないので、ヘッダーの材料をここで作った`summary`だけで賄う。
  *
- * CI状態は呼び出し側が渡す。取得にPR1件あたり1回APIを消費するので、「いつ取るか」の判断
- * （draftやclosedでは取らない）は経路ごとに違うため。
+ * CI状態とコンフリクト有無（`mergeable`。#1742）は呼び出し側が渡す。取得にPR1件あたり1回APIを
+ * 消費するので、「いつ取るか」の判断（draftやclosedでは取らない）は経路ごとに違うため。
+ * この2つは1回のGraphQLでまとめて取れる（`fetchPullRequestCiState`）。
  *
  * 対応Issueの`00.check-user`（`linkedIssueCheckUser`）とその理由（`linkedIssueCheckReason`。
  * #1490）も呼び出し側が渡す。DBキャッシュを引く処理で、一覧は全リポジトリぶんをまとめて
@@ -26,6 +27,8 @@ export function toPullRequestSummary(
   options: {
     merged: boolean;
     ciState: CiState;
+    /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
+    mergeable?: boolean | null;
     linkedIssueCheckUser?: boolean;
     linkedIssueCheckReason?: CheckUserReason | null;
   },
@@ -61,6 +64,7 @@ export function toPullRequestSummary(
     linkedIssueCheckUser: options.linkedIssueCheckUser ?? false,
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
+    mergeable: options.mergeable ?? null,
     createdAt: pullRequest.created_at,
     updatedAt: pullRequest.updated_at,
   };

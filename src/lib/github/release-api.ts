@@ -1,4 +1,8 @@
-import { fetchCheckRollup } from "@/lib/github/check-rollup";
+import {
+  fetchCheckRollup,
+  fetchPullRequestRollup,
+  type CheckRollup,
+} from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -187,32 +191,42 @@ export async function fetchRefCiState(
   ref: string,
   token: string,
 ): Promise<CiState> {
-  const rollup = await fetchCheckRollup(owner, repo, ref, token);
+  return toCiState(await fetchCheckRollup(owner, repo, ref, token));
+}
+
+/** チェック集約から`CiState`を決める。取得できていなければ`unknown` */
+function toCiState(rollup: CheckRollup | null): CiState {
   if (!rollup) return "unknown";
   // 100件を超えるrefでは1件ずつ見られないため、GitHubの集約値をそのまま使う。
   if (!rollup.checks) return ciStateFromRollupState(rollup.state);
   return resolveCiStateFromCheckRuns(rollup.checks);
 }
 
+/** PR1件ぶんのCI状態とコンフリクト有無（#1742） */
+export type PullRequestCiState = {
+  ciState: CiState;
+  /** `true`＝マージ可能・`false`＝コンフリクトあり・`null`＝GitHubが判定中または取得できず */
+  mergeable: boolean | null;
+};
+
 /**
- * マージ待ちPRのコンフリクト有無だけを取り出す（#1293）。
+ * マージ待ちPRのCI状態とコンフリクト有無を**1回のGraphQL**で取得する（#1742）。
  *
- * `mergeable`はPRの単体取得でしか返らず、GitHub側で非同期に計算されるため判定前は`null`。
- * リリース進捗では「コンフリクトあり」の表示と自動解消ボタンの出し分けにしか使わないので、
- * `fetchRefCiState`が取得失敗を`unknown`へ縮退させるのと同じく、失敗しても例外にせず
- * `null`（＝判定できていない）として扱う。
+ * `mergeable`はGitHub側が非同期に計算するため、判定が終わるまでは`null`が返る。
+ * 「判定前イコールコンフリクトなし」ではないので、呼び出し側は`false`のときだけ
+ * コンフリクトとして扱う（`repairKindsFor`）。
+ *
+ * PR番号が手元にある経路（PR一覧・リリース進捗）はこちらを使い、番号を持たない経路
+ * （developブランチそのもののCI状態など）は`fetchRefCiState`を使う。
  */
-export async function fetchPullRequestMergeable(
+export async function fetchPullRequestCiState(
   owner: string,
   repo: string,
   number: number,
   token: string,
-): Promise<boolean | null> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
-  const res = await githubFetch(url, token).catch(() => null);
-  if (!res || !res.ok) return null;
-  const data: { mergeable?: boolean | null } = await res.json().catch(() => ({}));
-  return data.mergeable ?? null;
+): Promise<PullRequestCiState> {
+  const { rollup, mergeable } = await fetchPullRequestRollup(owner, repo, number, token);
+  return { ciState: toCiState(rollup), mergeable };
 }
 
 /**
