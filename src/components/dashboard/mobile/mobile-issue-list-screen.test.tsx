@@ -67,6 +67,13 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
     cleanup();
   });
 
+  // 通知ベル（#1772）。実行状況を置いている画面には同じように置く
+  it("ヘッダーに通知ベルを出す", () => {
+    renderScreen({ view: "in-progress" });
+
+    expect(screen.getByRole("button", { name: "対応が必要なもの" })).toBeTruthy();
+  });
+
   it("表示中のビュー名と件数をボタンに出す", () => {
     renderScreen({ view: "in-progress" });
 

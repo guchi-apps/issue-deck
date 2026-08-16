@@ -22,9 +22,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import type { NotificationTarget } from "@/lib/notifications";
-import type { Issue } from "@/types/issue";
-import type { PullRequestSummary } from "@/types/pull-request";
-import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 /** フィルターポップオーバー内の選択肢チップ（#944：ヘッダーが崩れないよう状態・担当者・
@@ -56,10 +53,6 @@ type TopBarProps = {
   onCreateIssue: () => void;
   /** 複数リポジトリ横断の質問（#1454）。単一リポジトリへの質問は新規作成ダイアログ側（#1641） */
   onAskCrossRepoQuestion: () => void;
-  repositories: ConnectedRepository[];
-  issues: Issue[];
-  /** 通知ベル（#1614）に出すマージ待ちPR。画面が既に取得済みの一覧をそのまま使う */
-  pullRequests: PullRequestSummary[];
   /** 通知ベルの項目を押したときの遷移 */
   onOpenNotificationTarget: (target: NotificationTarget) => void;
   /** 実行キューの行のタイトルを押したときの遷移（#1625）。通知ベルと同じくIssue詳細を開く */
@@ -84,9 +77,6 @@ export function TopBar({
   assigneeOptions,
   onCreateIssue,
   onAskCrossRepoQuestion,
-  repositories,
-  issues,
-  pullRequests,
   onOpenNotificationTarget,
   onOpenIssue,
   onOpenCheckUserView,
@@ -282,11 +272,9 @@ export function TopBar({
       <DispatchQueueButton onOpenIssue={onOpenIssue} />
 
       {/* リリース専用のロケットボタンを置き換え、ユーザーの操作が必要なものをリポジトリ横断で
-          1か所に集める（#1614）。リリースの起動・マージは「ブランチ」画面が持つ */}
+          1か所に集める（#1614）。リリースの起動・マージは「ブランチ」画面が持つ。
+          材料は`NotificationProvider`から読むためここでは渡さない（#1772） */}
       <NotificationButton
-        repositories={repositories}
-        issues={issues}
-        pullRequests={pullRequests}
         onOpenTarget={onOpenNotificationTarget}
         onOpenCheckUserView={onOpenCheckUserView}
         onOpenFlow={onOpenFlow}

@@ -11,6 +11,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -113,6 +114,9 @@ export function MobileHomeScreen({
         */}
         <MobileReloadButton />
         <MobileDispatchStatusButton dispatch={dispatch} />
+        {/* 通知ベル（#1772）。実行状況の右隣＝PCのトップバー（実行キュー → ベル → アバター）
+            と同じ順序。**設定より左**なのは、設定がこの画面だけの右端の常設だから */}
+        <MobileNotificationButton />
         <button
           type="button"
           onClick={onOpenSettings}
