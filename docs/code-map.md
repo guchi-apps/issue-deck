@@ -715,6 +715,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716）。pollerは`WORKTREE_CLEANUP_INTERVAL_MINUTES`
+  （既定60分・0で無効）の間隔で`scripts/cleanup-worktrees.sh --yes`を呼ぶ。**足りなかったのは
+  判定ではなく起点**で、スクリプトは#1100からあったのに実行の起点がどこにも無く、3日で181本・38GB
+  溜まってルートFSが77%に達した。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
+  経っていないworktreeは触らない（`--min-age-minutes`。`start-issue.sh`が作ってからセッションの
+  プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
+  消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
+  [multi-agent/branching.md](multi-agent/branching.md)「掃除を回す起点」。
 - **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
   だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
   `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。
