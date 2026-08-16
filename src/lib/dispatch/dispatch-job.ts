@@ -1,3 +1,6 @@
+// 型だけのimport（コンパイル時に消える）。`host-checkout.ts`側も`DispatchHostView`を
+// 型としてしか使わないため、実行時の循環importにはならない（`host-metrics.ts`と同じ）
+import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 // 型だけのimport（コンパイル時に消える）。`host-metrics.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない
@@ -246,6 +249,17 @@ export type DispatchHostView = {
    * こちらは画面へ出すための写し。
    */
   metrics: DispatchHostMetrics | null;
+  /**
+   * pollerが動かしているチェックアウトの版（#1612）。**申告していなければ`null`**
+   * （古いpoller・gitが無い・読めなかった巡）。
+   *
+   * **`contractVersion`・`agentVersion`とは別物。** あちらは約束を変えたときに手で上げる
+   * 版数で、チェックアウトの鮮度とは無関係（実際、版数が同じまま97コミット遅れていた）。
+   *
+   * **割り当ての判定には使わない**（`metrics`と同じ立場）。遅れているホストへジョブを
+   * 配らない、といった判断はしない。取り込むかどうかは人が決める。
+   */
+  checkout: DispatchHostCheckout | null;
 };
 
 /**

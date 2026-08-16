@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
+import { parseDispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import { parseDispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import { announceDispatchHost } from "@/lib/dispatch/jobs";
 
@@ -88,6 +89,10 @@ export async function POST(request: NextRequest) {
     // リソース使用率（#1567）。**1つでも壊れていれば全体を`null`にする**
     // （`parseDispatchHostMetrics`）。部分的に採用すると、取れなかった項目が0＝空きに見える
     metrics: parseDispatchHostMetrics(payload?.metrics),
+    // pollerが動かしているチェックアウトの版（#1612）。**`agentVersion`とは別物**で、
+    // あちらは手で上げるプロトコル版数、こちらは実際に走っているスクリプトの事実。
+    // `develop`へマージしても届かないことに気付ける唯一の手掛かりになる
+    checkout: parseDispatchHostCheckout(payload?.checkout),
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });
