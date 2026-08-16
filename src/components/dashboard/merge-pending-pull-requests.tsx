@@ -5,6 +5,7 @@ import { GitPullRequest } from "lucide-react";
 import {
   BranchBadge,
   CiStateBadge,
+  ConflictBadge,
   formatElapsed,
 } from "@/components/dashboard/pull-request-badges";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -54,6 +55,7 @@ export function MergePendingPullRequests({
               <span className="flex flex-wrap items-center gap-2">
                 <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
                 <CiStateBadge ciState={pullRequest.ciState} />
+                <ConflictBadge mergeable={pullRequest.mergeable} />
                 <span className="text-xs text-muted-foreground">
                   {formatElapsed(pullRequest.createdAt)}
                 </span>

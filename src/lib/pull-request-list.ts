@@ -219,9 +219,14 @@ export function groupPullRequestsByRepository(
  *
  * 画面内のリンクからマージ済み・クローズ済みのPRも開けるようになったため（#1260）、
  * openでないPRも対象外にする。
+ *
+ * **コンフリクトしているPR（`mergeable`が`false`）も対象外**（#1742）。CI失敗と違って
+ * 「確認のうえマージする」余地が無く、押してもGitHubが受け付けないため。代わりに同じ場所へ
+ * 「コンフリクトを自動解消」が出る（`repairKindsFor`）。`null`（判定中・未取得）のときは
+ * 従来どおりボタンを出す——判定前を「コンフリクトあり」として扱わないため。
  */
 export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
-  return pullRequest.state === "open" && !pullRequest.draft;
+  return pullRequest.state === "open" && !pullRequest.draft && pullRequest.mergeable !== false;
 }
 
 /**

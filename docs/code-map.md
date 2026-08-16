@@ -359,6 +359,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **コンフリクト有無（`mergeable`）は、そのCI状態と同じ1回のGraphQLで取る**（#1742。
+  `fetchPullRequestRollup` → `fetchPullRequestCiState`）。`mergeable`はRESTだとPRの単体取得でしか
+  返らないため、PR一覧に出すとPR1件につき1回APIが増える——これが理由でPR一覧は長らく
+  「CI通過」だけを出しており、**コンフリクトで実際には入らないPRが「入れられる」ように見えていた**。
+  GraphQLの`PullRequest`は`mergeable`とheadコミットの`statusCheckRollup`を同じクエリで返すので、
+  すでに消費しているCI状態の1回に相乗りさせれば消費は増えない。**PR番号を持つ経路
+  （PR一覧・PR詳細・リリース進捗）はこちらを使い、番号を持たない経路（developブランチそのものの
+  CI状態など）だけ`fetchRefCiState`を使う。**
+  `mergeable`はGitHub側が非同期に計算するため判定中は`null`で、**`null`を「コンフリクトなし」と
+  扱わない**（`ConflictBadge`も`repairKindsFor`も`false`のときだけ動く）。draftとclosedなPRでは
+  そもそも取得しない（CI状態と同じ方針）。
+  表示と操作は一覧・詳細・確認待ち一覧・リリース進捗で揃え、コンフリクト中は
+  **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
+  GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
