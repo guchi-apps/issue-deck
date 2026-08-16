@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, CheckCircle2, Loader2, Wrench } from "lucide-react";
+import { Ban, CheckCircle2, ListChecks, Loader2, Wrench } from "lucide-react";
 
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,9 @@ import { cn } from "@/lib/utils";
  * なぞっただけで、すぐ下に出る本文と重複していた。毎回同じ文面が縦に積まれ、実行してよいかの
  * 判断材料と出口が押し下げられる方が損が大きい。運用の説明はdocs/multi-agent/labels.mdに置く。
  *
+ * **手順そのものはここに並べず、「順番に進める」（手作業アシスタント・#1826）へ渡す**。
+ * 本文をなぞる説明を戻すのではなく、1手順ずつ案内する別の画面へ送る形にしている。
+ *
  * 配色にamberを使わないのは、amberが「ユーザーの確認待ち」（`00.check-user`）の色として
  * 使われているため（sidebar-nav・workflow-status-steps）。承認して再開させる先がある
  * 確認待ちと、実行者が人である手作業とを、盤面で混同させない。violetは`71.manual-step`
@@ -32,6 +35,7 @@ import { cn } from "@/lib/utils";
 export function ManualStepPanel({
   onComplete,
   onSkip,
+  onStartGuide,
   isSubmitting,
   prerequisites,
   prerequisiteSummary,
@@ -42,6 +46,11 @@ export function ManualStepPanel({
   onComplete: () => void;
   /** 実施せず終わらせる場合（計画外としてクローズ） */
   onSkip: () => void;
+  /**
+   * 手作業アシスタント（#1826）をこのIssueから開く。渡さない場合はボタンを出さない
+   * （アシスタントを置いていない画面から使われたとき、押せない導線を残さないため）
+   */
+  onStartGuide?: () => void;
   isSubmitting: boolean;
   /**
    * 待っている相手（先に完了している必要があるIssue・PR）の状況（#1705）。
@@ -80,7 +89,20 @@ export function ManualStepPanel({
         />
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={isSubmitting} onClick={onComplete}>
+        {/* 手順を1つずつ案内する入口（#1826）。**実行の前に押すもの**なので、
+            終わった後に押すクローズの2つより前に置く */}
+        {onStartGuide && (
+          <Button size="sm" disabled={isSubmitting} onClick={onStartGuide}>
+            <ListChecks />
+            順番に進める
+          </Button>
+        )}
+        <Button
+          variant={onStartGuide ? "outline" : "default"}
+          size="sm"
+          disabled={isSubmitting}
+          onClick={onComplete}
+        >
           {isSubmitting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
           手作業を完了してクローズ
         </Button>

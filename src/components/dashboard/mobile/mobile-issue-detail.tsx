@@ -141,6 +141,8 @@ type MobileIssueDetailProps = {
   onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
   onSelectRepository: (repositoryFullName: string) => void;
+  /** 手作業アシスタント（#1826）をこのIssueから開く */
+  onStartManualStepGuide: (startIssueId: string) => void;
 };
 
 /** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
@@ -159,6 +161,7 @@ export function MobileIssueDetail({
   onCreateIssue,
   onCreateFollowupIssue,
   onSelectRepository,
+  onStartManualStepGuide,
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
@@ -742,6 +745,7 @@ export function MobileIssueDetail({
             isSubmitting={isSubmitting}
             onComplete={() => handleClose("completed")}
             onSkip={() => handleClose("not_planned")}
+            onStartGuide={() => onStartManualStepGuide(issue.id)}
             prerequisites={manualStepPrerequisites.prerequisites}
             prerequisiteSummary={manualStepPrerequisites.summary}
             repositoryFullName={issue.repositoryFullName}

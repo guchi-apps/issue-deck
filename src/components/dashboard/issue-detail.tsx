@@ -137,6 +137,8 @@ type IssueDetailProps = {
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
   onSelectRepository: (repositoryFullName: string) => void;
+  /** 手作業アシスタント（#1826）をこのIssueから開く */
+  onStartManualStepGuide: (startIssueId: string) => void;
 };
 
 export function IssueDetail({
@@ -150,6 +152,7 @@ export function IssueDetail({
   onToggleFavorite,
   onCreateFollowupIssue,
   onSelectRepository,
+  onStartManualStepGuide,
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
@@ -748,6 +751,7 @@ export function IssueDetail({
               isSubmitting={isSubmitting}
               onComplete={() => handleClose("completed")}
               onSkip={() => handleClose("not_planned")}
+              onStartGuide={() => onStartManualStepGuide(issue.id)}
               prerequisites={manualStepPrerequisites.prerequisites}
               prerequisiteSummary={manualStepPrerequisites.summary}
               repositoryFullName={issue.repositoryFullName}

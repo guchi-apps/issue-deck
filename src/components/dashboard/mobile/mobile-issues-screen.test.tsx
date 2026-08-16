@@ -102,6 +102,7 @@ function renderScreen(
       onSelectIssue={vi.fn()}
       onCreateIssue={vi.fn()}
       onAskCrossRepoQuestion={vi.fn()}
+      onStartManualStepGuide={vi.fn()}
     />,
   );
 }

@@ -407,6 +407,33 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
+- **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
+  [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
+  本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
+  本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
+  本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・
+  ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
+  - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
+    Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
+    手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
+    `TASK_LINE_PATTERN`を共有する**——別の正規表現を書くと、Issue詳細の「タスク 2 / 3 完了」と
+    アシスタントの手順数が食い違う。
+  - **案内するのは前提条件が満たされたものだけ**（`buildManualStepQueue`。件数・通知ベルと同じ
+    `computeManualStepReadiness`）。ただし**Issue詳細から開いた1件だけは前提待ちでも外さない**——
+    人が明示的に開いたものを、本文からの推定でしかない判定で締め出さない。
+  - **入口は一覧の上に置き、ヘッダーには入れない**。スマホの一覧は`IssueList`のヘッダーを
+    出さず（`showHeader={false}`）、画面側のヘッダーには操作を足さない決まり（#1646）のため、
+    ヘッダーに置くとPCにしか出ない。Issue詳細側の入口は`ManualStepPanel`の「順番に進める」。
+  - **新しい状態もAPIも持たない。** チェックの実体はIssue本文（`use-issue-task-list.ts`）、
+    クローズは`ManualStepPanel`と同じ`PATCH /api/issues`。GitHubで付けても一覧で付けても
+    アシスタントで付けても、書き換わるのは同じ1か所。
+  - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
+    一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
+    （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。
+  - **テンプレートに沿っていない本文（`hasTemplate: false`）を隠さない。** 手順に割れない
+    だけなので、本文をそのまま1画面で出してクローズの出口だけ付ける。
+  - **コマンドのコピーボタンを作らない。** 手順をMarkdownとして描けば、既存の
+    `MarkdownBody`のコードブロック（#1726）がそのまま付く。
 - **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
   [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
   （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
