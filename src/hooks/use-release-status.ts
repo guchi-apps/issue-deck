@@ -31,6 +31,11 @@ export type BumpPullRequest = ReleasePullRequest & {
    * このセクション自体がPR本文に現れないためnull
    */
   changelog: string | null;
+  /**
+   * バンプPR本文の「## 使い方（生成された利用者向け文言）」セクションから抜き出した操作手順（#1729）。
+   * 更新履歴と違い、**画面で使える変化が無いリリースでは生成自体が行われない**ためnullになる。
+   */
+  usage: string | null;
 };
 
 export type ReleaseWorkflowRun = {

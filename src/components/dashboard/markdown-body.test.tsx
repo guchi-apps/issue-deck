@@ -142,6 +142,61 @@ describe("MarkdownBody のタスクリスト", () => {
   });
 });
 
+// 手作業Issueのコマンドを、スマホから範囲選択せずに取り出せるようにする（#1726）。
+describe("MarkdownBody のコードブロック", () => {
+  function renderContent(content: string) {
+    return render(
+      <GithubReferenceNavigationProvider openReference={vi.fn()}>
+        <MarkdownBody content={content} />
+      </GithubReferenceNavigationProvider>,
+    );
+  }
+
+  function mockClipboard(writeText: () => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+  }
+
+  it("コピーボタンでコードブロック全体をコピーする", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    renderContent(["```bash", "git -C ~/apps/issue-deck pull --ff-only", "pnpm install", "```"].join("\n"));
+
+    fireEvent.click(screen.getByRole("button", { name: "コードをコピー" }));
+
+    // 末尾の改行は落とす（貼り付けた時点でコマンドが実行されないように）
+    expect(writeText).toHaveBeenCalledWith("git -C ~/apps/issue-deck pull --ff-only\npnpm install");
+    expect(await screen.findByRole("button", { name: "コピーしました" })).toBeTruthy();
+  });
+
+  // コピーできていないのに成功表示を出すと、貼り付けて初めて失敗に気づくことになる
+  it("コピーに失敗したときは成功表示を出さない", async () => {
+    mockClipboard(vi.fn().mockRejectedValue(new Error("denied")));
+    // フォールバック（execCommand）もjsdomには無いので、失敗の扱いになる
+    Object.defineProperty(document, "execCommand", { value: () => false, configurable: true });
+    renderContent(["```", "ssh vps", "```"].join("\n"));
+
+    fireEvent.click(screen.getByRole("button", { name: "コードをコピー" }));
+
+    expect(await screen.findByRole("button", { name: "コピーできませんでした" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "コピーしました" })).toBeNull();
+  });
+
+  it("中身が空のコードブロックにはコピーボタンを出さない", () => {
+    renderContent(["```", "```"].join("\n"));
+
+    expect(screen.queryByRole("button", { name: "コードをコピー" })).toBeNull();
+  });
+
+  it("本文中のインラインのコードにはコピーボタンを出さない", () => {
+    renderContent("`develop`の最新へ更新する。");
+
+    expect(screen.queryByRole("button", { name: "コードをコピー" })).toBeNull();
+  });
+});
+
 // react-markdownは各コンポーネントへhastのノード（node）も渡してくる。DOMへ流すと
 // `node="[object Object]"`という無効な属性になるので、どの要素でも落としておく（#1499）。
 describe("MarkdownBody のDOM属性", () => {

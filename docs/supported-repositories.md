@@ -290,6 +290,23 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
 
+### 使い方の自動生成（`RELEASE_USAGE`）の対応状況
+
+同じ判定ステップが利用者向けの操作手順も生成し、`RELEASE_USAGE`環境変数として同じ経路で渡す
+（#1729）。更新履歴が「何が変わったか」であるのに対し、こちらは「どこを開く / 何を押す /
+どうなれば成功か」。**画面で使える変化が無いリリースでは空になる**ため、更新履歴があっても
+使い方が無いことがある。
+
+| `RELEASE_USAGE`を反映する | （まだ無い。`RELEASE_CHANGELOG`を反映している6リポジトリへリポジトリごとのIssueで順次対応する） |
+|---|---|
+| 受け取れる状態にある | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・`clip-hive`・`ops-dashboard`（`"version"` lifecycleスクリプトを持つ） |
+| 生成されるが使われない | 上記以外（`RELEASE_CHANGELOG`と同じ扱い。バンプPR本文には出る） |
+
+**issue-deckの画面では、バンプPRが開いている間だけスマホのリリースシートに「使い方（利用者向け）」
+として出る**（`src/components/dashboard/release-progress.tsx`）。恒久的な置き場所は各アプリの
+更新履歴画面で、そちらが本来の届け先。受け取り方は
+[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「`RELEASE_USAGE`（使い方）の受け取り方」を参照。
+
 ```bash
 # 配置状況の確認
 for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do

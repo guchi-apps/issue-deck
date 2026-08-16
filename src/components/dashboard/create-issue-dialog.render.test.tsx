@@ -670,3 +670,99 @@ describe("CreateIssueDialog のクイック起票", () => {
     expect(screen.queryByLabelText("タイトル")).toBeNull();
   });
 });
+
+/**
+ * #1728。書いている内容ごと別ウィンドウ（`/issues/new`）へ移す。
+ * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
+ */
+describe("CreateIssueDialog の別ウィンドウ", () => {
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("「別ウィンドウで開く」で、書いている内容を渡してウィンドウを開き、ダイアログを閉じる", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue({ focus: vi.fn() } as unknown as Window);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "別ウィンドウで開く" }));
+
+    expect(open).toHaveBeenCalledWith(
+      "/issues/new",
+      "issue-deck-create-issue",
+      expect.stringContaining("popup=yes"),
+    );
+    // 渡すのは入力内容そのもの。開いた側が読み取って消す
+    const handoff = JSON.parse(window.localStorage.getItem("issue-create-handoff") ?? "{}");
+    expect(handoff.body).toBe("書きかけの本文");
+    expect(handoff.repositoryFullName).toBe(REPOSITORY_FULL_NAME);
+    expect(handoff.step).toBe("input");
+    // 移したのでダイアログ側は閉じる
+    expect(screen.queryByLabelText("内容")).toBeNull();
+  });
+
+  it("ブラウザに止められた場合はダイアログを閉じず、理由を出す", () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "別ウィンドウで開く" }));
+
+    expect(
+      screen.queryByText("ブラウザが別ウィンドウを止めました。このサイトのポップアップを許可してください。"),
+    ).not.toBeNull();
+    // 書いていた内容の行き先が消えないよう、ダイアログは開いたまま
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("書きかけの本文");
+    expect(window.localStorage.getItem("issue-create-handoff")).toBeNull();
+  });
+
+  it("別ウィンドウ側は、移してきた内容と続きのステップで始まる", () => {
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={vi.fn()}
+        repositories={[makeRepository()]}
+        issues={[]}
+        onCreated={vi.fn()}
+        initialHandoff={{
+          kind: "issue",
+          repositoryFullName: REPOSITORY_FULL_NAME,
+          title: "移してきたタイトル",
+          body: "移してきた本文",
+          selectedLabels: ["50.feature"],
+          assignee: "m-guchi",
+          bodyPrefix: null,
+          step: "confirm",
+          savedAt: Date.now(),
+        }}
+      />,
+    );
+
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("移してきたタイトル");
+    expect(screen.getByText("移してきた本文")).not.toBeNull();
+    // 移した先で同じ物をもう一度「復元する」と出さない（すでに入っているため）
+    expect(screen.queryByText("保存された下書きがあります")).toBeNull();
+    // ウィンドウの中には移す先が無いので、「別ウィンドウで開く」は出さない
+    expect(screen.queryByRole("button", { name: "別ウィンドウで開く" })).toBeNull();
+  });
+
+  it("別ウィンドウでは、取り消しの文言を渡されたものに差し替える", () => {
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={vi.fn()}
+        repositories={[makeRepository()]}
+        issues={[]}
+        onCreated={vi.fn()}
+        cancelLabel="デッキへ戻る"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "デッキへ戻る" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
+  });
+});

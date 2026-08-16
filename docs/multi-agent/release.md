@@ -50,6 +50,26 @@ origin/develop`・`git log origin/main..origin/develop`を確認し、semverに�
 major/minor/patchのいずれかと判断根拠を返す。判定ステップ自体が失敗した場合や、返り値が
 major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。
 
+### 同じステップが利用者向けの文言も作る
+
+このステップは上げ幅の判定だけでなく、**同じ差分から利用者向けの文言を2種類**生成する。
+どちらもバンプPRの本文に載り、`"version"` npm lifecycleスクリプトへ環境変数として渡って、
+更新履歴表示を持つリポジトリが自前の画面に出す（受け取り方は
+[docs/cross-repo-setup-guide.md](../cross-repo-setup-guide.md)）。
+
+| 出力 | 環境変数 | 何を書くか | 空になる条件 |
+|---|---|---|---|
+| `changelog` | `RELEASE_CHANGELOG` | 何が変わったか（#800） | 判定失敗時 |
+| `usage` | `RELEASE_USAGE` | どう使うか。どこを開く / 何を押す / どうなれば成功か（#1729） | 判定失敗時、**画面で使える変化が無いリリース** |
+
+`usage`を足したのは、「機能が入ったのは分かるが、どこを押せば使えるのか分からない」を
+リリース単位で解消するため。**Issue単位ではなくリリース単位にしてあるのは、届け先が
+各アプリの更新履歴画面（バージョンごとに並ぶ画面）だから。**
+
+`usage`だけは「画面で使える変化が無いリリース」で空になる契約にしてある。内部改善だけの
+リリースで無理に手順を書かせると、読み手が毎回それを読んで空振りすることになるため。
+空のときはPR本文にセクションごと出さない。
+
 ### 画面から上げ幅を指定する（#1548）
 
 **「生成されたPR上でバージョンを直接修正する」は実際には間に合わない。** バンプPRはCI通過後に
@@ -62,7 +82,8 @@ PRを閉じるところから始める必要がある）。そこで、**起動�
 - 画面 → `POST /api/repositories/release`（`bumpKind`） → `workflow_dispatch`の`bump_kind` input
   → callerが`reusable-release-develop-to-main.yml`の`bump-kind`へ渡す、という一本道で届く。
 - **指定があっても判定ステップは走らせる。** 上げ幅と一緒に利用者向けの更新履歴
-  （`changelog` → `RELEASE_CHANGELOG`）を作っているため、飛ばすと更新履歴が空になる。
+  （`changelog` → `RELEASE_CHANGELOG`）と使い方（`usage` → `RELEASE_USAGE`）を作っている
+  ため、飛ばすとどちらも空になる。
   指定値で判定結果を上書きし、判断根拠（PR本文の「バージョンの判断根拠」）には
   「issue-deckの画面から◯◯を指定しました（コード差分からの自動判定は△△）」を残す。
 - 画面の選択肢に添える基準（major/minor/patchの説明）は`src/lib/semver-bump.ts`の

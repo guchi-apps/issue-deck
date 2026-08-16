@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,6 +10,7 @@ import {
   MessageCircleQuestion,
   Pencil,
   Plus,
+  SquareArrowOutUpRight,
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -56,6 +57,7 @@ import {
   isSelectableLabelName,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
+import { openIssueCreateWindow, type IssueCreateHandoff } from "@/lib/issue-create-window";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
@@ -66,6 +68,7 @@ import {
   resolveInitialQuickStep,
   type QuickIssueStep,
 } from "@/lib/quick-issue";
+import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -209,6 +212,64 @@ function RepositorySelectItems({
   );
 }
 
+/**
+ * 出し方（#1728）。`window`はこのフォームだけを表示する別ウィンドウ（`/issues/new`）の中身。
+ * **項目も手順も共通で、変わるのは外枠と「キャンセル」の意味だけ。**
+ */
+export type CreateIssuePresentation = "dialog" | "window";
+
+/**
+ * 別ウィンドウ用の外枠（#1728）。Radixの`DialogTitle`等はダイアログの文脈の外では使えないため、
+ * 見た目を合わせた素の要素へ差し替える。上下の帯を固定し、中身だけがスクロールする。
+ */
+function WindowHeader({ className, ...props }: ComponentProps<"div">) {
+  return <div className={cn("flex flex-col gap-1 border-b px-4 py-3", className)} {...props} />;
+}
+
+function WindowTitle({ className, ...props }: ComponentProps<"h1">) {
+  return (
+    <h1 className={cn("font-heading text-base leading-none font-medium", className)} {...props} />
+  );
+}
+
+function WindowDescription({ className, ...props }: ComponentProps<"p">) {
+  return <p className={cn("text-xs text-muted-foreground", className)} {...props} />;
+}
+
+function WindowFooter({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col-reverse gap-2 border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+type Chrome = {
+  Header: ComponentType<{ className?: string; children?: React.ReactNode }>;
+  Title: ComponentType<{ className?: string; children?: React.ReactNode }>;
+  Description: ComponentType<{ className?: string; children?: React.ReactNode }>;
+  Footer: ComponentType<{ className?: string; children?: React.ReactNode }>;
+};
+
+// レンダーのたびに作ると中身ごと作り直しになる（入力中のフォーカスが飛ぶ）ため、モジュールで持つ
+const DIALOG_CHROME: Chrome = {
+  Header: DialogHeader,
+  Title: DialogTitle,
+  Description: DialogDescription,
+  Footer: DialogFooter,
+};
+
+const WINDOW_CHROME: Chrome = {
+  Header: WindowHeader,
+  Title: WindowTitle,
+  Description: WindowDescription,
+  Footer: WindowFooter,
+};
+
 type CreateIssueDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -223,6 +284,15 @@ type CreateIssueDialogProps = {
   bodyPrefix?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
+  /** 出し方（#1728）。既定はダイアログ */
+  presentation?: CreateIssuePresentation;
+  /**
+   * 別ウィンドウへ移したときに引き継ぐ入力内容（#1728）。渡されたときは保存済み下書きの
+   * 提示（「復元する」）を出さない——移してきた内容がすでに入っているため、選ばせる意味が無い。
+   */
+  initialHandoff?: IssueCreateHandoff | null;
+  /** 入力ステップの取り消しボタンの文言。別ウィンドウでは閉じ方が変わるため差し替える */
+  cancelLabel?: string;
 };
 
 /**
@@ -246,6 +316,15 @@ type CreateIssueDialogProps = {
  * 間違いが見えないまま別リポジトリへIssueが立ち、そのリポジトリの無人実行の母集団に入る。
  * 逆に**推定が失敗しても作成は止めない**——トークン未設定（501）・生成失敗のときは値が空のまま
  * `confirm`へ進み、従来どおり自分で埋められる状態にする。
+ *
+ * ## 別ウィンドウ（#1728）
+ *
+ * `presentation="window"`のときは、外枠だけを差し替えて`/issues/new`のページ本体になる。
+ * **項目・手順・作成後の動きは共通のまま**にする——別ウィンドウ用にフォームをもう一つ作ると、
+ * 以降の変更を2か所へ入れ続けることになり、片方だけ古くなる。
+ *
+ * 移す入口はこのダイアログの中（見出し右の「別ウィンドウで開く」）だけで、ヘッダー等からは
+ * 開かない。書き始めてから移りたくなるのが元の使い方で、入口を増やすと同じ物を作る導線が並ぶ。
  */
 export function CreateIssueDialog({
   open,
@@ -257,7 +336,12 @@ export function CreateIssueDialog({
   bodyPrefix,
   issues,
   onCreated,
+  presentation = "dialog",
+  initialHandoff = null,
+  cancelLabel,
 }: CreateIssueDialogProps) {
+  const isWindow = presentation === "window";
+  const Chrome = isWindow ? WINDOW_CHROME : DIALOG_CHROME;
   const { createIssue, isSubmitting: isCreatingIssue, error, setError } = useIssueMutations();
   const {
     createComment,
@@ -306,6 +390,8 @@ export function CreateIssueDialog({
   const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
+  /** 別ウィンドウがブラウザに止められたか（#1728）。黙って何も起きないと壊れて見える */
+  const [popOutBlocked, setPopOutBlocked] = useState(false);
   const hasUserSetAssignee = useRef(false);
   /**
    * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ「実装を開始」を出す。**
@@ -364,15 +450,21 @@ export function CreateIssueDialog({
     // 渡されていればそちらを優先し、それ以外は空の状態にする（保存済みの下書きは自動では
     // 反映せず、readRestorableIssueDraftの結果をユーザーが「復元する」で選んだ場合のみ反映する）。
     // 外部トリガー（開閉）に同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
-    const draft = resolveInitialIssueDraft({
-      defaultRepositoryFullName,
-      defaultTitle,
-      defaultBody,
-    });
+    // 別ウィンドウへ移してきた内容があればそれを正とする（#1728）。移す前に書いていた種別・
+    // ステップまで含めて引き継ぐので、開いた瞬間から続きを書ける
+    const draft =
+      initialHandoff ??
+      resolveInitialIssueDraft({
+        defaultRepositoryFullName,
+        defaultTitle,
+        defaultBody,
+      });
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setKind("issue");
+    setKind(draft.kind);
     // 書く内容が渡されているとき（引き継ぎ作成・コメントからの起票）は入力ステップを飛ばす（#1605）
-    setStep(resolveInitialQuickStep({ defaultTitle, defaultBody }));
+    setStep(initialHandoff?.step ?? resolveInitialQuickStep({ defaultTitle, defaultBody }));
+    // 移してきた値は「人が書いたもの」として扱う。`自動`の出どころは移す前の画面に残っており、
+    // ここで復元すると、直したはずの項目まで自動と書かれかねない
     setCameFromInput(false);
     setAutoFilled({ repository: false, title: false, labels: false });
     setRepositoryCandidates([]);
@@ -386,13 +478,24 @@ export function CreateIssueDialog({
     setIsImageUploading(false);
     setError(null);
     setCommentError(null);
+    setPopOutBlocked(false);
     hasUserSetAssignee.current = draft.assignee !== null;
     // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
     // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
     setRestorableDraft(
-      readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
+      initialHandoff
+        ? null
+        : readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
     );
-  }, [open, defaultRepositoryFullName, defaultTitle, defaultBody, setError, setCommentError]);
+  }, [
+    open,
+    defaultRepositoryFullName,
+    defaultTitle,
+    defaultBody,
+    initialHandoff,
+    setError,
+    setCommentError,
+  ]);
 
   useIssueDraftAutosave(open, {
     kind,
@@ -420,6 +523,30 @@ export function CreateIssueDialog({
     // リポジトリのまま推定が省かれる。ここで降ろして自動で決め直させる
     if (resolved !== repositoryFullName) setHasPickedRepository(false);
     setRepositoryCandidates((prev) => selectableSuggestedRepositories(next, repositories, prev));
+  }
+
+  /**
+   * 書いている内容ごと別ウィンドウへ移す（#1728）。
+   *
+   * **開けたときだけダイアログを閉じる。** ポップアップを止められたときに閉じてしまうと、
+   * 書いていた内容の行き先が画面から消える（下書きには残るが、それは人が復元を選ぶもの）。
+   */
+  function handlePopOut() {
+    const opened = openIssueCreateWindow({
+      kind,
+      repositoryFullName,
+      title,
+      body,
+      selectedLabels,
+      assignee,
+      bodyPrefix: bodyPrefix ?? null,
+      step,
+    });
+    if (!opened) {
+      setPopOutBlocked(true);
+      return;
+    }
+    onOpenChange(false);
   }
 
   /** 候補チップを押してリポジトリを選び直す（#1710）。人が選んだので`自動`バッジは外す */
@@ -663,493 +790,536 @@ export function CreateIssueDialog({
 
     resetForm();
     clearIssueDraft();
-    onOpenChange(false);
+    // 別ウィンドウでは`onOpenChange(false)`がウィンドウを閉じる操作なので、ここでは呼ばない
+    // （#1728）。閉じると、この後に出す実行先の選択ごと消える。閉じるのは選択が終わった時点
+    if (!isWindow) onOpenChange(false);
     onCreated(issue);
     setStartTargetIssue(issue);
   }
 
-  return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="sm:max-w-lg"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              if (step === "input") {
-                void handleProceedToConfirm();
-              } else {
-                handleSubmit();
-              }
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {step === "confirm" && cameFromInput
-                ? "内容を確認"
-                : isQuestion
-                  ? "リポジトリに質問する"
-                  : "新しいIssueを作成"}
-            </DialogTitle>
-            {step === "input" ? (
-              <DialogDescription>
-                {isQuestion
-                  ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
-                  : hasPickedRepository
-                    ? "内容を書くと、タイトル・ラベルを自動で決めます。"
-                    : "内容を書くと、リポジトリ・タイトル・ラベルを自動で決めます。"}
-              </DialogDescription>
-            ) : (
-              cameFromInput && (
-                <DialogDescription>
-                  自動で決めた値です。違っていれば直せます。
-                </DialogDescription>
-              )
-            )}
-          </DialogHeader>
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    if (step === "input") {
+      void handleProceedToConfirm();
+    } else {
+      handleSubmit();
+    }
+  }
 
-          {restorableDraft && (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-              <span>保存された下書きがあります</span>
-              <Button variant="outline" size="xs" onClick={handleRestoreDraft}>
-                復元する
+  const header = (
+    <Chrome.Header>
+      <Chrome.Title>
+        {step === "confirm" && cameFromInput
+          ? "内容を確認"
+          : isQuestion
+            ? "リポジトリに質問する"
+            : "新しいIssueを作成"}
+      </Chrome.Title>
+      {step === "input" ? (
+        <Chrome.Description>
+          {isQuestion
+            ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
+            : hasPickedRepository
+              ? "内容を書くと、タイトル・ラベルを自動で決めます。"
+              : "内容を書くと、リポジトリ・タイトル・ラベルを自動で決めます。"}
+        </Chrome.Description>
+      ) : (
+        cameFromInput && (
+          <Chrome.Description>自動で決めた値です。違っていれば直せます。</Chrome.Description>
+        )
+      )}
+    </Chrome.Header>
+  );
+
+  const fields = (
+    <>
+      {restorableDraft && (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
+          <span>保存された下書きがあります</span>
+          <Button variant="outline" size="xs" onClick={handleRestoreDraft}>
+            復元する
+          </Button>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4">
+        {/* 種別（#1641）。**本文の内容からの自動判定は行わない。** 誤判定は押した本人から
+            見えないまま、質問のつもりの本文が実装Issueとして無人実行に乗る（逆もある）
+            という取り返しの付きにくい間違いになるため、押した時点で確定する形にする。
+            #1605で自動化したのはリポジトリ・タイトル・ラベルまでで、ここは対象外 */}
+        {step === "input" && (
+          <div className="flex flex-col gap-1.5">
+            <Label>種別</Label>
+            <div className="flex gap-1.5">
+              <Button
+                type="button"
+                variant={isQuestion ? "outline" : "default"}
+                className="h-9 px-3 text-xs"
+                aria-pressed={!isQuestion}
+                onClick={() => selectKind("issue")}
+              >
+                <Plus />
+                Issue
+              </Button>
+              <Button
+                type="button"
+                variant={isQuestion ? "default" : "outline"}
+                className="h-9 px-3 text-xs"
+                aria-pressed={isQuestion}
+                onClick={() => selectKind("question")}
+              >
+                <MessageCircleQuestion />
+                質問
               </Button>
             </div>
-          )}
+          </div>
+        )}
 
-          <div className="flex flex-col gap-4">
-            {/* 種別（#1641）。**本文の内容からの自動判定は行わない。** 誤判定は押した本人から
-                見えないまま、質問のつもりの本文が実装Issueとして無人実行に乗る（逆もある）
-                という取り返しの付きにくい間違いになるため、押した時点で確定する形にする。
-                #1605で自動化したのはリポジトリ・タイトル・ラベルまでで、ここは対象外 */}
-            {step === "input" && (
-              <div className="flex flex-col gap-1.5">
-                <Label>種別</Label>
-                <div className="flex gap-1.5">
-                  <Button
-                    type="button"
-                    variant={isQuestion ? "outline" : "default"}
-                    className="h-9 px-3 text-xs"
-                    aria-pressed={!isQuestion}
-                    onClick={() => selectKind("issue")}
-                  >
-                    <Plus />
-                    Issue
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={isQuestion ? "default" : "outline"}
-                    className="h-9 px-3 text-xs"
-                    aria-pressed={isQuestion}
-                    onClick={() => selectKind("question")}
-                  >
-                    <MessageCircleQuestion />
-                    質問
-                  </Button>
-                </div>
-              </div>
-            )}
+        {/* リポジトリの先指定（#1733）。**任意で、既定は「自動で決める」。**
+            どのリポジトリの話かが書く前から分かっているときに、推定と直しの1往復を
+            省くための欄で、選ばなければ「次へ」の挙動は#1605のまま変わらない。
+            リポジトリ別の画面から開いたときの値もここに出る——これまでは黙って
+            持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった */}
+        {step === "input" && hasSelectableRepository && (
+          <div className="flex flex-col gap-1.5">
+            {/* 「任意」は`Label`の外に置く。中に入れるとアクセシブルネームが
+                「リポジトリ任意」になり、項目名で引けなくなる（確認ステップのバッジと同じ理由） */}
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="create-issue-input-repo">リポジトリ</Label>
+              <span className="text-xs text-muted-foreground">任意</span>
+            </div>
+            <Select
+              value={repositoryFullName || AUTO_REPOSITORY_VALUE}
+              onValueChange={handleInputRepositoryChange}
+            >
+              <SelectTrigger id="create-issue-input-repo" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_REPOSITORY_VALUE}>自動で決める（内容から）</SelectItem>
+                <RepositorySelectItems
+                  registered={registeredRepositories}
+                  unregistered={selectableUnregisteredRepositories}
+                />
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-            {/* リポジトリの先指定（#1733）。**任意で、既定は「自動で決める」。**
-                どのリポジトリの話かが書く前から分かっているときに、推定と直しの1往復を
-                省くための欄で、選ばなければ「次へ」の挙動は#1605のまま変わらない。
-                リポジトリ別の画面から開いたときの値もここに出る——これまでは黙って
-                持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった */}
-            {step === "input" && hasSelectableRepository && (
-              <div className="flex flex-col gap-1.5">
-                {/* 「任意」は`Label`の外に置く。中に入れるとアクセシブルネームが
-                    「リポジトリ任意」になり、項目名で引けなくなる（確認ステップのバッジと同じ理由） */}
-                <div className="flex items-center gap-1.5">
-                  <Label htmlFor="create-issue-input-repo">リポジトリ</Label>
-                  <span className="text-xs text-muted-foreground">任意</span>
-                </div>
-                <Select
-                  value={repositoryFullName || AUTO_REPOSITORY_VALUE}
-                  onValueChange={handleInputRepositoryChange}
-                >
-                  <SelectTrigger id="create-issue-input-repo" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={AUTO_REPOSITORY_VALUE}>自動で決める（内容から）</SelectItem>
-                    <RepositorySelectItems
-                      registered={registeredRepositories}
-                      unregistered={selectableUnregisteredRepositories}
-                    />
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+        {/* 推定中の案内（#1605）。何を決めようとしているかは下の項目名が表すので、ここは1行 */}
+        {step === "confirm" && isQuickSuggesting && (
+          <p className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs text-foreground">
+            <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            内容から、リポジトリ・タイトル・ラベルを決めています
+          </p>
+        )}
 
-            {/* 推定中の案内（#1605）。何を決めようとしているかは下の項目名が表すので、ここは1行 */}
-            {step === "confirm" && isQuickSuggesting && (
-              <p className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs text-foreground">
-                <Loader2 className="size-3.5 shrink-0 animate-spin" />
-                内容から、リポジトリ・タイトル・ラベルを決めています
+        {step === "confirm" && (
+          <div className="flex flex-col gap-1.5">
+            {/* バッジは`Label`の外に置く。中に入れるとラベルの文字列（アクセシブルネーム）が
+                「リポジトリ自動」になり、項目名で引けなくなる */}
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="create-issue-repo">リポジトリ</Label>
+              {autoFilled.repository ? (
+                <AutoBadge />
+              ) : (
+                cameFromInput &&
+                !hasPickedRepository &&
+                repositoryFullName !== "" &&
+                repositoryFullName === defaultRepositoryFullName && <PageBadge />
+              )}
+            </div>
+            {isQuickSuggesting ? (
+              <FieldSkeleton />
+            ) : hasSelectableRepository ? (
+              <Select value={repositoryFullName} onValueChange={handleRepositoryChange}>
+                <SelectTrigger id="create-issue-repo" className="w-full">
+                  <SelectValue placeholder="リポジトリを選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  <RepositorySelectItems
+                    registered={registeredRepositories}
+                    unregistered={selectableUnregisteredRepositories}
+                  />
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {isQuestion
+                  ? "claude-issue-dispatch.ymlが導入されているリポジトリがありません。"
+                  : "連携しているリポジトリがありません。"}
               </p>
             )}
-
-            {step === "confirm" && (
-              <div className="flex flex-col gap-1.5">
-                {/* バッジは`Label`の外に置く。中に入れるとラベルの文字列（アクセシブルネーム）が
-                    「リポジトリ自動」になり、項目名で引けなくなる */}
-                <div className="flex items-center gap-1.5">
-                  <Label htmlFor="create-issue-repo">リポジトリ</Label>
-                  {autoFilled.repository ? (
-                    <AutoBadge />
-                  ) : (
-                    cameFromInput &&
-                    !hasPickedRepository &&
-                    repositoryFullName !== "" &&
-                    repositoryFullName === defaultRepositoryFullName && <PageBadge />
-                  )}
+            {/* 内容から推定した候補（#1710）。選択中のものを先頭に並べ、1タップで切り替えられる
+                ようにする。**推定を呼んでいないときは出さない**（「自分で入力する」・下書きの復元） */}
+            {!isQuickSuggesting && repositoryChoices.length > 1 && (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {repositoryChoices.map((fullName) => {
+                    const isCurrent = fullName === repositoryFullName;
+                    const isFromPage = fullName === defaultRepositoryFullName;
+                    const rank = repositoryCandidates.indexOf(fullName);
+                    const [owner, name] = fullName.split("/");
+                    return (
+                      <button
+                        key={fullName}
+                        type="button"
+                        aria-pressed={isCurrent}
+                        onClick={() => handleSelectCandidate(fullName)}
+                        className={`flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+                          isCurrent
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-input hover:bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`shrink-0 rounded-full border px-1.5 text-[10px] font-medium ${
+                            isCurrent ? "border-primary-foreground/40" : "border-border"
+                          }`}
+                        >
+                          {isFromPage ? "表示中" : `候補${rank + 1}`}
+                        </span>
+                        <span className="truncate">
+                          <span className={isCurrent ? "opacity-70" : "text-muted-foreground"}>
+                            {owner}/
+                          </span>
+                          {name}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-                {isQuickSuggesting ? (
-                  <FieldSkeleton />
-                ) : hasSelectableRepository ? (
-                  <Select value={repositoryFullName} onValueChange={handleRepositoryChange}>
-                    <SelectTrigger id="create-issue-repo" className="w-full">
-                      <SelectValue placeholder="リポジトリを選択" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <RepositorySelectItems
-                        registered={registeredRepositories}
-                        unregistered={selectableUnregisteredRepositories}
-                      />
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {isQuestion
-                      ? "claude-issue-dispatch.ymlが導入されているリポジトリがありません。"
-                      : "連携しているリポジトリがありません。"}
-                  </p>
-                )}
-                {/* 内容から推定した候補（#1710）。選択中のものを先頭に並べ、1タップで切り替えられる
-                    ようにする。**推定を呼んでいないときは出さない**（「自分で入力する」・下書きの復元） */}
-                {!isQuickSuggesting && repositoryChoices.length > 1 && (
-                  <>
-                    <div className="flex flex-wrap gap-1.5">
-                      {repositoryChoices.map((fullName) => {
-                        const isCurrent = fullName === repositoryFullName;
-                        const isFromPage = fullName === defaultRepositoryFullName;
-                        const rank = repositoryCandidates.indexOf(fullName);
-                        const [owner, name] = fullName.split("/");
-                        return (
-                          <button
-                            key={fullName}
-                            type="button"
-                            aria-pressed={isCurrent}
-                            onClick={() => handleSelectCandidate(fullName)}
-                            className={`flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
-                              isCurrent
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-input hover:bg-muted"
-                            }`}
-                          >
-                            <span
-                              className={`shrink-0 rounded-full border px-1.5 text-[10px] font-medium ${
-                                isCurrent ? "border-primary-foreground/40" : "border-border"
-                              }`}
-                            >
-                              {isFromPage ? "表示中" : `候補${rank + 1}`}
-                            </span>
-                            <span className="truncate">
-                              <span className={isCurrent ? "opacity-70" : "text-muted-foreground"}>
-                                {owner}/
-                              </span>
-                              {name}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      候補は内容から推定したものです。押すと切り替わります。
-                    </p>
-                  </>
-                )}
-                {isQuestion && (
-                  <p className="text-xs text-muted-foreground">
-                    回答するのはGitHub Actionsのため、claude-issue-dispatch.yml導入済みのリポジトリだけ選べます。
-                  </p>
-                )}
-              </div>
+                <p className="text-xs text-muted-foreground">
+                  候補は内容から推定したものです。押すと切り替わります。
+                </p>
+              </>
             )}
+            {isQuestion && (
+              <p className="text-xs text-muted-foreground">
+                回答するのはGitHub Actionsのため、claude-issue-dispatch.yml導入済みのリポジトリだけ選べます。
+              </p>
+            )}
+          </div>
+        )}
 
-            {step === "confirm" &&
-              (isQuestion ? (
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="create-issue-question-title">タイトル（自動）</Label>
-                  <p
-                    id="create-issue-question-title"
-                    className="rounded-md border border-input px-3 py-2 text-sm break-all text-muted-foreground"
-                  >
-                    {body.trim() ? buildAskRepoQuestionTitle(body) : "質問内容から自動で作られます"}
-                  </p>
-                </div>
+        {step === "confirm" &&
+          (isQuestion ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-issue-question-title">タイトル（自動）</Label>
+              <p
+                id="create-issue-question-title"
+                className="rounded-md border border-input px-3 py-2 text-sm break-all text-muted-foreground"
+              >
+                {body.trim() ? buildAskRepoQuestionTitle(body) : "質問内容から自動で作られます"}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="create-issue-title">タイトル</Label>
+                {autoFilled.title && <AutoBadge />}
+              </div>
+              {isQuickSuggesting ? (
+                <FieldSkeleton />
               ) : (
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="create-issue-title">タイトル</Label>
-                    {autoFilled.title && <AutoBadge />}
-                  </div>
-                  {isQuickSuggesting ? (
-                    <FieldSkeleton />
-                  ) : (
-                    <Input
-                      id="create-issue-title"
-                      value={title}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="Issueのタイトル"
-                      className="md:text-sm"
-                      autoFocus
-                    />
-                  )}
-                </div>
-              ))}
-
-            {/* 本文の入力欄は種別で変えない（#1641）。質問でも画像の貼り付け・ドラッグ&ドロップと
-                `#123`のIssue補完が使えるようにするのがこの統合の主目的で、以前の質問ダイアログは
-                素のTextareaだったためどちらも使えなかった。
-                #1605以降、編集できるのは入力ステップだけ。確認ステップでは畳んだ1行にして
-                「内容を編集」で戻す——書く場所を2つ持つと、どちらが本文なのか分からなくなる */}
-            {step === "input" ? (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="create-issue-body">{isQuestion ? "質問内容" : "内容"}</Label>
-                {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
-                    入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
-                {bodyPrefix && (
-                  <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">
-                      以下は本文の先頭に自動で付きます（編集不可）
-                    </p>
-                    <p className="mt-1 text-xs break-all whitespace-pre-wrap text-foreground">
-                      {bodyPrefix.trim()}
-                    </p>
-                  </div>
-                )}
-                <MentionTextarea
-                  id="create-issue-body"
-                  value={body}
-                  onChange={setBody}
-                  issueSuggestions={issueSuggestions}
-                  onUploadingChange={setIsImageUploading}
-                  repositoryFullName={repositoryFullName}
-                  placeholder={
-                    isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"
-                  }
-                  className="min-h-32 md:text-sm"
+                <Input
+                  id="create-issue-title"
+                  value={title}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  placeholder="Issueのタイトル"
+                  className="md:text-sm"
                   autoFocus
                 />
-                <div className="flex flex-wrap gap-2">
-                  <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
-                </div>
-                {/* 何が自動で決まるかは、リポジトリを指定したかどうかで変わる（#1733） */}
+              )}
+            </div>
+          ))}
+
+        {/* 本文の入力欄は種別で変えない（#1641）。質問でも画像の貼り付け・ドラッグ&ドロップと
+            `#123`のIssue補完が使えるようにするのがこの統合の主目的で、以前の質問ダイアログは
+            素のTextareaだったためどちらも使えなかった。
+            #1605以降、編集できるのは入力ステップだけ。確認ステップでは畳んだ1行にして
+            「内容を編集」で戻す——書く場所を2つ持つと、どちらが本文なのか分からなくなる */}
+        {step === "input" ? (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="create-issue-body">{isQuestion ? "質問内容" : "内容"}</Label>
+            {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
+                入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
+            {bodyPrefix && (
+              <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
                 <p className="text-xs text-muted-foreground">
-                  {hasPickedRepository
-                    ? isQuestion
-                      ? "リポジトリは指定したものを使います。質問する前に確認できます。"
-                      : "タイトル・ラベルは内容から決めます。リポジトリは指定したものを使います。"
-                    : isQuestion
-                      ? "リポジトリは内容から決めます。質問する前に確認できます。"
-                      : "リポジトリ・タイトル・ラベルは内容から決めます。作成する前に確認できます。"}
+                  以下は本文の先頭に自動で付きます（編集不可）
                 </p>
-                {quickSuggestNotConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    Claudeのトークンが設定されていないため、自動では決められません。次の画面で自分で選んでください。
+                <p className="mt-1 text-xs break-all whitespace-pre-wrap text-foreground">
+                  {bodyPrefix.trim()}
+                </p>
+              </div>
+            )}
+            <MentionTextarea
+              id="create-issue-body"
+              value={body}
+              onChange={setBody}
+              issueSuggestions={issueSuggestions}
+              onUploadingChange={setIsImageUploading}
+              repositoryFullName={repositoryFullName}
+              placeholder={
+                isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"
+              }
+              className="min-h-32 md:text-sm"
+              autoFocus
+            />
+            <div className="flex flex-wrap gap-2">
+              <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+            </div>
+            {/* 何が自動で決まるかは、リポジトリを指定したかどうかで変わる（#1733） */}
+            <p className="text-xs text-muted-foreground">
+              {hasPickedRepository
+                ? isQuestion
+                  ? "リポジトリは指定したものを使います。質問する前に確認できます。"
+                  : "タイトル・ラベルは内容から決めます。リポジトリは指定したものを使います。"
+                : isQuestion
+                  ? "リポジトリは内容から決めます。質問する前に確認できます。"
+                  : "リポジトリ・タイトル・ラベルは内容から決めます。作成する前に確認できます。"}
+            </p>
+            {quickSuggestNotConfigured && (
+              <p className="text-xs text-muted-foreground">
+                Claudeのトークンが設定されていないため、自動では決められません。次の画面で自分で選んでください。
+              </p>
+            )}
+            {quickSuggestError && (
+              <p className="text-xs text-destructive">{quickSuggestError}</p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <Label>{isQuestion ? "質問内容" : "内容"}</Label>
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                {body.trim() || "（未入力）"}
+              </span>
+              <Button variant="outline" size="xs" onClick={handleBackToInput}>
+                <Pencil />
+                内容を編集
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === "confirm" && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label>ラベル</Label>
+              {autoFilled.labels && <AutoBadge />}
+            </div>
+            {isQuickSuggesting ? (
+              <FieldSkeleton />
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <LabelPicker
+                    labels={selectableLabels}
+                    selectedNames={selectedLabels}
+                    onToggle={toggleLabel}
+                    isLoading={isMetaLoading}
+                    trigger={
+                      <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                        {selectedLabels.length > 0
+                          ? `ラベル (${selectedLabels.length})`
+                          : "ラベルを選択"}
+                        <ChevronDown className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  {/* 推定をやり直す口（#1605）。タイトルを機械生成する質問では出さない */}
+                  {!isQuestion && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      disabled={
+                        !body.trim() || !repositoryFullName || isMetaLoading || isSuggesting
+                      }
+                      onClick={handleGenerateSuggestion}
+                    >
+                      {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+                      タイトル・ラベルを自動生成
+                    </Button>
+                  )}
+                </div>
+                {/* ラベルが1つも決まらなかったことを明示する（#1710）。
+                    空欄と見分けが付かないままだと、ラベルの付かないIssueがそのまま作られる */}
+                {labelSuggestionMissed && !suggestNotConfigured && (
+                  <p className="text-xs text-destructive">
+                    ラベルは自動で決められませんでした。選ぶか、生成し直せます。
                   </p>
                 )}
-                {quickSuggestError && (
-                  <p className="text-xs text-destructive">{quickSuggestError}</p>
+                {suggestNotConfigured && (
+                  <p className="text-xs text-muted-foreground">
+                    Claudeのトークンが設定されていません
+                  </p>
                 )}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                <Label>{isQuestion ? "質問内容" : "内容"}</Label>
-                <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2">
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                    {body.trim() || "（未入力）"}
-                  </span>
-                  <Button variant="outline" size="xs" onClick={handleBackToInput}>
-                    <Pencil />
-                    内容を編集
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {step === "confirm" && (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Label>ラベル</Label>
-                  {autoFilled.labels && <AutoBadge />}
-                </div>
-                {isQuickSuggesting ? (
-                  <FieldSkeleton />
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <LabelPicker
-                        labels={selectableLabels}
-                        selectedNames={selectedLabels}
-                        onToggle={toggleLabel}
-                        isLoading={isMetaLoading}
-                        trigger={
-                          <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
-                            {selectedLabels.length > 0
-                              ? `ラベル (${selectedLabels.length})`
-                              : "ラベルを選択"}
-                            <ChevronDown className="size-3.5" />
-                          </Button>
-                        }
-                      />
-                      {/* 推定をやり直す口（#1605）。タイトルを機械生成する質問では出さない */}
-                      {!isQuestion && (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          disabled={
-                            !body.trim() || !repositoryFullName || isMetaLoading || isSuggesting
-                          }
-                          onClick={handleGenerateSuggestion}
+                {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
+                {selectedLabels.filter(isSelectableLabelName).length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {selectedLabels.filter(isSelectableLabelName).map((name) => {
+                      const label = labels.find((l) => l.name === name);
+                      return (
+                        <span
+                          key={name}
+                          className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                          style={getLabelBadgeStyle(label?.color ?? "#64748b")}
                         >
-                          {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
-                          タイトル・ラベルを自動生成
-                        </Button>
-                      )}
-                    </div>
-                    {/* ラベルが1つも決まらなかったことを明示する（#1710）。
-                        空欄と見分けが付かないままだと、ラベルの付かないIssueがそのまま作られる */}
-                    {labelSuggestionMissed && !suggestNotConfigured && (
-                      <p className="text-xs text-destructive">
-                        ラベルは自動で決められませんでした。選ぶか、生成し直せます。
-                      </p>
-                    )}
-                    {suggestNotConfigured && (
-                      <p className="text-xs text-muted-foreground">
-                        Claudeのトークンが設定されていません
-                      </p>
-                    )}
-                    {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
-                    {selectedLabels.filter(isSelectableLabelName).length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {selectedLabels.filter(isSelectableLabelName).map((name) => {
-                          const label = labels.find((l) => l.name === name);
-                          return (
-                            <span
-                              key={name}
-                              className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                              style={getLabelBadgeStyle(label?.color ?? "#64748b")}
-                            >
-                              {name}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
+                          {name}
+                        </span>
+                      );
+                    })}
+                  </div>
                 )}
-              </div>
+              </>
             )}
-
-            {/* 実装オプション（`21.plan-required`等）はここでは選ばせない（#1580）。
-                どこでエージェントを止めるかの指定で、実行先が決まって初めて意味が決まるものが
-                混ざっている（撮影は無人実行専用・アーティファクトはローカル実行専用）。
-                起票の時点では実行先も実施時期も未定なので、「実装を開始」ダイアログで選ぶ */}
-
-            {/* 質問Issueに担当者は要らない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
-            {step === "confirm" && !isQuestion && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="create-issue-assignee">担当者</Label>
-                <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
-                  <SelectTrigger
-                    id="create-issue-assignee"
-                    className="h-9 w-full"
-                    disabled={isMetaLoading}
-                  >
-                    <SelectValue placeholder="担当者を選択" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">未設定</SelectItem>
-                    {assignees.map((login) => (
-                      <SelectItem key={login} value={login}>
-                        {login}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <ApiErrorMessage message={error ?? commentError} />
           </div>
+        )}
 
-          {step === "input" ? (
-            <DialogFooter>
-              {/* 推定を挟まず従来のフォームへ行く口。自動生成が失敗したときの行き先でもある */}
-              <Button variant="ghost" className="sm:mr-auto" onClick={handleSkipSuggestion}>
-                自分で入力する
-              </Button>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                キャンセル
-              </Button>
-              <Button
-                onClick={handleProceedToConfirm}
-                disabled={!canProceedFromInput(body) || isImageUploading || isQuickSuggesting}
+        {/* 実装オプション（`21.plan-required`等）はここでは選ばせない（#1580）。
+            どこでエージェントを止めるかの指定で、実行先が決まって初めて意味が決まるものが
+            混ざっている（撮影は無人実行専用・アーティファクトはローカル実行専用）。
+            起票の時点では実行先も実施時期も未定なので、「実装を開始」ダイアログで選ぶ */}
+
+        {/* 質問Issueに担当者は要らない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
+        {step === "confirm" && !isQuestion && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="create-issue-assignee">担当者</Label>
+            <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
+              <SelectTrigger
+                id="create-issue-assignee"
+                className="h-9 w-full"
+                disabled={isMetaLoading}
               >
-                {isQuickSuggesting ? <Loader2 className="animate-spin" /> : <ArrowRight />}
-                次へ
-              </Button>
-            </DialogFooter>
-          ) : (
-            <DialogFooter>
-              <Button variant="ghost" className="sm:mr-auto" onClick={handleBackToInput}>
-                <ArrowLeft />
-                戻る
-              </Button>
-              {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
-                  Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
-                  実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
-                  理由はダイアログのGitHub Actionsの選択肢の説明として出す */}
-              {!isQuestion && (
-                <Button
-                  variant="secondary"
-                  onClick={handleCreateAndStart}
-                  disabled={
-                    isSubmitting ||
-                    isQuickSuggesting ||
-                    !repositoryFullName ||
-                    !title.trim() ||
-                    isImageUploading
-                  }
-                >
-                  {isSubmitting ? "作成中..." : "作成+実装開始"}
-                </Button>
-              )}
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  isSubmitting ||
-                  isQuickSuggesting ||
-                  !repositoryFullName ||
-                  isImageUploading ||
-                  (isQuestion ? !body.trim() : !title.trim())
-                }
-              >
-                {isQuestion
-                  ? isSubmitting
-                    ? "送信中..."
-                    : "質問する"
-                  : isSubmitting
-                    ? "作成中..."
-                    : "作成"}
-              </Button>
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
+                <SelectValue placeholder="担当者を選択" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">未設定</SelectItem>
+                {assignees.map((login) => (
+                  <SelectItem key={login} value={login}>
+                    {login}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {/* 別ウィンドウを開けなかったときだけ出す（#1728）。押しても何も起きないと、
+            ボタンが壊れているのか自分の環境の設定なのかが分からない */}
+        {popOutBlocked && (
+          <p className="text-xs text-destructive">
+            ブラウザが別ウィンドウを止めました。このサイトのポップアップを許可してください。
+          </p>
+        )}
+
+        <ApiErrorMessage message={error ?? commentError} />
+      </div>
+    </>
+  );
+
+  const footer =
+    step === "input" ? (
+      <Chrome.Footer>
+        {/* 推定を挟まず従来のフォームへ行く口。自動生成が失敗したときの行き先でもある */}
+        <Button variant="ghost" className="sm:mr-auto" onClick={handleSkipSuggestion}>
+          自分で入力する
+        </Button>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          {cancelLabel ?? (isWindow ? "閉じる" : "キャンセル")}
+        </Button>
+        <Button
+          onClick={handleProceedToConfirm}
+          disabled={!canProceedFromInput(body) || isImageUploading || isQuickSuggesting}
+        >
+          {isQuickSuggesting ? <Loader2 className="animate-spin" /> : <ArrowRight />}
+          次へ
+        </Button>
+      </Chrome.Footer>
+    ) : (
+      <Chrome.Footer>
+        <Button variant="ghost" className="sm:mr-auto" onClick={handleBackToInput}>
+          <ArrowLeft />
+          戻る
+        </Button>
+        {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
+            Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
+            実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
+            理由はダイアログのGitHub Actionsの選択肢の説明として出す */}
+        {!isQuestion && (
+          <Button
+            variant="secondary"
+            onClick={handleCreateAndStart}
+            disabled={
+              isSubmitting ||
+              isQuickSuggesting ||
+              !repositoryFullName ||
+              !title.trim() ||
+              isImageUploading
+            }
+          >
+            {isSubmitting ? "作成中..." : "作成+実装開始"}
+          </Button>
+        )}
+        <Button
+          onClick={handleSubmit}
+          disabled={
+            isSubmitting ||
+            isQuickSuggesting ||
+            !repositoryFullName ||
+            isImageUploading ||
+            (isQuestion ? !body.trim() : !title.trim())
+          }
+        >
+          {isQuestion
+            ? isSubmitting
+              ? "送信中..."
+              : "質問する"
+            : isSubmitting
+              ? "作成中..."
+              : "作成"}
+        </Button>
+      </Chrome.Footer>
+    );
+
+  return (
+    <>
+      {isWindow ? (
+        // 別ウィンドウ（#1728）。ウィンドウ全体がこのフォームなので、見出しと操作を上下に固定し、
+        // 項目だけをスクロールさせる。実行先の選択（作成+実装開始）が出ている間は、その後ろに
+        // 作り終わったフォームを残さない
+        !startTargetIssue && (
+          <div className="flex h-full flex-col text-sm" onKeyDown={handleKeyDown}>
+            {header}
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{fields}</div>
+            {footer}
+          </div>
+        )
+      ) : (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+          <DialogContent className="sm:max-w-lg" onKeyDown={handleKeyDown}>
+            {header}
+            {/* 書いている内容ごと別ウィンドウへ移す（#1728）。**スマホでは出さない**——
+                ブラウザにウィンドウを並べる概念が無く、押しても別タブが開くだけで、
+                一覧を見ながら書くという目的が成立しない */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="absolute top-2 right-11 hidden md:inline-flex"
+              title="別ウィンドウで開く"
+              aria-label="別ウィンドウで開く"
+              onClick={handlePopOut}
+            >
+              <SquareArrowOutUpRight />
+            </Button>
+            {fields}
+            {footer}
+          </DialogContent>
+        </Dialog>
+      )}
       {/* 作成直後のオプション・実行先の選択（#1323・#1580）。実行先の既定はサブPCで、
           GitHub Actionsはフォールバック。作成フォームは閉じているため、Dialogの外側に並べて描画する */}
       {startTargetIssue && (
@@ -1157,7 +1327,11 @@ export function CreateIssueDialog({
           issue={startTargetIssue}
           open
           onOpenChange={(nextOpen) => {
-            if (!nextOpen) setStartTargetIssue(null);
+            if (nextOpen) return;
+            setStartTargetIssue(null);
+            // 別ウィンドウでは、実行先を選び終えた（または閉じた）時点でウィンドウごと閉じる
+            // （#1728）。作り終わったフォームだけが残っても、そこからできることは無い
+            if (isWindow) onOpenChange(false);
           }}
           // ラベル・コメント数の変化は、作成時と同じ経路（onCreated）で呼び出し側へ渡す。
           // 既存分があれば更新されるため、同じIssueが二重に並ぶことはない

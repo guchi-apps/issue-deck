@@ -51,6 +51,12 @@ type Step = {
   detail?: string;
   /** バンプPR本文の「## 更新履歴（生成された利用者向け文言）」セクションから抜き出した更新履歴 */
   changelog?: string;
+  /**
+   * バンプPR本文の「## 使い方（生成された利用者向け文言）」セクションから抜き出した操作手順（#1729）。
+   * 更新履歴が「何が変わったか」であるのに対し、こちらは「どう使うか」。**画面で使える変化が
+   * 無いリリースでは生成されない**ため、更新履歴があっても無いことがある。
+   */
+  usage?: string;
   /** マージ待ちPRの最新コミットのCI状態。バッジとして表示する */
   ciState?: CiState | null;
   /** マージ待ちPRがbaseとコンフリクトしているか。判定中・取得できない場合はnull */
@@ -157,6 +163,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = bump.version ? `次バージョン: v${bump.version}` : undefined;
     steps[0].detail = bump.reason ?? undefined;
     steps[0].changelog = bump.changelog ?? undefined;
+    steps[0].usage = bump.usage ?? undefined;
     // CIが実行中の間は自動マージ待ちの「進行中」、それ以外はスマホから1タップでマージできる「要操作」。
     const waitingCi = bump.ciState === "pending";
     steps[1].state = waitingCi ? "active" : "action";
@@ -339,6 +346,19 @@ export function ReleaseProgress({
                 <span className="text-xs font-medium text-muted-foreground">更新履歴（利用者向け）</span>
                 <p className="max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-line text-muted-foreground">
                   {step.changelog}
+                </p>
+              </div>
+            )}
+            {/* 「何が変わったか」（更新履歴）のすぐ下に「どう使うか」を置く（#1729）。
+                判断根拠・更新履歴と違い読み手がそのまま操作に使う文章なので、色と本文の
+                濃さで一段強くする。emeraldは実装ボット・オープンPRと同じ「進んだ」側の色 */}
+            {step.usage && (
+              <div className="ml-6 flex flex-col gap-0.5">
+                <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  使い方（利用者向け）
+                </span>
+                <p className="max-h-32 overflow-y-auto rounded-md border border-emerald-500/40 bg-emerald-500/5 p-2 text-xs whitespace-pre-line">
+                  {step.usage}
                 </p>
               </div>
             )}

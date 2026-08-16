@@ -319,6 +319,18 @@ export function computeOverviewStats(
 // 直前のオブジェクト参照を再利用してマージする。これにより、ポーリングのたびに
 // 全Issueのオブジェクト参照が入れ替わることで発生する不要な再レンダリング・副作用の
 // 再実行（コメント欄の一瞬の再読み込み表示など）を防ぐ。
+/**
+ * 作成したIssueを一覧へ入れる。**すでに同じIssueがあれば置き換える**——作成直後は
+ * ポーリングが先に反映していることがあり、単純に先頭へ足すと同じIssueが2行並ぶ（#449）。
+ * 自分の画面で作った場合（`handleIssueCreated`）と、別ウィンドウで作られた場合（#1728）の
+ * どちらもここを通す。
+ */
+export function upsertIssue(issues: Issue[], issue: Issue): Issue[] {
+  return issues.some((item) => item.id === issue.id)
+    ? issues.map((item) => (item.id === issue.id ? issue : item))
+    : [issue, ...issues];
+}
+
 export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue[] {
   const prevById = new Map(prevIssues.map((issue) => [issue.id, issue] as const));
   return nextIssues.map((issue) => {

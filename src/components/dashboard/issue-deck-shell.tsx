@@ -56,6 +56,7 @@ import {
   type PendingCheckUserToast,
 } from "@/lib/check-user-notification";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
+import { subscribeIssueCreated } from "@/lib/issue-broadcast";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import type { NotificationTarget } from "@/lib/notifications";
@@ -70,6 +71,7 @@ import {
   getAssigneeOptions,
   reconcileIssues,
   sortIssues,
+  upsertIssue,
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
@@ -245,11 +247,7 @@ export function IssueDeckShell({
   function handleIssueCreated(issue: Issue) {
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
-    setIssues((prev) =>
-      prev.some((item) => item.id === issue.id)
-        ? prev.map((item) => (item.id === issue.id ? issue : item))
-        : [issue, ...prev],
-    );
+    setIssues((prev) => upsertIssue(prev, issue));
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
   }
@@ -257,6 +255,11 @@ export function IssueDeckShell({
   function handleIssueUpdated(issue: Issue) {
     setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
   }
+
+  // 別ウィンドウ（`/issues/new`）で作られたIssueを一覧へ加える（#1728）。
+  // **選択中のIssueは動かさない**——別ウィンドウで書いているのはこの画面を見ながら書くためで、
+  // 作成のたびに見ていた画面が切り替わると目的と逆になる。
+  useEffect(() => subscribeIssueCreated((issue) => setIssues((prev) => upsertIssue(prev, issue))), []);
 
   // 削除したIssueはissuesから消えた時点で選択中Issueの解決に失敗するため、URLは触らない。
   // 触ると、スマホの削除直後の戻る操作（MobileIssueDetailがonBackを続けて呼ぶ）と
