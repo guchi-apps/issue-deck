@@ -2,6 +2,7 @@
 
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import type { BranchFlow } from "@/lib/branch-flow";
 
 type MobileFlowScreenProps = {
@@ -45,7 +46,13 @@ export function MobileFlowScreen({
       onRefresh={onRefresh}
       className="h-full"
       footerSpacing
-      headerActions={<MobileDispatchStatusButton />}
+      headerActions={
+        <>
+          <MobileDispatchStatusButton />
+          {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
+          <MobileNotificationButton />
+        </>
+      }
     />
   );
 }

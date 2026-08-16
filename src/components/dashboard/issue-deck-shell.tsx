@@ -16,6 +16,7 @@ import { GithubReferenceNavigationProvider } from "@/components/dashboard/github
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
+import { NotificationProvider } from "@/components/dashboard/notification-state";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import {
   MobileBottomNav,
@@ -806,6 +807,13 @@ export function IssueDeckShell({
 
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
+      {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
+          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る */}
+      <NotificationProvider
+        repositories={repositories}
+        issues={issues}
+        pullRequests={crossRepositoryPullRequests}
+      >
       <div className="flex h-full flex-col">
         <TopBar
           currentUser={currentUser}
@@ -820,9 +828,6 @@ export function IssueDeckShell({
           onAskCrossRepoQuestion={() =>
             openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
           }
-          repositories={repositories}
-          issues={issues}
-          pullRequests={crossRepositoryPullRequests}
           onOpenNotificationTarget={openNotificationTarget}
           /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
           onOpenIssue={openIssueUrl}
@@ -1224,6 +1229,7 @@ export function IssueDeckShell({
           onDismiss={handleDismissCheckUserToast}
         />
       </div>
+      </NotificationProvider>
     </GithubReferenceNavigationProvider>
   );
 }

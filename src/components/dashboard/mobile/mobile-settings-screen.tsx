@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { AccountSection } from "@/components/dashboard/settings/account-section";
 import {
@@ -79,6 +80,8 @@ export function MobileSettingsScreen({
         </button>
         <h1 className="flex-1 text-base font-semibold">{activeSection?.label ?? "設定"}</h1>
         <MobileDispatchStatusButton />
+        {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
+        <MobileNotificationButton />
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">

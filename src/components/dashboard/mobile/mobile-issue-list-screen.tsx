@@ -6,6 +6,7 @@ import { ArrowLeft, ChevronUp, MessageCircleQuestion, Plus, SlidersHorizontal } 
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import {
   MobileIssueFilterSheet,
   type MobileIssueLocalFilters,
@@ -202,6 +203,8 @@ export function MobileIssueListScreen({
           {headerActions}
           {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端で全画面そろえる */}
           <MobileDispatchStatusButton dispatch={dispatch} />
+          {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
+          <MobileNotificationButton />
         </div>
       </header>
 

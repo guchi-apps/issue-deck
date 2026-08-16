@@ -205,6 +205,20 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(screen.getByText("セッション 3/12")).toBeTruthy();
   });
 
+  // 通知ベル（#1772）。PCのトップバー（実行キュー → ベル → アバター）と同じ順序にする
+  it("ヘッダーの通知ベルは実行状況の右隣・設定の左に置く", () => {
+    dispatchState = makeDispatch({ hosts: [makeHost()] });
+    const { container } = renderHome();
+
+    const labels = Array.from(container.querySelectorAll("header button")).map((button) =>
+      button.getAttribute("aria-label"),
+    );
+
+    expect(labels).toContain("対応が必要なもの");
+    expect(labels.indexOf("対応が必要なもの")).toBe(labels.indexOf("実行状況") + 1);
+    expect(labels.indexOf("設定")).toBe(labels.indexOf("対応が必要なもの") + 1);
+  });
+
   it("右下の丸ボタンからIssueの作成と質問ができる", () => {
     const onCreateIssue = vi.fn();
     const onAskCrossRepoQuestion = vi.fn();

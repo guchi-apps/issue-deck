@@ -641,8 +641,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを
   7〜8回消費するため、開いている間だけポーリングする。横断のサマリは
   `GET /api/repositories/release-pending-merges`
-  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーの通知ベル（後述）と
-  **モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
+  （`hooks/use-repository-release-statuses.ts`）で、通知ベル（後述。PC・スマホとも
+  `NotificationProvider`が1回だけ取る）と**モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
   （`idle`/`progressing`/`action_required`/`error`）と表示文言は、どちらの経路も
   [`lib/github/release-button-status.ts`](../src/lib/github/release-button-status.ts)の
   `summarizeReleaseStatus`・`describeReleaseStatusBadge`だけを通す**（画面ごとに分岐を書くと
@@ -654,8 +654,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
   マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
   取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
-- **PCヘッダー右端の通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
+- **通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
   （#1614。[`components/dashboard/notification-button.tsx`](../src/components/dashboard/notification-button.tsx)）。
+  PCはヘッダー右端、スマホは各画面のヘッダーの実行状況の右隣に置く（#1772）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
   同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
   リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「完了したPR」と同じ
@@ -665,6 +666,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `filterPullRequestsByView`から得る。ここで独自判定を書くと、同じ状態が画面ごとに別の言葉で出る。
   - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
+    **材料を用意するのは`NotificationProvider`だけ**（#1772。
+    [`components/dashboard/notification-state.tsx`](../src/components/dashboard/notification-state.tsx)）。
+    ベルを置く場所がPCの1か所ではなくなったため、各ボタンが自分でフックを呼ぶとポーリングが
+    増える——PCのトップバーは`hidden md:flex`でCSSで隠れているだけで、スマホでもmountされたまま
+    だからで、どちらのレイアウトかはJS側から判別できない。
   - **同じ操作を2行に出さない。** リリースのマージ待ちとして出したPRと、確認待ちとして出した
     Issueに紐づくPRは、PRの区分から落とす（Issue詳細に`issue-merge-button.tsx`があるので
     操作は失われず、左メニューの「確認待ち」件数とも食い違わない）。
@@ -672,8 +678,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     しなくてよいものを並べるとベルを開く意味が薄れる。
   - **TopBarの絞り込みには追随しない。** 横断で見る場所なので、Issue側と同じく絞り込み前の
     集合を渡す（`IssueDeckShell`の`notifiablePullRequests`）。
-  - **スマホは対象外**（ヘッダー自体が`hidden md:flex`）。スマホの確認待ち・手作業待ちは
-    ホーム画面の件数、リリースはリポジトリ画面のシートという別経路のまま。
+  - **スマホは中身を共有し、出し方だけを変える**（#1772。
+    [`components/dashboard/notification-content.tsx`](../src/components/dashboard/notification-content.tsx)を
+    PCのポップオーバーと[`components/dashboard/mobile/mobile-notification-button.tsx`](../src/components/dashboard/mobile/mobile-notification-button.tsx)の
+    ボトムシートが共有する。実行キューの`dispatch-queue-content.tsx`と同じ三分割）。
+    置き場所は**実行状況（#1638）を置いている画面すべての、その右隣**で、PCの並び
+    （実行キュー → ベル → アバター）と同じ順序になる。**遷移先だけはスマホ側が自分で決める**
+    ——PCは`pane`を切り替えれば済むが、スマホは`mscreen`を進めないと画面が変わらない。
+    ホーム画面の件数・リポジトリ画面のリリースシートという従来の経路もそのまま残る。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
