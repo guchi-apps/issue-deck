@@ -287,10 +287,10 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 `"version"` lifecycleスクリプトへ`RELEASE_CHANGELOG`環境変数として渡す（#800）。
 受け取る側を持つかどうかはリポジトリごとに違う。
 
-| `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設） |
+| `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設）・**`issue-deck`**（#1764で新設） |
 |---|---|
 | 追記はするが**枠だけ**（`RELEASE_CHANGELOG`を読まない） | `signaly`（`scripts/bump_version.py`が`frontend/changelog.js`へスタブを足す。`bump-command`経由のため`npm`のlifecycleではない） |
-| 何もしない（バージョンだけが上がる） | `issue-deck`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
+| 何もしない（バージョンだけが上がる） | `car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
 
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
@@ -302,14 +302,15 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 どうなれば成功か」。**画面で使える変化が無いリリースでは空になる**ため、更新履歴があっても
 使い方が無いことがある。
 
-| `RELEASE_USAGE`を反映する | （まだ無い。`RELEASE_CHANGELOG`を反映している6リポジトリへリポジトリごとのIssueで順次対応する） |
+| `RELEASE_USAGE`を反映する | **`issue-deck`**（#1764。`src/lib/changelog.ts`の`usage`として持ち、設定 →「更新履歴」に出す。最初の1件） |
 |---|---|
-| 受け取れる状態にある | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・`clip-hive`・`ops-dashboard`（`"version"` lifecycleスクリプトを持つ） |
+| 受け取れる状態にある | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・`clip-hive`・`ops-dashboard`（`"version"` lifecycleスクリプトを持つ。反映はリポジトリごとのIssueで順次対応する） |
 | 生成されるが使われない | 上記以外（`RELEASE_CHANGELOG`と同じ扱い。バンプPR本文には出る） |
 
 **issue-deckの画面では、バンプPRが開いている間だけスマホのリリースシートに「使い方（利用者向け）」
 として出る**（`src/components/dashboard/release-progress.tsx`）。恒久的な置き場所は各アプリの
-更新履歴画面で、そちらが本来の届け先。受け取り方は
+更新履歴画面で、そちらが本来の届け先。issue-deck自身の届け先は設定 →「更新履歴」
+（`src/components/dashboard/settings/changelog-section.tsx`・#1764）。受け取り方は
 [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「`RELEASE_USAGE`（使い方）の受け取り方」を参照。
 
 ```bash

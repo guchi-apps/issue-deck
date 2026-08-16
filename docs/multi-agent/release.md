@@ -70,6 +70,12 @@ major/minor/patchのいずれでもない不正な場合はpatchにフォール�
 リリースで無理に手順を書かせると、読み手が毎回それを読んで空振りすることになるため。
 空のときはPR本文にセクションごと出さない。
 
+**issue-deck自身もこの契約の受け取り側になった**（#1764）。`package.json`の`"version"`
+lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changelog.ts`の先頭へ
+エントリを足し、設定 →「更新履歴」に出る。`changelog`は`changes`、`usage`は同じエントリの
+`usage`として持つ（`changes`へ混ぜない）。バンプ時に依存はインストールされないため、
+スクリプトはNode標準モジュールだけで書き、`preversion`は作らない。
+
 ### 画面から上げ幅を指定する（#1548）
 
 **「生成されたPR上でバージョンを直接修正する」は実際には間に合わない。** バンプPRはCI通過後に

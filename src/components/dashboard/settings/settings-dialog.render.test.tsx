@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import packageJson from "../../../../package.json";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 
 // フックの戻り値は毎レンダー同じ参照を返す（都度 vi.fn() を作ると identity が変わり続け、
@@ -125,11 +126,28 @@ describe("SettingsDialog", () => {
   it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
     renderDialog();
 
-    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態"]) {
+    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
     expect(screen.getByLabelText("サブPCの同時実行数")).toBeTruthy();
+  });
+
+  it("バージョンはアカウントを開かなくても見え、押すと更新履歴が開く（#1764）", () => {
+    renderDialog();
+
+    // 既定は実行設定。区分を切り替えてもバージョンは左タブの最下部に出たまま。
+    const version = screen.getByRole("button", { name: /Issue Deck v/ });
+    expect(version.textContent).toContain(`v${packageJson.version}`);
+
+    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    expect(screen.getByRole("button", { name: /Issue Deck v/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Issue Deck v/ }));
+    expect(screen.getByText("これまでの更新内容")).toBeTruthy();
+    // 更新履歴の先頭は現行バージョンで、「使用中」の印が付く
+    expect(screen.getByText("使用中")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: `v${packageJson.version}` })).toBeTruthy();
   });
 
   it("保存ボタンを持つのは実行設定だけで、即時実行の区分には無い（#1539）", () => {
