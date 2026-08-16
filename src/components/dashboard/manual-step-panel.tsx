@@ -79,7 +79,11 @@ export function ManualStepPanel({
         <strong className="font-medium">実装エージェントへは送りません</strong>
         （「開始」ボタンは出しません）。下の説明にある手順を自分で実行してください。
       </p>
+      {/* 本文の見出しと同じ順に並べる（#1730でテンプレートの先頭に「この作業でできるように
+          なること」が入り、「完了の確認方法」が「やること」の直後へ移った）。
+          テンプレートの見出しを変えるときはここも揃える（docs/multi-agent/labels.md「本文」） */}
       <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
+        <li>「この作業でできるようになること」でやる意味と急ぎ具合を確かめる</li>
         <li>「前提条件」（デバイス・ディレクトリ・ブランチ・先に必要なIssue／PR）を満たしているか確かめる</li>
         <li>「やること」の手順を実行する</li>
         <li>「完了の確認方法」で効いたことを確かめる</li>
