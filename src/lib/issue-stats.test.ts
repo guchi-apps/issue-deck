@@ -4,6 +4,7 @@ import {
   computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCounts,
+  computeNavCountsForFilters,
   computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
@@ -714,6 +715,69 @@ describe("time-dependent stats", () => {
       const counts = computeNavCounts(openIssues, allIssues, null);
       expect(counts.all).toBe(1);
       expect(counts["recently-merged"]).toBe(1);
+    });
+  });
+
+  describe("computeNavCountsForFilters", () => {
+    const listFilters = {
+      q: "",
+      repos: [] as string[],
+      state: "open" as const,
+      labels: [] as string[],
+      assignee: null,
+    };
+
+    it("状態の絞り込みを適用した件数を返す（close済みを含めない）", () => {
+      const issues = [
+        makeIssue({ id: "1" }),
+        makeIssue({ id: "2", state: "closed", closedAt: "2026-01-09T10:00:00.000Z" }),
+      ];
+
+      expect(computeNavCountsForFilters(issues, listFilters, null).all).toBe(1);
+    });
+
+    it("ラベル・担当者の絞り込みも適用する", () => {
+      const bugLabel = { name: "30.bug", color: "red", description: null };
+      const issues = [
+        makeIssue({ id: "1", labels: [bugLabel], assignee: { login: "me" } }),
+        makeIssue({ id: "2", labels: [bugLabel], assignee: null }),
+        makeIssue({ id: "3", labels: [], assignee: { login: "me" } }),
+      ];
+
+      expect(
+        computeNavCountsForFilters(issues, { ...listFilters, labels: ["30.bug"] }, null).all,
+      ).toBe(2);
+      expect(
+        computeNavCountsForFilters(issues, { ...listFilters, assignee: "me" }, null).all,
+      ).toBe(2);
+    });
+
+    it("close済みIssueが対象のビューは状態の絞り込みを無視して数える", () => {
+      const issues = [
+        makeIssue({ id: "1" }),
+        makeIssue({
+          id: "2",
+          state: "closed",
+          projectStatus: "Done",
+          closedAt: "2026-01-09T10:00:00.000Z",
+        }),
+      ];
+
+      const counts = computeNavCountsForFilters(issues, listFilters, null);
+      expect(counts.all).toBe(1);
+      expect(counts["recently-merged"]).toBe(1);
+    });
+
+    it("一覧の絞り込み結果と件数が一致する", () => {
+      const issues = [
+        makeIssue({ id: "1" }),
+        makeIssue({ id: "2", state: "closed", closedAt: "2026-01-09T10:00:00.000Z" }),
+        makeIssue({ id: "3", assignee: { login: "other" } }),
+      ];
+      const filters = { ...listFilters, assignee: "other" };
+
+      const displayed = applyIssueFilters(filterIssuesByView(issues, "all", null), filters);
+      expect(computeNavCountsForFilters(issues, filters, null).all).toBe(displayed.length);
     });
   });
 

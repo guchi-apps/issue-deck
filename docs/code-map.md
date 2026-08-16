@@ -83,6 +83,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
+  設定の「状態」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
+  レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
+  同じバーの上に立つ縦の目盛りで示す。** 以前は残量を描いていたので消費が進むほどバーが縮み、
+  経過時間も別の細いバーとして下に並んでいた。**片方だけ旧表示に戻さない**——同じ画面に
+  「伸びるバー」と「縮むバー」が混在すると、どちらの向きで読むのかが行ごとに変わる。
+  shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
+  （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
+  リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
@@ -135,6 +144,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
   サブPCの質問セッションで、リポジトリの絞り込み条件（ワークフロー不要）も実行先の選択も
   別物になるため。
+- **そのダイアログは2ステップで、既定は「内容を書く」だけ**（#1605）。開いた直後に出るのは
+  種別と本文の入力欄で、リポジトリ・タイトル・ラベル・担当者は画面に無い。「次へ」を押すと
+  `POST /api/issues/quick-suggest`が本文からリポジトリ・タイトル・ラベルを決め、値が入った
+  確認ステップ（＝従来のフォームそのもの）へ移る。ステップの初期値と遷移条件は
+  [`lib/quick-issue.ts`](../src/lib/quick-issue.ts)（`resolveInitialQuickStep`・
+  `canProceedFromInput`）。
+  **確認を飛ばして作成する経路を作ってはいけない。** リポジトリを外したまま作ると、押した本人から
+  見えないまま別リポジトリへIssueが立ち、そのリポジトリの無人実行の母集団に入る。**逆に、推定の
+  失敗で作成を止めてもいけない**——トークン未設定（501）・生成失敗のときは値が空のまま確認
+  ステップへ進む（入力ステップの「自分で入力する」も同じ行き先で、こちらはClaudeを呼ばない）。
+  推定APIの中身は「Claudeでリポジトリを決める → そのリポジトリのラベルを取る →
+  既存の`generateIssueSuggestion`でタイトル・ラベルを作る」の3段で、
+  **ラベル候補がリポジトリごとに違うため1回のClaude呼び出しにまとめられない**。
+  リポジトリの推定材料は[`lib/claude/repository-suggest.ts`](../src/lib/claude/repository-suggest.ts)が
+  組み立てる「リポジトリ名＋直近のopen Issueのタイトル数件」で、`Repository`に`description`を
+  足さずに済ませている。**候補一覧に無いフルネームは採らない**（`pickSuggestedRepository`）。
+  **種別（Issue／質問）だけはこの自動化の対象外**で、上のとおり自動判定しない。
+  Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
+  （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 

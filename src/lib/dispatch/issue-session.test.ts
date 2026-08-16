@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  compactIssueSessionLabel,
   findSessionForIssue,
   isSessionWaitingInput,
   shortIssueSessionLabel,
@@ -151,6 +152,23 @@ describe("summarizeIssueSession", () => {
 
   it("終了コードが取れなければ補足を出さない", () => {
     expect(summarizeIssueSession(session({ state: "FAILED" })).detail).toBeNull();
+  });
+});
+
+/**
+ * #1676。起動ジョブの行（「サブPCで起動しました」）をセッションの行へ畳んだときの文言。
+ * **`summarizeIssueSession`の`shortLabel`にホスト名を添えるだけ**で、分岐を持たない。
+ */
+describe("compactIssueSessionLabel", () => {
+  it("ホスト名と短い言い方をつなぐ", () => {
+    expect(compactIssueSessionLabel(session())).toBe("サブPC・実行中");
+    expect(compactIssueSessionLabel(session({ activity: "NOT_STARTED" }))).toBe(
+      "サブPC・まだ開始していません",
+    );
+    expect(compactIssueSessionLabel(session({ activity: "WAITING_INPUT" }))).toBe(
+      "サブPC・入力を待っています",
+    );
+    expect(compactIssueSessionLabel(session({ state: "FAILED" }))).toBe("サブPC・異常終了");
   });
 });
 

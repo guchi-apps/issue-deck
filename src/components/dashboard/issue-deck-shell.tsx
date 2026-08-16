@@ -854,8 +854,6 @@ export function IssueDeckShell({
                 <MobileReposScreen
                   repositories={repositories}
                   onSelectRepository={selectRepository}
-                  onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
-                  onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
                   onSetRepositoryFavorite={handleSetRepositoryFavorite}
                 />
               )}

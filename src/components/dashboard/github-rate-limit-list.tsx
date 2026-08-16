@@ -1,9 +1,9 @@
 "use client";
 
-import { Progress } from "@/components/ui/progress";
+import { UsageMeter } from "@/components/dashboard/usage-meter";
 import type { InstallationRateLimit, RateLimitResource } from "@/hooks/use-github-rate-limit";
 import { useNow } from "@/hooks/use-now";
-import { calcRemainingTimePercent, formatResetAt } from "@/lib/format-reset";
+import { calcElapsedTimePercent, formatResetAt, formatResetSentence } from "@/lib/format-reset";
 
 type GithubRateLimitListProps = {
   data: InstallationRateLimit[] | null;
@@ -20,28 +20,22 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60_000;
  */
 function RateLimitResourceRow({ resource, now }: { resource: RateLimitResource; now: number | null }) {
   const remainingPercent = resource.limit > 0 ? (resource.remaining / resource.limit) * 100 : 0;
-  const resetAt = now !== null ? formatResetAt(resource.reset, now) : null;
-  const remainingTimePercent =
-    now !== null ? calcRemainingTimePercent(resource.reset, RATE_LIMIT_WINDOW_MS, now) : null;
+  // GitHubは消費数も返すので、残量からの引き算ではなくそちらを使う。
+  const usedPercent = resource.limit > 0 ? (resource.used / resource.limit) * 100 : 0;
 
   return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">{resource.label}</span>
-        <span className="text-muted-foreground">
-          残り {Math.round(remainingPercent)}% ({resource.remaining} / {resource.limit})
-        </span>
-      </div>
-      <Progress value={remainingPercent} />
-      {resetAt && <p className="mt-1 text-xs text-muted-foreground">リセット: {resetAt}</p>}
-      {remainingTimePercent !== null && (
-        <Progress
-          value={remainingTimePercent}
-          className="mt-1 h-0.5"
-          indicatorClassName="bg-muted-foreground/40"
-        />
-      )}
-    </div>
+    <UsageMeter
+      label={resource.label}
+      labelMuted
+      usedPercent={usedPercent}
+      remainingPercent={remainingPercent}
+      remainingSuffix={`(${resource.remaining.toLocaleString()} / ${resource.limit.toLocaleString()})`}
+      elapsedPercent={
+        now !== null ? calcElapsedTimePercent(resource.reset, RATE_LIMIT_WINDOW_MS, now) : null
+      }
+      resetSentence={now !== null ? formatResetSentence(resource.reset, now) : null}
+      resetTitle={now !== null ? formatResetAt(resource.reset, now) : null}
+    />
   );
 }
 

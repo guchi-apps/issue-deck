@@ -13,7 +13,7 @@ import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
   computeLabelSummary,
-  computeNavCounts,
+  computeNavCountsForFilters,
   filterIssuesByView,
   getAssigneeOptions,
   sortIssues,
@@ -80,25 +80,25 @@ export function MobileRepoIssuesScreen({
     [issues, repository.fullName],
   );
 
+  // 一覧と件数の両方で使う絞り込み条件。片方だけ条件が欠けると、ビュー名の隣に出る件数と
+  // 実際に並ぶ件数が食い違う（#1689）。
+  const listFilters = useMemo(
+    () => ({ q: "", repos: [] as string[], state, labels, assignee }),
+    [state, labels, assignee],
+  );
+
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(repoIssues, view, currentUserLogin);
-    const filtered = applyIssueFilters(scoped, {
-      q: "",
-      repos: [],
-      state,
-      labels,
-      assignee,
-    });
-    return sortIssues(filtered, sort, view);
-  }, [repoIssues, view, currentUserLogin, state, labels, assignee, sort]);
+    return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
+  }, [repoIssues, view, currentUserLogin, listFilters, sort]);
 
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
   // タブごとの該当Issue件数（#880）。全タブに件数バッジを表示するため、リポジトリで
-  // 絞り込んだissuesを対象にcomputeNavCountsで求める。
+  // 絞り込んだissuesを母集団に、一覧と同じ絞り込みを適用して求める（#1689）。
   const navCounts = useMemo(
-    () => computeNavCounts(repoIssues, repoIssues, currentUserLogin),
-    [repoIssues, currentUserLogin],
+    () => computeNavCountsForFilters(repoIssues, listFilters, currentUserLogin),
+    [repoIssues, listFilters, currentUserLogin],
   );
   const color = getRepoColor(repository.fullName);
 

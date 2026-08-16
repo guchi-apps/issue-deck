@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { calcRemainingTimePercent, formatResetAt, formatResetCountdown } from "@/lib/format-reset";
+import {
+  calcElapsedTimePercent,
+  calcRemainingTimePercent,
+  formatResetAt,
+  formatResetCountdown,
+  formatResetSentence,
+} from "@/lib/format-reset";
 
 // ローカルタイムで解釈させるためタイムゾーン指定なしで生成する。
 // 2026-08-04は火曜日。
@@ -35,6 +41,20 @@ describe("formatResetCountdown", () => {
 
   it("数値でない値はnullを返す", () => {
     expect(formatResetCountdown(Number.NaN, NOW_MS)).toBeNull();
+  });
+});
+
+describe("formatResetSentence", () => {
+  it("残り時間に「でリセット」を添える", () => {
+    expect(formatResetSentence(afterMinutes(134), NOW_MS)).toBe("あと2時間14分でリセット");
+  });
+
+  it("経過済みなら「でリセット」を重ねない", () => {
+    expect(formatResetSentence(afterMinutes(-60), NOW_MS)).toBe("まもなくリセット");
+  });
+
+  it("数値でない値はnullを返す", () => {
+    expect(formatResetSentence(Number.NaN, NOW_MS)).toBeNull();
   });
 });
 
@@ -96,5 +116,25 @@ describe("calcRemainingTimePercent", () => {
 
   it("ウィンドウ長が0以下ならnullを返す", () => {
     expect(calcRemainingTimePercent(afterMinutes(30), 0, NOW_MS)).toBeNull();
+  });
+});
+
+describe("calcElapsedTimePercent", () => {
+  const HOUR_MS = 60 * 60_000;
+
+  it("ウィンドウ開始時点なら0%になる", () => {
+    expect(calcElapsedTimePercent(afterMinutes(60), HOUR_MS, NOW_MS)).toBeCloseTo(0);
+  });
+
+  it("ウィンドウ中間なら50%になる", () => {
+    expect(calcElapsedTimePercent(afterMinutes(30), HOUR_MS, NOW_MS)).toBeCloseTo(50);
+  });
+
+  it("リセット時点なら100%になる", () => {
+    expect(calcElapsedTimePercent(afterMinutes(0), HOUR_MS, NOW_MS)).toBeCloseTo(100);
+  });
+
+  it("数値でない値はnullを返す", () => {
+    expect(calcElapsedTimePercent(Number.NaN, HOUR_MS, NOW_MS)).toBeNull();
   });
 });
