@@ -848,6 +848,10 @@ export function IssueDeckShell({
                   state={mobileScreen.state}
                   assignee={mobileScreen.assignee}
                   sort={mobileScreen.sort}
+                  /* ホーム画面の「要対応」が数に含めているのと同じ配列を渡す（#1713）。
+                     数だけ足して中身を出さないと、押して開いた一覧が空に見える */
+                  mergePendingPullRequests={mergePendingPullRequests}
+                  onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
@@ -1032,6 +1036,10 @@ export function IssueDeckShell({
                       onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
                     />
                   ) : undefined
+                }
+                // 一覧のヘッダーの件数も左メニューと同じ数え方にする（#1713）
+                pinnedCount={
+                  filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: issueListWidth.width, maxWidth: "50vw" }}
