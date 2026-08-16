@@ -221,6 +221,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   DBへ持たせるとGitHub Appの`sub_issues` Webhookイベント購読の追加（GitHub App設定の手作業変更）と
   スキーマ変更が要るのに対し、得られるのは詳細1回あたり1クエリぶんの節約でしかない。子の
   `projectStatus`だけはDBキャッシュから合流させ、進捗の内訳を出す（`lib/sub-issue-progress.ts`）。
+  **サブIssueはリポジトリをまたげるので、親子は必ず`repositoryFullName`とセットで扱う**（#1722）。
+  進捗のDB引き当ても画面の行のキーも`owner/repo`＋番号で突き合わせること——番号だけだと、別リポジトリの
+  子に**番号が一致する親リポジトリ側の無関係なIssueの進捗**が付く（実際にそうなっていた）。
+  別リポジトリの親子の行にはリポジトリ名を添える（`resolveSubIssueRepositoryLabel`）。
+  横展開の運用は[multi-repo-changes.md](multi-repo-changes.md)。
   **一覧にはバッジを出していない**（IssueごとにGraphQLを1回叩くN+1になるため）。運用は
   [multi-agent/labels.md](multi-agent/labels.md)。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**

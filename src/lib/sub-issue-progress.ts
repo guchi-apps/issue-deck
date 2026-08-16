@@ -42,6 +42,21 @@ export function resolveSubIssueProgress(child: SubIssue): ProgressStatusKey {
   return resolveProgressStatus(child);
 }
 
+/**
+ * 別リポジトリの親子のときだけ、行に添えるリポジトリ名を返す（同じリポジトリならnull・#1722）。
+ *
+ * **同じリポジトリの親子（大多数）には何も足さない。** 全行にリポジトリ名が並ぶと、
+ * 見分けるべき「別リポジトリの子」が埋もれる。返すのは`owner/`を落とした短い名前で、
+ * 全体（`owner/repo`）は呼び出し側が`title`属性などに添える。
+ */
+export function resolveSubIssueRepositoryLabel(
+  child: SubIssue,
+  baseRepositoryFullName: string,
+): string | null {
+  if (!child.repositoryFullName || child.repositoryFullName === baseRepositoryFullName) return null;
+  return child.repositoryFullName.split("/").at(-1) || child.repositoryFullName;
+}
+
 /** 終わっているかどうか。closeされているか、Statusが`done`（mainへ反映済み）なら終わり */
 export function isSubIssueDone(child: SubIssue): boolean {
   return resolveSubIssueProgress(child) === "done";

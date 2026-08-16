@@ -817,7 +817,11 @@ export function MobileIssueDetail({
               )
             }
           >
-            <SubIssueProgress relations={subIssueRelations} showHeading={false} />
+            <SubIssueProgress
+              relations={subIssueRelations}
+              baseRepositoryFullName={issue.repositoryFullName}
+              showHeading={false}
+            />
           </IssueDetailSection>
         )}
 
