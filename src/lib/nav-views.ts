@@ -120,7 +120,7 @@ export const navViews: NavView[] = [...baseNavViews, ...labelNavViews];
  *
  * `navViews`は「viewクエリとして存在するビューの一覧」で、スマホのタブ・スワイプ順や件数の
  * 計算も同じ配列を見る。**左メニューに何をどの順で出すかはそれとは別の判断**なので、ここで
- * 別に持つ。ここから外したビュー（`recently-added`・`release-pending`・`recently-merged`）も
+ * 別に持つ。ここから外したビュー（`recently-added`・`recently-merged`）も
  * viewクエリとしては生きており、スマホのタブや既存リンクからは今までどおり開ける。
  *
  * `attention`は「エージェントが止まっていて人が動くまで進まないもの」だけを置く枠で、
@@ -144,18 +144,21 @@ export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter(
  * スマホのIssue一覧で選べるビュー（#1645）。「すべてのIssue」の次にユーザーの確認待ちを置き、
  * 対応が必要なIssueを最初に見つけられるようにする（#714）。
  *
- * 「お気に入り」「最近追加した」は出さない（#873）。「本番反映待ち」「直近本番に反映した」も、
- * 左メニュー（`sidebarIssueNavViews`）と揃えて外す（#1645）。どちらもviewクエリとしては生きて
- * おり、ホーム画面のクイックビューからは今までどおり開ける。
+ * 「お気に入り」「最近追加した」は出さない（#873）。「直近本番に反映した」も、左メニュー
+ * （`sidebarIssueNavViews`）と揃えて外す（#1645）。viewクエリとしては生きており、既存リンクからは
+ * 今までどおり開ける。
+ *
+ * **「本番反映待ち」は#1645でここから外していたが、#1743で戻した。** 左メニュー側へ足したので、
+ * 「左メニューと揃える」という#1645の判断はここでも足す向きに働く。
  */
 export const mobileListNavViews: NavView[] = [
   baseNavViews[0],
-  ...labelNavViews.filter((view) => !["release-pending", "recently-merged"].includes(view.id)),
+  ...labelNavViews.filter((view) => !["recently-merged"].includes(view.id)),
 ];
 
 /**
  * スマホのIssue一覧に並べるビュー（#1645）。`mobileListNavViews`に無いビュー
- * （ホーム画面のクイックビューから開いた「本番反映待ち」など）で開かれたときだけ、
+ * （既存リンクやホーム画面から開いた「直近本番に反映した」など）で開かれたときだけ、
  * そのビューを末尾へ足す。
  *
  * 足さないと、選択中を示すものが画面から消えるうえ、スワイプの隣接判定
@@ -166,8 +169,27 @@ export function resolveMobileListNavViews(view: NavViewId): NavView[] {
   return [...mobileListNavViews, getNavView(view)];
 }
 
-/** 左メニュー「Issue」セクション。並びは広い順→絞った順（#1613） */
-export const sidebarIssueNavViews: NavView[] = ["all", "favorites", "not-started", "in-progress"]
+/**
+ * 左メニュー「Issue」セクション。並びは広い順→絞った順（#1613）で、絞ったものどうしは
+ * 進捗の順（未着手 → 実行中 → 本番反映待ち）に並べる。
+ *
+ * 「本番反映待ち」は#1613でここから外していたが、#1743で戻した。developまで来て本番へ
+ * 出ていないIssueはリリース操作の起点として日常的に見るもので、PCではカードのような
+ * 別の入口も無く、viewクエリを直接いじる以外に開く手段が無かった。**足す先はここで、
+ * `sidebarAttentionNavViews`ではない**——本番反映待ちで止まっているのはエージェントではなく
+ * リリースの実行なので、「人が動くまで進まないもの」の枠へ入れると上から順に手を動かせば
+ * 盤面が進む、という読み方が崩れる。
+ *
+ * **この配列はスマホのホーム画面のメニューも使う**（#1690。`mobile-home-screen.tsx`）ので、
+ * ここへ足すとPCとスマホの両方に出る。
+ */
+export const sidebarIssueNavViews: NavView[] = [
+  "all",
+  "favorites",
+  "not-started",
+  "in-progress",
+  "release-pending",
+]
   .map((id) => navViews.find((view) => view.id === id))
   .filter((view): view is NavView => view !== undefined);
 

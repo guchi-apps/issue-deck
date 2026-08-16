@@ -3,6 +3,7 @@
 import { Check, CircleAlert, Clock, ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { ConflictBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { parseGithubReferenceUrl } from "@/lib/github-reference";
 import { repairKindsFor, type RepairKind } from "@/lib/github/pull-request-repair";
@@ -98,19 +99,6 @@ function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
       )}
     >
       {CI_STATE_LABEL[ciState]}
-    </span>
-  );
-}
-
-/**
- * マージ待ちPRがbaseとコンフリクトしていることを示すピル。CI状態と同じ並びに出す。
- */
-function ConflictBadge({ mergeable }: { mergeable: boolean | null | undefined }) {
-  if (mergeable !== false) return null;
-
-  return (
-    <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
-      コンフリクトあり
     </span>
   );
 }

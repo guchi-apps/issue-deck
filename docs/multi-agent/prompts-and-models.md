@@ -90,6 +90,43 @@ GitHub Actionsは`${{ }}`を1つでも含む文字列を、**ブロック全体�
 > 宣言したリポジトリは自前の起動スクリプトを使うため、同じ手当てをそちら側にも入れる必要がある
 > （[generic-launcher.md](generic-launcher.md)）。現状の宣言はissue-deck自身のみ。
 
+## 計画は要約から書く（#1744）
+
+`21.plan-required`のIssueでローカルセッションが出す計画は、**冒頭に`## 要約`を置いてから**
+詳細（対応方針・変更範囲・手順）を書く。承認する人が最初に読むのは「何をするのか・何が変わるのか・
+何が危ないのか・他に案は無いのか」であり、それが本文の中ほどに散っていると、承認の可否を決めるのに
+全文を読むことになるため。要約に置くのは次の6つ。
+
+| 順 | 項目 | 中身 |
+|---|---|---|
+| 1 | タイトル | 「何をするか」を1行 |
+| 2 | 概要 | なぜやるか・どう解決するかを2〜3行 |
+| 3 | 追加・変更・削除する機能 | 利用者から見た変化を「追加」「変更」「削除」に分けた箇条書き |
+| 4 | 影響範囲 | 効く経路・画面（ローカルのみか、無人実行にも効くか等） |
+| 5 | 懸念点 | 承認の判断に影響するリスク・副作用・不確かな前提 |
+| 6 | 他の案 | 検討して採らなかった案とその理由（無ければ省略可） |
+
+Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssueコメントとして投稿する（#1342・
+[session-notify.md](session-notify.md)）。**端末での提示とIssueに残る記録が同じ本文なので、
+書式を決める場所はプロンプトだけでよい。** 投稿側（`src/lib/dispatch/session-plan.ts`）は
+`<!-- plan-base: -->`とRemote Controlのリンクを足すだけで、本文の書式には関与しない。
+
+文面の正は次の2つで、**変えるときは両方を揃える**（出力言語と同じ二重管理）。
+
+| ファイル | 効く範囲 |
+|---|---|
+| [scripts/prompts/implementation-agent.md](../../scripts/prompts/implementation-agent.md) | issue-deck自身のローカルセッション（`scripts/start-issue.sh`） |
+| [scripts/prompts/generic-implementation-agent.md](../../scripts/prompts/generic-implementation-agent.md) | 他リポジトリのローカルセッション（汎用ランチャー） |
+
+後者は`src/lib/prompts/templates.generated.ts`へ生成物として写しているため、編集したら
+`node scripts/generate-prompt-templates.mjs`を実行し直す（忘れると`src/lib/prompts/templates.test.ts`
+が落ちる）。
+
+**GitHub Actionsの無人実行（`.github/prompts/plan.md`）は対象外**で、従来どおりの書式のまま。
+#1744で対象をサブPCのローカル実行に限定したため。無人実行へ広げる場合は、`.github/prompts/`が
+`prompts-ref`で他リポジトリにも配られる（[cross-repo-setup-guide.md](../cross-repo-setup-guide.md)）
+ことを踏まえ、配布タグを切る判断とセットで行う。
+
 ## 使用するモデルの設定（#622）
 
 `claude-issue-dispatch.yml`の各モード（計画提示・分割・質問応答・実装/追加対応）の

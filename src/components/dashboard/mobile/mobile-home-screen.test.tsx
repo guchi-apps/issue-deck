@@ -123,6 +123,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "お気に入り",
       "未着手",
       "実行中",
+      "本番反映待ち",
       "すべてのPR",
       "実行中",
     ]);
@@ -184,7 +185,8 @@ describe("MobileHomeScreen（#1690）", () => {
     const onSelectQuickView = vi.fn();
     renderHome({ onSelectQuickView });
 
-    fireEvent.click(screen.getByText("本番反映待ち"));
+    // メニューにも同名の行が並ぶため（#1743）、件数でカード側を指名する
+    fireEvent.click(screen.getByRole("button", { name: /本番反映待ち\s*3/ }));
 
     expect(onSelectQuickView).toHaveBeenCalledWith("release-pending");
   });

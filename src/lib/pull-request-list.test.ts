@@ -38,6 +38,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeable: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -395,6 +396,15 @@ describe("canMergeFromDeck", () => {
 
   it("draftはGitHub側がマージを受け付けないため対象にしない", () => {
     expect(canMergeFromDeck(pullRequest({ draft: true }))).toBe(false);
+  });
+
+  it("コンフリクトしているPRは対象にしない（#1742）", () => {
+    expect(canMergeFromDeck(pullRequest({ mergeable: false }))).toBe(false);
+  });
+
+  it("コンフリクトの判定が出ていないPRは従来どおり対象にする（#1742）", () => {
+    expect(canMergeFromDeck(pullRequest({ mergeable: null }))).toBe(true);
+    expect(canMergeFromDeck(pullRequest({ mergeable: true }))).toBe(true);
   });
 
   // 画面内のリンクからマージ済み・クローズ済みのPRも開けるようになったため（#1260）

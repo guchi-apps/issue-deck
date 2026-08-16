@@ -69,6 +69,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: true,
     linkedIssueCheckReason: "merge",
     ciState: "pending",
+    mergeable: null,
     createdAt: "2026-08-16T01:25:36.000Z",
     updatedAt: "2026-08-16T01:25:36.000Z",
     ...overrides,
