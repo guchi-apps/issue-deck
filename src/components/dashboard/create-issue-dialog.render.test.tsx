@@ -62,6 +62,19 @@ vi.mock("@/hooks/use-issue-suggest", () => ({
   }),
 }));
 
+// クイック起票の一括推定（#1605）。戻り値の参照を毎レンダー同じに保つため、外に置いた1つを返す
+const quickGenerate = vi.fn();
+const quickSuggestState = {
+  isGenerating: false,
+  error: null as string | null,
+  notConfigured: false,
+  generate: quickGenerate,
+};
+
+vi.mock("@/hooks/use-issue-quick-suggest", () => ({
+  useIssueQuickSuggest: () => quickSuggestState,
+}));
+
 vi.mock("@/hooks/use-progress-status-mutation", () => ({
   useProgressStatusMutation: () => ({ setProgressStatus: vi.fn() }),
 }));
@@ -150,6 +163,11 @@ function Harness({ onCreated }: { onCreated: (issue: Issue) => void }) {
   );
 }
 
+/** 推定を挟まず従来のフォーム（確認ステップ）へ進む（#1605） */
+function goToConfirmStep() {
+  fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
+}
+
 describe("CreateIssueDialog の「作成+実装開始」", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
@@ -162,10 +180,15 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     createIssue.mockReset();
     updateIssue.mockReset();
     enqueue.mockReset();
+    quickGenerate.mockReset();
+    quickSuggestState.isGenerating = false;
+    quickSuggestState.error = null;
+    quickSuggestState.notConfigured = false;
   });
 
   it("作成フォームには実装オプションのチェックボックスを出さない（#1580）", () => {
     render(<Harness onCreated={vi.fn()} />);
+    goToConfirmStep();
 
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.queryByText("計画が必要")).toBeNull();
@@ -174,6 +197,7 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
 
   it("作成後に開く「実装を開始」ダイアログでオプションを選ばせる（#1580）", async () => {
     render(<Harness onCreated={vi.fn()} />);
+    goToConfirmStep();
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
@@ -194,6 +218,7 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     );
     const onCreated = vi.fn();
     render(<Harness onCreated={onCreated} />);
+    goToConfirmStep();
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
@@ -240,6 +265,7 @@ describe("CreateIssueDialog の種別「質問」", () => {
   it("質問ではタイトル欄・担当者・「作成+実装開始」を出さない", () => {
     render(<Harness onCreated={vi.fn()} />);
     selectQuestion();
+    goToConfirmStep();
 
     expect(screen.queryByLabelText("タイトル")).toBeNull();
     expect(screen.queryByLabelText("担当者")).toBeNull();
@@ -256,14 +282,18 @@ describe("CreateIssueDialog の種別「質問」", () => {
     expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
   });
 
-  it("タイトルは質問文から自動で作り、プレビューとして見せる", () => {
+  it("タイトルは質問文から自動で作り、確認ステップでプレビューとして見せる", () => {
     render(<Harness onCreated={vi.fn()} />);
     selectQuestion();
+    goToConfirmStep();
 
     expect(screen.getByText("質問内容から自動で作られます")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "内容を編集" }));
     fireEvent.change(screen.getByLabelText("質問内容"), {
       target: { value: "認証の流れを教えて" },
     });
+    goToConfirmStep();
     expect(screen.getByText("[質問] 認証の流れを教えて")).not.toBeNull();
   });
 
@@ -275,6 +305,7 @@ describe("CreateIssueDialog の種別「質問」", () => {
     fireEvent.change(screen.getByLabelText("質問内容"), {
       target: { value: "認証の流れを教えて" },
     });
+    goToConfirmStep();
     fireEvent.click(screen.getByRole("button", { name: "質問する" }));
 
     await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
@@ -287,5 +318,107 @@ describe("CreateIssueDialog の種別「質問」", () => {
     await waitFor(() =>
       expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ commentCount: 1 })),
     );
+  });
+});
+
+/**
+ * #1605。開いた直後は本文の入力欄だけを出し、「次へ」でリポジトリ・タイトル・ラベルを
+ * 推定してから確認ステップへ移る。**推定の成否によらず確認ステップへは必ず進む。**
+ */
+describe("CreateIssueDialog のクイック起票", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue());
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    quickGenerate.mockReset();
+    quickSuggestState.isGenerating = false;
+    quickSuggestState.error = null;
+    quickSuggestState.notConfigured = false;
+  });
+
+  it("開いた直後はリポジトリ・タイトル・ラベル・担当者を出さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.getByLabelText("内容")).not.toBeNull();
+    expect(screen.queryByLabelText("リポジトリ")).toBeNull();
+    expect(screen.queryByLabelText("タイトル")).toBeNull();
+    expect(screen.queryByLabelText("担当者")).toBeNull();
+    expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
+  });
+
+  it("「次へ」で推定を呼び、確認ステップに結果を入れる", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      title: "PWA表示時に画面を更新するボタンを追加する",
+      labels: [],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), {
+      target: { value: "PWAで引っ張っても更新されない" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ body: "PWAで引っ張っても更新されない", kind: "issue" }),
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe(
+        "PWA表示時に画面を更新するボタンを追加する",
+      ),
+    );
+  });
+
+  it("推定できなくても確認ステップへ進み、自分で入力できる状態にする", async () => {
+    quickSuggestState.notConfigured = true;
+    quickGenerate.mockResolvedValue(null);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
+  });
+
+  it("「自分で入力する」では推定を呼ばない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
+
+    expect(quickGenerate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("タイトル")).not.toBeNull();
+  });
+
+  it("本文が空のままでは「次へ」を押せない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(
+      (screen.getByRole("button", { name: "次へ" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("確認ステップの「内容を編集」で入力ステップへ戻る", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      title: "タイトル案",
+      labels: [],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "内容を編集" }));
+
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("本文");
+    expect(screen.queryByLabelText("タイトル")).toBeNull();
   });
 });
