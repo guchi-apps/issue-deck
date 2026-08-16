@@ -57,6 +57,8 @@
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
 #                                   チェックアウトの遅れを数え直す間隔の分数（省略時は360・0で無効）
+#   WORKTREE_CLEANUP_INTERVAL_MINUTES
+#                                   worktreeを掃除する間隔の分数（省略時は60・0で無効）
 #
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
@@ -76,7 +78,8 @@ set -euo pipefail
 #    リポジトリ（横断質問セッションの記録先）のセッションも報告する（#1537）。
 # 8: 使用率の申告にSWAPを載せ、既定のポーリング間隔を30秒にする（#1624）。
 # 9: 動かしているチェックアウトの版（コミット・ブランチ・developからの遅れ）を申告する（#1612）。
-DISPATCH_POLLER_VERSION="9"
+# 10: マージ済みworktreeの掃除（cleanup-worktrees.sh）を一定間隔で呼ぶ（#1716）。
+DISPATCH_POLLER_VERSION="10"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -99,6 +102,9 @@ QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
 SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
+# worktreeの掃除（#1716）。**新しい常駐プロセスもsystemd timerも増やさず、この1巡に相乗りさせる。**
+# ただし上の2つと違い毎巡は呼ばず、`WORKTREE_CLEANUP_INTERVAL_MINUTES` の間隔で呼ぶ。
+WORKTREE_CLEANER="$SCRIPT_DIR/cleanup-worktrees.sh"
 
 ANNOUNCE_ONLY=0
 DRY_RUN=0
@@ -206,6 +212,14 @@ MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSI
 # 数字かは`fetchedAt`として一緒に申告し、画面が古ければ注記を出す）。
 CHECKOUT_FETCH_INTERVAL_MINUTES="$(require_non_negative_int \
   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" 360)"
+
+# worktreeを掃除する間隔（分）。**0で無効**（#1716）。
+#
+# 既定の60分は「消し忘れを溜めない」と「1巡を長く塞がない」の間を取った値。掃除は
+# `git fetch` と `gh pr list` を1回ずつ叩き、worktreeの本数ぶんの走査を行うため、
+# 毎巡（30秒ごと）呼ぶには重い。
+WORKTREE_CLEANUP_INTERVAL_MINUTES="$(require_non_negative_int \
+  WORKTREE_CLEANUP_INTERVAL_MINUTES "${WORKTREE_CLEANUP_INTERVAL_MINUTES:-}" 60)"
 
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
@@ -584,6 +598,47 @@ reap_sessions() {
   fi
   # **回収の失敗でポーリングを止めない**（開発サーバーの回収・申告・報告と同じ扱い）。
   bash "$SESSION_REAPER" || echo "Error: セッションの回収に失敗しました。" >&2
+  return 0
+}
+
+# --- worktreeの掃除（#1716）------------------------------------------------------
+# マージ済み・作業実績の無いworktreeとローカルブランチを消す。開発サーバー・セッションの回収と
+# 同じく**判断は挟まない計器**（docs/multi-agent/gates.md）で、消してよいかの判定はすべて
+# `cleanup-worktrees.sh` 側にある。ここは「一定間隔で呼ぶ」だけを持つ。
+#
+# **これまで実行の起点がどこにも無かった**（#1716）。スクリプトは#1100からあったのに、
+# ユーザーcrontabもsystemd timerも無く、`start-issue.sh`は案内を出すだけだったため、サブPCの
+# 稼働開始（2026-08-13）から3日で181本・38GBまで溜まり、ルートFSが77%に達した。
+# 掃除さえ回れば181本中177本が削除対象になりうる状態だったので、足りなかったのは判定ではなく起点。
+#
+# **非対話では`--yes`が必須**（付けないと表示だけで終わる）。
+WORKTREE_CLEANUP_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/worktree-cleanup.stamp"
+# 掃除が固まっても1巡を止めないための上限（秒）。#1680の改善後で実測「170本を数十秒」なので、
+# 5分あれば通常は足りる。**この間ポーリングは止まる**（ジョブの取得が最大5分遅れる）が、
+# 別プロセスへ逃がすと失敗がjournaldに出ないままになるため、上限付きの同期実行にしている。
+WORKTREE_CLEANUP_TIMEOUT_SECONDS=300
+
+reap_worktrees() {
+  ((WORKTREE_CLEANUP_INTERVAL_MINUTES > 0)) || return 0
+  [[ -f "$WORKTREE_CLEANER" ]] || return 0
+
+  local last now
+  last=0
+  if [[ -f "$WORKTREE_CLEANUP_STAMP" ]]; then
+    last="$(date -r "$WORKTREE_CLEANUP_STAMP" +%s 2>/dev/null || echo 0)"
+  fi
+  now="$(date +%s)"
+  ((now - last >= WORKTREE_CLEANUP_INTERVAL_MINUTES * 60)) || return 0
+
+  # **走らせる前に印を置く。** 掃除が落ちても次の巡で即座に走り直さないようにする
+  # （`gh`の未認証のように毎回失敗する理由だと、30秒ごとに数十秒の走査を繰り返すことになる）。
+  mkdir -p "$(dirname "$WORKTREE_CLEANUP_STAMP")" 2>/dev/null || true
+  touch "$WORKTREE_CLEANUP_STAMP" 2>/dev/null || true
+
+  echo "worktreeを掃除します（間隔 ${WORKTREE_CLEANUP_INTERVAL_MINUTES}分）..."
+  # **回収の失敗でポーリングを止めない**（開発サーバー・セッションの回収と同じ扱い）。
+  timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --yes ||
+    echo "Error: worktreeの掃除に失敗しました。" >&2
   return 0
 }
 
@@ -1200,6 +1255,11 @@ run_once() {
   # 畳めば`run-issue-session.sh`のtrapが開発サーバーも止めるが、trapを通れなかったぶんは
   # 次の巡で孤児として回収される。
   reap_sessions
+
+  # マージ済みworktreeを掃除する（#1716）。**セッションの回収の後に行う。** 直前に畳んだ
+  # セッションのworktreeを、同じ巡でそのまま消せる（セッションが動いている間は消えない）。
+  # 毎巡ではなく WORKTREE_CLEANUP_INTERVAL_MINUTES の間隔でだけ実際に走る。
+  reap_worktrees
 
   # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
   # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
