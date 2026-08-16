@@ -29,6 +29,8 @@ function renderScreen(
       failedRepositories={[]}
       fetchedAt="2026-08-14T10:30:00Z"
       isLoading={false}
+      isRefreshing={false}
+      autoRefreshIntervalMs={null}
       error={null}
       onRefresh={vi.fn()}
       onBack={overrides.onBack ?? vi.fn()}

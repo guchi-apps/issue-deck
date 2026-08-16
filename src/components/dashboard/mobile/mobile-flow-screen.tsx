@@ -3,6 +3,7 @@
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type { BranchFlow } from "@/lib/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -10,10 +11,15 @@ type MobileFlowScreenProps = {
   flow: BranchFlow;
   fetchedAt: string | null;
   isLoading: boolean;
+  /** 自動更新も含めて取得中か（#1767）。`BranchFlowView`へそのまま渡す */
+  isRefreshing: boolean;
   error: string | null;
   failedRepositories: string[];
   /** マージ済みPRまで取得できているか（#1711）。`BranchFlowView`へそのまま渡す */
   mergedPullRequestsLoaded: boolean;
+  /** 自動更新の間隔（#1767）。`BranchFlowView`へそのまま渡す */
+  autoRefreshIntervalMs: AutoRefreshIntervalMs;
+  onChangeAutoRefreshInterval: (intervalMs: AutoRefreshIntervalMs) => void;
   onRefresh: () => void;
   /** PRをこの画面からマージできたとき（#1756）。`BranchFlowView`へそのまま渡す */
   onMerged: (pullRequest: PullRequestSummary) => void;
@@ -33,9 +39,12 @@ export function MobileFlowScreen({
   flow,
   fetchedAt,
   isLoading,
+  isRefreshing,
   error,
   failedRepositories,
   mergedPullRequestsLoaded,
+  autoRefreshIntervalMs,
+  onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
 }: MobileFlowScreenProps) {
@@ -44,9 +53,12 @@ export function MobileFlowScreen({
       flow={flow}
       fetchedAt={fetchedAt}
       isLoading={isLoading}
+      isRefreshing={isRefreshing}
       error={error}
       failedRepositories={failedRepositories}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+      autoRefreshIntervalMs={autoRefreshIntervalMs}
+      onChangeAutoRefreshInterval={onChangeAutoRefreshInterval}
       onRefresh={onRefresh}
       onMerged={onMerged}
       className="h-full"

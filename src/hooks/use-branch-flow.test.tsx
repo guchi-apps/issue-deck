@@ -2,9 +2,9 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { usePullRequests } from "@/hooks/use-pull-requests";
+import { useBranchFlow } from "@/hooks/use-branch-flow";
 
-const POLL_INTERVAL_MS = 10_000;
+const ONE_MINUTE_MS = 60_000;
 
 let hidden = false;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -13,7 +13,7 @@ function stubFetch() {
   fetchMock = vi.fn(async () => ({
     ok: true,
     json: async () => ({
-      pullRequests: [],
+      repositories: [],
       failedRepositories: [],
       fetchedAt: new Date().toISOString(),
     }),
@@ -43,49 +43,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("usePullRequests の自動更新（#1531・#1767）", () => {
-  it("間隔が渡されなければ（null）時間が経っても取り直さない", async () => {
-    renderHook(() => usePullRequests("open", null));
-    await advance(POLL_INTERVAL_MS * 3);
+describe("useBranchFlow の自動更新（#1767）", () => {
+  it("間隔が渡されなければ時間が経っても取り直さない（既定は自動更新しない）", async () => {
+    renderHook(() => useBranchFlow(true));
+    await advance(ONE_MINUTE_MS * 3);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("間隔を渡すとその間隔ごとに取り直す", async () => {
-    renderHook(() => usePullRequests("open", POLL_INTERVAL_MS));
+    renderHook(() => useBranchFlow(true, ONE_MINUTE_MS));
     // マウント時の取得が飛んでいる間の重複は投げない（有効化直後の1回は初回取得と重なる）
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await advance(POLL_INTERVAL_MS);
+    await advance(ONE_MINUTE_MS);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    await advance(POLL_INTERVAL_MS);
+    await advance(ONE_MINUTE_MS);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("ビューを開いて自動更新が有効になった時点で、次の周期を待たずに1回取り直す", async () => {
-    const { rerender } = renderHook(
-      ({ intervalMs }: { intervalMs: number | null }) => usePullRequests("open", intervalMs),
-      { initialProps: { intervalMs: null as number | null } },
-    );
-    await advance(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("画面を開いていない間は自動更新しない", async () => {
+    renderHook(() => useBranchFlow(false, ONE_MINUTE_MS));
+    await advance(ONE_MINUTE_MS * 3);
 
-    await act(async () => {
-      rerender({ intervalMs: POLL_INTERVAL_MS });
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("裏に回っているタブでは取りに行かず、前面へ戻った時点で取り直す", async () => {
-    renderHook(() => usePullRequests("open", POLL_INTERVAL_MS));
+    renderHook(() => useBranchFlow(true, ONE_MINUTE_MS));
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     hidden = true;
-    await advance(POLL_INTERVAL_MS * 3);
+    await advance(ONE_MINUTE_MS * 3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     hidden = false;
@@ -95,42 +87,13 @@ describe("usePullRequests の自動更新（#1531・#1767）", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("自動更新では読み込み表示を出さない（更新ボタンが10秒ごとに無効化されない）", async () => {
-    const { result } = renderHook(() => usePullRequests("open", POLL_INTERVAL_MS));
+  it("自動更新では読み込み表示を出さず、更新アイコン用の`isRefreshing`だけを立てる", async () => {
+    const { result } = renderHook(() => useBranchFlow(true, ONE_MINUTE_MS));
     await advance(0);
     expect(result.current.isLoading).toBe(false);
-
-    let loadingDuringPoll = false;
-    // 取得の応答を保留して、その間の`isLoading`を観測する
-    let resolveFetch: (() => void) | null = null;
-    fetchMock.mockImplementationOnce(async () => {
-      await new Promise<void>((resolve) => {
-        resolveFetch = resolve;
-      });
-      return {
-        ok: true,
-        json: async () => ({
-          pullRequests: [],
-          failedRepositories: [],
-          fetchedAt: new Date().toISOString(),
-        }),
-      };
-    });
-
-    await advance(POLL_INTERVAL_MS);
-    loadingDuringPoll = result.current.isLoading;
-    await act(async () => {
-      resolveFetch?.();
-    });
-
-    expect(loadingDuringPoll).toBe(false);
-  });
-
-  it("自動更新の取得中は`isRefreshing`が立つ（更新アイコンを回すため。#1767）", async () => {
-    const { result } = renderHook(() => usePullRequests("open", POLL_INTERVAL_MS));
-    await advance(0);
     expect(result.current.isRefreshing).toBe(false);
 
+    // 取得の応答を保留して、その間の状態を観測する
     let resolveFetch: (() => void) | null = null;
     fetchMock.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => {
@@ -139,31 +102,33 @@ describe("usePullRequests の自動更新（#1531・#1767）", () => {
       return {
         ok: true,
         json: async () => ({
-          pullRequests: [],
+          repositories: [],
           failedRepositories: [],
           fetchedAt: new Date().toISOString(),
         }),
       };
     });
 
-    await advance(POLL_INTERVAL_MS);
+    await advance(ONE_MINUTE_MS);
+    const loadingDuringPoll = result.current.isLoading;
     const refreshingDuringPoll = result.current.isRefreshing;
     await act(async () => {
       resolveFetch?.();
     });
 
+    expect(loadingDuringPoll).toBe(false);
     expect(refreshingDuringPoll).toBe(true);
     expect(result.current.isRefreshing).toBe(false);
   });
 
   it("自動更新の失敗は画面に出さず、次の周期で回復する", async () => {
-    const { result } = renderHook(() => usePullRequests("open", POLL_INTERVAL_MS));
+    const { result } = renderHook(() => useBranchFlow(true, ONE_MINUTE_MS));
     await advance(0);
 
     fetchMock.mockImplementationOnce(async () => {
       throw new Error("ネットワークエラー");
     });
-    await advance(POLL_INTERVAL_MS);
+    await advance(ONE_MINUTE_MS);
 
     expect(result.current.error).toBeNull();
   });

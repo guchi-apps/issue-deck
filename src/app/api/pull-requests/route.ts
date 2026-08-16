@@ -35,7 +35,8 @@ async function handleGET(request: Request) {
   // 一覧の母集団はIssue一覧と揃えて「連携済みリポジトリ」全体とし、そこからユーザーが
   // 左メニューで非表示にしたもの（HiddenRepository）とアーカイブ済みを除く。
   // 1リポジトリにつき1回（`scope=all`なら2回）GitHub APIを呼ぶため、母集団の広さがそのまま
-  // 取得コストになる。自動ポーリングを持たせていない（画面を開いたときと手動更新のみ）のはこのため。
+  // 取得コストになる。自動更新を常時は回さず、「完了したPR」ビューの表示中（10秒。#1531）と
+  // ブランチ画面でユーザーが間隔を選んだ間（既定は自動更新しない。#1767）に限っているのはこのため。
   const hiddenRepositoryIds = (
     await db.hiddenRepository.findMany({ where: { userId }, select: { repositoryId: true } })
   ).map((row) => row.repositoryId);

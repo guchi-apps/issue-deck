@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type {
   PullRequestListResponse,
   PullRequestListScope,
   PullRequestSummary,
 } from "@/types/pull-request";
-
-/** 自動更新の間隔（#1531）。消費が想定より減らないときはここだけを調整する */
-const POLL_INTERVAL_MS = 10_000;
 
 type UsePullRequestsResult = {
   pullRequests: PullRequestSummary[];
@@ -27,6 +26,13 @@ type UsePullRequestsResult = {
    */
   loadedScope: PullRequestListScope | null;
   isLoading: boolean;
+  /**
+   * 取得が飛んでいる間は自動更新でも真になる（#1767）。読み込み表示（更新ボタンの無効化・
+   * 「読み込み中...」）は`isLoading`のまま据え置き、**更新アイコンの回転だけ**をこちらで
+   * 出すため。自動更新でも回るようにしないと、画面は勝手に変わるのに何も起きていないように
+   * 見える。
+   */
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
 };
@@ -44,7 +50,8 @@ type UsePullRequestsResult = {
  * **ダッシュボードを開いている間は常に有効。** 左メニューの件数表示（#1389）のため、PRペインを
  * 開いていなくてもマウント時に1回だけ取得する。
  *
- * **自動更新は`autoRefresh`が有効な間だけ**（#1531。呼び出し側で「完了したPR」ビューの表示中に
+ * **自動更新は`autoRefreshIntervalMs`が渡されている間だけ**（#1531・#1767。呼び出し側で
+ * 「完了したPR」ビューの表示中（10秒）と、ブランチ画面でユーザーが間隔を選んだ場合に
  * 限っている）。1回の取得で「リポジトリ数 + draft以外のopen PR数」ぶんGitHub APIを呼ぶため
  * （[/api/pull-requests](../app/api/pull-requests/route.ts)）、常時ポーリングするとインストール
  * 当たりの上限（5,000回/時）を超える。10秒間隔で回せるのは、取得側がETagの条件付きGETを
@@ -53,13 +60,14 @@ type UsePullRequestsResult = {
  */
 export function usePullRequests(
   scope: PullRequestListScope,
-  autoRefresh = false,
+  autoRefreshIntervalMs: AutoRefreshIntervalMs = null,
 ): UsePullRequestsResult {
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loadedScope, setLoadedScope] = useState<PullRequestListScope | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // refreshで再取得させるためのキー。増やすと下のeffectが再実行される。
   const [reloadKey, setReloadKey] = useState(0);
@@ -89,6 +97,8 @@ export function usePullRequests(
     async function load(background: boolean) {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
+      // 更新アイコンの回転は自動更新でも出す（#1767）
+      setIsRefreshing(true);
       if (!background) {
         setIsLoading(true);
         setError(null);
@@ -119,7 +129,10 @@ export function usePullRequests(
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         inFlightRef.current = false;
-        if (!cancelled && !background) setIsLoading(false);
+        if (!cancelled) {
+          setIsRefreshing(false);
+          if (!background) setIsLoading(false);
+        }
       }
     }
 
@@ -133,32 +146,18 @@ export function usePullRequests(
     };
   }, [fetchScope, reloadKey]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
+  // 裏に回っているタブでは取りに行かない・有効になった直後に1回取る、といった扱いは
+  // ブランチ状況（`use-branch-flow.ts`）と共通なので`useAutoRefresh`が持つ（#1767）。
+  useAutoRefresh(autoRefreshIntervalMs, backgroundLoadRef);
 
-    function poll() {
-      // 裏に回っているタブのために取り続けない。
-      if (document.hidden) return;
-      void backgroundLoadRef.current?.();
-    }
-
-    // 有効になった直後に1回取る。ビューを開いた時点の内容が最長10秒古いままにならないようにする
-    // （変化が無ければ304で返るため、この1回でレート制限は消費しない）。
-    poll();
-    const intervalId = setInterval(poll, POLL_INTERVAL_MS);
-
-    function handleVisibilityChange() {
-      // バックグラウンドタブでは`poll`がno-opのままインターバルだけ進むため、
-      // 復帰時に次の周期を待たず即座に最新状態を取得する。
-      if (!document.hidden) poll();
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [autoRefresh]);
-
-  return { pullRequests, failedRepositories, fetchedAt, loadedScope, isLoading, error, refresh };
+  return {
+    pullRequests,
+    failedRepositories,
+    fetchedAt,
+    loadedScope,
+    isLoading,
+    isRefreshing,
+    error,
+    refresh,
+  };
 }
