@@ -20,6 +20,38 @@ import { githubGraphql } from "@/lib/github/graphql";
 /** チェック1件。RESTのcheck-runと同じ語彙（小文字）へ正規化したもの */
 export type RollupCheck = { status: string; conclusion: string | null };
 
+/**
+ * CI状態の集約から外すワークフローのファイル名（#1799）。
+ *
+ * **これらはCIではなく、issue-deck自身が各リポジトリへ配っている運用自動化**（ラベル付け・
+ * 自動レビュー・自動マージ・自動修復・リリース起動）で、callerのファイル名は配布先でも同じ。
+ * PRのheadコミットにはこれらのcheck-runもぶら下がるため、素直に集約すると「CI」を名乗る
+ * バッジが運用自動化の進行状況になってしまう。
+ *
+ * とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、通ったらマージする**
+ * ワークフローで、`wait-for-ci` → `risk-check` → `claude-review` → `auto-merge`のいずれかが
+ * PRが開いている間ずっと実行中になる。つまり集約に含めている限り、自動マージされるPRは
+ * 一度も「CI通過」を表示できない——CIが終わった後に更新ボタンを押しても「CI実行中」のままで、
+ * ボタンが効いていないように見えていた（#1799。マージボタンが押せない事例は
+ * [docs/multi-agent/labels.md](../../../docs/multi-agent/labels.md)にも記録がある）。
+ *
+ * 外すのはここに挙げたものだけで、`ci.yml`・`deploy.yml`・`version-tag-check.yml`などの
+ * 検査系と、リポジトリ固有のワークフロー・外部CIのcommit statusはそのまま数える
+ * （**知らないものは数える**側に倒し、CIを見落とさないようにする）。
+ */
+const NON_CI_WORKFLOW_FILES = new Set([
+  "claude-issue-dispatch.yml",
+  "claude-review-develop.yml",
+  "claude-conflict-resolve.yml",
+  "claude-ci-fix.yml",
+  "claude-pr-repair.yml",
+  "issue-labels.yml",
+  "release-develop-to-main.yml",
+  "shared-knowledge-propose.yml",
+  "propagate-workflow-tag.yml",
+  "sync-secrets.yml",
+]);
+
 export type CheckRollup = {
   /**
    * GitHub自身の集約結果（小文字。`success` / `pending` / `failure` / `error` / `expected`）。
@@ -36,7 +68,13 @@ export type CheckRollup = {
 /** 1回のクエリで引くチェックの上限。GraphQLの`first`の上限値でもある */
 const CONTEXTS_PAGE_SIZE = 100;
 
-/** `statusCheckRollup`の中身。ref経由・PR経由のどちらのクエリでも同じ形を引く */
+/**
+ * `statusCheckRollup`の中身。ref経由・PR経由のどちらのクエリでも同じ形を引く。
+ *
+ * `checkSuite.workflowRun.workflow.resourcePath`は、そのcheck-runがどのワークフローのものかを
+ * 見て運用自動化を集約から外すために取る（#1799。`NON_CI_WORKFLOW_FILES`）。同じクエリに
+ * 足すだけなのでGitHub APIの消費は増えない。
+ */
 const ROLLUP_FIELDS = `
   state
   contexts(first: ${CONTEXTS_PAGE_SIZE}) {
@@ -46,6 +84,13 @@ const ROLLUP_FIELDS = `
       ... on CheckRun {
         status
         conclusion
+        checkSuite {
+          workflowRun {
+            workflow {
+              resourcePath
+            }
+          }
+        }
       }
       ... on StatusContext {
         state
@@ -104,6 +149,10 @@ type RollupContextNode = {
   conclusion?: string | null;
   /** StatusContext（外部CIのcommit status）。`SUCCESS` / `PENDING` / `FAILURE`など */
   state?: string | null;
+  /** CheckRun。GitHub Actions発なら`/owner/repo/actions/workflows/ci.yml`が入る（#1799） */
+  checkSuite?: {
+    workflowRun?: { workflow?: { resourcePath?: string | null } | null } | null;
+  } | null;
 };
 
 /** `statusCheckRollup`のノード。ref経由・PR経由で同じ形を受ける */
@@ -158,22 +207,44 @@ function toRollupCheck(node: RollupContextNode): RollupCheck | null {
   return null;
 }
 
+/** `/owner/repo/actions/workflows/ci.yml` → `ci.yml`。Actions発でなければnull */
+function workflowFileOf(node: RollupContextNode): string | null {
+  const path = node.checkSuite?.workflowRun?.workflow?.resourcePath;
+  if (!path) return null;
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** CI状態の集約に数えるチェックか（#1799）。ワークフローが分からないものは数える */
+function isCiCheck(node: RollupContextNode): boolean {
+  const file = workflowFileOf(node);
+  return file === null || !NON_CI_WORKFLOW_FILES.has(file);
+}
+
+function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
+  return nodes.map(toRollupCheck).filter((check): check is RollupCheck => check !== null);
+}
+
 /**
  * GraphQLの`statusCheckRollup`ノードを`CheckRollup`へ写す。
  * ノードがnull（＝refは解決できたがチェックが1件も無い）の場合は空の一覧を返す。
+ *
+ * 運用自動化のcheck-runは数えない（#1799。`NON_CI_WORKFLOW_FILES`）。ただし**除いた結果が
+ * 空になるなら、除く前をそのまま返す**——CIを持たず運用自動化のワークフローしか無い
+ * リポジトリで、CI状態が一律「不明」になってPRが「実行中」のビューから出られなくなるため
+ * （そこでの表示はこの変更の前と同じままになる）。
  */
 function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
   if (!rollup) return { state: null, checks: [] };
 
   const state = rollup.state ? rollup.state.toLowerCase() : null;
   if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
+    // 1件ずつ見られないためGitHubの集約値（＝運用自動化も含む）へ縮退する。
     return { state, checks: null };
   }
+  const ciChecks = toRollupChecks(rollup.contexts.nodes.filter(isCiCheck));
   return {
     state,
-    checks: rollup.contexts.nodes
-      .map(toRollupCheck)
-      .filter((check): check is RollupCheck => check !== null),
+    checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(rollup.contexts.nodes),
   };
 }
 
