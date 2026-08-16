@@ -62,6 +62,7 @@ import { isAutoAssignableLabelName } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import {
+  AUTO_REPOSITORY_VALUE,
   buildRepositoryChoices,
   canProceedFromInput,
   resolveInitialQuickStep,
@@ -104,13 +105,16 @@ export function mergeSuggestedLabels(prev: string[], suggested: string[]): strin
  *
  * **質問は`claude-issue-dispatch.yml`が導入済みのリポジトリでしか成立しない**（回答するのが
  * GitHub Actionsのmode=askのため）。Issueへ戻すときは絞り込みが無いので、選択をそのまま残す。
+ *
+ * **未選択（＝「自動で決める」）は選び直さない**（#1733）。入力ステップにリポジトリ欄が出た
+ * 以上、種別を押しただけで1件目が勝手に入ると、選んでいないものを選んだように見える。
  */
 export function resolveKindRepository(
   kind: IssueDraftKind,
   repositories: ConnectedRepository[],
   current: string,
 ): string {
-  if (kind === "issue") return current;
+  if (kind === "issue" || current === "") return current;
   const askable = repositories.filter((repo) => repo.hasClaudeWorkflow);
   return askable.some((repo) => repo.fullName === current) ? current : (askable[0]?.fullName ?? "");
 }
@@ -166,6 +170,46 @@ function PageBadge() {
 /** 推定が終わるまでの入れ物。項目名は出したまま、値の場所だけを空けておく */
 function FieldSkeleton() {
   return <div className="h-9 animate-pulse rounded-md border border-input bg-muted/60" />;
+}
+
+/**
+ * リポジトリの選択肢。入力ステップ（#1733）と確認ステップの2か所で同じものを出す。
+ *
+ * **並びを2か所で書き分けない。** 先に指定する場所と後で直す場所で順序やグループ名が違うと、
+ * 同じリポジトリを探すのに2通りの探し方を覚えることになる。
+ * グループ名は片方しか無いときには出さない（見出しだけの意味が無いため）。
+ */
+function RepositorySelectItems({
+  registered,
+  unregistered,
+}: {
+  registered: ConnectedRepository[];
+  unregistered: ConnectedRepository[];
+}) {
+  return (
+    <>
+      {registered.length > 0 && (
+        <SelectGroup>
+          {unregistered.length > 0 && <SelectLabel>登録済み</SelectLabel>}
+          {registered.map((repo) => (
+            <SelectItem key={repo.id} value={repo.fullName}>
+              {repo.fullName}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+      {unregistered.length > 0 && (
+        <SelectGroup>
+          {registered.length > 0 && <SelectLabel>未登録</SelectLabel>}
+          {unregistered.map((repo) => (
+            <SelectItem key={repo.id} value={repo.fullName}>
+              {repo.fullName}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+    </>
+  );
 }
 
 /**
@@ -332,6 +376,14 @@ export function CreateIssueDialog({
    */
   const [labelSuggestionMissed, setLabelSuggestionMissed] = useState(false);
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
+  /**
+   * リポジトリを**人が指定したか**（#1733）。入力ステップのリポジトリ欄で選ぶと立つ。
+   *
+   * **画面から渡された値（リポジトリ別の画面から開いた場合）とは区別する。** どちらも
+   * `repositoryFullName`に入るが、渡されただけのものは「そこを開いていた」という理由でしか
+   * ないため、推定も候補チップも従来どおり行う（#1710）。指定した場合だけ推定を省く。
+   */
+  const [hasPickedRepository, setHasPickedRepository] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -418,6 +470,7 @@ export function CreateIssueDialog({
     setRepositoryCandidates([]);
     setLabelSuggestionMissed(false);
     setRepositoryFullName(draft.repositoryFullName);
+    setHasPickedRepository(false);
     setTitle(draft.title);
     setBody(draft.body);
     setSelectedLabels(draft.selectedLabels);
@@ -463,8 +516,12 @@ export function CreateIssueDialog({
 
   /** 種別を切り替える。質問で選べないリポジトリを選んでいた場合は選び直す（#1641） */
   function selectKind(next: IssueDraftKind) {
+    const resolved = resolveKindRepository(next, repositories, repositoryFullName);
     setKind(next);
-    setRepositoryFullName((prev) => resolveKindRepository(next, repositories, prev));
+    setRepositoryFullName(resolved);
+    // 選び直された値は本人の指定ではない（#1733）。指定として扱うと、選んでいない
+    // リポジトリのまま推定が省かれる。ここで降ろして自動で決め直させる
+    if (resolved !== repositoryFullName) setHasPickedRepository(false);
     setRepositoryCandidates((prev) => selectableSuggestedRepositories(next, repositories, prev));
   }
 
@@ -495,20 +552,33 @@ export function CreateIssueDialog({
   /** 候補チップを押してリポジトリを選び直す（#1710）。人が選んだので`自動`バッジは外す */
   function handleSelectCandidate(fullName: string) {
     setAutoFilled((prev) => ({ ...prev, repository: false }));
+    setHasPickedRepository(true);
     setRepositoryFullName(fullName);
+  }
+
+  /**
+   * 入力ステップでリポジトリを指定する（#1733）。「自動で決める」を選べば未指定へ戻る。
+   * 指定した時点で`hasPickedRepository`が立ち、「次へ」でリポジトリの推定を省く。
+   */
+  function handleInputRepositoryChange(value: string) {
+    const isAuto = value === AUTO_REPOSITORY_VALUE;
+    setHasPickedRepository(!isAuto);
+    setRepositoryFullName(isAuto ? "" : value);
   }
 
   function handleRestoreDraft() {
     if (!restorableDraft) return;
     // 下書きは書いていたときの種別ごと戻す（質問の書きかけを復元してIssueとして作らない）
     setKind(restorableDraft.kind);
-    setRepositoryFullName(
-      resolveKindRepository(
-        restorableDraft.kind,
-        repositories,
-        defaultRepositoryFullName ?? restorableDraft.repositoryFullName,
-      ),
+    const restoredRepository = resolveKindRepository(
+      restorableDraft.kind,
+      repositories,
+      defaultRepositoryFullName ?? restorableDraft.repositoryFullName,
     );
+    setRepositoryFullName(restoredRepository);
+    // 書いていたときに入っていた値は本人が決めたものとして扱う（#1733）。書き直して「次へ」を
+    // 押したときに、いったん決まっていたリポジトリが推定で上書きされないようにする
+    setHasPickedRepository(restoredRepository !== "");
     setTitle(restorableDraft.title);
     setBody(restorableDraft.body);
     // 実装オプション用ラベル（`21.plan-required`等）は#1580でこの画面から選べなくなったが、
@@ -533,6 +603,7 @@ export function CreateIssueDialog({
     setRepositoryCandidates([]);
     setLabelSuggestionMissed(false);
     setRepositoryFullName("");
+    setHasPickedRepository(false);
     setTitle("");
     setBody("");
     setSelectedLabels([]);
@@ -583,13 +654,18 @@ export function CreateIssueDialog({
       // すでに決まっているリポジトリ（表示中のリポジトリ）は選択状態のまま動かさない。
       // 推定自体は行われ、結果は候補チップとして並ぶ（#1710）
       repositoryFullName: repositoryFullName || null,
+      // ただし人が入力ステップで指定した場合は、推定そのものを省く（#1733）
+      repositoryPinned: hasPickedRepository,
     });
     if (!result) return;
 
-    // 候補が無い応答（デプロイ直後に古い版のAPIを叩いた場合）でも、決まった1件は候補として扱う
-    const suggested =
-      result.repositoryCandidates ??
-      (result.repositoryFullName ? [result.repositoryFullName] : []);
+    // 候補が無い応答（デプロイ直後に古い版のAPIを叩いた場合）でも、決まった1件は候補として扱う。
+    // ただし人が指定している場合は候補を出さない（#1733）——押しても変わらないものを並べると、
+    // 指定した本人には自分の選択が疑われているようにしか見えない
+    const suggested = hasPickedRepository
+      ? []
+      : (result.repositoryCandidates ??
+        (result.repositoryFullName ? [result.repositoryFullName] : []));
     const candidates = selectableSuggestedRepositories(kind, repositories, suggested);
     // 画面がリポジトリを渡していないときだけ、推定の1位を選んだ状態にする
     const isRepositoryAuto = !repositoryFullName && candidates.length > 0;
@@ -627,6 +703,7 @@ export function CreateIssueDialog({
 
   function handleRepositoryChange(value: string) {
     setAutoFilled((prev) => ({ ...prev, repository: false }));
+    setHasPickedRepository(true);
     setRepositoryFullName(value);
   }
 
@@ -743,7 +820,9 @@ export function CreateIssueDialog({
         <Chrome.Description>
           {isQuestion
             ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
-            : "内容を書くと、リポジトリ・タイトル・ラベルを自動で決めます。"}
+            : hasPickedRepository
+              ? "内容を書くと、タイトル・ラベルを自動で決めます。"
+              : "内容を書くと、リポジトリ・タイトル・ラベルを自動で決めます。"}
         </Chrome.Description>
       ) : (
         cameFromInput && (
@@ -797,6 +876,37 @@ export function CreateIssueDialog({
           </div>
         )}
 
+        {/* リポジトリの先指定（#1733）。**任意で、既定は「自動で決める」。**
+            どのリポジトリの話かが書く前から分かっているときに、推定と直しの1往復を
+            省くための欄で、選ばなければ「次へ」の挙動は#1605のまま変わらない。
+            リポジトリ別の画面から開いたときの値もここに出る——これまでは黙って
+            持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった */}
+        {step === "input" && hasSelectableRepository && (
+          <div className="flex flex-col gap-1.5">
+            {/* 「任意」は`Label`の外に置く。中に入れるとアクセシブルネームが
+                「リポジトリ任意」になり、項目名で引けなくなる（確認ステップのバッジと同じ理由） */}
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="create-issue-input-repo">リポジトリ</Label>
+              <span className="text-xs text-muted-foreground">任意</span>
+            </div>
+            <Select
+              value={repositoryFullName || AUTO_REPOSITORY_VALUE}
+              onValueChange={handleInputRepositoryChange}
+            >
+              <SelectTrigger id="create-issue-input-repo" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_REPOSITORY_VALUE}>自動で決める（内容から）</SelectItem>
+                <RepositorySelectItems
+                  registered={registeredRepositories}
+                  unregistered={selectableUnregisteredRepositories}
+                />
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* 推定中の案内（#1605）。何を決めようとしているかは下の項目名が表すので、ここは1行 */}
         {step === "confirm" && isQuickSuggesting && (
           <p className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs text-foreground">
@@ -815,6 +925,7 @@ export function CreateIssueDialog({
                 <AutoBadge />
               ) : (
                 cameFromInput &&
+                !hasPickedRepository &&
                 repositoryFullName !== "" &&
                 repositoryFullName === defaultRepositoryFullName && <PageBadge />
               )}
@@ -827,28 +938,10 @@ export function CreateIssueDialog({
                   <SelectValue placeholder="リポジトリを選択" />
                 </SelectTrigger>
                 <SelectContent>
-                  {registeredRepositories.length > 0 && (
-                    <SelectGroup>
-                      {selectableUnregisteredRepositories.length > 0 && (
-                        <SelectLabel>登録済み</SelectLabel>
-                      )}
-                      {registeredRepositories.map((repo) => (
-                        <SelectItem key={repo.id} value={repo.fullName}>
-                          {repo.fullName}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                  {selectableUnregisteredRepositories.length > 0 && (
-                    <SelectGroup>
-                      {registeredRepositories.length > 0 && <SelectLabel>未登録</SelectLabel>}
-                      {selectableUnregisteredRepositories.map((repo) => (
-                        <SelectItem key={repo.id} value={repo.fullName}>
-                          {repo.fullName}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
+                  <RepositorySelectItems
+                    registered={registeredRepositories}
+                    unregistered={selectableUnregisteredRepositories}
+                  />
                 </SelectContent>
               </Select>
             ) : (
@@ -978,10 +1071,15 @@ export function CreateIssueDialog({
             <div className="flex flex-wrap gap-2">
               <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
             </div>
+            {/* 何が自動で決まるかは、リポジトリを指定したかどうかで変わる（#1733） */}
             <p className="text-xs text-muted-foreground">
-              {isQuestion
-                ? "リポジトリは内容から決めます。質問する前に確認できます。"
-                : "リポジトリ・タイトル・ラベルは内容から決めます。作成する前に確認できます。"}
+              {hasPickedRepository
+                ? isQuestion
+                  ? "リポジトリは指定したものを使います。質問する前に確認できます。"
+                  : "タイトル・ラベルは内容から決めます。リポジトリは指定したものを使います。"
+                : isQuestion
+                  ? "リポジトリは内容から決めます。質問する前に確認できます。"
+                  : "リポジトリ・タイトル・ラベルは内容から決めます。作成する前に確認できます。"}
             </p>
             {quickSuggestNotConfigured && (
               <p className="text-xs text-muted-foreground">
