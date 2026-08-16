@@ -929,6 +929,7 @@ jobs:
           fi
 
       - name: 対応開始をコメントで通知する
+        id: ack_comment
         # Claude Codeエージェント自身に通知コメントの投稿を委ねると、調査に時間がかかった場合や
         # 途中で行き詰まった場合に「依頼を受け取ったこと」自体が使用者に伝わらない恐れがある。
         # そのため後続のClaude Codeステップとは独立した、失敗しにくい単純なシェルスクリプトの
@@ -944,6 +945,13 @@ jobs:
         # 常に同一だったため、使用者からは「なぜ同じ通知が2回来たのか」が分からず、不安になって
         # 重複して再依頼してしまう一因になっていた(#747)。そのため直前コメントを判定し、再試行で
         # あることが分かる一文を付け加える。
+        #
+        # **mode=askのときだけ、投稿したコメントのidをoutputへ残す(#1766)。** 質問は
+        # 「質問→受付→回答」の3件が並び、回答が出たあとも受付だけが役目を終えて残る。
+        # 投稿自体をやめないのは、この受付コメントに含まれる`実行ログ: <URL>`が画面の
+        # 経過時間バッジ・実行キャンセルボタン(src/hooks/use-issue-workflow-run.ts)の
+        # 唯一の手掛かりで、回答が出るまでの間はそれが要るため。回答(または回答できなかった
+        # ことの通知)が出た時点で、後続の検証ステップがこのidのコメントを削除する。
         if: github.event_name != 'workflow_dispatch' && (steps.state.outputs.mode == 'plan' || steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional' || steps.state.outputs.mode == 'split' || steps.state.outputs.mode == 'ask')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1005,7 +1013,23 @@ jobs:
             AGENT_ROLE=guide
           fi
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n'"<!-- issue-deck-agent:$AGENT_ROLE -->"
-          gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
+          COMMENT_URL="$(gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY")"
+
+          # 削除するのは質問の受付コメントだけで、対象は「いま投稿したこの1件」に限る。
+          # `gh issue comment`は投稿したコメントのURL(`.../issues/1#issuecomment-123`)を
+          # 標準出力へ返すので、その末尾のidだけを取り出す。**数字として取れなかった場合は
+          # 何も出力しない**(idを取り違えて別のコメントを消さないため)。
+          if [ "${{ steps.state.outputs.mode }}" = "ask" ]; then
+            ACK_ID="${COMMENT_URL##*#issuecomment-}"
+            case "$ACK_ID" in
+              ''|*[!0-9]*)
+                echo "::warning::受付コメントのidを特定できなかったため、回答後の削除をスキップします（出力: ${COMMENT_URL}）"
+                ;;
+              *)
+                echo "ack_comment_id=$ACK_ID" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+          fi
 
       - name: Project Status を報告する（計画検討着手時）
         # 進捗をissue-deckの進捗報告APIへ送り、Projectsのカンバンを追従させる(#991 Phase 2)。
@@ -1556,24 +1580,67 @@ jobs:
           fi
           "$CLAUDE_USAGE_SCRIPT" "Claude Code（質問応答）" "${{ steps.claude_question.outputs.execution_file }}"
 
-      - name: 質問への回答を検証し、必要ならフォールバックする
+      - name: 質問への回答を検証し、受付コメントを片付ける
+        # 質問のスレッドを「質問と回答だけ」にするステップ(#1766)。回答が出たかどうかを判定し、
+        # 役目を終えた受付コメントを削除し、回答できていなければその旨を残す。
+        #
+        # 判定は**回答マーカー(`<!-- issue-deck-qa-answer -->`)の有無**で行う。以前は
+        # 「コメントが1件でも増えたか」で見ていたが、実行中に人や別のワークフローが
+        # コメントすると件数だけが増え、回答が無いまま「完了」と判定されていた。
+        # ただしマーカーの付与はプロンプト(.github/prompts/question.md)の指示に依存するため、
+        # マーカーが無くてもこの実行のトークン名義(github-actions[bot])で新規コメントが
+        # 投稿されていれば回答済みとして扱い、警告だけ残す(回答が出ているのに
+        # 「回答できませんでした」と通知する誤検知を避けるため)。
         if: always() && steps.state.outputs.mode == 'ask'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACK_COMMENT_ID: ${{ steps.ack_comment.outputs.ack_comment_id }}
+          BEFORE_COUNT: ${{ steps.before_ask.outputs.comment_count }}
         run: |
           set -e
-          AFTER_COUNT="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments | length')"
-          BEFORE_COUNT="${{ steps.before_ask.outputs.comment_count }}"
           : "${BEFORE_COUNT:=0}"
-          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
-            echo "新規コメントを確認できたため質問への回答は完了とみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+          case "$BEFORE_COUNT" in
+            ''|*[!0-9]*) BEFORE_COUNT=0 ;;
+          esac
+
+          COMMENTS_JSON="$(gh issue view ${{ steps.state.outputs.issue_number }} --json comments --jq '.comments')"
+          # 質問前のコメント数(before_ask)より後に増えたぶんだけを見る。受付コメントは
+          # before_askより前に投稿済みなのでここには含まれない。
+          NEW_JSON="$(printf '%s' "$COMMENTS_JSON" | jq --argjson skip "$BEFORE_COUNT" '.[$skip:]')"
+          HAS_ANSWER="$(printf '%s' "$NEW_JSON" | jq -r 'any(.[]; .body | contains("<!-- issue-deck-qa-answer -->"))')"
+          HAS_BOT_COMMENT="$(printf '%s' "$NEW_JSON" | jq -r 'any(.[]; .viewerDidAuthor == true or ((.author.login // "") | startswith("github-actions")))')"
+
+          ANSWERED=false
+          if [ "$HAS_ANSWER" = "true" ]; then
+            ANSWERED=true
+            echo "回答コメントを確認できたため、質問への回答は完了とみなします"
+          elif [ "$HAS_BOT_COMMENT" = "true" ]; then
+            ANSWERED=true
+            echo "::warning::回答マーカー（<!-- issue-deck-qa-answer -->）の無い新規コメントを回答とみなしました。画面では回答ボットとして表示されず、回答待ちの表示も解除されません"
+          else
+            echo "回答コメントが確認できないため、回答できなかったことを通知します"
+          fi
+
+          # 受付コメントは回答（または下の通知）が出た時点で役目を終えるため削除する。
+          # 消すのはこの実行が投稿した1件だけで、失敗してもジョブは落とさない。
+          if [ -n "$ACK_COMMENT_ID" ]; then
+            if gh api --method DELETE "repos/${{ github.repository }}/issues/comments/$ACK_COMMENT_ID" --silent; then
+              echo "受付コメント（id: $ACK_COMMENT_ID）を削除しました"
+            else
+              echo "::warning::受付コメント（id: $ACK_COMMENT_ID）の削除に失敗しました"
+            fi
+          fi
+
+          if [ "$ANSWERED" = "true" ]; then
             exit 0
           fi
 
-          echo "新規コメントが確認できないため、フォールバックコメントを投稿します（投稿前後とも $BEFORE_COUNT 件）"
-          FALLBACK_BODY=$'⚠️ 質問への回答に失敗した可能性があります。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
+          # 末尾は`<!-- issue-deck-fallback-notice -->`にする。src/lib/github/fallback-notice.tsが
+          # **本文の最終行での一致**だけをフォールバック通知と認め、画面はこれをエラー通知ボット
+          # （赤）として表示する。あわせて画面の「Claudeの回答待ち」表示もここで解除される。
+          FALLBACK_BODY=$'⚠️ 質問への回答を投稿できませんでした。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 
       - name: 実装前のコメント数を記録する
