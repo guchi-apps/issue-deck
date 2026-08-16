@@ -674,7 +674,7 @@ export function MobileIssueDetail({
           mobile-screen-scroll-container.test.tsで固定している */}
       {/* pb-20（5rem）も外さない（#1793）。この画面には下端から浮いている要素が2つあり、
           ScrollToLatestCommentButton（bottom-4・h-11＝下端から3.75rem）と新規作成のFAB
-          （bottom-4・size-12＝下端から4rem）が、最下部までスクロールしたときにコメント
+          （bottom-4・size-14＝下端から4.5rem）が、最下部までスクロールしたときにコメント
           入力欄の操作列へ重ならないための余白 */}
       <div
         ref={scrollContainerRef}
@@ -987,9 +987,9 @@ export function MobileIssueDetail({
         type="button"
         onClick={() => onCreateIssue(issue.repositoryFullName)}
         aria-label="新しいIssueを作成"
-        className="absolute right-4 bottom-4 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        className="absolute right-4 bottom-4 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
       >
-        <Plus className="size-5" />
+        <Plus className="size-6" />
       </button>
 
       <DeleteIssueDialog
