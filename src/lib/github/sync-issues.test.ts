@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { askClaudeCommentBody, QA_ANSWER_MARKER } from "@/lib/github/ask-claude";
+import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
 import { updateQaAnswerPendingState, upsertIssueFromWebhookPayload } from "@/lib/github/sync-issues";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 
@@ -169,6 +170,18 @@ describe("updateQaAnswerPendingState", () => {
 
   it("回答コメントの場合、nullに戻す", async () => {
     await updateQaAnswerPendingState(1, `回答本文\n\n${QA_ANSWER_MARKER}`);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { githubIssueId: BigInt(1) },
+      data: { qaAnswerPendingAt: null },
+    });
+  });
+
+  it("回答できなかったことの通知の場合も、nullに戻す（#1766）", async () => {
+    await updateQaAnswerPendingState(
+      1,
+      `⚠️ 質問への回答を投稿できませんでした。\n\n${FALLBACK_NOTICE_MARKER}`,
+    );
 
     expect(updateMany).toHaveBeenCalledWith({
       where: { githubIssueId: BigInt(1) },
