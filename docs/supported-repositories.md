@@ -150,11 +150,51 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 `releaseWorkflowExists`で、結果は10分キャッシュする）。無人実行（計画〜実装）を入れているかとは
 独立しているため、ここに分けて記録する。
 
-2026-08-15時点の実測。
+**通知ベル（PC）とリポジトリ一覧のバッジ（スマホ）も同じ基準になった**（#1727）。こちらは
+`/api/repositories/release-pending-merges`が母集団を`hasClaudeWorkflow: true`で先に絞っており、
+#1538がボタンについて取り除いたのと同じ代用（`claude-issue-dispatch.yml`の有無で
+「リリースworkflow導入済み」を代用する）が残っていた。無人実行を入れずにリリースフローだけを
+載せたリポジトリでは、**ボタンは出るのに「マージ待ち」の通知だけ出ない**という食い違いになる。
+
+2026-08-16時点の実測。
 
 | 配布済み | `issue-deck`（ローカルパス参照）・`shopping-list`・`dayspan`（この2つはコピー方式）・`car-care`・`meisai-lab`・`asset-manager`・`subscription-lists`・`portfolio`・`solitaire`・`myroom`・`signaly`・`aide`・`db-console`（#1551で追加）・**`clip-hive`・`ops-dashboard`**（#1591で追加） |
 |---|---|
-| **未配布** | なし（対応済みリポジトリすべてに行き渡った） |
+| **未配布** | **`subpc`・`vps`**（#1706・#1727。上の表に載らないインフラ設定リポジトリで、対応は各リポジトリの子Issue guchi-apps/subpc#13・guchi-apps/vps#80 で行う） |
+
+### `subpc`・`vps`（インフラ設定リポジトリ）
+
+無人実行（計画〜実装）は入れないまま、**リリースフローだけを載せる**対象
+（#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80）。
+2026-08-16時点の実測と、各リポジトリで必要になる作業は次のとおり。
+
+| 項目 | `guchi-apps/subpc` | `guchi-apps/vps` |
+|---|---|---|
+| デフォルトブランチ | `main` | `main` |
+| `develop` | **無い**（作るところから） | ある（**`main`から21コミット遅れ**。先に追従が要る） |
+| バージョンファイル | 無い | 無い |
+| `release-develop-to-main.yml` | 無い | 無い |
+| `deploy.yml` | ある（`push: main`。**サブPC上のセルフホストランナー**） | ある（`push: main`。SSHでVPSへ反映） |
+| Allow auto-merge | **無効**（バンプPRの自動マージに必要） | **無効**（同左） |
+| `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） |
+
+**どちらもNodeを使わないため、バージョンの持ち方は`signaly`と同じ形になる**
+（`version.json` + `version-file`・`bump-command`。上記「リリースワークフローのバージョン管理方式」）。
+`package.json`を置いてしまうと、依存を持たないインフラ設定リポジトリにnpmの体裁だけが増える。
+
+**デフォルトブランチが`main`のままでも載せられるが、callerは`main`にも入れる。**
+`workflow_dispatch`はワークフローファイルがデフォルトブランチに無いと有効にならず、
+issue-deckの起動（`ref: develop`のdispatch）が404になる。**この2件はデフォルトを`develop`へ
+移さない**——どちらも`drift-check.yml`が`schedule`で動き、スケジュール実行はデフォルトブランチの
+内容を実機と突き合わせるため、`develop`をデフォルトにすると`main`未反映の変更が毎日ドリフトとして
+報告される（`db-console`でデフォルトを`develop`へ移したときとは事情が違う。あちらは
+`issues`・`issue_comment`のワークフローを載せるための変更だった）。
+
+> **issue-deckのリリース画面のバージョン表示は`package.json`固定**
+> （[`lib/github/release-api.ts`](../src/lib/github/release-api.ts)の`fetchPackageVersion`）。
+> `version.json`を使うリポジトリでは`main`/`develop`の版数が`-`と表示され、
+> `release_pending`（developだけbump済みの過渡状態）も判定されない。**起動・PR作成・マージ待ちの
+> 通知はいずれもPRの実在から判定するため動く。** 既に`signaly`が同じ状態にある。
 
 **未配布のリポジトリではリリースボタンが出ない。** 押せないだけでなく、develop→mainのリリースPRも
 バージョンbumpも自動化されないため、リリースは手作業になる（手作業リリースはタグ重複などの
