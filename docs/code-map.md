@@ -763,6 +763,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 を通す（付与エンドポイントは存在しないラベル名を渡すとその場で作ってしまうため）。
 一覧は[multi-agent/labels.md](multi-agent/labels.md)「理由を表す`01.check-*`ラベル」。
 
+**ラベル名の番号帯で「そのラベルをどう扱うか」を決める判定は
+[`lib/issue-status.ts`](../src/lib/issue-status.ts)に集めてある。** 3つあり、用途が違うので
+使い分ける。`isAttentionLabel`＝`00.`帯と`01.check-*`（一覧カードのラベル表示から外す）、
+`isProgressLabel`＝それに廃止済みの`01.`〜`09.`ステップを足したもの（人が選ぶ対象から外す。
+人が選べる範囲そのものは`lib/github/start-implementation.ts`の`isSelectableLabelName`が
+実装オプション用ラベルも足して決める）、`isAutoAssignableLabelName`＝**Claudeがタイトルと
+一緒に推定してよい範囲**（30〜89番台。71番台と番号プレフィックスの無いラベルを除く。#1662）。
+推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを自動生成」だけで、
+プロンプトの候補一覧・応答の後処理（[`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)）と
+画面側のリセット範囲（`create-issue-dialog.tsx`の`mergeSuggestedLabels`）が同じ判定を通る。
+どれか1つでもずれると、範囲外のラベルが付くか、人が選んだラベルが黙って消える。
+理由は[multi-agent/labels.md](multi-agent/labels.md)「Claudeによるラベル自動付与の対象は30〜89番台に限る」。
+
 **理由から「次にどこの何を押すか」を組み立てるのは
 [`lib/github/check-user-guidance.ts`](../src/lib/github/check-user-guidance.ts)1か所**（#1663）。
 Remote Controlを開くのか・対応PRをマージするのか・コメント欄の「承認」を押すのかは、理由
