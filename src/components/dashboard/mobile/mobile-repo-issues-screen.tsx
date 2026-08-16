@@ -18,6 +18,7 @@ import {
   getAssigneeOptions,
   sortIssues,
 } from "@/lib/issue-stats";
+import { computeManualStepReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
@@ -96,10 +97,15 @@ export function MobileRepoIssuesScreen({
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
   // タブごとの該当Issue件数（#880）。全タブに件数バッジを表示するため、リポジトリで
   // 絞り込んだissuesを母集団に、一覧と同じ絞り込みを適用して求める（#1689）。
+  // 母集団に絞り込み前の全Issueを渡すのは、手作業Issueが別リポジトリのIssue・PRを
+  // 待っていることがあるため（#1763）。このリポジトリ分だけでは「状態不明＝実行できる」に倒れる
   const navCounts = useMemo(
-    () => computeNavCountsForFilters(repoIssues, listFilters, currentUserLogin),
-    [repoIssues, listFilters, currentUserLogin],
+    () => computeNavCountsForFilters(repoIssues, listFilters, currentUserLogin, issues),
+    [repoIssues, listFilters, currentUserLogin, issues],
   );
+
+  // 手作業Issueの前提条件がそろっているか（#1763）。判定の母集団も全Issue
+  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
   const color = getRepoColor(repository.fullName);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置はリポジトリ・
@@ -176,6 +182,7 @@ export function MobileRepoIssuesScreen({
       }
       issues={displayedIssues}
       navCounts={navCounts}
+      manualStepReadiness={manualStepReadiness}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}

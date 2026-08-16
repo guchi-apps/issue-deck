@@ -196,6 +196,9 @@ export function SidebarNav({
               icon: navViewIcons[view.id],
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
+              // 手作業の件数は「いま実行できる数」（#1763。`computeNavCounts`で数え済み）。
+              // 内訳の吹き出しは付けない——数字がそのまま実行できる件数を指すため、
+              // 同じことを言い直すだけになる。前提待ちの件数は一覧のヘッダーで読む
               count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
               // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
               // あるときだけで、前提待ちしか無い間は強調しない（#1613）。
@@ -203,10 +206,6 @@ export function SidebarNav({
                 view.id === "check-user"
                   ? checkUserCount > 0
                   : manualStepAttention.actionable > 0,
-              title:
-                view.id === "manual-step"
-                  ? `いま実行できる: ${manualStepAttention.actionable}件 / 前提待ち: ${manualStepAttention.waitingForPrerequisites}件`
-                  : undefined,
             }),
           )}
         </ul>

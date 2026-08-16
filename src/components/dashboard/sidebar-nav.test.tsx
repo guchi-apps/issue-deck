@@ -177,6 +177,20 @@ describe("SidebarNav", () => {
     expect(screen.getByText("3").className).toContain("bg-amber-500");
   });
 
+  // 件数（computeNavCounts）が「いま実行できる数」になったため、内訳の吹き出しは
+  // 同じことを言い直すだけになる（#1763）。前提待ちの件数は一覧のヘッダーで読む
+  it("手作業の行に内訳の吹き出しを付けない", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, "manual-step": 1 },
+      { manualStepAttention: { total: 3, actionable: 1, waitingForPrerequisites: 2 } },
+    );
+
+    expect(
+      screen.getByRole("button", { name: /ユーザーの作業待ち/ }).getAttribute("title"),
+    ).toBeNull();
+  });
+
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
   it("未取得のときはどのPRビューにも件数を出さない", () => {
     renderSidebar({ all: null, "in-progress": null, completed: null });

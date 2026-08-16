@@ -368,12 +368,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
   ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
   `pinnedSection`と`pinnedCount`が担う。
-- **「ユーザーの作業待ち」（`71.manual-step`）を橙色にするのは、いま実行できるものがあるときだけ**
-  （#1613。[`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
-  手作業の多くは起点の変更が本番へ出るまで実行できず、1件でもあれば強調すると数週間先まで
-  点いたままになる。判定は本文の`## 前提条件`・`## 関連`に書かれた参照
+- **「ユーザーの作業待ち」（`71.manual-step`）は、いま実行できる件数だけを出す**
+  （#1613で橙色の強調を、#1763で件数そのものを。
+  [`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
+  手作業の多くは起点の変更が本番へ出るまで実行できず、総数のままだと数週間先まで実行できない
+  ものが残っている間ずっと数が減らず、「いま手を動かせば片付く数」として読めない。判定は本文の
+  `## 前提条件`・`## 関連`に書かれた参照
   （[`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)）の進捗で行い、
   **状態を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+  - **数え方の差し替えは`computeNavCounts`（[`lib/issue-stats.ts`](../src/lib/issue-stats.ts)）
+    1か所で行う。** 左メニュー・スマホのホーム・ビュー選択シート・リポジトリ別一覧の件数は
+    すべてこの関数の結果を見ており、画面ごとに足し引きすると片方だけ古くなる。
+    リポジトリで絞り込んだ一覧を数えるときは、`computeNavCountsForFilters`へ**絞り込み前の
+    全Issue**を渡す（手作業Issueは別リポジトリのIssueを待っていることがあり、母集団から
+    外れると「状態不明＝実行できる」に倒れる）。
+  - **メニューの数（実行できる件数）と一覧の行数はわざと食い違う。** その差は一覧のヘッダー
+    （`formatManualStepListCount`が作る`2件・前提待ち2件`）と、各行のアイコンで説明する。
+    行のアイコンは[`issue-list.tsx`](../src/components/dashboard/issue-list.tsx)の
+    `ManualStepReadinessIcon`で、判定は件数と同じ`computeManualStepReadiness`から引くので
+    数と印が食い違わない。**渡す判定は絞り込み前の全Issueを母集団に作る**——「ユーザーの
+    作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
+  - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
+    同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、

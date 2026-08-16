@@ -80,7 +80,10 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
-import { computeManualStepAttention } from "@/lib/manual-step-attention";
+import {
+  computeManualStepAttention,
+  computeManualStepReadiness,
+} from "@/lib/manual-step-attention";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -455,6 +458,10 @@ export function IssueDeckShell({
       ),
     [issues, filters],
   );
+  // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
+  // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
+  // 参照先のIssueを1件も引けない。
+  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -1108,6 +1115,8 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
+                // 手作業Issueの行に「いま実行できるか」を出す（#1763）
+                manualStepReadiness={manualStepReadiness}
                 // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
                 filtersIgnored={filtersIgnored}
                 className="hidden shrink-0 border-r md:flex"
