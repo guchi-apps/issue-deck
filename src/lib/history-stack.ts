@@ -14,14 +14,31 @@
  */
 let depth = 0;
 
+/**
+ * 「巻き戻せるか」が変わったことを知りたい購読者（#1771）。
+ *
+ * PC版ヘッダーの戻るボタンは、巻き戻せないときは押せない状態にする。この値はモジュール変数
+ * なので、変わったことをReactへ伝える経路が要る（`useCanGoBackInApp`が`useSyncExternalStore`
+ * から購読する）。**通知するのは`canGoBackInApp()`の真偽が変わったときだけ**で、深さが1→2の
+ * ように増えただけでは通知しない（見た目が変わらない再描画になるため）。
+ */
+const listeners = new Set<() => void>();
+
+function setDepth(next: number): void {
+  const before = canGoBackInApp();
+  depth = next;
+  if (canGoBackInApp() === before) return;
+  for (const listener of listeners) listener();
+}
+
 /** 履歴エントリを1つ積んだ */
 export function recordHistoryPush(): void {
-  depth += 1;
+  setDepth(depth + 1);
 }
 
 /** ブラウザ・OSの履歴移動が起きた */
 export function recordHistoryPop(): void {
-  depth = Math.max(0, depth - 1);
+  setDepth(Math.max(0, depth - 1));
 }
 
 /** 自分が積んだ履歴を巻き戻せるか */
@@ -29,7 +46,15 @@ export function canGoBackInApp(): boolean {
   return depth > 0;
 }
 
+/** 巻き戻せるかどうかが変わったら`listener`を呼ぶ。戻り値は購読の解除 */
+export function subscribeHistoryStack(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /** テスト用。実行時には呼ばない */
 export function resetHistoryStack(): void {
-  depth = 0;
+  setDepth(0);
 }

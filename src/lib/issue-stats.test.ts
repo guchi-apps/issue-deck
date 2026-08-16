@@ -3,14 +3,15 @@ import {
   applyIssueFilters,
   computeFilterLabelSummary,
   computeLabelSummary,
-  computeNavCounts,
   computeNavCountsForFilters,
   computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
   groupIssuesByRepository,
+  hasIgnoredIssueFilters,
   reconcileIssues,
+  resolveFiltersForView,
   sortIssues,
   upsertIssue,
 } from "@/lib/issue-stats";
@@ -693,7 +694,15 @@ describe("time-dependent stats", () => {
     });
   });
 
-  describe("computeNavCounts", () => {
+  describe("computeNavCountsForFilters", () => {
+    const listFilters = {
+      q: "",
+      repos: [] as string[],
+      state: "open" as const,
+      labels: [] as string[],
+      assignee: null,
+    };
+
     it("各ビューに一致するIssue数を返す", () => {
       const issues = [
         makeIssue({
@@ -708,7 +717,7 @@ describe("time-dependent stats", () => {
           createdAt: "2025-01-01T00:00:00.000Z",
         }),
       ];
-      expect(computeNavCounts(issues, issues, "me")).toEqual({
+      expect(computeNavCountsForFilters(issues, listFilters, "me")).toEqual({
         all: 2,
         favorites: 1,
         "recently-added": 1,
@@ -720,22 +729,6 @@ describe("time-dependent stats", () => {
         "release-pending": 0,
         "recently-merged": 0,
       });
-    });
-
-    it("close済みIssueが対象のビューはissuesIgnoringStateを基準に数える", () => {
-      const openIssues = [makeIssue({ id: "1" })];
-      const allIssues = [
-        ...openIssues,
-        makeIssue({
-          id: "2",
-          state: "closed",
-          projectStatus: "Done",
-          closedAt: "2026-01-09T10:00:00.000Z",
-        }),
-      ];
-      const counts = computeNavCounts(openIssues, allIssues, null);
-      expect(counts.all).toBe(1);
-      expect(counts["recently-merged"]).toBe(1);
     });
 
     // 前提待ちを含む総数は「いま手を動かせば片付く数」として読めない（#1763）
@@ -758,18 +751,8 @@ describe("time-dependent stats", () => {
         }),
       ];
 
-      expect(computeNavCounts(issues, issues, null)["manual-step"]).toBe(1);
+      expect(computeNavCountsForFilters(issues, listFilters, null)["manual-step"]).toBe(1);
     });
-  });
-
-  describe("computeNavCountsForFilters", () => {
-    const listFilters = {
-      q: "",
-      repos: [] as string[],
-      state: "open" as const,
-      labels: [] as string[],
-      assignee: null,
-    };
 
     it("状態の絞り込みを適用した件数を返す（close済みを含めない）", () => {
       const issues = [
@@ -822,6 +805,94 @@ describe("time-dependent stats", () => {
 
       const displayed = applyIssueFilters(filterIssuesByView(issues, "all", null), filters);
       expect(computeNavCountsForFilters(issues, filters, null).all).toBe(displayed.length);
+    });
+  });
+
+  // #1750: リポジトリ横断で全体を見るビューは、ユーザーの絞り込みを適用しない
+  describe("resolveFiltersForView / hasIgnoredIssueFilters", () => {
+    const filters = {
+      q: "キーワード",
+      repos: ["owner/repo"],
+      state: "closed" as const,
+      labels: ["30.bug"],
+      assignee: "me",
+    };
+
+    it("確認待ち・作業待ち・質問では条件を落とし、状態はビューの既定へ戻す", () => {
+      for (const view of ["check-user", "manual-step", "question"] as const) {
+        expect(resolveFiltersForView(filters, view)).toEqual({
+          q: "",
+          repos: [],
+          state: "open",
+          labels: [],
+          assignee: null,
+        });
+        expect(hasIgnoredIssueFilters(filters, view)).toBe(true);
+      }
+    });
+
+    it("それ以外のビューは条件をそのまま使う", () => {
+      for (const view of ["all", "not-started", "in-progress", "recently-merged"] as const) {
+        expect(resolveFiltersForView(filters, view)).toBe(filters);
+        expect(hasIgnoredIssueFilters(filters, view)).toBe(false);
+      }
+    });
+
+    it("絞り込みが指定されていなければ注記は出さない", () => {
+      const empty = { q: "", repos: [], state: "open" as const, labels: [], assignee: null };
+      expect(hasIgnoredIssueFilters(empty, "check-user")).toBe(false);
+    });
+  });
+
+  describe("リポジトリ絞り込みと件数（#1750）", () => {
+    const issues = [
+      makeIssue({
+        id: "1",
+        repositoryFullName: "owner/a",
+        labels: [{ name: "00.check-user", color: "red", description: null }],
+      }),
+      makeIssue({
+        id: "2",
+        repositoryFullName: "owner/b",
+        labels: [{ name: "00.check-user", color: "red", description: null }],
+      }),
+      makeIssue({
+        id: "3",
+        repositoryFullName: "owner/b",
+        labels: [{ name: "71.manual-step", color: "blue", description: null }],
+      }),
+      makeIssue({ id: "4", repositoryFullName: "owner/b", title: "[質問] これは何ですか" }),
+    ];
+    const filters = {
+      q: "",
+      repos: ["owner/a"],
+      state: "open" as const,
+      labels: [] as string[],
+      assignee: null,
+    };
+
+    it("リポジトリを絞っても確認待ち・作業待ち・質問の件数は変わらない", () => {
+      const counts = computeNavCountsForFilters(issues, filters, null);
+      expect(counts["check-user"]).toBe(2);
+      expect(counts["manual-step"]).toBe(1);
+      expect(counts.question).toBe(1);
+    });
+
+    it("それ以外のビューは従来どおり絞り込まれる", () => {
+      const counts = computeNavCountsForFilters(issues, filters, null);
+      expect(counts.all).toBe(1);
+    });
+
+    it("一覧側もリポジトリ絞り込みを適用しない（件数と一致する）", () => {
+      const displayed = filterIssuesByView(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "check-user")),
+        "check-user",
+        null,
+        issues,
+      );
+      expect(displayed).toHaveLength(
+        computeNavCountsForFilters(issues, filters, null)["check-user"],
+      );
     });
   });
 

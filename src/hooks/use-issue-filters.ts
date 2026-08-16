@@ -166,7 +166,7 @@ export function useIssueFilters() {
     [navigateParams, filters.view],
   );
 
-  // 複数フィールドを1回のURL更新でまとめて反映する（よく使うフィルター適用など、
+  // 複数フィールドを1回のURL更新でまとめて反映する（ビュー切り替えなど、
   // setFilterの連続呼び出しだと互いの変更を上書きしてしまうケース向け）。
   const setFilters = useCallback(
     (patch: Partial<IssueFilters>, options?: { history?: HistoryMode }) => {

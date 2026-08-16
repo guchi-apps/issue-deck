@@ -63,6 +63,8 @@ function renderFlow(input: {
   mergedPullRequestsLoaded?: boolean;
   error?: string | null;
   onRefresh?: () => void;
+  /** マージできたときの後始末（#1756）。渡さない場合は`onRefresh`へ縮退する */
+  onMerged?: (pullRequest: PullRequestSummary) => void;
 }) {
   const flow = buildBranchFlow({
     repositories: [{ fullName: REPO, private: false }],
@@ -82,6 +84,7 @@ function renderFlow(input: {
       failedRepositories={input.failedRepositories ?? []}
       mergedPullRequestsLoaded={input.mergedPullRequestsLoaded ?? true}
       onRefresh={input.onRefresh ?? vi.fn()}
+      onMerged={input.onMerged}
     />,
   );
 }
@@ -877,6 +880,120 @@ describe("BranchFlowView", () => {
     });
   });
 
+  describe("作業ブランチのPRのマージ（#1756）", () => {
+    /** ユーザーがマージするしかないdevelop向けPR（`00.check-user` + `01.check-merge`） */
+    function userMergePullRequest(overrides: Partial<PullRequestSummary> = {}) {
+      return makePullRequest({
+        number: 91,
+        headRef: "issue-88",
+        linkedIssueNumber: 88,
+        linkedIssueCheckUser: true,
+        linkedIssueCheckReason: "merge",
+        ...overrides,
+      });
+    }
+
+    it("ユーザーのマージが必要なPRにはボタンと理由のバッジを出す", () => {
+      renderFlow({ pullRequests: [userMergePullRequest()] });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
+      expect(screen.getByText("マージする")).toBeTruthy();
+    });
+
+    it("自動でマージされるPRには出さない（押す必要が無いものを押させない）", () => {
+      renderFlow({
+        pullRequests: [
+          userMergePullRequest({ linkedIssueCheckUser: false, linkedIssueCheckReason: null }),
+        ],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("Auto-merge有効なPRには出さない（待てば入る）", () => {
+      renderFlow({ pullRequests: [userMergePullRequest({ autoMergeEnabled: true })] });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("コンフリクトしているPRにはボタンを出さない（バッジは出す）", () => {
+      renderFlow({ pullRequests: [userMergePullRequest({ mergeable: false })] });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("CIが通っていればダイアログを挟まずマージし、onMergedへ対象のPRを渡す", async () => {
+      // この describe の afterEach が拾えるよう、stubGlobalではなくspyOnで差し替える
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      const onMerged = vi.fn();
+      const pullRequest = userMergePullRequest();
+
+      renderFlow({ pullRequests: [pullRequest], onMerged });
+      ensureRepositoryOpen();
+      fireEvent.click(screen.getByText("マージする"));
+
+      await screen.findByText("マージ済み");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onMerged).toHaveBeenCalledWith(expect.objectContaining({ id: pullRequest.id }));
+    });
+
+    it("マージ後のボタンは無効のまま残し、二度目の要求を飛ばさない", async () => {
+      // この describe の afterEach が拾えるよう、stubGlobalではなくspyOnで差し替える
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+      renderFlow({ pullRequests: [userMergePullRequest()], onMerged: vi.fn() });
+      ensureRepositoryOpen();
+      fireEvent.click(screen.getByText("マージする"));
+
+      const merged = await screen.findByText("マージ済み");
+      fireEvent.click(merged);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("マージ済みになったPRからはボタンが消える（親が取得を待たず反映した後）", () => {
+      renderFlow({
+        pullRequests: [
+          userMergePullRequest({
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-16T10:00:00Z",
+          }),
+        ],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("リリースPRのマージボタンは束の見出しの1つだけ（行と二重に出さない）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1550,
+            title: "v3.22.0をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [
+          branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 }, hasReleaseWorkflow: true }),
+        ],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getAllByText("マージする")).toHaveLength(1);
+    });
+  });
+
   describe("バージョンバンプPRの表示（#1548）", () => {
     function makeBumpPullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
       return makePullRequest({
@@ -1214,5 +1331,93 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText("本番へ出た変更を表示（1件）"));
       expect(screen.getByText("issue-915")).toBeTruthy();
     });
+  });
+});
+
+/**
+ * 左メニューのリポジトリ絞り込みを、この画面では「展開」として効かせる（#1750）。
+ * 母集団は絞らないので、選ばれていないリポジトリも畳んだ行として残る。
+ */
+describe("選択中リポジトリの展開（#1750）", () => {
+  const OTHER = "guchi-apps/car-care";
+
+  function renderTwoRepositories(expandedRepositoryFullNames: string[]) {
+    const flow = buildBranchFlow({
+      repositories: [
+        { fullName: REPO, private: false },
+        { fullName: OTHER, private: false },
+      ],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    });
+
+    return render(
+      <BranchFlowView
+        flow={flow}
+        fetchedAt="2026-08-15T10:30:00Z"
+        isLoading={false}
+        error={null}
+        failedRepositories={[]}
+        mergedPullRequestsLoaded
+        expandedRepositoryFullNames={expandedRepositoryFullNames}
+        onRefresh={vi.fn()}
+      />,
+    );
+  }
+
+  function repositoryRow(shortName: string) {
+    return screen.getByText(shortName).closest("button");
+  }
+
+  afterEach(cleanup);
+
+  it("選択中のリポジトリだけを開いた状態にし、他は畳んだまま残す", () => {
+    renderTwoRepositories([REPO]);
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("true");
+    expect(repositoryRow("car-care")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("選択があることをヘッダーに出す", () => {
+    renderTwoRepositories([REPO]);
+    expect(screen.getByText(/絞り込み中の1件を展開/)).toBeTruthy();
+  });
+
+  it("選択が無ければ従来どおり（すべて畳む・注記も出さない）", () => {
+    renderTwoRepositories([]);
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/絞り込み中の/)).toBeNull();
+  });
+
+  it("手で畳んだあとは、再描画で勝手に開き直さない", () => {
+    const { rerender } = renderTwoRepositories([REPO]);
+    fireEvent.click(screen.getByText(REPO_SHORT));
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+
+    const flow = buildBranchFlow({
+      repositories: [
+        { fullName: REPO, private: false },
+        { fullName: OTHER, private: false },
+      ],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    });
+    rerender(
+      <BranchFlowView
+        flow={flow}
+        fetchedAt="2026-08-15T10:31:00Z"
+        isLoading={false}
+        error={null}
+        failedRepositories={[]}
+        mergedPullRequestsLoaded
+        expandedRepositoryFullNames={[REPO]}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
   });
 });

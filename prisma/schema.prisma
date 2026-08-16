@@ -31,7 +31,6 @@ model User {
   hiddenRepositories   HiddenRepository[]
   favoriteRepositories FavoriteRepository[]
   favoriteIssues       FavoriteIssue[]
-  quickFilters         QuickFilter[]
   commentReads         IssueCommentRead[]
 }
 
@@ -265,27 +264,6 @@ model IssueCommentRead {
 
   @@unique([userId, issueId])
   @@index([issueId])
-}
-
-// ユーザーごとに保存したよく使うフィルター（PC左メニュー・スマホホーム画面に表示）
-model QuickFilter {
-  id       String  @id @default(cuid())
-  userId   String
-  name     String
-  view     String  @default("all")
-  q        String  @default("")
-  repo     String?
-  state    String  @default("open")
-  labels   String  @default("")
-  assignee String?
-  sort     String  @default("created")
-
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, name])
-  @@index([userId])
 }
 
 // GitHub API消費の内訳計測（src/lib/github/api-usage.ts）を、プロセス再起動をまたいで

@@ -40,10 +40,6 @@ function renderSidebar(
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
-      quickFilters={[]}
-      onSelectQuickFilter={() => {}}
-      onDeleteQuickFilter={() => {}}
-      onSaveQuickFilter={() => {}}
     />,
   );
 }
@@ -82,10 +78,6 @@ function renderSidebarWithRepositories(
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
       labelSummary={[]}
-      quickFilters={[]}
-      onSelectQuickFilter={() => {}}
-      onDeleteQuickFilter={() => {}}
-      onSaveQuickFilter={() => {}}
     />,
   );
 }

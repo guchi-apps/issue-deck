@@ -93,6 +93,12 @@ type IssueListProps = {
    */
   manualStepReadiness?: ManualStepReadinessMap;
   /**
+   * 絞り込みを指定しているのに、このビューでは適用されない状態か（#1750）。
+   * 判定は`hasIgnoredIssueFilters`で行い、ここは受け取った結果を注記として出すだけ。
+   * 黙って無視すると、キーワードやリポジトリを選んでも件数が変わらない理由が画面から読めない。
+   */
+  filtersIgnored?: boolean;
+  /**
    * ディスパッチの状態（#1638）。**同じ画面で既に取っているなら渡す**（#1262の取り決め）。
    * スマホのIssue一覧はヘッダーの実行状況ボタンと一覧が同じものを見るため、画面側で1回
    * 取って両方へ配っている。省略時はこの一覧が自分で取りに行く（PCの一覧は従来どおり）。
@@ -189,6 +195,7 @@ export function IssueList({
   pinnedSection,
   pinnedCount = 0,
   manualStepReadiness,
+  filtersIgnored = false,
   dispatch: injectedDispatch,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
@@ -427,7 +434,14 @@ export function IssueList({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="text-xs text-muted-foreground">{countLabel}</p>
+            <p className="text-xs text-muted-foreground">
+              {countLabel}
+              {filtersIgnored && (
+                <span title="このビューはリポジトリ横断で全体を表示します（#1750）。キーワード・リポジトリ・状態・ラベル・担当者の絞り込みは適用しません。">
+                  {" ・ 絞り込みは適用外"}
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {/* 夜にまとめて積んで順に流すための入口（#1266） */}

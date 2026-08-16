@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  ArrowLeft,
   ChevronDown,
   FolderTree,
   LayoutDashboard,
@@ -68,6 +69,10 @@ type TopBarProps = {
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
+  /** アプリ内で巻き戻せる履歴があるか（#1771）。無ければ戻るボタンを押せない状態にする */
+  canGoBack: boolean;
+  /** 1つ前の画面へ戻る（#1771） */
+  onBack: () => void;
 };
 
 export function TopBar({
@@ -89,13 +94,15 @@ export function TopBar({
   isSidebarCollapsed,
   onToggleSidebar,
   onOpenSettings,
+  canGoBack,
+  onBack,
 }: TopBarProps) {
 
   // 検索欄はURL（filters.q）に直接バインドすると、1文字入力するたびにrouter.replaceによる
   // ナビゲーションが走り入力が遅く感じられる（#1024）。入力自体はローカルstateで即時反映し、
   // URLへの反映（＝一覧の絞り込み）はデバウンスして行う。
   const [searchInput, setSearchInput] = useState(filters.q);
-  // クイックフィルター適用等、入力以外の経路でfilters.qが変わった場合はローカルstateを
+  // ブラウザバック等、入力以外の経路でfilters.qが変わった場合はローカルstateを
   // 追随させる（レンダー中に比較・更新することでeffectでの同期に伴うカスケード再レンダーを避ける）。
   const [syncedFiltersQ, setSyncedFiltersQ] = useState(filters.q);
   if (filters.q !== syncedFiltersQ) {
@@ -143,6 +150,25 @@ export function TopBar({
         ) : (
           <PanelLeftClose className="size-4" />
         )}
+      </Button>
+
+      {/* 1つ前の画面へ戻る（#1771）。**パソコンでアプリとして起動（PWA）するとブラウザの
+          ツールバーごと戻る矢印が消え、戻る操作の手段が画面上に無くなる。** ブラウザの戻る矢印が
+          あった位置とほぼ同じ、ウィンドウ左上へ置く。
+          戻り先の判断は`useHistoryNavigation`の`goBackOrFallback`に集約してあり（#1396）、
+          スマホのヘッダーの戻る・右スワイプと同じものを呼んでいる。
+          **巻き戻せないときも隠さず、押せない状態で残す。** 消すとヘッダーの並びが左右にずれ、
+          隣の「サイドバーを表示／非表示」を押そうとして位置が変わる。 */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0"
+        onClick={onBack}
+        disabled={!canGoBack}
+        title="戻る"
+        aria-label="戻る"
+      >
+        <ArrowLeft className="size-4" />
       </Button>
 
       {/* ヘッダーが狭いときに「Issue」「Deck」の2行へ折り返されないようにする（#1373） */}

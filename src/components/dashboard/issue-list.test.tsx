@@ -183,3 +183,18 @@ describe("IssueListの縦方向の縮小（#1665）", () => {
     expect((container.firstChild as HTMLElement).className).toContain("min-h-0");
   });
 });
+
+// #1750: 絞り込みを黙って無視すると、件数が変わらない理由が画面から読めない
+describe("絞り込みが効かないビューの注記（#1750）", () => {
+  afterEach(cleanup);
+
+  it("filtersIgnoredのときだけ件数の隣に注記を出す", () => {
+    renderList({ filtersIgnored: true });
+    expect(screen.getByText(/絞り込みは適用外/)).toBeTruthy();
+  });
+
+  it("既定では出さない", () => {
+    renderList();
+    expect(screen.queryByText(/絞り込みは適用外/)).toBeNull();
+  });
+});

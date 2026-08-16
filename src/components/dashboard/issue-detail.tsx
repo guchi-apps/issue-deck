@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 
 import {
-  Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -106,7 +105,6 @@ import {
   canCloseAskRepoQuestion,
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
-import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -285,21 +283,6 @@ export function IssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
-  }
-
-  function handleClaudeAppHandoff() {
-    if (!issue) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: buildClaudeAppHandoffCommentBody(),
-    }).then((created) => {
-      if (!created) return;
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    });
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -892,19 +875,6 @@ export function IssueDetail({
                   <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
                     <FilePlus2 />
                     引き継いでIssueを作成
-                  </Button>
-                )}
-                {issue.state === "open" && (
-                  <Button variant="outline" asChild>
-                    <a
-                      href={buildClaudeAppUrl(issue)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={handleClaudeAppHandoff}
-                    >
-                      <Bot />
-                      Claudeアプリで開く
-                    </a>
                   </Button>
                 )}
                 {canAskClaude(issue) && (
