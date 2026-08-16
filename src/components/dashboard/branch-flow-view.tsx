@@ -58,6 +58,15 @@ type BranchFlowViewProps = {
    * （PWAはデプロイを検知して自動でリロードするため、ちょうどこの画面が出ている時間と重なる）。
    */
   mergedPullRequestsLoaded: boolean;
+  /**
+   * 開いた状態で見せるリポジトリ（#1750）。PCの左メニューで選択中のリポジトリを渡す。
+   *
+   * **この画面はリポジトリ絞り込みを適用しない**（横断で流れを俯瞰する場所のため）ので、
+   * 選択は「絞る」ではなく「先頭へ寄せて展開する」形で効かせる。並べ替えは
+   * `orderRepositoriesBySelection`が済ませてあり、ここは開閉だけを扱う。
+   * スマホにはリポジトリ絞り込みが無いため渡さない。
+   */
+  expandedRepositoryFullNames?: readonly string[];
   onRefresh: () => void;
   /**
    * この画面からPRをマージできたとき（#1756）。**再取得より先にマージ済みとして描くのは
@@ -1076,6 +1085,7 @@ export function BranchFlowView({
   error,
   failedRepositories,
   mergedPullRequestsLoaded,
+  expandedRepositoryFullNames = [],
   onRefresh,
   onMerged,
   headerLeading,
@@ -1103,10 +1113,26 @@ export function BranchFlowView({
   useEffect(() => {
     if (autoOpenedRef.current || flow.repositories.length === 0 || !releasesLoaded) return;
     autoOpenedRef.current = true;
-    setOpenRepositories(
-      new Set(flow.repositories.filter(needsAttention).map((repo) => repo.repositoryFullName)),
-    );
+    const attention = flow.repositories.filter(needsAttention).map((repo) => repo.repositoryFullName);
+    // 絞り込みで開いたぶんを消さないよう合流させる（#1750）。この効果は必ず1回しか走らないが、
+    // 選択を反映する下の効果とはどちらが先に走るか決まっていない。
+    setOpenRepositories((prev) => new Set([...prev, ...attention]));
   }, [flow.repositories, releasesLoaded]);
+
+  // 左メニューで選択中のリポジトリを開いた状態にする（#1750）。**開く向きにしか働かせない**——
+  // 選択が外れたときに畳むと、見ていたリポジトリが勝手に閉じる。手で開閉したぶんも残す。
+  // 反映済みの選択を覚え、同じ選択で開き直さない（手で畳んだものが再描画のたびに開くのを防ぐ）
+  const expandedKey = expandedRepositoryFullNames.join(",");
+  const appliedExpandedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (appliedExpandedKeyRef.current === expandedKey) return;
+    appliedExpandedKeyRef.current = expandedKey;
+    if (expandedKey === "") return;
+    const names = expandedKey.split(",");
+    // 選択が変わった瞬間にだけ開く（refで1回に抑えてある）ので、描画のたびには走らない
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOpenRepositories((prev) => new Set([...prev, ...names]));
+  }, [expandedKey]);
 
   // マージ後の後始末は親が持つ（#1756）。渡されていない場合は取り直すだけに縮退させる
   function handleMerged(pullRequest: PullRequestSummary) {
@@ -1145,6 +1171,11 @@ export function BranchFlowView({
             </h1>
             <p className="truncate text-xs text-muted-foreground">
               <span>{flow.repositories.length}リポジトリ</span>
+              {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
+                  出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない */}
+              {expandedRepositoryFullNames.length > 0 && (
+                <span>{` ・ 絞り込み中の${expandedRepositoryFullNames.length}件を展開`}</span>
+              )}
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
               )}

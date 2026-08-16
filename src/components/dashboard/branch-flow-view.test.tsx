@@ -1333,3 +1333,91 @@ describe("BranchFlowView", () => {
     });
   });
 });
+
+/**
+ * 左メニューのリポジトリ絞り込みを、この画面では「展開」として効かせる（#1750）。
+ * 母集団は絞らないので、選ばれていないリポジトリも畳んだ行として残る。
+ */
+describe("選択中リポジトリの展開（#1750）", () => {
+  const OTHER = "guchi-apps/car-care";
+
+  function renderTwoRepositories(expandedRepositoryFullNames: string[]) {
+    const flow = buildBranchFlow({
+      repositories: [
+        { fullName: REPO, private: false },
+        { fullName: OTHER, private: false },
+      ],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    });
+
+    return render(
+      <BranchFlowView
+        flow={flow}
+        fetchedAt="2026-08-15T10:30:00Z"
+        isLoading={false}
+        error={null}
+        failedRepositories={[]}
+        mergedPullRequestsLoaded
+        expandedRepositoryFullNames={expandedRepositoryFullNames}
+        onRefresh={vi.fn()}
+      />,
+    );
+  }
+
+  function repositoryRow(shortName: string) {
+    return screen.getByText(shortName).closest("button");
+  }
+
+  afterEach(cleanup);
+
+  it("選択中のリポジトリだけを開いた状態にし、他は畳んだまま残す", () => {
+    renderTwoRepositories([REPO]);
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("true");
+    expect(repositoryRow("car-care")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("選択があることをヘッダーに出す", () => {
+    renderTwoRepositories([REPO]);
+    expect(screen.getByText(/絞り込み中の1件を展開/)).toBeTruthy();
+  });
+
+  it("選択が無ければ従来どおり（すべて畳む・注記も出さない）", () => {
+    renderTwoRepositories([]);
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/絞り込み中の/)).toBeNull();
+  });
+
+  it("手で畳んだあとは、再描画で勝手に開き直さない", () => {
+    const { rerender } = renderTwoRepositories([REPO]);
+    fireEvent.click(screen.getByText(REPO_SHORT));
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+
+    const flow = buildBranchFlow({
+      repositories: [
+        { fullName: REPO, private: false },
+        { fullName: OTHER, private: false },
+      ],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    });
+    rerender(
+      <BranchFlowView
+        flow={flow}
+        fetchedAt="2026-08-15T10:31:00Z"
+        isLoading={false}
+        error={null}
+        failedRepositories={[]}
+        mergedPullRequestsLoaded
+        expandedRepositoryFullNames={[REPO]}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(repositoryRow(REPO_SHORT)?.getAttribute("aria-expanded")).toBe("false");
+  });
+});

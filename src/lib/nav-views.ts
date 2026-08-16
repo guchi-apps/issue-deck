@@ -64,6 +64,18 @@ export type NavView = {
    * check-userはリポジトリ横断の優先順位付け（確認が古い順）を崩したくないためOFFのまま。
    */
   groupByRepoDefault?: boolean;
+  /**
+   * ユーザーが指定した絞り込み条件（キーワード・リポジトリ・状態・ラベル・担当者）を
+   * 適用しないビューかどうか（#1750）。
+   *
+   * このアプリは複数リポジトリを横断で見るためのもので、「人が動くまで進まないもの」と
+   * 「質問」は**全体で取りこぼしが無いか**を確かめる場所になる。1リポジトリへ絞ったまま
+   * 見ると、他のリポジトリで止まっているものが画面から消える。
+   *
+   * 無視するのはユーザーが指定した条件だけで、**ビューの定義そのもの**
+   * （`labels`・`questionOnly`・`defaultState`）は従来どおり効く。
+   */
+  ignoresIssueFilters?: boolean;
 };
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
@@ -95,6 +107,15 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
   "recently-merged",
 ];
 
+/**
+ * ユーザーの絞り込み条件を適用しないビュー（#1750）。左メニューの最上段（要対応の2つ）と
+ * 「質問」で、どれも「全体で漏れが無いか」を見る場所。画面ではなくビューの性質として
+ * ここに持つ——PC・スマホの各画面で条件を書くと、片方だけ直され続ける。
+ *
+ * 「ブランチ」（`pane=flow`）も同じ扱いにするが、ビューではないので画面側で行う。
+ */
+const IGNORE_FILTER_VIEWS: readonly LabelNavViewId[] = ["check-user", "manual-step", "question"];
+
 /** 定型の絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
 export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   id: preset.key,
@@ -107,6 +128,7 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
   groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),
+  ignoresIssueFilters: IGNORE_FILTER_VIEWS.includes(preset.key),
 }));
 
 /**
@@ -220,6 +242,14 @@ export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
 /** ビューごとの、リポジトリごとのグルーピング表示（#849）の既定ON/OFF */
 export function getNavViewDefaultGroupByRepo(id: NavViewId): boolean {
   return getNavView(id).groupByRepoDefault ?? false;
+}
+
+/**
+ * ユーザーが指定した絞り込み条件を適用しないビューか（#1750）。
+ * 一覧・件数・注記の出し分けはすべてこの1か所を通す。
+ */
+export function navViewIgnoresIssueFilters(id: NavViewId): boolean {
+  return getNavView(id).ignoresIssueFilters ?? false;
 }
 
 /**

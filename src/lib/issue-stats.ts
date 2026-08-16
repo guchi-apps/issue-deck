@@ -2,7 +2,12 @@ import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
-import { getNavView, navViews } from "@/lib/nav-views";
+import {
+  getNavView,
+  getNavViewDefaultState,
+  navViewIgnoresIssueFilters,
+  navViews,
+} from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -112,9 +117,15 @@ export function filterIssuesByView(
   }
 }
 
+/** 一覧の母集団を減らす絞り込み条件（＝ユーザーがTopBar・左メニューで指定するもの） */
+export type IssueFilterInput = Pick<
+  IssueFilters,
+  "q" | "repos" | "state" | "labels" | "assignee"
+>;
+
 export function applyIssueFilters(
   issues: Issue[],
-  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  filters: IssueFilterInput,
 ): Issue[] {
   const q = filters.q.trim();
 
@@ -137,6 +148,48 @@ export function applyIssueFilters(
     }
     return true;
   });
+}
+
+/**
+ * そのビューで実際に適用する絞り込み条件を求める（#1750）。
+ *
+ * 「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」はリポジトリ横断で全体を見る場所なので、
+ * ユーザーが指定した条件（キーワード・リポジトリ・状態・ラベル・担当者）を一切適用しない。
+ * **状態だけはビューの既定値へ戻す**——ビューの定義の一部（`00.check-user`はopenのものを見る）で
+ * あって、ユーザーの絞り込みではないため。
+ *
+ * 一覧・件数の両方が必ずここを通す。片方だけ素の`filters`を使うと、左メニューの件数と
+ * 一覧に並ぶ件数が食い違う（#1689と同じ失敗）。
+ */
+export function resolveFiltersForView<T extends IssueFilterInput>(
+  filters: T,
+  view: NavViewId,
+): T {
+  if (!navViewIgnoresIssueFilters(view)) return filters;
+  return {
+    ...filters,
+    q: "",
+    repos: [],
+    state: getNavViewDefaultState(view),
+    labels: [],
+    assignee: null,
+  };
+}
+
+/**
+ * 絞り込みが指定されているのに、そのビューでは適用されない状態か（#1750）。
+ * 黙って無視すると「キーワードを入れても件数が変わらない」理由が画面から読めないため、
+ * 一覧のヘッダーに注記を出すかどうかの判定に使う。
+ */
+export function hasIgnoredIssueFilters(filters: IssueFilterInput, view: NavViewId): boolean {
+  if (!navViewIgnoresIssueFilters(view)) return false;
+  return (
+    filters.q.trim() !== "" ||
+    filters.repos.length > 0 ||
+    filters.labels.length > 0 ||
+    filters.assignee !== null ||
+    filters.state !== getNavViewDefaultState(view)
+  );
 }
 
 /**
@@ -230,55 +283,35 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
 }
 
 /**
- * ビューごとの件数を数える。
- * ビューのdefaultStateが現在の状態絞り込みと異なる場合（「直近main反映済み」など）は、
- * 選択したときに実際に表示される件数と揃うようissuesIgnoringStateを基準にする。
- */
-export function computeNavCounts(
-  issues: Issue[],
-  issuesIgnoringState: Issue[],
-  currentUserLogin: string | null,
-  referenceIssues?: Issue[],
-): Record<NavViewId, number> {
-  const counts = {} as Record<NavViewId, number>;
-  for (const view of navViews) {
-    const base = view.defaultState === "all" ? issuesIgnoringState : issues;
-    counts[view.id] = filterIssuesByView(
-      base,
-      view.id,
-      currentUserLogin,
-      referenceIssues ?? base,
-    ).length;
-  }
-  return counts;
-}
-
-/**
  * 表示中の絞り込み（状態・ラベル・担当者など）を適用したうえで、ビューごとの件数を数える
  * （#1689）。絞り込み前の全Issueを数えると、一覧に並ぶ件数と食い違う（例: 状態がopenの
  * 一覧なのに、ビュー名の隣にclose済みを含めた総数が出る）。
  *
- * PC（`issue-deck-shell`）はTopBarの絞り込みを適用した集合を自前で持っており、それを
- * `computeNavCounts`へ渡すことで同じ結果を得ている。ここは絞り込み済みの集合を再利用
- * しないスマホの一覧向けに、その組み立てをまとめたもの。
+ * **絞り込みはビューごとに解決する**（#1750）。「ユーザーの確認待ち」のように条件を適用しない
+ * ビューがあるため、絞り込み済みの集合を外から受け取る形（旧`computeNavCounts`）は成立しない。
+ * PC（`issue-deck-shell`）・スマホの一覧のどちらもここを通す。
  *
- * - 状態（open/closed）の絞り込みだけを外した集合も渡すのは、「直近本番に反映した」の
- *   ようにclose済みIssueが対象のビューを、現在の状態絞り込みで0件にしないため。
+ * - 状態（open/closed）の絞り込みを外した集合を基準にするビューがあるのは、「直近本番に
+ *   反映した」のようにclose済みIssueが対象のビューを、現在の状態絞り込みで0件にしないため。
  * - 「最新リリース」の基準時刻（`filterIssuesByView`のreferenceIssues）は絞り込み前の
  *   issuesから求める。一覧側も絞り込み前の集合を基準にしているため、揃えないと
  *   「直近本番に反映した」の件数だけがズレる。
  */
 export function computeNavCountsForFilters(
   issues: Issue[],
-  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  filters: IssueFilterInput,
   currentUserLogin: string | null,
 ): Record<NavViewId, number> {
-  return computeNavCounts(
-    applyIssueFilters(issues, filters),
-    applyIssueFilters(issues, { ...filters, state: "all" }),
-    currentUserLogin,
-    issues,
-  );
+  const counts = {} as Record<NavViewId, number>;
+  for (const view of navViews) {
+    const viewFilters = resolveFiltersForView(filters, view.id);
+    const base = applyIssueFilters(
+      issues,
+      view.defaultState === "all" ? { ...viewFilters, state: "all" } : viewFilters,
+    );
+    counts[view.id] = filterIssuesByView(base, view.id, currentUserLogin, issues).length;
+  }
+  return counts;
 }
 
 /**
@@ -424,7 +457,7 @@ export function computeLabelSummary(
  */
 export function computeFilterLabelSummary(
   issues: Issue[],
-  filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
+  filters: IssueFilterInput,
   fallbackLabels?: LabelSummary[],
 ): LabelSummary[] {
   return computeLabelSummary(applyIssueFilters(issues, { ...filters, labels: [] }), {

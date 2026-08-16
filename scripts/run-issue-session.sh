@@ -395,11 +395,19 @@ fi
 # --add-dir でworktree外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md
 # 「8. Claude Codeへのコンテキストの渡し方」）。cloneしていない環境でも起動できるよう、
 # 存在しない場合は --add-dir を付けずにそのまま起動する。
+#
+# **実装対象が共有知識リポジトリ自身のときは付けない**（#1741）。あのディレクトリは
+# guchi-apps/docs の本体チェックアウトそのもので、渡すと「worktreeではなく本体を直接編集する」
+# 事故を招く。そこは他の全セッションが読む共有物で、汚すと横に波及する。判定は呼び出し側
+# （scripts/generic-start-issue.sh）がチェックアウト先のパス一致で行い、ここへは印だけが届く。
 SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
 CLAUDE_EXTRA_ARGS=()
 # フック設定を生成できたか（#1465）。生成できたときだけ「まだ開始していない」印を置く
 HOOKS_ENABLED=0
-if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
+if [[ "${ISSUE_DECK_SKIP_SHARED_CONTEXT:-0}" == "1" ]]; then
+  echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）は、このセッションの実装対象そのもののため参照に加えません。"
+  echo "     編集するのはworktree側です（本体チェックアウトは他のセッションが読む共有物なので触らないでください）。"
+elif [[ -d "$SHARED_CONTEXT_DIR" ]]; then
   CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
   echo "#$ISSUE_NUMBER: 共有知識リポジトリを参照可能にします: $SHARED_CONTEXT_DIR"
 else

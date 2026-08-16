@@ -4,6 +4,7 @@ import {
   getAdjacentNavViewId,
   getNavViewDefaultGroupByRepo,
   getNavViewDefaultState,
+  navViewIgnoresIssueFilters,
   mobileListNavViews,
   navViewIcons,
   navViews,
@@ -169,5 +170,25 @@ describe("getAdjacentNavViewId", () => {
     expect(getAdjacentNavViewId(navViews[0].id, "next", tabOrder)).toBe(navViews[3].id);
     expect(getAdjacentNavViewId(navViews[3].id, "prev", tabOrder)).toBe(navViews[0].id);
     expect(getAdjacentNavViewId(navViews[3].id, "next", tabOrder)).toBe(navViews[1].id);
+  });
+});
+
+// #1750: リポジトリ横断で全体を見るビューは、ユーザーの絞り込みを適用しない
+describe("navViewIgnoresIssueFilters", () => {
+  it("要対応の2つと質問だけが対象になる", () => {
+    const ignored = navViews.filter((view) => navViewIgnoresIssueFilters(view.id));
+    expect(ignored.map((view) => view.id)).toEqual(["check-user", "manual-step", "question"]);
+  });
+
+  it("左メニュー最上段（要対応）はすべて対象（画像の並びと揃える）", () => {
+    for (const view of [...sidebarAttentionNavViews, ...sidebarQuestionNavViews]) {
+      expect(navViewIgnoresIssueFilters(view.id)).toBe(true);
+    }
+  });
+
+  it("Issueセクションのビューは対象外（従来どおり絞り込みが効く）", () => {
+    for (const view of sidebarIssueNavViews) {
+      expect(navViewIgnoresIssueFilters(view.id)).toBe(false);
+    }
   });
 });

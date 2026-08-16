@@ -114,6 +114,23 @@ if [[ ! -d "$REPO_PATH/.git" && ! -f "$REPO_PATH/.git" ]]; then
   exit 1
 fi
 
+# 実装対象が共有知識リポジトリ自身か（#1741）。
+#
+# 共有知識（`~/apps/_docs` = guchi-apps/docs）は全セッションが`--add-dir`で読む前提の
+# チェックアウトで、プロンプトも「読み取り専用」と書いている。そのリポジトリのIssueを起動すると
+# **実装対象の本体チェックアウトを参照に加えることになり**、worktreeではなくそちらを直接編集する
+# 事故を招くうえ、指示自体が自己矛盾する。
+#
+# **リポジトリ名では判定しない。** 共有知識の置き場は`ISSUE_DECK_SHARED_CONTEXT_DIR`で差し替えられ、
+# ディレクトリ名（`_docs`）もリポジトリ名（`docs`）と一致しない。実体が同じかどうか（`-ef`）だけを見る。
+SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
+if [[ -d "$SHARED_CONTEXT_DIR" && "$REPO_PATH" -ef "$SHARED_CONTEXT_DIR" ]]; then
+  export ISSUE_DECK_SKIP_SHARED_CONTEXT=1
+  echo "#$ISSUE_NUMBER: $FULL_NAME は共有知識リポジトリ自身のため、共有知識の参照（--add-dir）は付けません。"
+else
+  export ISSUE_DECK_SKIP_SHARED_CONTEXT=0
+fi
+
 for required_command in git gh python3; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Error: $required_command コマンドが見つかりません。" >&2
@@ -383,7 +400,8 @@ fi
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$WORKTREE_DIR" "${BASE_BRANCH:-}" \
-  "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" "$ISSUE_RELATIONS" "$CONCURRENT_WORK" >"$PROMPT_FILE" <<'PY'
+  "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" "$ISSUE_RELATIONS" "$CONCURRENT_WORK" \
+  "$SHARED_CONTEXT_DIR" "$ISSUE_DECK_SKIP_SHARED_CONTEXT" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -398,7 +416,9 @@ import sys
     dev_port,
     issue_relations,
     concurrent_work,
-) = sys.argv[1:11]
+    shared_context_dir,
+    skip_shared_context,
+) = sys.argv[1:13]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -494,6 +514,38 @@ else:
         "アーティファクトに並べて提示してください**（#1632）。"
     )
 
+# 全アプリ共通の共有知識（#1741）。**実装対象が共有知識リポジトリ自身のときは文面ごと差し替える。**
+# 既定の文面は「共有知識は読み取り専用」と書いており、そのリポジトリを実装する回では指示が
+# 自己矛盾する。あわせて`--add-dir`も付けていない（本体チェックアウトを渡すと、worktreeではなく
+# そちらを編集する事故を招くため）。
+if skip_shared_context == "1":
+    shared_context_instructions = (
+        f"**このリポジトリ自身が全アプリ共通の共有知識リポジトリです**（`{shared_context_dir}` = "
+        f"`{repository}`）。そのため、他のリポジトリのセッションで付く共有知識の参照"
+        "（`--add-dir`）はこのセッションには付いていません。読むのも書くのも、"
+        f"**このセッションのworktree（`{worktree_dir}`）の中のファイル**です。\n\n"
+        f"- `{shared_context_dir}` は同じリポジトリの**本体チェックアウト**で、"
+        "他の全セッションが実行中に読んでいます。**絶対に編集しないでください**"
+        "（そこを汚すと、走っている他のセッションの前提まで変わります）\n"
+        "- 索引は worktree 内の `CLAUDE.md`、実装エージェント向けの共通ルールは "
+        "`agent-rules/implementation.md` です。**自分のworktree側を読んでください**\n"
+        "- 後述「実装中に得た知見の記録」にある「共有知識リポジトリへ反映できません」は、"
+        "**実装対象がこのリポジトリ自身である今回は当てはまりません**。共通の知見はこのPull Requestに"
+        "同梱して構いません（ただしIssueの要求から外れる変更は入れないこと）"
+    )
+else:
+    shared_context_instructions = (
+        f"このセッションでは `--add-dir` により共有知識リポジトリ（`{shared_context_dir}` = "
+        "`guchi-apps/docs`）を参照できます（存在しない環境では付与されません）。"
+        "実装の前提として、必要な範囲だけ読んでください。\n\n"
+        f"- `{shared_context_dir}/CLAUDE.md` — 共有知識の索引・読む順序\n"
+        f"- `{shared_context_dir}/agent-rules/implementation.md` — 実装エージェントの共通ルール\n"
+        f"- `{shared_context_dir}/knowledge/` — 今回触る領域（GitHub Actions・デプロイ・認証・DB等）に"
+        "対応するファイルがあれば着手前に読む\n\n"
+        "共有知識リポジトリのファイルは**読み取り専用**として扱い、編集・コミットは行わないでください。"
+        "内容が対象リポジトリの `CLAUDE.md` / `docs/` と矛盾する場合は、対象リポジトリ側を優先します。"
+    )
+
 comments = issue.get("comments", [])
 if comments:
     comment_text = "\n\n".join(
@@ -524,6 +576,7 @@ replacements = {
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
     "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
+    "{{SHARED_CONTEXT_INSTRUCTIONS}}": shared_context_instructions,
 }
 result = template
 for placeholder, value in replacements.items():
@@ -570,7 +623,10 @@ build_env_prefix() {
   # 記述子に載らず、回収の対象にならない。
   # ISSUE_DECK_CLAUDE_RESUME は前回の会話を引き継ぐかどうか（#1541）。worktreeの扱いを見て
   # 上で決めた値で、tmuxの中まで届かないと新規worktreeでも再開してしまう。
-  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE \
+  # ISSUE_DECK_SKIP_SHARED_CONTEXT は実装対象が共有知識リポジトリ自身かどうか（#1741）。
+  # tmuxの中まで届かないと `--add-dir` が付いてしまい、本体チェックアウトを渡すことになる。
+  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_SHARED_CONTEXT \
+    ISSUE_DECK_CLAUDE_PERMISSION_MODE \
     ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_RESUME; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
