@@ -11,6 +11,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -69,9 +70,9 @@ type MobileHomeScreenProps = {
  * 出す項目を決めているのは`lib/nav-views.ts`・`lib/pull-request-views.ts`の`sidebar*`で、
  * 片方を足せば両方に出る。
  *
- * **PCにある「リポジトリ（全件）」「ラベル」「よく使うフィルター」は置かない。** リポジトリは
- * フッターの「Issue」タブ（リポジトリ一覧）、ラベルは一覧の絞り込みシートが既に担っており、
- * ホームに3つ目の入口を作ると押す場所が割れる。
+ * **PCにある「リポジトリ（全件）」「ラベル」は置かない。** リポジトリはフッターの「Issue」タブ
+ * （リポジトリ一覧）、ラベルは一覧の絞り込みシートが既に担っており、ホームに3つ目の入口を
+ * 作ると押す場所が割れる。
  */
 export function MobileHomeScreen({
   overviewStats,
@@ -113,6 +114,9 @@ export function MobileHomeScreen({
         */}
         <MobileReloadButton />
         <MobileDispatchStatusButton dispatch={dispatch} />
+        {/* 通知ベル（#1772）。実行状況の右隣＝PCのトップバー（実行キュー → ベル → アバター）
+            と同じ順序。**設定より左**なのは、設定がこの画面だけの右端の常設だから */}
+        <MobileNotificationButton />
         <button
           type="button"
           onClick={onOpenSettings}

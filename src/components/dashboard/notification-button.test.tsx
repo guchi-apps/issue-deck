@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationButton } from "@/components/dashboard/notification-button";
+import { NotificationProvider } from "@/components/dashboard/notification-state";
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -116,16 +117,20 @@ type RenderOptions = {
   onOpenFlow?: () => void;
 };
 
+/** 材料はProviderが配る（#1772）ので、ボタン単体ではなくProviderごと描く */
 function renderButton(options: RenderOptions = {}) {
   return render(
-    <NotificationButton
+    <NotificationProvider
       repositories={options.repositories ?? [repository("guchi-apps/issue-deck")]}
       issues={options.issues ?? []}
       pullRequests={options.pullRequests ?? []}
-      onOpenTarget={options.onOpenTarget ?? (() => {})}
-      onOpenCheckUserView={options.onOpenCheckUserView ?? (() => {})}
-      onOpenFlow={options.onOpenFlow ?? (() => {})}
-    />,
+    >
+      <NotificationButton
+        onOpenTarget={options.onOpenTarget ?? (() => {})}
+        onOpenCheckUserView={options.onOpenCheckUserView ?? (() => {})}
+        onOpenFlow={options.onOpenFlow ?? (() => {})}
+      />
+    </NotificationProvider>,
   );
 }
 

@@ -124,4 +124,11 @@ describe("MobileReposScreen のヘッダー（#1685）", () => {
     expect(screen.queryByTitle("非表示にする")).toBeNull();
     expect(screen.queryByTitle("表示する")).toBeNull();
   });
+
+  // 通知ベル（#1772）。実行状況を置いている画面には同じように置く
+  it("通知ベルを出す", () => {
+    renderScreen(null);
+
+    expect(screen.getByRole("button", { name: "対応が必要なもの" })).toBeTruthy();
+  });
 });

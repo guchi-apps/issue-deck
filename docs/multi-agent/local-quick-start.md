@@ -987,6 +987,15 @@ CI用プレースホルダ（`ci-placeholder`）が入っている値だけは�
 **worktreeごとにDBは分かれていない。** 全worktreeの`DATABASE_URL`が同じ`app_issue_deck_dev`を指すため、
 一度入れれば全worktreeの開発サーバーから見える。
 
+**裏返しとして、他のworktreeが流したマイグレーションで自分の画面が落ちることがある**（#1772）。
+テーブルを落とすマイグレーションを持つブランチで`pnpm db:migrate:dev`が走ると、まだそのブランチを
+取り込んでいないworktreeでは`PrismaClientKnownRequestError` `P2021`（table does not exist）になり、
+ページが500やエラー画面になる。**`prisma migrate status`は「up to date」と答える**——自分のブランチの
+マイグレーションはすべて適用済みで、他ブランチのぶんは知らないため、これでは気づけない。
+開発サーバーのログに出る`P2021`と`meta.table`を見て、自分のブランチが持つ該当マイグレーションを
+流し直せば直る（例: `npx prisma db execute --file prisma/migrations/<名前>/migration.sql --schema prisma/schema.prisma`）。
+最終的にはdevelopを取り込めば揃うので、**画面確認の前にdevelopとの差分を見ておくと早い。**
+
 見た目・操作の確認だけならダミーデータで足りる。
 
 ```bash
@@ -994,10 +1003,12 @@ pnpm db:seed:dev
 ```
 
 - CIが使っているダミーデータ（`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから
-  投入する薄いラッパー（`scripts/seed-dev-db.sh`）。リポジトリ5件・Issue 53件が入り、進捗はカンバンの
+  投入する薄いラッパー（`scripts/seed-dev-db.sh`）。リポジトリ5件・Issue 54件が入り、進捗はカンバンの
   全列へ散る（`SEED_PROFILE=dev`のときだけ効く後処理。**未設定時の挙動はCIと同じで変わらない**）。
-  53件目は手作業Issue（`71.manual-step`）のサンプルで、`## 前提条件`が進捗の違う3件を指しているため、
-  Issue詳細の「前提条件の状況」（#1705）と左メニューの「ユーザーの作業待ち」の内訳を実物で確かめられる。
+  末尾2件は手作業Issue（`71.manual-step`）のサンプルで、`## 前提条件`が進捗の違うIssueを指している。
+  **前提待ちのものと、いま実行できるものが1件ずつ**入るので（#1763）、Issue詳細の「前提条件の状況」
+  （#1705）だけでなく、左メニューの件数（いま実行できる数）・一覧のヘッダーの内訳・行のアイコンの
+  出し分けも実物で確かめられる。
 - `CI_LOGIN_BYPASS_SECRET`が空なら生成して`.env.local`へ書き込む。**書き込まれた場合は開発サーバーを
   起こし直す**（`next dev`は起動時にしか`.env.local`を読まない）。
 - 起こし直すと、ログイン画面に「開発用ダミーユーザーでログイン」ボタンが出る。Supabase Authを経由せず、

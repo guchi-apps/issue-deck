@@ -3,6 +3,7 @@
 import { ChevronLeft } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
@@ -77,7 +78,13 @@ export function MobilePullRequestsScreen({
           </button>
         ) : undefined
       }
-      headerActions={<MobileDispatchStatusButton />}
+      headerActions={
+        <>
+          <MobileDispatchStatusButton />
+          {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
+          <MobileNotificationButton />
+        </>
+      }
       headerBelow={
         <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {pullRequestViews.map((pullRequestView) => {

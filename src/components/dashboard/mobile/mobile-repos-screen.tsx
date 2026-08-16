@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Archive, CircleSlash, FolderGit2, Lock, Search, Star } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
+import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { Input } from "@/components/ui/input";
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -80,6 +81,8 @@ export function MobileReposScreen({
             ここのアイコンは置かない（#1685） */}
         {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端に固定する */}
         <MobileDispatchStatusButton />
+        {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
+        <MobileNotificationButton />
       </header>
 
       <div className="shrink-0 p-4">

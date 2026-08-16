@@ -136,6 +136,25 @@ describe("buildImplementationPrompt", () => {
   });
 });
 
+// #1741: 共有知識リポジトリ（guchi-apps/docs）を実装対象にする回では、既定の文面
+// （「共有知識は読み取り専用」）が指示として自己矛盾する
+describe("全アプリ共通の共有知識（#1741）", () => {
+  it("通常のリポジトリでは共有知識を読み取り専用として案内する", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).toContain("`~/apps/_docs/agent-rules/implementation.md`");
+    expect(prompt).toContain("**読み取り専用**として扱い");
+    expect(prompt).not.toContain("このリポジトリ自身が全アプリ共通の共有知識リポジトリです");
+  });
+
+  it("共有知識リポジトリ自身が対象なら、読み取り専用の案内を出さない", () => {
+    const prompt = buildImplementationPrompt({ ...BASE, repositoryFullName: "guchi-apps/docs" });
+    expect(prompt).toContain("**このリポジトリ自身が全アプリ共通の共有知識リポジトリです**");
+    expect(prompt).not.toContain("**読み取り専用**として扱い");
+    // 本体チェックアウトを触らせない禁止事項は、対象がこのリポジトリ自身でも残す
+    expect(prompt).toContain("本体チェックアウト");
+  });
+});
+
 describe("並行状況と親子Issue（#1267）", () => {
   it("親子を渡さなければ「取得していません」と出す（無いのか取っていないのかを区別する）", () => {
     expect(buildImplementationPrompt(BASE)).toContain("（この経路では取得していません）");

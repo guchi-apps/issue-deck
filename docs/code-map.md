@@ -98,6 +98,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
+  [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
+  `package.json`の`"version"` lifecycleスクリプト
+  （[`scripts/version-changelog.mjs`](../scripts/version-changelog.mjs)）が、共有ワークフローの
+  生成した`RELEASE_CHANGELOG`（何が変わったか）と`RELEASE_USAGE`（どう使うか・#1729）を
+  配列の先頭へ足す。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
+  モジュールだけで書き、`preversion`は作らない。** 表示は
+  [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
+  PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
+  スマホは一覧最下部）に置く——アカウント区分の中にあった頃は開かないと見えなかった。
 - **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
   設定の「状態」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
   レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
@@ -196,6 +206,22 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
   **ラベルが1つも決まらなかったときは、その旨を画面に出す**（#1710）。空欄と「決められなかった」
   は見分けが付かず、ラベルの付かないIssueがそのまま作られていた。
+- **入力ステップで本文テンプレートを選べる**（#1745。
+  [`lib/issue-templates.ts`](../src/lib/issue-templates.ts)）。機能追加・改善／見た目・不具合の3種で、
+  **入るのは見出しだけの骨組み**（説明文は入れない——消し忘れがそのままIssue本文に残る）。何を書くかは
+  選択中のチップの下の1行（`hint`）で示す。種別ラベルの分布と実際のIssueの書き方から、
+  「あるものを変える」（`51.improvement`・`62.design`）を1つにまとめ、「無いものを作る」（`50.feature`）と
+  「意図どおり動かない」（`30.bug`・`40.unexpected`）を分けている。
+  **入力欄は1つのまま**で、項目ごとに分ける形（GitHubのIssueフォーム風）にはしない——画像の貼り付け・
+  `#123`の補完・下書きの自動保存・別ウィンドウへの引き継ぎ・推定APIへの本文渡しを項目ぶん作り直すことになり、
+  得られるのは記入欄の見た目の差だけになる。
+  **自分で書いた内容は黙って消さない。** 骨組みのまま（または空）なら確認せず入れ替え、書いた内容が
+  あるときだけ置き換えの確認を出す（判定は`resolveTemplateChange`に寄せ、画面側は結果を状態へ移すだけ）。
+  **「使わない」チップは置かず、選択中のチップの押し直しで外す**——4つ目を足すとスマホ幅（本文幅 約329px）で
+  1行に収まらない。**骨組みのままでは「次へ」を押せない**（`isUnfilledTemplateBody`）。見出しだけを材料に
+  推定させると、確認ステップに内容と関係の無いリポジトリ・タイトル・ラベルが並ぶ。
+  **テンプレートは推定に渡さない**（`/api/issues/quick-suggest`は無変更）。本文に入る見出し自体が
+  ラベル推定の手がかりになるため、APIとプロンプトを触る必要が無い。**種別が「質問」のときは出さない。**
 - **ダイアログの中身が横幅を押し広げないよう、`DialogContent`は`grid-cols-[minmax(0,1fr)]`で
   列を止めてある**（#1710）。暗黙の`auto`トラックは最も長い中身に合わせて伸びるため、
   折り返さない長い文字列（畳んだ本文に出る画像URL等）が1つあるだけで列がその幅まで広がり、
@@ -301,14 +327,36 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`mobile/mobile-home-screen.tsx`](../src/components/dashboard/mobile/mobile-home-screen.tsx)）。
   以前はホームだけ`navViews`から機械的に作った9項目の平坦な一覧で、PCとどちらが正なのか
   分からない状態だった。**片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは
-  「リポジトリ（全件）」「ラベル」「よく使うフィルター」の3節だけ（スマホではそれぞれフッターの
-  「Issue」タブと一覧の絞り込みシートが担う）。
+  「リポジトリ（全件）」「ラベル」の2節だけ（スマホではそれぞれフッターの「Issue」タブと
+  一覧の絞り込みシートが担う）。左メニュー下部にあった「よく使うフィルター」（保存した検索条件を
+  並べる節）は、スマホから外した後もPCで使われていなかったため#1754で画面・API・
+  `QuickFilter`テーブルごと削除した。
   「本番反映待ち」は#1613でIssueの節から外していたが、#1743で戻した（PC・スマホのホーム・
   スマホのIssue一覧の3か所すべてに出る）。**足す先は`sidebarIssueNavViews`で、
   `sidebarAttentionNavViews`ではない**——本番反映待ちで止まっているのはエージェントではなく
   リリースの実行で、要対応の枠へ入れると上記の並びの読み方が崩れる。ホームでは先頭の
   「いまの状況」のカードとメニューの両方から開けるが、これは「ユーザーの確認待ち」も同じ
   （カードは件数を見るサマリ、メニューは他のビューと並ぶ入口）。
+- **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
+  適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
+  [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は
+  `navViewIgnoresIssueFilters`の1か所。**画面ごとに条件を書かない**——PCとスマホで書くと
+  片方だけ直され続ける。落とすのはユーザーが指定した条件（キーワード・リポジトリ・状態・
+  ラベル・担当者）だけで、**ビューの定義そのもの**（`00.check-user`・質問の接頭辞・既定の状態=open）は
+  従来どおり効く。解決は[`lib/issue-stats.ts`](../src/lib/issue-stats.ts)の`resolveFiltersForView`で、
+  **一覧・件数の両方が必ずここを通す**（片方だけ素の`filters`を使うと、左メニューの件数と一覧の
+  件数が食い違う）。そのため`computeNavCounts`（絞り込み済みの2集合を受け取る形）は成立しなくなり、
+  `computeNavCountsForFilters`（絞り込み前のIssueと条件を受け取り、ビューごとに解決する）へ
+  一本化した。「ユーザーの確認待ち」に並ぶマージ待ちPRも同じ理由でリポジトリ絞り込みを掛けない
+  （掛けると同じ一覧の中でIssueだけ全体・PRだけ絞られた状態になる）。
+  **絞り込みが効かないことは画面に出す**（`IssueList`の`filtersIgnored`＝`hasIgnoredIssueFilters`）。
+  黙って無視すると、キーワードやリポジトリを選んでも件数が変わらない理由が読めない。
+  「ブランチ」はビューではないので画面側で同じ扱いにし、**選択中のリポジトリは絞る代わりに
+  先頭へ寄せて（`orderRepositoriesBySelection`）展開する**（`BranchFlowView`の
+  `expandedRepositoryFullNames`）。**開く向きにしか働かせない**——選択が外れたときに畳むと、
+  見ていたリポジトリが勝手に閉じる。理由は、このアプリが複数リポジトリを横断で見るためのもので、
+  「人が動くまで進まないもの」は全体で取りこぼしが無いかを確かめる場所だから。個々のIssue一覧・
+  PR一覧がリポジトリで絞られるのは従来どおり。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
   一覧の先頭に`MergePendingPullRequests`、選ぶ対象は`pullRequestsAwaitingUserMerge`）。
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
@@ -320,12 +368,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
   ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
   `pinnedSection`と`pinnedCount`が担う。
-- **「ユーザーの作業待ち」（`71.manual-step`）を橙色にするのは、いま実行できるものがあるときだけ**
-  （#1613。[`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
-  手作業の多くは起点の変更が本番へ出るまで実行できず、1件でもあれば強調すると数週間先まで
-  点いたままになる。判定は本文の`## 前提条件`・`## 関連`に書かれた参照
+- **「ユーザーの作業待ち」（`71.manual-step`）は、いま実行できる件数だけを出す**
+  （#1613で橙色の強調を、#1763で件数そのものを。
+  [`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
+  手作業の多くは起点の変更が本番へ出るまで実行できず、総数のままだと数週間先まで実行できない
+  ものが残っている間ずっと数が減らず、「いま手を動かせば片付く数」として読めない。判定は本文の
+  `## 前提条件`・`## 関連`に書かれた参照
   （[`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)）の進捗で行い、
   **状態を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+  - **数え方の差し替えは`computeNavCounts`（[`lib/issue-stats.ts`](../src/lib/issue-stats.ts)）
+    1か所で行う。** 左メニュー・スマホのホーム・ビュー選択シート・リポジトリ別一覧の件数は
+    すべてこの関数の結果を見ており、画面ごとに足し引きすると片方だけ古くなる。
+    リポジトリで絞り込んだ一覧を数えるときは、`computeNavCountsForFilters`へ**絞り込み前の
+    全Issue**を渡す（手作業Issueは別リポジトリのIssueを待っていることがあり、母集団から
+    外れると「状態不明＝実行できる」に倒れる）。
+  - **メニューの数（実行できる件数）と一覧の行数はわざと食い違う。** その差は一覧のヘッダー
+    （`formatManualStepListCount`が作る`2件・前提待ち2件`）と、各行のアイコンで説明する。
+    行のアイコンは[`issue-list.tsx`](../src/components/dashboard/issue-list.tsx)の
+    `ManualStepReadinessIcon`で、判定は件数と同じ`computeManualStepReadiness`から引くので
+    数と印が食い違わない。**渡す判定は絞り込み前の全Issueを母集団に作る**——「ユーザーの
+    作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
+  - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
+    同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
@@ -383,18 +447,34 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `mergeable`はGitHub側が非同期に計算するため判定中は`null`で、**`null`を「コンフリクトなし」と
   扱わない**（`ConflictBadge`も`repairKindsFor`も`false`のときだけ動く）。draftとclosedなPRでは
   そもそも取得しない（CI状態と同じ方針）。
-  表示と操作は一覧・詳細・確認待ち一覧・リリース進捗で揃え、コンフリクト中は
+  表示と操作は一覧・詳細・確認待ち一覧・リリース進捗・ブランチ画面で揃え、コンフリクト中は
   **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
   GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
-  数え、渡すのは一覧と同じ母集団（マージ済みで伏せたPRとリポジトリ絞り込みを適用し、状態別
-  ビューは適用する前）にする。取得前は0ではなく件数そのものを出さない。
+  数え、渡すのは一覧と同じ母集団（マージ済みとして先に反映したPRとリポジトリ絞り込みを適用し、
+  状態別ビューは適用する前）にする。取得前は0ではなく件数そのものを出さない。
   **どのビューもopenなPRしか出さなくなったため（#1613）、PR一覧の`scope`は`open`に固定**で、
   `all`を要求するのは「ブランチとPRの流れ」を開いている間だけ（マージ済みPRとブランチの
   突き合わせに要る）。**一度`all`まで広げた母集団はペインを離れても狭めない**（`open`は`all`の
   部分集合なので、狭める向きで取り直すのは消費にしかならない）。
+- **画面からマージしたPRは、取得を待たず「マージ済み」として反映する。伏せない**（#1756。
+  [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`applyOptimisticMerges`）。
+  マージの成否は押した時点で確定しているのに、それが画面へ届くのは次のPR取得が返ってからで、
+  そのあいだ「マージ待ち」のまま残る。**この数秒がもう一度押せると2回目のマージ要求が飛ぶ**
+  （GitHubは405で弾き、画面にはエラーだけが残る）。以前は一覧から伏せていたが、伏せるのは
+  PR一覧にとってしか正しくない——`IssueDeckShell`の同じ取得結果（`visiblePullRequests`と
+  `crossRepositoryPullRequests`）をブランチ画面がレーンの組み立てに使っているため、
+  PRが消えるとレーンが「PR未作成」に化けていた。
+  マージ済みへ差し替えれば、PR一覧・件数からは今までどおり消え（openだけを通すため）、
+  ブランチ画面のレーンは次のリリースの束へ移り、`canMergeFromDeck`がfalseになってボタンも消える。
+  **寿命は「次の取得が返るまで」**で、マージできていなければ取得結果にopenのまま現れて元に戻る。
+- **ブランチ画面のマージボタンは「ユーザーがマージするしかないPR」にだけ出す**（#1548・#1756。
+  `branch-flow-view.tsx`）。判定はPR一覧と同じ`requiresUserMerge`＋`canMergeFromDeck`で、
+  待てば自動で入るPR（Auto-merge有効・自動マージ対象）には出さない——押す必要が無いものまで
+  押させることになるため。**リリースの束の見出しはPRの行とは別にボタンを持つ**ので、
+  その下のPR行には`onMerged`を渡さない（渡すと同じPRのボタンが2つ出る）。
 - **スマホのIssue一覧で絞り込みを操作する行は、画面の上ではなく下端（フッタータブのすぐ上）に
   置く**（#1645。[`mobile/mobile-issue-list-screen.tsx`](../src/components/dashboard/mobile/mobile-issue-list-screen.tsx)）。
   元は上部の横スクロールタブだったが、片手で持つと親指が届かず、押して開くシートは下から出るため
@@ -605,8 +685,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを
   7〜8回消費するため、開いている間だけポーリングする。横断のサマリは
   `GET /api/repositories/release-pending-merges`
-  （`hooks/use-repository-release-statuses.ts`）で、PCヘッダーの通知ベル（後述）と
-  **モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
+  （`hooks/use-repository-release-statuses.ts`）で、通知ベル（後述。PC・スマホとも
+  `NotificationProvider`が1回だけ取る）と**モバイルのリポジトリ一覧のバッジ**（#1117）が共有する。**状態の4値への畳み込み
   （`idle`/`progressing`/`action_required`/`error`）と表示文言は、どちらの経路も
   [`lib/github/release-button-status.ts`](../src/lib/github/release-button-status.ts)の
   `summarizeReleaseStatus`・`describeReleaseStatusBadge`だけを通す**（画面ごとに分岐を書くと
@@ -618,8 +698,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   どちらも「CIが`pending`でなくなった時点」で揃えている**（#1433）。PRが作られた直後はまだ
   マージできないため、押しても弾かれる操作を強調して促さない。`unknown`（`Checks: read`が無い・
   取得失敗）は「要操作」のまま残す（CI状態が取れないだけでマージの導線が消えないように）。
-- **PCヘッダー右端の通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
+- **通知ベルが、リポジトリ横断で「人の操作が要るもの」を見る唯一の場所**
   （#1614。[`components/dashboard/notification-button.tsx`](../src/components/dashboard/notification-button.tsx)）。
+  PCはヘッダー右端、スマホは各画面のヘッダーの実行状況の右隣に置く（#1772）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
   同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
   リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「完了したPR」と同じ
@@ -629,6 +710,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `filterPullRequestsByView`から得る。ここで独自判定を書くと、同じ状態が画面ごとに別の言葉で出る。
   - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
+    **材料を用意するのは`NotificationProvider`だけ**（#1772。
+    [`components/dashboard/notification-state.tsx`](../src/components/dashboard/notification-state.tsx)）。
+    ベルを置く場所がPCの1か所ではなくなったため、各ボタンが自分でフックを呼ぶとポーリングが
+    増える——PCのトップバーは`hidden md:flex`でCSSで隠れているだけで、スマホでもmountされたまま
+    だからで、どちらのレイアウトかはJS側から判別できない。
   - **同じ操作を2行に出さない。** リリースのマージ待ちとして出したPRと、確認待ちとして出した
     Issueに紐づくPRは、PRの区分から落とす（Issue詳細に`issue-merge-button.tsx`があるので
     操作は失われず、左メニューの「確認待ち」件数とも食い違わない）。
@@ -636,8 +722,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     しなくてよいものを並べるとベルを開く意味が薄れる。
   - **TopBarの絞り込みには追随しない。** 横断で見る場所なので、Issue側と同じく絞り込み前の
     集合を渡す（`IssueDeckShell`の`notifiablePullRequests`）。
-  - **スマホは対象外**（ヘッダー自体が`hidden md:flex`）。スマホの確認待ち・手作業待ちは
-    ホーム画面の件数、リリースはリポジトリ画面のシートという別経路のまま。
+  - **スマホは中身を共有し、出し方だけを変える**（#1772。
+    [`components/dashboard/notification-content.tsx`](../src/components/dashboard/notification-content.tsx)を
+    PCのポップオーバーと[`components/dashboard/mobile/mobile-notification-button.tsx`](../src/components/dashboard/mobile/mobile-notification-button.tsx)の
+    ボトムシートが共有する。実行キューの`dispatch-queue-content.tsx`と同じ三分割）。
+    置き場所は**実行状況（#1638）を置いている画面すべての、その右隣**で、PCの並び
+    （実行キュー → ベル → アバター）と同じ順序になる。**遷移先だけはスマホ側が自分で決める**
+    ——PCは`pane`を切り替えれば済むが、スマホは`mscreen`を進めないと画面が変わらない。
+    ホーム画面の件数・リポジトリ画面のリリースシートという従来の経路もそのまま残る。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -669,6 +761,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/history-stack.ts`](../src/lib/history-stack.ts)が数え、**ズレは必ずフォールバック側
   （アプリの外へ出さない側）に倒れる**ようにしている。ダイアログ（Issue作成・編集・設定）は
   履歴に載せない。戻る操作で入力中の本文が消える方が損失が大きいため。
+- **PC版のヘッダー（`topbar.tsx`）にも同じ戻るボタンを置いている**（#1771）。**パソコンで
+  アプリとして起動（PWA）するとブラウザのツールバーごと戻る矢印が消え、戻る操作の手段が画面上に
+  無くなる**ため。呼ぶのはスマホと同じ`goBackOrFallback`で、**戻るの定義を増やさない**。
+  押せるかどうかは`useCanGoBackInApp()`（`lib/history-stack.ts`の`subscribeHistoryStack`を
+  `useSyncExternalStore`で読む）で、巻き戻せないときは**隠さずに押せない状態で残す**
+  （消すとヘッダーの並びが左右にずれ、隣のサイドバー開閉ボタンの位置が変わる）。
+  「更新」ボタン（`mobile-reload-button.tsx`）と同じく`display-mode: standalone`では
+  出し分けない（判定に実機差があり、外すと要求そのものが満たされないため）。
 - **サブPCへのディスパッチはpull型で、書き込み経路は`/api/dispatch/*`の1本。** 画面はジョブを
   `DispatchJob`へ積むだけで、サブPCのpollerが`POST /api/dispatch/claim`で取りに来る（VPSが
   tailnetに参加しておらず、Tailscale SSHにforced commandが無いためpush型は採れない。#1176）。

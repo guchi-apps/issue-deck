@@ -16,6 +16,7 @@ import { GithubReferenceNavigationProvider } from "@/components/dashboard/github
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
+import { NotificationProvider } from "@/components/dashboard/notification-state";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import {
   MobileBottomNav,
@@ -32,14 +33,13 @@ import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-p
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
-import { QuickFilterDialog } from "@/components/dashboard/quick-filter-dialog";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
-import { useHistoryNavigation } from "@/hooks/use-history-navigation";
+import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
@@ -49,7 +49,11 @@ import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
-import { buildBranchFlow, latestReleaseMergedAtByRepository } from "@/lib/branch-flow";
+import {
+  buildBranchFlow,
+  latestReleaseMergedAtByRepository,
+  orderRepositoriesBySelection,
+} from "@/lib/branch-flow";
 import {
   isMergeCheckUser,
   resolveCheckUserToasts,
@@ -64,26 +68,32 @@ import {
   applyIssueFilters,
   computeFilterLabelSummary,
   computeLabelSummary,
-  computeNavCounts,
+  computeNavCountsForFilters,
   computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
+  hasIgnoredIssueFilters,
   reconcileIssues,
+  resolveFiltersForView,
   sortIssues,
   upsertIssue,
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { getNavViewLabel } from "@/lib/nav-views";
-import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import {
+  computeManualStepAttention,
+  computeManualStepReadiness,
+} from "@/lib/manual-step-attention";
+import {
+  applyOptimisticMerges,
   computePullRequestNavCounts,
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
+  type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
-import type { QuickFilter } from "@/types/quick-filter";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -94,7 +104,6 @@ type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
   repositories: ConnectedRepository[];
   issues: Issue[];
-  quickFilters: QuickFilter[];
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
@@ -105,7 +114,6 @@ export function IssueDeckShell({
   currentUser,
   repositories: initialRepositories,
   issues: initialIssues,
-  quickFilters: initialQuickFilters,
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
@@ -125,10 +133,11 @@ export function IssueDeckShell({
   const { openIssue: openIssueUrl, openPullRequest: openPullRequestUrl } =
     useReferenceNavigation();
   const { goBackOrFallback } = useHistoryNavigation();
+  // PC版ヘッダーの戻るボタンが押せるかどうか（#1771）
+  const canGoBack = useCanGoBackInApp();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
-  const [quickFilters, setQuickFilters] = useState<QuickFilter[]>(initialQuickFilters);
   // PC版の選択中Issueは`issue`クエリ（missueと同じ識別子＝String(githubIssueId)）が正で、
   // 表示するIssueはそこからの派生値（#1396）。stateで持つとIssueを開く操作が履歴に載らず、
   // 戻る操作でアプリの外へ出てしまうため移した。ポーリングや編集でissuesが更新されれば
@@ -139,7 +148,6 @@ export function IssueDeckShell({
     () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
     [issues, filters.issue],
   );
-  const [quickFilterDialogOpen, setQuickFilterDialogOpen] = useState(false);
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
@@ -390,18 +398,17 @@ export function IssueDeckShell({
     setCheckUserToasts((prev) => prev.filter((toast) => toast.id !== id));
   }
 
-  // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
-  // サイドバーの件数表示はこれを基準にする。
-  const topbarFilteredIssues = useMemo(
-    () => applyIssueFilters(issues, filters),
-    [issues, filters],
+  // 表示中のビューで実際に適用する絞り込み（#1750）。「ユーザーの確認待ち」「ユーザーの
+  // 作業待ち」「質問」はリポジトリ横断で全体を見る場所なので、ここで条件が空へ解決される。
+  const viewFilters = useMemo(
+    () => resolveFiltersForView(filters, filters.view),
+    [filters],
   );
 
-  // 「直近main反映済み」のようにclose済みIssueを含むビューの件数を数えるための、
-  // 状態（open/closed）の絞り込みだけを外した集合。
-  const topbarFilteredIssuesIgnoringState = useMemo(
-    () => applyIssueFilters(issues, { ...filters, state: "all" }),
-    [issues, filters],
+  // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
+  const viewFilteredIssues = useMemo(
+    () => applyIssueFilters(issues, viewFilters),
+    [issues, viewFilters],
   );
 
   const filteredIssues = useMemo(
@@ -409,34 +416,53 @@ export function IssueDeckShell({
       sortIssues(
         // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
         // 基準がずれて古いリリース分が現れないようにする）。
-        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin, issues),
+        filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues),
         filters.sort,
         filters.view,
       ),
-    [topbarFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
+    [viewFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );
 
+  // 絞り込みを指定しているのに、いま見ているビューでは効かない状態か（#1750）。
+  // 黙って無視すると件数が変わらない理由が読めないため、一覧のヘッダーに注記を出す。
+  const filtersIgnored = useMemo(
+    () => hasIgnoredIssueFilters(filters, filters.view),
+    [filters],
+  );
+
+  // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
+  // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   const navCounts = useMemo(
+    () => computeNavCountsForFilters(issues, filters, currentUserLogin),
+    [issues, filters, currentUserLogin],
+  );
+  // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
+  // どのビューを表示していても求める。絞り込みを適用しないビュー（#1750）なので、
+  // 母集団は絞り込み前の全Issue。
+  const checkUserIssues = useMemo(
     () =>
-      computeNavCounts(
-        topbarFilteredIssues,
-        topbarFilteredIssuesIgnoringState,
+      filterIssuesByView(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "check-user")),
+        "check-user",
         currentUserLogin,
         issues,
       ),
-    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
+    [issues, filters, currentUserLogin],
   );
-  // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
-  // どのビューを表示していても求める。
-  const checkUserIssues = useMemo(
-    () => filterIssuesByView(topbarFilteredIssues, "check-user", currentUserLogin, issues),
-    [topbarFilteredIssues, issues, currentUserLogin],
-  );
-  // 「ユーザーの作業待ち」の内訳（#1613）。起点Issueを引くための母集団は絞り込み前の全Issue。
+  // 「ユーザーの作業待ち」の内訳（#1613）。こちらも絞り込みを適用しないビューで、
+  // 起点Issueを引くための母集団も絞り込み前の全Issue。
   const manualStepAttention = useMemo(
-    () => computeManualStepAttention(topbarFilteredIssues, issues),
-    [topbarFilteredIssues, issues],
+    () =>
+      computeManualStepAttention(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "manual-step")),
+        issues,
+      ),
+    [issues, filters],
   );
+  // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
+  // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
+  // 参照先のIssueを1件も引けない。
+  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -471,42 +497,42 @@ export function IssueDeckShell({
     [repositories],
   );
 
-  // マージ直後はGitHub側の反映を待たずに一覧から消したいので、ローカルで伏せる。ただし伏せるのは
-  // 「伏せた時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を正とする
-  // （マージできていなければまた一覧に現れる）。
+  // マージ直後はGitHub側の反映を待たずにマージ済みとして描く（#1756）。反映するのは
+  // 「マージした時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を
+  // 正とする（マージできていなければまた一覧に現れる）。
+  //
+  // **以前はここで一覧から伏せていたが、伏せるのはPR一覧にとってしか正しくない**——同じ集合を
+  // ブランチ画面がレーンの組み立てに使っているため、PRが消えるとレーンが「PR未作成」に化けていた。
   const [mergedPullRequests, setMergedPullRequests] = useState<{
-    ids: string[];
+    merges: OptimisticMerge[];
     fetchedAt: string | null;
-  }>({ ids: [], fetchedAt: null });
-  const hiddenPullRequestIds = useMemo(
+  }>({ merges: [], fetchedAt: null });
+  const optimisticMerges = useMemo(
     () =>
-      mergedPullRequests.fetchedAt === openPullRequests.fetchedAt ? mergedPullRequests.ids : [],
+      mergedPullRequests.fetchedAt === openPullRequests.fetchedAt ? mergedPullRequests.merges : [],
     [mergedPullRequests, openPullRequests.fetchedAt],
   );
 
-  // マージ済みで伏せたPRを除き、左メニューでリポジトリを絞り込んでいるときはPR一覧も同じ
+  // マージ済みとして反映したうえで、左メニューでリポジトリを絞り込んでいるときはPR一覧も同じ
   // 絞り込みに従わせた集合。状態別ビュー（#1312）を掛ける前のこれを、一覧と左メニューの件数
   // （#1389）の共通の母集団にする。Issue側のnavCountsと同じで、ここを揃えておかないと
   // メニューの件数と一覧に並ぶ件数が食い違う。
   const visiblePullRequests = useMemo(() => {
-    const visible = openPullRequests.pullRequests.filter(
-      (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
-    );
+    const visible = applyOptimisticMerges(openPullRequests.pullRequests, optimisticMerges);
     return filters.repos.length === 0
       ? visible
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
-  }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
+  }, [openPullRequests.pullRequests, filters.repos, optimisticMerges]);
 
-  // ヘッダーの通知ベル（#1614）に渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
-  // ベルはリポジトリ横断で「いま人が動かないと止まるもの」を見る場所で、Issue側（絞り込み前の
-  // `issues`を渡している）と揃えないと、絞り込んだ瞬間にPRだけ消えて件数の意味が変わる。
-  // 伏せたPR（マージ済みで消したもの）だけは除く。
-  const notifiablePullRequests = useMemo(
-    () =>
-      openPullRequests.pullRequests.filter(
-        (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
-      ),
-    [openPullRequests.pullRequests, hiddenPullRequestIds],
+  // リポジトリ横断で見る場所へ渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
+  // 渡す先はヘッダーの通知ベル（#1614）・「ユーザーの確認待ち」に並ぶマージ待ちPR・
+  // ブランチ画面（#1750）の3つで、どれもリポジトリ横断で「いま人が動かないと止まるもの」を
+  // 見る場所。Issue側（絞り込みを適用しないビュー）と揃えないと、絞り込んだ瞬間にPRだけ消えて
+  // 件数の意味が変わる。マージ済みとして先に反映したぶん（#1756）だけは、こちらにも効かせる
+  // ——ブランチ画面のマージボタンが消えるのはこの集合を通ってのことなので、外すと二度押せる。
+  const crossRepositoryPullRequests = useMemo(
+    () => applyOptimisticMerges(openPullRequests.pullRequests, optimisticMerges),
+    [openPullRequests.pullRequests, optimisticMerges],
   );
 
   const filteredPullRequests = useMemo(
@@ -522,10 +548,12 @@ export function IssueDeckShell({
   );
 
   // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものは
-  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。
+  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。**リポジトリ絞り込みは掛けない**
+  // （#1750）——並ぶ先が絞り込みを適用しないビューなので、掛けると同じ一覧の中でIssueだけ
+  // 全体・PRだけ絞られた状態になる。
   const mergePendingPullRequests = useMemo(
-    () => pullRequestsAwaitingUserMerge(visiblePullRequests, checkUserIssues),
-    [visiblePullRequests, checkUserIssues],
+    () => pullRequestsAwaitingUserMerge(crossRepositoryPullRequests, checkUserIssues),
+    [crossRepositoryPullRequests, checkUserIssues],
   );
 
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
@@ -547,9 +575,11 @@ export function IssueDeckShell({
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
   // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
   // その1点だけを渡す（フック側が自分でポーリングの要否を決める）。
+  // 母集団はブランチ画面と揃える（#1750）。全リポジトリを出す画面なのにデプロイ状況だけ
+  // 絞られると、行によって出たり出なかったりする。
   const latestReleaseMergedAt = useMemo(
-    () => latestReleaseMergedAtByRepository(visiblePullRequests),
-    [visiblePullRequests],
+    () => latestReleaseMergedAtByRepository(crossRepositoryPullRequests),
+    [crossRepositoryPullRequests],
   );
   const deployStatus = useDeployStatus(isFlowPaneActive, latestReleaseMergedAt);
 
@@ -558,11 +588,14 @@ export function IssueDeckShell({
   const branchFlow = useMemo(
     () =>
       buildBranchFlow({
-        repositories: visibleRepositories
-          .filter((repo) => !repo.archived)
-          .filter((repo) => filters.repos.length === 0 || filters.repos.includes(repo.fullName)),
-        // 左メニューのリポジトリ絞り込み・マージ直後に伏せたPRを反映済みの集合
-        pullRequests: visiblePullRequests,
+        // **リポジトリ絞り込みは適用しない**（#1750）。この画面はリポジトリ横断で流れを俯瞰
+        // する場所なので、選択中のリポジトリは絞り込む代わりに先頭へ寄せ、展開して見せる。
+        repositories: orderRepositoriesBySelection(
+          visibleRepositories.filter((repo) => !repo.archived),
+          filters.repos,
+        ),
+        // マージ直後のPRをマージ済みとして反映した集合（リポジトリ絞り込みは掛けない）
+        pullRequests: crossRepositoryPullRequests,
         // 本文とラベルは手作業Issue（71.manual-step）の紐づけに使う（#1510）。
         // どちらもDBキャッシュ由来で、渡すのに追加の取得は要らない
         issues: issues.map((issue) => ({
@@ -575,7 +608,7 @@ export function IssueDeckShell({
     [
       visibleRepositories,
       filters.repos,
-      visiblePullRequests,
+      crossRepositoryPullRequests,
       issues,
       branchFlowStatus.branchStatuses,
       deployStatus.deployStatuses,
@@ -605,16 +638,27 @@ export function IssueDeckShell({
   }, [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail]);
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
+    const merge: OptimisticMerge = { id: pullRequest.id, mergedAt: new Date().toISOString() };
     setMergedPullRequests((prev) => ({
-      ids:
-        prev.fetchedAt === openPullRequests.fetchedAt
-          ? [...prev.ids, pullRequest.id]
-          : [pullRequest.id],
+      merges: prev.fetchedAt === openPullRequests.fetchedAt ? [...prev.merges, merge] : [merge],
       fetchedAt: openPullRequests.fetchedAt,
     }));
     // マージしたPRの詳細は用済みなので閉じて一覧へ戻す（スマホでは一覧画面へ戻る）。
     if (filters.pr === pullRequest.id) selectPullRequest(null);
     openPullRequests.refresh();
+  }
+
+  /**
+   * ブランチ画面からマージできたとき（#1756）。
+   *
+   * マージ済みとしての反映（＝同じPRを二度マージできないこと）は`handlePullRequestMerged`が
+   * 担い、ここではこの画面が持つ他の2つの取得——ブランチ状況と本番デプロイ状況——も
+   * 取り直す。ヘッダーの「更新」が3つまとめて取り直しているのと同じ組み合わせ。
+   */
+  function handleBranchFlowMerged(pullRequest: PullRequestSummary) {
+    handlePullRequestMerged(pullRequest);
+    branchFlowStatus.refresh();
+    deployStatus.refresh();
   }
 
   /**
@@ -743,41 +787,18 @@ export function IssueDeckShell({
     }
   }
 
-  // 保存したフィルター（左メニュー）を適用する。スマホのホーム画面からも呼んでいたが、
-  // ホームから節ごと外したためPCだけの経路になった（#1690）。
-  function handleSelectQuickFilter(quickFilter: QuickFilter) {
-    setFilters({
-      view: quickFilter.view,
-      q: quickFilter.q,
-      repos: quickFilter.repos,
-      state: quickFilter.state,
-      labels: quickFilter.labels,
-      assignee: quickFilter.assignee,
-      sort: quickFilter.sort,
-      // 保存したフィルターはIssueの絞り込み条件なので、PRペインを開いていればIssueへ戻す。
-      pane: "issues",
-      // 一覧の中身が入れ替わるので選択中Issueも畳む（1回のURL更新にまとめる）。
-      issue: null,
-    });
-  }
-
-  async function handleDeleteQuickFilter(quickFilter: QuickFilter) {
-    setQuickFilters((prev) => prev.filter((item) => item.id !== quickFilter.id));
-
-    try {
-      const response = await fetch(`/api/quick-filters/${quickFilter.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("failed to delete quick filter");
-    } catch (error) {
-      console.error("[issue-deck-shell] failed to delete quick filter", error);
-      setQuickFilters((prev) => [...prev, quickFilter]);
-    }
-  }
-
   // 設定画面のように、フッターに対応するタブが無い画面ではnullになる（#1638）
   const activeBottomNavTab: MobileBottomNavTab | null = resolveBottomNavTab(mobileScreen);
 
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
+      {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
+          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る */}
+      <NotificationProvider
+        repositories={repositories}
+        issues={issues}
+        pullRequests={crossRepositoryPullRequests}
+      >
       <div className="flex h-full flex-col">
         <TopBar
           currentUser={currentUser}
@@ -792,9 +813,6 @@ export function IssueDeckShell({
           onAskCrossRepoQuestion={() =>
             openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
           }
-          repositories={repositories}
-          issues={issues}
-          pullRequests={notifiablePullRequests}
           onOpenNotificationTarget={openNotificationTarget}
           /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
           onOpenIssue={openIssueUrl}
@@ -803,6 +821,21 @@ export function IssueDeckShell({
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
           onOpenSettings={() => setSettingsDialogOpen(true)}
+          /* パソコンでアプリとして起動するとブラウザの戻る矢印が無くなるため、ヘッダーに
+             戻る導線を置く（#1771）。戻り先の判断はスマホと同じ`goBackOrFallback`。
+             巻き戻せる履歴が無いときはボタンを押せないのでフォールバックは実際には走らないが、
+             万一走ったときに開いている詳細を閉じる（＝一覧へ戻る）ようにしておく。
+             閉じる側は履歴を積まない（積むと戻る操作のたびに履歴が伸びる。#1396）。 */
+          canGoBack={canGoBack}
+          onBack={() =>
+            goBackOrFallback(() => {
+              if (filters.pr) {
+                selectPullRequest(null);
+                return;
+              }
+              setFilter("issue", null, { history: "replace" });
+            })
+          }
         />
 
         <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -842,6 +875,7 @@ export function IssueDeckShell({
                     openPullRequests.refresh();
                     deployStatus.refresh();
                   }}
+                  onMerged={handleBranchFlowMerged}
                 />
               )}
 
@@ -998,10 +1032,6 @@ export function IssueDeckShell({
                 selectedLabels={filters.labels}
                 onSelectLabel={(label) => toggleLabel(label.name)}
                 onClearLabels={() => setFilter("labels", [])}
-                quickFilters={quickFilters}
-                onSelectQuickFilter={handleSelectQuickFilter}
-                onDeleteQuickFilter={handleDeleteQuickFilter}
-                onSaveQuickFilter={() => setQuickFilterDialogOpen(true)}
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
               />
@@ -1019,11 +1049,14 @@ export function IssueDeckShell({
               error={branchFlowStatus.error ?? openPullRequests.error}
               failedRepositories={branchFlowStatus.failedRepositories}
               mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+              /* 絞り込みでは無く「展開して見せる」形にする（#1750） */
+              expandedRepositoryFullNames={filters.repos}
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();
                 deployStatus.refresh();
               }}
+              onMerged={handleBranchFlowMerged}
               className="hidden flex-1 md:flex"
             />
           ) : filters.pane === "pull-requests" ? (
@@ -1087,6 +1120,10 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
+                // 手作業Issueの行に「いま実行できるか」を出す（#1763）
+                manualStepReadiness={manualStepReadiness}
+                // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
+                filtersIgnored={filtersIgnored}
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: issueListWidth.width, maxWidth: "50vw" }}
               />
@@ -1148,22 +1185,6 @@ export function IssueDeckShell({
           issues={issues}
           onCreated={handleIssueCreated}
         />
-        <QuickFilterDialog
-          open={quickFilterDialogOpen}
-          onOpenChange={setQuickFilterDialogOpen}
-          // 保存対象はIssueの絞り込み条件だけ。表示中のペイン（filters.pane）は絞り込み条件では
-          // ないため、QuickFilterには含めない。
-          filters={{
-            view: filters.view,
-            q: filters.q,
-            repos: filters.repos,
-            state: filters.state,
-            labels: filters.labels,
-            assignee: filters.assignee,
-            sort: filters.sort,
-          }}
-          onCreated={(quickFilter) => setQuickFilters((prev) => [...prev, quickFilter])}
-        />
         <SettingsDialog
           open={settingsDialogOpen}
           onOpenChange={setSettingsDialogOpen}
@@ -1192,6 +1213,7 @@ export function IssueDeckShell({
           onDismiss={handleDismissCheckUserToast}
         />
       </div>
+      </NotificationProvider>
     </GithubReferenceNavigationProvider>
   );
 }

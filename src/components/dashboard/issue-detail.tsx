@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 
 import {
-  Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -106,7 +105,6 @@ import {
   canCloseAskRepoQuestion,
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
-import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -287,21 +285,6 @@ export function IssueDetail({
     }
   }
 
-  function handleClaudeAppHandoff() {
-    if (!issue) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: buildClaudeAppHandoffCommentBody(),
-    }).then((created) => {
-      if (!created) return;
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    });
-  }
-
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
     if (!issue) return false;
     const [owner, repo] = issue.repositoryFullName.split("/");
@@ -436,6 +419,9 @@ export function IssueDetail({
   // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
   // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
+  // 質問Issueをワンボタンで終える導線の表示条件（#1770）。ヘッダーとコメント欄の下の
+  // 2か所で同じ値を使い、片方だけ出る状態を作らない
+  const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
   // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
   // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
   const actionsDisabledReason = startImplementationDisabledReason(
@@ -564,7 +550,7 @@ export function IssueDetail({
                   )}
                 />
               )}
-              {canCloseAskRepoQuestion(issue, comments) && (
+              {canCloseQuestion && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -572,7 +558,7 @@ export function IssueDetail({
                   onClick={() => handleClose("completed")}
                 >
                   <XCircle />
-                  質問を終えてクローズ
+                  回答を確認してクローズ
                 </Button>
               )}
               {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
@@ -894,19 +880,6 @@ export function IssueDetail({
                     引き継いでIssueを作成
                   </Button>
                 )}
-                {issue.state === "open" && (
-                  <Button variant="outline" asChild>
-                    <a
-                      href={buildClaudeAppUrl(issue)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={handleClaudeAppHandoff}
-                    >
-                      <Bot />
-                      Claudeアプリで開く
-                    </a>
-                  </Button>
-                )}
                 {canAskClaude(issue) && (
                   <Button
                     variant="outline"
@@ -917,13 +890,24 @@ export function IssueDetail({
                     質問する
                   </Button>
                 )}
+                {/* 質問Issueでは主ボタン（塗りつぶし）を「コメント」に持たせない（#1770）。
+                    回答を読み終えた人の用事はクローズか再質問で、書き足すことではない */}
                 <Button
+                  variant={canCloseQuestion ? "outline" : "default"}
                   onClick={handleCreateComment}
                   disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
                 >
                   {isCommentSubmitting && <Loader2 className="animate-spin" />}
                   {isCommentSubmitting ? "送信中..." : "コメント"}
                 </Button>
+                {/* 回答を読み終えた位置に出口を置く（#1770）。ヘッダーにも同じ操作があるが、
+                    コメントを読み進めるとそちらは押す対象として遠い */}
+                {canCloseQuestion && (
+                  <Button disabled={isSubmitting} onClick={() => handleClose("completed")}>
+                    <XCircle />
+                    回答を確認してクローズ
+                  </Button>
+                )}
               </div>
               <ApiErrorMessage message={commentMutationError} />
             </div>

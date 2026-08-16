@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { computeManualStepAttention } from "@/lib/manual-step-attention";
+import {
+  computeManualStepAttention,
+  computeManualStepReadiness,
+  formatManualStepListCount,
+} from "@/lib/manual-step-attention";
 import type { Issue } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -138,5 +142,61 @@ describe("computeManualStepAttention", () => {
       actionable: 0,
       waitingForPrerequisites: 1,
     });
+  });
+});
+
+// 一覧の行のアイコン（#1763）。件数と同じ判定から作るので、数と印が食い違わない
+describe("computeManualStepReadiness", () => {
+  it("手作業Issueごとに、いま実行できるかと待っている相手を返す", () => {
+    const origin = makeIssue({ number: 100, projectStatus: "Develop" });
+    const ready = manualStep(101, null);
+    const waiting = manualStep(102, 100);
+
+    const readiness = computeManualStepReadiness([origin, ready, waiting]);
+
+    expect(readiness.get(ready.id)?.ready).toBe(true);
+    expect(readiness.get(ready.id)?.message).toBe(
+      "前提はすべて満たされています。いま実行できます。",
+    );
+    expect(readiness.get(waiting.id)?.ready).toBe(false);
+    expect(readiness.get(waiting.id)?.blocking.map((item) => item.number)).toEqual([100]);
+  });
+
+  // 印を付ける対象は「ユーザーがこれから実行する手作業」だけ
+  it("手作業以外のIssueとclosedな手作業Issueは載せない", () => {
+    const closed = manualStep(101, null, { state: "closed" });
+    const other = makeIssue({ number: 1 });
+
+    expect(computeManualStepReadiness([closed, other]).size).toBe(0);
+  });
+
+  it("件数（computeManualStepAttention）と同じ判定になる", () => {
+    const origin = makeIssue({ number: 100, projectStatus: "Develop" });
+    const issues = [origin, manualStep(101, null), manualStep(102, 100)];
+
+    const readiness = [...computeManualStepReadiness(issues).values()];
+
+    expect(readiness.filter((item) => item.ready).length).toBe(
+      computeManualStepAttention(issues).actionable,
+    );
+  });
+});
+
+describe("formatManualStepListCount", () => {
+  const origin = makeIssue({ number: 100, projectStatus: "Develop" });
+  const issues = [manualStep(101, null), manualStep(102, 100)];
+  const readiness = computeManualStepReadiness(issues, [origin, ...issues]);
+
+  // 左メニューは実行できる件数しか出さないため、その差はここで説明する
+  it("実行できる件数を先に出し、前提待ちを添える", () => {
+    expect(formatManualStepListCount(issues, readiness)).toBe("1件・前提待ち1件");
+  });
+
+  it("前提待ちが無ければ件数だけを出す", () => {
+    expect(formatManualStepListCount([issues[0]], readiness)).toBe("1件");
+  });
+
+  it("手作業Issueが無ければnullを返す（呼び出し側が今までどおりの件数を出す）", () => {
+    expect(formatManualStepListCount([makeIssue({ number: 1 })], readiness)).toBeNull();
   });
 });

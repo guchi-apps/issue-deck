@@ -11,8 +11,12 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 privateリポジトリから参照でき、privateでもブランチ保護が効く（2026-08-15に`clip-hive`で実測。
 無人実行が`PROGRESS_REPORT_SECRET`で進捗報告APIを叩けている）。#1011が前提に挙げていた制約は
 解消済みで、残るのは導入作業だけになった。判断の経緯は
-[docs/organization-migration.md](organization-migration.md)を参照。ここに挙がっていないprivate
-リポジトリ（`vps`）は#1011配下で順次導入する。
+[docs/organization-migration.md](organization-migration.md)を参照。
+
+**インフラ設定・共有知識のリポジトリ（`vps`・`subpc`・`docs`）は、この表には載せない。**
+無人実行は入れず、ローカルセッションとリリースフローだけを載せる、というのが#1697・#1741の判断
+（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。#1011が「順次導入する」と
+していた`vps`もこの扱いになる。
 
 「対応」の実態はワークフローファイル一式・ラベル体系・CLAUDE.md・ブランチ運用・Secretsなど
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
@@ -150,7 +154,8 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 `releaseWorkflowExists`で、結果は10分キャッシュする）。無人実行（計画〜実装）を入れているかとは
 独立しているため、ここに分けて記録する。
 
-**通知ベル（PC）とリポジトリ一覧のバッジ（スマホ）も同じ基準になった**（#1727）。こちらは
+**通知ベル（PC・スマホ）とリポジトリ一覧のバッジ（スマホ）も同じ基準になった**（#1727。
+ベルは#1772でスマホのヘッダーにも置いた）。こちらは
 `/api/repositories/release-pending-merges`が母集団を`hasClaudeWorkflow: true`で先に絞っており、
 #1538がボタンについて取り除いたのと同じ代用（`claude-issue-dispatch.yml`の有無で
 「リリースworkflow導入済み」を代用する）が残っていた。無人実行を入れずにリリースフローだけを
@@ -158,25 +163,47 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 
 2026-08-16時点の実測。
 
-| 配布済み | `issue-deck`（ローカルパス参照）・`shopping-list`・`dayspan`（この2つはコピー方式）・`car-care`・`meisai-lab`・`asset-manager`・`subscription-lists`・`portfolio`・`solitaire`・`myroom`・`signaly`・`aide`・`db-console`（#1551で追加）・**`clip-hive`・`ops-dashboard`**（#1591で追加） |
+| 配布済み | `issue-deck`（ローカルパス参照）・`shopping-list`・`dayspan`（この2つはコピー方式）・`car-care`・`meisai-lab`・`asset-manager`・`subscription-lists`・`portfolio`・`solitaire`・`myroom`・`signaly`・`aide`・`db-console`（#1551で追加）・**`clip-hive`・`ops-dashboard`**（#1591で追加）・**`subpc`・`vps`**（#1706・#1727。2026-08-16に導入） |
 |---|---|
-| **未配布** | **`subpc`・`vps`**（#1706・#1727。上の表に載らないインフラ設定リポジトリで、対応は各リポジトリの子Issue guchi-apps/subpc#13・guchi-apps/vps#80 で行う） |
+| **未配布** | なし |
+| **対象外** | **`docs`**（デプロイを持たず「マージ＝全アプリへ反映」のため、リリースという段階を挟む意味が無い。guchi-apps/docs#15） |
 
-### `subpc`・`vps`（インフラ設定リポジトリ）
+### `subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）
 
-無人実行（計画〜実装）は入れないまま、**リリースフローだけを載せる**対象
-（#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80）。
-2026-08-16時点の実測と、各リポジトリで必要になる作業は次のとおり。
+無人実行（計画〜実装）は入れないまま、**リリースフローだけを載せた**対象
+（#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80。**2026-08-16に完了**）。
+`docs`だけはリリースフローも入れない（後述）。
 
-| 項目 | `guchi-apps/subpc` | `guchi-apps/vps` |
-|---|---|---|
-| デフォルトブランチ | `main` | `main` |
-| `develop` | **無い**（作るところから） | ある（**`main`から21コミット遅れ**。先に追従が要る） |
-| バージョンファイル | 無い | 無い |
-| `release-develop-to-main.yml` | 無い | 無い |
-| `deploy.yml` | ある（`push: main`。**サブPC上のセルフホストランナー**） | ある（`push: main`。SSHでVPSへ反映） |
-| Allow auto-merge | **無効**（バンプPRの自動マージに必要） | **無効**（同左） |
-| `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） |
+> **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
+> フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
+> 無人実行を入れていない2件でも、**この2件のIssueはサブPCのローカルセッションで回せる**
+> （下記「ローカル起動プロトコルの適合状況」の※4）。`docs`も同じ回で載せた。
+2026-08-16の導入後の状態は次のとおり。
+
+| 項目 | `guchi-apps/subpc` | `guchi-apps/vps` | `guchi-apps/docs` |
+|---|---|---|---|
+| デフォルトブランチ | `main`（据え置き） | `main`（据え置き） | `main` |
+| `develop` | あり（`main`から作成） | あり（**#79で`main`へ揃え直した**） | **持たない**（作ったうえで削除） |
+| バージョンファイル | `version.json`（`1.0.0`） | `version.json`（`1.0.0`） | 無い |
+| `release-develop-to-main.yml` | `@workflows/v19`（`develop`・`main`の両方） | 同左 | 入れない |
+| `deploy.yml` | ある（`push: main`。**サブPC上のセルフホストランナー**） | ある（`push: main`。SSHでVPSへ反映） | 無い |
+| Allow auto-merge | 有効 | 有効 | 有効（使わない） |
+| `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
+| `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
+| ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
+
+**`vps`の`develop`は`main`から21コミット遅れ・3コミット先行で分岐していた**（guchi-apps/vps#79）。
+先行分は`main`側により新しい形で入っており固有の成果が無かったため、退避ブランチ
+（`backup/develop-before-realign-260816`）を作ってから`develop`を`main`へ強制更新した。
+**Issueブランチを`main`へ直接マージすると同じ状態に戻る**ため、両リポジトリの`CLAUDE.md`に
+その旨を書いてある。
+
+**`docs`はリリースフローを入れない**（guchi-apps/docs#15）。各アプリの
+`shared-knowledge-propose.yml`が出す共有知識の追加提案PRは`main`宛に届く
+（`vars.SHARED_CONTEXT_REF || 'main'`）ため、`develop`を挟むと提案PRのマージのたびに`develop`が
+behindになり、guchi-apps/vps#79と同じ分岐状態に向かう。**この変数は「提案PRの宛先」と
+「各アプリが共有知識を読むref」の両方に使われている**ので、`develop`へ切り替えると全アプリが
+未リリースの共有知識を読むことになる。分離する改修なしには成立しないため、`main`直運用を正とした。
 
 **どちらもNodeを使わないため、バージョンの持ち方は`signaly`と同じ形になる**
 （`version.json` + `version-file`・`bump-command`。上記「リリースワークフローのバージョン管理方式」）。
@@ -282,10 +309,10 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 `"version"` lifecycleスクリプトへ`RELEASE_CHANGELOG`環境変数として渡す（#800）。
 受け取る側を持つかどうかはリポジトリごとに違う。
 
-| `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設） |
+| `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設）・**`issue-deck`**（#1764で新設） |
 |---|---|
 | 追記はするが**枠だけ**（`RELEASE_CHANGELOG`を読まない） | `signaly`（`scripts/bump_version.py`が`frontend/changelog.js`へスタブを足す。`bump-command`経由のため`npm`のlifecycleではない） |
-| 何もしない（バージョンだけが上がる） | `issue-deck`・`car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
+| 何もしない（バージョンだけが上がる） | `car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
 
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
@@ -297,14 +324,15 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 どうなれば成功か」。**画面で使える変化が無いリリースでは空になる**ため、更新履歴があっても
 使い方が無いことがある。
 
-| `RELEASE_USAGE`を反映する | （まだ無い。`RELEASE_CHANGELOG`を反映している6リポジトリへリポジトリごとのIssueで順次対応する） |
+| `RELEASE_USAGE`を反映する | **`issue-deck`**（#1764。`src/lib/changelog.ts`の`usage`として持ち、設定 →「更新履歴」に出す。最初の1件） |
 |---|---|
-| 受け取れる状態にある | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・`clip-hive`・`ops-dashboard`（`"version"` lifecycleスクリプトを持つ） |
+| 受け取れる状態にある | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・`clip-hive`・`ops-dashboard`（`"version"` lifecycleスクリプトを持つ。反映はリポジトリごとのIssueで順次対応する） |
 | 生成されるが使われない | 上記以外（`RELEASE_CHANGELOG`と同じ扱い。バンプPR本文には出る） |
 
 **issue-deckの画面では、バンプPRが開いている間だけスマホのリリースシートに「使い方（利用者向け）」
 として出る**（`src/components/dashboard/release-progress.tsx`）。恒久的な置き場所は各アプリの
-更新履歴画面で、そちらが本来の届け先。受け取り方は
+更新履歴画面で、そちらが本来の届け先。issue-deck自身の届け先は設定 →「更新履歴」
+（`src/components/dashboard/settings/changelog-section.tsx`・#1764）。受け取り方は
 [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)の「`RELEASE_USAGE`（使い方）の受け取り方」を参照。
 
 ```bash
@@ -394,6 +422,9 @@ done
 | `guchi-apps/ops-dashboard` | — | ○（※3） |
 | `guchi-apps/db-console` | — | ○（※3） |
 | `guchi-apps/aide` | — | ○（※3） |
+| `guchi-apps/subpc` | — | ○（※4） |
+| `guchi-apps/vps` | — | ○（※4） |
+| `guchi-apps/docs` | — | ○（※4） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -404,7 +435,7 @@ done
 汎用ランチャーは既定で開発サーバーを起動せず（#1224）、envが無ければ`supply_env_files`は何もしないため、
 セッションの起動には影響しない。開発サーバーを動かすセッションでだけ配置する。
 
-サブPC列は**2026-08-15時点の申告15件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
+サブPC列は**2026-08-16時点の申告18件**（pollerのログで直接実測）。※2の4件は#1224のロールアウト対象に
 入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。単に未着手だったため#1276で追加し、
 あわせてポート帯も確保した（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——
 載っていないと汎用ランチャーの既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。
@@ -415,6 +446,33 @@ done
 されていなかった。ポート帯も`clip-hive`の10000以外は未確保だったため、あわせて足した（17000・18000）。**`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため
 `11.local`の付与とProject Statusの遷移が成立せず保留していた**（#1224）が、両方を導入して前提が揃ったため、
 サブPCの対応表でコメントアウトされていた行を有効化した。ポート帯（10000）は#1224の時点で確保済み。
+
+※4 `subpc`・`vps`・`docs`は#1741で追加した（3件ともprivate）。**上の「対応リポジトリ一覧」の表には
+載らないインフラ設定・共有知識のリポジトリで、`claude-issue-dispatch.yml`・`issue-labels.yml`の
+どちらも持たない。** そのため無人実行は回らず、**実行経路はこのローカルセッションだけ**になる
+（起動そのものは汎用ランチャーが行うので成立する）。実測した特徴と、載せるにあたっての判断は次のとおり。
+
+- **ラベル体系は2026-08-16に整備済み**（guchi-apps/vps#81・guchi-apps/subpc#15・guchi-apps/docs#13）。
+  それ以前は3件ともラベルが未定義で、`11.local`の付与が`'11.local' not found`で落ちていた
+  （警告のみで起動は続く）。`AskUserQuestion`で付く`00.check-user`は逆に**付与エンドポイントが
+  色も説明も無いラベルをその場で作ってしまう**（`src/lib/dispatch/check-user-labels.ts`）。
+  整備は**リポジトリごとの子Issue**で行った（`CLAUDE.md`「複数リポジトリに影響する変更は、
+  リポジトリごとにIssueを分ける」）。旧世代の進捗ラベルが付いたopen Issueは3件とも無く、
+  カンバンへの書き戻しは不要だった
+- **進捗（Project Status）は起動したIssueだけが盤面に載る。** 報告API（`POST /api/progress`）は
+  未登録なら`addProjectItem`で追加する（`src/lib/github/report-progress.ts`）が、一括同期
+  （`syncProjectStatuses`）は`hasClaudeWorkflow: true`で絞るため取り込まれない
+- **3件とも既定ブランチは`main`のまま。** 汎用ランチャーは`origin/HEAD`を正とするので`main`から
+  分岐し`main`宛PRになる。`subpc`・`vps`は`deploy.yml`が`push: main`なので、**マージがそのまま
+  本番反映**になる。2026-08-16に`subpc`・`vps`へ`develop`とリリースフローを入れたが、
+  **既定ブランチは移していない**（`drift-check.yml`のschedule実行が既定ブランチの内容を実機と
+  突き合わせるため）。`docs`は`develop`を持たない（上記）
+- **`docs`のチェックアウト先は`~/apps/_docs`**で、ディレクトリ名がリポジトリ名と一致しない。
+  これは全セッションが`--add-dir`で読む共有知識の参照先と**同一実体**のため、そのリポジトリの
+  Issueを起動するときだけ参照を付けない（[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)
+  「共有知識リポジトリ自身のIssueを起動するとき」）
+- 3件とも`package.json`を持たず開発サーバーを起動しないが、ポート帯（20000・21000・22000）は
+  確保した。載っていないと既定の`3000 + Issue番号`に落ち、未登録のリポジトリ同士が相乗りするため
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyOptimisticMerges,
   classifyPullRequest,
   computePullRequestNavCounts,
   extractLinkedIssueNumber,
@@ -543,5 +544,58 @@ describe("requiresUserMerge", () => {
     for (const ciState of ["pending", "success", "failure", "unknown"] as const) {
       expect(requiresUserMerge(pullRequest({ linkedIssueCheckUser: true, ciState }))).toBe(true);
     }
+  });
+});
+
+describe("applyOptimisticMerges", () => {
+  it("マージしたPRをマージ済みへ差し替える（他のPRはそのまま）", () => {
+    const merged = pullRequest({ id: "repo#1", number: 1 });
+    const other = pullRequest({ id: "repo#2", number: 2 });
+
+    const result = applyOptimisticMerges(
+      [merged, other],
+      [{ id: "repo#1", mergedAt: "2026-08-16T10:00:00.000Z" }],
+    );
+
+    expect(result[0]).toMatchObject({
+      id: "repo#1",
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-08-16T10:00:00.000Z",
+    });
+    expect(result[1]).toBe(other);
+  });
+
+  it("マージ済みとして扱ったPRには画面からのマージボタンを出さない", () => {
+    const [result] = applyOptimisticMerges(
+      [pullRequest({ id: "repo#1", linkedIssueCheckUser: true })],
+      [{ id: "repo#1", mergedAt: "2026-08-16T10:00:00.000Z" }],
+    );
+
+    expect(canMergeFromDeck(result)).toBe(false);
+    expect(requiresUserMerge(result)).toBe(false);
+    // openなPRだけを通す一覧からも消える（従来「伏せて」いたのと同じ結果）
+    expect(filterPullRequestsByView([result], "all")).toEqual([]);
+  });
+
+  it("取得結果の方が進んでいる（既にclosed）場合は取得結果を正とする", () => {
+    const closed = pullRequest({
+      id: "repo#1",
+      state: "closed",
+      merged: false,
+      mergedAt: null,
+    });
+
+    const [result] = applyOptimisticMerges(
+      [closed],
+      [{ id: "repo#1", mergedAt: "2026-08-16T10:00:00.000Z" }],
+    );
+
+    expect(result).toBe(closed);
+  });
+
+  it("対象が無ければ配列をそのまま返す", () => {
+    const pullRequests = [pullRequest()];
+    expect(applyOptimisticMerges(pullRequests, [])).toBe(pullRequests);
   });
 });

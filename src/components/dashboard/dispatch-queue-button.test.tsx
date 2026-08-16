@@ -12,6 +12,7 @@ const NOW = new Date("2026-08-15T12:00:00.000Z");
 const dismiss = vi.fn();
 const cancel = vi.fn();
 const prioritize = vi.fn();
+const refresh = vi.fn();
 
 function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
   return {
@@ -54,12 +55,26 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
   };
 }
 
-function makeDispatch(jobs: DispatchJobView[]): DispatchStateHandle {
+/** 更新インジケーター（#1773）の材料。既定は「12秒前に取得できていて、いまは取得していない」 */
+type RefreshOverrides = {
+  fetchedAt?: number | null;
+  isFetching?: boolean;
+  pollIntervalMs?: number;
+};
+
+function makeDispatch(
+  jobs: DispatchJobView[],
+  refreshOverrides: RefreshOverrides = {},
+): DispatchStateHandle {
   return {
     hosts: [makeHost()],
     jobs,
     sessions: [],
     concurrency: 2,
+    fetchedAt: refreshOverrides.fetchedAt ?? Date.now() - 12_000,
+    isFetching: refreshOverrides.isFetching ?? false,
+    pollIntervalMs: refreshOverrides.pollIntervalMs ?? 20_000,
+    refresh,
     error: null,
     setError: vi.fn(),
     isSubmitting: false,
@@ -71,8 +86,8 @@ function makeDispatch(jobs: DispatchJobView[]): DispatchStateHandle {
   } as unknown as DispatchStateHandle;
 }
 
-async function openQueue(jobs: DispatchJobView[]) {
-  render(<DispatchQueueButton dispatch={makeDispatch(jobs)} />);
+async function openQueue(jobs: DispatchJobView[], refreshOverrides: RefreshOverrides = {}) {
+  render(<DispatchQueueButton dispatch={makeDispatch(jobs, refreshOverrides)} />);
   fireEvent.click(screen.getByLabelText("実行キュー"));
   await waitFor(() => expect(screen.getByText("直近の失敗")).toBeDefined());
 }
@@ -439,5 +454,44 @@ describe("DispatchQueueButton の行からIssueを開く", () => {
 
     expect(screen.queryByLabelText(/をissue-deckで開く/)).toBeNull();
     expect(screen.getByText("#1519 実行キューの状態を可視化する")).toBeDefined();
+  });
+});
+
+/**
+ * #1773。実行キューは開いている間ずっと自動で取り直しているが、その形跡が画面に無く、
+ * 最新なのか取得が止まって固まっているのかを見分けられなかった。
+ */
+describe("DispatchQueueButton の更新インジケーター（#1773）", () => {
+  it("いつ時点の内容かと、次に取りに行く間隔を出す", async () => {
+    await openQueue([makeJob()]);
+
+    expect(screen.getByText("12秒前に更新・20秒ごと")).toBeDefined();
+  });
+
+  it("押すと次の自動更新を待たずに取り直す", async () => {
+    await openQueue([makeJob()]);
+
+    fireEvent.click(screen.getByLabelText("実行キューを今すぐ更新"));
+
+    expect(refresh).toHaveBeenCalled();
+    // 取り消し・表示消しとは別物。取り違えるとキューの中身が変わってしまう
+    expect(cancel).not.toHaveBeenCalled();
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it("取得中はアイコンが回り、経過ではなく「更新中…」を出す", async () => {
+    await openQueue([makeJob()], { isFetching: true });
+
+    const button = screen.getByLabelText("実行キューを今すぐ更新");
+    expect(button.textContent).toContain("更新中…");
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("取得できないまま間隔の3倍を超えたら注意色にする", async () => {
+    await openQueue([makeJob()], { fetchedAt: Date.now() - 120_000 });
+
+    const button = screen.getByLabelText("実行キューを今すぐ更新");
+    expect(button.textContent).toContain("2分前に更新");
+    expect(button.className).toContain("text-amber-700");
   });
 });

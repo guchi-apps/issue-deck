@@ -766,3 +766,127 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
     expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
   });
 });
+
+/**
+ * #1745。1段目で本文テンプレート（機能追加・改善／見た目・不具合）を選べるようにしたもの。
+ * 入るのは見出しだけの骨組みで、入力欄は1つのまま。
+ */
+describe("CreateIssueDialog の本文テンプレート", () => {
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+  });
+
+  function bodyValue() {
+    return (screen.getByLabelText("内容") as HTMLTextAreaElement).value;
+  }
+
+  function nextButton() {
+    return screen.getByRole("button", { name: "次へ" }) as HTMLButtonElement;
+  }
+
+  it("チップを押すと本文に見出しが入り、埋めるまで「次へ」を押せない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+
+    expect(bodyValue()).toContain("## 追加したい機能");
+    expect(bodyValue()).toContain("## なぜ追加したいか（解決したいこと）");
+    expect(nextButton().disabled).toBe(true);
+    expect(screen.queryByText("テンプレートの項目を埋めると「次へ」が押せます。")).not.toBeNull();
+  });
+
+  it("項目を1つ埋めると「次へ」が押せる", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
+    fireEvent.change(screen.getByLabelText("内容"), {
+      target: { value: `${bodyValue()}\n件数の表示が合っていない` },
+    });
+
+    expect(nextButton().disabled).toBe(false);
+    expect(screen.queryByText("テンプレートの項目を埋めると「次へ」が押せます。")).toBeNull();
+  });
+
+  it("骨組みのままなら、別のチップを押しても確認せず入れ替える", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+    fireEvent.click(screen.getByRole("button", { name: "改善・見た目" }));
+
+    expect(bodyValue()).toContain("## 対象の画面・機能");
+    expect(bodyValue()).not.toContain("## 追加したい機能");
+    expect(screen.getByRole("button", { name: "改善・見た目" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("書いた内容があるときは確認を出し、「やめる」で本文を残す", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
+
+    expect(bodyValue()).toBe("書きかけの本文");
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+
+    expect(bodyValue()).toBe("書きかけの本文");
+    expect(screen.getByRole("button", { name: "不具合" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("確認で「置き換える」を押したときだけ本文を入れ替える", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
+    fireEvent.click(screen.getByRole("button", { name: "置き換える" }));
+
+    expect(bodyValue()).toContain("## 起きていること");
+    expect(bodyValue()).not.toContain("書きかけの本文");
+  });
+
+  it("選択中のチップを押し直すと選択が外れ、骨組みのままなら本文も空へ戻る", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+
+    expect(bodyValue()).toBe("");
+    expect(screen.getByRole("button", { name: "機能追加" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("押し直しで外すとき、書いた内容は消さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+    fireEvent.change(screen.getByLabelText("内容"), {
+      target: { value: `${bodyValue()}\nカンバンに件数を出したい` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+
+    expect(bodyValue()).toContain("カンバンに件数を出したい");
+    expect(screen.getByRole("button", { name: "機能追加" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("種別が「質問」のときはテンプレート欄を出さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+
+    expect(screen.queryByText("テンプレート")).toBeNull();
+    expect(screen.queryByRole("button", { name: "改善・見た目" })).toBeNull();
+  });
+
+  it("確認ステップではテンプレート欄を出さない（書く場所は1段目だけ）", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
+    goToConfirmStep();
+
+    expect(screen.queryByText("テンプレート")).toBeNull();
+  });
+});

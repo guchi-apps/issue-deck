@@ -149,6 +149,23 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
   return { repositories };
 }
 
+/**
+ * 選択中のリポジトリを一覧の先頭へ寄せる（#1750）。
+ *
+ * ブランチ画面はリポジトリ絞り込みを適用せず全リポジトリを並べるため、選択したリポジトリを
+ * 展開しても、連携数が増えると画面の外にあって気付けない。左メニューのリポジトリ一覧（#1480）と
+ * 同じ考え方で先頭へ寄せる。**グループ内の並びは元のまま保ち**、選択が0件なら並びは変わらない。
+ */
+export function orderRepositoriesBySelection<T extends { fullName: string }>(
+  repositories: readonly T[],
+  selectedFullNames: readonly string[],
+): T[] {
+  if (selectedFullNames.length === 0) return [...repositories];
+  const selected = repositories.filter((repo) => selectedFullNames.includes(repo.fullName));
+  const rest = repositories.filter((repo) => !selectedFullNames.includes(repo.fullName));
+  return [...selected, ...rest];
+}
+
 function buildRepository({
   repository,
   pullRequests,
