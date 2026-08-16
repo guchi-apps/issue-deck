@@ -7,6 +7,8 @@ import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { AccountSection } from "@/components/dashboard/settings/account-section";
+import { AppVersionButton } from "@/components/dashboard/settings/app-version-button";
+import { ChangelogSection } from "@/components/dashboard/settings/changelog-section";
 import {
   ExecutionSettingsSection,
   type AppSettingsValues,
@@ -128,6 +130,12 @@ export function MobileSettingsScreen({
                 );
               })}
             </ul>
+
+            {/* バージョンは区分の中ではなく一覧の最下部へ。設定を開けば必ず目に入り、
+                押すと更新履歴へ入る（#1764） */}
+            <div className="mt-auto border-t pt-3">
+              <AppVersionButton onClick={() => setSection("changelog")} />
+            </div>
           </>
         )}
 
@@ -159,6 +167,7 @@ export function MobileSettingsScreen({
             githubStatus={data.githubStatus}
           />
         )}
+        {section === "changelog" && <ChangelogSection />}
       </div>
     </div>
   );

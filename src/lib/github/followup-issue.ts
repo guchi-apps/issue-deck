@@ -4,7 +4,7 @@ import type { Issue } from "@/types/issue";
  * 「引き継いでIssueを作成」機能で、新規Issueの本文の**先頭に固定で付く**テキストを組み立てる。
  *
  * 作成先リポジトリは元Issueと異なるリポジトリへ切り替えられる可能性があるため、`#<番号>`のみの
- * 参照ではなく、リポジトリ名とフルURLを含める（`buildClaudeAppPrompt`と同じ考え方）。フルURLは
+ * 参照ではなく、リポジトリ名とフルURLを含める。フルURLは
  * GitHub・issue-deckどちらのMarkdownレンダラでも素のURLとして自動リンク化されるため、作成先
  * リポジトリが元Issueと異なっていても常に正しいリンクとして機能する（#815）。
  *

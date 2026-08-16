@@ -5,7 +5,6 @@ import { useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRightLeft,
-  Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -101,7 +100,6 @@ import {
   canCloseAskRepoQuestion,
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
-import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
@@ -261,6 +259,9 @@ export function MobileIssueDetail({
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
   // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
+  // 質問Issueをワンボタンで終える導線の表示条件（#1770）。⋯メニューとコメント欄の下の
+  // 2か所で同じ値を使い、片方だけ出る状態を作らない
+  const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
   const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
@@ -384,20 +385,6 @@ export function MobileIssueDetail({
       setNewCommentBody("");
       onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
     }
-  }
-
-  function handleClaudeAppHandoff() {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: buildClaudeAppHandoffCommentBody(),
-    }).then((created) => {
-      if (!created) return;
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    });
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -531,7 +518,8 @@ export function MobileIssueDetail({
             質問する）も並べていたが、▶は本文の全幅ボタンと表示条件が同一（`canStartImplementation`）で
             必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
             タイトルに120pxしか残らなかった。どちらも操作自体は消さず、▶は本文のボタンへ一本化し、
-            ?と「質問を終えてクローズ」は下の⋯メニューへ移した。
+            ?と「回答を確認してクローズ」は下の⋯メニューへ移した（後者はコメント欄の下にも
+            出す。#1770）。
             マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
         <button
           type="button"
@@ -566,27 +554,14 @@ export function MobileIssueDetail({
                 Claudeに質問する
               </DropdownMenuItem>
             )}
-            {canCloseAskRepoQuestion(issue, comments) && (
+            {canCloseQuestion && (
               <DropdownMenuItem
                 className="whitespace-nowrap text-xs"
                 disabled={isSubmitting}
                 onSelect={() => handleClose("completed")}
               >
                 <XCircle className="size-3.5" />
-                質問を終えてクローズ
-              </DropdownMenuItem>
-            )}
-            {issue.state === "open" && (
-              <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
-                <a
-                  href={buildClaudeAppUrl(issue)}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={handleClaudeAppHandoff}
-                >
-                  <Bot className="size-3.5" />
-                  Claudeアプリで開く
-                </a>
+                回答を確認してクローズ
               </DropdownMenuItem>
             )}
             <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
@@ -947,13 +922,23 @@ export function MobileIssueDetail({
                   質問する
                 </Button>
               )}
+              {/* PC側と同じ理由で、質問Issueでは主ボタンを「コメント」に持たせない（#1770） */}
               <Button
+                variant={canCloseQuestion ? "outline" : "default"}
                 onClick={handleCreateComment}
                 disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
               >
                 {isCommentSubmitting && <Loader2 className="animate-spin" />}
                 {isCommentSubmitting ? "送信中..." : "コメント"}
               </Button>
+              {/* 回答を読み終えた位置に出口を置く（#1770）。スマホでは同じ操作が⋯メニューの
+                  奥にしかなく、開き直さないと終えられなかった */}
+              {canCloseQuestion && (
+                <Button disabled={isSubmitting} onClick={() => handleClose("completed")}>
+                  <XCircle />
+                  回答を確認してクローズ
+                </Button>
+              )}
             </div>
             <ApiErrorMessage message={commentMutationError} />
           </div>

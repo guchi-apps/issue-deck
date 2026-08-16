@@ -4,6 +4,7 @@ import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import type { BranchFlow } from "@/lib/branch-flow";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobileFlowScreenProps = {
   flow: BranchFlow;
@@ -14,6 +15,8 @@ type MobileFlowScreenProps = {
   /** マージ済みPRまで取得できているか（#1711）。`BranchFlowView`へそのまま渡す */
   mergedPullRequestsLoaded: boolean;
   onRefresh: () => void;
+  /** PRをこの画面からマージできたとき（#1756）。`BranchFlowView`へそのまま渡す */
+  onMerged: (pullRequest: PullRequestSummary) => void;
 };
 
 /**
@@ -34,6 +37,7 @@ export function MobileFlowScreen({
   failedRepositories,
   mergedPullRequestsLoaded,
   onRefresh,
+  onMerged,
 }: MobileFlowScreenProps) {
   return (
     <BranchFlowView
@@ -44,6 +48,7 @@ export function MobileFlowScreen({
       failedRepositories={failedRepositories}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       onRefresh={onRefresh}
+      onMerged={onMerged}
       className="h-full"
       footerSpacing
       headerActions={

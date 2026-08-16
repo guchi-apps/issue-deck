@@ -4,6 +4,8 @@ import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { AccountSection } from "@/components/dashboard/settings/account-section";
+import { AppVersionButton } from "@/components/dashboard/settings/app-version-button";
+import { ChangelogSection } from "@/components/dashboard/settings/changelog-section";
 import {
   ExecutionSettingsSection,
   type AppSettingsValues,
@@ -102,6 +104,12 @@ export function SettingsDialog({
                 </button>
               );
             })}
+
+            {/* バージョンは区分の外（左タブの最下部）に常設する。どの区分を開いていても
+                目に入り、押すと更新履歴へ入る（#1764） */}
+            <div className="mt-auto border-t pt-1.5">
+              <AppVersionButton onClick={() => setSection("changelog")} />
+            </div>
           </nav>
 
           <div className="flex min-w-0 flex-col overflow-y-auto">
@@ -137,6 +145,7 @@ export function SettingsDialog({
                   githubStatus={data.githubStatus}
                 />
               )}
+              {section === "changelog" && <ChangelogSection />}
             </div>
           </div>
         </div>
