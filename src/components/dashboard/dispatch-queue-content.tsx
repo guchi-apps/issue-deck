@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Loader2, RefreshCw, X } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { useNow } from "@/hooks/use-now";
 import {
   describeDispatchJobKind,
   describeDispatchJobStatus,
@@ -13,6 +14,11 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import {
+  describeDispatchQueueRefresh,
+  describeDispatchQueueRefreshHint,
+  type DispatchQueueRefreshTone,
+} from "@/lib/dispatch/queue-refresh";
 import {
   cancelableDispatchJobs,
   describeDispatchQueueLoad,
@@ -57,6 +63,10 @@ import { cn } from "@/lib/utils";
  * 戻って探し直す必要があった。**`onOpenIssue`を渡さなければ従来どおり文字列のまま**
  * （呼び出し側がポップオーバー・シートを閉じてから遷移するかどうかを決められるよう、
  * ここでは閉じる操作をせずそのまま呼ぶ）。
+ *
+ * **先頭に更新インジケーターを出す**（#1773・`QueueRefreshRow`）。この中身は開いている間ずっと
+ * 自動で取り直しているが、その形跡が画面に無く、最新なのか取得が止まって固まっているのかを
+ * 見分けられなかった。PCとスマホで同じものを出す都合上、置き場所もここ1か所にする。
  */
 export function DispatchQueueContent({
   dispatch,
@@ -85,6 +95,9 @@ export function DispatchQueueContent({
 
   return (
     <>
+      {/* いつ時点の内容かと、取得中かどうか（#1773） */}
+      <QueueRefreshRow dispatch={dispatch} />
+
       {/*
         ホストの様子（#1567）。セッション本数と上限（#1394）・リソース使用率・そのホストで
         動いているセッションを1枚にまとめている。**同時実行数の隣に並べて出す**のは従来と
@@ -187,6 +200,54 @@ export function DispatchQueueContent({
 
       {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}
     </>
+  );
+}
+
+/**
+ * 古さの配色（#1773）。ホストの使用率・チェックアウトの鮮度（`dispatch-host-panel.tsx`）と
+ * 同じ色を同じ意味で使う。
+ */
+const REFRESH_TONE_CLASS: Record<DispatchQueueRefreshTone, string> = {
+  normal: "text-muted-foreground",
+  warn: "text-amber-700 dark:text-amber-400",
+};
+
+/**
+ * いつ時点の内容かを出し、押すと取り直す1行（#1773）。
+ *
+ * **経過の数え上げ（1秒ごと）をこの行だけに閉じ込めるため、独立したコンポーネントにしてある。**
+ * `DispatchQueueContent`の側で`useNow`を呼ぶと、キュー全体（ホストの様子・全ジョブの行）が
+ * 毎秒描き直される。**ポップオーバー・シートは閉じている間そもそも描かれない**ので、
+ * この毎秒の更新が走るのは開いている間だけ。
+ *
+ * 取得中のアイコンの回転は、PR一覧の更新ボタン（`pull-request-list.tsx`）と同じ書き方に揃える。
+ */
+function QueueRefreshRow({ dispatch }: { dispatch: DispatchStateHandle }) {
+  const now = useNow(1_000);
+  const { label, tone } = describeDispatchQueueRefresh({
+    fetchedAt: dispatch.fetchedAt,
+    nowMs: now,
+    isFetching: dispatch.isFetching,
+    pollIntervalMs: dispatch.pollIntervalMs,
+  });
+
+  return (
+    <div className="mb-1 flex justify-end">
+      <button
+        type="button"
+        aria-label="実行キューを今すぐ更新"
+        title={describeDispatchQueueRefreshHint(dispatch.pollIntervalMs)}
+        className={cn(
+          // 秒が変わるたびに文字幅が動かないよう桁を固定する
+          "flex items-center gap-1 rounded px-1 py-0.5 text-[11px] tabular-nums hover:bg-accent hover:text-foreground",
+          REFRESH_TONE_CLASS[tone],
+        )}
+        onClick={dispatch.refresh}
+      >
+        <RefreshCw className={cn("size-3 shrink-0", dispatch.isFetching && "animate-spin")} />
+        {label}
+      </button>
+    </div>
   );
 }
 
