@@ -30,27 +30,31 @@ describe("スマホの一覧に並べるビュー（#1645）", () => {
     expect(mobileListNavViews.slice(0, 2).map((view) => view.id)).toEqual(["all", "check-user"]);
   });
 
-  it("お気に入り・最近追加した・本番関連の2ビューは出さない", () => {
+  it("お気に入り・最近追加した・直近本番に反映したは出さない", () => {
     const ids = mobileListNavViews.map((view) => view.id);
     expect(ids).not.toContain("favorites");
     expect(ids).not.toContain("recently-added");
-    expect(ids).not.toContain("release-pending");
     expect(ids).not.toContain("recently-merged");
+  });
+
+  // 左メニューへ足したので、揃える側のここにも出す（#1743）
+  it("本番反映待ちは末尾に出す", () => {
+    expect(mobileListNavViews.at(-1)?.id).toBe("release-pending");
   });
 
   it("一覧に無いビューで開かれたときだけ、そのビューを末尾へ足す", () => {
     expect(resolveMobileListNavViews("in-progress")).toBe(mobileListNavViews);
 
-    const resolved = resolveMobileListNavViews("release-pending");
+    const resolved = resolveMobileListNavViews("recently-merged");
     expect(resolved).toHaveLength(mobileListNavViews.length + 1);
-    expect(resolved.at(-1)?.id).toBe("release-pending");
+    expect(resolved.at(-1)?.id).toBe("recently-merged");
   });
 
   it("足したビューからも左右のスワイプで隣のビューへ移動できる", () => {
-    const resolved = resolveMobileListNavViews("release-pending");
+    const resolved = resolveMobileListNavViews("recently-merged");
 
-    expect(getAdjacentNavViewId("release-pending", "prev", resolved)).toBe("in-progress");
-    expect(getAdjacentNavViewId("release-pending", "next", resolved)).toBeNull();
+    expect(getAdjacentNavViewId("recently-merged", "prev", resolved)).toBe("release-pending");
+    expect(getAdjacentNavViewId("recently-merged", "next", resolved)).toBeNull();
   });
 });
 
@@ -63,12 +67,14 @@ describe("左メニューのグループ（#1613）", () => {
     expect(sidebarQuestionNavViews.map((view) => view.id)).toEqual(["question"]);
   });
 
-  it("Issueは広い順に4つ", () => {
+  // 絞ったものどうしは進捗の順（未着手 → 実行中 → 本番反映待ち、#1743）
+  it("Issueは広い順に5つ", () => {
     expect(sidebarIssueNavViews.map((view) => view.id)).toEqual([
       "all",
       "favorites",
       "not-started",
       "in-progress",
+      "release-pending",
     ]);
   });
 

@@ -98,7 +98,8 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
     fireEvent.click(screen.getByRole("button", { name: /すべてのIssue/ }));
 
     expect(screen.getByText("表示するIssue")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /本番反映待ち/ })).toBeNull();
+    // 本番反映待ちは#1743で一覧へ戻した。出さないのは「直近本番に反映した」だけ
+    expect(screen.getByRole("button", { name: /本番反映待ち/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /直近本番に反映した/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /未着手/ }));
@@ -106,14 +107,14 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
   });
 
   it("一覧に無いビューで開かれた場合は、そのビューもシートに並べる", () => {
-    renderScreen({ view: "release-pending" });
+    renderScreen({ view: "recently-merged" });
 
-    fireEvent.click(screen.getByRole("button", { name: /本番反映待ち/ }));
+    fireEvent.click(screen.getByRole("button", { name: /直近本番に反映した/ }));
 
-    // シートを開くと背景はaria-hiddenになるため、ここで引ける本番反映待ちはシート内の行
+    // シートを開くと背景はaria-hiddenになるため、ここで引ける行はシート内の行
     expect(screen.getByText("表示するIssue")).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /本番反映待ち/ }).getAttribute("aria-current"),
+      screen.getByRole("button", { name: /直近本番に反映した/ }).getAttribute("aria-current"),
     ).toBe("true");
   });
 
