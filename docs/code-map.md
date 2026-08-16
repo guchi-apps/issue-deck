@@ -98,6 +98,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
+  [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
+  `package.json`の`"version"` lifecycleスクリプト
+  （[`scripts/version-changelog.mjs`](../scripts/version-changelog.mjs)）が、共有ワークフローの
+  生成した`RELEASE_CHANGELOG`（何が変わったか）と`RELEASE_USAGE`（どう使うか・#1729）を
+  配列の先頭へ足す。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
+  モジュールだけで書き、`preversion`は作らない。** 表示は
+  [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
+  PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
+  スマホは一覧最下部）に置く——アカウント区分の中にあった頃は開かないと見えなかった。
 - **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
   設定の「状態」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
   レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は

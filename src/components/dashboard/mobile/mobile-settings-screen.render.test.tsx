@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import packageJson from "../../../../package.json";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 
 const appSettingsMutations = {
@@ -107,11 +108,22 @@ describe("MobileSettingsScreen", () => {
   it("PCの設定ダイアログと同じ区分を一覧に出す（#1539・#1552）", () => {
     renderScreen();
 
-    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態"]) {
+    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     // 一覧の時点では中身を出さない（ドリルダウン式）
     expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
+  });
+
+  it("バージョンを一覧の最下部に常設し、押すと更新履歴へ入る（#1764）", () => {
+    renderScreen();
+
+    const version = screen.getByRole("button", { name: /Issue Deck v/ });
+    expect(version.textContent).toContain(`v${packageJson.version}`);
+
+    fireEvent.click(version);
+    expect(screen.getByRole("heading", { name: "更新履歴" })).toBeTruthy();
+    expect(screen.getByText("使用中")).toBeTruthy();
   });
 
   it("区分を選ぶと中身へ入り、戻るで一覧へ帰る", () => {

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { LogOut, Trash2 } from "lucide-react";
 
-import packageJson from "../../../../package.json";
 import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
@@ -13,6 +12,9 @@ import type { CurrentUser } from "@/types/user";
 /**
  * 設定の「アカウント」区分（#1539）。以前は独立した`ProfileDialog`だったが、
  * 設定ダイアログの中からさらにダイアログを開く入れ子をやめてここへ展開した。
+ *
+ * バージョン表示はここの末尾にあったが、この区分を開かないと見えなかったため、
+ * 区分の外（`AppVersionButton`）へ移した（#1764）。
  */
 export function AccountSection({ currentUser }: { currentUser: CurrentUser | null }) {
   const { handleLogout, handleDeleteAccount } = useAccountActions();
@@ -53,10 +55,6 @@ export function AccountSection({ currentUser }: { currentUser: CurrentUser | nul
           リポジトリには影響しません。
         </p>
       </div>
-
-      <p className="text-center text-xs text-muted-foreground">
-        Issue Deck v{packageJson.version}
-      </p>
 
       <DeleteAccountDialog
         open={deleteDialogOpen}
