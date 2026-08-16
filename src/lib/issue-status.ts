@@ -32,3 +32,29 @@ export function isAttentionLabel(labelName: string): boolean {
 export function isProgressLabel(labelName: string): boolean {
   return isAttentionLabel(labelName) || matchStatusStep(labelName) !== null;
 }
+
+// ラベル自動付与（Issue本文からClaudeにタイトル・ラベルを推定させる機能）の対象範囲（#1662）。
+// 30〜89番台は不具合・新機能・デザイン・優先度といった「本文の内容から決まる」分類で、
+// ここだけが推定に向く。それ以外は運用の都合で人やワークフローが付けるものなので外す。
+const AUTO_ASSIGNABLE_MIN_BAND = 30;
+const AUTO_ASSIGNABLE_MAX_BAND = 89;
+// 71番台（`71.manual-step`）は、タイトルが`[手作業]`で始まるIssueへ`reusable-issue-labels.yml`の
+// `manual-step-label`ジョブが付けるルールベースのラベル（docs/multi-agent/labels.md参照）。
+// 推定で付くと「ユーザーの作業待ち」ビューへ紛れ込み、Issue詳細から実装の導線が消える。
+const AUTO_ASSIGNABLE_EXCLUDED_BAND = 71;
+const NUMBER_BAND_PATTERN = /^(\d{2})\./;
+
+/**
+ * ラベル自動付与（Claudeによるタイトル・ラベル生成）の対象にしてよいラベルかどうか（#1662）。
+ *
+ * **番号プレフィックスを持たないラベルは対象外。** issue-deckのラベル体系を配っていない
+ * リポジトリに残るGitHub既定の`bug`・`enhancement`等は、番号帯で性質を判別できないため
+ * 推定に載せない（そのリポジトリでは自動生成がラベルを付けず、タイトルだけを生成する）。
+ */
+export function isAutoAssignableLabelName(labelName: string): boolean {
+  const match = NUMBER_BAND_PATTERN.exec(labelName);
+  if (!match) return false;
+  const band = Number(match[1]);
+  if (band === AUTO_ASSIGNABLE_EXCLUDED_BAND) return false;
+  return band >= AUTO_ASSIGNABLE_MIN_BAND && band <= AUTO_ASSIGNABLE_MAX_BAND;
+}

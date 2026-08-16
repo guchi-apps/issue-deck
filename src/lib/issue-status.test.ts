@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isAttentionLabel, isProgressLabel, matchStatusStep } from "@/lib/issue-status";
+import {
+  isAttentionLabel,
+  isAutoAssignableLabelName,
+  isProgressLabel,
+  matchStatusStep,
+} from "@/lib/issue-status";
 
 describe("isProgressLabel", () => {
   it("00番台（要対応フラグ）を進捗ラベルと判定する", () => {
@@ -47,5 +52,53 @@ describe("01.check-*（00.check-userの理由ラベル。#1490）", () => {
   it("要対応ラベルとして扱う（一覧カードのラベル一覧・ラベル選択欄から外す）", () => {
     expect(isAttentionLabel("01.check-plan")).toBe(true);
     expect(isProgressLabel("01.check-plan")).toBe(true);
+  });
+});
+
+describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#1662）", () => {
+  it("30〜89番台（種別・優先度）を対象にする", () => {
+    for (const name of [
+      "30.bug",
+      "31.security",
+      "40.invalid",
+      "50.feature",
+      "51.improvement",
+      "60.chore",
+      "62.design",
+      "65.docs",
+      "70.confirm",
+      "80.Priority: High",
+      "89.Priority: low",
+    ]) {
+      expect(isAutoAssignableLabelName(name)).toBe(true);
+    }
+  });
+
+  it("71番台（手作業。ワークフローがタイトルから付ける）は対象外", () => {
+    expect(isAutoAssignableLabelName("71.manual-step")).toBe(false);
+  });
+
+  it("30番未満・90番以上（要対応・進捗・ローカル・実装オプション・クローズ理由）は対象外", () => {
+    for (const name of [
+      "00.check-user",
+      "01.check-plan",
+      "02.wip",
+      "11.local",
+      "21.plan-required",
+      "22.merge-confirm-required",
+      "23.preview-required",
+      "24.screenshot-required",
+      "25.artifact-required",
+      "90.Close: duplicate",
+      "99.something",
+    ]) {
+      expect(isAutoAssignableLabelName(name)).toBe(false);
+    }
+  });
+
+  it("番号プレフィックスを持たないラベルは対象外（ラベル体系を配っていないリポジトリのラベル）", () => {
+    expect(isAutoAssignableLabelName("bug")).toBe(false);
+    expect(isAutoAssignableLabelName("enhancement")).toBe(false);
+    expect(isAutoAssignableLabelName("3.bug")).toBe(false);
   });
 });

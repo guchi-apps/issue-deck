@@ -56,6 +56,7 @@ import {
   isSelectableLabelName,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
+import { isAutoAssignableLabelName } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import {
@@ -81,13 +82,16 @@ export function groupRepositoriesByWorkflowStatus(
 
 /**
  * 「タイトル・ラベルを自動生成」実行時の選択ラベルを算出する。
- * 進捗管理用ラベル・実装オプション用ラベル（チェックボックスで個別に選択するもの）はリセット対象外として
- * そのまま維持し、それ以外のユーザー選択可能なラベルは一度リセットしたうえで生成結果を反映する。
+ *
+ * **リセットするのは自動付与の対象になるラベル（30〜89番台。71番台を除く。#1662）だけ。**
+ * 生成結果に出てこないラベル——進捗管理用・実装オプション用に加えて、人が手で選んだ
+ * `11.local`や`90.Close: *`——までリセットすると、自動生成のたびに黙って消え、
+ * 生成結果からは二度と復活しない。
  */
 export function mergeSuggestedLabels(prev: string[], suggested: string[]): string[] {
   return [
-    ...prev.filter((name) => !isSelectableLabelName(name)),
-    ...new Set(suggested.filter(isSelectableLabelName)),
+    ...prev.filter((name) => !isAutoAssignableLabelName(name)),
+    ...new Set(suggested.filter(isAutoAssignableLabelName)),
   ];
 }
 
