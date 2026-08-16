@@ -4,13 +4,13 @@ import {
   CHECK_USER_LABEL,
   CHECK_USER_REASON_TEXT,
   checkUserReason,
-  isManualStepIssue,
 } from "@/lib/github/approval-labels";
 import {
   describeReleaseStatusBadge,
   releaseAttentionRank,
 } from "@/lib/github/release-button-status";
 import { buildPullRequestId } from "@/lib/github-reference";
+import { computeManualStepReadiness } from "@/lib/manual-step-attention";
 import { filterPullRequestsByView } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -24,7 +24,8 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 止まるものがどこにあるか」が分かる**ことなので、そこだけをリリース以外へも広げて残した。
  *
  * **判定は既存の純粋関数へ委ねる。** リリースは`describeReleaseStatusBadge`、確認待ちは
- * `checkUserReason`、PRは`filterPullRequestsByView`（左メニューの「完了したPR」と同じ母集団）。
+ * `checkUserReason`、PRは`filterPullRequestsByView`（左メニューの「完了したPR」と同じ母集団）、
+ * 手作業は`computeManualStepReadiness`（左メニューの「ユーザーの作業待ち」と同じ判定）。
  * ここで新しい基準を作ると、同じ状態を指す文言や件数が画面ごとに食い違う。
  *
  * **追加のGitHub API消費はゼロ。** 入力の4つはいずれも`IssueDeckShell`とベル自身が
@@ -188,10 +189,23 @@ function buildCheckUserNotifications(
   });
 }
 
-/** 手作業待ち（`71.manual-step`）の通知。openのまま残り続けるので、古いものほど上に出る */
+/**
+ * 手作業待ち（`71.manual-step`）の通知。openのまま残り続けるので、古いものほど上に出る。
+ *
+ * **並べるのは前提条件が満たされていて、いま実行できるものだけ**（#1801）。手作業Issueの多くは
+ * 先行する変更が本番へ出た後でなければ実行できず（`manual-step-attention.ts`）、数週間先まで
+ * 動かせないものまで並べるとベルが「いま人が動けば盤面が進むもの」を集める場所として読めなくなる
+ * （リリースの`progressing`を出さないのと同じ理由）。件数バッジも左メニューの
+ * 「ユーザーの作業待ち」（`actionable`だけを数える。#1763）と一致する。
+ *
+ * 判定は左メニュー・一覧の行アイコンと同じ`computeManualStepReadiness`へ委ねる。母集団は
+ * ベルが受け取る全Issue（TopBarの絞り込み前）なので、参照先の解決もそのまま行える。
+ * 状態を取れない参照は「実行できる」側に数えるため、そうした手作業はベルに残る。
+ */
 function buildManualStepNotifications(issues: Issue[]): NotificationItem[] {
+  const readiness = computeManualStepReadiness(issues);
   return issues
-    .filter((issue) => issue.state === "open" && isManualStepIssue(issue.labels))
+    .filter((issue) => readiness.get(issue.id)?.ready === true)
     .map(
       (issue) =>
         ({
