@@ -298,3 +298,86 @@ describe("Issue詳細の下端の余白（#1793）", () => {
     expect(scrollContainer().className).toContain("pb-20");
   });
 });
+
+/**
+ * 確認待ちの案内は、セッションの状態（`/api/dispatch`）が届いてから出す（#1810）。
+ *
+ * 取得前の`sessions`は`[]`で、ローカルセッションが入力待ちかどうかは分からない。それを
+ * 「入力待ちではない」と読むと、Remote Controlの案内を出すべき場面で承認欄への案内を
+ * 先に出してしまう（実際、サブPCで走っているIssueを開くと一瞬だけそちらが見えていた）。
+ */
+describe("確認待ちの案内が出るタイミング（#1810）", () => {
+  const waitingSession = {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1810",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    issueTitle: null,
+    issueId: null,
+    state: "ALIVE" as const,
+    exitStatus: null,
+    firstSeenAt: "2026-08-01T00:00:00.000Z",
+    lastReportedAt: "2026-08-01T00:10:00.000Z",
+    activity: "WAITING_INPUT" as const,
+    activityAt: "2026-08-01T00:10:00.000Z",
+    remoteControlUrl: "https://claude.ai/code/session_abc",
+    previewUrl: null,
+  };
+
+  const checkUserIssue = () =>
+    buildIssue({
+      title: "サブPCで実装中のIssue",
+      labels: ["00.check-user", "01.check-input", "11.local"].map((name) => ({
+        name,
+        color: "d73a4a",
+        description: null,
+      })),
+    });
+
+  function withSessions<T>(sessions: unknown[], isLoaded: boolean, run: () => T): T {
+    const prev = { sessions: dispatchState.sessions, isLoaded: dispatchState.isLoaded };
+    Object.assign(dispatchState, { sessions, isLoaded });
+    try {
+      return run();
+    } finally {
+      Object.assign(dispatchState, prev);
+    }
+  }
+
+  it("PCは、届くまで承認欄への案内を出さない", () => {
+    withSessions([], false, () => {
+      renderDetail(checkUserIssue());
+      expect(screen.queryByText("質問への回答が必要です")).toBeNull();
+      expect(screen.queryByRole("button", { name: /承認欄へ移動/ })).toBeNull();
+    });
+  });
+
+  /** 案内パネル（`CheckUserReasonNotice`）の中だけを見る（コメント欄の案内にも同名のリンクがある） */
+  function guidancePanel(): HTMLElement {
+    const heading = screen.getByText("質問への回答が必要です");
+    const panel = heading.parentElement;
+    if (!panel) throw new Error("確認待ちの案内が見つからない");
+    return panel;
+  }
+
+  it("PCは、届いた時点でRemote Controlの案内を出す", () => {
+    withSessions([waitingSession], true, () => {
+      renderDetail(checkUserIssue());
+      expect(within(guidancePanel()).getByRole("link", { name: /Remote Controlで開く/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /承認欄へ移動/ })).toBeNull();
+    });
+  });
+
+  it("スマホも同じ（届くまで出さず、届いたらRemote Controlへ寄せる）", () => {
+    withSessions([], false, () => {
+      renderMobileDetail(checkUserIssue());
+      expect(screen.queryByText("質問への回答が必要です")).toBeNull();
+    });
+    cleanup();
+    withSessions([waitingSession], true, () => {
+      renderMobileDetail(checkUserIssue());
+      expect(within(guidancePanel()).getByRole("link", { name: /Remote Controlで開く/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /承認欄へ移動/ })).toBeNull();
+    });
+  });
+});

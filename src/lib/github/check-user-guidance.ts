@@ -105,6 +105,16 @@ export type ResolveCheckUserGuidanceOptions = {
    * 押しても何も起きない移動ボタンを出さないため。**
    */
   hasPullRequestSection?: boolean;
+  /**
+   * セッションの状態（`/api/dispatch`）がまだ届いていないか（#1810）。
+   *
+   * **`sessionWaitingInput`の`false`は「入力待ちではない」と「まだ分からない」の
+   * 両方を意味してしまう。** セッションの一覧は取得前も`[]`を返すため、開いた直後は
+   * 必ず「入力待ちではない」側に倒れ、承認欄へ送る案内（「承認欄へ移動」）を出してから
+   * Remote Controlの案内へ書き換わっていた。**確定するまではどちらも名乗らない**
+   * （`useDispatchState`の`isLoaded`を渡す。取得に失敗しても`true`になるので待ち続けない）。
+   */
+  sessionStatePending?: boolean;
 };
 
 /**
@@ -116,6 +126,7 @@ export type ResolveCheckUserGuidanceOptions = {
  *
  * **理由ラベルが読めないときは`null`を返す**（`checkUserReason`が`00.check-user`とのANDでしか
  * 理由を返さないのと同じ考え方で、行き先を推測で決めない）。呼び出し側は従来どおりの表示に戻る。
+ * **セッションの状態が届いていないときも同じく`null`**（`sessionStatePending`・#1810）。
  */
 export function resolveCheckUserGuidance({
   reason,
@@ -123,8 +134,12 @@ export function resolveCheckUserGuidance({
   sessionWaitingInput = false,
   remoteControlUrl = null,
   hasPullRequestSection = true,
+  sessionStatePending = false,
 }: ResolveCheckUserGuidanceOptions): CheckUserGuidance | null {
   if (reason === null) return null;
+  // 行き先はローカルセッションが入力待ちかどうかで変わる（下の分岐）。**未確定のまま
+  // 出すと必ず「入力待ちではない」側の案内が先に出る**ので、届くまでは何も出さない（#1810）
+  if (sessionStatePending) return null;
   const guide = REASON_GUIDE[reason];
   const heading = CHECK_USER_REASON_HEADING[reason];
 
