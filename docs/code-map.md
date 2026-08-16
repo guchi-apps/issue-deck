@@ -1022,6 +1022,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**
+- **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
+  末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに
+  サムネイルで横に並べる**（#1819）。呼び出し元へ渡す`value`は従来どおり画像記法込みの1本の
+  文字列なので、下書きの保存も投稿も変わらない。**入力欄の表示と`value`がズレているのはここだけ**で、
+  分解・合成は同ファイルの`splitAttachments` / `composeAttachments`が持つ。文章の途中に書かれた
+  画像記法は本文の文字のまま残す（既存のIssue・コメントを編集で書き換えないため）。
 
 ## 画面のボタンは`@claude`コメントで動く
 
