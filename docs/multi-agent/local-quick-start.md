@@ -1162,7 +1162,7 @@ Issue本文とコメント全件は元から展開している。そこに落ち
 
 | 足したもの | 集め方 | 置き場所 |
 |---|---|---|
-| 親子Issue | `gh issue view --json parent,subIssues` | `{{ISSUE_RELATIONS}}` |
+| 親子Issue | `gh api graphql`（`parent`・`subIssues`） | `{{ISSUE_RELATIONS}}` |
 | 並行状況（`origin/develop`の先端・未マージPR・同じホストの他セッション） | git・`gh pr list`・`tmux list-sessions` | `{{CONCURRENT_WORK}}` |
 | 画像の読み方 | データ不要（テンプレートの固定文） | 本文中 |
 
@@ -1172,6 +1172,26 @@ Issue本文とコメント全件は元から展開している。そこに落ち
 
 **判断はしない。事実だけを集める。** [gates.md](gates.md)の「計器」の側で、tmuxはメタデータしか
 読まない（画面の文字列からの推定は実地で誤判定した実績がある）。
+
+### 親子Issueは`gh issue view --json`ではなく`gh api graphql`で取る（#1753）
+
+`gh issue view --json parent,subIssues`は**新しめの`gh`にしか無いフィールド**で、Ubuntuのapt版
+（2.45.0）では`Unknown JSON field: "parent"`で落ちる。当初はこれを`2>/dev/null || true`で
+握り潰していたため、親子のあるIssueでも常に「（取得できませんでした）」になり、
+**エラーは画面にも出ないので誰も気づけなかった**（#1267の狙い＝子Issueで親の背景が落ちるのを
+防ぐ、が達成できていなかった）。GraphQLのAPI自体は同じ`gh`でも通るため、issue-deck本体の
+[src/lib/github/sub-issues-api.ts](../../src/lib/github/sub-issues-api.ts)と同じクエリを
+`gh api graphql`で直接叩く。`gh`のバージョンに依存しない。
+
+あわせて次の2点も直した。
+
+- **リポジトリ名も取る**（#1722）。サブIssueはリポジトリをまたげるため、`#123`とだけ書くと
+  受け取ったエージェントの側では自分のリポジトリの無関係なIssueに解決する。担当Issueと別の
+  リポジトリのものだけ`owner/repo#123`と書く（画面から起動する経路
+  [build-implementation-prompt.ts](../../src/lib/prompts/build-implementation-prompt.ts)の
+  `formatRelations`と同じ書式）
+- **失敗の理由を書く。** 「取得できませんでした」だけでは、親子が無いのか壊れているのかを
+  見分けられない。`gh`のエラーメッセージの1行目を添える
 
 ### 画面からコピーしたプロンプトでは並行状況が空になる
 
