@@ -56,7 +56,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention(issues)).toEqual({
       total: 1,
       actionable: 1,
-      waitingForRelease: 0,
+      waitingForPrerequisites: 0,
     });
   });
 
@@ -67,7 +67,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention(issues)).toEqual({
       total: 1,
       actionable: 0,
-      waitingForRelease: 1,
+      waitingForPrerequisites: 1,
     });
   });
 
@@ -76,7 +76,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention([manualStep(101, null)])).toEqual({
       total: 1,
       actionable: 1,
-      waitingForRelease: 0,
+      waitingForPrerequisites: 0,
     });
   });
 
@@ -84,7 +84,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention([manualStep(101, 100)])).toEqual({
       total: 1,
       actionable: 1,
-      waitingForRelease: 0,
+      waitingForPrerequisites: 0,
     });
   });
 
@@ -99,7 +99,19 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention([otherRepoOrigin, manualStep(101, 100)])).toEqual({
       total: 1,
       actionable: 1,
-      waitingForRelease: 0,
+      waitingForPrerequisites: 0,
+    });
+  });
+
+  // 起点だけでなく`## 前提条件`に書かれた参照も待つ相手（#1705。Issue詳細と同じ判定）
+  it("前提条件に書かれたIssueがまだ進んでいなければ前提待ちとして数える", () => {
+    const origin = makeIssue({ number: 100, state: "closed", projectStatus: "Done" });
+    const prerequisite = makeIssue({ number: 9999, projectStatus: "Implementation" });
+
+    expect(computeManualStepAttention([origin, prerequisite, manualStep(101, 100)])).toEqual({
+      total: 1,
+      actionable: 0,
+      waitingForPrerequisites: 1,
     });
   });
 
@@ -112,7 +124,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention(issues)).toEqual({
       total: 0,
       actionable: 0,
-      waitingForRelease: 0,
+      waitingForPrerequisites: 0,
     });
   });
 
@@ -124,7 +136,7 @@ describe("computeManualStepAttention", () => {
     expect(computeManualStepAttention([step], [origin, step])).toEqual({
       total: 1,
       actionable: 0,
-      waitingForRelease: 1,
+      waitingForPrerequisites: 1,
     });
   });
 });

@@ -46,7 +46,17 @@ const ISSUE_TEMPLATES = [
   { title: "アクセシビリティ対応を強化する", state: "OPEN", labels: [{ name: "question", color: "d876e3" }] },
 ];
 
-async function upsertDummyIssue(repository, { number, title, state, labels, projectStatus = null }) {
+async function upsertDummyIssue(
+  repository,
+  {
+    number,
+    title,
+    state,
+    labels,
+    projectStatus = null,
+    body = "CI環境の画面確認用ダミーIssueです。",
+  },
+) {
   const githubIssueId = BigInt(repository.githubRepositoryId) * 1000n + BigInt(number);
   const now = new Date();
   const issue = await prisma.issue.upsert({
@@ -55,7 +65,7 @@ async function upsertDummyIssue(repository, { number, title, state, labels, proj
     create: {
       number,
       title,
-      body: "CI環境の画面確認用ダミーIssueです。",
+      body,
       state,
       authorLogin: "ci-dummy-user",
       commentCount: COMMENT_COUNT_PER_ISSUE,
@@ -129,6 +139,46 @@ const DEV_PROJECT_STATUS_CYCLE = [
   "Done",
 ];
 
+/**
+ * 開発用の手作業Issue（`71.manual-step`）のサンプル（#1705）。
+ *
+ * 「前提条件の状況」（Issue詳細の手作業パネル）は、本文に書かれた参照の**進捗が段階ごとに
+ * 違う**ときにしか読み比べられない。参照先はこの下の`DEV_PROJECT_STATUS_CYCLE`で進捗を
+ * 散らしたIssueで、番号と進捗の対応は`(番号 - 1) % 7`——#4が`Develop PR`（実装中）、
+ * #5が`Develop`（本番未反映）、#7が`Done`（mainへ反映済み）になる。
+ * **サイクルを変えるときはこの本文の番号も直すこと。**
+ */
+const MANUAL_STEP_SAMPLE_BODY = [
+  "## 前提条件",
+  "",
+  "- 実行するデバイス: VPS（`ssh vps`）",
+  "- カレントディレクトリ: `/var/www/sample-repo-1`",
+  "- Gitブランチ: `develop`",
+  "- 先に完了している必要があるIssue・PR: #5 がmainへ反映された後、#7 の変更が本番へ出た後",
+  "- その他の前提: なし",
+  "",
+  "## やること",
+  "",
+  "- [ ] `.env`へ`SAMPLE_TOKEN`を追記する",
+  "- [ ] PM2を再起動する",
+  "",
+  "## なぜエージェントが実施しないか",
+  "",
+  "本番サーバーの`.env`はリポジトリに無く、エージェントからは書き換えられないため。",
+  "",
+  "## 放置するとどうなるか",
+  "",
+  "本番の通知が飛ばないままになる。",
+  "",
+  "## 完了の確認方法",
+  "",
+  "`pm2 logs sample-repo-1`に`notify: ok`が出ること。",
+  "",
+  "## 関連",
+  "",
+  "- 起点Issue: #4",
+].join("\n");
+
 async function applyDevProfile(installation) {
   // 「実装を開始」「ローカルで開始」の導線は、この2つのフラグが立っているリポジトリにしか出ない。
   const updatedRepositories = await prisma.repository.updateMany({
@@ -153,8 +203,23 @@ async function applyDevProfile(installation) {
     });
   }
 
+  // 手作業Issueのサンプル（#1705）。進捗を散らした**後**に作る（このIssue自身の進捗はReadyのまま）
+  const firstRepository = await prisma.repository.findFirst({
+    where: { installationId: installation.id },
+    orderBy: { githubRepositoryId: "asc" },
+  });
+  if (firstRepository) {
+    await upsertDummyIssue(firstRepository, {
+      number: ISSUES_PER_REPOSITORY + 3,
+      title: "[手作業] VPS: sample-repo-1の.envにSAMPLE_TOKENを追加する",
+      state: "OPEN",
+      labels: [{ name: "71.manual-step", color: "d876e3" }],
+      body: MANUAL_STEP_SAMPLE_BODY,
+    });
+  }
+
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らしました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを1件追加しました。`,
   );
 }
 

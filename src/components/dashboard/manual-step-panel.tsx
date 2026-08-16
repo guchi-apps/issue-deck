@@ -2,7 +2,12 @@
 
 import { Ban, CheckCircle2, Loader2, Wrench } from "lucide-react";
 
+import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
+import type {
+  ManualStepPrerequisite,
+  ManualStepPrerequisiteSummary,
+} from "@/lib/manual-step-prerequisites";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +27,9 @@ export function ManualStepPanel({
   onComplete,
   onSkip,
   isSubmitting,
+  prerequisites,
+  prerequisiteSummary,
+  repositoryFullName,
   className,
 }: {
   /** 手作業を実行し終えた場合（完了としてクローズ） */
@@ -29,6 +37,15 @@ export function ManualStepPanel({
   /** 実施せず終わらせる場合（計画外としてクローズ） */
   onSkip: () => void;
   isSubmitting: boolean;
+  /**
+   * 待っている相手（先に完了している必要があるIssue・PR）の状況（#1705）。
+   * `hooks/use-manual-step-prerequisites.ts`の結果をそのまま渡す。**PC・スマホの
+   * どちらの詳細からも渡すこと**——片方だけだと「実行してよいか」の答えが画面で食い違う。
+   */
+  prerequisites?: ManualStepPrerequisite[];
+  /** 参照が1件も無ければnull。そのときは前提条件のブロックごと出さない */
+  prerequisiteSummary?: ManualStepPrerequisiteSummary | null;
+  repositoryFullName?: string;
   className?: string;
 }) {
   return (
@@ -46,6 +63,17 @@ export function ManualStepPanel({
         <Wrench className="size-4 shrink-0" />
         あなたの手作業を待っています
       </p>
+      {/* 待っている相手の状況（#1705）。実行してよいかの判断材料なので、手順の説明より先に出す。
+          **前提が揃っていなくてもボタンは押せるままにする**——ここの判定は本文に書かれた
+          番号からの推定で、外したときに完了できなくなる方が損が大きい */}
+      {prerequisiteSummary && prerequisites && prerequisites.length > 0 && repositoryFullName && (
+        <ManualStepPrerequisites
+          className="mt-2"
+          prerequisites={prerequisites}
+          summary={prerequisiteSummary}
+          repositoryFullName={repositoryFullName}
+        />
+      )}
       <p className="mt-2 text-xs text-muted-foreground">
         このIssueはエージェントが代行できない作業です。
         <strong className="font-medium">実装エージェントへは送りません</strong>
