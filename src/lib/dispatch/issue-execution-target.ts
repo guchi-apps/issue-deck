@@ -1,7 +1,7 @@
-import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import { isIssueExecutionPending, type DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
+import { isLocalSessionIssue } from "@/lib/github/project-status-dispatch";
 
 /**
  * あるIssueの実装が**どこで走っているか**の解決（#1262）。
@@ -99,7 +99,39 @@ export function resolveIssueExecutionTarget(params: {
   const session = newestSessionForIssue(sessions, repositoryFullName, issueNumber);
   const job = session ? null : newestJobForIssue(jobs, repositoryFullName, issueNumber);
   const host = session?.host ?? job?.targetHost ?? null;
-  const isLocal = labels.some((label) => label.name === LOCAL_LABEL_NAME);
+  const isLocal = isLocalSessionIssue(labels);
 
   return { host, expectsActionsRun: host === null && !isLocal };
+}
+
+/**
+ * そのIssueの実行が**もう始められているか**（#1815）。**開始の主導線（塗りつぶしのボタン）を
+ * 出すかどうかだけ**の判定で、`isIssueExecutionPending`より広い。
+ *
+ * 実体（未完了のジョブ・生きているセッション）に加えて`11.local`ラベルを見る。ジョブ・
+ * セッションはpull型で画面へ届くまでに間があり、**押した直後は実体がまだ何も見えていない**。
+ * 実際、Issueを作成して続けて起動した直後の詳細画面では、ジョブを積んだのが別のダイアログ
+ * （自前の取得口を持つ）だったために20秒間まったく反映されず、押す前と同じ「サブPCで開始」が
+ * 全幅で残っていた。**`11.local`は積むより先に付けている**ので、実体が見えない間もこの
+ * ラベルだけは届いている。
+ *
+ * **起動そのものを塞ぐ判定には使わない。** ラベルはセッションが外すまで残り、落ちたセッションを
+ * 立て直したい場面でも付いたままになる。立て直しの導線（枠線の「サブPCで開始」・
+ * `StartLocalSessionButton`）は`isIssueExecutionPending`の方で判断し、こちらでは消さない。
+ *
+ * `dispatch-job.ts`ではなくここに置くのは、**`11.local`の判定（`project-status-dispatch.ts`）が
+ * 進捗の定義（`issue-progress.ts`＝lucide-reactのアイコンを持つ）まで連れてくる**ため。
+ * `dispatch-job.ts`はAPIルート・ジョブの払い出しからも読む純粋関数の置き場で、そこへ画面用の
+ * 依存を持ち込まない。
+ */
+export function isIssueExecutionStarted(params: {
+  /** そのIssueへ積んだ起動ジョブ（`findDispatchJobForIssue`の結果） */
+  job: Pick<DispatchJobView, "status"> | null;
+  /** 動いているセッション（`findBlockingSession`の結果） */
+  blockingSession: DispatchSessionView | null;
+  /** Issueに付いているラベル */
+  labels: readonly { name: string }[];
+}): boolean {
+  if (isIssueExecutionPending(params)) return true;
+  return isLocalSessionIssue(params.labels);
 }

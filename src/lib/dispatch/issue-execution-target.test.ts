@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import { isIssueExecutionPending, type DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
   describeIssueExecutionTarget,
+  isIssueExecutionStarted,
   resolveIssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -159,5 +160,46 @@ describe("describeIssueExecutionTarget", () => {
 
   it("何も分からなければ「Actions」", () => {
     expect(describeIssueExecutionTarget({ host: null, expectsActionsRun: true })).toBe("Actions");
+  });
+});
+
+/**
+ * #1815。実行を開始した直後は、進捗もジョブもセッションもまだ画面へ届かない。届いているのは
+ * 積むより先に付けている`11.local`だけなので、これを見ないと押した後も同じ開始ボタンが残る。
+ */
+describe("isIssueExecutionStarted", () => {
+  it("`11.local`が付いていれば、ジョブもセッションも無くても始まっているとみなす", () => {
+    expect(
+      isIssueExecutionStarted({
+        job: null,
+        blockingSession: null,
+        labels: [{ name: "11.local" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("`11.local`が無ければ、実体の有無だけで判断する（従来どおり）", () => {
+    expect(
+      isIssueExecutionStarted({
+        job: null,
+        blockingSession: null,
+        labels: [{ name: "21.plan-required" }],
+      }),
+    ).toBe(false);
+    expect(
+      isIssueExecutionStarted({ job: { status: "QUEUED" }, blockingSession: null, labels: [] }),
+    ).toBe(true);
+    expect(
+      isIssueExecutionStarted({
+        job: { status: "SUCCEEDED" },
+        blockingSession: session(),
+        labels: [],
+      }),
+    ).toBe(true);
+  });
+
+  // 立て直しの導線（枠線の「サブPCで開始」）まで塞がないよう、実体の判定は広げない
+  it("`11.local`が付いていても、`isIssueExecutionPending`は実体だけを見る", () => {
+    expect(isIssueExecutionPending({ job: null, blockingSession: null })).toBe(false);
   });
 });

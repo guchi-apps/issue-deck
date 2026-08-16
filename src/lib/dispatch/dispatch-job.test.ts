@@ -434,6 +434,12 @@ describe("isIssueExecutionPending", () => {
       isIssueExecutionPending({ job: { status: "SUCCEEDED" }, blockingSession: session() }),
     ).toBe(true);
   });
+
+  // #1815。ラベルはセッションが外すまで残るため、立て直しの導線はここで塞がない
+  it("`11.local`が付いていても、実体が無ければ走っているとはみなさない", () => {
+    expect(isIssueExecutionPending({ job: null, blockingSession: null })).toBe(false);
+  });
+
 });
 
 describe("describeDispatchJobStatus", () => {

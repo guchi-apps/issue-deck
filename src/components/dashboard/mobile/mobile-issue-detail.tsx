@@ -60,7 +60,10 @@ import {
   LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
-import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
+import {
+  isIssueExecutionStarted,
+  resolveIssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
 import {
   findSessionForIssue,
   isSessionWaitingInput,
@@ -215,6 +218,16 @@ export function MobileIssueDetail({
   // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の真下に
   // 押せる「GitHub Actionsで開始」が全幅で残っていた
   const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
+  // 主導線（全幅の「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
+  // 画面へ届くまでの間、押す前とまったく同じボタンが残り、効かなかったように見えていた
+  const executionStarted = isIssueExecutionStarted({
+    job: dispatchJob,
+    blockingSession,
+    labels: issue.labels,
+  });
+  // 開始の主導線を出すか。`StartLocalSessionButton`の起動ボタンは、これが出ていないときだけ出す
+  // （#1349。両方出すと「サブPCで開始」が2つ並ぶ）
+  const showStartDialog = canStartImplementation(issue) && !executionStarted;
   // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
   // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
   const startLabel = !dispatch.isLoaded
@@ -687,7 +700,7 @@ export function MobileIssueDetail({
           checkUserGuidance={checkUserGuidance}
         />
 
-        {canStartImplementation(issue) && !executionPending && (
+        {showStartDialog && (
           <StartImplementationDialog
             issue={issue}
             onIssueUpdated={onIssueUpdated}
@@ -709,12 +722,14 @@ export function MobileIssueDetail({
         {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
             兼ねる。サブPCの申告が無ければこの導線ごと出ない。
             起動ボタンは、すぐ上の「実装を開始」（既定の実行先を文言にしている・#1262）が
-            出ていないときだけ出す（#1349）。もう走っているIssueではどちらも出さない（#1667） */}
+            出ていないときだけ出す（#1349）。もう走っているIssueではどちらも出さない（#1667）。
+            `11.local`だけが付いている状態（#1815）ではここが唯一の起動導線になる
+            ——主導線は引っ込めるが、落ちたセッションの立て直しまで塞がない */}
         <StartLocalSessionButton
           issue={issue}
           onIssueUpdated={onIssueUpdated}
           fullWidth
-          showStartButton={!canStartImplementation(issue) && !executionPending}
+          showStartButton={!showStartDialog && !executionPending}
           /* 積んだジョブの状態は`IssueStatusCard`が出すので、ここでは出さない（#1646）。
              両方に出すと「順番待ち」が同じ画面に2つ並ぶ。PCの詳細と同じ渡し方 */
           showJobStatus={false}

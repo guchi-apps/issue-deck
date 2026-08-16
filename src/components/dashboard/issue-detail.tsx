@@ -52,7 +52,10 @@ import {
   LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
-import { resolveIssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
+import {
+  isIssueExecutionStarted,
+  resolveIssueExecutionTarget,
+} from "@/lib/dispatch/issue-execution-target";
 import {
   findSessionForIssue,
   isSessionWaitingInput,
@@ -452,6 +455,16 @@ export function IssueDetail({
   // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の隣に
   // 押せる「GitHub Actionsで開始」が残っていた
   const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
+  // 主導線（塗りつぶしの「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
+  // 画面へ届くまでの間、押す前とまったく同じボタンが残り、効かなかったように見えていた
+  const executionStarted = isIssueExecutionStarted({
+    job: dispatchJob,
+    blockingSession,
+    labels: issue.labels,
+  });
+  // 開始の主導線を出すか。`StartLocalSessionButton`の起動ボタンは、これが出ていないときだけ出す
+  // （#1349。両方出すと「サブPCで開始」が2つ並ぶ）
+  const showStartDialog = canStartImplementation(issue) && !executionStarted;
   // ホストの一覧が届くまでは実行先を名乗らない（#1666）。空の一覧のまま名乗ると
   // 「GitHub Actionsで開始」と出した直後に「サブPCで開始」へ書き変わる
   const startLabel = !dispatch.isLoaded
@@ -523,7 +536,7 @@ export function IssueDetail({
             <>
               {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
                   対応PR一覧（IssuePullRequestList）の各行に置いている（#1339） */}
-              {canStartImplementation(issue) && !executionPending && (
+              {showStartDialog && (
                 <StartImplementationDialog
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
@@ -569,11 +582,13 @@ export function IssueDetail({
               {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
                   起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
                   あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                  「サブPCで開始」が2つ並ぶ。もう走っているIssueではどちらも出さない（#1667） */}
+                  「サブPCで開始」が2つ並ぶ。もう走っているIssueではどちらも出さない（#1667）。
+                  `11.local`だけが付いている状態（#1815）ではここが唯一の起動導線になる
+                  ——主導線は引っ込めるが、落ちたセッションの立て直しまで塞がない */}
               <StartLocalSessionButton
                 issue={issue}
                 onIssueUpdated={onIssueUpdated}
-                showStartButton={!canStartImplementation(issue) && !executionPending}
+                showStartButton={!showStartDialog && !executionPending}
                 showJobStatus={false}
                 dispatch={dispatch}
               />
