@@ -4,6 +4,7 @@ import {
   groupRepositoriesByWorkflowStatus,
   mergeSuggestedLabels,
   resolveKindRepository,
+  selectableSuggestedRepositories,
 } from "@/components/dashboard/create-issue-dialog";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { ConnectedRepository } from "@/types/repository";
@@ -116,5 +117,37 @@ describe("resolveKindRepository", () => {
 
   it("質問で選べるリポジトリが1つも無ければ未選択にする", () => {
     expect(resolveKindRepository("question", [notConfigured], "owner/not-configured")).toBe("");
+  });
+});
+
+/** #1710。押しても切り替わらない候補チップを出さないための絞り込み */
+describe("selectableSuggestedRepositories", () => {
+  const repositories = [
+    makeRepo({ fullName: "guchi-apps/issue-deck", hasClaudeWorkflow: true }),
+    makeRepo({ fullName: "guchi-apps/car-care", hasClaudeWorkflow: false }),
+  ];
+
+  it("Issueでは連携しているリポジトリをすべて残し、推定の順序を保つ", () => {
+    expect(
+      selectableSuggestedRepositories("issue", repositories, [
+        "guchi-apps/car-care",
+        "guchi-apps/issue-deck",
+      ]),
+    ).toEqual(["guchi-apps/car-care", "guchi-apps/issue-deck"]);
+  });
+
+  it("質問ではclaude-issue-dispatch.yml未導入のリポジトリを落とす", () => {
+    expect(
+      selectableSuggestedRepositories("question", repositories, [
+        "guchi-apps/car-care",
+        "guchi-apps/issue-deck",
+      ]),
+    ).toEqual(["guchi-apps/issue-deck"]);
+  });
+
+  it("画面に出ていない（非表示・未連携の）リポジトリは落とす", () => {
+    expect(
+      selectableSuggestedRepositories("issue", repositories, ["guchi-apps/unknown"]),
+    ).toEqual([]);
   });
 });

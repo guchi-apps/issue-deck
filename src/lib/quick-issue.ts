@@ -16,10 +16,37 @@ export type QuickSuggestKind = IssueDraftKind;
 export type QuickSuggestResult = {
   /** 推定できなかった場合はnull（確認ステップでユーザーが選ぶ） */
   repositoryFullName: string | null;
+  /**
+   * 内容から推定したリポジトリ候補（確からしい順・最大3件・#1710）。
+   * 確認ステップにチップとして並べ、1タップで選び直せるようにする。
+   * `repositoryFullName`が画面から渡された値のときは、ここに別のリポジトリが並ぶことがある。
+   */
+  repositoryCandidates: string[];
   /** 種別が「質問」のとき、および生成に失敗したときはnull */
   title: string | null;
   labels: string[];
 };
+
+/**
+ * 確認ステップに出すリポジトリ候補の並びを作る（#1710）。
+ *
+ * **選択中のものを必ず先頭に置く。** 押せる候補の中に今の値が無いと、切り替えた後に
+ * 元へ戻す先が消える。画面から渡されたリポジトリ（表示中のリポジトリ）は推定結果に
+ * 入っていないことがあるため、ここで合流させる。
+ */
+export function buildRepositoryChoices(
+  selected: string,
+  candidates: string[],
+  limit = 3,
+): string[] {
+  const choices = selected ? [selected] : [];
+  for (const candidate of candidates) {
+    if (choices.includes(candidate)) continue;
+    choices.push(candidate);
+    if (choices.length >= limit) break;
+  }
+  return choices;
+}
 
 /**
  * ダイアログを開いたときのステップを決める。
