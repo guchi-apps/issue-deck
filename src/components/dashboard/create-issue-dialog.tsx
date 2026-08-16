@@ -59,6 +59,13 @@ import {
 } from "@/lib/github/start-implementation";
 import { openIssueCreateWindow, type IssueCreateHandoff } from "@/lib/issue-create-window";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
+import {
+  findIssueTemplate,
+  isUnfilledTemplateBody,
+  ISSUE_TEMPLATES,
+  resolveTemplateChange,
+  type IssueTemplateId,
+} from "@/lib/issue-templates";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import {
@@ -386,6 +393,16 @@ export function CreateIssueDialog({
   const [hasPickedRepository, setHasPickedRepository] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  /**
+   * 適用中の本文テンプレート（#1745）。未選択は`null`。**下書きから復元した本文や、
+   * 別ウィンドウから引き継いだ本文は「人が書いたもの」として扱う**ので、そこでは`null`へ戻す。
+   */
+  const [templateId, setTemplateId] = useState<IssueTemplateId | null>(null);
+  /**
+   * 置き換えの確認中のテンプレート（#1745）。書いた内容がある状態でチップを押したときだけ入る。
+   * **自分で書いた内容を黙って消さない**ための1手で、「やめる」で降ろす。
+   */
+  const [pendingTemplateId, setPendingTemplateId] = useState<IssueTemplateId | null>(null);
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
@@ -427,6 +444,10 @@ export function CreateIssueDialog({
     () => labels.filter((label) => isSelectableLabelName(label.name)),
     [labels],
   );
+  const selectedTemplate = findIssueTemplate(templateId);
+  const pendingTemplate = findIssueTemplate(pendingTemplateId);
+  /** テンプレートを入れたまま、項目を1つも埋めていないか（#1745）。「次へ」を塞ぐ材料 */
+  const isTemplateUnfilled = isUnfilledTemplateBody(body, templateId);
   /** 確認ステップのリポジトリ欄に並べるチップ（選択中＋推定候補・#1710） */
   const repositoryChoices = useMemo(
     () => buildRepositoryChoices(repositoryFullName, repositoryCandidates),
@@ -473,6 +494,10 @@ export function CreateIssueDialog({
     setHasPickedRepository(false);
     setTitle(draft.title);
     setBody(draft.body);
+    // 引き継いだ本文は人が書いたものとして扱う（#1745）。テンプレートの選択状態は引き継がないため、
+    // 移した先でテンプレートを変えるときは置き換えの確認が1回入る
+    setTemplateId(null);
+    setPendingTemplateId(null);
     setSelectedLabels(draft.selectedLabels);
     setAssignee(draft.assignee);
     setIsImageUploading(false);
@@ -518,6 +543,9 @@ export function CreateIssueDialog({
   function selectKind(next: IssueDraftKind) {
     const resolved = resolveKindRepository(next, repositories, repositoryFullName);
     setKind(next);
+    // 質問ではテンプレート欄が消える（#1745）。確認だけが残ると、戻ったときに押した覚えの無い
+    // 置き換えの確認が出ている状態になるため降ろす
+    setPendingTemplateId(null);
     setRepositoryFullName(resolved);
     // 選び直された値は本人の指定ではない（#1733）。指定として扱うと、選んでいない
     // リポジトリのまま推定が省かれる。ここで降ろして自動で決め直させる
@@ -581,6 +609,9 @@ export function CreateIssueDialog({
     setHasPickedRepository(restoredRepository !== "");
     setTitle(restorableDraft.title);
     setBody(restorableDraft.body);
+    // 復元した本文は人が書いたものとして扱う（#1745）。テンプレートの選択状態は保存していない
+    setTemplateId(null);
+    setPendingTemplateId(null);
     // 実装オプション用ラベル（`21.plan-required`等）は#1580でこの画面から選べなくなったが、
     // それ以前に保存された下書きには残っている。画面に出ないラベルが黙って付かないよう濾す
     setSelectedLabels(restorableDraft.selectedLabels.filter(isSelectableLabelName));
@@ -606,9 +637,41 @@ export function CreateIssueDialog({
     setHasPickedRepository(false);
     setTitle("");
     setBody("");
+    setTemplateId(null);
+    setPendingTemplateId(null);
     setSelectedLabels([]);
     setAssignee(null);
     hasUserSetAssignee.current = false;
+  }
+
+  /**
+   * 本文テンプレートのチップを押したとき（#1745）。
+   *
+   * 判定は`resolveTemplateChange`に寄せてあり、ここは結果を状態へ移すだけにする。
+   * **書いた内容があるときは置き換えず、確認を出す**（`confirm`）。
+   */
+  function handleTemplateClick(next: IssueTemplateId) {
+    const change = resolveTemplateChange({ nextId: next, appliedId: templateId, body });
+    if (change.kind === "confirm") {
+      setPendingTemplateId(next);
+      return;
+    }
+    setPendingTemplateId(null);
+    if (change.kind === "detach") {
+      setTemplateId(null);
+      return;
+    }
+    setTemplateId(change.templateId);
+    setBody(change.body);
+  }
+
+  /** 置き換えの確認で「置き換える」を押したとき（#1745） */
+  function handleConfirmTemplateReplace() {
+    const template = findIssueTemplate(pendingTemplateId);
+    setPendingTemplateId(null);
+    if (!template) return;
+    setTemplateId(template.id);
+    setBody(template.body);
   }
 
   function toggleLabel(name: string) {
@@ -644,7 +707,9 @@ export function CreateIssueDialog({
    * どこにも進めなくなる。空欄のフォームとして続けられる方がよい。
    */
   async function handleProceedToConfirm() {
-    if (!canProceedFromInput(body)) return;
+    // テンプレートの見出しだけの状態では進めない（#1745）。見出しを材料に推定させると、
+    // 確認ステップに内容と関係の無いリポジトリ・タイトル・ラベルが並ぶ
+    if (!canProceedFromInput(body) || isUnfilledTemplateBody(body, templateId)) return;
     setStep("confirm");
     setCameFromInput(true);
 
@@ -907,6 +972,65 @@ export function CreateIssueDialog({
           </div>
         )}
 
+        {/* 本文テンプレート（#1745）。**任意で、既定は未選択。** 押すと書くべき項目（見出し）が
+            本文に入る。**「使わない」チップは置かない**——チップが4つになるとスマホ幅で
+            1行に収まらず、選択を外すのは押し直しで足りる。
+            **種別が「質問」のときは出さない。** 質問は聞きたいことをそのまま書くもので、
+            埋める項目が無い。テンプレートからラベルは決めない（本文に入る見出し自体が
+            既存の推定の材料になるため、APIとプロンプトを触らずに済ませている） */}
+        {step === "input" && !isQuestion && (
+          <div className="flex flex-col gap-1.5">
+            {/* 「任意」は`Label`の外に置く（リポジトリ欄・確認ステップのバッジと同じ理由） */}
+            <div className="flex items-center gap-1.5">
+              <Label>テンプレート</Label>
+              <span className="text-xs text-muted-foreground">任意</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {ISSUE_TEMPLATES.map((template) => {
+                const isSelected = template.id === templateId;
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => handleTemplateClick(template.id)}
+                    className={cn(
+                      "flex h-9 items-center rounded-full border px-3 text-xs",
+                      isSelected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-input hover:bg-muted",
+                    )}
+                  >
+                    {template.label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* 書いた内容がある状態で別のテンプレートを押したときの確認（#1745）。
+                黙って消すと、書いていたものが取り戻せない */}
+            {pendingTemplate ? (
+              <div className="flex flex-col gap-2 rounded-md border border-input bg-muted px-3 py-2">
+                <p className="text-xs">
+                  いま書いてある内容を「{pendingTemplate.label}
+                  」のテンプレートで置き換えます。書いた内容は消えます。
+                </p>
+                <div className="flex gap-1.5">
+                  <Button variant="secondary" size="xs" onClick={handleConfirmTemplateReplace}>
+                    置き換える
+                  </Button>
+                  <Button variant="outline" size="xs" onClick={() => setPendingTemplateId(null)}>
+                    やめる
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {selectedTemplate?.hint ?? "選ぶと、書くべき項目が本文に入ります。"}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* 推定中の案内（#1605）。何を決めようとしているかは下の項目名が表すので、ここは1行 */}
         {step === "confirm" && isQuickSuggesting && (
           <p className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs text-foreground">
@@ -1071,6 +1195,13 @@ export function CreateIssueDialog({
             <div className="flex flex-wrap gap-2">
               <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
             </div>
+            {/* 骨組みのままでは進めないことを、押せない理由として出す（#1745）。
+                押せないボタンだけを見せると、壊れているのか自分の入力が足りないのかが読めない */}
+            {isTemplateUnfilled && (
+              <p className="text-xs text-foreground">
+                テンプレートの項目を埋めると「次へ」が押せます。
+              </p>
+            )}
             {/* 何が自動で決まるかは、リポジトリを指定したかどうかで変わる（#1733） */}
             <p className="text-xs text-muted-foreground">
               {hasPickedRepository
@@ -1233,7 +1364,13 @@ export function CreateIssueDialog({
         </Button>
         <Button
           onClick={handleProceedToConfirm}
-          disabled={!canProceedFromInput(body) || isImageUploading || isQuickSuggesting}
+          disabled={
+            !canProceedFromInput(body) ||
+            // テンプレートの見出しだけの状態では進めない（#1745）
+            isTemplateUnfilled ||
+            isImageUploading ||
+            isQuickSuggesting
+          }
         >
           {isQuickSuggesting ? <Loader2 className="animate-spin" /> : <ArrowRight />}
           次へ
