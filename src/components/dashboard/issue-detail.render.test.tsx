@@ -271,6 +271,47 @@ describe("MobileIssueDetailのコメント欄の下の操作列（#1770）", () 
 });
 
 /**
+ * 実行を開始した直後は、進捗（Project Status）もジョブもセッションもまだ画面へ届かない（#1815）。
+ *
+ * 届いているのは**積むより先に付けている`11.local`だけ**なので、これを見ずに開始ボタンを
+ * 出し続けると、押した後もまったく同じ主ボタンが残り、効かなかったように見える。
+ */
+describe("実行を開始したIssueの開始ボタン（#1815）", () => {
+  const localLabel = [{ name: "11.local", color: "d73a4a", description: null }];
+
+  it("PCは、`11.local`が付いていれば開始ボタンを出さない", () => {
+    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す", labels: localLabel }));
+    expect(screen.queryByRole("button", { name: /で開始$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "実装を開始" })).toBeNull();
+  });
+
+  it("PCは、`11.local`が無ければ従来どおり開始ボタンを出す", () => {
+    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
+    expect(screen.getByRole("button", { name: /GitHub Actionsで開始/ })).toBeTruthy();
+  });
+
+  it("スマホも同じ（`11.local`が付いていれば出さない）", () => {
+    renderMobileDetail(
+      buildIssue({ title: "ログイン画面のレイアウトを見直す", labels: localLabel }),
+    );
+    expect(screen.queryByRole("button", { name: /で開始$/ })).toBeNull();
+  });
+
+  it("スマホも、`11.local`が無ければ従来どおり出す", () => {
+    renderMobileDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
+    expect(screen.getByRole("button", { name: /GitHub Actionsで開始/ })).toBeTruthy();
+  });
+
+  /** ボタンを消したぶん、何が起きているのかは`IssueStatusCard`が1行で出す */
+  it("開始ボタンの代わりに「ローカルで対応中」が出る", () => {
+    renderMobileDetail(
+      buildIssue({ title: "ログイン画面のレイアウトを見直す", labels: localLabel }),
+    );
+    expect(screen.getByText("ローカルで対応中")).toBeTruthy();
+  });
+});
+
+/**
  * 「コメント欄へ移動」ボタン（ScrollToLatestCommentButton）は画面下端から`bottom-4`で
  * 浮いているため、スクロール領域の中身の下端にそのぶんの余白が無いと、最下部まで
  * スクロールしたときコメント入力欄の操作列へ重なる（#1793）。

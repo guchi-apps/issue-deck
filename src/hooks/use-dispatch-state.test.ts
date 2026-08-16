@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -21,6 +21,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // **必ず片付ける**（#1815）。このフックは他のインスタンスへ取り直しを配るため、
+  // 前のテストで立てたものが残っていると次のテストの取得回数に混ざる
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -115,5 +118,70 @@ describe("useDispatchState の更新インジケーター（#1773）", () => {
 
     await waitFor(() => expect(result.current.jobs.length).toBe(1));
     expect(result.current.pollIntervalMs).toBe(5_000);
+  });
+});
+
+/**
+ * #1815。積んだジョブを自分の状態へ足すだけでは、**同じ画面の別のコンポーネントには届かない。**
+ * Issueを作成して続けて起動した直後（「作成+実装開始」）がこれで、ジョブを積むのは作成側の
+ * ダイアログの取得口、押した結果を出すのは裏で開いているIssue詳細の取得口という別インスタンスに
+ * なるため、詳細側は次のポーリング（20秒後）まで押す前と同じ開始ボタンを出したままだった。
+ */
+describe("積んだ結果を同じ画面の他のインスタンスへ配る（#1815）", () => {
+  /** 状態の取得（GET）だけを数える。積む操作（POST）と混ぜない */
+  function makeFetchMock() {
+    const mock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ job: { id: "job-1", status: "QUEUED" } }),
+        } as Response);
+      }
+      return respond();
+    });
+    return {
+      mock,
+      loadCount: () => mock.mock.calls.filter(([, init]) => init?.method !== "POST").length,
+    };
+  }
+
+  const enqueueParams = {
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1815,
+    hostName: "subpc",
+  };
+
+  it("片方でenqueueすると、もう片方も取り直す", async () => {
+    const { mock, loadCount } = makeFetchMock();
+    vi.stubGlobal("fetch", mock);
+
+    const starter = renderHook(() => useDispatchState(true));
+    renderHook(() => useDispatchState(true));
+
+    await waitFor(() => expect(loadCount()).toBe(2));
+
+    await act(async () => {
+      await starter.result.current.enqueue(enqueueParams);
+    });
+
+    // 積んだ本人と、開いたままのもう片方の2つが取り直す
+    await waitFor(() => expect(loadCount()).toBe(4));
+  });
+
+  it("取得しない設定（enabled=false）のインスタンスは取り直さない", async () => {
+    const { mock, loadCount } = makeFetchMock();
+    vi.stubGlobal("fetch", mock);
+
+    const starter = renderHook(() => useDispatchState(true));
+    renderHook(() => useDispatchState(false));
+
+    await waitFor(() => expect(loadCount()).toBe(1));
+
+    await act(async () => {
+      await starter.result.current.enqueue(enqueueParams);
+    });
+
+    // 取り直すのは積んだ本人だけ（閉じているダイアログのために取得を増やさない）
+    await waitFor(() => expect(loadCount()).toBe(2));
   });
 });

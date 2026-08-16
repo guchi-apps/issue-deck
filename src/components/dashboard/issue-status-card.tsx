@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircleQuestion } from "lucide-react";
+import { MessageCircleQuestion, Server } from "lucide-react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
@@ -76,9 +76,21 @@ export function IssueStatusCard({
   // キャンセルボタンが出る条件（`CancelWorkflowRunButton`と同じ判定）
   const hasCancelableRun =
     workflowRun !== null && workflowRun.status !== "completed" && workflowRunId !== null;
+  /**
+   * ジョブもセッションも届いていないのに、ローカルで動いていることだけが分かっている状態（#1815）。
+   *
+   * 実行を開始した直後・端末から`start-issue.sh`で起こした場合・記録が24時間で落ちた後が
+   * これにあたる。**開始の主導線（塗りつぶしのボタン）はこの状態でも引っ込める**ため、
+   * 代わりに何が起きているのかを1行出す。出さないとカードごと描かれず、押した結果が
+   * 画面から消えるだけになる。判定・文言はコメント欄の案内（`LocalSessionCommentNotice`）と
+   * 同じく`11.local`を根拠にする（`resolveIssueExecutionTarget`）。
+   */
+  const localOnly =
+    !executionTarget.expectsActionsRun && dispatchJob === null && issueSession === null;
   const hasActivity =
     dispatchJob !== null ||
     issueSession !== null ||
+    localOnly ||
     hasCrossRepoJob ||
     qaAnswerPending ||
     hasCancelableRun;
@@ -125,6 +137,17 @@ export function IssueStatusCard({
               align="end"
               launchJob={foldedLaunchJob}
             />
+          )}
+          {localOnly && (
+            <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs">
+              <span className="inline-flex w-fit items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                <Server className="size-3.5" />
+                ローカルで対応中
+              </span>
+              <span className="text-muted-foreground">
+                無人実行（GitHub Actions）はこのIssueに反応しません
+              </span>
+            </div>
           )}
           <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="end" />
           {(qaAnswerPending || hasCancelableRun) && (

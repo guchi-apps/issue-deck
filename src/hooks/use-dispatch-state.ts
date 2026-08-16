@@ -57,6 +57,27 @@ function hasActiveJob(state: DispatchState | null): boolean {
   return state?.jobs.some((job) => isActiveDispatchJobStatus(job.status)) ?? false;
 }
 
+/**
+ * このフックを使っている**すべてのコンポーネント**へ「取り直せ」を配るための購読者（#1815）。
+ *
+ * 積んだジョブを自分の状態へ足すだけでは、**同じ画面の別のコンポーネントには届かない。**
+ * Issueを作成して続けて起動した直後（`create-issue-dialog.tsx`の「作成+実装開始」）が
+ * これで、ジョブを積むのは作成側のダイアログが持つ取得口、押した結果を出すのは
+ * 裏で開いているIssue詳細の取得口、という別々のインスタンスになる。詳細側は次のポーリング
+ * （何も動いていなければ20秒後）まで何も知らないため、その間ずっと押す前と同じ
+ * 「サブPCで開始」が出たままになっていた。
+ *
+ * 配るのは合図だけで、状態は各インスタンスが`/api/dispatch`から取り直す（DBの読み取りのみ）。
+ */
+const refreshListeners = new Set<() => void>();
+
+/** `except`（積んだ本人）以外へ配る。本人は自分で`reloadKey`を進めるため、二重に走らせない */
+function notifyDispatchChanged(except: () => void) {
+  for (const listener of refreshListeners) {
+    if (listener !== except) listener();
+  }
+}
+
 async function readErrorMessage(res: Response): Promise<string> {
   const json = (await res.json().catch(() => ({}))) as { message?: string };
   // APIは拒否理由を利用者向けの文言で返す（#1179）。そのまま出すのが最も情報量が多い
@@ -179,6 +200,25 @@ export function useDispatchState(enabled: boolean) {
     setReloadKey((key) => key + 1);
   }, []);
 
+  // 他のインスタンスが積んだ・取り消した合図を受けて取り直す（#1815）。**取得しない設定
+  // （`enabled`がfalse）のときは購読しない**——閉じているダイアログのために取得を増やさない
+  useEffect(() => {
+    if (!enabled) return;
+    refreshListeners.add(refresh);
+    return () => {
+      refreshListeners.delete(refresh);
+    };
+  }, [enabled, refresh]);
+
+  /**
+   * 自分の状態を取り直しつつ、**同じ画面の他のインスタンスにも取り直させる**（#1815）。
+   * 積む・取り消す・送るのすべてで通す。
+   */
+  const markChanged = useCallback(() => {
+    setReloadKey((key) => key + 1);
+    notifyDispatchChanged(refresh);
+  }, [refresh]);
+
   /** ジョブを積む。拒否された場合はAPIが返した理由をそのままerrorへ入れる */
   const enqueue = useCallback(
     async (params: {
@@ -209,7 +249,7 @@ export function useDispatchState(enabled: boolean) {
         const json = (await res.json()) as { job: DispatchJobView };
         // 次のポーリングを待たずに「順番待ち」を出す。押した直後こそ反応が要る
         setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
-        setReloadKey((key) => key + 1);
+        markChanged();
         return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -218,7 +258,7 @@ export function useDispatchState(enabled: boolean) {
         setIsSubmitting(false);
       }
     },
-    [],
+    [markChanged],
   );
 
   /**
@@ -253,7 +293,7 @@ export function useDispatchState(enabled: boolean) {
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
-        setReloadKey((key) => key + 1);
+        markChanged();
         return { ok: true };
       } catch (err) {
         return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -261,7 +301,7 @@ export function useDispatchState(enabled: boolean) {
         setIsSubmitting(false);
       }
     },
-    [],
+    [markChanged],
   );
 
   const cancel = useCallback(async (jobId: string): Promise<boolean> => {
@@ -272,7 +312,7 @@ export function useDispatchState(enabled: boolean) {
         method: "POST",
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
-      setReloadKey((key) => key + 1);
+      markChanged();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -280,7 +320,7 @@ export function useDispatchState(enabled: boolean) {
     } finally {
       setIsSubmitting(false);
     }
-  }, []);
+  }, [markChanged]);
 
   /**
    * 終了したジョブの表示を消す（#1479）。取り消し（`cancel`）とは別で、既に終わったものだけが対象。
@@ -299,7 +339,7 @@ export function useDispatchState(enabled: boolean) {
       setState((prev) =>
         prev ? { ...prev, jobs: prev.jobs.filter((job) => job.id !== jobId) } : prev,
       );
-      setReloadKey((key) => key + 1);
+      markChanged();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -307,7 +347,7 @@ export function useDispatchState(enabled: boolean) {
     } finally {
       setIsSubmitting(false);
     }
-  }, []);
+  }, [markChanged]);
 
   /**
    * 順番待ちのジョブを先頭へ上げる（#1541）。
@@ -342,7 +382,7 @@ export function useDispatchState(enabled: boolean) {
           ),
         };
       });
-      setReloadKey((key) => key + 1);
+      markChanged();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -350,7 +390,7 @@ export function useDispatchState(enabled: boolean) {
     } finally {
       setIsSubmitting(false);
     }
-  }, []);
+  }, [markChanged]);
 
   return {
     hosts: state?.hosts ?? [],
