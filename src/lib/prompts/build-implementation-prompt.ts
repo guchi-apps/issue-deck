@@ -59,6 +59,40 @@ function preamble(repositoryFullName: string, issueNumber: number): string {
   ].join("\n");
 }
 
+/**
+ * 全アプリ共通の共有知識リポジトリ（#1741）。
+ *
+ * **実装対象がこのリポジトリ自身のときは文面ごと差し替える。** 既定の文面は「共有知識は
+ * 読み取り専用」と書いており、そのリポジトリを実装する回では指示が自己矛盾する。
+ *
+ * **ここだけはリポジトリ名で判定する。** ランチャー（`scripts/generic-start-issue.sh`）は
+ * チェックアウト先と共有知識ディレクトリのパス一致（`-ef`）で判定できるが、この経路は
+ * ブラウザから来るため貼り付け先のローカルパスが分からない。
+ */
+const SHARED_CONTEXT_REPOSITORY = "guchi-apps/docs";
+const SHARED_CONTEXT_DIR = "~/apps/_docs";
+
+function sharedContextInstructions(repositoryFullName: string): string {
+  if (repositoryFullName === SHARED_CONTEXT_REPOSITORY) {
+    return [
+      `**このリポジトリ自身が全アプリ共通の共有知識リポジトリです**（\`${SHARED_CONTEXT_DIR}\` = \`${SHARED_CONTEXT_REPOSITORY}\`）。読むのも書くのも、**このセッションの作業ツリーの中のファイル**です。`,
+      "",
+      `- \`${SHARED_CONTEXT_DIR}\` は同じリポジトリの**本体チェックアウト**で、他のセッションが実行中に読んでいます。**そちらは編集しないでください**（貼り付け先が本体チェックアウトそのものの場合は、先にworktreeを作ってください）`,
+      "- 索引は作業ツリー内の `CLAUDE.md`、実装エージェント向けの共通ルールは `agent-rules/implementation.md` です",
+      "- 後述「実装中に得た知見の記録」にある「共有知識リポジトリへ反映できません」は、**実装対象がこのリポジトリ自身である今回は当てはまりません**",
+    ].join("\n");
+  }
+  return [
+    `このセッションで共有知識リポジトリ（\`${SHARED_CONTEXT_DIR}\` = \`${SHARED_CONTEXT_REPOSITORY}\`）をローカルにcloneしてある場合は、実装の前提として必要な範囲だけ読んでください。`,
+    "",
+    `- \`${SHARED_CONTEXT_DIR}/CLAUDE.md\` — 共有知識の索引・読む順序`,
+    `- \`${SHARED_CONTEXT_DIR}/agent-rules/implementation.md\` — 実装エージェントの共通ルール`,
+    `- \`${SHARED_CONTEXT_DIR}/knowledge/\` — 今回触る領域（GitHub Actions・デプロイ・認証・DB等）に対応するファイルがあれば着手前に読む`,
+    "",
+    "共有知識リポジトリのファイルは**読み取り専用**として扱い、編集・コミットは行わないでください。内容が対象リポジトリの `CLAUDE.md` / `docs/` と矛盾する場合は、対象リポジトリ側を優先します。",
+  ].join("\n");
+}
+
 function previewInstructions(labelNames: ReadonlySet<string>): string {
   if (labelNames.has(PREVIEW_REQUIRED_LABEL)) {
     return [
@@ -181,6 +215,7 @@ export function buildImplementationPrompt(params: {
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshotInstructions(labelNames),
     "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
+    "{{SHARED_CONTEXT_INSTRUCTIONS}}": sharedContextInstructions(repositoryFullName),
   };
 
   const filled = Object.entries(replacements).reduce(
