@@ -187,6 +187,25 @@ function goToConfirmStep() {
   fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
 }
 
+/**
+ * Radixの`Select`はjsdomに無いポインタ関連のAPIを呼ぶため、開くには先に補う必要がある。
+ * 入力ステップのリポジトリ欄（#1733）を実際に操作するテストで使う。
+ */
+function stubPointerApisForSelect() {
+  const proto = Element.prototype as unknown as Record<string, () => unknown>;
+  proto.hasPointerCapture = () => false;
+  proto.setPointerCapture = () => undefined;
+  proto.releasePointerCapture = () => undefined;
+  proto.scrollIntoView = () => undefined;
+}
+
+/** 入力ステップのリポジトリ欄で指定する（#1733） */
+function pickInputRepository(optionName: string) {
+  stubPointerApisForSelect();
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "リポジトリ" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 describe("CreateIssueDialog の「作成+実装開始」", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
@@ -359,14 +378,127 @@ describe("CreateIssueDialog のクイック起票", () => {
     quickSuggestState.notConfigured = false;
   });
 
-  it("開いた直後はリポジトリ・タイトル・ラベル・担当者を出さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
+  it("開いた直後はタイトル・ラベル・担当者を出さない（リポジトリは先に指定できる・#1733）", () => {
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
 
     expect(screen.getByLabelText("内容")).not.toBeNull();
-    expect(screen.queryByLabelText("リポジトリ")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      "自動で決める",
+    );
     expect(screen.queryByLabelText("タイトル")).toBeNull();
     expect(screen.queryByLabelText("担当者")).toBeNull();
     expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
+  });
+
+  /**
+   * #1733。リポジトリ別の画面から渡された値は、これまで入力ステップに何も出ないまま
+   * 持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった。
+   */
+  it("リポジトリ別の画面から開いたときは、入力ステップにその値が入っている", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      REPOSITORY_FULL_NAME,
+    );
+  });
+
+  it("指定しなければ、推定に「指定済み」を立てない", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ repositoryFullName: null, repositoryPinned: false }),
+    );
+  });
+
+  /**
+   * #1733。人が選んだ値を推し量る意味は無いので、リポジトリの推定は省く。
+   * 押しても変わらない候補チップも、直していないのに「自動」と名乗るバッジも出さない。
+   */
+  it("入力ステップで指定すると、推定を省いて候補チップも「自動」バッジも出さない", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+      repositoryCandidates: [],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), makeOtherRepository()]}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickInputRepository(OTHER_REPOSITORY_FULL_NAME);
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+        repositoryPinned: true,
+      }),
+    );
+
+    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
+    // 指定したリポジトリのまま。タイトルだけが「自動」で、リポジトリには何も付かない
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    expect(screen.getAllByText("自動")).toHaveLength(1);
+    expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
+    expect(screen.queryByRole("button", { name: /候補1/ })).toBeNull();
+  });
+
+  /**
+   * #1733。質問へ切り替えると、ワークフロー未導入のリポジトリは選び直される（#1641）。
+   * **選び直された値は本人の指定ではない**ので、指定として扱って推定を省いてはいけない。
+   */
+  it("種別の切り替えでリポジトリが選び直されたら、指定として扱わない", async () => {
+    const unregistered: ConnectedRepository = {
+      ...makeOtherRepository(),
+      id: "3",
+      name: "vps",
+      fullName: "guchi-apps/vps",
+      hasClaudeWorkflow: false,
+    };
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: null,
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), unregistered]}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickInputRepository("guchi-apps/vps");
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+    // 質問では選べないため導入済みの先頭へ寄る（#1641）
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      REPOSITORY_FULL_NAME,
+    );
+
+    fireEvent.change(screen.getByLabelText("質問内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ repositoryPinned: false }),
+    );
   });
 
   it("「次へ」で推定を呼び、確認ステップに結果を入れる", async () => {

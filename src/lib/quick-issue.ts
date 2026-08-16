@@ -11,6 +11,15 @@ import type { IssueDraftKind } from "@/hooks/use-issue-draft";
  */
 export type QuickIssueStep = "input" | "confirm";
 
+/**
+ * 入力ステップのリポジトリ欄で「自動で決める」を表す値（#1733）。
+ *
+ * 選んでいない状態（`repositoryFullName`が空文字）を`Select`の選択肢として出すための番兵で、
+ * **空文字は使えない**——Radixの`SelectItem`は空文字を値に取れず、プレースホルダーの解除に
+ * 使っている内部の仕様と衝突する。担当者欄の`__none__`（未設定）と同じ形にしてある。
+ */
+export const AUTO_REPOSITORY_VALUE = "__auto__";
+
 export type QuickSuggestKind = IssueDraftKind;
 
 export type QuickSuggestResult = {
