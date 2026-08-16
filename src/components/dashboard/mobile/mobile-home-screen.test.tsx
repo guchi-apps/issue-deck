@@ -26,7 +26,7 @@ const NAV_COUNTS = Object.fromEntries(NAV_VIEW_IDS.map((id) => [id, 0])) as Reco
 
 const PR_NAV_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: null };
 
-const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForRelease: 0 };
+const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
 
 const OVERVIEW_STATS: OverviewStat[] = [
   { label: "要対応", value: "2", linkedView: "check-user" },
@@ -148,7 +148,7 @@ describe("MobileHomeScreen（#1690）", () => {
   it("「ユーザーの作業待ち」を強調するのは、いま実行できる手作業があるときだけ", () => {
     const { rerender } = renderHome({
       navCounts: { ...NAV_COUNTS, "manual-step": 2 },
-      manualStepAttention: { total: 2, actionable: 0, waitingForRelease: 2 },
+      manualStepAttention: { total: 2, actionable: 0, waitingForPrerequisites: 2 },
     });
 
     function badgeClassName() {
@@ -163,7 +163,7 @@ describe("MobileHomeScreen（#1690）", () => {
         overviewStats={OVERVIEW_STATS}
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         checkUserPullRequestCount={0}
-        manualStepAttention={{ total: 2, actionable: 1, waitingForRelease: 1 }}
+        manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}

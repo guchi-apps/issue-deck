@@ -274,8 +274,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - **「ユーザーの作業待ち」（`71.manual-step`）を橙色にするのは、いま実行できるものがあるときだけ**
   （#1613。[`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
   手作業の多くは起点の変更が本番へ出るまで実行できず、1件でもあれば強調すると数週間先まで
-  点いたままになる。判定は本文`## 関連`の起点Issue（`extractManualStepOrigin`）の進捗で行い、
-  **起点を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+  点いたままになる。判定は本文の`## 前提条件`・`## 関連`に書かれた参照
+  （[`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)）の進捗で行い、
+  **状態を特定できないものは実行できる側に数える**（見落とすより強調しすぎる方へ倒す）。
+- **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
+  [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
+  参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
+  Issueとして見つからなかった番号だけ`/api/issues/pull-requests`でPRとして1回引く
+  （[`hooks/use-manual-step-prerequisites.ts`](../src/hooks/use-manual-step-prerequisites.ts)。
+  同じ番号空間にIssueとPRが同居するため番号だけでは区別できない）。**PRは実装→develop→mainの
+  3段階に載せない**——`IssuePullRequest`はbaseブランチを持たず、マージ済みPRがdevelopまでなのか
+  mainへ届いたのかを言えないため。左メニューの件数と同じ判定を通すので、**数と詳細が食い違わない**。
 - **PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する。**
   Issueと違い`PullRequest`テーブルもWebhook購読（`pull_request`イベント）も持たない。
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため

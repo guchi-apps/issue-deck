@@ -208,14 +208,14 @@ export function SidebarNav({
               onClick: () => onSelectView(view.id),
               count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
               // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
-              // あるときだけで、デプロイ待ちしか無い間は強調しない（#1613）。
+              // あるときだけで、前提待ちしか無い間は強調しない（#1613）。
               highlighted:
                 view.id === "check-user"
                   ? checkUserCount > 0
                   : manualStepAttention.actionable > 0,
               title:
                 view.id === "manual-step"
-                  ? `いま実行できる: ${manualStepAttention.actionable}件 / 本番反映待ち: ${manualStepAttention.waitingForRelease}件`
+                  ? `いま実行できる: ${manualStepAttention.actionable}件 / 前提待ち: ${manualStepAttention.waitingForPrerequisites}件`
                   : undefined,
             }),
           )}
