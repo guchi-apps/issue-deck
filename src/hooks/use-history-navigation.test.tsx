@@ -2,7 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useHistoryNavigation } from "@/hooks/use-history-navigation";
+import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { canGoBackInApp, resetHistoryStack } from "@/lib/history-stack";
 
 const routerPush = vi.fn();
@@ -86,5 +86,41 @@ describe("useHistoryNavigation のURL更新（#1597）", () => {
     act(() => result.current.navigateParams((params) => params.delete("issue"), { history: "replace" }));
 
     expect(replaceState.mock.calls[0][2]).toBe("/dashboard");
+  });
+});
+
+describe("useCanGoBackInApp（#1771）", () => {
+  it("画面遷移で戻れる状態に変わり、戻る操作で元に戻る", () => {
+    const { result: navigation } = renderNavigation();
+    const { result: canGoBack } = renderHook(() => useCanGoBackInApp());
+
+    // 起動直後（共有URLで開いた直後）は戻り先が無い＝ボタンは押せない
+    expect(canGoBack.current).toBe(false);
+
+    act(() =>
+      navigation.current.navigateParams((params) => params.set("issue", "123"), {
+        history: "push",
+      }),
+    );
+    expect(canGoBack.current).toBe(true);
+
+    // ブラウザ・OSの戻る（popstate）でも購読側へ伝わる
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(canGoBack.current).toBe(false);
+  });
+
+  it("絞り込み条件の変更（replace）では戻れる状態にならない", () => {
+    const { result: navigation } = renderNavigation();
+    const { result: canGoBack } = renderHook(() => useCanGoBackInApp());
+
+    act(() =>
+      navigation.current.navigateParams((params) => params.set("q", "deck"), {
+        history: "replace",
+      }),
+    );
+
+    expect(canGoBack.current).toBe(false);
   });
 });

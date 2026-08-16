@@ -1,9 +1,14 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-import { canGoBackInApp, recordHistoryPop, recordHistoryPush } from "@/lib/history-stack";
+import {
+  canGoBackInApp,
+  recordHistoryPop,
+  recordHistoryPush,
+  subscribeHistoryStack,
+} from "@/lib/history-stack";
 
 /**
  * URLクエリの更新で履歴を積むか（`push`）積まないか（`replace`）。
@@ -98,4 +103,24 @@ export function useHistoryNavigation() {
   );
 
   return { navigateParams, goBackOrFallback };
+}
+
+/**
+ * いまアプリ内で巻き戻せる履歴があるか（#1771）。PC版ヘッダーの戻るボタンが、押せるかどうかの
+ * 表示を切り替えるために使う。
+ *
+ * `canGoBackInApp()`はモジュール変数を読むだけで再描画のきっかけにならないため、
+ * `subscribeHistoryStack`で購読して`useSyncExternalStore`から読む。**popstateの購読は
+ * ここでも張る**。`useHistoryNavigation`を呼ばずにこのフックだけを使う呼び出し元でも、
+ * 戻る操作のあとに値が更新されるようにするため。購読はタブに1つだけ張られるので二重にはならない。
+ *
+ * 通知は「戻れる／戻れない」が変わったときだけなので（`history-stack.ts`）、履歴が深くなる
+ * たびに再描画されることはない。
+ *
+ * サーバー側のスナップショットは常に`false`。サーバーには履歴が無く、初回描画は「戻れない」
+ * から始まる（クライアントで積んだ時点で有効になる）。
+ */
+export function useCanGoBackInApp(): boolean {
+  useEffect(ensurePopStateListener, []);
+  return useSyncExternalStore(subscribeHistoryStack, canGoBackInApp, () => false);
 }
