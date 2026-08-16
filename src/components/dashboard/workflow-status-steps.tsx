@@ -293,17 +293,21 @@ export function WorkflowStatusSteps({
           {targetLabel}で実行中
         </p>
       )}
-      <p className="mt-1.5 text-center text-[11px] md:hidden">
-        <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
-          {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
-        </span>
-        {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
+      {/* 確認待ちのバッジは行に流し込まず、段を分けて隙間を取る（#1676）。同じ`<p>`に並べると
+          折り返したときに行間ぶんしか空かず、丸みのあるバッジが上の行に貼り付いて見えていた */}
+      <div className="mt-1.5 flex flex-col items-center gap-1.5 text-center text-[11px] md:hidden">
+        <p>
+          <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
+            {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
+          </span>
+          {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
+        </p>
         {approvalPending && (
-          <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+          <span className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
             {approvalPendingText}
           </span>
         )}
-      </p>
+      </div>
     </div>
   );
 }

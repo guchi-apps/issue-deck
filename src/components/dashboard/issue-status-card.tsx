@@ -82,6 +82,15 @@ export function IssueStatusCard({
     hasCrossRepoJob ||
     qaAnswerPending ||
     hasCancelableRun;
+  /**
+   * 起動ジョブの行をセッションの行へ畳むか（#1676）。
+   *
+   * 起動が成功していてセッションが立っていれば、2つは同じ「サブPCで動いている」ことを
+   * 2行で言っているだけになる。**起動が終わっていないあいだは畳まない**（「順番待ちの理由」
+   * 「失敗理由」「取り消し」は`DispatchJobStatus`にしか無い）。
+   */
+  const foldedLaunchJob =
+    issueSession !== null && dispatchJob?.status === "SUCCEEDED" ? dispatchJob : null;
 
   if (!hasSteps && !hasActivity && !checkUserGuidance) return null;
 
@@ -101,7 +110,7 @@ export function IssueStatusCard({
 
       {hasActivity && (
         <div className="flex flex-col gap-2 border-t pt-3 empty:hidden">
-          {dispatchJob && (
+          {dispatchJob && !foldedLaunchJob && (
             <DispatchJobStatus
               job={dispatchJob}
               isSubmitting={dispatch.isSubmitting}
@@ -110,7 +119,12 @@ export function IssueStatusCard({
             />
           )}
           {issueSession && (
-            <IssueSessionStatus session={issueSession} dispatch={dispatch} align="end" />
+            <IssueSessionStatus
+              session={issueSession}
+              dispatch={dispatch}
+              align="end"
+              launchJob={foldedLaunchJob}
+            />
           )}
           <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="end" />
           {(qaAnswerPending || hasCancelableRun) && (
