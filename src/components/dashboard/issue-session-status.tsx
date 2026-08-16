@@ -15,6 +15,7 @@ import {
   OctagonX,
   SendHorizonal,
   Square,
+  TimerReset,
 } from "lucide-react";
 
 import {
@@ -44,6 +45,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   compactIssueSessionLabel,
+  describeSessionReap,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
@@ -137,6 +139,9 @@ export function IssueSessionStatus({
   launchJob?: DispatchJobView | null;
 }) {
   const summary = summarizeIssueSession(session);
+  // 自動終了までの残り時間（#1817）。**猶予待ちのセッションでだけ返る。**
+  // 画面の更新（`use-dispatch-state`のポーリング）のたびに計算し直す
+  const reapNotice = describeSessionReap(session);
   const [confirmingKill, setConfirmingKill] = useState(false);
   // 停止の失敗は押した場所に出す（`dispatch.error`は起動ボタンの下に出るため、そちらへ流さない）
   const [controlError, setControlError] = useState<string | null>(null);
@@ -256,6 +261,21 @@ export function IssueSessionStatus({
               入力待ちに添えると、何時間前の入力待ちでも「たった今」に見える */}
           <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
         </span>
+        {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「サブPC・応答を
+            終えています・あと3分で自動終了」と1つのピルに詰まり、状態と予定のどちらが今の話
+            なのか読み取れない。配色は入力待ち（waiting）と同じ琥珀色で、**押す操作は無い** */}
+        {reapNotice && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs tabular-nums ring-1 ring-inset",
+              TONE_CLASS.waiting,
+              reapNotice.imminent && "font-medium",
+            )}
+          >
+            <TimerReset className="size-3.5" />
+            {reapNotice.label}
+          </span>
+        )}
         {hasControls && (
           <Button
             variant="ghost"
@@ -279,6 +299,18 @@ export function IssueSessionStatus({
           )}
         >
           {summary.detail}
+        </p>
+      )}
+      {/* なぜ終わるのか・畳まれた後どうなるか（#1817）。**畳まない。** 理由の無い終了予告は
+          「勝手に消される」としか読めず、続けたい場合に何をすればよいかも分からない */}
+      {reapNotice && (
+        <p
+          className={cn(
+            "w-full break-words text-xs text-muted-foreground",
+            align === "end" ? "text-right" : "text-left",
+          )}
+        >
+          {reapNotice.detail}
         </p>
       )}
       {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、

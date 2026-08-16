@@ -313,6 +313,8 @@ describe("findBlockingSession", () => {
       activityAt: null,
       remoteControlUrl: null,
       previewUrl: null,
+      reapAt: null,
+      reapReason: null,
       ...overrides,
     };
   }
@@ -406,6 +408,8 @@ describe("isIssueExecutionPending", () => {
       activityAt: null,
       remoteControlUrl: null,
       previewUrl: null,
+      reapAt: null,
+      reapReason: null,
       ...overrides,
     };
   }

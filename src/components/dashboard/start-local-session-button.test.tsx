@@ -94,6 +94,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    reapAt: null,
+    reapReason: null,
     ...overrides,
   };
 }

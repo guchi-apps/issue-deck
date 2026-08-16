@@ -897,7 +897,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。**PRを作り`11.local`も外した引き渡し済みの
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
-  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。**横断質問セッションは
+  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。**猶予待ちのセッションには
+  「あと何分で畳むか」を状態ファイル（`.reap`）へ残し、pollerが`DispatchSession.reapAt`として
+  運ぶ**（#1817。画面の文言は`lib/dispatch/issue-session.ts`の`describeSessionReap`。
+  **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
+  終わらないセッションに終了予告が出る）。**横断質問セッションは
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
