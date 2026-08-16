@@ -592,6 +592,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
   CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
   残り続けていた。
+  **そのPRが本番へ出たかは、「マージ済み」の隣のバッジで出す**（#1814。`DeployStatusBadge`）。
+  判定の材料も結論もブランチ画面と同じで、
+  [`lib/pull-request-deploy.ts`](../src/lib/pull-request-deploy.ts)の
+  `resolvePullRequestDeployStatus`が「作業PRのマージ時刻より後、最初にmainへ入ったPRがその変更を
+  運んだ」（#1455と同じ前提）で運び手を決め、デプロイの成否は`resolveDeployState`（#1579）を
+  そのまま通す。**2か所で違う結論を出さないよう、判定を写さずこの関数から呼ぶ。**
+  取得は専用の`GET /api/pull-requests/deploy-status`（PR単体・mainへのクローズ済みPR一覧・
+  `deploy.yml`の最新run）で、**マージ済みのPRを開いたときだけ**呼ぶ。詳細APIへ相乗りさせないのは、
+  デプロイ中の取り直し（`hooks/use-pull-request-deploy-status.ts`。デプロイ待ち・実行中だけ30秒ごと）の
+  たびに本文・コメント・レビューまで取り直さないため。**判定できないときは何も出さない**——
+  `deploy.yml`が無いリポジトリ、取得した30件より古いリリースしか関係しないPR、15分待っても実行が
+  現れないリポジトリでは、「未反映」と言い切らずバッジごと消す（ブランチ画面と同じ方針）。
+  スマホのPR詳細は同じ`PullRequestDetail`を使うため、**片方の画面にだけ出す実装にしない**。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、

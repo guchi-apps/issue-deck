@@ -54,6 +54,15 @@ export function issueBranchName(issueNumber: number): string {
 const VERSION_PATTERN = /v(\d+\.\d+\.\d+)/;
 
 /**
+ * リリースPRのタイトル（やバンプPRのブランチ名）から版を取り出す。取れなければnull。
+ * PR詳細のデプロイ表示（`lib/pull-request-deploy.ts`。#1814）も同じ取り出し方に揃えるため、
+ * 正規表現を写さずここを共用する。
+ */
+export function releaseVersionFromTitle(title: string): string | null {
+  return VERSION_PATTERN.exec(title)?.[1] ?? null;
+}
+
+/**
  * 既定では隠すレーン（#1510）。
  *
  * **区切りは「本番へ出たか」ではなく「まだ流れているか」に置く。** バージョンごとの束
@@ -350,7 +359,7 @@ function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
     .filter((pullRequest) => pullRequest.kind === "release" && pullRequest.mergedAt !== null)
     .map((pullRequest) => ({
       mergedAt: new Date(pullRequest.mergedAt as string).getTime(),
-      version: VERSION_PATTERN.exec(pullRequest.title)?.[1] ?? null,
+      version: releaseVersionFromTitle(pullRequest.title),
       pullRequestNumber: pullRequest.number,
       pullRequest,
     }))
@@ -475,12 +484,8 @@ function groupLanesByRelease({
         // から取る（#1548）。バンプ中は次に出る版が既に決まっているため、「次のリリース」より
         // 版数を出すほうが状況を表す。
         version:
-          (openReleasePullRequest
-            ? (VERSION_PATTERN.exec(openReleasePullRequest.title)?.[1] ?? null)
-            : null) ??
-          (openBumpPullRequest
-            ? (VERSION_PATTERN.exec(openBumpPullRequest.headRef)?.[1] ?? null)
-            : null),
+          (openReleasePullRequest ? releaseVersionFromTitle(openReleasePullRequest.title) : null) ??
+          (openBumpPullRequest ? releaseVersionFromTitle(openBumpPullRequest.headRef) : null),
         pullRequest: openReleasePullRequest,
         bumpPullRequest: openBumpPullRequest,
         mergedAt: null,
