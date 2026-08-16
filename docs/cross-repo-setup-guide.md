@@ -1268,6 +1268,16 @@ rm -rf .shared-context .shared-prompts
 - Branch protection: `main`はRequire pull request before merging・Required status checks、
   `develop`は最低限`required_status_checks`（CIジョブ名）を設定する。詳細な設定値・設定コマンド例は
   [docs/multi-agent/branching.md](multi-agent/branching.md)の「ブランチ保護ルール案」を参照
+- **デフォルトブランチを`main`に据え置くリポジトリでは、`delete_branch_on_merge`を`false`にする**（#1786）。
+  `develop`→`main`のリリースPRは**headが`develop`**のため、この設定が`true`だとマージした瞬間に
+  `develop`が自動削除され、次回以降のリリースが成立しなくなる（`push: develop`が発火せず、
+  `ref: develop`のdispatchが404になる）。**既定が`develop`のリポジトリでは起きない**——GitHubは
+  既定ブランチを削除しないため。あわせてrulesetに`deletion`制限を入れると二重に防げる
+
+  ```bash
+  gh api repos/guchi-apps/my-app --jq '"delete_branch_on_merge=\(.delete_branch_on_merge) default_branch=\(.default_branch)"'
+  gh api --method PATCH repos/guchi-apps/my-app -F delete_branch_on_merge=false
+  ```
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
