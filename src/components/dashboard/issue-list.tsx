@@ -10,6 +10,7 @@ import {
   CircleDot,
   CircleSlash,
   Clock,
+  ListChecks,
   Lock,
   MessageSquare,
   Star,
@@ -18,6 +19,7 @@ import {
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -97,6 +99,11 @@ type IssueListProps = {
    * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
    */
   manualStepReadiness?: ManualStepReadinessMap;
+  /**
+   * 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う。
+   * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない
+   */
+  onStartManualStepGuide?: () => void;
   /**
    * 絞り込みを指定しているのに、このビューでは適用されない状態か（#1750）。
    * 判定は`hasIgnoredIssueFilters`で行い、ここは受け取った結果を注記として出すだけ。
@@ -229,6 +236,7 @@ export function IssueList({
   pinnedSection,
   pinnedCount = 0,
   manualStepReadiness,
+  onStartManualStepGuide,
   filtersIgnored = false,
   dispatch: injectedDispatch,
 }: IssueListProps) {
@@ -328,6 +336,13 @@ export function IssueList({
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
     `${listedCount}件`;
+
+  // アシスタントが案内できるのは「いま実行できる」手作業だけ（`buildManualStepQueue`）。
+  // 1件も無いときにボタンを出すと、押しても何も案内されない画面が開く
+  const guidableManualStepCount =
+    view === "manual-step" && manualStepReadiness
+      ? issues.filter((issue) => manualStepReadiness.get(issue.id)?.ready === true).length
+      : 0;
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -508,6 +523,26 @@ export function IssueList({
           dispatch={dispatch}
           onDone={exitSelecting}
         />
+      )}
+
+      {/* 溜まった手作業を1件ずつ案内する入口（#1826）。**ヘッダーではなく一覧の上に置く**——
+          スマホの一覧はこのコンポーネントのヘッダーを出さず（`showHeader={false}`）、
+          画面側のヘッダーには操作を足さない決まりのため（#1646）。ここならPC・スマホの
+          どちらにも同じ位置で出る */}
+      {onStartManualStepGuide && guidableManualStepCount > 0 && (
+        <div className="flex items-center gap-2 border-b bg-violet-500/5 px-4 py-2">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            いま実行できる手作業が
+            <span className="font-medium text-foreground tabular-nums">
+              {guidableManualStepCount}件
+            </span>
+            あります。
+          </p>
+          <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
+            <ListChecks />
+            順番に進める
+          </Button>
+        </div>
       )}
 
       {pinnedSection}
