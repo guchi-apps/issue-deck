@@ -2,6 +2,7 @@ import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
+import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import { getNavView, navViews } from "@/lib/nav-views";
 import { matchesSearchQuery } from "@/lib/search-query";
 
@@ -233,6 +234,13 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  * ビューごとの件数を数える。
  * ビューのdefaultStateが現在の状態絞り込みと異なる場合（「直近main反映済み」など）は、
  * 選択したときに実際に表示される件数と揃うようissuesIgnoringStateを基準にする。
+ *
+ * **「ユーザーの作業待ち」（`manual-step`）だけは、いま実行できる件数を出す**（#1763。
+ * `lib/manual-step-attention.ts`）。前提待ちを含む総数は「いま手を動かせば片付く数」として
+ * 読めないため。数え方の差し替えはここ1か所で行う——左メニュー・スマホのホーム・ビュー選択
+ * シート・リポジトリ別一覧の件数はすべてこの関数の結果を見ており、画面ごとに足し引きすると
+ * 片方だけ古くなる。一覧のヘッダーだけは行数を出す場所なので、そちらは
+ * `formatManualStepListCount`で内訳（`2件・前提待ち2件`）を添えて食い違いを説明する。
  */
 export function computeNavCounts(
   issues: Issue[],
@@ -243,12 +251,11 @@ export function computeNavCounts(
   const counts = {} as Record<NavViewId, number>;
   for (const view of navViews) {
     const base = view.defaultState === "all" ? issuesIgnoringState : issues;
-    counts[view.id] = filterIssuesByView(
-      base,
-      view.id,
-      currentUserLogin,
-      referenceIssues ?? base,
-    ).length;
+    const matched = filterIssuesByView(base, view.id, currentUserLogin, referenceIssues ?? base);
+    counts[view.id] =
+      view.id === "manual-step"
+        ? computeManualStepAttention(matched, referenceIssues ?? base).actionable
+        : matched.length;
   }
   return counts;
 }
@@ -267,17 +274,24 @@ export function computeNavCounts(
  * - 「最新リリース」の基準時刻（`filterIssuesByView`のreferenceIssues）は絞り込み前の
  *   issuesから求める。一覧側も絞り込み前の集合を基準にしているため、揃えないと
  *   「直近本番に反映した」の件数だけがズレる。
+ *
+ * @param referenceIssues 「最新リリース」の基準時刻と、手作業Issueの前提条件（#1763）を
+ *   解決するための母集団。**リポジトリで絞り込んだ一覧を数えるときは、絞り込む前の全Issueを
+ *   渡す**（`mobile-repo-issues-screen.tsx`）。手作業Issueは`guchi-apps/vps#88`のように別
+ *   リポジトリを待っていることがあり、母集団から外れていると「状態不明＝実行できる」と
+ *   数えてしまう。省略時は`issues`（＝この一覧の母集団）。
  */
 export function computeNavCountsForFilters(
   issues: Issue[],
   filters: Pick<IssueFilters, "q" | "repos" | "state" | "labels" | "assignee">,
   currentUserLogin: string | null,
+  referenceIssues: Issue[] = issues,
 ): Record<NavViewId, number> {
   return computeNavCounts(
     applyIssueFilters(issues, filters),
     applyIssueFilters(issues, { ...filters, state: "all" }),
     currentUserLogin,
-    issues,
+    referenceIssues,
   );
 }
 

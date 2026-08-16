@@ -25,6 +25,10 @@ import {
   navViewIcons,
   resolveMobileListNavViews,
 } from "@/lib/nav-views";
+import {
+  formatManualStepListCount,
+  type ManualStepReadinessMap,
+} from "@/lib/manual-step-attention";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
@@ -73,6 +77,11 @@ type MobileIssueListScreenProps = {
    * ビューの件数だけで、他のビューの件数には触らない。
    */
   pinned?: { view: NavViewId; count: number; section: ReactNode };
+  /**
+   * 手作業Issue（`71.manual-step`）が、いま実行できるかどうか（#1763）。
+   * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
+   */
+  manualStepReadiness?: ManualStepReadinessMap;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -103,6 +112,7 @@ export function MobileIssueListScreen({
   onCreateIssue,
   onAskCrossRepoQuestion,
   pinned,
+  manualStepReadiness,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
@@ -114,6 +124,12 @@ export function MobileIssueListScreen({
   // ビューの件数も、切り替えた後と同じ数字にするため）。
   const pinnedCount = pinned?.count ?? 0;
   const listedCount = issues.length + (pinned?.view === view ? pinnedCount : 0);
+  // 「ユーザーの作業待ち」だけは、メニューと同じ「いま実行できる件数」に前提待ちを添える
+  // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ
+  const countLabel =
+    (view === "manual-step" && manualStepReadiness
+      ? formatManualStepListCount(issues, manualStepReadiness)
+      : null) ?? `${listedCount}件`;
   const displayNavCounts = useMemo(() => {
     if (!pinned || pinned.count === 0) return navCounts;
     return { ...navCounts, [pinned.view]: (navCounts[pinned.view] ?? 0) + pinned.count };
@@ -195,7 +211,7 @@ export function MobileIssueListScreen({
           {/* 表示中のビュー名を件数の行にも出す（#1645）。操作は下端の行で行うが、
               一覧をスクロールしている最中に「何を見ているのか」を見上げて確かめられる */}
           <p className="truncate text-xs text-muted-foreground">
-            {[meta, getNavViewLabel(view), `${listedCount}件`].filter(Boolean).join("・")}
+            {[meta, getNavViewLabel(view), countLabel].filter(Boolean).join("・")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -223,6 +239,7 @@ export function MobileIssueListScreen({
         // ユーザーがマージするしかないPRは、確認待ちの一覧の先頭に出す（#1613・#1713）。
         // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
+        manualStepReadiness={manualStepReadiness}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。

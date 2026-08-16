@@ -6,8 +6,10 @@ import {
   Archive,
   CheckSquare,
   CircleCheck,
+  CircleCheckBig,
   CircleDot,
   CircleSlash,
+  Clock,
   Lock,
   MessageSquare,
   Star,
@@ -31,6 +33,11 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
+import {
+  formatManualStepListCount,
+  type ManualStepReadiness,
+  type ManualStepReadinessMap,
+} from "@/lib/manual-step-attention";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
@@ -77,6 +84,15 @@ type IssueListProps = {
    */
   pinnedCount?: number;
   /**
+   * 手作業Issue（`71.manual-step`）が、いま実行できるかどうか（#1763）。
+   * 行の右上へアイコンで出し、「ユーザーの作業待ち」ではヘッダーの件数にも使う。
+   *
+   * **絞り込み前の全Issueを母集団に作ったものを渡す。** 一覧が自分の`issues`だけで判定すると、
+   * 手作業Issueしか並ばないこのビューでは参照先の通常Issueが手元に無く、全件が
+   * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
+   */
+  manualStepReadiness?: ManualStepReadinessMap;
+  /**
    * ディスパッチの状態（#1638）。**同じ画面で既に取っているなら渡す**（#1262の取り決め）。
    * スマホのIssue一覧はヘッダーの実行状況ボタンと一覧が同じものを見るため、画面側で1回
    * 取って両方へ配っている。省略時はこの一覧が自分で取りに行く（PCの一覧は従来どおり）。
@@ -119,6 +135,31 @@ function IssueStateIcon({ issue }: { issue: Issue }) {
   );
 }
 
+/**
+ * 手作業Issueの前提条件がそろっているか（#1763）。Issue詳細の「前提条件の状況」（#1705）と
+ * 同じ判定・同じ配色（emerald／amber）で、一覧のまま「どれをいま実行できるか」が分かるようにする。
+ *
+ * 説明は`title`（PCのホバー）と`aria-label`に持たせる。スマホはホバーできないため、
+ * 内訳はヘッダーの件数（`formatManualStepListCount`）とIssue詳細が担う。
+ */
+function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness | undefined }) {
+  if (!readiness) return null;
+  const Icon = readiness.ready ? CircleCheckBig : Clock;
+  return (
+    <span title={readiness.message} className="flex shrink-0 items-center">
+      <Icon
+        className={cn(
+          "size-3.5",
+          readiness.ready
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-amber-600 dark:text-amber-400",
+        )}
+        aria-label={readiness.ready ? "前提条件がそろっている" : "前提条件の完了待ち"}
+      />
+    </span>
+  );
+}
+
 // グループ表示中は各行のリポジトリ名表示がヘッダーと重複するため省略する（#849）
 function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
   return (
@@ -147,6 +188,7 @@ export function IssueList({
   view,
   pinnedSection,
   pinnedCount = 0,
+  manualStepReadiness,
   dispatch: injectedDispatch,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
@@ -234,6 +276,13 @@ export function IssueList({
   );
   const isGrouped = Boolean(repoGroups && repoGroups.length > 1);
 
+  // 「ユーザーの作業待ち」だけは、左メニューと同じ「いま実行できる件数」を先に出し、
+  // 差である前提待ちを添える（#1763）。他のビューは今までどおり並んでいる行数。
+  const countLabel =
+    (view === "manual-step" && manualStepReadiness
+      ? formatManualStepListCount(issues, manualStepReadiness)
+      : null) ?? `${issues.length + pinnedCount}件`;
+
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -298,6 +347,7 @@ export function IssueList({
               )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
+              <ManualStepReadinessIcon readiness={manualStepReadiness?.get(issue.id)} />
               <WorkflowStepBadge
                 labels={issue.labels}
                 projectStatus={issue.projectStatus}
@@ -377,7 +427,7 @@ export function IssueList({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="text-xs text-muted-foreground">{issues.length + pinnedCount}件</p>
+            <p className="text-xs text-muted-foreground">{countLabel}</p>
           </div>
           <div className="flex items-center gap-2">
             {/* 夜にまとめて積んで順に流すための入口（#1266） */}

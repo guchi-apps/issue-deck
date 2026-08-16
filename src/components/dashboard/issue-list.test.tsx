@@ -121,6 +121,58 @@ describe("IssueListの選択ハイライト（#1597）", () => {
   });
 });
 
+describe("手作業Issueの前提条件アイコン（#1763）", () => {
+  const readiness = new Map([
+    ["1", { ready: true, blocking: [], message: "前提はすべて満たされています。いま実行できます。" }],
+    [
+      "2",
+      {
+        ready: false,
+        blocking: [],
+        message: "まだ実行できません。#100 がmainへ反映されるのを待ってください。",
+      },
+    ],
+  ]);
+
+  it("いま実行できる手作業と前提待ちの手作業を、別のアイコンで示す", () => {
+    renderList({ manualStepReadiness: readiness });
+
+    expect(rowOf(1).contains(screen.getByLabelText("前提条件がそろっている"))).toBe(true);
+    expect(rowOf(2).contains(screen.getByLabelText("前提条件の完了待ち"))).toBe(true);
+  });
+
+  // 判定に載らないIssue（手作業でない・closed）へ印を付けない
+  it("判定に無いIssueにはアイコンを出さない", () => {
+    renderList({ manualStepReadiness: readiness });
+
+    expect(rowOf(3).querySelector("[aria-label='前提条件がそろっている']")).toBeNull();
+    expect(rowOf(3).querySelector("[aria-label='前提条件の完了待ち']")).toBeNull();
+  });
+
+  it("待っている相手はホバーで読めるようにする", () => {
+    renderList({ manualStepReadiness: readiness });
+
+    expect(
+      rowOf(2).querySelector(
+        "[title='まだ実行できません。#100 がmainへ反映されるのを待ってください。']",
+      ),
+    ).not.toBeNull();
+  });
+
+  // 左メニューが「いま実行できる件数」を出すため、一覧の行数のままだと数が食い違う
+  it("「ユーザーの作業待ち」のヘッダーは、実行できる件数と前提待ちの件数を出す", () => {
+    renderList({ manualStepReadiness: readiness, view: "manual-step" });
+
+    expect(screen.getByText("1件・前提待ち1件")).toBeTruthy();
+  });
+
+  it("他のビューのヘッダーは今までどおり並んでいる件数を出す", () => {
+    renderList({ manualStepReadiness: readiness, view: "all" });
+
+    expect(screen.getByText("3件")).toBeTruthy();
+  });
+});
+
 describe("IssueListの縦方向の縮小（#1665）", () => {
   it("ルートにmin-h-0が付いている", () => {
     // jsdomはレイアウトを計算しないため、クラスの有無で守る。

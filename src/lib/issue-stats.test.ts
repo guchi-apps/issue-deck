@@ -737,6 +737,29 @@ describe("time-dependent stats", () => {
       expect(counts.all).toBe(1);
       expect(counts["recently-merged"]).toBe(1);
     });
+
+    // 前提待ちを含む総数は「いま手を動かせば片付く数」として読めない（#1763）
+    it("ユーザーの作業待ちは、いま実行できる手作業だけを数える", () => {
+      const manualStepLabel = { name: "71.manual-step", color: "d876e3", description: null };
+      const origin = makeIssue({ id: "100", number: 100, projectStatus: "Develop" });
+      const issues = [
+        origin,
+        makeIssue({
+          id: "101",
+          number: 101,
+          labels: [manualStepLabel],
+          body: "## 前提条件\n\n- なし\n",
+        }),
+        makeIssue({
+          id: "102",
+          number: 102,
+          labels: [manualStepLabel],
+          body: "## 前提条件\n\n- #100 が本番へ出た後\n",
+        }),
+      ];
+
+      expect(computeNavCounts(issues, issues, null)["manual-step"]).toBe(1);
+    });
   });
 
   describe("computeNavCountsForFilters", () => {

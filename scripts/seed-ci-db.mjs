@@ -147,8 +147,12 @@ const DEV_PROJECT_STATUS_CYCLE = [
  * 結果から引いて埋める（`DEV_PROJECT_STATUS_CYCLE`の並びやリポジトリの順序が変わっても
  * ずれない）。
  *
+ * **前提待ちのものと、いま実行できるものを1件ずつ作る**（#1763）。左メニューの件数は
+ * 実行できる手作業だけを数え、一覧の行にはどちらなのかをアイコンで出すため、片方しか
+ * 無いと開発環境ではその違いを確かめられない。
+ *
  * @param origin 起点Issue（実装中）の番号
- * @param developed developへ入っているIssue（本番未反映）の番号
+ * @param developed developへ入っているIssue（本番未反映）の番号。nullなら前提待ちにしない
  * @param released mainへ反映済みのIssueの番号
  */
 function manualStepSampleBody(origin, developed, released) {
@@ -163,7 +167,9 @@ function manualStepSampleBody(origin, developed, released) {
     "- 実行するデバイス: VPS（`ssh vps`）",
     "- カレントディレクトリ: `/var/www/sample-repo-1`",
     "- Gitブランチ: `develop`",
-    `- 先に完了している必要があるIssue・PR: #${developed} がmainへ反映された後、#${released} の変更が本番へ出た後`,
+    developed === null
+      ? `- 先に完了している必要があるIssue・PR: #${released} の変更が本番へ出た後`
+      : `- 先に完了している必要があるIssue・PR: #${developed} がmainへ反映された後、#${released} の変更が本番へ出た後`,
     "- その他の前提: なし",
     "",
     "## やること",
@@ -234,6 +240,7 @@ async function applyDevProfile(installation) {
   ]);
   const hasManualStepSample = Boolean(firstRepository && origin && developed && released);
   if (hasManualStepSample) {
+    // 前提待ち（#developedがdevelopまでしか来ていない）
     await upsertDummyIssue(firstRepository, {
       number: ISSUES_PER_REPOSITORY + 3,
       title: "[手作業] VPS: sample-repo-1の.envにSAMPLE_TOKENを追加する",
@@ -241,10 +248,18 @@ async function applyDevProfile(installation) {
       labels: [{ name: "71.manual-step", color: "d876e3" }],
       body: manualStepSampleBody(origin.number, developed.number, released.number),
     });
+    // いま実行できる（待つ相手が本番へ出ているものだけ。起点も反映済みにする）
+    await upsertDummyIssue(firstRepository, {
+      number: ISSUES_PER_REPOSITORY + 4,
+      title: "[手作業] 1Password: sample-repo-1のSAMPLE_TOKENを発行する",
+      state: "OPEN",
+      labels: [{ name: "71.manual-step", color: "d876e3" }],
+      body: manualStepSampleBody(released.number, null, released.number),
+    });
   }
 
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 1 : 0}件追加しました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 2 : 0}件（前提待ち・いま実行できる各1件）追加しました。`,
   );
 }
 
