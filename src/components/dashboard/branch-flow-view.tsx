@@ -46,6 +46,16 @@ type BranchFlowViewProps = {
   error: string | null;
   /** ブランチ状況を取得できなかったリポジトリ（PRだけで組み立てている） */
   failedRepositories: string[];
+  /**
+   * マージ済み（クローズ済み）のPRまで取得できているか（#1711）。
+   *
+   * **この画面のリリースの束は、クローズ済みのPRが揃って初めて組み立てられる。** PR一覧の母集団は
+   * この画面を開いたときに`open`から`all`へ広がる（`hooks/use-pull-requests.ts`）ため、広がる前の
+   * 一瞬は「マージ済みのPRが1件も無い」状態を描くことになる。本番デプロイの直後は進行中の作業も
+   * 無いため、その一瞬が「何も無い・リリース済みを開くボタンも無い」画面として現れていた
+   * （PWAはデプロイを検知して自動でリロードするため、ちょうどこの画面が出ている時間と重なる）。
+   */
+  mergedPullRequestsLoaded: boolean;
   onRefresh: () => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
@@ -634,17 +644,24 @@ function ReleaseGroupNote({ group }: { group: BranchFlowReleaseGroup }) {
  * **既定で出すのは「次のリリースに乗る分」まで**（#1586）。本番へ出た版の束は、いま何が出るのかを
  * 押し下げるだけなのでボタンで開くまで畳む。ただし**未完了の手作業だけは畳んでも別枠で出す**——
  * 版が出た後も残る作業で、隠すと画面のどこにも現れなくなるため。
+ *
+ * **「次のリリースに乗る分」が1件も無いときだけは、いちばん新しい版の束を既定で出す**（#1711）。
+ * 本番へ出した直後がその状態で、押し下げるものが無いのに畳むと画面の中身が丸ごと消える。
+ * デプロイ直後にこの画面を見に来る目的（今回何が出たのか・デプロイが通ったのか。#1579）が
+ * そのままボタンの向こうへ隠れていた。
  */
 function ReleaseFlowGraph({
   repository,
   showClosed,
   showAllVersions,
+  mergedPullRequestsLoaded,
   onShowAllVersions,
   onRefresh,
 }: {
   repository: BranchFlowRepository;
   showClosed: boolean;
   showAllVersions: boolean;
+  mergedPullRequestsLoaded: boolean;
   onShowAllVersions: () => void;
   onRefresh: () => void;
 }) {
@@ -655,11 +672,20 @@ function ReleaseFlowGraph({
 
   // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
   // 特定できないレーンは、すでに済んだ変更なのでボタンで開くまで出さない。
+  //
+  // **その「次のリリースに乗る分」が無いときは、いちばん新しい版の束を代わりに出す**（#1711）。
+  // 未リリースの束は先頭にしか来ないので、どちらの場合も出すのは配列の先頭からの連続した並び。
+  const pendingGroups = repository.releaseGroups.filter((group) => group.mergedAt === null);
   const visibleGroups = showAllVersions
     ? repository.releaseGroups
-    : repository.releaseGroups.filter((group) => group.mergedAt === null);
+    : pendingGroups.length > 0
+      ? pendingGroups
+      : repository.releaseGroups.slice(0, 1);
   const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
   const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
+  // 版を特定できないレーンもボタンの向こうにいる（#1711）。**畳んだ束が無いときでもボタンを出す
+  // 理由**で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が画面のどこにも無くなる。
+  const hiddenUnassignedCount = showAllVersions ? 0 : repository.unassignedLanes.length;
 
   // 畳んだぶんに残っている手作業だけは別枠で出す（#1586）。束を開いているときは
   // レーンにぶら下がって出るので、ここでは出さない（二重に出さないため）
@@ -754,25 +780,45 @@ function ReleaseFlowGraph({
           </>
         )}
 
-        {(hiddenGroups.length > 0 || hiddenClosedCount > 0) && (
-          <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
-            {hiddenGroups.length > 0 && (
-              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onShowAllVersions}>
-                リリース済みのバージョンを表示（{hiddenGroups.length}件）
-              </Button>
-            )}
-            {hiddenClosedCount > 0 && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                クローズ（未マージ）{hiddenClosedCount}件は隠しています
-              </span>
-            )}
-          </li>
-        )}
-
-        {activeLanes.length === 0 && visibleGroups.length === 0 && unassignedLanes.length === 0 && (
+        {/* **マージ済みのPRが揃うまでは、リリース済みについて何も言い切らない**（#1711）。
+            この段階で「リリース済みのバージョンは無い」「作業はありません」と描くと、
+            本番デプロイ直後（＝進行中の作業も無い）に画面が空になり、開くボタンも消える */}
+        {!mergedPullRequestsLoaded ? (
           <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-            developへ向かっている作業はありません。
+            リリース済みのバージョンを読み込み中...
           </li>
+        ) : (
+          <>
+            {(hiddenGroups.length > 0 || hiddenUnassignedCount > 0 || hiddenClosedCount > 0) && (
+              <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
+                {(hiddenGroups.length > 0 || hiddenUnassignedCount > 0) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs"
+                    onClick={onShowAllVersions}
+                  >
+                    {hiddenGroups.length > 0
+                      ? `リリース済みのバージョンを表示（${hiddenGroups.length}件）`
+                      : `本番へ出た変更を表示（${hiddenUnassignedCount}件）`}
+                  </Button>
+                )}
+                {hiddenClosedCount > 0 && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    クローズ（未マージ）{hiddenClosedCount}件は隠しています
+                  </span>
+                )}
+              </li>
+            )}
+
+            {activeLanes.length === 0 &&
+              visibleGroups.length === 0 &&
+              unassignedLanes.length === 0 && (
+                <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+                  developへ向かっている作業はありません。
+                </li>
+              )}
+          </>
         )}
       </ul>
 
@@ -836,11 +882,13 @@ function ReleaseGroupHeaderWithLanes({
 function RepositorySummaryRow({
   repository,
   branchesFailed,
+  mergedPullRequestsLoaded,
   isOpen,
   onToggle,
 }: {
   repository: BranchFlowRepository;
   branchesFailed: boolean;
+  mergedPullRequestsLoaded: boolean;
   isOpen: boolean;
   onToggle: () => void;
 }) {
@@ -926,8 +974,12 @@ function RepositorySummaryRow({
       {branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>
       )}
+      {/* 取得が済むまで「動きなし」と言い切らない（#1711）。マージ済みのPRが揃っていない間は
+          進行中の件数も版も出せず、静かなだけなのか読み込み中なのかを行から区別できない */}
       {!hasAnything && !branchesFailed && (
-        <span className="shrink-0 text-xs text-muted-foreground">動きなし</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {mergedPullRequestsLoaded ? "動きなし" : "読み込み中"}
+        </span>
       )}
     </button>
   );
@@ -964,6 +1016,7 @@ export function BranchFlowView({
   isLoading,
   error,
   failedRepositories,
+  mergedPullRequestsLoaded,
   onRefresh,
   headerLeading,
   headerActions,
@@ -979,13 +1032,21 @@ export function BranchFlowView({
 
   const attentionRepositories = flow.repositories.filter(needsAttention);
 
+  // **取得に失敗したときは読み込み中で止めない**（#1711）。`error`は見出しのすぐ下に出ており、
+  // そこへ終わらない「読み込み中」を重ねると、待てば直るものとして読めてしまう。
+  // 失敗しているときは従来どおりの表示（＝取れた範囲で描く）に戻す。
+  const releasesLoaded = mergedPullRequestsLoaded || error !== null;
+
+  // **マージ済みのPRが揃うまで判定を確定させない**（#1711）。手が要るかどうかはPRの状態で決まる
+  // ので、母集団が`open`のままの一瞬で確定させると、CI失敗もリリース中も無いことになり
+  // 1件も開かないまま終わる。
   useEffect(() => {
-    if (autoOpenedRef.current || flow.repositories.length === 0) return;
+    if (autoOpenedRef.current || flow.repositories.length === 0 || !releasesLoaded) return;
     autoOpenedRef.current = true;
     setOpenRepositories(
       new Set(flow.repositories.filter(needsAttention).map((repo) => repo.repositoryFullName)),
     );
-  }, [flow.repositories]);
+  }, [flow.repositories, releasesLoaded]);
 
   function toggleRepository(fullName: string) {
     setOpenRepositories((prev) => {
@@ -1077,6 +1138,7 @@ export function BranchFlowView({
               <RepositorySummaryRow
                 repository={repository}
                 branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
+                mergedPullRequestsLoaded={releasesLoaded}
                 isOpen={isOpen}
                 onToggle={() => toggleRepository(repository.repositoryFullName)}
               />
@@ -1086,6 +1148,7 @@ export function BranchFlowView({
                     repository={repository}
                     showClosed={showClosed}
                     showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
+                    mergedPullRequestsLoaded={releasesLoaded}
                     onShowAllVersions={() =>
                       setAllVersionsRepositories(
                         (prev) => new Set([...prev, repository.repositoryFullName]),
