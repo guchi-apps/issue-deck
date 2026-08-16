@@ -55,16 +55,25 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
   };
 }
 
+const refresh = vi.fn();
+
 function makeDispatch(overrides: {
   hosts?: DispatchHostView[];
   jobs?: DispatchJobView[];
   sessions?: DispatchSessionView[];
+  /** 更新インジケーター（#1773）。既定は「12秒前に取得できていて、いまは取得していない」 */
+  fetchedAt?: number | null;
+  isFetching?: boolean;
 }): DispatchStateHandle {
   return {
     hosts: overrides.hosts ?? [],
     jobs: overrides.jobs ?? [],
     sessions: overrides.sessions ?? [],
     concurrency: 2,
+    fetchedAt: overrides.fetchedAt ?? Date.now() - 12_000,
+    isFetching: overrides.isFetching ?? false,
+    pollIntervalMs: 20_000,
+    refresh,
     error: null,
     setError: vi.fn(),
     isSubmitting: false,
@@ -114,6 +123,25 @@ describe("MobileDispatchStatusButton（#1638）", () => {
     expect(screen.getByText(/#1638/)).toBeTruthy();
     // このキューが何を映しているかの但し書き（#1567）
     expect(screen.getByText(/GitHub Actionsでの無人実行はここには出ません/)).toBeTruthy();
+  });
+
+  /**
+   * #1773。更新インジケーターはPCの実行キューと共有の中身（`DispatchQueueContent`）に
+   * 置いてあるので、シート側にも同じものが出る。外出先で見るぶん、出ている内容が
+   * いつ時点かはむしろこちらで要る。
+   */
+  it("シートにも更新インジケーターが出て、押すと取り直す", () => {
+    render(
+      <MobileDispatchStatusButton
+        dispatch={makeDispatch({ hosts: [makeHost()], jobs: [makeJob()] })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "実行状況" }));
+    expect(screen.getByText("12秒前に更新・20秒ごと")).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("実行キューを今すぐ更新"));
+    expect(refresh).toHaveBeenCalled();
   });
 
   // 行のタイトルからIssue詳細を開く（#1625）。PCの実行キューと同じ振る舞いにする

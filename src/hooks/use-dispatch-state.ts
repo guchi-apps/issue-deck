@@ -44,6 +44,15 @@ const ACTIVE_POLL_INTERVAL_MS = 5_000;
  */
 const IDLE_POLL_INTERVAL_MS = 20_000;
 
+/**
+ * 取得中の表示（アイコンの回転）を保つ下限（#1773）。
+ *
+ * **叩き先は自前の`GET /api/dispatch`（DBの読み取りのみ）で、数十msで返ることが多い。**
+ * 素直に「取得している間だけ`true`」にすると、回転が1周もせずに消えて点滅にしか見えず、
+ * 更新されたことの合図として読めない。
+ */
+const MIN_FETCHING_MS = 500;
+
 function hasActiveJob(state: DispatchState | null): boolean {
   return state?.jobs.some((job) => isActiveDispatchJobStatus(job.status)) ?? false;
 }
@@ -75,6 +84,16 @@ export function useDispatchState(enabled: boolean) {
    * ポーリングの2回目以降は`false`へ戻さない（戻すと20秒ごとに選択肢が消える）。
    */
   const [isLoaded, setIsLoaded] = useState(false);
+  /**
+   * 最後に**取得できた**時刻（epoch ms・#1773）。実行キューの「◯秒前に更新」に出す。
+   *
+   * **失敗したときは更新しない。** 取得の失敗は表面化しない作りなので（下の`load`）、
+   * 失敗しても時刻を進めると「更新できていない」と「更新した結果が同じ」の区別が付かなくなる。
+   * 進めずにおけば、経過だけが伸びて古いことが表示に出る。
+   */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  /** 取得中（#1773）。**操作の送信中（`isSubmitting`）とは別物**なので混ぜない */
+  const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // enqueue・cancelの直後に取り直すためのキー。増やすと下のeffectが再実行される
@@ -85,11 +104,15 @@ export function useDispatchState(enabled: boolean) {
 
     let cancelled = false;
     let timerId: ReturnType<typeof setTimeout> | undefined;
+    let fetchingTimerId: ReturnType<typeof setTimeout> | undefined;
     let inFlight = false;
     let latest: DispatchState | null = null;
 
     async function load() {
       inFlight = true;
+      const startedAt = Date.now();
+      clearTimeout(fetchingTimerId);
+      setIsFetching(true);
       try {
         const res = await fetch("/api/dispatch");
         if (!res.ok) return;
@@ -97,6 +120,7 @@ export function useDispatchState(enabled: boolean) {
         if (cancelled) return;
         latest = json;
         setState(json);
+        setFetchedAt(Date.now());
       } catch {
         // 取得の失敗は表面化しない。ここが落ちても「このPC」での起動は使えるため、
         // エラー表示で導線を覆うより、サブPCの選択肢が出ないだけの方が害が小さい
@@ -108,6 +132,13 @@ export function useDispatchState(enabled: boolean) {
             poll,
             hasActiveJob(latest) ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
           );
+          // 速すぎて見えない回転にしないための下限（#1773）
+          const remaining = MIN_FETCHING_MS - (Date.now() - startedAt);
+          if (remaining > 0) {
+            fetchingTimerId = setTimeout(() => setIsFetching(false), remaining);
+          } else {
+            setIsFetching(false);
+          }
         }
       }
     }
@@ -133,9 +164,20 @@ export function useDispatchState(enabled: boolean) {
     return () => {
       cancelled = true;
       clearTimeout(timerId);
+      clearTimeout(fetchingTimerId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, reloadKey]);
+
+  /**
+   * 次の自動更新を待たずに取り直す（#1773）。
+   *
+   * **積んだ直後の取り直し（`enqueue`・`cancel`ほか）と同じ経路**（`reloadKey`）を使う。
+   * 押した瞬間にeffectが再実行されて`load()`が走るため、待ち時間は最大20秒から0になる。
+   */
+  const refresh = useCallback(() => {
+    setReloadKey((key) => key + 1);
+  }, []);
 
   /** ジョブを積む。拒否された場合はAPIが返した理由をそのままerrorへ入れる */
   const enqueue = useCallback(
@@ -316,6 +358,14 @@ export function useDispatchState(enabled: boolean) {
     sessions: state?.sessions ?? [],
     concurrency: state?.concurrency ?? null,
     isLoaded,
+    fetchedAt,
+    isFetching,
+    /**
+     * いま使っている取得間隔（#1773）。**上のeffectと同じ判定を使う**ので、画面に出す
+     * 「20秒ごと」と実際の周期がずれない。
+     */
+    pollIntervalMs: hasActiveJob(state) ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
+    refresh,
     error,
     setError,
     isSubmitting,
