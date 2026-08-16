@@ -538,7 +538,7 @@ Free前提の分岐（repo secretを配る・auto-mergeを諦める）を設計�
 | GitHub Actions | issue-deckがディスパッチ | 保持しない | 常時 | 報告のみ |
 | ミニPC（常駐） | issue-deckがディスパッチ | 保持する | 常時 | ディスパッチ受け口＋報告 |
 | メインPC（VS Code） | **人がその場で開始する** | 保持する | 断続的 | **報告のみ** |
-| Claudeアプリ（`claude.ai/code`） | **人がその場で開始する** | 保持する | 常時（PC不要） | **報告のみ** |
+| Claudeアプリ（`claude.ai/code`） | **人がその場で開始する** | 保持する | 常時（PC不要） | **報告のみ**（画面からの導線は#1769で削除） |
 
 **ディスパッチできるのは上2つだけ。** 下2つは人が開いた時点で始まる引き取り型で、開いていない
 セッションへジョブを送ることはできない。したがって必要なのは**進捗の報告だけ**である。
@@ -552,9 +552,9 @@ Free前提の分岐（repo secretを配る・auto-mergeを諦める）を設計�
 - **メインPC（VS Code）**: [`scripts/start-issue.sh`](../scripts/start-issue.sh)がworktreeを作り
   Claude Codeセッションを起動する。`11.local`ラベルを付けている間は`claude-issue-dispatch.yml`が
   そのIssueに対して何もしない（[multi-agent/branching.md](multi-agent/branching.md)）
-- **Claudeアプリ**: [`claude-app.ts`](../src/lib/github/claude-app.ts)がIssueを指定して
-  `claude.ai/code/new`を開くURLを組み立てる。`branch`に`issue-<番号>`を渡すため、無人実行と
-  同じブランチを起点にセッションが始まる（#499）。Actions無人実行との役割分担は #993 で検討中
+- **Claudeアプリ**: かつてはIssueを指定して`claude.ai/code/new`を開くボタンを画面に置いていたが
+  （#360・#499）、質問する・サブPCで実行するで用途が代替されたため**#1769で削除した**。
+  人がClaudeアプリでIssueに取り組むこと自体は妨げられないが、issue-deckからの導線は無い
 
 **現状、これらのモードで進捗を動かすと、ラベルを人が手で付け替えることになる。** 報告APIが
 できれば、どのモードから実装しても同じようにカンバンが追従する。
