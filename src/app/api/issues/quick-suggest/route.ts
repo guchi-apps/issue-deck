@@ -33,6 +33,11 @@ const CANDIDATE_ISSUE_SCAN_LIMIT = RECENT_TITLE_LIMIT;
  * 「リポジトリ別の画面から開いた」というだけの理由で、書いた内容が別のリポジトリの話である
  * ことは普通に起きる。渡された方を選択状態にしたまま、推定した候補も返して画面に並べる。
  *
+ * **例外は`repositoryPinned`が付いているとき**（＝人が入力ステップで選んだ・#1733）。本人が
+ * 決めた値を推し量る意味は無いので、リポジトリの推定（Claude 1回＋リポジトリごとのIssue取得）を
+ * まるごと省いてタイトル・ラベルの生成へ進む。候補も返さない——押しても何も変わらない候補を
+ * 並べると、選んだはずの指定が疑われているように見える。
+ *
  * **途中で失敗しても、取れたところまでを返す。** 起票そのものを止めないための作りで、
  * 呼び出し側は欠けた項目を空欄のフォームとして扱う。
  */
@@ -54,13 +59,17 @@ export async function POST(request: NextRequest) {
     typeof payload?.repositoryFullName === "string" && payload.repositoryFullName
       ? payload.repositoryFullName
       : null;
+  // 人が選んだリポジトリのときだけ推定を省く（#1733）。渡されただけの場合は推定を続ける（#1710）
+  const isRepositoryPinned = payload?.repositoryPinned === true && givenRepositoryFullName !== null;
 
   if (typeof body !== "string" || !body.trim()) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
   try {
-    const repositoryCandidates = await inferRepositories(userId, body, kind);
+    const repositoryCandidates = isRepositoryPinned
+      ? []
+      : await inferRepositories(userId, body, kind);
     const repositoryFullName = givenRepositoryFullName ?? repositoryCandidates[0] ?? null;
 
     if (!repositoryFullName) {

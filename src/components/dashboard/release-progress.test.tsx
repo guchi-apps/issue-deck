@@ -85,6 +85,7 @@ describe("ReleaseProgress CI状態バッジ", () => {
             version: "1.1.0",
             reason: null,
             changelog: null,
+            usage: null,
           },
         })}
       />,
@@ -117,12 +118,16 @@ describe("ReleaseProgress mainへマージ段の導線（#1433）", () => {
   );
 });
 
-describe("ReleaseProgress 更新履歴表示", () => {
+describe("ReleaseProgress 更新履歴・使い方の表示", () => {
   afterEach(() => {
     cleanup();
   });
 
-  function statusWithBump(reason: string | null, changelog: string | null): AvailableReleaseStatus {
+  function statusWithBump(
+    reason: string | null,
+    changelog: string | null,
+    usage: string | null = null,
+  ): AvailableReleaseStatus {
     return makeStatus({
       phase: "bump_pr_open",
       bumpPullRequest: {
@@ -134,6 +139,7 @@ describe("ReleaseProgress 更新履歴表示", () => {
         version: "1.1.0",
         reason,
         changelog,
+        usage,
       },
     });
   }
@@ -150,6 +156,23 @@ describe("ReleaseProgress 更新履歴表示", () => {
     render(<ReleaseProgress status={statusWithBump("判断根拠のテキスト", null)} />);
     expect(screen.getByText("判断根拠のテキスト")).not.toBeNull();
     expect(screen.queryByText("更新履歴（利用者向け）")).toBeNull();
+  });
+
+  it("usageがある場合は使い方を更新履歴と並べて表示する（#1729）", () => {
+    render(
+      <ReleaseProgress
+        status={statusWithBump("判断根拠のテキスト", "更新履歴のテキスト", "1. 「共有」を押す")}
+      />,
+    );
+    expect(screen.getByText("使い方（利用者向け）")).not.toBeNull();
+    expect(screen.getByText("1. 「共有」を押す")).not.toBeNull();
+  });
+
+  // 画面で使える変化が無いリリースでは、更新履歴だけがあって使い方が無い状態になる
+  it("changelogがあってもusageが無ければ使い方のボックスを表示しない（#1729）", () => {
+    render(<ReleaseProgress status={statusWithBump("判断根拠のテキスト", "更新履歴のテキスト")} />);
+    expect(screen.getByText("更新履歴（利用者向け）")).not.toBeNull();
+    expect(screen.queryByText("使い方（利用者向け）")).toBeNull();
   });
 });
 
@@ -195,6 +218,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
             version: "1.1.0",
             reason: null,
             changelog: null,
+            usage: null,
           },
         })}
         repoFullName="owner/repo"

@@ -71,14 +71,14 @@ export function NotificationButton({
 }: NotificationButtonProps) {
   const [open, setOpen] = useState(false);
 
-  // リリース状況を取りに行くのは、リリースworkflowを持つリポジトリがあるときだけ
-  // （ロケットボタンと同じ条件）。
-  const hasReleasableRepository = useMemo(
-    () => repositories.some((repo) => repo.hasClaudeWorkflow),
-    [repositories],
-  );
+  // 連携しているリポジトリが1件でもあれば取りに行く（スマホのリポジトリ一覧と同じ条件）。
+  // **`hasClaudeWorkflow`では絞らない**（#1727）。あれは`claude-issue-dispatch.yml`の有無で
+  // 「リリースworkflow導入済み」を代用していたもので、無人実行を入れずにリリースフローだけを
+  // 載せたリポジトリ（`subpc`・`vps`）が通知から丸ごと抜け落ちる。実際にどのリポジトリを
+  // 対象にするかはAPI側が`release-develop-to-main.yml`の実在で決める。
+  const hasConnectedRepository = repositories.length > 0;
   const { data: releaseStatuses, refetch: refetchReleaseStatuses } =
-    useRepositoryReleaseStatuses(hasReleasableRepository);
+    useRepositoryReleaseStatuses(hasConnectedRepository);
 
   const items = useMemo(
     () => buildNotifications({ issues, pullRequests, releaseStatuses }),

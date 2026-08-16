@@ -7,8 +7,14 @@ import type { QuickSuggestKind, QuickSuggestResult } from "@/lib/quick-issue";
 export type QuickSuggestRequest = {
   body: string;
   kind: QuickSuggestKind;
-  /** すでに決まっているリポジトリ（スマホのリポジトリ別画面から開いた場合など）。推定を省く */
+  /** すでに決まっているリポジトリ（人が入力ステップで選んだ場合・リポジトリ別の画面から開いた場合） */
   repositoryFullName?: string | null;
+  /**
+   * `repositoryFullName`が**人の指定**かどうか（#1733）。
+   * 真のときAPIはリポジトリの推定を行わず、タイトル・ラベルだけを生成する。
+   * 画面から渡しただけ（リポジトリ別の画面から開いた）の場合は偽で、推定は従来どおり行う（#1710）。
+   */
+  repositoryPinned?: boolean;
 };
 
 /**

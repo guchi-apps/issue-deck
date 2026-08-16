@@ -9,17 +9,25 @@ import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 
 const releaseStatusesMock = vi.hoisted(() => ({ current: [] as RepositoryReleaseStatus[] }));
+/** `useRepositoryReleaseStatuses`へ渡された`enabled`を記録する（#1727の判定を検査するため） */
+const releaseStatusesEnabled = vi.hoisted(() => ({ calls: [] as boolean[] }));
 
 vi.mock("@/hooks/use-repository-release-statuses", () => ({
-  useRepositoryReleaseStatuses: () => ({
-    data: releaseStatusesMock.current,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
+  useRepositoryReleaseStatuses: (enabled: boolean) => {
+    releaseStatusesEnabled.calls.push(enabled);
+    return {
+      data: releaseStatusesMock.current,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+  },
 }));
 
-function repository(fullName: string): ConnectedRepository {
+function repository(
+  fullName: string,
+  overrides: Partial<ConnectedRepository> = {},
+): ConnectedRepository {
   return {
     id: fullName,
     name: fullName.split("/")[1],
@@ -30,6 +38,7 @@ function repository(fullName: string): ConnectedRepository {
     hasLocalStartScript: true,
     hidden: false,
     favorite: false,
+    ...overrides,
   };
 }
 
@@ -91,6 +100,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeable: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -98,6 +108,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
 }
 
 type RenderOptions = {
+  repositories?: ConnectedRepository[];
   issues?: Issue[];
   pullRequests?: PullRequestSummary[];
   onOpenTarget?: () => void;
@@ -108,7 +119,7 @@ type RenderOptions = {
 function renderButton(options: RenderOptions = {}) {
   return render(
     <NotificationButton
-      repositories={[repository("guchi-apps/issue-deck")]}
+      repositories={options.repositories ?? [repository("guchi-apps/issue-deck")]}
       issues={options.issues ?? []}
       pullRequests={options.pullRequests ?? []}
       onOpenTarget={options.onOpenTarget ?? (() => {})}
@@ -120,7 +131,25 @@ function renderButton(options: RenderOptions = {}) {
 
 afterEach(() => {
   releaseStatusesMock.current = [];
+  releaseStatusesEnabled.calls = [];
   cleanup();
+});
+
+describe("NotificationButton リリース状況の取得条件", () => {
+  it("claude-issue-dispatch.ymlを持たないリポジトリしか無くても取得する（#1727）", () => {
+    renderButton({ repositories: [repository("guchi-apps/vps", { hasClaudeWorkflow: false })] });
+
+    // 無人実行の有無とリリースフローの有無は別軸で、リリースフローだけを載せたリポジトリが
+    // ある。対象の絞り込みはAPI側（`release-develop-to-main.yml`の実在）に任せる。
+    expect(releaseStatusesEnabled.calls).toContain(true);
+    expect(releaseStatusesEnabled.calls).not.toContain(false);
+  });
+
+  it("連携リポジトリが1件も無ければ取得しない", () => {
+    renderButton({ repositories: [] });
+
+    expect(releaseStatusesEnabled.calls).not.toContain(true);
+  });
 });
 
 describe("NotificationButton バッジ", () => {

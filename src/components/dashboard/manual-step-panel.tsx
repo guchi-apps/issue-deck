@@ -11,12 +11,18 @@ import type {
 import { cn } from "@/lib/utils";
 
 /**
- * 手作業Issue（`71.manual-step`）の詳細画面に出す、実行者向けの案内と出口（#1280）。
+ * 手作業Issue（`71.manual-step`）の詳細画面に出す、実行者向けの判断材料と出口（#1280）。
  *
  * 手作業Issueは**エージェントへ送らないIssue**でありながら、進捗が`Ready`のまま留まる。
  * そのため以前は「実装を開始」が主ボタンとして出たまま、完了の導線は「…」メニューの
  * 「クローズする」の奥にしか無く、実行し終えたユーザーが次に何をすればよいか画面から
- * 読み取れなかった。ここで「送らないこと」と「終わったらクローズすること」を1か所に出す。
+ * 読み取れなかった。ここで「終わったらクローズすること」を出口として1か所に出す。
+ *
+ * **出すのは「前提条件の状況」と2つのクローズボタンだけにする**（#1732）。以前は
+ * 「エージェントへは送らない」旨の説明と5項目の手順リスト、進捗Statusの補足も並べていたが、
+ * 手順リストは本文テンプレートの見出し（`## 前提条件`・`## やること`・`## 完了の確認方法`）を
+ * なぞっただけで、すぐ下に出る本文と重複していた。毎回同じ文面が縦に積まれ、実行してよいかの
+ * 判断材料と出口が押し下げられる方が損が大きい。運用の説明はdocs/multi-agent/labels.mdに置く。
  *
  * 配色にamberを使わないのは、amberが「ユーザーの確認待ち」（`00.check-user`）の色として
  * 使われているため（sidebar-nav・workflow-status-steps）。承認して再開させる先がある
@@ -51,7 +57,7 @@ export function ManualStepPanel({
   return (
     <section
       className={cn(
-        "rounded-lg border border-violet-500/40 bg-violet-500/5 p-3",
+        "flex flex-col gap-2 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3",
         className,
       )}
       aria-labelledby="manual-step-panel-title"
@@ -63,30 +69,17 @@ export function ManualStepPanel({
         <Wrench className="size-4 shrink-0" />
         あなたの手作業を待っています
       </p>
-      {/* 待っている相手の状況（#1705）。実行してよいかの判断材料なので、手順の説明より先に出す。
+      {/* 待っている相手の状況（#1705）。実行してよいかの判断材料なので、出口のボタンより先に出す。
           **前提が揃っていなくてもボタンは押せるままにする**——ここの判定は本文に書かれた
           番号からの推定で、外したときに完了できなくなる方が損が大きい */}
       {prerequisiteSummary && prerequisites && prerequisites.length > 0 && repositoryFullName && (
         <ManualStepPrerequisites
-          className="mt-2"
           prerequisites={prerequisites}
           summary={prerequisiteSummary}
           repositoryFullName={repositoryFullName}
         />
       )}
-      <p className="mt-2 text-xs text-muted-foreground">
-        このIssueはエージェントが代行できない作業です。
-        <strong className="font-medium">実装エージェントへは送りません</strong>
-        （「開始」ボタンは出しません）。下の説明にある手順を自分で実行してください。
-      </p>
-      <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
-        <li>「前提条件」（デバイス・ディレクトリ・ブランチ・先に必要なIssue／PR）を満たしているか確かめる</li>
-        <li>「やること」の手順を実行する</li>
-        <li>「完了の確認方法」で効いたことを確かめる</li>
-        <li>実行結果や気づいた点があればコメントに残す（任意）</li>
-        <li>「手作業を完了してクローズ」を押す</li>
-      </ol>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={isSubmitting} onClick={onComplete}>
           {isSubmitting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
           手作業を完了してクローズ
@@ -96,9 +89,6 @@ export function ManualStepPanel({
           実施せずクローズ
         </Button>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        進捗（Status）はReadyのままで構いません。リリースフローには乗らないため、クローズが完了の記録になります。
-      </p>
     </section>
   );
 }

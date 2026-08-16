@@ -118,6 +118,14 @@ describe("resolveKindRepository", () => {
   it("質問で選べるリポジトリが1つも無ければ未選択にする", () => {
     expect(resolveKindRepository("question", [notConfigured], "owner/not-configured")).toBe("");
   });
+
+  /**
+   * #1733。入力ステップに「自動で決める」が出た以上、種別を押しただけで1件目が入ると、
+   * 選んでいないものを選んだように見える。
+   */
+  it("未選択（自動で決める）のまま質問へ切り替えても未選択のままにする", () => {
+    expect(resolveKindRepository("question", [configured, notConfigured], "")).toBe("");
+  });
 });
 
 /** #1710。押しても切り替わらない候補チップを出さないための絞り込み */

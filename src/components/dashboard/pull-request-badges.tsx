@@ -50,6 +50,22 @@ export function CiStateBadge({ ciState }: { ciState: CiState }) {
   );
 }
 
+/**
+ * コンフリクトのピル（#1742）。`mergeable`が`false`のときだけ描く。
+ *
+ * **`null`（GitHubが判定中・未取得）では何も出さない。** 判定前を「コンフリクトなし」とも
+ * 「あり」とも言わない方針で、自動解消ボタンの出し分け（`repairKindsFor`）と揃えている。
+ * PR一覧・PR詳細・確認待ち一覧・リリース進捗のどこでも同じ見た目にするためここに置く。
+ */
+export function ConflictBadge({ mergeable }: { mergeable: boolean | null | undefined }) {
+  if (mergeable !== false) return null;
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
+      コンフリクトあり
+    </span>
+  );
+}
+
 export function BranchBadge({ baseRef, headRef }: { baseRef: string; headRef: string }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">

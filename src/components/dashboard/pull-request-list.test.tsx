@@ -29,6 +29,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeable: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -124,6 +125,28 @@ describe("PullRequestList", () => {
   it("判定が確定していないPRには出さない（#1469）", () => {
     renderList([makePullRequest({ linkedIssueCheckUser: false })]);
     expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
+  });
+
+  // 一覧も`mergeable`を持つようになった（#1742）。CI通過だけを見て「入れられる」と読めてしまう
+  // 状態を無くすのが目的なので、バッジと自動解消ボタンをここで確かめる。
+  it("コンフリクトしているPRはその旨と自動解消ボタンを出し、マージボタンを出さない（#1742）", () => {
+    renderList([makePullRequest({ ciState: "success", mergeable: false })]);
+    expect(screen.getByText("CI通過")).toBeTruthy();
+    expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  it("コンフリクトの判定が出ていないPRには何も出さない（#1742）", () => {
+    renderList([makePullRequest({ mergeable: null })]);
+    expect(screen.queryByText("コンフリクトあり")).toBeNull();
+    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+    expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
+  });
+
+  it("CI失敗のPRには自動修正ボタンを出す（#1293）", () => {
+    renderList([makePullRequest({ ciState: "failure" })]);
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).toBeTruthy();
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {

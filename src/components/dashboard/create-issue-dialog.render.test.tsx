@@ -187,6 +187,25 @@ function goToConfirmStep() {
   fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
 }
 
+/**
+ * Radixの`Select`はjsdomに無いポインタ関連のAPIを呼ぶため、開くには先に補う必要がある。
+ * 入力ステップのリポジトリ欄（#1733）を実際に操作するテストで使う。
+ */
+function stubPointerApisForSelect() {
+  const proto = Element.prototype as unknown as Record<string, () => unknown>;
+  proto.hasPointerCapture = () => false;
+  proto.setPointerCapture = () => undefined;
+  proto.releasePointerCapture = () => undefined;
+  proto.scrollIntoView = () => undefined;
+}
+
+/** 入力ステップのリポジトリ欄で指定する（#1733） */
+function pickInputRepository(optionName: string) {
+  stubPointerApisForSelect();
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "リポジトリ" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 describe("CreateIssueDialog の「作成+実装開始」", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
@@ -359,14 +378,127 @@ describe("CreateIssueDialog のクイック起票", () => {
     quickSuggestState.notConfigured = false;
   });
 
-  it("開いた直後はリポジトリ・タイトル・ラベル・担当者を出さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
+  it("開いた直後はタイトル・ラベル・担当者を出さない（リポジトリは先に指定できる・#1733）", () => {
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
 
     expect(screen.getByLabelText("内容")).not.toBeNull();
-    expect(screen.queryByLabelText("リポジトリ")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      "自動で決める",
+    );
     expect(screen.queryByLabelText("タイトル")).toBeNull();
     expect(screen.queryByLabelText("担当者")).toBeNull();
     expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
+  });
+
+  /**
+   * #1733。リポジトリ別の画面から渡された値は、これまで入力ステップに何も出ないまま
+   * 持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった。
+   */
+  it("リポジトリ別の画面から開いたときは、入力ステップにその値が入っている", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      REPOSITORY_FULL_NAME,
+    );
+  });
+
+  it("指定しなければ、推定に「指定済み」を立てない", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ repositoryFullName: null, repositoryPinned: false }),
+    );
+  });
+
+  /**
+   * #1733。人が選んだ値を推し量る意味は無いので、リポジトリの推定は省く。
+   * 押しても変わらない候補チップも、直していないのに「自動」と名乗るバッジも出さない。
+   */
+  it("入力ステップで指定すると、推定を省いて候補チップも「自動」バッジも出さない", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+      repositoryCandidates: [],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), makeOtherRepository()]}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickInputRepository(OTHER_REPOSITORY_FULL_NAME);
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+        repositoryPinned: true,
+      }),
+    );
+
+    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
+    // 指定したリポジトリのまま。タイトルだけが「自動」で、リポジトリには何も付かない
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    expect(screen.getAllByText("自動")).toHaveLength(1);
+    expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
+    expect(screen.queryByRole("button", { name: /候補1/ })).toBeNull();
+  });
+
+  /**
+   * #1733。質問へ切り替えると、ワークフロー未導入のリポジトリは選び直される（#1641）。
+   * **選び直された値は本人の指定ではない**ので、指定として扱って推定を省いてはいけない。
+   */
+  it("種別の切り替えでリポジトリが選び直されたら、指定として扱わない", async () => {
+    const unregistered: ConnectedRepository = {
+      ...makeOtherRepository(),
+      id: "3",
+      name: "vps",
+      fullName: "guchi-apps/vps",
+      hasClaudeWorkflow: false,
+    };
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: null,
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), unregistered]}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickInputRepository("guchi-apps/vps");
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+    // 質問では選べないため導入済みの先頭へ寄る（#1641）
+    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
+      REPOSITORY_FULL_NAME,
+    );
+
+    fireEvent.change(screen.getByLabelText("質問内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
+    expect(quickGenerate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ repositoryPinned: false }),
+    );
   });
 
   it("「次へ」で推定を呼び、確認ステップに結果を入れる", async () => {
@@ -536,5 +668,101 @@ describe("CreateIssueDialog のクイック起票", () => {
 
     expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("本文");
     expect(screen.queryByLabelText("タイトル")).toBeNull();
+  });
+});
+
+/**
+ * #1728。書いている内容ごと別ウィンドウ（`/issues/new`）へ移す。
+ * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
+ */
+describe("CreateIssueDialog の別ウィンドウ", () => {
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("「別ウィンドウで開く」で、書いている内容を渡してウィンドウを開き、ダイアログを閉じる", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue({ focus: vi.fn() } as unknown as Window);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "別ウィンドウで開く" }));
+
+    expect(open).toHaveBeenCalledWith(
+      "/issues/new",
+      "issue-deck-create-issue",
+      expect.stringContaining("popup=yes"),
+    );
+    // 渡すのは入力内容そのもの。開いた側が読み取って消す
+    const handoff = JSON.parse(window.localStorage.getItem("issue-create-handoff") ?? "{}");
+    expect(handoff.body).toBe("書きかけの本文");
+    expect(handoff.repositoryFullName).toBe(REPOSITORY_FULL_NAME);
+    expect(handoff.step).toBe("input");
+    // 移したのでダイアログ側は閉じる
+    expect(screen.queryByLabelText("内容")).toBeNull();
+  });
+
+  it("ブラウザに止められた場合はダイアログを閉じず、理由を出す", () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "別ウィンドウで開く" }));
+
+    expect(
+      screen.queryByText("ブラウザが別ウィンドウを止めました。このサイトのポップアップを許可してください。"),
+    ).not.toBeNull();
+    // 書いていた内容の行き先が消えないよう、ダイアログは開いたまま
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("書きかけの本文");
+    expect(window.localStorage.getItem("issue-create-handoff")).toBeNull();
+  });
+
+  it("別ウィンドウ側は、移してきた内容と続きのステップで始まる", () => {
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={vi.fn()}
+        repositories={[makeRepository()]}
+        issues={[]}
+        onCreated={vi.fn()}
+        initialHandoff={{
+          kind: "issue",
+          repositoryFullName: REPOSITORY_FULL_NAME,
+          title: "移してきたタイトル",
+          body: "移してきた本文",
+          selectedLabels: ["50.feature"],
+          assignee: "m-guchi",
+          bodyPrefix: null,
+          step: "confirm",
+          savedAt: Date.now(),
+        }}
+      />,
+    );
+
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("移してきたタイトル");
+    expect(screen.getByText("移してきた本文")).not.toBeNull();
+    // 移した先で同じ物をもう一度「復元する」と出さない（すでに入っているため）
+    expect(screen.queryByText("保存された下書きがあります")).toBeNull();
+    // ウィンドウの中には移す先が無いので、「別ウィンドウで開く」は出さない
+    expect(screen.queryByRole("button", { name: "別ウィンドウで開く" })).toBeNull();
+  });
+
+  it("別ウィンドウでは、取り消しの文言を渡されたものに差し替える", () => {
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={vi.fn()}
+        repositories={[makeRepository()]}
+        issues={[]}
+        onCreated={vi.fn()}
+        cancelLabel="デッキへ戻る"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "デッキへ戻る" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
   });
 });

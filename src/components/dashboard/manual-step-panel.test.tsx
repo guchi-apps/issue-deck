@@ -57,6 +57,16 @@ describe("ManualStepPanel", () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
+  // 手順は本文テンプレートの見出しと重複していたので出さない（#1732）
+  it("手順の説明は出さず、クローズのボタンだけを出す", () => {
+    render(<ManualStepPanel isSubmitting={false} onComplete={vi.fn()} onSkip={vi.fn()} />);
+
+    expect(screen.queryByText(/実装エージェントへは送りません/)).toBeNull();
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.queryByText(/進捗（Status）はReadyのまま/)).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
+
   it("送信中はどちらのボタンも押せない", () => {
     const onComplete = vi.fn();
     const onSkip = vi.fn();

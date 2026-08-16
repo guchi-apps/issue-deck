@@ -18,6 +18,7 @@ src/
     api/            Route Handler。画面からのデータ取得・更新はすべてここ経由
     auth/callback   Supabase Authのコールバック。Userレコードの作成とトークン保存
     dashboard/      メイン画面
+    issues/new      Issue作成画面を別ウィンドウで開くためのページ（#1728）
     github/setup    GitHub Appインストール後の受け口
   components/
     dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
@@ -63,6 +64,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   押した行が反応しない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
+- **Issueの作成フォームは、ダイアログでも別ウィンドウでも
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)1つだけ**（#1728）。
+  `presentation`（`dialog` / `window`）で外枠（見出し・フッター・オーバーレイの有無）だけを
+  差し替え、項目・2ステップの流れ・作成後の動きは共通のまま使う。**別ウィンドウ用にフォームを
+  もう一つ作らない**——以降の変更を2か所へ入れ続けることになり、片方だけ古くなる。
+  別ウィンドウのページは[`app/issues/new/page.tsx`](../src/app/issues/new/page.tsx)、
+  ウィンドウとしての振る舞い（受け渡し・閉じ方・作成の通知）は
+  [`create-issue-window.tsx`](../src/components/dashboard/create-issue-window.tsx)が持つ。
+  `window.open`では状態を直接渡せないため、書きかけの内容はlocalStorage経由で一度だけ渡す
+  （[`lib/issue-create-window.ts`](../src/lib/issue-create-window.ts)。下書きの自動保存
+  （`use-issue-draft`）とはキーも意味も別物で、あちらは人が「復元する」を選ぶもの）。
+  作成したIssueは`BroadcastChannel`で元のデッキへ伝えて一覧へ加えるが、
+  **選択中のIssueは動かさない**（[`lib/issue-broadcast.ts`](../src/lib/issue-broadcast.ts)）。
+  伝わらなくても一覧のポーリング（10秒）で現れるので、失敗しても作成は止めない。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -168,6 +183,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面が渡すのは「その画面を開いていた」という事実だけで、書いた内容が別のリポジトリの話で
   あることは普通に起きる。渡された値は選択状態のまま`表示中のリポジトリ`と示し、推定結果は
   候補として並べる。
+  **入力ステップでもリポジトリだけは先に指定できる**（#1733）。既定は「自動で決める（内容から）」で、
+  選ばなければ上記のまま何も変わらない。選んだときだけ`repositoryPinned`が立ち、**APIは
+  リポジトリの推定（Claude 1回＋リポジトリごとのIssueタイトル取得）をまるごと省いて**
+  タイトル・ラベルの生成へ直行する。確認ステップでは候補チップも`自動`／`表示中のリポジトリ`
+  バッジも出さない——押しても変わらない候補や、本人が選んだ値に付く「自動」は、選んだ側から見ると
+  自分の指定が効いていないようにしか読めない。**「人が選んだ」と「画面から渡された」を混ぜないこと**が
+  この分岐の要で、画面側は`hasPickedRepository`、API側は`repositoryPinned`で区別する。
+  選択肢の並びは入力ステップと確認ステップで共通（`RepositorySelectItems`）。
   **種別（Issue／質問）だけはこの自動化の対象外**で、上のとおり自動判定しない。
   Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
   （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
@@ -270,7 +293,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `sidebarQuestionNavViews`・`sidebarIssueNavViews`、
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
   `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
-  左メニューから外した「最近追加した」「本番反映待ち」「直近本番に反映した」「完了したPR」は
+  左メニューから外した「最近追加した」「直近本番に反映した」「完了したPR」は
   viewクエリとしては生きており、既存リンクからは今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
@@ -280,7 +303,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   分からない状態だった。**片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは
   「リポジトリ（全件）」「ラベル」「よく使うフィルター」の3節だけ（スマホではそれぞれフッターの
   「Issue」タブと一覧の絞り込みシートが担う）。
-  「本番反映待ち」はホームのメニューには無いが、先頭の「いまの状況」のカードから開ける。
+  「本番反映待ち」は#1613でIssueの節から外していたが、#1743で戻した（PC・スマホのホーム・
+  スマホのIssue一覧の3か所すべてに出る）。**足す先は`sidebarIssueNavViews`で、
+  `sidebarAttentionNavViews`ではない**——本番反映待ちで止まっているのはエージェントではなく
+  リリースの実行で、要対応の枠へ入れると上記の並びの読み方が崩れる。ホームでは先頭の
+  「いまの状況」のカードとメニューの両方から開けるが、これは「ユーザーの確認待ち」も同じ
+  （カードは件数を見るサマリ、メニューは他のビューと並ぶ入口）。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
   一覧の先頭に`MergePendingPullRequests`、選ぶ対象は`pullRequestsAwaitingUserMerge`）。
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
@@ -344,6 +372,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **コンフリクト有無（`mergeable`）は、そのCI状態と同じ1回のGraphQLで取る**（#1742。
+  `fetchPullRequestRollup` → `fetchPullRequestCiState`）。`mergeable`はRESTだとPRの単体取得でしか
+  返らないため、PR一覧に出すとPR1件につき1回APIが増える——これが理由でPR一覧は長らく
+  「CI通過」だけを出しており、**コンフリクトで実際には入らないPRが「入れられる」ように見えていた**。
+  GraphQLの`PullRequest`は`mergeable`とheadコミットの`statusCheckRollup`を同じクエリで返すので、
+  すでに消費しているCI状態の1回に相乗りさせれば消費は増えない。**PR番号を持つ経路
+  （PR一覧・PR詳細・リリース進捗）はこちらを使い、番号を持たない経路（developブランチそのものの
+  CI状態など）だけ`fetchRefCiState`を使う。**
+  `mergeable`はGitHub側が非同期に計算するため判定中は`null`で、**`null`を「コンフリクトなし」と
+  扱わない**（`ConflictBadge`も`repairKindsFor`も`false`のときだけ動く）。draftとclosedなPRでは
+  そもそも取得しない（CI状態と同じ方針）。
+  表示と操作は一覧・詳細・確認待ち一覧・リリース進捗で揃え、コンフリクト中は
+  **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
+  GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
@@ -360,9 +402,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`mobile-issue-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-issue-view-sheet.tsx)が
   全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
   ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
-  一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃えて「本番反映待ち」
-  「直近本番に反映した」を外すが、**ホーム画面のカード（「本番反映待ち」）や既存のURLからは
-  それらのビューで開かれうる**ため、現在のビューが一覧に無いときだけ末尾へ足す
+  一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃える。外しているのは
+  「直近本番に反映した」だけで（「本番反映待ち」は左メニューへ戻した#1743にあわせてこちらにも出す）、
+  **既存のURLからはそのビューでも開かれうる**ため、現在のビューが一覧に無いときだけ末尾へ足す
   （足さないと選択中の表示もスワイプ移動先も失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
   （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
   同じシートにあっても数えない。
@@ -687,6 +729,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716）。pollerは`WORKTREE_CLEANUP_INTERVAL_MINUTES`
+  （既定60分・0で無効）の間隔で`scripts/cleanup-worktrees.sh --yes`を呼ぶ。**足りなかったのは
+  判定ではなく起点**で、スクリプトは#1100からあったのに実行の起点がどこにも無く、3日で181本・38GB
+  溜まってルートFSが77%に達した。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
+  経っていないworktreeは触らない（`--min-age-minutes`。`start-issue.sh`が作ってからセッションの
+  プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
+  消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
+  [multi-agent/branching.md](multi-agent/branching.md)「掃除を回す起点」。
 - **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
   だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
   `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。
@@ -863,6 +913,13 @@ Issue詳細の上部（`IssueStatusCard`）とコメント欄の承認カード�
 pnpm test        # lint + typecheck + vitest run
 pnpm test:unit   # vitestのみ
 ```
+
+**shadcn（Radix）の`Select`は、jsdomでそのままでは開けない**（#1733）。`hasPointerCapture`・
+`setPointerCapture`・`releasePointerCapture`・`scrollIntoView`をテスト側で補ってから、
+トリガーへ`keyDown`（`ArrowDown`）を送ると`role="option"`が出て`click`で選べる。補わないと
+ドロップダウンが開かず、選択を伴う画面の挙動をテストできない（`create-issue-dialog.render.test.tsx`の
+`stubPointerApisForSelect`が実装）。トリガーの表示値を読むだけなら
+`getByRole("combobox", { name: ... })`の`textContent`で足り、補う必要は無い。
 
 `pnpm dev` は `next dev` の単純なラッパーではなく、[../scripts/dev.sh](../scripts/dev.sh) が
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の

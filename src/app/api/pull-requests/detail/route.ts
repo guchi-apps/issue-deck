@@ -98,6 +98,9 @@ async function handleGET(request: NextRequest) {
         {
           merged: pullRequest.merged,
           ciState,
+          // 詳細は単体取得（`fetchPullRequest`）のレスポンスに`mergeable`を含むため、
+          // 一覧のようにGraphQLで取り直す必要はない（#1742）。
+          mergeable: pullRequest.mergeable,
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),
@@ -108,7 +111,6 @@ async function handleGET(request: NextRequest) {
       deletions: pullRequest.deletions,
       changedFiles: pullRequest.changed_files,
       commits: pullRequest.commits,
-      mergeable: pullRequest.mergeable,
       events: buildPullRequestEvents({ comments, reviews, reviewComments }),
       fetchedAt: new Date().toISOString(),
     };

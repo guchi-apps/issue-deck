@@ -36,24 +36,57 @@ export type CheckRollup = {
 /** 1回のクエリで引くチェックの上限。GraphQLの`first`の上限値でもある */
 const CONTEXTS_PAGE_SIZE = 100;
 
+/** `statusCheckRollup`の中身。ref経由・PR経由のどちらのクエリでも同じ形を引く */
+const ROLLUP_FIELDS = `
+  state
+  contexts(first: ${CONTEXTS_PAGE_SIZE}) {
+    totalCount
+    nodes {
+      __typename
+      ... on CheckRun {
+        status
+        conclusion
+      }
+      ... on StatusContext {
+        state
+      }
+    }
+  }
+`;
+
 const QUERY = `
   query($owner: String!, $name: String!, $expression: String!) {
     repository(owner: $owner, name: $name) {
       object(expression: $expression) {
         ... on Commit {
           statusCheckRollup {
-            state
-            contexts(first: ${CONTEXTS_PAGE_SIZE}) {
-              totalCount
-              nodes {
-                __typename
-                ... on CheckRun {
-                  status
-                  conclusion
-                }
-                ... on StatusContext {
-                  state
-                }
+            ${ROLLUP_FIELDS}
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * PR番号で引く版（#1742）。**CI状態とコンフリクト有無を1回のクエリでまとめて取る**ためにある。
+ *
+ * `mergeable`はRESTだとPRの単体取得でしか返らないため、PR一覧で出そうとするとPR1件につき
+ * 1回APIが増える。GraphQLの`PullRequest`は`mergeable`と（headコミットの）`statusCheckRollup`を
+ * 同じ1クエリで返せるので、いま消費しているCI状態の1回に相乗りさせられる。
+ *
+ * `commits(last: 1)`が返すのはPRのheadコミットで、ref経由で`head.sha`を指定した場合と同じもの。
+ */
+const PULL_REQUEST_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        mergeable
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                ${ROLLUP_FIELDS}
               }
             }
           }
@@ -73,13 +106,26 @@ type RollupContextNode = {
   state?: string | null;
 };
 
+/** `statusCheckRollup`のノード。ref経由・PR経由で同じ形を受ける */
+type RollupNode = {
+  state: string | null;
+  contexts: { totalCount: number; nodes: RollupContextNode[] };
+};
+
 type RollupResponse = {
   repository: {
     object: {
-      statusCheckRollup: {
-        state: string | null;
-        contexts: { totalCount: number; nodes: RollupContextNode[] };
-      } | null;
+      statusCheckRollup: RollupNode | null;
+    } | null;
+  } | null;
+};
+
+type PullRequestRollupResponse = {
+  repository: {
+    pullRequest: {
+      /** `MERGEABLE` / `CONFLICTING` / `UNKNOWN`（GitHubが判定中） */
+      mergeable: string | null;
+      commits: { nodes: { commit: { statusCheckRollup: RollupNode | null } | null }[] };
     } | null;
   } | null;
 };
@@ -113,6 +159,25 @@ function toRollupCheck(node: RollupContextNode): RollupCheck | null {
 }
 
 /**
+ * GraphQLの`statusCheckRollup`ノードを`CheckRollup`へ写す。
+ * ノードがnull（＝refは解決できたがチェックが1件も無い）の場合は空の一覧を返す。
+ */
+function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
+  if (!rollup) return { state: null, checks: [] };
+
+  const state = rollup.state ? rollup.state.toLowerCase() : null;
+  if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
+    return { state, checks: null };
+  }
+  return {
+    state,
+    checks: rollup.contexts.nodes
+      .map(toRollupCheck)
+      .filter((check): check is RollupCheck => check !== null),
+  };
+}
+
+/**
  * 指定ref（ブランチ名・タグ・SHA）のチェック集約を取得する。取得できなければnull
  * （呼び出し側で`unknown`へ縮退させる。CI状態が取れないだけでマージの導線を消さないため）。
  */
@@ -135,18 +200,59 @@ export async function fetchCheckRollup(
   });
   if (!data) return null;
 
-  const rollup = data.repository?.object?.statusCheckRollup;
-  // refは解決できたがチェックが1件も無い場合、`statusCheckRollup`はnullになる。
-  if (!rollup) return { state: null, checks: [] };
+  return toCheckRollup(data.repository?.object?.statusCheckRollup);
+}
 
-  const state = rollup.state ? rollup.state.toLowerCase() : null;
-  if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
-    return { state, checks: null };
-  }
+/** PR1件ぶんのチェック集約とコンフリクト有無（#1742） */
+export type PullRequestRollup = {
+  /** headコミットのチェック集約。取得できなければnull */
+  rollup: CheckRollup | null;
+  /**
+   * コンフリクトの有無。`true`＝マージ可能・`false`＝コンフリクトあり・
+   * `null`＝GitHubが判定中（`UNKNOWN`）または取得できなかった。
+   */
+  mergeable: boolean | null;
+};
+
+/** GraphQLの`MergeableState`をbooleanへ写す。`UNKNOWN`（判定中）はnullのまま扱う */
+function toMergeable(state: string | null | undefined): boolean | null {
+  if (state === "MERGEABLE") return true;
+  if (state === "CONFLICTING") return false;
+  return null;
+}
+
+/**
+ * PR番号で、headコミットのチェック集約とコンフリクト有無を**1回のクエリで**取得する（#1742）。
+ *
+ * PR一覧はもともとCI状態のためにPR1件につきGraphQLを1回消費している。`mergeable`をここへ
+ * 相乗りさせることで、一覧でもコンフリクトを出せるようにしつつGitHub APIの消費は増やさない
+ * （RESTの単体取得を足すとPR1件につき1回増える）。
+ *
+ * 取得に失敗しても例外にせず`{ rollup: null, mergeable: null }`へ縮退させる
+ * （`fetchCheckRollup`と同じ扱い。CI状態やコンフリクトが取れないだけで一覧を落とさない）。
+ */
+export async function fetchPullRequestRollup(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<PullRequestRollup> {
+  const data = await githubGraphql<PullRequestRollupResponse>(
+    token,
+    PULL_REQUEST_QUERY,
+    { owner, name: repo, number },
+    "pullRequestStatusCheckRollup",
+    { permissionHint: "（Pull requests: ReadとChecks: Readの権限が要ります）" },
+  ).catch((error: unknown) => {
+    console.warn(`[fetchPullRequestRollup] ${owner}/${repo}#${number} の取得に失敗しました:`, error);
+    return null;
+  });
+
+  const pullRequest = data?.repository?.pullRequest;
+  if (!pullRequest) return { rollup: null, mergeable: null };
+
   return {
-    state,
-    checks: rollup.contexts.nodes
-      .map(toRollupCheck)
-      .filter((check): check is RollupCheck => check !== null),
+    rollup: toCheckRollup(pullRequest.commits.nodes[0]?.commit?.statusCheckRollup),
+    mergeable: toMergeable(pullRequest.mergeable),
   };
 }
