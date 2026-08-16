@@ -44,8 +44,6 @@ function renderScreen(releaseStatuses: RepositoryReleaseStatus[] | null) {
     <MobileReposScreen
       repositories={[REPO_A, REPO_B]}
       onSelectRepository={vi.fn()}
-      onHideRepository={vi.fn()}
-      onShowRepository={vi.fn()}
       onSetRepositoryFavorite={vi.fn()}
     />,
   );
@@ -107,5 +105,23 @@ describe("MobileReposScreen のリリース状況バッジ（#1117）", () => {
     // dayspanは応答に含まれない＝idleなので、バッジは1つだけ。
     expect(screen.queryByText("実施中")).toBeNull();
     expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+  });
+});
+
+describe("MobileReposScreen のヘッダー（#1685）", () => {
+  beforeEach(() => {
+    useRepositoryReleaseStatuses.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("表示・非表示を切り替えるアイコンを出さない（設定画面と重複するため削除した）", () => {
+    renderScreen(null);
+
+    expect(screen.queryByLabelText("表示・非表示を切り替える")).toBeNull();
+    expect(screen.queryByTitle("非表示にする")).toBeNull();
+    expect(screen.queryByTitle("表示する")).toBeNull();
   });
 });

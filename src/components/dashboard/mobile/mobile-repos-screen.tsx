@@ -1,17 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  Archive,
-  CircleSlash,
-  Eye,
-  EyeOff,
-  FolderGit2,
-  Lock,
-  Search,
-  Settings2,
-  Star,
-} from "lucide-react";
+import { Archive, CircleSlash, FolderGit2, Lock, Search, Star } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { Input } from "@/components/ui/input";
@@ -41,21 +31,16 @@ const BADGE_TONE_CLASS: Record<ReleaseStatusBadge["tone"], string> = {
 type MobileReposScreenProps = {
   repositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
-  onHideRepository: (repository: ConnectedRepository) => void;
-  onShowRepository: (repository: ConnectedRepository) => void;
   onSetRepositoryFavorite: (repository: ConnectedRepository, favorite: boolean) => void;
 };
 
 export function MobileReposScreen({
   repositories,
   onSelectRepository,
-  onHideRepository,
-  onShowRepository,
   onSetRepositoryFavorite,
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
-  const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
 
   // 本番ワークフローの進捗を一覧で把握できるようにする（#1117）。取得はこの画面を
   // 開いている間だけで、`idle`のリポジトリはAPIが返さないためバッジも出ない。
@@ -91,26 +76,8 @@ export function MobileReposScreen({
         {/* フッターの「Issue」タブが開く画面なので、見出しもラベルに揃える（#1436）。
             中身はリポジトリ一覧のままで、リポジトリを選ぶとそのIssue一覧へ進む */}
         <h1 className="flex-1 text-base font-semibold">Issue</h1>
-        <button
-          type="button"
-          onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
-          title={
-            isEditingRepoVisibility
-              ? "表示・非表示の切り替えを終了"
-              : "表示・非表示を切り替える"
-          }
-          aria-label={
-            isEditingRepoVisibility
-              ? "表示・非表示の切り替えを終了"
-              : "表示・非表示を切り替える"
-          }
-          className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-            isEditingRepoVisibility && "bg-accent text-foreground",
-          )}
-        >
-          <Settings2 className="size-4" />
-        </button>
+        {/* リポジトリの表示・非表示を切り替える口は設定画面に同じものがあるため、
+            ここのアイコンは置かない（#1685） */}
         {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端に固定する */}
         <MobileDispatchStatusButton />
       </header>
@@ -217,22 +184,6 @@ export function MobileReposScreen({
                     >
                       <Star className={cn("size-4", repo.favorite && "fill-yellow-400")} />
                     </button>
-                    {isEditingRepoVisibility && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          repo.hidden ? onShowRepository(repo) : onHideRepository(repo)
-                        }
-                        title={repo.hidden ? "表示する" : "非表示にする"}
-                        className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        {repo.hidden ? (
-                          <EyeOff className="size-4" />
-                        ) : (
-                          <Eye className="size-4" />
-                        )}
-                      </button>
-                    )}
                   </li>
                 );
               })}
