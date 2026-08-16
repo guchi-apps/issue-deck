@@ -100,6 +100,7 @@ function makeHost(): DispatchHostView {
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,
+    checkout: null,
   };
 }
 

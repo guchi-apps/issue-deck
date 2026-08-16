@@ -30,6 +30,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
       swapUsedMb: 1_024,
       swapTotalMb: 8_192,
     },
+    checkout: null,
     ...overrides,
   };
 }
@@ -166,6 +167,37 @@ describe("DispatchHostPanel", () => {
     expect(screen.queryByText("34%")).toBeNull();
     expect(screen.queryByText("セッション 2/12")).toBeNull();
     expect(screen.getByText(/応答していません/)).toBeTruthy();
+  });
+
+  /**
+   * #1612。**pollerは自分と同じチェックアウトの回収スクリプト・ランチャーを動かす**ため、
+   * developへマージしただけでは効かない。効いていないことに気付く手掛かりがどこにも無く、
+   * 実際に97コミット遅れたまま#1454・#1541が一度も働いていなかった。
+   */
+  it("動かしているスクリプトの版と、developからの遅れを出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({
+            checkout: {
+              commit: "fbb809d",
+              branch: "develop",
+              committedAt: NOW.toISOString(),
+              behindCount: 97,
+              fetchedAt: NOW.toISOString(),
+            },
+          }),
+        ]}
+        sessions={[]}
+      />,
+    );
+    expect(screen.getByText("スクリプト develop fbb809d")).toBeTruthy();
+    expect(screen.getByText("97コミット遅れ・たった今")).toBeTruthy();
+  });
+
+  it("版を申告していない古いpollerではその行を出さない", () => {
+    render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
+    expect(screen.queryByText(/スクリプト/)).toBeNull();
   });
 
   it("使用率を申告していない古いpollerではメーターを出さない", () => {

@@ -5,6 +5,10 @@ import { ExternalLink, Monitor } from "lucide-react";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
+import {
+  describeDispatchHostCheckout,
+  type DispatchHostCheckoutTone,
+} from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   describeDispatchHostMetrics,
@@ -40,6 +44,16 @@ const METRIC_TONE_CLASS: Record<DispatchHostMetricTone, { bar: string; text: str
   normal: { bar: "bg-muted-foreground/60", text: "text-muted-foreground" },
   warn: { bar: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
   critical: { bar: "bg-destructive", text: "text-destructive" },
+};
+
+/**
+ * チェックアウトの鮮度（#1612）の配色。**使用率と同じ3段階の同じ色**にして、画面の中で
+ * 同じ色が違う重さを指さないようにする。
+ */
+const CHECKOUT_TONE_CLASS: Record<DispatchHostCheckoutTone, string> = {
+  normal: "text-muted-foreground",
+  warn: "text-amber-700 dark:text-amber-400",
+  critical: "text-destructive",
 };
 
 const SESSION_TONE_CLASS: Record<IssueSessionTone, string> = {
@@ -96,6 +110,10 @@ function HostCard({
   onOpenIssue?: (issueId: string) => void;
 }) {
   const metrics = describeDispatchHostMetrics(host);
+  // いま動いているスクリプトがどの版か（#1612）。**pollerは自分と同じチェックアウトの
+  // 回収スクリプト・ランチャーを動かすため、developへマージしただけでは効かない。**
+  // ここに出しておかないと、効いていないことに気付く手掛かりがどこにも無い
+  const checkout = describeDispatchHostCheckout(host);
   const atCapacity = isDispatchHostAtSessionCapacity(host);
   // 申告していない古いpollerでは本数そのものが不明。0本と混ぜない（#1394）
   const hasSessionCount = host.maxSessions !== null && host.liveSessions !== null;
@@ -127,6 +145,16 @@ function HostCard({
           </span>
         )}
       </div>
+
+      {checkout && (
+        <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+          <span className="truncate text-muted-foreground">スクリプト {checkout.version}</span>
+          <span className={cn("shrink-0", CHECKOUT_TONE_CLASS[checkout.tone])}>
+            {checkout.status}
+            {checkout.detail ? `・${checkout.detail}` : ""}
+          </span>
+        </div>
+      )}
 
       {metrics && (
         <div className="mt-1.5 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1">

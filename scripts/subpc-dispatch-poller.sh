@@ -55,6 +55,8 @@
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
+#   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
+#                                   チェックアウトの遅れを数え直す間隔の分数（省略時は360・0で無効）
 #
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
@@ -73,7 +75,8 @@ set -euo pipefail
 # 7: セッションの owner/repo を状態ファイルから復元し、`local-repos.conf`に載っていない
 #    リポジトリ（横断質問セッションの記録先）のセッションも報告する（#1537）。
 # 8: 使用率の申告にSWAPを載せ、既定のポーリング間隔を30秒にする（#1624）。
-DISPATCH_POLLER_VERSION="8"
+# 9: 動かしているチェックアウトの版（コミット・ブランチ・developからの遅れ）を申告する（#1612）。
+DISPATCH_POLLER_VERSION="9"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -162,6 +165,21 @@ require_positive_int() {
   printf '%s\n' "$value"
 }
 
+# 0を「無効」の意味で使える設定値のための版（#1612）。回収まわりの分数（`DEV_SERVER_IDLE_MINUTES`
+# など）と同じ約束で、0は壊れた値ではなく「その機能を止める」という指定。
+require_non_negative_int() {
+  local name="$1" value="$2" fallback="$3"
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  if [[ ! "$value" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    echo "Error: $name は0以上の整数で指定してください: $value（$DISPATCH_ENV_FILE）" >&2
+    exit 1
+  fi
+  printf '%s\n' "$value"
+}
+
 # 既定は30秒（#1624で60秒から短くした）。この間隔がそのまま「画面のボタンを押してから起動が
 # 始まるまで」と「実行キューに出る使用率の古さ」の上限になる。1巡でissue-deckへ行くのは
 # HTTP 2回・DBクエリ数件なので、倍にしても負荷は無視できる。
@@ -180,6 +198,14 @@ LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPAT
 # 開発サーバーが最大3本（#1177）走るため、12本で1〜2割の余裕を残す見当。
 # 別のホストへ載せるときは搭載メモリに合わせて dispatch.env で変える。
 MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSIONS:-}" 12)"
+
+# チェックアウトの遅れ（#1612）を数え直す間隔（分）。**0で無効**（fetchを一切行わない）。
+#
+# 既定の6時間は「毎巡fetchしたくない」と「遅れに気付くのが1日遅れては意味が無い」の間を取った値。
+# 遅れの数字は最後にoriginを見た時点のものなので、間隔を延ばすほど申告が古くなる（どの時点の
+# 数字かは`fetchedAt`として一緒に申告し、画面が古ければ注記を出す）。
+CHECKOUT_FETCH_INTERVAL_MINUTES="$(require_non_negative_int \
+  DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" 360)"
 
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
@@ -365,8 +391,113 @@ collect_host_metrics() {
     '{cpuPercent: $cpuPercent, memoryUsedMb: $memoryUsedMb, memoryTotalMb: $memoryTotalMb, swapUsedMb: $swapUsedMb, swapTotalMb: $swapTotalMb, diskUsedGb: $diskUsedGb, diskTotalGb: $diskTotalGb}'
 }
 
+# 動かしているチェックアウトの版（#1612）。**画面へ出すためだけの申告**で、issue-deck側は
+# この値で何も判定しない。
+#
+# pollerが動かすのは自分と同じチェックアウト（`SCRIPT_DIR`基準）の`reap-sessions.sh`・
+# `reap-dev-servers.sh`・ランチャーで、**これを自動で更新する仕組みは無い**。つまり`develop`へ
+# マージしただけでは挙動が変わらないのに、変わっていないことに気付く手掛かりがどこにも無かった。
+# 2026-08-15には97コミット遅れており、#1454と#1541がどちらもマージ済みなのに一度も
+# 効いていなかった（worktreeで`--dry-run`すると直って見えるため、実機との差にも気付けない）。
+#
+# **ここでやるのは申告だけで、`git pull`はしない**（docs/multi-agent/gates.md）。レビューを
+# 経ていないコードが無人で走り出す形にはせず、取り込むかどうかは人が決める。
+CHECKOUT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# fetchが固まっても1巡を止めないための上限（秒）。起動の`timeout`と同じ考え方。
+CHECKOUT_FETCH_TIMEOUT_SECONDS=60
+
+# 最後にoriginを見た時刻（epoch秒）。**`.git/FETCH_HEAD`のmtimeで見る。**
+# gitがfetch・pullのたびに書き直すファイルなので、pollerが打ったfetchも人が手で打ったpullも
+# 同じように反映される（poller専用の印を別に持つと、人がpullした直後に「古い」と出る）。
+checkout_fetch_epoch() {
+  local git_dir fetch_head
+  git_dir="$(git -C "$CHECKOUT_DIR" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  fetch_head="$git_dir/FETCH_HEAD"
+  [[ -f "$fetch_head" ]] || return 1
+  date -r "$fetch_head" +%s 2>/dev/null || return 1
+}
+
+# 間隔を過ぎていればoriginを見に行く。**失敗しても何も止めない**（遅れが数えられないだけで、
+# その場合は`behindCount`が空のまま申告され、画面には「遅れ不明」と出る）。
+maybe_fetch_checkout() {
+  ((CHECKOUT_FETCH_INTERVAL_MINUTES > 0)) || return 0
+  local last now
+  last="$(checkout_fetch_epoch)" || last=0
+  now="$(date +%s)"
+  ((now - last >= CHECKOUT_FETCH_INTERVAL_MINUTES * 60)) || return 0
+
+  # **標準出力も捨てる。** この関数は申告のJSONを組み立てる途中で呼ばれるため、
+  # gitが何か書くとJSONに混ざる。
+  if ! timeout "$CHECKOUT_FETCH_TIMEOUT_SECONDS" git -C "$CHECKOUT_DIR" fetch --quiet origin >/dev/null 2>&1; then
+    echo "警告: チェックアウトの遅れを数えるためのfetchに失敗しました（$CHECKOUT_DIR）。" >&2
+  fi
+  return 0
+}
+
+# 申告する版を組み立てる。**gitが無い・リポジトリでない・HEADが読めない場合は何も出力しない**
+# （呼び出し側が`checkout`ごと落とす）。逆に、ブランチ・遅れ・fetch時刻は取れなくても
+# 全体を落とさない。いちばん確実な事実（どのコミットが動いているか）まで消してしまわないため。
+collect_checkout_state() {
+  command -v git >/dev/null 2>&1 || return 1
+  git -C "$CHECKOUT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+
+  maybe_fetch_checkout
+
+  local commit branch committed_at upstream behind fetched_epoch fetched_at
+  commit="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null)" || return 1
+  [[ -n "$commit" ]] || return 1
+
+  # detached HEADでは空になる。**それ自体が異常な状態なので、空のまま申告して画面に出させる**
+  branch="$(git -C "$CHECKOUT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  committed_at="$(git -C "$CHECKOUT_DIR" log -1 --format=%cI HEAD 2>/dev/null || true)"
+
+  # 比べる先は追跡ブランチ（通常は`origin/develop`）。**`origin/develop`と決め打ちしない**のは、
+  # 別のホスト・別のブランチで動かしたときに「常に大量に遅れている」と出るのを避けるため。
+  # 追跡ブランチの設定が無いときだけ`origin/<ブランチ名>`へ落とす。
+  upstream="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [[ -z "$upstream" && -n "$branch" ]] &&
+    git -C "$CHECKOUT_DIR" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+    upstream="origin/$branch"
+  fi
+  behind=""
+  if [[ -n "$upstream" ]]; then
+    behind="$(git -C "$CHECKOUT_DIR" rev-list --count "HEAD..$upstream" 2>/dev/null || true)"
+    [[ "$behind" =~ ^[0-9]+$ ]] || behind=""
+  fi
+
+  # 遅れの数字が「いつ時点のものか」。毎巡fetchしないため、これが無いと0の意味が定まらない
+  fetched_at=""
+  if fetched_epoch="$(checkout_fetch_epoch)"; then
+    fetched_at="$(date -u -d "@$fetched_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  fi
+
+  jq -n \
+    --arg commit "$commit" \
+    --arg branch "$branch" \
+    --arg committedAt "$committed_at" \
+    --arg fetchedAt "$fetched_at" \
+    --argjson behindCount "${behind:-null}" \
+    '{commit: $commit, behindCount: $behindCount}
+      + (if $branch == "" then {} else {branch: $branch} end)
+      + (if $committedAt == "" then {} else {committedAt: $committedAt} end)
+      + (if $fetchedAt == "" then {} else {fetchedAt: $fetchedAt} end)'
+}
+
+# journaldの1行に載せる版の要約。**画面を開かなくても分かるようにする**（サブPCを直接見る
+# ときは、まずここを読むため）。
+describe_checkout_state() {
+  local checkout="$1"
+  [[ -n "$checkout" ]] || return 0
+  printf '%s' "$checkout" | jq -r '
+    "・スクリプト " + (.branch // "detached") + " " + .commit + "（"
+    + (if .behindCount == null then "遅れ不明"
+       elif .behindCount == 0 then "最新"
+       else "\(.behindCount)コミット遅れ" end)
+    + "）"' 2>/dev/null || true
+}
+
 announce() {
-  local repositories payload live_sessions metrics
+  local repositories payload live_sessions metrics checkout
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
   # **申告するのは1巡の入口で数えた本数**（#1394）。この後の回収（reap_sessions）で減ったぶんは
   # 次の巡の申告に乗る。画面に出すのは「最後に申告した時点」の数字で、判定そのものは
@@ -377,6 +508,10 @@ announce() {
   # 取れなければ空にし、下で`null`として送る（#1567）。issue-deck側はそれを「申告なし」として
   # 5列をnullへ戻すため、**取れなくなった巡で古い数字が残り続けることはない**
   metrics="$(collect_host_metrics 2>/dev/null)" || metrics=""
+
+  # 動かしているチェックアウトの版（#1612）。取れなければ空にし、下で`null`として送る
+  # （issue-deck側はそれを「申告なし」として5列をnullへ戻すため、古い版が残り続けない）
+  checkout="$(collect_checkout_state)" || checkout=""
 
   # `sessionControl`は「セッションの停止・終了（#1332）を実行できる」という申告。
   # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
@@ -394,6 +529,10 @@ announce() {
   # `metrics`も**画面へ出すためだけの申告**（#1567）。「もう1本起こしてよいか」を判断するのに
   # ops-dashboardを開かなくて済むようにするためのもので、こちらも判定には使わない。
   # 取れなければ`null`（＝申告なし）。
+  #
+  # `checkout`も同じく**画面へ出すためだけの申告**（#1612）。**`agentVersion`とは別物**で、
+  # あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に動いているスクリプトが
+  # どのコミットのものかという事実（版数が同じまま97コミット遅れていた、が起きている）。
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \
@@ -404,13 +543,14 @@ announce() {
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson metrics "${metrics:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics}')"
+    --argjson checkout "${checkout:-null}" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
     return 1
   fi
-  echo "申告しました: $HOST_NAME（セッション $live_sessions/$MAX_SESSIONS） → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
+  echo "申告しました: $HOST_NAME（セッション $live_sessions/$MAX_SESSIONS$(describe_checkout_state "$checkout")） → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
   return 0
 }
 
