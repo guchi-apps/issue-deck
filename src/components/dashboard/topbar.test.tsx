@@ -75,7 +75,7 @@ describe("TopBar 検索欄", () => {
     expect(setFilter).toHaveBeenCalledWith("q", "bug");
   });
 
-  it("クイックフィルター適用等でfilters.qが外部から変わった場合は表示に追随する", async () => {
+  it("ブラウザバック等でfilters.qが外部から変わった場合は表示に追随する", async () => {
     const setFilter = vi.fn();
     const { container, rerender } = renderTopBar(setFilter, { ...baseFilters, q: "foo" });
     const input = container.querySelector('input[placeholder="Issueを検索..."]') as HTMLInputElement;
