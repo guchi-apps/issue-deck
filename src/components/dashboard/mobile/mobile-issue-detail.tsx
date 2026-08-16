@@ -5,7 +5,6 @@ import { useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRightLeft,
-  Bot,
   ExternalLink,
   FilePlus2,
   Loader2,
@@ -101,7 +100,6 @@ import {
   canCloseAskRepoQuestion,
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
-import { buildClaudeAppHandoffCommentBody, buildClaudeAppUrl } from "@/lib/github/claude-app";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
@@ -386,20 +384,6 @@ export function MobileIssueDetail({
     }
   }
 
-  function handleClaudeAppHandoff() {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: buildClaudeAppHandoffCommentBody(),
-    }).then((created) => {
-      if (!created) return;
-      setComments((prev) => [...prev, created]);
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    });
-  }
-
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
     const [owner, repo] = issue.repositoryFullName.split("/");
     const updated = await updateComment({ owner, repo, commentId: Number(commentId), body });
@@ -574,19 +558,6 @@ export function MobileIssueDetail({
               >
                 <XCircle className="size-3.5" />
                 質問を終えてクローズ
-              </DropdownMenuItem>
-            )}
-            {issue.state === "open" && (
-              <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
-                <a
-                  href={buildClaudeAppUrl(issue)}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={handleClaudeAppHandoff}
-                >
-                  <Bot className="size-3.5" />
-                  Claudeアプリで開く
-                </a>
               </DropdownMenuItem>
             )}
             <DropdownMenuItem asChild className="whitespace-nowrap text-xs">
