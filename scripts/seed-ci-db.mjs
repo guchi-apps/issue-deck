@@ -140,44 +140,49 @@ const DEV_PROJECT_STATUS_CYCLE = [
 ];
 
 /**
- * 開発用の手作業Issue（`71.manual-step`）のサンプル（#1705）。
+ * 開発用の手作業Issue（`71.manual-step`）のサンプル本文（#1705）。
  *
  * 「前提条件の状況」（Issue詳細の手作業パネル）は、本文に書かれた参照の**進捗が段階ごとに
- * 違う**ときにしか読み比べられない。参照先はこの下の`DEV_PROJECT_STATUS_CYCLE`で進捗を
- * 散らしたIssueで、番号と進捗の対応は`(番号 - 1) % 7`——#4が`Develop PR`（実装中）、
- * #5が`Develop`（本番未反映）、#7が`Done`（mainへ反映済み）になる。
- * **サイクルを変えるときはこの本文の番号も直すこと。**
+ * 違う**ときにしか読み比べられない。そのため参照先の番号は固定で書かず、進捗を散らした
+ * 結果から引いて埋める（`DEV_PROJECT_STATUS_CYCLE`の並びやリポジトリの順序が変わっても
+ * ずれない）。
+ *
+ * @param origin 起点Issue（実装中）の番号
+ * @param developed developへ入っているIssue（本番未反映）の番号
+ * @param released mainへ反映済みのIssueの番号
  */
-const MANUAL_STEP_SAMPLE_BODY = [
-  "## 前提条件",
-  "",
-  "- 実行するデバイス: VPS（`ssh vps`）",
-  "- カレントディレクトリ: `/var/www/sample-repo-1`",
-  "- Gitブランチ: `develop`",
-  "- 先に完了している必要があるIssue・PR: #5 がmainへ反映された後、#7 の変更が本番へ出た後",
-  "- その他の前提: なし",
-  "",
-  "## やること",
-  "",
-  "- [ ] `.env`へ`SAMPLE_TOKEN`を追記する",
-  "- [ ] PM2を再起動する",
-  "",
-  "## なぜエージェントが実施しないか",
-  "",
-  "本番サーバーの`.env`はリポジトリに無く、エージェントからは書き換えられないため。",
-  "",
-  "## 放置するとどうなるか",
-  "",
-  "本番の通知が飛ばないままになる。",
-  "",
-  "## 完了の確認方法",
-  "",
-  "`pm2 logs sample-repo-1`に`notify: ok`が出ること。",
-  "",
-  "## 関連",
-  "",
-  "- 起点Issue: #4",
-].join("\n");
+function manualStepSampleBody(origin, developed, released) {
+  return [
+    "## 前提条件",
+    "",
+    "- 実行するデバイス: VPS（`ssh vps`）",
+    "- カレントディレクトリ: `/var/www/sample-repo-1`",
+    "- Gitブランチ: `develop`",
+    `- 先に完了している必要があるIssue・PR: #${developed} がmainへ反映された後、#${released} の変更が本番へ出た後`,
+    "- その他の前提: なし",
+    "",
+    "## やること",
+    "",
+    "- [ ] `.env`へ`SAMPLE_TOKEN`を追記する",
+    "- [ ] PM2を再起動する",
+    "",
+    "## なぜエージェントが実施しないか",
+    "",
+    "本番サーバーの`.env`はリポジトリに無く、エージェントからは書き換えられないため。",
+    "",
+    "## 放置するとどうなるか",
+    "",
+    "本番の通知が飛ばないままになる。",
+    "",
+    "## 完了の確認方法",
+    "",
+    "`pm2 logs sample-repo-1`に`notify: ok`が出ること。",
+    "",
+    "## 関連",
+    "",
+    `- 起点Issue: #${origin}`,
+  ].join("\n");
+}
 
 async function applyDevProfile(installation) {
   // 「実装を開始」「ローカルで開始」の導線は、この2つのフラグが立っているリポジトリにしか出ない。
@@ -203,23 +208,42 @@ async function applyDevProfile(installation) {
     });
   }
 
-  // 手作業Issueのサンプル（#1705）。進捗を散らした**後**に作る（このIssue自身の進捗はReadyのまま）
+  // 手作業Issueのサンプル（#1705）。進捗を散らした**後**に、実際に散った結果から参照先を
+  // 選んで作る（このIssue自身の進捗はReadyのまま）
   const firstRepository = await prisma.repository.findFirst({
     where: { installationId: installation.id },
     orderBy: { githubRepositoryId: "asc" },
   });
-  if (firstRepository) {
+  const referenceFor = async (projectStatus) =>
+    firstRepository
+      ? await prisma.issue.findFirst({
+          where: {
+            repositoryId: firstRepository.id,
+            number: { lte: ISSUES_PER_REPOSITORY },
+            projectStatus,
+          },
+          orderBy: { number: "asc" },
+          select: { number: true },
+        })
+      : null;
+  const [origin, developed, released] = await Promise.all([
+    referenceFor("Develop PR"),
+    referenceFor("Develop"),
+    referenceFor("Done"),
+  ]);
+  const hasManualStepSample = Boolean(firstRepository && origin && developed && released);
+  if (hasManualStepSample) {
     await upsertDummyIssue(firstRepository, {
       number: ISSUES_PER_REPOSITORY + 3,
       title: "[手作業] VPS: sample-repo-1の.envにSAMPLE_TOKENを追加する",
       state: "OPEN",
       labels: [{ name: "71.manual-step", color: "d876e3" }],
-      body: MANUAL_STEP_SAMPLE_BODY,
+      body: manualStepSampleBody(origin.number, developed.number, released.number),
     });
   }
 
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを1件追加しました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 1 : 0}件追加しました。`,
   );
 }
 
