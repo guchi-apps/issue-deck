@@ -4,7 +4,8 @@ issue-deckのマルチエージェント自動化ワークフロー一式（`@cl
 計画〜実装〜PR作成〜レビューまでの無人実行）が実際に導入され、機能しているリポジトリを
 記録する。導入の背景・他リポジトリへ展開する際の検討事項は
 [docs/cross-repo-automation.md](cross-repo-automation.md)、実際に導入する際の手順は
-[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)を参照。
+[docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)を参照。**導入済みのリポジトリ群へ
+同じ変更を横展開する**ときの進め方は[docs/multi-repo-changes.md](multi-repo-changes.md)。
 
 **privateリポジトリも対象にできる。** organizationは`team`プランのため、organization secretが
 privateリポジトリから参照でき、privateでもブランチ保護が効く（2026-08-15に`clip-hive`で実測。

@@ -16,6 +16,10 @@ issue #723 に対応する実務向けガイド。issue-deckの「Issueごとの
   ブランチ運用など、導入時にそのまま埋めるべき設定項目をチェックリスト形式でまとめる。
 - [docs/supported-repositories.md](supported-repositories.md): 実際に導入済み・検討中のリポジトリの
   **記録簿**。本ガイドに沿って導入したら、この一覧に導入状況を追記する。
+- [docs/multi-repo-changes.md](multi-repo-changes.md): **導入済みのリポジトリ群へ変更を横展開する**
+  ときの進め方（#1698）。本ガイドが「まだ入っていないリポジトリに運用一式を入れる」手順なのに対し、
+  あちらは「もう入っているリポジトリ全体に同じ直しを配る」手順を扱う。Issueを起点に他リポジトリへ
+  PRが自動作成されることは**無い**という前提と、種類ごとの配り方をまとめている。
 - 設計の経緯・issue-deck自身での詳細実装は[docs/multi-agent-workflow.md](multi-agent-workflow.md)を
   参照。
 
