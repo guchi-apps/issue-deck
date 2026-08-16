@@ -82,6 +82,47 @@ worktree_commits_not_in_develop() {
   git -C "$root" rev-list --count "origin/develop..$branch" 2>/dev/null || true
 }
 
+# そのworktreeで最後に「起動の準備」が行われてからの経過分数を出力する（#1716）。
+#
+# **無人で掃除を回すために要る**（#1716）。掃除の判定はどれも「いま何かが動いているか」を
+# 見ておらず、`start-issue.sh`がworktreeを作ってから`run-issue-session.sh`のプロセスが立つまでの
+# 数分間は、未コミットの変更もdevelopに未反映のコミットも無い（`pnpm install`が置くのは
+# `.gitignore`対象のファイルだけ）。人が手で打っていた頃はその瞬間に実行される確率が低かったが、
+# 定期実行では毎時ぶつかりに行くことになり、**準備中のworktreeをブランチごと消しうる**。
+#
+# 見るのは次の3つのうち最も新しいmtimeで、そこからの経過分数を返す。
+#
+#   - worktreeのディレクトリ（作成時刻。`stat`のbirth timeが取れればそちら）
+#   - `.env.local`（`start-issue.sh`が**起動のたびに**`PORT`を書き直す。作り直しでも再開でも通る）
+#   - 起動用プロンプト（`.prompts/issue-<番号>.md`。準備の最後に生成される）
+#
+# **`.next`やログのmtimeは見ない。** あちらは開発サーバーが動いている間ずっと更新されるため、
+# 「準備中かどうか」ではなく「使われているかどうか」になってしまう（それは
+# worktree_session_running の担当）。
+#
+# 取れなければ何も出力しない。呼び出し側は空を「判定不能」として**消さない側**へ倒すこと。
+worktree_prepared_minutes() {
+  local dir="$1" prompt_file="${2:-}" now newest=0 ts f
+  now="$(date +%s)"
+
+  # ディレクトリはbirth timeを優先する。ext4では取れるが、取れない場合は0が返るためmtimeへ落とす。
+  ts="$(stat -c %W "$dir" 2>/dev/null || echo 0)"
+  [[ "$ts" =~ ^[1-9][0-9]*$ ]] || ts="$(stat -c %Y "$dir" 2>/dev/null || echo 0)"
+  [[ "$ts" =~ ^[1-9][0-9]*$ ]] && newest="$ts"
+
+  for f in "$dir/.env.local" "$prompt_file"; do
+    [[ -n "$f" && -e "$f" ]] || continue
+    ts="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    [[ "$ts" =~ ^[1-9][0-9]*$ ]] || continue
+    ((ts > newest)) && newest="$ts"
+  done
+
+  [[ "$newest" -gt 0 ]] || return 0
+  local elapsed=$(((now - newest) / 60))
+  ((elapsed < 0)) && elapsed=0
+  printf '%s' "$elapsed"
+}
+
 # そのIssueのセッション（run-issue-session.sh）または開発サーバーが動いているか。
 worktree_session_running() {
   local n="$1" worktree_base="$2"

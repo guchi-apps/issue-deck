@@ -75,6 +75,15 @@ export type PullRequestSummary = {
   linkedIssueCheckReason: CheckUserReason | null;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
+  /**
+   * baseブランチとのコンフリクトの有無（#1742）。`false`＝コンフリクトあり・`true`＝マージ可能・
+   * `null`＝GitHubが判定中（非同期に計算される）か、そもそも取得していない（draft・closed）。
+   *
+   * **`null`を「コンフリクトなし」として扱わない。** 判定が出るまではコンフリクトの表示も
+   * 自動解消ボタンも出さないという意味で、`repairKindsFor`もその方針で書かれている。
+   * CI状態と同じ1回のGraphQLで取るため、これを持つことでGitHub APIの消費は増えない。
+   */
+  mergeable: boolean | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -197,8 +206,6 @@ export type PullRequestDetail = {
   deletions: number;
   changedFiles: number;
   commits: number;
-  /** コンフリクトの有無。GitHubが判定中の場合はnull */
-  mergeable: boolean | null;
   /** 時系列（古い順）に並べたコメント・レビュー */
   events: PullRequestEvent[];
 };

@@ -8,6 +8,7 @@ import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
   BranchBadge,
   CiStateBadge,
+  ConflictBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
@@ -158,8 +159,9 @@ export function PullRequestDetail({
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   // 取得結果が選択中PRのものか（切り替え直後に前のPRの本文を出さないための保険）
   const currentDetail = detail && detail.id === pullRequest.id ? detail : null;
-  // 詳細は`mergeable`を持つため、CI失敗とコンフリクトの両方の修復ボタンを出せる（#1293）。
-  const repairKinds = repairKindsFor(pullRequest, currentDetail?.mergeable);
+  // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
+  // コンフリクトの両方の修復ボタンを出せる（#1293）。
+  const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -235,11 +237,8 @@ export function PullRequestDetail({
               <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
             )}
             {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
-            {currentDetail?.mergeable === false && (
-              <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
-                コンフリクトあり
-              </span>
-            )}
+            <ConflictBadge mergeable={pullRequest.mergeable} />
+
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <UserAvatar login={pullRequest.authorLogin} className="size-4" />
               {pullRequest.authorLogin}

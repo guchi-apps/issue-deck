@@ -359,6 +359,9 @@ Issue番号は単調増加するので、同じリポジトリ内でポートが
 | 4 | 作業が終わってアイドルなものを止める（**セッションは残す**） | 同上 |
 | 5 | 1〜4の在庫に載っていない分を`/proc`の走査で見つけて止める | 同上（#1525） |
 
+worktreeそのものの掃除も同じpollerの1巡に相乗りしており、2の`cleanup-worktrees.sh`を1時間ごとに
+呼ぶ（#1716。後述の[溜まったworktreeを掃除する](#溜まったworktreeを掃除する)）。
+
 5は1〜4の重複ではなく**在庫の取り方が違う**。1・2の入口は「ポートを手掛かりに引く」
 （`dev_server_stop_by_port`・#1524）で、対象は「セッション終了時」「worktree削除時」という
 イベントが起きたときに限られる。3・4が見るのは`.dev-servers/issue-<番号>.pid`だけで、
@@ -1528,14 +1531,23 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 
 ## 溜まったworktreeを掃除する
 
-worktreeは自動では消えない。1つあたり`node_modules`込みで1GB前後あるため、放置すると
-ディスクを食い、`git worktree list`も読みにくくなる。
+worktreeは1つあたり`node_modules`込みで1GB前後あり、`.next`（ビルド成果物）を加えると
+最大1.7GBまで膨らむ。放置するとディスクを食い、`git worktree list`も読みにくくなる。
+
+**サブPCではpollerが1時間ごとに`cleanup-worktrees.sh --yes`を呼ぶ**（#1716。間隔は
+`WORKTREE_CLEANUP_INTERVAL_MINUTES`・**0で無効**）。以前は実行の起点がどこにも無く、3日で
+181本・38GBまで溜まってルートFSが77%に達した。設計と安全弁（準備中のworktreeを消さない
+`--min-age-minutes`、残すworktreeの`.next`削除）は[branching.md](branching.md)の
+「掃除を回す起点」を参照。
+
+手元で回すときは次のとおり。
 
 ```bash
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run --size  # ディスク使用量も測る（遅い）
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --issue 123 --force  # 残ったものを1件だけ強制削除
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --min-age-minutes 0  # 直前に作ったworktreeも対象にする
 ```
 
 走査中は`走査中 N/M`が出る。169件で20秒ほどかかり、`--size`を付けるとさらに40秒ほど増える（#1680）。

@@ -392,6 +392,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **コンフリクト有無（`mergeable`）は、そのCI状態と同じ1回のGraphQLで取る**（#1742。
+  `fetchPullRequestRollup` → `fetchPullRequestCiState`）。`mergeable`はRESTだとPRの単体取得でしか
+  返らないため、PR一覧に出すとPR1件につき1回APIが増える——これが理由でPR一覧は長らく
+  「CI通過」だけを出しており、**コンフリクトで実際には入らないPRが「入れられる」ように見えていた**。
+  GraphQLの`PullRequest`は`mergeable`とheadコミットの`statusCheckRollup`を同じクエリで返すので、
+  すでに消費しているCI状態の1回に相乗りさせれば消費は増えない。**PR番号を持つ経路
+  （PR一覧・PR詳細・リリース進捗）はこちらを使い、番号を持たない経路（developブランチそのものの
+  CI状態など）だけ`fetchRefCiState`を使う。**
+  `mergeable`はGitHub側が非同期に計算するため判定中は`null`で、**`null`を「コンフリクトなし」と
+  扱わない**（`ConflictBadge`も`repairKindsFor`も`false`のときだけ動く）。draftとclosedなPRでは
+  そもそも取得しない（CI状態と同じ方針）。
+  表示と操作は一覧・詳細・確認待ち一覧・リリース進捗で揃え、コンフリクト中は
+  **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
+  GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
@@ -735,6 +749,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716）。pollerは`WORKTREE_CLEANUP_INTERVAL_MINUTES`
+  （既定60分・0で無効）の間隔で`scripts/cleanup-worktrees.sh --yes`を呼ぶ。**足りなかったのは
+  判定ではなく起点**で、スクリプトは#1100からあったのに実行の起点がどこにも無く、3日で181本・38GB
+  溜まってルートFSが77%に達した。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
+  経っていないworktreeは触らない（`--min-age-minutes`。`start-issue.sh`が作ってからセッションの
+  プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
+  消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
+  [multi-agent/branching.md](multi-agent/branching.md)「掃除を回す起点」。
 - **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
   だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
   `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。

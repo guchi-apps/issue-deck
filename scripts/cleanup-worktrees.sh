@@ -3,6 +3,7 @@
 #
 # 使い方:
 #   scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]
+#                                [--min-age-minutes <分>] [--keep-next]
 #
 #   --dry-run       判定結果を表示するだけで削除しない
 #   --yes / -y      確認プロンプトを出さずに削除する
@@ -10,6 +11,10 @@
 #   --no-fetch      origin/develop の最新化（git fetch）を行わない
 #   --force         未コミットの変更・未pushのコミットを無視して削除する（--issue 必須）
 #   --size          削除対象のディスク使用量を測って表示する（既定では測らない）
+#   --min-age-minutes <分>
+#                   起動の準備からこの分数が経っていないworktreeは触らない（既定30・0で無効）。
+#                   --issue で1件に絞ったときは効かない（明示的な指定を優先する）
+#   --keep-next     残すworktreeの `.next` を削除しない
 #
 # 次をすべて満たすworktreeだけを削除対象にする。1つでも欠けたら残す。
 #   - 未コミットの変更が無い
@@ -31,14 +36,27 @@
 # 削除するのは worktree・ローカルブランチ・そのIssue用の生成物（起動用プロンプト、
 # 開発サーバーのログ・PIDファイル）まで。リモートブランチには触れない。
 #
+# **残すworktreeの `.next` は削除する**（#1716）。ビルド成果物なので消しても失われるものが無く、
+# 次に `pnpm dev` / `pnpm build` を打てば作り直される。実測でサブPCの worktree 163本が
+# `.next/dev`（Turbopackのdevキャッシュ）だけで16GB、`.next`全体で25GB・1本あたり最大679MBを
+# 抱えていた。消して無くなるworktreeのぶんは削除で一緒に消えるので、ここで効くのは
+# **未pushのコミットや未コミットの変更を抱えて長く残るworktree**。`--keep-next`で止められる。
+#
+# **`--min-age-minutes`（既定30分）は無人実行のための安全弁**（#1716）。上の判定はどれも
+# 「いま何かが動いているか」を見ておらず、`start-issue.sh`がworktreeを作ってからセッションの
+# プロセスが立つまでの数分間は削除対象の条件をすべて満たしてしまう（`pnpm install`が置くのは
+# `.gitignore`対象のファイルだけなので、未コミットの変更として数えられない）。人が手で
+# 打っていた頃はその瞬間に当たる確率が低かったが、定期実行では毎時ぶつかりに行く。
+#
 # **worktreeが100件を超えても数十秒で終わること**を前提に書く（#1680）。1件ずつ `gh` を叩き、
 # 1件ずつ `du` でサイズを測っていた頃は170件で4分以上かかり、その間1行も出力しないため
 # `--dry-run` が固まったようにしか見えなかった。worktreeの数に比例して増える処理を足すときは、
 # まとめて1回で引けないか・進捗を出せるかを先に考える。
 #
 # 環境変数:
-#   ISSUE_DECK_WORKTREE_BASE  worktreeの置き場所（既定: ~/apps/issue-deck-worktrees）
-#   ISSUE_DECK_GH_TIMEOUT     gh の1回の呼び出しに被せる制限時間・秒（既定: 60）
+#   ISSUE_DECK_WORKTREE_BASE           worktreeの置き場所（既定: ~/apps/issue-deck-worktrees）
+#   ISSUE_DECK_GH_TIMEOUT              gh の1回の呼び出しに被せる制限時間・秒（既定: 60）
+#   ISSUE_DECK_CLEANUP_MIN_AGE_MINUTES --min-age-minutes の既定値（既定: 30）
 
 set -euo pipefail
 
@@ -56,6 +74,7 @@ source "$ROOT/scripts/lib/dev-server.sh"
 
 usage() {
   echo "Usage: scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]"
+  echo "                                    [--min-age-minutes <分>] [--keep-next]"
 }
 
 DRY_RUN=0
@@ -63,7 +82,9 @@ ASSUME_YES=0
 DO_FETCH=1
 FORCE=0
 SHOW_SIZE=0
+PRUNE_NEXT=1
 TARGET_ISSUE=""
+MIN_AGE_MINUTES="${ISSUE_DECK_CLEANUP_MIN_AGE_MINUTES:-30}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,6 +93,9 @@ while [[ $# -gt 0 ]]; do
     --no-fetch) DO_FETCH=0 ;;
     --force) FORCE=1 ;;
     --size) SHOW_SIZE=1 ;;
+    --keep-next) PRUNE_NEXT=0 ;;
+    --min-age-minutes) shift; MIN_AGE_MINUTES="${1:-}" ;;
+    --min-age-minutes=*) MIN_AGE_MINUTES="${1#*=}" ;;
     --issue) shift; TARGET_ISSUE="${1:-}" ;;
     --issue=*) TARGET_ISSUE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -83,6 +107,17 @@ done
 if [[ -n "$TARGET_ISSUE" && ! "$TARGET_ISSUE" =~ ^[0-9]+$ ]]; then
   echo "Error: --issue は数字で指定してください: $TARGET_ISSUE" >&2
   exit 1
+fi
+
+if [[ ! "$MIN_AGE_MINUTES" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "Error: --min-age-minutes は0以上の整数で指定してください: $MIN_AGE_MINUTES" >&2
+  exit 1
+fi
+
+# **1件に絞ったときは経過時間を見ない**（#1716）。番号を打った人は対象を分かって指定しており、
+# 「30分待ってください」と返すのは邪魔にしかならない。安全弁が要るのは全件を無人で回す側。
+if [[ -n "$TARGET_ISSUE" ]]; then
+  MIN_AGE_MINUTES=0
 fi
 
 # --force は必ず1件に絞って使う。全件へ効く強制削除は、判定を1つ間違えただけで並行して
@@ -160,10 +195,25 @@ target_forced=()
 # 「じゃあどうすれば消えるのか」が分からず、結局 git worktree remove を手で打つことになる。
 keep_notes=()
 keep_hints=()
+# 残すworktreeのうち、`.next`（ビルド成果物）を消してよいもの（#1716）。
+prune_next_dirs=()
+prune_next_numbers=()
 
 keep_worktree() {
   keep_notes+=("$1")
   keep_hints+=("$2")
+}
+
+# 残すと決めたworktreeの `.next` を削除候補に積む（#1716）。
+#
+# **呼ぶのは「セッションも開発サーバーも動いておらず、起動の準備からも十分に経っている」と
+# 判定した後だけ。** 動いている最中に消すとビルドが壊れ、準備中に消すと初回の起動を遅らせる。
+mark_next_for_prune() {
+  local n="$1" dir="$2"
+  [[ "$PRUNE_NEXT" -eq 1 ]] || return 0
+  [[ -d "$dir/.next" ]] || return 0
+  prune_next_dirs+=("$dir/.next")
+  prune_next_numbers+=("$n")
 }
 
 # --force の案内文。コピペでそのまま実行できるよう絶対パスで出す。
@@ -253,6 +303,23 @@ for scan_index in "${!managed_dirs[@]}"; do
     continue
   fi
 
+  # 起動の準備中に当たらないようにする（#1716）。ここから下の判定はどれも「いま何かが
+  # 動いているか」を見ておらず、worktreeを作ってからセッションのプロセスが立つまでの数分間は
+  # 削除対象の条件をすべて満たしてしまう。**判定できない（空）ときも消さない側へ倒す。**
+  if [[ "$MIN_AGE_MINUTES" -gt 0 ]]; then
+    prepared_minutes="$(worktree_prepared_minutes "$dir" "$PROMPT_DIR/issue-$n.md")"
+    if [[ -z "$prepared_minutes" ]]; then
+      keep_worktree "#$n 起動の準備からの経過時間を判定できない" \
+        "対象だと分かっているなら: bash $ROOT/scripts/cleanup-worktrees.sh --issue $n"
+      continue
+    fi
+    if [[ "$prepared_minutes" -lt "$MIN_AGE_MINUTES" ]]; then
+      keep_worktree "#$n 起動の準備から ${prepared_minutes}分（最小 ${MIN_AGE_MINUTES}分）しか経っていない" \
+        "今すぐ消すなら: bash $ROOT/scripts/cleanup-worktrees.sh --issue $n"
+      continue
+    fi
+  fi
+
   dirty_count="$(worktree_dirty_count "$dir")"
   # 空文字は「判定できなかった」。0（＝失われるコミットが無い）と区別する（#1192）。
   unpushed="$(worktree_commits_not_in_develop "$ROOT" "issue-$n")"
@@ -276,20 +343,25 @@ for scan_index in "${!managed_dirs[@]}"; do
     continue
   fi
 
+  # ここから下の「残す」3つは、**セッションも開発サーバーも動いておらず、起動の準備からも
+  # 十分に経っている**worktree（#1716）。worktree自体は残すが、`.next`は作り直せるので消す。
   if [[ "$dirty_count" -gt 0 ]]; then
     keep_worktree "#$n 未コミットの変更が $dirty_count 件ある" "$(force_hint "$n")"
+    mark_next_for_prune "$n" "$dir"
     continue
   fi
 
   if [[ -z "$unpushed" ]]; then
     keep_worktree "#$n origin/develop との差分を判定できない（fetchに失敗している可能性）" \
       "git -C $ROOT fetch origin develop を通してから再実行する"
+    mark_next_for_prune "$n" "$dir"
     continue
   fi
 
   if [[ "$unpushed" -gt 0 ]]; then
     keep_worktree "#$n origin/develop に入っていないコミットが $unpushed 件ある（未pushの作業）" \
       "$(force_hint "$n")"
+    mark_next_for_prune "$n" "$dir"
     continue
   fi
 
@@ -360,7 +432,34 @@ else
 fi
 echo ""
 
-if [[ ${#target_dirs[@]} -eq 0 ]]; then
+# 残すworktreeの `.next`（#1716）。**worktreeを消さない側の解放手段**で、削除対象が0件でも
+# ここだけは効く。サイズは削除対象と同じく `--size` のときだけ測る。
+next_sizes=()
+if [[ ${#prune_next_dirs[@]} -gt 0 ]]; then
+  if [[ "$SHOW_SIZE" -eq 1 ]]; then
+    echo "残すworktreeの .next のサイズを集計しています（${#prune_next_dirs[@]}件）..."
+    declare -A next_size_by_dir=()
+    while IFS=$'\t' read -r size path; do
+      [[ -n "$path" ]] || continue
+      next_size_by_dir["$path"]="$size"
+    done < <(measure_sizes "${prune_next_dirs[@]}")
+    for dir in "${prune_next_dirs[@]}"; do
+      next_sizes+=("${next_size_by_dir[$dir]:-不明}")
+    done
+  fi
+  echo "=== 残すworktreeで削除する .next (${#prune_next_dirs[@]}件) ==="
+  for i in "${!prune_next_dirs[@]}"; do
+    if [[ "$SHOW_SIZE" -eq 1 ]]; then
+      printf '  #%s  %s / %s\n' "${prune_next_numbers[$i]}" "${prune_next_dirs[$i]}" "${next_sizes[$i]}"
+    else
+      printf '  #%s  %s\n' "${prune_next_numbers[$i]}" "${prune_next_dirs[$i]}"
+    fi
+  done
+  echo "  ※ビルド成果物なので、次に pnpm dev / pnpm build を打てば作り直される（残すには --keep-next）"
+  echo ""
+fi
+
+if [[ ${#target_dirs[@]} -eq 0 && ${#prune_next_dirs[@]} -eq 0 ]]; then
   # --force は1件に絞って指定するものなので、その1件が見つからなかったなら打ち間違いを疑う。
   if [[ "$FORCE" -eq 1 && ${#keep_notes[@]} -eq 0 ]]; then
     echo "Error: worktree $WORKTREE_BASE/issue-$TARGET_ISSUE が見つかりません。" >&2
@@ -379,7 +478,7 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
     echo "非対話実行のため削除しません。削除する場合は --yes を付けて実行してください。"
     exit 0
   fi
-  prompt="上記 ${#target_dirs[@]} 件のworktree・ブランチを削除しますか？ [y/N]: "
+  prompt="上記 ${#target_dirs[@]} 件のworktree・ブランチと ${#prune_next_dirs[@]} 件の .next を削除しますか？ [y/N]: "
   if [[ "$FORCE" -eq 1 ]]; then
     prompt="上記を --force で削除します。「失われるもの」は取り戻せません。続けますか？ [y/N]: "
   fi
@@ -391,7 +490,9 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
 fi
 
 failed=0
-for i in "${!target_dirs[@]}"; do
+# **添字の展開は空配列でも安全な形で書く。** `${!arr[@]}` は空配列でも空に展開されるが、
+# `${!arr[@]+...}` と書くと `${!name}`（間接参照）として解釈され `invalid variable name` で落ちる。
+for ((i = 0; i < ${#target_dirs[@]}; i++)); do
   dir="${target_dirs[$i]}"
   n="${target_numbers[$i]}"
   echo "#$n: worktreeを削除しています（$dir）..."
@@ -429,6 +530,18 @@ for i in "${!target_dirs[@]}"; do
 done
 
 git -C "$ROOT" worktree prune
+
+# 残すworktreeの `.next` を消す（#1716）。**worktreeの削除より後に行う**。消えるworktreeの
+# `.next` は削除で一緒に消えるため、ここへ積むのは残す側だけ。
+for ((i = 0; i < ${#prune_next_dirs[@]}; i++)); do
+  next_dir="${prune_next_dirs[$i]}"
+  n="${prune_next_numbers[$i]}"
+  echo "#$n: .next を削除しています（$next_dir）..."
+  if ! rm -rf "$next_dir"; then
+    echo "警告: #$n の .next 削除に失敗しました。" >&2
+    failed=$((failed + 1))
+  fi
+done
 
 if [[ "$failed" -gt 0 ]]; then
   echo "$failed 件の削除に失敗しました。" >&2

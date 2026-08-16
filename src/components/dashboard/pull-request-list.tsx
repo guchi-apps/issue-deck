@@ -7,6 +7,7 @@ import { GithubReferenceLink } from "@/components/dashboard/github-reference-lin
 import {
   BranchBadge,
   CiStateBadge,
+  ConflictBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
@@ -71,9 +72,9 @@ function PullRequestCard({
   onMerged: () => void;
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
-  // 一覧は`mergeable`を持たない（PR1件につき単体取得が1回増えるため取っていない）。
-  // コンフリクトの修復ボタンは`mergeable`を持つ詳細ペイン・リリース進捗の側に出す。
-  const repairKinds = repairKindsFor(pullRequest, undefined);
+  // 一覧も`mergeable`を持つ（#1742）。CI状態と同じ1回のGraphQLで取っているので、
+  // コンフリクトの表示と自動解消ボタンを出してもGitHub APIの消費は増えない。
+  const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
 
   return (
     <li
@@ -129,6 +130,7 @@ function PullRequestCard({
         ) : (
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
+        <ConflictBadge mergeable={pullRequest.mergeable} />
         {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
         {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">

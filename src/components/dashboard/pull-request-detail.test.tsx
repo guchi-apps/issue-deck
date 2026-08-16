@@ -31,6 +31,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeable: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -60,7 +61,6 @@ function makeDetail(overrides: Partial<PullRequestDetailData> = {}): PullRequest
     deletions: 8,
     changedFiles: 5,
     commits: 2,
-    mergeable: true,
     events: [makeEvent()],
     fetchedAt: "2026-08-01T02:00:00.000Z",
     ...overrides,
@@ -136,9 +136,12 @@ describe("PullRequestDetail", () => {
     expect(screen.getByText("src/lib/foo.ts:12")).toBeTruthy();
   });
 
-  it("コンフリクトしているPRは警告を出す", () => {
-    renderDetail({ detail: makeDetail({ mergeable: false }) });
+  // `mergeable`は詳細ではなくsummaryが持つ（一覧・詳細で同じ判定にするため。#1742）
+  it("コンフリクトしているPRは警告と自動解消ボタンを出し、マージボタンを出さない", () => {
+    renderDetail({ pullRequest: makePullRequest({ mergeable: false }) });
     expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("自動でマージされないPRには「ユーザーのマージが必要です」を出す（#1469）", () => {
@@ -173,7 +176,6 @@ describe("PullRequestDetail", () => {
   it("マージ済みPRはその旨を出し、マージボタンを出さない", () => {
     renderDetail({
       pullRequest: makePullRequest({ state: "closed", merged: true }),
-      detail: makeDetail({ mergeable: null }),
     });
     expect(screen.getByText("マージ済み")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
@@ -182,7 +184,6 @@ describe("PullRequestDetail", () => {
   it("マージされずクローズされたPRはその旨を出し、マージボタンを出さない", () => {
     renderDetail({
       pullRequest: makePullRequest({ state: "closed", merged: false }),
-      detail: makeDetail({ mergeable: null }),
     });
     expect(screen.getByText("クローズ済み")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();

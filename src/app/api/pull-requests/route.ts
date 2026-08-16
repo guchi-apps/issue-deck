@@ -10,7 +10,7 @@ import {
   fetchOpenPullRequests,
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
-import { fetchRefCiState } from "@/lib/github/release-api";
+import { fetchPullRequestCiState } from "@/lib/github/release-api";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
@@ -161,26 +161,26 @@ async function toOpenPullRequest(
   pullRequest: GithubApiOpenPullRequest,
   repository: RepositoryContext,
 ): Promise<PullRequestSummary> {
-  // CI状態はPR1件につき1回（check-runsが100件を超えるrefではページ数ぶん）APIを消費する。
-  // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いてunknownにする。
-  const ciState = pullRequest.draft
-    ? "unknown"
-    : await fetchRefCiState(
+  // CI状態とコンフリクト有無（#1742）はPR1件につきGraphQL 1回で**まとめて**取る。
+  // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いて未取得にする。
+  const { ciState, mergeable } = pullRequest.draft
+    ? { ciState: "unknown" as const, mergeable: null }
+    : await fetchPullRequestCiState(
         repository.ownerLogin,
         repository.name,
-        pullRequest.head.sha,
+        pullRequest.number,
         repository.token,
       );
 
   // openのPRにマージ済みは存在しない。
-  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState });
+  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
 }
 
 /**
  * クローズ済み（マージ済み・却下）のPRを一覧の形へ変換する（#1312）。
  *
- * **CI状態は取得せず`unknown`のまま返す。** 取得にはPR1件あたり1回APIを消費するのに対し、
- * 既に閉じたPRのCIは「見て何かする」対象ではないため。マージ済みかどうかは
+ * **CI状態とコンフリクト有無は取得せず`unknown` / `null`のまま返す。** 取得にはPR1件あたり
+ * 1回APIを消費するのに対し、既に閉じたPRのCIは「見て何かする」対象ではないため。マージ済みかどうかは
  * 一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧のレスポンスに含まれない）。
  */
 function toClosedPullRequest(
