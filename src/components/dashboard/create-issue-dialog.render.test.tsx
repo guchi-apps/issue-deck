@@ -148,15 +148,34 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   } as Issue;
 }
 
+const OTHER_REPOSITORY_FULL_NAME = "guchi-apps/shopping-list";
+
+function makeOtherRepository(): ConnectedRepository {
+  return {
+    ...makeRepository(),
+    id: "2",
+    name: "shopping-list",
+    fullName: OTHER_REPOSITORY_FULL_NAME,
+  };
+}
+
 /** 実際の利用と同じく、開閉状態を呼び出し側（issue-deck-shell）が持つ形で描画する */
-function Harness({ onCreated }: { onCreated: (issue: Issue) => void }) {
+function Harness({
+  onCreated,
+  repositories = [makeRepository()],
+  defaultRepositoryFullName = REPOSITORY_FULL_NAME,
+}: {
+  onCreated: (issue: Issue) => void;
+  repositories?: ConnectedRepository[];
+  defaultRepositoryFullName?: string | null;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <CreateIssueDialog
       open={open}
       onOpenChange={setOpen}
-      repositories={[makeRepository()]}
-      defaultRepositoryFullName={REPOSITORY_FULL_NAME}
+      repositories={repositories}
+      defaultRepositoryFullName={defaultRepositoryFullName}
       issues={[]}
       onCreated={onCreated}
     />
@@ -402,6 +421,103 @@ describe("CreateIssueDialog のクイック起票", () => {
     expect(
       (screen.getByRole("button", { name: "次へ" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  /**
+   * #1710。推定を1件に決め打ちしていたため、外したときの直し方が十数件のリストを開くしか
+   * なかった。候補を並べ、1タップで選び直せること・押した後は「自動」を名乗らないことを見る。
+   */
+  it("推定したリポジトリ候補をチップで並べ、押すと選び直せる", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME, OTHER_REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), makeOtherRepository()]}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    const candidate = await screen.findByRole("button", { name: /候補2.*shopping-list/ });
+    expect(
+      screen.getByRole("button", { name: /候補1.*issue-deck/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    // リポジトリとタイトルの2つが「自動」
+    expect(screen.getAllByText("自動")).toHaveLength(2);
+
+    fireEvent.click(candidate);
+
+    expect(candidate.getAttribute("aria-pressed")).toBe("true");
+    // 人が選んだので「自動」は外れる（タイトルの分だけが残る）
+    expect(screen.getAllByText("自動")).toHaveLength(1);
+  });
+
+  it("リポジトリ別の画面から開いたときは、その値を選んだまま「表示中のリポジトリ」と示す", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), makeOtherRepository()]}
+        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(screen.queryByText("表示中のリポジトリ")).not.toBeNull());
+    expect(
+      screen.getByRole("button", { name: /表示中.*shopping-list/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    // 内容から推定した方も、押せば切り替わる候補として並ぶ
+    expect(screen.getByRole("button", { name: /候補1.*issue-deck/ })).not.toBeNull();
+  });
+
+  it("ラベルが1つも決まらなかったときは、その旨を出す", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: [],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("ラベルは自動で決められませんでした。選ぶか、生成し直せます。")).not.toBeNull(),
+    );
+  });
+
+  it("ラベルが決まったときは、その注記を出さない", async () => {
+    quickGenerate.mockResolvedValue({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      repositoryCandidates: [REPOSITORY_FULL_NAME],
+      title: "タイトル案",
+      labels: ["30.bug"],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    await waitFor(() => expect(screen.queryByText("30.bug")).not.toBeNull());
+    expect(
+      screen.queryByText("ラベルは自動で決められませんでした。選ぶか、生成し直せます。"),
+    ).toBeNull();
   });
 
   it("確認ステップの「内容を編集」で入力ステップへ戻る", async () => {

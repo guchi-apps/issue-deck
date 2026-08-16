@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildRepositorySuggestPrompt,
-  pickSuggestedRepository,
+  pickSuggestedRepositories,
   RECENT_TITLE_LIMIT,
+  REPOSITORY_SUGGEST_LIMIT,
 } from "@/lib/claude/repository-suggest";
 
 describe("buildRepositorySuggestPrompt", () => {
@@ -48,33 +49,65 @@ describe("buildRepositorySuggestPrompt", () => {
   });
 });
 
-describe("pickSuggestedRepository", () => {
-  const candidates = ["guchi-apps/issue-deck", "guchi-apps/car-care"];
+describe("pickSuggestedRepositories", () => {
+  const candidates = ["guchi-apps/issue-deck", "guchi-apps/car-care", "guchi-apps/shopping-list"];
 
-  it("候補に存在するフルネームを返す", () => {
-    expect(pickSuggestedRepository('{"repository": "guchi-apps/car-care"}', candidates)).toBe(
-      "guchi-apps/car-care",
-    );
+  it("候補に存在するフルネームを、返ってきた順（確からしい順）で返す", () => {
+    expect(
+      pickSuggestedRepositories(
+        '{"repositories": ["guchi-apps/car-care", "guchi-apps/issue-deck"]}',
+        candidates,
+      ),
+    ).toEqual(["guchi-apps/car-care", "guchi-apps/issue-deck"]);
   });
 
   it("コードフェンスで囲まれていても解釈する", () => {
     expect(
-      pickSuggestedRepository('```json\n{"repository": "guchi-apps/issue-deck"}\n```', candidates),
-    ).toBe("guchi-apps/issue-deck");
+      pickSuggestedRepositories(
+        '```json\n{"repositories": ["guchi-apps/issue-deck"]}\n```',
+        candidates,
+      ),
+    ).toEqual(["guchi-apps/issue-deck"]);
   });
 
   it("大文字小文字の違いは候補側の表記へ寄せる", () => {
-    expect(pickSuggestedRepository('{"repository": "Guchi-Apps/Issue-Deck"}', candidates)).toBe(
-      "guchi-apps/issue-deck",
-    );
+    expect(
+      pickSuggestedRepositories('{"repositories": ["Guchi-Apps/Issue-Deck"]}', candidates),
+    ).toEqual(["guchi-apps/issue-deck"]);
   });
 
   it("候補に無いフルネームは採らない", () => {
-    expect(pickSuggestedRepository('{"repository": "guchi-apps/unknown"}', candidates)).toBeNull();
+    expect(
+      pickSuggestedRepositories(
+        '{"repositories": ["guchi-apps/unknown", "guchi-apps/car-care"]}',
+        candidates,
+      ),
+    ).toEqual(["guchi-apps/car-care"]);
   });
 
-  it("nullやJSONとして壊れた応答はnullを返す", () => {
-    expect(pickSuggestedRepository('{"repository": null}', candidates)).toBeNull();
-    expect(pickSuggestedRepository("選べませんでした", candidates)).toBeNull();
+  it("重複と上限を整理する", () => {
+    expect(
+      pickSuggestedRepositories(
+        '{"repositories": ["guchi-apps/car-care", "guchi-apps/car-care", "guchi-apps/issue-deck", "guchi-apps/shopping-list", "guchi-apps/issue-deck"]}',
+        candidates,
+      ),
+    ).toEqual([
+      "guchi-apps/car-care",
+      "guchi-apps/issue-deck",
+      "guchi-apps/shopping-list",
+    ]);
+    expect(REPOSITORY_SUGGEST_LIMIT).toBe(3);
+  });
+
+  it("1件だけを返す旧来の形式（repository）も受け取る", () => {
+    expect(pickSuggestedRepositories('{"repository": "guchi-apps/car-care"}', candidates)).toEqual([
+      "guchi-apps/car-care",
+    ]);
+  });
+
+  it("空配列やJSONとして壊れた応答は空配列を返す", () => {
+    expect(pickSuggestedRepositories('{"repositories": []}', candidates)).toEqual([]);
+    expect(pickSuggestedRepositories('{"repository": null}', candidates)).toEqual([]);
+    expect(pickSuggestedRepositories("選べませんでした", candidates)).toEqual([]);
   });
 });

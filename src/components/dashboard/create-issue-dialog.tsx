@@ -60,6 +60,7 @@ import { isAutoAssignableLabelName } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import {
+  buildRepositoryChoices,
   canProceedFromInput,
   resolveInitialQuickStep,
   type QuickIssueStep,
@@ -111,6 +112,26 @@ export function resolveKindRepository(
   return askable.some((repo) => repo.fullName === current) ? current : (askable[0]?.fullName ?? "");
 }
 
+/**
+ * 推定されたリポジトリ候補のうち、いまの種別で実際に選べるものだけを残す（#1710）。
+ *
+ * **選べないものを候補として出さない。** 押しても切り替わらないチップは、押した本人からは
+ * 壊れているようにしか見えない。非表示にしているリポジトリや、質問で選べない
+ * `claude-issue-dispatch.yml`未導入のリポジトリがこれに当たる。
+ */
+export function selectableSuggestedRepositories(
+  kind: IssueDraftKind,
+  repositories: ConnectedRepository[],
+  candidates: string[],
+): string[] {
+  const selectable = new Set(
+    repositories
+      .filter((repo) => kind === "issue" || repo.hasClaudeWorkflow)
+      .map((repo) => repo.fullName),
+  );
+  return candidates.filter((candidate) => selectable.has(candidate));
+}
+
 const DEFAULT_ASSIGNEE = "m-guchi";
 
 /**
@@ -122,6 +143,19 @@ function AutoBadge() {
   return (
     <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-px text-[10px] font-medium text-primary">
       自動
+    </span>
+  );
+}
+
+/**
+ * 値の出どころが「開いていた画面」であることを示すバッジ（#1710）。
+ * **`自動`と書き分ける。** リポジトリ別の画面から開くと内容を読まずにそのリポジトリが入るため、
+ * 「Claudeが内容から決めた」と誤解されると、違っていても疑われないまま作成まで進む。
+ */
+function PageBadge() {
+  return (
+    <span className="ml-1.5 rounded border border-border px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+      表示中のリポジトリ
     </span>
   );
 }
@@ -202,6 +236,17 @@ export function CreateIssueDialog({
     title: boolean;
     labels: boolean;
   }>({ repository: false, title: false, labels: false });
+  /**
+   * 内容から推定したリポジトリ候補（確からしい順・#1710）。確認ステップにチップとして並べる。
+   * 推定を呼んでいないとき（「自分で入力する」・下書きの復元）は空のまま＝チップを出さない。
+   */
+  const [repositoryCandidates, setRepositoryCandidates] = useState<string[]>([]);
+  /**
+   * 推定はできたのにラベルが1つも決まらなかったか（#1710）。
+   * **黙って空のまま進めない。** 空欄と「決められなかった」は画面上で見分けが付かず、
+   * ラベルの付いていないIssueがそのまま作られていた。
+   */
+  const [labelSuggestionMissed, setLabelSuggestionMissed] = useState(false);
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -244,6 +289,11 @@ export function CreateIssueDialog({
     () => labels.filter((label) => isSelectableLabelName(label.name)),
     [labels],
   );
+  /** 確認ステップのリポジトリ欄に並べるチップ（選択中＋推定候補・#1710） */
+  const repositoryChoices = useMemo(
+    () => buildRepositoryChoices(repositoryFullName, repositoryCandidates),
+    [repositoryFullName, repositoryCandidates],
+  );
   const {
     isGenerating: isSuggesting,
     error: suggestError,
@@ -273,6 +323,8 @@ export function CreateIssueDialog({
     setStep(resolveInitialQuickStep({ defaultTitle, defaultBody }));
     setCameFromInput(false);
     setAutoFilled({ repository: false, title: false, labels: false });
+    setRepositoryCandidates([]);
+    setLabelSuggestionMissed(false);
     setRepositoryFullName(draft.repositoryFullName);
     setTitle(draft.title);
     setBody(draft.body);
@@ -310,6 +362,13 @@ export function CreateIssueDialog({
   function selectKind(next: IssueDraftKind) {
     setKind(next);
     setRepositoryFullName((prev) => resolveKindRepository(next, repositories, prev));
+    setRepositoryCandidates((prev) => selectableSuggestedRepositories(next, repositories, prev));
+  }
+
+  /** 候補チップを押してリポジトリを選び直す（#1710）。人が選んだので`自動`バッジは外す */
+  function handleSelectCandidate(fullName: string) {
+    setAutoFilled((prev) => ({ ...prev, repository: false }));
+    setRepositoryFullName(fullName);
   }
 
   function handleRestoreDraft() {
@@ -335,6 +394,8 @@ export function CreateIssueDialog({
     setStep("confirm");
     setCameFromInput(false);
     setAutoFilled({ repository: false, title: false, labels: false });
+    setRepositoryCandidates([]);
+    setLabelSuggestionMissed(false);
   }
 
   function resetForm() {
@@ -342,6 +403,8 @@ export function CreateIssueDialog({
     setStep("input");
     setCameFromInput(false);
     setAutoFilled({ repository: false, title: false, labels: false });
+    setRepositoryCandidates([]);
+    setLabelSuggestionMissed(false);
     setRepositoryFullName("");
     setTitle("");
     setBody("");
@@ -352,6 +415,7 @@ export function CreateIssueDialog({
 
   function toggleLabel(name: string) {
     setAutoFilled((prev) => ({ ...prev, labels: false }));
+    setLabelSuggestionMissed(false);
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
@@ -370,7 +434,8 @@ export function CreateIssueDialog({
     if (!result) return;
     setTitle(result.title);
     setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
-    setAutoFilled((prev) => ({ ...prev, title: true, labels: true }));
+    setAutoFilled((prev) => ({ ...prev, title: true, labels: result.labels.length > 0 }));
+    setLabelSuggestionMissed(result.labels.length === 0);
   }
 
   /**
@@ -388,19 +453,22 @@ export function CreateIssueDialog({
     const result = await generateQuickSuggestion({
       body,
       kind,
-      // すでに決まっているリポジトリは推定し直さない（外す余地を作らない）
+      // すでに決まっているリポジトリ（表示中のリポジトリ）は選択状態のまま動かさない。
+      // 推定自体は行われ、結果は候補チップとして並ぶ（#1710）
       repositoryFullName: repositoryFullName || null,
     });
     if (!result) return;
 
-    const nextRepository = result.repositoryFullName
-      ? resolveKindRepository(kind, repositories, result.repositoryFullName)
-      : "";
-    // 候補外へ寄せ替えられた場合（質問で未導入リポジトリを選ばれた等）は自動と見なさない
-    const isRepositoryAuto =
-      !repositoryFullName && nextRepository !== "" && nextRepository === result.repositoryFullName;
+    // 候補が無い応答（デプロイ直後に古い版のAPIを叩いた場合）でも、決まった1件は候補として扱う
+    const suggested =
+      result.repositoryCandidates ??
+      (result.repositoryFullName ? [result.repositoryFullName] : []);
+    const candidates = selectableSuggestedRepositories(kind, repositories, suggested);
+    // 画面がリポジトリを渡していないときだけ、推定の1位を選んだ状態にする
+    const isRepositoryAuto = !repositoryFullName && candidates.length > 0;
 
-    if (isRepositoryAuto) setRepositoryFullName(nextRepository);
+    setRepositoryCandidates(candidates);
+    if (isRepositoryAuto) setRepositoryFullName(candidates[0]);
     if (result.title) setTitle(result.title);
     if (result.labels.length > 0) {
       setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
@@ -410,6 +478,8 @@ export function CreateIssueDialog({
       title: Boolean(result.title),
       labels: result.labels.length > 0,
     });
+    // 質問Issueにラベルは付けないため、決まらなかったことを知らせるのはIssueのときだけ
+    setLabelSuggestionMissed(kind === "issue" && result.labels.length === 0);
   }
 
   /**
@@ -419,6 +489,8 @@ export function CreateIssueDialog({
   function handleSkipSuggestion() {
     setStep("confirm");
     setCameFromInput(false);
+    setRepositoryCandidates([]);
+    setLabelSuggestionMissed(false);
   }
 
   /** 確認ステップから本文の書き直しへ戻る */
@@ -614,7 +686,13 @@ export function CreateIssueDialog({
                     「リポジトリ自動」になり、項目名で引けなくなる */}
                 <div className="flex items-center gap-1.5">
                   <Label htmlFor="create-issue-repo">リポジトリ</Label>
-                  {autoFilled.repository && <AutoBadge />}
+                  {autoFilled.repository ? (
+                    <AutoBadge />
+                  ) : (
+                    cameFromInput &&
+                    repositoryFullName !== "" &&
+                    repositoryFullName === defaultRepositoryFullName && <PageBadge />
+                  )}
                 </div>
                 {isQuickSuggesting ? (
                   <FieldSkeleton />
@@ -654,6 +732,50 @@ export function CreateIssueDialog({
                       ? "claude-issue-dispatch.ymlが導入されているリポジトリがありません。"
                       : "連携しているリポジトリがありません。"}
                   </p>
+                )}
+                {/* 内容から推定した候補（#1710）。選択中のものを先頭に並べ、1タップで切り替えられる
+                    ようにする。**推定を呼んでいないときは出さない**（「自分で入力する」・下書きの復元） */}
+                {!isQuickSuggesting && repositoryChoices.length > 1 && (
+                  <>
+                    <div className="flex flex-wrap gap-1.5">
+                      {repositoryChoices.map((fullName) => {
+                        const isCurrent = fullName === repositoryFullName;
+                        const isFromPage = fullName === defaultRepositoryFullName;
+                        const rank = repositoryCandidates.indexOf(fullName);
+                        const [owner, name] = fullName.split("/");
+                        return (
+                          <button
+                            key={fullName}
+                            type="button"
+                            aria-pressed={isCurrent}
+                            onClick={() => handleSelectCandidate(fullName)}
+                            className={`flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+                              isCurrent
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-input hover:bg-muted"
+                            }`}
+                          >
+                            <span
+                              className={`shrink-0 rounded-full border px-1.5 text-[10px] font-medium ${
+                                isCurrent ? "border-primary-foreground/40" : "border-border"
+                              }`}
+                            >
+                              {isFromPage ? "表示中" : `候補${rank + 1}`}
+                            </span>
+                            <span className="truncate">
+                              <span className={isCurrent ? "opacity-70" : "text-muted-foreground"}>
+                                {owner}/
+                              </span>
+                              {name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      候補は内容から推定したものです。押すと切り替わります。
+                    </p>
+                  </>
                 )}
                 {isQuestion && (
                   <p className="text-xs text-muted-foreground">
@@ -800,6 +922,13 @@ export function CreateIssueDialog({
                         </Button>
                       )}
                     </div>
+                    {/* ラベルが1つも決まらなかったことを明示する（#1710）。
+                        空欄と見分けが付かないままだと、ラベルの付かないIssueがそのまま作られる */}
+                    {labelSuggestionMissed && !suggestNotConfigured && (
+                      <p className="text-xs text-destructive">
+                        ラベルは自動で決められませんでした。選ぶか、生成し直せます。
+                      </p>
+                    )}
                     {suggestNotConfigured && (
                       <p className="text-xs text-muted-foreground">
                         Claudeのトークンが設定されていません
