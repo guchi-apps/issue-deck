@@ -712,7 +712,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   母集団）／`71.manual-step`の4区分。
   - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
     作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
-    `filterPullRequestsByView`から得る。ここで独自判定を書くと、同じ状態が画面ごとに別の言葉で出る。
+    `filterPullRequestsByView`・`computeManualStepReadiness`から得る。ここで独自判定を書くと、
+    同じ状態が画面ごとに別の言葉で出る。
+  - **`71.manual-step`は前提条件が満たされたものだけを出す**（#1801。判定は左メニューの
+    「ユーザーの作業待ち」と同じ`computeManualStepReadiness`）。先行する変更が本番へ出るまで
+    実行できない手作業まで並べると、ベルが「いま人が動けば盤面が進むもの」の集まりでなくなり、
+    件数バッジも左メニューの件数（`actionable`だけを数える。#1763）と食い違う。前提待ちの
+    手作業は「ユーザーの作業待ち」ビューに橙の時計付きで残るので、見えなくなるわけではない。
   - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
     **材料を用意するのは`NotificationProvider`だけ**（#1772。
