@@ -90,6 +90,13 @@ type CommentThreadProps = {
    * 走っているローカルセッションが入力待ちで、どのボタンも効かない状態を表す。
    */
   sessionWaitingInput?: boolean;
+  /**
+   * セッションの状態（`/api/dispatch`）がまだ届いていない（#1810）。**`sessionWaitingInput`が
+   * 未確定**であることを表し、trueの間は承認カードを描かない。取得前は必ず
+   * `sessionWaitingInput === false`になるため、そのまま描くと承認・修正ボタンを一瞬出してから
+   * Remote Controlの案内へ差し替わる。
+   */
+  sessionStatePending?: boolean;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
   /** 自動マージされなかった理由（#1631）。PRマージ待ちの案内へ添える。解決は親が行う */
@@ -191,6 +198,7 @@ function ApprovalActions({
   mergeCheckReasons = null,
   checkUserReason = null,
   sessionWaitingInput,
+  sessionStatePending = false,
   pullRequestLinks,
   pullRequests,
   repositoryFullName,
@@ -224,6 +232,8 @@ function ApprovalActions({
   /** `00.check-user`が付いている理由（#1490）。読めないリポジトリではnull */
   checkUserReason?: CheckUserReason | null;
   sessionWaitingInput?: boolean;
+  /** セッションの状態がまだ届いていない（#1810）。`sessionWaitingInput`が未確定であることを表す */
+  sessionStatePending?: boolean;
   pullRequestLinks?: PullRequestLink[];
   pullRequests?: IssuePullRequest[];
   repositoryFullName: string;
@@ -296,6 +306,12 @@ function ApprovalActions({
     setMergedHere((prev) => new Set([...prev, pullRequestNumber]));
     onPullRequestMerged?.(pullRequestNumber);
   }
+
+  // セッションの状態が届くまでは、承認カードをどちらの形にも決めない（#1810）。取得前は
+  // `sessionWaitingInput`が必ずfalseになるため、そのまま描くと「承認」「修正」を一瞬出して
+  // からRemote Controlの案内（下の分岐）へ差し替わる。**マージ待ちだけは別**で、判定材料が
+  // ラベルとコメントなのでセッションの状態を待つ理由が無い
+  if (sessionStatePending && !mergeApprovalPending) return null;
 
   // 次にどこの何を押せばよいか（#1663）。承認カードは行き先そのものなので、移動ボタンは
   // 出さずボタン名だけが入る（`placement: "approval"`）。理由ラベルが読めなければnullで、
@@ -493,6 +509,7 @@ export function CommentThread({
   checkUserReason = null,
   localSessionNotice,
   sessionWaitingInput,
+  sessionStatePending,
   mergeApprovalPending,
   mergeCheckReasons = null,
   pullRequestLinks,
@@ -574,6 +591,7 @@ export function CommentThread({
         mergeCheckReasons={mergeCheckReasons}
         checkUserReason={checkUserReason}
         sessionWaitingInput={sessionWaitingInput}
+        sessionStatePending={sessionStatePending}
         pullRequestLinks={pullRequestLinks}
         pullRequests={pullRequests}
         repositoryFullName={repositoryFullName}

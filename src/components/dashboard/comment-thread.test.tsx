@@ -593,6 +593,52 @@ describe("CommentThread セッションが入力待ちのとき", () => {
   });
 });
 
+/**
+ * #1810。セッションの状態（`/api/dispatch`）が届く前は`sessionWaitingInput`が必ずfalseになり、
+ * 入力待ちのセッションでも承認・修正ボタンが一瞬出てから案内へ差し替わっていた。
+ */
+describe("CommentThread セッションの状態が届いていないとき", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderPending(overrides: { mergeApprovalPending?: boolean } = {}) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        sessionStatePending
+        checkUserReason="input"
+        localSessionNotice={<p>Remote Controlから伝えてください</p>}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onRequestPrFix={async () => {}}
+        mergeApprovalPending={overrides.mergeApprovalPending}
+      />,
+    );
+  }
+
+  it("承認カードをどちらの形でも出さない", () => {
+    renderPending();
+    expect(screen.queryByRole("button", { name: "承認" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "修正" })).toBeNull();
+    expect(screen.queryByText("質問への回答が必要です")).toBeNull();
+    expect(screen.queryByText("セッションが入力を待っています")).toBeNull();
+  });
+
+  // マージ待ちの判定材料はラベルとコメントで、セッションの状態を待つ理由が無い
+  it("PRマージ待ちはセッションの状態を待たずに出す", () => {
+    renderPending({ mergeApprovalPending: true });
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+  });
+});
+
 describe("CommentThread 承認カードの見出し（#1490）", () => {
   afterEach(() => {
     cleanup();

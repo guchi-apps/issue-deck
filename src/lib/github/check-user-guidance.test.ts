@@ -71,6 +71,33 @@ describe("resolveCheckUserGuidance", () => {
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
   });
 
+  // #1810。取得前の`sessions`は`[]`で、`sessionWaitingInput`は必ずfalseになる。そのまま
+  // 描くと承認欄へ送る案内を出してからRemote Controlの案内へ書き換わる
+  it("セッションの状態が届いていない間は、どちらの案内も出さない", () => {
+    expect(
+      resolveCheckUserGuidance({
+        reason: "input",
+        placement: "status",
+        sessionWaitingInput: false,
+        sessionStatePending: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("セッションの状態が届けば、入力待ちの案内へ切り替わる", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "input",
+      placement: "status",
+      sessionWaitingInput: true,
+      remoteControlUrl: "https://claude.ai/code/session_abc",
+      sessionStatePending: false,
+    });
+    expect(guidance?.action).toEqual({
+      kind: "remote-control",
+      url: "https://claude.ai/code/session_abc",
+    });
+  });
+
   it("停止・回答済みは、待機中と区別できる状態を出す", () => {
     expect(resolveCheckUserGuidance({ reason: "blocked", placement: "status" })?.agentState.tag).toBe(
       "停止中",

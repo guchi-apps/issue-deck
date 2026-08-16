@@ -469,6 +469,10 @@ export function IssueDetail({
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
+  // セッションの一覧が届くまでは、確認待ちの案内も承認欄も形を決めない（#1810。#1666と同じ理由）。
+  // 取得前の`sessions`は`[]`なので`sessionWaitingInput`は必ずfalseになり、承認欄へ送る案内を
+  // 出してからRemote Controlの案内へ書き換わっていた
+  const sessionStatePending = !dispatch.isLoaded;
   const executionTarget = resolveIssueExecutionTarget({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -497,6 +501,7 @@ export function IssueDetail({
     sessionWaitingInput,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
+    sessionStatePending,
   });
 
   return (
@@ -830,6 +835,7 @@ export function IssueDetail({
                 )
               }
               sessionWaitingInput={sessionWaitingInput}
+              sessionStatePending={sessionStatePending}
               mergeApprovalPending={mergeApprovalPending}
               mergeCheckReasons={mergeCheckReasons}
               pullRequestLinks={pullRequestLinks}
