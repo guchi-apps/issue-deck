@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type ComponentProps } from "react";
+import { Check, Copy } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -8,6 +9,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { copyText } from "@/lib/copy-text";
+import { hastToCopyText } from "@/lib/hast-text";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
 import {
@@ -144,6 +147,73 @@ function TaskCheckbox({
   );
 }
 
+/**
+ * フェンス付きコードブロック。右上のボタンでワンクリックコピーできる（#1726）。
+ *
+ * 手作業Issue（`71.manual-step`）の「やること」に並ぶコマンドを、スマホから手で範囲選択して
+ * 取り出すのが実質不可能だったのが発端。横スクロールするブロックでは選択ハンドルが端まで
+ * 届かない。
+ *
+ * **ホバーで出す方式にしない。** 主戦場がスマホでホバーが無いため、常に表示する。
+ */
+function CodeBlock({ node, children }: ComponentProps<"pre"> & { node?: unknown }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  // 中身はhastから取る。`children`はReact要素なので文字列化できない
+  const text = hastToCopyText(node as Parameters<typeof hastToCopyText>[0]);
+
+  async function handleCopy() {
+    const ok = await copyText(text);
+    // コピーできていないのに成功表示を出さない（`dispatch-job-status.tsx`と同じ扱い）
+    setState(ok ? "copied" : "failed");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1500);
+  }
+
+  const label =
+    state === "copied" ? "コピーしました" : state === "failed" ? "コピーできませんでした" : "コードをコピー";
+
+  // 中身が空のブロックにはコピーする相手がいない
+  if (text === "") {
+    return (
+      <pre className="mb-3 overflow-x-auto rounded-md bg-muted p-3 text-[0.8125rem] last:mb-0">{children}</pre>
+    );
+  }
+
+  return (
+    <div className="relative mb-3 last:mb-0">
+      <pre className="overflow-x-auto rounded-md bg-muted p-3 pr-11 text-[0.8125rem]">{children}</pre>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        aria-label={label}
+        title={label}
+        className={cn(
+          "absolute top-1.5 right-1.5 inline-flex size-7 cursor-pointer items-center justify-center",
+          // 背景は不透明にする。横スクロール中はボタンの下にコードの続きが来るため、
+          // 透かすと重なって読めなくなる
+          "rounded-md border bg-background text-muted-foreground transition hover:text-foreground",
+          state === "copied" && "text-primary",
+          state === "failed" && "text-destructive",
+        )}
+      >
+        {state === "copied" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      </button>
+      {/* 押した結果は色とアイコンだけでは読み上げに乗らないので、状態を文字でも持たせる */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {state === "idle" ? "" : label}
+      </span>
+    </div>
+  );
+}
+
 const components: Components = {
   a: (props) => <MarkdownLink {...props} />,
   // `node`を捨てているのは、react-markdownがhastのノードも渡してくるため。そのままDOMへ
@@ -164,9 +234,7 @@ const components: Components = {
       {children}
     </code>
   ),
-  pre: ({ children }) => (
-    <pre className="mb-3 overflow-x-auto rounded-md bg-muted p-3 text-[0.8125rem] last:mb-0">{children}</pre>
-  ),
+  pre: ({ node, children }) => <CodeBlock node={node}>{children}</CodeBlock>,
   h1: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
   h2: ({ children }) => <h3 className="mb-2 text-base font-semibold">{children}</h3>,
   h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold">{children}</h3>,
