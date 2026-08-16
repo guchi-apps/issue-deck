@@ -39,7 +39,7 @@ import { TopBar } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
-import { useHistoryNavigation } from "@/hooks/use-history-navigation";
+import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
@@ -131,6 +131,8 @@ export function IssueDeckShell({
   const { openIssue: openIssueUrl, openPullRequest: openPullRequestUrl } =
     useReferenceNavigation();
   const { goBackOrFallback } = useHistoryNavigation();
+  // PC版ヘッダーの戻るボタンが押せるかどうか（#1771）
+  const canGoBack = useCanGoBackInApp();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
@@ -831,6 +833,21 @@ export function IssueDeckShell({
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
           onOpenSettings={() => setSettingsDialogOpen(true)}
+          /* パソコンでアプリとして起動するとブラウザの戻る矢印が無くなるため、ヘッダーに
+             戻る導線を置く（#1771）。戻り先の判断はスマホと同じ`goBackOrFallback`。
+             巻き戻せる履歴が無いときはボタンを押せないのでフォールバックは実際には走らないが、
+             万一走ったときに開いている詳細を閉じる（＝一覧へ戻る）ようにしておく。
+             閉じる側は履歴を積まない（積むと戻る操作のたびに履歴が伸びる。#1396）。 */
+          canGoBack={canGoBack}
+          onBack={() =>
+            goBackOrFallback(() => {
+              if (filters.pr) {
+                selectPullRequest(null);
+                return;
+              }
+              setFilter("issue", null, { history: "replace" });
+            })
+          }
         />
 
         <div className="flex flex-1 flex-col overflow-hidden md:flex-row">

@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   canGoBackInApp,
   recordHistoryPop,
   recordHistoryPush,
   resetHistoryStack,
+  subscribeHistoryStack,
 } from "@/lib/history-stack";
 
 describe("history-stack", () => {
@@ -38,5 +39,33 @@ describe("history-stack", () => {
     // ここで1つ積めばすぐ巻き戻せる状態に戻る（過去のマイナス分が残らない）
     recordHistoryPush();
     expect(canGoBackInApp()).toBe(true);
+  });
+});
+
+describe("history-stack の購読（#1771）", () => {
+  beforeEach(() => {
+    resetHistoryStack();
+  });
+
+  it("巻き戻せるかどうかが変わったときだけ通知する", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeHistoryStack(listener);
+
+    // false → true
+    recordHistoryPush();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // true のまま深さだけ増減しても、戻るボタンの見た目は変わらないので通知しない
+    recordHistoryPush();
+    recordHistoryPop();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // true → false
+    recordHistoryPop();
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    recordHistoryPush();
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 });
