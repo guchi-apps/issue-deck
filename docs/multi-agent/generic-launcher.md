@@ -214,11 +214,89 @@ systemctl --user restart issue-deck-dispatch-poller.service
 **対応表（`local-repos.conf`）への追記だけなら再起動は要らない**——申告のたびに読み直されるため。
 再起動が要るのは、この`git pull`のようにissue-deck側のスクリプトが変わったときに限られる。
 
+**pullが要るものと、要らないものがある**（#1438・#1741）。issue-deck側を直したときに、その変更が
+サブPCへいつ届くかは**どちらから読まれるファイルか**で決まる。
+
+| 変更したファイル | 読まれ方 | pullが要るか |
+| --- | --- | --- |
+| `generic-start-issue.sh`・`start-local-session.sh`・それらが`source`する`lib/`・`local-repo-ports.conf` | 本体の作業ツリー（`~/apps/issue-deck/scripts/`） | **要る** |
+| `run-issue-session.sh`・`session-notify.sh`・`prompts/` | `origin/develop`の同期コピー（`~/.cache/issue-deck/launcher-scripts/<SHA>/`） | 要らない（マージされた時点で効く） |
+
+ポート帯（`local-repo-ports.conf`）は前者なので、**developへマージしただけでは効かない。**
+載っていない間は汎用ランチャーの既定`3000 + Issue番号`が使われる。
+
+### 手で叩いて確かめるときは`--prepare-only`と`env -u`を使う
+
+ランチャーの挙動を確認したいときは`--prepare-only`を使う。worktree・envの供給・プロンプトの生成
+までを行い、**tmuxセッションもClaude Codeも起動しない**。
+
+```bash
+env -u ISSUE_DECK_DEV_PORT_BASE \
+ISSUE_DECK_LOCAL_REPO_PORTS_CONFIG="$PWD/scripts/local-repo-ports.conf" \
+ISSUE_DECK_DISPATCH_ENV=/dev/null APP_BASE_URL= PROGRESS_REPORT_SECRET= \
+  bash scripts/generic-start-issue.sh --prepare-only <owner> <repo> <番号>
+```
+
+- **`ISSUE_DECK_DEV_PORT_BASE`は必ず`env -u`で落とす。** ポート帯を`local-repo-ports.conf`から
+  引くのは**受け口（`start-local-session.sh`）**で、ランチャー自身はこの環境変数を足すだけ。
+  ローカルセッションのtmuxの中から手で叩くと、**そのセッション向けの値が残っていて別の帯になる**
+  （実際に`vps`の確認で`21068`のはずが`7068`になった）。帯そのものを確かめたいときは
+  `local_repo_port_base`を直接呼ぶ方が確実
+- **`ISSUE_DECK_DISPATCH_ENV=/dev/null`と空の`APP_BASE_URL`で進捗報告を止める。** 報告API
+  （`POST /api/progress`）は未登録のIssueを`addProjectItem`で**盤面へ追加する**ため、確認のつもりで
+  カンバンに載ってしまう
+- `11.local`の付与だけは止められない（ラベルが定義されているリポジトリでは実際に付く）。
+  確認後に外す
+- 後始末として、作った worktree・ブランチを消す（`git -C <本体> worktree remove <パス> --force`
+  と `git -C <本体> branch -D issue-<番号>`）
+
 ### マルチエージェント運用に未対応のリポジトリ
 
 `claude-issue-dispatch.yml`・`issue-labels.yml`を持たないリポジトリでも起動自体はできるが、
 **`11.local`ラベルが無ければ付与に失敗し、Project Statusの自動遷移も起きない。** 起動はするが
 記録が残らない状態になるので、対応可否は個別に判断する（#1224ではclip-hiveがこれに当たる）。
+
+**#1741で`subpc`・`vps`・`docs`をこの状態のまま載せた。** インフラ設定・共有知識のリポジトリで、
+無人実行を入れる予定が無く、**ローカルセッションが唯一の実行経路**になるため。実際に起きることは
+次のとおりで、いずれも起動は止まらない。
+
+```text
+failed to update https://github.com/guchi-apps/vps/issues/68: '11.local' not found
+#68: 警告: ラベル（11.local）の付与に失敗しました。手動で付けてください。
+```
+
+- `11.local`の付与は`gh issue edit`が`not found`で落ちる（警告のみ）。**無人実行が無いリポジトリでは
+  二重起動の心配も無い**ので、記録が残らないこと以外の実害は無い
+- 逆に`00.check-user`は、`AskUserQuestion`のときに**付与エンドポイントが色も説明も無いラベルを
+  その場で作ってしまう**（`src/lib/dispatch/check-user-labels.ts`）。理由ラベル（`01.check-*`）は
+  リポジトリに定義があるものしか付かないのでガードが効く
+- 進捗（Project Status）は、報告API（`POST /api/progress`）が未登録なら`addProjectItem`で追加する
+  ため**起動したIssueだけ盤面に載る**。一括同期（`syncProjectStatuses`）は`hasClaudeWorkflow: true`で
+  絞るので取り込まれず、非対称が残る
+
+**ラベル体系の整備は対象リポジトリごとのIssueで行う**（`CLAUDE.md`「複数リポジトリに影響する変更は、
+リポジトリごとにIssueを分ける」）。載せる側（issue-deck）でやるのはポート帯の確保までにする。
+
+### 共有知識リポジトリ自身のIssueを起動するとき
+
+`guchi-apps/docs`（`~/apps/_docs`）は**全セッションが`--add-dir`で読む共有知識のチェックアウト
+そのもの**である。このリポジトリのIssueを素直に起動すると、
+
+- 実装対象の**本体チェックアウトが参照に加わり**、worktreeではなくそちらを直接編集する事故を招く。
+  そこは走行中の他セッションが読んでいる共有物で、汚すと横へ波及する
+- プロンプトのひな形が「共有知識リポジトリは**読み取り専用**」と書いているため、**指示が自己矛盾する**
+
+そのため、チェックアウト先が共有知識ディレクトリと同一実体のときだけ`--add-dir`を付けず、プロンプトの
+「全アプリ共通の共有知識」の節も差し替える（#1741）。
+
+**判定はリポジトリ名ではなくパスの一致（`-ef`）で行う。** 共有知識の置き場は
+`ISSUE_DECK_SHARED_CONTEXT_DIR`で差し替えられ、ディレクトリ名（`_docs`）もリポジトリ名（`docs`）と
+一致しない。実装は`generic-start-issue.sh`が判定して`ISSUE_DECK_SKIP_SHARED_CONTEXT`をexportし、
+`run-issue-session.sh`はその印だけを見る（`build_env_prefix`の受け渡し変数にも入れる——tmuxの中まで
+届かないと`--add-dir`が付いてしまう）。
+
+**「編集してはいけない」という禁止事項自体は残す。** 実装対象がこのリポジトリ自身でも、触ってよいのは
+worktreeだけで、本体チェックアウト（`~/apps/_docs`）は依然として触ってはいけない。
 
 ## 注意点
 

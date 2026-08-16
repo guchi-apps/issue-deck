@@ -166,6 +166,11 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 
 無人実行（計画〜実装）は入れないまま、**リリースフローだけを載せる**対象
 （#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80）。
+
+> **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
+> フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
+> 無人実行を入れていない2件でも、**この2件のIssueはサブPCのローカルセッションで回せる**
+> （下記「ローカル起動プロトコルの適合状況」の※4）。`docs`も同じ回で載せた。
 2026-08-16時点の実測と、各リポジトリで必要になる作業は次のとおり。
 
 | 項目 | `guchi-apps/subpc` | `guchi-apps/vps` |
@@ -394,6 +399,9 @@ done
 | `guchi-apps/ops-dashboard` | — | ○（※3） |
 | `guchi-apps/db-console` | — | ○（※3） |
 | `guchi-apps/aide` | — | ○（※3） |
+| `guchi-apps/subpc` | — | ○（※4） |
+| `guchi-apps/vps` | — | ○（※4） |
+| `guchi-apps/docs` | — | ○（※4） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -404,7 +412,7 @@ done
 汎用ランチャーは既定で開発サーバーを起動せず（#1224）、envが無ければ`supply_env_files`は何もしないため、
 セッションの起動には影響しない。開発サーバーを動かすセッションでだけ配置する。
 
-サブPC列は**2026-08-15時点の申告15件**（pollerのログで直接実測）。この4件は#1224のロールアウト対象に
+サブPC列は**2026-08-16時点の申告18件**（pollerのログで直接実測）。※2の4件は#1224のロールアウト対象に
 入っておらず、**除外した理由は記録に残っていない**（#1269で確認）。単に未着手だったため#1276で追加し、
 あわせてポート帯も確保した（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）——
 載っていないと汎用ランチャーの既定`3000 + Issue番号`に落ち、4件が同じ帯に相乗りするため。
@@ -415,6 +423,29 @@ done
 されていなかった。ポート帯も`clip-hive`の10000以外は未確保だったため、あわせて足した（17000・18000）。**`claude-issue-dispatch.yml`・`issue-labels.yml`を持たないため
 `11.local`の付与とProject Statusの遷移が成立せず保留していた**（#1224）が、両方を導入して前提が揃ったため、
 サブPCの対応表でコメントアウトされていた行を有効化した。ポート帯（10000）は#1224の時点で確保済み。
+
+※4 `subpc`・`vps`・`docs`は#1741で追加した（3件ともprivate）。**上の「対応リポジトリ一覧」の表には
+載らないインフラ設定・共有知識のリポジトリで、`claude-issue-dispatch.yml`・`issue-labels.yml`の
+どちらも持たない。** そのため無人実行は回らず、**実行経路はこのローカルセッションだけ**になる
+（起動そのものは汎用ランチャーが行うので成立する）。実測した特徴と、載せるにあたっての判断は次のとおり。
+
+- **`11.local`の付与は失敗する。** 3件ともラベルが未定義で、`gh issue edit --add-label`が
+  `'11.local' not found`で落ちる（警告のみで起動は続く）。`AskUserQuestion`で付く`00.check-user`は
+  逆に**付与エンドポイントが色も説明も無いラベルをその場で作ってしまう**
+  （`src/lib/dispatch/check-user-labels.ts`）。ラベル体系の整備は**リポジトリごとの子Issue**で行う
+  （`CLAUDE.md`「複数リポジトリに影響する変更は、リポジトリごとにIssueを分ける」）
+- **進捗（Project Status）は起動したIssueだけが盤面に載る。** 報告API（`POST /api/progress`）は
+  未登録なら`addProjectItem`で追加する（`src/lib/github/report-progress.ts`）が、一括同期
+  （`syncProjectStatuses`）は`hasClaudeWorkflow: true`で絞るため取り込まれない
+- **3件とも既定ブランチが`main`**（`subpc`・`docs`は`develop`を持たず、`vps`の`develop`は
+  mainから遅れている）。汎用ランチャーは`origin/HEAD`を正とするので`main`から分岐し`main`宛PRになる。
+  `subpc`・`vps`は`deploy.yml`が`push: main`なので、**マージがそのまま本番反映**になる
+- **`docs`のチェックアウト先は`~/apps/_docs`**で、ディレクトリ名がリポジトリ名と一致しない。
+  これは全セッションが`--add-dir`で読む共有知識の参照先と**同一実体**のため、そのリポジトリの
+  Issueを起動するときだけ参照を付けない（[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)
+  「共有知識リポジトリ自身のIssueを起動するとき」）
+- 3件とも`package.json`を持たず開発サーバーを起動しないが、ポート帯（20000・21000・22000）は
+  確保した。載っていないと既定の`3000 + Issue番号`に落ち、未登録のリポジトリ同士が相乗りするため
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
