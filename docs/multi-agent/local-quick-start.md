@@ -987,6 +987,15 @@ CI用プレースホルダ（`ci-placeholder`）が入っている値だけは�
 **worktreeごとにDBは分かれていない。** 全worktreeの`DATABASE_URL`が同じ`app_issue_deck_dev`を指すため、
 一度入れれば全worktreeの開発サーバーから見える。
 
+**裏返しとして、他のworktreeが流したマイグレーションで自分の画面が落ちることがある**（#1772）。
+テーブルを落とすマイグレーションを持つブランチで`pnpm db:migrate:dev`が走ると、まだそのブランチを
+取り込んでいないworktreeでは`PrismaClientKnownRequestError` `P2021`（table does not exist）になり、
+ページが500やエラー画面になる。**`prisma migrate status`は「up to date」と答える**——自分のブランチの
+マイグレーションはすべて適用済みで、他ブランチのぶんは知らないため、これでは気づけない。
+開発サーバーのログに出る`P2021`と`meta.table`を見て、自分のブランチが持つ該当マイグレーションを
+流し直せば直る（例: `npx prisma db execute --file prisma/migrations/<名前>/migration.sql --schema prisma/schema.prisma`）。
+最終的にはdevelopを取り込めば揃うので、**画面確認の前にdevelopとの差分を見ておくと早い。**
+
 見た目・操作の確認だけならダミーデータで足りる。
 
 ```bash
