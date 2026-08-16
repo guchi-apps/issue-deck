@@ -4,7 +4,11 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { extractBumpChangelog, extractBumpReason } from "@/lib/github/release-bump-reason";
+import {
+  extractBumpChangelog,
+  extractBumpReason,
+  extractBumpUsage,
+} from "@/lib/github/release-bump-reason";
 import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
   dispatchReleaseWorkflow,
@@ -139,6 +143,7 @@ async function handleGET(request: NextRequest) {
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
+            usage: extractBumpUsage(bumpPr.body),
           }
         : null,
       releasePullRequest: releasePr
