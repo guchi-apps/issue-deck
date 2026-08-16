@@ -489,6 +489,12 @@ export function IssueDeckShell({
     [navCounts, mergePendingPullRequests.length],
   );
 
+  // ブランチ画面のリリースの束が組み立てられる状態か（#1711）。**要求した`scope`ではなく、
+  // 手元にある取得結果の母集団で判断する。** ブランチ画面を開いた直後は`open`のときの結果が
+  // 残っており、そこにはマージ済みのPRが1件も無いため、揃ったものとして描くと直前に本番へ
+  // 出した版ごと画面から消える。
+  const mergedPullRequestsLoaded = openPullRequests.loadedScope === "all";
+
   // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
   const branchFlowStatus = useBranchFlow(isFlowPaneActive);
 
@@ -784,6 +790,7 @@ export function IssueDeckShell({
                   isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
                   error={branchFlowStatus.error ?? openPullRequests.error}
                   failedRepositories={branchFlowStatus.failedRepositories}
+                  mergedPullRequestsLoaded={mergedPullRequestsLoaded}
                   onRefresh={() => {
                     branchFlowStatus.refresh();
                     openPullRequests.refresh();
@@ -961,6 +968,7 @@ export function IssueDeckShell({
               isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
               error={branchFlowStatus.error ?? openPullRequests.error}
               failedRepositories={branchFlowStatus.failedRepositories}
+              mergedPullRequestsLoaded={mergedPullRequestsLoaded}
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();

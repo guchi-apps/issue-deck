@@ -17,6 +17,15 @@ type UsePullRequestsResult = {
   failedRepositories: string[];
   /** 最終取得時刻（ISO8601）。未取得はnull */
   fetchedAt: string | null;
+  /**
+   * 手元にある取得結果の母集団（#1711）。未取得はnull。
+   *
+   * **`scope`に`all`を要求しても、実際にクローズ済みまで届くのは次の取得が終わってから。**
+   * それまでは`open`のときの結果が残るため、要求した`scope`を見て「クローズ済みも揃っている」
+   * と判断すると、まだ入っていないものを「無い」と読んでしまう（ブランチ画面がリリース済みの
+   * バージョンを1件も出せなくなっていた）。
+   */
+  loadedScope: PullRequestListScope | null;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
@@ -49,6 +58,7 @@ export function usePullRequests(
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [loadedScope, setLoadedScope] = useState<PullRequestListScope | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // refreshで再取得させるためのキー。増やすと下のeffectが再実行される。
@@ -100,6 +110,8 @@ export function usePullRequests(
         setPullRequests(data.pullRequests);
         setFailedRepositories(data.failedRepositories);
         setFetchedAt(data.fetchedAt);
+        // 実際に取れた母集団を残す。要求した`scope`ではなく「手元にある結果が何か」を返す（#1711）
+        setLoadedScope(fetchScope);
         setError(null);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -148,5 +160,5 @@ export function usePullRequests(
     };
   }, [autoRefresh]);
 
-  return { pullRequests, failedRepositories, fetchedAt, isLoading, error, refresh };
+  return { pullRequests, failedRepositories, fetchedAt, loadedScope, isLoading, error, refresh };
 }
