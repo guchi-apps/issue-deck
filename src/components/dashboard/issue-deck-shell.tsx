@@ -49,7 +49,11 @@ import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
-import { buildBranchFlow, latestReleaseMergedAtByRepository } from "@/lib/branch-flow";
+import {
+  buildBranchFlow,
+  latestReleaseMergedAtByRepository,
+  orderRepositoriesBySelection,
+} from "@/lib/branch-flow";
 import {
   isMergeCheckUser,
   resolveCheckUserToasts,
@@ -64,12 +68,14 @@ import {
   applyIssueFilters,
   computeFilterLabelSummary,
   computeLabelSummary,
-  computeNavCounts,
+  computeNavCountsForFilters,
   computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
+  hasIgnoredIssueFilters,
   reconcileIssues,
+  resolveFiltersForView,
   sortIssues,
   upsertIssue,
 } from "@/lib/issue-stats";
@@ -390,18 +396,17 @@ export function IssueDeckShell({
     setCheckUserToasts((prev) => prev.filter((toast) => toast.id !== id));
   }
 
-  // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
-  // サイドバーの件数表示はこれを基準にする。
-  const topbarFilteredIssues = useMemo(
-    () => applyIssueFilters(issues, filters),
-    [issues, filters],
+  // 表示中のビューで実際に適用する絞り込み（#1750）。「ユーザーの確認待ち」「ユーザーの
+  // 作業待ち」「質問」はリポジトリ横断で全体を見る場所なので、ここで条件が空へ解決される。
+  const viewFilters = useMemo(
+    () => resolveFiltersForView(filters, filters.view),
+    [filters],
   );
 
-  // 「直近main反映済み」のようにclose済みIssueを含むビューの件数を数えるための、
-  // 状態（open/closed）の絞り込みだけを外した集合。
-  const topbarFilteredIssuesIgnoringState = useMemo(
-    () => applyIssueFilters(issues, { ...filters, state: "all" }),
-    [issues, filters],
+  // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
+  const viewFilteredIssues = useMemo(
+    () => applyIssueFilters(issues, viewFilters),
+    [issues, viewFilters],
   );
 
   const filteredIssues = useMemo(
@@ -409,33 +414,48 @@ export function IssueDeckShell({
       sortIssues(
         // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
         // 基準がずれて古いリリース分が現れないようにする）。
-        filterIssuesByView(topbarFilteredIssues, filters.view, currentUserLogin, issues),
+        filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues),
         filters.sort,
         filters.view,
       ),
-    [topbarFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
+    [viewFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );
 
+  // 絞り込みを指定しているのに、いま見ているビューでは効かない状態か（#1750）。
+  // 黙って無視すると件数が変わらない理由が読めないため、一覧のヘッダーに注記を出す。
+  const filtersIgnored = useMemo(
+    () => hasIgnoredIssueFilters(filters, filters.view),
+    [filters],
+  );
+
+  // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
+  // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   const navCounts = useMemo(
+    () => computeNavCountsForFilters(issues, filters, currentUserLogin),
+    [issues, filters, currentUserLogin],
+  );
+  // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
+  // どのビューを表示していても求める。絞り込みを適用しないビュー（#1750）なので、
+  // 母集団は絞り込み前の全Issue。
+  const checkUserIssues = useMemo(
     () =>
-      computeNavCounts(
-        topbarFilteredIssues,
-        topbarFilteredIssuesIgnoringState,
+      filterIssuesByView(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "check-user")),
+        "check-user",
         currentUserLogin,
         issues,
       ),
-    [topbarFilteredIssues, topbarFilteredIssuesIgnoringState, issues, currentUserLogin],
+    [issues, filters, currentUserLogin],
   );
-  // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
-  // どのビューを表示していても求める。
-  const checkUserIssues = useMemo(
-    () => filterIssuesByView(topbarFilteredIssues, "check-user", currentUserLogin, issues),
-    [topbarFilteredIssues, issues, currentUserLogin],
-  );
-  // 「ユーザーの作業待ち」の内訳（#1613）。起点Issueを引くための母集団は絞り込み前の全Issue。
+  // 「ユーザーの作業待ち」の内訳（#1613）。こちらも絞り込みを適用しないビューで、
+  // 起点Issueを引くための母集団も絞り込み前の全Issue。
   const manualStepAttention = useMemo(
-    () => computeManualStepAttention(topbarFilteredIssues, issues),
-    [topbarFilteredIssues, issues],
+    () =>
+      computeManualStepAttention(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "manual-step")),
+        issues,
+      ),
+    [issues, filters],
   );
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
@@ -497,11 +517,12 @@ export function IssueDeckShell({
       : visible.filter((pullRequest) => filters.repos.includes(pullRequest.repositoryFullName));
   }, [openPullRequests.pullRequests, filters.repos, hiddenPullRequestIds]);
 
-  // ヘッダーの通知ベル（#1614）に渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
-  // ベルはリポジトリ横断で「いま人が動かないと止まるもの」を見る場所で、Issue側（絞り込み前の
-  // `issues`を渡している）と揃えないと、絞り込んだ瞬間にPRだけ消えて件数の意味が変わる。
-  // 伏せたPR（マージ済みで消したもの）だけは除く。
-  const notifiablePullRequests = useMemo(
+  // リポジトリ横断で見る場所へ渡す母集団。**TopBarのリポジトリ絞り込みには従わせない。**
+  // 渡す先はヘッダーの通知ベル（#1614）・「ユーザーの確認待ち」に並ぶマージ待ちPR・
+  // ブランチ画面（#1750）の3つで、どれもリポジトリ横断で「いま人が動かないと止まるもの」を
+  // 見る場所。Issue側（絞り込みを適用しないビュー）と揃えないと、絞り込んだ瞬間にPRだけ消えて
+  // 件数の意味が変わる。伏せたPR（マージ済みで消したもの）だけは除く。
+  const crossRepositoryPullRequests = useMemo(
     () =>
       openPullRequests.pullRequests.filter(
         (pullRequest) => !hiddenPullRequestIds.includes(pullRequest.id),
@@ -522,10 +543,12 @@ export function IssueDeckShell({
   );
 
   // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものは
-  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。
+  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。**リポジトリ絞り込みは掛けない**
+  // （#1750）——並ぶ先が絞り込みを適用しないビューなので、掛けると同じ一覧の中でIssueだけ
+  // 全体・PRだけ絞られた状態になる。
   const mergePendingPullRequests = useMemo(
-    () => pullRequestsAwaitingUserMerge(visiblePullRequests, checkUserIssues),
-    [visiblePullRequests, checkUserIssues],
+    () => pullRequestsAwaitingUserMerge(crossRepositoryPullRequests, checkUserIssues),
+    [crossRepositoryPullRequests, checkUserIssues],
   );
 
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
@@ -547,9 +570,11 @@ export function IssueDeckShell({
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
   // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
   // その1点だけを渡す（フック側が自分でポーリングの要否を決める）。
+  // 母集団はブランチ画面と揃える（#1750）。全リポジトリを出す画面なのにデプロイ状況だけ
+  // 絞られると、行によって出たり出なかったりする。
   const latestReleaseMergedAt = useMemo(
-    () => latestReleaseMergedAtByRepository(visiblePullRequests),
-    [visiblePullRequests],
+    () => latestReleaseMergedAtByRepository(crossRepositoryPullRequests),
+    [crossRepositoryPullRequests],
   );
   const deployStatus = useDeployStatus(isFlowPaneActive, latestReleaseMergedAt);
 
@@ -558,11 +583,14 @@ export function IssueDeckShell({
   const branchFlow = useMemo(
     () =>
       buildBranchFlow({
-        repositories: visibleRepositories
-          .filter((repo) => !repo.archived)
-          .filter((repo) => filters.repos.length === 0 || filters.repos.includes(repo.fullName)),
-        // 左メニューのリポジトリ絞り込み・マージ直後に伏せたPRを反映済みの集合
-        pullRequests: visiblePullRequests,
+        // **リポジトリ絞り込みは適用しない**（#1750）。この画面はリポジトリ横断で流れを俯瞰
+        // する場所なので、選択中のリポジトリは絞り込む代わりに先頭へ寄せ、展開して見せる。
+        repositories: orderRepositoriesBySelection(
+          visibleRepositories.filter((repo) => !repo.archived),
+          filters.repos,
+        ),
+        // マージ直後に伏せたPRだけを除いた集合（リポジトリ絞り込みは掛けない）
+        pullRequests: crossRepositoryPullRequests,
         // 本文とラベルは手作業Issue（71.manual-step）の紐づけに使う（#1510）。
         // どちらもDBキャッシュ由来で、渡すのに追加の取得は要らない
         issues: issues.map((issue) => ({
@@ -575,7 +603,7 @@ export function IssueDeckShell({
     [
       visibleRepositories,
       filters.repos,
-      visiblePullRequests,
+      crossRepositoryPullRequests,
       issues,
       branchFlowStatus.branchStatuses,
       deployStatus.deployStatuses,
@@ -794,7 +822,7 @@ export function IssueDeckShell({
           }
           repositories={repositories}
           issues={issues}
-          pullRequests={notifiablePullRequests}
+          pullRequests={crossRepositoryPullRequests}
           onOpenNotificationTarget={openNotificationTarget}
           /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
           onOpenIssue={openIssueUrl}
@@ -1019,6 +1047,8 @@ export function IssueDeckShell({
               error={branchFlowStatus.error ?? openPullRequests.error}
               failedRepositories={branchFlowStatus.failedRepositories}
               mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+              /* 絞り込みでは無く「展開して見せる」形にする（#1750） */
+              expandedRepositoryFullNames={filters.repos}
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();
@@ -1087,6 +1117,8 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
+                // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
+                filtersIgnored={filtersIgnored}
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: issueListWidth.width, maxWidth: "50vw" }}
               />

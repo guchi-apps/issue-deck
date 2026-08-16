@@ -5,6 +5,7 @@ import {
   extractManualStepOrigin,
   isClosedLane,
   latestReleaseMergedAtByRepository,
+  orderRepositoriesBySelection,
   type BranchFlowIssueSource,
 } from "@/lib/branch-flow";
 import type {
@@ -1117,5 +1118,30 @@ describe("サマリー行の集計", () => {
       branchStatuses: [branchStatus()],
     });
     expect(flow.repositories[0].summary.hasCiFailure).toBe(false);
+  });
+});
+
+// #1750: ブランチ画面はリポジトリ絞り込みを適用せず、選択中を先頭へ寄せて展開する
+describe("orderRepositoriesBySelection", () => {
+  const repositories = [
+    { fullName: "owner/a" },
+    { fullName: "owner/b" },
+    { fullName: "owner/c" },
+  ];
+
+  it("選択中のリポジトリを先頭へ寄せ、どちらのグループも元の並びを保つ", () => {
+    expect(orderRepositoriesBySelection(repositories, ["owner/c", "owner/b"])).toEqual([
+      { fullName: "owner/b" },
+      { fullName: "owner/c" },
+      { fullName: "owner/a" },
+    ]);
+  });
+
+  it("選択が無ければ並びは変わらない", () => {
+    expect(orderRepositoriesBySelection(repositories, [])).toEqual(repositories);
+  });
+
+  it("選択されていても一覧に無いリポジトリは足さない（＝件数は増えない）", () => {
+    expect(orderRepositoriesBySelection(repositories, ["owner/unknown"])).toEqual(repositories);
   });
 });
