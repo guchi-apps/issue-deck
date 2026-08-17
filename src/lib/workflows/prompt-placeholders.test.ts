@@ -17,6 +17,7 @@ const WORKFLOWS_DIR = join(process.cwd(), ".github", "workflows");
 const OWNERS: Record<string, string> = {
   "implement.md": "reusable-issue-dispatch.yml",
   "plan.md": "reusable-issue-dispatch.yml",
+  "plan-review.md": "reusable-issue-dispatch.yml",
   "split.md": "reusable-issue-dispatch.yml",
   "question.md": "reusable-issue-dispatch.yml",
   "ci-fix.md": "reusable-claude-ci-fix.yml",
@@ -38,14 +39,27 @@ function readPrompt(name: string): string {
   return readFileSync(join(PROMPTS_DIR, name), "utf8");
 }
 
-// ワークフローが envsubst へ渡している変数名を取り出す
-function substitutedBy(workflow: string): string[] {
+// そのプロンプトを組み立てるステップが envsubst へ渡している変数名を取り出す。
+//
+// **変数リストはステップごとに違う**（計画レビューだけ ${FLEET_STATUS} を受け取る。#1218）ため、
+// ワークフロー単位ではなくプロンプト単位で引く。走査は行ベースで、
+// `PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/<名前>.md"` を見つけたら以降の envsubst を
+// そのファイルのものとみなす（scripts/check-workflow-expression-length.mjs と同じ方式）。
+function substitutedFor(prompt: string, workflow: string): string[] {
   const source = readFileSync(join(WORKFLOWS_DIR, workflow), "utf8");
-  const calls = [...new Set(source.match(/envsubst '[^']*'/g) ?? [])];
-  expect(calls, `${workflow} の envsubst 呼び出し`).toHaveLength(1);
-  return [...((calls[0] as string).matchAll(/\$\{([A-Z_]+)\}/g) as Iterable<RegExpMatchArray>)].map(
-    (m) => m[1] as string,
-  );
+  let current: string | null = null;
+  for (const line of source.split("\n")) {
+    const fileMatch = /\/([\w.-]+\.md)"/.exec(line);
+    if (fileMatch) current = fileMatch[1] as string;
+    const envsubstMatch = /envsubst '([^']*)'/.exec(line);
+    if (!envsubstMatch || current !== prompt) continue;
+    return [
+      ...((envsubstMatch[1] as string).matchAll(
+        /\$\{([A-Z_]+)\}/g,
+      ) as Iterable<RegExpMatchArray>),
+    ].map((m) => m[1] as string);
+  }
+  expect.fail(`${workflow} に ${prompt} を組み立てる envsubst が見つからない`);
 }
 
 // プロンプト本文で使われているプレースホルダ
@@ -93,7 +107,7 @@ describe("無人実行プロンプト", () => {
 
   it("プロンプトが使う変数を、所属ワークフローが全て渡している", () => {
     for (const [name, workflow] of Object.entries(OWNERS)) {
-      const provided = substitutedBy(workflow);
+      const provided = substitutedFor(name, workflow);
 
       for (const placeholder of placeholdersIn(readPrompt(name))) {
         expect(provided, `${name} が使う \${${placeholder}} は ${workflow} が渡していない`).toContain(
@@ -118,10 +132,12 @@ describe("無人実行プロンプト", () => {
       HEAD_REF: "develop",
       WORK_BRANCH: "pr-repair/37-1",
       PUSH_MODE: "pull-request",
+      // 計画レビューへ差し込む並行状況スナップショット（#1215・#1218）
+      FLEET_STATUS: "（テスト用のダミー）",
     };
 
     for (const [name, workflow] of Object.entries(OWNERS)) {
-      const vars = substitutedBy(workflow);
+      const vars = substitutedFor(name, workflow);
       const expanded = execFileSync("envsubst", [vars.map((key) => `$\{${key}}`).join(" ")], {
         input: readPrompt(name),
         // envsubstへ渡す変数だけの環境にする。型定義がNODE_ENVを要求するため補う
@@ -137,7 +153,7 @@ describe("無人実行プロンプト", () => {
   });
 
   it("展開後の実装プロンプトが呼び出し元の値になっている", () => {
-    const vars = substitutedBy("reusable-issue-dispatch.yml");
+    const vars = substitutedFor("implement.md", "reusable-issue-dispatch.yml");
     const expanded = execFileSync("envsubst", [vars.map((key) => `$\{${key}}`).join(" ")], {
       input: readPrompt("implement.md"),
       env: {

@@ -479,14 +479,15 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 
 | ファイル | 参照方式での扱い |
 |---|---|
-| `.github/prompts/{plan,split,question,implement}.md` | **コピー不要。** `prompts-ref`で解決される |
+| `.github/prompts/{plan,plan-review,split,question,implement}.md` | **コピー不要。** `prompts-ref`で解決される |
 | `.github/scripts/summarize-claude-usage.sh` | **コピー不要。** 同じく`prompts-ref`で解決される |
+| `scripts/fleet-status.sh` | **コピー不要。** 同じく`prompts-ref`で解決される（計画レビューへ並行状況を差し込む。#1218。無くてもその節が空になるだけでジョブは失敗しない） |
 
 **`prompts-ref`を指定し忘れると、呼び出し元リポジトリの`.github/prompts/`が読まれ、存在しないため最初のClaudeステップで落ちる。** 使用量出力スクリプトも同様に解決されるため、これが無いと`exit 127`でジョブが失敗する（#964で実際に発生）。
 
-対象リポジトリ固有のプロンプトを使いたい場合に限り、`.github/prompts/`配下を自分で用意して`prompts-ref`を未指定にする。ただしプロンプトは4ファイル・約48KBで最も更新頻度が高い部分のため、**特段の理由がなければ共有側を使う**こと。
+対象リポジトリ固有のプロンプトを使いたい場合に限り、`.github/prompts/`配下を自分で用意して`prompts-ref`を未指定にする。ただしプロンプトは5ファイル・約78KBで最も更新頻度が高い部分のため、**特段の理由がなければ共有側を使う**こと。
 
-プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・`${RUN_URL}`のプレースホルダで表現され、ワークフロー側の「〜プロンプトを組み立てる」ステップが`envsubst`で埋めて環境変数へ格納する。
+プロンプト内の動的な値は`${ISSUE_NUMBER}`・`${BRANCH}`・`${PR_URL}`・`${MODE}`・`${REPOSITORY}`・`${RUN_URL}`・`${PACKAGE_MANAGER}`（計画レビューのみ`${FLEET_STATUS}`も）のプレースホルダで表現され、ワークフロー側の「〜プロンプトを組み立てる」ステップが`envsubst`で埋めて環境変数へ格納する。
 
 ### 参考: issue-deckの全ワークフロー一覧
 
