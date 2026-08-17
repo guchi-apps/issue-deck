@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ADVANCED_PROGRESS_STATUSES,
+  CLOSE_TERMINAL_SOURCE_STATUSES,
   PROGRESS_STATUSES,
   getProgressStatusIndex,
   hasActiveProgress,
@@ -13,10 +14,19 @@ import {
 } from "@/lib/issue-progress";
 
 describe("PROGRESS_STATUSES の定義", () => {
-  it("先頭がreadyで、それ以外がステップ表示の対象になる", () => {
+  it("先頭がreadyで、readyと対応終了を除いた6状態がステップ表示の対象になる", () => {
     expect(PROGRESS_STATUSES[0].key).toBe("ready");
-    expect(ADVANCED_PROGRESS_STATUSES).toHaveLength(PROGRESS_STATUSES.length - 1);
-    expect(ADVANCED_PROGRESS_STATUSES.some((status) => status.key === "ready")).toBe(false);
+    // ステップ表示（WORKFLOW_STEPS）はPlanning〜Doneの一本道。ここが増えると通常のIssueの
+    // 「実装中（2/6）」という分母まで変わるため、件数そのものを固定して押さえる（#1856）
+    expect(ADVANCED_PROGRESS_STATUSES).toHaveLength(6);
+    expect(ADVANCED_PROGRESS_STATUSES.map((status) => status.key)).toEqual([
+      "planning",
+      "implementation",
+      "develop-pr",
+      "develop",
+      "release",
+      "done",
+    ]);
   });
 
   it("Status名に重複がない", () => {
@@ -24,9 +34,23 @@ describe("PROGRESS_STATUSES の定義", () => {
     expect(new Set(statusNames).size).toBe(statusNames.length);
   });
 
-  it("マージ後の定常状態と未着手はactiveではない", () => {
+  it("マージ後の定常状態・未着手・対応終了はactiveではない", () => {
     const inactive = PROGRESS_STATUSES.filter((status) => !status.active).map((s) => s.key);
-    expect(inactive).toEqual(["ready", "develop", "done"]);
+    expect(inactive).toEqual(["ready", "develop", "done", "closed"]);
+  });
+});
+
+describe("CLOSE_TERMINAL_SOURCE_STATUSES", () => {
+  it("close時に終端へ送るのは実装中の3状態だけ（#1856）", () => {
+    expect(CLOSE_TERMINAL_SOURCE_STATUSES).toEqual(["planning", "implementation", "develop-pr"]);
+  });
+
+  it("本番未反映の変更を抱える状態と未着手は含めない", () => {
+    // `develop`・`release`はdevelopまで入って本番へ出ていない。`ready`は未着手のまま
+    // 終わっただけで取り残しではない
+    for (const key of ["ready", "develop", "release", "done", "closed"] as const) {
+      expect(CLOSE_TERMINAL_SOURCE_STATUSES).not.toContain(key);
+    }
   });
 });
 
@@ -35,6 +59,7 @@ describe("matchProjectStatus", () => {
     expect(matchProjectStatus("Implementation")).toBe("implementation");
     expect(matchProjectStatus("Develop PR")).toBe("develop-pr");
     expect(matchProjectStatus("Done")).toBe("done");
+    expect(matchProjectStatus("Closed")).toBe("closed");
   });
 
   it("未知のStatus名はnullを返す", () => {
@@ -63,7 +88,9 @@ describe("resolveProgressStatus", () => {
 describe("getProgressStatusIndex", () => {
   it("遷移順のとおりに並ぶ", () => {
     expect(getProgressStatusIndex("ready")).toBe(0);
-    expect(getProgressStatusIndex("done")).toBe(PROGRESS_STATUSES.length - 1);
+    // 本流の終端は`done`。`closed`はそこから外れた終端なので、`done`の後ろに置く（#1856）
+    expect(getProgressStatusIndex("closed")).toBe(PROGRESS_STATUSES.length - 1);
+    expect(getProgressStatusIndex("closed")).toBeGreaterThan(getProgressStatusIndex("done"));
     expect(getProgressStatusIndex("develop")).toBeGreaterThan(
       getProgressStatusIndex("develop-pr"),
     );

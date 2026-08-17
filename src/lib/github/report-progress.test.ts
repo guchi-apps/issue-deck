@@ -45,6 +45,10 @@ vi.mock("@/lib/github/projects-api", () => ({
 }));
 
 import { clearProjectStatusFieldCache, reportProgressStatus } from "@/lib/github/report-progress";
+import {
+  CLOSE_TERMINAL_SOURCE_STATUSES,
+  type ProgressStatusKey,
+} from "@/lib/issue-progress";
 
 const REPOSITORY = {
   id: "repo-1",
@@ -60,6 +64,7 @@ const STATUS_FIELD = {
     ["Implementation", "opt-impl"],
     ["Develop", "opt-develop"],
     ["Done", "opt-done"],
+    ["Closed", "opt-closed"],
   ]),
 };
 
@@ -77,12 +82,14 @@ const NOT_ON_BOARD = { issueNodeId: "I_issue1", issueOpen: true, item: null };
 
 function report(
   issueNumber = 1007,
-  status: "implementation" | "release" | "develop" | "done" = "implementation",
+  status: "implementation" | "release" | "develop" | "done" | "closed" = "implementation",
+  onlyFrom?: readonly ProgressStatusKey[],
 ) {
   return reportProgressStatus({
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber,
     status,
+    onlyFrom,
   });
 }
 
@@ -234,6 +241,49 @@ describe("reportProgressStatus", () => {
       expect.objectContaining({ optionId: "opt-done" }),
       "token",
     );
+  });
+
+  it("closedなIssueでも`closed`（対応終了）の報告は書き込む（#1856）", async () => {
+    findIssueProjectState.mockResolvedValue(onBoard("Implementation", "item-1", false));
+
+    const result = await report(1007, "closed", CLOSE_TERMINAL_SOURCE_STATUSES);
+
+    expect(result).toEqual({ applied: true, from: "Implementation", to: "Closed" });
+    expect(updateProjectItemStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ optionId: "opt-closed" }),
+      "token",
+    );
+  });
+
+  it("onlyFromに一致しないStatusには書き込まない（#1856）", async () => {
+    // developまで入って本番へ出ていないIssueをcloseしても、終端へは送らない
+    findIssueProjectState.mockResolvedValue(onBoard("Develop", "item-1", false));
+
+    const result = await report(1007, "closed", CLOSE_TERMINAL_SOURCE_STATUSES);
+
+    expect(result).toEqual({ applied: false, reason: "status_mismatch" });
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("`Done`まで進んだIssueを閉じ直しても巻き戻らない（#1856）", async () => {
+    findIssueProjectState.mockResolvedValue(onBoard("Done", "item-1", false));
+
+    const result = await report(1007, "closed", CLOSE_TERMINAL_SOURCE_STATUSES);
+
+    expect(result).toEqual({ applied: false, reason: "status_mismatch" });
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+  });
+
+  it("onlyFrom指定時、盤面に無いIssueは載せずに終わる（#1856）", async () => {
+    // 載せてしまうと、closeされただけのIssueで盤面が埋まる
+    findIssueProjectState.mockResolvedValue({ ...NOT_ON_BOARD, issueOpen: false });
+
+    const result = await report(1007, "closed", CLOSE_TERMINAL_SOURCE_STATUSES);
+
+    expect(result).toEqual({ applied: false, reason: "status_mismatch" });
+    expect(addProjectItem).not.toHaveBeenCalled();
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
   });
 
   it("Statusフィールドの取得は繰り返しの報告でキャッシュされる", async () => {

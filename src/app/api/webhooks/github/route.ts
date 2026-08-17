@@ -14,6 +14,8 @@ import {
   type DispatchMode,
 } from "@/lib/github/project-status-dispatch";
 import { fetchProjectItem } from "@/lib/github/projects-api";
+import { reportProgressStatus } from "@/lib/github/report-progress";
+import { CLOSE_TERMINAL_SOURCE_STATUSES, resolveProgressStatus } from "@/lib/issue-progress";
 import {
   deleteIssueByGithubId,
   syncRepositoryIssues,
@@ -98,6 +100,62 @@ async function handleIssuesEvent(payload: {
   if (!repository) return;
 
   await upsertIssueFromWebhookPayload(repository.id, payload.issue);
+
+  // **closeを進捗の終端への遷移として扱う（#1856）。** DBのstateをclosedにした後に行う。
+  //
+  // `reopened`では何も戻さない。戻す先（`Implementation`だったのか`Ready`だったのか）を
+  // 復元する材料が無く、推測で書くと人が意図して置いた状態を壊す。必要なら右パネルの
+  // 進捗セレクトから選べる。
+  if (payload.action === "closed") {
+    await closeStrandedProgress(repository.id, repository.fullName, payload.issue.number);
+  }
+}
+
+/**
+ * closeされたIssueのStatusが`Planning`・`Implementation`・`Develop PR`に取り残されていれば、
+ * 終端（`Closed`）へ送る（#1856）。
+ *
+ * **ワークフロー（`reusable-issue-labels.yml`の`cleanup-on-close`）ではなくここに置く。**
+ * Projectへの読み書きはissue-deckに一本化するという#991の中核の判断に沿ううえ、
+ * ワークフロー側へ入れると`workflows/vN`タグを配布先リポジトリすべてへ配り直すまで効かない。
+ * issue-deckのGitHub Appは接続済みの全リポジトリの`issues`イベントを既に受けており、
+ * **`GITHUB_TOKEN`起点のcloseでもApp宛のWebhookは届く**（他のワークフローを起動しないという
+ * GitHubの仕様はActionsの中だけの話で、Webhookの配信には及ばない）。そのため
+ * `main-pr-merged`が`gh issue close`した場合もここへ来るが、そちらは`Develop`・`Release`から
+ * closeするため対象外になり、`done`の報告と競合しない。
+ *
+ * DBの`projectStatus`での事前判定は、無関係なcloseでGraphQLを叩かないための足切りにすぎない。
+ * **正しさは`onlyFrom`側（Projectの実物を読む）が担保する。**
+ */
+async function closeStrandedProgress(
+  repositoryId: string,
+  repositoryFullName: string,
+  issueNumber: number,
+) {
+  try {
+    const issue = await db.issue.findUnique({
+      where: { repositoryId_number: { repositoryId, number: issueNumber } },
+      select: { projectStatus: true },
+    });
+    const current = resolveProgressStatus({ projectStatus: issue?.projectStatus ?? null });
+    if (!CLOSE_TERMINAL_SOURCE_STATUSES.includes(current)) return;
+
+    await reportProgressStatus({
+      repositoryFullName,
+      issueNumber,
+      status: "closed",
+      onlyFrom: CLOSE_TERMINAL_SOURCE_STATUSES,
+    });
+  } catch (error) {
+    // 進捗の更新でissue-deckを単一障害点にしない（#991）。ここで投げるとWebhook全体が500になり、
+    // 成功済みのIssue取り込みごとGitHubに再送される
+    console.error(
+      "[webhooks/github] failed to move closed issue to the terminal status",
+      repositoryFullName,
+      issueNumber,
+      error,
+    );
+  }
 }
 
 async function handleIssueCommentEvent(payload: {
