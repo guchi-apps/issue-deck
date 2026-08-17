@@ -796,6 +796,18 @@ jobs:
           fi
           echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
 
+          # 並行状況スナップショット(#1215)。計画レビュー(G1・#1218)の入力に差し込む。
+          # 使用量スクリプトと同じく必須ではないため、無くても落とさない(その節が空になるだけ)。
+          # 呼び出し元にスクリプトが無くてもprompts-ref指定時は共有側のものが使える。
+          FLEET="$ROOT/scripts/fleet-status.sh"
+          if [ -x "$FLEET" ]; then
+            echo "並行状況スナップショット: $FLEET"
+          else
+            echo "並行状況スナップショット $FLEET が無いため、計画レビューへの差し込みはスキップします"
+            FLEET=""
+          fi
+          echo "FLEET_STATUS_SCRIPT=$FLEET" >> "$GITHUB_ENV"
+
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
         # 同じ id: state として出力し直す(#651)。ファイル全体に101箇所ある steps.state.outputs.*
@@ -1162,6 +1174,7 @@ jobs:
           retention-days: 14
 
       - name: 計画コメント投稿を検証し、必要ならフォールバックする
+        id: verify_plan
         if: always() && steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1193,6 +1206,18 @@ jobs:
           : "${BEFORE_COUNT:=0}"
           if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
             echo "新規コメントを確認できたため計画提示は完了とみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            # 計画の関門(G1・#1218)を起動してよいかをここで決める。判断材料はこのステップが
+            # 既に持っているため、専用の判定ステップは設けない。
+            #   - 計画が実際に投稿された回だけ走らせる(フォールバックした回はレビューの対象が無い)
+            #   - 直近のコメントが質問への回答(#417のqa-answer)なら走らせない。計画本文は
+            #     更新されておらず、同じ計画をもう一度読むだけでコストを払うことになる
+            LAST_BODY="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | last | .body' 2>/dev/null || true)"
+            if printf '%s' "$LAST_BODY" | grep -q '<!-- issue-deck-qa-answer -->'; then
+              echo "直近のコメントが質問への回答のため、計画レビューは起動しません"
+              echo "plan_posted=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "plan_posted=true" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -1384,6 +1409,97 @@ jobs:
           if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
             gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
           fi
+
+      - name: 計画レビュープロンプトを組み立てる
+        # 計画の関門(G1・#1218)。計画提示の直後に、**別のClaude Codeステップ**として計画を
+        # リポジトリの実態と突き合わせる。計画を書いたセッションは自分が調べた範囲の中で結論を
+        # 書いており誰も検算していないため、独立した2回目の目を入れる(docs/multi-agent/gates.md)。
+        #
+        # プロンプト本文を.github/prompts/へ置く理由は上記「計画提示プロンプトを組み立てる」の
+        # コメントを参照(#907)。動的な値はenvsubstで埋め、プレースホルダは以下の4つ。
+        #   ${ISSUE_NUMBER} ${REPOSITORY} ${RUN_URL} ${FLEET_STATUS}
+        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/plan-review.md"
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+
+          # 並行状況スナップショット(#1215)を入力へ差し込む。走っているセッション同士の関係を
+          # 見る実行体が他に無いため、**新しいLLM呼び出しを増やさずに俯瞰を効かせる**
+          # (docs/multi-agent/gates.md「俯瞰を常駐させない」)。
+          #
+          # ランナーにはtmuxが無くセッションの行は空になるため、ここで埋まるのは実質
+          # 「developの先端」と「未マージPR(変更ファイル付き)」。走っているローカルセッションまで
+          # 見えるのはローカル入口(scripts/start-reviewer.sh --plan)の方。
+          # --root を渡すのは、prompts-ref経由だとこのスクリプトが.shared-prompts/(issue-deck側の
+          # checkout)に置かれ、既定のままでは呼び出し元ではなくissue-deckの先端を出してしまうため。
+          #
+          # **取得できなくてもレビュー自体は行う。** 俯瞰は材料の1つであって必須ではない。
+          FLEET_STATUS="（並行状況のスナップショットは取得できませんでした）"
+          if [ -n "${FLEET_STATUS_SCRIPT:-}" ]; then
+            SNAPSHOT="$("$FLEET_STATUS_SCRIPT" --root "$GITHUB_WORKSPACE" --repo "$GITHUB_REPOSITORY" --no-fetch 2>/dev/null)" || SNAPSHOT=""
+            if [ -n "$SNAPSHOT" ]; then
+              FLEET_STATUS="$SNAPSHOT"
+            else
+              echo "::warning::並行状況スナップショットの取得に失敗したため、その節を空のまま進めます"
+            fi
+          fi
+          export FLEET_STATUS
+
+          {
+            echo 'PROMPT_PLAN_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${ISSUE_NUMBER} ${REPOSITORY} ${RUN_URL} ${FLEET_STATUS}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Claude Code（計画レビュー）
+        id: claude_plan_review
+        # モデルは補助系(assist_model_flag)ではなく実装系(model_flag)に寄せる。指摘の見落としは
+        # そのまま「実装30分＋実装run 1本の作り直し」になり、損失がレビュー1本のコストより大きい
+        # (#1218・docs/multi-agent/prompts-and-models.md)。
+        #
+        # **PR操作(gh pr merge・gh pr edit)とラベル操作(gh issue edit)は許可しない。** マージ権限を
+        # 持つセッションが計画へ指摘すると自己承認の構図になり、ラベルを触れると承認(00.check-userを
+        # 外す操作)まで倒せてしまう。G1が出すのは指摘と推奨までで、承認は人が行う。
+        #
+        # continue-on-errorを付けているのは、計画レビューが補助だから。ここが落ちても計画提示自体は
+        # 成功しており、runを赤くして人に「計画が出ていない」と誤解させる方が害が大きい。
+        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # issue-deck[bot]名義のコメントで起動する経路(カンバンのドラッグ。#991 Phase 3)を
+          # 通すため。詳細は本ファイル冒頭の非人間アクター拒否についての説明を参照(#1022)
+          allowed_bots: "issue-deck[bot]"
+          show_full_output: true
+          claude_args: |
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git ls-remote:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"
+            --disallowedTools "Task,Agent"
+            ${{ steps.claude_model.outputs.model_flag }}
+          prompt: ${{ env.PROMPT_PLAN_REVIEW }}
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（計画レビュー））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_plan_review.outputs.execution_file != ''
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（計画レビュー）" "${{ steps.claude_plan_review.outputs.execution_file }}"
 
       - name: 分割前のコメント数を記録する
         id: before_split

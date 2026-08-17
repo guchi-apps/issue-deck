@@ -26,7 +26,11 @@ export type ManualStepGuideStep = {
    */
   line: number | null;
   checked: boolean;
-  /** 画面に描くMarkdown（見出し文＋直下のコードブロック。インデントを戻してある） */
+  /**
+   * 画面に描くMarkdown（見出し文＋直下のコードブロック）。行頭のインデントは
+   * **リストマーカーぶんだけ**戻してある（`blockMarkdown`）。インデント記法で書かれた
+   * コードブロックはコードブロックのまま残る
+   */
   markdown: string;
   /** 一覧・見出しに使う素のテキスト（Markdownの記法を落としたもの） */
   text: string;
@@ -134,7 +138,7 @@ function findSection(sections: Section[], key: SectionKey): Section | null {
 /** 節の本文。前後の空行を落とし、空なら`null` */
 function sectionText(section: Section | null): string | null {
   if (!section) return null;
-  const text = section.lines.join("\n").trim();
+  const text = blockMarkdown(section.lines);
   return text === "" ? null : text;
 }
 
@@ -187,15 +191,17 @@ function normalizeInline(raw: string): string {
 /**
  * `## やること`を手順へ割る。
  *
- * チェック行から次のチェック行（または節の終わり）までを1手順とし、共通の先頭インデントを
- * 落として`markdown`にする。テンプレートでは手順の下にコードブロックを**インデントして**
- * 置く決まりなので、落とさないとコードブロックとして描かれない。
+ * チェック行から次のチェック行（または節の終わり）までを1手順とし、そのリスト項目の
+ * インデントぶんだけ行頭を戻して`markdown`にする（`blockMarkdown`）。テンプレートでは
+ * 手順の下にコードブロックを**インデントして**置く決まりなので、戻さないとコードブロックとして
+ * 描かれない。
  *
  * **チェックリストが1つも無ければ節全体を1手順として返す**（手順が1つの手作業は
  * チェックリストにしなくてよい、という運用に合わせる）。
  */
 function parseSteps(section: Section): { intro: string | null; steps: ManualStepGuideStep[] } {
-  const marks: { index: number; checked: boolean }[] = [];
+  /** `indent`はそのチェック行のリストマーカーぶんの幅（`- [ ] `なら`- `の2） */
+  const marks: { index: number; checked: boolean; indent: number }[] = [];
   let openFence: string | null = null;
 
   section.lines.forEach((line, index) => {
@@ -209,11 +215,12 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     if (openFence !== null) return;
 
     const task = TASK_LINE_PATTERN.exec(line);
-    if (task) marks.push({ index, checked: task[2] !== " " });
+    if (task) marks.push({ index, checked: task[2] !== " ", indent: task[1].length });
   });
 
   if (marks.length === 0) {
-    const markdown = dedent(section.lines).trim();
+    // 節の直下は列0から始まるので、ここでは何も削らない
+    const markdown = blockMarkdown(section.lines);
     if (markdown === "") return { intro: null, steps: [] };
     return {
       intro: null,
@@ -221,11 +228,11 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     };
   }
 
-  const introText = dedent(section.lines.slice(0, marks[0].index)).trim();
+  const introText = blockMarkdown(section.lines.slice(0, marks[0].index));
   const steps = marks.map((mark, order) => {
     const end = order + 1 < marks.length ? marks[order + 1].index : section.lines.length;
     const head = section.lines[mark.index].replace(TASK_LINE_PATTERN, "").trim();
-    const rest = dedent(section.lines.slice(mark.index + 1, end)).trim();
+    const rest = blockMarkdown(section.lines.slice(mark.index + 1, end), mark.indent);
     const markdown = rest === "" ? head : `${head}\n\n${rest}`;
     return {
       line: section.startLine + mark.index,
@@ -238,16 +245,62 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
   return { intro: introText === "" ? null : introText, steps };
 }
 
-/** 空行以外の最小インデントぶんだけ、各行の行頭を削る */
-function dedent(lines: string[]): string {
-  let minimum: number | null = null;
-  for (const line of lines) {
-    if (line.trim() === "") continue;
-    const indent = line.length - line.trimStart().length;
-    if (minimum === null || indent < minimum) minimum = indent;
+/**
+ * 画面へ渡すMarkdownへ整える。行頭から削るのは**その位置の構造ぶんだけ**にする。
+ *
+ * 1. リスト項目の中なら、マーカーぶんの列数（`indent`）。GitHubがその項目に対して削るのと同じ
+ * 2. フェンス付きコードブロックは、開きフェンスのインデントぶん（Markdownの描画と同じ）
+ *
+ * 空行以外の**最小インデント**ぶんを削っていた頃は、テンプレートどおりに**インデント記法**
+ * （4スペース）でコマンドを書いた手順が、コードブロックではなく素の段落として描かれていた
+ * （#1835。`- [x] `の下に置かれた6スペースを6つとも削っていた）。構造ぶんだけ削る形にすると、
+ * フェンス記法・インデント記法のどちらで書かれていてもGitHubと同じ見え方になり、
+ * コードブロックとして描かれる＝コピーボタン（#1726）が付く。
+ *
+ * フェンスの中まで列0へ寄せるのは、`lib/manual-step-command.ts`（#1828の代行実行）が
+ * この`markdown`からコマンドを取り出すため。描画では消えるインデントがコマンドに残ると、
+ * 実行するコマンドの見た目が本文と食い違う。
+ *
+ * **前後の空行は行単位で落とす。** 文字単位の`trim()`だと、先頭がインデント記法の
+ * コードブロックのときに行頭のスペースごと消えてしまい、ここで削らない意味が無くなる。
+ *
+ * @param indent 削る列数。手順ならそのリスト項目のマーカーぶん、節の直下なら0
+ */
+function blockMarkdown(lines: string[], indent = 0): string {
+  const stripped: string[] = [];
+  let fence: { marker: string; indent: number } | null = null;
+
+  for (const raw of lines) {
+    const line = stripLeadingSpaces(raw, indent);
+    // 4スペース以上下がった``` はフェンスではなくインデント記法のコードブロックの中身
+    // （CommonMarkと同じ扱い）。フェンスとして読むと、中身のインデントまで削ってしまう
+    const marker = line.length - line.trimStart().length < 4
+      ? FENCE_PATTERN.exec(line)?.[1][0]
+      : undefined;
+
+    if (marker !== undefined && fence === null) {
+      fence = { marker, indent: line.length - line.trimStart().length };
+      stripped.push(stripLeadingSpaces(line, fence.indent));
+      continue;
+    }
+    if (marker !== undefined && marker === fence?.marker) {
+      stripped.push(stripLeadingSpaces(line, fence.indent));
+      fence = null;
+      continue;
+    }
+    stripped.push(fence === null ? line : stripLeadingSpaces(line, fence.indent));
   }
-  if (minimum === null || minimum === 0) return lines.join("\n");
-  return lines.map((line) => (line.trim() === "" ? line : line.slice(minimum))).join("\n");
+
+  let start = 0;
+  let end = stripped.length;
+  while (start < end && stripped[start].trim() === "") start += 1;
+  while (end > start && stripped[end - 1].trim() === "") end -= 1;
+  return stripped.slice(start, end).join("\n");
+}
+
+/** 行頭のインデントを最大`width`文字ぶん削る（行頭以外は触らない） */
+function stripLeadingSpaces(line: string, width: number): string {
+  return line.slice(Math.min(width, line.length - line.trimStart().length));
 }
 
 function firstLineText(markdown: string): string {

@@ -6,12 +6,13 @@
 
 ## プロンプトの配置と式テンプレート長上限（#901, #907）
 
-`claude-issue-dispatch.yml`の4つのClaude Codeステップ（計画提示・分割・質問応答・実装）の
-プロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下のMarkdownに置いている。
+`claude-issue-dispatch.yml`の5つのClaude Codeステップ（計画提示・計画レビュー・分割・質問応答・
+実装）のプロンプト本文は、ワークフローYAMLではなく`.github/prompts/`配下のMarkdownに置いている。
 
 | ファイル | 対応するステップ |
 |---|---|
 | `.github/prompts/plan.md` | Claude Code（計画提示） |
+| `.github/prompts/plan-review.md` | Claude Code（計画レビュー。計画の関門G1。#1218） |
 | `.github/prompts/split.md` | Claude Code（分割） |
 | `.github/prompts/question.md` | Claude Code（質問応答） |
 | `.github/prompts/implement.md` | Claude Code（実装・PR作成） |
@@ -20,10 +21,15 @@
 埋めたうえで`$GITHUB_ENV`へヒアドキュメント形式で格納する。Claudeステップ側は
 `prompt: ${{ env.PROMPT_IMPLEMENT }}`のような短い参照になる。
 
-プレースホルダは以下の6つ。`envsubst`には置換対象をこのリストで明示指定しており、プロンプト本文の
-他の`$`表記を巻き込まない。
+プレースホルダは以下の7つ。`envsubst`には置換対象をこのリストで明示指定しており、プロンプト本文の
+他の`$`表記を巻き込まない。**どれが使えるかはステップごとに違う**（`envsubst`の変数リストがその
+ステップで渡したものだけになっているため。検査するCIも同じリストから導出する）。
 
-`${ISSUE_NUMBER}` `${BRANCH}` `${PR_URL}` `${MODE}` `${REPOSITORY}` `${RUN_URL}`
+`${ISSUE_NUMBER}` `${BRANCH}` `${PR_URL}` `${MODE}` `${REPOSITORY}` `${RUN_URL}` `${PACKAGE_MANAGER}`
+
+計画レビューだけは、これらに加えて`${FLEET_STATUS}`（`scripts/fleet-status.sh`の出力）を渡す。
+走っているセッション同士の関係を見る実行体が他に無いため、**新しいLLM呼び出しを増やさずに俯瞰を
+効かせる**ための差し込み（[gates.md](gates.md)「G1の実装」）。
 
 プロンプトファイルが存在しない・空の場合は組み立てステップで明示的に失敗させる。空のプロンプトが
 そのままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま走り出すため。
@@ -152,8 +158,12 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 
 | 設定 | 適用されるステップ |
 |---|---|
-| `claudeModel`（実装・計画） | 計画提示、実装・PR作成 |
+| `claudeModel`（実装・計画） | 計画提示、計画レビュー、実装・PR作成 |
 | `claudeModelAssist`（補助処理） | サブIssue分割、質問応答 |
+
+**計画レビュー（#1218）を補助系に寄せていないのは、見落としの損失が大きいため。** 計画段階で
+潰せなかった設計ミスは「実装30分＋実装run 1本（$1.70〜3.18）の作り直し」になり、レビュー1本を
+安いモデルにして浮く額と釣り合わない。
 
 `claude_model`ステップは`model_flag`と`assist_model_flag`の2つを出力し、各`claude_args`が
 どちらかを埋め込む。フォールバックの考え方は両者で同じ（不正値・取得失敗時は`"auto"`扱い）。
@@ -174,7 +184,7 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 `claude-code-action`の`execution_file`出力から、そのステップのコスト・ターン数・所要時間・
 トークン内訳・権限拒否を抽出し、GitHub ActionsのJob Summaryへ表として出力する。
 
-対象は`claude-issue-dispatch.yml`の4ステップ（計画提示・分割・質問応答・実装）に加え、
+対象は`claude-issue-dispatch.yml`の5ステップ（計画提示・計画レビュー・分割・質問応答・実装）に加え、
 `claude-review-develop.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
 `claude-pr-repair.yml`・`shared-knowledge-propose.yml`・`release-develop-to-main.yml`の各1ステップ。
 

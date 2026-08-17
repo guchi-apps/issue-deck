@@ -368,6 +368,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リロードや共有で勝手に再現しない）、検索語を変えると破棄して通常の検索へ戻る。
   絞り込み条件としては`IssueFilterInput.aiMatchedIds`に載せ、**一覧・左メニューの件数・ラベルの
   件数がすべて同じ`applyIssueFilters`を通る**ため数字は食い違わない（#1689・#1750と同じ理由）。
+- **未着手の着手順は「次にやること」が決める**（#1853。
+  [`issue-order-dialog.tsx`](../src/components/dashboard/issue-order-dialog.tsx)）。「未着手」ビューの
+  一覧の上のボタンを押すと、未着手のIssueのタイトル・ラベル・起票からの経過日数・**本文の先頭
+  200文字**を`POST /api/issues/order`→[`lib/claude/issue-order.ts`](../src/lib/claude/issue-order.ts)へ渡し、
+  着手順の上位5件と**実施しない方がよさそうなもの**（重複・陳腐化）を理由付きで受け取る。
+  枠の扱い・501の扱い・候補に無いキーを採らない方針は「AIで探す」と同じ。
+  - **ビューを増やさずダイアログにする。** 左メニューへ足すと、押すまで中身が空の項目が常設され、
+    「上から順に手を動かせば盤面が進む」という並びの読み方（`sidebarAttentionNavViews`）が崩れる。
+    入口の位置・PC/スマホ共通という作りは手作業アシスタント（#1826）に揃える。
+  - **判定の母集団はユーザーの絞り込みを通さない**（`useIssueOrderGuide`が
+    `filterIssuesByView(..., "not-started")`で作る）。左メニューの「未着手」と同じ数え方にするため
+    （#1750と同じ理由）で、リポジトリを1つに絞って見ていても着手順は横断で決まる。
+    **一覧の行数ではなくこの件数を入口のバーに出す**（`issueOrderCount`）。
+  - **結果は保存しない。** 未着手の顔ぶれが変われば順番も変わり、保存すると古い順位が正しく
+    見えてしまう。閉じれば消え、必要なら「決め直す」で取り直す（DBのスキーマも増やさない）。
+  - **1位は自動でサブPCへ積める**（フッターのチェック。端末ごとに`issue-order.auto-start`へ保存）。
+    積む手順は「まとめて積む」（#1266）と共有し
+    （[`lib/dispatch/enqueue-issue.ts`](../src/lib/dispatch/enqueue-issue.ts)）、**積めたときだけ
+    `11.local`を付ける**。**`dispatch.isLoaded`が立つまで積みに行かない**（#1666・#1810。取得前の
+    `hosts`は`[]`で「1台も無い」と区別が付かず、待たないと必ず失敗する）。失敗しても自動では
+    繰り返さない。**自動開始が有効なときは入口のボタンの文言を「順番を決めて開始」に変える**——
+    押した瞬間に実装が積まれることが、押す前に読めないといけない。
+  - **見送り候補をクローズもラベル付けもしない。** 重複・陳腐化の判定はタイトルと本文の冒頭からの
+    推測でしかなく外れる。挙げるところまでを機械が担い、押せるのは開くことだけにする。
 - **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
   適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は
@@ -944,8 +968,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **複数リポジトリ横断の質問もこのキューで流す**（#1454。`kind`は`CROSS_REPO_QUESTION`）。
   Actionsは1リポジトリしかチェックアウトしないため横断できず、サブPC限定の導線になる。
   質問Issueは記録先リポジトリ（既定は名前が`question`のもの）に普通のIssueとして作り、
-  ランチャー（`scripts/start-cross-repo-question.sh`）は**worktreeを作らず**、実行できる
+  ランチャー（`scripts/start-cross-repo-question.sh`）は**質問用のworktreeを作らず**、実行できる
   全リポジトリを`--add-dir`で読み取り用に渡す（書き込み系ツールは`--disallowedTools`で封じる）。
+  **渡すのは本体チェックアウトではなく`origin/develop`のスナップショット**（#1583。
+  `scripts/lib/question-refs.sh`が起動時に`fetch`し、`.questions/_refs/<owner>-<repo>`の
+  detached worktreeを合わせる）。本体チェックアウトを更新する仕組みがどこにも無く、実測で
+  最大29コミット遅れのコードを根拠に答えていたため。**本体の作業ツリーには触れず**、
+  用意できなかったリポジトリだけ本体へ落として遅れコミット数を参照一覧に出す。
   回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
   そのまま働く。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
@@ -1012,7 +1041,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   出力を固定したfixtureで検証できる（`src/lib/fleet-status.test.ts`）。**LLMを使わず、
   画面（`capture-pane`）も読まない計器**で、判断はしない。計画が前提としたSHAからの変化を見せる
   `scripts/lib/plan-base.sh`（`<!-- plan-base: <SHA> -->`。**止めず、見せるだけ**）と対で、
-  設計は[multi-agent/gates.md](multi-agent/gates.md)。
+  設計は[multi-agent/gates.md](multi-agent/gates.md)。**`--root <dir>`で突き合わせ先のリポジトリを
+  差し替えられる**（#1218）。GitHub Actionsの計画レビューは他リポジトリからも呼ばれ、そのとき
+  このスクリプトは`.shared-prompts/`（issue-deck側のcheckout）に置かれるため、既定のままでは
+  呼び出し元ではなくissue-deckの先端を出してしまう。
+- **計画の関門（G1）は`.github/prompts/plan-review.md`（無人）と`scripts/prompts/plan-review-agent.md`
+  （ローカル）の兄弟プロンプト**（#1218）。無人は`reusable-issue-dispatch.yml`の`mode=plan`で計画
+  コメントの投稿直後に自動で走り、ローカルは`scripts/start-reviewer.sh --plan <Issue番号>`で人が
+  起こす（引数なしは従来どおり成果物の関門G2）。どちらも`fleet-status.sh`の出力を差し込む。
+  **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある）。
+  `11.local`が付いたローカル計画に無人G1は走らない（#1855で別途扱う）。設計は
+  [multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
@@ -1056,8 +1095,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   生成されないという形でこれを踏んだ）。`scripts/lib/launcher-scripts-sync.sh`の
   `resolve_launcher_scripts_dir`が置き場所を決め、`warn_launcher_scripts_stale`が差分を警告する。
   **同期コピーを使うのは作業ツリーが単に古いだけのときに限り、未コミットの変更があれば
-  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 入口の`start-issue.sh`と
-  pollerは作業ツリーのまま。経路の表は
+  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 「単に古いだけ」の判定は
+  **HEADがリモート追跡ブランチのどれかに含まれているか**で行う（#1583）。`origin/develop`の
+  祖先であることを条件にしていた頃は、本体チェックアウトが`main`に乗っているだけで
+  同期コピーが丸ごと無効化されていた（`main`のマージコミットは`develop`に含まれないため）。
+  入口の`start-issue.sh`とpollerは作業ツリーのままだが、**横断質問のランチャーだけは
+  同期コピーから自分を実行し直す**（#1583。pollerが本体の`scripts/`を直接起動するため、
+  ランチャーの修正が人の`git pull`まで効かなかった）。経路の表は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・

@@ -6,14 +6,9 @@ import { Loader2, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import {
-  describeDispatchEnqueueRejection,
-  findBlockingSession,
-  resolveDefaultDispatchHost,
-  resolveDispatchTargetRejection,
-} from "@/lib/dispatch/dispatch-job";
+import { resolveDefaultDispatchHost } from "@/lib/dispatch/dispatch-job";
+import { enqueueIssueToDefaultHost } from "@/lib/dispatch/enqueue-issue";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -58,58 +53,21 @@ export function BulkDispatchBar({
     const skipped: string[] = [];
 
     // **1件ずつ順に投げる。** まとめて投げると、拒否された理由がどのIssueのものか分からない。
-    // 積む順がそのまま実行順になるので、選択の並び（＝一覧の並び）のまま送る
+    // 積む順がそのまま実行順になるので、選択の並び（＝一覧の並び）のまま送る。
+    // 1件ぶんの手順は「次にやること」の自動開始（#1853）と共有する
     for (const issue of issues) {
-      const hostView = dispatch.hosts.find((candidate) => candidate.name === host) ?? null;
-      // **セッションの生存はここでも見る（#1311）。** 未完了ジョブと違い、こちらはAPI側に
-      // 弾かれても「積めなかった理由」が1件ずつ返るだけで、押す前に分かる方が親切。
-      // 最終判定はAPI側（`enqueueDispatchJob`）が行う点は未完了ジョブと同じ
-      const blockingSession = findBlockingSession({
-        sessions: dispatch.sessions,
+      const outcome = await enqueueIssueToDefaultHost(issue, {
         hosts: dispatch.hosts,
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
+        sessions: dispatch.sessions,
+        enqueue: dispatch.enqueue,
+        enqueueError: dispatch.error,
+        updateIssue,
       });
-      const rejection = resolveDispatchTargetRejection({
-        host: hostView,
-        repositoryFullName: issue.repositoryFullName,
-        // 未完了ジョブの有無はAPI側が最終判定する（`activeKey`のunique制約）。ここでは
-        // 「そのリポジトリを実行できるか」までを先に見る
-        hasActiveJob: false,
-        blockingSession,
-      });
-      if (rejection) {
-        skipped.push(
-          `#${issue.number}: ${describeDispatchEnqueueRejection(rejection, {
-            hostName: host,
-            repositoryFullName: issue.repositoryFullName,
-            session: blockingSession,
-          })}`,
-        );
-        continue;
-      }
-
-      const enqueued = await dispatch.enqueue({
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
-        hostName: host,
-      });
-      if (!enqueued) {
-        // 拒否理由は`dispatch.error`に入る。**積めなかったIssueには`11.local`を付けない**
-        // （付けると無人実行までそのIssueに触れなくなる）
-        skipped.push(`#${issue.number}: ${dispatch.error ?? "積めませんでした"}`);
+      if (!outcome.ok) {
+        skipped.push(`#${issue.number}: ${outcome.reason}`);
         continue;
       }
       queued += 1;
-
-      const nextNames = labelNamesWithLocal(issue.labels);
-      if (nextNames) {
-        await updateIssue({
-          repositoryFullName: issue.repositoryFullName,
-          number: issue.number,
-          labels: nextNames,
-        });
-      }
     }
 
     setIsSubmitting(false);

@@ -5,6 +5,7 @@ const repositoryFindMany = vi.fn();
 const syncRepositoryIssues = vi.fn();
 const addMissingProjectItems = vi.fn();
 const syncProjectStatuses = vi.fn();
+const closeStrandedProjectItems = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get requireUserId() {
@@ -35,6 +36,9 @@ vi.mock("@/lib/github/sync-project-status", () => ({
   get syncProjectStatuses() {
     return syncProjectStatuses;
   },
+  get closeStrandedProjectItems() {
+    return closeStrandedProjectItems;
+  },
 }));
 
 import { POST } from "@/app/api/sync/issues/route";
@@ -51,6 +55,7 @@ beforeEach(() => {
   syncRepositoryIssues.mockReset().mockResolvedValue(undefined);
   addMissingProjectItems.mockReset().mockResolvedValue({ added: 0, skipped: false });
   syncProjectStatuses.mockReset().mockResolvedValue({ updated: 0, cleared: 0, skipped: false });
+  closeStrandedProjectItems.mockReset().mockResolvedValue({ closed: 0, skipped: false });
 });
 
 describe("POST /api/sync/issues", () => {
@@ -80,6 +85,28 @@ describe("POST /api/sync/issues", () => {
     await POST();
 
     expect(order).toEqual(["sync", "backfill"]);
+  });
+
+  // 取り残しの是正は最後（#1856）。先に置くとsyncProjectStatusesがProjectの読み直し結果で
+  // DBを上書きし、直した値が消える（#1137と同じ理由）
+  it("closedなのに実装中に残っているIssueの是正は、取り込み・追加のあとに行う", async () => {
+    const order: string[] = [];
+    syncProjectStatuses.mockImplementation(async () => {
+      order.push("sync");
+      return { updated: 0, cleared: 0, skipped: false };
+    });
+    addMissingProjectItems.mockImplementation(async () => {
+      order.push("backfill");
+      return { added: 0, skipped: false };
+    });
+    closeStrandedProjectItems.mockImplementation(async () => {
+      order.push("close-stranded");
+      return { closed: 0, skipped: false };
+    });
+
+    await POST();
+
+    expect(order).toEqual(["sync", "backfill", "close-stranded"]);
   });
 
   it("Issueの取り込みはProject連携より先に行う", async () => {

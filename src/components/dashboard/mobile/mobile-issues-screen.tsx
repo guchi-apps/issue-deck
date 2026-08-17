@@ -44,6 +44,10 @@ type MobileIssuesScreenProps = {
   onBack?: () => void;
   /** 手作業アシスタント（#1826）を開く */
   onStartManualStepGuide: () => void;
+  /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
+  onStartIssueOrder?: () => void;
+  issueOrderAutoStart?: boolean;
+  issueOrderCount?: number;
 };
 
 export function MobileIssuesScreen({
@@ -66,6 +70,9 @@ export function MobileIssuesScreen({
   onAskCrossRepoQuestion,
   onBack,
   onStartManualStepGuide,
+  onStartIssueOrder,
+  issueOrderAutoStart,
+  issueOrderCount,
 }: MobileIssuesScreenProps) {
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
 
@@ -128,6 +135,9 @@ export function MobileIssuesScreen({
       scrollKey={scrollKey}
       manualStepReadiness={manualStepReadiness}
       onStartManualStepGuide={onStartManualStepGuide}
+      onStartIssueOrder={onStartIssueOrder}
+      issueOrderAutoStart={issueOrderAutoStart}
+      issueOrderCount={issueOrderCount}
       // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も
       // `MobileIssueListScreen`がこれを見て行うため、件数と中身が別々にならない
       pinned={{

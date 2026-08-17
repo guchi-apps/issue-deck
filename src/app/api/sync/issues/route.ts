@@ -4,7 +4,11 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
-import { addMissingProjectItems, syncProjectStatuses } from "@/lib/github/sync-project-status";
+import {
+  addMissingProjectItems,
+  closeStrandedProjectItems,
+  syncProjectStatuses,
+} from "@/lib/github/sync-project-status";
 
 // 再同期の失敗。kindで由来を区別する（#1141）。
 // - repository: そのリポジトリのIssue取り込みが失敗した。syncedから差し引く
@@ -76,6 +80,12 @@ async function handlePOST() {
       if (result.skipped) break;
       const backfill = await addMissingProjectItems(installationId);
       if (backfill.skipped) break;
+      // closedなのに`Planning`・`Implementation`・`Develop PR`に取り残されているIssueを
+      // 終端へ寄せる（#1856）。**最後に置く。** 先に置くと`syncProjectStatuses`が
+      // Projectを読み直した結果でDBを上書きし、直した値が消える（#1137と同じ理由）。
+      // Projectに`Closed`の選択肢が無ければ何もせずskippedで返るので、その場合も
+      // 手前の2つは通常どおり効く
+      await closeStrandedProjectItems(installationId);
     } catch (error) {
       // Project連携が失敗してもIssueの再同期自体は成功しているため、全体を失敗にはしない
       projectErrors.push({

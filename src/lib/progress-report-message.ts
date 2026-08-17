@@ -17,8 +17,10 @@ export type ProgressReportFailureReason =
   | "unknown_status"
   /** GitHub上にIssueが無い（削除・移動済み）か、Projectへの追加に失敗した */
   | "not_in_project"
-  /** closedなIssueを`Done`より手前へ巻き戻す報告だったため書かなかった（#1348） */
+  /** closedなIssueを終端（`Done`・`Closed`）より手前へ巻き戻す報告だったため書かなかった（#1348） */
   | "issue_closed"
+  /** 報告側が指定した遷移元（`onlyFrom`）に現在のStatusが含まれず、対象外だった（#1856） */
+  | "status_mismatch"
   /** 既に同じStatusだったため書き込まなかった */
   | "unchanged";
 
@@ -27,7 +29,10 @@ const MESSAGES: Record<ProgressReportFailureReason, string | null> = {
   unknown_repository: "このリポジトリはissue-deckに接続されていないため、進捗を変更できません。",
   unknown_status: "GitHub Projects側にこのステータスの選択肢が見つかりませんでした。",
   not_in_project: "GitHub Projectsへの登録に失敗したため、進捗を変更できませんでした。",
-  issue_closed: "クローズ済みのIssueは「本番反映済」以外の進捗へ変更できません。",
+  issue_closed: "クローズ済みのIssueは「本番反映済」「対応終了」以外の進捗へ変更できません。",
+  // 遷移元を限定した報告（close起点の自動遷移）が対象外だっただけで、何も壊れていない。
+  // 画面の進捗セレクトはonlyFromを指定しないため、そもそもここには来ない
+  status_mismatch: null,
   // 既に同じStatusだった場合は何も壊れていない。エラーとして見せない
   unchanged: null,
 };

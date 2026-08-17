@@ -52,7 +52,10 @@ vi.mock("@/lib/github/projects-api", () => ({
   },
 }));
 
-import { addMissingProjectItems } from "@/lib/github/sync-project-status";
+import {
+  addMissingProjectItems,
+  closeStrandedProjectItems,
+} from "@/lib/github/sync-project-status";
 
 const STATUS_FIELD = {
   projectId: "PVT_1",
@@ -174,5 +177,101 @@ describe("addMissingProjectItems", () => {
 
     expect(result).toEqual({ added: 0, skipped: true });
     expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("closeStrandedProjectItems", () => {
+  const REPO = { id: "repo-1", githubRepositoryId: 100 };
+
+  /** closedなIssueの盤面アイテム */
+  function closedItem(issueNumber: number, status: string | null) {
+    return { ...item(issueNumber, status), issueOpen: false };
+  }
+
+  const STATUS_FIELD_WITH_CLOSED = {
+    ...STATUS_FIELD,
+    optionIdByName: new Map([...STATUS_FIELD.optionIdByName, ["Closed", "opt-closed"]]),
+  };
+
+  beforeEach(() => {
+    process.env.PROJECT_V2_OWNER = "guchi-apps";
+    process.env.PROJECT_V2_NUMBER = "1";
+
+    repositoryFindMany.mockReset().mockResolvedValue([REPO]);
+    issueUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    fetchProjectItems.mockReset().mockResolvedValue([]);
+    fetchProjectStatusField.mockReset().mockResolvedValue(STATUS_FIELD_WITH_CLOSED);
+    updateProjectItemStatus.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    delete process.env.PROJECT_V2_OWNER;
+    delete process.env.PROJECT_V2_NUMBER;
+  });
+
+  it("closedなのに実装中の3状態に残っているIssueを終端へ寄せ、DBも揃える", async () => {
+    fetchProjectItems.mockResolvedValue([closedItem(70, "Implementation")]);
+
+    const result = await closeStrandedProjectItems(42);
+
+    expect(result).toEqual({ closed: 1, skipped: false });
+    expect(updateProjectItemStatus).toHaveBeenCalledWith(
+      { projectId: "PVT_1", itemId: "item-70", fieldId: "PVTSSF_1", optionId: "opt-closed" },
+      "token",
+    );
+    expect(issueUpdateMany).toHaveBeenCalledWith({
+      where: { repositoryId: "repo-1", number: 70 },
+      data: { projectStatus: "Closed", projectItemId: "item-70" },
+    });
+  });
+
+  it("openなIssue・対象外のStatus・Status無しは触らない", async () => {
+    fetchProjectItems.mockResolvedValue([
+      { ...item(1, "Implementation"), issueOpen: true },
+      closedItem(2, "Develop"),
+      closedItem(3, "Done"),
+      closedItem(4, "Ready"),
+      closedItem(5, null),
+      closedItem(6, "Closed"),
+    ]);
+
+    const result = await closeStrandedProjectItems(42);
+
+    expect(result).toEqual({ closed: 0, skipped: false });
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+    expect(issueUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("Projectに`Closed`の選択肢が無ければ何も書かずskippedを返す", async () => {
+    // 選択肢を手で足すまでは、別のStatusで代用せずそのまま待つ
+    fetchProjectStatusField.mockResolvedValue(STATUS_FIELD);
+    fetchProjectItems.mockResolvedValue([closedItem(70, "Implementation")]);
+
+    const result = await closeStrandedProjectItems(42);
+
+    expect(result).toEqual({ closed: 0, skipped: true });
+    expect(fetchProjectItems).not.toHaveBeenCalled();
+    expect(updateProjectItemStatus).not.toHaveBeenCalled();
+  });
+
+  it("環境変数が未設定ならGitHubへ問い合わせずskippedを返す", async () => {
+    delete process.env.PROJECT_V2_NUMBER;
+
+    const result = await closeStrandedProjectItems(42);
+
+    expect(result).toEqual({ closed: 0, skipped: true });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("issue-deckが接続していないリポジトリのIssueもStatusだけは直す", async () => {
+    repositoryFindMany.mockResolvedValue([]);
+    fetchProjectItems.mockResolvedValue([closedItem(70, "Develop PR")]);
+
+    const result = await closeStrandedProjectItems(42);
+
+    expect(result).toEqual({ closed: 1, skipped: false });
+    expect(updateProjectItemStatus).toHaveBeenCalled();
+    expect(issueUpdateMany).not.toHaveBeenCalled();
   });
 });

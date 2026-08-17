@@ -13,7 +13,7 @@ describe("progressChangeErrorMessage", () => {
 
   it("書けなかった理由はその内容が伝わる文言になる", () => {
     expect(progressChangeErrorMessage({ ok: true, applied: false, reason: "issue_closed" })).toBe(
-      "クローズ済みのIssueは「本番反映済」以外の進捗へ変更できません。",
+      "クローズ済みのIssueは「本番反映済」「対応終了」以外の進捗へ変更できません。",
     );
     expect(
       progressChangeErrorMessage({ ok: true, applied: false, reason: "project_disabled" }),

@@ -180,6 +180,25 @@ describe("ManualStepGuideDialog", () => {
     expect(screen.getByText("develop")).toBeTruthy();
   });
 
+  /**
+   * 解析そのものは`lib/manual-step-guide.test.ts`が見ているが、コピーボタン（#1726）が
+   * 実際に出るかどうかは描いてみないと分からない。テンプレートの文言（「インデントした
+   * コードブロック」）どおりにフェンス無しで書かれた手順で、パーサ → 画面 → ボタンまで通す（#1835）。
+   */
+  it("インデント記法で書かれた手順のコマンドにもコピーボタンが出る（#1835）", () => {
+    taskList.body = `## やること
+
+- [ ] トークンを生成する
+
+      openssl rand -hex 32
+`;
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.getByText("openssl rand -hex 32")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "コードをコピー" })).toBeTruthy();
+  });
+
   it("「実行した・次へ」でその手順の行にチェックを付ける", () => {
     renderDialog([issue()]);
     fireEvent.click(screen.getByRole("button", { name: "はじめる" }));

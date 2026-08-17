@@ -86,6 +86,10 @@ type MobileIssueListScreenProps = {
   manualStepReadiness?: ManualStepReadinessMap;
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
   onStartManualStepGuide?: () => void;
+  /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
+  onStartIssueOrder?: () => void;
+  issueOrderAutoStart?: boolean;
+  issueOrderCount?: number;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -118,6 +122,9 @@ export function MobileIssueListScreen({
   pinned,
   manualStepReadiness,
   onStartManualStepGuide,
+  onStartIssueOrder,
+  issueOrderAutoStart,
+  issueOrderCount,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
@@ -251,6 +258,9 @@ export function MobileIssueListScreen({
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
         manualStepReadiness={manualStepReadiness}
         onStartManualStepGuide={onStartManualStepGuide}
+        onStartIssueOrder={onStartIssueOrder}
+        issueOrderAutoStart={issueOrderAutoStart}
+        issueOrderCount={issueOrderCount}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。

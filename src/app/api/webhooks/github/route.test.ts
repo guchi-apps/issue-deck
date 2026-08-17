@@ -571,3 +571,83 @@ describe("POST /api/webhooks/github issues（ラベル変更）", () => {
     expect(upsertIssueFromWebhookPayload).toHaveBeenCalled();
   });
 });
+
+describe("POST /api/webhooks/github issues.closed（取り残しの終端遷移・#1856）", () => {
+  beforeEach(() => {
+    process.env.GITHUB_WEBHOOK_SECRET = SECRET;
+    findUniqueRepository.mockReset().mockResolvedValue({
+      id: "repo-1",
+      fullName: "guchi-apps/issue-deck",
+    });
+    upsertIssueFromWebhookPayload.mockReset().mockResolvedValue(undefined);
+    findUniqueIssue.mockReset().mockResolvedValue({ projectStatus: "Implementation" });
+    reportProgressStatus.mockReset().mockResolvedValue({ applied: true });
+  });
+
+  afterEach(() => {
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    vi.clearAllMocks();
+  });
+
+  const closedPayload = {
+    action: "closed",
+    issue: { id: 1, number: 70, labels: [] },
+    repository: { id: 555 },
+  };
+
+  it("`Implementation`のIssueがcloseされたら終端（closed）を報告する", async () => {
+    const response = await POST(makeRequest(closedPayload, "issues"));
+
+    expect(response.status).toBe(200);
+    expect(reportProgressStatus).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 70,
+      status: "closed",
+      // 実際に書くかどうかはProjectの実物を見て判定させる（DBの鮮度に依存させない）
+      onlyFrom: ["planning", "implementation", "develop-pr"],
+    });
+  });
+
+  it("DBのstateを更新してから報告する（closedなIssueへの書き込みが弾かれないように）", async () => {
+    const order: string[] = [];
+    upsertIssueFromWebhookPayload.mockImplementation(async () => {
+      order.push("upsert");
+    });
+    reportProgressStatus.mockImplementation(async () => {
+      order.push("report");
+      return { applied: true };
+    });
+
+    await POST(makeRequest(closedPayload, "issues"));
+
+    expect(order).toEqual(["upsert", "report"]);
+  });
+
+  it("`Develop`・`Ready`・Status無しのIssueは対象にしない", async () => {
+    for (const projectStatus of ["Develop", "Release", "Done", "Ready", null]) {
+      findUniqueIssue.mockResolvedValue({ projectStatus });
+      reportProgressStatus.mockClear();
+
+      await POST(makeRequest(closedPayload, "issues"));
+
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+    }
+  });
+
+  it("close以外のactionでは報告しない", async () => {
+    await POST(makeRequest({ ...closedPayload, action: "reopened" }, "issues"));
+
+    expect(reportProgressStatus).not.toHaveBeenCalled();
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalled();
+  });
+
+  it("報告が失敗してもWebhookは200を返す（Issueの取り込みまで再送させない）", async () => {
+    reportProgressStatus.mockRejectedValue(new Error("boom"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(makeRequest(closedPayload, "issues"));
+
+    expect(response.status).toBe(200);
+    consoleError.mockRestore();
+  });
+});
