@@ -34,6 +34,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.4.0",
+    date: "2026-08-18",
+    changes: [
+      "未着手のIssueについて、どの順番で着手すべきかをAIが判定し提案する「次にやること」機能を追加しました。また、計画レビューの新しいチェック機能や、手作業手順のコードブロック表示崩れの修正を行いました。",
+    ],
+    usage: [
+      "1. 画面の未着手Issue一覧（Readyビュー）を開く",
+      "2. 「次にやること」ボタンを押す",
+      "3. AIが提案する着手順と、実施を見送るべきIssueの一覧が表示されれば成功",
+      "4. 提案された順番のまま、そのIssueを自動的に開始することもできる",
+    ],
+  },
+  {
     version: "4.3.1",
     date: "2026-08-18",
     changes: [
