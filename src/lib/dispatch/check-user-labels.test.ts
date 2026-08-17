@@ -77,9 +77,11 @@ describe("addCheckUserWithReason", () => {
     fetchRepositoryLabelNames.mockRejectedValue(new Error("boom"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
+    // ラベル一覧が引けなくても、付与直後のラベル名は返す（#1855。呼び出し元はこれを見て
+    // 計画レビューを起こすかどうかを決める）
     await expect(
       addCheckUserWithReason("guchi-apps", "issue-deck", 4, "token", "plan"),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(["00.check-user"]);
 
     expect(addIssueLabels).toHaveBeenCalledTimes(1);
     error.mockRestore();

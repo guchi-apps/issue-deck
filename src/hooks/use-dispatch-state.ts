@@ -226,11 +226,11 @@ export function useDispatchState(enabled: boolean) {
       issueNumber: number;
       hostName: string;
       /**
-       * 起動の種別。省略時は実装セッション（`LAUNCH`）。横断質問（#1454）だけが
-       * `cross_repo_question`を渡す。**セッションを立てる種別に限る**（停止・終了・追加指示は
-       * `sendSessionControl`が扱う）
+       * 起動の種別。省略時は実装セッション（`LAUNCH`）。横断質問（#1454）は
+       * `cross_repo_question`、計画レビュー（#1855）は`plan_review`を渡す。
+       * **セッションを立てる種別に限る**（停止・終了・追加指示は`sendSessionControl`が扱う）
        */
-      kind?: "cross_repo_question";
+      kind?: "cross_repo_question" | "plan_review";
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);
