@@ -81,6 +81,11 @@ export async function POST(request: NextRequest) {
     // 横断質問ジョブを配らない（`sessionControl`・`instruction`と同じ向き）
     crossRepoQuestionCapable:
       typeof payload?.crossRepoQuestion === "boolean" ? payload.crossRepoQuestion : null,
+    // 手作業の代行実行（#1828）を実行できるpollerだけが送ってくる。**未申告はnull＝非対応扱い**。
+    // `instruction`と分けるのは、あちらが走っているセッションの入力欄へ1行流すだけなのに対し、
+    // こちらは**シェルでコマンドを実行する**ため、届いた先で起きることが違うから
+    manualStepCapable:
+      typeof payload?.manualStep === "boolean" ? payload.manualStep : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
     // 起動ジョブを取りに行かない**（#1361）ので、これが無いと画面は「順番待ちのまま進まない」
     // 理由を出せない。判定は引き続きpoller側が持ち、ここは写しを受け取るだけ

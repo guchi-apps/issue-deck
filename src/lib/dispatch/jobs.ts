@@ -14,6 +14,7 @@ import {
   describeCrossRepoQuestionRejection,
   describeDispatchReportLost,
   describeDispatchTimeout,
+  describeManualStepExecutionRejection,
   describeSessionControlRejection,
   DISPATCH_CLAIM_TIMEOUT_MS,
   DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
@@ -23,9 +24,11 @@ import {
   isDispatchHostOnline,
   isSessionLaunchJobKind,
   normalizeDispatchHostRepositories,
+  OUT_OF_BAND_JOB_KINDS,
   parseDispatchHostRepositories,
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
+  resolveManualStepExecutionRejection,
   resolveSessionControlRejection,
   SESSION_CONTROL_JOB_KINDS,
   SESSION_LAUNCH_JOB_KINDS,
@@ -36,9 +39,13 @@ import {
   type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
+  type ManualStepExecutionRejection,
   type SessionControlJobKind,
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
+import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import { extractManualStepCommands, isSubpcManualStepDevice } from "@/lib/manual-step-command";
+import { parseManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
  * ディスパッチのジョブキュー（#1179）のDB操作。
@@ -85,6 +92,10 @@ function toJobView(
     status: job.status,
     message: job.message,
     instruction: job.instruction,
+    command: job.command,
+    manualStepLine: job.manualStepLine,
+    exitCode: job.exitCode,
+    commandOutput: job.commandOutput,
     tmuxSessionName: job.tmuxSessionName,
     queuePriority: job.queuePriority,
     createdAt: job.createdAt.toISOString(),
@@ -110,6 +121,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
+    manualStepCapable: host.manualStepCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
     // 5列は「まとめて入るかまとめてnullか」で保存されている（#1567）。読むときも同じ扱いにし、
@@ -175,10 +187,12 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         // heartbeatが一度も届かないままRUNNINGになっている場合はstartedAtで測る
         { status: "RUNNING", heartbeatAt: null, startedAt: { lt: heartbeatDeadline } },
         // 取りに来られないまま古びた制御ジョブ（#1332）。**起動ジョブと違い、待たせるほど
-        // 危険になる**（何時間も後に届いた`C-c`は、そのとき走っている別の作業を止める）
+        // 危険になる**（何時間も後に届いた`C-c`は、そのとき走っている別の作業を止める）。
+        // **手作業の代行実行（#1828）も同じ扱い**——承認した時点のホストの状態に対する実行で、
+        // 何時間も後に届いてよいものではない
         {
           status: "QUEUED",
-          kind: { in: [...SESSION_CONTROL_JOB_KINDS] },
+          kind: { in: [...SESSION_CONTROL_JOB_KINDS, ...OUT_OF_BAND_JOB_KINDS] },
           createdAt: { lt: controlDeadline },
         },
       ],
@@ -557,6 +571,122 @@ export async function enqueueSessionControlJob(params: {
   }
 }
 
+export type EnqueueManualStepJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: ManualStepExecutionRejection; message: string };
+
+/**
+ * 手作業アシスタントの手順を、サブPCで代行実行するジョブを積む（#1828）。
+ *
+ * **画面から届いた文字列を実行しない。** 受け取るのは「どのIssueのどの手順か」（`stepLine`）と
+ * 「人が承認したコマンド」（`approvedCommand`）で、実際にジョブへ載せるのは**この関数が
+ * Issue本文から抽出し直したもの**。承認した文字列は「人が見て押したのはこれか」の照合にしか
+ * 使わない。ここが、この機能を「画面から任意のコマンドを流せる口」にしないための一次の歯止め
+ * （二次の歯止めはサブPC側で、pollerがGitHubの本文を読み直して同じ照合をもう一度行う）。
+ *
+ * 本文はDBのIssueキャッシュから読む。**画面が見ているのと同じ本文**で、人が承認したのは
+ * その表示なので、照合の相手としてはGitHubの最新よりこちらが正しい（GitHub側との突き合わせは
+ * pollerが実行の直前に行う）。
+ */
+export async function enqueueManualStepJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  /** 実行する手順の`- [ ]`の行番号 */
+  stepLine: number;
+  /** 画面に出ていて、人が承認したコマンド。**照合専用** */
+  approvedCommand: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueManualStepJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: ManualStepExecutionRejection): EnqueueManualStepJobResult => ({
+    ok: false,
+    rejection,
+    message: describeManualStepExecutionRejection(rejection, { hostName: params.hostName }),
+  });
+
+  const issue = await findIssueForManualStep(params.repositoryFullName, params.issueNumber);
+  // Issueを引けない＝同期前・GitHub Appを外したリポジトリ。**本文が読めないなら代行しない**
+  if (!issue) return reject("not_manual_step");
+  if (!issue.labels.some((label) => label.name === MANUAL_STEP_LABEL)) {
+    return reject("not_manual_step");
+  }
+
+  const guide = parseManualStepGuide(issue.body);
+  if (!isSubpcManualStepDevice(guide.where.device)) return reject("device_not_subpc");
+
+  const extracted = extractManualStepCommands(issue.body, guide).find(
+    (entry) => entry.stepLine === params.stepLine,
+  );
+  if (!extracted) return reject("no_command");
+  // **一致しなければ実行しない。** 承認した後に本文が書き換わった場合で、押した人が見たものと
+  // これから実行するものが違う（画面を更新して、変わった内容を見てから押し直してもらう）
+  if (extracted.command !== params.approvedCommand) return reject("body_changed");
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const rejection = resolveManualStepExecutionRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          manualStepCapable: host.manualStepCapable,
+        }
+      : null,
+    isManualStepIssue: true,
+    isSubpcDevice: true,
+    hasCommand: true,
+    // 二重投入はactiveKeyのunique制約が止める（下のcatch）。ここでは先読みしない
+    hasActiveJob: false,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "MANUAL_STEP",
+        status: "QUEUED",
+        // **Issue単位で1件まで**（手順単位にしない）。同じ手作業の2つの手順が同時に走ると、
+        // 順番に実行する前提の手順（`git pull`→`systemctl restart`）が入れ替わりうる
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "MANUAL_STEP",
+        ),
+        requestedByUserId: params.requestedByUserId,
+        command: extracted.command,
+        manualStepLine: params.stepLine,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return reject("already_queued");
+  }
+}
+
+/** 代行実行の判定に要る本文とラベルを、DBのIssueキャッシュから引く（#1828） */
+async function findIssueForManualStep(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<{ body: string | null; labels: { name: string }[] } | null> {
+  // `Repository.fullName`はインストール違いで複数行あり得るので`findFirst`で受ける
+  // （同じIssueなので本文もラベルも同じ。`resolveDispatchIssues`と同じ扱い）
+  const repository = await db.repository.findFirst({
+    where: { fullName: repositoryFullName },
+    select: { id: true },
+  });
+  if (!repository) return null;
+
+  return db.issue.findFirst({
+    where: { repositoryId: repository.id, number: issueNumber },
+    select: { body: true, labels: { select: { name: true } } },
+  });
+}
+
 /**
  * サブPCがジョブを取る。
  *
@@ -598,6 +728,10 @@ export async function claimDispatchJobs(params: {
   const controlKinds: DispatchJobKind[] = [];
   if (host?.sessionControlCapable === true) controlKinds.push("INTERRUPT", "KILL");
   if (host?.instructionCapable === true) controlKinds.push("INSTRUCTION");
+  // **手作業の代行実行（#1828）も枠外で先に配る。** セッションを立てないので枠を消費せず、
+  // 承認から5分で失効する以上、起動待ちの後ろに並ばせると届く前に失効しうる。
+  // 対応を申告していないpollerには配らない（未知の種別として`failed`になり、押した実行が失われる）
+  if (host?.manualStepCapable === true) controlKinds.push(...OUT_OF_BAND_JOB_KINDS);
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -695,6 +829,10 @@ export async function reportDispatchJob(params: {
   status: DispatchReportStatus;
   message?: string | null;
   tmuxSessionName?: string | null;
+  /** 代行実行（#1828）の終了コード。`0`のときだけ画面が手順のチェックを付ける */
+  exitCode?: number | null;
+  /** 代行実行の出力。**受け口で長さを切ってから渡す**（`MANUAL_STEP_OUTPUT_MAX_LENGTH`） */
+  output?: string | null;
   now?: Date;
 }): Promise<ReportDispatchJobResult> {
   const now = params.now ?? new Date();
@@ -707,6 +845,10 @@ export async function reportDispatchJob(params: {
   const data: Parameters<typeof db.dispatchJob.update>[0]["data"] = {
     message: params.message ?? job.message,
     tmuxSessionName: params.tmuxSessionName ?? job.tmuxSessionName,
+    // 代行実行の結果（#1828）。**送られてこなければ触らない**（`running`の報告で終了コードを
+    // nullへ戻さないため）。実行したのがコマンドではないジョブには最初から入らない
+    exitCode: params.exitCode ?? job.exitCode,
+    commandOutput: params.output ?? job.commandOutput,
   };
 
   if (params.status === "running") {
@@ -1063,6 +1205,8 @@ export async function announceDispatchHost(params: {
   instructionCapable: boolean | null;
   /** 横断質問セッションを起こせるか（#1454）。申告していないpollerでは`null`＝非対応 */
   crossRepoQuestionCapable: boolean | null;
+  /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
+  manualStepCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
    * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
@@ -1095,6 +1239,7 @@ export async function announceDispatchHost(params: {
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
+    manualStepCapable: params.manualStepCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
     // 申告が無ければ5列とも`null`へ戻す（#1567）。**前回の値を残さない。**

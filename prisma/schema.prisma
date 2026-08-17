@@ -355,6 +355,7 @@ enum DispatchJobKind {
   QUESTION
   INSTRUCTION
   CROSS_REPO_QUESTION
+  MANUAL_STEP
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -409,6 +410,28 @@ model DispatchJob {
   // **組み立てるのは人だけで、実行体が状況から本文を決めて自動送信する経路は作らない**
   // （docs/multi-agent/gates.md）。画面のプリセットも、押すのは人という点は変わらない。
   instruction        String?           @db.Text
+  // 手作業アシスタントから代行実行するコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
+  //
+  // **入るのはサーバーが手作業Issueの本文から抽出し直したものだけ。** 画面から届いた文字列は
+  // 「人が承認したのはこれか」の照合にしか使わず、そのまま保存も実行もしない。これがこの経路を
+  // 「画面から任意のコマンドを流せる口」にしないための一次の歯止めになっている
+  // （二次の歯止めはサブPC側で、pollerがGitHubの本文を読み直して同じ照合をもう一度行う）。
+  command            String?           @db.Text
+  // 代行実行した手順の、本文中の行番号（#1828。`- [ ]`の行）。画面がジョブと手順を対応付ける。
+  //
+  // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは
+  // 「どの手順を実行したのか」を後から辿るためで、行が持つ意味はあくまで記録。
+  manualStepLine     Int?
+  // 代行実行の終了コード（#1828）。`0`が成功で、画面はこれを見てチェックを付けるかを決める。
+  // タイムアウトで打ち切った場合は`timeout`の終了コード（124）が入る。
+  exitCode           Int?
+  // 代行実行の出力（#1828。標準出力と標準エラーをまとめたもの）。**末尾を残して切る**
+  // （エラーは最後に出るため）。
+  //
+  // **出力にはシークレットが混ざりうる。** ログイン必須のこの画面にだけ出し、GitHubのIssueにも
+  // 通知にもpollerのログにも出さない。ここに残ること自体は、実行した結果を後から確かめる
+  // 唯一の手掛かりであるため受け入れている。
+  commandOutput      String?           @db.Text
   // 画面から失敗の表示を消した時刻（#1479）。入っている行は`GET /api/dispatch`が返さない。
   //
   // **行そのものは消さない。** 失敗理由（`message`）は後から原因を追うときの唯一の手掛かりで、
@@ -482,6 +505,14 @@ model DispatchHost {
   // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として
   // `failed`になり、質問が必ず失われる）
   crossRepoQuestionCapable Boolean?
+  // 手作業アシスタントからの代行実行（#1828）を実行できるか。`scripts/run-manual-step.sh`を
+  // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
+  // （`sessionControlCapable`・`instructionCapable`と同じ向き）。
+  //
+  // **`instructionCapable`とも分けて持つ。** あちらは走っているセッションの入力欄へ1行流すだけだが、
+  // こちらは**シェルでコマンドを実行する**。対応していないpollerへ配ると未知の種別として`failed`に
+  // なるだけだが、そもそも配ってよいホストかどうかの意味が違う
+  manualStepCapable Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。

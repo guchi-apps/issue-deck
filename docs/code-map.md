@@ -441,6 +441,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   - **新しい状態もAPIも持たない。** チェックの実体はIssue本文（`use-issue-task-list.ts`）、
     クローズは`ManualStepPanel`と同じ`PATCH /api/issues`。GitHubで付けても一覧で付けても
     アシスタントで付けても、書き換わるのは同じ1か所。
+  - **サブPCで実行する手順は「承認して実行」で代行できる**（#1828。
+    [`manual-step-run-panel.tsx`](../src/components/dashboard/manual-step-run-panel.tsx)・
+    [`lib/manual-step-command.ts`](../src/lib/manual-step-command.ts)）。押すと既存の
+    ジョブキューへ`MANUAL_STEP`のジョブが積まれ、サブPCのpollerが実行して終了コードと出力を
+    画面へ返す（終了コード0のときだけチェックが付く）。**実行できるのは本文に書かれた
+    コマンドだけで、画面から届いた文字列は照合にしか使わない**（サーバーとpollerが本文と
+    独立に2回照合する）。設計は
+    [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業アシスタントからの代行実行1828)。
   - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
     一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
     （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。
