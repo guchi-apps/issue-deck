@@ -122,16 +122,26 @@ export function filterIssuesByView(
 export type IssueFilterInput = Pick<
   IssueFilters,
   "q" | "repos" | "state" | "labels" | "assignee"
->;
+> & {
+  /**
+   * AIあいまい検索で選ばれたIssueのid集合（#1788）。URLには載らない一時的な状態なので
+   * `IssueFilters`（＝クエリパラメータ）ではなくここにだけ持つ。
+   *
+   * **一覧も左メニューの件数も同じ`applyIssueFilters`を通すため、ここへ足しておけば数字は
+   * 食い違わない**（#1689・#1750と同じ理由）。
+   */
+  aiMatchedIds?: ReadonlySet<string> | null;
+};
 
 export function applyIssueFilters(
   issues: Issue[],
   filters: IssueFilterInput,
 ): Issue[] {
   const q = filters.q.trim();
+  const aiMatchedIds = filters.aiMatchedIds ?? null;
 
   return issues.filter((issue) => {
-    if (q && !matchesSearchQuery(issue, q)) return false;
+    if ((q || aiMatchedIds) && !matchesSearchQuery(issue, q, { aiMatchedIds })) return false;
     if (filters.repos.length > 0 && !filters.repos.includes(issue.repositoryFullName)) {
       return false;
     }
@@ -170,6 +180,9 @@ export function resolveFiltersForView<T extends IssueFilterInput>(
   return {
     ...filters,
     q: "",
+    // キーワードを外すビューでは、その結果であるAI検索の絞り込み（#1788）も一緒に外す。
+    // 片方だけ残すと「キーワードは効かないのに件数だけAIで絞られている」状態になる。
+    aiMatchedIds: null,
     repos: [],
     state: getNavViewDefaultState(view),
     labels: [],

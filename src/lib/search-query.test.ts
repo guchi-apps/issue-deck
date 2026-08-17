@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesSearchQuery, parseSearchQuery } from "@/lib/search-query";
+import { extractSearchTokens, matchesSearchQuery, parseSearchQuery } from "@/lib/search-query";
 import type { Issue } from "@/types/issue";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -126,5 +126,54 @@ describe("matchesSearchQuery", () => {
     });
     expect(matchesSearchQuery(issue, "label:bug is:open feature")).toBe(true);
     expect(matchesSearchQuery(issue, "label:bug is:open notfound")).toBe(false);
+  });
+});
+
+describe("matchesSearchQuery（AIあいまい検索・#1788）", () => {
+  const aiMatchedIds = new Set(["ai-1"]);
+
+  it("aiMatchedIdsがあるときは自由語の部分一致の代わりにid集合で判定する", () => {
+    const matched = makeIssue({ id: "ai-1", title: "一覧の絞り込みが重い", body: "" });
+    const unmatched = makeIssue({ id: "ai-2", title: "検索が遅い", body: "" });
+
+    // 文字列としては一致しないIssueが残り、一致するIssueでもAIが選ばなければ落ちる
+    expect(matchesSearchQuery(matched, "検索が遅い", { aiMatchedIds })).toBe(true);
+    expect(matchesSearchQuery(unmatched, "検索が遅い", { aiMatchedIds })).toBe(false);
+  });
+
+  it("label:等のトークンはAI検索中もそのまま効く", () => {
+    const issue = makeIssue({
+      id: "ai-1",
+      labels: [{ name: "bug", color: "red", description: null }],
+      state: "open",
+    });
+
+    expect(matchesSearchQuery(issue, "label:bug 重い", { aiMatchedIds })).toBe(true);
+    expect(matchesSearchQuery(issue, "label:other 重い", { aiMatchedIds })).toBe(false);
+    expect(matchesSearchQuery(issue, "is:closed 重い", { aiMatchedIds })).toBe(false);
+  });
+
+  it("aiMatchedIdsを渡さなければ従来どおりの部分一致になる", () => {
+    const issue = makeIssue({ id: "ai-2", title: "検索が遅い" });
+
+    expect(matchesSearchQuery(issue, "検索", {})).toBe(true);
+    expect(matchesSearchQuery(issue, "検索", { aiMatchedIds: null })).toBe(true);
+  });
+});
+
+describe("extractSearchTokens（#1788）", () => {
+  it("トークンだけを残し、自由語を落とす", () => {
+    expect(extractSearchTokens('label:bug -label:wontfix is:open assignee:octocat 検索が遅い')).toBe(
+      "label:bug -label:wontfix is:open assignee:octocat",
+    );
+  });
+
+  it("トークンが無ければ空文字になる", () => {
+    expect(extractSearchTokens("検索が遅い")).toBe("");
+  });
+
+  it("繰り返し呼んでも結果が変わらない（グローバル正規表現のlastIndexに引きずられない）", () => {
+    expect(extractSearchTokens("label:bug 重い")).toBe("label:bug");
+    expect(extractSearchTokens("label:bug 重い")).toBe("label:bug");
   });
 });

@@ -6,12 +6,15 @@ import {
   ChevronDown,
   FolderTree,
   LayoutDashboard,
+  Loader2,
   MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
   SlidersHorizontal,
+  Sparkles,
+  X,
 } from "lucide-react";
 
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
@@ -42,6 +45,25 @@ function FilterChip({
   );
 }
 
+/**
+ * 検索欄の「AIで探す」（#1788）の状態と操作。中身の管理は`issue-deck-shell`側にある
+ * （AIが選んだIssueで一覧・件数を絞るのは、TopBarではなく一覧の絞り込みの仕事のため）。
+ */
+export type TopBarAiSearch = {
+  /** AIに投げられる自由語があるか（`label:`等のトークンだけならボタンを出さない） */
+  canRun: boolean;
+  isSearching: boolean;
+  /** `CLAUDE_CODE_OAUTH_TOKEN`が未設定でAPIが501を返した後（ボタン自体を出さない） */
+  notConfigured: boolean;
+  error: string | null;
+  /** AI検索の結果で絞り込み中なら、その件数。通常検索中はnull */
+  matchedCount: number | null;
+  /** 候補が上限（`ISSUE_SEARCH_CANDIDATE_LIMIT`）を超えて切り捨てられた件数 */
+  droppedCandidateCount: number;
+  run: () => void;
+  clear: () => void;
+};
+
 type TopBarProps = {
   currentUser: CurrentUser | null;
   filters: IssueFilters;
@@ -66,6 +88,8 @@ type TopBarProps = {
   canGoBack: boolean;
   /** 1つ前の画面へ戻る（#1771） */
   onBack: () => void;
+  /** 検索欄の「AIで探す」（#1788） */
+  aiSearch: TopBarAiSearch;
 };
 
 export function TopBar({
@@ -86,6 +110,7 @@ export function TopBar({
   onOpenSettings,
   canGoBack,
   onBack,
+  aiSearch,
 }: TopBarProps) {
 
   // 検索欄はURL（filters.q）に直接バインドすると、1文字入力するたびにrouter.replaceによる
@@ -107,6 +132,14 @@ export function TopBar({
     }, 300);
     return () => clearTimeout(timer);
   }, [searchInput, filters.q, setFilter]);
+
+  function handleClearSearch() {
+    setSearchInput("");
+    setFilter("q", "");
+    aiSearch.clear();
+  }
+
+  const isAiSearchActive = aiSearch.matchedCount !== null;
 
   const stateLabel =
     filters.state === "open"
@@ -167,16 +200,75 @@ export function TopBar({
         Issue Deck
       </div>
 
-      <div className="relative w-72">
+      <div className="relative w-72 shrink-0">
         <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Issueを検索..."
           title='検索式が使えます（例: label:bug -label:wontfix is:open assignee:octocat）。トークン以外の文字列はタイトル・本文の部分一致になります。'
-          className="pl-8"
+          className="pr-8 pl-8"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
         />
+        {/* 入力を消す導線（#1788）。1文字ずつ消す以外に戻す方法が無かった。
+            **デバウンスを待たずURLへも即時に反映する**——300ms待つと、押した直後に
+            絞り込まれたままの一覧が残り、消えたように見えないため */}
+        {searchInput !== "" && (
+          <button
+            type="button"
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={handleClearSearch}
+            title="検索をクリア"
+            aria-label="検索をクリア"
+          >
+            <X className="size-4" />
+          </button>
+        )}
       </div>
+
+      {/* AIあいまい検索（#1788）。文字列一致で0件になったときの逃げ道なので、検索欄のすぐ隣に置く。
+          **押したときだけClaudeを呼ぶ**（プラン枠を消費するため、入力のたびやEnterでは実行しない）。
+          トークンだけの検索式のときと、トークン未設定でAPIが501を返した後は出さない */}
+      {!aiSearch.notConfigured && (aiSearch.canRun || isAiSearchActive) && (
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant={isAiSearchActive ? "default" : "outline"}
+            size="sm"
+            className="text-xs"
+            onClick={isAiSearchActive ? aiSearch.clear : aiSearch.run}
+            disabled={aiSearch.isSearching}
+            title={
+              isAiSearchActive
+                ? "AI検索を解除して通常の検索へ戻します"
+                : "入力の意味に近いIssueをAIが選びます（Claudeのプラン枠を使うため、押したときだけ実行されます）"
+            }
+          >
+            {aiSearch.isSearching ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Sparkles className="size-3" />
+            )}
+            {isAiSearchActive ? "AI検索を解除" : "AIで探す"}
+          </Button>
+          {aiSearch.error ? (
+            <span className="max-w-48 truncate text-xs text-destructive" title={aiSearch.error}>
+              {aiSearch.error}
+            </span>
+          ) : isAiSearchActive ? (
+            <span
+              className="text-xs whitespace-nowrap text-muted-foreground"
+              title={
+                aiSearch.droppedCandidateCount > 0
+                  ? `候補が多いため、新しい順に上位のみを対象にしました（対象外: ${aiSearch.droppedCandidateCount}件）`
+                  : undefined
+              }
+            >
+              AI検索: {aiSearch.matchedCount}件
+              {aiSearch.droppedCandidateCount > 0 && `（${aiSearch.droppedCandidateCount}件は対象外）`}
+            </span>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex flex-1 items-center gap-2">
         <Popover>
