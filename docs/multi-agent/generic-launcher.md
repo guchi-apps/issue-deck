@@ -166,9 +166,30 @@ cd ~/apps/<repo> && npm ci   # または pnpm install。package.json が無け�
 # 3. 対応表へ追記
 $EDITOR ~/.config/issue-deck/local-repos.conf
 
-# 4. 申告に載ることを確認する
+# 4. フォルダの信頼確認に1回だけ答える（#1838）
+cd ~/apps/<repo> && claude   # 「Yes, I trust this folder」を選び、/exit で抜ける
+
+# 5. 申告に載ることを確認する
 ~/apps/issue-deck/scripts/subpc-dispatch-poller.sh --announce-only
 ```
+
+**4を飛ばすと、最初のセッションが起動確認で止まる**（#1838）。初めてClaude Codeを開く
+リポジトリでは`claude`の起動直後に信頼確認（`Is this a project you created or one you trust?`）が
+出て、答えるまでセッションが始まらない。この間はフックが1つも飛ばない（#1465）ため、画面には
+「実行中」と出たまま何も進まず、答えられるのは端末だけ（Remote Controlはセッションが始まって
+いないので繋がっていない）。実際にcar-care #27がこの状態で止まった。
+
+**答えるのは本体チェックアウトで1回だけでよい。** 信頼はworktreeのパスではなく、共通の`.git`を
+持つ本体チェックアウトのパスへ記録される（実測: `~/.claude.json`の`projects`に載っているのは
+本体チェックアウトだけで、約100件の会話履歴があるworktreeは1件も無い）。以後そのリポジトリの
+worktreeでは聞かれない。
+
+飛ばしたまま起動しても**worktreeは作られない**。`start-local-session.sh`と
+`generic-start-issue.sh`が起動前に`~/.claude.json`を読んで確かめ、未信頼なら上のコマンドを
+出して止まる（[scripts/lib/claude-trust.sh](../../scripts/lib/claude-trust.sh)）。画面から
+起動した場合はジョブの失敗としてこの文面がそのまま出る。**読むだけで書き換えはしない**ので、
+「信頼確認そのものは自動化しない」（[session-notify.md](session-notify.md)）とは衝突しない。
+判定が誤って止めた場合は`ISSUE_DECK_SKIP_CLAUDE_TRUST_CHECK=1`で飛ばせる。
 
 **`git clone git@github.com:...`（SSH形式）では通らない。** サブPCの`~/.ssh/`には`authorized_keys`と
 `known_hosts`しか無く、GitHubへ出ていくための秘密鍵が無い。既存リポジトリのremoteもすべてHTTPSで、

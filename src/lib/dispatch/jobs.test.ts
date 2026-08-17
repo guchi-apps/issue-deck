@@ -11,7 +11,9 @@ const dispatchJobUpdateMany = vi.fn();
 const dispatchJobCount = vi.fn();
 const dispatchHostFindMany = vi.fn();
 const repositoryFindMany = vi.fn();
+const repositoryFindFirst = vi.fn();
 const issueFindMany = vi.fn();
+const issueFindFirst = vi.fn();
 const appSettingFindUnique = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -29,15 +31,22 @@ vi.mock("@/lib/db", () => ({
         return dispatchHostFindMany;
       },
     },
-    // 実行キューの行に出すIssueタイトルの引き当て（#1519）
+    // 実行キューの行に出すIssueタイトルの引き当て（#1519）と、
+    // 代行実行の本文・ラベルの引き当て（#1828）
     repository: {
       get findMany() {
         return repositoryFindMany;
+      },
+      get findFirst() {
+        return repositoryFindFirst;
       },
     },
     issue: {
       get findMany() {
         return issueFindMany;
+      },
+      get findFirst() {
+        return issueFindFirst;
       },
     },
     dispatchSession: {
@@ -82,6 +91,7 @@ const {
   dismissDispatchJob,
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
+  enqueueManualStepJob,
   enqueueSessionControlJob,
   expireStaleDispatchJobs,
   listDispatchState,
@@ -103,6 +113,7 @@ function host(overrides: Record<string, unknown> = {}) {
     instructionCapable: true,
     // 横断質問（#1454）に対応したpoller
     crossRepoQuestionCapable: true,
+    manualStepCapable: null,
     maxConcurrency: null,
     ...overrides,
   };
@@ -827,6 +838,10 @@ describe("dismissDispatchJob", () => {
       status: "FAILED",
       message: "tmuxの起動に失敗しました。",
       instruction: null,
+      command: null,
+      manualStepLine: null,
+      exitCode: null,
+      commandOutput: null,
       tmuxSessionName: null,
       createdAt: NOW,
       claimedAt: null,
@@ -895,6 +910,10 @@ describe("prioritizeDispatchJob", () => {
       status: "QUEUED",
       message: null,
       instruction: null,
+      command: null,
+      manualStepLine: null,
+      exitCode: null,
+      commandOutput: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: NOW,
@@ -1011,6 +1030,10 @@ describe("listDispatchState のIssueタイトル解決", () => {
       status: "QUEUED",
       message: null,
       instruction: null,
+      command: null,
+      manualStepLine: null,
+      exitCode: null,
+      commandOutput: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: NOW,
@@ -1149,5 +1172,253 @@ describe("listDispatchState のIssueタイトル解決", () => {
     await listDispatchState(NOW);
     expect(repositoryFindMany).not.toHaveBeenCalled();
     expect(issueFindMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 手作業の代行実行（#1828）。
+ *
+ * **ここが「画面から任意のコマンドを流せる口」にならないための一次の歯止め。** 画面から届いた
+ * 文字列は照合にしか使わず、ジョブに載せるのは本文から抽出し直したものであることを確かめる。
+ */
+describe("enqueueManualStepJob", () => {
+  const MANUAL_STEP_BODY = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+- カレントディレクトリ: \`~/apps/issue-deck\`
+
+## やること
+
+- [ ] チェックアウトを更新する
+
+    \`\`\`bash
+    cd ~/apps/issue-deck
+    git pull --ff-only
+    \`\`\`
+`;
+  // `- [ ] チェックアウトを更新する` の行番号（1始まり）
+  const STEP_LINE = MANUAL_STEP_BODY.split("\n").indexOf("- [ ] チェックアウトを更新する") + 1;
+  const COMMAND = "cd ~/apps/issue-deck\ngit pull --ff-only";
+
+  function setUpIssue(overrides: { body?: string | null; labels?: { name: string }[] } = {}) {
+    repositoryFindFirst.mockResolvedValue({ id: "repo-1" });
+    issueFindFirst.mockResolvedValue({
+      body: overrides.body === undefined ? MANUAL_STEP_BODY : overrides.body,
+      labels: overrides.labels ?? [{ name: "71.manual-step" }],
+    });
+  }
+
+  async function run(overrides: { stepLine?: number; approvedCommand?: string } = {}) {
+    return enqueueManualStepJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1823,
+      hostName: "subpc",
+      stepLine: overrides.stepLine ?? STEP_LINE,
+      approvedCommand: overrides.approvedCommand ?? COMMAND,
+      requestedByUserId: "user-1",
+      now: NOW,
+    });
+  }
+
+  beforeEach(() => {
+    setUpIssue();
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: true }));
+  });
+
+  it("本文から抽出し直したコマンドをジョブに載せる", async () => {
+    const result = await run();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "MANUAL_STEP",
+          command: COMMAND,
+          manualStepLine: STEP_LINE,
+          // Issue単位で1件まで（順番に実行する前提の手順が入れ替わらないようにする）
+          activeKey: `manual_step:${REPOSITORY}#1823`,
+          requestedByUserId: "user-1",
+        }),
+      }),
+    );
+  });
+
+  // **承認した内容と本文が食い違えば実行しない。** 押した人が見たものと、これから実行される
+  // ものが違う状態を作らない
+  it("承認したコマンドが本文と一致しなければ積まない", async () => {
+    const result = await run({ approvedCommand: "rm -rf ~/apps/issue-deck" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("body_changed");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("手作業Issue（71.manual-step）でなければ積まない", async () => {
+    setUpIssue({ labels: [{ name: "50.feature" }] });
+    const result = await run();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("not_manual_step");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  // VPS・1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
+  it("実行するデバイスがサブPCでなければ積まない", async () => {
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**VPS**") });
+    const result = await run();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("device_not_subpc");
+  });
+
+  it("コマンドを1つに定められない手順は積まない", async () => {
+    const result = await run({ stepLine: 1 });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("no_command");
+  });
+
+  // 対応していないpollerへ配ると未知の種別として失敗になり、押した実行が必ず失われる
+  it("代行実行に対応していないホストには積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: null }));
+    const result = await run();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("manual_step_unsupported");
+  });
+
+  it("Issueを引けなければ積まない（本文を照合できないため）", async () => {
+    repositoryFindFirst.mockResolvedValue(null);
+    const result = await run();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("not_manual_step");
+  });
+});
+
+/**
+ * 代行実行の結果（#1828）。**終了コードと出力はここでしか画面へ渡らない。**
+ */
+describe("reportDispatchJob の代行実行の結果", () => {
+  beforeEach(() => {
+    dispatchJobFindUnique.mockResolvedValue({
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1823,
+      targetHost: "subpc",
+      kind: "MANUAL_STEP",
+      status: "RUNNING",
+      claimedByHost: "subpc",
+      message: null,
+      instruction: null,
+      command: "git pull --ff-only",
+      manualStepLine: 12,
+      tmuxSessionName: null,
+      exitCode: null,
+      commandOutput: null,
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: NOW,
+      startedAt: NOW,
+      finishedAt: null,
+    });
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("終了コードと出力を保存する", async () => {
+    await reportDispatchJob({
+      jobId: "job-1",
+      hostName: "subpc",
+      status: "succeeded",
+      message: "実行しました（終了コード 0）",
+      exitCode: 0,
+      output: "Already up to date.",
+      now: NOW,
+    });
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ exitCode: 0, commandOutput: "Already up to date." }),
+      }),
+    );
+  });
+
+  // `running`の報告で結果をnullへ戻さない（実行中の巡で終了コードが消えると、画面が
+  // 「終わったのに結果が無い」状態になる）
+  it("送られてこない結果は触らない", async () => {
+    dispatchJobFindUnique.mockResolvedValue({
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1823,
+      targetHost: "subpc",
+      kind: "MANUAL_STEP",
+      status: "CLAIMED",
+      claimedByHost: "subpc",
+      message: null,
+      instruction: null,
+      command: "git pull --ff-only",
+      manualStepLine: 12,
+      tmuxSessionName: null,
+      exitCode: 1,
+      commandOutput: "前回の出力",
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: NOW,
+      startedAt: null,
+      finishedAt: null,
+    });
+
+    await reportDispatchJob({ jobId: "job-1", hostName: "subpc", status: "running", now: NOW });
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ exitCode: 1, commandOutput: "前回の出力" }),
+      }),
+    );
+  });
+});
+
+/**
+ * 払い出し（#1828）。**セッションの枠は消費せず、対応を申告したホストにだけ配る。**
+ */
+describe("claimDispatchJobs の代行実行", () => {
+  it("申告したホストには制御ジョブと同じ枠外で配る", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: true }));
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    expect(dispatchJobFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "QUEUED",
+          kind: { in: ["INTERRUPT", "KILL", "INSTRUCTION", "MANUAL_STEP"] },
+        }),
+      }),
+    );
+    // 枠（同時実行数）を数える対象には入れない
+    expect(dispatchJobCount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] } }),
+      }),
+    );
+  });
+
+  it("申告していないホストには配らない", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: null }));
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    const kinds = dispatchJobFindMany.mock.calls
+      .map((call) => (call[0]?.where?.kind as { in?: string[] } | undefined)?.in ?? [])
+      .flat();
+    expect(kinds).not.toContain("MANUAL_STEP");
   });
 });

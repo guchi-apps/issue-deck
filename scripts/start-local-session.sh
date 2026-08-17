@@ -124,6 +124,28 @@ for required_command in git gh claude; do
   fi
 done
 
+# フォルダの信頼確認が済んでいるか（#1838）。**worktreeを作る前にここで止める。**
+#
+# 初めてClaude Codeを開くリポジトリでは、`claude`の起動直後に信頼確認が出て、答えるまで
+# セッションが始まらない。この間はフックが1つも飛ばない（#1465）ので、画面には「実行中」と
+# 出たまま何も進まず、3分後に「まだ開始していません」が出て`00.check-user`が付く。しかも
+# 答えられるのは端末だけ（Remote Controlはセッションが始まっていないので繋がっていない）で、
+# 画面から辿れる出口が無い。**実際にcar-care #27でこの状態のまま止まった。**
+#
+# 起動する前に分かるなら、止まったセッションを立てるより先に案内を出した方が早い。ここで
+# `exit 1`すればpollerがジョブを`failed`にし、この文面が画面に出る（subpc-dispatch-poller.sh）。
+#
+# **判定は`~/.claude.json`を読むだけ**で、`hasTrustDialogAccepted`を立てはしない。
+# 「信頼確認そのものは自動化しない」（docs/multi-agent/session-notify.md）は変えていない。
+#
+# 古い複製には lib/claude-trust.sh が無い。**そのときは黙って通す**（判定できないだけで、
+# 起動を止める理由にはならない。local-repo-resolve.sh と違って無くても動く）。
+if [[ -f "$LIB_DIR/claude-trust.sh" ]]; then
+  # shellcheck source=scripts/lib/claude-trust.sh
+  source "$LIB_DIR/claude-trust.sh"
+  claude_trust_require "$REPO_PATH" "$FULL_NAME" || exit 1
+fi
+
 # LANアクセス設定（Windowsの管理者権限が必要）は、wt.exeで開いたタブではUACを承認しても
 # 待ちから戻らずタブが固まる。ワンクリック起動では行わない（#1076）。
 # コマンドライン引数ではなく環境変数で渡すのは、この指定を解釈しないリポジトリの

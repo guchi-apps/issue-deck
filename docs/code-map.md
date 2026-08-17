@@ -354,6 +354,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リリースの実行で、要対応の枠へ入れると上記の並びの読み方が崩れる。ホームでは先頭の
   「いまの状況」のカードとメニューの両方から開けるが、これは「ユーザーの確認待ち」も同じ
   （カードは件数を見るサマリ、メニューは他のビューと並ぶ入口）。
+- **検索欄の絞り込みは文字列の部分一致（[`lib/search-query.ts`](../src/lib/search-query.ts)）で、
+  「AIで探す」を押したときだけ意味での絞り込みへ切り替わる**（#1788）。押すと表示中の一覧から
+  新しい順に最大`ISSUE_SEARCH_CANDIDATE_LIMIT`件のタイトル・ラベル（**本文は送らない**）を
+  `POST /api/issues/ai-search`→[`lib/claude/issue-search.ts`](../src/lib/claude/issue-search.ts)へ渡し、
+  返ってきたIssueのidの集合で絞る（`matchesSearchQuery`の`aiMatchedIds`）。`label:`等のトークンは
+  自由語と別に評価しているのでAI検索中もそのまま効き、AIへ渡すのはトークンを除いた自由語だけ
+  （`extractSearchTokens`）。**候補は自由語で絞る前の集合から作る**——文字列一致で0件のときに押す
+  機能なので、先に部分一致を掛けると候補まで0件になる。
+  **1回ごとにClaudeのプラン枠を消費するため、呼ぶのはボタンを押したときだけ**（入力のたび・
+  Enterキーでは呼ばない。`hooks/use-issue-ai-search.ts`）。`CLAUDE_CODE_OAUTH_TOKEN`が未設定なら
+  APIが501を返し、画面はボタンを出さなくなる。結果はURLに載せず（プラン枠を使って得たものを
+  リロードや共有で勝手に再現しない）、検索語を変えると破棄して通常の検索へ戻る。
+  絞り込み条件としては`IssueFilterInput.aiMatchedIds`に載せ、**一覧・左メニューの件数・ラベルの
+  件数がすべて同じ`applyIssueFilters`を通る**ため数字は食い違わない（#1689・#1750と同じ理由）。
 - **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
   適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は
@@ -427,6 +441,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   - **新しい状態もAPIも持たない。** チェックの実体はIssue本文（`use-issue-task-list.ts`）、
     クローズは`ManualStepPanel`と同じ`PATCH /api/issues`。GitHubで付けても一覧で付けても
     アシスタントで付けても、書き換わるのは同じ1か所。
+  - **サブPCで実行する手順は「承認して実行」で代行できる**（#1828。
+    [`manual-step-run-panel.tsx`](../src/components/dashboard/manual-step-run-panel.tsx)・
+    [`lib/manual-step-command.ts`](../src/lib/manual-step-command.ts)）。押すと既存の
+    ジョブキューへ`MANUAL_STEP`のジョブが積まれ、サブPCのpollerが実行して終了コードと出力を
+    画面へ返す（終了コード0のときだけチェックが付く）。**実行できるのは本文に書かれた
+    コマンドだけで、画面から届いた文字列は照合にしか使わない**（サーバーとpollerが本文と
+    独立に2回照合する）。設計は
+    [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業アシスタントからの代行実行1828)。
   - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
     一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
     （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。
@@ -686,6 +708,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   になる（issue-deck本体で72件）。異常を示すバッジの形なのに行動につながらないため落とした。
   マージコミットを除いて数える案はコミット一覧を引く必要があり、この画面の前提（取得を増やさない）
   と噛み合わないので採らなかった。
+  **まだブランチが無いIssueは「実装予定」として流れ図の上流に並べる**（#1704）。レーンはPRのheadブランチと
+  実在する作業ブランチの和集合なので、着手前のIssueは画面のどこにも現れなかった。対象は進捗が
+  `ready`・`planning`のopen Issueのうち、どのレーンにも現れていないもの（`lib/branch-flow.ts`の
+  `PLANNED_ISSUE_PROGRESS_STATUSES`・`collectPlannedIssues`）。**`ready`まで含めるのは、計画が要らない
+  Issueが`Ready`から直接実装へ入るため**で、`planning`だけに絞ると次に流れてくるものがほとんど映らない。
+  **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）にはこの集合を足さない**——ブランチが無いのが
+  正常な状態で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
+  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: low`）→ 番号の新しい順で、
+  **既定は3件まで**（`PLANNED_ISSUE_PREVIEW_COUNT`）。未着手はバックログ全体なので、全部出すと
+  流れ図が下へ押し出される。残りはリポジトリごとのボタンで開き、件数は見出しと畳んだ1行（「予定◯」）に出す。
+  **手が要るものではないので、初回に自動で開く条件（`needsAttention`）には加えない。**
+  枝と点は破線で描き、実在するブランチのレーンと見分けが付くようにする。
+  **`orphanIssues`（ブランチもPRも見つからないIssue）とは別物**で、あちらは「実装中なのにブランチが無い」
+  異常を隠さないための枠。手作業Issue（`71.manual-step`）は実装するものではないため実装予定に混ぜない。
   **手作業Issue（`71.manual-step`）は本文から起点Issueを推定してレーンへぶら下げる**（#1510）。
   GitHubネイティブのサブIssue関係はDBへキャッシュしておらず（`/api/issues/sub-issues`はIssue詳細を
   開いたときだけ取る）、持たせるにはGitHub Appの`sub_issues`Webhook購読の追加とスキーマ変更が要る。
@@ -930,6 +966,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
+- **そのホストで初めて開くリポジトリは、起こす前に止める**（#1838。`scripts/lib/claude-trust.sh`）。
+  Claude Codeのフォルダ信頼確認（`Is this a project you created or one you trust?`）に答えるまで
+  セッションは始まらず、その間はフックが1つも飛ばない（#1465）。`start-local-session.sh`・
+  `generic-start-issue.sh`が`~/.claude.json`を**読んで**未信頼を見分け、worktreeを作る前に
+  「本体チェックアウトで1回だけ答えてください」と出して止まる。**信頼は本体チェックアウトの
+  パスに記録される**ためリポジトリにつき1回で済む。**書き換えはしない**（「信頼確認そのものは
+  自動化しない」）。判定できないときは通す（fail open。`ISSUE_DECK_SKIP_CLAUDE_TRUST_CHECK=1`で
+  丸ごと飛ばせる）。
 - **起動したセッションの後始末はpollerの1巡に相乗りさせ、常駐プロセスを増やさない。**
   `scripts/reap-dev-servers.sh`が開発サーバーを（#1223）、`scripts/reap-sessions.sh`が作業の
   終わったtmuxセッションそのものを畳む（#1256）。判定材料は`scripts/lib/session-state.sh`が

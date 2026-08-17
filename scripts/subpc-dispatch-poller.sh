@@ -16,6 +16,12 @@
 #   KILL        … `tmux kill-session -t <セッション名>`（セッションごと畳む）
 #   INSTRUCTION … 人が書いた1行を入力欄へ送る（#1012）。**3段階プロトコル**（下記）で送る
 #
+# セッションに触らないジョブもある（#1828）。
+#
+#   MANUAL_STEP … 手作業アシスタントで承認された1手順ぶんのコマンドを、このホストで実行する。
+#                 **GitHubの手作業Issueの本文と照合してから**、別プロセス
+#                 （scripts/run-manual-step.sh）で実行し、終了コードと出力を画面へ返す
+#
 # 立てるセッションにも2種類ある（#1454）。
 #
 #   LAUNCH              … 実装セッション。scripts/start-local-session.sh 経由でworktreeを作る
@@ -79,7 +85,8 @@ set -euo pipefail
 # 8: 使用率の申告にSWAPを載せ、既定のポーリング間隔を30秒にする（#1624）。
 # 9: 動かしているチェックアウトの版（コミット・ブランチ・developからの遅れ）を申告する（#1612）。
 # 10: マージ済みworktreeの掃除（cleanup-worktrees.sh）を一定間隔で呼ぶ（#1716）。
-DISPATCH_POLLER_VERSION="10"
+# 11: 手作業の代行実行（`MANUAL_STEP`）を、GitHubの本文と照合してから実行する（#1828）。
+DISPATCH_POLLER_VERSION="11"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -98,6 +105,9 @@ LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
 # worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
 QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
+# 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
+# あるため。理由はスクリプト冒頭のコメントを参照）。
+MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -344,6 +354,19 @@ cross_repo_question_capable() {
   fi
 }
 
+# 手作業の代行実行（#1828）を実行できるか。**実行スクリプトと、実行前の照合に使う`gh`が
+# 揃っているかで判定する。** どちらか欠けたまま申告すると、押した実行が必ず失敗として残る。
+#
+# `gh`を必須にしているのは、**実行するコマンドがGitHub上の手作業Issueの本文に書かれたものか**を
+# サブPC側でも確かめるため（issue-deck側の照合だけに頼らない多層防御）。
+manual_step_capable() {
+  if [[ -f "$MANUAL_STEP_RUNNER" ]] && command -v gh >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # ホストのリソース使用率（#1567）。画面（実行キュー・スマホのホーム）へ出すためだけの申告で、
 # **issue-deck側はこの値で何も判定しない**（起動を止めているのは DISPATCH_MAX_SESSIONS と
 # 同時実行数だけ）。
@@ -544,6 +567,10 @@ announce() {
   # ops-dashboardを開かなくて済むようにするためのもので、こちらも判定には使わない。
   # 取れなければ`null`（＝申告なし）。
   #
+  # `manualStep`は「手作業アシスタントからの代行実行（#1828）を実行できる」という申告。
+  # **`instruction`とも別に持つ。** あちらは走っているセッションの入力欄へ1行送るだけなのに対し、
+  # こちらは**シェルでコマンドを実行する**ため、届いた先で起きることの性質が違う。
+  #
   # `checkout`も同じく**画面へ出すためだけの申告**（#1612）。**`agentVersion`とは別物**で、
   # あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に動いているスクリプトが
   # どのコミットのものかという事実（版数が同じまま97コミット遅れていた、が起きている）。
@@ -556,9 +583,10 @@ announce() {
     --argjson maxSessions "$MAX_SESSIONS" \
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
+    --argjson manualStep "$(manual_step_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1131,6 +1159,84 @@ run_control_job() {
   return 0
 }
 
+# 手作業の代行実行（#1828）。承認された1手順ぶんのコマンドを、このホストで実行する。
+#
+# **届いたコマンドをそのまま実行しない。** GitHubから手作業Issueの本文を読み直し、
+#
+#   1. `71.manual-step` ラベルが付いていること
+#   2. 受け取ったコマンドが**その本文にそのまま含まれる**こと
+#
+# の2つを確かめてから実行する。issue-deck側（`enqueueManualStepJob`）も本文から抽出し直した
+# ものだけをジョブに載せているので、**同じ照合を独立に2回行う**形になる。DBだけ、あるいは
+# issue-deckだけを握られても、本文に無いコマンドはここで止まる。
+#
+# **実行そのものは別プロセスへ逃がす**（`run-manual-step.sh`）。サブPCの手作業で最も多いのが
+# 「`git pull`してpollerを再起動する」で、pollerのcgroupの中で実行すると自分ごと殺されて
+# 結果を返せない。`systemd-run --user --collect --unit=...`で別のcgroupへ出す。
+run_manual_step_job() {
+  local job_id="$1" owner="$2" repo="$3" issue_number="$4" command="$5"
+  local body payload_file unit
+
+  if [[ -z "$command" ]]; then
+    report_job "$job_id" failed "実行するコマンドが空です。"
+    return 0
+  fi
+  if [[ ! -f "$MANUAL_STEP_RUNNER" ]]; then
+    report_job "$job_id" failed "代行実行のスクリプトがありません（$MANUAL_STEP_RUNNER）。"
+    return 0
+  fi
+
+  # **確かめられなければ実行しない**（`gh`が無い・未認証・Issueを読めない）。
+  # 判定材料が無いときは実行しない側へ倒す（この仕組み全体で一貫している向き）。
+  if ! body="$(gh issue view "$issue_number" --repo "$owner/$repo" --json body,labels 2>/dev/null)"; then
+    report_job "$job_id" skipped "GitHubから手作業Issueの本文を読めなかったため実行しませんでした。"
+    return 0
+  fi
+  if [[ "$(printf '%s' "$body" | jq -r '[.labels[].name] | index("71.manual-step") // "" ')" == "" ]]; then
+    report_job "$job_id" skipped "対象が手作業Issue（71.manual-step）ではないため実行しませんでした。"
+    return 0
+  fi
+  # 本文に**そのまま含まれる**ことだけを見る（本文の解析はissue-deck側の仕事で、こちらでは
+  # もう一度やらない。ここで見たいのは「本文に無いコマンドが混ざっていないか」の一点）
+  if ! printf '%s' "$body" | jq -r '.body // ""' | grep -qF -- "$command"; then
+    report_job "$job_id" skipped \
+      "実行するコマンドが手作業Issueの本文と一致しないため実行しませんでした（本文が変わった可能性があります）。"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため実行しません（MANUAL_STEP → $owner/$repo #$issue_number）"
+    echo "  照合は通りました（本文に同じコマンドがあります）"
+    return 0
+  fi
+
+  # **コマンドはargvに載せずファイルで渡す**（`ps`で他のユーザーからも見えるため）。
+  # 読んだ側が消す。
+  payload_file="$(mktemp -t issue-deck-manual-step-job.XXXXXX)"
+  chmod 600 "$payload_file"
+  jq -n --arg jobId "$job_id" --arg command "$command" '{jobId: $jobId, command: $command}' \
+    >"$payload_file"
+
+  # 実行を始めたことを先に伝える（届くまで最大1巡ぶん遅れるので、画面が黙る時間を短くする）
+  report_job "$job_id" running "サブPCで実行しています"
+
+  unit="issue-deck-manual-step-$job_id"
+  if command -v systemd-run >/dev/null 2>&1 &&
+    systemd-run --user --quiet --collect --unit="$unit" \
+      /bin/bash -lc "$MANUAL_STEP_RUNNER $(printf '%q' "$payload_file")" 2>/dev/null; then
+    echo "  代行実行を開始しました（$unit）"
+    return 0
+  fi
+
+  # systemd-runが使えない環境向けの退避経路。**pollerを再起動する手順ではここは巻き添えになる**
+  # （そのときは結果が返らず、ジョブはタイムアウトする）。それでも実行できない状態よりはよい。
+  echo "  systemd-runが使えないため、切り離したプロセスとして実行します" >&2
+  setsid nohup /bin/bash -lc "$MANUAL_STEP_RUNNER $(printf '%q' "$payload_file")" \
+    >/dev/null 2>&1 &
+  disown
+  return 0
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -1138,7 +1244,7 @@ run_control_job() {
 # 組み立てると規約がずれた瞬間に「起動したのに失敗と報告する」誤判定になる。
 run_job() {
   local job_json="$1"
-  local job_id owner repo full_name issue_number kind requested_session instruction
+  local job_id owner repo full_name issue_number kind requested_session instruction command
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -1147,6 +1253,8 @@ run_job() {
   requested_session="$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')"
   # 追加指示の本文（#1012）。`INSTRUCTION`以外では空
   instruction="$(printf '%s' "$job_json" | jq -r '.instruction // ""')"
+  # 代行実行するコマンド（#1828）。`MANUAL_STEP`以外では空
+  command="$(printf '%s' "$job_json" | jq -r '.command // ""')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -1169,6 +1277,13 @@ run_job() {
     fi
     launch_and_report "$job_id" "$repo" "$issue_number" "横断質問セッションを起動しています" \
       bash "$QUESTION_LAUNCHER" "$owner" "$repo" "$issue_number"
+    return 0
+  fi
+
+  # 手作業の代行実行（#1828）。**セッションを立てず、tmuxにも触らない。** cloneの有無も
+  # 問わない（実行するのはホスト上のコマンドで、worktreeを作るわけではない）。
+  if [[ "$kind" == "MANUAL_STEP" ]]; then
+    run_manual_step_job "$job_id" "$owner" "$repo" "$issue_number" "$command"
     return 0
   fi
 

@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
+import { ManualStepRunPanel } from "@/components/dashboard/manual-step-run-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,6 +26,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
@@ -78,6 +80,7 @@ export function ManualStepGuideDialog({
   open,
   onOpenChange,
   onIssueUpdated,
+  dispatch: injectedDispatch,
 }: {
   /**
    * 案内するIssueのidの並び。開いた時点で確定させた**スナップショット**を渡す
@@ -90,7 +93,15 @@ export function ManualStepGuideDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onIssueUpdated: (issue: Issue) => void;
+  /**
+   * ディスパッチの状態（#1828の代行実行が使う）。**テストから差し込むためだけの口**で、
+   * 通常は開いている間だけ自前で取得する（閉じているダイアログのためにポーリングを増やさない）。
+   */
+  dispatch?: DispatchStateHandle;
 }) {
+  const ownDispatch = useDispatchState(injectedDispatch === undefined && open);
+  const dispatch = injectedDispatch ?? ownDispatch;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* ヘッダー・本文・フッターの3段。本文だけをスクロールさせるため、既定の
@@ -103,6 +114,7 @@ export function ManualStepGuideDialog({
         <GuideSession
           queueIds={queueIds}
           issues={issues}
+          dispatch={dispatch}
           onIssueUpdated={onIssueUpdated}
           onClose={() => onOpenChange(false)}
         />
@@ -118,11 +130,13 @@ export function ManualStepGuideDialog({
 function GuideSession({
   queueIds,
   issues,
+  dispatch,
   onIssueUpdated,
   onClose,
 }: {
   queueIds: string[];
   issues: Issue[];
+  dispatch: DispatchStateHandle;
   onIssueUpdated: (issue: Issue) => void;
   onClose: () => void;
 }) {
@@ -150,6 +164,7 @@ function GuideSession({
       key={issue.id}
       issue={issue}
       issues={issues}
+      dispatch={dispatch}
       position={queueIds.indexOf(issue.id) + 1}
       total={queueIds.length}
       stageIndex={stageIndex}
@@ -196,6 +211,7 @@ function GuideFinished({ started, onClose }: { started: boolean; onClose: () => 
 function ManualStepGuideContent({
   issue,
   issues,
+  dispatch,
   position,
   total,
   stageIndex,
@@ -206,6 +222,7 @@ function ManualStepGuideContent({
 }: {
   issue: Issue;
   issues: Issue[];
+  dispatch: DispatchStateHandle;
   position: number;
   total: number;
   stageIndex: number;
@@ -247,6 +264,17 @@ function ManualStepGuideContent({
     onStageIndexChange(index + 1);
   }
 
+  /**
+   * 代行実行（#1828）が終了コード0で終わったときのチェック。
+   *
+   * **次の画面へは自動で進めない。** 実行できたことと、出力を見て次へ進んでよいと判断することは
+   * 別で、勝手に進むと結果を読む前に画面が変わる。付けるのはチェックだけで、進むのは人が押す。
+   */
+  async function handleStepExecuted(executed: ManualStepGuideStep) {
+    if (executed.line === null || executed.checked) return;
+    await taskList.toggleTask(executed.line, true);
+  }
+
   const stepCount = guide.hasTemplate ? guide.steps.length : 0;
 
   return (
@@ -281,7 +309,15 @@ function ManualStepGuideContent({
             <OverviewStage guide={guide} issue={issue} prerequisites={prerequisites} />
           )}
           {stage.kind === "step" && (
-            <StepStage step={stage.step} order={stage.order} total={stepCount} issue={issue} />
+            <StepStage
+              step={stage.step}
+              order={stage.order}
+              total={stepCount}
+              issue={issue}
+              guide={guide}
+              dispatch={dispatch}
+              onExecuted={() => void handleStepExecuted(stage.step)}
+            />
           )}
           {stage.kind === "body" && <BodyStage issue={issue} body={taskList.body} />}
           {stage.kind === "finish" && <FinishStage guide={guide} issue={issue} />}
@@ -327,13 +363,22 @@ function ManualStepGuideContent({
               <Button variant="outline" size="sm" onClick={() => onStageIndexChange(index + 1)}>
                 あとで
               </Button>
+              {/* 代行実行が成功するとチェックが付く（#1828）。**そのときは主導線を「次へ」に
+                  変える**——既に実行済みの手順に「実行した」を押させると、押さないと進めないのか
+                  分からなくなる */}
               <Button
                 size="sm"
                 disabled={taskList.isToggling}
                 onClick={() => void handleStepDone()}
               >
-                {taskList.isToggling ? <Loader2 className="animate-spin" /> : <Check />}
-                実行した・次へ
+                {taskList.isToggling ? (
+                  <Loader2 className="animate-spin" />
+                ) : stage.step.checked ? (
+                  <ArrowRight />
+                ) : (
+                  <Check />
+                )}
+                {stage.step.checked ? "次へ" : "実行した・次へ"}
               </Button>
             </>
           ) : (
@@ -498,11 +543,17 @@ function StepStage({
   order,
   total,
   issue,
+  guide,
+  dispatch,
+  onExecuted,
 }: {
   step: ManualStepGuideStep;
   order: number;
   total: number;
   issue: Issue;
+  guide: ManualStepGuide;
+  dispatch: DispatchStateHandle;
+  onExecuted: () => void;
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -521,6 +572,14 @@ function StepStage({
           手順もMarkdownとして描く。チェックボックスは`- [ ]`ごと外してあるので、
           この中には出ない（付けるのはフッターの「実行した・次へ」） */}
       <MarkdownBody content={step.markdown} repositoryFullName={issue.repositoryFullName} />
+      {/* サブPCで実行する手順は、承認1回で代行できる（#1828）。できない場合も理由を出す */}
+      <ManualStepRunPanel
+        issue={issue}
+        guide={guide}
+        step={step}
+        dispatch={dispatch}
+        onSucceeded={onExecuted}
+      />
     </section>
   );
 }

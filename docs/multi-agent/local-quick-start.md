@@ -935,11 +935,12 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 
 | 場所 | 何をするか |
 |---|---|
-| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定なら`-H 127.0.0.1`を渡す（#1526）。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
+| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定なら`-H 127.0.0.1`を渡す（#1526）。あわせて`tailscale serve`も張り直す（#1363・後述）。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
 | `scripts/run-issue-session.sh` | 開発サーバーを起こす前に`ISSUE_DECK_DEV_HOST=127.0.0.1`をexportする（#1526で無条件にした）。セッション開始時点から閉じるので、そもそもぶつかる状態を作らない。**#1329より前に作られたworktreeにも効く**唯一の経路 |
 
 - **serveは`localhost:<ポート>`へproxyするので、閉じてもtailnetのURLからは従来どおり見える**
-  （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する。
+  （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する（張り直しは
+  `scripts/dev.sh`が行う・#1363）。
 - **serveを張る順番は変えていない。** 先に張ると、`ISSUE_DECK_DEV_HOST`を見ない他リポジトリの
   開発サーバー（汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり
   「devサーバー→serve」の順で、待ち受けもそのリポジトリの既定のまま。
@@ -980,6 +981,40 @@ LISTEN 0  511                           *:5403     *:*
 その隙間に当たると、起動中のセッションのserveを外してしまう。そこで1回目は
 `~/apps/issue-deck-worktrees/.dev-servers/orphan-serve-strikes`へ記録するだけにしている
 （手で流して即座に片付けたいときは2回続けて実行する。`--dry-run`はこの記録を書き換えない）。
+
+#### 起こし直しでは`tailscale serve`を張り直す（#1363）
+
+**「開発サーバーだけが止まる」と、公開のほうも巻き添えで消える。** アイドルで回収された（#1223）
+ポートは転送先（`localhost:<ポート>`）に待ち受けが無くなるので、上の孤児判定（#1403）が
+2巡（pollerの既定で約2分）でserveを撤去する。セッション自体は生きていても撤去される
+（**ポートからIssue・セッションを逆算しない**という判定の建て付け上、区別できない）。
+
+ところが**serveを張るのはセッションの起動経路だけ**（`run-issue-session.sh`・
+`start-develop-dev.sh`）で、プロンプトが案内する起こし直し（`cd <worktree> && pnpm dev`）には
+その一手が無かった。結果として次のようになっていた。
+
+1. アイドルで開発サーバーが停止する（#1223）
+2. 約2分後、`reap-dev-servers.sh`がそのポートのserveを孤児として撤去する（#1403）
+3. 案内どおり`pnpm dev`で起こし直すと、localhostでは見えるが**tailnetのURLは死んだまま**
+4. issue-deckの画面にはセッション開始時に報告されたtailnetのURLが出たままなので、
+   `23.preview-required`で別端末（スマホ）から開く導線が、気づかないうちに切れている
+
+そこで**`scripts/dev.sh`が起動時に`tailscale serve`を張り直す**。serveの公開は同じ内容なら
+何度張っても同じなので、セッションの起動経路から呼ばれて二重に張っても害は無い。
+
+- **待ち受けを開けているとき（`ISSUE_DECK_DEV_HOST`が非ループバック）は張らない。** serveは
+  tailnetアドレスを具体的に掴むため、`::`を要求する`next dev`より先に張ると`EADDRINUSE`になる
+  （上の順序の話がそのまま当てはまる）。開けているならtailnetからは直接届く
+- `tailscale serve`が使えないホスト（メインPCのWSL等）では黙って何もしない。公開そのものを
+  止めたいときは`ISSUE_DECK_TAILNET_PUBLISH=0`を渡す
+- 出す行の文面は`run-issue-session.sh`と同じ（`開発サーバーをtailnetへ公開しました: <URL>`）。
+  プロンプトが「起動ログのこの行を見る」と案内している（`scripts/start-issue.sh`）ため揃える
+- **issue-deckへの報告（`report_preview_url_to_issue_deck`）はしない。** ホスト名もポートも
+  変わらないのでURLは同じで、画面に出ている値は元から正しい。死んでいたのは実体のほうだけ
+
+`EADDRINUSE`そのもの（#1363の起票時の現象）は#1526で待ち受けを`127.0.0.1`に閉じたときに解消済み。
+実測でも、serveを先に張ってから`127.0.0.1`にbindしても衝突せず、serveの転送先（`localhost`）は
+IPv4のループバック待ち受けに解決される。
 
 ### allowedDevOriginsに載せる必要がある
 
@@ -1061,10 +1096,12 @@ pnpm db:seed:dev
 - CIが使っているダミーデータ（`scripts/ci-seed-user.mjs`・`scripts/seed-ci-db.mjs`）をローカルから
   投入する薄いラッパー（`scripts/seed-dev-db.sh`）。リポジトリ5件・Issue 54件が入り、進捗はカンバンの
   全列へ散る（`SEED_PROFILE=dev`のときだけ効く後処理。**未設定時の挙動はCIと同じで変わらない**）。
-  末尾2件は手作業Issue（`71.manual-step`）のサンプルで、`## 前提条件`が進捗の違うIssueを指している。
+  末尾3件は手作業Issue（`71.manual-step`）のサンプルで、`## 前提条件`が進捗の違うIssueを指している。
   **前提待ちのものと、いま実行できるものが1件ずつ**入るので（#1763）、Issue詳細の「前提条件の状況」
   （#1705）だけでなく、左メニューの件数（いま実行できる数）・一覧のヘッダーの内訳・行のアイコンの
-  出し分けも実物で確かめられる。
+  出し分けも実物で確かめられる。**3件目はサブPCで実行する手作業**（#1828）で、手作業アシスタントの
+  代行実行（「承認して実行」）が出る唯一のサンプル。**2つ目の手順にはコマンドを置いていない**ので、
+  代行できない手順の見え方も同じ本文で確かめられる。
 - `CI_LOGIN_BYPASS_SECRET`が空なら生成して`.env.local`へ書き込む。**書き込まれた場合は開発サーバーを
   起こし直す**（`next dev`は起動時にしか`.env.local`を読まない）。
 - 起こし直すと、ログイン画面に「開発用ダミーユーザーでログイン」ボタンが出る。Supabase Authを経由せず、
@@ -1083,6 +1120,18 @@ pnpm db:seed:dev
 ここまで含めて実データで見たい場合は、開発用GitHub Appの設定が要る（`PREVIEW_MODE=true`を併用して
 書き込み系APIを塞ぐこと。`src/lib/preview-mode.ts`）。実物が無くても見た目だけ確認したい場合は
 `25.artifact-required`（[labels.md](labels.md)「見た目のアーティファクト要否をIssueラベルでトグルする」）。
+
+#### 書き込み系APIを`curl`で確かめるときは`PREVIEW_MODE`を一時的に外す（#1828）
+
+**worktreeの`.env.local`には`PREVIEW_MODE=true`が入っている**（本体チェックアウトからコピーされる）。
+このとき`POST`・`PATCH`・`DELETE`のAPIは中身を実行せず`{"error":"preview_mode_forbidden"}`（403）を
+返すため、**書き込み系の経路は「認証は通ったのに何も起きない」形で確かめ損なう。**
+
+- 外すときは`.env.local`を書き換えて開発サーバーを起こし直す。**`PREVIEW_MODE=false pnpm dev`のように
+  プロセス環境変数で上書きしても効かない**（`next dev`は`.env.local`を読み直して上書きする）
+- **確かめ終えたら必ず戻す。** 開発サーバーは実データのGitHubトークンを持ちうるため、
+  塞いだままにしておく方が既定として安全
+- ダミーデータ（`pnpm db:seed:dev`）だけを相手にしている間は、外しても書き込み先は開発DBに閉じる
 
 ### 認証の背後にある画面をコマンドだけで確かめる（#1656）
 
@@ -1368,6 +1417,27 @@ Issue #<番号>「<Issueのタイトル>」のセッションを再開しまし�
 ```bash
 tmux attach -t <リポジトリ名>-issue-<番号>
 ```
+
+### 信頼確認はリポジトリにつき1回。先に答えておけば止まらない（#1838）
+
+信頼は**worktreeのパスではなく本体チェックアウトのパス**へ記録される（実測: `~/.claude.json`の
+`projects`に載っているのは本体チェックアウトと非gitのディレクトリだけで、約100件の会話履歴が
+あるworktreeは1件も無い）。したがって、そのリポジトリで**一度答えれば以後は聞かれない**。
+
+```bash
+cd ~/apps/<repo> && claude   # 「Yes, I trust this folder」を選び、/exit で抜ける
+```
+
+新しいリポジトリを対象に加えるときの手順に入れてある
+（[generic-launcher.md](generic-launcher.md)「対象リポジトリを増やす」）。飛ばしたまま起動しても
+**worktreeは作られない**。`start-local-session.sh`・`generic-start-issue.sh`が起動前に
+`~/.claude.json`を読んで確かめ、未信頼なら上のコマンドを出して止まる
+（[scripts/lib/claude-trust.sh](../../scripts/lib/claude-trust.sh)）。
+
+**信頼確認に答える前は会話履歴が1件も作られない。** `~/.claude/projects/<cwdの名前>/`に`.jsonl`が
+できるのはセッションが始まってからで、止まったまま終えたセッションは`--continue`で引き継ぐ材料を
+残さない（`run-issue-session.sh`の再開判定はこの`.jsonl`の有無を見ている）。**信頼確認で止まった
+セッションは「再開」ではなく起こし直しになる**、と考えてよい。
 
 仕組みは[session-notify.md](session-notify.md)「セッションが始まる前は、フックでは何も
 分からない（#1465）」を参照。

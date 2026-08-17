@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
 import { getPendingDispatchAt } from "@/lib/dispatch/pending-dispatch";
+import { handleIssueClosedForDispatch } from "@/lib/dispatch/session-close";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
@@ -141,6 +142,29 @@ async function upsertIssueRow(
       where: { issueId: issue.id, name: { notIn: labelNames } },
     }),
   ]);
+
+  // closeされたら、そのIssueで走っているローカルセッションを畳む（#1518）。
+  //
+  // **OPEN→CLOSEDの遷移だけで発火させる。** 「今CLOSEDである」で判定すると、定期同期が回るたび
+  // （closedなIssueへ人が手で起こしたセッションも含めて）畳みに行ってしまう。更新前の状態を
+  // 持っているのはこの関数だけで、画面のPATCH・webhook・定期同期の3経路がここを通る。
+  //
+  // 配信順序が前後した古いペイロードは上の`githubUpdatedAt`のガードで先に返るため、
+  // 「closeされた後に届いたopenの通知」で二重に発火することはない。
+  if (existing?.state === "OPEN" && data.state === "CLOSED") {
+    // `repositoryFullName`はこの関数が持っていないので、遷移を検知したときだけ引く
+    // （呼び出し3経路のシグネチャを変えないため）。
+    const repository = await db.repository.findUnique({
+      where: { id: repositoryId },
+      select: { fullName: true },
+    });
+    if (repository) {
+      await handleIssueClosedForDispatch({
+        repositoryFullName: repository.fullName,
+        issueNumber: issue.number,
+      });
+    }
+  }
 
   return issue;
 }

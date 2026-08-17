@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
+import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 
 /** メッセージは画面にそのまま出る。長文が流れ込まないよう頭で切る */
 const MAX_MESSAGE_LENGTH = 2000;
@@ -44,7 +45,26 @@ export async function POST(request: NextRequest) {
       ? payload.tmuxSessionName.slice(0, 191)
       : null;
 
-  const result = await reportDispatchJob({ jobId, hostName, status, message, tmuxSessionName });
+  // 手作業の代行実行（#1828）の結果。**出力は末尾を残して切る**（エラーは最後に出るため）。
+  // ここに来た出力はDBに残り、ログイン必須の画面にだけ出る（GitHubにも通知にも出さない）
+  const exitCode =
+    typeof payload?.exitCode === "number" && Number.isInteger(payload.exitCode)
+      ? payload.exitCode
+      : null;
+  const output =
+    typeof payload?.output === "string" && payload.output !== ""
+      ? payload.output.slice(-MANUAL_STEP_OUTPUT_MAX_LENGTH)
+      : null;
+
+  const result = await reportDispatchJob({
+    jobId,
+    hostName,
+    status,
+    message,
+    tmuxSessionName,
+    exitCode,
+    output,
+  });
 
   if (!result.ok) {
     // `already_finished`（タイムアウト済みのジョブへ遅れて報告が届いた）はpoller側の異常では

@@ -104,9 +104,15 @@ export function ExecutionSettingsSection({
           value={autoRetryLimit}
           onChange={(e) => setAutoRetryLimit(Number(e.target.value))}
         />
+        {/*
+          この設定を読むのは`reusable-issue-dispatch.yml`のフォールバック検証ステップだけで、
+          ローカルセッション（`scripts/start-issue.sh`）は参照しない。適用先を書かないと
+          ローカル実行にも効くと読めてしまうため、対象と例外を明記する（#1808）。
+        */}
         <p className="text-xs text-muted-foreground">
-          Claude
-          Codeの実装・計画ワークフローが行き詰まって終了した場合に、自動で再実行する回数の上限です（0で無効）。全リポジトリ共通の設定です。
+          GitHub
+          Actionsの無人実行（Issueからの計画・実装）が、計画コメントもPull
+          Requestも残せずに終わった場合に、自動で再実行する回数の上限です。0で無効ですが、一過性の障害と判定した場合だけは0でも2回まで再実行します。ローカルセッションには適用されません。全リポジトリ共通の設定です。
         </p>
       </div>
 

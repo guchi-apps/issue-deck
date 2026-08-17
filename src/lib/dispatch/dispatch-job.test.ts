@@ -30,6 +30,8 @@ import {
   resolveDefaultCrossRepoQuestionHost,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
+  resolveManualStepExecutionRejection,
+  resolveManualStepHost,
   resolveScreenshotRejection,
   resolveSessionControlRejection,
   type DispatchHostView,
@@ -537,6 +539,10 @@ describe("findDispatchJobForIssue", () => {
       status: "QUEUED",
       message: null,
       instruction: null,
+      command: null,
+      manualStepLine: null,
+      exitCode: null,
+      commandOutput: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: "2026-08-14T00:00:00.000Z",
@@ -851,6 +857,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,
+      manualStepCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -909,6 +916,7 @@ describe("横断質問（#1454）", () => {
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,
+      manualStepCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1029,6 +1037,10 @@ describe("横断質問（#1454）", () => {
         status: "QUEUED",
         message: null,
         instruction: null,
+        command: null,
+        manualStepLine: null,
+        exitCode: null,
+        commandOutput: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-15T00:00:00Z",
@@ -1039,5 +1051,98 @@ describe("横断質問（#1454）", () => {
     ];
     expect(findCrossRepoQuestionJobForIssue(jobs, "guchi-apps/question", 12)?.id).toBe("question-1");
     expect(findDispatchJobForIssue(jobs, "guchi-apps/question", 12)).toBeNull();
+  });
+});
+
+/**
+ * 手作業の代行実行（#1828）の可否。**画面とAPIが同じ関数を使う**ので、押せるのに拒否される
+ * （その逆も）が生まれない。判定の**順番**にも意味がある。
+ */
+describe("resolveManualStepExecutionRejection", () => {
+  function params(overrides: Record<string, unknown> = {}) {
+    return {
+      host: { online: true, manualStepCapable: true },
+      isManualStepIssue: true,
+      isSubpcDevice: true,
+      hasCommand: true,
+      hasActiveJob: false,
+      ...overrides,
+    } as Parameters<typeof resolveManualStepExecutionRejection>[0];
+  }
+
+  it("条件が揃っていれば押せる", () => {
+    expect(resolveManualStepExecutionRejection(params())).toBeNull();
+  });
+
+  // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
+  // そもそも代行の対象外で、ホストの状態を理由に出しても直す手がかりにならない
+  it("Issue・手順の理由をホストの理由より先に出す", () => {
+    expect(
+      resolveManualStepExecutionRejection(params({ isSubpcDevice: false, host: null })),
+    ).toBe("device_not_subpc");
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ hasCommand: false, host: { online: false, manualStepCapable: null } }),
+      ),
+    ).toBe("no_command");
+  });
+
+  it("手作業Issueでなければ代行しない", () => {
+    expect(resolveManualStepExecutionRejection(params({ isManualStepIssue: false }))).toBe(
+      "not_manual_step",
+    );
+  });
+
+  // 未申告（古いpoller）は「できない」として扱う。配ると未知の種別として失敗になる
+  it("申告していないpollerには押させない", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ host: { online: true, manualStepCapable: null } }),
+      ),
+    ).toBe("manual_step_unsupported");
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ host: { online: false, manualStepCapable: true } }),
+      ),
+    ).toBe("host_offline");
+    expect(resolveManualStepExecutionRejection(params({ host: null }))).toBe("host_unknown");
+  });
+
+  // activeKeyはIssue単位。順番に実行する前提の手順が入れ替わらないようにする
+  it("同じIssueに未処理の代行実行があれば押させない", () => {
+    expect(resolveManualStepExecutionRejection(params({ hasActiveJob: true }))).toBe(
+      "already_queued",
+    );
+  });
+});
+
+/**
+ * 代行実行の実行先（#1828）。**実行できるリポジトリは見ない**——代行するのはホスト上の
+ * コマンドで、worktreeを作るわけではない。
+ */
+describe("resolveManualStepHost", () => {
+  function hostFor(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      online: true,
+      manualStepCapable: true,
+      repositories: [],
+      ...overrides,
+    } as DispatchHostView;
+  }
+
+  it("対応していて応答しているホストを選ぶ", () => {
+    const hosts = [
+      hostFor({ name: "oldpc", manualStepCapable: null }),
+      hostFor({ name: "subpc" }),
+    ];
+    expect(resolveManualStepHost(hosts)?.name).toBe("subpc");
+  });
+
+  // 押せない理由（未対応・応答なし）を出すのに相手の名前が要る
+  it("対応しているホストが無ければ先頭を返す", () => {
+    const hosts = [hostFor({ name: "oldpc", manualStepCapable: null })];
+    expect(resolveManualStepHost(hosts)?.name).toBe("oldpc");
+    expect(resolveManualStepHost([])).toBeNull();
   });
 });

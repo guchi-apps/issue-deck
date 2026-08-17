@@ -66,6 +66,30 @@ describe("applyIssueFilters", () => {
     expect(result.map((issue) => issue.id)).toEqual(["1"]);
   });
 
+  // #1788: AIあいまい検索は自由語の部分一致の代わりにid集合で絞る
+  it("aiMatchedIdsがあるときは、文字列一致しないIssueでもAIが選んだものを残す", () => {
+    const issues = [makeIssue({ id: "1", title: "foo" }), makeIssue({ id: "2", title: "bar" })];
+    const result = applyIssueFilters(issues, {
+      ...DEFAULT_FILTERS,
+      q: "存在しない語",
+      aiMatchedIds: new Set(["2"]),
+    });
+    expect(result.map((issue) => issue.id)).toEqual(["2"]);
+  });
+
+  it("aiMatchedIdsとlabel:トークンは併用できる", () => {
+    const issues = [
+      makeIssue({ id: "1", labels: [{ name: "bug", color: "red", description: null }] }),
+      makeIssue({ id: "2", labels: [] }),
+    ];
+    const result = applyIssueFilters(issues, {
+      ...DEFAULT_FILTERS,
+      q: "label:bug 重い",
+      aiMatchedIds: new Set(["1", "2"]),
+    });
+    expect(result.map((issue) => issue.id)).toEqual(["1"]);
+  });
+
   it("reposが一致しないIssueを除外する", () => {
     const issues = [
       makeIssue({ id: "1", repositoryFullName: "owner/repo-a" }),
@@ -822,6 +846,8 @@ describe("time-dependent stats", () => {
       for (const view of ["check-user", "manual-step", "question"] as const) {
         expect(resolveFiltersForView(filters, view)).toEqual({
           q: "",
+          // キーワードを外すビューでは、AI検索の絞り込み（#1788）も一緒に外す
+          aiMatchedIds: null,
           repos: [],
           state: "open",
           labels: [],

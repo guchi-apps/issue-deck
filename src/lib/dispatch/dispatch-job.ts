@@ -47,7 +47,8 @@ export type DispatchJobKind =
   | "KILL"
   | "QUESTION"
   | "INSTRUCTION"
-  | "CROSS_REPO_QUESTION";
+  | "CROSS_REPO_QUESTION"
+  | "MANUAL_STEP";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -93,7 +94,24 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "question") return "QUESTION";
   if (value === "instruction") return "INSTRUCTION";
   if (value === "cross_repo_question") return "CROSS_REPO_QUESTION";
+  if (value === "manual_step") return "MANUAL_STEP";
   return null;
+}
+
+/**
+ * セッションを立てず、tmuxにも触らないジョブ（#1828）。いまのところ手作業の代行実行だけ。
+ *
+ * **払い出しは制御ジョブと同じ「枠外」**（`SESSION_LAUNCH_JOB_KINDS`に入れない）で、
+ * `QUEUED`のまま5分で`TIMEOUT`にするのも制御ジョブと揃える——**待たせるほど危険になる**
+ * 性質が同じだから（何時間も後に届いたコマンドは、そのときのホストの状態に対する実行になる）。
+ *
+ * 一方で`SESSION_CONTROL_JOB_KINDS`には**入れない**。あちらはpollerがセッション名を組み立て直して
+ * 突き合わせる種別の集合で、こちらは操作する相手がセッションではない。
+ */
+export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP"] as const;
+
+export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
+  return (OUT_OF_BAND_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
 /**
@@ -183,6 +201,24 @@ export type DispatchJobView = {
    * 見えないと、送り直してよいのか（同じ指示が二重に届かないか）判断できない。
    */
   instruction: string | null;
+  /**
+   * 代行実行したコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
+   *
+   * **サーバーが手作業Issueの本文から抽出し直したものが入る。** 画面はこれを「承認したものと
+   * 同じか」の確認に使えるが、実行そのものはこの値で行われる（画面から届いた文字列は照合専用）。
+   */
+  command: string | null;
+  /** 代行実行した手順の行番号（#1828）。画面がジョブと手順を対応付ける */
+  manualStepLine: number | null;
+  /** 代行実行の終了コード（#1828）。`0`のときだけ画面が手順のチェックを付ける */
+  exitCode: number | null;
+  /**
+   * 代行実行の出力（#1828。末尾を残して切ったもの）。
+   *
+   * **シークレットが混ざりうるため、ログイン必須のこの画面より外へは出さない**
+   * （GitHubのIssueにも通知にも載せない）。
+   */
+  commandOutput: string | null;
   tmuxSessionName: string | null;
   /**
    * 順番待ちの中で先に払い出す度合い（#1541。大きいほど先）。
@@ -229,6 +265,14 @@ export type DispatchHostView = {
    * 配ると質問が必ず失われる。
    */
   crossRepoQuestionCapable: boolean | null;
+  /**
+   * 手作業アシスタントからの代行実行（#1828）を実行できるか。**`null`（未申告）は「できない」として
+   * 扱う**（`sessionControlCapable`と同じ）。
+   *
+   * **`instructionCapable`とも分けて持つ。** あちらは走っているセッションの入力欄へ1行流すだけで、
+   * こちらは**シェルでコマンドを実行する**。同じ「文字列を届ける」でも、届いた先で起きることが違う。
+   */
+  manualStepCapable: boolean | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -516,11 +560,92 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "質問";
     case "CROSS_REPO_QUESTION":
       return "横断質問";
+    case "MANUAL_STEP":
+      return "手作業の代行";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
       return SESSION_CONTROL_LABELS[kind].action;
   }
+}
+
+/**
+ * 手作業の代行実行（#1828）を押せない理由。**画面にそのまま出す前提**。
+ *
+ * 起動側（`DispatchEnqueueRejection`）・制御ジョブ側（`SessionControlRejection`）と同じ立場のもので、
+ * 判定は画面とAPIで同じ関数（`resolveManualStepExecutionRejection`）を使う。
+ */
+export type ManualStepExecutionRejection =
+  | "not_manual_step"
+  | "device_not_subpc"
+  | "no_command"
+  | "host_unknown"
+  | "host_offline"
+  | "manual_step_unsupported"
+  | "already_queued"
+  | "body_changed";
+
+export function describeManualStepExecutionRejection(
+  rejection: ManualStepExecutionRejection,
+  context: { hostName: string; device?: string | null },
+): string {
+  switch (rejection) {
+    case "not_manual_step":
+      return "この Issue は手作業Issue（`71.manual-step`）ではないため代行できません。";
+    case "device_not_subpc":
+      // **どこで実行する手作業なのかまで書く。** VPS・1Password・GitHub App・ブラウザでの設定は
+      // issue-deckから到達できず、代行できるようになる見込みも無い（「更新すれば押せる」ではない）
+      return context.device
+        ? `この手作業は${context.device}で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。`
+        : "この手作業はサブPC以外で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。";
+    case "no_command":
+      // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
+      // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
+      return "この手順は代行できません。実行するコマンドのブロックがちょうど1つ書かれている手順だけを代行します。";
+    case "host_unknown":
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "manual_step_unsupported":
+      return `${formatDispatchHostName(context.hostName)} のpollerが手作業の代行実行に対応していません（更新してから押せるようになります）。`;
+    case "already_queued":
+      return "この手作業には未処理の代行実行が既にあります。";
+    case "body_changed":
+      // **押した後にしか出ない。** 承認した内容とサーバーが読み直した本文が食い違った場合で、
+      // 実行はしていない（画面を更新して、変わった内容を見てから押し直してもらう）
+      return "本文が変わったため実行しませんでした。画面を更新して、実行する内容をもう一度確かめてください。";
+  }
+}
+
+/**
+ * 手作業の代行実行を押せるか、**押される前に**判定する（#1828）。
+ *
+ * 判定の並びと文言は`enqueueManualStepJob`（`jobs.ts`）と同じものを使う。片方だけが持つと
+ * 「押せるのにAPIが拒否する」（その逆も）が生まれるのは、起動側（#1180）・制御ジョブ（#1332）と同じ。
+ *
+ * **`body_changed`はここでは返さない。** 画面が見ている本文＝人が承認した本文なので、
+ * ずれを検出できるのはサーバーだけ（押した後にしか分からない）。
+ */
+export function resolveManualStepExecutionRejection(params: {
+  host: Pick<DispatchHostView, "online" | "manualStepCapable"> | null | undefined;
+  /** 対象が手作業Issue（`71.manual-step`）か */
+  isManualStepIssue: boolean;
+  /** `## 前提条件`の「実行するデバイス」がサブPCか */
+  isSubpcDevice: boolean;
+  /** その手順から実行するコマンドを1つだけ取り出せたか */
+  hasCommand: boolean;
+  hasActiveJob: boolean;
+}): ManualStepExecutionRejection | null {
+  // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
+  // そもそも代行の対象外で、ホストの状態を理由に出しても直す手がかりにならない
+  if (!params.isManualStepIssue) return "not_manual_step";
+  if (!params.isSubpcDevice) return "device_not_subpc";
+  if (!params.hasCommand) return "no_command";
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.manualStepCapable !== true) return "manual_step_unsupported";
+  if (params.hasActiveJob) return "already_queued";
+  return null;
 }
 
 /**
@@ -780,6 +905,7 @@ export function describeDispatchJobStatus(
 } {
   if (kind === "QUESTION") return describeQuestionJobStatus(status);
   if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
+  if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -867,6 +993,42 @@ function describeCrossRepoQuestionJobStatus(status: DispatchJobStatus): {
       return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":
       return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * 手作業の代行実行（#1828）の状態の見せ方。
+ *
+ * **`succeeded`は「コマンドが終了コード0で終わった」まで**。ここだけは他の種別と違い、
+ * ジョブの成否がやりたかったこと（手順の実行）の成否と一致する——起動ジョブのように
+ * 「その先はProject Statusが持つ」という続きが無い。
+ *
+ * **押してから届くまで（`QUEUED`）を黙らない。** pull型なので最大でポーリング間隔
+ * （既定30秒）は何も起きず、そこを黙っていると押せていないように見える（#1332と同じ）。
+ */
+function describeManualStepJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "サブPCへ送信しました", tone: "pending" };
+    case "CLAIMED":
+      return { label: "サブPCが受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "実行中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "実行しました", tone: "success" };
+    case "FAILED":
+      return { label: "失敗しました", tone: "error" };
+    // pollerが実行しなかった場合（本文と照合できなかった・`gh`が使えない）。**何も実行して
+    // いない**ので、失敗と同じ赤にはしない。理由は`message`に入る
+    case "SKIPPED":
+      return { label: "実行を見送りました", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "サブPCへ届きませんでした", tone: "error" };
     case "CANCELED":
       return { label: "取り消し済み", tone: "muted" };
   }
@@ -964,6 +1126,42 @@ export function findCrossRepoQuestionJobForIssue(
   );
 }
 
+/**
+ * ある手順について画面に出す代行実行ジョブ（#1828）を1件選ぶ。
+ *
+ * **手順の行番号まで一致するものに限る。** 同じIssueの別の手順の結果を、いま開いている手順の
+ * 結果として出すと、実行していないコマンドが成功したように見える。
+ *
+ * `manualStepLine`を持たない行（古いジョブ）はどの手順にも一致しない。
+ */
+export function findManualStepJobForStep(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+  stepLine: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "MANUAL_STEP" && job.manualStepLine === stepLine,
+  );
+}
+
+/** そのIssueに未処理の代行実行があるか（`activeKey`はIssue単位なので、手順で分けない） */
+export function findManualStepJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "MANUAL_STEP",
+  );
+}
+
 function findJobForIssue(
   jobs: readonly DispatchJobView[],
   repositoryFullName: string,
@@ -1009,6 +1207,22 @@ export function resolveDefaultDispatchHost(params: {
         }) === null,
     )?.name ?? null
   );
+}
+
+/**
+ * 手作業の代行実行（#1828）を行うホストを決める。
+ *
+ * **実行できるリポジトリ（`repositories`）は見ない。** 代行するのはホスト上のコマンドで、
+ * worktreeを作るわけではないため、対象の手作業Issueがどのリポジトリのものかは関係がない
+ * （実際、`~/apps/issue-deck`を更新する手作業は他リポジトリのIssueとしても起票されうる）。
+ *
+ * 対応しているホストが無ければ**先頭のホストを返す**。押せない理由（未対応・応答なし）を
+ * 出すのに相手の名前が要るためで、`null`になるのは申告が1件も無いときだけ。
+ */
+export function resolveManualStepHost(
+  hosts: readonly DispatchHostView[],
+): DispatchHostView | null {
+  return hosts.find((host) => host.online && host.manualStepCapable === true) ?? hosts[0] ?? null;
 }
 
 /**

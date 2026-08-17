@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Archive, CircleSlash, FolderGit2, Lock, Search, Star } from "lucide-react";
+import { Archive, CircleSlash, FolderGit2, Lock, Search, Star, X } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
@@ -90,10 +90,22 @@ export function MobileReposScreen({
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="リポジトリを検索..."
-            className="pl-8"
+            className="pr-9 pl-8"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          {/* 入力を消す導線（#1788）。PCの検索欄と同じ位置・同じアイコンで揃える。
+              指で押す場所なので、当たり判定はPCより少し大きめにとる */}
+          {query !== "" && (
+            <button
+              type="button"
+              className="absolute top-1/2 right-1 -translate-y-1/2 rounded-sm p-1.5 text-muted-foreground active:bg-accent"
+              onClick={() => setQuery("")}
+              aria-label="検索をクリア"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
       </div>
 

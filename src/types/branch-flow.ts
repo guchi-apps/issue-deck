@@ -123,6 +123,25 @@ export type BranchFlowIssueRef = {
 };
 
 /**
+ * Issueの優先度（`80.Priority: High` / `89.Priority: low`）。付いていなければnull（#1704）。
+ *
+ * ブランチ画面が使うのは**実装予定の並び順と1行の表示だけ**なので、ラベル名から解決した結果を
+ * この2値へ潰して持つ。優先度ラベルは`11.local`と番号帯が重ならないよう80・89番台にリネーム済み。
+ */
+export type BranchFlowIssuePriority = "high" | "low";
+
+/**
+ * まだブランチが無い「実装予定」のIssue（#1704）。
+ *
+ * ブランチ画面のレーンはPRのheadブランチと実在する作業ブランチの和集合で作るため、
+ * **着手前のIssueは画面のどこにも現れない。** 「次に何が流れてくるか」を同じ画面で見せるために、
+ * レーンにならないIssueをそのまま並べる。材料は既存のIssueキャッシュだけで、追加の取得は無い。
+ */
+export type BranchFlowPlannedIssue = BranchFlowIssueRef & {
+  priority: BranchFlowIssuePriority | null;
+};
+
+/**
  * マージ済みの作業が本番（main）まで届いているか（#1455）。
  *
  * - `released` … develop→mainのリリースPRに乗ってmainへ入った。`version`はそのリリースの版
@@ -228,6 +247,13 @@ export type BranchFlowRepositorySummary = {
    */
   releaseInProgress: boolean;
   /**
+   * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に「予定◯」として出す。
+   *
+   * **手が要るものではない**ので、初回に自動で開く条件（`needsAttention`）には加えない。
+   * 開かずに溜まり具合だけ分かればよい、というのがこの数字の役目。
+   */
+  plannedIssueCount: number;
+  /**
    * 直近のリリースの本番デプロイの状態（#1579）。畳んだ1行に「デプロイ中」「デプロイ失敗」を
    * 出すために持つ。**mainへマージした後もここが動いている間はまだ本番へ出ていない。**
    */
@@ -278,6 +304,14 @@ export type BranchFlowRepository = {
    * 「関連が付いていない」ことを隠さないために出す。
    */
   orphanIssues: BranchFlowIssueRef[];
+  /**
+   * これから着手するIssue（#1704）。進捗が`ready`・`planning`で、まだどのレーンにも現れていないもの。
+   *
+   * **`orphanIssues`とは別物。** あちらは「実装中なのにブランチが見つからない」という異常を隠さない
+   * ための枠で、こちらは正常な上流（まだブランチが無くて当然のIssue）。並びは
+   * 計画検討中 → 未着手、同じ進捗では優先度の高い順、最後に番号の新しい順。
+   */
+  plannedIssues: BranchFlowPlannedIssue[];
   /** ブランチ状況を取得できたか。falseのときはPRだけから組み立てている */
   branchesLoaded: boolean;
 };
