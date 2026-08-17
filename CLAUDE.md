@@ -133,6 +133,8 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 6. `Release` — mainへPR作成・マージ中
 7. `Done` — mainへマージ完了。**この時点でissueをclose**する
 
+これとは別に、**本流から外れた終端`Closed`（対応終了）がある**（#1856）。他ブランチ・他PRへ反映して完了した、「すでに実装済み・対応不要」と判断して止まった、成果が別リポジトリのPRや`71.manual-step` Issueの起票だった、重複・見送りでcloseした——といった**PRを作らずに終わったIssue**は、`issue-<番号>`ブランチをheadとするPRが無いため`Develop PR`以降を誰も報告せず、`Implementation`に取り残される。そこでissue-deckがIssueのcloseを受け取った時点で、Statusが`Planning`・`Implementation`・`Develop PR`のときに限り`Closed`へ送る。`Done`（本番反映済）とは別の状態にしてあるので、リリース関連の一覧に混ざることはない（設計は[docs/progress-status-architecture.md](docs/progress-status-architecture.md)「closeは終端`Closed`への遷移として扱う」）。
+
 Statusを進めるのはissue-deckだけで、各ワークフロー・ローカルセッションは進捗報告API（`POST /api/progress`）へ報告する。**`gh issue edit`で進捗を付け替えることはできない。** 人が動かす場合はカンバンのカードをドラッグするか、issue-deckの画面のボタン、またはIssue詳細の右パネル（プロパティ）の「進捗」セレクトを使う。**右パネルのセレクトは状態を書き換えるだけで実行を起動しない**（起動を伴うのはカンバンのドラッグと「実装を開始」ボタン）。
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。**誰がいつ付け、いつ外すのかの一覧は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「`00.check-user`が付く・外れるタイミング」を参照**（無人実行・ローカル実行・画面操作の3経路に分かれているため、ここを正とする）。**付けるときは、その理由を表す`01.check-*`ラベル（`01.check-plan`・`01.check-input`・`01.check-merge`・`01.check-blocked`・`01.check-answered`）も1枚あわせて付ける**（#1490。同じ節を参照）。理由ラベルは`00.check-user`とのANDでしか読まれず、**そのリポジトリに定義が無ければ付けなくてよい**。

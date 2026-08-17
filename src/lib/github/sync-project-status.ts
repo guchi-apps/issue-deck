@@ -8,7 +8,11 @@ import {
   fetchProjectStatusField,
   updateProjectItemStatus,
 } from "@/lib/github/projects-api";
-import { getProgressStatusDef } from "@/lib/issue-progress";
+import {
+  CLOSE_TERMINAL_SOURCE_STATUSES,
+  getProgressStatusDef,
+  matchProjectStatus,
+} from "@/lib/issue-progress";
 
 export type ProjectStatusSyncResult = {
   /** Statusを反映したIssueの件数 */
@@ -179,4 +183,81 @@ export async function addMissingProjectItems(
   }
 
   return { added, skipped: false };
+}
+
+export type StrandedIssueCleanupResult = {
+  /** 終端（`Closed`）へ寄せたIssueの件数 */
+  closed: number;
+  /** Projectを使わない設定、またはProjectに`Closed`の選択肢が無くてスキップしたか */
+  skipped: boolean;
+};
+
+/**
+ * closedなのにStatusが`Planning`・`Implementation`・`Develop PR`に取り残されているIssueを、
+ * 終端（`Closed`）へまとめて寄せる（#1856）。
+ *
+ * 通常はIssueのcloseを受けたWebhook（`app/api/webhooks/github/route.ts`）がその場で遷移させる。
+ * こちらは**Webhookが届く前から溜まっていた既存分の回収**と、**取りこぼしへの恒久的な安全網**を
+ * 兼ねる。`syncProjectStatuses`・`addMissingProjectItems`と同じく再同期から呼ばれる。
+ *
+ * 判定に必要な「Issueがclosedか」と「今のStatus」は`fetchProjectItems`が返すスナップショットに
+ * 両方入っているため、盤面を1回読むだけで済み、Issueごとの追加の問い合わせは要らない。
+ *
+ * @param installationId GitHub Appのインストールid（Projectの所有org側のもの）
+ */
+export async function closeStrandedProjectItems(
+  installationId: number,
+): Promise<StrandedIssueCleanupResult> {
+  const location = getProjectLocation();
+  if (!location) return { closed: 0, skipped: true };
+
+  const token = await getInstallationToken(installationId);
+  const project = await fetchProjectStatusField(location.owner, location.number, token);
+  if (!project) return { closed: 0, skipped: true };
+
+  const terminalStatus = getProgressStatusDef("closed").projectStatus;
+  const terminalOptionId = project.optionIdByName.get(terminalStatus);
+  // Project側に`Closed`の選択肢を足すまでは何もしない。ここで別のStatusで代用すると
+  // 意味の違う状態が混ざるため、選択肢が現れるまで待つ（進捗はそのまま残る）
+  if (!terminalOptionId) return { closed: 0, skipped: true };
+
+  const items = await fetchProjectItems(location.owner, location.number, token);
+
+  const repositories = await db.repository.findMany({
+    where: { installation: { installationId } },
+    select: { id: true, githubRepositoryId: true },
+  });
+  const repositoryIdByGithubId = new Map(
+    repositories.map((repository) => [repository.githubRepositoryId, repository.id]),
+  );
+
+  let closed = 0;
+  for (const item of items) {
+    if (item.issueOpen) continue;
+    if (!item.status) continue;
+    const current = matchProjectStatus(item.status);
+    if (!current || !CLOSE_TERMINAL_SOURCE_STATUSES.includes(current)) continue;
+
+    await updateProjectItemStatus(
+      {
+        projectId: project.projectId,
+        itemId: item.itemId,
+        fieldId: project.fieldId,
+        optionId: terminalOptionId,
+      },
+      token,
+    );
+    closed += 1;
+
+    // `reportProgressStatus`と同じく、Projectを書いたらDBのキャッシュも揃える。
+    // issue-deckが接続していないリポジトリのIssueは対象外（Statusだけ直して終わる）
+    const repositoryId = repositoryIdByGithubId.get(item.repositoryDatabaseId);
+    if (!repositoryId) continue;
+    await db.issue.updateMany({
+      where: { repositoryId, number: item.issueNumber },
+      data: { projectStatus: terminalStatus, projectItemId: item.itemId },
+    });
+  }
+
+  return { closed, skipped: false };
 }

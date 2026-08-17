@@ -43,10 +43,16 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 | Develop | `develop` | `05.develop` |
 | Release | `release` | `07.m:marge` |
 | Done | `done` | `09.main` |
+| Closed | `closed` | （対応する進捗ラベルは無い。#1856で追加） |
 
 対応表の実体は[`src/lib/issue-progress.ts`](../src/lib/issue-progress.ts)の`PROGRESS_STATUSES`
 にあり、Status名・表示名・アイコンを1箇所に集約している。**ラベル名の列は履歴であり、
 コード上には存在しない**（Phase 5・#1010で削除した）。
+
+**`Closed`（対応終了）だけは`Ready` → `Done`の本流から外れた終端**で、PRを経ずに終わった
+Issueのcloseで入る（後述「closeは終端`Closed`への遷移として扱う」）。ステップ表示
+（`ADVANCED_PROGRESS_STATUSES`／`WORKFLOW_STEPS`）には含めない。含めると通常のIssueの表示まで
+「実装中（2/7）」のように分母が増え、到達し得ない段が常に1つ残るため。
 
 ### 盤面へ載せるのもissue-deckの仕事
 
@@ -302,9 +308,86 @@ Statusは`projects_v2_item` Webhookと再同期（[`sync-project-status.ts`](../
 | developへマージ | `reusable-issue-labels.yml`（PRマージ・sweep） | `develop` |
 | main向けPRオープン | `reusable-issue-labels.yml` | `release` |
 | mainへマージ | `reusable-issue-labels.yml` | `done` |
+| Issueのクローズ | **issue-deck自身**（`issues` Webhook。#1856） | `closed` |
 
-**Issueのクローズ（`cleanup-on-close`）は報告しない。** ここで`ready`を報告すると、
-`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。
+**ワークフローの`cleanup-on-close`は進捗を報告しない。** ここで`ready`を報告すると、
+`Done`のIssueを人が閉じ直しただけで盤面が巻き戻る。closeを終端への遷移として扱うのは
+issue-deck側で、次節のとおり遷移元を限定している。
+
+### closeは終端`Closed`への遷移として扱う（#1856）
+
+**`issue-<番号>`ブランチをheadとするPRが存在しない限り、`develop-pr`以降は誰も報告しない。**
+上の表のとおり`develop-pr`・`develop`を報告するのは`reusable-issue-labels.yml`のPRオープン・
+PRマージ・sweepだけで、どれも対象Issueをブランチ名から特定するためである。したがって
+**PRを作らずに完了したIssueは`Implementation`に取り残され、自動では二度と進まない。**
+
+PRを作らずに終わるのは例外ではなく、いずれも各リポジトリの実装プロンプトが正しい振る舞いとして
+指示している経路である。
+
+- 他ブランチ・他PRへ反映して完了した（コンフリクト解消など）
+- 「すでに実装済み・対応不要」と判断して止まった（ファイルを変更せずPRも作らない）
+- 成果が別リポジトリのPR、または`71.manual-step` Issueの起票だった
+- 重複・見送りでcloseした
+
+**closeは上のどの経路でも必ず起きる唯一確実な完了のシグナル**なので、これを終端への遷移として
+扱う。実体は[`route.ts`](../src/app/api/webhooks/github/route.ts)の`closeStrandedProgress`。
+
+#### 遷移先に`Done`を使わない
+
+`Done`は「mainへマージ完了」で、リリース関連の表示と一括遷移がその意味に依存している。
+特に「直近本番に反映した」ビューは、`filterLatestReleaseIssues`（[`issue-stats.ts`](../src/lib/issue-stats.ts)）が
+**「そのリポジトリで最後にcloseされた`Done`のIssue」を基準に一定時間の窓を取る**作りのため、
+リリースと無関係な手動closeが`Done`に混ざると基準を奪い、**本当のリリース分が一覧から消える。**
+専用の終端`Closed`を足すことでこれを避けている。
+
+#### 遷移元は`Planning`・`Implementation`・`Develop PR`に限る
+
+定数は`CLOSE_TERMINAL_SOURCE_STATUSES`（[`issue-progress.ts`](../src/lib/issue-progress.ts)）。
+
+- **`Develop`・`Release`は含めない。** developまで入って本番へ出ていない変更を抱えており、
+  終端へ送ると「終わった」という嘘になる
+- **`Ready`は含めない。** 未着手のまま終わっただけで、取り残されているわけではない
+- **`Done`は含めない。** これにより「`Done`まで進んだIssueを人が閉じ直しても盤面が巻き戻らない」
+  という現行の性質が構造的に保たれる
+
+#### ワークフローではなくissue-deckのWebhookに置く
+
+- 「Projectへの読み書きはissue-deckに一本化する」という中核の判断に沿う
+- `cleanup-on-close`へ入れると、`workflows/vN`タグを配布先リポジトリすべてへ配り直すまで効かない。
+  issue-deck側なら接続済みの全リポジトリへ同時に効く
+- **`GITHUB_TOKEN`起点のcloseでもApp宛のWebhookは届く**（「他のワークフローを起動しない」という
+  GitHubの仕様はActionsの中だけの話で、Webhookの配信には及ばない）。そのため`main-pr-merged`が
+  `gh issue close`した場合もここへ来るが、そちらは`Develop`・`Release`からのcloseなので対象外に
+  なり、`done`の報告と競合しない
+
+#### 判定材料はProjectの実物
+
+`reportProgressStatus`の`onlyFrom`が、Projectから読んだ現在のStatusと突き合わせてから書く。
+Webhook側でDBの`projectStatus`も見ているが、あれは無関係なcloseでGraphQLを叩かないための
+足切りにすぎない。**正しさは`onlyFrom`側が担保する**（報告の正しさをDBの鮮度に依存させない、
+というこのAPI全体の方針と同じ）。
+
+なお`onlyFrom`を指定した報告では、**盤面に載っていないIssueを載せない。** 載せると、closeされた
+だけのIssueで盤面が埋まる（`addMissingProjectItems`がclosedなIssueを追加しないのと同じ理由）。
+
+#### 既存の取り残しと取りこぼしの回収
+
+`closeStrandedProjectItems`（[`sync-project-status.ts`](../src/lib/github/sync-project-status.ts)）が
+画面の再同期から呼ばれ、closedなのに上の3状態に残っているIssueをまとめて`Closed`へ寄せる。
+判定に必要な「Issueがclosedか」と「今のStatus」は`fetchProjectItems`のスナップショットに
+両方入っているため、盤面を1回読むだけで済む。
+
+#### `Closed`の選択肢を足すまでは何も起きない
+
+Project側のStatusフィールドに`Closed`が無い間は、報告が`unknown_status`、再同期が`skipped`で
+返って**何も書かない**（別のStatusで代用はしない）。壊れはしないが、効き始めるのは選択肢を
+足してからになる。
+
+#### `reopened`では何も戻さない
+
+戻す先（`Implementation`だったのか`Ready`だったのか）を復元する材料が無く、推測で書くと人が
+意図して置いた状態を壊す。必要なら画面右パネルの進捗セレクトから選ぶ（`PROGRESS_STATUSES`を
+そのまま描画しているため、「対応終了」も手で選べる）。
 
 > **Phase 5（#1010）で削除した経路**: Phase 2には「手で付け替えたラベルもStatusへ反映する」
 > （#1042。`issues` Webhookの`labeled`・`unlabeled`起点）と「再同期がラベルを正としてStatusへ

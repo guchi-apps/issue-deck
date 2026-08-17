@@ -1,4 +1,5 @@
 import {
+  Archive,
   ClipboardList,
   Code2,
   GitMerge,
@@ -28,7 +29,8 @@ export type ProgressStatusKey =
   | "develop-pr"
   | "develop"
   | "release"
-  | "done";
+  | "done"
+  | "closed";
 
 export type ProgressStatusDef = {
   key: ProgressStatusKey;
@@ -50,6 +52,11 @@ export type ProgressStatusDef = {
 /**
  * 進捗状態の遷移順（CLAUDE.md参照）。Status名・表示名の対応をここに一元化する。
  * 配列の順序がそのままカンバンとステップ表示の並び順になる。
+ *
+ * **`closed`（対応終了）だけは`ready` → `done`の本流から外れた終端**で、PRを経ずに終わった
+ * Issueのclose時に入る（#1856。`CLOSE_TERMINAL_SOURCE_STATUSES`）。`done`（本番反映済）と
+ * 分けているのは、`done`が「mainへマージ完了」を意味し、リリース関連のビューと一括遷移が
+ * その意味に依存しているため。並びとしてはカンバンの最右になるよう末尾へ置く。
  */
 export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
@@ -101,12 +108,50 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
     icon: Rocket,
     active: false,
   },
+  {
+    key: "closed",
+    projectStatus: "Closed",
+    label: "対応終了",
+    icon: Archive,
+    active: false,
+  },
 ];
 
-/** 未着手（`ready`）を除く、進捗が動いている状態。ステップ表示の対象になる */
+/**
+ * `ready`（未着手）と`closed`（対応終了）を除く、遷移順に並んだ6状態。
+ * ステップ表示（`WORKFLOW_STEPS`）の母集団になる。
+ *
+ * **`closed`を含めない。** ステップ表示は`Planning` → `Done`の一本道を進捗として見せるもので、
+ * そこへ本流から外れた終端を足すと、通常のIssueの表示まで「実装中（2/7）」のように
+ * 分母が増え、到達し得ない段が1つ常に残る。`closed`のIssueはステップ表示自体を出さない
+ * （`getWorkflowStepIndex`がnullを返す）。途中のどこまで進んでいたかは、対応が終わった
+ * Issueにとって意味を持たないため。
+ */
 export const ADVANCED_PROGRESS_STATUSES: readonly ProgressStatusDef[] = PROGRESS_STATUSES.filter(
-  (status) => status.key !== "ready",
+  (status) => status.key !== "ready" && status.key !== "closed",
 );
+
+/**
+ * Issueがcloseされたとき、終端（`closed`）へ送る対象になる進捗（#1856）。
+ *
+ * **PRを作らずに終わるIssueは例外ではない。** 他ブランチ・他PRへ反映して完了した場合、
+ * 「すでに実装済み・対応不要」と判断して止まった場合、成果が別リポジトリのPRや
+ * `71.manual-step` Issueの起票だった場合、重複・見送りでcloseした場合がこれにあたる。
+ * `develop-pr`以降を報告するのは`reusable-issue-labels.yml`のPRオープン・PRマージ・sweepだけで、
+ * どれも対象Issueをブランチ名`issue-<番号>`から特定するため、**そのブランチをheadとするPRが
+ * 存在しない限り誰も報告せず**、Statusが実装中の列に残り続ける。closeは上のどの経路でも必ず
+ * 起きる唯一確実な完了のシグナルなので、これを終端への遷移として扱う。
+ *
+ * **`develop`・`release`は含めない。** これらはdevelopまで入って本番へ出ていない変更を
+ * 抱えており、終端へ送ると「終わった」という嘘になる（closedなIssueがリリースの一括遷移から
+ * 漏れる問題は#1348で別途扱っている）。**`ready`も含めない。** 未着手のまま終わっただけで、
+ * 取り残されているわけではない。
+ */
+export const CLOSE_TERMINAL_SOURCE_STATUSES: readonly ProgressStatusKey[] = [
+  "planning",
+  "implementation",
+  "develop-pr",
+];
 
 /**
  * 進捗状態の判定に必要な最小限のIssue。表示用のIssue型とDBの行のどちらからでも渡せる。

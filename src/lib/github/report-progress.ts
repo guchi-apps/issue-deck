@@ -8,7 +8,11 @@ import {
   updateProjectItemStatus,
   type ProjectStatusField,
 } from "@/lib/github/projects-api";
-import { getProgressStatusDef, type ProgressStatusKey } from "@/lib/issue-progress";
+import {
+  getProgressStatusDef,
+  matchProjectStatus,
+  type ProgressStatusKey,
+} from "@/lib/issue-progress";
 import type { ProgressReportFailureReason } from "@/lib/progress-report-message";
 
 /**
@@ -70,6 +74,14 @@ export async function reportProgressStatus(params: {
   repositoryFullName: string;
   issueNumber: number;
   status: ProgressStatusKey;
+  /**
+   * 指定すると、**現在のStatusがこの中にあるときだけ書き込む**（#1856）。
+   * close起点の終端への遷移のように「特定の段階にいるものだけを動かす」報告で使う。
+   *
+   * 判定材料はProjectから読んだ実物（`item.status`）で、DBのキャッシュではない。
+   * 報告の正しさをDBの鮮度に依存させないという、このモジュール全体の方針に揃えている。
+   */
+  onlyFrom?: readonly ProgressStatusKey[];
 }): Promise<ProgressReportResult> {
   const location = getProjectLocation();
   if (!location) return { applied: false, reason: "project_disabled" };
@@ -106,7 +118,7 @@ export async function reportProgressStatus(params: {
   // GitHub上にIssueが存在しない（削除・移動済み）
   if (!state) return { applied: false, reason: "not_in_project" };
 
-  // closedなIssueの進捗は`Done`以外へ動かさない（#1348）。
+  // closedなIssueの進捗は終端（`Done`・`Closed`）以外へ動かさない（#1348・#1856）。
   //
   // `Done`でcloseされた後も、同じブランチ（issue-<番号>）からdevelopへPRがマージされると
   // issue-labels.ymlのdevelop-pr-mergedがブランチ名だけを見て`develop`を報告するため、
@@ -115,11 +127,26 @@ export async function reportProgressStatus(params: {
   // リリースが何度走ってもこのIssueを拾わないため、盤面の「本番へ反映する内容」に
   // 恒久的に残り続ける（#1181が実際にこうなった）。
   //
-  // `done`だけを通すのは、main-pr-mergedが「closeしてから`done`を報告する」順序で
+  // `done`を通すのは、main-pr-mergedが「closeしてから`done`を報告する」順序で
   // 動いているため（.github/workflows/reusable-issue-labels.yml）。ここで一律に弾くと
-  // 正規のDone遷移そのものが書き込めなくなる。
-  if (!state.issueOpen && params.status !== "done") {
+  // 正規のDone遷移そのものが書き込めなくなる。`closed`（対応終了）も同じで、close起点の
+  // 終端への遷移（#1856）は定義上closedなIssueに対してしか起きない。
+  //
+  // **通すのは終端の2つだけ**という形は変えない。巻き戻りを防ぐという#1348の目的は、
+  // 前へ進む先しか通さないことで引き続き守られる。
+  if (!state.issueOpen && params.status !== "done" && params.status !== "closed") {
     return { applied: false, reason: "issue_closed" };
+  }
+
+  // 遷移元を限定した報告（#1856）。**盤面へ載せる前に判定する。** 載せてから判定すると、
+  // 対象外だったIssueが「Statusは変わらないが盤面には載った」状態になり、close済みのIssueで
+  // 盤面が埋まる（`addMissingProjectItems`がclosedなIssueを追加しないのと同じ理由）。
+  // アイテムが無い＝現在のStatusが存在しないので、どのonlyFromにも一致しない。
+  if (params.onlyFrom) {
+    const current = state.item?.status ? matchProjectStatus(state.item.status) : null;
+    if (!current || !params.onlyFrom.includes(current)) {
+      return { applied: false, reason: "status_mismatch" };
+    }
   }
 
   // 盤面に無ければ載せる。Project WorkflowsのAuto-addはプランごとに設定できる
