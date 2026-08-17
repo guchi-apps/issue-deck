@@ -1429,6 +1429,96 @@ describe("選択中リポジトリの展開（#1750）", () => {
   });
 });
 
+describe("実装予定のIssue（#1704）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** 未着手のIssueを番号だけ変えて並べる */
+  function plannedIssues(numbers: number[]): BranchFlowIssueSource[] {
+    return numbers.map((number) => ({
+      number,
+      title: `やること${number}`,
+      repositoryFullName: REPO,
+      state: "open",
+      projectStatus: "Ready",
+    }));
+  }
+
+  it("畳んだ1行に件数を出す", () => {
+    renderFlow({ issues: plannedIssues([10, 11]), branchStatuses: [branchStatus()] });
+
+    expect(screen.getByText("予定2")).toBeTruthy();
+    expect(screen.queryByText(/実装予定 2件/)).toBeNull();
+  });
+
+  it("開くと既定で3件まで出し、残りはボタンで開く", () => {
+    renderFlow({
+      issues: plannedIssues([10, 11, 12, 13, 14]),
+      branchStatuses: [branchStatus()],
+    });
+    ensureRepositoryOpen();
+
+    expect(screen.getByText("実装予定 5件")).toBeTruthy();
+    expect(screen.getByText(/Issue #14/)).toBeTruthy();
+    expect(screen.queryByText(/Issue #11/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "実装予定の残り2件を表示" }));
+    expect(screen.getByText(/Issue #11/)).toBeTruthy();
+    expect(screen.getByText(/Issue #10/)).toBeTruthy();
+
+    // 押し直すと頭出しへ戻る
+    fireEvent.click(screen.getByRole("button", { name: "実装予定を3件だけ表示" }));
+    expect(screen.queryByText(/Issue #10/)).toBeNull();
+  });
+
+  it("3件以下なら展開ボタンは出さない", () => {
+    renderFlow({ issues: plannedIssues([10, 11]), branchStatuses: [branchStatus()] });
+    ensureRepositoryOpen();
+
+    expect(screen.getByText("実装予定 2件")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /実装予定/ })).toBeNull();
+  });
+
+  it("優先度が付いているIssueにはピルを出す", () => {
+    renderFlow({
+      issues: [
+        {
+          number: 20,
+          title: "急ぎのやること",
+          repositoryFullName: REPO,
+          state: "open",
+          projectStatus: "Ready",
+          labels: ["80.Priority: High"],
+        },
+      ],
+      branchStatuses: [branchStatus()],
+    });
+    ensureRepositoryOpen();
+
+    expect(screen.getByText("優先度 高")).toBeTruthy();
+  });
+
+  it("実装予定が無ければ見出しごと出さない", () => {
+    renderFlow({
+      issues: [
+        {
+          number: 30,
+          title: "実装中のもの",
+          repositoryFullName: REPO,
+          state: "open",
+          projectStatus: "Implementation",
+        },
+      ],
+      branchStatuses: [branchStatus()],
+    });
+    ensureRepositoryOpen();
+
+    expect(screen.queryByText(/実装予定/)).toBeNull();
+    expect(screen.queryByText(/^予定/)).toBeNull();
+  });
+});
+
 describe("BranchFlowView の自動更新（#1767）", () => {
   afterEach(() => {
     cleanup();

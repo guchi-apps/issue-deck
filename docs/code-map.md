@@ -686,6 +686,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   になる（issue-deck本体で72件）。異常を示すバッジの形なのに行動につながらないため落とした。
   マージコミットを除いて数える案はコミット一覧を引く必要があり、この画面の前提（取得を増やさない）
   と噛み合わないので採らなかった。
+  **まだブランチが無いIssueは「実装予定」として流れ図の上流に並べる**（#1704）。レーンはPRのheadブランチと
+  実在する作業ブランチの和集合なので、着手前のIssueは画面のどこにも現れなかった。対象は進捗が
+  `ready`・`planning`のopen Issueのうち、どのレーンにも現れていないもの（`lib/branch-flow.ts`の
+  `PLANNED_ISSUE_PROGRESS_STATUSES`・`collectPlannedIssues`）。**`ready`まで含めるのは、計画が要らない
+  Issueが`Ready`から直接実装へ入るため**で、`planning`だけに絞ると次に流れてくるものがほとんど映らない。
+  **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）にはこの集合を足さない**——ブランチが無いのが
+  正常な状態で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
+  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: low`）→ 番号の新しい順で、
+  **既定は3件まで**（`PLANNED_ISSUE_PREVIEW_COUNT`）。未着手はバックログ全体なので、全部出すと
+  流れ図が下へ押し出される。残りはリポジトリごとのボタンで開き、件数は見出しと畳んだ1行（「予定◯」）に出す。
+  **手が要るものではないので、初回に自動で開く条件（`needsAttention`）には加えない。**
+  枝と点は破線で描き、実在するブランチのレーンと見分けが付くようにする。
+  **`orphanIssues`（ブランチもPRも見つからないIssue）とは別物**で、あちらは「実装中なのにブランチが無い」
+  異常を隠さないための枠。手作業Issue（`71.manual-step`）は実装するものではないため実装予定に混ぜない。
   **手作業Issue（`71.manual-step`）は本文から起点Issueを推定してレーンへぶら下げる**（#1510）。
   GitHubネイティブのサブIssue関係はDBへキャッシュしておらず（`/api/issues/sub-issues`はIssue詳細を
   開いたときだけ取る）、持たせるにはGitHub Appの`sub_issues`Webhook購読の追加とスキーマ変更が要る。
