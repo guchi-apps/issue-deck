@@ -11,9 +11,11 @@ import {
 import {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
+  enqueueManualStepJob,
   enqueueSessionControlJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
+import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
@@ -54,6 +56,8 @@ export async function GET() {
  * 無い段階で積めるようにすると、`QUEUED`のまま誰も取りに来ないジョブが残る。開けるのはStep 3）。
  * `cross_repo_question`（#1454）は受け付ける。こちらはpoller側の実行（`start-cross-repo-question.sh`）と
  * 対応の申告（`crossRepoQuestion`）が揃っており、申告のあるホストにしか払い出さない。
+ * `manual_step`（#1828）も受け付ける。**画面から届いたコマンド文字列は照合にしか使わず**、
+ * 実行するのはサーバーが手作業Issueの本文から抽出し直したもの。
  */
 export async function POST(request: NextRequest) {
   const guarded = previewModeGuard();
@@ -97,6 +101,44 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(
       { ok: true, job: questionResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // 手作業の代行実行（#1828）。**受け取るのは「どの手順か」と「人が承認したコマンド」だけ**で、
+  // 実際に実行するのは`enqueueManualStepJob`がIssue本文から抽出し直したもの。届いた文字列は
+  // 「押した人が見ていたのはこれか」の照合にしか使わない
+  if (kind === "MANUAL_STEP") {
+    const stepLine = payload?.stepLine;
+    const approvedCommand = payload?.command;
+    if (
+      typeof stepLine !== "number" ||
+      !Number.isInteger(stepLine) ||
+      stepLine < 1 ||
+      typeof approvedCommand !== "string" ||
+      approvedCommand === "" ||
+      approvedCommand.length > MANUAL_STEP_COMMAND_MAX_LENGTH
+    ) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
+    const manualStepResult = await enqueueManualStepJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      stepLine,
+      approvedCommand,
+      requestedByUserId: userId,
+    });
+    if (!manualStepResult.ok) {
+      const status = manualStepResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: manualStepResult.rejection, message: manualStepResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: manualStepResult.job },
       { headers: { "Cache-Control": "no-store" } },
     );
   }

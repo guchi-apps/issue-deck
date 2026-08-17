@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
+import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -17,6 +19,7 @@ const taskList = {
   error: null as string | null,
   toggleTask: vi.fn(),
 };
+const runManualStep = vi.fn();
 const issueMutations = {
   updateIssue: vi.fn(),
   isSubmitting: false,
@@ -71,7 +74,58 @@ function issue(overrides: Partial<Issue> = {}): Issue {
   } as Issue;
 }
 
-function renderDialog(issues: Issue[], queueIds = issues.map((item) => item.id)) {
+/** 代行実行（#1828）の判定材料。**差し込まないと画面が自分で`/api/dispatch`を叩く** */
+function dispatchHandle(
+  overrides: { hosts?: DispatchHostView[]; jobs?: DispatchJobView[] } = {},
+): DispatchStateHandle {
+  return {
+    hosts: overrides.hosts ?? [subpcHost()],
+    jobs: overrides.jobs ?? [],
+    sessions: [],
+    isSubmitting: false,
+    runManualStep,
+    cancel: vi.fn(),
+  } as unknown as DispatchStateHandle;
+}
+
+function subpcHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+  return {
+    name: "subpc",
+    online: true,
+    manualStepCapable: true,
+    repositories: [REPO],
+    ...overrides,
+  } as DispatchHostView;
+}
+
+function manualStepJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+  return {
+    id: "job-1",
+    repositoryFullName: REPO,
+    issueNumber: 1823,
+    kind: "MANUAL_STEP",
+    status: "SUCCEEDED",
+    manualStepLine: STEP_LINE,
+    command: "git pull --ff-only",
+    exitCode: 0,
+    commandOutput: "Already up to date.",
+    message: null,
+    createdAt: "2026-08-17T00:00:00Z",
+    startedAt: "2026-08-17T00:00:01Z",
+    finishedAt: "2026-08-17T00:00:03Z",
+    ...overrides,
+  } as DispatchJobView;
+}
+
+/** 本文中の`- [ ] チェックアウトを更新する`の行番号（1始まり） */
+const STEP_LINE =
+  BODY.split("\n").findIndex((text) => text.includes("チェックアウトを更新する")) + 1;
+
+function renderDialog(
+  issues: Issue[],
+  queueIds = issues.map((item) => item.id),
+  dispatch: DispatchStateHandle = dispatchHandle(),
+) {
   const onIssueUpdated = vi.fn();
   render(
     <ManualStepGuideDialog
@@ -80,6 +134,7 @@ function renderDialog(issues: Issue[], queueIds = issues.map((item) => item.id))
       open
       onOpenChange={vi.fn()}
       onIssueUpdated={onIssueUpdated}
+      dispatch={dispatch}
     />,
   );
   return { onIssueUpdated };
@@ -93,6 +148,7 @@ describe("ManualStepGuideDialog", () => {
     issueMutations.error = null;
     issueMutations.isSubmitting = false;
     taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
     issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ state: "closed" }));
   });
 
@@ -206,5 +262,111 @@ describe("ManualStepGuideDialog", () => {
     // 出口だけは残す（案内できない手作業を行き止まりにしない）
     fireEvent.click(screen.getByRole("button", { name: "次へ" }));
     expect(screen.getByRole("button", { name: "完了してクローズ" })).toBeTruthy();
+  });
+});
+
+/**
+ * 手作業の代行実行（#1828）。**押す前に何を実行するかが出ていること**と、
+ * **代行できないときに理由が出ること**を見る。実行の可否の判定そのものは
+ * `lib/dispatch/dispatch-job.ts`と`lib/manual-step-command.ts`のテストが持つ。
+ */
+describe("ManualStepGuideDialog の代行実行", () => {
+  beforeEach(() => {
+    taskList.body = BODY;
+    taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("実行するコマンドを出したうえで承認を求める", () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.getByText("subpcで代行実行できます")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "承認して実行" })).toBeTruthy();
+    // 出力の扱いは押す前に伝える（このリポジトリはPUBLIC）
+    expect(screen.getByText(/出力にシークレットが混ざることがあります/)).toBeTruthy();
+  });
+
+  it("承認すると、その手順の行と本文のコマンドを送る", () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "承認して実行" }));
+
+    expect(runManualStep).toHaveBeenCalledWith({
+      repositoryFullName: REPO,
+      issueNumber: 1823,
+      hostName: "subpc",
+      stepLine: STEP_LINE,
+      command: "git pull --ff-only",
+    });
+  });
+
+  // 終了コード0のときだけ。**画面が進むのではなくチェックが付くだけ**（結果を読む前に進めない）
+  it("終了コード0で終わったら手順にチェックを付ける", async () => {
+    renderDialog([issue()], undefined, dispatchHandle({ jobs: [manualStepJob()] }));
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(await screen.findByText(/実行しました（終了コード 0）/)).toBeTruthy();
+    expect(taskList.toggleTask).toHaveBeenCalledWith(STEP_LINE, true);
+  });
+
+  it("失敗したらチェックを付けず、出力を開いて出す", async () => {
+    renderDialog(
+      [issue()],
+      undefined,
+      dispatchHandle({
+        jobs: [
+          manualStepJob({
+            status: "FAILED",
+            exitCode: 1,
+            commandOutput: "error: Your local changes would be overwritten",
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.getByText(/失敗しました（終了コード 1）/)).toBeTruthy();
+    expect(screen.getByText(/error: Your local changes would be overwritten/)).toBeTruthy();
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+  });
+
+  // VPS・1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
+  it("サブPC以外で実行する手作業では、ボタンを出さずに理由を出す", () => {
+    const body = BODY.replace("**サブPC**", "**VPS**");
+    taskList.body = body;
+    renderDialog([issue({ body })]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
+    expect(screen.getByText(/画面からは代行できません/)).toBeTruthy();
+  });
+
+  // pollerはサブPC側の作業ツリーから動くため、更新するのは人の作業になる
+  it("pollerが未対応なら理由を出す", () => {
+    renderDialog(
+      [issue()],
+      undefined,
+      dispatchHandle({ hosts: [subpcHost({ manualStepCapable: null })] }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
+    expect(screen.getByText(/代行実行に対応していません/)).toBeTruthy();
+  });
+
+  // コマンドが1つに定まらない手順（2つ目の手順にはコードブロックが無い）
+  it("コマンドが書かれていない手順では理由を出す", () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+
+    expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
+    expect(screen.getByText(/ちょうど1つ書かれている手順だけを代行します/)).toBeTruthy();
   });
 });

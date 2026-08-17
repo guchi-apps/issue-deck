@@ -191,6 +191,58 @@ function manualStepSampleBody(origin, developed, released) {
   ].join("\n");
 }
 
+/**
+ * サブPCで実行する手作業のサンプル本文（#1828）。
+ *
+ * 手作業アシスタントの**代行実行（「承認して実行」）は、実行するデバイスがサブPCで、かつ
+ * 手順の中にシェルのコードブロックがちょうど1つある手順にしか出ない。** 上の2件（VPS・
+ * 1Password）はどちらも条件を満たさないため、これが無いと開発環境では「代行できません」の
+ * 側しか確かめられない。
+ *
+ * **2つ目の手順にはコマンドを置いていない**（代行できない手順の見え方も同じ本文で確かめられる）。
+ *
+ * @param origin 起点Issue（mainへ反映済み）の番号
+ */
+function manualStepSubpcSampleBody(origin) {
+  return [
+    "## この作業でできるようになること",
+    "",
+    "- できるようになること: サブPCのチェックアウトが最新になり、新しいpollerが動く",
+    "- 実行するまでできないこと: developへ入れた変更がサブPC側に反映されない",
+    "",
+    "## 前提条件",
+    "",
+    "- 実行するデバイス: **サブPC**（メインPCからなら `ssh subpc`）",
+    "- カレントディレクトリ: `~/apps/issue-deck`",
+    "- Gitブランチ: `develop`（本体チェックアウトがdevelopのため）",
+    `- 先に完了している必要があるIssue・PR: #${origin} の変更が本番へ出た後`,
+    "- その他の前提: なし",
+    "",
+    "## やること",
+    "",
+    "- [ ] 本体チェックアウトを最新のdevelopへ更新する",
+    "",
+    "    ```bash",
+    "    cd ~/apps/issue-deck",
+    "    git pull --ff-only",
+    "    ```",
+    "",
+    "- [ ] 画面のホストの行で、チェックアウトの遅れが消えていることを確かめる",
+    "",
+    "## 完了の確認方法",
+    "",
+    "`git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop` が `0` を返すこと。",
+    "",
+    "## なぜエージェントが実施しないか",
+    "",
+    "`~/apps/issue-deck`は本体チェックアウトで、実装エージェントが触れるのは自分のworktreeだけのため。",
+    "",
+    "## 関連",
+    "",
+    `- 起点Issue: #${origin}`,
+  ].join("\n");
+}
+
 async function applyDevProfile(installation) {
   // 「実装を開始」「ローカルで開始」の導線は、この2つのフラグが立っているリポジトリにしか出ない。
   const updatedRepositories = await prisma.repository.updateMany({
@@ -256,10 +308,18 @@ async function applyDevProfile(installation) {
       labels: [{ name: "71.manual-step", color: "d876e3" }],
       body: manualStepSampleBody(released.number, null, released.number),
     });
+    // サブPCで実行するもの（#1828。代行実行の「承認して実行」が出る唯一のサンプル）
+    await upsertDummyIssue(firstRepository, {
+      number: ISSUES_PER_REPOSITORY + 5,
+      title: "[手作業] サブPC: issue-deckのチェックアウトを更新する",
+      state: "OPEN",
+      labels: [{ name: "71.manual-step", color: "d876e3" }],
+      body: manualStepSubpcSampleBody(released.number),
+    });
   }
 
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 2 : 0}件（前提待ち・いま実行できる各1件）追加しました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 3 : 0}件（前提待ち・いま実行できる・サブPCで代行できる各1件）追加しました。`,
   );
 }
 

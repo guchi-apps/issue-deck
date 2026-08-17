@@ -304,6 +304,55 @@ export function useDispatchState(enabled: boolean) {
     [markChanged],
   );
 
+  /**
+   * 手作業アシスタントの手順をサブPCで代行実行する（#1828）。
+   *
+   * **送るのは「どの手順か」と「画面に出ていて人が承認したコマンド」だけ。** 実行するのは
+   * サーバーが手作業Issueの本文から抽出し直したもので、ここで送る文字列は照合にしか使われない
+   * （本文が変わっていれば`body_changed`で拒否され、何も実行されない）。
+   *
+   * 失敗の理由は`error`（共有）へ入れず戻り値で返す（`sendSessionControl`と同じ理由。
+   * 押した場所と表示が離れると話が通じない）。
+   */
+  const runManualStep = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+      /** 実行する手順の`- [ ]`の行番号 */
+      stepLine: number;
+      /** 画面に出ていて、人が承認したコマンド */
+      command: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            host: params.hostName,
+            kind: "manual_step",
+            stepLine: params.stepLine,
+            command: params.command,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリング（最短5秒）を待たずに「送信しました」を出す。押した直後こそ反応が要る
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   const cancel = useCallback(async (jobId: string): Promise<boolean> => {
     setIsSubmitting(true);
     setError(null);
@@ -411,6 +460,7 @@ export function useDispatchState(enabled: boolean) {
     isSubmitting,
     enqueue,
     sendSessionControl,
+    runManualStep,
     cancel,
     dismiss,
     prioritize,
