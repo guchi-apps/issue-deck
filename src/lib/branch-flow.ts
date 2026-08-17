@@ -8,10 +8,12 @@ import {
 import type {
   BranchFlowDeployRun,
   BranchFlowDeployState,
+  BranchFlowIssuePriority,
   BranchFlowIssueRef,
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
+  BranchFlowPlannedIssue,
   BranchFlowReleaseGroup,
   BranchFlowReleaseState,
   BranchFlowRepository,
@@ -41,6 +43,33 @@ export const ACTIVE_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = [
 const ACTIVE_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
   ACTIVE_ISSUE_PROGRESS_STATUSES,
 );
+
+/**
+ * これから着手する＝まだブランチが無くて当然の進捗（#1704）。
+ *
+ * **`ready`（未着手）まで含める。** issue-deckの運用では、計画が要らないIssueは`Ready`から直接
+ * 実装へ入る（`21.plan-required`が付いたものだけ`Planning`を経由する）ため、`planning`だけに
+ * 絞ると「次に流れてくるもの」がほとんど映らない。件数が多くなるぶんは画面側で頭出しする。
+ *
+ * **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）には足さない。** この集合のIssueは
+ * ブランチが無いのが正常で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
+ */
+export const PLANNED_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = ["planning", "ready"];
+
+const PLANNED_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
+  PLANNED_ISSUE_PROGRESS_STATUSES,
+);
+
+/** 優先度ラベル。`11.local`と番号帯が重ならないよう80・89番台へリネーム済み（CLAUDE.md） */
+export const HIGH_PRIORITY_LABEL = "80.Priority: High";
+export const LOW_PRIORITY_LABEL = "89.Priority: low";
+
+/** 優先度ラベルから優先度を取る。付いていなければnull（#1704） */
+export function resolveIssuePriority(labels: readonly string[]): BranchFlowIssuePriority | null {
+  if (labels.includes(HIGH_PRIORITY_LABEL)) return "high";
+  if (labels.includes(LOW_PRIORITY_LABEL)) return "low";
+  return null;
+}
 
 /** Issue番号から作業ブランチ名を作る（`scripts/start-issue.sh`が作る命名規約） */
 export function issueBranchName(issueNumber: number): string {
@@ -259,6 +288,10 @@ function buildRepository({
     deployState,
   });
 
+  // これから着手するIssue（#1704）。レーンに現れているものは除くので、`linkedIssueNumbers`を
+  // 作った後でなければ組み立てられない。
+  const plannedIssues = collectPlannedIssues(issues, linkedIssueNumbers);
+
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
   );
@@ -282,6 +315,9 @@ function buildRepository({
     // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
+    // 畳んだ1行に「予定◯」として出すだけ（#1704）。手が要るものではないので、
+    // 初回に自動で開く条件（`needsAttention`）には入れない。
+    plannedIssueCount: plannedIssues.length,
     deploy: deployState,
   };
 
@@ -321,8 +357,52 @@ function buildRepository({
       )
       .map(toIssueRef)
       .sort((a, b) => b.number - a.number),
+    plannedIssues,
     branchesLoaded: branchStatus !== null,
   };
+}
+
+/** 実装予定の並び順。計画検討中を先に、次に優先度の高い順（`orphanIssues`と同じく最後は番号の新しい順） */
+const PLANNED_PROGRESS_ORDER: Record<string, number> = { planning: 0, ready: 1 };
+const PLANNED_PRIORITY_ORDER: Record<string, number> = { high: 0, low: 2 };
+
+/**
+ * これから着手するIssueを集める（#1704）。
+ *
+ * **`orphanIssues`と条件がよく似ているが、意味が違う。** あちらは「実装中なのにブランチが
+ * 見つからない」異常で、こちらはまだブランチが無くて当然の上流。除外はどちらも同じで、
+ * すでにレーンとして画面に出ているIssueは重ねて出さない。
+ *
+ * 手作業Issue（`71.manual-step`）は実装するものではなく、既にレーンの下と束の外へ出している
+ * （#1510・#1586）ため、ここには混ぜない。
+ */
+function collectPlannedIssues(
+  issues: BranchFlowIssueSource[],
+  laneIssueNumbers: ReadonlySet<number>,
+): BranchFlowPlannedIssue[] {
+  return issues
+    .filter(
+      (issue) =>
+        issue.state === "open" &&
+        !isManualStepIssue(issue) &&
+        PLANNED_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
+        !laneIssueNumbers.has(issue.number),
+    )
+    .map((issue) => ({
+      ...toIssueRef(issue),
+      priority: resolveIssuePriority(issue.labels ?? []),
+    }))
+    .sort(comparePlannedIssues);
+}
+
+function comparePlannedIssues(a: BranchFlowPlannedIssue, b: BranchFlowPlannedIssue): number {
+  const byProgress =
+    (PLANNED_PROGRESS_ORDER[a.progress ?? ""] ?? 1) - (PLANNED_PROGRESS_ORDER[b.progress ?? ""] ?? 1);
+  if (byProgress !== 0) return byProgress;
+  const byPriority =
+    (PLANNED_PRIORITY_ORDER[a.priority ?? ""] ?? 1) - (PLANNED_PRIORITY_ORDER[b.priority ?? ""] ?? 1);
+  if (byPriority !== 0) return byPriority;
+  return b.number - a.number;
 }
 
 /** マージ済みのリリースPR（develop→main）を、マージが古い順に並べたもの */

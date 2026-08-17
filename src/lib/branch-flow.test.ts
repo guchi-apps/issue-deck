@@ -375,6 +375,7 @@ describe("buildBranchFlow", () => {
       hasCiFailure: false,
       needsUserMerge: false,
       openManualStepCount: 0,
+      plannedIssueCount: 0,
       releaseInProgress: false,
       deploy: null,
     });
@@ -1065,6 +1066,7 @@ describe("サマリー行の集計", () => {
       hasCiFailure: true,
       needsUserMerge: true,
       openManualStepCount: 0,
+      plannedIssueCount: 0,
       releaseInProgress: false,
       deploy: null,
     });
@@ -1119,6 +1121,74 @@ describe("サマリー行の集計", () => {
       branchStatuses: [branchStatus()],
     });
     expect(flow.repositories[0].summary.hasCiFailure).toBe(false);
+  });
+});
+
+// #1704: まだブランチが無い「実装予定」のIssueも画面に出す
+describe("実装予定のIssue（plannedIssues）", () => {
+  it("未着手・計画検討中のopen Issueを集め、件数をサマリーへ出す", () => {
+    const flow = build({
+      issues: [
+        issue({ number: 10, title: "未着手のもの", projectStatus: "Ready" }),
+        issue({ number: 11, title: "計画検討中のもの", projectStatus: "Planning" }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    const [repository] = flow.repositories;
+    expect(repository.plannedIssues.map((planned) => planned.number)).toEqual([11, 10]);
+    expect(repository.plannedIssues[0]).toMatchObject({
+      number: 11,
+      title: "計画検討中のもの",
+      progress: "planning",
+      priority: null,
+    });
+    expect(repository.summary.plannedIssueCount).toBe(2);
+  });
+
+  it("実装中以降・クローズ済み・手作業Issueは実装予定に入れない", () => {
+    const flow = build({
+      issues: [
+        issue({ number: 20, projectStatus: "Implementation" }),
+        issue({ number: 21, projectStatus: "Develop" }),
+        issue({ number: 22, projectStatus: "Ready", state: "closed" }),
+        issue({ number: 23, projectStatus: "Ready", labels: ["71.manual-step"] }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(flow.repositories[0].plannedIssues).toEqual([]);
+    expect(flow.repositories[0].summary.plannedIssueCount).toBe(0);
+  });
+
+  it("すでにレーンとして出ているIssueは、実装予定へ重ねて出さない", () => {
+    const flow = build({
+      issues: [issue({ number: 30, projectStatus: "Ready" })],
+      pullRequests: [pullRequest({ number: 1, headRef: "issue-30", linkedIssueNumber: 30 })],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(allLanes(flow.repositories[0])).toHaveLength(1);
+    expect(flow.repositories[0].plannedIssues).toEqual([]);
+  });
+
+  it("計画検討中 → 優先度の高い順 → 番号の新しい順で並べる", () => {
+    const flow = build({
+      issues: [
+        issue({ number: 40, projectStatus: "Ready" }),
+        issue({ number: 41, projectStatus: "Ready", labels: ["89.Priority: low"] }),
+        issue({ number: 42, projectStatus: "Ready", labels: ["80.Priority: High"] }),
+        issue({ number: 43, projectStatus: "Ready" }),
+        issue({ number: 44, projectStatus: "Planning" }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(flow.repositories[0].plannedIssues.map((planned) => planned.number)).toEqual([
+      44, 42, 43, 40, 41,
+    ]);
+    expect(flow.repositories[0].plannedIssues[1].priority).toBe("high");
+    expect(flow.repositories[0].plannedIssues.at(-1)?.priority).toBe("low");
   });
 });
 
