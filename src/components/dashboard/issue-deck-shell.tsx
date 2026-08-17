@@ -9,6 +9,7 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { IssueOrderDialog } from "@/components/dashboard/issue-order-dialog";
 import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
@@ -44,6 +45,7 @@ import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-nav
 import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
+import { useIssueOrderGuide } from "@/hooks/use-issue-order-guide";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePullRequests } from "@/hooks/use-pull-requests";
@@ -602,6 +604,9 @@ export function IssueDeckShell({
   // 手作業アシスタント（#1826）。PC・スマホのどちらの入口から開いても同じ状態を使うため、
   // 状態とダイアログはここに1つだけ置く
   const manualStepGuide = useManualStepGuide(issues, manualStepReadiness);
+  // 「次にやること」（#1853）。手作業アシスタントと同じく、PC・スマホのどちらの入口から
+  // 開いても同じ状態を使うため、状態とダイアログはここに1つだけ置く
+  const issueOrderGuide = useIssueOrderGuide(issues);
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -1088,6 +1093,11 @@ export function IssueDeckShell({
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onBack={mobileScreen.origin === "home" ? goBack : undefined}
                   onStartManualStepGuide={() => manualStepGuide.start()}
+                  onStartIssueOrder={
+                    issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
+                  }
+                  issueOrderAutoStart={issueOrderGuide.autoStart}
+                  issueOrderCount={issueOrderGuide.totalCount}
                 />
               )}
 
@@ -1282,6 +1292,10 @@ export function IssueDeckShell({
                 manualStepReadiness={manualStepReadiness}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
                 onStartManualStepGuide={() => manualStepGuide.start()}
+                // 未着手の着手順をClaudeに決めさせる入口（#1853）
+                onStartIssueOrder={issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start}
+                issueOrderAutoStart={issueOrderGuide.autoStart}
+                issueOrderCount={issueOrderGuide.totalCount}
                 // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
                 filtersIgnored={filtersIgnored}
                 className="hidden shrink-0 border-r md:flex"
@@ -1328,6 +1342,9 @@ export function IssueDeckShell({
             </>
           )}
         </div>
+
+        {/* 「次にやること」（#1853）。PC・スマホの入口が同じ1つを開く */}
+        <IssueOrderDialog guide={issueOrderGuide} onSelectIssue={(issue) => openIssueUrl(issue.id)} />
 
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
         <ManualStepGuideDialog

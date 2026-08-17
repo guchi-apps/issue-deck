@@ -10,6 +10,7 @@ import {
   CircleDot,
   CircleSlash,
   Clock,
+  Compass,
   ListChecks,
   Lock,
   MessageSquare,
@@ -104,6 +105,21 @@ type IssueListProps = {
    * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない
    */
   onStartManualStepGuide?: () => void;
+  /**
+   * 「次にやること」（#1853）を開く。「未着手」でだけ使う。
+   * 渡さない・未着手が1件も無い場合はボタンを出さない。
+   * `CLAUDE_CODE_OAUTH_TOKEN`が未設定の環境では親（`useIssueOrderGuide`の`notConfigured`）が
+   * 渡すのをやめるので、押しても何も起きないボタンが残らない
+   */
+  onStartIssueOrder?: () => void;
+  /** 「次にやること」で1位を自動でサブPCへ積む設定か（#1853）。ボタンの文言が変わる */
+  issueOrderAutoStart?: boolean;
+  /**
+   * 「次にやること」が判定の対象にする件数（#1853）。**この一覧の行数ではなく、
+   * ユーザーの絞り込みを通していない「未着手」の総数**を渡す（`useIssueOrderGuide`）。
+   * 一覧の行数を出すと、リポジトリで絞ったときに「N件あります」と実際に判定する件数がずれる
+   */
+  issueOrderCount?: number;
   /**
    * 絞り込みを指定しているのに、このビューでは適用されない状態か（#1750）。
    * 判定は`hasIgnoredIssueFilters`で行い、ここは受け取った結果を注記として出すだけ。
@@ -237,6 +253,9 @@ export function IssueList({
   pinnedCount = 0,
   manualStepReadiness,
   onStartManualStepGuide,
+  onStartIssueOrder,
+  issueOrderAutoStart = false,
+  issueOrderCount = 0,
   filtersIgnored = false,
   dispatch: injectedDispatch,
 }: IssueListProps) {
@@ -541,6 +560,24 @@ export function IssueList({
           <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
             <ListChecks />
             順番に進める
+          </Button>
+        </div>
+      )}
+
+      {/* 未着手のIssueの着手順をClaudeに決めさせる入口（#1853）。手作業アシスタントと同じく
+          ヘッダーではなく一覧の上に置くことで、PC・スマホのどちらにも同じ位置で出る。
+          **自動開始が有効なら文言でそう伝える**——押した瞬間に実装セッションが積まれるので、
+          「順番を決める」としか書いていないと、始まったことが押した本人から見えない */}
+      {onStartIssueOrder && view === "not-started" && issueOrderCount > 0 && (
+        <div className="flex items-center gap-2 border-b bg-sky-500/5 px-4 py-2">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            未着手のIssueが
+            <span className="font-medium tabular-nums text-foreground">{issueOrderCount}件</span>
+            あります。
+          </p>
+          <Button size="xs" className="shrink-0" onClick={onStartIssueOrder}>
+            <Compass />
+            {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
           </Button>
         </div>
       )}
