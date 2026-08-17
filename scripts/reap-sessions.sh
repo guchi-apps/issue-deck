@@ -40,6 +40,15 @@
 #
 # **判定できないときは必ず「畳まない」側へ倒す。** 畳むと文脈が失われ、取り返せない
 # （#1178 ではPRのマージ後に追加指示が来て同じセッションを再利用した実績がある）。
+#
+# ## 畳む予定を画面へ出す（#1817）
+#
+# 条件がすべて揃い、あとは猶予が経つのを待っているだけのセッションには、畳む予定
+# （`<セッション名>.reap` = `<期限のepoch> <理由コード>`）を書く。pollerがそれを読んで
+# issue-deckへ報告し、画面に「あと3分で自動終了」と出る。**判定はここにしか無い**
+# （worktreeがcleanか・push済みかはこのホストのファイルシステムにしか無く、画面側からは
+# 同じ判定を組み立てられない）。書くのは`hold_until_reap`の1か所だけで、条件を満たさない
+# セッションでは`reap_one`の入口で消える。
 
 set -euo pipefail
 
@@ -153,6 +162,26 @@ hold() {
   return 0
 }
 
+# 畳む条件は揃っているが、猶予がまだ経っていないセッション（#1817）。**残す動きはこれまでと
+# 同じで、加えて「いつ・なぜ畳むか」を状態ファイル（`.reap`）へ残す。**
+#
+# pollerがこれを読んでissue-deckへ報告し、画面に「あと3分で自動終了」と出る。残り時間を出せる
+# のはここだけで、判定材料のうちworktreeがcleanか・push済みかはこのホストにしか無い。
+#
+# **`--dry-run`では書かない**（何も変えない道具という性質を保つ）。代わりに残り分数を表示に出す。
+hold_until_reap() {
+  local session="$1" deadline="$2" reason_code="$3" reason="$4" remaining
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    # 切り上げ（残り10秒を「あと0分」と出さない）。表示だけなのでhold()は通さない
+    remaining=$(((deadline - NOW + 59) / 60))
+    echo "  $session: [dry-run] 残します: $reason（あと約${remaining}分・$reason_code）"
+    return 0
+  fi
+  # **書けなくても残す判断は変わらない**（画面に残り時間が出ないだけ）。
+  session_state_write_reap "$session" "$deadline" "$reason_code" || true
+  hold "$session" "$reason"
+}
+
 # 実際に畳む。**必ずログに残す。** 無人実行では「なぜセッションが消えたのか」がここにしか残らない。
 # 判定は呼び出し元が済ませてある（実装セッションと横断質問セッションで条件が違うため。#1454）。
 fold_session() {
@@ -179,13 +208,19 @@ fold_session() {
 # 1セッションを判定し、条件をすべて満たせば畳む。
 # **条件は安い順に並べる**（tmux → 状態ファイル → git → GitHub API）。手前で残すと決まれば
 # gh を叩かずに済み、毎分のポーリングで無駄なAPI呼び出しをしない。
+#
+# **猶予（時間）だけは条件の最後に見る**（#1817）。以前は`Stop`からの経過時間で先に足切りして
+# いたが、それだと「畳む条件は揃っていて、あとは時間が経つのを待っているだけ」なのか
+# 「そもそも畳まないセッション」なのかを、猶予が過ぎるまで区別できない。画面へ残り時間を
+# 出すにはこの区別が要る。増えるのは猶予待ちのセッション1本あたり毎巡1〜2回の`gh`で、
+# 猶予（既定5分）を過ぎた後は従来も毎巡叩いていた。
 reap_one() {
   local session="$1"
   local descriptor reapable worktree repository issue_number kind
   local alive_panes event_line event_at event_name idle_for
-  local idle_minutes idle_seconds gate_minutes gate_seconds
+  local idle_minutes idle_seconds
   local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
-  local merged_pr open_pr handoff_reason handoff_hold reason
+  local merged_pr open_pr handoff_reason handoff_hold handoff_code reason
 
   # 記述子が無いセッションには触らない。**これが「巻き込んではいけないもの」への線引き**で、
   # 他リポジトリの作業用セッション・人が手で立てたセッション・この仕組みより前から動いている
@@ -199,6 +234,11 @@ reap_one() {
   [[ "$reapable" == "1" ]] || return 0
 
   CANDIDATES=$((CANDIDATES + 1))
+
+  # 前の巡で書いた畳む予定（#1817）は入口で消す。**書くのは「猶予待ち」の分岐1か所だけ**に
+  # しておくと、条件を満たさなくなったセッション（追加指示で作業が再開した・`11.local`が
+  # 付け直された）に終了予告が残り続けることがない。
+  [[ "$DRY_RUN" -eq 1 ]] || session_state_clear_reap "$session"
 
   if [[ -n "$SELF_SESSION" && "$session" == "$SELF_SESSION" ]]; then
     hold "$session" "この回収スクリプト自身が動いているセッション"
@@ -259,21 +299,10 @@ reap_one() {
   fi
   idle_for=$((NOW - event_at))
 
-  # **実装セッションの猶予は経路ごとに違う**（CLOSED・マージ済みは`IDLE_MINUTES`、ローカル作業を
-  # 終えた引き渡し済みは`HANDOFF_IDLE_MINUTES`。#1649）。ここで見るのはそのうち短い方だけで、
-  # 「どの経路でも畳めない」ときに`gh`を叩かずに落とすための足切りにあたる（条件は安い順、の維持）。
-  # 実際の判定は下の各経路で行う。
-  gate_minutes="$idle_minutes"
-  gate_seconds="$idle_seconds"
-  if [[ "$kind" != "question" && "$HANDOFF_IDLE_SECONDS" -gt 0 && "$HANDOFF_IDLE_SECONDS" -lt "$gate_seconds" ]]; then
-    gate_minutes="$HANDOFF_IDLE_MINUTES"
-    gate_seconds="$HANDOFF_IDLE_SECONDS"
-  fi
-  if [[ "$idle_for" -lt "$gate_seconds" ]]; then
-    # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-    hold "$session" "最後の応答終了から猶予（${gate_minutes}分）が経っていない"
-    return 0
-  fi
+  # **猶予そのものはここで見ない**（#1817）。**実装セッションの猶予は経路ごとに違う**
+  # （CLOSED・マージ済みは`IDLE_MINUTES`、ローカル作業を終えた引き渡し済みは
+  # `HANDOFF_IDLE_MINUTES`。#1649）ので、どの経路で畳むかが決まってから、その経路の猶予と
+  # 突き合わせる（下の各経路の`hold_until_reap`）。
 
   # --- 横断質問セッション（#1454）はここで決める ---
   # **worktreeを持たず、コミットもpushもしない**（読み取り専用で、成果物は質問Issueへ投稿した
@@ -286,6 +315,12 @@ reap_one() {
       return 0
     fi
     if [[ "$issue_state" == "CLOSED" ]]; then
+      if [[ "$idle_for" -lt "$idle_seconds" ]]; then
+        # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+        hold_until_reap "$session" "$((event_at + idle_seconds))" "QUESTION_CLOSED" \
+          "質問Issue #$issue_number はCLOSEDだが、猶予（${idle_minutes}分）が経っていない"
+        return 0
+      fi
       fold_session "$session" "$repository" "$issue_number" \
         "質問Issue #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
         "もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
@@ -300,6 +335,11 @@ reap_one() {
     # 送られないまま忘れられると、質問Issueを閉じる人がいない限り永久に残る。畳んでも失うのは
     # 会話の文脈だけ（worktreeもコミットも持たない）で、回答コメントは質問Issueに残っている。
     # 今すぐ畳みたいときは、画面のセッション表示の「終了」を押せば猶予を待たずに済む。
+    if [[ "$idle_for" -lt "$idle_seconds" ]]; then
+      hold_until_reap "$session" "$((event_at + idle_seconds))" "QUESTION_IDLE" \
+        "質問Issue #$issue_number はOPENだが、放置の猶予（${idle_minutes}分）が経っていない"
+      return 0
+    fi
     fold_session "$session" "$repository" "$issue_number" \
       "質問Issue #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${QUESTION_IDLE_MINUTES}分）" \
       "続きを聞く場合は、issue-deckの「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
@@ -365,7 +405,8 @@ reap_one() {
   if [[ "$issue_state" == "CLOSED" ]]; then
     if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
       # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-      hold "$session" "Issue #$issue_number はCLOSEDだが、猶予（${IDLE_MINUTES}分）が経っていない"
+      hold_until_reap "$session" "$((event_at + IDLE_SECONDS))" "ISSUE_CLOSED" \
+        "Issue #$issue_number はCLOSEDだが、猶予（${IDLE_MINUTES}分）が経っていない"
       return 0
     fi
     reason="Issue #$issue_number はCLOSED"
@@ -374,7 +415,8 @@ reap_one() {
       --json number --jq '.[0].number // empty' 2>/dev/null || true)"
     if [[ -n "$merged_pr" ]]; then
       if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
-        hold "$session" "PR #$merged_pr はマージ済みだが、猶予（${IDLE_MINUTES}分）が経っていない"
+        hold_until_reap "$session" "$((event_at + IDLE_SECONDS))" "PR_MERGED" \
+          "PR #$merged_pr はマージ済みだが、猶予（${IDLE_MINUTES}分）が経っていない"
         return 0
       fi
       reason="PR #$merged_pr がマージ済み"
@@ -402,6 +444,7 @@ reap_one() {
       if [[ -n "$open_pr" ]]; then
         handoff_reason="PR #$open_pr を作成しレビューへ引き渡し済み"
         handoff_hold="PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+        handoff_code="HANDOFF_PR_OPEN"
       elif [[ -n "$other_remote_branches" ]]; then
         # **PRを作らずに終わったセッション**（#1600）。子Issueへの分割・調査だけ・
         # 「対応不要」の結論のいずれかで終わると、`issue-<番号>`のPRは最後まで作られない。
@@ -414,13 +457,15 @@ reap_one() {
         # 「PRを作り忘れた」可能性があるため、下の`hold`で従来どおり残す。
         handoff_reason="PRを作らずにローカル作業を終えている（このセッションのコミットが残っていない）"
         handoff_hold="ローカル作業を終えてから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+        handoff_code="HANDOFF_NO_PR"
       else
         hold "$session" "IssueがOPENで、issue-$issue_number のPRがまだ作られていない"
         return 0
       fi
       if [[ "$idle_for" -lt "$HANDOFF_IDLE_SECONDS" ]]; then
         # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-        hold "$session" "$handoff_hold"
+        hold_until_reap "$session" "$((event_at + HANDOFF_IDLE_SECONDS))" "$handoff_code" \
+          "$handoff_hold"
         return 0
       fi
       reason="$handoff_reason"

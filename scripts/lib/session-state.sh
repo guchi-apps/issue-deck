@@ -7,8 +7,10 @@
 #   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）と
 #                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
 #                                 `SessionStart`では`.starting`を消す（#1465）
-#   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む
-#   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）
+#   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む。畳む条件が揃って
+#                                 猶予待ちになったセッションには、その予定（<セッション名>.reap、#1817）を書く
+#   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）。
+#                                 `.reap`も読み、畳む予定を報告する（#1817）
 #
 # **キーはtmuxのセッション名。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 # リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られるため
@@ -52,6 +54,47 @@ session_state_event_file() {
 session_state_reason_file() {
   session_state_name_ok "${1:-}" || return 1
   printf '%s/%s.reason' "$(session_state_dir)" "$1"
+}
+
+# 畳む予定（#1817）。**「畳む条件はすべて満たしていて、あとは猶予が経つのを待っている」
+# セッションにだけ置く。**
+#
+# 残り時間を出せるのは`reap-sessions.sh`だけで、判定材料のうちworktreeがcleanか・コミットが
+# push済みかはサブPCのファイルシステムにしか無く、issue-deck側からは見えない。判定を画面側へ
+# 写すと必ずずれ、**終わらないセッションに終了予告が出る**。そこで判定は回収スクリプトに1つだけ
+# 置いたまま、その結論（いつ・なぜ畳むか）をpollerが読んで報告する。
+#
+# 中身は`.event`に倣った`<期限のepoch> <理由コード>`の1行。理由は文言ではなくコード
+# （`PR_MERGED`など）で運び、**画面に出す文言はissue-deck側に置く**（同じ状態が画面と
+# ログで2通りの言い方になるのを避ける）。
+session_state_reap_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.reap' "$(session_state_dir)" "$1"
+}
+
+# 畳む予定を書く。第2引数は期限（epoch秒）、第3引数は理由コード。
+session_state_write_reap() {
+  local session="$1" at="$2" reason="$3" file content
+  file="$(session_state_reap_file "$session")" || return 1
+  printf -v content '%s %s\n' "$at" "$reason"
+  session_state_write_file "$file" "$content"
+}
+
+# 畳む予定を`<期限のepoch> <理由コード>`の形で返す。無ければ非0で返る。
+session_state_read_reap() {
+  local session="$1" file
+  file="$(session_state_reap_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  head -1 "$file" 2>/dev/null
+}
+
+# 畳む予定を消す（条件を満たさなくなった・畳んだ）。無ければ何もしない。
+session_state_clear_reap() {
+  local session="$1" file
+  file="$(session_state_reap_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
 }
 
 # Claude Codeがまだ開始していないことの印（#1465）。
@@ -240,6 +283,7 @@ session_state_remove() {
     "$(session_state_descriptor_file "$session" 2>/dev/null || true)" \
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
+    "$(session_state_reap_file "$session" 2>/dev/null || true)" \
     "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)" \
     "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do

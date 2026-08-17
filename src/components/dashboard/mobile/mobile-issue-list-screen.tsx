@@ -84,6 +84,8 @@ type MobileIssueListScreenProps = {
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
    */
   manualStepReadiness?: ManualStepReadinessMap;
+  /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
+  onStartManualStepGuide?: () => void;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /** 画面固有のシート等（リリースシート） */
@@ -115,6 +117,7 @@ export function MobileIssueListScreen({
   onAskCrossRepoQuestion,
   pinned,
   manualStepReadiness,
+  onStartManualStepGuide,
   scrollKey,
   children,
 }: MobileIssueListScreenProps) {
@@ -247,6 +250,7 @@ export function MobileIssueListScreen({
         // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
         manualStepReadiness={manualStepReadiness}
+        onStartManualStepGuide={onStartManualStepGuide}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。
@@ -354,24 +358,24 @@ export function MobileIssueListScreen({
       {children}
 
       {/* 下端の絞り込み行（高さ約74px）と重ならない位置へ上げる（#1645） */}
-      <div className="absolute right-4 bottom-22 flex items-center gap-2">
+      <div className="absolute right-4 bottom-22 flex items-center gap-3">
         {onAskCrossRepoQuestion && (
           <button
             type="button"
             onClick={onAskCrossRepoQuestion}
             aria-label="複数リポジトリに質問する"
-            className="flex size-12 items-center justify-center rounded-full border bg-background shadow-lg"
+            className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
           >
-            <MessageCircleQuestion className="size-5" />
+            <MessageCircleQuestion className="size-6" />
           </button>
         )}
         <button
           type="button"
           onClick={onCreateIssue}
           aria-label="新しいIssueを作成"
-          className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+          className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
         >
-          <Plus className="size-5" />
+          <Plus className="size-6" />
         </button>
       </div>
     </div>

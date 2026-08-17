@@ -1,0 +1,287 @@
+import { describe, expect, it } from "vitest";
+
+import { buildManualStepQueue, parseManualStepGuide } from "@/lib/manual-step-guide";
+import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
+import type { Issue } from "@/types/issue";
+
+/**
+ * 材料は**実物の手作業Issueの本文**（#1823・#1795・guchi-apps/aide#59）。
+ * 合成した理想的な本文だけで固めると、太字・括弧書きの補足・インデント幅の揺れ・
+ * チェック項目の前に置かれた前置きといった実際の書かれ方を踏まない。
+ */
+
+/** #1823 サブPC: issue-deckのチェックアウトを更新してpollerを再起動する */
+const ISSUE_1823 = `## この作業でできるようになること
+
+- **できるようになること**: サブPCの回収スクリプトが、猶予待ちのセッションに理由を残すようになる。
+- **実行するまでできないこと**: 画面には残り時間が一切出ない。
+
+## 前提条件
+
+- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- カレントディレクトリ: \`~/apps/issue-deck\`
+- Gitブランチ: \`develop\`（本体チェックアウトがdevelopのため）
+- 先に完了している必要があるIssue／PR: **#1822 がdevelopへマージされていること**
+- その他の前提: \`issue-deck-dispatch-poller.service\`（systemd user unit）が動いていること
+
+## やること
+
+- [ ] 本体チェックアウトを最新のdevelopへ更新する
+
+    \`\`\`bash
+    cd ~/apps/issue-deck
+    git pull --ff-only
+    \`\`\`
+
+- [ ] pollerを再起動する（常駐プロセスが読み込み中のファイルなので、pullとセットで行う）
+
+    \`\`\`bash
+    systemctl --user restart issue-deck-dispatch-poller.service
+    \`\`\`
+
+## 完了の確認方法
+
+- 遅れが0になっていること（\`0\`が出れば最新）
+
+    \`\`\`bash
+    git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop   # 0 なら最新
+    \`\`\`
+
+## なぜエージェントが実施しないか
+
+\`~/apps/issue-deck\`は本体チェックアウトで、実装エージェントが作業してよいのは自分のworktreeだけ。
+
+## 関連
+
+- 起点Issue: #1817
+- 対応PR: #1822
+`;
+
+/** #1795 共有ワークフローのタグ配布。コードブロックのインデントが2スペース */
+const ISSUE_1795 = `## この作業でできるようになること
+
+- できるようになること: 他リポジトリでも受付コメントが消えるようになる
+
+## 前提条件
+
+- 実行するデバイス: ブラウザ（issue-deckの画面）とサブPCのどちらでもよい
+- カレントディレクトリ: \`~/apps/issue-deck\`（画面から配る場合は不要）
+- Gitブランチ: \`develop\`
+- 先に完了している必要があるIssue・PR: #1794 が\`develop\`へマージされていること
+
+## やること
+
+- [x] \`main\`に#1794の内容が入っていることを確認する
+
+  \`\`\`bash
+  cd ~/apps/issue-deck
+  git fetch origin
+  \`\`\`
+
+- [ ] \`workflows/v21\`タグを\`main\`に切って push する
+
+  \`\`\`bash
+  git tag workflows/v21 origin/main
+  git push origin workflows/v21
+  \`\`\`
+
+- [ ] issue-deckの画面から\`workflows/v21\`を対象リポジトリへ配り、配布PRをマージする
+
+## 完了の確認方法
+
+- \`git ls-remote --tags origin | grep workflows/v21\` で1行返る
+`;
+
+/** guchi-apps/aide#59 チェック項目の前に前置きがあり、ラベルが太字 */
+const AIDE_59 = `## この作業でできるようになること
+
+- **できるようになること**: 本番のトークン3つが1Password経由で配られるようになる。
+
+## 前提条件
+
+- **実行するデバイス**: サブPC（1Passwordの操作は \`op\` CLI、同期は \`~/apps/aide\`）。確認にVPSへのSSHを使う
+- **カレントディレクトリ**: \`/home/guchi/apps/aide\`
+- **Gitブランチ**: \`develop\`（\`scripts/sync-github-secrets.sh\` は #55 のPRがマージされたものを使う）
+- **先に完了している必要があるIssue・PR**: #55 の対応PRが \`develop\` へマージ済みであること
+
+## やること
+
+\`AIDE_GITHUB_TOKEN\` は**現在VPSの \`.env\` だけが正**なので、新規発行ではなく**そこから1Passwordへ移す**。
+
+- [ ] VPSの \`.env\` から現在値を控える
+
+    \`\`\`bash
+    ssh vps
+    grep -E '^(AIDE_GITHUB_TOKEN)=' .env
+    \`\`\`
+
+- [ ] 1Passwordへフィールドを作り、控えた値を入れる
+
+## 完了の確認方法
+
+- \`gh secret list\` に3件出ること
+`;
+
+describe("parseManualStepGuide", () => {
+  it("テンプレートどおりの本文を、目的・実行する場所・手順・確認方法へ割る（#1823）", () => {
+    const guide = parseManualStepGuide(ISSUE_1823);
+
+    expect(guide.hasTemplate).toBe(true);
+    expect(guide.outcome).toContain("猶予待ちのセッションに理由を残す");
+    expect(guide.where).toEqual({
+      device: "サブPC",
+      directory: "~/apps/issue-deck",
+      branch: "develop",
+    });
+    expect(guide.steps).toHaveLength(2);
+    expect(guide.verification).toContain("遅れが0になっていること");
+  });
+
+  it("手順の行番号は本文のチェック行を指し、コードブロックはインデントを戻して付く（#1823）", () => {
+    const guide = parseManualStepGuide(ISSUE_1823);
+    const lines = ISSUE_1823.split("\n");
+
+    for (const step of guide.steps) {
+      expect(step.line).not.toBeNull();
+      // `toggleTaskListLine`がその行を書き換えられること＝チェック行を指していること
+      expect(lines[(step.line as number) - 1]).toMatch(/^-\s\[[ xX]\]\s/);
+    }
+    expect(guide.steps[0].text).toBe("本体チェックアウトを最新のdevelopへ更新する");
+    expect(guide.steps[0].markdown).toBe(
+      "本体チェックアウトを最新のdevelopへ更新する\n\n```bash\ncd ~/apps/issue-deck\ngit pull --ff-only\n```",
+    );
+  });
+
+  it("`## なぜエージェントが実施しないか`のコードブロックや後続の節を手順へ混ぜない（#1823）", () => {
+    const guide = parseManualStepGuide(ISSUE_1823);
+    const joined = guide.steps.map((step) => step.markdown).join("\n");
+
+    expect(joined).not.toContain("起点Issue");
+    expect(joined).not.toContain("本体チェックアウトで、実装エージェント");
+  });
+
+  it("チェック済みの手順は`checked`で返す（#1795）", () => {
+    const guide = parseManualStepGuide(ISSUE_1795);
+
+    expect(guide.steps.map((step) => step.checked)).toEqual([true, false, false]);
+  });
+
+  it("インデントが2スペースのコードブロックも手順に付く（#1795）", () => {
+    const guide = parseManualStepGuide(ISSUE_1795);
+
+    expect(guide.steps[1].markdown).toContain("```bash\ngit tag workflows/v21 origin/main");
+  });
+
+  it("コードブロックを持たない手順は見出し文だけになる（#1795）", () => {
+    const guide = parseManualStepGuide(ISSUE_1795);
+
+    expect(guide.steps[2].markdown).toBe(
+      "issue-deckの画面から`workflows/v21`を対象リポジトリへ配り、配布PRをマージする",
+    );
+  });
+
+  it("末尾の括弧書きだけを落とし、途中の括弧は残す（#1795）", () => {
+    const guide = parseManualStepGuide(ISSUE_1795);
+
+    expect(guide.where.directory).toBe("~/apps/issue-deck");
+    expect(guide.where.device).toBe("ブラウザ（issue-deckの画面）とサブPCのどちらでもよい");
+  });
+
+  it("ラベルが太字でも実行する場所を拾う（aide#59）", () => {
+    const guide = parseManualStepGuide(AIDE_59);
+
+    expect(guide.where.directory).toBe("/home/guchi/apps/aide");
+    expect(guide.where.branch).toBe("develop");
+    expect(guide.where.device).toContain("サブPC");
+  });
+
+  it("チェック項目の前に置かれた前置きを落とさない（aide#59）", () => {
+    const guide = parseManualStepGuide(AIDE_59);
+
+    expect(guide.todoIntro).toContain("新規発行ではなく");
+    expect(guide.steps).toHaveLength(2);
+    expect(guide.steps[0].markdown).not.toContain("新規発行ではなく");
+  });
+
+  it("チェックリストの無い`## やること`は節ごと1手順にする", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\nVPSの`.env`へ1行足して再起動する。\n\n```bash\necho X=1 >> .env\n```\n",
+    );
+
+    expect(guide.hasTemplate).toBe(true);
+    expect(guide.steps).toHaveLength(1);
+    expect(guide.steps[0].line).toBeNull();
+    expect(guide.steps[0].text).toBe("VPSの.envへ1行足して再起動する。");
+  });
+
+  it("`## やること`が無い本文は手順に割らない（テンプレート外）", () => {
+    const guide = parseManualStepGuide("設定画面でトークンを入れ替えてください。");
+
+    expect(guide.hasTemplate).toBe(false);
+    expect(guide.steps).toEqual([]);
+    expect(guide.where).toEqual({ device: null, directory: null, branch: null });
+  });
+
+  it("本文が空でも落ちない", () => {
+    expect(parseManualStepGuide(null).hasTemplate).toBe(false);
+    expect(parseManualStepGuide("").steps).toEqual([]);
+  });
+
+  it("「不要」「なし」はチップに出さない", () => {
+    const guide = parseManualStepGuide(
+      "## 前提条件\n\n- 実行するデバイス: ブラウザ\n- カレントディレクトリ: 不要\n- Gitブランチ: なし\n\n## やること\n\n- [ ] 押す\n",
+    );
+
+    expect(guide.where).toEqual({ device: "ブラウザ", directory: null, branch: null });
+  });
+
+  it("コードブロックの中の`#`を見出しとして扱わない", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] 実行する\n\n    ```bash\n    # 完了の確認方法\n    echo ok\n    ```\n\n## 完了の確認方法\n\n- `echo ok`が通ること\n",
+    );
+
+    expect(guide.steps).toHaveLength(1);
+    expect(guide.steps[0].markdown).toContain("# 完了の確認方法");
+    expect(guide.verification).toBe("- `echo ok`が通ること");
+  });
+});
+
+function issue(id: string, updatedAt: string): Issue {
+  return { id, updatedAt } as Issue;
+}
+
+function readiness(entries: Record<string, boolean>): ManualStepReadinessMap {
+  return new Map(
+    Object.entries(entries).map(([id, ready]) => [id, { ready, blocking: [], message: "" }]),
+  );
+}
+
+describe("buildManualStepQueue", () => {
+  it("いま実行できる手作業だけを、更新の古い順に並べる", () => {
+    const issues = [
+      issue("a", "2026-08-10T00:00:00Z"),
+      issue("b", "2026-08-01T00:00:00Z"),
+      issue("c", "2026-08-05T00:00:00Z"),
+    ];
+
+    const queue = buildManualStepQueue(issues, readiness({ a: true, b: true, c: false }));
+
+    expect(queue.map((item) => item.id)).toEqual(["b", "a"]);
+  });
+
+  it("起点のIssueは先頭に置き、前提待ちでも外さない", () => {
+    const issues = [issue("a", "2026-08-01T00:00:00Z"), issue("b", "2026-08-02T00:00:00Z")];
+
+    const queue = buildManualStepQueue(issues, readiness({ a: true, b: false }), "b");
+
+    expect(queue.map((item) => item.id)).toEqual(["b", "a"]);
+  });
+
+  it("起点のIssueを二重に並べない", () => {
+    const issues = [issue("a", "2026-08-01T00:00:00Z"), issue("b", "2026-08-02T00:00:00Z")];
+
+    const queue = buildManualStepQueue(issues, readiness({ a: true, b: true }), "a");
+
+    expect(queue.map((item) => item.id)).toEqual(["a", "b"]);
+  });
+});

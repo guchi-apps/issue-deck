@@ -18,6 +18,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
+import { autoRefreshIntervalLabel, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   canMergeFromDeck,
@@ -36,6 +37,16 @@ type PullRequestListProps = {
   failedRepositories: string[];
   fetchedAt: string | null;
   isLoading: boolean;
+  /**
+   * 自動更新も含めて取得が飛んでいるか（#1767）。更新アイコンの回転にだけ使い、
+   * ボタンの無効化・「読み込み中...」には使わない。渡されない場合は`isLoading`と同じ扱い。
+   */
+  isRefreshing?: boolean;
+  /**
+   * 自動更新の間隔（#1767）。`null`＝自動更新しない。この一覧では設定できず、
+   * 「いま何分間隔で更新中か」を出すためだけに受け取る（決めるのは`issue-deck-shell.tsx`）。
+   */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   error: string | null;
   onRefresh: () => void;
   /** 詳細を表示中のPRのid。未選択・詳細を持たない画面ではnull */
@@ -168,6 +179,8 @@ export function PullRequestList({
   failedRepositories,
   fetchedAt,
   isLoading,
+  isRefreshing,
+  autoRefreshIntervalMs = null,
   error,
   onRefresh,
   selectedPullRequestId = null,
@@ -204,6 +217,10 @@ export function PullRequestList({
           <p className="truncate text-xs text-muted-foreground">
             <span>{pullRequests.length}件</span>
             {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+            {/* 何分間隔で更新中なのかを画面に出す（#1767） */}
+            {autoRefreshIntervalMs !== null && (
+              <span>{` ・ 自動更新${autoRefreshIntervalLabel(autoRefreshIntervalMs)}`}</span>
+            )}
           </p>
         </div>
         <Button
@@ -213,7 +230,8 @@ export function PullRequestList({
           disabled={isLoading}
           onClick={onRefresh}
         >
-          <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
+          {/* 自動更新でも回す（#1767）。押せなくするのは手動更新のときだけ */}
+          <RefreshCw className={cn("size-3.5", (isRefreshing ?? isLoading) && "animate-spin")} />
           更新
         </Button>
         {headerActions}

@@ -89,6 +89,43 @@ export type PullRequestSummary = {
 };
 
 /**
+ * PR1件が本番へ届いたか（#1814）。`GET /api/pull-requests/deploy-status`が返す。
+ *
+ * - `develop-only` … developへは入ったが、まだmainへ運ばれていない（本番未反映）
+ * - `waiting` … mainへ入ったが、そのデプロイ実行がまだ現れていない
+ * - `running` … `deploy.yml`が実行中
+ * - `deployed` … デプロイが成功した（＝ここで初めて「本番反映」と言ってよい）
+ * - `failed` … デプロイが失敗した（**mainには入ったが本番には出ていない**）
+ *
+ * 判定できない場合（未マージ・`deploy.yml`が無い・取得した範囲より古いPR）は状態そのものが
+ * `null`になり、画面は何も出さない。**間違った状態を出すより「何も言わない」方がよい**
+ * （ブランチ画面の`BranchFlowDeployState`と同じ方針。#1579）。
+ */
+export type PullRequestDeployStatusKind =
+  | "develop-only"
+  | "waiting"
+  | "running"
+  | "deployed"
+  | "failed";
+
+export type PullRequestDeployStatus = {
+  kind: PullRequestDeployStatusKind;
+  /** 本番へ運んだ（運ぼうとしている）リリースの版。タイトルから取れなければnull */
+  version: string | null;
+  /** 運んだリリースPRの番号。特定できなければnull */
+  releasePullRequestNumber: number | null;
+  /** デプロイ実行のログURL。実行がまだ無い（`waiting`・`develop-only`）場合はnull */
+  deployRunUrl: string | null;
+};
+
+export type PullRequestDeployStatusResponse = {
+  /** 判定できなければnull */
+  status: PullRequestDeployStatus | null;
+  /** 取得時刻（ISO8601） */
+  fetchedAt: string;
+};
+
+/**
  * Issue画面の「対応PR」1件ぶんの情報（#1339）。
  *
  * 1つのIssueに複数のPRがぶら下がりうるため、Issue画面はこれを配列で持つ。

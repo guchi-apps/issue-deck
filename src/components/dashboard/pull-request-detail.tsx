@@ -9,6 +9,7 @@ import {
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
+  DeployStatusBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
@@ -20,6 +21,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
@@ -128,6 +130,15 @@ export function PullRequestDetail({
   style,
   footerSpacing = false,
 }: PullRequestDetailProps) {
+  // 本番へ届いたか（#1814）。マージ済みのPRでだけ取りに行く。ヘッダーの「更新」でも
+  // 取り直したいので、詳細の取得時刻をキーに渡す。スマホのPR詳細画面もこの部品を使うため、
+  // ここで持つことでPC・スマホの両方に同じ表示が出る。
+  const deployStatus = usePullRequestDeployStatus(
+    pullRequest?.id ?? null,
+    pullRequest?.merged ?? false,
+    detail?.fetchedAt ?? null,
+  );
+
   // 画面内のリンクから一覧に無いPRを開いた場合、ヘッダーの材料（summary）が届くまで
   // 選択中PRはnullのまま。「PRを選ぶと〜」ではなく読み込み中・失敗として見せる（#1260）。
   if (!pullRequest) {
@@ -233,6 +244,7 @@ export function PullRequestDetail({
             ) : (
               <CiStateBadge ciState={pullRequest.ciState} />
             )}
+            <DeployStatusBadge status={deployStatus} />
             {pullRequest.autoMergeEnabled && (
               <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
             )}

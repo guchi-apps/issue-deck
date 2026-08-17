@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import type {
+  PullRequestDeployStatus,
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
   PullRequestEvent,
@@ -89,9 +90,24 @@ function renderDetail(
   );
 }
 
+/** 本番デプロイ状況の取得（#1814）。既定では「判定できない」を返し、バッジを出さない */
+function mockDeployStatus(status: PullRequestDeployStatus | null = null) {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ status, fetchedAt: "2026-08-16T12:00:00.000Z" }),
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("PullRequestDetail", () => {
+  beforeEach(() => {
+    mockDeployStatus();
+  });
+
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("未選択のときは選択を促す", () => {
@@ -187,6 +203,45 @@ describe("PullRequestDetail", () => {
     });
     expect(screen.getByText("クローズ済み")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  // 本番へ届いたかをPR詳細で分かるようにする（#1814）
+  it("マージ済みPRには本番デプロイ状況のバッジを出し、実行ログへリンクする", async () => {
+    mockDeployStatus({
+      kind: "deployed",
+      version: "4.1.0",
+      releasePullRequestNumber: 100,
+      deployRunUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+    });
+    renderDetail({ pullRequest: makePullRequest({ state: "closed", merged: true }) });
+
+    const badge = await screen.findByText("本番反映済み v4.1.0");
+    expect(badge.closest("a")?.getAttribute("href")).toBe(
+      "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+    );
+  });
+
+  it("判定できないときはバッジを出さない（未反映と言い切らない）", async () => {
+    const fetchMock = mockDeployStatus(null);
+    renderDetail({ pullRequest: makePullRequest({ state: "closed", merged: true }) });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByText(/本番/)).toBeNull();
+    expect(screen.queryByText(/デプロイ/)).toBeNull();
+  });
+
+  it("未マージのPRではデプロイ状況を取りに行かない", async () => {
+    const fetchMock = mockDeployStatus({
+      kind: "deployed",
+      version: "4.1.0",
+      releasePullRequestNumber: 100,
+      deployRunUrl: null,
+    });
+    renderDetail();
+
+    await waitFor(() => expect(screen.getByText("コメント 1件")).toBeTruthy());
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("本番反映済み v4.1.0")).toBeNull();
   });
 
   it("summaryが未取得のうちは読み込み中として見せる（PRを選ぶ促しは出さない）", () => {

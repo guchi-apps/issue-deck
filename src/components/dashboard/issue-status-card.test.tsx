@@ -77,6 +77,28 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
   } as DispatchSessionView;
 }
 
+function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+  return {
+    id: "job-launch",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1577,
+    issueTitle: null,
+    issueId: null,
+    targetHost: "subpc",
+    kind: "LAUNCH",
+    status: "SUCCEEDED",
+    queuePriority: 0,
+    message: null,
+    instruction: null,
+    tmuxSessionName: "issue-deck-issue-1577",
+    createdAt: NOW,
+    claimedAt: null,
+    startedAt: null,
+    finishedAt: NOW,
+    ...overrides,
+  };
+}
+
 const EXECUTION_TARGET: IssueExecutionTarget = {
   kind: "actions",
   expectsActionsRun: true,
@@ -87,6 +109,7 @@ function renderCard(props: Partial<Parameters<typeof IssueStatusCard>[0]> = {}) 
   return render(
     <IssueStatusCard
       issue={makeIssue()}
+      onIssueUpdated={vi.fn()}
       dispatch={makeDispatch()}
       dispatchJob={null}
       issueSession={null}
@@ -121,6 +144,32 @@ describe("IssueStatusCard", () => {
     expect(screen.getByText(/実行中/)).not.toBeNull();
   });
 
+  /**
+   * #1830。押す人が見ているのは「終了しました」と出ている場所なので、呼び戻す導線もそこへ置く。
+   * 生きているセッションでは出さない（`SessionRecoveryButton`側の判定）。
+   */
+  it("終了したセッションの下に「セッションを復旧」を出す", () => {
+    renderCard({
+      issueSession: makeSession({ state: "GONE", activity: "WAITING_INPUT" }),
+      dispatch: makeDispatch({
+        hosts: [
+          {
+            name: "subpc",
+            repositories: ["guchi-apps/issue-deck"],
+            online: true,
+          } as never,
+        ],
+      }),
+    });
+    expect(screen.getByText(/回答前に終了/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "セッションを復旧" })).not.toBeNull();
+  });
+
+  it("動いているセッションには「セッションを復旧」を出さない", () => {
+    renderCard({ issueSession: makeSession() });
+    expect(screen.queryByRole("button", { name: "セッションを復旧" })).toBeNull();
+  });
+
   it("Claudeの回答待ちを同じカードの中に出す", () => {
     renderCard({ qaAnswerPending: true });
     expect(screen.getByText("Claudeの回答待ち")).not.toBeNull();
@@ -149,28 +198,6 @@ describe("IssueStatusCard", () => {
    * 失敗理由・取り消しは`DispatchJobStatus`にしか無い）。
    */
   describe("起動ジョブの行を畳む（#1676）", () => {
-    function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
-      return {
-        id: "job-launch",
-        repositoryFullName: "guchi-apps/issue-deck",
-        issueNumber: 1577,
-        issueTitle: null,
-        issueId: null,
-        targetHost: "subpc",
-        kind: "LAUNCH",
-        status: "SUCCEEDED",
-        queuePriority: 0,
-        message: null,
-        instruction: null,
-        tmuxSessionName: "issue-deck-issue-1577",
-        createdAt: NOW,
-        claimedAt: null,
-        startedAt: null,
-        finishedAt: NOW,
-        ...overrides,
-      };
-    }
-
     it("起動が成功してセッションが立っていれば、起動の行は出さない", () => {
       renderCard({ dispatchJob: makeLaunchJob(), issueSession: makeSession() });
 
@@ -185,6 +212,43 @@ describe("IssueStatusCard", () => {
       });
 
       expect(screen.getByText(/サブPCで順番待ち/)).not.toBeNull();
+    });
+  });
+
+  /**
+   * #1815。開始の主導線（塗りつぶしのボタン）は`11.local`が付いた時点で引っ込めるため、
+   * ジョブもセッションも届いていない状態で何も出さないと、押した結果が画面から消えるだけになる。
+   */
+  describe("ローカルで対応中（#1815）", () => {
+    const LOCAL_TARGET = { expectsActionsRun: false, host: null } as IssueExecutionTarget;
+
+    it("ジョブもセッションも無くても、ローカルで対応中なら1行出す", () => {
+      renderCard({ executionTarget: LOCAL_TARGET });
+
+      expect(screen.getByText("ローカルで対応中")).not.toBeNull();
+      expect(screen.getByText(/無人実行（GitHub Actions）はこのIssueに反応しません/)).not.toBeNull();
+    });
+
+    it("ジョブが見えているならそちらに任せて出さない", () => {
+      renderCard({
+        executionTarget: LOCAL_TARGET,
+        dispatchJob: makeLaunchJob({ status: "QUEUED", finishedAt: null }),
+      });
+
+      expect(screen.queryByText("ローカルで対応中")).toBeNull();
+      expect(screen.getByText(/サブPCで順番待ち/)).not.toBeNull();
+    });
+
+    it("セッションが見えているならそちらに任せて出さない", () => {
+      renderCard({ executionTarget: LOCAL_TARGET, issueSession: makeSession() });
+
+      expect(screen.queryByText("ローカルで対応中")).toBeNull();
+    });
+
+    it("GitHub Actionsで走るIssueでは出さない", () => {
+      renderCard();
+
+      expect(screen.queryByText("ローカルで対応中")).toBeNull();
     });
   });
 });

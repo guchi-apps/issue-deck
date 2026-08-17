@@ -50,6 +50,18 @@ export function labelNamesWithLocal(labels: readonly { name: string }[]): string
   return [...names, LOCAL_LABEL_NAME];
 }
 
+/**
+ * そのIssueが**ローカル（サブPCまたは手元）で対応中か**（`11.local`が付いているか）。
+ *
+ * 起動の経路によらず、**画面から起動したときは積むより先にこのラベルを付ける**
+ * （`start-local-session-button.tsx`の`ensureLocalLabel`・「実装を開始」ダイアログも同じ）。
+ * サブPCのランチャー（`start-issue.sh`）も起動時に付けるため、**ジョブ・セッションの記録が
+ * まだ画面へ届いていない間、実行が始まったことを知っている唯一の材料**になる（#1815）。
+ */
+export function isLocalSessionIssue(labels: readonly { name: string }[]): boolean {
+  return labels.some((label) => label.name === LOCAL_LABEL_NAME);
+}
+
 /** 未着手を表すProject Status名 */
 const READY_STATUS = getProgressStatusDef("ready").projectStatus;
 

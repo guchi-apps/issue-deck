@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   compactIssueSessionLabel,
+  describeSessionReap,
+  describeSessionRecovery,
   findSessionForIssue,
   isSessionWaitingInput,
   shortIssueSessionLabel,
@@ -27,6 +29,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    reapAt: null,
+    reapReason: null,
     ...overrides,
   };
 }
@@ -110,8 +114,67 @@ describe("summarizeIssueSession", () => {
     const s = summarizeIssueSession(
       session({ state: "GONE", activity: "WAITING_INPUT", remoteControlUrl: "https://claude.ai/code/x" }),
     );
-    expect(s.tone).toBe("done");
     expect(s.remoteControlUrl).toBeNull();
+  });
+
+  // #1830。「終了しました」だけでは、役目を終えて自動で畳まれたのか、こちらの回答を待ったまま
+  // 消えたのか（復旧して答える必要がある）を区別できない
+  describe("回答を待ったまま終わったセッション（#1830）", () => {
+    it("回答前に終了したことを書き分ける", () => {
+      const s = summarizeIssueSession(session({ state: "GONE", activity: "WAITING_INPUT" }));
+      expect(s.tone).toBe("waiting");
+      expect(s.shortLabel).toBe("回答前に終了");
+      expect(s.label).toContain("回答を待っている間に終了");
+      expect(s.detail).toContain("あなたの回答を待っている間に");
+      // 一覧のバッジも同じ分岐で言う（片方だけ増やさない）
+      expect(shortIssueSessionLabel(session({ state: "GONE", activity: "WAITING_INPUT" }))).toBe(
+        "回答前に終了",
+      );
+    });
+
+    it("答えた後に進んで終わったセッションは、これまでどおり「終了」とだけ出す", () => {
+      const s = summarizeIssueSession(session({ state: "EXITED", activity: "RESPONDED" }));
+      expect(s.tone).toBe("done");
+      expect(s.shortLabel).toBe("終了");
+      expect(s.detail).toBeNull();
+      expect(shortIssueSessionLabel(session({ state: "EXITED", activity: "RESPONDED" }))).toBe(
+        "終了",
+      );
+    });
+
+    // 異常終了は終了コードを出すのが要点なので、これまでどおり`error`のまま
+    it("異常終了は入力待ちのまま落ちていても「異常終了」", () => {
+      const s = summarizeIssueSession(
+        session({ state: "FAILED", exitStatus: 1, activity: "WAITING_INPUT" }),
+      );
+      expect(s.tone).toBe("error");
+      expect(s.shortLabel).toBe("異常終了");
+    });
+  });
+
+  describe("describeSessionRecovery（#1830）", () => {
+    it("動いているセッションには出さない", () => {
+      expect(describeSessionRecovery(session({ state: "ALIVE" }))).toBeNull();
+    });
+
+    it("終了したセッションには、押すと何が起きるかを添えて返す", () => {
+      const recovery = describeSessionRecovery(session({ state: "GONE", activity: "RESPONDED" }));
+      expect(recovery).not.toBeNull();
+      expect(recovery?.primary).toBe(false);
+      expect(recovery?.detail).toContain("前回の会話の続き");
+      expect(recovery?.detail).toContain("11.local");
+    });
+
+    it("回答前に終了したときだけ主導線にする", () => {
+      const recovery = describeSessionRecovery(
+        session({ state: "GONE", activity: "WAITING_INPUT" }),
+      );
+      expect(recovery?.primary).toBe(true);
+    });
+
+    it("異常終了も復旧の対象にする", () => {
+      expect(describeSessionRecovery(session({ state: "FAILED", exitStatus: 1 }))).not.toBeNull();
+    });
   });
 
   // #1353。pollerは1巡ごとにlastReportedAtを更新するため、これを入力待ちに添えると
@@ -263,5 +326,80 @@ describe("isSessionWaitingInput", () => {
 
   it("セッションが無ければ偽", () => {
     expect(isSessionWaitingInput(null)).toBe(false);
+  });
+});
+
+/**
+ * 自動終了までの残り時間（#1817）。
+ *
+ * **判定そのものはサブPCの`reap-sessions.sh`が持ち、ここは運ばれてきた予定を言い方へ直すだけ。**
+ * 画面側で条件を組み立て直すと必ずずれ、終わらないセッションに終了予告が出る。
+ */
+describe("describeSessionReap", () => {
+  const NOW = new Date("2026-08-16T12:00:00.000Z");
+
+  it("残り時間と理由を出す", () => {
+    const notice = describeSessionReap(
+      session({ reapAt: "2026-08-16T12:03:10.000Z", reapReason: "PR_MERGED" }),
+      NOW,
+    );
+    expect(notice?.label).toBe("あと3分で自動終了");
+    expect(notice?.imminent).toBe(false);
+    expect(notice?.detail).toContain("PRがマージ済みのため");
+    // 畳まれた後どうなるかまで書く（続けたい場合に何をすればよいかが分かるように）
+    expect(notice?.detail).toContain("worktreeは残る");
+  });
+
+  it("残り1分を切ったら「まもなく」に変える", () => {
+    const notice = describeSessionReap(
+      session({ reapAt: "2026-08-16T12:00:50.000Z", reapReason: "ISSUE_CLOSED" }),
+      NOW,
+    );
+    expect(notice?.label).toBe("まもなく自動終了");
+    expect(notice?.imminent).toBe(true);
+  });
+
+  it("期限を過ぎた直後はまだ出す（次の巡で畳まれる）", () => {
+    expect(
+      describeSessionReap(
+        session({ reapAt: "2026-08-16T11:59:00.000Z", reapReason: "PR_MERGED" }),
+        NOW,
+      )?.label,
+    ).toBe("まもなく自動終了");
+  });
+
+  it("期限を大きく過ぎたら出さない（回収が止まっているときに残り続けさせない）", () => {
+    expect(
+      describeSessionReap(
+        session({ reapAt: "2026-08-16T11:55:00.000Z", reapReason: "PR_MERGED" }),
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("質問セッションは会話を引き継がない旨を出す", () => {
+    const notice = describeSessionReap(
+      session({ reapAt: "2026-08-16T12:10:00.000Z", reapReason: "QUESTION_IDLE" }),
+      NOW,
+    );
+    expect(notice?.detail).toContain("新しく質問してください");
+    expect(notice?.detail).not.toContain("worktree");
+  });
+
+  it("生きていないセッションには出さない", () => {
+    for (const state of ["EXITED", "FAILED", "GONE"] as const) {
+      expect(
+        describeSessionReap(
+          session({ state, reapAt: "2026-08-16T12:03:00.000Z", reapReason: "PR_MERGED" }),
+          NOW,
+        ),
+      ).toBeNull();
+    }
+  });
+
+  it("予定が無い・理由だけ・時刻だけのときは出さない", () => {
+    expect(describeSessionReap(session(), NOW)).toBeNull();
+    expect(describeSessionReap(session({ reapReason: "PR_MERGED" }), NOW)).toBeNull();
+    expect(describeSessionReap(session({ reapAt: "2026-08-16T12:03:00.000Z" }), NOW)).toBeNull();
   });
 });

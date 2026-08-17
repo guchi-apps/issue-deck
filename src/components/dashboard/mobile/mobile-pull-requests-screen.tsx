@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, pullRequestViews } from "@/lib/pull-request-views";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,10 @@ type MobilePullRequestsScreenProps = {
   failedRepositories: string[];
   fetchedAt: string | null;
   isLoading: boolean;
+  /** 自動更新も含めて取得中か（#1767）。`PullRequestList`へそのまま渡す */
+  isRefreshing: boolean;
+  /** 自動更新の間隔（#1767）。`PullRequestList`へそのまま渡す */
+  autoRefreshIntervalMs: AutoRefreshIntervalMs;
   error: string | null;
   onRefresh: () => void;
   onBack: () => void;
@@ -46,6 +51,8 @@ export function MobilePullRequestsScreen({
   failedRepositories,
   fetchedAt,
   isLoading,
+  isRefreshing,
+  autoRefreshIntervalMs,
   error,
   onRefresh,
   onBack,
@@ -60,6 +67,8 @@ export function MobilePullRequestsScreen({
       failedRepositories={failedRepositories}
       fetchedAt={fetchedAt}
       isLoading={isLoading}
+      isRefreshing={isRefreshing}
+      autoRefreshIntervalMs={autoRefreshIntervalMs}
       error={error}
       onRefresh={onRefresh}
       onSelectPullRequest={onSelectPullRequest}

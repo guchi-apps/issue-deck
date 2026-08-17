@@ -9,6 +9,7 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
@@ -42,6 +43,7 @@ import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
+import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
@@ -49,6 +51,12 @@ import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
+import {
+  COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS,
+  normalizeAutoRefreshInterval,
+  shorterAutoRefreshInterval,
+  type AutoRefreshIntervalMs,
+} from "@/lib/auto-refresh";
 import {
   buildBranchFlow,
   latestReleaseMergedAtByRepository,
@@ -334,11 +342,24 @@ export function IssueDeckShell({
   const autoRefreshPullRequests =
     (isPullRequestPaneActive && filters.prview === "completed") ||
     pendingCheckUserToasts.length > 0;
+  // ブランチ画面の自動更新の間隔（#1767）。**既定は「自動更新しない」**で、選んだ間隔は
+  // 端末のlocalStorageに残す。1巡でリポジトリ数ぶんのGraphQL（ブランチ状況）とPR一覧の
+  // 取得をまとめて使うため、既定で回すとレート制限の消費が常時上がる。
+  // 保存済みの値は選択肢のいずれかへ正規化する（`normalizeAutoRefreshInterval`）。
+  const [storedFlowAutoRefreshIntervalMs, setFlowAutoRefreshIntervalMs] =
+    usePersistedState<AutoRefreshIntervalMs>("issue-deck:flow-auto-refresh-interval", null);
+  const flowAutoRefreshIntervalMs = normalizeAutoRefreshInterval(storedFlowAutoRefreshIntervalMs);
   // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
   // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
+  // 自動更新の間隔は「完了したPRビュー（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
+  // 短い方（#1767）。どちらの要求も無ければnull＝自動更新しない。
+  const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
+    autoRefreshPullRequests ? COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS : null,
+    isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
+  );
   const openPullRequests = usePullRequests(
     isFlowPaneActive ? "all" : "open",
-    autoRefreshPullRequests,
+    pullRequestAutoRefreshIntervalMs,
   );
 
   useIssuePolling((polledIssues) => {
@@ -479,6 +500,9 @@ export function IssueDeckShell({
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
   const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
+  // 手作業アシスタント（#1826）。PC・スマホのどちらの入口から開いても同じ状態を使うため、
+  // 状態とダイアログはここに1つだけ置く
+  const manualStepGuide = useManualStepGuide(issues, manualStepReadiness);
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -585,8 +609,9 @@ export function IssueDeckShell({
   // 出した版ごと画面から消える。
   const mergedPullRequestsLoaded = openPullRequests.loadedScope === "all";
 
-  // ブランチ状況（#1455）。取得はこの画面を開いている間だけで、自動ポーリングは持たない。
-  const branchFlowStatus = useBranchFlow(isFlowPaneActive);
+  // ブランチ状況（#1455）。取得はこの画面を開いている間だけ。自動更新はユーザーが間隔を
+  // 選んだときだけ回る（#1767。既定は自動更新しない）。
+  const branchFlowStatus = useBranchFlow(isFlowPaneActive, flowAutoRefreshIntervalMs);
 
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
   // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
@@ -884,9 +909,12 @@ export function IssueDeckShell({
                   flow={branchFlow}
                   fetchedAt={branchFlowStatus.fetchedAt}
                   isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+                  isRefreshing={branchFlowStatus.isRefreshing || openPullRequests.isRefreshing}
                   error={branchFlowStatus.error ?? openPullRequests.error}
                   failedRepositories={branchFlowStatus.failedRepositories}
                   mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+                  autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+                  onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
                   onRefresh={() => {
                     branchFlowStatus.refresh();
                     openPullRequests.refresh();
@@ -925,6 +953,8 @@ export function IssueDeckShell({
                     failedRepositories={openPullRequests.failedRepositories}
                     fetchedAt={openPullRequests.fetchedAt}
                     isLoading={openPullRequests.isLoading}
+                    isRefreshing={openPullRequests.isRefreshing}
+                    autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                     error={openPullRequests.error}
                     onRefresh={openPullRequests.refresh}
                     onBack={goBack}
@@ -955,6 +985,7 @@ export function IssueDeckShell({
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                  onStartManualStepGuide={() => manualStepGuide.start()}
                 />
               )}
 
@@ -1017,6 +1048,7 @@ export function IssueDeckShell({
                   onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onSelectRepository={selectRepositoryByFullName}
+                  onStartManualStepGuide={manualStepGuide.start}
                 />
               )}
             </div>
@@ -1064,11 +1096,15 @@ export function IssueDeckShell({
               flow={branchFlow}
               fetchedAt={branchFlowStatus.fetchedAt}
               isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
+              /* 自動更新のぶんも回す（#1767）。ブランチ状況とPR一覧のどちらかが飛んでいれば回る */
+              isRefreshing={branchFlowStatus.isRefreshing || openPullRequests.isRefreshing}
               error={branchFlowStatus.error ?? openPullRequests.error}
               failedRepositories={branchFlowStatus.failedRepositories}
               mergedPullRequestsLoaded={mergedPullRequestsLoaded}
               /* 絞り込みでは無く「展開して見せる」形にする（#1750） */
               expandedRepositoryFullNames={filters.repos}
+              autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+              onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
               onRefresh={() => {
                 branchFlowStatus.refresh();
                 openPullRequests.refresh();
@@ -1087,6 +1123,8 @@ export function IssueDeckShell({
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}
                 isLoading={openPullRequests.isLoading}
+                isRefreshing={openPullRequests.isRefreshing}
+                autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                 error={openPullRequests.error}
                 onRefresh={openPullRequests.refresh}
                 selectedPullRequestId={filters.pr}
@@ -1140,6 +1178,8 @@ export function IssueDeckShell({
                 }
                 // 手作業Issueの行に「いま実行できるか」を出す（#1763）
                 manualStepReadiness={manualStepReadiness}
+                // 溜まった手作業を1件ずつ案内する入口（#1826）
+                onStartManualStepGuide={() => manualStepGuide.start()}
                 // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
                 filtersIgnored={filtersIgnored}
                 className="hidden shrink-0 border-r md:flex"
@@ -1162,6 +1202,7 @@ export function IssueDeckShell({
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
                   }
+                  onStartManualStepGuide={manualStepGuide.start}
                 />
               </div>
               {selectedIssue && (
@@ -1185,6 +1226,15 @@ export function IssueDeckShell({
             </>
           )}
         </div>
+
+        {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
+        <ManualStepGuideDialog
+          queueIds={manualStepGuide.queueIds}
+          issues={issues}
+          open={manualStepGuide.open}
+          onOpenChange={manualStepGuide.setOpen}
+          onIssueUpdated={handleIssueUpdated}
+        />
 
         <CreateIssueDialog
           open={createDialogOpen}

@@ -23,12 +23,18 @@ export function ManualStepPrerequisites({
   prerequisites,
   summary,
   repositoryFullName,
+  titleId = "manual-step-prerequisites-title",
   className,
 }: {
   prerequisites: ManualStepPrerequisite[];
   summary: ManualStepPrerequisiteSummary;
   /** 手作業Issue自身のリポジトリ。同じリポジトリの参照は`#123`と短く出す */
   repositoryFullName: string;
+  /**
+   * 見出しのid。手作業アシスタント（#1826）はIssue詳細のパネルと同時にDOMへ載るため、
+   * 呼び出し側が別のidを渡してidの重複を避ける
+   */
+  titleId?: string;
   className?: string;
 }) {
   if (prerequisites.length === 0) return null;
@@ -37,10 +43,10 @@ export function ManualStepPrerequisites({
   return (
     <section
       className={cn("rounded-md border bg-background p-2.5", className)}
-      aria-labelledby="manual-step-prerequisites-title"
+      aria-labelledby={titleId}
     >
       <div className="flex items-center justify-between gap-2">
-        <p id="manual-step-prerequisites-title" className="text-xs font-medium">
+        <p id={titleId} className="text-xs font-medium">
           前提条件の状況
         </p>
         <p className="text-xs tabular-nums text-muted-foreground">

@@ -241,6 +241,48 @@ describe("parseDispatchSessionReport", () => {
     expect(parseDispatchSessionReport({ ...valid, claudeStarting: "true" })).toBeNull();
     expect(parseDispatchSessionReport({ ...valid, claudeStarting: 1 })).toBeNull();
   });
+
+  /**
+   * #1817。畳む予定は`claudeStarting`と同じく新しいpollerだけが送る。**壊れていても報告ごと
+   * 弾かない**（1件でも弾くと、そのホストのセッションが全部「消えた」と判定される）。
+   */
+  it("畳む予定を受け取る", () => {
+    expect(
+      parseDispatchSessionReport({
+        ...valid,
+        reapAt: "2026-08-16T12:03:00Z",
+        reapReason: "PR_MERGED",
+      }),
+    ).toEqual({ ...valid, reapAt: "2026-08-16T12:03:00.000Z", reapReason: "PR_MERGED" });
+  });
+
+  it("畳む予定は省略できる（古いpollerでは項目そのものを増やさない）", () => {
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed && "reapAt" in parsed).toBe(false);
+  });
+
+  it("予定が無いことの報告（null）はそのまま受け取る", () => {
+    expect(
+      parseDispatchSessionReport({ ...valid, reapAt: null, reapReason: null }),
+    ).toEqual({ ...valid, reapAt: null, reapReason: null });
+  });
+
+  it("知らない理由コード・壊れた時刻は、その項目だけを落として報告は通す", () => {
+    expect(
+      parseDispatchSessionReport({ ...valid, reapAt: "2026-08-16T12:03:00Z", reapReason: "WAT" }),
+    ).toEqual({ ...valid, reapAt: null, reapReason: null });
+    expect(
+      parseDispatchSessionReport({ ...valid, reapAt: "まもなく", reapReason: "PR_MERGED" }),
+    ).toEqual({ ...valid, reapAt: null, reapReason: null });
+  });
+
+  it("時刻と理由が揃っていなければ両方落とす（理由の無い終了予告を画面へ出さない）", () => {
+    expect(parseDispatchSessionReport({ ...valid, reapAt: "2026-08-16T12:03:00Z" })).toEqual({
+      ...valid,
+      reapAt: null,
+      reapReason: null,
+    });
+  });
 });
 
 /**

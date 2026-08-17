@@ -132,6 +132,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
+  （#1666・#1810）。[`use-dispatch-state.ts`](../src/hooks/use-dispatch-state.ts)の
+  `hosts`・`sessions`・`jobs`は**取得前も`[]`を返す**ため、受け取る側からは「1台も無い」
+  「セッションが無い＝入力待ちではない」と区別が付かない。区別せずに描くと、開いた直後だけ
+  必ず「無い側」の表示が出てからフェッチ完了で書き換わる。実際に、
+  実装開始ボタンが「GitHub Actionsで開始」→「サブPCで開始」へ変わり（#1666）、確認待ちの案内と
+  承認欄が「承認欄へ移動」「承認」「修正」→「Remote Controlで開く」へ変わっていた（#1810）。
+  **`isLoaded`は取得に失敗しても`true`になる**ので、待ち続けて何も出ない状態にはならない。
+  判定を持つ`resolveCheckUserGuidance`（`sessionStatePending`）と`ApprovalActions`
+  （同名のprop）は、確定するまで**どちらの形も出さない**（推測で片方を出すより、一拍遅れて
+  正しいものが出る方が害が小さい）。**マージ待ちだけは例外**で、判定材料がラベルとコメント
+  なのでセッションの状態を待たない。
 - **スマホのIssue詳細のヘッダーに操作を足さない**（#1646）。置けるのは`←`・タイトル・`★`・`⋯`だけで、
   それ以上並べると390px幅でタイトルが読めなくなる（以前は`▶`と`?`があり、タイトルに120pxしか
   残っていなかった）。**本文に同じ操作があるものはヘッダーに置かない**（`▶`は
@@ -395,6 +407,33 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
+- **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
+  [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
+  本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
+  本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
+  本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・
+  ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
+  - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
+    Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
+    手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
+    `TASK_LINE_PATTERN`を共有する**——別の正規表現を書くと、Issue詳細の「タスク 2 / 3 完了」と
+    アシスタントの手順数が食い違う。
+  - **案内するのは前提条件が満たされたものだけ**（`buildManualStepQueue`。件数・通知ベルと同じ
+    `computeManualStepReadiness`）。ただし**Issue詳細から開いた1件だけは前提待ちでも外さない**——
+    人が明示的に開いたものを、本文からの推定でしかない判定で締め出さない。
+  - **入口は一覧の上に置き、ヘッダーには入れない**。スマホの一覧は`IssueList`のヘッダーを
+    出さず（`showHeader={false}`）、画面側のヘッダーには操作を足さない決まり（#1646）のため、
+    ヘッダーに置くとPCにしか出ない。Issue詳細側の入口は`ManualStepPanel`の「順番に進める」。
+  - **新しい状態もAPIも持たない。** チェックの実体はIssue本文（`use-issue-task-list.ts`）、
+    クローズは`ManualStepPanel`と同じ`PATCH /api/issues`。GitHubで付けても一覧で付けても
+    アシスタントで付けても、書き換わるのは同じ1か所。
+  - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
+    一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
+    （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。
+  - **テンプレートに沿っていない本文（`hasTemplate: false`）を隠さない。** 手順に割れない
+    だけなので、本文をそのまま1画面で出してクローズの出口だけ付ける。
+  - **コマンドのコピーボタンを作らない。** 手順をMarkdownとして描けば、既存の
+    `MarkdownBody`のコードブロック（#1726）がそのまま付く。
 - **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
   [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
   （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
@@ -428,7 +467,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
   1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
   （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
-  `hooks/use-pull-requests.ts`。#1531）。
+  `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
+  そちらの間隔でもこの取得が回る**（#1767。両方の要求が重なったときは短い方。
+  [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`shorterAutoRefreshInterval`）。
 - **10秒間隔で回せるのは、GitHubへの取得がETagの条件付きGETを通っているから**（#1531。
   [`lib/github/conditional-request.ts`](../src/lib/github/conditional-request.ts)）。
   GitHubのREST APIは`If-None-Match`付きのリクエストが`304 Not Modified`を返したとき、
@@ -578,6 +619,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
   CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
   残り続けていた。
+  **そのPRが本番へ出たかは、「マージ済み」の隣のバッジで出す**（#1814。`DeployStatusBadge`）。
+  判定の材料も結論もブランチ画面と同じで、
+  [`lib/pull-request-deploy.ts`](../src/lib/pull-request-deploy.ts)の
+  `resolvePullRequestDeployStatus`が「作業PRのマージ時刻より後、最初にmainへ入ったPRがその変更を
+  運んだ」（#1455と同じ前提）で運び手を決め、デプロイの成否は`resolveDeployState`（#1579）を
+  そのまま通す。**2か所で違う結論を出さないよう、判定を写さずこの関数から呼ぶ。**
+  取得は専用の`GET /api/pull-requests/deploy-status`（PR単体・mainへのクローズ済みPR一覧・
+  `deploy.yml`の最新run）で、**マージ済みのPRを開いたときだけ**呼ぶ。詳細APIへ相乗りさせないのは、
+  デプロイ中の取り直し（`hooks/use-pull-request-deploy-status.ts`。デプロイ待ち・実行中だけ30秒ごと）の
+  たびに本文・コメント・レビューまで取り直さないため。**判定できないときは何も出さない**——
+  `deploy.yml`が無いリポジトリ、取得した30件より古いリリースしか関係しないPR、15分待っても実行が
+  現れないリポジトリでは、「未反映」と言い切らずバッジごと消す（ブランチ画面と同じ方針）。
+  スマホのPR詳細は同じ`PullRequestDetail`を使うため、**片方の画面にだけ出す実装にしない**。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -590,8 +644,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `delete_branch_on_merge`も有効にしたが、**ブランチ数に依存しない作りのままにしてある**）。
   代わりに
   **進行中のIssueに対応するブランチ（`issue-<番号>`）だけをGraphQLのエイリアスで名指しして引く**。
-  **自動ポーリングは持たず**、画面を開いたときと更新ボタンのときだけ走る
-  （`hooks/use-branch-flow.ts`。一度取った内容は画面を離れても保持する）。
+  走るのは画面を開いたときと更新ボタンのとき、そして**ユーザーが自動更新の間隔を選んでいれば
+  その周期**（#1767。既定は自動更新しない。`hooks/use-branch-flow.ts`。一度取った内容は
+  画面を離れても保持する）。
   この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
   「どのバージョンで本番へ出たか」を出せないため。組み立ては
   [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、
@@ -667,10 +722,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
   場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
   打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。
-  **この画面で唯一の自動更新がここ**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
+  デプロイ状況は**常に自動更新の対象**（`hooks/use-deploy-status.ts`。デプロイが動いている間だけ
   30秒ごと）。消費が釣り合うのは、リポジトリあたりREST 1回であることと、
   `fetchLatestWorkflowRun`がETagの条件付きGETを通す（変化が無ければ304でレート制限を消費しない）
-  ため。ブランチ状況とPR一覧は従来どおり手動更新のまま。
+  ため。
   **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
   数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
   （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
@@ -698,6 +753,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
   無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
   「バージョン不明」を出す（誤った版を出さないため）。
+- **ブランチ状況とPR一覧の自動更新は、ユーザーが間隔を選んだときだけ回る**（#1767。
+  更新ボタンの右のメニューで「自動更新しない（既定）／1分／5分／10分」。選択は端末の
+  localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
+  [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)が持つ）。**既定を「自動更新しない」に
+  しているのは1巡の消費が重いから**——ブランチ状況はリポジトリあたりGraphQL 1回、PR一覧は
+  リポジトリあたりREST 2回（ETagで304なら消費0）＋draft以外のopen PRあたりGraphQL 1回で、
+  26リポジトリを1分間隔で回すとGraphQLだけで毎時1,600ポイント前後（上限5,000ポイント/時）になる。
+  回すのは**この画面を開いていて、かつタブが前面にある間だけ**（`hooks/use-auto-refresh.ts`が
+  Page Visibility APIで止め、前面へ戻った時点で次の周期を待たずに取り直す）。
+  **自動更新の取得では読み込み表示（ボタンの無効化・「読み込み中...」）を出さず、更新アイコンの
+  回転（`isRefreshing`）だけを出す。** 周期ごとに操作できなくなるのを避けつつ、画面が勝手に
+  変わったときに何が起きたのかが分かるようにするため。失敗も画面に出さない（次の周期で回復する）。
 - **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
   対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
   `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ
@@ -870,7 +937,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   起動時の記述子を、`session-notify.sh`がフックの最後のイベントを書く）と、gitとGitHubの事実だけで、
   **画面（`capture-pane`）の内容は読まない**。**PRを作り`11.local`も外した引き渡し済みの
   セッションも畳む**（#1541。猶予は`SESSION_HANDOFF_IDLE_MINUTES`。畳まれても
-  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。**横断質問セッションは
+  `run-issue-session.sh`の`--continue`で前回の会話の続きから再開できる）。**猶予待ちのセッションには
+  「あと何分で畳むか」を状態ファイル（`.reap`）へ残し、pollerが`DispatchSession.reapAt`として
+  運ぶ**（#1817。画面の文言は`lib/dispatch/issue-session.ts`の`describeSessionReap`。
+  **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
+  終わらないセッションに終了予告が出る）。**横断質問セッションは
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
@@ -995,6 +1066,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**
+- **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
+  末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに
+  サムネイルで横に並べる**（#1819）。呼び出し元へ渡す`value`は従来どおり画像記法込みの1本の
+  文字列なので、下書きの保存も投稿も変わらない。**入力欄の表示と`value`がズレているのはここだけ**で、
+  分解・合成は同ファイルの`splitAttachments` / `composeAttachments`が持つ。文章の途中に書かれた
+  画像記法は本文の文字のまま残す（既存のIssue・コメントを編集で書き換えないため）。
 
 ## 画面のボタンは`@claude`コメントで動く
 

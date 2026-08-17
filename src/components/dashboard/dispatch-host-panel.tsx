@@ -15,7 +15,11 @@ import {
   formatHostMetricPercent,
   type DispatchHostMetricTone,
 } from "@/lib/dispatch/host-metrics";
-import { summarizeIssueSession, type IssueSessionTone } from "@/lib/dispatch/issue-session";
+import {
+  describeSessionReap,
+  summarizeIssueSession,
+  type IssueSessionTone,
+} from "@/lib/dispatch/issue-session";
 import { selectHostSessions } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -225,6 +229,10 @@ function SessionRow({
 }) {
   const summary = summarizeIssueSession(session);
   const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+  // 自動終了までの残り時間（#1817）。**文言は`describeSessionReap`をそのまま使う**（Issue詳細と
+  // 同じ状態が、画面によって違う言い方にならないようにする）。理由の1行はここには出さない
+  // （行が2倍になるので、詳しくはIssueを開いてもらう）
+  const reapNotice = describeSessionReap(session);
 
   return (
     <li className="flex items-start gap-1.5 text-xs">
@@ -245,6 +253,11 @@ function SessionRow({
         />
         <span className={cn("block truncate", SESSION_TEXT_CLASS[summary.tone])}>
           {repoName}・{summary.shortLabel}・{formatRelativeDate(summary.at)}
+          {reapNotice && (
+            <>
+              ・<span className="text-amber-700 dark:text-amber-400">{reapNotice.label}</span>
+            </>
+          )}
         </span>
       </span>
       {/*

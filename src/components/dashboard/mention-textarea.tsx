@@ -10,7 +10,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { Eye, ImagePlus, Loader2, Pencil } from "lucide-react";
+import { Eye, ImagePlus, Loader2, Pencil, X } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,52 @@ function detectTrigger(text: string, cursor: number): Trigger | null {
   return { type: symbol === "@" ? "mention" : "issue", start, query };
 }
 
+/** 入力欄の下にサムネイルとして並べる、添付済みの画像1枚ぶん */
+export type ImageAttachment = {
+  /** 画像記法のalt。アップロードしたファイル名が入る */
+  name: string;
+  url: string;
+};
+
+/** 単独の行がまるごと画像記法（`![alt](url)`）になっているかどうか */
+const ATTACHMENT_LINE_PATTERN = /^!\[([^\]]*)\]\(([^()\s]+)\)$/;
+
+/**
+ * 本文の末尾に並ぶ画像記法を「添付」として切り出す（#1819）。
+ *
+ * 添付は常に末尾へ足すため、末尾から空行を読み飛ばしつつ画像記法だけの行を集め、
+ * それ以外の行が現れた時点で打ち切る。**文章の途中に書かれた画像記法は本文の文字として
+ * そのまま残す**——過去の下書きや既存コメントには文中に画像を置いたものがあり、
+ * それらを勝手に末尾へ動かすと編集で本文が書き換わってしまうため。
+ */
+export function splitAttachments(value: string): { body: string; attachments: ImageAttachment[] } {
+  const lines = value.split("\n");
+  const attachments: ImageAttachment[] = [];
+  let end = lines.length;
+  while (end > 0) {
+    const line = lines[end - 1].trim();
+    if (line === "") {
+      end -= 1;
+      continue;
+    }
+    const match = ATTACHMENT_LINE_PATTERN.exec(line);
+    if (!match) break;
+    attachments.unshift({ name: match[1], url: match[2] });
+    end -= 1;
+  }
+  if (attachments.length === 0) return { body: value, attachments: [] };
+  return { body: lines.slice(0, end).join("\n").replace(/\s+$/, ""), attachments };
+}
+
+/** `splitAttachments`の逆。本文と添付から、呼び出し元へ渡す1本の文字列を組み立てる */
+export function composeAttachments(body: string, attachments: ImageAttachment[]): string {
+  // 添付が無いときに本文へ手を入れると、末尾の改行が消えて入力の邪魔になる。
+  if (attachments.length === 0) return body;
+  const block = attachments.map(({ name, url }) => `![${name}](${url})`).join("\n");
+  const trimmed = body.replace(/\s+$/, "");
+  return trimmed === "" ? block : `${trimmed}\n\n${block}`;
+}
+
 type MentionTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange"> & {
   value: string;
   onChange: (value: string) => void;
@@ -76,31 +122,38 @@ export function MentionTextarea({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [uploadingCount, setUploadingCount] = useState(0);
-  const isUploading = uploadingCount > 0;
+  const [uploads, setUploads] = useState<{ id: number; name: string }[]>([]);
+  const isUploading = uploads.length > 0;
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isPreview, setIsPreview] = useState(false);
 
-  // 複数画像を同時にアップロードすると、各アップロード完了時のonChangeがレンダー未反映のvalueを
-  // 閉じ込めてしまい、後勝ちで他方の挿入結果を消してしまう。挿入のたびに同期更新するrefを
-  // 正とすることで、完了順が前後しても両方の挿入結果を保持できるようにする。
-  const latestValueRef = useRef(value);
+  // 呼び出し元へ渡す値（value）は「本文＋末尾の画像記法」のままにし、表示だけを分ける（#1819）。
+  // 入力欄には本文だけを出し、末尾の画像記法はサムネイルとして下に並べる。
+  const [{ body, attachments }, setContent] = useState(() => splitAttachments(value));
+  // 複数画像を同時にアップロードすると、各アップロード完了時のonChangeがレンダー未反映の値を
+  // 閉じ込めてしまい、後勝ちで他方の追加結果を消してしまう。更新のたびに同期更新するrefを
+  // 正とすることで、完了順が前後しても両方の添付を保持できるようにする。
+  const bodyRef = useRef(body);
+  const attachmentsRef = useRef(attachments);
   const lastEmittedRef = useRef(value);
-  // 画像アップロード中に次の挿入位置を引き継ぐための参照。nullの間は実際のカーソル位置を使う。
-  const pendingInsertPosRef = useRef<number | null>(null);
-  const activeUploadsRef = useRef(0);
+  const uploadIdRef = useRef(0);
   useEffect(() => {
-    // onChange経由で自分が発行した値への追従（エコーバック）は無視し、送信後のクリアなど
-    // 呼び出し元起因の外部変更のみをrefへ反映する。
-    if (value !== lastEmittedRef.current) {
-      latestValueRef.current = value;
-      lastEmittedRef.current = value;
-    }
+    // onChange経由で自分が発行した値への追従（エコーバック）は無視し、送信後のクリアや
+    // 下書きの復元など呼び出し元起因の外部変更のみを取り込む。
+    if (value === lastEmittedRef.current) return;
+    const next = splitAttachments(value);
+    lastEmittedRef.current = value;
+    bodyRef.current = next.body;
+    attachmentsRef.current = next.attachments;
+    setContent(next);
   }, [value]);
 
-  function emitChange(nextValue: string) {
-    latestValueRef.current = nextValue;
+  function emitChange(nextBody: string, nextAttachments: ImageAttachment[]) {
+    bodyRef.current = nextBody;
+    attachmentsRef.current = nextAttachments;
+    setContent({ body: nextBody, attachments: nextAttachments });
+    const nextValue = composeAttachments(nextBody, nextAttachments);
     lastEmittedRef.current = nextValue;
     onChange(nextValue);
   }
@@ -132,12 +185,12 @@ export function MentionTextarea({
   function applySuggestion(inserted: string) {
     if (!trigger) return;
     const el = textareaRef.current;
-    const cursor = el?.selectionStart ?? value.length;
-    const before = value.slice(0, trigger.start);
-    const after = value.slice(cursor);
+    const cursor = el?.selectionStart ?? body.length;
+    const before = body.slice(0, trigger.start);
+    const after = body.slice(cursor);
     const symbol = trigger.type === "mention" ? "@" : "#";
     const text = `${symbol}${inserted} `;
-    emitChange(`${before}${text}${after}`);
+    emitChange(`${before}${text}${after}`, attachmentsRef.current);
     setTrigger(null);
     requestAnimationFrame(() => {
       if (!el) return;
@@ -150,56 +203,36 @@ export function MentionTextarea({
   function handleChange(e: ChangeEvent<HTMLTextAreaElement>) {
     // 空になってプレビューを抜けたあと、再入力で勝手にプレビューへ戻らないようにする。
     setIsPreview(false);
-    emitChange(e.target.value);
+    emitChange(e.target.value, attachmentsRef.current);
     const cursor = e.target.selectionStart ?? e.target.value.length;
     setTrigger(detectTrigger(e.target.value, cursor));
     setActiveIndex(0);
-    // ユーザーが手で編集した場合は、以降の画像挿入は現在のカーソル位置へ戻す。
-    pendingInsertPosRef.current = null;
   }
 
-  function insertAtCursor(text: string) {
-    const el = textareaRef.current;
-    // 複数画像を同時にアップロードすると、完了順が前後してレンダー未反映の value を
-    // 元に挿入し合い、互いの挿入結果を消してしまうことがあるため、常に最新の内容を
-    // 保持する latestValueRef を正として使う。挿入位置も、同一操作内の他の画像の挿入で
-    // 動いた分を pendingInsertPosRef で引き継ぎ、1枚目の直後に2枚目が続くようにする。
-    const current = latestValueRef.current;
-    const start = pendingInsertPosRef.current ?? el?.selectionStart ?? current.length;
-    const end = pendingInsertPosRef.current ?? el?.selectionEnd ?? current.length;
-    const before = current.slice(0, start);
-    const after = current.slice(end);
-    const combined = `${before}${text}${after}`;
-    const nextPos = before.length + text.length;
-    pendingInsertPosRef.current = nextPos;
-    emitChange(combined);
-    requestAnimationFrame(() => {
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(nextPos, nextPos);
-    });
+  function removeAttachment(index: number) {
+    emitChange(
+      bodyRef.current,
+      attachmentsRef.current.filter((_, i) => i !== index),
+    );
   }
 
   async function uploadImage(file: File) {
     setUploadError(null);
-    activeUploadsRef.current += 1;
-    setUploadingCount(activeUploadsRef.current);
+    uploadIdRef.current += 1;
+    const uploadId = uploadIdRef.current;
+    setUploads((prev) => [...prev, { id: uploadId, name: file.name }]);
     try {
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/issues/images", { method: "POST", body: formData });
       if (!res.ok) throw new Error("upload_failed");
       const data: { url: string } = await res.json();
-      insertAtCursor(`![${file.name}](${data.url})`);
+      // カーソル位置は見ない。添付は常に末尾（サムネイル列の右端）へ足す（#1819）。
+      emitChange(bodyRef.current, [...attachmentsRef.current, { name: file.name, url: data.url }]);
     } catch {
       setUploadError("画像のアップロードに失敗しました");
     } finally {
-      activeUploadsRef.current -= 1;
-      setUploadingCount(activeUploadsRef.current);
-      if (activeUploadsRef.current === 0) {
-        // 一連のアップロードが終わったら、次回は改めて実際のカーソル位置から挿入する。
-        pendingInsertPosRef.current = null;
-      }
+      setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
     }
   }
 
@@ -299,7 +332,7 @@ export function MentionTextarea({
       <div className="relative">
         <Textarea
           ref={textareaRef}
-          value={value}
+          value={body}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onBlur={(e) => {
@@ -360,6 +393,14 @@ export function MentionTextarea({
           </ul>
         )}
       </div>
+      {(attachments.length > 0 || uploads.length > 0) && (
+        <AttachmentStrip
+          attachments={attachments}
+          uploads={uploads}
+          onRemove={removeAttachment}
+          disabled={disabled}
+        />
+      )}
       <div className="flex items-center gap-2">
         <input
           ref={fileInputRef}
@@ -387,6 +428,71 @@ export function MentionTextarea({
         />
         {uploadError && <span className="text-xs text-destructive">{uploadError}</span>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 添付した画像を入力欄の下にサムネイルで横一列に並べる（#1819）。
+ * 枚数が増えても高さを1段に保ちたいので、折り返さず横スクロールにする——折り返すと
+ * スマホで送信ボタンが画面外へ押し出されるため。
+ */
+function AttachmentStrip({
+  attachments,
+  uploads,
+  onRemove,
+  disabled,
+}: {
+  attachments: ImageAttachment[];
+  uploads: { id: number; name: string }[];
+  onRemove: (index: number) => void;
+  disabled?: boolean;
+}) {
+  const countLabel = [
+    attachments.length > 0 ? `添付 ${attachments.length}枚` : null,
+    uploads.length > 0 ? `${uploads.length}枚アップロード中` : null,
+  ]
+    .filter(Boolean)
+    .join("・");
+
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto py-0.5" data-slot="mention-attachments">
+      {attachments.map((attachment, index) => (
+        <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
+          <a
+            href={attachment.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`${attachment.name}（新しいタブで開く）`}
+            className="block size-full overflow-hidden rounded-md border"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={attachment.url} alt={attachment.name} className="size-full object-cover" />
+            <span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-[9px] leading-tight text-white">
+              {attachment.name}
+            </span>
+          </a>
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            disabled={disabled}
+            aria-label={`${attachment.name} の添付を取り消す`}
+            className="absolute top-0.5 right-0.5 grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      ))}
+      {uploads.map((upload) => (
+        <div
+          key={upload.id}
+          title={`${upload.name} をアップロード中`}
+          className="grid size-16 shrink-0 place-items-center rounded-md border border-dashed text-muted-foreground md:size-18"
+        >
+          <Loader2 className="size-4 animate-spin" />
+        </div>
+      ))}
+      <span className="shrink-0 text-[11px] text-muted-foreground">{countLabel}</span>
     </div>
   );
 }

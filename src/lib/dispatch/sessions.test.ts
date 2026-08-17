@@ -282,6 +282,69 @@ describe("reportDispatchSessions", () => {
 
       expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
     });
+
+    // #1817。前のセッションに出ていた「あと3分で自動終了」が、起動し直した直後の別の
+    // セッションにそのまま出るのを防ぐ（古いpollerで予定が報告されない場合も含む）
+    it("前のセッションの畳む予定を捨てる", async () => {
+      findMany
+        .mockResolvedValueOnce([
+          existingRow({ state: "GONE", reapAt: NOW, reapReason: "PR_MERGED" }),
+        ])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({
+        reapAt: null,
+        reapReason: null,
+      });
+    });
+  });
+
+  /**
+   * #1817。畳む予定は毎巡の報告に載るので、**送ってきた値でそのまま置き換える**。
+   * 条件を満たさなくなったセッションに終了予告が残ると、いつまでも終わらない予告になる。
+   */
+  describe("畳む予定（#1817）", () => {
+    it("報告された予定をそのまま保存する", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ reapAt: "2026-08-14T12:05:00.000Z", reapReason: "PR_MERGED" })],
+        now: NOW,
+      });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({
+        reapAt: new Date("2026-08-14T12:05:00.000Z"),
+        reapReason: "PR_MERGED",
+      });
+    });
+
+    it("予定が無い報告（null）で、前の巡の予定を消す", async () => {
+      findMany
+        .mockResolvedValueOnce([existingRow({ reapAt: NOW, reapReason: "PR_MERGED" })])
+        .mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ reapAt: null, reapReason: null })],
+        now: NOW,
+      });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({
+        reapAt: null,
+        reapReason: null,
+      });
+    });
+
+    it("項目を送ってこない古いpollerでは既存の値を触らない", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("reapAt");
+    });
   });
 
   /**
