@@ -1017,7 +1017,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   出力を固定したfixtureで検証できる（`src/lib/fleet-status.test.ts`）。**LLMを使わず、
   画面（`capture-pane`）も読まない計器**で、判断はしない。計画が前提としたSHAからの変化を見せる
   `scripts/lib/plan-base.sh`（`<!-- plan-base: <SHA> -->`。**止めず、見せるだけ**）と対で、
-  設計は[multi-agent/gates.md](multi-agent/gates.md)。
+  設計は[multi-agent/gates.md](multi-agent/gates.md)。**`--root <dir>`で突き合わせ先のリポジトリを
+  差し替えられる**（#1218）。GitHub Actionsの計画レビューは他リポジトリからも呼ばれ、そのとき
+  このスクリプトは`.shared-prompts/`（issue-deck側のcheckout）に置かれるため、既定のままでは
+  呼び出し元ではなくissue-deckの先端を出してしまう。
+- **計画の関門（G1）は`.github/prompts/plan-review.md`（無人）と`scripts/prompts/plan-review-agent.md`
+  （ローカル）の兄弟プロンプト**（#1218）。無人は`reusable-issue-dispatch.yml`の`mode=plan`で計画
+  コメントの投稿直後に自動で走り、ローカルは`scripts/start-reviewer.sh --plan <Issue番号>`で人が
+  起こす（引数なしは従来どおり成果物の関門G2）。どちらも`fleet-status.sh`の出力を差し込む。
+  **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある）。
+  `11.local`が付いたローカル計画に無人G1は走らない（#1855で別途扱う）。設計は
+  [multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

@@ -1,20 +1,60 @@
 #!/usr/bin/env bash
-# develop向けの未処理PR一覧を把握した状態で、レビュー・統合エージェント用のClaude Codeセッションを起動する
+# レビューのClaude Codeセッションを起動する。関門（gate）ごとに2つの役がある。
 #
 # 使い方:
-#   scripts/start-reviewer.sh
+#   scripts/start-reviewer.sh                成果物の関門（G2）。develop向けの未処理PRを見てマージする
+#   scripts/start-reviewer.sh --plan <番号>  計画の関門（G1）。Issueの計画をリポジトリの実態と突き合わせる
 #
 # 前提:
 #   - gh コマンドで認証済みであること
 #   - 本体リポジトリ（このスクリプトがあるリポジトリ）はdevelopの最新チェックアウトとして空けておく運用
 #
-# 実装エージェント側（start-issue.sh）と異なり、レビュー・統合エージェントは常に本体リポジトリで
-# 動作し、PRを1件ずつ gh pr checkout しながら処理する。worktreeは作成しない。
+# 実装エージェント側（start-issue.sh）と異なり、どちらの役も常に本体リポジトリで動作する。
+# G2はPRを1件ずつ gh pr checkout しながら処理し、G1は読むだけ。worktreeは作成しない。
+#
+# **G1とG2はセッションを兼ねない**（#1218・docs/multi-agent/gates.md）。マージ権限を持つ
+# セッションが計画へ指摘すると、自分が指示したとおりに実装されたPRを自分でマージする自己承認の
+# 構図になるため、入口とプロンプトを分けている。
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROMPT_TEMPLATE="$ROOT/scripts/prompts/review-agent.md"
+
+MODE="pr"
+PLAN_ISSUE=""
+
+usage() {
+  sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --plan)
+      MODE="plan"
+      PLAN_ISSUE="${2:-}"
+      shift 2 || true
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Error: 不明な引数です: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$MODE" == "plan" ]]; then
+  if [[ ! "$PLAN_ISSUE" =~ ^[0-9]+$ ]]; then
+    echo "Error: --plan にはIssue番号を指定してください（例: scripts/start-reviewer.sh --plan 1218）。" >&2
+    exit 1
+  fi
+  PROMPT_TEMPLATE="$ROOT/scripts/prompts/plan-review-agent.md"
+else
+  PROMPT_TEMPLATE="$ROOT/scripts/prompts/review-agent.md"
+fi
 
 # セッションの出力言語（#1395）。実装セッション（scripts/run-issue-session.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
@@ -46,9 +86,41 @@ echo "develop を最新化しています..."
 git checkout develop
 git pull --ff-only origin develop
 
+trap 'rm -f "${PR_JSON_FILE:-}" "${PR_LIST_FILE:-}" "${FLEET_STATUS_FILE:-}"' EXIT
+
+if [[ "$MODE" == "plan" ]]; then
+  # 計画の関門（G1・#1218）。並行状況スナップショット（#1215）をプロンプトへ差し込む。
+  # 直前にdevelopを最新化しているので --no-fetch でよい。
+  # **取れなくてもレビュー自体は行う**（俯瞰は材料の1つであって必須ではない）。
+  echo "並行状況を取得しています..."
+  FLEET_STATUS_FILE="$(mktemp)"
+  if ! "$ROOT/scripts/fleet-status.sh" --no-fetch >"$FLEET_STATUS_FILE" 2>/dev/null; then
+    echo "警告: 並行状況スナップショットの取得に失敗しました。その節は空のまま起動します。" >&2
+    echo "（並行状況のスナップショットは取得できませんでした）" >"$FLEET_STATUS_FILE"
+  fi
+  cat "$FLEET_STATUS_FILE"
+  echo
+
+  PROMPT_CONTENT="$(python3 - "$PROMPT_TEMPLATE" "$FLEET_STATUS_FILE" "$PLAN_ISSUE" <<'PY'
+import sys
+
+template_path, fleet_path, issue_number = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(template_path, encoding="utf-8") as f:
+    template = f.read()
+with open(fleet_path, encoding="utf-8") as f:
+    fleet = f.read().rstrip("\n")
+
+sys.stdout.write(template.replace("{{ISSUE_NUMBER}}", issue_number).replace("{{FLEET_STATUS}}", fleet))
+PY
+)"
+
+  echo "Issue #$PLAN_ISSUE の計画レビュー（G1）としてClaude Codeセッションを起動します。"
+else
+# 以下は従来どおりの成果物の関門（G2）。ヒアドキュメントを含むため、条件分岐を足しても
+# インデントは変えていない。
 echo "未処理PR一覧を取得しています..."
 PR_JSON_FILE="$(mktemp)"
-trap 'rm -f "$PR_JSON_FILE" "${PR_LIST_FILE:-}"' EXIT
 gh pr list --repo guchi-apps/issue-deck --base develop --json number,title,author,headRefName,mergeable,statusCheckRollup,url >"$PR_JSON_FILE"
 
 PR_LIST_FILE="$(mktemp)"
@@ -121,6 +193,7 @@ with open(pr_list_path, encoding="utf-8") as f:
 sys.stdout.write(template.replace("{{PR_LIST}}", pr_list))
 PY
 )"
+fi
 
 # 全アプリ共通の共有知識リポジトリ（guchi-apps/docs）をローカルにcloneしてある場合は、
 # --add-dir でリポジトリ外のそのディレクトリも参照できるようにする（docs/shared-knowledge.md

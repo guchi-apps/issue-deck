@@ -7,9 +7,11 @@
 #   scripts/fleet-status.sh --no-fetch     origin の最新化を行わない（オフライン・速度優先）
 #   scripts/fleet-status.sh --base main    突き合わせるベースブランチを変える（既定: develop）
 #   scripts/fleet-status.sh --repo owner/name   対象リポジトリを変える（既定: guchi-apps/issue-deck）
+#   scripts/fleet-status.sh --root <dir>   突き合わせるgitリポジトリを変える（既定: このスクリプトのあるリポジトリ）
 #
 # 環境変数:
 #   ISSUE_DECK_REPO               対象リポジトリの既定値
+#   ISSUE_DECK_FLEET_ROOT         --root の既定値
 #   ISSUE_DECK_SESSION_STATE_DIR  セッションの記述子の置き場（scripts/lib/session-state.sh）
 #
 # ## なぜ要るか
@@ -49,9 +51,10 @@ REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
 BASE_BRANCH="develop"
 OUTPUT="table"
 DO_FETCH=1
+ROOT_OVERRIDE="${ISSUE_DECK_FLEET_ROOT:-}"
 
 usage() {
-  sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -72,6 +75,10 @@ while [[ $# -gt 0 ]]; do
       REPO="${2:-$REPO}"
       shift 2 || true
       ;;
+    --root)
+      ROOT_OVERRIDE="${2:-}"
+      shift 2 || true
+      ;;
     -h | --help)
       usage
       exit 0
@@ -86,7 +93,16 @@ done
 
 REPO_NAME="${REPO##*/}"
 
-ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+# 突き合わせるgitリポジトリ。既定はこのスクリプト自身のリポジトリだが、**スクリプトと対象が
+# 別物になる経路がある**ため差し替えられるようにしてある（#1218）。GitHub Actionsの計画レビューは
+# 他リポジトリからも呼ばれ、その場合このスクリプトは`.shared-prompts/`（issue-deck側のcheckout）に
+# 置かれる。既定のままだとissue-deckのdevelop先端を「呼び出し元の先端」として出してしまう。
+ROOT_BASE="${ROOT_OVERRIDE:-$SCRIPT_DIR}"
+if [[ -n "$ROOT_OVERRIDE" && ! -d "$ROOT_OVERRIDE" ]]; then
+  echo "Error: --root に指定されたディレクトリがありません: $ROOT_OVERRIDE" >&2
+  exit 1
+fi
+ROOT="$(git -C "$ROOT_BASE" rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$ROOT" ]]; then
   echo "Error: gitリポジトリの中で実行してください。" >&2
   exit 1
