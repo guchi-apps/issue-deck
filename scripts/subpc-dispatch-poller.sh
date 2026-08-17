@@ -60,6 +60,7 @@
 #   DISPATCH_HOST_NAME              このホストの名前（省略時は `hostname -s`）
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
+#   DISPATCH_MAX_PLAN_REVIEWS       同時に走らせる計画レビューの上限（省略時は2）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
@@ -223,6 +224,14 @@ LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPAT
 # 別のホストへ載せるときは搭載メモリに合わせて dispatch.env で変える。
 MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSIONS:-}" 12)"
 
+# 同時に走らせる計画レビュー（#1855）の上限。**`DISPATCH_MAX_SESSIONS`とは別に持つ。**
+#
+# 計画レビューのセッションは`-issue-`の規約から外してあるため上の本数に数えられず、ジョブも
+# セッションが立った時点で閉じる（枠が即座に空く）。**何も見ないと同時に何本でも走る**ので、
+# ここで別に止める。実装セッションより小さく取るのは、読むだけで数分で終わる代わりに、
+# 走っている間はモデル呼び出しがそのぶん並ぶため（1本$0.7〜1.5）。
+MAX_PLAN_REVIEWS="$(require_positive_int DISPATCH_MAX_PLAN_REVIEWS "${DISPATCH_MAX_PLAN_REVIEWS:-}" 2)"
+
 # チェックアウトの遅れ（#1612）を数え直す間隔（分）。**0で無効**（fetchを一切行わない）。
 #
 # 既定の6時間は「毎巡fetchしたくない」と「遅れに気付くのが1日遅れては意味が無い」の間を取った値。
@@ -349,6 +358,17 @@ screenshot_capable() {
 count_issue_sessions() {
   tmux list-sessions -F '#{session_name}' 2>/dev/null |
     grep -cE '^.+-issue-[1-9][0-9]*$' || true
+}
+
+# 生きている計画レビューのセッションの本数（#1855）。
+#
+# **`count_issue_sessions`とは別に数える。** 計画レビューのセッション名は`-issue-`の規約から
+# 外してあり（そうしないとセッション報告・停止／終了の突き合わせに混ざる）、そのぶん
+# `DISPATCH_MAX_SESSIONS`の計上からも外れる。ジョブはセッションが立った時点で成功として
+# 閉じるため枠も即座に空き、**このまま何も見ないと同時に何本でも走りうる**。
+count_plan_review_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-plan-review-[1-9][0-9]*$' || true
 }
 
 # 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
@@ -1328,6 +1348,18 @@ run_job() {
   if [[ "$kind" == "PLAN_REVIEW" ]]; then
     if [[ ! -f "$PLAN_REVIEW_LAUNCHER" ]]; then
       report_job "$job_id" failed "計画レビューのランチャーがありません（$PLAN_REVIEW_LAUNCHER）。"
+      return 0
+    fi
+    # **本数の上限はここでしか見られない**（#1855）。計画レビューのセッションは
+    # `count_issue_sessions`に数えられず、ジョブも起動した時点で閉じるため、
+    # `DISPATCH_MAX_SESSIONS`とは独立に積み上がる。**失敗ではなく見送り**として報告する
+    # （ガードが正常に働いた結果で、何も壊れていない。#1229と同じ扱い）。見送った計画は
+    # 画面の「計画をレビュー」から起こし直せる
+    local live_reviews
+    live_reviews="$(count_plan_review_sessions)"
+    if [[ "$MAX_PLAN_REVIEWS" -gt 0 && "${live_reviews:-0}" -ge "$MAX_PLAN_REVIEWS" ]]; then
+      report_job "$job_id" skipped \
+        "計画レビューのセッションが上限（$MAX_PLAN_REVIEWS本）に達しているため起動しませんでした（現在 $live_reviews 本）。"
       return 0
     fi
     launch_and_report "$job_id" "$(plan_review_session_name "$repo" "$issue_number")" \

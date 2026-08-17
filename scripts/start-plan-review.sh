@@ -25,9 +25,14 @@
 #                     （docs/multi-agent/gates.md「G1が承認しない理由」）
 #
 # **フック（session-notify.sh）は付けない。** 実装セッション用の経路（run-issue-session.sh）へ
-# 載せると、同じIssueに受付コメント（#1119）が二重に出るうえ、`Stop` フックが
-# **このIssueの `00.check-user`（＝計画の承認待ち）を外してしまう**。G1は計画の承認待ちを
-# 解く役ではない。
+# 載せると、同じIssueに受付コメント（#1119）と締めのコメント（#1119）が二重に出る。加えて、
+# レビュー中に承認プロンプトが出ると`00.check-user`の理由ラベルが`01.check-plan`から
+# `01.check-input`へ書き換わり、その後の`Stop`で**このIssueの`00.check-user`（＝計画の
+# 承認待ち）ごと外れる**。G1は計画の承認待ちを解く役ではない。
+#
+# 代償として、このセッションは通知にもpollerのセッション報告にも自動回収にも乗らない。
+# そこは**同時に走る本数の上限**（poller側の`DISPATCH_MAX_PLAN_REVIEWS`）と、
+# 下の**実行時間の上限**の2つで受ける。
 #
 # セッション名は `<リポジトリ名>-plan-review-<番号>`。**実装セッションの `<リポジトリ名>-issue-<番号>`
 # とは別の形にしてある** — pollerのセッション報告・本数の計上・停止/終了の突き合わせはすべて
@@ -35,8 +40,10 @@
 # ことになる。
 #
 # 環境変数:
-#   ISSUE_DECK_PLAN_REVIEW_BASE         プロンプト・ログの置き場（既定 ~/apps/issue-deck-worktrees/.plan-reviews）
-#   ISSUE_DECK_QUESTION_BASE            参照スナップショットの置き場（横断質問と共有。#1583）
+#   ISSUE_DECK_PLAN_REVIEW_BASE         プロンプト・ログ・参照スナップショットの置き場
+#                                       （既定 ~/apps/issue-deck-worktrees/.plan-reviews）
+#   ISSUE_DECK_PLAN_REVIEW_TIMEOUT_SECONDS
+#                                       1本のレビューに被せる上限秒数（既定1800・0で無効）
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_LAUNCHER_REEXEC          1なら同期コピーからの再実行を行わない（内部用・#1583）
 
@@ -54,7 +61,8 @@ source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # 起動スクリプト自身が古いままの場合の警告と、同期コピーの解決（#1274・#1438・#1583）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
-# 参照先を`origin/develop`のスナップショットにする（#1583）。横断質問と同じ置き場を使う。
+# 参照先を`origin/develop`のスナップショットにする（#1583）。仕組みは横断質問と共有するが、
+# **置き場は分ける**（下の`ISSUE_DECK_QUESTION_BASE`の上書き）。
 # shellcheck source=scripts/lib/question-refs.sh
 source "$SCRIPT_DIR/lib/question-refs.sh"
 # プロンプトの組み立て。**人の入口（start-reviewer.sh --plan）と共有する。**
@@ -66,6 +74,20 @@ source "$SCRIPT_DIR/lib/claude-trust.sh"
 
 usage() {
   echo "Usage: scripts/start-plan-review.sh [--prepare-only] <owner> <repo> <issue番号>" >&2
+}
+
+# 走っている計画レビューのセッション名（`<リポジトリ名>-plan-review-<番号>`）。
+# **`report_sessions`も`count_issue_sessions`もこの名前を拾わない**ので、本数を知る手掛かりは
+# ここしか無い。pollerの同名の判定（`count_plan_review_sessions`）と規約を揃える。
+plan_review_session_names() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -E '^.+-plan-review-[1-9][0-9]*$' || true
+}
+
+# 同じリポジトリの計画レビューが（このIssue以外も含めて）走っているか。
+plan_review_sessions_alive_for() {
+  local safe_repo="$1"
+  plan_review_session_names | grep -qE "^${safe_repo}-plan-review-[1-9][0-9]*$"
 }
 
 PREPARE_ONLY=0
@@ -91,6 +113,14 @@ OWNER="$1"
 REPO="$2"
 ISSUE_NUMBER="$3"
 FULL_NAME="$OWNER/$REPO"
+
+# 置き場と名前。**参照スナップショット・プロンプト・ログをこの1か所へまとめる**（#1855）。
+PLAN_REVIEW_BASE="${ISSUE_DECK_PLAN_REVIEW_BASE:-$HOME/apps/issue-deck-worktrees/.plan-reviews}"
+SAFE_REPO="${REPO//[^A-Za-z0-9_-]/-}"
+SESSION_NAME="$SAFE_REPO-plan-review-$ISSUE_NUMBER"
+PROMPT_DIR="$PLAN_REVIEW_BASE/.prompts"
+PROMPT_FILE="$PROMPT_DIR/$SAFE_REPO-$ISSUE_NUMBER.md"
+LOG_FILE="$PLAN_REVIEW_BASE/$SAFE_REPO-$ISSUE_NUMBER.log"
 
 # 引数はジョブキューのレスポンス経由で渡るため、呼び出し元で検証済みでも改めて検証する
 # （多層防御。ここが最後にパス・シェル引数として使う場所）。
@@ -139,17 +169,41 @@ fi
 claude_trust_require "$REPO_PATH" "$FULL_NAME" || exit 1
 
 # --- 参照するコード（origin/develop のスナップショット）------------------------
+#
+# **置き場は横断質問（`.questions/_refs`）と分ける**（#1855）。あちらのスナップショットは
+# リポジトリごとに固定で、質問セッションが起動するたびに`checkout --force --detach`で別の
+# コミットへ貼り替えられる。読んでいる最中に足元のコードが変わると、`plan-base`のSHAとの
+# 突き合わせ（G1の中心的な作業）の根拠が壊れる。置き場を分ければ、貼り替える可能性がある
+# のは同じリポジトリの別の計画レビューだけになり、その1点は下のガードで塞げる。
+#
+# **cwdはスナップショットそのものにする**（横断質問が`_session-<repo>`という空のディレクトリを
+# cwdにしているのとは違う）。あちらは「どのリポジトリでもない視点」が要る横断の質問で、cwdを
+# どれかのリポジトリにすると視点が偏るのを避けている。G1は逆で、**対象リポジトリそのものが
+# 主題**であり、そのリポジトリの`CLAUDE.md`・`docs/`のルールと計画が矛盾しないかを見るのが
+# 仕事なので、cwdに置いて自動で読ませる方が正しい。
+export ISSUE_DECK_QUESTION_BASE="$PLAN_REVIEW_BASE"
+
 echo "#$ISSUE_NUMBER: $FULL_NAME を最新化しています..."
 question_refs_fetch_all "$REPO_PATH"
-question_ref_prepare "$FULL_NAME" "$REPO_PATH"
-WORKDIR="$QUESTION_REF_DIR"
-CHECKOUT_LABEL="$QUESTION_REF_LABEL"
-if [[ "$QUESTION_REF_SNAPSHOT" -ne 1 ]]; then
-  # スナップショットを用意できなかった場合は本体チェックアウトを読む（`question_ref_prepare`の
-  # フォールバック）。**それでもレビューは行う** — 参照先が1つ古いことより、計画が誰にも
-  # 検算されないことのほうが困る。どれくらい古いのかはプロンプトに載るので、指摘を読む側が
-  # 割り引いて読める。
-  echo "警告: スナップショットを用意できませんでした。本体チェックアウトを読みます（$CHECKOUT_LABEL）。" >&2
+
+# **他の計画レビューが同じリポジトリを読んでいる間は貼り替えない。** そのセッションの足元が
+# 変わる方が、こちらが数コミット古いものを読むより害が大きい（指摘の根拠が壊れる）。
+# 鮮度はプロンプトに載るので、読む側は割り引いて読める。
+SNAPSHOT_DIR="$(question_refs_base_dir)/$(question_refs_safe_name "$FULL_NAME")"
+if [[ -d "$SNAPSHOT_DIR" ]] && plan_review_sessions_alive_for "$SAFE_REPO"; then
+  WORKDIR="$SNAPSHOT_DIR"
+  CHECKOUT_LABEL="$(git -C "$SNAPSHOT_DIR" log -1 --format='%h・%cs' 2>/dev/null || printf '不明')（別の計画レビューが読んでいるため貼り替えていません）"
+else
+  question_ref_prepare "$FULL_NAME" "$REPO_PATH"
+  WORKDIR="$QUESTION_REF_DIR"
+  CHECKOUT_LABEL="$QUESTION_REF_LABEL"
+  if [[ "$QUESTION_REF_SNAPSHOT" -ne 1 ]]; then
+    # スナップショットを用意できなかった場合は本体チェックアウトを読む（`question_ref_prepare`の
+    # フォールバック）。**それでもレビューは行う** — 参照先が1つ古いことより、計画が誰にも
+    # 検算されないことのほうが困る。どれくらい古いのかはプロンプトに載るので、指摘を読む側が
+    # 割り引いて読める。
+    echo "警告: スナップショットを用意できませんでした。本体チェックアウトを読みます（$CHECKOUT_LABEL）。" >&2
+  fi
 fi
 echo "#$ISSUE_NUMBER: 読むコード: $WORKDIR（$CHECKOUT_LABEL）"
 
@@ -167,11 +221,6 @@ if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
   exit 1
 fi
 
-PLAN_REVIEW_BASE="${ISSUE_DECK_PLAN_REVIEW_BASE:-$HOME/apps/issue-deck-worktrees/.plan-reviews}"
-SAFE_REPO="${REPO//[^A-Za-z0-9_-]/-}"
-PROMPT_DIR="$PLAN_REVIEW_BASE/.prompts"
-PROMPT_FILE="$PROMPT_DIR/$SAFE_REPO-$ISSUE_NUMBER.md"
-LOG_FILE="$PLAN_REVIEW_BASE/$SAFE_REPO-$ISSUE_NUMBER.log"
 mkdir -p "$PROMPT_DIR"
 
 # 並行状況スナップショット（#1215）。**突き合わせるのは本体チェックアウト**（スナップショットは
@@ -193,8 +242,6 @@ if [[ "$PREPARE_ONLY" -eq 1 ]]; then
 fi
 
 # --- セッションの起動 ---------------------------------------------------------
-SESSION_NAME="$SAFE_REPO-plan-review-$ISSUE_NUMBER"
-
 # **許可するツールはActionsの計画レビュー（reusable-issue-dispatch.ymlの「Claude Code（計画レビュー）」）
 # と同じ。** 文面（プロンプト）だけでなく、できることの範囲も2つの入口で揃える。
 # `gh pr merge`・`gh pr edit`（G2との兼務＝自己承認）と`gh issue edit`（承認まで倒す）は入れない。
@@ -221,7 +268,19 @@ fi
 # 「指摘が投稿されなかったのはなぜか」を後から辿れない。
 # `set -o pipefail` を先に置く。**`| tee` を挟むと終了コードが`tee`のものになり**、
 # `remain-on-exit failed`（失敗したときだけペインを残す）が永久に効かなくなる。
-SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | claude' "$WORKDIR" "$PROMPT_FILE")"
+#
+# **実行時間の上限を必ず被せる**（#1855）。このセッションはフックを付けず、名前も`-issue-`の
+# 規約から外れているため、**固まっても誰も気づけない**（`session-notify.sh`の通知も、
+# pollerのセッション報告も、`reap-sessions.sh`の回収も届かない）。上限で必ず終わる形にして、
+# 「畳むのはセッション自身」という前提を成立させる。`timeout`が無い環境では被せずに進む。
+PLAN_REVIEW_TIMEOUT="${ISSUE_DECK_PLAN_REVIEW_TIMEOUT_SECONDS:-1800}"
+RUNNER=""
+if [[ "$PLAN_REVIEW_TIMEOUT" =~ ^[0-9]+$ && "$PLAN_REVIEW_TIMEOUT" -gt 0 ]] &&
+  command -v timeout >/dev/null 2>&1; then
+  RUNNER="timeout $PLAN_REVIEW_TIMEOUT "
+fi
+
+SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %sclaude' "$WORKDIR" "$PROMPT_FILE" "$RUNNER")"
 for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
 done
