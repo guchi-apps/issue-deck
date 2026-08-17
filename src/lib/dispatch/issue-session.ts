@@ -3,6 +3,7 @@ import type {
   DispatchSessionReapReason,
   DispatchSessionView,
 } from "@/lib/dispatch/session-state";
+import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 
 /**
  * あるIssueに紐づくセッションを1件選び、画面へ出す形にする（#1264）。
@@ -98,12 +99,25 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     };
   }
   if (session.state === "EXITED" || session.state === "GONE") {
+    // **回答を待ったまま消えた場合だけは別の言い方をする**（#1830）。どちらも「終了しました」と
+    // 出すと、役目を終えて自動で畳まれたのか（次に押すものは無い）、こちらの回答を待ったまま
+    // 消えたのか（復旧して答える必要がある）を区別できない。
+    //
+    // **`state`を優先するという方針は変えていない。** `WAITING_INPUT`をここで「今も待っている」
+    // 意味には使わず（待つ相手はもういない）、**終わり方の記録**としてだけ読む。答えた後に
+    // 作業が進めば`WORKING`／`RESPONDED`へ移るため、終了時点で`WAITING_INPUT`のまま残るのは
+    // 実際に答えないうちに消えた場合に限られる。
+    const endedWhileWaiting = session.activity === "WAITING_INPUT";
     return {
       ...base,
-      tone: "done",
-      label: `${formatDispatchHostName(session.host)}のセッションは終了しました`,
-      shortLabel: "終了",
-      detail: null,
+      tone: endedWhileWaiting ? "waiting" : "done",
+      label: endedWhileWaiting
+        ? `${formatDispatchHostName(session.host)}のセッションは回答を待っている間に終了しました`
+        : `${formatDispatchHostName(session.host)}のセッションは終了しました`,
+      shortLabel: endedWhileWaiting ? "回答前に終了" : "終了",
+      // 復旧すると会話の続きから始まることは、押す場所（`SessionRecoveryButton`）の側に添える。
+      // 両方で言うと同じ案内が2行並ぶ
+      detail: endedWhileWaiting ? "あなたの回答を待っている間にセッションが終了しました" : null,
       remoteControlUrl: null,
       previewUrl: null,
     };
@@ -267,10 +281,42 @@ export function describeSessionReap(
   };
 }
 
+/**
+ * 終了したセッションを画面から復旧できるか（#1830）。
+ *
+ * **復旧の実体は「同じIssueで起動ジョブをもう一度積む」だけ。** worktreeを消していなければ
+ * ランチャーが`claude --continue`を渡し、前回の会話の続きから再開する（#1541。
+ * `scripts/run-issue-session.sh`）。issue-deck側はsession idもホストの内部状態も持たない。
+ *
+ * ここが返すのは**押せる相手がいるかどうか**（＝セッションがもう動いていないか）だけで、
+ * 「サブPCが申告しているか」「未処理のジョブがあるか」は起動ジョブと同じ判定
+ * （`resolveDispatchTargetRejection`）に任せる。判定を二重に持つと、押せる条件が場所によって
+ * ずれる。
+ */
+export type SessionRecoveryNotice = {
+  /** 主導線（塗りつぶし）で出すか。回答を待ったまま終わったときだけ真 */
+  primary: boolean;
+  /** ボタンに常に添える1行。押すと何が起きるかを、押す前に読ませる */
+  detail: string;
+};
+
+export function describeSessionRecovery(session: DispatchSessionView): SessionRecoveryNotice | null {
+  // 動いているセッションには復旧する相手がいない（止めたい・送りたいは既存の操作の担当）
+  if (session.state === "ALIVE") return null;
+  return {
+    primary: session.activity === "WAITING_INPUT",
+    detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（worktreeはそのまま・${LOCAL_LABEL_NAME}を付け直します）`,
+  };
+}
+
 /** 一覧のバッジなど、1語で出したい場所向けの短い表現。通常の実行中はnull（出さない） */
 export function shortIssueSessionLabel(session: DispatchSessionView): string | null {
   if (session.state === "FAILED") return "異常終了";
-  if (session.state === "EXITED" || session.state === "GONE") return "終了";
+  // 終了の言い分けは`summarizeIssueSession`と同じ分岐にする（#1830）。片方だけ増やすと、
+  // 同じ状態が一覧とIssue詳細で2通りの言い方になる
+  if (session.state === "EXITED" || session.state === "GONE") {
+    return session.activity === "WAITING_INPUT" ? "回答前に終了" : "終了";
+  }
   if (session.activity === "WAITING_INPUT") return "入力待ち";
   // 人が端末で答えるまで進まない点は入力待ちと同じなので、一覧にも出す（#1465）
   if (session.activity === "NOT_STARTED") return "未開始";

@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
-import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useLocalSessionLaunch } from "@/hooks/use-local-session-launch";
 import {
   describeDispatchEnqueueRejection,
   findBlockingSession,
@@ -26,7 +26,6 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
-import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -79,8 +78,8 @@ type StartLocalSessionButtonProps = {
  * 立て直せなくなる。ただし**そのIssueがもう走っている間だけは、こちらも出さない**（#1667）。
  * 未完了のジョブ・生きているセッションが無くなれば導線は戻るので、立て直しは塞がない。
  *
- * `11.local`は**積めたときだけ**付ける。拒否されたのにラベルだけ残ると、無人実行まで
- * そのIssueに触れなくなる。
+ * 起動そのもの（`11.local`を付けてジョブを積む）は`useLocalSessionLaunch`が持ち、終了した
+ * セッションを呼び戻す「セッションを復旧」（#1830）と共有している。
  */
 export function StartLocalSessionButton({
   issue,
@@ -90,8 +89,6 @@ export function StartLocalSessionButton({
   showJobStatus = true,
   dispatch: injectedDispatch,
 }: StartLocalSessionButtonProps) {
-  const { updateIssue, isSubmitting, error } = useIssueMutations();
-
   // closedなIssueは起動しても実装対象が無い。リポジトリ名が壊れている場合は起動先へ渡せない。
   // 手作業Issue（`71.manual-step`）も同じく起動先が無い（実行者が人）ので出さない（#1280）
   const isAvailable =
@@ -102,6 +99,12 @@ export function StartLocalSessionButton({
   // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
   const ownDispatch = useDispatchState(injectedDispatch === undefined && isAvailable);
   const dispatch = injectedDispatch ?? ownDispatch;
+  // 起動の手順（`11.local`を付けてからジョブを積む）は「セッションを復旧」（#1830）と共有する
+  const { launch, isSubmitting: isBusy, error } = useLocalSessionLaunch({
+    issue,
+    dispatch,
+    onIssueUpdated,
+  });
 
   if (!isAvailable) return null;
 
@@ -114,32 +117,6 @@ export function StartLocalSessionButton({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
   });
-  const isBusy = isSubmitting || dispatch.isSubmitting;
-
-  /**
-   * 起動前に`11.local`を付ける。**失敗しても起動自体は妨げない**
-   * （起動できないより、ラベルが遅れる方が軽い）。
-   */
-  async function ensureLocalLabel() {
-    const labelNames = issue.labels.map((label) => label.name);
-    if (labelNames.includes(LOCAL_LABEL_NAME)) return;
-    const updated = await updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: [...labelNames, LOCAL_LABEL_NAME],
-    });
-    if (updated) onIssueUpdated(updated);
-  }
-
-  async function handleDispatch(hostName: string) {
-    const enqueued = await dispatch.enqueue({
-      repositoryFullName: issue.repositoryFullName,
-      issueNumber: issue.number,
-      hostName,
-    });
-    if (enqueued) await ensureLocalLabel();
-  }
-
   // 起動先が1つしか無いならメニューを開かせない。選択肢が1つのメニューを開かせる意味が無い
   const onlyHost = dispatch.hosts.length === 1 ? (dispatch.hosts[0] ?? null) : null;
   const onlyHostRejection = onlyHost
@@ -175,7 +152,7 @@ export function StartLocalSessionButton({
       variant="outline"
       size={fullWidth ? "default" : "sm"}
       className={fullWidth ? "w-full" : undefined}
-      onClick={() => void handleDispatch(onlyHost.name)}
+      onClick={() => void launch(onlyHost.name)}
       disabled={isBusy || onlyHostRejection !== null}
     >
       {isBusy ? <Loader2 className="animate-spin" /> : <Server />}
@@ -222,7 +199,7 @@ export function StartLocalSessionButton({
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
                 blockingSession={blockingSession}
-                onSelect={() => void handleDispatch(host.name)}
+                onSelect={() => void launch(host.name)}
               />
             ))}
           </DropdownMenuContent>

@@ -699,6 +699,7 @@ export function IssueDetail({
               走っているものが1つも無いIssueでは何も描かない */}
           <IssueStatusCard
             issue={issue}
+            onIssueUpdated={onIssueUpdated}
             dispatch={dispatch}
             dispatchJob={dispatchJob}
             issueSession={issueSession}

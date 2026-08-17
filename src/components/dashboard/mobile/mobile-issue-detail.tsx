@@ -693,6 +693,7 @@ export function MobileIssueDetail({
             カードごと描かれない */}
         <IssueStatusCard
           issue={issue}
+          onIssueUpdated={onIssueUpdated}
           dispatch={dispatch}
           dispatchJob={dispatchJob}
           issueSession={issueSession}
