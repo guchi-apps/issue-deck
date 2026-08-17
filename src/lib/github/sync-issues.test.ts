@@ -11,9 +11,18 @@ const updateMany = vi.fn();
 const $transaction = vi.fn();
 const issueLabelUpsert = vi.fn();
 const issueLabelDeleteMany = vi.fn();
+const repositoryFindUnique = vi.fn();
+// closeでセッションを畳む後片付け（#1518）。ここでは「遷移したときだけ呼ぶ」ことだけを見る
+const handleIssueClosedForDispatch = vi.fn();
 
 vi.mock("@/lib/github/app-auth", () => ({
   getInstallationToken: vi.fn(),
+}));
+
+vi.mock("@/lib/dispatch/session-close", () => ({
+  get handleIssueClosedForDispatch() {
+    return handleIssueClosedForDispatch;
+  },
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -27,6 +36,11 @@ vi.mock("@/lib/db", () => ({
       },
       get updateMany() {
         return updateMany;
+      },
+    },
+    repository: {
+      get findUnique() {
+        return repositoryFindUnique;
       },
     },
     issueLabel: {
@@ -267,5 +281,109 @@ describe("upsertIssueFromWebhookPayload の lastCommentAt 更新", () => {
         update: expect.objectContaining({ lastCommentAt: existingLastCommentAt }),
       }),
     );
+  });
+});
+
+/**
+ * closeを検知してローカルセッションを畳む（#1518）。
+ *
+ * **「今CLOSEDである」ではなくOPEN→CLOSEDの遷移で1回だけ**という点がここの本体。
+ * 現在の状態で判定すると、定期同期が回るたびに（closedなIssueで人が手で起こした
+ * セッションも含めて）畳みに行ってしまう。
+ */
+describe("upsertIssueFromWebhookPayload のclose検知", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    findUnique.mockReset();
+    upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
+    issueLabelUpsert.mockReset().mockResolvedValue(undefined);
+    issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
+    $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+    repositoryFindUnique.mockReset().mockResolvedValue({ fullName: "guchi-apps/issue-deck" });
+    handleIssueClosedForDispatch.mockReset().mockResolvedValue({
+      killedHosts: [],
+      skipped: [],
+      canceledJobs: 0,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function existingIssue(state: "OPEN" | "CLOSED") {
+    return {
+      state,
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: null,
+      lastCommentAt: null,
+      labels: [],
+    };
+  }
+
+  it("OPENからCLOSEDへ変わったとき、走っているセッションの後片付けを呼ぶ", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+    const raw = makeRawIssue({ number: 1518, state: "closed", state_reason: "completed" });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(handleIssueClosedForDispatch).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1518,
+    });
+  });
+
+  it("すでにCLOSEDだったIssueの更新では呼ばない（定期同期で毎回畳まない）", async () => {
+    findUnique.mockResolvedValue(existingIssue("CLOSED"));
+    const raw = makeRawIssue({ state: "closed", state_reason: "completed" });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
+  });
+
+  it("OPENのままの更新では呼ばない", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue());
+
+    expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
+  });
+
+  it("初めて取り込むIssueがCLOSEDでも呼ばない（遷移ではない）", async () => {
+    findUnique.mockResolvedValue(null);
+    const raw = makeRawIssue({ state: "closed", state_reason: "completed" });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
+  });
+
+  it("反映済みより古いペイロードでは呼ばない（Webhookの配信順序の入れ替わり対策）", async () => {
+    findUnique.mockResolvedValue({
+      ...existingIssue("OPEN"),
+      githubUpdatedAt: new Date("2026-08-10T00:00:00.000Z"),
+    });
+    const raw = makeRawIssue({
+      state: "closed",
+      state_reason: "completed",
+      updated_at: "2026-08-01T00:00:00.000Z",
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
+  });
+
+  it("リポジトリの行が引けないときは何もしない（owner/repoが組み立てられない）", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+    repositoryFindUnique.mockResolvedValue(null);
+    const raw = makeRawIssue({ state: "closed", state_reason: "completed" });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
   });
 });

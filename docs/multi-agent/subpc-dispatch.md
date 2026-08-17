@@ -187,6 +187,38 @@ Issue詳細の実行中カード（`IssueStatusCard`）では、**停止・追�
 順番待ち・起動中・起動失敗のあいだは起動ジョブの行をそのまま出す。順番待ちの理由（#1394）・
 失敗理由・取り消しは`DispatchJobStatus`にしか無い。
 
+#### Issueをcloseしたら同じ`KILL`を自動で積む（#1518）
+
+**closeは「このセッションはもう用が無い」の最も強い合図**なのに、押さなければ何も起きなかった。
+サブPC側の自動回収（`scripts/reap-sessions.sh`）はIssueがCLOSEDなら畳む経路（`ISSUE_CLOSED`）を
+持っているが、**その手前で`11.local`が付いていれば`hold`する。** あのラベルは実装エージェントが
+引き渡し時に自分で外すもので、closeで打ち切ったセッションでは外れないまま残る（加えて未コミットの
+変更・`Stop`フック未達でも残す）。結果、**走っている最中にcloseしたセッションは事実上回収されず**、
+本数の上限（#1361）を1本ずつ埋め続けていた。
+
+そこでissue-deck側が、IssueがcloseされたときにIssue詳細の「セッションを閉じる」と同じ`KILL`
+ジョブを自動で積む（`src/lib/dispatch/session-close.ts`）。
+
+- **積む条件は「OPEN→CLOSEDへ変わった」ことだけ。** 「今CLOSEDである」で判定すると、定期同期が
+  回るたびに（closedなIssueで人が手で起こしたセッションも含めて）畳みに行ってしまう。遷移を
+  知っているのはDB同期の`upsertIssueRow`（`src/lib/github/sync-issues.ts`）で、**画面からの
+  クローズ（`PATCH /api/issues`）・GitHub上でのclose（webhook）・定期同期の3経路がすべてここを
+  通る**ため、検知は1か所で足りる
+- **対象は`ALIVE`のセッションだけ。** 終了したペイン（`EXITED`/`FAILED`）は異常終了の証拠で、
+  最後の出力を読めるように残す（`reap-sessions.sh`の「読む前に消さない」と同じ立場）
+- **順番待ち（`QUEUED`）の起動ジョブも取り消す。** closeした1分後に起動されては意味が無い。
+  `CLAIMED`以降は触らない（pollerが既にworktreeの作成へ入っており、`cancelDispatchJob`が
+  `RUNNING`を断るのと同じ理由）
+- **失敗してもcloseを止めない。** 積めなかった理由はログに残すだけにする。セッションを畳むための
+  機能でIssueを閉じられなくなる方が重い
+- **これは計器であって役ではない**（[gates.md](gates.md)）。判断は挟まず、closeという事実から固定の
+  `tmux kill-session`を積むだけで、`send-keys`は使わない。**新しい受け口もpollerの新しい申告も
+  要らない**ので、サブPC側を更新しなくても`sessionControlCapable`を申告済みのpollerなら効く
+
+残る穴は、**pollerが落ちている間にcloseした場合**（`KILL`は5分で`TIMEOUT`し、自動回収も
+`11.local`で止まる）。塞ぐには`reap-sessions.sh`のCLOSED経路で`11.local`を無視する必要があり、
+それはサブPCのチェックアウト更新（pull＋poller再起動）とセットになるため、別Issueで扱う。
+
 ### 走っているセッションへ追加指示を送る（#1012）
 
 **#1176 Phase 3 の本体。** セッションを保持したまま動かす価値は「承認・CI失敗を既存セッションへ
