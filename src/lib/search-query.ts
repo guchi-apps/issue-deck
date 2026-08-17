@@ -46,7 +46,32 @@ export function parseSearchQuery(q: string): ParsedSearchQuery {
   return { includeLabels, excludeLabels, state, assignee, keyword };
 }
 
-export function matchesSearchQuery(issue: Issue, q: string): boolean {
+/**
+ * 検索式のうち、`label:`・`is:`・`assignee:`のトークンだけを取り出して連結する（#1788）。
+ *
+ * AIあいまい検索の候補を集めるときに使う。候補は「自由語以外の条件を満たすIssue」——
+ * 自由語で先に文字列一致の絞り込みをかけてしまうと、そもそもAIに探させたいIssueが
+ * 候補から落ちる（0件のときにAIボタンを押すのが主な使い方のため、候補も0件になる）。
+ */
+export function extractSearchTokens(q: string): string {
+  return (q.match(TOKEN_PATTERN) ?? []).join(" ");
+}
+
+export type MatchesSearchQueryOptions = {
+  /**
+   * AIあいまい検索で選ばれたIssueのid集合（#1788）。
+   *
+   * 渡されている間は、自由語の部分一致の代わりにこの集合への所属で判定する。
+   * `label:`等のトークンは自由語と別に評価しているため、AI検索中もそのまま効く。
+   */
+  aiMatchedIds?: ReadonlySet<string> | null;
+};
+
+export function matchesSearchQuery(
+  issue: Issue,
+  q: string,
+  options?: MatchesSearchQueryOptions,
+): boolean {
   const parsed = parseSearchQuery(q);
 
   if (parsed.includeLabels.length > 0) {
@@ -69,7 +94,9 @@ export function matchesSearchQuery(issue: Issue, q: string): boolean {
     }
   }
 
-  if (parsed.keyword) {
+  if (options?.aiMatchedIds) {
+    if (!options.aiMatchedIds.has(issue.id)) return false;
+  } else if (parsed.keyword) {
     const haystack = `${issue.title}\n${issue.body}`.toLowerCase();
     if (!haystack.includes(parsed.keyword)) return false;
   }

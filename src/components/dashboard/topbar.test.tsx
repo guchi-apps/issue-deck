@@ -2,7 +2,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TopBar } from "@/components/dashboard/topbar";
+import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 
 vi.mock("next/navigation", () => ({
@@ -25,32 +25,52 @@ const baseFilters: IssueFilters = {
 
 type SetFilter = <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => void;
 
+const baseAiSearch: TopBarAiSearch = {
+  canRun: false,
+  isSearching: false,
+  notConfigured: false,
+  error: null,
+  matchedCount: null,
+  droppedCandidateCount: 0,
+  run: () => {},
+  clear: () => {},
+};
+
+function topBarProps(
+  setFilter: SetFilter,
+  filters: IssueFilters = baseFilters,
+  back: { canGoBack?: boolean; onBack?: () => void } = {},
+  aiSearch: Partial<TopBarAiSearch> = {},
+) {
+  return {
+    currentUser: null,
+    filters,
+    setFilter,
+    groupByRepo: false,
+    onChangeGroupByRepo: () => {},
+    assigneeOptions: [],
+    onCreateIssue: () => {},
+    onAskCrossRepoQuestion: () => {},
+    onOpenNotificationTarget: () => {},
+    onOpenIssue: () => {},
+    onOpenCheckUserView: () => {},
+    onOpenFlow: () => {},
+    isSidebarCollapsed: false,
+    onToggleSidebar: () => {},
+    onOpenSettings: () => {},
+    canGoBack: back.canGoBack ?? true,
+    onBack: back.onBack ?? (() => {}),
+    aiSearch: { ...baseAiSearch, ...aiSearch },
+  };
+}
+
 function renderTopBar(
   setFilter: SetFilter,
   filters: IssueFilters = baseFilters,
   back: { canGoBack?: boolean; onBack?: () => void } = {},
+  aiSearch: Partial<TopBarAiSearch> = {},
 ) {
-  return render(
-    <TopBar
-      currentUser={null}
-      filters={filters}
-      setFilter={setFilter}
-      groupByRepo={false}
-      onChangeGroupByRepo={() => {}}
-      assigneeOptions={[]}
-      onCreateIssue={() => {}}
-      onAskCrossRepoQuestion={() => {}}
-      onOpenNotificationTarget={() => {}}
-      onOpenIssue={() => {}}
-      onOpenCheckUserView={() => {}}
-      onOpenFlow={() => {}}
-      isSidebarCollapsed={false}
-      onToggleSidebar={() => {}}
-      onOpenSettings={() => {}}
-      canGoBack={back.canGoBack ?? true}
-      onBack={back.onBack ?? (() => {})}
-    />,
-  );
+  return render(<TopBar {...topBarProps(setFilter, filters, back, aiSearch)} />);
 }
 
 describe("TopBar 検索欄", () => {
@@ -84,29 +104,96 @@ describe("TopBar 検索欄", () => {
     const input = container.querySelector('input[placeholder="Issueを検索..."]') as HTMLInputElement;
     await waitFor(() => expect(input.value).toBe("foo"));
 
-    rerender(
-      <TopBar
-        currentUser={null}
-        filters={{ ...baseFilters, q: "bar" }}
-        setFilter={setFilter}
-        groupByRepo={false}
-        onChangeGroupByRepo={() => {}}
-        assigneeOptions={[]}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
-        onOpenNotificationTarget={() => {}}
-        onOpenIssue={() => {}}
-        onOpenCheckUserView={() => {}}
-        onOpenFlow={() => {}}
-        isSidebarCollapsed={false}
-        onToggleSidebar={() => {}}
-        onOpenSettings={() => {}}
-        canGoBack
-        onBack={() => {}}
-      />,
-    );
+    rerender(<TopBar {...topBarProps(setFilter, { ...baseFilters, q: "bar" })} />);
 
     await waitFor(() => expect(input.value).toBe("bar"));
+  });
+});
+
+describe("TopBar 検索のクリアボタン（#1788）", () => {
+  function findClearButton(container: HTMLElement) {
+    return container.querySelector('button[aria-label="検索をクリア"]') as HTMLButtonElement | null;
+  }
+
+  it("入力が空のときは出さない", () => {
+    const { container } = renderTopBar(vi.fn());
+
+    expect(findClearButton(container)).toBeNull();
+  });
+
+  it("押すと入力とURLの検索条件を同時に消す（デバウンスを待たない）", async () => {
+    const setFilter = vi.fn();
+    const { container } = renderTopBar(setFilter, { ...baseFilters, q: "bug" });
+    const input = container.querySelector('input[placeholder="Issueを検索..."]') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("bug"));
+
+    const clearButton = findClearButton(container);
+    expect(clearButton).not.toBeNull();
+    fireEvent.click(clearButton as HTMLButtonElement);
+
+    expect(input.value).toBe("");
+    expect(setFilter).toHaveBeenCalledWith("q", "");
+  });
+
+  it("押すとAI検索の結果も解除する", async () => {
+    const clear = vi.fn();
+    const { container } = renderTopBar(vi.fn(), { ...baseFilters, q: "bug" }, {}, {
+      canRun: true,
+      matchedCount: 3,
+      clear,
+    });
+
+    fireEvent.click(findClearButton(container) as HTMLButtonElement);
+
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TopBar AIあいまい検索（#1788）", () => {
+  function findAiButton(container: HTMLElement) {
+    return [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "AIで探す" || button.textContent === "AI検索を解除",
+    );
+  }
+
+  it("自由語が無いときは出さない", () => {
+    const { container } = renderTopBar(vi.fn(), baseFilters, {}, { canRun: false });
+
+    expect(findAiButton(container)).toBeUndefined();
+  });
+
+  it("押すとAI検索を実行する", () => {
+    const run = vi.fn();
+    const { container } = renderTopBar(vi.fn(), { ...baseFilters, q: "重い" }, {}, {
+      canRun: true,
+      run,
+    });
+
+    fireEvent.click(findAiButton(container) as HTMLButtonElement);
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("AI検索中は件数を出し、もう一度押すと解除する", () => {
+    const clear = vi.fn();
+    const { container } = renderTopBar(vi.fn(), { ...baseFilters, q: "重い" }, {}, {
+      canRun: true,
+      matchedCount: 12,
+      clear,
+    });
+
+    expect(container.textContent).toContain("AI検索: 12件");
+    fireEvent.click(findAiButton(container) as HTMLButtonElement);
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it("トークンが未設定（501）と分かった後はボタンを出さない", () => {
+    const { container } = renderTopBar(vi.fn(), { ...baseFilters, q: "重い" }, {}, {
+      canRun: true,
+      notConfigured: true,
+    });
+
+    expect(findAiButton(container)).toBeUndefined();
   });
 });
 

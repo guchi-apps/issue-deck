@@ -354,6 +354,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リリースの実行で、要対応の枠へ入れると上記の並びの読み方が崩れる。ホームでは先頭の
   「いまの状況」のカードとメニューの両方から開けるが、これは「ユーザーの確認待ち」も同じ
   （カードは件数を見るサマリ、メニューは他のビューと並ぶ入口）。
+- **検索欄の絞り込みは文字列の部分一致（[`lib/search-query.ts`](../src/lib/search-query.ts)）で、
+  「AIで探す」を押したときだけ意味での絞り込みへ切り替わる**（#1788）。押すと表示中の一覧から
+  新しい順に最大`ISSUE_SEARCH_CANDIDATE_LIMIT`件のタイトル・ラベル（**本文は送らない**）を
+  `POST /api/issues/ai-search`→[`lib/claude/issue-search.ts`](../src/lib/claude/issue-search.ts)へ渡し、
+  返ってきたIssueのidの集合で絞る（`matchesSearchQuery`の`aiMatchedIds`）。`label:`等のトークンは
+  自由語と別に評価しているのでAI検索中もそのまま効き、AIへ渡すのはトークンを除いた自由語だけ
+  （`extractSearchTokens`）。**候補は自由語で絞る前の集合から作る**——文字列一致で0件のときに押す
+  機能なので、先に部分一致を掛けると候補まで0件になる。
+  **1回ごとにClaudeのプラン枠を消費するため、呼ぶのはボタンを押したときだけ**（入力のたび・
+  Enterキーでは呼ばない。`hooks/use-issue-ai-search.ts`）。`CLAUDE_CODE_OAUTH_TOKEN`が未設定なら
+  APIが501を返し、画面はボタンを出さなくなる。結果はURLに載せず（プラン枠を使って得たものを
+  リロードや共有で勝手に再現しない）、検索語を変えると破棄して通常の検索へ戻る。
+  絞り込み条件としては`IssueFilterInput.aiMatchedIds`に載せ、**一覧・左メニューの件数・ラベルの
+  件数がすべて同じ`applyIssueFilters`を通る**ため数字は食い違わない（#1689・#1750と同じ理由）。
 - **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
   適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は

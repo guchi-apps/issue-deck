@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
@@ -36,11 +36,12 @@ import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
-import { TopBar } from "@/components/dashboard/topbar";
+import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
+import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
@@ -70,6 +71,7 @@ import {
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { subscribeIssueCreated } from "@/lib/issue-broadcast";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
+import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/issue-search";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import type { NotificationTarget } from "@/lib/notifications";
 import {
@@ -88,6 +90,7 @@ import {
   upsertIssue,
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
+import { extractSearchTokens, parseSearchQuery } from "@/lib/search-query";
 import { getNavViewLabel } from "@/lib/nav-views";
 import {
   computeManualStepAttention,
@@ -420,11 +423,42 @@ export function IssueDeckShell({
     setCheckUserToasts((prev) => prev.filter((toast) => toast.id !== id));
   }
 
+  // AIあいまい検索（#1788）。押したときだけClaudeを呼び、選ばれたIssueのidをここへ持つ。
+  // **URLへは載せない**——プラン枠を使って得た結果で、リロードや共有で勝手に再現されるものでは
+  // ないため（`IssueFilters`はクエリパラメータと同期している）。
+  const aiSearch = useIssueAiSearch();
+  const { search: requestAiSearch, clearError: clearAiSearchError } = aiSearch;
+  const [aiSearchResult, setAiSearchResult] = useState<{
+    query: string;
+    issueIds: string[];
+    /** 候補の上限を超えて対象外にした件数（画面に注記を出すため） */
+    droppedCandidateCount: number;
+  } | null>(null);
+  // 検索語を変えたら通常の検索へ戻す。レンダー中に比較して捨てるのはTopBarの入力同期と同じ形
+  // （effectで消すと、1フレームだけ古いAI結果で絞られた一覧が出る）。
+  const [aiSearchSyncedQuery, setAiSearchSyncedQuery] = useState(filters.q);
+  if (filters.q !== aiSearchSyncedQuery) {
+    setAiSearchSyncedQuery(filters.q);
+    if (aiSearchResult) setAiSearchResult(null);
+    clearAiSearchError();
+  }
+
+  const aiMatchedIds = useMemo(
+    () => (aiSearchResult ? new Set(aiSearchResult.issueIds) : null),
+    [aiSearchResult],
+  );
+  // 一覧・左メニューの件数・ラベルの件数がすべて同じ条件を通るよう、AI検索の結果もここで混ぜる
+  // （#1689・#1750と同じ理由で、片方だけ素のfiltersを使うと数字が食い違う）。
+  const filtersWithAiSearch = useMemo(
+    () => ({ ...filters, aiMatchedIds }),
+    [filters, aiMatchedIds],
+  );
+
   // 表示中のビューで実際に適用する絞り込み（#1750）。「ユーザーの確認待ち」「ユーザーの
   // 作業待ち」「質問」はリポジトリ横断で全体を見る場所なので、ここで条件が空へ解決される。
   const viewFilters = useMemo(
-    () => resolveFiltersForView(filters, filters.view),
-    [filters],
+    () => resolveFiltersForView(filtersWithAiSearch, filters.view),
+    [filtersWithAiSearch, filters.view],
   );
 
   // TopBarの絞り込み（キーワード・リポジトリ・状態・ラベル・担当者）を適用した集合。
@@ -445,6 +479,71 @@ export function IssueDeckShell({
     [viewFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
   );
 
+  // AI検索へ渡す自由語（`label:`等のトークンを除いた残り）。これが空ならボタンを出さない。
+  const aiSearchKeyword = useMemo(() => parseSearchQuery(filters.q).keyword, [filters.q]);
+
+  const runAiSearch = useCallback(async () => {
+    if (!aiSearchKeyword) return;
+    // **候補は「自由語以外の条件を満たすIssue」**。自由語で先に文字列一致をかけてしまうと、
+    // AIに探させたいIssueが候補から落ちる（文字列一致で0件のときに押す機能のため、
+    // 候補まで0件になる）。トークン（label:等）とビューの絞り込みはそのまま効かせる。
+    const baseFilters = resolveFiltersForView(
+      { ...filters, q: extractSearchTokens(filters.q), aiMatchedIds: null },
+      filters.view,
+    );
+    const candidates = sortIssues(
+      filterIssuesByView(
+        applyIssueFilters(issues, baseFilters),
+        filters.view,
+        currentUserLogin,
+        issues,
+      ),
+      filters.sort,
+      filters.view,
+    );
+    // 上限を超える分は新しい順に切る（プロンプトが膨らむため。切った件数は画面に出す）
+    const targets = candidates.slice(0, ISSUE_SEARCH_CANDIDATE_LIMIT);
+    const issueIds = await requestAiSearch(aiSearchKeyword, targets);
+    if (!issueIds) return;
+    setAiSearchResult({
+      query: filters.q,
+      issueIds,
+      droppedCandidateCount: candidates.length - targets.length,
+    });
+  }, [aiSearchKeyword, filters, issues, currentUserLogin, requestAiSearch]);
+
+  const clearAiSearch = useCallback(() => {
+    setAiSearchResult(null);
+    clearAiSearchError();
+  }, [clearAiSearchError]);
+
+  const topBarAiSearch = useMemo<TopBarAiSearch>(
+    () => ({
+      canRun: aiSearchKeyword !== "",
+      isSearching: aiSearch.isSearching,
+      notConfigured: aiSearch.notConfigured,
+      error: aiSearch.error,
+      // 件数は一覧と同じ集合から数える（AIが返した件数ではない。ビューやラベルの絞り込みで
+      // さらに減ることがあり、左メニューの数字と食い違わせないため）
+      matchedCount: aiSearchResult ? filteredIssues.length : null,
+      droppedCandidateCount: aiSearchResult?.droppedCandidateCount ?? 0,
+      run: () => {
+        void runAiSearch();
+      },
+      clear: clearAiSearch,
+    }),
+    [
+      aiSearchKeyword,
+      aiSearch.isSearching,
+      aiSearch.notConfigured,
+      aiSearch.error,
+      aiSearchResult,
+      filteredIssues,
+      runAiSearch,
+      clearAiSearch,
+    ],
+  );
+
   // 絞り込みを指定しているのに、いま見ているビューでは効かない状態か（#1750）。
   // 黙って無視すると件数が変わらない理由が読めないため、一覧のヘッダーに注記を出す。
   const filtersIgnored = useMemo(
@@ -455,8 +554,8 @@ export function IssueDeckShell({
   // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
   // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   const navCounts = useMemo(
-    () => computeNavCountsForFilters(issues, filters, currentUserLogin),
-    [issues, filters, currentUserLogin],
+    () => computeNavCountsForFilters(issues, filtersWithAiSearch, currentUserLogin),
+    [issues, filtersWithAiSearch, currentUserLogin],
   );
   // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
   // どのビューを表示していても求める。絞り込みを適用しないビュー（#1750）なので、
@@ -508,8 +607,8 @@ export function IssueDeckShell({
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
   // 左メニュー「ラベル」に出す一覧と件数（#1441）。TopBarの絞り込みに追随させる。
   const sidebarLabelSummary = useMemo(
-    () => computeFilterLabelSummary(issues, filters, labelSummary),
-    [issues, filters, labelSummary],
+    () => computeFilterLabelSummary(issues, filtersWithAiSearch, labelSummary),
+    [issues, filtersWithAiSearch, labelSummary],
   );
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
@@ -526,8 +625,10 @@ export function IssueDeckShell({
         filters.labels.join(","),
         filters.assignee,
         filters.sort,
+        // AI検索の結果で絞り込むと並ぶ行が変わるため、別の一覧として扱う（#1788）
+        aiSearchResult ? "ai" : "",
       ]),
-    [filters],
+    [filters, aiSearchResult],
   );
 
   // Issue作成ダイアログのリポジトリ選択肢は、サイドメニューで非表示にしたリポジトリを
@@ -867,6 +968,7 @@ export function IssueDeckShell({
              巻き戻せる履歴が無いときはボタンを押せないのでフォールバックは実際には走らないが、
              万一走ったときに開いている詳細を閉じる（＝一覧へ戻る）ようにしておく。
              閉じる側は履歴を積まない（積むと戻る操作のたびに履歴が伸びる。#1396）。 */
+          aiSearch={topBarAiSearch}
           canGoBack={canGoBack}
           onBack={() =>
             goBackOrFallback(() => {
