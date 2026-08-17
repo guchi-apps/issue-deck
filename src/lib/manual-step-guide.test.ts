@@ -92,6 +92,39 @@ const ISSUE_1795 = `## この作業でできるようになること
 - \`git ls-remote --tags origin | grep workflows/v21\` で1行返る
 `;
 
+/**
+ * guchi-apps/ops-dashboard#59 相当（実物は ops-dashboard#90）。コマンドを**インデント記法の
+ * コードブロック**（`- [x] `の下に6スペース）で書いた本文。テンプレートの文言が
+ * 「インデントしたコードブロック」なので、フェンスを付けずにこう書かれることが実際にある。
+ */
+const OPS_90 = `## この作業でできるようになること
+
+- **できるようになること**: 読み取りAPIがトークンで通るようになる。
+
+## 前提条件
+
+- **実行するデバイス**: サブPC
+- **カレントディレクトリ**: \`~/apps/ops-dashboard\`
+- **Gitブランチ**: \`develop\`
+
+## やること
+
+- [x] ランダムなトークンを生成する（32文字以上。値は端末の履歴やログに残さないよう注意する）
+
+      openssl rand -hex 32
+
+- [x] GitHub の secret へ同期する
+
+      cd ~/apps/ops-dashboard
+      git switch develop && git pull
+
+## 完了の確認方法
+
+1. GitHub 側に secret が入っていること
+
+       gh secret list --repo guchi-apps/ops-dashboard | grep OPS_API_TOKEN
+`;
+
 /** guchi-apps/aide#59 チェック項目の前に前置きがあり、ラベルが太字 */
 const AIDE_59 = `## この作業でできるようになること
 
@@ -170,6 +203,39 @@ describe("parseManualStepGuide", () => {
     const guide = parseManualStepGuide(ISSUE_1795);
 
     expect(guide.steps[1].markdown).toContain("```bash\ngit tag workflows/v21 origin/main");
+  });
+
+  it("インデント記法のコードブロックを潰さない（ops-dashboard#90・#1835）", () => {
+    const guide = parseManualStepGuide(OPS_90);
+
+    // 行頭に4スペース以上が残っていること＝コードブロックとして描かれること。
+    // ここが潰れると本文と同じ字で並ぶだけになり、コピーボタン（#1726）も出ない
+    expect(guide.steps[0].markdown).toBe(
+      "ランダムなトークンを生成する（32文字以上。値は端末の履歴やログに残さないよう注意する）\n\n    openssl rand -hex 32",
+    );
+    expect(guide.steps[1].markdown).toBe(
+      "GitHub の secret へ同期する\n\n    cd ~/apps/ops-dashboard\n    git switch develop && git pull",
+    );
+    expect(guide.verification).toContain(
+      "       gh secret list --repo guchi-apps/ops-dashboard",
+    );
+  });
+
+  it("インデント記法のコードブロックの中にある```をフェンスとして扱わない（#1835）", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] 例を貼る\n\n      ```bash\n      echo hi\n      ```\n",
+    );
+
+    // 4スペース以上下がった```はコードブロックの中身。フェンスとして読むと中身まで
+    // 列0へ寄せてしまい、`echo hi`がコードブロックの外へ出る
+    expect(guide.steps[0].markdown).toBe("例を貼る\n\n    ```bash\n    echo hi\n    ```");
+  });
+
+  it("チェックリストが無くインデント記法のコードブロックだけの節も潰さない（#1835）", () => {
+    const guide = parseManualStepGuide("## やること\n\n    echo X=1 >> .env\n");
+
+    expect(guide.steps).toHaveLength(1);
+    expect(guide.steps[0].markdown).toBe("    echo X=1 >> .env");
   });
 
   it("コードブロックを持たない手順は見出し文だけになる（#1795）", () => {
