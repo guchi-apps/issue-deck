@@ -65,6 +65,31 @@ describe("開発サーバーの待ち受けアドレス（#1526）", () => {
     expect(source).toContain("tailscale_serve_unpublish");
   });
 
+  it("scripts/dev.sh は起動のたびに tailscale serve を張り直す（#1363）", () => {
+    const source = withoutComments(read("dev.sh"));
+
+    // 開発サーバーだけがアイドルで回収されると（#1223）、転送先に待ち受けが無くなるため
+    // reap-dev-servers.sh が serve を孤児として撤去する（#1403）。張り直す一手が
+    // **手で `pnpm dev` を叩き直す経路**に無いと、localhostでは見えるのに
+    // tailnetのURL（issue-deckの画面に出たまま）が死んだままになる。
+    expect(source).toContain("lib/tailscale-serve.sh");
+    expect(source).toContain("tailscale_serve_publish");
+
+    // 待ち受けを開けているときは張らない。serveがtailnetアドレスを先に掴むと、
+    // `::` を要求する next dev が EADDRINUSE で起動できなくなる。
+    expect(source).toMatch(/dev_host_is_loopback "\$DEV_HOST"/);
+  });
+
+  it("tailnetへの公開を知らせる文面は起動経路のあいだで揃っている（#1363）", () => {
+    // プロンプト（scripts/start-issue.sh）が「起動ログのこの行に出ているURLを使う」と
+    // 案内しているため、経路ごとに文面が割れると案内の側から拾えなくなる。
+    const marker = "開発サーバーをtailnetへ公開しました";
+
+    expect(read("dev.sh")).toContain(marker);
+    expect(read("run-issue-session.sh")).toContain(marker);
+    expect(read("start-issue.sh")).toContain(marker);
+  });
+
   it("scripts/lib/dev-server.sh の全インターフェース判定は tailscale serve 自身の待ち受けを拾わない", () => {
     const source = read("lib/dev-server.sh");
 

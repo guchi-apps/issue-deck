@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
+# tailnetへの公開（#1265）を起こし直しでも張り直すため（#1363）。
+# shellcheck source=scripts/lib/tailscale-serve.sh
+source "$SCRIPT_DIR/lib/tailscale-serve.sh"
+
 # next devは.env.localを自動読込するが、このスクリプト自身（bash）は読み込まないため明示的に読む。
 if [ -f .env.local ]; then
   set -a
@@ -87,6 +91,41 @@ elif [ "${ISSUE_DECK_SKIP_LAN_SETUP:-0}" != "0" ]; then
   echo "LANアクセス設定はスキップします（LAN内の別端末から見る場合は scripts/setup-lan-access.sh ${PORT} を実行してください）。" >&2
 else
   bash "$(dirname "${BASH_SOURCE[0]}")/setup-lan-access.sh" "${PORT}" || echo "警告: LANアクセス設定に失敗しました。localhostでの確認は引き続き可能です。" >&2
+fi
+
+# tailnetへの公開（`tailscale serve`・#1265）を張り直す（#1363）。
+#
+# **開発サーバーだけが停止すると、公開のほうも撤去される。** アイドルで回収された（#1223）
+# 開発サーバーのポートは転送先（`localhost:<ポート>`）に待ち受けが無くなるため、
+# `scripts/reap-dev-servers.sh`が2巡（既定で約2分）で孤児として撤去する（#1403）。
+# ところが公開を張るのはセッションの起動経路（`run-issue-session.sh`・`start-develop-dev.sh`）
+# だけで、**案内している起こし直し（`cd <worktree> && pnpm dev`）にはその一手が無かった。**
+# その結果、localhostでは見えるのにtailnetのURL（issue-deckの画面に出たまま）は死んだままになり、
+# `23.preview-required`で別端末から画面を見る導線が切れていた。
+#
+# **手で叩き直す経路はこのスクリプトだけで完結させる**（待ち受けの既定と同じ考え方・#1526）。
+# `tailscale serve`の公開は同じ内容なら何度張っても同じなので、セッションの起動経路から
+# 呼ばれて二重に張っても害は無い。
+#
+# **待ち受けを開けているときは張らない。** serveはtailnetアドレスを具体的に掴むため、
+# `::`（全インターフェース）を要求する`next dev`より先に張ると`EADDRINUSE`で起動できなくなる
+# （順序の詳細はdocs/multi-agent/local-quick-start.md）。開けているならtailnetからは直接見える。
+#
+# `tailscale serve`が使えないホスト（メインPCのWSL等）では黙って何もしない。
+# 公開そのものを止めたいときは`ISSUE_DECK_TAILNET_PUBLISH=0`を渡す。
+if [ "${ISSUE_DECK_TAILNET_PUBLISH:-1}" = "0" ]; then
+  echo "tailnetへの公開は行いません（ISSUE_DECK_TAILNET_PUBLISH=0 の指定）。" >&2
+elif ! dev_host_is_loopback "$DEV_HOST"; then
+  echo "tailnetへの公開は行いません（待ち受けが ${DEV_HOST} のため、serveを張ると next dev が EADDRINUSE で起動できません）。tailnetからは直接この待ち受けに届きます。" >&2
+else
+  PREVIEW_URL="$(tailscale_serve_publish "$PORT" || true)"
+  if [ -n "$PREVIEW_URL" ]; then
+    # **文面は run-issue-session.sh と同じにする。** 起動ログからtailnetのURLを拾う案内
+    # （scripts/start-issue.sh がプロンプトへ書き込む）が、この行を目印にしている。
+    echo "開発サーバーをtailnetへ公開しました: $PREVIEW_URL" >&2
+  else
+    echo "情報: tailnetへの公開は行いません（tailscale serveが使えないホストです）。" >&2
+  fi
 fi
 
 SMEE_PID=""
