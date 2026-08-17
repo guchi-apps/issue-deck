@@ -7,7 +7,9 @@
 #
 # 引数の `<owner>/<repo>` と `<issue番号>` は**質問Issueの置き場所**で、参照範囲ではない。
 # 参照するのは「このホストが実行できると申告した全リポジトリ」（`local_repo_list_runnable`）で、
-# それらのチェックアウトを `--add-dir` で渡す。
+# それらの **`origin/develop` のスナップショット**（`scripts/lib/question-refs.sh`）を
+# `--add-dir` で渡す。本体チェックアウトをそのまま渡すと、誰も更新しないため古いコードを
+# 根拠に答えることになる（#1583）。
 #
 # 呼び出し経路:
 #   issue-deckの画面「質問する」→「複数のリポジトリ（横断）」
@@ -15,7 +17,8 @@
 #
 # ## 実装セッション（generic-start-issue.sh）との違い
 #
-#   worktree        作らない。**読み取り専用**なのでブランチもコミットも要らない
+#   worktree        質問のための作業用worktreeは作らない。**読み取り専用**なのでブランチも
+#                   コミットも要らない（参照先のスナップショットだけはdetachedのworktree）
 #   cwd             リポジトリごとに固定の空ディレクトリ
 #                   （~/apps/issue-deck-worktrees/.questions/_session-<repo>）。
 #                   どれか1つのリポジトリをcwdにすると、そのリポジトリのCLAUDE.mdだけが
@@ -32,11 +35,16 @@
 #   ISSUE_DECK_QUESTION_BASE            質問セッションの作業ディレクトリの置き場
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto。#1205）
+#   ISSUE_DECK_LAUNCHER_REEXEC          1なら同期コピーからの再実行を行わない（内部用・#1583）
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$ROOT/scripts"
+
+# 同期コピーから自分自身を実行し直すとき（#1583）にそのまま渡す。下の引数解析は
+# `--prepare-only` を取り除いてしまうため、渡された形を先に控えておく。
+ORIGINAL_ARGS=(${@+"$@"})
 
 # 対応表の解決・検証は受け口・pollerと共有する（判定を二重に持たない）。
 # shellcheck source=scripts/lib/local-repo-resolve.sh
@@ -47,6 +55,9 @@ source "$SCRIPT_DIR/lib/personal-config-sync.sh"
 # 起動スクリプト自身（issue-deckの本体の作業ツリー）が古いままの場合の警告（#1274・#1438）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
+# 参照先を`origin/develop`のスナップショットにする（#1583）。
+# shellcheck source=scripts/lib/question-refs.sh
+source "$SCRIPT_DIR/lib/question-refs.sh"
 
 usage() {
   echo "Usage: scripts/start-cross-repo-question.sh [--prepare-only] <owner> <repo> <issue番号>" >&2
@@ -91,9 +102,37 @@ if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-warn_personal_config_drift
 resolve_launcher_scripts_dir "$ROOT"
+# 本体が古いことは**再実行する前に**言う（再実行後はROOTが同期コピーの置き場になり、gitの
+# 作業ツリーでないため何も出せない）。
 warn_launcher_scripts_stale "$ROOT"
+
+# **ランチャー自身も同期コピーから走らせる**（#1583）。
+#
+# pollerは本体の作業ツリーの`scripts/`を直接起動するため、#1438で新しくなるのは
+# `run-issue-session.sh`と`prompts/`から先だけで、このスクリプト自身は本体のものが動いていた。
+# その結果、developへ入れたランチャーの修正（#1529のcwd固定など）は**誰かが本体を`git pull`
+# するまで効かない**。ここで一度だけ同期コピーへ移ることで、以降のランチャーの修正が
+# マージした時点で効くようになる。
+#
+# **判断に迷ったら本体**という#1438の建て付けはそのまま使う。同期コピーを使うかどうかを
+# 決めるのは`resolve_launcher_scripts_dir`で、未コミットの変更がある・fetchできない・展開に
+# 失敗したといった場合は`LAUNCHER_SCRIPTS_SHA`が空になり、ここも素通りする。
+if [[ -n "$LAUNCHER_SCRIPTS_SHA" && "${ISSUE_DECK_LAUNCHER_REEXEC:-0}" != "1" &&
+  -f "$LAUNCHER_SCRIPTS_DIR/start-cross-repo-question.sh" ]]; then
+  echo "情報: ランチャー自身も $LAUNCHER_SYNC_REF の同期コピー（${LAUNCHER_SCRIPTS_SHA:0:7}）から実行し直します（#1583）。"
+  # 再実行は1回だけ（同期コピー側のROOTはgitの作業ツリーではないため、そちらでは
+  # `LAUNCHER_SCRIPTS_SHA`が空になり自然に止まるが、明示的な印も置く）。
+  export ISSUE_DECK_LAUNCHER_REEXEC=1
+  # セッションへの申告（どのコミットのスクリプトで動いているか）は引き継ぐ。
+  export ISSUE_DECK_LAUNCHER_SCRIPTS_SHA="$LAUNCHER_SCRIPTS_SHA"
+  export ISSUE_DECK_LAUNCHER_ROOT="$ROOT"
+  exec bash "$LAUNCHER_SCRIPTS_DIR/start-cross-repo-question.sh" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+fi
+
+warn_personal_config_drift
+# 同期コピーから再実行された側では`LAUNCHER_SCRIPTS_SHA`が空になるため、引き継いだ値を見る。
+LAUNCHER_SCRIPTS_SHA="${LAUNCHER_SCRIPTS_SHA:-${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:-}}"
 if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
   echo "情報: セッション側のスクリプトは $LAUNCHER_SYNC_REF の同期コピー（${LAUNCHER_SCRIPTS_SHA:0:7}）から実行します（#1438）。"
 fi
@@ -103,7 +142,7 @@ fi
 # 実際に渡すディレクトリがずれないようにするため。1件も無ければ質問に答える材料が無いので、
 # 起動せずに理由を出して止める（issue-deck側も`no_runnable_repositories`で断っている）。
 REFERENCE_NAMES=()
-REFERENCE_DIRS=()
+REFERENCE_PATHS=()
 while IFS= read -r name; do
   [[ -n "$name" ]] || continue
   if ! repo_path="$(local_repo_resolve_path "$name")"; then
@@ -111,16 +150,33 @@ while IFS= read -r name; do
   fi
   [[ -d "$repo_path" ]] || continue
   REFERENCE_NAMES+=("$name")
-  REFERENCE_DIRS+=("$repo_path")
+  REFERENCE_PATHS+=("$repo_path")
 done < <(local_repo_list_runnable)
 
-if [[ "${#REFERENCE_DIRS[@]}" -eq 0 ]]; then
+if [[ "${#REFERENCE_PATHS[@]}" -eq 0 ]]; then
   echo "Error: 参照できるリポジトリが1つもありません（$(local_repos_config_file)）。" >&2
   echo "  cloneの有無と対応表の記載を確認してください。" >&2
   exit 1
 fi
 
-echo "#$ISSUE_NUMBER: 参照するリポジトリ: ${#REFERENCE_DIRS[@]}件"
+# --- 参照先を origin/develop のスナップショットへ寄せる（#1583）--------------------------------
+# **本体チェックアウトをそのまま渡さない。** 更新する仕組みが無いため古いコードを根拠に
+# 答えることになる（実測で最大29コミット遅れ）。fetchは全リポジトリぶんを並列で行い、
+# 用意できなかったリポジトリだけ本体チェックアウトへ落とす（理由は参照一覧に出す）。
+echo "#$ISSUE_NUMBER: 参照するリポジトリを最新化しています（${#REFERENCE_PATHS[@]}件）..."
+question_refs_fetch_all "${REFERENCE_PATHS[@]}"
+
+REFERENCE_DIRS=()
+REFERENCE_LABELS=()
+SNAPSHOT_COUNT=0
+for i in "${!REFERENCE_NAMES[@]}"; do
+  question_ref_prepare "${REFERENCE_NAMES[$i]}" "${REFERENCE_PATHS[$i]}"
+  REFERENCE_DIRS+=("$QUESTION_REF_DIR")
+  REFERENCE_LABELS+=("$QUESTION_REF_LABEL")
+  [[ "$QUESTION_REF_SNAPSHOT" -eq 1 ]] && SNAPSHOT_COUNT=$((SNAPSHOT_COUNT + 1))
+done
+
+echo "#$ISSUE_NUMBER: 参照するリポジトリ: ${#REFERENCE_DIRS[@]}件（スナップショット ${SNAPSHOT_COUNT}件・本体チェックアウト $(( ${#REFERENCE_DIRS[@]} - SNAPSHOT_COUNT ))件）"
 
 # --- 作業ディレクトリ ---------------------------------------------------------
 # **どのリポジトリでもない空のディレクトリをcwdにする。** 実装セッションのworktreeや
@@ -160,10 +216,12 @@ if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
   exit 1
 fi
 
-# 参照リポジトリの一覧をプロンプトへ差し込む形（`- owner/repo … パス`）に整える。
+# 参照リポジトリの一覧をプロンプトへ差し込む形（`- owner/repo … パス（鮮度）`）に整える。
+# **鮮度を必ず添える**（#1583）。回答は「いまのdevelopがどうなっているか」として読まれるため、
+# 何時点の何を読んだのかを回答へ書けるようにする。
 REFERENCE_LIST=""
 for i in "${!REFERENCE_NAMES[@]}"; do
-  REFERENCE_LIST+="- \`${REFERENCE_NAMES[$i]}\` … \`${REFERENCE_DIRS[$i]}\`"$'\n'
+  REFERENCE_LIST+="- \`${REFERENCE_NAMES[$i]}\` … \`${REFERENCE_DIRS[$i]}\`（${REFERENCE_LABELS[$i]}）"$'\n'
 done
 
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています..."
@@ -221,6 +279,10 @@ if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   echo "#$ISSUE_NUMBER: 準備が完了しました。"
   echo "  作業ディレクトリ: $SESSION_DIR"
   echo "  プロンプト: $PROMPT_FILE"
+  echo "  参照先:"
+  for i in "${!REFERENCE_NAMES[@]}"; do
+    echo "    ${REFERENCE_NAMES[$i]} … ${REFERENCE_DIRS[$i]}（${REFERENCE_LABELS[$i]}）"
+  done
   exit 0
 fi
 
@@ -260,7 +322,9 @@ build_env_prefix() {
   done
   if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
     prefix+="export ISSUE_DECK_LAUNCHER_SCRIPTS_SHA=$(printf '%q' "$LAUNCHER_SCRIPTS_SHA"); "
-    prefix+="export ISSUE_DECK_LAUNCHER_ROOT=$(printf '%q' "$ROOT"); "
+    # 同期コピーから再実行された側（#1583）の `$ROOT` は同期コピーの置き場になる。
+    # セッションが「どのチェックアウトが古いのか」を出せるよう、本体のパスを引き継ぐ。
+    prefix+="export ISSUE_DECK_LAUNCHER_ROOT=$(printf '%q' "${ISSUE_DECK_LAUNCHER_ROOT:-$ROOT}"); "
   fi
   printf '%s' "$prefix"
 }

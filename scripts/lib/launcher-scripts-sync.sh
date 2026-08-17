@@ -56,13 +56,13 @@
 # 作業ツリーには一切触れないまま、フックとプロンプトの中身だけを新しくできる。
 #
 # **同期コピーを使うのは「本体の作業ツリーが単に古いだけ」と確かめられたときに限る。**
-# `scripts/`に未コミットの変更があるか、HEADが`origin/develop`に含まれていない（＝手元の
-# ブランチにしか無い変更がある）場合は、これまでどおり作業ツリーのものを走らせる。
+# `scripts/`に未コミットの変更があるか、HEADがどのリモート追跡ブランチにも含まれていない
+# （＝手元にしか無いコミットがある）場合は、これまでどおり作業ツリーのものを走らせる。
 # 起動スクリプトが、人が今書いているものを黙って無かったことにしてはいけない。
 #
-# **これで新しくなるのはセッション側だけ。** 人が叩く入口（`start-issue.sh`・
-# `generic-start-issue.sh`）とサブPCのpoller（systemdが起動する常駐プロセス）は引き続き
-# 本体の作業ツリーから動くため、警告は残す。
+# **新しくなるのはセッション側と、横断質問のランチャー（#1583）まで。** 人が叩く入口
+# （`start-issue.sh`・`generic-start-issue.sh`）とサブPCのpoller（systemdが起動する常駐
+# プロセス）は引き続き本体の作業ツリーから動くため、警告は残す。
 
 # 比較対象。worktreeの作成元と同じ `origin/develop` を正とする。
 LAUNCHER_SYNC_REF="${ISSUE_DECK_LAUNCHER_SYNC_REF:-origin/develop}"
@@ -128,7 +128,8 @@ warn_launcher_scripts_stale() {
   if [[ -n "${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:-${LAUNCHER_SCRIPTS_SHA:-}}" ]]; then
     echo "  セッション側（run-issue-session.sh・session-notify.sh・prompts/）は $LAUNCHER_SYNC_REF の" >&2
     echo "  同期コピーから読むため新しいままですが、この起動スクリプト自身とサブPCのpollerは" >&2
-    echo "  本体の作業ツリーから動きます（#1438）。" >&2
+    echo "  本体の作業ツリーから動きます（横断質問のランチャーだけは同期コピーから実行し直します。" >&2
+    echo "  #1438・#1583）。" >&2
   else
     echo "  起動スクリプトとセッション通知のフックは、worktreeではなく本体の作業ツリーから" >&2
     echo "  実行されます。developに入った修正は pull するまで反映されません（#1274）。" >&2
@@ -216,9 +217,19 @@ resolve_launcher_scripts_dir() {
   # **人が今書いているものを、起動スクリプトが黙って無かったことにしない。**
   # `scripts/`に未コミットの変更があれば、これまでどおり作業ツリーのものを走らせる
   git -C "$root" diff --quiet HEAD -- scripts/ 2>/dev/null || return 0
-  # HEADが`origin/develop`に含まれていない＝手元のブランチにしか無い変更がある。
-  # 「単に古いだけ」ではないので、こちらも作業ツリーを優先する
-  git -C "$root" merge-base --is-ancestor HEAD "$LAUNCHER_SYNC_REF" >/dev/null 2>&1 || return 0
+  # HEADが手元にしか無いコミットを指しているなら「単に古いだけ」ではないので、作業ツリーを優先する。
+  #
+  # **`origin/develop`の祖先であることを条件にしない**（#1583）。本体チェックアウトは
+  # リリース作業などで`main`に乗ることがあり、`main`のマージコミットは`develop`に含まれない。
+  # そのため元の条件では、**発行済みのブランチに乗っているだけで同期コピーが丸ごと無効化**され、
+  # 気付く手掛かりも無かった（サブPCでは`main`（v4.0.0）に乗ったまま67コミット遅れており、
+  # #1438が入っているのにセッション側のスクリプトもプロンプトも古いままだった）。
+  #
+  # 見るのは「HEADがリモートへ出ているか」だけにする。リモート追跡ブランチのどれかに含まれて
+  # いれば、そのコミットは誰かが読める場所にあり、ここで同期コピーへ移っても失われるものは無い。
+  local published
+  published="$(git -C "$root" branch -r --contains HEAD 2>/dev/null | head -1)"
+  [[ -n "$published" ]] || return 0
 
   local sha dir
   sha="$(git -C "$root" rev-parse "$LAUNCHER_SYNC_REF" 2>/dev/null || true)"
