@@ -935,11 +935,12 @@ Supabaseのリダイレクト許可リストもホスト名の形でしか通ら
 
 | 場所 | 何をするか |
 |---|---|
-| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定なら`-H 127.0.0.1`を渡す（#1526）。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
+| `scripts/dev.sh` | `ISSUE_DECK_DEV_HOST`が未設定なら`-H 127.0.0.1`を渡す（#1526）。あわせて`tailscale serve`も張り直す（#1363・後述）。**手で`pnpm dev`を叩き直す経路**はここだけで完結する |
 | `scripts/run-issue-session.sh` | 開発サーバーを起こす前に`ISSUE_DECK_DEV_HOST=127.0.0.1`をexportする（#1526で無条件にした）。セッション開始時点から閉じるので、そもそもぶつかる状態を作らない。**#1329より前に作られたworktreeにも効く**唯一の経路 |
 
 - **serveは`localhost:<ポート>`へproxyするので、閉じてもtailnetのURLからは従来どおり見える**
-  （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する。
+  （#1350で実測）。`pnpm dev`で起こし直せば、tailnetのURLもそのまま復帰する（張り直しは
+  `scripts/dev.sh`が行う・#1363）。
 - **serveを張る順番は変えていない。** 先に張ると、`ISSUE_DECK_DEV_HOST`を見ない他リポジトリの
   開発サーバー（汎用ランチャー・#1224）が起動できなくなる。あちらは従来どおり
   「devサーバー→serve」の順で、待ち受けもそのリポジトリの既定のまま。
@@ -980,6 +981,40 @@ LISTEN 0  511                           *:5403     *:*
 その隙間に当たると、起動中のセッションのserveを外してしまう。そこで1回目は
 `~/apps/issue-deck-worktrees/.dev-servers/orphan-serve-strikes`へ記録するだけにしている
 （手で流して即座に片付けたいときは2回続けて実行する。`--dry-run`はこの記録を書き換えない）。
+
+#### 起こし直しでは`tailscale serve`を張り直す（#1363）
+
+**「開発サーバーだけが止まる」と、公開のほうも巻き添えで消える。** アイドルで回収された（#1223）
+ポートは転送先（`localhost:<ポート>`）に待ち受けが無くなるので、上の孤児判定（#1403）が
+2巡（pollerの既定で約2分）でserveを撤去する。セッション自体は生きていても撤去される
+（**ポートからIssue・セッションを逆算しない**という判定の建て付け上、区別できない）。
+
+ところが**serveを張るのはセッションの起動経路だけ**（`run-issue-session.sh`・
+`start-develop-dev.sh`）で、プロンプトが案内する起こし直し（`cd <worktree> && pnpm dev`）には
+その一手が無かった。結果として次のようになっていた。
+
+1. アイドルで開発サーバーが停止する（#1223）
+2. 約2分後、`reap-dev-servers.sh`がそのポートのserveを孤児として撤去する（#1403）
+3. 案内どおり`pnpm dev`で起こし直すと、localhostでは見えるが**tailnetのURLは死んだまま**
+4. issue-deckの画面にはセッション開始時に報告されたtailnetのURLが出たままなので、
+   `23.preview-required`で別端末（スマホ）から開く導線が、気づかないうちに切れている
+
+そこで**`scripts/dev.sh`が起動時に`tailscale serve`を張り直す**。serveの公開は同じ内容なら
+何度張っても同じなので、セッションの起動経路から呼ばれて二重に張っても害は無い。
+
+- **待ち受けを開けているとき（`ISSUE_DECK_DEV_HOST`が非ループバック）は張らない。** serveは
+  tailnetアドレスを具体的に掴むため、`::`を要求する`next dev`より先に張ると`EADDRINUSE`になる
+  （上の順序の話がそのまま当てはまる）。開けているならtailnetからは直接届く
+- `tailscale serve`が使えないホスト（メインPCのWSL等）では黙って何もしない。公開そのものを
+  止めたいときは`ISSUE_DECK_TAILNET_PUBLISH=0`を渡す
+- 出す行の文面は`run-issue-session.sh`と同じ（`開発サーバーをtailnetへ公開しました: <URL>`）。
+  プロンプトが「起動ログのこの行を見る」と案内している（`scripts/start-issue.sh`）ため揃える
+- **issue-deckへの報告（`report_preview_url_to_issue_deck`）はしない。** ホスト名もポートも
+  変わらないのでURLは同じで、画面に出ている値は元から正しい。死んでいたのは実体のほうだけ
+
+`EADDRINUSE`そのもの（#1363の起票時の現象）は#1526で待ち受けを`127.0.0.1`に閉じたときに解消済み。
+実測でも、serveを先に張ってから`127.0.0.1`にbindしても衝突せず、serveの転送先（`localhost`）は
+IPv4のループバック待ち受けに解決される。
 
 ### allowedDevOriginsに載せる必要がある
 
