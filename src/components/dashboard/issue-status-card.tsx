@@ -7,6 +7,7 @@ import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-
 import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import { SessionRecoveryButton } from "@/components/dashboard/session-recovery-button";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
@@ -23,6 +24,8 @@ import type { Issue } from "@/types/issue";
 
 type IssueStatusCardProps = {
   issue: Issue;
+  /** ラベルを更新したときに親へ返す（セッションの復旧が`11.local`を付け直す。#1830） */
+  onIssueUpdated: (issue: Issue) => void;
   /** 画面で1回だけ取ったディスパッチの状態（#1262）。取り消し・停止もこの経路で積む */
   dispatch: DispatchStateHandle;
   /** このIssueへ積んだ実装ジョブ（`findDispatchJobForIssue`の結果） */
@@ -55,6 +58,7 @@ type IssueStatusCardProps = {
  */
 export function IssueStatusCard({
   issue,
+  onIssueUpdated,
   dispatch,
   dispatchJob,
   issueSession,
@@ -136,6 +140,18 @@ export function IssueStatusCard({
               dispatch={dispatch}
               align="end"
               launchJob={foldedLaunchJob}
+            />
+          )}
+          {/* 終了したセッションを呼び戻す（#1830）。**終了した行のすぐ下に置く。**
+              押す人が見ているのは「終了しました」と出ている場所で、そこから別の場所にある
+              起動ボタンを探させると、会話の続きから戻れること自体に気づけない */}
+          {issueSession && (
+            <SessionRecoveryButton
+              issue={issue}
+              session={issueSession}
+              dispatch={dispatch}
+              onIssueUpdated={onIssueUpdated}
+              align="end"
             />
           )}
           {localOnly && (

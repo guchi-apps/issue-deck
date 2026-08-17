@@ -109,6 +109,7 @@ function renderCard(props: Partial<Parameters<typeof IssueStatusCard>[0]> = {}) 
   return render(
     <IssueStatusCard
       issue={makeIssue()}
+      onIssueUpdated={vi.fn()}
       dispatch={makeDispatch()}
       dispatchJob={null}
       issueSession={null}
@@ -141,6 +142,32 @@ describe("IssueStatusCard", () => {
     renderCard({ issueSession: makeSession() });
     expect(screen.queryByRole("list", { name: "実装状況" })).toBeNull();
     expect(screen.getByText(/実行中/)).not.toBeNull();
+  });
+
+  /**
+   * #1830。押す人が見ているのは「終了しました」と出ている場所なので、呼び戻す導線もそこへ置く。
+   * 生きているセッションでは出さない（`SessionRecoveryButton`側の判定）。
+   */
+  it("終了したセッションの下に「セッションを復旧」を出す", () => {
+    renderCard({
+      issueSession: makeSession({ state: "GONE", activity: "WAITING_INPUT" }),
+      dispatch: makeDispatch({
+        hosts: [
+          {
+            name: "subpc",
+            repositories: ["guchi-apps/issue-deck"],
+            online: true,
+          } as never,
+        ],
+      }),
+    });
+    expect(screen.getByText(/回答前に終了/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "セッションを復旧" })).not.toBeNull();
+  });
+
+  it("動いているセッションには「セッションを復旧」を出さない", () => {
+    renderCard({ issueSession: makeSession() });
+    expect(screen.queryByRole("button", { name: "セッションを復旧" })).toBeNull();
   });
 
   it("Claudeの回答待ちを同じカードの中に出す", () => {
