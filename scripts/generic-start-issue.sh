@@ -143,6 +143,17 @@ if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
+# フォルダの信頼確認が済んでいるか（#1838）。**worktreeを作る前にここで止める。**
+# 汎用ランチャーが起こすのは「そのホストでまだClaude Codeを開いたことがないリポジトリ」で
+# あることが多く、信頼確認に当たりやすい。当たると答えるまでセッションが始まらず、フックが
+# 1つも飛ばないまま止まる（#1465）。判定は`~/.claude.json`を読むだけで、書き換えはしない。
+# `--prepare-only`では`claude`を起こさないので確かめない。
+# shellcheck source=scripts/lib/claude-trust.sh
+source "$SCRIPT_DIR/lib/claude-trust.sh"
+if [[ "$PREPARE_ONLY" -eq 0 ]]; then
+  claude_trust_require "$REPO_PATH" "$FULL_NAME" || exit 1
+fi
+
 # worktreeを作ってから落ちると中途半端な状態が残るため、パッケージマネージャの有無は先に確かめる。
 PACKAGE_MANAGER="$(detect_package_manager "$REPO_PATH")"
 if [[ -n "$PACKAGE_MANAGER" ]] && ! command -v "$PACKAGE_MANAGER" >/dev/null 2>&1; then

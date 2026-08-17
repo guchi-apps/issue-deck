@@ -958,6 +958,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
+- **そのホストで初めて開くリポジトリは、起こす前に止める**（#1838。`scripts/lib/claude-trust.sh`）。
+  Claude Codeのフォルダ信頼確認（`Is this a project you created or one you trust?`）に答えるまで
+  セッションは始まらず、その間はフックが1つも飛ばない（#1465）。`start-local-session.sh`・
+  `generic-start-issue.sh`が`~/.claude.json`を**読んで**未信頼を見分け、worktreeを作る前に
+  「本体チェックアウトで1回だけ答えてください」と出して止まる。**信頼は本体チェックアウトの
+  パスに記録される**ためリポジトリにつき1回で済む。**書き換えはしない**（「信頼確認そのものは
+  自動化しない」）。判定できないときは通す（fail open。`ISSUE_DECK_SKIP_CLAUDE_TRUST_CHECK=1`で
+  丸ごと飛ばせる）。
 - **起動したセッションの後始末はpollerの1巡に相乗りさせ、常駐プロセスを増やさない。**
   `scripts/reap-dev-servers.sh`が開発サーバーを（#1223）、`scripts/reap-sessions.sh`が作業の
   終わったtmuxセッションそのものを畳む（#1256）。判定材料は`scripts/lib/session-state.sh`が

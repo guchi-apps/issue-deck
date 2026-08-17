@@ -1369,6 +1369,27 @@ Issue #<番号>「<Issueのタイトル>」のセッションを再開しまし�
 tmux attach -t <リポジトリ名>-issue-<番号>
 ```
 
+### 信頼確認はリポジトリにつき1回。先に答えておけば止まらない（#1838）
+
+信頼は**worktreeのパスではなく本体チェックアウトのパス**へ記録される（実測: `~/.claude.json`の
+`projects`に載っているのは本体チェックアウトと非gitのディレクトリだけで、約100件の会話履歴が
+あるworktreeは1件も無い）。したがって、そのリポジトリで**一度答えれば以後は聞かれない**。
+
+```bash
+cd ~/apps/<repo> && claude   # 「Yes, I trust this folder」を選び、/exit で抜ける
+```
+
+新しいリポジトリを対象に加えるときの手順に入れてある
+（[generic-launcher.md](generic-launcher.md)「対象リポジトリを増やす」）。飛ばしたまま起動しても
+**worktreeは作られない**。`start-local-session.sh`・`generic-start-issue.sh`が起動前に
+`~/.claude.json`を読んで確かめ、未信頼なら上のコマンドを出して止まる
+（[scripts/lib/claude-trust.sh](../../scripts/lib/claude-trust.sh)）。
+
+**信頼確認に答える前は会話履歴が1件も作られない。** `~/.claude/projects/<cwdの名前>/`に`.jsonl`が
+できるのはセッションが始まってからで、止まったまま終えたセッションは`--continue`で引き継ぐ材料を
+残さない（`run-issue-session.sh`の再開判定はこの`.jsonl`の有無を見ている）。**信頼確認で止まった
+セッションは「再開」ではなく起こし直しになる**、と考えてよい。
+
 仕組みは[session-notify.md](session-notify.md)「セッションが始まる前は、フックでは何も
 分からない（#1465）」を参照。
 

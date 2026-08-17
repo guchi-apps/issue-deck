@@ -133,7 +133,7 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       tone: "waiting",
       label: `${formatDispatchHostName(session.host)}のセッションがまだ開始していません`,
       shortLabel: "まだ開始していません",
-      detail: `フォルダの信頼確認（Is this a project you created or one you trust?）などで止まっている可能性があります。\`tmux attach -t ${session.tmuxSessionName}\`で答えてください`,
+      detail: `フォルダの信頼確認（Is this a project you created or one you trust?）などで止まっている可能性があります。\`tmux attach -t ${session.tmuxSessionName}\`で答えてください（この確認はリポジトリにつき1回です）`,
       // 繋がっていないURLを出さない（起動時に取れた値が残っていることがある）
       remoteControlUrl: null,
     };
