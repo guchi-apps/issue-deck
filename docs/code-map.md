@@ -944,8 +944,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **複数リポジトリ横断の質問もこのキューで流す**（#1454。`kind`は`CROSS_REPO_QUESTION`）。
   Actionsは1リポジトリしかチェックアウトしないため横断できず、サブPC限定の導線になる。
   質問Issueは記録先リポジトリ（既定は名前が`question`のもの）に普通のIssueとして作り、
-  ランチャー（`scripts/start-cross-repo-question.sh`）は**worktreeを作らず**、実行できる
+  ランチャー（`scripts/start-cross-repo-question.sh`）は**質問用のworktreeを作らず**、実行できる
   全リポジトリを`--add-dir`で読み取り用に渡す（書き込み系ツールは`--disallowedTools`で封じる）。
+  **渡すのは本体チェックアウトではなく`origin/develop`のスナップショット**（#1583。
+  `scripts/lib/question-refs.sh`が起動時に`fetch`し、`.questions/_refs/<owner>-<repo>`の
+  detached worktreeを合わせる）。本体チェックアウトを更新する仕組みがどこにも無く、実測で
+  最大29コミット遅れのコードを根拠に答えていたため。**本体の作業ツリーには触れず**、
+  用意できなかったリポジトリだけ本体へ落として遅れコミット数を参照一覧に出す。
   回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
   そのまま働く。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
@@ -1056,8 +1061,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   生成されないという形でこれを踏んだ）。`scripts/lib/launcher-scripts-sync.sh`の
   `resolve_launcher_scripts_dir`が置き場所を決め、`warn_launcher_scripts_stale`が差分を警告する。
   **同期コピーを使うのは作業ツリーが単に古いだけのときに限り、未コミットの変更があれば
-  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 入口の`start-issue.sh`と
-  pollerは作業ツリーのまま。経路の表は
+  そちらを優先する。作業ツリーには触れない（自動pullはしない）。** 「単に古いだけ」の判定は
+  **HEADがリモート追跡ブランチのどれかに含まれているか**で行う（#1583）。`origin/develop`の
+  祖先であることを条件にしていた頃は、本体チェックアウトが`main`に乗っているだけで
+  同期コピーが丸ごと無効化されていた（`main`のマージコミットは`develop`に含まれないため）。
+  入口の`start-issue.sh`とpollerは作業ツリーのままだが、**横断質問のランチャーだけは
+  同期コピーから自分を実行し直す**（#1583。pollerが本体の`scripts/`を直接起動するため、
+  ランチャーの修正が人の`git pull`まで効かなかった）。経路の表は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
