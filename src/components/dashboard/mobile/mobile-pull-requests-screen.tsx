@@ -8,6 +8,7 @@ import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileViewSheet } from "@/components/dashboard/mobile/mobile-view-sheet";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
@@ -34,12 +35,14 @@ type MobilePullRequestsScreenProps = {
   failedRepositories: string[];
   fetchedAt: string | null;
   isLoading: boolean;
-  /** 自動更新も含めて取得中か（#1767）。`PullRequestList`へそのまま渡す */
-  isRefreshing: boolean;
   /** 自動更新の間隔（#1767）。`PullRequestList`へそのまま渡す */
   autoRefreshIntervalMs: AutoRefreshIntervalMs;
   error: string | null;
-  onRefresh: () => void;
+  /**
+   * 一覧を下へ引っ張ったときのPRの取り直し（#1947）。**完了を待てるものを渡す**——
+   * 待てないと更新中の表示が最短時間で消え、取れたのかどうかが画面から分からない。
+   */
+  onRefresh: () => Promise<unknown> | void;
   onBack: () => void;
   /** 画面内で状態別ビューを切り替えたとき（#1436） */
   onChangeView: (view: PullRequestViewId) => void;
@@ -65,7 +68,6 @@ export function MobilePullRequestsScreen({
   failedRepositories,
   fetchedAt,
   isLoading,
-  isRefreshing,
   autoRefreshIntervalMs,
   error,
   onRefresh,
@@ -75,6 +77,18 @@ export function MobilePullRequestsScreen({
   onMerged,
 }: MobilePullRequestsScreenProps) {
   const [viewSheetOpen, setViewSheetOpen] = useState(false);
+
+  // ヘッダーの実行状況（#1638）はこの画面で1回だけ取り、ボタンと引っ張り更新の両方へ配る
+  // （取得口を増やさない＝`use-dispatch-state.ts`の取り決め。Issue一覧と同じ形）
+  const dispatch = useDispatchState(true);
+
+  // 一覧を下へ引っ張ったときの更新（#1947）。**待つのはPRの取り直しだけ。**
+  // `dispatch.refresh`は取り直しの合図（`reloadKey`を進める同期関数）で完了を待てないが、
+  // 更新中の表示は`MIN_REFRESHING_MS`（0.5秒）保たれるので、その間に反映される。
+  async function handlePullToRefresh() {
+    dispatch.refresh();
+    await onRefresh();
+  }
 
   // 戻るボタンを出す経路（ホームからのドリルダウン）でだけ、戻るスワイプも有効にする
   const backEnabled = origin === "home";
@@ -133,10 +147,9 @@ export function MobilePullRequestsScreen({
         failedRepositories={failedRepositories}
         fetchedAt={fetchedAt}
         isLoading={isLoading}
-        isRefreshing={isRefreshing}
         autoRefreshIntervalMs={autoRefreshIntervalMs}
         error={error}
-        onRefresh={onRefresh}
+        onPullToRefresh={handlePullToRefresh}
         onSelectPullRequest={onSelectPullRequest}
         onMerged={onMerged}
         className="h-full"
@@ -156,7 +169,7 @@ export function MobilePullRequestsScreen({
         }
         headerActions={
           <>
-            <MobileDispatchStatusButton />
+            <MobileDispatchStatusButton dispatch={dispatch} />
             {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
             <MobileNotificationButton />
           </>
