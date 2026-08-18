@@ -166,8 +166,8 @@ async function toOpenPullRequest(
 ): Promise<PullRequestSummary> {
   // CI状態とコンフリクト有無（#1742）はPR1件につきGraphQL 1回で**まとめて**取る。
   // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いて未取得にする。
-  const { ciState, mergeable } = pullRequest.draft
-    ? { ciState: "unknown" as const, mergeable: null }
+  const { ciState, mergeable, mergeJudgement } = pullRequest.draft
+    ? { ciState: "unknown" as const, mergeable: null, mergeJudgement: "unknown" as const }
     : await fetchPullRequestCiState(
         repository.ownerLogin,
         repository.name,
@@ -176,7 +176,12 @@ async function toOpenPullRequest(
       );
 
   // openのPRにマージ済みは存在しない。
-  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
+  return toPullRequestSummary(pullRequest, repository, {
+    merged: false,
+    ciState,
+    mergeable,
+    mergeJudgement,
+  });
 }
 
 /**

@@ -52,6 +52,28 @@ const NON_CI_WORKFLOW_FILES = new Set([
   "sync-secrets.yml",
 ]);
 
+/**
+ * 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968）。
+ *
+ * - `pending` … 判定のcheck-runがまだ完了していない（＝マージしてよいかがまだ決まっていない）
+ * - `settled` … 判定のcheck-runが揃って完了している（結論は対応Issueの`00.check-user`側にある）
+ * - `unknown` … 判定のcheck-runが1件も無い。ワークフローが配られていないリポジトリ、
+ *   起動前、あるいはチェックが多すぎて1件ずつ見られなかった場合
+ */
+export type MergeJudgementState = "pending" | "settled" | "unknown";
+
+/**
+ * 自動マージ可否を判定するワークフローのファイル名（#1968）。callerのファイル名は配布先でも同じ。
+ *
+ * このワークフローのcheck-runは`NON_CI_WORKFLOW_FILES`でCI状態の集約から外れている（#1799）。
+ * 外したこと自体は正しい（外さないと自動マージされるPRが一度も「CI通過」を表示できない）が、
+ * その結果**判定が走っている最中でもCI状態が`success`になり、画面のマージボタンが警告も
+ * 確認ダイアログも無しに1クリックでマージできる状態になっていた**。実際にPR #1959が判定の
+ * 6分前にマージされている。CI状態とは別の軸としてここで進み具合を取り出し、判定中は
+ * 画面からマージできないようにする（`isMergeJudgementPending`）。
+ */
+const MERGE_JUDGEMENT_WORKFLOW_FILE = "claude-review-develop.yml";
+
 export type CheckRollup = {
   /**
    * GitHub自身の集約結果（小文字。`success` / `pending` / `failure` / `error` / `expected`）。
@@ -63,6 +85,11 @@ export type CheckRollup = {
    * （ページングを重ねるより、GitHubの集約値をそのまま使う方が問い合わせ1回で済み、ずれも生まない）。
    */
   checks: RollupCheck[] | null;
+  /**
+   * 自動マージ可否の判定の進み具合（#1968）。CI状態（`checks`）とは別の軸で、
+   * `claude-review-develop.yml`のcheck-runだけを見て決める。
+   */
+  mergeJudgement: MergeJudgementState;
 };
 
 /** 1回のクエリで引くチェックの上限。GraphQLの`first`の上限値でもある */
@@ -220,6 +247,28 @@ function isCiCheck(node: RollupContextNode): boolean {
   return file === null || !NON_CI_WORKFLOW_FILES.has(file);
 }
 
+/**
+ * 自動マージ可否の判定の進み具合を決める（#1968）。
+ *
+ * **`claude-review-develop.yml`のcheck-runだけを見る。** 1件でも未完了なら`pending`で、
+ * 判定が下るまで画面からマージさせない。1件も無ければ`unknown`——ワークフローを配って
+ * いないリポジトリまで巻き込んでマージできなくしないため、そこは従来どおり押せる側へ倒す。
+ *
+ * キャンセル・スキップされたcheck-runは`completed`なので`settled`として扱う。判定が
+ * 得られないまま止まった場合に画面を塞ぎ続けるより、押せる側へ戻す方を選んでいる
+ * （ワークフロー側も`wait-for-ci`のタイムアウトをfail-openにしており、方針を揃える）。
+ */
+function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgementState {
+  const judgementChecks = nodes.filter(
+    (node) => workflowFileOf(node) === MERGE_JUDGEMENT_WORKFLOW_FILE,
+  );
+  if (judgementChecks.length === 0) return "unknown";
+  const pending = judgementChecks.some(
+    (node) => (node.status ?? "").toLowerCase() !== "completed",
+  );
+  return pending ? "pending" : "settled";
+}
+
 function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
   return nodes.map(toRollupCheck).filter((check): check is RollupCheck => check !== null);
 }
@@ -234,17 +283,19 @@ function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
  * （そこでの表示はこの変更の前と同じままになる）。
  */
 function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
-  if (!rollup) return { state: null, checks: [] };
+  if (!rollup) return { state: null, checks: [], mergeJudgement: "unknown" };
 
   const state = rollup.state ? rollup.state.toLowerCase() : null;
   if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
     // 1件ずつ見られないためGitHubの集約値（＝運用自動化も含む）へ縮退する。
-    return { state, checks: null };
+    // 判定の進み具合も1件ずつ見ないと分からないため`unknown`にする（#1968）。
+    return { state, checks: null, mergeJudgement: "unknown" };
   }
   const ciChecks = toRollupChecks(rollup.contexts.nodes.filter(isCiCheck));
   return {
     state,
     checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(rollup.contexts.nodes),
+    mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
   };
 }
 

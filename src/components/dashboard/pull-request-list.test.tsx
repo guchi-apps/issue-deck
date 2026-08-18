@@ -29,6 +29,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeJudgement: "unknown",
     mergeable: null,
     repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
@@ -218,6 +219,14 @@ describe("PullRequestList", () => {
     renderList([makePullRequest({ draft: true })]);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
     expect(screen.getByText("ドラフト")).toBeTruthy();
+  });
+
+  it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
+    // PR #1959の再現。CIは通っていても判定が終わるまではマージさせない。
+    renderList([makePullRequest({ ciState: "success", mergeJudgement: "pending" })]);
+    const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {

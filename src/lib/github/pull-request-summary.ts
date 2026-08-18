@@ -1,5 +1,6 @@
 import { buildPullRequestId } from "@/lib/github-reference";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
+import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
@@ -15,7 +16,8 @@ import type { PullRequestSummary } from "@/types/pull-request";
  *
  * CI状態とコンフリクト有無（`mergeable`。#1742）は呼び出し側が渡す。取得にPR1件あたり1回APIを
  * 消費するので、「いつ取るか」の判断（draftやclosedでは取らない）は経路ごとに違うため。
- * この2つは1回のGraphQLでまとめて取れる（`fetchPullRequestCiState`）。
+ * この2つと自動マージ可否の判定の進み具合（`mergeJudgement`。#1968）は、1回のGraphQLで
+ * まとめて取れる（`fetchPullRequestCiState`）。
  *
  * 対応Issueの`00.check-user`（`linkedIssueCheckUser`）とその理由（`linkedIssueCheckReason`。
  * #1490）も呼び出し側が渡す。DBキャッシュを引く処理で、一覧は全リポジトリぶんをまとめて
@@ -33,6 +35,8 @@ export function toPullRequestSummary(
     ciState: CiState;
     /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
     mergeable?: boolean | null;
+    /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
+    mergeJudgement?: MergeJudgementState;
     linkedIssueCheckUser?: boolean;
     linkedIssueCheckReason?: CheckUserReason | null;
     /** 修復ワークフローの配布状況。判定していない経路では省略＝`{}`（押せる扱い） */
@@ -70,6 +74,7 @@ export function toPullRequestSummary(
     linkedIssueCheckUser: options.linkedIssueCheckUser ?? false,
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
+    mergeJudgement: options.mergeJudgement ?? "unknown",
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     createdAt: pullRequest.created_at,

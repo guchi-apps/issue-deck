@@ -43,6 +43,24 @@ describe("IssueMergeButton", () => {
     expect(button.disabled).toBe(true);
   });
 
+  it("自動マージ可否の判定中は「判定中」を表示して押せなくする（#1968）", () => {
+    render(
+      <IssueMergeButton onMerge={async () => true} ciStatus="success" mergeJudgement="pending" />,
+    );
+    const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    // なぜ押せないかが分かるよう理由をtitleに出す。
+    expect(button.title).toContain("claude-review-develop");
+  });
+
+  it("判定が終わっていれば押せる（#1968）", () => {
+    render(
+      <IssueMergeButton onMerge={async () => true} ciStatus="success" mergeJudgement="settled" />,
+    );
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
   it("マージ済みのときは「マージ済み」を表示して押せなくする", () => {
     render(<IssueMergeButton onMerge={async () => true} isMerged />);
     const button = screen.getByRole("button", { name: /マージ済み/ }) as HTMLButtonElement;

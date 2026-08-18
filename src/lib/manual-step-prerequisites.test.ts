@@ -52,6 +52,7 @@ function makePullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRe
     draft: false,
     merged: false,
     ciStatus: null,
+    mergeJudgement: "unknown",
     linkedIssueNumber: null,
     ...overrides,
   };
