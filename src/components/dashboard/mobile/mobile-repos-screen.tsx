@@ -1,10 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Archive, CircleSlash, FolderGit2, Lock, Search, Star, X } from "lucide-react";
+import {
+  Archive,
+  ChevronRight,
+  CircleSlash,
+  FolderGit2,
+  Lock,
+  Search,
+  Star,
+  X,
+} from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
+import { NavCount } from "@/components/dashboard/nav-count";
 import { Input } from "@/components/ui/input";
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
@@ -12,6 +22,7 @@ import {
   describeReleaseStatusBadge,
   type ReleaseStatusBadge,
 } from "@/lib/github/release-button-status";
+import { navViewIcons } from "@/lib/nav-views";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   isRepositoryAutomationUnsupported,
@@ -35,13 +46,25 @@ const BADGE_TONE_CLASS: Record<ReleaseStatusBadge["tone"], string> = {
 
 type MobileReposScreenProps = {
   repositories: ConnectedRepository[];
+  /**
+   * 「すべてのリポジトリのIssue」の行に出す件数（#1951）。左メニュー・ホームと同じ
+   * `navCounts`の「すべてのIssue」を渡す——ここで数え直すと、同じ名前の場所で違う数が出る。
+   */
+  allIssueCount: number;
   onSelectRepository: (repository: ConnectedRepository) => void;
+  /** 全リポジトリ横断のIssue一覧を開く（#1951） */
+  onSelectAllIssues: () => void;
   onSetRepositoryFavorite: (repository: ConnectedRepository, favorite: boolean) => void;
 };
 
+/** 「すべてのIssue」ビューのアイコン。遷移先の一覧で選ばれるビューと同じものを出す（#1951） */
+const AllIssuesIcon = navViewIcons.all;
+
 export function MobileReposScreen({
   repositories,
+  allIssueCount,
   onSelectRepository,
+  onSelectAllIssues,
   onSetRepositoryFavorite,
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
@@ -111,9 +134,24 @@ export function MobileReposScreen({
             </button>
           )}
         </div>
+
+        {/* 全リポジトリ横断のIssue一覧への入口（#1951）。この画面はリポジトリを1つ選ばないと
+            Issueへ辿り着けず、横断の一覧を開くにはホームまで戻る必要があった。
+            **検索窓の直下・一覧の外**に置く——リポジトリの行に混ぜると、検索やお気に入りの
+            対象に見えるうえ、スクロールで流れて見つからなくなる */}
+        <button
+          type="button"
+          onClick={onSelectAllIssues}
+          className="mt-3 flex min-h-11 w-full items-center gap-2 rounded-md bg-accent/40 px-2 py-2 text-left text-sm hover:bg-accent"
+        >
+          <AllIssuesIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate">すべてのリポジトリのIssue</span>
+          <NavCount count={allIssueCount} />
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
+      <div className="flex-1 overflow-y-auto border-t px-4 pt-3 pb-4">
         {repositories.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
             まだリポジトリと連携していません。
