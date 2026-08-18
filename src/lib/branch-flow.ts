@@ -316,7 +316,7 @@ function buildRepository({
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
-    // 初回に自動で開く条件（`needsAttention`）には入れない。
+    // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     plannedIssueCount: plannedIssues.length,
     deploy: deployState,
   };
