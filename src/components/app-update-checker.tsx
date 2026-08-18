@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { AppLoadingScreen } from "@/components/loading-screen";
 import { Button } from "@/components/ui/button";
 
 // フォアグラウンドで使い続けているセッション向けの定期チェック間隔。
@@ -19,6 +20,7 @@ type AppUpdateCheckerProps = {
  */
 export function AppUpdateChecker({ currentVersion }: AppUpdateCheckerProps) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const checkingRef = useRef(false);
 
   useEffect(() => {
@@ -39,10 +41,13 @@ export function AppUpdateChecker({ currentVersion }: AppUpdateCheckerProps) {
 
     // バックグラウンドから復帰した直後は、ユーザーが未保存の入力を失う心配がない
     // 安全なタイミングなので、新バージョンを検知したらそのまま自動でリロードする。
+    // リロードが終わるまでは前のバージョンの画面が残り、操作しても反応しないため、
+    // 読み込み中であることを画面で伝えてから実行する（#1978）。
     async function handleVisibilityChange() {
       if (document.visibilityState !== "visible") return;
       const latestVersion = await fetchLatestVersion();
       if (latestVersion && latestVersion !== currentVersion) {
+        setReloading(true);
         window.location.reload();
       }
     }
@@ -65,12 +70,27 @@ export function AppUpdateChecker({ currentVersion }: AppUpdateCheckerProps) {
     };
   }, [currentVersion]);
 
+  if (reloading) {
+    return (
+      <div className="fixed inset-0 z-100 flex flex-col bg-background">
+        <AppLoadingScreen />
+      </div>
+    );
+  }
+
   if (!updateAvailable) return null;
 
   return (
     <div className="fixed inset-x-4 bottom-4 z-50 flex items-center justify-between gap-3 rounded-lg border bg-foreground px-4 py-3 text-background shadow-lg sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2">
       <p className="text-sm">新しいバージョンがあります</p>
-      <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => {
+          setReloading(true);
+          window.location.reload();
+        }}
+      >
         更新する
       </Button>
     </div>

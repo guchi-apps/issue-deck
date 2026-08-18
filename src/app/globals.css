@@ -194,3 +194,28 @@
     box-shadow: 0 0 0 3px var(--check-user-flash-ring);
   }
 }
+
+/* 読み込み中であることを示す往復するバー（#1978）。どこまで進んだかはサーバー側から
+   分からないため進捗率は出さず、動き続けること自体を「アプリは生きている」の合図にする。
+   クラスを使うのは`src/components/loading-screen.tsx`。 */
+@keyframes loading-bar-slide {
+  from {
+    left: -42%;
+  }
+  to {
+    left: 102%;
+  }
+}
+
+.loading-bar-slide {
+  animation: loading-bar-slide 1.4s cubic-bezier(0.55, 0.1, 0.35, 0.9) infinite;
+}
+
+/* 動きを減らす設定では往復させず、バーを置いたままにする（状態は文言で伝わる） */
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar-slide {
+    animation: none;
+    left: 0;
+    width: 60%;
+  }
+}
