@@ -83,6 +83,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   作成したIssueは`BroadcastChannel`で元のデッキへ伝えて一覧へ加えるが、
   **選択中のIssueは動かさない**（[`lib/issue-broadcast.ts`](../src/lib/issue-broadcast.ts)）。
   伝わらなくても一覧のポーリング（10秒）で現れるので、失敗しても作成は止めない。
+- **作成フォームの項目は「種別 → リポジトリ → タイトル → 内容 → ラベル」の順で、
+  担当者は`m-guchi`固定**（#1929）。スマホ（393×852）で操作ボタンまで一画面に収めるための
+  並びで、「どこへ」→「何を」→「詳しく」の順に読める。担当者の選択欄は出さず、
+  リポジトリの割り当て可能なユーザーに`m-guchi`が居ればそれを付ける（居なければ未設定。
+  割り当てられない相手を送るとGitHub側で黙って落ちる）。**縦を詰めるための省略は、
+  画面から読み取れないことだけ残す**——リポジトリの補足文は質問のとき（選択肢が減っている
+  理由）だけ、見出しの説明文は質問のときだけ出し、Issueの説明文は`sr-only`で残す
+  （消すと`DialogContent`の説明が無くなりRadixが警告する）。
+  入力欄の下の「画像を添付」「音声入力を整理」は添付サムネイルと同じ行に並べ、
+  プレビューへの切り替えはこのフォームでは出さない
+  （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
+  `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と

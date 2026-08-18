@@ -377,7 +377,6 @@ export function CreateIssueDialog({
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   /** 別ウィンドウがブラウザに止められたか（#1728）。黙って何も起きないと壊れて見える */
   const [popOutBlocked, setPopOutBlocked] = useState(false);
-  const hasUserSetAssignee = useRef(false);
   /**
    * 「作成+実装開始」で作成したIssue（#1323）。**入っている間だけ「実装を開始」を出す。**
    * このダイアログ自体は閉じているので、そちらはDialogの外側に並べて描画する。
@@ -461,7 +460,6 @@ export function CreateIssueDialog({
     setError(null);
     setCommentError(null);
     setPopOutBlocked(false);
-    hasUserSetAssignee.current = draft.assignee !== null;
     // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
     // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
     setRestorableDraft(
@@ -488,12 +486,15 @@ export function CreateIssueDialog({
     assignee,
   });
 
+  /**
+   * 担当者は`m-guchi`固定（#1929）。画面から選べなくしたので、リポジトリの割り当て可能な
+   * ユーザーが分かった時点でこちらが入れる。**居ないリポジトリでは未設定のままにする**——
+   * 割り当てられない相手を送るとGitHub側で黙って落ちる。
+   */
   useEffect(() => {
-    if (!open || hasUserSetAssignee.current) return;
-    if (assignees.includes(DEFAULT_ASSIGNEE)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAssignee(DEFAULT_ASSIGNEE);
-    }
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAssignee(assignees.includes(DEFAULT_ASSIGNEE) ? DEFAULT_ASSIGNEE : null);
   }, [open, assignees]);
 
   // 提案が出たら、押した人の視線がある場所からでも見えるところまで寄せる（#1890）
@@ -576,8 +577,7 @@ export function CreateIssueDialog({
     // 実装オプション用ラベル（`21.plan-required`等）は#1580でこの画面から選べなくなったが、
     // それ以前に保存された下書きには残っている。画面に出ないラベルが黙って付かないよう濾す
     setSelectedLabels(restorableDraft.selectedLabels.filter(isSelectableLabelName));
-    setAssignee(restorableDraft.assignee);
-    hasUserSetAssignee.current = restorableDraft.assignee !== null;
+    // 担当者は下書きから戻さない（#1929）。固定値をeffectが入れ直す
     setRestorableDraft(null);
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
@@ -595,7 +595,6 @@ export function CreateIssueDialog({
     setBody("");
     setSelectedLabels([]);
     setAssignee(null);
-    hasUserSetAssignee.current = false;
   }
 
   function toggleLabel(name: string) {
@@ -604,11 +603,6 @@ export function CreateIssueDialog({
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
-  }
-
-  function handleAssigneeChange(value: string) {
-    hasUserSetAssignee.current = true;
-    setAssignee(value === "__none__" ? null : value);
   }
 
   function handleRepositoryChange(value: string) {
@@ -742,10 +736,18 @@ export function CreateIssueDialog({
     void handleSubmit();
   }
 
+  /**
+   * 見出し（#1929）。**Issueのときは説明文を画面に出さない。** 「内容を書いて作成します」は
+   * 画面を見れば分かることをスマホで2行使って書いていた。質問は作成後の動き（回答が
+   * コメントで返るまで待つ）が画面から読めないため、そちらだけ残す。
+   *
+   * 消すのは見た目だけで、要素は`sr-only`で残す——`DialogContent`の説明として読み上げに
+   * 使われており、無くすとRadixが警告を出す。
+   */
   const header = (
     <Chrome.Header>
       <Chrome.Title>{isQuestion ? "リポジトリに質問する" : "新しいIssueを作成"}</Chrome.Title>
-      <Chrome.Description>
+      <Chrome.Description className={isQuestion ? undefined : "sr-only"}>
         {isQuestion
           ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
           : "内容を書いて作成します。タイトル・ラベルは押したときだけ自動で付きます。"}
@@ -764,12 +766,17 @@ export function CreateIssueDialog({
         </div>
       )}
 
-      <div className="flex flex-col gap-4">
+      {/* 項目の間隔は`gap-3`（#1929）。スマホで一画面に収めるための詰めで、
+          1項目あたり4pxでも6項目ぶん積まれると見出しの説明文1行ぶんに相当する */}
+      <div className="flex flex-col gap-3">
         {/* 種別（#1641）。**本文の内容で勝手に切り替えない。** 誤判定は押した本人から
             見えないまま、質問のつもりの本文が実装Issueとして無人実行に乗る（逆もある）
             という取り返しの付きにくい間違いになるため、決めるのは押した人にする。
-            判定して「質問に切り替えますか」と提案するところまでは行う（下の`questionHint`・#1890） */}
-        <div className="flex flex-col gap-1.5">
+            判定して「質問に切り替えますか」と提案するところまでは行う（下の`questionHint`・#1890）
+
+            見出しとボタンは同じ行に置く（#1929）。選択肢が2つで横幅が余っており、
+            見出しだけで1行使う理由が無い */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Label>種別</Label>
           <div className="flex gap-1.5">
             <Button
@@ -864,18 +871,48 @@ export function CreateIssueDialog({
                 : "連携しているリポジトリがありません。"}
             </p>
           )}
-          {hasSelectableRepository && (
+          {/* 補足文は質問のときだけ出す（#1929）。「どのリポジトリの話かを選んでください」は
+              選択欄の`リポジトリを選択`と同じことしか言っておらず、`表示中のリポジトリ`の説明も
+              バッジの文字がそのまま説明になっている。質問は**選択肢が減っている理由**という
+              画面から読めないことを書いているため残す */}
+          {hasSelectableRepository && isQuestion && (
             <p className="text-xs text-muted-foreground">
-              {isQuestion
-                ? "回答するのはGitHub Actionsのため、claude-issue-dispatch.yml導入済みのリポジトリだけ選べます。"
-                : !hasPickedRepository &&
-                    repositoryFullName !== "" &&
-                    repositoryFullName === defaultRepositoryFullName
-                  ? "開いていた画面のリポジトリです。違っていれば選び直せます。"
-                  : "どのリポジトリの話かを選んでください。"}
+              回答するのはGitHub Actionsのため、claude-issue-dispatch.yml導入済みのリポジトリだけ選べます。
             </p>
           )}
         </div>
+
+        {/* タイトルはリポジトリと内容の間に置く（#1929）。**「どこへ」→「何を」→「詳しく」の
+            順に並べる。** 内容の下にあると、付与で埋まったタイトルを確かめるのに書き終えた本文を
+            越えて下へ探しに行くことになり、スマホでは本文の長さぶんだけ離れる */}
+        {isQuestion ? (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="create-issue-question-title">タイトル（自動）</Label>
+            <p
+              id="create-issue-question-title"
+              className="rounded-md border border-input px-3 py-2 text-sm break-all text-muted-foreground"
+            >
+              {body.trim() ? buildAskRepoQuestionTitle(body) : "質問内容から自動で作られます"}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="create-issue-title">タイトル</Label>
+              {autoFilled.title && <AutoBadge />}
+            </div>
+            {/* 空のままでも行き止まりにしない（#1884）。**下の主ボタンが何をするかは、
+                補足の行ではなくプレースホルダで示す**（#1929）——空欄のときにだけ出る点は
+                同じで、行が増えない */}
+            <Input
+              id="create-issue-title"
+              value={title}
+              onChange={(e) => handleTitleChange(e.target.value)}
+              placeholder="空欄なら「タイトル・ラベルを付与」で作れます"
+              className="md:text-sm"
+            />
+          </div>
+        )}
 
         {/* 本文の入力欄は種別で変えない（#1641）。質問でも画像の貼り付け・ドラッグ&ドロップと
             `#123`のIssue補完が使えるようにするのがこの統合の主目的で、以前の質問ダイアログは
@@ -903,51 +940,24 @@ export function CreateIssueDialog({
             repositoryFullName={repositoryFullName}
             placeholder={isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"}
             className="min-h-32 md:text-sm"
+            // 「画像を添付」と同じ行へ寄せる（#1929）。プレビューは出さない——貼った画像は
+            // サムネイルで見えており、書きかけを切り替えて確かめる場面が無い
+            showPreviewToggle={false}
+            toolbarExtra={
+              <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+            }
             autoFocus
           />
-          <div className="flex flex-wrap gap-2">
-            <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
-          </div>
         </div>
 
-        {isQuestion ? (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-question-title">タイトル（自動）</Label>
-            <p
-              id="create-issue-question-title"
-              className="rounded-md border border-input px-3 py-2 text-sm break-all text-muted-foreground"
-            >
-              {body.trim() ? buildAskRepoQuestionTitle(body) : "質問内容から自動で作られます"}
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="create-issue-title">タイトル</Label>
-              {autoFilled.title && <AutoBadge />}
-            </div>
-            <Input
-              id="create-issue-title"
-              value={title}
-              onChange={(e) => handleTitleChange(e.target.value)}
-              placeholder="Issueのタイトル"
-              className="md:text-sm"
-            />
-            {/* 空のままでも行き止まりにしない（#1884）。下の主ボタンが何をするかをここで示す */}
-            {needsTitle && (
-              <p className="text-xs text-muted-foreground">
-                空のままなら、下の「タイトル・ラベルを付与」で内容から作れます。
-              </p>
-            )}
-          </div>
-        )}
-
+        {/* ラベル（#1929）。見出し・選ぶ口・選んだ結果を同じ行にまとめる。
+            数が増えれば折り返るので、選んだぶんだけ縦に伸びる */}
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-1.5">
-            <Label>ラベル</Label>
-            {autoFilled.labels && <AutoBadge />}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label>ラベル</Label>
+              {autoFilled.labels && <AutoBadge />}
+            </div>
             <LabelPicker
               labels={selectableLabels}
               selectedNames={selectedLabels}
@@ -973,6 +983,18 @@ export function CreateIssueDialog({
                 付け直す
               </Button>
             )}
+            {selectedLabels.filter(isSelectableLabelName).map((name) => {
+              const label = labels.find((l) => l.name === name);
+              return (
+                <span
+                  key={name}
+                  className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
+                  style={getLabelBadgeStyle(label?.color ?? "#64748b")}
+                >
+                  {name}
+                </span>
+              );
+            })}
           </div>
           {/* ラベルが1つも決まらなかったことを明示する（#1710）。
               空欄と見分けが付かないままだと、ラベルの付かないIssueがそのまま作られる */}
@@ -987,22 +1009,6 @@ export function CreateIssueDialog({
             </p>
           )}
           {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
-          {selectedLabels.filter(isSelectableLabelName).length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {selectedLabels.filter(isSelectableLabelName).map((name) => {
-                const label = labels.find((l) => l.name === name);
-                return (
-                  <span
-                    key={name}
-                    className="rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ring-border"
-                    style={getLabelBadgeStyle(label?.color ?? "#64748b")}
-                  >
-                    {name}
-                  </span>
-                );
-              })}
-            </div>
-          )}
         </div>
 
         {/* 実装オプション（`21.plan-required`等）はここでは選ばせない（#1580）。
@@ -1010,29 +1016,11 @@ export function CreateIssueDialog({
             混ざっている（撮影は無人実行専用・アーティファクトはローカル実行専用）。
             起票の時点では実行先も実施時期も未定なので、「実装を開始」ダイアログで選ぶ */}
 
-        {/* 質問Issueに担当者は要らない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
-        {!isQuestion && (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-assignee">担当者</Label>
-            <Select value={assignee ?? "__none__"} onValueChange={handleAssigneeChange}>
-              <SelectTrigger
-                id="create-issue-assignee"
-                className="h-9 w-full"
-                disabled={isMetaLoading}
-              >
-                <SelectValue placeholder="担当者を選択" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">未設定</SelectItem>
-                {assignees.map((login) => (
-                  <SelectItem key={login} value={login}>
-                    {login}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        {/* 担当者の選択欄は出さない（#1929）。選べる相手が実質`m-guchi`しかおらず、
+            毎回そのまま作成していた。**付く値は変わらない**——リポジトリの割り当て可能な
+            ユーザーに`m-guchi`が居れば、これまでと同じようにその人が担当者になる
+            （上の`useEffect`）。別の人に割り当てたい場合はIssue詳細かGitHub側で変える。
+            質問Issueにはもともと担当者を付けない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
 
         {/* 別ウィンドウを開けなかったときだけ出す（#1728）。押しても何も起きないと、
             ボタンが壊れているのか自分の環境の設定なのかが分からない */}

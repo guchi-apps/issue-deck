@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,11 +10,14 @@ import {
 } from "@/components/dashboard/mention-textarea";
 
 /** 呼び出し元が保持する値（value）を画面に出して、テストから中身を確かめられるようにする */
-function Harness({ initialValue = "" }: { initialValue?: string }) {
+function Harness({
+  initialValue = "",
+  ...props
+}: { initialValue?: string } & Partial<ComponentProps<typeof MentionTextarea>>) {
   const [value, setValue] = useState(initialValue);
   return (
     <>
-      <MentionTextarea value={value} onChange={setValue} />
+      <MentionTextarea value={value} onChange={setValue} {...props} />
       <output data-testid="value">{value}</output>
     </>
   );
@@ -169,6 +172,46 @@ describe("MentionTextarea 画像の添付", () => {
 
     expect(textarea.value).toBe("再現手順です。");
     expect(attachedNames(container)).toEqual(["a.png"]);
+  });
+});
+
+/**
+ * #1929。Issue作成フォームをスマホ一画面に収めるため、入力欄の下を1行にまとめた。
+ */
+describe("MentionTextarea 入力欄の下の行", () => {
+  function buttonNames(container: HTMLElement) {
+    return Array.from(container.querySelectorAll('[data-slot="mention-toolbar"] button')).map(
+      (button) => button.textContent,
+    );
+  }
+
+  it("添付のサムネイルと「画像を添付」を同じ行に並べる", () => {
+    const { container } = render(
+      <Harness initialValue={"再現手順です。\n\n![a.png](/img/a.png)"} />,
+    );
+    const toolbar = container.querySelector('[data-slot="mention-toolbar"]') as HTMLElement;
+
+    // サムネイルの列と操作が、別々の行ではなく同じ行の中に並ぶ
+    expect(toolbar.querySelector('[data-slot="mention-attachments"] img')).not.toBeNull();
+    expect(buttonNames(container)).toContain("画像を添付");
+  });
+
+  it("プレビューへの切り替えは既定で出し、showPreviewToggleで消せる", () => {
+    const shown = render(<Harness initialValue="本文" />);
+    expect(buttonNames(shown.container)).toContain("プレビュー");
+    shown.unmount();
+
+    const hidden = render(<Harness initialValue="本文" showPreviewToggle={false} />);
+    expect(buttonNames(hidden.container)).not.toContain("プレビュー");
+    expect(buttonNames(hidden.container)).toContain("画像を添付");
+  });
+
+  it("toolbarExtraで渡した操作を同じ行の右へ並べる", () => {
+    const { container } = render(
+      <Harness initialValue="本文" toolbarExtra={<button type="button">音声入力を整理</button>} />,
+    );
+
+    expect(buttonNames(container)).toEqual(["画像を添付", "プレビュー", "音声入力を整理"]);
   });
 });
 
