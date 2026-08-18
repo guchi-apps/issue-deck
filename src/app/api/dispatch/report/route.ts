@@ -4,6 +4,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
+import { advanceManualStepRun } from "@/lib/manual-step-run";
 
 /** メッセージは画面にそのまま出る。長文が流れ込まないよう頭で切る */
 const MAX_MESSAGE_LENGTH = 2000;
@@ -77,6 +78,22 @@ export async function POST(request: NextRequest) {
     }
     const status = result.reason === "not_found" ? 404 : 403;
     return NextResponse.json({ error: result.reason }, { status });
+  }
+
+  // 自動実行（#1882）を1歩進める。**成功なら次の1件を積み、失敗ならそこで止まる。**
+  // 画面が開いているかどうかに関係なく進むのはここで、ブラウザを閉じても実行が続く理由。
+  // 手順ごとに「承認して実行」を押す使い方（#1828）では、進める実行そのものが無いので何もしない
+  if (result.job.kind === "MANUAL_STEP" && status !== "running") {
+    try {
+      await advanceManualStepRun({
+        repositoryFullName: result.job.repositoryFullName,
+        issueNumber: result.job.issueNumber,
+      });
+    } catch (error) {
+      // **報告そのものは受け付ける。** 次を積めなくても、届いた結果を捨てる方が損が大きい
+      // （画面から続きを流し直せる）
+      console.error(`[POST /api/dispatch/report] 自動実行を進められませんでした ${jobId}:`, error);
+    }
   }
 
   return NextResponse.json(

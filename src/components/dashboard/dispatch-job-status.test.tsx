@@ -19,6 +19,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     instruction: null,
     command: null,
     manualStepLine: null,
+    targetJobId: null,
     exitCode: null,
     commandOutput: null,
     tmuxSessionName: "issue-deck-issue-1468",
