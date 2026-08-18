@@ -468,6 +468,15 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > 守るものが無い。`claude-pr-repair.yml`・`shared-knowledge-propose.yml`は導入自体が任意。
 > 配布側に持たせると「全リポジトリへ一律に配る」挙動にしかできず、対象の判断を毎回人が
 > やり直すことになる。
+>
+> **例外は自動修復の3つ**（`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・
+> `claude-pr-repair.yml`。#1948）。**対象の判定を機械で書けた**ため、別の配布
+> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——前2つは
+> `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
+> `release-develop-to-main.yml`を持つリポジトリが対象で、`with:`は同じリポジトリの
+> `claude-issue-dispatch.yml`から写す。**タグの配布とは別のボタン・別のワークフローで、
+> こちらは自動マージしない。** 仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
+> 「配布状況と、不足しているcallerの配布」を参照。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。

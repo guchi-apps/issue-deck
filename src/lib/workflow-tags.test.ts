@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   canStartPropagation,
+  canStartRepairPropagation,
   evaluateWorkflowTags,
+  findRepairWorkflowPullRequest,
   extractWorkflowTagRef,
   findWorkflowTagPullRequest,
   isPropagationRunning,
   latestWorkflowTag,
   parseWorkflowTagVersion,
+  missingRepairWorkflows,
   propagationTargets,
+  repairPropagationTargets,
+  repairWorkflowLabel,
+  repairWorkflowPullRequestTitle,
   shortWorkflowTag,
   workflowTagGroup,
   workflowTagPullRequestTitle,
@@ -215,6 +221,8 @@ describe("propagationTargets / workflowTagGroup", () => {
     outdated: false,
     mismatched: false,
     updatePullRequest: null,
+    missingRepairWorkflows: [],
+    repairPullRequest: null,
     ...overrides,
   });
 
@@ -303,5 +311,146 @@ describe("タグ作成の版数計算（#1876）", () => {
     // 読めないまま加算すると`workflows/vNaN`を切ってしまう。呼び出し側はnullで中断する
     expect(parseWorkflowTagVersion("workflows/latest")).toBeNull();
     expect(parseWorkflowTagVersion("v21")).toBeNull();
+  });
+});
+
+describe("missingRepairWorkflows", () => {
+  it("無人実行のcallerがあれば、CI失敗・コンフリクトの自動修復を不足として挙げる", () => {
+    // 実測のguchi-apps/aideと同じ構成（自動修復は1つも無かった）
+    const missing = missingRepairWorkflows([
+      "ci.yml",
+      "issue-labels.yml",
+      "claude-issue-dispatch.yml",
+    ]);
+
+    expect(missing).toEqual(["claude-conflict-resolve.yml", "claude-ci-fix.yml"]);
+  });
+
+  it("リリースフローがあれば claude-pr-repair.yml も不足に挙げる", () => {
+    // バンプPR・リリースPRを直すワークフローなので、リリースフローが無いと起動対象が無い
+    const missing = missingRepairWorkflows([
+      "claude-issue-dispatch.yml",
+      "release-develop-to-main.yml",
+    ]);
+
+    expect(missing).toContain("claude-pr-repair.yml");
+  });
+
+  it("無人実行のcallerが無いリポジトリには配らない", () => {
+    // 参照タグも with: の値も写す先が無く、既定値だけのcallerは動かない
+    expect(missingRepairWorkflows(["ci.yml", "deploy.yml"])).toEqual([]);
+  });
+
+  it("既に置かれているものは不足に挙げない", () => {
+    const missing = missingRepairWorkflows([
+      "claude-issue-dispatch.yml",
+      "claude-ci-fix.yml",
+      "claude-conflict-resolve.yml",
+    ]);
+
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("repairPropagationTargets", () => {
+  const status = (overrides: Partial<WorkflowTagStatus>): WorkflowTagStatus => ({
+    fullName: "guchi-apps/aide",
+    refs: [],
+    outdated: false,
+    mismatched: false,
+    updatePullRequest: null,
+    missingRepairWorkflows: [],
+    repairPullRequest: null,
+    ...overrides,
+  });
+
+  it("不足があるリポジトリだけを対象にする", () => {
+    const targets = repairPropagationTargets([
+      status({ fullName: "guchi-apps/aide", missingRepairWorkflows: ["claude-ci-fix.yml"] }),
+      status({ fullName: "guchi-apps/dayspan" }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/aide"]);
+  });
+
+  it("配布PRが既にopenのリポジトリは対象から外す", () => {
+    // マージされるまでcallerは増えないため、除外しないと押すたびに2本目のPRが作られる
+    const targets = repairPropagationTargets([
+      status({
+        missingRepairWorkflows: ["claude-ci-fix.yml"],
+        repairPullRequest: { number: 7, url: "https://example.test/pull/7" },
+      }),
+    ]);
+
+    expect(targets).toEqual([]);
+  });
+
+  it("配布PRはタイトルで見つける（スクリプトの --title と同じ文面）", () => {
+    const found = findRepairWorkflowPullRequest([
+      { number: 3, title: "別のPR", url: "https://example.test/pull/3" },
+      { number: 7, title: repairWorkflowPullRequestTitle(), url: "https://example.test/pull/7" },
+    ]);
+
+    expect(found?.number).toBe(7);
+  });
+});
+
+describe("evaluateWorkflowTags の自動修復まわり", () => {
+  it("ファイル名一覧から不足を埋める", () => {
+    const status = evaluateWorkflowTags(
+      "guchi-apps/aide",
+      [{ file: "issue-labels.yml", uses: "workflows/v23", promptsRef: "workflows/v23" }],
+      "workflows/v23",
+      null,
+      { files: ["issue-labels.yml", "claude-issue-dispatch.yml"] },
+    );
+
+    expect(status.outdated).toBe(false);
+    expect(status.missingRepairWorkflows).toEqual([
+      "claude-conflict-resolve.yml",
+      "claude-ci-fix.yml",
+    ]);
+  });
+
+  it("ファイル名を渡さなければ不足なしとして扱う", () => {
+    const status = evaluateWorkflowTags("guchi-apps/aide", [], "workflows/v23");
+
+    expect(status.missingRepairWorkflows).toEqual([]);
+    expect(status.repairPullRequest).toBeNull();
+  });
+});
+
+describe("canStartRepairPropagation", () => {
+  it("配布の実行中は起動させない", () => {
+    // 起動は数秒で返るのにPRが出来るまでは数分かかる。その間押せると二重に配られる
+    const decision = canStartRepairPropagation({
+      status: "in_progress",
+      conclusion: null,
+      htmlUrl: "https://example.test/run",
+      createdAt: "2026-08-18T00:00:00Z",
+    });
+
+    expect(decision.allowed).toBe(false);
+  });
+
+  it("完了していれば起動してよい", () => {
+    const decision = canStartRepairPropagation({
+      status: "completed",
+      conclusion: "success",
+      htmlUrl: "https://example.test/run",
+      createdAt: "2026-08-18T00:00:00Z",
+    });
+
+    expect(decision.allowed).toBe(true);
+  });
+});
+
+describe("repairWorkflowLabel", () => {
+  it("ファイル名を画面向けの説明に変える", () => {
+    expect(repairWorkflowLabel("claude-ci-fix.yml")).toBe("develop向けPRのCI失敗修正");
+  });
+
+  it("未知のファイル名はそのまま返す", () => {
+    expect(repairWorkflowLabel("unknown.yml")).toBe("unknown.yml");
   });
 });

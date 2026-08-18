@@ -85,6 +85,18 @@ export type WorkflowTagStatus = {
    * 同じリポジトリへ2本目のPRが作られる（#1602）。
    */
   updatePullRequest: WorkflowTagPullRequest | null;
+  /**
+   * 置かれていない自動修復のcaller（#1948）。**そのリポジトリで意味を持つものだけ**が入る
+   * （判定は`missingRepairWorkflows`）。空なら不足なし。
+   */
+  missingRepairWorkflows: string[];
+  /**
+   * 自動修復ワークフローを配布するPRのうち、まだopenのもの。無ければ`null`。
+   *
+   * **これが有る間は配布の対象から外す**（`repairPropagationTargets`）。callerが増えるのは
+   * PRがマージされた後なので、それまでは「不足」と判定されたままになる。
+   */
+  repairPullRequest: WorkflowTagPullRequest | null;
 };
 
 /**
@@ -99,6 +111,15 @@ export function evaluateWorkflowTags(
   refs: WorkflowTagRef[],
   latest: string | null,
   updatePullRequest: WorkflowTagPullRequest | null = null,
+  /**
+   * 自動修復ワークフローの配布状況（#1948）。参照タグとは独立した軸のため、
+   * 位置引数を増やさず1つのオブジェクトにまとめて受ける。
+   */
+  repair: {
+    /** `.github/workflows/`直下のファイル名一覧 */
+    files?: string[];
+    pullRequest?: WorkflowTagPullRequest | null;
+  } = {},
 ): WorkflowTagStatus {
   const latestVersion = latest === null ? null : parseWorkflowTagVersion(latest);
 
@@ -110,7 +131,15 @@ export function evaluateWorkflowTags(
 
   const mismatched = refs.some((ref) => ref.promptsRef !== null && ref.promptsRef !== ref.uses);
 
-  return { fullName, refs, outdated, mismatched, updatePullRequest };
+  return {
+    fullName,
+    refs,
+    outdated,
+    mismatched,
+    updatePullRequest,
+    missingRepairWorkflows: missingRepairWorkflows(repair.files ?? []),
+    repairPullRequest: repair.pullRequest ?? null,
+  };
 }
 
 /**
@@ -199,5 +228,114 @@ export function canStartPropagation(run: PropagationRun | null): PropagationStar
     allowed: false,
     reason: "running",
     message: "更新の実行中です。完了してからもう一度実行してください。",
+  };
+}
+
+/**
+ * 自動修復のcaller1件ぶんの定義（#1948）。
+ *
+ * **配る条件をファイルの実在で表す。** 例えば`claude-pr-repair.yml`が受け持つのは
+ * バンプPR・develop→mainのリリースPRなので、リリースフローを持たないリポジトリへ配っても
+ * 起動する対象が存在しない。「そのリポジトリで意味を持つか」を`requires`のファイルの
+ * 有無で判定する。
+ */
+export type RepairWorkflowSpec = {
+  /** 配るcallerのファイル名 */
+  file: string;
+  /** これを持つリポジトリにだけ配る */
+  requires: string;
+  /** 画面に出す説明 */
+  label: string;
+};
+
+/**
+ * 配布対象の自動修復ワークフロー（#1948）。
+ *
+ * どれが何を直すかは[docs/multi-agent/auto-repair.md](../../docs/multi-agent/auto-repair.md)を参照。
+ * `claude-ci-fix.yml`・`claude-conflict-resolve.yml`は対応Issueを持つ`issue-<番号>`のPRが、
+ * `claude-pr-repair.yml`はIssueを持たないPR（バンプPR・リリースPR）が対象。
+ */
+export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
+  {
+    file: "claude-conflict-resolve.yml",
+    requires: "claude-issue-dispatch.yml",
+    label: "develop向けPRのコンフリクト解消",
+  },
+  {
+    file: "claude-ci-fix.yml",
+    requires: "claude-issue-dispatch.yml",
+    label: "develop向けPRのCI失敗修正",
+  },
+  {
+    file: "claude-pr-repair.yml",
+    requires: "release-develop-to-main.yml",
+    label: "バンプPR・リリースPRの修復",
+  },
+];
+
+/** ファイル名から画面に出す説明を引く。未知のファイルはそのまま返す */
+export function repairWorkflowLabel(file: string): string {
+  return REPAIR_WORKFLOW_SPECS.find((spec) => spec.file === file)?.label ?? file;
+}
+
+/**
+ * `.github/workflows/`のファイル名一覧から、**あるべきなのに無い**自動修復callerを返す。
+ *
+ * 判定にファイルの中身は見ない。issue-deck自身はローカルパス参照（`uses: ./`）で、
+ * 他リポジトリはタグ固定と方式が違うが、**どちらも「そのファイルが置いてあるか」だけで
+ * 起動できるかが決まる**ため（`workflow_dispatch`の受け口はファイルの実在で解決される）。
+ */
+export function missingRepairWorkflows(files: string[]): string[] {
+  const present = new Set(files);
+  return REPAIR_WORKFLOW_SPECS.filter(
+    (spec) => present.has(spec.requires) && !present.has(spec.file),
+  ).map((spec) => spec.file);
+}
+
+/**
+ * 配布ワークフローが作るPRのタイトル（#1948）。
+ *
+ * **`.github/scripts/propagate-repair-workflows.sh`の`gh pr create --title`と同じ文面**に
+ * する。配布済みかどうかの判定はこのタイトルだけを頼りにしており、片方だけ変えると
+ * 同じリポジトリへ2本目のPRが作られる（タグ配布の`workflowTagPullRequestTitle`と同じ理由）。
+ */
+export function repairWorkflowPullRequestTitle(): string {
+  return "自動修復ワークフローを追加する";
+}
+
+/** openなPRの中から、自動修復ワークフローの配布PRを1件探す */
+export function findRepairWorkflowPullRequest(
+  pullRequests: { number: number; title: string; url: string }[],
+): WorkflowTagPullRequest | null {
+  const title = repairWorkflowPullRequestTitle();
+  const found = pullRequests.find((pullRequest) => pullRequest.title.trim() === title);
+  return found ? { number: found.number, url: found.url } : null;
+}
+
+/**
+ * いま自動修復ワークフローを配るべきリポジトリ。**配布PRが既にopenのものは含めない。**
+ *
+ * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
+ * （`propagationTargets`と同じ理由）。
+ */
+export function repairPropagationTargets(statuses: WorkflowTagStatus[]): WorkflowTagStatus[] {
+  return statuses.filter(
+    (status) => status.missingRepairWorkflows.length > 0 && status.repairPullRequest === null,
+  );
+}
+
+/**
+ * いま自動修復ワークフローの配布を起こしてよいか（#1948）。
+ *
+ * 判定の形も理由もタグ配布（`canStartPropagation`）と同じ。**実行の正はGitHub側のrun**で、
+ * runを別に持つぶんだけ関数を分けてある（タグ配布が動いている間も、こちらは押せてよい）。
+ */
+export function canStartRepairPropagation(run: PropagationRun | null): PropagationStartDecision {
+  if (!isPropagationRunning(run)) return { allowed: true };
+
+  return {
+    allowed: false,
+    reason: "running",
+    message: "配布の実行中です。完了してからもう一度実行してください。",
   };
 }

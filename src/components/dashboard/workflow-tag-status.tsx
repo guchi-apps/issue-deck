@@ -10,6 +10,7 @@ import {
   Loader2,
   RefreshCw,
   Tag,
+  Wrench,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useWorkflowTags } from "@/hooks/use-workflow-tags";
 import {
   propagationTargets,
+  repairPropagationTargets,
+  repairWorkflowLabel,
   shortWorkflowTag,
   workflowTagGroup,
   type WorkflowTagStatus as Status,
@@ -135,13 +138,57 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * 自動修復のcallerが不足しているリポジトリの1行（#1948）。
+ *
+ * 何が不足しているかまで出す。**リポジトリによって不足するものが違う**（リリースフローを
+ * 持たないリポジトリには`claude-pr-repair.yml`を配らない）ため、件数だけでは何が配られるのか
+ * 分からない。
+ */
+function RepairRow({ status, running }: { status: Status; running: boolean }) {
+  return (
+    <li className="flex items-center gap-2 text-xs">
+      {status.repairPullRequest ? (
+        <GitPullRequestArrow className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : running ? (
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+      ) : (
+        <Wrench className="size-3.5 shrink-0 text-amber-500" />
+      )}
+
+      <span className="truncate">{status.fullName}</span>
+
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span className="text-muted-foreground">
+          {status.missingRepairWorkflows.map(repairWorkflowLabel).join(" / ")}
+        </span>
+        {status.repairPullRequest && (
+          <a
+            className="inline-flex items-center gap-0.5 underline underline-offset-2"
+            href={status.repairPullRequest.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            PR #{status.repairPullRequest.number}
+            <ExternalLink className="size-3" />
+          </a>
+        )}
+      </span>
+    </li>
+  );
+}
+
 export function WorkflowTagStatusSection({ open }: { open: boolean }) {
-  const { overview, isLoading, error, isRunning, reload, markDispatched } = useWorkflowTags(open);
+  const { overview, isLoading, error, isRunning, isRepairRunning, reload, markDispatched } =
+    useWorkflowTags(open);
   const [autoMerge, setAutoMerge] = useState(true);
   const [isDispatching, setIsDispatching] = useState(false);
   const [propagateMessage, setPropagateMessage] = useState<string | null>(null);
   const [propagateError, setPropagateError] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
+  const [isRepairDispatching, setIsRepairDispatching] = useState(false);
+  const [repairMessage, setRepairMessage] = useState<string | null>(null);
+  const [repairError, setRepairError] = useState<string | null>(null);
 
   const repositories = overview?.repositories ?? [];
   const targets = propagationTargets(repositories);
@@ -149,6 +196,12 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   const upToDate = repositories.filter((status) => workflowTagGroup(status) === "latest");
   const latestLabel = overview?.latest ? shortWorkflowTag(overview.latest) : null;
   const run = overview?.propagation ?? null;
+  const repairRun = overview?.repairPropagation ?? null;
+  // 不足しているリポジトリ。配布PRが既に出ているものは対象から外し、下に分けて出す（#1948）
+  const repairTargets = repairPropagationTargets(repositories);
+  const repairPending = repositories.filter(
+    (status) => status.missingRepairWorkflows.length > 0 && status.repairPullRequest !== null,
+  );
 
   /**
    * 配布を起動する（#1173）。`withNewTag`が真なら**次の版数を`main`に切ってから**配る（#1876）。
@@ -201,6 +254,44 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
       setPropagateError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsDispatching(false);
+    }
+  }
+
+  /**
+   * 不足している自動修復のcallerを配る（#1948）。
+   *
+   * **自動マージの選択は無い。** 配るのは新しいワークフローファイルそのもので、
+   * `@workflows/vN`の置換（#1602で自動マージの例外にしたもの）とは別物のため、
+   * 配布先のPRは人が確認してマージする。
+   */
+  async function handleRepairPropagate() {
+    setIsRepairDispatching(true);
+    setRepairMessage(null);
+    setRepairError(null);
+    try {
+      const res = await fetch("/api/workflow-tags/propagate-repair", { method: "POST" });
+      const result: {
+        dispatched: boolean;
+        targets: { repository: string; workflows: string[] }[];
+        message?: string;
+      } = await res.json().catch(() => ({ dispatched: false, targets: [] }));
+
+      if (!res.ok) throw new Error(result.message ?? `起動に失敗しました (${res.status})`);
+
+      if (result.dispatched) {
+        // runが見えるまでのあいだも実行中として扱わせる（この間に押せると二重起動になる）
+        markDispatched();
+        setRepairMessage(
+          `${result.targets.length}件のリポジトリへ自動修復ワークフローを追加するPRを作成しています。GitHub Actionsの完了後、各リポジトリでPRを確認してマージしてください。`,
+        );
+      } else {
+        setRepairMessage(result.message ?? "不足しているリポジトリはありません。");
+        reload();
+      }
+    } catch (err) {
+      setRepairError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRepairDispatching(false);
     }
   }
 
@@ -371,6 +462,75 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
       )}
 
       {propagateMessage && <p className="text-xs text-muted-foreground">{propagateMessage}</p>}
+
+      {(repairTargets.length > 0 || repairPending.length > 0) && (
+        <div className="mt-2 flex flex-col gap-1.5 border-t pt-2">
+          <span className="text-sm font-medium">自動修復ワークフロー</span>
+
+          {repairError && <p className="text-sm text-destructive">{repairError}</p>}
+
+          {repairTargets.length > 0 && (
+            <>
+              <GroupLabel>未配布（{repairTargets.length}）</GroupLabel>
+              <ul className="flex flex-col gap-1">
+                {repairTargets.map((status) => (
+                  <RepairRow key={status.fullName} status={status} running={isRepairRunning} />
+                ))}
+              </ul>
+            </>
+          )}
+
+          {repairPending.length > 0 && (
+            <>
+              <GroupLabel>配布PRの確認待ち（{repairPending.length}）</GroupLabel>
+              <ul className="flex flex-col gap-1">
+                {repairPending.map((status) => (
+                  <RepairRow key={status.fullName} status={status} running={false} />
+                ))}
+              </ul>
+            </>
+          )}
+
+          {repairTargets.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 w-full"
+              onClick={() => void handleRepairPropagate()}
+              disabled={isRepairDispatching || isRunning}
+            >
+              {isRepairDispatching || isRepairRunning ? <Loader2 className="animate-spin" /> : <Wrench />}
+              {isRepairRunning
+                ? "配布を実行中..."
+                : `${repairTargets.length}件へ自動修復ワークフローを配る`}
+            </Button>
+          )}
+
+          {isRepairRunning && repairRun && (
+            <p className="text-xs text-muted-foreground">
+              各リポジトリへPRを作成しています。{" "}
+              <a
+                className="inline-flex items-center gap-0.5 underline underline-offset-2"
+                href={repairRun.htmlUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                実行を見る
+                <ExternalLink className="size-3" />
+              </a>
+            </p>
+          )}
+
+          {repairMessage && <p className="text-xs text-muted-foreground">{repairMessage}</p>}
+
+          <p className="text-xs text-muted-foreground">
+            画面の「コンフリクトを自動解消」「CI失敗を自動修正」は各リポジトリのワークフローを
+            起動します。<strong>置かれていないリポジトリでは押しても起動しません。</strong>
+            配布は各リポジトリへPRを作る形で行い、
+            <strong>自動マージはしません</strong>（内容を確認してマージしてください）。
+          </p>
+        </div>
+      )}
 
       <Collapsible>
         <CollapsibleTrigger className="mt-1 border-t pt-1.5 text-left text-xs text-muted-foreground hover:underline">

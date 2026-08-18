@@ -203,6 +203,51 @@ describe("collectWorkflowTags", () => {
     ]);
   });
 
+  it("不足している自動修復のcallerを、同じ取得結果から割り出す（#1948）", async () => {
+    // 参照タグの解析と同じTreeのentriesを使うため、追加のGitHub API呼び出しは要らない
+    githubFetch.mockImplementation(
+      route({
+        tags: ["workflows/v12"],
+        entries: {
+          "guchi-apps/car-care": [
+            blob("claude-issue-dispatch.yml"),
+            blob("release-develop-to-main.yml", CALLER),
+            blob("claude-ci-fix.yml", CALLER),
+          ],
+        },
+      }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.missingRepairWorkflows).toEqual([
+      "claude-conflict-resolve.yml",
+      "claude-pr-repair.yml",
+    ]);
+  });
+
+  it("配布PRが既にあれば、それを結果に持たせる（#1948）", async () => {
+    // 対象から外す判定に使う。除外しないと押すたびに2本目のPRが作られる
+    githubFetch.mockImplementation(
+      route({
+        tags: ["workflows/v12"],
+        pullRequests: {
+          "guchi-apps/car-care": [
+            {
+              number: 12,
+              title: "自動修復ワークフローを追加する",
+              url: "https://github.com/guchi-apps/car-care/pull/12",
+            },
+          ],
+        },
+      }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.repairPullRequest?.number).toBe(12);
+  });
+
   it("リポジトリ数ぶんの往復をしない（1クエリにまとめる）", async () => {
     // 元はリポジトリあたり 1 + ワークフロー数のRESTリクエストで、実測141回・42秒かかっていた（#1503）
     repositoryFindMany.mockResolvedValue([
@@ -217,8 +262,9 @@ describe("collectWorkflowTags", () => {
     expect(overview.repositories).toHaveLength(3);
     // 最新タグ用の1本と、3リポジトリぶんをまとめた1本だけ
     expect(graphqlCalls()).toHaveLength(2);
-    // GraphQLの2本＋配布ワークフローの最新run（REST・ETagの条件付きGET）の1本
-    expect(githubFetch.mock.calls).toHaveLength(3);
+    // GraphQLの2本＋配布ワークフロー2種（タグ配布・自動修復の配布。#1948）の最新run
+    // （REST・ETagの条件付きGET）の2本
+    expect(githubFetch.mock.calls).toHaveLength(4);
   });
 
   it("タグ取得に失敗しても結果を返し、latest は null になる", async () => {
@@ -291,7 +337,12 @@ describe("collectWorkflowTags", () => {
 
     const overview = await collectWorkflowTags("user-1");
 
-    expect(overview).toEqual({ latest: null, repositories: [], propagation: null });
+    expect(overview).toEqual({
+      latest: null,
+      repositories: [],
+      propagation: null,
+      repairPropagation: null,
+    });
     expect(githubFetch).not.toHaveBeenCalled();
   });
 });
