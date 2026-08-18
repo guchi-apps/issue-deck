@@ -199,4 +199,12 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
 
     expect(screen.queryByRole("button", { name: "引っ張って更新" })).toBeNull();
   });
+
+  // #1945: 一覧の行が内側の重なり順にz-indexを使うため、指定が無いと丸ボタンが行の後ろへ回る
+  it("右下の丸ボタンを一覧より手前の層に置く", () => {
+    renderScreen();
+
+    const fabs = screen.getByRole("button", { name: "新しいIssueを作成" }).parentElement!;
+    expect(fabs.className).toContain("z-20");
+  });
 });

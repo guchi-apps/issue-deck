@@ -182,11 +182,34 @@ describe("NotificationButton バッジ", () => {
     const { container } = renderButton({
       issues: [
         makeIssue({ id: "a", number: 1, labels: [label("00.check-user")] }),
-        makeIssue({ id: "b", number: 2, labels: [label("71.manual-step")] }),
+        makeIssue({ id: "b", number: 2, labels: [label("00.check-user")] }),
       ],
     });
 
     expect(container.querySelector(".bg-amber-500")?.textContent).toBe("2");
+  });
+
+  it("手作業待ちはバッジの件数に含めない（#1936）", () => {
+    const { container } = renderButton({
+      issues: [
+        makeIssue({ id: "a", number: 1, labels: [label("00.check-user")] }),
+        makeIssue({ id: "b", number: 2, labels: [label("71.manual-step")] }),
+      ],
+    });
+
+    expect(container.querySelector(".bg-amber-500")?.textContent).toBe("1");
+  });
+
+  it("手作業待ちしか無ければバッジを出さない（#1936）", () => {
+    const { container } = renderButton({
+      issues: [makeIssue({ id: "b", number: 2, labels: [label("71.manual-step")] })],
+    });
+
+    expect(container.querySelector(".bg-amber-500")).toBeNull();
+    expect(container.querySelector(".bg-destructive")).toBeNull();
+    expect(screen.getByLabelText("対応が必要なもの").getAttribute("title")).toBe(
+      "対応が必要なもの",
+    );
   });
 
   it("失敗が1件でもあればバッジを赤にする（#1059と同じ考え方）", () => {
@@ -223,6 +246,27 @@ describe("NotificationButton ポップオーバー", () => {
     fireEvent.click(screen.getByText("#10 計画を見てほしいIssue"));
 
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: "issue", issueId: "issue-10" });
+  });
+
+  it("手作業待ちは一覧には残し、見出しの件数で内訳を出す（#1936）", () => {
+    renderButton({
+      issues: [
+        makeIssue({ id: "a", number: 1, labels: [label("00.check-user")] }),
+        makeIssue({
+          id: "b",
+          number: 2,
+          title: "VPSの.envを直す",
+          labels: [label("71.manual-step")],
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+
+    // バッジは1件だが、一覧には手作業待ちも並ぶ。その差は見出しの内訳で読める
+    expect(screen.getByText("1件・手作業待ち1件")).toBeTruthy();
+    expect(screen.getByText("手作業待ち")).toBeTruthy();
+    expect(screen.getByText("#2 VPSの.envを直す")).toBeTruthy();
   });
 
   it("0件のときは何も無いことを文言で出す", () => {

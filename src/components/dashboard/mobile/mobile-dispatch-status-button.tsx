@@ -46,15 +46,26 @@ import { summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
  *
  * **申告しているホストが1台も無ければ何も出さない**（PCの実行キューのボタンと同じ判定）。
  * ディスパッチを使っていない環境で、押しても空のシートしか出ないアイコンを残さない。
+ *
+ * **開閉は外から渡せる**（#1933）。ホームのサブPCのカードを押したときも同じシートを開くため、
+ * 置いた画面が状態を持てるようにしてある。渡されなければ従来どおり自分で持つ
+ * （このボタンを置いただけの画面に状態の持ち回りを強いない）。
  */
 export function MobileDispatchStatusButton({
   dispatch: injected,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   dispatch?: DispatchStateHandle;
+  /** 外から開閉を持つ場合（#1933）。`onOpenChange`と対で渡す */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
 
   if (dispatch.hosts.length === 0) return null;

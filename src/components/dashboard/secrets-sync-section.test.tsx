@@ -37,16 +37,52 @@ function mockFetch(repositories: SecretsSyncRepository[]) {
   return fetchMock;
 }
 
-beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => cleanup());
+/**
+ * リポジトリ名は`guchi-apps/`と本体で濃さを変えるため2つの要素に分かれており、
+ * 既定の文字列マッチでは引けない（#1942）。全体の文字列で引くための補助。
+ */
+function findRepositoryName(fullName: string) {
+  return screen.findByText(
+    (_, element) => element?.tagName === "SPAN" && element.textContent === fullName,
+  );
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  // 相対表記（「2時間前」）を固定するため、実行時刻を止める
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-14T10:30:00.000Z"));
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("SecretsSyncSection", () => {
   it("リポジトリごとの直近の結果を件数で出す", async () => {
     mockFetch([repository()]);
     render(<SecretsSyncSection open />);
 
-    expect(await screen.findByText("guchi-apps/issue-deck")).toBeTruthy();
-    expect(screen.getByText("同期=26 スキップ=2 失敗=0")).toBeTruthy();
+    expect(await findRepositoryName("guchi-apps/issue-deck")).toBeTruthy();
+    expect(screen.getByText("同期 26")).toBeTruthy();
+    expect(screen.getByText("スキップ 2")).toBeTruthy();
+    expect(screen.getByText("失敗 0")).toBeTruthy();
+  });
+
+  it("リポジトリ名は結果に押されて省略されない（#1942）", async () => {
+    mockFetch([repository({ fullName: "guchi-apps/subscription-tracker" })]);
+    render(<SecretsSyncSection open />);
+
+    const name = await findRepositoryName("guchi-apps/subscription-tracker");
+    expect(name.classList.contains("truncate")).toBe(false);
+  });
+
+  it("最後に実行した時期を相対表記で出す（押してよいかを押す前に判断できる）", async () => {
+    vi.setSystemTime(new Date("2026-08-14T13:00:00.000Z"));
+    mockFetch([repository()]);
+    render(<SecretsSyncSection open />);
+
+    expect(await screen.findByText("2時間前")).toBeTruthy();
   });
 
   it("失敗は項目名だけを出す（値も値の長さも出さない）", async () => {
@@ -62,7 +98,7 @@ describe("SecretsSyncSection", () => {
     ]);
     render(<SecretsSyncSection open />);
 
-    expect(await screen.findByText(/失敗: SIGNALY_WEBHOOK_URL/)).toBeTruthy();
+    expect(await screen.findByText("失敗: SIGNALY_WEBHOOK_URL")).toBeTruthy();
   });
 
   it("同期処理が始まる前に落ちた失敗（件数が全て0）はmessageを出す", async () => {
@@ -81,9 +117,12 @@ describe("SecretsSyncSection", () => {
     ]);
     render(<SecretsSyncSection open />);
 
-    expect(
-      await screen.findByText("sync-secrets.yml がこのリポジトリで見つかりませんでした。"),
-    ).toBeTruthy();
+    // 横へはみ出さず折り返すこと。以前は縮まない指定のまま1行に置かれ、
+    // スマホでは横スクロールしないと理由を読めなかった（#1942）
+    const message = await screen.findByText(
+      "sync-secrets.yml がこのリポジトリで見つかりませんでした。",
+    );
+    expect(message.classList.contains("break-words")).toBe(true);
   });
 
   it("実行中は同期ボタンを押せない（二重起動の防止）", async () => {
@@ -125,7 +164,7 @@ describe("SecretsSyncSection", () => {
     mockFetch([repository()]);
     render(<SecretsSyncSection open />);
 
-    await screen.findByText("guchi-apps/issue-deck");
+    await findRepositoryName("guchi-apps/issue-deck");
     fireEvent.change(screen.getByLabelText(/対象キー/), {
       target: { value: "op://apps/Server/host" },
     });

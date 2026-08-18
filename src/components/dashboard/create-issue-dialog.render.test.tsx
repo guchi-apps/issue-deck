@@ -415,7 +415,7 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
   });
 
-  /** #1929。欄は無くすが、**付く値はこれまでと同じ** */
+  /** #1929。欄は無くすが、作成するIssueには必ず`m-guchi`が付く */
   it("担当者の選択欄を出さず、作成するIssueにはm-guchiが付く", async () => {
     repoMeta.assignees = ["m-guchi", "someone-else"];
     render(<Harness onCreated={vi.fn()} />);
@@ -430,17 +430,35 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     );
   });
 
-  /** 割り当てられない相手を送るとGitHub側で黙って落ちるため、未設定のまま作る（#1929） */
-  it("m-guchiを割り当てられないリポジトリでは担当者を付けずに作成する", async () => {
-    repoMeta.assignees = ["someone-else"];
+  /**
+   * #1929。**割り当て可能ユーザーの取得結果に依存させない。** 以前は取得できた一覧に
+   * `m-guchi`が居たときだけ入る初期値だったため、欄を消したまま同じ作りにすると、
+   * 取得の失敗・遅延がそのまま担当者なしのIssueになり画面から気づけない。
+   */
+  it("割り当て可能ユーザーを取得できなくても担当者は付く", async () => {
+    repoMeta.assignees = [];
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
     await waitFor(() =>
-      expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ assignee: null })),
+      expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ assignee: "m-guchi" })),
     );
+  });
+
+  /**
+   * 開いて何も書かずにいるあいだは下書きを残さない（#1929）。担当者を状態として持っていた頃は、
+   * 開いただけで`m-guchi`が入り「空ではない下書き」として保存され、次に開くと
+   * 「保存された下書きがあります」が出ていた。
+   */
+  it("何も入力していなければ下書きを保存しない", async () => {
+    repoMeta.assignees = ["m-guchi"];
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
+
+    // 自動保存のデバウンス（500ms）を越えるまで待つ
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(window.localStorage.getItem("issue-create-draft")).toBeNull();
   });
 
   /** #1745で足した本文テンプレートは廃止（#1884） */

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canStartSecretsSync,
-  formatSecretsSyncResult,
+  describeSecretsSyncResult,
   normalizeOnlyKeys,
   SECRETS_SYNC_COOLDOWN_MS,
   SECRETS_SYNC_MAX_ONLY_KEYS,
@@ -98,32 +98,45 @@ describe("canStartSecretsSync", () => {
   });
 });
 
-describe("formatSecretsSyncResult", () => {
-  it("件数だけを出す（値も値の長さも出さない）", () => {
-    expect(formatSecretsSyncResult(run())).toBe("同期=26 スキップ=2 失敗=0");
+describe("describeSecretsSyncResult", () => {
+  it("件数を要素に分けて返す（値も値の長さも出さない）", () => {
+    expect(describeSecretsSyncResult(run())).toEqual({
+      kind: "counts",
+      synced: 26,
+      skipped: 2,
+      failed: 0,
+      failedKeys: [],
+    });
   });
 
   it("失敗があれば項目名だけを添える", () => {
-    const text = formatSecretsSyncResult(
+    const result = describeSecretsSyncResult(
       run({ status: "FAILED", failedCount: 2, failedKeys: ["SIGNALY_WEBHOOK_URL", "DB_NAME"] }),
     );
-    expect(text).toBe("同期=26 スキップ=2 失敗=2（失敗: SIGNALY_WEBHOOK_URL, DB_NAME）");
+    expect(result).toEqual({
+      kind: "counts",
+      synced: 26,
+      skipped: 2,
+      failed: 2,
+      failedKeys: ["SIGNALY_WEBHOOK_URL", "DB_NAME"],
+    });
   });
 
   it("未完了・時間切れはその旨を出す", () => {
-    expect(formatSecretsSyncResult(run({ status: "QUEUED" }))).toBe("実行中...");
-    expect(formatSecretsSyncResult(run({ status: "TIMEOUT" }))).toContain("報告がありませんでした");
+    expect(describeSecretsSyncResult(run({ status: "QUEUED" }))).toEqual({ kind: "running" });
+    const timeout = describeSecretsSyncResult(run({ status: "TIMEOUT" }));
+    expect(timeout.kind === "message" && timeout.message).toContain("報告がありませんでした");
   });
 
   it("時間切れにmessageがあればそれを出す", () => {
-    const text = formatSecretsSyncResult(
+    const result = describeSecretsSyncResult(
       run({ status: "TIMEOUT", message: "カスタムの時間切れ理由" }),
     );
-    expect(text).toBe("カスタムの時間切れ理由");
+    expect(result).toEqual({ kind: "message", message: "カスタムの時間切れ理由" });
   });
 
   it("件数が全て0の失敗はmessageを出す（同期処理が始まる前に落ちた場合、件数だけでは何も伝わらない）", () => {
-    const text = formatSecretsSyncResult(
+    const result = describeSecretsSyncResult(
       run({
         status: "FAILED",
         syncedCount: 0,
@@ -132,11 +145,14 @@ describe("formatSecretsSyncResult", () => {
         message: "sync-secrets.yml がこのリポジトリで見つかりませんでした。",
       }),
     );
-    expect(text).toBe("sync-secrets.yml がこのリポジトリで見つかりませんでした。");
+    expect(result).toEqual({
+      kind: "message",
+      message: "sync-secrets.yml がこのリポジトリで見つかりませんでした。",
+    });
   });
 
   it("件数がある失敗はmessageがあっても件数側を優先する（項目名の方が具体的なため）", () => {
-    const text = formatSecretsSyncResult(
+    const result = describeSecretsSyncResult(
       run({
         status: "FAILED",
         failedCount: 1,
@@ -144,6 +160,12 @@ describe("formatSecretsSyncResult", () => {
         message: "何かの補足",
       }),
     );
-    expect(text).toBe("同期=26 スキップ=2 失敗=1（失敗: PORT）");
+    expect(result).toEqual({
+      kind: "counts",
+      synced: 26,
+      skipped: 2,
+      failed: 1,
+      failedKeys: ["PORT"],
+    });
   });
 });

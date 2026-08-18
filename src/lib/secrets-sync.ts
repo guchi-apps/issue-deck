@@ -123,11 +123,29 @@ export function canStartSecretsSync(
   };
 }
 
-/** 画面に出す1行。**値も値の長さも出さない。失敗は項目名だけを見せる** */
-export function formatSecretsSyncResult(run: SecretSyncRunView): string {
-  if (run.status === "QUEUED") return "実行中...";
+/**
+ * 画面に出す1行ぶんの結果。**値も値の長さも出さない。失敗は項目名だけを見せる**
+ *
+ * 文字列を1本返さず要素に分けているのは、**画面側で色分けと折り返しを決めるため**（#1942）。
+ * 以前は「件数」も「失敗の長い理由」も同じ1本の文字列で、行の右端へ縮まない指定のまま
+ * 置いていたため、理由が長いと画面幅を超えて横スクロールしないと読めなかった。
+ */
+export type SecretsSyncResultView =
+  /** 実行中。件数はまだ無い */
+  | { kind: "running" }
+  /** 件数で結果を出せる。`failedKeys`は失敗した項目の**名前だけ** */
+  | { kind: "counts"; synced: number; skipped: number; failed: number; failedKeys: string[] }
+  /** 件数では何も伝わらないため、理由の文だけを出す */
+  | { kind: "message"; message: string };
+
+export function describeSecretsSyncResult(run: SecretSyncRunView): SecretsSyncResultView {
+  if (run.status === "QUEUED") return { kind: "running" };
   if (run.status === "TIMEOUT") {
-    return run.message ?? "結果の報告がありませんでした（GitHub Actionsの実行ログを確認してください）";
+    return {
+      kind: "message",
+      message:
+        run.message ?? "結果の報告がありませんでした（GitHub Actionsの実行ログを確認してください）",
+    };
   }
 
   // 件数が全て0のFAILEDは「同期処理そのものが始まる前に落ちた」ことを意味し、
@@ -140,10 +158,14 @@ export function formatSecretsSyncResult(run: SecretSyncRunView): string {
     run.skippedCount === 0 &&
     run.failedCount === 0
   ) {
-    return run.message;
+    return { kind: "message", message: run.message };
   }
 
-  const counts = `同期=${run.syncedCount} スキップ=${run.skippedCount} 失敗=${run.failedCount}`;
-  if (run.failedKeys.length === 0) return counts;
-  return `${counts}（失敗: ${run.failedKeys.join(", ")}）`;
+  return {
+    kind: "counts",
+    synced: run.syncedCount,
+    skipped: run.skippedCount,
+    failed: run.failedCount,
+    failedKeys: run.failedKeys,
+  };
 }

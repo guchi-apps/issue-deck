@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { AlertTriangle, Check, KeyRound, Loader2, RefreshCw } from "lucide-react";
 
 import {
@@ -16,8 +16,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useNow } from "@/hooks/use-now";
 import { useSecretsSync, type SecretsSyncRepository } from "@/hooks/use-secrets-sync";
-import { formatSecretsSyncResult, normalizeOnlyKeys } from "@/lib/secrets-sync";
+import { formatRelativeDate } from "@/lib/format-relative-date";
+import {
+  describeSecretsSyncResult,
+  normalizeOnlyKeys,
+  type SecretSyncRunView,
+} from "@/lib/secrets-sync";
 
 /**
  * 1Password → GitHub のシークレット同期を画面から起こす（#1309）。
@@ -29,8 +35,79 @@ import { formatSecretsSyncResult, normalizeOnlyKeys } from "@/lib/secrets-sync";
  * フリート横断の運用という点で「共有ワークフローのバージョン」と同じ性質のため、
  * アプリ設定ダイアログの隣に置いている。
  */
+/** `guchi-apps/issue-deck`を`guchi-apps/`と`issue-deck`に分ける。前者は全リポジトリで同じ */
+function splitRepositoryName(fullName: string): [string, string] {
+  const index = fullName.indexOf("/");
+  if (index < 0) return ["", fullName];
+  return [fullName.slice(0, index + 1), fullName.slice(index + 1)];
+}
+
+/**
+ * 1リポジトリぶんの結果。**件数は折り返して並べ、長い文（失敗の理由・失敗した項目名）は
+ * 段を改めて全文を出す**（#1942）。
+ *
+ * 以前は1本の文字列を行の右端へ縮まない指定で置いていたため、`sync-secrets.yml`が
+ * 見つからない等の長い理由が画面幅を超え、横スクロールしないと読めなかった。
+ */
+function SecretsSyncResultLine({
+  run,
+  nowMs,
+}: {
+  run: SecretSyncRunView | null;
+  nowMs: number | null;
+}) {
+  if (!run) return <span className="text-muted-foreground/60">未実行</span>;
+
+  const result = describeSecretsSyncResult(run);
+  // `useNow`はマウント前にnullを返す。そのあいだは時刻を出さない（#1891）
+  const relative = nowMs === null ? null : formatRelativeDate(run.finishedAt ?? run.startedAt, nowMs);
+  const detail =
+    result.kind === "message"
+      ? result.message
+      : result.kind === "counts" && result.failedKeys.length > 0
+        ? `失敗: ${result.failedKeys.join(", ")}`
+        : null;
+
+  return (
+    <>
+      <span className="flex flex-wrap items-baseline gap-x-1.5 text-muted-foreground tabular-nums">
+        {result.kind === "running" && <span>実行中...</span>}
+        {result.kind === "counts" &&
+          [
+            { label: "同期", value: result.synced, bad: false },
+            { label: "スキップ", value: result.skipped, bad: false },
+            { label: "失敗", value: result.failed, bad: true },
+          ].map((count, index) => (
+            <Fragment key={count.label}>
+              {index > 0 && <span className="opacity-40">·</span>}
+              <span
+                className={
+                  count.value === 0
+                    ? "opacity-50"
+                    : count.bad
+                      ? "font-medium text-destructive"
+                      : undefined
+                }
+              >
+                {`${count.label} ${count.value}`}
+              </span>
+            </Fragment>
+          ))}
+        {relative && <span className="opacity-70">{relative}</span>}
+      </span>
+
+      {detail && (
+        <p className="basis-full border-l-2 border-destructive/40 pl-1.5 break-words text-destructive">
+          {detail}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function SecretsSyncSection({ open }: { open: boolean }) {
   const { repositories, isLoading, error, reload } = useSecretsSync(open);
+  const nowMs = useNow();
   const [only, setOnly] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<SecretsSyncRepository | null>(null);
   const [submitting, setSubmitting] = useState<string | null>(null);
@@ -91,26 +168,37 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
       {repositories.length === 0 && !isLoading ? (
         <p className="text-xs text-muted-foreground">対象のリポジトリがありません。</p>
       ) : (
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col">
           {repositories.map((repository) => {
             const run = repository.latestRun;
             const running = run?.status === "QUEUED";
             const failed = run?.status === "FAILED" || run?.status === "TIMEOUT";
+            const [owner, name] = splitRepositoryName(repository.fullName);
             return (
-              <li key={repository.fullName} className="flex items-center gap-2 text-xs">
+              <li
+                key={repository.fullName}
+                className="flex items-start gap-2 border-t py-1.5 text-xs first:border-t-0"
+              >
                 {running ? (
-                  <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground" />
                 ) : failed ? (
-                  <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
                 ) : (
-                  <Check className="size-3.5 shrink-0 text-muted-foreground" />
+                  <Check
+                    className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground ${run ? "" : "opacity-60"}`}
+                  />
                 )}
-                <span className="truncate">{repository.fullName}</span>
-                <span
-                  className={`ml-auto shrink-0 ${failed ? "text-destructive" : "text-muted-foreground"}`}
-                >
-                  {run ? formatSecretsSyncResult(run) : "未実行"}
-                </span>
+
+                {/* 名前と結果は、狭い画面では2段・広い画面では1行に並べる。**どちらの幅でも
+                    はみ出さない**ことが要点で、長い失敗の理由は必ず段を改めて折り返す（#1942） */}
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-2">
+                  <span className="min-w-0 break-words sm:flex-1">
+                    <span className="text-muted-foreground">{owner}</span>
+                    <span className="font-medium">{name}</span>
+                  </span>
+                  <SecretsSyncResultLine run={run} nowMs={nowMs} />
+                </div>
+
                 <Button
                   variant="outline"
                   size="sm"

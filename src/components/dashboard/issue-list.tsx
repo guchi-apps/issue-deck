@@ -426,7 +426,10 @@ export function IssueList({
           else itemRefs.current.delete(issue.id);
         }}
         className={cn(
-          "relative border-b border-l-4 border-l-transparent hover:bg-accent",
+          // isolateで行の中に重なり順を閉じ込める（#1945）。下のz-0/z-10は当たり判定と本文の
+          // 前後だけを決めたいもので、これが無いと一覧の外にある要素（右下の丸ボタンなど）と
+          // 同じ土俵で比較され、z-indexを持たない側が一覧の後ろへ回ってしまう
+          "relative isolate border-b border-l-4 border-l-transparent hover:bg-accent",
           highlightedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
           isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
         )}
