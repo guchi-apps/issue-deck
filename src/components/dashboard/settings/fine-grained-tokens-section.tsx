@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFineGrainedTokenMutations } from "@/hooks/use-fine-grained-token-mutations";
 import { useNow } from "@/hooks/use-now";
+import { formatDateOnly } from "@/lib/format-date-time";
 import {
   FINE_GRAINED_TOKEN_NAME_MAX_LENGTH,
   getFineGrainedTokenRemainingDays,
@@ -80,7 +81,7 @@ export function FineGrainedTokensSection({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{token.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    期限: {new Date(token.expiresAt).toLocaleDateString("ja-JP")}
+                    期限: {formatDateOnly(token.expiresAt)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">

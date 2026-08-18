@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import type { ClaudeUsage } from "@/lib/claude/usage";
 
-const NOW_MS = new Date(2026, 7, 4, 12, 0, 0).getTime();
+// 表示は日本時間へ固定した（#1977）ので、瞬間はUTCで指定する。
+// 2026-08-04T03:00:00Z = 日本時間の12:00。
+const NOW_MS = Date.parse("2026-08-04T03:00:00Z");
 
 /** 5時間枠の途中（経過40%・使用10%）。 */
 function usage(overrides: Partial<ClaudeUsage["windows"][number]> = {}): ClaudeUsage {

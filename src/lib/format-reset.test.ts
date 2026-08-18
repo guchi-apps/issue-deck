@@ -7,9 +7,10 @@ import {
   formatResetSentence,
 } from "@/lib/format-reset";
 
-// ローカルタイムで解釈させるためタイムゾーン指定なしで生成する。
-// 2026-08-04は火曜日。
-const NOW_MS = new Date(2026, 7, 4, 12, 0, 0).getTime();
+// **UTCで指定した瞬間で書く**（#1977）。表示は日本時間へ固定したので、ローカルタイムで
+// 組み立てるとテストを走らせる環境のタイムゾーン次第で期待値が変わる。
+// 2026-08-04T03:00:00Z = 日本時間の2026-08-04(火) 12:00。
+const NOW_MS = Date.parse("2026-08-04T03:00:00Z");
 const NOW_SEC = NOW_MS / 1000;
 
 /** NOWからN分後のリセット時刻(epoch秒)。 */
@@ -65,7 +66,7 @@ describe("formatResetAt", () => {
   });
 
   it("分は2桁に揃え、時は揃えない", () => {
-    const at13 = new Date(2026, 7, 4, 13, 0, 0).getTime() / 1000;
+    const at13 = Date.parse("2026-08-04T04:00:00Z") / 1000;
     expect(formatResetAt(at13, NOW_MS)).toBe("13:00 (あと1時間)");
   });
 
@@ -77,8 +78,14 @@ describe("formatResetAt", () => {
   });
 
   it("翌日であれば5時間枠でも曜日を添える", () => {
-    const nextDayEarly = new Date(2026, 7, 5, 4, 0, 0).getTime() / 1000;
+    const nextDayEarly = Date.parse("2026-08-04T19:00:00Z") / 1000;
     expect(formatResetAt(nextDayEarly, NOW_MS)).toBe("水曜日 4:00 (あと16時間)");
+  });
+
+  // UTCで読むと同じ日（8/4）に見えるが日本時間では翌日。曜日が付くのが正
+  it("日付の境界は日本時間で判定する", () => {
+    const jstNextDay = Date.parse("2026-08-04T15:00:00Z") / 1000;
+    expect(formatResetAt(jstNextDay, NOW_MS)).toBe("水曜日 0:00 (あと12時間)");
   });
 
   it("数値でない値はnullを返す", () => {

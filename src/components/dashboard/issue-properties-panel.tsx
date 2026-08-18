@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { formatDateTimeFull } from "@/lib/format-date-time";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
@@ -156,11 +157,11 @@ export function IssuePropertiesPanel({
         <dl className="flex flex-col gap-1 text-sm">
           <div className="flex items-center justify-between gap-2">
             <dt className="text-muted-foreground">作成日</dt>
-            <dd>{new Date(issue.createdAt).toLocaleString("ja-JP")}</dd>
+            <dd>{formatDateTimeFull(issue.createdAt)}</dd>
           </div>
           <div className="flex items-center justify-between gap-2">
             <dt className="text-muted-foreground">更新日</dt>
-            <dd>{new Date(issue.updatedAt).toLocaleString("ja-JP")}</dd>
+            <dd>{formatDateTimeFull(issue.updatedAt)}</dd>
           </div>
         </dl>
       </section>

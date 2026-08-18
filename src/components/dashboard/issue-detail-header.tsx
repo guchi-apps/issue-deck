@@ -6,6 +6,7 @@ import { Archive, Lock } from "lucide-react";
 
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
+import { formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import type { Issue } from "@/types/issue";
@@ -61,7 +62,7 @@ export function IssueDetailHeader({ issue, onSelectRepository, actions }: IssueD
           {issue.author.login}
         </span>
         {/* 相対時刻にして1行へ収める。正確な日時はhoverで見せる */}
-        <span title={new Date(issue.updatedAt).toLocaleString("ja-JP")}>
+        <span title={formatDateTimeFull(issue.updatedAt)}>
           更新 {formatRelativeDate(issue.updatedAt)}
         </span>
       </div>

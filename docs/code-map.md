@@ -45,6 +45,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+- **画面に出す絶対時刻の整形は
+  [`lib/format-date-time.ts`](../src/lib/format-date-time.ts)だけを通し、日本時間で出す**（#1977）。
+  `toLocaleString("ja-JP")`や`getHours()`は**実行環境のタイムゾーン**で整形するため、UTCで動く
+  本番VPS・subpc・CIでは9時間ずれた時刻になる。サーバー描画とブラウザ描画で結果が食い違うので、
+  ハイドレーションの警告としても出る。`eslint.config.mjs`の`no-restricted-syntax`が
+  `toLocaleDateString`・`toLocaleTimeString`・`new Date(...).toLocaleString`と
+  `getHours()`などのローカルタイムの読み出しを禁止しており、例外は`format-date-time.ts`だけ。
+  日付の境界（同じ日か・何曜日か）の判定も`toJstParts`・`isSameJstDay`を通す。
+  - **変換できない時刻をそのまま出す場合は、どのタイムゾーンの値かを文字列に書く。**
+    ホバーで出す完全な日時（`formatDateTimeFull`）は「（日本時間）」を添えている。
+  - 相対表現（`formatRelativeDate`の「3時間前」）は差分の計算なのでこの規約の対象外。
+    DB・API応答・スクリプトが受け渡すISO文字列はUTCのままでよい（表示ではないため）。
 - **画面の現在地を表すURLクエリの更新は
   [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
   だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの

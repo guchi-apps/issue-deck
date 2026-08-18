@@ -51,6 +51,7 @@ import {
   isReleaseCiPending,
   type BranchFlow,
 } from "@/lib/branch-flow";
+import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
@@ -152,14 +153,6 @@ const LANE_STATUS_LABEL: Partial<Record<BranchFlowLaneStatus, string>> = {
   open: "マージ待ち",
   closed: "クローズ（未マージ）",
 };
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
-}
 
 /** レーンの状態を表すピル。マージ待ちだけ色を付ける */
 function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
@@ -801,7 +794,7 @@ function ReleaseGroupHeader({
               {!inProduction && <DeployStateBadge deploy={group.deploy} />}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
-                  `${formatDate(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
+                  `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && <DeployStateBadge deploy={group.deploy} />}
@@ -1530,7 +1523,7 @@ export function BranchFlowView({
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
               )}
-              {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+              {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
                   「いま取りに行った」ことしか分からず、次にいつ更新されるかが読めない */}
               {autoRefreshIntervalMs !== null && (

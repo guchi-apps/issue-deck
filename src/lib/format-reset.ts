@@ -1,12 +1,4 @@
-const WEEKDAY_LABELS = [
-  "日曜日",
-  "月曜日",
-  "火曜日",
-  "水曜日",
-  "木曜日",
-  "金曜日",
-  "土曜日",
-] as const;
+import { formatJstWeekday, isSameJstDay, toJstParts } from "@/lib/format-date-time";
 
 /**
  * リセット時刻(epoch秒)までの残り時間を「あと2時間13分」形式にする。
@@ -44,31 +36,27 @@ export function formatResetSentence(resetsAtSeconds: number, nowMs: number): str
   return countdown.startsWith("あと") ? `${countdown}でリセット` : countdown;
 }
 
-function isSameLocalDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
 /**
  * リセット時刻を「13:00 (あと2時間14分)」形式にする。
  * 日をまたぐ場合は「月曜日 4:00 (あと3日4時間)」のように曜日を添える。
  *
  * 曜日の有無は「週次枠かどうか」ではなく日付が変わるかどうかで判定するため、
  * 5時間枠が深夜をまたぐ場合にも曜日が付く。
+ *
+ * **時刻・曜日・同じ日かの判定はすべて日本時間**（#1977）。実行環境のタイムゾーンで読むと、
+ * UTCで動くサーバー側とブラウザ側で9時間ずれた時刻が出る。
  */
 export function formatResetAt(resetsAtSeconds: number, nowMs: number): string | null {
   if (!Number.isFinite(resetsAtSeconds)) return null;
 
   const resetDate = new Date(resetsAtSeconds * 1000);
-  if (Number.isNaN(resetDate.getTime())) return null;
+  const parts = toJstParts(resetDate);
+  if (parts === null) return null;
 
-  const time = `${resetDate.getHours()}:${String(resetDate.getMinutes()).padStart(2, "0")}`;
-  const weekday = isSameLocalDay(resetDate, new Date(nowMs))
-    ? ""
-    : `${WEEKDAY_LABELS[resetDate.getDay()]} `;
+  // 時は揃えず分だけ2桁にする（「13:00」「4:00」）。狭い枠に置く1行なので、
+  // 先頭の0を落としたぶんだけ短くなる
+  const time = `${parts.hour}:${String(parts.minute).padStart(2, "0")}`;
+  const weekday = isSameJstDay(resetDate, nowMs) ? "" : `${formatJstWeekday(resetDate)} `;
 
   const countdown = formatResetCountdown(resetsAtSeconds, nowMs);
   return countdown === null ? `${weekday}${time}` : `${weekday}${time} (${countdown})`;

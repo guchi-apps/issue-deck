@@ -24,10 +24,10 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     commandOutput: null,
     tmuxSessionName: "issue-deck-issue-1468",
     queuePriority: 0,
-    createdAt: new Date(2026, 7, 15, 9, 0, 0).toISOString(),
+    createdAt: "2026-08-15T00:00:00Z",
     claimedAt: null,
     startedAt: null,
-    finishedAt: new Date(2026, 7, 15, 9, 5, 0).toISOString(),
+    finishedAt: "2026-08-15T00:05:00Z",
     ...overrides,
   };
 }
