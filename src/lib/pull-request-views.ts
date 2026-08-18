@@ -78,3 +78,19 @@ export function isPullRequestViewId(value: string | null | undefined): value is 
 export function getPullRequestView(id: PullRequestViewId): PullRequestView {
   return pullRequestViews.find((view) => view.id === id) ?? pullRequestViews[0];
 }
+
+/**
+ * 表示順で隣にあるビューのidを返す（端に来たらnull）。スマホのPR一覧を左右にスワイプして
+ * ビューを切り替えるのに使う（#1691）。Issue側の`getAdjacentNavViewId`と同じ形。
+ */
+export function getAdjacentPullRequestViewId(
+  id: PullRequestViewId,
+  direction: "prev" | "next",
+  order: readonly PullRequestView[] = pullRequestViews,
+): PullRequestViewId | null {
+  const index = order.findIndex((view) => view.id === id);
+  if (index === -1) return null;
+
+  const adjacentIndex = direction === "next" ? index + 1 : index - 1;
+  return order[adjacentIndex]?.id ?? null;
+}

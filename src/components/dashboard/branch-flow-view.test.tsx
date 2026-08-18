@@ -148,7 +148,9 @@ describe("BranchFlowView", () => {
       });
 
       expect(screen.getByText(REPO_SHORT)).toBeTruthy();
-      expect(screen.getByText("進行中1")).toBeTruthy();
+      // 件数はアイコンと数字だけで出し、言葉は読み上げ・ツールチップに持たせる（#1886）
+      expect(screen.getByLabelText("進行中 1件")).toBeTruthy();
+      expect(screen.queryByText("進行中1")).toBeNull();
       expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
@@ -1445,10 +1447,12 @@ describe("実装予定のIssue（#1704）", () => {
     }));
   }
 
-  it("畳んだ1行に件数を出す", () => {
+  it("畳んだ1行にはアイコンと数字だけを出す（#1886）", () => {
     renderFlow({ issues: plannedIssues([10, 11]), branchStatuses: [branchStatus()] });
 
-    expect(screen.getByText("予定2")).toBeTruthy();
+    expect(screen.getByLabelText("実装予定 2件")).toBeTruthy();
+    expect(screen.queryByText("予定2")).toBeNull();
+    // 開いたときの見出しは畳んだ状態では出さない
     expect(screen.queryByText(/実装予定 2件/)).toBeNull();
   });
 
@@ -1477,7 +1481,8 @@ describe("実装予定のIssue（#1704）", () => {
     ensureRepositoryOpen();
 
     expect(screen.getByText("実装予定 2件")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /実装予定/ })).toBeNull();
+    // 畳んだ行のボタンも読み上げに「実装予定 2件」を持つため、展開ボタンの文言で見る（#1886）
+    expect(screen.queryByRole("button", { name: /実装予定(の残り|を)/ })).toBeNull();
   });
 
   it("優先度が付いているIssueにはピルを出す", () => {
@@ -1515,7 +1520,7 @@ describe("実装予定のIssue（#1704）", () => {
     ensureRepositoryOpen();
 
     expect(screen.queryByText(/実装予定/)).toBeNull();
-    expect(screen.queryByText(/^予定/)).toBeNull();
+    expect(screen.queryByLabelText(/実装予定/)).toBeNull();
   });
 });
 

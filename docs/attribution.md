@@ -22,7 +22,7 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 |---|---|---|---|
 | Issue作成 | アプリ画面（`POST /api/issues`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | サブIssue作成（計画の分割、`mode=split`） | `claude-issue-dispatch.yml` | `GITHUB_TOKEN` | `github-actions[bot]` |
-| コメント投稿（通常コメント・「Claudeに質問する」・承認/修正ボタン） | アプリ画面（`POST /api/issues/comments`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
+| コメント投稿（通常コメント・「質問する」・承認/修正ボタン） | アプリ画面（`POST /api/issues/comments`） | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | コメント投稿（計画提示・実装完了報告・質問への回答等） | `claude-issue-dispatch.yml`ほか | `GITHUB_TOKEN` | `github-actions[bot]` |
 | ラベル操作（Issue更新、`PATCH /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | Issue削除（`DELETE /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人**（GraphQL `deleteIssue`ミューテーションはリポジトリのadmin権限を要求するため、write権限のみのユーザーは失敗しうる） |
@@ -56,7 +56,7 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 （詳細は`comment-source.ts`のコメントを参照）。
 
 1. `<!-- issue-deck-fallback-notice -->`（`fallback-notice.ts`、既存） — 行き詰まり・エラー終了時のフォールバック通知
-2. `<!-- issue-deck-qa-answer -->`（`ask-claude.ts`、既存） — 「Claudeに質問する」への回答
+2. `<!-- issue-deck-qa-answer -->`（`ask-claude.ts`、既存） — 「質問する」への回答
 3. `<!-- issue-deck-plan-type:implement|split -->`（`comment-source.ts`で新たにTS側の判定関数を用意） — 計画コメント
 4. `<!-- issue-deck-source:<id> -->`（`comment-source.ts`で新設） — 上記に該当しない定型コメントの投稿元ワークフロー
    - id一覧: `claude-issue-dispatch` / `claude-review-develop` / `claude-conflict-resolve` / `issue-labels`

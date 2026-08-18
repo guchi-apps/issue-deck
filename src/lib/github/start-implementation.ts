@@ -215,7 +215,11 @@ export function canStartImplementation(
  * ボタン自体は非表示にせず、押せない理由を示した上で無効化する（#976）。
  * `hasClaudeWorkflow`が明示的にfalseの場合のみ無効化し、リポジトリ情報が見つからない等でundefinedの
  * 場合は誤って無効化しないよう理由を返さない。
- * 文言・判定はリポジトリ一覧のバッジ（sidebar-nav.tsx・mobile-repos-screen.tsx）と揃えている。
+ * **リポジトリ一覧の印（`lib/repository-automation.ts`）とは判定が違う**（#1888）。あちらは
+ * 「issue-deckで実装を回せるか」なので、サブPCのローカルセッションで起動できるリポジトリには
+ * 印を出さない。ここはダイアログの中のActionsの選択肢だけを落とすためのもので、軸は
+ * GitHub Actions単独に限られる（#1262）。揃えると、サブPCで起動できるリポジトリで
+ * Actionsを選べてしまう。
  */
 export function startImplementationDisabledReason(hasClaudeWorkflow: boolean | undefined): string | null {
   if (hasClaudeWorkflow === false) {

@@ -204,6 +204,26 @@ export async function fetchRepositoryLabelNames(
 }
 
 /**
+ * Issueに**いま付いている**ラベル名を返す（#1905）。
+ *
+ * 使うのは「外してよいか」を外す前に確かめたいときだけ（`src/lib/dispatch/check-user-labels.ts`）。
+ * `addIssueLabels`・`removeIssueLabel`は操作後の一覧を返すので、付け外しのついでに知りたい
+ * だけならそちらで足りる。**操作せずに読むための口はここにしか無い。**
+ */
+export async function fetchIssueLabelNames(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<string[]> {
+  const labels = await fetchAllPages<{ name: string }>(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/labels?per_page=100`,
+    token,
+  );
+  return labels.map((label) => label.name).filter((name) => typeof name === "string");
+}
+
+/**
  * Issueからラベルを**1つだけ**外す（#1342）。
  *
  * `addIssueLabels`と対になる。`updateIssue`の`labels`は全置換なので、外したい1つ以外を

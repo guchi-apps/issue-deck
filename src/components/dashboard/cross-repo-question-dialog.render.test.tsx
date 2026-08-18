@@ -64,7 +64,9 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     instructionCapable: true,
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    manualStepAbortCapable: null,
     planReviewCapable: null,
+    selfUpdateCapable: null,
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,
@@ -83,6 +85,7 @@ function makeQuestionRepository(): ConnectedRepository {
     // 横断質問はActionsを使わないため、ワークフローが無くても記録先に選べる
     hasClaudeWorkflow: false,
     hasLocalStartScript: false,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };
@@ -97,6 +100,7 @@ function makeRepository(): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };

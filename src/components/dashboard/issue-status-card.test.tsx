@@ -92,6 +92,7 @@ function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     instruction: null,
     command: null,
     manualStepLine: null,
+    targetJobId: null,
     exitCode: null,
     commandOutput: null,
     tmuxSessionName: "issue-deck-issue-1577",

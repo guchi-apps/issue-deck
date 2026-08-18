@@ -69,6 +69,12 @@ case "$1 \${2:-}" in
     else echo "$value"; fi
     ;;
   "api repos"*)
+    # wip-on-pushが引く「このコミットに紐づくPR」（repos/<owner>/<repo>/commits/<sha>/pulls）
+    if [[ "$2" == */pulls ]]; then
+      if [ "\${STUB_COMMIT_PULLS:-}" = "fail" ]; then exit 1; fi
+      echo "\${STUB_COMMIT_PULLS:-[]}"
+      exit 0
+    fi
     var="STUB_REF_\${2##*/issue-}"
     value="\${!var:-404}"
     if [ "$value" = "404" ]; then echo '{"message":"Not Found","status":"404"}'; exit 1
@@ -367,5 +373,118 @@ describe("Project Status の報告", () => {
     const result = runStep(reportStep, { ...base, STUB_POST_CODES: "000 200" });
 
     expect(result.stdout).toContain("issue #1583 を develop-pr として報告しました");
+  });
+});
+
+describe("wip-on-push のマージ済み判定", () => {
+  const STEP = "対象issueを特定する";
+  const base = { GITHUB_REF_NAME: "issue-1901", HEAD_SHA: "aaa111" };
+  const pulls = (baseRef, headRef) =>
+    JSON.stringify([{ merged_at: "2026-08-18T00:00:00Z", base: { ref: baseRef }, head: { ref: headRef } }]);
+
+  it("main直行リポジトリのマージ済みPRでも巻き戻さない（#1901）", () => {
+    // develop決め打ちのままだと「マージ済みでない」と判定し、遅れて走ったrunが
+    // main-direct-mergedの`Done`を`Implementation`へ戻してしまう
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("main", "issue-1901") });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual([]);
+  });
+
+  it("developへマージ済みのpushも従来どおり巻き戻さない（#1511）", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("develop", "issue-1901") });
+
+    expect(result.reported).toEqual([]);
+  });
+
+  it("ブランチ名が一致しないPR（developの先端から切った直後のpush）は巻き込まない", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("main", "develop") });
+
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("マージ済みPRが無ければ implementation を報告する", () => {
+    const result = runStep(STEP, base);
+
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("PRを取得できないときは報告する側へ倒す（fail-open）", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: "fail" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    expect(result.stdout).toContain("紐づくPRを取得できませんでした");
+  });
+});
+
+describe("main-direct-pr-opened / main-direct-merged（main直行リポジトリ・#1901）", () => {
+  const OPENED_STEP = "main宛のPR作成をIssueへ通知する";
+  const MERGED_STEP = "00.check-user を外しmainへのマージを通知する";
+  const CLOSE_STEP = "mainへ到達したissueをcloseする";
+
+  it("main宛PRの作成で、常に00.check-userと01.check-mergeを付ける", () => {
+    const result = runStep(OPENED_STEP, { HEAD_REF: "issue-1901" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    // base=mainのPRは claude-review-develop.yml の対象外で必ず人がマージするため、
+    // develop-pr-openedのような経路の有無の調査を挟まず常に付ける
+    expect(result.calls).toContain("--add-label 00.check-user --add-label 01.check-merge");
+    expect(result.calls).toContain("mainへのPRを作成しました");
+  });
+
+  it("ラベル一覧がHTTP 503でも落ちず、進捗の報告へissue番号を渡す", () => {
+    const result = runStep(OPENED_STEP, {
+      HEAD_REF: "issue-1901",
+      STUB_LABEL_LIST_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("issue-<番号>以外のブランチからのmain宛PRでは何も報告しない", () => {
+    const result = runStep(OPENED_STEP, { HEAD_REF: "release/v1.2.0" });
+
+    expect(result.reported).toEqual([]);
+  });
+
+  it("main宛PRのマージで、確認系ラベルを外して進捗の報告へissue番号を渡す", () => {
+    const result = runStep(MERGED_STEP, { HEAD_REF: "issue-1901" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    expect(result.calls).toContain("--remove-label 00.check-user");
+    expect(result.calls).toContain("mainへのマージが完了しました");
+  });
+
+  it("ラベル操作・コメント投稿が失敗しても、進捗の報告へissue番号を渡す", () => {
+    const result = runStep(MERGED_STEP, {
+      HEAD_REF: "issue-1901",
+      STUB_ISSUE_WRITE_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("closeステップは受け取ったissueをcloseし、失敗してもジョブを落とさない", () => {
+    const ok = runStep(CLOSE_STEP, { ISSUE_NUMBERS: "1901" });
+    expect(ok.status).toBe(0);
+    expect(ok.calls).toContain("gh issue close 1901");
+
+    const failed = runStep(CLOSE_STEP, { ISSUE_NUMBERS: "1901", STUB_ISSUE_WRITE_FAIL: "1" });
+    expect(failed.status).toBe(0);
+    expect(failed.stdout).toContain("::warning::issue #1901: closeに失敗しました");
+  });
+
+  it("`done`の報告をcloseより先に置く（#1856の終端遷移と競合させない）", () => {
+    // 先にcloseすると、issue-deckがcloseを受けて`Implementation`・`Develop PR`から
+    // 終端`Closed`へ送る経路（closeStrandedProgress）に当たり、`Done`ではなく
+    // `Closed`へ落ちうる。順序そのものが仕様なので、入れ替えを検知できるようにする。
+    const merged = workflowYaml.slice(workflowYaml.indexOf("  main-direct-merged:"));
+    expect(merged.indexOf("STATUS: done")).toBeGreaterThan(-1);
+    expect(merged.indexOf("STATUS: done")).toBeLessThan(merged.indexOf(`- name: ${CLOSE_STEP}`));
   });
 });

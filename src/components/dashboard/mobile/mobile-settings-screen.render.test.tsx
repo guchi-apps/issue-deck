@@ -74,6 +74,7 @@ const repositories = [
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   },

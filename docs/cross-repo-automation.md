@@ -1,7 +1,7 @@
 # 他リポジトリでも同様の自動化を有効にするための調査
 
 issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプリ）に既にある「実装を開始」
-ボタン・「Claudeに質問する」ボタンは、`@claude ...`形式の定型コメントをGitHub App経由で
+ボタン・「質問する」ボタンは、`@claude ...`形式の定型コメントをGitHub App経由で
 投稿する仕組み自体は特定リポジトリに依存せず汎用化されている。しかし、そのコメントを実際に
 受けて実装〜レビュー〜マージまで進める自動化本体（`.github/workflows/`配下のワークフロー群と
 対応するラベル体系）は、現状issue-deckリポジトリ自身にのみ存在し、issue-deck自身の開発
@@ -18,7 +18,8 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   してください`という定型コメントを投稿する。あわせて選択したオプション（`21.plan-required`・
   `23.preview-required`・`24.screenshot-required`に対応するラベル）を付与する。リポジトリ固有の
   前提を含まない。
-- `src/lib/github/ask-claude.ts`: 「Claudeに質問する」ボタン押下時に`@claude 質問: <本文>`という
+- `src/lib/github/ask-claude.ts`: 「質問する」ボタン（Issue詳細のコメント欄の下。#1913）押下時に
+  `@claude 質問: <本文>`という
   定型コメントを投稿する。質問コメントは末尾の`<!-- issue-deck-question -->`マーカー、回答コメントは
   `<!-- issue-deck-qa-answer -->`マーカーで識別する（#1294。「質問である」ことの識別と「Actionsを
   起こすトリガー」は別の軸で、後者は本文の先頭が`@claude`かどうかで決まる。詳細は

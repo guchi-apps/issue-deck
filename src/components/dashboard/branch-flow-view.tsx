@@ -2,16 +2,20 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  ArrowUpToLine,
   Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleDashed,
   Clock,
+  GitBranch,
   Loader2,
   Lock,
   RefreshCw,
   TriangleAlert,
   Wrench,
+  type LucideIcon,
 } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -1069,10 +1073,45 @@ function ReleaseGroupHeaderWithLanes({
 }
 
 /**
+ * 畳んだ行に出す件数（#1886）。**種類はアイコンと色で出し、言葉はツールチップと読み上げに持たせる。**
+ *
+ * 予定・進行中・未リリースが同じ灰色の文字で横に並んでいたため、右端まで読まないとどれが
+ * リリース待ちなのか分からなかった。**形（破線の丸／枝分かれ／上向き矢印）でも区別が付く**ので、
+ * 色を見分けにくくても読める。手が要るもの（CI失敗・手作業）のピルより静かなままにして、
+ * 目立ち方の順序を崩さない。
+ */
+function SummaryCount({
+  icon: Icon,
+  label,
+  count,
+  className,
+}: {
+  icon: LucideIcon;
+  label: string;
+  count: number;
+  className?: string;
+}) {
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={cn(
+        "flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground",
+        className,
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+      {count}
+    </span>
+  );
+}
+
+/**
  * 畳んだときの1行（#1510）。
  *
  * **右側に出すのは「手が要るか」だけ。** 8リポジトリを1画面へ収めるための行なので、
  * ここで詳細を語らない。リポジトリ名は`owner/`を落とし、フル名は`title`属性に持たせる。
+ * 件数は`SummaryCount`でアイコンと数字だけにしている（#1886）。
  */
 function RepositorySummaryRow({
   repository,
@@ -1159,19 +1198,31 @@ function RepositorySummaryRow({
           手作業{summary.openManualStepCount}
         </span>
       )}
-      {/* 開かなくても、これから流れてくるものが溜まっているかが分かるようにする（#1704） */}
+      {/* 開かなくても、これから流れてくるものが溜まっているかが分かるようにする（#1704）。
+          破線の丸は流れ図の実装予定ノードと同じ描き方で、まだブランチが無いことを形で出す */}
       {summary.plannedIssueCount > 0 && (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          予定{summary.plannedIssueCount}
-        </span>
+        <SummaryCount
+          icon={CircleDashed}
+          label={`実装予定 ${summary.plannedIssueCount}件`}
+          count={summary.plannedIssueCount}
+        />
       )}
       {summary.activeLaneCount > 0 && (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          進行中{summary.activeLaneCount}
-        </span>
+        <SummaryCount
+          icon={GitBranch}
+          label={`進行中 ${summary.activeLaneCount}件`}
+          count={summary.activeLaneCount}
+          className="text-sky-600 dark:text-sky-400"
+        />
       )}
+      {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886） */}
       {unreleasedCommits > 0 && !summary.releaseInProgress && (
-        <span className="shrink-0 text-xs text-muted-foreground">未リリース{unreleasedCommits}</span>
+        <SummaryCount
+          icon={ArrowUpToLine}
+          label={`未リリース ${unreleasedCommits}コミット`}
+          count={unreleasedCommits}
+          className="text-purple-600 dark:text-purple-400"
+        />
       )}
       {branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>

@@ -5,12 +5,15 @@ import {
   canCompleteManualStep,
   checkUserReason,
   isCheckUserReasonLabel,
+  isSessionRemovableCheckUserReason,
   labelsWithCheckUserReason,
   isLabelFilterPresetActive,
   isMergeApprovalPending,
   isQaOnlyApprovalPending,
   LABEL_FILTER_PRESETS,
+  dismissCheckUserCommentBody,
   labelsAfterApproval,
+  labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
   requestPrFixCommentBody,
@@ -171,6 +174,34 @@ describe("labelsAfterRejection", () => {
   });
 });
 
+/**
+ * #1903。ローカルセッションが担当しているIssueの承認欄から押す「確認待ちを外す」。
+ * 承認ではないので`21.plan-required`は残し、`@claude`も付けない（無人実行を起こさない）。
+ */
+describe("labelsAfterCheckUserDismissal", () => {
+  it("00.check-userと理由ラベルだけを外し、21.plan-requiredは残す", () => {
+    expect(
+      labelsAfterCheckUserDismissal([
+        makeLabel("00.check-user"),
+        makeLabel("01.check-input"),
+        makeLabel("21.plan-required"),
+        makeLabel("11.local"),
+      ]),
+    ).toEqual(["21.plan-required", "11.local"]);
+  });
+});
+
+describe("dismissCheckUserCommentBody", () => {
+  it("@claudeを付けない（無人実行のトリガー条件に掛けない）", () => {
+    expect(dismissCheckUserCommentBody()).not.toContain("@claude");
+    expect(dismissCheckUserCommentBody("端末で回答済み")).not.toContain("@claude");
+  });
+
+  it("入力があれば本文の先頭に残す", () => {
+    expect(dismissCheckUserCommentBody("端末で回答済み")).toContain("端末で回答済み");
+  });
+});
+
 describe("isMergeApprovalPending", () => {
   it("00.check-userが無ければfalseを返す", () => {
     expect(isMergeApprovalPending({ labels: [], projectStatus: "Develop PR" })).toBe(false);
@@ -328,6 +359,23 @@ describe("checkUserReason（#1490）", () => {
         makeLabel("01.check-plan"),
       ]),
     ).toBe("plan");
+  });
+});
+
+describe("isSessionRemovableCheckUserReason（#1905）", () => {
+  it("セッション自身が付ける理由なら外してよい", () => {
+    expect(isSessionRemovableCheckUserReason("plan")).toBe(true);
+    expect(isSessionRemovableCheckUserReason("input")).toBe(true);
+    expect(isSessionRemovableCheckUserReason("blocked")).toBe(true);
+  });
+
+  it("別の実行体が付ける理由は外さない（人がマージ・確認の合図を失うため）", () => {
+    expect(isSessionRemovableCheckUserReason("merge")).toBe(false);
+    expect(isSessionRemovableCheckUserReason("answered")).toBe(false);
+  });
+
+  it("理由が読めない（ラベル未配布）ときは従来どおり外す", () => {
+    expect(isSessionRemovableCheckUserReason(null)).toBe(true);
   });
 });
 

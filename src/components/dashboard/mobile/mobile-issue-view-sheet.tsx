@@ -1,10 +1,7 @@
 "use client";
 
-import { Check } from "lucide-react";
-
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { MobileViewSheet } from "@/components/dashboard/mobile/mobile-view-sheet";
 import { navViewIcons, type NavView } from "@/lib/nav-views";
-import { cn } from "@/lib/utils";
 import type { NavViewId } from "@/types/issue";
 
 type MobileIssueViewSheetProps = {
@@ -20,10 +17,8 @@ type MobileIssueViewSheetProps = {
 
 /**
  * スマホのIssue一覧で表示するビューを選ぶボトムシート（#1645）。
- *
- * 元は一覧の上部に横スクロールのタブとして並べていたが、画面に2つ強しか映らず、
- * 残りは横スクロールで探しに行くことになっていた。縦に全部並べれば1画面に収まり、
- * 「いくつあるのか」「いまどれなのか」も同時に読める。
+ * 見た目と操作はPull Request側と共通の`MobileViewSheet`が持ち、ここはIssue固有の
+ * 材料（アイコン・件数・強調するビュー）を組み立てるだけにしている（#1691）。
  */
 export function MobileIssueViewSheet({
   open,
@@ -34,52 +29,24 @@ export function MobileIssueViewSheet({
   onSelect,
 }: MobileIssueViewSheetProps) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto overscroll-contain">
-        <SheetHeader>
-          <SheetTitle>表示するIssue</SheetTitle>
-        </SheetHeader>
-
-        <div className="flex flex-col p-2 pt-0">
-          {views.map((navView) => {
-            const count = navCounts[navView.id] ?? 0;
-            const Icon = navViewIcons[navView.id];
-            const active = navView.id === view;
-            // 確認待ちの強調は件数バッジだけに閉じる（#1443）。行ごとamberに塗ると
-            // 選択中の行（primary）と役割が混ざる。
-            const highlighted = navView.id === "check-user" && count > 0;
-            return (
-              <button
-                key={navView.id}
-                type="button"
-                onClick={() => {
-                  onSelect(navView.id);
-                  onOpenChange(false);
-                }}
-                aria-current={active ? "true" : undefined}
-                // 行の高さは指で押せる大きさ（52px）を確保し、行のどこを押しても選べるようにする
-                className={cn(
-                  "flex h-13 items-center gap-3 rounded-lg px-3 text-left text-sm",
-                  active && "bg-primary/10 font-medium text-primary",
-                )}
-              >
-                <Icon className={cn("size-5 shrink-0", !active && "text-muted-foreground")} />
-                <span className="min-w-0 flex-1 truncate">{navView.label}</span>
-                <span
-                  className={cn(
-                    "shrink-0 text-xs text-muted-foreground",
-                    highlighted &&
-                      "flex size-5 items-center justify-center rounded-full bg-amber-500 text-white",
-                  )}
-                >
-                  {count}
-                </span>
-                <Check className={cn("size-4 shrink-0", !active && "invisible")} />
-              </button>
-            );
-          })}
-        </div>
-      </SheetContent>
-    </Sheet>
+    <MobileViewSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="表示するIssue"
+      items={views.map((navView) => {
+        const count = navCounts[navView.id] ?? 0;
+        return {
+          id: navView.id,
+          label: navView.label,
+          icon: navViewIcons[navView.id],
+          count,
+          // 確認待ちの強調は件数バッジだけに閉じる（#1443）。行ごとamberに塗ると
+          // 選択中の行（primary）と役割が混ざる。
+          highlighted: navView.id === "check-user" && count > 0,
+        };
+      })}
+      selectedId={view}
+      onSelect={onSelect}
+    />
   );
 }

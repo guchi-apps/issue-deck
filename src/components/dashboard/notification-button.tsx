@@ -8,6 +8,7 @@ import {
   NotificationBadge,
   NotificationContent,
 } from "@/components/dashboard/notification-content";
+import { NotificationRefreshButton } from "@/components/dashboard/notification-refresh-button";
 import { useNotificationState } from "@/components/dashboard/notification-state";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { NotificationItem, NotificationTarget } from "@/lib/notifications";
@@ -34,8 +35,9 @@ type NotificationButtonProps = {
  * （`notification-content.tsx`。#1772）。ここが持つのはポップオーバーで出すことと、
  * 押されたときに閉じてから遷移することだけ。
  *
- * **追加のGitHub API消費はゼロ。** 材料は`NotificationProvider`（`notification-state.tsx`）が
- * 1か所で用意したものを読む。
+ * **材料は`NotificationProvider`（`notification-state.tsx`）が1か所で用意したものを読む。**
+ * 開いている間だけ30秒ごとに取り直し、いつ時点の内容かを右上に出す（#1909。
+ * `notification-refresh-button.tsx`）。閉じている間に増える取得は無い。
  */
 export function NotificationButton({
   onOpenTarget,
@@ -43,7 +45,7 @@ export function NotificationButton({
   onOpenFlow,
 }: NotificationButtonProps) {
   const [open, setOpen] = useState(false);
-  const { items, groups, hasError, refetch } = useNotificationState();
+  const { items, groups, hasError } = useNotificationState();
 
   function handleSelect(item: NotificationItem) {
     setOpen(false);
@@ -51,14 +53,9 @@ export function NotificationButton({
   }
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        // 開いた時点の状態で判断できるよう取り直す（バックグラウンドの再取得は5分間隔のため）
-        if (nextOpen) refetch();
-      }}
-    >
+    // 開いた時点の取り直しと、開いている間の自動更新は中身の側が持つ
+    // （`notification-refresh-button.tsx`。#1909）
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -71,9 +68,14 @@ export function NotificationButton({
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
-        <div className="flex items-baseline justify-between gap-2 px-3 pt-3 pb-2">
+        {/* 件数の右に更新ボタンを並べる（#1909）。いつ時点の内容かは、開いたまま見ている
+            人にとって件数と同じくらい判断の材料になる */}
+        <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
           <h3 className="text-xs font-semibold">対応が必要なもの</h3>
-          <span className="text-xs text-muted-foreground">{items.length}件</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">{items.length}件</span>
+            <NotificationRefreshButton />
+          </div>
         </div>
 
         <NotificationContent

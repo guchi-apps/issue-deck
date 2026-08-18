@@ -91,6 +91,7 @@ const {
   dismissDispatchJob,
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
+  enqueueManualStepAbortJob,
   enqueueManualStepJob,
   enqueuePlanReviewJob,
   enqueueSessionControlJob,
@@ -115,8 +116,10 @@ function host(overrides: Record<string, unknown> = {}) {
     // 横断質問（#1454）に対応したpoller
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    manualStepAbortCapable: null,
     // 計画レビュー（#1855）に対応したpoller
     planReviewCapable: true,
+    selfUpdateCapable: null,
     maxConcurrency: null,
     ...overrides,
   };
@@ -599,6 +602,44 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
   });
 
+  // 中断（#1882）は代行実行とは別の申告で配る。**未対応のpollerへ配ると`failed`になるだけ**で、
+  // そのときは打ち切りを待つ案内を出す方が正しい
+  it("中断に対応していないpollerには中断ジョブを配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ manualStepCapable: true, manualStepAbortCapable: null }),
+    );
+    dispatchJobCount.mockResolvedValue(0);
+    const requestedKinds: string[][] = [];
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | undefined;
+      if (kind?.in) requestedKinds.push(kind.in);
+      return [];
+    });
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    const controlKinds = requestedKinds.find((kinds) => kinds.includes("MANUAL_STEP")) ?? [];
+    expect(controlKinds).not.toContain("MANUAL_STEP_ABORT");
+  });
+
+  it("中断に対応したpollerには中断ジョブも配る", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ manualStepCapable: true, manualStepAbortCapable: true }),
+    );
+    dispatchJobCount.mockResolvedValue(0);
+    const requestedKinds: string[][] = [];
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | undefined;
+      if (kind?.in) requestedKinds.push(kind.in);
+      return [];
+    });
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    const controlKinds = requestedKinds.find((kinds) => kinds.includes("MANUAL_STEP")) ?? [];
+    expect(controlKinds).toContain("MANUAL_STEP_ABORT");
+  });
+
   it("同時実行数が埋まっていても制御ジョブは払い出す", async () => {
     // 起動ジョブで枠が埋まっている状態
     dispatchJobCount.mockResolvedValue(2);
@@ -950,6 +991,7 @@ describe("dismissDispatchJob", () => {
       instruction: null,
       command: null,
       manualStepLine: null,
+      targetJobId: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1022,6 +1064,7 @@ describe("prioritizeDispatchJob", () => {
       instruction: null,
       command: null,
       manualStepLine: null,
+      targetJobId: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1142,6 +1185,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
       instruction: null,
       command: null,
       manualStepLine: null,
+      targetJobId: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1485,6 +1529,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       instruction: null,
       command: "git pull --ff-only",
       manualStepLine: 12,
+      targetJobId: null,
       tmuxSessionName: null,
       exitCode: null,
       commandOutput: null,
@@ -1530,6 +1575,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       instruction: null,
       command: "git pull --ff-only",
       manualStepLine: 12,
+      targetJobId: null,
       tmuxSessionName: null,
       exitCode: 1,
       commandOutput: "前回の出力",
@@ -1588,5 +1634,83 @@ describe("claimDispatchJobs の代行実行", () => {
       .map((call) => (call[0]?.where?.kind as { in?: string[] } | undefined)?.in ?? [])
       .flat();
     expect(kinds).not.toContain("MANUAL_STEP");
+  });
+});
+
+/**
+ * 走っている代行実行の中断（#1882）。
+ *
+ * **止める対象はジョブのidで指し、コマンドは渡さない**（pollerがユニット名を組み立て直す）。
+ * 対応を申告していないpollerには配らない、という向きも他の種別と揃っていることを見る。
+ */
+describe("enqueueManualStepAbortJob", () => {
+  function runningManualStepJob(overrides: Record<string, unknown> = {}) {
+    return { id: "job-1", kind: "MANUAL_STEP", status: "RUNNING", ...overrides };
+  }
+
+  async function abort() {
+    return enqueueManualStepAbortJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1876,
+      hostName: "subpc",
+      targetJobId: "job-1",
+      requestedByUserId: "user-1",
+      now: NOW,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: "abort-1",
+      createdAt: NOW,
+      queuePriority: 0,
+      ...data,
+    }));
+  });
+
+  it("走っているジョブを指す中断ジョブを積む", async () => {
+    dispatchJobFindUnique.mockResolvedValue(runningManualStepJob());
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepAbortCapable: true }));
+
+    const result = await abort();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "MANUAL_STEP_ABORT",
+          targetJobId: "job-1",
+          // 未処理の中断は1件まで（連打しても同じ停止が積み上がらない）
+          activeKey: "manual_step_abort:guchi-apps/issue-deck#1876",
+        }),
+      }),
+    );
+    // **コマンドは載せない**（pollerがユニット名を組み立て直して止める）
+    expect(dispatchJobCreate.mock.calls[0][0].data.command).toBeUndefined();
+  });
+
+  it("走り出していないジョブは対象にしない（取り消しの担当）", async () => {
+    dispatchJobFindUnique.mockResolvedValue(runningManualStepJob({ status: "QUEUED" }));
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepAbortCapable: true }));
+
+    const result = await abort();
+
+    expect(result).toMatchObject({ ok: false, rejection: "not_running" });
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("中断に対応していないpollerには配らず、打ち切りまで待つことを伝える", async () => {
+    dispatchJobFindUnique.mockResolvedValue(runningManualStepJob());
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepAbortCapable: null }));
+
+    const result = await abort();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rejection).toBe("abort_unsupported");
+      expect(result.message).toContain("5分で打ち切られます");
+    }
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
   });
 });

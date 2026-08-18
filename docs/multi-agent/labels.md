@@ -123,6 +123,11 @@ issue番号の特定は、Issue専用ブランチの命名規約`issue-<番号>`
 同時に`gh issue comment`でIssueへ完了報告のコメントも投稿する。盤面だけでは気付きにくいため、
 PRオープン・マージという確実なイベントに紐づけて通知している。
 
+**`develop`を持たないリポジトリ（`guchi-apps/docs`）では、`main-direct-pr-opened`・
+`main-direct-merged`が同じ役割を担う**（#1901。`workflows/v23`以降）。`issue-<番号>` → `main`の
+PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`、マージで`Done`＋issueのclose
+まで進める。develop運用のリポジトリでは`base.ref`の条件に一致しないため発火しない。
+
 `develop-pr-merged`は、`claude-review-develop.yml`の`auto-merge`ジョブが有効化するGitHub Auto-merge
 機能による実際のマージ（必須ステータスチェック通過後にGitHub側が非同期に実行）では発火しないことが
 ある（Issue #112。GITHUB_TOKEN起点のイベントは他のワークフローを起動しないというGitHub仕様の影響を
@@ -194,7 +199,7 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
 | --- | --- |
 | ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
 | ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
-| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`が進捗の遷移とあわせて外す（#266） |
+| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`が進捗の遷移とあわせて外す（#266・#1901） |
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
 | Issueがcloseされた | `reusable-issue-labels.yml`の`cleanup-on-close`（#464） |
@@ -206,6 +211,25 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
   付けた`00.check-user`まで落とす。付けた事実はホスト側の状態ファイル
   （`scripts/lib/session-state.sh`の`<セッション名>.check-user`）に印として残し、印があるときしか
   外しに行かない。
+- **印はセッションが終わっても消さず、同じIssueの次のセッションが引き継ぐ**（#1905）。
+  以前は`session_state_remove`（セッションの終了・回収）が他の状態ファイルと一緒に消していた。
+  すると**入力待ちのまま終わったセッションの`00.check-user`が、誰にも外せないまま残る** —
+  ラベルはGitHubに残るのに、外す権利を表す印だけがホストから消えるため。#1893では計画の
+  承認待ちで終わったセッションを同じIssueで起こし直したあと、実装が終わってPRができても
+  `00.check-user`が付いたままで、画面には「実行中なのに確認待ち」とだけ出ていた。
+  セッション名はIssueごとに一定（`<リポジトリ名>-issue-<番号>`）なので、残した印は次の
+  セッションが引き継ぎ、最初の`Stop`でラベルごと消える。
+- **引き継いだ印で、他の実行体が付けた`00.check-user`は落とさない**（#1905）。印を置いた後に
+  レビュー・統合が`01.check-merge`へ、無人実行が`01.check-answered`へ付け替えていることが
+  あるため、外す直前にいまの理由を読み、セッション自身が付ける理由
+  （`01.check-plan`・`01.check-input`・`01.check-blocked`、または理由ラベル未配布）のときだけ
+  外す（`src/lib/dispatch/check-user-labels.ts`）。ラベルを読めなかったときは外す側に倒す
+  （確認待ちが解けない方が、画面から見て困る）。
+- **計画の承認待ちを質問への回答待ちで上書きしない**（#1905）。計画を出すと、その承認
+  プロンプトで`Notification / permission_prompt`も必ず飛ぶ（#1893では9秒後）。理由を
+  `01.check-input`へ落とすと画面の見出しが「計画の承認が必要です」から「質問への回答が
+  必要です」へ変わり、待たれているものが読めなくなるため、`01.check-plan`が付いている間は
+  付け替えない（`requestSessionCheckUser`の`keepExistingReasons`）。
 - **外れるのは「答えた瞬間」で、応答終了（`Stop`）を待たない**（#1357・#1438）。承認した直後の
   `PostToolUse`が合図で、そのために計画を出した時点（`ExitPlanMode`の`PreToolUse`）で状態を
   「入力待ち」として記録しておく。記録が無いと`PostToolUse`が間引きで捨てられ、承認しても
@@ -222,6 +246,22 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
 - **入力待ちの間は画面の承認・修正ボタンを出さない。** `11.local`が付いている間、押しても
   コメントが残るだけで走っているセッションには届かない（`LocalSessionWaitingInputNotice`）。
   セッションが落ちていれば従来どおりボタンを出す — 画面から`00.check-user`を外す手段を残すため。
+- **入力待ちでなくても、ローカルが担当している間の承認欄には「承認」「修正」を出さない**（#1903）。
+  届かないのは入力待ちのときだけではない。従来はここで塗りつぶしの「承認」を主導線として出し、
+  上部の帯は「回答を書いて『承認』を押すと、内容がエージェントへ渡ります」、すぐ下の案内は
+  「承認してもコメントが残るだけで、走っているセッションは動きません」と正反対のことを言っていた。
+  さらに「承認」が投稿する`@claude`コメントは無人実行を起こし、`11.local`が付いている以上は
+  「このIssueには`11.local`が付いているため対応しません」という案内を足して終わっていた。
+  ここでできることの名前に置き換える。
+  - ボタンは**「コメント」「質問する」「確認待ちを外す」「取り下げ」**（`comment-thread.tsx`）。
+    塗りつぶし（主導線）は案内の中の「Remote Controlで答える」だけが持つ
+  - **「確認待ちを外す」は承認ではない。** `00.check-user`と理由ラベルだけを外し、`21.plan-required`は
+    残す（`labelsAfterCheckUserDismissal`）。投稿するコメントに`@claude`を付けない
+    （`dismissCheckUserCommentBody`）ので、無人実行は起動しない
+  - **「質問する」だけは実際に答えが返る。** 読み取り専用の質問応答（`mode=ask`）は`11.local`が
+    付いていても唯一許可されている経路のため
+  - 上部の帯の文言も実行先を見る（`resolveCheckUserGuidance`の`localSession`）。セッションが
+    終了している場合は、届かないのではなく「終了しているので復旧が要る」と言い分ける
 
 ### 理由を表す`01.check-*`ラベル（#1469・#1490）
 
@@ -257,7 +297,7 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
 - **理由は常に1枚。** 付け替えのときは他の理由ラベルを外す。判定は
   `src/lib/github/approval-labels.ts`に寄せ、画面・API・ローカル経路はそこだけを通す。
 - **外すのは`00.check-user`を外すのと同じ場所**（`labelsAfterApproval`／`labelsAfterRejection`、
-  `develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`cleanup-on-close`）。
+  `develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`・`cleanup-on-close`）。
 - リネームは`gh label edit "00.qa-answered" --name "01.check-answered"`（付いているIssueから
   外れずにその場で名前が変わる）。移行期間は**読む側が新旧どちらの名前も受け付ける**。
   書く側は「`01.check-answered`があればそれ、無ければ`00.qa-answered`」の順に解決する
@@ -1082,9 +1122,9 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`はレビュー完了後に付ける（#1406）**: 一次判定の結果を反映する（ラベル付与・理由コメント投稿）のは、`risk-check`ではなくワークフロー最後の`auto-merge`ジョブの先頭ステップ。`risk-check`の時点で付けていた頃は、そのあとに走る`claude-review`（数分かかる）と`auto-merge`のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では**head SHAの全check-runを集約したCI状態が`in_progress`のまま**（`src/lib/github/pull-request-ci.ts`）でマージボタンが押せなかった。実測（PR #1404）ではCI（`lint-and-build`）成功が17:43:23、`00.check-user`付与が17:43:51、`claude-review`完了が17:50:18で、**通知から約6分半**押せない状態が続いていた。**レビュー用ワークフローが自分自身の完了を待ってからラベルを付けることはできない**（デッドロックになる）ため、「ラベルを読む直前＝最後のジョブで書く」形にして、通知後に残るcheck-runを`auto-merge`ジョブ自身の数秒だけにしている。なお`risky`が真なら`needs-review`も必ず真になる（`add_review_reason "機械的リスク判定に該当したため"`）ので、一次判定に当たったPRでは`claude-review`が必ず走り、付与は常にレビュー完了後になる。`claude-review`が失敗して`auto-merge`ごとスキップされる経路では、`claude-review-fallback`がラベル付与と理由の伝達を肩代わりする。**なお画面側は#1799で、CI状態の集約からレビュー・自動マージ（`claude-review-develop.yml`）のcheck-runを外した**（`src/lib/github/check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）ため、`auto-merge`ジョブ自身が残っていてもCI状態は`success`になる。ここでの「最後のジョブで書く」構成は通知のタイミングを揃えるために引き続き必要だが、**残るcheck-runがマージボタンを塞ぐことはなくなっている**。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは上記の反映を済ませたうえで、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
-- **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266）。
+- **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266・#1901）。
 - **判定経路を持たないリポジトリではPR作成時に付ける（#1470）**: 上の判定は**すべて`claude-review-develop.yml`（caller）を持つリポジトリでしか走らない**。callerが無いリポジトリでは`risk-check`も`auto-merge`も一度も起動せず、自動マージされないのに`00.check-user`も付かないため、develop向けPRが誰にも気付かれないまま開いたまま残る。実測（2026-08-15）では、callerを持つのは`issue-deck`・`dayspan`・`shopping-list`の3つだけで、**他12リポジトリに判定されないままのdevelop向けPRが13本**あった（配布状況は[docs/supported-repositories.md](../supported-repositories.md)「`claude-review-develop.yml`の配布状況」）。そのため`reusable-issue-labels.yml`の`develop-pr-opened`ジョブ（展開済みの全リポジトリが呼ぶ唯一の共通経路）が、PR作成時に`.github/workflows/claude-review-develop.yml`の有無を`gh api`で確認し、**無ければその場で`00.check-user`を付ける**。理由はPR作成通知コメントの末尾に1行足す形で伝える（コメントを増やさないため）。
   - **経路を持つリポジトリでは何もしない。** ここで付けると`auto-merge`ジョブが「`00.check-user`が付いている」と読んで自動マージを常にスキップしてしまう。将来callerを配ったリポジトリでは、この保険は自動的に発火しなくなる
   - **一覧の取得に失敗したときは「経路なし」に倒す（fail-closed）。** 3回リトライしても取れなければ警告を出したうえでラベルを付ける。誤って付いた`00.check-user`は画面から外せるが、付かなかったPRは気付かれずに残り続けるため
-  - 外れるタイミングは他の経路と同じで、`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`がマージ時に、`cleanup-on-close`がIssue close時に外す
+  - 外れるタイミングは他の経路と同じで、`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`がマージ時に、`cleanup-on-close`がIssue close時に外す
 - **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。**この「push開始時点で付いていたか」は`risk-check`が掴んで`already-check-user`出力で渡す**（#1406）。付与を行う`auto-merge`ジョブ側で読み直すと、`claude-review`が二次判定で付けたラベルを見て一次判定の理由コメントを取りこぼす。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。

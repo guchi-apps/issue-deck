@@ -10,7 +10,7 @@ export function buildIssueSearchKey(issue: Issue): string {
 }
 
 /**
- * 検索欄の「AIで探す」を呼ぶフック（#1788）。`use-issue-quick-suggest.ts`と同じ形にしてある。
+ * 検索欄の「AIで探す」を呼ぶフック（#1788）。`use-issue-suggest.ts`と同じ形にしてある。
  *
  * **呼ぶのはボタンを押したときだけ。** 1回ごとにClaudeのプラン枠を消費するため、
  * 入力のたびの実行やEnterキーへの割り当ては行わない。

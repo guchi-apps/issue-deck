@@ -181,7 +181,7 @@ model Issue {
   // 並べるための基準）。ラベルが外れるとnullに戻す
   checkUserLabeledAt DateTime?
 
-  // 「Claudeに質問する」ダイアログ経由の質問コメント（isAskClaudeQuestionComment）が
+  // 「質問する」ボタン経由の質問コメント（isAskClaudeQuestionComment）が
   // 投稿された日時。一覧画面はissueごとにコメント本文を取得しないため、Webhook
   // （issue_comment created）で質問コメントを検知した時点で記録し、対応する回答コメント
   // （isQaAnswerComment）が投稿されたらnullに戻す近似値として使う
@@ -348,6 +348,12 @@ enum DispatchJobStatus {
 // 投稿するジョブ。**activeKeyを取らない**（下記`activeKey`のコメント参照）。
 // **まだ積む経路も払い出し口も無い**（器だけを先に入れている）。実行はStep 3（別Issue）で、
 // poller側の対応申告とセットで開ける。
+// MANUAL_STEP_ABORT（#1882）は走っている代行実行（MANUAL_STEP）を止めるジョブ。
+// pollerが`systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。
+// **セッションを操作するジョブではない**（相手はtmuxではなくtransient unit）ため、
+// `SESSION_CONTROL_JOB_KINDS`ではなく`OUT_OF_BAND_JOB_KINDS`に入れて枠外で先に配る。
+// 止める対象は`targetJobId`で指す（pollerはユニット名を組み立て直す。任意の
+// `systemctl stop`を流す経路にしない）。
 // PLAN_REVIEW（#1855）は計画の関門（G1・#1218）のセッションを立てるジョブ。CROSS_REPO_QUESTIONと
 // 同じく「セッションを立てる」側で、worktreeは作らず対象リポジトリの`origin/develop`の
 // スナップショットを読むだけ。**実装セッションが承認待ちで生きている最中に走るのが常態**なので、
@@ -360,7 +366,9 @@ enum DispatchJobKind {
   INSTRUCTION
   CROSS_REPO_QUESTION
   MANUAL_STEP
+  MANUAL_STEP_ABORT
   PLAN_REVIEW
+  SELF_UPDATE
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -427,6 +435,13 @@ model DispatchJob {
   // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは
   // 「どの手順を実行したのか」を後から辿るためで、行が持つ意味はあくまで記録。
   manualStepLine     Int?
+  // 止める対象のジョブid（#1882。`kind`が`MANUAL_STEP_ABORT`のときだけ入る）。
+  //
+  // **pollerへ渡すのはこのidだけで、実行するコマンドは渡さない。** pollerが
+  // `issue-deck-manual-step-<id>`というユニット名を組み立て直して止めるので、
+  // この経路が任意の`systemctl stop`を流す口にはならない（`INTERRUPT`・`KILL`が
+  // セッション名を組み立て直すのと同じ作法）。
+  targetJobId        String?
   // 代行実行の終了コード（#1828）。`0`が成功で、画面はこれを見てチェックを付けるかを決める。
   // タイムアウトで打ち切った場合は`timeout`の終了コード（124）が入る。
   exitCode           Int?
@@ -477,34 +492,34 @@ model DispatchJob {
 // `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
 // 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
 model DispatchHost {
-  id                String   @id @default(cuid())
-  name              String   @unique
+  id                       String    @id @default(cuid())
+  name                     String    @unique
   // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
   // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
-  repositories      String   @db.Text
+  repositories             String    @db.Text
   // ホストの受け口が扱えるローカル起動プロトコルの上限版数
   // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
-  contractVersion   Int?
+  contractVersion          Int?
   // ホスト側が申告する同時実行数の上限。AppSetting.dispatchConcurrencyとminを取る
-  maxConcurrency    Int?
+  maxConcurrency           Int?
   // pollerのバージョン。受け口が古いまま動いているかの手掛かり
-  agentVersion      String?
+  agentVersion             String?
   // スクリーンショットを撮れるか（#1268）。Playwrightのブラウザ本体が入っているかで判定する。
   // **`null`は「申告していない」**（古いpoller）で、`false`（撮れない）とは区別する。
   // 無人実行では依存の追加をその場で確認する相手がいないため、撮れないホストで
   // `24.screenshot-required`を選ばせると必ず詰まる
-  screenshotCapable Boolean?
+  screenshotCapable        Boolean?
   // 走っているセッションを画面から操作できるか（#1332）。pollerが対応版で申告する。
   // **`null`（未申告＝古いpoller）は「できない」として扱う**。`screenshotCapable`とは逆で、
   // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
   // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
-  sessionControlCapable Boolean?
+  sessionControlCapable    Boolean?
   // 走っているセッションへ追加指示を流せるか（#1012）。3段階プロトコル
   // （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）を実装したpollerだけが申告する。
   // **`sessionControlCapable`とは別に持つ**。あちらは固定の`C-c`と`kill-session`しか送らないのに対し、
   // こちらは**内容のある文字列**を送るため、対応版でないpollerへ配ると事故の質が違う
   // （`null`＝未申告は「できない」として扱うのは同じ）
-  instructionCapable Boolean?
+  instructionCapable       Boolean?
   // 複数リポジトリ横断の質問セッション（#1454）を起こせるか。`scripts/start-cross-repo-question.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として
@@ -517,14 +532,31 @@ model DispatchHost {
   // **`instructionCapable`とも分けて持つ。** あちらは走っているセッションの入力欄へ1行流すだけだが、
   // こちらは**シェルでコマンドを実行する**。対応していないpollerへ配ると未知の種別として`failed`に
   // なるだけだが、そもそも配ってよいホストかどうかの意味が違う
-  manualStepCapable Boolean?
+  manualStepCapable        Boolean?
+  // 走っている代行実行を止められるか（#1882）。`MANUAL_STEP_ABORT`を扱えるpollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（`manualStepCapable`と同じ向き）。
+  //
+  // **`manualStepCapable`とは分けて持つ。** 代行実行を実行できるpollerでも、止める側の実装が
+  // 入っているとは限らない。判定材料が無いまま中断ジョブを配ると未知の種別として`failed`になり、
+  // 画面には「中断できなかった」だけが残る。申告を見て、止められないホストでは
+  // 「打ち切りまで待つ」ことを先に案内する。
+  manualStepAbortCapable   Boolean?
   // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。
   //
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
-  planReviewCapable Boolean?
+  planReviewCapable        Boolean?
+
+  // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
+  // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（他のCapableと同じ向き）。
+  //
+  // **`manualStepCapable`とは分けて持つ。** 両方とも枠外で配る「セッションを立てない」ジョブ
+  // （`OUT_OF_BAND_JOB_KINDS`）だが、手作業の代行に対応した既存のpollerは更新のジョブを知らず、
+  // まとめて配ると未知の種別として`failed`になり、押した更新が失われる。
+  selfUpdateCapable        Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
@@ -534,8 +566,8 @@ model DispatchHost {
   // 判定には使わない（サブPCのtmuxを見られるのはpollerだけで、こちらに判定を置くとずれる）。
   // **`null`は「申告していない」**（古いpoller）＝上限そのものが不明という意味で、
   // `liveSessions`が0であることとは区別する
-  maxSessions       Int?
-  liveSessions      Int?
+  maxSessions              Int?
+  liveSessions             Int?
   // 申告した時点のリソース使用率（#1567）。「もう1本セッションを起こしてよいか」を
   // issue-deckの画面だけで判断できるようにするための写しで、**判定には一切使わない**
   // （起動を止めているのは引き続き`maxSessions`と同時実行数）。
@@ -548,18 +580,18 @@ model DispatchHost {
   // **`null`は「申告していない」**（古いpoller・取得に失敗した巡）で、0（空いている）とは
   // 区別する。5つは**まとめて入るかまとめてnullか**のどちらかで、部分的には埋まらない
   // （受け口の`parseDispatchHostMetrics`が全体を落とす）
-  cpuPercent        Float?
-  memoryUsedMb      Int?
-  memoryTotalMb     Int?
-  diskUsedGb        Float?
-  diskTotalGb       Float?
+  cpuPercent               Float?
+  memoryUsedMb             Int?
+  memoryTotalMb            Int?
+  diskUsedGb               Float?
+  diskTotalGb              Float?
   // SWAP（#1624）。**上の5つの「まとめて入るかまとめてnullか」には含めない。** SWAPを持たない
   // ホストとSWAPを申告しない古いpollerがどちらもありうるため、必須にするとCPU・メモリ・
   // ディスクごと消える。この2つは対で入るか、対でnullか。
   // **総量0（SWAPを持たない）はnullと区別する**（申告は届いている）が、画面ではどちらも
   // 行ごと出さない（`describeDispatchHostMetrics`）
-  swapUsedMb        Int?
-  swapTotalMb       Int?
+  swapUsedMb               Int?
+  swapTotalMb              Int?
   // pollerが動かしているチェックアウトの鮮度（#1612）。**`agentVersion`とは別物**で、
   // あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に走っているスクリプトが
   // どのコミットのものかという事実。
@@ -572,13 +604,13 @@ model DispatchHost {
   // **`null`は「申告していない」**（古いpoller・gitが無い・チェックアウトを読めなかった巡）。
   // `checkoutBehind`だけは別に`null`になりうる（fetchできず、遅れを数えられなかった場合）。
   // 数えた遅れがいつ時点のものかは`checkoutFetchedAt`（最後にoriginを見た時刻）で分かる
-  checkoutCommit      String?
-  checkoutBranch      String?
-  checkoutCommittedAt DateTime?
-  checkoutBehind      Int?
-  checkoutFetchedAt   DateTime?
+  checkoutCommit           String?
+  checkoutBranch           String?
+  checkoutCommittedAt      DateTime?
+  checkoutBehind           Int?
+  checkoutFetchedAt        DateTime?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
-  lastSeenAt        DateTime
+  lastSeenAt               DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -676,6 +708,69 @@ enum DispatchSessionState {
   EXITED
   FAILED
   GONE
+}
+
+// 手作業アシスタントの自動実行（#1869）の状態（#1882）。
+//
+// RUNNING=次の1件を積んでよい／PAUSED=止まっている（理由は`pausedReason`）／
+// FINISHED=流すものが無くなった（クローズは人が押す）／STOPPED=人が中断した。
+enum ManualStepRunStatus {
+  RUNNING
+  PAUSED
+  FINISHED
+  STOPPED
+}
+
+// 自動実行が止まっている理由（#1882）。**画面の出し分けと、再開してよいかの判断に使う。**
+//
+// USER=代行できない項目に来た（人が実行して「実行した・次へ」を押すと続きから流れる）/
+// FAILED=実行が失敗した・打ち切られた（原因を直してから再開する）/
+// ENQUEUE_FAILED=積めなかった（ホストが居ない・本文が変わった等。理由は`message`）。
+enum ManualStepRunPause {
+  USER
+  FAILED
+  ENQUEUE_FAILED
+}
+
+// 手作業アシスタントの自動実行1本（#1882）。
+//
+// **#1869では「状態を持つのは画面だけ」にしていた**（サーバー・DBに置くと、画面を閉じた後に
+// 誰が実行を進めるのかを決める必要が出るため）。#1882で「自動実行中に画面を閉じたい・進行状況を
+// 確認したい」という要望を受け、**進めるのはサーバー**（代行実行の結果報告を受けた時点で次の
+// 1件を積む）と決めてここへ移した。画面は状態を読んで出すだけになり、ブラウザを閉じても
+// 別の端末から開いても、同じ1本の実行を追える。
+//
+// **1つのIssueにつき1行**（`@@unique`）。次に同じ手作業を流すときは同じ行を上書きする。
+// 「いつ何を実行したか」の履歴は`DispatchJob`側に残るので、ここに履歴を溜める必要が無い。
+//
+// **DispatchJobへ外部キーは張らない**（`DispatchJob`がRepositoryへ張っていないのと同じ理由で、
+// 寿命が違うため）。`currentJobId`は画面が結果を引き当てるための手掛かり。
+model ManualStepRun {
+  id                 String              @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 積む先のホスト名（DispatchHost.nameと対応）。**開始した時点のホストに固定する**
+  targetHost         String
+  status             ManualStepRunStatus @default(RUNNING)
+  pausedReason       ManualStepRunPause?
+  // この実行で流し終えた行番号のJSON配列（例: `[12,18]`）。**チェックの付かない確認コマンドを
+  // 二度流さないための記録。** 手順のチェックはIssue本文が正で、ここには持たない
+  doneLines          String              @db.Text
+  // 失敗したときに出力をClaudeへ送ってよいか（承認パネルのチェック。#1869）
+  diagnoseConsent    Boolean             @default(true)
+  // 承認した人（User.id）。Userを消しても実行の記録は残すためFKは張らない
+  startedByUserId    String?
+  // いま積んでいる（または最後に積んだ）代行実行ジョブのid
+  currentJobId       String?
+  // 止まった理由・中断の結果など、**画面にそのまま出す前提**の一文
+  message            String?             @db.Text
+  startedAt          DateTime            @default(now())
+  finishedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([repositoryFullName, issueNumber])
+  @@index([status])
 }
 
 model IssueLabel {

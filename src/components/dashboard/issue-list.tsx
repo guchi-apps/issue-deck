@@ -12,6 +12,7 @@ import {
   Clock,
   Compass,
   ListChecks,
+  Loader2,
   Lock,
   MessageSquare,
   Star,
@@ -32,7 +33,9 @@ import {
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
@@ -133,14 +136,6 @@ type IssueListProps = {
    */
   dispatch?: DispatchStateHandle;
 };
-
-function formatRelativeDate(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays <= 0) return "今日";
-  if (diffDays === 1) return "1日前";
-  return `${diffDays}日前`;
-}
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
 // （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
@@ -363,6 +358,21 @@ export function IssueList({
       ? issues.filter((issue) => manualStepReadiness.get(issue.id)?.ready === true).length
       : 0;
 
+  // 走っている自動実行（#1882）。**入口に出すのはこの一覧に居る手作業の分だけ**——
+  // 別のビューを見ているときに手作業の進捗を割り込ませない（進み具合は実行キューでも見られる）
+  const activeManualStepRun =
+    view === "manual-step"
+      ? ((dispatch.manualStepRuns ?? []).find(
+          (run) =>
+            isActiveManualStepRun(run.status) &&
+            issues.some(
+              (issue) =>
+                issue.repositoryFullName === run.repositoryFullName &&
+                issue.number === run.issueNumber,
+            ),
+        ) ?? null)
+      : null;
+
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -482,7 +492,11 @@ export function IssueList({
                   {issue.commentCount}
                 </span>
               )}
-              <span>{formatRelativeDate(issue.updatedAt)}</span>
+              {/* 一覧はサーバーでも描かれるため、現在時刻は描画中に読まず`useNow`から受ける
+                  （#1891）。分単位で刻むようになったぶん、サーバーで描いた時刻と
+                  ハイドレーション時刻が分の境界をまたぐと表示が食い違う。マウント前
+                  （`now === null`）は出しようがないので出さない */}
+              <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
         </button>
@@ -548,7 +562,7 @@ export function IssueList({
           スマホの一覧はこのコンポーネントのヘッダーを出さず（`showHeader={false}`）、
           画面側のヘッダーには操作を足さない決まりのため（#1646）。ここならPC・スマホの
           どちらにも同じ位置で出る */}
-      {onStartManualStepGuide && guidableManualStepCount > 0 && (
+      {onStartManualStepGuide && (guidableManualStepCount > 0 || activeManualStepRun !== null) && (
         <div className="flex items-center gap-2 border-b bg-violet-500/5 px-4 py-2">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">
             いま実行できる手作業が
@@ -557,6 +571,16 @@ export function IssueList({
             </span>
             あります。
           </p>
+          {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
+              戻ってこられる目印がここに要る（押すとアシスタントが開く） */}
+          {activeManualStepRun !== null && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 tabular-nums dark:text-amber-300">
+              {activeManualStepRun.status === "RUNNING" && (
+                <Loader2 className="size-3 animate-spin" aria-hidden />
+              )}
+              自動実行 {activeManualStepRun.done} / {activeManualStepRun.total}
+            </span>
+          )}
           <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
             <ListChecks />
             順番に進める

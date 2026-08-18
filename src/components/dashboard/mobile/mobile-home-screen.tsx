@@ -44,7 +44,7 @@ type MobileHomeScreenProps = {
   manualStepAttention: ManualStepAttention;
   /**
    * 未確認（回答が届いていて未読）の質問Issueの件数（#1796）。
-   * 「質問」の件数は総数のままで、1件以上のときだけ数字の色を変える（PCの左メニューと同じ）。
+   * 「質問」の件数として出し、1件以上のときはオレンジの丸で強調する（#1910・PCの左メニューと同じ）。
    */
   unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
@@ -167,6 +167,7 @@ export function MobileHomeScreen({
                 hosts={dispatch.hosts}
                 sessions={dispatch.sessions}
                 onOpenIssue={onOpenIssue}
+                onRequestSelfUpdate={(hostName) => void dispatch.requestSelfUpdate(hostName)}
               />
             </div>
           )}
@@ -210,9 +211,10 @@ export function MobileHomeScreen({
                 label={view.label}
                 icon={navViewIcons[view.id]}
                 onClick={() => onSelectQuickView(view.id)}
-                // 件数は確認済みも含めた総数のままで、未確認が残っている間だけ色を変える（#1796）
-                count={navCounts[view.id]}
-                emphasis={unconfirmedQuestionCount > 0 ? "unread" : "none"}
+                // 件数は未確認（回答が届いていて未読）の数で、確認待ち・作業待ちと同じく
+                // 「いま手を動かせる数」を出す（#1910・PCと同じ）
+                count={unconfirmedQuestionCount}
+                emphasis={unconfirmedQuestionCount > 0 ? "attention" : "none"}
                 title={
                   unconfirmedQuestionCount > 0
                     ? `回答が届いていてまだ開いていない質問が${unconfirmedQuestionCount}件あります`

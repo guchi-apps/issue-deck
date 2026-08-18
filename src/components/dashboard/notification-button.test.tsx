@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationButton } from "@/components/dashboard/notification-button";
@@ -12,6 +12,8 @@ import type { ConnectedRepository } from "@/types/repository";
 const releaseStatusesMock = vi.hoisted(() => ({ current: [] as RepositoryReleaseStatus[] }));
 /** `useRepositoryReleaseStatuses`へ渡された`enabled`を記録する（#1727の判定を検査するため） */
 const releaseStatusesEnabled = vi.hoisted(() => ({ calls: [] as boolean[] }));
+/** リリース状況の取り直し（#1909の自動更新・更新ボタンが呼ぶ）。同一性を保つため外に置く */
+const releaseStatusesRefetch = vi.hoisted(() => vi.fn(async () => [] as RepositoryReleaseStatus[]));
 
 vi.mock("@/hooks/use-repository-release-statuses", () => ({
   useRepositoryReleaseStatuses: (enabled: boolean) => {
@@ -20,7 +22,7 @@ vi.mock("@/hooks/use-repository-release-statuses", () => ({
       data: releaseStatusesMock.current,
       isLoading: false,
       error: null,
-      refetch: vi.fn(),
+      refetch: releaseStatusesRefetch,
     };
   },
 }));
@@ -37,6 +39,7 @@ function repository(
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
     ...overrides,
@@ -108,6 +111,10 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
   };
 }
 
+/** Issue一覧・PR一覧の取り直し（`IssueDeckShell`が渡すもの。#1909） */
+const refreshIssuesMock = vi.fn(async () => true);
+const refreshPullRequestsMock = vi.fn();
+
 type RenderOptions = {
   repositories?: ConnectedRepository[];
   issues?: Issue[];
@@ -124,6 +131,8 @@ function renderButton(options: RenderOptions = {}) {
       repositories={options.repositories ?? [repository("guchi-apps/issue-deck")]}
       issues={options.issues ?? []}
       pullRequests={options.pullRequests ?? []}
+      onRefreshIssues={refreshIssuesMock}
+      onRefreshPullRequests={refreshPullRequestsMock}
     >
       <NotificationButton
         onOpenTarget={options.onOpenTarget ?? (() => {})}
@@ -137,6 +146,9 @@ function renderButton(options: RenderOptions = {}) {
 afterEach(() => {
   releaseStatusesMock.current = [];
   releaseStatusesEnabled.calls = [];
+  releaseStatusesRefetch.mockClear();
+  refreshIssuesMock.mockClear();
+  refreshPullRequestsMock.mockClear();
   cleanup();
 });
 
@@ -233,5 +245,48 @@ describe("NotificationButton ポップオーバー", () => {
     fireEvent.click(screen.getByLabelText("対応が必要なもの"));
     fireEvent.click(screen.getByText("ブランチ画面を開く"));
     expect(onOpenFlow).toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1909。開いている間は30秒ごとに取り直し、右上の更新ボタンでいつ時点の内容かを出す。
+ *
+ * 取り直すのはベルの材料3つ（リリース状況・Issue一覧・Pull Request一覧）で、**開いている間
+ * だけ**。閉じている間の取得が増えていないことも併せて確かめる。
+ */
+describe("NotificationButton 自動更新", () => {
+  it("閉じている間は取りに行かず、開いた時点で3つとも取り直す", async () => {
+    renderButton();
+
+    expect(releaseStatusesRefetch).not.toHaveBeenCalled();
+    expect(refreshIssuesMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+
+    expect(screen.getByLabelText("対応が必要なものを今すぐ更新")).toBeTruthy();
+    await waitFor(() => {
+      expect(releaseStatusesRefetch).toHaveBeenCalledTimes(1);
+      expect(refreshIssuesMock).toHaveBeenCalledTimes(1);
+      expect(refreshPullRequestsMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("更新ボタンを押すと、次の周期を待たずに取り直す", async () => {
+    renderButton();
+
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+
+    // 取得が終わって「いつ時点か」が出るまで待つ（取得中の重複呼び出しは弾かれるため）
+    await waitFor(
+      () => expect(screen.getByLabelText("対応が必要なものを今すぐ更新").textContent).toContain("30秒ごと"),
+      { timeout: 3_000 },
+    );
+
+    fireEvent.click(screen.getByLabelText("対応が必要なものを今すぐ更新"));
+
+    await waitFor(() => {
+      expect(releaseStatusesRefetch).toHaveBeenCalledTimes(2);
+      expect(refreshIssuesMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

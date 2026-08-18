@@ -42,7 +42,6 @@ function makeStoredHandoff() {
     selectedLabels: [],
     assignee: null,
     bodyPrefix: null,
-    step: "confirm",
     savedAt: Date.now(),
   });
 }

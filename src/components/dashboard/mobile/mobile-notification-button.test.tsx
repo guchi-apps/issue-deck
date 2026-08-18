@@ -22,7 +22,7 @@ vi.mock("@/hooks/use-repository-release-statuses", () => ({
     data: releaseStatusesMock.current,
     isLoading: false,
     error: null,
-    refetch: vi.fn(),
+    refetch: vi.fn(async () => []),
   }),
 }));
 
@@ -42,6 +42,7 @@ function repository(fullName: string): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };

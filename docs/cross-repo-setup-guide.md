@@ -441,6 +441,8 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v19` | 上記 | #1548。`reusable-release-develop-to-main.yml`が`bump-kind` inputを受け取り、issue-deckの画面から上げ幅（major/minor/patch）を指定してリリースを起動できるようになった版。**タグの作成と配布は#1565で人が行う。** 配布と同時にcaller側へ`workflow_dispatch`の`bump_kind` inputと`with: bump-kind:`を足すまで、対象リポジトリでは画面で上げ幅を選ぶと「上げ幅の指定に未対応です」になる（自動判定での起動は従来どおり動く）。**caller側の追加は#1603で12リポジトリの配布PRへ入れた**（[supported-repositories.md](supported-repositories.md)「callerの`bump_kind`入力の配布状況」） |
 | `workflows/v20` | 上記 | #1729（対応PRは#1738）。`reusable-release-develop-to-main.yml`が利用者向けの使い方（操作手順）も生成し、`RELEASE_USAGE`環境変数として`version` lifecycleスクリプトへ渡すようになった版。**タグの作成と画面からの配布は#1739で人が行った。** 配布しても、各アプリの`version`スクリプトが`RELEASE_USAGE`を受け取るまでそのアプリの更新履歴画面には出ない（バンプPR本文とissue-deckのリリースシートには出る）。受け取り方は本ガイドの「`RELEASE_USAGE`（使い方）の受け取り方」、対応状況は[supported-repositories.md](supported-repositories.md)「使い方の自動生成（`RELEASE_USAGE`）の対応状況」 |
 | `workflows/v21` | 上記 | #1766。`reusable-issue-dispatch.yml`の質問応答（`mode=ask`）が、回答の投稿後に自分の受付コメントを削除し、回答できなかった場合はエラー通知ボット名義（`<!-- issue-deck-fallback-notice -->`）で通知するようになった版。回答の検証も件数比較から回答マーカーの有無へ変えた。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリの質問は従来どおり受付コメントが残り、回答できなかった場合の通知も案内ボット名義のままになる（issue-deck側の「回答待ち」解除は配布前でも効く） |
+| `workflows/v22` | 上記 | #1861（対応PRは#1868）。進捗の報告が一時的なAPI不調で失われても`Implementation`のまま取り残されない版。`develop-merge-sweep`が`Implementation`も走査し（マージ済みPRの先端とブランチの先端が一致するときだけ進める）、通知より先に進捗報告へissue番号を渡し、issue-deckへのPOST/GETに5xxと接続失敗に限った再試行が入った。**タグの作成と画面からの配布は#1870で人が行った。** 配るまで、対象リポジトリでは`develop-pr-opened`の報告が5xxに当たるとマージ済みのissueが`Implementation`に残り続ける |
+| `workflows/v23` | 上記 | #1901。`reusable-issue-labels.yml`に`main-direct-pr-opened`・`main-direct-merged`が入り、**developを経由せず`issue-<番号>` → `main`のPRしか作らないリポジトリ**（`guchi-apps/docs`）でも`Develop PR` → `Done`まで進んでissueがcloseされるようになった版。**タグの作成と`docs`へのcaller新規配置は人が行う。** develop運用の既存リポジトリは`base.ref`の条件に一致しないため、配っても挙動は変わらない |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
@@ -1281,6 +1283,26 @@ rm -rf .shared-context .shared-prompts
   gh api repos/guchi-apps/my-app --jq '"delete_branch_on_merge=\(.delete_branch_on_merge) default_branch=\(.default_branch)"'
   gh api --method PATCH repos/guchi-apps/my-app -F delete_branch_on_merge=false
   ```
+
+### `develop`を持たないリポジトリ（main直行）
+
+`guchi-apps/docs`のように**`develop`を置かず、`issue-<番号>` → `main`のPRだけで回すリポジトリ**が
+ある（理由は[supported-repositories.md](supported-repositories.md)の「`subpc`・`vps`・`docs`」を
+参照。共有知識の提案PRが`main`宛に届くため、`develop`を挟むと全アプリが読むrefが1リリース分遅れる）。
+
+**この形でも`issue-labels.yml`のcallerはそのまま置ける**（`workflows/v23`以降）。
+`reusable-issue-labels.yml`の`main-direct-pr-opened`・`main-direct-merged`が
+`base.ref == 'main'`かつ`head.ref`が`issue-<番号>`のPRを拾い、
+`Implementation` → `Develop PR` → `Done`（＋issueのclose）まで進める。callerの内容は
+develop運用のリポジトリと同一でよい（`on: pull_request: branches:`は元から`develop`と`main`の
+両方を並べているため）。
+
+- **`v22`以前を参照しているとこの経路は無い。** `Implementation`から先へ進むジョブが1つも
+  発火せず、PRをマージして内容が反映された後もissueが盤面の「実行中」に残り続ける（#1901）
+- **`claude-review-develop.yml`は入れても効かない。** callerのトリガーが`branches: [develop]`
+  固定のため、base が`main`のPRは判定されない。したがってこのPRは必ず人がマージする前提で、
+  `main-direct-pr-opened`が常に`00.check-user` + `01.check-merge`を付ける
+- **`release-develop-to-main.yml`は入れない。** マージがそのまま反映であり、リリースという段が無い
 
 ## 6. リポジトリ差異の吸収チェックリスト
 

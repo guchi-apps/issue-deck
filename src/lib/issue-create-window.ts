@@ -1,5 +1,4 @@
 import type { IssueDraftKind } from "@/hooks/use-issue-draft";
-import type { QuickIssueStep } from "@/lib/quick-issue";
 
 /**
  * Issue作成画面を別ウィンドウ（`/issues/new`）で開くための受け渡し（#1728）。
@@ -21,8 +20,6 @@ export type IssueCreateHandoff = {
   assignee: string | null;
   /** 本文の先頭に固定で付くテキスト（引き継ぎ作成・#1322）。入力欄には入らないため別に運ぶ */
   bodyPrefix: string | null;
-  /** 移す時点で開いていたステップ。確認まで進んでいたなら、開いた先も確認から始める */
-  step: QuickIssueStep;
   savedAt: number;
 };
 
@@ -81,7 +78,6 @@ export function parseIssueCreateHandoff(raw: string | null, now: number): IssueC
       : [],
     assignee: typeof parsed.assignee === "string" ? parsed.assignee : null,
     bodyPrefix: typeof parsed.bodyPrefix === "string" ? parsed.bodyPrefix : null,
-    step: parsed.step === "confirm" ? "confirm" : "input",
     savedAt: parsed.savedAt,
   };
 }

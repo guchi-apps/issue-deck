@@ -233,6 +233,12 @@ async function requestPlanReview(params: {
  * 計画の提示（`postSessionPlan`）と違い本文が無いぶん、**ラベルだけが「人を待っている」ことの
  * 唯一の記録**になる。付けたことはホスト側にも印として残り（`scripts/lib/session-state.sh`の
  * `.check-user`）、人が答えた時点で`resolveSessionPlanCheckUser`が外す。
+ *
+ * **`01.check-plan`は上書きしない**（#1905）。計画を出すと、その承認プロンプトで必ずこの
+ * フックも飛ぶ（#1893では9秒後）。理由を`input`へ落とすと、画面の見出しが
+ * 「計画の承認が必要です」から「質問への回答が必要です」へ変わり、**待たれているのが
+ * 計画の承認だと読めなくなる。** 計画への回答で`00.check-user`ごと外れるため、
+ * 保ったまま取り残されることは無い。
  */
 export async function requestSessionCheckUser(params: {
   repositoryFullName: string;
@@ -245,7 +251,9 @@ export async function requestSessionCheckUser(params: {
     const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
-    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "input");
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "input", {
+      keepExistingReasons: ["plan"],
+    });
     return true;
   } catch (error) {
     console.error(

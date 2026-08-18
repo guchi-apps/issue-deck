@@ -20,7 +20,19 @@ export type IssueSuggestInput = {
   availableLabels: IssueSuggestLabelInput[];
 };
 
+/**
+ * 本文が「やってほしい作業」なのか「聞きたいこと」なのかの判定（#1890）。
+ *
+ * **判定結果で種別を切り替えることはしない。** 作成フォームは`question`のときだけ
+ * 「質問に切り替えますか」という提案を出し、切り替えるかどうかは押した人が決める。
+ * #1641で本文からの自動判定を見送った理由（誤判定が押した本人から見えないまま
+ * 実装フローに乗る）は、提案にとどめることで避けている。
+ */
+export type IssueSuggestKind = "issue" | "question";
+
 export type IssueSuggestResult = {
+  /** 応答に含まれない・知らない値だったときは`issue`（提案を出さない側）へ倒す */
+  kind: IssueSuggestKind;
   title: string;
   labels: string[];
 };
@@ -52,10 +64,15 @@ export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
           .join("\n")
       : "(利用可能なラベルなし)";
 
-  return `以下はこれから作成するGitHub Issueの本文です。この内容から、簡潔で分かりやすい日本語のタイトル案と、下記の「利用可能なラベル一覧」の中から内容に適合するものを選んだ配列を提案してください。
+  return `以下はこれから作成するGitHub Issueの本文です。この内容から、この本文が「作業の依頼」なのか「質問」なのかの判定と、簡潔で分かりやすい日本語のタイトル案と、下記の「利用可能なラベル一覧」の中から内容に適合するものを選んだ配列を提案してください。
 
 出力は前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
-{"title": "タイトル案", "labels": ["ラベル名1", "ラベル名2"]}
+{"kind": "issue", "title": "タイトル案", "labels": ["ラベル名1", "ラベル名2"]}
+
+"kind"のルール:
+- "issue" … 何かを直したい・作りたい・変えたい・調べて対応してほしい、という作業の依頼。不具合の報告もこちら。
+- "question" … 「〜とは何ですか」「なぜ〜なのですか」「〜はできますか」「〜と〜の違いは」のように、**答えを聞くことが目的**で、コードを変える依頼が含まれていないもの。
+- **迷ったら"issue"にしてください。** 作業の依頼と読める部分が少しでもあれば"issue"です。
 
 "labels"のルール:
 - 「利用可能なラベル一覧」に書かれているラベル名を、説明を付けずそのまま書いてください。
@@ -137,11 +154,26 @@ export async function generateIssueSuggestion(
     throw new Error("Claudeの応答の形式が不正です");
   }
 
-  const { title, labels: rawLabels } = parsed as { title: string; labels: unknown[] };
+  const {
+    kind: rawKind,
+    title,
+    labels: rawLabels,
+  } = parsed as { kind?: unknown; title: string; labels: unknown[] };
 
   const labels = matchSuggestedLabels(rawLabels, input.availableLabels);
 
-  return { title: title.trim(), labels };
+  return { kind: normalizeSuggestedKind(rawKind), title: title.trim(), labels };
+}
+
+/**
+ * Claudeが返した種別を、扱える値へ落とす（#1890）。
+ *
+ * **`question`と読めたときだけ`question`で、それ以外は全て`issue`。** 欠けていても
+ * 例外にはしない——種別は「提案を出すかどうか」を決めるだけの追加情報で、タイトル・ラベルの
+ * 生成をここで失敗させると、質問の判定を足したことで従来の機能まで止まることになる。
+ */
+export function normalizeSuggestedKind(raw: unknown): IssueSuggestKind {
+  return raw === "question" ? "question" : "issue";
 }
 
 /**
@@ -149,7 +181,7 @@ export async function generateIssueSuggestion(
  *
  * **表記の揺れで落とさない。** プロンプトでは`- 30.bug: 不具合`の形で候補を渡しているため、
  * モデルが箇条書きの記号や説明を付けたまま返すことがある。以前は完全一致だけを見ており、
- * その場合はラベルが1つも付かないまま（タイトルだけが入った状態で）確認ステップへ進んでいた。
+ * その場合はラベルが1つも付かないまま、タイトルだけが入った状態になっていた。
  * 一方で、**候補に無いラベル名は依然として採らない**（存在しないラベルでの作成はGitHub側で失敗する）。
  */
 export function matchSuggestedLabels(

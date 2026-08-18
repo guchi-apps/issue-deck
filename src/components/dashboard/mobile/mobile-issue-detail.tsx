@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
-import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
@@ -86,9 +85,11 @@ import {
   approveCommentBody,
   canCompleteManualStep,
   checkUserReason,
+  dismissCheckUserCommentBody,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
+  labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
   requestContinuationCommentBody,
@@ -187,9 +188,6 @@ export function MobileIssueDetail({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
-  // 「Claudeに質問する」は⋯メニューから開くので、開閉はここで持つ（#1646）。
-  // `DropdownMenuItem`をトリガーにすると、メニューが閉じた時点でダイアログごと消える
-  const [isAskDialogOpen, setIsAskDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
   // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
@@ -247,6 +245,8 @@ export function MobileIssueDetail({
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
+  // 生きているセッションかどうか（#1903。PCのIssue詳細と同じ）
+  const sessionAlive = issueSession?.state === "ALIVE";
   // セッションの一覧が届くまでは、確認待ちの案内も承認欄も形を決めない（#1810。#1666と同じ理由）。
   // 取得前の`sessions`は`[]`なので`sessionWaitingInput`は必ずfalseになり、承認欄へ送る案内を
   // 出してからRemote Controlの案内へ書き換わっていた
@@ -318,6 +318,9 @@ export function MobileIssueDetail({
     reason: checkUserReason(issue.labels),
     placement: "status",
     sessionWaitingInput,
+    // ローカルが担当しているIssueでは「内容がエージェントへ渡ります」と案内しない（#1903）
+    localSession: !executionTarget.expectsActionsRun,
+    sessionAlive,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
     sessionStatePending,
@@ -376,36 +379,40 @@ export function MobileIssueDetail({
     }
   }
 
+  /** コメントを1件投稿し、一覧と件数へ反映する（PCのIssue詳細と同じ扱い） */
+  async function postComment(body: string): Promise<boolean> {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({ owner, repo, number: issue.number, body });
+    if (!created) return false;
+    setComments((prev) => [...prev, created]);
+    onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    return true;
+  }
+
   async function handleCreateComment() {
     if (!newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: newCommentBody,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
   async function handleAskClaudeFromComposer() {
     if (!newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: askClaudeCommentBody(newCommentBody),
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+  }
+
+  /** ローカルセッション担当中の承認欄から押せる3つ（#1903。PCのIssue詳細と同じ） */
+  async function handleApprovalComment(body: string) {
+    await postComment(body);
+  }
+
+  async function handleApprovalAskClaude(question: string) {
+    await postComment(askClaudeCommentBody(question));
+  }
+
+  async function handleDismissCheckUser(text?: string) {
+    await updateLabelsAndComment(
+      labelsAfterCheckUserDismissal(issue.labels),
+      dismissCheckUserCommentBody(text),
+    );
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -540,7 +547,8 @@ export function MobileIssueDetail({
             必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
             タイトルに120pxしか残らなかった。どちらも操作自体は消さず、▶は本文のボタンへ一本化し、
             ?と「回答を確認してクローズ」は下の⋯メニューへ移した（後者はコメント欄の下にも
-            出す。#1770）。
+            出す。#1770）。その後、?（Claudeに質問する）はコメント欄の下の「質問する」と
+            投稿されるコメントが同一だったため、⋯メニューからも外した（#1913）。
             マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
         <button
           type="button"
@@ -565,16 +573,8 @@ export function MobileIssueDetail({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-0">
-            {/* ヘッダーから移した2つ（#1646）。先頭へ置き、押す回数の多い順を保つ */}
-            {canAskClaude(issue) && (
-              <DropdownMenuItem
-                className="whitespace-nowrap text-xs"
-                onSelect={() => setIsAskDialogOpen(true)}
-              >
-                <MessageCircleQuestion className="size-3.5" />
-                Claudeに質問する
-              </DropdownMenuItem>
-            )}
+            {/* ヘッダーから移した「回答を確認してクローズ」（#1646）。先頭へ置き、押す回数の
+                多い順を保つ */}
             {canCloseQuestion && (
               <DropdownMenuItem
                 className="whitespace-nowrap text-xs"
@@ -889,6 +889,9 @@ export function MobileIssueDetail({
             }
             sessionWaitingInput={sessionWaitingInput}
             sessionStatePending={sessionStatePending}
+            localSession={!executionTarget.expectsActionsRun}
+            sessionAlive={sessionAlive}
+            canAskClaude={canAskClaude(issue)}
             mergeApprovalPending={mergeApprovalPending}
             mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
@@ -898,6 +901,9 @@ export function MobileIssueDetail({
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
+            onComment={handleApprovalComment}
+            onAskClaude={handleApprovalAskClaude}
+            onDismissCheckUser={handleDismissCheckUser}
             onRequestContinuation={handleRequestContinuation}
             onRequestPrFix={handleRequestPrFix}
             onMergePullRequest={handleMergePullRequest}
@@ -946,9 +952,12 @@ export function MobileIssueDetail({
                   引き継いでIssueを作成
                 </Button>
               )}
+              {/* ⋯メニューの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
+                  ここへ引き継ぐ（#1913） */}
               {canAskClaude(issue) && (
                 <Button
                   variant="outline"
+                  title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
                   onClick={handleAskClaudeFromComposer}
                   disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
                 >
@@ -1017,15 +1026,6 @@ export function MobileIssueDetail({
         issue={issue}
         open={isSummaryDialogOpen}
         onOpenChange={setIsSummaryDialogOpen}
-      />
-
-      {/* トリガーは⋯メニューの項目なので、ここではダイアログ本体だけを置く（#1646） */}
-      <AskClaudeDialog
-        issue={issue}
-        open={isAskDialogOpen}
-        onOpenChange={setIsAskDialogOpen}
-        onIssueUpdated={onIssueUpdated}
-        onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
       />
     </div>
   );

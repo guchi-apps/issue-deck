@@ -107,6 +107,10 @@ export function ManualStepAutoRunPanel({
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         上から順に1件ずつ実行し、終了コード0のときだけ手順にチェックを付けて次へ進みます。
         失敗した時点で止まり、あなたが実行する手順に来たときも止まります。
+        <strong className="font-semibold">
+          進めるのはサーバーなので、この画面を閉じても続きます
+        </strong>
+        （進み具合は実行キューから確認でき、いつでも中断できます）。
         完了の確認は実行して結果を出すだけで、チェックもクローズもしません。
         出力はこの画面にだけ表示し、GitHubのIssueには残しません。
         <strong className="font-semibold">出力にシークレットが混ざることがあります。</strong>
