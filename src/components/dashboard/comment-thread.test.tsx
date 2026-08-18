@@ -755,3 +755,105 @@ describe("CommentThread 承認カードの表示位置（#1639）", () => {
     expect(card.closest("li")).toBeNull();
   });
 });
+
+/**
+ * #1903。ローカルセッションが担当しているIssueでは、「承認」「修正」を押しても走っている
+ * セッションには届かず、投稿される`@claude`コメントが無人実行を起こして「`11.local`が
+ * 付いているため対応しません」という案内を足すだけだった。ここでできることの名前に
+ * 置き換える（コメント／質問する／確認待ちを外す／取り下げ）。
+ */
+describe("CommentThread ローカルセッションが担当しているとき", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderLocal(
+    props: {
+      onComment?: (body: string) => void;
+      onAskClaude?: (question: string) => void;
+      onDismissCheckUser?: (text?: string) => void;
+      mergeApprovalPending?: boolean;
+      canAskClaude?: boolean;
+    } = {},
+  ) {
+    return render(
+      <CommentThread
+        comments={[]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        approvalPending
+        localSession
+        sessionAlive
+        canAskClaude={props.canAskClaude ?? true}
+        checkUserReason="input"
+        localSessionNotice={<p>ここに書いた回答はセッションに届きません</p>}
+        onApprove={async () => {}}
+        onReject={async () => {}}
+        onWithdraw={async () => {}}
+        onComment={props.onComment ?? (async () => {})}
+        onAskClaude={props.onAskClaude ?? (async () => {})}
+        onDismissCheckUser={props.onDismissCheckUser ?? (async () => {})}
+        onRequestPrFix={async () => {}}
+        onMergePullRequest={async () => true}
+        mergeApprovalPending={props.mergeApprovalPending}
+      />,
+    );
+  }
+
+  it("承認・修正を出さず、コメント／質問する／確認待ちを外すを出す", () => {
+    renderLocal();
+    expect(screen.queryByRole("button", { name: "承認" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "修正" })).toBeNull();
+    expect(screen.getByRole("button", { name: "コメント" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "確認待ちを外す" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "取り下げ" })).not.toBeNull();
+  });
+
+  it("届かないことを入力欄の説明にも書く", () => {
+    renderLocal();
+    expect(
+      screen.getByPlaceholderText("コメントを入力（記録として残ります。セッションには届きません）"),
+    ).not.toBeNull();
+  });
+
+  it("入力があるときだけコメント・質問を押せる", () => {
+    const onComment = vi.fn();
+    renderLocal({ onComment });
+    expect(screen.getByRole("button", { name: "コメント" })).toHaveProperty("disabled", true);
+    fireEvent.change(
+      screen.getByPlaceholderText("コメントを入力（記録として残ります。セッションには届きません）"),
+      { target: { value: "あとで確認する" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "コメント" }));
+    expect(onComment).toHaveBeenCalledWith("あとで確認する");
+  });
+
+  it("確認待ちを外すは入力が無くても押せる（印の片付けだけでも使う）", () => {
+    const onDismissCheckUser = vi.fn();
+    renderLocal({ onDismissCheckUser });
+    fireEvent.click(screen.getByRole("button", { name: "確認待ちを外す" }));
+    expect(onDismissCheckUser).toHaveBeenCalledWith(undefined);
+  });
+
+  it("入力があれば確認待ちを外すにも本文が渡る", () => {
+    const onDismissCheckUser = vi.fn();
+    renderLocal({ onDismissCheckUser });
+    fireEvent.change(
+      screen.getByPlaceholderText("コメントを入力（記録として残ります。セッションには届きません）"),
+      { target: { value: "端末で回答済み" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "確認待ちを外す" }));
+    expect(onDismissCheckUser).toHaveBeenCalledWith("端末で回答済み");
+  });
+
+  // マージはGitHub側の操作なので`11.local`中でも実際に効く（入力待ちの分岐と同じ扱い）
+  it("PRマージ待ちのときはマージ案内を優先する", () => {
+    renderLocal({ mergeApprovalPending: true });
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "確認待ちを外す" })).toBeNull();
+  });
+});

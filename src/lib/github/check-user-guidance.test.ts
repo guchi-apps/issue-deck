@@ -106,4 +106,59 @@ describe("resolveCheckUserGuidance", () => {
       resolveCheckUserGuidance({ reason: "answered", placement: "status" })?.agentState.tag,
     ).toBe("待っていません");
   });
+
+  /**
+   * #1903。ローカルセッションが担当しているIssueでは、入力待ちで止まっていなくても
+   * コメント欄はセッションへ届かない。「内容がエージェントへ渡ります」と言わせない。
+   */
+  it("ローカルが担当しているときは、エージェントへ渡ると案内しない", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "input",
+      placement: "status",
+      localSession: true,
+      sessionAlive: true,
+      remoteControlUrl: "https://claude.ai/code/session_abc",
+    });
+    expect(guidance?.buttons).not.toContain("エージェントへ渡ります");
+    expect(guidance?.buttons).toContain("セッションには届かず");
+    expect(guidance?.action).toEqual({
+      kind: "remote-control",
+      url: "https://claude.ai/code/session_abc",
+    });
+  });
+
+  it("セッションが動いていなければ、起こし直しを促し承認欄へ送る", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "plan",
+      placement: "status",
+      localSession: true,
+      sessionAlive: false,
+      remoteControlUrl: null,
+    });
+    expect(guidance?.buttons).toContain("動いていません");
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
+  });
+
+  it("ローカルでも、回答済みは「確認待ちを外す」を押すことだけを言う", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "answered",
+      placement: "approval",
+      localSession: true,
+      sessionAlive: true,
+    });
+    expect(guidance?.buttons).toContain("「確認待ちを外す」");
+    expect(guidance?.action).toBeNull();
+  });
+
+  // マージはGitHub側の操作なので、ローカルが担当していても画面から実行できる
+  it("ローカルが担当していてもマージだけは従来どおり対応PRへ送る", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "merge",
+      placement: "status",
+      localSession: true,
+      sessionAlive: true,
+    });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+    expect(guidance?.buttons).toContain("「マージ」");
+  });
 });

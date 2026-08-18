@@ -60,11 +60,30 @@ describe("LocalSessionCommentNotice", () => {
 });
 
 describe("LocalSessionApprovalNotice", () => {
-  it("承認しても走っているセッションが動かないことを出す（#1264の文面を保つ）", () => {
+  it("生きているセッションでは、ここに書いても届かないことと答える場所を出す（#1264・#1903）", () => {
     render(<LocalSessionApprovalNotice session={session()} />);
-    expect(screen.getByText(/走っているセッションは動きません/)).toBeTruthy();
+    expect(screen.getByText(/ここに書いた回答はセッションに届きません/)).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /Remote Controlで開く/ }).getAttribute("href"),
+      screen.getByRole("link", { name: /Remote Controlで答える/ }).getAttribute("href"),
     ).toBe(REMOTE_URL);
+  });
+
+  it("「確認待ちを外す」を押すと何が起きるかを、押す前に出す（#1903）", () => {
+    render(<LocalSessionApprovalNotice session={session()} />);
+    expect(screen.getByText(/確認待ちの印が外れるだけです/)).toBeTruthy();
+  });
+
+  it("終わったセッションでは終了していることを出し、Remote Controlへは送らない（#1903）", () => {
+    render(<LocalSessionApprovalNotice session={session({ state: "GONE" })} />);
+    expect(screen.getByText(/終了しています/)).toBeTruthy();
+    expect(screen.getByText(/セッションを復旧/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Remote Control/ })).toBeNull();
+  });
+
+  // 記録が無いだけで、終了したとは限らない（24時間で落ちる・pollerの外で起こした場合）
+  it("セッションが分からないときは終了したと言わず、届かないことだけを出す", () => {
+    render(<LocalSessionApprovalNotice session={null} />);
+    expect(screen.getByText(/走っているセッションには届きません/)).toBeTruthy();
+    expect(screen.queryByText(/終了しています/)).toBeNull();
   });
 });

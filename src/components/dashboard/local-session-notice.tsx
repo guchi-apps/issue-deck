@@ -4,6 +4,7 @@ import { ExternalLink, Info } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
@@ -28,9 +29,21 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 function LocalSessionNotice({
   session,
   children,
+  /**
+   * Remote Controlのボタンを塗りつぶし（主導線）にするか（#1903）。
+   *
+   * 承認欄では、そこにある他のボタンがどれもセッションへ届かない。**枠の中で唯一効く操作**が
+   * これなので、承認欄でだけ主導線として出す。コメント入力欄の案内は「記録として残すだけなら
+   * そのままでよい」場面なので、従来どおり枠線のまま。
+   */
+  emphasizeRemoteControl = false,
+  /** Remote Controlボタンの文言。承認欄では「答える」ことが用件なので言い換える */
+  remoteControlLabel = "Remote Controlで開く",
 }: {
   session: DispatchSessionView | null;
   children: ReactNode;
+  emphasizeRemoteControl?: boolean;
+  remoteControlLabel?: string;
 }) {
   const remoteControlUrl = session ? summarizeIssueSession(session).remoteControlUrl : null;
 
@@ -41,9 +54,14 @@ function LocalSessionNotice({
         <span>{children}</span>
       </p>
       {remoteControlUrl && (
-        <Button variant="outline" size="sm" className="mt-2" asChild>
+        <Button
+          variant={emphasizeRemoteControl ? "default" : "outline"}
+          size="sm"
+          className="mt-2"
+          asChild
+        >
           <a href={remoteControlUrl} target="_blank" rel="noreferrer">
-            Remote Controlで開く
+            {remoteControlLabel}
             <ExternalLink />
           </a>
         </Button>
@@ -53,10 +71,15 @@ function LocalSessionNotice({
 }
 
 /**
- * 承認欄に出す案内（#1264）。
+ * 承認欄に出す案内（#1264・#1903）。
  *
  * **承認コメントを投稿しても、`11.local`が付いている間は無人実行が反応しない。** そのため
  * 「計画を承認」を押しても何も起きない（コメントだけが残る）。
+ *
+ * #1903で、セッションが生きているかどうかで言い方を分けた。「動きません」だけでは、
+ * 答える先がまだあるのか（Remote Control）、もう居ないのか（復旧が要る）が読み取れない。
+ * あわせて、承認欄のボタンから「承認」「修正」を外して「コメント」「質問する」
+ * 「確認待ちを外す」に変えた（`comment-thread.tsx`）ため、押すと何が起きるかもここで言う。
  */
 export function LocalSessionApprovalNotice({
   session,
@@ -64,14 +87,44 @@ export function LocalSessionApprovalNotice({
   /** 対応するセッション。見つかっていなければ`null`（案内だけ出す） */
   session: DispatchSessionView | null;
 }) {
+  const hostName = session ? formatDispatchHostName(session.host) : null;
+
+  // セッションの記録そのものが無い（24時間で落ちた・pollerの外で起こした）。**終了したとは
+  // 言い切らない。** 復旧ボタンもセッションの行が無ければ出ないので、そこへは送らない
+  if (session === null) {
+    return (
+      <LocalSessionNotice session={null}>
+        このIssueはローカル（サブPCまたは手元）で対応中です。
+        <strong className="font-medium">ここでの操作は走っているセッションには届きません</strong>
+        （`11.local`が付いている間、無人実行も反応しません）。「確認待ちを外す」を押しても、
+        コメントが記録として残り確認待ちの印が外れるだけです。
+      </LocalSessionNotice>
+    );
+  }
+
+  // 終わったセッションに「Remote Controlから答えてください」と言わない（開いても繋がらない）。
+  // 出口は復旧（`SessionRecoveryButton`。押す場所はセッションの行の下にある）
+  if (session.state !== "ALIVE") {
+    return (
+      <LocalSessionNotice session={session}>
+        このIssueを担当していた{hostName}のセッションは
+        <strong className="font-medium">終了しています</strong>
+        。ここでの操作では作業は再開しません（コメントは記録として残ります）。続きを頼むには
+        「セッションを復旧」から起こし直してください。
+      </LocalSessionNotice>
+    );
+  }
+
   return (
-    <LocalSessionNotice session={session}>
-      このIssueはローカル（サブPCまたは手元）で対応中です。
-      <strong className="font-medium">
-        下のボタンで承認してもコメントが残るだけで、走っているセッションは動きません
-      </strong>
-      （`11.local`が付いている間、無人実行は反応しません）。セッションへ答えるには Remote
-      Controlを開いてください。
+    <LocalSessionNotice
+      session={session}
+      emphasizeRemoteControl
+      remoteControlLabel="Remote Controlで答える"
+    >
+      {hostName}のセッションが担当中です。
+      <strong className="font-medium">ここに書いた回答はセッションに届きません</strong>
+      （`11.local`が付いている間、無人実行も反応しません）。「確認待ちを外す」を押しても、
+      コメントが記録として残り確認待ちの印が外れるだけです。答えるにはRemote Controlを開いてください。
     </LocalSessionNotice>
   );
 }

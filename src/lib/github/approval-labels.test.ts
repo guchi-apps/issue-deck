@@ -10,7 +10,9 @@ import {
   isMergeApprovalPending,
   isQaOnlyApprovalPending,
   LABEL_FILTER_PRESETS,
+  dismissCheckUserCommentBody,
   labelsAfterApproval,
+  labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
   requestPrFixCommentBody,
@@ -168,6 +170,34 @@ describe("labelsAfterRejection", () => {
         makeLabel("bug"),
       ]),
     ).toEqual(["21.plan-required", "bug"]);
+  });
+});
+
+/**
+ * #1903。ローカルセッションが担当しているIssueの承認欄から押す「確認待ちを外す」。
+ * 承認ではないので`21.plan-required`は残し、`@claude`も付けない（無人実行を起こさない）。
+ */
+describe("labelsAfterCheckUserDismissal", () => {
+  it("00.check-userと理由ラベルだけを外し、21.plan-requiredは残す", () => {
+    expect(
+      labelsAfterCheckUserDismissal([
+        makeLabel("00.check-user"),
+        makeLabel("01.check-input"),
+        makeLabel("21.plan-required"),
+        makeLabel("11.local"),
+      ]),
+    ).toEqual(["21.plan-required", "11.local"]);
+  });
+});
+
+describe("dismissCheckUserCommentBody", () => {
+  it("@claudeを付けない（無人実行のトリガー条件に掛けない）", () => {
+    expect(dismissCheckUserCommentBody()).not.toContain("@claude");
+    expect(dismissCheckUserCommentBody("端末で回答済み")).not.toContain("@claude");
+  });
+
+  it("入力があれば本文の先頭に残す", () => {
+    expect(dismissCheckUserCommentBody("端末で回答済み")).toContain("端末で回答済み");
   });
 });
 
