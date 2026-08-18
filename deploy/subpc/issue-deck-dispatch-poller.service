@@ -32,8 +32,16 @@ EnvironmentFile=%h/.config/issue-deck/dispatch.env
 # 明示し、~/.profile 系（PATH は ~/.profile.local）をまとめて読ませる。
 ExecStart=/bin/bash -lc '%h/apps/issue-deck/scripts/subpc-dispatch-poller.sh'
 
+# **`KillMode`は既定（`control-group`）のまま置く**（#1935）。停止処理でcgroupの残り全員に
+# SIGTERMが飛ぶが、tmuxサーバーはpoller自身が`systemd-run --user --scope`で別のcgroup
+# （`issue-deck-tmux-server.scope`）へ出すため、走っている実装セッションは巻き添えにならない。
+# `KillMode=process`でも巻き添えは防げるが、停止しても走っていたランチャー（`start-issue.sh`・
+# 最長15分）やcurl・gitがcgroupに残り、次の起動と重なる。
+# 詳細は docs/multi-agent/subpc-dispatch.md「tmuxサーバーはpollerとは別のcgroupで起こす」。
+
 # 落ちても復帰させる。1巡の失敗ではプロセスを終わらせない作りなので、ここへ来るのは
-# 設定不備（起動直後に終了する）か想定外の異常のどちらか。
+# 設定不備（起動直後に終了する）か想定外の異常のどちらか。**復帰も停止処理を通る**ので、
+# 上のcgroupの分離はこの経路のためでもある。
 Restart=always
 RestartSec=30s
 

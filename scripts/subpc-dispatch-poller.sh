@@ -10,6 +10,10 @@
 #     → scripts/start-local-session.sh → 対象リポジトリの scripts/start-issue.sh
 #     → tmuxセッションが立つ（以降の進捗は start-issue.sh が POST /api/progress へ報告する）
 #
+# **tmuxサーバーはpollerとは別のcgroup（`issue-deck-tmux-server.scope`）で起こす**（#1935）。
+# 同じcgroupに入れると、pollerの停止処理（`systemctl --user restart`・異常終了→`Restart=always`）で
+# 走っている実装セッションが全部落ちる。理由と置き直せる条件は`ensure_tmux_server_scope`のコメント。
+#
 # ジョブには種別（`kind`）があり、立ったあとのセッションを操作するものも同じキューで流れる（#1332）。
 #
 #   INTERRUPT   … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
@@ -98,7 +102,9 @@ set -euo pipefail
 # 13: 走っている代行実行を止める（`MANUAL_STEP_ABORT`）（#1882）。
 # 14: チェックアウトの更新（`SELF_UPDATE`）を実際に実行できるようにする（#1927）。13以前は
 #     `selfUpdate`を申告していても、埋め草のIssue番号`0`が検証で弾かれて全件失敗していた。
-DISPATCH_POLLER_VERSION="14"
+# 15: tmuxサーバーを`systemd-run --user --scope`でpollerとは別のcgroupに置き、pollerの再起動で
+#     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
+DISPATCH_POLLER_VERSION="15"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -820,6 +826,82 @@ report_job() {
 
 tmux_session_names() {
   tmux list-sessions -F '#{session_name}' 2>/dev/null | sort || true
+}
+
+# --- tmuxサーバーのcgroup（#1935）------------------------------------------------
+# **tmuxサーバーはpollerとは別のcgroupで起こす。**
+#
+# unitに`KillMode`の指定は無く、systemdの既定は`KillMode=control-group`なので、停止処理では
+# cgroupの残り全員にSIGTERMが飛ぶ。何もしなければtmuxサーバーを最初に起こすのはpollerが呼んだ
+# ランチャーの`tmux new-session`で、サーバーはpollerと同じcgroupに入る。その結果
+# `systemctl --user restart`（と異常終了→`Restart=always`での復帰）のたびに、走っている実装
+# セッションが全部落ちていた（2026-08-18の再起動では6本→0本。#1935）。
+#
+# **サーバーさえ別のcgroupへ出せば、配下のセッションはまとめて巻き添えから外れる。** paneの
+# プロセスはtmuxサーバーの子として生まれるためで、起動を仲介するランチャー（pollerの子）は
+# そのままでよい——`tmux new-session`は既に動いているサーバーに作らせるだけだから。
+#
+# 起こし方は手作業の代行実行（#1828）と同じ`systemd-run --user`だが、あちらの`--collect --unit=`
+# （service）ではなく**scope**を使う。serviceはsystemdがコマンドを起こすもので、tmuxのように
+# 自分でdaemon化するプロセスは主プロセスの追跡に約束事が要る。scopeは「このプロセスを別のunitに
+# 入れて動かす」だけなので、daemon化した後もサーバーがそのcgroupに残り、残っている間だけ
+# scopeも生き続ける。
+#
+# `set-option -s exit-empty off`が要る。既定ではセッションが1本も無いサーバーは即座に終了する
+# ため、`start-server`だけでは起こした端からscopeごと消える。
+#
+# **既に動いているサーバーのcgroupは後から変えられない。** 置き直せるのはサーバーが動いて
+# いない隙だけなので、ここでは「無ければ起こす」だけを行い、pollerと同じcgroupにいるサーバーを
+# 見つけた場合は警告に留める（走っているセッションが全部終わってサーバーが落ちれば、次の起動で
+# 自然に移る）。
+TMUX_SERVER_SCOPE_UNIT="issue-deck-tmux-server"
+TMUX_SERVER_CGROUP_WARNED=0
+
+# cgroup v2のパス（`/proc/<pid>/cgroup`の`0::`行の3列目）。読めなければ空を返す。
+process_cgroup_path() {
+  awk -F: '$1 == "0" { print $3; exit }' "/proc/$1/cgroup" 2>/dev/null || true
+}
+
+# 走っているtmuxサーバーがpollerと同じcgroupにいたら警告する。**プロセスごとに1度だけ**
+# （毎巡出すとjournalが埋まり、本来見たい失敗理由が読めなくなる）。
+warn_if_tmux_server_shares_cgroup() {
+  [[ "$TMUX_SERVER_CGROUP_WARNED" -eq 0 ]] || return 0
+  local server_pid ours theirs
+  server_pid="$(tmux display-message -p '#{pid}' 2>/dev/null || true)"
+  [[ "$server_pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  ours="$(process_cgroup_path "$$")"
+  theirs="$(process_cgroup_path "$server_pid")"
+  [[ -n "$ours" && "$ours" == "$theirs" ]] || return 0
+  TMUX_SERVER_CGROUP_WARNED=1
+  echo "警告: 動いているtmuxサーバー（PID $server_pid）がpollerと同じcgroupにいます（#1935）。" >&2
+  echo "  この状態のまま systemctl --user restart で再起動すると、走っている実装セッションが" >&2
+  echo "  巻き添えで落ちます。セッションが1本も無くなってサーバーが落ちれば、次の起動から" >&2
+  echo "  別のcgroup（$TMUX_SERVER_SCOPE_UNIT.scope）へ移ります。" >&2
+}
+
+ensure_tmux_server_scope() {
+  # サーバーが動いていれば何もしない。**セッションが0本でも成功する**ので、
+  # 「サーバーが動いているか」の判定にそのまま使える（動いていなければ非0で終わる）。
+  if tmux list-sessions >/dev/null 2>&1; then
+    warn_if_tmux_server_shares_cgroup
+    return 0
+  fi
+
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    echo "警告: systemd-run が無いため、tmuxサーバーはpollerと同じcgroupで起こされます（#1935）。" >&2
+    return 0
+  fi
+
+  if timeout 30 systemd-run --user --quiet --scope --collect --unit="$TMUX_SERVER_SCOPE_UNIT" \
+    tmux start-server ';' set-option -s exit-empty off >/dev/null 2>&1; then
+    echo "tmuxサーバーをpollerとは別のcgroupで起こしました（$TMUX_SERVER_SCOPE_UNIT.scope）。"
+    return 0
+  fi
+
+  # 起こせなくてもセッションの起動自体は続けられる（ランチャーの`tmux new-session`が従来どおり
+  # pollerのcgroupでサーバーを起こす）。**そのぶん巻き添えの条件は元に戻る**ので理由を残す。
+  echo "警告: tmuxサーバーを別のcgroup（$TMUX_SERVER_SCOPE_UNIT.scope）で起こせませんでした（#1935）。" >&2
+  return 0
 }
 
 # --- セッションの状態報告（#1217）------------------------------------------------
@@ -1591,6 +1673,12 @@ launch_and_report() {
     return 0
   fi
 
+  # **ランチャーを走らせる前に、tmuxサーバーを別のcgroupへ出しておく**（#1935）。ここを通らないと
+  # サーバーを起こすのはランチャーの`tmux new-session`になり、pollerと同じcgroupに入る。
+  # 直前の`reap_sessions`で最後のセッションが畳まれてサーバーが落ちていることもあるため、
+  # 起動時に1度だけでは足りず、起動のたびに確かめる（動いていれば何もしない）。
+  ensure_tmux_server_scope
+
   report_job "$job_id" running "$running_message"
 
   # 起動の出力は失敗時にジョブの結果として返すため取っておく。
@@ -1701,6 +1789,14 @@ run_once() {
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
   return 0
 }
+
+# tmuxサーバーを別のcgroupで起こしておく（#1935）。起動のたびにも確かめる（launch_and_report）が、
+# ここで先に置いておくと、手元のターミナルから直接`start-issue.sh`を叩いたセッションも同じ
+# サーバーにぶら下がり、pollerの再起動と無関係でいられる。
+# **申告だけ・dry-runでは起こさない**（何も起動しないと言っている経路で状態を作らない）。
+if [[ "$ANNOUNCE_ONLY" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+  ensure_tmux_server_scope
+fi
 
 if [[ "$ONCE" -eq 1 ]]; then
   run_once
