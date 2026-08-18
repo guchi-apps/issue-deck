@@ -92,6 +92,11 @@ type MobileIssueListScreenProps = {
   issueOrderCount?: number;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
+  /**
+   * 一覧を下へ引っ張ったときのIssueの取り直し（#1893）。渡さないと引っ張り更新は動かない。
+   * ヘッダーの実行状況（`useDispatchState`）はこの画面が持っているため、ここで一緒に撃つ。
+   */
+  onRefresh?: () => Promise<unknown> | void;
   /** 画面固有のシート等（リリースシート） */
   children?: ReactNode;
 };
@@ -126,6 +131,7 @@ export function MobileIssueListScreen({
   issueOrderAutoStart,
   issueOrderCount,
   scrollKey,
+  onRefresh,
   children,
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -157,6 +163,14 @@ export function MobileIssueListScreen({
   // ヘッダーの実行状況（#1638）と一覧の実行先の解決（#1262）が同じものを見るため、
   // この画面で1回だけ取って両方へ配る（取得口を増やさない＝`use-dispatch-state.ts`の取り決め）
   const dispatch = useDispatchState(true);
+
+  // 一覧を下へ引っ張ったときの更新（#1893）。**待つのはIssueの取り直しだけ。**
+  // `dispatch.refresh`は取り直しの合図（`reloadKey`を進める同期関数）で完了を待てないが、
+  // 更新中の表示は`MIN_REFRESHING_MS`（0.5秒）保たれるので、その間に反映される。
+  async function handlePullToRefresh() {
+    dispatch.refresh();
+    await onRefresh?.();
+  }
 
   const swipeBackHandlers = useSwipeBack(onBack ?? (() => {}));
   const swipeFilterHandlers = useSwipeFilterView((direction) => {
@@ -261,6 +275,7 @@ export function MobileIssueListScreen({
         onStartIssueOrder={onStartIssueOrder}
         issueOrderAutoStart={issueOrderAutoStart}
         issueOrderCount={issueOrderCount}
+        onPullToRefresh={onRefresh ? handlePullToRefresh : undefined}
       />
 
       {/* 一覧の絞り込みを操作する行は画面の下端（フッタータブのすぐ上）に置く（#1645）。

@@ -20,8 +20,9 @@ export type ProgressStatusMutationResult =
  * 進捗の変更結果を画面へ出すべきエラーメッセージにする。**出す必要が無ければnull**。
  *
  * `unchanged`（既に同じStatusだった）は失敗ではないためnullになり、呼び出し側は成功と
- * 同じ扱い（選択を確定させる）で構わない。フックの外へ出しているのは、Radix Selectを
- * 開くコンポーネントテストの前例がこのリポジトリに無く、分岐だけを単体で検証するため。
+ * 同じ扱い（選択を確定させる）で構わない。フックの外へ出しているのは、分岐だけを単体で
+ * 検証できるようにするため（セレクトを開くところまで含めた確認は
+ * `components/dashboard/issue-progress-select.render.test.tsx`にある）。
  */
 export function progressChangeErrorMessage(result: ProgressStatusMutationResult): string | null {
   if (!result.ok) return "進捗を変更できませんでした。時間をおいて試してください。";

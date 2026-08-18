@@ -24,11 +24,9 @@ function renderSidebar(
   {
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
-    unconfirmedQuestionCount = 0,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
-    unconfirmedQuestionCount?: number;
   } = {},
 ) {
   render(
@@ -42,7 +40,6 @@ function renderSidebar(
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
-      unconfirmedQuestionCount={unconfirmedQuestionCount}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -81,7 +78,6 @@ function renderSidebarWithRepositories(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
-      unconfirmedQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -199,24 +195,20 @@ describe("SidebarNav", () => {
     ).toBeNull();
   });
 
-  // 件数は未確認の数で、確認待ち・作業待ちと同じオレンジの丸で出す（#1910）。
-  it("未確認の質問があれば未確認の件数をオレンジの丸で出す", () => {
-    renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 1 },
-    );
+  // 件数（`computeNavCountsForFilters`）は未確認の数で、確認待ち・作業待ちと同じ
+  // オレンジの丸で出す（#1910）
+  it("未確認の質問があれば件数をオレンジの丸で出す", () => {
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 1 });
 
     const button = screen.getByRole("button", { name: /質問/ });
-    // 総数（3件）ではなく未確認の件数（1件）を出す
     expect(button.textContent).toContain("1");
-    expect(button.textContent).not.toContain("3");
     expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+    // 丸の数字が何を数えているのかは行のラベルからは読めないため、吹き出しで補う
     expect(button.getAttribute("title")).toContain("1件");
   });
 
   it("未確認の質問が無ければ強調しない", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 3 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 0 });
 
     const button = screen.getByRole("button", { name: /質問/ });
     expect(button.querySelector("span:last-child")?.className).not.toContain("amber");

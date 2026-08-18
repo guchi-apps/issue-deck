@@ -6,6 +6,7 @@ import {
   describeDispatchJobWaitReason,
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
+  selectHostSelfUpdateJob,
   selectHostSessions,
   summarizeDispatchQueue,
   summarizeDispatchSessionCapacity,
@@ -415,5 +416,29 @@ describe("selectHostSessions", () => {
       "old",
       "failed",
     ]);
+  });
+});
+
+// #1927。`SELF_UPDATE`はキューの一覧（running・queued・failed・controls）のどこにも入らないため、
+// 押した結果を出すにはホストのカードが自分で引く必要がある
+describe("selectHostSelfUpdateJob", () => {
+  it("そのホストの最後のチェックアウト更新を返す", () => {
+    const jobs = [
+      job({ id: "old", kind: "SELF_UPDATE", createdAt: "2026-08-14T00:00:00.000Z" }),
+      job({ id: "new", kind: "SELF_UPDATE", createdAt: "2026-08-14T01:00:00.000Z" }),
+      job({ id: "launch", kind: "LAUNCH", createdAt: "2026-08-14T02:00:00.000Z" }),
+      job({
+        id: "other-host",
+        kind: "SELF_UPDATE",
+        targetHost: "mainpc",
+        createdAt: "2026-08-14T03:00:00.000Z",
+      }),
+    ];
+    expect(selectHostSelfUpdateJob(jobs, "subpc")?.id).toBe("new");
+    expect(selectHostSelfUpdateJob(jobs, "mainpc")?.id).toBe("other-host");
+  });
+
+  it("そのホストの更新が無ければnull", () => {
+    expect(selectHostSelfUpdateJob([job({ kind: "LAUNCH" })], "subpc")).toBeNull();
   });
 });

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
-import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const NOW = new Date("2026-08-15T12:00:00.000Z");
@@ -35,6 +35,34 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
       swapTotalMb: 8_192,
     },
     checkout: null,
+    ...overrides,
+  };
+}
+
+function makeSelfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+  return {
+    id: "job-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    // Issueに紐づかないジョブなので、番号は埋め草の0（#1875）
+    issueNumber: 0,
+    issueTitle: null,
+    issueId: null,
+    targetHost: "subpc",
+    kind: "SELF_UPDATE",
+    status: "QUEUED",
+    message: null,
+    instruction: null,
+    command: null,
+    manualStepLine: null,
+    targetJobId: null,
+    exitCode: null,
+    commandOutput: null,
+    tmuxSessionName: null,
+    queuePriority: 0,
+    createdAt: NOW.toISOString(),
+    claimedAt: null,
+    startedAt: null,
+    finishedAt: null,
     ...overrides,
   };
 }
@@ -287,5 +315,165 @@ describe("DispatchHostPanel", () => {
     expect(screen.getByText("mainpc")).toBeTruthy();
     expect(screen.getByText("#1")).toBeTruthy();
     expect(screen.getByText("#2")).toBeTruthy();
+  });
+
+  /**
+   * #1875で入れたボタンは、押しても画面に何も出なかった（#1927）。積めなかった理由も、
+   * pollerが返した失敗も捨てられており、`SELF_UPDATE`は実行キューの一覧にも出ないため、
+   * 「反応しない」以外の見え方が無かった。
+   */
+  describe("更新して再起動（#1875・#1927）", () => {
+    const BEHIND = makeHost({
+      selfUpdateCapable: true,
+      checkout: {
+        commit: "7b71764",
+        branch: "develop",
+        committedAt: NOW.toISOString(),
+        behindCount: 31,
+        fetchedAt: NOW.toISOString(),
+      },
+    });
+
+    it("押すとホスト名を渡して更新を積む", async () => {
+      const onRequestSelfUpdate = vi.fn().mockResolvedValue({ ok: true });
+      render(
+        <DispatchHostPanel
+          hosts={[BEHIND]}
+          sessions={[]}
+          onRequestSelfUpdate={onRequestSelfUpdate}
+        />,
+      );
+
+      await act(async () => {
+        screen.getByRole("button", { name: "更新して再起動" }).click();
+      });
+      expect(onRequestSelfUpdate).toHaveBeenCalledWith("subpc");
+    });
+
+    it("積めなかった理由をボタンの下に出す", async () => {
+      const onRequestSelfUpdate = vi
+        .fn()
+        .mockResolvedValue({ ok: false, message: "subpc の更新は既に積まれています。" });
+      render(
+        <DispatchHostPanel
+          hosts={[BEHIND]}
+          sessions={[]}
+          onRequestSelfUpdate={onRequestSelfUpdate}
+        />,
+      );
+
+      await act(async () => {
+        screen.getByRole("button", { name: "更新して再起動" }).click();
+      });
+      expect(screen.getByText("subpc の更新は既に積まれています。")).toBeTruthy();
+    });
+
+    // pull型で届くまで最大30秒あり、その間に何も出ないと押し直される
+    it("積んだ更新が届くまでの間はその旨を出し、押せなくする", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[BEHIND]}
+          sessions={[]}
+          jobs={[makeSelfUpdateJob()]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("更新を積みました（届くまで最大30秒）")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "更新して再起動" }).hasAttribute("disabled")).toBe(
+        true,
+      );
+    });
+
+    // 届いた後の失敗はpollerからしか返らない。ここに出さないと画面のどこにも出ない
+    it("pollerが返した失敗の理由を出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[BEHIND]}
+          sessions={[]}
+          jobs={[
+            makeSelfUpdateJob({
+              status: "FAILED",
+              message: "作業ツリーに未コミットの変更があります。手元で確認してください。",
+              finishedAt: NOW.toISOString(),
+            }),
+          ]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByText(
+          "更新できませんでした: 作業ツリーに未コミットの変更があります。手元で確認してください。",
+        ),
+      ).toBeTruthy();
+    });
+
+    // 更新に成功すると遅れは0になるが、そこでボタンごと消すと押した結果が読めないまま終わる
+    it("遅れが解消していても、直前の更新の結果は出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[
+            makeHost({
+              selfUpdateCapable: true,
+              checkout: {
+                commit: "fbb809d",
+                branch: "develop",
+                committedAt: NOW.toISOString(),
+                behindCount: 0,
+                fetchedAt: NOW.toISOString(),
+              },
+            }),
+          ]}
+          sessions={[]}
+          jobs={[
+            makeSelfUpdateJob({
+              status: "SUCCEEDED",
+              message: "7b71764 → fbb809d へ更新しました。再起動します。",
+              finishedAt: NOW.toISOString(),
+            }),
+          ]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("7b71764 → fbb809d へ更新しました。再起動します。")).toBeTruthy();
+    });
+
+    it("遅れておらず積んだ更新も無ければボタンを出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[
+            makeHost({
+              selfUpdateCapable: true,
+              checkout: {
+                commit: "fbb809d",
+                branch: "develop",
+                committedAt: NOW.toISOString(),
+                behindCount: 0,
+                fetchedAt: NOW.toISOString(),
+              },
+            }),
+          ]}
+          sessions={[]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+    });
+
+    // 申告していないpollerへ配っても、未知の種別として失敗するだけ
+    it("更新に対応していないpollerには出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ selfUpdateCapable: null, checkout: BEHIND.checkout })]}
+          sessions={[]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+    });
   });
 });

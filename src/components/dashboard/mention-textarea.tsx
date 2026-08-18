@@ -104,6 +104,19 @@ type MentionTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange
   onUploadingChange?: (uploading: boolean) => void;
   /** プレビュー時にIssue参照（#番号）をリンク化するためのリポジトリ */
   repositoryFullName?: string;
+  /**
+   * 入力とプレビューを切り替えるボタンを出すか（既定は出す・#1929）。
+   * **Issue作成フォームだけ`false`にしている。** 貼った画像はサムネイルで見えており、
+   * 書きかけを切り替えて確かめる場面が無いため、1行ぶんの高さの方が惜しい。
+   * コメント投稿は書いたMarkdownを投稿前に確かめる意味が残るので既定のまま。
+   */
+  showPreviewToggle?: boolean;
+  /**
+   * 「画像を添付」と同じ行の右へ並べる追加の操作（#1929）。
+   * 呼び出し元が入力欄の下に別行で置いていたボタン（「音声入力を整理」）を、
+   * この行へ寄せて縦を詰めるためのもの。
+   */
+  toolbarExtra?: React.ReactNode;
 };
 
 export function MentionTextarea({
@@ -115,6 +128,8 @@ export function MentionTextarea({
   className,
   onUploadingChange,
   repositoryFullName,
+  showPreviewToggle = true,
+  toolbarExtra,
   disabled,
   ...props
 }: MentionTextareaProps) {
@@ -393,15 +408,10 @@ export function MentionTextarea({
           </ul>
         )}
       </div>
-      {(attachments.length > 0 || uploads.length > 0) && (
-        <AttachmentStrip
-          attachments={attachments}
-          uploads={uploads}
-          onRemove={removeAttachment}
-          disabled={disabled}
-        />
-      )}
-      <div className="flex items-center gap-2">
+      {/* サムネイルの列と操作を同じ行に置く（#1929）。**添付があるときに2行使わない。**
+          サムネイルの列は伸び縮みして横スクロールし、操作は折り返さず右端に固定する
+          ——スマホでは行が詰まるため、押せなくなるのはサムネイル側ではなくボタン側になる */}
+      <div className="flex items-center gap-2" data-slot="mention-toolbar">
         <input
           ref={fileInputRef}
           type="file"
@@ -410,24 +420,38 @@ export function MentionTextarea({
           className="hidden"
           onChange={handleFileInputChange}
         />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || isUploading}
-        >
-          {isUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
-          {isUploading ? "アップロード中..." : "画像を添付"}
-        </Button>
-        <PreviewToggleButton
-          isPreview={false}
-          onClick={() => setIsPreview(true)}
-          disabled={value.trim() === ""}
-        />
-        {uploadError && <span className="text-xs text-destructive">{uploadError}</span>}
+        {(attachments.length > 0 || uploads.length > 0) && (
+          <AttachmentStrip
+            attachments={attachments}
+            uploads={uploads}
+            onRemove={removeAttachment}
+            disabled={disabled}
+            className="min-w-0 flex-1"
+          />
+        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || isUploading}
+          >
+            {isUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
+            {isUploading ? "アップロード中..." : "画像を添付"}
+          </Button>
+          {showPreviewToggle && (
+            <PreviewToggleButton
+              isPreview={false}
+              onClick={() => setIsPreview(true)}
+              disabled={value.trim() === ""}
+            />
+          )}
+          {toolbarExtra}
+        </div>
       </div>
+      {uploadError && <span className="text-xs text-destructive">{uploadError}</span>}
     </div>
   );
 }
@@ -436,27 +460,30 @@ export function MentionTextarea({
  * 添付した画像を入力欄の下にサムネイルで横一列に並べる（#1819）。
  * 枚数が増えても高さを1段に保ちたいので、折り返さず横スクロールにする——折り返すと
  * スマホで送信ボタンが画面外へ押し出されるため。
+ *
+ * **枚数の文字はアップロード中だけ出す**（#1929）。同じ行に操作ボタンが並んだため、
+ * サムネイルを見れば分かる枚数のために横幅を使うと、狭い画面でサムネイルが先に隠れる。
  */
 function AttachmentStrip({
   attachments,
   uploads,
   onRemove,
   disabled,
+  className,
 }: {
   attachments: ImageAttachment[];
   uploads: { id: number; name: string }[];
   onRemove: (index: number) => void;
   disabled?: boolean;
+  className?: string;
 }) {
-  const countLabel = [
-    attachments.length > 0 ? `添付 ${attachments.length}枚` : null,
-    uploads.length > 0 ? `${uploads.length}枚アップロード中` : null,
-  ]
-    .filter(Boolean)
-    .join("・");
+  const countLabel = uploads.length > 0 ? `${uploads.length}枚アップロード中` : null;
 
   return (
-    <div className="flex items-center gap-2 overflow-x-auto py-0.5" data-slot="mention-attachments">
+    <div
+      className={cn("flex items-center gap-2 overflow-x-auto py-0.5", className)}
+      data-slot="mention-attachments"
+    >
       {attachments.map((attachment, index) => (
         <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
           <a
@@ -492,7 +519,9 @@ function AttachmentStrip({
           <Loader2 className="size-4 animate-spin" />
         </div>
       ))}
-      <span className="shrink-0 text-[11px] text-muted-foreground">{countLabel}</span>
+      {countLabel && (
+        <span className="shrink-0 text-[11px] text-muted-foreground">{countLabel}</span>
+      )}
     </div>
   );
 }

@@ -49,8 +49,11 @@ vi.mock("@/hooks/use-issue-comment-mutations", () => ({
   useIssueCommentMutations: () => commentMutations,
 }));
 
+// 割り当て可能なユーザーはテストごとに差し替える（担当者の固定・#1929）
+const repoMeta = { labels: [], assignees: [] as string[], isLoading: false };
+
 vi.mock("@/hooks/use-issue-repo-meta", () => ({
-  useIssueRepoMeta: () => ({ labels: [], assignees: [], isLoading: false }),
+  useIssueRepoMeta: () => repoMeta,
 }));
 
 // タイトル・ラベルの付与（#1884）。戻り値の参照を毎レンダー同じに保つため、外に置いた1つを返す
@@ -371,22 +374,73 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     cleanup();
     createIssue.mockReset();
     resetSuggest();
+    repoMeta.assignees = [];
     window.localStorage.clear();
   });
 
-  it("開いた直後から、リポジトリ・内容・タイトル・ラベル・担当者がすべて出ている", () => {
+  it("開いた直後から、リポジトリ・タイトル・内容・ラベルがすべて出ている", () => {
     render(<Harness onCreated={vi.fn()} />);
 
     expect(screen.getByLabelText("リポジトリ")).not.toBeNull();
     expect(screen.getByLabelText("内容")).not.toBeNull();
     expect(screen.getByLabelText("タイトル")).not.toBeNull();
     expect(screen.getByRole("button", { name: /ラベルを選択/ })).not.toBeNull();
-    expect(screen.getByLabelText("担当者")).not.toBeNull();
     // 2画面ぶんの導線は無くなった
     expect(screen.queryByRole("button", { name: "次へ" })).toBeNull();
     expect(screen.queryByRole("button", { name: "戻る" })).toBeNull();
     expect(screen.queryByRole("button", { name: "自分で入力する" })).toBeNull();
     expect(screen.queryByRole("button", { name: "内容を編集" })).toBeNull();
+  });
+
+  /**
+   * #1929。**「どこへ」→「何を」→「詳しく」の順に並べる。** 内容の下にあると、付与で
+   * 埋まったタイトルを確かめるのに書き終えた本文を越えて下へ探しに行くことになる。
+   */
+  it("タイトル欄をリポジトリと内容の間に置く", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const repository = screen.getByLabelText("リポジトリ");
+    const title = screen.getByLabelText("タイトル");
+    const body = screen.getByLabelText("内容");
+
+    expect(repository.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  /** #1929。貼った画像はサムネイルで見えており、切り替えて確かめる場面が無い */
+  it("プレビューへの切り替えは出さず、画像の添付は残す", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "プレビュー" })).toBeNull();
+    expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
+  });
+
+  /** #1929。欄は無くすが、**付く値はこれまでと同じ** */
+  it("担当者の選択欄を出さず、作成するIssueにはm-guchiが付く", async () => {
+    repoMeta.assignees = ["m-guchi", "someone-else"];
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.queryByLabelText("担当者")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() =>
+      expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ assignee: "m-guchi" })),
+    );
+  });
+
+  /** 割り当てられない相手を送るとGitHub側で黙って落ちるため、未設定のまま作る（#1929） */
+  it("m-guchiを割り当てられないリポジトリでは担当者を付けずに作成する", async () => {
+    repoMeta.assignees = ["someone-else"];
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() =>
+      expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ assignee: null })),
+    );
   });
 
   /** #1745で足した本文テンプレートは廃止（#1884） */
@@ -410,7 +464,6 @@ describe("CreateIssueDialog の1画面フォーム", () => {
 
     expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
     expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
-    expect(screen.queryByText("どのリポジトリの話かを選んでください。")).not.toBeNull();
   });
 
   it("人が選び直したリポジトリには「表示中のリポジトリ」を出さない", () => {
@@ -617,10 +670,9 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
   it("質問だと判定されても種別は変えず、提案だけを出す", async () => {
     await generateAsQuestion();
 
-    // 種別はIssueのまま（質問なら担当者欄が消え、タイトルは自動プレビューになる）
+    // 種別はIssueのまま（質問ならタイトルは入力欄ではなく自動プレビューになる）
     expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
     expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
-    expect(screen.queryByLabelText("担当者")).not.toBeNull();
   });
 
   it("質問と判定されなければ提案を出さない", async () => {

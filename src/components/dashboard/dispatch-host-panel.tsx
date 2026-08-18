@@ -1,15 +1,18 @@
 "use client";
 
-import { ExternalLink, Monitor, RefreshCw } from "lucide-react";
+import { ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
-import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
+  describeDispatchHostSelfUpdate,
   type DispatchHostCheckoutTone,
+  type DispatchHostSelfUpdateRow,
 } from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
@@ -22,7 +25,7 @@ import {
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
-import { selectHostSessions } from "@/lib/dispatch/queue-summary";
+import { selectHostSelfUpdateJob, selectHostSessions } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
@@ -83,11 +86,17 @@ const SESSION_TEXT_CLASS: Record<IssueSessionTone, string> = {
 export function DispatchHostPanel({
   hosts,
   sessions,
+  jobs = [],
   onOpenIssue,
   onRequestSelfUpdate,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
+  /**
+   * 積まれているジョブ（#1927）。**チェックアウトの更新（`SELF_UPDATE`）の結果を出すためだけに
+   * 受け取る。** 渡さなければ従来どおり、押した後は何も出ない。
+   */
+  jobs?: readonly DispatchJobView[];
   /**
    * セッションの行のタイトルから、そのIssueの詳細を開く（#1625）。渡さなければタイトルは
    * ただの文字列のまま（従来の表示）。**Issueのidが引けている行にだけリンクを出す**ので、
@@ -100,7 +109,9 @@ export function DispatchHostPanel({
    * これが無かった頃は`ssh`して`git pull && systemctl restart`する手作業Issueが、共有
    * ワークフローやpollerを直すたびに起票されていた（#1858・#1867）。
    */
-  onRequestSelfUpdate?: (hostName: string) => void;
+  onRequestSelfUpdate?: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   if (hosts.length === 0) return null;
 
@@ -111,6 +122,7 @@ export function DispatchHostPanel({
           key={host.name}
           host={host}
           sessions={selectHostSessions(sessions, host.name)}
+          selfUpdateJob={selectHostSelfUpdateJob(jobs, host.name)}
           onOpenIssue={onOpenIssue}
           onRequestSelfUpdate={onRequestSelfUpdate}
         />
@@ -122,13 +134,17 @@ export function DispatchHostPanel({
 function HostCard({
   host,
   sessions,
+  selfUpdateJob,
   onOpenIssue,
   onRequestSelfUpdate,
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
+  selfUpdateJob: DispatchJobView | null;
   onOpenIssue?: (issueId: string) => void;
-  onRequestSelfUpdate?: (hostName: string) => void;
+  onRequestSelfUpdate?: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   const metrics = describeDispatchHostMetrics(host);
   // いま動いているスクリプトがどの版か（#1612）。**pollerは自分と同じチェックアウトの
@@ -138,6 +154,14 @@ function HostCard({
   const atCapacity = isDispatchHostAtSessionCapacity(host);
   // 申告していない古いpollerでは本数そのものが不明。0本と混ぜない（#1394）
   const hasSessionCount = host.maxSessions !== null && host.liveSessions !== null;
+  // 押した更新がどうなったか（#1927）。**遅れが解消した後も、結果が出るまでは出し続ける**
+  // （成功すれば`behindCount`は0になるが、そこでボタンごと消すと「押しても何も起きなかった」
+  // ままに見える）
+  const selfUpdate = describeDispatchHostSelfUpdate(selfUpdateJob);
+  const canSelfUpdate =
+    onRequestSelfUpdate !== undefined &&
+    host.selfUpdateCapable === true &&
+    ((host.checkout?.behindCount ?? 0) > 0 || selfUpdate !== null);
 
   return (
     <div className="rounded-md border p-2">
@@ -177,24 +201,16 @@ function HostCard({
         </div>
       )}
 
-      {/* **遅れているときだけ出す。** 常に置くと、押す意味が無い状態でも再起動だけが走り、
-          そのぶんジョブの払い出しが止まる。対応していないpollerにも出さない（配っても未知の
-          種別として失敗するだけ） */}
-      {onRequestSelfUpdate &&
-        host.selfUpdateCapable === true &&
-        (host.checkout?.behindCount ?? 0) > 0 && (
-          <div className="mt-1.5 flex justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-[11px]"
-              onClick={() => onRequestSelfUpdate(host.name)}
-            >
-              <RefreshCw className="size-3" />
-              更新して再起動
-            </Button>
-          </div>
-        )}
+      {/* **遅れているときと、押した更新の結果がまだ読める間だけ出す。** 常に置くと、押す意味が
+          無い状態でも再起動だけが走り、そのぶんジョブの払い出しが止まる。対応していない
+          pollerにも出さない（配っても未知の種別として失敗するだけ） */}
+      {canSelfUpdate && (
+        <SelfUpdateRow
+          hostName={host.name}
+          selfUpdate={selfUpdate}
+          onRequestSelfUpdate={onRequestSelfUpdate}
+        />
+      )}
 
       {metrics && (
         <div className="mt-1.5 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1">
@@ -214,6 +230,72 @@ function HostCard({
             />
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * チェックアウトの更新を積むボタンと、その結果（#1875・#1927）。
+ *
+ * **押した結果を必ずこの場に出す。** 以前は`void dispatch.requestSelfUpdate(...)`で戻り値を
+ * 捨てており、積めなかった場合（未処理の更新がある・pollerが対応していない）も、届いた後に
+ * pollerが失敗を返した場合も画面には何も出なかった。`SELF_UPDATE`は実行キューの一覧にも
+ * 出ないため、「押しても反応しない」以外の見え方が無かった（#1927）。
+ *
+ * 押せない状態にするのは**届くのを待っている間だけ**。連打しても
+ * `activeKey`のunique制約で弾かれるが、その拒否を見せても押した人にできることは無い。
+ */
+function SelfUpdateRow({
+  hostName,
+  selfUpdate,
+  onRequestSelfUpdate,
+}: {
+  hostName: string;
+  selfUpdate: DispatchHostSelfUpdateRow | null;
+  onRequestSelfUpdate: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+}) {
+  const [sending, setSending] = useState(false);
+  // 積めなかった理由（#1927）。**次に押すまで残す**（消えると押した結果が無かったことになる）
+  const [error, setError] = useState<string | null>(null);
+  const pending = sending || (selfUpdate?.pending ?? false);
+  const notice = error
+    ? { label: error, tone: "critical" as DispatchHostCheckoutTone }
+    : selfUpdate;
+
+  async function request() {
+    setSending(true);
+    setError(null);
+    try {
+      const result = await onRequestSelfUpdate(hostName);
+      if (!result.ok) setError(result.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-col items-end gap-1">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 text-[11px]"
+        disabled={pending}
+        onClick={() => void request()}
+      >
+        {pending ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : (
+          <RefreshCw className="size-3" />
+        )}
+        更新して再起動
+      </Button>
+      {notice && (
+        <span className={cn("text-right text-[11px]", CHECKOUT_TONE_CLASS[notice.tone])}>
+          {notice.label}
+        </span>
       )}
     </div>
   );

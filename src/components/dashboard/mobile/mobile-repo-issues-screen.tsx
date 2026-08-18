@@ -46,6 +46,8 @@ type MobileRepoIssuesScreenProps = {
   onBack: () => void;
   onCreateIssue: () => void;
   onAskCrossRepoQuestion: () => void;
+  /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
+  onRefresh?: () => Promise<unknown> | void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -64,6 +66,7 @@ export function MobileRepoIssuesScreen({
   onBack,
   onCreateIssue,
   onAskCrossRepoQuestion,
+  onRefresh,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -194,6 +197,7 @@ export function MobileRepoIssuesScreen({
       onCreateIssue={onCreateIssue}
       onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       scrollKey={scrollKey}
+      onRefresh={onRefresh}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}

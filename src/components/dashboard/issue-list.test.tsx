@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueList } from "@/components/dashboard/issue-list";
-import type { Issue } from "@/types/issue";
+import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type { Issue, IssueLabel } from "@/types/issue";
 
 vi.mock("@/hooks/use-dispatch-state", () => ({
   useDispatchState: () => ({
@@ -61,8 +63,15 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 const issues = [makeIssue({ number: 1 }), makeIssue({ number: 2 }), makeIssue({ number: 3 })];
 
+// 行の枠は`<li>`（#1915）。カード全面に敷いた選択用ボタンと本文が兄弟に分かれたため、
+// 選択ハイライトのクラスも`<li>`側に付く
 function rowOf(issueNumber: number): HTMLElement {
-  return screen.getByText(`#${issueNumber} Issue ${issueNumber}`).closest("button")!;
+  return screen.getByText(`#${issueNumber} Issue ${issueNumber}`).closest("li")!;
+}
+
+/** 行を選ぶ当たり判定（カード全面に敷いたボタン）。本文の中のボタン（チェックボックス等）と区別する */
+function selectButtonOf(issueNumber: number): HTMLElement {
+  return rowOf(issueNumber).querySelector(":scope > button")!;
 }
 
 function renderList(props: Partial<React.ComponentProps<typeof IssueList>> = {}) {
@@ -87,7 +96,7 @@ describe("IssueListの選択ハイライト（#1597）", () => {
     const onSelectIssue = vi.fn();
     renderList({ onSelectIssue });
 
-    fireEvent.click(rowOf(2));
+    fireEvent.click(selectButtonOf(2));
 
     expect(onSelectIssue).toHaveBeenCalledTimes(1);
     expect(rowOf(2).className).toContain("border-l-primary");
@@ -98,7 +107,7 @@ describe("IssueListの選択ハイライト（#1597）", () => {
     // 確認待ちトースト・本文中のIssueリンクなど、一覧の外から選択が変わる経路がある。
     const { rerender } = renderList();
 
-    fireEvent.click(rowOf(2));
+    fireEvent.click(selectButtonOf(2));
     expect(rowOf(2).className).toContain("border-l-primary");
 
     rerender(
@@ -114,7 +123,7 @@ describe("IssueListの選択ハイライト（#1597）", () => {
     renderList({ onSelectIssue, selectedIssueId: "1" });
 
     fireEvent.click(screen.getByRole("button", { name: "まとめて選択" }));
-    fireEvent.click(rowOf(2));
+    fireEvent.click(selectButtonOf(2));
 
     expect(onSelectIssue).not.toHaveBeenCalled();
     expect(rowOf(1).className).not.toContain("border-l-primary");
@@ -215,7 +224,7 @@ describe("質問Issueの状態ラベル（#1796）", () => {
 
   function questionRow(number: number): HTMLElement {
     const issue = questions.find((item) => item.number === number)!;
-    return screen.getByText(`#${issue.number} ${issue.title}`).closest("button")!;
+    return screen.getByText(`#${issue.number} ${issue.title}`).closest("li")!;
   }
 
   it("回答が届いていて未読なら「未確認」、まだ回答が来ていなければ「回答待ち」を出す", () => {
@@ -267,5 +276,122 @@ describe("IssueList 更新日時", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+function label(name: string): IssueLabel {
+  return { name, color: "ededed", description: null };
+}
+
+function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+  return {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    issueTitle: null,
+    issueId: null,
+    state: "ALIVE",
+    exitStatus: null,
+    activity: "WAITING_INPUT",
+    activityAt: "2026-08-18T00:00:00Z",
+    remoteControlUrl: "https://claude.ai/remote/abc",
+    previewUrl: null,
+    reapAt: null,
+    reapReason: null,
+    firstSeenAt: "2026-08-18T00:00:00Z",
+    lastReportedAt: "2026-08-18T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeDispatch(sessions: DispatchSessionView[]): DispatchStateHandle {
+  return {
+    hosts: [],
+    jobs: [],
+    sessions,
+    concurrency: null,
+    error: null,
+    isSubmitting: false,
+    setError: vi.fn(),
+    enqueue: vi.fn(),
+    cancel: vi.fn(),
+    sendSessionControl: vi.fn(),
+  } as unknown as DispatchStateHandle;
+}
+
+// #1915: 入力待ちに気づいてから答えるまで、Issueを開き直さずに済むようにする
+describe("一覧からRemote Controlを開く（#1915）", () => {
+  it("Remote ControlのURLがあるセッションの行にだけボタンを出す", () => {
+    renderList({ dispatch: makeDispatch([makeSession()]) });
+
+    expect(screen.getByRole("link", { name: "#1のRemote Controlで開く" })).toBeTruthy();
+    // セッションが無い行には出さない
+    expect(screen.queryByRole("link", { name: "#2のRemote Controlで開く" })).toBeNull();
+  });
+
+  // 開いても意味が無いURLを残さない（判定はsummarizeIssueSessionと共通）
+  it("終了したセッションには出さない", () => {
+    renderList({
+      dispatch: makeDispatch([makeSession({ state: "EXITED" })]),
+    });
+
+    expect(screen.queryByRole("link", { name: "#1のRemote Controlで開く" })).toBeNull();
+  });
+
+  it("まだ開始していないセッションには出さない", () => {
+    renderList({
+      dispatch: makeDispatch([makeSession({ activity: "NOT_STARTED" })]),
+    });
+
+    expect(screen.queryByRole("link", { name: "#1のRemote Controlで開く" })).toBeNull();
+  });
+
+  // リンクを選択用ボタンの中に置くと、押したときにIssueの選択まで走る（不正なHTMLでもある）
+  it("押してもIssueの選択は起こらない", () => {
+    const onSelectIssue = vi.fn();
+    renderList({ onSelectIssue, dispatch: makeDispatch([makeSession()]) });
+
+    const link = screen.getByRole("link", { name: "#1のRemote Controlで開く" });
+    expect(selectButtonOf(1).contains(link)).toBe(false);
+
+    fireEvent.click(link);
+
+    expect(onSelectIssue).not.toHaveBeenCalled();
+  });
+});
+
+// #1915: 実装オプションでラベル行が折り返し、行の右端に置く場所が無かった
+describe("一覧のカードに出すラベル（#1915）", () => {
+  const labeled = [
+    makeIssue({
+      number: 1,
+      labels: [
+        label("50.feature"),
+        label("21.plan-required"),
+        label("25.artifact-required"),
+        label("11.local"),
+        label("80.Priority: High"),
+      ],
+    }),
+  ];
+
+  it("実装オプション（20番台）は出さない", () => {
+    render(
+      <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
+    );
+
+    expect(screen.queryByText("21.plan-required")).toBeNull();
+    expect(screen.queryByText("25.artifact-required")).toBeNull();
+  });
+
+  it("実行状態・分類・優先度は今までどおり出す", () => {
+    render(
+      <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
+    );
+
+    expect(screen.getByText("50.feature")).toBeTruthy();
+    expect(screen.getByText("11.local")).toBeTruthy();
+    expect(screen.getByText("80.Priority: High")).toBeTruthy();
   });
 });

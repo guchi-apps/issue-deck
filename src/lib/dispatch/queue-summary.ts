@@ -163,6 +163,26 @@ export function selectHostSessions(
 }
 
 /**
+ * そのホストへ最後に積んだチェックアウトの更新（#1927）。無ければ`null`。
+ *
+ * **`SELF_UPDATE`はキューの一覧（`summarizeDispatchQueue`）に出ない。** 起動ジョブでも制御
+ * ジョブでもないため`running`・`queued`・`failed`・`controls`のどれにも入らず、押した結果が
+ * 画面のどこにも出ないまま終わっていた（#1927。実際には全件失敗していたのに「ボタンが
+ * 反応しない」としか見えなかった）。ホストのカードは押した本人が見ている場所なので、
+ * そこへ出すために1件だけ引く。
+ */
+export function selectHostSelfUpdateJob(
+  jobs: readonly DispatchJobView[],
+  hostName: string,
+): DispatchJobView | null {
+  return (
+    [...jobs]
+      .filter((job) => job.kind === "SELF_UPDATE" && job.targetHost === hostName)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+  );
+}
+
+/**
  * 順番待ちが進まない理由（#1394）。理由が無ければ`null`。
  *
  * **応答しているホストだけを見る。** 落ちているホストは「上限で待っている」のではなく

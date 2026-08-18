@@ -28,9 +28,10 @@ type MobileIssueSummaryCardProps = {
  * 縦に6段積まれ、**本題である説明とコメントが初期表示から押し出されていた**。ここへ畳むことで、
  * 指を動かす前に「どのIssueが・いまどの段階で・誰の担当で・何件やり取りがあるか」まで読める。
  *
- * **編集の口はここに置かない。** 担当者の変更・ラベルの追加削除は
+ * **編集の口はここに置かない。** 進捗の変更・担当者の変更・ラベルの追加削除は
  * `MobileIssuePropertiesSection`（折りたたみ）が持つ。読むための面と編集するための面を混ぜると、
- * 見るだけのときも編集UIの場所代を払うことになり、元の状態に戻る。
+ * 見るだけのときも編集UIの場所代を払うことになり、元の状態に戻る。**ここに出る進捗は読むだけ**で、
+ * 変えられる場所は折りたたみの行（`進捗 実装中 ・ 担当 …`）が指す（#1920）。
  */
 export function MobileIssueSummaryCard({ issue, onSelectRepository }: MobileIssueSummaryCardProps) {
   // Projectへ未登録（`projectStatus`がnull）は「未着手」と偽らず、進捗そのものを出さない。

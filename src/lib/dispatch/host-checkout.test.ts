@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
+  describeDispatchHostSelfUpdate,
   parseDispatchHostCheckout,
   type DispatchHostCheckout,
 } from "@/lib/dispatch/host-checkout";
@@ -148,5 +149,100 @@ describe("describeDispatchHostCheckout（#1612）", () => {
   it("申告が無い・応答していないホストでは行ごと出さない", () => {
     expect(describeDispatchHostCheckout(host({ checkout: null }), NOW)).toBeNull();
     expect(describeDispatchHostCheckout(host({ online: false }), NOW)).toBeNull();
+  });
+});
+
+/**
+ * #1927。押した「更新して再起動」の結果は、ここが返す1行にしか出ない
+ * （`SELF_UPDATE`は実行キューの一覧に載らない）。
+ */
+describe("describeDispatchHostSelfUpdate（#1927）", () => {
+  function selfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+    return {
+      id: "job-1",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 0,
+      issueTitle: null,
+      issueId: null,
+      targetHost: "subpc",
+      kind: "SELF_UPDATE",
+      status: "QUEUED",
+      message: null,
+      instruction: null,
+      command: null,
+      manualStepLine: null,
+      targetJobId: null,
+      exitCode: null,
+      commandOutput: null,
+      tmuxSessionName: null,
+      queuePriority: 0,
+      createdAt: NOW.toISOString(),
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("積んだ直後は届くまでの目安を出し、押し直させない", () => {
+    expect(describeDispatchHostSelfUpdate(selfUpdateJob(), NOW)).toEqual({
+      label: "更新を積みました（届くまで最大30秒）",
+      tone: "normal",
+      pending: true,
+    });
+    expect(describeDispatchHostSelfUpdate(selfUpdateJob({ status: "RUNNING" }), NOW)).toEqual({
+      label: "更新しています",
+      tone: "normal",
+      pending: true,
+    });
+  });
+
+  // pollerが返した理由（「作業ツリーに未コミットの変更があります」等）は、ここに出さないと
+  // 画面のどこにも出ないまま24時間で消える
+  it("失敗はpollerが返した理由をそのまま添えて赤で出す", () => {
+    expect(
+      describeDispatchHostSelfUpdate(
+        selfUpdateJob({
+          status: "FAILED",
+          message: "作業ツリーに未コミットの変更があります。手元で確認してください。",
+          finishedAt: NOW.toISOString(),
+        }),
+        NOW,
+      ),
+    ).toEqual({
+      label: "更新できませんでした: 作業ツリーに未コミットの変更があります。手元で確認してください。",
+      tone: "critical",
+      pending: false,
+    });
+  });
+
+  it("成功はpollerの文言をそのまま出す（journaldの文言と揃える）", () => {
+    expect(
+      describeDispatchHostSelfUpdate(
+        selfUpdateJob({
+          status: "SUCCEEDED",
+          message: "7b71764 → fbb809d へ更新しました。再起動します。",
+          finishedAt: NOW.toISOString(),
+        }),
+        NOW,
+      ),
+    ).toMatchObject({ label: "7b71764 → fbb809d へ更新しました。再起動します。", pending: false });
+  });
+
+  // 終了したジョブは24時間ぶん画面へ返る。翌日まで「更新しました」が残らないようにする
+  it("終わってから時間が経った更新は出さない", () => {
+    expect(
+      describeDispatchHostSelfUpdate(
+        selfUpdateJob({
+          status: "SUCCEEDED",
+          finishedAt: new Date(NOW.getTime() - 11 * 60 * 1000).toISOString(),
+        }),
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("積んだ更新が無ければ何も出さない", () => {
+    expect(describeDispatchHostSelfUpdate(null, NOW)).toBeNull();
   });
 });

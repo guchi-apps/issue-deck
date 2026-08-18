@@ -38,6 +38,22 @@
 > **`40.unexpected`（旧`40.invalid`）と`61.ops`はGitHub側の反映が別作業**（#1714）。ラベルの改名・
 > 新設は19リポジトリへの操作で、この表を含むPull Requestをマージしても反映されない。
 
+### 一覧のカードに出すラベル（#1915）
+
+**Issue一覧のカードは、`00.`・`01.check-*`（要対応とその理由）と実装オプションのラベルを出さない**
+（`isProgressLabel`・`isStartImplementationOptionLabel`。`src/components/dashboard/issue-list.tsx`の
+`listCardLabels`）。前者はカード右上の`WorkflowStepBadge`が同じことを言っており、後者は
+「実装を開始」ダイアログで選んだ**走らせ方**で、盤面を眺めるときの手掛かりにならない。
+**実装オプションかどうかの正は`START_IMPLEMENTATION_OPTIONS`**（`src/lib/github/start-implementation.ts`）で、
+番号帯の正規表現で別に判定を作らない——オプションを増やしたときに片方だけ増えて食い違う。
+
+出さない理由はもう一つあり、**ラベル行の右端がRemote Controlを開くボタンの場所**になっている。
+オプションを並べていた頃はラベル行が2行へ折り返し、置く場所が無かった。
+**新しいラベルの帯を足すときは、一覧に出すかどうかもここで決める**（付いているものをすべて
+見るのはIssue詳細の役割で、そちらからは除外しない）。なお`22.merge-confirm-required`・
+`23.preview-required`・`24.screenshot-required`は、バッジなど他の表示に置き換えが無いため
+**一覧からは読み取れなくなる**（#1915でそれを承知のうえ決めた）。
+
 ### 空き番号は詰めない
 
 帯の中は**追加順に採番し、関連するものを後から隣へ挿せるよう間を空けておく**（`62`と`65`の

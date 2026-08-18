@@ -4,8 +4,10 @@ import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, PLAN_REQUIRED_LABEL } from "@/lib/
 import {
   canStartImplementation,
   isSelectableLabelName,
+  isStartImplementationOptionLabel,
   planRequiredDefaultForLabels,
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
+  START_IMPLEMENTATION_OPTIONS,
   startImplementationCommentBody,
   startImplementationDisabledReason,
   startImplementationLabelsToAdd,
@@ -211,5 +213,30 @@ describe("canStartImplementation", () => {
 
   it("closedなIssueでは表示しない", () => {
     expect(canStartImplementation({ ...makeIssue([]), state: "closed" })).toBe(false);
+  });
+});
+
+// #1915: Issue一覧のカードはこの判定でラベルを間引く（判定の正はSTART_IMPLEMENTATION_OPTIONS）
+describe("isStartImplementationOptionLabel", () => {
+  it("実装オプションが付けるラベルを判定する", () => {
+    expect(isStartImplementationOptionLabel("21.plan-required")).toBe(true);
+    expect(isStartImplementationOptionLabel("22.merge-confirm-required")).toBe(true);
+    expect(isStartImplementationOptionLabel("23.preview-required")).toBe(true);
+    expect(isStartImplementationOptionLabel("24.screenshot-required")).toBe(true);
+    expect(isStartImplementationOptionLabel("25.artifact-required")).toBe(true);
+  });
+
+  it("それ以外のラベルは対象にしない", () => {
+    expect(isStartImplementationOptionLabel("11.local")).toBe(false);
+    expect(isStartImplementationOptionLabel("50.feature")).toBe(false);
+    expect(isStartImplementationOptionLabel("71.manual-step")).toBe(false);
+    expect(isStartImplementationOptionLabel("bug")).toBe(false);
+  });
+
+  // オプションを増やしたときに一覧側の判定だけ古くならないよう、定義から作る
+  it("START_IMPLEMENTATION_OPTIONSのラベルをすべて対象にする", () => {
+    for (const option of START_IMPLEMENTATION_OPTIONS) {
+      expect(isStartImplementationOptionLabel(option.githubLabel)).toBe(true);
+    }
   });
 });

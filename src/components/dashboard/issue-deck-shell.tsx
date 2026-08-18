@@ -98,7 +98,6 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
-import { countUnconfirmedQuestions } from "@/lib/question-attention";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -587,21 +586,6 @@ export function IssueDeckShell({
       ),
     [issues, filters],
   );
-  // 未確認（回答が届いていて未読）の質問の件数（#1796）。左メニュー・スマホのホームの
-  // 「質問」に、オレンジの丸の件数としてそのまま出す（#1910）。
-  // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
-  const unconfirmedQuestionCount = useMemo(
-    () =>
-      countUnconfirmedQuestions(
-        filterIssuesByView(
-          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
-          "question",
-          currentUserLogin,
-          issues,
-        ),
-      ),
-    [issues, filters, currentUserLogin],
-  );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
@@ -1016,7 +1000,6 @@ export function IssueDeckShell({
                   navCounts={navCounts}
                   checkUserPullRequestCount={mergePendingPullRequests.length}
                   manualStepAttention={manualStepAttention}
-                  unconfirmedQuestionCount={unconfirmedQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
@@ -1112,6 +1095,9 @@ export function IssueDeckShell({
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                  /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
+                     経路（reconcileIssues・確認待ちトーストの判定）を通す */
+                  onRefresh={issuePolling.refresh}
                   onStartManualStepGuide={() => manualStepGuide.start()}
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
@@ -1163,6 +1149,7 @@ export function IssueDeckShell({
                   onAskCrossRepoQuestion={() =>
                     openCrossRepoQuestionDialog(mobileScreen.repository.fullName)
                   }
+                  onRefresh={issuePolling.refresh}
                 />
               )}
 
@@ -1201,7 +1188,6 @@ export function IssueDeckShell({
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
-                unconfirmedQuestionCount={unconfirmedQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}

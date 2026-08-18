@@ -62,6 +62,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
+  `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
+  **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
+  以前のように本文ごと`<button>`で包むと、その中にリンクを置けない——不正なHTMLになるうえ、
+  押すとIssueの選択まで走る。枠線・選択ハイライト・ホバーは`<li>`側に付いている。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
@@ -78,6 +83,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   作成したIssueは`BroadcastChannel`で元のデッキへ伝えて一覧へ加えるが、
   **選択中のIssueは動かさない**（[`lib/issue-broadcast.ts`](../src/lib/issue-broadcast.ts)）。
   伝わらなくても一覧のポーリング（10秒）で現れるので、失敗しても作成は止めない。
+- **作成フォームの項目は「種別 → リポジトリ → タイトル → 内容 → ラベル」の順で、
+  担当者は`m-guchi`固定**（#1929）。スマホ（393×852）で操作ボタンまで一画面に収めるための
+  並びで、「どこへ」→「何を」→「詳しく」の順に読める。担当者の選択欄は出さず、
+  リポジトリの割り当て可能なユーザーに`m-guchi`が居ればそれを付ける（居なければ未設定。
+  割り当てられない相手を送るとGitHub側で黙って落ちる）。**縦を詰めるための省略は、
+  画面から読み取れないことだけ残す**——リポジトリの補足文は質問のとき（選択肢が減っている
+  理由）だけ、見出しの説明文は質問のときだけ出し、Issueの説明文は`sr-only`で残す
+  （消すと`DialogContent`の説明が無くなりRadixが警告する）。
+  入力欄の下の「画像を添付」「音声入力を整理」は添付サムネイルと同じ行に並べ、
+  プレビューへの切り替えはこのフォームでは出さない
+  （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
+  `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -117,6 +134,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893）。
+  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は`IssueList`の
+  `onPullToRefresh`を渡した画面（スマホのIssue一覧2画面）だけで有効になる。
+  **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
+  `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
+  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
+  実装で外せない点が3つある。**Reactの`onTouchMove`ではなく`{ passive: false }`のネイティブ
+  リスナーを張る**（Reactはルートでpassive登録するため`preventDefault()`が効かない）。
+  **`preventDefault()`するのは「縦方向かつ下向き」に動いている間だけ**——方向判定
+  （`use-swipe-back.ts`と同じ式）は横が明確に優位でない限り縦と見なすので、条件を「縦」だけに
+  すると一覧の先頭から上へ読み進めるスクロールごと止まる。**タッチを受けるのはスクロール領域
+  （`<ul>`）ではなくそれを包む枠**で、`<ul>`は0件で消えるため直接付けると空の一覧を更新できない。
+  取り直すのは`GET /api/issues`（`use-issue-polling.ts`の`refresh`）と実行状況までで、
+  **GitHubからの再同期（`POST /api/sync/issues`）はしない**。1回でリポジトリ数ぶんのGitHub APIを
+  使うため、指を下ろすたびに走ってよい操作ではない（再同期は設定の「フリート運用」に置いてある）。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
@@ -127,7 +159,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   スマホ側で新たに増えたのは、上部の
   [`mobile/mobile-issue-summary-card.tsx`](../src/components/dashboard/mobile/mobile-issue-summary-card.tsx)（読む専用）と
   [`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)（編集の口）で、
-  **この2つに同じ値を両方出さない**のが分け方の要点（サマリーは読むだけ・編集は折りたたみ）。
+  **サマリーは読むだけ・編集は折りたたみ**が分け方の要点。同じ値を両方に出すのは、担当者と進捗の
+  ように**畳んだ行が「変えられる場所はここ」と示す必要がある**ときに限る（#1920）。進捗はこれで
+  読める場所が最大3つ（サマリーカード・実行状況カードのステップ表示・畳んだ行）になるが、
+  **前の2つは読む専用で、変更の口を指せるのは畳んだ行だけ**。`ready`・`closed`ではステップ表示が
+  出ないので2つに収まる。
   `IssueDetailSection`の開閉状態は`issue-detail.section.<id>`のlocalStorageで**セクションごとに1つ**
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
@@ -278,11 +314,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
     **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
     畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
-- **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
-  ラベル・担当者と並ぶ位置にあり
-  （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
-  PCの常時表示パネルと狭い画面の「プロパティ」シートが同じコンポーネントを使う）、
-  `POST /api/issues/progress-status`へ投げる。**この経路は実行を起動しない。**
+- **人が進捗を直接動かす入口は、Issue詳細の「進捗」セレクト**（#1350・#1920）。中身・並び・注記は
+  [`components/dashboard/issue-progress-select.tsx`](../src/components/dashboard/issue-progress-select.tsx)
+  が持ち、**PCとスマホがこれ1つを共有する**——PCはラベル・担当者と並ぶ右パネル
+  （[`issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。常時表示の
+  パネルと狭い画面の「プロパティ」シートが同じコンポーネント）、スマホは「プロパティ」の折りたたみ
+  （[`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)）。
+  **片方の画面にだけ挙動や文言を足さない**（足すと「選ぶと何が起きるのか」の答えが端末で変わる）。
+  投げ先は`POST /api/issues/progress-status`。**この経路は実行を起動しない。**
   GitHub Projectsのカンバンでカードをドラッグした場合と違い、書くのがissue-deck自身の
   GitHub Appで、かつ`reportProgressStatus`がDBキャッシュを同時に更新するため、
   `projects_v2_item` Webhookを受けた`maybeDispatchFromProjectStatus`が`isOwnAppSender`と
@@ -505,6 +544,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
   - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と
     同じ考え方。未確認が無ければ`0`になる）。総数との差は一覧のヘッダー（`3件・未確認1件`）で説明する。
+  - **数え方の差し替えは`issue-stats.ts`の`computeNavCountsForFilters`で行い、画面側では行わない**
+    （#1910）。`navCounts["question"]`はスマホの一覧のビュー切替（`mobile-issue-list-screen.tsx`）と
+    ビュー選択シート（`mobile-issue-view-sheet.tsx`）にも出るため、画面ごとに数字を差し替えると
+    左メニューの`1`と一覧の`3`が食い違う。手作業（#1763）と同じ置き場。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
@@ -738,8 +781,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （カードを省く`isQuiet`はレーンの総数で判定しており、畳んだ完了レーンしか無いリポジトリを
   静かとみなさなかった）。**動きの無いリポジトリも隠さず1行で並べる**——畳むようになったことで
   隠す理由が場所ではなくなり、隠す方が「集計から漏れていないか」を確かめられなくなる。
-  初回に自動で開くのは**手が要るものだけ**（CI失敗・ユーザーのマージ待ち・リリース中。
-  `BranchFlowRepositorySummary`）で、以降の再取得ではユーザーの開閉を上書きしない。
+  **開いた直後は自動で展開しない**（#1932）。当初は手が要るもの（CI失敗・ユーザーのマージ待ち・
+  リリース中）だけを初回に開いていたが、そのぶん初期表示が縦に伸び、1行に畳んで俯瞰する
+  という画面の趣旨と食い違っていた。手が要ることはヘッダーの「手が要るもの◯件」
+  （`needsAttention`）と畳んだ行のピルが伝え、開くかどうかは行のクリックか「すべて開く」で
+  ユーザーが決める。**左メニューで選択中のリポジトリを開く動き（#1750）はこれとは別で残す。**
   **展開した中身は「バージョンへ何が合流したか」の流れ図**（#1510）。`main`と`develop`の
   2本の縦レールに対し、**横線1本がリリース（develop→mainのマージ）**で、その下にぶら下がる枝が
   その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**次のリリースに乗る分まで**
@@ -749,7 +795,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **畳んだぶんに残る未完了の手作業（`71.manual-step`）だけは束の外へ出して常に見せる**——
   版が出た後も残る作業で、畳んだ束と一緒に隠すと画面のどこにも現れなくなるため。
   同じ理由で、畳んだリポジトリ行にも件数（`BranchFlowRepositorySummary.openManualStepCount`）を
-  出す。**ただし初回に自動で開く条件には加えない**（手作業はこの画面で押すものではない）。
+  出す。**ただし「手が要るもの」の判定（`needsAttention`）には加えない**（手作業はこの画面で
+  押すものではない）。
   この形にしたことで
   「developへマージ済み」「main未反映」「vX.Y.Zで本番反映」のピルは**どの横線の下にいるか**が
   表すようになり、レーンに残るピルは上段（マージ待ち・PR未作成・クローズ）だけになった。
@@ -773,7 +820,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   3つとも同じ灰色の文字だったため、右端まで読まないとリリース待ちなのか未着手なのか分からなかった。
   破線の丸（実装予定・灰）／枝分かれ（進行中・青）／上向き矢印（未リリース・紫）と**形でも区別が付く**ようにし、
   言葉は`title`と`aria-label`に持たせる。
-  **手が要るものではないので、初回に自動で開く条件（`needsAttention`）には加えない。**
+  **手が要るものではないので、`needsAttention`（ヘッダーの「手が要るもの◯件」）には加えない。**
   枝と点は破線で描き、実在するブランチのレーンと見分けが付くようにする。
   **`orphanIssues`（ブランチもPRも見つからないIssue）とは別物**で、あちらは「実装中なのにブランチが無い」
   異常を隠さないための枠。手作業Issue（`71.manual-step`）は実装するものではないため実装予定に混ぜない。
@@ -806,7 +853,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リリースPRがマージされた瞬間に束の見出しが「◯/◯に本番反映」へ変わっていたが、見ているのは
   mainへマージされた事実だけで、そこから`deploy.yml`が数分走り、失敗すればmainに入ったまま
   本番へは出ない。**デプロイが済むまで「本番反映」と書かない**ようにし、実行中・失敗・待ちを
-  束の見出しと畳んだ1行に出す（デプロイ中・失敗のリポジトリは初回に自動で開く）。
+  束の見出しと畳んだ1行に出す（デプロイ中・失敗は`needsAttention`に含め、「手が要るもの◯件」に数える）。
   取得は専用の軽いエンドポイント`GET /api/branch-flow/deploy`（mainブランチの`deploy.yml`の
   最新run 1件。`fetchLatestDeployWorkflowRun`）で、**リリース用workflowを持つリポジトリだけ**を
   対象にする。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
