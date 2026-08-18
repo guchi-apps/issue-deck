@@ -877,6 +877,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リポジトリ1件ぶんで1回だけ行い、行とボタンの両方へ配る——同じキーで`usePersistedState`を
   2か所から読むと、押した瞬間の書き込みが互いに伝わらないため。出すのは`canTriggerRelease`が
   trueの間だけにして、リリース完了後も10分残る起動時刻で古いピルが出ないようにしている。
+  経過を見る時計（`hooks/use-now.ts`）は**起動時刻が入っている間だけ回す**——このhookは畳んだぶんも
+  含めてリポジトリ全件でマウントされるため、既定のまま呼ぶと普段から全件で30秒ごとの再描画が走る。
+  「手が要るもの◯件」（`needsAttention`）には数えない。**押す操作の有無ではなく、記録が端末ローカル
+  だから**で、数えると同じ画面でも見る端末によって件数が食い違う。
   **mainへのマージもこの画面から行える**（#1548）。束の見出しのマージボタンは一覧・詳細と同じ
   `PullRequestMergeButton`（`POST /api/issues/pull-request-merge`。merge commit）で、
   `mergeWarnings`がbase`main`のPRに「本番デプロイが走る」警告を必ず返すため確認ダイアログを通る。
