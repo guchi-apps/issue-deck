@@ -5,12 +5,15 @@ import { cn } from "@/lib/utils";
  * アイコンは通常のまま置く**（#1443）。行全体を塗ると選択中の行と見分けがつかなくなる。
  *
  * - `none` … 通常（グレーの数字）
- * - `attention` … 塗りつぶしの丸。**「人が動くまで進まないもの」だけ**（確認待ち・作業待ち）
- * - `unread` … 数字の文字色だけ変える。要対応より一段弱い強調で、質問の未確認に使う。
- *   質問は読めば済むもので、放置しても盤面は止まらない。同じ丸バッジにすると、上から順に
- *   手を動かせば進む、という並びの読み方が崩れる
+ * - `attention` … 塗りつぶしのオレンジの丸。**人が手を動かすまで進まないもの**
+ *   （確認待ち・作業待ち）と、**回答が届いていてまだ読んでいない質問**（#1910）に使う
+ *
+ * **弱い強調（数字の文字色だけ変える`unread`）は#1910で廃止した。** 質問は読めば済むので
+ * 一段弱く出す（#1796）としていたが、数字の色だけでは未確認の回答があることに気づけず、
+ * 見落としの原因になっていた。強調の段階を1つにして、**丸が点いている行は上から順に
+ * 手を動かせば消える**という読み方へ揃える。
  */
-export type NavCountEmphasis = "none" | "attention" | "unread";
+export type NavCountEmphasis = "none" | "attention";
 
 /**
  * 左メニュー（PC・`sidebar-nav.tsx`）とホームのメニュー（スマホ・`mobile-home-screen.tsx`）で
@@ -32,7 +35,6 @@ export function NavCount({
         "text-xs text-muted-foreground",
         emphasis === "attention" &&
           "flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-white",
-        emphasis === "unread" && "font-semibold text-amber-600 dark:text-amber-400",
       )}
     >
       {count}

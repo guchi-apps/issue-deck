@@ -199,8 +199,8 @@ describe("SidebarNav", () => {
     ).toBeNull();
   });
 
-  // 件数は確認済みも含めた総数のまま、未確認が残っている間だけ色を変える（#1796）。
-  it("未確認の質問があれば件数の文字色を変える（総数は変えない）", () => {
+  // 件数は未確認の数で、確認待ち・作業待ちと同じオレンジの丸で出す（#1910）。
+  it("未確認の質問があれば未確認の件数をオレンジの丸で出す", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
       { ...NAV_COUNTS, question: 3 },
@@ -208,19 +208,19 @@ describe("SidebarNav", () => {
     );
 
     const button = screen.getByRole("button", { name: /質問/ });
-    expect(button.textContent).toContain("3");
-    const badge = screen.getByText("3");
-    expect(badge.className).toContain("text-amber-600");
-    // 要対応（確認待ち・作業待ち）の塗りつぶしの丸とは強さを分ける
-    expect(badge.className).not.toContain("bg-amber-500");
+    // 総数（3件）ではなく未確認の件数（1件）を出す
+    expect(button.textContent).toContain("1");
+    expect(button.textContent).not.toContain("3");
+    expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
     expect(button.getAttribute("title")).toContain("1件");
   });
 
   it("未確認の質問が無ければ強調しない", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 3 });
 
-    expect(screen.getByText("3").className).not.toContain("amber");
-    expect(screen.getByRole("button", { name: /質問/ }).getAttribute("title")).toBeNull();
+    const button = screen.getByRole("button", { name: /質問/ });
+    expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(button.getAttribute("title")).toBeNull();
   });
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
