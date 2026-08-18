@@ -39,7 +39,7 @@ function renderScreen(releaseStatuses: RepositoryReleaseStatus[] | null) {
     data: releaseStatuses,
     isLoading: false,
     error: null,
-    refetch: vi.fn(),
+    refetch: vi.fn(async () => []),
   });
 
   render(
@@ -142,7 +142,7 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
       data: null,
       isLoading: false,
       error: null,
-      refetch: vi.fn(),
+      refetch: vi.fn(async () => []),
     });
   });
 

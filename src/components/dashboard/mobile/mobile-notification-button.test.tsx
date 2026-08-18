@@ -22,7 +22,7 @@ vi.mock("@/hooks/use-repository-release-statuses", () => ({
     data: releaseStatusesMock.current,
     isLoading: false,
     error: null,
-    refetch: vi.fn(),
+    refetch: vi.fn(async () => []),
   }),
 }));
 

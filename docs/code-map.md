@@ -883,13 +883,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     実行できない手作業まで並べると、ベルが「いま人が動けば盤面が進むもの」の集まりでなくなり、
     件数バッジも左メニューの件数（`actionable`だけを数える。#1763）と食い違う。前提待ちの
     手作業は「ユーザーの作業待ち」ビューに橙の時計付きで残るので、見えなくなるわけではない。
-  - **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
+  - **追加のGitHub API消費は、閉じている間はゼロ**（開いている間だけ30秒ごとに取り直す。
+    #1909。後述）。Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。
     **材料を用意するのは`NotificationProvider`だけ**（#1772。
     [`components/dashboard/notification-state.tsx`](../src/components/dashboard/notification-state.tsx)）。
     ベルを置く場所がPCの1か所ではなくなったため、各ボタンが自分でフックを呼ぶとポーリングが
     増える——PCのトップバーは`hidden md:flex`でCSSで隠れているだけで、スマホでもmountされたまま
     だからで、どちらのレイアウトかはJS側から判別できない。
+  - **開いている間だけ30秒ごとに取り直し、右上に「いつ時点の内容か」を出す**（#1909。
+    [`components/dashboard/notification-refresh-button.tsx`](../src/components/dashboard/notification-refresh-button.tsx)）。
+    開いた時点で1回取り、以後30秒ごと（裏に回ったタブでは取りに行かず、前面へ戻った時点で
+    取り直す。`hooks/use-auto-refresh.ts`）。**自動更新を持つのは開いた中身の側**——
+    ポップオーバー・シートは閉じている間そもそも描かれないので、開いているかどうかを
+    Providerへ伝える仕組みが要らない。取り直す先はベルの材料3つで、まとめて呼べるように
+    `NotificationProvider`が`refresh`として配る。**PR一覧だけは`refreshInBackground`**
+    （#1909。`refresh`だと取得effectが張り直されて`isLoading`が立ち、後ろに開いているPR一覧が
+    30秒ごとに「読み込み中...」へ戻る）。**取れなかった周は「最後に取れた時刻」を進めない**
+    ——進めると、取れていないのに「たった今更新」と出る。文言・配色（「12秒前に更新・30秒ごと」・
+    取得中の回転・3周期落ちたら橙）と見た目は実行キュー（#1773）と共通で、
+    [`lib/refresh-status.ts`](../src/lib/refresh-status.ts)と
+    [`components/dashboard/refresh-indicator-button.tsx`](../src/components/dashboard/refresh-indicator-button.tsx)
+    にある。
   - **同じ操作を2行に出さない。** リリースのマージ待ちとして出したPRと、確認待ちとして出した
     Issueに紐づくPRは、PRの区分から落とす（Issue詳細に`issue-merge-button.tsx`があるので
     操作は失われず、左メニューの「確認待ち」件数とも食い違わない）。
