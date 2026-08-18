@@ -153,24 +153,31 @@ jobs:
           # ——develop-merge-sweepが拾うのは`Develop PR`にいるIssueだけで、
           # `Implementation`は対象外のため。
           #
-          # 判定は「このコミットを先端とする、同じブランチからdevelopへのマージ済みPRがあるか」。
-          # `.head.ref`まで見るのは、developの先端から切ったブランチを**コミット前に**pushした
-          # 場合を巻き込まないため(そのSHAはdevelopのマージコミットでもあり、ブランチ名を見ないと
-          # 「マージ済み」と誤判定する)。マージ後の追加対応でpushされた新しいコミットには
+          # 判定は「このコミットを先端とする、同じブランチからdevelopまたはmainへのマージ済みPRが
+          # あるか」。`.head.ref`まで見るのは、developの先端から切ったブランチを**コミット前に**
+          # pushした場合を巻き込まないため(そのSHAはdevelopのマージコミットでもあり、ブランチ名を
+          # 見ないと「マージ済み」と誤判定する)。マージ後の追加対応でpushされた新しいコミットには
           # マージ済みPRが紐づかないため、`Develop` -> `Implementation`という正規の戻り
           # (reusable-issue-dispatch.ymlのmode=additional)は妨げない。
+          #
+          # **`main`も見るのはmain直行リポジトリのため(#1901)。** そちらのマージ済みPRは
+          # `base.ref == 'main'`なので、developだけを見ていると常に「マージ済みでない」と判定し、
+          # 遅れて走ったこのジョブがmain-direct-mergedの`Done`を`Implementation`へ巻き戻す。
+          # しかも`develop-merge-sweep`は`--base develop`固定で拾い直せない。develop運用の
+          # リポジトリでは`issue-<番号>` -> `main`のPRを作らないため、条件を緩めても挙動は
+          # 変わらない(`.head.ref`の一致も必ず要求している)。
           #
           # 問い合わせに失敗した場合は報告する側へ倒す(fail-open)。Statusのズレは盤面から直せるが、
           # 報告しなければ実装中のIssueが`Ready`のまま残り、着手が見えなくなるため。
           merged=""
           merged="$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" 2>/dev/null |
             jq --arg branch "$GITHUB_REF_NAME" \
-              '[.[] | select(.merged_at != null and .base.ref == "develop" and .head.ref == $branch)] | length' \
+              '[.[] | select(.merged_at != null and (.base.ref == "develop" or .base.ref == "main") and .head.ref == $branch)] | length' \
               2>/dev/null)" || merged=""
           if [[ ! "$merged" =~ ^[0-9]+$ ]]; then
             echo "::warning::$HEAD_SHA に紐づくPRを取得できませんでした。マージ済みではないものとして報告します"
           elif [ "$merged" -gt 0 ]; then
-            echo "このpushの内容は既にdevelopへマージ済みのため、issue #$n を Implementation へ戻しません"
+            echo "このpushの内容は既にdevelop・mainへマージ済みのため、issue #$n を Implementation へ戻しません"
             exit 0
           fi
 

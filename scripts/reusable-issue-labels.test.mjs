@@ -69,6 +69,12 @@ case "$1 \${2:-}" in
     else echo "$value"; fi
     ;;
   "api repos"*)
+    # wip-on-pushが引く「このコミットに紐づくPR」（repos/<owner>/<repo>/commits/<sha>/pulls）
+    if [[ "$2" == */pulls ]]; then
+      if [ "\${STUB_COMMIT_PULLS:-}" = "fail" ]; then exit 1; fi
+      echo "\${STUB_COMMIT_PULLS:-[]}"
+      exit 0
+    fi
     var="STUB_REF_\${2##*/issue-}"
     value="\${!var:-404}"
     if [ "$value" = "404" ]; then echo '{"message":"Not Found","status":"404"}'; exit 1
@@ -367,6 +373,48 @@ describe("Project Status の報告", () => {
     const result = runStep(reportStep, { ...base, STUB_POST_CODES: "000 200" });
 
     expect(result.stdout).toContain("issue #1583 を develop-pr として報告しました");
+  });
+});
+
+describe("wip-on-push のマージ済み判定", () => {
+  const STEP = "対象issueを特定する";
+  const base = { GITHUB_REF_NAME: "issue-1901", HEAD_SHA: "aaa111" };
+  const pulls = (baseRef, headRef) =>
+    JSON.stringify([{ merged_at: "2026-08-18T00:00:00Z", base: { ref: baseRef }, head: { ref: headRef } }]);
+
+  it("main直行リポジトリのマージ済みPRでも巻き戻さない（#1901）", () => {
+    // develop決め打ちのままだと「マージ済みでない」と判定し、遅れて走ったrunが
+    // main-direct-mergedの`Done`を`Implementation`へ戻してしまう
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("main", "issue-1901") });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual([]);
+  });
+
+  it("developへマージ済みのpushも従来どおり巻き戻さない（#1511）", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("develop", "issue-1901") });
+
+    expect(result.reported).toEqual([]);
+  });
+
+  it("ブランチ名が一致しないPR（developの先端から切った直後のpush）は巻き込まない", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: pulls("main", "develop") });
+
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("マージ済みPRが無ければ implementation を報告する", () => {
+    const result = runStep(STEP, base);
+
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("PRを取得できないときは報告する側へ倒す（fail-open）", () => {
+    const result = runStep(STEP, { ...base, STUB_COMMIT_PULLS: "fail" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    expect(result.stdout).toContain("紐づくPRを取得できませんでした");
   });
 });
 

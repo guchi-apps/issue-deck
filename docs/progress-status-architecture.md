@@ -183,6 +183,9 @@ Issueの完了判定をそこへ持ち込まない。
   だけで、main直行の取りこぼしは拾えない。`docs`は自動マージの経路を持たず人が手でマージする
   ため`pull_request: closed`は確実に発火するが、報告が5xxに当たり続けた場合は画面の
   「進捗」セレクトで直す
+- **拾い直せない以上、巻き戻す側を先に塞いである。** `wip-on-push`のマージ済み判定が
+  `base.ref == 'main'`も見る（前節）。ここがdevelop決め打ちのままだと、runの作成が遅れた
+  pushが`Done`を`Implementation`へ戻し、そのまま誰も拾わない
 
 #### push起点の報告は、runの作成が遅れるとマージ済みのIssueを巻き戻す（#1511）
 
@@ -207,11 +210,18 @@ pushで`implementation`を報告するが、このrunの作成が遅れると、
 次節を参照）。
 
 対処は`wip-on-push`側に入れてある。**pushされたコミットを先端とする、同じブランチから
-developへのマージ済みPRが既にあれば報告しない。** `.head.ref`まで見るのは、developの先端から
-切ったブランチをコミット前にpushした場合を巻き込まないため（そのSHAはdevelopのマージコミット
-でもあるため、ブランチ名を見ないと「マージ済み」と誤判定する）。マージ後の追加対応で
+`develop`または`main`へのマージ済みPRが既にあれば報告しない。** `.head.ref`まで見るのは、
+developの先端から切ったブランチをコミット前にpushした場合を巻き込まないため（そのSHAはdevelopの
+マージコミットでもあるため、ブランチ名を見ないと「マージ済み」と誤判定する）。マージ後の追加対応で
 pushされた新しいコミットにはマージ済みPRが紐づかないので、`Develop` → `Implementation`という
 正規の戻り（`reusable-issue-dispatch.yml`の`mode=additional`）は妨げない。
+
+**`main`も見るのは、main直行リポジトリで同じ巻き戻りが起きるため**（#1901。当初は
+`.base.ref == "develop"`の決め打ちだった）。そちらのマージ済みPRは`base.ref == 'main'`なので、
+developだけを見ていると常に「マージ済みでない」と判定し、遅れて走った`wip-on-push`が
+`main-direct-merged`の`Done`を`Implementation`へ巻き戻す。**しかも`develop-merge-sweep`は
+`--base develop`固定で拾い直せない。** develop運用のリポジトリでは`issue-<番号>` → `main`のPRを
+作らないため、条件を緩めても挙動は変わらない。
 
 **報告の成否はHTTPコードだけでは分からない点にも注意する。** `POST /api/progress`は
 反映されなかった場合（Project未導入・盤面へ未登録・既に同じStatus）も200で
