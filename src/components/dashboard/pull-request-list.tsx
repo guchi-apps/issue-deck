@@ -19,6 +19,7 @@ import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-i
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { autoRefreshIntervalLabel, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
@@ -72,10 +73,6 @@ type PullRequestListProps = {
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる（#677と同じ理由） */
   footerSpacing?: boolean;
 };
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-}
 
 function PullRequestCard({
   pullRequest,
@@ -233,7 +230,7 @@ export function PullRequestList({
           </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{pullRequests.length}件</span>
-            {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+            {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
             {/* 何分間隔で更新中なのかを画面に出す（#1767） */}
             {autoRefreshIntervalMs !== null && (
               <span>{` ・ 自動更新${autoRefreshIntervalLabel(autoRefreshIntervalMs)}`}</span>
