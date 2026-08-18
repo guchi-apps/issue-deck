@@ -3,6 +3,7 @@
 import { CircleAlert, Plus, X } from "lucide-react";
 
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
+import { IssueProgressSelect } from "@/components/dashboard/issue-progress-select";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
@@ -13,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { getProgressStatusDef, resolveProgressStatus } from "@/lib/issue-progress";
 import { isAttentionLabel, matchStatusStep, STATUS_STEP_MAX } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import type { Issue } from "@/types/issue";
@@ -23,6 +25,8 @@ type MobileIssuePropertiesSectionProps = {
   isSubmitting: boolean;
   onToggleLabel: (name: string) => void;
   onAssigneeChange: (login: string | null) => void;
+  /** 進捗を変えられたときに親の`issue`を差し替える（#1920） */
+  onIssueUpdated: (issue: Issue) => void;
 };
 
 /**
@@ -32,21 +36,33 @@ type MobileIssuePropertiesSectionProps = {
  * 常時占有して説明を画面外へ押し出していた。PCが右のプロパティパネル
  * （`issue-properties-panel.tsx`）へ寄せているのと同じ整理を、スマホでは折りたたみで行う。
  *
- * **進捗（Project Status）はここに置かない。** PCのパネルには変更用のセレクトがあるが、
- * スマホの詳細では進捗はサマリーカードと実行状況カードが読む専用で出しており、
- * ここへ変更の口を足すと同じ値の表示が3か所になる。
+ * **進捗（Project Status）を変える口もここに置く**（#1920）。以前は「同じ値の表示が増える」ことを
+ * 避けてスマホには変更の口を置かず、進捗はサマリーカードと実行状況カードが読む専用で出すだけ
+ * だった。しかしそのせいで**スマホからは進捗をまったく動かせず**、PCを開くかGitHubのカンバンを
+ * 触るしかなかった。中身・並び・注記はPCのパネルと同じ`IssueProgressSelect`を使い、
+ * **どちらかの画面にだけ挙動を足さない。**
+ *
+ * 畳んだ行のsummaryにも進捗を出す。**これで進捗を読める場所は最大3つになる**——サマリーカード
+ * （`mobile-issue-summary-card.tsx`）と、`Planning`〜`Done`のときだけ出る実行状況カードの
+ * ステップ表示（`workflow-status-steps.tsx`）と、この行。増やしてなお出すのは、**残り2つは
+ * どちらも読む専用で、「変えられる場所がここにある」と示せるのがこの行だけ**だから。
+ * 出さないと、進捗を変えたい人は「プロパティ」を当てずっぽうで開くことになる。
+ * `ready`・`closed`ではステップ表示自体が出ないので、そこでは2か所に収まる。
  */
 export function MobileIssuePropertiesSection({
   issue,
   isSubmitting,
   onToggleLabel,
   onAssigneeChange,
+  onIssueUpdated,
 }: MobileIssuePropertiesSectionProps) {
   const {
     labels: repoLabels,
     assignees: repoAssignees,
     isLoading: isMetaLoading,
   } = useIssueRepoMeta(issue.repositoryFullName);
+  // Projectへ未登録なら畳んだ行にも出さない（「未着手」と偽らない。セレクト側と同じ判定）
+  const progress = issue.projectStatus ? getProgressStatusDef(resolveProgressStatus(issue)) : null;
 
   return (
     <IssueDetailSection
@@ -54,12 +70,15 @@ export function MobileIssuePropertiesSection({
       title="プロパティ"
       summary={
         <span className="truncate text-xs text-muted-foreground">
+          {progress && `進捗 ${progress.label} ・ `}
           担当 {issue.assignee?.login ?? "未設定"}
           {issue.labels.length > 0 && ` ・ ラベル ${issue.labels.length}`}
         </span>
       }
     >
       <div className="flex flex-col gap-4">
+        <IssueProgressSelect issue={issue} onIssueUpdated={onIssueUpdated} />
+
         <div>
           <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">担当者</h3>
           <Select
