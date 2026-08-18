@@ -353,6 +353,39 @@ export function useDispatchState(enabled: boolean) {
     [markChanged],
   );
 
+  /**
+   * サブPCのチェックアウトを更新してpollerを畳む（#1875）。
+   *
+   * **送るのはホスト名だけ。** Issueに紐づく操作ではないため、リポジトリも番号も渡さない
+   * （サーバー側が埋め草を入れる）。
+   *
+   * 失敗の理由は`error`（共有）へ入れず戻り値で返す（`runManualStep`と同じ理由。押した場所と
+   * 表示が離れると話が通じない）。
+   */
+  const requestSelfUpdate = useCallback(
+    async (hostName: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ host: hostName, kind: "self_update" }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリングを待たずに状態を出す。**pull型で最大30秒何も起きない**ため
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   const cancel = useCallback(async (jobId: string): Promise<boolean> => {
     setIsSubmitting(true);
     setError(null);
@@ -461,6 +494,7 @@ export function useDispatchState(enabled: boolean) {
     enqueue,
     sendSessionControl,
     runManualStep,
+    requestSelfUpdate,
     cancel,
     dismiss,
     prioritize,

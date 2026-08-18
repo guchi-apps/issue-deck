@@ -25,6 +25,10 @@ import {
   parseDispatchHostName,
   parseDispatchHostRepositories,
   parseDispatchJobKind,
+  isOutOfBandJobKind,
+  buildSelfUpdateActiveKey,
+  SELF_UPDATE_REPOSITORY,
+  SELF_UPDATE_ISSUE_NUMBER,
   parseDispatchReportStatus,
   parseDispatchTarget,
   parseSessionInstruction,
@@ -865,6 +869,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
       planReviewCapable: null,
+      selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -925,6 +930,7 @@ describe("横断質問（#1454）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
       planReviewCapable: null,
+      selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1091,6 +1097,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: true,
       planReviewCapable: true,
+      selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1306,6 +1313,7 @@ describe("resolveManualStepHost", () => {
       online: true,
       manualStepCapable: true,
       planReviewCapable: null,
+      selfUpdateCapable: null,
       repositories: [],
       ...overrides,
     } as DispatchHostView;
@@ -1324,5 +1332,35 @@ describe("resolveManualStepHost", () => {
     const hosts = [hostFor({ name: "oldpc", manualStepCapable: null })];
     expect(resolveManualStepHost(hosts)?.name).toBe("oldpc");
     expect(resolveManualStepHost([])).toBeNull();
+  });
+});
+
+describe("チェックアウトの更新（#1875）", () => {
+  it("更新ジョブの活性キーはホストで一意になる", () => {
+    // **Issueではなくホストで一意にする。** 同じホストへ二重に積むと、1本目の再起動中に
+    // 2本目が届いて中途半端な状態になる
+    expect(buildSelfUpdateActiveKey("subpc")).toBe("self_update:host:subpc");
+    expect(buildSelfUpdateActiveKey("subpc")).not.toBe(buildSelfUpdateActiveKey("subpc2"));
+  });
+
+  it("Issue単位のキーと混ざらない", () => {
+    // 埋め草の`issue-deck#0`で作ったキーと衝突すると、Issue側の操作と取り合いになる
+    expect(buildSelfUpdateActiveKey("subpc")).not.toBe(
+      buildDispatchActiveKey(SELF_UPDATE_REPOSITORY, SELF_UPDATE_ISSUE_NUMBER, "SELF_UPDATE"),
+    );
+  });
+
+  it("`self_update`を種別として読める", () => {
+    expect(parseDispatchJobKind("self_update")).toBe("SELF_UPDATE");
+  });
+
+  it("セッションを立てない種別として扱う", () => {
+    // 枠外で払い出し、QUEUEDのまま5分で失効させる（手作業の代行と同じ性質）
+    expect(isOutOfBandJobKind("SELF_UPDATE")).toBe(true);
+    expect(isSessionLaunchJobKind("SELF_UPDATE")).toBe(false);
+  });
+
+  it("画面に出す名前を持つ", () => {
+    expect(describeDispatchJobKind("SELF_UPDATE")).toBe("チェックアウトの更新");
   });
 });
