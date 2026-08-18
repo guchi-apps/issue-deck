@@ -5,6 +5,7 @@ import {
   canCompleteManualStep,
   checkUserReason,
   isCheckUserReasonLabel,
+  isSessionRemovableCheckUserReason,
   labelsWithCheckUserReason,
   isLabelFilterPresetActive,
   isMergeApprovalPending,
@@ -328,6 +329,23 @@ describe("checkUserReason（#1490）", () => {
         makeLabel("01.check-plan"),
       ]),
     ).toBe("plan");
+  });
+});
+
+describe("isSessionRemovableCheckUserReason（#1905）", () => {
+  it("セッション自身が付ける理由なら外してよい", () => {
+    expect(isSessionRemovableCheckUserReason("plan")).toBe(true);
+    expect(isSessionRemovableCheckUserReason("input")).toBe(true);
+    expect(isSessionRemovableCheckUserReason("blocked")).toBe(true);
+  });
+
+  it("別の実行体が付ける理由は外さない（人がマージ・確認の合図を失うため）", () => {
+    expect(isSessionRemovableCheckUserReason("merge")).toBe(false);
+    expect(isSessionRemovableCheckUserReason("answered")).toBe(false);
+  });
+
+  it("理由が読めない（ラベル未配布）ときは従来どおり外す", () => {
+    expect(isSessionRemovableCheckUserReason(null)).toBe(true);
   });
 });
 
