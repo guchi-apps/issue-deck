@@ -25,6 +25,12 @@
 #                 **GitHubの手作業Issueの本文と照合してから**、別プロセス
 #                 （scripts/run-manual-step.sh）で実行し、終了コードと出力を画面へ返す
 #
+# ジョブとは別に、**画面から何も押されなくても1巡ごとに行うことがある**（#1971）。
+#
+#   APIエラー（529等）で中断して止まったセッションの検知と自動再開
+#   （`resume_interrupted_sessions`。送るのは固定の1行だけで、経路は`INSTRUCTION`と同じ
+#   3段階プロトコル。CLAUDE.mdの`send-keys`禁止に対する3つ目の例外にあたる）
+#
 # 立てるセッションにも2種類ある（#1454）。
 #
 #   LAUNCH              … 実装セッション。scripts/start-local-session.sh 経由でworktreeを作る
@@ -67,6 +73,10 @@
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
+#   SESSION_RESUME_ENABLED          APIエラーで中断したセッションの自動再開（省略時は1・0で無効）
+#   SESSION_RESUME_STALL_MINUTES    中断とみなすまでの停滞の分数（省略時は10）
+#   SESSION_RESUME_MAX_ATTEMPTS     1セッションあたりの再開の上限回数（省略時は3）
+#   SESSION_RESUME_INTERVAL_MINUTES 再開を試みる間隔の分数（省略時は5）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
@@ -98,7 +108,8 @@ set -euo pipefail
 # 13: 走っている代行実行を止める（`MANUAL_STEP_ABORT`）（#1882）。
 # 14: チェックアウトの更新（`SELF_UPDATE`）を実際に実行できるようにする（#1927）。13以前は
 #     `selfUpdate`を申告していても、埋め草のIssue番号`0`が検証で弾かれて全件失敗していた。
-DISPATCH_POLLER_VERSION="14"
+# 15: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
+DISPATCH_POLLER_VERSION="15"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -112,6 +123,12 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 # セッションを畳んだときの状態ファイルの後始末に使う（#1332。reap-sessions.shと同じ扱い）。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
+# APIエラーで中断したセッションの検知（#1971）。**転記を読むのはこの用途だけ**で、
+# 判定の中身は`lib/session-resume.sh`、転記の場所の解決は`lib/session-transcript.sh`が持つ。
+# shellcheck source=scripts/lib/session-transcript.sh
+source "$SCRIPT_DIR/lib/session-transcript.sh"
+# shellcheck source=scripts/lib/session-resume.sh
+source "$SCRIPT_DIR/lib/session-resume.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
@@ -130,6 +147,9 @@ SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
 # worktreeの掃除（#1716）。**新しい常駐プロセスもsystemd timerも増やさず、この1巡に相乗りさせる。**
 # ただし上の2つと違い毎巡は呼ばず、`WORKTREE_CLEANUP_INTERVAL_MINUTES` の間隔で呼ぶ。
 WORKTREE_CLEANER="$SCRIPT_DIR/cleanup-worktrees.sh"
+# セッションの通知（#1219）。**通知の文面と送り先を持つのは向こう1箇所**なので、pollerからも
+# 同じスクリプトを呼ぶ（#1971。自動再開をあきらめたときだけ使う）。
+NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
 
 # 起動時の引数。**チェックアウトの更新のあと`exec`で自分を入れ替えるときに渡し直す**（#1927）。
 POLLER_ARGV=("$@")
@@ -1045,28 +1065,32 @@ instruction_input_line() {
 # **`capture-pane`の内容を読むのはこの機能だけ。** #1217のセッション報告は「画面の内容は
 # 読まない」で通しており、その線は維持する（読んだ内容で決めてよいのは「送ってよい／送らない」の
 # 一方向だけで、内容から次に送るものを決めることはしない）。
+#
+# 第2引数は許可する状態イベント（`|`区切り。省略時は`Stop`だけ）。**広げてよいのは
+# `working`まで**で、APIエラーで中断したセッションの自動再開（#1971）だけがそれを渡す。
+# あちらは`Stop`フックが飛ばないまま止まるため`working`のまま残り、しかし転記の末尾が
+# APIエラーであることを別途確かめてから来る。`permission_prompt`は**どの経路でも許可しない**
+# （事故が起きたのはまさにこの状態）。
 instruction_ready() {
-  local session="$1" event last_event pane input_line rest
+  local session="$1" allowed="${2:-Stop}" event last_event pane input_line rest
 
-  # 1a. 状態ファイル（#1219・#1357）。**最後のイベントが`Stop`のときだけ送る。**
-  # `permission_prompt`は承認プロンプト・`AskUserQuestion`の表示中で、事故が起きたのはまさに
-  # この状態。`working`は作業中。**記録が無いときも送らない**（判定材料が無い＝確かめられない）。
+  # 1a. 状態ファイル（#1219・#1357）。**最後のイベントが`$allowed`に含まれるときだけ送る**
+  # （既定は`Stop`だけ）。`permission_prompt`は承認プロンプト・`AskUserQuestion`の表示中で、
+  # 事故が起きたのはまさにこの状態。`working`は作業中。
+  # **記録が無いときも送らない**（判定材料が無い＝確かめられない）。
   if ! event="$(session_state_read_event "$session")" || [[ -z "$event" ]]; then
     echo "セッションの状態が記録されていないため送りませんでした（フックが動いていない可能性があります）"
     return 1
   fi
   last_event="${event##* }"
-  case "$last_event" in
-    Stop) ;;
-    permission_prompt)
-      echo "承認プロンプトまたは選択フォームの表示中のため送りませんでした（答えるのはRemote Controlから行ってください）"
-      return 1
-      ;;
-    *)
-      echo "セッションが作業中のため送りませんでした（最後のイベント: $last_event）"
-      return 1
-      ;;
-  esac
+  if [[ "$last_event" == "permission_prompt" ]]; then
+    echo "承認プロンプトまたは選択フォームの表示中のため送りませんでした（答えるのはRemote Controlから行ってください）"
+    return 1
+  fi
+  if [[ ! "$last_event" =~ ^($allowed)$ ]]; then
+    echo "セッションが作業中のため送りませんでした（最後のイベント: $last_event）"
+    return 1
+  fi
 
   pane="$(tmux capture-pane -p -t "=$session:" 2>/dev/null || true)"
   if [[ -z "$pane" ]]; then
@@ -1115,59 +1139,164 @@ instruction_reflected() {
 }
 
 # 追加指示を1件送る。**このプロトコルの全体がここに閉じている。**
-send_session_instruction() {
-  local job_id="$1" session="$2" body="$3" reason
+#
+# **ジョブに依らない**（#1971でAPIエラーからの自動再開も同じ経路を
+# 通すため切り出した）。第3引数は`instruction_ready`へ渡す「許可する状態イベント」。
+#
+# 返り値: 0=送った / 1=見送り（安全機構が正常に止めた）/ 2=送れなかった（異常）
+# 1・2のときは理由を標準出力へ1行で返す。**呼び出し元が報告の形（ジョブ／ログ）を決める。**
+deliver_session_instruction() {
+  local session="$1" body="$2" allowed="${3:-Stop}" reason
 
   if [[ -z "$body" ]]; then
-    report_job "$job_id" failed "追加指示の本文が空です" "$session"
-    return 0
+    echo "追加指示の本文が空です"
+    return 2
   fi
   # 受け口（`parseSessionInstruction`）と同じ検証を重ねる。**ここが最後に端末へ渡す場所**なので、
   # issue-deck側で検証済みでも改めて確かめる（多層防御。セッション名の突き合わせと同じ立場）。
   if [[ "$body" == *$'\n'* || "$body" =~ [[:cntrl:]] ]]; then
-    report_job "$job_id" failed "追加指示の本文に改行または制御文字が含まれています" "$session"
-    return 0
+    echo "追加指示の本文に改行または制御文字が含まれています"
+    return 2
   fi
   if ((${#body} > 500)); then
-    report_job "$job_id" failed "追加指示の本文が長すぎます（${#body}文字）" "$session"
-    return 0
+    echo "追加指示の本文が長すぎます（${#body}文字）"
+    return 2
   fi
 
   # 段1: 状態確認
-  if ! reason="$(instruction_ready "$session")"; then
+  if ! reason="$(instruction_ready "$session" "$allowed")"; then
     # **失敗ではなく見送り。** 安全機構が正常に働いた結果で、何も壊れていない（#1229と同じ扱い）。
-    # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
-    echo "  追加指示を見送りました: $reason"
-    report_job "$job_id" skipped "$reason" "$session"
-    return 0
+    echo "$reason"
+    return 1
   fi
 
   # 段2: 本文のみ送出（Enterは送らない）。`-l`はリテラル送出で、`--`以降を値として扱わせる
   # （`-l`が無いと`Enter`のようなキー名として解釈されうる）。
   if ! tmux send-keys -t "=$session:" -l -- "$body" 2>/dev/null; then
-    report_job "$job_id" failed "追加指示の本文を送れませんでした: $session" "$session"
-    return 0
+    echo "追加指示の本文を送れませんでした: $session"
+    return 2
   fi
 
   # 段3: 反映の再確認。**ここで止まったら追加のキーは一切送らない。** 本文がどこへ入ったのか
   # 分からない状態で消しにいく（`C-u`など）のは、事故の元をもう1つ増やすことになる。
   if ! instruction_reflected "$session" "$body"; then
-    report_job "$job_id" failed \
-      "本文が入力欄に反映されたことを確認できなかったため、Enterを送っていません。入力欄に文字が残っている可能性があります（tmux attach -t $session で確認してください）" \
-      "$session"
-    return 0
+    echo "本文が入力欄に反映されたことを確認できなかったため、Enterを送っていません。入力欄に文字が残っている可能性があります（tmux attach -t $session で確認してください）"
+    return 2
   fi
 
   # 段4: 確定キーを別送
   if ! tmux send-keys -t "=$session:" Enter 2>/dev/null; then
-    report_job "$job_id" failed \
-      "本文は入力欄に入りましたが、確定キーを送れませんでした（tmux attach -t $session で確認してください）" \
-      "$session"
-    return 0
+    echo "本文は入力欄に入りましたが、確定キーを送れませんでした（tmux attach -t $session で確認してください）"
+    return 2
   fi
 
-  echo "  追加指示を送りました: $session"
-  report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+  return 0
+}
+
+# 画面から積まれた追加指示（`INSTRUCTION`）を1件送り、結果をジョブとして報告する。
+send_session_instruction() {
+  local job_id="$1" session="$2" body="$3" message status=0
+
+  message="$(deliver_session_instruction "$session" "$body")" || status=$?
+  case "$status" in
+    0)
+      echo "  追加指示を送りました: $session"
+      report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+      ;;
+    1)
+      # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
+      echo "  追加指示を見送りました: $message"
+      report_job "$job_id" skipped "$message" "$session"
+      ;;
+    *)
+      report_job "$job_id" failed "$message" "$session"
+      ;;
+  esac
+  return 0
+}
+
+# --- APIエラーで中断したセッションの自動再開（#1971）-----------------------------
+# Claude Codeがサーバー側の一時エラー（529 Overloaded など）を再試行しきると、そのturnは
+# `API Error: 529 Overloaded. ...` の表示で打ち切られ、**`Stop`フックが飛ばないまま**入力欄へ
+# 戻る。誰にも通知されず、状態ファイルは`working`のまま止まり、回収も追加指示も効かない。
+# 2026-08-18には6セッションが5時間半それで止まっていた（`lib/session-resume.sh`の冒頭を参照）。
+#
+# **ここはCLAUDE.md「監視・計画レビューを行う実行体の禁止事項」の3つ目の例外**にあたる。
+# 事故（選択フォームの表示中に本文＋Enterを送り、勝手に回答済みになった）を再発させないため、
+# 次の3つを同時に満たす形でだけ開けている。
+#
+#   1. 送る本文は固定（`SESSION_RESUME_BODY`）。**状況を読んで返事を組み立てない**
+#   2. 送る経路は人が押したときと同じ3段階プロトコル（`deliver_session_instruction`）。
+#      承認プロンプト・選択フォームの表示中、処理中、入力欄に打ちかけがある場合は送らない
+#   3. 送ってよいのは、**転記の末尾がAPIエラーである**ことを確かめられたセッションだけ
+#
+# 上限（既定3回）を使い切ったら送るのをやめ、Signalyへ1度だけ通知して人へ渡す。
+
+# 中断したセッションをSignalyへ引き上げる（#1971）。**通知の文面と送り先を持つのは
+# `session-notify.sh`1箇所**なので、pollerは合成したフックJSONを渡すだけにする。
+# `session_id`を載せるのは、向こうがRemote ControlのURLを引くのに使うため。
+notify_session_interrupted() {
+  local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5"
+  local session_id hook_json
+  [[ -x "$NOTIFY_SCRIPT" ]] || return 0
+  session_id="$(session_transcript_record_field "$session" sessionId 2>/dev/null || true)"
+  hook_json="$(jq -nc --arg id "$session_id" --arg detail "$detail" \
+    '{hook_event_name: "SessionInterrupted", session_id: $id, interrupt_detail: $detail}')" || return 0
+  printf '%s' "$hook_json" |
+    SESSION_NOTIFY_TMUX_SESSION="$session" "$NOTIFY_SCRIPT" "$issue_number" "$repo_name" "$full_name" ||
+    true
+  return 0
+}
+
+resume_interrupted_sessions() {
+  local session_name repo_name issue_number full_name message status attempts
+
+  [[ "${SESSION_RESUME_ENABLED:-1}" != "0" ]] || return 0
+
+  while IFS= read -r session_name; do
+    [[ -n "$session_name" ]] || continue
+    # 実装セッションだけを対象にする。計画レビュー・横断質問はフックの状態ファイルを持たず
+    # （名前が`-issue-`の規約から外れている）、段1で必ず弾かれる。
+    [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+
+    if ! session_resume_interrupted "$session_name"; then
+      # 自力で動き出した（または最初から止まっていない）。**次に別の理由で止まったときに
+      # 前回の回数を引きずらないよう、ここで消す。**
+      session_state_clear_resume "$session_name"
+      continue
+    fi
+
+    if session_resume_exhausted "$session_name"; then
+      session_resume_notified "$session_name" && continue
+      full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
+      echo "APIエラーからの自動再開をあきらめました（上限 ${SESSION_RESUME_MAX_ATTEMPTS} 回）: $session_name"
+      notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
+        "自動再開を${SESSION_RESUME_MAX_ATTEMPTS}回試しましたが再開できませんでした。"
+      session_resume_record_notified "$session_name"
+      continue
+    fi
+
+    session_resume_due "$session_name" || continue
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "--dry-run のため再開しません（APIエラーで中断: $session_name）"
+      continue
+    fi
+
+    # **許可する状態イベントに`working`を足すのはここだけ。** 中断したセッションは`Stop`が
+    # 飛ばないまま`working`で止まっているため、既定のままでは自分の中断を直せない。
+    status=0
+    message="$(deliver_session_instruction "$session_name" "$SESSION_RESUME_BODY" 'Stop|working')" || status=$?
+    session_resume_record_attempt "$session_name"
+    attempts="$(session_resume_read_state "$session_name" | awk '{print $2}')"
+    case "$status" in
+      0) echo "APIエラーで中断していたため再開しました（${attempts}/${SESSION_RESUME_MAX_ATTEMPTS}回目）: $session_name" ;;
+      1) echo "APIエラーで中断していますが再開を見送りました: $session_name: $message" ;;
+      *) echo "APIエラーで中断していますが再開できませんでした: $session_name: $message" ;;
+    esac
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
   return 0
 }
 
@@ -1660,6 +1789,10 @@ run_once() {
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
     return 0
   fi
+
+  # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**
+  # 畳まれたセッションへ送りに行かず、報告には再開前の状態が残る（前後関係が読める）。
+  resume_interrupted_sessions
 
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。

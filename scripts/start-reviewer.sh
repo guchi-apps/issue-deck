@@ -62,6 +62,9 @@ source "$ROOT/scripts/lib/agent-language.sh"
 # 計画レビューのプロンプトの組み立て（#1855）。自動の入口（start-plan-review.sh）と共有する。
 # shellcheck source=scripts/lib/plan-review-prompt.sh
 source "$ROOT/scripts/lib/plan-review-prompt.sh"
+# APIの一時的な過負荷（529）で打ち切られにくくする（#1971）。実装セッションと同じ値を使う。
+# shellcheck source=scripts/lib/claude-retries.sh
+source "$ROOT/scripts/lib/claude-retries.sh"
 
 # このスクリプトが見るリポジトリ。G2のPR一覧の取得先と、G1のプロンプトへ埋める`{{REPOSITORY}}`。
 REVIEW_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
@@ -212,6 +215,8 @@ append_language_system_prompt
 # 環境変数で切り替える。レビュー・統合エージェントも`gh pr view`・`gh pr merge`等のBashコマンドを
 # 多用するため、`acceptEdits`のままでは都度停止する。
 PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+
+claude_export_max_retries
 
 echo "Claude Codeセッションを権限モード $PERMISSION_MODE で起動します（このターミナルで実行）..."
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
