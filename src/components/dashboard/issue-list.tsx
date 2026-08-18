@@ -11,6 +11,7 @@ import {
   CircleSlash,
   Clock,
   Compass,
+  ExternalLink,
   ListChecks,
   Loader2,
   Lock,
@@ -32,13 +33,13 @@ import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
-import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
-import { isProgressLabel } from "@/lib/issue-status";
+import { isImplementationOptionLabel, isProgressLabel } from "@/lib/issue-status";
 import {
   formatManualStepListCount,
   type ManualStepReadiness,
@@ -139,9 +140,14 @@ type IssueListProps = {
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
 // （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
-// WorkflowStepBadgeが進捗と確認待ちの理由を表現するため、下部のラベル一覧からは除外する
-function nonStatusLabels(labels: IssueLabel[]) {
-  return labels.filter((label) => !isProgressLabel(label.name));
+// WorkflowStepBadgeが進捗と確認待ちの理由を表現するため、下部のラベル一覧からは除外する。
+// **実装オプション（20番台）も出さない**（#1915）。「実装を開始」ダイアログで選んだ走らせ方で、
+// 盤面を眺めるときの手掛かりにならないうえ、ラベル行が2行に折り返してRemote Controlを
+// 置く場所が無かった。付いているものをすべて見るのはIssue詳細の役割
+function listCardLabels(labels: IssueLabel[]) {
+  return labels.filter(
+    (label) => !isProgressLabel(label.name) && !isImplementationOptionLabel(label.name),
+  );
 }
 
 function IssueStateIcon({ issue }: { issue: Issue }) {
@@ -388,6 +394,13 @@ export function IssueList({
   }
 
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
+    // 一覧から直接開く出口（#1915）。**出す条件はIssue詳細（`IssueSessionStatus`）と同じ**で、
+    // 判定は`summarizeIssueSession`に任せる。終了したセッション・まだ開始していないセッションの
+    // URLは開いても意味が無く、そこで同じ分岐をここに書き足すと片方だけ古くなる
+    const remoteControlUrl = (() => {
+      const session = sessionByIssueId.get(issue.id);
+      return session ? summarizeIssueSession(session).remoteControlUrl : null;
+    })();
     return (
       <li
         key={issue.id}
@@ -395,9 +408,19 @@ export function IssueList({
           if (el) itemRefs.current.set(issue.id, el);
           else itemRefs.current.delete(issue.id);
         }}
+        className={cn(
+          "relative border-b border-l-4 border-l-transparent hover:bg-accent",
+          highlightedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
+          isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
+        )}
       >
+        {/* 行を選ぶ当たり判定（#1915）。**本文を包む`<button>`にしない。** ラベル行へ足した
+            Remote Controlはリンク（`<a>`）で、ボタンの中に置くと不正なHTMLになり、押したときに
+            Issueの選択まで走る。カード全面へ敷いたこのボタンを本文の下に置き、本文側は
+            ポインタを透過させることで、見た目を変えずに「カードのどこを押しても選択」を保つ */}
         <button
           type="button"
+          aria-label={`#${issue.number} ${issue.title}`}
           onClick={() => {
             if (isSelecting) {
               toggleSelected(issue.id);
@@ -406,12 +429,9 @@ export function IssueList({
             setOptimisticSelectedId(issue.id);
             onSelectIssue(issue);
           }}
-          className={cn(
-            "flex w-full flex-col gap-1.5 border-b border-l-4 border-l-transparent px-4 py-3 text-left hover:bg-accent",
-            highlightedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
-            isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
-          )}
-        >
+          className="absolute inset-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        />
+        <div className="pointer-events-none relative flex w-full flex-col gap-1.5 px-4 py-3 text-left">
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
               {isSelecting && (
@@ -475,7 +495,7 @@ export function IssueList({
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center gap-1">
               <QuestionStateBadge state={resolveQuestionState(issue)} />
-              {nonStatusLabels(issue.labels).map((label) => (
+              {listCardLabels(issue.labels).map((label) => (
                 <span
                   key={label.name}
                   className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
@@ -486,6 +506,23 @@ export function IssueList({
               ))}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {/* 走っているセッションを一覧から開く（#1915）。**ラベル行の右端に置く**——
+                  カードの下へ1行足すと、セッションのあるカードだけ高さが変わって一覧が
+                  不揃いになる。文言は「Remote」まで詰め、全文は`title`・`aria-label`に持たせる */}
+              {remoteControlUrl && (
+                <Button variant="outline" size="xs" asChild className="pointer-events-auto">
+                  <a
+                    href={remoteControlUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Remote Controlで開く"
+                    aria-label={`#${issue.number}のRemote Controlで開く`}
+                  >
+                    <ExternalLink />
+                    Remote
+                  </a>
+                </Button>
+              )}
               {issue.commentCount > 0 && (
                 <span className="flex items-center gap-0.5">
                   <MessageSquare className="size-3" />
@@ -499,7 +536,7 @@ export function IssueList({
               <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
-        </button>
+        </div>
       </li>
     );
   }
