@@ -27,15 +27,20 @@ export const AUTO_REFRESH_INTERVAL_OPTIONS: AutoRefreshOption[] = [
 ];
 
 /**
- * 一覧の自動更新間隔（#1531・#1947）。ユーザーが選ぶ対象ではなく、更新ボタンを押させない
- * ための固定値。
+ * PR一覧（PCのPRペイン・スマホのPR画面）の自動更新間隔（#1531・#1947）。ユーザーが選ぶ
+ * 対象ではなく、CIの進捗やマージの状況に気づくのに更新ボタンを押させないための固定値。
  *
- * **Issue一覧（`use-issue-polling.ts`）とPR一覧（`issue-deck-shell.tsx`）で同じ値を使う。**
- * 元は「完了したPR」ビューだけの間隔だったが、PR画面から更新ボタンを外した（#1947）ので、
- * どちらの一覧も「開いている間は10秒ごとに勝手に新しくなる」という同じ約束になった。
- * 別々に持つと、片方を変えたときに画面ごとに古さが違うという分かりにくい差が生まれる。
+ * 元は「完了したPR」ビューだけの間隔だったが、ヘッダーの「更新」ボタンを外した（#1947）ため、
+ * PR画面を開いている間はどのビューでもこの間隔で回す。
+ *
+ * **Issue一覧のポーリング（`use-issue-polling.ts`）とは値が同じでも定数を分ける。**
+ * あちらは`GET /api/issues`（DBの読み取りだけ）で、こちらは1巡ごとにGitHub APIを
+ * 「リポジトリ数のREST（ETagで304なら消費0）＋ draft以外のopen PR数のGraphQL
+ * （条件付きGETが効かない）」だけ使う。冒頭の「1回の取得コストが重い画面ほど間隔を長くする」に
+ * 従って片方だけ間隔を見直せるようにしておく（1つに寄せると、PR一覧を延ばしたいだけの
+ * ときにIssue一覧まで巻き込む）。
  */
-export const LIST_POLL_INTERVAL_MS = 10_000;
+export const PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
 
 /** 「1分間隔」のように画面へ出す文言にする。分で割り切れない値は秒で出す */
 export function autoRefreshIntervalLabel(intervalMs: number): string {

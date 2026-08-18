@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
-  LIST_POLL_INTERVAL_MS,
+  PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
   shorterAutoRefreshInterval,
 } from "@/lib/auto-refresh";
@@ -15,7 +15,7 @@ describe("autoRefreshIntervalLabel", () => {
   });
 
   it("分に満たない間隔は秒で出す（一覧の10秒。#1531・#1947）", () => {
-    expect(autoRefreshIntervalLabel(LIST_POLL_INTERVAL_MS)).toBe("10秒間隔");
+    expect(autoRefreshIntervalLabel(PULL_REQUEST_POLL_INTERVAL_MS)).toBe("10秒間隔");
   });
 });
 

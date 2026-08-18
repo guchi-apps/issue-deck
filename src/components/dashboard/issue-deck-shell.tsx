@@ -55,7 +55,7 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import {
-  LIST_POLL_INTERVAL_MS,
+  PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
   shorterAutoRefreshInterval,
   type AutoRefreshIntervalMs,
@@ -343,8 +343,15 @@ export function IssueDeckShell({
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「完了したPR」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
-  // 取得1回のコストは「リポジトリ数 + draft以外のopen PR数」だが、いずれもETagの条件付きGETを
-  // 通しており変化が無い間は304＝レート制限を消費しない（`lib/github/conditional-request.ts`）。
+  //
+  // **コストは「消費0」ではない。** 1巡は「リポジトリ数のREST（ETagの条件付きGETを通すので
+  // 変化が無い間は304＝消費0）＋ draft以外のopen PR数のGraphQL（`fetchPullRequestCiState`。
+  // 条件付きGETが効かないので毎回消費する）」で、10秒間隔なら毎時
+  // 「360 × draft以外のopen PR数」ポイントのGraphQLを使う（上限5,000ポイント/時）。
+  // 共有ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に
+  // 触れうる。**PR1件ごとのGraphQLを1回へまとめる改善は#1962**で、そこまでは
+  // 設定の「GitHub API使用量」（`pull_request_list`）で消費を見られるようにしてある。
+  //
   // 歯止めは従来どおりで、**ペイン・画面を開いている間だけ**・裏に回ったタブでは取りに行かない
   // （`use-auto-refresh.ts`）。
   // 保留中の確認待ちトーストがある間も自動更新する（#1709）。CIが確定したかどうかは
@@ -362,7 +369,7 @@ export function IssueDeckShell({
   // 自動更新の間隔は「PR画面（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
   // 短い方（#1767）。どちらの要求も無ければnull＝自動更新しない。
   const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
-    autoRefreshPullRequests ? LIST_POLL_INTERVAL_MS : null,
+    autoRefreshPullRequests ? PULL_REQUEST_POLL_INTERVAL_MS : null,
     isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
   );
   const openPullRequests = usePullRequests(
@@ -1064,10 +1071,11 @@ export function IssueDeckShell({
                     isLoading={openPullRequests.isLoading}
                     autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                     error={openPullRequests.error}
-                    /* 引っ張って更新（#1947）。**`refresh`ではなく`refreshInBackground`。**
-                       `refresh`は取得effectを張り直すため`isLoading`が立ち、引っ張った直後に
-                       一覧が「読み込み中...」へ戻ってしまう。加えてこちらは完了を待てる */
-                    onRefresh={openPullRequests.refreshInBackground}
+                    /* 引っ張って更新（#1947）。**`refresh`でも`refreshInBackground`でもなく
+                       `refreshFromPull`。** `refresh`は取得effectを張り直すため引っ張った直後に
+                       一覧が「読み込み中...」へ戻り、`refreshInBackground`は自動更新と重なると
+                       空振りするうえ失敗も画面に出ない（`use-pull-requests.ts`） */
+                    onRefresh={openPullRequests.refreshFromPull}
                     onBack={goBack}
                     onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
                     onMerged={handlePullRequestMerged}
