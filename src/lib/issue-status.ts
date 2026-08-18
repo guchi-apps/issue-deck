@@ -65,24 +65,3 @@ export function isAutoAssignableLabelName(labelName: string): boolean {
   return band >= AUTO_ASSIGNABLE_MIN_BAND && band <= AUTO_ASSIGNABLE_MAX_BAND;
 }
 
-// 実装オプション（ゲート）の帯（#1915）。`21.plan-required`〜`25.artifact-required`は
-// 「実装を開始」ダイアログで人が選ぶ実行時の設定で、**Issueの内容ではなく走らせ方**を表す。
-// 十の位だけが意味を持つという番号帯の設計（docs/multi-agent/labels.md）に従い、
-// 個々のラベル名ではなく20番台であることで判定する。
-const OPTION_BAND_MIN = 20;
-const OPTION_BAND_MAX = 29;
-
-/**
- * 実装オプションのラベル（20番台）かどうか（#1915）。
- *
- * **一覧のカードでラベルを出すかどうかの判定に使う。** 一覧は「何のIssueか・急ぎか」を
- * 眺める場所で、どのゲートを選んで走らせたかは開いてから確かめれば足りる。オプションを
- * 並べていた頃はラベル行が2行に折り返し、行の右端に置く操作の場所が無かった。
- * **Issue詳細のラベル欄からは除外しない**（そこは付いているものをすべて見る場所）。
- */
-export function isImplementationOptionLabel(labelName: string): boolean {
-  const match = NUMBER_BAND_PATTERN.exec(labelName);
-  if (!match) return false;
-  const band = Number(match[1]);
-  return band >= OPTION_BAND_MIN && band <= OPTION_BAND_MAX;
-}

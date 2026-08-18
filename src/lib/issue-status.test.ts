@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   isAttentionLabel,
   isAutoAssignableLabelName,
-  isImplementationOptionLabel,
   isProgressLabel,
   matchStatusStep,
 } from "@/lib/issue-status";
@@ -105,25 +104,3 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
   });
 });
 
-// #1915: 一覧のカードはラベル行を1行に収め、右端にRemote Controlのボタンを置く
-describe("isImplementationOptionLabel", () => {
-  it("実装オプション（20番台）を実装オプションと判定する", () => {
-    expect(isImplementationOptionLabel("21.plan-required")).toBe(true);
-    expect(isImplementationOptionLabel("22.merge-confirm-required")).toBe(true);
-    expect(isImplementationOptionLabel("23.preview-required")).toBe(true);
-    expect(isImplementationOptionLabel("24.screenshot-required")).toBe(true);
-    expect(isImplementationOptionLabel("25.artifact-required")).toBe(true);
-  });
-
-  it("他の帯のラベルは対象にしない", () => {
-    expect(isImplementationOptionLabel("11.local")).toBe(false);
-    expect(isImplementationOptionLabel("50.feature")).toBe(false);
-    expect(isImplementationOptionLabel("71.manual-step")).toBe(false);
-    expect(isImplementationOptionLabel("80.Priority: High")).toBe(false);
-  });
-
-  it("番号プレフィックスの無いラベルは対象にしない", () => {
-    expect(isImplementationOptionLabel("bug")).toBe(false);
-    expect(isImplementationOptionLabel("2.plan")).toBe(false);
-  });
-});

@@ -40,15 +40,19 @@
 
 ### 一覧のカードに出すラベル（#1915）
 
-**Issue一覧のカードは、`00.`・`01.check-*`（要対応とその理由）と`20.`番台（実装オプション）を出さない**
-（`isProgressLabel`・`isImplementationOptionLabel`。`src/components/dashboard/issue-list.tsx`の
+**Issue一覧のカードは、`00.`・`01.check-*`（要対応とその理由）と実装オプションのラベルを出さない**
+（`isProgressLabel`・`isStartImplementationOptionLabel`。`src/components/dashboard/issue-list.tsx`の
 `listCardLabels`）。前者はカード右上の`WorkflowStepBadge`が同じことを言っており、後者は
 「実装を開始」ダイアログで選んだ**走らせ方**で、盤面を眺めるときの手掛かりにならない。
+**実装オプションかどうかの正は`START_IMPLEMENTATION_OPTIONS`**（`src/lib/github/start-implementation.ts`）で、
+番号帯の正規表現で別に判定を作らない——オプションを増やしたときに片方だけ増えて食い違う。
 
 出さない理由はもう一つあり、**ラベル行の右端がRemote Controlを開くボタンの場所**になっている。
 オプションを並べていた頃はラベル行が2行へ折り返し、置く場所が無かった。
 **新しいラベルの帯を足すときは、一覧に出すかどうかもここで決める**（付いているものをすべて
-見るのはIssue詳細の役割で、そちらからは除外しない）。
+見るのはIssue詳細の役割で、そちらからは除外しない）。なお`22.merge-confirm-required`・
+`23.preview-required`・`24.screenshot-required`は、バッジなど他の表示に置き換えが無いため
+**一覧からは読み取れなくなる**（#1915でそれを承知のうえ決めた）。
 
 ### 空き番号は詰めない
 

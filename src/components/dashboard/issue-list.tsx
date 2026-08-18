@@ -38,8 +38,9 @@ import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
+import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
-import { isImplementationOptionLabel, isProgressLabel } from "@/lib/issue-status";
+import { isProgressLabel } from "@/lib/issue-status";
 import {
   formatManualStepListCount,
   type ManualStepReadiness,
@@ -141,12 +142,12 @@ type IssueListProps = {
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
 // （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
 // WorkflowStepBadgeが進捗と確認待ちの理由を表現するため、下部のラベル一覧からは除外する。
-// **実装オプション（20番台）も出さない**（#1915）。「実装を開始」ダイアログで選んだ走らせ方で、
+// **実装オプションのラベルも出さない**（#1915）。「実装を開始」ダイアログで選んだ走らせ方で、
 // 盤面を眺めるときの手掛かりにならないうえ、ラベル行が2行に折り返してRemote Controlを
 // 置く場所が無かった。付いているものをすべて見るのはIssue詳細の役割
 function listCardLabels(labels: IssueLabel[]) {
   return labels.filter(
-    (label) => !isProgressLabel(label.name) && !isImplementationOptionLabel(label.name),
+    (label) => !isProgressLabel(label.name) && !isStartImplementationOptionLabel(label.name),
   );
 }
 
@@ -429,9 +430,9 @@ export function IssueList({
             setOptimisticSelectedId(issue.id);
             onSelectIssue(issue);
           }}
-          className="absolute inset-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+          className="absolute inset-0 z-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
         />
-        <div className="pointer-events-none relative flex w-full flex-col gap-1.5 px-4 py-3 text-left">
+        <div className="pointer-events-none relative z-10 flex w-full flex-col gap-1.5 px-4 py-3 text-left">
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
               {isSelecting && (
