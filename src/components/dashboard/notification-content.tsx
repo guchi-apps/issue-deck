@@ -138,6 +138,9 @@ export function NotificationContent({
  * **1件でも失敗（CIの失敗など）が混ざれば赤、それ以外は橙。** 開かずに「直す必要がある」と
  * 気づけるのはここだけのため（判定は`hasErrorNotification`）。0件のときは何も出さない。
  *
+ * **渡す`count`は一覧の行数ではなく`countBadgeNotifications`の結果**（#1936）。手作業待ちは
+ * 一覧には並ぶがここには数えない（理由は`lib/notifications.ts`の`BADGE_EXCLUDED_GROUPS`）。
+ *
  * 重ねる位置だけはボタンの大きさで変える。PCは`size-8`、スマホは指で押せる`size-11`で、
  * 同じオフセットにするとスマホではアイコンから離れて宙に浮く。
  */
@@ -165,7 +168,11 @@ export function NotificationBadge({
   );
 }
 
-/** ボタンのtitle・シートの見出しに添える件数の文言。0件でも押せることが分かる文言にする */
+/**
+ * ボタンのtitle・シートの見出しに添える件数の文言。0件でも押せることが分かる文言にする。
+ * **渡すのはバッジと同じ件数**（手作業待ちを除く。#1936）——バッジに出ている数字とツールチップが
+ * 食い違うと、どちらが本当なのか分からなくなる。
+ */
 export function describeNotificationTitle(count: number): string {
   return count > 0 ? `対応が必要なもの（${count}件）` : "対応が必要なもの";
 }

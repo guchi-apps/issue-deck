@@ -45,7 +45,7 @@ export function NotificationButton({
   onOpenFlow,
 }: NotificationButtonProps) {
   const [open, setOpen] = useState(false);
-  const { items, groups, hasError } = useNotificationState();
+  const { items, groups, badgeCount, countLabel, hasError } = useNotificationState();
 
   function handleSelect(item: NotificationItem) {
     setOpen(false);
@@ -60,11 +60,12 @@ export function NotificationButton({
         <button
           type="button"
           className="relative flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-accent"
-          title={describeNotificationTitle(items.length)}
+          title={describeNotificationTitle(badgeCount)}
           aria-label="対応が必要なもの"
         >
           <Bell className="size-4" />
-          <NotificationBadge count={items.length} hasError={hasError} />
+          {/* 数えるのは手作業待ちを除いたぶん（#1936）。中身の一覧には手作業待ちも並ぶ */}
+          <NotificationBadge count={badgeCount} hasError={hasError} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
@@ -73,7 +74,8 @@ export function NotificationButton({
         <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
           <h3 className="text-xs font-semibold">対応が必要なもの</h3>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">{items.length}件</span>
+            {/* バッジに数えていない手作業待ちがあれば内訳が付く（#1936） */}
+            <span className="text-xs text-muted-foreground">{countLabel}</span>
             <NotificationRefreshButton />
           </div>
         </div>
