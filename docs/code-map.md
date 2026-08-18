@@ -62,6 +62,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
+  `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
+  **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
+  以前のように本文ごと`<button>`で包むと、その中にリンクを置けない——不正なHTMLになるうえ、
+  押すとIssueの選択まで走る。枠線・選択ハイライト・ホバーは`<li>`側に付いている。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも

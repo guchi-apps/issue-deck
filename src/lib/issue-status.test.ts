@@ -103,3 +103,4 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
     expect(isAutoAssignableLabelName("3.bug")).toBe(false);
   });
 });
+

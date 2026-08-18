@@ -64,3 +64,4 @@ export function isAutoAssignableLabelName(labelName: string): boolean {
   if (band === AUTO_ASSIGNABLE_EXCLUDED_BAND) return false;
   return band >= AUTO_ASSIGNABLE_MIN_BAND && band <= AUTO_ASSIGNABLE_MAX_BAND;
 }
+
