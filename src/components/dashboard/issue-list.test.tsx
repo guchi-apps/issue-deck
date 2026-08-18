@@ -373,6 +373,49 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
   });
 });
 
+// #1964: 押さないと先へ進まない行を、一覧のまま見分けられるようにする
+describe("Remoteボタンの強調（#1964）", () => {
+  function remoteLinkOf(issueNumber: number): HTMLElement {
+    return screen.getByRole("link", { name: `#${issueNumber}のRemote Controlで開く` });
+  }
+
+  it("セッションが入力待ちの行は枠線がamberになる", () => {
+    renderList({ dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })]) });
+
+    expect(remoteLinkOf(1).className).toContain("border-amber-500");
+  });
+
+  it("動いているだけの行は今までどおりの枠線", () => {
+    renderList({ dispatch: makeDispatch([makeSession({ activity: "WORKING" })]) });
+
+    expect(remoteLinkOf(1).className).not.toContain("border-amber-500");
+  });
+
+  it("00.check-userが付いていれば、入力待ちでなくても強調する", () => {
+    renderList({
+      issues: [makeIssue({ number: 1, labels: [{ name: "00.check-user" }] as IssueLabel[] })],
+      dispatch: makeDispatch([makeSession({ activity: "WORKING" })]),
+    });
+
+    expect(remoteLinkOf(1).className).toContain("border-amber-500");
+  });
+
+  // マージはGitHub側の操作で、画面の対応PRから実行できる
+  it("理由が01.check-mergeなら強調しない", () => {
+    renderList({
+      issues: [
+        makeIssue({
+          number: 1,
+          labels: [{ name: "00.check-user" }, { name: "01.check-merge" }] as IssueLabel[],
+        }),
+      ],
+      dispatch: makeDispatch([makeSession({ activity: "WORKING" })]),
+    });
+
+    expect(remoteLinkOf(1).className).not.toContain("border-amber-500");
+  });
+});
+
 // #1915: 実装オプションでラベル行が折り返し、行の右端に置く場所が無かった
 describe("一覧のカードに出すラベル（#1915）", () => {
   const labeled = [
