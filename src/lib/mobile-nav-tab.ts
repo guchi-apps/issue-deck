@@ -19,9 +19,10 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
       return "pull-requests";
     // 全リポジトリ横断のIssue一覧はフッターから外し、ホームの「よくつかうフィルター」
     // 「保存したフィルター」「概要」からのドリルダウンだけにした（#1436）。
-    // 辿ってきた導線に合わせてホームを点灯させる。
+    // 辿ってきた導線に合わせてホームを点灯させる。#1951で「Issue」タブのリポジトリ一覧
+    // からも開けるようになったため、そこから来た場合だけ「Issue」タブを点灯させる。
     case "issues":
-      return "home";
+      return screen.origin === "repos" ? "repos" : "home";
     // 「ブランチ」画面は#1455ではホームからのドリルダウンだったが、#1638でタブになった
     case "flow":
       return "flow";

@@ -16,6 +16,12 @@ import type { Issue, NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 
+/**
+ * 全リポジトリ横断のIssue一覧（`mscreen=issues`）をどこから開いたか。URLの`mfrom`が正で、
+ * 未指定は`tab`。戻り先（`goBack`）とフッターの点灯（`resolveBottomNavTab`）に効く。
+ */
+export type MobileIssuesOrigin = "tab" | "home" | "repos";
+
 export type MobileScreen =
   | { kind: "home" }
   | {
@@ -27,9 +33,12 @@ export type MobileScreen =
       sort: IssueSort;
       returnToIssueId: string | null;
       // ボトムナビの「Issue」タブから直接開いたか（"tab"）、ホームの「よくつかう
-      // フィルター」「保存したフィルター」からのドリルダウンか（"home"）。ホーム経由の
-      // 場合のみ戻る導線（ヘッダーの戻るボタン・右スワイプ）を表示する（#525）。
-      origin: "tab" | "home";
+      // フィルター」「保存したフィルター」からのドリルダウンか（"home"）、「Issue」タブの
+      // リポジトリ一覧にある「すべてのリポジトリのIssue」からか（"repos"、#1951）。
+      // "tab"以外は戻る導線（ヘッダーの戻るボタン・右スワイプ）を表示する（#525）。
+      // **戻り先とフッターの点灯（`mobile-nav-tab.ts`）はこの値だけで決まる。**
+      // "home"と"repos"を一緒くたにすると、リポジトリ一覧から開いたのにホームへ戻る。
+      origin: MobileIssuesOrigin;
     }
   | { kind: "repos" }
   // 設定（#1638でボトムナビから外し、ホームのヘッダー右上の歯車から開く画面になった）。
@@ -78,7 +87,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const assigneeParam = searchParams.get("massignee");
   const sortParam = searchParams.get("msort");
   const fromParam = searchParams.get("mfrom");
-  const origin: "tab" | "home" = fromParam === "home" ? "home" : "tab";
+  const origin: MobileIssuesOrigin =
+    fromParam === "home" || fromParam === "repos" ? fromParam : "tab";
   const labels = useMemo(
     () => (labelsParam ? labelsParam.split(",").filter(Boolean) : []),
     [labelsParam],
@@ -158,12 +168,17 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       };
     }
 
-    if (screenParam === "repos" || screenParam === "settings") {
-      return { kind: screenParam };
+    if (screenParam === "repos") {
+      return { kind: "repos" };
+    }
+
+    if (screenParam === "settings") {
+      return { kind: "settings" };
     }
 
     if (screenParam === "pull-requests") {
-      return { kind: "pull-requests", origin };
+      // PR一覧の遷移元は"tab"か"home"だけ（"repos"はIssue一覧のための値・#1951）
+      return { kind: "pull-requests", origin: origin === "home" ? "home" : "tab" };
     }
 
     if (screenParam === "flow") {
@@ -187,7 +202,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         state?: IssueStateFilter | null;
         assignee?: string | null;
         sort?: IssueSort | null;
-        origin?: "tab" | "home" | null;
+        origin?: MobileIssuesOrigin | null;
         /** PR一覧の状態別ビュー（#1312）。PCと同じ`prview`クエリを共有する */
         prview?: PullRequestViewId | null;
       },
@@ -253,8 +268,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           params.delete("msort");
         }
 
-        if (next.origin === "home") {
-          params.set("mfrom", "home");
+        if (next.origin === "home" || next.origin === "repos") {
+          params.set("mfrom", next.origin);
         } else {
           params.delete("mfrom");
         }
@@ -350,6 +365,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen, view, state, isStateExplicit],
   );
 
+  // 「Issue」タブのリポジトリ一覧から、全リポジトリ横断のIssue一覧を開く（#1951）。
+  // ホームの「よくつかうフィルター」（selectQuickView）と違い、絞り込み条件は引き継がずに
+  // 「すべてのIssue」の既定の状態で開く——リポジトリ一覧には引き継ぐ条件が無い。
+  const selectAllIssues = useCallback(
+    () => navigate({ screen: "issues", view: "all", origin: "repos" }),
+    [navigate],
+  );
+
   const selectIssue = useCallback(
     (issue: Issue) =>
       navigate({
@@ -431,7 +454,11 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const goBack = useCallback(() => {
     goBackOrFallback(() => {
       if (mobileScreen.kind !== "issue-detail" && mobileScreen.kind !== "repo-detail") {
-        navigate({ screen: "home" }, { history: "replace" });
+        // リポジトリ一覧から開いた横断Issue一覧はリポジトリ一覧へ戻す（#1951）。
+        // 巻き戻せる履歴が無い（共有URLで直接開いた）ときだけここを通る
+        const fallback =
+          mobileScreen.kind === "issues" && mobileScreen.origin === "repos" ? "repos" : "home";
+        navigate({ screen: fallback }, { history: "replace" });
         return;
       }
 
@@ -481,6 +508,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
+    selectAllIssues,
     updateListFilters,
     goBack,
   };
