@@ -18,6 +18,12 @@
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
 #                                               **Signalyへもissue-deckへも送らない**
 #
+# **1つだけフック以外の入口がある**（#1971）。`SessionInterrupted`はClaude Codeのフックではなく、
+# pollerが合成して渡してくる合図で、「APIエラー（529等）でturnが打ち切られたまま止まっている」
+# ことを人へ引き上げる。このときClaude Codeは`Stop`を飛ばさないため、フックだけを待っていると
+# 誰にも伝わらない。**Signalyへ通知するだけ**で、状態の記録もissue-deckへの報告も行わない。
+# 対象のセッション名は`SESSION_NOTIFY_TMUX_SESSION`で受け取る（`$TMUX`が使えないため）。
+#
 # **`00.check-user`を付け外しするのは、自分が付けたときだけ**（印は`lib/session-state.sh`の
 # `<セッション名>.check-user`）。Issueに書かれた「Claudeがユーザーに質問したとき」
 # 「開発環境のリンクを提示したとき」「スクリーンショットを提示したとき」は、ローカルセッションでは
@@ -100,8 +106,14 @@ fi
 
 # tmuxのセッション名。状態ファイルのキーであり、`tmux attach -t <名前>` でそのまま繋げるよう
 # 通知にも載せる。tmuxの外で起動した場合は空になる。
+#
+# **`SESSION_NOTIFY_TMUX_SESSION`で外から渡せる**（#1971）。APIエラーで中断したセッションの
+# 引き上げは、そのセッションの中ではなくpollerから呼ばれるため`$TMUX`が使えない。
+# 渡された名前はそのセッションを指すだけで、ここから送る操作は無い（読むのと通知だけ）。
 NOTIFY_TMUX_SESSION=""
-if [[ -n "${TMUX:-}" ]]; then
+if [[ -n "${SESSION_NOTIFY_TMUX_SESSION:-}" ]]; then
+  NOTIFY_TMUX_SESSION="$SESSION_NOTIFY_TMUX_SESSION"
+elif [[ -n "${TMUX:-}" ]]; then
   NOTIFY_TMUX_SESSION="$(tmux display-message -p '#S' 2>/dev/null || true)"
 fi
 export NOTIFY_TMUX_SESSION
@@ -155,6 +167,7 @@ fi
 # 標準出力の1行目を「何をするか」、2行目以降をpayloadとして返す。
 #
 #   send <状態イベント> <activity> <remote-controlのURL|->   Signalyへ通知する（payloadはSignaly用）
+#   notify <->  <-> <remote-controlのURL|->                 Signalyへ通知するだけ（#1971。記録も報告もしない）
 #   quiet <状態イベント> <activity>                          issue-deckへだけ報告する（#1357）
 #   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用）
 #   skip                                                    何もしない
@@ -374,7 +387,24 @@ if event == "PostToolUse":
 #
 # `activity` はissue-deckの画面へ渡す値（#1264）。状態ファイル用の`state_event`と別に持つのは、
 # 片方がホスト内の回収判定、もう片方が画面表示という別々の用途のため。
-if event == "Stop":
+#
+# `decision`は下の1行にそのまま出る。`notify`はSignalyへ通知するだけで、状態の記録も
+# issue-deckへの報告も行わない（#1971。フックではなくpollerから来る合図のため、
+# 「今このセッションが何をしているか」を表す値を持たない）。
+decision = "send"
+
+if event == "SessionInterrupted":
+    # APIエラー（529 Overloaded など）でturnが打ち切られ、止まったままのセッション（#1971）。
+    # **これはClaude Codeのフックではなく、pollerが合成して渡してくる合図。**
+    # このときClaude Codeは`Stop`を飛ばさないため、ここが人へ届く唯一の経路になる。
+    # pollerは自動再開を上限まで試したあとにだけ呼ぶ（1セッションにつき1回）。
+    emoji = "⚠️"
+    color = "#ed4245"
+    label = "APIエラーで中断"
+    state_event = "-"
+    activity = "-"
+    decision = "notify"
+elif event == "Stop":
     emoji = "✅"
     color = "#57f287"
     label = "応答終了"
@@ -442,6 +472,11 @@ if issue_number:
 if host_name:
     fields.append({"name": "Host", "value": host_name, "inline": True})
 fields.append({"name": "Event", "value": label, "inline": True})
+# 中断の引き上げ（#1971）に添える一文。**pollerが持つ固定の文言だけが入る**
+# （セッションの画面や応答テキストは、他のイベントと同じくここへ載せない）。
+interrupt_detail = hook.get("interrupt_detail", "")
+if isinstance(interrupt_detail, str) and interrupt_detail.strip():
+    fields.append({"name": "詳細", "value": interrupt_detail.strip(), "inline": False})
 if tmux_session:
     fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
 preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
@@ -463,7 +498,7 @@ if remote_url:
     # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
     fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
 
-print("send", state_event, activity, remote_url or "-")
+print(decision, state_event, activity, remote_url or "-")
 print(json.dumps({"title": title, "color": color, "fields": fields}))
 PY
 )"
@@ -553,11 +588,20 @@ if [[ "$decision" == "plan" ]]; then
   exit 0
 fi
 
-if [[ "$decision" != "send" && "$decision" != "quiet" ]]; then
+if [[ "$decision" != "send" && "$decision" != "quiet" && "$decision" != "notify" ]]; then
   exit 0
 fi
 read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 [[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
+
+# 中断の引き上げ（#1971）はSignalyへ通知するだけ。**状態の記録もissue-deckへの報告も行わない。**
+# これはフックではなくpollerから来る合図で、「今このセッションが何をしているか」を表す値を
+# 持たない（`working`のまま止まっている、が最後に分かっている事実）。空にして、以降の
+# 記録・報告の条件から自然に外す。
+if [[ "$decision" == "notify" ]]; then
+  STATE_EVENT=""
+  ACTIVITY=""
+fi
 
 # このセッションが入力待ちに入ったこと（#1417）。**`00.check-user`を付けるのはここだけ。**
 # `Notification / permission_prompt`はAskUserQuestionの質問と権限の承認プロンプトで飛ぶ、
@@ -632,7 +676,10 @@ print(json.dumps({
     session_state_clear_check_user_pending "$NOTIFY_TMUX_SESSION" || true
   fi
 }
-report_activity_to_issue_deck
+# `activity`を持たない通知（#1971）はここを通さない。
+if [[ -n "$ACTIVITY" ]]; then
+  report_activity_to_issue_deck
+fi
 
 # 作業再開の報告（#1357）はここまで。**Signalyへは送らない**（答えたのは人自身で、
 # 同じことを通知し返す意味が無い）。

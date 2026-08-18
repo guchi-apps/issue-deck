@@ -63,6 +63,9 @@ source "$SCRIPT_DIR/lib/kickoff-prompt.sh"
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 
+# shellcheck source=scripts/lib/claude-retries.sh
+source "$SCRIPT_DIR/lib/claude-retries.sh"
+
 # start-issue.sh・generic-start-issue.sh も同じ警告を出しているが、そちらは呼び出し元プロセスの
 # 標準出力に出るだけで、tmux経由（`tmux new-session -d`）で起動した場合はそのまま誰にも見られずに
 # 消える。新しいtmuxのpaneは呼び出し元とは別のptyで、直後にこのスクリプトの出力だけが流れ込む
@@ -709,5 +712,8 @@ fi
 # 子プロセスなので、ここでexportしておけば通知にも載せられる。**セッション通知は入力待ちで
 # 飛ぶ**ので、そこにプレビューのURLがあると、気づいた側がその場で画面を開ける。
 export ISSUE_DECK_PREVIEW_URL="$PREVIEW_URL"
+
+# APIの一時的な過負荷（529 Overloaded）で中断しにくくする（#1971。理由は lib/claude-retries.sh）。
+claude_export_max_retries
 
 claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$KICKOFF_PROMPT"
