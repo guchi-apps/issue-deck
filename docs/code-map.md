@@ -67,6 +67,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
   以前のように本文ごと`<button>`で包むと、その中にリンクを置けない——不正なHTMLになるうえ、
   押すとIssueの選択まで走る。枠線・選択ハイライト・ホバーは`<li>`側に付いている。
+  - **その行のRemote Controlのボタンを強調するかの判定は
+    [`lib/remote-control-attention.ts`](../src/lib/remote-control-attention.ts)の
+    `shouldEmphasizeRemoteControl`だけが持つ**（#1964。`question-attention.ts`・
+    `manual-step-attention.ts`と同じ形）。**ボタンを出す条件（`summarizeIssueSession`の
+    `remoteControlUrl`）とは別物**なので、ボタンの側で両方を組み立てない。中身は
+    `isSessionWaitingInput`と`checkUserReason`・`isSessionRemovableCheckUserReason`を
+    合成するだけで、条件を書き下ろさない——入力待ちは`ALIVE`のときだけ、理由は
+    `00.check-user`とのANDでしか読まない、という既存の担保を二重に持たないため。
+    **強調は枠線と文字のamberだけで、中は塗らない**（同じ形の行が縦に続く一覧では、
+    塗りつぶしたボタンが1つあるだけで視線を奪う）。色は右上のバッジ
+    （`WorkflowStepBadge`）の確認待ちと同じamberを使い、同じ行の中で同じ意味に別の色を当てない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
@@ -135,9 +146,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893）。
-  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は`IssueList`の
-  `onPullToRefresh`を渡した画面（スマホのIssue一覧2画面）だけで有効になる。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958）。
+  判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
+  引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。
+  `onPullToRefresh`を渡した画面だけで有効になり、渡しているのはスマホのIssue一覧2画面・PR一覧
+  （#1947）・ブランチ画面（`BranchFlowView`。#1958）。**描画を一覧ごとに書かない**——文言・色・
+  戻りのアニメーションが片方だけ変わると、同じ操作なのに画面ごとに見え方が違うことになる。
+  **取り直しの完了を待てない画面は、画面側の取得中フラグを`isRefreshing`として渡す**（#1958）。
+  ブランチ画面の`refresh`は取り直しの合図を出すだけの同期関数で、待っても取得の完了とは無関係に
+  返るため、渡さないと数秒かかる取得の途中で「更新中…」が消える。フックはフラグが立つのを
+  待ってから下りるのを待つ（立たない・下りないときはそれぞれ上限で表示だけ戻す）。
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
   ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
@@ -562,7 +580,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
   （#1058の調査時点で全連携リポジトリ合計0件）、DBキャッシュを持つ効果より
   スキーマ・Webhook設定を増やさない方が勝つと判断した。
-  取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
+  取得コストは「対象リポジトリ数（REST）＋ installationごとに数回（GraphQL。CI状態と
+  コンフリクトをPRごとではなくエイリアスでまとめて引く。#1962）」で、母集団が広いぶん
   1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
   （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
   `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
@@ -676,8 +695,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`getAdjacentPullRequestViewId`が決める。
   **一覧本体だけをスワイプに追従させる**ため、`PullRequestList`はスクロール領域だけに掛かる
   `listStyle`と下端に固定する`footer`を受け取る（ヘッダーごと動かすと、ヘッダーを持たないIssue一覧と
-  見え方がずれる）。**ヘッダー右上の「更新」はスマホでも残す**——CIの進捗やマージの状況を
-  自動更新（1分間隔）より先に知りたい場面があり、スマホには下へ引っ張って更新する手段がまだ無い。
+  見え方がずれる）。**縦の引っ張りは`listStyle`と別の要素へ掛ける**（#1947）——同じ要素へ両方の
+  transformを書くと、ビュー切り替えの追従と引っ張りの追従が互いを打ち消す。
+  **ヘッダーに「更新」ボタンは置かない**（#1947。PC・スマホとも）——スマホは下へ引っ張って更新でき、
+  PR画面を開いている間はどのビューでも10秒間隔で自動更新するため、Issue一覧のヘッダーと同じ形に
+  そろえた。**引っ張って更新が呼ぶのは`usePullRequests`の`refreshFromPull`**——`refresh`は取得
+  effectを張り直すため引っ張った直後に一覧が「読み込み中...」へ戻り、`refreshInBackground`は
+  自動更新と重なると何もせず返る（空振り）うえ失敗も画面に出ない。更新ボタンを外した以上、
+  引っ張った結果が嘘にならないよう、**飛んでいる取得があればその完了を待ち、失敗は`error`に
+  出す**口を別に用意している。
   **ヘッダーの見出しはビュー名のまま**（「実行中のプルリクエスト」）で下端の行と重なるが、これは
   Issue一覧が見出しの行にもビュー名を出しているのと同じ意図——上は「いま何を見ているか」を
   スクロール中に見上げて確かめるためのもので、下は操作。**件数は`number | null`で、`null`は
@@ -713,7 +739,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「完了したPR」
   （CIがsuccess/failure）は**同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えても
   GitHub APIを叩き直さない。「完了したPR」は左メニューから外したが`prview=completed`のURLは
-  生きており、10秒ごとの自動更新（#1531）もそのまま。並び順は「すべてのPR」だけ更新が新しい順で、
+  生きている。**10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「完了したPR」
+  ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
+  歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
+  ポーリングと同じ間隔・同じ止め方にそろえてある。**ただし1巡のコストは「消費0」ではない。**
+  「リポジトリ数のREST（ETagの条件付きGETを通すので変化が無い間は304＝消費0）＋ draft以外の
+  open PR数のGraphQL（`fetchPullRequestCiState`。条件付きGETが効かず毎回消費する）」で、
+  10秒間隔なら毎時「360 × draft以外のopen PR数」ポイント（上限5,000ポイント/時）。共有
+  ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に触れうるので、
+  **PR1件ごとのGraphQLを1回へまとめる改善を#1962として分けてある。**
+  **値が同じでもIssue一覧のポーリング（`use-issue-polling.ts`の`POLL_INTERVAL_MS`）とは定数を
+  分ける**——あちらは`GET /api/issues`（DBの読み取りだけ）で、`lib/auto-refresh.ts`冒頭の
+  「1回の取得コストが重い画面ほど間隔を長くする」に従って片方だけ見直せるようにしておく。
+  並び順は「すべてのPR」だけ更新が新しい順で、
   他は作成が古い順＝滞留が長い順。
   マージ済みPRを一覧で振り返りたくなった時点で、キャッシュ層の追加とあわせて再検討する
   （いまはIssue・ブランチ画面のリンクから個別に開く。#1260）。
@@ -913,7 +951,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
   [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)が持つ）。**既定を「自動更新しない」に
   しているのは1巡の消費が重いから**——ブランチ状況はリポジトリあたりGraphQL 1回、PR一覧は
-  リポジトリあたりREST 2回（ETagで304なら消費0）＋draft以外のopen PRあたりGraphQL 1回で、
+  リポジトリあたりREST 2回（ETagで304なら消費0）＋CI状態をinstallationごとにGraphQL 数回で、
   26リポジトリを1分間隔で回すとGraphQLだけで毎時1,600ポイント前後（上限5,000ポイント/時）になる。
   回すのは**この画面を開いていて、かつタブが前面にある間だけ**（`hooks/use-auto-refresh.ts`が
   Page Visibility APIで止め、前面へ戻った時点で次の周期を待たずに取り直す）。

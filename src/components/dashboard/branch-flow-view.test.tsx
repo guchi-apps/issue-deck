@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
@@ -34,6 +34,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeJudgement: "unknown",
     mergeable: null,
     repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
@@ -70,6 +71,10 @@ function renderFlow(input: {
   onRefresh?: () => void;
   /** マージできたときの後始末（#1756）。渡さない場合は`onRefresh`へ縮退する */
   onMerged?: (pullRequest: PullRequestSummary) => void;
+  /** 引っ張って更新（#1958）。渡した画面（スマホ）でだけ有効になる */
+  onPullToRefresh?: () => Promise<unknown> | void;
+  /** ヘッダーの更新を文字なしのアイコンだけにするか（#1958） */
+  refreshIconOnly?: boolean;
 }) {
   const flow = buildBranchFlow({
     repositories: [{ fullName: REPO, private: false }],
@@ -93,6 +98,8 @@ function renderFlow(input: {
       onChangeAutoRefreshInterval={input.onChangeAutoRefreshInterval}
       onRefresh={input.onRefresh ?? vi.fn()}
       onMerged={input.onMerged}
+      onPullToRefresh={input.onPullToRefresh}
+      refreshIconOnly={input.refreshIconOnly}
     />,
   );
 }
@@ -1678,5 +1685,70 @@ describe("BranchFlowView の自動更新（#1767）", () => {
     renderFlow({});
 
     expect(screen.queryByRole("button", { name: /自動更新の間隔/ })).toBeNull();
+  });
+});
+
+// 引っ張って更新とスマホのヘッダー（#1958）
+describe("BranchFlowView の引っ張って更新（#1958）", () => {
+  afterEach(cleanup);
+
+  // jsdomには`TouchEvent`のコンストラクタが無いため、ハンドラが読む`touches`だけを持つ
+  // イベントを組み立てる（`use-pull-to-refresh.test.tsx`と同じ作り）
+  function touchEvent(type: string, x: number, y: number) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+    return event;
+  }
+
+  /** 引っ張りのタッチを受ける枠（スクロール領域を包む枠） */
+  function pullContainer(container: HTMLElement) {
+    const scroller = container.querySelector(".overflow-y-auto");
+    if (!scroller?.parentElement) throw new Error("スクロール領域が見つからない");
+    return scroller.parentElement;
+  }
+
+  it("下へ引っ張ると表示が出て、離すと更新が走る", async () => {
+    const onPullToRefresh = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderFlow({ onPullToRefresh });
+    const target = pullContainer(container);
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchstart", 100, 100));
+      target.dispatchEvent(touchEvent("touchmove", 100, 140));
+    });
+    expect(screen.getByText("引っ張って更新")).toBeTruthy();
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+    expect(screen.getByText("離すと更新")).toBeTruthy();
+
+    await act(async () => {
+      target.dispatchEvent(new Event("touchend", { bubbles: true }));
+    });
+    expect(onPullToRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("更新中…")).toBeTruthy();
+  });
+
+  it("引っ張って更新を渡さない画面（PC）では反応しない", () => {
+    const { container } = renderFlow({});
+    const target = pullContainer(container);
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchstart", 100, 100));
+      target.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+    expect(screen.queryByText("離すと更新")).toBeNull();
+  });
+
+  it("スマホでは更新ボタンを文字なしのアイコンだけにする", () => {
+    renderFlow({ refreshIconOnly: true });
+    const button = screen.getByRole("button", { name: "更新" });
+    expect(button.textContent).toBe("");
+  });
+
+  it("PCでは更新ボタンに文字を出す", () => {
+    renderFlow({});
+    expect(screen.getByRole("button", { name: "更新" }).textContent).toBe("更新");
   });
 });

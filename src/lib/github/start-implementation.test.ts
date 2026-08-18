@@ -80,20 +80,50 @@ describe("planRequiredDefaultForLabels", () => {
 });
 
 describe("artifactRequiredDefaultForLabels", () => {
+  /** リポジトリ側に25.artifact-requiredが配られている状態 */
+  const distributed = [ARTIFACT_REQUIRED_LABEL, "62.design", "50.feature", "30.bug"];
+
   it("デザインの種別ではアーティファクトを既定でONにする（#1956）", () => {
-    expect(artifactRequiredDefaultForLabels(["62.design"])).toBe(true);
+    expect(
+      artifactRequiredDefaultForLabels({
+        issueLabelNames: ["62.design"],
+        repositoryLabelNames: distributed,
+      }),
+    ).toBe(true);
   });
 
   it("デザイン以外の種別ではOFFのままにする（#1956）", () => {
-    expect(artifactRequiredDefaultForLabels(["50.feature"])).toBe(false);
-    expect(artifactRequiredDefaultForLabels(["51.improvement"])).toBe(false);
-    expect(artifactRequiredDefaultForLabels(["30.bug"])).toBe(false);
-    expect(artifactRequiredDefaultForLabels([])).toBe(false);
+    for (const issueLabelNames of [["50.feature"], ["51.improvement"], ["30.bug"], []]) {
+      expect(
+        artifactRequiredDefaultForLabels({ issueLabelNames, repositoryLabelNames: distributed }),
+      ).toBe(false);
+    }
   });
 
   // 種別を選び直したときに付け外しの両方向へ追従させるため、25.artifact-required自体は見ない
   it("25.artifact-requiredが付いているだけでは既定をONにしない", () => {
-    expect(artifactRequiredDefaultForLabels([ARTIFACT_REQUIRED_LABEL])).toBe(false);
+    expect(
+      artifactRequiredDefaultForLabels({
+        issueLabelNames: [ARTIFACT_REQUIRED_LABEL],
+        repositoryLabelNames: distributed,
+      }),
+    ).toBe(false);
+  });
+
+  // 存在しないラベル名を付与すると、色も説明も無いラベルがその場で作られる（#1490・#1956）
+  it("リポジトリに25.artifact-requiredが定義されていなければ既定をONにしない（#1956）", () => {
+    expect(
+      artifactRequiredDefaultForLabels({
+        issueLabelNames: ["62.design"],
+        repositoryLabelNames: ["62.design", "21.plan-required"],
+      }),
+    ).toBe(false);
+  });
+
+  it("リポジトリのラベル一覧が未取得のうちは既定をONにしない（#1956）", () => {
+    expect(
+      artifactRequiredDefaultForLabels({ issueLabelNames: ["62.design"], repositoryLabelNames: [] }),
+    ).toBe(false);
   });
 });
 
@@ -130,7 +160,9 @@ describe("startImplementationOptionsFromLabels", () => {
 
   // デザインは計画の既定（#1317）にも含まれるため、2つ同時にチェックが入った状態で開く
   it("25.artifact-requiredが未付与でも、デザインのIssueならアーティファクトにチェックを入れて開く（#1956）", () => {
-    expect(startImplementationOptionsFromLabels(makeLabels(["62.design"]))).toEqual({
+    expect(
+      startImplementationOptionsFromLabels(makeLabels(["62.design"]), [ARTIFACT_REQUIRED_LABEL]),
+    ).toEqual({
       ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
       planRequired: true,
       artifactRequired: true,
@@ -138,9 +170,26 @@ describe("startImplementationOptionsFromLabels", () => {
   });
 
   it("デザイン以外の種別ではアーティファクトにチェックを入れない（#1956）", () => {
-    expect(startImplementationOptionsFromLabels(makeLabels(["51.improvement"]))).toEqual({
+    expect(
+      startImplementationOptionsFromLabels(makeLabels(["51.improvement"]), [ARTIFACT_REQUIRED_LABEL]),
+    ).toEqual({
       ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
       planRequired: true,
+    });
+  });
+
+  // 25.artifact-requiredを配っていないリポジトリで、押した覚えのないラベルを作らせない（#1956）
+  it("リポジトリに25.artifact-requiredが無ければデザインのIssueでもチェックを入れない（#1956）", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["62.design"]), ["62.design"])).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      planRequired: true,
+    });
+  });
+
+  it("既に25.artifact-requiredが付いていれば、リポジトリのラベル一覧によらず尊重する", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels([ARTIFACT_REQUIRED_LABEL]))).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      artifactRequired: true,
     });
   });
 });

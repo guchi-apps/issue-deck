@@ -178,6 +178,7 @@ export function IssuePullRequestList({
                   onMerged={() => onMerged?.(link.number)}
                   pullRequestNumber={link.number}
                   ciStatus={detail?.ciStatus ?? null}
+                  mergeJudgement={detail?.mergeJudgement ?? null}
                   isMerging={Boolean(isMerging) && mergeTargetNumber === link.number}
                   isMerged={merged}
                   error={mergeTargetNumber === link.number ? mergeError : null}

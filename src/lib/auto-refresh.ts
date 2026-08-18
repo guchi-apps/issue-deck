@@ -7,8 +7,9 @@
  *
  * **1回の取得コストが重い画面ほど間隔を長くする。** ブランチ画面の1巡は
  * 「リポジトリ数（GraphQL）＋ リポジトリ数×2（REST・ETagで304なら消費0）＋
- * draft以外のopen PR数（GraphQL）」で、26リポジトリなら1分間隔で毎時1,600ポイント前後の
- * GraphQL（上限5,000ポイント/時）を使う。既定を「自動更新しない」にしているのはこのため。
+ * PRのCI状態（GraphQL。installationごとに数回で、PR件数には比例しない。#1962）」で、
+ * 26リポジトリなら1分間隔で毎時1,600ポイント前後のGraphQL（上限5,000ポイント/時）を使う。
+ * 既定を「自動更新しない」にしているのはこのため。
  */
 export type AutoRefreshIntervalMs = number | null;
 
@@ -27,10 +28,20 @@ export const AUTO_REFRESH_INTERVAL_OPTIONS: AutoRefreshOption[] = [
 ];
 
 /**
- * 「完了したPR」ビューの自動更新間隔（#1531）。ユーザーが選ぶ対象ではなく、
- * CIが確定したPRに気づくのに更新ボタンを押させないための固定値。
+ * PR一覧（PCのPRペイン・スマホのPR画面）の自動更新間隔（#1531・#1947）。ユーザーが選ぶ
+ * 対象ではなく、CIの進捗やマージの状況に気づくのに更新ボタンを押させないための固定値。
+ *
+ * 元は「完了したPR」ビューだけの間隔だったが、ヘッダーの「更新」ボタンを外した（#1947）ため、
+ * PR画面を開いている間はどのビューでもこの間隔で回す。
+ *
+ * **Issue一覧のポーリング（`use-issue-polling.ts`）とは値が同じでも定数を分ける。**
+ * あちらは`GET /api/issues`（DBの読み取りだけ）で、こちらは1巡ごとにGitHub APIを
+ * 「リポジトリ数のREST（ETagで304なら消費0）＋ draft以外のopen PR数のGraphQL
+ * （条件付きGETが効かない）」だけ使う。冒頭の「1回の取得コストが重い画面ほど間隔を長くする」に
+ * 従って片方だけ間隔を見直せるようにしておく（1つに寄せると、PR一覧を延ばしたいだけの
+ * ときにIssue一覧まで巻き込む）。
  */
-export const COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
+export const PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
 
 /** 「1分間隔」のように画面へ出す文言にする。分で割り切れない値は秒で出す */
 export function autoRefreshIntervalLabel(intervalMs: number): string {

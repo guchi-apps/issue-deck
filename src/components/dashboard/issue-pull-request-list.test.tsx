@@ -19,6 +19,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
+    mergeJudgement: "unknown",
     linkedIssueNumber: 600,
     ...overrides,
   };
@@ -109,6 +110,20 @@ describe("IssuePullRequestList", () => {
       />,
     );
     const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("自動マージ可否の判定中の行はマージボタンを押せない（#1968）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        // CIは通っているが判定はまだ走っている状態（PR #1959の再現）。
+        pullRequests={[pullRequest({ ciStatus: "success", mergeJudgement: "pending" })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 
