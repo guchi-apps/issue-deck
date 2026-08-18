@@ -9,6 +9,7 @@ import {
   GitPullRequestArrow,
   Loader2,
   RefreshCw,
+  Tag,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -149,22 +150,38 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   const latestLabel = overview?.latest ? shortWorkflowTag(overview.latest) : null;
   const run = overview?.propagation ?? null;
 
-  async function handlePropagate() {
+  /**
+   * 配布を起動する（#1173）。`withNewTag`が真なら**次の版数を`main`に切ってから**配る（#1876）。
+   *
+   * タグを切る操作だけが手作業Issueとして残っていた（v20・v21・v22で毎回起票された）ため、
+   * 同じボタンの並びから通せるようにしている。
+   */
+  async function handlePropagate(withNewTag = false) {
     setIsDispatching(true);
     setPropagateMessage(null);
     setPropagateError(null);
     try {
-      const res = await fetch("/api/workflow-tags/propagate", {
+      const endpoint = withNewTag ? "/api/workflow-tags/release" : "/api/workflow-tags/propagate";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ autoMerge }),
       });
+      const payload = await res.json().catch(() => ({}));
+      // `/release`は`{ tag, propagation }`、`/propagate`は配布の結果をそのまま返す
       const result: {
         dispatched: boolean;
         tag: string | null;
         repositories: string[];
         message?: string;
-      } = await res.json().catch(() => ({ dispatched: false, tag: null, repositories: [] }));
+      } = withNewTag
+        ? ((payload as { propagation?: unknown }).propagation ?? {
+            dispatched: false,
+            tag: (payload as { tag?: { tag?: string | null } }).tag?.tag ?? null,
+            repositories: [],
+            message: (payload as { tag?: { message?: string } }).tag?.message,
+          })
+        : payload;
 
       if (!res.ok) throw new Error(result.message ?? `起動に失敗しました (${res.status})`);
 
@@ -301,7 +318,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
             variant="default"
             size="sm"
             className="mt-1 w-full"
-            onClick={handlePropagate}
+            onClick={() => void handlePropagate(false)}
             disabled={isDispatching || isRunning}
           >
             {isDispatching || isRunning ? (
@@ -312,6 +329,19 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
             {isRunning
               ? "更新を実行中..."
               : `${targets.length}件を ${latestLabel ?? "最新"} へ更新する`}
+          </Button>
+
+          {/* **配るタグを切るのも同じ並びに置く**（#1876）。切る操作だけが手作業Issueとして
+              残っていた。`main`に対して切るので、developの内容は配られない */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => void handlePropagate(true)}
+            disabled={isDispatching || isRunning}
+          >
+            {isDispatching || isRunning ? <Loader2 className="animate-spin" /> : <Tag />}
+            新しいタグを切って配る
           </Button>
 
           <label className="flex items-center gap-2 text-xs text-muted-foreground">

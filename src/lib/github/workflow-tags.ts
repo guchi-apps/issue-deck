@@ -10,6 +10,7 @@ import {
   extractWorkflowTagRef,
   findWorkflowTagPullRequest,
   latestWorkflowTag,
+  parseWorkflowTagVersion,
   propagationTargets,
   type PropagationRun,
   type WorkflowTagPullRequest,
@@ -309,6 +310,117 @@ async function fetchPropagationRun(token: string): Promise<PropagationRun | null
 
 /** タグ更新PRを一括作成するワークフロー（issue-deck 側） */
 const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
+
+export type CreateWorkflowTagResult = {
+  created: boolean;
+  /** 切ったタグ。既に存在した場合もそのタグ名を返す */
+  tag: string | null;
+  /** タグが指すコミット（短縮なし） */
+  sha: string | null;
+  reason?: "no_latest" | "already_exists" | "not_synced";
+  message?: string;
+};
+
+/**
+ * 次の版数のタグを `main` に切る（#1876）。
+ *
+ * **配布はここまで自動化されていて、残っていたのはこの1操作だけだった。** タグを切るためだけに
+ * `71.manual-step` のIssueが v20・v21・v22 と毎回起票されていた（#1739・#1795・#1870）。
+ *
+ * **`main` に対して切る。** `develop` の内容を配ると、まだ本番へ出ていないワークフローが
+ * 全リポジトリで走り出す。参照するのは `main` の先端で、`develop` は見ない。
+ *
+ * **人の確認点は残す。** 「配るタグは人の確認を通してから切る」という運用
+ * （`.github/workflows/propagate-workflow-tag.yml` のコメント）は、画面のボタンを押す行為で
+ * 満たされる。自動では切らない。
+ */
+export async function createNextWorkflowTag(userId: string): Promise<CreateWorkflowTagResult> {
+  const overview = await collectWorkflowTags(userId);
+  if (!overview.latest) {
+    return {
+      created: false,
+      tag: null,
+      sha: null,
+      reason: "no_latest",
+      message: "issue-deck側の最新タグを取得できませんでした。",
+    };
+  }
+
+  const current = parseWorkflowTagVersion(overview.latest);
+  if (current === null) {
+    return {
+      created: false,
+      tag: overview.latest,
+      sha: null,
+      reason: "no_latest",
+      message: `最新タグの版数を読めません（${overview.latest}）。`,
+    };
+  }
+  const next = `workflows/v${current + 1}`;
+
+  const [owner, repo] = SOURCE_REPOSITORY.split("/");
+  const source = await db.repository.findFirst({
+    where: { fullName: SOURCE_REPOSITORY },
+    select: { installation: { select: { installationId: true } } },
+  });
+  if (!source) {
+    return {
+      created: false,
+      tag: next,
+      sha: null,
+      reason: "not_synced",
+      message: `${SOURCE_REPOSITORY} が同期されていません。`,
+    };
+  }
+
+  const token = await getInstallationToken(source.installation.installationId);
+
+  // **`main` の先端を取る。** ここを `develop` にすると、本番へ出ていない内容が配られる
+  const headRes = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/commits/main`, token);
+  if (!headRes.ok) {
+    const detail = await headRes.text().catch(() => "");
+    throw new GithubApiError(
+      headRes.status,
+      `GitHub API request failed: ${headRes.status} commits/main ${detail}`,
+    );
+  }
+  const head = (await headRes.json()) as { sha?: string };
+  if (!head.sha) {
+    return {
+      created: false,
+      tag: next,
+      sha: null,
+      reason: "not_synced",
+      message: "mainの先端を取得できませんでした。",
+    };
+  }
+
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/refs`, token, {
+    method: "POST",
+    body: { ref: `refs/tags/${next}`, sha: head.sha },
+  });
+
+  // 既に同じタグがある（二重クリック・別タブからの操作）。**エラーにはしない**——
+  // 呼び出し側はこのあと配布へ進むので、狙った版数が存在していれば目的は果たせている
+  if (res.status === 422) {
+    return {
+      created: false,
+      tag: next,
+      sha: head.sha,
+      reason: "already_exists",
+      message: `${next} は既に存在します。`,
+    };
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(
+      res.status,
+      `GitHub API request failed: ${res.status} git/refs ${detail}`,
+    );
+  }
+
+  return { created: true, tag: next, sha: head.sha };
+}
 
 export type DispatchPropagationResult = {
   dispatched: boolean;
