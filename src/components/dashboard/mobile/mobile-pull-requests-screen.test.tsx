@@ -123,6 +123,19 @@ describe("MobilePullRequestsScreen のスワイプ（#1691）", () => {
     expect(onChangeView).toHaveBeenCalledWith("all");
   });
 
+  it("フッターのタブから開いた場合は、右スワイプで戻らない（#1691）", () => {
+    // PR一覧は`origin`によらず`onBack`が渡ってくる（Issue一覧と違う）。判定を`onBack`の
+    // 有無にすると、戻る先が無いタブ経由でもホームへ抜けてしまう。
+    const onBack = vi.fn();
+    const onChangeView = vi.fn();
+    renderScreen({ view: "in-progress", origin: "tab", onBack, onChangeView });
+
+    swipe(120);
+
+    expect(onBack).not.toHaveBeenCalled();
+    expect(onChangeView).toHaveBeenCalledWith("all");
+  });
+
   it("端のビューではそれ以上切り替えない", () => {
     const onChangeView = vi.fn();
     renderScreen({ view: "all", onChangeView });
