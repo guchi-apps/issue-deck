@@ -61,6 +61,15 @@ export type ManualStepGuide = {
   steps: ManualStepGuideStep[];
   /** `## 完了の確認方法`（Markdownのまま） */
   verification: string | null;
+  /**
+   * `## 完了の確認方法`が本文のどこにあるか（1始まりの行番号。`end`はその節の最終行）。
+   *
+   * 確認節のコマンドも代行実行できるようにするため（#1869）、**節の中身ではなく位置**を返す。
+   * `verification`は`blockMarkdown`でインデントと前後の空行を落とした後の文字列なので、
+   * そこから本文の行番号へ戻せない。実行するコマンドの取り出しは本文の生の行を見る
+   * （`lib/manual-step-command.ts`の`extractVerificationCommands`）。
+   */
+  verificationRange: { start: number; end: number } | null;
 };
 
 const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
@@ -316,12 +325,14 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
     todoIntro: null,
     steps: [],
     verification: null,
+    verificationRange: null,
   };
   if (!body || body.trim() === "") return empty;
 
   const sections = splitSections(body);
   const todo = findSection(sections, "todo");
   const parsed = todo ? parseSteps(todo) : { intro: null, steps: [] };
+  const verification = findSection(sections, "verification");
 
   return {
     hasTemplate: parsed.steps.length > 0,
@@ -329,8 +340,15 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
     where: parseManualStepWhere(findSection(sections, "prerequisites")),
     todoIntro: parsed.intro,
     steps: parsed.steps,
-    verification: sectionText(findSection(sections, "verification")),
+    verification: sectionText(verification),
+    verificationRange: sectionRange(verification),
   };
+}
+
+/** 節が本文のどこにあるか（1始まり）。中身が無ければ`null` */
+function sectionRange(section: Section | null): { start: number; end: number } | null {
+  if (!section || section.lines.length === 0) return null;
+  return { start: section.startLine, end: section.startLine + section.lines.length - 1 };
 }
 
 /**

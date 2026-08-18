@@ -17,6 +17,8 @@ import {
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isCancelableDispatchJobStatus,
+  isSessionControlJobKind,
+  isSessionLaunchJobKind,
   isIssueExecutionPending,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
@@ -28,6 +30,10 @@ import {
   parseSessionInstruction,
   resolveCrossRepoQuestionRejection,
   resolveDefaultCrossRepoQuestionHost,
+  resolveDefaultPlanReviewHost,
+  resolvePlanReviewRejection,
+  describePlanReviewRejection,
+  findPlanReviewJobForIssue,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
   resolveManualStepExecutionRejection,
@@ -858,6 +864,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       instructionCapable: true,
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
+      planReviewCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -917,6 +924,7 @@ describe("横断質問（#1454）", () => {
       instructionCapable: true,
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
+      planReviewCapable: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1055,6 +1063,177 @@ describe("横断質問（#1454）", () => {
 });
 
 /**
+ * 計画の関門（G1・#1855）。**計画コメントの投稿を契機に自動で積まれる**ジョブなので、
+ * 「動いているセッションでは弾かない」ことがこの種別の要点になる。
+ */
+describe("計画レビュー（PLAN_REVIEW）", () => {
+  function host(
+    overrides: Partial<Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories">> = {},
+  ): Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories"> {
+    return {
+      online: true,
+      planReviewCapable: true,
+      repositories: ["guchi-apps/issue-deck"],
+      ...overrides,
+    };
+  }
+
+  function hostView(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      repositories: ["guchi-apps/issue-deck"],
+      contractVersion: 1,
+      online: true,
+      lastSeenAt: "2026-08-17T00:00:00Z",
+      screenshotCapable: true,
+      sessionControlCapable: true,
+      instructionCapable: true,
+      crossRepoQuestionCapable: true,
+      manualStepCapable: true,
+      planReviewCapable: true,
+      maxSessions: 12,
+      liveSessions: 0,
+      metrics: null,
+      checkout: null,
+      ...overrides,
+    };
+  }
+
+  it("種別として受け付ける", () => {
+    expect(parseDispatchJobKind("plan_review")).toBe("PLAN_REVIEW");
+  });
+
+  // 実装ジョブと名前空間を分ける（実装ジョブが走っているIssueにもレビューを積めるように）
+  it("activeKeyは専用の名前空間を持つ", () => {
+    expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1855, "PLAN_REVIEW")).toBe(
+      "plan_review:guchi-apps/issue-deck#1855",
+    );
+  });
+
+  // tmuxセッションを立てるジョブなので、枠（同時実行数）を消費する側に入る
+  it("セッションを立てるジョブとして数える", () => {
+    expect(isSessionLaunchJobKind("PLAN_REVIEW")).toBe(true);
+    expect(isSessionControlJobKind("PLAN_REVIEW")).toBe(false);
+  });
+
+  it("キューでは「計画レビュー」として並ぶ", () => {
+    expect(describeDispatchJobKind("PLAN_REVIEW")).toBe("計画レビュー");
+    expect(describeDispatchJobStatus("SUCCEEDED", "PLAN_REVIEW")).toEqual({
+      label: "計画レビューを起動しました",
+      tone: "success",
+    });
+  });
+
+  it("条件が揃っていれば押せる", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host(),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+      }),
+    ).toBeNull();
+  });
+
+  // 未申告（古いpoller）は「できない」側へ倒す。自動で積まれる種別なので、配ると計画のたびに
+  // 失敗したジョブが並ぶ
+  it("申告していないpollerには押せない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host({ planReviewCapable: null }),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+      }),
+    ).toBe("plan_review_unsupported");
+  });
+
+  // 横断質問と違い、対象リポジトリのコードを読むのでcloneが要る
+  it("そのホストで実行できないリポジトリでは押せない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host(),
+        repositoryFullName: "guchi-apps/car-care",
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_not_runnable");
+  });
+
+  it("応答していないホストには押せない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host({ online: false }),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+      }),
+    ).toBe("host_offline");
+  });
+
+  it("未処理の計画レビューがあれば押せない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host(),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: true,
+      }),
+    ).toBe("already_queued");
+  });
+
+  it("理由には何をすれば押せるようになるかを書く", () => {
+    expect(describePlanReviewRejection("plan_review_unsupported", { hostName: "subpc" })).toContain(
+      "更新してから",
+    );
+  });
+
+  it("既定の起動先はそのリポジトリを実行できるホストの先頭", () => {
+    expect(
+      resolveDefaultPlanReviewHost(
+        [
+          hostView({ name: "old-host", planReviewCapable: null }),
+          hostView({ name: "other", repositories: ["guchi-apps/car-care"] }),
+          hostView({ name: "subpc" }),
+        ],
+        "guchi-apps/issue-deck",
+      ),
+    ).toBe("subpc");
+  });
+
+  it("選べるホストが無ければnull（GitHub Actionsへのフォールバックは無い）", () => {
+    expect(
+      resolveDefaultPlanReviewHost([hostView({ planReviewCapable: false })], "guchi-apps/issue-deck"),
+    ).toBeNull();
+  });
+
+  // 起動ジョブの未完了判定に混ざると、計画を出した瞬間に実装の起動が押せなくなる
+  it("起動ジョブとは別に取り出す", () => {
+    const jobs: DispatchJobView[] = [
+      {
+        id: "plan-review-1",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1855,
+        issueTitle: null,
+        issueId: null,
+        targetHost: "subpc",
+        kind: "PLAN_REVIEW",
+        status: "QUEUED",
+        message: null,
+        instruction: null,
+        command: null,
+        manualStepLine: null,
+        exitCode: null,
+        commandOutput: null,
+        tmuxSessionName: null,
+        queuePriority: 0,
+        createdAt: "2026-08-17T00:00:00Z",
+        claimedAt: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+    ];
+    expect(findPlanReviewJobForIssue(jobs, "guchi-apps/issue-deck", 1855)?.id).toBe("plan-review-1");
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1855)).toBeNull();
+  });
+});
+
+/**
  * 手作業の代行実行（#1828）の可否。**画面とAPIが同じ関数を使う**ので、押せるのに拒否される
  * （その逆も）が生まれない。判定の**順番**にも意味がある。
  */
@@ -1126,6 +1305,7 @@ describe("resolveManualStepHost", () => {
       name: "subpc",
       online: true,
       manualStepCapable: true,
+      planReviewCapable: null,
       repositories: [],
       ...overrides,
     } as DispatchHostView;

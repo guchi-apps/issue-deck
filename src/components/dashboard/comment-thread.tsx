@@ -86,6 +86,12 @@ type CommentThreadProps = {
   /** サブPC実行中に承認が空振りすることを伝える案内（#1264・#1417） */
   localSessionNotice?: ReactNode;
   /**
+   * 計画の承認待ちのときに出す「計画をレビュー」（G1・#1855）。**承認カードの中に置く。**
+   * 承認するかどうかを決める瞬間に押すもので、押すと指摘がこのIssueのコメントとして返る。
+   * 対象外（理由が計画でない・実行できるホストがない）のときは親がundefinedを渡す。
+   */
+  planReviewAction?: ReactNode;
+  /**
    * trueの場合、承認・修正・取り下げボタンを出さずlocalSessionNoticeだけを表示する（#1417）。
    * 走っているローカルセッションが入力待ちで、どのボタンも効かない状態を表す。
    */
@@ -204,6 +210,7 @@ function ApprovalActions({
   repositoryFullName,
   issueSuggestions,
   localSessionNotice,
+  planReviewAction,
 }: {
   onApprove: (text?: string) => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
@@ -239,6 +246,7 @@ function ApprovalActions({
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   localSessionNotice?: ReactNode;
+  planReviewAction?: ReactNode;
 }) {
   const [text, setText] = useState("");
   const [textValidationError, setTextValidationError] = useState<string | null>(null);
@@ -325,6 +333,10 @@ function ApprovalActions({
       <div {...checkUserTargetProps("approval")} className="mt-3 rounded-lg border border-dashed p-3">
         <p className="mb-2 text-sm font-medium">セッションが入力を待っています</p>
         {localSessionNotice}
+        {/* 計画の承認待ちはこちらの分岐に来ることが多い（計画を出したセッションは、承認を待つ
+            プロンプトを出したまま生きている）。**押せる操作がここにしか無い**ので、
+            「計画をレビュー」もここへ置く（#1855） */}
+        {planReviewAction}
       </div>
     );
   }
@@ -420,6 +432,8 @@ function ApprovalActions({
       {/* サブPCで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
           反応しない（#1264）。押しても何も起きないことを、押す前に出す */}
       {localSessionNotice}
+      {/* 承認するかどうかを決める場所で、計画レビューを起こせるようにする（#1855） */}
+      {planReviewAction}
       {isFallbackNotice ? (
         <div className="flex flex-wrap justify-end gap-2">
           <Button size="sm" onClick={() => onRequestContinuation?.()} disabled={busy}>
@@ -508,6 +522,7 @@ export function CommentThread({
   approvalPending,
   checkUserReason = null,
   localSessionNotice,
+  planReviewAction,
   sessionWaitingInput,
   sessionStatePending,
   mergeApprovalPending,
@@ -570,6 +585,7 @@ export function CommentThread({
     approvalPending && onApprove && onReject && onWithdraw ? (
       <ApprovalActions
         localSessionNotice={localSessionNotice}
+        planReviewAction={planReviewAction}
         onApprove={onApprove}
         onReject={onReject}
         onWithdraw={onWithdraw}

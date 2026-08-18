@@ -40,6 +40,9 @@ export type DispatchJobStatus =
  *   別物**で、あちらは`claude -p`を1回走らせて終わる想定なのに対し、こちらは`LAUNCH`と同じく
  *   tmuxセッションを立てる（回答後もセッションが残り、追加指示で追い質問ができる）。参照する
  *   リポジトリは**そのホストが実行できると申告した全部**で、ジョブには載せない
+ * - `PLAN_REVIEW` … 計画の関門（G1・#1218）のセッションを立てる（#1855）。計画コメントの投稿を
+ *   契機に自動で積まれ、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を
+ *   Issueコメントへ投稿する。**worktreeは作らず、レビュー1本で終わってセッションごと畳む**
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -48,7 +51,8 @@ export type DispatchJobKind =
   | "QUESTION"
   | "INSTRUCTION"
   | "CROSS_REPO_QUESTION"
-  | "MANUAL_STEP";
+  | "MANUAL_STEP"
+  | "PLAN_REVIEW";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -77,7 +81,7 @@ export function isSessionControlJobKind(kind: DispatchJobKind): kind is SessionC
  *
  * 制御ジョブ（`SESSION_CONTROL_JOB_KINDS`）は含めない。あちらは**枠外で先に配られる**（#1332）。
  */
-export const SESSION_LAUNCH_JOB_KINDS = ["LAUNCH", "CROSS_REPO_QUESTION"] as const;
+export const SESSION_LAUNCH_JOB_KINDS = ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] as const;
 
 export type SessionLaunchJobKind = (typeof SESSION_LAUNCH_JOB_KINDS)[number];
 
@@ -95,6 +99,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "instruction") return "INSTRUCTION";
   if (value === "cross_repo_question") return "CROSS_REPO_QUESTION";
   if (value === "manual_step") return "MANUAL_STEP";
+  if (value === "plan_review") return "PLAN_REVIEW";
   return null;
 }
 
@@ -273,6 +278,15 @@ export type DispatchHostView = {
    * こちらは**シェルでコマンドを実行する**。同じ「文字列を届ける」でも、届いた先で起きることが違う。
    */
   manualStepCapable: boolean | null;
+  /**
+   * 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。**`null`（未申告）は「できない」として
+   * 扱う**（`crossRepoQuestionCapable`と同じ）。
+   *
+   * **判定材料が無いことを理由に配らない向きは、この種別でいちばん効く。** 計画レビューは
+   * 計画コメントの投稿を契機に自動で積まれるため、対応していないpollerへ配ると、計画を出すたびに
+   * 未知の種別として`failed`になったジョブが画面へ並ぶ。
+   */
+  planReviewCapable: boolean | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -562,6 +576,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "横断質問";
     case "MANUAL_STEP":
       return "手作業の代行";
+    case "PLAN_REVIEW":
+      return "計画レビュー";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
@@ -829,6 +845,83 @@ export function resolveDefaultCrossRepoQuestionHost(
 }
 
 /**
+ * 計画の関門（G1・#1855）のセッションを起こせない理由。
+ *
+ * 横断質問（`CrossRepoQuestionRejection`）と似ているが、要点は2つ違う。
+ *
+ * - **`repository_not_runnable`がある。** 計画レビューは対象リポジトリのコードを読んで計画と
+ *   突き合わせるので、そのリポジトリがcloneされている必要がある（横断質問は記録先のcloneが要らない）
+ * - **`session_alive`が無い。** 計画を出したセッションは承認待ちで生きているのが常態で、
+ *   そこで弾くと**自動起動が常に断られる**（この機能そのものが成立しない）
+ */
+export type PlanReviewRejection =
+  | "host_unknown"
+  | "host_offline"
+  | "plan_review_unsupported"
+  | "repository_not_runnable"
+  | "already_queued";
+
+export function describePlanReviewRejection(
+  rejection: PlanReviewRejection,
+  context: { hostName: string; repositoryFullName?: string },
+): string {
+  switch (rejection) {
+    case "host_unknown":
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "plan_review_unsupported":
+      // **何をすれば押せるようになるかまで書く**（`cross_repo_question_unsupported`と同じ）。
+      // pollerはサブPC側の作業ツリーから動くため、更新するのは人の作業になる
+      return `${formatDispatchHostName(context.hostName)} のpollerが計画レビューに対応していません（更新してから押せるようになります）。`;
+    case "repository_not_runnable":
+      return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
+    case "already_queued":
+      return "このIssueには実行中または待機中の計画レビューが既にあります。";
+  }
+}
+
+/**
+ * 計画レビューを起こせない理由を、**押される前に**判定する（#1855）。
+ *
+ * 判定の並びと文言は`enqueuePlanReviewJob`（`jobs.ts`）と同じものを使う。片方だけで持つと
+ * 「画面では押せるのにAPIが断る」状態が生まれるのは、起動側（#1180）・制御側（#1332）と同じ。
+ */
+export function resolvePlanReviewRejection(params: {
+  host: Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories"> | null | undefined;
+  repositoryFullName: string;
+  hasActiveJob: boolean;
+}): PlanReviewRejection | null {
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.planReviewCapable !== true) return "plan_review_unsupported";
+  if (!params.host.repositories.includes(params.repositoryFullName)) {
+    return "repository_not_runnable";
+  }
+  if (params.hasActiveJob) return "already_queued";
+  return null;
+}
+
+/**
+ * 計画レビューの既定の起動先を決める（#1855）。選べるホストが1台も無ければ`null`。
+ *
+ * **GitHub Actionsへのフォールバックは無い**（`resolveDefaultCrossRepoQuestionHost`と同じ）。
+ * 無人実行のG1は`reusable-issue-dispatch.yml`が計画提示の直後に自分で走らせるもので、
+ * こちらから積む相手ではない。
+ */
+export function resolveDefaultPlanReviewHost(
+  hosts: readonly DispatchHostView[],
+  repositoryFullName: string,
+): string | null {
+  return (
+    hosts.find(
+      (host) =>
+        resolvePlanReviewRejection({ host, repositoryFullName, hasActiveJob: false }) === null,
+    )?.name ?? null
+  );
+}
+
+/**
  * そのIssueの起動を止めるべきセッションを探す（#1311）。
  *
  * 起動済みのIssueをもう一度積むと、pollerの重複起動ガードに弾かれるまで（実測で最大75秒）
@@ -906,6 +999,7 @@ export function describeDispatchJobStatus(
   if (kind === "QUESTION") return describeQuestionJobStatus(status);
   if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
+  if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -989,6 +1083,39 @@ function describeCrossRepoQuestionJobStatus(status: DispatchJobStatus): {
       return { label: "質問セッションを起動しました", tone: "success" };
     case "FAILED":
       return { label: "失敗", tone: "error" };
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * 計画レビュー（G1・#1855）の状態の見せ方。
+ *
+ * **`succeeded`は「レビューのセッションが立った」まで**で、指摘が投稿されたことではない
+ * （`CROSS_REPO_QUESTION`と同じ立場）。指摘はIssueのコメントとして返るため、そちらを見てもらう。
+ *
+ * **`skipped`は「レビューしなかった」**（同じ計画のレビューが既に動いていた・対象の計画が
+ * 見つからなかった）。何も壊れていないので赤くしない。
+ */
+function describePlanReviewJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "計画レビューを起動中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "計画レビューを起動しました", tone: "success" };
+    case "FAILED":
+      return { label: "計画レビューを起動できませんでした", tone: "error" };
     case "SKIPPED":
       return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":
@@ -1159,6 +1286,26 @@ export function findManualStepJobForIssue(
     repositoryFullName,
     issueNumber,
     (job) => job.kind === "MANUAL_STEP",
+  );
+}
+
+/**
+ * あるIssueについて画面に出す計画レビュージョブ（#1855）を1件選ぶ。
+ *
+ * **起動ジョブとは別に返す**（`findCrossRepoQuestionJobForIssue`と同じ理由）。計画レビューは
+ * 実装セッションが動いている最中に走るのが常態なので、混ぜると計画を出した瞬間に
+ * そのIssueの実装の起動が押せなくなる。
+ */
+export function findPlanReviewJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "PLAN_REVIEW",
   );
 }
 

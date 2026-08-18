@@ -15,6 +15,7 @@ import {
   describeDispatchReportLost,
   describeDispatchTimeout,
   describeManualStepExecutionRejection,
+  describePlanReviewRejection,
   describeSessionControlRejection,
   DISPATCH_CLAIM_TIMEOUT_MS,
   DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
@@ -29,6 +30,7 @@ import {
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
   resolveManualStepExecutionRejection,
+  resolvePlanReviewRejection,
   resolveSessionControlRejection,
   SESSION_CONTROL_JOB_KINDS,
   SESSION_LAUNCH_JOB_KINDS,
@@ -40,11 +42,15 @@ import {
   type DispatchJobView,
   type DispatchReportStatus,
   type ManualStepExecutionRejection,
+  type PlanReviewRejection,
   type SessionControlJobKind,
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
-import { extractManualStepCommands, isSubpcManualStepDevice } from "@/lib/manual-step-command";
+import {
+  extractRunnableManualStepCommands,
+  isSubpcManualStepDevice,
+} from "@/lib/manual-step-command";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
@@ -122,6 +128,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     instructionCapable: host.instructionCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
+    planReviewCapable: host.planReviewCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
     // 5列は「まとめて入るかまとめてnullか」で保存されている（#1567）。読むときも同じ扱いにし、
@@ -273,10 +280,17 @@ async function findSessionsForStaleLaunchJobs(
   stale: readonly StaleDispatchJob[],
   now: Date,
 ): Promise<Map<string, string>> {
-  // 制御ジョブ（枠外で走り、tmuxを1回叩いて終わる）はセッションを立てないので対象外
+  // 制御ジョブ（枠外で走り、tmuxを1回叩いて終わる）はセッションを立てないので対象外。
+  //
+  // **計画レビュー（#1855）も外す。** セッションは立てるが、名前が`-issue-`の規約から外れて
+  // いるためpollerは報告せず、`DispatchSession`の行にならない。ここで拾おうとすると、
+  // 代わりに**同じIssueの実装セッション**（計画の承認待ちで生きている）に一致し、
+  // 届かなかったレビューを「そのセッションで起動できていた」ことにしてしまう。
   const launchJobs = stale.filter(
     (job) =>
-      isSessionLaunchJobKind(job.kind) && (job.status === "CLAIMED" || job.status === "RUNNING"),
+      isSessionLaunchJobKind(job.kind) &&
+      job.kind !== "PLAN_REVIEW" &&
+      (job.status === "CLAIMED" || job.status === "RUNNING"),
   );
   if (launchJobs.length === 0) return new Map();
 
@@ -476,6 +490,79 @@ export async function enqueueCrossRepoQuestionJob(params: {
   }
 }
 
+export type EnqueuePlanReviewJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: PlanReviewRejection; message: string };
+
+/**
+ * 計画の関門（G1・#1218）のセッションを積む（#1855）。
+ *
+ * 呼ぶのは2か所。**計画コメントの投稿（`postSessionPlan`）からの自動起動**と、画面の
+ * 「計画をレビュー」ボタン。どちらも同じ判定を通す。
+ *
+ * **起動ジョブ（`enqueueDispatchJob`）と決定的に違うのは、動いているセッションで弾かないこと。**
+ * 計画を出したセッションは承認待ちで生きているのが常態で、そこで弾くと自動起動が常に断られる
+ * （この機能そのものが成立しない）。二重起動は`activeKey`（`plan_review:owner/repo#番号`）が
+ * 止めるので、同じIssueに未処理の計画レビューは1件までになる。
+ */
+export async function enqueuePlanReviewJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueuePlanReviewJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: PlanReviewRejection): EnqueuePlanReviewJobResult => ({
+    ok: false,
+    rejection,
+    message: describePlanReviewRejection(rejection, {
+      hostName: params.hostName,
+      repositoryFullName: params.repositoryFullName,
+    }),
+  });
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+
+  // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）
+  const rejection = resolvePlanReviewRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          planReviewCapable: host.planReviewCapable,
+          repositories: parseDispatchHostRepositories(host.repositories),
+        }
+      : null,
+    repositoryFullName: params.repositoryFullName,
+    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
+    hasActiveJob: false,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "PLAN_REVIEW",
+        status: "QUEUED",
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "PLAN_REVIEW",
+        ),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return reject("already_queued");
+  }
+}
+
 export type EnqueueSessionControlJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: SessionControlRejection; message: string };
@@ -618,7 +705,9 @@ export async function enqueueManualStepJob(params: {
   const guide = parseManualStepGuide(issue.body);
   if (!isSubpcManualStepDevice(guide.where.device)) return reject("device_not_subpc");
 
-  const extracted = extractManualStepCommands(issue.body, guide).find(
+  // 手順（`## やること`）と完了の確認（`## 完了の確認方法`）の両方が対象（#1869）。
+  // **画面と同じ関数で取り出す**ので、押せるのにAPIが拒否する組み合わせが生まれない
+  const extracted = extractRunnableManualStepCommands(issue.body, guide).find(
     (entry) => entry.stepLine === params.stepLine,
   );
   if (!extracted) return reject("no_command");
@@ -750,6 +839,9 @@ export async function claimDispatchJobs(params: {
   // pollerには配らない（古いpollerは未知の種別として`failed`で返すため、質問が必ず失われる）
   const launchKinds: DispatchJobKind[] = ["LAUNCH"];
   if (host?.crossRepoQuestionCapable === true) launchKinds.push("CROSS_REPO_QUESTION");
+  // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は横断質問と同じで、
+  // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ
+  if (host?.planReviewCapable === true) launchKinds.push("PLAN_REVIEW");
 
   const running = await db.dispatchJob.count({
     where: {
@@ -1207,6 +1299,8 @@ export async function announceDispatchHost(params: {
   crossRepoQuestionCapable: boolean | null;
   /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
   manualStepCapable: boolean | null;
+  /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
+  planReviewCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
    * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
@@ -1240,6 +1334,7 @@ export async function announceDispatchHost(params: {
     instructionCapable: params.instructionCapable,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
+    planReviewCapable: params.planReviewCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
     // 申告が無ければ5列とも`null`へ戻す（#1567）。**前回の値を残さない。**

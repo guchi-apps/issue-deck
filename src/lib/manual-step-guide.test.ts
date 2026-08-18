@@ -351,3 +351,26 @@ describe("buildManualStepQueue", () => {
     expect(queue.map((item) => item.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("verificationRange（#1869）", () => {
+  it("`## 完了の確認方法`の行範囲を返す（確認節のコマンドを本文の行番号で指すため）", () => {
+    const guide = parseManualStepGuide(ISSUE_1823);
+    const lines = ISSUE_1823.split("\n");
+    const range = guide.verificationRange;
+
+    expect(range).not.toBeNull();
+    // 節の見出しの次の行から始まる
+    expect(lines[(range as { start: number }).start - 2]).toMatch(/^##\s.*確認方法/);
+    // 範囲の中に確認のコマンドが含まれ、次の節の見出しは含まれない
+    const inside = lines
+      .slice((range as { start: number }).start - 1, (range as { end: number }).end)
+      .join("\n");
+    expect(inside).toContain("遅れが0になっていること");
+    expect(inside).not.toMatch(/^##\s/m);
+  });
+
+  it("確認方法が書かれていない本文ではnull", () => {
+    expect(parseManualStepGuide("## やること\n\n- [ ] 何かする").verificationRange).toBeNull();
+    expect(parseManualStepGuide(null).verificationRange).toBeNull();
+  });
+});

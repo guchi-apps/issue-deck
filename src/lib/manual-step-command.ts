@@ -1,4 +1,4 @@
-import { FENCE_PATTERN } from "@/lib/markdown-task-list";
+import { FENCE_PATTERN, TASK_LINE_PATTERN } from "@/lib/markdown-task-list";
 import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
@@ -15,13 +15,26 @@ import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-gu
  * 流れる経路は無い（サブPC側でもpollerがGitHubの本文を読み直して同じ照合を行う）。
  */
 
-/** 代行実行できる手順1件 */
+/** 代行実行できる1件 */
 export type ManualStepCommand = {
-  /** その手順の`- [ ]`の行番号（1始まり）。画面のチェックと、どの手順かの指定に使う */
+  /**
+   * 本文の中でこのコマンドを指す行番号（1始まり）。
+   *
+   * - `kind: "step"` … その手順の`- [ ]`の行。画面のチェックと、どの手順かの指定に使う
+   * - `kind: "verification"` … そのコードブロックの**開きフェンスの行**（#1869）。確認節には
+   *   チェック行が無いので、ブロックそのものの位置で指す
+   *
+   * どちらも同じ本文の行番号なので、ジョブ（`DispatchJob.manualStepLine`）・画面・pollerは
+   * 種別を意識せずに扱える。
+   */
   stepLine: number;
   /** 実行するコマンド（コードブロックの中身。前後の空行を落としたもの） */
   command: string;
+  /** `## やること`の手順か、`## 完了の確認方法`のコマンドか */
+  kind: ManualStepCommandKind;
 };
+
+export type ManualStepCommandKind = "step" | "verification";
 
 /**
  * 実行するコマンドとして受け付けるコードブロックの言語。
@@ -99,17 +112,203 @@ export function extractManualStepCommands(
     if (step.line === null) continue;
     const command = extractShellBlock(step.markdown);
     if (command === null) continue;
-    commands.push({ stepLine: step.line, command });
+    commands.push({ stepLine: step.line, command, kind: "step" });
   }
   return commands;
 }
 
-/** `stepLine`の手順のコマンドを引く。無ければ`null`（＝その手順は代行できない） */
+/**
+ * `## 完了の確認方法`から、代行実行できるコマンドを取り出す（#1869）。
+ *
+ * **手順と違い、ブロックが複数あっても全部返す。** 手順で「ちょうど1つ」に限っているのは、
+ * チェック1つに対してどのコマンドを実行したのかが対応しなくなるためで、確認節には
+ * チェックそのものが無い（実行しても本文は書き換わらない）。上から順に実行してよい。
+ *
+ * 実行結果は画面に出すだけで、**チェックもクローズもしない**。「期待する出力」との照合は
+ * しないので、終了コードが0でも完了とは限らない——それを判断するのは人。
+ *
+ * 走査するのは**本文の生の行**（`guide.verification`ではない）。画面へ渡すMarkdownは
+ * インデントと前後の空行を落とした後の文字列で、そこからは本文の行番号へ戻せない。
+ */
+export function extractVerificationCommands(
+  body: string | null,
+  guide: ManualStepGuide = parseManualStepGuide(body),
+): ManualStepCommand[] {
+  if (!body || guide.verificationRange === null) return [];
+
+  const lines = body.split("\n");
+  const { start, end } = guide.verificationRange;
+  const commands: ManualStepCommand[] = [];
+
+  for (const block of findShellBlocks(lines, start - 1, Math.min(end, lines.length))) {
+    commands.push({ stepLine: block.fenceIndex + 1, command: block.command, kind: "verification" });
+  }
+  return commands;
+}
+
+/**
+ * 本文から代行実行できるコマンドを、実行する順（手順 → 完了の確認）にすべて取り出す（#1869）。
+ *
+ * 画面・API・pollerが同じ並びを見るための唯一の入口。**確認節を含めるかどうかを
+ * 呼び出し側の判断にしない**（含める側と含めない側が生まれると、画面で押せるのにAPIが拒否する）。
+ */
+export function extractRunnableManualStepCommands(
+  body: string | null,
+  guide: ManualStepGuide = parseManualStepGuide(body),
+): ManualStepCommand[] {
+  return [...extractManualStepCommands(body, guide), ...extractVerificationCommands(body, guide)];
+}
+
+/** `stepLine`が指すコマンドを引く。無ければ`null`（＝そこは代行できない） */
 export function findManualStepCommand(
   body: string | null,
   stepLine: number,
 ): ManualStepCommand | null {
-  return extractManualStepCommands(body).find((entry) => entry.stepLine === stepLine) ?? null;
+  return (
+    extractRunnableManualStepCommands(body).find((entry) => entry.stepLine === stepLine) ?? null
+  );
+}
+
+/**
+ * `stepLine`が指すコマンドを、`nextCommand`へ差し替えた本文を返す（#1869）。
+ *
+ * 失敗した手順に対してClaudeが出した修正案を適用するための書き換え。**本文へ入るのは
+ * コマンドの文字列だけ**で、原因の説明も実行時の出力も入れない（このリポジトリはPUBLICで、
+ * 手作業の出力にはシークレットが混ざりうる）。置き換えるのはコードブロックの中身だけで、
+ * フェンスの記号・インデント・前後の行はそのまま残す。
+ *
+ * **一意に特定できなければ`null`**（安全側へ倒す）。書き換えた結果からコマンドを取り出し直して
+ * 元どおり読めることまで確かめてから返すので、壊れた本文をGitHubへ送らない。
+ */
+export function replaceManualStepCommand(
+  body: string | null,
+  stepLine: number,
+  nextCommand: string,
+): string | null {
+  if (!body) return null;
+
+  const command = nextCommand.trim();
+  if (command === "" || command.length > MANUAL_STEP_COMMAND_MAX_LENGTH) return null;
+  // フェンスを含むコマンドはブロックを閉じてしまう（本文の構造が壊れる）
+  if (command.split("\n").some((line) => FENCE_PATTERN.test(line))) return null;
+
+  const current = findManualStepCommand(body, stepLine);
+  if (current === null) return null;
+
+  const lines = body.split("\n");
+  const block = findBlockForCommand(lines, stepLine, current.kind);
+  if (block === null) return null;
+
+  const indent = " ".repeat(block.indent);
+  const replaced = [
+    ...lines.slice(0, block.fenceIndex + 1),
+    ...command.split("\n").map((line) => (line === "" ? "" : `${indent}${line}`)),
+    ...lines.slice(block.closeIndex),
+  ].join("\n");
+
+  // 書き換えた本文から同じ行を引き直せることまで確かめる。ここが通らない書き換えは
+  // 画面・API・pollerの照合も通らないため、送る前に捨てる
+  if (findManualStepCommand(replaced, stepLine)?.command !== command) return null;
+  return replaced;
+}
+
+/** 差し替える対象のコードブロック（開き・閉じフェンスの位置とインデント） */
+type ShellBlock = { fenceIndex: number; closeIndex: number; indent: number; command: string };
+
+/** `stepLine`が指すコマンドのコードブロックを、本文の行の中から1つに定める */
+function findBlockForCommand(
+  lines: string[],
+  stepLine: number,
+  kind: ManualStepCommandKind,
+): ShellBlock | null {
+  if (kind === "verification") {
+    // 確認節は開きフェンスの行そのものを指している
+    const blocks = findShellBlocks(lines, stepLine - 1, lines.length);
+    const block = blocks[0];
+    return block && block.fenceIndex === stepLine - 1 ? block : null;
+  }
+
+  // 手順は`- [ ]`の行を指しているので、そこから次の手順（または節の終わり）までを見る
+  const start = stepLine - 1;
+  let end = lines.length;
+  let openFence: string | null = null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const fence = FENCE_PATTERN.exec(lines[index]);
+    if (fence) {
+      const marker = fence[1][0];
+      if (openFence === null) openFence = marker;
+      else if (marker === openFence) openFence = null;
+      continue;
+    }
+    if (openFence !== null) continue;
+    if (TASK_LINE_PATTERN.test(lines[index]) || HEADING_PATTERN.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+
+  const blocks = findShellBlocks(lines, start, end);
+  // 手順は「ちょうど1つ」に限る（`extractShellBlock`と同じ判定）
+  return blocks.length === 1 ? blocks[0] : null;
+}
+
+/** 行頭の見出し。手順の終わりの判定に使う（`lib/manual-step-guide.ts`と同じ形） */
+const HEADING_PATTERN = /^#{1,6}\s+/;
+
+/**
+ * `[from, to)`の範囲にあるシェルのコードブロックを、開きフェンスの位置とともに取り出す。
+ *
+ * **インデントの深さでフェンスかどうかを変えない**（`lib/manual-step-guide.ts`の
+ * `splitSections`・`extractShellBlock`と同じ）。テンプレートの手作業Issueはコマンドを
+ * リスト項目の下に4スペース下げて書くため、CommonMarkの「4スペース＝インデント記法」を
+ * ここで適用すると、実際の本文のコマンドがひとつも取り出せない。中身のインデントは
+ * 開きフェンスのぶんだけ戻す。
+ */
+type OpenFence = { marker: string; indent: number; index: number; executable: boolean };
+
+function findShellBlocks(lines: string[], from: number, to: number): ShellBlock[] {
+  const blocks: ShellBlock[] = [];
+  let open: OpenFence | null = null;
+  let current: string[] = [];
+
+  for (let index = Math.max(0, from); index < Math.min(to, lines.length); index += 1) {
+    const line = lines[index];
+    const indent = line.length - line.trimStart().length;
+    const fence: RegExpExecArray | null = FENCE_PATTERN.exec(line);
+
+    if (fence) {
+      const marker: string = fence[1][0];
+      if (open === null) {
+        const language = line.slice(line.indexOf(fence[1]) + fence[1].length).trim().toLowerCase();
+        open = { marker, indent, index, executable: SHELL_FENCE_LANGUAGES.has(language) };
+        current = [];
+        continue;
+      }
+      if (marker === open.marker) {
+        const opened = open;
+        const command = current
+          .map((entry) =>
+            entry.slice(Math.min(opened.indent, entry.length - entry.trimStart().length)),
+          )
+          .join("\n")
+          .trim();
+        if (opened.executable && command !== "" && command.length <= MANUAL_STEP_COMMAND_MAX_LENGTH) {
+          blocks.push({
+            fenceIndex: opened.index,
+            closeIndex: index,
+            indent: opened.indent,
+            command,
+          });
+        }
+        open = null;
+        current = [];
+      }
+      continue;
+    }
+    if (open !== null) current.push(line);
+  }
+
+  return blocks;
 }
 
 /**

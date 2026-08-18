@@ -42,7 +42,16 @@ name: Issue Progress (reusable)
 # 非同期に実行)では発火しないことがある(Issue #112。GITHUB_TOKEN起点のイベントは他の
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
-# develop-merge-sweepジョブはこれを取りこぼした`Develop PR`をscheduleで定期的に拾い直す。
+# develop-merge-sweepジョブはこれを取りこぼした`Develop PR`・`Implementation`のissueを
+# scheduleで定期的に拾い直す。
+#
+# **一時的なAPI不調でこの経路が丸ごと失われないようにしてある(#1861)。** #1583では
+# develop-pr-openedの報告がHTTP 500、develop-pr-mergedの`gh label list`がHTTP 503に当たり、
+# マージ済みのissueが`Implementation`のまま取り残された。対処は3つで、(1)進捗の報告より先に
+# 対象issue番号をGITHUB_OUTPUTへ書き、ラベル操作・コメント投稿の失敗は警告に留める、
+# (2)issue-deckへのPOST/GETは5xxと接続失敗にだけ再試行する、(3)develop-merge-sweepが
+# `Implementation`も走査する。詳細はdocs/progress-status-architecture.mdを参照。
+# 判定の失敗経路はscripts/reusable-issue-labels.test.mjsが`run:`本文を直接実行して検証する。
 #
 # cleanup-on-closeジョブは、上記の状態遷移(main-pr-mergedによるDone遷移)を経由しない
 # Issueクローズ(例: 21.plan-requiredの計画をユーザーが承認・練り直しのいずれもせず、
@@ -178,11 +187,26 @@ jobs:
           fi
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -252,37 +276,59 @@ jobs:
         env:
           AUTO_MERGE_PATH: ${{ steps.verdict.outputs.auto_merge_path }}
         run: |
-          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            n="${BASH_REMATCH[1]}"
-            note=""
-            if [ "$AUTO_MERGE_PATH" != "true" ]; then
-              # 対象リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
-              # ジョブごと落ちる(#975)。実在する場合だけ呼ぶ(develop-pr-mergedと同じ作法)。
-              # ユーザーがマージする状態なので、理由は`01.check-merge`(#1490)。理由は常に1枚
-              # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
-              REASON_LABEL="01.check-merge"
-              DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
-              LABEL_ARGS=()
-              for name in "00.check-user" "$REASON_LABEL"; do
-                if grep -qx "$name" <<<"$DEFINED_LABELS"; then
-                  LABEL_ARGS+=(--add-label "$name")
-                else
-                  echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
-                fi
-              done
-              for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-                if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
-                  LABEL_ARGS+=(--remove-label "$name")
-                fi
-              done
-              if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
-                gh issue edit "$n" "${LABEL_ARGS[@]}"
+          if [[ ! "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            exit 0
+          fi
+          n="${BASH_REMATCH[1]}"
+
+          # **対象issueの出力を最初に行う(#1861)。** ラベル操作・コメント投稿のどれかが
+          # GitHub APIの一時的な5xxで落ちると、`bash -e`でこのステップごと異常終了し、
+          # 後続の「Project Status を報告する」ステップまでスキップされる。以降の失敗は
+          # すべて警告に留め、進捗の報告を最優先で守る(develop-pr-mergedと同じ形)。
+          echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
+
+          note=""
+          if [ "$AUTO_MERGE_PATH" != "true" ]; then
+            # 対象リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+            # ジョブごと落ちる(#975)。実在する場合だけ呼ぶ(develop-pr-mergedと同じ作法)。
+            # ユーザーがマージする状態なので、理由は`01.check-merge`(#1490)。理由は常に1枚
+            # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+            REASON_LABEL="01.check-merge"
+            DEFINED_LABELS=""
+            for attempt in 1 2 3; do
+              if [ "$attempt" != 1 ]; then sleep 5; fi
+              if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+                && [ -n "$DEFINED_LABELS" ]; then
+                break
+              fi
+              DEFINED_LABELS=""
+            done
+            if [ -z "$DEFINED_LABELS" ]; then
+              echo "::warning::ラベル一覧を取得できませんでした。ラベルの付与をスキップします（進捗の報告は続けます）"
+            fi
+            LABEL_ARGS=()
+            for name in "00.check-user" "$REASON_LABEL"; do
+              if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                LABEL_ARGS+=(--add-label "$name")
+              elif [ -n "$DEFINED_LABELS" ]; then
+                echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+              fi
+            done
+            for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+              if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                LABEL_ARGS+=(--remove-label "$name")
+              fi
+            done
+            if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
+              if gh issue edit "$n" "${LABEL_ARGS[@]}"; then
                 note=$'\n\n'"⚠️ このリポジトリには自動マージ可否を判定するワークフロー（\`claude-review-develop.yml\`）が無いため、このPRが自動でマージされることはありません。内容を確認したうえでマージしてください。"
+              else
+                echo "::warning::issue #$n: ラベルの付与に失敗しました（進捗の報告は続けます）"
               fi
             fi
-            gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL$note"$'\n\n<!-- issue-deck-source:issue-labels -->'
-            echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
           fi
+          gh issue comment "$n" --body "🔧 実装が完了し、developへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL$note"$'\n\n<!-- issue-deck-source:issue-labels -->' \
+            || echo "::warning::issue #$n: PR作成のコメント投稿に失敗しました（進捗の報告は続けます）"
 
       - name: Project Status を報告する
         if: steps.transition.outputs.issue_numbers != ''
@@ -302,11 +348,26 @@ jobs:
           fi
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -335,26 +396,46 @@ jobs:
       - name: 00.check-user を外しマージ完了を通知する
         id: transition
         run: |
-          if [[ "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
-            n="${BASH_REMATCH[1]}"
-            # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
-            # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
-            # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
-            DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
-            REMOVE_ARGS=()
-            for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-              if grep -qx "$name" <<<"$DEFINED_LABELS"; then
-                REMOVE_ARGS+=(--remove-label "$name")
-              fi
-            done
-            if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${REMOVE_ARGS[@]}"
-            else
-              echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
-            fi
-            gh issue comment "$n" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
-            echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
+          if [[ ! "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            exit 0
           fi
+          n="${BASH_REMATCH[1]}"
+
+          # **対象issueの出力を最初に行う(#1861)。** ラベル操作・コメント投稿のどれかが
+          # GitHub APIの一時的な5xxで落ちると、`bash -e`でこのステップごと異常終了し、
+          # 後続の「Project Status を報告する」ステップまでスキップされる。#1583では
+          # `gh label list`のHTTP 503でこの経路に落ち、マージ済みのissueが`Implementation`の
+          # まま取り残された。**進捗の報告を最優先で守り、以降の失敗はすべて警告に留める。**
+          echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
+
+          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
+          REMOVE_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$n" "${REMOVE_ARGS[@]}" \
+              || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告は続けます）"
+          elif [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告は続けます）"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
+          fi
+          gh issue comment "$n" --body "✅ developへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->' \
+            || echo "::warning::issue #$n: マージ完了のコメント投稿に失敗しました（進捗の報告は続けます）"
 
       # 1つのIssueに複数のPRが発生するため、ここでの`develop`は「最新のPRがdevelopへ入った」
       # ことを表し、Issueの完了を意味しない(docs/progress-status-architecture.md)。
@@ -377,11 +458,26 @@ jobs:
           fi
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -391,8 +487,21 @@ jobs:
 
   develop-merge-sweep:
     # GitHub Auto-merge機能によるマージがdevelop-pr-mergedジョブを起動しなかった
-    # ケースの安全網。`Develop PR`にいる全issueについて、対応ブランチ(issue-<番号>)
-    # からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら`Develop`へ進める。
+    # ケースの安全網。`Develop PR`・`Implementation`にいる全issueについて、対応ブランチ
+    # (issue-<番号>)からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら`Develop`へ進める。
+    #
+    # **`Implementation`も対象にするのは、`Develop PR`へ一度も到達しないまま
+    # 取り残されるケースがあるため(#1861)。** develop-pr-openedの`POST /api/progress`が
+    # 一時的な5xxで失敗すると、PRを作ってもStatusは`Implementation`のまま動かない。
+    # そのまま人がPRをマージし、develop-pr-mergedも同じ時間帯のAPI不調で落ちると、
+    # 「`Develop PR`にいるissue」しか見ていなかった従来のこのジョブは対象にすら入れられず、
+    # 拾い直す経路がどこにも無かった(#1583で実測)。
+    #
+    # ただし`Implementation`には「developへマージしたあと追加対応でブランチへpushした」
+    # 正規の状態(reusable-issue-dispatch.ymlのmode=additional)も含まれる。マージ済みPRが
+    # あるだけで進めると実装中のissueを勝手に動かすため、**マージ済みPRの先端と現在の
+    # ブランチの先端が一致するか**を必ず確かめる(#1513と同じ考え方)。マージ後に
+    # ブランチが削除されている場合は追加のpushが無い証拠として扱う。
     #
     # 対象の探し方がPhase 5で変わった。以前は`gh issue list --label <進捗ラベル>`で
     # GitHubのラベルから探していたが、ラベルを廃止したためissue-deckへ問い合わせる。
@@ -419,9 +528,23 @@ jobs:
             exit 0
           fi
           body_file="${RUNNER_TEMP:-/tmp}/progress-develop-pr.json"
-          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
-            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr")" || code=000
+          # 一時的な5xx・接続失敗だけを再試行する(#1861)。4xxは設定・実装の誤りで、
+          # 待っても変わらないため即座に諦める。
+          code=""
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+            code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr,implementation")" || code=000
+            if [ "$code" = "200" ]; then break; fi
+            case "$code" in
+              000|5??) ;;
+              *) break ;;
+            esac
+            if [ "$attempt" != 4 ]; then
+              echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
+            fi
+          done
           # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
           # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
           # issueが1件もcloseされない」が正常系と見分けられなくなる。
@@ -435,14 +558,28 @@ jobs:
           fi
           numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
           if [ -z "$numbers" ]; then
-            echo "Develop PR にいるopenなissueはありません（対象なしのため何もしません）"
+            echo "Develop PR・Implementation にいるopenなissueはありません（対象なしのため何もしません）"
             exit 0
           fi
 
           # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
           # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
           # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
-          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          #
+          # ラベル一覧の取得もGitHub APIの一時的な5xxで落ちる(#1583でHTTP 503を実測)。
+          # 取れなければラベルの除去だけを諦め、進捗の報告は続ける(#1861)。
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
+          if [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告は続けます）"
+          fi
           REMOVE_ARGS=()
           for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
             if grep -qx "$name" <<<"$DEFINED_LABELS"; then
@@ -451,14 +588,53 @@ jobs:
           done
           transitioned=""
           for n in $numbers; do
-            pr_url="$(gh pr list --state merged --base develop --head "issue-$n" --json url --jq '.[0].url // empty')"
-            if [ -n "$pr_url" ]; then
-              if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-                gh issue edit "$n" "${REMOVE_ARGS[@]}"
-              fi
-              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->'
-              transitioned="${transitioned}${n}"$'\n'
+            # 該当なしなら`[]`、取得に失敗したときだけ空になる。失敗を「マージ済みPRが無い」と
+            # 取り違えないよう区別し、失敗は次回のスケジュール実行に回す(#1861)
+            merged_json="$(gh pr list --state merged --base develop --head "issue-$n" \
+              --json url,headRefOid,mergedAt --limit 20 2>/dev/null)" || merged_json=""
+            if [ -z "$merged_json" ]; then
+              echo "::warning::issue #$n: マージ済みPRを取得できませんでした。次回のスケジュール実行で再判定します"
+              continue
             fi
+            pr_url="$(jq -r 'sort_by(.mergedAt) | last | .url // empty' <<<"$merged_json" 2>/dev/null || true)"
+            pr_head="$(jq -r 'sort_by(.mergedAt) | last | .headRefOid // empty' <<<"$merged_json" 2>/dev/null || true)"
+            if [ -z "$pr_url" ]; then
+              continue
+            fi
+
+            # マージ後に追加でpushされていないかを確かめる(#1861)。`Implementation`には
+            # マージ後の追加対応(mode=additional)も含まれるため、マージ済みPRがあるだけで
+            # 進めると実装中のissueを勝手に`Develop`へ動かしてしまう。
+            # ブランチが消えている(HTTP 404)なら、そのissueへの追加のpushは無い。
+            ref_json="$(gh api "repos/$GH_REPO/git/ref/heads/issue-$n" 2>/dev/null)" || true
+            branch_head="$(jq -r '.object.sha // empty' <<<"$ref_json" 2>/dev/null || true)"
+            ref_status="$(jq -r '.status // empty' <<<"$ref_json" 2>/dev/null || true)"
+            if [ -n "$branch_head" ]; then
+              if [ "$branch_head" != "$pr_head" ]; then
+                echo "issue #$n: ブランチ issue-$n の先端がマージ済みPR（$pr_url）と一致しないため、追加対応中とみなして進めません"
+                continue
+              fi
+            elif [ "$ref_status" != "404" ]; then
+              echo "::warning::issue #$n: ブランチ issue-$n の状態を確認できませんでした。次回のスケジュール実行で再判定します"
+              continue
+            fi
+
+            if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+              gh issue edit "$n" "${REMOVE_ARGS[@]}" \
+                || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告は続けます）"
+            fi
+            # 同じPRのマージを既に通知済みなら重ねて通知しない。`Implementation`を対象に
+            # 加えたことで、develop-pr-mergedが通知だけ済ませた後にStatusが巻き戻った
+            # ケース(#1511)を拾うと二重に通知しうるため(#1861)
+            notified="$(gh issue view "$n" --json comments 2>/dev/null \
+              | jq --arg url "$pr_url" '[.comments[].body | select(contains($url) and contains("developへのマージが完了しました"))] | length' 2>/dev/null)" || notified=""
+            if [ "$notified" = "0" ] || [ -z "$notified" ]; then
+              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->' \
+                || echo "::warning::issue #$n: マージ完了のコメント投稿に失敗しました（進捗の報告は続けます）"
+            else
+              echo "issue #$n: $pr_url のマージは通知済みのため、コメントは投稿しません"
+            fi
+            transitioned="${transitioned}${n}"$'\n'
           done
           if [ -n "$transitioned" ]; then
             {
@@ -479,11 +655,26 @@ jobs:
         run: |
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -519,9 +710,22 @@ jobs:
             exit 0
           fi
           body_file="${RUNNER_TEMP:-/tmp}/progress-develop.json"
-          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
-            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop")" || code=000
+          # 一時的な5xx・接続失敗だけを再試行する(#1861)
+          code=""
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+            code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$REPO&status=develop")" || code=000
+            if [ "$code" = "200" ]; then break; fi
+            case "$code" in
+              000|5??) ;;
+              *) break ;;
+            esac
+            if [ "$attempt" != 4 ]; then
+              echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
+            fi
+          done
           # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
           # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
           # issueが1件もcloseされない」が正常系と見分けられなくなる。
@@ -555,11 +759,26 @@ jobs:
         run: |
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -607,9 +826,22 @@ jobs:
             exit 0
           fi
           body_file="${RUNNER_TEMP:-/tmp}/progress-done.json"
-          code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
-            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || code=000
+          # 一時的な5xx・接続失敗だけを再試行する(#1861)
+          code=""
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+            code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || code=000
+            if [ "$code" = "200" ]; then break; fi
+            case "$code" in
+              000|5??) ;;
+              *) break ;;
+            esac
+            if [ "$attempt" != 4 ]; then
+              echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
+            fi
+          done
           # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
           # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
           # issueが1件もcloseされない」が正常系と見分けられなくなる。
@@ -630,7 +862,21 @@ jobs:
           # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
           # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
           # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
-          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          #
+          # ラベル一覧の取得もGitHub APIの一時的な5xxで落ちる(#1583でHTTP 503を実測)。
+          # 取れなければラベルの除去だけを諦め、closeと進捗の報告は続ける(#1861)。
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
+          if [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（closeと進捗の報告は続けます）"
+          fi
           REMOVE_ARGS=()
           for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
             if grep -qx "$name" <<<"$DEFINED_LABELS"; then
@@ -640,9 +886,10 @@ jobs:
           transitioned=""
           for n in $numbers; do
             if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${REMOVE_ARGS[@]}"
+              gh issue edit "$n" "${REMOVE_ARGS[@]}" \
+                || echo "::warning::issue #$n: ラベルの除去に失敗しました（closeと進捗の報告は続けます）"
             fi
-            gh issue close "$n"
+            gh issue close "$n" || echo "::warning::issue #$n: closeに失敗しました（進捗の報告は続けます）"
             transitioned="${transitioned}${n}"$'\n'
           done
           if [ -n "$transitioned" ]; then
@@ -664,11 +911,26 @@ jobs:
         run: |
           while read -r n; do
             [ -n "$n" ] || continue
-            code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-              -X POST "$APP_BASE_URL/api/progress" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              -H "Content-Type: application/json" \
-              -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
             if [ "$code" = "200" ]; then
               echo "issue #$n を $STATUS として報告しました"
             else
@@ -768,7 +1030,18 @@ jobs:
           # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
           # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
           # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
-          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          #
+          # ラベル一覧の取得もGitHub APIの一時的な5xxで落ちる(#1583でHTTP 503を実測)。
+          # 取れなければ除去を諦め、後続のスクリーンショット削除まで巻き添えにしない(#1861)。
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
           REMOVE_ARGS=()
           for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
             if grep -qx "$name" <<<"$DEFINED_LABELS"; then
@@ -776,7 +1049,10 @@ jobs:
             fi
           done
           if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-            gh issue edit "$ISSUE_NUMBER" "${REMOVE_ARGS[@]}"
+            gh issue edit "$ISSUE_NUMBER" "${REMOVE_ARGS[@]}" \
+              || echo "::warning::issue #$ISSUE_NUMBER: ラベルの除去に失敗しました"
+          elif [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします"
           else
             echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
           fi

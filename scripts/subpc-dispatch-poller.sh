@@ -28,6 +28,10 @@
 #   CROSS_REPO_QUESTION … 複数リポジトリ横断の質問セッション。worktreeを作らず、このホストが
 #                         実行できる全リポジトリを読み取り用に参照させる
 #                         （scripts/start-cross-repo-question.sh）
+#   PLAN_REVIEW         … 計画の関門（G1・#1218）のセッション。計画コメントの投稿を契機に
+#                         **自動で積まれる**（#1855）。対象リポジトリの origin/develop の
+#                         スナップショットを読み、指摘をIssueコメントへ投稿して終わる
+#                         （scripts/start-plan-review.sh）
 #
 # **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
 # （#1176）。issue-deck側からSSHでキックする経路は採れない。
@@ -56,6 +60,7 @@
 #   DISPATCH_HOST_NAME              このホストの名前（省略時は `hostname -s`）
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
+#   DISPATCH_MAX_PLAN_REVIEWS       同時に走らせる計画レビューの上限（省略時は2）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
@@ -86,7 +91,8 @@ set -euo pipefail
 # 9: 動かしているチェックアウトの版（コミット・ブランチ・developからの遅れ）を申告する（#1612）。
 # 10: マージ済みworktreeの掃除（cleanup-worktrees.sh）を一定間隔で呼ぶ（#1716）。
 # 11: 手作業の代行実行（`MANUAL_STEP`）を、GitHubの本文と照合してから実行する（#1828）。
-DISPATCH_POLLER_VERSION="11"
+# 12: 計画レビュー（`PLAN_REVIEW`）のセッションを起こす（#1855）。
+DISPATCH_POLLER_VERSION="12"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -108,6 +114,9 @@ QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
 MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
+# 計画の関門（G1・#1218）のセッション（#1855）。**実装セッションとも横断質問とも別のランチャー**で、
+# worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
+PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -214,6 +223,14 @@ LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPAT
 # 開発サーバーが最大3本（#1177）走るため、12本で1〜2割の余裕を残す見当。
 # 別のホストへ載せるときは搭載メモリに合わせて dispatch.env で変える。
 MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSIONS:-}" 12)"
+
+# 同時に走らせる計画レビュー（#1855）の上限。**`DISPATCH_MAX_SESSIONS`とは別に持つ。**
+#
+# 計画レビューのセッションは`-issue-`の規約から外してあるため上の本数に数えられず、ジョブも
+# セッションが立った時点で閉じる（枠が即座に空く）。**何も見ないと同時に何本でも走る**ので、
+# ここで別に止める。実装セッションより小さく取るのは、読むだけで数分で終わる代わりに、
+# 走っている間はモデル呼び出しがそのぶん並ぶため（1本$0.7〜1.5）。
+MAX_PLAN_REVIEWS="$(require_positive_int DISPATCH_MAX_PLAN_REVIEWS "${DISPATCH_MAX_PLAN_REVIEWS:-}" 2)"
 
 # チェックアウトの遅れ（#1612）を数え直す間隔（分）。**0で無効**（fetchを一切行わない）。
 #
@@ -343,6 +360,17 @@ count_issue_sessions() {
     grep -cE '^.+-issue-[1-9][0-9]*$' || true
 }
 
+# 生きている計画レビューのセッションの本数（#1855）。
+#
+# **`count_issue_sessions`とは別に数える。** 計画レビューのセッション名は`-issue-`の規約から
+# 外してあり（そうしないとセッション報告・停止／終了の突き合わせに混ざる）、そのぶん
+# `DISPATCH_MAX_SESSIONS`の計上からも外れる。ジョブはセッションが立った時点で成功として
+# 閉じるため枠も即座に空き、**このまま何も見ないと同時に何本でも走りうる**。
+count_plan_review_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-plan-review-[1-9][0-9]*$' || true
+}
+
 # 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
 # 申告した種別のジョブは実行できなければならないため、`true`固定にはしない（pollerだけ
 # 新しくしてランチャーが同期されていない、という状態がありうる）。
@@ -361,6 +389,20 @@ cross_repo_question_capable() {
 # サブPC側でも確かめるため（issue-deck側の照合だけに頼らない多層防御）。
 manual_step_capable() {
   if [[ -f "$MANUAL_STEP_RUNNER" ]] && command -v gh >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# 計画レビュー（G1・#1855）のセッションを起こせるか。**ランチャーが手元にあるかで判定する**
+# （`cross_repo_question_capable`と同じ）。
+#
+# ここを`true`固定にしないことの意味は、この種別ではとりわけ大きい。計画レビューのジョブは
+# **計画コメントの投稿を契機に自動で積まれる**ため、ランチャーが無いまま申告すると、
+# 計画を出すたびに「未知のジョブ種別です」で失敗したジョブが画面へ並ぶ。
+plan_review_capable() {
+  if [[ -f "$PLAN_REVIEW_LAUNCHER" ]]; then
     printf 'true'
   else
     printf 'false'
@@ -571,6 +613,10 @@ announce() {
   # **`instruction`とも別に持つ。** あちらは走っているセッションの入力欄へ1行送るだけなのに対し、
   # こちらは**シェルでコマンドを実行する**ため、届いた先で起きることの性質が違う。
   #
+  # `planReview`は「計画レビュー（G1・#1855）のセッションを起こせる」という申告。
+  # **この種別のジョブは人が押さなくても積まれる**（計画コメントの投稿が契機）ため、
+  # 対応していないまま申告すると、計画を出すたびに失敗したジョブが画面へ並ぶ。
+  #
   # `checkout`も同じく**画面へ出すためだけの申告**（#1612）。**`agentVersion`とは別物**で、
   # あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に動いているスクリプトが
   # どのコミットのものかという事実（版数が同じまま97コミット遅れていた、が起きている）。
@@ -584,9 +630,10 @@ announce() {
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson manualStep "$(manual_step_capable)" \
+    --argjson planReview "$(plan_review_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, planReview: $planReview, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -905,6 +952,17 @@ report_sessions() {
 expected_session_name() {
   local repo="$1" issue_number="$2"
   printf '%s' "${repo//[^A-Za-z0-9_-]/-}-issue-$issue_number"
+}
+
+# 計画レビュー（G1・#1855）のセッション名。**`-issue-`の規約からは外してある。**
+#
+# 実装セッションと同じ形にすると、`report_sessions`（セッションの報告）・`count_issue_sessions`
+# （本数の計上）・停止／終了の突き合わせがすべて拾ってしまい、**計画レビューを実装セッションと
+# 取り違えて畳む**ことになる。計画レビューは計画を出したセッションと同じIssueに対して、
+# そのセッションが生きている最中に走る。組み立て方は`scripts/start-plan-review.sh`と揃える。
+plan_review_session_name() {
+  local repo="$1" issue_number="$2"
+  printf '%s' "${repo//[^A-Za-z0-9_-]/-}-plan-review-$issue_number"
 }
 
 # --- 追加指示の送出（#1012・3段階プロトコル）------------------------------------
@@ -1275,8 +1333,38 @@ run_job() {
       report_job "$job_id" failed "横断質問のランチャーがありません（$QUESTION_LAUNCHER）。"
       return 0
     fi
-    launch_and_report "$job_id" "$repo" "$issue_number" "横断質問セッションを起動しています" \
+    launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
+      "横断質問セッションを起動しています" \
       bash "$QUESTION_LAUNCHER" "$owner" "$repo" "$issue_number"
+    return 0
+  fi
+
+  # 計画レビュー（G1・#1855）。**`local_repo_check`は通さない**（版数の契約は実装セッション用で、
+  # こちらは読むだけ）。cloneが無い場合はランチャー側が理由を出して落ちる。
+  #
+  # **重複起動の判定に使うセッション名が実装セッションとは違う**（`<repo>-plan-review-<番号>`）。
+  # 実装セッションの名前で見ると、計画を出したセッションが動いている間はレビューが必ず
+  # 「起動済みのため見送り」になる——それはこの機能が働くべき瞬間そのもの。
+  if [[ "$kind" == "PLAN_REVIEW" ]]; then
+    if [[ ! -f "$PLAN_REVIEW_LAUNCHER" ]]; then
+      report_job "$job_id" failed "計画レビューのランチャーがありません（$PLAN_REVIEW_LAUNCHER）。"
+      return 0
+    fi
+    # **本数の上限はここでしか見られない**（#1855）。計画レビューのセッションは
+    # `count_issue_sessions`に数えられず、ジョブも起動した時点で閉じるため、
+    # `DISPATCH_MAX_SESSIONS`とは独立に積み上がる。**失敗ではなく見送り**として報告する
+    # （ガードが正常に働いた結果で、何も壊れていない。#1229と同じ扱い）。見送った計画は
+    # 画面の「計画をレビュー」から起こし直せる
+    local live_reviews
+    live_reviews="$(count_plan_review_sessions)"
+    if [[ "$MAX_PLAN_REVIEWS" -gt 0 && "${live_reviews:-0}" -ge "$MAX_PLAN_REVIEWS" ]]; then
+      report_job "$job_id" skipped \
+        "計画レビューのセッションが上限（$MAX_PLAN_REVIEWS本）に達しているため起動しませんでした（現在 $live_reviews 本）。"
+      return 0
+    fi
+    launch_and_report "$job_id" "$(plan_review_session_name "$repo" "$issue_number")" \
+      "計画レビュー（G1）を起動しています" \
+      bash "$PLAN_REVIEW_LAUNCHER" "$owner" "$repo" "$issue_number"
     return 0
   fi
 
@@ -1301,21 +1389,26 @@ run_job() {
     return 0
   fi
 
-  launch_and_report "$job_id" "$repo" "$issue_number" "起動しています（$LOCAL_REPO_PATH）" \
+  launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
+    "起動しています（$LOCAL_REPO_PATH）" \
     bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
 }
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
 #
-# **実装セッション（`LAUNCH`）と横断質問セッション（`CROSS_REPO_QUESTION`・#1454）で共有する。**
-# 違うのは走らせるコマンドだけで、重複防止・`running`の報告・差分による成否判定・失敗時の
-# 出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。
+# **セッションを立てる3種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`）で共有する。**
+# 違うのは走らせるコマンドと期待するセッション名だけで、重複防止・`running`の報告・差分による
+# 成否判定・失敗時の出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。
 #
-#   $1 ジョブID / $2 リポジトリ名 / $3 Issue番号 / $4 `running`として画面へ出す文言
-#   $5以降 実行するコマンド
+# **期待するセッション名を引数で受ける**（#1855）。以前はリポジトリ名とIssue番号から
+# `<repo>-issue-<番号>`を組み立てていたが、計画レビューは**実装セッションが動いている最中に
+# 起こすもの**で、その名前で重複を見ると必ず「起動済みのため見送り」になる。
+#
+#   $1 ジョブID / $2 期待するtmuxセッション名 / $3 `running`として画面へ出す文言
+#   $4以降 実行するコマンド
 launch_and_report() {
-  local job_id="$1" repo="$2" issue_number="$3" running_message="$4"
-  shift 4
+  local job_id="$1" expected_session="$2" running_message="$3"
+  shift 3
 
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
@@ -1326,8 +1419,7 @@ launch_and_report() {
   # 起動を断ってしまう。起動できるリポジトリが1つだった間は表に出なかったが、増やした時点で
   # 番号の衝突はほぼ確実に起きる。セッション名の規約は`<リポジトリ名>-issue-<番号>`
   # （docs/multi-agent/local-quick-start.md「セッション名」）。
-  local before after new_sessions expected_session
-  expected_session="$(expected_session_name "$repo" "$issue_number")"
+  local before after new_sessions
   before="$(tmux_session_names)"
   if printf '%s\n' "$before" | grep -qxF "$expected_session"; then
     # **失敗ではなく見送り（#1229）。** ガードが正常に働いた結果で、何も壊れていない。

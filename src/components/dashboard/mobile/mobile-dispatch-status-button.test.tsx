@@ -26,6 +26,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     instructionCapable: true,
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    planReviewCapable: null,
     maxSessions: 12,
     liveSessions: 1,
     metrics: null,
