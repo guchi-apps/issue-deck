@@ -11,6 +11,7 @@ vi.mock("@/hooks/use-repository-release-statuses", () => ({
 }));
 
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE } from "@/lib/repository-automation";
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -23,6 +24,7 @@ function repository(overrides: Partial<ConnectedRepository> = {}): ConnectedRepo
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
     ...overrides,
@@ -130,5 +132,49 @@ describe("MobileReposScreen のヘッダー（#1685）", () => {
     renderScreen(null);
 
     expect(screen.getByRole("button", { name: "対応が必要なもの" })).toBeTruthy();
+  });
+});
+
+describe("MobileReposScreen の実行経路の印（#1888）", () => {
+  beforeEach(() => {
+    useRepositoryReleaseStatuses.mockReset();
+    useRepositoryReleaseStatuses.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderWith(repositories: ConnectedRepository[]) {
+    render(
+      <MobileReposScreen
+        repositories={repositories}
+        onSelectRepository={vi.fn()}
+        onSetRepositoryFavorite={vi.fn()}
+      />,
+    );
+  }
+
+  it("無人実行もサブPCも対応していないリポジトリには印を出す", () => {
+    renderWith([repository({ hasClaudeWorkflow: false, dispatchRunnable: false })]);
+
+    expect(screen.getByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeTruthy();
+  });
+
+  it("無人実行が無くてもサブPCで起動できるリポジトリには印を出さない（vps・subpc・docs）", () => {
+    renderWith([repository({ hasClaudeWorkflow: false, dispatchRunnable: true })]);
+
+    expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();
+  });
+
+  it("無人実行に対応しているリポジトリには印を出さない", () => {
+    renderWith([repository({ hasClaudeWorkflow: true, dispatchRunnable: false })]);
+
+    expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();
   });
 });

@@ -15,6 +15,7 @@ function repository(overrides: Partial<ConnectedRepository> = {}): ConnectedRepo
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
     ...overrides,
