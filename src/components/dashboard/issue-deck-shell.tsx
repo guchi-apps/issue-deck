@@ -954,8 +954,15 @@ export function IssueDeckShell({
           groupByRepo={groupByRepo}
           onChangeGroupByRepo={setGroupByRepo}
           assigneeOptions={assigneeOptions}
+          /* 開いている画面に関連するリポジトリを初期値にする（#1884）。1つに絞り込んでいれば
+             そのリポジトリ、絞り込んでいなければ開いているIssueのリポジトリ。どちらも
+             分からなければ渡さず、フォームで選ばせる */
           onCreateIssue={() =>
-            openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+            openCreateDialog(
+              filters.repos.length === 1
+                ? filters.repos[0]
+                : (selectedIssue?.repositoryFullName ?? null),
+            )
           }
           onAskCrossRepoQuestion={() =>
             openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)

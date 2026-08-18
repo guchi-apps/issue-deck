@@ -17,7 +17,6 @@ function makeHandoff(overrides: Partial<IssueCreateHandoff> = {}): IssueCreateHa
     selectedLabels: ["50.feature"],
     assignee: "m-guchi",
     bodyPrefix: null,
-    step: "confirm",
     savedAt: NOW,
     ...overrides,
   };
@@ -42,7 +41,7 @@ describe("parseIssueCreateHandoff", () => {
 
   it("欠けている値・型の違う値は既定へ寄せる", () => {
     const parsed = parseIssueCreateHandoff(
-      JSON.stringify({ savedAt: NOW, kind: "unknown", selectedLabels: ["a", 1], step: "unknown" }),
+      JSON.stringify({ savedAt: NOW, kind: "unknown", selectedLabels: ["a", 1] }),
       NOW,
     );
     expect(parsed).toEqual({
@@ -53,7 +52,6 @@ describe("parseIssueCreateHandoff", () => {
       selectedLabels: ["a"],
       assignee: null,
       bodyPrefix: null,
-      step: "input",
       savedAt: NOW,
     });
   });
