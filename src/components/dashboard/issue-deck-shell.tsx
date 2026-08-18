@@ -1006,8 +1006,6 @@ export function IssueDeckShell({
                   onSelectFlow={() => selectTab("flow")}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
-                  /* サブPCのカードのセッション行からIssue詳細を開く（#1625） */
-                  onOpenIssue={openIssueUrl}
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onOpenSettings={selectMobileSettings}

@@ -1,7 +1,7 @@
 "use client";
 
-import { ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,7 @@ import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
   describeDispatchHostSelfUpdate,
+  type DispatchHostCheckoutRow,
   type DispatchHostCheckoutTone,
   type DispatchHostSelfUpdateRow,
 } from "@/lib/dispatch/host-checkout";
@@ -18,6 +19,7 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   describeDispatchHostMetrics,
   formatHostMetricPercent,
+  type DispatchHostMetricRow,
   type DispatchHostMetricTone,
 } from "@/lib/dispatch/host-metrics";
 import {
@@ -42,8 +44,15 @@ import { cn } from "@/lib/utils";
  * 何が動いているのか分からないという元の状態がスマホ側に残る。
  * スマホ側は#1638でいったんヘッダーの実行状況シートへ移したが、ホームを開いても「いま何が
  * 動いているか」が分からなくなったため#1690で戻した。**同じ部品を2か所に置く代わりに、
- * ホームは「ホストの様子と動いているセッション」のサマリ、ヘッダーのシートはそれに加えて
- * キュー全体（順番待ち・失敗・停止操作）**という切り分けにしてある。
+ * ホームは`compact`で縮めたホストの様子（#1933）、ヘッダーのシートはそれに加えて動いている
+ * セッションとキュー全体（順番待ち・失敗・停止操作）**という切り分けにしてある。
+ *
+ * **`compact`はスマホのホーム専用**（#1933）。使用率を横並びにし、セッションの一覧・
+ * スクリプトの版（遅れているときを除く）・「更新して再起動」を落として、カード全体を
+ * 実行状況シートを開くボタンにする。#1690で戻した時点のカードは縦242pxあり、それだけで
+ * メニューの1行目を画面の外へ押し出していた。**#1638の「ホームから消えて分からなくなる」が
+ * 再発しないのは、動いているセッションが消えるのではなく1タップ先へ移るだけだから**で、
+ * 入力待ちのセッションがあることは縮めた側の見出しにも残す（`waitingCount`）。
  *
  * **セッションの行の文言・配色は`summarizeIssueSession`をそのまま使う**（Issue詳細の
  * `issue-session-status.tsx`と同じ）。ここで独自の言い方を作ると、同じセッションが画面に
@@ -89,6 +98,8 @@ export function DispatchHostPanel({
   jobs = [],
   onOpenIssue,
   onRequestSelfUpdate,
+  compact = false,
+  onOpenDetail,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
@@ -112,6 +123,18 @@ export function DispatchHostPanel({
   onRequestSelfUpdate?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
+   * 縮めた版で出す（#1933）。スマホのホーム専用で、使用率を横並びにしてセッションの一覧・
+   * スクリプトの版（遅れているときを除く）・「更新して再起動」を落とす。
+   * **`jobs`・`onRequestSelfUpdate`は渡さなくてよい**——押した結果を出す先はシート側になる。
+   */
+  compact?: boolean;
+  /**
+   * カード全体を押したときの受け取り手（#1933）。渡すとカードがボタンになる。
+   * **`compact`と組にして使う**——縮めていない版はセッションの行にリンクを、更新の行に
+   * ボタンを持っており、ボタンで包むとその中にボタンが入る。
+   */
+  onOpenDetail?: () => void;
 }) {
   if (hosts.length === 0) return null;
 
@@ -125,6 +148,8 @@ export function DispatchHostPanel({
           selfUpdateJob={selectHostSelfUpdateJob(jobs, host.name)}
           onOpenIssue={onOpenIssue}
           onRequestSelfUpdate={onRequestSelfUpdate}
+          compact={compact}
+          onOpenDetail={onOpenDetail}
         />
       ))}
     </div>
@@ -137,6 +162,8 @@ function HostCard({
   selfUpdateJob,
   onOpenIssue,
   onRequestSelfUpdate,
+  compact,
+  onOpenDetail,
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
@@ -145,6 +172,8 @@ function HostCard({
   onRequestSelfUpdate?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  compact?: boolean;
+  onOpenDetail?: () => void;
 }) {
   const metrics = describeDispatchHostMetrics(host);
   // いま動いているスクリプトがどの版か（#1612）。**pollerは自分と同じチェックアウトの
@@ -163,33 +192,23 @@ function HostCard({
     host.selfUpdateCapable === true &&
     ((host.checkout?.behindCount ?? 0) > 0 || selfUpdate !== null);
 
+  if (compact) {
+    return (
+      <CompactHostCard
+        host={host}
+        metrics={metrics}
+        checkout={checkout}
+        atCapacity={atCapacity}
+        hasSessionCount={hasSessionCount}
+        waitingCount={countWaitingSessions(sessions)}
+        onOpenDetail={onOpenDetail}
+      />
+    );
+  }
+
   return (
     <div className="rounded-md border p-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-medium">
-          <span
-            aria-hidden
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              host.online ? "bg-primary" : "bg-muted-foreground",
-            )}
-          />
-          {formatDispatchHostName(host.name)}
-        </span>
-        {host.online ? (
-          hasSessionCount && (
-            <span className={cn("text-[11px] text-muted-foreground", atCapacity && "text-destructive")}>
-              セッション {host.liveSessions}/{host.maxSessions}
-            </span>
-          )
-        ) : (
-          // 応答していないホストは本数も使用率も出さない。最後の申告の時刻だけを出して、
-          // 「動いていない」と「見えていない」を取り違えないようにする
-          <span className="text-[11px] text-muted-foreground">
-            応答していません・{formatRelativeDate(host.lastSeenAt)}
-          </span>
-        )}
-      </div>
+      <HostHeading host={host} atCapacity={atCapacity} hasSessionCount={hasSessionCount} />
 
       {checkout && (
         <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
@@ -298,6 +317,170 @@ function SelfUpdateRow({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * カードの1行目（ホスト名とセッション本数）。**縮めた版と従来の版で同じものを出す**——
+ * ここだけ別々に書くと、片方の上限の色や応答なしの文言が古いまま残る。
+ */
+function HostHeading({
+  host,
+  atCapacity,
+  hasSessionCount,
+  trailing,
+}: {
+  host: DispatchHostView;
+  atCapacity: boolean;
+  hasSessionCount: boolean;
+  /** 右端に足すもの（縮めた版の入力待ちの印と山括弧） */
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="flex items-center gap-1.5 text-xs font-medium">
+        <span
+          aria-hidden
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            host.online ? "bg-primary" : "bg-muted-foreground",
+          )}
+        />
+        {formatDispatchHostName(host.name)}
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {host.online ? (
+          hasSessionCount && (
+            <span className={cn("text-[11px] text-muted-foreground", atCapacity && "text-destructive")}>
+              セッション {host.liveSessions}/{host.maxSessions}
+            </span>
+          )
+        ) : (
+          // 応答していないホストは本数も使用率も出さない。最後の申告の時刻だけを出して、
+          // 「動いていない」と「見えていない」を取り違えないようにする
+          <span className="text-[11px] text-muted-foreground">
+            応答していません・{formatRelativeDate(host.lastSeenAt)}
+          </span>
+        )}
+        {trailing}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 人の入力を待っているセッションの本数（#1933）。**縮めた版の見出しに残す唯一のセッションの
+ * 情報**で、これが無いと変更後のホームには「シートを開くべきとき」を示すものが何も無くなる
+ * （「セッション 6/12」は本数でしかなく、ホームの「実行中」はIssueの進捗の件数）。
+ *
+ * 数えるのは`summarizeIssueSession`の`waiting`で、入力待ち（`WAITING_INPUT`）とまだ開始して
+ * いない（`NOT_STARTED`）の両方が入る。**どちらも人が答えるまで進まない**ので、ホームでは
+ * 分けない（違いはシートの行に出る）。
+ */
+function countWaitingSessions(sessions: DispatchSessionView[]): number {
+  return sessions.filter((session) => summarizeIssueSession(session).tone === "waiting").length;
+}
+
+/**
+ * 縮めた版のカード（#1933）。スマホのホームだけがこれを使う。
+ *
+ * **使用率は横並びにして、実数（`7.6 / 15.6 GB`）を落とす。** 4列に入れると読める字幅に
+ * ならないためで、実数は押した先の実行状況シートに従来どおり出る。SWAPを申告していない
+ * ホストでは`describeDispatchHostMetrics`が行ごと返さないので、その場合は3列になる。
+ *
+ * **スクリプトの版は遅れているときだけ出す。** 常に出すと縮めた意味が無くなる一方、
+ * 遅れは「developへマージしたのに効いていない」ことに気付く唯一の手掛かり（#1612）なので、
+ * ここだけは残す。「更新して再起動」（#1875・#1927）は押した結果を出す先ごとシート側にあり、
+ * ここには置かない（カード全体が開くボタンなので、中にボタンを重ねられない）。
+ */
+function CompactHostCard({
+  host,
+  metrics,
+  checkout,
+  atCapacity,
+  hasSessionCount,
+  waitingCount,
+  onOpenDetail,
+}: {
+  host: DispatchHostView;
+  metrics: DispatchHostMetricRow[] | null;
+  checkout: DispatchHostCheckoutRow | null;
+  atCapacity: boolean;
+  hasSessionCount: boolean;
+  waitingCount: number;
+  onOpenDetail?: () => void;
+}) {
+  const body = (
+    <>
+      <HostHeading
+        host={host}
+        atCapacity={atCapacity}
+        hasSessionCount={hasSessionCount}
+        trailing={
+          <>
+            {waitingCount > 0 && (
+              <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                入力待ち {waitingCount}
+              </span>
+            )}
+            {onOpenDetail && (
+              <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+          </>
+        }
+      />
+
+      {checkout && checkout.tone !== "normal" && (
+        <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+          <span className="truncate text-muted-foreground">スクリプト {checkout.version}</span>
+          <span className={cn("shrink-0", CHECKOUT_TONE_CLASS[checkout.tone])}>
+            {checkout.status}
+          </span>
+        </div>
+      )}
+
+      {metrics && (
+        <div
+          className={cn("mt-2 grid gap-2", metrics.length === 4 ? "grid-cols-4" : "grid-cols-3")}
+        >
+          {metrics.map((metric) => (
+            <CompactMetric key={metric.label} {...metric} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (!onOpenDetail) return <div className="rounded-md border p-2">{body}</div>;
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenDetail}
+      aria-label={`${formatDispatchHostName(host.name)}の実行状況を開く`}
+      className="w-full rounded-md border p-2 text-left hover:bg-accent active:bg-accent"
+    >
+      {body}
+    </button>
+  );
+}
+
+/** 縮めた版の1つぶん。割合を主役にして、目盛りはその下に細く敷く */
+function CompactMetric({ label, percent, tone }: DispatchHostMetricRow) {
+  const toneClass = METRIC_TONE_CLASS[tone];
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="truncate text-[10px] text-muted-foreground">{label}</span>
+      <span className={cn("text-[13px] font-semibold tabular-nums", toneClass.text)}>
+        {formatHostMetricPercent(percent)}
+      </span>
+      <span className="h-1 rounded-full bg-muted" aria-hidden>
+        <span
+          className={cn("block h-full rounded-full", toneClass.bar)}
+          style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+        />
+      </span>
+    </span>
   );
 }
 

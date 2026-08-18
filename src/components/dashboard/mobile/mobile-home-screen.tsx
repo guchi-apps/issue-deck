@@ -8,6 +8,7 @@ import {
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
@@ -50,8 +51,6 @@ type MobileHomeScreenProps = {
   onSelectFlow: () => void;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
-  /** サブPCのカードのセッション行から、そのIssueの詳細を開く（#1625） */
-  onOpenIssue: (issueId: string) => void;
   /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
   onCreateIssue: () => void;
   onAskCrossRepoQuestion: () => void;
@@ -85,7 +84,6 @@ export function MobileHomeScreen({
   onSelectFlow,
   favoriteRepositories,
   onSelectRepository,
-  onOpenIssue,
   onCreateIssue,
   onAskCrossRepoQuestion,
   onOpenSettings,
@@ -96,6 +94,11 @@ export function MobileHomeScreen({
     ポーリングが2本走る。
   */
   const dispatch = useDispatchState(true);
+  /*
+    実行状況シートの開閉（#1933）。**ヘッダー右上のボタンとサブPCのカードで同じシートを開く**
+    ため、状態はここで持つ。開く口が2つになるだけで、中身は1つのまま
+  */
+  const [dispatchStatusOpen, setDispatchStatusOpen] = useState(false);
   // 確認待ちにはIssueだけでなく、ユーザーがマージするしかないPRも数に含める（PCと同じ）
   const checkUserCount = navCounts["check-user"] + checkUserPullRequestCount;
 
@@ -113,7 +116,11 @@ export function MobileHomeScreen({
           置く。**ホーム以外の画面には出していない**——理由は`mobile-reload-button.tsx`
         */}
         <MobileReloadButton />
-        <MobileDispatchStatusButton dispatch={dispatch} />
+        <MobileDispatchStatusButton
+          dispatch={dispatch}
+          open={dispatchStatusOpen}
+          onOpenChange={setDispatchStatusOpen}
+        />
         {/* 通知ベル（#1772）。実行状況の右隣＝PCのトップバー（実行キュー → ベル → アバター）
             と同じ順序。**設定より左**なのは、設定がこの画面だけの右端の常設だから */}
         <MobileNotificationButton />
@@ -133,8 +140,9 @@ export function MobileHomeScreen({
         {/*
           先頭のダッシュボード（#1690）。盤面の3枚と、サブPCの様子を1枚ずつ。
           ホストの様子はここへ戻したもので、#1638でヘッダーの実行状況シートへ移していた。
-          **ホームは「いま何が動いているか」のサマリ、ヘッダーはキュー全体（順番待ち・失敗・
-          停止操作）**という切り分けにしてある
+          **ホームは使用率だけのサマリ、ヘッダーのシートは動いているセッションとキュー全体
+          （順番待ち・失敗・停止操作）**という切り分けにしてある（#1933でセッションの一覧を
+          シート側へ寄せ、ホームのカードはシートを開く口を兼ねるようにした）
         */}
         <div className="p-4">
           <h2 className="mb-2 text-sm font-semibold">いまの状況</h2>
@@ -154,15 +162,19 @@ export function MobileHomeScreen({
             ))}
           </div>
 
-          {/* 申告しているホストが1台も無ければ`DispatchHostPanel`は何も描かない */}
+          {/*
+            サブPCの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
+            セッション・スクリプトの版・「更新して再起動」はここには出さず、押して開く
+            実行状況シートに任せる。従来はこの1枚だけで縦242pxを占め、メニューの1行目が
+            画面の外にあった。申告しているホストが1台も無ければ`DispatchHostPanel`は何も描かない
+          */}
           {dispatch.hosts.length > 0 && (
             <div className="mt-2">
               <DispatchHostPanel
                 hosts={dispatch.hosts}
                 sessions={dispatch.sessions}
-                jobs={dispatch.jobs}
-                onOpenIssue={onOpenIssue}
-                onRequestSelfUpdate={dispatch.requestSelfUpdate}
+                compact
+                onOpenDetail={() => setDispatchStatusOpen(true)}
               />
             </div>
           )}

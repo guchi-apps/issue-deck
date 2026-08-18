@@ -13,6 +13,12 @@ vi.mock("@/hooks/use-dispatch-state", () => ({
   useDispatchState: () => dispatchState,
 }));
 
+// 実行状況シートの中身はIssue詳細への遷移（`useReferenceNavigation` → `useRouter`）を要求する。
+// ここで見たいのは「同じシートが開くか」だけなので、遷移そのものは差し替える
+vi.mock("@/hooks/use-reference-navigation", () => ({
+  useReferenceNavigation: () => ({ openIssue: () => {}, openPullRequest: () => {} }),
+}));
+
 import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
@@ -93,7 +99,6 @@ function renderHome(
       onSelectFlow={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
-      onOpenIssue={() => {}}
       onCreateIssue={() => {}}
       onAskCrossRepoQuestion={() => {}}
       onOpenSettings={() => {}}
@@ -175,7 +180,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectFlow={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onOpenIssue={() => {}}
         onCreateIssue={() => {}}
         onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
@@ -210,7 +214,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectFlow={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onOpenIssue={() => {}}
         onCreateIssue={() => {}}
         onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
@@ -256,6 +259,41 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(labels).toContain("対応が必要なもの");
     expect(labels.indexOf("対応が必要なもの")).toBe(labels.indexOf("実行状況") + 1);
     expect(labels.indexOf("設定")).toBe(labels.indexOf("対応が必要なもの") + 1);
+  });
+
+  // #1933。ホームは使用率だけのサマリで、セッションの一覧はヘッダーの実行状況シートが持つ
+  it("動いているセッションはホームに出さず、カードから実行状況を開ける", () => {
+    dispatchState = makeDispatch({
+      hosts: [makeHost({ metrics: null })],
+      sessions: [
+        {
+          host: "subpc",
+          tmuxSessionName: "issue-deck-issue-1933",
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1933,
+          issueTitle: "ホーム画面の実装状況表示を簡略化",
+          issueId: null,
+          state: "ALIVE",
+          exitStatus: null,
+          firstSeenAt: "2026-08-16T00:00:00Z",
+          lastReportedAt: "2026-08-16T00:00:00Z",
+          activity: null,
+          activityAt: null,
+          remoteControlUrl: null,
+          previewUrl: null,
+          reapAt: null,
+          reapReason: null,
+        },
+      ],
+    });
+    renderHome();
+
+    expect(screen.queryByText("#1933 ホーム画面の実装状況表示を簡略化")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "サブPCの実行状況を開く" }));
+
+    // ヘッダーのボタンと同じシートが開く（開いた中身にだけ出るキューの見出しで確かめる）
+    expect(screen.getByRole("dialog", { name: "実行状況" })).toBeTruthy();
   });
 
   it("右下の丸ボタンからIssueの作成と質問ができる", () => {
