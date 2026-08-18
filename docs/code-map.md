@@ -622,6 +622,25 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （足さないと選択中の表示もスワイプ移動先も失われる）。絞り込みが効いているかは色と件数バッジで示し、数えるのは件数を減らす条件だけ
   （[`lib/issue-filter-summary.ts`](../src/lib/issue-filter-summary.ts)）。並び順・グルーピングは
   同じシートにあっても数えない。
+- **スマホのPR一覧のビュー切り替えも、Issue一覧と同じ「下端の行＋左右スワイプ」にそろえる**
+  （#1691。[`mobile/mobile-pull-requests-screen.tsx`](../src/components/dashboard/mobile/mobile-pull-requests-screen.tsx)）。
+  元はヘッダー下の横スクロールタブで、同じ操作なのに画面ごとに置き場所が違っていた。
+  ビュー選択のボトムシートはIssueと共通の
+  [`mobile/mobile-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-view-sheet.tsx)で、
+  Issue側（`mobile-issue-view-sheet.tsx`）はアイコン・件数・強調するビューを渡すだけの包み。
+  スワイプは`use-swipe-filter-view`をIssue一覧と同じ形で使い、隣のビューは
+  [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`getAdjacentPullRequestViewId`が決める。
+  **一覧本体だけをスワイプに追従させる**ため、`PullRequestList`はスクロール領域だけに掛かる
+  `listStyle`と下端に固定する`footer`を受け取る（ヘッダーごと動かすと、ヘッダーを持たないIssue一覧と
+  見え方がずれる）。**ヘッダー右上の「更新」はスマホでも残す**——CIの進捗やマージの状況を
+  自動更新（1分間隔）より先に知りたい場面があり、スマホには下へ引っ張って更新する手段がまだ無い。
+  **ヘッダーの見出しはビュー名のまま**（「実行中のプルリクエスト」）で下端の行と重なるが、これは
+  Issue一覧が見出しの行にもビュー名を出しているのと同じ意図——上は「いま何を見ているか」を
+  スクロール中に見上げて確かめるためのもので、下は操作。**件数は`number | null`で、`null`は
+  未取得を意味する**ので、行・ドット・シートのいずれでも`null`のときは数を出さない
+  （0を出すと「PRが無い」と読めてしまう。`lib/pull-request-list.ts`）。
+  **戻るスワイプは`origin === "home"`のときだけ**有効にする——PR一覧は経路によらず`onBack`が
+  渡ってくるので、Issue一覧のように`onBack`の有無で分けるとタブから開いたときもホームへ抜ける。
 - **スマホのフッターは「ホーム／Issue／PR／ブランチ」で、タブのidは`mscreen`の値そのもの**
   （#1436・#1638）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
   （→リポジトリ別Issue一覧）。
