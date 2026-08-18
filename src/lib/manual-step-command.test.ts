@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractManualStepCommands,
+  extractRunnableManualStepCommands,
   extractShellBlock,
+  extractVerificationCommands,
   findManualStepCommand,
   isSubpcManualStepDevice,
   MANUAL_STEP_COMMAND_MAX_LENGTH,
+  replaceManualStepCommand,
 } from "@/lib/manual-step-command";
 
 /**
@@ -159,5 +162,136 @@ describe("isSubpcManualStepDevice", () => {
   // 読み取れなければ代行しない側へ倒す
   it("記載が無ければ代行対象にしない", () => {
     expect(isSubpcManualStepDevice(null)).toBe(false);
+  });
+});
+
+describe("extractVerificationCommands", () => {
+  it("`## 完了の確認方法`のコマンドを、コードブロックの行番号付きで取り出す（#1869）", () => {
+    const commands = extractVerificationCommands(REAL_BODY);
+
+    expect(commands.map((entry) => entry.command)).toEqual([
+      "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop",
+    ]);
+    expect(commands[0].kind).toBe("verification");
+    // 行番号は開きフェンスの行（確認節にはチェック行が無いのでブロックそのものを指す）
+    expect(REAL_BODY.split("\n")[commands[0].stepLine - 1].trim()).toBe("```bash");
+  });
+
+  // 手順と違い「どれを実行したのか」がチェック1つに対応しないという問題が起きない
+  it("コードブロックが複数あっても全部返す", () => {
+    const body = `## 完了の確認方法
+
+\`\`\`bash
+echo one
+\`\`\`
+
+\`\`\`bash
+echo two
+\`\`\`
+`;
+
+    expect(extractVerificationCommands(body).map((entry) => entry.command)).toEqual([
+      "echo one",
+      "echo two",
+    ]);
+  });
+
+  it("言語の指定が無いコードブロック（出力例）は取り出さない", () => {
+    const body = `## 完了の確認方法
+
+\`\`\`
+0
+\`\`\`
+`;
+
+    expect(extractVerificationCommands(body)).toEqual([]);
+  });
+
+  it("確認節が無い本文・空の本文でも落ちない", () => {
+    expect(extractVerificationCommands("## やること\n\n- [ ] 何かする")).toEqual([]);
+    expect(extractVerificationCommands(null)).toEqual([]);
+  });
+
+  it("他の節（なぜエージェントが実施しないか）のコマンドは混ざらない", () => {
+    expect(
+      extractVerificationCommands(REAL_BODY).some((entry) =>
+        entry.command.includes("対象にしない"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("extractRunnableManualStepCommands", () => {
+  it("手順 → 完了の確認の順に並ぶ", () => {
+    const commands = extractRunnableManualStepCommands(REAL_BODY);
+
+    expect(commands.map((entry) => entry.kind)).toEqual(["step", "step", "verification"]);
+  });
+});
+
+describe("findManualStepCommand（確認節）", () => {
+  it("確認節の行番号でも引ける（#1869）", () => {
+    const [verification] = extractVerificationCommands(REAL_BODY);
+
+    expect(findManualStepCommand(REAL_BODY, verification.stepLine)?.command).toBe(
+      verification.command,
+    );
+  });
+});
+
+describe("replaceManualStepCommand", () => {
+  it("手順のコマンドだけを差し替える（インデント・フェンス・前後の行は変えない）", () => {
+    const [, second] = extractManualStepCommands(REAL_BODY);
+    const replaced = replaceManualStepCommand(
+      REAL_BODY,
+      second.stepLine,
+      "systemctl --user restart issue-deck-poller.service",
+    );
+
+    expect(replaced).not.toBeNull();
+    expect(replaced).toContain(
+      "    systemctl --user restart issue-deck-poller.service\n    ```",
+    );
+    // 他の手順・確認節はそのまま
+    expect(replaced).toContain("git pull --ff-only");
+    expect(replaced).toContain("rev-list --count HEAD..origin/develop");
+    // 書き換えた本文からも同じ行で引ける（画面・API・pollerの照合が通る形）
+    expect(findManualStepCommand(replaced as string, second.stepLine)?.command).toBe(
+      "systemctl --user restart issue-deck-poller.service",
+    );
+  });
+
+  it("確認節のコマンドも差し替えられる", () => {
+    const [verification] = extractVerificationCommands(REAL_BODY);
+    const replaced = replaceManualStepCommand(REAL_BODY, verification.stepLine, "echo done");
+
+    expect(findManualStepCommand(replaced as string, verification.stepLine)?.command).toBe(
+      "echo done",
+    );
+  });
+
+  it("複数行のコマンドへも差し替えられる", () => {
+    const [first] = extractManualStepCommands(REAL_BODY);
+    const replaced = replaceManualStepCommand(REAL_BODY, first.stepLine, "cd /tmp\nls -la");
+
+    expect(findManualStepCommand(replaced as string, first.stepLine)?.command).toBe(
+      "cd /tmp\nls -la",
+    );
+  });
+
+  // 壊れた本文をGitHubへ送らないための歯止め
+  it("フェンスを含むコマンド・空・長すぎるコマンドは差し替えない", () => {
+    const [first] = extractManualStepCommands(REAL_BODY);
+
+    expect(replaceManualStepCommand(REAL_BODY, first.stepLine, "```bash\nls\n```")).toBeNull();
+    expect(replaceManualStepCommand(REAL_BODY, first.stepLine, "   ")).toBeNull();
+    expect(
+      replaceManualStepCommand(REAL_BODY, first.stepLine, "a".repeat(MANUAL_STEP_COMMAND_MAX_LENGTH + 1)),
+    ).toBeNull();
+  });
+
+  it("手順でない行・本文が空のときは差し替えない", () => {
+    expect(replaceManualStepCommand(REAL_BODY, 1, "ls")).toBeNull();
+    expect(replaceManualStepCommand(null, 10, "ls")).toBeNull();
   });
 });

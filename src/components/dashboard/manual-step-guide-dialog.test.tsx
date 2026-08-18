@@ -389,3 +389,286 @@ describe("ManualStepGuideDialog の代行実行", () => {
     expect(screen.getByText(/ちょうど1つ書かれている手順だけを代行します/)).toBeTruthy();
   });
 });
+
+/**
+ * 自動実行と失敗時の修正案（#1869）。
+ *
+ * 見るのは**運び方**（承認1回でどこまで進むか・どこで止まるか・修正案をどう適用するか）だけ。
+ * 実行計画の組み立ては`lib/manual-step-autorun.test.ts`、診断の解釈は
+ * `lib/claude/manual-step-fix.test.ts`が持つ。
+ */
+describe("ManualStepGuideDialog の自動実行", () => {
+  const AUTO_BODY = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+
+## やること
+
+- [ ] チェックアウトを更新する
+
+    \`\`\`bash
+    git pull --ff-only
+    \`\`\`
+
+- [ ] pollerを再起動する
+
+    \`\`\`bash
+    systemctl --user restart issue-deck-poller.service
+    \`\`\`
+
+## 完了の確認方法
+
+- 遅れが0であること
+
+    \`\`\`bash
+    git rev-list --count HEAD..origin/develop
+    \`\`\`
+`;
+  const lines = AUTO_BODY.split("\n");
+  const FIRST_LINE = lines.findIndex((text) => text.includes("チェックアウトを更新する")) + 1;
+  const SECOND_LINE = lines.findIndex((text) => text.includes("pollerを再起動する")) + 1;
+  const VERIFICATION_LINE =
+    lines.findIndex(
+      (text, index) => text.trim() === "```bash" && index > SECOND_LINE + 3,
+    ) + 1;
+
+  const fetchMock = vi.fn();
+
+  function renderAutoDialog(dispatch: DispatchStateHandle) {
+    const view = render(
+      <ManualStepGuideDialog
+        queueIds={["1823"]}
+        issues={[issue({ body: AUTO_BODY })]}
+        open
+        onOpenChange={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        dispatch={dispatch}
+      />,
+    );
+    return {
+      rerender: (next: DispatchStateHandle) =>
+        view.rerender(
+          <ManualStepGuideDialog
+            queueIds={["1823"]}
+            issues={[issue({ body: AUTO_BODY })]}
+            open
+            onOpenChange={vi.fn()}
+            onIssueUpdated={vi.fn()}
+            dispatch={next}
+          />,
+        ),
+    };
+  }
+
+  beforeEach(() => {
+    taskList.body = AUTO_BODY;
+    taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ body: AUTO_BODY }));
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("最初の画面に、実行されるコマンドを全部並べて承認を求める", () => {
+    renderAutoDialog(dispatchHandle());
+
+    expect(screen.getByText("手順2件・確認1件を続けて実行できます")).toBeTruthy();
+    expect(screen.getByText("git pull --ff-only")).toBeTruthy();
+    expect(screen.getByText("systemctl --user restart issue-deck-poller.service")).toBeTruthy();
+    expect(screen.getByText("git rev-list --count HEAD..origin/develop")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "承認して3件を自動実行" })).toBeTruthy();
+  });
+
+  it("承認すると1件目を実行し、成功したら次の手順へ自動で進む", async () => {
+    const view = renderAutoDialog(dispatchHandle());
+
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+
+    expect(runManualStep).toHaveBeenCalledWith(
+      expect.objectContaining({ stepLine: FIRST_LINE, command: "git pull --ff-only" }),
+    );
+
+    view.rerender(
+      dispatchHandle({ jobs: [manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 })] }),
+    );
+
+    // 成功した手順にはチェックが付き、次の手順が積まれる
+    expect(taskList.toggleTask).toHaveBeenCalledWith(FIRST_LINE, true);
+    expect(runManualStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stepLine: SECOND_LINE,
+        command: "systemctl --user restart issue-deck-poller.service",
+      }),
+    );
+  });
+
+  it("最後は完了の確認のコマンドまで流し、クローズはしない", async () => {
+    const view = renderAutoDialog(dispatchHandle());
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+
+    view.rerender(
+      dispatchHandle({ jobs: [manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 })] }),
+    );
+    view.rerender(
+      dispatchHandle({
+        jobs: [
+          manualStepJob({ id: "job-2", manualStepLine: SECOND_LINE, exitCode: 0 }),
+          manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 }),
+        ],
+      }),
+    );
+
+    expect(runManualStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stepLine: VERIFICATION_LINE,
+        command: "git rev-list --count HEAD..origin/develop",
+      }),
+    );
+    expect(issueMutations.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("失敗したらそこで止まり、次の手順を積まない", () => {
+    const view = renderAutoDialog(dispatchHandle());
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+    expect(runManualStep).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      dispatchHandle({
+        jobs: [
+          manualStepJob({
+            manualStepLine: FIRST_LINE,
+            status: "FAILED",
+            exitCode: 1,
+            commandOutput: "error: Your local changes would be overwritten",
+          }),
+        ],
+      }),
+    );
+
+    expect(runManualStep).toHaveBeenCalledTimes(1);
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+    expect(screen.getByText("失敗したため止まっています")).toBeTruthy();
+  });
+
+  // 終わったジョブは24時間画面に残る。**前回の失敗を理由に、これから積む1件を止めない**
+  it("前回の実行で失敗した手順でも、承認したら実行し直す", () => {
+    renderAutoDialog(
+      dispatchHandle({
+        jobs: [
+          manualStepJob({
+            manualStepLine: FIRST_LINE,
+            status: "FAILED",
+            exitCode: 1,
+            createdAt: "2026-08-16T00:00:00Z",
+          }),
+        ],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+
+    expect(runManualStep).toHaveBeenCalledWith(
+      expect.objectContaining({ stepLine: FIRST_LINE, command: "git pull --ff-only" }),
+    );
+    expect(screen.queryByText("失敗したため止まっています")).toBeNull();
+  });
+
+  it("失敗すると原因を調べ、修正案を差分で出す", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: {
+          kind: "command",
+          cause: "ユニット名が実際と違います。",
+          command: "systemctl --user restart issue-deck-dispatch-poller.service",
+          advice: null,
+        },
+        currentCommand: "systemctl --user restart issue-deck-poller.service",
+      }),
+    });
+
+    const view = renderAutoDialog(dispatchHandle());
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+    view.rerender(
+      dispatchHandle({
+        jobs: [manualStepJob({ manualStepLine: FIRST_LINE, status: "FAILED", exitCode: 1 })],
+      }),
+    );
+
+    expect(await screen.findByText("ユニット名が実際と違います。")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/manual-steps/fix",
+      expect.objectContaining({ method: "POST" }),
+    );
+    // 送るのはジョブのidだけ（コマンドも出力もサーバーが読み直す）
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ jobId: "job-1" });
+  });
+
+  // 出力にはシークレットが混ざりうるので、送ってよいかは承認の時点で決める
+  it("同意を外して承認した場合は、失敗しても出力を送らない", () => {
+    const view = renderAutoDialog(dispatchHandle());
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+    view.rerender(
+      dispatchHandle({
+        jobs: [manualStepJob({ manualStepLine: FIRST_LINE, status: "FAILED", exitCode: 1 })],
+      }),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "原因を調べる" })).toBeTruthy();
+  });
+
+  it("修正を適用すると、本文を書き換えてから実行する", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: {
+          kind: "command",
+          cause: "リポジトリの外で実行しています。",
+          command: "git -C ~/apps/issue-deck pull --ff-only",
+          advice: null,
+        },
+        currentCommand: "git pull --ff-only",
+      }),
+    });
+
+    const view = renderAutoDialog(dispatchHandle());
+    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+    view.rerender(
+      dispatchHandle({
+        jobs: [
+          manualStepJob({
+            manualStepLine: FIRST_LINE,
+            command: "git pull --ff-only",
+            status: "FAILED",
+            exitCode: 1,
+          }),
+        ],
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "修正を適用して実行" }));
+
+    await vi.waitFor(() => expect(issueMutations.updateIssue).toHaveBeenCalled());
+    const [patch] = issueMutations.updateIssue.mock.calls[0];
+    expect(patch.body).toContain("git -C ~/apps/issue-deck pull --ff-only");
+    // 書き換えたのはそのコマンドだけ（他の手順・確認はそのまま）
+    expect(patch.body).toContain("systemctl --user restart issue-deck-poller.service");
+    expect(patch.body).toContain("git rev-list --count HEAD..origin/develop");
+    await vi.waitFor(() =>
+      expect(runManualStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stepLine: FIRST_LINE,
+          command: "git -C ~/apps/issue-deck pull --ff-only",
+        }),
+      ),
+    );
+  });
+});

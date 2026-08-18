@@ -201,6 +201,9 @@ function manualStepSampleBody(origin, developed, released) {
  *
  * **2つ目の手順にはコマンドを置いていない**（代行できない手順の見え方も同じ本文で確かめられる）。
  *
+ * **`## 完了の確認方法`はコードブロックで書く**（#1869）。確認のコマンドも代行の対象になったので、
+ * インラインコードのままだと開発環境で自動実行の最後の1件を確かめられない。
+ *
  * @param origin 起点Issue（mainへ反映済み）の番号
  */
 function manualStepSubpcSampleBody(origin) {
@@ -231,7 +234,11 @@ function manualStepSubpcSampleBody(origin) {
     "",
     "## 完了の確認方法",
     "",
-    "`git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop` が `0` を返すこと。",
+    "次のコマンドが `0` を返すこと。",
+    "",
+    "```bash",
+    "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop",
+    "```",
     "",
     "## なぜエージェントが実施しないか",
     "",
