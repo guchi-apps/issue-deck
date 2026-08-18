@@ -108,6 +108,7 @@ export function DispatchQueueContent({
         hosts={dispatch.hosts}
         sessions={dispatch.sessions}
         onOpenIssue={onOpenIssue}
+        onRequestSelfUpdate={(hostName) => void dispatch.requestSelfUpdate(hostName)}
       />
 
       {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}

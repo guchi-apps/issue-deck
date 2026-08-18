@@ -117,6 +117,7 @@ function host(overrides: Record<string, unknown> = {}) {
     manualStepCapable: null,
     // 計画レビュー（#1855）に対応したpoller
     planReviewCapable: true,
+    selfUpdateCapable: null,
     maxConcurrency: null,
     ...overrides,
   };

@@ -14,6 +14,7 @@ import {
   enqueueManualStepJob,
   enqueuePlanReviewJob,
   enqueueSessionControlJob,
+  enqueueSelfUpdateJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
@@ -76,7 +77,24 @@ export async function POST(request: NextRequest) {
   const target = parseDispatchTarget(payload?.repository, payload?.issue);
   const hostName = parseDispatchHostName(payload?.host);
   const kind = parseDispatchJobKind(payload?.kind);
-  if (!target || !hostName || !kind) {
+  if (!hostName || !kind) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // チェックアウトの更新（#1875）は**ホストに対する操作でIssueを持たない**。
+  // 他の種別より先に返し、`target`の必須チェックから外す。
+  if (kind === "SELF_UPDATE") {
+    const result = await enqueueSelfUpdateJob({ hostName, requestedByUserId: userId });
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.rejection, message: result.message },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ job: result.job }, { status: 201 });
+  }
+
+  if (!target) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
