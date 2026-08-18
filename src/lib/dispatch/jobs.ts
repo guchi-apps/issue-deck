@@ -47,7 +47,10 @@ import {
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
-import { extractManualStepCommands, isSubpcManualStepDevice } from "@/lib/manual-step-command";
+import {
+  extractRunnableManualStepCommands,
+  isSubpcManualStepDevice,
+} from "@/lib/manual-step-command";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
@@ -702,7 +705,9 @@ export async function enqueueManualStepJob(params: {
   const guide = parseManualStepGuide(issue.body);
   if (!isSubpcManualStepDevice(guide.where.device)) return reject("device_not_subpc");
 
-  const extracted = extractManualStepCommands(issue.body, guide).find(
+  // 手順（`## やること`）と完了の確認（`## 完了の確認方法`）の両方が対象（#1869）。
+  // **画面と同じ関数で取り出す**ので、押せるのにAPIが拒否する組み合わせが生まれない
+  const extracted = extractRunnableManualStepCommands(issue.body, guide).find(
     (entry) => entry.stepLine === params.stepLine,
   );
   if (!extracted) return reject("no_command");

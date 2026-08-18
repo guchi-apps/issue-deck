@@ -473,6 +473,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     コマンドだけで、画面から届いた文字列は照合にしか使わない**（サーバーとpollerが本文と
     独立に2回照合する）。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業アシスタントからの代行実行1828)。
+  - **承認1回で最後まで流し、失敗したらClaudeが修正案を出す**（#1869。
+    [`manual-step-autorun-panel.tsx`](../src/components/dashboard/manual-step-autorun-panel.tsx)・
+    [`hooks/use-manual-step-autorun.ts`](../src/hooks/use-manual-step-autorun.ts)・
+    [`lib/manual-step-autorun.ts`](../src/lib/manual-step-autorun.ts)・
+    [`manual-step-fix-panel.tsx`](../src/components/dashboard/manual-step-fix-panel.tsx)・
+    [`lib/claude/manual-step-fix.ts`](../src/lib/claude/manual-step-fix.ts)）。
+    最初の画面に実行予定のコマンドを畳まずに並べ、承認すると手順1..n → `## 完了の確認方法`の
+    コマンドまで1件ずつ流す。**新しい実行の口は作らず**、既存の`POST /api/dispatch`へ1件ずつ積む。
+    - **自動実行の状態を持つのは画面だけ**（サーバー・DBには置かない）。**ダイアログを閉じれば
+      止まる**。Issueもまたがない（次の手作業は承認し直す）
+    - **止まったら勝手に進めない**——失敗・代行できない手順・最後の確認のいずれでも止まり、
+      クローズは人が押す
+    - 失敗の診断は`POST /api/manual-steps/fix`。**送るのはジョブのidだけ**で、コマンドと出力は
+      サーバーが読み直す。修正案の適用は必ず人が押し、押されたら**本文のコードブロックを
+      差し替えてから**実行する（`replaceManualStepCommand`）。実行するのは常に本文のコマンド、
+      という歯止めを崩さないため
+    - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
+      失敗の表示の「原因を調べる」を押したときだけ送る
   - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
     一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
     （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。

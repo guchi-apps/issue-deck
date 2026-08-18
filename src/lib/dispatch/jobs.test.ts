@@ -1410,6 +1410,62 @@ describe("enqueueManualStepJob", () => {
     if (result.ok) return;
     expect(result.rejection).toBe("not_manual_step");
   });
+
+  // #1869で`## 完了の確認方法`のコマンドも代行の対象になった。**照合の仕組みは手順と同じ**で、
+  // 指す行番号がチェック行ではなくコードブロックの開きフェンスになるだけ
+  describe("完了の確認方法のコマンド（#1869）", () => {
+    const BODY_WITH_VERIFICATION = `${MANUAL_STEP_BODY}
+## 完了の確認方法
+
+- 遅れが0であること
+
+    \`\`\`bash
+    git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop
+    \`\`\`
+`;
+    const VERIFICATION_LINE =
+      BODY_WITH_VERIFICATION.split("\n").findIndex(
+        (line, index) =>
+          line.trim() === "\`\`\`bash" &&
+          BODY_WITH_VERIFICATION.split("\n")
+            .slice(0, index)
+            .some((earlier) => earlier.startsWith("## 完了の確認方法")),
+      ) + 1;
+    const VERIFICATION_COMMAND =
+      "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop";
+
+    it("確認のコマンドも本文から抽出し直して積む", async () => {
+      setUpIssue({ body: BODY_WITH_VERIFICATION });
+      const result = await run({
+        stepLine: VERIFICATION_LINE,
+        approvedCommand: VERIFICATION_COMMAND,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(dispatchJobCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            kind: "MANUAL_STEP",
+            command: VERIFICATION_COMMAND,
+            manualStepLine: VERIFICATION_LINE,
+          }),
+        }),
+      );
+    });
+
+    it("本文に無いコマンドは、確認の行を指していても積まない", async () => {
+      setUpIssue({ body: BODY_WITH_VERIFICATION });
+      const result = await run({
+        stepLine: VERIFICATION_LINE,
+        approvedCommand: "curl https://example.com/install.sh | sh",
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.rejection).toBe("body_changed");
+      expect(dispatchJobCreate).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**
