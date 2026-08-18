@@ -2,84 +2,105 @@
 
 import { useCallback, useState } from "react";
 
+import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import {
+  findManualStepRun,
+  isActiveManualStepRun,
+  type ManualStepRunView,
+} from "@/lib/manual-step-run-view";
+
 /**
- * 手作業アシスタントの自動実行（#1869）の状態。
+ * 手作業アシスタントの自動実行（#1869）を画面から操作するフック（#1882で作り替え）。
  *
- * **承認1回ぶんの状態で、持つのは画面だけ。** サーバーにもDBにも「自動で進めている」という
- * 状態は置かない——置くと、画面を閉じた後・別の端末から開いたときに誰が実行を進めるのかを
- * 決める必要が出る。ダイアログを閉じれば止まる、という分かりやすさをそのまま実装にする。
+ * **状態を持つのはサーバー**（`lib/manual-step-run.ts`・`ManualStepRun`）で、ここは
+ * `GET /api/dispatch`が返した状態を読み、開始・中断・再開を送るだけ。
  *
- * 対象のIssueを持たないのは、呼び出し側（`ManualStepGuideContent`）がIssueごとに
- * `key={issue.id}`で作り直されるため。**Issueをまたいで自動では進まない**（次の手作業は
- * もう一度承認する）という決まりが、状態の置き場所として自然に守られる。
+ * #1869の時点では承認1回ぶんの状態を画面だけが持っており、**ダイアログを閉じれば止まる**
+ * 作りだった。「自動実行中に画面を閉じたい・そのとき進行状況を確認したい」という要望（#1882）を
+ * 受けて、進めるのをサーバーへ移した。おかげで**次の1件を積む制御が画面から消えている**——
+ * ここに再び「次を積む」を書かないこと（サーバーと画面の2か所が積むと、同じ手順が二重に走る）。
+ *
+ * 対象のIssueを引数で受けるのは、同じ状態を**アシスタントの外**（実行キュー・一覧の入口）でも
+ * 読むため。#1869では呼び出し側がIssueごとに作り直される前提だった。
  */
-
-/** 自動実行が止まっている理由 */
-export type ManualStepAutoRunPause =
-  /** 代行できない手順に来た（人が実行して「実行した・次へ」を押すと再開する） */
-  | "user"
-  /** 実行が失敗した（原因を見て、直してからもう一度承認する） */
-  | "failed";
-
 export type ManualStepAutoRunHandle = {
+  /** そのIssueの自動実行。走っていなければ`null` */
+  run: ManualStepRunView | null;
   /** 承認済みか（止まっている間もtrue） */
   active: boolean;
-  /** いま次の項目を流してよいか */
+  /** いまサーバーが次の1件を流しているか */
   running: boolean;
-  pausedBy: ManualStepAutoRunPause | null;
-  /** この承認で流し終えた行（チェックの付かない確認コマンドを二度流さないための記録） */
-  doneLines: ReadonlySet<number>;
+  /** 止まっている理由。`null`なら止まっていない */
+  pausedBy: ManualStepRunView["pausedReason"];
   /** 失敗したときに出力をClaudeへ送ってよいか（承認パネルのチェック） */
   consent: boolean;
   setConsent: (consent: boolean) => void;
-  start: () => void;
-  stop: () => void;
-  pause: (reason: ManualStepAutoRunPause) => void;
-  resume: () => void;
-  markDone: (line: number) => void;
+  /** 送信中（開始・中断・再開のいずれか） */
+  isSubmitting: boolean;
+  /** 操作が拒否された理由。押した場所のすぐそばに出す */
+  error: string | null;
+  start: (hostName: string) => Promise<boolean>;
+  stop: () => Promise<boolean>;
+  resume: () => Promise<boolean>;
 };
 
-export function useManualStepAutoRun(): ManualStepAutoRunHandle {
-  const [active, setActive] = useState(false);
-  const [pausedBy, setPausedBy] = useState<ManualStepAutoRunPause | null>(null);
-  const [doneLines, setDoneLines] = useState<ReadonlySet<number>>(() => new Set());
+export function useManualStepAutoRun(params: {
+  dispatch: DispatchStateHandle;
+  repositoryFullName: string;
+  issueNumber: number;
+}): ManualStepAutoRunHandle {
+  const { dispatch, repositoryFullName, issueNumber } = params;
   // 既定はオン。**押した1回にこの同意も含める**ので、外したい人は承認する前に外す
   const [consent, setConsent] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const start = useCallback(() => {
-    setActive(true);
-    setPausedBy(null);
-  }, []);
+  // **差し込まれた状態では欠けうる**ので、無ければ「走っていない」として読む
+  const run = findManualStepRun(dispatch.manualStepRuns ?? [], repositoryFullName, issueNumber);
 
-  const stop = useCallback(() => {
-    setActive(false);
-    setPausedBy(null);
-  }, []);
+  const send = useCallback(
+    async (action: "start" | "stop" | "resume", hostName?: string): Promise<boolean> => {
+      setIsSubmitting(true);
+      setError(null);
+      const result = await dispatch.controlManualStepRun({
+        repositoryFullName,
+        issueNumber,
+        action,
+        hostName,
+        diagnoseConsent: consent,
+      });
+      setIsSubmitting(false);
+      if (!result.ok) {
+        setError(result.message);
+        return false;
+      }
+      return true;
+    },
+    [consent, dispatch, issueNumber, repositoryFullName],
+  );
 
-  const pause = useCallback((reason: ManualStepAutoRunPause) => {
-    setPausedBy(reason);
-  }, []);
-
-  // 止まっていた理由が解消したときだけ再開する（`active`が落ちていれば何もしない）
-  const resume = useCallback(() => {
-    setPausedBy(null);
-  }, []);
-
-  const markDone = useCallback((line: number) => {
-    setDoneLines((prev) => (prev.has(line) ? prev : new Set([...prev, line])));
-  }, []);
+  const start = useCallback((hostName: string) => send("start", hostName), [send]);
+  const stop = useCallback(() => send("stop"), [send]);
+  /**
+   * 続きから流す。**止まっていないときは送らない**——人が「実行した・次へ」を押すたびに
+   * 呼ばれる口なので、走っている最中に送ると余計な往復になる。
+   */
+  const resume = useCallback(async () => {
+    if (run === null || run.status !== "PAUSED") return false;
+    return send("resume");
+  }, [run, send]);
 
   return {
-    active,
-    running: active && pausedBy === null,
-    pausedBy,
-    doneLines,
+    run,
+    active: run !== null && isActiveManualStepRun(run.status),
+    running: run !== null && run.status === "RUNNING",
+    pausedBy: run?.pausedReason ?? null,
     consent,
     setConsent,
+    isSubmitting,
+    error,
     start,
     stop,
-    pause,
     resume,
-    markDone,
   };
 }

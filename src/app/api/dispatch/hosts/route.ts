@@ -86,6 +86,11 @@ export async function POST(request: NextRequest) {
     // こちらは**シェルでコマンドを実行する**ため、届いた先で起きることが違うから
     manualStepCapable:
       typeof payload?.manualStep === "boolean" ? payload.manualStep : null,
+    // 走っている代行実行を止められるpollerだけが送ってくる（#1882）。**未申告はnull＝非対応扱い**。
+    // `manualStep`と分けるのは、代行実行を実行できるpollerでも止める側の実装が入っているとは
+    // 限らないため。非対応と分かっていれば、画面は押す前に「打ち切りまで待つ」ことを案内できる
+    manualStepAbortCapable:
+      typeof payload?.manualStepAbort === "boolean" ? payload.manualStepAbort : null,
     // 計画レビュー（G1・#1855）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**。
     // このジョブは計画コメントの投稿を契機に**自動で積まれる**ため、非対応のpollerへ配ると
     // 計画のたびに`failed`のジョブが並ぶ（他の種別より、申告を見てから配る意味が大きい）

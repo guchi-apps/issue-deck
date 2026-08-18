@@ -41,6 +41,16 @@ export type ManualStepGuideWhere = {
   device: string | null;
   directory: string | null;
   branch: string | null;
+  /**
+   * その端末へ入るためのコマンド（#1882）。テンプレートの「実行するデバイス」は
+   * `**サブPC**（メインPCからなら \`ssh subpc\`）`のように**括弧書きで接続コマンドを書く**
+   * 決まりで、チップに出す値からは括弧ごと落としている（`cleanWhereValue`）。
+   *
+   * 代行実行が失敗して自分で実行するとき、いちばん分からないのが「どこから実行するのか」
+   * （#1882）。**本文に書かれたものだけを拾い、ホスト名から組み立てたりしない**——
+   * 推測した接続先を出すと、それが正しいかを確かめる手間が増える。
+   */
+  connect: string | null;
 };
 
 export type ManualStepGuide = {
@@ -153,7 +163,12 @@ function sectionText(section: Section | null): string | null {
 
 /** `## 前提条件`から「どこで実行するか」を拾う */
 function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
-  const where: ManualStepGuideWhere = { device: null, directory: null, branch: null };
+  const where: ManualStepGuideWhere = {
+    device: null,
+    directory: null,
+    branch: null,
+    connect: null,
+  };
   if (!section) return where;
 
   for (const line of section.lines) {
@@ -167,7 +182,10 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
     if (value === null) continue;
 
     // 「カレントディレクトリ」より先に「ディレクトリ」を見ないよう、長い語から順に判定する
-    if (where.device === null && label.includes("デバイス")) where.device = value;
+    if (where.device === null && label.includes("デバイス")) {
+      where.device = value;
+      where.connect = extractConnectCommand(item[1].slice(separator.index + 1));
+    }
     else if (where.directory === null && label.includes("ディレクトリ")) where.directory = value;
     else if (where.branch === null && label.includes("ブランチ")) where.branch = value;
   }
@@ -187,6 +205,22 @@ function cleanWhereValue(raw: string): string | null {
   value = value.replace(/[（(][^）)]*[）)]\s*$/, "").trim();
   if (value === "" || value === "不要" || value === "なし") return null;
   return value;
+}
+
+/**
+ * 「実行するデバイス」の行から接続コマンドを拾う（#1882）。
+ *
+ * **コードスパン（`` `ssh subpc` ``）を優先する。** テンプレートがそう書く決まりで、
+ * 書き手が「これがコマンド」と印を付けたものだから。印が無い場合だけ、素の`ssh …`を拾う。
+ * どちらも無ければ`null`（接続の案内そのものを出さない）。
+ */
+function extractConnectCommand(raw: string): string | null {
+  for (const match of raw.matchAll(/`([^`]+)`/g)) {
+    const command = match[1].trim();
+    if (command !== "") return command;
+  }
+  const bare = /\bssh\s+[\w.@-]+(?:\s+[\w.@/-]+)?/.exec(raw);
+  return bare === null ? null : bare[0].trim();
 }
 
 /** 太字・コード・リンクの記法を落として素のテキストにする */
@@ -321,7 +355,7 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
   const empty: ManualStepGuide = {
     hasTemplate: false,
     outcome: null,
-    where: { device: null, directory: null, branch: null },
+    where: { device: null, directory: null, branch: null, connect: null },
     todoIntro: null,
     steps: [],
     verification: null,

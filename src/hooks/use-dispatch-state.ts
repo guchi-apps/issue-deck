@@ -8,6 +8,10 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import {
+  isActiveManualStepRun,
+  type ManualStepRunView,
+} from "@/lib/manual-step-run-view";
 
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
@@ -29,6 +33,11 @@ export type DispatchState = {
    * Issueの実行先の解決（#1262・`resolveIssueExecutionTarget`）がこれを使う。
    */
   sessions: DispatchSessionView[];
+  /**
+   * 手作業アシスタントの自動実行（#1882）。**進めているのはサーバー**で、画面はこれを読んで
+   * 進み具合を出すだけ。ダイアログを閉じても・ブラウザを閉じても実行は続く。
+   */
+  manualStepRuns: ManualStepRunView[];
   concurrency: number;
 };
 
@@ -54,7 +63,13 @@ const IDLE_POLL_INTERVAL_MS = 20_000;
 const MIN_FETCHING_MS = 500;
 
 function hasActiveJob(state: DispatchState | null): boolean {
-  return state?.jobs.some((job) => isActiveDispatchJobStatus(job.status)) ?? false;
+  if (state === null) return false;
+  // **走っている自動実行も「動いている」に数える**（#1882）。次の1件を積むのはサーバーで、
+  // 積まれた瞬間は画面に何も無い（ジョブが現れるのは次の取得）。ここを数えないと、
+  // 1件終わってから次が見えるまで最大20秒黙る
+  // **テストの差し込みや古い応答では欠けうる**ので、無ければ「動いていない」として読む
+  if (state.manualStepRuns?.some((run) => isActiveManualStepRun(run.status))) return true;
+  return state.jobs.some((job) => isActiveDispatchJobStatus(job.status));
 }
 
 /**
@@ -353,6 +368,104 @@ export function useDispatchState(enabled: boolean) {
     [markChanged],
   );
 
+  /**
+   * 走っている代行実行を1件だけ止める（#1882）。
+   *
+   * **自動実行の中断（`controlManualStepRun`の`stop`）とは別物。** あちらは実行そのものを
+   * 終わらせるが、こちらは手順ごとに「承認して実行」を押した1件を止めるための口。
+   */
+  const abortManualStep = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+      targetJobId: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            host: params.hostName,
+            kind: "manual_step_abort",
+            targetJobId: params.targetJobId,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
+   * 手作業アシスタントの自動実行（#1882）を開始・中断・再開する。
+   *
+   * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ）。`error`は起動ボタンの下に
+   * 出るため、アシスタントの中で押した結果がそちらへ出ると押した場所と表示が離れる。
+   *
+   * 返ってきた状態はポーリングを待たずに手元へ反映する。**押した直後こそ反応が要る**
+   * （中断は特に、押しても止まった様子が出ないと何度も押される）。
+   */
+  const controlManualStepRun = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      action: "start" | "stop" | "resume";
+      /** `start`のときの積み先。中断・再開では開始時のホストをサーバーが覚えている */
+      hostName?: string;
+      /** `start`のときの同意（失敗したときに出力をClaudeへ送ってよいか。#1869） */
+      diagnoseConsent?: boolean;
+    }): Promise<{ ok: true; run: ManualStepRunView } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/manual-steps/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            action: params.action,
+            host: params.hostName,
+            diagnoseConsent: params.diagnoseConsent,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { run: ManualStepRunView };
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                manualStepRuns: [
+                  json.run,
+                  ...prev.manualStepRuns.filter(
+                    (run) =>
+                      run.repositoryFullName !== json.run.repositoryFullName ||
+                      run.issueNumber !== json.run.issueNumber,
+                  ),
+                ],
+              }
+            : prev,
+        );
+        markChanged();
+        return { ok: true, run: json.run };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   const cancel = useCallback(async (jobId: string): Promise<boolean> => {
     setIsSubmitting(true);
     setError(null);
@@ -445,6 +558,7 @@ export function useDispatchState(enabled: boolean) {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
     sessions: state?.sessions ?? [],
+    manualStepRuns: state?.manualStepRuns ?? [],
     concurrency: state?.concurrency ?? null,
     isLoaded,
     fetchedAt,
@@ -461,6 +575,8 @@ export function useDispatchState(enabled: boolean) {
     enqueue,
     sendSessionControl,
     runManualStep,
+    abortManualStep,
+    controlManualStepRun,
     cancel,
     dismiss,
     prioritize,

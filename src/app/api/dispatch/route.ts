@@ -11,12 +11,14 @@ import {
 import {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
+  enqueueManualStepAbortJob,
   enqueueManualStepJob,
   enqueuePlanReviewJob,
   enqueueSessionControlJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
+import { listManualStepRunViews } from "@/lib/manual-step-run";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
@@ -40,8 +42,18 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const state = await listDispatchState();
-  return NextResponse.json(state, { headers: { "Cache-Control": "no-store" } });
+  // 手作業アシスタントの自動実行（#1882）も同じ応答に載せる。**取得口を増やさない**
+  // （セッション・#1217と同じ理由で、分けると同じ画面のためにポーリングが2本走る）。
+  // **`listDispatchState`の中では呼ばない**——あちらを呼ぶのは自動実行の側（ジョブを積む）で、
+  // 逆向きの参照を足すと相互参照になる
+  const [state, manualStepRuns] = await Promise.all([
+    listDispatchState(),
+    listManualStepRunViews(),
+  ]);
+  return NextResponse.json(
+    { ...state, manualStepRuns },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 /**
@@ -143,6 +155,33 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(
       { ok: true, job: manualStepResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // 走っている代行実行の中断（#1882）。**止める対象はジョブのidで指す**（コマンドは渡さない。
+  // pollerがユニット名を組み立て直して止めるので、任意の`systemctl stop`を流す口にならない）
+  if (kind === "MANUAL_STEP_ABORT") {
+    const targetJobId = payload?.targetJobId;
+    if (typeof targetJobId !== "string" || targetJobId === "") {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const abortResult = await enqueueManualStepAbortJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      targetJobId,
+      requestedByUserId: userId,
+    });
+    if (!abortResult.ok) {
+      const status = abortResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: abortResult.rejection, message: abortResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: abortResult.job },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
