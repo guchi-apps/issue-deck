@@ -96,15 +96,15 @@ async function handleGET(request: Request) {
             : Promise.resolve<GithubApiOpenPullRequest[]>([]),
         ]);
 
-        return {
-          repositoryId: repository.id,
-          pullRequests: [
-            ...(await Promise.all(
-              openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
-            )),
-            ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
-          ],
-        };
+        const pullRequests = [
+          ...(await Promise.all(
+            openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
+          )),
+          ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
+        ];
+        await attachRepairWorkflowAvailability(pullRequests, context);
+
+        return { repositoryId: repository.id, pullRequests };
       } catch (error) {
         // 1リポジトリの取得失敗で一覧全体を落とさない。取れなかったことは画面へ返す。
         console.error(`[GET /api/pull-requests] ${repository.fullName}:`, error);
@@ -175,28 +175,43 @@ async function toOpenPullRequest(
         repository.token,
       );
 
-  // 自動修復ワークフローが配られているかは、**修復ボタンを出すPRでだけ**確かめる（#1960）。
-  // 押せるのに404で起動しないボタンを出さないためで、判定結果はプロセス内に10分キャッシュ
-  // されるため、CI失敗・コンフリクトのPRが並んでいてもGitHub APIの消費はごく小さい。
-  const repairWorkflowAvailability = await fetchRepairWorkflowAvailability(
-    repository.ownerLogin,
-    repository.name,
-    {
-      number: pullRequest.number,
-      baseRef: pullRequest.base.ref,
-      headRef: pullRequest.head.ref,
-    },
-    repairKindsFor({ state: "open", draft: pullRequest.draft, ciState }, mergeable),
-    repository.token,
-  );
-
   // openのPRにマージ済みは存在しない。
-  return toPullRequestSummary(pullRequest, repository, {
-    merged: false,
-    ciState,
-    mergeable,
-    repairWorkflowAvailability,
-  });
+  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
+}
+
+/**
+ * 修復ボタンを出すPRに、起動先ワークフローの配布状況を埋める（#1960）。
+ *
+ * **PR1件ずつの変換（`toOpenPullRequest`）ではなく、summaryが揃ってから別の一巡で埋める。**
+ * CI状態の取得はPRごとの1リクエストからまとめ取りへ組み替える予定があり（#1962）、そこへ
+ * 別の判定を混ぜると同じ関数を2つの変更が奪い合うため。対応Issueの`00.check-user`を
+ * 合流させるのと同じ「揃ってから足す」形にしている。
+ *
+ * 判定するのはボタンが出るPRだけで、結果はプロセス内にキャッシュされる。CI失敗・コンフリクトの
+ * PRが並んでいてもGitHub APIの消費はごく小さい。
+ */
+async function attachRepairWorkflowAvailability(
+  pullRequests: PullRequestSummary[],
+  repository: RepositoryContext,
+): Promise<void> {
+  await Promise.all(
+    pullRequests.map(async (pullRequest) => {
+      const kinds = repairKindsFor(pullRequest, pullRequest.mergeable);
+      if (kinds.length === 0) return;
+
+      pullRequest.repairWorkflowAvailability = await fetchRepairWorkflowAvailability(
+        repository.ownerLogin,
+        repository.name,
+        {
+          number: pullRequest.number,
+          baseRef: pullRequest.baseRef,
+          headRef: pullRequest.headRef,
+        },
+        kinds,
+        repository.token,
+      );
+    }),
+  );
 }
 
 /**

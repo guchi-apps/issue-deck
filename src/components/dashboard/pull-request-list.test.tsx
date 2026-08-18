@@ -157,7 +157,7 @@ describe("PullRequestList", () => {
       makePullRequest({
         ciState: "failure",
         mergeable: false,
-        repairWorkflowAvailability: { ci: false, conflict: false },
+        repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
       }),
     ]);
 
@@ -177,7 +177,7 @@ describe("PullRequestList", () => {
       makePullRequest({
         ciState: "failure",
         mergeable: false,
-        repairWorkflowAvailability: { ci: true, conflict: false },
+        repairWorkflowAvailability: { ci: "available", conflict: "missing" },
       }),
     ]);
 
