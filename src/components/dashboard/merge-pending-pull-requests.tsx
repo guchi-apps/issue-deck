@@ -6,8 +6,8 @@ import {
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
-  formatElapsed,
 } from "@/components/dashboard/pull-request-badges";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -57,7 +57,7 @@ export function MergePendingPullRequests({
                 <CiStateBadge ciState={pullRequest.ciState} />
                 <ConflictBadge mergeable={pullRequest.mergeable} />
                 <span className="text-xs text-muted-foreground">
-                  {formatElapsed(pullRequest.createdAt)}
+                  {formatRelativeDate(pullRequest.createdAt)}
                 </span>
               </span>
             </button>

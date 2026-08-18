@@ -85,6 +85,7 @@ function makeRepository(): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };
@@ -103,6 +104,7 @@ function makeHost(): DispatchHostView {
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
     planReviewCapable: null,
+    selfUpdateCapable: null,
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,
