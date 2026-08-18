@@ -82,6 +82,7 @@ describe("fetchCheckRollup", () => {
         { status: "in_progress", conclusion: null },
         { status: "completed", conclusion: "cancelled" },
       ],
+      mergeJudgement: "unknown",
     });
   });
 
@@ -107,6 +108,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "failure" },
         { status: "pending", conclusion: null },
       ],
+      mergeJudgement: "unknown",
     });
   });
 
@@ -129,6 +131,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "pending",
       checks: [{ status: "completed", conclusion: "success" }],
+      mergeJudgement: "pending",
     });
   });
 
@@ -153,6 +156,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "pending", conclusion: null },
       ],
+      mergeJudgement: "pending",
     });
   });
 
@@ -176,7 +180,45 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "skipped" },
       ],
+      mergeJudgement: "settled",
     });
+  });
+
+  it("自動マージ可否の判定が実行中なら`mergeJudgement`は`pending`（CIは通っていても）（#1968）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            // PR #1959の再現。CIは通っているが、判定はまだ走っている。
+            checkRun("COMPLETED", "SUCCESS", "ci.yml"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    // CI状態は`success`のままで、判定の進み具合だけが別の軸として`pending`になる。
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
+    expect(rollup?.mergeJudgement).toBe("pending");
+  });
+
+  it("判定のワークフローが配られていないリポジトリでは`unknown`（#1968）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "SUCCESS",
+        contexts: {
+          totalCount: 1,
+          nodes: [checkRun("COMPLETED", "SUCCESS", "ci.yml")],
+        },
+      }),
+    );
+
+    await expect(
+      fetchCheckRollup("owner", "repo", "develop", "token").then((r) => r?.mergeJudgement),
+    ).resolves.toBe("unknown");
   });
 
   it("チェックが100件を超える場合は1件ずつ返さず、`state`だけを返す", async () => {
@@ -193,6 +235,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "success",
       checks: null,
+      mergeJudgement: "unknown",
     });
   });
 
@@ -202,6 +245,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: null,
       checks: [],
+      mergeJudgement: "unknown",
     });
   });
 
@@ -248,7 +292,11 @@ describe("fetchPullRequestRollup", () => {
     );
 
     await expect(fetchPullRequestRollup("owner", "repo", 42, "token")).resolves.toEqual({
-      rollup: { state: "success", checks: [{ status: "completed", conclusion: "success" }] },
+      rollup: {
+        state: "success",
+        checks: [{ status: "completed", conclusion: "success" }],
+        mergeJudgement: "unknown",
+      },
       mergeable: false,
     });
     // ref経由（`fetchCheckRollup`）と足して2回にならないこと自体がこの関数の目的。
@@ -263,13 +311,13 @@ describe("fetchPullRequestRollup", () => {
   it("`MERGEABLE`はtrue、`UNKNOWN`（判定中）はnullにする", async () => {
     stubGraphql(pullRequestWithRollup("MERGEABLE", null));
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [] },
+      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
       mergeable: true,
     });
 
     stubGraphql(pullRequestWithRollup("UNKNOWN", null));
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [] },
+      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
       mergeable: null,
     });
   });
@@ -278,7 +326,7 @@ describe("fetchPullRequestRollup", () => {
     stubGraphql(pullRequestResponse({ mergeable: "MERGEABLE", commits: { nodes: [] } }));
 
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [] },
+      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
       mergeable: true,
     });
   });
@@ -379,6 +427,7 @@ describe("fetchPullRequestRollups", () => {
     expect(rollups.get(pullRequestRollupKey("owner", "repo", 2))?.rollup).toEqual({
       state: "success",
       checks: [],
+      mergeJudgement: "unknown",
     });
   });
 

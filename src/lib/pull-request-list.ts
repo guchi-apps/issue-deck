@@ -1,3 +1,4 @@
+import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -295,9 +296,40 @@ export function pullRequestsAwaitingUserMerge(
   );
 }
 
+/** 判定中でマージボタンを押せないときに、ボタンへ出す短い表示（#1968） */
+export const MERGE_JUDGEMENT_PENDING_LABEL = "判定中";
+
+/** 判定中でマージボタンを押せない理由。ボタンの`title`に出す（#1968） */
+export const MERGE_JUDGEMENT_PENDING_REASON =
+  "developへマージしてよいかを判定中です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。";
+
+/**
+ * 自動マージ可否の判定がまだ下っていないPRか（#1968）。**真のあいだは画面からマージさせない。**
+ *
+ * 判定を行う`claude-review-develop.yml`のcheck-runは、CI状態の集約から外してある（#1799）。
+ * そのため判定が走っている最中でも`ciState`は`success`になり、`mergeWarnings`が空＝確認
+ * ダイアログすら出ないまま1クリックでマージできていた。実際にPR #1959は判定の6分前に
+ * 画面のマージボタンでdevelopへ入り、`00.check-user`・`01.check-merge`はマージ後に付いた
+ * （マージ前の確認として機能していない）。
+ *
+ * **この窓のあいだ、人がマージを押す必要は本来ない。** 判定が「自動マージしてよい」なら
+ * ワークフロー自身がマージし、「確認が必要」なら対応Issueへ`00.check-user`が付いて
+ * `requiresUserMerge`が真になり、ボタンはまた押せるようになる。
+ *
+ * 警告ダイアログではなく無効化にしているのは、事故が「ダイアログを読み飛ばした」ではなく
+ * 「ダイアログが出なかった」ために起きているため。判定のcheck-runが1件も無いリポジトリ
+ * （ワークフロー未配布・起動前）は`unknown`で従来どおり押せる。
+ */
+export function isMergeJudgementPending(mergeJudgement: MergeJudgementState): boolean {
+  return mergeJudgement === "pending";
+}
+
 /**
  * そのままマージすると意図しない結果になりうる状態の説明。空配列なら確認なしでマージしてよい。
  * 画面はこの内容を確認ダイアログに並べる。
+ *
+ * 自動マージ可否の判定中（`isMergeJudgementPending`）はここではなくボタンの無効化で止める。
+ * 「確認して押す」余地がある状態ではなく、判定が終わるまで待つべき状態のため（#1968）。
  */
 export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   const warnings: string[] = [];

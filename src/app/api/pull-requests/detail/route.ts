@@ -14,7 +14,7 @@ import {
   fetchPullRequestReviewComments,
   fetchPullRequestReviews,
 } from "@/lib/github/pull-requests-api";
-import { fetchRefCiState } from "@/lib/github/release-api";
+import { fetchRefCheckState } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
@@ -72,10 +72,11 @@ async function handleGET(request: NextRequest) {
 
     // CI状態はまだマージ・レビューの判断が要るPRでしか意味を持たない。closedなPRや
     // draftでは追加の1リクエストを使わずunknownのままにする（一覧側と同じ方針）。
-    const ciState =
+    // 自動マージ可否の判定の進み具合（#1968）も同じ1回のクエリから取り出す。
+    const { ciState, mergeJudgement } =
       pullRequest.state === "open" && !pullRequest.draft
-        ? await fetchRefCiState(owner, repo, pullRequest.head.sha, token)
-        : "unknown";
+        ? await fetchRefCheckState(owner, repo, pullRequest.head.sha, token)
+        : { ciState: "unknown" as const, mergeJudgement: "unknown" as const };
 
     // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
     // 消費せず、DBキャッシュを1件引くだけ。番号の推定は一覧と同じ純粋関数を通す。
@@ -117,6 +118,7 @@ async function handleGET(request: NextRequest) {
         {
           merged: pullRequest.merged,
           ciState,
+          mergeJudgement,
           // 詳細は単体取得（`fetchPullRequest`）のレスポンスに`mergeable`を含むため、
           // 一覧のようにGraphQLで取り直す必要はない（#1742）。
           mergeable: pullRequest.mergeable,

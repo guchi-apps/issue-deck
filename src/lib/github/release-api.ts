@@ -3,6 +3,7 @@ import {
   fetchPullRequestRollup,
   fetchPullRequestRollups,
   type CheckRollup,
+  type MergeJudgementState,
   type PullRequestRollupTarget,
 } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
@@ -209,7 +210,30 @@ export async function fetchRefCiState(
   ref: string,
   token: string,
 ): Promise<CiState> {
-  return toCiState(await fetchCheckRollup(owner, repo, ref, token));
+  return (await fetchRefCheckState(owner, repo, ref, token)).ciState;
+}
+
+/** ref1件ぶんのCI状態と、自動マージ可否の判定の進み具合（#1968） */
+export type RefCheckState = {
+  ciState: CiState;
+  mergeJudgement: MergeJudgementState;
+};
+
+/**
+ * 指定refのCI状態と、自動マージ可否の判定の進み具合を**同じ1回のクエリで**返す（#1968）。
+ *
+ * 判定の進み具合（`claude-review-develop.yml`のcheck-run）はCI状態の集約から外れている
+ * （#1799）ため、CI状態だけを見ていると「判定が走っている最中でもCI通過」に見える。
+ * 同じ`statusCheckRollup`から取り出せるので、これを足してもGitHub APIの消費は増えない。
+ */
+export async function fetchRefCheckState(
+  owner: string,
+  repo: string,
+  ref: string,
+  token: string,
+): Promise<RefCheckState> {
+  const rollup = await fetchCheckRollup(owner, repo, ref, token);
+  return { ciState: toCiState(rollup), mergeJudgement: rollup?.mergeJudgement ?? "unknown" };
 }
 
 /** チェック集約から`CiState`を決める。取得できていなければ`unknown` */
@@ -225,6 +249,8 @@ export type PullRequestCiState = {
   ciState: CiState;
   /** `true`＝マージ可能・`false`＝コンフリクトあり・`null`＝GitHubが判定中または取得できず */
   mergeable: boolean | null;
+  /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968） */
+  mergeJudgement: MergeJudgementState;
 };
 
 /**
@@ -244,13 +270,18 @@ export async function fetchPullRequestCiState(
   token: string,
 ): Promise<PullRequestCiState> {
   const { rollup, mergeable } = await fetchPullRequestRollup(owner, repo, number, token);
-  return { ciState: toCiState(rollup), mergeable };
+  return {
+    ciState: toCiState(rollup),
+    mergeable,
+    mergeJudgement: rollup?.mergeJudgement ?? "unknown",
+  };
 }
 
-/** 取得できなかったPRの値。CI状態は`unknown`・コンフリクトは判定できずnull */
+/** 取得できなかったPRの値。CI状態・判定の進み具合は`unknown`、コンフリクトは判定できずnull */
 export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
   ciState: "unknown",
   mergeable: null,
+  mergeJudgement: "unknown",
 };
 
 /**
@@ -270,7 +301,10 @@ export async function fetchPullRequestCiStates(
 ): Promise<Map<string, PullRequestCiState>> {
   const rollups = await fetchPullRequestRollups(targets, token);
   return new Map(
-    [...rollups].map(([key, { rollup, mergeable }]) => [key, { ciState: toCiState(rollup), mergeable }]),
+    [...rollups].map(([key, { rollup, mergeable }]) => [
+      key,
+      { ciState: toCiState(rollup), mergeable, mergeJudgement: rollup?.mergeJudgement ?? "unknown" },
+    ]),
   );
 }
 

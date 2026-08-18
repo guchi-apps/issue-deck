@@ -258,14 +258,20 @@ function toOpenPullRequest(
   repository: RepositoryContext,
   ciStates: Map<string, PullRequestCiState>,
 ): PullRequestSummary {
-  // CI状態とコンフリクト有無（#1742）は前段でまとめて取ってある（#1962）。draftと、
-  // 取得できなかったPRはここに無いため未取得（`unknown` / `null`）のままになる。
-  const { ciState, mergeable } =
+  // CI状態・コンフリクト有無（#1742）・自動マージ可否の判定の進み具合（#1968）は前段で
+  // まとめて取ってある（#1962）。draftと、取得できなかったPRはここに無いため未取得
+  // （`unknown` / `null`）のままになる。
+  const { ciState, mergeable, mergeJudgement } =
     ciStates.get(pullRequestRollupKey(repository.ownerLogin, repository.name, pullRequest.number)) ??
     UNKNOWN_PULL_REQUEST_CI_STATE;
 
   // openのPRにマージ済みは存在しない。
-  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
+  return toPullRequestSummary(pullRequest, repository, {
+    merged: false,
+    ciState,
+    mergeable,
+    mergeJudgement,
+  });
 }
 
 /**

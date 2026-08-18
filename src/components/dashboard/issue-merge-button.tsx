@@ -15,7 +15,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
+import {
+  isMergeJudgementPending,
+  MERGE_JUDGEMENT_PENDING_LABEL,
+  MERGE_JUDGEMENT_PENDING_REASON,
+} from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 
 type IssueMergeButtonProps = {
@@ -27,6 +33,11 @@ type IssueMergeButtonProps = {
   pullRequestNumber?: number | null;
   /** 対応PRの最新コミットのCI状態。実行中はマージさせない */
   ciStatus?: PullRequestCiStatus | null;
+  /**
+   * 自動マージ可否の判定の進み具合（#1968）。`pending`のあいだはマージさせない。
+   * CI状態とは別の軸で、判定のcheck-runはCI状態の集約から外れている（#1799）。
+   */
+  mergeJudgement?: MergeJudgementState | null;
   isMerging?: boolean;
   isMerged?: boolean;
   /** マージ失敗時のエラーメッセージ。ボタンの手前にインライン表示する */
@@ -43,12 +54,17 @@ type IssueMergeButtonProps = {
  *
  * PR一覧・PR詳細画面のマージボタンは`PullRequestMergeButton`（`pull-request-merge-button.tsx`）で、
  * `PullRequestSummary`を前提に警告付きの確認を出す別物。Issue画面はPR番号しか持たないためこちらを使う。
+ *
+ * **CI実行中に加えて、自動マージ可否の判定中も押せなくする**（#1968。`mergeJudgement`）。
+ * 判定のcheck-runはCI状態の集約から外れている（#1799）ため、`ciStatus`だけを見ていると
+ * 判定より先にマージできてしまう。
  */
 export function IssueMergeButton({
   onMerge,
   onMerged,
   pullRequestNumber,
   ciStatus,
+  mergeJudgement,
   isMerging,
   isMerged,
   error,
@@ -57,7 +73,8 @@ export function IssueMergeButton({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const busy = Boolean(isMerging);
   const merged = Boolean(isMerged);
-  const disabled = busy || merged || ciStatus === "in_progress";
+  const judgementPending = isMergeJudgementPending(mergeJudgement ?? "unknown");
+  const disabled = busy || merged || ciStatus === "in_progress" || judgementPending;
 
   async function confirmMerge() {
     const ok = await onMerge();
@@ -72,6 +89,7 @@ export function IssueMergeButton({
         size="sm"
         onClick={() => setIsConfirmOpen(true)}
         disabled={disabled}
+        title={judgementPending ? MERGE_JUDGEMENT_PENDING_REASON : undefined}
         // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
         // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
         // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
@@ -79,7 +97,11 @@ export function IssueMergeButton({
         className="transition-colors"
       >
         {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
-        {merged ? "マージ済み" : "マージする"}
+        {merged
+          ? "マージ済み"
+          : judgementPending
+            ? MERGE_JUDGEMENT_PENDING_LABEL
+            : "マージする"}
       </Button>
 
       <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
