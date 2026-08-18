@@ -505,6 +505,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
   - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と
     同じ考え方。未確認が無ければ`0`になる）。総数との差は一覧のヘッダー（`3件・未確認1件`）で説明する。
+  - **数え方の差し替えは`issue-stats.ts`の`computeNavCountsForFilters`で行い、画面側では行わない**
+    （#1910）。`navCounts["question"]`はスマホの一覧のビュー切替（`mobile-issue-list-screen.tsx`）と
+    ビュー選択シート（`mobile-issue-view-sheet.tsx`）にも出るため、画面ごとに数字を差し替えると
+    左メニューの`1`と一覧の`3`が食い違う。手作業（#1763）と同じ置き場。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、

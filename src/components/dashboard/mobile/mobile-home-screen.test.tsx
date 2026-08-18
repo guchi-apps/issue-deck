@@ -87,7 +87,6 @@ function renderHome(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
-      unconfirmedQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
@@ -170,7 +169,6 @@ describe("MobileHomeScreen（#1690）", () => {
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
-        unconfirmedQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
@@ -187,9 +185,10 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(badgeClassName()).toContain("bg-amber-500");
   });
 
-  // 件数は未確認の数で、確認待ち・作業待ちと同じオレンジの丸で出す（#1910・PCと同じ）
+  // 件数（`computeNavCountsForFilters`）は未確認の数で、確認待ち・作業待ちと同じ
+  // オレンジの丸で出す（#1910・PCと同じ）
   it("未確認の質問があるときだけ「質問」の件数をオレンジの丸で出す", () => {
-    const { rerender } = renderHome({ navCounts: { ...NAV_COUNTS, question: 3 } });
+    const { rerender } = renderHome({ navCounts: { ...NAV_COUNTS, question: 0 } });
 
     function badgeClassName(unconfirmed: number) {
       // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
@@ -197,16 +196,14 @@ describe("MobileHomeScreen（#1690）", () => {
       return row.querySelector("span:last-child")?.className ?? "";
     }
 
-    // 総数（3件）ではなく未確認の件数を出すので、未確認が無ければ0になる
     expect(badgeClassName(0)).not.toContain("amber");
 
     rerender(
       <MobileHomeScreen
         overviewStats={OVERVIEW_STATS}
-        navCounts={{ ...NAV_COUNTS, question: 3 }}
+        navCounts={{ ...NAV_COUNTS, question: 1 }}
         checkUserPullRequestCount={0}
         manualStepAttention={NO_MANUAL_STEP}
-        unconfirmedQuestionCount={1}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
