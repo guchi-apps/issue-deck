@@ -162,6 +162,11 @@ export function IssueDeckShell({
     () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
     [issues, filters.issue],
   );
+  /**
+   * いま画面に出ているIssue（#1884）。PR・ブランチのペインでは詳細を描かないため、
+   * `selectedIssue`が残っていても「開いている画面のIssue」ではない。
+   */
+  const visibleIssue = filters.pane === "issues" ? selectedIssue : null;
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
@@ -954,8 +959,18 @@ export function IssueDeckShell({
           groupByRepo={groupByRepo}
           onChangeGroupByRepo={setGroupByRepo}
           assigneeOptions={assigneeOptions}
+          /* 開いている画面に関連するリポジトリを初期値にする（#1884）。1つに絞り込んでいれば
+             そのリポジトリ、絞り込んでいなければ**いま画面に出ている**Issueのリポジトリ。
+             どちらも分からなければ渡さず、フォームで選ばせる。
+             **`selectedIssue`だけを見てはいけない。** PR・ブランチのペインへ移っても
+             `?issue=`は残るため（`use-issue-filters.ts`は`pr`しか畳まない）、Issue詳細が
+             どこにも出ていない状態で「表示中のリポジトリ」と書くことになる */
           onCreateIssue={() =>
-            openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+            openCreateDialog(
+              filters.repos.length === 1
+                ? filters.repos[0]
+                : (visibleIssue?.repositoryFullName ?? null),
+            )
           }
           onAskCrossRepoQuestion={() =>
             openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)

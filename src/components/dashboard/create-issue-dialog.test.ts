@@ -4,7 +4,6 @@ import {
   groupRepositoriesByWorkflowStatus,
   mergeSuggestedLabels,
   resolveKindRepository,
-  selectableSuggestedRepositories,
 } from "@/components/dashboard/create-issue-dialog";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { ConnectedRepository } from "@/types/repository";
@@ -104,10 +103,14 @@ describe("resolveKindRepository", () => {
     ).toBe("owner/not-configured");
   });
 
-  it("質問へ切り替えたとき、ワークフロー未導入のリポジトリを選んでいたら導入済みの先頭へ寄せる", () => {
+  /**
+   * #1884。リポジトリを人が決める形にした以上、種別を押しただけで選んでいないリポジトリが
+   * 入る経路は残さない（以前は導入済みの先頭1件を入れていた）。
+   */
+  it("質問へ切り替えたとき、ワークフロー未導入のリポジトリを選んでいたら未選択へ戻す", () => {
     expect(
       resolveKindRepository("question", [notConfigured, configured], "owner/not-configured"),
-    ).toBe("owner/configured");
+    ).toBe("");
   });
 
   it("質問で選べるリポジトリを既に選んでいる場合は変えない", () => {
@@ -121,42 +124,9 @@ describe("resolveKindRepository", () => {
   });
 
   /**
-   * #1733。入力ステップに「自動で決める」が出た以上、種別を押しただけで1件目が入ると、
-   * 選んでいないものを選んだように見える。
+   * #1733。種別を押しただけで1件目が入ると、選んでいないものを選んだように見える。
    */
-  it("未選択（自動で決める）のまま質問へ切り替えても未選択のままにする", () => {
+  it("未選択のまま質問へ切り替えても未選択のままにする", () => {
     expect(resolveKindRepository("question", [configured, notConfigured], "")).toBe("");
-  });
-});
-
-/** #1710。押しても切り替わらない候補チップを出さないための絞り込み */
-describe("selectableSuggestedRepositories", () => {
-  const repositories = [
-    makeRepo({ fullName: "guchi-apps/issue-deck", hasClaudeWorkflow: true }),
-    makeRepo({ fullName: "guchi-apps/car-care", hasClaudeWorkflow: false }),
-  ];
-
-  it("Issueでは連携しているリポジトリをすべて残し、推定の順序を保つ", () => {
-    expect(
-      selectableSuggestedRepositories("issue", repositories, [
-        "guchi-apps/car-care",
-        "guchi-apps/issue-deck",
-      ]),
-    ).toEqual(["guchi-apps/car-care", "guchi-apps/issue-deck"]);
-  });
-
-  it("質問ではclaude-issue-dispatch.yml未導入のリポジトリを落とす", () => {
-    expect(
-      selectableSuggestedRepositories("question", repositories, [
-        "guchi-apps/car-care",
-        "guchi-apps/issue-deck",
-      ]),
-    ).toEqual(["guchi-apps/issue-deck"]);
-  });
-
-  it("画面に出ていない（非表示・未連携の）リポジトリは落とす", () => {
-    expect(
-      selectableSuggestedRepositories("issue", repositories, ["guchi-apps/unknown"]),
-    ).toEqual([]);
   });
 });
