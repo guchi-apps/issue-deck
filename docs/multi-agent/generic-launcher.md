@@ -152,6 +152,27 @@ issue-deckの画面へ渡す（`localhost`のURLでは外出先から届かな�
 GitHub上のファイルの有無ではなく、実際にcloneされ起動できるかを申告しているサブPC側の情報の方が
 正確なため。マーカー行を持たないリポジトリのIssueでも、サブPCが申告していれば「サブPCで開始」が出る。
 
+### リポジトリ一覧の「非対応」の印も同じ理由で2経路の和で決める
+
+左メニュー・スマホのリポジトリ画面・設定の「表示」区分に出る丸に斜め線の印（`CircleSlash`）は、
+元は`Repository.hasClaudeWorkflow`（`claude-issue-dispatch.yml`の有無）だけで出していた。
+その結果、`vps`・`subpc`・`docs`のように**無人実行は持たないがローカルセッションでは対応する**
+リポジトリ（#1741）に非対応の印が出て、「このリポジトリではIssueを解決できない」と読めて
+しまっていた（#1888）。
+
+判定は`isRepositoryAutomationUnsupported`（`src/lib/repository-automation.ts`）へ寄せ、
+**どちらの経路でも起動できないときだけ**印を出す。サブPC側の材料は
+`listDispatchRunnableRepositories`（`src/lib/dispatch/runnable-repositories.ts`）が
+`DispatchHost.repositories`から集め、サーバー側で`ConnectedRepository.dispatchRunnable`として
+画面へ渡す。
+
+- **ホストが応答しているか（online）は見ない。** 一覧の印はリポジトリの構成を表すもので、
+  サブPCがスリープしているあいだだけ印が付いたり消えたりすると、何を表しているのか読めない。
+  実際に押せるかどうかは、押す時点でIssue詳細側（`resolveDispatchTargetRejection`）が判定する
+- **Issue詳細の「実装を開始」の無効化（`startImplementationDisabledReason`）とは揃えない。**
+  あちらはダイアログの中のActionsの選択肢だけを落とすためのもので、軸がGitHub Actions単独に
+  限られる（#1262）。揃えると、サブPCで起動できるリポジトリでActionsを選べてしまう
+
 ## 対象リポジトリを増やす（サブPC側の作業）
 
 対象リポジトリには**何も追加しない。** サブPC側だけで完結する。

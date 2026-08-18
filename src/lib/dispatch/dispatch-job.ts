@@ -57,7 +57,8 @@ export type DispatchJobKind =
   | "CROSS_REPO_QUESTION"
   | "MANUAL_STEP"
   | "MANUAL_STEP_ABORT"
-  | "PLAN_REVIEW";
+  | "PLAN_REVIEW"
+  | "SELF_UPDATE";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -106,11 +107,13 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "manual_step") return "MANUAL_STEP";
   if (value === "manual_step_abort") return "MANUAL_STEP_ABORT";
   if (value === "plan_review") return "PLAN_REVIEW";
+  if (value === "self_update") return "SELF_UPDATE";
   return null;
 }
 
 /**
- * セッションを立てず、tmuxにも触らないジョブ（#1828）。手作業の代行実行と、その中断（#1882）。
+ * セッションを立てず、tmuxにも触らないジョブ（#1828）。手作業の代行実行と、その中断（#1882）、
+ * チェックアウトの更新（#1875）。
  *
  * **払い出しは制御ジョブと同じ「枠外」**（`SESSION_LAUNCH_JOB_KINDS`に入れない）で、
  * `QUEUED`のまま5分で`TIMEOUT`にするのも制御ジョブと揃える——**待たせるほど危険になる**
@@ -119,7 +122,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
  * 一方で`SESSION_CONTROL_JOB_KINDS`には**入れない**。あちらはpollerがセッション名を組み立て直して
  * 突き合わせる種別の集合で、こちらは操作する相手がセッションではない。
  */
-export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP", "MANUAL_STEP_ABORT"] as const;
+export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP", "MANUAL_STEP_ABORT", "SELF_UPDATE"] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
   return (OUT_OF_BAND_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
@@ -309,6 +312,12 @@ export type DispatchHostView = {
    * 未知の種別として`failed`になったジョブが画面へ並ぶ。
    */
   planReviewCapable: boolean | null;
+
+  /**
+   * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
+   * 扱う**（他のCapableと同じ）。`manualStepCapable`と分けて持つ理由はスキーマ側のコメント参照。
+   */
+  selfUpdateCapable: boolean | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -446,6 +455,26 @@ export function buildDispatchActiveKey(
   if (kind === "QUESTION") return null;
   const target = `${repositoryFullName}#${issueNumber}`;
   return kind === "LAUNCH" ? target : `${kind.toLowerCase()}:${target}`;
+}
+
+/**
+ * チェックアウトの更新（#1875）が使う`DispatchJob`の埋め草。
+ *
+ * **このジョブはIssueに紐づかない**（ホストに対する操作）が、`DispatchJob`は
+ * `repositoryFullName`・`issueNumber`を必須で持つ。pollerが動かしているチェックアウトは
+ * issue-deck自身なので、リポジトリはそれを入れ、番号は「Issueではない」印として0を置く。
+ */
+export const SELF_UPDATE_REPOSITORY = "guchi-apps/issue-deck";
+export const SELF_UPDATE_ISSUE_NUMBER = 0;
+
+/**
+ * 更新ジョブの活性キー。**Issueではなくホストで一意にする。**
+ *
+ * 同じホストへ更新を二重に積むと、1本目の再起動中に2本目が届いて中途半端な状態になる。
+ * `buildDispatchActiveKey`が作る`self_update:owner/repo#0`と混ざらないよう`host:`を挟む。
+ */
+export function buildSelfUpdateActiveKey(hostName: string): string {
+  return `self_update:host:${hostName}`;
 }
 
 /** 申告が届いてから一定時間内なら生存とみなす */
@@ -602,6 +631,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "代行の中断";
     case "PLAN_REVIEW":
       return "計画レビュー";
+    case "SELF_UPDATE":
+      return "チェックアウトの更新";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":

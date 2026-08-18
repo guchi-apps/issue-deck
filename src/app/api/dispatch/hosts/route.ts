@@ -95,6 +95,8 @@ export async function POST(request: NextRequest) {
     // このジョブは計画コメントの投稿を契機に**自動で積まれる**ため、非対応のpollerへ配ると
     // 計画のたびに`failed`のジョブが並ぶ（他の種別より、申告を見てから配る意味が大きい）
     planReviewCapable: typeof payload?.planReview === "boolean" ? payload.planReview : null,
+    selfUpdateCapable:
+      typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
     // 起動ジョブを取りに行かない**（#1361）ので、これが無いと画面は「順番待ちのまま進まない」
     // 理由を出せない。判定は引き続きpoller側が持ち、ここは写しを受け取るだけ

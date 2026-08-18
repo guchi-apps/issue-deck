@@ -31,6 +31,10 @@ import {
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
+import {
+  isRepositoryAutomationUnsupported,
+  REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE,
+} from "@/lib/repository-automation";
 import type { LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
@@ -351,7 +355,7 @@ export function SidebarNav({
                           </span>
                           <span className="truncate">{repo.name}</span>
                         </span>
-                        {(repo.archived || repo.private || !repo.hasClaudeWorkflow) && (
+                        {(repo.archived || repo.private || isRepositoryAutomationUnsupported(repo)) && (
                           <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                             {repo.archived && (
                               <span title="アーカイブ済み">
@@ -363,8 +367,8 @@ export function SidebarNav({
                                 <Lock className="size-3" />
                               </span>
                             )}
-                            {!repo.hasClaudeWorkflow && (
-                              <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                            {isRepositoryAutomationUnsupported(repo) && (
+                              <span title={REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE}>
                                 <CircleSlash className="size-3" />
                               </span>
                             )}

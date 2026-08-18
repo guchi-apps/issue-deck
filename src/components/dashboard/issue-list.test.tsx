@@ -246,3 +246,26 @@ describe("質問Issueの状態ラベル（#1796）", () => {
     expect(screen.getByText("1件")).toBeTruthy();
   });
 });
+
+// #1891。当日ぶんをまとめて「今日」に丸めていたため、朝更新したIssueと数分前に
+// 更新したIssueが同じ表記になっていた
+describe("IssueList 更新日時", () => {
+  it("当日の更新は「今日」ではなく分・時間まで刻んで出す", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 18, 12, 0, 0));
+    try {
+      renderList({
+        issues: [
+          makeIssue({ number: 30, updatedAt: new Date(2026, 7, 18, 11, 43, 0).toISOString() }),
+          makeIssue({ number: 31, updatedAt: new Date(2026, 7, 18, 9, 0, 0).toISOString() }),
+        ],
+      });
+
+      expect(rowOf(30).textContent).toContain("17分前");
+      expect(rowOf(31).textContent).toContain("3時間前");
+      expect(rowOf(30).textContent).not.toContain("今日");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

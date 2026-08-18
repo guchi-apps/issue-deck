@@ -35,6 +35,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     manualStepCapable: null,
     manualStepAbortCapable: null,
     planReviewCapable: null,
+    selfUpdateCapable: null,
     maxSessions: 12,
     liveSessions: 6,
     metrics: VALID,

@@ -368,6 +368,7 @@ enum DispatchJobKind {
   MANUAL_STEP
   MANUAL_STEP_ABORT
   PLAN_REVIEW
+  SELF_UPDATE
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -547,6 +548,15 @@ model DispatchHost {
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
   planReviewCapable        Boolean?
+
+  // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
+  // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（他のCapableと同じ向き）。
+  //
+  // **`manualStepCapable`とは分けて持つ。** 両方とも枠外で配る「セッションを立てない」ジョブ
+  // （`OUT_OF_BAND_JOB_KINDS`）だが、手作業の代行に対応した既存のpollerは更新のジョブを知らず、
+  // まとめて配ると未知の種別として`failed`になり、押した更新が失われる。
+  selfUpdateCapable        Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。

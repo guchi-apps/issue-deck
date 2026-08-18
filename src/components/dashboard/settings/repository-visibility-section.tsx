@@ -7,6 +7,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getRepoColor } from "@/lib/repo-color";
 import {
+  isRepositoryAutomationUnsupported,
+  REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE,
+} from "@/lib/repository-automation";
+import {
   selectRepositoriesToToggle,
   summarizeRepositoryVisibility,
 } from "@/lib/repository-visibility";
@@ -125,7 +129,7 @@ export function RepositoryVisibilitySection({
                 >
                   {repository.name}
                 </span>
-                {(repository.archived || repository.private || !repository.hasClaudeWorkflow) && (
+                {(repository.archived || repository.private || isRepositoryAutomationUnsupported(repository)) && (
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     {repository.archived && (
                       <span title="アーカイブ済み">
@@ -137,8 +141,8 @@ export function RepositoryVisibilitySection({
                         <Lock className="size-3" />
                       </span>
                     )}
-                    {!repository.hasClaudeWorkflow && (
-                      <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                    {isRepositoryAutomationUnsupported(repository) && (
+                      <span title={REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE}>
                         <CircleSlash className="size-3" />
                       </span>
                     )}

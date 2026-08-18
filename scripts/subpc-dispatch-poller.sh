@@ -427,6 +427,20 @@ plan_review_capable() {
   fi
 }
 
+# チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
+#
+# 再起動はsystemdの`Restart=always`に任せる（自分で`systemctl restart`を打つと、結果を報告する
+# 前に死ぬ）。unitの設定まで確かめないのは、確かめる手段（`systemctl show`）が使えない環境でも
+# pollerは動くうえ、`Restart=always`が外れていた場合は「終了したまま上がってこない」という
+# 分かりやすい壊れ方をするため。
+self_update_capable() {
+  if git -C "$CHECKOUT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # ホストのリソース使用率（#1567）。画面（実行キュー・スマホのホーム）へ出すためだけの申告で、
 # **issue-deck側はこの値で何も判定しない**（起動を止めているのは DISPATCH_MAX_SESSIONS と
 # 同時実行数だけ）。
@@ -650,9 +664,10 @@ announce() {
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson planReview "$(plan_review_capable)" \
+    --argjson selfUpdate "$(self_update_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1250,6 +1265,49 @@ run_control_job() {
 # **実行そのものは別プロセスへ逃がす**（`run-manual-step.sh`）。サブPCの手作業で最も多いのが
 # 「`git pull`してpollerを再起動する」で、pollerのcgroupの中で実行すると自分ごと殺されて
 # 結果を返せない。`systemd-run --user --collect --unit=...`で別のcgroupへ出す。
+# チェックアウトを最新へ追随させ、pollerを畳む（#1875）。
+#
+# **`ssh`して`git pull && systemctl restart`していた手作業**（#1858・#1867）の置き換え。
+# pollerが自分から`git pull`しない設計（人が取り込むかを決める）は崩さず、**画面で押された
+# ときだけ**動く経路としてここに置く。
+#
+# **報告してから終了する。** 自分で`systemctl --user restart`を打つと、報告が届く前にプロセスが
+# 死んで、画面には「実行中」のまま残る。終了だけしてsystemdの`Restart=always`に拾わせれば、
+# 結果を返したうえで新しい版で上がり直せる。
+run_self_update_job() {
+  local job_id="$1"
+
+  echo "チェックアウトを更新します（$CHECKOUT_DIR）..."
+
+  # **作業ツリーが汚れていたら触らない。** 手で試した変更を巻き込んで消しうるため、
+  # 強制せずに人へ返す
+  if [[ -n "$(git -C "$CHECKOUT_DIR" status --porcelain 2>/dev/null)" ]]; then
+    report_job "$job_id" failed "作業ツリーに未コミットの変更があります。手元で確認してください。"
+    return 0
+  fi
+
+  local before after out
+  before="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+
+  # **`--ff-only`。** マージコミットを作らず、分岐していれば失敗として返す
+  if ! out="$(timeout 120 git -C "$CHECKOUT_DIR" pull --ff-only 2>&1)"; then
+    report_job "$job_id" failed \
+      "git pull --ff-only に失敗しました: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+    return 0
+  fi
+
+  after="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+
+  if [[ "$before" == "$after" ]]; then
+    report_job "$job_id" succeeded "既に最新でした（$after）。再起動します。"
+  else
+    report_job "$job_id" succeeded "$before → $after へ更新しました。再起動します。"
+  fi
+
+  echo "更新を反映するため終了します（systemdが起動し直します）。"
+  exit 0
+}
+
 run_manual_step_job() {
   local job_id="$1" owner="$2" repo="$3" issue_number="$4" command="$5"
   local body payload_file unit
@@ -1446,6 +1504,13 @@ run_job() {
   # セッション名を組み立て直すのと同じ作法で、任意の`systemctl stop`を流す口にしない）。
   if [[ "$kind" == "MANUAL_STEP_ABORT" ]]; then
     abort_manual_step_job "$job_id" "$(printf '%s' "$job_json" | jq -r '.targetJobId // ""')"
+    return 0
+  fi
+
+  # チェックアウトの更新（#1875）。**Issueに紐づかない**ため、owner/repo/issue_numberは
+  # 埋め草が入っている（issue-deck#0）。参照しない。
+  if [[ "$kind" == "SELF_UPDATE" ]]; then
+    run_self_update_job "$job_id"
     return 0
   fi
 

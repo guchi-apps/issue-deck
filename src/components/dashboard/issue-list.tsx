@@ -35,6 +35,7 @@ import {
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
@@ -135,14 +136,6 @@ type IssueListProps = {
    */
   dispatch?: DispatchStateHandle;
 };
-
-function formatRelativeDate(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays <= 0) return "今日";
-  if (diffDays === 1) return "1日前";
-  return `${diffDays}日前`;
-}
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
 // （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
@@ -499,7 +492,11 @@ export function IssueList({
                   {issue.commentCount}
                 </span>
               )}
-              <span>{formatRelativeDate(issue.updatedAt)}</span>
+              {/* 一覧はサーバーでも描かれるため、現在時刻は描画中に読まず`useNow`から受ける
+                  （#1891）。分単位で刻むようになったぶん、サーバーで描いた時刻と
+                  ハイドレーション時刻が分の境界をまたぐと表示が食い違う。マウント前
+                  （`now === null`）は出しようがないので出さない */}
+              <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
         </button>

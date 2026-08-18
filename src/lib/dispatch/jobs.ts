@@ -9,6 +9,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
+  buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
   describeManualStepAbortRejection,
@@ -34,6 +35,8 @@ import {
   resolveManualStepExecutionRejection,
   resolvePlanReviewRejection,
   resolveSessionControlRejection,
+  SELF_UPDATE_ISSUE_NUMBER,
+  SELF_UPDATE_REPOSITORY,
   SESSION_CONTROL_JOB_KINDS,
   SESSION_LAUNCH_JOB_KINDS,
   type CrossRepoQuestionRejection,
@@ -135,6 +138,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
     planReviewCapable: host.planReviewCapable,
+    selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
     // 5列は「まとめて入るかまとめてnullか」で保存されている（#1567）。読むときも同じ扱いにし、
@@ -851,6 +855,72 @@ export async function enqueueManualStepAbortJob(params: {
   }
 }
 
+export type SelfUpdateRejection = "host_not_found" | "not_capable" | "already_queued";
+
+export type EnqueueSelfUpdateJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: SelfUpdateRejection; message: string };
+
+/**
+ * サブPCのチェックアウトを最新へ追随させ、pollerを再起動する（#1875）。
+ *
+ * **pollerは自分から`git pull`しない**——レビューを経ていないコードが無人で走り出す形にせず、
+ * 取り込むかどうかは人が決める、という設計のため（`scripts/subpc-dispatch-poller.sh`）。
+ * この経路は**人が画面で押したときだけ**動くので、その設計を崩さずに、`ssh`して
+ * `git pull && systemctl restart`する手作業（#1858・#1867）をなくせる。
+ *
+ * **遅れが無くても弾かない。** pollerは`--ff-only`で引くため、既に最新なら何も起きずに
+ * 再起動だけが走る。押せるかどうかの判断は画面側に任せ、ここでは受け付ける。
+ */
+export async function enqueueSelfUpdateJob(params: {
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueSelfUpdateJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  if (!host) {
+    return {
+      ok: false,
+      rejection: "host_not_found",
+      message: `${params.hostName} はまだ申告していません。pollerが動いているか確認してください。`,
+    };
+  }
+  // **申告していないpollerへ配らない。** 未知の種別として`failed`で返ってくるだけで、
+  // 押した更新が失われる（`claimDispatchJobs`の分岐と対になっている）
+  if (host.selfUpdateCapable !== true) {
+    return {
+      ok: false,
+      rejection: "not_capable",
+      message: `${params.hostName} のpollerはチェックアウトの更新に対応していません。先に手元で更新してください。`,
+    };
+  }
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: SELF_UPDATE_REPOSITORY,
+        issueNumber: SELF_UPDATE_ISSUE_NUMBER,
+        targetHost: params.hostName,
+        kind: "SELF_UPDATE",
+        status: "QUEUED",
+        activeKey: buildSelfUpdateActiveKey(params.hostName),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    // activeKeyのunique制約。二重クリックや、前の更新がまだ終わっていない場合
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: `${params.hostName} の更新は既に積まれています。`,
+    };
+  }
+}
+
 /** 代行実行の判定に要る本文とラベルを、DBのIssueキャッシュから引く（#1828） */
 async function findIssueForManualStep(
   repositoryFullName: string,
@@ -914,11 +984,15 @@ export async function claimDispatchJobs(params: {
   // **手作業の代行実行（#1828）も枠外で先に配る。** セッションを立てないので枠を消費せず、
   // 承認から5分で失効する以上、起動待ちの後ろに並ばせると届く前に失効しうる。
   // 対応を申告していないpollerには配らない（未知の種別として`failed`になり、押した実行が失われる）
+  // **枠外のジョブでも申告は種別ごとに見る。** 手作業の代行に対応した既存のpollerは
+  // チェックアウトの更新（#1875）を知らないため、`OUT_OF_BAND_JOB_KINDS`をまとめて配ると
+  // 未知の種別として`failed`になり、押した更新が失われる。
   if (host?.manualStepCapable === true) controlKinds.push("MANUAL_STEP");
   // **中断（#1882）は代行実行とは別の申告で配る。** 代行実行を実行できるpollerでも、止める側の
   // 実装が入っているとは限らない。非対応のpollerへ配ると未知の種別として`failed`になり、
   // 画面には「中断できなかった」だけが残る（そのときは打ち切りを待つ案内を出す方が正しい）
   if (host?.manualStepAbortCapable === true) controlKinds.push("MANUAL_STEP_ABORT");
+  if (host?.selfUpdateCapable === true) controlKinds.push("SELF_UPDATE");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -1401,6 +1475,7 @@ export async function announceDispatchHost(params: {
   manualStepAbortCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
+  selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
    * 割り当ての判定には使わない**（判定はpoller側。サブPCのtmuxを見られるのはあちらだけ）。
@@ -1436,6 +1511,7 @@ export async function announceDispatchHost(params: {
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,
     planReviewCapable: params.planReviewCapable,
+    selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
     // 申告が無ければ5列とも`null`へ戻す（#1567）。**前回の値を残さない。**

@@ -1,6 +1,8 @@
 "use client";
 
-import { ExternalLink, Monitor } from "lucide-react";
+import { ExternalLink, Monitor, RefreshCw } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
@@ -82,6 +84,7 @@ export function DispatchHostPanel({
   hosts,
   sessions,
   onOpenIssue,
+  onRequestSelfUpdate,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
@@ -91,6 +94,13 @@ export function DispatchHostPanel({
    * 押しても何も起きない行は生まれない。
    */
   onOpenIssue?: (issueId: string) => void;
+  /**
+   * チェックアウトの更新を積む（#1875）。渡さなければボタンを出さない（`onOpenIssue`と同じ形）。
+   *
+   * これが無かった頃は`ssh`して`git pull && systemctl restart`する手作業Issueが、共有
+   * ワークフローやpollerを直すたびに起票されていた（#1858・#1867）。
+   */
+  onRequestSelfUpdate?: (hostName: string) => void;
 }) {
   if (hosts.length === 0) return null;
 
@@ -102,6 +112,7 @@ export function DispatchHostPanel({
           host={host}
           sessions={selectHostSessions(sessions, host.name)}
           onOpenIssue={onOpenIssue}
+          onRequestSelfUpdate={onRequestSelfUpdate}
         />
       ))}
     </div>
@@ -112,10 +123,12 @@ function HostCard({
   host,
   sessions,
   onOpenIssue,
+  onRequestSelfUpdate,
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
   onOpenIssue?: (issueId: string) => void;
+  onRequestSelfUpdate?: (hostName: string) => void;
 }) {
   const metrics = describeDispatchHostMetrics(host);
   // いま動いているスクリプトがどの版か（#1612）。**pollerは自分と同じチェックアウトの
@@ -163,6 +176,25 @@ function HostCard({
           </span>
         </div>
       )}
+
+      {/* **遅れているときだけ出す。** 常に置くと、押す意味が無い状態でも再起動だけが走り、
+          そのぶんジョブの払い出しが止まる。対応していないpollerにも出さない（配っても未知の
+          種別として失敗するだけ） */}
+      {onRequestSelfUpdate &&
+        host.selfUpdateCapable === true &&
+        (host.checkout?.behindCount ?? 0) > 0 && (
+          <div className="mt-1.5 flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => onRequestSelfUpdate(host.name)}
+            >
+              <RefreshCw className="size-3" />
+              更新して再起動
+            </Button>
+          </div>
+        )}
 
       {metrics && (
         <div className="mt-1.5 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1">

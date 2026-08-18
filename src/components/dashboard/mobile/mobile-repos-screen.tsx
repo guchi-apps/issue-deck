@@ -13,6 +13,10 @@ import {
   type ReleaseStatusBadge,
 } from "@/lib/github/release-button-status";
 import { getRepoColor } from "@/lib/repo-color";
+import {
+  isRepositoryAutomationUnsupported,
+  REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE,
+} from "@/lib/repository-automation";
 import { cn } from "@/lib/utils";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -133,7 +137,7 @@ export function MobileReposScreen({
                 const color = getRepoColor(repo.fullName);
                 const releaseBadge = releaseBadgeByRepo.get(repo.fullName);
                 const hasStateIcons =
-                  repo.archived || repo.private || !repo.hasClaudeWorkflow;
+                  repo.archived || repo.private || isRepositoryAutomationUnsupported(repo);
                 return (
                   <li key={repo.id} className="flex items-center gap-1">
                     <button
@@ -177,8 +181,8 @@ export function MobileReposScreen({
                                   <Lock className="size-3.5" />
                                 </span>
                               )}
-                              {!repo.hasClaudeWorkflow && (
-                                <span title="issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）">
+                              {isRepositoryAutomationUnsupported(repo) && (
+                                <span title={REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE}>
                                   <CircleSlash className="size-3.5" />
                                 </span>
                               )}
