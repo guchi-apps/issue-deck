@@ -127,7 +127,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   スマホ側で新たに増えたのは、上部の
   [`mobile/mobile-issue-summary-card.tsx`](../src/components/dashboard/mobile/mobile-issue-summary-card.tsx)（読む専用）と
   [`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)（編集の口）で、
-  **この2つに同じ値を両方出さない**のが分け方の要点（サマリーは読むだけ・編集は折りたたみ）。
+  **サマリーは読むだけ・編集は折りたたみ**が分け方の要点。同じ値を両方に出すのは、担当者と進捗の
+  ように**折りたたみを開かないと今どこにいるかが分からなくなる**ときに限る（#1920。進捗は畳んだ行の
+  summaryにも出す）。
   `IssueDetailSection`の開閉状態は`issue-detail.section.<id>`のlocalStorageで**セクションごとに1つ**
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
@@ -270,11 +272,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
     **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
     畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
-- **人が進捗を直接動かす入口は、Issue詳細の右パネル（プロパティ）の「進捗」セレクト**（#1350）。
-  ラベル・担当者と並ぶ位置にあり
-  （[`components/dashboard/issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。
-  PCの常時表示パネルと狭い画面の「プロパティ」シートが同じコンポーネントを使う）、
-  `POST /api/issues/progress-status`へ投げる。**この経路は実行を起動しない。**
+- **人が進捗を直接動かす入口は、Issue詳細の「進捗」セレクト**（#1350・#1920）。中身・並び・注記は
+  [`components/dashboard/issue-progress-select.tsx`](../src/components/dashboard/issue-progress-select.tsx)
+  が持ち、**PCとスマホがこれ1つを共有する**——PCはラベル・担当者と並ぶ右パネル
+  （[`issue-properties-panel.tsx`](../src/components/dashboard/issue-properties-panel.tsx)。常時表示の
+  パネルと狭い画面の「プロパティ」シートが同じコンポーネント）、スマホは「プロパティ」の折りたたみ
+  （[`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)）。
+  **片方の画面にだけ挙動や文言を足さない**（足すと「選ぶと何が起きるのか」の答えが端末で変わる）。
+  投げ先は`POST /api/issues/progress-status`。**この経路は実行を起動しない。**
   GitHub Projectsのカンバンでカードをドラッグした場合と違い、書くのがissue-deck自身の
   GitHub Appで、かつ`reportProgressStatus`がDBキャッシュを同時に更新するため、
   `projects_v2_item` Webhookを受けた`maybeDispatchFromProjectStatus`が`isOwnAppSender`と

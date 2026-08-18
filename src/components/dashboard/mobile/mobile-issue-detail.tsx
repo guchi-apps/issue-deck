@@ -831,12 +831,13 @@ export function MobileIssueDetail({
 
         <IssueAiSummarySection issue={issue} />
 
-        {/* 担当者・ラベル・日付は「変えたいときに触るもの」なので畳んでおく（#1646） */}
+        {/* 進捗・担当者・ラベル・日付は「変えたいときに触るもの」なので畳んでおく（#1646・#1920） */}
         <MobileIssuePropertiesSection
           issue={issue}
           isSubmitting={isSubmitting}
           onToggleLabel={toggleLabel}
           onAssigneeChange={handleAssigneeChange}
+          onIssueUpdated={onIssueUpdated}
         />
 
         <Separator />
