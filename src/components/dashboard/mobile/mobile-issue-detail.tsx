@@ -998,11 +998,12 @@ export function MobileIssueDetail({
         className="left-1/2 bottom-4 -translate-x-1/2"
       />
 
+      {/* z-20は他のモバイル画面の丸ボタンと揃える（#1945）。本文より手前に浮かせる */}
       <button
         type="button"
         onClick={() => onCreateIssue(issue.repositoryFullName)}
         aria-label="新しいIssueを作成"
-        className="absolute right-4 bottom-4 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        className="absolute right-4 bottom-4 z-20 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
       >
         <Plus className="size-6" />
       </button>

@@ -382,8 +382,10 @@ export function MobileIssueListScreen({
 
       {children}
 
-      {/* 下端の絞り込み行（高さ約74px）と重ならない位置へ上げる（#1645） */}
-      <div className="absolute right-4 bottom-22 flex items-center gap-3">
+      {/* 下端の絞り込み行（高さ約74px）と重ならない位置へ上げる（#1645）。
+          z-20は一覧の行より手前に浮かせるため（#1945）。一覧の行は中身の重なり順に
+          z-indexを使っており、指定が無いとスクロール中にこのボタンが行の後ろへ回る */}
+      <div className="absolute right-4 bottom-22 z-20 flex items-center gap-3">
         {onAskCrossRepoQuestion && (
           <button
             type="button"

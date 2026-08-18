@@ -283,9 +283,10 @@ export function MobileHomeScreen({
       {/*
         Issue一覧画面（`mobile-issue-list-screen.tsx`）と**同じ形・同じ順**の丸ボタン（#1690）。
         同じ動作のボタンが画面ごとに違う見た目・違う位置にあると探すことになる。位置だけは違い、
-        あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上
+        あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上。
+        z-20も揃える（#1945）。一覧に重ねたときに行の後ろへ回らないようにするため
       */}
-      <div className="absolute right-4 bottom-4 flex items-center gap-3">
+      <div className="absolute right-4 bottom-4 z-20 flex items-center gap-3">
         <button
           type="button"
           onClick={onAskCrossRepoQuestion}
