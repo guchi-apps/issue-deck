@@ -11,7 +11,6 @@ import {
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
-  formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -19,6 +18,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { autoRefreshIntervalLabel, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   canMergeFromDeck,
@@ -148,7 +148,7 @@ function PullRequestCard({
           <UserAvatar login={pullRequest.authorLogin} className="size-4" />
           {pullRequest.authorLogin}
         </span>
-        <span className="text-xs text-muted-foreground">{formatElapsed(pullRequest.createdAt)}</span>
+        <span className="text-xs text-muted-foreground">{formatRelativeDate(pullRequest.createdAt)}</span>
         <PullRequestRepairButtons
           repositoryFullName={pullRequest.repositoryFullName}
           pullRequestNumber={pullRequest.number}
