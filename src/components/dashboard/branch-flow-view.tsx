@@ -27,6 +27,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
@@ -114,6 +116,20 @@ type BranchFlowViewProps = {
    * 渡されない場合は`onRefresh`だけを呼ぶ（＝再取得が返るまでマージ待ちのまま残る）。
    */
   onMerged?: (pullRequest: PullRequestSummary) => void;
+  /**
+   * 一覧を下へ引っ張ったときに実行する更新（#1958）。**渡した画面でだけ有効になる。**
+   * 引っ張るという操作はタッチにしか無く、PCの画面は渡さないので今までどおり
+   * （Issue一覧の`onPullToRefresh`と同じ扱い。#1893）。
+   */
+  onPullToRefresh?: () => Promise<unknown> | void;
+  /**
+   * ヘッダーの更新ボタンを回転アイコンだけにするか（#1958）。スマホで渡す。
+   *
+   * 引っ張って更新できるようになったぶん「更新」の文字は要らなくなり、その幅を
+   * 見出しと「◯リポジトリ・◯時点」の行へ回す。**押したときの動きと読み上げ用の名前は
+   * 変えない**——引っ張れることに気づいていない人の手段を消さないため。
+   */
+  refreshIconOnly?: boolean;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   /** 見出しの右に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
@@ -1303,6 +1319,8 @@ export function BranchFlowView({
   onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
+  onPullToRefresh,
+  refreshIconOnly = false,
   headerLeading,
   headerActions,
   className,
@@ -1315,6 +1333,19 @@ export function BranchFlowView({
   // 実装予定を全件出しているリポジトリ（#1704）。既定は頭出しの3件までで、押すたびに切り替える
   const [allPlannedRepositories, setAllPlannedRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
+
+  // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
+  // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
+  // 取得の完了は`isRefreshing`で待つ——`onRefresh`（`use-branch-flow.ts`・`use-pull-requests.ts`の
+  // `refresh`）は取り直しのきっかけを作る同期関数で、待っても取得の完了とは無関係に返る
+  const pullContainerRef = useRef<HTMLDivElement>(null);
+  const pullScrollRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh({
+    containerRef: pullContainerRef,
+    scrollRef: pullScrollRef,
+    onRefresh: onPullToRefresh,
+    isRefreshing: isRefreshing ?? isLoading,
+  });
 
   // **取得に失敗したときは読み込み中で止めない**（#1711）。`error`は見出しのすぐ下に出ており、
   // そこへ終わらない「読み込み中」を重ねると、待てば直るものとして読めてしまう。
@@ -1427,14 +1458,21 @@ export function BranchFlowView({
           <Button
             size="sm"
             variant="ghost"
-            className={cn("h-8 shrink-0", onChangeAutoRefreshInterval && "rounded-r-none pr-1.5")}
+            /* アイコンだけにしても読み上げ用の名前は「更新」のまま（#1958） */
+            aria-label="更新"
+            className={cn(
+              "h-8 shrink-0",
+              refreshIconOnly && "px-2",
+              onChangeAutoRefreshInterval && "rounded-r-none pr-1.5",
+            )}
             disabled={isLoading}
             onClick={onRefresh}
           >
             {/* 回転させる条件は`isRefreshing`（自動更新でも回る。#1767）。ボタンを押せなく
                 するのは手動更新のときだけなので、こちらは`isLoading`のまま */}
             <RefreshCw className={cn("size-3.5", (isRefreshing ?? isLoading) && "animate-spin")} />
-            更新
+            {/* スマホは引っ張って更新できるぶん文字を出さない（#1958） */}
+            {!refreshIconOnly && "更新"}
           </Button>
           {onChangeAutoRefreshInterval && (
             <DropdownMenu>
@@ -1471,62 +1509,75 @@ export function BranchFlowView({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain">
-        {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
+      {/* 引っ張って更新（#1958）のタッチを受ける枠。スクロールするのは中の要素で、
+          この枠は動かさない（インジケーターを上端に重ねる基準にもなる） */}
+      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+        <PullToRefreshIndicator pull={pull} />
 
-        {!error && flow.repositories.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isLoading ? "読み込み中..." : "表示できるリポジトリがありません。"}
-          </p>
-        )}
+        <div
+          ref={pullScrollRef}
+          className="flex-1 overflow-y-auto overscroll-contain"
+          style={{
+            transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
+            transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
+          }}
+        >
+          {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 
-        {flow.repositories.map((repository) => {
-          const isOpen = openRepositories.has(repository.repositoryFullName);
-          return (
-            <section key={repository.repositoryFullName}>
-              <RepositorySummaryRow
-                repository={repository}
-                branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
-                mergedPullRequestsLoaded={releasesLoaded}
-                isOpen={isOpen}
-                onToggle={() => toggleRepository(repository.repositoryFullName)}
-              />
-              {isOpen && (
-                <div className="border-b">
-                  <ReleaseFlowGraph
-                    repository={repository}
-                    showClosed={showClosed}
-                    showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
-                    showAllPlannedIssues={allPlannedRepositories.has(
-                      repository.repositoryFullName,
-                    )}
-                    mergedPullRequestsLoaded={releasesLoaded}
-                    onShowAllVersions={() =>
-                      setAllVersionsRepositories(
-                        (prev) => new Set([...prev, repository.repositoryFullName]),
-                      )
-                    }
-                    onToggleAllPlannedIssues={() =>
-                      setAllPlannedRepositories((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(repository.repositoryFullName)) {
-                          next.delete(repository.repositoryFullName);
-                        } else {
-                          next.add(repository.repositoryFullName);
-                        }
-                        return next;
-                      })
-                    }
-                    onRefresh={onRefresh}
-                    onMerged={handleMerged}
-                  />
-                </div>
-              )}
-            </section>
-          );
-        })}
+          {!error && flow.repositories.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {isLoading ? "読み込み中..." : "表示できるリポジトリがありません。"}
+            </p>
+          )}
 
-        {footerSpacing && <div className="h-14" aria-hidden="true" />}
+          {flow.repositories.map((repository) => {
+            const isOpen = openRepositories.has(repository.repositoryFullName);
+            return (
+              <section key={repository.repositoryFullName}>
+                <RepositorySummaryRow
+                  repository={repository}
+                  branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
+                  mergedPullRequestsLoaded={releasesLoaded}
+                  isOpen={isOpen}
+                  onToggle={() => toggleRepository(repository.repositoryFullName)}
+                />
+                {isOpen && (
+                  <div className="border-b">
+                    <ReleaseFlowGraph
+                      repository={repository}
+                      showClosed={showClosed}
+                      showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
+                      showAllPlannedIssues={allPlannedRepositories.has(
+                        repository.repositoryFullName,
+                      )}
+                      mergedPullRequestsLoaded={releasesLoaded}
+                      onShowAllVersions={() =>
+                        setAllVersionsRepositories(
+                          (prev) => new Set([...prev, repository.repositoryFullName]),
+                        )
+                      }
+                      onToggleAllPlannedIssues={() =>
+                        setAllPlannedRepositories((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(repository.repositoryFullName)) {
+                            next.delete(repository.repositoryFullName);
+                          } else {
+                            next.add(repository.repositoryFullName);
+                          }
+                          return next;
+                        })
+                      }
+                      onRefresh={onRefresh}
+                      onMerged={handleMerged}
+                    />
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
+          {footerSpacing && <div className="h-14" aria-hidden="true" />}
+        </div>
       </div>
     </div>
   );

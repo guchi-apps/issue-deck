@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import {
+  MAX_EXTERNAL_REFRESHING_MS,
   PULL_SPINNER_PX,
   PULL_THRESHOLD_PX,
   remainingRefreshingMs,
@@ -18,6 +19,8 @@ import {
 const DIRECTION_LOCK_PX = 10;
 /** 横方向と判定するための優位さ。`use-swipe-back.ts`・`use-swipe-filter-view.ts`と同じ */
 const HORIZONTAL_DOMINANCE_RATIO = 1.5;
+/** 外の取得が終わったかを見に行く間隔（#1958）。取得中フラグはrefで読むため自分で確認する */
+const EXTERNAL_REFRESHING_POLL_MS = 100;
 
 type PullState = {
   startX: number;
@@ -53,6 +56,17 @@ type UsePullToRefreshParams = {
   scrollRef: RefObject<HTMLElement | null>;
   /** 更新の実行。渡さない場合はこのフックは何もしない（PCの一覧） */
   onRefresh?: () => Promise<unknown> | void;
+  /**
+   * 画面が取得中かどうか（#1958）。渡すと、`onRefresh`が返った後もこれが下りるまで
+   * 「更新中…」を保つ。
+   *
+   * **`onRefresh`の完了を待てない画面のためにある。** ブランチ画面の取り直し
+   * （`use-branch-flow.ts`・`use-pull-requests.ts`の`refresh`）は取得のきっかけを作る
+   * 同期関数で、待っても取得の完了とは無関係に返る。そのままだと最短の0.5秒
+   * （`MIN_REFRESHING_MS`）で表示が消え、数秒かかるGitHubからの取得が終わったように見える。
+   * 待ち続けないよう`MAX_EXTERNAL_REFRESHING_MS`で打ち切る。
+   */
+  isRefreshing?: boolean;
 };
 
 /**
@@ -71,6 +85,7 @@ export function usePullToRefresh({
   containerRef,
   scrollRef,
   onRefresh,
+  isRefreshing: externalRefreshing = false,
 }: UsePullToRefreshParams): PullToRefreshHandle {
   const stateRef = useRef<PullState | null>(null);
   const onRefreshRef = useRef(onRefresh);
@@ -80,10 +95,16 @@ export function usePullToRefresh({
   // イベントハンドラの中から今の状態を見るためのミラー。リスナーは張り替えたくないので
   // 依存に入れず、refで読む
   const isRefreshingRef = useRef(false);
+  // 外の取得中フラグ（#1958）も、更新の途中から見るためrefへ写す
+  const externalRefreshingRef = useRef(externalRefreshing);
 
   useEffect(() => {
     onRefreshRef.current = onRefresh;
   }, [onRefresh]);
+
+  useEffect(() => {
+    externalRefreshingRef.current = externalRefreshing;
+  }, [externalRefreshing]);
 
   const enabled = Boolean(onRefresh);
 
@@ -115,6 +136,17 @@ export function usePullToRefresh({
       const remaining = remainingRefreshingMs(Date.now() - startedAt);
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      // 画面が取得中なら、下りるまで「更新中…」のまま待つ（#1958）。**待っている間も
+      // `isRefreshingRef`は真のまま**で、引っ張り直しての二重起動を防ぐ。
+      // 下りないまま`MAX_EXTERNAL_REFRESHING_MS`を過ぎたら表示だけ戻す（取得は止めない）
+      const waitStartedAt = Date.now();
+      while (
+        !cancelled &&
+        externalRefreshingRef.current &&
+        Date.now() - waitStartedAt < MAX_EXTERNAL_REFRESHING_MS
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESHING_POLL_MS));
       }
       isRefreshingRef.current = false;
       if (cancelled) return;
