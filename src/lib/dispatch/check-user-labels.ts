@@ -19,6 +19,12 @@ import { addIssueLabels, fetchRepositoryLabelNames, removeIssueLabel } from "@/l
  * - **理由は常に1枚。** 既に付いている別の理由ラベル（旧名`00.qa-answered`を含む）を外す。
  *   何が付いているかは`addIssueLabels`の戻り値（付与後のラベル一覧）から分かるので、
  *   そのための追加のAPI呼び出しは要らない。
+ *
+ * **付与後のラベル名を返す**（#1855）。呼び出し側（`postSessionPlan`）は「このIssueに
+ * `21.plan-required`が付いているか」で計画レビューを起こすかどうかを決めるが、そのために
+ * GitHubへもう一度問い合わせる必要は無い——ここで既に分かっている。返すのは
+ * `00.check-user`の付与直後の一覧で、**この後に外す理由ラベルは含まれうる**（判定に使うのは
+ * それ以外のラベルなので、区別する必要は無い）。取れなければ`null`。
  */
 export async function addCheckUserWithReason(
   owner: string,
@@ -26,7 +32,7 @@ export async function addCheckUserWithReason(
   issueNumber: number,
   token: string,
   reason: CheckUserReason,
-): Promise<void> {
+): Promise<string[] | null> {
   const currentNames = await addIssueLabels(owner, repo, issueNumber, token, [CHECK_USER_LABEL]);
 
   const reasonLabel = CHECK_USER_REASON_LABELS[reason];
@@ -41,7 +47,7 @@ export async function addCheckUserWithReason(
     // 理由ラベルは補助でしかない。ここで失敗しても`00.check-user`は既に付いており、画面は
     // 従来どおりの推測で動く
     console.error(`[dispatch] ラベル一覧を取得できませんでした（${owner}/${repo}）`, error);
-    return;
+    return currentNames;
   }
 
   if (definedLabels.has(reasonLabel) && !currentNames.includes(reasonLabel)) {
@@ -50,6 +56,7 @@ export async function addCheckUserWithReason(
   for (const stale of staleReasonLabels) {
     await removeIssueLabel(owner, repo, issueNumber, token, stale);
   }
+  return currentNames;
 }
 
 /**

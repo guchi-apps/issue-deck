@@ -111,6 +111,7 @@ function makeHost(): DispatchHostView {
     instructionCapable: true,
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    planReviewCapable: null,
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,

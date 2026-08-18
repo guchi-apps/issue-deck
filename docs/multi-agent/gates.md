@@ -62,17 +62,62 @@ G1は根拠付きの指摘と、承認可否の**推奨**までを出す。承�
 | 入口 | 起動 | プロンプト | 並行状況として入るもの |
 |---|---|---|---|
 | 無人（Actions） | `reusable-issue-dispatch.yml`の`mode=plan`で、計画コメントが投稿された直後に自動 | `.github/prompts/plan-review.md` | developの先端・未マージPR（**ランナーにtmuxが無いためセッションは空**） |
-| ローカル | `scripts/start-reviewer.sh --plan <Issue番号>`（メインPCは`start-reviewer.ps1 -Plan <番号>`）を人が叩く | `scripts/prompts/plan-review-agent.md` | 上に加えて走っているセッションと重なるファイル |
+| ローカル（自動・#1855） | ローカルセッションが計画を投稿した直後に自動（`DispatchJob`の`PLAN_REVIEW`→poller→`scripts/start-plan-review.sh`） | 対象リポジトリの`scripts/prompts/plan-review-agent.md`、無ければ`scripts/prompts/generic-plan-review-agent.md` | 上に加えて走っているセッションと重なるファイル |
+| ローカル（手動） | `scripts/start-reviewer.sh --plan <Issue番号>`（メインPCは`start-reviewer.ps1 -Plan <番号>`）を人が叩く | 同上 | 同上 |
 
-どちらも`scripts/fleet-status.sh`の出力をそのまま差し込む（**新しいLLM呼び出しを増やさずに俯瞰が
-効く**）。Actionsからは`--root "$GITHUB_WORKSPACE"`を渡す。`prompts-ref`経由だとスクリプト自身は
+どれも`scripts/fleet-status.sh`の出力をそのまま差し込む（**新しいLLM呼び出しを増やさずに俯瞰が
+効く**）。差し込み方はローカルの2入口で共有する（`scripts/lib/plan-review-prompt.sh`）。
+Actionsからは`--root "$GITHUB_WORKSPACE"`を渡す。`prompts-ref`経由だとスクリプト自身は
 `.shared-prompts/`（issue-deck側のcheckout）に置かれ、既定のままでは呼び出し元ではなくissue-deckの
 先端を出してしまうため。
 
-**ローカルセッションが出した計画には、無人のG1は自動では走らない。** `11.local`が付いている間、
-無人実行は`mode=skip`になる（読み取り専用の`ask`だけが例外）。ローカル経路でG1を通すには人が
-`--plan`で起こす。計画コメントの投稿を契機に自動で起こす仕組み（`DispatchJob`の新種別＋poller＋
-画面のボタン）は#1855で別途扱う。
+#### ローカル経路の自動起動（#1855）
+
+**`11.local`が付いている間、無人実行は`mode=skip`になる**（読み取り専用の`ask`だけが例外）ため、
+#1218の時点ではローカルセッションの計画に無人のG1が挟まらず、人が`--plan`で起こしたときだけ
+レビューが入っていた。実際には計画を出す経路の多くがローカルで、そこが素通りだと
+「計画が書かれてラベルが付いて承認待ちになるだけ」になる。
+
+契機は**計画コメントの投稿**（`src/lib/dispatch/session-plan.ts`の`postSessionPlan`）。
+横断質問（#1454）・手作業の代行（#1828）と同じジョブキューに`PLAN_REVIEW`として積み、
+サブPCのpollerが払い出す。守っていることは4つ。
+
+- **`21.plan-required`が付いた計画だけを対象にする。** 無人実行のG1（`mode=plan`）と同じ範囲で、
+  ad hocにPlan modeへ入っただけの計画まで拾わない（1本$0.7〜1.5が予定外に増える）。判定に使う
+  ラベルは`00.check-user`を付けたときの戻り値から分かるので、GitHubへの問い合わせは増えない
+- **計画が実際に投稿された回だけ起こす**（無人側の`plan_posted`と同じ条件）。積めなかった場合
+  （pollerが未対応・同じ計画のレビューが動いている）でも計画の投稿は成功として扱う
+- **読むのは対象リポジトリの`origin/develop`のスナップショット**（仕組みは
+  `scripts/lib/question-refs.sh`を横断質問と共有し、**置き場は`.plan-reviews/_refs`へ分ける**）。
+  本体チェックアウトで`git checkout develop`すると、`gh pr checkout`で作業中のG2のブランチを奪い、
+  未コミットの変更があるだけで起動できなくなる。#1583と同じく、参照するコードが古びる問題も
+  同時に避けられる。置き場を分けるのは、**読んでいる最中に足元のコードが変わらないようにする**ため
+  （横断質問のスナップショットは質問が起きるたびに`checkout --force`で貼り替えられる。同じ
+  リポジトリの別の計画レビューが走っている間も貼り替えない）。**cwdはスナップショットそのもの**で、
+  横断質問が中立の空ディレクトリをcwdにしているのとは違う——あちらは視点が偏るのを避けるためで、
+  G1は対象リポジトリの`CLAUDE.md`・`docs/`のルールと計画を突き合わせるのが仕事だから
+- **セッションは`<リポジトリ名>-plan-review-<番号>`で、`claude -p`を1回走らせて畳む。**
+  実装セッション（`<リポジトリ名>-issue-<番号>`）とは名前の形を分ける — pollerのセッション報告・
+  本数の計上・停止／終了の突き合わせはすべて`-issue-`の規約に依存しており、混ぜると
+  **計画レビューを実装セッションと取り違えて畳む**。フック（`session-notify.sh`）も付けない。
+  付けると受付コメントと締めのコメントが二重に出るうえ、承認プロンプトが出た場合に
+  `00.check-user`の理由が`01.check-plan`から`01.check-input`へ書き換わり、その後の`Stop`で
+  **そのIssueの`00.check-user`（＝計画の承認待ち）ごと外れる**
+
+**規約から外したぶん、上限と寿命は自分で持つ**（#1855）。計画レビューのセッションは
+`count_issue_sessions`に数えられず、ジョブもセッションが立った時点で閉じる（枠が即座に空く）
+ため、放っておくと`DISPATCH_MAX_SESSIONS`とは独立に何本でも走る。受けているのは2つ。
+
+- **同時に走る本数の上限**（`DISPATCH_MAX_PLAN_REVIEWS`。既定2）。上限に達している間に届いた
+  レビューは**失敗ではなく見送り**として記録し、画面の「計画をレビュー」から起こし直せる
+- **実行時間の上限**（`ISSUE_DECK_PLAN_REVIEW_TIMEOUT_SECONDS`。既定30分）。フックが飛ばない以上、
+  固まったことに気付く仕組みが無いため、**必ず終わる形にして「畳むのはセッション自身」を成立させる**
+
+許可ツールはActionsのG1と同じ一覧を渡す（`gh pr merge`・`gh pr edit`・`gh issue edit`を含めない）。
+**文面だけでなく、できることの範囲も入口ごとに揃える。**
+
+画面（Issue詳細の承認カード）にも「計画をレビュー」がある。自動で走らなかったとき・指摘を受けて
+計画を直したときに人が押す補助の入口で、押した結果は同じ`PLAN_REVIEW`ジョブになる。
 
 無人側で守っていること。
 

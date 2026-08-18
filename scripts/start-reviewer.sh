@@ -59,6 +59,12 @@ fi
 # セッションの出力言語（#1395）。実装セッション（scripts/run-issue-session.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
 source "$ROOT/scripts/lib/agent-language.sh"
+# 計画レビューのプロンプトの組み立て（#1855）。自動の入口（start-plan-review.sh）と共有する。
+# shellcheck source=scripts/lib/plan-review-prompt.sh
+source "$ROOT/scripts/lib/plan-review-prompt.sh"
+
+# このスクリプトが見るリポジトリ。G2のPR一覧の取得先と、G1のプロンプトへ埋める`{{REPOSITORY}}`。
+REVIEW_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "Error: gh コマンドが見つかりません。" >&2
@@ -92,28 +98,19 @@ if [[ "$MODE" == "plan" ]]; then
   # 計画の関門（G1・#1218）。並行状況スナップショット（#1215）をプロンプトへ差し込む。
   # 直前にdevelopを最新化しているので --no-fetch でよい。
   # **取れなくてもレビュー自体は行う**（俯瞰は材料の1つであって必須ではない）。
+  #
+  # **差し込みは`scripts/lib/plan-review-prompt.sh`と共有する**（#1855）。自動の入口
+  # （`scripts/start-plan-review.sh`）と同じ文面・同じプレースホルダで渡すため。
   echo "並行状況を取得しています..."
   FLEET_STATUS_FILE="$(mktemp)"
-  if ! "$ROOT/scripts/fleet-status.sh" --no-fetch >"$FLEET_STATUS_FILE" 2>/dev/null; then
-    echo "警告: 並行状況スナップショットの取得に失敗しました。その節は空のまま起動します。" >&2
-    echo "（並行状況のスナップショットは取得できませんでした）" >"$FLEET_STATUS_FILE"
-  fi
+  plan_review_fleet_status "$ROOT/scripts/fleet-status.sh" "$ROOT" "$REVIEW_REPO" \
+    >"$FLEET_STATUS_FILE"
   cat "$FLEET_STATUS_FILE"
   echo
 
-  PROMPT_CONTENT="$(python3 - "$PROMPT_TEMPLATE" "$FLEET_STATUS_FILE" "$PLAN_ISSUE" <<'PY'
-import sys
-
-template_path, fleet_path, issue_number = sys.argv[1], sys.argv[2], sys.argv[3]
-
-with open(template_path, encoding="utf-8") as f:
-    template = f.read()
-with open(fleet_path, encoding="utf-8") as f:
-    fleet = f.read().rstrip("\n")
-
-sys.stdout.write(template.replace("{{ISSUE_NUMBER}}", issue_number).replace("{{FLEET_STATUS}}", fleet))
-PY
-)"
+  # 人が起動する入口では、読むのは本体チェックアウト（直前に`git pull`済み）。
+  PROMPT_CONTENT="$(plan_review_render_prompt "$PROMPT_TEMPLATE" "$PLAN_ISSUE" "$REVIEW_REPO" \
+    "$ROOT" "本体チェックアウト・developの最新" "$FLEET_STATUS_FILE")"
 
   echo "Issue #$PLAN_ISSUE の計画レビュー（G1）としてClaude Codeセッションを起動します。"
 else
@@ -121,7 +118,7 @@ else
 # インデントは変えていない。
 echo "未処理PR一覧を取得しています..."
 PR_JSON_FILE="$(mktemp)"
-gh pr list --repo guchi-apps/issue-deck --base develop --json number,title,author,headRefName,mergeable,statusCheckRollup,url >"$PR_JSON_FILE"
+gh pr list --repo "$REVIEW_REPO" --base develop --json number,title,author,headRefName,mergeable,statusCheckRollup,url >"$PR_JSON_FILE"
 
 PR_LIST_FILE="$(mktemp)"
 python3 - "$PR_JSON_FILE" >"$PR_LIST_FILE" <<'PY'

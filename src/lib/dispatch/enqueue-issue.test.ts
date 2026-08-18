@@ -16,6 +16,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     instructionCapable: true,
     crossRepoQuestionCapable: true,
     manualStepCapable: true,
+    planReviewCapable: null,
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,

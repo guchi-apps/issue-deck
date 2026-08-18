@@ -33,6 +33,7 @@ import {
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
+import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -853,6 +854,13 @@ export function IssueDetail({
                 ) : (
                   <LocalSessionApprovalNotice session={issueSession} />
                 )
+              }
+              planReviewAction={
+                /* 計画の承認待ちのときだけ出す（#1855）。**自動起動が主経路**で、ここは
+                   走らなかったとき・計画を直してもう一度かけたいときの入口 */
+                checkUserReason(issue.labels) === "plan" ? (
+                  <PlanReviewButton issue={issue} dispatch={dispatch} />
+                ) : undefined
               }
               sessionWaitingInput={sessionWaitingInput}
               sessionStatePending={sessionStatePending}

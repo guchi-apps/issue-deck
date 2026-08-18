@@ -4,6 +4,8 @@ import {
 } from "@/lib/dispatch/check-user-labels";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
+import { enqueuePlanReviewJob } from "@/lib/dispatch/jobs";
+import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
@@ -108,6 +110,7 @@ export function buildSessionPlanCommentBody(params: {
 
 /**
  * 計画をIssueへ投稿し、`00.check-user`と理由ラベル`01.check-plan`を付ける（#1490）。
+ * 投稿できたら、続けて計画の関門（G1）のセッションを積む（#1855）。
  *
  * **失敗しても例外を投げない。** 呼び出し元はフックからの報告を受けているだけで、失敗しても
  * セッション側にできることは何も無い（`session-notify.sh`は何が起きても`exit 0`で返す）。
@@ -138,7 +141,23 @@ export async function postSessionPlan(params: {
 
     // ラベルは**追加**する。`updateIssue`の`labels`は全置換で、既に付いている
     // `21.plan-required`・`11.local`を巻き込んで落としてしまう
-    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "plan");
+    const labels = await addCheckUserWithReason(
+      parsed.owner,
+      parsed.repo,
+      params.issueNumber,
+      token,
+      "plan",
+    );
+
+    // 計画の関門（G1・#1855）。**計画が実際に投稿された回だけ起こす**（無人側で守っている
+    // のと同じ条件。`.github/workflows/reusable-issue-dispatch.yml`の`plan_posted`）。
+    // 投稿より後に置くのは、ここで何が起きても計画そのものは残るようにするため。
+    await requestPlanReview({
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      hostName: params.hostName,
+      labels,
+    });
     return true;
   } catch (error) {
     console.error(
@@ -146,6 +165,59 @@ export async function postSessionPlan(params: {
       error,
     );
     return false;
+  }
+}
+
+/**
+ * 計画の関門（G1・#1218）のセッションを積む（#1855）。
+ *
+ * **これが無い間、G1が自動で走るのは無人実行（Actions）で計画を出した経路だけだった。**
+ * `11.local`が付いている間、無人実行は`mode=skip`になる（`reusable-issue-dispatch.yml`）ため、
+ * ローカルセッションの計画には人が`scripts/start-reviewer.sh --plan`を叩いたときしか
+ * レビューが入らず、実際に多いローカル経路が素通りしていた
+ * （[docs/multi-agent/gates.md](../../../docs/multi-agent/gates.md)）。
+ *
+ * 積む条件は2つ。
+ *
+ * - **`21.plan-required`が付いていること。** G1が守っているのは「計画を出してから実装へ入る」
+ *   Issueで、そこは無人実行のG1（`mode=plan`）と同じ範囲。ad hocにPlan modeへ入っただけの
+ *   計画まで拾うと、レビュー1本ぶん（$0.7〜1.5）が予定外に増える
+ * - **どのホストのセッションかが分かること。** 起こす先はそのセッションが動いているホストで、
+ *   ジョブの払い出しはホスト単位のため、分からなければ積み先が決まらない
+ *
+ * **積めなくても計画の投稿は成功として扱う。** 呼び出し元はフックの報告を受けているだけで、
+ * ここで失敗を返しても計画が消えるわけではない（人は画面の「計画をレビュー」から起こし直せる）。
+ */
+async function requestPlanReview(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string | null;
+  /** `addCheckUserWithReason`が返した付与後のラベル名。取れなければ`null` */
+  labels: string[] | null;
+}): Promise<void> {
+  if (!params.hostName) return;
+  if (!params.labels?.includes(PLAN_REQUIRED_LABEL)) return;
+
+  try {
+    const result = await enqueuePlanReviewJob({
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      hostName: params.hostName,
+      // 人が押したわけではないので積んだユーザーは残らない（無人実行の起動と同じ扱い）
+      requestedByUserId: null,
+    });
+    if (!result.ok) {
+      // **断られること自体は異常ではない**（pollerが未対応・同じ計画のレビューが既にある）。
+      // 画面のジョブ一覧にも出ないため、ここだけが手掛かりになる
+      console.info(
+        `[dispatch] 計画レビューを積みませんでした（${params.repositoryFullName}#${params.issueNumber}）: ${result.rejection}`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[dispatch] 計画レビューを積めませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
   }
 }
 

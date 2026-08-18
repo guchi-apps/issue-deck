@@ -977,6 +977,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   用意できなかったリポジトリだけ本体へ落として遅れコミット数を参照一覧に出す。
   回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
   そのまま働く。
+  **計画の関門（G1）のセッションも同じキューで流す**（#1855。`kind`は`PLAN_REVIEW`）。
+  積むのは人ではなく**計画コメントの投稿**（`lib/dispatch/session-plan.ts`の`postSessionPlan`）で、
+  この種別だけが自動で積まれる。画面（Issue詳細の承認カード）の「計画をレビュー」は補助の入口
+  （`components/dashboard/plan-review-button.tsx`）。**動いているセッションを理由に断らない**
+  （計画を出したセッションは承認待ちで生きているのが常態）。
   立ったセッションの停止（`C-c`）・終了（`kill-session`）も同じキューを通る（#1332。`DispatchJob.kind`。
   **pollerはセッション名を`repositoryFullName`/`issueNumber`から組み立て直して突き合わせ、
   受け取った名前をtmuxへ渡さない**）。タイムアウトは定期実行を持たず、enqueue・claim・一覧取得のたびに
@@ -1046,12 +1051,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   このスクリプトは`.shared-prompts/`（issue-deck側のcheckout）に置かれるため、既定のままでは
   呼び出し元ではなくissue-deckの先端を出してしまう。
 - **計画の関門（G1）は`.github/prompts/plan-review.md`（無人）と`scripts/prompts/plan-review-agent.md`
-  （ローカル）の兄弟プロンプト**（#1218）。無人は`reusable-issue-dispatch.yml`の`mode=plan`で計画
-  コメントの投稿直後に自動で走り、ローカルは`scripts/start-reviewer.sh --plan <Issue番号>`で人が
-  起こす（引数なしは従来どおり成果物の関門G2）。どちらも`fleet-status.sh`の出力を差し込む。
-  **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある）。
-  `11.local`が付いたローカル計画に無人G1は走らない（#1855で別途扱う）。設計は
-  [multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
+  （ローカル。持たないリポジトリは`scripts/prompts/generic-plan-review-agent.md`）の兄弟プロンプト**
+  （#1218・#1855）。無人は`reusable-issue-dispatch.yml`の`mode=plan`で計画コメントの投稿直後に
+  自動で走る。ローカルは入口が2つで、**計画コメントの投稿を契機に自動**（#1855。
+  `lib/dispatch/session-plan.ts` → `DispatchJob`の`PLAN_REVIEW` → poller →
+  `scripts/start-plan-review.sh`）と、`scripts/start-reviewer.sh --plan <Issue番号>`で人が起こす
+  手動（引数なしは従来どおり成果物の関門G2）。どちらも`fleet-status.sh`の出力を差し込み、
+  差し込み方は`scripts/lib/plan-review-prompt.sh`で共有する。
+  **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある。自動の入口も
+  Actionsと同じ一覧を渡す）。設計は[multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
+- **計画レビューのセッションは`<リポジトリ名>-plan-review-<番号>`で、実装セッションの
+  `-issue-`規約から外す**（#1855）。pollerのセッション報告・本数の計上・停止／終了の突き合わせは
+  すべて`-issue-`に依存しており、混ぜると計画レビューを実装セッションと取り違えて畳む。
+  読むのは対象リポジトリの`origin/develop`のスナップショット（横断質問と同じ
+  `scripts/lib/question-refs.sh`）で、**本体チェックアウトを占有しない**（G2の`gh pr checkout`と
+  衝突しないため）。フックは付けない（`Stop`フックがそのIssueの`00.check-user`＝計画の承認待ちを
+  外してしまうため）。積むのは`21.plan-required`が付いた計画だけ。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

@@ -92,6 +92,7 @@ const {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepJob,
+  enqueuePlanReviewJob,
   enqueueSessionControlJob,
   expireStaleDispatchJobs,
   listDispatchState,
@@ -114,6 +115,8 @@ function host(overrides: Record<string, unknown> = {}) {
     // 横断質問（#1454）に対応したpoller
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    // 計画レビュー（#1855）に対応したpoller
+    planReviewCapable: true,
     maxConcurrency: null,
     ...overrides,
   };
@@ -495,6 +498,84 @@ describe("enqueueCrossRepoQuestionJob", () => {
   });
 });
 
+/**
+ * 計画の関門（G1・#1855）。**計画コメントの投稿を契機に自動で積まれる**ため、
+ * 「実装セッションが動いていても積める」ことがこの種別の要点。
+ */
+describe("enqueuePlanReviewJob", () => {
+  async function enqueuePlanReview() {
+    return enqueuePlanReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1855,
+      hostName: "subpc",
+      requestedByUserId: null,
+      now: NOW,
+    });
+  }
+
+  it("実装セッションが動いていても積める（計画の承認待ちがまさにその状態）", async () => {
+    dispatchSessionFindFirst.mockResolvedValue(
+      aliveSession({ repositoryFullName: REPOSITORY, issueNumber: 1855 }),
+    );
+
+    const result = await enqueuePlanReview();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "PLAN_REVIEW",
+          // 実装ジョブとは名前空間を分ける（同じIssueへ重ねて積めるように）
+          activeKey: "plan_review:guchi-apps/issue-deck#1855",
+        }),
+      }),
+    );
+  });
+
+  it("計画レビューに対応していないpollerへは積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ planReviewCapable: null }));
+
+    const result = await enqueuePlanReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("plan_review_unsupported");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  // 横断質問と違い、対象リポジトリのコードを読むのでcloneが要る
+  it("そのホストで実行できないリポジトリには積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ repositories: "[]" }));
+
+    const result = await enqueuePlanReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("repository_not_runnable");
+  });
+
+  it("申告が届いていないホストには積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(null);
+
+    const result = await enqueuePlanReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("host_unknown");
+  });
+
+  // activeKeyのunique制約が二重投入を止める（計画を出し直したときの重複起動もここで止まる）
+  it("未処理の計画レビューがあれば積まない", async () => {
+    dispatchJobCreate.mockRejectedValue(new Error("unique"));
+
+    const result = await enqueuePlanReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("already_queued");
+  });
+});
+
 describe("claimDispatchJobs の制御ジョブ", () => {
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -612,7 +693,9 @@ describe("claimDispatchJobs の制御ジョブ", () => {
 
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] } }),
+        where: expect.objectContaining({
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
+        }),
       }),
     );
   });
@@ -626,7 +709,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: "QUEUED",
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
         }),
       }),
     );
@@ -635,7 +718,10 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     dispatchJobFindMany.mockResolvedValue([]);
     dispatchJobCount.mockResolvedValue(0);
     appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
-    dispatchHostFindUnique.mockResolvedValue(host({ crossRepoQuestionCapable: null }));
+    // 横断質問も計画レビューも申告していない古いpoller（#1855で同じ向きの申告が増えた）
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ crossRepoQuestionCapable: null, planReviewCapable: null }),
+    );
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
     expect(dispatchJobFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -659,7 +745,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
             JSON.stringify(kinds),
         )?.orderBy;
 
-    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION"])).toEqual([
+    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"])).toEqual([
       { queuePriority: "desc" },
       { createdAt: "asc" },
     ]);
@@ -775,6 +861,30 @@ describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
 
   it("セッションが無ければ従来どおりTIMEOUTにする", async () => {
     dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
+    );
+  });
+
+  /**
+   * #1855。計画レビューのセッションは`-issue-`の規約から外れているためpollerが報告せず、
+   * `DispatchSession`の行にならない。ここで救済の対象にすると、代わりに**同じIssueの
+   * 実装セッション**（計画の承認待ちで生きている）に一致し、届かなかったレビューを
+   * 「起動できていた」ことにしてしまう。
+   */
+  it("計画レビューは、同じIssueの実装セッションで救済しない", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ kind: "PLAN_REVIEW" })]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
 
     await expireStaleDispatchJobs(NOW);
 
@@ -1405,7 +1515,9 @@ describe("claimDispatchJobs の代行実行", () => {
     // 枠（同時実行数）を数える対象には入れない
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION"] } }),
+        where: expect.objectContaining({
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
+        }),
       }),
     );
   });

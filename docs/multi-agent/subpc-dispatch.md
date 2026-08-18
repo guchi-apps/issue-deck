@@ -695,6 +695,51 @@ Statusが`Ready`のため、除外しないと「次にどれへ着手させる�
 （`71.manual-step`を専用ビューへ寄せたのと同じ理由、#1240）。**closeが完了の合図**なので、
 質問ビューはstate=openのまま件数を出す。
 
+### 計画レビュー（G1）のセッション（#1855）
+
+ローカルセッションが計画を投稿した直後に、計画の関門（G1・#1218）を自動で通すためのジョブ。
+**人が押さなくても積まれる唯一の種別**で、そこが横断質問（#1454）・手作業の代行（#1828）との
+いちばんの違いになる。設計の理由は[gates.md](gates.md)「ローカル経路の自動起動（#1855）」が正で、
+ここにはディスパッチの仕組みとして押さえる点だけを書く。
+
+```text
+ローカルセッションが ExitPlanMode（フック → POST /api/dispatch/sessions/plan）
+  ↓ 計画コメントを投稿し、00.check-user＋01.check-plan を付ける
+  ↓ 21.plan-required が付いていれば enqueuePlanReviewJob（kind=PLAN_REVIEW）
+（キュー: DispatchJob）
+  ↑ claim（planReviewCapable を申告したホストにだけ払い出す）
+scripts/subpc-dispatch-poller.sh
+  ↓ scripts/start-plan-review.sh <owner> <repo> <番号>
+tmuxセッション <リポジトリ名>-plan-review-<番号> → 指摘はIssueコメントとして返り、セッションは自分で畳む
+```
+
+- **セッションを立てる枠（`SESSION_LAUNCH_JOB_KINDS`）に入る。** tmuxセッションを立てるので、
+  同時実行数の計算にも画面の実行キューにも数える（#1544と同じ揃え方）
+- **`activeKey`は`plan_review:owner/repo#番号`。** 実装ジョブとは名前空間を分けるので、
+  実装セッションが動いているIssueにも積める。同じIssueへ重ねて積むのは`QUEUED`〜`RUNNING`の
+  1件までで、計画を出し直したときの重複起動はここで止まる
+- **「そのIssueのセッションが動いている」ことを理由に断らない**（`enqueueDispatchJob`・
+  `enqueueCrossRepoQuestionJob`との決定的な違い）。計画を出したセッションは承認待ちで生きているのが
+  常態で、そこで弾くと自動起動が常に断られる
+- **重複起動のガードに使うセッション名も別**（`plan_review_session_name`）。実装セッションの名前で
+  見ると、計画を出したセッションが動いている間はレビューが必ず「起動済みのため見送り」になる
+- **`report_sessions`・`count_issue_sessions`は拾わない。** どちらも`<リポジトリ名>-issue-<番号>`に
+  一致するものだけを見るため、計画レビューのセッションは`DispatchSession`の行にならず、
+  停止／終了（#1332）の対象にもならない。**畳むのはセッション自身**（`claude -p`が終われば消える）で、
+  自動回収（#1256）の判定には載せない
+- **そのぶん、本数と寿命は自分で持つ。** `DISPATCH_MAX_SESSIONS`の計上から外れ、ジョブも
+  セッションが立った時点で閉じる（枠が即座に空く）ため、何も見ないと同時に何本でも走る。
+  pollerは払い出しの直前に`count_plan_review_sessions`で数え、`DISPATCH_MAX_PLAN_REVIEWS`
+  （既定2）に達していれば**失敗ではなく見送り**として報告する。固まった場合に備えて、
+  ランチャーは`claude -p`に実行時間の上限（既定30分）を被せる
+- **参照スナップショットの置き場は横断質問と分ける**（`.plan-reviews/_refs`）。あちらは質問が
+  起きるたびに`checkout --force --detach`で貼り替えるため、共有するとレビューの最中に足元の
+  コードが変わる（`plan-base`のSHAとの突き合わせという、G1の中心的な作業の根拠が壊れる）。
+  同じリポジトリの別の計画レビューが走っている間も貼り替えず、そのまま読む
+- 失敗したときだけ`remain-on-exit failed`でペインが残る。次に同じIssueのレビューを起こしたとき、
+  ランチャーが最後の出力を表示してから畳む（横断質問と同じ扱い）。出力は
+  `~/apps/issue-deck-worktrees/.plan-reviews/<リポジトリ名>-<番号>.log`にも残る
+
 ### 開発サーバーの回収も1巡に相乗りさせる（#1223）
 
 pollerは1巡ごとに`scripts/reap-dev-servers.sh`を呼び、**セッションが畳まれても残った開発サーバー

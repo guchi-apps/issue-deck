@@ -348,6 +348,10 @@ enum DispatchJobStatus {
 // 投稿するジョブ。**activeKeyを取らない**（下記`activeKey`のコメント参照）。
 // **まだ積む経路も払い出し口も無い**（器だけを先に入れている）。実行はStep 3（別Issue）で、
 // poller側の対応申告とセットで開ける。
+// PLAN_REVIEW（#1855）は計画の関門（G1・#1218）のセッションを立てるジョブ。CROSS_REPO_QUESTIONと
+// 同じく「セッションを立てる」側で、worktreeは作らず対象リポジトリの`origin/develop`の
+// スナップショットを読むだけ。**実装セッションが承認待ちで生きている最中に走るのが常態**なので、
+// 起動ジョブと違って「そのIssueのセッションが動いている」ことを理由に弾かない。
 enum DispatchJobKind {
   LAUNCH
   INTERRUPT
@@ -356,6 +360,7 @@ enum DispatchJobKind {
   INSTRUCTION
   CROSS_REPO_QUESTION
   MANUAL_STEP
+  PLAN_REVIEW
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -513,6 +518,13 @@ model DispatchHost {
   // こちらは**シェルでコマンドを実行する**。対応していないpollerへ配ると未知の種別として`failed`に
   // なるだけだが、そもそも配ってよいホストかどうかの意味が違う
   manualStepCapable Boolean?
+  // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
+  // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
+  // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。
+  //
+  // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
+  // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
+  planReviewCapable Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。

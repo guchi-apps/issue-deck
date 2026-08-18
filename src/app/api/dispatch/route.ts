@@ -12,6 +12,7 @@ import {
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepJob,
+  enqueuePlanReviewJob,
   enqueueSessionControlJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
@@ -58,6 +59,9 @@ export async function GET() {
  * 対応の申告（`crossRepoQuestion`）が揃っており、申告のあるホストにしか払い出さない。
  * `manual_step`（#1828）も受け付ける。**画面から届いたコマンド文字列は照合にしか使わず**、
  * 実行するのはサーバーが手作業Issueの本文から抽出し直したもの。
+ * `plan_review`（#1855）も受け付ける。**こちらの主経路は自動起動**（計画コメントの投稿を契機に
+ * `postSessionPlan`が積む）で、ここは自動で走らなかったとき・計画を直してもう一度かけたいときに
+ * 人が押す入口。
  */
 export async function POST(request: NextRequest) {
   const guarded = previewModeGuard();
@@ -139,6 +143,29 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(
       { ok: true, job: manualStepResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // 計画レビュー（G1・#1855）。**動いているセッションでは弾かない**（計画を出したセッションは
+  // 承認待ちで生きているのが常態）ので、`enqueueDispatchJob`とは別の関数へ振る。
+  // ここは人が押したときの経路で、自動起動（計画コメントの投稿）は`postSessionPlan`が直接積む
+  if (kind === "PLAN_REVIEW") {
+    const planReviewResult = await enqueuePlanReviewJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      requestedByUserId: userId,
+    });
+    if (!planReviewResult.ok) {
+      const status = planReviewResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: planReviewResult.rejection, message: planReviewResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: planReviewResult.job },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
