@@ -1,5 +1,6 @@
 import { buildPullRequestId } from "@/lib/github-reference";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
+import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
 import { classifyPullRequest, extractLinkedIssueNumbers } from "@/lib/pull-request-list";
@@ -20,6 +21,9 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * #1490）も呼び出し側が渡す。DBキャッシュを引く処理で、一覧は全リポジトリぶんをまとめて
  * 1クエリ・詳細は1件だけと引き方が違うため（`src/lib/pull-request-check-user.ts`）。
  * 省略した場合は`false` / `null`（付いていない・理由が読めない扱い）。
+ *
+ * 自動修復ワークフローの配布状況（`repairWorkflowAvailability`。#1960）も同じく呼び出し側が
+ * 渡す。**修復ボタンを出すPRでしか判定しない**ため、いつ問い合わせるかは経路ごとに違う。
  */
 export function toPullRequestSummary(
   pullRequest: GithubApiOpenPullRequest,
@@ -31,6 +35,8 @@ export function toPullRequestSummary(
     mergeable?: boolean | null;
     linkedIssueCheckUser?: boolean;
     linkedIssueCheckReason?: CheckUserReason | null;
+    /** 修復ワークフローの配布状況。判定していない経路では省略＝`{}`（押せる扱い） */
+    repairWorkflowAvailability?: RepairWorkflowAvailability;
   },
 ): PullRequestSummary {
   const baseRef = pullRequest.base.ref;
@@ -65,6 +71,7 @@ export function toPullRequestSummary(
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
     mergeable: options.mergeable ?? null,
+    repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     createdAt: pullRequest.created_at,
     updatedAt: pullRequest.updated_at,
   };

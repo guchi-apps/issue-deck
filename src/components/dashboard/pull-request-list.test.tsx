@@ -30,6 +30,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckReason: null,
     ciState: "success",
     mergeable: null,
+    repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -147,6 +148,59 @@ describe("PullRequestList", () => {
   it("CI失敗のPRには自動修正ボタンを出す（#1293）", () => {
     renderList([makePullRequest({ ciState: "failure" })]);
     expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).toBeTruthy();
+  });
+
+  // 自動修復ワークフローが配られていないリポジトリでは、押しても404で起動しない（#1960）。
+  // ボタンは消さず、押せなくしたうえで理由と配り先を添える。
+  it("自動修復ワークフローが未配布なら修復ボタンを押せなくして理由を添える（#1960）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairWorkflowAvailability: { ci: false, conflict: false },
+      }),
+    ]);
+
+    const ciButton = screen.getByRole("button", { name: "CI失敗を自動修正" });
+    const conflictButton = screen.getByRole("button", { name: "コンフリクトを自動解消" });
+    expect(ciButton.hasAttribute("disabled")).toBe(true);
+    expect(conflictButton.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(
+        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("片方だけ未配布ならその種類だけ押せなくする（#1960）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairWorkflowAvailability: { ci: true, conflict: false },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(
+      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen.getByText(
+        "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("配布状況を判定していないPRは従来どおり押せる（#1960）", () => {
+    renderList([makePullRequest({ ciState: "failure", repairWorkflowAvailability: {} })]);
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(screen.queryByText(/未配布/)).toBeNull();
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {

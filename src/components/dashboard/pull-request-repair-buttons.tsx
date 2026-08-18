@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitMerge, Wrench } from "lucide-react";
+import { GitMerge, Info, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
@@ -17,9 +17,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { usePullRequestRepairMutation } from "@/hooks/use-pull-request-repair-mutation";
 import {
+  isRepairWorkflowMissing,
   REPAIR_KIND_DESCRIPTION,
   REPAIR_KIND_LABEL,
+  repairUnavailableNotice,
   type RepairKind,
+  type RepairWorkflowAvailability,
 } from "@/lib/github/pull-request-repair";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +31,11 @@ type PullRequestRepairButtonsProps = {
   pullRequestNumber: number;
   /** 出す修復ボタンの種類（`repairKindsFor`の結果）。空なら何も描かない */
   kinds: RepairKind[];
+  /**
+   * 起動先ワークフローが対象リポジトリに配られているか（#1960）。`false`の種類は押せなくする。
+   * 判定していない経路では省略してよく、その場合は従来どおり全部押せる。
+   */
+  availability?: RepairWorkflowAvailability;
   className?: string;
 };
 
@@ -46,17 +54,24 @@ const KIND_ICON: Record<RepairKind, typeof Wrench> = {
  *
  * 起動は非同期でワークフローが走り始めるだけなので、完了はPRのコメントで受け取る。
  * ここでは「起動した」ことだけを画面に残す。
+ *
+ * **起動先のワークフローが配られていないリポジトリでは、ボタンを消さずに押せなくする**
+ * （#1960。#1948の計画時点でユーザーと合意した方針）。消してしまうと「配れば使える」ことが
+ * 画面から分からなくなるため、無効化したうえで理由と配り先（設定＞フリート運用）を添える。
  */
 export function PullRequestRepairButtons({
   repositoryFullName,
   pullRequestNumber,
   kinds,
+  availability,
   className,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
   const [confirmKind, setConfirmKind] = useState<RepairKind | null>(null);
   const [startedKind, setStartedKind] = useState<RepairKind | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
+  // 未配布の種類があるときだけ、理由と配り先を1行で添える（無ければnull）。
+  const unavailableNotice = repairUnavailableNotice(kinds, availability);
 
   if (kinds.length === 0) return null;
 
@@ -77,13 +92,17 @@ export function PullRequestRepairButtons({
       ) : (
         kinds.map((kind) => {
           const Icon = KIND_ICON[kind];
+          const missing = isRepairWorkflowMissing(availability, kind);
           return (
             <Button
               key={kind}
               size="sm"
               variant="outline"
               className="h-7 shrink-0"
-              disabled={isSubmitting}
+              disabled={isSubmitting || missing}
+              // 無効化の理由はホバーできない端末にも要るため下の一文でも出すが、
+              // マウスで触ったときにその場で読めるようtitleにも同じ趣旨を持たせる。
+              title={missing && unavailableNotice ? unavailableNotice : undefined}
               onClick={() => {
                 setError(null);
                 setConfirmKind(kind);
@@ -94,6 +113,12 @@ export function PullRequestRepairButtons({
             </Button>
           );
         })
+      )}
+      {!startedKind && unavailableNotice && (
+        <p className="flex w-full min-w-0 items-start gap-1 text-xs text-muted-foreground">
+          <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+          <span>{unavailableNotice}</span>
+        </p>
       )}
       {error && !confirmKind && <span className="text-xs text-destructive">{error}</span>}
 

@@ -101,6 +101,51 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   conflict: "コンフリクトを自動解消",
 };
 
+/** 未配布を説明するときに使う、修復の種類の呼び方（#1960） */
+const REPAIR_KIND_WORKFLOW_LABEL: Record<RepairKind, string> = {
+  ci: "CI失敗修正",
+  conflict: "コンフリクト解消",
+};
+
+/**
+ * 修復の種類ごとの、起動先ワークフローの配布状況（#1960）。
+ *
+ * **キーが無い種類は「判定していない」＝押せる扱い**にする。判定するのはボタンを出すPR
+ * （`repairKindsFor`が空でない）だけで、判定そのものに失敗した場合も押せるままにするため
+ * （無効化の誤爆でユーザーの手を止める方が損失が大きい。押した先の404は
+ * `POST /api/pull-requests/repair`が専用文言へ置き換える）。
+ */
+export type RepairWorkflowAvailability = Partial<Record<RepairKind, boolean>>;
+
+/** その種類の修復ワークフローが未配布と分かっているか */
+export function isRepairWorkflowMissing(
+  availability: RepairWorkflowAvailability | undefined,
+  kind: RepairKind,
+): boolean {
+  return availability?.[kind] === false;
+}
+
+/**
+ * 未配布のためにボタンを押せなくする理由の文（#1960）。押せる種類しか無ければ`null`。
+ *
+ * 出している種類が全部未配布なら「自動修復ワークフロー」とまとめ、一部だけなら
+ * どちらが無いのかを名指しする。**配り先（設定＞フリート運用。#1948）まで書く**——
+ * 「押せない」とだけ言われても、次に何をすればよいかが画面から分からないため。
+ */
+export function repairUnavailableNotice(
+  kinds: RepairKind[],
+  availability: RepairWorkflowAvailability | undefined,
+): string | null {
+  const missing = kinds.filter((kind) => isRepairWorkflowMissing(availability, kind));
+  if (missing.length === 0) return null;
+
+  const subject =
+    missing.length === kinds.length
+      ? "自動修復ワークフロー"
+      : `${missing.map((kind) => REPAIR_KIND_WORKFLOW_LABEL[kind]).join("・")}のワークフロー`;
+  return `${subject}が未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。`;
+}
+
 /** 確認ダイアログで「何が起きるか」を説明する文 */
 export const REPAIR_KIND_DESCRIPTION: Record<RepairKind, string> = {
   ci: "失敗したCIのログをClaude Codeが読んで原因を修正し、検証したうえでpushします。",
