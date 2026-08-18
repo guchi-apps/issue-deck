@@ -1,0 +1,96 @@
+name: Propagate repair workflows
+
+# 自動修復のcaller（claude-conflict-resolve.yml・claude-ci-fix.yml・claude-pr-repair.yml）が
+# 置かれていないリポジトリへ、それを追加するPRを作成する（#1948）。
+#
+# **なぜ要るか。** issue-deckの画面の「コンフリクトを自動解消」「CI失敗を自動修正」は、
+# 対象リポジトリのcallerをworkflow_dispatchで起動する。callerが無いリポジトリでは押しても
+# 404で何も起きず、押すまでそれが分からない。実測ではフリートのうち3リポジトリしか
+# 持っていなかった（issue-deck・dayspan・shopping-list）。
+#
+# **タグ配布（propagate-workflow-tag.yml）とは別の操作。** あちらは既存callerの
+# `@workflows/vN`をsedで置換するもので、こちらは新しいcallerを雛形から作って追加する。
+# 自動マージの例外（#1602）は前者にのみ適用されるため、**ここで作るPRは自動マージしない。**
+#
+# **対象は呼び出し元（issue-deckの画面）が決めて渡す。** ここで再検知すると、画面の表示と
+# 実際の対象がずれる。
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: '配布先のJSON配列（例: [{"repository":"guchi-apps/aide","workflows":["claude-ci-fix.yml"]}]）'
+        required: true
+        type: string
+
+concurrency:
+  # 同じリポジトリへ二重にPRを作りうる
+  group: propagate-repair-workflows
+  cancel-in-progress: false
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # 配布処理（.github/scripts/propagate-repair-workflows.sh）と雛形
+        # （.github/templates/repair-callers/）を使うため、このジョブ自身のチェックアウトが要る。
+        uses: actions/checkout@v4
+
+      - name: 入力を検証する
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$TARGETS" | jq -e 'type == "array" and length > 0' >/dev/null; then
+            echo "::error::targets は空でないJSON配列である必要があります"
+            exit 1
+          fi
+
+          # owner/repo 以外を弾く。ここを緩めるとgh apiの宛先を任意に指定できてしまう
+          if ! printf '%s' "$TARGETS" \
+            | jq -e 'all(.repository | test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))' >/dev/null; then
+            echo "::error::targets に owner/repo 形式でない repository が含まれています"
+            exit 1
+          fi
+
+          # 配れるのは自動修復の3種だけ。ここを緩めると任意のファイル名を作りにいける
+          if ! printf '%s' "$TARGETS" | jq -e '
+            all(.workflows | type == "array" and length > 0
+                and all(. == "claude-ci-fix.yml"
+                        or . == "claude-conflict-resolve.yml"
+                        or . == "claude-pr-repair.yml"))' >/dev/null; then
+            echo "::error::workflows に配布対象外のファイル名が含まれています"
+            exit 1
+          fi
+
+      - name: 各リポジトリへPRを作成する
+        env:
+          # 他リポジトリの .github/workflows/ を変更するため、workflow権限を持つPATが要る
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          TARGETS: ${{ inputs.targets }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          git config --global user.name "Claude Code"
+          git config --global user.email "claude-code@example.com"
+
+          FAILED=0
+          while read -r REPO WORKFLOWS; do
+            echo "::group::$REPO"
+
+            # 1リポジトリの失敗で全体を止めない。残りは配れるほうがよい
+            if ! bash .github/scripts/propagate-repair-workflows.sh \
+              "$REPO" "$WORKFLOWS" "$SOURCE_REPOSITORY"; then
+              echo "::warning::$REPO への配布に失敗しました"
+              FAILED=$((FAILED + 1))
+            fi
+
+            echo "::endgroup::"
+          done < <(printf '%s' "$TARGETS" | jq -r '.[] | "\(.repository) \(.workflows | join(" "))"')
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED 件のリポジトリで失敗しました"
+            exit 1
+          fi
