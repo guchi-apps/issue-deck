@@ -16,14 +16,18 @@ import { isReleaseTriggerPending } from "@/lib/release-trigger-guard";
  * 判定と記録をそこから配る。
  *
  * 経過で自動的に「起動中」を抜けるよう、時刻は`useNow`で定期的に取り直す
- * （描画中に`Date.now()`を呼ばないため）。
+ * （描画中に`Date.now()`を呼ばないため）。**取り直すのは起動時刻が入っている間だけ**にする——
+ * この画面は畳んでいるぶんも含めてリポジトリ全件でこのhookを持つため、既定のまま呼ぶと
+ * 起動していない普段の状態でも全件でタイマーが回り続ける（#1955の計画レビュー指摘2）。
  */
 export function useReleaseTriggerPending(repositoryFullName: string) {
   const [triggeredAt, setTriggeredAt] = usePersistedState<string | null>(
     `issue-deck:release-triggered-at:${repositoryFullName}`,
     null,
   );
-  const now = useNow(30_000);
+  // **起動していない間はタイマーを張らない。** この画面はリポジトリの数だけこのhookを
+  // 常時マウントするため、既定のまま呼ぶと普段から全件で30秒ごとの再描画が走る。
+  const now = useNow(30_000, triggeredAt !== null);
 
   const markTriggered = useCallback(() => {
     setTriggeredAt(new Date().toISOString());
