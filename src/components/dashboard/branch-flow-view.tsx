@@ -1239,10 +1239,13 @@ function RepositorySummaryRow({
 }
 
 /**
- * 手を動かす必要があるリポジトリか。既定で開く条件でもある（#1510）。
+ * 手を動かす必要があるリポジトリか。ヘッダーの「手が要るもの◯件」に数える（#1510）。
+ *
+ * **開く条件ではない**（#1932）。初回に自動で開く動きはやめたので、この判定が変える表示は
+ * ヘッダーの件数だけで、開くかどうかはユーザーが決める。
  *
  * **デプロイ中も含める**（#1579）。押す操作は無いが、mainへマージしてから本番へ出るまでの間は
- * 「今どこまで来ているか」を見に来る時間そのもので、畳んだままだと見に来た意味が無い。
+ * 「今どこまで来ているか」を見に来る時間そのもので、件数から漏らすと見に来る手掛かりが無い。
  */
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
@@ -1258,7 +1261,8 @@ function needsAttention(repository: BranchFlowRepository): boolean {
  *
  * **既定は全リポジトリを1行に畳む**（#1510）。8リポジトリを扱う画面なのに1画面へ2件しか
  * 入らず、動きの無いリポジトリまでフルサイズで「何も無い」と言っていたため。
- * 手が要るもの（CI失敗・ユーザーのマージ待ち・リリース中）だけを初回に開く。
+ * **開いた直後は自動で展開しない**（#1932）。手が要るもの（CI失敗・ユーザーのマージ待ち・
+ * リリース中）を初回に開く動きは、初期表示が縦に伸びるためやめた。
  *
  * 展開した中身は`ReleaseFlowGraph`が持つ。組み立ては`lib/branch-flow.ts`の純粋関数が行い、
  * この層は描画だけを持つ。
@@ -1287,9 +1291,6 @@ export function BranchFlowView({
   const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
   // 実装予定を全件出しているリポジトリ（#1704）。既定は頭出しの3件までで、押すたびに切り替える
   const [allPlannedRepositories, setAllPlannedRepositories] = useState<Set<string>>(new Set());
-  // 初回に一度だけ自動で開く。以降の再取得でユーザーの開閉を上書きしない
-  const autoOpenedRef = useRef(false);
-
   const attentionRepositories = flow.repositories.filter(needsAttention);
 
   // **取得に失敗したときは読み込み中で止めない**（#1711）。`error`は見出しのすぐ下に出ており、
@@ -1297,17 +1298,11 @@ export function BranchFlowView({
   // 失敗しているときは従来どおりの表示（＝取れた範囲で描く）に戻す。
   const releasesLoaded = mergedPullRequestsLoaded || error !== null;
 
-  // **マージ済みのPRが揃うまで判定を確定させない**（#1711）。手が要るかどうかはPRの状態で決まる
-  // ので、母集団が`open`のままの一瞬で確定させると、CI失敗もリリース中も無いことになり
-  // 1件も開かないまま終わる。
-  useEffect(() => {
-    if (autoOpenedRef.current || flow.repositories.length === 0 || !releasesLoaded) return;
-    autoOpenedRef.current = true;
-    const attention = flow.repositories.filter(needsAttention).map((repo) => repo.repositoryFullName);
-    // 絞り込みで開いたぶんを消さないよう合流させる（#1750）。この効果は必ず1回しか走らないが、
-    // 選択を反映する下の効果とはどちらが先に走るか決まっていない。
-    setOpenRepositories((prev) => new Set([...prev, ...attention]));
-  }, [flow.repositories, releasesLoaded]);
+  // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
+  // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
+  // 初期表示が縦に伸び、全リポジトリを1行に畳んで俯瞰する画面の趣旨と食い違っていた。
+  // 手が要ることはヘッダーの「手が要るもの◯件」と畳んだ行のバッジが伝えるので、
+  // 開くかどうかはユーザーが決める（行のクリック・「すべて開く」）。
 
   // 左メニューで選択中のリポジトリを開いた状態にする（#1750）。**開く向きにしか働かせない**——
   // 選択が外れたときに畳むと、見ていたリポジトリが勝手に閉じる。手で開閉したぶんも残す。
