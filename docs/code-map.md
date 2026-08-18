@@ -67,6 +67,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
   以前のように本文ごと`<button>`で包むと、その中にリンクを置けない——不正なHTMLになるうえ、
   押すとIssueの選択まで走る。枠線・選択ハイライト・ホバーは`<li>`側に付いている。
+  - **その行のRemote Controlのボタンを強調するかの判定は
+    [`lib/remote-control-attention.ts`](../src/lib/remote-control-attention.ts)の
+    `shouldEmphasizeRemoteControl`だけが持つ**（#1964。`question-attention.ts`・
+    `manual-step-attention.ts`と同じ形）。**ボタンを出す条件（`summarizeIssueSession`の
+    `remoteControlUrl`）とは別物**なので、ボタンの側で両方を組み立てない。中身は
+    `isSessionWaitingInput`と`checkUserReason`・`isSessionRemovableCheckUserReason`を
+    合成するだけで、条件を書き下ろさない——入力待ちは`ALIVE`のときだけ、理由は
+    `00.check-user`とのANDでしか読まない、という既存の担保を二重に持たないため。
+    **強調は枠線と文字のamberだけで、中は塗らない**（同じ形の行が縦に続く一覧では、
+    塗りつぶしたボタンが1つあるだけで視線を奪う）。色は右上のバッジ
+    （`WorkflowStepBadge`）の確認待ちと同じamberを使い、同じ行の中で同じ意味に別の色を当てない。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも

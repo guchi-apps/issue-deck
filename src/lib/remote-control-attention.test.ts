@@ -85,6 +85,16 @@ describe("shouldEmphasizeRemoteControl", () => {
     ).toBe(true);
   });
 
+  // 読むだけの状態で、片付ける場所はコメント欄の「確認待ちを外す」
+  it("理由が01.check-answeredなら強調しない", () => {
+    expect(
+      shouldEmphasizeRemoteControl({
+        labels: labels("00.check-user", "01.check-answered", "11.local"),
+        session: session(),
+      }),
+    ).toBe(false);
+  });
+
   // 理由ラベルが配られていないリポジトリ。何を待っているかは読めないが、待っているのは確か
   it("理由ラベルが無い00.check-userでも強調する", () => {
     expect(

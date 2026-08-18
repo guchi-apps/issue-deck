@@ -1,6 +1,10 @@
 import { isSessionWaitingInput } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { checkUserReason, isApprovalPending } from "@/lib/github/approval-labels";
+import {
+  checkUserReason,
+  isApprovalPending,
+  isSessionRemovableCheckUserReason,
+} from "@/lib/github/approval-labels";
 import type { IssueLabel } from "@/types/issue";
 
 /**
@@ -28,7 +32,12 @@ export function shouldEmphasizeRemoteControl({
   // セッションが質問・承認プロンプトの前で止まっている。答える先はRemote Controlしかない
   if (isSessionWaitingInput(session)) return true;
   if (!isApprovalPending(labels)) return false;
-  // マージはGitHub側の操作で、画面の対応PRから実行できる（`resolveCheckUserGuidance`が
-  // 入力待ちでもmergeだけ別扱いにしているのと同じ理由）。Remote Controlの出番ではない
-  return checkUserReason(labels) !== "merge";
+  // **理由がセッション自身の付けたものであるときだけ強調する。** `01.check-merge`（レビュー・
+  // 統合が付ける）は画面の対応PRから、`01.check-answered`（無人実行が付ける）はコメント欄の
+  // 「確認待ちを外す」から片付くもので、どちらもRemote Controlの出番ではない。集合は
+  // `isSessionRemovableCheckUserReason`（#1905）を借りる——**セッションが付けた理由なら、
+  // 待っているのもそのセッション**なので、フックが外してよい理由と答える先は一致する。
+  // 理由ラベルが配られていないリポジトリでは`null`になり、そこでは強調する側に倒す（何を
+  // 待っているかは読めないが、`00.check-user`が付いている以上待っているのは確かなため）。
+  return isSessionRemovableCheckUserReason(checkUserReason(labels));
 }
