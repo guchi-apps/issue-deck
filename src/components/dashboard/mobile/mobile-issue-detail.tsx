@@ -86,9 +86,11 @@ import {
   approveCommentBody,
   canCompleteManualStep,
   checkUserReason,
+  dismissCheckUserCommentBody,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
+  labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
   requestContinuationCommentBody,
@@ -247,6 +249,8 @@ export function MobileIssueDetail({
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
+  // 生きているセッションかどうか（#1903。PCのIssue詳細と同じ）
+  const sessionAlive = issueSession?.state === "ALIVE";
   // セッションの一覧が届くまでは、確認待ちの案内も承認欄も形を決めない（#1810。#1666と同じ理由）。
   // 取得前の`sessions`は`[]`なので`sessionWaitingInput`は必ずfalseになり、承認欄へ送る案内を
   // 出してからRemote Controlの案内へ書き換わっていた
@@ -318,6 +322,9 @@ export function MobileIssueDetail({
     reason: checkUserReason(issue.labels),
     placement: "status",
     sessionWaitingInput,
+    // ローカルが担当しているIssueでは「内容がエージェントへ渡ります」と案内しない（#1903）
+    localSession: !executionTarget.expectsActionsRun,
+    sessionAlive,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
     sessionStatePending,
@@ -376,36 +383,40 @@ export function MobileIssueDetail({
     }
   }
 
+  /** コメントを1件投稿し、一覧と件数へ反映する（PCのIssue詳細と同じ扱い） */
+  async function postComment(body: string): Promise<boolean> {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({ owner, repo, number: issue.number, body });
+    if (!created) return false;
+    setComments((prev) => [...prev, created]);
+    onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    return true;
+  }
+
   async function handleCreateComment() {
     if (!newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: newCommentBody,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
   async function handleAskClaudeFromComposer() {
     if (!newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: askClaudeCommentBody(newCommentBody),
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+  }
+
+  /** ローカルセッション担当中の承認欄から押せる3つ（#1903。PCのIssue詳細と同じ） */
+  async function handleApprovalComment(body: string) {
+    await postComment(body);
+  }
+
+  async function handleApprovalAskClaude(question: string) {
+    await postComment(askClaudeCommentBody(question));
+  }
+
+  async function handleDismissCheckUser(text?: string) {
+    await updateLabelsAndComment(
+      labelsAfterCheckUserDismissal(issue.labels),
+      dismissCheckUserCommentBody(text),
+    );
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -889,6 +900,9 @@ export function MobileIssueDetail({
             }
             sessionWaitingInput={sessionWaitingInput}
             sessionStatePending={sessionStatePending}
+            localSession={!executionTarget.expectsActionsRun}
+            sessionAlive={sessionAlive}
+            canAskClaude={canAskClaude(issue)}
             mergeApprovalPending={mergeApprovalPending}
             mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
@@ -898,6 +912,9 @@ export function MobileIssueDetail({
             onApprove={handleApprove}
             onReject={handleReject}
             onWithdraw={handleWithdraw}
+            onComment={handleApprovalComment}
+            onAskClaude={handleApprovalAskClaude}
+            onDismissCheckUser={handleDismissCheckUser}
             onRequestContinuation={handleRequestContinuation}
             onRequestPrFix={handleRequestPrFix}
             onMergePullRequest={handleMergePullRequest}

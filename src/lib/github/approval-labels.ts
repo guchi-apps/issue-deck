@@ -390,6 +390,18 @@ export function labelsAfterApproval(labels: IssueLabel[]): string[] {
  * （`01.check-*`・旧名`00.qa-answered`）を外す。21.plan-requiredは計画の再提示が必要なため残す）
  */
 export function labelsAfterRejection(labels: IssueLabel[]): string[] {
+  return labelsAfterCheckUserDismissal(labels);
+}
+
+/**
+ * ローカルセッション担当中のIssueで「確認待ちを外す」を押したときに残すラベル名の配列（#1903）。
+ *
+ * **承認（`labelsAfterApproval`）と分けているのは、外す意味が違うため。** ローカルで
+ * 走っているセッションは画面のボタンを見ておらず、ここで押せるのは「人の確認待ちという印を
+ * 片付ける」ことだけで、計画を承認したことにはならない。`21.plan-required`は残す
+ * （そのIssueが計画提示を要することは変わらない）。
+ */
+export function labelsAfterCheckUserDismissal(labels: IssueLabel[]): string[] {
   return labels
     .map((label) => label.name)
     .filter((name) => name !== CHECK_USER_LABEL && !isCheckUserReasonLabel(name));
@@ -427,6 +439,21 @@ export function approveCommentBody(labels: IssueLabel[], text?: string): string 
   const trimmed = text?.trim();
   const body = trimmed ? `@claude ${trimmed}\n\n${followUp}` : `@claude ${followUp}`;
   return withNoTriggerMarkerIfPlanPending(labels, body);
+}
+
+/**
+ * 「確認待ちを外す」（ローカルセッション担当中の承認欄・#1903）で投稿する定型コメント本文。
+ *
+ * **`@claude`を付けない。** 付けると`reusable-issue-dispatch.yml`が起動し、`11.local`が
+ * 付いている以上は何もせず「このIssueには`11.local`が付いているため対応しません」という
+ * 案内コメントだけを足して終わる（従来の「承認」を押したときに実際に起きていたこと）。
+ * ここでの操作は走っているセッションへ届かないので、記録だけを残す。
+ */
+export function dismissCheckUserCommentBody(text?: string): string {
+  const trimmed = text?.trim();
+  const note =
+    "確認待ちを外しました。（ローカルのセッションが担当中のため、この操作は無人実行を起こしません）";
+  return trimmed ? `${trimmed}\n\n${note}` : note;
 }
 
 /**

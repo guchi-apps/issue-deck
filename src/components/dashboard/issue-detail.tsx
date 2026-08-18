@@ -92,9 +92,11 @@ import {
   approveCommentBody,
   canCompleteManualStep,
   checkUserReason,
+  dismissCheckUserCommentBody,
   isApprovalPending,
   isMergeApprovalPending,
   labelsAfterApproval,
+  labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
   requestContinuationCommentBody,
@@ -260,36 +262,48 @@ export function IssueDetail({
     }
   }
 
+  /** コメントを1件投稿し、一覧と件数へ反映する（投稿元の入力欄はそれぞれの呼び出し側が畳む） */
+  async function postComment(body: string): Promise<boolean> {
+    if (!issue) return false;
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({ owner, repo, number: issue.number, body });
+    if (!created) return false;
+    setComments((prev) => [...prev, created]);
+    onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
+    return true;
+  }
+
   async function handleCreateComment() {
     if (!issue || !newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: newCommentBody,
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
   async function handleAskClaudeFromComposer() {
     if (!issue || !newCommentBody.trim()) return;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: askClaudeCommentBody(newCommentBody),
-    });
-    if (created) {
-      setComments((prev) => [...prev, created]);
-      setNewCommentBody("");
-      onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    }
+    if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+  }
+
+  /**
+   * ローカルセッションが担当しているIssueの承認欄から押せる3つ（#1903）。
+   *
+   * **「承認」「修正」をここへ出さないための置き換え。** どちらも`@claude`コメントを投稿するが、
+   * `11.local`が付いている間の無人実行は「対応しません」という案内を足して終わるだけで、
+   * 走っているセッションにも届かない。
+   */
+  async function handleApprovalComment(body: string) {
+    await postComment(body);
+  }
+
+  async function handleApprovalAskClaude(question: string) {
+    await postComment(askClaudeCommentBody(question));
+  }
+
+  async function handleDismissCheckUser(text?: string) {
+    if (!issue) return;
+    await updateLabelsAndComment(
+      labelsAfterCheckUserDismissal(issue.labels),
+      dismissCheckUserCommentBody(text),
+    );
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -486,6 +500,9 @@ export function IssueDetail({
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
+  // 生きているセッションかどうか（#1903）。承認欄の案内を「届かない」と「終了している」で
+  // 分けるのに使う（`isSessionWaitingInput`が`ALIVE`でなければfalseを返すのと同じ考え方）
+  const sessionAlive = issueSession?.state === "ALIVE";
   // セッションの一覧が届くまでは、確認待ちの案内も承認欄も形を決めない（#1810。#1666と同じ理由）。
   // 取得前の`sessions`は`[]`なので`sessionWaitingInput`は必ずfalseになり、承認欄へ送る案内を
   // 出してからRemote Controlの案内へ書き換わっていた
@@ -516,6 +533,9 @@ export function IssueDetail({
     reason: checkUserReason(issue.labels),
     placement: "status",
     sessionWaitingInput,
+    // ローカルが担当しているIssueでは「内容がエージェントへ渡ります」と案内しない（#1903）
+    localSession: !executionTarget.expectsActionsRun,
+    sessionAlive,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
     sessionStatePending,
@@ -864,6 +884,12 @@ export function IssueDetail({
               }
               sessionWaitingInput={sessionWaitingInput}
               sessionStatePending={sessionStatePending}
+              localSession={!executionTarget.expectsActionsRun}
+              sessionAlive={sessionAlive}
+              canAskClaude={canAskClaude(issue)}
+              onComment={handleApprovalComment}
+              onAskClaude={handleApprovalAskClaude}
+              onDismissCheckUser={handleDismissCheckUser}
               mergeApprovalPending={mergeApprovalPending}
               mergeCheckReasons={mergeCheckReasons}
               pullRequestLinks={pullRequestLinks}

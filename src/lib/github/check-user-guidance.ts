@@ -92,12 +92,36 @@ const WAITING_INPUT_BUTTONS_REMOTE = "答えると確認待ちは自動で外れ
 const WAITING_INPUT_BUTTONS_FALLBACK =
   "コメント欄の案内からRemote Controlを開いて答えてください。";
 
+/**
+ * ローカルセッションが担当しているIssueの案内（#1903）。
+ *
+ * **入力待ちで止まっていなくても、画面のコメント欄はセッションへ届かない。** それなのに
+ * 従来はここで「回答を書いて『承認』を押すと、内容がエージェントへ渡ります」と出し、すぐ下の
+ * コメント欄には「承認してもコメントが残るだけで、走っているセッションは動きません」と
+ * 正反対のことが出ていた。届かないことをこちら側でも言い、ローカルの承認欄が実際に持っている
+ * ボタン（「コメント」「質問する」「確認待ちを外す」）の名前で案内する。
+ */
+const LOCAL_SESSION_BUTTONS_ALIVE =
+  "回答はRemote Controlか端末から伝えます。コメント欄に書いてもセッションには届かず、「確認待ちを外す」は印を外して記録を残すだけです。";
+const LOCAL_SESSION_BUTTONS_ENDED =
+  "担当していたセッションは動いていません。コメント欄の「確認待ちを外す」で印を片付けられます。続きを頼むにはセッションを起こし直してください。";
+/** 回答済み（`01.check-answered`）は元から「読むだけ」の状態なので、押すものだけを言い換える */
+const LOCAL_SESSION_BUTTONS_ANSWERED =
+  "読み終えたらコメント欄の「確認待ちを外す」を押すと確認待ちが外れます。";
+
 export type ResolveCheckUserGuidanceOptions = {
   /** `checkUserReason`の結果。**`null`（理由ラベル未配布）ならパネルを出さない** */
   reason: CheckUserReason | null;
   placement: CheckUserPlacement;
   /** 走っているセッションが入力待ちか（`isSessionWaitingInput`の結果） */
   sessionWaitingInput?: boolean;
+  /**
+   * そのIssueをローカルセッションが担当しているか（#1903。`resolveIssueExecutionTarget`の
+   * `expectsActionsRun`の裏返し）。**trueの間、コメント欄のボタンはセッションへ届かない。**
+   */
+  localSession?: boolean;
+  /** そのセッションが生きているか（`state === "ALIVE"`）。`localSession`のときの言い方を決める */
+  sessionAlive?: boolean;
   /** そのセッションのRemote Control URL（`summarizeIssueSession`の結果）。無ければnull */
   remoteControlUrl?: string | null;
   /**
@@ -132,6 +156,8 @@ export function resolveCheckUserGuidance({
   reason,
   placement,
   sessionWaitingInput = false,
+  localSession = false,
+  sessionAlive = false,
   remoteControlUrl = null,
   hasPullRequestSection = true,
   sessionStatePending = false,
@@ -162,6 +188,32 @@ export function resolveCheckUserGuidance({
 
   const target: CheckUserScrollTarget =
     reason === "merge" && hasPullRequestSection ? "pull-requests" : "approval";
+
+  // ローカルセッションが担当しているIssueでは、コメント欄の操作がセッションへ届かない（#1903）。
+  // **マージだけは別**（GitHub側の操作なので実際に効く。入力待ちの分岐と同じ理由）
+  if (localSession && reason !== "merge") {
+    return {
+      reason,
+      heading,
+      description: guide.description,
+      buttons:
+        reason === "answered"
+          ? LOCAL_SESSION_BUTTONS_ANSWERED
+          : sessionAlive
+            ? LOCAL_SESSION_BUTTONS_ALIVE
+            : LOCAL_SESSION_BUTTONS_ENDED,
+      // 行き先は「効く出口」を優先する。Remote Controlが取れていれば開くボタン、
+      // 取れていなければ操作のある承認欄（そこに居るなら移動ボタンは出さない）
+      action:
+        sessionAlive && remoteControlUrl
+          ? { kind: "remote-control", url: remoteControlUrl }
+          : placement === "approval"
+            ? null
+            : { kind: "scroll", target: "approval" },
+      agentState: guide.agentState,
+    };
+  }
+
   // 承認カードの中に出すパネルは、それ自体が目的地。移動ボタンは出さない
   const atDestination = placement === "approval" && (target === "approval" || reason === "merge");
 
