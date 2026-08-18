@@ -42,6 +42,7 @@ function repository(fullName: string): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };
