@@ -6,6 +6,8 @@
 #                                 開始していない印（<セッション名>.starting、#1465）を書き、終了時に消す
 #   scripts/session-notify.sh     Claude Codeのフックから、最後のイベント（<セッション名>.event）と
 #                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
+#                                 **この印だけはセッションが終わっても消さない**（#1905。同じIssueで
+#                                 起こし直したセッションが引き継いで外せるようにするため）。
 #                                 `SessionStart`では`.starting`を消す（#1465）
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む。畳む条件が揃って
 #                                 猶予待ちになったセッションには、その予定（<セッション名>.reap、#1817）を書く
@@ -232,8 +234,13 @@ session_state_mark_check_user_pending() {
   session_state_write_file "$file" "$content"
 }
 
-# 自分で付けた `00.check-user` の印があるか。**あるときだけラベルを外す**。
+# `00.check-user` の印があるか。**あるときだけラベルを外す**。
 # 旧名（`.plan`）も見る（#1456。`session_state_legacy_check_user_file`のコメント参照）。
+#
+# **印は同じIssueの前のセッションが置いたものかもしれない**（#1905。`session_state_remove`が
+# 消さなくなった）。入力待ちのまま終わったセッションのラベルを引き継いで外すのが狙いで、
+# 「自分が付けた」より広い。他の実行体が付け替えた理由まで落とさないためのガードは
+# issue-deck側（`src/lib/dispatch/check-user-labels.ts`）にある。
 session_state_check_user_pending() {
   local session="$1" file legacy
   file="$(session_state_check_user_file "$session")" || return 1
@@ -274,9 +281,23 @@ session_state_reason_changed() {
   return 0
 }
 
-# そのセッションの状態ファイルをすべて消す。**セッションを畳んだ後と、セッションが自然に
+# そのセッションの状態ファイルを消す。**セッションを畳んだ後と、セッションが自然に
 # 終わったときの両方で呼ぶ。** 残すと、次に同じ名前で立ったセッションが前回のイベントを
 # 引き継いだように見える。
+#
+# **`00.check-user`の印（`.check-user`・旧名`.plan`）だけは消さない**（#1905）。ここが
+# 消していたせいで、入力待ちのまま終わったセッションのIssueに`00.check-user`が付いたまま
+# 取り残されていた——ラベルはGitHubに残るのに、外す権利を表す印だけがホストから消えるため、
+# 同じIssueで起こし直したセッションはそれを外せない（#1893で発生。画面には「実行中なのに
+# 確認待ち」とだけ出る）。
+#
+# **セッション名はIssueごとに一定**（`<リポジトリ名>-issue-<番号>`）なので、残した印は次に
+# 同じIssueで立ったセッションが引き継ぎ、最初の`Stop`でラベルごと消える。**他の実行体が
+# 付け替えた理由（`01.check-merge`など）まで落とさないためのガードは、外す側
+# （`src/lib/dispatch/check-user-labels.ts`）にある。**
+#
+# 答えられないままIssueが終わった場合は印が残るが、消えても作り直せる状態を置く場所なので
+# 実害は無い（`session_state_clear_check_user_pending`で明示的に消せる）。
 session_state_remove() {
   local session="$1" file
   for file in \
@@ -284,9 +305,7 @@ session_state_remove() {
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_reap_file "$session" 2>/dev/null || true)" \
-    "$(session_state_check_user_file "$session" 2>/dev/null || true)" \
-    "$(session_state_starting_file "$session" 2>/dev/null || true)" \
-    "$(session_state_legacy_check_user_file "$session" 2>/dev/null || true)"; do
+    "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
   done

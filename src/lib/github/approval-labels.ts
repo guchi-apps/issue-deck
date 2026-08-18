@@ -135,6 +135,24 @@ export function checkUserReason(labels: LabelNames): CheckUserReason | null {
 }
 
 /**
+ * ローカルセッションのフックが**自分で外してよい**理由（#1905）。
+ *
+ * セッションが`00.check-user`を外してよいのは、**セッション自身が付ける理由**に限る。
+ * `01.check-merge`（レビュー・統合が付ける「PRをマージしてください」）と
+ * `01.check-answered`（無人実行が付ける「回答を読んでください」）は別の実行体のもので、
+ * セッションが落とすと人がマージ・確認の合図を失う。
+ *
+ * **理由ラベルが読めないとき（`null`）は外してよい。** 理由ラベルが配られていない
+ * リポジトリでは常にこうなり、従来どおりの挙動（印があれば外す）に戻る必要がある。
+ */
+const SESSION_OWNED_CHECK_USER_REASONS: readonly CheckUserReason[] = ["plan", "input", "blocked"];
+
+/** その理由の`00.check-user`を、ローカルセッションのフックが外してよいか（#1905） */
+export function isSessionRemovableCheckUserReason(reason: CheckUserReason | null): boolean {
+  return reason === null || SESSION_OWNED_CHECK_USER_REASONS.includes(reason);
+}
+
+/**
  * 理由を`reason`の1枚に付け替えたあとの、あるべきラベル名の集合を返す（#1490）。
  *
  * **理由は常に1枚**なので、既に付いている他の理由ラベル（旧名を含む）は落とす。返すのは
