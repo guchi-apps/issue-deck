@@ -497,13 +497,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
     同じ。開いた時点で既読）に乗せる——質問だけ別の基準を作ると、同じ行の中でドットとラベルが
     食い違う。
-  - **左メニューの件数は確認済みも含めた総数のままで、色だけが変わる**（`NavCount`の
-    `emphasis="unread"`＝数字の文字色）。塗りつぶしの丸（`emphasis="attention"`）は
-    「人が動くまで進まないもの」（確認待ち・作業待ち）専用で、読めば済む質問を同じ強さで
-    出すと、上から順に手を動かせば盤面が進むという並びの読み方が崩れる。件数の見た目は
-    PC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
+  - **左メニューの件数は未確認の件数で、確認待ち・作業待ちと同じ塗りつぶしのオレンジの丸
+    （`NavCount`の`emphasis="attention"`）で出す**（#1910）。数字の文字色だけを変える弱い強調
+    （旧`emphasis="unread"`）は#1796の判断だったが、色だけでは未確認の回答に気づけず見落として
+    いたため廃止した。**丸が点いている行は、上から順に手を動かせば消える**という読み方に揃える。
+    件数の見た目はPC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
-  - 総数と未確認の差は、手作業と同じく一覧のヘッダー（`3件・未確認1件`）で説明する。
+  - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と
+    同じ考え方。未確認が無ければ`0`になる）。総数との差は一覧のヘッダー（`3件・未確認1件`）で説明する。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、

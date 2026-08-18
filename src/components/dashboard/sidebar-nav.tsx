@@ -61,7 +61,7 @@ type SidebarNavProps = {
   manualStepAttention: ManualStepAttention;
   /**
    * 未確認（回答が届いていて未読）の質問Issueの件数（#1796）。
-   * 「質問」の件数は総数のままで、1件以上のときだけ数字の色を変える。
+   * 「質問」の件数として出し、1件以上のときはオレンジの丸で強調する（#1910）。
    */
   unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
@@ -219,9 +219,11 @@ export function SidebarNav({
               icon: navViewIcons[view.id],
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
-              // 件数は確認済みも含めた総数のままで、未確認が残っている間だけ色を変える（#1796）
-              count: navCounts[view.id],
-              emphasis: unconfirmedQuestionCount > 0 ? "unread" : "none",
+              // 件数は未確認（回答が届いていて未読）の数で、確認待ち・作業待ちと同じく
+              // 「いま手を動かせる数」を出す（#1910）。総数との差は一覧のヘッダーの
+              // 内訳（`3件・未確認1件`）で読む
+              count: unconfirmedQuestionCount,
+              emphasis: unconfirmedQuestionCount > 0 ? "attention" : "none",
               title:
                 unconfirmedQuestionCount > 0
                   ? `回答が届いていてまだ開いていない質問が${unconfirmedQuestionCount}件あります`

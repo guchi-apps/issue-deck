@@ -187,17 +187,18 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(badgeClassName()).toContain("bg-amber-500");
   });
 
-  // 件数は確認済みも含めた総数のまま、未確認が残っている間だけ色を変える（#1796・PCと同じ）
-  it("未確認の質問があるときだけ「質問」の件数の文字色を変える", () => {
+  // 件数は未確認の数で、確認待ち・作業待ちと同じオレンジの丸で出す（#1910・PCと同じ）
+  it("未確認の質問があるときだけ「質問」の件数をオレンジの丸で出す", () => {
     const { rerender } = renderHome({ navCounts: { ...NAV_COUNTS, question: 3 } });
 
-    function badgeClassName() {
+    function badgeClassName(unconfirmed: number) {
       // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
-      const row = screen.getByRole("button", { name: /^質問\s*3$/ });
+      const row = screen.getByRole("button", { name: new RegExp(`^質問\\s*${unconfirmed}$`) });
       return row.querySelector("span:last-child")?.className ?? "";
     }
 
-    expect(badgeClassName()).not.toContain("amber");
+    // 総数（3件）ではなく未確認の件数を出すので、未確認が無ければ0になる
+    expect(badgeClassName(0)).not.toContain("amber");
 
     rerender(
       <MobileHomeScreen
@@ -219,9 +220,7 @@ describe("MobileHomeScreen（#1690）", () => {
       />,
     );
 
-    expect(badgeClassName()).toContain("text-amber-600");
-    // 要対応の塗りつぶしの丸とは強さを分ける
-    expect(badgeClassName()).not.toContain("bg-amber-500");
+    expect(badgeClassName(1)).toContain("bg-amber-500");
   });
 
   it("先頭のカードを押すと、そのカードのビューへ遷移する", () => {
