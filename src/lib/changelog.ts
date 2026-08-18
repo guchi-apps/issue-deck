@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.6.0",
+    date: "2026-08-18",
+    changes: [
+      "シークレット（APIキーなどの機密情報）の発行から本番環境への反映までを、1つのコマンドでまとめて実行できるようになりました。これまで人が手作業で行っていた「1Passwordへの登録」「GitHubへの同期」「本番デプロイの実行」を自動化し、対応の抜け漏れや反映漏れを防ぎやすくしています。",
+    ],
+  },
+  {
     version: "4.5.0",
     date: "2026-08-18",
     changes: [
