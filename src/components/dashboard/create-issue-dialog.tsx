@@ -90,13 +90,14 @@ export function mergeSuggestedLabels(prev: string[], suggested: string[]): strin
 }
 
 /**
- * 種別を切り替えたときに選び直すリポジトリを決める（#1641）。
+ * 種別を切り替えたときに残すリポジトリを決める（#1641）。
  *
  * **質問は`claude-issue-dispatch.yml`が導入済みのリポジトリでしか成立しない**（回答するのが
  * GitHub Actionsのmode=askのため）。Issueへ戻すときは絞り込みが無いので、選択をそのまま残す。
  *
- * **未選択は選び直さない**（#1733）。種別を押しただけで1件目が勝手に入ると、選んでいないものを
- * 選んだように見える。
+ * **質問で選べない値だったときは、代わりを入れずに未選択へ戻す**（#1884）。以前は導入済みの
+ * 先頭1件を入れていたが、リポジトリを人が決める形にした以上、種別を押しただけで選んでいない
+ * リポジトリが入る経路は残せない（入った印を出す手立ても無くなった）。
  */
 export function resolveKindRepository(
   kind: IssueDraftKind,
@@ -105,7 +106,7 @@ export function resolveKindRepository(
 ): string {
   if (kind === "issue" || current === "") return current;
   const askable = repositories.filter((repo) => repo.hasClaudeWorkflow);
-  return askable.some((repo) => repo.fullName === current) ? current : (askable[0]?.fullName ?? "");
+  return askable.some((repo) => repo.fullName === current) ? current : "";
 }
 
 const DEFAULT_ASSIGNEE = "m-guchi";
@@ -464,13 +465,15 @@ export function CreateIssueDialog({
     }
   }, [open, assignees]);
 
-  /** 種別を切り替える。質問で選べないリポジトリを選んでいた場合は選び直す（#1641） */
+  /**
+   * 種別を切り替える。質問で選べないリポジトリを選んでいた場合は未選択へ戻す（#1641・#1884）。
+   * 戻した後は選ばせる側なので、「人が選んだ」印は降ろす。
+   */
   function selectKind(next: IssueDraftKind) {
     const resolved = resolveKindRepository(next, repositories, repositoryFullName);
     setKind(next);
     setRepositoryFullName(resolved);
-    // 選び直された値は本人の指定でも、開いていた画面の値でもない。バッジを出さないよう倒す
-    if (resolved !== repositoryFullName) setHasPickedRepository(true);
+    if (resolved !== repositoryFullName) setHasPickedRepository(false);
   }
 
   /**

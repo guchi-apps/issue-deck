@@ -423,6 +423,26 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
   });
 
+  /** #1884。押しただけで選んでいないリポジトリが入る経路を残さない */
+  it("質問へ切り替えたとき、質問に使えないリポジトリなら未選択へ戻して選ばせる", () => {
+    const notConfigured: ConnectedRepository = {
+      ...makeOtherRepository(),
+      hasClaudeWorkflow: false,
+    };
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), notConfigured]}
+        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
+      />,
+    );
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
+  });
+
   it("開いただけでは自動生成を呼ばない", () => {
     render(<Harness onCreated={vi.fn()} />);
 
@@ -441,6 +461,25 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
     // 同じことをする口を2つ同時に出さない
     expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
+  });
+
+  /**
+   * #1884。確認ステップにはキャンセルが無かったので、これは並べ替えではなく追加にあたる。
+   * スマホの縦積みでは、DOMの先頭に置いたキャンセルが一番下へ回る（`flex-col-reverse`）。
+   */
+  it("タイトルの有無によらずキャンセルを出し、操作ボタンの先頭に置く", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const cancelFirst = () => {
+      const footer = screen.getByRole("button", { name: "キャンセル" }).parentElement;
+      return Array.from(footer?.querySelectorAll("button") ?? [])[0]?.textContent;
+    };
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    expect(cancelFirst()).toBe("キャンセル");
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    expect(screen.getByRole("button", { name: "キャンセル" })).not.toBeNull();
+    expect(cancelFirst()).toBe("キャンセル");
   });
 
   it("本文が空・リポジトリ未選択のあいだは付与を押せない", () => {

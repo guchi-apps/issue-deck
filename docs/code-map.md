@@ -67,7 +67,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
   [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)1つだけ**（#1728）。
   `presentation`（`dialog` / `window`）で外枠（見出し・フッター・オーバーレイの有無）だけを
-  差し替え、項目・2ステップの流れ・作成後の動きは共通のまま使う。**別ウィンドウ用にフォームを
+  差し替え、項目・操作の流れ・作成後の動きは共通のまま使う。**別ウィンドウ用にフォームを
   もう一つ作らない**——以降の変更を2か所へ入れ続けることになり、片方だけ古くなる。
   別ウィンドウのページは[`app/issues/new/page.tsx`](../src/app/issues/new/page.tsx)、
   ウィンドウとしての振る舞い（受け渡し・閉じ方・作成の通知）は
