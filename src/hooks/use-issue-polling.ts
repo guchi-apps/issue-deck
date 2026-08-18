@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
+import { LIST_POLL_INTERVAL_MS } from "@/lib/auto-refresh";
 import type { Issue } from "@/types/issue";
-
-const POLL_INTERVAL_MS = 10_000;
 
 export type IssuePollingHandle = {
   /**
@@ -54,7 +53,7 @@ export function useIssuePolling(onIssues: (issues: Issue[]) => void): IssuePolli
       void refresh();
     }
 
-    const intervalId = setInterval(poll, POLL_INTERVAL_MS);
+    const intervalId = setInterval(poll, LIST_POLL_INTERVAL_MS);
 
     function handleVisibilityChange() {
       // バックグラウンドタブでは`poll`がno-opのままインターバルだけ進むため、

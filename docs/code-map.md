@@ -135,9 +135,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893）。
-  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は`IssueList`の
-  `onPullToRefresh`を渡した画面（スマホのIssue一覧2画面）だけで有効になる。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947）。
+  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は
+  [`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)で、
+  `IssueList`・`PullRequestList`に`onPullToRefresh`を渡した画面（スマホのIssue一覧2画面とPR一覧）
+  だけで有効になる。**描画を一覧ごとに書かない**——文言・色・戻りのアニメーションが片方だけ
+  変わると、同じ操作なのに画面ごとに見え方が違うことになる。
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
   ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
@@ -676,8 +679,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`getAdjacentPullRequestViewId`が決める。
   **一覧本体だけをスワイプに追従させる**ため、`PullRequestList`はスクロール領域だけに掛かる
   `listStyle`と下端に固定する`footer`を受け取る（ヘッダーごと動かすと、ヘッダーを持たないIssue一覧と
-  見え方がずれる）。**ヘッダー右上の「更新」はスマホでも残す**——CIの進捗やマージの状況を
-  自動更新（1分間隔）より先に知りたい場面があり、スマホには下へ引っ張って更新する手段がまだ無い。
+  見え方がずれる）。**縦の引っ張りは`listStyle`と別の要素へ掛ける**（#1947）——同じ要素へ両方の
+  transformを書くと、ビュー切り替えの追従と引っ張りの追従が互いを打ち消す。
+  **ヘッダーに「更新」ボタンは置かない**（#1947。PC・スマホとも）——スマホは下へ引っ張って更新でき、
+  PR画面を開いている間はどのビューでも10秒間隔で自動更新するため、Issue一覧のヘッダーと同じ形に
+  そろえた。取得に失敗しても次の周回で`error`が消えるので、押し直す口が無くても復帰する。
   **ヘッダーの見出しはビュー名のまま**（「実行中のプルリクエスト」）で下端の行と重なるが、これは
   Issue一覧が見出しの行にもビュー名を出しているのと同じ意図——上は「いま何を見ているか」を
   スクロール中に見上げて確かめるためのもので、下は操作。**件数は`number | null`で、`null`は
@@ -706,7 +712,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「完了したPR」
   （CIがsuccess/failure）は**同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えても
   GitHub APIを叩き直さない。「完了したPR」は左メニューから外したが`prview=completed`のURLは
-  生きており、10秒ごとの自動更新（#1531）もそのまま。並び順は「すべてのPR」だけ更新が新しい順で、
+  生きている。**10秒ごとの自動更新（`LIST_POLL_INTERVAL_MS`）は、元は「完了したPR」ビューだけ
+  だったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。1巡は
+  「リポジトリ数 + draft以外のopen PR数」だが、いずれもETagの条件付きGETを通しており変化が無い
+  間は304＝レート制限を消費しない。歯止めは「画面を開いている間だけ」「裏に回ったタブでは
+  取りに行かない」の2つで、Issue一覧のポーリングと同じ間隔・同じ止め方にそろえてある。
+  並び順は「すべてのPR」だけ更新が新しい順で、
   他は作成が古い順＝滞留が長い順。
   マージ済みPRを一覧で振り返りたくなった時点で、キャッシュ層の追加とあわせて再検討する
   （いまはIssue・ブランチ画面のリンクから個別に開く。#1260）。

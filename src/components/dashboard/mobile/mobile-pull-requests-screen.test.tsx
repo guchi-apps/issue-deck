@@ -18,6 +18,7 @@ function renderScreen(
     origin: "tab" | "home";
     onChangeView: (view: PullRequestViewId) => void;
     onBack: () => void;
+    onRefresh: () => Promise<unknown> | void;
   }> = {},
 ) {
   render(
@@ -29,10 +30,9 @@ function renderScreen(
       failedRepositories={[]}
       fetchedAt="2026-08-14T10:30:00Z"
       isLoading={false}
-      isRefreshing={false}
       autoRefreshIntervalMs={null}
       error={null}
-      onRefresh={vi.fn()}
+      onRefresh={overrides.onRefresh ?? vi.fn()}
       onBack={overrides.onBack ?? vi.fn()}
       onChangeView={overrides.onChangeView ?? vi.fn()}
       onSelectPullRequest={vi.fn()}
@@ -143,5 +143,18 @@ describe("MobilePullRequestsScreen のスワイプ（#1691）", () => {
     swipe(120);
 
     expect(onChangeView).not.toHaveBeenCalled();
+  });
+});
+
+// #1947。更新の口はヘッダーのボタンではなく、引っ張って更新と自動更新にそろえた
+describe("MobilePullRequestsScreen の更新（#1947）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("ヘッダーに「更新」ボタンを出さない", () => {
+    renderScreen();
+
+    expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
   });
 });

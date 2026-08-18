@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
-import { ExternalLink, Lock, RefreshCw } from "lucide-react";
+import { useRef, useState, type CSSProperties } from "react";
+import { ExternalLink, Lock } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
@@ -15,8 +15,9 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { Button } from "@/components/ui/button";
+import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { autoRefreshIntervalLabel, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
@@ -38,17 +39,17 @@ type PullRequestListProps = {
   fetchedAt: string | null;
   isLoading: boolean;
   /**
-   * 自動更新も含めて取得が飛んでいるか（#1767）。更新アイコンの回転にだけ使い、
-   * ボタンの無効化・「読み込み中...」には使わない。渡されない場合は`isLoading`と同じ扱い。
-   */
-  isRefreshing?: boolean;
-  /**
    * 自動更新の間隔（#1767）。`null`＝自動更新しない。この一覧では設定できず、
    * 「いま何分間隔で更新中か」を出すためだけに受け取る（決めるのは`issue-deck-shell.tsx`）。
    */
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   error: string | null;
-  onRefresh: () => void;
+  /**
+   * 一覧を下へ引っ張ったときに実行する更新（#1947）。**渡した画面でだけ有効になる。**
+   * 引っ張るという操作はタッチにしか無いため、PCのPRペインは渡さない
+   * （`IssueList`の`onPullToRefresh`と同じ扱い）。
+   */
+  onPullToRefresh?: () => Promise<unknown> | void;
   /** 詳細を表示中のPRのid。未選択・詳細を持たない画面ではnull */
   selectedPullRequestId?: string | null;
   /** PRを選んだとき（詳細の表示）。渡さない場合もタイトルのリンクからGitHubは開ける */
@@ -184,10 +185,9 @@ export function PullRequestList({
   failedRepositories,
   fetchedAt,
   isLoading,
-  isRefreshing,
   autoRefreshIntervalMs = null,
   error,
-  onRefresh,
+  onPullToRefresh,
   selectedPullRequestId = null,
   onSelectPullRequest,
   onMerged,
@@ -212,6 +212,16 @@ export function PullRequestList({
   }
   const highlightedId = optimisticSelectedId ?? selectedPullRequestId;
 
+  // 引っ張って更新（#1893・#1947）。**タッチを受けるのはスクロール領域そのものではなく
+  // それを包む枠**で、スクロール位置は中のスクロール領域を見る（`use-pull-to-refresh.ts`）。
+  const pullContainerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh({
+    containerRef: pullContainerRef,
+    scrollRef,
+    onRefresh: onPullToRefresh,
+  });
+
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
@@ -229,72 +239,81 @@ export function PullRequestList({
             )}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 shrink-0"
-          disabled={isLoading}
-          onClick={onRefresh}
-        >
-          {/* 自動更新でも回す（#1767）。押せなくするのは手動更新のときだけ */}
-          <RefreshCw className={cn("size-3.5", (isRefreshing ?? isLoading) && "animate-spin")} />
-          更新
-        </Button>
+        {/* ヘッダーに「更新」ボタンは置かない（#1947）。取り直しは自動更新（この画面を開いて
+            いる間は10秒間隔）と、スマホの引っ張って更新が担う。Issue一覧のヘッダーと同じ形 */}
         {headerActions}
       </header>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain" style={listStyle}>
-        {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
+      {/* 引っ張って更新（#1947）のタッチを受ける枠。**左右スワイプ（`listStyle`）は外側の枠、
+          縦の引っ張りは内側のスクロール領域**と、transformを掛ける要素を分ける——同じ要素へ
+          両方書くと、ビュー切り替えの追従と引っ張りの追従が互いを打ち消してしまう */}
+      <div
+        ref={pullContainerRef}
+        className="relative flex min-h-0 flex-1 flex-col"
+        style={listStyle}
+      >
+        <PullToRefreshIndicator pull={pull} />
 
-        {failedRepositories.length > 0 && (
-          <p className="border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
-            取得できなかったリポジトリがあります: {failedRepositories.join(", ")}
-          </p>
-        )}
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          style={{
+            transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
+            transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
+          }}
+        >
+          {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 
-        {!error && pullRequests.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isLoading ? "読み込み中..." : emptyMessage}
-          </p>
-        )}
+          {failedRepositories.length > 0 && (
+            <p className="border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
+              取得できなかったリポジトリがあります: {failedRepositories.join(", ")}
+            </p>
+          )}
 
-        {groups.map((group) => (
-          <section key={group.repositoryFullName}>
-            <h2 className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-4 py-2 text-xs font-semibold backdrop-blur">
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: getRepoColor(group.repositoryFullName) }}
-                aria-hidden="true"
-              />
-              <span className="truncate">{group.repositoryFullName}</span>
-              {group.repositoryPrivate && (
-                <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Private" />
-              )}
-              <span className="ml-auto shrink-0 font-normal text-muted-foreground">
-                {group.pullRequests.length}
-              </span>
-            </h2>
-            <ul>
-              {group.pullRequests.map((pullRequest) => (
-                <PullRequestCard
-                  key={pullRequest.id}
-                  pullRequest={pullRequest}
-                  selected={highlightedId === pullRequest.id}
-                  onSelect={
-                    onSelectPullRequest &&
-                    ((selectedPullRequest) => {
-                      setOptimisticSelectedId(selectedPullRequest.id);
-                      onSelectPullRequest(selectedPullRequest);
-                    })
-                  }
-                  onMerged={() => onMerged?.(pullRequest)}
+          {!error && pullRequests.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {isLoading ? "読み込み中..." : emptyMessage}
+            </p>
+          )}
+
+          {groups.map((group) => (
+            <section key={group.repositoryFullName}>
+              <h2 className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-4 py-2 text-xs font-semibold backdrop-blur">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: getRepoColor(group.repositoryFullName) }}
+                  aria-hidden="true"
                 />
-              ))}
-            </ul>
-          </section>
-        ))}
+                <span className="truncate">{group.repositoryFullName}</span>
+                {group.repositoryPrivate && (
+                  <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Private" />
+                )}
+                <span className="ml-auto shrink-0 font-normal text-muted-foreground">
+                  {group.pullRequests.length}
+                </span>
+              </h2>
+              <ul>
+                {group.pullRequests.map((pullRequest) => (
+                  <PullRequestCard
+                    key={pullRequest.id}
+                    pullRequest={pullRequest}
+                    selected={highlightedId === pullRequest.id}
+                    onSelect={
+                      onSelectPullRequest &&
+                      ((selectedPullRequest) => {
+                        setOptimisticSelectedId(selectedPullRequest.id);
+                        onSelectPullRequest(selectedPullRequest);
+                      })
+                    }
+                    onMerged={() => onMerged?.(pullRequest)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
 
-        {footerSpacing && <div className="h-14" aria-hidden="true" />}
+          {footerSpacing && <div className="h-14" aria-hidden="true" />}
+        </div>
       </div>
 
       {footer}

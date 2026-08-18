@@ -27,10 +27,15 @@ export const AUTO_REFRESH_INTERVAL_OPTIONS: AutoRefreshOption[] = [
 ];
 
 /**
- * 「完了したPR」ビューの自動更新間隔（#1531）。ユーザーが選ぶ対象ではなく、
- * CIが確定したPRに気づくのに更新ボタンを押させないための固定値。
+ * 一覧の自動更新間隔（#1531・#1947）。ユーザーが選ぶ対象ではなく、更新ボタンを押させない
+ * ための固定値。
+ *
+ * **Issue一覧（`use-issue-polling.ts`）とPR一覧（`issue-deck-shell.tsx`）で同じ値を使う。**
+ * 元は「完了したPR」ビューだけの間隔だったが、PR画面から更新ボタンを外した（#1947）ので、
+ * どちらの一覧も「開いている間は10秒ごとに勝手に新しくなる」という同じ約束になった。
+ * 別々に持つと、片方を変えたときに画面ごとに古さが違うという分かりにくい差が生まれる。
  */
-export const COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
+export const LIST_POLL_INTERVAL_MS = 10_000;
 
 /** 「1分間隔」のように画面へ出す文言にする。分で割り切れない値は秒で出す */
 export function autoRefreshIntervalLabel(intervalMs: number): string {

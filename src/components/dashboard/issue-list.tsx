@@ -16,11 +16,11 @@ import {
   Loader2,
   Lock,
   MessageSquare,
-  RotateCw,
   Star,
 } from "lucide-react";
 
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
+import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Button } from "@/components/ui/button";
@@ -667,37 +667,7 @@ export function IssueList({
       {/* 引っ張って更新（#1893）のタッチを受ける枠。**0件のときも枠は残す**——<ul>は0件で
           消えるため、<ul>に直接付けると「該当するIssueがありません」の一覧を更新できない */}
       <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
-        {pull.label && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center overflow-hidden"
-            style={{
-              height: pull.distance,
-              // 指の動きにはそのまま追従させ、離した後の戻りだけアニメーションさせる
-              transition: pull.isDragging ? "none" : "height 0.2s ease-out",
-            }}
-          >
-            <span
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs whitespace-nowrap text-muted-foreground shadow-sm",
-                // しきい値に届いた（離せば更新される）ことは、文言だけでなく色でも示す
-                (pull.phase === "ready" || pull.phase === "refreshing") &&
-                  "border-primary/30 bg-accent text-foreground",
-              )}
-            >
-              <RotateCw
-                className={cn("size-3.5", pull.phase === "refreshing" && "animate-spin")}
-                style={
-                  pull.phase === "refreshing"
-                    ? undefined
-                    : { transform: `rotate(${pull.arrowDegrees}deg)` }
-                }
-              />
-              {pull.label}
-            </span>
-          </div>
-        )}
+        <PullToRefreshIndicator pull={pull} />
 
         {issues.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">

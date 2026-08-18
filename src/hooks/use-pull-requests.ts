@@ -41,8 +41,11 @@ type UsePullRequestsResult = {
    * **通知ベルを開いている間の30秒ごとの取り直しはこちらを使う。** `refresh`は取得effectを
    * 張り直すため`isLoading`が立ち、後ろに開いているPR一覧が30秒ごとに「読み込み中...」へ
    * 戻ってしまう。
+   *
+   * **取得の完了まで待てる**（#1947）。一覧を引っ張って更新したときは、待たないと更新中の
+   * 表示が最短時間で消えてしまい、取れたのかどうかが画面から分からない。
    */
-  refreshInBackground: () => void;
+  refreshInBackground: () => Promise<void>;
 };
 
 /**
@@ -92,7 +95,10 @@ export function usePullRequests(
   const inFlightRef = useRef(false);
 
   const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
-  const refreshInBackground = useCallback(() => void backgroundLoadRef.current?.(), []);
+  const refreshInBackground = useCallback(
+    () => backgroundLoadRef.current?.() ?? Promise.resolve(),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
