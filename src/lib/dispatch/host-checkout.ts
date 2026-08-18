@@ -1,4 +1,5 @@
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 
 /**
  * ホストが申告する「いま動いているスクリプトの版」（#1612）。
@@ -122,15 +123,6 @@ export type DispatchHostCheckoutRow = {
   tone: DispatchHostCheckoutTone;
 };
 
-function formatRelative(from: string, now: Date): string {
-  const diffMinutes = Math.floor((now.getTime() - new Date(from).getTime()) / (1000 * 60));
-  if (diffMinutes <= 0) return "たった今";
-  if (diffMinutes < 60) return `${diffMinutes}分前`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}時間前`;
-  return `${Math.floor(diffHours / 24)}日前`;
-}
-
 /**
  * 申告されたチェックアウトの状態を画面の行へ直す。**出せない場合は`null`**（行ごと出さない）。
  *
@@ -153,7 +145,7 @@ export function describeDispatchHostCheckout(
       `${checkout.commit}（detached）`;
 
   const details: string[] = [];
-  if (checkout.committedAt) details.push(formatRelative(checkout.committedAt, now));
+  if (checkout.committedAt) details.push(formatRelativeDate(checkout.committedAt, now.getTime()));
 
   if (checkout.behindCount === null) {
     // fetchできていない。**「遅れていない」とは言えない**ので、遅れ0と同じ顔にはしない
@@ -162,7 +154,7 @@ export function describeDispatchHostCheckout(
 
   // 数えた時点が古ければ、そのぶんは数字に含まれていないことを明示する
   if (checkout.fetchedAt && now.getTime() - new Date(checkout.fetchedAt).getTime() > STALE_FETCH_MS) {
-    details.push(`${formatRelative(checkout.fetchedAt, now)}時点`);
+    details.push(`${formatRelativeDate(checkout.fetchedAt, now.getTime())}時点`);
   }
   const detail = details.join("・") || null;
 
