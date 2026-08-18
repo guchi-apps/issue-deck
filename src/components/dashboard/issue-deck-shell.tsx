@@ -346,12 +346,10 @@ export function IssueDeckShell({
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
   //
   // **コストは「消費0」ではない。** 1巡は「リポジトリ数のREST（ETagの条件付きGETを通すので
-  // 変化が無い間は304＝消費0）＋ draft以外のopen PR数のGraphQL（`fetchPullRequestCiState`。
-  // 条件付きGETが効かないので毎回消費する）」で、10秒間隔なら毎時
-  // 「360 × draft以外のopen PR数」ポイントのGraphQLを使う（上限5,000ポイント/時）。
-  // 共有ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に
-  // 触れうる。**PR1件ごとのGraphQLを1回へまとめる改善は#1962**で、そこまでは
-  // 設定の「GitHub API使用量」（`pull_request_list`）で消費を見られるようにしてある。
+  // 変化が無い間は304＝消費0）＋ draft以外のopen PRのCI状態（GraphQL。installationごとに
+  // まとめて数回で、条件付きGETは効かないため毎回消費するが、PR件数には比例しない。#1962）」で、
+  // 10秒間隔でもPR件数の増減に消費が引きずられにくい（上限5,000ポイント/時）。
+  // 設定の「GitHub API使用量」（`pull_request_list`）で実際の消費を見られる。
   //
   // 歯止めは従来どおりで、**ペイン・画面を開いている間だけ**・裏に回ったタブでは取りに行かない
   // （`use-auto-refresh.ts`）。
@@ -390,8 +388,8 @@ export function IssueDeckShell({
     // 対応PRのCIが確定するまで出さない（判定は`resolveCheckUserToasts`）。積むと同時に
     // PR一覧を取り直すのは、作られたばかりのPRが手元の取得結果にまだ載っていないため。
     const newlyCheckUserIssues = detectNewlyCheckUserIssues(issues, reconciledIssues);
-    // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得で「リポジトリ数 +
-    // draft以外のopen PR数」ぶんGitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
+    // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得でリポジトリ数ぶん
+    // GitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
     if (newlyCheckUserIssues.some(isMergeCheckUser)) openPullRequests.refresh();
     const detectedAt = Date.now();
     const pending = [

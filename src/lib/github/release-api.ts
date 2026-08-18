@@ -1,8 +1,10 @@
 import {
   fetchCheckRollup,
   fetchPullRequestRollup,
+  fetchPullRequestRollups,
   type CheckRollup,
   type MergeJudgementState,
+  type PullRequestRollupTarget,
 } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
@@ -273,6 +275,37 @@ export async function fetchPullRequestCiState(
     mergeable,
     mergeJudgement: rollup?.mergeJudgement ?? "unknown",
   };
+}
+
+/** 取得できなかったPRの値。CI状態・判定の進み具合は`unknown`、コンフリクトは判定できずnull */
+export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
+  ciState: "unknown",
+  mergeable: null,
+  mergeJudgement: "unknown",
+};
+
+/**
+ * 複数PRのCI状態とコンフリクト有無を、**PR件数によらず少ない回数の**GraphQLで取得する（#1962）。
+ *
+ * PR一覧のように対象が何件になるか分からない経路はこちらを使う。1件ずつ`fetchPullRequestCiState`を
+ * 呼ぶと消費がPR件数に比例し、10秒間隔の自動更新と合わせるとレート制限に触れる。
+ *
+ * 返すのは`pullRequestRollupKey()`をキーにしたMapで、**取得できなかったPRはキーごと落とす**。
+ * 呼び出し側は`?? UNKNOWN_PULL_REQUEST_CI_STATE`で未取得へ縮退させる。
+ *
+ * トークンはinstallation単位なので、渡してよいのは同じinstallationのPRだけ。
+ */
+export async function fetchPullRequestCiStates(
+  targets: PullRequestRollupTarget[],
+  token: string,
+): Promise<Map<string, PullRequestCiState>> {
+  const rollups = await fetchPullRequestRollups(targets, token);
+  return new Map(
+    [...rollups].map(([key, { rollup, mergeable }]) => [
+      key,
+      { ciState: toCiState(rollup), mergeable, mergeJudgement: rollup?.mergeJudgement ?? "unknown" },
+    ]),
+  );
 }
 
 /**

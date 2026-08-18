@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCheckRollup, fetchPullRequestRollup } from "@/lib/github/check-rollup";
+import {
+  fetchCheckRollup,
+  fetchPullRequestRollup,
+  fetchPullRequestRollups,
+  pullRequestRollupKey,
+} from "@/lib/github/check-rollup";
 
 function stubGraphql(body: unknown, status = 200) {
   const calls: { url: string; body: string }[] = [];
@@ -257,15 +262,21 @@ describe("fetchCheckRollup", () => {
   });
 });
 
-function pullRequestResponse(pullRequest: unknown) {
-  return { data: { repository: { pullRequest } } };
+/** エイリアス（`p0`・`p1`…）ごとのPRを並べた応答（#1962） */
+function pullRequestResponse(...pullRequests: unknown[]) {
+  return {
+    data: Object.fromEntries(
+      pullRequests.map((pullRequest, index) => [`p${index}`, { pullRequest }]),
+    ),
+  };
+}
+
+function pullRequestNode(mergeable: string | null, rollup: unknown) {
+  return { mergeable, commits: { nodes: [{ commit: { statusCheckRollup: rollup } }] } };
 }
 
 function pullRequestWithRollup(mergeable: string | null, rollup: unknown) {
-  return pullRequestResponse({
-    mergeable,
-    commits: { nodes: [{ commit: { statusCheckRollup: rollup } }] },
-  });
+  return pullRequestResponse(pullRequestNode(mergeable, rollup));
 }
 
 describe("fetchPullRequestRollup", () => {
@@ -291,9 +302,9 @@ describe("fetchPullRequestRollup", () => {
     // ref経由（`fetchCheckRollup`）と足して2回にならないこと自体がこの関数の目的。
     expect(calls).toHaveLength(1);
     expect(JSON.parse(calls[0]?.body ?? "{}").variables).toEqual({
-      owner: "owner",
-      name: "repo",
-      number: 42,
+      owner0: "owner",
+      name0: "repo",
+      number0: 42,
     });
   });
 
@@ -336,5 +347,102 @@ describe("fetchPullRequestRollup", () => {
       rollup: null,
       mergeable: null,
     });
+  });
+});
+
+describe("fetchPullRequestRollups", () => {
+  it("複数リポジトリのPRをエイリアスで1クエリにまとめる（#1962）", async () => {
+    const calls = stubGraphql(
+      pullRequestResponse(
+        pullRequestNode("MERGEABLE", { state: "SUCCESS", contexts: { totalCount: 0, nodes: [] } }),
+        pullRequestNode("CONFLICTING", { state: "FAILURE", contexts: { totalCount: 0, nodes: [] } }),
+      ),
+    );
+
+    const rollups = await fetchPullRequestRollups(
+      [
+        { owner: "owner", repo: "repo", number: 1 },
+        { owner: "owner", repo: "other", number: 2 },
+      ],
+      "token",
+    );
+
+    // PR件数ぶんではなく1回で済んでいることがこの関数の目的そのもの。
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]?.body ?? "{}").variables).toEqual({
+      owner0: "owner",
+      name0: "repo",
+      number0: 1,
+      owner1: "owner",
+      name1: "other",
+      number1: 2,
+    });
+    expect(rollups.get(pullRequestRollupKey("owner", "repo", 1))?.mergeable).toBe(true);
+    expect(rollups.get(pullRequestRollupKey("owner", "other", 2))?.mergeable).toBe(false);
+  });
+
+  it("25件を超える場合はクエリを分割する", async () => {
+    const calls = stubGraphql(
+      pullRequestResponse(
+        ...Array.from({ length: 25 }, () =>
+          pullRequestNode("MERGEABLE", { state: "SUCCESS", contexts: { totalCount: 0, nodes: [] } }),
+        ),
+      ),
+    );
+
+    const rollups = await fetchPullRequestRollups(
+      Array.from({ length: 30 }, (_, index) => ({ owner: "owner", repo: "repo", number: index })),
+      "token",
+    );
+
+    expect(calls).toHaveLength(2);
+    // 応答は25件ぶんを使い回しているため、2本目は先頭5件だけが埋まる。
+    expect(rollups.size).toBe(30);
+  });
+
+  it("一部のPRだけ読めなかった場合、残りは返す（`allowPartialData`）", async () => {
+    stubGraphql({
+      data: {
+        p0: null,
+        p1: {
+          pullRequest: pullRequestNode("MERGEABLE", {
+            state: "SUCCESS",
+            contexts: { totalCount: 0, nodes: [] },
+          }),
+        },
+      },
+      errors: [{ message: "Could not resolve to a Repository" }],
+    });
+
+    const rollups = await fetchPullRequestRollups(
+      [
+        { owner: "owner", repo: "gone", number: 1 },
+        { owner: "owner", repo: "repo", number: 2 },
+      ],
+      "token",
+    );
+
+    // 読めなかったPRはキーごと落とし、呼び出し側で`unknown`へ縮退させる。
+    expect(rollups.has(pullRequestRollupKey("owner", "gone", 1))).toBe(false);
+    expect(rollups.get(pullRequestRollupKey("owner", "repo", 2))?.rollup).toEqual({
+      state: "success",
+      checks: [],
+      mergeJudgement: "unknown",
+    });
+  });
+
+  it("クエリ自体が失敗した場合は例外にせず空を返す", async () => {
+    stubGraphql({ errors: [{ message: "Bad credentials" }] }, 401);
+
+    await expect(
+      fetchPullRequestRollups([{ owner: "owner", repo: "repo", number: 1 }], "token"),
+    ).resolves.toEqual(new Map());
+  });
+
+  it("対象が無ければGraphQLを1回も投げない", async () => {
+    const calls = stubGraphql({});
+
+    await expect(fetchPullRequestRollups([], "token")).resolves.toEqual(new Map());
+    expect(calls).toHaveLength(0);
   });
 });
