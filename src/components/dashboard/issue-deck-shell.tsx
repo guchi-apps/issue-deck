@@ -55,7 +55,7 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { ClaudeModel } from "@/lib/app-settings";
 import {
-  COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS,
+  PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
   shorterAutoRefreshInterval,
   type AutoRefreshIntervalMs,
@@ -341,17 +341,21 @@ export function IssueDeckShell({
   // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
-  // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
-  // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
-  // しているのは、取得1回のコストが「リポジトリ数（＋CI状態をinstallationごとに数回）」だから。
-  // 「完了したPR」は左メニューから外した（#1613）が、`prview=completed`のURLは生きており
-  // 自動更新もそのまま。既定の「すべてのPR」へ広げるとペインを開いている間ずっと10秒間隔で
-  // 叩き続けることになり、GitHub APIのレート制限に触れるため広げていない。
+  // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
+  // （#1531・#1947）。元は「完了したPR」ビューだけだったが、ヘッダーの「更新」ボタンを外した
+  // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
+  //
+  // **コストは「消費0」ではない。** 1巡は「リポジトリ数のREST（ETagの条件付きGETを通すので
+  // 変化が無い間は304＝消費0）＋ draft以外のopen PRのCI状態（GraphQL。installationごとに
+  // まとめて数回で、条件付きGETは効かないため毎回消費するが、PR件数には比例しない。#1962）」で、
+  // 10秒間隔でもPR件数の増減に消費が引きずられにくい（上限5,000ポイント/時）。
+  // 設定の「GitHub API使用量」（`pull_request_list`）で実際の消費を見られる。
+  //
+  // 歯止めは従来どおりで、**ペイン・画面を開いている間だけ**・裏に回ったタブでは取りに行かない
+  // （`use-auto-refresh.ts`）。
   // 保留中の確認待ちトーストがある間も自動更新する（#1709）。CIが確定したかどうかは
   // PR一覧の`ciState`でしか分からないため、取り直さないと保留を解けない。
-  const autoRefreshPullRequests =
-    (isPullRequestPaneActive && filters.prview === "completed") ||
-    pendingCheckUserToasts.length > 0;
+  const autoRefreshPullRequests = isPullRequestPaneActive || pendingCheckUserToasts.length > 0;
   // ブランチ画面の自動更新の間隔（#1767）。**既定は「自動更新しない」**で、選んだ間隔は
   // 端末のlocalStorageに残す。1巡でリポジトリ数ぶんのGraphQL（ブランチ状況）とPR一覧の
   // 取得をまとめて使うため、既定で回すとレート制限の消費が常時上がる。
@@ -361,10 +365,10 @@ export function IssueDeckShell({
   const flowAutoRefreshIntervalMs = normalizeAutoRefreshInterval(storedFlowAutoRefreshIntervalMs);
   // 母集団は「ブランチとPRの流れ」を開いている間だけ`all`。PRの状態別ビューはどれも
   // openなPRしか出さなくなったため（#1613）、PRペインでも`open`で足りる。
-  // 自動更新の間隔は「完了したPRビュー（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
+  // 自動更新の間隔は「PR画面（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
   // 短い方（#1767）。どちらの要求も無ければnull＝自動更新しない。
   const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
-    autoRefreshPullRequests ? COMPLETED_PULL_REQUEST_POLL_INTERVAL_MS : null,
+    autoRefreshPullRequests ? PULL_REQUEST_POLL_INTERVAL_MS : null,
     isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
   );
   const openPullRequests = usePullRequests(
@@ -1062,10 +1066,13 @@ export function IssueDeckShell({
                     failedRepositories={openPullRequests.failedRepositories}
                     fetchedAt={openPullRequests.fetchedAt}
                     isLoading={openPullRequests.isLoading}
-                    isRefreshing={openPullRequests.isRefreshing}
                     autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                     error={openPullRequests.error}
-                    onRefresh={openPullRequests.refresh}
+                    /* 引っ張って更新（#1947）。**`refresh`でも`refreshInBackground`でもなく
+                       `refreshFromPull`。** `refresh`は取得effectを張り直すため引っ張った直後に
+                       一覧が「読み込み中...」へ戻り、`refreshInBackground`は自動更新と重なると
+                       空振りするうえ失敗も画面に出ない（`use-pull-requests.ts`） */
+                    onRefresh={openPullRequests.refreshFromPull}
                     onBack={goBack}
                     onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
                     onMerged={handlePullRequestMerged}
@@ -1245,10 +1252,8 @@ export function IssueDeckShell({
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}
                 isLoading={openPullRequests.isLoading}
-                isRefreshing={openPullRequests.isRefreshing}
                 autoRefreshIntervalMs={pullRequestAutoRefreshIntervalMs}
                 error={openPullRequests.error}
-                onRefresh={openPullRequests.refresh}
                 selectedPullRequestId={filters.pr}
                 onSelectPullRequest={(pullRequest) => selectPullRequest(pullRequest.id)}
                 onMerged={handlePullRequestMerged}

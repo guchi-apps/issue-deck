@@ -16,11 +16,11 @@ import {
   Loader2,
   Lock,
   MessageSquare,
-  RotateCw,
   Star,
 } from "lucide-react";
 
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
+import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import {
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -418,6 +419,12 @@ export function IssueList({
       const session = sessionByIssueId.get(issue.id);
       return session ? summarizeIssueSession(session).remoteControlUrl : null;
     })();
+    // 押さないと先へ進まない行を見分けられるようにする（#1964）。**出す条件とは別物**で、
+    // 判定は`shouldEmphasizeRemoteControl`に置いてある
+    const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
+      labels: issue.labels,
+      session: sessionByIssueId.get(issue.id) ?? null,
+    });
     return (
       <li
         key={issue.id}
@@ -530,7 +537,22 @@ export function IssueList({
                   カードの下へ1行足すと、セッションのあるカードだけ高さが変わって一覧が
                   不揃いになる。文言は「Remote」まで詰め、全文は`title`・`aria-label`に持たせる */}
               {remoteControlUrl && (
-                <Button variant="outline" size="xs" asChild className="pointer-events-auto">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  asChild
+                  className={cn(
+                    "pointer-events-auto",
+                    // 回答を待っている行だけ枠線と文字をamberにする（#1964）。**中は塗らない**——
+                    // 同じ形の行が縦に続く画面で、塗りつぶしたボタンは1つあるだけで視線を奪う。
+                    // 面（背景）とホバーの挙動はoutlineのまま変えず、差は枠線と文字色だけにする。
+                    // 色は右上のバッジ（`WorkflowStepBadge`）の確認待ちと同じamberを借りる。同じ行で
+                    // 同じ意味に別の色を当てない。**回転・点滅はさせない**（あちらも承認待ちでは
+                    // 意図的に回転を止めている。待っているのは人であって処理ではない）
+                    emphasizeRemoteControl &&
+                      "border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400",
+                  )}
+                >
                   <a
                     href={remoteControlUrl}
                     target="_blank"
@@ -670,37 +692,7 @@ export function IssueList({
       {/* 引っ張って更新（#1893）のタッチを受ける枠。**0件のときも枠は残す**——<ul>は0件で
           消えるため、<ul>に直接付けると「該当するIssueがありません」の一覧を更新できない */}
       <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
-        {pull.label && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center overflow-hidden"
-            style={{
-              height: pull.distance,
-              // 指の動きにはそのまま追従させ、離した後の戻りだけアニメーションさせる
-              transition: pull.isDragging ? "none" : "height 0.2s ease-out",
-            }}
-          >
-            <span
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs whitespace-nowrap text-muted-foreground shadow-sm",
-                // しきい値に届いた（離せば更新される）ことは、文言だけでなく色でも示す
-                (pull.phase === "ready" || pull.phase === "refreshing") &&
-                  "border-primary/30 bg-accent text-foreground",
-              )}
-            >
-              <RotateCw
-                className={cn("size-3.5", pull.phase === "refreshing" && "animate-spin")}
-                style={
-                  pull.phase === "refreshing"
-                    ? undefined
-                    : { transform: `rotate(${pull.arrowDegrees}deg)` }
-                }
-              />
-              {pull.label}
-            </span>
-          </div>
-        )}
+        <PullToRefreshIndicator pull={pull} />
 
         {issues.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
