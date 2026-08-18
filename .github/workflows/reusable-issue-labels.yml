@@ -27,6 +27,13 @@ name: Issue Progress (reusable)
 # 通知手段として、実装エージェント経由・人間の手動PRのどちらでも同じ場所
 # (PRオープン・マージイベント)で確実に発火する。
 #
+# **develop を持たないリポジトリ向けにmain-direct-pr-opened・main-direct-mergedがある(#1901)。**
+# 上記の遷移はすべて「作業ブランチ -> develop -> main」を前提にしており、base.refかhead.refの
+# どちらかが`develop`であることを見る。guchi-apps/docsのようにPRが`issue-<番号>` -> `main`の
+# 形にしかならないリポジトリでは1つも発火せず、Implementationから先へ進む経路が無かった。
+# この2ジョブだけがbase.ref == 'main'かつhead.refが`issue-<番号>`のPRを拾う。develop運用の
+# リポジトリでは作業ブランチがmainを直接狙わないため、既存の挙動は変わらない。
+#
 # 対象issueの番号は、本リポジトリの命名規約であるブランチ名 issue-<番号>
 # (scripts/start-issue.shが作成)から特定する。head_ref等の値はscript injection
 # を避けるため env 経由でのみ参照し、run: 本文に直接展開しない。
@@ -936,6 +943,272 @@ jobs:
             else
               echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
             fi
+          done <<< "$ISSUE_NUMBERS"
+
+  main-direct-pr-opened:
+    # `issue-<番号>` -> `main` のPRを、develop運用における `issue-<番号>` -> `develop` のPRと
+    # 同じ扱いにする(#1901)。**develop を経由しないリポジトリのための経路。**
+    #
+    # 上の develop-pr-opened / develop-pr-merged / main-pr-in-progress / main-pr-merged は
+    # いずれも「作業ブランチ -> develop -> main」という運用を前提にしており、
+    # `base.ref == 'develop'` か `head.ref == 'develop'` のどちらかを必ず見る。そのため
+    # develop を持たない `guchi-apps/docs` のように PR が `issue-<番号>` -> `main` の形にしか
+    # ならないリポジトリでは、**`Implementation` から先へ進む経路が1つも無かった**
+    # (guchi-apps/docs#3 が PR #17 をmainへマージした後も `Implementation` のまま open で
+    # 盤面の「実行中」に残り続けた)。
+    #
+    # develop運用のリポジトリでは作業ブランチが `main` を直接狙うことは無いため、この2ジョブが
+    # 既存の挙動を変えることはない(仮に誤って `issue-<番号>` -> `main` のPRが作られた場合も、
+    # そのマージをもって完了扱いにするのは妥当な解釈になる)。
+    #
+    # **自動マージ判定の経路は調べない。** `claude-review-develop.yml` は caller 側で
+    # `branches: [develop]` にトリガーを絞っており(このリポジトリの同名ファイルを参照)、
+    # base が `main` のPRを判定することは無い。したがってこのPRは必ず人がマージするので、
+    # develop-pr-opened のような経路の有無の調査を挟まず、常に「ユーザーのマージが必要」
+    # (`00.check-user` + 理由の `01.check-merge`。#1470・#1490)として確定させる。
+    #
+    # 報告する Status は develop-pr-opened と同じ `develop-pr`(盤面の「Develop PR」)。
+    # main直行のリポジトリにとってはこのPRが唯一のPRで、「PRを作成・マージ中」という
+    # 段の意味はそのまま当てはまる。
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'issue-')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_REF: ${{ github.head_ref }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: main宛のPR作成をIssueへ通知する
+        id: transition
+        run: |
+          if [[ ! "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            exit 0
+          fi
+          n="${BASH_REMATCH[1]}"
+
+          # **対象issueの出力を最初に行う(#1861)。** ラベル操作・コメント投稿のどれかが
+          # GitHub APIの一時的な5xxで落ちると、`bash -e`でこのステップごと異常終了し、
+          # 後続の「Project Status を報告する」ステップまでスキップされる。以降の失敗は
+          # すべて警告に留め、進捗の報告を最優先で守る(develop-pr-openedと同じ形)。
+          echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
+
+          # 対象リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)。実在する場合だけ呼ぶ(develop-pr-openedと同じ作法)。
+          # ユーザーがマージする状態なので、理由は`01.check-merge`(#1490)。理由は常に1枚
+          # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+          REASON_LABEL="01.check-merge"
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
+          if [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの付与をスキップします（進捗の報告は続けます）"
+          fi
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            elif [ -n "$DEFINED_LABELS" ]; then
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          note=""
+          if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
+            if gh issue edit "$n" "${LABEL_ARGS[@]}"; then
+              note=$'\n\n'"⚠️ このリポジトリは作業ブランチから\`main\`へ直接マージする運用のため、自動マージの判定は行われません。内容を確認したうえでマージしてください。"
+            else
+              echo "::warning::issue #$n: ラベルの付与に失敗しました（進捗の報告は続けます）"
+            fi
+          fi
+          gh issue comment "$n" --body "🔧 実装が完了し、mainへのPRを作成しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL$note"$'\n\n<!-- issue-deck-source:issue-labels -->' \
+            || echo "::warning::issue #$n: PR作成のコメント投稿に失敗しました（進捗の報告は続けます）"
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: develop-pr
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
+            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
+            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
+
+  main-direct-merged:
+    # `issue-<番号>` -> `main` のPRがマージされた時点で、そのissueを`Done`にしてcloseする(#1901)。
+    # main直行のリポジトリではこのマージが本番反映そのものなので、develop運用における
+    # 「developへマージ -> リリースPR -> main-pr-merged」の3段が1回のマージに畳まれる。
+    #
+    # **`done`の報告を`gh issue close`より先に行う(順序が意味を持つ)。** issue-deckは
+    # Issueのcloseを受け取ると、Statusが`Planning`・`Implementation`・`Develop PR`のときに限り
+    # 終端`Closed`へ送る(#1856。src/app/api/webhooks/github/route.tsのcloseStrandedProgress)。
+    # このジョブが対象にするissueは`Implementation`か`Develop PR`にいるため**まさにその条件に
+    # 当てはまる**——先にcloseすると、`Done`ではなく`Closed`(対応終了)へ落ちうる。
+    # `done`を先に報告しておけば、close側は`onlyFrom`でProjectの実物を読み直して対象外と判断する。
+    # **既存のmain-pr-mergedがclose先行なのは、そちらの対象が`Develop`・`Release`にいて
+    # 終端遷移の条件に当てはまらないから**であり、ここへそのまま持ち込んではいけない。
+    #
+    # `gh issue close`はGITHUB_TOKEN起点のため、cleanup-on-closeジョブの`issues: closed`
+    # トリガーは発火しない(#266と同じGitHub仕様)。そのため`00.check-user`の除去はこのジョブ
+    # 自身で行う。**Webhookの配信には及ばない**ので、issue-deck側の受信は妨げられない。
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'issue-')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_REF: ${{ github.head_ref }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: 00.check-user を外しmainへのマージを通知する
+        id: transition
+        run: |
+          if [[ ! "$HEAD_REF" =~ ^issue-([0-9]+)$ ]]; then
+            exit 0
+          fi
+          n="${BASH_REMATCH[1]}"
+
+          # **対象issueの出力を最初に行う(#1861)。** 以降の失敗はすべて警告に留め、
+          # 進捗の報告とcloseを最優先で守る(develop-pr-mergedと同じ形)。
+          echo "issue_numbers=$n" >> "$GITHUB_OUTPUT"
+
+          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
+          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
+          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
+          DEFINED_LABELS=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" != 1 ]; then sleep 5; fi
+            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
+              && [ -n "$DEFINED_LABELS" ]; then
+              break
+            fi
+            DEFINED_LABELS=""
+          done
+          REMOVE_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              REMOVE_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$n" "${REMOVE_ARGS[@]}" \
+              || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告とcloseは続けます）"
+          elif [ -z "$DEFINED_LABELS" ]; then
+            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告とcloseは続けます）"
+          else
+            echo "::warning::ラベル '00.check-user' がリポジトリに存在しないため除去をスキップします"
+          fi
+          gh issue comment "$n" --body "🎉 mainへのマージが完了しました: $PR_URL"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->' \
+            || echo "::warning::issue #$n: マージ完了のコメント投稿に失敗しました（進捗の報告とcloseは続けます）"
+
+      - name: Project Status を報告する
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+          STATUS: done
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          while read -r n; do
+            [ -n "$n" ] || continue
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)。4xxは設定・実装の誤りで
+            # 待っても変わらないため、再試行せず即座に諦める。
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                -X POST "$APP_BASE_URL/api/progress" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
+              fi
+            done
+            if [ "$code" = "200" ]; then
+              echo "issue #$n を $STATUS として報告しました"
+            else
+              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
+            fi
+          done <<< "$ISSUE_NUMBERS"
+
+      # 報告の後にcloseする。理由はジョブ先頭のコメントを参照(#1856の終端遷移との競合)。
+      # 報告が失敗していてもcloseはする——mainへ入った以上、issueを開いたままにする理由が無い。
+      - name: mainへ到達したissueをcloseする
+        if: steps.transition.outputs.issue_numbers != ''
+        env:
+          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
+        run: |
+          while read -r n; do
+            [ -n "$n" ] || continue
+            gh issue close "$n" || echo "::warning::issue #$n: closeに失敗しました"
           done <<< "$ISSUE_NUMBERS"
 
   manual-step-label:

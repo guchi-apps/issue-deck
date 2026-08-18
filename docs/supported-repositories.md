@@ -191,6 +191,20 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 | `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
 | `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
 | ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
+| `issue-labels.yml` | `@workflows/v22`（guchi-apps/subpc#32で2026-08-18に追加） | **未配置**（#1901の残課題） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+
+> **進捗を`Implementation`から先へ進める経路は`issue-labels.yml`が持っている。** 3件とも当初は
+> 持っておらず、ローカルセッションが起動時に付ける`Implementation`のまま、PRをマージしても
+> issueが盤面の「実行中」に残り続けた（`subpc`の#10・#14・#19、`docs`の#3で実際に発生し、
+> 手で`Done`にしてcloseした）。**このワークフローはClaude Codeを一切起動しない**——
+> issue-deckの進捗報告API（`POST /api/progress`）を叩くのと`00.check-user`を外すだけなので、
+> 「無人実行は入れない」という#1741の判断とは別の軸にある。
+>
+> **`docs`はcallerを入れるだけでは解消しない**（#1901）。`develop`を持たずPRが
+> `issue-<番号>` → `main`の形になるため、`base.ref == 'develop'`か`head.ref == 'develop'`を
+> 見る既存ジョブがどれも発火しない。`workflows/v23`の`main-direct-pr-opened`・
+> `main-direct-merged`が要る（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)の
+> 「`develop`を持たないリポジトリ（main直行）」）。
 
 **`vps`の`develop`は`main`から21コミット遅れ・3コミット先行で分岐していた**（guchi-apps/vps#79）。
 先行分は`main`側により新しい形で入っており固有の成果が無かったため、退避ブランチ
@@ -458,9 +472,11 @@ done
 サブPCの対応表でコメントアウトされていた行を有効化した。ポート帯（10000）は#1224の時点で確保済み。
 
 ※4 `subpc`・`vps`・`docs`は#1741で追加した（3件ともprivate）。**上の「対応リポジトリ一覧」の表には
-載らないインフラ設定・共有知識のリポジトリで、`claude-issue-dispatch.yml`・`issue-labels.yml`の
-どちらも持たない。** そのため無人実行は回らず、**実行経路はこのローカルセッションだけ**になる
-（起動そのものは汎用ランチャーが行うので成立する）。実測した特徴と、載せるにあたっての判断は次のとおり。
+載らないインフラ設定・共有知識のリポジトリで、`claude-issue-dispatch.yml`を持たない。**
+そのため無人実行は回らず、**実行経路はこのローカルセッションだけ**になる
+（起動そのものは汎用ランチャーが行うので成立する）。**`issue-labels.yml`（進捗報告）は別の軸で、
+#1741の時点では3件とも持っていなかったが、その後`subpc`へ追加した**（guchi-apps/subpc#32。
+`docs`は#1901、`vps`は未配置）。実測した特徴と、載せるにあたっての判断は次のとおり。
 
 - **ラベル体系は2026-08-16に整備済み**（guchi-apps/vps#81・guchi-apps/subpc#15・guchi-apps/docs#13）。
   それ以前は3件ともラベルが未定義で、`11.local`の付与が`'11.local' not found`で落ちていた

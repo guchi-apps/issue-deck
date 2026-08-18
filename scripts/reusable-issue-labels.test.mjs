@@ -369,3 +369,74 @@ describe("Project Status の報告", () => {
     expect(result.stdout).toContain("issue #1583 を develop-pr として報告しました");
   });
 });
+
+describe("main-direct-pr-opened / main-direct-merged（main直行リポジトリ・#1901）", () => {
+  const OPENED_STEP = "main宛のPR作成をIssueへ通知する";
+  const MERGED_STEP = "00.check-user を外しmainへのマージを通知する";
+  const CLOSE_STEP = "mainへ到達したissueをcloseする";
+
+  it("main宛PRの作成で、常に00.check-userと01.check-mergeを付ける", () => {
+    const result = runStep(OPENED_STEP, { HEAD_REF: "issue-1901" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    // base=mainのPRは claude-review-develop.yml の対象外で必ず人がマージするため、
+    // develop-pr-openedのような経路の有無の調査を挟まず常に付ける
+    expect(result.calls).toContain("--add-label 00.check-user --add-label 01.check-merge");
+    expect(result.calls).toContain("mainへのPRを作成しました");
+  });
+
+  it("ラベル一覧がHTTP 503でも落ちず、進捗の報告へissue番号を渡す", () => {
+    const result = runStep(OPENED_STEP, {
+      HEAD_REF: "issue-1901",
+      STUB_LABEL_LIST_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("issue-<番号>以外のブランチからのmain宛PRでは何も報告しない", () => {
+    const result = runStep(OPENED_STEP, { HEAD_REF: "release/v1.2.0" });
+
+    expect(result.reported).toEqual([]);
+  });
+
+  it("main宛PRのマージで、確認系ラベルを外して進捗の報告へissue番号を渡す", () => {
+    const result = runStep(MERGED_STEP, { HEAD_REF: "issue-1901" });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+    expect(result.calls).toContain("--remove-label 00.check-user");
+    expect(result.calls).toContain("mainへのマージが完了しました");
+  });
+
+  it("ラベル操作・コメント投稿が失敗しても、進捗の報告へissue番号を渡す", () => {
+    const result = runStep(MERGED_STEP, {
+      HEAD_REF: "issue-1901",
+      STUB_ISSUE_WRITE_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1901"]);
+  });
+
+  it("closeステップは受け取ったissueをcloseし、失敗してもジョブを落とさない", () => {
+    const ok = runStep(CLOSE_STEP, { ISSUE_NUMBERS: "1901" });
+    expect(ok.status).toBe(0);
+    expect(ok.calls).toContain("gh issue close 1901");
+
+    const failed = runStep(CLOSE_STEP, { ISSUE_NUMBERS: "1901", STUB_ISSUE_WRITE_FAIL: "1" });
+    expect(failed.status).toBe(0);
+    expect(failed.stdout).toContain("::warning::issue #1901: closeに失敗しました");
+  });
+
+  it("`done`の報告をcloseより先に置く（#1856の終端遷移と競合させない）", () => {
+    // 先にcloseすると、issue-deckがcloseを受けて`Implementation`・`Develop PR`から
+    // 終端`Closed`へ送る経路（closeStrandedProgress）に当たり、`Done`ではなく
+    // `Closed`へ落ちうる。順序そのものが仕様なので、入れ替えを検知できるようにする。
+    const merged = workflowYaml.slice(workflowYaml.indexOf("  main-direct-merged:"));
+    expect(merged.indexOf("STATUS: done")).toBeGreaterThan(-1);
+    expect(merged.indexOf("STATUS: done")).toBeLessThan(merged.indexOf(`- name: ${CLOSE_STEP}`));
+  });
+});

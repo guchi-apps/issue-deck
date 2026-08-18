@@ -158,6 +158,32 @@ Issueの完了判定をそこへ持ち込まない。
 **`Done`のIssueへ追加作業が必要になった場合は、新しいIssueを立てる。** closeされたIssueへ
 作業を積み増すと、そのdevelopの変更はどのリリースの対象一覧にも出てこない。
 
+#### `develop`を持たないリポジトリでは`main`宛のPRが遷移を担う（#1901）
+
+上の遷移はすべて「作業ブランチ → `develop` → `main`」を前提にしており、
+`reusable-issue-labels.yml`のジョブは`base.ref == 'develop'`か`head.ref == 'develop'`の
+どちらかを必ず見る。**`guchi-apps/docs`のように`develop`を置かないリポジトリでは、PRが
+`issue-<番号>` → `main`の形にしかならないため、どのジョブも発火しない。**
+`Implementation`から先へ進む経路が1つも無く、内容が`main`へ反映された後もIssueが
+盤面の「実行中」に残り続けた（guchi-apps/docs#3）。
+
+`workflows/v23`で足した2ジョブがこの形を拾う。
+
+| ジョブ | 発火条件 | 報告 |
+| --- | --- | --- |
+| `main-direct-pr-opened` | `base.ref == 'main'` かつ `head.ref` が `issue-<番号>`・`opened` | `develop-pr`（＋`00.check-user`・`01.check-merge`の付与） |
+| `main-direct-merged` | 同左の`closed` かつ `merged == true` | `done`（＋確認系ラベルの除去・issueのclose） |
+
+- **既存の11リポジトリの挙動は変わらない。** develop運用では作業ブランチが`main`を直接
+  狙うことが無く、`if:`の条件に一致しない
+- **`claude-review-develop.yml`は`base: main`のPRを判定しない**（callerのトリガーが
+  `branches: [develop]`固定）。したがってこのPRは必ず人がマージする前提で、
+  `main-direct-pr-opened`は経路の有無を調べず常に`00.check-user`を付ける
+- **定期実行の安全網は無い。** `develop-merge-sweep`が見るのは`--base develop`のマージ済みPR
+  だけで、main直行の取りこぼしは拾えない。`docs`は自動マージの経路を持たず人が手でマージする
+  ため`pull_request: closed`は確実に発火するが、報告が5xxに当たり続けた場合は画面の
+  「進捗」セレクトで直す
+
 #### push起点の報告は、runの作成が遅れるとマージ済みのIssueを巻き戻す（#1511）
 
 **ワークフローの報告順は、イベントの発生順ではなくGitHubがrunを作った順で決まる。**
@@ -394,6 +420,10 @@ PRを作らずに終わるのは例外ではなく、いずれも各リポジト
   GitHubの仕様はActionsの中だけの話で、Webhookの配信には及ばない）。そのため`main-pr-merged`が
   `gh issue close`した場合もここへ来るが、そちらは`Develop`・`Release`からのcloseなので対象外に
   なり、`done`の報告と競合しない
+- **ただし`main-direct-merged`（#1901）は競合しうるので、報告とcloseの順序が仕様になっている。**
+  こちらが閉じるのは`Implementation`・`Develop PR`にいるIssueで、上の3つの遷移元にそのまま
+  当てはまる。**`done`を報告してからcloseする**ことで、Webhook側は`onlyFrom`でProjectの実物を
+  読み直して対象外（既に`Done`）と判断する。逆順にすると`Done`ではなく`Closed`へ落ちうる
 
 #### 判定材料はProjectの実物
 
