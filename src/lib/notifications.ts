@@ -195,8 +195,9 @@ function buildCheckUserNotifications(
  * **並べるのは前提条件が満たされていて、いま実行できるものだけ**（#1801）。手作業Issueの多くは
  * 先行する変更が本番へ出た後でなければ実行できず（`manual-step-attention.ts`）、数週間先まで
  * 動かせないものまで並べるとベルが「いま人が動けば盤面が進むもの」を集める場所として読めなくなる
- * （リリースの`progressing`を出さないのと同じ理由）。件数バッジも左メニューの
- * 「ユーザーの作業待ち」（`actionable`だけを数える。#1763）と一致する。
+ * （リリースの`progressing`を出さないのと同じ理由）。数え方は左メニューの「ユーザーの作業待ち」
+ * （`actionable`だけを数える。#1763）と揃えてある。**ただしベルの件数バッジには数えない**
+ * （#1936。`BADGE_EXCLUDED_GROUPS`）。
  *
  * 判定は左メニュー・一覧の行アイコンと同じ`computeManualStepReadiness`へ委ねる。母集団は
  * ベルが受け取る全Issue（TopBarの絞り込み前）なので、参照先の解決もそのまま行える。
@@ -297,6 +298,39 @@ export function buildNotifications(input: BuildNotificationsInput): Notification
     if (a.since === null || b.since === null) return 0;
     return new Date(a.since).getTime() - new Date(b.since).getTime();
   });
+}
+
+/**
+ * バッジに出す件数の対象外にする区分（#1936）。
+ *
+ * **手作業待ち（`71.manual-step`）はバッジに数えない。** ベルのバッジは「いま人が動けば盤面が
+ * 進むものがいくつあるか」を閉じたまま見るためのもので、増えたら開く・0になったら見なくてよい、
+ * という読み方で使う。手作業Issueは実行できる状態になってからも人の都合で数日〜数週間openのまま
+ * 残るため、数えると常時点灯し、確認待ち・マージ待ちPRが1件増えたことに気づけなくなる。
+ *
+ * **一覧（`groupNotifications`）からは外さない。** リポジトリ横断で手作業待ちを見られる場所は
+ * ベルの中しかなく（スマホは特に）、そこから消すと今度は存在自体に気づけない。
+ * バッジと一覧で母集団が違うことは、開いたときの見出しの内訳（`describeNotificationCount`）で
+ * 説明する。
+ */
+const BADGE_EXCLUDED_GROUPS: readonly NotificationGroup[] = ["manual-step"];
+
+/** バッジに出す件数。手作業待ち（`BADGE_EXCLUDED_GROUPS`）を除いた件数を返す（#1936） */
+export function countBadgeNotifications(items: NotificationItem[]): number {
+  return items.filter((item) => !BADGE_EXCLUDED_GROUPS.includes(item.group)).length;
+}
+
+/**
+ * ベルを開いたときの見出しに出す件数の文言（#1936）。
+ *
+ * バッジの件数（手作業待ちを除く）を先に置き、除いたぶんがあるときだけ内訳を添える。
+ * 左メニューの「ユーザーの作業待ち」（`formatManualStepListCount`の`2件・前提待ち2件`）と
+ * 同じ書き方で、**バッジの数字と一覧の行数が食い違う理由を画面の中だけで読めるようにする。**
+ */
+export function describeNotificationCount(items: NotificationItem[]): string {
+  const badgeCount = countBadgeNotifications(items);
+  const excluded = items.length - badgeCount;
+  return excluded === 0 ? `${badgeCount}件` : `${badgeCount}件・手作業待ち${excluded}件`;
 }
 
 /** バッジの色。1件でも失敗が混ざれば赤にする（開かずに「直す必要がある」と気づけるのはここだけ） */

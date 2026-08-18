@@ -117,11 +117,22 @@ describe("MobileNotificationButton（#1772）", () => {
     const { container } = renderButton({
       issues: [
         makeIssue({ id: "a", number: 1, labels: [label("00.check-user")] }),
-        makeIssue({ id: "b", number: 2, labels: [label("71.manual-step")] }),
+        makeIssue({ id: "b", number: 2, labels: [label("00.check-user")] }),
       ],
     });
 
     expect(container.querySelector(".bg-amber-500")?.textContent).toBe("2");
+  });
+
+  it("手作業待ちはバッジの件数に含めない（#1936。PCのベルと同じ）", () => {
+    const { container } = renderButton({
+      issues: [
+        makeIssue({ id: "a", number: 1, labels: [label("00.check-user")] }),
+        makeIssue({ id: "b", number: 2, labels: [label("71.manual-step")] }),
+      ],
+    });
+
+    expect(container.querySelector(".bg-amber-500")?.textContent).toBe("1");
   });
 
   it("押すとシートに区分ごとの一覧が出る", () => {

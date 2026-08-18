@@ -5,6 +5,8 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import {
   buildNotifications,
+  countBadgeNotifications,
+  describeNotificationCount,
   groupNotifications,
   hasErrorNotification,
   type NotificationGroup,
@@ -33,6 +35,16 @@ const MIN_FETCHING_MS = 500;
 type NotificationState = {
   items: NotificationItem[];
   groups: { group: NotificationGroup; items: NotificationItem[] }[];
+  /**
+   * ベルに重ねる件数バッジの数字（#1936）。**手作業待ちを含まない**ので`items.length`とは
+   * 一致しないことがある。理由は`lib/notifications.ts`の`BADGE_EXCLUDED_GROUPS`を参照。
+   */
+  badgeCount: number;
+  /**
+   * 開いたときの見出しに出す件数の文言（#1936）。バッジに数えていない手作業待ちがあるときは
+   * `4件・手作業待ち1件`のように内訳が付き、バッジとの差がその場で読める。
+   */
+  countLabel: string;
   /** 1件でも失敗が混ざっているか（バッジを赤にする条件） */
   hasError: boolean;
   /**
@@ -57,6 +69,8 @@ type NotificationState = {
 const EMPTY_STATE: NotificationState = {
   items: [],
   groups: [],
+  badgeCount: 0,
+  countLabel: "0件",
   hasError: false,
   refresh: () => {},
   isFetching: false,
@@ -163,6 +177,8 @@ export function NotificationProvider({
     return {
       items,
       groups: groupNotifications(items),
+      badgeCount: countBadgeNotifications(items),
+      countLabel: describeNotificationCount(items),
       hasError: hasErrorNotification(items),
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる

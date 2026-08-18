@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
 import {
   buildNotifications,
+  countBadgeNotifications,
+  describeNotificationCount,
   groupNotifications,
   hasErrorNotification,
   type NotificationItem,
@@ -445,5 +447,47 @@ describe("buildNotifications 並び順", () => {
   it("対象が無ければ空配列を返す", () => {
     expect(build()).toEqual([]);
     expect(hasErrorNotification([])).toBe(false);
+  });
+});
+
+describe("バッジの件数（#1936）", () => {
+  it("手作業待ちをバッジの件数に数えない", () => {
+    const items = build({
+      issues: [
+        makeIssue({ id: "manual", number: 3, labels: [label("71.manual-step")] }),
+        makeIssue({ id: "check", number: 4, labels: [label("00.check-user")] }),
+      ],
+      releaseStatuses: [makeReleaseStatus()],
+    });
+
+    // 一覧には3件（リリース・確認待ち・手作業待ち）並ぶが、バッジは手作業待ちを除いた2件
+    expect(items).toHaveLength(3);
+    expect(countBadgeNotifications(items)).toBe(2);
+  });
+
+  it("手作業待ちしか無ければバッジは0件になる（＝バッジを出さない）", () => {
+    const items = build({
+      issues: [makeIssue({ id: "manual", number: 3, labels: [label("71.manual-step")] })],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(countBadgeNotifications(items)).toBe(0);
+  });
+
+  it("見出しの件数は、手作業待ちがあるときだけ内訳を添える", () => {
+    const withManualStep = build({
+      issues: [
+        makeIssue({ id: "manual", number: 3, labels: [label("71.manual-step")] }),
+        makeIssue({ id: "check", number: 4, labels: [label("00.check-user")] }),
+      ],
+    });
+    expect(describeNotificationCount(withManualStep)).toBe("1件・手作業待ち1件");
+
+    const withoutManualStep = build({
+      issues: [makeIssue({ id: "check", number: 4, labels: [label("00.check-user")] })],
+    });
+    expect(describeNotificationCount(withoutManualStep)).toBe("1件");
+
+    expect(describeNotificationCount([])).toBe("0件");
   });
 });

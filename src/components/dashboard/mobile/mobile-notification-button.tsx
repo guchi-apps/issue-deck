@@ -43,7 +43,7 @@ import type { NotificationItem } from "@/lib/notifications";
  * ルーターのマウントを求められる。開いていないシートの中身はRadixが描かない。
  */
 export function MobileNotificationButton() {
-  const { items, hasError } = useNotificationState();
+  const { badgeCount, countLabel, hasError } = useNotificationState();
   const [open, setOpen] = useState(false);
 
   return (
@@ -54,12 +54,13 @@ export function MobileNotificationButton() {
         <button
           type="button"
           aria-label="対応が必要なもの"
-          title={describeNotificationTitle(items.length)}
+          title={describeNotificationTitle(badgeCount)}
           className="relative flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Bell className="size-5" />
-          {/* 指で押せる大きさ（size-11）のぶんだけ、PCより内側へ寄せてアイコンの角に重ねる */}
-          <NotificationBadge count={items.length} hasError={hasError} className="top-1.5 right-1.5" />
+          {/* 指で押せる大きさ（size-11）のぶんだけ、PCより内側へ寄せてアイコンの角に重ねる。
+              数えるのは手作業待ちを除いたぶん（#1936）でPCのベルと同じ */}
+          <NotificationBadge count={badgeCount} hasError={hasError} className="top-1.5 right-1.5" />
         </button>
       </SheetTrigger>
       {/*
@@ -73,7 +74,8 @@ export function MobileNotificationButton() {
               占めているので、更新ボタンは件数と同じ2段目の右端へ置く（#1909） */}
           <SheetTitle className="pr-8 text-sm">対応が必要なもの</SheetTitle>
           <div className="flex items-center justify-between gap-2">
-            <SheetDescription className="text-xs">{items.length}件</SheetDescription>
+            {/* バッジに数えていない手作業待ちがあれば内訳が付く（#1936） */}
+            <SheetDescription className="text-xs">{countLabel}</SheetDescription>
             <NotificationRefreshButton />
           </div>
         </SheetHeader>
