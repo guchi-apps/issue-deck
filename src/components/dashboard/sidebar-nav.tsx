@@ -59,11 +59,6 @@ type SidebarNavProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1613）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
-  /**
-   * 未確認（回答が届いていて未読）の質問Issueの件数（#1796）。
-   * 「質問」の件数として出し、1件以上のときはオレンジの丸で強調する（#1910）。
-   */
-  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
@@ -91,7 +86,6 @@ export function SidebarNav({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
-  unconfirmedQuestionCount,
   pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -220,13 +214,15 @@ export function SidebarNav({
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
               // 件数は未確認（回答が届いていて未読）の数で、確認待ち・作業待ちと同じく
-              // 「いま手を動かせる数」を出す（#1910）。総数との差は一覧のヘッダーの
-              // 内訳（`3件・未確認1件`）で読む
-              count: unconfirmedQuestionCount,
-              emphasis: unconfirmedQuestionCount > 0 ? "attention" : "none",
+              // 「いま手を動かせる数」を出す（#1910。数え方は`computeNavCountsForFilters`）。
+              // 総数との差は一覧のヘッダーの内訳（`3件・未確認1件`）で読む
+              count: navCounts[view.id],
+              emphasis: navCounts[view.id] > 0 ? "attention" : "none",
+              // 丸の数字が何を数えているのかは、行のラベル（「質問」）からは読めないため
+              // 吹き出しで補う（作業待ち（#1763）と違い、言い直しにならない）
               title:
-                unconfirmedQuestionCount > 0
-                  ? `回答が届いていてまだ開いていない質問が${unconfirmedQuestionCount}件あります`
+                navCounts[view.id] > 0
+                  ? `回答が届いていてまだ開いていない質問が${navCounts[view.id]}件あります`
                   : undefined,
             }),
           )}

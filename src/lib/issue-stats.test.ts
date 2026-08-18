@@ -778,6 +778,22 @@ describe("time-dependent stats", () => {
       expect(computeNavCountsForFilters(issues, listFilters, null)["manual-step"]).toBe(1);
     });
 
+    // 確認済みを含む総数は「いま読める数」として読めない（#1910）
+    it("質問は未確認（回答が届いていて未読）だけを数える", () => {
+      const issues = [
+        makeIssue({ id: "1", title: "[質問] 未確認のもの", hasUnreadComments: true }),
+        makeIssue({ id: "2", title: "[質問] 確認済みのもの", hasUnreadComments: false }),
+        makeIssue({
+          id: "3",
+          title: "[質問] 回答待ちのもの",
+          hasUnreadComments: true,
+          qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
+        }),
+      ];
+
+      expect(computeNavCountsForFilters(issues, listFilters, null).question).toBe(1);
+    });
+
     it("状態の絞り込みを適用した件数を返す（close済みを含めない）", () => {
       const issues = [
         makeIssue({ id: "1" }),
@@ -887,7 +903,13 @@ describe("time-dependent stats", () => {
         repositoryFullName: "owner/b",
         labels: [{ name: "71.manual-step", color: "blue", description: null }],
       }),
-      makeIssue({ id: "4", repositoryFullName: "owner/b", title: "[質問] これは何ですか" }),
+      // 「質問」の件数は未確認（回答が届いていて未読）だけを数える（#1910）
+      makeIssue({
+        id: "4",
+        repositoryFullName: "owner/b",
+        title: "[質問] これは何ですか",
+        hasUnreadComments: true,
+      }),
     ];
     const filters = {
       q: "",
