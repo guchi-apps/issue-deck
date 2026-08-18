@@ -42,9 +42,12 @@ type MobileIssuePropertiesSectionProps = {
  * 触るしかなかった。中身・並び・注記はPCのパネルと同じ`IssueProgressSelect`を使い、
  * **どちらかの画面にだけ挙動を足さない。**
  *
- * 畳んだ行のsummaryにも進捗を出すのは、**開かないと今どこにいるかが分からない状態にしない**ため。
- * サマリーカードにも進捗は出るが、あちらは読む専用で、こちらは「押せば変えられる場所」を指す
- * （担当者がすでに両方に出ているのと同じ関係）。
+ * 畳んだ行のsummaryにも進捗を出す。**これで進捗を読める場所は最大3つになる**——サマリーカード
+ * （`mobile-issue-summary-card.tsx`）と、`Planning`〜`Done`のときだけ出る実行状況カードの
+ * ステップ表示（`workflow-status-steps.tsx`）と、この行。増やしてなお出すのは、**残り2つは
+ * どちらも読む専用で、「変えられる場所がここにある」と示せるのがこの行だけ**だから。
+ * 出さないと、進捗を変えたい人は「プロパティ」を当てずっぽうで開くことになる。
+ * `ready`・`closed`ではステップ表示自体が出ないので、そこでは2か所に収まる。
  */
 export function MobileIssuePropertiesSection({
   issue,

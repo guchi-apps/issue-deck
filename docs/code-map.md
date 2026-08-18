@@ -128,8 +128,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`mobile/mobile-issue-summary-card.tsx`](../src/components/dashboard/mobile/mobile-issue-summary-card.tsx)（読む専用）と
   [`mobile/mobile-issue-properties-section.tsx`](../src/components/dashboard/mobile/mobile-issue-properties-section.tsx)（編集の口）で、
   **サマリーは読むだけ・編集は折りたたみ**が分け方の要点。同じ値を両方に出すのは、担当者と進捗の
-  ように**折りたたみを開かないと今どこにいるかが分からなくなる**ときに限る（#1920。進捗は畳んだ行の
-  summaryにも出す）。
+  ように**畳んだ行が「変えられる場所はここ」と示す必要がある**ときに限る（#1920）。進捗はこれで
+  読める場所が最大3つ（サマリーカード・実行状況カードのステップ表示・畳んだ行）になるが、
+  **前の2つは読む専用で、変更の口を指せるのは畳んだ行だけ**。`ready`・`closed`ではステップ表示が
+  出ないので2つに収まる。
   `IssueDetailSection`の開閉状態は`issue-detail.section.<id>`のlocalStorageで**セクションごとに1つ**
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
