@@ -13,7 +13,6 @@ import {
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
-  formatElapsed,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -256,7 +255,7 @@ export function PullRequestDetail({
               {pullRequest.authorLogin}
             </span>
             <span className="text-xs text-muted-foreground">
-              {formatElapsed(pullRequest.createdAt)}
+              {formatRelativeDate(pullRequest.createdAt)}
             </span>
             <PullRequestRepairButtons
               repositoryFullName={pullRequest.repositoryFullName}

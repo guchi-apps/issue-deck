@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -20,6 +21,7 @@ const taskList = {
   toggleTask: vi.fn(),
 };
 const runManualStep = vi.fn();
+const controlManualStepRun = vi.fn();
 const issueMutations = {
   updateIssue: vi.fn(),
   isSubmitting: false,
@@ -76,16 +78,47 @@ function issue(overrides: Partial<Issue> = {}): Issue {
 
 /** 代行実行（#1828）の判定材料。**差し込まないと画面が自分で`/api/dispatch`を叩く** */
 function dispatchHandle(
-  overrides: { hosts?: DispatchHostView[]; jobs?: DispatchJobView[] } = {},
+  overrides: {
+    hosts?: DispatchHostView[];
+    jobs?: DispatchJobView[];
+    /** 自動実行の状態（#1882）。サーバーが持つものを差し込む */
+    manualStepRuns?: ManualStepRunView[];
+  } = {},
 ): DispatchStateHandle {
   return {
     hosts: overrides.hosts ?? [subpcHost()],
     jobs: overrides.jobs ?? [],
     sessions: [],
+    manualStepRuns: overrides.manualStepRuns ?? [],
     isSubmitting: false,
     runManualStep,
+    controlManualStepRun,
+    abortManualStep: vi.fn(),
     cancel: vi.fn(),
   } as unknown as DispatchStateHandle;
+}
+
+/** サーバーが持っている自動実行（#1882） */
+function manualStepRun(overrides: Partial<ManualStepRunView> = {}): ManualStepRunView {
+  return {
+    repositoryFullName: REPO,
+    issueNumber: 1823,
+    issueTitle: "[手作業] サブPC: チェックアウトを更新する",
+    issueId: "1823",
+    targetHost: "subpc",
+    status: "RUNNING",
+    pausedReason: null,
+    done: 0,
+    total: 3,
+    currentLine: null,
+    currentLabel: null,
+    currentJobId: null,
+    message: null,
+    diagnoseConsent: true,
+    startedAt: "2026-08-18T00:00:00Z",
+    finishedAt: null,
+    ...overrides,
+  };
 }
 
 function subpcHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
@@ -93,6 +126,7 @@ function subpcHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView 
     name: "subpc",
     online: true,
     manualStepCapable: true,
+    manualStepAbortCapable: null,
     repositories: [REPO],
     ...overrides,
   } as DispatchHostView;
@@ -106,6 +140,7 @@ function manualStepJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     kind: "MANUAL_STEP",
     status: "SUCCEEDED",
     manualStepLine: STEP_LINE,
+    targetJobId: null,
     command: "git pull --ff-only",
     exitCode: 0,
     commandOutput: "Already up to date.",
@@ -149,6 +184,7 @@ describe("ManualStepGuideDialog", () => {
     issueMutations.isSubmitting = false;
     taskList.toggleTask.mockReset();
     runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
     issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ state: "closed" }));
   });
 
@@ -294,6 +330,7 @@ describe("ManualStepGuideDialog の代行実行", () => {
     taskList.body = BODY;
     taskList.toggleTask.mockReset();
     runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
   });
 
   afterEach(() => {
@@ -464,6 +501,7 @@ describe("ManualStepGuideDialog の自動実行", () => {
     taskList.body = AUTO_BODY;
     taskList.toggleTask.mockReset();
     runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
     issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ body: AUTO_BODY }));
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -484,98 +522,98 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(screen.getByRole("button", { name: "承認して3件を自動実行" })).toBeTruthy();
   });
 
-  it("承認すると1件目を実行し、成功したら次の手順へ自動で進む", async () => {
-    const view = renderAutoDialog(dispatchHandle());
+  it("承認するとサーバーへ開始を伝える（画面は積まない。#1882）", () => {
+    renderAutoDialog(dispatchHandle());
 
     fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
 
-    expect(runManualStep).toHaveBeenCalledWith(
-      expect.objectContaining({ stepLine: FIRST_LINE, command: "git pull --ff-only" }),
-    );
-
-    view.rerender(
-      dispatchHandle({ jobs: [manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 })] }),
-    );
-
-    // 成功した手順にはチェックが付き、次の手順が積まれる
-    expect(taskList.toggleTask).toHaveBeenCalledWith(FIRST_LINE, true);
-    expect(runManualStep).toHaveBeenCalledWith(
+    expect(controlManualStepRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        stepLine: SECOND_LINE,
-        command: "systemctl --user restart issue-deck-poller.service",
+        repositoryFullName: REPO,
+        issueNumber: 1823,
+        action: "start",
+        hostName: "subpc",
+        diagnoseConsent: true,
       }),
     );
+    // **画面からは1件も積まない。** 積むのはサーバー（両方が積むと同じ手順が二重に走る）
+    expect(runManualStep).not.toHaveBeenCalled();
   });
 
-  it("最後は完了の確認のコマンドまで流し、クローズはしない", async () => {
-    const view = renderAutoDialog(dispatchHandle());
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
-
-    view.rerender(
-      dispatchHandle({ jobs: [manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 })] }),
-    );
-    view.rerender(
-      dispatchHandle({
-        jobs: [
-          manualStepJob({ id: "job-2", manualStepLine: SECOND_LINE, exitCode: 0 }),
-          manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 }),
-        ],
-      }),
-    );
-
-    expect(runManualStep).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stepLine: VERIFICATION_LINE,
-        command: "git rev-list --count HEAD..origin/develop",
-      }),
-    );
-    expect(issueMutations.updateIssue).not.toHaveBeenCalled();
-  });
-
-  it("失敗したらそこで止まり、次の手順を積まない", () => {
-    const view = renderAutoDialog(dispatchHandle());
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
-    expect(runManualStep).toHaveBeenCalledTimes(1);
-
-    view.rerender(
-      dispatchHandle({
-        jobs: [
-          manualStepJob({
-            manualStepLine: FIRST_LINE,
-            status: "FAILED",
-            exitCode: 1,
-            commandOutput: "error: Your local changes would be overwritten",
-          }),
-        ],
-      }),
-    );
-
-    expect(runManualStep).toHaveBeenCalledTimes(1);
-    expect(taskList.toggleTask).not.toHaveBeenCalled();
-    expect(screen.getByText("失敗したため止まっています")).toBeTruthy();
-  });
-
-  // 終わったジョブは24時間画面に残る。**前回の失敗を理由に、これから積む1件を止めない**
-  it("前回の実行で失敗した手順でも、承認したら実行し直す", () => {
+  it("走っている間は進み具合と「閉じても続く」ことを出す（#1882）", () => {
     renderAutoDialog(
       dispatchHandle({
-        jobs: [
-          manualStepJob({
-            manualStepLine: FIRST_LINE,
-            status: "FAILED",
-            exitCode: 1,
-            createdAt: "2026-08-16T00:00:00Z",
+        manualStepRuns: [manualStepRun({ done: 1, total: 3, currentLine: SECOND_LINE })],
+      }),
+    );
+
+    expect(screen.getByText("自動実行中 2 / 3")).toBeTruthy();
+    expect(screen.getByText("・この画面を閉じても続きます")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "中断する" }).length).toBeGreaterThan(0);
+  });
+
+  it("中断するとサーバーへ中断を伝える（#1882）", () => {
+    renderAutoDialog(dispatchHandle({ manualStepRuns: [manualStepRun({ done: 1 })] }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "中断する" })[0]);
+
+    expect(controlManualStepRun).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "stop", repositoryFullName: REPO, issueNumber: 1823 }),
+    );
+  });
+
+  it("止まっているときは理由を出し、次を積まない", () => {
+    renderAutoDialog(
+      dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({
+            status: "PAUSED",
+            pausedReason: "FAILED",
+            message: "終了コード 1 で終わったため止まりました。",
+            done: 1,
           }),
+        ],
+        jobs: [manualStepJob({ manualStepLine: FIRST_LINE, status: "FAILED", exitCode: 1 })],
+      }),
+    );
+
+    expect(screen.getByText("失敗したため止まっています")).toBeTruthy();
+    expect(screen.getByText("・終了コード 1 で終わったため止まりました。")).toBeTruthy();
+    expect(runManualStep).not.toHaveBeenCalled();
+  });
+
+  it("人が実行して「実行した・次へ」を押すと、続きから流すようサーバーへ伝える", async () => {
+    renderAutoDialog(
+      dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({ status: "PAUSED", pausedReason: "USER", currentLine: FIRST_LINE }),
         ],
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
+    fireEvent.click(screen.getByRole("button", { name: "実行した・次へ" }));
 
-    expect(runManualStep).toHaveBeenCalledWith(
-      expect.objectContaining({ stepLine: FIRST_LINE, command: "git pull --ff-only" }),
+    await vi.waitFor(() =>
+      expect(controlManualStepRun).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "resume" }),
+      ),
     );
-    expect(screen.queryByText("失敗したため止まっています")).toBeNull();
+    expect(taskList.toggleTask).toHaveBeenCalledWith(FIRST_LINE, true);
+  });
+
+  it("自動実行中の成功では画面がチェックを付けない（付けるのはサーバー。#1882）", () => {
+    const view = renderAutoDialog(
+      dispatchHandle({ manualStepRuns: [manualStepRun({ currentLine: FIRST_LINE })] }),
+    );
+
+    view.rerender(
+      dispatchHandle({
+        manualStepRuns: [manualStepRun({ currentLine: FIRST_LINE })],
+        jobs: [manualStepJob({ manualStepLine: FIRST_LINE, exitCode: 0 })],
+      }),
+    );
+
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
   });
 
   it("失敗すると原因を調べ、修正案を差分で出す", async () => {
@@ -592,10 +630,11 @@ describe("ManualStepGuideDialog の自動実行", () => {
       }),
     });
 
-    const view = renderAutoDialog(dispatchHandle());
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
-    view.rerender(
+    renderAutoDialog(
       dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({ status: "PAUSED", pausedReason: "FAILED", currentLine: FIRST_LINE }),
+        ],
         jobs: [manualStepJob({ manualStepLine: FIRST_LINE, status: "FAILED", exitCode: 1 })],
       }),
     );
@@ -611,12 +650,16 @@ describe("ManualStepGuideDialog の自動実行", () => {
 
   // 出力にはシークレットが混ざりうるので、送ってよいかは承認の時点で決める
   it("同意を外して承認した場合は、失敗しても出力を送らない", () => {
-    const view = renderAutoDialog(dispatchHandle());
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
-    view.rerender(
+    renderAutoDialog(
       dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({
+            status: "PAUSED",
+            pausedReason: "FAILED",
+            diagnoseConsent: false,
+            currentLine: FIRST_LINE,
+          }),
+        ],
         jobs: [manualStepJob({ manualStepLine: FIRST_LINE, status: "FAILED", exitCode: 1 })],
       }),
     );
@@ -625,7 +668,7 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(screen.getByRole("button", { name: "原因を調べる" })).toBeTruthy();
   });
 
-  it("修正を適用すると、本文を書き換えてから実行する", async () => {
+  it("修正を適用すると、本文を書き換えてから続きをサーバーへ任せる（#1882）", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -639,10 +682,11 @@ describe("ManualStepGuideDialog の自動実行", () => {
       }),
     });
 
-    const view = renderAutoDialog(dispatchHandle());
-    fireEvent.click(screen.getByRole("button", { name: "承認して3件を自動実行" }));
-    view.rerender(
+    renderAutoDialog(
       dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({ status: "PAUSED", pausedReason: "FAILED", currentLine: FIRST_LINE }),
+        ],
         jobs: [
           manualStepJob({
             manualStepLine: FIRST_LINE,
@@ -662,13 +706,12 @@ describe("ManualStepGuideDialog の自動実行", () => {
     // 書き換えたのはそのコマンドだけ（他の手順・確認はそのまま）
     expect(patch.body).toContain("systemctl --user restart issue-deck-poller.service");
     expect(patch.body).toContain("git rev-list --count HEAD..origin/develop");
+    // **画面からは積み直さない。** 続きを流すのはサーバー
     await vi.waitFor(() =>
-      expect(runManualStep).toHaveBeenCalledWith(
-        expect.objectContaining({
-          stepLine: FIRST_LINE,
-          command: "git -C ~/apps/issue-deck pull --ff-only",
-        }),
+      expect(controlManualStepRun).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "resume" }),
       ),
     );
+    expect(runManualStep).not.toHaveBeenCalled();
   });
 });

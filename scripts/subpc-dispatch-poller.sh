@@ -19,6 +19,9 @@
 # セッションに触らないジョブもある（#1828）。
 #
 #   MANUAL_STEP … 手作業アシスタントで承認された1手順ぶんのコマンドを、このホストで実行する。
+#   MANUAL_STEP_ABORT … 走っている代行実行を止める（#1882）。
+#     `systemctl --user stop issue-deck-manual-step-<対象ジョブID>`。ユニット名は受け取った
+#     ジョブidから組み立て直す（任意のユニットを止める口にしない）。
 #                 **GitHubの手作業Issueの本文と照合してから**、別プロセス
 #                 （scripts/run-manual-step.sh）で実行し、終了コードと出力を画面へ返す
 #
@@ -92,7 +95,8 @@ set -euo pipefail
 # 10: マージ済みworktreeの掃除（cleanup-worktrees.sh）を一定間隔で呼ぶ（#1716）。
 # 11: 手作業の代行実行（`MANUAL_STEP`）を、GitHubの本文と照合してから実行する（#1828）。
 # 12: 計画レビュー（`PLAN_REVIEW`）のセッションを起こす（#1855）。
-DISPATCH_POLLER_VERSION="12"
+# 13: 走っている代行実行を止める（`MANUAL_STEP_ABORT`）（#1882）。
+DISPATCH_POLLER_VERSION="13"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -395,6 +399,20 @@ manual_step_capable() {
   fi
 }
 
+# 走っている代行実行を止められるか（#1882）。**`systemd-run`で起こしたtransient unitを
+# `systemctl --user stop`で止める**ので、systemdのユーザーセッションが使えるかで判定する。
+#
+# **`manual_step_capable`とは分けて申告する。** 代行実行を実行できても、`setsid`の退避経路で
+# 起こしたものは止められない。止められないと分かっていれば、画面は押す前に
+# 「打ち切り（5分）まで待つことになります」と案内できる。
+manual_step_abort_capable() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # 計画レビュー（G1・#1855）のセッションを起こせるか。**ランチャーが手元にあるかで判定する**
 # （`cross_repo_question_capable`と同じ）。
 #
@@ -644,11 +662,12 @@ announce() {
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson manualStep "$(manual_step_capable)" \
+    --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1353,6 +1372,53 @@ run_manual_step_job() {
   return 0
 }
 
+# 走っている代行実行を止める（#1882）。
+#
+# 代行実行は`systemd-run --user --collect --unit=issue-deck-manual-step-<ジョブID>`で
+# 起こしている。**ユニット名は受け取ったジョブidから組み立て直す**ので、この経路で任意の
+# ユニットを止めることはできない（idの形も確かめる）。
+#
+# 止めると`run-manual-step.sh`ごと落ちるため、**そのジョブの結果は返らない**。issue-deck側は
+# heartbeatの途絶で`TIMEOUT`にするか、画面が中断として扱う。ここでは中断ジョブ自身の成否だけを返す。
+abort_manual_step_job() {
+  local job_id="$1" target_job_id="$2" unit
+
+  if [[ -z "$target_job_id" ]]; then
+    report_job "$job_id" failed "止める対象のジョブが指定されていません。"
+    return 0
+  fi
+  # cuid（英数字）以外は受け付けない。**そのままユニット名になる値**なので形を確かめる
+  if [[ ! "$target_job_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    report_job "$job_id" failed "止める対象のジョブidが不正です。"
+    return 0
+  fi
+
+  unit="issue-deck-manual-step-$target_job_id"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    report_job "$job_id" failed "systemctlが無いため、走っているコマンドを止められません。"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため停止しません（$unit）"
+    return 0
+  fi
+
+  # **既に終わっていた場合も失敗にしない。** 止めたい状態にはなっている（`is-active`で確かめる）
+  if ! systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    report_job "$job_id" succeeded "走っているコマンドは既に終わっていました。"
+    return 0
+  fi
+
+  if systemctl --user stop "$unit" >/dev/null 2>&1; then
+    echo "  代行実行を中断しました（$unit）"
+    report_job "$job_id" succeeded "走っているコマンドを止めました。"
+    return 0
+  fi
+  report_job "$job_id" failed "走っているコマンドを止められませんでした（$unit）。"
+  return 0
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -1430,6 +1496,14 @@ run_job() {
   # 問わない（実行するのはホスト上のコマンドで、worktreeを作るわけではない）。
   if [[ "$kind" == "MANUAL_STEP" ]]; then
     run_manual_step_job "$job_id" "$owner" "$repo" "$issue_number" "$command"
+    return 0
+  fi
+
+  # 走っている代行実行の中断（#1882）。**受け取るのは止める対象のジョブidだけ**で、
+  # 実行するコマンドは受け取らない（ユニット名はこちらで組み立て直す。`INTERRUPT`・`KILL`が
+  # セッション名を組み立て直すのと同じ作法で、任意の`systemctl stop`を流す口にしない）。
+  if [[ "$kind" == "MANUAL_STEP_ABORT" ]]; then
+    abort_manual_step_job "$job_id" "$(printf '%s' "$job_json" | jq -r '.targetJobId // ""')"
     return 0
   fi
 

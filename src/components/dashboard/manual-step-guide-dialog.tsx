@@ -37,19 +37,28 @@ import {
 } from "@/hooks/use-manual-step-autorun";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
 import {
-  findManualStepJobForStep,
-  isActiveDispatchJobStatus,
+  describeManualStepAbortRejection,
+  resolveManualStepAbortRejection,
   resolveManualStepHost,
+  type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import {
   buildManualStepRunPlan,
   findManualStepEntry,
-  findNextManualStepEntry,
   type ManualStepRunEntry,
   type ManualStepRunPlan,
 } from "@/lib/manual-step-autorun";
-import { replaceManualStepCommand } from "@/lib/manual-step-command";
+import {
+  MANUAL_STEP_TIMEOUT_SECONDS,
+  replaceManualStepCommand,
+} from "@/lib/manual-step-command";
+import {
+  describeManualStepRun,
+  isActiveManualStepRun,
+  manualStepRunProgressPercent,
+  type ManualStepRunView,
+} from "@/lib/manual-step-run-view";
 import {
   parseManualStepGuide,
   type ManualStepGuide,
@@ -254,7 +263,13 @@ function ManualStepGuideContent({
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   const prerequisites = useManualStepPrerequisites(issue, issues);
   const { updateIssue, isSubmitting, error: closeError } = useIssueMutations();
-  const autorun = useManualStepAutoRun();
+  // 自動実行の状態はサーバーが持つ（#1882）。**画面は読んで出すだけで、次の1件を積まない**——
+  // 画面とサーバーの2か所が積むと、同じ手順が二重に走る
+  const autorun = useManualStepAutoRun({
+    dispatch,
+    repositoryFullName: issue.repositoryFullName,
+    issueNumber: issue.number,
+  });
 
   // 手順とチェック状態の正はIssue本文。トグルの楽観表示（`taskList.body`）を材料にすることで、
   // 「実行した」を押した瞬間にチェックが付いて見える
@@ -293,9 +308,9 @@ function ManualStepGuideContent({
   async function handleStepDone() {
     if (stage.kind === "step" && stage.step.line !== null) {
       if (!stage.step.checked) await taskList.toggleTask(stage.step.line, true);
-      // 人が実行した項目も「流し終えた」扱いにして、自動実行を先へ進める
-      autorun.markDone(stage.step.line);
-      autorun.resume();
+      // 人が実行した手順にチェックを付けたので、止まっていた自動実行は続きから流せる。
+      // **次に何を積むかを決めるのはサーバー**（チェックの付いた手順は計画から外れる）
+      await autorun.resume();
     }
     onStageIndexChange(index + 1);
   }
@@ -305,28 +320,18 @@ function ManualStepGuideContent({
    *
    * **手動で押したときは次の画面へ自動で進めない。** 実行できたことと、出力を見て次へ進んで
    * よいと判断することは別で、勝手に進むと結果を読む前に画面が変わる。付けるのはチェックだけ。
-   * 自動実行中（#1869）は、承認した時点でそこまで含めて任されているので下の制御が先へ進める。
+   *
+   * **自動実行中はここでチェックを付けない**（#1882）。付けるのはサーバー（GitHub App名義）で、
+   * 画面を閉じていても同じように付く。両方で付けようとすると、同じ本文への書き込みが競合する。
    */
   const handleExecuted = useCallback(
     async (executed: ManualStepRunEntry) => {
-      autorun.markDone(executed.line);
+      if (autorun.active) return;
       if (executed.kind !== "step" || executed.checked) return;
       await taskList.toggleTask(executed.line, true);
     },
-    [autorun, taskList],
+    [autorun.active, taskList],
   );
-
-  /**
-   * 実行が失敗したとき。**自動実行はそこで止める**（次の手順へ進めない）。
-   *
-   * ただし**自動実行が流している最中は、止めるかどうかを下の制御だけが決める**。画面に出ている
-   * のは前回の実行で失敗したジョブのこともあり（終わったジョブは24時間残る）、それを理由に
-   * 止めると、これから積む1件を実行する前に止まってしまう。
-   */
-  const handleFailed = useCallback(() => {
-    if (autorun.running) return;
-    autorun.pause("failed");
-  }, [autorun]);
 
   /**
    * Claudeの修正案（#1869）を適用する。
@@ -355,6 +360,15 @@ function ManualStepGuideContent({
       onIssueUpdated(updated);
       if (!params.run) return { ok: true as const };
 
+      // **自動実行が止まっているだけなら、積むのはサーバーに任せる**（#1882）。ここで直接
+      // 積むと、続きから流したサーバーが同じ手順をもう1件積みうる（実行の入口は1つに保つ）
+      if (autorun.active) {
+        const resumed = await autorun.resume();
+        return resumed
+          ? { ok: true as const }
+          : { ok: false as const, message: "自動実行を再開できませんでした。" };
+      }
+
       if (!host) {
         return { ok: false as const, message: "代行実行できるサブPCが見つかりませんでした。" };
       }
@@ -366,22 +380,30 @@ function ManualStepGuideContent({
         command: params.command,
       });
       if (!result.ok) return { ok: false as const, message: result.message };
-      // 失敗で止まっていた自動実行は、直したので続きから流す
-      autorun.resume();
       return { ok: true as const };
     },
     [autorun, dispatch, host, issue, onIssueUpdated, taskList.body, updateIssue],
   );
 
-  useManualStepAutoRunController({
-    autorun,
-    plan,
+  // サーバーが流している項目まで画面を進める（#1882）。**進めるのは1項目につき1回**で、
+  // 人が前の手順へ戻ったのを引き戻さない
+  useManualStepRunNavigation({
+    run: autorun.run,
     stages,
-    dispatch,
-    issue,
-    host,
     onStageIndexChange,
   });
+
+  // 失敗の自動診断は、**承認した1回に含まれる同意**（サーバーが覚えている）で決まる
+  const autoDiagnose = autorun.run?.diagnoseConsent === true && autorun.active;
+  /**
+   * 自動実行中の「もう一度実行」。**画面からは積まず、続きから流すようサーバーへ頼む**（#1882）。
+   * ここで積むと、同じ手順をサーバーがもう1件積みうる（実行の入口を1つに保つ）。
+   */
+  const autorunRetry = autorun.active
+    ? () => {
+        void autorun.resume();
+      }
+    : undefined;
 
   const stepCount = guide.hasTemplate ? guide.steps.length : 0;
   const currentEntry =
@@ -410,7 +432,7 @@ function ManualStepGuideContent({
         </DialogDescription>
       </header>
 
-      <AutoRunBar autorun={autorun} plan={plan} />
+      <AutoRunBar autorun={autorun} host={host} />
 
       <div className="flex min-h-0 flex-col overflow-y-auto">
         <div className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-muted/60 p-3 backdrop-blur-sm">
@@ -430,8 +452,10 @@ function ManualStepGuideContent({
                   device={guide.where.device}
                   consent={autorun.consent}
                   onConsentChange={autorun.setConsent}
-                  onApprove={autorun.start}
-                  isSubmitting={dispatch.isSubmitting}
+                  onApprove={() => {
+                    if (host) void autorun.start(host.name);
+                  }}
+                  isSubmitting={autorun.isSubmitting || dispatch.isSubmitting}
                 />
               )}
             </>
@@ -445,9 +469,9 @@ function ManualStepGuideContent({
               guide={guide}
               dispatch={dispatch}
               entry={currentEntry}
-              autoDiagnose={autorun.active && autorun.consent}
+              autoDiagnose={autoDiagnose}
               onExecuted={handleExecuted}
-              onFailed={handleFailed}
+              onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
             />
           )}
@@ -458,9 +482,9 @@ function ManualStepGuideContent({
               issue={issue}
               plan={plan}
               dispatch={dispatch}
-              autoDiagnose={autorun.active && autorun.consent}
+              autoDiagnose={autoDiagnose}
               onExecuted={handleExecuted}
-              onFailed={handleFailed}
+              onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
             />
           )}
@@ -485,11 +509,17 @@ function ManualStepGuideContent({
           </Button>
         )}
         <div className="flex flex-col-reverse gap-2 sm:order-3 sm:ml-auto sm:flex-row">
-          {/* 自動実行は**いつでも止められる**（#1869）。押すと積んだぶんは走り切るが、次は積まない */}
+          {/* 自動実行は**いつでも中断できる**（#1882）。次を積まないだけでなく、走っている
+              1件も止める（止められないホストでは、その旨が中断後のメッセージに出る） */}
           {autorun.active && (
-            <Button variant="outline" size="sm" onClick={autorun.stop}>
-              <CircleStop />
-              自動実行を停止
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={autorun.isSubmitting}
+              onClick={() => void autorun.stop()}
+            >
+              {autorun.isSubmitting ? <Loader2 className="animate-spin" /> : <CircleStop />}
+              中断する
             </Button>
           )}
           {isLast ? (
@@ -698,7 +728,7 @@ function StepStage({
   entry,
   autoDiagnose,
   onExecuted,
-  onFailed,
+  onRetry,
   onApplyFix,
 }: {
   step: ManualStepGuideStep;
@@ -711,7 +741,8 @@ function StepStage({
   entry: ManualStepRunEntry | null;
   autoDiagnose: boolean;
   onExecuted: (entry: ManualStepRunEntry) => void;
-  onFailed: () => void;
+  /** 「もう一度実行」を自前で扱う場合（自動実行中は積み直さず、続きから流す。#1882） */
+  onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
 }) {
   return (
@@ -740,7 +771,7 @@ function StepStage({
           dispatch={dispatch}
           autoDiagnose={autoDiagnose}
           onSucceeded={() => onExecuted(entry)}
-          onFailed={onFailed}
+          onRetry={onRetry}
           onApplyFix={onApplyFix}
         />
       )}
@@ -767,7 +798,7 @@ function FinishStage({
   dispatch,
   autoDiagnose,
   onExecuted,
-  onFailed,
+  onRetry,
   onApplyFix,
 }: {
   guide: ManualStepGuide;
@@ -776,7 +807,7 @@ function FinishStage({
   dispatch: DispatchStateHandle;
   autoDiagnose: boolean;
   onExecuted: (entry: ManualStepRunEntry) => void;
-  onFailed: () => void;
+  onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
 }) {
   const verifications = plan.entries.filter((entry) => entry.kind === "verification");
@@ -805,7 +836,7 @@ function FinishStage({
           dispatch={dispatch}
           autoDiagnose={autoDiagnose}
           onSucceeded={() => onExecuted(entry)}
-          onFailed={onFailed}
+          onRetry={onRetry}
           onApplyFix={onApplyFix}
         />
       ))}
@@ -821,173 +852,110 @@ type ManualStepApplyFix = (params: {
 }) => Promise<{ ok: boolean; message?: string }>;
 
 /**
- * 自動実行の進み具合（#1869）。**止まったときはその理由まで出す**——止まっていることに
+ * 自動実行の進み具合（#1869・#1882）。**止まったときはその理由まで出す**——止まっていることに
  * 気づかないまま画面を見続けるのがいちばん困る状態で、次に何を押せばよいかも変わる。
+ *
+ * **「この画面を閉じても続きます」を常に出す**（#1882）。進めているのはサーバーなので、
+ * 閉じてよいことが分からないと、終わるまで画面の前で待つことになる（それが元の作りだった）。
  */
 function AutoRunBar({
   autorun,
-  plan,
+  host,
 }: {
   autorun: ManualStepAutoRunHandle;
-  plan: ManualStepRunPlan;
+  host: DispatchHostView | null;
 }) {
-  if (!autorun.active) return null;
+  const run = autorun.run;
+  if (run === null || !isActiveManualStepRun(run.status)) return null;
 
-  const total = plan.entries.length;
-  const done = plan.entries.filter(
-    (entry) => entry.checked || autorun.doneLines.has(entry.line),
-  ).length;
-
-  const message =
-    autorun.pausedBy === "user"
-      ? "あなたが実行する手順で止まっています"
-      : autorun.pausedBy === "failed"
-        ? "失敗したため止まっています"
-        : `自動実行中 ${Math.min(done + 1, total)} / ${total}`;
+  const failed = run.pausedReason === "FAILED" || run.pausedReason === "ENQUEUE_FAILED";
+  const abortRejection =
+    run.status === "RUNNING" ? resolveManualStepAbortRejection(host) : null;
 
   return (
     <div
       className={cn(
-        "flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold",
-        autorun.pausedBy === "failed"
+        "flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-xs font-semibold",
+        failed
           ? "border-destructive/40 bg-destructive/5 text-destructive"
           : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
       )}
       role="status"
     >
-      {autorun.pausedBy === null && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
-      <span className="tabular-nums">{message}</span>
-      <span className="ml-auto h-1 w-24 shrink-0 overflow-hidden rounded-full bg-current/20">
-        <span
-          className="block h-full bg-current"
-          style={{ width: `${total === 0 ? 0 : Math.round((done / total) * 100)}%` }}
-        />
+      {run.status === "RUNNING" && (
+        <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
+      )}
+      <span className="tabular-nums">{describeManualStepRun(run)}</span>
+      <span className="font-normal text-muted-foreground">
+        {run.status === "RUNNING"
+          ? "・この画面を閉じても続きます"
+          : run.message !== null
+            ? `・${run.message}`
+            : ""}
       </span>
+      <span className="ml-auto flex shrink-0 items-center gap-2">
+        <span className="h-1 w-16 overflow-hidden rounded-full bg-current/20">
+          <span
+            className="block h-full bg-current"
+            style={{ width: `${manualStepRunProgressPercent(run)}%` }}
+          />
+        </span>
+        <Button
+          variant="outline"
+          size="xs"
+          disabled={autorun.isSubmitting}
+          onClick={() => void autorun.stop()}
+        >
+          {autorun.isSubmitting ? <Loader2 className="animate-spin" /> : <CircleStop />}
+          中断する
+        </Button>
+      </span>
+      {abortRejection !== null && (
+        <span className="basis-full font-normal text-muted-foreground">
+          {describeManualStepAbortRejection(abortRejection, {
+            hostName: run.targetHost,
+            timeoutMinutes: MANUAL_STEP_TIMEOUT_SECONDS / 60,
+          })}
+        </span>
+      )}
+      {autorun.error !== null && (
+        <span className="basis-full font-normal text-destructive">{autorun.error}</span>
+      )}
     </div>
   );
 }
 
 /**
- * 自動実行を進める制御（#1869）。
+ * サーバーが流している項目まで画面を進める（#1882）。
  *
- * **積むのは1件ずつで、前の1件が終わってから次を積む。** 代行実行の`activeKey`はIssue単位
- * （同じIssueの未処理は1件まで）で、順番に実行する前提の手順（`git pull` → 再起動）が
- * 入れ替わらないようにするための決まりでもある。
- *
- * 止まる条件は3つ。**どれも「勝手に進まない」側へ倒している。**
- *
- * - 代行できない項目に来た（人が実行して「実行した・次へ」を押すと続きから流れる）
- * - 実行が失敗した（原因と修正案を見て、直してから続ける）
- * - 積めなかった（起動先が居ない・本文が変わった等。理由はパネルに出る）
- *
- * 最後まで流れても**クローズはしない**。完了の確認の画面で止まり、押すのは人。
+ * **進めるのは1項目につき1回。** 人が前の手順へ戻ったのを引き戻さない（自動実行中でも
+ * 出力を読み返せる）。#1869では画面が次を積んでいたためこの関数が制御そのものだったが、
+ * いまは表示を追従させるだけ。
  */
-function useManualStepAutoRunController({
-  autorun,
-  plan,
+function useManualStepRunNavigation({
+  run,
   stages,
-  dispatch,
-  issue,
-  host,
   onStageIndexChange,
 }: {
-  autorun: ManualStepAutoRunHandle;
-  plan: ManualStepRunPlan;
+  run: ManualStepRunView | null;
   stages: GuideStage[];
-  dispatch: DispatchStateHandle;
-  issue: Issue;
-  host: { name: string } | null;
   onStageIndexChange: (index: number) => void;
 }) {
-  /**
-   * この承認で積んだ行と、**積む直前にその行について画面が持っていたジョブのid**。
-   *
-   * 終わったジョブは24時間画面に残る（`FINISHED_JOB_RETENTION_MS`）ため、前回の実行で失敗した
-   * ジョブがそのまま出ていることがある。積んだ結果を見るときに**それを結果と取り違えない**
-   * ように、押す前から在ったidを覚えて除ける。時刻で見分けないのは、画面と実行先の時計が
-   * 揃っている保証が無いため。
-   */
-  const enqueued = useRef<Map<number, Set<string>>>(new Map());
-  /** 画面をその項目まで進めたか。**進めるのは1項目につき1回**（人が戻ったのを引き戻さない） */
   const navigatedFor = useRef<number | null>(null);
-
-  const { active, running } = autorun;
-  useEffect(() => {
-    if (active) return;
-    enqueued.current = new Map();
-    navigatedFor.current = null;
-  }, [active]);
-
-  const next = running ? findNextManualStepEntry(plan, autorun.doneLines) : null;
+  const line = run !== null && isActiveManualStepRun(run.status) ? run.currentLine : null;
 
   useEffect(() => {
-    if (!running) return;
-
-    // 流すものが無くなった＝手順も確認も終わり。完了の確認の画面で止める
-    if (next === null) {
-      autorun.stop();
-      onStageIndexChange(stages.length - 1);
+    if (line === null) {
+      navigatedFor.current = null;
       return;
     }
+    if (navigatedFor.current === line) return;
+    navigatedFor.current = line;
 
-    if (navigatedFor.current !== next.line) {
-      navigatedFor.current = next.line;
-      const target =
-        next.kind === "verification"
-          ? stages.length - 1
-          : stages.findIndex((stage) => stage.kind === "step" && stage.step.line === next.line);
-      if (target >= 0) onStageIndexChange(target);
-    }
-
-    // 代行できない項目。人が実行して「実行した・次へ」を押すまで待つ
-    if (next.rejection !== null || next.command === null) {
-      autorun.pause("user");
-      return;
-    }
-
-    const before = enqueued.current.get(next.line);
-    if (before !== undefined) {
-      const job = findManualStepJobForStep(
-        dispatch.jobs,
-        issue.repositoryFullName,
-        issue.number,
-        next.line,
-      );
-      // 押す前から在ったジョブしか無い＝積んだぶんがまだ画面に届いていない
-      if (job === null || before.has(job.id) || isActiveDispatchJobStatus(job.status)) return;
-      if (job.status === "SUCCEEDED" && job.exitCode === 0) {
-        autorun.markDone(next.line);
-        return;
-      }
-      // 失敗・打ち切り・見送り。**チェックも付けず、次へも進めない**
-      autorun.pause("failed");
-      return;
-    }
-
-    if (dispatch.isSubmitting || host === null) return;
-    enqueued.current.set(
-      next.line,
-      new Set(
-        dispatch.jobs
-          .filter(
-            (job) =>
-              job.repositoryFullName === issue.repositoryFullName &&
-              job.issueNumber === issue.number &&
-              job.manualStepLine === next.line,
-          )
-          .map((job) => job.id),
-      ),
+    const target = stages.findIndex(
+      (stage) => stage.kind === "step" && stage.step.line === line,
     );
-    void dispatch
-      .runManualStep({
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
-        hostName: host.name,
-        stepLine: next.line,
-        command: next.command,
-      })
-      .then((result) => {
-        if (!result.ok) autorun.pause("failed");
-      });
-  }, [running, next, plan, stages, dispatch, issue, host, autorun, onStageIndexChange]);
+    // 手順に無い行＝`## 完了の確認方法`のコマンド。最後の画面で待つ
+    onStageIndexChange(target >= 0 ? target : stages.length - 1);
+  }, [line, stages, onStageIndexChange]);
 }

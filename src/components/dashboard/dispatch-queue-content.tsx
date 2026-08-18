@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, CircleStop, Loader2, X } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
+import { RefreshIndicatorButton } from "@/components/dashboard/refresh-indicator-button";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
-import { useNow } from "@/hooks/use-now";
 import {
   describeDispatchJobKind,
   describeDispatchJobStatus,
@@ -15,11 +15,6 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
-  describeDispatchQueueRefresh,
-  describeDispatchQueueRefreshHint,
-  type DispatchQueueRefreshTone,
-} from "@/lib/dispatch/queue-refresh";
-import {
   cancelableDispatchJobs,
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
@@ -27,6 +22,11 @@ import {
   type DispatchQueueSummary,
 } from "@/lib/dispatch/queue-summary";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import {
+  describeManualStepRun,
+  isActiveManualStepRun,
+  manualStepRunProgressPercent,
+} from "@/lib/manual-step-run-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -129,6 +129,13 @@ export function DispatchQueueContent({
           </p>
         )}
 
+      {/*
+        手作業アシスタントの自動実行（#1882）。**ジョブの節より先に出す。**
+        アシスタントを閉じてもここで進み具合を追える、というのがこの節の役目で、
+        ジョブの並びの下に置くと「閉じた後にどこを見ればよいか」の答えにならない
+      */}
+      <ManualStepRunSection dispatch={dispatch} onOpenIssue={onOpenIssue} />
+
       <QueueSection
         title="実行中"
         jobs={summary.running}
@@ -205,49 +212,21 @@ export function DispatchQueueContent({
 }
 
 /**
- * 古さの配色（#1773）。ホストの使用率・チェックアウトの鮮度（`dispatch-host-panel.tsx`）と
- * 同じ色を同じ意味で使う。
- */
-const REFRESH_TONE_CLASS: Record<DispatchQueueRefreshTone, string> = {
-  normal: "text-muted-foreground",
-  warn: "text-amber-700 dark:text-amber-400",
-};
-
-/**
  * いつ時点の内容かを出し、押すと取り直す1行（#1773）。
  *
- * **経過の数え上げ（1秒ごと）をこの行だけに閉じ込めるため、独立したコンポーネントにしてある。**
- * `DispatchQueueContent`の側で`useNow`を呼ぶと、キュー全体（ホストの様子・全ジョブの行）が
- * 毎秒描き直される。**ポップオーバー・シートは閉じている間そもそも描かれない**ので、
- * この毎秒の更新が走るのは開いている間だけ。
- *
- * 取得中のアイコンの回転は、PR一覧の更新ボタン（`pull-request-list.tsx`）と同じ書き方に揃える。
+ * **ボタン本体は通知ベルと共通**（`refresh-indicator-button.tsx`。#1909）。ここが持つのは
+ * 右端へ寄せる置き方と、何を更新するのかを表す名前だけ。
  */
 function QueueRefreshRow({ dispatch }: { dispatch: DispatchStateHandle }) {
-  const now = useNow(1_000);
-  const { label, tone } = describeDispatchQueueRefresh({
-    fetchedAt: dispatch.fetchedAt,
-    nowMs: now,
-    isFetching: dispatch.isFetching,
-    pollIntervalMs: dispatch.pollIntervalMs,
-  });
-
   return (
     <div className="mb-1 flex justify-end">
-      <button
-        type="button"
-        aria-label="実行キューを今すぐ更新"
-        title={describeDispatchQueueRefreshHint(dispatch.pollIntervalMs)}
-        className={cn(
-          // 秒が変わるたびに文字幅が動かないよう桁を固定する
-          "flex items-center gap-1 rounded px-1 py-0.5 text-[11px] tabular-nums hover:bg-accent hover:text-foreground",
-          REFRESH_TONE_CLASS[tone],
-        )}
-        onClick={dispatch.refresh}
-      >
-        <RefreshCw className={cn("size-3 shrink-0", dispatch.isFetching && "animate-spin")} />
-        {label}
-      </button>
+      <RefreshIndicatorButton
+        fetchedAt={dispatch.fetchedAt}
+        isFetching={dispatch.isFetching}
+        pollIntervalMs={dispatch.pollIntervalMs}
+        onRefresh={dispatch.refresh}
+        label="実行キューを今すぐ更新"
+      />
     </div>
   );
 }
@@ -428,5 +407,91 @@ function QueueSection({
         })}
       </ul>
     </div>
+  );
+}
+
+
+/**
+ * 手作業アシスタントの自動実行（#1882）。
+ *
+ * **進めているのはサーバー**なので、アシスタントを閉じても・ブラウザを閉じても進む。
+ * その進み具合を確かめる場所として、既にPC・スマホの両方から開ける実行キューへ置く
+ * （常設のバーを新しく足さない）。
+ *
+ * 出すのは**走っている・止まっている実行だけ**。終わった実行は`GET /api/dispatch`が
+ * 30分だけ返すので、結果（終わった・中断した）を見てから静かに消える。
+ */
+function ManualStepRunSection({
+  dispatch,
+  onOpenIssue,
+}: {
+  dispatch: DispatchStateHandle;
+  onOpenIssue?: (issueId: string) => void;
+}) {
+  const runs = dispatch.manualStepRuns ?? [];
+  if (runs.length === 0) return null;
+
+  return (
+    <section className="mt-3 flex flex-col gap-1.5">
+      <h4 className="text-[11px] font-semibold text-muted-foreground">手作業の自動実行</h4>
+      {runs.map((run) => {
+        const failed = run.pausedReason === "FAILED" || run.pausedReason === "ENQUEUE_FAILED";
+        return (
+          <div
+            key={`${run.repositoryFullName}#${run.issueNumber}`}
+            className={cn(
+              "flex flex-col gap-1.5 rounded-md border p-2",
+              run.status === "RUNNING" && "border-amber-500/40 bg-amber-500/5",
+              failed && "border-destructive/40 bg-destructive/5",
+            )}
+          >
+            <DispatchIssueTitle
+              issueNumber={run.issueNumber}
+              issueTitle={run.issueTitle}
+              issueId={run.issueId}
+              onOpenIssue={onOpenIssue}
+            />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+              {run.status === "RUNNING" && (
+                <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
+              )}
+              <span className="tabular-nums">{describeManualStepRun(run)}</span>
+              <span className="h-1 w-14 shrink-0 overflow-hidden rounded-full bg-foreground/15">
+                <span
+                  className="block h-full bg-foreground/50"
+                  style={{ width: `${manualStepRunProgressPercent(run)}%` }}
+                />
+              </span>
+              <span className="truncate">{run.targetHost}</span>
+            </div>
+            {run.currentLabel !== null && isActiveManualStepRun(run.status) && (
+              <p className="truncate text-[11px] text-muted-foreground">{run.currentLabel}</p>
+            )}
+            {run.message !== null && (
+              <p className="text-[11px] break-words text-muted-foreground">{run.message}</p>
+            )}
+            {isActiveManualStepRun(run.status) && (
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={dispatch.isSubmitting}
+                  onClick={() =>
+                    void dispatch.controlManualStepRun({
+                      repositoryFullName: run.repositoryFullName,
+                      issueNumber: run.issueNumber,
+                      action: "stop",
+                    })
+                  }
+                >
+                  {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <CircleStop />}
+                  中断する
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </section>
   );
 }

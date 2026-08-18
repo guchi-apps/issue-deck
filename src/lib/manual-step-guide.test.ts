@@ -162,6 +162,7 @@ describe("parseManualStepGuide", () => {
     expect(guide.hasTemplate).toBe(true);
     expect(guide.outcome).toContain("猶予待ちのセッションに理由を残す");
     expect(guide.where).toEqual({
+      connect: "ssh subpc",
       device: "サブPC",
       directory: "~/apps/issue-deck",
       branch: "develop",
@@ -285,7 +286,12 @@ describe("parseManualStepGuide", () => {
 
     expect(guide.hasTemplate).toBe(false);
     expect(guide.steps).toEqual([]);
-    expect(guide.where).toEqual({ device: null, directory: null, branch: null });
+    expect(guide.where).toEqual({
+      device: null,
+      directory: null,
+      branch: null,
+      connect: null,
+    });
   });
 
   it("本文が空でも落ちない", () => {
@@ -298,7 +304,12 @@ describe("parseManualStepGuide", () => {
       "## 前提条件\n\n- 実行するデバイス: ブラウザ\n- カレントディレクトリ: 不要\n- Gitブランチ: なし\n\n## やること\n\n- [ ] 押す\n",
     );
 
-    expect(guide.where).toEqual({ device: "ブラウザ", directory: null, branch: null });
+    expect(guide.where).toEqual({
+      device: "ブラウザ",
+      directory: null,
+      branch: null,
+      connect: null,
+    });
   });
 
   it("コードブロックの中の`#`を見出しとして扱わない", () => {

@@ -3,6 +3,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  CircleStop,
   Loader2,
   Search,
   ShieldCheck,
@@ -13,15 +14,19 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { ManualStepFixPanel } from "@/components/dashboard/manual-step-fix-panel";
+import { ManualStepWhereToRun } from "@/components/dashboard/manual-step-where-to-run";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useManualStepFix } from "@/hooks/use-manual-step-fix";
 import {
+  describeManualStepAbortRejection,
   describeManualStepExecutionRejection,
+  findManualStepAbortJobForJob,
   findManualStepJobForIssue,
   findManualStepJobForStep,
   isActiveDispatchJobStatus,
   isCancelableDispatchJobStatus,
+  resolveManualStepAbortRejection,
   resolveManualStepHost,
   resolveManualStepExecutionRejection,
   type DispatchJobView,
@@ -58,7 +63,7 @@ export function ManualStepRunPanel({
   dispatch,
   autoDiagnose = false,
   onSucceeded,
-  onFailed,
+  onRetry,
   onApplyFix,
 }: {
   issue: Issue;
@@ -73,8 +78,12 @@ export function ManualStepRunPanel({
    * （**チェックの実体はIssue本文**なので、書き換えは既存の`useIssueTaskList`が行う）。
    */
   onSucceeded: () => void;
-  /** 失敗・打ち切り・見送りで終わったときに1回だけ呼ばれる（自動実行を止めるのに使う） */
-  onFailed?: () => void;
+  /**
+   * 「もう一度実行」を呼び出し側で扱う場合（#1882）。**自動実行中はここから積まない**——
+   * 積むのはサーバーで、画面からも積むと同じ手順が二重に走る。渡さなければ従来どおり
+   * このパネルが積む（手順ごとに「承認して実行」を押す使い方。#1828）。
+   */
+  onRetry?: () => void;
   /**
    * 修正案を本文へ書き戻す（`run`がtrueなら書き戻したあと実行する）。
    * 渡されない場合は修正案の適用ボタンを出さない。
@@ -123,8 +132,7 @@ export function ManualStepRunPanel({
     if (notifiedJobId.current === job.id) return;
     notifiedJobId.current = job.id;
     if (succeeded) onSucceeded();
-    else onFailed?.();
-  }, [job, isRunning, succeeded, onSucceeded, onFailed]);
+  }, [job, isRunning, succeeded, onSucceeded]);
 
   // 自動実行中の失敗は、押されるのを待たずに原因を調べる（同意がある場合だけ）
   useEffect(() => {
@@ -177,8 +185,25 @@ export function ManualStepRunPanel({
       />
     ) : null;
 
+  /** 走っている1件を止める（#1882）。届くまで最大1巡（既定30秒）かかる */
+  async function handleAbort() {
+    if (!job || !host) return;
+    setError(null);
+    const result = await dispatch.abortManualStep({
+      repositoryFullName: issue.repositoryFullName,
+      issueNumber: issue.number,
+      hostName: host.name,
+      targetJobId: job.id,
+    });
+    if (!result.ok) setError(result.message);
+  }
+
   // 実行中・実行済みは、押せない理由よりそちらを出す（押した結果の方が直近の事実）
   if (job && (isRunning || job.status !== "QUEUED")) {
+    // 走り出した後は取り消せない（#1179）。**代わりに中断ジョブで止める**（#1882）。
+    // 止められないホストではボタンを出さず、打ち切りまで待つことを理由として出す
+    const abortRejection = job.status === "RUNNING" ? resolveManualStepAbortRejection(host) : null;
+    const abortJob = findManualStepAbortJobForJob(dispatch.jobs, job.id);
     return (
       <div className="flex flex-col gap-2">
         <ManualStepRunResult
@@ -192,7 +217,24 @@ export function ManualStepRunPanel({
               ? () => void dispatch.cancel(job.id)
               : undefined
           }
-          onRetry={isRunning ? undefined : () => void handleRun()}
+          onAbort={
+            job.status === "RUNNING" && abortRejection === null && abortJob === null
+              ? () => void handleAbort()
+              : undefined
+          }
+          abortNote={
+            job.status !== "RUNNING"
+              ? null
+              : abortJob !== null
+                ? "中断を送りました（届くまで最大30秒かかります）。"
+                : abortRejection === null
+                  ? null
+                  : describeManualStepAbortRejection(abortRejection, {
+                      hostName: host?.name ?? "サブPC",
+                      timeoutMinutes: MANUAL_STEP_TIMEOUT_SECONDS / 60,
+                    })
+          }
+          onRetry={isRunning ? undefined : (onRetry ?? (() => void handleRun()))}
           onDiagnose={
             failed && fixPanel === null && !fix.isLoading ? () => void fix.diagnose(job.id) : undefined
           }
@@ -200,6 +242,9 @@ export function ManualStepRunPanel({
           isSubmitting={dispatch.isSubmitting}
           error={error ?? fix.error}
         />
+        {/* 失敗したら、手元で実行するための「どこから」を出す（#1882）。**成功したら出さない**
+            ——実行し終えたものについて接続方法を並べても読む相手がいない */}
+        {failed && <ManualStepWhereToRun where={guide.where} command={command} />}
         {fixPanel}
       </div>
     );
@@ -207,15 +252,19 @@ export function ManualStepRunPanel({
 
   if (rejection !== null) {
     return (
-      <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
-        <Terminal className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-        <span>
-          {describeManualStepExecutionRejection(rejection, {
-            hostName: host?.name ?? "サブPC",
-            device: guide.where.device,
-          })}
-        </span>
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
+          <Terminal className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>
+            {describeManualStepExecutionRejection(rejection, {
+              hostName: host?.name ?? "サブPC",
+              device: guide.where.device,
+            })}
+          </span>
+        </p>
+        {/* 代行できない手順こそ、どこから実行するのかが要る（#1882） */}
+        <ManualStepWhereToRun where={guide.where} command={command} />
+      </div>
     );
   }
 
@@ -264,6 +313,8 @@ function ManualStepRunResult({
   showOutput,
   onToggleOutput,
   onCancel,
+  onAbort,
+  abortNote,
   onRetry,
   onDiagnose,
   isDiagnosing,
@@ -276,6 +327,10 @@ function ManualStepRunResult({
   showOutput: boolean;
   onToggleOutput: () => void;
   onCancel?: () => void;
+  /** 走っているコマンドを止める（#1882）。止められないホストでは渡さない */
+  onAbort?: () => void;
+  /** 中断について添える一文（送信済み・止められない理由）。無ければ`null` */
+  abortNote?: string | null;
   onRetry?: () => void;
   onDiagnose?: () => void;
   isDiagnosing: boolean;
@@ -358,11 +413,22 @@ function ManualStepRunResult({
         </p>
       )}
 
-      {(onCancel || onRetry || onDiagnose || isDiagnosing) && (
+      {abortNote != null && abortNote !== "" && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{abortNote}</p>
+      )}
+
+      {(onCancel || onAbort || onRetry || onDiagnose || isDiagnosing) && (
         <div className="flex flex-wrap justify-end gap-2">
           {onCancel && (
             <Button variant="outline" size="sm" disabled={isSubmitting} onClick={onCancel}>
               取り消す
+            </Button>
+          )}
+          {/* 走り出した1件を止める（#1882）。取り消しと違い、**止まるまでに最大30秒**かかる */}
+          {onAbort && (
+            <Button variant="outline" size="sm" disabled={isSubmitting} onClick={onAbort}>
+              <CircleStop />
+              中断する
             </Button>
           )}
           {(onDiagnose || isDiagnosing) && (

@@ -2,7 +2,7 @@ const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
 
-/** あいまい検索に使うモデル。`repository-suggest.ts`と同じくプラン枠の消費を抑える軽量なもの。 */
+/** あいまい検索に使うモデル。プラン枠の消費を抑える軽量なもの。 */
 const MODEL = "claude-haiku-4-5";
 
 /**
@@ -81,7 +81,7 @@ function extractJsonText(text: string): string {
 /**
  * Claudeの応答テキストから、候補に実在するIssueのキーを確からしい順に取り出す。
  *
- * **候補に無いキーは採らない**（`repository-suggest.ts`と同じ方針）。存在しないIssueを
+ * **候補に無いキーは採らない。** 存在しないIssueを
  * 返されたときにそのまま絞り込みへ渡すと、画面には「0件」とだけ出て、なぜ消えたのかが
  * 押した本人から見えない。JSONとして読めない応答も同様に空配列（＝該当なし）へ倒す。
  */
@@ -112,7 +112,7 @@ export function pickMatchedIssueKeys(text: string, candidateKeys: string[]): str
 /**
  * 検索語に意味が近いIssueをClaudeに選ばせ、そのキーを確からしい順に返す。
  *
- * `repository-suggest.ts`と同様、`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
+ * `CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
  * `/v1/messages`を直接呼び出す。**呼び出しごとにプラン枠を消費するため、入力のたびではなく
  * ボタンを押したときだけ呼ぶ**（画面側の`use-issue-ai-search.ts`もEnterには割り当てていない）。
  *

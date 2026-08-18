@@ -21,6 +21,14 @@ describe("buildIssueSuggestPrompt", () => {
     expect(prompt).toContain("- 51.improvement");
   });
 
+  it("作業の依頼か質問かを判定させる指示を含む（#1890）", () => {
+    const prompt = buildIssueSuggestPrompt({ body: "本文", availableLabels: [] });
+
+    expect(prompt).toContain('"kind"');
+    expect(prompt).toContain('"question"');
+    expect(prompt).toContain("迷ったら");
+  });
+
   it("ラベルが無い場合は「利用可能なラベルなし」と表示する", () => {
     const prompt = buildIssueSuggestPrompt({ body: "本文", availableLabels: [] });
 
@@ -118,7 +126,7 @@ describe("generateIssueSuggestion", () => {
       ],
     });
 
-    expect(result).toEqual({ title: "ログインに失敗する", labels: ["30.bug"] });
+    expect(result).toEqual({ kind: "issue", title: "ログインに失敗する", labels: ["30.bug"] });
   });
 
   it("リポジトリに存在しないラベル名は落とす", async () => {
@@ -130,6 +138,28 @@ describe("generateIssueSuggestion", () => {
     });
 
     expect(result.labels).toEqual(["30.bug"]);
+  });
+
+  it("種別が質問と返れば question として扱う（#1890）", async () => {
+    mockClaudeResponse({ kind: "question", title: "タイトル", labels: [] });
+
+    const result = await generateIssueSuggestion("dummy-token", {
+      body: "イシューと質問の違いはなんですか？",
+      availableLabels: [],
+    });
+
+    expect(result.kind).toBe("question");
+  });
+
+  it("種別が欠けていても issue として扱い、タイトル・ラベルは返す（#1890）", async () => {
+    mockClaudeResponse({ title: "タイトル", labels: ["30.bug"] });
+
+    const result = await generateIssueSuggestion("dummy-token", {
+      body: "本文",
+      availableLabels: [{ name: "30.bug", description: "不具合" }],
+    });
+
+    expect(result).toEqual({ kind: "issue", title: "タイトル", labels: ["30.bug"] });
   });
 });
 

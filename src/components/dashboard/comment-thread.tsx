@@ -4,8 +4,11 @@ import { type RefObject, useState, type ReactNode } from "react";
 
 import {
   Ban,
+  BellOff,
   Check,
   Loader2,
+  MessageCircleQuestion,
+  MessageSquare,
   MoreHorizontal,
   Pencil,
   RotateCw,
@@ -97,6 +100,15 @@ type CommentThreadProps = {
    */
   sessionWaitingInput?: boolean;
   /**
+   * そのIssueをローカルセッションが担当しているか（#1903）。trueのとき、承認欄のボタンを
+   * 「コメント」「質問する」「確認待ちを外す」「取り下げ」へ差し替える。
+   */
+  localSession?: boolean;
+  /** そのセッションが生きているか。案内の言い方（届かない／終了している）を決める */
+  sessionAlive?: boolean;
+  /** 「質問する」を出してよいか（`canAskClaude`の結果）。openなIssueなら常にtrue */
+  canAskClaude?: boolean;
+  /**
    * セッションの状態（`/api/dispatch`）がまだ届いていない（#1810）。**`sessionWaitingInput`が
    * 未確定**であることを表し、trueの間は承認カードを描かない。取得前は必ず
    * `sessionWaitingInput === false`になるため、そのまま描くと承認・修正ボタンを一瞬出してから
@@ -120,6 +132,12 @@ type CommentThreadProps = {
   onApprove?: (text?: string) => Promise<void> | void;
   onReject?: (reason: string) => Promise<void> | void;
   onWithdraw?: () => Promise<void> | void;
+  /** ローカルセッション担当中の承認欄で「コメント」を押したときの処理（#1903。ラベルは変えない） */
+  onComment?: (body: string) => Promise<void> | void;
+  /** 同じく「質問する」（読み取り専用の質問応答。`11.local`が付いていても唯一起動できる経路） */
+  onAskClaude?: (question: string) => Promise<void> | void;
+  /** 同じく「確認待ちを外す」（`00.check-user`と理由ラベルを外し、記録のコメントを残す） */
+  onDismissCheckUser?: (text?: string) => Promise<void> | void;
   /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
   onRequestContinuation?: () => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
@@ -186,6 +204,9 @@ function ApprovalActions({
   onApprove,
   onReject,
   onWithdraw,
+  onComment,
+  onAskClaude,
+  onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
   onMergePullRequest,
@@ -205,6 +226,9 @@ function ApprovalActions({
   checkUserReason = null,
   sessionWaitingInput,
   sessionStatePending = false,
+  localSession = false,
+  sessionAlive = false,
+  canAskClaude = false,
   pullRequestLinks,
   pullRequests,
   repositoryFullName,
@@ -215,6 +239,9 @@ function ApprovalActions({
   onApprove: (text?: string) => Promise<void> | void;
   onReject: (reason: string) => Promise<void> | void;
   onWithdraw: () => Promise<void> | void;
+  onComment?: (body: string) => Promise<void> | void;
+  onAskClaude?: (question: string) => Promise<void> | void;
+  onDismissCheckUser?: (text?: string) => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
@@ -241,6 +268,12 @@ function ApprovalActions({
   sessionWaitingInput?: boolean;
   /** セッションの状態がまだ届いていない（#1810）。`sessionWaitingInput`が未確定であることを表す */
   sessionStatePending?: boolean;
+  /** ローカルセッションが担当しているIssueか（#1903）。ボタンの構成を差し替える */
+  localSession?: boolean;
+  /** そのセッションが生きているか（#1903）。案内の言い方を決める */
+  sessionAlive?: boolean;
+  /** 「質問する」を出してよいか（#1903） */
+  canAskClaude?: boolean;
   pullRequestLinks?: PullRequestLink[];
   pullRequests?: IssuePullRequest[];
   repositoryFullName: string;
@@ -289,6 +322,40 @@ function ApprovalActions({
     setTextValidationError(null);
   }
 
+  /**
+   * ローカルセッション担当中の承認欄（#1903）。押しても走っているセッションには届かないため、
+   * ここでできるのは「記録を残す」「質問する」「確認待ちの印を片付ける」の3つだけ。
+   */
+  async function submitLocalComment() {
+    if (!onComment) return;
+    if (!text.trim()) {
+      setTextValidationError("コメントを入力してください");
+      return;
+    }
+    await onComment(text);
+    setText("");
+    setTextValidationError(null);
+  }
+
+  async function submitLocalQuestion() {
+    if (!onAskClaude) return;
+    if (!text.trim()) {
+      setTextValidationError("質問を入力してください");
+      return;
+    }
+    await onAskClaude(text);
+    setText("");
+    setTextValidationError(null);
+  }
+
+  async function submitDismissCheckUser() {
+    if (!onDismissCheckUser) return;
+    const trimmed = text.trim();
+    await onDismissCheckUser(trimmed ? trimmed : undefined);
+    setText("");
+    setTextValidationError(null);
+  }
+
   async function confirmWithdraw() {
     await onWithdraw();
     setIsWithdrawConfirmOpen(false);
@@ -324,7 +391,14 @@ function ApprovalActions({
   // 次にどこの何を押せばよいか（#1663）。承認カードは行き先そのものなので、移動ボタンは
   // 出さずボタン名だけが入る（`placement: "approval"`）。理由ラベルが読めなければnullで、
   // 従来どおり見出しだけになる
-  const guidance = resolveCheckUserGuidance({ reason: checkUserReason, placement: "approval" });
+  // ローカル担当中は「内容がエージェントへ渡ります」と言わせない（#1903）。Remote Controlを
+  // 開くボタンは案内（`localSessionNotice`）が持つので、URLはここへ渡さない
+  const guidance = resolveCheckUserGuidance({
+    reason: checkUserReason,
+    placement: "approval",
+    localSession,
+    sessionAlive,
+  });
 
   // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
   // **PRマージ待ちを優先するのは、あちらはGitHub側の操作で`11.local`中でも実際に効くため。**
@@ -450,6 +524,67 @@ function ApprovalActions({
             取り下げ
           </Button>
         </div>
+      ) : localSession ? (
+        /* ローカルセッションが担当しているIssue（#1903）。「承認」「修正」は押しても
+           セッションへ届かず、`@claude`コメントが無人実行を起こして「`11.local`が付いて
+           いるため対応しません」という案内だけを足していた。ここでできることの名前に
+           そのまま置き換える。塗りつぶしは案内の中のRemote Controlだけが持つ */
+        <div className="flex flex-col gap-2">
+          <ApprovalTextField
+            value={text}
+            onChange={changeText}
+            placeholder="コメントを入力（記録として残ります。セッションには届きません）"
+            repositoryFullName={repositoryFullName}
+            issueSuggestions={issueSuggestions}
+            disabled={busy}
+            onUploadingChange={setIsTextUploading}
+          />
+          {textValidationError && <p className="text-sm text-destructive">{textValidationError}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            {onComment && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={submitLocalComment}
+                disabled={busy || isTextUploading || !text.trim()}
+              >
+                <MessageSquare />
+                コメント
+              </Button>
+            )}
+            {onAskClaude && canAskClaude && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={submitLocalQuestion}
+                disabled={busy || isTextUploading || !text.trim()}
+              >
+                <MessageCircleQuestion />
+                質問する
+              </Button>
+            )}
+            {onDismissCheckUser && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={submitDismissCheckUser}
+                disabled={busy || isTextUploading}
+              >
+                <BellOff />
+                確認待ちを外す
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsWithdrawConfirmOpen(true)}
+              disabled={busy}
+            >
+              <Ban />
+              取り下げ
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           <ApprovalTextField
@@ -525,6 +660,9 @@ export function CommentThread({
   planReviewAction,
   sessionWaitingInput,
   sessionStatePending,
+  localSession,
+  sessionAlive,
+  canAskClaude,
   mergeApprovalPending,
   mergeCheckReasons = null,
   pullRequestLinks,
@@ -534,6 +672,9 @@ export function CommentThread({
   onApprove,
   onReject,
   onWithdraw,
+  onComment,
+  onAskClaude,
+  onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
   onMergePullRequest,
@@ -589,6 +730,9 @@ export function CommentThread({
         onApprove={onApprove}
         onReject={onReject}
         onWithdraw={onWithdraw}
+        onComment={onComment}
+        onAskClaude={onAskClaude}
+        onDismissCheckUser={onDismissCheckUser}
         onRequestContinuation={onRequestContinuation}
         onRequestPrFix={onRequestPrFix}
         onMergePullRequest={onMergePullRequest}
@@ -608,6 +752,9 @@ export function CommentThread({
         checkUserReason={checkUserReason}
         sessionWaitingInput={sessionWaitingInput}
         sessionStatePending={sessionStatePending}
+        localSession={localSession}
+        sessionAlive={sessionAlive}
+        canAskClaude={canAskClaude}
         pullRequestLinks={pullRequestLinks}
         pullRequests={pullRequests}
         repositoryFullName={repositoryFullName}

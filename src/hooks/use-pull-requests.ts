@@ -35,6 +35,14 @@ type UsePullRequestsResult = {
   isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
+  /**
+   * 自動更新と同じ扱いでの取り直し（#1909）。読み込み表示を出さず、失敗も画面に出さない。
+   *
+   * **通知ベルを開いている間の30秒ごとの取り直しはこちらを使う。** `refresh`は取得effectを
+   * 張り直すため`isLoading`が立ち、後ろに開いているPR一覧が30秒ごとに「読み込み中...」へ
+   * 戻ってしまう。
+   */
+  refreshInBackground: () => void;
 };
 
 /**
@@ -84,6 +92,7 @@ export function usePullRequests(
   const inFlightRef = useRef(false);
 
   const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
+  const refreshInBackground = useCallback(() => void backgroundLoadRef.current?.(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,5 +168,6 @@ export function usePullRequests(
     isRefreshing,
     error,
     refresh,
+    refreshInBackground,
   };
 }

@@ -12,6 +12,7 @@ import {
   buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
+  describeManualStepAbortRejection,
   describeCrossRepoQuestionRejection,
   describeDispatchReportLost,
   describeDispatchTimeout,
@@ -30,6 +31,7 @@ import {
   parseDispatchHostRepositories,
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
+  resolveManualStepAbortRejection,
   resolveManualStepExecutionRejection,
   resolvePlanReviewRejection,
   resolveSessionControlRejection,
@@ -44,6 +46,7 @@ import {
   type DispatchJobStatus,
   type DispatchJobView,
   type DispatchReportStatus,
+  type ManualStepAbortRejection,
   type ManualStepExecutionRejection,
   type PlanReviewRejection,
   type SessionControlJobKind,
@@ -53,6 +56,7 @@ import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import {
   extractRunnableManualStepCommands,
   isSubpcManualStepDevice,
+  MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 
@@ -103,6 +107,7 @@ function toJobView(
     instruction: job.instruction,
     command: job.command,
     manualStepLine: job.manualStepLine,
+    targetJobId: job.targetJobId,
     exitCode: job.exitCode,
     commandOutput: job.commandOutput,
     tmuxSessionName: job.tmuxSessionName,
@@ -131,6 +136,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     instructionCapable: host.instructionCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
+    manualStepAbortCapable: host.manualStepAbortCapable,
     planReviewCapable: host.planReviewCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
@@ -761,6 +767,94 @@ export async function enqueueManualStepJob(params: {
   }
 }
 
+export type EnqueueManualStepAbortJobResult =
+  | { ok: true; job: DispatchJobView }
+  | {
+      ok: false;
+      rejection: ManualStepAbortRejection | "already_queued" | "not_running";
+      message: string;
+    };
+
+/**
+ * 走っている代行実行を止めるジョブを積む（#1882）。
+ *
+ * **止める対象はジョブのidで指し、コマンドは渡さない。** pollerが
+ * `issue-deck-manual-step-<id>`というユニット名を組み立て直して止めるので、ここが
+ * 任意の`systemctl stop`を流す口にはならない（`INTERRUPT`・`KILL`がセッション名を
+ * 組み立て直すのと同じ作法）。
+ *
+ * **止められるのは走り出した後（`RUNNING`）だけ。** まだ払い出していないジョブは
+ * 取り消し（`cancelDispatchJob`）の担当で、そちらの方が確実に止まる。
+ */
+export async function enqueueManualStepAbortJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  /** 止める対象の`MANUAL_STEP`ジョブのid */
+  targetJobId: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueManualStepAbortJobResult> {
+  const now = params.now ?? new Date();
+
+  const target = await db.dispatchJob.findUnique({ where: { id: params.targetJobId } });
+  if (!target || target.kind !== "MANUAL_STEP" || target.status !== "RUNNING") {
+    return {
+      ok: false,
+      rejection: "not_running",
+      message: "走っている代行実行が見つかりませんでした（既に終わっている可能性があります）。",
+    };
+  }
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const rejection = resolveManualStepAbortRejection(
+    host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          manualStepAbortCapable: host.manualStepAbortCapable,
+        }
+      : null,
+  );
+  if (rejection !== null) {
+    return {
+      ok: false,
+      rejection,
+      message: describeManualStepAbortRejection(rejection, {
+        hostName: params.hostName,
+        timeoutMinutes: MANUAL_STEP_TIMEOUT_SECONDS / 60,
+      }),
+    };
+  }
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "MANUAL_STEP_ABORT",
+        status: "QUEUED",
+        // 種別ごとに名前空間を分ける（#1332と同じ）。**未処理の中断は1件まで**で、
+        // 連打しても同じ停止が積み上がらない
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "MANUAL_STEP_ABORT",
+        ),
+        requestedByUserId: params.requestedByUserId,
+        targetJobId: params.targetJobId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: "この手作業には未処理の中断があります（届くまで最大30秒かかります）。",
+    };
+  }
+}
+
 export type SelfUpdateRejection = "host_not_found" | "not_capable" | "already_queued";
 
 export type EnqueueSelfUpdateJobResult =
@@ -894,6 +988,10 @@ export async function claimDispatchJobs(params: {
   // チェックアウトの更新（#1875）を知らないため、`OUT_OF_BAND_JOB_KINDS`をまとめて配ると
   // 未知の種別として`failed`になり、押した更新が失われる。
   if (host?.manualStepCapable === true) controlKinds.push("MANUAL_STEP");
+  // **中断（#1882）は代行実行とは別の申告で配る。** 代行実行を実行できるpollerでも、止める側の
+  // 実装が入っているとは限らない。非対応のpollerへ配ると未知の種別として`failed`になり、
+  // 画面には「中断できなかった」だけが残る（そのときは打ち切りを待つ案内を出す方が正しい）
+  if (host?.manualStepAbortCapable === true) controlKinds.push("MANUAL_STEP_ABORT");
   if (host?.selfUpdateCapable === true) controlKinds.push("SELF_UPDATE");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
@@ -1373,6 +1471,8 @@ export async function announceDispatchHost(params: {
   crossRepoQuestionCapable: boolean | null;
   /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
   manualStepCapable: boolean | null;
+  /** 走っている代行実行を止められるか（#1882）。申告していないpollerでは`null`＝非対応 */
+  manualStepAbortCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
   selfUpdateCapable: boolean | null;
@@ -1409,6 +1509,7 @@ export async function announceDispatchHost(params: {
     instructionCapable: params.instructionCapable,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
+    manualStepAbortCapable: params.manualStepAbortCapable,
     planReviewCapable: params.planReviewCapable,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,

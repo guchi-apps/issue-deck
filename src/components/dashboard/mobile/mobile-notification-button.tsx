@@ -8,6 +8,7 @@ import {
   NotificationBadge,
   NotificationContent,
 } from "@/components/dashboard/notification-content";
+import { NotificationRefreshButton } from "@/components/dashboard/notification-refresh-button";
 import { useNotificationState } from "@/components/dashboard/notification-state";
 import {
   Sheet,
@@ -42,18 +43,13 @@ import type { NotificationItem } from "@/lib/notifications";
  * ルーターのマウントを求められる。開いていないシートの中身はRadixが描かない。
  */
 export function MobileNotificationButton() {
-  const { items, hasError, refetch } = useNotificationState();
+  const { items, hasError } = useNotificationState();
   const [open, setOpen] = useState(false);
 
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        // 開いた時点の状態で判断できるよう取り直す（バックグラウンドの再取得は5分間隔のため）
-        if (nextOpen) refetch();
-      }}
-    >
+    // 開いた時点の取り直しと、開いている間の自動更新は中身の側が持つ
+    // （`notification-refresh-button.tsx`。#1909）
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
           type="button"
@@ -73,8 +69,13 @@ export function MobileNotificationButton() {
       */}
       <SheetContent side="bottom" className="max-h-[85svh] gap-2 overflow-y-auto p-0 pb-8">
         <SheetHeader className="p-3 pb-0">
-          <SheetTitle className="text-sm">対応が必要なもの</SheetTitle>
-          <SheetDescription className="text-xs">{items.length}件</SheetDescription>
+          {/* 1段目の右端はシートの閉じるボタン（`sheet.tsx`の`absolute top-3 right-3`）が
+              占めているので、更新ボタンは件数と同じ2段目の右端へ置く（#1909） */}
+          <SheetTitle className="pr-8 text-sm">対応が必要なもの</SheetTitle>
+          <div className="flex items-center justify-between gap-2">
+            <SheetDescription className="text-xs">{items.length}件</SheetDescription>
+            <NotificationRefreshButton />
+          </div>
         </SheetHeader>
         <SheetBody onClose={() => setOpen(false)} />
       </SheetContent>

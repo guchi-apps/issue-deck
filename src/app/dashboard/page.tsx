@@ -6,6 +6,7 @@ import {
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 
 export default async function DashboardPage() {
@@ -49,6 +50,13 @@ export default async function DashboardPage() {
 
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
+  // 一覧の「どちらの実行経路にも対応していない」印（#1888）に使う。無人実行の有無
+  // （`hasClaudeWorkflow`）だけでは、サブPCのローカルセッションでのみ回すリポジトリ（#1741）に
+  // 非対応の印が出てしまう
+  const dispatchRunnableRepositories = currentUser
+    ? await listDispatchRunnableRepositories()
+    : new Set<string>();
+
   return (
     <IssueDeckShell
       currentUser={
@@ -64,6 +72,7 @@ export default async function DashboardPage() {
         archived: repo.archived,
         hasClaudeWorkflow: repo.hasClaudeWorkflow,
         hasLocalStartScript: repo.hasLocalStartScript,
+        dispatchRunnable: dispatchRunnableRepositories.has(repo.fullName),
         hidden: hiddenRepositoryIds.has(repo.id),
         favorite: favoriteRepositoryIds.has(repo.id),
       }))}

@@ -43,6 +43,10 @@ export type DispatchJobStatus =
  * - `PLAN_REVIEW` … 計画の関門（G1・#1218）のセッションを立てる（#1855）。計画コメントの投稿を
  *   契機に自動で積まれ、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を
  *   Issueコメントへ投稿する。**worktreeは作らず、レビュー1本で終わってセッションごと畳む**
+ * - `MANUAL_STEP_ABORT` … 走っている代行実行を止める（#1882）。pollerが
+ *   `systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。**セッションを
+ *   操作するジョブではない**（相手はtmuxではなくtransient unit）ので`SESSION_CONTROL_JOB_KINDS`
+ *   には入れない
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -52,6 +56,7 @@ export type DispatchJobKind =
   | "INSTRUCTION"
   | "CROSS_REPO_QUESTION"
   | "MANUAL_STEP"
+  | "MANUAL_STEP_ABORT"
   | "PLAN_REVIEW"
   | "SELF_UPDATE";
 
@@ -100,13 +105,14 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "instruction") return "INSTRUCTION";
   if (value === "cross_repo_question") return "CROSS_REPO_QUESTION";
   if (value === "manual_step") return "MANUAL_STEP";
+  if (value === "manual_step_abort") return "MANUAL_STEP_ABORT";
   if (value === "plan_review") return "PLAN_REVIEW";
   if (value === "self_update") return "SELF_UPDATE";
   return null;
 }
 
 /**
- * セッションを立てず、tmuxにも触らないジョブ（#1828）。手作業の代行実行と、
+ * セッションを立てず、tmuxにも触らないジョブ（#1828）。手作業の代行実行と、その中断（#1882）、
  * チェックアウトの更新（#1875）。
  *
  * **払い出しは制御ジョブと同じ「枠外」**（`SESSION_LAUNCH_JOB_KINDS`に入れない）で、
@@ -116,7 +122,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
  * 一方で`SESSION_CONTROL_JOB_KINDS`には**入れない**。あちらはpollerがセッション名を組み立て直して
  * 突き合わせる種別の集合で、こちらは操作する相手がセッションではない。
  */
-export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP", "SELF_UPDATE"] as const;
+export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP", "MANUAL_STEP_ABORT", "SELF_UPDATE"] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
   return (OUT_OF_BAND_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
@@ -218,6 +224,13 @@ export type DispatchJobView = {
   command: string | null;
   /** 代行実行した手順の行番号（#1828）。画面がジョブと手順を対応付ける */
   manualStepLine: number | null;
+  /**
+   * 止める対象のジョブid（#1882。`kind`が`MANUAL_STEP_ABORT`のときだけ入る）。
+   *
+   * 画面は「この実行を止めようとしている中断ジョブがあるか」をこれで引く（中断も届くまで
+   * 最大1巡かかるため、押した後に何も出ないと押し直してよいのか分からない）。
+   */
+  targetJobId: string | null;
   /** 代行実行の終了コード（#1828）。`0`のときだけ画面が手順のチェックを付ける */
   exitCode: number | null;
   /**
@@ -281,6 +294,15 @@ export type DispatchHostView = {
    * こちらは**シェルでコマンドを実行する**。同じ「文字列を届ける」でも、届いた先で起きることが違う。
    */
   manualStepCapable: boolean | null;
+  /**
+   * 走っている代行実行を止められるか（#1882）。**`null`（未申告）は「できない」として扱う**
+   * （`manualStepCapable`と同じ向き）。
+   *
+   * **画面はこれを見て、中断の効き目を先に伝える。** 止められないホストでは「打ち切り
+   * （5分）まで待つことになります」と出す。押せば止まるように見せて実際は止まらない、
+   * という状態を作らないための材料。
+   */
+  manualStepAbortCapable: boolean | null;
   /**
    * 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。**`null`（未申告）は「できない」として
    * 扱う**（`crossRepoQuestionCapable`と同じ）。
@@ -605,6 +627,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "横断質問";
     case "MANUAL_STEP":
       return "手作業の代行";
+    case "MANUAL_STEP_ABORT":
+      return "代行の中断";
     case "PLAN_REVIEW":
       return "計画レビュー";
     case "SELF_UPDATE":
@@ -1318,6 +1342,55 @@ export function findManualStepJobForIssue(
     issueNumber,
     (job) => job.kind === "MANUAL_STEP",
   );
+}
+
+/**
+ * ある代行実行を止めようとしている中断ジョブ（#1882）を1件選ぶ。
+ *
+ * **押した中断が届くまでにも最大1巡（既定30秒）かかる。** その間に画面へ何も出ないと、
+ * 押せていないのか届いていないのかが分からず押し直すことになるため、未処理の中断ジョブを
+ * 引けるようにしておく。
+ */
+export function findManualStepAbortJobForJob(
+  jobs: readonly DispatchJobView[],
+  targetJobId: string,
+): DispatchJobView | null {
+  return (
+    jobs.find((job) => job.kind === "MANUAL_STEP_ABORT" && job.targetJobId === targetJobId) ?? null
+  );
+}
+
+/**
+ * 走っている代行実行を止められない理由（#1882）。**画面にそのまま出す前提**。
+ *
+ * `null`なら押せる。ここで返す理由は「押しても効かない」ことの説明であって、中断の操作
+ * （自動実行を止めること）自体は常に行える——止められないのは**走っている1件**だけ。
+ */
+export type ManualStepAbortRejection = "host_unknown" | "host_offline" | "abort_unsupported";
+
+export function describeManualStepAbortRejection(
+  rejection: ManualStepAbortRejection,
+  context: { hostName: string; timeoutMinutes: number },
+): string {
+  switch (rejection) {
+    case "host_unknown":
+      return `${context.hostName}が見つからないため、走っているコマンドは止められません（${context.timeoutMinutes}分で打ち切られます）。`;
+    case "host_offline":
+      return `${context.hostName}が応答していないため、走っているコマンドは止められません（${context.timeoutMinutes}分で打ち切られます）。`;
+    case "abort_unsupported":
+      // **「更新すれば止められる」ことまで書く。** 止められない理由がpollerの版であることが
+      // 分かれば、次にやること（poller更新の手作業）へ繋がる
+      return `${context.hostName}のpollerが中断に対応していないため、走っているコマンドは止められません（${context.timeoutMinutes}分で打ち切られます）。pollerを更新すると止められるようになります。`;
+  }
+}
+
+export function resolveManualStepAbortRejection(
+  host: Pick<DispatchHostView, "online" | "manualStepAbortCapable"> | null | undefined,
+): ManualStepAbortRejection | null {
+  if (!host) return "host_unknown";
+  if (!host.online) return "host_offline";
+  if (host.manualStepAbortCapable !== true) return "abort_unsupported";
+  return null;
 }
 
 /**

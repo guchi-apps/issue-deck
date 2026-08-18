@@ -8,36 +8,43 @@ const POLL_INTERVAL_MS = 10_000;
 
 export type IssuePollingHandle = {
   /**
-   * いますぐ取り直す（#1893）。一覧を下へ引っ張ったときのように、ユーザーが明示的に
-   * 求めたときだけ呼ぶ。**ポーリングと違い`document.hidden`では止めない**——
-   * 見ていない画面のための取得ではないため。
+   * いますぐ取り直す。一覧を下へ引っ張ったとき（#1893）や、通知ベルを開いている間の
+   * 自動更新（`notification-state.tsx`、#1909）が使う。**ポーリングと違い
+   * `document.hidden`では止めない**——見ていない画面のための取得ではないため。
+   * 戻り値は取得できたかどうかで、呼んだ側が「いつ時点の内容か」を出すのに使う——
+   * 失敗を成功として数えると、取れていないのに「たった今更新」と出てしまう。
    */
-  refresh: () => Promise<void>;
+  refresh: () => Promise<boolean>;
 };
 
+/**
+ * Issue一覧をDBから取り直し続ける（叩き先は`GET /api/issues`で、GitHub APIは消費しない）。
+ */
 export function useIssuePolling(onIssues: (issues: Issue[]) => void): IssuePollingHandle {
   const onIssuesRef = useRef(onIssues);
-  const cancelledRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     onIssuesRef.current = onIssues;
   }, [onIssues]);
 
   useEffect(() => {
-    cancelledRef.current = false;
+    mountedRef.current = true;
     return () => {
-      cancelledRef.current = true;
+      mountedRef.current = false;
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch("/api/issues");
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const data: { issues: Issue[] } = await res.json();
-      if (!cancelledRef.current) onIssuesRef.current(data.issues);
+      if (mountedRef.current) onIssuesRef.current(data.issues);
+      return true;
     } catch {
       // ネットワーク瞬断等は次回のポーリングで回復するため無視する
+      return false;
     }
   }, []);
 

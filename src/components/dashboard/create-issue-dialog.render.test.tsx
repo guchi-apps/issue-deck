@@ -53,26 +53,17 @@ vi.mock("@/hooks/use-issue-repo-meta", () => ({
   useIssueRepoMeta: () => ({ labels: [], assignees: [], isLoading: false }),
 }));
 
-vi.mock("@/hooks/use-issue-suggest", () => ({
-  useIssueSuggest: () => ({
-    isGenerating: false,
-    error: null,
-    notConfigured: false,
-    generate: vi.fn(),
-  }),
-}));
-
-// クイック起票の一括推定（#1605）。戻り値の参照を毎レンダー同じに保つため、外に置いた1つを返す
-const quickGenerate = vi.fn();
-const quickSuggestState = {
+// タイトル・ラベルの付与（#1884）。戻り値の参照を毎レンダー同じに保つため、外に置いた1つを返す
+const suggestGenerate = vi.fn();
+const suggestState = {
   isGenerating: false,
   error: null as string | null,
   notConfigured: false,
-  generate: quickGenerate,
+  generate: suggestGenerate,
 };
 
-vi.mock("@/hooks/use-issue-quick-suggest", () => ({
-  useIssueQuickSuggest: () => quickSuggestState,
+vi.mock("@/hooks/use-issue-suggest", () => ({
+  useIssueSuggest: () => suggestState,
 }));
 
 vi.mock("@/hooks/use-progress-status-mutation", () => ({
@@ -94,6 +85,7 @@ function makeRepository(): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
+    dispatchRunnable: false,
     hidden: false,
     favorite: false,
   };
@@ -111,6 +103,7 @@ function makeHost(): DispatchHostView {
     instructionCapable: true,
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
+    manualStepAbortCapable: null,
     planReviewCapable: null,
     selfUpdateCapable: null,
     maxSessions: 12,
@@ -185,14 +178,9 @@ function Harness({
   );
 }
 
-/** 推定を挟まず従来のフォーム（確認ステップ）へ進む（#1605） */
-function goToConfirmStep() {
-  fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
-}
-
 /**
  * Radixの`Select`はjsdomに無いポインタ関連のAPIを呼ぶため、開くには先に補う必要がある。
- * 入力ステップのリポジトリ欄（#1733）を実際に操作するテストで使う。
+ * リポジトリ欄を実際に操作するテストで使う。
  */
 function stubPointerApisForSelect() {
   const proto = Element.prototype as unknown as Record<string, () => unknown>;
@@ -202,11 +190,18 @@ function stubPointerApisForSelect() {
   proto.scrollIntoView = () => undefined;
 }
 
-/** 入力ステップのリポジトリ欄で指定する（#1733） */
-function pickInputRepository(optionName: string) {
+/** リポジトリ欄で選び直す */
+function pickRepository(optionName: string) {
   stubPointerApisForSelect();
   fireEvent.keyDown(screen.getByRole("combobox", { name: "リポジトリ" }), { key: "ArrowDown" });
   fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
+function resetSuggest() {
+  suggestGenerate.mockReset();
+  suggestState.isGenerating = false;
+  suggestState.error = null;
+  suggestState.notConfigured = false;
 }
 
 describe("CreateIssueDialog の「作成+実装開始」", () => {
@@ -221,15 +216,11 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     createIssue.mockReset();
     updateIssue.mockReset();
     enqueue.mockReset();
-    quickGenerate.mockReset();
-    quickSuggestState.isGenerating = false;
-    quickSuggestState.error = null;
-    quickSuggestState.notConfigured = false;
+    resetSuggest();
   });
 
   it("作成フォームには実装オプションのチェックボックスを出さない（#1580）", () => {
     render(<Harness onCreated={vi.fn()} />);
-    goToConfirmStep();
 
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.queryByText("計画が必要")).toBeNull();
@@ -238,7 +229,6 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
 
   it("作成後に開く「実装を開始」ダイアログでオプションを選ばせる（#1580）", async () => {
     render(<Harness onCreated={vi.fn()} />);
-    goToConfirmStep();
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
@@ -259,7 +249,6 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     );
     const onCreated = vi.fn();
     render(<Harness onCreated={onCreated} />);
-    goToConfirmStep();
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
@@ -297,6 +286,7 @@ describe("CreateIssueDialog の種別「質問」", () => {
     cleanup();
     createIssue.mockReset();
     commentMutations.createComment.mockReset();
+    resetSuggest();
   });
 
   function selectQuestion() {
@@ -306,12 +296,20 @@ describe("CreateIssueDialog の種別「質問」", () => {
   it("質問ではタイトル欄・担当者・「作成+実装開始」を出さない", () => {
     render(<Harness onCreated={vi.fn()} />);
     selectQuestion();
-    goToConfirmStep();
 
     expect(screen.queryByLabelText("タイトル")).toBeNull();
     expect(screen.queryByLabelText("担当者")).toBeNull();
     expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
     expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
+  });
+
+  /** 質問のタイトルは質問文から機械生成する。付与ボタンを出す意味が無い（#1884） */
+  it("質問では「タイトル・ラベルを付与」を出さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+    selectQuestion();
+
+    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
   });
 
   // 質問でも画像を貼れて`#123`のIssue補完が効くこと（この統合の主目的）
@@ -323,18 +321,15 @@ describe("CreateIssueDialog の種別「質問」", () => {
     expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
   });
 
-  it("タイトルは質問文から自動で作り、確認ステップでプレビューとして見せる", () => {
+  it("タイトルは質問文から自動で作り、プレビューとして見せる", () => {
     render(<Harness onCreated={vi.fn()} />);
     selectQuestion();
-    goToConfirmStep();
 
     expect(screen.getByText("質問内容から自動で作られます")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "内容を編集" }));
     fireEvent.change(screen.getByLabelText("質問内容"), {
       target: { value: "認証の流れを教えて" },
     });
-    goToConfirmStep();
     expect(screen.getByText("[質問] 認証の流れを教えて")).not.toBeNull();
   });
 
@@ -346,7 +341,6 @@ describe("CreateIssueDialog の種別「質問」", () => {
     fireEvent.change(screen.getByLabelText("質問内容"), {
       target: { value: "認証の流れを教えて" },
     });
-    goToConfirmStep();
     fireEvent.click(screen.getByRole("button", { name: "質問する" }));
 
     await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
@@ -363,10 +357,11 @@ describe("CreateIssueDialog の種別「質問」", () => {
 });
 
 /**
- * #1605。開いた直後は本文の入力欄だけを出し、「次へ」でリポジトリ・タイトル・ラベルを
- * 推定してから確認ステップへ移る。**推定の成否によらず確認ステップへは必ず進む。**
+ * #1884。項目をすべて1画面に並べ、リポジトリは人が選び、タイトル・ラベルは
+ * 「タイトル・ラベルを付与」を押したときだけ決まる。2ステップ（#1605）と
+ * 内容からのリポジトリ推定（#1710・#1733）は廃止した。
  */
-describe("CreateIssueDialog のクイック起票", () => {
+describe("CreateIssueDialog の1画面フォーム", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
     createIssue.mockResolvedValue(makeIssue());
@@ -375,302 +370,212 @@ describe("CreateIssueDialog のクイック起票", () => {
   afterEach(() => {
     cleanup();
     createIssue.mockReset();
-    quickGenerate.mockReset();
-    quickSuggestState.isGenerating = false;
-    quickSuggestState.error = null;
-    quickSuggestState.notConfigured = false;
+    resetSuggest();
+    window.localStorage.clear();
   });
 
-  it("開いた直後はタイトル・ラベル・担当者を出さない（リポジトリは先に指定できる・#1733）", () => {
-    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
-
-    expect(screen.getByLabelText("内容")).not.toBeNull();
-    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
-      "自動で決める",
-    );
-    expect(screen.queryByLabelText("タイトル")).toBeNull();
-    expect(screen.queryByLabelText("担当者")).toBeNull();
-    expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
-  });
-
-  /**
-   * #1733。リポジトリ別の画面から渡された値は、これまで入力ステップに何も出ないまま
-   * 持ち越され、確認ステップの「表示中のリポジトリ」で初めて分かる状態だった。
-   */
-  it("リポジトリ別の画面から開いたときは、入力ステップにその値が入っている", () => {
+  it("開いた直後から、リポジトリ・内容・タイトル・ラベル・担当者がすべて出ている", () => {
     render(<Harness onCreated={vi.fn()} />);
 
-    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
-      REPOSITORY_FULL_NAME,
-    );
+    expect(screen.getByLabelText("リポジトリ")).not.toBeNull();
+    expect(screen.getByLabelText("内容")).not.toBeNull();
+    expect(screen.getByLabelText("タイトル")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /ラベルを選択/ })).not.toBeNull();
+    expect(screen.getByLabelText("担当者")).not.toBeNull();
+    // 2画面ぶんの導線は無くなった
+    expect(screen.queryByRole("button", { name: "次へ" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "戻る" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "自分で入力する" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "内容を編集" })).toBeNull();
   });
 
-  it("指定しなければ、推定に「指定済み」を立てない", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME],
-      title: "タイトル案",
-      labels: [],
-    });
+  /** #1745で足した本文テンプレートは廃止（#1884） */
+  it("本文テンプレートのチップを出さない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "機能追加" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "改善・見た目" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "不具合" })).toBeNull();
+  });
+
+  it("開いていた画面のリポジトリが入り、その出どころを示す", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(REPOSITORY_FULL_NAME);
+    expect(screen.queryByText("表示中のリポジトリ")).not.toBeNull();
+  });
+
+  it("開いていた画面のリポジトリが分からなければ、未選択のまま選ばせる", () => {
     render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
 
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
-    expect(quickGenerate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ repositoryFullName: null, repositoryPinned: false }),
-    );
-  });
-
-  /**
-   * #1733。人が選んだ値を推し量る意味は無いので、リポジトリの推定は省く。
-   * 押しても変わらない候補チップも、直していないのに「自動」と名乗るバッジも出さない。
-   */
-  it("入力ステップで指定すると、推定を省いて候補チップも「自動」バッジも出さない", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
-      repositoryCandidates: [],
-      title: "タイトル案",
-      labels: [],
-    });
-    render(
-      <Harness
-        onCreated={vi.fn()}
-        repositories={[makeRepository(), makeOtherRepository()]}
-        defaultRepositoryFullName={null}
-      />,
-    );
-
-    pickInputRepository(OTHER_REPOSITORY_FULL_NAME);
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
-    expect(quickGenerate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({
-        repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
-        repositoryPinned: true,
-      }),
-    );
-
-    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
-    // 指定したリポジトリのまま。タイトルだけが「自動」で、リポジトリには何も付かない
-    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
-    expect(screen.getAllByText("自動")).toHaveLength(1);
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
     expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
-    expect(screen.queryByRole("button", { name: /候補1/ })).toBeNull();
+    expect(screen.queryByText("どのリポジトリの話かを選んでください。")).not.toBeNull();
   });
 
-  /**
-   * #1733。質問へ切り替えると、ワークフロー未導入のリポジトリは選び直される（#1641）。
-   * **選び直された値は本人の指定ではない**ので、指定として扱って推定を省いてはいけない。
-   */
-  it("種別の切り替えでリポジトリが選び直されたら、指定として扱わない", async () => {
-    const unregistered: ConnectedRepository = {
+  it("人が選び直したリポジトリには「表示中のリポジトリ」を出さない", () => {
+    render(
+      <Harness onCreated={vi.fn()} repositories={[makeRepository(), makeOtherRepository()]} />,
+    );
+
+    pickRepository(OTHER_REPOSITORY_FULL_NAME);
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
+  });
+
+  /** #1884。押しただけで選んでいないリポジトリが入る経路を残さない */
+  it("質問へ切り替えたとき、質問に使えないリポジトリなら未選択へ戻して選ばせる", () => {
+    const notConfigured: ConnectedRepository = {
       ...makeOtherRepository(),
-      id: "3",
-      name: "vps",
-      fullName: "guchi-apps/vps",
       hasClaudeWorkflow: false,
     };
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME],
-      title: null,
-      labels: [],
-    });
     render(
       <Harness
         onCreated={vi.fn()}
-        repositories={[makeRepository(), unregistered]}
-        defaultRepositoryFullName={null}
-      />,
-    );
-
-    pickInputRepository("guchi-apps/vps");
-    fireEvent.click(screen.getByRole("button", { name: "質問" }));
-    // 質問では選べないため導入済みの先頭へ寄る（#1641）
-    expect(screen.getByRole("combobox", { name: "リポジトリ" }).textContent).toContain(
-      REPOSITORY_FULL_NAME,
-    );
-
-    fireEvent.change(screen.getByLabelText("質問内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
-    expect(quickGenerate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ repositoryPinned: false }),
-    );
-  });
-
-  it("「次へ」で推定を呼び、確認ステップに結果を入れる", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      title: "PWA表示時に画面を更新するボタンを追加する",
-      labels: [],
-    });
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText("内容"), {
-      target: { value: "PWAで引っ張っても更新されない" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    await waitFor(() => expect(quickGenerate).toHaveBeenCalledTimes(1));
-    expect(quickGenerate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ body: "PWAで引っ張っても更新されない", kind: "issue" }),
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe(
-        "PWA表示時に画面を更新するボタンを追加する",
-      ),
-    );
-  });
-
-  it("推定できなくても確認ステップへ進み、自分で入力できる状態にする", async () => {
-    quickSuggestState.notConfigured = true;
-    quickGenerate.mockResolvedValue(null);
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
-    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
-  });
-
-  it("「自分で入力する」では推定を呼ばない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "自分で入力する" }));
-
-    expect(quickGenerate).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("タイトル")).not.toBeNull();
-  });
-
-  it("本文が空のままでは「次へ」を押せない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    expect(
-      (screen.getByRole("button", { name: "次へ" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
-
-  /**
-   * #1710。推定を1件に決め打ちしていたため、外したときの直し方が十数件のリストを開くしか
-   * なかった。候補を並べ、1タップで選び直せること・押した後は「自動」を名乗らないことを見る。
-   */
-  it("推定したリポジトリ候補をチップで並べ、押すと選び直せる", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME, OTHER_REPOSITORY_FULL_NAME],
-      title: "タイトル案",
-      labels: [],
-    });
-    render(
-      <Harness
-        onCreated={vi.fn()}
-        repositories={[makeRepository(), makeOtherRepository()]}
-        defaultRepositoryFullName={null}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-
-    const candidate = await screen.findByRole("button", { name: /候補2.*shopping-list/ });
-    expect(
-      screen.getByRole("button", { name: /候補1.*issue-deck/ }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    // リポジトリとタイトルの2つが「自動」
-    expect(screen.getAllByText("自動")).toHaveLength(2);
-
-    fireEvent.click(candidate);
-
-    expect(candidate.getAttribute("aria-pressed")).toBe("true");
-    // 人が選んだので「自動」は外れる（タイトルの分だけが残る）
-    expect(screen.getAllByText("自動")).toHaveLength(1);
-  });
-
-  it("リポジトリ別の画面から開いたときは、その値を選んだまま「表示中のリポジトリ」と示す", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME],
-      title: "タイトル案",
-      labels: [],
-    });
-    render(
-      <Harness
-        onCreated={vi.fn()}
-        repositories={[makeRepository(), makeOtherRepository()]}
+        repositories={[makeRepository(), notConfigured]}
         defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
 
-    await waitFor(() => expect(screen.queryByText("表示中のリポジトリ")).not.toBeNull());
-    expect(
-      screen.getByRole("button", { name: /表示中.*shopping-list/ }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    // 内容から推定した方も、押せば切り替わる候補として並ぶ
-    expect(screen.getByRole("button", { name: /候補1.*issue-deck/ })).not.toBeNull();
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
   });
 
-  it("ラベルが1つも決まらなかったときは、その旨を出す", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME],
-      title: "タイトル案",
-      labels: [],
-    });
+  it("開いただけでは自動生成を呼ばない", () => {
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+
+    expect(suggestGenerate).not.toHaveBeenCalled();
+  });
+
+  it("タイトルが空のあいだは、主ボタンが「タイトル・ラベルを付与」になる", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+
+    expect(screen.getByRole("button", { name: "タイトル・ラベルを付与" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
+    // 同じことをする口を2つ同時に出さない
+    expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
+  });
+
+  /**
+   * #1884。確認ステップにはキャンセルが無かったので、これは並べ替えではなく追加にあたる。
+   * スマホの縦積みでは、DOMの先頭に置いたキャンセルが一番下へ回る（`flex-col-reverse`）。
+   */
+  it("タイトルの有無によらずキャンセルを出し、操作ボタンの先頭に置く", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const cancelFirst = () => {
+      const footer = screen.getByRole("button", { name: "キャンセル" }).parentElement;
+      return Array.from(footer?.querySelectorAll("button") ?? [])[0]?.textContent;
+    };
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    expect(cancelFirst()).toBe("キャンセル");
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    expect(screen.getByRole("button", { name: "キャンセル" })).not.toBeNull();
+    expect(cancelFirst()).toBe("キャンセル");
+  });
+
+  it("本文が空・リポジトリ未選択のあいだは付与を押せない", () => {
+    render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
+
+    const button = () => screen.getByRole("button", { name: "タイトル・ラベルを付与" });
+    expect((button() as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    // 本文が入ってもリポジトリが決まらなければ押せない（ラベルの取得先が無い）
+    expect((button() as HTMLButtonElement).disabled).toBe(true);
+
+    pickRepository(REPOSITORY_FULL_NAME);
+    expect((button() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("付与を押すと、同じ画面のタイトル・ラベルが埋まって主ボタンが「作成」に変わる", async () => {
+    suggestGenerate.mockResolvedValue({ title: "タイトル案", labels: ["51.improvement"] });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
 
     await waitFor(() =>
-      expect(screen.queryByText("ラベルは自動で決められませんでした。選ぶか、生成し直せます。")).not.toBeNull(),
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
+    );
+    expect(screen.queryByText("51.improvement")).not.toBeNull();
+    expect(screen.getAllByText("自動")).toHaveLength(2);
+    // 画面は切り替わらない（本文の入力欄が出たまま）
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("本文");
+    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
+  });
+
+  it("タイトルを自分で書いた場合は、付与ではなく「作成」を出す", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+
+    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
+    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "作成+実装開始" })).not.toBeNull();
+    // 付け直しはこちらへ移る
+    expect(screen.getByRole("button", { name: "付け直す" })).not.toBeNull();
+    expect(screen.queryByText("自動")).toBeNull();
+  });
+
+  it("「付け直す」でも同じ生成を呼ぶ", async () => {
+    suggestGenerate.mockResolvedValue({ title: "付け直したタイトル", labels: [] });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    fireEvent.click(screen.getByRole("button", { name: "付け直す" }));
+
+    await waitFor(() => expect(suggestGenerate).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe(
+        "付け直したタイトル",
+      ),
     );
   });
 
-  it("ラベルが決まったときは、その注記を出さない", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      repositoryCandidates: [REPOSITORY_FULL_NAME],
-      title: "タイトル案",
-      labels: ["30.bug"],
-    });
+  /** #1710。空欄と「決められなかった」は見分けが付かない */
+  it("ラベルが1つも決まらなかったときは、その旨を出す", async () => {
+    suggestGenerate.mockResolvedValue({ title: "タイトル案", labels: [] });
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
 
-    await waitFor(() => expect(screen.queryByText("30.bug")).not.toBeNull());
-    expect(
-      screen.queryByText("ラベルは自動で決められませんでした。選ぶか、生成し直せます。"),
-    ).toBeNull();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("ラベルは自動で決められませんでした。選ぶか、付け直せます。"),
+      ).not.toBeNull(),
+    );
   });
 
-  it("確認ステップの「内容を編集」で入力ステップへ戻る", async () => {
-    quickGenerate.mockResolvedValue({
-      repositoryFullName: REPOSITORY_FULL_NAME,
-      title: "タイトル案",
-      labels: [],
-    });
+  it("生成できなくても、自分で書いて作成できる", async () => {
+    suggestState.notConfigured = true;
+    suggestGenerate.mockResolvedValue(null);
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
-    await waitFor(() => expect(screen.queryByLabelText("タイトル")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "内容を編集" }));
+    await waitFor(() => expect(suggestGenerate).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
-    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("本文");
-    expect(screen.queryByLabelText("タイトル")).toBeNull();
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    expect(createIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "自分で書いた", repositoryFullName: REPOSITORY_FULL_NAME }),
+    );
   });
 });
 
@@ -678,10 +583,140 @@ describe("CreateIssueDialog のクイック起票", () => {
  * #1728。書いている内容ごと別ウィンドウ（`/issues/new`）へ移す。
  * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
  */
+/**
+ * #1890。「タイトル・ラベルを付与」の応答に種別が乗る。質問だと判定されても**種別は変えず**、
+ * 切り替えるかどうかは押した人が決める。
+ */
+describe("CreateIssueDialog の質問への切り替え提案", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue());
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    resetSuggest();
+    window.localStorage.clear();
+  });
+
+  async function generateAsQuestion() {
+    suggestGenerate.mockResolvedValue({
+      kind: "question",
+      title: "タイトル案",
+      labels: ["51.improvement"],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+
+    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
+  }
+
+  it("質問だと判定されても種別は変えず、提案だけを出す", async () => {
+    await generateAsQuestion();
+
+    // 種別はIssueのまま（質問なら担当者欄が消え、タイトルは自動プレビューになる）
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+    expect(screen.queryByLabelText("担当者")).not.toBeNull();
+  });
+
+  it("質問と判定されなければ提案を出さない", async () => {
+    suggestGenerate.mockResolvedValue({ kind: "issue", title: "タイトル案", labels: [] });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "並び順を変えたい" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
+    );
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+  });
+
+  it("「Issueのままにする」で提案を降ろす。フォームの中身は変わらない", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueのままにする" }));
+
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+  });
+
+  it("「質問に切り替える」で質問の形になり、「Issueに戻す」で元へ戻る", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
+
+    expect(screen.getByRole("button", { name: "質問" }).getAttribute("aria-pressed")).toBe("true");
+    // タイトルは質問文から作った読み取り専用のプレビューへ変わり、担当者欄は消える
+    expect(screen.getByText("[質問] 違いはなんですか？")).not.toBeNull();
+    expect(screen.queryByLabelText("担当者")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
+
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
+  });
+
+  it("質問に使えないリポジトリで切り替えたときも、「Issueに戻す」で選び直さずに済む", async () => {
+    const notConfigured: ConnectedRepository = {
+      ...makeOtherRepository(),
+      hasClaudeWorkflow: false,
+    };
+    suggestGenerate.mockResolvedValue({ kind: "question", title: "タイトル案", labels: [] });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), notConfigured]}
+        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+  });
+
+  /**
+   * #1890。判定を起こす「タイトル・ラベルを付与」はフッターにあり、提案は先頭の種別欄の下に出る。
+   * ダイアログは中身ごとスクロールするため、寄せないと押した位置からは見えないことがある。
+   */
+  it("提案を出したら、その位置まで画面を寄せる", async () => {
+    const scrollIntoView = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(scrollIntoView);
+
+    await generateAsQuestion();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    vi.restoreAllMocks();
+  });
+
+  it("人が種別を押し直したら提案は降りる", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
+  });
+});
+
 describe("CreateIssueDialog の別ウィンドウ", () => {
   afterEach(() => {
     cleanup();
     window.localStorage.clear();
+    resetSuggest();
     vi.restoreAllMocks();
   });
 
@@ -701,7 +736,6 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
     const handoff = JSON.parse(window.localStorage.getItem("issue-create-handoff") ?? "{}");
     expect(handoff.body).toBe("書きかけの本文");
     expect(handoff.repositoryFullName).toBe(REPOSITORY_FULL_NAME);
-    expect(handoff.step).toBe("input");
     // 移したのでダイアログ側は閉じる
     expect(screen.queryByLabelText("内容")).toBeNull();
   });
@@ -721,7 +755,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
     expect(window.localStorage.getItem("issue-create-handoff")).toBeNull();
   });
 
-  it("別ウィンドウ側は、移してきた内容と続きのステップで始まる", () => {
+  it("別ウィンドウ側は、移してきた内容が入った状態で始まる", () => {
     render(
       <CreateIssueDialog
         open
@@ -738,14 +772,13 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
           selectedLabels: ["50.feature"],
           assignee: "m-guchi",
           bodyPrefix: null,
-          step: "confirm",
           savedAt: Date.now(),
         }}
       />,
     );
 
     expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("移してきたタイトル");
-    expect(screen.getByText("移してきた本文")).not.toBeNull();
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("移してきた本文");
     // 移した先で同じ物をもう一度「復元する」と出さない（すでに入っているため）
     expect(screen.queryByText("保存された下書きがあります")).toBeNull();
     // ウィンドウの中には移す先が無いので、「別ウィンドウで開く」は出さない
@@ -767,129 +800,5 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
 
     expect(screen.getByRole("button", { name: "デッキへ戻る" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
-  });
-});
-
-/**
- * #1745。1段目で本文テンプレート（機能追加・改善／見た目・不具合）を選べるようにしたもの。
- * 入るのは見出しだけの骨組みで、入力欄は1つのまま。
- */
-describe("CreateIssueDialog の本文テンプレート", () => {
-  afterEach(() => {
-    cleanup();
-    window.localStorage.clear();
-  });
-
-  function bodyValue() {
-    return (screen.getByLabelText("内容") as HTMLTextAreaElement).value;
-  }
-
-  function nextButton() {
-    return screen.getByRole("button", { name: "次へ" }) as HTMLButtonElement;
-  }
-
-  it("チップを押すと本文に見出しが入り、埋めるまで「次へ」を押せない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-
-    expect(bodyValue()).toContain("## 追加したい機能");
-    expect(bodyValue()).toContain("## なぜ追加したいか（解決したいこと）");
-    expect(nextButton().disabled).toBe(true);
-    expect(screen.queryByText("テンプレートの項目を埋めると「次へ」が押せます。")).not.toBeNull();
-  });
-
-  it("項目を1つ埋めると「次へ」が押せる", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
-    fireEvent.change(screen.getByLabelText("内容"), {
-      target: { value: `${bodyValue()}\n件数の表示が合っていない` },
-    });
-
-    expect(nextButton().disabled).toBe(false);
-    expect(screen.queryByText("テンプレートの項目を埋めると「次へ」が押せます。")).toBeNull();
-  });
-
-  it("骨組みのままなら、別のチップを押しても確認せず入れ替える", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-    fireEvent.click(screen.getByRole("button", { name: "改善・見た目" }));
-
-    expect(bodyValue()).toContain("## 対象の画面・機能");
-    expect(bodyValue()).not.toContain("## 追加したい機能");
-    expect(screen.getByRole("button", { name: "改善・見た目" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-  });
-
-  it("書いた内容があるときは確認を出し、「やめる」で本文を残す", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
-
-    expect(bodyValue()).toBe("書きかけの本文");
-    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
-
-    expect(bodyValue()).toBe("書きかけの本文");
-    expect(screen.getByRole("button", { name: "不具合" }).getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("確認で「置き換える」を押したときだけ本文を入れ替える", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "不具合" }));
-    fireEvent.click(screen.getByRole("button", { name: "置き換える" }));
-
-    expect(bodyValue()).toContain("## 起きていること");
-    expect(bodyValue()).not.toContain("書きかけの本文");
-  });
-
-  it("選択中のチップを押し直すと選択が外れ、骨組みのままなら本文も空へ戻る", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-
-    expect(bodyValue()).toBe("");
-    expect(screen.getByRole("button", { name: "機能追加" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-  });
-
-  it("押し直しで外すとき、書いた内容は消さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-    fireEvent.change(screen.getByLabelText("内容"), {
-      target: { value: `${bodyValue()}\nカンバンに件数を出したい` },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-
-    expect(bodyValue()).toContain("カンバンに件数を出したい");
-    expect(screen.getByRole("button", { name: "機能追加" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-  });
-
-  it("種別が「質問」のときはテンプレート欄を出さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "質問" }));
-
-    expect(screen.queryByText("テンプレート")).toBeNull();
-    expect(screen.queryByRole("button", { name: "改善・見た目" })).toBeNull();
-  });
-
-  it("確認ステップではテンプレート欄を出さない（書く場所は1段目だけ）", () => {
-    render(<Harness onCreated={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "機能追加" }));
-    goToConfirmStep();
-
-    expect(screen.queryByText("テンプレート")).toBeNull();
   });
 });

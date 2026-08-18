@@ -1,12 +1,14 @@
 /**
- * 実行キューの更新インジケーターの文言と配色（#1773）。
+ * 「いま出ている内容がいつ時点のものか」を出す更新インジケーターの文言と配色
+ * （#1773で実行キューに入れたものを、通知ベルと共通化した。#1909）。
  *
- * **実行キューは開いている間ずっと自動で取り直しているが、その形跡が画面に無かった。**
- * 取得の失敗は握り潰す作り（`use-dispatch-state.ts`）で、バックグラウンドタブでは取得自体を
- * 飛ばすため、内容が古いまま固まっていても正常時と見分けが付かない。
+ * **自動で取り直している画面ほど、止まっていることに気づけない。** 取得の失敗は握り潰す作りで、
+ * バックグラウンドタブでは取得自体を飛ばすため、内容が古いまま固まっていても正常時と見分けが
+ * 付かない。
  *
- * **出すのは「最後に取れた時刻」と「次に取りに行く間隔」の2つだけ。** 間隔は動いているジョブの
- * 有無で5秒／20秒に変わるので、固定文ではなくフックが実際に使っている値を受け取って出す。
+ * **出すのは「最後に取れた時刻」と「次に取りに行く間隔」の2つだけ。** 間隔は画面ごとに違う
+ * （実行キューは5秒／20秒、通知ベルは30秒）ので、固定文ではなく呼び出し側が実際に使っている値を
+ * 受け取って出す。
  *
  * **次の更新までのカウントダウンは出さない。** 知りたいのは「出ている内容がいつ時点のものか」で、
  * あと何秒で更新されるかではない。
@@ -18,7 +20,7 @@
  * ここでは`critical`（赤）を使わない——**赤はジョブの失敗とホストの応答なしに割り当ててあり、
  * 「ブラウザが取りに行けていない」を同じ重さで出すと取り違える。**
  */
-export type DispatchQueueRefreshTone = "normal" | "warn";
+export type RefreshTone = "normal" | "warn";
 
 /**
  * 取得できていないと見なすまでの倍率（#1773）。
@@ -28,7 +30,7 @@ export type DispatchQueueRefreshTone = "normal" | "warn";
  */
 const STALE_INTERVAL_FACTOR = 3;
 
-export function describeDispatchQueueRefresh({
+export function describeRefreshStatus({
   fetchedAt,
   nowMs,
   isFetching,
@@ -40,7 +42,7 @@ export function describeDispatchQueueRefresh({
   nowMs: number | null;
   isFetching: boolean;
   pollIntervalMs: number;
-}): { label: string; tone: DispatchQueueRefreshTone } {
+}): { label: string; tone: RefreshTone } {
   const interval = `${Math.round(pollIntervalMs / 1000)}秒ごと`;
 
   // まだ一度も取れていないとき（初回の取得中・SSR直後）は経過を出しようがない。
@@ -51,7 +53,7 @@ export function describeDispatchQueueRefresh({
 
   const elapsedMs = Math.max(0, nowMs - fetchedAt);
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
-  const tone: DispatchQueueRefreshTone =
+  const tone: RefreshTone =
     elapsedMs > pollIntervalMs * STALE_INTERVAL_FACTOR ? "warn" : "normal";
 
   if (elapsedSeconds < 1) return { label: `たった今更新・${interval}`, tone };
@@ -64,6 +66,6 @@ export function describeDispatchQueueRefresh({
 }
 
 /** ボタンのツールチップ（#1773）。押すと何が起きるかと、放っておいても更新されることの両方を出す */
-export function describeDispatchQueueRefreshHint(pollIntervalMs: number): string {
+export function describeRefreshHint(pollIntervalMs: number): string {
   return `今すぐ更新（${Math.round(pollIntervalMs / 1000)}秒ごとに自動更新）`;
 }

@@ -162,6 +162,11 @@ export function IssueDeckShell({
     () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
     [issues, filters.issue],
   );
+  /**
+   * いま画面に出ているIssue（#1884）。PR・ブランチのペインでは詳細を描かないため、
+   * `selectedIssue`が残っていても「開いている画面のIssue」ではない。
+   */
+  const visibleIssue = filters.pane === "issues" ? selectedIssue : null;
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
@@ -582,8 +587,8 @@ export function IssueDeckShell({
       ),
     [issues, filters],
   );
-  // 未確認（回答が届いていて未読）の質問の件数（#1796）。左メニュー・スマホのホームで
-  // 「質問」の数字の色を変えるためだけに使う（件数そのものは総数のまま）。
+  // 未確認（回答が届いていて未読）の質問の件数（#1796）。左メニュー・スマホのホームの
+  // 「質問」に、オレンジの丸の件数としてそのまま出す（#1910）。
   // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
   const unconfirmedQuestionCount = useMemo(
     () =>
@@ -940,11 +945,16 @@ export function IssueDeckShell({
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
-          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る */}
+          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
+          ベルを開いている間の取り直し（#1909）もここが持つ取得口を使い回す——ベル専用の
+          取得口を足すと、同じIssue・PRを2本のポーリングで取りに行くことになる */}
       <NotificationProvider
         repositories={repositories}
         issues={issues}
         pullRequests={crossRepositoryPullRequests}
+        onRefreshIssues={issuePolling.refresh}
+        onRefreshPullRequests={openPullRequests.refreshInBackground}
+        isRefreshingPullRequests={openPullRequests.isRefreshing}
       >
       <div className="flex h-full flex-col">
         <TopBar
@@ -954,8 +964,18 @@ export function IssueDeckShell({
           groupByRepo={groupByRepo}
           onChangeGroupByRepo={setGroupByRepo}
           assigneeOptions={assigneeOptions}
+          /* 開いている画面に関連するリポジトリを初期値にする（#1884）。1つに絞り込んでいれば
+             そのリポジトリ、絞り込んでいなければ**いま画面に出ている**Issueのリポジトリ。
+             どちらも分からなければ渡さず、フォームで選ばせる。
+             **`selectedIssue`だけを見てはいけない。** PR・ブランチのペインへ移っても
+             `?issue=`は残るため（`use-issue-filters.ts`は`pr`しか畳まない）、Issue詳細が
+             どこにも出ていない状態で「表示中のリポジトリ」と書くことになる */
           onCreateIssue={() =>
-            openCreateDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+            openCreateDialog(
+              filters.repos.length === 1
+                ? filters.repos[0]
+                : (visibleIssue?.repositoryFullName ?? null),
+            )
           }
           onAskCrossRepoQuestion={() =>
             openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
