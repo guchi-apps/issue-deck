@@ -41,7 +41,13 @@ import {
   autoRefreshIntervalLabel,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
-import { DEVELOP_BRANCH, MAIN_BRANCH, isClosedLane, type BranchFlow } from "@/lib/branch-flow";
+import {
+  DEVELOP_BRANCH,
+  MAIN_BRANCH,
+  isClosedLane,
+  isReleaseCiPending,
+  type BranchFlow,
+} from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
@@ -687,6 +693,26 @@ function PlannedIssues({
 }
 
 /**
+ * リリースが進行中であることを表す紫のピル（#1931）。畳んだ1行と束の見出しで同じものを使う。
+ *
+ * **CIが走っている間だけ回るアイコンを添える。** 自動で進んでいる状態と、CIが終わって人の
+ * マージを待っている状態が同じ見た目だったため、開くまで区別できなかった。アイコンは
+ * 「デプロイ中」（`DeployStateIcon`）とまったく同じ形・大きさにして、同じ画面で2種類の
+ * 回り方が混ざらないようにしている。文言は変えず、読み上げにだけ実行中であることを足す。
+ */
+function ReleaseProgressPill({ label, ciPending }: { label: string; ciPending: boolean }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300"
+      aria-label={ciPending ? `${label}（チェック実行中）` : undefined}
+    >
+      {ciPending && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
+      {label}
+    </span>
+  );
+}
+
+/**
  * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
  *
  * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
@@ -750,25 +776,24 @@ function ReleaseGroupHeader({
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && <DeployStateBadge deploy={group.deploy} />}
             </>
+          ) : waitingUserMerge ? (
+            // mainへのマージだけは人が行う。待っているのが人の操作であることを、
+            // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
+            <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+              mainへマージ待ち
+            </span>
           ) : (
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
-                waitingUserMerge
-                  ? // mainへのマージだけは人が行う。待っているのが人の操作であることを、
-                    // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
-                    "bg-amber-500/15 font-medium text-amber-700 ring-amber-500 dark:text-amber-400"
-                  : "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300",
-              )}
-            >
-              {waitingUserMerge
-                ? "mainへマージ待ち"
-                : group.pullRequest
+            <ReleaseProgressPill
+              label={
+                group.pullRequest
                   ? "リリース中"
                   : group.bumpPullRequest
                     ? "バージョンバンプ中"
-                    : "本番未反映"}
-            </span>
+                    : "本番未反映"
+              }
+              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも走っていない
+              ciPending={isReleaseCiPending(group.pullRequest, group.bumpPullRequest)}
+            />
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
               `mergeWarnings`が返す警告で必ず確認ダイアログを通る */}
@@ -1179,9 +1204,7 @@ function RepositorySummaryRow({
         </span>
       )}
       {summary.releaseInProgress && (
-        <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300">
-          リリース中
-        </span>
+        <ReleaseProgressPill label="リリース中" ciPending={summary.releaseCiPending} />
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />

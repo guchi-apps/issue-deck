@@ -247,6 +247,15 @@ export type BranchFlowRepositorySummary = {
    */
   releaseInProgress: boolean;
   /**
+   * リリースを進めているPR（リリースPR・バージョンバンプPR）のCIが実行中（#1931）。
+   *
+   * **畳んだ1行の「リリース中」に回るアイコンを出すためだけに持つ。** 「リリース中」は
+   * CIが走っている間も、CIが終わって人のマージを待っている間も同じ見た目で、開くまで
+   * 「待てばよいのか、自分が押す番なのか」を区別できなかった。`unknown`（`Checks: read`が
+   * 無い・取得失敗）では実行中と言い切れないためfalseにする。
+   */
+  releaseCiPending: boolean;
+  /**
    * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に破線の丸のアイコンと
    * 数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。
    *

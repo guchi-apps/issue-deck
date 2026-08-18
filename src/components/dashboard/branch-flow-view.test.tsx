@@ -1203,6 +1203,46 @@ describe("BranchFlowView", () => {
       // 畳んだ1行と束の見出しの2か所に出る
       expect(screen.getAllByText("リリース中").length).toBeGreaterThan(1);
     });
+
+    // 自動で進んでいるのか、人がマージする番なのかを行を開かずに見分けられるようにする（#1931）
+    it("CI実行中の「リリース中」にはローディングを添える", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "pending",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      // 畳んだ1行と束の見出しの両方に付く
+      const pills = screen.getAllByLabelText("リリース中（チェック実行中）");
+      expect(pills).toHaveLength(2);
+      // 「デプロイ中」と同じ回るアイコン。止まったアイコンを添えても状態は伝わらない
+      pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
+    });
+
+    it("CIが終わっていればローディングは出さない（止まっている状態を回さない）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.queryByLabelText("リリース中（チェック実行中）")).toBeNull();
+    });
   });
 
   /**

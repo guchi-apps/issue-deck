@@ -377,6 +377,7 @@ describe("buildBranchFlow", () => {
       openManualStepCount: 0,
       plannedIssueCount: 0,
       releaseInProgress: false,
+      releaseCiPending: false,
       deploy: null,
     });
   });
@@ -833,6 +834,20 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
     expect(repository.summary.releaseInProgress).toBe(true);
   });
 
+  // 畳んだ1行の「リリース中」を回してよいかの判定（#1931）。CIが終わっていれば、
+  // 待つのではなく人がマージする番なので回さない。
+  it("CI実行中のバンプPRはリリースのCI実行中として拾う", () => {
+    expect(repository.summary.releaseCiPending).toBe(true);
+  });
+
+  it("CIが終わったバンプPRはリリースのCI実行中にしない", () => {
+    const done = build({
+      pullRequests: [pullRequest({ ...openBump, ciState: "success" })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0 } })],
+    }).repositories[0];
+    expect(done.summary.releaseCiPending).toBe(false);
+  });
+
   it("CIが落ちたバンプPRはCI失敗として拾う", () => {
     const failing = build({
       pullRequests: [pullRequest({ ...openBump, ciState: "failure" })],
@@ -1068,6 +1083,7 @@ describe("サマリー行の集計", () => {
       openManualStepCount: 0,
       plannedIssueCount: 0,
       releaseInProgress: false,
+      releaseCiPending: false,
       deploy: null,
     });
   });
