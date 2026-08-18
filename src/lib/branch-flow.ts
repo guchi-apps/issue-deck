@@ -103,6 +103,20 @@ export function isClosedLane(lane: BranchFlowLane): boolean {
   return lane.status === "closed";
 }
 
+/**
+ * リリースを進めているPRのCIが実行中か（#1931）。**回るアイコンを出してよいかの唯一の判定。**
+ *
+ * 「リリース中」のバッジは、CIが走っている間も、CIが終わって人のマージを待っている間も
+ * 同じ見た目だったため、行を開くまで「待てばよいのか、自分が押す番なのか」が分からなかった。
+ * 畳んだ1行（`summary.releaseCiPending`）と束の見出しで同じ規則にするためここに置く。
+ *
+ * **`unknown`（`Checks: read`が無い・チェックが0件・取得失敗）では回さない。** 実行中だと
+ * 言い切れないものを「進行中」と見せると、止まっているものを待ち続けることになる。
+ */
+export function isReleaseCiPending(...pullRequests: (PullRequestSummary | null)[]): boolean {
+  return pullRequests.some((pullRequest) => pullRequest?.ciState === "pending");
+}
+
 /** どのバージョンにも乗っていないレーンの並び順。手を動かす必要があるものから並べる */
 function laneOrder(lane: BranchFlowLane): number {
   if (lane.status === "open") return 0;
@@ -315,6 +329,9 @@ function buildRepository({
     // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
+    // CIが走っている間だけ畳んだ1行の「リリース中」を回す（#1931）。マージ待ちで止まって
+    // いるのか自動で進んでいるのかを、行を開かずに見分けられるようにするため。
+    releaseCiPending: isReleaseCiPending(releasePullRequest, bumpPullRequest),
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     plannedIssueCount: plannedIssues.length,
