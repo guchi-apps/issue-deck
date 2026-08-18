@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
-import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
@@ -559,19 +558,10 @@ export function IssueDetail({
                   )}
                 />
               )}
-              {canAskClaude(issue) && (
-                <AskClaudeDialog
-                  issue={issue}
-                  onIssueUpdated={onIssueUpdated}
-                  onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
-                  renderTrigger={(isSubmitting) => (
-                    <Button variant="outline" size="sm" disabled={isSubmitting}>
-                      {isSubmitting ? <Loader2 className="animate-spin" /> : <MessageCircleQuestion />}
-                      Claudeに質問する
-                    </Button>
-                  )}
-                />
-              )}
+              {/* 「Claudeに質問する」はここに置かない（#1913）。コメント欄の下の「質問する」と
+                  投稿されるコメントが同一（`askClaudeCommentBody`）で、あちらは本文をメンション
+                  補完・画像添付付きの入力欄で書けるぶん上位互換だった。ヘッダーに置くと、
+                  上のトップバーの「横断質問」とも見分けが付かない */}
               {canCloseQuestion && (
                 <Button
                   variant="outline"
@@ -922,9 +912,12 @@ export function IssueDetail({
                     引き継いでIssueを作成
                   </Button>
                 )}
+                {/* ヘッダーの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
+                    ここへ引き継ぐ（#1913） */}
                 {canAskClaude(issue) && (
                   <Button
                     variant="outline"
+                    title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
                     onClick={handleAskClaudeFromComposer}
                     disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
                   >
