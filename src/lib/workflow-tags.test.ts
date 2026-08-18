@@ -291,3 +291,17 @@ describe("shortWorkflowTag", () => {
     expect(shortWorkflowTag("v19")).toBe("v19");
   });
 });
+
+describe("タグ作成の版数計算（#1876）", () => {
+  it("最新タグの次の版数を求められる", () => {
+    // `createNextWorkflowTag`はこの値に1を足して`workflows/vN`を組み立てる
+    expect(parseWorkflowTagVersion("workflows/v21")).toBe(21);
+    expect(parseWorkflowTagVersion("workflows/v9")).toBe(9);
+  });
+
+  it("版数として読めない文字列はnullになる", () => {
+    // 読めないまま加算すると`workflows/vNaN`を切ってしまう。呼び出し側はnullで中断する
+    expect(parseWorkflowTagVersion("workflows/latest")).toBeNull();
+    expect(parseWorkflowTagVersion("v21")).toBeNull();
+  });
+});
