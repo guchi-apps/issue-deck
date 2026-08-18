@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
@@ -46,6 +47,8 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
+  ARTIFACT_REQUIRED_LABEL,
+  artifactRequiredDefaultForLabels,
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsToAdd,
@@ -225,13 +228,23 @@ export function StartImplementationDialog({
     injectedDispatch === undefined && includeDispatchTargets === true && open,
   );
   const dispatch = injectedDispatch ?? ownDispatch;
+  /**
+   * そのリポジトリに**定義されている**ラベル名（#1956）。アーティファクトの既定を当ててよいかの
+   * 判定にだけ使う。開いている間だけ取りに行く（閉じているダイアログのために取得を増やさない）。
+   */
+  const { labels: repositoryLabels } = useIssueRepoMeta(open ? issue.repositoryFullName : null);
+  const repositoryLabelNames = repositoryLabels.map((label) => label.name);
+  const hasArtifactLabelDefinition = repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL);
   const isSubmitting = isUpdatingIssue || isCreatingComment || dispatch.isSubmitting;
   const error = labelMutationError ?? commentMutationError ?? dispatch.error;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
   // 巻き戻さないよう、下のuseEffectの依存配列には含めずrefで最新値だけ参照する。
   const issueLabelsRef = useRef(issue.labels);
+  // リポジトリのラベル一覧も同じ理由でrefから読む（届くたびに選択状態を巻き戻さないため・#1956）
+  const repositoryLabelNamesRef = useRef(repositoryLabelNames);
   useEffect(() => {
     issueLabelsRef.current = issue.labels;
+    repositoryLabelNamesRef.current = repositoryLabelNames;
   });
 
   useEffect(() => {
@@ -240,12 +253,30 @@ export function StartImplementationDialog({
     // 呼び出し側から直接trueにされるケース（Issue作成直後の自動オープン）ではhandleOpenChange
     // を経由しないため、この効果で同期する。open自体の変化にのみ紐づく一度きりの処理であり、
     // ループや連鎖的な再レンダリングは発生しない。
-    setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current));
+    setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current, repositoryLabelNamesRef.current));
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
     setStartedTarget(null);
     setCopied(false);
   }, [open]);
+
+  /**
+   * リポジトリのラベル一覧は非同期で届くため、開いた直後の同期では間に合わないことがある（#1956）。
+   * 届いた時点でアーティファクトの既定をもう一度当てる。
+   *
+   * **既定はOFF→ONの一方向にしか動かさない**ので、先にユーザーが押した選択を打ち消すことはない
+   * （初期値がOFFである以上、この間にユーザーができるのはONにする操作だけ）。上の同期のように
+   * `setOptions`ごと置き換えると、他のチップの選択まで巻き戻る。
+   */
+  useEffect(() => {
+    if (!open) return;
+    const shouldTurnOn = artifactRequiredDefaultForLabels({
+      issueLabelNames: issueLabelsRef.current.map((label) => label.name),
+      repositoryLabelNames: repositoryLabelNamesRef.current,
+    });
+    if (!shouldTurnOn) return;
+    setOptions((prev) => (prev.artifactRequired ? prev : { ...prev, artifactRequired: true }));
+  }, [open, hasArtifactLabelDefinition]);
 
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);

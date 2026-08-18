@@ -4,10 +4,8 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import {
-  pullRequestRollupKey,
-  type PullRequestRollupTarget,
-} from "@/lib/github/check-rollup";
+import { pullRequestRollupKey, type PullRequestRollupTarget } from "@/lib/github/check-rollup";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchClosedPullRequests,
@@ -19,6 +17,7 @@ import {
   UNKNOWN_PULL_REQUEST_CI_STATE,
   type PullRequestCiState,
 } from "@/lib/github/release-api";
+import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
@@ -104,12 +103,18 @@ async function handleGET(request: Request) {
             : Promise.resolve<GithubApiOpenPullRequest[]>([]),
         ]);
 
-        return { repositoryId: repository.id, context, openPullRequests, closedPullRequests };
+        return { repositoryId: repository.id, context, token, openPullRequests, closedPullRequests };
       } catch (error) {
         // 1リポジトリの取得失敗で一覧全体を落とさない。取れなかったことは画面へ返す。
         console.error(`[GET /api/pull-requests] ${repository.fullName}:`, error);
         failedRepositories.push(repository.fullName);
-        return { repositoryId: repository.id, context, openPullRequests: [], closedPullRequests: [] };
+        return {
+          repositoryId: repository.id,
+          context,
+          token: null,
+          openPullRequests: [],
+          closedPullRequests: [],
+        };
       }
     }),
   );
@@ -118,6 +123,8 @@ async function handleGET(request: Request) {
 
   const results: RepositoryPullRequests[] = fetched.map((repository) => ({
     repositoryId: repository.repositoryId,
+    context: repository.context,
+    token: repository.token,
     pullRequests: [
       ...repository.openPullRequests.map((pullRequest) =>
         toOpenPullRequest(pullRequest, repository.context, ciStates),
@@ -127,6 +134,16 @@ async function handleGET(request: Request) {
       ),
     ],
   }));
+
+  // 修復ボタンを出すPRにだけ、起動先ワークフローの配布状況を埋める（#1960）。コンフリクト有無
+  // （`mergeable`）が決まってからでないと対象が定まらないため、CI状態のまとめ取りより後に置く。
+  await Promise.all(
+    results.map((result) =>
+      result.token === null
+        ? Promise.resolve()
+        : attachRepairWorkflowAvailability(result.pullRequests, result.context, result.token),
+    ),
+  );
 
   // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
   // 消費せず、DBキャッシュを全リポジトリぶんまとめて1クエリ引くだけ。
@@ -160,9 +177,13 @@ async function handleGET(request: Request) {
 /**
  * リポジトリ1件ぶんの取得結果。`00.check-user`の合流に`repositoryId`が要るため、
  * summaryの配列だけでなくどのリポジトリのものかも持たせる（#1469）。
+ * 修復ワークフローの配布状況（#1960）を後から埋めるのに、リポジトリとトークンも要る。
  */
 type RepositoryPullRequests = {
   repositoryId: string;
+  context: RepositoryContext;
+  /** 取得に失敗したリポジトリではnull（後続の問い合わせもしない） */
+  token: string | null;
   pullRequests: PullRequestSummary[];
 };
 
@@ -179,6 +200,8 @@ type RepositoryContext = {
 type FetchedRepository = {
   repositoryId: string;
   context: RepositoryContext;
+  /** 取得に失敗したリポジトリではnull */
+  token: string | null;
   openPullRequests: GithubApiOpenPullRequest[];
   closedPullRequests: GithubApiOpenPullRequest[];
 };
@@ -243,6 +266,41 @@ function toOpenPullRequest(
 
   // openのPRにマージ済みは存在しない。
   return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
+}
+
+/**
+ * 修復ボタンを出すPRに、起動先ワークフローの配布状況を埋める（#1960）。
+ *
+ * **PR1件ずつの変換（`toOpenPullRequest`）ではなく、summaryが揃ってから別の一巡で埋める。**
+ * CI状態はPRごとではなくまとめて取るようになった（#1962）ため、コンフリクト有無が分かるのは
+ * summaryが揃った後になる。対応Issueの`00.check-user`を合流させるのと同じ「揃ってから足す」形。
+ *
+ * 判定するのはボタンが出るPRだけで、結果はプロセス内にキャッシュされる。CI失敗・コンフリクトの
+ * PRが並んでいてもGitHub APIの消費はごく小さい。
+ */
+async function attachRepairWorkflowAvailability(
+  pullRequests: PullRequestSummary[],
+  repository: RepositoryContext,
+  token: string,
+): Promise<void> {
+  await Promise.all(
+    pullRequests.map(async (pullRequest) => {
+      const kinds = repairKindsFor(pullRequest, pullRequest.mergeable);
+      if (kinds.length === 0) return;
+
+      pullRequest.repairWorkflowAvailability = await fetchRepairWorkflowAvailability(
+        repository.ownerLogin,
+        repository.name,
+        {
+          number: pullRequest.number,
+          baseRef: pullRequest.baseRef,
+          headRef: pullRequest.headRef,
+        },
+        kinds,
+        token,
+      );
+    }),
+  );
 }
 
 /**

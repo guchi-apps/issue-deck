@@ -1,5 +1,6 @@
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
+import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { CiState } from "@/lib/github/release-api";
 
 /** マージ待ちPRの種別。リポジトリ横断の一覧で「何を待っているPRか」を一目で区別するために使う */
@@ -84,6 +85,15 @@ export type PullRequestSummary = {
    * CI状態と同じ1回のGraphQLで取るため、これを持つことでGitHub APIの消費は増えない。
    */
   mergeable: boolean | null;
+  /**
+   * 自動修復ワークフローが対象リポジトリに置かれているか（#1960）。修復ボタンを出す種類
+   * （`repairKindsFor`の結果）ごとに持つ。
+   *
+   * **判定するのはボタンを出すPRだけ**なので、ボタンが出ないPR（CIが通っている・closed・draft）
+   * では`{}`になる。`{}`のキーが無い種類は「押せる」扱い（`isRepairWorkflowMissing`）。
+   * これが`false`の種類は押しても`workflow_dispatch`が404になるため、画面側で無効化する。
+   */
+  repairWorkflowAvailability: RepairWorkflowAvailability;
   createdAt: string;
   updatedAt: string;
 };
