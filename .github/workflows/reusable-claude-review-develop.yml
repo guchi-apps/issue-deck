@@ -49,6 +49,16 @@ name: Reusable Claude Code Review (develop向けPR)
 # - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
 #   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
+# **判定が終わる前にPRがマージされていることがある(#1968)。** PR #1959は判定の6分前に
+# issue-deckの画面のマージボタンでdevelopへ入り、`00.check-user`・`01.check-merge`は
+# マージ後に付いた。ワークフロー内の順序(wait-for-ci -> risk-check -> claude-review ->
+# auto-merge)は保たれており、先行したのは**画面からの手動マージ**の方である。
+# 再発防止は画面側で行い(判定中はマージボタンを押せなくする。`src/lib/pull-request-list.ts`の
+# `isMergeJudgementPending`)、こちら側は「もう入ってしまった場合の伝え方」だけを直している——
+# auto-mergeジョブの理由コメントは、PRが既にマージ済みなら事後確認向けの文面へ切り替える
+# (ラベルは従来どおり付ける)。claude-reviewの二次判定側も同じ扱いを
+# .github/prompts/review-develop.md に書いている
+#
 # 00.check-userラベルを両判定(機械的/意味的)共通の「マージ保留」シグナルとして
 # 使うことで、判定ロジックとマージ可否判断を疎結合に保っている。
 #
@@ -647,6 +657,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
         run: |
@@ -678,7 +689,18 @@ jobs:
           if [ "$ALREADY_CHECK_USER" = "true" ]; then
             echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
           else
-            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
+            # 判定が下る前にPRがマージされていることがある(#1968。PR #1959は判定の6分前に
+            # issue-deckの画面からマージされた)。そのとき「マージ前に確認してください」と書くと、
+            # 既にdevelopへ入った変更に対して実行できない依頼になる。**文面だけを事後確認向けに
+            # 変え、ラベル(00.check-user・01.check-merge)はそのまま付ける**——確認が要る変更が
+            # 入ったこと自体は変わらず、人が気付ける必要があるため。
+            # 取得できない場合は従来の文面へ倒す(マージ済みと誤って言わない側)。
+            MERGED="$(gh pr view "$PR_NUMBER" --json merged --jq .merged 2>/dev/null || echo "false")"
+            if [ "$MERGED" = "true" ]; then
+              COMMENT_BODY="⚠️ このPRは自動マージ可否の判定が終わる前にdevelopへマージされています。以下の理由により、事後の確認が必要です。"
+            else
+              COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
+            fi
             COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
             COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"

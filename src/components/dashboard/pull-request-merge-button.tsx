@@ -15,7 +15,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
-import { mergeWarnings } from "@/lib/pull-request-list";
+import {
+  isMergeJudgementPending,
+  MERGE_JUDGEMENT_PENDING_LABEL,
+  MERGE_JUDGEMENT_PENDING_REASON,
+  mergeWarnings,
+} from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -37,6 +42,10 @@ type PullRequestMergeButtonProps = {
  * マージが通ったあとは「マージ済み」で無効のまま残す（#1548）。`onMerged`で再取得を促しても、
  * 一覧が入れ替わるまでの数秒はボタンが押せる状態で残り、そこを押すと2回目のマージ要求が飛ぶ
  * （GitHubは405で弾くが、画面にはエラーだけが出る）。
+ *
+ * **自動マージ可否の判定中は「判定中」で無効にする**（#1968。`isMergeJudgementPending`）。
+ * 判定のcheck-runはCI状態の集約から外れている（#1799）ため、そこを塞がないと判定より先に
+ * 確認なしでマージできてしまう。
  */
 export function PullRequestMergeButton({
   pullRequest,
@@ -48,6 +57,7 @@ export function PullRequestMergeButton({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isMerged, setIsMerged] = useState(false);
   const warnings = mergeWarnings(pullRequest);
+  const judgementPending = isMergeJudgementPending(pullRequest.mergeJudgement);
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
 
   async function runMerge() {
@@ -66,10 +76,17 @@ export function PullRequestMergeButton({
         size="sm"
         variant={variant}
         className="h-7 shrink-0"
-        disabled={isSubmitting || isMerged}
+        disabled={isSubmitting || isMerged || judgementPending}
+        title={judgementPending ? MERGE_JUDGEMENT_PENDING_REASON : undefined}
         onClick={() => (warnings.length > 0 ? setConfirmOpen(true) : runMerge())}
       >
-        {isMerged ? "マージ済み" : isSubmitting ? "マージ中..." : "マージする"}
+        {isMerged
+          ? "マージ済み"
+          : isSubmitting
+            ? "マージ中..."
+            : judgementPending
+              ? MERGE_JUDGEMENT_PENDING_LABEL
+              : "マージする"}
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

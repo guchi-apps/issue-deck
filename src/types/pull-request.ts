@@ -1,4 +1,5 @@
 import type { CheckUserReason } from "@/lib/github/approval-labels";
+import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { CiState } from "@/lib/github/release-api";
@@ -76,6 +77,16 @@ export type PullRequestSummary = {
   linkedIssueCheckReason: CheckUserReason | null;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
+  /**
+   * 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968）。
+   *
+   * **CI状態（`ciState`）とは別の軸。** 判定のcheck-runは#1799でCI状態の集約から外して
+   * あるため、判定が走っている最中でも`ciState`は`success`になる。`pending`のあいだは
+   * 「developへマージしてよいか」がまだ決まっていないので、画面のマージボタンを押せなく
+   * する（`isMergeJudgementPending`）。CI状態と同じ1回のGraphQLで取れるため、
+   * これを持つことでGitHub APIの消費は増えない。
+   */
+  mergeJudgement: MergeJudgementState;
   /**
    * baseブランチとのコンフリクトの有無（#1742）。`false`＝コンフリクトあり・`true`＝マージ可能・
    * `null`＝GitHubが判定中（非同期に計算される）か、そもそも取得していない（draft・closed）。
@@ -158,6 +169,11 @@ export type IssuePullRequest = {
    * （closedやdraftでCIを見ても判断に使わないため、1リクエストを使わない）
    */
   ciStatus: PullRequestCiStatus | null;
+  /**
+   * 自動マージ可否の判定の進み具合（#1968）。`ciStatus`と同じくopenかつdraftでないPRでのみ
+   * 取得し、それ以外は`unknown`。`pending`のあいだはIssue画面のマージボタンを押せなくする。
+   */
+  mergeJudgement: MergeJudgementState;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
 };
