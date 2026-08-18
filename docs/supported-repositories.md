@@ -367,6 +367,42 @@ for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
 done
 ```
 
+## 自動修復ワークフローの配布状況（#1948）
+
+**issue-deckの画面の「CI失敗を自動修正」「コンフリクトを自動解消」が実際に起動するかどうかは、
+配布先のcallerの実在だけで決まる**（`workflow_dispatch`の受け口はファイルの実在で解決される）。
+無いリポジトリでは押しても404になり、**押すまでそれが分からなかった**——起票のきっかけも
+guchi-apps/aideでこれを押したことだった。
+
+2026-08-18時点の実測（`claude-review-develop.yml`とも`release-develop-to-main.yml`とも独立した軸）。
+
+| ワークフロー | 配布済み | 未配布 |
+|---|---|---|
+| `claude-conflict-resolve.yml`・`claude-ci-fix.yml` | `issue-deck`（ローカルパス参照）・`dayspan`・`shopping-list` | `aide`・`car-care`・`asset-manager`・`portfolio`・`solitaire`・`signaly`・`myroom`・`meisai-lab`・`subscription-lists`・`clip-hive`・`db-console`・`ops-dashboard` |
+| `claude-pr-repair.yml` | `issue-deck`のみ | リリースフローを持つ他の全リポジトリ |
+
+```bash
+# 配置状況の確認
+for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+  out="$r:"
+  for f in claude-conflict-resolve.yml claude-ci-fix.yml claude-pr-repair.yml; do
+    gh api "repos/guchi-apps/$r/contents/.github/workflows/$f" --jq .name >/dev/null 2>&1 \
+      && out="$out $f"
+  done
+  echo "$out"
+done
+```
+
+**配布はissue-deckの画面（設定＞フリート運用＞共有ワークフローのバージョン）から行う。**
+不足しているcallerの検知は参照タグと同じGraphQL取得に相乗りしており、押すと
+`propagate-repair-workflows.yml`が配布先ごとにPRを作る。**自動マージはしない**ため、
+各リポジトリでPRを確認してマージするまでボタンは効かない。生成の仕組み・写す入力・
+`workflow_run`の購読先の決め方は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
+「配布状況と、不足しているcallerの配布」を参照。
+
+**この表は手動記録なので、正は各リポジトリの`.github/workflows/`と画面の「未配布」欄。**
+配布PRをマージしたら、画面の欄から消えたことを確認したうえでこの表も直す。
+
 ## `version-tag-check.yml`の配布状況
 
 上の表の「導入済み自動化ワークフロー」列は無人実行（計画〜実装〜レビュー）のワークフローについて
@@ -398,6 +434,8 @@ main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`か�
 **新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
 配布（`propagate-workflow-tag.yml`）は既存ファイルのタグを書き換えるだけで、callerの新規追加は
 行わない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローのタグ運用」）。
+**新規追加まで自動化してあるのは自動修復の3つだけ**で、そちらは別の配布
+（`propagate-repair-workflows.yml`。#1948。上記「自動修復ワークフローの配布状況」）が受け持つ。
 
 ```bash
 # 配置状況の確認

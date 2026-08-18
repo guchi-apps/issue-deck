@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 
@@ -18,6 +19,11 @@ export type ReleasePullRequest = {
    * `false`のときだけ「コンフリクトあり」と自動解消ボタンを出す。
    */
   mergeable: boolean | null;
+  /**
+   * このPRを直す自動修復ワークフロー（`claude-pr-repair.yml`）が配られているか（#1960）。
+   * 修復ボタンを出す状態（CI失敗・コンフリクト）のときだけ判定するため、それ以外は`{}`。
+   */
+  repairWorkflowAvailability: RepairWorkflowAvailability;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {

@@ -12,6 +12,8 @@ type Overview = {
   latest: string | null;
   repositories: WorkflowTagStatus[];
   propagation: PropagationRun | null;
+  /** 自動修復ワークフローの配布（#1948）。タグ配布とは別のrun */
+  repairPropagation: PropagationRun | null;
 };
 
 /** 配布ワークフローが動いている間の再取得間隔。PRの作成は1リポジトリあたり数秒〜数十秒 */
@@ -55,7 +57,12 @@ export function useWorkflowTags(enabled: boolean) {
     setReloadCount((count) => count + 1);
   }, []);
 
-  const isRunning = isPropagationRunning(overview?.propagation ?? null) || awaiting;
+  // **どちらかの配布が動いていれば「実行中」として扱う。** 押せる操作はどちらも
+  // 同じリポジトリ群の`.github/workflows/`へPRを作るもので、重ねて起こすと画面から
+  // 何が進行中なのか読めなくなる（#1948）。
+  const isTagRunning = isPropagationRunning(overview?.propagation ?? null);
+  const isRepairRunning = isPropagationRunning(overview?.repairPropagation ?? null);
+  const isRunning = isTagRunning || isRepairRunning || awaiting;
 
   useEffect(() => {
     if (!enabled) return;
@@ -76,7 +83,9 @@ export function useWorkflowTags(enabled: boolean) {
         const since = awaitingSince.current;
         if (
           since !== null &&
-          (isPropagationRunning(json.propagation) || Date.now() - since > AWAITING_RUN_TIMEOUT_MS)
+          (isPropagationRunning(json.propagation) ||
+            isPropagationRunning(json.repairPropagation) ||
+            Date.now() - since > AWAITING_RUN_TIMEOUT_MS)
         ) {
           awaitingSince.current = null;
           setAwaiting(false);
@@ -106,5 +115,5 @@ export function useWorkflowTags(enabled: boolean) {
     };
   }, [enabled, reloadCount, isRunning]);
 
-  return { overview, isLoading, error, isRunning, reload, markDispatched };
+  return { overview, isLoading, error, isRunning, isRepairRunning, reload, markDispatched };
 }

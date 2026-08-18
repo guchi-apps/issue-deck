@@ -35,6 +35,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckReason: null,
     ciState: "success",
     mergeable: null,
+    repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -819,6 +820,68 @@ describe("BranchFlowView", () => {
       await screen.findByText("リリース起動中…");
       expect(screen.queryByText("リリースを起動しました")).toBeNull();
       expect(screen.queryByText("リリースworkflowを起動しますか？")).toBeNull();
+    });
+
+    describe("畳んだ1行の「リリース起動中」（#1955）", () => {
+      async function trigger() {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+          new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        );
+        fireEvent.click(screen.getByText("リリースする"));
+        fireEvent.click(screen.getByText("起動する"));
+        await screen.findByText("リリース起動中…");
+      }
+
+      it("起動すると、行を畳んでも「リリース起動中」が残る", async () => {
+        renderFlow({ branchStatuses: [unreleased] });
+        openRepository();
+        await trigger();
+
+        expect(screen.getByText("リリース起動中")).toBeTruthy();
+
+        // 畳んでも、押したことと進んでいることが行から分かる（開いた中身のボタンは消える）
+        fireEvent.click(screen.getByText(REPO_SHORT));
+        expect(screen.getByText("リリース起動中")).toBeTruthy();
+        expect(screen.queryByText("リリース起動中…")).toBeNull();
+      });
+
+      it("起動中は「未リリース ◯コミット」を出さない（リリース中と同じ扱い）", async () => {
+        renderFlow({ branchStatuses: [unreleased] });
+        openRepository();
+        expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
+
+        await trigger();
+        expect(screen.queryByLabelText("未リリース 3コミット")).toBeNull();
+      });
+
+      it("押していなければ出さない", () => {
+        renderFlow({ branchStatuses: [unreleased] });
+        expect(screen.queryByText("リリース起動中")).toBeNull();
+      });
+
+      it("バンプPRが現れたら「リリース中」へ引き継ぐ", () => {
+        // 起動の記録は端末に残ったまま、バンプPRが画面に現れた状態
+        window.localStorage.setItem(
+          `issue-deck:release-triggered-at:${REPO}`,
+          JSON.stringify(new Date().toISOString()),
+        );
+        renderFlow({
+          pullRequests: [
+            makePullRequest({
+              number: 1547,
+              title: "v3.21.0をリリースする",
+              headRef: "release/v3.21.0",
+              kind: "version-bump",
+              state: "open",
+              ciState: "pending",
+            }),
+          ],
+          branchStatuses: [unreleased],
+        });
+
+        expect(screen.getByText("リリース中")).toBeTruthy();
+        expect(screen.queryByText("リリース起動中")).toBeNull();
+      });
     });
   });
 

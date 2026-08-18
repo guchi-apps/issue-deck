@@ -21,6 +21,8 @@ function status(overrides: Partial<WorkflowTagStatus> = {}): WorkflowTagStatus {
     outdated: true,
     mismatched: false,
     updatePullRequest: null,
+    missingRepairWorkflows: [],
+    repairPullRequest: null,
     ...overrides,
   };
 }
@@ -29,9 +31,20 @@ function mockFetch(overview: {
   latest: string | null;
   repositories: WorkflowTagStatus[];
   propagation: PropagationRun | null;
+  repairPropagation?: PropagationRun | null;
 }) {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
+      // 自動修復ワークフローの配布（#1948）はタグ配布と別のエンドポイント・別の応答
+      if (String(input).includes("propagate-repair")) {
+        return {
+          ok: true,
+          json: async () => ({
+            dispatched: true,
+            targets: [{ repository: "guchi-apps/aide", workflows: ["claude-ci-fix.yml"] }],
+          }),
+        } as Response;
+      }
       return {
         ok: true,
         json: async () => ({
@@ -41,7 +54,10 @@ function mockFetch(overview: {
         }),
       } as Response;
     }
-    return { ok: true, json: async () => overview } as Response;
+    return {
+      ok: true,
+      json: async () => ({ repairPropagation: null, ...overview }),
+    } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -151,5 +167,88 @@ describe("WorkflowTagStatusSection", () => {
       const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
       expect(post?.[1]?.body).toBe(JSON.stringify({ autoMerge: false }));
     });
+  });
+});
+
+describe("自動修復ワークフローの配布（#1948）", () => {
+  it("未配布のリポジトリと、何が不足しているかを出す", async () => {
+    // callerが無いリポジトリでは、画面の「コンフリクトを自動解消」を押しても起動しない
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/aide",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          missingRepairWorkflows: ["claude-conflict-resolve.yml", "claude-ci-fix.yml"],
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("未配布（1）")).toBeTruthy();
+    expect(screen.getByText(/develop向けPRのコンフリクト解消/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /1件へ自動修復ワークフローを配る/ }),
+    ).toBeTruthy();
+  });
+
+  it("配布ボタンは専用のエンドポイントへPOSTする", async () => {
+    const fetchMock = mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/aide",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          missingRepairWorkflows: ["claude-ci-fix.yml"],
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /1件へ自動修復ワークフローを配る/ }),
+    );
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            init?.method === "POST" && String(input).includes("/api/workflow-tags/propagate-repair"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("配布PRが既にあるリポジトリは対象から外し、PRへのリンクを出す", async () => {
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/aide",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          missingRepairWorkflows: ["claude-ci-fix.yml"],
+          repairPullRequest: { number: 12, url: "https://github.com/guchi-apps/aide/pull/12" },
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("配布PRの確認待ち（1）")).toBeTruthy();
+    expect(screen.getByText(/PR #12/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /自動修復ワークフローを配る/ })).toBeNull();
+  });
+
+  it("不足が無ければ自動修復の欄自体を出さない", async () => {
+    mockFetch({ latest: "workflows/v19", repositories: [status()], propagation: null });
+    render(<WorkflowTagStatusSection open />);
+
+    await screen.findByText("guchi-apps/car-care");
+    expect(screen.queryByText("自動修復ワークフロー")).toBeNull();
   });
 });

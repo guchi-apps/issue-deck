@@ -158,6 +158,7 @@ function PullRequestCard({
           repositoryFullName={pullRequest.repositoryFullName}
           pullRequestNumber={pullRequest.number}
           kinds={repairKinds}
+          availability={pullRequest.repairWorkflowAvailability}
         />
         {canMergeFromDeck(pullRequest) && (
           <PullRequestMergeButton

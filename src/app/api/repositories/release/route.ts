@@ -9,6 +9,7 @@ import {
   extractBumpReason,
   extractBumpUsage,
 } from "@/lib/github/release-bump-reason";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
   dispatchReleaseWorkflow,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/github/release-api";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
+import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { isBumpKind } from "@/lib/semver-bump";
 
@@ -109,6 +111,36 @@ async function handleGET(request: NextRequest) {
         : Promise.resolve(null),
     ]);
 
+    // 段に添える修復ボタンが実際に起動できるかを確かめる（#1960）。バンプPR・リリースPRを
+    // 直すのは`claude-pr-repair.yml`で、リリースフローを持っていても未配布のことがある。
+    // ボタンを出す段（CI失敗・コンフリクト）だけ問い合わせ、結果は10分キャッシュされる。
+    const [bumpRepairAvailability, releaseRepairAvailability] = await Promise.all([
+      bumpPr
+        ? fetchRepairWorkflowAvailability(
+            owner,
+            repo,
+            { number: bumpPr.number, baseRef: "develop", headRef: bumpPr.head.ref },
+            repairKindsFor(
+              { state: "open", draft: false, ciState: bumpState?.ciState ?? null },
+              bumpState?.mergeable ?? null,
+            ),
+            token,
+          )
+        : Promise.resolve({}),
+      releasePr
+        ? fetchRepairWorkflowAvailability(
+            owner,
+            repo,
+            { number: releasePr.number, baseRef: "main", headRef: releasePr.head.ref },
+            repairKindsFor(
+              { state: "open", draft: false, ciState: releaseState?.ciState ?? null },
+              releaseState?.mergeable ?? null,
+            ),
+            token,
+          )
+        : Promise.resolve({}),
+    ]);
+
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
     // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
     // - release_pr_open: develop→mainのPRがオープン中（mainマージ待ち＝人手）
@@ -137,6 +169,7 @@ async function handleGET(request: NextRequest) {
             title: bumpPr.title,
             ciState: bumpState?.ciState ?? null,
             mergeable: bumpState?.mergeable ?? null,
+            repairWorkflowAvailability: bumpRepairAvailability,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -150,6 +183,7 @@ async function handleGET(request: NextRequest) {
             title: releasePr.title,
             ciState: releaseState?.ciState ?? null,
             mergeable: releaseState?.mergeable ?? null,
+            repairWorkflowAvailability: releaseRepairAvailability,
           }
         : null,
       otherPullRequests,

@@ -6,12 +6,15 @@ import { fetchLatestWorkflowRun } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
   canStartPropagation,
+  canStartRepairPropagation,
   evaluateWorkflowTags,
+  findRepairWorkflowPullRequest,
   extractWorkflowTagRef,
   findWorkflowTagPullRequest,
   latestWorkflowTag,
   parseWorkflowTagVersion,
   propagationTargets,
+  repairPropagationTargets,
   type PropagationRun,
   type WorkflowTagPullRequest,
   type WorkflowTagRef,
@@ -60,6 +63,13 @@ export type WorkflowTagOverview = {
    * 画面を開き直しても・別のタブからでも同じ判断ができるようにする。
    */
   propagation: PropagationRun | null;
+  /**
+   * 自動修復ワークフローの配布（`propagate-repair-workflows.yml`）の最新の実行（#1948）。
+   *
+   * タグ配布とは別のrunなので分けて持つ。**同時に走っても互いを妨げない**——タグ配布は
+   * 既存callerのsed置換、こちらは新しいcallerの追加で、触るファイルが重ならない。
+   */
+  repairPropagation: PropagationRun | null;
 };
 
 /** GraphQLで読む対象リポジトリ（DBから引いた行のうち、問い合わせに要る項目だけ） */
@@ -87,7 +97,15 @@ type RepositoryEntry = {
 } | null;
 
 /** 1リポジトリぶんの読み取り結果 */
-type RepositoryRefs = { refs: WorkflowTagRef[]; pullRequests: OpenPullRequest[] };
+type RepositoryRefs = {
+  refs: WorkflowTagRef[];
+  /**
+   * `.github/workflows/`直下のファイル名一覧（#1948）。自動修復のcallerが置かれているかは
+   * **中身ではなくファイルの実在**で決まるため、参照タグの解析と同じ応答から拾える。
+   */
+  files: string[];
+  pullRequests: OpenPullRequest[];
+};
 
 /**
  * 1リポジトリから読むopenなPRの件数。
@@ -192,8 +210,10 @@ async function fetchRefsBatch(
     const repository = data[`r${index}`];
     const entries = repository?.object?.entries ?? [];
     const refs: WorkflowTagRef[] = [];
+    const files: string[] = [];
     for (const entry of entries) {
       if (entry.type !== "blob" || !entry.name.endsWith(".yml")) continue;
+      files.push(entry.name);
       // バイナリや巨大ファイルでは text が null になる。ワークフローYAMLでは起こらない想定
       if (typeof entry.object?.text !== "string") continue;
 
@@ -204,7 +224,7 @@ async function fetchRefsBatch(
     const pullRequests = (repository?.pullRequests?.nodes ?? []).filter(
       (node): node is OpenPullRequest => node !== null,
     );
-    refsByRepository.set(target.fullName, { refs, pullRequests });
+    refsByRepository.set(target.fullName, { refs, files, pullRequests });
   });
   return refsByRepository;
 }
@@ -233,7 +253,9 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
     orderBy: { fullName: "asc" },
   });
 
-  if (repositories.length === 0) return { latest: null, repositories: [], propagation: null };
+  if (repositories.length === 0) {
+    return { latest: null, repositories: [], propagation: null, repairPropagation: null };
+  }
 
   // インストールごとにトークンを取り直す。1ユーザーが複数インストールを持つことがある
   const tokens = new Map<number, string>();
@@ -278,23 +300,32 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
       latest,
     );
     statuses.push(
-      evaluateWorkflowTags(repository.fullName, result.refs, latest, updatePullRequest),
+      evaluateWorkflowTags(repository.fullName, result.refs, latest, updatePullRequest, {
+        files: result.files,
+        pullRequest: findRepairWorkflowPullRequest(result.pullRequests),
+      }),
     );
   }
 
-  const propagation = await fetchPropagationRun(firstToken);
+  const [propagation, repairPropagation] = await Promise.all([
+    fetchPropagationRun(firstToken, PROPAGATE_WORKFLOW_FILE),
+    fetchPropagationRun(firstToken, PROPAGATE_REPAIR_WORKFLOW_FILE),
+  ]);
 
-  return { latest, repositories: statuses, propagation };
+  return { latest, repositories: statuses, propagation, repairPropagation };
 }
 
 /**
  * 配布ワークフローの最新の実行を取る。**取れなくても一覧は出す**（実行状態が分からない
  * だけで、参照タグの状況は独立して読めるため）。
  */
-async function fetchPropagationRun(token: string): Promise<PropagationRun | null> {
+async function fetchPropagationRun(
+  token: string,
+  workflowFile: string,
+): Promise<PropagationRun | null> {
   const [owner, repo] = SOURCE_REPOSITORY.split("/");
   try {
-    const run = await fetchLatestWorkflowRun(owner!, repo!, PROPAGATE_WORKFLOW_FILE, token);
+    const run = await fetchLatestWorkflowRun(owner!, repo!, workflowFile, token);
     if (!run) return null;
     return {
       status: run.status,
@@ -310,6 +341,9 @@ async function fetchPropagationRun(token: string): Promise<PropagationRun | null
 
 /** タグ更新PRを一括作成するワークフロー（issue-deck 側） */
 const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
+
+/** 不足している自動修復callerを配るワークフロー（issue-deck 側。#1948） */
+const PROPAGATE_REPAIR_WORKFLOW_FILE = "propagate-repair-workflows.yml";
 
 export type CreateWorkflowTagResult = {
   created: boolean;
@@ -510,4 +544,74 @@ export async function dispatchPropagation(
   }
 
   return { dispatched: true, tag: overview.latest, repositories: targets };
+}
+
+export type DispatchRepairPropagationResult = {
+  dispatched: boolean;
+  /** 配布先とファイルの組。画面の件数表示にそのまま使う */
+  targets: { repository: string; workflows: string[] }[];
+  /** 起動しなかった理由。`running`のときだけ呼び出し側が409にする */
+  reason?: "running" | "no_targets";
+  message?: string;
+};
+
+/**
+ * 自動修復のcallerが無いリポジトリへ、それを追加するPRを作るワークフローを起動する（#1948）。
+ *
+ * **なぜ要るか。** 画面の「コンフリクトを自動解消」「CI失敗を自動修正」は
+ * `workflow_dispatch`でcallerを起動するため、callerが無いリポジトリでは押しても
+ * 404で何も起きない。実測ではフリートのうち3リポジトリしか持っていなかった。
+ *
+ * **対象はここ（DBを持つissue-deck側）で決めて渡す。** ワークフロー側で再検知すると、
+ * 画面に出ている一覧と実際の対象がずれる（タグ配布と同じ方針）。
+ *
+ * **自動マージはしない。** 配るのは新しいワークフローファイルそのもので、
+ * `@workflows/vN`の機械的な置換（#1602で自動マージの例外にしたもの）とは別物のため、
+ * 各リポジトリのPRは人が確認してマージする。
+ */
+export async function dispatchRepairPropagation(
+  userId: string,
+): Promise<DispatchRepairPropagationResult> {
+  const overview = await collectWorkflowTags(userId);
+
+  const decision = canStartRepairPropagation(overview.repairPropagation);
+  if (!decision.allowed) {
+    return { dispatched: false, targets: [], reason: decision.reason, message: decision.message };
+  }
+
+  const targets = repairPropagationTargets(overview.repositories).map((status) => ({
+    repository: status.fullName,
+    workflows: status.missingRepairWorkflows,
+  }));
+
+  // 対象が無いのに起動すると、何もしないrunが履歴に残って紛らわしい
+  if (targets.length === 0) {
+    return { dispatched: false, targets: [], reason: "no_targets" };
+  }
+
+  const [owner, repo] = SOURCE_REPOSITORY.split("/");
+  const source = await db.repository.findFirst({
+    where: { fullName: SOURCE_REPOSITORY },
+    select: { installation: { select: { installationId: true } } },
+  });
+  if (!source) {
+    throw new Error(`${SOURCE_REPOSITORY} が同期されていません`);
+  }
+
+  const token = await getInstallationToken(source.installation.installationId);
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${PROPAGATE_REPAIR_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    // 配布処理・雛形は`main`のものを使う（配るワークフローはタグ配布と揃えて本番の内容にする）
+    body: { ref: "main", inputs: { targets: JSON.stringify(targets) } },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(
+      res.status,
+      `GitHub API request failed: ${res.status} ${url} ${detail}`,
+    );
+  }
+
+  return { dispatched: true, targets };
 }

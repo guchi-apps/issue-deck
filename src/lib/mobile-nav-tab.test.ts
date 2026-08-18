@@ -52,6 +52,19 @@ describe("resolveBottomNavTab", () => {
   // 全リポジトリ横断のIssue一覧はフッターから外し、ホームからのドリルダウンにした（#1436）
   it("全リポジトリ横断のIssue一覧ではホームタブを返す", () => {
     expect(resolveBottomNavTab(issuesScreen)).toBe("home");
+    expect(resolveBottomNavTab({ ...issuesScreen, origin: "home" })).toBe("home");
+  });
+
+  // 「Issue」タブのリポジトリ一覧から開いた場合だけ「Issue」タブを点灯させる（#1951）
+  it("リポジトリ一覧から開いた横断のIssue一覧では「Issue」タブ（repos）を返す", () => {
+    expect(resolveBottomNavTab({ ...issuesScreen, origin: "repos" })).toBe("repos");
+    expect(
+      resolveBottomNavTab({
+        kind: "issue-detail",
+        issue,
+        back: { ...issuesScreen, origin: "repos" },
+      }),
+    ).toBe("repos");
   });
 
   it("ホームから開いたPR一覧でもPRタブを返す", () => {

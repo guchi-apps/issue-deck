@@ -14,13 +14,20 @@ export const RELEASE_WORKFLOW_FILE = "release-develop-to-main.yml";
 /** mainへのマージを受けて本番デプロイを行うworkflowのファイル名（deploy.yml） */
 export const DEPLOY_WORKFLOW_FILE = "deploy.yml";
 
-/** リポジトリに`release-develop-to-main.yml`と同名のworkflowが存在するかどうか */
-export async function fetchReleaseWorkflowExists(
+/**
+ * リポジトリに指定した名前のworkflowが置かれているかどうか。
+ *
+ * `workflow_dispatch`の受け口はファイルの実在で決まるため、**ファイル名だけで**
+ * 「画面のボタンから起動できるか」を判定できる（`missingRepairWorkflows`と同じ考え方）。
+ * リリースフローの有無（#1538）と自動修復ワークフローの配布状況（#1960）が共有する。
+ */
+export async function fetchWorkflowExists(
   owner: string,
   repo: string,
+  workflowFile: string,
   token: string,
 ): Promise<boolean> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}`;
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}`;
   const res = await githubFetch(url, token);
   if (res.status === 404) return false;
   if (!res.ok) {
@@ -28,6 +35,15 @@ export async function fetchReleaseWorkflowExists(
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
   return true;
+}
+
+/** リポジトリに`release-develop-to-main.yml`と同名のworkflowが存在するかどうか */
+export function fetchReleaseWorkflowExists(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<boolean> {
+  return fetchWorkflowExists(owner, repo, RELEASE_WORKFLOW_FILE, token);
 }
 
 /** 指定ブランチの`package.json`の`version`フィールドを取得する。ファイルが無ければnull */
