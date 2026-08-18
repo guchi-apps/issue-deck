@@ -240,3 +240,25 @@ describe("PullRequestList", () => {
     expect(rows[1].className).toContain("border-l-primary");
   });
 });
+
+// #1891。1時間未満をまとめて「1時間以内」に丸めていたため、作ったばかりのPRが
+// どれくらい前のものか読めなかった
+describe("PullRequestList 経過時間", () => {
+  it("1時間未満は「1時間以内」ではなく分で刻んで出す", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 18, 12, 0, 0));
+    try {
+      renderList([
+        makePullRequest({
+          number: 50,
+          createdAt: new Date(2026, 7, 18, 11, 43, 0).toISOString(),
+        }),
+      ]);
+
+      expect(screen.getByText("17分前")).toBeTruthy();
+      expect(screen.queryByText("1時間以内")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

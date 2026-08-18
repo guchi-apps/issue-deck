@@ -39,14 +39,6 @@ export function pullRequestKindLabel(kind: PullRequestKind): string | null {
   return kind === "other" ? null : KIND_LABEL[kind];
 }
 
-export function formatElapsed(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffHours < 1) return "1時間以内";
-  if (diffHours < 24) return `${diffHours}時間前`;
-  return `${Math.floor(diffHours / 24)}日前`;
-}
-
 /** CI状態のピル。配色は`release-progress.tsx`のCiStateBadgeに揃えている */
 export function CiStateBadge({ ciState }: { ciState: CiState }) {
   return (
