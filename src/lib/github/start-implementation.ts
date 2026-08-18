@@ -125,9 +125,24 @@ export const ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS = ["62.design"];
  * `planRequiredDefaultForLabels`と同じく**種別ラベルだけを見て、`25.artifact-required`自体の有無は
  * 見ない**。既に付いているラベルを尊重するかどうかは呼び出し側（`startImplementationOptionsFromLabels`）
  * が決める。
+ *
+ * **リポジトリに`25.artifact-required`が定義されていることも条件にする。** ラベルの付与
+ * エンドポイントは存在しないラベル名を渡すと**その場で作ってしまう**（`fetchRepositoryLabelNames`の
+ * 注記・#1490）。このラベルはローカル実行専用でissue-deck以外へはまだ配っていない（`62.design`だけが
+ * あるリポジトリが実在する）ため、条件を付けないと色も説明も無いラベルが、押した覚えのないまま
+ * 増えてしまう。**手で押した場合は従来どおり付く**（これは既定が勝手にONになる経路だけのガード）。
+ * リポジトリのラベル一覧が未取得（空配列）のときは既定を当てない——付け損ねる方が、配っていない
+ * ラベルを作るより軽い。
  */
-export function artifactRequiredDefaultForLabels(labelNames: readonly string[]): boolean {
-  return labelNames.some((name) => ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
+export function artifactRequiredDefaultForLabels({
+  issueLabelNames,
+  repositoryLabelNames,
+}: {
+  issueLabelNames: readonly string[];
+  repositoryLabelNames: readonly string[];
+}): boolean {
+  if (!repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL)) return false;
+  return issueLabelNames.some((name) => ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
 }
 
 /**
@@ -209,8 +224,15 @@ export function startImplementationLabelsToAdd(options: StartImplementationOptio
  * 「計画が必要」（#1317）と「アーティファクトで見た目を出す」（#1956）だけは種別ラベルからの既定も
  * 見る。ラベルが付いていなくても、新機能・改善のIssueでは計画が、デザインのIssueではアーティファクトが
  * チェックの入った状態で開く。
+ *
+ * `repositoryLabelNames`はそのリポジトリに**定義されている**ラベル名（`/api/issues/meta`）。
+ * アーティファクトの既定にだけ使う（上記`artifactRequiredDefaultForLabels`の注記）。省略した場合は
+ * その既定が当たらないだけで、他のオプションの挙動は変わらない。
  */
-export function startImplementationOptionsFromLabels(labels: IssueLabel[]): StartImplementationOptions {
+export function startImplementationOptionsFromLabels(
+  labels: IssueLabel[],
+  repositoryLabelNames: readonly string[] = [],
+): StartImplementationOptions {
   const labelNames = labels.map((label) => label.name);
   const attached = new Set(labelNames);
   return START_IMPLEMENTATION_OPTIONS.reduce((options, option) => {
@@ -218,7 +240,8 @@ export function startImplementationOptionsFromLabels(labels: IssueLabel[]): Star
       options[option.key] = attached.has(PLAN_REQUIRED_LABEL) || planRequiredDefaultForLabels(labelNames);
     } else if (option.key === "artifactRequired") {
       options[option.key] =
-        attached.has(ARTIFACT_REQUIRED_LABEL) || artifactRequiredDefaultForLabels(labelNames);
+        attached.has(ARTIFACT_REQUIRED_LABEL) ||
+        artifactRequiredDefaultForLabels({ issueLabelNames: labelNames, repositoryLabelNames });
     } else {
       options[option.key] = attached.has(option.githubLabel);
     }
