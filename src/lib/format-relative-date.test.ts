@@ -49,4 +49,10 @@ describe("formatRelativeDate", () => {
     expect(formatRelativeDate(ago(DAY))).toBe("1日前");
     expect(formatRelativeDate(ago(3 * DAY + 5 * HOUR))).toBe("3日前");
   });
+
+  // サーバー描画とハイドレーションで食い違わないよう、画面側は`useNow`の値を渡す（#1891）
+  it("基準時刻を渡せる", () => {
+    const base = new Date(2026, 7, 18, 15, 0, 0);
+    expect(formatRelativeDate(ago(0), base.getTime())).toBe("3時間前");
+  });
 });

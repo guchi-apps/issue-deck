@@ -475,7 +475,11 @@ export function IssueList({
                   {issue.commentCount}
                 </span>
               )}
-              <span>{formatRelativeDate(issue.updatedAt)}</span>
+              {/* 一覧はサーバーでも描かれるため、現在時刻は描画中に読まず`useNow`から受ける
+                  （#1891）。分単位で刻むようになったぶん、サーバーで描いた時刻と
+                  ハイドレーション時刻が分の境界をまたぐと表示が食い違う。マウント前
+                  （`now === null`）は出しようがないので出さない */}
+              <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
         </button>
