@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  ARTIFACT_REQUIRED_LABEL,
+  artifactRequiredDefaultForLabels,
   canStartImplementation,
   isSelectableLabelName,
   isStartImplementationOptionLabel,
@@ -77,6 +79,24 @@ describe("planRequiredDefaultForLabels", () => {
   });
 });
 
+describe("artifactRequiredDefaultForLabels", () => {
+  it("デザインの種別ではアーティファクトを既定でONにする（#1956）", () => {
+    expect(artifactRequiredDefaultForLabels(["62.design"])).toBe(true);
+  });
+
+  it("デザイン以外の種別ではOFFのままにする（#1956）", () => {
+    expect(artifactRequiredDefaultForLabels(["50.feature"])).toBe(false);
+    expect(artifactRequiredDefaultForLabels(["51.improvement"])).toBe(false);
+    expect(artifactRequiredDefaultForLabels(["30.bug"])).toBe(false);
+    expect(artifactRequiredDefaultForLabels([])).toBe(false);
+  });
+
+  // 種別を選び直したときに付け外しの両方向へ追従させるため、25.artifact-required自体は見ない
+  it("25.artifact-requiredが付いているだけでは既定をONにしない", () => {
+    expect(artifactRequiredDefaultForLabels([ARTIFACT_REQUIRED_LABEL])).toBe(false);
+  });
+});
+
 describe("startImplementationOptionsFromLabels", () => {
   function makeLabels(names: string[]) {
     return names.map((name) => ({ name, color: "000000", description: null }));
@@ -106,6 +126,22 @@ describe("startImplementationOptionsFromLabels", () => {
     expect(startImplementationOptionsFromLabels(makeLabels(["30.bug"]))).toEqual(
       START_IMPLEMENTATION_DEFAULT_OPTIONS,
     );
+  });
+
+  // デザインは計画の既定（#1317）にも含まれるため、2つ同時にチェックが入った状態で開く
+  it("25.artifact-requiredが未付与でも、デザインのIssueならアーティファクトにチェックを入れて開く（#1956）", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["62.design"]))).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      planRequired: true,
+      artifactRequired: true,
+    });
+  });
+
+  it("デザイン以外の種別ではアーティファクトにチェックを入れない（#1956）", () => {
+    expect(startImplementationOptionsFromLabels(makeLabels(["51.improvement"]))).toEqual({
+      ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
+      planRequired: true,
+    });
   });
 });
 
