@@ -11,8 +11,23 @@ import type { NavViewId } from "@/types/issue";
 // 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
 // 先頭の固定枠（#1713）だけは、どのビューで描かれるかをここで確かめるため通す。
 vi.mock("@/components/dashboard/issue-list", () => ({
-  IssueList: ({ pinnedSection }: { pinnedSection?: ReactNode }) => (
-    <div data-testid="issue-list">{pinnedSection}</div>
+  IssueList: ({
+    pinnedSection,
+    onPullToRefresh,
+  }: {
+    pinnedSection?: ReactNode;
+    onPullToRefresh?: () => Promise<unknown> | void;
+  }) => (
+    <div data-testid="issue-list">
+      {/* 引っ張って更新（#1893）は、この画面から一覧へ渡っているかだけをここで確かめる。
+          ジェスチャーの判定そのものは実DOMを使うuse-pull-to-refresh.test.tsxが見る */}
+      {onPullToRefresh && (
+        <button type="button" onClick={() => void onPullToRefresh()}>
+          引っ張って更新
+        </button>
+      )}
+      {pinnedSection}
+    </div>
   ),
 }));
 
@@ -34,6 +49,7 @@ function renderScreen(
     onChangeView: (view: NavViewId) => void;
     onChangeFilters: (filters: MobileIssueLocalFilters) => void;
     pinned: { view: NavViewId; count: number; section: ReactNode };
+    onRefresh: () => Promise<unknown> | void;
   }> = {},
 ) {
   render(
@@ -52,6 +68,7 @@ function renderScreen(
       onCreateIssue={vi.fn()}
       pinned={overrides.pinned}
       scrollKey="test"
+      onRefresh={overrides.onRefresh}
     />,
   );
 }
@@ -165,5 +182,21 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
       assignee: null,
       sort: "updated",
     });
+  });
+
+  // 引っ張って更新（#1893）
+  it("一覧へ引っ張って更新を渡し、実行するとIssueを取り直す", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    renderScreen({ onRefresh });
+
+    fireEvent.click(screen.getByRole("button", { name: "引っ張って更新" }));
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("取り直しを渡さない画面では引っ張って更新を有効にしない", () => {
+    renderScreen();
+
+    expect(screen.queryByRole("button", { name: "引っ張って更新" })).toBeNull();
   });
 });

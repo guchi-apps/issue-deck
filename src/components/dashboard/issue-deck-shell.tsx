@@ -367,7 +367,7 @@ export function IssueDeckShell({
     pullRequestAutoRefreshIntervalMs,
   );
 
-  useIssuePolling((polledIssues) => {
+  const issuePolling = useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);
 
     // 画面を開いている間に、新たに00.check-userラベルが付与されたIssueをトーストで知らせる
@@ -1092,6 +1092,9 @@ export function IssueDeckShell({
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                  /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
+                     経路（reconcileIssues・確認待ちトーストの判定）を通す */
+                  onRefresh={issuePolling.refresh}
                   onStartManualStepGuide={() => manualStepGuide.start()}
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
@@ -1143,6 +1146,7 @@ export function IssueDeckShell({
                   onAskCrossRepoQuestion={() =>
                     openCrossRepoQuestionDialog(mobileScreen.repository.fullName)
                   }
+                  onRefresh={issuePolling.refresh}
                 />
               )}
 

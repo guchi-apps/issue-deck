@@ -42,6 +42,8 @@ type MobileIssuesScreenProps = {
   onCreateIssue: () => void;
   onAskCrossRepoQuestion: () => void;
   onBack?: () => void;
+  /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
+  onRefresh?: () => Promise<unknown> | void;
   /** 手作業アシスタント（#1826）を開く */
   onStartManualStepGuide: () => void;
   /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
@@ -69,6 +71,7 @@ export function MobileIssuesScreen({
   onCreateIssue,
   onAskCrossRepoQuestion,
   onBack,
+  onRefresh,
   onStartManualStepGuide,
   onStartIssueOrder,
   issueOrderAutoStart,
@@ -133,6 +136,7 @@ export function MobileIssuesScreen({
       onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
+      onRefresh={onRefresh}
       manualStepReadiness={manualStepReadiness}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}

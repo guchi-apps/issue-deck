@@ -117,6 +117,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893）。
+  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は`IssueList`の
+  `onPullToRefresh`を渡した画面（スマホのIssue一覧2画面）だけで有効になる。
+  **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
+  `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
+  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
+  実装で外せない点が3つある。**Reactの`onTouchMove`ではなく`{ passive: false }`のネイティブ
+  リスナーを張る**（Reactはルートでpassive登録するため`preventDefault()`が効かない）。
+  **`preventDefault()`するのは「縦方向かつ下向き」に動いている間だけ**——方向判定
+  （`use-swipe-back.ts`と同じ式）は横が明確に優位でない限り縦と見なすので、条件を「縦」だけに
+  すると一覧の先頭から上へ読み進めるスクロールごと止まる。**タッチを受けるのはスクロール領域
+  （`<ul>`）ではなくそれを包む枠**で、`<ul>`は0件で消えるため直接付けると空の一覧を更新できない。
+  取り直すのは`GET /api/issues`（`use-issue-polling.ts`の`refresh`）と実行状況までで、
+  **GitHubからの再同期（`POST /api/sync/issues`）はしない**。1回でリポジトリ数ぶんのGitHub APIを
+  使うため、指を下ろすたびに走ってよい操作ではない（再同期は設定の「フリート運用」に置いてある）。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
