@@ -247,7 +247,8 @@ export type BranchFlowRepositorySummary = {
    */
   releaseInProgress: boolean;
   /**
-   * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に「予定◯」として出す。
+   * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に破線の丸のアイコンと
+   * 数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。
    *
    * **手が要るものではない**ので、初回に自動で開く条件（`needsAttention`）には加えない。
    * 開かずに溜まり具合だけ分かればよい、というのがこの数字の役目。
