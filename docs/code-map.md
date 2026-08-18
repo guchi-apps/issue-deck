@@ -136,8 +136,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
 - **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893）。
-  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は`IssueList`の
-  `onPullToRefresh`を渡した画面（スマホのIssue一覧2画面）だけで有効になる。
+  判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
+  引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。
+  `onPullToRefresh`を渡した画面だけで有効になり、渡しているのはスマホのIssue一覧2画面と
+  ブランチ画面（`BranchFlowView`。#1958）。**取り直しの完了を待てない画面は、画面側の
+  取得中フラグを`isRefreshing`として渡す**（#1958）。ブランチ画面の`refresh`は取り直しの
+  合図を出すだけの同期関数で、待っても取得の完了とは無関係に返るため、渡さないと数秒かかる
+  取得の途中で「更新中…」が消える。フックはフラグが立つのを待ってから下りるのを待つ
+  （立たない・下りないときはそれぞれ上限で表示だけ戻す）。
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
   ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。

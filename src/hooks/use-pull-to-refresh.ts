@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import {
+  EXTERNAL_REFRESHING_POLL_MS,
+  EXTERNAL_REFRESHING_START_MS,
   MAX_EXTERNAL_REFRESHING_MS,
   PULL_SPINNER_PX,
   PULL_THRESHOLD_PX,
@@ -19,8 +21,6 @@ import {
 const DIRECTION_LOCK_PX = 10;
 /** 横方向と判定するための優位さ。`use-swipe-back.ts`・`use-swipe-filter-view.ts`と同じ */
 const HORIZONTAL_DOMINANCE_RATIO = 1.5;
-/** 外の取得が終わったかを見に行く間隔（#1958）。取得中フラグはrefで読むため自分で確認する */
-const EXTERNAL_REFRESHING_POLL_MS = 100;
 
 type PullState = {
   startX: number;
@@ -85,8 +85,11 @@ export function usePullToRefresh({
   containerRef,
   scrollRef,
   onRefresh,
-  isRefreshing: externalRefreshing = false,
+  isRefreshing: externalIsRefreshing,
 }: UsePullToRefreshParams): PullToRefreshHandle {
+  // 渡されていない画面（Issue一覧）は外の取得を待たない。`false`を渡された画面とは区別する
+  const externalProvided = externalIsRefreshing !== undefined;
+  const externalRefreshing = externalIsRefreshing ?? false;
   const stateRef = useRef<PullState | null>(null);
   const onRefreshRef = useRef(onRefresh);
   const [distance, setDistance] = useState(0);
@@ -97,6 +100,11 @@ export function usePullToRefresh({
   const isRefreshingRef = useRef(false);
   // 外の取得中フラグ（#1958）も、更新の途中から見るためrefへ写す
   const externalRefreshingRef = useRef(externalRefreshing);
+  // フラグを渡された画面か（渡されない画面では待たない）
+  const externalProvidedRef = useRef(externalProvided);
+  // この更新で取得が始まったか。速い取得は待ち始める前に終わることがあるため、
+  // 「いま取得中か」ではなく「立ったことがあるか」で立ち上がりを見る
+  const externalStartedRef = useRef(false);
 
   useEffect(() => {
     onRefreshRef.current = onRefresh;
@@ -104,7 +112,12 @@ export function usePullToRefresh({
 
   useEffect(() => {
     externalRefreshingRef.current = externalRefreshing;
+    if (externalRefreshing) externalStartedRef.current = true;
   }, [externalRefreshing]);
+
+  useEffect(() => {
+    externalProvidedRef.current = externalProvided;
+  }, [externalProvided]);
 
   const enabled = Boolean(onRefresh);
 
@@ -120,7 +133,34 @@ export function usePullToRefresh({
       setDistance(0);
     }
 
+    /**
+     * 外（画面）の取得が始まって終わるまで待つ（#1958）。取得中フラグを渡されていない
+     * 画面（Issue一覧）では何もしない。
+     *
+     * **「始まるのを待つ」段が要る。** 取り直しの合図は同期関数で、`onRefresh`から戻った
+     * 時点ではまだフラグが立っていないため、いきなり「下りるのを待つ」と素通りする。
+     * 立たないまま`EXTERNAL_REFRESHING_START_MS`を過ぎたら、取得しない画面とみなしてやめる。
+     * 下りないまま`MAX_EXTERNAL_REFRESHING_MS`を過ぎた場合も表示だけ戻す（取得は止めない）。
+     */
+    async function waitForExternalRefresh() {
+      if (!externalProvidedRef.current) return;
+
+      const startDeadline = Date.now() + EXTERNAL_REFRESHING_START_MS;
+      // 待つ前にもう始まって終わっていることもある（速い取得）ので、立ち上がりは
+      // フラグそのものではなく「立ったことがあるか」で見る
+      while (!cancelled && !externalStartedRef.current && Date.now() < startDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESHING_POLL_MS));
+      }
+
+      const fallDeadline = Date.now() + MAX_EXTERNAL_REFRESHING_MS;
+      while (!cancelled && externalRefreshingRef.current && Date.now() < fallDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESHING_POLL_MS));
+      }
+    }
+
     async function runRefresh() {
+      // この更新で取得が始まったかを見るため、立ち上がりの記録は毎回消す
+      externalStartedRef.current = false;
       isRefreshingRef.current = true;
       setIsRefreshing(true);
       setIsDragging(false);
@@ -137,17 +177,9 @@ export function usePullToRefresh({
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
       }
-      // 画面が取得中なら、下りるまで「更新中…」のまま待つ（#1958）。**待っている間も
-      // `isRefreshingRef`は真のまま**で、引っ張り直しての二重起動を防ぐ。
-      // 下りないまま`MAX_EXTERNAL_REFRESHING_MS`を過ぎたら表示だけ戻す（取得は止めない）
-      const waitStartedAt = Date.now();
-      while (
-        !cancelled &&
-        externalRefreshingRef.current &&
-        Date.now() - waitStartedAt < MAX_EXTERNAL_REFRESHING_MS
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, EXTERNAL_REFRESHING_POLL_MS));
-      }
+      // 画面の取得が終わるまで「更新中…」のまま待つ（#1958）。**待っている間も
+      // `isRefreshingRef`は真のまま**で、引っ張り直しての二重起動を防ぐ
+      await waitForExternalRefresh();
       isRefreshingRef.current = false;
       if (cancelled) return;
       setIsRefreshing(false);

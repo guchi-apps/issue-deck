@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import {
+  EXTERNAL_REFRESHING_START_MS,
   MAX_EXTERNAL_REFRESHING_MS,
   MIN_REFRESHING_MS,
   PULL_MAX_PX,
@@ -201,6 +202,55 @@ describe("usePullToRefresh", () => {
       expect(view.result.current.distance).toBe(0);
     });
 
+    it("`onRefresh`から戻った時点でフラグがまだ立っていなくても、立ってから下りるまで待つ", async () => {
+      vi.useFakeTimers();
+      // ブランチ画面の取り直しは同期関数で、呼んだ直後はまだ取得中フラグが`false`
+      const onRefresh = vi.fn();
+      const { container, view } = setup(onRefresh, 0, false);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+
+      // 少し遅れて取得が始まる
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      view.rerender({ isRefreshing: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS * 6);
+      });
+      expect(view.result.current.phase).toBe("refreshing");
+
+      view.rerender({ isRefreshing: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS);
+      });
+      expect(view.result.current.phase).toBe("idle");
+    });
+
+    it("取得が始まらないままなら、立ち上がりの上限で表示を戻す", async () => {
+      vi.useFakeTimers();
+      const onRefresh = vi.fn();
+      const { container, view } = setup(onRefresh, 0, false);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EXTERNAL_REFRESHING_START_MS + MIN_REFRESHING_MS);
+      });
+      expect(view.result.current.phase).toBe("idle");
+    });
+
     it("取得中のフラグが下りないままでも上限で表示を戻す", async () => {
       vi.useFakeTimers();
       const onRefresh = vi.fn().mockResolvedValue(undefined);
@@ -214,7 +264,7 @@ describe("usePullToRefresh", () => {
         container.dispatchEvent(new Event("touchend", { bubbles: true }));
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(MAX_EXTERNAL_REFRESHING_MS + MIN_REFRESHING_MS);
+        await vi.advanceTimersByTimeAsync(MAX_EXTERNAL_REFRESHING_MS + MIN_REFRESHING_MS * 4);
       });
       expect(view.result.current.phase).toBe("idle");
     });

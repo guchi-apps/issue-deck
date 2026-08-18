@@ -31,6 +31,17 @@ export const MIN_REFRESHING_MS = 500;
  * **打ち切るのは表示だけで、取得そのものは止めない。**
  */
 export const MAX_EXTERNAL_REFRESHING_MS = 15_000;
+/**
+ * 外の取得が「始まる」のを待つ上限（#1958）。
+ *
+ * **取り直しの合図（`use-branch-flow.ts`・`use-pull-requests.ts`の`refresh`）は同期関数で、
+ * 呼んだ時点ではまだ取得中フラグが立っていない。** 待たずに見に行くと立つ前に素通りし、
+ * 下限（`MIN_REFRESHING_MS`）だけで表示が消える。立たないまま過ぎたら、その画面は
+ * 取得しなかったものとして扱い待つのをやめる。
+ */
+export const EXTERNAL_REFRESHING_START_MS = 1_000;
+/** 外の取得中フラグを見に行く間隔（#1958）。フラグはrefで読むため自分で確認する */
+export const EXTERNAL_REFRESHING_POLL_MS = 100;
 
 export type PullPhase = "idle" | "pull" | "ready" | "refreshing";
 
