@@ -109,6 +109,16 @@ export function resolveKindRepository(
   return askable.some((repo) => repo.fullName === current) ? current : "";
 }
 
+/**
+ * 「内容から質問のようです」の行の状態（#1890）。`switched`だけが、戻すときの行き先として
+ * 切り替える前のリポジトリを持つ。**質問では選べないリポジトリが未選択へ戻される**
+ * （`resolveKindRepository`）ため、`fullName`だけでなく「人が選んだ値か」も一緒に覚えておく
+ * ——戻したときに`表示中のリポジトリ`バッジの出方まで元へ揃える。
+ */
+type QuestionHint =
+  | { phase: "suggested" }
+  | { phase: "switched"; previousRepository: { fullName: string; picked: boolean } };
+
 const DEFAULT_ASSIGNEE = "m-guchi";
 
 /**
@@ -332,6 +342,16 @@ export function CreateIssueDialog({
    * ラベルの付いていないIssueがそのまま作られていた。
    */
   const [labelSuggestionMissed, setLabelSuggestionMissed] = useState(false);
+  /**
+   * 内容が質問だと判定されたときに、種別の下へ出す行（#1890）。
+   *
+   * - `suggested` … 判定しただけの状態。**種別もリポジトリも変えていない。** 押さなければ従来どおりIssueとして作られる
+   * - `switched` … 「質問に切り替える」を押した後。戻したときの行き先として、押す前のリポジトリを持つ
+   *
+   * **判定で種別を勝手に変えない**のが要点。#1641が本文からの自動判定を見送ったのは、誤判定が
+   * 押した本人から見えないまま実装フローに乗るためで、提案にとどめればその状態は作れない。
+   */
+  const [questionHint, setQuestionHint] = useState<QuestionHint | null>(null);
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   /**
    * リポジトリを**人が選び直したか**（#1710・#1884）。`表示中のリポジトリ`バッジを消す判断に使う。
@@ -417,6 +437,7 @@ export function CreateIssueDialog({
     // ここで復元すると、直したはずの項目まで自動と書かれかねない
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
+    setQuestionHint(null);
     setRepositoryFullName(draft.repositoryFullName);
     // 移してきたリポジトリは、移す前の画面で人が選んだものかどうかまでは分からない。
     // 触っていない扱いにすると`表示中のリポジトリ`が出るが、`defaultRepositoryFullName`も
@@ -474,6 +495,29 @@ export function CreateIssueDialog({
     setKind(next);
     setRepositoryFullName(resolved);
     if (resolved !== repositoryFullName) setHasPickedRepository(false);
+    // 種別を人が決めた時点で提案は役目を終える（#1890）。切り替え・戻すの各ボタンは、
+    // これを呼んだあとで自分の状態を立て直す
+    setQuestionHint(null);
+  }
+
+  /** 提案の「質問に切り替える」（#1890）。戻す先として、切り替える前のリポジトリを覚えておく */
+  function handleSwitchToQuestion() {
+    const previousRepository = { fullName: repositoryFullName, picked: hasPickedRepository };
+    selectKind("question");
+    setQuestionHint({ phase: "switched", previousRepository });
+  }
+
+  /**
+   * 提案の「Issueに戻す」（#1890）。種別を戻すだけでは、質問で選べず未選択になった
+   * リポジトリが空のまま残るため、押す前の値を入れ直す。
+   */
+  function handleRevertToIssue() {
+    const previous = questionHint?.phase === "switched" ? questionHint.previousRepository : null;
+    selectKind("issue");
+    if (previous) {
+      setRepositoryFullName(previous.fullName);
+      setHasPickedRepository(previous.picked);
+    }
   }
 
   /**
@@ -521,12 +565,14 @@ export function CreateIssueDialog({
     setRestorableDraft(null);
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
+    setQuestionHint(null);
   }
 
   function resetForm() {
     setKind("issue");
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
+    setQuestionHint(null);
     setRepositoryFullName("");
     setHasPickedRepository(false);
     setTitle("");
@@ -575,6 +621,10 @@ export function CreateIssueDialog({
     setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
     setAutoFilled({ title: true, labels: result.labels.length > 0 });
     setLabelSuggestionMissed(result.labels.length === 0);
+    // 内容が質問だと判定されたときだけ提案を出す（#1890）。**ここでは種別を変えない。**
+    // この関数はタイトルが空のIssue（主ボタン）か「付け直す」からしか呼ばれないので、
+    // 種別が「質問」の状態で通ることはない
+    if (result.kind === "question") setQuestionHint({ phase: "suggested" });
   }
 
   async function handleSubmit() {
@@ -727,6 +777,41 @@ export function CreateIssueDialog({
             </Button>
           </div>
         </div>
+
+        {/* 内容が質問だと判定されたときの提案（#1890）。**種別のすぐ下に置く。**
+            提案しているのは種別の変更で、押した結果が変わるのも真上のボタンなので、
+            離して置くと何が切り替わったのかが読めない。色は質問コメント
+            （comment-thread.tsx）と揃えて青にし、画面をまたいで「青い囲み＝質問」で読めるようにする */}
+        {questionHint?.phase === "suggested" && (
+          <div className="flex flex-col gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2.5">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">内容から質問のようです</span>
+              <p className="text-xs text-muted-foreground">
+                「質問」にすると、コードは変更されず回答コメントだけが返ります。Issueのままにすると、
+                これまでどおり実装の対象になります。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="xs" onClick={handleSwitchToQuestion}>
+                質問に切り替える
+              </Button>
+              <Button variant="outline" size="xs" onClick={() => setQuestionHint(null)}>
+                Issueのままにする
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 切り替えた直後だけ出す（#1890）。種別の見た目も変わっているが、押した操作を
+            1タップで取り消せる口をその場に残す */}
+        {questionHint?.phase === "switched" && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">質問に切り替えました。</span>
+            <Button variant="outline" size="xs" onClick={handleRevertToIssue}>
+              Issueに戻す
+            </Button>
+          </div>
+        )}
 
         {/* リポジトリ（#1884）。**初期値になるのは開いていた画面のリポジトリだけで、
             内容からの推定はしない。** 分からなければ未選択のまま選ばせる——押した本人が

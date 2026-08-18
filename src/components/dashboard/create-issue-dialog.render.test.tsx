@@ -583,6 +583,121 @@ describe("CreateIssueDialog の1画面フォーム", () => {
  * #1728。書いている内容ごと別ウィンドウ（`/issues/new`）へ移す。
  * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
  */
+/**
+ * #1890。「タイトル・ラベルを付与」の応答に種別が乗る。質問だと判定されても**種別は変えず**、
+ * 切り替えるかどうかは押した人が決める。
+ */
+describe("CreateIssueDialog の質問への切り替え提案", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue());
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    resetSuggest();
+    window.localStorage.clear();
+  });
+
+  async function generateAsQuestion() {
+    suggestGenerate.mockResolvedValue({
+      kind: "question",
+      title: "タイトル案",
+      labels: ["51.improvement"],
+    });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+
+    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
+  }
+
+  it("質問だと判定されても種別は変えず、提案だけを出す", async () => {
+    await generateAsQuestion();
+
+    // 種別はIssueのまま（質問なら担当者欄が消え、タイトルは自動プレビューになる）
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+    expect(screen.queryByLabelText("担当者")).not.toBeNull();
+  });
+
+  it("質問と判定されなければ提案を出さない", async () => {
+    suggestGenerate.mockResolvedValue({ kind: "issue", title: "タイトル案", labels: [] });
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "並び順を変えたい" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
+    );
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+  });
+
+  it("「Issueのままにする」で提案を降ろす。フォームの中身は変わらない", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueのままにする" }));
+
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+  });
+
+  it("「質問に切り替える」で質問の形になり、「Issueに戻す」で元へ戻る", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
+
+    expect(screen.getByRole("button", { name: "質問" }).getAttribute("aria-pressed")).toBe("true");
+    // タイトルは質問文から作った読み取り専用のプレビューへ変わり、担当者欄は消える
+    expect(screen.getByText("[質問] 違いはなんですか？")).not.toBeNull();
+    expect(screen.queryByLabelText("担当者")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
+
+    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
+  });
+
+  it("質問に使えないリポジトリで切り替えたときも、「Issueに戻す」で選び直さずに済む", async () => {
+    const notConfigured: ConnectedRepository = {
+      ...makeOtherRepository(),
+      hasClaudeWorkflow: false,
+    };
+    suggestGenerate.mockResolvedValue({ kind: "question", title: "タイトル案", labels: [] });
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        repositories={[makeRepository(), notConfigured]}
+        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+  });
+
+  it("人が種別を押し直したら提案は降りる", async () => {
+    await generateAsQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "質問" }));
+
+    expect(screen.queryByText("内容から質問のようです")).toBeNull();
+    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
+  });
+});
+
 describe("CreateIssueDialog の別ウィンドウ", () => {
   afterEach(() => {
     cleanup();

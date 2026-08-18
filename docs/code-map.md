@@ -173,9 +173,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   どちらでも同じ部品**（`MentionTextarea`）を使う。種別で変わるのはタイトル（質問は
   `buildAskRepoQuestionTitle`で質問文から機械生成し、入力させない）・担当者の有無・
   リポジトリの絞り込み（質問は`claude-issue-dispatch.yml`導入済みのみ）・作成後の動き
-  （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容から種別を
-  自動判定してはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
-  Issueとして無人実行に乗る（逆もある）ため、押した時点で確定する形にしている。
+  （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容で種別を
+  切り替えてはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
+  Issueとして無人実行に乗る（逆もある）ため、決めるのは押した人にする。
+  **判定して「質問に切り替えますか」と提案するところまでは行う**（#1890）。「タイトル・ラベルを
+  付与」が呼ぶ`POST /api/issues/suggest`の応答に`kind`（`issue` / `question`）が乗っており、
+  `question`のときだけ種別の下に提案を出す。押さなければ従来どおりIssueとして作られ、
+  押したときだけ`selectKind("question")`が走る（戻す口も同じ場所に残す）。判定の実体は
+  [`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)で、**タイトル・ラベルの
+  生成と同じ1回の呼び出しに相乗りさせる**——質問かどうかだけのために往復を増やさない。
+  `kind`が欠けた・知らない値だった応答は`issue`扱い（`normalizeSuggestedKind`）で、
+  提案を出さない側へ倒す。
   **横断質問（#1454）はここに混ぜず、
   [`cross-repo-question-dialog.tsx`](../src/components/dashboard/cross-repo-question-dialog.tsx)
   として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
