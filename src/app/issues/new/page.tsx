@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { CreateIssueWindow } from "@/components/dashboard/create-issue-window";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 
 /**
@@ -24,7 +25,7 @@ export default async function NewIssuePage() {
   // 未ログインはproxy（middleware）が/loginへ送るが、Cookieが無効な場合等の保険として塞ぐ
   if (!currentUser) redirect("/login?callbackUrl=/issues/new");
 
-  const [repositories, hiddenRepositories, issues] = await Promise.all([
+  const [repositories, hiddenRepositories, issues, dispatchRunnableRepositories] = await Promise.all([
     db.repository.findMany({
       where: { installation: { userInstallations: { some: { userId: currentUser.id } } } },
       orderBy: { fullName: "asc" },
@@ -34,6 +35,8 @@ export default async function NewIssuePage() {
       select: { repositoryId: true },
     }),
     getIssuesForUser(currentUser.id),
+    // 一覧の印（#1888）はデッキ本体（`/dashboard`）と同じ材料で決める
+    listDispatchRunnableRepositories(),
   ]);
 
   const hiddenRepositoryIds = new Set(hiddenRepositories.map((row) => row.repositoryId));
@@ -51,6 +54,7 @@ export default async function NewIssuePage() {
             archived: repo.archived,
             hasClaudeWorkflow: repo.hasClaudeWorkflow,
             hasLocalStartScript: repo.hasLocalStartScript,
+            dispatchRunnable: dispatchRunnableRepositories.has(repo.fullName),
             hidden: false,
             favorite: false,
           }))}
