@@ -343,7 +343,7 @@ export function IssueDeckShell({
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
   // 「完了したPR」を表示している間だけ10秒ごとに取り直す（#1531）。CIが確定してマージ待ちに
   // なったPRが載る画面で、気づくのに更新ボタンを押させないため。他のビューとペイン外を対象外に
-  // しているのは、取得1回のコストが「リポジトリ数 + draft以外のopen PR数」だから。
+  // しているのは、取得1回のコストが「リポジトリ数（＋CI状態をinstallationごとに数回）」だから。
   // 「完了したPR」は左メニューから外した（#1613）が、`prview=completed`のURLは生きており
   // 自動更新もそのまま。既定の「すべてのPR」へ広げるとペインを開いている間ずっと10秒間隔で
   // 叩き続けることになり、GitHub APIのレート制限に触れるため広げていない。
@@ -384,8 +384,8 @@ export function IssueDeckShell({
     // 対応PRのCIが確定するまで出さない（判定は`resolveCheckUserToasts`）。積むと同時に
     // PR一覧を取り直すのは、作られたばかりのPRが手元の取得結果にまだ載っていないため。
     const newlyCheckUserIssues = detectNewlyCheckUserIssues(issues, reconciledIssues);
-    // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得で「リポジトリ数 +
-    // draft以外のopen PR数」ぶんGitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
+    // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得でリポジトリ数ぶん
+    // GitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
     if (newlyCheckUserIssues.some(isMergeCheckUser)) openPullRequests.refresh();
     const detectedAt = Date.now();
     const pending = [

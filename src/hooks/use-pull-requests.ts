@@ -60,7 +60,8 @@ type UsePullRequestsResult = {
  *
  * **自動更新は`autoRefreshIntervalMs`が渡されている間だけ**（#1531・#1767。呼び出し側で
  * 「完了したPR」ビューの表示中（10秒）と、ブランチ画面でユーザーが間隔を選んだ場合に
- * 限っている）。1回の取得で「リポジトリ数 + draft以外のopen PR数」ぶんGitHub APIを呼ぶため
+ * 限っている）。1回の取得で「リポジトリ数（＋CI状態をinstallationごとに数回。#1962）」ぶん
+ * GitHub APIを呼ぶため
  * （[/api/pull-requests](../app/api/pull-requests/route.ts)）、常時ポーリングするとインストール
  * 当たりの上限（5,000回/時）を超える。10秒間隔で回せるのは、取得側がETagの条件付きGETを
  * 通していて変化が無い間は304＝レート制限を消費しないため

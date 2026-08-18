@@ -4,13 +4,21 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  pullRequestRollupKey,
+  type PullRequestRollupTarget,
+} from "@/lib/github/check-rollup";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchClosedPullRequests,
   fetchOpenPullRequests,
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
-import { fetchPullRequestCiState } from "@/lib/github/release-api";
+import {
+  fetchPullRequestCiStates,
+  UNKNOWN_PULL_REQUEST_CI_STATE,
+  type PullRequestCiState,
+} from "@/lib/github/release-api";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
@@ -35,8 +43,8 @@ async function handleGET(request: Request) {
   // 一覧の母集団はIssue一覧と揃えて「連携済みリポジトリ」全体とし、そこからユーザーが
   // 左メニューで非表示にしたもの（HiddenRepository）とアーカイブ済みを除く。
   // 1リポジトリにつき1回（`scope=all`なら2回）GitHub APIを呼ぶため、母集団の広さがそのまま
-  // 取得コストになる。自動更新を常時は回さず、「完了したPR」ビューの表示中（10秒。#1531）と
-  // ブランチ画面でユーザーが間隔を選んだ間（既定は自動更新しない。#1767）に限っているのはこのため。
+  // 取得コストになる（このRESTはETagの条件付きGETが効くので、変化が無ければレート制限を
+  // 消費しない）。CI状態のGraphQLはPR件数ではなくinstallationごとの回数で済ませている（#1962）。
   const hiddenRepositoryIds = (
     await db.hiddenRepository.findMany({ where: { userId }, select: { repositoryId: true } })
   ).map((row) => row.repositoryId);
@@ -73,17 +81,19 @@ async function handleGET(request: Request) {
 
   const failedRepositories: string[] = [];
 
-  const results = await Promise.all(
-    repositories.map(async (repository): Promise<RepositoryPullRequests> => {
+  // まずPR一覧そのもの（REST。ETagの条件付きGETが効く）をリポジトリごとに取る。CI状態は
+  // ここでは取りに行かず、全リポジトリぶんのPRが揃ってからまとめて引く（#1962）。
+  const fetched = await Promise.all(
+    repositories.map(async (repository): Promise<FetchedRepository> => {
+      const context: RepositoryContext = {
+        ownerLogin: repository.ownerLogin,
+        name: repository.name,
+        fullName: repository.fullName,
+        private: repository.private,
+        installationId: repository.installation.installationId,
+      };
       try {
         const token = await tokenFor(repository.installation.installationId);
-        const context = {
-          ownerLogin: repository.ownerLogin,
-          name: repository.name,
-          fullName: repository.fullName,
-          private: repository.private,
-          token,
-        };
 
         // クローズ済みはCI状態を取りに行かないぶん、増えるAPI呼び出しはリポジトリあたり1回だけ。
         // openと並行に投げて、`scope=all`のときだけ待ち時間が伸びることのないようにする。
@@ -94,23 +104,29 @@ async function handleGET(request: Request) {
             : Promise.resolve<GithubApiOpenPullRequest[]>([]),
         ]);
 
-        return {
-          repositoryId: repository.id,
-          pullRequests: [
-            ...(await Promise.all(
-              openPullRequests.map((pullRequest) => toOpenPullRequest(pullRequest, context)),
-            )),
-            ...closedPullRequests.map((pullRequest) => toClosedPullRequest(pullRequest, context)),
-          ],
-        };
+        return { repositoryId: repository.id, context, openPullRequests, closedPullRequests };
       } catch (error) {
         // 1リポジトリの取得失敗で一覧全体を落とさない。取れなかったことは画面へ返す。
         console.error(`[GET /api/pull-requests] ${repository.fullName}:`, error);
         failedRepositories.push(repository.fullName);
-        return { repositoryId: repository.id, pullRequests: [] };
+        return { repositoryId: repository.id, context, openPullRequests: [], closedPullRequests: [] };
       }
     }),
   );
+
+  const ciStates = await fetchCiStates(fetched, tokenFor);
+
+  const results: RepositoryPullRequests[] = fetched.map((repository) => ({
+    repositoryId: repository.repositoryId,
+    pullRequests: [
+      ...repository.openPullRequests.map((pullRequest) =>
+        toOpenPullRequest(pullRequest, repository.context, ciStates),
+      ),
+      ...repository.closedPullRequests.map((pullRequest) =>
+        toClosedPullRequest(pullRequest, repository.context),
+      ),
+    ],
+  }));
 
   // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
   // 消費せず、DBキャッシュを全リポジトリぶんまとめて1クエリ引くだけ。
@@ -155,23 +171,75 @@ type RepositoryContext = {
   name: string;
   fullName: string;
   private: boolean;
-  token: string;
+  /** CI状態のまとめ取りを同じinstallationのPRごとに束ねるために持つ（#1962） */
+  installationId: number;
 };
 
-async function toOpenPullRequest(
+/** CI状態を引く前の、リポジトリ1件ぶんのPR一覧（#1962） */
+type FetchedRepository = {
+  repositoryId: string;
+  context: RepositoryContext;
+  openPullRequests: GithubApiOpenPullRequest[];
+  closedPullRequests: GithubApiOpenPullRequest[];
+};
+
+/**
+ * draft以外のopen PRのCI状態とコンフリクト有無を、**installationごとにまとめて**取る（#1962）。
+ *
+ * 以前はPR1件につきGraphQLを1回投げていたため、10秒間隔の自動更新（#1947）と合わせると
+ * 消費が「360巡/時 × draft以外のopen PR数」になり、PRが14件前後で上限（5,000ポイント/時）に
+ * 触れる形になっていた。共有ワークフローの参照タグを配ると14リポジトリ前後へ一斉にPRが出るので、
+ * いちばん見たい場面がいちばん危ないという状態だった。
+ *
+ * トークンはリポジトリではなくinstallation単位なので、**別リポジトリのPRも同じ1クエリに
+ * 混ぜられる**（`fetchPullRequestCiStates`がさらに件数で分割する）。
+ *
+ * 取得に失敗したPRはMapに現れず、呼び出し側で`unknown` / `null`へ縮退する。CI状態が取れない
+ * だけで一覧そのものは返す（1件ずつ引いていたときと同じ扱い）。
+ */
+async function fetchCiStates(
+  repositories: FetchedRepository[],
+  tokenFor: (installationId: number) => Promise<string>,
+): Promise<Map<string, PullRequestCiState>> {
+  const targetsByInstallation = new Map<number, PullRequestRollupTarget[]>();
+  for (const repository of repositories) {
+    for (const pullRequest of repository.openPullRequests) {
+      // draftはまだレビュー・マージの対象ではないため取りに行かない（未取得のまま返す）。
+      if (pullRequest.draft) continue;
+      const { installationId, ownerLogin, name } = repository.context;
+      const targets = targetsByInstallation.get(installationId) ?? [];
+      targets.push({ owner: ownerLogin, repo: name, number: pullRequest.number });
+      targetsByInstallation.set(installationId, targets);
+    }
+  }
+
+  const ciStates = new Map<string, PullRequestCiState>();
+  await Promise.all(
+    [...targetsByInstallation].map(async ([installationId, targets]) => {
+      try {
+        const token = await tokenFor(installationId);
+        for (const [key, ciState] of await fetchPullRequestCiStates(targets, token)) {
+          ciStates.set(key, ciState);
+        }
+      } catch (error) {
+        // トークンが取れないなど。CI状態が出ないだけで一覧は返す。
+        console.error(`[GET /api/pull-requests] installation ${installationId} のCI状態:`, error);
+      }
+    }),
+  );
+  return ciStates;
+}
+
+function toOpenPullRequest(
   pullRequest: GithubApiOpenPullRequest,
   repository: RepositoryContext,
-): Promise<PullRequestSummary> {
-  // CI状態とコンフリクト有無（#1742）はPR1件につきGraphQL 1回で**まとめて**取る。
-  // draftはまだレビュー・マージの対象ではないため、その分の呼び出しを省いて未取得にする。
-  const { ciState, mergeable } = pullRequest.draft
-    ? { ciState: "unknown" as const, mergeable: null }
-    : await fetchPullRequestCiState(
-        repository.ownerLogin,
-        repository.name,
-        pullRequest.number,
-        repository.token,
-      );
+  ciStates: Map<string, PullRequestCiState>,
+): PullRequestSummary {
+  // CI状態とコンフリクト有無（#1742）は前段でまとめて取ってある（#1962）。draftと、
+  // 取得できなかったPRはここに無いため未取得（`unknown` / `null`）のままになる。
+  const { ciState, mergeable } =
+    ciStates.get(pullRequestRollupKey(repository.ownerLogin, repository.name, pullRequest.number)) ??
+    UNKNOWN_PULL_REQUEST_CI_STATE;
 
   // openのPRにマージ済みは存在しない。
   return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });

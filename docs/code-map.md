@@ -562,7 +562,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   無人実行はPR作成から自動マージまでが短く、openなPRは常時0〜数件しか存在しないため
   （#1058の調査時点で全連携リポジトリ合計0件）、DBキャッシュを持つ効果より
   スキーマ・Webhook設定を増やさない方が勝つと判断した。
-  取得コストは「対象リポジトリ数 + draft以外のopen PR数」回のAPI呼び出しで、母集団が広いぶん
+  取得コストは「対象リポジトリ数（REST）＋ installationごとに数回（GraphQL。CI状態と
+  コンフリクトをPRごとではなくエイリアスでまとめて引く。#1962）」で、母集団が広いぶん
   1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
   （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
   `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
@@ -909,7 +910,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
   [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)が持つ）。**既定を「自動更新しない」に
   しているのは1巡の消費が重いから**——ブランチ状況はリポジトリあたりGraphQL 1回、PR一覧は
-  リポジトリあたりREST 2回（ETagで304なら消費0）＋draft以外のopen PRあたりGraphQL 1回で、
+  リポジトリあたりREST 2回（ETagで304なら消費0）＋CI状態をinstallationごとにGraphQL 数回で、
   26リポジトリを1分間隔で回すとGraphQLだけで毎時1,600ポイント前後（上限5,000ポイント/時）になる。
   回すのは**この画面を開いていて、かつタブが前面にある間だけ**（`hooks/use-auto-refresh.ts`が
   Page Visibility APIで止め、前面へ戻った時点で次の周期を待たずに取り直す）。
