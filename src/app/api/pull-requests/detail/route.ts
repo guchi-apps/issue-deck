@@ -7,6 +7,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchPullRequest,
@@ -14,6 +15,7 @@ import {
   fetchPullRequestReviews,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCiState } from "@/lib/github/release-api";
+import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
 import type { PullRequestDetail } from "@/types/pull-request";
@@ -90,6 +92,23 @@ async function handleGET(request: NextRequest) {
     const checkUserKey =
       linkedIssueNumber === null ? null : checkUserIssueKey(repository.id, linkedIssueNumber);
 
+    // 自動修復ワークフローが配られているかは、修復ボタンを出すPRでだけ確かめる（#1960）。
+    // 一覧と同じキャッシュを通るので、一覧から開いた直後は追加のAPI消費が無い。
+    const repairWorkflowAvailability = await fetchRepairWorkflowAvailability(
+      owner,
+      repo,
+      { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
+      repairKindsFor(
+        {
+          state: pullRequest.state === "closed" ? "closed" : "open",
+          draft: pullRequest.draft,
+          ciState,
+        },
+        pullRequest.mergeable,
+      ),
+      token,
+    );
+
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,
       summary: toPullRequestSummary(
@@ -104,6 +123,7 @@ async function handleGET(request: NextRequest) {
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),
+          repairWorkflowAvailability,
         },
       ),
       body: pullRequest.body ?? "",

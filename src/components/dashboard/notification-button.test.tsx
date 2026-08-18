@@ -105,6 +105,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckReason: null,
     ciState: "success",
     mergeable: null,
+    repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
