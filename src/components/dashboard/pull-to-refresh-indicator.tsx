@@ -6,15 +6,20 @@ import type { PullToRefreshHandle } from "@/hooks/use-pull-to-refresh";
 import { cn } from "@/lib/utils";
 
 /**
- * 一覧を下へ引っ張ったときに上端へ出す表示（#1893・#1947）。
+ * 一覧を下へ引っ張ったときに上端へ出す表示（#1893でIssue一覧に入れ、#1947でPR一覧、
+ * #1958でブランチ画面と共通化した）。
  *
- * **Issue一覧（`issue-list.tsx`）とPR一覧（`pull-request-list.tsx`）で共有する。**
- * 引っ張りの判定は`use-pull-to-refresh.ts`に集約してあるが、描画をそれぞれに書くと
- * 文言・色・戻りのアニメーションが片方だけ変わり、同じ操作なのに画面ごとに違う見え方に
- * なってしまう。
+ * **Issue一覧（`issue-list.tsx`）・PR一覧（`pull-request-list.tsx`）・ブランチ画面
+ * （`branch-flow-view.tsx`）で共有する。** 引っ張りの判定は`use-pull-to-refresh.ts`に
+ * 集約してあるが、描画をそれぞれに書くと文言・色・戻りのアニメーションが片方だけ変わり、
+ * 同じ操作なのに画面ごとに違う見え方になってしまう。
  *
- * **置く先は`position: relative`な枠の中。** この要素は枠の上端へ絶対配置し、引っ張った量を
- * 高さとして持つ（枠の中身は同じ量だけ下へずらす）。
+ * **置く側は`position: relative`な枠を用意し、その枠でタッチを受ける**（`usePullToRefresh`の
+ * `containerRef`）。この部品は枠の上端へ絶対配置し、引っ張った量を高さとして持つだけで、
+ * 一覧を下げる動き（枠の中身をずらす`translateY`）はスクロール領域側が持つ——下げる対象は
+ * 画面ごとに違う（Issue一覧は`<ul>`、ブランチ画面はスクロールする`<div>`）ため。
+ *
+ * `idle`（引っ張っていない）ときは`label`がnullで、何も描かない。
  */
 export function PullToRefreshIndicator({ pull }: { pull: PullToRefreshHandle }) {
   if (!pull.label) return null;

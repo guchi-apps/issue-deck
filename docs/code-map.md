@@ -146,12 +146,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947）。
-  判定は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)の純粋関数、描画は
-  [`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)で、
-  `IssueList`・`PullRequestList`に`onPullToRefresh`を渡した画面（スマホのIssue一覧2画面とPR一覧）
-  だけで有効になる。**描画を一覧ごとに書かない**——文言・色・戻りのアニメーションが片方だけ
-  変わると、同じ操作なのに画面ごとに見え方が違うことになる。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958）。
+  判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
+  引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。
+  `onPullToRefresh`を渡した画面だけで有効になり、渡しているのはスマホのIssue一覧2画面・PR一覧
+  （#1947）・ブランチ画面（`BranchFlowView`。#1958）。**描画を一覧ごとに書かない**——文言・色・
+  戻りのアニメーションが片方だけ変わると、同じ操作なのに画面ごとに見え方が違うことになる。
+  **取り直しの完了を待てない画面は、画面側の取得中フラグを`isRefreshing`として渡す**（#1958）。
+  ブランチ画面の`refresh`は取り直しの合図を出すだけの同期関数で、待っても取得の完了とは無関係に
+  返るため、渡さないと数秒かかる取得の途中で「更新中…」が消える。フックはフラグが立つのを
+  待ってから下りるのを待つ（立たない・下りないときはそれぞれ上限で表示だけ戻す）。
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
   ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
