@@ -16,10 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useNow } from "@/hooks/use-now";
-import { usePersistedState } from "@/hooks/use-persisted-state";
 import { requestRelease } from "@/lib/release-request";
-import { isReleaseTriggerPending } from "@/lib/release-trigger-guard";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { BranchFlowIssueRef } from "@/types/branch-flow";
 
@@ -29,7 +26,9 @@ type RepositoryReleaseButtonProps = {
   pendingIssues: BranchFlowIssueRef[];
   /** 直近で本番へ出た版（`3.21.0`）。上げ幅の選択肢に「3.21.0 → 3.22.0」の目安を出すのに使う */
   currentVersion?: string | null;
-  /** 起動に成功したあと、バンプPRの出現を反映させるための再取得 */
+  /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
+  isPending: boolean;
+  /** 起動に成功したあと。起動中の記録とバンプPRの出現を反映させるための再取得を親が行う */
   onTriggered: () => void;
 };
 
@@ -47,12 +46,14 @@ type RepositoryReleaseButtonProps = {
  *
  * **一度起動したら、バンプPRが現れるまで押せない**（#1548）。起動からPRが現れるまでの数十秒は
  * `canTriggerRelease`がtrueのまま残るため、その間の連打がそのままworkflowの多重起動になっていた。
- * 起動時刻は端末のlocalStorageへ置き、判定は`isReleaseTriggerPending`が持つ。
+ * 起動時刻は端末のlocalStorageへ置き、判定は`useReleaseTriggerPending`が持つ——**同じ状態を
+ * 畳んだ1行のピルも見るため、保持はこのボタンではなくリポジトリの節に置いてある**（#1955）。
  */
 export function RepositoryReleaseButton({
   repositoryFullName,
   pendingIssues,
   currentVersion = null,
+  isPending,
   onTriggered,
 }: RepositoryReleaseButtonProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -60,20 +61,12 @@ export function RepositoryReleaseButton({
   const [error, setError] = useState<string | null>(null);
   // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
-  const [triggeredAt, setTriggeredAt] = usePersistedState<string | null>(
-    `issue-deck:release-triggered-at:${repositoryFullName}`,
-    null,
-  );
-  // 経過で自動的に押せる状態へ戻すため、時刻を定期的に取り直す（描画中にDate.now()を呼ばない）
-  const now = useNow(30_000);
-  const isPending = now !== null && isReleaseTriggerPending(triggeredAt, now);
 
   async function handleTrigger() {
     setIsTriggering(true);
     setError(null);
     try {
       await requestRelease(repositoryFullName, bumpKind ?? undefined);
-      setTriggeredAt(new Date().toISOString());
       // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前は「リリースを起動しました」の
       // ダイアログを続けて出していたが、閉じた先のボタンが「リリース起動中…」へ変わることで
       // 起動できたことは分かるため、OKを押させるだけの一手間だった。

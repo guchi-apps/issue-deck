@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useRepositoryReleaseStatuses = vi.fn();
@@ -45,7 +45,9 @@ function renderScreen(releaseStatuses: RepositoryReleaseStatus[] | null) {
   render(
     <MobileReposScreen
       repositories={[REPO_A, REPO_B]}
+      allIssueCount={12}
       onSelectRepository={vi.fn()}
+      onSelectAllIssues={vi.fn()}
       onSetRepositoryFavorite={vi.fn()}
     />,
   );
@@ -154,7 +156,9 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
     render(
       <MobileReposScreen
         repositories={repositories}
+        allIssueCount={12}
         onSelectRepository={vi.fn()}
+        onSelectAllIssues={vi.fn()}
         onSetRepositoryFavorite={vi.fn()}
       />,
     );
@@ -176,5 +180,56 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
     renderWith([repository({ hasClaudeWorkflow: true, dispatchRunnable: false })]);
 
     expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();
+  });
+});
+
+describe("MobileReposScreen の全リポジトリのIssueへの入口（#1951）", () => {
+  beforeEach(() => {
+    useRepositoryReleaseStatuses.mockReset();
+    useRepositoryReleaseStatuses.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(async () => []),
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderWithAllIssues(onSelectAllIssues: () => void, allIssueCount = 12) {
+    render(
+      <MobileReposScreen
+        repositories={[REPO_A, REPO_B]}
+        allIssueCount={allIssueCount}
+        onSelectRepository={vi.fn()}
+        onSelectAllIssues={onSelectAllIssues}
+        onSetRepositoryFavorite={vi.fn()}
+      />,
+    );
+  }
+
+  it("件数付きの行を出し、押すと横断のIssue一覧を開く", () => {
+    const onSelectAllIssues = vi.fn();
+    renderWithAllIssues(onSelectAllIssues, 12);
+
+    const button = screen.getByRole("button", { name: /すべてのリポジトリのIssue/ });
+    expect(button.textContent).toContain("12");
+
+    fireEvent.click(button);
+    expect(onSelectAllIssues).toHaveBeenCalledTimes(1);
+  });
+
+  // リポジトリ名の絞り込みで消えると、横断一覧への入口が検索のたびに見当たらなくなる
+  it("リポジトリの検索で絞り込んでも消えない", () => {
+    renderWithAllIssues(vi.fn());
+
+    fireEvent.change(screen.getByPlaceholderText("リポジトリを検索..."), {
+      target: { value: "該当しない名前" },
+    });
+
+    expect(screen.getByText("該当するリポジトリがありません")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /すべてのリポジトリのIssue/ })).toBeTruthy();
   });
 });

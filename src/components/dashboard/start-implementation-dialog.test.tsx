@@ -8,6 +8,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  ARTIFACT_REQUIRED_LABEL,
   MERGE_CONFIRM_REQUIRED_LABEL,
   PREVIEW_REQUIRED_LABEL,
 } from "@/lib/github/start-implementation";
@@ -450,6 +451,40 @@ describe("StartImplementationDialog", () => {
 
       expect(
         screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+
+    // デザインは計画の既定（#1317）にも入っているため、2つ同時にチェックが入る（#1956）
+    it("デザインのIssueでは「アーティファクトで見た目を出す」にもチェックが入り、そのままラベルが付く", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "62.design", color: "bfdadc", description: null }] }),
+      });
+
+      expect(
+        screen
+          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      clickStart();
+
+      await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+      expect(updateIssue.mock.calls[0][0].labels).toContain(ARTIFACT_REQUIRED_LABEL);
+    });
+
+    it("改善のIssueではアーティファクトにチェックが入らない（#1956）", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "51.improvement", color: "0052cc", description: null }] }),
+      });
+
+      expect(
+        screen
+          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getAttribute("aria-checked"),
       ).toBe("false");
     });
   });

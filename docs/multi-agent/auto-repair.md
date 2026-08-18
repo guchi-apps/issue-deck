@@ -266,3 +266,57 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
   `reusable-claude-conflict-resolve.yml`・`reusable-claude-pr-repair.yml`が`claude[bot]`のみ、
   `reusable-claude-ci-fix.yml`は指定自体が無く、3つとも押しても効かない状態だった。
   **今後この導線から起動するワークフローを増やすときは`allowed_bots`への追加を忘れないこと。**
+
+## 配布状況と、不足しているcallerの配布（#1948）
+
+**自動修復のcallerは、そのリポジトリの`.github/workflows/`に置かれていなければ起動できない。**
+`workflow_dispatch`の受け口はファイルの実在で解決されるため、無いリポジトリでは画面のボタンを
+押してもGitHub APIが404を返し、押すまでそれが分からなかった（`/api/pull-requests/repair`は
+この404だけ専用の文言に置き換えている）。実測では、フリートのうち3リポジトリしか持って
+いなかった（issue-deck・dayspan・shopping-list。2026-08-18時点の配布状況は
+[../supported-repositories.md](../supported-repositories.md)「自動修復ワークフローの配布状況」）。
+
+配布は**issue-deckの画面（設定＞フリート運用＞共有ワークフローのバージョン）**から行う。
+
+- 検知は共有ワークフローの参照タグと同じGraphQL取得に相乗りしており、追加のAPI消費は無い
+  （`collectWorkflowTags`が読む`.github/workflows/`のTreeのファイル名を使う）。判定は
+  `missingRepairWorkflows`（`src/lib/workflow-tags.ts`）で、**そのリポジトリで意味を持つものだけ**を
+  不足として挙げる——`claude-ci-fix.yml`・`claude-conflict-resolve.yml`は
+  `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
+  `release-develop-to-main.yml`を持つリポジトリが対象。
+- ボタンは`propagate-repair-workflows.yml`を起動し、`.github/scripts/propagate-repair-workflows.sh`が
+  リポジトリごとにPRを作る。callerの中身は`.github/templates/repair-callers/`の雛形から生成し、
+  **参照タグ（`uses:`・`prompts-ref`）と`runtime-setup`・`package-manager`・`node-version`は
+  そのリポジトリの`claude-issue-dispatch.yml`から写す**（写す入力を3つに限るのは、
+  再利用ワークフローが宣言していない入力を渡すと読み込み自体が失敗するため）。
+- **`verify-commands`・`build-env`は配らない。** リポジトリごとに違い機械的に決められないため、
+  必要なら配布後に手で足す（issue-deck・dayspanのcallerが実例）。
+- **`workflow_run`はワークフローの「名前」で購読する。** 雛形の購読先は配布先の`ci.yml`
+  （無ければ`test.yml`）の`name:`から埋める。名前が変わると黙って発火しなくなる。
+- **配布PRは自動マージしない。** 自動マージの例外（#1602）は`@workflows/vN`の機械的な置換に
+  限られ、新しいワークフローファイルの追加はGitHub Actionsの変更そのものにあたるため、
+  各リポジトリでPRを確認してマージする。配布PRが既にopenのリポジトリは、次に押したときの
+  対象から外れる（同じリポジトリへ2本目を作らないため。タグ配布と同じ仕組み）。
+- **配布しても、マージされるまでボタンは効かない。** `workflow_dispatch`の受け口は配布先の
+  デフォルトブランチの定義から解決されるため。
+
+## 未配布のリポジトリでは修復ボタンを押せなくする（#1960）
+
+配れるようにしても、**配る前・新しく連携したリポジトリ・配布PRがマージされるまでの間**は、
+押せるのに404で起動しないボタンが出たままになる。そこで起動先ワークフローの実在を取得時に
+確かめ、無ければボタンを無効化して理由（と配り先である設定＞フリート運用）を添える。
+
+- **ボタンは消さずに無効化する。** 消すと「配れば使える」ことが画面から分からなくなるため
+  （#1948の計画時点でユーザーと合意した方針）。
+- 判定は`fetchRepairWorkflowAvailability`（`src/lib/github/repair-workflow-cache.ts`）で、
+  **修復ボタンを出す種類（`repairKindsFor`が返した種類）だけ**を問い合わせる。結果は
+  `releaseWorkflowExists`と同じくプロセス内に10分キャッシュするため、CI失敗のPRが並んでいても
+  GitHub APIの消費はごく小さい。同じワークフローを見る種類（バンプPR・リリースPRのCI失敗と
+  コンフリクトはどちらも`claude-pr-repair.yml`）は1回にまとめる。
+- 種類ごとに起動先が違うため、判定も**種類ごと**に持つ（`RepairWorkflowAvailability`）。
+  `claude-ci-fix.yml`だけ配られている、といった状態ではCI修正だけ押せる。
+- **判定に失敗した（404以外のエラー）種類は押せるままにする。** 権限・障害で無効化すると
+  「配ってあるのに押せない」状態になるため。押した先の404を専用文言に置き換える
+  `POST /api/pull-requests/repair`の処理は、最後の砦としてそのまま残している。
+- 経路は3つ（`/api/pull-requests`・`/api/pull-requests/detail`・`/api/repositories/release`）で、
+  画面側は`PullRequestRepairButtons`が1か所で表示を受け持つ。

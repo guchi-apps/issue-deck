@@ -6,7 +6,11 @@ import { GithubReferenceLink } from "@/components/dashboard/github-reference-lin
 import { ConflictBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { parseGithubReferenceUrl } from "@/lib/github-reference";
-import { repairKindsFor, type RepairKind } from "@/lib/github/pull-request-repair";
+import {
+  repairKindsFor,
+  type RepairKind,
+  type RepairWorkflowAvailability,
+} from "@/lib/github/pull-request-repair";
 import { cn } from "@/lib/utils";
 import type { CiState, ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-release-status";
 
@@ -66,7 +70,12 @@ type Step = {
    * この段のマージ待ちPRを直すボタンの対象（#1293）。CI失敗・コンフリクトで止まっている段に、
    * その場で自動修復を起動する導線を添えるために持つ。
    */
-  repair?: { pullRequestNumber: number; kinds: RepairKind[] };
+  repair?: {
+    pullRequestNumber: number;
+    kinds: RepairKind[];
+    /** 起動先ワークフローの配布状況（#1960）。未配布の種類はボタンを押せなくする */
+    availability: RepairWorkflowAvailability;
+  };
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
@@ -111,12 +120,19 @@ function repairForPullRequest(pullRequest: {
   number: number;
   ciState: CiState | null;
   mergeable: boolean | null;
+  repairWorkflowAvailability: RepairWorkflowAvailability;
 }): Step["repair"] {
   const kinds = repairKindsFor(
     { state: "open", draft: false, ciState: pullRequest.ciState },
     pullRequest.mergeable,
   );
-  return kinds.length > 0 ? { pullRequestNumber: pullRequest.number, kinds } : undefined;
+  return kinds.length > 0
+    ? {
+        pullRequestNumber: pullRequest.number,
+        kinds,
+        availability: pullRequest.repairWorkflowAvailability,
+      }
+    : undefined;
 }
 
 /**
@@ -318,6 +334,7 @@ export function ReleaseProgress({
                 repositoryFullName={repoFullName}
                 pullRequestNumber={step.repair.pullRequestNumber}
                 kinds={step.repair.kinds}
+                availability={step.repair.availability}
                 className="ml-6"
               />
             )}

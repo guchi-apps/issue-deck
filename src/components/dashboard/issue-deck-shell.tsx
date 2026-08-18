@@ -194,6 +194,7 @@ export function IssueDeckShell({
     selectRepositoryByFullName,
     selectIssue,
     selectQuickView,
+    selectAllIssues,
     updateListFilters,
     goBack,
   } = useMobileScreen(issues, repositories);
@@ -1092,7 +1093,8 @@ export function IssueDeckShell({
                   onSelectIssue={selectIssue}
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
-                  onBack={mobileScreen.origin === "home" ? goBack : undefined}
+                  /* タブから直接開いたとき以外は戻る導線を出す（#525・#1951） */
+                  onBack={mobileScreen.origin === "tab" ? undefined : goBack}
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
                      経路（reconcileIssues・確認待ちトーストの判定）を通す */
                   onRefresh={issuePolling.refresh}
@@ -1108,7 +1110,11 @@ export function IssueDeckShell({
               {mobileScreen.kind === "repos" && (
                 <MobileReposScreen
                   repositories={repositories}
+                  /* 検索窓の下の「すべてのリポジトリのIssue」の件数（#1951）。
+                     左メニュー・ホームと同じ数え方にするため`navCounts`から引く */
+                  allIssueCount={navCounts.all}
                   onSelectRepository={selectRepository}
+                  onSelectAllIssues={selectAllIssues}
                   onSetRepositoryFavorite={handleSetRepositoryFavorite}
                 />
               )}

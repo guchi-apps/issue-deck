@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchClosedPullRequests,
@@ -11,6 +12,7 @@ import {
   type GithubApiOpenPullRequest,
 } from "@/lib/github/pull-requests-api";
 import { fetchPullRequestCiState } from "@/lib/github/release-api";
+import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
@@ -173,8 +175,28 @@ async function toOpenPullRequest(
         repository.token,
       );
 
+  // 自動修復ワークフローが配られているかは、**修復ボタンを出すPRでだけ**確かめる（#1960）。
+  // 押せるのに404で起動しないボタンを出さないためで、判定結果はプロセス内に10分キャッシュ
+  // されるため、CI失敗・コンフリクトのPRが並んでいてもGitHub APIの消費はごく小さい。
+  const repairWorkflowAvailability = await fetchRepairWorkflowAvailability(
+    repository.ownerLogin,
+    repository.name,
+    {
+      number: pullRequest.number,
+      baseRef: pullRequest.base.ref,
+      headRef: pullRequest.head.ref,
+    },
+    repairKindsFor({ state: "open", draft: pullRequest.draft, ciState }, mergeable),
+    repository.token,
+  );
+
   // openのPRにマージ済みは存在しない。
-  return toPullRequestSummary(pullRequest, repository, { merged: false, ciState, mergeable });
+  return toPullRequestSummary(pullRequest, repository, {
+    merged: false,
+    ciState,
+    mergeable,
+    repairWorkflowAvailability,
+  });
 }
 
 /**

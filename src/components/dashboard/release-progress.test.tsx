@@ -34,6 +34,7 @@ function statusWithReleaseCi(
       title: "release",
       ciState,
       mergeable,
+      repairWorkflowAvailability: {},
     },
   });
 }
@@ -82,6 +83,7 @@ describe("ReleaseProgress CI状態バッジ", () => {
             title: "bump",
             ciState: "failure",
             mergeable: null,
+            repairWorkflowAvailability: {},
             version: "1.1.0",
             reason: null,
             changelog: null,
@@ -136,6 +138,7 @@ describe("ReleaseProgress 更新履歴・使い方の表示", () => {
         title: "bump",
         ciState: null,
         mergeable: null,
+        repairWorkflowAvailability: {},
         version: "1.1.0",
         reason,
         changelog,
@@ -204,6 +207,36 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
     expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
   });
 
+  // バンプPR・リリースPRを直すのは`claude-pr-repair.yml`で、リリースフローを持っていても
+  // 配られていないことがある（#1960）。
+  it("自動修復ワークフローが未配布なら段のボタンを押せなくして理由を添える（#1960）", () => {
+    const status = statusWithReleaseCi("failure", false);
+    render(
+      <ReleaseProgress
+        status={makeStatus({
+          ...status,
+          releasePullRequest: {
+            ...status.releasePullRequest!,
+            repairWorkflowAvailability: { ci: false, conflict: false },
+          },
+        })}
+        repoFullName="owner/repo"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(
+      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen.getByText(
+        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      ),
+    ).not.toBeNull();
+  });
+
   it("バンプPR（develop向け）のCI失敗にも同じボタンを出す", () => {
     render(
       <ReleaseProgress
@@ -215,6 +248,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
             title: "bump",
             ciState: "failure",
             mergeable: null,
+            repairWorkflowAvailability: {},
             version: "1.1.0",
             reason: null,
             changelog: null,
