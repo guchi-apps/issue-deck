@@ -879,6 +879,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **10分で失効させる**のは、workflowが失敗してバンプPRが1本も作られなかったときにボタンが
   二度と押せなくなるのを防ぐため。サーバー側に押下を記録しないのは、問い合わせるとこの画面の
   前提（取得を増やさない）が崩れるから。
+  **起動中は畳んだ1行にも「リリース起動中」の紫のピルを出す**（#1955）。開いたときのボタンにしか
+  出ておらず、畳むと押す前と同じ行に戻っていた。保持は[`hooks/use-release-trigger-pending.ts`](../src/hooks/use-release-trigger-pending.ts)が
+  リポジトリ1件ぶんで1回だけ行い、行とボタンの両方へ配る——同じキーで`usePersistedState`を
+  2か所から読むと、押した瞬間の書き込みが互いに伝わらないため。出すのは`canTriggerRelease`が
+  trueの間だけにして、リリース完了後も10分残る起動時刻で古いピルが出ないようにしている。
   **mainへのマージもこの画面から行える**（#1548）。束の見出しのマージボタンは一覧・詳細と同じ
   `PullRequestMergeButton`（`POST /api/issues/pull-request-merge`。merge commit）で、
   `mergeWarnings`がbase`main`のPRに「本番デプロイが走る」警告を必ず返すため確認ダイアログを通る。
