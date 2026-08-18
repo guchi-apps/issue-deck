@@ -7,7 +7,7 @@ import {
   canRepairFromDeck,
   isRepairWorkflowMissing,
   repairKindsFor,
-  repairUnavailableNotice,
+  repairUnavailableNotices,
   resolveRepairDispatch,
 } from "@/lib/github/pull-request-repair";
 
@@ -106,39 +106,63 @@ describe("repairKindsFor", () => {
 });
 
 describe("isRepairWorkflowMissing", () => {
-  it("falseと分かっている種類だけ未配布として扱う", () => {
-    expect(isRepairWorkflowMissing({ ci: false }, "ci")).toBe(true);
-    expect(isRepairWorkflowMissing({ ci: true }, "ci")).toBe(false);
+  it("配布されていないと分かっている種類だけ押せなくする", () => {
+    expect(isRepairWorkflowMissing({ ci: "missing" }, "ci")).toBe(true);
+    expect(isRepairWorkflowMissing({ ci: "unsupported" }, "ci")).toBe(true);
+    expect(isRepairWorkflowMissing({ ci: "available" }, "ci")).toBe(false);
   });
 
   it("判定していない種類・そもそも判定していない経路は押せる扱いにする", () => {
     // 存在確認に失敗した種類はキーごと落ちる。無効化の誤爆でユーザーの手を止めない（#1960）。
-    expect(isRepairWorkflowMissing({ conflict: false }, "ci")).toBe(false);
+    expect(isRepairWorkflowMissing({ conflict: "missing" }, "ci")).toBe(false);
     expect(isRepairWorkflowMissing({}, "ci")).toBe(false);
     expect(isRepairWorkflowMissing(undefined, "ci")).toBe(false);
   });
 });
 
-describe("repairUnavailableNotice", () => {
+describe("repairUnavailableNotices", () => {
   it("押せない種類が無ければ何も添えない", () => {
-    expect(repairUnavailableNotice(["ci"], { ci: true })).toBeNull();
-    expect(repairUnavailableNotice(["ci", "conflict"], {})).toBeNull();
-    expect(repairUnavailableNotice([], { ci: false })).toBeNull();
+    expect(repairUnavailableNotices(["ci"], { ci: "available" })).toEqual([]);
+    expect(repairUnavailableNotices(["ci", "conflict"], {})).toEqual([]);
+    expect(repairUnavailableNotices([], { ci: "missing" })).toEqual([]);
   });
 
   it("出している種類が全部未配布ならまとめて言い、配り先を添える", () => {
-    expect(repairUnavailableNotice(["conflict", "ci"], { conflict: false, ci: false })).toBe(
+    expect(
+      repairUnavailableNotices(["conflict", "ci"], { conflict: "missing", ci: "missing" }),
+    ).toEqual([
       "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
-    );
+    ]);
   });
 
   it("片方だけ未配布ならどちらが無いのかを名指しする", () => {
     // `claude-ci-fix.yml`だけ配られている、といった状態が実際にありうる（#1948）。
-    expect(repairUnavailableNotice(["conflict", "ci"], { conflict: false, ci: true })).toBe(
+    expect(
+      repairUnavailableNotices(["conflict", "ci"], { conflict: "missing", ci: "available" }),
+    ).toEqual([
       "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
-    );
-    expect(repairUnavailableNotice(["conflict", "ci"], { conflict: true, ci: false })).toBe(
-      "CI失敗修正のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
-    );
+    ]);
+  });
+
+  it("配布の対象ですらないリポジトリでは設定画面へ送らない", () => {
+    // 前提ワークフローが無いリポジトリは配布の一覧に出ない（#1948）。そこへ「配布できます」と
+    // 案内すると行き止まりになる。
+    expect(
+      repairUnavailableNotices(["conflict", "ci"], {
+        conflict: "unsupported",
+        ci: "unsupported",
+      }),
+    ).toEqual([
+      "自動修復ワークフローが未配布です。このリポジトリは配布の対象外のため、必要なら手動で追加してください。",
+    ]);
+  });
+
+  it("理由が違う種類が混ざったら行を分ける", () => {
+    expect(
+      repairUnavailableNotices(["conflict", "ci"], { conflict: "missing", ci: "unsupported" }),
+    ).toEqual([
+      "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      "CI失敗修正のワークフローが未配布です。このリポジトリは配布の対象外のため、必要なら手動で追加してください。",
+    ]);
   });
 });

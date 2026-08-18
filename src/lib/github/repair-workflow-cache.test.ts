@@ -21,8 +21,9 @@ describe("fetchRepairWorkflowAvailability", () => {
   });
 
   it("種類ごとの起動先ワークフローの有無を返す", async () => {
-    fetchWorkflowExists.mockImplementation(async (_owner, _repo, file: string) =>
-      file === "claude-ci-fix.yml",
+    // 前提の`claude-issue-dispatch.yml`はあるので、無い側は「これから配れる」扱いになる。
+    fetchWorkflowExists.mockImplementation(
+      async (_owner, _repo, file: string) => file !== "claude-conflict-resolve.yml",
     );
 
     const availability = await fetchRepairWorkflowAvailability(
@@ -33,7 +34,29 @@ describe("fetchRepairWorkflowAvailability", () => {
       "token",
     );
 
-    expect(availability).toEqual({ ci: true, conflict: false });
+    expect(availability).toEqual({ ci: "available", conflict: "missing" });
+  });
+
+  it("前提のワークフローが無いリポジトリは配布の対象外として返す（#1948の配布条件）", async () => {
+    // `release-develop-to-main.yml`はあるが`claude-issue-dispatch.yml`が無いリポジトリでは、
+    // `issue-<番号>`のPRに出るボタンの起動先を配布の一覧から配れない。
+    fetchWorkflowExists.mockResolvedValue(false);
+
+    const availability = await fetchRepairWorkflowAvailability(
+      "guchi-apps",
+      "vps",
+      ISSUE_PR,
+      ["ci"],
+      "token",
+    );
+
+    expect(availability).toEqual({ ci: "unsupported" });
+    expect(fetchWorkflowExists).toHaveBeenCalledWith(
+      "guchi-apps",
+      "vps",
+      "claude-issue-dispatch.yml",
+      "token",
+    );
   });
 
   it("ボタンを出す種類が無ければGitHub APIを呼ばない", async () => {
@@ -60,7 +83,7 @@ describe("fetchRepairWorkflowAvailability", () => {
       "token",
     );
 
-    expect(availability).toEqual({ ci: true, conflict: true });
+    expect(availability).toEqual({ ci: "available", conflict: "available" });
     expect(fetchWorkflowExists).toHaveBeenCalledTimes(1);
     expect(fetchWorkflowExists).toHaveBeenCalledWith(
       "guchi-apps",
@@ -71,7 +94,7 @@ describe("fetchRepairWorkflowAvailability", () => {
   });
 
   it("2回目以降はキャッシュを使い、GitHub APIを消費しない", async () => {
-    fetchWorkflowExists.mockResolvedValue(false);
+    fetchWorkflowExists.mockResolvedValue(true);
 
     await fetchRepairWorkflowAvailability("guchi-apps", "issue-deck", BUMP_PR, ["ci"], "token");
     const second = await fetchRepairWorkflowAvailability(
@@ -82,8 +105,33 @@ describe("fetchRepairWorkflowAvailability", () => {
       "token",
     );
 
-    expect(second).toEqual({ ci: false });
+    expect(second).toEqual({ ci: "available" });
     expect(fetchWorkflowExists).toHaveBeenCalledTimes(1);
+  });
+
+  it("未配布は短いTTLで確認し直し、配布済みは持ち続ける", async () => {
+    // 配布PRがマージされた直後に「配ったのに押せない」時間ができないよう、無い側だけ短く持つ。
+    vi.useFakeTimers();
+    try {
+      fetchWorkflowExists.mockImplementation(
+        async (_owner, _repo, file: string) => file === "claude-issue-dispatch.yml",
+      );
+
+      await fetchRepairWorkflowAvailability("guchi-apps", "issue-deck", ISSUE_PR, ["ci"], "token");
+      expect(fetchWorkflowExists).toHaveBeenCalledTimes(2);
+
+      // 1分経つと未配布（`claude-ci-fix.yml`）だけ問い合わせ直す。
+      vi.advanceTimersByTime(61_000);
+      await fetchRepairWorkflowAvailability("guchi-apps", "issue-deck", ISSUE_PR, ["ci"], "token");
+      expect(fetchWorkflowExists).toHaveBeenCalledTimes(3);
+
+      // 10分経てば配布済みの側（前提ワークフロー）も確認し直す。
+      vi.advanceTimersByTime(10 * 60_000);
+      await fetchRepairWorkflowAvailability("guchi-apps", "issue-deck", ISSUE_PR, ["ci"], "token");
+      expect(fetchWorkflowExists).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("判定に失敗した種類はキーを落とし、押せるままにする", async () => {
@@ -116,7 +164,7 @@ describe("fetchRepairWorkflowAvailability", () => {
       "token",
     );
 
-    expect(second).toEqual({ ci: true });
+    expect(second).toEqual({ ci: "available" });
     expect(fetchWorkflowExists).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });

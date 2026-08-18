@@ -217,7 +217,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
           ...status,
           releasePullRequest: {
             ...status.releasePullRequest!,
-            repairWorkflowAvailability: { ci: false, conflict: false },
+            repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
           },
         })}
         repoFullName="owner/repo"

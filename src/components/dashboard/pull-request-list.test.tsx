@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
@@ -44,6 +44,7 @@ type RenderOverrides = Partial<{
   failedRepositories: string[];
   selectedPullRequestId: string | null;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
+  onPullToRefresh: () => Promise<unknown> | void;
 }>;
 
 function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrides = {}) {
@@ -55,11 +56,21 @@ function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrid
       fetchedAt="2026-08-11T10:30:00Z"
       isLoading={overrides.isLoading ?? false}
       error={overrides.error ?? null}
-      onRefresh={vi.fn()}
+      onPullToRefresh={overrides.onPullToRefresh}
       selectedPullRequestId={overrides.selectedPullRequestId ?? null}
       onSelectPullRequest={overrides.onSelectPullRequest}
     />,
   );
+}
+
+/**
+ * jsdomには`TouchEvent`のコンストラクタが無いため、ハンドラが読む`touches`だけを持つ
+ * イベントを組み立てる（`use-pull-to-refresh.test.tsx`と同じ作り）。
+ */
+function touchEvent(type: string, x: number, y: number) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+  return event;
 }
 
 describe("PullRequestList", () => {
@@ -157,7 +168,7 @@ describe("PullRequestList", () => {
       makePullRequest({
         ciState: "failure",
         mergeable: false,
-        repairWorkflowAvailability: { ci: false, conflict: false },
+        repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
       }),
     ]);
 
@@ -177,7 +188,7 @@ describe("PullRequestList", () => {
       makePullRequest({
         ciState: "failure",
         mergeable: false,
-        repairWorkflowAvailability: { ci: true, conflict: false },
+        repairWorkflowAvailability: { ci: "available", conflict: "missing" },
       }),
     ]);
 
@@ -314,5 +325,56 @@ describe("PullRequestList 経過時間", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// #1947。ヘッダーの「更新」ボタンを外し、代わりに一覧を下へ引っ張って更新できるようにした。
+// ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が実DOMで見る
+describe("PullRequestList の更新（#1947）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("ヘッダーに「更新」ボタンを出さない", () => {
+    renderList([makePullRequest()]);
+
+    expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
+  });
+
+  it("一覧を先頭から下へ引っ張ると更新が走る", async () => {
+    const onPullToRefresh = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderList([makePullRequest()], { onPullToRefresh });
+
+    // タッチを受けるのはスクロール領域を包む枠（0件でも残る側）
+    const pullContainer = container.querySelector("div.relative");
+    expect(pullContainer).toBeTruthy();
+
+    await act(async () => {
+      pullContainer!.dispatchEvent(touchEvent("touchstart", 100, 100));
+      pullContainer!.dispatchEvent(touchEvent("touchmove", 100, 140));
+      // しきい値（64px）を超えるまで引く。追従は移動量の半分（PULL_RESISTANCE）
+      pullContainer!.dispatchEvent(touchEvent("touchmove", 100, 300));
+      pullContainer!.dispatchEvent(new Event("touchend", { bubbles: true }));
+    });
+
+    expect(onPullToRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("引っ張っている途中は「離すと更新」を出す", () => {
+    const { container } = renderList([makePullRequest()], {
+      onPullToRefresh: vi.fn().mockResolvedValue(undefined),
+    });
+    const pullContainer = container.querySelector("div.relative")!;
+
+    act(() => {
+      pullContainer.dispatchEvent(touchEvent("touchstart", 100, 100));
+      pullContainer.dispatchEvent(touchEvent("touchmove", 100, 140));
+    });
+    expect(screen.getByText("引っ張って更新")).toBeTruthy();
+
+    act(() => {
+      pullContainer.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+    expect(screen.getByText("離すと更新")).toBeTruthy();
   });
 });

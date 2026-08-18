@@ -315,8 +315,19 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
   コンフリクトはどちらも`claude-pr-repair.yml`）は1回にまとめる。
 - 種類ごとに起動先が違うため、判定も**種類ごと**に持つ（`RepairWorkflowAvailability`）。
   `claude-ci-fix.yml`だけ配られている、といった状態ではCI修正だけ押せる。
+- **「これから配れる（`missing`）」と「配布の対象ですらない（`unsupported`）」を分ける。**
+  配布の一覧は`requires`を持つリポジトリしか対象にしないため（上節）、例えば
+  `release-develop-to-main.yml`はあるが`claude-issue-dispatch.yml`が無いリポジトリ
+  （2026-08-18時点の`guchi-apps/vps`・`guchi-apps/subpc`）では、`issue-<番号>`のPRに出る
+  CI修正ボタンの起動先を配れない。そこへ「設定＞フリート運用から配れます」と案内すると
+  行き止まりになるので、無いと分かったときだけ前提ファイルの有無も確かめて文言を変える。
+- **未配布（偽）のキャッシュは1分と短くする。** 配布PRがマージされた瞬間に偽から真へ変わる値で、
+  10分持つと「配ったのにボタンが押せない」時間ができる。逆向き（真→偽）は起こらないので、
+  配布済みの側は10分のままでよい（`ISSUE_RUN_NEGATIVE_CACHE_TTL_MS`と同じ考え方）。
 - **判定に失敗した（404以外のエラー）種類は押せるままにする。** 権限・障害で無効化すると
   「配ってあるのに押せない」状態になるため。押した先の404を専用文言に置き換える
   `POST /api/pull-requests/repair`の処理は、最後の砦としてそのまま残している。
 - 経路は3つ（`/api/pull-requests`・`/api/pull-requests/detail`・`/api/repositories/release`）で、
-  画面側は`PullRequestRepairButtons`が1か所で表示を受け持つ。
+  画面側は`PullRequestRepairButtons`が1か所で表示を受け持つ。一覧APIでは**PR1件ずつの変換
+  （`toOpenPullRequest`）ではなく、summaryが揃ってから別の一巡で埋める**——CI状態の取得を
+  まとめ取りへ組み替える予定（#1962）と同じ関数を奪い合わないため。

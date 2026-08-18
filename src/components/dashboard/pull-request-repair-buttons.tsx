@@ -20,7 +20,7 @@ import {
   isRepairWorkflowMissing,
   REPAIR_KIND_DESCRIPTION,
   REPAIR_KIND_LABEL,
-  repairUnavailableNotice,
+  repairUnavailableNotices,
   type RepairKind,
   type RepairWorkflowAvailability,
 } from "@/lib/github/pull-request-repair";
@@ -70,8 +70,8 @@ export function PullRequestRepairButtons({
   const [confirmKind, setConfirmKind] = useState<RepairKind | null>(null);
   const [startedKind, setStartedKind] = useState<RepairKind | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
-  // 未配布の種類があるときだけ、理由と配り先を1行で添える（無ければnull）。
-  const unavailableNotice = repairUnavailableNotice(kinds, availability);
+  // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
+  const unavailableNotices = repairUnavailableNotices(kinds, availability);
 
   if (kinds.length === 0) return null;
 
@@ -102,7 +102,7 @@ export function PullRequestRepairButtons({
               disabled={isSubmitting || missing}
               // 無効化の理由はホバーできない端末にも要るため下の一文でも出すが、
               // マウスで触ったときにその場で読めるようtitleにも同じ趣旨を持たせる。
-              title={missing && unavailableNotice ? unavailableNotice : undefined}
+              title={missing ? unavailableNotices.join(" ") : undefined}
               onClick={() => {
                 setError(null);
                 setConfirmKind(kind);
@@ -114,12 +114,16 @@ export function PullRequestRepairButtons({
           );
         })
       )}
-      {!startedKind && unavailableNotice && (
-        <p className="flex w-full min-w-0 items-start gap-1 text-xs text-muted-foreground">
-          <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-          <span>{unavailableNotice}</span>
-        </p>
-      )}
+      {!startedKind &&
+        unavailableNotices.map((notice) => (
+          <p
+            key={notice}
+            className="flex w-full min-w-0 items-start gap-1 text-xs text-muted-foreground"
+          >
+            <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+            <span>{notice}</span>
+          </p>
+        ))}
       {error && !confirmKind && <span className="text-xs text-destructive">{error}</span>}
 
       <AlertDialog

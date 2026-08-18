@@ -36,6 +36,7 @@ import {
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -418,6 +419,12 @@ export function IssueList({
       const session = sessionByIssueId.get(issue.id);
       return session ? summarizeIssueSession(session).remoteControlUrl : null;
     })();
+    // 押さないと先へ進まない行を見分けられるようにする（#1964）。**出す条件とは別物**で、
+    // 判定は`shouldEmphasizeRemoteControl`に置いてある
+    const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
+      labels: issue.labels,
+      session: sessionByIssueId.get(issue.id) ?? null,
+    });
     return (
       <li
         key={issue.id}
@@ -530,7 +537,22 @@ export function IssueList({
                   カードの下へ1行足すと、セッションのあるカードだけ高さが変わって一覧が
                   不揃いになる。文言は「Remote」まで詰め、全文は`title`・`aria-label`に持たせる */}
               {remoteControlUrl && (
-                <Button variant="outline" size="xs" asChild className="pointer-events-auto">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  asChild
+                  className={cn(
+                    "pointer-events-auto",
+                    // 回答を待っている行だけ枠線と文字をamberにする（#1964）。**中は塗らない**——
+                    // 同じ形の行が縦に続く画面で、塗りつぶしたボタンは1つあるだけで視線を奪う。
+                    // 面（背景）とホバーの挙動はoutlineのまま変えず、差は枠線と文字色だけにする。
+                    // 色は右上のバッジ（`WorkflowStepBadge`）の確認待ちと同じamberを借りる。同じ行で
+                    // 同じ意味に別の色を当てない。**回転・点滅はさせない**（あちらも承認待ちでは
+                    // 意図的に回転を止めている。待っているのは人であって処理ではない）
+                    emphasizeRemoteControl &&
+                      "border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400",
+                  )}
+                >
                   <a
                     href={remoteControlUrl}
                     target="_blank"
