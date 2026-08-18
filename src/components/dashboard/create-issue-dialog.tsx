@@ -372,7 +372,6 @@ export function CreateIssueDialog({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
-  const [assignee, setAssignee] = useState<string | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [restorableDraft, setRestorableDraft] = useState<IssueDraft | null>(null);
   /** 別ウィンドウがブラウザに止められたか（#1728）。黙って何も起きないと壊れて見える */
@@ -383,7 +382,7 @@ export function CreateIssueDialog({
    */
   const [startTargetIssue, setStartTargetIssue] = useState<Issue | null>(null);
 
-  const { labels, assignees, isLoading: isMetaLoading } = useIssueRepoMeta(
+  const { labels, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
   );
   const issueSuggestions = useMemo(
@@ -455,7 +454,6 @@ export function CreateIssueDialog({
     setTitle(draft.title);
     setBody(draft.body);
     setSelectedLabels(draft.selectedLabels);
-    setAssignee(draft.assignee);
     setIsImageUploading(false);
     setError(null);
     setCommentError(null);
@@ -477,25 +475,16 @@ export function CreateIssueDialog({
     setCommentError,
   ]);
 
+  // 担当者は画面の状態として持たない（#1929）。下書きにも入れない——開いて何も書かずに
+  // 閉じただけの下書きが「空ではない」と判定され、次に開いたとき「復元する」が出てしまう
   useIssueDraftAutosave(open, {
     kind,
     repositoryFullName,
     title,
     body,
     selectedLabels,
-    assignee,
+    assignee: null,
   });
-
-  /**
-   * 担当者は`m-guchi`固定（#1929）。画面から選べなくしたので、リポジトリの割り当て可能な
-   * ユーザーが分かった時点でこちらが入れる。**居ないリポジトリでは未設定のままにする**——
-   * 割り当てられない相手を送るとGitHub側で黙って落ちる。
-   */
-  useEffect(() => {
-    if (!open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAssignee(assignees.includes(DEFAULT_ASSIGNEE) ? DEFAULT_ASSIGNEE : null);
-  }, [open, assignees]);
 
   // 提案が出たら、押した人の視線がある場所からでも見えるところまで寄せる（#1890）
   useEffect(() => {
@@ -550,7 +539,7 @@ export function CreateIssueDialog({
       title,
       body,
       selectedLabels,
-      assignee,
+      assignee: null,
       bodyPrefix: bodyPrefix ?? null,
     });
     if (!opened) {
@@ -594,7 +583,6 @@ export function CreateIssueDialog({
     setTitle("");
     setBody("");
     setSelectedLabels([]);
-    setAssignee(null);
   }
 
   function toggleLabel(name: string) {
@@ -648,7 +636,7 @@ export function CreateIssueDialog({
       title,
       body: composeIssueBody(bodyPrefix, body),
       labels: selectedLabels,
-      assignee,
+      assignee: DEFAULT_ASSIGNEE,
     });
     if (issue) {
       resetForm();
@@ -709,7 +697,7 @@ export function CreateIssueDialog({
       title,
       body: composeIssueBody(bodyPrefix, body),
       labels: selectedLabels,
-      assignee,
+      assignee: DEFAULT_ASSIGNEE,
     });
     if (!issue) return;
 
@@ -1016,10 +1004,11 @@ export function CreateIssueDialog({
             混ざっている（撮影は無人実行専用・アーティファクトはローカル実行専用）。
             起票の時点では実行先も実施時期も未定なので、「実装を開始」ダイアログで選ぶ */}
 
-        {/* 担当者の選択欄は出さない（#1929）。選べる相手が実質`m-guchi`しかおらず、
-            毎回そのまま作成していた。**付く値は変わらない**——リポジトリの割り当て可能な
-            ユーザーに`m-guchi`が居れば、これまでと同じようにその人が担当者になる
-            （上の`useEffect`）。別の人に割り当てたい場合はIssue詳細かGitHub側で変える。
+        {/* 担当者は`m-guchi`固定にし、選択欄は出さない（#1929）。選べる相手が実質1人しかおらず、
+            毎回そのまま作成していた。**値は画面の状態として持たず、作成時に定数を送る。**
+            以前は`/api/issues/meta`が返した割り当て可能ユーザーに`m-guchi`が居たときだけ
+            入る初期値だったため、欄を消すと取得の失敗・遅延がそのまま「担当者なしのIssue」に
+            なり、画面からは気づけなくなる。別の人に割り当てたい場合はIssue詳細かGitHub側で変える。
             質問Issueにはもともと担当者を付けない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
 
         {/* 別ウィンドウを開けなかったときだけ出す（#1728）。押しても何も起きないと、
