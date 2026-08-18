@@ -17,8 +17,8 @@
 #   scripts/provision-secret.sh --repo guchi-apps/subscription-lists --key INTERNAL_API_KEY --generate base64-32
 #   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_READ_SECRET --generate hex32 --dry-run
 #   printf '%s' "$値" | scripts/provision-secret.sh --repo guchi-apps/aide --key ZAIM_EMAIL --from-stdin
-#   scripts/provision-secret.sh --repo guchi-apps/db-console --key SIGNALY_WEBHOOK_URL \
-#     --copy-from "op://apps/Signaly/webhook-url" --field-type url
+#   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_OPS_DASHBOARD_TOKEN \
+#     --copy-from "op://apps/ops-dashboard/ops-api-token"
 #
 # オプション:
 #   --repo <owner/repo>    対象リポジトリ（必須）
