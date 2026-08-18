@@ -41,37 +41,43 @@ function renderScreen(
   );
 }
 
-describe("MobilePullRequestsScreen のビュー切り替えタブ（#1436）", () => {
+/** 下端のビュー行（シートを開くボタン） */
+function viewRow() {
+  return screen.getByRole("button", { name: /実行中|すべてのPR|完了したPR/ });
+}
+
+describe("MobilePullRequestsScreen のビュー切り替え（#1691）", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("3つの状態別ビューをタブに出し、件数を持つビューだけ件数を添える", () => {
+  it("下端の行に表示中のビュー名と件数を出す", () => {
     renderScreen();
 
-    expect(screen.getByRole("button", { name: /すべてのPR/ }).textContent).toBe("すべてのPR");
-    expect(screen.getByRole("button", { name: /実行中/ }).textContent).toBe("実行中2");
-    expect(screen.getByRole("button", { name: /完了したPR/ }).textContent).toBe("完了したPR3");
+    expect(viewRow().textContent).toBe("実行中2");
   });
 
-  it("表示中のビューのタブにaria-currentが付く", () => {
-    renderScreen({ view: "completed" });
+  it("件数を持たないビュー（すべてのPR）は件数を添えない", () => {
+    renderScreen({ view: "all" });
 
-    expect(
-      screen.getByRole("button", { name: /完了したPR/ }).getAttribute("aria-current"),
-    ).toBe("page");
-    expect(
-      screen.getByRole("button", { name: /実行中/ }).getAttribute("aria-current"),
-    ).toBeNull();
+    expect(viewRow().textContent).toBe("すべてのPR");
   });
 
-  it("タブを押すとそのビューでonChangeViewを呼ぶ", () => {
+  it("上部の横スクロールタブは出さない（切り替えの口を1つにする）", () => {
+    renderScreen();
+
+    // 「完了したPR」はシートを開くまで画面に無い
+    expect(screen.queryByRole("button", { name: /完了したPR/ })).toBeNull();
+  });
+
+  it("行を押して開くシートからビューを選べる", () => {
     const onChangeView = vi.fn();
     renderScreen({ onChangeView });
 
-    fireEvent.click(screen.getByRole("button", { name: /すべてのPR/ }));
+    fireEvent.click(viewRow());
+    fireEvent.click(screen.getByRole("button", { name: /完了したPR/ }));
 
-    expect(onChangeView).toHaveBeenCalledWith("all");
+    expect(onChangeView).toHaveBeenCalledWith("completed");
   });
 
   it("フッターのタブから開いた場合は戻るボタンを出さず、ホーム経由なら出す", () => {
@@ -84,5 +90,45 @@ describe("MobilePullRequestsScreen のビュー切り替えタブ（#1436）", (
     renderScreen({ origin: "home", onBack });
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     expect(onBack).toHaveBeenCalled();
+  });
+});
+
+describe("MobilePullRequestsScreen のスワイプ（#1691）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function swipe(deltaX: number) {
+    const surface = viewRow().closest("div.flex.h-full") as HTMLElement;
+    fireEvent.touchStart(surface, { touches: [{ clientX: 200, clientY: 400 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 200 + deltaX, clientY: 400 }] });
+    fireEvent.touchEnd(surface);
+  }
+
+  it("左へスワイプすると次のビューへ切り替える", () => {
+    const onChangeView = vi.fn();
+    renderScreen({ view: "in-progress", onChangeView });
+
+    swipe(-120);
+
+    expect(onChangeView).toHaveBeenCalledWith("completed");
+  });
+
+  it("右へスワイプすると前のビューへ切り替える", () => {
+    const onChangeView = vi.fn();
+    renderScreen({ view: "in-progress", onChangeView });
+
+    swipe(120);
+
+    expect(onChangeView).toHaveBeenCalledWith("all");
+  });
+
+  it("端のビューではそれ以上切り替えない", () => {
+    const onChangeView = vi.fn();
+    renderScreen({ view: "all", onChangeView });
+
+    swipe(120);
+
+    expect(onChangeView).not.toHaveBeenCalled();
   });
 });

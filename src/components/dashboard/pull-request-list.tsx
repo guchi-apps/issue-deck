@@ -57,12 +57,17 @@ type PullRequestListProps = {
   onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
-  /** ヘッダーと一覧の間に差し込む行（スマホのビュー切り替えタブ。#1436） */
-  headerBelow?: React.ReactNode;
   /** ヘッダーの右端に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
   headerActions?: React.ReactNode;
+  /** 一覧の下端に固定する行（スマホのビュー切り替え。#1691。PCからは渡さない） */
+  footer?: React.ReactNode;
   className?: string;
   style?: CSSProperties;
+  /**
+   * 一覧本体（スクロール領域）だけに掛けるスタイル（#1691）。スマホのスワイプで
+   * ビューを切り替えるとき、ヘッダーと下端の行は動かさず一覧だけを指に追従させる。
+   */
+  listStyle?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる（#677と同じ理由） */
   footerSpacing?: boolean;
 };
@@ -187,10 +192,11 @@ export function PullRequestList({
   onSelectPullRequest,
   onMerged,
   headerLeading,
-  headerBelow,
   headerActions,
+  footer,
   className,
   style,
+  listStyle,
   footerSpacing = false,
 }: PullRequestListProps) {
   const groups = groupPullRequestsByRepository(pullRequests, view);
@@ -237,9 +243,7 @@ export function PullRequestList({
         {headerActions}
       </header>
 
-      {headerBelow}
-
-      <div className="flex-1 overflow-y-auto overscroll-contain">
+      <div className="flex-1 overflow-y-auto overscroll-contain" style={listStyle}>
         {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 
         {failedRepositories.length > 0 && (
@@ -292,6 +296,8 @@ export function PullRequestList({
 
         {footerSpacing && <div className="h-14" aria-hidden="true" />}
       </div>
+
+      {footer}
     </div>
   );
 }
