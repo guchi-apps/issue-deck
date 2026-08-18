@@ -160,8 +160,9 @@ export function MobileHomeScreen({
               <DispatchHostPanel
                 hosts={dispatch.hosts}
                 sessions={dispatch.sessions}
+                jobs={dispatch.jobs}
                 onOpenIssue={onOpenIssue}
-                onRequestSelfUpdate={(hostName) => void dispatch.requestSelfUpdate(hostName)}
+                onRequestSelfUpdate={dispatch.requestSelfUpdate}
               />
             </div>
           )}

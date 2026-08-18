@@ -1,4 +1,4 @@
-import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
 /**
@@ -12,9 +12,11 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
  * **どちらもマージ済みなのに一度も効いていなかった**（worktreeで`--dry-run`すると直って
  * 見えるため、実機との差にも気付けない）。
  *
- * **足すのは計器だけで、pollerに`git pull`はさせない**（`docs/multi-agent/gates.md`
+ * **足すのは計器だけで、pollerに自分から`git pull`はさせない**（`docs/multi-agent/gates.md`
  * 「監督のための役は新設しない」）。レビューを経ていないコードが無人で走り出す形にはせず、
- * 「遅れている」という事実だけを画面へ出して、取り込むかどうかは人が決める。
+ * 「遅れている」という事実だけを画面へ出して、取り込むかどうかは人が決める。**人が押した
+ * ときだけ更新する経路（#1875の「更新して再起動」）はこの取り決めを崩さない**ので、
+ * 押した結果の見せ方（`describeDispatchHostSelfUpdate`・#1927）もここに置く。
  *
  * **`agentVersion`とは別物。** あちらは約束を変えたときに手で上げるプロトコル版数で、
  * チェックアウトの鮮度とは無関係（実際、版数が同じまま97コミット遅れていた）。
@@ -166,5 +168,65 @@ export function describeDispatchHostCheckout(
     status: `${checkout.behindCount}コミット遅れ`,
     detail,
     tone: checkout.behindCount >= CRITICAL_BEHIND_COUNT ? "critical" : "warn",
+  };
+}
+
+/**
+ * 終わった更新をボタンの下に出し続ける時間（#1927）。
+ *
+ * 終了したジョブは24時間ぶん画面へ返るため（`listDispatchState`）、そのまま出すと翌日まで
+ * 「更新しました」が残る。**押した直後の答えとして読める間だけ**出す。届くまで最大30秒
+ * （ポーリング間隔）＋`git pull`と入れ替えで数十秒あるので、その数倍を取ってある。
+ */
+const SELF_UPDATE_RESULT_WINDOW_MS = 10 * 60 * 1000;
+
+/** 押した「更新して再起動」がいまどうなっているか（#1927） */
+export type DispatchHostSelfUpdateRow = {
+  /** そのまま出す1行。失敗の理由（pollerが返した`message`）もここに入る */
+  label: string;
+  tone: DispatchHostCheckoutTone;
+  /** まだ結果が出ていない（届くのを待っている）。押し直させないために使う */
+  pending: boolean;
+};
+
+/**
+ * 積んだチェックアウトの更新の状態を、ボタンの下の1行へ直す。出すものが無ければ`null`。
+ *
+ * **押した結果を出す場所がここしか無い**（#1927）。`SELF_UPDATE`は起動ジョブでも制御ジョブでも
+ * ないため実行キューの一覧に一切出ず、pollerが返した失敗（例:「作業ツリーに未コミットの変更が
+ * あります」）は画面のどこにも現れないまま24時間で消えていた。押した本人が見ているのはホストの
+ * カードなので、そこへ返す。
+ *
+ * **pull型で届くまで最大30秒かかる**ため、`QUEUED`の間も「積んだ」ことだけは出す
+ * （制御ジョブを一覧に出しているのと同じ理由。「押したのに何も起きない」に見せない）。
+ */
+export function describeDispatchHostSelfUpdate(
+  job: DispatchJobView | null,
+  now: Date = new Date(),
+): DispatchHostSelfUpdateRow | null {
+  if (!job) return null;
+
+  if (job.status === "QUEUED") {
+    return { label: "更新を積みました（届くまで最大30秒）", tone: "normal", pending: true };
+  }
+  if (job.status === "CLAIMED" || job.status === "RUNNING") {
+    return { label: "更新しています", tone: "normal", pending: true };
+  }
+
+  const finishedAt = job.finishedAt ? new Date(job.finishedAt).getTime() : null;
+  if (finishedAt === null || now.getTime() - finishedAt > SELF_UPDATE_RESULT_WINDOW_MS) return null;
+
+  if (job.status === "SUCCEEDED") {
+    // pollerの`message`をそのまま出す（「7b71764 → fbb809d へ更新しました。再起動します。」）。
+    // ここで言い換えると、journaldに残る文言と画面の文言が食い違う
+    return { label: job.message ?? "更新しました。", tone: "normal", pending: false };
+  }
+  if (job.status === "CANCELED") {
+    return { label: "更新を取り消しました。", tone: "normal", pending: false };
+  }
+  return {
+    label: `更新できませんでした: ${job.message ?? "理由が返っていません。"}`,
+    tone: "critical",
+    pending: false,
   };
 }

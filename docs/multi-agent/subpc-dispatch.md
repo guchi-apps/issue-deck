@@ -1675,12 +1675,64 @@ systemctl --user restart issue-deck-dispatch-poller.service
 - 遅れの数え直しは人が手で`git pull`しても反映される（判断材料は`.git/FETCH_HEAD`のmtime）
 - journaldにも毎巡出る（`申告しました: subpc（セッション 3/12・スクリプト develop fbb809d（97コミット遅れ））`）
 
-**pollerに`git pull`はさせていない**（[gates.md](gates.md)）。レビューを経ていないコードが無人で
-走り出す形にはせず、計器を1つ増やすにとどめてある。取り込むのは上のコマンドで人が行う。
+**pollerが自分から`git pull`することはない**（[gates.md](gates.md)）。レビューを経ていないコードが
+無人で走り出す形にはしない。取り込むのは人が決めることで、上のコマンドを手で打つか、次の
+「更新して再起動」を押すかのどちらか。
 
 `agentVersion`（`DISPATCH_POLLER_VERSION`）とは別物であることに注意する。あちらは約束を変えた
 ときに手で上げるプロトコル版数で、チェックアウトの鮮度とは無関係（実際、版数が同じまま
 97コミット遅れていた）。
+
+### 画面から更新して再起動する（#1875）
+
+遅れている行の下に「更新して再起動」を出し、押すと`SELF_UPDATE`のジョブが積まれる。受け取った
+pollerは`git pull --ff-only`してから自分を新しいスクリプトへ入れ替える。`ssh`して
+`git pull && systemctl --user restart`するだけの手作業Issue（#1858・#1867）をなくすためのもので、
+**押すのは人**という一点は#1612から変えていない。
+
+- **遅れているときだけ出す。** 最新の状態で押しても再起動が走るだけで、そのぶん払い出しが止まる
+- **`selfUpdate`を申告したpollerにだけ出す**（配っても未知の種別として失敗するだけ）
+- **作業ツリーが汚れていたら触らない。** 手で試した変更を巻き込んで消しうるため、
+  失敗として人へ返す。`--ff-only`なので分岐していても失敗する
+- ジョブは`activeKey`（`self_update:host:<ホスト名>`）で1件に絞る。連打しても積み上がらない
+
+#### Issue番号を持たないジョブは、Issue番号の検証より前で捌く（#1927）
+
+`SELF_UPDATE`は**Issueに紐づかない**ため`guchi-apps/issue-deck #0`という埋め草で積まれる。
+pollerの`run_job`は種別を見る前に`local_session_validate_target`（多層防御）を通しており、
+あちらはIssue番号に`^[1-9][0-9]*$`を求めるため、**この種別は届いた全件が「Issue番号が不正です」で
+失敗していた**。#1875から#1927までの間、ボタンは一度も働いていない。
+
+見つけるのに時間がかかったのは、**失敗がどこにも出なかった**ため。
+
+- pollerのjournaldには`ジョブ <id>: guchi-apps/issue-deck #0（SELF_UPDATE）`の1行しか出ない
+  （検証の失敗は`2>/dev/null`、`report_job`は成功しても何も出さない）
+- issue-deckの画面にも出ない。`SELF_UPDATE`は起動ジョブでも制御ジョブでもないため、
+  実行キューの`running`・`queued`・`failed`・`controls`のどれにも入らない
+  （`summarizeDispatchQueue`）
+
+そのため#1927では**押した結果をホストのカードへ返す**ようにしてある（積んだ／届いた／失敗の理由）。
+Issueに紐づかない種別をこの先足すときは、**検証より前に捌く**か、検証をその種別で分ける。
+
+#### 更新の再起動でセッションを巻き添えにしない（#1927）
+
+unitは既定の`KillMode=control-group`で、**pollerが起こしたtmuxサーバーと実装セッションは
+pollerと同じcgroupに入る**。mainプロセスが終わるとsystemdは停止処理としてcgroupの残り全員に
+SIGTERMを送るため、`exit`して`Restart=always`に拾わせる形だと、更新のたびに走っている
+実装セッションが全部落ちる（2026-08-18の`systemctl --user restart`では6本→0本になっている）。
+
+そこで更新後は終了せず、**同じPIDのまま`exec`で新しいスクリプトへ入れ替える**。systemdから見て
+何も起きていないので停止処理は走らず、セッションはそのまま生き続ける。
+
+```bash
+exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
+```
+
+pullが`git`のrename（新しいinode）で入るため、実行中のbashが読んでいるファイルは差し替わらない。
+`exec`まで到達してから新しい版が読まれる。
+
+> **`systemctl --user restart`で人が再起動する場合は、いまも実装セッションが巻き添えになる。**
+> 走っているセッションが無いことを確かめてから打つ。
 
 ## ログをどこで見るか
 
