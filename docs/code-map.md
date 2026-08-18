@@ -284,6 +284,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   折り返さない長い文字列（畳んだ本文に出る画像URL等）が1つあるだけで列がその幅まで広がり、
   `w-full`の項目とフッターのボタンがまとめて画面外へ出る。スマホ幅で顕在化するが、
   原因は幅ではなく列の伸び方なので、幅の指定を足しても直らない。
+- **「読み込み中」と「読み込めなかった」は、どちらも画面が名乗る**（#1978）。ホーム画面から
+  起動したPWAにはタブもアドレスバーも無く、白いまま止まった画面が遅いのか終わっているのかを
+  外から知る手段が無い。全画面のローディング（`AppLoadingScreen`）とスケルトンに重ねる帯
+  （`LoadingStatusPill`）は[`components/loading-screen.tsx`](../src/components/loading-screen.tsx)、
+  失敗したときの画面は[`components/app-error-screen.tsx`](../src/components/app-error-screen.tsx)に
+  あり、`app/loading.tsx`・`app/dashboard/loading.tsx`・`app/error.tsx`・`app/global-error.tsx`が
+  それぞれを差し込む。**待ち時間で文言を変える判断は
+  [`lib/loading-screen-message.ts`](../src/lib/loading-screen-message.ts)だけが持つ**——
+  全画面と帯で同じ区切り・同じ言い回しにするためで、コンポーネント側でしきい値を書かない。
+  進捗率は出さない（サーバー側から分からないため、止まった数字は止まったアプリに見える）。
+  **エラー画面はSSRのHTMLには出ず、クライアントで描かれる**ので、`curl`では確認できない
+  （レンダリングテストか実ブラウザで見る）。
+- **ホーム画面から起動する先は`/dashboard`**（`app/manifest.ts`の`start_url`。#1978）。
+  `/`は`redirect("/dashboard")`するだけの通過点で、以前のように`/login`へ送ると
+  middlewareが`/dashboard`へ折り返し、認証の確認を含む往復が毎回1回余計に増える。
 
 ## `middleware.ts` は無い。`src/proxy.ts` を見る
 

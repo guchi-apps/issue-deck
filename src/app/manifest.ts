@@ -5,7 +5,10 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "IssueDeck",
     short_name: "IssueDeck",
     description: "複数のGitHubリポジトリのIssueを横断して確認・整理できるWebアプリ",
-    start_url: "/",
+    // ホーム画面のアイコンから開く先。"/"はリダイレクトを1回挟むぶん起動が遅く、
+    // その間は白い画面になるため直接ダッシュボードを開く（#1978）。未ログインなら
+    // middlewareがログイン画面へ送る。
+    start_url: "/dashboard",
     display: "standalone",
     background_color: "#ffffff",
     theme_color: "#171717",
