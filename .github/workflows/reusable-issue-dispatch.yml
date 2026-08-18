@@ -79,7 +79,7 @@ name: Claude Issue Dispatch (reusable)
 #      例外)。1がラベル付け替えの順序次第ですり抜けるケースを、人間が明示的に立てる停止フラグで
 #      塞ぐ。順番待ち中に付与された場合もdispatchジョブの陳腐化チェックで拾って中止する。
 #
-# issue-detail.tsx等の「Claudeに質問する」ダイアログ(src/lib/github/ask-claude.ts)が投稿する
+# issue-detail.tsx等の「質問する」ボタン(src/lib/github/ask-claude.ts)が投稿する
 # 質問コメントは、コード変更を伴わない読み取り専用の質問応答(mode=ask)として
 # 扱う。実装状況(実装中・承認待ち・PR作成後・クローズ済み等、上記いずれの状態でも)によらず常に
 # 最優先で割り込み、ラベル変更・ブランチ作成・コミット・PR作成は一切行わずIssueへの回答コメントの
@@ -437,7 +437,7 @@ jobs:
           echo "$LABELS" | grep -qx "23.preview-required" && PREVIEW_REQUIRED=true
           echo "preview_required=$PREVIEW_REQUIRED" >> "$GITHUB_OUTPUT"
 
-          # issue-detail.tsx等の「Claudeに質問する」ダイアログ（src/lib/github/ask-claude.ts）が
+          # issue-detail.tsx等の「質問する」ボタン（src/lib/github/ask-claude.ts）が
           # 投稿した質問コメントかを判定する。該当する場合、実装状況（実装中・承認待ち・PR作成後等）
           # によらず常に最優先で読み取り専用の質問応答モード(mode=ask)へ割り込む。
           #
@@ -471,7 +471,7 @@ jobs:
             # 人間が明示的に立てる停止フラグ。下記のunlabeledガードが状態依存で取りこぼす
             # (例: ローカル側が進捗をImplementationへ進める前に00.check-userを外した場合)ケースも塞ぐ。
             #
-            # mode=ask(「Claudeに質問する」ダイアログ)だけは上の分岐で先に確定させて許可する。
+            # mode=ask(「質問する」ボタン)だけは上の分岐で先に確定させて許可する。
             # 読み取り専用でブランチにもラベル状態にも触れず、人間がその場で明示的に投げた質問で
             # あるため、ローカル作業と競合しない。
             MODE=skip
@@ -1755,7 +1755,7 @@ jobs:
           # 末尾は`<!-- issue-deck-fallback-notice -->`にする。src/lib/github/fallback-notice.tsが
           # **本文の最終行での一致**だけをフォールバック通知と認め、画面はこれをエラー通知ボット
           # （赤）として表示する。あわせて画面の「Claudeの回答待ち」表示もここで解除される。
-          FALLBACK_BODY=$'⚠️ 質問への回答を投稿できませんでした。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、もう一度「Claudeに質問する」から質問し直してください。'
+          FALLBACK_BODY=$'⚠️ 質問への回答を投稿できませんでした。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、Issue詳細のコメント欄の下にある「質問する」から質問し直してください。'
           FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 

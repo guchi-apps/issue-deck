@@ -425,3 +425,25 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
     });
   });
 });
+
+/**
+ * 質問の導線をコメント欄の下の「質問する」へ一本化した（#1913）。ヘッダーの
+ * 「Claudeに質問する」は投稿されるコメントが同一で、押した結果が変わらなかった
+ */
+describe("質問の導線（#1913）", () => {
+  it("ヘッダーに「Claudeに質問する」は出ない", () => {
+    renderDetail(buildIssue());
+    expect(screen.queryByRole("button", { name: "Claudeに質問する" })).toBeNull();
+  });
+
+  it("コメント欄の下の「質問する」は残る", () => {
+    renderDetail(buildIssue());
+    expect(within(composer()).getByRole("button", { name: "質問する" })).toBeTruthy();
+  });
+
+  it("スマホも同じ（⋯メニューから消し、コメント欄の下だけに残す）", () => {
+    renderMobileDetail(buildIssue());
+    expect(screen.queryByText("Claudeに質問する")).toBeNull();
+    expect(within(composer()).getByRole("button", { name: "質問する" })).toBeTruthy();
+  });
+});

@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
-import { AskClaudeDialog } from "@/components/dashboard/ask-claude-dialog";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
@@ -189,9 +188,6 @@ export function MobileIssueDetail({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
-  // 「Claudeに質問する」は⋯メニューから開くので、開閉はここで持つ（#1646）。
-  // `DropdownMenuItem`をトリガーにすると、メニューが閉じた時点でダイアログごと消える
-  const [isAskDialogOpen, setIsAskDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
   // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
@@ -551,7 +547,8 @@ export function MobileIssueDetail({
             必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
             タイトルに120pxしか残らなかった。どちらも操作自体は消さず、▶は本文のボタンへ一本化し、
             ?と「回答を確認してクローズ」は下の⋯メニューへ移した（後者はコメント欄の下にも
-            出す。#1770）。
+            出す。#1770）。その後、?（Claudeに質問する）はコメント欄の下の「質問する」と
+            投稿されるコメントが同一だったため、⋯メニューからも外した（#1913）。
             マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
         <button
           type="button"
@@ -576,16 +573,8 @@ export function MobileIssueDetail({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-0">
-            {/* ヘッダーから移した2つ（#1646）。先頭へ置き、押す回数の多い順を保つ */}
-            {canAskClaude(issue) && (
-              <DropdownMenuItem
-                className="whitespace-nowrap text-xs"
-                onSelect={() => setIsAskDialogOpen(true)}
-              >
-                <MessageCircleQuestion className="size-3.5" />
-                Claudeに質問する
-              </DropdownMenuItem>
-            )}
+            {/* ヘッダーから移した「回答を確認してクローズ」（#1646）。先頭へ置き、押す回数の
+                多い順を保つ */}
             {canCloseQuestion && (
               <DropdownMenuItem
                 className="whitespace-nowrap text-xs"
@@ -963,9 +952,12 @@ export function MobileIssueDetail({
                   引き継いでIssueを作成
                 </Button>
               )}
+              {/* ⋯メニューの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
+                  ここへ引き継ぐ（#1913） */}
               {canAskClaude(issue) && (
                 <Button
                   variant="outline"
+                  title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
                   onClick={handleAskClaudeFromComposer}
                   disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
                 >
@@ -1034,15 +1026,6 @@ export function MobileIssueDetail({
         issue={issue}
         open={isSummaryDialogOpen}
         onOpenChange={setIsSummaryDialogOpen}
-      />
-
-      {/* トリガーは⋯メニューの項目なので、ここではダイアログ本体だけを置く（#1646） */}
-      <AskClaudeDialog
-        issue={issue}
-        open={isAskDialogOpen}
-        onOpenChange={setIsAskDialogOpen}
-        onIssueUpdated={onIssueUpdated}
-        onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
       />
     </div>
   );

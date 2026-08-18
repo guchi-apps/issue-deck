@@ -41,7 +41,7 @@ type WorkflowStepBadgeProps = ProgressProps & {
    */
   running?: { isRunning: boolean; currentStep: string | null; runId?: number | null };
   /**
-   * 「Claudeに質問する」ダイアログ経由の質問コメントが投稿済みで、まだ回答コメントが
+   * 「質問する」ボタン経由の質問コメントが投稿済みで、まだ回答コメントが
    * 投稿されていない状態かどうか（@/lib/github/ask-claudeのisQaAnswerPending相当）
    */
   qaAnswerPending?: boolean;
