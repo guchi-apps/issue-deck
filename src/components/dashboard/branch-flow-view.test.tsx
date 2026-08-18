@@ -102,8 +102,8 @@ function openRepository() {
 }
 
 /**
- * 中身が開いた状態にする。**手が要るリポジトリ（CI失敗・マージ待ち・リリース中）は初回に
- * 自動で開く**ため、そこで`openRepository`を呼ぶと逆に閉じてしまう（#1548）。
+ * 中身が開いた状態にする。自動展開は無くなった（#1932）ので通常は`openRepository`と同じだが、
+ * 開閉の既定が変わっても呼び出し側のテストが壊れないようにこの形で残す。
  */
 function ensureRepositoryOpen() {
   const row = screen.getByText(REPO_SHORT).closest("button");
@@ -168,7 +168,7 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
-    it("CIが失敗しているリポジトリは最初から開いておく", () => {
+    it("CIが失敗しているリポジトリも畳んだまま並べる（#1932）", () => {
       renderFlow({
         pullRequests: [
           makePullRequest({ number: 1461, headRef: "issue-1454", ciState: "failure" }),
@@ -178,13 +178,16 @@ describe("BranchFlowView", () => {
         ],
       });
 
-      // サマリー行のピルと、開いた先のPR行のCI状態の両方に出る
-      expect(screen.getAllByText("CI失敗").length).toBeGreaterThan(0);
-      expect(screen.getByText("issue-1454")).toBeTruthy();
+      // 手が要ることは畳んだ行のピルとヘッダーの件数が伝える（開くのはユーザーの操作）
+      expect(screen.getByText("CI失敗")).toBeTruthy();
       expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+      expect(screen.queryByText("issue-1454")).toBeNull();
+
+      openRepository();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
     });
 
-    it("ユーザーのマージを待っているリポジトリも最初から開く", () => {
+    it("ユーザーのマージを待っているリポジトリも畳んだまま並べる（#1932）", () => {
       renderFlow({
         pullRequests: [
           makePullRequest({
@@ -200,7 +203,7 @@ describe("BranchFlowView", () => {
       });
 
       expect(screen.getByText("ユーザーのマージが必要")).toBeTruthy();
-      expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
     it("動きの無いリポジトリも1行で並べる", () => {
@@ -1292,10 +1295,10 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("リリース済みのバージョンを読み込み中...")).toBeNull();
     });
 
-    it("取得が揃ってから、手が要るリポジトリを自動で開く（#1711）", () => {
+    it("手が要るリポジトリでも自動で開かない（#1932）", () => {
       const flow = buildBranchFlow({
         repositories: [{ fullName: REPO, private: false }],
-        // CIが落ちている＝手が要る。ただし判定材料が揃うまでは開かない
+        // CIが落ちている＝手が要る。以前（#1711）はこの条件で自動展開していた
         pullRequests: [makePullRequest({ number: 940, ciState: "failure" })],
         issues: [],
         branchStatuses: [branchStatus()],
@@ -1314,7 +1317,13 @@ describe("BranchFlowView", () => {
         "false",
       );
 
+      // マージ済みPRまで揃っても畳んだまま。開くのはユーザーの操作だけ
       rerender(<BranchFlowView {...props} mergedPullRequestsLoaded />);
+      expect(screen.getByText(REPO_SHORT).closest("button")?.getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+
+      openRepository();
       expect(screen.getByText(REPO_SHORT).closest("button")?.getAttribute("aria-expanded")).toBe(
         "true",
       );
