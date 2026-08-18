@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, CircleStop, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, CircleStop, Loader2, X } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
+import { RefreshIndicatorButton } from "@/components/dashboard/refresh-indicator-button";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
-import { useNow } from "@/hooks/use-now";
 import {
   describeDispatchJobKind,
   describeDispatchJobStatus,
@@ -14,11 +14,6 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import {
-  describeDispatchQueueRefresh,
-  describeDispatchQueueRefreshHint,
-  type DispatchQueueRefreshTone,
-} from "@/lib/dispatch/queue-refresh";
 import {
   cancelableDispatchJobs,
   describeDispatchQueueLoad,
@@ -217,49 +212,21 @@ export function DispatchQueueContent({
 }
 
 /**
- * 古さの配色（#1773）。ホストの使用率・チェックアウトの鮮度（`dispatch-host-panel.tsx`）と
- * 同じ色を同じ意味で使う。
- */
-const REFRESH_TONE_CLASS: Record<DispatchQueueRefreshTone, string> = {
-  normal: "text-muted-foreground",
-  warn: "text-amber-700 dark:text-amber-400",
-};
-
-/**
  * いつ時点の内容かを出し、押すと取り直す1行（#1773）。
  *
- * **経過の数え上げ（1秒ごと）をこの行だけに閉じ込めるため、独立したコンポーネントにしてある。**
- * `DispatchQueueContent`の側で`useNow`を呼ぶと、キュー全体（ホストの様子・全ジョブの行）が
- * 毎秒描き直される。**ポップオーバー・シートは閉じている間そもそも描かれない**ので、
- * この毎秒の更新が走るのは開いている間だけ。
- *
- * 取得中のアイコンの回転は、PR一覧の更新ボタン（`pull-request-list.tsx`）と同じ書き方に揃える。
+ * **ボタン本体は通知ベルと共通**（`refresh-indicator-button.tsx`。#1909）。ここが持つのは
+ * 右端へ寄せる置き方と、何を更新するのかを表す名前だけ。
  */
 function QueueRefreshRow({ dispatch }: { dispatch: DispatchStateHandle }) {
-  const now = useNow(1_000);
-  const { label, tone } = describeDispatchQueueRefresh({
-    fetchedAt: dispatch.fetchedAt,
-    nowMs: now,
-    isFetching: dispatch.isFetching,
-    pollIntervalMs: dispatch.pollIntervalMs,
-  });
-
   return (
     <div className="mb-1 flex justify-end">
-      <button
-        type="button"
-        aria-label="実行キューを今すぐ更新"
-        title={describeDispatchQueueRefreshHint(dispatch.pollIntervalMs)}
-        className={cn(
-          // 秒が変わるたびに文字幅が動かないよう桁を固定する
-          "flex items-center gap-1 rounded px-1 py-0.5 text-[11px] tabular-nums hover:bg-accent hover:text-foreground",
-          REFRESH_TONE_CLASS[tone],
-        )}
-        onClick={dispatch.refresh}
-      >
-        <RefreshCw className={cn("size-3 shrink-0", dispatch.isFetching && "animate-spin")} />
-        {label}
-      </button>
+      <RefreshIndicatorButton
+        fetchedAt={dispatch.fetchedAt}
+        isFetching={dispatch.isFetching}
+        pollIntervalMs={dispatch.pollIntervalMs}
+        onRefresh={dispatch.refresh}
+        label="実行キューを今すぐ更新"
+      />
     </div>
   );
 }

@@ -372,7 +372,7 @@ export function IssueDeckShell({
     pullRequestAutoRefreshIntervalMs,
   );
 
-  useIssuePolling((polledIssues) => {
+  const issuePolling = useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);
 
     // 画面を開いている間に、新たに00.check-userラベルが付与されたIssueをトーストで知らせる
@@ -945,11 +945,16 @@ export function IssueDeckShell({
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
-          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る */}
+          リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
+          ベルを開いている間の取り直し（#1909）もここが持つ取得口を使い回す——ベル専用の
+          取得口を足すと、同じIssue・PRを2本のポーリングで取りに行くことになる */}
       <NotificationProvider
         repositories={repositories}
         issues={issues}
         pullRequests={crossRepositoryPullRequests}
+        onRefreshIssues={issuePolling.refresh}
+        onRefreshPullRequests={openPullRequests.refreshInBackground}
+        isRefreshingPullRequests={openPullRequests.isRefreshing}
       >
       <div className="flex h-full flex-col">
         <TopBar

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import {
@@ -14,13 +14,38 @@ import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 
+/**
+ * ベルを開いている間の再取得間隔（#1909）。
+ *
+ * **開いている間だけ**で、閉じれば止まる。閉じている間のバックグラウンド再取得は従来どおり
+ * 5分間隔（`use-repository-release-statuses.ts`）で、こちらは「開いて見ている人が、放って
+ * おいても変化に気づける」ための間隔。実行キュー（5秒／20秒。叩き先はDBのみ）より長いのは、
+ * 1巡でリリース状況（リポジトリ横断）とPull Request一覧を取り直すため。
+ */
+const POLL_INTERVAL_MS = 30_000;
+
+/**
+ * 取得中の表示（アイコンの回転）を保つ下限（#1773と同じ理由）。素直に「取得している間だけ」に
+ * すると、速く返ったときに回転が1周もせず点滅にしか見えない。
+ */
+const MIN_FETCHING_MS = 500;
+
 type NotificationState = {
   items: NotificationItem[];
   groups: { group: NotificationGroup; items: NotificationItem[] }[];
   /** 1件でも失敗が混ざっているか（バッジを赤にする条件） */
   hasError: boolean;
-  /** ベルを開いたときの取り直し。バックグラウンドの再取得は5分間隔のため */
-  refetch: () => void;
+  /**
+   * ベルの材料（リリース状況・Issue一覧・Pull Request一覧）をまとめて取り直す（#1909）。
+   * 開いている間の自動更新と、右上の更新ボタンの両方がこれを呼ぶ。
+   */
+  refresh: () => void;
+  /** 取得が飛んでいる間。自動更新でも真になる（更新アイコンを回すため） */
+  isFetching: boolean;
+  /** 最後に取得できた時刻（epoch ms）。まだ一度も取れていなければnull */
+  fetchedAt: number | null;
+  /** 開いている間の自動更新の間隔。文言（「30秒ごと」）と古さの判定にも使う */
+  pollIntervalMs: number;
   /**
    * 通知の材料そのもの。スマホのベルが遷移に使う`useMobileScreen`が要求するため配る
    * （現在地の解決に一覧が要る）。表示には使わない。
@@ -33,7 +58,10 @@ const EMPTY_STATE: NotificationState = {
   items: [],
   groups: [],
   hasError: false,
-  refetch: () => {},
+  refresh: () => {},
+  isFetching: false,
+  fetchedAt: null,
+  pollIntervalMs: POLL_INTERVAL_MS,
   issues: [],
   repositories: [],
 };
@@ -50,9 +78,14 @@ const NotificationStateContext = createContext<NotificationState>(EMPTY_STATE);
  * mountされたままだからで、どちらのレイアウトを見ているかはJS側からは判別できない
  * （`use-reference-navigation.ts`と同じ事情）。
  *
- * **追加のGitHub API消費はゼロ。** Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
- * リリース状況の取得は従来どおり1本のまま。何を通知にするかの判定は`lib/notifications.ts`
- * （純粋関数）にある。
+ * **取り直しもここが持つ**（#1909）。ベルの中身は3つの取得口（リリース状況・Issue一覧・
+ * Pull Request一覧）から組み立てているので、「対応が必要なものを取り直す」を1つの操作として
+ * 出すには、3つをまとめて呼べる場所が要る。開いている間の自動更新も右上の更新ボタンも
+ * これを呼ぶ。
+ *
+ * **開いていない間は何も増やさない。** 自動更新を回すのはベルの中身の側
+ * （`notification-refresh-button.tsx`）で、ポップオーバー・シートは閉じている間そもそも
+ * 描かれない。
  *
  * **Providerの外では0件を返す。** ベルを置いたスマホの各画面は画面単体でテストしており、
  * Providerを必須にすると、ベルを足した画面のテストがすべてProviderのラップを要求される。
@@ -61,12 +94,30 @@ export function NotificationProvider({
   repositories,
   issues,
   pullRequests,
+  onRefreshIssues,
+  onRefreshPullRequests,
+  isRefreshingPullRequests = false,
   children,
 }: {
   repositories: ConnectedRepository[];
   issues: Issue[];
   /** リポジトリ横断のPR。TopBarの絞り込みは適用しない（#1750） */
   pullRequests: PullRequestSummary[];
+  /**
+   * Issue一覧の取り直し（#1909）。取得できたかを返す——失敗を成功として数えると、
+   * 取れていないのに「たった今更新」と出てしまう。渡さない場合はIssueを取り直さない
+   * （10秒ごとのポーリングに任せる）。
+   */
+  onRefreshIssues?: () => Promise<boolean>;
+  /**
+   * Pull Request一覧の取り直し（#1909）。**これだけは投げっぱなし**で、取得の完了は
+   * `isRefreshingPullRequests`で見る（`usePullRequests`が待てる形を返していないため）。
+   *
+   * 渡すのは自動更新と同じ扱いの`refreshInBackground`。`refresh`だと後ろに開いているPR一覧が
+   * 30秒ごとに「読み込み中...」へ戻る。
+   */
+  onRefreshPullRequests?: () => void;
+  isRefreshingPullRequests?: boolean;
   children: ReactNode;
 }) {
   // 連携しているリポジトリが1件でもあれば取りに行く（スマホのリポジトリ一覧と同じ条件）。
@@ -77,17 +128,60 @@ export function NotificationProvider({
   const hasConnectedRepository = repositories.length > 0;
   const { data: releaseStatuses, refetch } = useRepositoryReleaseStatuses(hasConnectedRepository);
 
+  const [isSelfFetching, setIsSelfFetching] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  // 前の取得が飛んでいる間は次を投げない（遅い応答が重なるとGitHub APIを無駄に消費する）
+  const inFlightRef = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setIsSelfFetching(true);
+    const startedAt = Date.now();
+    try {
+      const [releaseOk, issuesOk] = await Promise.all([
+        // 連携リポジトリが無ければそもそも取りに行っていないので、取れた扱いにする
+        hasConnectedRepository ? refetch().then((data) => data !== null) : Promise.resolve(true),
+        onRefreshIssues ? onRefreshIssues() : Promise.resolve(true),
+      ]);
+      onRefreshPullRequests?.();
+      // **取れなかった周は`fetchedAt`を進めない**（#1773と同じ）。進めると、取れていないのに
+      // 「たった今更新」と出て、古いまま固まっていることに気づけない
+      if (releaseOk && issuesOk) setFetchedAt(Date.now());
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_FETCHING_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_FETCHING_MS - elapsed));
+      }
+    } finally {
+      inFlightRef.current = false;
+      setIsSelfFetching(false);
+    }
+  }, [hasConnectedRepository, refetch, onRefreshIssues, onRefreshPullRequests]);
+
   const value = useMemo<NotificationState>(() => {
     const items = buildNotifications({ issues, pullRequests, releaseStatuses });
     return {
       items,
       groups: groupNotifications(items),
       hasError: hasErrorNotification(items),
-      refetch: () => void refetch(),
+      refresh: () => void refresh(),
+      // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
+      isFetching: isSelfFetching || isRefreshingPullRequests,
+      fetchedAt,
+      pollIntervalMs: POLL_INTERVAL_MS,
       issues,
       repositories,
     };
-  }, [issues, repositories, pullRequests, releaseStatuses, refetch]);
+  }, [
+    issues,
+    repositories,
+    pullRequests,
+    releaseStatuses,
+    refresh,
+    isSelfFetching,
+    isRefreshingPullRequests,
+    fetchedAt,
+  ]);
 
   return (
     <NotificationStateContext.Provider value={value}>{children}</NotificationStateContext.Provider>
