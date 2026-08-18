@@ -96,7 +96,9 @@ set -euo pipefail
 # 11: 手作業の代行実行（`MANUAL_STEP`）を、GitHubの本文と照合してから実行する（#1828）。
 # 12: 計画レビュー（`PLAN_REVIEW`）のセッションを起こす（#1855）。
 # 13: 走っている代行実行を止める（`MANUAL_STEP_ABORT`）（#1882）。
-DISPATCH_POLLER_VERSION="13"
+# 14: チェックアウトの更新（`SELF_UPDATE`）を実際に実行できるようにする（#1927）。13以前は
+#     `selfUpdate`を申告していても、埋め草のIssue番号`0`が検証で弾かれて全件失敗していた。
+DISPATCH_POLLER_VERSION="14"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -128,6 +130,9 @@ SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
 # worktreeの掃除（#1716）。**新しい常駐プロセスもsystemd timerも増やさず、この1巡に相乗りさせる。**
 # ただし上の2つと違い毎巡は呼ばず、`WORKTREE_CLEANUP_INTERVAL_MINUTES` の間隔で呼ぶ。
 WORKTREE_CLEANER="$SCRIPT_DIR/cleanup-worktrees.sh"
+
+# 起動時の引数。**チェックアウトの更新のあと`exec`で自分を入れ替えるときに渡し直す**（#1927）。
+POLLER_ARGV=("$@")
 
 ANNOUNCE_ONLY=0
 DRY_RUN=0
@@ -1304,8 +1309,15 @@ run_self_update_job() {
     report_job "$job_id" succeeded "$before → $after へ更新しました。再起動します。"
   fi
 
-  echo "更新を反映するため終了します（systemdが起動し直します）。"
-  exit 0
+  # **終了せず、`exec`で新しいスクリプトへ入れ替える**（#1927）。
+  #
+  # unitは既定の`KillMode=control-group`で、mainプロセスが終わるとsystemdは停止処理として
+  # **cgroupの残り全員にSIGTERMを送る**。このcgroupにはpollerが起こしたtmuxサーバーと
+  # 実装セッションが入っているため、`exit`で畳むと更新のたびに走っている実装セッションが
+  # 全部落ちる（2026-08-18の`systemctl --user restart`では6本→0本になっている）。
+  # 同じPIDのまま`exec`すればsystemdから見て何も起きておらず、停止処理も走らない。
+  echo "更新を反映するため、新しいスクリプトへ入れ替えます（同じプロセスのまま）。"
+  exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
 }
 
 run_manual_step_job() {
@@ -1442,6 +1454,19 @@ run_job() {
 
   echo "ジョブ $job_id: $full_name #$issue_number（$kind）"
 
+  # チェックアウトの更新（#1875）。**Issueに紐づかない**ため、owner/repo/issue_numberは
+  # 埋め草が入っている（issue-deck#0）。参照しない。
+  #
+  # **下の`local_session_validate_target`より前に置く**（#1927）。あちらはIssue番号に
+  # `^[1-9][0-9]*$`を求めるため、埋め草の`0`が必ず弾かれ、この種別は届いた全件が
+  # 「Issue番号が不正です」で失敗していた。画面の「更新して再起動」は押しても何も起きず、
+  # 失敗はキューのどこにも出ない（`SELF_UPDATE`は起動ジョブでも制御ジョブでもないため）ので、
+  # 効いていないことに気付く手掛かりが無かった。
+  if [[ "$kind" == "SELF_UPDATE" ]]; then
+    run_self_update_job "$job_id"
+    return 0
+  fi
+
   # 受け取った値をサブPC側でも検証する（多層防御）。issue-deck側で検証済みでも、
   # ここが最後にパス・シェル引数として使う場所なので改めて確かめる。
   if ! local_session_validate_target "$owner" "$repo" "$issue_number" 2>/dev/null; then
@@ -1504,13 +1529,6 @@ run_job() {
   # セッション名を組み立て直すのと同じ作法で、任意の`systemctl stop`を流す口にしない）。
   if [[ "$kind" == "MANUAL_STEP_ABORT" ]]; then
     abort_manual_step_job "$job_id" "$(printf '%s' "$job_json" | jq -r '.targetJobId // ""')"
-    return 0
-  fi
-
-  # チェックアウトの更新（#1875）。**Issueに紐づかない**ため、owner/repo/issue_numberは
-  # 埋め草が入っている（issue-deck#0）。参照しない。
-  if [[ "$kind" == "SELF_UPDATE" ]]; then
-    run_self_update_job "$job_id"
     return 0
   fi
 
