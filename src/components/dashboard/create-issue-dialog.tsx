@@ -352,6 +352,16 @@ export function CreateIssueDialog({
    * 押した本人から見えないまま実装フローに乗るためで、提案にとどめればその状態は作れない。
    */
   const [questionHint, setQuestionHint] = useState<QuestionHint | null>(null);
+  /**
+   * 提案を出したときに、そこまで画面を寄せるための参照（#1890）。
+   *
+   * **判定を起こすボタン（「タイトル・ラベルを付与」）はフッターにあり、提案を出す種別欄は
+   * フォームの先頭にある。** ダイアログは中身ごとスクロールする（`DialogContent`の
+   * `overflow-y-auto`）ため、本文が長いときやスマホ幅では、押した時点で種別欄は画面外にある。
+   * 提案が見えないまま作成まで進めると、#1641が避けたかった「押した本人から見えない」に戻る。
+   * `block: "nearest"`なので、すでに見えているときは動かない。
+   */
+  const questionHintRef = useRef<HTMLDivElement>(null);
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   /**
    * リポジトリを**人が選び直したか**（#1710・#1884）。`表示中のリポジトリ`バッジを消す判断に使う。
@@ -485,6 +495,12 @@ export function CreateIssueDialog({
       setAssignee(DEFAULT_ASSIGNEE);
     }
   }, [open, assignees]);
+
+  // 提案が出たら、押した人の視線がある場所からでも見えるところまで寄せる（#1890）
+  useEffect(() => {
+    if (questionHint?.phase !== "suggested") return;
+    questionHintRef.current?.scrollIntoView({ block: "nearest" });
+  }, [questionHint?.phase]);
 
   /**
    * 種別を切り替える。質問で選べないリポジトリを選んでいた場合は未選択へ戻す（#1641・#1884）。
@@ -749,9 +765,10 @@ export function CreateIssueDialog({
       )}
 
       <div className="flex flex-col gap-4">
-        {/* 種別（#1641）。**本文の内容からの自動判定は行わない。** 誤判定は押した本人から
+        {/* 種別（#1641）。**本文の内容で勝手に切り替えない。** 誤判定は押した本人から
             見えないまま、質問のつもりの本文が実装Issueとして無人実行に乗る（逆もある）
-            という取り返しの付きにくい間違いになるため、押した時点で確定する形にする */}
+            という取り返しの付きにくい間違いになるため、決めるのは押した人にする。
+            判定して「質問に切り替えますか」と提案するところまでは行う（下の`questionHint`・#1890） */}
         <div className="flex flex-col gap-1.5">
           <Label>種別</Label>
           <div className="flex gap-1.5">
@@ -783,7 +800,10 @@ export function CreateIssueDialog({
             離して置くと何が切り替わったのかが読めない。色は質問コメント
             （comment-thread.tsx）と揃えて青にし、画面をまたいで「青い囲み＝質問」で読めるようにする */}
         {questionHint?.phase === "suggested" && (
-          <div className="flex flex-col gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2.5">
+          <div
+            ref={questionHintRef}
+            className="flex flex-col gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2.5"
+          >
             <div className="flex flex-col gap-1">
               <span className="text-sm font-medium">内容から質問のようです</span>
               <p className="text-xs text-muted-foreground">

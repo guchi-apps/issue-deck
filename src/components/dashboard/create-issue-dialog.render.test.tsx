@@ -688,6 +688,20 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
   });
 
+  /**
+   * #1890。判定を起こす「タイトル・ラベルを付与」はフッターにあり、提案は先頭の種別欄の下に出る。
+   * ダイアログは中身ごとスクロールするため、寄せないと押した位置からは見えないことがある。
+   */
+  it("提案を出したら、その位置まで画面を寄せる", async () => {
+    const scrollIntoView = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(scrollIntoView);
+
+    await generateAsQuestion();
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    vi.restoreAllMocks();
+  });
+
   it("人が種別を押し直したら提案は降りる", async () => {
     await generateAsQuestion();
 
