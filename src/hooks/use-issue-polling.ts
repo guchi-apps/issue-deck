@@ -6,15 +6,21 @@ import type { Issue } from "@/types/issue";
 
 const POLL_INTERVAL_MS = 10_000;
 
+export type IssuePollingHandle = {
+  /**
+   * いますぐ取り直す。一覧を下へ引っ張ったとき（#1893）や、通知ベルを開いている間の
+   * 自動更新（`notification-state.tsx`、#1909）が使う。**ポーリングと違い
+   * `document.hidden`では止めない**——見ていない画面のための取得ではないため。
+   * 戻り値は取得できたかどうかで、呼んだ側が「いつ時点の内容か」を出すのに使う——
+   * 失敗を成功として数えると、取れていないのに「たった今更新」と出てしまう。
+   */
+  refresh: () => Promise<boolean>;
+};
+
 /**
  * Issue一覧をDBから取り直し続ける（叩き先は`GET /api/issues`で、GitHub APIは消費しない）。
- *
- * **`refresh`は「次の周期を待たずに取り直したい」側のためのもの**（#1909）。通知ベルを開いて
- * いる間の自動更新（`notification-state.tsx`）が使う。戻り値は取得できたかどうかで、
- * 呼んだ側が「いつ時点の内容か」を出すのに使う——失敗を成功として数えると、取れていないのに
- * 「たった今更新」と出てしまう。
  */
-export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
+export function useIssuePolling(onIssues: (issues: Issue[]) => void): IssuePollingHandle {
   const onIssuesRef = useRef(onIssues);
   const mountedRef = useRef(true);
 
@@ -29,7 +35,7 @@ export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
     };
   }, []);
 
-  const load = useCallback(async (): Promise<boolean> => {
+  const refresh = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch("/api/issues");
       if (!res.ok) return false;
@@ -45,7 +51,7 @@ export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
   useEffect(() => {
     function poll() {
       if (document.hidden) return;
-      void load();
+      void refresh();
     }
 
     const intervalId = setInterval(poll, POLL_INTERVAL_MS);
@@ -61,7 +67,7 @@ export function useIssuePolling(onIssues: (issues: Issue[]) => void) {
       clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [load]);
+  }, [refresh]);
 
-  return { refresh: load };
+  return { refresh };
 }

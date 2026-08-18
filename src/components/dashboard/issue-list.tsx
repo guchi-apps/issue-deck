@@ -15,6 +15,7 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  RotateCw,
   Star,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { useNow } from "@/hooks/use-now";
+import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
@@ -135,6 +137,11 @@ type IssueListProps = {
    * 取って両方へ配っている。省略時はこの一覧が自分で取りに行く（PCの一覧は従来どおり）。
    */
   dispatch?: DispatchStateHandle;
+  /**
+   * 一覧を下へ引っ張ったときに実行する更新（#1893）。**渡した画面でだけ有効になる。**
+   * 引っ張るという操作はタッチにしか無く、PCの一覧は渡さないので今までどおり。
+   */
+  onPullToRefresh?: () => Promise<unknown> | void;
 };
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
@@ -253,6 +260,7 @@ export function IssueList({
   issueOrderCount = 0,
   filtersIgnored = false,
   dispatch: injectedDispatch,
+  onPullToRefresh,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
@@ -321,6 +329,14 @@ export function IssueList({
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
+  // 引っ張って更新（#1893）。タッチを受けるのは一覧を包む枠で、スクロール位置は<ul>から見る
+  // （0件のときは<ul>ごと消えるため、<ul>に直接付けると空の一覧で引っ張れなくなる）
+  const pullContainerRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh({
+    containerRef: pullContainerRef,
+    scrollRef: listRef,
+    onRefresh: onPullToRefresh,
+  });
   const issueIds = useMemo(() => issues.map((issue) => issue.id), [issues]);
 
   // 一覧が再マウントされた直後（Issue詳細から戻ってきた等）に、直前まで見ていた位置へ戻す。
@@ -610,39 +626,82 @@ export function IssueList({
 
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが
           ドキュメント側へ伝播してヘッダー・フッターごと動くのを防ぐ（#607） */}
-      {issues.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-          該当するIssueがありません
-        </div>
-      ) : (
-        // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
-        // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
-        // offsetTopにヘッダー・タブの高さが含まれてしまう（実測で145pxずれる）。
-        // アンカーによる復元は保存時との差分を取るためこのずれが相殺されるが、保存済み位置が
-        // 無いときの中央寄せ（computeCenteredIssueListScrollTop）は生のoffsetTopを使うため、
-        // 基準を揃えないと同じ分だけ下にずれる。
-        <ul
-          ref={listRef}
-          className={cn(
-            "relative flex-1 overflow-y-auto overscroll-contain",
-            fabSpacing && "pb-20",
-          )}
-        >
-          {isGrouped
-            ? repoGroups!.flatMap((group) => [
-                <li key={`group-${group.repositoryFullName}`}>
-                  <GroupHeader group={group} />
-                </li>,
-                ...group.issues.map((issue) => renderIssueRow(issue, false)),
-              ])
-            : issues.map((issue) => renderIssueRow(issue, true))}
-          {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
-              兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
-              見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
-              保険として同じ高さの空白ボックスを追加する（#677） */}
-          {footerSpacing && <li aria-hidden className="h-14 shrink-0" />}
-        </ul>
-      )}
+      {/* 引っ張って更新（#1893）のタッチを受ける枠。**0件のときも枠は残す**——<ul>は0件で
+          消えるため、<ul>に直接付けると「該当するIssueがありません」の一覧を更新できない */}
+      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+        {pull.label && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center overflow-hidden"
+            style={{
+              height: pull.distance,
+              // 指の動きにはそのまま追従させ、離した後の戻りだけアニメーションさせる
+              transition: pull.isDragging ? "none" : "height 0.2s ease-out",
+            }}
+          >
+            <span
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs whitespace-nowrap text-muted-foreground shadow-sm",
+                // しきい値に届いた（離せば更新される）ことは、文言だけでなく色でも示す
+                (pull.phase === "ready" || pull.phase === "refreshing") &&
+                  "border-primary/30 bg-accent text-foreground",
+              )}
+            >
+              <RotateCw
+                className={cn("size-3.5", pull.phase === "refreshing" && "animate-spin")}
+                style={
+                  pull.phase === "refreshing"
+                    ? undefined
+                    : { transform: `rotate(${pull.arrowDegrees}deg)` }
+                }
+              />
+              {pull.label}
+            </span>
+          </div>
+        )}
+
+        {issues.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+            該当するIssueがありません
+          </div>
+        ) : (
+          // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
+          // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
+          // offsetTopにヘッダー・タブの高さが含まれてしまう（実測で145pxずれる）。
+          // アンカーによる復元は保存時との差分を取るためこのずれが相殺されるが、保存済み位置が
+          // 無いときの中央寄せ（computeCenteredIssueListScrollTop）は生のoffsetTopを使うため、
+          // 基準を揃えないと同じ分だけ下にずれる。
+          // flex-1・min-h-0は、包む枠（引っ張って更新のタッチを受ける枠）の中でも件数ぶんの
+          // 高さまで伸びず、残りを埋めるだけにするために要る（#1665と同じ理由）。
+          // transformはoffsetTopに影響しないため、引っ張りの追従は上の2つと両立する。
+          <ul
+            ref={listRef}
+            className={cn(
+              "relative min-h-0 flex-1 overflow-y-auto overscroll-contain",
+              fabSpacing && "pb-20",
+            )}
+            style={{
+              transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
+              transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
+            }}
+          >
+            {isGrouped
+              ? repoGroups!.flatMap((group) => [
+                  <li key={`group-${group.repositoryFullName}`}>
+                    <GroupHeader group={group} />
+                  </li>,
+                  ...group.issues.map((issue) => renderIssueRow(issue, false)),
+                ])
+              : issues.map((issue) => renderIssueRow(issue, true))}
+            {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
+                兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
+                見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
+                保険として同じ高さの空白ボックスを追加する（#677） */}
+            {footerSpacing && <li aria-hidden className="h-14 shrink-0" />}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
