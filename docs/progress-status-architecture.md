@@ -168,9 +168,11 @@ pushで`implementation`を報告するが、このrunの作成が遅れると、
 | 07:51:35 | PR #1507 をdevelopへマージ | `develop` |
 | 07:59:29 | 07:48:41のpushのrunがようやく作られる | **`implementation`** |
 
-**この巻き戻りは自力で戻らない。** `develop-merge-sweep`が拾い直すのは`Develop PR`にいる
-Issueだけで、`Implementation`は対象外。リリース時の一括遷移（`Develop`・`Release`を`Done`へ）も
-拾わないため、マージ済みのIssueが実装中の列に残り続ける。
+**この巻き戻りは、当時どの安全網でも戻せなかった。** `develop-merge-sweep`が拾い直すのは
+`Develop PR`にいるIssueだけで、`Implementation`は対象外だったため。リリース時の一括遷移
+（`Develop`・`Release`を`Done`へ）も拾わず、マージ済みのIssueが実装中の列に残り続けた
+（#1861で`develop-merge-sweep`が`Implementation`も見るようになり、現在はこの経路でも拾える。
+次節を参照）。
 
 対処は`wip-on-push`側に入れてある。**pushされたコミットを先端とする、同じブランチから
 developへのマージ済みPRが既にあれば報告しない。** `.head.ref`まで見るのは、developの先端から
@@ -183,6 +185,39 @@ pushされた新しいコミットにはマージ済みPRが紐づかないの�
 反映されなかった場合（Project未導入・盤面へ未登録・既に同じStatus）も200で
 `{"applied": false, "reason": ...}`を返す仕様で、各ワークフローは`-o /dev/null`で本文を
 捨てているため、ログの「報告しました」は「届いた」以上の意味を持たない。
+
+#### 報告が一時的なAPI不調に当たると、`Implementation`のまま取り残される（#1861）
+
+**「報告の失敗はジョブを落とさない」という取り決めは、失敗した報告を誰かが拾い直せることが
+前提になっている。** その前提が成り立たない組み合わせが#1583で実際に起きた。
+
+| 時刻(UTC) | 出来事 | 結果 |
+| --- | --- | --- |
+| 17:06 | `develop-pr-opened`が`POST /api/progress`（`status=develop-pr`）を実行 | **HTTP 500**。`::warning::`止まりでジョブは`success`、Statusは`Implementation`のまま |
+| 17:13 | PR #1857 をdevelopへマージ、`develop-pr-merged`が起動 | ラベル一覧を引く`gh label list`が**HTTP 503**で落ち、`bash -e`でステップごと異常終了 |
+| 〃 | 同ジョブの「Project Status を報告する」ステップ | 前のステップが落ちたため**実行されない**。`00.check-user`・`01.check-merge`も残留 |
+
+拾い直す経路が無かった理由は2つある。**`develop-merge-sweep`は`Develop PR`にいるIssueしか
+見ておらず、`develop-pr`への報告自体が失敗した今回はそこへ一度も到達していない。** そして
+`develop-pr-merged`は、進捗の報告より先にラベル操作とコメント投稿を行う順序だった。
+
+対処は3つ入れてある（`.github/workflows/reusable-issue-labels.yml`）。
+
+- **`develop-merge-sweep`の対象に`Implementation`を加えた。** `Develop PR`へ到達しないまま
+  マージされたIssueも15分ごとに拾える。ただし`Implementation`には「developへマージした後、
+  追加対応でブランチへpushした」正規の状態（`mode=additional`）も含まれるため、
+  **マージ済みPRの先端と現在のブランチの先端が一致するときだけ進める**（#1513と同じ考え方。
+  マージでブランチが削除されている場合は追加のpushが無い証拠として扱う）
+- **通知より先に対象Issue番号を`GITHUB_OUTPUT`へ書く。** ラベル操作・コメント投稿の失敗は
+  すべて警告に留め、進捗の報告ステップまで必ず到達させる。ラベル一覧の取得にも再試行を入れた
+- **`POST`/`GET /api/progress`に、5xxと接続失敗に限った再試行**（4回・10/20/30秒）。4xxは
+  設定や実装の誤りで待っても変わらないため再試行しない
+
+**再試行だけでは足りない。** #1583のAPI不調は7分続いており、この長さは`develop-merge-sweep`が
+拾うことで吸収する。再試行は数十秒の揺らぎ、sweepはそれより長い障害、という役割分担になっている。
+
+判定の失敗経路は実際に走らせないと確かめられないため、`scripts/reusable-issue-labels.test.mjs`が
+YAMLから`run:`本文を取り出し、`gh`・`curl`をスタブに差し替えて`bash -e`で実行している。
 
 ## 目標アーキテクチャ
 

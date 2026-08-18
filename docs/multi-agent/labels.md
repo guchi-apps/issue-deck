@@ -128,10 +128,16 @@ PRオープン・マージという確実なイベントに紐づけて通知し
 ある（Issue #112。GITHUB_TOKEN起点のイベントは他のワークフローを起動しないというGitHub仕様の影響を
 受けるため）。`auto-merge`ジョブ自体はWORKFLOW_PATでAuto-mergeを有効化するよう対応済みだが、
 根本解消したか確証が持てないため、`develop-merge-sweep`ジョブが`schedule`（15分おき）・
-`workflow_dispatch`をトリガーに、`Develop PR`にいる全issueを走査し、対応ブランチ
+`workflow_dispatch`をトリガーに、`Develop PR`・`Implementation`にいる全issueを走査し、対応ブランチ
 （`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`Develop`へ進める安全網を
 別途設けている。走査対象はissue-deckの進捗問い合わせAPIから引くため、**issue-deckへ疎通
 できない間このジョブは何も見つけられない**（ラベルという代替の判断材料はもう無い）。
+
+`Implementation`も走査するのは、`develop-pr-opened`の進捗報告が一時的なAPI不調で失敗すると
+`Develop PR`へ一度も到達せず、`Develop PR`だけを見ていた頃はどの安全網でも拾えなかったため
+（#1861・#1583）。ただしマージ後の追加対応（`mode=additional`）で`Implementation`へ戻るのは
+正規の遷移なので、**マージ済みPRの先端と現在のブランチの先端が一致するときだけ**進める。
+`00.check-user`と理由ラベルの除去も同じ経路で行われるため、この安全網は残留ラベルの後始末も兼ねる。
 
 ## `00.check-user`が付く・外れるタイミング（#1417）
 
