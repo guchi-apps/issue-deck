@@ -139,6 +139,13 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **設定の「フリート運用」でリポジトリを並べる一覧は
+  [`fleet-repository-row.tsx`](../src/components/dashboard/fleet-repository-row.tsx)の行を使う**（#1952）。
+  シークレット同期・共有ワークフローのタグ・自動修復ワークフローの3つが同じ画面で隣り合うため、
+  行の作り（狭い画面は「名前」「結果」の2段・広い画面は1行・長い文言は段を改めて折り返し・
+  行の境目に罫線）をここへ寄せる。**アイコンとリポジトリ名を`truncate`＋`ml-auto shrink-0`で
+  並べ直さない**——長い文言がスマホ幅で画面の外へ出て読めなくなる（#1942で片方だけ直した結果、
+  同じ画面で行の作りが割れていた）。
 - **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
   [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
   `package.json`の`"version"` lifecycleスクリプト
