@@ -108,7 +108,7 @@ type IssueListProps = {
    * 手作業Issueしか並ばないこのビューでは参照先の通常Issueが手元に無く、全件が
    * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
    */
-  manualStepReadiness?: ManualStepReadinessMap;
+  prerequisiteReadiness?: ManualStepReadinessMap;
   /**
    * 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う。
    * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない
@@ -181,8 +181,12 @@ function IssueStateIcon({ issue }: { issue: Issue }) {
 }
 
 /**
- * 手作業Issueの前提条件がそろっているか（#1763）。Issue詳細の「前提条件の状況」（#1705）と
- * 同じ判定・同じ配色（emerald／amber）で、一覧のまま「どれをいま実行できるか」が分かるようにする。
+ * 前提条件がそろっているか（#1763。#2003で手作業Issue以外にも出すようにした）。
+ * Issue詳細の「前提条件の状況」（#1705）と同じ判定・同じ配色（emerald／amber）で、
+ * 一覧のまま「どれをいま進められるか」が分かるようにする。
+ *
+ * **前提を書いていないIssueには何も出ない**（`computeIssuePrerequisiteReadiness`が載せない）。
+ * 全行にアイコンが並ぶと、前提待ちの橙が埋もれる。
  *
  * 説明は`title`（PCのホバー）と`aria-label`に持たせる。スマホはホバーできないため、
  * 内訳はヘッダーの件数（`formatManualStepListCount`）とIssue詳細が担う。
@@ -262,7 +266,7 @@ export function IssueList({
   view,
   pinnedSection,
   pinnedCount = 0,
-  manualStepReadiness,
+  prerequisiteReadiness,
   onStartManualStepGuide,
   onStartIssueOrder,
   issueOrderAutoStart = false,
@@ -381,8 +385,8 @@ export function IssueList({
   // 他のビューは今までどおり並んでいる行数。
   const listedCount = issues.length + pinnedCount;
   const countLabel =
-    (view === "manual-step" && manualStepReadiness
-      ? formatManualStepListCount(issues, manualStepReadiness)
+    (view === "manual-step" && prerequisiteReadiness
+      ? formatManualStepListCount(issues, prerequisiteReadiness)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
     `${listedCount}件`;
@@ -390,8 +394,8 @@ export function IssueList({
   // アシスタントが案内できるのは「いま実行できる」手作業だけ（`buildManualStepQueue`）。
   // 1件も無いときにボタンを出すと、押しても何も案内されない画面が開く
   const guidableManualStepCount =
-    view === "manual-step" && manualStepReadiness
-      ? issues.filter((issue) => manualStepReadiness.get(issue.id)?.ready === true).length
+    view === "manual-step" && prerequisiteReadiness
+      ? issues.filter((issue) => prerequisiteReadiness.get(issue.id)?.ready === true).length
       : 0;
 
   // 走っている自動実行（#1882）。**入口に出すのはこの一覧に居る手作業の分だけ**——
@@ -496,7 +500,7 @@ export function IssueList({
               )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
-              <ManualStepReadinessIcon readiness={manualStepReadiness?.get(issue.id)} />
+              <ManualStepReadinessIcon readiness={prerequisiteReadiness?.get(issue.id)} />
               <WorkflowStepBadge
                 labels={issue.labels}
                 projectStatus={issue.projectStatus}

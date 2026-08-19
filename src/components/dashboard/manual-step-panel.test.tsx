@@ -15,6 +15,7 @@ function prerequisite(overrides: Partial<ManualStepPrerequisite> = {}): ManualSt
     repositoryFullName: REPO,
     number: 1690,
     origin: false,
+    explicit: true,
     kind: "issue",
     title: "右パネルから進捗を変えられるようにする",
     htmlUrl: `https://github.com/${REPO}/issues/1690`,
@@ -22,6 +23,7 @@ function prerequisite(overrides: Partial<ManualStepPrerequisite> = {}): ManualSt
     label: "developへマージ済み・本番未反映",
     satisfied: false,
     stepIndex: 1,
+    manualStep: false,
     ...overrides,
   };
 }
@@ -42,6 +44,34 @@ function renderWithPrerequisites(prerequisites: ManualStepPrerequisite[]) {
 describe("ManualStepPanel", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  // #2003: 自分が終わるまで何が止まっているのかは、後回しにしてよいかの判断に一番効く
+  it("このIssueの完了を待っているIssueを、前提条件の下に出す", () => {
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        dependents={[
+          {
+            id: "38",
+            repositoryFullName: REPO,
+            number: 38,
+            title: "セルフホストランナーが落ちたまま復帰しない",
+            htmlUrl: `https://github.com/${REPO}/issues/38`,
+            stage: "in-progress",
+            label: "実装中",
+            stepIndex: 0,
+            manualStep: false,
+          },
+        ]}
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.getByText("このIssueの完了を待っているIssue")).toBeTruthy();
+    expect(screen.getByText("このIssueが終わるまで #38 は先へ進めません。")).toBeTruthy();
   });
 
   it("完了・実施せずのそれぞれのクローズを呼び分ける", () => {

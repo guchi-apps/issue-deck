@@ -14,7 +14,7 @@ import {
   filterIssuesByView,
   sortIssues,
 } from "@/lib/issue-stats";
-import { computeManualStepReadiness } from "@/lib/manual-step-attention";
+import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -100,7 +100,7 @@ export function MobileIssuesScreen({
 
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
   // 一覧に並ぶのは手作業Issueだけで、その中からは参照先のIssueを引けない
-  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
+  const prerequisiteReadiness = useMemo(() => computeIssuePrerequisiteReadiness(issues), [issues]);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
   // ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
@@ -137,7 +137,7 @@ export function MobileIssuesScreen({
       onBack={onBack}
       scrollKey={scrollKey}
       onRefresh={onRefresh}
-      manualStepReadiness={manualStepReadiness}
+      prerequisiteReadiness={prerequisiteReadiness}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}
       issueOrderAutoStart={issueOrderAutoStart}

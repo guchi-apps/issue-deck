@@ -1,11 +1,12 @@
 import { extractManualStepOrigin } from "@/lib/branch-flow";
+import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import type { Issue } from "@/types/issue";
 import type { IssuePullRequest } from "@/types/pull-request";
 
 /**
- * 手作業Issue（`71.manual-step`）が待っている相手（先に完了している必要があるIssue・PR）を
- * 本文から拾い、いまどこまで進んだかを解決する（#1705）。
+ * Issueが待っている相手（先に完了している必要があるIssue・PR）を本文から拾い、いまどこまで
+ * 進んだかを解決する（#1705。#2003で手作業Issue以外へ広げた）。
  *
  * 手作業Issueのテンプレート（CLAUDE.md「ユーザーの手作業が残る場合は新規Issueとして起票する」）は
  * `## 前提条件`に「先に完了している必要があるIssue・PR」を、`## 関連`に起点Issueを書く決まりに
@@ -19,18 +20,29 @@ import type { IssuePullRequest } from "@/types/pull-request";
  * **状態を取れなかった参照は「待ち」に数えない。** 別リポジトリ・取得範囲外というだけで
  * 実行できる手作業を止めてしまわないため。左メニューの「ユーザーの作業待ち」の数え方
  * （`manual-step-attention.ts`）と同じ向きに倒している。
+ *
+ * **実施順序を書く場所はここ1つに寄せている**（#2003）。`guchi-apps/subpc`の#38/#39/#40の
+ * ように順序が決まっている組み合わせは、これまでPR本文の散文にしか無く画面へ出ていなかった。
+ * 手作業Issueのテンプレートにすでにある`## 前提条件`をどのIssueでも読むことにして、新しい
+ * ラベルもスキーマ変更（`sub_issues`のWebhook購読）も足さずに順序を表せるようにしている。
  */
 
 /** 本文から拾った参照1件 */
 export type ManualStepReference = {
   /**
    * 参照先のリポジトリ。`owner/repo#123`形式で書かれていればそのリポジトリ、
-   * 単なる`#123`なら手作業Issue自身のリポジトリ。
+   * 単なる`#123`ならIssue自身のリポジトリ。
    */
   repositoryFullName: string;
   number: number;
   /** `## 関連`に書かれた起点Issueか（画面では「起点」と添える） */
   origin: boolean;
+  /**
+   * `## 前提条件`に**書かれている**か（#2003）。起点から補った参照と区別する。
+   * 明示された前提は取り消さないが、起点から補っただけの前提は、相手が自分を前提として
+   * 挙げていれば取り消す（`collectPrerequisiteReferences`）。
+   */
+  explicit: boolean;
 };
 
 /**
@@ -55,6 +67,10 @@ export type ManualStepPrerequisiteStage =
   | "merged"
   /** PR: マージ待ち */
   | "open"
+  /** 手作業Issue（`71.manual-step`）: まだ実施されていない（#2003） */
+  | "manual-pending"
+  /** 手作業Issue: 実施してクローズ済み（#2003） */
+  | "manual-done"
   /** キャッシュにも取得結果にも無く、状態が分からない */
   | "unknown";
 
@@ -72,10 +88,15 @@ export type ManualStepPrerequisite = ManualStepReference & {
    */
   satisfied: boolean;
   /**
-   * 3段階（実装 → develop → main）のうち現在地。段階に載らないもの（PR・クローズ済み・
-   * 状態不明）はnullで、画面はドットを出さない。
+   * 3段階（実装 → develop → main）のうち現在地。段階に載らないもの（PR・手作業Issue・
+   * クローズ済み・状態不明）はnullで、画面はドットを出さない。
    */
   stepIndex: 0 | 1 | 2 | null;
+  /**
+   * 参照先が手作業Issue（`71.manual-step`）か（#2003）。**手作業はdevelopもmainも通らない**ので
+   * 3段階には載せず、実施したかどうかだけを出す。
+   */
+  manualStep: boolean;
 };
 
 export type ManualStepPrerequisiteSummary = {
@@ -102,15 +123,21 @@ const FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
  * 番号は待つ相手**と読んで差し支えなく、行の見出しに依存させると拾い漏れる方が痛い。
  * コードブロックの中（コピペ用のコマンド）は拾わない。
  *
- * @param body 手作業Issueの本文
- * @param repositoryFullName 手作業Issue自身のリポジトリ。`#123`形式の参照先になる
- * @param selfNumber 手作業Issue自身の番号。自分への参照は除く
+ * `## 関連`の起点を前提として補うのは**手作業Issueのときだけ**（`includeOrigin`）。一般のIssueの
+ * `## 関連`は単に関わりのある番号を並べる欄で、待つ相手とは限らない（#2003）。
+ *
+ * @param body Issueの本文
+ * @param repositoryFullName Issue自身のリポジトリ。`#123`形式の参照先になる
+ * @param selfNumber Issue自身の番号。自分への参照は除く
+ * @param options `includeOrigin`は`## 関連`の起点を前提として補うか（既定はtrue）
  */
 export function extractManualStepReferences(
   body: string | null,
   repositoryFullName: string,
   selfNumber: number,
+  options: { includeOrigin?: boolean } = {},
 ): ManualStepReference[] {
+  const { includeOrigin = true } = options;
   const references: ManualStepReference[] = [];
   const seen = new Set<string>();
 
@@ -130,13 +157,14 @@ export function extractManualStepReferences(
         repositoryFullName: match[1] ?? repositoryFullName,
         number: Number(match[2]),
         origin: false,
+        explicit: true,
       });
     }
   }
 
   // 起点Issue（`## 関連`）も待つ相手として扱う。多くの手作業は起点の変更が本番へ出た後で
   // なければ実行できない（`manual-step-attention.ts`）
-  const originNumber = extractManualStepOrigin(body);
+  const originNumber = includeOrigin ? extractManualStepOrigin(body) : null;
   if (originNumber !== null) {
     const key = `${repositoryFullName}#${originNumber}`;
     const existing = references.find(
@@ -145,11 +173,68 @@ export function extractManualStepReferences(
     if (existing) {
       existing.origin = true;
     } else {
-      add({ repositoryFullName, number: originNumber, origin: true });
+      add({ repositoryFullName, number: originNumber, origin: true, explicit: false });
     }
   }
 
   return references;
+}
+
+/**
+ * Issue1件が待っている相手を決める（#2003）。画面（Issue詳細・一覧・左メニュー）は
+ * **必ずここを通す**ので、どこから見ても同じ相手・同じ向きになる。
+ *
+ * `extractManualStepReferences`との違いは2つ。
+ *
+ * 1. **起点を前提として補うのは手作業Issueだけ。** 一般のIssueの`## 関連`は待つ相手ではない
+ * 2. **起点から補っただけの前提は、相手が明示的に自分を待っていれば取り消す。** 手作業Issueは
+ *    起点Issueへ紐付けて起票する決まり（CLAUDE.md）なので、順序が逆の組み合わせ——起点の側が
+ *    手作業の完了を待つ——では、放っておくと両者が互いを待ち、画面には**逆向きの待ち**だけが
+ *    出る。実例が`guchi-apps/subpc`の#38（起点）と#39（手作業）で、#39には「#38が完了して
+ *    mainへ反映されるのを待ってください」と出ていた。**明示された前提が、補った前提に勝つ。**
+ *
+ * @param issue 判定するIssue
+ * @param issues 相手の本文を読むための母集団（絞り込み前の全Issueでよい）
+ */
+export function collectPrerequisiteReferences(issue: Issue, issues: Issue[]): ManualStepReference[] {
+  const includeOrigin = isManualStepIssue(issue.labels);
+  const references = extractManualStepReferences(
+    issue.body,
+    issue.repositoryFullName,
+    issue.number,
+    { includeOrigin },
+  );
+  if (!includeOrigin) return references;
+
+  return references.filter((reference) => {
+    if (reference.explicit) return true;
+    const other = issues.find(
+      (candidate) =>
+        candidate.repositoryFullName === reference.repositoryFullName &&
+        candidate.number === reference.number,
+    );
+    if (!other) return true;
+    return !declaresPrerequisite(other, issue);
+  });
+}
+
+/**
+ * 本文の`## 前提条件`に**書かれている**前提だけを拾う（起点からの補いは含めない。#2003）。
+ * 「自分を待っている相手」（`issue-dependents.ts`）は、書かれたものだけを辿る。
+ */
+export function extractExplicitPrerequisites(issue: Issue): ManualStepReference[] {
+  return extractManualStepReferences(issue.body, issue.repositoryFullName, issue.number, {
+    includeOrigin: false,
+  });
+}
+
+/** `issue`の`## 前提条件`に`target`が書かれているか（#2003） */
+function declaresPrerequisite(issue: Issue, target: Issue): boolean {
+  return extractExplicitPrerequisites(issue).some(
+    (reference) =>
+      reference.repositoryFullName === target.repositoryFullName &&
+      reference.number === target.number,
+  );
 }
 
 /** `## 前提条件`の節の行（コードフェンスの中を除く） */
@@ -222,41 +307,92 @@ export function resolveManualStepPrerequisites(
       label: "状態を取得できませんでした",
       satisfied: true,
       stepIndex: null,
+      manualStep: false,
     };
   });
 }
 
-function fromIssue(reference: ManualStepReference, issue: Issue): ManualStepPrerequisite {
-  const base = {
-    ...reference,
-    kind: "issue" as const,
-    title: issue.title,
-    htmlUrl: issue.htmlUrl,
-  };
+/**
+ * Issue1件の「どこまで進んだか」。前提条件（待つ側）と、待たれている側（`issue-dependents.ts`）の
+ * どちらもここを通すので、同じIssueが2つの画面で違う状態に見えない（#2003）。
+ */
+export function describeIssueStage(
+  issue: Issue,
+): Pick<ManualStepPrerequisite, "stage" | "label" | "satisfied" | "stepIndex" | "manualStep"> {
+  // 手作業Issueはdevelopもmainも通らず、進捗Statusは`Ready`のまま実行者がcloseする
+  // （CLAUDE.md「ユーザーの手作業が残る場合は新規Issueとして起票する」）。3段階に載せると、
+  // 通っていない道を通ったかのように見えるため、実施したかどうかだけを出す
+  if (isManualStepIssue(issue.labels)) {
+    if (issue.state === "closed") {
+      return {
+        stage: issue.stateReason === "not_planned" ? "closed" : "manual-done",
+        label: issue.stateReason === "not_planned" ? "実施せず終了" : "実施済み",
+        satisfied: true,
+        stepIndex: null,
+        manualStep: true,
+      };
+    }
+    return {
+      stage: "manual-pending",
+      label: "手作業・未実施",
+      satisfied: false,
+      stepIndex: null,
+      manualStep: true,
+    };
+  }
+
   const status = resolveProgressStatus(issue);
 
   // Doneはmainへマージ完了（CLAUDE.md「Issueの進捗の状態遷移」）。closeより先に判定するのは、
   // Doneに達したIssueはcloseされるため——closedを先に見ると全部「クローズ済み」になる
   if (status === "done") {
-    return { ...base, stage: "done-main", label: "mainへ反映済み", satisfied: true, stepIndex: 2 };
+    return {
+      stage: "done-main",
+      label: "mainへ反映済み",
+      satisfied: true,
+      stepIndex: 2,
+      manualStep: false,
+    };
   }
   if (issue.state === "closed") {
     // Doneまで行かずに閉じられたIssue。もう進まないので待っても仕方がない
-    return { ...base, stage: "closed", label: "クローズ済み", satisfied: true, stepIndex: null };
+    return {
+      stage: "closed",
+      label: "クローズ済み",
+      satisfied: true,
+      stepIndex: null,
+      manualStep: false,
+    };
   }
   if (status === "develop" || status === "release") {
     return {
-      ...base,
       stage: "develop",
       label: "developへマージ済み・本番未反映",
       satisfied: false,
       stepIndex: 1,
+      manualStep: false,
     };
   }
   if (status === "ready") {
-    return { ...base, stage: "not-started", label: "未着手", satisfied: false, stepIndex: 0 };
+    return {
+      stage: "not-started",
+      label: "未着手",
+      satisfied: false,
+      stepIndex: 0,
+      manualStep: false,
+    };
   }
-  return { ...base, stage: "in-progress", label: "実装中", satisfied: false, stepIndex: 0 };
+  return { stage: "in-progress", label: "実装中", satisfied: false, stepIndex: 0, manualStep: false };
+}
+
+function fromIssue(reference: ManualStepReference, issue: Issue): ManualStepPrerequisite {
+  return {
+    ...reference,
+    kind: "issue" as const,
+    title: issue.title,
+    htmlUrl: issue.htmlUrl,
+    ...describeIssueStage(issue),
+  };
 }
 
 function fromPullRequest(
@@ -270,6 +406,7 @@ function fromPullRequest(
     htmlUrl: pullRequest.htmlUrl,
     // PRはマージ先を持っていないため、実装→develop→mainの段階には載せない
     stepIndex: null,
+    manualStep: false,
   };
   if (pullRequest.merged) {
     return { ...base, stage: "merged", label: "マージ済み", satisfied: true };
@@ -298,11 +435,19 @@ export function formatManualStepReference(
 /**
  * 先頭に出す1行を組み立てる。**待っている相手が何をするのを待っているのかまで書く**
  * （「まだ実行できません」だけでは、番号を開き直すことになって元の状態と変わらない）。
+ *
+ * 文頭は手作業Issueかどうかで変える（#2003）。手作業Issueは「いま手を動かしてよいか」を
+ * 答える画面なので「まだ実行できません」でよいが、一般のIssueはエージェントが実装を進めること
+ * 自体は止まらない（止まるのは多くの場合マージ）。断定を弱め、残っている件数を先に出す。
+ *
+ * @param options `manualStep`は手作業Issueの画面か（既定はtrue＝従来の文面）
  */
 export function summarizeManualStepPrerequisites(
   prerequisites: ManualStepPrerequisite[],
   repositoryFullName: string,
+  options: { manualStep?: boolean } = {},
 ): ManualStepPrerequisiteSummary {
+  const { manualStep = true } = options;
   const blocking = prerequisites.filter((prerequisite) => !prerequisite.satisfied);
   const satisfiedCount = prerequisites.length - blocking.length;
 
@@ -311,18 +456,21 @@ export function summarizeManualStepPrerequisites(
       total: prerequisites.length,
       satisfiedCount,
       blocking,
-      message: "前提はすべて満たされています。いま実行できます。",
+      message: manualStep
+        ? "前提はすべて満たされています。いま実行できます。"
+        : "前提はすべて満たされています。",
     };
   }
 
   const head = blocking[0];
   const reference = formatManualStepReference(head, repositoryFullName);
   const rest = blocking.length > 1 ? `（ほか${blocking.length - 1}件）` : "";
+  const lead = manualStep ? "まだ実行できません。" : `前提が${blocking.length}件残っています。`;
   return {
     total: prerequisites.length,
     satisfiedCount,
     blocking,
-    message: `まだ実行できません。${reference} ${waitingFor(head)}のを待ってください${rest}。`,
+    message: `${lead}${reference} ${waitingFor(head)}のを待ってください${rest}。`,
   };
 }
 
@@ -332,6 +480,8 @@ function waitingFor(prerequisite: ManualStepPrerequisite): string {
       return "がmainへ反映される";
     case "open":
       return "がマージされる";
+    case "manual-pending":
+      return "の手作業が実施される";
     default:
       return "が完了してmainへ反映される";
   }

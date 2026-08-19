@@ -18,7 +18,7 @@ import {
   getAssigneeOptions,
   sortIssues,
 } from "@/lib/issue-stats";
-import { computeManualStepReadiness } from "@/lib/manual-step-attention";
+import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
@@ -108,7 +108,7 @@ export function MobileRepoIssuesScreen({
   );
 
   // 手作業Issueの前提条件がそろっているか（#1763）。判定の母集団も全Issue
-  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
+  const prerequisiteReadiness = useMemo(() => computeIssuePrerequisiteReadiness(issues), [issues]);
   const color = getRepoColor(repository.fullName);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置はリポジトリ・
@@ -185,7 +185,7 @@ export function MobileRepoIssuesScreen({
       }
       issues={displayedIssues}
       navCounts={navCounts}
-      manualStepReadiness={manualStepReadiness}
+      prerequisiteReadiness={prerequisiteReadiness}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}

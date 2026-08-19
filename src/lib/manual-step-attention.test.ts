@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  computeIssuePrerequisiteReadiness,
   computeManualStepAttention,
   computeManualStepReadiness,
   formatManualStepListCount,
@@ -198,5 +199,44 @@ describe("formatManualStepListCount", () => {
 
   it("手作業Issueが無ければnullを返す（呼び出し側が今までどおりの件数を出す）", () => {
     expect(formatManualStepListCount([makeIssue({ number: 1 })], readiness)).toBeNull();
+  });
+});
+
+// #2003: 一覧の行アイコンは手作業Issue以外にも出す。ただし数と通知は手作業Issueのまま
+describe("computeIssuePrerequisiteReadiness", () => {
+  const waiting = makeIssue({
+    number: 38,
+    body: "## 前提条件\n\n- 先に完了している必要があるIssue・PR: #39\n",
+  });
+  const step = manualStep(39, 38);
+
+  it("前提を書いた一般のIssueも判定に載せる", () => {
+    const readiness = computeIssuePrerequisiteReadiness([waiting, step]);
+
+    expect(readiness.get(waiting.id)?.ready).toBe(false);
+    expect(readiness.get(waiting.id)?.message).toBe(
+      "前提が1件残っています。#39 の手作業が実施されるのを待ってください。",
+    );
+  });
+
+  // 全行にアイコンが並ぶと、前提待ちの橙が埋もれる
+  it("前提を書いていない一般のIssueは載せない", () => {
+    const plain = makeIssue({ number: 41 });
+
+    expect(computeIssuePrerequisiteReadiness([plain]).has(plain.id)).toBe(false);
+  });
+
+  // 起点から補った前提が取り消され、手作業の側は実行できるようになる
+  it("起点が自分を前提として挙げていれば、手作業は実行できる側になる", () => {
+    const readiness = computeIssuePrerequisiteReadiness([waiting, step]);
+
+    expect(readiness.get(step.id)?.ready).toBe(true);
+  });
+
+  it("左メニューの件数は手作業Issueだけを数えたまま", () => {
+    const readiness = computeManualStepReadiness([waiting, step]);
+
+    expect(readiness.has(waiting.id)).toBe(false);
+    expect(readiness.has(step.id)).toBe(true);
   });
 });

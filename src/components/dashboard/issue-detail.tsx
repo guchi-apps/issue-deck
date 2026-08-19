@@ -51,6 +51,7 @@ import {
   LocalSessionCommentNotice,
   LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
+import { IssueOrderSection } from "@/components/dashboard/issue-order-section";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import {
   isIssueExecutionStarted,
@@ -766,7 +767,20 @@ export function IssueDetail({
               onStartGuide={() => onStartManualStepGuide(issue.id)}
               prerequisites={manualStepPrerequisites.prerequisites}
               prerequisiteSummary={manualStepPrerequisites.summary}
+              dependents={manualStepPrerequisites.dependents}
               repositoryFullName={issue.repositoryFullName}
+            />
+          )}
+
+          {/* 実施順序（#2003）。手作業Issueでは上の手作業パネルの中に出しているので、
+              ここでは出さない（同じものが2回並ぶ） */}
+          {!canCompleteManualStep(issue) && (
+            <IssueOrderSection
+              prerequisites={manualStepPrerequisites.prerequisites}
+              prerequisiteSummary={manualStepPrerequisites.summary}
+              dependents={manualStepPrerequisites.dependents}
+              repositoryFullName={issue.repositoryFullName}
+              idPrefix="pc"
             />
           )}
 

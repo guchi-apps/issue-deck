@@ -83,7 +83,7 @@ type MobileIssueListScreenProps = {
    * 手作業Issue（`71.manual-step`）が、いま実行できるかどうか（#1763）。
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
    */
-  manualStepReadiness?: ManualStepReadinessMap;
+  prerequisiteReadiness?: ManualStepReadinessMap;
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
   onStartManualStepGuide?: () => void;
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
@@ -125,7 +125,7 @@ export function MobileIssueListScreen({
   onCreateIssue,
   onAskCrossRepoQuestion,
   pinned,
-  manualStepReadiness,
+  prerequisiteReadiness,
   onStartManualStepGuide,
   onStartIssueOrder,
   issueOrderAutoStart,
@@ -146,8 +146,8 @@ export function MobileIssueListScreen({
   // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ。
   // 「質問」の未確認の内訳（#1796）も同じ理由でここに出す（PCの一覧ヘッダーと同じ表記）
   const countLabel =
-    (view === "manual-step" && manualStepReadiness
-      ? formatManualStepListCount(issues, manualStepReadiness)
+    (view === "manual-step" && prerequisiteReadiness
+      ? formatManualStepListCount(issues, prerequisiteReadiness)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
     `${listedCount}件`;
@@ -270,7 +270,7 @@ export function MobileIssueListScreen({
         // ユーザーがマージするしかないPRは、確認待ちの一覧の先頭に出す（#1613・#1713）。
         // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
-        manualStepReadiness={manualStepReadiness}
+        prerequisiteReadiness={prerequisiteReadiness}
         onStartManualStepGuide={onStartManualStepGuide}
         onStartIssueOrder={onStartIssueOrder}
         issueOrderAutoStart={issueOrderAutoStart}

@@ -192,6 +192,76 @@ function manualStepSampleBody(origin, developed, released) {
 }
 
 /**
+ * 実施順序のサンプル（#2003）。**待つ側が一般のIssueで、待たれる側が手作業Issue**という、
+ * これまで画面に何も出なかった向きの組み合わせを1組だけ作る。
+ *
+ * 上の3件（`manualStepSampleBody`）はどれも手作業Issueが起点を待つ向きなので、これが無いと
+ * 開発環境では「実施順序」セクションも「このIssueの完了を待っているIssue」も確かめられない。
+ *
+ * @param manualStep 先に実施する手作業Issueの番号
+ */
+function orderingWaiterBody(manualStep) {
+  return [
+    "## 概要",
+    "",
+    "sample-repo-1のデプロイ先を新しいホストへ入れ替える。**切り替え自体は手作業の後**でないと、",
+    "反映されないまま本番が止まる。",
+    "",
+    "## 前提条件",
+    "",
+    `- 先に完了している必要があるIssue・PR: #${manualStep}（新ホストの鍵を配る手作業）`,
+    "",
+    "## やること",
+    "",
+    "- [ ] `deploy.yml`のホスト名を差し替える",
+  ].join("\n");
+}
+
+/**
+ * 実施順序のサンプルのうち、待たれる側の手作業Issue（#2003）。
+ *
+ * **`## 前提条件`の「先に完了している必要があるIssue・PR」は「なし」**にしてある。起点Issue
+ * （待っている側）を`## 関連`にだけ書くという、テンプレートどおりの書き方で「起点から補った
+ * 前提が取り消される」ところまで確かめられるようにするため。
+ *
+ * @param origin 起点Issue（この作業の完了を待っている側）の番号
+ */
+function orderingManualStepBody(origin) {
+  return [
+    "## この作業でできるようになること",
+    "",
+    "- できるようになること: 新ホストへデプロイできるようになる",
+    `- 実行するまでできないこと: #${origin} のPull Requestをマージしても本番へ届かない`,
+    "",
+    "## 前提条件",
+    "",
+    "- 実行するデバイス: サブPC（`ssh subpc`）",
+    "- カレントディレクトリ: 不要",
+    "- Gitブランチ: 不要",
+    "- 先に完了している必要があるIssue・PR: なし",
+    "- その他の前提: なし",
+    "",
+    "## やること",
+    "",
+    "- [ ] 新ホストへデプロイ用の公開鍵を配る",
+    "",
+    "## 完了の確認方法",
+    "",
+    "```bash",
+    "ssh deploy@new-host true",
+    "```",
+    "",
+    "## なぜエージェントが実施しないか",
+    "",
+    "鍵の配布に本番ホストのパスワードが要るため。",
+    "",
+    "## 関連",
+    "",
+    `- 起点Issue: #${origin}`,
+  ].join("\n");
+}
+
+/**
  * サブPCで実行する手作業のサンプル本文（#1828）。
  *
  * 手作業アシスタントの**代行実行（「承認して実行」）は、実行するデバイスがサブPCで、かつ
@@ -323,10 +393,28 @@ async function applyDevProfile(installation) {
       labels: [{ name: "71.manual-step", color: "d876e3" }],
       body: manualStepSubpcSampleBody(released.number),
     });
+
+    // 実施順序（#2003）。**一般のIssueが手作業を待つ**向きの組。上の3件とは逆向きで、
+    // これが無いと「実施順序」セクションも「このIssueの完了を待っているIssue」も出ない
+    await upsertDummyIssue(firstRepository, {
+      number: ISSUES_PER_REPOSITORY + 6,
+      title: "[手作業] サブPC: 新デプロイ先へ公開鍵を配る",
+      state: "OPEN",
+      labels: [{ name: "71.manual-step", color: "d876e3" }],
+      body: orderingManualStepBody(ISSUES_PER_REPOSITORY + 7),
+    });
+    await upsertDummyIssue(firstRepository, {
+      number: ISSUES_PER_REPOSITORY + 7,
+      title: "sample-repo-1のデプロイ先を新ホストへ入れ替える",
+      state: "OPEN",
+      labels: [{ name: "51.improvement", color: "0e8a16" }],
+      projectStatus: "Implementation",
+      body: orderingWaiterBody(ISSUES_PER_REPOSITORY + 6),
+    });
   }
 
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 3 : 0}件（前提待ち・いま実行できる・サブPCで代行できる各1件）追加しました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 4 : 0}件（前提待ち・いま実行できる・サブPCで代行できる・一般Issueに待たれている 各1件）と、実施順序（#2003）を確かめる一般Issueを${hasManualStepSample ? 1 : 0}件追加しました。`,
   );
 }
 

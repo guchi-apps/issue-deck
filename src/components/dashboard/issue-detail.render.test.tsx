@@ -34,7 +34,7 @@ const comments: IssueComment[] = [
 
 const commentsState = { comments, isLoading: false, error: null, setComments: vi.fn() };
 const subIssues = { relations: { parent: null, children: [] }, isLoading: false };
-const manualStepPrerequisites = { prerequisites: [], summary: null };
+const manualStepPrerequisites = { prerequisites: [], summary: null, dependents: [] };
 const taskList = {
   body: "本文",
   progress: { completed: 0, total: 0 },
