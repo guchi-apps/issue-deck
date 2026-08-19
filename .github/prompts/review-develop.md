@@ -47,6 +47,10 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
   Gitブランチ・先に完了している必要があるIssue／PR）と`## 完了の確認方法`が埋まっているかを見る。**
   空欄や「動作を確認する」だけで終わっているものは、実行する人が実行してよいか・いま急ぐべきかを
   判断できないため指摘する（[docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)「本文」）
+- **逆に、起票しない決まりのものを手作業Issueにしていないか。** issue-deck画面のボタンで
+  実行できる操作（サブPC上のチェックアウトの更新・再起動）・繰り返し発生する作業・openな
+  同内容の手作業Issueが既にあるものは起票しない（[docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)「起票しない条件」・#2009）。
+  該当する場合は、起票を取り下げて既存Issueか画面の操作へ寄せるよう指摘する
 
 ## 全アプリ共通の共有知識（`.shared-context/`）
 ワークツリー内の`.shared-context/`に、全アプリ共通の知識リポジトリ（`guchi-apps/docs`）が
