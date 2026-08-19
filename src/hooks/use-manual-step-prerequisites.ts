@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { isManualStepIssue } from "@/lib/github/approval-labels";
+import { computeIssueDependents, type IssueDependent } from "@/lib/issue-dependents";
 import {
-  extractManualStepReferences,
+  collectPrerequisiteReferences,
   resolveManualStepPrerequisites,
   summarizeManualStepPrerequisites,
   type ManualStepPrerequisite,
@@ -15,23 +16,26 @@ import type { IssuePullRequest, IssuePullRequestListResponse } from "@/types/pul
 
 const EMPTY_PULL_REQUESTS: IssuePullRequest[] = [];
 const EMPTY_PREREQUISITES: ManualStepPrerequisite[] = [];
+const EMPTY_DEPENDENTS: IssueDependent[] = [];
 
 export type UseManualStepPrerequisitesResult = {
   prerequisites: ManualStepPrerequisite[];
   /** 参照が1件も無ければnull（画面は前提条件のブロックごと出さない） */
   summary: ManualStepPrerequisiteSummary | null;
+  /** 逆向き——このIssueの完了を待っているIssue（#2003）。無ければ空配列 */
+  dependents: IssueDependent[];
 };
 
 /**
- * 手作業Issue（`71.manual-step`）が待っている相手の状況を集める（#1705）。
+ * Issueが待っている相手と、逆に自分を待っている相手の状況を集める
+ * （#1705。#2003で手作業Issue以外へ広げ、逆向きも返すようにした）。
  *
  * Issueの参照は画面がすでに持っているキャッシュから引くので**GitHub APIを消費しない**。
  * Issueとして見つからなかった番号だけ、PRの可能性として既存の`/api/issues/pull-requests`で
  * 1回だけ引く（同じ番号空間にIssueとPRが同居するため、番号だけでは区別できない）。
- * **ポーリングはしない**——手作業の前提が数十秒で変わることはなく、Issue詳細を開き直せば
- * 取り直される。
+ * **ポーリングはしない**——前提が数十秒で変わることはなく、Issue詳細を開き直せば取り直される。
  *
- * PRとして引きに行くのは手作業Issue自身のリポジトリの番号だけ。`owner/repo#123`形式で
+ * PRとして引きに行くのはIssue自身のリポジトリの番号だけ。`owner/repo#123`形式で
  * 別リポジトリを指した参照は、そのリポジトリのIssueがキャッシュにあれば解決でき、
  * 無ければ「状態不明」（＝待ちに数えない）になる。
  */
@@ -42,9 +46,14 @@ export function useManualStepPrerequisites(
   const [pullRequests, setPullRequests] = useState<IssuePullRequest[]>(EMPTY_PULL_REQUESTS);
 
   const references = useMemo(() => {
-    if (!issue || !isManualStepIssue(issue.labels)) return [];
-    return extractManualStepReferences(issue.body, issue.repositoryFullName, issue.number);
-  }, [issue]);
+    if (!issue) return [];
+    return collectPrerequisiteReferences(issue, issues);
+  }, [issue, issues]);
+
+  const dependents = useMemo(() => {
+    if (!issue) return EMPTY_DEPENDENTS;
+    return computeIssueDependents(issue, issues);
+  }, [issue, issues]);
 
   const repositoryFullName = issue?.repositoryFullName ?? null;
   const [owner, repo] = repositoryFullName ? repositoryFullName.split("/") : [null, null];
@@ -100,9 +109,11 @@ export function useManualStepPrerequisites(
     };
   }, [owner, repo, unresolvedKey]);
 
+  const manualStep = issue !== null && isManualStepIssue(issue.labels);
+
   return useMemo(() => {
     if (references.length === 0 || !repositoryFullName) {
-      return { prerequisites: EMPTY_PREREQUISITES, summary: null };
+      return { prerequisites: EMPTY_PREREQUISITES, summary: null, dependents };
     }
     const prerequisites = resolveManualStepPrerequisites(
       references,
@@ -112,7 +123,8 @@ export function useManualStepPrerequisites(
     );
     return {
       prerequisites,
-      summary: summarizeManualStepPrerequisites(prerequisites, repositoryFullName),
+      summary: summarizeManualStepPrerequisites(prerequisites, repositoryFullName, { manualStep }),
+      dependents,
     };
-  }, [references, issues, pullRequests, repositoryFullName]);
+  }, [references, issues, pullRequests, repositoryFullName, manualStep, dependents]);
 }

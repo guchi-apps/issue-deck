@@ -202,7 +202,7 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
   ]);
 
   it("いま実行できる手作業と前提待ちの手作業を、別のアイコンで示す", () => {
-    renderList({ manualStepReadiness: readiness });
+    renderList({ prerequisiteReadiness: readiness });
 
     expect(rowOf(1).contains(screen.getByLabelText("前提条件がそろっている"))).toBe(true);
     expect(rowOf(2).contains(screen.getByLabelText("前提条件の完了待ち"))).toBe(true);
@@ -210,14 +210,14 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
 
   // 判定に載らないIssue（手作業でない・closed）へ印を付けない
   it("判定に無いIssueにはアイコンを出さない", () => {
-    renderList({ manualStepReadiness: readiness });
+    renderList({ prerequisiteReadiness: readiness });
 
     expect(rowOf(3).querySelector("[aria-label='前提条件がそろっている']")).toBeNull();
     expect(rowOf(3).querySelector("[aria-label='前提条件の完了待ち']")).toBeNull();
   });
 
   it("待っている相手はホバーで読めるようにする", () => {
-    renderList({ manualStepReadiness: readiness });
+    renderList({ prerequisiteReadiness: readiness });
 
     expect(
       rowOf(2).querySelector(
@@ -228,13 +228,13 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
 
   // 左メニューが「いま実行できる件数」を出すため、一覧の行数のままだと数が食い違う
   it("「ユーザーの作業待ち」のヘッダーは、実行できる件数と前提待ちの件数を出す", () => {
-    renderList({ manualStepReadiness: readiness, view: "manual-step" });
+    renderList({ prerequisiteReadiness: readiness, view: "manual-step" });
 
     expect(screen.getByText("1件・前提待ち1件")).toBeTruthy();
   });
 
   it("他のビューのヘッダーは今までどおり並んでいる件数を出す", () => {
-    renderList({ manualStepReadiness: readiness, view: "all" });
+    renderList({ prerequisiteReadiness: readiness, view: "all" });
 
     expect(screen.getByText("3件")).toBeTruthy();
   });

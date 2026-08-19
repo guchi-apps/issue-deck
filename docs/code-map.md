@@ -611,8 +611,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     （#1910）。`navCounts["question"]`はスマホの一覧のビュー切替（`mobile-issue-list-screen.tsx`）と
     ビュー選択シート（`mobile-issue-view-sheet.tsx`）にも出るため、画面ごとに数字を差し替えると
     左メニューの`1`と一覧の`3`が食い違う。手作業（#1763）と同じ置き場。
+- **Issue間の実施順序は本文の`## 前提条件`に書き、待つ側と待たれる側の両方へ出す**（#2003。
+  [`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)・
+  [`lib/issue-dependents.ts`](../src/lib/issue-dependents.ts)）。順序を表せるのは手作業Issueが
+  待っている相手だけで、しかも向きが一方向しか無かった（`guchi-apps/subpc`の#38/#39/#40のように
+  **対応Issueとそのマージのほうが手作業を待つ**組み合わせでは、順序がPR本文の散文にしか残らない）。
+  - **書く場所は`## 前提条件`の1か所。** 手作業Issueのテンプレートにすでにある見出しをどのIssueでも
+    読むことにして、新しいラベルもスキーマ変更（`sub_issues`のWebhook購読）も足していない。
+  - **`## 関連`の「起点」を前提として補うのは手作業Issueだけ**、かつ**相手が明示的に自分を前提として
+    挙げていれば取り消す**（`collectPrerequisiteReferences`）。手作業Issueは起点へ紐付けて起票する
+    決まりのため、順序が逆の組み合わせでは放っておくと互いを待ち、逆向きの待ちだけが画面に出る。
+  - **逆向き（自分を待っている相手）は`## 前提条件`に書かれたものだけを辿る**
+    （`computeIssueDependents`）。起点まで辿ると、実際には待っていない親Issueが並ぶ。
+  - **一覧の行アイコンは前提を書いたIssueすべてに出すが、左メニュー「ユーザーの作業待ち」の件数と
+    手作業の通知は手作業Issueのままにする**（`computeIssuePrerequisiteReadiness`と
+    `computeManualStepReadiness`の使い分け）。あの数は「いま手を動かせば盤面が進む手作業が何件あるか」
+    を答えるもので、一般のIssueを混ぜると別の数になる。
+  - **手作業Issueは実装→develop→mainの3段階に載せない。** developもmainも通らず、進捗Statusは
+    `Ready`のまま実行者がcloseするため、載せると通っていない道を通ったように見える。
 - **手作業Issueが待っている相手の状況は、Issue詳細の手作業パネルの中に出す**（#1705。
   [`manual-step-prerequisites.tsx`](../src/components/dashboard/manual-step-prerequisites.tsx)）。
+  手作業Issue以外では独立したセクション「実施順序」として出す（#2003。
+  [`issue-order-section.tsx`](../src/components/dashboard/issue-order-section.tsx)。
+  前提が残っている間は畳めなくする——畳まれていると、書いた側は出したつもりでも読む側が開くまで
+  気付かない）。
   参照先のIssueは画面がすでに持っているキャッシュ（進捗）から引くので**GitHub APIを消費せず**、
   Issueとして見つからなかった番号だけ`/api/issues/pull-requests`でPRとして1回引く
   （[`hooks/use-manual-step-prerequisites.ts`](../src/hooks/use-manual-step-prerequisites.ts)。

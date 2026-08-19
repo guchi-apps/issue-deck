@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleHelp, Clock, Dot } from "lucide-react";
+import { Check, CircleHelp, Clock, Dot, Wrench } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
@@ -11,11 +11,12 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * 手作業Issueが待っている相手（先に完了している必要があるIssue・PR）の状況（#1705）。
+ * Issueが待っている相手（先に完了している必要があるIssue・PR）の状況
+ * （#1705。#2003で手作業Issue以外にも出すようにした）。
  *
- * `ManualStepPanel`の中に置く。**手作業パネルの外に出さない**——「あなたの手作業を待って
- * います」と「その前提がまだ揃っていない」は同じ判断のための材料で、離すと実行しようとした
- * 人が前提の行まで戻らない。
+ * **手作業Issueでは`ManualStepPanel`の中に置く。** 「あなたの手作業を待っています」と
+ * 「その前提がまだ揃っていない」は同じ判断のための材料で、離すと実行しようとした人が
+ * 前提の行まで戻らない。手作業Issue以外では、Issue詳細の独立したセクションとして出す。
  *
  * 材料の作り方と「状態不明を待ちに数えない」理由は`lib/manual-step-prerequisites.ts`を参照。
  */
@@ -118,6 +119,11 @@ function PrerequisiteMark({ prerequisite }: { prerequisite: ManualStepPrerequisi
   if (prerequisite.satisfied) {
     return <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
   }
+  // 未実施の手作業だけは工具の印にする（#2003）。待つ相手が「人がコマンドを打つこと」で
+  // あることは、時計（時間が経てば進む）とは別の合図として読ませたい
+  if (prerequisite.stage === "manual-pending") {
+    return <Wrench className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+  }
   if (prerequisite.stage === "develop") {
     return <Clock className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
   }
@@ -201,7 +207,7 @@ function stageBadgeClassName(prerequisite: ManualStepPrerequisite): string {
   if (prerequisite.satisfied) {
     return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
-  if (prerequisite.stage === "develop") {
+  if (prerequisite.stage === "develop" || prerequisite.stage === "manual-pending") {
     return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
   return "bg-muted text-muted-foreground";

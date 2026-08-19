@@ -95,6 +95,7 @@ import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { extractSearchTokens, parseSearchQuery } from "@/lib/search-query";
 import { getNavViewLabel } from "@/lib/nav-views";
 import {
+  computeIssuePrerequisiteReadiness,
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
@@ -595,6 +596,14 @@ export function IssueDeckShell({
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
   const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
+  // 一覧の行に出す前提待ちの印は、手作業Issue以外にも広げる（#2003）。手作業アシスタントと
+  // 左メニューの件数は`manualStepReadiness`（手作業Issueだけ）のままにする——あちらは
+  // 「いま手を動かせば盤面が進む手作業が何件あるか」を答えるもので、一般のIssueを混ぜると
+  // 別の数になる
+  const prerequisiteReadiness = useMemo(
+    () => computeIssuePrerequisiteReadiness(issues),
+    [issues],
+  );
   // 手作業アシスタント（#1826）。PC・スマホのどちらの入口から開いても同じ状態を使うため、
   // 状態とダイアログはここに1つだけ置く
   const manualStepGuide = useManualStepGuide(issues, manualStepReadiness);
@@ -1303,8 +1312,8 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
-                // 手作業Issueの行に「いま実行できるか」を出す（#1763）
-                manualStepReadiness={manualStepReadiness}
+                // 前提条件がそろっているかを行に出す（#1763・#2003）
+                prerequisiteReadiness={prerequisiteReadiness}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
                 onStartManualStepGuide={() => manualStepGuide.start()}
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）
