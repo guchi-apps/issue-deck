@@ -462,6 +462,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     押した瞬間に実装が積まれることが、押す前に読めないといけない。
   - **見送り候補をクローズもラベル付けもしない。** 重複・陳腐化の判定はタイトルと本文の冒頭からの
     推測でしかなく外れる。挙げるところまでを機械が担い、押せるのは開くことだけにする。
+- **選んだIssueをまとめて実行する入口は一覧の上のバー**（#1266・#1993。
+  [`bulk-dispatch-bar.tsx`](../src/components/dashboard/bulk-dispatch-bar.tsx)）。
+  手作業アシスタント・「次にやること」と同じ位置に置くのは、**スマホの一覧が`IssueList`の
+  ヘッダーを出さない**（`showHeader={false}`）ためで、ヘッダーに置くとPCからしか押せない。
+  出すのは積めるIssueが2件以上あるときだけ（[`lib/dispatch/bulk-dispatch.ts`](../src/lib/dispatch/bulk-dispatch.ts)）。
+  - **オプションは1回だけ選び、選んだIssueすべてへ同じように付ける。** チップは「実装を開始」
+    ダイアログと共有し（[`start-option-chip.tsx`](../src/components/dashboard/start-option-chip.tsx)）、
+    出すのは**選んだIssueで共通して選べるもの**だけ（`commonStartImplementationOptions`）。
+    既定は全部OFFで、既に付いているラベルは外さない。設計と理由は
+    [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)を参照。
 - **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
   適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は

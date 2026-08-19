@@ -5,6 +5,7 @@ import {
   ARTIFACT_REQUIRED_LABEL,
   artifactRequiredDefaultForLabels,
   canStartImplementation,
+  commonStartImplementationOptions,
   isSelectableLabelName,
   isStartImplementationOptionLabel,
   planRequiredDefaultForLabels,
@@ -323,5 +324,40 @@ describe("isStartImplementationOptionLabel", () => {
     for (const option of START_IMPLEMENTATION_OPTIONS) {
       expect(isStartImplementationOptionLabel(option.githubLabel)).toBe(true);
     }
+  });
+});
+
+describe("commonStartImplementationOptions（#1993）", () => {
+  const ALL_LABELS = START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel);
+
+  it("撮影は出さない（サブPCへ積むため）", () => {
+    const keys = commonStartImplementationOptions(
+      new Map([["guchi-apps/issue-deck", ALL_LABELS]]),
+    ).map((option) => option.key);
+
+    expect(keys).toContain("planRequired");
+    expect(keys).toContain("artifactRequired");
+    expect(keys).not.toContain("screenshotRequired");
+  });
+
+  // 片方にしか定義が無いラベルを一括で配ると、無い側では**その場で作られてしまう**（#1490）
+  it("選んだIssueのリポジトリすべてに定義があるものだけ出す", () => {
+    const keys = commonStartImplementationOptions(
+      new Map([
+        ["guchi-apps/issue-deck", ALL_LABELS],
+        ["guchi-apps/dayspan", [PLAN_REQUIRED_LABEL]],
+      ]),
+    ).map((option) => option.key);
+
+    expect(keys).toEqual(["planRequired"]);
+  });
+
+  it("ラベル一覧が分からないリポジトリでは絞り込まない", () => {
+    const keys = commonStartImplementationOptions(new Map()).map((option) => option.key);
+
+    expect(keys).toContain("planRequired");
+    expect(keys).toContain("artifactRequired");
+    expect(keys).toContain("mergeConfirmRequired");
+    expect(keys).toContain("previewRequired");
   });
 });
