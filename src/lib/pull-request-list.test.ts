@@ -9,6 +9,7 @@ import {
   filterPullRequestsByView,
   groupPullRequestsByRepository,
   canMergeFromDeck,
+  isMergeJudgementPending,
   mergeWarnings,
   pullRequestsAwaitingUserMerge,
   requiresUserMerge,
@@ -39,7 +40,9 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeJudgement: "unknown",
     mergeable: null,
+    repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -412,6 +415,21 @@ describe("canMergeFromDeck", () => {
   it("openでないPRは対象にしない", () => {
     expect(canMergeFromDeck(pullRequest({ state: "closed", merged: true }))).toBe(false);
     expect(canMergeFromDeck(pullRequest({ state: "closed", merged: false }))).toBe(false);
+  });
+});
+
+describe("isMergeJudgementPending", () => {
+  it("判定が走っている間だけ真になる（#1968）", () => {
+    expect(isMergeJudgementPending("pending")).toBe(true);
+    expect(isMergeJudgementPending("settled")).toBe(false);
+    // 判定のワークフローが配られていないリポジトリまで塞がない。
+    expect(isMergeJudgementPending("unknown")).toBe(false);
+  });
+
+  it("判定中でも`mergeWarnings`は増やさない（止め方はボタンの無効化。#1968）", () => {
+    expect(mergeWarnings(pullRequest({ ciState: "success", mergeJudgement: "pending" }))).toEqual(
+      [],
+    );
   });
 });
 

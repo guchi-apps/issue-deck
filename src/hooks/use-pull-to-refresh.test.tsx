@@ -4,7 +4,13 @@ import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
-import { PULL_MAX_PX, PULL_THRESHOLD_PX } from "@/lib/pull-to-refresh";
+import {
+  EXTERNAL_REFRESHING_START_MS,
+  MAX_EXTERNAL_REFRESHING_MS,
+  MIN_REFRESHING_MS,
+  PULL_MAX_PX,
+  PULL_THRESHOLD_PX,
+} from "@/lib/pull-to-refresh";
 
 // jsdomには`TouchEvent`のコンストラクタが無いため、ハンドラが読む`touches`だけを持つ
 // イベントを組み立てて実要素へdispatchする。フックはネイティブリスナーで受けるので、
@@ -17,7 +23,7 @@ function touchEvent(type: string, x: number, y: number) {
   return event;
 }
 
-function setup(onRefresh?: () => Promise<unknown> | void, scrollTop = 0) {
+function setup(onRefresh?: () => Promise<unknown> | void, scrollTop = 0, isRefreshing = false) {
   const container = document.createElement("div");
   const list = document.createElement("ul");
   Object.defineProperty(list, "scrollTop", { value: scrollTop, writable: true });
@@ -29,7 +35,12 @@ function setup(onRefresh?: () => Promise<unknown> | void, scrollTop = 0) {
   containerRef.current = container;
   scrollRef.current = list;
 
-  const view = renderHook(() => usePullToRefresh({ containerRef, scrollRef, onRefresh }));
+  // 画面側の取得中フラグ（#1958）は途中で変わるため、rerenderで差し替えられる形で渡す
+  const view = renderHook(
+    (props: { isRefreshing: boolean }) =>
+      usePullToRefresh({ containerRef, scrollRef, onRefresh, isRefreshing: props.isRefreshing }),
+    { initialProps: { isRefreshing } },
+  );
   return { container, list, view };
 }
 
@@ -157,5 +168,105 @@ describe("usePullToRefresh", () => {
     ]);
     expect(view.result.current.distance).toBe(0);
     expect(view.result.current.label).toBeNull();
+  });
+
+  // 画面の取得中フラグを渡した場合（#1958）
+  describe("画面が取得中の間の扱い", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("下限を過ぎても、画面が取得中の間は「更新中…」を保つ", async () => {
+      vi.useFakeTimers();
+      const onRefresh = vi.fn().mockResolvedValue(undefined);
+      const { container, view } = setup(onRefresh, 0, true);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS * 4);
+      });
+      expect(view.result.current.phase).toBe("refreshing");
+
+      // 取得が終わったら表示を戻す
+      view.rerender({ isRefreshing: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS);
+      });
+      expect(view.result.current.phase).toBe("idle");
+      expect(view.result.current.distance).toBe(0);
+    });
+
+    it("`onRefresh`から戻った時点でフラグがまだ立っていなくても、立ってから下りるまで待つ", async () => {
+      vi.useFakeTimers();
+      // ブランチ画面の取り直しは同期関数で、呼んだ直後はまだ取得中フラグが`false`
+      const onRefresh = vi.fn();
+      const { container, view } = setup(onRefresh, 0, false);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+
+      // 少し遅れて取得が始まる
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      view.rerender({ isRefreshing: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS * 6);
+      });
+      expect(view.result.current.phase).toBe("refreshing");
+
+      view.rerender({ isRefreshing: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIN_REFRESHING_MS);
+      });
+      expect(view.result.current.phase).toBe("idle");
+    });
+
+    it("取得が始まらないままなら、立ち上がりの上限で表示を戻す", async () => {
+      vi.useFakeTimers();
+      const onRefresh = vi.fn();
+      const { container, view } = setup(onRefresh, 0, false);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EXTERNAL_REFRESHING_START_MS + MIN_REFRESHING_MS);
+      });
+      expect(view.result.current.phase).toBe("idle");
+    });
+
+    it("取得中のフラグが下りないままでも上限で表示を戻す", async () => {
+      vi.useFakeTimers();
+      const onRefresh = vi.fn().mockResolvedValue(undefined);
+      const { container, view } = setup(onRefresh, 0, true);
+
+      drag(container, [
+        [100, 100],
+        [100, 300],
+      ]);
+      await act(async () => {
+        container.dispatchEvent(new Event("touchend", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MAX_EXTERNAL_REFRESHING_MS + MIN_REFRESHING_MS * 4);
+      });
+      expect(view.result.current.phase).toBe("idle");
+    });
   });
 });

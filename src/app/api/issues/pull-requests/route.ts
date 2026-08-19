@@ -11,7 +11,7 @@ import {
   fetchPullRequest,
   type GithubApiPullRequestDetail,
 } from "@/lib/github/pull-requests-api";
-import { fetchRefCiState } from "@/lib/github/release-api";
+import { fetchRefCheckState } from "@/lib/github/release-api";
 import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
 import type { IssuePullRequest, IssuePullRequestListResponse } from "@/types/pull-request";
 
@@ -47,10 +47,12 @@ async function toIssuePullRequest(
 ): Promise<IssuePullRequest> {
   // CI状態はまだマージの判断が要るPRでしか意味を持たない。closedやdraftでは追加の
   // 1リクエストを使わずnullのままにする（`/api/pull-requests/detail`と同じ方針）。
-  const ciStatus =
+  // 自動マージ可否の判定の進み具合（#1968）も同じ1回のクエリから取り出す。
+  const checkState =
     pullRequest.state === "open" && !pullRequest.draft
-      ? toPullRequestCiStatus(await fetchRefCiState(owner, repo, pullRequest.head.sha, token))
+      ? await fetchRefCheckState(owner, repo, pullRequest.head.sha, token)
       : null;
+  const ciStatus = checkState ? toPullRequestCiStatus(checkState.ciState) : null;
 
   return {
     number: pullRequest.number,
@@ -60,6 +62,7 @@ async function toIssuePullRequest(
     draft: pullRequest.draft,
     merged: pullRequest.merged,
     ciStatus,
+    mergeJudgement: checkState?.mergeJudgement ?? "unknown",
     linkedIssueNumber: extractLinkedIssueNumber({
       headRef: pullRequest.head.ref,
       title: pullRequest.title,

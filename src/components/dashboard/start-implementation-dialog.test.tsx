@@ -8,6 +8,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import {
+  ARTIFACT_REQUIRED_LABEL,
   MERGE_CONFIRM_REQUIRED_LABEL,
   PREVIEW_REQUIRED_LABEL,
 } from "@/lib/github/start-implementation";
@@ -28,6 +29,18 @@ vi.mock("@/hooks/use-issue-comment-mutations", () => ({
 
 vi.mock("@/hooks/use-progress-status-mutation", () => ({
   useProgressStatusMutation: () => ({ setProgressStatus }),
+}));
+
+// リポジトリに定義されているラベル（#1956）。アーティファクトの既定を当ててよいかの判定に使う。
+// 既定は「25.artifact-requiredを配ってあるリポジトリ」とする
+let repositoryLabelNames: string[] = [ARTIFACT_REQUIRED_LABEL];
+
+vi.mock("@/hooks/use-issue-repo-meta", () => ({
+  useIssueRepoMeta: () => ({
+    labels: repositoryLabelNames.map((name) => ({ name, color: "ededed", description: null })),
+    assignees: [],
+    isLoading: false,
+  }),
 }));
 
 // サブPCへのディスパッチ（#1179）の状態。既定は「申告しているホストが無い」
@@ -178,6 +191,7 @@ describe("StartImplementationDialog", () => {
       isLoaded: true,
       error: null,
     };
+    repositoryLabelNames = [ARTIFACT_REQUIRED_LABEL];
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
@@ -450,6 +464,56 @@ describe("StartImplementationDialog", () => {
 
       expect(
         screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+
+    // デザインは計画の既定（#1317）にも入っているため、2つ同時にチェックが入る（#1956）
+    it("デザインのIssueでは「アーティファクトで見た目を出す」にもチェックが入り、そのままラベルが付く", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "62.design", color: "bfdadc", description: null }] }),
+      });
+
+      expect(
+        screen
+          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      clickStart();
+
+      await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+      expect(updateIssue.mock.calls[0][0].labels).toContain(ARTIFACT_REQUIRED_LABEL);
+    });
+
+    // 存在しないラベル名を渡すと、色も説明も無いラベルがその場で作られる（#1490・#1956）
+    it("25.artifact-requiredを配っていないリポジトリでは、デザインのIssueでもチェックが入らない（#1956）", () => {
+      dispatchState.hosts = [makeHost()];
+      repositoryLabelNames = ["62.design", PLAN_REQUIRED_LABEL];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "62.design", color: "bfdadc", description: null }] }),
+      });
+
+      expect(
+        screen
+          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+
+    it("改善のIssueではアーティファクトにチェックが入らない（#1956）", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({ labels: [{ name: "51.improvement", color: "0052cc", description: null }] }),
+      });
+
+      expect(
+        screen
+          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getAttribute("aria-checked"),
       ).toBe("false");
     });
   });

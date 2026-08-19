@@ -10,6 +10,10 @@
 #     → scripts/start-local-session.sh → 対象リポジトリの scripts/start-issue.sh
 #     → tmuxセッションが立つ（以降の進捗は start-issue.sh が POST /api/progress へ報告する）
 #
+# **tmuxサーバーはpollerとは別のcgroup（`issue-deck-tmux-server.scope`）で起こす**（#1935）。
+# 同じcgroupに入れると、pollerの停止処理（`systemctl --user restart`・異常終了→`Restart=always`）で
+# 走っている実装セッションが全部落ちる。理由と置き直せる条件は`ensure_tmux_server_scope`のコメント。
+#
 # ジョブには種別（`kind`）があり、立ったあとのセッションを操作するものも同じキューで流れる（#1332）。
 #
 #   INTERRUPT   … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
@@ -24,6 +28,12 @@
 #     ジョブidから組み立て直す（任意のユニットを止める口にしない）。
 #                 **GitHubの手作業Issueの本文と照合してから**、別プロセス
 #                 （scripts/run-manual-step.sh）で実行し、終了コードと出力を画面へ返す
+#
+# ジョブとは別に、**画面から何も押されなくても1巡ごとに行うことがある**（#1971）。
+#
+#   APIエラー（529等）で中断して止まったセッションの検知と自動再開
+#   （`resume_interrupted_sessions`。送るのは固定の1行だけで、経路は`INSTRUCTION`と同じ
+#   3段階プロトコル。CLAUDE.mdの`send-keys`禁止に対する3つ目の例外にあたる）
 #
 # 立てるセッションにも2種類ある（#1454）。
 #
@@ -67,6 +77,10 @@
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
+#   SESSION_RESUME_ENABLED          APIエラーで中断したセッションの自動再開（省略時は1・0で無効）
+#   SESSION_RESUME_STALL_MINUTES    中断とみなすまでの停滞の分数（省略時は10）
+#   SESSION_RESUME_MAX_ATTEMPTS     1セッションあたりの再開の上限回数（省略時は3）
+#   SESSION_RESUME_INTERVAL_MINUTES 再開を試みる間隔の分数（省略時は5）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
@@ -98,7 +112,10 @@ set -euo pipefail
 # 13: 走っている代行実行を止める（`MANUAL_STEP_ABORT`）（#1882）。
 # 14: チェックアウトの更新（`SELF_UPDATE`）を実際に実行できるようにする（#1927）。13以前は
 #     `selfUpdate`を申告していても、埋め草のIssue番号`0`が検証で弾かれて全件失敗していた。
-DISPATCH_POLLER_VERSION="14"
+# 15: tmuxサーバーを`systemd-run --user --scope`でpollerとは別のcgroupに置き、pollerの再起動で
+#     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
+# 16: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
+DISPATCH_POLLER_VERSION="16"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -112,6 +129,12 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 # セッションを畳んだときの状態ファイルの後始末に使う（#1332。reap-sessions.shと同じ扱い）。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
+# APIエラーで中断したセッションの検知（#1971）。**転記を読むのはこの用途だけ**で、
+# 判定の中身は`lib/session-resume.sh`、転記の場所の解決は`lib/session-transcript.sh`が持つ。
+# shellcheck source=scripts/lib/session-transcript.sh
+source "$SCRIPT_DIR/lib/session-transcript.sh"
+# shellcheck source=scripts/lib/session-resume.sh
+source "$SCRIPT_DIR/lib/session-resume.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
@@ -130,6 +153,9 @@ SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
 # worktreeの掃除（#1716）。**新しい常駐プロセスもsystemd timerも増やさず、この1巡に相乗りさせる。**
 # ただし上の2つと違い毎巡は呼ばず、`WORKTREE_CLEANUP_INTERVAL_MINUTES` の間隔で呼ぶ。
 WORKTREE_CLEANER="$SCRIPT_DIR/cleanup-worktrees.sh"
+# セッションの通知（#1219）。**通知の文面と送り先を持つのは向こう1箇所**なので、pollerからも
+# 同じスクリプトを呼ぶ（#1971。自動再開をあきらめたときだけ使う）。
+NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
 
 # 起動時の引数。**チェックアウトの更新のあと`exec`で自分を入れ替えるときに渡し直す**（#1927）。
 POLLER_ARGV=("$@")
@@ -822,6 +848,82 @@ tmux_session_names() {
   tmux list-sessions -F '#{session_name}' 2>/dev/null | sort || true
 }
 
+# --- tmuxサーバーのcgroup（#1935）------------------------------------------------
+# **tmuxサーバーはpollerとは別のcgroupで起こす。**
+#
+# unitに`KillMode`の指定は無く、systemdの既定は`KillMode=control-group`なので、停止処理では
+# cgroupの残り全員にSIGTERMが飛ぶ。何もしなければtmuxサーバーを最初に起こすのはpollerが呼んだ
+# ランチャーの`tmux new-session`で、サーバーはpollerと同じcgroupに入る。その結果
+# `systemctl --user restart`（と異常終了→`Restart=always`での復帰）のたびに、走っている実装
+# セッションが全部落ちていた（2026-08-18の再起動では6本→0本。#1935）。
+#
+# **サーバーさえ別のcgroupへ出せば、配下のセッションはまとめて巻き添えから外れる。** paneの
+# プロセスはtmuxサーバーの子として生まれるためで、起動を仲介するランチャー（pollerの子）は
+# そのままでよい——`tmux new-session`は既に動いているサーバーに作らせるだけだから。
+#
+# 起こし方は手作業の代行実行（#1828）と同じ`systemd-run --user`だが、あちらの`--collect --unit=`
+# （service）ではなく**scope**を使う。serviceはsystemdがコマンドを起こすもので、tmuxのように
+# 自分でdaemon化するプロセスは主プロセスの追跡に約束事が要る。scopeは「このプロセスを別のunitに
+# 入れて動かす」だけなので、daemon化した後もサーバーがそのcgroupに残り、残っている間だけ
+# scopeも生き続ける。
+#
+# `set-option -s exit-empty off`が要る。既定ではセッションが1本も無いサーバーは即座に終了する
+# ため、`start-server`だけでは起こした端からscopeごと消える。
+#
+# **既に動いているサーバーのcgroupは後から変えられない。** 置き直せるのはサーバーが動いて
+# いない隙だけなので、ここでは「無ければ起こす」だけを行い、pollerと同じcgroupにいるサーバーを
+# 見つけた場合は警告に留める（走っているセッションが全部終わってサーバーが落ちれば、次の起動で
+# 自然に移る）。
+TMUX_SERVER_SCOPE_UNIT="issue-deck-tmux-server"
+TMUX_SERVER_CGROUP_WARNED=0
+
+# cgroup v2のパス（`/proc/<pid>/cgroup`の`0::`行の3列目）。読めなければ空を返す。
+process_cgroup_path() {
+  awk -F: '$1 == "0" { print $3; exit }' "/proc/$1/cgroup" 2>/dev/null || true
+}
+
+# 走っているtmuxサーバーがpollerと同じcgroupにいたら警告する。**プロセスごとに1度だけ**
+# （毎巡出すとjournalが埋まり、本来見たい失敗理由が読めなくなる）。
+warn_if_tmux_server_shares_cgroup() {
+  [[ "$TMUX_SERVER_CGROUP_WARNED" -eq 0 ]] || return 0
+  local server_pid ours theirs
+  server_pid="$(tmux display-message -p '#{pid}' 2>/dev/null || true)"
+  [[ "$server_pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  ours="$(process_cgroup_path "$$")"
+  theirs="$(process_cgroup_path "$server_pid")"
+  [[ -n "$ours" && "$ours" == "$theirs" ]] || return 0
+  TMUX_SERVER_CGROUP_WARNED=1
+  echo "警告: 動いているtmuxサーバー（PID $server_pid）がpollerと同じcgroupにいます（#1935）。" >&2
+  echo "  この状態のまま systemctl --user restart で再起動すると、走っている実装セッションが" >&2
+  echo "  巻き添えで落ちます。セッションが1本も無くなってサーバーが落ちれば、次の起動から" >&2
+  echo "  別のcgroup（$TMUX_SERVER_SCOPE_UNIT.scope）へ移ります。" >&2
+}
+
+ensure_tmux_server_scope() {
+  # サーバーが動いていれば何もしない。**セッションが0本でも成功する**ので、
+  # 「サーバーが動いているか」の判定にそのまま使える（動いていなければ非0で終わる）。
+  if tmux list-sessions >/dev/null 2>&1; then
+    warn_if_tmux_server_shares_cgroup
+    return 0
+  fi
+
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    echo "警告: systemd-run が無いため、tmuxサーバーはpollerと同じcgroupで起こされます（#1935）。" >&2
+    return 0
+  fi
+
+  if timeout 30 systemd-run --user --quiet --scope --collect --unit="$TMUX_SERVER_SCOPE_UNIT" \
+    tmux start-server ';' set-option -s exit-empty off >/dev/null 2>&1; then
+    echo "tmuxサーバーをpollerとは別のcgroupで起こしました（$TMUX_SERVER_SCOPE_UNIT.scope）。"
+    return 0
+  fi
+
+  # 起こせなくてもセッションの起動自体は続けられる（ランチャーの`tmux new-session`が従来どおり
+  # pollerのcgroupでサーバーを起こす）。**そのぶん巻き添えの条件は元に戻る**ので理由を残す。
+  echo "警告: tmuxサーバーを別のcgroup（$TMUX_SERVER_SCOPE_UNIT.scope）で起こせませんでした（#1935）。" >&2
+  return 0
+}
+
 # --- セッションの状態報告（#1217）------------------------------------------------
 # `DispatchJob`の寿命は「tmuxセッションが立った」ところで終わっており、**立った後の
 # セッションは誰も見ていない**。そこを埋めるための報告。
@@ -1045,28 +1147,32 @@ instruction_input_line() {
 # **`capture-pane`の内容を読むのはこの機能だけ。** #1217のセッション報告は「画面の内容は
 # 読まない」で通しており、その線は維持する（読んだ内容で決めてよいのは「送ってよい／送らない」の
 # 一方向だけで、内容から次に送るものを決めることはしない）。
+#
+# 第2引数は許可する状態イベント（`|`区切り。省略時は`Stop`だけ）。**広げてよいのは
+# `working`まで**で、APIエラーで中断したセッションの自動再開（#1971）だけがそれを渡す。
+# あちらは`Stop`フックが飛ばないまま止まるため`working`のまま残り、しかし転記の末尾が
+# APIエラーであることを別途確かめてから来る。`permission_prompt`は**どの経路でも許可しない**
+# （事故が起きたのはまさにこの状態）。
 instruction_ready() {
-  local session="$1" event last_event pane input_line rest
+  local session="$1" allowed="${2:-Stop}" event last_event pane input_line rest
 
-  # 1a. 状態ファイル（#1219・#1357）。**最後のイベントが`Stop`のときだけ送る。**
-  # `permission_prompt`は承認プロンプト・`AskUserQuestion`の表示中で、事故が起きたのはまさに
-  # この状態。`working`は作業中。**記録が無いときも送らない**（判定材料が無い＝確かめられない）。
+  # 1a. 状態ファイル（#1219・#1357）。**最後のイベントが`$allowed`に含まれるときだけ送る**
+  # （既定は`Stop`だけ）。`permission_prompt`は承認プロンプト・`AskUserQuestion`の表示中で、
+  # 事故が起きたのはまさにこの状態。`working`は作業中。
+  # **記録が無いときも送らない**（判定材料が無い＝確かめられない）。
   if ! event="$(session_state_read_event "$session")" || [[ -z "$event" ]]; then
     echo "セッションの状態が記録されていないため送りませんでした（フックが動いていない可能性があります）"
     return 1
   fi
   last_event="${event##* }"
-  case "$last_event" in
-    Stop) ;;
-    permission_prompt)
-      echo "承認プロンプトまたは選択フォームの表示中のため送りませんでした（答えるのはRemote Controlから行ってください）"
-      return 1
-      ;;
-    *)
-      echo "セッションが作業中のため送りませんでした（最後のイベント: $last_event）"
-      return 1
-      ;;
-  esac
+  if [[ "$last_event" == "permission_prompt" ]]; then
+    echo "承認プロンプトまたは選択フォームの表示中のため送りませんでした（答えるのはRemote Controlから行ってください）"
+    return 1
+  fi
+  if [[ ! "$last_event" =~ ^($allowed)$ ]]; then
+    echo "セッションが作業中のため送りませんでした（最後のイベント: $last_event）"
+    return 1
+  fi
 
   pane="$(tmux capture-pane -p -t "=$session:" 2>/dev/null || true)"
   if [[ -z "$pane" ]]; then
@@ -1115,59 +1221,164 @@ instruction_reflected() {
 }
 
 # 追加指示を1件送る。**このプロトコルの全体がここに閉じている。**
-send_session_instruction() {
-  local job_id="$1" session="$2" body="$3" reason
+#
+# **ジョブに依らない**（#1971でAPIエラーからの自動再開も同じ経路を
+# 通すため切り出した）。第3引数は`instruction_ready`へ渡す「許可する状態イベント」。
+#
+# 返り値: 0=送った / 1=見送り（安全機構が正常に止めた）/ 2=送れなかった（異常）
+# 1・2のときは理由を標準出力へ1行で返す。**呼び出し元が報告の形（ジョブ／ログ）を決める。**
+deliver_session_instruction() {
+  local session="$1" body="$2" allowed="${3:-Stop}" reason
 
   if [[ -z "$body" ]]; then
-    report_job "$job_id" failed "追加指示の本文が空です" "$session"
-    return 0
+    echo "追加指示の本文が空です"
+    return 2
   fi
   # 受け口（`parseSessionInstruction`）と同じ検証を重ねる。**ここが最後に端末へ渡す場所**なので、
   # issue-deck側で検証済みでも改めて確かめる（多層防御。セッション名の突き合わせと同じ立場）。
   if [[ "$body" == *$'\n'* || "$body" =~ [[:cntrl:]] ]]; then
-    report_job "$job_id" failed "追加指示の本文に改行または制御文字が含まれています" "$session"
-    return 0
+    echo "追加指示の本文に改行または制御文字が含まれています"
+    return 2
   fi
   if ((${#body} > 500)); then
-    report_job "$job_id" failed "追加指示の本文が長すぎます（${#body}文字）" "$session"
-    return 0
+    echo "追加指示の本文が長すぎます（${#body}文字）"
+    return 2
   fi
 
   # 段1: 状態確認
-  if ! reason="$(instruction_ready "$session")"; then
+  if ! reason="$(instruction_ready "$session" "$allowed")"; then
     # **失敗ではなく見送り。** 安全機構が正常に働いた結果で、何も壊れていない（#1229と同じ扱い）。
-    # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
-    echo "  追加指示を見送りました: $reason"
-    report_job "$job_id" skipped "$reason" "$session"
-    return 0
+    echo "$reason"
+    return 1
   fi
 
   # 段2: 本文のみ送出（Enterは送らない）。`-l`はリテラル送出で、`--`以降を値として扱わせる
   # （`-l`が無いと`Enter`のようなキー名として解釈されうる）。
   if ! tmux send-keys -t "=$session:" -l -- "$body" 2>/dev/null; then
-    report_job "$job_id" failed "追加指示の本文を送れませんでした: $session" "$session"
-    return 0
+    echo "追加指示の本文を送れませんでした: $session"
+    return 2
   fi
 
   # 段3: 反映の再確認。**ここで止まったら追加のキーは一切送らない。** 本文がどこへ入ったのか
   # 分からない状態で消しにいく（`C-u`など）のは、事故の元をもう1つ増やすことになる。
   if ! instruction_reflected "$session" "$body"; then
-    report_job "$job_id" failed \
-      "本文が入力欄に反映されたことを確認できなかったため、Enterを送っていません。入力欄に文字が残っている可能性があります（tmux attach -t $session で確認してください）" \
-      "$session"
-    return 0
+    echo "本文が入力欄に反映されたことを確認できなかったため、Enterを送っていません。入力欄に文字が残っている可能性があります（tmux attach -t $session で確認してください）"
+    return 2
   fi
 
   # 段4: 確定キーを別送
   if ! tmux send-keys -t "=$session:" Enter 2>/dev/null; then
-    report_job "$job_id" failed \
-      "本文は入力欄に入りましたが、確定キーを送れませんでした（tmux attach -t $session で確認してください）" \
-      "$session"
-    return 0
+    echo "本文は入力欄に入りましたが、確定キーを送れませんでした（tmux attach -t $session で確認してください）"
+    return 2
   fi
 
-  echo "  追加指示を送りました: $session"
-  report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+  return 0
+}
+
+# 画面から積まれた追加指示（`INSTRUCTION`）を1件送り、結果をジョブとして報告する。
+send_session_instruction() {
+  local job_id="$1" session="$2" body="$3" message status=0
+
+  message="$(deliver_session_instruction "$session" "$body")" || status=$?
+  case "$status" in
+    0)
+      echo "  追加指示を送りました: $session"
+      report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+      ;;
+    1)
+      # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
+      echo "  追加指示を見送りました: $message"
+      report_job "$job_id" skipped "$message" "$session"
+      ;;
+    *)
+      report_job "$job_id" failed "$message" "$session"
+      ;;
+  esac
+  return 0
+}
+
+# --- APIエラーで中断したセッションの自動再開（#1971）-----------------------------
+# Claude Codeがサーバー側の一時エラー（529 Overloaded など）を再試行しきると、そのturnは
+# `API Error: 529 Overloaded. ...` の表示で打ち切られ、**`Stop`フックが飛ばないまま**入力欄へ
+# 戻る。誰にも通知されず、状態ファイルは`working`のまま止まり、回収も追加指示も効かない。
+# 2026-08-18には6セッションが5時間半それで止まっていた（`lib/session-resume.sh`の冒頭を参照）。
+#
+# **ここはCLAUDE.md「監視・計画レビューを行う実行体の禁止事項」の3つ目の例外**にあたる。
+# 事故（選択フォームの表示中に本文＋Enterを送り、勝手に回答済みになった）を再発させないため、
+# 次の3つを同時に満たす形でだけ開けている。
+#
+#   1. 送る本文は固定（`SESSION_RESUME_BODY`）。**状況を読んで返事を組み立てない**
+#   2. 送る経路は人が押したときと同じ3段階プロトコル（`deliver_session_instruction`）。
+#      承認プロンプト・選択フォームの表示中、処理中、入力欄に打ちかけがある場合は送らない
+#   3. 送ってよいのは、**転記の末尾がAPIエラーである**ことを確かめられたセッションだけ
+#
+# 上限（既定3回）を使い切ったら送るのをやめ、Signalyへ1度だけ通知して人へ渡す。
+
+# 中断したセッションをSignalyへ引き上げる（#1971）。**通知の文面と送り先を持つのは
+# `session-notify.sh`1箇所**なので、pollerは合成したフックJSONを渡すだけにする。
+# `session_id`を載せるのは、向こうがRemote ControlのURLを引くのに使うため。
+notify_session_interrupted() {
+  local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5"
+  local session_id hook_json
+  [[ -x "$NOTIFY_SCRIPT" ]] || return 0
+  session_id="$(session_transcript_record_field "$session" sessionId 2>/dev/null || true)"
+  hook_json="$(jq -nc --arg id "$session_id" --arg detail "$detail" \
+    '{hook_event_name: "SessionInterrupted", session_id: $id, interrupt_detail: $detail}')" || return 0
+  printf '%s' "$hook_json" |
+    SESSION_NOTIFY_TMUX_SESSION="$session" "$NOTIFY_SCRIPT" "$issue_number" "$repo_name" "$full_name" ||
+    true
+  return 0
+}
+
+resume_interrupted_sessions() {
+  local session_name repo_name issue_number full_name message status attempts
+
+  [[ "${SESSION_RESUME_ENABLED:-1}" != "0" ]] || return 0
+
+  while IFS= read -r session_name; do
+    [[ -n "$session_name" ]] || continue
+    # 実装セッションだけを対象にする。計画レビュー・横断質問はフックの状態ファイルを持たず
+    # （名前が`-issue-`の規約から外れている）、段1で必ず弾かれる。
+    [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+
+    if ! session_resume_interrupted "$session_name"; then
+      # 自力で動き出した（または最初から止まっていない）。**次に別の理由で止まったときに
+      # 前回の回数を引きずらないよう、ここで消す。**
+      session_state_clear_resume "$session_name"
+      continue
+    fi
+
+    if session_resume_exhausted "$session_name"; then
+      session_resume_notified "$session_name" && continue
+      full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
+      echo "APIエラーからの自動再開をあきらめました（上限 ${SESSION_RESUME_MAX_ATTEMPTS} 回）: $session_name"
+      notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
+        "自動再開を${SESSION_RESUME_MAX_ATTEMPTS}回試しましたが再開できませんでした。"
+      session_resume_record_notified "$session_name"
+      continue
+    fi
+
+    session_resume_due "$session_name" || continue
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "--dry-run のため再開しません（APIエラーで中断: $session_name）"
+      continue
+    fi
+
+    # **許可する状態イベントに`working`を足すのはここだけ。** 中断したセッションは`Stop`が
+    # 飛ばないまま`working`で止まっているため、既定のままでは自分の中断を直せない。
+    status=0
+    message="$(deliver_session_instruction "$session_name" "$SESSION_RESUME_BODY" 'Stop|working')" || status=$?
+    session_resume_record_attempt "$session_name"
+    attempts="$(session_resume_read_state "$session_name" | awk '{print $2}')"
+    case "$status" in
+      0) echo "APIエラーで中断していたため再開しました（${attempts}/${SESSION_RESUME_MAX_ATTEMPTS}回目）: $session_name" ;;
+      1) echo "APIエラーで中断していますが再開を見送りました: $session_name: $message" ;;
+      *) echo "APIエラーで中断していますが再開できませんでした: $session_name: $message" ;;
+    esac
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
   return 0
 }
 
@@ -1591,6 +1802,12 @@ launch_and_report() {
     return 0
   fi
 
+  # **ランチャーを走らせる前に、tmuxサーバーを別のcgroupへ出しておく**（#1935）。ここを通らないと
+  # サーバーを起こすのはランチャーの`tmux new-session`になり、pollerと同じcgroupに入る。
+  # 直前の`reap_sessions`で最後のセッションが畳まれてサーバーが落ちていることもあるため、
+  # 起動時に1度だけでは足りず、起動のたびに確かめる（動いていれば何もしない）。
+  ensure_tmux_server_scope
+
   report_job "$job_id" running "$running_message"
 
   # 起動の出力は失敗時にジョブの結果として返すため取っておく。
@@ -1661,6 +1878,10 @@ run_once() {
     return 0
   fi
 
+  # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**
+  # 畳まれたセッションへ送りに行かず、報告には再開前の状態が残る（前後関係が読める）。
+  resume_interrupted_sessions
+
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。
   #
@@ -1701,6 +1922,14 @@ run_once() {
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
   return 0
 }
+
+# tmuxサーバーを別のcgroupで起こしておく（#1935）。起動のたびにも確かめる（launch_and_report）が、
+# ここで先に置いておくと、手元のターミナルから直接`start-issue.sh`を叩いたセッションも同じ
+# サーバーにぶら下がり、pollerの再起動と無関係でいられる。
+# **申告だけ・dry-runでは起こさない**（何も起動しないと言っている経路で状態を作らない）。
+if [[ "$ANNOUNCE_ONLY" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+  ensure_tmux_server_scope
+fi
 
 if [[ "$ONCE" -eq 1 ]]; then
   run_once

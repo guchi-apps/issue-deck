@@ -71,6 +71,9 @@ source "$SCRIPT_DIR/lib/plan-review-prompt.sh"
 # フォルダの信頼確認（#1838）。未信頼のまま起こすとセッションが確認待ちで止まる。
 # shellcheck source=scripts/lib/claude-trust.sh
 source "$SCRIPT_DIR/lib/claude-trust.sh"
+# APIの一時的な過負荷（529）で打ち切られにくくする（#1971）。実装セッションと同じ値を使う。
+# shellcheck source=scripts/lib/claude-retries.sh
+source "$SCRIPT_DIR/lib/claude-retries.sh"
 
 usage() {
   echo "Usage: scripts/start-plan-review.sh [--prepare-only] <owner> <repo> <issue番号>" >&2
@@ -280,7 +283,11 @@ if [[ "$PLAN_REVIEW_TIMEOUT" =~ ^[0-9]+$ && "$PLAN_REVIEW_TIMEOUT" -gt 0 ]] &&
   RUNNER="timeout $PLAN_REVIEW_TIMEOUT "
 fi
 
-SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %sclaude' "$WORKDIR" "$PROMPT_FILE" "$RUNNER")"
+# リトライ上限（#1971）は**コマンドへ埋め込む。** tmuxのセッションはtmuxサーバー側の環境を
+# 引き継ぐため、このスクリプトでexportしても向こうへは届かない（`--add-dir`の値と同じ扱い）。
+claude_export_max_retries
+SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | CLAUDE_CODE_MAX_RETRIES=%q %sclaude' \
+  "$WORKDIR" "$PROMPT_FILE" "$CLAUDE_CODE_MAX_RETRIES" "$RUNNER")"
 for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
 done

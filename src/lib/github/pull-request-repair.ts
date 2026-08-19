@@ -101,6 +101,74 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   conflict: "コンフリクトを自動解消",
 };
 
+/** 未配布を説明するときに使う、修復の種類の呼び方（#1960） */
+const REPAIR_KIND_WORKFLOW_LABEL: Record<RepairKind, string> = {
+  ci: "CI失敗修正",
+  conflict: "コンフリクト解消",
+};
+
+/**
+ * 修復ワークフローの配布状況（#1960）。
+ *
+ * - `available` … 置かれている（押せる）
+ * - `missing` … 置かれていないが、設定＞フリート運用から配れる
+ * - `unsupported` … **配布の一覧にも出てこない。** 自動修復のcallerは「そのリポジトリで意味を
+ *   持つか」を前提ワークフローの有無で決めており（`REPAIR_WORKFLOW_SPECS`の`requires`。#1948）、
+ *   それを満たさないリポジトリはボタンを押しても起動しないのに配る導線も無い。
+ *   `missing`と同じ文言で設定画面へ送ると行き止まりになるため、状態を分ける。
+ */
+export type RepairWorkflowState = "available" | "missing" | "unsupported";
+
+/**
+ * 修復の種類ごとの、起動先ワークフローの配布状況（#1960）。
+ *
+ * **キーが無い種類は「判定していない」＝押せる扱い**にする。判定するのはボタンを出すPR
+ * （`repairKindsFor`が空でない）だけで、判定そのものに失敗した場合も押せるままにするため
+ * （無効化の誤爆でユーザーの手を止める方が損失が大きい。押した先の404は
+ * `POST /api/pull-requests/repair`が専用文言へ置き換える）。
+ */
+export type RepairWorkflowAvailability = Partial<Record<RepairKind, RepairWorkflowState>>;
+
+/** その種類の修復ワークフローが起動できないと分かっているか */
+export function isRepairWorkflowMissing(
+  availability: RepairWorkflowAvailability | undefined,
+  kind: RepairKind,
+): boolean {
+  const state = availability?.[kind];
+  return state === "missing" || state === "unsupported";
+}
+
+/** 押せなくした理由を説明する文の末尾（状態ごとに次の一手が違う） */
+const REPAIR_UNAVAILABLE_SUFFIX: Record<Exclude<RepairWorkflowState, "available">, string> = {
+  missing: "が未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+  unsupported: "が未配布です。このリポジトリは配布の対象外のため、必要なら手動で追加してください。",
+};
+
+/**
+ * 未配布のためにボタンを押せなくする理由の文（#1960）。押せる種類しか無ければ空配列。
+ *
+ * 出している種類が全部同じ理由で押せないなら「自動修復ワークフロー」とまとめ、一部だけなら
+ * どちらが無いのかを名指しする。**次に何をすればよいかまで書く**——「押せない」とだけ
+ * 言われても、配ればよいのか対象外なのかが画面から分からないため。
+ */
+export function repairUnavailableNotices(
+  kinds: RepairKind[],
+  availability: RepairWorkflowAvailability | undefined,
+): string[] {
+  const notices: string[] = [];
+  for (const state of ["missing", "unsupported"] as const) {
+    const target = kinds.filter((kind) => availability?.[kind] === state);
+    if (target.length === 0) continue;
+
+    const subject =
+      target.length === kinds.length
+        ? "自動修復ワークフロー"
+        : `${target.map((kind) => REPAIR_KIND_WORKFLOW_LABEL[kind]).join("・")}のワークフロー`;
+    notices.push(`${subject}${REPAIR_UNAVAILABLE_SUFFIX[state]}`);
+  }
+  return notices;
+}
+
 /** 確認ダイアログで「何が起きるか」を説明する文 */
 export const REPAIR_KIND_DESCRIPTION: Record<RepairKind, string> = {
   ci: "失敗したCIのログをClaude Codeが読んで原因を修正し、検証したうえでpushします。",

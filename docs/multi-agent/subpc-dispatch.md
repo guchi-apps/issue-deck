@@ -344,6 +344,46 @@ Issue詳細の「いま何が起きているか」カードの、その行のす
   （`CROSS_REPO_QUESTION`）が画面に残っているかどうかで行う
 - **自動では復旧しない。** 落ちたセッションを勝手に立て直す実行体は作らない（[gates.md](gates.md)）
 
+### APIエラーで中断したセッションの自動再開（#1971）
+
+**画面から何も押されなくても、pollerが1巡ごとに行う唯一の送出**（`resume_interrupted_sessions`）。
+
+Claude Codeはサーバー側の一時エラー（529 Overloaded など）を再試行し、使い切ると
+`API Error: 529 Overloaded. ...` を表示して**そのturnを打ち切る**。セッションは生きたまま入力欄へ
+戻るが、**このとき`Stop`フックが飛ばない**。その結果、
+
+- Signalyにも画面にも「止まった」と伝わらない（人は気づけない）
+- 状態ファイル（#1219・#1357）は`working`のまま止まる
+- 回収（#1256）は`Stop`しか畳まないので、セッションは残り続ける
+- 上の「追加指示を送る」も段1aで弾かれ、**人が画面から送ることすらできない**
+
+2026-08-18 16:12〜16:37（UTC）に6セッション（issue-deck #1947・#1956・#1962・#1964、aide #35・#89）が
+同時にこれで止まり、人が端末から「続けて」と打つ 21:55 まで5時間半動かなかった。転記の最後は
+例外なく `isApiErrorMessage: true` のレコードで終わっていた。
+
+| 段 | やること |
+|---|---|
+| 検知 | 生きている実装セッション（`<リポジトリ名>-issue-<番号>`）の転記の**最後のレコードがAPIエラー**で、かつそのファイルが `SESSION_RESUME_STALL_MINUTES`（既定10分）更新されていないこと |
+| 送出 | **固定の1行**を上の3段階プロトコルで送る。**段1aだけ`working`も通す**（中断したセッションは`Stop`が飛ばないまま`working`で止まるため。`permission_prompt`はどの経路でも通さない） |
+| 打ち切り | `SESSION_RESUME_MAX_ATTEMPTS`（既定3回）まで、`SESSION_RESUME_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、Signalyへ**1度だけ**通知して人へ渡す |
+
+**送る本文は`scripts/lib/session-resume.sh`が持つ定数**で、状況によって変えない。これが
+[gates.md](gates.md)「やらせないこと」の例外として成立する条件そのもので、内容を組み立て始めた
+時点で禁止の側へ戻る（変えたい文面があるなら、それは人が「追加指示を送る」で送るもの）。
+
+**「落ちたセッションを自動で立て直さない」（上の`WAITING_INPUT`のまま消えた場合）とは別の話。**
+あちらは死んだセッションを新しく起こす判断で、こちらは**生きているセッションが自分の続きを
+書き始めるだけ**である。worktreeも会話もそのまま残っており、人が端末で「続けて」と打つのと
+同じことをしている。
+
+検知はClaude Codeの内部仕様（転記の置き場とレコードの形）に依存するため、**読めなければ
+「中断していない」＝何もしない**へ倒す。その場合はこれまでどおり止まったまま人を待つ。
+設定はすべて `~/.config/issue-deck/dispatch.env`（`SESSION_RESUME_*`）で、`SESSION_RESUME_ENABLED=0`
+で仕組みごと止められる。
+
+なお、**そもそも打ち切られにくくする**ため、ランチャーは`CLAUDE_CODE_MAX_RETRIES=15`
+（Claude Code側の上限。既定は10）を渡してセッションを起こす（`scripts/run-issue-session.sh`）。
+
 ### 手作業アシスタントからの代行実行（#1828）
 
 手作業アシスタント（#1826）の手順画面に「承認して実行」を置き、**押した1回の承認でサブPC上の
@@ -414,6 +454,9 @@ cgroupの中で`systemctl --user restart issue-deck-dispatch-poller.service`を�
 実行しているプロセスごと殺されて結果を返せない（systemdの既定は`KillMode=control-group`で、
 `setsid`では逃げられない）。`systemd-run`が使えない環境向けに`setsid`の退避経路も持つが、
 そちらでは再起動の手順で結果が返らずタイムアウトになる。
+
+**tmuxサーバーを別のcgroupへ出すのも同じ理由**（#1935。後述の「tmuxサーバーはpollerとは別の
+cgroupで起こす」）。あちらはscope、こちらはserviceで、使い分けの理由もそこに書いてある。
 
 - コマンドは**argvに載せずファイルで渡す**（`ps`で他のユーザーからも見えるため）。読んだ側が消す
 - cwdは**ホーム固定**。手作業のコマンドはテンプレートどおり自分で`cd`する。前提条件の
@@ -1754,8 +1797,45 @@ exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
 pullが`git`のrename（新しいinode）で入るため、実行中のbashが読んでいるファイルは差し替わらない。
 `exec`まで到達してから新しい版が読まれる。
 
-> **`systemctl --user restart`で人が再起動する場合は、いまも実装セッションが巻き添えになる。**
-> 走っているセッションが無いことを確かめてから打つ。
+> **`systemctl --user restart`で人が再起動する経路と、異常終了→`Restart=always`での復帰は
+> これでは救えない。** どちらもsystemdの停止処理を通るため。そちらは次のtmuxサーバーの
+> cgroupで塞いでいる（#1935）。
+
+#### tmuxサーバーはpollerとは別のcgroupで起こす（#1935）
+
+上の`exec`は「更新して再起動」ボタンのぶんしか救わない。停止処理を通るどの経路でも巻き添えを
+出さないためには、**SIGTERMが飛ぶcgroupにtmuxサーバーを置かない**しかない。
+
+pollerは起動時と各セッションの起動直前に、tmuxサーバーが動いていなければ自分で起こす
+（`ensure_tmux_server_scope`）。
+
+```bash
+systemd-run --user --quiet --scope --collect --unit=issue-deck-tmux-server \
+  tmux start-server ';' set-option -s exit-empty off
+```
+
+- **serviceではなくscope。** serviceはsystemdがコマンドを起こすもので、tmuxのように自分で
+  daemon化するプロセスは主プロセスの追跡に約束事が要る。scopeは「このプロセスを別のunitに入れて
+  動かす」だけなので、daemon化した後もサーバーはそのcgroupに残り、残っている間だけscopeも生きる
+  （手作業の代行実行（#1828）がserviceなのは、あちらがsystemdに起こさせて終了を待たない実行だから）
+- **`set-option -s exit-empty off`が要る。** 既定ではセッションが1本も無いサーバーは即座に
+  終了するため、`start-server`だけでは起こした端からscopeごと消える
+- **paneのプロセスはtmuxサーバーの子として生まれる**ので、サーバーさえ出せば配下のセッションは
+  まとめて巻き添えから外れる（tmux 3.4はさらにpaneごとに`tmux-spawn-<UUID>.scope`を作る）。
+  起動を仲介するランチャーはpollerの子のままでよい——`tmux new-session`は既に動いている
+  サーバーに作らせるだけだから
+- **起動のたびに確かめる。** 直前の`reap_sessions`で最後のセッションが畳まれ、サーバーが
+  落ちていることがある。起動時に1度だけでは、そこから先はまたpollerのcgroupで起き直る
+- **既に動いているサーバーのcgroupは後から変えられない。** pollerと同じcgroupにいるサーバーを
+  見つけたら、警告を（プロセスごとに1度だけ）出して何もしない。**移行はデプロイの直後には
+  起きない**——走っているセッションが全部終わってサーバーが落ちた次の起動で入れ替わる
+- `systemd-run`が無い・失敗した場合は警告を出して従来どおり進む（ランチャーの`tmux new-session`が
+  pollerのcgroupでサーバーを起こす）。起動できないよりはよい
+
+**unitへ`KillMode=process`を入れる案は採らなかった。** 巻き添えは同じように防げるが、停止しても
+走っていたランチャー（`start-issue.sh`・最長15分）やcurl・gitがcgroupに残り、次の起動と重なる。
+止まるべきものが止まらない側の危うさをunit全体に広げるより、tmuxサーバーだけを外へ出す方が
+影響が小さい。unitの入れ替え（`cp` + `daemon-reload`）という手作業が要らないのも大きい。
 
 ## ログをどこで見るか
 

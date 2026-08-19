@@ -99,6 +99,42 @@ session_state_clear_reap() {
   return 0
 }
 
+# APIエラーで中断したセッションを自動再開した記録（#1971）。
+#
+# 中身は`<最後に試した時刻のepoch> <試した回数> <人へ渡したことを通知したか(0|1)>`の1行。
+# **回数を持つのは、過負荷が続いている間に無限に送り続けないため。** 上限（既定3回）を
+# 使い切ったら送るのをやめ、Signalyへ1度だけ通知して人へ渡す。
+#
+# 判定そのもの（何が「中断」か）は`lib/session-resume.sh`が持ち、ここは置き場だけを持つ。
+# **セッションが自力で動き出したら消す**（`session_state_clear_resume`）。次に別の理由で
+# 中断したときに、前回の回数を引きずったまま「もう上限」と判断しないため。
+session_state_resume_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.resume' "$(session_state_dir)" "$1"
+}
+
+session_state_write_resume() {
+  local session="$1" at="$2" attempts="$3" notified="$4" file content
+  file="$(session_state_resume_file "$session")" || return 1
+  printf -v content '%s %s %s\n' "$at" "$attempts" "$notified"
+  session_state_write_file "$file" "$content"
+}
+
+session_state_read_resume() {
+  local session="$1" file
+  file="$(session_state_resume_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  head -1 "$file" 2>/dev/null
+}
+
+session_state_clear_resume() {
+  local session="$1" file
+  file="$(session_state_resume_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Claude Codeがまだ開始していないことの印（#1465）。
 # `run-issue-session.sh`が`claude`を起動する直前に置き、`SessionStart`フックが消す。
 #
@@ -305,6 +341,7 @@ session_state_remove() {
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_reap_file "$session" 2>/dev/null || true)" \
+    "$(session_state_resume_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true

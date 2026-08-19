@@ -64,7 +64,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "artifactRequired",
     label: "アーティファクトで見た目を出す",
     description:
-      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。「計画が必要」と併用すると計画と一緒に承認できます）",
+      "コードを書き始める前に見た目をPC・スマホ（iPhone 15）の2画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。デザインのIssueでは既定でON。「計画が必要」と併用すると計画と一緒に承認できます）",
     githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
   {
@@ -108,6 +108,41 @@ export const PLAN_REQUIRED_DEFAULT_TYPE_LABELS = ["50.feature", "51.improvement"
  */
 export function planRequiredDefaultForLabels(labelNames: readonly string[]): boolean {
   return labelNames.some((name) => PLAN_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
+}
+
+/**
+ * アーティファクトでの見た目確認を既定でONにするIssue種別ラベル（#1956）。
+ *
+ * **デザインの修正だけを挙げる。** このラベルの効きどころは「作り始める前に見た目を合意すること」で、
+ * 見た目そのものが成果物になるIssueでは毎回ONにしたい。逆に画面を触らない新機能・改善まで広げると、
+ * 見た目案を作る意味が無いIssueでチェックを外す手間が増える。
+ */
+export const ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS = ["62.design"];
+
+/**
+ * Issueの種別ラベルから「アーティファクトで見た目を出す」の既定値を求める（#1956）。
+ *
+ * `planRequiredDefaultForLabels`と同じく**種別ラベルだけを見て、`25.artifact-required`自体の有無は
+ * 見ない**。既に付いているラベルを尊重するかどうかは呼び出し側（`startImplementationOptionsFromLabels`）
+ * が決める。
+ *
+ * **リポジトリに`25.artifact-required`が定義されていることも条件にする。** ラベルの付与
+ * エンドポイントは存在しないラベル名を渡すと**その場で作ってしまう**（`fetchRepositoryLabelNames`の
+ * 注記・#1490）。このラベルはローカル実行専用でissue-deck以外へはまだ配っていない（`62.design`だけが
+ * あるリポジトリが実在する）ため、条件を付けないと色も説明も無いラベルが、押した覚えのないまま
+ * 増えてしまう。**手で押した場合は従来どおり付く**（これは既定が勝手にONになる経路だけのガード）。
+ * リポジトリのラベル一覧が未取得（空配列）のときは既定を当てない——付け損ねる方が、配っていない
+ * ラベルを作るより軽い。
+ */
+export function artifactRequiredDefaultForLabels({
+  issueLabelNames,
+  repositoryLabelNames,
+}: {
+  issueLabelNames: readonly string[];
+  repositoryLabelNames: readonly string[];
+}): boolean {
+  if (!repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL)) return false;
+  return issueLabelNames.some((name) => ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
 }
 
 /**
@@ -186,17 +221,30 @@ export function startImplementationLabelsToAdd(options: StartImplementationOptio
 /**
  * issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める。
  *
- * 「計画が必要」だけは種別ラベルからの既定（#1317）も見る。`21.plan-required`が付いていなくても、
- * 新機能・改善のIssueではチェックが入った状態で開く。
+ * 「計画が必要」（#1317）と「アーティファクトで見た目を出す」（#1956）だけは種別ラベルからの既定も
+ * 見る。ラベルが付いていなくても、新機能・改善のIssueでは計画が、デザインのIssueではアーティファクトが
+ * チェックの入った状態で開く。
+ *
+ * `repositoryLabelNames`はそのリポジトリに**定義されている**ラベル名（`/api/issues/meta`）。
+ * アーティファクトの既定にだけ使う（上記`artifactRequiredDefaultForLabels`の注記）。省略した場合は
+ * その既定が当たらないだけで、他のオプションの挙動は変わらない。
  */
-export function startImplementationOptionsFromLabels(labels: IssueLabel[]): StartImplementationOptions {
+export function startImplementationOptionsFromLabels(
+  labels: IssueLabel[],
+  repositoryLabelNames: readonly string[] = [],
+): StartImplementationOptions {
   const labelNames = labels.map((label) => label.name);
   const attached = new Set(labelNames);
   return START_IMPLEMENTATION_OPTIONS.reduce((options, option) => {
-    options[option.key] =
-      option.key === "planRequired"
-        ? attached.has(PLAN_REQUIRED_LABEL) || planRequiredDefaultForLabels(labelNames)
-        : attached.has(option.githubLabel);
+    if (option.key === "planRequired") {
+      options[option.key] = attached.has(PLAN_REQUIRED_LABEL) || planRequiredDefaultForLabels(labelNames);
+    } else if (option.key === "artifactRequired") {
+      options[option.key] =
+        attached.has(ARTIFACT_REQUIRED_LABEL) ||
+        artifactRequiredDefaultForLabels({ issueLabelNames: labelNames, repositoryLabelNames });
+    } else {
+      options[option.key] = attached.has(option.githubLabel);
+    }
     return options;
   }, {} as StartImplementationOptions);
 }

@@ -43,6 +43,20 @@ type UsePullRequestsResult = {
    * 戻ってしまう。
    */
   refreshInBackground: () => void;
+  /**
+   * ユーザーの操作（一覧を下へ引っ張る）による取り直し（#1947）。
+   *
+   * `refreshInBackground`との違いは2つで、どちらも**更新ボタンを外した以上、
+   * 引っ張った結果が嘘にならないため**に要る。
+   *
+   * - **取得が飛んでいる最中は、その取得の完了を待って返す。** 何もせず返すと、自動更新と
+   *   重なったときに「更新中…」が最短表示時間ぶん回っただけで終わり、取り直していないのに
+   *   取り直したように見える。
+   * - **失敗を`error`に出す。** 自動更新の失敗は次の周期で回復するので黙るが、ユーザーが
+   *   自分で引っ張った取得は、レート制限やトークン失効で落ちても画面に何も出ないと
+   *   「引っ張っても何も起きない」としか見えない。
+   */
+  refreshFromPull: () => Promise<void>;
 };
 
 /**
@@ -60,7 +74,8 @@ type UsePullRequestsResult = {
  *
  * **自動更新は`autoRefreshIntervalMs`が渡されている間だけ**（#1531・#1767。呼び出し側で
  * 「完了したPR」ビューの表示中（10秒）と、ブランチ画面でユーザーが間隔を選んだ場合に
- * 限っている）。1回の取得で「リポジトリ数 + draft以外のopen PR数」ぶんGitHub APIを呼ぶため
+ * 限っている）。1回の取得で「リポジトリ数（＋CI状態をinstallationごとに数回。#1962）」ぶん
+ * GitHub APIを呼ぶため
  * （[/api/pull-requests](../app/api/pull-requests/route.ts)）、常時ポーリングするとインストール
  * 当たりの上限（5,000回/時）を超える。10秒間隔で回せるのは、取得側がETagの条件付きGETを
  * 通していて変化が無い間は304＝レート制限を消費しないため
@@ -88,27 +103,42 @@ export function usePullRequests(
   // 自動更新から呼ぶ取得処理。取得effectの中で作った関数をここへ預け、ポーリングのeffectが
   // 取得effectを再実行させずに（＝`isLoading`を立て直さずに）呼べるようにする。
   const backgroundLoadRef = useRef<(() => Promise<void>) | null>(null);
-  // 前の取得が飛んでいる間は次を投げない。遅い応答が重なるとGitHub APIを無駄に消費する。
-  const inFlightRef = useRef(false);
+  // ユーザーの操作（引っ張って更新）から呼ぶ取得処理。失敗を`error`へ出す点だけが違う（#1947）
+  const pullLoadRef = useRef<(() => Promise<void>) | null>(null);
+  /**
+   * 飛んでいる取得。**真偽値ではなくPromiseで持つ**（#1947）。
+   *
+   * 遅い応答が重なるとGitHub APIを無駄に消費するので次を投げないのは従来どおりだが、
+   * 引っ張って更新は「いま飛んでいる取得の完了」を待てないと空振りになる。
+   */
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
   const refreshInBackground = useCallback(() => void backgroundLoadRef.current?.(), []);
+  const refreshFromPull = useCallback(
+    () => pullLoadRef.current?.() ?? Promise.resolve(),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
     /**
-     * `background`が真なのは自動更新からの呼び出し（#1531）。読み込み表示を出さず、失敗も
-     * 画面に出さない——10秒ごとに更新ボタンが無効化され「読み込み中...」が点滅するのは
-     * 画面を見ている側にとって邪魔で、瞬断は次の周期で回復するため。
+     * 取得のきっかけ（#1531・#1947）。読み込み表示（`isLoading`＝「読み込み中...」）を出すのは
+     * 画面を開いた・母集団が変わったときだけで、10秒ごとに点滅させない。失敗を`error`へ出すのは
+     * 「ユーザーがそれを待っている」ときだけで、自動更新の瞬断は次の周期で回復するため黙る。
+     *
+     * | kind | isLoading | 失敗を画面に出す |
+     * | --- | --- | --- |
+     * | `initial` | 出す | 出す |
+     * | `background`（自動更新・通知ベル） | 出さない | 出さない |
+     * | `pull`（引っ張って更新） | 出さない | 出す |
      */
-    async function load(background: boolean) {
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
+    async function runLoad(kind: "initial" | "background" | "pull") {
       // 更新アイコンの回転は自動更新でも出す（#1767）
       setIsRefreshing(true);
-      if (!background) {
+      if (kind === "initial") {
         setIsLoading(true);
         setError(null);
       }
@@ -134,24 +164,43 @@ export function usePullRequests(
         setError(null);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        if (cancelled || background) return;
+        if (cancelled || kind === "background") return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        inFlightRef.current = false;
         if (!cancelled) {
           setIsRefreshing(false);
-          if (!background) setIsLoading(false);
+          if (kind === "initial") setIsLoading(false);
         }
       }
     }
 
-    backgroundLoadRef.current = () => load(true);
-    load(false);
+    /**
+     * 取得の入口。**飛んでいる取得があれば、それの完了を待って返す**（#1947）。
+     * 投げ直さないのは従来どおり（重なるとGitHub APIを無駄に消費する）だが、
+     * 待てるようにしないと引っ張って更新が空振りになる。
+     */
+    function load(kind: "initial" | "background" | "pull"): Promise<void> {
+      const inFlight = inFlightRef.current;
+      if (inFlight) return inFlight;
+      const started = runLoad(kind).finally(() => {
+        inFlightRef.current = null;
+      });
+      inFlightRef.current = started;
+      return started;
+    }
+
+    backgroundLoadRef.current = () => load("background");
+    pullLoadRef.current = () => load("pull");
+    void load("initial");
 
     return () => {
       cancelled = true;
       controller.abort();
       backgroundLoadRef.current = null;
+      pullLoadRef.current = null;
+      // **effectを張り直すときは飛んでいる取得の記録も捨てる。** 残すと、`refresh`で
+      // 母集団を取り直したいのに、中断済みの取得を待って何も取らずに返ってしまう。
+      inFlightRef.current = null;
     };
   }, [fetchScope, reloadKey]);
 
@@ -169,5 +218,6 @@ export function usePullRequests(
     error,
     refresh,
     refreshInBackground,
+    refreshFromPull,
   };
 }

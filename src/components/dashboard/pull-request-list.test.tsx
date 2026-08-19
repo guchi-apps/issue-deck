@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
@@ -29,7 +29,9 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
+    mergeJudgement: "unknown",
     mergeable: null,
+    repairWorkflowAvailability: {},
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -43,6 +45,7 @@ type RenderOverrides = Partial<{
   failedRepositories: string[];
   selectedPullRequestId: string | null;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
+  onPullToRefresh: () => Promise<unknown> | void;
 }>;
 
 function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrides = {}) {
@@ -54,11 +57,21 @@ function renderList(pullRequests: PullRequestSummary[], overrides: RenderOverrid
       fetchedAt="2026-08-11T10:30:00Z"
       isLoading={overrides.isLoading ?? false}
       error={overrides.error ?? null}
-      onRefresh={vi.fn()}
+      onPullToRefresh={overrides.onPullToRefresh}
       selectedPullRequestId={overrides.selectedPullRequestId ?? null}
       onSelectPullRequest={overrides.onSelectPullRequest}
     />,
   );
+}
+
+/**
+ * jsdomには`TouchEvent`のコンストラクタが無いため、ハンドラが読む`touches`だけを持つ
+ * イベントを組み立てる（`use-pull-to-refresh.test.tsx`と同じ作り）。
+ */
+function touchEvent(type: string, x: number, y: number) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+  return event;
 }
 
 describe("PullRequestList", () => {
@@ -149,10 +162,71 @@ describe("PullRequestList", () => {
     expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).toBeTruthy();
   });
 
+  // 自動修復ワークフローが配られていないリポジトリでは、押しても404で起動しない（#1960）。
+  // ボタンは消さず、押せなくしたうえで理由と配り先を添える。
+  it("自動修復ワークフローが未配布なら修復ボタンを押せなくして理由を添える（#1960）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
+      }),
+    ]);
+
+    const ciButton = screen.getByRole("button", { name: "CI失敗を自動修正" });
+    const conflictButton = screen.getByRole("button", { name: "コンフリクトを自動解消" });
+    expect(ciButton.hasAttribute("disabled")).toBe(true);
+    expect(conflictButton.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(
+        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("片方だけ未配布ならその種類だけ押せなくする（#1960）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairWorkflowAvailability: { ci: "available", conflict: "missing" },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(
+      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen.getByText(
+        "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("配布状況を判定していないPRは従来どおり押せる（#1960）", () => {
+    renderList([makePullRequest({ ciState: "failure", repairWorkflowAvailability: {} })]);
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(screen.queryByText(/未配布/)).toBeNull();
+  });
+
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
     renderList([makePullRequest({ draft: true })]);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
     expect(screen.getByText("ドラフト")).toBeTruthy();
+  });
+
+  it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
+    // PR #1959の再現。CIは通っていても判定が終わるまではマージさせない。
+    renderList([makePullRequest({ ciState: "success", mergeJudgement: "pending" })]);
+    const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {
@@ -260,5 +334,56 @@ describe("PullRequestList 経過時間", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// #1947。ヘッダーの「更新」ボタンを外し、代わりに一覧を下へ引っ張って更新できるようにした。
+// ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が実DOMで見る
+describe("PullRequestList の更新（#1947）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("ヘッダーに「更新」ボタンを出さない", () => {
+    renderList([makePullRequest()]);
+
+    expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
+  });
+
+  it("一覧を先頭から下へ引っ張ると更新が走る", async () => {
+    const onPullToRefresh = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderList([makePullRequest()], { onPullToRefresh });
+
+    // タッチを受けるのはスクロール領域を包む枠（0件でも残る側）
+    const pullContainer = container.querySelector("div.relative");
+    expect(pullContainer).toBeTruthy();
+
+    await act(async () => {
+      pullContainer!.dispatchEvent(touchEvent("touchstart", 100, 100));
+      pullContainer!.dispatchEvent(touchEvent("touchmove", 100, 140));
+      // しきい値（64px）を超えるまで引く。追従は移動量の半分（PULL_RESISTANCE）
+      pullContainer!.dispatchEvent(touchEvent("touchmove", 100, 300));
+      pullContainer!.dispatchEvent(new Event("touchend", { bubbles: true }));
+    });
+
+    expect(onPullToRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("引っ張っている途中は「離すと更新」を出す", () => {
+    const { container } = renderList([makePullRequest()], {
+      onPullToRefresh: vi.fn().mockResolvedValue(undefined),
+    });
+    const pullContainer = container.querySelector("div.relative")!;
+
+    act(() => {
+      pullContainer.dispatchEvent(touchEvent("touchstart", 100, 100));
+      pullContainer.dispatchEvent(touchEvent("touchmove", 100, 140));
+    });
+    expect(screen.getByText("引っ張って更新")).toBeTruthy();
+
+    act(() => {
+      pullContainer.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+    expect(screen.getByText("離すと更新")).toBeTruthy();
   });
 });

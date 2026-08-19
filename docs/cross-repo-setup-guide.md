@@ -468,6 +468,15 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > 守るものが無い。`claude-pr-repair.yml`・`shared-knowledge-propose.yml`は導入自体が任意。
 > 配布側に持たせると「全リポジトリへ一律に配る」挙動にしかできず、対象の判断を毎回人が
 > やり直すことになる。
+>
+> **例外は自動修復の3つ**（`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・
+> `claude-pr-repair.yml`。#1948）。**対象の判定を機械で書けた**ため、別の配布
+> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——前2つは
+> `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
+> `release-develop-to-main.yml`を持つリポジトリが対象で、`with:`は同じリポジトリの
+> `claude-issue-dispatch.yml`から写す。**タグの配布とは別のボタン・別のワークフローで、
+> こちらは自動マージしない。** 仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
+> 「配布状況と、不足しているcallerの配布」を参照。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
@@ -592,7 +601,7 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
-| `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | **実装着手前**に見た目のアーティファクト公開・承認を必須にする（ローカル実行専用。#1473・#1540。**issue-deck以外へはまだ配っていない**） |
+| `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | **実装着手前**に見た目のアーティファクト公開・承認を必須にする（ローカル実行専用。#1473・#1540。配布先は限られる。**配っていないリポジトリでは`62.design`による既定ONも効かない**——存在しないラベル名を付与するとその場で作られてしまうため。#1956） |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップ・質問応答ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする（#735・#1528） |
 | `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「ユーザーの作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 

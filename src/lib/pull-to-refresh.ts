@@ -22,6 +22,26 @@ export const PULL_SPINNER_PX = 48;
  * 素直に「取得している間だけ」にすると回転が1周もせずに消え、点滅にしか見えない。
  */
 export const MIN_REFRESHING_MS = 500;
+/**
+ * 外の取得の完了を待つ上限（#1958）。
+ *
+ * ブランチ画面のようにGitHub APIを叩く画面では、取り直しが数秒かかる。取得中かどうかを
+ * 外から受け取って（`usePullToRefresh`の`isRefreshing`）「更新中…」を保つが、応答が返らない
+ * ままフラグが下りない場合に表示が残り続けるのを防ぐため、ここで打ち切る。
+ * **打ち切るのは表示だけで、取得そのものは止めない。**
+ */
+export const MAX_EXTERNAL_REFRESHING_MS = 15_000;
+/**
+ * 外の取得が「始まる」のを待つ上限（#1958）。
+ *
+ * **取り直しの合図（`use-branch-flow.ts`・`use-pull-requests.ts`の`refresh`）は同期関数で、
+ * 呼んだ時点ではまだ取得中フラグが立っていない。** 待たずに見に行くと立つ前に素通りし、
+ * 下限（`MIN_REFRESHING_MS`）だけで表示が消える。立たないまま過ぎたら、その画面は
+ * 取得しなかったものとして扱い待つのをやめる。
+ */
+export const EXTERNAL_REFRESHING_START_MS = 1_000;
+/** 外の取得中フラグを見に行く間隔（#1958）。フラグはrefで読むため自分で確認する */
+export const EXTERNAL_REFRESHING_POLL_MS = 100;
 
 export type PullPhase = "idle" | "pull" | "ready" | "refreshing";
 

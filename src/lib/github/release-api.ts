@@ -1,7 +1,10 @@
 import {
   fetchCheckRollup,
   fetchPullRequestRollup,
+  fetchPullRequestRollups,
   type CheckRollup,
+  type MergeJudgementState,
+  type PullRequestRollupTarget,
 } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
@@ -14,13 +17,20 @@ export const RELEASE_WORKFLOW_FILE = "release-develop-to-main.yml";
 /** mainへのマージを受けて本番デプロイを行うworkflowのファイル名（deploy.yml） */
 export const DEPLOY_WORKFLOW_FILE = "deploy.yml";
 
-/** リポジトリに`release-develop-to-main.yml`と同名のworkflowが存在するかどうか */
-export async function fetchReleaseWorkflowExists(
+/**
+ * リポジトリに指定した名前のworkflowが置かれているかどうか。
+ *
+ * `workflow_dispatch`の受け口はファイルの実在で決まるため、**ファイル名だけで**
+ * 「画面のボタンから起動できるか」を判定できる（`missingRepairWorkflows`と同じ考え方）。
+ * リリースフローの有無（#1538）と自動修復ワークフローの配布状況（#1960）が共有する。
+ */
+export async function fetchWorkflowExists(
   owner: string,
   repo: string,
+  workflowFile: string,
   token: string,
 ): Promise<boolean> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}`;
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}`;
   const res = await githubFetch(url, token);
   if (res.status === 404) return false;
   if (!res.ok) {
@@ -28,6 +38,15 @@ export async function fetchReleaseWorkflowExists(
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
   return true;
+}
+
+/** リポジトリに`release-develop-to-main.yml`と同名のworkflowが存在するかどうか */
+export function fetchReleaseWorkflowExists(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<boolean> {
+  return fetchWorkflowExists(owner, repo, RELEASE_WORKFLOW_FILE, token);
 }
 
 /** 指定ブランチの`package.json`の`version`フィールドを取得する。ファイルが無ければnull */
@@ -191,7 +210,30 @@ export async function fetchRefCiState(
   ref: string,
   token: string,
 ): Promise<CiState> {
-  return toCiState(await fetchCheckRollup(owner, repo, ref, token));
+  return (await fetchRefCheckState(owner, repo, ref, token)).ciState;
+}
+
+/** ref1件ぶんのCI状態と、自動マージ可否の判定の進み具合（#1968） */
+export type RefCheckState = {
+  ciState: CiState;
+  mergeJudgement: MergeJudgementState;
+};
+
+/**
+ * 指定refのCI状態と、自動マージ可否の判定の進み具合を**同じ1回のクエリで**返す（#1968）。
+ *
+ * 判定の進み具合（`claude-review-develop.yml`のcheck-run）はCI状態の集約から外れている
+ * （#1799）ため、CI状態だけを見ていると「判定が走っている最中でもCI通過」に見える。
+ * 同じ`statusCheckRollup`から取り出せるので、これを足してもGitHub APIの消費は増えない。
+ */
+export async function fetchRefCheckState(
+  owner: string,
+  repo: string,
+  ref: string,
+  token: string,
+): Promise<RefCheckState> {
+  const rollup = await fetchCheckRollup(owner, repo, ref, token);
+  return { ciState: toCiState(rollup), mergeJudgement: rollup?.mergeJudgement ?? "unknown" };
 }
 
 /** チェック集約から`CiState`を決める。取得できていなければ`unknown` */
@@ -207,6 +249,8 @@ export type PullRequestCiState = {
   ciState: CiState;
   /** `true`＝マージ可能・`false`＝コンフリクトあり・`null`＝GitHubが判定中または取得できず */
   mergeable: boolean | null;
+  /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968） */
+  mergeJudgement: MergeJudgementState;
 };
 
 /**
@@ -226,7 +270,42 @@ export async function fetchPullRequestCiState(
   token: string,
 ): Promise<PullRequestCiState> {
   const { rollup, mergeable } = await fetchPullRequestRollup(owner, repo, number, token);
-  return { ciState: toCiState(rollup), mergeable };
+  return {
+    ciState: toCiState(rollup),
+    mergeable,
+    mergeJudgement: rollup?.mergeJudgement ?? "unknown",
+  };
+}
+
+/** 取得できなかったPRの値。CI状態・判定の進み具合は`unknown`、コンフリクトは判定できずnull */
+export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
+  ciState: "unknown",
+  mergeable: null,
+  mergeJudgement: "unknown",
+};
+
+/**
+ * 複数PRのCI状態とコンフリクト有無を、**PR件数によらず少ない回数の**GraphQLで取得する（#1962）。
+ *
+ * PR一覧のように対象が何件になるか分からない経路はこちらを使う。1件ずつ`fetchPullRequestCiState`を
+ * 呼ぶと消費がPR件数に比例し、10秒間隔の自動更新と合わせるとレート制限に触れる。
+ *
+ * 返すのは`pullRequestRollupKey()`をキーにしたMapで、**取得できなかったPRはキーごと落とす**。
+ * 呼び出し側は`?? UNKNOWN_PULL_REQUEST_CI_STATE`で未取得へ縮退させる。
+ *
+ * トークンはinstallation単位なので、渡してよいのは同じinstallationのPRだけ。
+ */
+export async function fetchPullRequestCiStates(
+  targets: PullRequestRollupTarget[],
+  token: string,
+): Promise<Map<string, PullRequestCiState>> {
+  const rollups = await fetchPullRequestRollups(targets, token);
+  return new Map(
+    [...rollups].map(([key, { rollup, mergeable }]) => [
+      key,
+      { ciState: toCiState(rollup), mergeable, mergeJudgement: rollup?.mergeJudgement ?? "unknown" },
+    ]),
+  );
 }
 
 /**

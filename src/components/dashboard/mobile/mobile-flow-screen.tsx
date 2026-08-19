@@ -61,6 +61,12 @@ export function MobileFlowScreen({
       onChangeAutoRefreshInterval={onChangeAutoRefreshInterval}
       onRefresh={onRefresh}
       onMerged={onMerged}
+      /* 引っ張って更新（#1958）。ブランチ状況・PR一覧・デプロイ状況の取り直しをまとめて
+         起こす`onRefresh`をそのまま渡す。**完了は待てない**（取り直しのきっかけを作る
+         同期関数のため）ので、「更新中…」の表示は`isRefreshing`で保つ */
+      onPullToRefresh={onRefresh}
+      /* 引っ張って更新できるぶん、ヘッダーの更新は文字を出さずアイコンだけにする（#1958） */
+      refreshIconOnly
       className="h-full"
       footerSpacing
       headerActions={

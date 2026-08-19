@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { GithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useNow } from "@/hooks/use-now";
+import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatDuration } from "@/lib/format-duration";
 
 type GithubApiUsageListProps = {
@@ -45,7 +46,7 @@ export function GithubApiUsageList({ data, isLoading, error }: GithubApiUsageLis
   }
 
   const measuredMs = now !== null ? now - data.measuringSince : null;
-  const currentHourLabel = `${new Date(data.currentHourStartedAt).getHours()}:00〜`;
+  const currentHourLabel = `${formatTimeOfDay(data.currentHourStartedAt)}〜`;
   const modeLabel = mode === "currentHour" ? `今時（${currentHourLabel}）` : "過去1日";
   const total = mode === "currentHour" ? data.totalCurrentHour : data.totalLast24h;
 

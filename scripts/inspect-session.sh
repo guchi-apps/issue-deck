@@ -40,6 +40,12 @@
 
 set -euo pipefail
 
+INSPECT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 転記の場所を引く処理は`lib/session-transcript.sh`に置いてある（#1971）。
+# **中断の検知（poller）と同じ手順を使う**ため、こちら側に写しを持たない。
+# shellcheck source=scripts/lib/session-transcript.sh
+source "$INSPECT_SCRIPT_DIR/lib/session-transcript.sh"
+
 CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 # 長いセッションでは数MBになるため全部は読まない（session-notify.sh の TRANSCRIPT_TAIL_BYTES と同じ考え方）。
 INSPECT_TAIL_BYTES="${INSPECT_TAIL_BYTES:-8388608}"
@@ -139,60 +145,6 @@ resolve_session_by_issue() {
   printf '%s' "$matches"
 }
 
-# セッション名 → 作業ディレクトリ。
-# 生きている間は tmux から取るのが確実。取れないときだけ worktree の規約から補う
-# （`<repo>-issue-<n>` → ~/apps/<repo>-worktrees/issue-<n>）。
-resolve_session_cwd() {
-  local session="$1" path repo number
-  path="$(tmux display-message -p -t "=$session:" '#{pane_current_path}' 2>/dev/null || true)"
-  if [[ -n "$path" && -d "$path" ]]; then
-    printf '%s' "$path"
-    return 0
-  fi
-  if [[ "$session" =~ ^(.+)-issue-([0-9]+)$ ]]; then
-    repo="${BASH_REMATCH[1]}"
-    number="${BASH_REMATCH[2]}"
-    path="$HOME/apps/${repo}-worktrees/issue-${number}"
-    [[ -d "$path" ]] && printf '%s' "$path" && return 0
-  fi
-  return 1
-}
-
-# 作業ディレクトリ → 転記の置き場。ディレクトリ名は cwd の非英数字を `-` へ置換したもの。
-# **これは公開仕様ではない**ので、外れたときは各ディレクトリの `cwd` フィールドと突き合わせる
-# フォールバックへ落ちる（総当たりになるため既定にはしない）。
-resolve_transcript_dir() {
-  local cwd="$1" slug dir latest
-  slug="$(printf '%s' "$cwd" | sed 's/[^a-zA-Z0-9]/-/g')"
-  if [[ -d "$CLAUDE_PROJECTS_DIR/$slug" ]]; then
-    printf '%s' "$CLAUDE_PROJECTS_DIR/$slug"
-    return 0
-  fi
-  for dir in "$CLAUDE_PROJECTS_DIR"/*/; do
-    [[ -d "$dir" ]] || continue
-    latest="$(latest_transcript "${dir%/}")" || continue
-    [[ -n "$latest" ]] || continue
-    if head -n 40 "$latest" 2>/dev/null | jq -r -R 'fromjson? // empty | .cwd // empty' 2>/dev/null | grep -qxF "$cwd"; then
-      printf '%s' "${dir%/}"
-      return 0
-    fi
-  done
-  return 1
-}
-
-# 転記ディレクトリの中で一番新しい .jsonl。セッションを再開すると増えるため、mtime で選ぶ。
-latest_transcript() {
-  local dir="$1" newest="" f
-  for f in "$dir"/*.jsonl; do
-    [[ -f "$f" ]] || continue
-    if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
-      newest="$f"
-    fi
-  done
-  [[ -n "$newest" ]] || return 1
-  printf '%s' "$newest"
-}
-
 # ---------------------------------------------------------------------------
 # 一覧（引数なし）
 # ---------------------------------------------------------------------------
@@ -207,7 +159,7 @@ if [[ -z "$TARGET" ]]; then
   printf '%s\n' 'セッション                       状態     作業ディレクトリ'
   while IFS= read -r s; do
     [[ -n "$s" ]] || continue
-    cwd="$(resolve_session_cwd "$s" || true)"
+    cwd="$(session_transcript_cwd "$s" || true)"
     printf '%-32s %-8s %s\n' "$s" "$(session_state "$s")" "${cwd:-(不明)}"
   done <<<"$sessions"
   printf '\n中身を見るには: %s <Issue番号|セッション名>\n' "${BASH_SOURCE[0]}"
@@ -227,13 +179,13 @@ fi
 [[ -d "$CLAUDE_PROJECTS_DIR" ]] ||
   die "転記の置き場がありません: $CLAUDE_PROJECTS_DIR（このホストでClaude Codeが動いていない可能性があります）"
 
-CWD="$(resolve_session_cwd "$SESSION" || true)"
+CWD="$(session_transcript_cwd "$SESSION" || true)"
 [[ -n "$CWD" ]] || die "セッション「$SESSION」の作業ディレクトリを特定できません（tmuxに無く、worktreeの規約にも当てはまりません）"
 
-TRANSCRIPT_DIR="$(resolve_transcript_dir "$CWD" || true)"
+TRANSCRIPT_DIR="$(session_transcript_dir "$CWD" || true)"
 [[ -n "$TRANSCRIPT_DIR" ]] || die "「$CWD」に対応する転記が $CLAUDE_PROJECTS_DIR にありません"
 
-TRANSCRIPT="$(latest_transcript "$TRANSCRIPT_DIR" || true)"
+TRANSCRIPT="$(session_transcript_latest "$TRANSCRIPT_DIR" || true)"
 [[ -n "$TRANSCRIPT" ]] || die "転記ファイル（.jsonl）が $TRANSCRIPT_DIR にありません"
 
 if ((RAW_ONLY)); then

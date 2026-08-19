@@ -27,6 +27,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,11 +37,13 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
+import { useReleaseTriggerPending } from "@/hooks/use-release-trigger-pending";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
@@ -48,6 +51,7 @@ import {
   isReleaseCiPending,
   type BranchFlow,
 } from "@/lib/branch-flow";
+import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
@@ -114,6 +118,20 @@ type BranchFlowViewProps = {
    * 渡されない場合は`onRefresh`だけを呼ぶ（＝再取得が返るまでマージ待ちのまま残る）。
    */
   onMerged?: (pullRequest: PullRequestSummary) => void;
+  /**
+   * 一覧を下へ引っ張ったときに実行する更新（#1958）。**渡した画面でだけ有効になる。**
+   * 引っ張るという操作はタッチにしか無く、PCの画面は渡さないので今までどおり
+   * （Issue一覧の`onPullToRefresh`と同じ扱い。#1893）。
+   */
+  onPullToRefresh?: () => Promise<unknown> | void;
+  /**
+   * ヘッダーの更新ボタンを回転アイコンだけにするか（#1958）。スマホで渡す。
+   *
+   * 引っ張って更新できるようになったぶん「更新」の文字は要らなくなり、その幅を
+   * 見出しと「◯リポジトリ・◯時点」の行へ回す。**押したときの動きと読み上げ用の名前は
+   * 変えない**——引っ張れることに気づいていない人の手段を消さないため。
+   */
+  refreshIconOnly?: boolean;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   /** 見出しの右に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
@@ -135,14 +153,6 @@ const LANE_STATUS_LABEL: Partial<Record<BranchFlowLaneStatus, string>> = {
   open: "マージ待ち",
   closed: "クローズ（未マージ）",
 };
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
-}
 
 /** レーンの状態を表すピル。マージ待ちだけ色を付ける */
 function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
@@ -695,18 +705,31 @@ function PlannedIssues({
 /**
  * リリースが進行中であることを表す紫のピル（#1931）。畳んだ1行と束の見出しで同じものを使う。
  *
- * **CIが走っている間だけ回るアイコンを添える。** 自動で進んでいる状態と、CIが終わって人の
+ * **自動で進んでいる間だけ回るアイコンを添える。** 自動で進んでいる状態と、CIが終わって人の
  * マージを待っている状態が同じ見た目だったため、開くまで区別できなかった。アイコンは
  * 「デプロイ中」（`DeployStateIcon`）とまったく同じ形・大きさにして、同じ画面で2種類の
  * 回り方が混ざらないようにしている。文言は変えず、読み上げにだけ実行中であることを足す。
+ *
+ * 回っている理由は状態によって違う（CI実行中／workflowの起動待ち。#1955）ので、読み上げへ
+ * 足す言葉は呼び出し側から渡す。
  */
-function ReleaseProgressPill({ label, ciPending }: { label: string; ciPending: boolean }) {
+function ReleaseProgressPill({
+  label,
+  spinning,
+  note,
+}: {
+  label: string;
+  /** 自動で進んでいる最中か。trueのときだけ回るアイコンを出す */
+  spinning: boolean;
+  /** 回っている理由。読み上げに`${label}（${note}）`の形で足す */
+  note?: string;
+}) {
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300"
-      aria-label={ciPending ? `${label}（チェック実行中）` : undefined}
+      aria-label={spinning && note ? `${label}（${note}）` : undefined}
     >
-      {ciPending && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
+      {spinning && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
       {label}
     </span>
   );
@@ -771,7 +794,7 @@ function ReleaseGroupHeader({
               {!inProduction && <DeployStateBadge deploy={group.deploy} />}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
-                  `${formatDate(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
+                  `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && <DeployStateBadge deploy={group.deploy} />}
@@ -792,7 +815,8 @@ function ReleaseGroupHeader({
                     : "本番未反映"
               }
               // 「本番未反映」はまだPRが無い状態なので、そもそもCIも走っていない
-              ciPending={isReleaseCiPending(group.pullRequest, group.bumpPullRequest)}
+              spinning={isReleaseCiPending(group.pullRequest, group.bumpPullRequest)}
+              note="チェック実行中"
             />
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
@@ -856,9 +880,10 @@ function ReleaseFlowGraph({
   showAllVersions,
   showAllPlannedIssues,
   mergedPullRequestsLoaded,
+  releaseTriggerPending,
   onShowAllVersions,
   onToggleAllPlannedIssues,
-  onRefresh,
+  onReleaseTriggered,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -867,10 +892,12 @@ function ReleaseFlowGraph({
   /** 実装予定を全件出しているか（#1704）。既定は頭出しの3件まで */
   showAllPlannedIssues: boolean;
   mergedPullRequestsLoaded: boolean;
+  /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
+  releaseTriggerPending: boolean;
   onShowAllVersions: () => void;
   onToggleAllPlannedIssues: () => void;
-  /** リリースworkflowを起こした後の取り直し */
-  onRefresh: () => void;
+  /** リリースworkflowを起こせた後（起動中の記録と、バンプPRを出すための取り直し） */
+  onReleaseTriggered: () => void;
   /** PRをこの画面からマージできたとき（#1756） */
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
@@ -975,7 +1002,8 @@ function ReleaseFlowGraph({
                   repositoryFullName={repository.repositoryFullName}
                   pendingIssues={pendingIssues}
                   currentVersion={repository.release.latestVersion}
-                  onTriggered={onRefresh}
+                  isPending={releaseTriggerPending}
+                  onTriggered={onReleaseTriggered}
                 />
               ) : undefined
             }
@@ -1142,23 +1170,31 @@ function RepositorySummaryRow({
   repository,
   branchesFailed,
   mergedPullRequestsLoaded,
+  releaseTriggerPending,
   isOpen,
   onToggle,
 }: {
   repository: BranchFlowRepository;
   branchesFailed: boolean;
   mergedPullRequestsLoaded: boolean;
+  /** この端末からリリースworkflowを起こした直後で、まだバンプPRが現れていない（#1955） */
+  releaseTriggerPending: boolean;
   isOpen: boolean;
   onToggle: () => void;
 }) {
   const { summary } = repository;
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
+  // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
+  // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
+  const releaseLaunching = releaseTriggerPending && repository.canTriggerRelease;
   // 成功したデプロイは畳んだ行に出さない（静止している状態でバッジを埋めない。#1579）
   const deploy =
     summary.deploy && summary.deploy.kind !== "success" ? summary.deploy : null;
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
+    releaseLaunching ||
     deploy !== null ||
     unreleasedCommits > 0 ||
     summary.openManualStepCount > 0 ||
@@ -1203,8 +1239,18 @@ function RepositorySummaryRow({
           CI失敗
         </span>
       )}
-      {summary.releaseInProgress && (
-        <ReleaseProgressPill label="リリース中" ciPending={summary.releaseCiPending} />
+      {summary.releaseInProgress ? (
+        <ReleaseProgressPill
+          label="リリース中"
+          spinning={summary.releaseCiPending}
+          note="チェック実行中"
+        />
+      ) : (
+        // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
+        // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
+        releaseLaunching && (
+          <ReleaseProgressPill label="リリース起動中" spinning note="workflowの起動待ち" />
+        )
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
@@ -1239,7 +1285,7 @@ function RepositorySummaryRow({
         />
       )}
       {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886） */}
-      {unreleasedCommits > 0 && !summary.releaseInProgress && (
+      {unreleasedCommits > 0 && !summary.releaseInProgress && !releaseLaunching && (
         <SummaryCount
           icon={ArrowUpToLine}
           label={`未リリース ${unreleasedCommits}コミット`}
@@ -1262,6 +1308,76 @@ function RepositorySummaryRow({
 }
 
 /**
+ * リポジトリ1件ぶん（畳んだ1行＋開いた中身）。
+ *
+ * **切り出したのは、起動中（`useReleaseTriggerPending`）を1か所で持つため**（#1955）。
+ * 起動時刻は端末のlocalStorageにあるが、同じキーを畳んだ行とボタンの2か所から読むと
+ * 押した瞬間の書き込みが互いに伝わらない。ここで1回だけ読み、行とボタンへ配る。
+ */
+function RepositorySection({
+  repository,
+  branchesFailed,
+  mergedPullRequestsLoaded,
+  showClosed,
+  showAllVersions,
+  showAllPlannedIssues,
+  isOpen,
+  onToggle,
+  onShowAllVersions,
+  onToggleAllPlannedIssues,
+  onRefresh,
+  onMerged,
+}: {
+  repository: BranchFlowRepository;
+  branchesFailed: boolean;
+  mergedPullRequestsLoaded: boolean;
+  showClosed: boolean;
+  showAllVersions: boolean;
+  showAllPlannedIssues: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+  onShowAllVersions: () => void;
+  onToggleAllPlannedIssues: () => void;
+  /** リリースworkflowを起こした後の取り直し */
+  onRefresh: () => void;
+  onMerged: (pullRequest: PullRequestSummary) => void;
+}) {
+  const { isPending, markTriggered } = useReleaseTriggerPending(repository.repositoryFullName);
+
+  return (
+    <section>
+      <RepositorySummaryRow
+        repository={repository}
+        branchesFailed={branchesFailed}
+        mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+        releaseTriggerPending={isPending}
+        isOpen={isOpen}
+        onToggle={onToggle}
+      />
+      {isOpen && (
+        <div className="border-b">
+          <ReleaseFlowGraph
+            repository={repository}
+            showClosed={showClosed}
+            showAllVersions={showAllVersions}
+            showAllPlannedIssues={showAllPlannedIssues}
+            mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+            releaseTriggerPending={isPending}
+            onShowAllVersions={onShowAllVersions}
+            onToggleAllPlannedIssues={onToggleAllPlannedIssues}
+            onReleaseTriggered={() => {
+              markTriggered();
+              onRefresh();
+            }}
+            onMerged={onMerged}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
  * 手を動かす必要があるリポジトリか。ヘッダーの「手が要るもの◯件」に数える（#1510）。
  *
  * **開く条件ではない**（#1932）。初回に自動で開く動きはやめたので、この判定が変える表示は
@@ -1269,6 +1385,11 @@ function RepositorySummaryRow({
  *
  * **デプロイ中も含める**（#1579）。押す操作は無いが、mainへマージしてから本番へ出るまでの間は
  * 「今どこまで来ているか」を見に来る時間そのもので、件数から漏らすと見に来る手掛かりが無い。
+ *
+ * **「リリース起動中」（#1955）だけは含めない。** 押す操作の有無ではなく、判断の材料が
+ * 端末ローカルの記録（起動時刻をlocalStorageへ置き、10分で失効する）でしかないため——
+ * 数えると、同じ画面をどの端末で見るかによってヘッダーの件数が食い違う。畳んだ行のピルは
+ * 押した端末にだけ出るもので、そこで閉じている。
  */
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
@@ -1303,6 +1424,8 @@ export function BranchFlowView({
   onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
+  onPullToRefresh,
+  refreshIconOnly = false,
   headerLeading,
   headerActions,
   className,
@@ -1315,6 +1438,19 @@ export function BranchFlowView({
   // 実装予定を全件出しているリポジトリ（#1704）。既定は頭出しの3件までで、押すたびに切り替える
   const [allPlannedRepositories, setAllPlannedRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
+
+  // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
+  // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
+  // 取得の完了は`isRefreshing`で待つ——`onRefresh`（`use-branch-flow.ts`・`use-pull-requests.ts`の
+  // `refresh`）は取り直しのきっかけを作る同期関数で、待っても取得の完了とは無関係に返る
+  const pullContainerRef = useRef<HTMLDivElement>(null);
+  const pullScrollRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh({
+    containerRef: pullContainerRef,
+    scrollRef: pullScrollRef,
+    onRefresh: onPullToRefresh,
+    isRefreshing: isRefreshing ?? isLoading,
+  });
 
   // **取得に失敗したときは読み込み中で止めない**（#1711）。`error`は見出しのすぐ下に出ており、
   // そこへ終わらない「読み込み中」を重ねると、待てば直るものとして読めてしまう。
@@ -1387,7 +1523,7 @@ export function BranchFlowView({
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
               )}
-              {fetchedAt && <span>{` ・ ${formatTime(fetchedAt)}時点`}</span>}
+              {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
                   「いま取りに行った」ことしか分からず、次にいつ更新されるかが読めない */}
               {autoRefreshIntervalMs !== null && (
@@ -1427,14 +1563,21 @@ export function BranchFlowView({
           <Button
             size="sm"
             variant="ghost"
-            className={cn("h-8 shrink-0", onChangeAutoRefreshInterval && "rounded-r-none pr-1.5")}
+            /* アイコンだけにしても読み上げ用の名前は「更新」のまま（#1958） */
+            aria-label="更新"
+            className={cn(
+              "h-8 shrink-0",
+              refreshIconOnly && "px-2",
+              onChangeAutoRefreshInterval && "rounded-r-none pr-1.5",
+            )}
             disabled={isLoading}
             onClick={onRefresh}
           >
             {/* 回転させる条件は`isRefreshing`（自動更新でも回る。#1767）。ボタンを押せなく
                 するのは手動更新のときだけなので、こちらは`isLoading`のまま */}
             <RefreshCw className={cn("size-3.5", (isRefreshing ?? isLoading) && "animate-spin")} />
-            更新
+            {/* スマホは引っ張って更新できるぶん文字を出さない（#1958） */}
+            {!refreshIconOnly && "更新"}
           </Button>
           {onChangeAutoRefreshInterval && (
             <DropdownMenu>
@@ -1471,62 +1614,61 @@ export function BranchFlowView({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain">
-        {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
+      {/* 引っ張って更新（#1958）のタッチを受ける枠。スクロールするのは中の要素で、
+          この枠は動かさない（インジケーターを上端に重ねる基準にもなる） */}
+      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+        <PullToRefreshIndicator pull={pull} />
 
-        {!error && flow.repositories.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isLoading ? "読み込み中..." : "表示できるリポジトリがありません。"}
-          </p>
-        )}
+        <div
+          ref={pullScrollRef}
+          className="flex-1 overflow-y-auto overscroll-contain"
+          style={{
+            transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
+            transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
+          }}
+        >
+          {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 
-        {flow.repositories.map((repository) => {
-          const isOpen = openRepositories.has(repository.repositoryFullName);
-          return (
-            <section key={repository.repositoryFullName}>
-              <RepositorySummaryRow
-                repository={repository}
-                branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
-                mergedPullRequestsLoaded={releasesLoaded}
-                isOpen={isOpen}
-                onToggle={() => toggleRepository(repository.repositoryFullName)}
-              />
-              {isOpen && (
-                <div className="border-b">
-                  <ReleaseFlowGraph
-                    repository={repository}
-                    showClosed={showClosed}
-                    showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
-                    showAllPlannedIssues={allPlannedRepositories.has(
-                      repository.repositoryFullName,
-                    )}
-                    mergedPullRequestsLoaded={releasesLoaded}
-                    onShowAllVersions={() =>
-                      setAllVersionsRepositories(
-                        (prev) => new Set([...prev, repository.repositoryFullName]),
-                      )
-                    }
-                    onToggleAllPlannedIssues={() =>
-                      setAllPlannedRepositories((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(repository.repositoryFullName)) {
-                          next.delete(repository.repositoryFullName);
-                        } else {
-                          next.add(repository.repositoryFullName);
-                        }
-                        return next;
-                      })
-                    }
-                    onRefresh={onRefresh}
-                    onMerged={handleMerged}
-                  />
-                </div>
-              )}
-            </section>
-          );
-        })}
+          {!error && flow.repositories.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {isLoading ? "読み込み中..." : "表示できるリポジトリがありません。"}
+            </p>
+          )}
 
-        {footerSpacing && <div className="h-14" aria-hidden="true" />}
+          {flow.repositories.map((repository) => (
+            <RepositorySection
+              key={repository.repositoryFullName}
+              repository={repository}
+              branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
+              mergedPullRequestsLoaded={releasesLoaded}
+              showClosed={showClosed}
+              showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
+              showAllPlannedIssues={allPlannedRepositories.has(repository.repositoryFullName)}
+              isOpen={openRepositories.has(repository.repositoryFullName)}
+              onToggle={() => toggleRepository(repository.repositoryFullName)}
+              onShowAllVersions={() =>
+                setAllVersionsRepositories(
+                  (prev) => new Set([...prev, repository.repositoryFullName]),
+                )
+              }
+              onToggleAllPlannedIssues={() =>
+                setAllPlannedRepositories((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(repository.repositoryFullName)) {
+                    next.delete(repository.repositoryFullName);
+                  } else {
+                    next.add(repository.repositoryFullName);
+                  }
+                  return next;
+                })
+              }
+              onRefresh={onRefresh}
+              onMerged={handleMerged}
+            />
+          ))}
+
+          {footerSpacing && <div className="h-14" aria-hidden="true" />}
+        </div>
       </div>
     </div>
   );
