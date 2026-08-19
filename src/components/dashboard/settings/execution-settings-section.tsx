@@ -171,8 +171,8 @@ export function ExecutionSettingsSection({
         />
         <p className="text-xs text-muted-foreground">
           サブPCへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
-          合わせて変えられるよう設定値にしています（既定の2はCPUを載せ替える前の実測値で、
-          載せ替え後の測り直しは未了です）。
+          合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
+          4本にするとメモリが足りずビルドが2倍以上遅くなります）。
         </p>
       </div>
 
