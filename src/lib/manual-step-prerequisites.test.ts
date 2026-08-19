@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectPrerequisiteReferences,
+  describeIssueStage,
+  extractExplicitPrerequisites,
   extractManualStepReferences,
   formatManualStepReference,
   resolveManualStepPrerequisites,
@@ -83,9 +86,9 @@ const BODY = [
 describe("extractManualStepReferences", () => {
   it("前提条件の節の参照と起点Issueを拾う", () => {
     expect(extractManualStepReferences(BODY, REPO, 1712)).toEqual([
-      { repositoryFullName: REPO, number: 1690, origin: false },
-      { repositoryFullName: REPO, number: 1704, origin: false },
-      { repositoryFullName: REPO, number: 1662, origin: true },
+      { repositoryFullName: REPO, number: 1690, origin: false, explicit: true },
+      { repositoryFullName: REPO, number: 1704, origin: false, explicit: true },
+      { repositoryFullName: REPO, number: 1662, origin: true, explicit: false },
     ]);
   });
 
@@ -107,7 +110,7 @@ describe("extractManualStepReferences", () => {
     const body = "## 前提条件\n\n- 先に完了している必要があるIssue・PR: guchi-apps/vps#88\n";
 
     expect(extractManualStepReferences(body, REPO, 1712)).toEqual([
-      { repositoryFullName: "guchi-apps/vps", number: 88, origin: false },
+      { repositoryFullName: "guchi-apps/vps", number: 88, origin: false, explicit: true },
     ]);
   });
 
@@ -115,15 +118,17 @@ describe("extractManualStepReferences", () => {
     const body = "## 前提条件\n\n- #1712 と #1690 と #1690\n";
 
     expect(extractManualStepReferences(body, REPO, 1712)).toEqual([
-      { repositoryFullName: REPO, number: 1690, origin: false },
+      { repositoryFullName: REPO, number: 1690, origin: false, explicit: true },
     ]);
   });
 
   it("前提条件にも書かれた起点Issueは1件にまとめ、起点として印を付ける", () => {
     const body = "## 前提条件\n\n- #1662 がmainへ反映された後\n\n## 関連\n\n- 起点Issue: #1662\n";
 
+    // 書かれてもいるので`explicit`。起点から補っただけの前提と違い、相手が自分を待って
+    // いても取り消さない（#2003）
     expect(extractManualStepReferences(body, REPO, 1712)).toEqual([
-      { repositoryFullName: REPO, number: 1662, origin: true },
+      { repositoryFullName: REPO, number: 1662, origin: true, explicit: true },
     ]);
   });
 
@@ -131,7 +136,7 @@ describe("extractManualStepReferences", () => {
     const body = "## やること\n\n- [ ] 実行する\n\n## 関連\n\n- 起点Issue: #1662\n";
 
     expect(extractManualStepReferences(body, REPO, 1712)).toEqual([
-      { repositoryFullName: REPO, number: 1662, origin: true },
+      { repositoryFullName: REPO, number: 1662, origin: true, explicit: false },
     ]);
   });
 });
@@ -165,7 +170,7 @@ describe("resolveManualStepPrerequisites", () => {
   it("Doneでcloseされたissueはmainへ反映済みとして扱う", () => {
     const issues = [makeIssue({ number: 1690, projectStatus: "Done", state: "closed" })];
     const [first] = resolveManualStepPrerequisites(
-      [{ repositoryFullName: REPO, number: 1690, origin: false }],
+      [{ repositoryFullName: REPO, number: 1690, origin: false, explicit: true }],
       issues,
       [],
       REPO,
@@ -178,7 +183,7 @@ describe("resolveManualStepPrerequisites", () => {
   it("Doneまで行かずに閉じられたIssueは待たない", () => {
     const issues = [makeIssue({ number: 1690, state: "closed", stateReason: "not_planned" })];
     const [first] = resolveManualStepPrerequisites(
-      [{ repositoryFullName: REPO, number: 1690, origin: false }],
+      [{ repositoryFullName: REPO, number: 1690, origin: false, explicit: true }],
       issues,
       [],
       REPO,
@@ -190,7 +195,7 @@ describe("resolveManualStepPrerequisites", () => {
 
   it("マージ済みPRは満たされたものとして扱い、3段階には載せない", () => {
     const [first] = resolveManualStepPrerequisites(
-      [{ repositoryFullName: REPO, number: 1704, origin: false }],
+      [{ repositoryFullName: REPO, number: 1704, origin: false, explicit: true }],
       [],
       [makePullRequest({ number: 1704, state: "closed", merged: true })],
       REPO,
@@ -207,7 +212,7 @@ describe("resolveManualStepPrerequisites", () => {
   // 取得範囲外というだけで実行できる手作業を止めない（manual-step-attentionと同じ向き）
   it("状態を取れなかった参照は待ちに数えない", () => {
     const [first] = resolveManualStepPrerequisites(
-      [{ repositoryFullName: "guchi-apps/vps", number: 88, origin: false }],
+      [{ repositoryFullName: "guchi-apps/vps", number: 88, origin: false, explicit: true }],
       [],
       [],
       REPO,
@@ -222,7 +227,7 @@ describe("resolveManualStepPrerequisites", () => {
       makeIssue({ number: 88, repositoryFullName: "guchi-apps/vps", title: "こちらが正しい" }),
     ];
     const [first] = resolveManualStepPrerequisites(
-      [{ repositoryFullName: "guchi-apps/vps", number: 88, origin: false }],
+      [{ repositoryFullName: "guchi-apps/vps", number: 88, origin: false, explicit: true }],
       issues,
       [],
       REPO,
@@ -235,7 +240,7 @@ describe("resolveManualStepPrerequisites", () => {
 describe("summarizeManualStepPrerequisites", () => {
   it("待つ相手が無ければ実行できる旨を返す", () => {
     const prerequisites = resolveManualStepPrerequisites(
-      [{ repositoryFullName: REPO, number: 1662, origin: true }],
+      [{ repositoryFullName: REPO, number: 1662, origin: true, explicit: false }],
       [makeIssue({ number: 1662, projectStatus: "Done", state: "closed" })],
       [],
       REPO,
@@ -251,8 +256,8 @@ describe("summarizeManualStepPrerequisites", () => {
   it("何を待っているのかまで含めた1行を返す", () => {
     const prerequisites = resolveManualStepPrerequisites(
       [
-        { repositoryFullName: REPO, number: 1690, origin: true },
-        { repositoryFullName: REPO, number: 1704, origin: false },
+        { repositoryFullName: REPO, number: 1690, origin: true, explicit: true },
+        { repositoryFullName: REPO, number: 1704, origin: false, explicit: true },
       ],
       [
         makeIssue({ number: 1690, projectStatus: "Develop" }),
@@ -274,13 +279,139 @@ describe("summarizeManualStepPrerequisites", () => {
 describe("formatManualStepReference", () => {
   it("同じリポジトリなら番号だけ、別リポジトリならfullNameを添える", () => {
     expect(
-      formatManualStepReference({ repositoryFullName: REPO, number: 12, origin: false }, REPO),
+      formatManualStepReference({ repositoryFullName: REPO, number: 12, origin: false, explicit: true }, REPO),
     ).toBe("#12");
     expect(
       formatManualStepReference(
-        { repositoryFullName: "guchi-apps/vps", number: 88, origin: false },
+        { repositoryFullName: "guchi-apps/vps", number: 88, origin: false, explicit: true },
         REPO,
       ),
     ).toBe("guchi-apps/vps#88");
+  });
+});
+
+const MANUAL_STEP_LABEL = { name: "71.manual-step", color: "d876e3", description: null };
+
+// #2003: 実施順序を`## 前提条件`に書けば、手作業Issue以外でも画面に出る
+describe("collectPrerequisiteReferences", () => {
+  it("一般のIssueは`## 前提条件`だけを読み、`## 関連`の起点は前提にしない", () => {
+    const issue = makeIssue({
+      number: 38,
+      body: "## 前提条件\n\n- 先に完了している必要があるIssue・PR: #39\n\n## 関連\n\n- 起点: #1997\n",
+    });
+
+    expect(collectPrerequisiteReferences(issue, [issue])).toEqual([
+      { repositoryFullName: REPO, number: 39, origin: false, explicit: true },
+    ]);
+  });
+
+  it("手作業Issueは今までどおり`## 関連`の起点も前提として補う", () => {
+    const manualStep = makeIssue({
+      number: 39,
+      labels: [MANUAL_STEP_LABEL],
+      body: "## 関連\n\n- 起点: #38\n",
+    });
+
+    expect(collectPrerequisiteReferences(manualStep, [manualStep])).toEqual([
+      { repositoryFullName: REPO, number: 38, origin: true, explicit: false },
+    ]);
+  });
+
+  // guchi-apps/subpc#38（起点）と#39（手作業）。放っておくと互いを待ち、
+  // 実際の順序と逆向きの待ちだけが画面に出ていた
+  it("起点が自分を前提として挙げていれば、起点から補った前提は取り消す", () => {
+    const origin = makeIssue({
+      number: 38,
+      body: "## 前提条件\n\n- 先に完了している必要があるIssue・PR: #39\n",
+    });
+    const manualStep = makeIssue({
+      number: 39,
+      labels: [MANUAL_STEP_LABEL],
+      body: "## 関連\n\n- 起点: #38\n",
+    });
+
+    expect(collectPrerequisiteReferences(manualStep, [origin, manualStep])).toEqual([]);
+    expect(collectPrerequisiteReferences(origin, [origin, manualStep])).toEqual([
+      { repositoryFullName: REPO, number: 39, origin: false, explicit: true },
+    ]);
+  });
+
+  it("前提条件にも書いてある起点は取り消さない", () => {
+    const origin = makeIssue({
+      number: 38,
+      body: "## 前提条件\n\n- #39\n",
+    });
+    const manualStep = makeIssue({
+      number: 39,
+      labels: [MANUAL_STEP_LABEL],
+      body: "## 前提条件\n\n- #38 がmainへ反映された後\n\n## 関連\n\n- 起点: #38\n",
+    });
+
+    expect(collectPrerequisiteReferences(manualStep, [origin, manualStep])).toEqual([
+      { repositoryFullName: REPO, number: 38, origin: true, explicit: true },
+    ]);
+  });
+});
+
+describe("extractExplicitPrerequisites", () => {
+  it("`## 関連`の起点は含めない", () => {
+    const issue = makeIssue({
+      number: 39,
+      labels: [MANUAL_STEP_LABEL],
+      body: "## 前提条件\n\n- #12\n\n## 関連\n\n- 起点: #38\n",
+    });
+
+    expect(extractExplicitPrerequisites(issue).map((reference) => reference.number)).toEqual([12]);
+  });
+});
+
+// #2003: 手作業はdevelopもmainも通らないので、3段階に載せると通っていない道を通ったように見える
+describe("describeIssueStage", () => {
+  it("未実施の手作業は3段階に載せない", () => {
+    const stage = describeIssueStage(makeIssue({ number: 39, labels: [MANUAL_STEP_LABEL] }));
+
+    expect(stage).toMatchObject({
+      stage: "manual-pending",
+      label: "手作業・未実施",
+      satisfied: false,
+      stepIndex: null,
+      manualStep: true,
+    });
+  });
+
+  it("実施してクローズされた手作業は満たされたものとして扱う", () => {
+    const stage = describeIssueStage(
+      makeIssue({ number: 39, labels: [MANUAL_STEP_LABEL], state: "closed" }),
+    );
+
+    expect(stage).toMatchObject({ stage: "manual-done", label: "実施済み", satisfied: true });
+  });
+
+  it("実施せず終わらせた手作業も待たない", () => {
+    const stage = describeIssueStage(
+      makeIssue({
+        number: 39,
+        labels: [MANUAL_STEP_LABEL],
+        state: "closed",
+        stateReason: "not_planned",
+      }),
+    );
+
+    expect(stage).toMatchObject({ stage: "closed", label: "実施せず終了", satisfied: true });
+  });
+});
+
+describe("summarizeManualStepPrerequisites（一般のIssue。#2003）", () => {
+  it("実行できるかではなく、残っている前提の件数を出す", () => {
+    const prerequisites = resolveManualStepPrerequisites(
+      [{ repositoryFullName: REPO, number: 39, origin: false, explicit: true }],
+      [makeIssue({ number: 39, labels: [MANUAL_STEP_LABEL] })],
+      [],
+      REPO,
+    );
+
+    expect(
+      summarizeManualStepPrerequisites(prerequisites, REPO, { manualStep: false }).message,
+    ).toBe("前提が1件残っています。#39 の手作業が実施されるのを待ってください。");
   });
 });

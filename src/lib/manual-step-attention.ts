@@ -1,6 +1,6 @@
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import {
-  extractManualStepReferences,
+  collectPrerequisiteReferences,
   resolveManualStepPrerequisites,
   summarizeManualStepPrerequisites,
   type ManualStepPrerequisite,
@@ -27,7 +27,11 @@ export type ManualStepReadiness = {
   message: string;
 };
 
-/** Issueのid → いま実行できるか。手作業Issue（openな`71.manual-step`）だけが載る */
+/**
+ * Issueのid → 前提がそろっているか。何が載るかは作った関数で違う
+ * （`computeManualStepReadiness`は手作業Issueだけ、`computeIssuePrerequisiteReadiness`は
+ * 前提を書いたIssueすべて）。
+ */
 export type ManualStepReadinessMap = ReadonlyMap<string, ManualStepReadiness>;
 
 /**
@@ -83,21 +87,51 @@ export function computeManualStepReadiness(
   issues: Issue[],
   referenceIssues: Issue[] = issues,
 ): ManualStepReadinessMap {
+  return computeReadiness(issues, referenceIssues, { manualStepOnly: true });
+}
+
+/**
+ * 前提条件を書いたIssueすべてを1件ずつ判定する（#2003）。一覧の行アイコンとIssue詳細は
+ * こちらを使い、**手作業Issue以外でも前提待ちが分かる**ようにする。
+ *
+ * `computeManualStepReadiness`（手作業Issueだけ）との使い分けは、**数と通知の意味を守るため**。
+ * 左メニュー「ユーザーの作業待ち」の件数と手作業の通知（`notifications.ts`）は「いま手を
+ * 動かせば盤面が進む手作業が何件あるか」を答えるもので、一般のIssueを混ぜると別の数になる。
+ *
+ * 手作業Issueは前提を1件も書いていなくても載せる（従来どおり緑チェックが付く）。
+ * 一般のIssueは**前提を書いたものだけ**を載せる——書いていないIssueにまで印を出すと、
+ * 一覧のほぼ全行にアイコンが並び、前提待ちの橙が埋もれる。
+ */
+export function computeIssuePrerequisiteReadiness(
+  issues: Issue[],
+  referenceIssues: Issue[] = issues,
+): ManualStepReadinessMap {
+  return computeReadiness(issues, referenceIssues, { manualStepOnly: false });
+}
+
+function computeReadiness(
+  issues: Issue[],
+  referenceIssues: Issue[],
+  { manualStepOnly }: { manualStepOnly: boolean },
+): ManualStepReadinessMap {
   const readinessByIssueId = new Map<string, ManualStepReadiness>();
   for (const issue of issues) {
-    if (issue.state !== "open" || !isManualStepIssue(issue.labels)) continue;
-    const references = extractManualStepReferences(
-      issue.body,
-      issue.repositoryFullName,
-      issue.number,
-    );
+    if (issue.state !== "open") continue;
+    const manualStep = isManualStepIssue(issue.labels);
+    if (manualStepOnly && !manualStep) continue;
+
+    const references = collectPrerequisiteReferences(issue, referenceIssues);
+    if (!manualStep && references.length === 0) continue;
+
     const prerequisites = resolveManualStepPrerequisites(
       references,
       referenceIssues,
       [],
       issue.repositoryFullName,
     );
-    const summary = summarizeManualStepPrerequisites(prerequisites, issue.repositoryFullName);
+    const summary = summarizeManualStepPrerequisites(prerequisites, issue.repositoryFullName, {
+      manualStep,
+    });
     readinessByIssueId.set(issue.id, {
       ready: summary.blocking.length === 0,
       blocking: summary.blocking,

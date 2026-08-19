@@ -2,8 +2,10 @@
 
 import { Ban, CheckCircle2, ListChecks, Loader2, Wrench } from "lucide-react";
 
+import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
+import type { IssueDependent } from "@/lib/issue-dependents";
 import type {
   ManualStepPrerequisite,
   ManualStepPrerequisiteSummary,
@@ -39,6 +41,7 @@ export function ManualStepPanel({
   isSubmitting,
   prerequisites,
   prerequisiteSummary,
+  dependents,
   repositoryFullName,
   className,
 }: {
@@ -60,6 +63,11 @@ export function ManualStepPanel({
   prerequisites?: ManualStepPrerequisite[];
   /** 参照が1件も無ければnull。そのときは前提条件のブロックごと出さない */
   prerequisiteSummary?: ManualStepPrerequisiteSummary | null;
+  /**
+   * このIssueの完了を待っているIssue（#2003）。**実行者に一番効く情報**——自分が終わるまで
+   * 何が止まっているのかが分かると、後回しにしてよい手作業かどうかを判断できる。
+   */
+  dependents?: IssueDependent[];
   repositoryFullName?: string;
   className?: string;
 }) {
@@ -87,6 +95,11 @@ export function ManualStepPanel({
           summary={prerequisiteSummary}
           repositoryFullName={repositoryFullName}
         />
+      )}
+      {/* 逆向き——この手作業が終わるまで先へ進めないIssue（#2003）。前提条件のすぐ下に置く。
+          どちらも実施順序という1つの問いへの答えで、離すと順番を確かめるのに画面を往復する */}
+      {dependents && dependents.length > 0 && repositoryFullName && (
+        <IssueDependents dependents={dependents} repositoryFullName={repositoryFullName} />
       )}
       <div className="flex flex-wrap gap-2">
         {/* 手順を1つずつ案内する入口（#1826）。**実行の前に押すもの**なので、
