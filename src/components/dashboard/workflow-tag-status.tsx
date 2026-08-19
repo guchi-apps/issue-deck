@@ -13,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { FleetRepositoryRow } from "@/components/dashboard/fleet-repository-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -72,7 +73,13 @@ function CountChip({
   );
 }
 
-/** 一覧の1行。左からアイコン・リポジトリ名・タグ・（あれば）補足 */
+/**
+ * 一覧の1行。アイコン・リポジトリ名・タグ・（あれば）補足を`FleetRepositoryRow`へ載せる。
+ *
+ * **不一致の警告は結果と同じ段に置かない**（#1952）。以前は結果側を`ml-auto shrink-0`で
+ * 右端に固定していたため、`uses と prompts-ref が不一致`が入るとスマホ幅で画面の外へ出て、
+ * 先にリポジトリ名（`truncate`）が欠けていた。
+ */
 function RepositoryRow({
   status,
   latest,
@@ -86,45 +93,45 @@ function RepositoryRow({
   const to = latest ? shortWorkflowTag(latest) : null;
 
   return (
-    <li className="flex items-center gap-2 text-xs">
-      {group === "latest" ? (
-        <Check className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : group === "pull-request" ? (
-        <GitPullRequestArrow className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : running ? (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-      ) : (
-        <AlertTriangle
-          className={`size-3.5 shrink-0 ${status.mismatched ? "text-destructive" : "text-amber-500"}`}
-        />
-      )}
-
-      <span className="truncate">{status.fullName}</span>
-
-      <span className="ml-auto flex shrink-0 items-center gap-1.5 tabular-nums">
-        <span className="text-muted-foreground">{summarizeTags(status)}</span>
-        {group !== "latest" && to && (
-          <>
-            <span className="text-muted-foreground">→</span>
-            <span className="font-medium text-amber-600 dark:text-amber-500">{to}</span>
-          </>
-        )}
-        {status.mismatched && (
-          <span className="text-destructive">uses と prompts-ref が不一致</span>
-        )}
-        {status.updatePullRequest && (
-          <a
-            className="inline-flex items-center gap-0.5 underline underline-offset-2"
-            href={status.updatePullRequest.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            PR #{status.updatePullRequest.number}
-            <ExternalLink className="size-3" />
-          </a>
-        )}
-      </span>
-    </li>
+    <FleetRepositoryRow
+      fullName={status.fullName}
+      icon={
+        group === "latest" ? (
+          <Check className="size-3.5 text-muted-foreground" />
+        ) : group === "pull-request" ? (
+          <GitPullRequestArrow className="size-3.5 text-muted-foreground" />
+        ) : running ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <AlertTriangle
+            className={`size-3.5 ${status.mismatched ? "text-destructive" : "text-amber-500"}`}
+          />
+        )
+      }
+      result={
+        <span className="flex flex-wrap items-baseline gap-x-1.5 text-muted-foreground tabular-nums">
+          <span>{summarizeTags(status)}</span>
+          {group !== "latest" && to && (
+            <>
+              <span>→</span>
+              <span className="font-medium text-amber-600 dark:text-amber-500">{to}</span>
+            </>
+          )}
+          {status.updatePullRequest && (
+            <a
+              className="inline-flex items-center gap-0.5 underline underline-offset-2"
+              href={status.updatePullRequest.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              PR #{status.updatePullRequest.number}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+        </span>
+      }
+      detail={status.mismatched ? "uses と prompts-ref が不一致" : null}
+    />
   );
 }
 
@@ -147,34 +154,35 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
  */
 function RepairRow({ status, running }: { status: Status; running: boolean }) {
   return (
-    <li className="flex items-center gap-2 text-xs">
-      {status.repairPullRequest ? (
-        <GitPullRequestArrow className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : running ? (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-      ) : (
-        <Wrench className="size-3.5 shrink-0 text-amber-500" />
-      )}
-
-      <span className="truncate">{status.fullName}</span>
-
-      <span className="ml-auto flex shrink-0 items-center gap-1.5">
-        <span className="text-muted-foreground">
-          {status.missingRepairWorkflows.map(repairWorkflowLabel).join(" / ")}
+    <FleetRepositoryRow
+      fullName={status.fullName}
+      icon={
+        status.repairPullRequest ? (
+          <GitPullRequestArrow className="size-3.5 text-muted-foreground" />
+        ) : running ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <Wrench className="size-3.5 text-amber-500" />
+        )
+      }
+      result={
+        // 不足しているワークフロー名は3件つながると長い。折り返して全文を出す（#1952）
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 break-words text-muted-foreground">
+          <span>{status.missingRepairWorkflows.map(repairWorkflowLabel).join(" / ")}</span>
+          {status.repairPullRequest && (
+            <a
+              className="inline-flex items-center gap-0.5 underline underline-offset-2"
+              href={status.repairPullRequest.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              PR #{status.repairPullRequest.number}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
         </span>
-        {status.repairPullRequest && (
-          <a
-            className="inline-flex items-center gap-0.5 underline underline-offset-2"
-            href={status.repairPullRequest.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            PR #{status.repairPullRequest.number}
-            <ExternalLink className="size-3" />
-          </a>
-        )}
-      </span>
-    </li>
+      }
+    />
   );
 }
 
@@ -347,7 +355,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
           {targets.length > 0 && (
             <>
               <GroupLabel>更新が必要（{targets.length}）</GroupLabel>
-              <ul className="flex flex-col gap-1">
+              <ul className="flex flex-col">
                 {targets.map((status) => (
                   <RepositoryRow
                     key={status.fullName}
@@ -363,7 +371,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
           {pending.length > 0 && (
             <>
               <GroupLabel>更新PRの確認待ち（{pending.length}）</GroupLabel>
-              <ul className="flex flex-col gap-1">
+              <ul className="flex flex-col">
                 {pending.map((status) => (
                   <RepositoryRow
                     key={status.fullName}
@@ -387,7 +395,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
                 </CollapsibleTrigger>
               </GroupLabel>
               <CollapsibleContent>
-                <ul className="flex flex-col gap-1">
+                <ul className="flex flex-col">
                   {upToDate.map((status) => (
                     <RepositoryRow
                       key={status.fullName}
@@ -472,7 +480,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
           {repairTargets.length > 0 && (
             <>
               <GroupLabel>未配布（{repairTargets.length}）</GroupLabel>
-              <ul className="flex flex-col gap-1">
+              <ul className="flex flex-col">
                 {repairTargets.map((status) => (
                   <RepairRow key={status.fullName} status={status} running={isRepairRunning} />
                 ))}
@@ -483,7 +491,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
           {repairPending.length > 0 && (
             <>
               <GroupLabel>配布PRの確認待ち（{repairPending.length}）</GroupLabel>
-              <ul className="flex flex-col gap-1">
+              <ul className="flex flex-col">
                 {repairPending.map((status) => (
                   <RepairRow key={status.fullName} status={status} running={false} />
                 ))}

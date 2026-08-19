@@ -139,6 +139,13 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **設定の「フリート運用」でリポジトリを並べる一覧は
+  [`fleet-repository-row.tsx`](../src/components/dashboard/fleet-repository-row.tsx)の行を使う**（#1952）。
+  シークレット同期・共有ワークフローのタグ・自動修復ワークフローの3つが同じ画面で隣り合うため、
+  行の作り（狭い画面は「名前」「結果」の2段・広い画面は1行・長い文言は段を改めて折り返し・
+  行の境目に罫線）をここへ寄せる。**アイコンとリポジトリ名を`truncate`＋`ml-auto shrink-0`で
+  並べ直さない**——長い文言がスマホ幅で画面の外へ出て読めなくなる（#1942で片方だけ直した結果、
+  同じ画面で行の作りが割れていた）。
 - **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
   [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
   `package.json`の`"version"` lifecycleスクリプト
@@ -821,6 +828,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `deploy.yml`が無いリポジトリ、取得した30件より古いリリースしか関係しないPR、15分待っても実行が
   現れないリポジトリでは、「未反映」と言い切らずバッジごと消す（ブランチ画面と同じ方針）。
   スマホのPR詳細は同じ`PullRequestDetail`を使うため、**片方の画面にだけ出す実装にしない**。
+- **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
+  （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
+  [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、
+  そのあいだの消費はゼロ。畳んでいても見出しにファイル数と増減を出せるのは、詳細APIが既に返している
+  `changedFiles`・`additions`・`deletions`を使っているため（**件数のために取得しない**）。
+  一度取れたら畳んでも捨てず、PRの切り替えとヘッダーの「更新」でだけ取り直す。
+  **開閉はPRごとではなくセクション単位で覚えるので、開いたままにしていれば別のPRを開くたびに
+  1回消費する**（#1577のIssue詳細と同じ作法）。消費するかどうかを畳むかどうかで選べる点が
+  「詳細APIへ相乗りさせて常に取る」形との違いで、同じPRを開き直すぶんはETagの条件付きGET
+  （`githubFetchJsonWithEtag`）が304を返すためレート制限を消費しない。
+  器を`IssueDetailSection`と共有していないのは枠の見た目が別物（角丸カード対、横幅いっぱいの帯）
+  だからで、開閉の作法（`Collapsible`・セクション単位の保存キー）だけを揃えている。
+  **ページングはせず100件（`PULL_REQUEST_FILES_PER_PAGE`）で打ち切る**——1PRを開くだけで何十
+  リクエストも消費する方が害が大きく、そこまで並べても画面では読めないため、打ち切ったことを
+  `truncated`で伝えてGitHubの「Files changed」へ誘導する。**差分そのもの（`patch`）は受け取らない**。
+  この画面が答えるのは「どこを触ったPRか」までで、行単位の差分はGitHubに任せる。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、

@@ -63,6 +63,16 @@ function mockFetch(overview: {
   return fetchMock;
 }
 
+/**
+ * リポジトリ名は`guchi-apps/`と本体で濃さを変えるため2つの要素に分かれており、
+ * 既定の文字列マッチでは引けない（#1952。共通の行コンポーネントへ寄せた）。
+ * 全体の文字列で引くための補助。
+ */
+function repositoryNameMatcher(fullName: string) {
+  return (_: string, element: Element | null) =>
+    element?.tagName === "SPAN" && element.textContent === fullName;
+}
+
 beforeEach(() => vi.unstubAllGlobals());
 afterEach(() => cleanup());
 
@@ -71,7 +81,7 @@ describe("WorkflowTagStatusSection", () => {
     mockFetch({ latest: "workflows/v19", repositories: [status()], propagation: null });
     render(<WorkflowTagStatusSection open />);
 
-    expect(await screen.findByText("guchi-apps/car-care")).toBeTruthy();
+    expect(await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"))).toBeTruthy();
     expect(screen.getByText("v18")).toBeTruthy();
     expect(screen.getByText("更新が必要（1）")).toBeTruthy();
     expect(screen.getByRole("button", { name: /1件を v19 へ更新する/ })).toBeTruthy();
@@ -149,7 +159,27 @@ describe("WorkflowTagStatusSection", () => {
 
     expect(await screen.findByText("最新（1）")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /へ更新する/ })).toBeNull();
-    expect(screen.queryByText("guchi-apps/car-care")).toBeNull();
+    expect(screen.queryByText(repositoryNameMatcher("guchi-apps/car-care"))).toBeNull();
+  });
+
+  it("uses と prompts-ref の不一致は、結果と同じ段ではなく別の段へ出す（#1952）", async () => {
+    // 長い文言を結果と同じ段に置くと、スマホ幅で画面の外へ出て読めなくなる
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v18" }],
+          outdated: false,
+          mismatched: true,
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    const detail = await screen.findByText("uses と prompts-ref が不一致");
+    expect(detail.tagName).toBe("P");
+    expect(detail.className).toContain("break-words");
   });
 
   it("自動マージのチェックを外すとその指定でPOSTする", async () => {
@@ -248,7 +278,7 @@ describe("自動修復ワークフローの配布（#1948）", () => {
     mockFetch({ latest: "workflows/v19", repositories: [status()], propagation: null });
     render(<WorkflowTagStatusSection open />);
 
-    await screen.findByText("guchi-apps/car-care");
+    await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"));
     expect(screen.queryByText("自動修復ワークフロー")).toBeNull();
   });
 });

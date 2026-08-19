@@ -197,3 +197,60 @@ export async function fetchPullRequestReviewComments(
     token,
   );
 }
+
+/**
+ * `GET /repos/{owner}/{repo}/pulls/{number}/files` のレスポンスのうち、変更ファイル一覧で使う
+ * フィールド（#1987）。
+ *
+ * `patch`（差分そのもの）は受け取らない——画面では行単位の差分を出さず、内容を見たい場合は
+ * GitHubへ飛ばす方針のため。1ファイルあたり数十KBになりうるので、応答をそのまま画面へ
+ * 渡さないという意味でもある。
+ */
+export type GithubApiPullRequestFile = {
+  filename: string;
+  /** `added` / `modified` / `removed` / `renamed` / `copied` / `changed` / `unchanged` */
+  status: string;
+  additions: number;
+  deletions: number;
+  /** そのコミット時点のファイルを開くURL。削除されたファイルでも（削除前の内容として）返る */
+  blob_url: string;
+  /** `renamed`のときのみ、変更前のパス */
+  previous_filename?: string;
+};
+
+/**
+ * 1回のリクエストで取得する変更ファイルの上限（GitHubの`per_page`の最大値）。
+ *
+ * **ページングはしない。** 1つのPRで100ファイルを超えるのは巨大な依存更新やリネームの一括適用
+ * くらいで、そこまで並べても画面では読めない。ページングすると1PRを開くだけで何十リクエストも
+ * 消費するため、超えたぶんは「GitHubで見る」へ誘導する（`fetchClosedPullRequests`と同じ方針）。
+ */
+export const PULL_REQUEST_FILES_PER_PAGE = 100;
+
+/**
+ * PRの変更ファイル一覧を1ページぶん取得する（#1987）。
+ *
+ * PR詳細の「変更ファイル」を**開いたときだけ**呼ぶ。畳んでいる間は呼ばないので、畳んだまま
+ * PRを見て回るぶんにはGitHub APIの消費は増えない。ただし開閉はセクション単位で覚えるため、
+ * 開いたままにしていれば別のPRを開くたびに1回消費する（PR一覧と同じくETagの条件付きGETを
+ * 通すので、**同じPRを開き直すぶんは304になりレート制限を消費しない**）。
+ *
+ * **返り値はETagキャッシュと同じ実体になりうるので、呼び出し側で書き換えない**
+ * （`toPullRequestFiles`は新しい配列・新しいオブジェクトを作る）。
+ */
+export async function fetchPullRequestFiles(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<GithubApiPullRequestFile[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/files?per_page=${PULL_REQUEST_FILES_PER_PAGE}`;
+  const result = await githubFetchJsonWithEtag<GithubApiPullRequestFile[]>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  return result.data;
+}
