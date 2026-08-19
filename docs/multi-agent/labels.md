@@ -160,6 +160,22 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 正規の遷移なので、**マージ済みPRの先端と現在のブランチの先端が一致するときだけ**進める。
 `00.check-user`と理由ラベルの除去も同じ経路で行われるため、この安全網は残留ラベルの後始末も兼ねる。
 
+#### 取り残されたコミットは見送らず人へ渡す（#1999）
+
+先端が一致しないときに黙って見送ると、**PRのマージとほぼ同時にpushされたコミット**が
+どのPRにも載らないままdevelopへ入らず、15分おきに見送られ続けるだけで誰にも伝わらない
+（`guchi-apps/subscription-lists#99`で実測。本番の画面が404のまま残った）。そこで
+`develop-merge-sweep`は見送る前に`compare/develop...issue-<番号>`を引き、
+
+- developへ入っていないコミットが**無ければ**、先端が違ってもそのまま`Develop`へ進める
+- **あって**、develop向けPRが開いておらず、最後のコミットから猶予時間（既定120分）が過ぎて
+  いれば、`00.check-user`＋`01.check-blocked`とIssueコメントで人へ渡す
+
+コメント末尾の`<!-- issue-deck-stranded:issue-<番号>@<SHA> -->`で冪等にしているため、同じ先端に
+対して通知は1回だけで、新しいコミットがpushされれば改めて通知される。設計理由は
+[progress-status-architecture.md](../progress-status-architecture.md)「PRマージとほぼ同時のpushは、
+どのPRにも載らないまま取り残される」を参照。
+
 ## `00.check-user`が付く・外れるタイミング（#1417）
 
 `00.check-user`は「ユーザーの確認・指示が要る」ことを表す唯一のラベルで、**付け外しをする実行体が
@@ -180,6 +196,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
 | すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
+| PRマージとほぼ同時のpushでdevelopへ入らないコミットが取り残された | `reusable-issue-labels.yml`の`develop-merge-sweep`が`00.check-user`＋`01.check-blocked`を付与（#1999。後述「取り残されたコミットは見送らず人へ渡す」） | 同じ（15分おきのcronでの検知なので、コミットの起点を問わない） |
 
 ### マージを求める`00.check-user`は、実装側から付けない（#1709）
 

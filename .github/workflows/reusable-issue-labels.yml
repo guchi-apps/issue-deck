@@ -50,7 +50,8 @@ name: Issue Progress (reusable)
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
 # develop-merge-sweepジョブはこれを取りこぼした`Develop PR`・`Implementation`のissueを
-# scheduleで定期的に拾い直す。
+# scheduleで定期的に拾い直す。**拾えなかったもの(developへ入らないまま取り残された
+# コミットがあるブランチ)も見送るだけで終わらせず、`00.check-user`を付けて人へ渡す(#1999)。**
 #
 # **一時的なAPI不調でこの経路が丸ごと失われないようにしてある(#1861)。** #1583では
 # develop-pr-openedの報告がHTTP 500、develop-pr-mergedの`gh label list`がHTTP 503に当たり、
@@ -517,11 +518,25 @@ jobs:
     # ブランチの先端が一致するか**を必ず確かめる(#1513と同じ考え方)。マージ後に
     # ブランチが削除されている場合は追加のpushが無い証拠として扱う。
     #
+    # **先端が一致しないときに黙って見送らない(#1999)。** 先端不一致には「追加対応で
+    # 実装中」だけでなく「PRのマージとほぼ同時にpushされ、どのPRにも載らないまま
+    # developへ入らないコミット」も含まれる。従来はどちらも同じ1行をログへ書いて
+    # 見送るだけだったため、後者は15分ごとに見送られ続けるだけで誰にも伝わらなかった
+    # (guchi-apps/subscription-lists#99で実測。本番の画面が404のまま残った)。
+    # developへ入っていないコミットの有無を比較で確かめ、猶予時間を過ぎても
+    # develop向けPRが開かれないものへ`00.check-user`+`01.check-blocked`を付けて通知する。
+    #
     # 対象の探し方がPhase 5で変わった。以前は`gh issue list --label <進捗ラベル>`で
     # GitHubのラベルから探していたが、ラベルを廃止したためissue-deckへ問い合わせる。
     # **issue-deckへ届かなければ対象は0件になり、このrunは何もしない。**
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # ブランチとdevelopの比較(compare API)を読むためcontentsが要る。ワークフロー先頭の
+    # permissions:には無いので、develop-pr-openedと同じ形でジョブ側に明示する。
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -600,6 +615,23 @@ jobs:
               REMOVE_ARGS+=(--remove-label "$name")
             fi
           done
+          # developへ入らないまま取り残されたコミットを見つけたときに付けるラベル(#1999)。
+          # ユーザーがやることは「計画の承認」ではなく「続け方の指示」なので理由は
+          # `01.check-blocked`。理由は常に1枚なので、定義済みの他の理由ラベルは同じ
+          # 呼び出しで外す(develop-pr-openedと同じ作法)。
+          STRANDED_REASON_LABEL="01.check-blocked"
+          ADD_ARGS=()
+          if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
+            ADD_ARGS+=(--add-label "00.check-user")
+            if grep -qx "$STRANDED_REASON_LABEL" <<<"$DEFINED_LABELS"; then
+              ADD_ARGS+=(--add-label "$STRANDED_REASON_LABEL")
+            fi
+            for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+              if [ "$name" != "$STRANDED_REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+                ADD_ARGS+=(--remove-label "$name")
+              fi
+            done
+          fi
           transitioned=""
           for n in $numbers; do
             # 該当なしなら`[]`、取得に失敗したときだけ空になる。失敗を「マージ済みPRが無い」と
@@ -623,12 +655,78 @@ jobs:
             ref_json="$(gh api "repos/$GH_REPO/git/ref/heads/issue-$n" 2>/dev/null)" || true
             branch_head="$(jq -r '.object.sha // empty' <<<"$ref_json" 2>/dev/null || true)"
             ref_status="$(jq -r '.status // empty' <<<"$ref_json" 2>/dev/null || true)"
-            if [ -n "$branch_head" ]; then
-              if [ "$branch_head" != "$pr_head" ]; then
-                echo "issue #$n: ブランチ issue-$n の先端がマージ済みPR（$pr_url）と一致しないため、追加対応中とみなして進めません"
+            if [ -n "$branch_head" ] && [ "$branch_head" != "$pr_head" ]; then
+              # 先端が一致しない理由は2つあり、従来はまとめて見送っていた(#1999)。
+              # (a)マージ後の追加対応でpushした実装中(mode=additional)
+              # (b)PRのマージとほぼ同時にpushされ、どのPRにも載らないまま取り残された
+              #    コミット。**このジョブが15分ごとに同じ行をログへ書くだけで、
+              #    developへ入らないことが誰にも伝わらなかった**(guchi-apps/subscription-lists#99。
+              #    2秒差のpushでdevelopに画面のルートが入らず、本番が404のまま残った)。
+              #
+              # 見分けにはdevelopとの比較を使う。developへ入っていないコミットが1件も
+              # 無ければ、先端が違っても取り残しは無いので、そのまま`Develop`へ進めてよい
+              # (人がcherry-pick等で取り残しを解消した後、ここで止まり続けないための経路でもある)。
+              compare_json="$(gh api "repos/$GH_REPO/compare/develop...issue-$n" 2>/dev/null)" || compare_json=""
+              ahead="$(jq -r '.ahead_by // empty' <<<"$compare_json" 2>/dev/null || true)"
+              if [ -z "$ahead" ]; then
+                echo "::warning::issue #$n: ブランチ issue-$n とdevelopの差分を取得できませんでした。次回のスケジュール実行で再判定します"
                 continue
               fi
-            elif [ "$ref_status" != "404" ]; then
+              if [ "$ahead" != "0" ]; then
+                # ここから先は「取り残しかどうか」の判定。実装中(a)と区別が付かないため、
+                # (1)developへのPRが開いていない、(2)最後のコミットから猶予時間が過ぎている、
+                # の両方を満たすものだけを取り残しとして扱う。回数ではなく時間で見るのは、
+                # ジョブが実行間の状態を持てないため(#1999)。
+                open_json="$(gh pr list --state open --base develop --head "issue-$n" \
+                  --json url --limit 5 2>/dev/null)" || open_json=""
+                if [ -z "$open_json" ]; then
+                  echo "::warning::issue #$n: 開いているdevelop向けPRを取得できませんでした。取り残しの判定は次回のスケジュール実行に回します"
+                  continue
+                fi
+                if [ "$(jq -r 'length' <<<"$open_json" 2>/dev/null || echo 0)" != "0" ]; then
+                  echo "issue #$n: developへ未マージのコミットがありますが、develop向けPRが開いているため進めません（取り残しではありません）"
+                  continue
+                fi
+                grace_minutes="${STRANDED_GRACE_MINUTES:-120}"
+                last_commit_at="$(jq -r '.commits | last | .commit.committer.date // empty' <<<"$compare_json" 2>/dev/null || true)"
+                last_epoch=""
+                if [ -n "$last_commit_at" ]; then
+                  last_epoch="$(date -u -d "$last_commit_at" +%s 2>/dev/null || true)"
+                fi
+                if [ -z "$last_epoch" ]; then
+                  echo "::warning::issue #$n: 未マージコミットの日時を判定できませんでした。次回のスケジュール実行で再判定します"
+                  continue
+                fi
+                age_minutes=$(( ( $(date -u +%s) - last_epoch ) / 60 ))
+                if [ "$age_minutes" -lt "$grace_minutes" ]; then
+                  echo "issue #$n: developへ未マージのコミットが${ahead}件ありますが、最後のコミットから${age_minutes}分のため様子を見ます（${grace_minutes}分を超えたら通知します）"
+                  continue
+                fi
+                # 同じ先端について通知を繰り返さない。15分おきに走るため、冪等でないと
+                # 同じ内容が一日100件近く積まれる。**取得に失敗したときは通知しない**
+                # (二重投稿より、次回の実行へ回す方が軽い)。
+                stranded_marker="<!-- issue-deck-stranded:issue-$n@$branch_head -->"
+                stranded_notified="$(gh issue view "$n" --json comments 2>/dev/null \
+                  | jq --arg m "$stranded_marker" '[.comments[].body | select(contains($m))] | length' 2>/dev/null)" || stranded_notified=""
+                if [ -z "$stranded_notified" ]; then
+                  echo "::warning::issue #$n: 既存コメントを取得できませんでした。取り残しの通知は次回のスケジュール実行に回します"
+                  continue
+                fi
+                if [ "$stranded_notified" != "0" ]; then
+                  echo "issue #$n: 取り残し（$branch_head）は通知済みのため、コメントは投稿しません"
+                  continue
+                fi
+                if [ "${#ADD_ARGS[@]}" -gt 0 ]; then
+                  gh issue edit "$n" "${ADD_ARGS[@]}" \
+                    || echo "::warning::issue #$n: 00.check-user の付与に失敗しました（コメントの投稿は続けます）"
+                fi
+                gh issue comment "$n" --body "⚠️ developへ入っていないコミットが \`issue-$n\` に残っています。"$'\n\n'"- ブランチ \`issue-$n\` の先端: \`$branch_head\`"$'\n'"- 直近のマージ済みPR: $pr_url （head \`$pr_head\`）"$'\n'"- developへ入っていないコミット: ${ahead}件（最後のコミットから約${age_minutes}分）"$'\n\n'"PRのマージとほぼ同時にpushされたコミットは、そのPRに含まれずdevelopへも入りません。このままでは進捗も\`Develop\`へ進みません。次のどちらかで解消してください。"$'\n\n'"1. コミットが必要なら、\`issue-$n\` から \`develop\` への新しいPull Requestを作成してマージする"$'\n'"2. コミットが不要なら、ブランチ \`issue-$n\` を削除する"$'\n\n'"実行ログ: $RUN_URL"$'\n\n'"$stranded_marker"$'\n<!-- issue-deck-source:issue-labels -->' \
+                  || echo "::warning::issue #$n: 取り残しのコメント投稿に失敗しました"
+                echo "issue #$n: developへ入っていないコミット${ahead}件を取り残しとして通知しました"
+                continue
+              fi
+              echo "issue #$n: ブランチ issue-$n の先端はマージ済みPR（$pr_url）と違いますが、developへ入っていないコミットは無いため進めます"
+            elif [ -z "$branch_head" ] && [ "$ref_status" != "404" ]; then
               echo "::warning::issue #$n: ブランチ issue-$n の状態を確認できませんでした。次回のスケジュール実行で再判定します"
               continue
             fi
