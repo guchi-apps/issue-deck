@@ -121,9 +121,12 @@ describe("PullRequestDetail", () => {
     renderDetail();
     expect(screen.getByText("実装内容")).toBeTruthy();
     expect(screen.getByText("PR詳細ペインを追加した。")).toBeTruthy();
-    expect(screen.getByText("+120")).toBeTruthy();
-    expect(screen.getByText("-8")).toBeTruthy();
+    // 増減はヘッダーの統計と「変更ファイル」の見出し（#1987）の2か所に出る。長い本文の
+    // 下まで読み進めても規模が分かるようにしているため、重複はそのまま許容する。
+    expect(screen.getAllByText("+120")).toHaveLength(2);
+    expect(screen.getAllByText("-8")).toHaveLength(2);
     expect(screen.getByText(/5ファイル ・ 2コミット/)).toBeTruthy();
+    expect(screen.getByText("変更ファイル")).toBeTruthy();
     expect(screen.getByText("コメント 1件")).toBeTruthy();
     expect(screen.getByText("実装が完了しました。")).toBeTruthy();
   });
