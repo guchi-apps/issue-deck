@@ -13,10 +13,11 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 解消済みで、残るのは導入作業だけになった。判断の経緯は
 [docs/organization-migration.md](organization-migration.md)を参照。
 
-**インフラ設定・共有知識のリポジトリ（`vps`・`subpc`・`docs`）は、この表には載せない。**
-無人実行は入れず、ローカルセッションとリリースフローだけを載せる、というのが#1697・#1741の判断
-（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。#1011が「順次導入する」と
-していた`vps`もこの扱いになる。
+**インフラ設定・共有知識・個人設定のリポジトリ（`vps`・`subpc`・`docs`・`claude-config`）は、
+この表には載せない。** 無人実行は入れず、ローカルセッションとリリースフローだけを載せる、
+というのが#1697・#1741の判断（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。
+#1011が「順次導入する」としていた`vps`もこの扱いになる。`claude-config`（個人設定）は#1988で
+同じ枠へ加えた（下記「`claude-config`（個人設定）」）。
 
 「対応」の実態はワークフローファイル一式・ラベル体系・CLAUDE.md・ブランチ運用・Secretsなど
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
@@ -250,6 +251,61 @@ issue-deckの起動（`ref: develop`のdispatch）が404になる。**この2件
 **未配布のリポジトリではリリースボタンが出ない。** 押せないだけでなく、develop→mainのリリースPRも
 バージョンbumpも自動化されないため、リリースは手作業になる（手作業リリースはタグ重複などの
 リポジトリ固有の制約を毎回踏む。[multi-agent/release.md](multi-agent/release.md)参照）。
+
+### `claude-config`（個人設定）
+
+個人設定（`~/.claude/CLAUDE.md`・個人skill）の実体
+（[multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)）。上の3件と同じ枠で、
+**無人実行は入れずサブPCのローカルセッションだけで回す**（#1988。起点は guchi-apps/question#19、
+この経路が要る最初の実例は guchi-apps/claude-config#1）。`~/.claude/`へsymlinkで直結している資産で、
+GitHub Actionsの実行環境には存在しないため、無人実行に実装させる意味が薄い。
+
+**リリースフローも入れない。** `docs`と同じく`develop`を持たず、デプロイも無い
+（反映は各マシンの`git pull`）ため、リリースという段階を挟む先が無い。
+
+2026-08-19に実測した状態と、#1988で行った作業は次のとおり。
+
+| 項目 | #1988の前 | #1988の後 |
+|---|---|---|
+| ラベル体系 | GitHub既定の9個のまま（`11.local`・`00.check-user`が無い） | issue-deckと同一（既定9個は削除） |
+| `~/.config/issue-deck/local-repos.conf` | 未記載 | `/home/guchi/apps/claude-config`を追記 |
+| ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 未確保 | 23000 |
+| フォルダの信頼確認（#1838） | 未承認 | 手作業として起票（#1994） |
+| `.github/workflows/` | 無し | 無し（`issue-labels.yml`は guchi-apps/claude-config#2 で別途） |
+| ブランチ | `main`のみ（`develop`なし・`origin/HEAD`未設定） | 据え置き |
+
+- **対応表を足すだけで申告に載る。pollerの再起動は要らない**（#1988で実測。追記から次の巡回で
+  18件→19件になった）。`local_repo_list_runnable()`が申告のたびに`local-repos.conf`を読み直す
+- **`origin/HEAD`が未設定でも起動には影響しない。** 汎用ランチャーの`resolve_base_branch`が
+  `git remote set-head origin --auto`で引き直す（[scripts/generic-start-issue.sh](../scripts/generic-start-issue.sh)）。
+  `develop`を持たないので、PRは`docs`と同じく`issue-<番号>` → `main`の直行になる
+- **`main`のブランチ保護は入れない。** `docs`にもruleset は無く、マージするのは人だけで、
+  守るべき自動マージ経路（`claude-review-develop.yml`）がそもそも走らない。
+  `delete_branch_on_merge: true`のままでよいのも`docs`と同じ理由で、#1786が問題にしたのは
+  **headが`develop`のリリースPR**であり、`develop`を持たないリポジトリでは起こらない
+- **進捗は`Implementation`で止まる。** ローカルセッションが起動時に`Implementation`を報告した後、
+  `Develop PR`以降を報告するのは`issue-labels.yml`で、このリポジトリには`.github/workflows/`自体が
+  無い（`docs`#3・`subpc`#10・#14・#19と同じ状態）。**入れるまでは手で`Done`にしてcloseする。**
+  導入は guchi-apps/claude-config#2 で分けた——`develop`を持たないため`workflows/v23`の
+  `main-direct-pr-opened`・`main-direct-merged`が要る（#1901・#1917）
+- **マージしただけでは実機に反映されない。** `~/.claude/CLAUDE.md`・`~/.claude/skills`は
+  `~/apps/claude-config`（本体チェックアウト）へのsymlinkなので、`main`へマージしたあと両機で
+  `git pull`するまで効かない。取り残しは`check-sync.sh`（[scripts/lib/personal-config-sync.sh](../scripts/lib/personal-config-sync.sh)が
+  各セッションの起動時に呼ぶ）が「originより遅れている」として警告するため、経路自体は閉じている
+- **`package.json`を持たない。** 依存インストールとenvの配置は不要
+  （[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「envは既定では置かない」）。
+  ポート帯だけは、上の3件と同じ理由（既定の`3000 + Issue番号`への相乗りを避ける）で確保する
+
+> **このリポジトリの`CLAUDE.md`は個人グローバルルールそのもの。** worktreeのルートに置かれた
+> `CLAUDE.md`はプロジェクト指示として読まれ、同時に`~/.claude/CLAUDE.md`（本体チェックアウトへの
+> symlink）もグローバルルールとして読まれるため、**同じ内容が2枠に載る**。実害は2つあり、
+> どちらも「読み込まれない」側ではなく「読み込まれすぎる」側に出る。
+>
+> - 同じ文面がコンテキストに二重に入る（内容が同じなので判断は壊れないが、無駄が出る）
+> - **リポジトリ固有の運用ルールを`CLAUDE.md`へ書けない。** 書くと全マシン・全セッションの
+>   グローバルルールになる。ブランチ運用やPRの宛先を残すなら`README.md`側にする
+>   （`README.md`はセッションへ自動で読み込まれない）。`subpc`・`vps`・`docs`が
+>   `CLAUDE.md`に自リポジトリ向けの節を持っているのと、ここだけ扱いが違う
 
 ### callerの`bump_kind`入力の配布状況（#1603）
 
@@ -487,6 +543,7 @@ done
 | `guchi-apps/subpc` | — | ○（※4） |
 | `guchi-apps/vps` | — | ○（※4） |
 | `guchi-apps/docs` | — | ○（※4） |
+| `guchi-apps/claude-config` | — | ○（※5） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -537,6 +594,12 @@ done
   「共有知識リポジトリ自身のIssueを起動するとき」）
 - 3件とも`package.json`を持たず開発サーバーを起動しないが、ポート帯（20000・21000・22000）は
   確保した。載っていないと既定の`3000 + Issue番号`に落ち、未登録のリポジトリ同士が相乗りするため
+
+※5 `claude-config`（個人設定。private）は#1988で追加した。**※4の3件と同じ枠**で、
+`claude-issue-dispatch.yml`を持たず実行経路はローカルセッションだけ。**`issue-labels.yml`も
+持たないため進捗が`Implementation`で止まる**（導入は guchi-apps/claude-config#2）。
+`package.json`を持たないがポート帯（23000）は同じ理由で確保した。フォルダの信頼確認（#1838）だけは
+対話が要るので手作業として起票した（#1994）。実測と判断は上記「`claude-config`（個人設定）」を参照。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
