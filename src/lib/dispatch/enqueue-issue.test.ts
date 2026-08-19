@@ -90,6 +90,51 @@ describe("enqueueIssueToDefaultHost", () => {
     });
   });
 
+  // まとめて実行（#1993）で選んだオプションは、`11.local`と同じ1回の書き込みで付ける
+  it("渡したラベルを11.localと一緒に付ける", async () => {
+    const updateIssue = vi.fn().mockResolvedValue(null);
+
+    await enqueueIssueToDefaultHost(issue(), deps({ updateIssue }), [
+      "21.plan-required",
+      "23.preview-required",
+    ]);
+
+    expect(updateIssue).toHaveBeenCalledTimes(1);
+    expect(updateIssue).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      number: 42,
+      labels: ["21.plan-required", "23.preview-required", "11.local"],
+    });
+  });
+
+  it("既に11.localが付いていても、渡したラベルは付ける", async () => {
+    const updateIssue = vi.fn().mockResolvedValue(null);
+    const labels = [{ name: "11.local", color: "ededed", description: null }];
+
+    await enqueueIssueToDefaultHost(issue({ labels }), deps({ updateIssue }), [
+      "21.plan-required",
+    ]);
+
+    expect(updateIssue).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      number: 42,
+      labels: ["11.local", "21.plan-required"],
+    });
+  });
+
+  // 積めていないのにオプションだけ残ると、次に開いたときに押した覚えのないチェックが入る
+  it("積み込みが拒否されたら、渡したラベルも付けない", async () => {
+    const updateIssue = vi.fn().mockResolvedValue(null);
+
+    await enqueueIssueToDefaultHost(
+      issue(),
+      deps({ enqueue: vi.fn().mockResolvedValue(false), updateIssue }),
+      ["21.plan-required"],
+    );
+
+    expect(updateIssue).not.toHaveBeenCalled();
+  });
+
   it("既に11.localが付いているIssueにはラベルを付け直さない", async () => {
     const updateIssue = vi.fn().mockResolvedValue(null);
     const labels = [{ name: "11.local", color: "ededed", description: null }];

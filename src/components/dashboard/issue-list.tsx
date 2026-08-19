@@ -35,6 +35,7 @@ import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
+import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
@@ -334,6 +335,17 @@ export function IssueList({
   // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
   // Issueを開く。選択モードのときだけチェックボックスを出す
   const [isSelecting, setIsSelecting] = useState(false);
+  // 入口のバーを出すかどうかの判定（#1993）。**押しても何も起きない件数を出さない**ため、
+  // closeしたIssueと既に走っている（積んである）Issueは数えない
+  const bulkDispatchableIssues = useMemo(
+    () =>
+      listBulkDispatchableIssues(issues, {
+        hosts: dispatch.hosts,
+        jobs: dispatch.jobs,
+        sessions: dispatch.sessions,
+      }),
+    [issues, dispatch.hosts, dispatch.jobs, dispatch.sessions],
+  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
@@ -610,31 +622,8 @@ export function IssueList({
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* 夜にまとめて積んで順に流すための入口（#1266） */}
-            <button
-              type="button"
-              aria-label={isSelecting ? "選択をやめる" : "まとめて選択"}
-              title={isSelecting ? "選択をやめる" : "まとめてサブPCへ積む"}
-              onClick={() => (isSelecting ? exitSelecting() : setIsSelecting(true))}
-              className={cn(
-                "rounded-md p-1 hover:bg-accent",
-                isSelecting ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              <CheckSquare className="size-4" />
-            </button>
-            <Star className="size-4 text-muted-foreground" />
-          </div>
+          <Star className="size-4 text-muted-foreground" />
         </div>
-      )}
-
-      {isSelecting && (
-        <BulkDispatchBar
-          issues={issues.filter((issue) => selectedIds.has(issue.id))}
-          dispatch={dispatch}
-          onDone={exitSelecting}
-        />
       )}
 
       {/* 溜まった手作業を1件ずつ案内する入口（#1826）。**ヘッダーではなく一覧の上に置く**——
@@ -683,6 +672,34 @@ export function IssueList({
             {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
           </Button>
         </div>
+      )}
+
+      {/* 選んだIssueをまとめて実行する入口（#1266・#1993）。**ヘッダーではなく一覧の上に置く**——
+          スマホの一覧はこのコンポーネントのヘッダーを出さない（`showHeader={false}`）ため、
+          ヘッダーに置くとPCからしか押せない（手作業アシスタント・「次にやること」と同じ理由）。
+          **出すのは積めるIssueが2件以上あるときだけ**で、1件しか無いなら個別の「実装を開始」で足りる */}
+      {isSelecting ? (
+        <BulkDispatchBar
+          issues={issues.filter((issue) => selectedIds.has(issue.id))}
+          dispatch={dispatch}
+          onClose={exitSelecting}
+        />
+      ) : (
+        bulkDispatchableIssues.length >= 2 && (
+          <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2">
+            <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+              まとめて実行できるIssueが
+              <span className="font-medium text-foreground tabular-nums">
+                {bulkDispatchableIssues.length}件
+              </span>
+              あります。
+            </p>
+            <Button size="xs" variant="outline" className="shrink-0" onClick={() => setIsSelecting(true)}>
+              <CheckSquare />
+              まとめて実行
+            </Button>
+          </div>
+        )
       )}
 
       {pinnedSection}

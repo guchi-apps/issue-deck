@@ -47,12 +47,18 @@ export type EnqueueIssueOutcome =
  * **積めなかったときは`11.local`を付けない。** 付けると、実行が始まっていないのに
  * 無人実行（`claude-issue-dispatch.yml`）までそのIssueに触れなくなる。
  *
+ * `labelsToAdd`は「まとめて実行」で選んだオプションのラベル（#1993）。**`11.local`と同じ
+ * 1回の書き込みで付け、積めたときだけ付ける** — 積めていないIssueに`21.plan-required`だけが
+ * 残ると、次に個別で開いたときに押した覚えのないチェックが入っていることになる。
+ * **既に付いているラベルは外さない**（足すだけ）。
+ *
  * セッションの生存（`findBlockingSession`）を先に見るのは、押す前に理由を出すため。
  * 最終的な判定はAPI側（`enqueueDispatchJob`）が行う。
  */
 export async function enqueueIssueToDefaultHost(
   issue: Issue,
   deps: EnqueueIssueDeps,
+  labelsToAdd: readonly string[] = [],
 ): Promise<EnqueueIssueOutcome> {
   const blockingSession = findBlockingSession({
     sessions: deps.sessions,
@@ -104,7 +110,7 @@ export async function enqueueIssueToDefaultHost(
     return { ok: false, reason: deps.enqueueError ?? "積めませんでした" };
   }
 
-  const nextNames = labelNamesWithLocal(issue.labels);
+  const nextNames = labelNamesWithLocal(issue.labels, labelsToAdd);
   if (nextNames) {
     // ラベル付けに失敗しても積み込み自体は成功として扱う（起動できないより軽い）
     await deps.updateIssue({
