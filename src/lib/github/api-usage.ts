@@ -37,6 +37,7 @@ export const GITHUB_API_FEATURES = [
   { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
+  { key: "pull_request_files", label: "PR詳細の変更ファイル一覧の取得" },
   { key: "issue_comments", label: "コメント取得" },
   { key: "sub_issues", label: "子Issueの取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },

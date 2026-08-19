@@ -272,3 +272,32 @@ export type PullRequestDetail = {
   /** 時系列（古い順）に並べたコメント・レビュー */
   events: PullRequestEvent[];
 };
+
+/**
+ * 変更ファイルの種別（#1987）。GitHubの`status`（`added`・`modified`ほか）を、画面に出す
+ * 4種類へ寄せたもの。`copied`・`changed`のように滅多に出ない値まで別扱いにしても
+ * 読む側の判断は変わらないため、`modified`（変更）へ寄せる。
+ */
+export type PullRequestFileChange = "added" | "modified" | "removed" | "renamed";
+
+/** PRで変更されたファイル1件（#1987） */
+export type PullRequestFile = {
+  /** 変更後のパス。削除されたファイルは削除前のパス */
+  path: string;
+  change: PullRequestFileChange;
+  additions: number;
+  deletions: number;
+  /** GitHubでそのファイルを開くURL */
+  blobUrl: string;
+  /** `renamed`のときのみ、変更前のパス。それ以外はnull */
+  previousPath: string | null;
+};
+
+export type PullRequestFileListResponse = {
+  files: PullRequestFile[];
+  /**
+   * 1ページの上限で打ち切ったか（#1987）。trueのときは画面に「先頭100件」である旨を出し、
+   * 残りはGitHubで見てもらう。
+   */
+  truncated: boolean;
+};

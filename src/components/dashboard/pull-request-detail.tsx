@@ -15,6 +15,7 @@ import {
   UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
+import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -304,6 +305,15 @@ export function PullRequestDetail({
                 <p className="text-sm text-muted-foreground">本文はありません。</p>
               )}
             </section>
+
+            <PullRequestFileList
+              pullRequestId={pullRequest.id}
+              htmlUrl={pullRequest.htmlUrl}
+              changedFiles={currentDetail.changedFiles}
+              additions={currentDetail.additions}
+              deletions={currentDetail.deletions}
+              refreshKey={currentDetail.fetchedAt}
+            />
 
             <section>
               <h2 className="border-b bg-muted/50 px-4 py-2 text-xs font-semibold">
