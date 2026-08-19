@@ -9,7 +9,14 @@ import {
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { Issue } from "@/types/issue";
 
-/** 「まとめて実行」の判定に使う、いま画面が持っているディスパッチの状態（#1993） */
+/**
+ * 「まとめて実行」の判定に使う、いま画面が持っているディスパッチの状態（#1993）。
+ *
+ * **`isLoaded`は受け取らない。** 取得前の`hosts`は`[]`で、この判定は必ず0件＝入口のバーが
+ * 出ない状態になるため、待つのと結果が変わらない。`isLoaded`を見ているのは**押した瞬間に
+ * 積みに行く**経路（「次にやること」の自動開始・#1666・#1810）で、あちらは待たないと必ず
+ * 失敗する。こちらは人が押すまで何も起こさない。
+ */
 export type BulkDispatchContext = {
   hosts: readonly DispatchHostView[];
   jobs: readonly DispatchJobView[];

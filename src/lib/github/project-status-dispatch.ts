@@ -39,25 +39,15 @@ export type DispatchMode = "plan" | "implement" | "approve-plan";
 export const LOCAL_LABEL_NAME = "11.local";
 
 /**
- * `11.local`（と`additional`で渡したラベル）を足したラベル名の配列を返す。
- * **足すものが1つも無ければ`null`**（更新不要）。
+ * `11.local`を足したラベル名の配列を返す。**既に付いていれば`null`**（更新不要）。
  *
  * 画面からサブPCへ起動する経路が2つ（「サブPCで開始」ボタンと、スマホの「実装を開始」
  * ダイアログでの実行先選択・#1248）になったため、判定をここに1つだけ置く。
- *
- * `additional`は「まとめて実行」で選んだオプションのラベル（#1993）。**`11.local`と同じ
- * 1回の書き込みで付ける** — Issueの件数ぶん繰り返す経路なので、GitHubへの往復を倍にしない。
  */
-export function labelNamesWithLocal(
-  labels: readonly { name: string }[],
-  additional: readonly string[] = [],
-): string[] | null {
+export function labelNamesWithLocal(labels: readonly { name: string }[]): string[] | null {
   const names = labels.map((label) => label.name);
-  const toAdd = [...new Set([...additional, LOCAL_LABEL_NAME])].filter(
-    (name) => !names.includes(name),
-  );
-  if (toAdd.length === 0) return null;
-  return [...names, ...toAdd];
+  if (names.includes(LOCAL_LABEL_NAME)) return null;
+  return [...names, LOCAL_LABEL_NAME];
 }
 
 /**

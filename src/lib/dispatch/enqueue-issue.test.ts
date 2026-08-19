@@ -90,21 +90,29 @@ describe("enqueueIssueToDefaultHost", () => {
     });
   });
 
-  // まとめて実行（#1993）で選んだオプションは、`11.local`と同じ1回の書き込みで付ける
-  it("渡したラベルを11.localと一緒に付ける", async () => {
-    const updateIssue = vi.fn().mockResolvedValue(null);
+  // まとめて実行（#1993）で選んだオプションは、**積むより先に**付ける。ランチャーは起動直後に
+  // ラベルを読むため（`scripts/start-issue.sh`）、積んだ後に付けると読まれないことがある
+  it("渡したラベルは積む前に付け、11.localは積んだ後に付ける", async () => {
+    const order: string[] = [];
+    const updateIssue = vi.fn().mockImplementation((input: { labels: string[] }) => {
+      order.push(`update:${input.labels.join(",")}`);
+      return Promise.resolve(null);
+    });
+    const enqueue = vi.fn().mockImplementation(() => {
+      order.push("enqueue");
+      return Promise.resolve(true);
+    });
 
-    await enqueueIssueToDefaultHost(issue(), deps({ updateIssue }), [
+    await enqueueIssueToDefaultHost(issue(), deps({ enqueue, updateIssue }), [
       "21.plan-required",
       "23.preview-required",
     ]);
 
-    expect(updateIssue).toHaveBeenCalledTimes(1);
-    expect(updateIssue).toHaveBeenCalledWith({
-      repositoryFullName: "guchi-apps/issue-deck",
-      number: 42,
-      labels: ["21.plan-required", "23.preview-required", "11.local"],
-    });
+    expect(order).toEqual([
+      "update:21.plan-required,23.preview-required",
+      "enqueue",
+      "update:21.plan-required,23.preview-required,11.local",
+    ]);
   });
 
   it("既に11.localが付いていても、渡したラベルは付ける", async () => {
@@ -115,6 +123,7 @@ describe("enqueueIssueToDefaultHost", () => {
       "21.plan-required",
     ]);
 
+    expect(updateIssue).toHaveBeenCalledTimes(1);
     expect(updateIssue).toHaveBeenCalledWith({
       repositoryFullName: "guchi-apps/issue-deck",
       number: 42,
@@ -122,8 +131,8 @@ describe("enqueueIssueToDefaultHost", () => {
     });
   });
 
-  // 積めていないのにオプションだけ残ると、次に開いたときに押した覚えのないチェックが入る
-  it("積み込みが拒否されたら、渡したラベルも付けない", async () => {
+  // 押す前の判定を通ってから書くので、ここまで来るのはAPI側で弾かれた場合だけ
+  it("積み込みが拒否されても、11.localは付けない", async () => {
     const updateIssue = vi.fn().mockResolvedValue(null);
 
     await enqueueIssueToDefaultHost(
@@ -132,7 +141,12 @@ describe("enqueueIssueToDefaultHost", () => {
       ["21.plan-required"],
     );
 
-    expect(updateIssue).not.toHaveBeenCalled();
+    expect(updateIssue).toHaveBeenCalledTimes(1);
+    expect(updateIssue).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      number: 42,
+      labels: ["21.plan-required"],
+    });
   });
 
   it("既に11.localが付いているIssueにはラベルを付け直さない", async () => {
