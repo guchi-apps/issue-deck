@@ -47,12 +47,22 @@ export type EnqueueIssueOutcome =
  * **積めなかったときは`11.local`を付けない。** 付けると、実行が始まっていないのに
  * 無人実行（`claude-issue-dispatch.yml`）までそのIssueに触れなくなる。
  *
+ * `labelsToAdd`は「まとめて実行」で選んだオプションのラベル（#1993）。**積むより先に付ける。**
+ * `21.plan-required`等はサブPCのランチャーが起動直後に読む（`scripts/start-issue.sh`）ため、
+ * 積んだ後に付けると、払い出しがその隙間に入ったときに読まれない。「実装を開始」ダイアログも
+ * 同じ理由で先に付けている（`applyOptionLabels`）。**書き込みが`11.local`と2回に分かれるが、
+ * 1回にまとめると「積めたときだけ付ける」`11.local`の決まりを破ることになる。**
+ * **既に付いているラベルは外さない**（足すだけ）。積めなかったときにオプションのラベルだけが
+ * 残ることはあるが、押す前の判定（`resolveDispatchTargetRejection`）を通ってから書くので、
+ * 残るのはAPI側で弾かれた場合に限られる。
+ *
  * セッションの生存（`findBlockingSession`）を先に見るのは、押す前に理由を出すため。
  * 最終的な判定はAPI側（`enqueueDispatchJob`）が行う。
  */
 export async function enqueueIssueToDefaultHost(
   issue: Issue,
   deps: EnqueueIssueDeps,
+  labelsToAdd: readonly string[] = [],
 ): Promise<EnqueueIssueOutcome> {
   const blockingSession = findBlockingSession({
     sessions: deps.sessions,
@@ -95,6 +105,18 @@ export async function enqueueIssueToDefaultHost(
     };
   }
 
+  // オプションのラベルは**積む前**に付ける（上の注記）。ラベル付けに失敗しても積み込みは行う
+  // （オプションが効かないより、起動しない方が重い）
+  const currentNames = issue.labels.map((label) => label.name);
+  const namesWithOptions = [...new Set([...currentNames, ...labelsToAdd])];
+  if (namesWithOptions.length !== currentNames.length) {
+    await deps.updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      labels: namesWithOptions,
+    });
+  }
+
   const enqueued = await deps.enqueue({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -104,7 +126,8 @@ export async function enqueueIssueToDefaultHost(
     return { ok: false, reason: deps.enqueueError ?? "積めませんでした" };
   }
 
-  const nextNames = labelNamesWithLocal(issue.labels);
+  // 上の書き込みが失敗していても、ここで両方まとめて送り直す形になるので取りこぼさない
+  const nextNames = labelNamesWithLocal(namesWithOptions.map((name) => ({ name })));
   if (nextNames) {
     // ラベル付けに失敗しても積み込み自体は成功として扱う（起動できないより軽い）
     await deps.updateIssue({

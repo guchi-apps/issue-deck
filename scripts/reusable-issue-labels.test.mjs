@@ -58,17 +58,32 @@ case "$1 \${2:-}" in
     ;;
   "pr list")
     head=""
+    state=""
     while [ $# -gt 0 ]; do
       if [ "$1" = "--head" ]; then head="$2"; fi
+      if [ "$1" = "--state" ]; then state="$2"; fi
       shift
     done
-    var="STUB_PR_\${head#issue-}"
+    if [ "$state" = "open" ]; then
+      var="STUB_PR_OPEN_\${head#issue-}"
+    else
+      var="STUB_PR_\${head#issue-}"
+    fi
     value="\${!var:-}"
     if [ -z "$value" ]; then echo "[]"
     elif [ "$value" = "fail" ]; then echo "gh: server error (HTTP 502)" >&2; exit 1
     else echo "$value"; fi
     ;;
   "api repos"*)
+    # develop-merge-sweepが引く「developとブランチの差分」（repos/<owner>/<repo>/compare/develop...issue-<n>）
+    if [[ "$2" == */compare/* ]]; then
+      var="STUB_COMPARE_\${2##*...issue-}"
+      value="\${!var:-}"
+      if [ "$value" = "fail" ]; then echo "gh: server error" >&2; exit 1; fi
+      if [ -z "$value" ]; then value='{"ahead_by":0,"commits":[]}'; fi
+      echo "$value"
+      exit 0
+    fi
     # wip-on-pushが引く「このコミットに紐づくPR」（repos/<owner>/<repo>/commits/<sha>/pulls）
     if [[ "$2" == */pulls ]]; then
       if [ "\${STUB_COMMIT_PULLS:-}" = "fail" ]; then exit 1; fi
@@ -82,6 +97,10 @@ case "$1 \${2:-}" in
     else echo "{\\"object\\":{\\"sha\\":\\"$value\\"}}"; fi
     ;;
   "issue view")
+    if [ "\${STUB_ISSUE_VIEW_FAIL:-0}" = "1" ]; then
+      echo "gh: server error (HTTP 500)" >&2
+      exit 1
+    fi
     var="STUB_COMMENTS_$3"
     value="\${!var:-}"
     if [ -z "$value" ]; then echo '{"comments":[]}'; else echo "$value"; fi
@@ -222,16 +241,130 @@ describe("develop-merge-sweep", () => {
     expect(result.calls).toContain("status=develop-pr,implementation");
   });
 
+  /**
+   * `develop`へ入っていないコミットがある状態のcompare応答。
+   * 最新コミットの日時だけが判定に効くため、`minutesAgo`で「いつpushされたか」を作る。
+   */
+  function aheadOf(count, minutesAgo) {
+    const date = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+    return JSON.stringify({
+      ahead_by: count,
+      commits: Array.from({ length: count }, () => ({
+        commit: { committer: { date } },
+      })),
+    });
+  }
+
+  const stranded = {
+    STUB_PR_1583: MERGED_PR,
+    STUB_REF_1583: "bbb222",
+    STUB_COMPARE_1583: aheadOf(1, 300),
+  };
+
   it("マージ後に追加pushがあるブランチは進めない（mode=additionalの実装中）", () => {
     const result = runStep(SWEEP_STEP, {
       ...inImplementation,
       STUB_PR_1583: MERGED_PR,
       STUB_REF_1583: "bbb222",
+      STUB_COMPARE_1583: aheadOf(1, 5),
     });
 
     expect(result.status).toBe(0);
     expect(result.reported).toEqual([]);
     expect(result.calls).not.toContain("gh issue comment");
+    // 猶予時間の内側なので、取り残しとしての通知もしない
+    expect(result.stdout).toContain("様子を見ます");
+  });
+
+  it("マージ直後にpushされ取り残されたコミットを00.check-userで通知する（#1999）", () => {
+    const result = runStep(SWEEP_STEP, { ...inImplementation, ...stranded });
+
+    expect(result.status).toBe(0);
+    // 取り残しがある間は`Develop`へ進めない（進捗の報告はしない）
+    expect(result.reported).toEqual([]);
+    expect(result.calls).toContain("--add-label 00.check-user");
+    expect(result.calls).toContain("--add-label 01.check-blocked");
+    expect(result.calls).toContain("gh issue comment 1583");
+    expect(result.stdout).toContain("取り残しとして通知しました");
+  });
+
+  it("develop向けPRが開いている間は取り残しとして通知しない", () => {
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      ...stranded,
+      STUB_PR_OPEN_1583: JSON.stringify([
+        { url: "https://github.com/guchi-apps/issue-deck/pull/1900" },
+      ]),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("--add-label 00.check-user");
+    expect(result.calls).not.toContain("gh issue comment");
+  });
+
+  it("同じ先端を通知済みなら、15分ごとにコメントを重ねない", () => {
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      ...stranded,
+      STUB_COMMENTS_1583: JSON.stringify({
+        comments: [{ body: "⚠️ ...\n<!-- issue-deck-stranded:issue-1583@bbb222 -->" }],
+      }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("通知済みのため");
+  });
+
+  it("既存コメントを取得できないときは通知せず、次回のcronに回す", () => {
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      ...stranded,
+      STUB_ISSUE_VIEW_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("既存コメントを取得できませんでした");
+  });
+
+  it("開いているPRを取得できないときは通知せず、次回のcronに回す", () => {
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      ...stranded,
+      STUB_PR_OPEN_1583: "fail",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("開いているdevelop向けPRを取得できませんでした");
+  });
+
+  it("先端が違っても、developへ入っていないコミットが無ければDevelopへ進める", () => {
+    // 人が取り残しをcherry-pick等で解消した後、ここで止まり続けないための経路
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      STUB_PR_1583: MERGED_PR,
+      STUB_REF_1583: "bbb222",
+      STUB_COMPARE_1583: JSON.stringify({ ahead_by: 0, commits: [] }),
+    });
+
+    expect(result.reported).toEqual(["1583"]);
+    expect(result.stdout).toContain("developへ入っていないコミットは無いため進めます");
+  });
+
+  it("developとの差分を取得できないときは進めず、通知もしない", () => {
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      STUB_PR_1583: MERGED_PR,
+      STUB_REF_1583: "bbb222",
+      STUB_COMPARE_1583: "fail",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual([]);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("差分を取得できませんでした");
   });
 
   it("ブランチが残っていて先端が一致するなら進める", () => {

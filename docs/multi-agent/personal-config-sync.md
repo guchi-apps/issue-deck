@@ -214,6 +214,37 @@ Tailscale SSHへ一本化しており、公開IPも持たないため（[subpc-d
 起動スクリプトは本体の作業ツリーから動くが、それを`origin/develop`へ追従させる仕組みは
 まだ無い（現状の手当ては#1274の警告と、セッション側だけ同期コピーから読む#1438まで）。
 
+## claude-config のIssueをどう実装するか（#1988）
+
+`guchi-apps/claude-config`（この個人設定の実体）にもIssueが立つ
+（最初の実例は guchi-apps/claude-config#1）。**実行経路はサブPCのローカルセッションだけ**で、
+無人実行（`claude-issue-dispatch.yml`）は入れない——個人設定は`~/.claude/`へsymlinkで直結している
+資産で、GitHub Actionsの実行環境には存在しないため、そこで実装させる意味が薄い。`subpc`・`vps`・
+`docs`と同じ枠として扱う（[../supported-repositories.md](../supported-repositories.md)の
+「`claude-config`（個人設定）」に実測と判断がある）。
+
+この運用で押さえておく点は3つ。
+
+- **`main`直行になる。** `develop`を持たないので、PRは`issue-<番号>` → `main`。
+  `main`のブランチ保護は入れておらず、マージするのは人だけ
+- **進捗は`Implementation`で止まる。** `issue-labels.yml`を持たないため、マージしても
+  盤面の「実行中」に残る。入れるまでは手で`Done`にしてcloseする
+  （導入は guchi-apps/claude-config#2）
+- **マージしただけでは実機に反映されない。** `~/.claude/CLAUDE.md`・`~/.claude/skills`は
+  本体チェックアウトへのsymlinkなので、両機で`git pull`するまで効かない。取り残しは上記
+  「取り残しの検知」の`check-sync.sh`が拾う
+
+### リポジトリ固有の運用ルールを`CLAUDE.md`へ書かない
+
+`~/apps/claude-config/CLAUDE.md`は**個人グローバルルールの実体そのもの**なので、
+worktreeで開いたセッションではプロジェクト指示として読まれ、同時に`~/.claude/CLAUDE.md`
+（本体チェックアウトへのsymlink）としてもグローバルルールに載る。**同じ内容が2枠に入る。**
+
+内容が同じなので判断は壊れないが、**リポジトリ固有の運用ルールを書く場所としては使えない。**
+ブランチ運用やPRの宛先をここへ書くと、全マシン・全セッションのグローバルルールになる。
+残すなら`README.md`側にする（`README.md`はセッションへ自動で読み込まれない）。
+`subpc`・`vps`・`docs`が`CLAUDE.md`に自リポジトリ向けの節を持っているのと、ここだけ扱いが違う。
+
 ## 関連
 
 - [ブランチ・worktree運用とエージェントの役割](branching.md) 共有知識層の位置づけ
