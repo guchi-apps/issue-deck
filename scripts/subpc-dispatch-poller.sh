@@ -813,6 +813,16 @@ REPORT_RETRY_INTERVAL=5
 # 揃えて標準エラーへ出す。#1228は「不正値・起動不能も標準出力へ」としていたが、それらは画面へ
 # `failed`として報告するもので、報告の色とログのストリームが食い違うと突き合わせが要る側に
 # 戻ってしまう（journalは標準出力・標準エラーのどちらも同じように残すため、追う分には差が無い）。
+#
+# **代行実行（`MANUAL_STEP`）の結果はここを通らないし、通してはいけない**（#1228のG1レビュー）。
+# pollerが報告するのは`running`までで、成否は`systemd-run`で切り離した別ユニットの
+# `scripts/run-manual-step.sh`が自分の`report()`から返す。あちらはコマンドの出力に
+# シークレットが混ざりうるためjournalへ書かない取り決めで（同スクリプトの`report()`の
+# コメント・docs/multi-agent/subpc-dispatch.md）、ここに揃えに行くとその決まりを破る。
+#
+# 出すのは1行が基本だが、起動失敗の`message`はランチャー出力の末尾（複数行）をそのまま
+# 含む。**そこは要約せず全部出す**（何を直せばよいかが書かれている唯一の出力で、以前も
+# 標準エラーへ全文出していた）。
 log_job_report() {
   local status="$1" message="${2:-}"
 
@@ -1321,9 +1331,11 @@ send_session_instruction() {
       ;;
     1)
       # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
-      # **「追加指示を見送りました」まで報告の文言に含める**（#1228）。以前は前置きを
-      # echo側だけが持っていたため、ログと画面で文言が違っていた。
-      report_job "$job_id" skipped "追加指示を見送りました: $message" "$session"
+      # **前置き（「追加指示を見送りました」）は付けない**（#1228のG1レビュー）。画面は
+      # 状態ラベルとして既に「送信を見送りました」を出すため（`dispatch-job.ts`の
+      # `SKIPPED`）、`message`側にも付けると同じことを2回言う表示になる。ログでは直前の
+      # 「ジョブ <id>: <repo> #<番号>（INSTRUCTION）」の行が文脈を持っている。
+      report_job "$job_id" skipped "$message" "$session"
       ;;
     *)
       report_job "$job_id" failed "$message" "$session"
@@ -1668,9 +1680,10 @@ abort_manual_step_job() {
   fi
 
   if systemctl --user stop "$unit" >/dev/null 2>&1; then
-    # ユニット名まで報告に含める（#1228）。止められなかった場合の文言と揃い、画面と
-    # ログのどちらからでも、どのユニットを止めたのかが分かる。
-    report_job "$job_id" succeeded "走っているコマンドを止めました（$unit）。"
+    # **このechoは残す**（#1228のG1レビュー）。報告と同じことを言っているように見えるが、
+    # 止めたユニット名が出るのはここだけで、報告の文言（画面に出る）は変えない。
+    echo "  代行実行を中断しました（$unit）"
+    report_job "$job_id" succeeded "走っているコマンドを止めました。"
     return 0
   fi
   report_job "$job_id" failed "走っているコマンドを止められませんでした（$unit）。"
