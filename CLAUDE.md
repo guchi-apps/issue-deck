@@ -158,6 +158,8 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 - 起点IssueへGitHubネイティブのサブIssueとして紐付け、起点IssueとPRにリンクをコメントする
 - issue-deckのサイドメニューの「ユーザーの作業待ち」ビュー（`view=manual-step`）に集まる。**エージェントへ送り直すIssueではないため実装開始の導線は出ず**、実行したユーザーがIssue詳細の「手作業を完了してクローズ」でcloseする（進捗Statusは`Ready`のままでよい）
 
+**ただし、次のどれかに当てはまるものは起票しない**（#2009）。**issue-deckの画面から実行できる操作**（サブPCのチェックアウト更新とpollerの再起動は「更新して再起動」で済む）、**同じ作業が繰り返し発生するもの**（発生のたびに起票せず、その作業をなくすIssueを立てる）、**openな同内容の手作業Issueが既にあるもの**（起票の前に`gh issue list --state open --label "71.manual-step" --search ...`で確認し、あれば既存Issueへコメントする）。この判断が無かった期間に、同じ内容の手作業Issueが5日で17件立っている。
+
 判断基準・本文テンプレートの全文・設計理由は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「デプロイ後などに残るユーザーの手作業はIssueとして起票する」を参照。
 
 ### ユーザー自身にコマンドを実行してもらうときは、Issueコメントに書く
