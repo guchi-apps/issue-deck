@@ -193,6 +193,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | PRを作成したが、そのリポジトリに自動マージ判定の経路が無い | `reusable-issue-labels.yml`の`develop-pr-opened`が付与（#1470。後述「判定経路を持たないリポジトリではPR作成時に付ける」） | 同じ（判定はリポジトリ単位で、起動元を問わない） |
 | 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
 | スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
+| ユーザー自身にコマンドを実行してもらう必要が出た | `.github/prompts/implement.md`がコマンドを書いたコメントとあわせて`00.check-user`＋`01.check-blocked`を付与（人の操作を待てないため停止する。#2002） | `AskUserQuestion`で尋ねるため質問と同じ経路で付く（フックが`01.check-input`）。**コマンドはIssueコメントにも投稿する**（端末の表示は通知にならないため。#2002） |
 | 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
 | すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
@@ -225,6 +226,31 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
 見て、実行中の間はトーストを保留し、ベルのバッジを「CI実行中」に落とす。判定材料はPR一覧が既に
 持っている値なので、GitHub APIの消費は増えない。保留中のものは、確認待ちが解ければ表示せずに
 捨てる（上の3の形）。
+
+### ユーザーにコマンドを実行してもらうときは、Issueコメントにも書く（#2002）
+
+エージェントが権限や実行環境の都合で実行できないコマンドに当たり、**ユーザーに実行して
+もらってから作業を続けたい**ことがある。guchi-apps/myroom#167（本番デプロイの再実行）では、
+auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`をブロックし、実装エージェントが
+端末にコマンドを出したままユーザーを待ち続けた。**端末の表示は通知にならない**ため、ユーザーが
+端末を見に来るまで誰も気付かなかった。
+
+この状況は既存のどのルールにも当てはまらなかった。作業を続けるつもりなので**中断ではなく**、
+まだ終わっていないので**完了報告でもない**。`71.manual-step`はPRマージ後も残る手作業を追跡する
+ためのもので、セッションの中で今すぐ実行してほしい1コマンドには重すぎる。
+
+そこで各実装プロンプトに「ユーザー自身にコマンドを実行してもらう場合」の節を置き、**端末や
+ログに出すだけで終わらせず、Issueコメントとして投稿する**ことを求めている。コメントには
+「なぜエージェントが実行できないか」「コピペで実行できるコマンド」「実行後にエージェントが
+何をするか」を書く。
+
+| 経路 | ラベル | 付け方 |
+| --- | --- | --- |
+| ローカルセッション（`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`） | `00.check-user`＋`01.check-input` | `AskUserQuestion`で尋ねればフックが自動で付ける（#1417）。付いていなければ手で付け、再開時に外す |
+| 無人実行（`.github/prompts/implement.md`） | `00.check-user`＋`01.check-blocked` | バッチ実行は人の操作を待てず、その場で停止するため理由は「待機」ではなく「停止」 |
+
+**ブロックされること自体は直さない。** 本番へ出る操作をエージェントに自動実行させないのは
+妥当な挙動で、直すべきなのはブロックされた後の伝え方である。
 
 ### 外れるタイミング
 
@@ -346,6 +372,7 @@ PRのopen時点で付ける（#1470）ため、付与のタイミングを揃え
 | --- | --- | --- |
 | 計画を提示した | `01.check-plan` | `.github/prompts/plan.md`（無人実行）／`session-plan.ts`の`postSessionPlan`（ローカル） |
 | 質問・確認の入力待ちに入った | `01.check-input` | `session-plan.ts`の`requestSessionCheckUser`（ローカル。無人実行に入力待ちは無い） |
+| ユーザー自身にコマンドを実行してもらう必要が出た | `01.check-input`（ローカル）／`01.check-blocked`（無人実行） | `scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`（ローカル。実体はフックの`requestSessionCheckUser`）、`.github/prompts/implement.md`（無人実行。#2002） |
 | ユーザーの質問へ回答した | `01.check-answered` | `.github/prompts/plan.md`・`implement.md`（無人実行） |
 | PRが自動マージされなかった／判定経路が無い | `01.check-merge` | `reusable-claude-review-develop.yml`の`auto-merge`・`auto-merge-fallback`、`reusable-issue-labels.yml`の`develop-pr-opened`、`.github/prompts/review-develop.md` |
 | 行き詰まり・依存追加・異常終了で停止した／すでに実装済みで実装不要と判断して停止した | `01.check-blocked` | `.github/prompts/implement.md`・`plan.md`（実装済み判断。#1601）、`reusable-issue-dispatch.yml`のフォールバック3か所、`reusable-claude-ci-fix.yml`・`reusable-claude-conflict-resolve.yml`・`reusable-claude-review-develop.yml`のレビュー失敗、`reusable-release-develop-to-main.yml`、`session-escalation.ts`（ローカル） |
