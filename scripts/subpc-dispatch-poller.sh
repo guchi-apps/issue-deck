@@ -796,7 +796,42 @@ reap_worktrees() {
 REPORT_RETRY_ATTEMPTS=3
 REPORT_RETRY_INTERVAL=5
 
+# issue-deckへ報告した内容を、そのままサブPC側のログにも1行出す（#1228）。
+#
+# Actions UIに相当するものが無いため、pollerの調査は`journalctl`が入口になる
+# （docs/multi-agent/subpc-dispatch.md「ログをどこで見るか」）。それなのに**起動前に
+# 早期returnする経路は`report_job`で画面へ報告するだけ**で、手元には`ジョブ <id>: <repo>
+# #<番号>`の1行しか出ていなかった。ログだけでは起動したのか見送ったのか判断できず、
+# `tmux ls`と突き合わせる必要があった（#1224で実際に起きた）。
+#
+# **分岐ごとにechoを足すのではなく、報告の入口で出す。** 同じ理由を2か所に書くと片方だけ
+# 直したときにずれるうえ、報告のみの分岐は起票時の3か所から20か所以上に増えている
+# （`PLAN_REVIEW`の本数上限・`MANUAL_STEP`の照合など）。ここに置けば足し忘れが起きない。
+#
+# **どちらのストリームへ出すかは、画面へ報告する`status`だけで決める。** 見送り（`skipped`）・
+# 成功・実行中は「異常ではないが起きたこと」なので標準出力、`failed`は既存の起動失敗の出力に
+# 揃えて標準エラーへ出す。#1228は「不正値・起動不能も標準出力へ」としていたが、それらは画面へ
+# `failed`として報告するもので、報告の色とログのストリームが食い違うと突き合わせが要る側に
+# 戻ってしまう（journalは標準出力・標準エラーのどちらも同じように残すため、追う分には差が無い）。
+log_job_report() {
+  local status="$1" message="${2:-}"
+
+  [[ -n "$message" ]] || return 0
+  if [[ "$status" == "failed" ]]; then
+    echo "  $message" >&2
+  else
+    echo "  $message"
+  fi
+}
+
 report_job() {
+  log_job_report "$2" "${3:-}"
+  send_job_report "$@"
+}
+
+# 報告の送出そのもの。**`report_job`と分けてあるのは、下の`skipped`→`failed`の読み替えで
+# 自分を呼び直すため**（ログはもう出しているので、そこから呼ぶとログだけ二重になる）。
+send_job_report() {
   local job_id="$1" status="$2" message="${3:-}" session="${4:-}"
   local payload
   payload="$(jq -n \
@@ -833,7 +868,7 @@ report_job() {
   # **見送りは失敗より軽い事実なので、失敗としてなら報告できる間はそちらで報告する。**
   if [[ "$status" == "skipped" && "$API_RESPONSE_STATUS" == "400" ]]; then
     echo "  受け口が skipped を受け付けないため failed で報告します（issue-deckの版数が古い）" >&2
-    report_job "$job_id" failed "$message" "$session"
+    send_job_report "$job_id" failed "$message" "$session"
     return 0
   fi
 
@@ -1282,13 +1317,13 @@ send_session_instruction() {
   message="$(deliver_session_instruction "$session" "$body")" || status=$?
   case "$status" in
     0)
-      echo "  追加指示を送りました: $session"
       report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
       ;;
     1)
       # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
-      echo "  追加指示を見送りました: $message"
-      report_job "$job_id" skipped "$message" "$session"
+      # **「追加指示を見送りました」まで報告の文言に含める**（#1228）。以前は前置きを
+      # echo側だけが持っていたため、ログと画面で文言が違っていた。
+      report_job "$job_id" skipped "追加指示を見送りました: $message" "$session"
       ;;
     *)
       report_job "$job_id" failed "$message" "$session"
@@ -1462,7 +1497,6 @@ run_control_job() {
       ;;
   esac
 
-  echo "  $action を実行しました: $session"
   report_job "$job_id" succeeded "$action を実行しました: $session" "$session"
   return 0
 }
@@ -1634,8 +1668,9 @@ abort_manual_step_job() {
   fi
 
   if systemctl --user stop "$unit" >/dev/null 2>&1; then
-    echo "  代行実行を中断しました（$unit）"
-    report_job "$job_id" succeeded "走っているコマンドを止めました。"
+    # ユニット名まで報告に含める（#1228）。止められなかった場合の文言と揃い、画面と
+    # ログのどちらからでも、どのユニットを止めたのかが分かる。
+    report_job "$job_id" succeeded "走っているコマンドを止めました（$unit）。"
     return 0
   fi
   report_job "$job_id" failed "走っているコマンドを止められませんでした（$unit）。"
@@ -1835,15 +1870,13 @@ launch_and_report() {
   if [[ -n "$new_sessions" ]]; then
     local session
     session="$(printf '%s\n' "$new_sessions" | head -1)"
-    echo "  起動しました: tmuxセッション $session"
     report_job "$job_id" succeeded "tmuxセッション $session を起動しました" "$session"
   else
     # 起動の出力をそのまま返す。受け口は「何を直せばよいか」まで書いて止まるため、
     # 画面にそのまま出せば原因が分かる。
     local message
     message="$(tail -c 1500 "$output_file")"
-    echo "  起動できませんでした（終了コード $launch_status）" >&2
-    printf '%s\n' "$message" >&2
+    # 出力は`report_job`が報告と同じ文字列で標準エラーへ出す（#1228）。
     report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message"
   fi
   rm -f "$output_file"
