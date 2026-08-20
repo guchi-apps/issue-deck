@@ -139,6 +139,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
   Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+- **設定の「フリート運用」の中身は開くまで読み込まない**（#2022）。共有ワークフローの配布・
+  1Passwordのシークレット同期・PATの一覧は
+  [`settings/lazy-fleet-panel.tsx`](../src/components/dashboard/settings/lazy-fleet-panel.tsx)の
+  カードで畳んであり、**押した時点で初めて中身をマウントする**（中のセクションは自分が
+  マウントされた時点で取りに行くため、マウント＝通信になる）。以前はこの区分を開いた瞬間に
+  14リポジトリぶんのタグ照会・同期履歴・PAT一覧がまとめて走っていた。**閉じてもアンマウント
+  しない**（`hidden`で隠すだけ）——開閉のたびに同じ取得が走るのを避け、入力中の対象キーも残す。
+  見出しは各カードが持ち、中のセクション側には置かない（同じ文言が2行並ぶ）。PATの期限警告だけは
+  カードを開かなくても分かるように、`useSettingsData`が数えた件数をカードの見出しへ出す。
 - **設定の「フリート運用」でリポジトリを並べる一覧は
   [`fleet-repository-row.tsx`](../src/components/dashboard/fleet-repository-row.tsx)の行を使う**（#1952）。
   シークレット同期・共有ワークフローのタグ・自動修復ワークフローの3つが同じ画面で隣り合うため、
@@ -1397,8 +1406,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   書けないままにする**——16リポジトリを操作する立場のため、書き込み権限を持たせると侵害時の
   影響範囲が全リポジトリのデプロイ用シークレットに広がる（`docs/cross-repo-automation.md`）。
   結果は`POST /api/secrets-sync/report`（認証は`PROGRESS_REPORT_SECRET`。進捗報告APIと同じ値）で
-  戻り、`SecretSyncRun`に残る。**保存も表示も件数と失敗した項目名だけで、値も値の長さも持たない**
-  （長さも手がかりになる）。判断は[`lib/secrets-sync.ts`](../src/lib/secrets-sync.ts)の純粋関数、
+  戻り、`SecretSyncRun`に残る。**保存も表示も件数と項目名だけで、値も値の長さも持たない**
+  （長さも手がかりになる）。項目名は失敗・同期・スキップの3種類を残し、画面では行ごとの
+  「内訳」で出す（#2022。件数だけでは「値を変えた項目が本当に入ったのか」を確かめられず、
+  Actionsのログを開きに行くしかなかった）。**項目名を拾うのは共有ワークフロー側**
+  （`reusable-sync-secrets.yml`がスクリプトのログの`ok`/`skip`/`FAIL`の行頭から取る）なので、
+  **新しいタグを配るまで配布先の実行は項目名を報告しない**。その実行の内訳には
+  「項目名が記録されていません」と出す（0件と読み違えないため）。
+  判断は[`lib/secrets-sync.ts`](../src/lib/secrets-sync.ts)の純粋関数、
   DBとの往復は[`lib/secrets-sync-runs.ts`](../src/lib/secrets-sync-runs.ts)。
   **CLIから直接叩く経路とActions経由では、消費する1Passwordの枠が違う**——CLIは個人アカウントの
   セッションで枠を消費しないが、Actionsはサービスアカウント（アカウント全体で1,000件/日）を使う。

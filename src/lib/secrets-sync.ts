@@ -53,6 +53,10 @@ export type SecretSyncRunView = {
   failedCount: number;
   /** 失敗した項目の**名前だけ**。値も値の長さも含めない */
   failedKeys: string[];
+  /** 同期した項目の**名前だけ**（#2022）。項目名を報告しない古い版からの報告では空 */
+  syncedKeys: string[];
+  /** スキップした項目の**名前だけ**（#2022）。同上 */
+  skippedKeys: string[];
   runUrl: string | null;
   message: string | null;
 };
@@ -168,4 +172,38 @@ export function describeSecretsSyncResult(run: SecretSyncRunView): SecretsSyncRe
     failed: run.failedCount,
     failedKeys: run.failedKeys,
   };
+}
+
+/**
+ * 1実行の**内訳**。件数の裏にある「何の項目が同期されたのか」を出すための組み立て（#2022）。
+ *
+ * **失敗を先頭に置く。** 内訳を開く動機のほとんどは「何が落ちたか」の確認で、
+ * 同期できた項目の一覧はその次に見たいもの。空のグループは出さない（並ぶだけ増える）。
+ *
+ * 扱うのは**項目名だけ**。値も値の長さも、ここまで一度も運ばれてこない。
+ */
+export type SecretsSyncKeyGroup = {
+  kind: "failed" | "synced" | "skipped";
+  label: string;
+  keys: string[];
+};
+
+export function secretsSyncKeyGroups(run: SecretSyncRunView): SecretsSyncKeyGroup[] {
+  const groups: SecretsSyncKeyGroup[] = [
+    { kind: "failed", label: "失敗", keys: run.failedKeys },
+    { kind: "synced", label: "同期", keys: run.syncedKeys },
+    { kind: "skipped", label: "スキップ", keys: run.skippedKeys },
+  ];
+  return groups.filter((group) => group.keys.length > 0);
+}
+
+/**
+ * 項目名が1つも残っていない実行かどうか。
+ *
+ * **件数が0件だったのか、項目名を記録していない古い実行なのかは、空の一覧では区別できない。**
+ * 記録前の実行（#2022より前）と、項目名を報告しない古いタグの共有ワークフローからの報告が
+ * これに当たるため、画面ではその旨を書く。
+ */
+export function hasSecretsSyncKeyNames(run: SecretSyncRunView): boolean {
+  return secretsSyncKeyGroups(run).length > 0;
 }

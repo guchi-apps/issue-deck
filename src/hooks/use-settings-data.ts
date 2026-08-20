@@ -49,11 +49,15 @@ export function useSettingsData(enabled: boolean) {
   const now = useNow();
 
   // 期限切れ・期限が近いPATが1つでもあれば「フリート運用」に警告を出す。
-  const hasExpiringFineGrainedToken =
-    now !== null &&
-    (fineGrainedTokens ?? []).some(
-      (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
-    );
+  // **件数まで数えるのは、フリート運用のPATのカードが畳んであるため**（#2022）。
+  // 開かなくても何件あるかが見出しに出る。判定はここ1か所に置く（PCとスマホで食い違わせない）。
+  const expiringFineGrainedTokenCount =
+    now === null
+      ? 0
+      : (fineGrainedTokens ?? []).filter(
+          (token) => getFineGrainedTokenStatus(token.expiresAt, now) !== "active",
+        ).length;
+  const hasExpiringFineGrainedToken = expiringFineGrainedTokenCount > 0;
   const hasGithubIncident = githubStatus !== null && githubStatus.indicator !== "none";
 
   return {
@@ -77,6 +81,7 @@ export function useSettingsData(enabled: boolean) {
       refetch: refetchFineGrainedTokens,
     },
     hasExpiringFineGrainedToken,
+    expiringFineGrainedTokenCount,
     hasGithubIncident,
   };
 }

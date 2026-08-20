@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { AlertTriangle, Check, KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, KeyRound, Loader2, RefreshCw } from "lucide-react";
 
 import { FleetRepositoryRow } from "@/components/dashboard/fleet-repository-row";
 import {
@@ -22,7 +22,10 @@ import { useSecretsSync, type SecretsSyncRepository } from "@/hooks/use-secrets-
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   describeSecretsSyncResult,
+  hasSecretsSyncKeyNames,
   normalizeOnlyKeys,
+  secretsSyncKeyGroups,
+  type SecretsSyncKeyGroup,
   type SecretSyncRunView,
 } from "@/lib/secrets-sync";
 
@@ -42,13 +45,66 @@ import {
  * 以前は1本の文字列を行の右端へ縮まない指定で置いていたため、`sync-secrets.yml`が
  * 見つからない等の長い理由が画面幅を超え、横スクロールしないと読めなかった。
  */
-function secretsSyncDetail(run: SecretSyncRunView): string | null {
+function secretsSyncDetail(run: SecretSyncRunView, breakdownOpen: boolean): string | null {
   const result = describeSecretsSyncResult(run);
   if (result.kind === "message") return result.message;
-  if (result.kind === "counts" && result.failedKeys.length > 0) {
+  // 内訳を開いている間は、同じ項目名が2か所に出るため畳んだ側だけに出す（#2022）
+  if (!breakdownOpen && result.kind === "counts" && result.failedKeys.length > 0) {
     return `失敗: ${result.failedKeys.join(", ")}`;
   }
   return null;
+}
+
+/** 内訳のチップの色。失敗だけ赤、スキップは薄く、同期は既定の枠 */
+function keyChipClass(kind: SecretsSyncKeyGroup["kind"]): string {
+  if (kind === "failed") return "border-destructive/40 text-destructive";
+  if (kind === "skipped") return "border-dashed text-muted-foreground";
+  return "";
+}
+
+/**
+ * 1実行の内訳（#2022）。**何の項目が同期されたのか**を項目名で出す。
+ *
+ * 件数だけでは「値を変えた項目が本当に入ったのか」を確かめられず、GitHubのActionsの
+ * ログまで開きに行くしかなかった。ここに出るのも**項目名だけ**で、値も値の長さも
+ * DBにもAPIにも一度も乗っていない。
+ */
+function SecretsSyncBreakdown({ run }: { run: SecretSyncRunView }) {
+  const groups = secretsSyncKeyGroups(run);
+
+  return (
+    <div className="mt-1 flex flex-col gap-1.5 rounded-md border bg-muted/40 p-2">
+      {!hasSecretsSyncKeyNames(run) ? (
+        <p className="text-[11px] text-muted-foreground">
+          この実行では項目名が記録されていません。共有ワークフローの新しいタグを配ったあとの
+          実行から記録されます。
+        </p>
+      ) : (
+        <>
+          {groups.map((group) => (
+            <div key={group.kind} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="w-16 shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                {group.label} {group.keys.length}
+              </span>
+              <span className="flex min-w-0 flex-wrap gap-1">
+                {group.keys.map((key) => (
+                  <span
+                    key={key}
+                    className={`rounded border px-1 font-mono text-[10px] leading-5 break-all ${keyChipClass(group.kind)}`}
+                  >
+                    {key}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+          <p className="text-[11px] text-muted-foreground">
+            保存しているのは項目名だけです。値も値の長さも記録しません。
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** 1リポジトリぶんの結果。**件数は折り返して並べる**（#1942） */
@@ -99,10 +155,20 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
   const nowMs = useNow();
   const [only, setOnly] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<SecretsSyncRepository | null>(null);
+  // 内訳を開いているリポジトリ。複数を並べて見比べられるように、1つに絞らない
+  const [openBreakdowns, setOpenBreakdowns] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const onlyIsValid = normalizeOnlyKeys(only) !== null;
+
+  function toggleBreakdown(fullName: string) {
+    setOpenBreakdowns((current) =>
+      current.includes(fullName)
+        ? current.filter((name) => name !== fullName)
+        : [...current, fullName],
+    );
+  }
 
   async function handleSync(repository: SecretsSyncRepository) {
     const [owner, repo] = repository.fullName.split("/");
@@ -127,20 +193,27 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">1Password → GitHub のシークレット同期</span>
-        <Button variant="ghost" size="sm" onClick={reload} disabled={isLoading} aria-label="再取得">
-          <RefreshCw className={isLoading ? "animate-spin" : undefined} />
-        </Button>
-      </div>
-
       {error && <p className="text-sm text-destructive">{error}</p>}
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
+      {/* 見出しは、この区画を畳んでいる`LazyFleetPanel`のカードが持つ（#2022）。
+          再取得はここに残る唯一の行頭の操作なので、対象キーの行の右端へ寄せる */}
       <div className="flex flex-col gap-1">
-        <Label htmlFor="secrets-sync-only" className="text-xs font-normal text-muted-foreground">
-          対象キー（カンマ区切り。空なら全件）
-        </Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="secrets-sync-only" className="text-xs font-normal text-muted-foreground">
+            対象キー（カンマ区切り。空なら全件）
+          </Label>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-my-1 h-6"
+            onClick={reload}
+            disabled={isLoading}
+            aria-label="再取得"
+          >
+            <RefreshCw className={isLoading ? "animate-spin" : undefined} />
+          </Button>
+        </div>
         <Input
           id="secrets-sync-only"
           value={only}
@@ -162,6 +235,9 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
             const run = repository.latestRun;
             const running = run?.status === "QUEUED";
             const failed = run?.status === "FAILED" || run?.status === "TIMEOUT";
+            // 実行中は件数がまだ無い。内訳を開けるのは結果が出てからだけ
+            const breakdownAvailable = run !== null && !running;
+            const breakdownOpen = breakdownAvailable && openBreakdowns.includes(repository.fullName);
             return (
               <FleetRepositoryRow
                 key={repository.fullName}
@@ -177,8 +253,26 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
                     />
                   )
                 }
-                result={<SecretsSyncResultLine run={run} nowMs={nowMs} />}
-                detail={run ? secretsSyncDetail(run) : null}
+                result={
+                  <>
+                    <SecretsSyncResultLine run={run} nowMs={nowMs} />
+                    {breakdownAvailable && (
+                      <button
+                        type="button"
+                        aria-expanded={breakdownOpen}
+                        onClick={() => toggleBreakdown(repository.fullName)}
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded border px-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                      >
+                        内訳
+                        <ChevronRight
+                          className={`size-3 transition-transform ${breakdownOpen ? "rotate-90" : ""}`}
+                        />
+                      </button>
+                    )}
+                  </>
+                }
+                detail={run ? secretsSyncDetail(run, breakdownOpen) : null}
+                expansion={breakdownOpen && run ? <SecretsSyncBreakdown run={run} /> : null}
                 action={
                   <Button
                     variant="outline"

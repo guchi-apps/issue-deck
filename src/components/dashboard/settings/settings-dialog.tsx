@@ -135,7 +135,10 @@ export function SettingsDialog({
                 />
               )}
               {section === "fleet" && (
-                <FleetOpsSection active={open} fineGrainedTokens={data.fineGrainedTokens} />
+                <FleetOpsSection
+                  fineGrainedTokens={data.fineGrainedTokens}
+                  expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
+                />
               )}
               {section === "status" && (
                 <StatusSection

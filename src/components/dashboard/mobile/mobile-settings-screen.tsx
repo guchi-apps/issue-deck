@@ -157,7 +157,10 @@ export function MobileSettingsScreen({
           />
         )}
         {section === "fleet" && (
-          <FleetOpsSection active fineGrainedTokens={data.fineGrainedTokens} />
+          <FleetOpsSection
+            fineGrainedTokens={data.fineGrainedTokens}
+            expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
+          />
         )}
         {section === "status" && (
           <StatusSection
