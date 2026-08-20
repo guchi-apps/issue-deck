@@ -55,6 +55,7 @@ import {
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import {
   extractRunnableManualStepCommands,
+  findInteractiveCommand,
   isSubpcManualStepDevice,
   MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
@@ -699,10 +700,16 @@ export async function enqueueManualStepJob(params: {
   const now = params.now ?? new Date();
   await expireStaleDispatchJobs(now);
 
-  const reject = (rejection: ManualStepExecutionRejection): EnqueueManualStepJobResult => ({
+  const reject = (
+    rejection: ManualStepExecutionRejection,
+    interactiveCommand: string | null = null,
+  ): EnqueueManualStepJobResult => ({
     ok: false,
     rejection,
-    message: describeManualStepExecutionRejection(rejection, { hostName: params.hostName }),
+    message: describeManualStepExecutionRejection(rejection, {
+      hostName: params.hostName,
+      interactiveCommand,
+    }),
   });
 
   const issue = await findIssueForManualStep(params.repositoryFullName, params.issueNumber);
@@ -725,6 +732,11 @@ export async function enqueueManualStepJob(params: {
   // これから実行するものが違う（画面を更新して、変わった内容を見てから押し直してもらう）
   if (extracted.command !== params.approvedCommand) return reject("body_changed");
 
+  // **対話が要るコマンドは積まない**（#2025）。積んでも代行実行のシェルには標準入力が無く、
+  // 失敗か打ち切りで終わる。画面（`buildManualStepRunPlan`）と同じ関数で判定するので、
+  // 押せるのにここで拒否される組み合わせは生まれない
+  const interactiveCommand = findInteractiveCommand(extracted.command);
+
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
   const rejection = resolveManualStepExecutionRejection({
     host: host
@@ -736,10 +748,11 @@ export async function enqueueManualStepJob(params: {
     isManualStepIssue: true,
     isSubpcDevice: true,
     hasCommand: true,
+    interactiveCommand,
     // 二重投入はactiveKeyのunique制約が止める（下のcatch）。ここでは先読みしない
     hasActiveJob: false,
   });
-  if (rejection) return reject(rejection);
+  if (rejection) return reject(rejection, interactiveCommand);
 
   try {
     const job = await db.dispatchJob.create({

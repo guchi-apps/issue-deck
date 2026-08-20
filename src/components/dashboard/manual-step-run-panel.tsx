@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   ChevronDown,
   ChevronRight,
   CircleStop,
@@ -118,6 +119,8 @@ export function ManualStepRunPanel({
     isManualStepIssue: isManualStepIssue(issue.labels),
     isSubpcDevice: isSubpcManualStepDevice(guide.where.device),
     hasCommand: command !== null,
+    // 対話が要るコマンドかどうかは実行計画が判定済み（#2025）。ここで見直さない
+    interactiveCommand: entry.interactiveCommand,
     hasActiveJob: hasActiveOtherJob,
   });
 
@@ -251,6 +254,11 @@ export function ManualStepRunPanel({
   }
 
   if (rejection !== null) {
+    // **確認コマンドには「実行した・次へ」が無い**（チェックが付かないため）。対話が要るコマンドで
+    // 自動実行が止まったとき、続きへ進める導線をここに出す（#2025）。手順はダイアログの
+    // フッターの「実行した・次へ」が同じ役目を持つので出さない
+    const canContinue =
+      onRetry !== undefined && entry.kind === "verification" && rejection === "interactive_command";
     return (
       <div className="flex flex-col gap-2">
         <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
@@ -259,11 +267,20 @@ export function ManualStepRunPanel({
             {describeManualStepExecutionRejection(rejection, {
               hostName: host?.name ?? "サブPC",
               device: guide.where.device,
+              interactiveCommand: entry.interactiveCommand,
             })}
           </span>
         </p>
         {/* 代行できない手順こそ、どこから実行するのかが要る（#1882） */}
         <ManualStepWhereToRun where={guide.where} command={command} />
+        {canContinue && (
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              <ArrowRight />
+              自分で実行した・続きへ
+            </Button>
+          </div>
+        )}
       </div>
     );
   }

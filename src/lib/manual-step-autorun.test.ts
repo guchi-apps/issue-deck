@@ -175,3 +175,47 @@ describe("findManualStepEntry", () => {
     expect(findManualStepEntry(result, 1)).toBeNull();
   });
 });
+
+/**
+ * 対話が要るコマンドを含む項目（#2025）。**そこだけ人が実行し、残りは自動で流れる**ことを見る。
+ */
+describe("対話が要るコマンドを含む項目", () => {
+  const INTERACTIVE_BODY = BODY.replace(
+    "systemctl --user restart issue-deck-dispatch-poller.service",
+    "op signin\n    scripts/sync-github-secrets.sh",
+  );
+
+  it("代行できない項目として並べ、承認する件数から外す", () => {
+    const result = plan(INTERACTIVE_BODY);
+    const [first, second] = result.entries;
+
+    expect(first.rejection).toBeNull();
+    expect(second.rejection).toBe("interactive_command");
+    // どのコマンドで引っかかったのかを画面へ出せること
+    expect(second.interactiveCommand).toBe("op signin");
+    // 手順1と確認1は代行できる（止まるのはその1件だけ）
+    expect(result.runnable).toBe(2);
+    expect(result.blocked).toBe(2);
+    expect(describeManualStepRunPlan(result)).toBe("手順1件・確認1件");
+  });
+
+  it("確認コマンドにも同じ判定を掛ける", () => {
+    const result = plan(
+      BODY.replace(
+        "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop",
+        "op signin && op item get Server --fields host",
+      ),
+    );
+    const verification = result.entries[result.entries.length - 1];
+
+    expect(verification.kind).toBe("verification");
+    expect(verification.rejection).toBe("interactive_command");
+  });
+
+  // ホストが応答していない・pollerが未対応でも、人が実行するしかないことは変わらない
+  it("ホストの都合より先に理由として出す", () => {
+    const result = plan(INTERACTIVE_BODY, null);
+
+    expect(result.entries[1].rejection).toBe("interactive_command");
+  });
+});

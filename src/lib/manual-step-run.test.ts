@@ -495,3 +495,86 @@ describe("listManualStepRunViews", () => {
     });
   });
 });
+
+/**
+ * 対話が要るコマンド（#2025）。**そこだけ人へ返し、続きは自動で流せる**ことを見る。
+ */
+describe("対話が要るコマンドを含む項目", () => {
+  const INTERACTIVE_BODY = BODY.replace("git pull --ff-only", "op signin");
+
+  it("対話が要る手順では積まずに人へ返す", async () => {
+    const created = run();
+    manualStepRunUpsert.mockResolvedValue(created);
+    applyUpdate(created);
+    issueFindFirst.mockResolvedValue({
+      body: INTERACTIVE_BODY,
+      title: "[手作業] サブPC: シークレットを同期する",
+      githubIssueId: BigInt(42),
+      labels: [{ name: "71.manual-step" }],
+    });
+
+    await startManualStepRun({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1876,
+      hostName: "subpc",
+      userId: "user-1",
+      diagnoseConsent: true,
+      now: NOW,
+    });
+
+    // 積んでも標準入力が無いまま失敗するだけなので、積まない
+    expect(enqueueManualStepJob).not.toHaveBeenCalled();
+    expect(manualStepRunUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PAUSED",
+          // ホスト側の事情ではなく、人が実行するしかない止まり方
+          pausedReason: "USER",
+          message: expect.stringContaining("op signin"),
+        }),
+      }),
+    );
+  });
+
+  // 確認コマンドにはチェックが無い（#1869）。記録しないと、続きへ進めても同じ所で止まり続ける
+  it("対話が要る確認コマンドは、止まると同時に流し終えた扱いにする", async () => {
+    const body = BODY.replace("- [ ] チェックアウトを更新する", "- [x] チェックアウトを更新する")
+      .replace("- [ ] pollerを再起動する", "- [x] pollerを再起動する")
+      .replace("git rev-list --count HEAD..origin/develop", "op signin");
+    const bodyLines = body.split("\n");
+    const verificationHeading = bodyLines.findIndex((text) => text.includes("## 完了の確認方法"));
+    const verificationLine =
+      bodyLines.findIndex((text, index) => index > verificationHeading && text.includes("```bash")) +
+      1;
+
+    const created = run();
+    manualStepRunUpsert.mockResolvedValue(created);
+    applyUpdate(created);
+    issueFindFirst.mockResolvedValue({
+      body,
+      title: "[手作業] サブPC: シークレットを同期する",
+      githubIssueId: BigInt(42),
+      labels: [{ name: "71.manual-step" }],
+    });
+
+    await startManualStepRun({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1876,
+      hostName: "subpc",
+      userId: "user-1",
+      diagnoseConsent: true,
+      now: NOW,
+    });
+
+    expect(enqueueManualStepJob).not.toHaveBeenCalled();
+    expect(manualStepRunUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PAUSED",
+          pausedReason: "USER",
+          doneLines: JSON.stringify([verificationLine]),
+        }),
+      }),
+    );
+  });
+});

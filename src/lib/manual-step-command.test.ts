@@ -5,6 +5,7 @@ import {
   extractRunnableManualStepCommands,
   extractShellBlock,
   extractVerificationCommands,
+  findInteractiveCommand,
   findManualStepCommand,
   isSubpcManualStepDevice,
   MANUAL_STEP_COMMAND_MAX_LENGTH,
@@ -293,5 +294,51 @@ describe("replaceManualStepCommand", () => {
   it("手順でない行・本文が空のときは差し替えない", () => {
     expect(replaceManualStepCommand(REAL_BODY, 1, "ls")).toBeNull();
     expect(replaceManualStepCommand(null, 10, "ls")).toBeNull();
+  });
+});
+
+/**
+ * 対話が要るコマンドの検出（#2025）。
+ *
+ * 見落とせば代行実行が失敗するだけだが、**広く取りすぎると、いま代行できている手順が
+ * 押せなくなる**。境目（コマンドの位置に現れたか）を中心に確かめる。
+ */
+describe("findInteractiveCommand", () => {
+  it("op signinを含むコマンドを見つける", () => {
+    expect(findInteractiveCommand("op signin")).toBe("op signin");
+    expect(
+      findInteractiveCommand("op signin\nscripts/sync-github-secrets.sh --dry-run"),
+    ).toBe("op signin");
+  });
+
+  it("括弧・パイプの内側にあっても見つける", () => {
+    expect(findInteractiveCommand('eval "$(op signin)"')).toBe("op signin");
+    expect(findInteractiveCommand("cd ~/apps/issue-deck && op signin --account my")).toBe(
+      "op signin",
+    );
+  });
+
+  it("gh の対話的なログイン・スコープ追加も対象にする", () => {
+    expect(findInteractiveCommand("gh auth login")).toBe("gh auth login");
+    expect(findInteractiveCommand("gh auth refresh -s admin:org")).toBe("gh auth refresh");
+  });
+
+  // **広げすぎない。** 1Passwordのサービスアカウントで動くコマンドは対話にならない
+  it("対話にならないコマンドは対象にしない", () => {
+    expect(findInteractiveCommand("op item get Server --fields host")).toBeNull();
+    expect(findInteractiveCommand("gh issue view 2025 --json body")).toBeNull();
+    expect(findInteractiveCommand("git pull --ff-only")).toBeNull();
+    expect(findInteractiveCommand(null)).toBeNull();
+  });
+
+  // 手順の説明としてコメントに書かれているだけなら、実行されるのは残りの行
+  it("コメント行は見ない", () => {
+    expect(findInteractiveCommand("# op signin は実行済みの前提\nscripts/x.sh")).toBeNull();
+  });
+
+  // 語の途中で当てない（`stop signin`のような別のコマンドを巻き込まない）
+  it("語の一部には当てない", () => {
+    expect(findInteractiveCommand("stop signing")).toBeNull();
+    expect(findInteractiveCommand("./opsignin.sh")).toBeNull();
   });
 });
