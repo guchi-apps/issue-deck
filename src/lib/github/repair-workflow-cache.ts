@@ -5,59 +5,31 @@ import {
   type RepairWorkflowAvailability,
   type RepairWorkflowState,
 } from "@/lib/github/pull-request-repair";
-import { fetchWorkflowExists } from "@/lib/github/release-api";
+import {
+  clearWorkflowExistsCacheForTest,
+  workflowExists as workflowExistsCached,
+} from "@/lib/github/workflow-exists-cache";
 import { REPAIR_WORKFLOW_SPECS } from "@/lib/workflow-tags";
-
-/**
- * 配られているワークフローが消えることはまず無いため、`releaseWorkflowExists`と同じ間隔で
- * プロセス内にキャッシュする。本番はPM2のfork（単一プロセス）で動作し、プロセスが
- * 入れ替わればキャッシュは空になる。
- */
-const REPAIR_WORKFLOW_EXISTS_TTL_MS = 10 * 60_000;
 
 /**
  * **無い側は短く持つ。** 配布PR（#1948）がマージされた瞬間に偽から真へ変わる値で、
  * そこを10分持つと「配ったのにボタンが押せない」時間ができる。逆向き（真→偽）は起こらない。
  * 短いTTLで再確認するのはボタンが出ているPRがある間だけなので、消費は小さい
  * （`ISSUE_RUN_NEGATIVE_CACHE_TTL_MS`と同じ考え方）。
+ *
+ * キャッシュ本体とTTLの既定（有る側は10分）は`workflow-exists-cache.ts`が持つ（#2020）。
  */
 const REPAIR_WORKFLOW_MISSING_TTL_MS = 60_000;
 
-const repairWorkflowExistsCache = new Map<string, { exists: boolean; cachedAt: number }>();
-
-/**
- * 同じワークフローへの問い合わせが重ならないようにするための実行中のPromise。
- * 1回のPR一覧の取得で、同じリポジトリの同じファイルを複数のPR・複数の種類が同時に見にくる
- * （`claude-pr-repair.yml`はCI失敗とコンフリクトの両方の起動先）。
- */
-const inFlight = new Map<string, Promise<boolean>>();
-
-async function workflowExists(
+function workflowExists(
   owner: string,
   repo: string,
   workflowFile: string,
   token: string,
 ): Promise<boolean> {
-  const key = `${owner}/${repo}/${workflowFile}`;
-  const cached = repairWorkflowExistsCache.get(key);
-  if (cached) {
-    const ttl = cached.exists ? REPAIR_WORKFLOW_EXISTS_TTL_MS : REPAIR_WORKFLOW_MISSING_TTL_MS;
-    if (Date.now() - cached.cachedAt < ttl) return cached.exists;
-  }
-
-  const running = inFlight.get(key);
-  if (running) return running;
-
-  const request = fetchWorkflowExists(owner, repo, workflowFile, token)
-    .then((exists) => {
-      repairWorkflowExistsCache.set(key, { exists, cachedAt: Date.now() });
-      return exists;
-    })
-    .finally(() => {
-      inFlight.delete(key);
-    });
-  inFlight.set(key, request);
-  return request;
+  return workflowExistsCached(owner, repo, workflowFile, token, {
+    missingTtlMs: REPAIR_WORKFLOW_MISSING_TTL_MS,
+  });
 }
 
 /**
@@ -123,6 +95,5 @@ export async function fetchRepairWorkflowAvailability(
 
 /** テスト用にキャッシュを空にする（プロセスをまたがないので本番では呼ばない） */
 export function clearRepairWorkflowExistsCacheForTest(): void {
-  repairWorkflowExistsCache.clear();
-  inFlight.clear();
+  clearWorkflowExistsCacheForTest();
 }

@@ -993,8 +993,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   本番へは出ない。**デプロイが済むまで「本番反映」と書かない**ようにし、実行中・失敗・待ちを
   束の見出しと畳んだ1行に出す（デプロイ中・失敗は`needsAttention`に含め、「手が要るもの◯件」に数える）。
   取得は専用の軽いエンドポイント`GET /api/branch-flow/deploy`（mainブランチの`deploy.yml`の
-  最新run 1件。`fetchLatestDeployWorkflowRun`）で、**リリース用workflowを持つリポジトリだけ**を
-  対象にする。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
+  最新run 1件。`fetchLatestDeployWorkflowRun`）で、**`deploy.yml`を持つリポジトリだけ**を
+  対象にする（#2020。元はリリース用workflowの有無で絞っていたが、再デプロイのボタンを足したことで
+  develop→mainのリリースを回さないリポジトリ——vps・clip-hive——にも状態を出す先ができた）。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
   runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
   場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
   打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。
@@ -1005,12 +1006,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **一度起動したら、バンプPRが現れるまでボタンを押せなくする**（#1548）。起動からPRが現れるまでの
   数十秒は`canTriggerRelease`がtrueのまま残り、その間の連打がworkflowの多重起動になっていた
   （既存のバンプPRがあれば作成はスキップされるが、バージョン判定のClaude実行は毎回走る）。
-  起動時刻は端末のlocalStorageへ置き、判定は[`lib/release-trigger-guard.ts`](../src/lib/release-trigger-guard.ts)。
+  起動時刻は端末のlocalStorageへ置き、判定は[`lib/trigger-pending-guard.ts`](../src/lib/trigger-pending-guard.ts)。
   **10分で失効させる**のは、workflowが失敗してバンプPRが1本も作られなかったときにボタンが
   二度と押せなくなるのを防ぐため。サーバー側に押下を記録しないのは、問い合わせるとこの画面の
   前提（取得を増やさない）が崩れるから。
   **起動中は畳んだ1行にも「リリース起動中」の紫のピルを出す**（#1955）。開いたときのボタンにしか
-  出ておらず、畳むと押す前と同じ行に戻っていた。保持は[`hooks/use-release-trigger-pending.ts`](../src/hooks/use-release-trigger-pending.ts)が
+  出ておらず、畳むと押す前と同じ行に戻っていた。保持は[`hooks/use-trigger-pending.ts`](../src/hooks/use-trigger-pending.ts)が
   リポジトリ1件ぶんで1回だけ行い、行とボタンの両方へ配る——同じキーで`usePersistedState`を
   2か所から読むと、押した瞬間の書き込みが互いに伝わらないため。出すのは`canTriggerRelease`が
   trueの間だけにして、リリース完了後も10分残る起動時刻で古いピルが出ないようにしている。
@@ -1018,6 +1019,26 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   含めてリポジトリ全件でマウントされるため、既定のまま呼ぶと普段から全件で30秒ごとの再描画が走る。
   「手が要るもの◯件」（`needsAttention`）には数えない。**押す操作の有無ではなく、記録が端末ローカル
   だから**で、数えると同じ画面でも見る端末によって件数が食い違う。
+  **この画面から本番デプロイだけをやり直せる**（#2020）。「本番へ再デプロイ」は`main`をそのまま
+  出し直す操作（`deploy.yml`を`ref: main`・input無しでdispatchする）で、**リリースとは別物**。
+  GitHubのSecretsや環境変数を変えると本番へ反映するのに`deploy.yml`を走らせる必要があるが
+  （`deploy.yml`が本番の`.env`をまるごと書き直す）、それまで手段はdevelop→mainのマージだけで、
+  出すコードが無いのにリリースを1回まわしていた。押してよいかは`canTriggerDeploy`
+  （`deploy.yml`がある・デプロイが動いていない）で決まり、**未リリースの変更の有無は見ない**——
+  developとの差分は出ないため、リリースの可否とは関係が無い。デプロイ中に押させないのは、
+  `deploy.yml`の`concurrency`が`cancel-in-progress: true`で、重ねると走っている実行を打ち切るため。
+  **置き場所はリポジトリの節（レールの凡例の行）で、リリースの束ではない。** 束は畳まれたり
+  本番反映済みで隠れたりするので、束に付けると押したいときに画面から消える。
+  ボタンは[`repository-deploy-button.tsx`](../src/components/dashboard/repository-deploy-button.tsx)、
+  起動は`POST /api/repositories/deploy`（[`lib/deploy-request.ts`](../src/lib/deploy-request.ts)）。
+  **`deploy.yml`があっても`workflow_dispatch`を書いていないリポジトリがある**（portfolio）。
+  ファイルの有無からは区別できない（GitHubのworkflow APIが起動条件を返さない）ため、dispatchが
+  422で落ちた時点で`deploy_dispatch_unsupported`へ振り分け、「workflow_dispatchを足すと押せる」と
+  出す——押し直しても直らないので、起動そのものの失敗と同じ文言にしない。
+  起動から実行が現れるまでの数秒は、リリースと同じ仕組み（`useTriggerPending("deploy", …)`。
+  失効は3分）でボタンを「デプロイ起動中…」にする。**そのあいだデプロイ状況のポーリングも続ける**
+  （`hasUnseenDeployTrigger`）——押した直後は「まだ本番へ出ていない」材料が応答側に無く、
+  そのままでは実行が現れても画面が「デプロイ成功」のまま止まる。
   **mainへのマージもこの画面から行える**（#1548）。束の見出しのマージボタンは一覧・詳細と同じ
   `PullRequestMergeButton`（`POST /api/issues/pull-request-merge`。merge commit）で、
   `mergeWarnings`がbase`main`のPRに「本番デプロイが走る」警告を必ず返すため確認ダイアログを通る。

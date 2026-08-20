@@ -28,6 +28,7 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +44,7 @@ import {
   autoRefreshIntervalLabel,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
-import { useReleaseTriggerPending } from "@/hooks/use-release-trigger-pending";
+import { useTriggerPending } from "@/hooks/use-trigger-pending";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
@@ -881,9 +882,11 @@ function ReleaseFlowGraph({
   showAllPlannedIssues,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
+  deployTriggerPending,
   onShowAllVersions,
   onToggleAllPlannedIssues,
   onReleaseTriggered,
+  onDeployTriggered,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -894,10 +897,14 @@ function ReleaseFlowGraph({
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
+  /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か（#2020） */
+  deployTriggerPending: boolean;
   onShowAllVersions: () => void;
   onToggleAllPlannedIssues: () => void;
   /** リリースworkflowを起こせた後（起動中の記録と、バンプPRを出すための取り直し） */
   onReleaseTriggered: () => void;
+  /** 本番デプロイworkflowを起こせた後（起動中の記録と、実行を出すための取り直し。#2020） */
+  onDeployTriggered: () => void;
   /** PRをこの画面からマージできたとき（#1756） */
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
@@ -941,6 +948,10 @@ function ReleaseFlowGraph({
     );
 
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
+  // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
+  // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
+  const latestReleaseMergedAt =
+    repository.releaseGroups.find((group) => group.mergedAt !== null)?.mergedAt ?? null;
   const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
     ? repository.releaseGroups[0].lanes
     : []
@@ -948,7 +959,7 @@ function ReleaseFlowGraph({
 
   return (
     <div className="relative px-4 py-3">
-      <div className="flex items-center gap-3 pb-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-purple-500" />
           {MAIN_BRANCH}
@@ -959,6 +970,22 @@ function ReleaseFlowGraph({
         </span>
         {unreleasedCommits !== null && unreleasedCommits > 0 && (
           <span>未リリース {unreleasedCommits}コミット</span>
+        )}
+        {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
+            隠れたりするため、束に付けると押したいときに画面から消える。ここなら
+            リポジトリを開いている間はつねに同じ位置にある */}
+        {repository.canTriggerDeploy && (
+          <>
+            <span className="flex-1" />
+            <RepositoryDeployButton
+              repositoryFullName={repository.repositoryFullName}
+              currentVersion={repository.release.latestVersion}
+              deployedAt={latestReleaseMergedAt}
+              unreleasedCommits={unreleasedCommits ?? 0}
+              isPending={deployTriggerPending}
+              onTriggered={onDeployTriggered}
+            />
+          </>
         )}
       </div>
 
@@ -1342,7 +1369,8 @@ function RepositorySection({
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  const { isPending, markTriggered } = useReleaseTriggerPending(repository.repositoryFullName);
+  const { isPending, markTriggered } = useTriggerPending("release", repository.repositoryFullName);
+  const deployTrigger = useTriggerPending("deploy", repository.repositoryFullName);
 
   return (
     <section>
@@ -1363,10 +1391,15 @@ function RepositorySection({
             showAllPlannedIssues={showAllPlannedIssues}
             mergedPullRequestsLoaded={mergedPullRequestsLoaded}
             releaseTriggerPending={isPending}
+            deployTriggerPending={deployTrigger.isPending}
             onShowAllVersions={onShowAllVersions}
             onToggleAllPlannedIssues={onToggleAllPlannedIssues}
             onReleaseTriggered={() => {
               markTriggered();
+              onRefresh();
+            }}
+            onDeployTriggered={() => {
+              deployTrigger.markTriggered();
               onRefresh();
             }}
             onMerged={onMerged}

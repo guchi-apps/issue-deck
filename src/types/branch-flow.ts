@@ -29,6 +29,14 @@ export type RepositoryBranchStatus = {
    * 「リリースする」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
    */
   hasReleaseWorkflow: boolean;
+  /**
+   * 本番デプロイworkflow（`deploy.yml`）を持つか（#2020）。
+   * 「本番へ再デプロイ」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
+   *
+   * **`hasReleaseWorkflow`とは一致しない。** develop→mainのリリースを回さず`deploy.yml`だけを
+   * 持つリポジトリ（vps・clip-hive）があるため、片方から代用しない。
+   */
+  hasDeployWorkflow: boolean;
 };
 
 /**
@@ -310,6 +318,14 @@ export type BranchFlowRepository = {
    * openなリリースPRもバンプPRも無く、未リリースの変更が1つ以上ある場合だけtrue。
    */
   canTriggerRelease: boolean;
+  /**
+   * いま「本番へ再デプロイ」を押してよいか（#2020）。`deploy.yml`があり、デプロイが
+   * 動いていない（`summary.deploy`が`waiting`・`running`でない）場合だけtrue。
+   *
+   * **未リリースの変更の有無は見ない。** これは`main`をそのまま出し直す操作で、
+   * developとの差分は出ないため、リリースの可否とは関係が無い。
+   */
+  canTriggerDeploy: boolean;
   /**
    * 実装が進んでいるはずなのにブランチもPRも見つからないIssue。
    * 「関連が付いていない」ことを隠さないために出す。

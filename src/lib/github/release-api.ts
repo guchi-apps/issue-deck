@@ -333,3 +333,26 @@ export async function dispatchReleaseWorkflow(
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
 }
+
+/**
+ * 本番デプロイworkflow（`deploy.yml`）をmainブランチに対して手動起動する（#2020）。
+ *
+ * **inputは送らない。** 各リポジトリの`deploy.yml`は`workflow_dispatch:`をinput無しで
+ * 書いており、送るとGitHubが422（`Unexpected inputs provided`）で落とす。
+ * `main`をそのまま出し直すだけの操作なので、指定するものも無い。
+ *
+ * `workflow_dispatch`そのものを書いていないリポジトリでも422になる（`guchi-apps/portfolio`）。
+ * ファイルの有無からは区別できないため、呼び出し側が422を専用の文言へ振り分ける。
+ */
+export async function dispatchDeployWorkflow(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${DEPLOY_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: "main" } });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}

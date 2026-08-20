@@ -4,8 +4,8 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { deployWorkflowExists } from "@/lib/github/deploy-workflow-cache";
 import { fetchLatestDeployWorkflowRun } from "@/lib/github/release-api";
-import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import type { BranchFlowDeployResponse, RepositoryDeployStatus } from "@/types/branch-flow";
 
 export function GET() {
@@ -25,8 +25,11 @@ export function GET() {
  * 消費が釣り合わない。こちらの消費はリポジトリあたりREST 1回で、しかもETagの条件付きGETを
  * 通しているため、実行が進んでいない間の再取得はレート制限を消費しない。
  *
- * 対象は`/api/branch-flow`と同じ母集団のうち、**リリース用workflowを持つリポジトリだけ**。
- * develop→mainのリリースを行わないリポジトリには、状態を出す先（リリースの束）が無い。
+ * 対象は`/api/branch-flow`と同じ母集団のうち、**`deploy.yml`を持つリポジトリだけ**。
+ * 元はリリース用workflowの有無で絞っていたが（状態を出す先がリリースの束しか無かったため）、
+ * #2020で「本番へ再デプロイ」を足したことで、develop→mainのリリースを回さないリポジトリ
+ * （vps・clip-hive）にも状態を出す先ができた——押している最中はボタンを押させないための材料で、
+ * 畳んだ1行の「デプロイ中」もリリースの束とは関係なく出る。
  */
 async function handleGET() {
   const userId = await requireUserId();
@@ -63,13 +66,13 @@ async function handleGET() {
     repositories.map(async (repository): Promise<RepositoryDeployStatus | null> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
-        // プロセス内に10分キャッシュされ、ヘッダーのリリース状態取得と共有される（#1538）
-        const hasReleaseWorkflow = await releaseWorkflowExists(
+        // プロセス内に10分キャッシュされ、ブランチ状況・デプロイの起動と共有される（#2020）
+        const hasDeployWorkflow = await deployWorkflowExists(
           repository.ownerLogin,
           repository.name,
           token,
         );
-        if (!hasReleaseWorkflow) return null;
+        if (!hasDeployWorkflow) return null;
 
         const deployRun = await fetchLatestDeployWorkflowRun(
           repository.ownerLogin,

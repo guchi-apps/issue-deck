@@ -364,6 +364,13 @@ function buildRepository({
       releasePullRequest === null &&
       bumpPullRequest === null &&
       (branchStatus?.developVsMain?.aheadBy ?? 0) > 0,
+    // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
+    // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
+    // デプロイが動いている間だけ押させない（`deploy.yml`の`concurrency`は
+    // `cancel-in-progress: true`で、重ねて起動すると走っているデプロイを打ち切るため）。
+    canTriggerDeploy:
+      (branchStatus?.hasDeployWorkflow ?? false) &&
+      (deployState === null || deployState.kind === "success" || deployState.kind === "failure"),
     orphanIssues: issues
       .filter(
         (issue) =>

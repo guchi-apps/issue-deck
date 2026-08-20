@@ -125,6 +125,7 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
     existingBranches: ["main", "develop"],
     developVsMain: null,
     hasReleaseWorkflow: false,
+    hasDeployWorkflow: false,
     ...overrides,
   };
 }
@@ -693,6 +694,50 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
       expect(screen.getByText("issue-1454")).toBeTruthy();
       expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+    });
+  });
+
+  describe("本番デプロイ起動ボタン（#2020）", () => {
+    const deployable = branchStatus({
+      developVsMain: { aheadBy: 3, behindBy: 0 },
+      hasDeployWorkflow: true,
+    });
+
+    it("deploy.ymlを持つリポジトリを開くと出す", () => {
+      renderFlow({ branchStatuses: [deployable] });
+      openRepository();
+      expect(screen.getByText("本番へ再デプロイ")).toBeTruthy();
+    });
+
+    it("deploy.ymlが無ければ出さない", () => {
+      renderFlow({
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+      openRepository();
+      expect(screen.queryByText("本番へ再デプロイ")).toBeNull();
+    });
+
+    it("押すと本番へ出るものを確認ダイアログに出す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [deployable],
+      });
+      openRepository();
+      fireEvent.click(screen.getByText("本番へ再デプロイ"));
+
+      expect(screen.getByText("mainを本番へ出し直しますか？")).toBeTruthy();
+      // **developの差分は出ない**ことを、リリースと取り違えないよう明示する
+      expect(screen.getByText("3コミットぶんは出ません")).toBeTruthy();
+      // いま本番に出ている版を添える（押す前に「同じものが出る」と分かるようにする）
+      expect(screen.getByText("いまの本番")).toBeTruthy();
     });
   });
 

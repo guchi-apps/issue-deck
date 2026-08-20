@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { readTriggeredAt } from "@/hooks/use-trigger-pending";
 import { resolveDeployState } from "@/lib/branch-flow";
+import { DEPLOY_TRIGGER_PENDING_MS, isTriggerPending } from "@/lib/trigger-pending-guard";
 import type { BranchFlowDeployResponse, RepositoryDeployStatus } from "@/types/branch-flow";
 
 type UseDeployStatusResult = {
@@ -28,6 +30,23 @@ function hasPendingDeploy(
       now,
     });
     return state !== null && state.kind !== "success";
+  });
+}
+
+/**
+ * 画面から本番デプロイを起こしたのに、その実行がまだ取得できていないリポジトリがあるか（#2020）。
+ *
+ * **押した直後は「まだ本番へ出ていない」材料が応答の側に何も無い。** 直近のリリースはとっくに
+ * デプロイ成功で、新しい実行はまだGitHubに現れていないため、`hasPendingDeploy`だけを見ていると
+ * 押した直後にポーリングが止まり、実行が現れても画面が「デプロイ成功」のまま動かない。
+ * 押した記録（端末のlocalStorage）を見て、実行が現れるまでのあいだだけ取り直しを続ける。
+ */
+function hasUnseenDeployTrigger(statuses: RepositoryDeployStatus[], now: number): boolean {
+  return statuses.some((status) => {
+    const triggeredAt = readTriggeredAt("deploy", status.repositoryFullName);
+    if (!isTriggerPending(triggeredAt, now, DEPLOY_TRIGGER_PENDING_MS)) return false;
+    const runAt = status.deployRun ? new Date(status.deployRun.createdAt).getTime() : 0;
+    return runAt < new Date(triggeredAt as string).getTime();
   });
 }
 
@@ -97,8 +116,16 @@ export function useDeployStatus(
       }
     }
 
+    function shouldKeepPolling(): boolean {
+      const now = Date.now();
+      return (
+        hasPendingDeploy(lastStatuses, releaseMergedAtRef.current) ||
+        hasUnseenDeployTrigger(lastStatuses, now)
+      );
+    }
+
     function schedule() {
-      if (cancelled || !hasPendingDeploy(lastStatuses, releaseMergedAtRef.current)) return;
+      if (cancelled || !shouldKeepPolling()) return;
       timerId = setTimeout(poll, ACTIVE_POLL_INTERVAL_MS);
     }
 
@@ -110,7 +137,7 @@ export function useDeployStatus(
 
     function handleVisibilityChange() {
       if (document.hidden || inFlight) return;
-      if (!hasPendingDeploy(lastStatuses, releaseMergedAtRef.current)) return;
+      if (!shouldKeepPolling()) return;
       clearTimeout(timerId);
       void poll();
     }

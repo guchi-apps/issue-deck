@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { lookupBranchRefs } from "@/lib/github/branches-api";
+import { deployWorkflowExists } from "@/lib/github/deploy-workflow-cache";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { ACTIVE_ISSUE_PROGRESS_STATUSES, issueBranchName } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
@@ -100,7 +101,7 @@ async function handleGET() {
       const checkedBranches = branchesByRepositoryId.get(repository.id) ?? [];
       try {
         const token = await tokenFor(repository.installation.installationId);
-        const [lookup, hasReleaseWorkflow] = await Promise.all([
+        const [lookup, hasReleaseWorkflow, hasDeployWorkflow] = await Promise.all([
           lookupBranchRefs(repository.ownerLogin, repository.name, checkedBranches, token),
           // 「リリースする」を出してよいかは、リリース用workflowの有無で決める（#1538）。
           // `claude-issue-dispatch.yml`の有無（`hasClaudeWorkflow`）で代用していたため、
@@ -114,6 +115,14 @@ async function handleGET() {
             console.error(`[GET /api/branch-flow] release workflow ${repository.fullName}:`, error);
             return false;
           }),
+          // 「本番へ再デプロイ」を出してよいかは、`deploy.yml`の有無で決める（#2020）。
+          // リリース用workflowの有無とは一致しない——`deploy.yml`だけを持つリポジトリ
+          // （vps・clip-hive）があり、そこはdevelop→mainのリリースを回さないぶん
+          // 手動での出し直しがいちばん要る。判定は同じキャッシュを通る。
+          deployWorkflowExists(repository.ownerLogin, repository.name, token).catch((error) => {
+            console.error(`[GET /api/branch-flow] deploy workflow ${repository.fullName}:`, error);
+            return false;
+          }),
         ]);
 
         return {
@@ -122,6 +131,7 @@ async function handleGET() {
           existingBranches: lookup.existingBranches,
           developVsMain: lookup.developVsMain,
           hasReleaseWorkflow,
+          hasDeployWorkflow,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。取れなかったことだけを返す。

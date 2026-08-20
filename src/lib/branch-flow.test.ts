@@ -82,6 +82,7 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
     existingBranches: ["main", "develop"],
     developVsMain: null,
     hasReleaseWorkflow: false,
+    hasDeployWorkflow: false,
     ...overrides,
   };
 }
@@ -361,6 +362,7 @@ describe("buildBranchFlow", () => {
           existingBranches: ["main", "develop"],
           developVsMain: { aheadBy: 0, behindBy: 0 },
           hasReleaseWorkflow: false,
+          hasDeployWorkflow: false,
         },
       ],
     });
@@ -725,6 +727,93 @@ describe("extractManualStepOrigin", () => {
   it("手掛かりが無ければnull", () => {
     expect(extractManualStepOrigin("VPSで作業する。#999 は無関係。")).toBeNull();
     expect(extractManualStepOrigin(null)).toBeNull();
+  });
+});
+
+describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () => {
+  const MERGED_AT = "2026-08-15T10:00:00Z";
+  const NOW = new Date("2026-08-15T10:01:00Z").getTime();
+
+  const RELEASED = [
+    pullRequest({
+      number: 1573,
+      title: "v3.22.0をmainへリリースする",
+      baseRef: "main",
+      headRef: "develop",
+      kind: "release",
+      linkedIssueNumber: null,
+      state: "closed",
+      merged: true,
+      mergedAt: MERGED_AT,
+    }),
+  ];
+
+  function buildDeploy(input: {
+    hasDeployWorkflow?: boolean;
+    deployRun?: Partial<BranchFlowDeployRun> | null;
+    aheadBy?: number;
+  }) {
+    const deployStatuses: RepositoryDeployStatus[] | undefined =
+      input.deployRun === null
+        ? undefined
+        : [
+            {
+              repositoryFullName: REPO,
+              deployRun: {
+                status: "completed",
+                conclusion: "success",
+                htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+                createdAt: "2026-08-15T10:00:30Z",
+                ...input.deployRun,
+              },
+            },
+          ];
+    return build({
+      pullRequests: RELEASED,
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: input.aheadBy ?? 0, behindBy: 0 },
+          hasDeployWorkflow: input.hasDeployWorkflow ?? true,
+        }),
+      ],
+      deployStatuses,
+      now: NOW,
+    }).repositories[0];
+  }
+
+  it("deploy.ymlがあり、デプロイが動いていなければ押せる", () => {
+    expect(buildDeploy({}).canTriggerDeploy).toBe(true);
+  });
+
+  it("未リリースの変更があっても押せる（mainをそのまま出し直す操作のため）", () => {
+    expect(buildDeploy({ aheadBy: 5 }).canTriggerDeploy).toBe(true);
+  });
+
+  it("deploy.ymlを持たないリポジトリでは押せない", () => {
+    expect(buildDeploy({ hasDeployWorkflow: false }).canTriggerDeploy).toBe(false);
+  });
+
+  it("デプロイが動いている間は押せない（重ねて起動すると走っている実行を打ち切るため）", () => {
+    const repository = buildDeploy({ deployRun: { status: "in_progress", conclusion: null } });
+    expect(repository.summary.deploy?.kind).toBe("running");
+    expect(repository.canTriggerDeploy).toBe(false);
+  });
+
+  it("マージ済みだが実行がまだ現れていない間も押せない", () => {
+    // マージより前の実行しか無い＝今回ぶんの実行を待っている状態（`waiting`）
+    const repository = buildDeploy({ deployRun: { createdAt: "2026-08-15T09:00:00Z" } });
+    expect(repository.summary.deploy?.kind).toBe("waiting");
+    expect(repository.canTriggerDeploy).toBe(false);
+  });
+
+  it("デプロイに失敗した後は押せる（出し直せることが要る）", () => {
+    const repository = buildDeploy({ deployRun: { conclusion: "failure" } });
+    expect(repository.summary.deploy?.kind).toBe("failure");
+    expect(repository.canTriggerDeploy).toBe(true);
+  });
+
+  it("デプロイ状況を取得できていなくても押せる（判定材料が無いだけで、起動は妨げない）", () => {
+    expect(buildDeploy({ deployRun: null }).canTriggerDeploy).toBe(true);
   });
 });
 
