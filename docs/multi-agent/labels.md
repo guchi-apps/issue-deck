@@ -886,12 +886,17 @@ gh issue list --repo guchi-apps/issue-deck --state open \
 
 ### 実機の設定ファイル変更は、管理リポジトリのIssueへ切り出す（#2021）
 
-VPS・サブPCの設定ファイルは**Gitで管理されていて、mainへマージすれば実機へ自動で反映される**。
+VPS・サブPCの設定ファイルは**Gitで管理されていて、`main`へマージすれば実機へ自動で反映される**。
 
 - `guchi-apps/vps`: `main`へのpushで`.github/workflows/deploy.yml`がVPSへrsyncし、
   `scripts/apply.sh`が`/etc`配下へ配る
 - `guchi-apps/subpc`: `main`へのpushでサブPC上のself-hostedランナーが
   `scripts/setup-apply.sh`（＝`setup.sh`）を実行する
+
+**ただしマージは2回ある。** どちらのリポジトリも日常の開発ブランチは`develop`で、Issueブランチが
+向くのも`develop`。`deploy.yml`が起動するのは`main`へのpushなので、実機へ出るには
+`develop`→`main`のリリースPR（`release-develop-to-main.yml`）のマージがもう1段要る。
+そのマージは自動マージ不可カテゴリ（[../../CLAUDE.md](../../CLAUDE.md)）なので人が行う。
 
 にもかかわらず、手作業Issueには`sudo nano /etc/apache2/sites-available/...`のように**実機を
 直接書き換える手順**が書かれることがある。そうすると変更がGitに残らず、両リポジトリが毎日回して
@@ -909,6 +914,12 @@ VPS・サブPCの設定ファイルは**Gitで管理されていて、mainへマ
 | `/etc/netplan/`・`/etc/ssh/sshd_config.d/`・`/etc/default/grub` | `guchi-apps/subpc` | `configs/` |
 | `~/.bashrc`・`~/.bashrc.local`・`~/.profile.local` | `guchi-apps/subpc` | `configs/bash/` |
 
+**載せるのは`deploy.yml`の`paths`に入っている受け口だけ**（vpsは`apache/**`・`systemd/**`・
+`cron/**`・`scripts/**`・`fail2ban/**`、subpcは`setup.sh`・`configs/**`・`scripts/**`）。
+vpsの`mysql/`は記録用で`scripts/apply.sh`が配らないため対応表に載せていない——マージしても実機が
+変わらない置き場を載せると、切り出したPRをマージしても実機は元のままなのに「対応済み」に見える。
+Git管理外の領域は従来どおり手作業のまま残すのが正しい。
+
 **対応表の正は[`src/lib/infra-config-repos.ts`](../../src/lib/infra-config-repos.ts)**。上の表は
 読むためのもので、画面もそちらを見る。各リポジトリの反映スクリプト（`scripts/apply.sh`・
 `setup.sh`）が変わったら、まずそこを直す。**`mysql/`（vps）と`netplan`（subpc）はマージしても
@@ -922,10 +933,12 @@ VPS・サブPCの設定ファイルは**Gitで管理されていて、mainへマ
    担当Issue以外の実装にあたる（[branching.md](branching.md)）。PRは対象リポジトリの
    セッションが作る
 2. 起点Issueのサブissueとして紐付け、PR本文と完了報告コメントにリンクを書く
-3. **人に残るのがそのPRのマージだけなら、手作業Issueは起票しない。** 切り出したIssueが
-   そのまま追跡になる（上記「起票しない条件」と同じ考え方）
-4. 実機の操作が別に残る場合だけ手作業Issueを起票し、`## 前提条件`の「先に完了している必要が
-   あるIssue・PR」へ`guchi-apps/vps#<番号>`と書いて順序を残す（後述「実施順序は`## 前提条件`に書く」）
+3. 手作業Issueは残す。ただし本文に書くのは実機のコマンドではなく、**マージと確認の3手順**にする
+   （(1) 切り出したPRを`develop`へマージ (2) `develop`→`main`のリリースPRを作成・マージ
+   (3) `deploy.yml`の成功を確認）。実機へ出るまでのマージが2回あり、2段目は自動マージ不可
+   カテゴリで人が行うため、追跡の対象として残る
+4. その手作業Issueの`## 前提条件`の「先に完了している必要があるIssue・PR」へ
+   `guchi-apps/vps#<番号>`と書いて順序を残す（後述「実施順序は`## 前提条件`に書く」）
 
 #### 取りこぼしは画面が拾う
 

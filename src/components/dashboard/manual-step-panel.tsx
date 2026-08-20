@@ -188,8 +188,9 @@ function ManualStepVerifiedNotice({ verifiedAt }: { verifiedAt: string }) {
  * 実機のファイル変更を、管理リポジトリのIssueへ切り出す入口（#2021）。
  *
  * VPS・サブPCの設定ファイルは`guchi-apps/vps`・`guchi-apps/subpc`で管理されており、
- * mainへマージすれば実機へ自動で反映される。**手で書き換えるとGitに残らずドリフトになる**
- * ため、当たっている手順があるときだけ、切り出す導線をここに出す。
+ * `develop`へのマージと`develop`→`main`のリリースを経て実機へ自動で反映される。
+ * **手で書き換えるとGitに残らずドリフトになる**ため、当たっている手順があるときだけ、
+ * 切り出す導線をここに出す。
  *
  * **押しても勝手に起票しない。** 押すと新規作成ダイアログが対象リポジトリ・タイトル・本文を
  * 埋めた状態で開くだけで、作るかどうかは中身を読んだ人が決める（他リポジトリへ書く操作を
@@ -213,7 +214,8 @@ function InfraConfigNotice({
         リポジトリ経由で反映できます
       </p>
       <p className="mt-1 text-xs text-muted-foreground">
-        実機のファイルを書き換える手順があります。これらはGitで管理されていて、PRをマージすれば実機へ自動で反映されます。
+        {"実機のファイルを書き換える手順があります。これらはGitで管理されていて、" +
+          "developへマージしたうえでdevelop→mainのリリースをマージすると、実機へ自動で反映されます。"}
       </p>
       <ul className="mt-2 space-y-2">
         {targets.map((target) => (

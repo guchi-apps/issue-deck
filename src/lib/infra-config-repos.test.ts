@@ -108,6 +108,21 @@ describe("detectInfraConfigTargets", () => {
     expect(detectInfraConfigTargets(body)).toEqual([]);
   });
 
+  // #2021の計画レビュー: `deploy.yml`の`paths`に無い置き場（vpsの`mysql/`）は、PRをマージしても
+  // 実機が変わらない。切り出せると案内すると「対応済みなのに直っていない」状態になる
+  it("マージしても実機へ反映されないvpsのMySQL設定には当てない", () => {
+    const body = buildBody({
+      device: "VPS",
+      todo: `- [ ] my.cnfを修正する
+
+    \`\`\`bash
+    sudo nano /etc/mysql/my.cnf
+    \`\`\``,
+    });
+
+    expect(detectInfraConfigTargets(body)).toEqual([]);
+  });
+
   it("デバイスが読めず、VPS・サブPCの両方に当たるパスは切り出さない", () => {
     const body = buildBody({
       todo: `- [ ] ユニットを置く
@@ -250,6 +265,21 @@ describe("buildInfraConfigIssueDraft", () => {
     expect(draft.body).toContain("`apache/sites-available/`");
     expect(draft.body).toContain("sudo cp aide.gucchii.com.conf");
     expect(draft.body).toContain("scripts/apply.sh");
+  });
+
+  // #2021の計画レビュー: Issueブランチが向くのは`develop`で、実機へ出るのは`main`へのマージ。
+  // 1段で書くと「マージしたのに反映されない」ことになる
+  it("developへのPRと、develop→mainのリリースの2段で書く", () => {
+    const [target] = detectInfraConfigTargets(body);
+    const draft = buildInfraConfigIssueDraft({
+      target,
+      originRepositoryFullName: "guchi-apps/issue-deck",
+      originNumber: 2001,
+      originTitle: "[手作業] VPS: aideのVirtualHostを追加する",
+    });
+
+    expect(draft.body).toContain("`develop` 宛のPull Requestを作成する");
+    expect(draft.body).toContain("`develop`→`main`のリリースPR");
   });
 
   it("反映のされ方が既定と違う対応では、その但し書きを使う", () => {

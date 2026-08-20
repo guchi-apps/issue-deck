@@ -17,6 +17,15 @@ import { parseManualStepGuide, type ManualStepGuideStep } from "@/lib/manual-ste
  *
  * **対応表の正は各リポジトリの反映スクリプト**（`guchi-apps/vps`の`scripts/apply.sh`、
  * `guchi-apps/subpc`の`setup.sh`）。あちらの構成が変わったらここも直す。
+ *
+ * **載せるのは`deploy.yml`の`paths`に入っている受け口だけにする。** マージしても実機が
+ * 変わらない置き場（vpsの`mysql/`は記録のみで`apply.sh`が配らない）を載せると、切り出した
+ * PRをマージしても実機は元のままなのに「対応済み」に見える。Git管理外の領域は、従来どおり
+ * 手作業のまま残すのが正しい。
+ *
+ * **実機へ出るまでにマージは2回ある。** 切り出したIssueのブランチが向くのは`develop`で、
+ * `deploy.yml`が起動するのは`main`へのpush。`develop`→`main`のリリースPRのマージは
+ * 自動マージ不可カテゴリ（CLAUDE.md）にあたるため人が行う。案内と本文はこの2段で書く。
  */
 
 export type InfraConfigDevice = "vps" | "subpc";
@@ -57,9 +66,9 @@ const VPS_REPO: InfraConfigRepo = {
   device: "vps",
   deviceLabel: "VPS",
   repositoryFullName: "guchi-apps/vps",
-  baseBranch: "main",
+  baseBranch: "develop",
   applyNote:
-    "`main`へマージすると`.github/workflows/deploy.yml`がVPSへ同期し、`scripts/apply.sh`が実機へ反映する",
+    "`develop`へマージしたうえで、`develop`→`main`のリリースPR（`release-develop-to-main.yml`）をマージすると、`.github/workflows/deploy.yml`がVPSへ同期し`scripts/apply.sh`が実機へ反映する",
   entries: [
     {
       livePath: "/etc/apache2/sites-available/",
@@ -107,15 +116,6 @@ const VPS_REPO: InfraConfigRepo = {
       description: "fail2banの設定",
     },
     {
-      livePath: "/etc/mysql/",
-      repoPath: "mysql/my.cnf",
-      description: "MariaDBの設定",
-      // apply.shは`mysql/`を配らない（「メモのみ」と明示されている）。PRを出しても
-      // 実機は変わらないので、そのことを本文へ書けるようにここへ持つ
-      applyNote:
-        "**`mysql/`は`scripts/apply.sh`の対象外**（記録のみ）。実機への反映は別途手作業で行う",
-    },
-    {
       livePath: "/var/spool/cron/crontabs/",
       repoPath: "cron/crontab.txt",
       description: "crontab",
@@ -132,9 +132,9 @@ const SUBPC_REPO: InfraConfigRepo = {
   device: "subpc",
   deviceLabel: "サブPC",
   repositoryFullName: "guchi-apps/subpc",
-  baseBranch: "main",
+  baseBranch: "develop",
   applyNote:
-    "`main`へマージすると`.github/workflows/deploy.yml`がサブPC上のself-hostedランナーで`scripts/setup-apply.sh`を実行し、実機へ反映する",
+    "`develop`へマージしたうえで、`develop`→`main`のリリースPR（`release-develop-to-main.yml`）をマージすると、`.github/workflows/deploy.yml`がサブPC上のself-hostedランナーで`scripts/setup-apply.sh`を実行し実機へ反映する",
   entries: [
     {
       livePath: "/etc/default/grub",
@@ -378,6 +378,7 @@ export function buildInfraConfigIssueDraft(params: {
     "",
     `- [ ] \`${target.entry.repoPath}\` を、下記の手順が意図している内容へ更新する`,
     `- [ ] \`${target.repo.baseBranch}\` 宛のPull Requestを作成する`,
+    "- [ ] マージ後、`develop`→`main`のリリースPRを作成する（実機へ出るのはこのマージ。人が行う）",
     "",
     "## 元の手作業の手順",
     "",

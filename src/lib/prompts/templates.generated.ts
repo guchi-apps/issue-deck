@@ -225,20 +225,22 @@ APIキー・トークン・パスワード等の実シークレットを、コ�
 **ただし、VPS・サブPCの設定ファイルの変更は、手作業Issueの手順として書かないでください**（#2021）。
 \`/etc/apache2/sites-available/\`・\`/etc/systemd/system/\`・\`~/.config/systemd/user/\`・crontab・
 \`/etc/fail2ban/\`（VPS）、\`/etc/netplan/\`・\`/etc/ssh/sshd_config.d/\`・\`~/.bashrc.local\`（サブPC）
-などは\`guchi-apps/vps\`・\`guchi-apps/subpc\`で管理されており、**mainへマージすれば各リポジトリの
-\`deploy.yml\`が実機へ自動で反映します。** 実機を直接編集すると変更がGitに残らず、毎日のドリフト
-検知で後から差分としてだけ出てきます（対応表の正は\`guchi-apps/issue-deck\`の
-\`src/lib/infra-config-repos.ts\`）。
+などは\`guchi-apps/vps\`・\`guchi-apps/subpc\`で管理されており、Git経由で反映できます。実機を直接
+編集すると変更がGitに残らず、毎日のドリフト検知で後から差分としてだけ出てきます（対応表の正は
+\`guchi-apps/issue-deck\`の\`src/lib/infra-config-repos.ts\`。**\`deploy.yml\`の\`paths\`に載っている
+受け口だけ**が対象で、vpsの\`mysql/\`のような記録用ディレクトリは従来どおり手作業です）。
 
 - 該当する変更は**対象リポジトリへIssueを起票**して切り出す
   （\`gh issue create --repo guchi-apps/vps ...\`）。起点Issueのサブissueとして紐付け、PR本文と
   完了報告コメントにリンクを書く。**そのリポジトリでの実装（ファイルの変更・PR作成）は
   このセッションで行わないでください**——担当Issue以外の実装にあたります
-- **人に残るのがそのPRのマージだけなら、手作業Issueは起票しません。** 切り出したIssueが
-  そのまま追跡になります
-- 実機の操作が別に残る場合（\`netplan apply\`・再起動・自動反映の対象外のファイルなど）は
-  従来どおり手作業Issueを起票し、\`## 前提条件\`の「先に完了している必要があるIssue・PR」へ
-  \`guchi-apps/vps#<番号>\`のように書いて順序を残します
+- **実機へ出るまでのマージは2回**です。切り出したIssueのブランチが向くのは\`develop\`で、
+  \`deploy.yml\`が起動するのは\`main\`へのpush。\`develop\`→\`main\`のリリースPRのマージは自動マージ
+  不可カテゴリなので人が行います
+- したがって手作業Issueは残ります。内容は実機のコマンドではなく
+  「(1) 切り出したPRを\`develop\`へマージ (2) \`develop\`→\`main\`のリリースPRを作成・マージ
+  (3) \`deploy.yml\`の成功を確認」の3手順にし、\`## 前提条件\`の「先に完了している必要がある
+  Issue・PR」へ\`guchi-apps/vps#<番号>\`と書いて順序を残します
 
 - **起票する前に、次のどれかに当てはまらないかを確認してください。当てはまるなら起票しません**（guchi-apps/issue-deck#2009。同じ内容の手作業Issueが5日で17件立ったため）
   - **issue-deckの画面から実行できる操作**（サブPC上のチェックアウトの更新・再起動など、ホストの行のボタンで済むもの）。起票せず、PR本文の「注意点」と起点Issueのコメントに案内を書く
