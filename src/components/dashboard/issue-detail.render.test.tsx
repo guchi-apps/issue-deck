@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
+import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { QA_ANSWER_MARKER, QUESTION_COMMENT_MARKER } from "@/lib/github/ask-claude";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -49,7 +51,12 @@ const commentSummaries = {
   notConfigured: false,
   generate: vi.fn(),
 };
-const workflowRun = { run: null, isLoading: false, runId: null, commentId: null };
+const workflowRun: {
+  run: { status: string } | null;
+  isLoading: boolean;
+  runId: number | null;
+  commentId: string | null;
+} = { run: null, isLoading: false, runId: null, commentId: null };
 const issueMutations = {
   updateIssue: vi.fn(),
   deleteIssue: vi.fn(),
@@ -65,7 +72,18 @@ const commentMutations = {
   error: null,
   setError: vi.fn(),
 };
-const dispatchState = {
+const dispatchState: {
+  hosts: DispatchHostView[];
+  jobs: DispatchJobView[];
+  sessions: DispatchSessionView[];
+  concurrency: number;
+  isLoaded: boolean;
+  error: string | null;
+  isSubmitting: boolean;
+  enqueue: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+  setError: ReturnType<typeof vi.fn>;
+} = {
   hosts: [],
   jobs: [],
   sessions: [],
@@ -314,6 +332,84 @@ describe("実行を開始したIssueの開始ボタン（#1815）", () => {
       buildIssue({ title: "ログイン画面のレイアウトを見直す", labels: localLabel }),
     );
     expect(screen.getByText("ローカルで対応中")).toBeTruthy();
+  });
+});
+
+/**
+ * GitHub Actionsで実装が走っている最中も、サブPCの起動ボタンだけは残っていた（#2032）。
+ *
+ * 進捗が`Implementation`へ進むため「実装を開始」ダイアログは消えるが、そこが消えると
+ * `StartLocalSessionButton`の起動ボタンが出る（落ちたセッションを立て直すための導線・#1349）。
+ * ジョブもセッションもまだ無く、停止フラグ（`11.local`）はActions側が判定を終えた後では
+ * 効かないので、押すと同じ`issue-<番号>`ブランチをActionsとサブPCが別々に進める。
+ */
+describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", () => {
+  /** 起動先が1台だけなら、ボタンの文言はそのホスト名になる（`StartLocalSessionButton`） */
+  const subpc = {
+    name: "subpc",
+    repositories: ["guchi-apps/issue-deck"],
+    contractVersion: 2,
+    online: true,
+    lastSeenAt: "2026-08-20T00:00:00.000Z",
+    screenshotCapable: true,
+    sessionControlCapable: true,
+    instructionCapable: true,
+    crossRepoQuestionCapable: true,
+    manualStepCapable: true,
+    manualStepAbortCapable: null,
+    planReviewCapable: null,
+    selfUpdateCapable: null,
+    maxSessions: 12,
+    liveSessions: 0,
+    metrics: null,
+    checkout: null,
+  };
+
+  /** Actionsが実装中のIssue。`Implementation`なので「実装を開始」ダイアログは出ない */
+  function runningIssue() {
+    return buildIssue({
+      title: "ログイン画面のレイアウトを見直す",
+      projectStatus: "Implementation",
+    });
+  }
+
+  function withState(run: { status: string } | null, body: () => void) {
+    dispatchState.hosts = [subpc];
+    workflowRun.run = run;
+    try {
+      body();
+    } finally {
+      dispatchState.hosts = [];
+      workflowRun.run = null;
+    }
+  }
+
+  it("PCは、Actionsの実行中なら起動ボタンを出さない", () => {
+    withState({ status: "in_progress" }, () => {
+      renderDetail(runningIssue());
+      expect(screen.queryByRole("button", { name: /で開始$/ })).toBeNull();
+    });
+  });
+
+  it("PCは、Actionsの実行が終わっていれば従来どおり出す（立て直しの導線を塞がない）", () => {
+    withState({ status: "completed" }, () => {
+      renderDetail(runningIssue());
+      expect(screen.getByRole("button", { name: "サブPCで開始" })).toBeTruthy();
+    });
+  });
+
+  it("スマホも同じ（実行中なら出さない）", () => {
+    withState({ status: "queued" }, () => {
+      renderMobileDetail(runningIssue());
+      expect(screen.queryByRole("button", { name: /で開始$/ })).toBeNull();
+    });
+  });
+
+  it("スマホも、実行が終わっていれば従来どおり出す", () => {
+    withState({ status: "completed" }, () => {
+      renderMobileDetail(runningIssue());
+      expect(screen.getByRole("button", { name: "サブPCで開始" })).toBeTruthy();
+    });
   });
 });
 

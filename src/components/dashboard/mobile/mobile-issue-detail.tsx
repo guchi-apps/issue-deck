@@ -230,8 +230,13 @@ export function MobileIssueDetail({
   });
   // もう走り始めているIssueでは開始の導線を出さない（#1667）。積んだ直後は進捗がまだ
   // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の真下に
-  // 押せる「GitHub Actionsで開始」が全幅で残っていた
-  const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
+  // 押せる「GitHub Actionsで開始」が全幅で残っていた。
+  // **GitHub Actionsの実行中も同じく出さない**（#2032。PCの詳細と同じ判定）
+  const executionPending = isIssueExecutionPending({
+    job: dispatchJob,
+    blockingSession,
+    actionsRun: workflowRun,
+  });
   // 主導線（全幅の「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
   // 画面へ届くまでの間、押す前とまったく同じボタンが残り、効かなかったように見えていた
   const executionStarted = isIssueExecutionStarted({

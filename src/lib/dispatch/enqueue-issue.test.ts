@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
+import {
+  ACTIONS_RUNNING_ENQUEUE_REASON,
+  type DispatchHostView,
+} from "@/lib/dispatch/dispatch-job";
 import { enqueueIssueToDefaultHost, type EnqueueIssueDeps } from "@/lib/dispatch/enqueue-issue";
 import type { Issue } from "@/types/issue";
 
@@ -224,5 +227,35 @@ describe("enqueueIssueToDefaultHost", () => {
 
     expect(outcome).toEqual({ ok: false, reason: "同時実行数の上限です" });
     expect(updateIssue).not.toHaveBeenCalled();
+  });
+
+  // #2032。Actionsで走っているIssueはジョブにもセッションにも現れないため、これが無いと
+  // 「まとめて実行」がそのまま積み、同じブランチを2つの経路が進める
+  it("GitHub Actionsで走っているIssueは積まず、ラベルも付けない（#2032）", async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const updateIssue = vi.fn().mockResolvedValue(null);
+
+    const outcome = await enqueueIssueToDefaultHost(
+      issue({ id: "abc" }),
+      deps({ enqueue, updateIssue, actionsRunningIssueIds: new Set(["abc"]) }),
+      ["21.plan-required"],
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome).toEqual({ ok: false, reason: ACTIONS_RUNNING_ENQUEUE_REASON });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("Actionsで走っている他のIssueに引きずられない（#2032）", async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+
+    const outcome = await enqueueIssueToDefaultHost(
+      issue({ id: "abc" }),
+      deps({ enqueue, actionsRunningIssueIds: new Set(["xyz"]) }),
+    );
+
+    expect(outcome).toEqual({ ok: true, hostName: "subpc" });
+    expect(enqueue).toHaveBeenCalled();
   });
 });

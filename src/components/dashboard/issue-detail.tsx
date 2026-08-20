@@ -484,8 +484,15 @@ export function IssueDetail({
   });
   // もう走り始めているIssueでは開始の導線を出さない（#1667）。積んだ直後は進捗がまだ
   // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の隣に
-  // 押せる「GitHub Actionsで開始」が残っていた
-  const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
+  // 押せる「GitHub Actionsで開始」が残っていた。
+  // **GitHub Actionsの実行中も同じく出さない**（#2032）。ジョブもセッションも無いまま
+  // 「サブPCで開始」だけが残り、Actionsと同じブランチをサブPCが別に進めてしまっていた。
+  // 実行状況は既にこの画面が持っている（`useIssueWorkflowRun`）ので、取得口は増やさない
+  const executionPending = isIssueExecutionPending({
+    job: dispatchJob,
+    blockingSession,
+    actionsRun: workflowRun,
+  });
   // 主導線（塗りつぶしの「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
   // 画面へ届くまでの間、押す前とまったく同じボタンが残り、効かなかったように見えていた
   const executionStarted = isIssueExecutionStarted({

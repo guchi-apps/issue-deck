@@ -21,17 +21,30 @@ export type BulkDispatchContext = {
   hosts: readonly DispatchHostView[];
   jobs: readonly DispatchJobView[];
   sessions: readonly DispatchSessionView[];
+  /**
+   * GitHub Actionsの実行が進行中のIssueのid（#2032）。**そのIssueは積める側に数えない。**
+   *
+   * ジョブ・セッションはサブPC側の記録なので、Actionsで走っているIssueはどちらにも現れない。
+   * 一覧は実行状況を既に持っている（`use-issues-workflow-running.ts`）ので、それをそのまま
+   * 渡してもらう——ここでGitHub APIを叩き足さないための形。**渡さなければ従来どおり**
+   * （実行状況を持たない呼び出し元は判定材料を増やさない）。
+   */
+  actionsRunningIssueIds?: ReadonlySet<string>;
 };
 
 /**
  * そのIssueをいま積める起動先（#1993）。積めなければ`null`。
  *
  * **判定材料は「実装を開始」ダイアログと同じ**（`findDispatchJobForIssue`の未完了判定と
- * `findBlockingSession`）。ここで独自の条件を書き足すと、1件ずつ積む導線と食い違う。
+ * `findBlockingSession`、そしてGitHub Actionsの実行状況・#2032）。ここで独自の条件を
+ * 書き足すと、1件ずつ積む導線と食い違う。
  * 最終的な判定はAPI側（`enqueueDispatchJob`）が行うため、ここは押す前に出す目安に留まる。
  */
 export function resolveBulkDispatchHost(issue: Issue, context: BulkDispatchContext): string | null {
   if (issue.state !== "open") return null;
+  // GitHub Actionsで走っている最中のIssueは積ませない（#2032）。1件ずつ積む導線
+  // （`isIssueExecutionPending`）と同じ立場の判定で、材料の出所だけが違う
+  if (context.actionsRunningIssueIds?.has(issue.id)) return null;
   const job = findDispatchJobForIssue(context.jobs, issue.repositoryFullName, issue.number);
   return resolveDefaultDispatchHost({
     hosts: context.hosts,

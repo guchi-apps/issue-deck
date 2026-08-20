@@ -37,11 +37,17 @@ import type { Issue } from "@/types/issue";
 export function BulkDispatchBar({
   issues,
   dispatch,
+  actionsRunningIssueIds,
   onClose,
 }: {
   /** 選択中のIssue */
   issues: Issue[];
   dispatch: DispatchStateHandle;
+  /**
+   * GitHub Actionsの実行が進行中のIssueのid（#2032）。**積める側に数えない。**
+   * 一覧が既に持っている実行状況をそのまま受け取る（ここでGitHub APIを叩き足さない）
+   */
+  actionsRunningIssueIds?: ReadonlySet<string>;
   /** 選択モードを抜ける（積み終えたときと「やめる」を押したときの両方） */
   onClose: () => void;
 }) {
@@ -54,6 +60,7 @@ export function BulkDispatchBar({
     hosts: dispatch.hosts,
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
+    actionsRunningIssueIds,
   };
   // **選んだうち1件でも積めれば押せる。** 先頭のIssueだけで判定すると、そのリポジトリが
   // cloneされていないだけで、他のIssueまで積めなくなる
@@ -92,6 +99,10 @@ export function BulkDispatchBar({
         {
           hosts: dispatch.hosts,
           sessions: dispatch.sessions,
+          // Actionsで走っている最中のIssueは積まない（#2032）。**押せるかどうかの判定
+          // （`dispatchable`）だけでなく、投げる側にも同じ材料を渡す**——ここは選択した
+          // 全件をそのまま回すので、数え方だけ直しても投げるのは止まらない
+          actionsRunningIssueIds,
           enqueue: dispatch.enqueue,
           enqueueError: dispatch.error,
           updateIssue,
