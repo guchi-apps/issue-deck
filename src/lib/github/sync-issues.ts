@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
 import { getPendingDispatchAt } from "@/lib/dispatch/pending-dispatch";
+import { getManualStepVerifiedAt } from "@/lib/manual-step-verification-patrol";
 import { handleIssueClosedForDispatch } from "@/lib/dispatch/session-close";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
@@ -240,8 +241,12 @@ export async function upsertIssueAndGetDisplay(
   const pendingAt = await getPendingDispatchAt(
     buildDispatchActiveKey(repository.fullName, row.number),
   );
+  // 完了確認の巡回の印（#2008）も同じ理由で落とさない。落とすと、この1件で一覧を差し替えた
+  // 瞬間だけ「完了済みの可能性」が消えて次のポーリングで戻る
+  const verifiedAt = await getManualStepVerifiedAt(repository.fullName, row.number);
   return {
     ...dbIssueToDisplayIssue(repository, row),
     dispatchPendingAt: pendingAt?.toISOString() ?? null,
+    manualStepVerifiedAt: verifiedAt?.toISOString() ?? null,
   };
 }

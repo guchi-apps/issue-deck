@@ -25,6 +25,7 @@ import {
 } from "@/lib/manual-step-autorun";
 import { MANUAL_STEP_TIMEOUT_SECONDS } from "@/lib/manual-step-command";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
+import { abandonManualStepVerificationCheck } from "@/lib/manual-step-verification-patrol";
 import { toggleTaskListLine } from "@/lib/markdown-task-list";
 
 /**
@@ -99,6 +100,14 @@ export async function startManualStepRun(params: {
       ...values,
     },
     update: values,
+  });
+
+  // 完了確認の巡回（#2008）が同じIssueを流していたら取りやめる。**人の操作を優先する**——
+  // `activeKey`はIssue単位なので、巡回が次の1件を積み続けると人の実行が`already_queued`で弾かれる
+  await abandonManualStepVerificationCheck({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
+    now,
   });
 
   const synced = await syncManualStepRun(run, now);

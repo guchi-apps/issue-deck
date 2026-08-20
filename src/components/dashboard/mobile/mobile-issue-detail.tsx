@@ -751,6 +751,7 @@ export function MobileIssueDetail({
             prerequisites={manualStepPrerequisites.prerequisites}
             prerequisiteSummary={manualStepPrerequisites.summary}
             dependents={manualStepPrerequisites.dependents}
+            verifiedAt={issue.manualStepVerifiedAt}
             repositoryFullName={issue.repositoryFullName}
           />
         )}

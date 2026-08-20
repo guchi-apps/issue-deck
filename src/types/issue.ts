@@ -103,6 +103,16 @@ export type Issue = {
    */
   dispatchPendingAt: string | null;
   /**
+   * 手作業Issue（`71.manual-step`）の`## 完了の確認方法`が、定期巡回で**すべて終了コード0で
+   * 通った**日時（ISO8601。#2008）。通っていない・巡回の対象外はnull。
+   *
+   * **「完了済みの可能性」であって完了ではない。** 本文の「期待する出力」との照合はしないので、
+   * 0で終わっても完了とは限らない——クローズを押すのは人（`lib/manual-step-verification.ts`）。
+   * 値を入れるのはジョブを引く側（@/lib/issues-for-user・@/lib/github/sync-issues）で、
+   * マッパーの既定はnull（`dispatchPendingAt`と同じ形）
+   */
+  manualStepVerifiedAt: string | null;
+  /**
    * GitHub Projects v2のStatus（例: "Implementation"）。Projectに未登録のIssueはnull。
    * 進捗状態を判定するときはこの値を直接見ず、@/lib/issue-progressのresolveProgressStatusを
    * 通すこと（Statusがnullなら進捗ラベルへフォールバックする）
