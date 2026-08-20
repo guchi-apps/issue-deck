@@ -119,6 +119,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,11 @@ type IssueDetailProps = {
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
+  /**
+   * 手作業の中の実機ファイル変更を、管理リポジトリ（`guchi-apps/vps`・`guchi-apps/subpc`）の
+   * Issueとして切り出す（#2021）
+   */
+  onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
   onSelectRepository: (repositoryFullName: string) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
@@ -154,6 +160,7 @@ export function IssueDetail({
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
+  onCreateConfigIssue,
   onSelectRepository,
   onStartManualStepGuide,
 }: IssueDetailProps) {
@@ -161,6 +168,12 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
+  // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
+  // ——他のIssueの本文に同じパスが出てきても、それは実行手順ではない
+  const infraConfigTargets = useMemo(
+    () => (issue && canCompleteManualStep(issue) ? detectInfraConfigTargets(issue.body) : []),
+    [issue],
+  );
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
@@ -471,8 +484,15 @@ export function IssueDetail({
   });
   // もう走り始めているIssueでは開始の導線を出さない（#1667）。積んだ直後は進捗がまだ
   // `Ready`のままで、既定の実行先だけがGitHub Actionsへ移るため、「順番待ち」の隣に
-  // 押せる「GitHub Actionsで開始」が残っていた
-  const executionPending = isIssueExecutionPending({ job: dispatchJob, blockingSession });
+  // 押せる「GitHub Actionsで開始」が残っていた。
+  // **GitHub Actionsの実行中も同じく出さない**（#2032）。ジョブもセッションも無いまま
+  // 「サブPCで開始」だけが残り、Actionsと同じブランチをサブPCが別に進めてしまっていた。
+  // 実行状況は既にこの画面が持っている（`useIssueWorkflowRun`）ので、取得口は増やさない
+  const executionPending = isIssueExecutionPending({
+    job: dispatchJob,
+    blockingSession,
+    actionsRun: workflowRun,
+  });
   // 主導線（塗りつぶしの「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
   // 画面へ届くまでの間、押す前とまったく同じボタンが残り、効かなかったように見えていた
   const executionStarted = isIssueExecutionStarted({
@@ -769,6 +789,8 @@ export function IssueDetail({
               prerequisiteSummary={manualStepPrerequisites.summary}
               dependents={manualStepPrerequisites.dependents}
               verifiedAt={issue.manualStepVerifiedAt}
+              configTargets={infraConfigTargets}
+              onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
               repositoryFullName={issue.repositoryFullName}
             />
           )}

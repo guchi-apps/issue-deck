@@ -40,6 +40,7 @@ import {
   findPlanReviewJobForIssue,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
+  describeManualStepExecutionRejection,
   resolveManualStepExecutionRejection,
   resolveManualStepHost,
   resolveScreenshotRejection,
@@ -456,6 +457,37 @@ describe("isIssueExecutionPending", () => {
     expect(isIssueExecutionPending({ job: null, blockingSession: null })).toBe(false);
   });
 
+  // #2032。「GitHub Actions」→「サブPC」の順で開始すると、ジョブもセッションも無いまま
+  // 両方が同じブランチを進める。停止フラグ（`11.local`）はActions側が判定を終えた後では効かない
+  it("GitHub Actionsの実行が進行中なら走っているとみなす", () => {
+    for (const status of ["queued", "in_progress", "waiting"]) {
+      expect(
+        isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: { status } }),
+      ).toBe(true);
+    }
+  });
+
+  // 実行が終われば導線は戻る（失敗した実行を手元で引き取り直せなくならない）
+  it("GitHub Actionsの実行が完了していれば導線を出す", () => {
+    expect(
+      isIssueExecutionPending({
+        job: null,
+        blockingSession: null,
+        actionsRun: { status: "completed" },
+      }),
+    ).toBe(false);
+  });
+
+  // 実行ログのリンクが出るまでは`null`。分からないことを理由に塞ぐと、Actionsを一度も
+  // 使っていないIssueまで積めなくなる
+  it("実行が分からない（未取得・紐づく実行が無い）ときは導線を出す", () => {
+    expect(isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: null })).toBe(
+      false,
+    );
+    expect(
+      isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: undefined }),
+    ).toBe(false);
+  });
 });
 
 describe("describeDispatchJobStatus", () => {
@@ -1257,6 +1289,7 @@ describe("resolveManualStepExecutionRejection", () => {
       isManualStepIssue: true,
       isSubpcDevice: true,
       hasCommand: true,
+      interactiveCommand: null,
       hasActiveJob: false,
       ...overrides,
     } as Parameters<typeof resolveManualStepExecutionRejection>[0];
@@ -1277,6 +1310,22 @@ describe("resolveManualStepExecutionRejection", () => {
         params({ hasCommand: false, host: { online: false, manualStepCapable: null } }),
       ),
     ).toBe("no_command");
+  });
+
+  // 更新すれば押せるようになるものではない（人が実行するしかない）ので、ホストの理由より先に出す
+  it("対話が要るコマンドはホストの理由より先に出す", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ interactiveCommand: "op signin", host: null }),
+      ),
+    ).toBe("interactive_command");
+    // どのコマンドで引っかかったのかを文面に出す
+    expect(
+      describeManualStepExecutionRejection("interactive_command", {
+        hostName: "subpc",
+        interactiveCommand: "op signin",
+      }),
+    ).toContain("op signin");
   });
 
   it("手作業Issueでなければ代行しない", () => {

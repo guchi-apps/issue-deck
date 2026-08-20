@@ -363,14 +363,24 @@ export function IssueList({
   const [isSelecting, setIsSelecting] = useState(false);
   // 入口のバーを出すかどうかの判定（#1993）。**押しても何も起きない件数を出さない**ため、
   // closeしたIssueと既に走っている（積んである）Issueは数えない
+  // GitHub Actionsで走っている最中のIssueも数えない（#2032）。材料はこの一覧が既に
+  // ポーリングしている実行状況（`runningByIssueId`）で、GitHub APIは追加で叩かない
+  const actionsRunningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, state] of Object.entries(runningByIssueId)) {
+      if (state?.isRunning) ids.add(id);
+    }
+    return ids;
+  }, [runningByIssueId]);
   const bulkDispatchableIssues = useMemo(
     () =>
       listBulkDispatchableIssues(issues, {
         hosts: dispatch.hosts,
         jobs: dispatch.jobs,
         sessions: dispatch.sessions,
+        actionsRunningIssueIds,
       }),
-    [issues, dispatch.hosts, dispatch.jobs, dispatch.sessions],
+    [issues, dispatch.hosts, dispatch.jobs, dispatch.sessions, actionsRunningIssueIds],
   );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
@@ -709,6 +719,7 @@ export function IssueList({
         <BulkDispatchBar
           issues={issues.filter((issue) => selectedIds.has(issue.id))}
           dispatch={dispatch}
+          actionsRunningIssueIds={actionsRunningIssueIds}
           onClose={exitSelecting}
         />
       ) : (

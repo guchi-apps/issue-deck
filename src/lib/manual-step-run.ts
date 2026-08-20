@@ -261,10 +261,19 @@ async function syncManualStepRun(run: ManualStepRun, now: Date): Promise<ManualS
 
   if (next.rejection !== null || next.command === null) {
     const reason = next.rejection === null ? "no_command" : next.rejection;
-    return pauseRun(current, pauseReasonFor(reason), describeManualStepExecutionRejection(reason, {
+    const message = describeManualStepExecutionRejection(reason, {
       hostName: current.targetHost,
       device: context.device,
-    }));
+      interactiveCommand: next.interactiveCommand,
+    });
+    // **`## 完了の確認方法`のコマンドにはチェックが無い**（#1869）。人が実行するしかない確認で
+    // 止まった場合、流し終えた扱いにしておかないと、続きへ進めても同じ項目でまた止まる（#2025）。
+    // 手順はチェックが付いた時点で計画から外れるので、ここで記録するのは確認だけ
+    const doneLines =
+      next.kind === "verification" && pauseReasonFor(reason) === "USER"
+        ? appendDoneLine(current.doneLines, next.line)
+        : current.doneLines;
+    return pauseRun(current, pauseReasonFor(reason), message, doneLines);
   }
 
   const enqueued = await enqueueManualStepJob({
@@ -423,6 +432,8 @@ function pauseReasonFor(rejection: ManualStepExecutionRejection): "USER" | "ENQU
     case "no_command":
     case "device_not_subpc":
     case "not_manual_step":
+    // 対話が要るコマンド（#2025）。**人が実行するしかない**ので、ホスト側の事情と混ぜない
+    case "interactive_command":
       return "USER";
     default:
       return "ENQUEUE_FAILED";
@@ -433,10 +444,17 @@ async function pauseRun(
   run: ManualStepRun,
   reason: "USER" | "FAILED" | "ENQUEUE_FAILED",
   message: string | null,
+  doneLines: string = run.doneLines,
 ): Promise<ManualStepRun> {
   return db.manualStepRun.update({
     where: { id: run.id },
-    data: { status: "PAUSED", pausedReason: reason, message, currentJobId: run.currentJobId },
+    data: {
+      status: "PAUSED",
+      pausedReason: reason,
+      message,
+      currentJobId: run.currentJobId,
+      doneLines,
+    },
   });
 }
 

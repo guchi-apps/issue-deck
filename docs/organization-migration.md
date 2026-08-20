@@ -215,7 +215,8 @@ Organizationへ移したリポジトリには届かない。
 変わるため、設定ミスの温床になりやすい。
 
 特に注意が要るのが共有知識リポジトリ`docs`で、`reusable-issue-dispatch.yml`・
-`claude-review-develop.yml`・`shared-knowledge-propose.yml`の3つが`WORKFLOW_PAT`でcheckoutしている。
+`claude-review-develop.yml`の2つが`WORKFLOW_PAT`でcheckoutしている（#2029より前は
+`shared-knowledge-propose.yml`もcheckoutしていた）。
 issue-deckだけをorgへ移して`docs`を個人アカウントに残すと、共有知識のcheckoutが失敗する
 （各ワークフローは`continue-on-error`で続行するため停止はしないが、共有知識なしで動くことになる）。
 

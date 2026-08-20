@@ -6,6 +6,7 @@ import {
 import {
   extractManualStepCommands,
   extractVerificationCommands,
+  findInteractiveCommand,
   isSubpcManualStepDevice,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
@@ -42,6 +43,12 @@ export type ManualStepRunEntry = {
   command: string | null;
   /** 手順のチェック状態。確認にはチェックが無いので常に`false` */
   checked: boolean;
+  /**
+   * このコマンドに含まれる、対話が要るコマンドの表記（#2025）。`null`なら無い。
+   * **止まった理由を画面へ出すために持ち回る**（`rejection`だけでは何が引っかかったのか
+   * 分からず、人はどのコマンドを自分で実行すればよいのか判断できない）。
+   */
+  interactiveCommand: string | null;
   /** 代行できない理由。`null`なら押せる */
   rejection: ManualStepExecutionRejection | null;
 };
@@ -78,18 +85,23 @@ export function buildManualStepRunPlan(
   const steps = guide.steps.filter((step) => step.line !== null);
   const verifications = extractVerificationCommands(body, guide);
 
-  const reject = (hasCommand: boolean): ManualStepExecutionRejection | null =>
+  const reject = (
+    hasCommand: boolean,
+    interactiveCommand: string | null,
+  ): ManualStepExecutionRejection | null =>
     resolveManualStepExecutionRejection({
       host: context.host,
       isManualStepIssue: context.isManualStepIssue,
       isSubpcDevice,
       hasCommand,
+      interactiveCommand,
       hasActiveJob: context.hasActiveJob ?? false,
     });
 
   const entries: ManualStepRunEntry[] = [
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
+      const interactiveCommand = findInteractiveCommand(command);
       return {
         kind: "step",
         order: index + 1,
@@ -98,10 +110,12 @@ export function buildManualStepRunPlan(
         text: step.text,
         command,
         checked: step.checked,
-        rejection: reject(command !== null),
+        interactiveCommand,
+        rejection: reject(command !== null, interactiveCommand),
       };
     }),
     ...verifications.map((entry, index): ManualStepRunEntry => {
+      const interactiveCommand = findInteractiveCommand(entry.command);
       return {
         kind: "verification",
         order: index + 1,
@@ -110,7 +124,8 @@ export function buildManualStepRunPlan(
         text: verifications.length > 1 ? `完了の確認 ${index + 1}` : "完了の確認",
         command: entry.command,
         checked: false,
-        rejection: reject(true),
+        interactiveCommand,
+        rejection: reject(true, interactiveCommand),
       };
     }),
   ];

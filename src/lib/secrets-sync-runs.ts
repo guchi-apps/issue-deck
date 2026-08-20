@@ -10,6 +10,11 @@ import { SECRETS_SYNC_TIMEOUT_MS, type SecretSyncRunView } from "@/lib/secrets-s
  * こちらはDBとの往復だけを引き受ける。
  */
 
+/** カンマ区切りの項目名を配列にする。空文字は「1件も無い」（`[""]`にしない） */
+function splitKeys(value: string): string[] {
+  return value === "" ? [] : value.split(",");
+}
+
 export function toSecretSyncRunView(run: SecretSyncRun): SecretSyncRunView {
   return {
     id: run.id,
@@ -22,7 +27,9 @@ export function toSecretSyncRunView(run: SecretSyncRun): SecretSyncRunView {
     skippedCount: run.skippedCount,
     failedCount: run.failedCount,
     // 空文字を`split`すると`[""]`になり、画面に空の項目名が並ぶ
-    failedKeys: run.failedKeys === "" ? [] : run.failedKeys.split(","),
+    failedKeys: splitKeys(run.failedKeys),
+    syncedKeys: splitKeys(run.syncedKeys),
+    skippedKeys: splitKeys(run.skippedKeys),
     runUrl: run.runUrl,
     message: run.message,
   };
@@ -90,6 +97,8 @@ export async function createQueuedSecretSyncRun(params: {
       only: params.only,
       requestedByUserId: params.requestedByUserId,
       failedKeys: "",
+      syncedKeys: "",
+      skippedKeys: "",
     },
   });
   return toSecretSyncRunView(run);
@@ -113,6 +122,9 @@ export type SecretsSyncReport = {
   failed: number;
   /** 失敗した項目の**名前だけ**。値・値の長さは受け取らない */
   failedKeys: string[];
+  /** 同期した項目・スキップした項目の**名前だけ**（#2022）。古い版からの報告では空配列 */
+  syncedKeys: string[];
+  skippedKeys: string[];
   /** 件数だけでは何が起きたか分からない場合の補足（同期処理が始まる前に落ちた場合など） */
   message: string | null;
 };
@@ -137,6 +149,8 @@ export async function recordSecretsSyncReport(report: SecretsSyncReport): Promis
     skippedCount: report.skipped,
     failedCount: report.failed,
     failedKeys: report.failedKeys.join(","),
+    syncedKeys: report.syncedKeys.join(","),
+    skippedKeys: report.skippedKeys.join(","),
     runUrl: report.runUrl,
     message: report.message,
   } as const;

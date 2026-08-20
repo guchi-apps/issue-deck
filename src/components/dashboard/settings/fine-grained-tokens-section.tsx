@@ -59,9 +59,9 @@ export function FineGrainedTokensSection({
   }
 
   return (
+    // 見出し（「Fine-grained PATの有効期限」）は、この区画を畳んでいる`LazyFleetPanel`の
+    // カードが持つ（#2022）。ここに重ねて置くと同じ文言が2行並ぶ
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium">Fine-grained PATの有効期限</span>
-
       {isLoading && <p className="text-xs text-muted-foreground">読み込み中...</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
       {data && data.length === 0 && (

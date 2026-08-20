@@ -1,4 +1,5 @@
 import {
+  ACTIONS_RUNNING_ENQUEUE_REASON,
   describeDispatchEnqueueRejection,
   findBlockingSession,
   resolveDefaultDispatchHost,
@@ -18,6 +19,14 @@ import type { Issue } from "@/types/issue";
 export type EnqueueIssueDeps = {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
+  /**
+   * GitHub Actionsの実行が進行中のIssueのid（#2032）。**含まれていたら積まない。**
+   *
+   * ジョブ・セッションはサブPC側の記録なので、Actionsで走っているIssueはどちらにも現れない。
+   * 呼び出し元が既に持っている実行状況（`use-issues-workflow-running.ts`）をそのまま渡す。
+   * **渡さなければ従来どおり**——実行状況を持っていない呼び出し元は判定材料を増やさない。
+   */
+  actionsRunningIssueIds?: ReadonlySet<string>;
   enqueue: (input: {
     repositoryFullName: string;
     issueNumber: number;
@@ -64,6 +73,14 @@ export async function enqueueIssueToDefaultHost(
   deps: EnqueueIssueDeps,
   labelsToAdd: readonly string[] = [],
 ): Promise<EnqueueIssueOutcome> {
+  // GitHub Actionsで走っている最中のIssueは積まない（#2032）。**ラベルを付ける前に返す**
+  // ——`11.local`もオプションのラベルも、積めないのに書き込むと無人実行まで止めてしまう。
+  // 理由が`DispatchEnqueueRejection`ではなく専用の文言なのは、あちらがAPI側
+  // （`enqueueDispatchJob`）の判定と1対1で対応する取り決めのため（`dispatch-job.ts`の注記）
+  if (deps.actionsRunningIssueIds?.has(issue.id)) {
+    return { ok: false, reason: ACTIONS_RUNNING_ENQUEUE_REASON };
+  }
+
   const blockingSession = findBlockingSession({
     sessions: deps.sessions,
     hosts: deps.hosts,

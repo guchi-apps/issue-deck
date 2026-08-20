@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useLocalSessionLaunch } from "@/hooks/use-local-session-launch";
 import {
+  ACTIONS_RUNNING_ENQUEUE_REASON,
   describeDispatchEnqueueRejection,
   findBlockingSession,
   findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
+  isActionsRunInProgress,
   isActiveDispatchJobStatus,
   resolveDispatchTargetRejection,
 } from "@/lib/dispatch/dispatch-job";
@@ -40,6 +42,7 @@ export function SessionRecoveryButton({
   issue,
   session,
   dispatch,
+  actionsRun,
   onIssueUpdated,
   align = "end",
 }: {
@@ -48,6 +51,15 @@ export function SessionRecoveryButton({
   session: DispatchSessionView;
   /** 画面で1回だけ取ったディスパッチの状態（#1262） */
   dispatch: DispatchStateHandle;
+  /**
+   * そのIssueで走っているGitHub Actionsの実行（#2032・`useIssueWorkflowRun`の`run`）。
+   *
+   * **進行中なら押させない。** ローカルで着手したIssueは`11.local`を外して無人実行へ
+   * 引き継ぐため、「終了したセッションの行」と「Actionsの実行中」は日常的に重なる
+   * （セッションの記録は24時間残る）。そこで押すと、Actionsと同じブランチをサブPCが
+   * 別に進めることになる
+   */
+  actionsRun?: { status: string } | null;
   onIssueUpdated: (issue: Issue) => void;
   /** 横並びのツールバー（PC）では右寄せ、縦積み（スマホ）では左寄せ */
   align?: "start" | "end";
@@ -90,6 +102,11 @@ export function SessionRecoveryButton({
     blockingSession,
   });
 
+  // Actionsが走っている間は復旧させない（#2032）。**ボタンごと消さず、理由を出して押せなく
+  // する**——このコンポーネントは「なぜ復旧できないのかを画面から分かるようにする」ために
+  // 導線を残す方針で作られている（`rejection`の扱いと同じ）
+  const actionsRunning = isActionsRunInProgress(actionsRun);
+
   if (!recovery || !isAvailable || startedAsQuestion) return null;
 
   const rejectionMessage = rejection
@@ -116,7 +133,7 @@ export function SessionRecoveryButton({
         variant={recovery.primary ? "default" : "outline"}
         size="sm"
         className="w-full sm:w-auto"
-        disabled={isSubmitting || rejection !== null}
+        disabled={isSubmitting || rejection !== null || actionsRunning}
         onClick={() => void launch(session.host)}
       >
         {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
@@ -130,6 +147,9 @@ export function SessionRecoveryButton({
       {rejectionMessage && rejection !== "already_queued" && (
         <p className={textClassName}>{rejectionMessage}</p>
       )}
+      {/* Actionsの実行中（#2032）。押せない理由が2つ重なることはあるが、
+          先に消えるのはActions側とは限らないので両方出す */}
+      {actionsRunning && <p className={textClassName}>{ACTIONS_RUNNING_ENQUEUE_REASON}</p>}
       {(error || dispatch.error) && (
         <p className={cn(textClassName, "text-destructive")}>{error ?? dispatch.error}</p>
       )}

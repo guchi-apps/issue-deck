@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
+import { detectInfraConfigTargets } from "@/lib/infra-config-repos";
 import {
   summarizeManualStepPrerequisites,
   type ManualStepPrerequisite,
@@ -185,5 +186,78 @@ describe("ManualStepPanel", () => {
     );
 
     expect(screen.queryByText("完了済みの可能性があります。")).toBeNull();
+  });
+});
+
+/**
+ * #2021: 実機のファイル変更をリポジトリ経由へ寄せる導線。検出そのものは
+ * `lib/infra-config-repos.ts`のテストで見ているので、ここでは出し分けと押したときだけを見る。
+ */
+describe("ManualStepPanel（設定変更Issueの切り出し）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const CONFIG_BODY = `## 前提条件
+
+- 実行するデバイス: **VPS**
+
+## やること
+
+- [ ] VirtualHostを配置する
+
+    \`\`\`bash
+    sudo cp aide.gucchii.com.conf /etc/apache2/sites-available/aide.gucchii.com.conf
+    \`\`\`
+`;
+
+  it("当たった手順があるとき、切り出し先とボタンを出す", () => {
+    const onCreateConfigIssue = vi.fn();
+    const targets = detectInfraConfigTargets(CONFIG_BODY);
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        configTargets={targets}
+        onCreateConfigIssue={onCreateConfigIssue}
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.getByText("リポジトリ経由で反映できます")).toBeTruthy();
+    expect(screen.getByText("guchi-apps/vps")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /設定変更Issueを作る/ }));
+    expect(onCreateConfigIssue).toHaveBeenCalledWith(targets[0]);
+  });
+
+  it("当たった手順が無ければ何も出さない", () => {
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        configTargets={[]}
+        onCreateConfigIssue={vi.fn()}
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.queryByText("リポジトリ経由で反映できます")).toBeNull();
+  });
+
+  // 切り出す先を持たない画面（渡していない呼び出し元）で、押せない導線を出さない
+  it("切り出しのハンドラを渡していなければ出さない", () => {
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        configTargets={detectInfraConfigTargets(CONFIG_BODY)}
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.queryByText("リポジトリ経由で反映できます")).toBeNull();
   });
 });

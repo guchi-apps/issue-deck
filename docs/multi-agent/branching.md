@@ -214,7 +214,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
 - PR作成をトリガーとした`Implementation`→`Develop PR`の遷移（ワークフローが自動で報告する）
 - 全アプリ共通の共有知識（`.shared-context/`）を必要な範囲で参照する
-- 実装中に得た知見を、アプリ固有なら`docs/`へ同梱し、全アプリ共通と判断したものは対応Issueへ「追加提案」コメントとして投稿する（共有知識リポジトリ自体は編集しない。[docs/shared-knowledge.md](../shared-knowledge.md)参照）
+- 実装中に得た知見を`docs/`へ同梱し、あわせて同じ内容を対応Issueへ「知見メモ」（`<!-- knowledge-candidate -->`）として投稿する。共有知識へ格上げするかどうかは判定しない（共有知識リポジトリ自体も編集しない。[docs/shared-knowledge.md](../shared-knowledge.md)参照）
 
 禁止事項:
 - `main`/`develop`への直接コミット・push
@@ -249,11 +249,10 @@ lint・buildの完了から1分足らずでマージされる。#1891では、PR
 - 対応Issueの要件充足、Issue外変更の混入有無、コード品質・セキュリティ、CI結果を確認する
 - 「自動マージ不可カテゴリ」に該当する変更を検知したら`00.check-user`を付与し、マージせずユーザーの確認を待つ
 - 問題がなければ`develop`へマージし、マージ後`develop`上で再テストする。対応Issueの`Develop PR`→`Develop`はPRマージをトリガーにワークフローが報告する（issueはcloseしない）
-- 実装エージェントが投稿した共有知識への追加提案を、再利用性・正確性・重複・恒久性の4観点で審査し、承認/却下のマーカー付きコメントを投稿する（[docs/shared-knowledge.md](../shared-knowledge.md)参照）
 
 禁止事項:
 - `main`への直接マージ・push
-- 共有知識リポジトリの編集・コミット（反映は`shared-knowledge-propose.yml`がPRを作成し、人間がマージする）
+- 共有知識リポジトリの編集・コミット（格上げの判定と反映は`guchi-apps/docs`側の格上げ判定エージェントがPRを作成し、人間がマージする）
 
 ## 全アプリ共通の共有知識層（shared context）
 
@@ -294,6 +293,8 @@ Actions上でClaude Codeを動かす際の知見、共通コーディング方�
    付与は人間の手だけに頼らず、ローカルセッションの起動経路が自動で行う。画面の「ローカルで開始」ボタンは起動前に、`scripts/start-issue.sh`は起動時（`prepare_issue`）に付ける。ターミナルから`start-issue.sh`を直接叩いた場合に何も付かず二重起動を止めるものが無かったのを、後者で塞いだ（#1097）。詳細は[local-quick-start.md](local-quick-start.md)「起動時のラベル付与」。
    **外すのは付けた側の責任**で、自動では外れない。ローカルでの作業を終えてPRを無人実行側へ引き継ぐ時点で外す（付いている間は追加対応・レビュー指摘への対応も無人実行では動かない）。
    順番待ちの間に`11.local`が付いた場合も、`dispatch`ジョブ冒頭の陳腐化チェックで検知して中止する。
+
+**`11.local`が効くのはActions側が判定する時点まで**で、逆向き（Actionsが走っている最中にサブPCへ積む）は止められない。triageと陳腐化チェックを通過して走っているrunは、後から`11.local`を付けても止まらないからで、そのままだと同じ`issue-<番号>`ブランチをActionsとサブPCが別々に進める（#2032）。こちらは**積む側の画面**で塞ぐ——GitHub Actionsの実行が進行中のIssueには起動の導線を出さない（Issue詳細の起動ボタン・「まとめて実行」・「セッションを復旧」の3つ）。判定材料は画面が既にポーリングしている実行状況で、GitHub APIは追加で叩かない。詳細は[subpc-dispatch.md](subpc-dispatch.md)「GitHub Actionsが走っている間は積ませない（#2032）」。
 
 `11.local`は`0x.`始まりではないため、issue-deck画面上は進捗ステップ（`WorkflowStepBadge`）ではなく通常のラベルとして表示・編集できる（`src/lib/issue-status.ts`の`isProgressLabel`）。あわせて番号帯が重ならないよう、優先度ラベルを`80.Priority: High`・`89.Priority: low`へリネームした。
 

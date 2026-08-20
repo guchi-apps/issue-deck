@@ -147,16 +147,19 @@ function renderButton({
   issue = makeIssue(),
   session = makeSession(),
   dispatch = makeDispatch(),
+  actionsRun = null,
 }: {
   issue?: Issue;
   session?: DispatchSessionView;
   dispatch?: DispatchStateHandle;
+  actionsRun?: { status: string } | null;
 } = {}) {
   return render(
     <SessionRecoveryButton
       issue={issue}
       session={session}
       dispatch={dispatch}
+      actionsRun={actionsRun}
       onIssueUpdated={vi.fn()}
     />,
   );
@@ -239,6 +242,20 @@ describe("SessionRecoveryButton", () => {
     const alive = makeSession({ state: "ALIVE", tmuxSessionName: "issue-deck-issue-1830" });
     renderButton({ dispatch: makeDispatch({ sessions: [alive] }) });
     expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);
+  });
+
+  // #2032。ローカルで着手したIssueは`11.local`を外して無人実行へ引き継ぐため、「終了した
+  // セッションの行」と「Actionsの実行中」は日常的に重なる（セッションの記録は24時間残る）
+  it("GitHub Actionsの実行中は押せず、理由を出す（#2032）", () => {
+    renderButton({ actionsRun: { status: "in_progress" } });
+    expect(recoveryButton()).not.toBeNull();
+    expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/GitHub Actionsの実行が進行中です/)).not.toBeNull();
+  });
+
+  it("GitHub Actionsの実行が終わっていれば押せる（#2032）", () => {
+    renderButton({ actionsRun: { status: "completed" } });
+    expect(recoveryButton()!.hasAttribute("disabled")).toBe(false);
   });
 
   it("closedなIssueには出さない", () => {

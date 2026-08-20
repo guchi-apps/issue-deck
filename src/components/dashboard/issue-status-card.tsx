@@ -150,6 +150,7 @@ export function IssueStatusCard({
               issue={issue}
               session={issueSession}
               dispatch={dispatch}
+              actionsRun={workflowRun}
               onIssueUpdated={onIssueUpdated}
               align="end"
             />

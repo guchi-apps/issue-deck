@@ -1379,6 +1379,19 @@ describe("enqueueManualStepJob", () => {
     dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: true }));
   });
 
+  // 積んでも代行実行のシェルには標準入力が無く、失敗か打ち切りで終わる（#2025）
+  it("対話が要るコマンドは積まない", async () => {
+    const body = MANUAL_STEP_BODY.replace("git pull --ff-only", "op signin");
+    setUpIssue({ body });
+    const result = await run({ approvedCommand: "cd ~/apps/issue-deck\nop signin" });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.rejection).toBe("interactive_command");
+    // 何を自分で実行すればよいのかまで返す
+    expect(result.ok === false && result.message).toContain("op signin");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
   it("本文から抽出し直したコマンドをジョブに載せる", async () => {
     const result = await run();
 

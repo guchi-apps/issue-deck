@@ -650,6 +650,7 @@ export type ManualStepExecutionRejection =
   | "not_manual_step"
   | "device_not_subpc"
   | "no_command"
+  | "interactive_command"
   | "host_unknown"
   | "host_offline"
   | "manual_step_unsupported"
@@ -658,7 +659,12 @@ export type ManualStepExecutionRejection =
 
 export function describeManualStepExecutionRejection(
   rejection: ManualStepExecutionRejection,
-  context: { hostName: string; device?: string | null },
+  context: {
+    hostName: string;
+    device?: string | null;
+    /** 対話が要ると判定されたコマンドの表記（`interactive_command`のときだけ使う） */
+    interactiveCommand?: string | null;
+  },
 ): string {
   switch (rejection) {
     case "not_manual_step":
@@ -673,6 +679,13 @@ export function describeManualStepExecutionRejection(
       // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
       // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
       return "この手順は代行できません。実行するコマンドのブロックがちょうど1つ書かれている手順だけを代行します。";
+    case "interactive_command":
+      // **代行できるようになる見込みが無い理由**（`device_not_subpc`と同じ立場）。
+      // 代行実行のシェルには標準入力が無く、サインインの答えを渡せない。ここだけは人が
+      // 実行して、続きは自動実行に任せてもらう（#2025）
+      return context.interactiveCommand
+        ? `この手順には対話が必要なコマンド（${context.interactiveCommand}）が含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`
+        : `この手順には対話が必要なコマンドが含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`;
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
@@ -705,6 +718,12 @@ export function resolveManualStepExecutionRejection(params: {
   isSubpcDevice: boolean;
   /** その手順から実行するコマンドを1つだけ取り出せたか */
   hasCommand: boolean;
+  /**
+   * そのコマンドに含まれる、対話が要るコマンドの表記（`findInteractiveCommand`の結果。#2025）。
+   * **判定そのものは`lib/manual-step-command.ts`が持つ**——ここで文字列を見ると、画面・API・
+   * 自動実行がそれぞれ別の条件を持つことになる。
+   */
+  interactiveCommand: string | null;
   hasActiveJob: boolean;
 }): ManualStepExecutionRejection | null {
   // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
@@ -712,6 +731,8 @@ export function resolveManualStepExecutionRejection(params: {
   if (!params.isManualStepIssue) return "not_manual_step";
   if (!params.isSubpcDevice) return "device_not_subpc";
   if (!params.hasCommand) return "no_command";
+  // **ホストの都合より先に見る。** 更新すれば押せるようになるものではなく、人が実行するしかない
+  if (params.interactiveCommand) return "interactive_command";
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.manualStepCapable !== true) return "manual_step_unsupported";
@@ -1013,27 +1034,73 @@ export function findBlockingSession(params: {
 }
 
 /**
+ * GitHub Actionsの実行が進行中か（#2032）。**`completed`以外はすべて進行中**（`queued`で
+ * 順番待ちのものも含む。走り出す前に積めてしまえば結果は同じ）。
+ *
+ * **`null`／`undefined`は「進行中ではない」ではなく「分からない」。** 実行ログのリンクは
+ * Actions側がIssueへコメントして初めて画面に現れるため、起動直後の数十秒はここが`null`に
+ * なる。それでも`false`（＝止めない）を返すのは、**分からないことを理由に起動を塞ぐと
+ * Actionsを一度も使っていないIssueまで積めなくなる**ため。塞ぎ切れない隙間は残るが、
+ * 実際に問題になっているのは「Actionsが数分〜数十分走っている最中に押せる」方であり、
+ * そちらはリンクが出た時点から消える。
+ */
+export function isActionsRunInProgress(
+  /** そのIssueに紐づく実行（`useIssueWorkflowRun`の`run`／`/api/issues/workflow-run`の応答） */
+  run: { status: string } | null | undefined,
+): boolean {
+  return run != null && run.status !== "completed";
+}
+
+/**
+ * Actionsが走っている間、サブPCへ積めない理由の文言（#2032）。
+ *
+ * **`describeDispatchEnqueueRejection`とは別に持つ。** あちらの`DispatchEnqueueRejection`は
+ * API側（`enqueueDispatchJob`）の判定と1対1で対応する取り決めで、API側はActionsの実行状況を
+ * 持っていない（画面のポーリング結果が判定材料）。そこへ混ぜると「画面にしか無い拒否理由」が
+ * 拒否一覧に並び、対応が崩れる。
+ *
+ * 積む導線が複数ある（「まとめて実行」・「セッションを復旧」）ので、文言だけはここで揃える。
+ */
+export const ACTIONS_RUNNING_ENQUEUE_REASON =
+  "GitHub Actionsの実行が進行中です。同じブランチを2つの経路が進めることになるため、実行が終わるまでサブPCへは積めません。";
+
+/**
  * そのIssueの実行が**もう始まっているか**（#1667）。開始の導線を出すかどうかの判定に使う。
  *
- * **未完了のジョブ（順番待ち・受け取り済み・起動中）か、生きているセッションがあれば`true`。**
- * どちらも既存の判定（`isActiveDispatchJobStatus`・`findBlockingSession`）をそのまま読む。
+ * **未完了のジョブ（順番待ち・受け取り済み・起動中）か、生きているセッションか、進行中の
+ * GitHub Actionsの実行があれば`true`。** どれも既存の判定
+ * （`isActiveDispatchJobStatus`・`findBlockingSession`・`isActionsRunInProgress`）をそのまま読む。
  *
  * 積んだ直後のIssueは、進捗（Project Status）がまだ`Ready`のままで
  * （報告するのは起動したランチャー側・#1236）、`canStartImplementation`は`true`を返し続ける。
  * そのうえ**自分が積んだジョブでサブPCが塞がるため既定の実行先がGitHub Actionsへ移り**、
  * 「順番待ち」の真下に押せる「GitHub Actionsで開始」が並ぶ。押せば二重に走る。
  *
+ * **Actionsの実行を見るのは逆向きの穴を塞ぐため**（#2032）。「GitHub Actions」→「サブPC」の
+ * 順で開始すると、どこにも止めるものが無く両方が走る——ジョブもセッションもまだ無く、停止
+ * フラグ（`11.local`）はActions側が判定を終えた後では効かない。同じ`issue-<番号>`ブランチを
+ * 2つの経路が別々に進めることになる。
+ *
  * **失敗・取り消し・起動済みで終わったジョブでは`false`に戻る**（未完了ではなくなる）。
- * 落ちたセッションを立て直す導線まで塞がない。
+ * Actionsの実行も`completed`になれば`false`へ戻るので、**落ちたセッション・失敗した実行を
+ * 立て直す導線まで塞がない。**
  */
 export function isIssueExecutionPending(params: {
   /** そのIssueへ積んだ起動ジョブ（`findDispatchJobForIssue`の結果） */
   job: Pick<DispatchJobView, "status"> | null;
   /** 動いているセッション（`findBlockingSession`の結果） */
   blockingSession: DispatchSessionView | null;
+  /**
+   * そのIssueで走っているGitHub Actionsの実行（`useIssueWorkflowRun`の`run`）。#2032。
+   *
+   * **省略できる。** 実行状況を持っていない画面（取得口を増やしたくない場所）からは渡さず、
+   * ジョブとセッションだけで判定する。
+   */
+  actionsRun?: { status: string } | null;
 }): boolean {
   if (params.job !== null && isActiveDispatchJobStatus(params.job.status)) return true;
-  return params.blockingSession !== null;
+  if (params.blockingSession !== null) return true;
+  return isActionsRunInProgress(params.actionsRun);
 }
 
 /**

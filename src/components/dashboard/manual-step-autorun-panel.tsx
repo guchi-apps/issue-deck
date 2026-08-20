@@ -42,14 +42,18 @@ export function ManualStepAutoRunPanel({
 
   // 1件も代行できない場合は、承認ではなく**理由**を出す（押せないボタンを出さない）
   if (plan.runnable === 0) {
-    const rejection = pending[0].rejection;
+    const { rejection, interactiveCommand } = pending[0];
     return (
       <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
         <Terminal className="mt-0.5 size-3.5 shrink-0" aria-hidden />
         <span>
           {rejection === null
             ? "この手作業は画面からは代行できません。手順どおり実行してください。"
-            : describeManualStepExecutionRejection(rejection, { hostName, device })}
+            : describeManualStepExecutionRejection(rejection, {
+                hostName,
+                device,
+                interactiveCommand,
+              })}
         </span>
       </p>
     );
@@ -97,7 +101,12 @@ export function ManualStepAutoRunPanel({
             )}
             {entry.rejection !== null && !entry.checked && (
               <p className="text-[11px] leading-relaxed text-muted-foreground">
-                {describeManualStepExecutionRejection(entry.rejection, { hostName, device })}
+                {describeManualStepExecutionRejection(entry.rejection, {
+                  hostName,
+                  device,
+                  // どのコマンドで引っかかったのかまで出す（#2025）。人はそれを手元で実行する
+                  interactiveCommand: entry.interactiveCommand,
+                })}
               </p>
             )}
           </li>
