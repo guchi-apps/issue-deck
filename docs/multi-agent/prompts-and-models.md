@@ -183,7 +183,7 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 **develop向けPRの自動レビュー（`claude-review-develop.yml`）は対象外とし、`--model`を指定しない
 既定のままにしている。** レビュー品質の低下は自動マージ不可判定の見落としに直結し、コスト削減と
 釣り合わないため。`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-pr-repair.yml`・
-`shared-knowledge-propose.yml`・`release-develop-to-main.yml`も同様に`--model`を指定していない
+`release-develop-to-main.yml`も同様に`--model`を指定していない
 （そもそもこの設定を参照していない）。
 
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
@@ -197,7 +197,7 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 
 対象は`claude-issue-dispatch.yml`の5ステップ（計画提示・計画レビュー・分割・質問応答・実装）に加え、
 `claude-review-develop.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・
-`claude-pr-repair.yml`・`shared-knowledge-propose.yml`・`release-develop-to-main.yml`の各1ステップ。
+`claude-pr-repair.yml`・`release-develop-to-main.yml`の各1ステップ。
 
 **このスクリプトはジョブを失敗させない。** 計測は補助情報であり、`execution_file`が無い・
 `claude-code-action`側のJSONスキーマが変わった・`jq`が失敗した場合でも、本来の処理（実装・

@@ -223,8 +223,7 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 > `delete_branch_on_merge: false`にし、rulesetに`deletion`制限も入れて二重に防ぐ
 > （`vps`は`protect develop`（id=20909317）で対応済み）。
 
-**`docs`はリリースフローを入れない**（guchi-apps/docs#15）。各アプリの
-`shared-knowledge-propose.yml`が出す共有知識の追加提案PRは`main`宛に届く
+**`docs`はリリースフローを入れない**（guchi-apps/docs#15）。共有知識への反映PRは`main`宛に届く
 （`vars.SHARED_CONTEXT_REF || 'main'`）ため、`develop`を挟むと提案PRのマージのたびに`develop`が
 behindになり、guchi-apps/vps#79と同じ分岐状態に向かう。**この変数は「提案PRの宛先」と
 「各アプリが共有知識を読むref」の両方に使われている**ので、`develop`へ切り替えると全アプリが
@@ -660,8 +659,8 @@ Actions側の対応とローカル起動の対応は**必ずしも一致しな�
   「意図的に古いbase-commitのまま」にしていた運用（#814が未反映であることの記録）も、
   参照方式では`uses:`のタグが実態を表すため役目を終えている
 
-`shared-knowledge-propose.yml`（共有知識層、#889）のマーカーは、issue-deck側とshopping-list側の
-双方のPull Requestがマージされた時点で追加する。
+`shared-knowledge-propose.yml`（共有知識層、#889）のマーカーは追加しない。#2029でissue-deck側の
+ワークフローを廃止したため、ドリフトを監視する対象が無い。
 
 ### guchi-apps/dayspan
 

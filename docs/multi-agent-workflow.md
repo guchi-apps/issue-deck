@@ -78,7 +78,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 - `.github/workflows/claude-review-develop.yml`（Phase3、作成済み。Phase4で`risk-check`/`auto-merge`ジョブを追加）
 - `.github/workflows/claude-issue-dispatch.yml`（Phase5、作成済み）
 - `.github/workflows/release-develop-to-main.yml`（Phase6、作成済み）
-- `.github/workflows/shared-knowledge-propose.yml`（共有知識層、作成済み。承認済みの知見を`guchi-apps/docs`へのPRに変換する。[docs/shared-knowledge.md](shared-knowledge.md)参照）
+- 共有知識層の反映ワークフローはこのリポジトリには置かない（#2029で`shared-knowledge-propose.yml`を廃止。格上げの判定と`guchi-apps/docs`へのPR作成は同リポジトリ側の格上げ判定エージェントが行う。[docs/shared-knowledge.md](shared-knowledge.md)参照）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成

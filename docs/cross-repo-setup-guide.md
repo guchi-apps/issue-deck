@@ -75,7 +75,6 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | 方式 | 対象ワークフロー | やること |
 |---|---|---|
 | **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`・`claude-pr-repair.yml`・`version-tag-check.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
-| コピー方式（未移行） | `shared-knowledge-propose.yml` | ファイルをコピーし、リポジトリ差異に合わせて改変する |
 
 参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
 
@@ -96,7 +95,6 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `version-tag-check.yml` | `main`宛のPRの時点で、リリースタグ（`vX.Y.Z`）がバージョンを上げないまま重複しないかを検査する（#1367）。**トリガー定義のみ**を持ち、本体は`reusable-version-tag-check.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`で、タグの接頭辞は`tag-prefix`で指定する（既定は`package.json`・`.version`・`v`）。**トリガーを`develop`へ広げないこと**（featureブランチのバージョンは直前のリリースのままでタグが必ず存在するため、developへの全PRが赤くなる） |
 | `reusable-version-tag-check.yml` | 上記のジョブ本体（`on: workflow_call`）。`version-tag-check`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
-| `shared-knowledge-propose.yml` | developマージ後、承認済みの「共有知識への追加提案」を共有知識リポジトリ（`guchi-apps/docs`）へのPull Requestに変換する | リポジトリ固有の前提を持たないため、ほぼ無改変で移植できる。共有知識リポジトリを別のものにする場合はリポジトリ変数`SHARED_CONTEXT_REPO`で切り替える。導入は任意（共有知識層を使わないリポジトリでは不要） |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
@@ -466,7 +464,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > **初回配置を`propagate-workflow-tag.yml`へ寄せていないのは、「どのリポジトリへ置くべきか」の
 > 判定がワークフローごとに違うため**（#1459）。`version-tag-check.yml`は`deploy.yml`が
 > `vX.Y.Z`タグを作るリポジトリだけが対象で、タグを作らないリポジトリ（`guchi-apps/vps`）には
-> 守るものが無い。`claude-pr-repair.yml`・`shared-knowledge-propose.yml`は導入自体が任意。
+> 守るものが無い。`claude-pr-repair.yml`は導入自体が任意。
 > 配布側に持たせると「全リポジトリへ一律に配る」挙動にしかできず、対象の判断を毎回人が
 > やり直すことになる。
 >
@@ -1316,7 +1314,7 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
 
 ## 6. リポジトリ差異の吸収チェックリスト
 
-> **適用範囲**: 本節は**コピー方式のワークフロー**（`shared-knowledge-propose.yml`）が対象。参照方式の6つ（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`）は`with:`で吸収済みのため、ワークフローを編集する必要はない。
+> **適用範囲**: 本節は**コピー方式のワークフロー**（現在は該当なし。以前は`shared-knowledge-propose.yml`が該当した）が対象。参照方式の6つ（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`）は`with:`で吸収済みのため、ワークフローを編集する必要はない。
 
 
 ワークフローファイルをそのままコピーしても動かない、個別カスタマイズが必要な観点。
@@ -1449,19 +1447,20 @@ scripts/check-cross-repo-guide-sync.sh
 - [ ] **`secrets.WORKFLOW_PAT`が共有知識リポジトリへ到達できることを確認する。**
       `guchi-apps/docs`はprivateのため、checkoutにトークンが要る。PATのRepository accessが
       「All repositories」であれば追加設定は不要（issue-deckはこの設定）。リポジトリを個別指定
-      している場合は`guchi-apps/docs`を追加し、`Contents: Read and write`・
-      `Pull requests: Read and write`を付与する（`shared-knowledge-propose.yml`まで導入せず
-      読み取りだけなら`Contents: Read`で足りる）。
+      している場合は`guchi-apps/docs`を追加する。必要なのは`Contents: Read`だけでよい
+      （共有知識への書き込みは`guchi-apps/docs`側の格上げ判定ワークフローが行うため、
+      導入先のPATに書き込み権限は要らない）。
 - [ ] **共有知識のcheckoutステップを各ワークフローへ追加し、プロンプトに参照ルールを書く。**
       issue-deckの`claude-issue-dispatch.yml`・`claude-review-develop.yml`の
       「共有知識リポジトリをcheckoutする」ステップをそのままコピーできる。共有知識リポジトリを
       別のものにする場合は、リポジトリ変数`SHARED_CONTEXT_REPO`（既定値`guchi-apps/docs`）・
       `SHARED_CONTEXT_REF`（既定値`main`）で切り替えられるため、ワークフロー本文の改変は不要。
 
-知見の書き戻し（実装エージェントの提案 → レビューエージェントの審査 → `shared-knowledge-propose.yml`
-による反映PR → 人間のマージ）まで導入する場合は、`shared-knowledge-propose.yml`もあわせてコピーし、
-`CLAUDE.md`に「`.shared-context/`は読み取り専用」「共通知見は提案コメントにとどめる」ルールを
-記載する。
+知見の書き戻しは**導入先に何も置かなくてよい**（#2029）。実装エージェントが対応Issueへ残す
+知見メモ（`<!-- knowledge-candidate -->`）を、`guchi-apps/docs`側の格上げ判定エージェントが
+フリート全体から拾って審査する。導入先の`CLAUDE.md`には「`.shared-context/`は読み取り専用」
+「知見は自リポジトリの`docs/`へ書き、同じ内容を知見メモとしてIssueへ残す」「格上げの判定は
+しない」を記載する（[shared-knowledge.md](shared-knowledge.md)「9. 共有知識更新フロー」）。
 
 ## 11. 盤面へ載せる（リポジトリを再同期）
 
