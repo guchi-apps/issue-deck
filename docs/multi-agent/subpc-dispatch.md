@@ -1590,6 +1590,43 @@ pull型を採った以上、押してから起動が始まるまでポーリン�
   （`use-dispatch-state.ts`の購読者）。1画面1取得口の原則（#1262）は守りつつ、
   ダイアログと詳細のように取得口が分かれる経路でも押した結果がすぐ出る
 
+### GitHub Actionsが走っている間は積ませない（#2032）
+
+**「GitHub Actions」→「サブPC」の順で開始すると、どこにも止めるものが無く両方が走っていた。**
+拒否の判定（`resolveDispatchTargetRejection`・`enqueueDispatchJob`）が見ているのはホストの
+生存・そのリポジトリを実行できるか・同じIssueの未完了ジョブ・生きているセッションの4つで、
+**どれもサブPC側の記録**なので、Actionsで走っているIssueはどこにも現れない。停止フラグ
+（`11.local`）はActions側が判定を終えた後では効かない（triageと陳腐化チェックを通過して
+走っている run は、後から付けても止まらない）。結果として同じ`issue-<番号>`ブランチを
+2つの経路が別々に進め、先に押し込んだ側の後からのpushが弾かれる。
+
+**判定材料は画面が既に持っている実行状況**（`use-issue-workflow-run.ts`＝Issue詳細、
+`use-issues-workflow-running.ts`＝一覧）で、**GitHub APIは追加で叩かない。**
+判定は`isActionsRunInProgress`（`completed`以外は進行中）。塞ぐのは積む導線3つ。
+
+| 導線 | 材料 | 効かせ方 |
+|---|---|---|
+| Issue詳細の起動ボタン（`StartLocalSessionButton`） | `useIssueWorkflowRun`の`run` | `isIssueExecutionPending`に足して導線ごと消す（#1667と同じ） |
+| 「まとめて実行」（`bulk-dispatch-bar.tsx`） | 一覧の`useIssuesWorkflowRunning` | 積める件数から外し（`resolveBulkDispatchHost`）、投げる側（`enqueueIssueToDefaultHost`）でも止める |
+| 「セッションを復旧」（`session-recovery-button.tsx`） | `useIssueWorkflowRun`の`run` | ボタンは残して押せなくし、理由を出す（#1180の立場） |
+
+- **「まとめて実行」は数え方だけ直しても止まらない。** 押した後に回るのは選択した全件で、
+  積める件数（`dispatchable`）はボタンを出すかどうかにしか効かない
+- **「セッションを復旧」も塞ぐ。** ローカルで着手したIssueは`11.local`を外して無人実行へ
+  引き継ぐ運用なので、「終了したセッションの行」と「Actionsの実行中」は日常的に重なる
+  （セッションの記録は24時間残る）
+- **拒否理由（`DispatchEnqueueRejection`）には足さない。** あちらはAPI側
+  （`enqueueDispatchJob`）の判定と1対1で対応する取り決めで、API側はActionsの実行状況を
+  持っていない。文言だけ`ACTIONS_RUNNING_ENQUEUE_REASON`で揃える
+- **実行が`completed`になれば導線は戻る。** 失敗した実行を手元で引き取り直す道は塞がない
+- **隙間は残る。** 実行ログのリンクはActionsがIssueへコメントして初めて画面に現れるため、
+  起動直後の数十秒は判定材料が無い。そこで「分からない＝止める」に倒すと、Actionsを一度も
+  使っていないIssueまで積めなくなるので倒さない。実際に問題になっているのは
+  「数分〜数十分走っている最中に押せる」方で、そちらはリンクが出た時点から消える
+- **Actions側を途中で止める案（走行中に`11.local`を検知して中断する）は採らなかった。**
+  中断の判定を実装ステップの途中に足すと、中途半端なブランチが残った状態で止まる経路が
+  増える。ここで積ませなければ、後から`11.local`が付く経路自体がほぼ無くなる
+
 ## 実行キューとして見せる（#1266）
 
 GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順に流す**形にした（#1261）。

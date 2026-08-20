@@ -457,6 +457,37 @@ describe("isIssueExecutionPending", () => {
     expect(isIssueExecutionPending({ job: null, blockingSession: null })).toBe(false);
   });
 
+  // #2032。「GitHub Actions」→「サブPC」の順で開始すると、ジョブもセッションも無いまま
+  // 両方が同じブランチを進める。停止フラグ（`11.local`）はActions側が判定を終えた後では効かない
+  it("GitHub Actionsの実行が進行中なら走っているとみなす", () => {
+    for (const status of ["queued", "in_progress", "waiting"]) {
+      expect(
+        isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: { status } }),
+      ).toBe(true);
+    }
+  });
+
+  // 実行が終われば導線は戻る（失敗した実行を手元で引き取り直せなくならない）
+  it("GitHub Actionsの実行が完了していれば導線を出す", () => {
+    expect(
+      isIssueExecutionPending({
+        job: null,
+        blockingSession: null,
+        actionsRun: { status: "completed" },
+      }),
+    ).toBe(false);
+  });
+
+  // 実行ログのリンクが出るまでは`null`。分からないことを理由に塞ぐと、Actionsを一度も
+  // 使っていないIssueまで積めなくなる
+  it("実行が分からない（未取得・紐づく実行が無い）ときは導線を出す", () => {
+    expect(isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: null })).toBe(
+      false,
+    );
+    expect(
+      isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: undefined }),
+    ).toBe(false);
+  });
 });
 
 describe("describeDispatchJobStatus", () => {

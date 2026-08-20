@@ -134,6 +134,27 @@ describe("resolveBulkDispatchHost（#1993）", () => {
       }),
     ).toBeNull();
   });
+
+  // #2032。Actionsで走っているIssueはジョブにもセッションにも現れないため、これが無いと素通りする
+  it("GitHub Actionsで走っているIssueは積めない（#2032）", () => {
+    expect(
+      resolveBulkDispatchHost(issue({ number: 7 }), {
+        ...EMPTY,
+        hosts: [host()],
+        actionsRunningIssueIds: new Set(["7"]),
+      }),
+    ).toBeNull();
+  });
+
+  it("Actionsで走っていない他のIssueは従来どおり積める", () => {
+    expect(
+      resolveBulkDispatchHost(issue({ number: 8 }), {
+        ...EMPTY,
+        hosts: [host()],
+        actionsRunningIssueIds: new Set(["7"]),
+      }),
+    ).toBe("subpc");
+  });
 });
 
 describe("bulkDispatchableIssues（#1993）", () => {
@@ -151,5 +172,18 @@ describe("bulkDispatchableIssues（#1993）", () => {
 
   it("起動先の申告が1件も無ければ空", () => {
     expect(bulkDispatchableIssues([issue()], EMPTY)).toEqual([]);
+  });
+
+  // 入口のバーに出る件数から、押しても積めないぶんを外す（#2032）
+  it("GitHub Actionsで走っているIssueは数えない（#2032）", () => {
+    const issues = [issue({ number: 1 }), issue({ number: 2 }), issue({ number: 3 })];
+
+    const dispatchable = bulkDispatchableIssues(issues, {
+      ...EMPTY,
+      hosts: [host()],
+      actionsRunningIssueIds: new Set(["2"]),
+    });
+
+    expect(dispatchable.map((target) => target.number)).toEqual([1, 3]);
   });
 });
