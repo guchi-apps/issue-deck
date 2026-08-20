@@ -1,3 +1,4 @@
+import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
 
@@ -278,6 +279,21 @@ export type BranchFlowRepositorySummary = {
    * 無い・取得失敗）では実行中と言い切れないためfalseにする。
    */
   releaseCiPending: boolean;
+  /**
+   * リリースを進めているPRのうち、**人がマージするしかない状態で止まっているもの**の
+   * マージ先（#2038）。待っていなければnull。
+   *
+   * 畳んだ1行で「リリース中」（紫・待てば進む）と「mainへマージ待ち」（琥珀・押す番）を
+   * 書き分けるために持つ。**紫と琥珀の対比はこの画面の既存の約束**（「ユーザーのマージが
+   * 必要」「手作業◯」が琥珀）で、そこへリリースのマージ待ちを合流させる。
+   *
+   * 判定の基準は展開したときのリリースの見出し（`ReleaseGroupHeader`）と同じく
+   * 「CIが`pending`でなくなった時点」。**`failure`だけは除く**——赤の「CI失敗」と並べると
+   * 「直す必要がある」と「マージすればよい」を取り違えるため（#1059と同じ優先順位）。
+   * `unknown`（`Checks: read`が無い・取得失敗）はマージ待ちのまま残す（CI状態が取れない
+   * だけで、待っているものが画面から消える方が困る）。
+   */
+  releaseMergeTarget: ReleaseMergeTarget | null;
   /**
    * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に破線の丸のアイコンと
    * 数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。

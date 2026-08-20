@@ -53,6 +53,7 @@ import {
   type BranchFlow,
 } from "@/lib/branch-flow";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
+import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
@@ -646,11 +647,7 @@ const PLANNED_ISSUE_PREVIEW_COUNT = 3;
 /** 優先度のピル。高だけ色を付ける（低は「後回しでよい」という情報なので目立たせない） */
 function IssuePriorityBadge({ priority }: { priority: BranchFlowIssuePriority }) {
   if (priority === "low") return <PullRequestMetaBadge>優先度 低</PullRequestMetaBadge>;
-  return (
-    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-      優先度 高
-    </span>
-  );
+  return <AttentionPill>優先度 高</AttentionPill>;
 }
 
 /**
@@ -722,6 +719,24 @@ function PlannedIssues({
 }
 
 /**
+ * 人の操作を待っていることを表す琥珀のピル（#2038）。
+ *
+ * **この画面での琥珀は「あなたの番」を意味する**（ユーザーのマージが必要・手作業・優先度 高）。
+ * 同じ意味のバッジが同じ見た目でないと色から読み取れないため、写していたクラスをここへ寄せ、
+ * リリースのマージ待ちも合流させた。配色の由来は`pull-request-badges.tsx`の
+ * `UserMergeRequiredBadge`（`00.check-user`と同じamber）。
+ *
+ * 対になるのが紫の`ReleaseProgressPill`で、あちらは「待っていれば次へ進む」。
+ */
+function AttentionPill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
+      {children}
+    </span>
+  );
+}
+
+/**
  * リリースが進行中であることを表す紫のピル（#1931）。畳んだ1行と束の見出しで同じものを使う。
  *
  * **自動で進んでいる間だけ回るアイコンを添える。** 自動で進んでいる状態と、CIが終わって人の
@@ -782,6 +797,11 @@ function ReleaseGroupHeader({
     group.deploy === null || group.deploy.kind === "success" || group.deploy.manual;
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
+  //
+  // **CIが落ちているときはここでは「マージ待ち」のまま**——畳んだ1行（`releaseMergeTarget`）が
+  // `failure`を除くのは、同じ行に赤の「CI失敗」が並んで意味が競合するからで（#2038）、
+  // この見出しには失敗を示すものが無く、外すと止まっているリリースが「リリース中」に見える。
+  // 失敗そのものはすぐ下のPRの行（`CiStateBadge`）が出す。
   const waitingUserMerge =
     group.pullRequest !== null &&
     group.pullRequest.state === "open" &&
@@ -826,9 +846,7 @@ function ReleaseGroupHeader({
           ) : waitingUserMerge ? (
             // mainへのマージだけは人が行う。待っているのが人の操作であることを、
             // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
-            <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-              mainへマージ待ち
-            </span>
+            <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>
           ) : (
             <ReleaseProgressPill
               label={
@@ -1290,11 +1308,18 @@ function RepositorySummaryRow({
         </span>
       )}
       {summary.releaseInProgress ? (
-        <ReleaseProgressPill
-          label="リリース中"
-          spinning={summary.releaseCiPending}
-          note="チェック実行中"
-        />
+        // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
+        // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
+        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う
+        summary.releaseMergeTarget ? (
+          <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
+        ) : (
+          <ReleaseProgressPill
+            label="リリース中"
+            spinning={summary.releaseCiPending}
+            note="チェック実行中"
+          />
+        )
       ) : (
         // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
         // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
@@ -1305,17 +1330,11 @@ function RepositorySummaryRow({
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
 
-      {/* リリースPRのマージ待ちはリリース中のピルが表すので、重ねて出さない */}
-      {summary.needsUserMerge && (
-        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-          ユーザーのマージが必要
-        </span>
-      )}
+      {/* リリースPRのマージ待ちは上の琥珀のピルが表すので、重ねて出さない（#2038） */}
+      {summary.needsUserMerge && <AttentionPill>ユーザーのマージが必要</AttentionPill>}
       {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする */}
       {summary.openManualStepCount > 0 && (
-        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
-          手作業{summary.openManualStepCount}
-        </span>
+        <AttentionPill>手作業{summary.openManualStepCount}</AttentionPill>
       )}
       {/* 開かなくても、これから流れてくるものが溜まっているかが分かるようにする（#1704）。
           破線の丸は流れ図の実装予定ノードと同じ描き方で、まだブランチが無いことを形で出す */}
@@ -1439,18 +1458,43 @@ function RepositorySection({
  * **開く条件ではない**（#1932）。初回に自動で開く動きはやめたので、この判定が変える表示は
  * ヘッダーの件数だけで、開くかどうかはユーザーが決める。
  *
- * **デプロイ中も含める**（#1579）。押す操作は無いが、mainへマージしてから本番へ出るまでの間は
- * 「今どこまで来ているか」を見に来る時間そのもので、件数から漏らすと見に来る手掛かりが無い。
+ * **リリース中・デプロイ中は、人が押す番になったときだけ数える**（#2038）。#1510・#1579では
+ * リリースが動いていること自体を数えていたが、そのせいで「手が要るもの6件」の中身がCIの完了を
+ * 待つだけのものばかりになり、件数を見ても押す番かどうかが分からなかった。自動で進んでいる
+ * ぶんは`isProgressing`が「待てば進むもの◯件」として同じヘッダーに残すので、mainへマージして
+ * から本番へ出るまでを見に来る手掛かり（#1579）は消えない。
  *
- * **「リリース起動中」（#1955）だけは含めない。** 押す操作の有無ではなく、判断の材料が
+ * **「リリース起動中」（#1955）だけはどちらにも含めない。** 押す操作の有無ではなく、判断の材料が
  * 端末ローカルの記録（起動時刻をlocalStorageへ置き、10分で失効する）でしかないため——
  * 数えると、同じ画面をどの端末で見るかによってヘッダーの件数が食い違う。畳んだ行のピルは
  * 押した端末にだけ出るもので、そこで閉じている。
  */
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
-  const deploying = summary.deploy !== null && summary.deploy.kind !== "success";
-  return summary.hasCiFailure || summary.needsUserMerge || summary.releaseInProgress || deploying;
+  return (
+    summary.hasCiFailure ||
+    summary.needsUserMerge ||
+    summary.releaseMergeTarget !== null ||
+    summary.deploy?.kind === "failure"
+  );
+}
+
+/**
+ * 待っていれば次へ進むリポジトリか。ヘッダーの「待てば進むもの◯件」に数える（#2038）。
+ *
+ * **「手が要るもの」と重ねて数えない**（呼び出し側で`needsAttention`を除く）。同じリポジトリが
+ * 両方に出ると、2つの件数を足しても画面に並ぶ行数と合わなくなる。
+ *
+ * **畳んだ1行の「進行中 N件」とは別物。** あちらは作業レーンの本数（`activeLaneCount`）で、
+ * こちらはリポジトリの件数。同じ画面で同じ言葉が2つの意味を持たないよう、言い回しを分けている。
+ */
+function isProgressing(repository: BranchFlowRepository): boolean {
+  const { summary } = repository;
+  const deploying =
+    summary.deploy !== null &&
+    summary.deploy.kind !== "success" &&
+    summary.deploy.kind !== "failure";
+  return (summary.releaseInProgress && summary.releaseMergeTarget === null) || deploying;
 }
 
 /**
@@ -1494,6 +1538,10 @@ export function BranchFlowView({
   // 実装予定を全件出しているリポジトリ（#1704）。既定は頭出しの3件までで、押すたびに切り替える
   const [allPlannedRepositories, setAllPlannedRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
+  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
+  const progressingRepositories = flow.repositories.filter(
+    (repository) => !needsAttention(repository) && isProgressing(repository),
+  );
 
   // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
   // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
@@ -1578,6 +1626,11 @@ export function BranchFlowView({
               )}
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
+              )}
+              {/* 自動で進んでいるぶんは別に数える（#2038）。「手が要るもの」へ混ぜていたころは、
+                  件数を見ても押す番があるのかが分からなかった */}
+              {progressingRepositories.length > 0 && (
+                <span>{` ・ 待てば進むもの${progressingRepositories.length}件`}</span>
               )}
               {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
