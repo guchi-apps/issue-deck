@@ -60,7 +60,8 @@ export function MobileSettingsScreen({
   onUpdated,
 }: MobileSettingsScreenProps) {
   const [section, setSection] = useState<SettingsSectionKey | null>(null);
-  const data = useSettingsData(true);
+  // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
+  const data = useSettingsData(true, section === "status");
 
   const alerts: Partial<Record<SettingsSectionKey, boolean>> = {
     fleet: data.hasExpiringFineGrainedToken,

@@ -35,9 +35,13 @@ type FleetOpsSectionProps = {
  * 保存ボタンは無い。ここに保存が要る設定値を混ぜると、元の「保存がどこまで効くのか
  * 分からない」状態に戻る。設定値は`ExecutionSettingsSection`へ置くこと。
  *
- * **中の3区画は`LazyFleetPanel`で畳み、開いたものだけを読み込む**（#2022）。この区分を
- * 開いただけで14リポジトリぶんのGitHub API呼び出しが走っていたのをやめるため。
+ * **中の3区画は`LazyFleetPanel`で畳む**（#2022）。この区分を開いただけで、共有ワークフローの
+ * タグ照会（GitHubへの一括問い合わせ）とシークレット同期の履歴が走っていたのをやめるため。
  * 上の「GitHubからの再取得」は押すまで何も起こさないので、畳まずそのまま置く。
+ *
+ * **PATのカードだけは畳んでも取得が減らない。** 一覧は設定画面が先に取っており
+ * （`useSettingsData`。左タブの警告バッジの材料になる）、ここでは表示を畳むだけ。
+ * 代わりに件数を見出しへ出し、開かなくても期限切れに気づけるようにしている。
  */
 export function FleetOpsSection({
   fineGrainedTokens,
@@ -84,7 +88,7 @@ export function FleetOpsSection({
         icon={Boxes}
         title="共有ワークフローの配布"
         description="参照タグの更新と、自動修復ワークフローの配布"
-        loadHint="開くと各リポジトリの参照状況をGitHubから取得します"
+        loadHint="開くと各リポジトリの参照状況をGitHubへ問い合わせます"
       >
         <WorkflowTagStatusSection open />
       </LazyFleetPanel>

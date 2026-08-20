@@ -16,25 +16,32 @@ import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
  * それぞれ書いていた。片方だけ直すとPCとスマホで表示が食い違うため、取得と判定を
  * ここへ寄せて、画面側は器（ダイアログか全画面か）だけを持つようにした。
  *
- * `enabled`は開いているときだけ取りに行くためのもので、各フックの引数にそのまま渡る。
+ * `enabled`は設定画面を開いているあいだ真になる。**それだけでは足りない**（#2022）——
+ * 設定を開いた時点では、どの区分も選んでいないのに5本の取得が走っていた。そのうち
+ * 使用量・レート制限（`StatusSection`でしか読まないもの）は`statusActive`が真、つまり
+ * **「状態」区分を開いているあいだだけ**取りに行く。区分を離れて戻ると取り直すが、
+ * 使用量は見るたびに新しいほうがよいので、そのままにしている。
+ *
+ * 残る2本（GitHubの障害状況・PATの一覧）は`enabled`のままにする。**どちらも区分を
+ * 開かずに出す警告バッジの材料**で、遅らせるとバッジが出なくなる。
  */
-export function useSettingsData(enabled: boolean) {
+export function useSettingsData(enabled: boolean, statusActive: boolean) {
   const {
     data: rateLimits,
     isLoading: rateLimitsLoading,
     error: rateLimitsError,
-  } = useGithubRateLimit(enabled);
+  } = useGithubRateLimit(enabled && statusActive);
   const {
     data: apiUsage,
     isLoading: apiUsageLoading,
     error: apiUsageError,
-  } = useGithubApiUsage(enabled);
+  } = useGithubApiUsage(enabled && statusActive);
   const {
     data: claudeUsage,
     isLoading: claudeUsageLoading,
     error: claudeUsageError,
     notConfigured: claudeUsageNotConfigured,
-  } = useClaudeUsage(enabled);
+  } = useClaudeUsage(enabled && statusActive);
   const {
     data: githubStatus,
     isLoading: githubStatusLoading,

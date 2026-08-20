@@ -60,7 +60,8 @@ export function SettingsDialog({
   onUpdated,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
-  const data = useSettingsData(open);
+  // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
+  const data = useSettingsData(open, section === "status");
 
   const alerts: Partial<Record<SettingsSectionKey, boolean>> = {
     fleet: data.hasExpiringFineGrainedToken,
