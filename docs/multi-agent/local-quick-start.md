@@ -1488,6 +1488,45 @@ claude --permission-mode "$PERMISSION_MODE" ...
 「心当たりのないタブが開いたら閉じる」で受けている。`auto`ではその開いてしまったセッションが
 コマンドを確認なしで実行できるため、**閉じる判断は早いほどよい**。
 
+### 起票（`gh issue create`）だけは許可規則として渡す（#2017）
+
+`auto`の権限クラシファイアは**同じコマンドでも実行のたびに判断が変わる**。`gh issue create`は
+通ることも拒否されることもあり、拒否された側は「弾かれました」と書き残して終えるしかない。
+guchi-apps/dayspan#292 では実際に起票が拒否され、質問への回答で挙がった改善が**Issueとして
+残らないまま、質問Issue自身で実装されてPRが作られた**。
+
+そこで`run-issue-session.sh`は`--allowedTools "Bash(gh issue create:*)"`を常に渡す。許可規則は
+クラシファイアより先に評価される（拒否メッセージ自身が「add a Bash permission rule to their
+settings」と案内する）ため、これでブレが無くなる。**この経路を通るセッション全て**——横断質問
+セッションと、汎用ランチャーで起こす各リポジトリの実装セッション——に効く。
+
+**効くのは静的解析できる形のコマンドだけ**（#2017で実測）。規則の当たり判定だけを見るため、
+クラシファイアを外した`--permission-mode default`（規則に無いものは即座に承認待ち）で
+3通りを試した結果が次のとおり。
+
+| コマンド | 結果 |
+|---|---|
+| `gh issue create --repo … --title "…" --body "line1"` | 実行された（規則が当たっている） |
+| `gh issue create --repo … --body "$(printf %s line2)"` | 拒否。`Contains shell syntax (string) that cannot be statically analyzed` |
+| `gh --version`（規則に無い） | 承認待ちで停止（規則の効果であることの対照） |
+
+つまり**コマンド置換（`$(...)`）を含む起票は許可規則の対象外**で、`gh`が起動すらしない。回答
+コメントの投稿は`--body "$(cat <<'EOF' … EOF)"`の形を指示しているため、そのまま起票にも使うと
+ここで落ちる。質問応答のプロンプト（[.github/prompts/question.md](../../.github/prompts/question.md)・
+[scripts/prompts/cross-repo-question-agent.md](../../scripts/prompts/cross-repo-question-agent.md)）
+には、**起票の`--body`は複数行のままそのまま渡す**と書いてある。
+
+- **許可するのは起票だけ。** `gh issue edit`・`gh issue close`は質問セッションの禁止事項であり、
+  進捗の付け替えはそもそも`gh issue edit`では動かない（Project Statusが正）
+- **質問セッションだけに絞らない。** 実装セッションも`71.manual-step`の起票で同じコマンドを使う
+  （#1486・#2009）。同じ理由の許可を経路ごとに書き分けると、拒否されたときに原因を探し直すことになる
+- 暴発の歯止め（`70.confirm`を付ける・1回に目安3件まで・起票しても実装しない）は
+  プロンプト側にある（#735・#1528）
+- `--allowedTools`は許可の**追加**で、挙げていないツールを禁止するものではない。禁止は
+  `--disallowedTools`が持つ（横断質問セッションの`Edit,Write,NotebookEdit`）
+- GitHub Actionsの無人実行にはクラシファイアが無く、`--allowedTools`に
+  `Bash(gh issue create:*)`が既に入っている（[dispatch.md](dispatch.md)「無人実行時の権限モード」）
+
 ## タブは非対話シェルで始まる（nvmが読まれない）
 
 `wt.exe` → `wsl.exe -d <ディストロ> -- bash -lc` で開くタブは**非対話シェル**で、Ubuntuの

@@ -451,6 +451,33 @@ if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
   echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: ${ISSUE_DECK_DISALLOWED_TOOLS}"
 fi
 
+# 起票（`gh issue create`）を明示的に許可する（#2017）。
+#
+# 質問セッションは「調べる過程で見つけた別件を`70.confirm`付きで起票してよい」運用（#1528）だが、
+# `--permission-mode auto`（#1205）の権限クラシファイアが判断を持っているため、**同じコマンドでも
+# 実行のたびに拒否されることがある。** guchi-apps/dayspan#292 では実際に起票が拒否され、回答の
+# 末尾に「起票は権限で弾かれました」とだけ残り、代わりに質問Issue自身で実装してPRが作られた。
+# 許可規則はクラシファイアより先に評価されるため（拒否メッセージ自身が「add a Bash permission
+# rule to their settings」と案内する）、ここで規則として渡してブレを無くす。
+#
+# **許可するのは起票だけ**にする。`gh issue edit`・`gh issue close`は質問セッションの禁止事項で、
+# 実装セッションでも進捗の付け替えは画面側の役目（`gh issue edit`で進捗は動かせない）。
+# 暴発の歯止め（`70.confirm`を付ける・1回に目安3件まで・起票しても実装しない）はプロンプト側にある。
+#
+# **質問セッションだけに絞らない。** 実装セッションも、残るユーザーの手作業を`71.manual-step`の
+# Issueとして起票する運用（#1486・#2009）で同じコマンドを使う。同じ理由の許可を経路ごとに
+# 書き分けると、片方が拒否されたときに原因を探し直すことになる。
+#
+# **効くのは静的解析できる形のコマンドだけ**（実測）。`--body "$(cat <<'EOF' ... EOF)"`のように
+# コマンド置換を含むものは許可規則の対象外で、`Contains shell syntax (string) that cannot be
+# statically analyzed`として拒否される。プロンプト側で「起票の`--body`は複数行のままそのまま
+# 渡す（コマンド置換を使わない）」と指示しているのはこのため。
+#
+# `--allowedTools`は許可の**追加**であり、ここに挙げていないツールを禁止するものではない
+# （禁止は上の`--disallowedTools`が持つ）。
+SESSION_ALLOWED_TOOLS="Bash(gh issue create:*)"
+CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
+
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
 # 依存せず、このスクリプトから起こしたセッションの応答を日本語に揃える。文面と未対応時の扱いは
 # scripts/lib/agent-language.sh を参照。
