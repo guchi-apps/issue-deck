@@ -1,10 +1,11 @@
 "use client";
 
-import { Ban, CheckCircle2, ListChecks, Loader2, Wrench } from "lucide-react";
+import { Ban, BadgeCheck, CheckCircle2, ListChecks, Loader2, Wrench } from "lucide-react";
 
 import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
+import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import type { IssueDependent } from "@/lib/issue-dependents";
 import type {
   ManualStepPrerequisite,
@@ -42,6 +43,7 @@ export function ManualStepPanel({
   prerequisites,
   prerequisiteSummary,
   dependents,
+  verifiedAt,
   repositoryFullName,
   className,
 }: {
@@ -68,6 +70,11 @@ export function ManualStepPanel({
    * 何が止まっているのかが分かると、後回しにしてよい手作業かどうかを判断できる。
    */
   dependents?: IssueDependent[];
+  /**
+   * 定期巡回で`## 完了の確認方法`のコマンドがすべて通った日時（ISO8601。#2008）。
+   * 通っていない・巡回の対象外はnullで、そのときは何も出さない。
+   */
+  verifiedAt?: string | null;
   repositoryFullName?: string;
   className?: string;
 }) {
@@ -101,6 +108,7 @@ export function ManualStepPanel({
       {dependents && dependents.length > 0 && repositoryFullName && (
         <IssueDependents dependents={dependents} repositoryFullName={repositoryFullName} />
       )}
+      {verifiedAt && <ManualStepVerifiedNotice verifiedAt={verifiedAt} />}
       <div className="flex flex-wrap gap-2">
         {/* 手順を1つずつ案内する入口（#1826）。**実行の前に押すもの**なので、
             終わった後に押すクローズの2つより前に置く */}
@@ -111,7 +119,9 @@ export function ManualStepPanel({
           </Button>
         )}
         <Button
-          variant={onStartGuide ? "outline" : "default"}
+          // 確認が通っているときは、押してほしいのがクローズになる（#2008）。実行の入口
+          // （「順番に進める」）より、こちらを主ボタンにする
+          variant={onStartGuide && !verifiedAt ? "outline" : "default"}
           size="sm"
           disabled={isSubmitting}
           onClick={onComplete}
@@ -125,5 +135,32 @@ export function ManualStepPanel({
         </Button>
       </div>
     </section>
+  );
+}
+
+/**
+ * 定期巡回で完了の確認コマンドが通ったことを伝える（#2008）。
+ *
+ * **「完了済みの可能性」までしか言わない。** 巡回が見ているのは終了コードだけで、本文の
+ * 「期待する出力」との照合はしていない（`lib/manual-step-verification.ts`）。断定すると、
+ * 通っただけのものを確かめずにクローズしてしまう。
+ *
+ * **出力そのものはここに出さない。** 手作業の出力にはシークレットが混ざりうるため、置き場は
+ * 実行キューのジョブ1か所に留める（#1828「出力は画面にだけ出す」）。
+ */
+function ManualStepVerifiedNotice({ verifiedAt }: { verifiedAt: string }) {
+  return (
+    <p
+      className="flex items-start gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+      title={formatDateTimeFull(verifiedAt)}
+    >
+      <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />
+      <span>
+        <span className="font-medium">完了済みの可能性があります。</span>
+        {/* 日本語の地の文なので、行を分けてできる空白が入らないよう1つの文字列にまとめる */}
+        {`${formatDateTime(verifiedAt)}の巡回で「完了の確認方法」のコマンドがすべて成功しました。` +
+          "出力の中身までは照合していないため、確かめてからクローズしてください。"}
+      </span>
+    </p>
   );
 }

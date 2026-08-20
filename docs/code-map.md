@@ -582,6 +582,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **openな手作業の`## 完了の確認方法`は1日1回、人の操作なしに巡回する**（#2008。
+    [`lib/manual-step-verification.ts`](../src/lib/manual-step-verification.ts)・
+    [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・
+    `ManualStepVerificationCheck`）。全部が終了コード0で終わったIssueには「完了済みの可能性」の
+    印（`Issue.manualStepVerifiedAt`）が付き、一覧の行と`ManualStepPanel`に出る。
+    **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスが
+    サブPCで、**確認コマンドが読み取りだけだと読める**Issueに限る
+    （`isReadOnlyVerificationCommand`）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
+    常駐プロセスは置かない。設計は
+    [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。
   - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
     一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
     （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。

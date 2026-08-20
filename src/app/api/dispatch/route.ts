@@ -20,6 +20,7 @@ import {
 } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
 import { listManualStepRunViews } from "@/lib/manual-step-run";
+import { runManualStepVerificationPatrol } from "@/lib/manual-step-verification-patrol";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
@@ -41,6 +42,16 @@ export async function GET() {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // 手作業Issueの完了確認の定期巡回（#2008）を、この読み取りのついでに1歩進める。
+  // **常駐プロセスは置かない**（`expireStaleDispatchJobs`と同じ方針）。1日1回で足りる
+  // 巡回のために、動かす仕組みを別に用意する理由が無い。
+  // **失敗しても状態の取得は続ける**——巡回はあれば嬉しい程度のもので、画面を止める理由にしない
+  try {
+    await runManualStepVerificationPatrol();
+  } catch (error) {
+    console.error("[GET /api/dispatch] 完了確認の巡回を進められませんでした:", error);
   }
 
   // 手作業アシスタントの自動実行（#1882）も同じ応答に載せる。**取得口を増やさない**

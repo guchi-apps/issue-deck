@@ -106,6 +106,8 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     lastCommentAt: null,
     // ディスパッチのジョブはIssueの行に無い。合流するのは呼び出し側（#1347）
     dispatchPendingAt: null,
+    // 完了確認の巡回の結果も別テーブル。合流するのは呼び出し側（#2008）
+    manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: raw.html_url,
     favorite: false,
@@ -156,6 +158,8 @@ export function dbIssueToDisplayIssue(
     lastCommentAt: row.lastCommentAt?.toISOString() ?? null,
     // ディスパッチのジョブは別テーブルで、この行からは分からない。合流するのは呼び出し側（#1347）
     dispatchPendingAt: null,
+    // 完了確認の巡回の結果も別テーブル。合流するのは呼び出し側（#2008）
+    manualStepVerifiedAt: null,
     projectStatus: row.projectStatus,
     htmlUrl: row.htmlUrl,
     favorite: false,

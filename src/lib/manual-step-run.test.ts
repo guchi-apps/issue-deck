@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * ジョブの積み方は`dispatch/jobs.test.ts`が見ている。
  */
 
+const manualStepVerificationCheckFindUnique = vi.fn();
+const manualStepVerificationCheckUpdate = vi.fn();
 const manualStepRunUpsert = vi.fn();
 const manualStepRunFindUnique = vi.fn();
 const manualStepRunFindMany = vi.fn();
@@ -21,6 +23,15 @@ const issueFindFirst = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
+    manualStepVerificationCheck: {
+      // 完了確認の巡回（#2008）は、自動実行を始めたときに取りやめるためだけに触る
+      get findUnique() {
+        return manualStepVerificationCheckFindUnique;
+      },
+      get update() {
+        return manualStepVerificationCheckUpdate;
+      },
+    },
     manualStepRun: {
       get upsert() {
         return manualStepRunUpsert;
@@ -163,6 +174,8 @@ function applyUpdate(current: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
 
+  // 巡回していない状態が既定（自動実行の判定には関わらない）
+  manualStepVerificationCheckFindUnique.mockResolvedValue(null);
   repositoryFindFirst.mockResolvedValue({ id: "repo-1" });
   issueFindFirst.mockResolvedValue({
     body: BODY,
