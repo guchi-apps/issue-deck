@@ -312,6 +312,57 @@ function findShellBlocks(lines: string[], from: number, to: number): ShellBlock[
 }
 
 /**
+ * 標準入力が無いと必ず失敗する、対話が要るコマンド（#2025）。
+ *
+ * 代行実行は`scripts/run-manual-step.sh`が`</dev/null`で走らせる（答える相手が居ないまま
+ * 待ち続けないため）。ここに挙げたものは端末の前に人が居ることを前提にしているので、積んでも
+ * 失敗するか打ち切り（`MANUAL_STEP_TIMEOUT_SECONDS`）を待つだけになる。**押す前に「あなたが
+ * 実行」と出す**ためのもので、実行を止める壁ではない（壁は本文との照合）。
+ *
+ * **必ず対話が要るものだけを挙げる。** 「設定によっては対話になる」ものまで広げると、いま
+ * 代行できている手順が押せなくなる。逆に、ここに挙げそこねたコマンドは失敗として止まるだけで、
+ * 人が手元で実行すれば進む——**迷ったら挙げない側**ではなく、**代行しない側**へ倒す。
+ */
+const INTERACTIVE_COMMANDS = [
+  // 1Passwordの個人アカウントへのサインイン。セッションは実行したシェルの環境変数にしか
+  // 残らないため、**同じブロックにある後続のコマンドまで含めて人が実行する**必要がある
+  // （人が手元で`op signin`だけ実行しても、代行実行のシェルはそのセッションを引き継げない）
+  "op signin",
+  // GitHub CLIの対話的なログイン・スコープの追加（ブラウザでコードを入力する）
+  "gh auth login",
+  "gh auth refresh",
+] as const;
+
+/**
+ * コマンドの中に対話が要るコマンドがあれば、その表記を返す（無ければ`null`）。
+ *
+ * 見るのは**コマンドの文字列だけ**で、実行してみて判断することはしない。行頭が`#`の行は
+ * コメントなので見ない。`eval "$(op signin)"`のように括弧・パイプの内側にあるものは拾う。
+ * 文字列リテラルの中（`echo "op signin してください"`）まで見分けはしないが、**誤検知しても
+ * 「あなたが実行」になるだけ**で、人が実行すればそのまま先へ進める。
+ */
+export function findInteractiveCommand(command: string | null): string | null {
+  if (!command) return null;
+  const lines = command
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"));
+  if (lines.length === 0) return null;
+
+  const body = lines.join("\n");
+  return INTERACTIVE_COMMANDS.find((entry) => interactivePattern(entry).test(body)) ?? null;
+}
+
+/** `op signin`のような語の並びを、コマンドの位置に現れたときだけ当たる正規表現にする */
+function interactivePattern(command: string): RegExp {
+  const words = command
+    .split(" ")
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  // 直前が行頭・空白・パイプ・`;`・`&`・`(`・バッククォート・`$(`のときだけコマンドとみなす
+  return new RegExp(`(?:^|[\\s;&|(\`])${words}\\b`, "m");
+}
+
+/**
  * `## 前提条件`の「実行するデバイス」がサブPCか。
  *
  * **サブPC以外は一律で代行しない。** VPS・1Password・GitHub App・ブラウザでの設定は

@@ -650,6 +650,7 @@ export type ManualStepExecutionRejection =
   | "not_manual_step"
   | "device_not_subpc"
   | "no_command"
+  | "interactive_command"
   | "host_unknown"
   | "host_offline"
   | "manual_step_unsupported"
@@ -658,7 +659,12 @@ export type ManualStepExecutionRejection =
 
 export function describeManualStepExecutionRejection(
   rejection: ManualStepExecutionRejection,
-  context: { hostName: string; device?: string | null },
+  context: {
+    hostName: string;
+    device?: string | null;
+    /** 対話が要ると判定されたコマンドの表記（`interactive_command`のときだけ使う） */
+    interactiveCommand?: string | null;
+  },
 ): string {
   switch (rejection) {
     case "not_manual_step":
@@ -673,6 +679,13 @@ export function describeManualStepExecutionRejection(
       // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
       // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
       return "この手順は代行できません。実行するコマンドのブロックがちょうど1つ書かれている手順だけを代行します。";
+    case "interactive_command":
+      // **代行できるようになる見込みが無い理由**（`device_not_subpc`と同じ立場）。
+      // 代行実行のシェルには標準入力が無く、サインインの答えを渡せない。ここだけは人が
+      // 実行して、続きは自動実行に任せてもらう（#2025）
+      return context.interactiveCommand
+        ? `この手順には対話が必要なコマンド（${context.interactiveCommand}）が含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`
+        : `この手順には対話が必要なコマンドが含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`;
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
@@ -705,6 +718,12 @@ export function resolveManualStepExecutionRejection(params: {
   isSubpcDevice: boolean;
   /** その手順から実行するコマンドを1つだけ取り出せたか */
   hasCommand: boolean;
+  /**
+   * そのコマンドに含まれる、対話が要るコマンドの表記（`findInteractiveCommand`の結果。#2025）。
+   * **判定そのものは`lib/manual-step-command.ts`が持つ**——ここで文字列を見ると、画面・API・
+   * 自動実行がそれぞれ別の条件を持つことになる。
+   */
+  interactiveCommand: string | null;
   hasActiveJob: boolean;
 }): ManualStepExecutionRejection | null {
   // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
@@ -712,6 +731,8 @@ export function resolveManualStepExecutionRejection(params: {
   if (!params.isManualStepIssue) return "not_manual_step";
   if (!params.isSubpcDevice) return "device_not_subpc";
   if (!params.hasCommand) return "no_command";
+  // **ホストの都合より先に見る。** 更新すれば押せるようになるものではなく、人が実行するしかない
+  if (params.interactiveCommand) return "interactive_command";
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.manualStepCapable !== true) return "manual_step_unsupported";

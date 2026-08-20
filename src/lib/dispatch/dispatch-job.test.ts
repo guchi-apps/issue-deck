@@ -40,6 +40,7 @@ import {
   findPlanReviewJobForIssue,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
+  describeManualStepExecutionRejection,
   resolveManualStepExecutionRejection,
   resolveManualStepHost,
   resolveScreenshotRejection,
@@ -1257,6 +1258,7 @@ describe("resolveManualStepExecutionRejection", () => {
       isManualStepIssue: true,
       isSubpcDevice: true,
       hasCommand: true,
+      interactiveCommand: null,
       hasActiveJob: false,
       ...overrides,
     } as Parameters<typeof resolveManualStepExecutionRejection>[0];
@@ -1277,6 +1279,22 @@ describe("resolveManualStepExecutionRejection", () => {
         params({ hasCommand: false, host: { online: false, manualStepCapable: null } }),
       ),
     ).toBe("no_command");
+  });
+
+  // 更新すれば押せるようになるものではない（人が実行するしかない）ので、ホストの理由より先に出す
+  it("対話が要るコマンドはホストの理由より先に出す", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ interactiveCommand: "op signin", host: null }),
+      ),
+    ).toBe("interactive_command");
+    // どのコマンドで引っかかったのかを文面に出す
+    expect(
+      describeManualStepExecutionRejection("interactive_command", {
+        hostName: "subpc",
+        interactiveCommand: "op signin",
+      }),
+    ).toContain("op signin");
   });
 
   it("手作業Issueでなければ代行しない", () => {

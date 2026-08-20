@@ -522,6 +522,30 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(screen.getByRole("button", { name: "承認して3件を自動実行" })).toBeTruthy();
   });
 
+  // 対話が要るコマンド（#2025）。**その1件だけ人が実行し、残りは承認の対象に残る**
+  it("対話が要るコマンドを含む手順は「あなたが実行」として並べる", () => {
+    const body = AUTO_BODY.replace(
+      "systemctl --user restart issue-deck-poller.service",
+      "op signin",
+    );
+    taskList.body = body;
+    render(
+      <ManualStepGuideDialog
+        queueIds={["1823"]}
+        issues={[issue({ body })]}
+        open
+        onOpenChange={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    expect(screen.getByText("あなたが実行")).toBeTruthy();
+    expect(screen.getByText(/対話が必要なコマンド（op signin）/)).toBeTruthy();
+    // 残りの手順と確認は代行できるので、承認の対象から外れるのはその1件だけ
+    expect(screen.getByRole("button", { name: "承認して2件を自動実行" })).toBeTruthy();
+  });
+
   it("承認するとサーバーへ開始を伝える（画面は積まない。#1882）", () => {
     renderAutoDialog(dispatchHandle());
 
