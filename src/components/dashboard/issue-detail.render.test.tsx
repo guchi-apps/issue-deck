@@ -182,6 +182,7 @@ function renderDetail(issue: Issue) {
       onIssueDeleted={vi.fn()}
       onToggleFavorite={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
+      onCreateConfigIssue={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,
@@ -202,6 +203,7 @@ function renderMobileDetail(issue: Issue) {
       onToggleFavorite={vi.fn()}
       onCreateIssue={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
+      onCreateConfigIssue={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,

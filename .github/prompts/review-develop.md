@@ -36,6 +36,11 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
 - 全アプリ共通の共有知識と矛盾していないか（下記「共有知識との整合性」参照）
 - `.shared-context/`配下（共有知識リポジトリのcheckout）がPRの差分に混入していないか。
   混入していれば必ず指摘し、自動マージ不可として扱う
+- **VPS・サブPCの設定ファイルの変更（Apacheのvhost・systemdユニット・cron・fail2ban・
+  netplan・`~/.bashrc.local`など）が、実機を直接書き換える手順として書かれていないか**（#2021）。
+  これらは`guchi-apps/vps`・`guchi-apps/subpc`のIssueへ切り出すのが正しく、手作業Issueに残すのは
+  「切り出したPRのマージ→`develop`→`main`のリリース→反映の確認」だけ。切り出し済みなら
+  起票漏れとして扱わない（対応表の正は`src/lib/infra-config-repos.ts`）
 - **マージ後にユーザー自身の手作業（本番サーバー上の`.env`の書き換え、GitHub Appの権限追加、
   1Passwordでのトークン発行、他リポジトリへのラベル配布・タグ更新など）が必要なのに、
   PR本文の「注意点」やIssueコメントに書かれているだけで、`71.manual-step`ラベル付きの

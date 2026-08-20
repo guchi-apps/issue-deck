@@ -73,6 +73,11 @@ import {
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { subscribeIssueCreated } from "@/lib/issue-broadcast";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
+import {
+  buildInfraConfigIssueDraft,
+  type InfraConfigTarget,
+} from "@/lib/infra-config-repos";
+import { appendPrerequisiteReference } from "@/lib/manual-step-prerequisites";
 import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/issue-search";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import type { NotificationTarget } from "@/lib/notifications";
@@ -202,6 +207,13 @@ export function IssueDeckShell({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
+  const [createDialogTitle, setCreateDialogTitle] = useState<string | null>(null);
+  const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
+  /**
+   * 設定変更Issueの切り出し元（#2021）。作成できた時点で、この手作業Issueの`## 前提条件`へ
+   * 「作った方が先」と書き足すために覚えておく
+   */
+  const [configIssueOrigin, setConfigIssueOrigin] = useState<Issue | null>(null);
   const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
   const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -253,6 +265,35 @@ export function IssueDeckShell({
   function openCreateDialog(defaultRepositoryFullName?: string | null) {
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
     setCreateDialogBodyPrefix(null);
+    clearConfigIssuePrefill();
+    setCreateDialogOpen(true);
+  }
+
+  /** 前回の切り出し（#2021）の埋め込みを持ち越さない。他の入口から開くたびに落とす */
+  function clearConfigIssuePrefill() {
+    setCreateDialogTitle(null);
+    setCreateDialogBody(null);
+    setConfigIssueOrigin(null);
+  }
+
+  /**
+   * 手作業の中の実機ファイル変更を、管理リポジトリのIssueとして切り出す（#2021）。
+   *
+   * **ここでは起票しない。** 対象リポジトリ・タイトル・本文を埋めた新規作成ダイアログを
+   * 開くだけで、他リポジトリへ書くかどうかは中身を読んだ人が決める。
+   */
+  function openConfigChangeIssueDialog(issue: Issue, target: InfraConfigTarget) {
+    const draft = buildInfraConfigIssueDraft({
+      target,
+      originRepositoryFullName: issue.repositoryFullName,
+      originNumber: issue.number,
+      originTitle: issue.title,
+    });
+    setCreateDialogRepo(draft.repositoryFullName);
+    setCreateDialogTitle(draft.title);
+    setCreateDialogBody(draft.body);
+    setCreateDialogBodyPrefix(null);
+    setConfigIssueOrigin(issue);
     setCreateDialogOpen(true);
   }
 
@@ -269,6 +310,7 @@ export function IssueDeckShell({
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
     setCreateDialogBodyPrefix(buildFollowupIssueBodyPrefix(issue));
+    clearConfigIssuePrefill();
     setCreateDialogOpen(true);
   }
 
@@ -276,8 +318,45 @@ export function IssueDeckShell({
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
     setIssues((prev) => upsertIssue(prev, issue));
+    // 設定変更Issueとして切り出したものは、手作業がそのPRのマージを待つ（#2021）
+    if (configIssueOrigin) {
+      void linkConfigIssueToManualStep(configIssueOrigin, issue);
+      clearConfigIssuePrefill();
+    }
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
+  }
+
+  /**
+   * 切り出した設定変更Issueを、手作業Issueの`## 前提条件`へ書き足す（#2021）。
+   *
+   * **実施順序を表す場所は本文の`## 前提条件`だけ**（docs/multi-agent/labels.md）。ここへ
+   * 書いておくと、画面の「実施順序」にも一覧の橙の時計にも出て、PRがマージされるまで
+   * 手作業が実行できないことが伝わる。
+   *
+   * 失敗しても切り出し自体は済んでいるので、握りつぶしてログだけ残す（作成し直させない）。
+   */
+  async function linkConfigIssueToManualStep(origin: Issue, created: Issue) {
+    const reference = `${created.repositoryFullName}#${created.number}`;
+    const body = appendPrerequisiteReference(origin.body, reference);
+    if (body === origin.body) return;
+
+    try {
+      const response = await fetch("/api/issues", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repositoryFullName: origin.repositoryFullName,
+          number: origin.number,
+          body,
+        }),
+      });
+      if (!response.ok) throw new Error("failed to update manual step prerequisites");
+      const data = (await response.json()) as { issue?: Issue };
+      if (data.issue) handleIssueUpdated(data.issue);
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to link config issue", error);
+    }
   }
 
   function handleIssueUpdated(issue: Issue) {
@@ -1186,6 +1265,7 @@ export function IssueDeckShell({
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
+                  onCreateConfigIssue={openConfigChangeIssueDialog}
                   onSelectRepository={selectRepositoryByFullName}
                   onStartManualStepGuide={manualStepGuide.start}
                 />
@@ -1339,6 +1419,7 @@ export function IssueDeckShell({
                   onIssueDeleted={handleIssueDeleted}
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
+                  onCreateConfigIssue={openConfigChangeIssueDialog}
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
                   }
@@ -1384,6 +1465,8 @@ export function IssueDeckShell({
           onOpenChange={setCreateDialogOpen}
           repositories={visibleRepositories}
           defaultRepositoryFullName={createDialogRepo}
+          defaultTitle={createDialogTitle}
+          defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
           issues={issues}
           onCreated={handleIssueCreated}
