@@ -214,7 +214,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
 - PR作成をトリガーとした`Implementation`→`Develop PR`の遷移（ワークフローが自動で報告する）
 - 全アプリ共通の共有知識（`.shared-context/`）を必要な範囲で参照する
-- 実装中に得た知見を、アプリ固有なら`docs/`へ同梱し、全アプリ共通と判断したものは対応Issueへ「追加提案」コメントとして投稿する（共有知識リポジトリ自体は編集しない。[docs/shared-knowledge.md](../shared-knowledge.md)参照）
+- 実装中に得た知見を`docs/`へ同梱し、あわせて同じ内容を対応Issueへ「知見メモ」（`<!-- knowledge-candidate -->`）として投稿する。共有知識へ格上げするかどうかは判定しない（共有知識リポジトリ自体も編集しない。[docs/shared-knowledge.md](../shared-knowledge.md)参照）
 
 禁止事項:
 - `main`/`develop`への直接コミット・push
@@ -249,11 +249,10 @@ lint・buildの完了から1分足らずでマージされる。#1891では、PR
 - 対応Issueの要件充足、Issue外変更の混入有無、コード品質・セキュリティ、CI結果を確認する
 - 「自動マージ不可カテゴリ」に該当する変更を検知したら`00.check-user`を付与し、マージせずユーザーの確認を待つ
 - 問題がなければ`develop`へマージし、マージ後`develop`上で再テストする。対応Issueの`Develop PR`→`Develop`はPRマージをトリガーにワークフローが報告する（issueはcloseしない）
-- 実装エージェントが投稿した共有知識への追加提案を、再利用性・正確性・重複・恒久性の4観点で審査し、承認/却下のマーカー付きコメントを投稿する（[docs/shared-knowledge.md](../shared-knowledge.md)参照）
 
 禁止事項:
 - `main`への直接マージ・push
-- 共有知識リポジトリの編集・コミット（反映は`shared-knowledge-propose.yml`がPRを作成し、人間がマージする）
+- 共有知識リポジトリの編集・コミット（格上げの判定と反映は`guchi-apps/docs`側の格上げ判定エージェントがPRを作成し、人間がマージする）
 
 ## 全アプリ共通の共有知識層（shared context）
 

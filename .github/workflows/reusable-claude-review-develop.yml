@@ -23,8 +23,8 @@ name: Reusable Claude Code Review (develop向けPR)
 #   develop向けPRの大半は小規模・低リスクで、そこにClaude Codeによる意味的レビューを
 #   毎回かけるのは費用対効果が低いため、risk-checkのneeds-review出力が
 #   trueのときだけ実行する(#992)。ゲート条件は risk-check の該当・大きな差分・
-#   共有知識への追加提案あり・対応Issue番号不明・対応Issueに00.check-user付与済み、の
-#   いずれか。スキップされた場合はauto-mergeがそのまま進む(下記auto-mergeのif参照)
+#   対応Issue番号不明・対応Issueに00.check-user付与済み、のいずれか。
+#   スキップされた場合はauto-mergeがそのまま進む(下記auto-mergeのif参照)
 #   なお、claude-code-actionには「ワークフローファイルの内容がデフォルトブランチ(develop)の
 #   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
 #   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
@@ -395,14 +395,6 @@ jobs:
             if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
               add_review_reason "対応Issueに \`00.check-user\` が付与されており、ユーザーが確認する際の判断材料が必要なため"
             fi
-            # 共有知識への追加提案は、claude-reviewが投稿する
-            # <!-- shared-knowledge-verdict:approved --> コメントを
-            # shared-knowledge-propose.ymlが起点にしている。レビューをスキップすると
-            # 提案が永久に審査されないままになるため、提案があれば必ず実行する。
-            if gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body' \
-              | grep -qF '<!-- shared-knowledge-proposal -->'; then
-              add_review_reason "対応Issueに共有知識への追加提案コメントがあり、審査が必要なため"
-            fi
           fi
 
           if [ "$NEEDS_REVIEW" = "true" ]; then
@@ -494,8 +486,8 @@ jobs:
           echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
 
       - name: 共有知識リポジトリをcheckoutする
-        # レビュー観点の1つである「共有知識との整合性」と、実装エージェントが投稿した
-        # 共有知識への追加提案の審査に使う(docs/shared-knowledge.md「9.2 審査」)。
+        # レビュー観点の1つである「共有知識との整合性」に使う(docs/shared-knowledge.md)。
+        # 共有知識へ格上げするかどうかの判定はここでは行わない(#2029)。
         # checkoutに失敗してもレビュー自体は続行する(continue-on-error)。
         continue-on-error: true
         uses: actions/checkout@v4
@@ -543,9 +535,8 @@ jobs:
           allowed_bots: "claude[bot]"
           additional_permissions: |
             actions: read
-          # Read/Grep/Globは、レビュー観点「共有知識との整合性」と共有知識追加提案の審査のために
-          # .shared-context/配下を読む用途で追加している。gh issue viewは対応Issueの本文・コメント
-          # （実装エージェントが投稿した追加提案コメントを含む）の取得に使う。
+          # Read/Grep/Globは、レビュー観点「共有知識との整合性」のために.shared-context/配下を
+          # 読む用途で追加している。gh issue viewは対応Issueの本文・コメントの取得に使う。
           # gh pr diff/view/checksは、レビューの起点となる差分の取得とCI結果の確認に使う(#906)。
           claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
           prompt: ${{ env.PROMPT_REVIEW }}
