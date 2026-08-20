@@ -512,7 +512,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `load-secrets-check.yml` | シークレットの供給元（GitHub／1Password）を検証する（`workflow_dispatch`）。本番には触れず、解決できたかどうかと解決できなかった項目名だけを報告する（#1306） | **展開時に有用。** 対象リポジトリへGitHub側のsecret/variableを投入したあと、`deploy.yml`を切り替える前にこれで確認できる |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |
-| `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と失敗した項目名だけ）をissue-deckへ報告する（#1309） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
+| `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と、同期・スキップ・失敗した項目名だけ）をissue-deckへ報告する（#1309・#2022） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
 
 ## 2. ラベル体系
 
@@ -1176,8 +1176,11 @@ jobs:
 `--dry-run`も同じだけ読むため下見にはならない。画面側は、対象キーの絞り込み・実行前の確認・
 直近の成功から10分のクールダウンで連打を抑えている。
 
-**結果として画面に出るのは件数と失敗した項目名だけ**（`同期=N スキップ=M 失敗=K`）。値そのものも
-値の長さも、ログ・画面・APIのどこにも出さない（長さも手がかりになる）。
+**結果として画面に出るのは件数と項目名だけ**（`同期=N スキップ=M 失敗=K` と、同期・スキップ・
+失敗それぞれの項目名）。値そのものも値の長さも、ログ・画面・APIのどこにも出さない
+（長さも手がかりになる）。項目名は行ごとの「内訳」を開くと出る（#2022）。**項目名を拾うのは
+`reusable-sync-secrets.yml`側**なので、配布先が古いタグを参照している間は件数だけが届き、
+その実行の内訳には「項目名が記録されていません」と出る。
 
 ### 変数 `APP_BASE_URL`
 

@@ -859,6 +859,11 @@ model SecretSyncRun {
   failedCount        Int                 @default(0)
   // 失敗した項目の**名前だけ**をカンマ区切りで持つ
   failedKeys         String              @db.Text
+  // 同期した項目・スキップした項目の**名前だけ**をカンマ区切りで持つ（#2022）。
+  // 「何の値が同期されたのか」を画面に出すためで、ここも**値そのものも値の長さも持たない**。
+  // 既存の行と、項目名を報告しない古いタグの共有ワークフローからの報告では空文字になる
+  syncedKeys         String              @db.Text
+  skippedKeys        String              @db.Text
   runUrl             String?
   // 画面にそのまま出す説明文（報告が来ないまま時間切れになった場合の理由など）
   message            String?             @db.Text

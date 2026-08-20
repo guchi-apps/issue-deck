@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   canStartSecretsSync,
   describeSecretsSyncResult,
+  hasSecretsSyncKeyNames,
   normalizeOnlyKeys,
+  secretsSyncKeyGroups,
   SECRETS_SYNC_COOLDOWN_MS,
   SECRETS_SYNC_MAX_ONLY_KEYS,
   type SecretSyncRunView,
@@ -21,6 +23,8 @@ function run(overrides: Partial<SecretSyncRunView> = {}): SecretSyncRunView {
     skippedCount: 2,
     failedCount: 0,
     failedKeys: [],
+    syncedKeys: [],
+    skippedKeys: [],
     runUrl: null,
     message: null,
     ...overrides,
@@ -167,5 +171,31 @@ describe("describeSecretsSyncResult", () => {
       failed: 1,
       failedKeys: ["PORT"],
     });
+  });
+});
+
+describe("secretsSyncKeyGroups", () => {
+  it("失敗を先頭に並べる（内訳を開く動機は「何が落ちたか」の確認）", () => {
+    const groups = secretsSyncKeyGroups(
+      run({
+        failedKeys: ["DEPLOY_SSH_KEY"],
+        syncedKeys: ["DB_NAME", "SSH_HOST"],
+        skippedKeys: ["WORKFLOW_PAT"],
+      }),
+    );
+
+    expect(groups.map((group) => group.kind)).toEqual(["failed", "synced", "skipped"]);
+    expect(groups[1].keys).toEqual(["DB_NAME", "SSH_HOST"]);
+  });
+
+  it("空のグループは出さない（並ぶだけで読み取る手間が増える）", () => {
+    const groups = secretsSyncKeyGroups(run({ syncedKeys: ["DB_NAME"] }));
+
+    expect(groups.map((group) => group.kind)).toEqual(["synced"]);
+  });
+
+  it("項目名を記録していない実行は、件数0の実行と区別できるようにする", () => {
+    expect(hasSecretsSyncKeyNames(run())).toBe(false);
+    expect(hasSecretsSyncKeyNames(run({ syncedKeys: ["DB_NAME"] }))).toBe(true);
   });
 });
