@@ -125,6 +125,7 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
     existingBranches: ["main", "develop"],
     developVsMain: null,
     hasReleaseWorkflow: false,
+    hasDeployWorkflow: false,
     ...overrides,
   };
 }
@@ -696,6 +697,50 @@ describe("BranchFlowView", () => {
     });
   });
 
+  describe("本番デプロイ起動ボタン（#2020）", () => {
+    const deployable = branchStatus({
+      developVsMain: { aheadBy: 3, behindBy: 0 },
+      hasDeployWorkflow: true,
+    });
+
+    it("deploy.ymlを持つリポジトリを開くと出す", () => {
+      renderFlow({ branchStatuses: [deployable] });
+      openRepository();
+      expect(screen.getByText("本番へ再デプロイ")).toBeTruthy();
+    });
+
+    it("deploy.ymlが無ければ出さない", () => {
+      renderFlow({
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+      });
+      openRepository();
+      expect(screen.queryByText("本番へ再デプロイ")).toBeNull();
+    });
+
+    it("押すと本番へ出るものを確認ダイアログに出す", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [deployable],
+      });
+      openRepository();
+      fireEvent.click(screen.getByText("本番へ再デプロイ"));
+
+      expect(screen.getByText("mainを本番へ出し直しますか？")).toBeTruthy();
+      // **developの差分は出ない**ことを、リリースと取り違えないよう明示する
+      expect(screen.getByText("3コミットぶんは出ません")).toBeTruthy();
+      // いま本番に出ている版を添える（押す前に「同じものが出る」と分かるようにする）
+      expect(screen.getByText("いまの本番")).toBeTruthy();
+    });
+  });
+
   describe("リリース起動ボタン", () => {
     const unreleased = branchStatus({
       developVsMain: { aheadBy: 3, behindBy: 0 },
@@ -1175,6 +1220,8 @@ describe("BranchFlowView", () => {
             conclusion: "success",
             htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
             createdAt: "2026-08-15T10:00:30Z",
+            // 既定はmainへのpushで走った本番反映（手動の出し直しは`event`で分ける。#2020）
+            event: "push",
             ...overrides,
           },
         },
@@ -1230,6 +1277,46 @@ describe("BranchFlowView", () => {
       // 次のリリースに乗る分が無いので、いちばん新しい版の束が既定で開いている（#1711）
       expect(screen.getByText("8/15に本番反映")).toBeTruthy();
       expect(screen.getByText("デプロイ成功")).toBeTruthy();
+    });
+
+    // 計画レビューの指摘1（#2020）。出し直しは「その版が本番へ出たか」を表さない
+    it("手動の出し直し中でも、すでに出た版の「本番反映」を取り消さない", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({
+          status: "in_progress",
+          conclusion: null,
+          event: "workflow_dispatch",
+          createdAt: "2026-08-15T10:05:00Z",
+        }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.queryByText("8/15にmainへマージ")).toBeNull();
+      // 状態そのものは、リリースの本番反映とは別の言葉で出す
+      expect(screen.getByText("本番へ再デプロイ中")).toBeTruthy();
+      expect(screen.getByText("再デプロイ中")).toBeTruthy();
+    });
+
+    it("手動の出し直しに失敗しても、すでに出た版の「本番反映」を取り消さない", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({
+          conclusion: "failure",
+          event: "workflow_dispatch",
+          createdAt: "2026-08-15T10:05:00Z",
+        }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.getAllByText("再デプロイ失敗").length).toBeGreaterThan(0);
+      expect(screen.queryByText("デプロイ失敗")).toBeNull();
     });
 
     it("状態が分からないときは従来どおりの表示のまま", () => {

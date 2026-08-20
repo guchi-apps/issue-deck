@@ -100,6 +100,15 @@ export type ReleaseWorkflowRun = {
   conclusion: string | null;
   htmlUrl: string;
   createdAt: string;
+  /**
+   * この実行を起こしたイベント（`push` | `workflow_dispatch` など。#2020）。
+   *
+   * **`deploy.yml`の実行が「リリースの本番反映」なのか「手動の出し直し」なのかは、これでしか
+   * 区別できない。** mainへのpushで走ったものだけがその版を本番へ出した実行で、
+   * `workflow_dispatch`は既に出ている版を出し直しているだけ。混ぜると、出し直しが走っている間や
+   * 失敗したときに、すでに本番へ出ている版まで「まだ本番に出ていない」表示に戻る。
+   */
+  event: string;
 };
 
 /**
@@ -123,7 +132,13 @@ export async function fetchLatestWorkflowRun(
   const qs = query ? `&${query}` : "";
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1${qs}`;
   const result = await githubFetchJsonWithEtag<{
-    workflow_runs?: Array<{ status: string; conclusion: string | null; html_url: string; created_at: string }>;
+    workflow_runs?: Array<{
+      status: string;
+      conclusion: string | null;
+      html_url: string;
+      created_at: string;
+      event: string;
+    }>;
   }>(url, token);
   if (!result.ok) {
     if (result.status === 404) return null;
@@ -139,6 +154,7 @@ export async function fetchLatestWorkflowRun(
     conclusion: run.conclusion ?? null,
     htmlUrl: run.html_url,
     createdAt: run.created_at,
+    event: run.event,
   };
 }
 
@@ -328,6 +344,29 @@ export async function dispatchReleaseWorkflow(
     method: "POST",
     body: { ref: "develop", ...(bumpKind ? { inputs: { bump_kind: bumpKind } } : {}) },
   });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
+/**
+ * 本番デプロイworkflow（`deploy.yml`）をmainブランチに対して手動起動する（#2020）。
+ *
+ * **inputは送らない。** 各リポジトリの`deploy.yml`は`workflow_dispatch:`をinput無しで
+ * 書いており、送るとGitHubが422（`Unexpected inputs provided`）で落とす。
+ * `main`をそのまま出し直すだけの操作なので、指定するものも無い。
+ *
+ * `workflow_dispatch`そのものを書いていないリポジトリでも422になる（`guchi-apps/portfolio`）。
+ * ファイルの有無からは区別できないため、呼び出し側が422を専用の文言へ振り分ける。
+ */
+export async function dispatchDeployWorkflow(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${DEPLOY_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: "main" } });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

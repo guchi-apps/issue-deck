@@ -880,6 +880,15 @@ remote→この環境変数の順で解決する。**issue-deckへ報告する�
 `--disallowedTools`で封じたまま）。ルールは無人実行の質問応答と同じで、
 [labels.md](labels.md)「質問セッションは実装しないが、Issueの起票はしてよい」に集約してある。
 
+**起票は許可規則として渡してある**（#2017）。`--permission-mode auto`のクラシファイアは同じ
+コマンドでも判断が変わり、実際に guchi-apps/dayspan#292 で起票が拒否されて、回答で挙がった改善が
+Issueとして残らないまま質問Issue自身で実装された。`run-issue-session.sh`が
+`--allowedTools "Bash(gh issue create:*)"`を常に渡すので、以後はクラシファイアの判断を待たない。
+**ただし効くのは静的解析できる形のコマンドだけ**で、`--body "$(cat <<'EOF' … EOF)"`のように
+コマンド置換を含む起票は規則の対象外として拒否される。プロンプトが「起票の`--body`は複数行の
+ままそのまま渡す」と指示しているのはこのため
+（[local-quick-start.md](local-quick-start.md)「起票（`gh issue create`）だけは許可規則として渡す」）。
+
 横断質問セッションだけの注意として、**起票先は質問Issueの記録先リポジトリとは限らない。**
 記録先（`question`等）へ誤って起票すると実装セッションを起こせない場所に埋もれるため、
 プロンプトは`gh issue create --repo <owner/repo>`で起票先を明示させる。`70.confirm`が定義されて

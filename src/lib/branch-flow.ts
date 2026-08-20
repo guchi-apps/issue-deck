@@ -364,6 +364,13 @@ function buildRepository({
       releasePullRequest === null &&
       bumpPullRequest === null &&
       (branchStatus?.developVsMain?.aheadBy ?? 0) > 0,
+    // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
+    // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
+    // デプロイが動いている間だけ押させない（`deploy.yml`の`concurrency`は
+    // `cancel-in-progress: true`で、重ねて起動すると走っているデプロイを打ち切るため）。
+    canTriggerDeploy:
+      (branchStatus?.hasDeployWorkflow ?? false) &&
+      (deployState === null || deployState.kind === "success" || deployState.kind === "failure"),
     orphanIssues: issues
       .filter(
         (issue) =>
@@ -497,18 +504,26 @@ export function resolveDeployState({
 }): BranchFlowDeployState | null {
   if (deployRun === null) return null;
 
-  if (releaseMergedAt !== null) {
+  // 画面から起こした出し直し（#2020）。**その版が本番へ出たかどうかは、この実行からは分からない**
+  // ——出し直しは、すでに出ている版をもう一度出しているだけ。状態は出すが、版の見出しの
+  // 「本番反映」を取り消さないよう印を付けて渡す。
+  const manual = deployRun.event === "workflow_dispatch";
+
+  if (releaseMergedAt !== null && !manual) {
     const mergedAt = new Date(releaseMergedAt).getTime();
     if (new Date(deployRun.createdAt).getTime() < mergedAt) {
       // 今回のマージに対する実行がまだ現れていない。上限を過ぎたら判定を諦める
-      return now - mergedAt < DEPLOY_WAIT_LIMIT_MS ? { kind: "waiting", htmlUrl: null } : null;
+      return now - mergedAt < DEPLOY_WAIT_LIMIT_MS
+        ? { kind: "waiting", htmlUrl: null, manual: false }
+        : null;
     }
   }
 
-  if (deployRun.status !== "completed") return { kind: "running", htmlUrl: deployRun.htmlUrl };
+  if (deployRun.status !== "completed")
+    return { kind: "running", htmlUrl: deployRun.htmlUrl, manual };
   return deployRun.conclusion === "success"
-    ? { kind: "success", htmlUrl: deployRun.htmlUrl }
-    : { kind: "failure", htmlUrl: deployRun.htmlUrl };
+    ? { kind: "success", htmlUrl: deployRun.htmlUrl, manual }
+    : { kind: "failure", htmlUrl: deployRun.htmlUrl, manual };
 }
 
 /**

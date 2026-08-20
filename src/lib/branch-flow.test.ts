@@ -82,6 +82,7 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
     existingBranches: ["main", "develop"],
     developVsMain: null,
     hasReleaseWorkflow: false,
+    hasDeployWorkflow: false,
     ...overrides,
   };
 }
@@ -361,6 +362,7 @@ describe("buildBranchFlow", () => {
           existingBranches: ["main", "develop"],
           developVsMain: { aheadBy: 0, behindBy: 0 },
           hasReleaseWorkflow: false,
+          hasDeployWorkflow: false,
         },
       ],
     });
@@ -728,6 +730,120 @@ describe("extractManualStepOrigin", () => {
   });
 });
 
+describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () => {
+  const MERGED_AT = "2026-08-15T10:00:00Z";
+  const NOW = new Date("2026-08-15T10:01:00Z").getTime();
+
+  const RELEASED = [
+    pullRequest({
+      number: 1573,
+      title: "v3.22.0をmainへリリースする",
+      baseRef: "main",
+      headRef: "develop",
+      kind: "release",
+      linkedIssueNumber: null,
+      state: "closed",
+      merged: true,
+      mergedAt: MERGED_AT,
+    }),
+  ];
+
+  function buildDeploy(input: {
+    hasDeployWorkflow?: boolean;
+    deployRun?: Partial<BranchFlowDeployRun> | null;
+    aheadBy?: number;
+  }) {
+    const deployStatuses: RepositoryDeployStatus[] | undefined =
+      input.deployRun === null
+        ? undefined
+        : [
+            {
+              repositoryFullName: REPO,
+              deployRun: {
+                status: "completed",
+                conclusion: "success",
+                htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+                createdAt: "2026-08-15T10:00:30Z",
+                event: "push",
+                ...input.deployRun,
+              },
+            },
+          ];
+    return build({
+      pullRequests: RELEASED,
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: input.aheadBy ?? 0, behindBy: 0 },
+          hasDeployWorkflow: input.hasDeployWorkflow ?? true,
+        }),
+      ],
+      deployStatuses,
+      now: NOW,
+    }).repositories[0];
+  }
+
+  it("deploy.ymlがあり、デプロイが動いていなければ押せる", () => {
+    expect(buildDeploy({}).canTriggerDeploy).toBe(true);
+  });
+
+  it("未リリースの変更があっても押せる（mainをそのまま出し直す操作のため）", () => {
+    expect(buildDeploy({ aheadBy: 5 }).canTriggerDeploy).toBe(true);
+  });
+
+  it("deploy.ymlを持たないリポジトリでは押せない", () => {
+    expect(buildDeploy({ hasDeployWorkflow: false }).canTriggerDeploy).toBe(false);
+  });
+
+  it("デプロイが動いている間は押せない（重ねて起動すると走っている実行を打ち切るため）", () => {
+    const repository = buildDeploy({ deployRun: { status: "in_progress", conclusion: null } });
+    expect(repository.summary.deploy?.kind).toBe("running");
+    expect(repository.canTriggerDeploy).toBe(false);
+  });
+
+  it("マージ済みだが実行がまだ現れていない間も押せない", () => {
+    // マージより前の実行しか無い＝今回ぶんの実行を待っている状態（`waiting`）
+    const repository = buildDeploy({ deployRun: { createdAt: "2026-08-15T09:00:00Z" } });
+    expect(repository.summary.deploy?.kind).toBe("waiting");
+    expect(repository.canTriggerDeploy).toBe(false);
+  });
+
+  // 計画レビューの指摘1（#2020）。出し直しの実行を版の判定へそのまま流すと、すでに本番へ
+  // 出ている版が「まだ出ていない」ように読める
+  it("手動の出し直しは版の状態を取り消さない（manualの印を付けて渡す）", () => {
+    const running = buildDeploy({
+      deployRun: { status: "in_progress", conclusion: null, event: "workflow_dispatch" },
+    });
+    expect(running.summary.deploy).toMatchObject({ kind: "running", manual: true });
+
+    const failed = buildDeploy({
+      deployRun: { conclusion: "failure", event: "workflow_dispatch" },
+    });
+    expect(failed.summary.deploy).toMatchObject({ kind: "failure", manual: true });
+
+    // mainへのpushで走った実行は従来どおり（版が本番へ出たかを表す）
+    expect(buildDeploy({ deployRun: { status: "in_progress", conclusion: null } }).summary.deploy)
+      .toMatchObject({ kind: "running", manual: false });
+  });
+
+  // 出し直しの実行はマージ時刻との比較に掛けない（掛けると「デプロイ待ち」に化ける）
+  it("マージより前に始まった出し直しでも「デプロイ待ち」にしない", () => {
+    const repository = buildDeploy({
+      deployRun: { createdAt: "2026-08-15T09:00:00Z", event: "workflow_dispatch" },
+    });
+    expect(repository.summary.deploy).toMatchObject({ kind: "success", manual: true });
+  });
+
+  it("デプロイに失敗した後は押せる（出し直せることが要る）", () => {
+    const repository = buildDeploy({ deployRun: { conclusion: "failure" } });
+    expect(repository.summary.deploy?.kind).toBe("failure");
+    expect(repository.canTriggerDeploy).toBe(true);
+  });
+
+  it("デプロイ状況を取得できていなくても押せる（判定材料が無いだけで、起動は妨げない）", () => {
+    expect(buildDeploy({ deployRun: null }).canTriggerDeploy).toBe(true);
+  });
+});
+
 describe("リリース起動の可否（canTriggerRelease）", () => {
   const repositories = [{ fullName: REPO, private: false }];
 
@@ -916,6 +1032,7 @@ describe("本番デプロイの状態（#1579）", () => {
           htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
           // 既定は「マージの後に始まった実行」
           createdAt: "2026-08-15T10:00:30Z",
+          event: "push",
           ...overrides,
         },
       },
@@ -936,6 +1053,7 @@ describe("本番デプロイの状態（#1579）", () => {
     const repository = releasedGroup(deployRun({ status: "in_progress", conclusion: null }));
     expect(repository.releaseGroups[0].deploy).toEqual({
       kind: "running",
+      manual: false,
       htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
     });
     // 畳んだ1行にも同じ状態を出す
@@ -957,7 +1075,11 @@ describe("本番デプロイの状態（#1579）", () => {
 
   it("最新の実行がマージより古ければ「デプロイ待ち」（実行がまだ現れていない）", () => {
     const repository = releasedGroup(deployRun({ createdAt: "2026-08-14T00:00:00Z" }));
-    expect(repository.releaseGroups[0].deploy).toEqual({ kind: "waiting", htmlUrl: null });
+    expect(repository.releaseGroups[0].deploy).toEqual({
+      kind: "waiting",
+      htmlUrl: null,
+      manual: false,
+    });
   });
 
   it("待っても実行が現れないまま15分を過ぎたら、状態を出すのをやめる", () => {
