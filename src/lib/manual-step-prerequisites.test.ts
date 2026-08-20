@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appendPrerequisiteReference,
   collectPrerequisiteReferences,
   describeIssueStage,
   extractExplicitPrerequisites,
@@ -414,5 +415,89 @@ describe("summarizeManualStepPrerequisites（一般のIssue。#2003）", () => {
     expect(
       summarizeManualStepPrerequisites(prerequisites, REPO, { manualStep: false }).message,
     ).toBe("前提が1件残っています。#39 の手作業が実施されるのを待ってください。");
+  });
+});
+
+describe("appendPrerequisiteReference", () => {
+  it("既存の「先に完了している必要があるIssue・PR」の行へ書き足す", () => {
+    const body = `## 前提条件
+
+- 実行するデバイス: **VPS**
+- 先に完了している必要があるIssue・PR: #1461
+
+## やること
+`;
+    const updated = appendPrerequisiteReference(body, "guchi-apps/vps#103");
+    expect(updated).toContain(
+      "- 先に完了している必要があるIssue・PR: #1461、guchi-apps/vps#103",
+    );
+  });
+
+  it("「なし」と書かれていれば置き換える", () => {
+    const body = `## 前提条件
+
+- 先に完了している必要があるIssue・PR: なし
+
+## やること
+`;
+    const updated = appendPrerequisiteReference(body, "guchi-apps/subpc#12");
+    expect(updated).toContain("- 先に完了している必要があるIssue・PR: guchi-apps/subpc#12");
+    expect(updated).not.toContain("なし");
+  });
+
+  it("節はあるが行が無ければ、節の末尾へ足す", () => {
+    const body = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+
+## やること
+`;
+    const updated = appendPrerequisiteReference(body, "guchi-apps/subpc#12");
+    const lines = updated.split("\n");
+    expect(lines.indexOf("- 先に完了している必要があるIssue・PR: guchi-apps/subpc#12")).toBe(
+      lines.indexOf("- 実行するデバイス: **サブPC**") + 1,
+    );
+  });
+
+  it("節が無ければ`## やること`の前に作る", () => {
+    const body = `## この作業でできるようになること
+
+- 例。
+
+## やること
+
+- [ ] なにかする
+`;
+    const updated = appendPrerequisiteReference(body, "guchi-apps/vps#103");
+    expect(updated.indexOf("## 前提条件")).toBeLessThan(updated.indexOf("## やること"));
+    expect(
+      extractManualStepReferences(updated, "guchi-apps/issue-deck", 1).map(
+        (reference) => `${reference.repositoryFullName}#${reference.number}`,
+      ),
+    ).toContain("guchi-apps/vps#103");
+  });
+
+  it("すでに同じ参照があれば本文を変えない", () => {
+    const body = `## 前提条件
+
+- 先に完了している必要があるIssue・PR: guchi-apps/vps#103
+
+## やること
+`;
+    expect(appendPrerequisiteReference(body, "guchi-apps/vps#103")).toBe(body);
+  });
+
+  it("書き足した参照は読み返せる", () => {
+    const body = `## 前提条件
+
+- 先に完了している必要があるIssue・PR: #1461
+
+## やること
+`;
+    const updated = appendPrerequisiteReference(body, "guchi-apps/vps#103");
+    const references = extractManualStepReferences(updated, "guchi-apps/issue-deck", 1).map(
+      (reference) => `${reference.repositoryFullName}#${reference.number}`,
+    );
+    expect(references).toEqual(["guchi-apps/issue-deck#1461", "guchi-apps/vps#103"]);
   });
 });

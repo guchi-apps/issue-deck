@@ -884,6 +884,65 @@ gh issue list --repo guchi-apps/issue-deck --state open \
   いま追跡すべきものではない。ただし**closedが何件も出てきたら「繰り返し発生するもの」の
   合図**なので、起票ではなく作業をなくすIssueを立てる
 
+### 実機の設定ファイル変更は、管理リポジトリのIssueへ切り出す（#2021）
+
+VPS・サブPCの設定ファイルは**Gitで管理されていて、mainへマージすれば実機へ自動で反映される**。
+
+- `guchi-apps/vps`: `main`へのpushで`.github/workflows/deploy.yml`がVPSへrsyncし、
+  `scripts/apply.sh`が`/etc`配下へ配る
+- `guchi-apps/subpc`: `main`へのpushでサブPC上のself-hostedランナーが
+  `scripts/setup-apply.sh`（＝`setup.sh`）を実行する
+
+にもかかわらず、手作業Issueには`sudo nano /etc/apache2/sites-available/...`のように**実機を
+直接書き換える手順**が書かれることがある。そうすると変更がGitに残らず、両リポジトリが毎日回して
+いるドリフト検知で後から差分としてだけ出てくる（直した本人はもうその作業を覚えていない）。
+
+**そこで、実機のファイル変更は手作業Issueの手順にせず、管理リポジトリのIssueへ切り出す。**
+
+| 実機のパス | 管理リポジトリ | リポジトリ内の置き場所 |
+| --- | --- | --- |
+| `/etc/apache2/sites-available/`・`conf-available/`・`mods-available/` | `guchi-apps/vps` | `apache/` |
+| `/etc/systemd/system/`・`~/.config/systemd/user/` | `guchi-apps/vps` | `systemd/` |
+| `/usr/local/bin/`・`/etc/profile.d/signaly_login_notify.sh` | `guchi-apps/vps` | `scripts/` |
+| `crontab -e` | `guchi-apps/vps` | `cron/crontab.txt` |
+| `/etc/fail2ban/jail.local` | `guchi-apps/vps` | `fail2ban/jail.local` |
+| `/etc/netplan/`・`/etc/ssh/sshd_config.d/`・`/etc/default/grub` | `guchi-apps/subpc` | `configs/` |
+| `~/.bashrc`・`~/.bashrc.local`・`~/.profile.local` | `guchi-apps/subpc` | `configs/bash/` |
+
+**対応表の正は[`src/lib/infra-config-repos.ts`](../../src/lib/infra-config-repos.ts)**。上の表は
+読むためのもので、画面もそちらを見る。各リポジトリの反映スクリプト（`scripts/apply.sh`・
+`setup.sh`）が変わったら、まずそこを直す。**`mysql/`（vps）と`netplan`（subpc）はマージしても
+自動では反映されない**——前者は`apply.sh`の対象外、後者は`netplan apply`と再起動を自動化して
+いない（失敗すると到達できなくなるため）。この2つは対応表側に但し書きを持たせてある。
+
+切り出しの流れは次のとおり。
+
+1. 対象リポジトリへIssueを起票する（`gh issue create --repo guchi-apps/vps ...`）。
+   **そのリポジトリでの実装（ファイルの変更・PR作成）は起票したセッションで行わない**——
+   担当Issue以外の実装にあたる（[branching.md](branching.md)）。PRは対象リポジトリの
+   セッションが作る
+2. 起点Issueのサブissueとして紐付け、PR本文と完了報告コメントにリンクを書く
+3. **人に残るのがそのPRのマージだけなら、手作業Issueは起票しない。** 切り出したIssueが
+   そのまま追跡になる（上記「起票しない条件」と同じ考え方）
+4. 実機の操作が別に残る場合だけ手作業Issueを起票し、`## 前提条件`の「先に完了している必要が
+   あるIssue・PR」へ`guchi-apps/vps#<番号>`と書いて順序を残す（後述「実施順序は`## 前提条件`に書く」）
+
+#### 取りこぼしは画面が拾う
+
+すでに立っている手作業Issueや、上の判断を知らないセッションが書いた手順のために、
+**手作業パネル（`ManualStepPanel`）が本文を見て「リポジトリ経由で反映できます」を出す**。
+押すと新規作成ダイアログが対象リポジトリ・タイトル・本文を埋めた状態で開き、作成すると
+起点の手作業Issueの`## 前提条件`へ`guchi-apps/vps#<番号>`が自動で書き足される。
+
+- **画面が黙って他リポジトリへ起票することはない。** 埋めるところまでで、作るかどうかは
+  中身を読んだ人が決める
+- **判定はパスの文字列一致と書き換えを表す語だけで、推定を挟まない。** 読み取るだけの手順
+  （`cat`・`systemctl status`）には出ない。デバイス（`## 前提条件`の「実行するデバイス」）が
+  読めず、VPS・サブPCの両方に当たるパス（`/etc/systemd/system/`）は、どちらの実機か決められない
+  ので出さない。**取りこぼす側へ倒してある**——当たっていない手順に出すと、実機に反映されない
+  PRだけが残る
+- 出ていても手作業は止まらない。「順番に進める」も「完了してクローズ」もそのまま押せる
+
 ### ラベル
 
 `71.manual-step`（ユーザー自身の手作業が必要）を付ける。

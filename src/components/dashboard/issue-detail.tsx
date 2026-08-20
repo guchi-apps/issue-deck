@@ -119,6 +119,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { cn } from "@/lib/utils";
@@ -139,6 +140,11 @@ type IssueDetailProps = {
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
+  /**
+   * 手作業の中の実機ファイル変更を、管理リポジトリ（`guchi-apps/vps`・`guchi-apps/subpc`）の
+   * Issueとして切り出す（#2021）
+   */
+  onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
   onSelectRepository: (repositoryFullName: string) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
@@ -154,6 +160,7 @@ export function IssueDetail({
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
+  onCreateConfigIssue,
   onSelectRepository,
   onStartManualStepGuide,
 }: IssueDetailProps) {
@@ -161,6 +168,12 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
+  // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
+  // ——他のIssueの本文に同じパスが出てきても、それは実行手順ではない
+  const infraConfigTargets = useMemo(
+    () => (issue && canCompleteManualStep(issue) ? detectInfraConfigTargets(issue.body) : []),
+    [issue],
+  );
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
@@ -769,6 +782,8 @@ export function IssueDetail({
               prerequisiteSummary={manualStepPrerequisites.summary}
               dependents={manualStepPrerequisites.dependents}
               verifiedAt={issue.manualStepVerifiedAt}
+              configTargets={infraConfigTargets}
+              onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
               repositoryFullName={issue.repositoryFullName}
             />
           )}

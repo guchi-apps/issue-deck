@@ -486,3 +486,59 @@ function waitingFor(prerequisite: ManualStepPrerequisite): string {
       return "が完了してmainへ反映される";
   }
 }
+
+/** `- 先に完了している必要があるIssue・PR: ...` の行（表記の揺れを吸収する） */
+const PREREQUISITE_ITEM_PATTERN = /^\s*[-*]\s*(?:\*\*)?先に完了している必要がある/;
+/** 「なし」だけが書かれている状態。参照を足すときは置き換える */
+const PREREQUISITE_NONE_PATTERN = /(なし|無し)\s*[。.]?\s*$/;
+const TODO_HEADING_PATTERN = /^#{2,3}\s*やること\s*$/;
+
+/**
+ * 本文の`## 前提条件`へ、待つ相手の参照（`owner/repo#123`）を書き足す（#2021）。
+ *
+ * 実機の設定変更を`guchi-apps/vps`・`guchi-apps/subpc`のIssueへ切り出したとき、手作業Issueは
+ * **そのPRがマージされるまで実行できない**。その順序を画面（実施順序）とエージェントの両方へ
+ * 伝える場所は`## 前提条件`だけなので、切り出しと同時にここへ書き足す。
+ *
+ * **書式の知識をこのファイルの外へ持ち出さない。** 読む側（`extractManualStepReferences`）と
+ * 同じ節・同じ行を見て足すので、足したものが必ず読み返される。
+ *
+ * すでに同じ参照が節の中にあれば本文を変えない（押し直しで行が増えない）。
+ */
+export function appendPrerequisiteReference(body: string | null, reference: string): string {
+  const source = body ?? "";
+  if (prerequisiteSectionLines(source).some((line) => line.includes(reference))) return source;
+
+  const lines = source.split("\n");
+  const headingIndex = lines.findIndex((line) => PREREQUISITE_HEADING_PATTERN.test(line.trim()));
+
+  if (headingIndex === -1) {
+    // 節が無ければ作る。**`## やること`の前**に置く——テンプレートの並び（できるように
+    // なること → 前提条件 → やること）から外れると、順番に読む人が前提を読み飛ばす
+    const section = ["## 前提条件", "", `- 先に完了している必要があるIssue・PR: ${reference}`, ""];
+    const todoIndex = lines.findIndex((line) => TODO_HEADING_PATTERN.test(line.trim()));
+    if (todoIndex === -1) {
+      const trimmed = source.replace(/\s*$/, "");
+      return `${trimmed}\n\n${section.slice(0, 3).join("\n")}\n`;
+    }
+    return [...lines.slice(0, todoIndex), ...section, ...lines.slice(todoIndex)].join("\n");
+  }
+
+  const rest = lines.slice(headingIndex + 1);
+  const nextHeadingOffset = rest.findIndex((line) => HEADING_PATTERN.test(line));
+  const sectionEnd = nextHeadingOffset === -1 ? lines.length : headingIndex + 1 + nextHeadingOffset;
+
+  for (let index = headingIndex + 1; index < sectionEnd; index += 1) {
+    if (!PREREQUISITE_ITEM_PATTERN.test(lines[index])) continue;
+    lines[index] = PREREQUISITE_NONE_PATTERN.test(lines[index])
+      ? lines[index].replace(PREREQUISITE_NONE_PATTERN, reference)
+      : `${lines[index].replace(/\s*$/, "")}、${reference}`;
+    return lines.join("\n");
+  }
+
+  // 節はあるが行が無い場合は、節の末尾（最後の中身のある行の直後）へ足す
+  let insertAt = sectionEnd;
+  while (insertAt > headingIndex + 1 && lines[insertAt - 1].trim() === "") insertAt -= 1;
+  lines.splice(insertAt, 0, `- 先に完了している必要があるIssue・PR: ${reference}`);
+  return lines.join("\n");
+}

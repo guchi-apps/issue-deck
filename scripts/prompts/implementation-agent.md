@@ -219,6 +219,24 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 **その手作業を単独の新規Issueとして起票してください。**
 
+**ただし、VPS・サブPCの設定ファイルの変更は、手作業Issueの手順として書かないでください**（#2021）。
+`/etc/apache2/sites-available/`・`/etc/systemd/system/`・`~/.config/systemd/user/`・crontab・
+`/etc/fail2ban/`（VPS）、`/etc/netplan/`・`/etc/ssh/sshd_config.d/`・`~/.bashrc.local`（サブPC）
+などは`guchi-apps/vps`・`guchi-apps/subpc`で管理されており、**mainへマージすれば各リポジトリの
+`deploy.yml`が実機へ自動で反映します。** 実機を直接編集すると変更がGitに残らず、毎日のドリフト
+検知で後から差分としてだけ出てきます（対応表の正は`guchi-apps/issue-deck`の
+`src/lib/infra-config-repos.ts`）。
+
+- 該当する変更は**対象リポジトリへIssueを起票**して切り出す
+  （`gh issue create --repo guchi-apps/vps ...`）。起点Issueのサブissueとして紐付け、PR本文と
+  完了報告コメントにリンクを書く。**そのリポジトリでの実装（ファイルの変更・PR作成）は
+  このセッションで行わないでください**——担当Issue以外の実装にあたります
+- **人に残るのがそのPRのマージだけなら、手作業Issueは起票しません。** 切り出したIssueが
+  そのまま追跡になります
+- 実機の操作が別に残る場合（`netplan apply`・再起動・自動反映の対象外のファイルなど）は
+  従来どおり手作業Issueを起票し、`## 前提条件`の「先に完了している必要があるIssue・PR」へ
+  `guchi-apps/vps#<番号>`のように書いて順序を残します
+
 - **起票する前に、次のどれかに当てはまらないかを確認してください。当てはまるなら起票しません**（#2009。同じ内容の手作業Issueが5日で17件立ったため）
   - **issue-deckの画面から実行できる操作**（サブPCのチェックアウト更新とpollerの再起動は、ホストの行に出る「更新して再起動」で済む）。起票せず、PR本文の「注意点」と起点Issueのコメントに「マージ後に画面から更新して再起動する」と書く
   - **同じ作業が繰り返し発生するもの**（デプロイのたび・pullのたびに必要になるもの）。2回目以降だと気付いたら、その作業を追跡するIssueではなく、**その作業をなくすIssue**（自動化する・画面の操作へ寄せる）を起票する
