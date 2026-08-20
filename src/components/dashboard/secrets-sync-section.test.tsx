@@ -19,6 +19,8 @@ function repository(overrides: Partial<SecretsSyncRepository> = {}): SecretsSync
       skippedCount: 2,
       failedCount: 0,
       failedKeys: [],
+      syncedKeys: [],
+      skippedKeys: [],
       runUrl: null,
       message: null,
     },
@@ -158,6 +160,74 @@ describe("SecretsSyncSection", () => {
       );
       expect(post?.[0]).toBe("/api/secrets-sync");
     });
+  });
+
+  it("内訳を開くと、何の項目が同期されたのかを項目名で出す（#2022）", async () => {
+    mockFetch([
+      repository({
+        latestRun: {
+          ...repository().latestRun!,
+          syncedCount: 2,
+          skippedCount: 1,
+          syncedKeys: ["DB_NAME", "SIGNALY_WEBHOOK_URL"],
+          skippedKeys: ["WORKFLOW_PAT"],
+        },
+      }),
+    ]);
+    render(<SecretsSyncSection open />);
+
+    // 押すまでは件数だけ。項目名は出さない
+    await findRepositoryName("guchi-apps/issue-deck");
+    expect(screen.queryByText("DB_NAME")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /内訳/ }));
+
+    expect(screen.getByText("DB_NAME")).toBeTruthy();
+    expect(screen.getByText("SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    expect(screen.getByText("WORKFLOW_PAT")).toBeTruthy();
+    // 値も値の長さも出していないことを、断り書きとしても示す
+    expect(screen.getByText(/保存しているのは項目名だけです/)).toBeTruthy();
+  });
+
+  it("失敗した項目名は内訳の中でも出し、行の警告とは二重に出さない（#2022）", async () => {
+    mockFetch([
+      repository({
+        latestRun: {
+          ...repository().latestRun!,
+          status: "FAILED",
+          failedCount: 1,
+          failedKeys: ["SIGNALY_WEBHOOK_URL"],
+          syncedKeys: ["DB_NAME"],
+        },
+      }),
+    ]);
+    render(<SecretsSyncSection open />);
+
+    expect(await screen.findByText("失敗: SIGNALY_WEBHOOK_URL")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /内訳/ }));
+
+    expect(screen.queryByText("失敗: SIGNALY_WEBHOOK_URL")).toBeNull();
+    expect(screen.getByText("SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    // 「失敗 1」は行の件数と内訳の見出しの2か所に出る（項目名の重複とは別）
+    expect(screen.getAllByText("失敗 1")).toHaveLength(2);
+  });
+
+  it("項目名を記録していない実行では、0件と読み違えないよう理由を出す（#2022）", async () => {
+    mockFetch([repository()]);
+    render(<SecretsSyncSection open />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /内訳/ }));
+
+    expect(screen.getByText(/この実行では項目名が記録されていません/)).toBeTruthy();
+  });
+
+  it("未実行のリポジトリには内訳を出さない（開いても何も無い）", async () => {
+    mockFetch([repository({ latestRun: null })]);
+    render(<SecretsSyncSection open />);
+
+    await findRepositoryName("guchi-apps/issue-deck");
+    expect(screen.queryByRole("button", { name: /内訳/ })).toBeNull();
   });
 
   it("KEY名として不正な絞り込みは、起動する前にボタンを止める", async () => {

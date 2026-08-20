@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import packageJson from "../../../../package.json";
@@ -29,8 +29,13 @@ const settingsData = {
   hasGithubIncident: false,
 };
 
+// 「状態」区分を開いているあいだだけ使用量を取りに行く（#2022）。引数を控えて検証する
+const useSettingsDataArgs: [boolean, boolean][] = [];
 vi.mock("@/hooks/use-settings-data", () => ({
-  useSettingsData: () => settingsData,
+  useSettingsData: (enabled: boolean, statusActive: boolean) => {
+    useSettingsDataArgs.push([enabled, statusActive]);
+    return settingsData;
+  },
 }));
 
 vi.mock("@/hooks/use-app-settings-mutations", () => ({
@@ -121,6 +126,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useSettingsDataArgs.length = 0;
   cleanup();
 });
 
@@ -162,6 +168,34 @@ describe("SettingsDialog", () => {
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
     expect(screen.getByRole("button", { name: /Issueを再同期/ })).toBeTruthy();
     expect(screen.getByText("Fine-grained PATの有効期限")).toBeTruthy();
+  });
+
+  it("フリート運用の各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+
+    // 見出しは出るが、中身（＝取得を伴う一覧）はまだ無い
+    expect(screen.getByText("1Password → GitHub のシークレット同期")).toBeTruthy();
+    expect(screen.queryByLabelText(/対象キー/)).toBeNull();
+
+    const panel = screen
+      .getByText("1Password → GitHub のシークレット同期")
+      .closest("section") as HTMLElement;
+    fireEvent.click(within(panel).getByRole("button", { name: /開く/ }));
+
+    expect(screen.getByLabelText(/対象キー/)).toBeTruthy();
+  });
+
+  it("使用量・レート制限は「状態」を開くまで取りに行かない（#2022）", () => {
+    renderDialog();
+
+    // 開いた直後はどの区分も「状態」ではない
+    expect(useSettingsDataArgs.every(([, statusActive]) => statusActive === false)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /状態/ }));
+
+    expect(useSettingsDataArgs.at(-1)).toEqual([true, true]);
   });
 
   it("変更が無いあいだ保存は押せず、変更すると押せるようになる", async () => {

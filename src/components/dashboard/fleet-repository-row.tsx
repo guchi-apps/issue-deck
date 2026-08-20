@@ -22,6 +22,7 @@ export function FleetRepositoryRow({
   result,
   detail,
   action,
+  expansion,
 }: {
   /** 状態を表すアイコン。大きさ（`size-3.5`）と色は呼び出し側で指定する */
   icon: ReactNode;
@@ -32,6 +33,11 @@ export function FleetRepositoryRow({
   detail?: ReactNode;
   /** 行の右端に置く操作。無い一覧もある */
   action?: ReactNode;
+  /**
+   * 押して開く詳細（#2022）。`detail`と違い**エラーの色を持たない**枠で、
+   * 幅いっぱいに段を改めて出す。シークレット同期の「内訳」（項目名の一覧）が使う。
+   */
+  expansion?: ReactNode;
 }) {
   const [owner, name] = splitRepositoryName(fullName);
 
@@ -54,6 +60,8 @@ export function FleetRepositoryRow({
             {detail}
           </p>
         )}
+
+        {expansion && <div className="basis-full">{expansion}</div>}
       </div>
 
       {action}
