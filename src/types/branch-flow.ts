@@ -50,6 +50,11 @@ export type BranchFlowDeployRun = {
   conclusion: string | null;
   htmlUrl: string;
   createdAt: string;
+  /**
+   * この実行を起こしたイベント（#2020）。`push`＝mainへのマージを受けた本番反映、
+   * `workflow_dispatch`＝画面からの手動の出し直し。
+   */
+  event: string;
 };
 
 /** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
@@ -80,6 +85,14 @@ export type BranchFlowDeployState = {
   kind: BranchFlowDeployStateKind;
   /** 実行ログのURL。`waiting`（実行がまだ現れていない）ではnull */
   htmlUrl: string | null;
+  /**
+   * 画面から手動で起こした出し直しの実行か（#2020）。
+   *
+   * **この状態が「その版が本番へ出たか」を表していないことの印。** 出し直しはすでに本番へ出た
+   * mainをもう一度出しているだけなので、走っている間も失敗したときも、版の見出しの「本番反映」を
+   * 取り消してはいけない（取り消すと、出ている版が出ていないように読める）。
+   */
+  manual: boolean;
 };
 
 export type BranchFlowResponse = {

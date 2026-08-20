@@ -193,6 +193,21 @@ const DEPLOY_STATE_LABEL_COMPACT: Record<BranchFlowDeployStateKind, string> = {
   failure: "デプロイ失敗",
 };
 
+/**
+ * 画面から起こした出し直し（#2020）の文言。**リリースの本番反映と言葉を分ける。**
+ * 同じ「デプロイ失敗」でも、意味が「その版が本番に出ていない」か「出ている版の出し直しに
+ * 失敗した」かで、次にやることが違う。成功と待ちは出し直しでも読み方が変わらないため据え置く。
+ */
+const MANUAL_DEPLOY_STATE_LABEL: Partial<Record<BranchFlowDeployStateKind, string>> = {
+  running: "本番へ再デプロイ中",
+  failure: "再デプロイ失敗",
+};
+
+const MANUAL_DEPLOY_STATE_LABEL_COMPACT: Partial<Record<BranchFlowDeployStateKind, string>> = {
+  running: "再デプロイ中",
+  failure: "再デプロイ失敗",
+};
+
 /** 配色はリリースの横線（purple）・失敗（destructive）・成功（green）に合わせる */
 const DEPLOY_STATE_CLASS: Record<BranchFlowDeployStateKind, string> = {
   waiting: "bg-muted text-muted-foreground ring-border",
@@ -231,7 +246,10 @@ function DeployStateBadge({
 }) {
   if (!deploy) return null;
 
-  const label = (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
+  const label =
+    (deploy.manual
+      ? (compact ? MANUAL_DEPLOY_STATE_LABEL_COMPACT : MANUAL_DEPLOY_STATE_LABEL)[deploy.kind]
+      : undefined) ?? (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
   const content = (
     <span
       className={cn(
@@ -756,7 +774,12 @@ function ReleaseGroupHeader({
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
-  const inProduction = group.deploy === null || group.deploy.kind === "success";
+  //
+  // **手動の出し直し（#2020）はこの判定に効かせない。** 出し直しはすでに本番へ出たmainを
+  // もう一度出しているだけなので、走っている間や失敗したときにこの版の「本番反映」を
+  // 取り消すと、出ている版が出ていないように読める。状態そのものはバッジで出す。
+  const inProduction =
+    group.deploy === null || group.deploy.kind === "success" || group.deploy.manual;
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
   const waitingUserMerge =

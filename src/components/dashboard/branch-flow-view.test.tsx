@@ -1220,6 +1220,8 @@ describe("BranchFlowView", () => {
             conclusion: "success",
             htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
             createdAt: "2026-08-15T10:00:30Z",
+            // 既定はmainへのpushで走った本番反映（手動の出し直しは`event`で分ける。#2020）
+            event: "push",
             ...overrides,
           },
         },
@@ -1275,6 +1277,46 @@ describe("BranchFlowView", () => {
       // 次のリリースに乗る分が無いので、いちばん新しい版の束が既定で開いている（#1711）
       expect(screen.getByText("8/15に本番反映")).toBeTruthy();
       expect(screen.getByText("デプロイ成功")).toBeTruthy();
+    });
+
+    // 計画レビューの指摘1（#2020）。出し直しは「その版が本番へ出たか」を表さない
+    it("手動の出し直し中でも、すでに出た版の「本番反映」を取り消さない", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({
+          status: "in_progress",
+          conclusion: null,
+          event: "workflow_dispatch",
+          createdAt: "2026-08-15T10:05:00Z",
+        }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.queryByText("8/15にmainへマージ")).toBeNull();
+      // 状態そのものは、リリースの本番反映とは別の言葉で出す
+      expect(screen.getByText("本番へ再デプロイ中")).toBeTruthy();
+      expect(screen.getByText("再デプロイ中")).toBeTruthy();
+    });
+
+    it("手動の出し直しに失敗しても、すでに出た版の「本番反映」を取り消さない", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({
+          conclusion: "failure",
+          event: "workflow_dispatch",
+          createdAt: "2026-08-15T10:05:00Z",
+        }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("8/15に本番反映")).toBeTruthy();
+      expect(screen.getAllByText("再デプロイ失敗").length).toBeGreaterThan(0);
+      expect(screen.queryByText("デプロイ失敗")).toBeNull();
     });
 
     it("状態が分からないときは従来どおりの表示のまま", () => {

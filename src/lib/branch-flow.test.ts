@@ -764,6 +764,7 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
                 conclusion: "success",
                 htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
                 createdAt: "2026-08-15T10:00:30Z",
+                event: "push",
                 ...input.deployRun,
               },
             },
@@ -804,6 +805,32 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
     const repository = buildDeploy({ deployRun: { createdAt: "2026-08-15T09:00:00Z" } });
     expect(repository.summary.deploy?.kind).toBe("waiting");
     expect(repository.canTriggerDeploy).toBe(false);
+  });
+
+  // 計画レビューの指摘1（#2020）。出し直しの実行を版の判定へそのまま流すと、すでに本番へ
+  // 出ている版が「まだ出ていない」ように読める
+  it("手動の出し直しは版の状態を取り消さない（manualの印を付けて渡す）", () => {
+    const running = buildDeploy({
+      deployRun: { status: "in_progress", conclusion: null, event: "workflow_dispatch" },
+    });
+    expect(running.summary.deploy).toMatchObject({ kind: "running", manual: true });
+
+    const failed = buildDeploy({
+      deployRun: { conclusion: "failure", event: "workflow_dispatch" },
+    });
+    expect(failed.summary.deploy).toMatchObject({ kind: "failure", manual: true });
+
+    // mainへのpushで走った実行は従来どおり（版が本番へ出たかを表す）
+    expect(buildDeploy({ deployRun: { status: "in_progress", conclusion: null } }).summary.deploy)
+      .toMatchObject({ kind: "running", manual: false });
+  });
+
+  // 出し直しの実行はマージ時刻との比較に掛けない（掛けると「デプロイ待ち」に化ける）
+  it("マージより前に始まった出し直しでも「デプロイ待ち」にしない", () => {
+    const repository = buildDeploy({
+      deployRun: { createdAt: "2026-08-15T09:00:00Z", event: "workflow_dispatch" },
+    });
+    expect(repository.summary.deploy).toMatchObject({ kind: "success", manual: true });
   });
 
   it("デプロイに失敗した後は押せる（出し直せることが要る）", () => {
@@ -1005,6 +1032,7 @@ describe("本番デプロイの状態（#1579）", () => {
           htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
           // 既定は「マージの後に始まった実行」
           createdAt: "2026-08-15T10:00:30Z",
+          event: "push",
           ...overrides,
         },
       },
@@ -1025,6 +1053,7 @@ describe("本番デプロイの状態（#1579）", () => {
     const repository = releasedGroup(deployRun({ status: "in_progress", conclusion: null }));
     expect(repository.releaseGroups[0].deploy).toEqual({
       kind: "running",
+      manual: false,
       htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
     });
     // 畳んだ1行にも同じ状態を出す
@@ -1046,7 +1075,11 @@ describe("本番デプロイの状態（#1579）", () => {
 
   it("最新の実行がマージより古ければ「デプロイ待ち」（実行がまだ現れていない）", () => {
     const repository = releasedGroup(deployRun({ createdAt: "2026-08-14T00:00:00Z" }));
-    expect(repository.releaseGroups[0].deploy).toEqual({ kind: "waiting", htmlUrl: null });
+    expect(repository.releaseGroups[0].deploy).toEqual({
+      kind: "waiting",
+      htmlUrl: null,
+      manual: false,
+    });
   });
 
   it("待っても実行が現れないまま15分を過ぎたら、状態を出すのをやめる", () => {

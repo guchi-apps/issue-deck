@@ -36,6 +36,7 @@ function deployRun(overrides: Partial<BranchFlowDeployRun> = {}): BranchFlowDepl
     conclusion: "success",
     htmlUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     createdAt: "2026-08-16T11:01:00Z",
+    event: "push",
     ...overrides,
   };
 }
