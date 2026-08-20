@@ -995,7 +995,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   取得は専用の軽いエンドポイント`GET /api/branch-flow/deploy`（mainブランチの`deploy.yml`の
   最新run 1件。`fetchLatestDeployWorkflowRun`）で、**`deploy.yml`を持つリポジトリだけ**を
   対象にする（#2020。元はリリース用workflowの有無で絞っていたが、再デプロイのボタンを足したことで
-  develop→mainのリリースを回さないリポジトリ——vps・clip-hive——にも状態を出す先ができた）。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
+  リリースの束が無くても状態を出す先ができた。**ボタンを出す条件と同じ条件で絞る**——片方だけ
+  `deploy.yml`を持つリポジトリが現れた瞬間に「押せるのに進捗が出ない」が起こるため）。判定（`lib/branch-flow.ts`の`resolveDeployState`）は**直近のリリースPRのマージ時刻と
   runの開始時刻の比較だけ**で、追加の照合は要らない。runが取得できない（`deploy.yml`が無い等）
   場合は状態を出さず従来表示のままにし、**実行が現れないまま15分が過ぎた「デプロイ待ち」も
   打ち切る**（mainへのpushでデプロイしないリポジトリで永久に待ちと言い続けないため）。

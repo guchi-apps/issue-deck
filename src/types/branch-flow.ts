@@ -33,8 +33,9 @@ export type RepositoryBranchStatus = {
    * 本番デプロイworkflow（`deploy.yml`）を持つか（#2020）。
    * 「本番へ再デプロイ」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
    *
-   * **`hasReleaseWorkflow`とは一致しない。** develop→mainのリリースを回さず`deploy.yml`だけを
-   * 持つリポジトリ（vps・clip-hive）があるため、片方から代用しない。
+   * **`hasReleaseWorkflow`で代用しない。** 現時点ではこの2つを持つリポジトリの集合は一致して
+   * いるが、条件としては別物（`deploy.yml`だけを置いたリポジトリでも出し直しは要る）。
+   * 一致しなくなった瞬間に「押せるのに進捗が出ない」「押せないのに出せる」が起こる。
    */
   hasDeployWorkflow: boolean;
 };

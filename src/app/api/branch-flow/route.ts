@@ -116,9 +116,9 @@ async function handleGET() {
             return false;
           }),
           // 「本番へ再デプロイ」を出してよいかは、`deploy.yml`の有無で決める（#2020）。
-          // リリース用workflowの有無とは一致しない——`deploy.yml`だけを持つリポジトリ
-          // （vps・clip-hive）があり、そこはdevelop→mainのリリースを回さないぶん
-          // 手動での出し直しがいちばん要る。判定は同じキャッシュを通る。
+          // **`hasReleaseWorkflow`で代用しない**——現時点では両者を持つリポジトリの集合は
+          // 一致しているが条件としては別物で、`deploy.yml`だけを置いたリポジトリでも
+          // 出し直しは要る。判定は起動側・デプロイ状況と同じキャッシュを通る。
           deployWorkflowExists(repository.ownerLogin, repository.name, token).catch((error) => {
             console.error(`[GET /api/branch-flow] deploy workflow ${repository.fullName}:`, error);
             return false;
