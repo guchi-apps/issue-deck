@@ -382,6 +382,7 @@ describe("buildBranchFlow", () => {
       plannedIssueCount: 0,
       releaseInProgress: false,
       releaseCiPending: false,
+      releaseMergeTarget: null,
       deploy: null,
     });
   });
@@ -1208,6 +1209,7 @@ describe("サマリー行の集計", () => {
       plannedIssueCount: 0,
       releaseInProgress: false,
       releaseCiPending: false,
+      releaseMergeTarget: null,
       deploy: null,
     });
   });
@@ -1265,6 +1267,84 @@ describe("サマリー行の集計", () => {
 });
 
 // #1704: まだブランチが無い「実装予定」のIssueも画面に出す
+/**
+ * リリースが自動で進んでいるのか、人が押す番なのかの判定（#2038）。
+ * 畳んだ1行が紫の「リリース中」を出すか、琥珀の「mainへマージ待ち」を出すかがここで決まる。
+ */
+describe("リリースのマージ待ち（releaseMergeTarget）", () => {
+  function summaryOf(pullRequests: PullRequestSummary[]) {
+    return build({
+      pullRequests,
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0 } })],
+    }).repositories[0].summary;
+  }
+
+  const releasePullRequest = (overrides: Partial<PullRequestSummary> = {}) =>
+    pullRequest({
+      number: 1600,
+      title: "v3.23.0をmainへリリースする",
+      headRef: "develop",
+      baseRef: "main",
+      kind: "release",
+      linkedIssueNumber: null,
+      state: "open",
+      ...overrides,
+    });
+
+  const bumpPullRequest = (overrides: Partial<PullRequestSummary> = {}) =>
+    pullRequest({
+      number: 1599,
+      title: "v3.23.0をリリースする",
+      headRef: "release/v3.23.0",
+      kind: "version-bump",
+      linkedIssueNumber: null,
+      state: "open",
+      autoMergeEnabled: true,
+      ...overrides,
+    });
+
+  it("CIが終わったリリースPRはmainへのマージ待ち", () => {
+    expect(summaryOf([releasePullRequest({ ciState: "success" })]).releaseMergeTarget).toBe("main");
+  });
+
+  it("CI実行中は待ちにしない（まだマージできない操作を促さない）", () => {
+    expect(summaryOf([releasePullRequest({ ciState: "pending" })]).releaseMergeTarget).toBeNull();
+  });
+
+  // 赤の「CI失敗」と琥珀の「マージ待ち」が同じ行に並ぶと、直すのかマージするのかを取り違える（#1059）
+  it("CIが落ちているあいだは待ちにしない（CI失敗のバッジに任せる）", () => {
+    const summary = summaryOf([releasePullRequest({ ciState: "failure" })]);
+    expect(summary.releaseMergeTarget).toBeNull();
+    expect(summary.hasCiFailure).toBe(true);
+  });
+
+  // CI状態が取れないだけで、待っているものが画面から消える方が困る
+  it("CI状態が分からない（unknown）ときは待ちのまま残す", () => {
+    expect(summaryOf([releasePullRequest({ ciState: "unknown" })]).releaseMergeTarget).toBe("main");
+  });
+
+  it("Auto-mergeが効いているバンプPRは待ちにしない（放っておけばdevelopへ入る）", () => {
+    expect(summaryOf([bumpPullRequest({ ciState: "success" })]).releaseMergeTarget).toBeNull();
+  });
+
+  it("Auto-mergeが効かず滞留しているバンプPRはdevelopへのマージ待ち", () => {
+    const summary = summaryOf([bumpPullRequest({ autoMergeEnabled: false, ciState: "success" })]);
+    expect(summary.releaseMergeTarget).toBe("develop");
+  });
+
+  it("リリースPRとバンプPRが両方あればmainを優先する（先に押すのはmain側）", () => {
+    const summary = summaryOf([
+      releasePullRequest({ ciState: "success" }),
+      bumpPullRequest({ autoMergeEnabled: false, ciState: "success" }),
+    ]);
+    expect(summary.releaseMergeTarget).toBe("main");
+  });
+
+  it("リリースが動いていなければnull", () => {
+    expect(summaryOf([]).releaseMergeTarget).toBeNull();
+  });
+});
+
 describe("実装予定のIssue（plannedIssues）", () => {
   it("未着手・計画検討中のopen Issueを集め、件数をサマリーへ出す", () => {
     const flow = build({
