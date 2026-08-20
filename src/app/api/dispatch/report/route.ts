@@ -5,6 +5,7 @@ import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
+import { advanceManualStepVerificationCheck } from "@/lib/manual-step-verification-patrol";
 
 /** メッセージは画面にそのまま出る。長文が流れ込まないよう頭で切る */
 const MAX_MESSAGE_LENGTH = 2000;
@@ -86,6 +87,13 @@ export async function POST(request: NextRequest) {
   if (result.job.kind === "MANUAL_STEP" && status !== "running") {
     try {
       await advanceManualStepRun({
+        repositoryFullName: result.job.repositoryFullName,
+        issueNumber: result.job.issueNumber,
+      });
+      // 完了確認の定期巡回（#2008）も同じ報告で1歩進める。**人が始めた自動実行と巡回は
+      // 同時には走らない**（巡回は自動実行が動いているIssueを選ばない）ので、どちらか一方だけが
+      // 動く。片方ずつ呼び分ける条件をここに書くと、判定が2か所に増える
+      await advanceManualStepVerificationCheck({
         repositoryFullName: result.job.repositoryFullName,
         issueNumber: result.job.issueNumber,
       });

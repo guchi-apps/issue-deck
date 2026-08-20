@@ -773,6 +773,50 @@ model ManualStepRun {
   @@index([status])
 }
 
+// 定期巡回の結果（#2008）。**PASSED＝「完了済みの可能性」で、完了そのものではない。**
+//
+// RUNNING=確認コマンドを順に流している最中 / PASSED=全部が終了コード0で終わった /
+// FAILED=どれかが0以外だった（＝まだ実施されていないと読む。ふつうの状態） /
+// UNAVAILABLE=流せなかった（ホストが居ない・積めなかった・打ち切った）。
+enum ManualStepVerificationStatus {
+  RUNNING
+  PASSED
+  FAILED
+  UNAVAILABLE
+}
+
+// openな手作業Issueの`## 完了の確認方法`を、人の操作なしに定期実行した結果（#2008）。
+//
+// 手作業の完了判定が「人がクローズを押す」ことだけに依存していると、**実行したのに押し忘れた
+// ものに誰も気づけない**（#1994が実例）。確認コマンドを1日1回流し、全部通ったIssueに
+// 「完了済みの可能性」の印を出して、押す機会を画面へ戻す。
+//
+// **1つのIssueにつき1行**（`@@unique`。`ManualStepRun`と同じ形）。前回の巡回の結果は
+// 上書きし、履歴は`DispatchJob`側に残る。**流したコマンドの出力はここに持たない**——
+// 出力にはシークレットが混ざりうるため、置き場は`DispatchJob.commandOutput`の1か所に留める
+// （#1828「出力は画面にだけ出す」）。
+model ManualStepVerificationCheck {
+  id                 String                       @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 積む先のホスト名（DispatchHost.nameと対応）。巡回のたびに選び直す
+  targetHost         String
+  status             ManualStepVerificationStatus @default(RUNNING)
+  // この巡回で流し終えた行番号のJSON配列（`ManualStepRun.doneLines`と同じ形）
+  doneLines          String                       @db.Text
+  // いま積んでいる（または最後に積んだ）代行実行ジョブのid
+  currentJobId       String?
+  // 止まった理由。**画面には出さない**（巡回は人が始めたものではないため、失敗を通知しない）
+  message            String?                      @db.Text
+  startedAt          DateTime                     @default(now())
+  finishedAt         DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  @@unique([repositoryFullName, issueNumber])
+  @@index([status])
+}
+
 model IssueLabel {
   id            String  @id @default(cuid())
   issueId       String

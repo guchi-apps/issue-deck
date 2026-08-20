@@ -768,6 +768,7 @@ export function IssueDetail({
               prerequisites={manualStepPrerequisites.prerequisites}
               prerequisiteSummary={manualStepPrerequisites.summary}
               dependents={manualStepPrerequisites.dependents}
+              verifiedAt={issue.manualStepVerifiedAt}
               repositoryFullName={issue.repositoryFullName}
             />
           )}

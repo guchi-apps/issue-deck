@@ -35,6 +35,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     qaAnswerPendingAt: null,
     lastCommentAt: null,
     dispatchPendingAt: null,
+    manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/1",
     favorite: false,

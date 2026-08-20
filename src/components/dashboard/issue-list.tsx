@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   Archive,
+  BadgeCheck,
   CheckSquare,
   CircleCheck,
   CircleCheckBig,
@@ -40,6 +41,7 @@ import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { formatDateTime } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
@@ -191,6 +193,26 @@ function IssueStateIcon({ issue }: { issue: Issue }) {
  * 説明は`title`（PCのホバー）と`aria-label`に持たせる。スマホはホバーできないため、
  * 内訳はヘッダーの件数（`formatManualStepListCount`）とIssue詳細が担う。
  */
+/**
+ * 完了の確認コマンドが定期巡回で通った印（#2008）。
+ *
+ * **前提条件の印（`ManualStepReadinessIcon`）とは別に出す。** あちらは「いま実行してよいか」、
+ * こちらは「もう実行し終えているかもしれない」で、答えている問いが違う。手作業Issueの色である
+ * violet（`71.manual-step`ラベルと同じ）を使い、前提の緑・橙と読み違えないようにする。
+ */
+function ManualStepVerifiedIcon({ verifiedAt }: { verifiedAt: string | null }) {
+  if (!verifiedAt) return null;
+  const label = `完了済みの可能性（${formatDateTime(verifiedAt)}の巡回で確認コマンドがすべて成功）`;
+  return (
+    <span title={label} className="flex shrink-0 items-center">
+      <BadgeCheck
+        className="size-3.5 text-violet-600 dark:text-violet-400"
+        aria-label={label}
+      />
+    </span>
+  );
+}
+
 function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness | undefined }) {
   if (!readiness) return null;
   const Icon = readiness.ready ? CircleCheckBig : Clock;
@@ -500,6 +522,7 @@ export function IssueList({
               )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
+              <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />
               <ManualStepReadinessIcon readiness={prerequisiteReadiness?.get(issue.id)} />
               <WorkflowStepBadge
                 labels={issue.labels}

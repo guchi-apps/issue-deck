@@ -155,4 +155,35 @@ describe("ManualStepPanel", () => {
 
     expect(screen.queryByText("前提条件の状況")).toBeNull();
   });
+
+  // 完了確認の定期巡回（#2008）
+  it("確認コマンドが通っていれば「完了済みの可能性」を出す", () => {
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        verifiedAt="2026-08-20T00:12:00.000Z"
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.getByText("完了済みの可能性があります。")).toBeTruthy();
+    // 断定はしない（終了コードしか見ていないため、確かめるのは人）
+    expect(screen.getByText(/確かめてからクローズしてください/)).toBeTruthy();
+  });
+
+  it("通っていなければ何も出さない", () => {
+    render(
+      <ManualStepPanel
+        isSubmitting={false}
+        onComplete={vi.fn()}
+        onSkip={vi.fn()}
+        verifiedAt={null}
+        repositoryFullName={REPO}
+      />,
+    );
+
+    expect(screen.queryByText("完了済みの可能性があります。")).toBeNull();
+  });
 });
