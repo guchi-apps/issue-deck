@@ -29,6 +29,15 @@ export type RepositoryBranchStatus = {
    * 「リリースする」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
    */
   hasReleaseWorkflow: boolean;
+  /**
+   * 本番デプロイworkflow（`deploy.yml`）を持つか（#2020）。
+   * 「本番へ再デプロイ」ボタンを出してよいかの前提。取得に失敗した場合はfalse（出さない）。
+   *
+   * **`hasReleaseWorkflow`で代用しない。** 現時点ではこの2つを持つリポジトリの集合は一致して
+   * いるが、条件としては別物（`deploy.yml`だけを置いたリポジトリでも出し直しは要る）。
+   * 一致しなくなった瞬間に「押せるのに進捗が出ない」「押せないのに出せる」が起こる。
+   */
+  hasDeployWorkflow: boolean;
 };
 
 /**
@@ -42,6 +51,11 @@ export type BranchFlowDeployRun = {
   conclusion: string | null;
   htmlUrl: string;
   createdAt: string;
+  /**
+   * この実行を起こしたイベント（#2020）。`push`＝mainへのマージを受けた本番反映、
+   * `workflow_dispatch`＝画面からの手動の出し直し。
+   */
+  event: string;
 };
 
 /** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
@@ -72,6 +86,14 @@ export type BranchFlowDeployState = {
   kind: BranchFlowDeployStateKind;
   /** 実行ログのURL。`waiting`（実行がまだ現れていない）ではnull */
   htmlUrl: string | null;
+  /**
+   * 画面から手動で起こした出し直しの実行か（#2020）。
+   *
+   * **この状態が「その版が本番へ出たか」を表していないことの印。** 出し直しはすでに本番へ出た
+   * mainをもう一度出しているだけなので、走っている間も失敗したときも、版の見出しの「本番反映」を
+   * 取り消してはいけない（取り消すと、出ている版が出ていないように読める）。
+   */
+  manual: boolean;
 };
 
 export type BranchFlowResponse = {
@@ -310,6 +332,14 @@ export type BranchFlowRepository = {
    * openなリリースPRもバンプPRも無く、未リリースの変更が1つ以上ある場合だけtrue。
    */
   canTriggerRelease: boolean;
+  /**
+   * いま「本番へ再デプロイ」を押してよいか（#2020）。`deploy.yml`があり、デプロイが
+   * 動いていない（`summary.deploy`が`waiting`・`running`でない）場合だけtrue。
+   *
+   * **未リリースの変更の有無は見ない。** これは`main`をそのまま出し直す操作で、
+   * developとの差分は出ないため、リリースの可否とは関係が無い。
+   */
+  canTriggerDeploy: boolean;
   /**
    * 実装が進んでいるはずなのにブランチもPRも見つからないIssue。
    * 「関連が付いていない」ことを隠さないために出す。

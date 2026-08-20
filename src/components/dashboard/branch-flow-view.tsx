@@ -28,6 +28,7 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +44,7 @@ import {
   autoRefreshIntervalLabel,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
-import { useReleaseTriggerPending } from "@/hooks/use-release-trigger-pending";
+import { useTriggerPending } from "@/hooks/use-trigger-pending";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
@@ -192,6 +193,21 @@ const DEPLOY_STATE_LABEL_COMPACT: Record<BranchFlowDeployStateKind, string> = {
   failure: "デプロイ失敗",
 };
 
+/**
+ * 画面から起こした出し直し（#2020）の文言。**リリースの本番反映と言葉を分ける。**
+ * 同じ「デプロイ失敗」でも、意味が「その版が本番に出ていない」か「出ている版の出し直しに
+ * 失敗した」かで、次にやることが違う。成功と待ちは出し直しでも読み方が変わらないため据え置く。
+ */
+const MANUAL_DEPLOY_STATE_LABEL: Partial<Record<BranchFlowDeployStateKind, string>> = {
+  running: "本番へ再デプロイ中",
+  failure: "再デプロイ失敗",
+};
+
+const MANUAL_DEPLOY_STATE_LABEL_COMPACT: Partial<Record<BranchFlowDeployStateKind, string>> = {
+  running: "再デプロイ中",
+  failure: "再デプロイ失敗",
+};
+
 /** 配色はリリースの横線（purple）・失敗（destructive）・成功（green）に合わせる */
 const DEPLOY_STATE_CLASS: Record<BranchFlowDeployStateKind, string> = {
   waiting: "bg-muted text-muted-foreground ring-border",
@@ -230,7 +246,10 @@ function DeployStateBadge({
 }) {
   if (!deploy) return null;
 
-  const label = (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
+  const label =
+    (deploy.manual
+      ? (compact ? MANUAL_DEPLOY_STATE_LABEL_COMPACT : MANUAL_DEPLOY_STATE_LABEL)[deploy.kind]
+      : undefined) ?? (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
   const content = (
     <span
       className={cn(
@@ -755,7 +774,12 @@ function ReleaseGroupHeader({
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
-  const inProduction = group.deploy === null || group.deploy.kind === "success";
+  //
+  // **手動の出し直し（#2020）はこの判定に効かせない。** 出し直しはすでに本番へ出たmainを
+  // もう一度出しているだけなので、走っている間や失敗したときにこの版の「本番反映」を
+  // 取り消すと、出ている版が出ていないように読める。状態そのものはバッジで出す。
+  const inProduction =
+    group.deploy === null || group.deploy.kind === "success" || group.deploy.manual;
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
   const waitingUserMerge =
@@ -881,9 +905,11 @@ function ReleaseFlowGraph({
   showAllPlannedIssues,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
+  deployTriggerPending,
   onShowAllVersions,
   onToggleAllPlannedIssues,
   onReleaseTriggered,
+  onDeployTriggered,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -894,10 +920,14 @@ function ReleaseFlowGraph({
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
+  /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か（#2020） */
+  deployTriggerPending: boolean;
   onShowAllVersions: () => void;
   onToggleAllPlannedIssues: () => void;
   /** リリースworkflowを起こせた後（起動中の記録と、バンプPRを出すための取り直し） */
   onReleaseTriggered: () => void;
+  /** 本番デプロイworkflowを起こせた後（起動中の記録と、実行を出すための取り直し。#2020） */
+  onDeployTriggered: () => void;
   /** PRをこの画面からマージできたとき（#1756） */
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
@@ -941,6 +971,10 @@ function ReleaseFlowGraph({
     );
 
   const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
+  // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
+  // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
+  const latestReleaseMergedAt =
+    repository.releaseGroups.find((group) => group.mergedAt !== null)?.mergedAt ?? null;
   const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
     ? repository.releaseGroups[0].lanes
     : []
@@ -948,7 +982,7 @@ function ReleaseFlowGraph({
 
   return (
     <div className="relative px-4 py-3">
-      <div className="flex items-center gap-3 pb-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-purple-500" />
           {MAIN_BRANCH}
@@ -959,6 +993,22 @@ function ReleaseFlowGraph({
         </span>
         {unreleasedCommits !== null && unreleasedCommits > 0 && (
           <span>未リリース {unreleasedCommits}コミット</span>
+        )}
+        {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
+            隠れたりするため、束に付けると押したいときに画面から消える。ここなら
+            リポジトリを開いている間はつねに同じ位置にある */}
+        {repository.canTriggerDeploy && (
+          <>
+            <span className="flex-1" />
+            <RepositoryDeployButton
+              repositoryFullName={repository.repositoryFullName}
+              currentVersion={repository.release.latestVersion}
+              deployedAt={latestReleaseMergedAt}
+              unreleasedCommits={unreleasedCommits ?? 0}
+              isPending={deployTriggerPending}
+              onTriggered={onDeployTriggered}
+            />
+          </>
         )}
       </div>
 
@@ -1342,7 +1392,8 @@ function RepositorySection({
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  const { isPending, markTriggered } = useReleaseTriggerPending(repository.repositoryFullName);
+  const { isPending, markTriggered } = useTriggerPending("release", repository.repositoryFullName);
+  const deployTrigger = useTriggerPending("deploy", repository.repositoryFullName);
 
   return (
     <section>
@@ -1363,10 +1414,15 @@ function RepositorySection({
             showAllPlannedIssues={showAllPlannedIssues}
             mergedPullRequestsLoaded={mergedPullRequestsLoaded}
             releaseTriggerPending={isPending}
+            deployTriggerPending={deployTrigger.isPending}
             onShowAllVersions={onShowAllVersions}
             onToggleAllPlannedIssues={onToggleAllPlannedIssues}
             onReleaseTriggered={() => {
               markTriggered();
+              onRefresh();
+            }}
+            onDeployTriggered={() => {
+              deployTrigger.markTriggered();
               onRefresh();
             }}
             onMerged={onMerged}
