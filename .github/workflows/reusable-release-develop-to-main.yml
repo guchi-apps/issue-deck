@@ -464,7 +464,8 @@ jobs:
             echo
             echo "## 注意点"
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
-            echo "- 自動マージはされません。CI通過を確認のうえ、ユーザーがマージしてください"
+            echo "- **このPRはCI通過後にdevelopへ自動マージされます**（GitHub Auto-merge。マージ方式はマージコミット）。内容を止めたい場合はCIが終わる前にauto-mergeを解除してください"
+            echo "- auto-mergeの有効化に失敗した場合のみ自動ではマージされません。その場合はCI通過を確認のうえ、リリース画面のリンクから手動でマージしてください"
           } > /tmp/release-pr-body.md
 
           gh pr create --base develop --head "$BRANCH" \
