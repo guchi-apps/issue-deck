@@ -110,6 +110,19 @@ export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): Re
 /** マージ待ちPRのマージ先。"main": develop→mainのPR、"develop": バンプPR（#979） */
 export type ReleaseMergeTarget = "main" | "develop";
 
+/**
+ * マージ待ちの文言。**マージ待ちを出す画面はここだけを通す**（#2038）。
+ *
+ * ヘッダーのリリース状況・スマホのリポジトリ一覧（`describeReleaseStatusBadge`）に加えて、
+ * ブランチ画面の畳んだ1行と展開したリリースの見出しも同じ文言を出すため、リテラルを
+ * 写さずここへ寄せる。マージ先が分からない場合だけ「マージ待ち」に落とす。
+ */
+export function releaseMergeTargetLabel(target: ReleaseMergeTarget | null): string {
+  if (target === "develop") return "developへマージ待ち";
+  if (target === "main") return "mainへマージ待ち";
+  return "マージ待ち";
+}
+
 /** バッジの見た目。呼び出し側で配色に対応付ける */
 export type ReleaseStatusBadgeTone = "progressing" | "action" | "error";
 
@@ -143,15 +156,7 @@ export function describeReleaseStatusBadge(input: {
   }
 
   if (status === "action_required") {
-    return {
-      label:
-        mergeTarget === "develop"
-          ? "developへマージ待ち"
-          : mergeTarget === "main"
-            ? "mainへマージ待ち"
-            : "マージ待ち",
-      tone: "action",
-    };
+    return { label: releaseMergeTargetLabel(mergeTarget), tone: "action" };
   }
 
   return { label: "実施中", tone: "progressing" };

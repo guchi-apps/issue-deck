@@ -1,4 +1,5 @@
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import { resolveProgressStatus, type ProgressStatusKey } from "@/lib/issue-progress";
 import {
   classifyPullRequest,
@@ -115,6 +116,38 @@ export function isClosedLane(lane: BranchFlowLane): boolean {
  */
 export function isReleaseCiPending(...pullRequests: (PullRequestSummary | null)[]): boolean {
   return pullRequests.some((pullRequest) => pullRequest?.ciState === "pending");
+}
+
+/**
+ * リリースを進めているPRが人のマージを待っているか。待っていればマージ先を返す（#2038）。
+ *
+ * **「リリース中」が自動で進んでいる状態か、人が押す番かを分ける唯一の判定。** 畳んだ1行では
+ * どちらも同じ紫のバッジで、違いは回るアイコンの有無しか無かったため、一覧を流し見して
+ * 「自分の番のリポジトリ」を見つけられなかった（#2038）。展開したときの見出し
+ * （`ReleaseGroupHeader`の`waitingUserMerge`）と同じ「CIが`pending`でなくなった時点」を基準にする。
+ *
+ * **`failure`は待ちに数えない。** 畳んだ1行にはリリースPR・バンプPRのCI失敗も含む「CI失敗」の
+ * バッジが出る（`summary.hasCiFailure`）ため、両方を出すと赤と琥珀が同じ行に並ぶ。
+ * 「直す必要がある」と「マージすればよい」を取り違えさせないという#1059の優先順位に従い、
+ * 失敗しているあいだは赤だけを出す。
+ *
+ * **バンプPRはauto-mergeが効いている間は待ちにしない**——放っておけばdevelopへ入る。
+ * 効いていないバンプPRが残るのは滞留そのもので、展開したときも「developへマージ待ち」と
+ * 出している（`BumpPullRequestLine`）。
+ */
+export function resolveReleaseMergeTarget(
+  releasePullRequest: PullRequestSummary | null,
+  bumpPullRequest: PullRequestSummary | null,
+): ReleaseMergeTarget | null {
+  if (isWaitingUserMerge(releasePullRequest)) return "main";
+  if (isWaitingUserMerge(bumpPullRequest) && !bumpPullRequest?.autoMergeEnabled) return "develop";
+  return null;
+}
+
+/** openで、CIが実行中でも失敗でもない（＝マージできる状態で止まっている） */
+function isWaitingUserMerge(pullRequest: PullRequestSummary | null): boolean {
+  if (pullRequest === null || pullRequest.state !== "open") return false;
+  return pullRequest.ciState !== "pending" && pullRequest.ciState !== "failure";
 }
 
 /** どのバージョンにも乗っていないレーンの並び順。手を動かす必要があるものから並べる */
@@ -332,6 +365,9 @@ function buildRepository({
     // CIが走っている間だけ畳んだ1行の「リリース中」を回す（#1931）。マージ待ちで止まって
     // いるのか自動で進んでいるのかを、行を開かずに見分けられるようにするため。
     releaseCiPending: isReleaseCiPending(releasePullRequest, bumpPullRequest),
+    // 人が押す番になったら、紫の「リリース中」から琥珀の「mainへマージ待ち」へ変える（#2038）。
+    // 展開したときの見出しと同じ判定・同じ文言を、開かなくても読めるところまで引き上げる。
+    releaseMergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     plannedIssueCount: plannedIssues.length,

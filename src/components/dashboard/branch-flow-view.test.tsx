@@ -784,7 +784,8 @@ describe("BranchFlowView", () => {
       });
       openRepository();
       expect(screen.queryByText("リリースする")).toBeNull();
-      expect(screen.getByText("リリース中")).toBeTruthy();
+      // CIが終わっているリリースPRなので、表示は人のマージ待ちになる（#2038）
+      expect(screen.getAllByText("mainへマージ待ち").length).toBeGreaterThan(0);
     });
 
     it("押すと今回反映する内容を確認ダイアログに出す", () => {
@@ -1183,7 +1184,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      expect(screen.getByText("developへマージ待ち")).toBeTruthy();
+      // 畳んだ1行（琥珀のピル）と幹のバンプPRの行の2か所に出る（#2038）
+      expect(screen.getAllByText("developへマージ待ち")).toHaveLength(2);
       expect(screen.getByText("マージする")).toBeTruthy();
     });
   });
@@ -1342,7 +1344,10 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
+      // 畳んだ1行と束の見出しの2か所に出す（#2038）。開かなくても押す番だと分かるようにする
+      expect(screen.getAllByText("mainへマージ待ち")).toHaveLength(2);
+      // 「リリース中」（待てば進む）とは同時に出さない
+      expect(screen.queryByText("リリース中")).toBeNull();
     });
 
     it("CI実行中はまだマージできないので「リリース中」のままにする", () => {
@@ -1400,8 +1405,9 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      expect(screen.getByText("リリース中")).toBeTruthy();
+      // CIが終わった時点で「リリース中」ではなくなる（#2038）。止まっている状態を回さない
       expect(screen.queryByLabelText("リリース中（チェック実行中）")).toBeNull();
+      expect(screen.queryByText("リリース中")).toBeNull();
     });
   });
 
@@ -1409,6 +1415,90 @@ describe("BranchFlowView", () => {
    * 本番デプロイの直後（#1711）。進行中の作業もdevelopとmainの差も無いため、
    * この画面に出るものはリリース済みの束しか残らない。
    */
+  /**
+   * 畳んだ1行とヘッダーの件数で、待てばよいのか自分が押す番なのかを見分ける（#2038）。
+   * どちらも行を開かずに読むものなので、開かない状態で確かめる。
+   */
+  describe("リリース中と押す番の見分け（#2038）", () => {
+    const unreleased = branchStatus({
+      developVsMain: { aheadBy: 3, behindBy: 0 },
+      hasReleaseWorkflow: true,
+    });
+
+    function renderRelease(ciState: PullRequestSummary["ciState"]) {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState,
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+    }
+
+    it("CIが終わっていれば、畳んだままでも「mainへマージ待ち」と出す", () => {
+      renderRelease("success");
+
+      expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
+      expect(screen.queryByText("リリース中")).toBeNull();
+      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
+    });
+
+    it("CI実行中は「リリース中」のままで、件数も「待てば進むもの」に入れる", () => {
+      renderRelease("pending");
+
+      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+
+    // 赤の「CI失敗」と重ねない（直すのかマージするのかを取り違えさせない。#1059）
+    it("CIが落ちていれば「CI失敗」だけを出す", () => {
+      renderRelease("failure");
+
+      expect(screen.getByText("CI失敗")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+    });
+
+    // 押す操作は無いが、本番へ出るまでを見に来る手掛かりは残す（#1579の意図）
+    it("デプロイ中は「待てば進むもの」に数える", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1573,
+            title: "v3.22.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-15T10:00:00Z",
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+        deployStatuses: [
+          {
+            repositoryFullName: REPO,
+            deployRun: {
+              status: "in_progress",
+              conclusion: null,
+              htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+              createdAt: "2026-08-15T10:00:30Z",
+              event: "push",
+            },
+          },
+        ],
+        now: new Date("2026-08-15T10:01:00Z").getTime(),
+      });
+
+      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+  });
+
   describe("本番デプロイ直後", () => {
     /** v3.17.0で本番へ出たレーンだけがある状態（未リリースの分は無い） */
     const justReleased = [
