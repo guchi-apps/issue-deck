@@ -442,6 +442,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v22` | 上記 | #1861（対応PRは#1868）。進捗の報告が一時的なAPI不調で失われても`Implementation`のまま取り残されない版。`develop-merge-sweep`が`Implementation`も走査し（マージ済みPRの先端とブランチの先端が一致するときだけ進める）、通知より先に進捗報告へissue番号を渡し、issue-deckへのPOST/GETに5xxと接続失敗に限った再試行が入った。**タグの作成と画面からの配布は#1870で人が行った。** 配るまで、対象リポジトリでは`develop-pr-opened`の報告が5xxに当たるとマージ済みのissueが`Implementation`に残り続ける |
 | `workflows/v23` | 上記 | #1901。`reusable-issue-labels.yml`に`main-direct-pr-opened`・`main-direct-merged`が入り、**developを経由せず`issue-<番号>` → `main`のPRしか作らないリポジトリ**（`guchi-apps/docs`）でも`Develop PR` → `Done`まで進んでissueがcloseされるようになった版。**タグの作成と`docs`へのcaller新規配置は人が行う。** develop運用の既存リポジトリは`base.ref`の条件に一致しないため、配っても挙動は変わらない |
 | `workflows/v24` | 上記 | #1999。`reusable-issue-labels.yml`の`develop-merge-sweep`が、**PRのマージとほぼ同時にpushされてdevelopへ入らないままのコミット**を検知して`00.check-user`＋`01.check-blocked`で人へ渡すようになった版（あわせて、developへ入っていないコミットが無ければ先端が違っても`Develop`へ進める）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリでは取り残しが15分おきに見送られ続けるだけで通知されない（`guchi-apps/subscription-lists#99`で実測） |
+| `workflows/v25` | 上記 | #2042（対応PRは#2043）。`reusable-release-develop-to-main.yml`が作るバンプPRの本文が、実際の挙動どおり「CI通過後にdevelopへ自動マージされる」と案内するようになった版。それまでは直後で`gh pr merge --auto --merge`を実行しているにもかかわらず「自動マージはされません」と書いており、PRを見た人が手動マージを待つか、逆に放置して意図せずdevelopへ入っていた。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリのバンプPRには誤った案内が出続ける（issue-deck自身はローカルパス参照のため配布前から直っている） |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
