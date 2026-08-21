@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.17.1",
+    date: "2026-08-22",
+    changes: [
+      "develop→mainのリリースPRに表示される案内文を、実際の挙動に合わせて修正しました。CI通過後は自動的にマージされる旨が正しく案内されるようになります。",
+    ],
+  },
+  {
     version: "4.17.0",
     date: "2026-08-22",
     changes: [
