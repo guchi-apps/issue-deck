@@ -109,6 +109,36 @@ describe("MobileIssueSummaryCard（#1646）", () => {
     expect(screen.getByText("+1")).toBeTruthy();
   });
 
+  /**
+   * #2057。確認待ちのバッジ（「確認待ち・PRのマージ」）が同じことを日本語で言っているため、
+   * 上限3件の枠を`00.`/`01.`で2件使うと分類ラベルが「+N」の裏へ落ちていた。
+   */
+  it("確認待ちのときはラベル欄から00.check-user・01.check-*を外す（#2057）", () => {
+    renderCard({
+      projectStatus: "Develop PR",
+      labels: [
+        label("00.check-user"),
+        label("01.check-merge"),
+        label("60.chore"),
+        label("62.design"),
+      ],
+    });
+
+    expect(screen.getByText("確認待ち・PRのマージ")).toBeTruthy();
+    expect(screen.queryByText("00.check-user")).toBeNull();
+    expect(screen.queryByText("01.check-merge")).toBeNull();
+    expect(screen.getByText("60.chore")).toBeTruthy();
+    expect(screen.getByText("62.design")).toBeTruthy();
+    // 外したぶんは「隠した」わけではないので件数にも数えない
+    expect(screen.queryByText("+2")).toBeNull();
+  });
+
+  it("確認待ちでなければ従来どおり要対応ラベルも出す", () => {
+    renderCard({ labels: [label("01.check-merge"), label("60.chore")] });
+
+    expect(screen.getByText("01.check-merge")).toBeTruthy();
+  });
+
   it("ラベルの削除ボタンは置かない（編集はプロパティ側の役割）", () => {
     renderCard({ labels: [label("62.design")] });
 

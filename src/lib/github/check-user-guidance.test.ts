@@ -12,7 +12,7 @@ describe("resolveCheckUserGuidance", () => {
     expect(guidance?.heading).toBe("計画の承認が必要です");
     expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
     expect(guidance?.buttons).toContain("コメント欄の「承認」");
-    expect(guidance?.agentState.tag).toBe("待機中");
+    expect(guidance?.agentState).toBe("待機中");
   });
 
   it("承認カードの中では移動ボタンを出さず、押すボタン名だけを添える", () => {
@@ -25,6 +25,18 @@ describe("resolveCheckUserGuidance", () => {
     const guidance = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
     expect(guidance?.buttons).toContain("「マージ」");
+  });
+
+  /**
+   * #2057。「修正を依頼する」はコメント欄の承認カードにしか無いボタンで、上部の案内が送る
+   * 対応PRのセクションには置いていない。移動先に無いボタンを案内していた。
+   */
+  it("上部の案内は「修正を依頼する」に触れない（移動先にそのボタンが無い）", () => {
+    const away = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
+    expect(away?.buttons).not.toContain("修正を依頼する");
+
+    const here = resolveCheckUserGuidance({ reason: "merge", placement: "approval" });
+    expect(here?.buttons).toContain("修正を依頼する");
   });
 
   it("対応PRのセクションが無いときは、押しても何も起きない移動先を出さない", () => {
@@ -99,11 +111,11 @@ describe("resolveCheckUserGuidance", () => {
   });
 
   it("停止・回答済みは、待機中と区別できる状態を出す", () => {
-    expect(resolveCheckUserGuidance({ reason: "blocked", placement: "status" })?.agentState.tag).toBe(
+    expect(resolveCheckUserGuidance({ reason: "blocked", placement: "status" })?.agentState).toBe(
       "停止中",
     );
     expect(
-      resolveCheckUserGuidance({ reason: "answered", placement: "status" })?.agentState.tag,
+      resolveCheckUserGuidance({ reason: "answered", placement: "status" })?.agentState,
     ).toBe("待っていません");
   });
 

@@ -108,6 +108,45 @@ describe("IssueOrderSection（#2003）", () => {
     expect(screen.queryByText("このIssueの完了を待っているIssue")).toBeNull();
   });
 
+  /**
+   * #2057。「実施順序 1 前提はそろっている」は押す先が無く、読んでも次にやることが変わらない。
+   * 待たされているか待たせているかのどちらかが成立しているときだけ出す。
+   */
+  it("前提が全部そろっていて待っている相手もいなければ節ごと出さない（#2057）", () => {
+    const satisfied = prerequisite({ satisfied: true, stage: "done-main", label: "main反映済み", manualStep: false });
+    render(
+      <IssueOrderSection
+        prerequisites={[satisfied]}
+        prerequisiteSummary={summarizeManualStepPrerequisites([satisfied], REPO, {
+          manualStep: false,
+        })}
+        dependents={[]}
+        repositoryFullName={REPO}
+        idPrefix="test"
+      />,
+    );
+
+    expect(screen.queryByText("実施順序")).toBeNull();
+  });
+
+  it("前提がそろっていても、待っている相手がいれば出す（#2057）", () => {
+    const satisfied = prerequisite({ satisfied: true, stage: "done-main", label: "main反映済み", manualStep: false });
+    render(
+      <IssueOrderSection
+        prerequisites={[satisfied]}
+        prerequisiteSummary={summarizeManualStepPrerequisites([satisfied], REPO, {
+          manualStep: false,
+        })}
+        dependents={[dependent()]}
+        repositoryFullName={REPO}
+        idPrefix="test"
+      />,
+    );
+
+    expect(screen.getByText("実施順序")).toBeTruthy();
+    expect(screen.getByText(/1件が完了を待っている/)).toBeTruthy();
+  });
+
   // 手作業はdevelopもmainも通らないので、3段階のドットを出さない
   it("未実施の手作業の前提には3段階のドットを出さない", () => {
     renderSection({ prerequisites: [prerequisite()] });
