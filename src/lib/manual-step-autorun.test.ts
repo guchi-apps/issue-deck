@@ -266,3 +266,55 @@ describe("対話が要るコマンドを含む項目", () => {
     });
   });
 });
+
+/**
+ * プレースホルダを含む項目（#2051）。実例（guchi-apps/aide#103）と同じ形で、
+ * **人が値を埋めてから実行する手順が自動実行の対象から外れる**ことを見る。
+ */
+describe("プレースホルダを含む項目", () => {
+  const PLACEHOLDER_BODY = BODY.replace(
+    "systemctl --user restart issue-deck-dispatch-poller.service",
+    "AIDE_ZAIM_CONSUMER_KEY=<控えたkey> node scripts/oauth-token.mjs",
+  );
+
+  it("代行できない項目として並べ、承認する件数から外す", () => {
+    const result = plan(PLACEHOLDER_BODY);
+    const [first, second] = result.entries;
+
+    expect(first.rejection).toBeNull();
+    expect(second.rejection).toBe("placeholder_command");
+    // 埋める値がどこにあるのかを画面へ出せること
+    expect(second.placeholder).toBe("<控えたkey>");
+    expect(result.runnable).toBe(2);
+    expect(result.blocked).toBe(2);
+    expect(describeManualStepRunPlan(result)).toBe("手順1件・確認1件");
+  });
+
+  it("確認コマンドにも同じ判定を掛ける", () => {
+    const result = plan(
+      BODY.replace(
+        "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop",
+        "gh issue view <番号> --json state",
+      ),
+    );
+    const verification = result.entries[result.entries.length - 1];
+
+    expect(verification.kind).toBe("verification");
+    expect(verification.rejection).toBe("placeholder_command");
+  });
+
+  // ホストが応答していない・pollerが未対応でも、人が埋めるしかないことは変わらない
+  it("ホストの都合より先に理由として出す", () => {
+    const result = plan(PLACEHOLDER_BODY, null);
+
+    expect(result.entries[1].rejection).toBe("placeholder_command");
+  });
+
+  // **いま代行できている手順を巻き込まない。** テンプレートどおりの本文はそのまま流れる
+  it("プレースホルダの無い本文は従来どおり代行できる", () => {
+    const result = plan();
+
+    expect(result.entries.every((entry) => entry.placeholder === null)).toBe(true);
+    expect(result.runnable).toBe(3);
+  });
+});

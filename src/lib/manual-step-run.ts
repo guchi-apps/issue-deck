@@ -267,6 +267,7 @@ async function syncManualStepRun(run: ManualStepRun, now: Date): Promise<ManualS
       // 止まったのに「サブPCで実行するため」と表示される
       device: next.device,
       interactiveCommand: next.interactiveCommand,
+      placeholder: next.placeholder,
     });
     // **`## 完了の確認方法`のコマンドにはチェックが無い**（#1869）。人が実行するしかない確認で
     // 止まった場合、流し終えた扱いにしておかないと、続きへ進めても同じ項目でまた止まる（#2025）。
@@ -436,6 +437,8 @@ function pauseReasonFor(rejection: ManualStepExecutionRejection): "USER" | "ENQU
     case "not_manual_step":
     // 対話が要るコマンド（#2025）。**人が実行するしかない**ので、ホスト側の事情と混ぜない
     case "interactive_command":
+    // プレースホルダを含むコマンド（#2051）。人が値を埋めてから実行するしかない
+    case "placeholder_command":
       return "USER";
     default:
       return "ENQUEUE_FAILED";

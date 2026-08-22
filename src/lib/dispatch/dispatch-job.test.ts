@@ -1290,6 +1290,7 @@ describe("resolveManualStepExecutionRejection", () => {
       isSubpcDevice: true,
       hasCommand: true,
       interactiveCommand: null,
+      placeholder: null,
       hasActiveJob: false,
       ...overrides,
     } as Parameters<typeof resolveManualStepExecutionRejection>[0];
@@ -1326,6 +1327,20 @@ describe("resolveManualStepExecutionRejection", () => {
         interactiveCommand: "op signin",
       }),
     ).toContain("op signin");
+  });
+
+  // 値が埋まっていないコマンドも、更新すれば押せるようになるものではない（#2051）
+  it("プレースホルダを含むコマンドはホストの理由より先に出す", () => {
+    expect(
+      resolveManualStepExecutionRejection(params({ placeholder: "<控えたkey>", host: null })),
+    ).toBe("placeholder_command");
+    // 埋める値がどこにあるのかを文面に出す
+    expect(
+      describeManualStepExecutionRejection("placeholder_command", {
+        hostName: "subpc",
+        placeholder: "<控えたkey>",
+      }),
+    ).toContain("<控えたkey>");
   });
 
   it("手作業Issueでなければ代行しない", () => {

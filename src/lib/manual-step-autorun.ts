@@ -7,6 +7,7 @@ import {
   extractManualStepCommands,
   extractVerificationCommands,
   findInteractiveCommand,
+  findPlaceholder,
   isSubpcManualStepDevice,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
@@ -59,6 +60,11 @@ export type ManualStepRunEntry = {
    * 分からず、人はどのコマンドを自分で実行すればよいのか判断できない）。
    */
   interactiveCommand: string | null;
+  /**
+   * このコマンドに含まれる、人が値を埋めるプレースホルダの表記（#2051）。`null`なら無い。
+   * `interactiveCommand`と同じく、**止まった理由を画面へ出すために持ち回る**。
+   */
+  placeholder: string | null;
   /** 代行できない理由。`null`なら押せる */
   rejection: ManualStepExecutionRejection | null;
 };
@@ -100,6 +106,7 @@ export function buildManualStepRunPlan(
     device: string | null,
     hasCommand: boolean,
     interactiveCommand: string | null,
+    placeholder: string | null,
   ): ManualStepExecutionRejection | null =>
     resolveManualStepExecutionRejection({
       host: context.host,
@@ -107,6 +114,7 @@ export function buildManualStepRunPlan(
       isSubpcDevice: isSubpcManualStepDevice(device),
       hasCommand,
       interactiveCommand,
+      placeholder,
       hasActiveJob: context.hasActiveJob ?? false,
     });
 
@@ -114,6 +122,7 @@ export function buildManualStepRunPlan(
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
       const interactiveCommand = findInteractiveCommand(command);
+      const placeholder = findPlaceholder(command);
       const device = resolveManualStepDevice(guide.where, step);
       return {
         kind: "step",
@@ -125,13 +134,15 @@ export function buildManualStepRunPlan(
         device,
         checked: step.checked,
         interactiveCommand,
-        rejection: reject(device, command !== null, interactiveCommand),
+        placeholder,
+        rejection: reject(device, command !== null, interactiveCommand, placeholder),
       };
     }),
     // **完了の確認に手順ごとのデバイスは無い。** `## 完了の確認方法`は節ひとつで、どの端末で
     // 確かめるかを書く場所がないため、手作業の既定値をそのまま使う
     ...verifications.map((entry, index): ManualStepRunEntry => {
       const interactiveCommand = findInteractiveCommand(entry.command);
+      const placeholder = findPlaceholder(entry.command);
       const device = guide.where.defaultDevice;
       return {
         kind: "verification",
@@ -143,7 +154,8 @@ export function buildManualStepRunPlan(
         device,
         checked: false,
         interactiveCommand,
-        rejection: reject(device, true, interactiveCommand),
+        placeholder,
+        rejection: reject(device, true, interactiveCommand, placeholder),
       };
     }),
   ];

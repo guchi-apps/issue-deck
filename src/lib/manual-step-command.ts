@@ -393,3 +393,69 @@ export function isSubpcManualStepDevice(device: string | null): boolean {
   const names = matchManualStepDeviceNames(device);
   return names.length === 1 && names[0] === "サブPC";
 }
+
+/**
+ * 人が値を埋めてから実行する「プレースホルダ」の書き方（#2051）。
+ *
+ * 手作業Issueの`## やること`には、**値を埋めてから実行するコマンド**が書かれることがある
+ * （`AIDE_ZAIM_CONSUMER_KEY=<控えたkey> node scripts/oauth-token.mjs`）。それは実行できる
+ * コマンドとまったく同じ`bash`フェンスで書かれるため、**代行実行は穴が空いたまま実行しに行く**。
+ * 実害は失敗だけではない——上の例の`=<控えたkey>`は**シェルのリダイレクトとして解釈されうる形**で、
+ * 意図しない失敗の仕方をする。
+ *
+ * **`findInteractiveCommand`とは倒す向きが逆**（#2025との違い）。あちらは「必ず対話が要るものだけを
+ * 挙げる／迷ったら挙げない」で、挙げそこねても失敗して止まるだけだった。こちらは取りこぼすと
+ * **穴あきのコマンドがそのまま走る**一方、誤検知しても「あなたが実行」になるだけで人が実行すれば
+ * 進む。被害が非対称なので、**迷ったら拾う側**へ倒す。
+ *
+ * 挙げないものもここに書いておく。
+ *
+ * - **`${...}`・`$NAME`**… 実在の環境変数参照と区別できない（`$HOME`・`"$CHILD_ID"`が誤検知になる）
+ * - **`...`（ASCIIのピリオド3つ）**… `git diff main...HEAD`のような実在の記法と衝突する
+ *   （全角の`…`は実在のコマンドに現れないので拾う）
+ * - **`（…）`（全角丸括弧）**… `gh issue comment --body "…（詳細はPRを参照）"`のように、
+ *   日本語を含む実在のコマンドに現れる
+ */
+const PLACEHOLDER_PATTERNS = [
+  // `<控えたkey>`・`＜番号＞`。**内側が空白で始まらない・終わらないものだけ**を拾うことで、
+  // リダイレクト（`cmd < in.txt > out.txt`）・ヒアドキュメント（`cat <<EOF > f`）・
+  // プロセス置換（`diff <(a) <(b)`）を外す。改行をまたぐものも拾わない
+  /[<＜](?!\s)[^<>＜＞\n]*[^<>＜＞\s][>＞]/,
+  // 伏せ字。`***`は実在のグロブ（`*`・`**`）より1つ多い
+  /[*＊]{3,}/,
+  // 全角の三点リーダ。実在のコマンドには現れない
+  /…/,
+  // `KEY=xxx`のような埋め草。**語として現れたときだけ**（`0xxx`・`abcxxx`は拾わない）
+  /\bx{3,}\b/i,
+] as const;
+
+/** 画面へ出す表記の上限。長い行がそのまま説明文に流れ込まないよう切る */
+const PLACEHOLDER_LABEL_MAX_LENGTH = 40;
+
+/**
+ * コマンドの中にプレースホルダがあれば、その表記を返す（無ければ`null`）。#2051
+ *
+ * 見るのは**コマンドの文字列だけ**で、実行してみて判断することはしない。行頭が`#`の行は
+ * 実行されないコメントなので見ない（`findInteractiveCommand`と同じ）。
+ *
+ * **止める壁ではない。** 壁は本文との照合（`enqueueManualStepJob`の`body_changed`）で、
+ * これは押す前に「あなたが実行」と理由を出すためのもの。
+ */
+export function findPlaceholder(command: string | null): string | null {
+  if (!command) return null;
+  const body = command
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  if (body.trim() === "") return null;
+
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    const found = pattern.exec(body);
+    if (!found) continue;
+    const label = found[0];
+    return label.length > PLACEHOLDER_LABEL_MAX_LENGTH
+      ? `${label.slice(0, PLACEHOLDER_LABEL_MAX_LENGTH)}…`
+      : label;
+  }
+  return null;
+}
