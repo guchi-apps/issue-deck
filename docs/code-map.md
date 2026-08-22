@@ -74,6 +74,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **画面に重ねて出すもの（モーダル・全画面のプレビュー）は、URLクエリではなくローカルstateで
+  持ち、戻る操作への対応は[`hooks/use-history-dismiss.ts`](../src/hooks/use-history-dismiss.ts)の
+  `useHistoryDismiss`に任せる**（#2065・#2149）。開いている間だけ履歴を1つ積み、戻る操作で
+  そのエントリが外れたら閉じる（バツボタンで閉じたときは積んだぶんを自分で片付ける）。
+  現在地の`view`・`pane`・`issue`・`pr`と違い、重ね表示は**下の画面を残したまま出る**ため、
+  クエリにすると閉じ忘れの後始末が要る場所が増える（ビュー切り替え・スマホの画面遷移など、
+  クエリを畳む場所が別々のフックに散っている）。さらに`pr`クエリはスマホのPR詳細画面
+  （`mscreen=pull-requests`）が既に使っており、条件が重なる。**URLで共有したい画面は
+  重ね表示にしない**——PR詳細を共有する導線はPR一覧画面（`pane=pull-requests`＋`pr`）が担う。
+  例は`image-preview-dialog.tsx`（添付画像の原寸）と`pull-request-detail-dialog.tsx`
+  （「ユーザーの確認待ち」から開くPR詳細）。
 - **Issue一覧の上に並ぶ「〜が n件あります。」の入口バーは、`issue-list.tsx`の
   `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」・「まとめて実行」の
   3本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの

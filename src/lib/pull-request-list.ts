@@ -341,6 +341,42 @@ export function isMergeWaitingForChecks(pullRequest: PullRequestSummary): boolea
 }
 
 /**
+ * 詳細のヘッダーに出す`PullRequestSummary`を、一覧の項目と詳細APIの`summary`から選ぶ
+ * （#1578・#2149）。
+ *
+ * 一覧に載っていればそれを使う（CI状態まで揃っていて即座に描ける）。載っていない場合は
+ * 詳細APIが返す`summary`で補う——画面内のリンクからマージ済み・クローズ済みのPRを開いた
+ * 経路（#1260）。
+ *
+ * **両方あるときは取得が新しい方を採る**（#1578）。一覧はPR画面を開いている間しか自動更新
+ * されず、詳細ヘッダーの更新ボタンは詳細しか取り直さない。一覧を無条件に優先すると、更新を
+ * 押してCIが通ったことを取り直しても、一覧を開いた時点の「CI失敗」が出たまま消えなかった。
+ *
+ * 取得中・別のPRへ切り替えた直後に前のPRのヘッダーが残らないよう、`detail`はidの一致を
+ * 確認してから使う。
+ *
+ * @param pullRequestId 詳細を開いているPRのid（`<owner>/<repo>#<番号>`）。未選択はnull
+ * @param pullRequests 一覧の母集団
+ * @param pullRequestsFetchedAt 一覧の取得時刻（ISO8601）。未取得はnull
+ * @param detail 詳細APIの結果。取得前・取得失敗時はnull
+ */
+export function resolvePullRequestHeader(
+  pullRequestId: string | null,
+  pullRequests: readonly PullRequestSummary[],
+  pullRequestsFetchedAt: string | null,
+  detail: { id: string; summary: PullRequestSummary; fetchedAt: string } | null,
+): PullRequestSummary | null {
+  if (!pullRequestId) return null;
+  const fromList = pullRequests.find((pullRequest) => pullRequest.id === pullRequestId) ?? null;
+  const fromDetail = detail && detail.id === pullRequestId ? detail : null;
+  if (!fromDetail) return fromList;
+  if (!fromList) return fromDetail.summary;
+  return pullRequestsFetchedAt && pullRequestsFetchedAt > fromDetail.fetchedAt
+    ? fromList
+    : fromDetail.summary;
+}
+
+/**
  * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613・#2081）。
  *
  * 返すのは`pullRequestsRequiringUserMerge`のうち**いまマージを押せるもの**だけ。件数
