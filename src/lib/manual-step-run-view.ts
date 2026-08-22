@@ -90,3 +90,65 @@ export function findManualStepRun(
     ) ?? null
   );
 }
+
+/** 一覧の入口に出すバッジと、その中身の見出しに使う集計（#2119） */
+export type ManualStepRunSummary = {
+  /** 走っている（止まっているものを含む）実行の件数 */
+  count: number;
+  /** 全実行を合わせた進み具合 */
+  done: number;
+  total: number;
+  /** 1件でも動いているか（バッジの回転を出すかどうか） */
+  running: boolean;
+  /** 1件でも失敗して止まっているか（バッジごと赤へ寄せるかどうか） */
+  failed: boolean;
+};
+
+export function summarizeManualStepRuns(
+  runs: readonly ManualStepRunView[],
+): ManualStepRunSummary {
+  return {
+    count: runs.length,
+    done: runs.reduce((sum, run) => sum + run.done, 0),
+    total: runs.reduce((sum, run) => sum + run.total, 0),
+    running: runs.some((run) => run.status === "RUNNING"),
+    failed: runs.some((run) => isFailedManualStepRun(run)),
+  };
+}
+
+/** 失敗して止まっているか。理由が`USER`（人が実行する手順で待っている）ものは含めない */
+export function isFailedManualStepRun(run: ManualStepRunView): boolean {
+  return (
+    run.status === "PAUSED" &&
+    (run.pausedReason === "FAILED" || run.pausedReason === "ENQUEUE_FAILED")
+  );
+}
+
+/**
+ * バッジの文言（#2119）。**1件のときは今までどおり`自動実行 2 / 5`のまま**——押せるように
+ * なっただけの変更で文言まで変えると、見慣れた表示が理由も無く変わる。
+ *
+ * 複数走っているときだけ件数を先に出す。#1882の作りは先頭1件しか拾っておらず、2本目以降が
+ * 走っていることが画面のどこにも出ていなかった。
+ */
+export function describeManualStepRunBadge(summary: ManualStepRunSummary): string {
+  const progress = `${summary.done} / ${summary.total}`;
+  return summary.count > 1 ? `自動実行 ${summary.count}件 ${progress}` : `自動実行 ${progress}`;
+}
+
+/**
+ * 一覧に並べる順（#2119）。**押す必要があるものを上に置く**——失敗して止まっているもの、
+ * 次に人が実行する手順で待っているもの、走っていて放っておいてよいもの、の順。
+ *
+ * 同じ段の中では受け取った順（`listManualStepRunViews`は`startedAt`の新しい順）を保つ。
+ */
+export function sortManualStepRunsForList(
+  runs: readonly ManualStepRunView[],
+): ManualStepRunView[] {
+  const rank = (run: ManualStepRunView): number => {
+    if (isFailedManualStepRun(run)) return 0;
+    if (run.status === "PAUSED") return 1;
+    return 2;
+  };
+  return [...runs].sort((a, b) => rank(a) - rank(b));
+}

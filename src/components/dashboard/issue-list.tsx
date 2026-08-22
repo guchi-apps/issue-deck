@@ -14,7 +14,6 @@ import {
   Compass,
   ExternalLink,
   ListChecks,
-  Loader2,
   Lock,
   MessageSquare,
   ScrollText,
@@ -22,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
+import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
@@ -42,7 +42,10 @@ import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/disp
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
-import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
+import {
+  isActiveManualStepRun,
+  sortManualStepRunsForList,
+} from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -116,9 +119,12 @@ type IssueListProps = {
   prerequisiteReadiness?: ManualStepReadinessMap;
   /**
    * 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う。
-   * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない
+   * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない。
+   *
+   * `startIssueId`を渡すとそのIssueが案内の先頭になる（自動実行バッジの一覧から
+   * 開くときに使う。#2119）。省略すると今までどおり`buildManualStepQueue`の並び順
    */
-  onStartManualStepGuide?: () => void;
+  onStartManualStepGuide?: (startIssueId?: string) => void;
   /**
    * 「次にやること」（#1853）を開く。「未着手」でだけ使う。
    * 渡さない・未着手が1件も無い場合はボタンを出さない。
@@ -490,18 +496,22 @@ export function IssueList({
   // 別のビューを見ているときに手作業の進捗を割り込ませない。
   // **#2073で実行キューの節を撤去したので、進み具合が出る常設の場所はここだけ**
   // （ここはバッジで、中断できるのはアシスタントの中）
-  const activeManualStepRun =
+  // **拾うのは走っている全件**（#2119）。`.find`で先頭1件しか見ていなかったため、
+  // 複数走っていても1件ぶんの進捗しか出ず、2本目以降は画面のどこにも出ていなかった
+  const activeManualStepRuns =
     view === "manual-step"
-      ? ((dispatch.manualStepRuns ?? []).find(
-          (run) =>
-            isActiveManualStepRun(run.status) &&
-            issues.some(
-              (issue) =>
-                issue.repositoryFullName === run.repositoryFullName &&
-                issue.number === run.issueNumber,
-            ),
-        ) ?? null)
-      : null;
+      ? sortManualStepRunsForList(
+          (dispatch.manualStepRuns ?? []).filter(
+            (run) =>
+              isActiveManualStepRun(run.status) &&
+              issues.some(
+                (issue) =>
+                  issue.repositoryFullName === run.repositoryFullName &&
+                  issue.number === run.issueNumber,
+              ),
+          ),
+        )
+      : [];
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -759,33 +769,39 @@ export function IssueList({
           スマホの一覧はこのコンポーネントのヘッダーを出さず（`showHeader={false}`）、
           画面側のヘッダーには操作を足さない決まりのため（#1646）。ここならPC・スマホの
           どちらにも同じ位置で出る */}
-      {onStartManualStepGuide && (guidableManualStepCount > 0 || activeManualStepRun !== null) && (
-        <div className={cn(COUNT_BAR_CLASS, "bg-violet-500/5")}>
-          <p className={COUNT_BAR_TEXT_CLASS}>
-            いま実行できる手作業が
-            <span className="font-medium text-foreground tabular-nums">
-              {guidableManualStepCount}件
-            </span>
-            あります。
-          </p>
-          <div className={COUNT_BAR_ACTIONS_CLASS}>
-            {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
-                戻ってこられる目印がここに要る（押すとアシスタントが開く） */}
-            {activeManualStepRun !== null && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 tabular-nums dark:text-amber-300">
-                {activeManualStepRun.status === "RUNNING" && (
-                  <Loader2 className="size-3 animate-spin" aria-hidden />
-                )}
-                自動実行 {activeManualStepRun.done} / {activeManualStepRun.total}
+      {onStartManualStepGuide &&
+        (guidableManualStepCount > 0 || activeManualStepRuns.length > 0) && (
+          <div className={cn(COUNT_BAR_CLASS, "bg-violet-500/5")}>
+            <p className={COUNT_BAR_TEXT_CLASS}>
+              いま実行できる手作業が
+              <span className="font-medium text-foreground tabular-nums">
+                {guidableManualStepCount}件
               </span>
-            )}
-            <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
-              <ListChecks />
-              順番に進める
-            </Button>
+              あります。
+            </p>
+            <div className={COUNT_BAR_ACTIONS_CLASS}>
+              {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
+                  戻ってこられる目印がここに要る。押すと走っている実行が全部並び、行から
+                  そのIssueのアシスタントを開ける（#2119） */}
+              <ManualStepRunBadge
+                runs={activeManualStepRuns}
+                onOpenRun={(run) => {
+                  // `run.issueId`は引けないことがあるので、並んでいるIssueから引き直す
+                  const issue = issues.find(
+                    (candidate) =>
+                      candidate.repositoryFullName === run.repositoryFullName &&
+                      candidate.number === run.issueNumber,
+                  );
+                  onStartManualStepGuide(issue?.id ?? run.issueId ?? undefined);
+                }}
+              />
+              <Button size="xs" className="shrink-0" onClick={() => onStartManualStepGuide()}>
+                <ListChecks />
+                順番に進める
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* 未着手のIssueの着手順をClaudeに決めさせる入口（#1853）。手作業アシスタントと同じく
           ヘッダーではなく一覧の上に置くことで、PC・スマホのどちらにも同じ位置で出る。
