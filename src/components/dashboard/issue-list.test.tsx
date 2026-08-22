@@ -618,3 +618,52 @@ describe("IssueList ヘッダーの自動更新の状態（#1797）", () => {
     expect(meta).not.toContain("更新");
   });
 });
+
+/**
+ * 一覧の上に並ぶ「〜が n件あります。」の入口バー（#2107）。
+ *
+ * **折り返しはjsdomでは再現できない**（レイアウトを計算しないため）ので、
+ * 幅が足りないときに折り返すための指定が残っているかをクラスで見張る。1行固定の`flex`へ
+ * 戻ると、狭いカラムでテキストが幅0まで潰れて1文字ずつ縦に並ぶ。
+ */
+describe("件数バーの折り返し（#2107）", () => {
+  function barOf(text: RegExp): HTMLElement {
+    return screen.getByText(text).closest("div")!;
+  }
+
+  it("手作業の入口バーは、入りきらないときに折り返せる", () => {
+    const readiness = new Map([
+      ["1", { ready: true, blocking: [], message: "" }],
+      ["2", { ready: true, blocking: [], message: "" }],
+    ]);
+    renderList({
+      view: "manual-step",
+      prerequisiteReadiness: readiness,
+      onStartManualStepGuide: vi.fn(),
+    });
+
+    const bar = barOf(/いま実行できる手作業が/);
+    expect(bar.className).toContain("flex-wrap");
+    // テキストに基準幅が無いと、縮むだけで折り返しの合図にならない
+    expect(screen.getByText(/いま実行できる手作業が/).className).toContain("basis-48");
+    // ボタン側は折り返した後も右端に残す
+    expect(screen.getByRole("button", { name: "順番に進める" }).closest("div")!.className).toContain(
+      "ml-auto",
+    );
+  });
+
+  it("「次にやること」の入口バーも折り返せる", () => {
+    renderList({ view: "not-started", issueOrderCount: 67, onStartIssueOrder: vi.fn() });
+
+    expect(barOf(/未着手のIssueが/).className).toContain("flex-wrap");
+    expect(screen.getByText(/未着手のIssueが/).className).toContain("basis-48");
+  });
+
+  it("「まとめて実行」の入口バーも折り返せる", () => {
+    useDispatchHost();
+    renderList();
+
+    expect(barOf(/まとめて実行できるIssueが/).className).toContain("flex-wrap");
+    expect(screen.getByText(/まとめて実行できるIssueが/).className).toContain("basis-48");
+  });
+});

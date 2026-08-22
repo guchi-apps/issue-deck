@@ -286,6 +286,29 @@ function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
   );
 }
 
+/**
+ * 一覧の上に並ぶ「〜が n件あります。」の入口バー（手作業アシスタント・「次にやること」・
+ * まとめて実行）で共有する見た目。
+ *
+ * **入りきらないときは折り返す**（#2107）。以前は1行固定の`flex`で、右のバッジ・ボタンだけに
+ * `shrink-0`が付いていた。中央カラムは手で狭められる（#381）ため、縮められるものが左の
+ * `flex-1`のテキストしか無くなり、幅0まで潰れて1文字ずつ縦に並ぶ。右が「自動実行 n / m」
+ * バッジとボタンの2つになる手作業のバーで最初に起きる。
+ *
+ * - `flex-wrap`＋テキストの`basis-48`（12rem）で、テキストが読める幅を切ったらボタン側が
+ *   次の行へ落ちる。**基準幅を与えるのが肝**で、`flex-1`（`basis-0%`）のままだと
+ *   テキストは幅0まで縮むだけで折り返しの合図にならない
+ * - 伸ばす指定は`flex-1`ではなく`grow`にする。`flex-1`は`flex`ショートハンドなので
+ *   `basis-48`と同じ`flex-basis`を奪い合い、どちらが勝つかがTailwindのCSS出力順に依存する
+ *   （いまの版は`basis-*`が後に出るので効くが、順が変われば黙って1文字ずつに戻る）。
+ *   `grow`は`flex-grow`だけを触るので競合しない
+ * - 落ちたボタン側は`ml-auto`で右端に残す。左端に来ると本文と縦に並び、押す場所が読みにくい
+ * - 幅に余裕があるときの見た目は従来どおり（1行・テキスト左・ボタン右）
+ */
+const COUNT_BAR_CLASS = "flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-4 py-2";
+const COUNT_BAR_TEXT_CLASS = "min-w-0 grow basis-48 text-xs text-muted-foreground";
+const COUNT_BAR_ACTIONS_CLASS = "ml-auto flex shrink-0 items-center gap-2";
+
 export function IssueList({
   title,
   issues,
@@ -737,28 +760,30 @@ export function IssueList({
           画面側のヘッダーには操作を足さない決まりのため（#1646）。ここならPC・スマホの
           どちらにも同じ位置で出る */}
       {onStartManualStepGuide && (guidableManualStepCount > 0 || activeManualStepRun !== null) && (
-        <div className="flex items-center gap-2 border-b bg-violet-500/5 px-4 py-2">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <div className={cn(COUNT_BAR_CLASS, "bg-violet-500/5")}>
+          <p className={COUNT_BAR_TEXT_CLASS}>
             いま実行できる手作業が
             <span className="font-medium text-foreground tabular-nums">
               {guidableManualStepCount}件
             </span>
             あります。
           </p>
-          {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
-              戻ってこられる目印がここに要る（押すとアシスタントが開く） */}
-          {activeManualStepRun !== null && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 tabular-nums dark:text-amber-300">
-              {activeManualStepRun.status === "RUNNING" && (
-                <Loader2 className="size-3 animate-spin" aria-hidden />
-              )}
-              自動実行 {activeManualStepRun.done} / {activeManualStepRun.total}
-            </span>
-          )}
-          <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
-            <ListChecks />
-            順番に進める
-          </Button>
+          <div className={COUNT_BAR_ACTIONS_CLASS}>
+            {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
+                戻ってこられる目印がここに要る（押すとアシスタントが開く） */}
+            {activeManualStepRun !== null && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 tabular-nums dark:text-amber-300">
+                {activeManualStepRun.status === "RUNNING" && (
+                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                )}
+                自動実行 {activeManualStepRun.done} / {activeManualStepRun.total}
+              </span>
+            )}
+            <Button size="xs" className="shrink-0" onClick={onStartManualStepGuide}>
+              <ListChecks />
+              順番に進める
+            </Button>
+          </div>
         </div>
       )}
 
@@ -767,16 +792,18 @@ export function IssueList({
           **自動開始が有効なら文言でそう伝える**——押した瞬間に実装セッションが積まれるので、
           「順番を決める」としか書いていないと、始まったことが押した本人から見えない */}
       {onStartIssueOrder && view === "not-started" && issueOrderCount > 0 && (
-        <div className="flex items-center gap-2 border-b bg-sky-500/5 px-4 py-2">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <div className={cn(COUNT_BAR_CLASS, "bg-sky-500/5")}>
+          <p className={COUNT_BAR_TEXT_CLASS}>
             未着手のIssueが
             <span className="font-medium tabular-nums text-foreground">{issueOrderCount}件</span>
             あります。
           </p>
-          <Button size="xs" className="shrink-0" onClick={onStartIssueOrder}>
-            <Compass />
-            {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
-          </Button>
+          <div className={COUNT_BAR_ACTIONS_CLASS}>
+            <Button size="xs" className="shrink-0" onClick={onStartIssueOrder}>
+              <Compass />
+              {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -793,18 +820,25 @@ export function IssueList({
         />
       ) : (
         bulkDispatchableIssues.length >= 2 && (
-          <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2">
-            <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          <div className={cn(COUNT_BAR_CLASS, "bg-muted/40")}>
+            <p className={COUNT_BAR_TEXT_CLASS}>
               まとめて実行できるIssueが
               <span className="font-medium text-foreground tabular-nums">
                 {bulkDispatchableIssues.length}件
               </span>
               あります。
             </p>
-            <Button size="xs" variant="outline" className="shrink-0" onClick={() => setIsSelecting(true)}>
-              <CheckSquare />
-              まとめて実行
-            </Button>
+            <div className={COUNT_BAR_ACTIONS_CLASS}>
+              <Button
+                size="xs"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setIsSelecting(true)}
+              >
+                <CheckSquare />
+                まとめて実行
+              </Button>
+            </div>
           </div>
         )
       )}
