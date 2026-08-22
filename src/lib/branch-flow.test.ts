@@ -15,6 +15,7 @@ import type {
   RepositoryBranchStatus,
   RepositoryDeployStatus,
 } from "@/types/branch-flow";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -55,7 +56,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,

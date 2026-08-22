@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bot,
+  BotOff,
   Clock,
   GitMerge,
   GitPullRequest,
@@ -14,14 +16,21 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { MergeJudgement } from "@/lib/github/check-rollup";
+import type { AiReview, MergeJudgement } from "@/lib/github/check-rollup";
 import {
   REPAIR_KIND_RUNNING_LABEL,
   REPAIR_KIND_RUNNING_SHORT_LABEL,
 } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { CiState } from "@/lib/github/release-api";
-import { mergeJudgementLabel, mergeJudgementReason } from "@/lib/pull-request-list";
+import {
+  AI_REVIEW_SETTLED_LABEL,
+  AI_REVIEW_SETTLED_REASON,
+  aiReviewSettledState,
+  mergeJudgementLabel,
+  mergeJudgementReason,
+  type AiReviewSettledState,
+} from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestDeployStatus,
@@ -48,8 +57,20 @@ export function pullRequestKindLabel(kind: PullRequestKind): string | null {
   return kind === "other" ? null : KIND_LABEL[kind];
 }
 
-/** CI状態のピル。配色は`release-progress.tsx`のCiStateBadgeに揃えている */
-export function CiStateBadge({ ciState }: { ciState: CiState }) {
+/**
+ * CI状態のピル。**CI状態の呼び名と見た目を持つのはこの1か所だけ**（#2150）。
+ *
+ * かつては同じラベル表と同じピルがPR画面・Issue画面・リリース進捗の3ファイルに複製されており、
+ * 「CI通過」と「CI成功」が画面によって食い違っていた（#2145で文言だけ揃えたが、複製は残っていた）。
+ * Issue画面は`PullRequestCiStatusBadge`、リリース進捗はこのコンポーネントを直接使う。
+ *
+ * `null`・`undefined`（そもそも取りに行っていない）では何も出さない。取りに行ったうえで
+ * 決まらなかった`unknown`（「CI状態は不明」）とは別物で、リリース進捗のように段によって
+ * CI状態を持たない呼び出し元がこの形を使う。
+ */
+export function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
+  if (!ciState) return null;
+
   return (
     <span
       className={cn(
@@ -235,6 +256,68 @@ export function MergeJudgementBadge({ mergeJudgement }: { mergeJudgement: MergeJ
   return (
     <a
       href={mergeJudgement.runUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(className, "hover:underline")}
+      title={`${reason}（クリックで実行ログを開きます）`}
+    >
+      {content}
+    </a>
+  );
+}
+
+const AI_REVIEW_ICON: Record<AiReviewSettledState, LucideIcon> = {
+  passed: Bot,
+  skipped: BotOff,
+  failed: TriangleAlert,
+};
+
+/**
+ * Claudeのレビューが終わったことを出すピル（#2150）。**終わった後の3状態だけを描く。**
+ *
+ * CI状態とは別の軸で、`claude-review-develop.yml`のcheck-runはCI状態の集約から外して
+ * ある（#1799）。そのため「CIは通ったが、Claudeがレビューし終えたのか」は画面のどこにも
+ * 出ていなかった。自動マージされるPRでは判定が終わると`MergeJudgementBadge`（判定中）が
+ * 消えるだけで、レビューが動いたのか差分が小さくて飛ばされたのかも分からない。
+ *
+ * **実行中は描かない。** その言い回しは`MergeJudgementBadge`の「Claudeがレビュー中」が
+ * 持っており、両方出すと同じことを2回言うことになる（判定は`aiReviewSettledState`）。
+ *
+ * 配色は隣の「CI通過」と同じ`muted`にする。同じ「通ったチェック」なのに緑にすると、
+ * レビューの方が重い出来事に見えてしまう（緑は`DeployStatusBadge`の「本番反映済み」に
+ * 取ってある）。区別はアイコンで付け、失敗だけ人が動く必要がある赤にする。
+ * `runUrl`があればピルごと実行ログへのリンクにする（他のピルと同じ形）。
+ */
+export function AiReviewBadge({ aiReview }: { aiReview: AiReview | null | undefined }) {
+  const state = aiReviewSettledState(aiReview);
+  if (state === null) return null;
+
+  const Icon = AI_REVIEW_ICON[state];
+  const label = AI_REVIEW_SETTLED_LABEL[state];
+  const reason = AI_REVIEW_SETTLED_REASON[state];
+  const className = cn(
+    "inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+    state === "failed"
+      ? "bg-destructive/15 text-destructive ring-destructive"
+      : "bg-muted text-muted-foreground ring-border",
+  );
+  const content = (
+    <>
+      <Icon className="size-3" aria-hidden="true" />
+      {label}
+    </>
+  );
+
+  if (!aiReview?.runUrl) {
+    return (
+      <span className={className} title={reason}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={aiReview.runUrl}
       target="_blank"
       rel="noopener noreferrer"
       className={cn(className, "hover:underline")}

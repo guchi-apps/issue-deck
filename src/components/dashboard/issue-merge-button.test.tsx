@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 
 describe("IssueMergeButton", () => {
   afterEach(() => {
@@ -48,7 +49,7 @@ describe("IssueMergeButton", () => {
       <IssueMergeButton
         onMerge={async () => true}
         ciStatus="success"
-        mergeJudgement={{ state: "pending", step: null, runUrl: null }}
+        mergeJudgement={{ state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE }}
       />,
     );
     const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
@@ -62,7 +63,7 @@ describe("IssueMergeButton", () => {
       <IssueMergeButton
         onMerge={async () => true}
         ciStatus="success"
-        mergeJudgement={{ state: "settled", step: null, runUrl: null }}
+        mergeJudgement={{ state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE }}
       />,
     );
     const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;

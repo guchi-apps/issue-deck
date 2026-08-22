@@ -1,4 +1,9 @@
-import type { MergeJudgement, MergeJudgementStep } from "@/lib/github/check-rollup";
+import type {
+  AiReview,
+  AiReviewState,
+  MergeJudgement,
+  MergeJudgementStep,
+} from "@/lib/github/check-rollup";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -410,6 +415,47 @@ export function mergeJudgementLabel(step: MergeJudgementStep | null): string {
  */
 export function mergeJudgementReason(step: MergeJudgementStep | null): string {
   return `${mergeJudgementLabel(step)}です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
+}
+
+/**
+ * バッジとして描く、Claudeのレビューの「終わった後」の状態（#2150）。
+ * `AiReviewState`から`pending`（実行中）と`none`（check-runが無い）を除いたもの。
+ */
+export type AiReviewSettledState = Exclude<AiReviewState, "pending" | "none">;
+
+/**
+ * Claudeのレビューの状態を表す、画面のバッジの文言（#2150）。
+ *
+ * **`pending`は入っていない。** 実行中の言い回しは`MERGE_JUDGEMENT_STEP_LABEL`の
+ * 「Claudeがレビュー中」が既に持っており、両方出すと同じことを2回言うことになる。
+ * このバッジが引き受けるのは「終わった後」の3状態だけ。
+ */
+export const AI_REVIEW_SETTLED_LABEL: Record<AiReviewSettledState, string> = {
+  passed: "Claudeのレビュー完了",
+  skipped: "Claudeのレビュー省略",
+  failed: "Claudeのレビュー失敗",
+};
+
+/** バッジの`title`に出す説明（#2150）。PCでマウスを載せたときに、その状態の意味まで読めるようにする */
+export const AI_REVIEW_SETTLED_REASON: Record<AiReviewSettledState, string> = {
+  passed: "Claude Codeによるレビューが終わっています（claude-review-develop）。",
+  skipped:
+    "差分が小さくリスクのあるパスも含まれないため、Claude Codeによるレビューは実行されていません（claude-review-develop / risk-check）。",
+  failed:
+    "Claude Codeによるレビューが失敗しました（claude-review-develop）。対応Issueへ00.check-userが付き、ユーザーの確認待ちになります。",
+};
+
+/**
+ * バッジを出す状態か（#2150）。**出すのは終わった3状態だけ。**
+ *
+ * `pending`は上のとおり「Claudeがレビュー中」が受け持ち、`none`（check-runが無い）は
+ * ワークフロー未配布・リリースPR・起動前のいずれかで、言えることが何も無いため出さない。
+ */
+export function aiReviewSettledState(
+  aiReview: AiReview | null | undefined,
+): AiReviewSettledState | null {
+  const state = aiReview?.state;
+  return state === "passed" || state === "skipped" || state === "failed" ? state : null;
 }
 
 /**

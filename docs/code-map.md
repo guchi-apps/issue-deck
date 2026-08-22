@@ -877,6 +877,25 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   消費は増えない: `mergeable`は上のとおりCI状態と同じGraphQLに相乗りし（1件ずつの
   `fetchRefCheckState`をやめ、`fetchPullRequestCiStates`のまとめ取りにしたので**むしろ減る**）、
   `repairRun`はGitHubではなくDBを1回引くだけ。
+- **CI状態の呼び名と見た目を持つのは`CiStateBadge`の1か所だけ**（#2150。
+  [`components/dashboard/pull-request-badges.tsx`](../src/components/dashboard/pull-request-badges.tsx)）。
+  以前は同じラベル表と同じピルがPR画面・Issue画面（`pull-request-ci-status.tsx`）・リリース進捗
+  （`release-progress.tsx`）の3ファイルに複製されており、#2145で文言を「CI通過」へ揃えた後も
+  複製そのものは残っていた（揃える前はIssue画面だけ「CI成功」だった）。Issue画面が持つ型は
+  `PullRequestCiStatus`でPR画面の`CiState`と違うため、`PullRequestCiStatusBadge`は
+  **型を戻して`CiStateBadge`へ渡すだけの薄い層**にしてある。状態や文言を足すときはここだけを触る。
+- **「Claudeがレビューし終えたか」はCI状態とも判定全体とも別の軸として持つ**（#2150。
+  `check-rollup.ts`の`toAiReview`→ `MergeJudgement.aiReview`、画面は
+  `pull-request-badges.tsx`の`AiReviewBadge`）。判定ワークフローのcheck-runはCI状態の集約から
+  外してあり（#1799）、判定全体（`mergeJudgement.state`）が`settled`になるのは`auto-merge`まで
+  終わってから。そのため**CIが通った後にレビューだけが動いている窓**と、**差分が小さくて
+  レビューが走らなかったPR**が、どちらも画面では「何も出ていない」になっていた。
+  `claude-review`ジョブのcheck-runだけを見て、完了（`success`）・省略（`skipped`。
+  `risk-check`の`needs-review`が偽）・失敗の3つに分けて出す。**実行中は出さない**——その
+  言い回しは`MergeJudgementBadge`の「Claudeがレビュー中」が持っており、両方出すと同じことを
+  2回言うことになる。**肩代わりジョブ（`claude-review-fallback`）は数えない**（`00.check-user`を
+  付けるだけでレビューをやり直さないため）。取得は既存のGraphQLの応答から読むだけで、
+  **GitHub APIの消費は増えない**。
 - **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145。
   [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)の
   `isIssuePullRequestSettling`）。コンフリクトの自動解消と自動マージ可否の判定は**CIが通過した

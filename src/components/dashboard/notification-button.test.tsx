@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationButton } from "@/components/dashboard/notification-button";
 import { NotificationProvider } from "@/components/dashboard/notification-state";
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
@@ -105,7 +106,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,

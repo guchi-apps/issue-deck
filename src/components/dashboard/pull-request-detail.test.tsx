@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type {
   PullRequestDeployStatus,
   PullRequestSummary,
@@ -32,7 +33,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
@@ -173,6 +174,41 @@ describe("PullRequestDetail", () => {
 
     renderDetail();
     expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
+  });
+
+  it("Claudeのレビューが終わったPRはCI状態の隣にバッジを出す（#2150）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "passed", runUrl: null },
+        },
+      }),
+    });
+    expect(screen.getByText("CI通過")).toBeTruthy();
+    expect(screen.getByText("Claudeのレビュー完了")).toBeTruthy();
+  });
+
+  // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
+  it("レビューが実行されなかったPRは「省略」と出す（#2150）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "skipped", runUrl: null },
+        },
+      }),
+    });
+    expect(screen.getByText("Claudeのレビュー省略")).toBeTruthy();
+  });
+
+  it("レビューのcheck-runが無いPRにはバッジを出さない（#2150）", () => {
+    renderDetail();
+    expect(screen.queryByText(/^Claudeのレビュー/)).toBeNull();
   });
 
   it("別のPRの取得結果は表示しない", () => {

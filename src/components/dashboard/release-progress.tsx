@@ -3,7 +3,11 @@
 import { Check, CircleAlert, Clock, ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
-import { ConflictBadge, RepairRunBadge } from "@/components/dashboard/pull-request-badges";
+import {
+  CiStateBadge,
+  ConflictBadge,
+  RepairRunBadge,
+} from "@/components/dashboard/pull-request-badges";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { parseGithubReferenceUrl } from "@/lib/github-reference";
 import {
@@ -86,36 +90,6 @@ type Step = {
   /** 参考リンク（要操作ではない。実行中・完了段でrun詳細への導線として添える） */
   link?: { href: string; label: string; pending?: boolean };
 };
-
-const CI_STATE_LABEL: Record<CiState, string> = {
-  pending: "CI実行中",
-  success: "CI通過",
-  failure: "CI失敗",
-  unknown: "CI状態は不明",
-};
-
-/**
- * マージ待ちPRの最新コミットのCI状態を色付きピルで表示する。`pull-request-ci-status.tsx`の
- * 配色方針（primary/destructive/mutedのring付きピル）を踏襲しつつ、型はCiState用に独立させている。
- */
-function CiStateBadge({ ciState }: { ciState: CiState | null | undefined }) {
-  if (!ciState) return null;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-        ciState === "pending"
-          ? "bg-primary/15 text-primary ring-primary"
-          : ciState === "failure"
-            ? "bg-destructive/15 text-destructive ring-destructive"
-            : "bg-muted text-muted-foreground ring-border",
-      )}
-    >
-      {CI_STATE_LABEL[ciState]}
-    </span>
-  );
-}
 
 /**
  * 段に紐づくマージ待ちPRから、自動修復ボタンの対象を組み立てる（#1293）。
