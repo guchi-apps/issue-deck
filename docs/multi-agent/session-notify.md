@@ -324,6 +324,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | ✅ 応答終了 |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | **送らない**（Issueのコメントへ回す） |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | **送らない**（issue-deckの画面へだけ回す） |
+| `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | **送らない**（issue-deckの画面へだけ回す。後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
@@ -335,6 +336,33 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
 潰さないため、この経路は生きている。
 
 `SessionEnd`は使っていない。tmuxのウィンドウを閉じただけのイベントに通知の価値が薄い。
+
+## 公開したアーティファクトはissue-deckへ取り込む（#2154）
+
+**claude.aiのアーティファクトページはiframeに入らない。** `https://claude.ai/code/artifact/<id>`は
+`content-security-policy: frame-ancestors 'self'`を返すため（実測）、URLだけを画面へ運んでも
+「ブラウザに遷移せずにアプリ上で見る」ことにはならない。中身を出している
+`<id>.frame.claudeusercontent.com`の方も、トークン付きのパスでしか開かない。
+
+そこで`Artifact`ツールの`PostToolUse`で、**公開したHTMLファイルの原本ごと**
+`POST /api/dispatch/sessions/artifact`へ送る。issue-deckは`uploads/artifacts/`へ保存し、
+自分のオリジンから`GET /api/issues/artifacts/<id>`として配り直す。
+
+- **`PostToolUse`の間引き（#1357）より前で処理する。** 間引きは「直前が入力待ちのとき」しか
+  通さないが、アーティファクトの公開の直前に承認プロンプトが出るとは限らない
+- **公開（`action`が未指定か`publish`）だけを拾う。** `list`・`read`・`comments`・`upload_asset`は
+  取り込まない
+- **URLはツールの応答から正規表現で拾うだけ**で、取れなくても取り込む。見た目を出すのに
+  要るのはHTMLの原本で、URLはclaude.aiで開き直すための逃げ道にすぎない
+- **同じファイルパスへの再公開は上書き**（claude.aiでも同じURLになる）。履歴は持たない
+- 出るのは**近似**。claude.aiが公開時に足しているmermaidの描画とランタイム機能
+  （`window.claude.*`）は再現しない。その断りは画面（プレビューの下辺）に出している
+- 中身はエージェントが書いた任意のHTML・JSなので、**配信時のCSPと画面のiframeの両方で
+  `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
+  手が届く）
+
+画面では、Issue詳細の「アーティファクト」セクションと、本文・コメント中のclaude.aiリンク
+（保存済みのものだけ）から開ける。
 
 ## 通知の中身
 

@@ -8,8 +8,10 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ImagePreviewDialog } from "@/components/dashboard/image-preview-dialog";
+import { parseArtifactUrlId } from "@/lib/artifact-document";
 import { copyText } from "@/lib/copy-text";
 import { hastToCopyText } from "@/lib/hast-text";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
@@ -100,14 +102,45 @@ const LINK_CLASS = "text-primary underline underline-offset-2";
  * それ以外（外部サイト・Actionsのログなど）は従来どおり別タブで開く（#1260）。
  * `#123`形式の参照は`rehypeLinkifyIssueRefs`が既にGitHubのURLへ展開しているので、
  * ここでは区別せず同じ扱いになる。
+ *
+ * **claude.aiのアーティファクトURLも、保存済みならアプリ内で開く**（#2154）。計画コメントに
+ * 載ったURLをスマホから押したときに、claude.aiへログインし直さずに見た目を確かめられる。
+ * 保存が無い（このIssueのものではない・取り込む前に公開された）ときは素の外部リンクのまま。
  */
 function MarkdownLink({ children, href, title }: ComponentProps<"a">) {
+  // フックは条件の外で呼ぶ。**保存済みかどうかで分岐するのはこの後**
+  const artifactPreview = useArtifactPreview();
+  const artifactId = parseArtifactUrlId(href);
+  const artifact = artifactId ? (artifactPreview?.findByClaudeId(artifactId) ?? null) : null;
+
   // 受け取ったpropsをまとめて流さないのは、react-markdownがhastのノード（node）も渡してくるため。
   // DOMへ流すと無効な属性になる。リンクとして必要なのはhrefとtitleだけで、target・relは
   // GithubReferenceLinkが決める。
   if (typeof href !== "string" || href === "") {
     return (
       <a title={title} className={LINK_CLASS}>
+        {children}
+      </a>
+    );
+  }
+
+  if (artifact && artifactPreview) {
+    return (
+      <a
+        href={href}
+        title={title}
+        target="_blank"
+        rel="noreferrer"
+        className={LINK_CLASS}
+        onClick={(event) => {
+          // 修飾キー付き・左ボタン以外は「別で開きたい」意思表示なので、ブラウザに任せる
+          // （`GithubReferenceLink`と同じ判定）
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (event.button !== 0) return;
+          event.preventDefault();
+          artifactPreview.open(artifact);
+        }}
+      >
         {children}
       </a>
     );

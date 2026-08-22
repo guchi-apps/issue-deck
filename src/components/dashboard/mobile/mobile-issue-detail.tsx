@@ -20,9 +20,11 @@ import {
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
@@ -120,6 +122,7 @@ import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
@@ -177,6 +180,8 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
+  // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
+  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   // 手作業Issueが待っている相手の状況（#1705）。PCの詳細と同じフック・同じ部品を使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
@@ -560,6 +565,8 @@ export function MobileIssueDetail({
   }
 
   return (
+    // 本文・コメントの中のclaude.aiリンクもプレビューへ差し替えるので、詳細の全体を包む（#2154）
+    <ArtifactPreviewProvider artifacts={artifacts}>
     <div className="relative flex h-full flex-col overflow-hidden" {...swipeBackHandlers}>
       <header className="flex shrink-0 items-center gap-3 border-b p-4">
         <button
@@ -753,6 +760,13 @@ export function MobileIssueDetail({
             />
           </div>
         )}
+
+        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く */}
+        <IssueArtifactSection
+          artifacts={artifacts}
+          onReload={reloadArtifacts}
+          idPrefix="mobile"
+        />
 
         {showStartDialog && (
           <StartImplementationDialog
@@ -1099,5 +1113,6 @@ export function MobileIssueDetail({
         onOpenChange={setIsSummaryDialogOpen}
       />
     </div>
+    </ArtifactPreviewProvider>
   );
 }
