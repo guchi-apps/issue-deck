@@ -7,6 +7,7 @@ import {
   extractManualStepCommands,
   extractVerificationCommands,
   findInteractiveCommand,
+  findPlaceholder,
   isSubpcManualStepDevice,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
@@ -49,6 +50,11 @@ export type ManualStepRunEntry = {
    * 分からず、人はどのコマンドを自分で実行すればよいのか判断できない）。
    */
   interactiveCommand: string | null;
+  /**
+   * このコマンドに含まれる、人が値を埋めるプレースホルダの表記（#2051）。`null`なら無い。
+   * `interactiveCommand`と同じく、**止まった理由を画面へ出すために持ち回る**。
+   */
+  placeholder: string | null;
   /** 代行できない理由。`null`なら押せる */
   rejection: ManualStepExecutionRejection | null;
 };
@@ -88,6 +94,7 @@ export function buildManualStepRunPlan(
   const reject = (
     hasCommand: boolean,
     interactiveCommand: string | null,
+    placeholder: string | null,
   ): ManualStepExecutionRejection | null =>
     resolveManualStepExecutionRejection({
       host: context.host,
@@ -95,6 +102,7 @@ export function buildManualStepRunPlan(
       isSubpcDevice,
       hasCommand,
       interactiveCommand,
+      placeholder,
       hasActiveJob: context.hasActiveJob ?? false,
     });
 
@@ -102,6 +110,7 @@ export function buildManualStepRunPlan(
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
       const interactiveCommand = findInteractiveCommand(command);
+      const placeholder = findPlaceholder(command);
       return {
         kind: "step",
         order: index + 1,
@@ -111,11 +120,13 @@ export function buildManualStepRunPlan(
         command,
         checked: step.checked,
         interactiveCommand,
-        rejection: reject(command !== null, interactiveCommand),
+        placeholder,
+        rejection: reject(command !== null, interactiveCommand, placeholder),
       };
     }),
     ...verifications.map((entry, index): ManualStepRunEntry => {
       const interactiveCommand = findInteractiveCommand(entry.command);
+      const placeholder = findPlaceholder(entry.command);
       return {
         kind: "verification",
         order: index + 1,
@@ -125,7 +136,8 @@ export function buildManualStepRunPlan(
         command: entry.command,
         checked: false,
         interactiveCommand,
-        rejection: reject(true, interactiveCommand),
+        placeholder,
+        rejection: reject(true, interactiveCommand, placeholder),
       };
     }),
   ];
