@@ -4,6 +4,7 @@ import { ChevronRight, ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-
 import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
@@ -484,8 +485,19 @@ function CompactHostCard({
  * 同じクラスを置くこと自体が高さの一致になる）。**`CompactHostCard`を直すときはここも直す。**
  *
  * 使用率は実物が4列（SWAPを申告していないホストでは3列）だが、**列数は高さに影響しない**ので
- * ここは4列で固定してよい。スクリプトの版の行（遅れているときだけ出る）は敷かない——
- * 遅れているかどうかは取得するまで分からず、出ない側に合わせないと常に1行ぶん余る。
+ * ここは4列で固定してよい。
+ *
+ * **合わせているのは「応答していて使用率を申告している」1通りだけ**（#2090の計画レビュー指摘1）。
+ * 実物の高さは3通りある。取得するまでどれになるかは分からないので、いちばん普通の1通りに
+ * 合わせ、残りは差ぶんだけ動くのを許す（`min-h-*`を実物とスケルトンに揃えて置く手もあるが、
+ * いちばん高い状態に合わせることになり、普通の状態のカードに常に空きができる）。
+ *
+ * - 応答していて最新: 見出し＋使用率。**ここに合わせている**（ずれ0）
+ * - 応答していて遅れている・遅れ不明: 上にスクリプトの版が1行増える（`mt-1`＋16.5px＝約21px
+ *   ぶん下へ動く）。`describeDispatchHostCheckout`は`behindCount`が0以外か`null`なら
+ *   `tone`を`normal`以外にするため、developが進んで「更新して再起動」を押すまでの間はこちら
+ * - 応答していない: `describeDispatchHostMetrics`が`null`を返して使用率ごと消え、見出しだけの
+ *   カードになる（約51px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
  */
 export function CompactHostCardSkeleton() {
   return (
@@ -494,27 +506,27 @@ export function CompactHostCardSkeleton() {
       <span className="sr-only" role="status">
         サブPCの状態を読み込み中
       </span>
-      <div aria-hidden className="animate-pulse">
+      <div aria-hidden>
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex items-center gap-1.5 text-xs font-medium">
-            <span className="size-1.5 shrink-0 rounded-full bg-muted" />
-            <span className="rounded bg-muted text-transparent">サブPC</span>
+            <Skeleton className="size-1.5 shrink-0 rounded-full" />
+            <Skeleton className="rounded-sm text-transparent">サブPC</Skeleton>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
-            <span className="rounded bg-muted text-[11px] text-transparent">セッション 0/0</span>
+            <Skeleton className="rounded-sm text-[11px] text-transparent">セッション 0/0</Skeleton>
           </span>
         </div>
 
         <div className="mt-2 grid grid-cols-4 gap-2">
           {SKELETON_METRIC_LABELS.map((label) => (
             <span key={label} className="flex min-w-0 flex-col gap-0.5">
-              <span className="truncate rounded bg-muted text-[10px] text-transparent">
+              <Skeleton className="truncate rounded-sm text-[10px] text-transparent">
                 {label}
-              </span>
-              <span className="rounded bg-muted text-[13px] font-semibold text-transparent tabular-nums">
+              </Skeleton>
+              <Skeleton className="rounded-sm text-[13px] font-semibold text-transparent tabular-nums">
                 00%
-              </span>
-              <span className="h-1 rounded-full bg-muted" />
+              </Skeleton>
+              <Skeleton className="h-1 rounded-full" />
             </span>
           ))}
         </div>
