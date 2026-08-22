@@ -1521,6 +1521,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
   読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
   足すと同じ役が2つになる）。
+- **重いコマンド（テスト・ビルド）は機体全体で同時2本までに絞る**（#2076。
+  `scripts/heavy-command.sh`）。`package.json`の`test:unit`・`build`が`flock`で枠を取ってから
+  走る。既存の上限（`AppSetting.dispatchConcurrency`・`DISPATCH_MAX_SESSIONS`）は**ジョブの
+  払い出しとセッション本数にしか効かず**、立った後の12本が同時にテストを始められた
+  （1本でピーク3.24GiB・12スレッド）。枠の置き場はリポジトリの外
+  （`${XDG_CACHE_HOME:-~/.cache}/heavy-command`）で、制約が機体にあるため他リポジトリと共有できる。
+  1本あたりのワーカー数は`vitest.config.ts`が6に絞る。設計は
+  [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「立った後のセッションが走らせるものには上限が無い」。
 - **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
   worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
   既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は
