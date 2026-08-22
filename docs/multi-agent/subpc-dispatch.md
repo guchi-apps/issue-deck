@@ -1515,6 +1515,13 @@ issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](gener
 - **効くのはissue-deckのコマンドだけ。** 他リポジトリのセッション（dayspan・ops-dashboardなど）が
   走らせるテスト・ビルドは対象外で、そちらは各リポジトリが同じ仕組みを持つ必要がある
 
+> **`exec`のリダイレクトに`2>/dev/null`を直接付けない。** `exec {fd}>"$file" 2>/dev/null`と書くと、
+> `exec`はコマンドを伴わない＝**シェル自身のfdを恒久的に付け替える**ため、そこから先の標準エラー
+> 出力が丸ごと捨てられる。実装中に実際にこれを踏み、待機中のメッセージが1行も出ない状態で
+> 「枠は効いているのに待っているように見えない」という誤診をしかけた。抑えたいのはその1行だけ
+> なので`{ exec {fd}>"$file"; } 2>/dev/null`と囲う。`scripts/heavy-command.test.mjs`に
+> 「待機メッセージが出ること」を残してあるのは、ここが黙って消える壊れ方をするため。
+
 ## ポーリング間隔も設定値にする
 
 `~/.config/issue-deck/dispatch.env`の`DISPATCH_POLL_INTERVAL_SECONDS`（既定30秒）。
