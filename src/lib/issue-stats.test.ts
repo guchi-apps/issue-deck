@@ -944,6 +944,23 @@ describe("time-dependent stats", () => {
         computeNavCountsForFilters(issues, filters, null)["check-user"],
       );
     });
+
+    // #2174。エージェントが動いている確認待ちは、開いても押せる操作が無いので数えない。
+    // **一覧には残す**ため、行数との差はヘッダーの内訳（`formatCheckUserListCount`）で説明する
+    it("実行中の確認待ちは件数から外す（#2174）", () => {
+      const counts = computeNavCountsForFilters(
+        issues,
+        filters,
+        null,
+        issues,
+        new Set(["1"]),
+      );
+      expect(counts["check-user"]).toBe(1);
+    });
+
+    it("実行中の集合を渡さなければ従来どおり全件を数える", () => {
+      expect(computeNavCountsForFilters(issues, filters, null, issues)["check-user"]).toBe(2);
+    });
   });
 
   describe("computeOverviewStats", () => {

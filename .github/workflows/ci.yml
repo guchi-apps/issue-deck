@@ -103,9 +103,12 @@ jobs:
       - name: Prompt shared template sync check
         run: node scripts/generate-prompt-templates.mjs --check
 
-  # ワークフローの式テンプレート長（21,000バイト）超過を検出する（#901）。
-  # 超過するとワークフローファイル自体が無効になり、issue_comment等のトリガーが
-  # 一切発火しなくなるため、developへ入る前に落とす。
+  # ワークフローファイルが「Invalid workflow file」になる書き方を、developへ入る前に落とす。
+  # 無効になるとトリガーが一切発火しなくなり、ジョブも作られないためログに何も残らない。
+  # **ジョブ名は変えないこと**（ブランチ保護の必須チェックとして参照されている）。検査を
+  # 増やすときはここへステップを足す。
+  #   - 式テンプレート長（21,000バイト）の超過（#901）
+  #   - 式として解釈できない `${{ ... }}`（#2181）
   workflow-expression-length-check:
     runs-on: ubuntu-latest
 
@@ -115,6 +118,9 @@ jobs:
 
       - name: Workflow expression length check
         run: node scripts/check-workflow-expression-length.mjs
+
+      - name: Workflow expression syntax check
+        run: node scripts/check-workflow-expression-syntax.mjs
 
   # ワークフロー同期のずれを知らせるだけの通知ジョブ。CIの合否には影響させない。
   # continue-on-errorをジョブ単位ではなくステップ単位に付けているのは、ジョブ単位だと

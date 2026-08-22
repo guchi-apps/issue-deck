@@ -65,11 +65,17 @@ export type MobileScreen =
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
 /**
- * フッターの「PR」タブから開くときのビュー（#1436）。取得がopenのPRだけで済む
- * 「処理中のPR」にしてある。`DEFAULT_PULL_REQUEST_VIEW`（`all`）は画面内のリンクから
+ * フッターの「PR」タブから開くときのビュー（#1436・#2176）。
+ *
+ * **元は「実行中」だったが「マージ待ち」へ変えた（#2176）。** 実行中のPRはCIの結果を待つ
+ * しかなく、タブを押した直後に手を動かせるのは「あとはマージするだけ」のPRの方。取得する
+ * PRの母集団（`usePullRequests`の`scope`）はビューに依存しないので、どちらでも通信は増えない。
+ *
+ * 切り替えたいときは画面下端のビュー行・左右スワイプで1タップ・1スワイプで移れる
+ * （`mobile-pull-requests-screen.tsx`）。`DEFAULT_PULL_REQUEST_VIEW`（`all`）は画面内のリンクから
  * マージ済みPRを直接開く経路（#1260）のための既定なので、そちらは変えない。
  */
-const PULL_REQUEST_TAB_DEFAULT_VIEW: PullRequestViewId = "in-progress";
+const PULL_REQUEST_TAB_DEFAULT_VIEW: PullRequestViewId = "completed";
 
 // スマホ画面の現在地をURLクエリ（mscreen/mrepo/missue/mview/mlabels/mstate/massignee/msort）に保持する。
 // ステートのみで管理するとページ更新時に必ずホーム画面へ戻ってしまい、Issue詳細から一覧へ

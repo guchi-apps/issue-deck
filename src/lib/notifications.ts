@@ -87,6 +87,12 @@ export type BuildNotificationsInput = {
   pullRequests: PullRequestSummary[];
   /** リポジトリごとのリリース状況。未取得はnull */
   releaseStatuses: RepositoryReleaseStatus[] | null;
+  /**
+   * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
+   * **画面が左メニューの件数に使っているのと同じ集合を渡す**——ここで数え直すと、
+   * メニューからは消えているのにベルには「PRのマージ」と出ている状態になる。
+   */
+  checkUserRunningIssueIds?: ReadonlySet<string>;
 };
 
 /**
@@ -171,18 +177,28 @@ function selectCheckUserIssues(issues: Issue[]): Issue[] {
 function buildCheckUserNotifications(
   issues: Issue[],
   pullRequests: PullRequestSummary[],
+  runningIssueIds: ReadonlySet<string> | undefined,
 ): NotificationItem[] {
   return selectCheckUserIssues(issues).map((issue) => {
     const reason = checkUserReason(issue.labels);
     const awaitingCi = isMergeAwaitingCi(issue, pullRequests);
+    // エージェントがまだ動いているもの（#2174）。左メニューの件数から外したのと同じ集合で、
+    // CIの完了待ち（#1709）と同じく「いま人が動けるものではない」側へ寄せる
+    const running = runningIssueIds?.has(issue.id) === true;
     return {
       id: `check-user:${issue.id}`,
       group: "check-user",
       // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）。
-      // CIの完了待ちも、いま人が動けるものではないので同じ扱いにする（#1709）。
-      tone: reason === "answered" || awaitingCi ? "info" : "action",
+      // CIの完了待ち・エージェントの実行中も、いま人が動けるものではないので同じ扱いにする。
+      tone: reason === "answered" || awaitingCi || running ? "info" : "action",
       title: `#${issue.number} ${issue.title}`,
-      badgeLabel: awaitingCi ? "CI実行中" : reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
+      badgeLabel: awaitingCi
+        ? "CI実行中"
+        : running
+          ? "実行中"
+          : reason
+            ? CHECK_USER_REASON_TEXT[reason]
+            : "確認待ち",
       repositoryFullName: issue.repositoryFullName,
       since: issue.checkUserLabeledAt ?? issue.updatedAt,
       target: { kind: "issue", issueId: issue.id },
@@ -267,10 +283,14 @@ function buildPullRequestNotifications(
  * `sort`の安定性で保つ。
  */
 export function buildNotifications(input: BuildNotificationsInput): NotificationItem[] {
-  const { issues, pullRequests, releaseStatuses } = input;
+  const { issues, pullRequests, releaseStatuses, checkUserRunningIssueIds } = input;
 
   const releaseItems = buildReleaseNotifications(releaseStatuses);
-  const checkUserItems = buildCheckUserNotifications(issues, pullRequests);
+  const checkUserItems = buildCheckUserNotifications(
+    issues,
+    pullRequests,
+    checkUserRunningIssueIds,
+  );
   const manualStepItems = buildManualStepNotifications(issues);
 
   // PR側から落とす対象を集める。

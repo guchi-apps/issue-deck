@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { navViews } from "@/lib/nav-views";
-import type { NavViewId } from "@/types/issue";
+import type { Issue, NavViewId } from "@/types/issue";
 
 // 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
 // 先頭の固定枠（#1713）だけは、どのビューで描かれるかをここで確かめるため通す。
@@ -52,12 +52,15 @@ function renderScreen(
     onRefresh: () => Promise<unknown> | void;
     fetchedAt: string | null;
     autoRefreshIntervalMs: number | null;
+    issues: Issue[];
+    checkUserRunningIssueIds: ReadonlySet<string>;
   }> = {},
 ) {
   render(
     <MobileIssueListScreen
       title="Issue"
-      issues={[]}
+      issues={overrides.issues ?? []}
+      checkUserRunningIssueIds={overrides.checkUserRunningIssueIds}
       navCounts={NAV_COUNTS}
       selectedIssueId={null}
       view={overrides.view ?? "all"}
@@ -75,6 +78,11 @@ function renderScreen(
       autoRefreshIntervalMs={overrides.autoRefreshIntervalMs}
     />,
   );
+}
+
+/** ヘッダーの件数だけを見るテスト用。一覧本体は差し替えてあるので中身は最小限でよい */
+function makeIssue(id: string): Issue {
+  return { id, number: Number(id), title: `Issue ${id}` } as Issue;
 }
 
 const MERGE_PENDING_PINNED = {
@@ -168,6 +176,17 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
     expect(
       screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent,
     ).toContain("5");
+  });
+
+  // #2174: 左メニューが実行中の確認待ちを件数から外すため、行数のままだと数が食い違う
+  it("「ユーザーの確認待ち」のヘッダーは、実行中を引いた件数と内訳を出す（#2174）", () => {
+    renderScreen({
+      view: "check-user",
+      issues: [makeIssue("1"), makeIssue("2")],
+      checkUserRunningIssueIds: new Set(["1"]),
+    });
+
+    expect(screen.getByText("ユーザーの確認待ち・1件・実行中1件")).toBeTruthy();
   });
 
   it("絞り込みシートの「すべて解除」で状態・ラベル・担当者だけを既定へ戻す", () => {
