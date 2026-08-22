@@ -156,6 +156,11 @@ privateリポジトリでブランチ保護が使えないことで壊れるの�
 
 `vps`と`docs`がprivate必須である以上、public化だけでは片付かない。
 
+**この判断はActions分数だけの話ではない。** secret scanning / push protectionも
+「publicなら無料・privateならGHAS `Secret Protection`として$19/月」という同じ構造を持つ
+（#2098で実際に課金が発生した）。privateのまま残すリポジトリで何を有効にしてよいかは
+[docs/github-billing.md](github-billing.md)にまとめている。
+
 ### 移行対象の切り分け
 
 archivedな大学系7件（thesis系・tyuujitu系）は個人の資産であり、アプリ運用とは無関係なので
