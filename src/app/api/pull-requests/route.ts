@@ -9,6 +9,7 @@ import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRuns,
   repairRunKey,
+  visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
@@ -182,8 +183,12 @@ async function handleGET(request: Request) {
       })),
   );
   for (const pullRequest of allPullRequests) {
-    pullRequest.repairRun =
-      repairRuns.get(repairRunKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
+    // 症状（コンフリクト・CI失敗）が消えたPRでは出さない（#2165）。終了の報告が届かなかった
+    // 修復がDBに`running`のまま残るため、行の有無だけで出すと解消後もピルが消えない。
+    pullRequest.repairRun = visibleRepairRun(
+      repairRuns.get(repairRunKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null,
+      pullRequest,
+    );
   }
 
   const response: PullRequestListResponse = {

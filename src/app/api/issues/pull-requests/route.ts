@@ -11,6 +11,7 @@ import { toPullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import {
   fetchActivePullRequestRepairRuns,
   repairRunKey,
+  visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import {
   fetchPullRequest,
@@ -68,7 +69,11 @@ function toIssuePullRequest(
     ciStatus: checkState ? toPullRequestCiStatus(checkState.ciState) : null,
     mergeJudgement: checkState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: checkState?.mergeable ?? null,
-    repairRun,
+    // 症状（コンフリクト・CI失敗）が消えたPRでは出さない（#2165）。
+    repairRun: visibleRepairRun(repairRun, {
+      mergeable: checkState?.mergeable ?? null,
+      ciState: checkState?.ciState ?? null,
+    }),
     linkedIssueNumber: extractLinkedIssueNumber({
       headRef: pullRequest.head.ref,
       title: pullRequest.title,

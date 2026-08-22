@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import type { RepairKind } from "@/lib/github/pull-request-repair";
+import type { CiState } from "@/lib/github/release-api";
 
 /**
  * PRの自動修復がいま走っているか（#2072）。
@@ -26,10 +27,13 @@ export type PullRequestRepairRunSummary = {
 /**
  * 「実行中」と見なす上限（分）。これを過ぎた行は走っていないものとして扱う。
  *
- * 終了の報告はジョブの最後のステップ（`if: always()`）が行い、**キャンセルされた場合も
- * `always()`は走る**ため、報告が届かないのはrunnerごと落ちたときに限られる。それでも
- * `running`のまま残ると「自動修正中」が消えず、修復ボタンも押せないままになるので、
- * 時間で失効させる安全網を置く。
+ * 終了の報告はジョブの最後のステップ（`if: always()`）が行うが、**ジョブが始まる前に
+ * キャンセルされるとステップは1つも走らない**（`concurrency`のcancel-in-progressで実際に
+ * 起きている）。runnerごと落ちた場合と合わせて`running`のまま残ると「自動修正中」が消えず、
+ * 修復ボタンも押せないままになるので、時間で失効させる安全網を置く。
+ *
+ * **これは最後の砦で、ふだん効かせるものではない。** 症状が消えたPRのピルは
+ * `visibleRepairRun`が読み出しの時点で落とす（#2165）。
  *
  * 値はGitHub Actionsのジョブの既定タイムアウト（360分）に合わせてある。**実行より先に
  * ピルが消える方が害が大きい**——長引いた実行でバッジだけ消えると、このIssueの困りごと
@@ -60,6 +64,49 @@ export function isRepairRunActive(
 ): boolean {
   if (run.status !== "running") return false;
   return now.getTime() - run.startedAt.getTime() < REPAIR_RUN_STALE_MINUTES * 60_000;
+}
+
+/**
+ * その修復が直そうとしていた症状が、対象PRから既に消えているか（#2165）。
+ *
+ * - `conflict` … コンフリクトが解消されている（`mergeable`がtrue）
+ * - `ci` … CIが通っている（`ciState`がsuccess）
+ *
+ * どちらも**修復が終わったことの十分な根拠**になる。コンフリクト解消のワークフロー自身、
+ * 着手前に`mergeable`を見直して「既にコンフリクトが解消されている」なら何もせずに終わる。
+ *
+ * 未判定（`mergeable`がnull・`ciState`がpending/unknown）は「消えていない」側へ倒す。
+ * 判定が出るまで表示を消さないという意味で、`repairKindsFor`の方針と揃える。
+ */
+export function isRepairSymptomGone(
+  kind: RepairKind,
+  pullRequest: { mergeable?: boolean | null; ciState?: CiState | null },
+): boolean {
+  return kind === "conflict" ? pullRequest.mergeable === true : pullRequest.ciState === "success";
+}
+
+/**
+ * 画面へ出す修復状況。**症状が消えたPRでは何も出さない**（#2165）。
+ *
+ * DBの行だけを見ていると、終了の報告が届かなかった修復が
+ * `REPAIR_RUN_STALE_MINUTES`（6時間）のあいだ「解消中」のまま残る。報告は3経路とも
+ * ワークフローの最後のステップが行うので、次のどちらでも届かない。
+ *
+ * - **ジョブが始まる前にキャンセルされた**（`concurrency`のcancel-in-progressで実際に起きる。
+ *   ステップが1つも走らないため`if: always()`のステップも動かない）
+ * - **配布済みのワークフローが報告のステップを持たない世代**（`@workflows/vN`をタグで固定して
+ *   いるため、issue-deck側で足しても配り直すまで届かない）
+ *
+ * どちらもissue-deck側からは区別できないうえ、**issue-deckは「実行中」の行を起動した時点で
+ * 自分で書いている**（`POST /api/pull-requests/repair`・巡回起動）ので、報告が来ない相手でも
+ * ピルだけは出てしまう。そこで、報告に頼らず**PRの今の状態**で消す。
+ */
+export function visibleRepairRun(
+  run: PullRequestRepairRunSummary | null,
+  pullRequest: { mergeable?: boolean | null; ciState?: CiState | null },
+): PullRequestRepairRunSummary | null {
+  if (run === null) return null;
+  return isRepairSymptomGone(run.kind, pullRequest) ? null : run;
 }
 
 /**
@@ -176,6 +223,41 @@ export async function fetchActivePullRequestRepairRun(
     now,
   );
   return active.get(repairRunKey(repositoryFullName, pullRequestNumber)) ?? null;
+}
+
+/**
+ * コンフリクトが解消されたPRに残っている「実行中」の行を、終わった側へ倒す（#2165）。
+ *
+ * 表示は`visibleRepairRun`が読み出しのたびに落とすが、**行そのものが`running`のまま残ると
+ * 巡回起動が止まる**（`decideConflictSweep`は`isRepairRunActive`な行を見て
+ * `repair_running`で見送るため、そのPRが6時間以内に再びコンフリクトしても起動しない）。
+ * 巡回はコンフリクト有無を毎回取っているので、そのついでに片付ける。
+ *
+ * 返すのは更新した行数。**失敗させない**——掃除ができなくても巡回そのものは続ける。
+ */
+export async function settleResolvedConflictRepairRuns(
+  targets: PullRequestRepairRunTarget[],
+  now: Date = new Date(),
+): Promise<number> {
+  if (targets.length === 0) return 0;
+
+  const result = await db.pullRequestRepairRun
+    .updateMany({
+      where: {
+        kind: "conflict",
+        status: "running",
+        OR: targets.map((target) => ({
+          repositoryFullName: target.repositoryFullName,
+          pullRequestNumber: target.pullRequestNumber,
+        })),
+      },
+      data: { status: "finished", finishedAt: now },
+    })
+    .catch((error: unknown) => {
+      console.warn("[settleResolvedConflictRepairRuns] 更新に失敗しました:", error);
+      return { count: 0 };
+    });
+  return result.count;
 }
 
 /**
