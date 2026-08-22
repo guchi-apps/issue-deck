@@ -19,10 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import {
-  formatQuestionNavTitle,
-  type QuestionAttention,
-} from "@/lib/question-attention";
+import { formatQuestionNavTitle } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
@@ -48,10 +45,10 @@ type MobileHomeScreenProps = {
   /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
   /**
-   * 「質問」の内訳（#2070）。件数（`navCounts`）は一覧に並ぶ数で、
-   * オレンジの丸は未確認（回答が届いていて未読）があるときだけ点ける。
+   * 未確認（回答が届いていて未読）の質問の件数（#2070）。**行に出す数字は`navCounts`から
+   * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
    */
-  questionAttention: QuestionAttention;
+  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
@@ -87,7 +84,7 @@ export function MobileHomeScreen({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
-  questionAttention,
+  unconfirmedQuestionCount,
   pullRequestNavCounts,
   onSelectQuickView,
   onSelectPullRequests,
@@ -231,8 +228,8 @@ export function MobileHomeScreen({
                 // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）。
                 // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
                 count={navCounts[view.id]}
-                emphasis={questionAttention.unconfirmed > 0 ? "attention" : "none"}
-                title={formatQuestionNavTitle(questionAttention)}
+                emphasis={unconfirmedQuestionCount > 0 ? "attention" : "none"}
+                title={formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount)}
               />
             ))}
             <MobileNavRow label="ブランチ" icon={GitBranch} onClick={onSelectFlow} />

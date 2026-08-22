@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import type { QuestionAttention } from "@/lib/question-attention";
 import { navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { getPullRequestView } from "@/lib/pull-request-views";
@@ -25,11 +24,11 @@ function renderSidebar(
   {
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
-    questionAttention = { total: navCounts.question, unconfirmed: 0 },
+    unconfirmedQuestionCount = 0,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
-    questionAttention?: QuestionAttention;
+    unconfirmedQuestionCount?: number;
   } = {},
 ) {
   render(
@@ -43,7 +42,7 @@ function renderSidebar(
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
-      questionAttention={questionAttention}
+      unconfirmedQuestionCount={unconfirmedQuestionCount}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -82,7 +81,7 @@ function renderSidebarWithRepositories(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
-      questionAttention={{ total: 0, unconfirmed: 0 }}
+      unconfirmedQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -206,7 +205,7 @@ describe("SidebarNav", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
       { ...NAV_COUNTS, question: 3 },
-      { questionAttention: { total: 3, unconfirmed: 1 } },
+      { unconfirmedQuestionCount: 1 },
     );
 
     const button = screen.getByRole("button", { name: /質問/ });
@@ -221,7 +220,7 @@ describe("SidebarNav", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
       { ...NAV_COUNTS, question: 3 },
-      { questionAttention: { total: 3, unconfirmed: 0 } },
+      { unconfirmedQuestionCount: 0 },
     );
 
     const button = screen.getByRole("button", { name: /質問/ });

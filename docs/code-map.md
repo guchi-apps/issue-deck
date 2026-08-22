@@ -551,9 +551,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   - **「質問」は#1910で数字を未確認（回答が届いていて未読）へ差し替えていたが、#2070で戻した。**
     読み終えた質問しか無いと、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
     （質問の確認済みは作業待ちの前提待ちと違い、「読んだがまだcloseしていない」＝人が片付ける
-    余地が残っているもの）。未確認は
-    [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`computeQuestionAttention`が
-    別に返し、丸を点ける判定と吹き出し（`formatQuestionNavTitle`）にだけ使う。
+    余地が残っているもの）。未確認は`countUnconfirmedQuestions`をシェルで別に数え、丸を点ける
+    判定と吹き出し（`formatQuestionNavTitle`）にだけ渡す。**総数は`navCounts`から引き、
+    画面側で数え直さない**——数え直すと同じ行の数字と吹き出しが別の数え方になる。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
   一覧の先頭に`MergePendingPullRequests`、選ぶ対象は`pullRequestsAwaitingUserMerge`）。
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
@@ -684,10 +684,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
     同じ。開いた時点で既読）に乗せる——質問だけ別の基準を作ると、同じ行の中でドットとラベルが
     食い違う。
-  - **左メニューの件数は未確認の件数で、確認待ち・作業待ちと同じ塗りつぶしのオレンジの丸
-    （`NavCount`の`emphasis="attention"`）で出す**（#1910）。数字の文字色だけを変える弱い強調
-    （旧`emphasis="unread"`）は#1796の判断だったが、色だけでは未確認の回答に気づけず見落として
-    いたため廃止した。**丸が点いている行は、上から順に手を動かせば消える**という読み方に揃える。
+  - **左メニューの丸は、確認待ち・作業待ちと同じ塗りつぶしのオレンジ
+    （`NavCount`の`emphasis="attention"`）で、未確認が1件でもあれば点ける**（#1910）。数字の
+    文字色だけを変える弱い強調（旧`emphasis="unread"`）は#1796の判断だったが、色だけでは未確認の
+    回答に気づけず見落としていたため廃止した。**丸が点いている行は、上から順に手を動かせば
+    消える**という読み方に揃える。
+  - **ただし行に出す数字は未確認の件数ではなく、一覧に並ぶ件数（開いている質問の総数）**
+    （#2070）。#1910では数字も未確認にしていたが、読み終えた質問しか無いと`0`と出て
+    「質問は無い」と読めていた。内訳は行の吹き出し（`formatQuestionNavTitle`）と一覧ヘッダー
+    （`formatQuestionListCount`）で読む。
     件数の見た目はPC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
   - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と

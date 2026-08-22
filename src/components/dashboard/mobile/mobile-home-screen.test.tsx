@@ -21,7 +21,6 @@ vi.mock("@/hooks/use-reference-navigation", () => ({
 
 import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import type { QuestionAttention } from "@/lib/question-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { NAV_VIEW_IDS } from "@/types/issue";
 import type { NavViewId, OverviewStat } from "@/types/issue";
@@ -34,8 +33,6 @@ const NAV_COUNTS = Object.fromEntries(NAV_VIEW_IDS.map((id) => [id, 0])) as Reco
 const PR_NAV_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: null };
 
 const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
-
-const NO_QUESTION: QuestionAttention = { total: 0, unconfirmed: 0 };
 
 const OVERVIEW_STATS: OverviewStat[] = [
   { label: "要対応", value: "2", linkedView: "check-user" },
@@ -96,7 +93,7 @@ function renderHome(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
-      questionAttention={NO_QUESTION}
+      unconfirmedQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
@@ -178,7 +175,7 @@ describe("MobileHomeScreen（#1690）", () => {
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
-        questionAttention={NO_QUESTION}
+        unconfirmedQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
@@ -205,7 +202,7 @@ describe("MobileHomeScreen（#1690）", () => {
   it("未確認の質問があれば、一覧の件数をオレンジの丸で出す", () => {
     renderHome({
       navCounts: { ...NAV_COUNTS, question: 3 },
-      questionAttention: { total: 3, unconfirmed: 1 },
+      unconfirmedQuestionCount: 1,
     });
 
     const row = questionRow(3);
@@ -218,7 +215,7 @@ describe("MobileHomeScreen（#1690）", () => {
   it("未確認の質問が無くても、開いている質問の件数は出す（強調はしない）", () => {
     renderHome({
       navCounts: { ...NAV_COUNTS, question: 3 },
-      questionAttention: { total: 3, unconfirmed: 0 },
+      unconfirmedQuestionCount: 0,
     });
 
     const row = questionRow(3);

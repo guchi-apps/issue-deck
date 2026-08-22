@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  computeQuestionAttention,
   countUnconfirmedQuestions,
   formatQuestionListCount,
   formatQuestionNavTitle,
@@ -66,34 +65,16 @@ describe("countUnconfirmedQuestions", () => {
   });
 });
 
-describe("computeQuestionAttention", () => {
-  // 未確認だけを数字に出すと、読み終えた質問しか無いときに「質問は無い」と読めてしまう（#2070）
-  it("総数は確認済み・回答待ちも含め、未確認は丸を点ける判定にだけ使う", () => {
-    expect(
-      computeQuestionAttention([
-        makeQuestion({ hasUnreadComments: true }),
-        makeQuestion(),
-        makeQuestion({ qaAnswerPendingAt: "2026-01-01T00:00:00.000Z" }),
-      ]),
-    ).toEqual({ total: 3, unconfirmed: 1 });
-  });
-
-  it("1件も無ければどちらも0", () => {
-    expect(computeQuestionAttention([])).toEqual({ total: 0, unconfirmed: 0 });
-  });
-});
-
 describe("formatQuestionNavTitle", () => {
+  // 数字（一覧に並ぶ件数）と丸（未確認）で意味が違うため、行のラベルだけでは読めない（#2070）
   it("未確認があれば内訳を添える", () => {
-    expect(formatQuestionNavTitle({ total: 3, unconfirmed: 1 })).toBe(
+    expect(formatQuestionNavTitle(3, 1)).toBe(
       "開いている質問が3件（うち回答が届いていてまだ開いていないものが1件）あります",
     );
   });
 
   it("未確認が無ければ総数だけを出す", () => {
-    expect(formatQuestionNavTitle({ total: 3, unconfirmed: 0 })).toBe(
-      "開いている質問が3件あります",
-    );
+    expect(formatQuestionNavTitle(3, 0)).toBe("開いている質問が3件あります");
   });
 });
 

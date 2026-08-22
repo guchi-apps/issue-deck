@@ -36,7 +36,7 @@ export function resolveQuestionState(
  * 丸を点けるかどうかの判定**（#1796・#1910）と、一覧ヘッダーの内訳に使う。
  *
  * **メニューに出す数字そのものではない**（#2070）。数字は一覧に並ぶ件数（＝開いている質問の
- * 総数）で、こちらは丸を点ける合図にだけ使う。詳細は`computeQuestionAttention`。
+ * 総数）で、こちらは丸を点ける合図にだけ使う。詳細は`formatQuestionNavTitle`。
  */
 export function countUnconfirmedQuestions(
   issues: Pick<Issue, "title" | "qaAnswerPendingAt" | "hasUnreadComments">[],
@@ -44,47 +44,27 @@ export function countUnconfirmedQuestions(
   return issues.filter((issue) => resolveQuestionState(issue) === "unconfirmed").length;
 }
 
-/** 「質問」の行に出す材料（#2070） */
-export type QuestionAttention = {
-  /** 一覧に並ぶ件数（＝開いている質問Issueの総数）。行に出す数字はこちら */
-  total: number;
-  /** 未確認（回答が届いていて未読）の件数。オレンジの丸を点ける判定に使う */
-  unconfirmed: number;
-};
-
 /**
- * 「質問」の行の数字と強調を1か所で求める（#2070）。**左メニュー（`sidebar-nav.tsx`）と
- * スマホのホーム（`mobile-home-screen.tsx`）が同じ値を使う。**
+ * 「質問」の行のツールチップ（#2070）。**行の数字（一覧に並ぶ件数）と丸（未確認があるという
+ * 合図）で意味が違うため、行のラベル（「質問」）だけでは何を数えているのか読めない。**
  *
- * **数字は一覧に並ぶ件数にする。** #1910で未確認の件数へ差し替えていたが、読み終えた質問しか
- * 残っていないときに、質問が何件も開いたままでも`0`と出て、タップした先の一覧ヘッダー
- * （`5件・未確認1件`）と食い違っていた。メニューの他の行はどれも「押した先に並ぶ件数」を
- * 出しているため、質問だけ別の数を出すと`0`が「質問は無い」と読めてしまう。
+ * **数字そのものは数え直さず、`computeNavCountsForFilters`が数えた件数を`total`へ渡す。**
+ * 画面側で数え直すと、同じ行の数字とツールチップが別の数え方になる
+ * （`docs/code-map.md`「数え方の差し替えは`computeNavCountsForFilters`で行う」）。
  *
- * **「いま読める回答がある」という#1910の合図はオレンジの丸として残す。** 丸が点いている行は
- * 上から順に手を動かせば消える、という読み方は変わらない。丸の中の数字は総数になるので、
- * 内訳はツールチップ（呼び出し側）と一覧ヘッダー（`formatQuestionListCount`）で読む。
+ * **未確認は「質問」の数字を差し替えるためのものではない**（#1910ではそうしていたが、
+ * 読み終えた質問しか無いときに、質問が何件も開いたままでも`0`と出て「質問は無い」と
+ * 読めていた）。使うのはオレンジの丸を点ける判定と、この吹き出しの内訳だけ。
+ * **「ユーザーの作業待ち」（`actionable`）と揃えないのは、あちらの前提待ちが
+ * 「まだできない」ものなのに対し、質問の確認済みは「読んだがまだcloseしていない」＝
+ * 人が片付ける余地が残っているもので、在庫として数えるほうが実態に合うため。**
  *
- * **「ユーザーの作業待ち」（`computeManualStepAttention`）は`actionable`のままにする。**
- * あちらの前提待ちは「まだ実行できない」もので在庫に数えると手を動かせる数が読めなくなるが、
- * 質問の確認済みは「読んだがまだcloseしていない」＝人が片付ける余地が残っているものなので、
- * 総数に含めるほうが実態に合う。
- *
- * @param issues 「質問」ビューで絞り込み済みのIssue（`filterIssuesByView(..., "question")`）
+ * @param total 一覧に並ぶ件数（＝`navCounts["question"]`）
+ * @param unconfirmed 未確認の件数（`countUnconfirmedQuestions`）
  */
-export function computeQuestionAttention(
-  issues: Pick<Issue, "title" | "qaAnswerPendingAt" | "hasUnreadComments">[],
-): QuestionAttention {
-  return { total: issues.length, unconfirmed: countUnconfirmedQuestions(issues) };
-}
-
-/**
- * 「質問」の行のツールチップ（#2070）。**数字（総数）と丸（未確認）で意味が違うため、
- * 行のラベルだけでは何を数えているのか読めない。**
- */
-export function formatQuestionNavTitle(attention: QuestionAttention): string {
-  if (attention.unconfirmed === 0) return `開いている質問が${attention.total}件あります`;
-  return `開いている質問が${attention.total}件（うち回答が届いていてまだ開いていないものが${attention.unconfirmed}件）あります`;
+export function formatQuestionNavTitle(total: number, unconfirmed: number): string {
+  if (unconfirmed === 0) return `開いている質問が${total}件あります`;
+  return `開いている質問が${total}件（うち回答が届いていてまだ開いていないものが${unconfirmed}件）あります`;
 }
 
 /**
