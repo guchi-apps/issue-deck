@@ -19,12 +19,17 @@ describe("isRepairRunActive", () => {
     expect(isRepairRunActive({ status: "running", startedAt: minutesAgo(3) }, NOW)).toBe(true);
   });
 
+  // 実行が長引いた程度でピルが消えると、このIssueの困りごとにそのまま戻る。
+  it("実測より長く（1時間）かかっている実行でもまだ走っているものとして扱う", () => {
+    expect(isRepairRunActive({ status: "running", startedAt: minutesAgo(60) }, NOW)).toBe(true);
+  });
+
   it("終了が報告された行は走っていない", () => {
     expect(isRepairRunActive({ status: "finished", startedAt: minutesAgo(1) }, NOW)).toBe(false);
   });
 
-  // 実行そのものがキャンセルされると終了の報告が届かず、`running`のまま残る。
-  // 画面に「自動修正中」が出続ける方が害が大きいため、時間で失効させる（#2072）。
+  // runnerごと落ちると終了の報告が届かず、`running`のまま残る。ジョブの既定タイムアウト
+  // （360分）を超えて生き続けることはないので、そこを上限に失効させる（#2072）。
   it("終了の報告が届かないまま時間が経った行は走っていないものとして扱う", () => {
     expect(
       isRepairRunActive({ status: "running", startedAt: minutesAgo(REPAIR_RUN_STALE_MINUTES + 1) }, NOW),
