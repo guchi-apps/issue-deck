@@ -1,5 +1,9 @@
 import { collectShellBlocks } from "@/lib/manual-step-command";
-import { parseManualStepGuide, splitManualStepSections } from "@/lib/manual-step-guide";
+import {
+  matchManualStepDeviceNames,
+  parseManualStepGuide,
+  splitManualStepSections,
+} from "@/lib/manual-step-guide";
 import { FENCE_PATTERN } from "@/lib/markdown-task-list";
 
 /**
@@ -12,6 +16,10 @@ import { FENCE_PATTERN } from "@/lib/markdown-task-list";
  *
  * **検査するのは画面が実際に使う項目だけにする。** 「テンプレートと文字が違う」を全部指摘すると
  * 読まれなくなる。ここに1つ足すときは、崩れたときにどの機能が落ちるかを言えることを条件にする。
+ *
+ * **プレースホルダ（`<控えたkey>`）は規則にしない**（#2051で判断した）。値を人が埋める手順は
+ * 本来そう書くしかなく、崩れているわけではない。指摘にすると直しようのない指摘が正しい本文へ
+ * 出続ける。代行実行から外す判定は`findPlaceholder`（`manual-step-command.ts`）が持つ。
  *
  * **判定はパーサーと同じ関数を通す**（`parseManualStepGuide`・`splitManualStepSections`・
  * `collectShellBlocks`）。別実装で書き直すと、検査を通った本文を画面が読めない・その逆、
@@ -65,14 +73,6 @@ const REQUIRED_PREREQUISITES = [
   severity: ManualStepBodyFindingSeverity;
 }[];
 
-/** 「実行するデバイス」に1つだけ書かれているべき端末の名前 */
-const DEVICE_NAMES = [
-  { label: "サブPC", needles: ["サブpc", "subpc"] },
-  { label: "メインPC", needles: ["メインpc", "mainpc"] },
-  { label: "VPS", needles: ["vps"] },
-  { label: "ブラウザ", needles: ["ブラウザ"] },
-] as const;
-
 /** `https://github.com/<owner>/<repo>/(issues|pull)/<番号>` */
 const GITHUB_REFERENCE_URL = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:issues|pull)\/(\d+)/g;
 
@@ -98,7 +98,7 @@ export function checkManualStepBody(
 
   findings.push(...checkHeadings(sections));
   findings.push(...checkPrerequisites(sections));
-  findings.push(...checkDevice(guide.where.device));
+  findings.push(...checkDevice(guide));
   findings.push(...checkTodo(sections, guide));
   findings.push(...checkRelatedReferences(sections, options.repositoryFullName));
 
@@ -206,19 +206,25 @@ function checkPrerequisites(
   return findings;
 }
 
-/** 「実行するデバイス」に端末が1つだけ書かれているか */
-function checkDevice(device: string | null): ManualStepBodyFinding[] {
-  if (device === null) return [];
-  const normalized = normalize(device);
-  const found = DEVICE_NAMES.filter((entry) =>
-    entry.needles.some((needle) => normalized.includes(needle)),
-  );
+/**
+ * 「実行するデバイス」に端末が複数書かれているとき、手順の文頭で端末が決まっているか（#2052）。
+ *
+ * **複数書かれていること自体は指摘しない。** 手順ごとに`（サブPC）`と書いてあるなら、
+ * 前提条件に両方の端末が並んでいるのは正しい情報である。落ちるのは**デバイスの無い手順**の方で、
+ * そこは既定値が決まらない（`where.defaultDevice`が`null`）ため代行の対象から外れる。
+ */
+function checkDevice(guide: ReturnType<typeof parseManualStepGuide>): ManualStepBodyFinding[] {
+  const found = matchManualStepDeviceNames(guide.where.device);
   if (found.length < 2) return [];
+
+  const missing = guide.steps.filter((step) => step.device === null);
+  if (missing.length === 0) return [];
+
   return [
     {
       rule: "multiple-devices",
-      severity: "warning",
-      message: `「実行するデバイス」に端末が複数書かれています（${found.map((entry) => entry.label).join("・")}）。この値はそのまま画面のチップに出るため1つだけにし、どの端末で何をするかは\`## やること\`の各手順の文頭に書いてください。`,
+      severity: "error",
+      message: `「実行するデバイス」に端末が複数書かれている（${found.join("・")}）のに、どこで実行するか書かれていない手順が${missing.length}件あります。どの端末で実行するかが決まらないため、その手順は代行実行の対象から外れます。\`- [ ] （サブPC）…\`のように各手順の文頭へ端末を書いてください。`,
     },
   ];
 }

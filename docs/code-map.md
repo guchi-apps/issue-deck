@@ -222,6 +222,24 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
+  `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
+  `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
+  `resolveIssueExecutionTarget`）から独立に文言を組み立てる**ため、素直に並べると1つの用件が
+  4回出る（確認待ちのIssueで実際にそうなっていた: サマリーのバッジ・ラベルチップ
+  `00.check-user`/`01.check-merge`・ステッパー下のバッジ・案内パネルの見出し）。
+  子は「出せるかどうか」だけを知っていて「他に誰が言っているか」を知らないので、
+  **判断は並べる側に置き、子には`showApprovalBadge`・`showExecutionTarget`・
+  `excludeAttention`のような出し分けのpropを渡す。** 子の中で他の部品の有無を推測しない。
+  - 状態そのものを表す**形（現在ステップの琥珀色・確認待ちのバッジ色）は消さない**。
+    重複しているのは文字だけで、色は一目で読むための別経路。
+  - **文言が「押すボタン」を名指しする場合は、その行き先に実在するか確かめる**。
+    `01.check-merge`の上部案内は「直したい点があれば『修正を依頼する』」と書いていたが、
+    そのボタンはコメント欄の承認カード（`comment-thread.tsx`）にしか無く、案内が送る
+    上部の対応PRセクションには「マージ」しか無かった（`buttonsAway`と`buttonsHere`を
+    分けているのはこのため）。
+  - **押す先が無く、読んでも次の行動が変わらない表示は出さない。** 「実施順序 1
+    前提はそろっている」がその例で、`IssueOrderSection`は前提待ちか被依存があるときだけ描く。
 - **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
   （#1666・#1810）。[`use-dispatch-state.ts`](../src/hooks/use-dispatch-state.ts)の
   `hosts`・`sessions`・`jobs`は**取得前も`[]`を返す**ため、受け取る側からは「1台も無い」
@@ -547,6 +565,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
   本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・
   ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
+  **デバイスは手順ごとに持てる**（#2052。手順の文頭の`（サブPC）`。無ければ`## 前提条件`の
+  「実行するデバイス」が既定値で、そこに端末が複数書かれていれば既定値は決まらない）。
   - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
     Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
     手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
@@ -603,8 +623,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・
     `ManualStepVerificationCheck`）。全部が終了コード0で終わったIssueには「完了済みの可能性」の
     印（`Issue.manualStepVerifiedAt`）が付き、一覧の行と`ManualStepPanel`に出る。
-    **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスが
-    サブPCで、**確認コマンドが読み取りだけだと読める**Issueに限る
+    **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスの
+    既定値がサブPCに決まり、**確認コマンドが読み取りだけだと読める**Issueに限る
     （`isReadOnlyVerificationCommand`）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
     常駐プロセスは置かない。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。
@@ -831,7 +851,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
   98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
   `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
-  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。**PRタブから開くときの
+  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。
+- **「ブランチ」タブのアイコンには反映待ちの件数を重ねる**（#2055。
+  [`lib/release-merge-pending.ts`](../src/lib/release-merge-pending.ts)）。
+  数えるのは**PRの本数**で、developへ（バージョンバンプPR `release/v…`）と
+  mainへ（リリースPR `develop`）のマージ待ちの合計。**Issueの件数ではない**——進捗Statusの
+  `Develop`・`Release`を数える「本番反映待ち」（左メニュー・ホームのカード）とは母集団が違う。
+  **出すのは合計だけで、内訳は`title`・`aria-label`に入れる。** 1タブ98pxに内訳2つを並べると
+  フッターを56px→68pxへ伸ばすことになり、5枠に増やせないのと同じ制約に当たる。
+  材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
+  **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
+  `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
+  したがって**CI実行中のPRは数えない**（`pendingMerge`がCIの確定後にしか埋まらないため。
+  #1433）。通知ベル・リポジトリ一覧のバッジと同じ判定で、ここだけ基準を変えると同じ状態が
+  場所によって別の数になる。**未取得（`null`）と0件は区別する**——未取得のうちは何も出さない
+  （0を出すと「待っているものが無い」と読めてしまう）。バッジの見た目は
+  ベルと同じ`NotificationBadge`を使い回す。
+  フッターは`NotificationProvider`の内側にあり、Providerを描く`issue-deck-shell.tsx`は
+  その親でフックを呼べないため、**件数はpropで配らず`MobileBottomNav`が自分で読む**。
+  描画だけの`MobileBottomNavView`を別に出してあるのは、Providerを立てずに件数を渡して
+  試験するため。
+- **PRタブから開くときの
   ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
@@ -1488,6 +1528,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **CLIから直接叩く経路とActions経由では、消費する1Passwordの枠が違う**——CLIは個人アカウントの
   セッションで枠を消費しないが、Actionsはサービスアカウント（アカウント全体で1,000件/日）を使う。
   そのため画面側にキーの絞り込み・確認ダイアログ・クールダウン（直近の成功から10分）を置いている。
+  **失敗の理由は、失敗したときだけログから消えていた**（#2049）。`run:`の既定シェルは
+  `bash -e {0}`で、ステップ冒頭の`set -uo pipefail`は-uとpipefailを足すだけで**-eを打ち消さない**。
+  同期スクリプトを素で呼ぶと非ゼロ終了の瞬間にステップが終わり、次行の`cat "$LOG"`にも件数の集計にも
+  到達しない。スクリプトは1件でも失敗すれば必ず非ゼロで終わる作りのため、**成功したときだけログが出て、
+  失敗したときは`##[error]Process completed with exit code 1.`しか残らない**という、いちばん困る形に
+  なっていた（画面にも`同期=0 スキップ=0 失敗=0`としか出ず、「同期処理が始まる前に失敗しました」の
+  判定にも誤ってかかった。実際には始まっていた）。終了コードは`|| rc=$?`で明示的に受け、
+  失敗時は`::error::`の注釈にも失敗した項目名を出す。失敗経路は実際に走らせないと確かめられないため、
+  [`scripts/reusable-sync-secrets.test.mjs`](../scripts/reusable-sync-secrets.test.mjs)が
+  YAMLから`run:`本文を取り出し、同期スクリプトをスタブに差し替えて`bash -e`で実行する
+  （`scripts/reusable-issue-labels.test.mjs`と同じ形）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 

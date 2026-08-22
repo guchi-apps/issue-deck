@@ -218,4 +218,103 @@ describe("対話が要るコマンドを含む項目", () => {
 
     expect(result.entries[1].rejection).toBe("interactive_command");
   });
+
+  /**
+   * 手順ごとのデバイス（#2052）。「ブラウザの手順は人、サブPCの手順は代行」が同じ手作業の
+   * 中で混在できること——Issue単位で1回だけ判定していた頃は、どちらかを必ず取り違えていた。
+   */
+  describe("デバイスは手順ごとに見る", () => {
+    const MIXED = `## 前提条件
+
+- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+
+## やること
+
+- [ ] （ブラウザ）GitHubの設定画面でトークンを発行する
+
+    \`\`\`bash
+    echo "貼り付けたトークンを保存する"
+    \`\`\`
+
+- [ ] チェックアウトを更新する
+
+    \`\`\`bash
+    cd ~/apps/issue-deck && git pull --ff-only
+    \`\`\`
+`;
+
+    it("ブラウザの手順は人が実行し、既定値のままの手順は代行できる", () => {
+      const result = plan(MIXED);
+
+      expect(result.entries[0].device).toBe("ブラウザ");
+      expect(result.entries[0].rejection).toBe("device_not_subpc");
+      expect(result.entries[1].device).toBe("サブPC");
+      expect(result.entries[1].rejection).toBeNull();
+      expect(result.runnable).toBe(1);
+      expect(result.blocked).toBe(1);
+    });
+
+    // 端末が複数書かれた「実行するデバイス」で全手順が代行対象になっていたのが#2052の実害
+    it("既定値が決まらない本文では、デバイスの無い手順を代行しない", () => {
+      const result = plan(
+        MIXED.replace("- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）", "- 実行するデバイス: **ブラウザ** と **サブPC**"),
+      );
+
+      expect(result.entries[1].device).toBeNull();
+      expect(result.entries[1].rejection).toBe("device_not_subpc");
+      expect(result.runnable).toBe(0);
+    });
+  });
+});
+
+/**
+ * プレースホルダを含む項目（#2051）。実例（guchi-apps/aide#103）と同じ形で、
+ * **人が値を埋めてから実行する手順が自動実行の対象から外れる**ことを見る。
+ */
+describe("プレースホルダを含む項目", () => {
+  const PLACEHOLDER_BODY = BODY.replace(
+    "systemctl --user restart issue-deck-dispatch-poller.service",
+    "AIDE_ZAIM_CONSUMER_KEY=<控えたkey> node scripts/oauth-token.mjs",
+  );
+
+  it("代行できない項目として並べ、承認する件数から外す", () => {
+    const result = plan(PLACEHOLDER_BODY);
+    const [first, second] = result.entries;
+
+    expect(first.rejection).toBeNull();
+    expect(second.rejection).toBe("placeholder_command");
+    // 埋める値がどこにあるのかを画面へ出せること
+    expect(second.placeholder).toBe("<控えたkey>");
+    expect(result.runnable).toBe(2);
+    expect(result.blocked).toBe(2);
+    expect(describeManualStepRunPlan(result)).toBe("手順1件・確認1件");
+  });
+
+  it("確認コマンドにも同じ判定を掛ける", () => {
+    const result = plan(
+      BODY.replace(
+        "git -C ~/apps/issue-deck rev-list --count HEAD..origin/develop",
+        "gh issue view <番号> --json state",
+      ),
+    );
+    const verification = result.entries[result.entries.length - 1];
+
+    expect(verification.kind).toBe("verification");
+    expect(verification.rejection).toBe("placeholder_command");
+  });
+
+  // ホストが応答していない・pollerが未対応でも、人が埋めるしかないことは変わらない
+  it("ホストの都合より先に理由として出す", () => {
+    const result = plan(PLACEHOLDER_BODY, null);
+
+    expect(result.entries[1].rejection).toBe("placeholder_command");
+  });
+
+  // **いま代行できている手順を巻き込まない。** テンプレートどおりの本文はそのまま流れる
+  it("プレースホルダの無い本文は従来どおり代行できる", () => {
+    const result = plan();
+
+    expect(result.entries.every((entry) => entry.placeholder === null)).toBe(true);
+    expect(result.runnable).toBe(3);
+  });
 });

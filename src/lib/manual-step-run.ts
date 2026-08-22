@@ -263,8 +263,11 @@ async function syncManualStepRun(run: ManualStepRun, now: Date): Promise<ManualS
     const reason = next.rejection === null ? "no_command" : next.rejection;
     const message = describeManualStepExecutionRejection(reason, {
       hostName: current.targetHost,
-      device: context.device,
+      // **止まった項目のデバイス**（#2052）。Issue単位の既定値を出すと、ブラウザの手順で
+      // 止まったのに「サブPCで実行するため」と表示される
+      device: next.device,
       interactiveCommand: next.interactiveCommand,
+      placeholder: next.placeholder,
     });
     // **`## 完了の確認方法`のコマンドにはチェックが無い**（#1869）。人が実行するしかない確認で
     // 止まった場合、流し終えた扱いにしておかないと、続きへ進めても同じ項目でまた止まる（#2025）。
@@ -434,6 +437,8 @@ function pauseReasonFor(rejection: ManualStepExecutionRejection): "USER" | "ENQU
     case "not_manual_step":
     // 対話が要るコマンド（#2025）。**人が実行するしかない**ので、ホスト側の事情と混ぜない
     case "interactive_command":
+    // プレースホルダを含むコマンド（#2051）。人が値を埋めてから実行するしかない
+    case "placeholder_command":
       return "USER";
     default:
       return "ENQUEUE_FAILED";
@@ -536,7 +541,6 @@ async function checkManualStepLine(
 
 type RunContext = {
   plan: ManualStepRunPlan;
-  device: string | null;
   issueTitle: string | null;
   issueId: string | null;
 };
@@ -569,7 +573,6 @@ async function loadRunContext(run: ManualStepRun, now: Date): Promise<RunContext
         : null,
       isManualStepIssue: issue.labels.some((label) => label.name === MANUAL_STEP_LABEL),
     }),
-    device: guide.where.device,
     issueTitle: issue.title,
     issueId: String(issue.githubIssueId),
   };

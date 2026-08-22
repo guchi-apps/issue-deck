@@ -151,6 +151,12 @@ jobs:
 > 該当するのは`manual-step-label`ジョブ（#1492。`issues: types: [opened, edited]`が必要。無いと
 > タイトルが`[手作業]`のIssueへ`71.manual-step`が自動で付かない）で、issue-deck側の
 > `issue-labels.yml`は`types: [opened, edited, closed]`になっている。
+>
+> **取りこぼしは`schedule`が埋め直すようになった（#2010）。** `manual-step-label`ジョブは
+> `schedule`・`workflow_dispatch`でも動き、タイトルが`[手作業]`で始まるopenなIssueのうち
+> ラベルの無いものを拾い直す。したがって`schedule`を持つcallerであれば、`opened`・`edited`の
+> 追記が遅れても最終的にはラベルが付く。**ただし遅れる**（cronの間隔ぶん）ため、
+> `issues: types:`を揃えること自体は引き続き必要。
 
 `claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
 
@@ -443,6 +449,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v23` | 上記 | #1901。`reusable-issue-labels.yml`に`main-direct-pr-opened`・`main-direct-merged`が入り、**developを経由せず`issue-<番号>` → `main`のPRしか作らないリポジトリ**（`guchi-apps/docs`）でも`Develop PR` → `Done`まで進んでissueがcloseされるようになった版。**タグの作成と`docs`へのcaller新規配置は人が行う。** develop運用の既存リポジトリは`base.ref`の条件に一致しないため、配っても挙動は変わらない |
 | `workflows/v24` | 上記 | #1999。`reusable-issue-labels.yml`の`develop-merge-sweep`が、**PRのマージとほぼ同時にpushされてdevelopへ入らないままのコミット**を検知して`00.check-user`＋`01.check-blocked`で人へ渡すようになった版（あわせて、developへ入っていないコミットが無ければ先端が違っても`Develop`へ進める）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリでは取り残しが15分おきに見送られ続けるだけで通知されない（`guchi-apps/subscription-lists#99`で実測） |
 | `workflows/v25` | 上記 | #2042（対応PRは#2043）。`reusable-release-develop-to-main.yml`が作るバンプPRの本文が、実際の挙動どおり「CI通過後にdevelopへ自動マージされる」と案内するようになった版。それまでは直後で`gh pr merge --auto --merge`を実行しているにもかかわらず「自動マージはされません」と書いており、PRを見た人が手動マージを待つか、逆に放置して意図せずdevelopへ入っていた。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリのバンプPRには誤った案内が出続ける（issue-deck自身はローカルパス参照のため配布前から直っている） |
+| `workflows/v26` | 上記 | #2049。`reusable-sync-secrets.yml`が、同期スクリプトの失敗時にもログ（`FAIL <KEY>（理由）`の行と集計）と件数・項目名を出すようになった版。`run:`の既定シェル`bash -e {0}`の下で終了コードを`|| rc=$?`で受けていなかったため、**失敗したときだけ`cat "$LOG"`にも集計にも到達せず**、Actionsには`##[error]Process completed with exit code 1.`しか、画面には`同期=0 スキップ=0 失敗=0`としか出なかった（`guchi-apps/car-care#99`の切り分けが手作業になった）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリではシークレット同期が失敗しても理由が分からないままになる（issue-deck自身はローカルパス参照のため配布前から直っている） |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの

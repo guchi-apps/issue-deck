@@ -425,6 +425,33 @@ describe("ManualStepGuideDialog の代行実行", () => {
     expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
     expect(screen.getByText(/ちょうど1つ書かれている手順だけを代行します/)).toBeTruthy();
   });
+
+  /**
+   * 手順ごとのデバイス（#2052）。**チップと代行の可否が同じ手作業の中で切り替わること**を
+   * 描いて確かめる。判定そのものは`lib/manual-step-autorun.test.ts`が見ているが、
+   * どのステージのデバイスをチップに出すかは画面側の配線なので、ここでしか落ちない。
+   */
+  it("手順の文頭に書かれた端末でチップと代行の可否が切り替わる（#2052）", () => {
+    const body = BODY.replace(
+      "- [ ] チェックアウトを更新する",
+      "- [ ] （ブラウザ）GitHubの設定画面でトークンを発行する\n\n- [ ] チェックアウトを更新する",
+    );
+    taskList.body = body;
+    renderDialog([issue({ body })]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    // 手順1はブラウザ。既定値がサブPCでも代行しない
+    expect(screen.getByText("ブラウザ")).toBeTruthy();
+    expect(screen.queryByText("サブPC")).toBeNull();
+    expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
+    expect(screen.getByText(/ブラウザで実行するため/)).toBeTruthy();
+
+    // 手順2はデバイスが書かれていないので既定値（サブPC）へ落ち、代行できる
+    fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+
+    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "承認して実行" })).toBeTruthy();
+  });
 });
 
 /**

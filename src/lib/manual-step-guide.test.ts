@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildManualStepQueue, parseManualStepGuide } from "@/lib/manual-step-guide";
+import {
+  buildManualStepQueue,
+  matchManualStepDeviceNames,
+  parseManualStepGuide,
+  resolveManualStepDevice,
+} from "@/lib/manual-step-guide";
 import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import type { Issue } from "@/types/issue";
 
@@ -164,6 +169,7 @@ describe("parseManualStepGuide", () => {
     expect(guide.where).toEqual({
       connect: "ssh subpc",
       device: "サブPC",
+      defaultDevice: "サブPC",
       directory: "~/apps/issue-deck",
       branch: "develop",
     });
@@ -288,6 +294,7 @@ describe("parseManualStepGuide", () => {
     expect(guide.steps).toEqual([]);
     expect(guide.where).toEqual({
       device: null,
+      defaultDevice: null,
       directory: null,
       branch: null,
       connect: null,
@@ -306,6 +313,7 @@ describe("parseManualStepGuide", () => {
 
     expect(guide.where).toEqual({
       device: "ブラウザ",
+      defaultDevice: "ブラウザ",
       directory: null,
       branch: null,
       connect: null,
@@ -320,6 +328,84 @@ describe("parseManualStepGuide", () => {
     expect(guide.steps).toHaveLength(1);
     expect(guide.steps[0].markdown).toContain("# 完了の確認方法");
     expect(guide.verification).toBe("- `echo ok`が通ること");
+  });
+});
+
+/**
+ * 手順ごとのデバイス（#2052）。
+ *
+ * 実際の手作業は端末をまたぐ（guchi-apps/aide#103は手順1がブラウザ・手順2がサブPC・
+ * 手順6がVPS）。**読めない書き方を勝手に解釈しないこと**を中心に確かめる——文字列の
+ * 部分一致でデバイスを決めたことが、Issue単位の判定が壊れていた原因そのものだった。
+ */
+describe("手順のデバイス", () => {
+  const MULTI_DEVICE = `## 前提条件
+
+- 実行するデバイス: **メインPC（ブラウザが要る）** と **サブPC**。サブPCへは \`ssh subpc\`
+- カレントディレクトリ: \`~/apps/aide\`
+
+## やること
+
+- [ ] （ブラウザ）dev.zaim.netでアプリを登録する
+- [ ] （サブPC）トークン取得スクリプトを実行する
+- [ ] 1Passwordへ5つのフィールドを足す
+`;
+
+  it("手順の文頭の`（デバイス）`を拾い、一覧の見出しからは落とす", () => {
+    const guide = parseManualStepGuide(MULTI_DEVICE);
+
+    expect(guide.steps.map((step) => step.device)).toEqual(["ブラウザ", "サブPC", null]);
+    expect(guide.steps[1].text).toBe("トークン取得スクリプトを実行する");
+    // 本文として描くMarkdownは書かれたまま（GitHubと同じ見え方を崩さない）
+    expect(guide.steps[1].markdown).toBe("（サブPC）トークン取得スクリプトを実行する");
+  });
+
+  // **既定値を決められない本文**。「サブPCを含むから代行してよい」と読むと、ブラウザで
+  // しかできない手順まで代行の対象になる（実際にそうなっていた）
+  it("「実行するデバイス」に端末が複数書かれていたら既定値にしない", () => {
+    const guide = parseManualStepGuide(MULTI_DEVICE);
+
+    expect(guide.where.device).toContain("サブPC");
+    expect(guide.where.defaultDevice).toBeNull();
+    expect(resolveManualStepDevice(guide.where, guide.steps[2])).toBeNull();
+  });
+
+  it("デバイスの書かれていない手順は`## 前提条件`の既定値へ落ちる", () => {
+    const guide = parseManualStepGuide(
+      "## 前提条件\n\n- 実行するデバイス: **サブPC**\n\n## やること\n\n- [ ] 更新する\n- [ ] （ブラウザ）画面で確かめる\n",
+    );
+
+    expect(resolveManualStepDevice(guide.where, guide.steps[0])).toBe("サブPC");
+    expect(resolveManualStepDevice(guide.where, guide.steps[1])).toBe("ブラウザ");
+  });
+
+  // 端末の名前として読めない括弧書きは、印そのものが無かったことにする
+  it("端末の名前でない括弧書きはデバイスとして読まない", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] （初回のみ）鍵を作る\n- [ ] （サブPCとVPS）両方で流す\n",
+    );
+
+    expect(guide.steps.map((step) => step.device)).toEqual([null, null]);
+    expect(guide.steps[0].text).toBe("（初回のみ）鍵を作る");
+  });
+
+  // **散文からは推測しない。** 「メインPCのブラウザで」のような書き方は端末が1つに決まらない
+  it("散文に出てくる端末名からはデバイスを推測しない", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] サブPCで`git pull`する\n",
+    );
+
+    expect(guide.steps[0].device).toBeNull();
+  });
+
+  it("matchManualStepDeviceNamesは書かれている端末を列挙する", () => {
+    expect(matchManualStepDeviceNames("**サブPC**（`ssh subpc`）")).toEqual(["サブPC"]);
+    expect(matchManualStepDeviceNames("ブラウザ（1Password）とサブPC")).toEqual([
+      "サブPC",
+      "ブラウザ",
+    ]);
+    expect(matchManualStepDeviceNames("Zaimの開発者ページ")).toEqual([]);
+    expect(matchManualStepDeviceNames(null)).toEqual([]);
   });
 });
 

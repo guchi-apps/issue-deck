@@ -7,6 +7,7 @@ import {
   extractVerificationCommands,
   findInteractiveCommand,
   findManualStepCommand,
+  findPlaceholder,
   isSubpcManualStepDevice,
   MANUAL_STEP_COMMAND_MAX_LENGTH,
   replaceManualStepCommand,
@@ -163,6 +164,12 @@ describe("isSubpcManualStepDevice", () => {
   // 読み取れなければ代行しない側へ倒す
   it("記載が無ければ代行対象にしない", () => {
     expect(isSubpcManualStepDevice(null)).toBe(false);
+  });
+
+  // 「サブPCを含むから代行してよい」と読むと、ブラウザ作業まで代行対象になっていた（#2052）
+  it("端末が1つに絞れない値は代行対象にしない", () => {
+    expect(isSubpcManualStepDevice("ブラウザ（1Password）とサブPC")).toBe(false);
+    expect(isSubpcManualStepDevice("メインPC と サブPC")).toBe(false);
   });
 });
 
@@ -340,5 +347,62 @@ describe("findInteractiveCommand", () => {
   it("語の一部には当てない", () => {
     expect(findInteractiveCommand("stop signing")).toBeNull();
     expect(findInteractiveCommand("./opsignin.sh")).toBeNull();
+  });
+});
+
+/**
+ * プレースホルダの検出（#2051）。
+ *
+ * `findInteractiveCommand`とは**倒す向きが逆**なので、拾えていること（取りこぼさないこと）を
+ * 中心に確かめつつ、実在のシェル記法（リダイレクト・ヒアドキュメント・プロセス置換・
+ * 環境変数参照）を巻き込んでいないことも確かめる。
+ */
+describe("findPlaceholder", () => {
+  // guchi-apps/aide#103 の実例。`=<控えたkey>`はシェルのリダイレクトとして解釈されうる
+  it("角括弧のプレースホルダを見つける", () => {
+    expect(
+      findPlaceholder(
+        "AIDE_ZAIM_CONSUMER_KEY=<控えたkey> AIDE_ZAIM_CONSUMER_SECRET=<控えたsecret> \\\n  node src/core/connectors/zaim/scripts/oauth-token.mjs",
+      ),
+    ).toBe("<控えたkey>");
+    expect(findPlaceholder("gh issue view <番号> --json body")).toBe("<番号>");
+    expect(findPlaceholder("gh api repos/<owner>/<repo>/issues")).toBe("<owner>");
+    expect(findPlaceholder("gh issue view ＜番号＞")).toBe("＜番号＞");
+  });
+
+  it("伏せ字・三点リーダ・埋め草も拾う", () => {
+    expect(findPlaceholder("op item create --password '***'")).toBe("***");
+    expect(findPlaceholder("gh issue list --search …")).toBe("…");
+    expect(findPlaceholder("AIDE_TOKEN=xxx node scripts/x.mjs")).toBe("xxx");
+    expect(findPlaceholder("curl https://XXXX.example.com")).toBe("XXXX");
+  });
+
+  // **ここを巻き込むと、いま代行できている手順が押せなくなる**
+  it("実在のシェル記法は拾わない", () => {
+    expect(findPlaceholder("grep foo < input.txt > output.txt")).toBeNull();
+    expect(findPlaceholder("grep foo <input.txt >output.txt")).toBeNull();
+    expect(findPlaceholder("cat <<EOF > /tmp/x\nbody\nEOF")).toBeNull();
+    expect(findPlaceholder("diff <(sort a) <(sort b)")).toBeNull();
+    expect(findPlaceholder("systemctl --user restart issue-deck-dispatch-poller.service")).toBeNull();
+    expect(findPlaceholder("cd ~/apps/issue-deck && git pull --ff-only")).toBeNull();
+    expect(findPlaceholder("ls *.log && ls **/*.ts")).toBeNull();
+    expect(findPlaceholder("git diff main...HEAD")).toBeNull();
+    expect(findPlaceholder(null)).toBeNull();
+  });
+
+  // **`${...}`・`$NAME`は実在の環境変数参照と区別できない**ので拾わない（#2051の決定）
+  it("環境変数の参照は拾わない", () => {
+    expect(findPlaceholder('gh api repos/o/r/issues/2051/sub_issues -F sub_issue_id="$CHILD_ID"')).toBeNull();
+    expect(findPlaceholder("cd ${HOME}/apps/issue-deck")).toBeNull();
+  });
+
+  // 語の途中では当てない（16進の値・識別子を巻き込まない）
+  it("語の一部には当てない", () => {
+    expect(findPlaceholder("git show 0xxxabc")).toBeNull();
+    expect(findPlaceholder("cat fooxxxbar.txt")).toBeNull();
+  });
+
+  it("コメント行は見ない", () => {
+    expect(findPlaceholder("# <番号>は起票したIssueの番号\nscripts/x.sh")).toBeNull();
   });
 });

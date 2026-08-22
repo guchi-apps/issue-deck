@@ -70,7 +70,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: true,
     linkedIssueCheckReason: "merge",
     ciState: "pending",
-    mergeJudgement: "unknown",
+    mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
     createdAt: "2026-08-16T01:25:36.000Z",

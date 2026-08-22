@@ -60,7 +60,13 @@ describe("buildWhereToRunLines", () => {
 describe("ManualStepWhereToRun", () => {
   it("実行するデバイスと3行をまとめてコピーできる形で出す", () => {
     const guide = parseManualStepGuide(BODY);
-    render(<ManualStepWhereToRun where={guide.where} command="git pull --ff-only" />);
+    render(
+      <ManualStepWhereToRun
+        where={guide.where}
+        device={guide.where.defaultDevice}
+        command="git pull --ff-only"
+      />,
+    );
 
     expect(screen.getByText("手元で実行する（サブPC）")).toBeTruthy();
     expect(screen.getByText("ssh subpc")).toBeTruthy();
@@ -71,7 +77,7 @@ describe("ManualStepWhereToRun", () => {
   it("案内できることが無ければ何も出さない", () => {
     const guide = parseManualStepGuide("## 前提条件\n\n- 実行するデバイス: **ブラウザ**\n");
     const { container } = render(
-      <ManualStepWhereToRun where={guide.where} command={null} />,
+      <ManualStepWhereToRun where={guide.where} device={guide.where.defaultDevice} command={null} />,
     );
 
     expect(container.textContent).toBe("");

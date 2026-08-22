@@ -19,7 +19,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
-    mergeJudgement: "unknown",
+    mergeJudgement: { state: "unknown", step: null, runUrl: null },
     linkedIssueNumber: 600,
     ...overrides,
   };
@@ -118,13 +118,39 @@ describe("IssuePullRequestList", () => {
       <IssuePullRequestList
         links={[link(616)]}
         // CIは通っているが判定はまだ走っている状態（PR #1959の再現）。
-        pullRequests={[pullRequest({ ciStatus: "success", mergeJudgement: "pending" })]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeJudgement: { state: "pending", step: null, runUrl: null },
+          }),
+        ]}
         mergeApprovalPending
         onMerge={async () => true}
       />,
     );
     const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+
+  it("判定中の行は待っている段階をバッジで出す（#2059）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
+            },
+          }),
+        ]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
   });
 
   it("マージするとその行のPR番号でonMerge・onMergedを呼ぶ", async () => {

@@ -29,6 +29,18 @@ describe("CheckUserReasonNotice", () => {
     expect(screen.getByText("待機中")).not.toBeNull();
   });
 
+  /**
+   * #2057。以前はパネルの4行目に「待機中 承認するまで実装は始まりません」という段があり、
+   * 補足文は説明文かボタンの案内の言い換えだった。タグは見出しと同じ行へ寄せる。
+   */
+  it("エージェントの状態は見出しと同じ行に置き、補足文は出さない（#2057）", () => {
+    render(<CheckUserReasonNotice guidance={guidanceFor({ reason: "plan", placement: "status" })} />);
+
+    const heading = screen.getByText("計画の承認が必要です");
+    expect(heading.parentElement?.textContent).toContain("待機中");
+    expect(screen.queryByText("承認するまで実装は始まりません")).toBeNull();
+  });
+
   it("移動ボタンを押すと、その操作をする場所までスクロールする", () => {
     const target = document.createElement("div");
     target.setAttribute(CHECK_USER_TARGET_ATTR, "approval");

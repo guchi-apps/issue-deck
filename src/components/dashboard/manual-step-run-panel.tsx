@@ -117,10 +117,13 @@ export function ManualStepRunPanel({
   const rejection = resolveManualStepExecutionRejection({
     host,
     isManualStepIssue: isManualStepIssue(issue.labels),
-    isSubpcDevice: isSubpcManualStepDevice(guide.where.device),
+    // デバイスは**この項目のもの**（#2052）。実行計画が解決済みなので、ここで引き直さない
+    isSubpcDevice: isSubpcManualStepDevice(entry.device),
     hasCommand: command !== null,
-    // 対話が要るコマンドかどうかは実行計画が判定済み（#2025）。ここで見直さない
+    // 対話が要るコマンド（#2025）・プレースホルダ（#2051）かどうかは実行計画が判定済み。
+    // ここで見直さない
     interactiveCommand: entry.interactiveCommand,
+    placeholder: entry.placeholder,
     hasActiveJob: hasActiveOtherJob,
   });
 
@@ -247,18 +250,22 @@ export function ManualStepRunPanel({
         />
         {/* 失敗したら、手元で実行するための「どこから」を出す（#1882）。**成功したら出さない**
             ——実行し終えたものについて接続方法を並べても読む相手がいない */}
-        {failed && <ManualStepWhereToRun where={guide.where} command={command} />}
+        {failed && (
+          <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
+        )}
         {fixPanel}
       </div>
     );
   }
 
   if (rejection !== null) {
-    // **確認コマンドには「実行した・次へ」が無い**（チェックが付かないため）。対話が要るコマンドで
-    // 自動実行が止まったとき、続きへ進める導線をここに出す（#2025）。手順はダイアログの
-    // フッターの「実行した・次へ」が同じ役目を持つので出さない
+    // **確認コマンドには「実行した・次へ」が無い**（チェックが付かないため）。対話が要るコマンド
+    // （#2025）・プレースホルダを含むコマンド（#2051）で自動実行が止まったとき、続きへ進める
+    // 導線をここに出す。手順はダイアログのフッターの「実行した・次へ」が同じ役目を持つので出さない
     const canContinue =
-      onRetry !== undefined && entry.kind === "verification" && rejection === "interactive_command";
+      onRetry !== undefined &&
+      entry.kind === "verification" &&
+      (rejection === "interactive_command" || rejection === "placeholder_command");
     return (
       <div className="flex flex-col gap-2">
         <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
@@ -266,13 +273,14 @@ export function ManualStepRunPanel({
           <span>
             {describeManualStepExecutionRejection(rejection, {
               hostName: host?.name ?? "サブPC",
-              device: guide.where.device,
+              device: entry.device,
               interactiveCommand: entry.interactiveCommand,
+              placeholder: entry.placeholder,
             })}
           </span>
         </p>
         {/* 代行できない手順こそ、どこから実行するのかが要る（#1882） */}
-        <ManualStepWhereToRun where={guide.where} command={command} />
+        <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
         {canContinue && (
           <div className="flex justify-end">
             <Button variant="outline" size="sm" onClick={onRetry}>

@@ -1,4 +1,9 @@
-import { parseManualStepGuide, type ManualStepGuideStep } from "@/lib/manual-step-guide";
+import {
+  matchManualStepDeviceNames,
+  parseManualStepGuide,
+  resolveManualStepDevice,
+  type ManualStepGuideStep,
+} from "@/lib/manual-step-guide";
 
 /**
  * VPS・サブPCの設定ファイルが、どのリポジトリのどこで管理されているかの対応表（#2021）。
@@ -243,14 +248,18 @@ const WRITE_MARKERS = [
   "削除",
 ];
 
-/** `## 前提条件`の「実行するデバイス」から、どちらの実機かを決める */
+/**
+ * その手順を実行する端末から、どちらの実機かを決める。
+ *
+ * 端末名の定義は`manual-step-guide.ts`の1か所から引く（#2052）。1つに絞れないものは
+ * `null`（どちらの実機か決められないまま切り出すと、反映されないリポジトリへPRが出る）。
+ * 「メインPC」「ブラウザ」は管理リポジトリを持たないため、どちらにも寄せない。
+ */
 export function resolveInfraConfigDevice(device: string | null): InfraConfigDevice | null {
-  if (!device) return null;
-  const normalized = device.toLowerCase();
-  // 「メインPC」は管理リポジトリを持たないため、どちらにも寄せない
-  if (normalized.includes("メインpc") || normalized.includes("mainpc")) return null;
-  if (normalized.includes("サブpc") || normalized.includes("subpc")) return "subpc";
-  if (normalized.includes("vps")) return "vps";
+  const names = matchManualStepDeviceNames(device);
+  if (names.length !== 1) return null;
+  if (names[0] === "サブPC") return "subpc";
+  if (names[0] === "VPS") return "vps";
   return null;
 }
 
@@ -261,7 +270,8 @@ export function resolveInfraConfigDevice(device: string | null): InfraConfigDevi
  * `parseManualStepGuide`に任せ、ここで本文の切り方を持たない——画面の案内と別々に
  * 本文を読むと、案内に出ている手順と検出結果がずれる。
  *
- * デバイスが読めないときは、**当たったリポジトリが1つに絞れる場合だけ**返す。
+ * デバイスは**手順ごとに**決める（#2052）。読めないときは、**当たったリポジトリが1つに
+ * 絞れる場合だけ**返す。
  * `/etc/systemd/system/`のようにVPS・サブPCの両方にあるパスは、どちらの実機の話か
  * 分からないまま切り出すと、反映されないリポジトリへPRが出る。
  */
@@ -269,14 +279,18 @@ export function detectInfraConfigTargets(body: string | null): InfraConfigTarget
   const guide = parseManualStepGuide(body);
   if (!guide.hasTemplate || guide.steps.length === 0) return [];
 
-  const device = resolveInfraConfigDevice(guide.where.device);
-  const repos = device ? INFRA_CONFIG_REPOS.filter((repo) => repo.device === device) : INFRA_CONFIG_REPOS;
-
   const targets: InfraConfigTarget[] = [];
   const seen = new Set<string>();
 
-  const options = { allowHomePaths: device !== null };
   for (const step of guide.steps) {
+    // **デバイスは手順ごとに見る**（#2052）。`/etc/systemd/system/`のようにVPS・サブPCの
+    // 両方にあるパスは、手順の文頭に`（VPS）`と書かれていればそこで1つに絞れる
+    const device = resolveInfraConfigDevice(resolveManualStepDevice(guide.where, step));
+    const repos = device
+      ? INFRA_CONFIG_REPOS.filter((repo) => repo.device === device)
+      : INFRA_CONFIG_REPOS;
+    const options = { allowHomePaths: device !== null };
+
     for (const target of detectStepTargets(step, repos, options)) {
       // デバイスが読めないまま複数のリポジトリに当たったら、どちらとも決められないので捨てる
       const ambiguous =

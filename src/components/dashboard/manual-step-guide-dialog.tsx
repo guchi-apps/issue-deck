@@ -61,6 +61,7 @@ import {
 } from "@/lib/manual-step-run-view";
 import {
   parseManualStepGuide,
+  resolveManualStepDevice,
   type ManualStepGuide,
   type ManualStepGuideStep,
 } from "@/lib/manual-step-guide";
@@ -437,7 +438,16 @@ function ManualStepGuideContent({
       <div className="flex min-h-0 flex-col overflow-y-auto">
         <div className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-muted/60 p-3 backdrop-blur-sm">
           <StageRail stages={stages} current={index} stepCount={stepCount} />
-          <WhereChips where={guide.where} />
+          {/* デバイスは**いま開いている手順のもの**（#2052）。手順にデバイスが書かれて
+              いなければ手作業の既定値へ落ちる */}
+          <WhereChips
+            where={guide.where}
+            device={
+              stage.kind === "step"
+                ? resolveManualStepDevice(guide.where, stage.step)
+                : guide.where.defaultDevice
+            }
+          />
         </div>
 
         <div className="flex flex-col gap-3 p-4">
@@ -449,7 +459,6 @@ function ManualStepGuideContent({
                 <ManualStepAutoRunPanel
                   plan={plan}
                   hostName={host?.name ?? "サブPC"}
-                  device={guide.where.device}
                   consent={autorun.consent}
                   onConsentChange={autorun.setConsent}
                   onApprove={() => {
@@ -634,9 +643,20 @@ function StageRail({
  * 手元の端末で打ってしまう事故を防ぐのがこのチップの役目で、最初の画面にだけ出すと
  * 手順へ進んだ時点で消える。
  */
-function WhereChips({ where }: { where: ManualStepGuide["where"] }) {
+function WhereChips({
+  where,
+  device,
+}: {
+  where: ManualStepGuide["where"];
+  /**
+   * いま出している手順のデバイス（#2052）。既定値が決まらない本文（端末が複数書かれている）で
+   * デバイスの無い手順を開くと`null`になるので、そのときだけ書かれた値をそのまま出す——
+   * 判定には使えないが、読む人にとっては本文に書いてあることが分かる方がよい。
+   */
+  device: string | null;
+}) {
   const chips = [
-    { icon: MonitorSmartphone, value: where.device, label: "実行するデバイス" },
+    { icon: MonitorSmartphone, value: device ?? where.device, label: "実行するデバイス" },
     { icon: FolderOpen, value: where.directory, label: "カレントディレクトリ" },
     { icon: GitBranch, value: where.branch, label: "Gitブランチ" },
   ].filter((chip): chip is typeof chip & { value: string } => chip.value !== null);
