@@ -75,6 +75,11 @@ jobs:
       - name: Workflow gh repository check
         run: scripts/check-workflow-gh-repo.sh
 
+      # checkoutを行うジョブがpermissions:へcontentsを書き忘れると、publicのissue-deckでは
+      # 匿名cloneが通って気付けず、privateの配布先だけでcheckoutが落ちる（#2126）。
+      - name: Workflow job permissions check
+        run: scripts/check-workflow-job-permissions.sh
+
       # ローカル起動プロトコル（#1073）への適合。issue-deck自身が契約を満たさなくなると、
       # 他リポジトリへ配る内容の正が崩れるため、developへ入る前に落とす。
       - name: Local session contract check
