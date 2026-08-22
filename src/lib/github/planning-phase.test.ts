@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isPlanningPhaseSkipped, resolvePlanningPhase } from "@/lib/github/planning-phase";
+import { SESSION_PLAN_MARKER } from "@/lib/dispatch/session-plan";
+import {
+  isPlanningPhaseSkipped,
+  resolvePlanningPhase,
+  SESSION_PLAN_COMMENT_MARKER,
+} from "@/lib/github/planning-phase";
 import type { IssueComment, IssueLabel } from "@/types/issue";
 
 function labels(...names: string[]): IssueLabel[] {
@@ -16,6 +21,14 @@ function comment(body: string, login = "issue-deck[bot]"): IssueComment {
     reactionCount: 0,
   };
 }
+
+/**
+ * 判定側はサーバー専用モジュール（`session-plan.ts`）をimportできないため、マーカーを
+ * 文字列で持っている。**正とずれたらここで落ちる**（テストはサーバー側を読んでよい）。
+ */
+it("計画コメントのマーカーは`session-plan.ts`の正と一致する", () => {
+  expect(SESSION_PLAN_COMMENT_MARKER).toBe(SESSION_PLAN_MARKER);
+});
 
 describe("resolvePlanningPhase", () => {
   it("計画フェーズより手前（未着手・計画検討中）は判定しない", () => {

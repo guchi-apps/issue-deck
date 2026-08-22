@@ -20,13 +20,16 @@ export type PlanningPhaseState = "planned" | "skipped" | "unknown";
  * ジョブの積み込みを抱えたサーバー専用モジュールで、画面（クライアントコンポーネント）から
  * 辿るとサーバー側のコードごとバンドルへ引きずり込む。同じ理由で
  * `session-wrapup.ts`もこのマーカーを文字列で持っている。
+ *
+ * 代わりに、**正とずれたら落ちるテスト**を`planning-phase.test.ts`に置いている
+ * （テストはサーバー側のモジュールを読んでよい）。
  */
-const SESSION_PLAN_MARKER = "<!-- issue-deck:session-plan -->";
+export const SESSION_PLAN_COMMENT_MARKER = "<!-- issue-deck:session-plan -->";
 
 /** 計画として投稿されたコメントかどうか。無人実行・ローカルセッションのどちらの経路も拾う */
 function isPlanComment(comment: Pick<IssueComment, "body" | "author">): boolean {
   // `ExitPlanMode`のフック経由（#1342）。役割マーカーを持たないので先に見る
-  if (comment.body.includes(SESSION_PLAN_MARKER)) return true;
+  if (comment.body.includes(SESSION_PLAN_COMMENT_MARKER)) return true;
   const resolved = resolveCommentSource(comment, comment.author.login);
   if (!resolved) return false;
   const role = commentAgentRole(resolved);
