@@ -7,6 +7,8 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { CHECK_USER_LABEL } from "@/lib/github/approval-labels";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
+import { isLabelClearedOnClose } from "@/lib/github/issue-close";
+import { clearLabelsOnIssueClose } from "@/lib/github/issue-close-cleanup";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
@@ -156,7 +158,8 @@ async function upsertIssueRow(
     }),
   ]);
 
-  // closeされたら、そのIssueで走っているローカルセッションを畳む（#1518）。
+  // closeされたら、そのIssueで走っているローカルセッションを畳み（#1518）、残ると害になる
+  // ラベルを外す（#2178）。
   //
   // **OPEN→CLOSEDの遷移だけで発火させる。** 「今CLOSEDである」で判定すると、定期同期が回るたび
   // （closedなIssueへ人が手で起こしたセッションも含めて）畳みに行ってしまう。更新前の状態を
@@ -166,16 +169,23 @@ async function upsertIssueRow(
   // 「closeされた後に届いたopenの通知」で二重に発火することはない。
   if (existing?.state === "OPEN" && data.state === "CLOSED") {
     // `repositoryFullName`はこの関数が持っていないので、遷移を検知したときだけ引く
-    // （呼び出し3経路のシグネチャを変えないため）。
+    // （呼び出し3経路のシグネチャを変えないため）。ラベルの除去はGitHubへ書きに行くので、
+    // インストールIDもここで一緒に取る。
     const repository = await db.repository.findUnique({
       where: { id: repositoryId },
-      select: { fullName: true },
+      select: {
+        fullName: true,
+        ownerLogin: true,
+        name: true,
+        installation: { select: { installationId: true } },
+      },
     });
     if (repository) {
       await handleIssueClosedForDispatch({
         repositoryFullName: repository.fullName,
         issueNumber: issue.number,
       });
+      await clearLabelsOnClose(repository, issue.id, issue.number, labelNames);
     }
   }
 
@@ -196,6 +206,62 @@ export async function syncRepositoryIssues(repository: RepoForSync): Promise<voi
       githubIssueId: { notIn: rawIssues.map((raw) => BigInt(raw.id)) },
     },
   });
+}
+
+/**
+ * closeされたIssueから、残ると害になるラベル（`00.check-user`・理由ラベル・`11.local`）を
+ * 外す（#2178。対象と理由は`lib/github/issue-close.ts`）。
+ *
+ * **GitHubへ出て行くのは、実際に対象ラベルが付いているときだけ。** 大半のcloseは1枚も
+ * 付いておらず、その場合はトークンの取得すら行わない。
+ *
+ * **DBの行も同時に落とす。** ここを通る経路のうち画面のPATCH（`upsertIssueAndGetDisplay`）は
+ * この直後にDBを読み直して1件を返すため、DBを直さないと「クローズした瞬間だけラベルが
+ * 残って見え、Webhookが届いてから消える」というちらつきになる。
+ *
+ * **投げない。** 後片付けの失敗でcloseそのものやDB同期を巻き添えにしない（#1856の
+ * `closeStrandedProgress`と同じ約束）。
+ */
+async function clearLabelsOnClose(
+  repository: {
+    fullName: string;
+    ownerLogin: string;
+    name: string;
+    installation: { installationId: number };
+  },
+  issueId: string,
+  issueNumber: number,
+  labelNames: readonly string[],
+): Promise<void> {
+  if (!labelNames.some(isLabelClearedOnClose)) return;
+
+  try {
+    const token = await getInstallationToken(repository.installation.installationId);
+    const removed = await clearLabelsOnIssueClose({
+      owner: repository.ownerLogin,
+      repo: repository.name,
+      issueNumber,
+      token,
+      currentLabelNames: labelNames,
+    });
+    if (removed.length === 0) return;
+
+    await db.issueLabel.deleteMany({ where: { issueId, name: { in: removed } } });
+
+    // `00.check-user`を外したときの後始末は、上の`upsertIssueRow`が付け外しを見て
+    // 書いているものと同じにする（確認待ちの並び順の基準時刻とPush通知の送信済み記録）。
+    if (removed.includes(CHECK_USER_LABEL)) {
+      await db.issue.update({
+        where: { id: issueId },
+        data: { checkUserLabeledAt: null, checkUserPushSentAt: null },
+      });
+    }
+  } catch (error) {
+    console.error(
+      `[sync-issues] クローズ時のラベル除去に失敗しました（${repository.fullName}#${issueNumber}）`,
+      error,
+    );
+  }
 }
 
 export async function upsertIssueFromWebhookPayload(

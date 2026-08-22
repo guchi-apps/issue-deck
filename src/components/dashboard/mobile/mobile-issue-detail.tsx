@@ -79,6 +79,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuPortal,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -103,6 +104,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
@@ -412,12 +414,13 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleClose(stateReason: "completed" | "not_planned") {
+  async function handleClose(stateReason: "completed" | "not_planned", closeReasonLabel?: string) {
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       state: "closed",
       stateReason,
+      closeReasonLabel,
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -699,6 +702,19 @@ export function MobileIssueDetail({
                     >
                       計画外としてクローズ
                     </DropdownMenuItem>
+                    {/* クローズ理由ラベル（#2178）。区切り線から下は「計画外の内訳」で、
+                        どれも`not_planned`でクローズしつつ`90.Close: *`を1枚付ける */}
+                    <DropdownMenuSeparator />
+                    {CLOSE_REASON_LABELS.map((reason) => (
+                      <DropdownMenuItem
+                        key={reason.name}
+                        className="whitespace-nowrap text-xs"
+                        disabled={isSubmitting}
+                        onSelect={() => handleClose("not_planned", reason.name)}
+                      >
+                        {reason.label}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuPortal>
               </DropdownMenuSub>

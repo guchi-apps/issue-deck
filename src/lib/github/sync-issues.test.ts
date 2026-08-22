@@ -12,11 +12,24 @@ const $transaction = vi.fn();
 const issueLabelUpsert = vi.fn();
 const issueLabelDeleteMany = vi.fn();
 const repositoryFindUnique = vi.fn();
+const issueUpdate = vi.fn();
 // closeでセッションを畳む後片付け（#1518）。ここでは「遷移したときだけ呼ぶ」ことだけを見る
 const handleIssueClosedForDispatch = vi.fn();
+// closeで残ると害になるラベルを外す後片付け（#2178）。外す対象の選別自体は
+// `issue-close.test.ts`で見ているので、ここでは呼び出しとDBへの反映だけを見る
+const clearLabelsOnIssueClose = vi.fn();
+const getInstallationToken = vi.fn();
 
 vi.mock("@/lib/github/app-auth", () => ({
-  getInstallationToken: vi.fn(),
+  get getInstallationToken() {
+    return getInstallationToken;
+  },
+}));
+
+vi.mock("@/lib/github/issue-close-cleanup", () => ({
+  get clearLabelsOnIssueClose() {
+    return clearLabelsOnIssueClose;
+  },
 }));
 
 vi.mock("@/lib/dispatch/session-close", () => ({
@@ -36,6 +49,9 @@ vi.mock("@/lib/db", () => ({
       },
       get updateMany() {
         return updateMany;
+      },
+      get update() {
+        return issueUpdate;
       },
     },
     repository: {
@@ -356,7 +372,15 @@ describe("upsertIssueFromWebhookPayload のclose検知", () => {
     issueLabelUpsert.mockReset().mockResolvedValue(undefined);
     issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
     $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
-    repositoryFindUnique.mockReset().mockResolvedValue({ fullName: "guchi-apps/issue-deck" });
+    repositoryFindUnique.mockReset().mockResolvedValue({
+      fullName: "guchi-apps/issue-deck",
+      ownerLogin: "guchi-apps",
+      name: "issue-deck",
+      installation: { installationId: 42 },
+    });
+    issueUpdate.mockReset().mockResolvedValue(undefined);
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    clearLabelsOnIssueClose.mockReset().mockResolvedValue([]);
     handleIssueClosedForDispatch.mockReset().mockResolvedValue({
       killedHosts: [],
       skipped: [],
@@ -441,5 +465,81 @@ describe("upsertIssueFromWebhookPayload のclose検知", () => {
     await upsertIssueFromWebhookPayload("repo-1", raw);
 
     expect(handleIssueClosedForDispatch).not.toHaveBeenCalled();
+    expect(clearLabelsOnIssueClose).not.toHaveBeenCalled();
+  });
+
+  it("OPENからCLOSEDへ変わったとき、残ると害になるラベルの除去へ今のラベル一覧を渡す", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+    clearLabelsOnIssueClose.mockResolvedValue(["11.local"]);
+    const raw = makeRawIssue({
+      number: 2178,
+      state: "closed",
+      state_reason: "completed",
+      labels: [
+        { id: 1, name: "11.local", color: "ededed", description: null },
+        { id: 2, name: "50.feature", color: "a2eeef", description: null },
+      ],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(clearLabelsOnIssueClose).toHaveBeenCalledWith({
+      owner: "guchi-apps",
+      repo: "issue-deck",
+      issueNumber: 2178,
+      token: "token",
+      currentLabelNames: ["11.local", "50.feature"],
+    });
+    // 画面がWebhookの往復を待たずに反映できるよう、DBの行も落とす
+    expect(issueLabelDeleteMany).toHaveBeenCalledWith({
+      where: { issueId: "issue-1", name: { in: ["11.local"] } },
+    });
+  });
+
+  it("対象ラベルが1枚も付いていなければ、トークンの取得すら行わない", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+    const raw = makeRawIssue({
+      state: "closed",
+      state_reason: "completed",
+      labels: [{ id: 2, name: "50.feature", color: "a2eeef", description: null }],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(getInstallationToken).not.toHaveBeenCalled();
+    expect(clearLabelsOnIssueClose).not.toHaveBeenCalled();
+  });
+
+  it("`00.check-user`を外したときは、確認待ちの基準時刻とPush通知の記録も戻す", async () => {
+    findUnique.mockResolvedValue(existingIssue("OPEN"));
+    clearLabelsOnIssueClose.mockResolvedValue(["00.check-user", "01.check-plan"]);
+    const raw = makeRawIssue({
+      state: "closed",
+      state_reason: "not_planned",
+      labels: [
+        { id: 1, name: "00.check-user", color: "d93f0b", description: null },
+        { id: 2, name: "01.check-plan", color: "fbca04", description: null },
+      ],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(issueUpdate).toHaveBeenCalledWith({
+      where: { id: "issue-1" },
+      data: { checkUserLabeledAt: null, checkUserPushSentAt: null },
+    });
+  });
+
+  it("すでにCLOSEDだったIssueの更新ではラベルを外しに行かない（定期同期で毎回叩かない）", async () => {
+    findUnique.mockResolvedValue(existingIssue("CLOSED"));
+    const raw = makeRawIssue({
+      state: "closed",
+      state_reason: "completed",
+      labels: [{ id: 1, name: "11.local", color: "ededed", description: null }],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(clearLabelsOnIssueClose).not.toHaveBeenCalled();
   });
 });
