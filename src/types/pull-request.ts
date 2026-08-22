@@ -1,5 +1,5 @@
 import type { CheckUserReason } from "@/lib/github/approval-labels";
-import type { MergeJudgementState } from "@/lib/github/check-rollup";
+import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { CiState } from "@/lib/github/release-api";
@@ -86,7 +86,7 @@ export type PullRequestSummary = {
    * する（`isMergeJudgementPending`）。CI状態と同じ1回のGraphQLで取れるため、
    * これを持つことでGitHub APIの消費は増えない。
    */
-  mergeJudgement: MergeJudgementState;
+  mergeJudgement: MergeJudgement;
   /**
    * baseブランチとのコンフリクトの有無（#1742）。`false`＝コンフリクトあり・`true`＝マージ可能・
    * `null`＝GitHubが判定中（非同期に計算される）か、そもそも取得していない（draft・closed）。
@@ -173,7 +173,7 @@ export type IssuePullRequest = {
    * 自動マージ可否の判定の進み具合（#1968）。`ciStatus`と同じくopenかつdraftでないPRでのみ
    * 取得し、それ以外は`unknown`。`pending`のあいだはIssue画面のマージボタンを押せなくする。
    */
-  mergeJudgement: MergeJudgementState;
+  mergeJudgement: MergeJudgement;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
 };

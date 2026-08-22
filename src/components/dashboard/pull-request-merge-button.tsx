@@ -18,7 +18,7 @@ import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-muta
 import {
   isMergeJudgementPending,
   MERGE_JUDGEMENT_PENDING_LABEL,
-  MERGE_JUDGEMENT_PENDING_REASON,
+  mergeJudgementReason,
   mergeWarnings,
 } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
@@ -77,7 +77,7 @@ export function PullRequestMergeButton({
         variant={variant}
         className="h-7 shrink-0"
         disabled={isSubmitting || isMerged || judgementPending}
-        title={judgementPending ? MERGE_JUDGEMENT_PENDING_REASON : undefined}
+        title={judgementPending ? mergeJudgementReason(pullRequest.mergeJudgement.step) : undefined}
         onClick={() => (warnings.length > 0 ? setConfirmOpen(true) : runMerge())}
       >
         {isMerged

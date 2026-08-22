@@ -6,6 +6,7 @@ import {
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
+  MergeJudgementBadge,
 } from "@/components/dashboard/pull-request-badges";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -55,6 +56,7 @@ export function MergePendingPullRequests({
               <span className="flex flex-wrap items-center gap-2">
                 <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
                 <CiStateBadge ciState={pullRequest.ciState} />
+                <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
                 <ConflictBadge mergeable={pullRequest.mergeable} />
                 <span className="text-xs text-muted-foreground">
                   {formatRelativeDate(pullRequest.createdAt)}
