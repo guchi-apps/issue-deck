@@ -301,14 +301,14 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
   失敗であれば本文へ「自動修正を試みます」を添える。**このジョブはリポジトリごとの`ci.yml`に
   あるため、他リポジトリへは波及しない**（画面の表示だけが共通で効く）。
 
-## 配布状況と、不足しているcallerの配布（#1948）
+## 配布状況と、不足しているcallerの配布（#1948・#1475）
 
 **自動修復のcallerは、そのリポジトリの`.github/workflows/`に置かれていなければ起動できない。**
 `workflow_dispatch`の受け口はファイルの実在で解決されるため、無いリポジトリでは画面のボタンを
 押してもGitHub APIが404を返し、押すまでそれが分からなかった（`/api/pull-requests/repair`は
 この404だけ専用の文言に置き換えている）。実測では、フリートのうち3リポジトリしか持って
 いなかった（issue-deck・dayspan・shopping-list。2026-08-18時点の配布状況は
-[../supported-repositories.md](../supported-repositories.md)「自動修復ワークフローの配布状況」）。
+[../supported-repositories.md](../supported-repositories.md)「不足しているcallerの配布状況」）。
 
 配布は**issue-deckの画面（設定＞フリート運用＞共有ワークフローのバージョン）**から行う。
 
@@ -318,15 +318,32 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
   不足として挙げる——`claude-ci-fix.yml`・`claude-conflict-resolve.yml`は
   `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
   `release-develop-to-main.yml`を持つリポジトリが対象。
+- **この配布経路は自動修復専用ではない**（#1475）。`claude-review-develop.yml`——develop向けPRの
+  自動マージ可否を判定する唯一の経路——も同じ一覧・同じボタンから配る。自動修復ではないが
+  「置かれていないと機能が丸ごと働かない」点が同じで、判定も`REPAIR_WORKFLOW_SPECS`に1行
+  足すだけで済むため。画面の見出しは「不足しているワークフロー」、配布PRのタイトルは
+  「不足しているワークフローを追加する」。
 - ボタンは`propagate-repair-workflows.yml`を起動し、`.github/scripts/propagate-repair-workflows.sh`が
-  リポジトリごとにPRを作る。callerの中身は`.github/templates/repair-callers/`の雛形から生成し、
+  リポジトリごとにPRを作る。callerの中身は`.github/templates/callers/`の雛形から生成し、
   **参照タグ（`uses:`・`prompts-ref`）と`runtime-setup`・`package-manager`・`node-version`は
   そのリポジトリの`claude-issue-dispatch.yml`から写す**（写す入力を3つに限るのは、
   再利用ワークフローが宣言していない入力を渡すと読み込み自体が失敗するため）。
+  **`claude-review-develop.yml`にはこの3つを写さない**——
+  `reusable-claude-review-develop.yml`が宣言していないため、渡すと読み込みごと失敗する。
+  写す値が要るかどうかは雛形に`__WITH_INPUTS__`があるかで決まる。
+- **`claude-review-develop.yml`を配るときは、配布先のリポジトリ設定も揃える**（#1475）。
+  `Allow auto-merge`を有効化し、`develop`にブランチ保護（必須ステータスチェック）が無ければ
+  作る。**保護が無いと自動マージは成立しない**——判定の時点でPRは「既にマージ可能」なので
+  `gh pr merge --auto`が断られ、`auto-merge-fallback`が毎回`00.check-user`を付けるだけで
+  終わる。必須チェック名は**ワークフローのジョブ名から推測せず**、直近のdevelop向けPRで実際に
+  走ったcheck runと突き合わせて一致したものだけを使う（実在しない名前を必須にすると永久に
+  埋まらずマージ不能になる）。突き合わせに失敗したら保護は作らず、PR本文へ警告を残す。
 - **`verify-commands`・`build-env`は配らない。** リポジトリごとに違い機械的に決められないため、
   必要なら配布後に手で足す（issue-deck・dayspanのcallerが実例）。
 - **`workflow_run`はワークフローの「名前」で購読する。** 雛形の購読先は配布先の`ci.yml`
   （無ければ`test.yml`）の`name:`から埋める。名前が変わると黙って発火しなくなる。
+  **ワークフローファイルがCRLFのリポジトリがある**（asset-manager）ため、読むときにCRを
+  落とす。落とさないと名前の末尾にCRが残り、購読先としても必須チェック名としても一致しない。
 - **配布PRは自動マージしない。** 自動マージの例外（#1602）は`@workflows/vN`の機械的な置換に
   限られ、新しいワークフローファイルの追加はGitHub Actionsの変更そのものにあたるため、
   各リポジトリでPRを確認してマージする。配布PRが既にopenのリポジトリは、次に押したときの

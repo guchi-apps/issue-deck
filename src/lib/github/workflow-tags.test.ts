@@ -203,7 +203,7 @@ describe("collectWorkflowTags", () => {
     ]);
   });
 
-  it("不足している自動修復のcallerを、同じ取得結果から割り出す（#1948）", async () => {
+  it("不足しているcallerを、同じ取得結果から割り出す（#1948・#1475）", async () => {
     // 参照タグの解析と同じTreeのentriesを使うため、追加のGitHub API呼び出しは要らない
     githubFetch.mockImplementation(
       route({
@@ -223,6 +223,7 @@ describe("collectWorkflowTags", () => {
     expect(overview.repositories[0]?.missingRepairWorkflows).toEqual([
       "claude-conflict-resolve.yml",
       "claude-pr-repair.yml",
+      "claude-review-develop.yml",
     ]);
   });
 
@@ -235,7 +236,7 @@ describe("collectWorkflowTags", () => {
           "guchi-apps/car-care": [
             {
               number: 12,
-              title: "自動修復ワークフローを追加する",
+              title: "不足しているワークフローを追加する",
               url: "https://github.com/guchi-apps/car-care/pull/12",
             },
           ],
@@ -262,7 +263,7 @@ describe("collectWorkflowTags", () => {
     expect(overview.repositories).toHaveLength(3);
     // 最新タグ用の1本と、3リポジトリぶんをまとめた1本だけ
     expect(graphqlCalls()).toHaveLength(2);
-    // GraphQLの2本＋配布ワークフロー2種（タグ配布・自動修復の配布。#1948）の最新run
+    // GraphQLの2本＋配布ワークフロー2種（タグ配布・不足callerの配布。#1948）の最新run
     // （REST・ETagの条件付きGET）の2本
     expect(githubFetch.mock.calls).toHaveLength(4);
   });

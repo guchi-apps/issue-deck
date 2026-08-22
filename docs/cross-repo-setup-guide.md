@@ -477,13 +477,21 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > やり直すことになる。
 >
 > **例外は自動修復の3つ**（`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・
-> `claude-pr-repair.yml`。#1948）。**対象の判定を機械で書けた**ため、別の配布
-> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——前2つは
-> `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
-> `release-develop-to-main.yml`を持つリポジトリが対象で、`with:`は同じリポジトリの
-> `claude-issue-dispatch.yml`から写す。**タグの配布とは別のボタン・別のワークフローで、
+> `claude-pr-repair.yml`。#1948）**と`claude-review-develop.yml`**（#1475）。
+> **対象の判定を機械で書けた**ため、別の配布
+> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——自動修復の前2つと
+> `claude-review-develop.yml`は`claude-issue-dispatch.yml`を持つリポジトリ、
+> `claude-pr-repair.yml`は`release-develop-to-main.yml`を持つリポジトリが対象。`with:`は
+> 同じリポジトリの`claude-issue-dispatch.yml`から写す（**`claude-review-develop.yml`だけは
+> 写さない**。`reusable-claude-review-develop.yml`が`runtime-setup`等を宣言しておらず、
+> 渡すと読み込みごと失敗するため）。**タグの配布とは別のボタン・別のワークフローで、
 > こちらは自動マージしない。** 仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
 > 「配布状況と、不足しているcallerの配布」を参照。
+>
+> **`claude-review-develop.yml`の配布は、リポジトリ設定（`Allow auto-merge`と`develop`の
+> ブランチ保護）まで含めて行う**（#1475）。保護が無いと`gh pr merge --auto`が「既にマージ
+> 可能」として断られ、callerを置いても自動マージは1本も成立しない。下記
+> 「`develop`のブランチ保護は自動マージの前提」を参照。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
@@ -1302,6 +1310,34 @@ rm -rf .shared-context .shared-prompts
   gh api repos/guchi-apps/my-app --jq '"delete_branch_on_merge=\(.delete_branch_on_merge) default_branch=\(.default_branch)"'
   gh api --method PATCH repos/guchi-apps/my-app -F delete_branch_on_merge=false
   ```
+
+### `develop`のブランチ保護は自動マージの前提（#1475）
+
+**`claude-review-develop.yml`を置いても、`develop`にブランチ保護（必須ステータスチェック）が
+無ければ自動マージは1本も成立しない。** `auto-merge`ジョブが実行する`gh pr merge --auto`は、
+PRが既にマージ可能な状態だと**「既にマージ可能」として断られる**。必須チェックが無いPRは
+判定の時点で常にその状態なので、ジョブは毎回失敗し、`auto-merge-fallback`が`00.check-user`を
+付ける——**未配布のときと同じ「全て手動マージ」に、失敗したジョブのぶんノイズが加わるだけ**に
+なる。実測では、`claude-review-develop.yml`が未配布だった12リポジトリすべてに保護が無かった。
+
+同じ保護は`release-develop-to-main.yml`のバンプPR（同じく`gh pr merge --auto --merge`で予約する）
+にも効く。
+
+- **必須チェック名は対象リポジトリのCIのジョブ名に合わせる。** 実測でも`lint-and-build`・
+  `test`・`verify`・`typecheck-and-test`・`backend`と割れており、`myroom`のように2つ
+  （`backend`・`frontend`）あるリポジトリもある
+- **実在しない名前を必須にすると、永久に埋まらずマージ不能になる。** ワークフローのジョブ名を
+  そのまま信じず、**直近のdevelop向けPRで実際に走ったcheck runと突き合わせて**確かめる
+  （画面からの配布はこの突き合わせを行い、一致しなければ保護を作らずPR本文へ警告を残す）
+- `ci.yml`の`pull_request.branches`に`develop`が含まれていることも確認する
+
+```bash
+# 必須チェック名の候補（CIのジョブ名 ∩ 直近のdevelop向けPRで実際に走ったcheck run）
+REPO=guchi-apps/my-app
+SHA="$(gh api "repos/$REPO/pulls?base=develop&state=closed&per_page=20" \
+  --jq 'map(select(.merged_at != null)) | .[0].head.sha')"
+gh api "repos/$REPO/commits/$SHA/check-runs" --jq '.check_runs[].name' | sort -u
+```
 
 ### `develop`を持たないリポジトリ（main直行）
 

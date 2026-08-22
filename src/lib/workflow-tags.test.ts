@@ -315,15 +315,29 @@ describe("タグ作成の版数計算（#1876）", () => {
 });
 
 describe("missingRepairWorkflows", () => {
-  it("無人実行のcallerがあれば、CI失敗・コンフリクトの自動修復を不足として挙げる", () => {
-    // 実測のguchi-apps/aideと同じ構成（自動修復は1つも無かった）
+  it("無人実行のcallerがあれば、自動修復と自動マージ判定を不足として挙げる", () => {
+    // 実測のguchi-apps/aideと同じ構成（自動修復も自動マージ判定も1つも無かった）
     const missing = missingRepairWorkflows([
       "ci.yml",
       "issue-labels.yml",
       "claude-issue-dispatch.yml",
     ]);
 
-    expect(missing).toEqual(["claude-conflict-resolve.yml", "claude-ci-fix.yml"]);
+    expect(missing).toEqual([
+      "claude-conflict-resolve.yml",
+      "claude-ci-fix.yml",
+      "claude-review-develop.yml",
+    ]);
+  });
+
+  it("claude-review-develop.yml が置かれていれば不足に挙げない", () => {
+    // develop向けPRの自動マージ可否を判定する唯一の経路（#1470・#1475）
+    const missing = missingRepairWorkflows([
+      "claude-issue-dispatch.yml",
+      "claude-review-develop.yml",
+    ]);
+
+    expect(missing).not.toContain("claude-review-develop.yml");
   });
 
   it("リリースフローがあれば claude-pr-repair.yml も不足に挙げる", () => {
@@ -346,6 +360,7 @@ describe("missingRepairWorkflows", () => {
       "claude-issue-dispatch.yml",
       "claude-ci-fix.yml",
       "claude-conflict-resolve.yml",
+      "claude-review-develop.yml",
     ]);
 
     expect(missing).toEqual([]);
@@ -409,6 +424,7 @@ describe("evaluateWorkflowTags の自動修復まわり", () => {
     expect(status.missingRepairWorkflows).toEqual([
       "claude-conflict-resolve.yml",
       "claude-ci-fix.yml",
+      "claude-review-develop.yml",
     ]);
   });
 
