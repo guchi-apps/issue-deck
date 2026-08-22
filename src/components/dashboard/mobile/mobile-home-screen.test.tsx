@@ -93,6 +93,7 @@ function renderHome(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
+      unconfirmedQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
@@ -174,6 +175,7 @@ describe("MobileHomeScreen（#1690）", () => {
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
+        unconfirmedQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
@@ -189,38 +191,36 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(badgeClassName()).toContain("bg-amber-500");
   });
 
-  // 件数（`computeNavCountsForFilters`）は未確認の数で、確認待ち・作業待ちと同じ
-  // オレンジの丸で出す（#1910・PCと同じ）
-  it("未確認の質問があるときだけ「質問」の件数をオレンジの丸で出す", () => {
-    const { rerender } = renderHome({ navCounts: { ...NAV_COUNTS, question: 0 } });
+  // 数字は一覧に並ぶ件数で、オレンジの丸は未確認があるときだけ（#2070・PCと同じ）。
+  // #1910のように未確認の数を数字に出すと、読み終えた質問しか無いときに
+  // 質問が何件も開いたままでも`0`と出て「質問は無い」と読めてしまう
+  function questionRow(total: number) {
+    // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
+    return screen.getByRole("button", { name: new RegExp(`^質問\\s*${total}$`) });
+  }
 
-    function badgeClassName(unconfirmed: number) {
-      // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
-      const row = screen.getByRole("button", { name: new RegExp(`^質問\\s*${unconfirmed}$`) });
-      return row.querySelector("span:last-child")?.className ?? "";
-    }
+  it("未確認の質問があれば、一覧の件数をオレンジの丸で出す", () => {
+    renderHome({
+      navCounts: { ...NAV_COUNTS, question: 3 },
+      unconfirmedQuestionCount: 1,
+    });
 
-    expect(badgeClassName(0)).not.toContain("amber");
+    const row = questionRow(3);
+    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+    // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
+    expect(row.getAttribute("title")).toContain("3件");
+    expect(row.getAttribute("title")).toContain("1件");
+  });
 
-    rerender(
-      <MobileHomeScreen
-        overviewStats={OVERVIEW_STATS}
-        navCounts={{ ...NAV_COUNTS, question: 1 }}
-        checkUserPullRequestCount={0}
-        manualStepAttention={NO_MANUAL_STEP}
-        pullRequestNavCounts={PR_NAV_COUNTS}
-        onSelectQuickView={() => {}}
-        onSelectPullRequests={() => {}}
-        onSelectFlow={() => {}}
-        favoriteRepositories={[]}
-        onSelectRepository={() => {}}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
-        onOpenSettings={() => {}}
-      />,
-    );
+  it("未確認の質問が無くても、開いている質問の件数は出す（強調はしない）", () => {
+    renderHome({
+      navCounts: { ...NAV_COUNTS, question: 3 },
+      unconfirmedQuestionCount: 0,
+    });
 
-    expect(badgeClassName(1)).toContain("bg-amber-500");
+    const row = questionRow(3);
+    expect(row.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(row.getAttribute("title")).toContain("3件");
   });
 
   it("先頭のカードを押すと、そのカードのビューへ遷移する", () => {

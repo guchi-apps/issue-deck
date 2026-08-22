@@ -3,7 +3,6 @@ import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { computeManualStepAttention } from "@/lib/manual-step-attention";
-import { countUnconfirmedQuestions } from "@/lib/question-attention";
 import {
   getNavView,
   getNavViewDefaultState,
@@ -312,14 +311,16 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  *   issuesから求める。一覧側も絞り込み前の集合を基準にしているため、揃えないと
  *   「直近本番に反映した」の件数だけがズレる。
  *
- * **「ユーザーの作業待ち」（`manual-step`）と「質問」は、いま手を動かせる件数を出す**
- * （#1763・#1910。`lib/manual-step-attention.ts`・`lib/question-attention.ts`）。前提待ちを
- * 含む総数・確認済みを含む総数は「いま手を動かせば片付く数」として読めないため、作業待ちは
- * `actionable`、質問は未確認（回答が届いていて未読）の件数を返す。**数え方をここで差し替える
- * ことで、左メニュー・スマホのホーム・スマホの一覧のビュー切替が同じ数字になる。**
- * 一覧のヘッダーだけは行数を出す場所なので、そちらは`formatManualStepListCount`・
- * `formatQuestionListCount`で内訳（`2件・前提待ち2件`・`3件・未確認1件`）を添えて
- * 食い違いを説明する。
+ * **「ユーザーの作業待ち」（`manual-step`）だけは、いま実行できる件数を出す**
+ * （#1763。`lib/manual-step-attention.ts`）。前提待ちを含む総数は「いま手を動かせば片付く数」
+ * として読めないため`actionable`を返す。**数え方をここで差し替えることで、左メニュー・スマホの
+ * ホーム・スマホの一覧のビュー切替が同じ数字になる。** 一覧のヘッダーだけは行数を出す場所なので、
+ * そちらは`formatManualStepListCount`が内訳（`2件・前提待ち2件`）を添えて食い違いを説明する。
+ *
+ * **「質問」は#1910で未確認の件数へ差し替えていたが、#2070で一覧と同じ件数へ戻した。**
+ * 読み終えた質問しか無いと、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた。
+ * 「回答が届いていてまだ読んでいない」という合図はオレンジの丸（`computeQuestionAttention`）に
+ * 残してあり、件数の内訳は一覧ヘッダーの`formatQuestionListCount`（`3件・未確認1件`）で読む。
  *
  * @param referenceIssues 「最新リリース」の基準時刻と、手作業Issueの前提条件（#1763）を
  *   解決するための母集団。**リポジトリで絞り込んだ一覧を数えるときは、絞り込む前の全Issueを
@@ -344,9 +345,7 @@ export function computeNavCountsForFilters(
     counts[view.id] =
       view.id === "manual-step"
         ? computeManualStepAttention(matched, referenceIssues).actionable
-        : view.id === "question"
-          ? countUnconfirmedQuestions(matched)
-          : matched.length;
+        : matched.length;
   }
   return counts;
 }

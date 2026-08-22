@@ -104,6 +104,7 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
+import { countUnconfirmedQuestions } from "@/lib/question-attention";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -671,6 +672,22 @@ export function IssueDeckShell({
       ),
     [issues, filters],
   );
+  // 未確認（回答が届いていて未読）の質問の件数（#1796・#2070）。左メニュー・スマホのホームで
+  // オレンジの丸を点けるかどうかと、吹き出しの内訳にだけ使う（**件数そのものは`navCounts`から
+  // 引く**——画面側で数え直すと同じ行の数字と吹き出しが別の数え方になる）。
+  // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
+  const unconfirmedQuestionCount = useMemo(
+    () =>
+      countUnconfirmedQuestions(
+        filterIssuesByView(
+          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
+          "question",
+          currentUserLogin,
+          issues,
+        ),
+      ),
+    [issues, filters, currentUserLogin],
+  );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
@@ -1093,6 +1110,7 @@ export function IssueDeckShell({
                   navCounts={navCounts}
                   checkUserPullRequestCount={mergePendingPullRequests.length}
                   manualStepAttention={manualStepAttention}
+                  unconfirmedQuestionCount={unconfirmedQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
@@ -1288,6 +1306,7 @@ export function IssueDeckShell({
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
+                unconfirmedQuestionCount={unconfirmedQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
