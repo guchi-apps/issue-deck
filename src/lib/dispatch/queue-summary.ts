@@ -7,6 +7,7 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { formatLaunchHoldMetric } from "@/lib/dispatch/host-metrics";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
@@ -194,15 +195,30 @@ export function describeDispatchQueueStall(
 ): string | null {
   if (summary.queued.length === 0) return null;
 
-  const blocked = summarizeDispatchSessionCapacity(hosts.filter((host) => host.online)).filter(
-    (capacity) => capacity.atCapacity,
-  );
-  if (blocked.length === 0) return null;
+  const online = hosts.filter((host) => host.online);
 
-  const names = blocked
-    .map((capacity) => `${formatDispatchHostName(capacity.hostName)}（${capacity.live}/${capacity.max}本）`)
-    .join("・");
-  return `${names}がセッション本数の上限に達しているため、順番待ちは進みません。作業が終わったセッションが畳まれると自動で再開します。`;
+  const blocked = summarizeDispatchSessionCapacity(online).filter((capacity) => capacity.atCapacity);
+  if (blocked.length > 0) {
+    const names = blocked
+      .map((capacity) => `${formatDispatchHostName(capacity.hostName)}（${capacity.live}/${capacity.max}本）`)
+      .join("・");
+    return `${names}がセッション本数の上限に達しているため、順番待ちは進みません。作業が終わったセッションが畳まれると自動で再開します。`;
+  }
+
+  // 本数に空きがあっても、メモリ・SWAPが逼迫していればpollerは起動ジョブを取りに来ない（#2095）。
+  // **本数の上限の後に見る。** 両方に当てはまるホストでは畳むのが先で、そちらの方が待っている
+  // 人にできることが具体的（畳めば余力も戻る）
+  const holding = online.flatMap((host) =>
+    host.launchHold === null ? [] : [{ name: host.name, hold: host.launchHold }],
+  );
+  if (holding.length > 0) {
+    const names = holding
+      .map(({ name, hold }) => `${formatDispatchHostName(name)}（${formatLaunchHoldMetric(hold)}）`)
+      .join("・");
+    return `${names}のメモリ・SWAPが逼迫しているため、順番待ちは進みません。走っている作業が終わって余力が戻ると自動で再開します。`;
+  }
+
+  return null;
 }
 
 /**
@@ -221,8 +237,16 @@ export function describeDispatchJobWaitReason(
   if (job.status !== "QUEUED" || !isSessionLaunchJobKind(job.kind)) return null;
   const host = hosts.find((candidate) => candidate.name === job.targetHost);
   // 落ちているホストは「上限で待っている」のではなく「取りに来られない」。別の話として扱う
-  if (!host || !host.online || !isDispatchHostAtSessionCapacity(host)) return null;
-  return `${formatDispatchHostName(host.name)}のセッションが上限（${host.liveSessions}/${host.maxSessions}本）に達しているため、まだ起動できません。作業が終わったセッションが畳まれると順に起動します。`;
+  if (!host || !host.online) return null;
+  if (isDispatchHostAtSessionCapacity(host)) {
+    return `${formatDispatchHostName(host.name)}のセッションが上限（${host.liveSessions}/${host.maxSessions}本）に達しているため、まだ起動できません。作業が終わったセッションが畳まれると順に起動します。`;
+  }
+  // 本数に空きがあっても、メモリ・SWAPが逼迫している間は取りに来ない（#2095）。
+  // **待っている人にできることが違う**ので、本数の上限とは別の文で説明する
+  if (host.launchHold !== null) {
+    return `${formatDispatchHostName(host.name)}の${formatLaunchHoldMetric(host.launchHold)}のため、まだ起動できません。走っている作業が終わって余力が戻ると順に起動します。`;
+  }
+  return null;
 }
 
 /** まとめて取り消せるジョブ（`queued`・`claimed`まで。`running`は途中で止めると中途半端なworktreeが残る） */

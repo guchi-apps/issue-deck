@@ -14,8 +14,14 @@ import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
  * 履歴といったホスト全体の監視は引き続きops-dashboardの担当で、こちらへは持ち込まない
  * （経緯は`src/app/api/dispatch/hosts/route.ts`のコメント）。
  *
- * **判定には使わない。** 起動を止めているのは`maxSessions`（#1361）と同時実行数だけで、
- * ここは画面へ出すための写し。使用率が高いことを理由にジョブの払い出しを止めたりはしない。
+ * **この数字そのものは判定に使わない。** issue-deck側がジョブの払い出しを止めるのは
+ * 同時実行数だけで、ここは画面へ出すための写し。
+ *
+ * **ただし#2095から、poller側はこの数字を見て起動ジョブを見送る。** 閾値を超えた巡は
+ * `maxJobs: 0`でclaimし、見送っていること自体を`launchHold`として申告してくる
+ * （`DispatchHostLaunchHold`）。**判定はあくまでpoller側**で、issue-deckは受け取った結果を
+ * 画面へ出すだけ（閾値はホストの搭載メモリで決まるため、`maxSessions`と同じく
+ * サブPCの`dispatch.env`が正）。
  *
  * Prismaに触れないため、クライアントコンポーネントからimportできる
  * （`issue-session.ts`・`queue-summary.ts`と同じ形）。
@@ -224,4 +230,76 @@ function describeSwapRow(metrics: DispatchHostMetrics): DispatchHostMetricRow[] 
 /** メーターの右に出す割合の文字列 */
 export function formatHostMetricPercent(percent: number): string {
   return `${Math.round(percent)}%`;
+}
+
+/**
+ * 起動を見送っている理由（#2095）。`MEMORY`はメモリ、`SWAP`はSWAPの使用率が閾値を超えたこと。
+ *
+ * **どちらも超えている場合、pollerはメモリを出す。** SWAPが増えるのはメモリが足りなくなった
+ * 結果なので、原因の側を出した方が「何を畳めばよいか」に繋がる。
+ */
+export type DispatchHostLaunchHoldReason = "MEMORY" | "SWAP";
+
+/**
+ * メモリ・SWAPが逼迫しているため、pollerが新しいセッションの起動ジョブを見送っている（#2095）。
+ *
+ * **使用率（`DispatchHostMetrics`）と違い、これは画面へ出すための写しであると同時に、
+ * その巡のpollerの実際の動きそのもの。** 見送っている間pollerは`maxJobs: 0`でclaimし、
+ * 起動ジョブを取りに行かない（停止・追加指示などの制御ジョブは従来どおり取る）。
+ *
+ * **判定はpoller側にある**（`DISPATCH_MEMORY_HOLD_PERCENT`・`DISPATCH_SWAP_HOLD_PERCENT`）。
+ * issue-deck側で閾値を持って判定し直さない。閾値はホストの搭載メモリで決まる性質のもので、
+ * `maxSessions`と同じくサブPCの`dispatch.env`が正（2か所に持つと必ずずれる）。
+ *
+ * `null`は「見送っていない」か「見送りを申告しない古いpoller」。**区別しない**のは、
+ * どちらも「見送りの説明を出さない」という同じ扱いでよいため。
+ */
+export type DispatchHostLaunchHold = {
+  reason: DispatchHostLaunchHoldReason;
+  /** 見送りの判断に使った使用率（0〜100）。同じ巡の`metrics`と同じ値 */
+  percent: number;
+  /** 超えた閾値（0〜100） */
+  thresholdPercent: number;
+};
+
+/**
+ * pollerが送ってきた`launchHold`を検証する。**1つでも外れたら全体を`null`にする**
+ * （`parseDispatchHostMetrics`と同じ向き）。
+ *
+ * 部分的に採用すると「理由は分かるが割合が0%」のような、読んでも判断できない表示になる。
+ */
+export function parseDispatchHostLaunchHold(value: unknown): DispatchHostLaunchHold | null {
+  if (typeof value !== "object" || value === null) return null;
+  const input = value as Record<string, unknown>;
+
+  const reason = input.reason;
+  if (reason !== "MEMORY" && reason !== "SWAP") return null;
+
+  const percent = parseFinite(input.percent, 100);
+  const thresholdPercent = parseFinite(input.thresholdPercent, 100);
+  if (percent === null || thresholdPercent === null) return null;
+
+  return { reason, percent, thresholdPercent };
+}
+
+/** 見送りの理由に出す名前。使用率のメーターのラベル（`describeDispatchHostMetrics`）と揃える */
+function formatLaunchHoldReason(reason: DispatchHostLaunchHoldReason): string {
+  return reason === "MEMORY" ? "メモリ" : "SWAP";
+}
+
+/** 「メモリ 92%（上限 85%）」。見送りを説明する文のどこでも同じ形で出す */
+export function formatLaunchHoldMetric(hold: DispatchHostLaunchHold): string {
+  return `${formatLaunchHoldReason(hold.reason)} ${formatHostMetricPercent(hold.percent)}（上限 ${formatHostMetricPercent(hold.thresholdPercent)}）`;
+}
+
+/**
+ * ホストのカードに出す1行（#2095）。**出せないときは`null`。**
+ *
+ * 出さないのは「見送っていない」と「応答していない」の2つ。後者を落とすのは使用率のメーターと
+ * 同じ理由で、落ちているホストは「余力が無くて待っている」のではなく「取りに来られない」。
+ * 古い見送りの理由をいまの状態として見せると、pollerが落ちていることに気付けなくなる。
+ */
+export function describeDispatchHostLaunchHold(host: DispatchHostView): string | null {
+  if (!host.launchHold || !host.online) return null;
+  return `${formatLaunchHoldMetric(host.launchHold)}のため、新しいセッションの起動を見送っています`;
 }

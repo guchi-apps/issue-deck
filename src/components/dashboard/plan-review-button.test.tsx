@@ -27,6 +27,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,
+    launchHold: null,
     checkout: null,
     ...overrides,
   };
