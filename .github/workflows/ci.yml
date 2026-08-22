@@ -86,6 +86,12 @@ jobs:
       - name: Load secrets env block check
         run: scripts/check-load-secrets-env-block.sh
 
+      # 手作業Issueの本文の雛形（docs/multi-agent/manual-step-body-template.md）が、
+      # 差し込み先の4ファイルへ反映されているか（#2048）。雛形を直したのに差し込みを
+      # 忘れると、起票するエージェントは古い雛形を読み続けるが、どこにも警告が出ない。
+      - name: Prompt shared template sync check
+        run: node scripts/generate-prompt-templates.mjs --check
+
   # ワークフローの式テンプレート長（21,000バイト）超過を検出する（#901）。
   # 超過するとワークフローファイル自体が無効になり、issue_comment等のトリガーが
   # 一切発火しなくなるため、developへ入る前に落とす。

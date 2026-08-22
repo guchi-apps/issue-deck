@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.18.0",
+    date: "2026-08-22",
+    changes: [
+      "手作業が必要なIssue（[手作業]で始まるIssue）を起票・編集したときに、本文の書式が崩れていると自動でIssueに指摘コメントが付くようになりました。指摘に従って本文を直すと、コメントは自動的に更新・削除されます。これにより、手作業Issueの内容が正しく画面（実施順序の表示など）に反映されやすくなります。",
+    ],
+  },
+  {
     version: "4.17.1",
     date: "2026-08-22",
     changes: [
