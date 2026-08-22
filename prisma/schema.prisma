@@ -998,7 +998,8 @@ model SessionArtifact {
   sourcePath         String  @db.Text
   /// `sourcePath`の同一判定用ハッシュ。MySQLのインデックスは`TEXT`に直接張れない
   sourceKey          String
-  /// `uploads/artifacts/`配下の保存ファイル名（UUID.html）
+  /// `uploads/artifacts/`配下の保存ファイル名（中身のSHA-256 + `.html`）。
+  /// **内容が同じなら同じ名前**なので、同じ公開が2回届いても余分なファイルが残らない
   storedFilename     String
   /// 保存したHTMLのバイト数。画面には出さないが、取りこぼしの調査に効く
   byteSize           Int

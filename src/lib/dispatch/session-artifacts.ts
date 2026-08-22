@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -20,9 +20,8 @@ import {
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads", "artifacts");
 
-/** 保存ファイル名の形。**ここを通ったものしか読まない**（パストラバーサル対策）。 */
-const STORED_FILENAME_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.html$/;
+/** 保存ファイル名の形（内容のSHA-256）。**ここを通ったものしか読まない**（パストラバーサル対策）。 */
+const STORED_FILENAME_PATTERN = /^[0-9a-f]{64}\.html$/;
 
 /**
  * 再公開の同一判定に使うキー。**`sourcePath`のハッシュ**にするのは、MySQLのunique indexを
@@ -37,6 +36,19 @@ async function removeStoredFile(filename: string): Promise<void> {
   // **消せなくても止めない。** 残ったファイルは誰からも参照されないだけで害が無く、
   // ここで失敗して保存そのものを落とす方が損失が大きい
   await rm(path.join(UPLOAD_DIR, filename), { force: true }).catch(() => undefined);
+}
+
+/**
+ * まだどの行からも参照されていないときだけ消す。
+ *
+ * **ファイル名が中身のハッシュなので、別のIssueのアーティファクトと中身が同じなら
+ * 同じファイルを共有している。** 確かめずに消すと、片方の差し替えでもう片方が空になる。
+ */
+async function removeStoredFileIfUnused(filename: string): Promise<void> {
+  if (!STORED_FILENAME_PATTERN.test(filename)) return;
+  const referenced = await db.sessionArtifact.count({ where: { storedFilename: filename } });
+  if (referenced > 0) return;
+  await removeStoredFile(filename);
 }
 
 /**
@@ -66,11 +78,16 @@ export async function saveSessionArtifact(params: {
     sourcePath: params.sourcePath,
   });
 
-  const storedFilename = `${randomUUID()}.html`;
+  // **ファイル名は中身のハッシュにする。** 同じ公開が2回届いたとき（後述）に、
+  // それぞれがランダムな名前で書くと、行が指さないファイルが毎回1つ残る。
+  // 内容が同じなら名前も同じなので、2本目は同じファイルを上書きするだけで済む
   const buffer = Buffer.from(params.html, "utf8");
+  const storedFilename = `${createHash("sha256").update(buffer).digest("hex")}.html`;
   await mkdir(UPLOAD_DIR, { recursive: true });
   await writeFile(path.join(UPLOAD_DIR, storedFilename), buffer);
 
+  // 差し替え前の保存ファイルを消すために、先に読んでおく。**取り逃しても壊れない**
+  // （参照されないファイルが1つ残るだけ）ので、下のupsertとの間の競合は許容する
   const existing = await db.sessionArtifact.findUnique({
     where: {
       repositoryFullName_issueNumber_sourceKey: {
@@ -79,7 +96,7 @@ export async function saveSessionArtifact(params: {
         sourceKey,
       },
     },
-    select: { id: true, storedFilename: true },
+    select: { storedFilename: true },
   });
 
   const data = {
@@ -96,22 +113,60 @@ export async function saveSessionArtifact(params: {
     publishedAt: now,
   };
 
-  const row = existing
-    ? await db.sessionArtifact.update({ where: { id: existing.id }, data })
-    : await db.sessionArtifact.create({
-        data: {
-          repositoryFullName: params.repositoryFullName,
-          issueNumber: params.issueNumber,
-          sourceKey,
-          claudeUrl: params.claudeUrl,
-          ...data,
-        },
-      });
+  // **同じ公開が2回届くことが実際にある。** issue-deck自身のセッションでは`PostToolUse`が
+  // `--settings`（`run-issue-session.sh`）とworktreeの`.claude/settings.json`の両方に
+  // 登録されており（#1456）、フックが二重に走る。
+  //
+  // **`upsert`だけでは足りない**（実測）。複合ユニークキーに対するPrismaの`upsert`は
+  // MySQLでは1文にならず、同時に届いた2本が揃って「無い」を見てINSERTへ進み、
+  // 片方がユニーク制約で落ちる。**落ちた側をUPDATEへ回して吸収する。**
+  const uniqueWhere = {
+    repositoryFullName_issueNumber_sourceKey: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      sourceKey,
+    },
+  };
+  let row;
+  try {
+    row = await db.sessionArtifact.upsert({
+      where: uniqueWhere,
+      create: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        sourceKey,
+        claudeUrl: params.claudeUrl,
+        ...data,
+      },
+      update: data,
+    });
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      // 保存できないのに書いたファイルだけ残さない
+      await removeStoredFile(storedFilename);
+      throw error;
+    }
+    row = await db.sessionArtifact.update({ where: uniqueWhere, data });
+  }
 
-  if (existing) await removeStoredFile(existing.storedFilename);
+  if (existing) await removeStoredFileIfUnused(existing.storedFilename);
   await pruneSessionArtifacts(params.repositoryFullName, params.issueNumber);
 
   return toSessionArtifactView(row);
+}
+
+/**
+ * Prismaのユニーク制約違反（`P2002`）か。**型に依存せずコードだけを見る**——
+ * `PrismaClientKnownRequestError`を`instanceof`で判定すると、生成物の版が変わったときに
+ * 静かに外れる（外れると、二重に届いた公開が500として捨てられる）。
+ */
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
 }
 
 /** 上限を超えた分を古いものから消す。ファイルも一緒に消す（残すと誰も辿れないゴミになる）。 */
@@ -128,7 +183,7 @@ async function pruneSessionArtifacts(
   if (rows.length === 0) return;
 
   await db.sessionArtifact.deleteMany({ where: { id: { in: rows.map((row) => row.id) } } });
-  for (const row of rows) await removeStoredFile(row.storedFilename);
+  for (const row of rows) await removeStoredFileIfUnused(row.storedFilename);
 }
 
 /** Issue1件ぶんの一覧。新しい順。 */
