@@ -57,6 +57,11 @@ export type BranchFlowDeployRun = {
    * `workflow_dispatch`＝画面からの手動の出し直し。
    */
   event: string;
+  /**
+   * 何回目の試行か（初回は1。#2134）。2以上なら`deploy-retry.yml`が自動で再実行したもの
+   * （人がGitHubの画面から再実行した場合も同じく増える）。
+   */
+  runAttempt: number;
 };
 
 /** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
@@ -95,6 +100,15 @@ export type BranchFlowDeployState = {
    * 取り消してはいけない（取り消すと、出ている版が出ていないように読める）。
    */
   manual: boolean;
+  /**
+   * 失敗を自動で再実行した後の実行か（#2134）。
+   *
+   * **「失敗しか通知されない」状態を画面側でも作らないための印。** これが無いと、自動再実行が
+   * 走っている間の表示は初回の実行中と見分けが付かず、人は自分で「本番へ再デプロイ」を押しに
+   * 行くしかないと読んでしまう（#2072と同じ問題）。`failure`と組み合わさったときは
+   * 「1回やり直しても駄目だった」＝人が見る番になったことを意味する。
+   */
+  autoRetried: boolean;
 };
 
 export type BranchFlowResponse = {

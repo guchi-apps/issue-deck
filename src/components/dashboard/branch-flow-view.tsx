@@ -220,6 +220,25 @@ const MANUAL_DEPLOY_STATE_LABEL_COMPACT: Partial<Record<BranchFlowDeployStateKin
   failure: "再デプロイ失敗",
 };
 
+/**
+ * 失敗を自動で再実行した後の文言（#2134）。**手動の出し直しより優先して出す。**
+ *
+ * 出したいのは「誰かが1回やり直している」ことで、それは押したのが人でも`deploy-retry.yml`でも
+ * 変わらない。走っている最中に何も言わないと、人は自分で「本番へ再デプロイ」を押しに行く
+ * しかないと読む。失敗まで来たときは逆に、**やり直しても駄目だった＝人が見る番**という意味に
+ * なるので、ここだけは押し直しを促さない言い方にする。
+ */
+const AUTO_RETRIED_DEPLOY_STATE_LABEL: Partial<Record<BranchFlowDeployStateKind, string>> = {
+  running: "自動で再デプロイ中",
+  failure: "再デプロイしても失敗",
+};
+
+const AUTO_RETRIED_DEPLOY_STATE_LABEL_COMPACT: Partial<Record<BranchFlowDeployStateKind, string>> =
+  {
+    running: "自動で再デプロイ中",
+    failure: "再デプロイも失敗",
+  };
+
 /** 配色はリリースの横線（purple）・失敗（destructive）・成功（green）に合わせる */
 const DEPLOY_STATE_CLASS: Record<BranchFlowDeployStateKind, string> = {
   waiting: "bg-muted text-muted-foreground ring-border",
@@ -259,9 +278,15 @@ function DeployStateBadge({
   if (!deploy) return null;
 
   const label =
+    (deploy.autoRetried
+      ? (compact ? AUTO_RETRIED_DEPLOY_STATE_LABEL_COMPACT : AUTO_RETRIED_DEPLOY_STATE_LABEL)[
+          deploy.kind
+        ]
+      : undefined) ??
     (deploy.manual
       ? (compact ? MANUAL_DEPLOY_STATE_LABEL_COMPACT : MANUAL_DEPLOY_STATE_LABEL)[deploy.kind]
-      : undefined) ?? (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
+      : undefined) ??
+    (compact ? DEPLOY_STATE_LABEL_COMPACT : DEPLOY_STATE_LABEL)[deploy.kind];
   const content = (
     <span
       className={cn(

@@ -1238,6 +1238,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   本番反映済みで隠れたりするので、束に付けると押したいときに画面から消える。
   ボタンは[`repository-deploy-button.tsx`](../src/components/dashboard/repository-deploy-button.tsx)、
   起動は`POST /api/repositories/deploy`（[`lib/deploy-request.ts`](../src/lib/deploy-request.ts)）。
+  **一時的な失敗は、人が押す前に1回だけ自動で流し直される**（#2134）。`.github/workflows/deploy-retry.yml`
+  （本体は`reusable-deploy-retry.yml`）が`Deploy to Production`の完了を`workflow_run`で購読し、
+  失敗したジョブが`build`・`deploy`だけなら`gh run rerun --failed`する。**上限が1回であることは
+  GitHubの`run_attempt`が保証する**（rerunは新しいrunを作らず同じrunのattemptを増やすため、
+  `run_attempt == 1`のときだけ再実行すればよい。issue-deckのDBへは何も記録しない——デプロイが
+  落ちているときにissue-deck自身が落ちている可能性があるため）。再実行は`createdAt`も`event`も
+  変えないので、画面で言える材料は`runAttempt`だけ。2以上なら`BranchFlowDeployState.autoRetried`が
+  立ち、バッジが「自動で再デプロイ中」「再デプロイしても失敗」になる。設計は
+  [multi-agent/auto-repair.md](multi-agent/auto-repair.md)「本番デプロイの一時的な失敗の再実行」。
   **`deploy.yml`があっても`workflow_dispatch`を書いていないリポジトリがある**（portfolio）。
   ファイルの有無からは区別できない（GitHubのworkflow APIが起動条件を返さない）ため、dispatchが
   422で落ちた時点で`deploy_dispatch_unsupported`へ振り分け、「workflow_dispatchを足すと押せる」と
