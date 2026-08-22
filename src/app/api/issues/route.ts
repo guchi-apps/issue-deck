@@ -3,7 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { createIssue, deleteIssue, updateIssue } from "@/lib/github/issues-api";
+import { isCloseReasonLabelName } from "@/lib/github/issue-close";
+import {
+  addIssueLabels,
+  createIssue,
+  deleteIssue,
+  fetchRepositoryLabelNames,
+  updateIssue,
+} from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { getIssuesForUser } from "@/lib/issues-for-user";
@@ -136,10 +143,37 @@ async function handlePATCH(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  // クローズ理由ラベル（`90.Close: *`）は**クローズより先に付ける**（#2178）。
+  // 後から付けると、`updateIssue`が返すペイロードにそのラベルが乗らず、色も説明も無い状態で
+  // DBへ入る（次の同期まで直らない）。先に付ければGitHubがクローズ後のレスポンスで
+  // 完全なラベルとして返してくれるので、追加の取得が要らない。
+  const closeReasonLabel =
+    input.state === "closed" &&
+    typeof payload.closeReasonLabel === "string" &&
+    isCloseReasonLabelName(payload.closeReasonLabel)
+      ? payload.closeReasonLabel
+      : null;
+
   const result = await withUserGithubToken(
     user,
     `PATCH /api/issues ${repositoryFullName}#${number}`,
     async (token) => {
+      if (closeReasonLabel) {
+        // **リポジトリに定義が無いラベルは付けない。** 付与エンドポイントは存在しない
+        // ラベル名をその場で作ってしまう（#1490）ため、色も説明も無いラベルが生える。
+        // 定義が無ければラベルを諦めてクローズだけ行う（クローズを失敗させない）。
+        try {
+          const defined = await fetchRepositoryLabelNames(owner, repo, token);
+          if (defined.has(closeReasonLabel)) {
+            await addIssueLabels(owner, repo, number, token, [closeReasonLabel]);
+          }
+        } catch (error) {
+          console.error(
+            `[PATCH /api/issues] クローズ理由ラベルを付けられませんでした（${repositoryFullName}#${number}）`,
+            error,
+          );
+        }
+      }
       const updated = await updateIssue(owner, repo, number, token, input);
       return upsertIssueAndGetDisplay(repository, updated);
     },

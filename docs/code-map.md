@@ -26,6 +26,7 @@ src/
   hooks/            use-* のクライアントフック。データ取得・更新はここに集約する
   lib/
     github/         GitHub APIとの境界。コンポーネントから直接叩かない
+                    （`issues-api.ts`を辿るモジュールは画面からimportできない。後述）
     claude/         Claude APIを使う機能（要約・提案・本文整形）
     supabase/       client / server / middleware / admin / github-oauth
     crypto/         ユーザートークンの暗号化
@@ -516,6 +517,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （プルダウンの選択だけで無人実行が始まると誤操作の影響が大きいため）。
   失敗理由の日本語化は[`lib/progress-report-message.ts`](../src/lib/progress-report-message.ts)に
   切り出してある（`lib/github/report-progress.ts`は`db`込みでクライアントからimportできない）。
+- **`lib/github/issues-api.ts`を辿るモジュールを、クライアントコンポーネントからimportしない**（#2178）。
+  `issues-api.ts` → `request.ts` → `api-usage.ts` と辿って`node:async_hooks`へ届くため、
+  画面から読んだ瞬間にクライアントのチャンク生成が失敗し、`/dashboard`が500になる
+  （`the chunking context does not support external modules (request: node:async_hooks)`）。
+  **型チェックも単体テストも通る**ので、開発サーバーで画面を開くまで分からない。判定・定数の
+  ような純粋なものと、GitHubを叩くものはファイルを分ける
+  （`lib/github/issue-close.ts`＝両方から読む／`lib/github/issue-close-cleanup.ts`＝サーバー専用。
+  `lib/progress-report-message.ts`と`lib/github/report-progress.ts`も同じ分け方）。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の

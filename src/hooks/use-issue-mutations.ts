@@ -22,6 +22,11 @@ export type UpdateIssueInput = {
   stateReason?: "completed" | "not_planned";
   labels?: string[];
   assignee?: string | null;
+  /**
+   * クローズと同時に付けるクローズ理由ラベル（`90.Close: *`。#2178）。
+   * `state: "closed"`のときだけ効き、リポジトリに定義が無ければ付与を諦めてクローズだけ行う。
+   */
+  closeReasonLabel?: string;
 };
 
 export type DeleteIssueInput = {

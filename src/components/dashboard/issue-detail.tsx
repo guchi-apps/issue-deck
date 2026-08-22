@@ -73,6 +73,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuPortal,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -111,6 +112,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
@@ -268,13 +270,14 @@ export function IssueDetail({
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
 
-  async function handleClose(stateReason: "completed" | "not_planned") {
+  async function handleClose(stateReason: "completed" | "not_planned", closeReasonLabel?: string) {
     if (!issue) return;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       state: "closed",
       stateReason,
+      closeReasonLabel,
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -740,6 +743,20 @@ export function IssueDetail({
                           >
                             計画外としてクローズ
                           </DropdownMenuItem>
+                          {/* クローズ理由ラベル（#2178）。区切り線から下は「計画外の内訳」で、
+                              どれも`not_planned`でクローズしつつ`90.Close: *`を1枚付ける。
+                              ダイアログを挟まずクリック1回で終える（上2つと操作を揃える） */}
+                          <DropdownMenuSeparator />
+                          {CLOSE_REASON_LABELS.map((reason) => (
+                            <DropdownMenuItem
+                              key={reason.name}
+                              className="whitespace-nowrap text-xs"
+                              disabled={isSubmitting}
+                              onSelect={() => handleClose("not_planned", reason.name)}
+                            >
+                              {reason.label}
+                            </DropdownMenuItem>
+                          ))}
                         </DropdownMenuSubContent>
                       </DropdownMenuPortal>
                     </DropdownMenuSub>
