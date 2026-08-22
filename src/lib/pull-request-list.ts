@@ -359,6 +359,16 @@ export function isMergeJudgementPending(
 }
 
 /**
+ * mainへ入る＝押した瞬間に本番デプロイが走るPRか（#2080）。
+ *
+ * 「確認ダイアログを必ず挟む」（`mergeWarnings`）と「ダイアログに含まれる変更を並べる」
+ * （`PullRequestMergeChanges`）が同じ条件で動く必要があるため、判定をここへ置いて共有する。
+ */
+export function isProductionMerge(pullRequest: { baseRef: string }): boolean {
+  return pullRequest.baseRef === MAIN_BRANCH;
+}
+
+/**
  * そのままマージすると意図しない結果になりうる状態の説明。空配列なら確認なしでマージしてよい。
  * 画面はこの内容を確認ダイアログに並べる。
  *
@@ -370,7 +380,7 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   // mainへのマージは本番へ出す操作そのもので、押した瞬間にdeploy.ymlが走る。CI通過済みで
   // 待ちが無いPRは1クリックでマージする既定のままだと、確認なしで本番反映まで進んでしまう。
   // **警告を1つ返すことで、既存の「警告があれば確認ダイアログを挟む」経路に必ず乗せる**（#1548）。
-  if (pullRequest.baseRef === MAIN_BRANCH) {
+  if (isProductionMerge(pullRequest)) {
     warnings.push("mainへのマージです。マージすると本番デプロイが走ります。");
   }
   if (pullRequest.ciState === "failure") {

@@ -293,6 +293,39 @@ export type PullRequestFile = {
   previousPath: string | null;
 };
 
+/**
+ * マージ確認ダイアログに並べる「このマージに含まれる変更」1件（#2080）。
+ *
+ * - `issue` … developへ入った作業PR（`issue-<番号>`ブランチ）
+ * - `version-bump` … バージョンバンプPR（`release/vX.Y.Z`）。利用者から見た変更ではない
+ * - `commit` … マージコミットへ畳めなかったコミット（squash運用のリポジトリ）
+ */
+export type PullRequestChangeKind = "issue" | "version-bump" | "commit";
+
+export type PullRequestChange = {
+  /** 一覧のkeyに使う識別子（コミットのSHA） */
+  id: string;
+  /** developへ入ったPRの番号。マージコミットから取れなければnull */
+  pullRequestNumber: number | null;
+  /** そのPRの対応Issue番号（ブランチ名`issue-<番号>`から）。取れなければnull */
+  issueNumber: number | null;
+  /** 画面に出す見出し。対応Issueのタイトル→PRのタイトル→コミットの件名の順で決まる */
+  title: string;
+  kind: PullRequestChangeKind;
+};
+
+export type PullRequestChangeListResponse = {
+  /** 新しい順 */
+  changes: PullRequestChange[];
+  /** 取得できたコミット数（打ち切っている場合は上限値） */
+  commitCount: number;
+  /**
+   * 1ページの上限で打ち切ったか（#2080）。trueのときは画面に「一部である」旨を出し、
+   * 残りはGitHubで見てもらう（`PullRequestFileListResponse.truncated`と同じ方針）。
+   */
+  truncated: boolean;
+};
+
 export type PullRequestFileListResponse = {
   files: PullRequestFile[];
   /**
