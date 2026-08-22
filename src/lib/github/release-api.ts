@@ -3,7 +3,8 @@ import {
   fetchPullRequestRollup,
   fetchPullRequestRollups,
   type CheckRollup,
-  type MergeJudgementState,
+  MERGE_JUDGEMENT_UNKNOWN,
+  type MergeJudgement,
   type PullRequestRollupTarget,
 } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
@@ -232,7 +233,7 @@ export async function fetchRefCiState(
 /** ref1件ぶんのCI状態と、自動マージ可否の判定の進み具合（#1968） */
 export type RefCheckState = {
   ciState: CiState;
-  mergeJudgement: MergeJudgementState;
+  mergeJudgement: MergeJudgement;
 };
 
 /**
@@ -249,7 +250,10 @@ export async function fetchRefCheckState(
   token: string,
 ): Promise<RefCheckState> {
   const rollup = await fetchCheckRollup(owner, repo, ref, token);
-  return { ciState: toCiState(rollup), mergeJudgement: rollup?.mergeJudgement ?? "unknown" };
+  return {
+    ciState: toCiState(rollup),
+    mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+  };
 }
 
 /** チェック集約から`CiState`を決める。取得できていなければ`unknown` */
@@ -266,7 +270,7 @@ export type PullRequestCiState = {
   /** `true`＝マージ可能・`false`＝コンフリクトあり・`null`＝GitHubが判定中または取得できず */
   mergeable: boolean | null;
   /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968） */
-  mergeJudgement: MergeJudgementState;
+  mergeJudgement: MergeJudgement;
 };
 
 /**
@@ -289,7 +293,7 @@ export async function fetchPullRequestCiState(
   return {
     ciState: toCiState(rollup),
     mergeable,
-    mergeJudgement: rollup?.mergeJudgement ?? "unknown",
+    mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
   };
 }
 
@@ -297,7 +301,7 @@ export async function fetchPullRequestCiState(
 export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
   ciState: "unknown",
   mergeable: null,
-  mergeJudgement: "unknown",
+  mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
 };
 
 /**
@@ -319,7 +323,11 @@ export async function fetchPullRequestCiStates(
   return new Map(
     [...rollups].map(([key, { rollup, mergeable }]) => [
       key,
-      { ciState: toCiState(rollup), mergeable, mergeJudgement: rollup?.mergeJudgement ?? "unknown" },
+      {
+        ciState: toCiState(rollup),
+        mergeable,
+        mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+      },
     ]),
   );
 }

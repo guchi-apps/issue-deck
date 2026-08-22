@@ -15,12 +15,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import type { MergeJudgementState } from "@/lib/github/check-rollup";
+import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import {
   isMergeJudgementPending,
   MERGE_JUDGEMENT_PENDING_LABEL,
-  MERGE_JUDGEMENT_PENDING_REASON,
+  mergeJudgementReason,
 } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +37,7 @@ type IssueMergeButtonProps = {
    * 自動マージ可否の判定の進み具合（#1968）。`pending`のあいだはマージさせない。
    * CI状態とは別の軸で、判定のcheck-runはCI状態の集約から外れている（#1799）。
    */
-  mergeJudgement?: MergeJudgementState | null;
+  mergeJudgement?: MergeJudgement | null;
   isMerging?: boolean;
   isMerged?: boolean;
   /** マージ失敗時のエラーメッセージ。ボタンの手前にインライン表示する */
@@ -73,7 +73,7 @@ export function IssueMergeButton({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const busy = Boolean(isMerging);
   const merged = Boolean(isMerged);
-  const judgementPending = isMergeJudgementPending(mergeJudgement ?? "unknown");
+  const judgementPending = isMergeJudgementPending(mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN);
   const disabled = busy || merged || ciStatus === "in_progress" || judgementPending;
 
   async function confirmMerge() {
@@ -89,7 +89,7 @@ export function IssueMergeButton({
         size="sm"
         onClick={() => setIsConfirmOpen(true)}
         disabled={disabled}
-        title={judgementPending ? MERGE_JUDGEMENT_PENDING_REASON : undefined}
+        title={judgementPending ? mergeJudgementReason(mergeJudgement?.step ?? null) : undefined}
         // CIバッジの出現とdisabled化が同一レンダーで重なると、バッジ挿入によるレイアウトの
         // 横移動とopacityのtransition-all（既定）が競合し、モバイルSafariで旧位置の
         // ボタンが一瞬二重表示される（#1115）。opacityを含む全プロパティのtransitionを
