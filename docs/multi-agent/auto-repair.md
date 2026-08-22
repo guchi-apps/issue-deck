@@ -16,6 +16,11 @@ develop向けPRがコンフリクトした場合、およびCIが失敗した場
 ので既存2ワークフローが受け持ち、無い場合は報告先を対象PR自身のコメントに置く
 `claude-pr-repair.yml`が受け持つ。
 
+`issue-<番号>` → developのコンフリクトについては、上の「自動検知」（GitHub Actionsのトリガー）に
+加えて**issue-deckからの巡回検知**（#2116）がある。GitHubのイベント配送・スケジューラが
+取りこぼしたコンフリクトを拾うための経路で、詳細は後述の
+「[issue-deckからの巡回検知（#2116）](#issue-deckからの巡回検知2116)」。
+
 ## PRコンフリクトの自動解消（#315）
 
 develop向けPRがdevelopとの間でコンフリクトした場合、これまでは人間がIssueに`@claude`コメントで
@@ -80,6 +85,56 @@ develop向けPRがdevelopとの間でコンフリクトした場合、これま�
 再取得する。`pull_request`イベント発火の瞬間は`mergeable`の計算がまだ終わっていないことが多く、
 「計算未完了イコールコンフリクトなし」と誤判定してPRのコンフリクトを取りこぼすのを防ぐため。
 このポーリングは`workflow_run`・`schedule`トリガーの既存挙動にも同様に効く。
+
+### issue-deckからの巡回検知（#2116）
+
+上の4つに加えて、**GitHubのイベント配送とスケジューラに依存しない5本目の検知経路**を
+issue-deck側に置いている。サブPCのpollerが1巡ごとに
+`POST /api/pull-requests/conflict-sweep`を叩き、issue-deckが連携済みリポジトリ全部の
+develop向け`issue-<番号>`PRを見て、コンフリクトしていれば
+`claude-conflict-resolve.yml`を`workflow_dispatch`する。判定は
+[`lib/github/conflict-sweep.ts`](../../src/lib/github/conflict-sweep.ts)、IOは
+[`lib/github/conflict-sweep-run.ts`](../../src/lib/github/conflict-sweep-run.ts)。
+
+**なぜ要るのか。** 「PRを作った時点で既にコンフリクトしている」場合に働くのは
+`pull_request(opened)`と`schedule`の2つだけで（developが動いていないので`workflow_run`は
+発火しない）、そのどちらもGitHub側の都合で落ちることが実際にあった。
+
+- `pull_request(opened)`は**イベントそのものが配送されないことがある。**
+  guchi-apps/myroom#191（2026-08-22 11:12:29 UTC作成）に対しては`pull_request`起因のrunが
+  1本も作られていない（`CI`・`Issue Progress`・`Claude Conflict Resolve`のいずれも。
+  2分前に作られた別PRでは3本とも走っている）
+- `schedule`は**15分おきと書いても15分おきには走らない。** 同日のmyroomの実測は
+  08:59・09:35・09:59・10:33・10:59で、24〜36分間隔だった
+
+結果としてmyroom#191は誰にも拾われず、人が画面のボタンを押すまでコンフリクトしたまま残った。
+
+**既存の4経路はそのまま残す。** 先に気づいた方が起動し、どちらから起動しても
+`resolve-conflicts`が着手前に対象PRの状態を再確認するため、二重に直しにいくことはない。
+
+巡回の作りで押さえておく点。
+
+- **間隔を決めるのはissue-deck側**（`CONFLICT_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）。
+  pollerは毎巡呼ぶだけで、間隔に達していなければ`swept: false`が返る。呼ぶ側が増えても
+  GitHub APIの消費が増えないようにするため
+- **同じPRへ続けて起動しない**（`CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES`・30分）。
+  コンフリクト解消のワークフローは`claude-ci-fix.yml`のような試行回数の上限を持たないため、
+  上限の代わりに間隔で抑える。値は従来の`schedule`の実測間隔に合わせてあり、これまでより
+  頻繁に再試行することはない
+- **対応Issueに`00.check-user`が付いていれば起動しない。** 自動解消を断念したワークフローが
+  付けるラベルなので、そのまま「人が見ると決めたもの」の目印として使う
+- **対象は`issue-<番号>`→developのPRだけ。** Issueに紐づかないPRを受け持つ
+  `claude-pr-repair.yml`は意図的に自動検知の経路を持たない（後述）ので、巡回でも起動しない
+- **GitHub APIの消費は小さい。** PR一覧のRESTはETagの条件付きGETが効き、変化が無ければ
+  レート制限を消費しない。コンフリクト有無のGraphQLは`issue-<番号>`→developのPRが
+  1件でもあるときだけ、installationごとに1回投げる
+- **起動そのものに失敗したPRも、同じ待ち時間だけ投げ直さない**（記録はプロセス内。DBへ書くと
+  画面に「自動解消中」のバッジが出てしまうが、実際には起動できていない）。
+  `workflow_dispatch`に`issue_number`入力を持たない世代のcallerを置いたままのリポジトリへは
+  常に422が返るため、覚えないと巡回のたびに投げ続けることになる（2026-08-22時点で
+  guchi-apps/shopping-list・guchi-apps/dayspanがこの状態。画面の「コンフリクトを自動解消」
+  ボタンも同じ理由で効かない。**`on:`はcallerが持つコピーなのでタグの更新では直らず**、
+  各リポジトリで直す必要がある）
 
 develop向けPRは`claude[bot]`（Claude Code GitHub App）が作成するため、`pull_request`トリガーでの
 `resolve-conflicts`ジョブの`claude-code-action`ステップはactorが`claude[bot]`になる。

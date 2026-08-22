@@ -369,7 +369,7 @@ Issue番号は単調増加するので、同じリポジトリ内でポートが
 | 5 | 1〜4の在庫に載っていない分を`/proc`の走査で見つけて止める | 同上（#1525） |
 
 worktreeそのものの掃除も同じpollerの1巡に相乗りしており、2の`cleanup-worktrees.sh`を1時間ごとに
-呼ぶ（#1716。後述の[溜まったworktreeを掃除する](#溜まったworktreeを掃除する)）。
+`--all-repos`付きで呼ぶ（#1716・#2123。後述の[溜まったworktreeを掃除する](#溜まったworktreeを掃除する)）。
 
 5は1〜4の重複ではなく**在庫の取り方が違う**。1・2の入口は「ポートを手掛かりに引く」
 （`dev_server_stop_by_port`・#1524）で、対象は「セッション終了時」「worktree削除時」という
@@ -617,7 +617,7 @@ scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで
 | worktree | `~/apps/issue-deck-worktrees/develop`（detached HEAD） | 本体が`develop`を開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしても`develop`は動かない |
 | ポート | `4000`（帯のベース値+0） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない |
 | ログ | `~/apps/issue-deck-worktrees/.dev-servers/develop.log` | Issueごとの開発サーバーと同じ置き場 |
-| 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、そのまま対象外になる |
+| 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、`--all-repos`で全リポジトリを回してもそのまま対象外になる |
 | tailnetへの公開 | `tailscale serve --http=4000 localhost:4000`（#1526） | 待ち受けは`127.0.0.1`に閉じる。公開範囲をTailscaleのACLが保証し、「意図した公開」と「閉じ忘れ」が見分けられる |
 
 **既定はバックグラウンド起動で、`nohup`によりSSHを切っても残る。** Tailscale SSHでサブPCに入って
@@ -1114,6 +1114,15 @@ pnpm db:seed:dev
   ダミーデータに紐づくバイパス用ユーザー（`ci-screenshot-bot`）で入る。仕組みはCIのスクリーンショット撮影と
   同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
 - 接続先がローカル（`localhost`/`127.0.0.1`）でなければ投入せず中止する。既存行を書き換える処理を含むため。
+
+**自動実行（#1869・#1882）の見た目はシードだけでは出ない**（#2119）。`db:seed:dev`が入れるのは
+手作業Issueの本文までで、`ManualStepRun`の行は作らない。「ユーザーの作業待ち」の帯に出る自動実行の
+バッジと一覧（`manual-step-run-badge.tsx`）を実物で見たい場合は、シードのあとに`ManualStepRun`を
+直接入れる（`repositoryFullName`＋`issueNumber`が一意キー。`doneLines`は流し終えた行番号のJSON配列）。
+**`status: "RUNNING"`で入れても、画面が読んだ時点で`PAUSED`／`pausedReason: "USER"`へ倒れる**
+——`listManualStepRunViews`が読むついでに`syncManualStepRun`を通し、対応する代行実行ジョブが
+無い実行は「人が実行する手順で待っている」と解釈するため。走っている見た目まで作りたいなら
+`DispatchJob`も併せて要る。確かめ終えたら入れた行は消す（開発DBは全worktreeで共通）。
 
 **ダミーで埋まらない範囲がある。** 次はGitHub APIと実インストールが要るので、ダミーデータでは空のまま。
 
@@ -1736,23 +1745,31 @@ Claude Codeには`claude -w/--worktree`とVSCode拡張の`Claude Code: Create Wo
 worktreeは1つあたり`node_modules`込みで1GB前後あり、`.next`（ビルド成果物）を加えると
 最大1.7GBまで膨らむ。放置するとディスクを食い、`git worktree list`も読みにくくなる。
 
-**サブPCではpollerが1時間ごとに`cleanup-worktrees.sh --yes`を呼ぶ**（#1716。間隔は
-`WORKTREE_CLEANUP_INTERVAL_MINUTES`・**0で無効**）。以前は実行の起点がどこにも無く、3日で
-181本・38GBまで溜まってルートFSが77%に達した。設計と安全弁（準備中のworktreeを消さない
-`--min-age-minutes`、残すworktreeの`.next`削除）は[branching.md](branching.md)の
-「掃除を回す起点」を参照。
+**サブPCではpollerが1時間ごとに`cleanup-worktrees.sh --all-repos --yes`を呼ぶ**（#1716・#2123。
+間隔は`WORKTREE_CLEANUP_INTERVAL_MINUTES`・**0で無効**）。以前は実行の起点がどこにも無く、3日で
+181本・38GBまで溜まってルートFSが77%に達した。起点を置いたあとも範囲がissue-deckだけだったため、
+今度は他リポジトリのworktreeが166本中153本まで溜まってルートFSが91%に達した（#2123）。設計と
+安全弁（準備中のworktreeを消さない`--min-age-minutes`、残すworktreeの`.next`削除、全リポジトリを
+回す`--all-repos`）は[branching.md](branching.md)の「掃除を回す起点」を参照。
+
+**掃除の対象はissue-deckだけではない**（#2123）。引数を付けなければ従来どおりissue-deckの
+`~/apps/issue-deck-worktrees`だけを見る。他リポジトリは`--repo <owner/repo>`、全部まとめてなら
+`--all-repos`。
 
 手元で回すときは次のとおり。
 
 ```bash
-bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # 判定だけ見る
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run   # issue-deckの判定だけ見る
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh             # 一覧を出して確認してから削除
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --all-repos --dry-run  # 全リポジトリの判定を見る
+bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --repo guchi-apps/myroom  # 1リポジトリだけ掃除する
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --dry-run --size  # ディスク使用量も測る（遅い）
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --issue 123 --force  # 残ったものを1件だけ強制削除
 bash ~/apps/issue-deck/scripts/cleanup-worktrees.sh --min-age-minutes 0  # 直前に作ったworktreeも対象にする
 ```
 
 走査中は`走査中 N/M`が出る。169件で20秒ほどかかり、`--size`を付けるとさらに40秒ほど増える（#1680）。
+`--all-repos`は19リポジトリ・166本で42秒（`--dry-run`の実測）。
 
 「残すworktree」の各行には**どうすれば消せるか**が1行で出る（#1192）。未コミットの変更や未pushの
 コミットが残っているものは`--issue <番号> --force`で消せる（何が失われるかを表示してから消す）。

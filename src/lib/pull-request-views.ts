@@ -1,4 +1,4 @@
-import { CircleCheckBig, GitPullRequest, LoaderCircle } from "lucide-react";
+import { GitMerge, GitPullRequest, LoaderCircle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -41,10 +41,15 @@ export const pullRequestViews: PullRequestView[] = [
   },
   {
     id: "completed",
-    label: "完了したPR",
-    title: "処理が完了したプルリクエスト",
-    description: "CIが確定したPull Request（マージできる状態、または失敗しているもの）",
-    emptyMessage: "処理が完了したPull Requestはありません。",
+    // 「完了したPR」から改名した（#2120）。CIが確定しただけで何も完了しておらず、名前が
+    // 「マージ済み」とも読めていた。ビューのidは`prview=completed`のURLを生かすため変えない。
+    label: "マージ待ち",
+    title: "マージ待ちのプルリクエスト",
+    // CI失敗を含むことを明示する。「ユーザーの確認待ち」に並ぶPR（`requiresUserMerge`）とは
+    // 母集団が別で、あちらはCIの結果を見ないため、CI実行中のリリースPRはここには出ない。
+    description:
+      "CIが確定してマージを待っているPull Request（CI失敗を含む。「ユーザーの確認待ち」とは母集団が別）",
+    emptyMessage: "マージ待ちのPull Requestはありません。",
   },
 ];
 
@@ -56,19 +61,20 @@ export const pullRequestViews: PullRequestView[] = [
 export const DEFAULT_PULL_REQUEST_VIEW: PullRequestViewId = "all";
 
 /**
- * PC左メニュー「Pull Request」セクションに出すビュー（#1613）。
- * 「完了したPR」は外した。CIが確定したPRは「すべてのPR」にマージ待ちとして並び、
- * ユーザーがマージするしかないものは「ユーザーの確認待ち」へ出るため、独立した入口を
- * 持たなくても拾える。`prview=completed`のURLは今までどおり開ける。
+ * PC左メニュー・スマホホームの「Pull Request」セクションに出すビュー（#1613・#2120）。
+ *
+ * #1613で「完了したPR」を外し、CIが確定したPRは「すべてのPR」から拾う前提にしていたが、
+ * そこには実行中のPRも混ざるため「あとはマージするだけのPR」だけを見る入口が無かった。
+ * 「マージ待ち」へ改名したうえで戻し、3つとも並べる（#2120）。`filterPullRequestsByView`が
+ * 「実行中」と「マージ待ち」でopenなPRを二分するので、2つの件数の和は「すべてのPR」に一致する。
  */
-export const sidebarPullRequestViews: PullRequestView[] = pullRequestViews.filter((view) =>
-  ["all", "in-progress"].includes(view.id),
-);
+export const sidebarPullRequestViews: PullRequestView[] = pullRequestViews;
 
 export const pullRequestViewIcons: Record<PullRequestViewId, LucideIcon> = {
   all: GitPullRequest,
   "in-progress": LoaderCircle,
-  completed: CircleCheckBig,
+  // チェックマーク（`CircleCheckBig`）だと「マージ済み」に読めるため、マージの記号にした（#2120）。
+  completed: GitMerge,
 };
 
 export function isPullRequestViewId(value: string | null | undefined): value is PullRequestViewId {

@@ -799,15 +799,22 @@ jobs:
 
   main-pr-in-progress:
     # develop -> main のPRが開いている間、その時点で`Develop`にいる全issueを`Release`へ
-    # 一括で進める。synchronizeも対象にすることで、PRオープン後にdevelopへ追加マージされた
-    # issueも随時反映する。
+    # 一括で進める。synchronizeも対象にすることで、PRオープン後にheadへ追加された分も
+    # 随時反映する。
+    #
+    # **リリースPRのheadは固定ブランチ`release-main/vX.Y.Z`（#2117）で、作成後は動かない。**
+    # そのためsynchronizeは実質発火せず、`opened`の1回だけが掃き寄せになる。リリースPRの
+    # 作成後にdevelopへ入ったissueは`Develop`のまま残り、次のリリースで`Release`へ進む
+    # （それがmainへ出る内容と一致する）。`develop`をheadに持つのは#2117以前のPRか、
+    # 共有ワークフローの参照タグが古いリポジトリのPR。
     #
     # 対象の探し方はdevelop-merge-sweepと同じ理由でissue-deckへの問い合わせになっている。
     if: |
       github.event_name == 'pull_request' &&
       (github.event.action == 'opened' || github.event.action == 'synchronize') &&
       github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'develop'
+      (github.event.pull_request.head.ref == 'develop' ||
+       startsWith(github.event.pull_request.head.ref, 'release-main/v'))
     runs-on: ubuntu-latest
     steps:
       - name: Develop にいる issue を特定する
@@ -902,10 +909,18 @@ jobs:
           done <<< "$ISSUE_NUMBERS"
 
   main-pr-merged:
-    # develop -> main のPRがマージされた時点で、`Develop`/`Release`のどちらにいるissueも
-    # `Done`へ一括で進めてcloseする。両方を対象にするのは、main-pr-in-progressの
-    # synchronizeが拾いきれていない可能性のあるissue(マージ直前にdevelopへ入ったもの)を
-    # 取りこぼさないため。
+    # develop -> main のPRがマージされた時点で、そのリリースに含まれるissueを`Done`へ
+    # 進めてcloseする。
+    #
+    # **対象はリリースPR本文の`## 対象issue`に載っている番号**(#2117)。リリースPRのheadは
+    # 固定ブランチ`release-main/vX.Y.Z`で、本文の一覧はその凍結内容と同じ時点で作られている
+    # ため、実際にmainへ出たissueと一致する。Project Statusで探すと、リリースPRの作成後に
+    # developへ入った(＝mainへ出ていない)issueまで`Develop`として拾ってcloseしてしまう。
+    #
+    # **本文から1件も取れなかった場合だけ、`Develop`/`Release`のProject Statusで探す**
+    # (#2117以前のPR・手で作ったPR・PR作成時にissue-deckへ問い合わせできず一覧が注記に
+    # なっていた場合)。両方を対象にするのは、main-pr-in-progressの掃き寄せが拾いきれて
+    # いない可能性のあるissueを取りこぼさないため。
     #
     # ここでの`gh issue close`はGITHUB_TOKEN起点のため、cleanup-on-closeジョブの
     # `issues: closed`トリガーは発火しない(他ジョブと同様のGitHub仕様。#266)。
@@ -920,7 +935,8 @@ jobs:
       github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'develop'
+      (github.event.pull_request.head.ref == 'develop' ||
+       startsWith(github.event.pull_request.head.ref, 'release-main/v'))
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -932,46 +948,61 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
           REPO: ${{ github.repository }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          missing=""
-          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
-          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
-          if [ -n "$missing" ]; then
-            echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
-            exit 0
+          # リリースPR本文の`## 対象issue`から番号を取り出す(#2117)。見出しから次の`## `
+          # 見出しまでを切り出し、`- #<番号> …`の行の番号だけを拾う。取得に失敗したときの
+          # 注記（`（issue-deckへ問い合わせできず…）`）はこの形にならないため紛れ込まない。
+          numbers="$(printf '%s\n' "$PR_BODY" | tr -d '\r' \
+            | awk '/^## 対象issue[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f' \
+            | sed -n 's/^- #\([0-9][0-9]*\).*$/\1/p' || true)"
+          if [ -n "$numbers" ]; then
+            echo "リリースPR本文の対象issueを使います: $(echo "$numbers" | tr '\n' ' ')"
+          else
+            echo "リリースPR本文に対象issueの一覧が無いため、Project Statusから探します"
           fi
-          body_file="${RUNNER_TEMP:-/tmp}/progress-done.json"
-          # 一時的な5xx・接続失敗だけを再試行する(#1861)
-          code=""
-          for attempt in 1 2 3 4; do
-            if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
-            code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || code=000
-            if [ "$code" = "200" ]; then break; fi
-            case "$code" in
-              000|5??) ;;
-              *) break ;;
-            esac
-            if [ "$attempt" != 4 ]; then
-              echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
-            fi
-          done
-          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
-          # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
-          # issueが1件もcloseされない」が正常系と見分けられなくなる。
-          if [ "$code" != "200" ]; then
-            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
-            exit 0
-          fi
-          if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
-            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
-            exit 0
-          fi
-          numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
+
           if [ -z "$numbers" ]; then
-            echo "Develop・Releaseにopenなissueはありません（対象なしのため何もしません。今回のリリースに紐づくissueが無い場合に起きます）"
-            exit 0
+            missing=""
+            [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+            [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+            if [ -n "$missing" ]; then
+              echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
+              exit 0
+            fi
+            body_file="${RUNNER_TEMP:-/tmp}/progress-done.json"
+            # 一時的な5xx・接続失敗だけを再試行する(#1861)
+            code=""
+            for attempt in 1 2 3 4; do
+              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
+              code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                "$APP_BASE_URL/api/progress?repository=$REPO&status=develop,release")" || code=000
+              if [ "$code" = "200" ]; then break; fi
+              case "$code" in
+                000|5??) ;;
+                *) break ;;
+              esac
+              if [ "$attempt" != 4 ]; then
+                echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
+              fi
+            done
+            # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
+            # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
+            # issueが1件もcloseされない」が正常系と見分けられなくなる。
+            if [ "$code" != "200" ]; then
+              echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
+              exit 0
+            fi
+            if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
+              echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
+              exit 0
+            fi
+            numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
+            if [ -z "$numbers" ]; then
+              echo "Develop・Releaseにopenなissueはありません（対象なしのため何もしません。今回のリリースに紐づくissueが無い場合に起きます）"
+              exit 0
+            fi
           fi
 
           # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を

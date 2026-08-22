@@ -184,10 +184,16 @@ jobs:
           done
           echo "タイムアウトしました。CI完了を待たずに後続ジョブへ進みます(fail-open)。"
 
+  # permissionsのcontents: readは、下のactions/checkoutに要る(#2126)。ジョブへpermissionsを
+  # 明示すると書かなかったスコープはnoneになるため、省くとGITHUB_TOKENでリポジトリを読めず、
+  # privateリポジトリではcheckoutが`Repository not found`で必ず失敗する(issue-deck自身は
+  # publicで匿名cloneが通るため表面化しなかった)。callerのpermissionsは呼び出し先が持てる
+  # 上限を決めるだけなので、caller側では回避できない。
   risk-check:
     needs: identify-issue
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: read
     outputs:
       # 機械的リスク判定に該当したか(auto-mergeジョブでの00.check-user付与の有無と一致する)

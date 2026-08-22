@@ -90,6 +90,10 @@
 #   WORKTREE_CLEANUP_INTERVAL_MINUTES
 #                                   worktreeを掃除する間隔の分数（省略時は60・0で無効）
 #
+# コンフリクトしたPRの巡回検知（#2116）は毎巡issue-deckへ促すだけで、**間隔の設定はここには
+# 無い**。どれくらいの間隔で見に行くか（＝GitHub APIをどれだけ使うか）はissue-deck側の
+# `CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分）が決める。
+#
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
 # issue-deckの画面にも出る）。
@@ -118,7 +122,9 @@ set -euo pipefail
 #     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
 # 16: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
 # 17: メモリ・SWAPが逼迫している間、起動ジョブを`maxJobs=0`で見送り、その理由を申告する（#2095）。
-DISPATCH_POLLER_VERSION="17"
+# 18: コンフリクトしたPRの巡回検知を1巡ごとにissue-deckへ促す（#2116）。
+# 19: 定期的なworktreeの掃除を`--all-repos`で全リポジトリへ広げる（#2123）。
+DISPATCH_POLLER_VERSION="19"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -805,11 +811,19 @@ reap_sessions() {
 # 稼働開始（2026-08-13）から3日で181本・38GBまで溜まり、ルートFSが77%に達した。
 # 掃除さえ回れば181本中177本が削除対象になりうる状態だったので、足りなかったのは判定ではなく起点。
 #
+# **`--all-repos`で全リポジトリを回す**（#2123）。issue-deckだけを掃除していた頃は、汎用
+# ランチャーで起こした他リポジトリのworktreeに起点が無く、166本中153本が他リポジトリのまま
+# 溜まってルートFSが91%に達した。#1716で足りなかったのが起点なら、ここで足りなかったのは範囲。
+#
 # **非対話では`--yes`が必須**（付けないと表示だけで終わる）。
 WORKTREE_CLEANUP_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/worktree-cleanup.stamp"
-# 掃除が固まっても1巡を止めないための上限（秒）。#1680の改善後で実測「170本を数十秒」なので、
-# 5分あれば通常は足りる。**この間ポーリングは止まる**（ジョブの取得が最大5分遅れる）が、
-# 別プロセスへ逃がすと失敗がjournaldに出ないままになるため、上限付きの同期実行にしている。
+# 掃除が固まっても1巡を止めないための上限（秒）。**この間ポーリングは止まる**（ジョブの取得が
+# その分だけ遅れる）が、別プロセスへ逃がすと失敗がjournaldに出ないままになるため、上限付きの
+# 同期実行にしている。
+#
+# 全リポジトリ（19リポジトリ・166本）の`--dry-run`が実測42秒なので、削除を含めても5分あれば
+# 足りる。**リポジトリを増やしたらここを見直す**（#2123。1リポジトリあたりfetch1回とgh1回が
+# 増える）。
 WORKTREE_CLEANUP_TIMEOUT_SECONDS=300
 
 reap_worktrees() {
@@ -829,10 +843,52 @@ reap_worktrees() {
   mkdir -p "$(dirname "$WORKTREE_CLEANUP_STAMP")" 2>/dev/null || true
   touch "$WORKTREE_CLEANUP_STAMP" 2>/dev/null || true
 
-  echo "worktreeを掃除します（間隔 ${WORKTREE_CLEANUP_INTERVAL_MINUTES}分）..."
+  echo "worktreeを掃除します（全リポジトリ・間隔 ${WORKTREE_CLEANUP_INTERVAL_MINUTES}分）..."
   # **回収の失敗でポーリングを止めない**（開発サーバー・セッションの回収と同じ扱い）。
-  timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --yes ||
+  timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --all-repos --yes ||
     echo "Error: worktreeの掃除に失敗しました。" >&2
+  return 0
+}
+
+# --- コンフリクトの巡回検知 -----------------------------------------------------
+# developとコンフリクトしたPRを、issue-deckに巡回して見つけさせる（#2116）。
+#
+# **GitHub Actions側の自動検知だけでは取りこぼす。** `pull_request(opened)`のイベントが
+# 配送されないことがあり（guchi-apps/myroom#191）、安全網の`schedule`も15分間隔の指定に
+# 対して実測24〜36分でしか走らない。「作った時点で既にコンフリクトしているPR」がそこへ
+# 落ちると、人が画面のボタンを押すまで誰も直しにいかない。
+#
+# **pollerがやるのは「呼ぶ」ことだけ。** 実際に巡回するかどうかも、どのPRへ何を起動するかも
+# issue-deck側が決める（`POST /api/pull-requests/conflict-sweep`）。間隔に達していなければ
+# `swept: false`が返って終わる。ここに間隔を持たせないのは、呼ぶ側が増えたときに
+# GitHub APIの消費が二重になるのを避けるため。
+#
+# **失敗しても1巡を止めない**（開発サーバー・セッションの回収と同じ扱い）。
+sweep_pull_request_conflicts() {
+  if ! api_call POST /api/pull-requests/conflict-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # **404と接続不可は黙って見送る。** 404はサブPCのチェックアウトだけ先に更新されて
+      # 本番のissue-deckがまだこの受け口を持っていない期間（更新の順序は運用で決まらない）、
+      # 接続不可は直後のジョブ取得が同じ理由で必ず報告する。どちらも30秒ごとに同じ行が
+      # 積まれるだけで、新しく分かることが無い。
+      404|000) return 0 ;;
+      *) report_api_failure "コンフリクトの巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept dispatched
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  dispatched="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.dispatched | length' 2>/dev/null || echo 0)"
+  [[ "${dispatched:-0}" -gt 0 ]] || return 0
+
+  # 起動したときだけ出す。**毎巡ログを出さない**（30秒ごとに「異常なし」が積まれると、
+  # journalctlで本当に見たい失敗が埋もれる）。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.dispatched[] | "コンフリクト解消を起動しました: \(.repositoryFullName)#\(.pullRequestNumber)（Issue #\(.issueNumber)）"' 2>/dev/null ||
+    true
   return 0
 }
 
@@ -1976,6 +2032,12 @@ run_once() {
 
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
     return 0
+  fi
+
+  # コンフリクトしたPRの巡回検知をissue-deckへ促す（#2116）。**dry-runでは呼ばない**
+  # （ワークフローの起動という外向きの副作用があるため）。
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    sweep_pull_request_conflicts
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

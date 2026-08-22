@@ -7,7 +7,7 @@ import { githubFetch } from "@/lib/github/request";
  * GitHubのREST APIは`If-None-Match`付きのリクエストが`304 Not Modified`を返したとき、
  * **その分をレート制限に計上しない**。PR一覧のように「対象リポジトリ数ぶんのリクエストを
  * 短い間隔で繰り返す」経路では、変化が無い間の消費をこれで実質ゼロにできる。
- * 「完了したPR」ビューの10秒ポーリング（`hooks/use-pull-requests.ts`）が成立しているのは
+ * PR画面の10秒ポーリング（`hooks/use-pull-requests.ts`）が成立しているのは
  * この仕組みのため——素で回すと26リポジトリ×360回/時でインストール当たりの上限
  * （5,000回/時）を超える。
  *

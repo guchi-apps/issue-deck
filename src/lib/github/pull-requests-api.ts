@@ -99,7 +99,7 @@ export async function fetchClosedPullRequestsForBase(
 
 /**
  * PR一覧の1ページ分を取得する。**ETagによる条件付きGET**を通すため、変化が無い間は
- * レート制限を消費しない（#1531。「完了したPR」ビューの10秒ポーリングの前提）。
+ * レート制限を消費しない（#1531。PR画面の10秒ポーリングの前提）。
  */
 async function fetchPullRequestPage(
   url: string,

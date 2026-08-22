@@ -606,10 +606,18 @@ ManualStepRun（1 Issueにつき1行）
 - **画面からは次を積まない。** 「もう一度実行」も「修正を適用して実行」も、自動実行中は
   サーバーへ「続きから流す」（`action=resume`）を送るだけにする。両方が積むと同じ手順が二重に走る
 - **進み具合は手作業アシスタント本体**（`AutoRunBar`）で追い、「ユーザーの作業待ち」ビューの入口には
-  「自動実行 n / m」バッジが出る（`issue-list.tsx`。**そのビューを見ているときの1件だけ**で、
+  「自動実行 n / m」バッジが出る（`issue-list.tsx`。**そのビューに並んでいるIssueの実行だけ**で、
   中断ボタンは持たない）。常設のバーは新しく足さない。#1882では実行キュー（PCのトップバー・
   スマホのヘッダー）にも節を出していたが、**#2073で撤去した**——`PAUSED`は人が手順を実行するまで
   無期限に残るため、Issueの数だけ積み上がって順番待ちのジョブを押し出していた（#2064）
+- **バッジを押すと走っている実行が全部並ぶ**（#2119・`components/dashboard/manual-step-run-badge.tsx`）。
+  #1882のバッジは`.find`で拾った先頭1件ぶんの進捗しか出しておらず、2本目以降が走っていることが
+  画面のどこにも出ていなかった（データは`listManualStepRunViews`が最初から全件返している）。
+  並び順は**押す必要があるものが上**（失敗 → あなたが実行 → 実行中。`sortManualStepRunsForList`）で、
+  1件でも失敗していればバッジごと赤へ寄せる。行を押すとそのIssueを先頭にしたアシスタントが開く
+  （`useManualStepGuide`の`start(startIssueId)`）
+- **一覧から中断はできない**（#2119）。中断はアシスタントの中の「中断する」だけに置く——進み具合を
+  見るつもりで開いた小さな面に、押し間違いで実行が消える操作を並べない
 - **画面へ返すのは`RUNNING`と`PAUSED`だけ**（#2073）。#1882では終わった実行も30分は返していたが、
   それを描いていたのは撤去した節だけで、残る読み手は両方とも`isActiveManualStepRun`で弾く
 - **止まったままの実行は、Issueがcloseされた時点で片付ける**（#2073・`sweepClosedManualStepRuns`）。
@@ -824,7 +832,8 @@ tmuxセッションが立つ → 回答は質問Issueへのコメントとして
 - **落ちたリポジトリは理由と遅れコミット数を参照一覧に出す**（`本体チェックアウト・main・
   origin/develop から 67コミット遅れ（…）`）。プロンプトは各リポジトリの ref・短縮SHA・コミット日を
   載せ、**回答の冒頭にその基準を書かせる**。読む側が何時点のコードの話かを確かめられるようにする
-- 掃除の対象外。`scripts/cleanup-worktrees.sh`が触るのは`$WORKTREE_BASE/issue-*`だけ
+- 掃除の対象外。`scripts/cleanup-worktrees.sh`が触るのは各リポジトリのworktreeの置き場の
+  `issue-*`だけで、`--all-repos`（#2123）で全リポジトリを回してもここには来ない
 
 **副作用として、他セッションが編集中の未コミットの変更は質問セッションから見えなくなる。**
 「いま誰かが書いている途中のもの」ではなく「developがどうなっているか」を答える器に振り切っている
@@ -1165,9 +1174,14 @@ PRを最後まで作らないため、**どの経路にも当たらず永久に�
 
 ### worktreeの掃除も1巡に相乗りさせる（#1716）
 
-#1223 の第3段階。pollerは`scripts/cleanup-worktrees.sh --yes`を呼び、**消しても失われるものが
-無いworktreeとローカルブランチ**を消す。セッションの回収の直後に呼ぶので、直前に畳んだ
-セッションのworktreeを同じ巡でそのまま消せる。
+#1223 の第3段階。pollerは`scripts/cleanup-worktrees.sh --all-repos --yes`を呼び、**消しても
+失われるものが無いworktreeとローカルブランチ**を消す。セッションの回収の直後に呼ぶので、直前に
+畳んだセッションのworktreeを同じ巡でそのまま消せる。
+
+**範囲は全リポジトリ**（#2123）。issue-deckだけを掃除していた頃は、汎用ランチャーで起こした
+他リポジトリのworktreeに起点が無く、166本中153本が他リポジトリのまま溜まってルートFSが91%に
+達した。`--all-repos`は`local-repos.conf`に載っていてチェックアウトとworktreeの置き場が実在する
+リポジトリを順に回す（19リポジトリ・166本で実測42秒）。
 
 **足りなかったのは判定ではなく起点だった。** スクリプトは#1100からあったのに、ユーザーcrontabにも
 systemd timerにも登録されておらず、`start-issue.sh`は案内メッセージを出すだけだった。サブPCの
@@ -1187,6 +1201,29 @@ systemd timerにも登録されておらず、`start-issue.sh`は案内メッセ
 
 無人で回すために足した安全弁（準備中のworktreeを消さない`--min-age-minutes`、残すworktreeの
 `.next`削除）は[branching.md](branching.md)の「掃除を回す起点」を参照。
+
+### コンフリクトの巡回検知も1巡に相乗りさせる（#2116）
+
+pollerは1巡ごとに`POST /api/pull-requests/conflict-sweep`を叩き、developとコンフリクトした
+PRをissue-deckに探させる。見つかれば`claude-conflict-resolve.yml`が起動する。
+
+**GitHub Actions側の自動検知だけでは取りこぼす。** `pull_request(opened)`のイベントが1本も
+配送されないことがあり（guchi-apps/myroom#191）、安全網の`schedule`も15分の指定に対して実測
+24〜36分でしか走らない。「作った時点で既にコンフリクトしているPR」がそこに落ちると、人が画面の
+ボタンを押すまで誰も直しにいかない。**GitHubのイベント配送・スケジューラに依存しない起点として、
+既に常駐しているpollerの1巡に相乗りさせる**（開発サーバー・セッション・worktreeの回収と同じ理由で、
+systemd timerは新設しない）。
+
+**上の3つと違い、pollerは間隔を持たない。** 毎巡そのまま呼び、実際に巡回するかどうかは
+issue-deck側が`CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分・0で無効）で決める。間隔が決めているのは
+GitHub APIをどれだけ使うかであり、それはissue-deckの側の関心事だから——呼ぶ側（別ホストのpoller等）が
+増えても消費が増えないようにしてある。間隔に達していなければ`swept: false`が返って終わる。
+ログに出すのは**実際に起動したときだけ**（30秒ごとに「異常なし」が積まれると、journalctlで
+本当に見たい失敗が埋もれる）。`--dry-run`では呼ばない（ワークフローの起動という外向きの副作用が
+あるため）。
+
+どのPRへ起動するかの判定はissue-deck側にある。設計は
+[auto-repair.md](auto-repair.md)「issue-deckからの巡回検知」。
 
 ### セッションの本数の上限（#1361）
 
@@ -1998,6 +2035,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
+| `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 

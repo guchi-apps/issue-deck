@@ -496,7 +496,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `sidebarQuestionNavViews`・`sidebarIssueNavViews`、
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
   `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
-  左メニューから外した「最近追加した」「直近本番に反映した」「完了したPR」は
+  左メニューから外した「最近追加した」「直近本番に反映した」は
   viewクエリとしては生きており、既存リンクからは今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
@@ -685,6 +685,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       受けたサーバー）。画面は状態を読んで出すだけで、**次を積まない**（両方が積むと二重に走る）。
       進み具合は「ユーザーの作業待ち」ビューの入口バッジとアシスタント本体で追う（#2073で
       実行キューの節は撤去した）。Issueはまたがない（次の手作業は承認し直す）
+    - **入口バッジは押すと走っている実行を全部並べる**（#2119。
+      [`manual-step-run-badge.tsx`](../src/components/dashboard/manual-step-run-badge.tsx)）。
+      #1882のバッジは`.find`で先頭1件しか拾っておらず、複数走っていても2本目以降が画面のどこにも
+      出ていなかった（`listManualStepRunViews`は最初から全件返している）。並びは**押す必要がある
+      ものが上**（失敗 → あなたが実行 → 実行中。`sortManualStepRunsForList`）で、行を押すと
+      そのIssueを先頭にしたアシスタントが開く。**一覧からは中断できない**——進み具合を見るために
+      開いた小さな面に、押し間違いで実行が消える操作を並べない
     - **いつでも中断できる**（#1882）。次を積まないだけでなく走っている1件も止める——
       順番待ちは取り消し、走り出したものは`MANUAL_STEP_ABORT`のジョブでpollerが
       `systemctl --user stop`。**止められないpollerでは打ち切り（5分）まで待つことを画面に出す**
@@ -792,9 +799,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   スキーマ・Webhook設定を増やさない方が勝つと判断した。
   取得コストは「対象リポジトリ数（REST）＋ installationごとに数回（GraphQL。CI状態と
   コンフリクトをPRごとではなくエイリアスでまとめて引く。#1962）」で、母集団が広いぶん
-  1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
-  （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
-  `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
+  1回が重い。そのため**自動更新はPR画面（PCのPRペイン・スマホのPR画面）を開いている間だけ**に
+  している（ビューによらず10秒間隔。ペイン・画面の外では画面を開いたときと手動更新のみ。
+  `hooks/use-pull-requests.ts`。#1531・#1947）。**ブランチ画面で自動更新を有効にしている間は、
   そちらの間隔でもこの取得が回る**（#1767。両方の要求が重なったときは短い方。
   [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`shorterAutoRefreshInterval`）。
 - **10秒間隔で回せるのは、GitHubへの取得がETagの条件付きGETを通っているから**（#1531。
@@ -972,13 +979,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
   同じく履歴を積まない（`selectPullRequestView`）。
-- **PRの状態別ビューは3つあるが、左メニューに出すのは「すべてのPR」「実行中」の2つ**（#1312・
-  #1613）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
+- **PRの状態別ビューは3つで、左メニューにも3つとも出す**（#1312・#1613・#2120）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
-  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「完了したPR」
+  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「マージ待ち」
   （CIがsuccess/failure）は**同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えても
-  GitHub APIを叩き直さない。「完了したPR」は左メニューから外したが`prview=completed`のURLは
-  生きている。**10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「完了したPR」
+  GitHub APIを叩き直さない。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
+  **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
+  ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
+  **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
   ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
   歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
   ポーリングと同じ間隔・同じ止め方にそろえてある。**ただし1巡のコストは「消費0」ではない。**
@@ -1011,13 +1019,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
   統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
   ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
-  **「処理中」「完了」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
+  **「実行中」「マージ待ち」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
   クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
   **両方あるときは`fetchedAt`が新しい方を使う**（#1578。`issue-deck-shell.tsx`の
   `selectedPullRequest`）。一覧を無条件に優先していたころは、詳細ヘッダーの更新ボタンが
-  詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
+  詳細しか取り直さない（一覧はPR画面を開いている間しか自動更新されない）ため、
   CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
   残り続けていた。
   **そのPRが本番へ出たかは、「マージ済み」の隣のバッジで出す**（#1814。`DeployStatusBadge`）。
@@ -1299,6 +1307,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **コンフリクトしたPRは、GitHubのイベントを待たずにissue-deck側から巡回して見つける**
+  （#2116。判定は[`lib/github/conflict-sweep.ts`](../src/lib/github/conflict-sweep.ts)、IOは
+  [`lib/github/conflict-sweep-run.ts`](../src/lib/github/conflict-sweep-run.ts)）。
+  サブPCのpollerが1巡ごとに`POST /api/pull-requests/conflict-sweep`（認証は`DISPATCH_SECRET`）を
+  叩き、連携済みリポジトリ全部のdevelop向け`issue-<番号>`PRのうちコンフリクトしているものへ
+  `claude-conflict-resolve.yml`を`workflow_dispatch`する。**GitHub Actions側の自動検知は
+  取りこぼす**——`pull_request(opened)`のイベントが1本も配送されないことがあり
+  （guchi-apps/myroom#191）、安全網の`schedule`も15分の指定に対して実測24〜36分でしか走らない。
+  **実際に巡回するかどうかを決めるのはサーバー側**（`CONFLICT_SWEEP_INTERVAL_MINUTES`・既定5分・
+  0で無効）で、pollerは毎巡素直に呼ぶ。同じPRへは30分（`CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES`）
+  空けるまで起動し直さず、対応Issueに`00.check-user`が付いていれば起動しない（自動解消を断念した
+  ワークフローが付けるラベルなので、そのまま「人が見ると決めたもの」の目印にする）。
+  設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「issue-deckからの巡回検知」。
 - **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
   `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
   修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは
@@ -1330,7 +1351,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   PCはヘッダー右端、スマホは各画面のヘッダーの実行状況の右隣に置く（#1772）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
   同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
-  リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「完了したPR」と同じ
+  リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「マージ待ち」と同じ
   母集団）／`71.manual-step`の4区分。
   - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
     作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
@@ -1520,10 +1541,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
-- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716）。pollerは`WORKTREE_CLEANUP_INTERVAL_MINUTES`
-  （既定60分・0で無効）の間隔で`scripts/cleanup-worktrees.sh --yes`を呼ぶ。**足りなかったのは
+- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716・#2123）。pollerは
+  `WORKTREE_CLEANUP_INTERVAL_MINUTES`（既定60分・0で無効）の間隔で
+  `scripts/cleanup-worktrees.sh --all-repos --yes`を呼ぶ。**足りなかったのは
   判定ではなく起点**で、スクリプトは#1100からあったのに実行の起点がどこにも無く、3日で181本・38GB
-  溜まってルートFSが77%に達した。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
+  溜まってルートFSが77%に達した。**次に足りなかったのは範囲**で、起点を置いたあともissue-deckの
+  worktreeしか見ておらず、汎用ランチャー（#1224）で起こした他リポジトリのworktreeが166本中153本
+  まで溜まってルートFSが91%に達した（#2123。`--repo <owner/repo>`で1リポジトリ、`--all-repos`で
+  `local-repos.conf`の全リポジトリ）。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
   経っていないworktreeは触らない（`--min-age-minutes`。`start-issue.sh`が作ってからセッションの
   プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
   消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
@@ -1756,6 +1781,23 @@ Issue詳細の上部（`IssueStatusCard`）とコメント欄の承認カード�
 検証するため、ドラッグ経路では`<!-- issue-deck:posted-by:<login> -->`で人間を復元させている。
 `21.plan-required`ラベルがワークフローのmodeを決めるので、`Planning`へ動かすときはコメントより
 先にラベルを書く。
+
+## 画面の表示名を変えるときは、旧名を名指ししている記述を「置換」しない
+
+このリポジトリのコメント・docsは、判定の母集団や自動更新の条件を**画面の表示名で説明している**
+（「左メニューの『完了したPR』と同じ母集団」のように）。表示名を変えると、それらが画面に
+無いものを指すようになるので、`grep -rn "<旧名>" src/ docs/`で全部引いてから直す。
+
+**そのとき一括置換をかけない**（#2120）。「マージ待ち」への改名（旧「完了したPR」）で旧名を
+引いたところ、`src/hooks/use-pull-requests.ts`・`src/lib/auto-refresh.ts`・
+`src/components/dashboard/issue-deck-shell.tsx`・`docs/code-map.md`の「自動更新は『完了したPR』
+ビューを表示している間だけ」が、**#1947（ヘッダーの「更新」ボタン廃止）の時点で既に事実と
+違っていた**（実際はPR画面を開いている間ビューによらず回る）。名前だけ置換していれば、その
+誤りが新しい名前で生き延びていた。旧名を名指ししている記述は「いま読んでも正しいか」を
+確かめる単位として扱う。
+
+例外は**出荷済みのリリースノート本文**（[`lib/changelog.ts`](../src/lib/changelog.ts)）。
+公開済みの版の文面は書き換えない運用なので、一括置換をかけるならここだけ除外する。
 
 ## テスト
 

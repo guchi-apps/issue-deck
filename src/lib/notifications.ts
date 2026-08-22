@@ -25,7 +25,7 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 止まるものがどこにあるか」が分かる**ことなので、そこだけをリリース以外へも広げて残した。
  *
  * **判定は既存の純粋関数へ委ねる。** リリースは`describeReleaseStatusBadge`、確認待ちは
- * `checkUserReason`、PRは`filterPullRequestsByView`（左メニューの「完了したPR」と同じ母集団）、
+ * `checkUserReason`、PRは`filterPullRequestsByView`（左メニューの「マージ待ち」と同じ母集団）、
  * 手作業は`computeManualStepReadiness`（左メニューの「ユーザーの作業待ち」と同じ判定）。
  * ここで新しい基準を作ると、同じ状態を指す文言や件数が画面ごとに食い違う。
  *
@@ -224,7 +224,7 @@ function buildManualStepNotifications(issues: Issue[]): NotificationItem[] {
 }
 
 /**
- * マージ待ちPRの通知。母集団は左メニューの「完了したPR」と同じ（open・非draft・CIが確定）で、
+ * マージ待ちPRの通知。母集団は左メニューの「マージ待ち」と同じ（open・非draft・CIが確定）で、
  * そこから**放っておけば入るもの**（Auto-merge有効でCI成功）だけを除く。
  *
  * `excludedIds`は他の区分で既に出しているPR。同じ操作が2行に出ると件数が実態より多く見える。

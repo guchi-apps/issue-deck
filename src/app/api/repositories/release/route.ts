@@ -27,6 +27,7 @@ import { GithubApiError } from "@/lib/github/github-api-error";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { isReleaseHeadRef } from "@/lib/pull-request-list";
 import { isBumpKind } from "@/lib/semver-bump";
 
 /** バンプPRのブランチ名（`release/v1.2.3`）から次バージョンを取り出す */
@@ -92,7 +93,9 @@ async function handleGET(request: NextRequest) {
     ]);
 
     const bumpPr = developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
-    const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
+    // リリースPRのheadは`release-main/vX.Y.Z`（#2117）。共有ワークフローの参照タグが古い
+    // リポジトリではまだ`develop`のため、`isReleaseHeadRef`が両方を受ける。
+    const releasePr = mainBasePullRequests.find((pr) => isReleaseHeadRef(pr.head.ref)) ?? null;
 
     // バンプPR自身を除いた、develop向けのその他のオープンPR一覧。Issueを起票せず直接
     // developへPRを作った場合に気づけるよう、リリース確認ダイアログで一覧表示する(#977)。
