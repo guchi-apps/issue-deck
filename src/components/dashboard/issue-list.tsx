@@ -885,55 +885,65 @@ export function IssueList({
         )
       )}
 
-      {pinnedSection}
-
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが
           ドキュメント側へ伝播してヘッダー・フッターごと動くのを防ぐ（#607） */}
       {/* 引っ張って更新（#1893）のタッチを受ける枠。**0件のときも枠は残す**——<ul>は0件で
           消えるため、<ul>に直接付けると「該当するIssueがありません」の一覧を更新できない */}
+      {/* **`pinnedSection`もこの枠の中に入れる**（#2175）。確認待ちの先頭に固定している
+          マージ待ちPull Request（#1613）は画面の上半分を占めることがあり、枠の外に置くと
+          そこを下へなぞってもタッチが届かず「引っ張っても何も起きない」ことになる */}
       <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
         <PullToRefreshIndicator pull={pull} />
 
-        {issues.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-            該当するIssueがありません
-          </div>
-        ) : (
-          // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
-          // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
-          // offsetTopにヘッダー・タブの高さが含まれてしまう（実測で145pxずれる）。
-          // アンカーによる復元は保存時との差分を取るためこのずれが相殺されるが、保存済み位置が
-          // 無いときの中央寄せ（computeCenteredIssueListScrollTop）は生のoffsetTopを使うため、
-          // 基準を揃えないと同じ分だけ下にずれる。
-          // flex-1・min-h-0は、包む枠（引っ張って更新のタッチを受ける枠）の中でも件数ぶんの
-          // 高さまで伸びず、残りを埋めるだけにするために要る（#1665と同じ理由）。
-          // transformはoffsetTopに影響しないため、引っ張りの追従は上の2つと両立する。
-          <ul
-            ref={listRef}
-            className={cn(
-              "relative min-h-0 flex-1 overflow-y-auto overscroll-contain",
-              fabSpacing && "pb-20",
-            )}
-            style={{
-              transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
-              transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
-            }}
-          >
-            {isGrouped
-              ? repoGroups!.flatMap((group) => [
-                  <li key={`group-${group.repositoryFullName}`}>
-                    <GroupHeader group={group} />
-                  </li>,
-                  ...group.issues.map((issue) => renderIssueRow(issue, false)),
-                ])
-              : issues.map((issue) => renderIssueRow(issue, true))}
-            {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
-                兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
-                見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
-                保険として同じ高さの空白ボックスを追加する（#677） */}
-            {footerSpacing && <li aria-hidden className="h-14 shrink-0" />}
-          </ul>
-        )}
+        {/* 引っ張りに追従して下がるのは<ul>だけでなく固定セクションも含めた中身全体。
+            片方だけ下げると、引いている最中に固定セクションと一覧の境目が割れて見える */}
+        <div
+          className="flex min-h-0 flex-1 flex-col"
+          style={{
+            transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
+            transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
+          }}
+        >
+          {pinnedSection}
+
+          {issues.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+              該当するIssueがありません
+            </div>
+          ) : (
+            // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
+            // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
+            // offsetTopにヘッダー・タブの高さが含まれてしまう（実測で145pxずれる）。
+            // アンカーによる復元は保存時との差分を取るためこのずれが相殺されるが、保存済み位置が
+            // 無いときの中央寄せ（computeCenteredIssueListScrollTop）は生のoffsetTopを使うため、
+            // 基準を揃えないと同じ分だけ下にずれる。
+            // flex-1・min-h-0は、包む枠（引っ張って更新のタッチを受ける枠）の中でも件数ぶんの
+            // 高さまで伸びず、残りを埋めるだけにするために要る（#1665と同じ理由）。
+            // 引っ張りに追従するtransformは1つ外の枠が持つ（#2175）。transformはoffsetTopに
+            // 影響しないため、追従は上の2つと両立する。
+            <ul
+              ref={listRef}
+              className={cn(
+                "relative min-h-0 flex-1 overflow-y-auto overscroll-contain",
+                fabSpacing && "pb-20",
+              )}
+            >
+              {isGrouped
+                ? repoGroups!.flatMap((group) => [
+                    <li key={`group-${group.repositoryFullName}`}>
+                      <GroupHeader group={group} />
+                    </li>,
+                    ...group.issues.map((issue) => renderIssueRow(issue, false)),
+                  ])
+                : issues.map((issue) => renderIssueRow(issue, true))}
+              {/* MobileBottomNavのnav（min-h-14）と同じ高さの空白。ボトムナビは通常フローの
+                  兄弟要素で本来重ならないはずだが、実機では末尾のIssueがフッターに隠れて
+                  見えない事象が報告されたため、スクロールで確実に隠れずに表示できるよう
+                  保険として同じ高さの空白ボックスを追加する（#677） */}
+              {footerSpacing && <li aria-hidden className="h-14 shrink-0" />}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );

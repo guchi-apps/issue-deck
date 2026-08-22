@@ -247,6 +247,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   取り直すのは`GET /api/issues`（`use-issue-polling.ts`の`refresh`）と実行状況までで、
   **GitHubからの再同期（`POST /api/sync/issues`）はしない**。1回でリポジトリ数ぶんのGitHub APIを
   使うため、指を下ろすたびに走ってよい操作ではない（再同期は設定の「フリート運用」に置いてある）。
+  **一覧の先頭に固定するセクション（`IssueList`の`pinnedSection`）も、その枠の中に置く**（#2175）——
+  「ユーザーの確認待ち」に並ぶマージ待ちPR（#1613）は画面の上半分を占めることがあり、枠の外に
+  置くとそこを下へなぞってもタッチが届かず「引っ張っても何も起きない」ことになる。引っ張りに
+  追従する`translateY`も`<ul>`ではなく固定セクションごと包む要素へ掛ける（片方だけ下げると、
+  引いている最中に固定セクションと一覧の境目が割れて見える）。
+  **確認待ちの一覧では、引っ張ったときにIssueとマージ待ちPRの両方を取り直す**（#2175）——
+  このビューではPRの自動更新を止めている（`usePullRequests`へ間隔を渡すのはPR画面とブランチ画面
+  だけ）ため、Issueだけ取り直すと画面の上半分は開いた時点のまま残る。呼ぶかどうかの判定は
+  `MobileIssuesScreen`が持ち（他のビューで呼ぶと1回でリポジトリ数ぶんのGitHub APIを使う）、
+  指で引けないPCは`MergePendingPullRequests`の見出しに置いた「更新」から同じ`refreshFromPull`を
+  呼ぶ。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、

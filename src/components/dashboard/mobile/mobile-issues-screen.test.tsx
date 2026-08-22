@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,10 +9,23 @@ import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 // 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
-// 先頭の固定枠（#1713。マージ待ちPR）だけは通す
+// 先頭の固定枠（#1713。マージ待ちPR）と、引っ張って更新の呼び出し口（#2175）だけは通す
 vi.mock("@/components/dashboard/issue-list", () => ({
-  IssueList: ({ pinnedSection }: { pinnedSection?: ReactNode }) => (
-    <div data-testid="issue-list">{pinnedSection}</div>
+  IssueList: ({
+    pinnedSection,
+    onPullToRefresh,
+  }: {
+    pinnedSection?: ReactNode;
+    onPullToRefresh?: () => Promise<unknown> | void;
+  }) => (
+    <div data-testid="issue-list">
+      {onPullToRefresh && (
+        <button type="button" onClick={() => void onPullToRefresh()}>
+          引っ張って更新
+        </button>
+      )}
+      {pinnedSection}
+    </div>
   ),
 }));
 
@@ -87,6 +100,8 @@ function renderScreen(
     view?: "all" | "check-user" | "manual-step";
     mergePendingPullRequests?: PullRequestSummary[];
     mergeCheckWaitingCount?: number;
+    onRefresh?: () => Promise<unknown> | void;
+    onRefreshPullRequests?: () => Promise<unknown> | void;
   } = {},
 ) {
   render(
@@ -110,6 +125,8 @@ function renderScreen(
       onCreateIssue={vi.fn()}
       onAskCrossRepoQuestion={vi.fn()}
       onStartManualStepGuide={vi.fn()}
+      onRefresh={options.onRefresh}
+      onRefreshPullRequests={options.onRefreshPullRequests}
     />,
   );
 }
@@ -214,5 +231,40 @@ describe("MobileIssuesScreen のヘッダーの見出し（#2081）", () => {
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Issue");
     expect(screen.getByText("すべてのIssue・0件")).toBeTruthy();
+  });
+});
+
+describe("MobileIssuesScreen の引っ張って更新（#2175）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("確認待ちではIssueとマージ待ちPRの両方を取り直す", async () => {
+    // この一覧の先頭にはマージ待ちPRが並ぶ（#1713）のに、確認待ちのビューではPRの
+    // 自動更新を止めているため、Issueだけ取り直すと画面の上半分が開いた時点のまま残る。
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const onRefreshPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderScreen([makeIssue()], { view: "check-user", onRefresh, onRefreshPullRequests });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "引っ張って更新" }));
+    });
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onRefreshPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("他のビューではPRを取りに行かない", async () => {
+    // 1回の取得でリポジトリ数ぶんのGitHub APIを使うため、PRが並ばない一覧では呼ばない
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const onRefreshPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderScreen([makeIssue()], { view: "all", onRefresh, onRefreshPullRequests });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "引っ張って更新" }));
+    });
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onRefreshPullRequests).not.toHaveBeenCalled();
   });
 });

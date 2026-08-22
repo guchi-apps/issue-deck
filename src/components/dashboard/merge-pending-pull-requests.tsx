@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, GitPullRequest } from "lucide-react";
+import { Clock, GitPullRequest, RefreshCw } from "lucide-react";
 
 import {
   BranchBadge,
@@ -8,7 +8,9 @@ import {
   ConflictBadge,
   MergeJudgementBadge,
 } from "@/components/dashboard/pull-request-badges";
+import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -30,11 +32,23 @@ export function MergePendingPullRequests({
   pullRequests,
   waitingForChecksCount = 0,
   onSelectPullRequest,
+  onRefresh,
+  isRefreshing = false,
 }: {
   pullRequests: PullRequestSummary[];
   /** CI・判定の完了待ちで一覧から外したPRの件数（#2081）。0なら完了待ちの行を出さない */
   waitingForChecksCount?: number;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
+  /**
+   * 見出しの「更新」でのPRの取り直し（#2175）。渡さなければボタンを出さない。
+   *
+   * **一覧を下へ引っ張れないPCのために要る。** 確認待ちのビューではPRの自動更新を
+   * 止めている（`usePullRequests`に間隔を渡すのはPR画面とブランチ画面だけ）ため、
+   * ここに並ぶPRは画面を開いた時点のままになる。
+   */
+  onRefresh?: () => void;
+  /** 取り直しが飛んでいる間の表示（アイコンの回転）。`onRefresh`が無いときは使わない */
+  isRefreshing?: boolean;
 }) {
   if (pullRequests.length === 0 && waitingForChecksCount === 0) return null;
 
@@ -42,21 +56,27 @@ export function MergePendingPullRequests({
   // 見出しの下に何も並ばない状態は、待たれているのに開けないものがあるように読めるため。
   if (pullRequests.length === 0) {
     return (
-      <p className="border-b px-4 py-2 text-xs text-muted-foreground">
-        <WaitingForChecksText count={waitingForChecksCount} />
-      </p>
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        <p className="min-w-0 text-xs text-muted-foreground">
+          <WaitingForChecksText count={waitingForChecksCount} />
+        </p>
+        <RefreshButton onRefresh={onRefresh} isRefreshing={isRefreshing} />
+      </div>
     );
   }
 
   return (
     <section className="border-b bg-amber-500/5 px-4 py-3" aria-labelledby="merge-pending-title">
-      <h3
-        id="merge-pending-title"
-        className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400"
-      >
-        <GitPullRequest className="size-3.5 shrink-0" />
-        あなたのマージを待っているPull Request
-      </h3>
+      <div className="flex items-center gap-2">
+        <h3
+          id="merge-pending-title"
+          className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400"
+        >
+          <GitPullRequest className="size-3.5 shrink-0" />
+          あなたのマージを待っているPull Request
+        </h3>
+        <RefreshButton onRefresh={onRefresh} isRefreshing={isRefreshing} />
+      </div>
       <ul className="mt-2 flex flex-col gap-1.5">
         {pullRequests.map((pullRequest) => (
           <li key={pullRequest.id}>
@@ -90,6 +110,35 @@ export function MergePendingPullRequests({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * 見出しの右へ置く「更新」（#2175）。`onRefresh`を渡されていない画面では何も描かない。
+ *
+ * **スマホの「引っ張って更新」と同じ取り直しを、指で引けないPCから呼ぶためのもの。**
+ * 文言・アイコン・回転はPR詳細（`pull-request-detail.tsx`）の更新ボタンに合わせている。
+ */
+function RefreshButton({
+  onRefresh,
+  isRefreshing,
+}: {
+  onRefresh?: () => void;
+  isRefreshing: boolean;
+}) {
+  if (!onRefresh) return null;
+
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="ml-auto shrink-0 text-muted-foreground"
+      disabled={isRefreshing}
+      onClick={onRefresh}
+    >
+      <RefreshCw className={cn("size-3.5", isRefreshing && "animate-spin")} />
+      更新
+    </Button>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
@@ -51,6 +51,14 @@ type MobileIssuesScreenProps = {
   onBack?: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
+  /**
+   * 同じ操作で走らせるPull Requestの取り直し（#2175）。**呼ぶのは「ユーザーの確認待ち」を
+   * 見ているときだけ。** この一覧の先頭にはマージ待ちPRが並ぶのに、確認待ちのビューでは
+   * PRの自動更新を止めている（`usePullRequests`に間隔を渡すのはPR画面とブランチ画面だけ）
+   * ため、Issueだけ取り直すと画面の上半分は開いた時点のまま残る。他のビューで呼ばないのは、
+   * 1回の取得でリポジトリ数ぶんのGitHub APIを使うため。
+   */
+  onRefreshPullRequests?: () => Promise<unknown> | void;
   /** 最終取得時刻（ISO8601）。`MobileIssueListScreen`へそのまま渡す（#1797） */
   fetchedAt?: string | null;
   /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
@@ -86,6 +94,7 @@ export function MobileIssuesScreen({
   onAskCrossRepoQuestion,
   onBack,
   onRefresh,
+  onRefreshPullRequests,
   fetchedAt,
   autoRefreshIntervalMs,
   onStartManualStepGuide,
@@ -118,6 +127,16 @@ export function MobileIssuesScreen({
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
   // 一覧に並ぶのは手作業Issueだけで、その中からは参照先のIssueを引けない
   const prerequisiteReadiness = useMemo(() => computeIssuePrerequisiteReadiness(issues), [issues]);
+
+  // 一覧を下へ引っ張ったときの取り直し（#1893）。**確認待ちのときだけPull Requestも
+  // 一緒に取り直し、両方が返るまで待つ**（#2175）。待たずに返すと「更新中…」が最短表示の
+  // 0.5秒（`MIN_REFRESHING_MS`）で消え、数秒かかるGitHubからの取得が終わったように見える。
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([
+      onRefresh?.(),
+      view === "check-user" ? onRefreshPullRequests?.() : undefined,
+    ]);
+  }, [onRefresh, onRefreshPullRequests, view]);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
   // ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
@@ -158,7 +177,7 @@ export function MobileIssuesScreen({
       onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
-      onRefresh={onRefresh}
+      onRefresh={onRefresh ? handleRefresh : undefined}
       fetchedAt={fetchedAt}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
