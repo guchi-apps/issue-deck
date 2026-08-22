@@ -99,6 +99,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
   canAskClaude,
@@ -293,6 +294,9 @@ export function MobileIssueDetail({
     [issues, issue.repositoryFullName],
   );
   const qaAnswerPending = isQaAnswerPending(comments);
+  // 進捗ステッパーの計画フェーズをスキップ表示にするか（#2069）。コメントを持っている
+  // この層でだけ判定できる
+  const planningSkipped = isPlanningPhaseSkipped(issue, comments, isLoading);
   const pullRequestLinks = usePullRequestLinks(issue.repositoryFullName, issue.number, comments);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
   // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
@@ -720,6 +724,7 @@ export function MobileIssueDetail({
           workflowRunId={workflowRunId}
           qaAnswerPending={qaAnswerPending}
           checkUserGuidance={checkUserGuidance}
+          planningSkipped={planningSkipped}
         />
 
         {showStartDialog && (

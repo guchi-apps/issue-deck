@@ -1,4 +1,4 @@
-import { Check, CircleAlert, MessageCircleQuestion } from "lucide-react";
+import { Check, CircleAlert, MessageCircleQuestion, Minus } from "lucide-react";
 
 import {
   describeIssueExecutionTarget,
@@ -51,6 +51,15 @@ type WorkflowStatusStepsProps = ProgressProps & {
    * セッションが終わった後も「実行中」のまま残り、「サブPC・応答を終えています」と食い違う。
    */
   showExecutionTarget?: boolean;
+  /**
+   * 計画フェーズ（`Planning`）を通らずに実装へ入ったIssueかどうか（#2069。
+   * 判定は`isPlanningPhaseSkipped`）。
+   *
+   * **既定は`false`＝従来どおり済みのチェックを出す。** 判定にはIssueのコメントが要り、
+   * 呼び出し側がそれを持っているとは限らない（一覧・取得中）。分からないまま
+   * 「スキップ」と言い切ると、計画を通したIssueにまで出てしまう。
+   */
+  planningSkipped?: boolean;
 };
 
 type WorkflowStepBadgeProps = ProgressProps & {
@@ -87,6 +96,13 @@ type WorkflowStepBadgeProps = ProgressProps & {
 };
 
 const BADGE_SIZE = 18;
+
+/** 計画フェーズ（`Planning`）の段の位置。スキップの判定に使う（#2069） */
+const PLANNING_STEP_INDEX = WORKFLOW_STEPS.findIndex((step) => step.key === "planning");
+
+/** 計画フェーズを通らなかった段のラベル・ツールチップ（#2069） */
+const SKIPPED_STEP_LABEL = "計画スキップ";
+const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りました";
 
 /**
  * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを円グラフ（パイ）で示す。
@@ -218,6 +234,12 @@ export function WorkflowStepBadge({
  * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
+ *
+ * **計画フェーズ（`Planning`）は、通らずに実装へ入ったIssueでは済み扱いにしない**（#2069）。
+ * `21.plan-required`を付けないIssueはそこを通らないのに、済みのチェックが出ていたため、
+ * 「計画を立てて承認まで通した」Issueと画面上まったく同じに見えていた。通らなかった段は
+ * 塗らずに破線の輪郭＋マイナスにし、次の段までの接続線も破線にする（判定は
+ * `isPlanningPhaseSkipped`で、材料になるコメントを持つIssue詳細だけが渡す）。
  */
 export function WorkflowStatusSteps({
   labels,
@@ -225,6 +247,7 @@ export function WorkflowStatusSteps({
   executionTarget,
   showApprovalBadge = true,
   showExecutionTarget = true,
+  planningSkipped = false,
 }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -245,16 +268,30 @@ export function WorkflowStatusSteps({
     showExecutionTarget && executionTarget && !executionTarget.expectsActionsRun
       ? describeIssueExecutionTarget(executionTarget)
       : null;
+  // 通り過ぎた計画フェーズだけをスキップ扱いにする（#2069）。まだそこにいる（`Planning`）
+  // 間は現在ステップの表示が優先で、スキップかどうかはそもそも決まらない
+  const skippedIndex = planningSkipped && currentIndex > PLANNING_STEP_INDEX ? PLANNING_STEP_INDEX : null;
+  // スマホでは段のラベルが出ないため、キャプションの側でも文字で言う（#2069）
+  const captionSuffix =
+    [skippedIndex !== null ? SKIPPED_STEP_LABEL : null, targetLabel ? `${targetLabel}で実行中` : null]
+      .filter(Boolean)
+      .join("・") || null;
 
   return (
     <div>
       <div className="overflow-x-auto">
         <div className="flex min-w-max" role="list" aria-label="実装状況">
           {WORKFLOW_STEPS.map((step, index) => {
-            const isDone = index < currentIndex;
+            const isSkipped = index === skippedIndex;
+            // スキップした段は「済み」にしない。塗ってチェックを出すと、計画を通した
+            // Issueと見分けが付かなくなる（#2069）
+            const isDone = index < currentIndex && !isSkipped;
             const isCurrent = index === currentIndex;
             const showApprovalPending = isCurrent && showBadge;
             const StepIcon = step.icon;
+            // 接続線も、スキップした段の前後だけ破線にする。実線のままだと進捗が計画から
+            // 続いてきたように読める
+            const skipLineClass = "h-0 border-t border-dashed border-muted-foreground/60";
             return (
               <div
                 key={step.key}
@@ -264,21 +301,28 @@ export function WorkflowStatusSteps({
                   <div
                     aria-hidden
                     className={cn(
-                      "absolute left-0 top-3 h-px w-1/2",
-                      isDone || isCurrent ? "bg-primary" : "bg-border",
+                      "absolute left-0 top-3 w-1/2",
+                      index - 1 === skippedIndex
+                        ? skipLineClass
+                        : cn("h-px", isDone || isCurrent ? "bg-primary" : "bg-border"),
                     )}
                   />
                 )}
                 {index !== WORKFLOW_STEPS.length - 1 && (
                   <div
                     aria-hidden
-                    className={cn("absolute right-0 top-3 h-px w-1/2", isDone ? "bg-primary" : "bg-border")}
+                    className={cn(
+                      "absolute right-0 top-3 w-1/2",
+                      isSkipped ? skipLineClass : cn("h-px", isDone ? "bg-primary" : "bg-border"),
+                    )}
                   />
                 )}
                 <div
                   role="listitem"
                   aria-current={isCurrent ? "step" : undefined}
-                  title={step.projectStatus}
+                  /* スマホでは段のラベルが出ないため、読み上げ向けの名前はここに持たせる（#2069） */
+                  aria-label={isSkipped ? SKIPPED_STEP_LABEL : undefined}
+                  title={isSkipped ? `${step.projectStatus} ${SKIPPED_STEP_TITLE}` : step.projectStatus}
                   className={cn(
                     "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-inset",
                     isDone && "bg-primary text-primary-foreground ring-primary",
@@ -286,10 +330,20 @@ export function WorkflowStatusSteps({
                       (approvalPending
                         ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
                         : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
-                    !isDone && !isCurrent && "text-muted-foreground ring-border",
+                    // 通っていない段は塗らず、破線の輪郭にする（#2069）。未着手の段（実線の輪郭）
+                    // とも、済みの段（塗りつぶし）とも重ならない見た目にする
+                    isSkipped &&
+                      "border border-dashed border-muted-foreground/70 text-muted-foreground ring-0",
+                    !isDone && !isCurrent && !isSkipped && "text-muted-foreground ring-border",
                   )}
                 >
-                  {isDone ? <Check className="size-3.5" /> : <StepIcon className="size-3.5" />}
+                  {isDone ? (
+                    <Check className="size-3.5" />
+                  ) : isSkipped ? (
+                    <Minus className="size-3.5" />
+                  ) : (
+                    <StepIcon className="size-3.5" />
+                  )}
                 </div>
                 {/* 折り返しを許す（#1577）。`whitespace-nowrap`だと「developへマージ」のような
                     長いラベルが列からはみ出し、隣のラベルと重なって読めなくなっていた */}
@@ -299,7 +353,7 @@ export function WorkflowStatusSteps({
                     isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
                   )}
                 >
-                  {step.label}
+                  {isSkipped ? SKIPPED_STEP_LABEL : step.label}
                 </span>
                 {showApprovalPending && (
                   <span className="hidden whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 md:inline-block dark:text-amber-400">
@@ -323,7 +377,7 @@ export function WorkflowStatusSteps({
           <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
             {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
           </span>
-          {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
+          {captionSuffix && <span className="ml-1.5 text-muted-foreground">{captionSuffix}</span>}
         </p>
         {showBadge && (
           <span className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
