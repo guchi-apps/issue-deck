@@ -265,11 +265,17 @@ jobs:
 
 
           def git_ignored(path):
-              return subprocess.run(
-                  ["git", "check-ignore", "-q", path],
-                  stdout=subprocess.DEVNULL,
-                  stderr=subprocess.DEVNULL,
-              ).returncode == 0
+              # ディレクトリ限定の `.gitignore` パターン（`/.next/` 等）は、対象がまだ
+              # チェックアウト後に存在せずディレクトリだと分からない場合、末尾に `/` を
+              # 付けないとマッチしない。ファイル向けパターンもあるため両方試す。
+              return any(
+                  subprocess.run(
+                      ["git", "check-ignore", "-q", candidate],
+                      stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL,
+                  ).returncode == 0
+                  for candidate in (path, f"{path}/")
+              )
 
 
           def check_ssh_action_envs(lines, all_env_names, workflow):
