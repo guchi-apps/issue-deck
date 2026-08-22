@@ -127,7 +127,10 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
   進む」「修正を送る」を押せる（押した内容はIssueコメントにも残る）。**`send-keys`は使わず**、
   計画を投稿したフックがClaude Code自身の許可判定として返すため、
   [docs/multi-agent/gates.md](docs/multi-agent/gates.md)の禁止には触れない。既定30分で待ちが
-  切れ、その後は従来どおり端末・Remote Controlから答える
+  切れ、その後は従来どおり端末・Remote Controlから答える。**押すのは1回で、端末・Remote
+  Controlでの承認し直しは要らない**（#2121。承認を返すときに`updatedInput`を添えないと
+  Claude Codeが聞き直すため、二重承認になっていた。
+  [docs/multi-agent/session-notify.md](docs/multi-agent/session-notify.md)「承認・修正は画面から送れる」）
 
 ### Issueの進捗の状態遷移
 

@@ -145,6 +145,21 @@ describe("計画への返事待ち", () => {
     expect(decision).toMatchObject({ permissionDecision: "allow" });
   });
 
+  // **`allow`だけでは端末に承認プロンプトが出る**（#2121）。Claude Codeは`ExitPlanMode`を
+  // 「許可が下りていても人へ聞き直す」ツールとして扱い、フックが`updatedInput`を返したときだけ
+  // その聞き直しを省く。ここが落ちると、画面で承認したあとRemote Controlでもう一度承認する
+  // 二重承認へ戻る。
+  it("承認には`updatedInput`（受け取った引数そのまま）を添える", async () => {
+    decisionQueue = [ok({ status: "APPROVED" })];
+
+    const decision = decisionOf(await runHook());
+
+    expect(decision).toMatchObject({
+      permissionDecision: "allow",
+      updatedInput: JSON.parse(HOOK_JSON).tool_input,
+    });
+  });
+
   it("修正は`deny`＋書かれた本文で返す（そのまま次の指示になる）", async () => {
     decisionQueue = [ok({ status: "REVISION_REQUESTED", revisionText: "C1の指摘を反映して" })];
 
@@ -154,6 +169,8 @@ describe("計画への返事待ち", () => {
       permissionDecision: "deny",
       permissionDecisionReason: "C1の指摘を反映して",
     });
+    // `deny`はもともと聞き直されずClaudeへ渡るので、引数を差し替える理由が無い
+    expect(decision).not.toHaveProperty("updatedInput");
   });
 
   it("届かない状態が続いたら降り、画面の待ちも畳ませる", async () => {

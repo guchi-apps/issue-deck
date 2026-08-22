@@ -70,7 +70,7 @@ ExitPlanMode（計画の提示）
        → Signalyへ「計画の承認待ち」を通知（#2061）
        → GET /api/dispatch/sessions/plan/decision?id=… を3秒おきに引いて待つ
   → 人がissue-deckの画面で「承認」／「修正を送る」を押す
-       → allow ／ deny＋修正の本文 を返す（＝承認プロンプトは出ない）
+       → allow＋updatedInput ／ deny＋修正の本文 を返す（＝承認プロンプトは出ない。#2121）
   → 実装 ／ 計画の練り直し → Stop
        → POST /api/dispatch/sessions/activity に planResolved: true を添える
             → 00.check-user を除去
@@ -108,6 +108,19 @@ ExitPlanMode（計画の提示）
 フォームに答えさせる操作はどこにも無いため、[gates.md](gates.md)の「実行体が判断して組み立てた
 文字列・確定キーの送出」の禁止に触れない。
 
+**承認（`allow`）には`hookSpecificOutput.updatedInput`を必ず添える**（#2121）。Claude Codeは
+`ExitPlanMode`を**「許可が下りていても人へ聞き直す」ツール**（内部の`requiresUserInteraction`）
+として扱っており、`allow`だけを返しても承認プロンプトが出る。**フックが`updatedInput`を
+返したときだけ、その聞き直しを省く。** 添えるのは受け取った`tool_input`そのままで、中身は
+変えない（「入力を差し替える」機能の副作用を借りているだけで、計画本文を書き換える意図は無い）。
+`deny`はもともと聞き直されずClaudeへ渡るため添えない。
+
+- **添え忘れると二重承認に戻る。** #2061の実装は`allow`だけを返していたため、画面で承認した
+  あとRemote Controlでもう一度おなじ計画を承認する必要があった。転記の`hook_success`と
+  `tool_result`のtimestampを比べると差がそのまま出る（実測で95秒・8分の例がある）。
+  境界は`scripts/session-notify-plan.test.mjs`が固定している
+- **公開仕様ではない。** 挙動はClaude Code 2.1.239のバイナリで確かめたもので、将来変わりうる。
+  変わっても端末に従来どおりの承認プロンプトが出るだけで、セッションは詰まらない
 - **画面から答えられるのは、待っている間だけ。** 待ち時間（既定30分）が切れると`EXPIRED`に
   なり、端末に従来どおりの承認プロンプトが出る。画面には残り時間がカウントダウンで出る
 - **待っている間、端末には承認プロンプトが出ない。** 端末に座っているなら`Esc`で中断すれば
