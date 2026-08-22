@@ -247,6 +247,139 @@ describe("BranchFlowView", () => {
     });
   });
 
+  /**
+   * PCの左右分割（#2157）。
+   *
+   * 分けるかどうかは画面が占めている幅の実測で決まるが、jsdomはレイアウトを持たず
+   * `getBoundingClientRect()`が常に0を返す。**幅を差し替えないテストは従来どおり
+   * 折りたたみのまま**で、そこは既存のテストがそのまま押さえている。
+   */
+  describe("PCの左右分割（#2157）", () => {
+    const REPO_B = "guchi-apps/myroom";
+    const REPO_B_SHORT = "myroom";
+    /** 右ペインの中身にだけ出る文字（左の畳んだ1行には出ない） */
+    const REPO_BRANCH = "issue-1454";
+    const REPO_B_BRANCH = "issue-5";
+
+    /** 2ペインに分かれる幅があることにする */
+    function mockWideLayout(width = 1200) {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        width,
+        height: 800,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+    }
+
+    function renderTwoRepositories(options: { splitLayout?: boolean } = {}) {
+      const flow = buildBranchFlow({
+        repositories: [
+          { fullName: REPO, private: false },
+          { fullName: REPO_B, private: false },
+        ],
+        pullRequests: [
+          makePullRequest({ number: 1461, headRef: REPO_BRANCH }),
+          makePullRequest({
+            id: `${REPO_B}#7`,
+            repositoryFullName: REPO_B,
+            number: 7,
+            headRef: REPO_B_BRANCH,
+          }),
+        ],
+        issues: [],
+        branchStatuses: [
+          branchStatus({ checkedBranches: [REPO_BRANCH], existingBranches: [REPO_BRANCH] }),
+          branchStatus({
+            repositoryFullName: REPO_B,
+            checkedBranches: [REPO_B_BRANCH],
+            existingBranches: [REPO_B_BRANCH],
+          }),
+        ],
+      });
+
+      return render(
+        <BranchFlowView
+          flow={flow}
+          fetchedAt="2026-08-15T10:30:00Z"
+          isLoading={false}
+          error={null}
+          failedRepositories={[]}
+          mergedPullRequestsLoaded
+          onRefresh={vi.fn()}
+          splitLayout={options.splitLayout ?? true}
+        />,
+      );
+    }
+
+    /** その文字が、畳んだ1行と同じ`<section>`（＝行の下）に出ているか */
+    function isInsideRow(rowLabel: string, text: string) {
+      const section = screen.getByText(rowLabel).closest("section");
+      return section !== null && section.contains(screen.getByText(text));
+    }
+
+    it("行をクリックすると、行の下ではなく右ペインに流れ図を出す", () => {
+      mockWideLayout();
+      renderTwoRepositories();
+
+      fireEvent.click(screen.getByText(REPO_SHORT));
+
+      expect(screen.getByText(REPO_BRANCH)).toBeTruthy();
+      expect(isInsideRow(REPO_SHORT, REPO_BRANCH)).toBe(false);
+      // 右ペインの見出しは`owner/`まで出す（左の行では落としているため）
+      expect(screen.getByRole("heading", { level: 2, name: REPO })).toBeTruthy();
+    });
+
+    it("別のリポジトリを選ぶと右ペインが差し替わる（同時に出せるのは1件）", () => {
+      mockWideLayout();
+      renderTwoRepositories();
+
+      fireEvent.click(screen.getByText(REPO_SHORT));
+      expect(screen.getByText(REPO_BRANCH)).toBeTruthy();
+
+      fireEvent.click(screen.getByText(REPO_B_SHORT));
+      expect(screen.queryByText(REPO_BRANCH)).toBeNull();
+      expect(screen.getByText(REPO_B_BRANCH)).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 2, name: REPO_B })).toBeTruthy();
+    });
+
+    it("何も選んでいないうちは右ペインに選び方を出す", () => {
+      mockWideLayout();
+      renderTwoRepositories();
+
+      expect(screen.getByText("左の一覧からリポジトリを選ぶと、ここに流れを表示します。")).toBeTruthy();
+      expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+    });
+
+    it("分割中は「すべて開く」を出さない（同時に1件しか出せないため）", () => {
+      mockWideLayout();
+      renderTwoRepositories();
+
+      expect(screen.queryByText("すべて開く")).toBeNull();
+    });
+
+    it("幅が足りなければ分割せず、今までどおり行の下に開く", () => {
+      renderTwoRepositories();
+
+      fireEvent.click(screen.getByText(REPO_SHORT));
+
+      expect(isInsideRow(REPO_SHORT, REPO_BRANCH)).toBe(true);
+      expect(screen.getByText("すべて開く")).toBeTruthy();
+    });
+
+    it("分割を渡していない画面（スマホ）は、幅が足りても行の下に開く", () => {
+      mockWideLayout();
+      renderTwoRepositories({ splitLayout: false });
+
+      fireEvent.click(screen.getByText(REPO_SHORT));
+
+      expect(isInsideRow(REPO_SHORT, REPO_BRANCH)).toBe(true);
+    });
+  });
   describe("流れ図", () => {
     it("Issue・ブランチ・PRを1本のレーンとして並べる", () => {
       renderFlow({

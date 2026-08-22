@@ -1370,8 +1370,9 @@ export function IssueDeckShell({
           )}
 
           {filters.pane === "flow" ? (
-            /* PC: ブランチ（#1455）。一覧と詳細に分かれないため、中央〜右を
-               1カラムで使う。IssueやPRを選ぶとそれぞれのペインへ遷移する */
+            /* PC: ブランチ（#1455）。中央〜右をこの画面だけで使い、その中を
+               左（リポジトリ一覧）と右（選んだリポジトリの流れ図）に分ける（#2157）。
+               IssueやPRを選ぶとそれぞれのペインへ遷移する */
             <BranchFlowView
               flow={branchFlow}
               fetchedAt={branchFlowStatus.fetchedAt}
@@ -1396,6 +1397,8 @@ export function IssueDeckShell({
                 deployStatus.refresh();
               }}
               onMerged={handleBranchFlowMerged}
+              /* 左右2ペイン（#2157）。幅が足りるかどうかは`BranchFlowView`が実測して決める */
+              splitLayout
               className="hidden flex-1 md:flex"
             />
           ) : filters.pane === "pull-requests" ? (

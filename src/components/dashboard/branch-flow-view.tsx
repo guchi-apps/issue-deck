@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowUpToLine,
   Check,
@@ -9,6 +18,7 @@ import {
   CircleAlert,
   CircleDashed,
   Clock,
+  ExternalLink,
   GitBranch,
   Loader2,
   Lock,
@@ -31,6 +41,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
+import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,7 +50,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { usePersistedState } from "@/hooks/use-persisted-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
+import { useResizableWidth } from "@/hooks/use-resizable-width";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
@@ -145,6 +158,16 @@ type BranchFlowViewProps = {
    * 変えない**——引っ張れることに気づいていない人の手段を消さないため。
    */
   refreshIconOnly?: boolean;
+  /**
+   * PCで左右2ペインに分けるか（#2157）。**渡した画面でだけ有効になる**（スマホは渡さない）。
+   *
+   * 1カラムのまま行の下へ展開していたころは、横幅が余っているのに縦へ伸び、一覧と中身を
+   * 同時に見られなかった。左に畳んだ1行だけを残し、流れ図は右ペインで独立してスクロールさせる。
+   *
+   * **渡しても幅が足りなければ従来どおり折りたたむ**（`SPLIT_MIN_WIDTH`）。左メニューを開いた
+   * まま狭いウィンドウで見ると、右ペインが読めない幅まで潰れるため。
+   */
+  splitLayout?: boolean;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   /** 見出しの右に置くボタン（スマホの実行状況。#1638。PCからは渡さない） */
@@ -154,6 +177,53 @@ type BranchFlowViewProps = {
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる */
   footerSpacing?: boolean;
 };
+
+/**
+ * 左右2ペインに分けるのに要る、この画面自身の最小幅（#2157）。
+ *
+ * **見るのはウィンドウ幅ではなくこの画面が占めている幅。** 左メニューは畳めるうえ幅も
+ * 変えられるので、同じウィンドウ幅でも中央に残る幅は倍近く違う。
+ */
+const SPLIT_MIN_WIDTH = 880;
+
+/** 右ペインのid（#2157）。畳んだ1行の`aria-controls`が指す先 */
+const DETAIL_PANE_ID = "branch-flow-detail";
+
+/** 左ペイン（リポジトリ一覧）の幅（#2157）。左メニュー・Issue一覧と同じくドラッグで変えられる */
+const LIST_PANE_WIDTH = {
+  storageKey: "issue-deck:branch-flow-list-width",
+  defaultWidth: 360,
+  minWidth: 280,
+  maxWidth: 640,
+  handleSide: "right",
+} as const;
+
+/**
+ * 要素の幅が閾値以上か（#2157）。
+ *
+ * CSSのブレークポイントでは足りない——分けるかどうかを決めるのはウィンドウ幅ではなく、
+ * 左メニューを引いた残りの幅だから。`ResizeObserver`が無い環境（テストのjsdom・SSR）では
+ * 初回の実測だけを使い、幅が取れなければ分割しない（＝従来の折りたたみ）側へ倒す。
+ */
+function useIsWiderThan(ref: RefObject<HTMLElement | null>, minWidth: number): boolean {
+  const [isWide, setIsWide] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    // 実測した値を状態へ移すだけで、描画のたびに走るものではない（ResizeObserverが呼ぶ）
+    const measure = () => setIsWide(element.getBoundingClientRect().width >= minWidth);
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, minWidth]);
+
+  return isWide;
+}
 
 /**
  * まだどのバージョンにも乗っていないレーンの状態（#1510）。
@@ -1277,6 +1347,7 @@ function RepositorySummaryRow({
   mergedPullRequestsLoaded,
   releaseTriggerPending,
   isOpen,
+  showSelectionMarker = false,
   onToggle,
 }: {
   repository: BranchFlowRepository;
@@ -1285,6 +1356,12 @@ function RepositorySummaryRow({
   /** この端末からリリースworkflowを起こした直後で、まだバンプPRが現れていない（#1955） */
   releaseTriggerPending: boolean;
   isOpen: boolean;
+  /**
+   * 2ペイン表示で「いま右に出ているのはこの行」を示す縦棒を出すか（#2157）。
+   *
+   * 中身が行の下に無いぶん、背景色の差だけでは選択中の行を見失う。
+   */
+  showSelectionMarker?: boolean;
   onToggle: () => void;
 }) {
   const { summary } = repository;
@@ -1311,13 +1388,23 @@ function RepositorySummaryRow({
       type="button"
       onClick={onToggle}
       aria-expanded={isOpen}
+      // 2ペインでは中身が行の下に無いので、どこが開いたのかを読み上げへ伝える（#2157）
+      aria-controls={showSelectionMarker ? DETAIL_PANE_ID : undefined}
       className={cn(
         "flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2 text-left hover:bg-accent/50",
         isOpen && "bg-muted/60",
+        // 枠線のぶん左padding を詰めて、選択中でない行と文字の位置を揃える
+        showSelectionMarker && "border-l-2 border-l-transparent pl-3.5",
+        showSelectionMarker && isOpen && "border-l-primary",
       )}
     >
       <ChevronRight
-        className={cn("size-3 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
+        className={cn(
+          "size-3 shrink-0 text-muted-foreground transition-transform",
+          // 2ペインでは下へ伸びないので回さない（回すと下に何か出ると読める）
+          isOpen && !showSelectionMarker && "rotate-90",
+          isOpen && showSelectionMarker && "text-foreground",
+        )}
         aria-hidden="true"
       />
       <span
@@ -1428,6 +1515,8 @@ function RepositorySection({
   showAllVersions,
   showAllPlannedIssues,
   isOpen,
+  selectionMode = false,
+  detailHost = null,
   onToggle,
   onShowAllVersions,
   onToggleAllPlannedIssues,
@@ -1441,6 +1530,17 @@ function RepositorySection({
   showAllVersions: boolean;
   showAllPlannedIssues: boolean;
   isOpen: boolean;
+  /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
+  selectionMode?: boolean;
+  /**
+   * 開いた中身（流れ図）を描く先（#2157）。2ペイン表示では右ペインの要素を渡し、
+   * `null`なら従来どおり行の下へ差し込む。
+   *
+   * **右ペインを別のコンポーネントにせず、描画先だけを差し替えるのが要点。** 行と中身を
+   * 別々に組み立てると`useTriggerPending`（起動中）を2か所から呼ぶことになり、押した瞬間の
+   * 書き込みが互いに伝わらない状態が戻ってくる（#1955でわざわざ1か所へまとめた）。
+   */
+  detailHost?: HTMLElement | null;
   onToggle: () => void;
   onShowAllVersions: () => void;
   onToggleAllPlannedIssues: () => void;
@@ -1451,6 +1551,29 @@ function RepositorySection({
   const { isPending, markTriggered } = useTriggerPending("release", repository.repositoryFullName);
   const deployTrigger = useTriggerPending("deploy", repository.repositoryFullName);
 
+  const graph = (
+    <ReleaseFlowGraph
+      repository={repository}
+      showClosed={showClosed}
+      showAllVersions={showAllVersions}
+      showAllPlannedIssues={showAllPlannedIssues}
+      mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+      releaseTriggerPending={isPending}
+      deployTriggerPending={deployTrigger.isPending}
+      onShowAllVersions={onShowAllVersions}
+      onToggleAllPlannedIssues={onToggleAllPlannedIssues}
+      onReleaseTriggered={() => {
+        markTriggered();
+        onRefresh();
+      }}
+      onDeployTriggered={() => {
+        deployTrigger.markTriggered();
+        onRefresh();
+      }}
+      onMerged={onMerged}
+    />
+  );
+
   return (
     <section>
       <RepositorySummaryRow
@@ -1459,32 +1582,15 @@ function RepositorySection({
         mergedPullRequestsLoaded={mergedPullRequestsLoaded}
         releaseTriggerPending={isPending}
         isOpen={isOpen}
+        showSelectionMarker={selectionMode}
         onToggle={onToggle}
       />
-      {isOpen && (
-        <div className="border-b">
-          <ReleaseFlowGraph
-            repository={repository}
-            showClosed={showClosed}
-            showAllVersions={showAllVersions}
-            showAllPlannedIssues={showAllPlannedIssues}
-            mergedPullRequestsLoaded={mergedPullRequestsLoaded}
-            releaseTriggerPending={isPending}
-            deployTriggerPending={deployTrigger.isPending}
-            onShowAllVersions={onShowAllVersions}
-            onToggleAllPlannedIssues={onToggleAllPlannedIssues}
-            onReleaseTriggered={() => {
-              markTriggered();
-              onRefresh();
-            }}
-            onDeployTriggered={() => {
-              deployTrigger.markTriggered();
-              onRefresh();
-            }}
-            onMerged={onMerged}
-          />
-        </div>
-      )}
+      {/* 2ペインでは右ペインへ送る（#2157）。描画先がまだ無い一瞬は何も出さない——
+          行の下へ落とすと、切り替わる前に一覧が縦へ伸びて見える */}
+      {isOpen &&
+        (selectionMode
+          ? detailHost && createPortal(graph, detailHost)
+          : <div className="border-b">{graph}</div>)}
     </section>
   );
 }
@@ -1535,6 +1641,55 @@ function isProgressing(repository: BranchFlowRepository): boolean {
 }
 
 /**
+ * 2ペイン表示の右ペインの見出し（#2157）。
+ *
+ * **どのリポジトリを見ているかを、左の一覧をたどらずに分かるようにするためだけのもの。**
+ * 状態のバッジは畳んだ1行と流れ図の両方が持っているので重ねず、ここには一覧の行では
+ * `owner/`を落としているフル名と、開いたときに毎回目で追う数（未リリース・進行中）を置く。
+ */
+function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
+  const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: getRepoColor(repository.repositoryFullName) }}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <h2 className="truncate text-sm font-semibold">{repository.repositoryFullName}</h2>
+        <p className="truncate text-xs text-muted-foreground">
+          {repository.release.latestVersion ? (
+            <span>v{repository.release.latestVersion}</span>
+          ) : (
+            <span>リリース済みのバージョンなし</span>
+          )}
+          {unreleasedCommits > 0 && <span>{` ・ 未リリース ${unreleasedCommits}コミット`}</span>}
+          {repository.summary.activeLaneCount > 0 && (
+            <span>{` ・ 進行中 ${repository.summary.activeLaneCount}件`}</span>
+          )}
+        </p>
+      </div>
+      {repository.repositoryPrivate && (
+        <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Private" />
+      )}
+      {/* アプリ内にリポジトリそのものの画面は無いので別タブで開く */}
+      <a
+        href={`https://github.com/${repository.repositoryFullName}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+        title="GitHubでリポジトリを開く"
+        aria-label="GitHubでリポジトリを開く"
+      >
+        <ExternalLink className="size-3.5" aria-hidden="true" />
+      </a>
+    </div>
+  );
+}
+
+/**
  * Issue・ブランチ・PRの関係を、リポジトリごとの「流れ」として1画面で見せる（#1455・#1510）。
  *
  * Issue一覧・PR一覧はどちらも「一方から他方を辿る」導線しか持たず、
@@ -1544,6 +1699,10 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  * 入らず、動きの無いリポジトリまでフルサイズで「何も無い」と言っていたため。
  * **開いた直後は自動で展開しない**（#1932）。手が要るもの（CI失敗・ユーザーのマージ待ち・
  * リリース中）を初回に開く動きは、初期表示が縦に伸びるためやめた。
+ *
+ * **PCで幅が足りるときは左右2ペインに分ける**（#2157。`splitLayout`）。左は畳んだ1行の一覧の
+ * まま、選んだ1件の流れ図を右ペインへ出す。1カラムのまま下へ展開すると、横幅が余っているのに
+ * 縦へ伸び、一覧と中身を同時に見られなかった。スマホと幅が足りないPCは従来どおり。
  *
  * 展開した中身は`ReleaseFlowGraph`が持つ。組み立ては`lib/branch-flow.ts`の純粋関数が行い、
  * この層は描画だけを持つ。
@@ -1564,12 +1723,27 @@ export function BranchFlowView({
   onMerged,
   onPullToRefresh,
   refreshIconOnly = false,
+  splitLayout = false,
   headerLeading,
   headerActions,
   className,
   style,
   footerSpacing = false,
 }: BranchFlowViewProps) {
+  // 2ペイン表示（#2157）。分けるかどうかは実測した幅で決める（`SPLIT_MIN_WIDTH`）
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const isWideEnough = useIsWiderThan(layoutRef, SPLIT_MIN_WIDTH);
+  const isSplit = splitLayout && isWideEnough;
+  // 右ペインの中身の描画先。コールバックrefは同一の関数にしておく（毎回新しい関数を渡すと
+  // Reactが付け外しを繰り返し、そのたびに状態が変わって再描画が止まらなくなる）
+  const [detailHost, setDetailHost] = useState<HTMLDivElement | null>(null);
+  const handleDetailHostRef = useCallback((node: HTMLDivElement | null) => setDetailHost(node), []);
+  const listWidth = useResizableWidth(LIST_PANE_WIDTH);
+  // 右に出しているリポジトリ。端末ごとに覚える（開き直しても同じものを見ている状態から始める）
+  const [selectedRepositoryFullName, setSelectedRepositoryFullName] = usePersistedState<
+    string | null
+  >("issue-deck:branch-flow-selected-repository", null);
+
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
   const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
@@ -1618,7 +1792,9 @@ export function BranchFlowView({
     // 選択が変わった瞬間にだけ開く（refで1回に抑えてある）ので、描画のたびには走らない
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenRepositories((prev) => new Set([...prev, ...names]));
-  }, [expandedKey]);
+    // 2ペインでは同時に1件しか出せないので、先頭の1件を右へ出す（#2157）
+    setSelectedRepositoryFullName(names[0]);
+  }, [expandedKey, setSelectedRepositoryFullName]);
 
   // マージ後の後始末は親が持つ（#1756）。渡されていない場合は取り直すだけに縮退させる
   function handleMerged(pullRequest: PullRequestSummary) {
@@ -1635,11 +1811,27 @@ export function BranchFlowView({
     });
   }
 
+  // 2ペインでは押すたびに畳まず、押した行を右へ出す（#2157）。同じ行をもう一度押しても
+  // 閉じない——右ペインが空になるだけで、得るものが無い
+  function handleRowClick(fullName: string) {
+    if (isSplit) setSelectedRepositoryFullName(fullName);
+    else toggleRepository(fullName);
+  }
+
+  function isRepositoryOpen(fullName: string) {
+    return isSplit ? selectedRepositoryFullName === fullName : openRepositories.has(fullName);
+  }
+
   const allOpen =
     flow.repositories.length > 0 && openRepositories.size === flow.repositories.length;
+  // 覚えている選択が今の一覧に無い（非表示にした・まだ読み込めていない）こともある
+  const selectedRepository =
+    flow.repositories.find(
+      (repository) => repository.repositoryFullName === selectedRepositoryFullName,
+    ) ?? null;
 
   return (
-    <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
+    <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
         スマホ（`md`未満）ではヘッダーを2段にする（#1638）。1段のままだと、見出しと
         「すべて開く」「クローズも表示」「更新」＋実行状況で幅を食い合い、見出しと
@@ -1685,20 +1877,23 @@ export function BranchFlowView({
           {/* 見出しと同じ段に置く（#1638）。実行状況はどの画面でも1段目の右端で揃える */}
           {headerActions}
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 shrink-0"
-          onClick={() =>
-            setOpenRepositories(
-              allOpen
-                ? new Set()
-                : new Set(flow.repositories.map((repo) => repo.repositoryFullName)),
-            )
-          }
-        >
-          {allOpen ? "すべて閉じる" : "すべて開く"}
-        </Button>
+        {/* 2ペインでは同時に1件しか出せないので出さない（#2157） */}
+        {!isSplit && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 shrink-0"
+            onClick={() =>
+              setOpenRepositories(
+                allOpen
+                  ? new Set()
+                  : new Set(flow.repositories.map((repo) => repo.repositoryFullName)),
+              )
+            }
+          >
+            {allOpen ? "すべて閉じる" : "すべて開く"}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -1770,13 +1965,20 @@ export function BranchFlowView({
 
       {/* 引っ張って更新（#1958）のタッチを受ける枠。スクロールするのは中の要素で、
           この枠は動かさない（インジケーターを上端に重ねる基準にもなる） */}
-      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={pullContainerRef}
+        className={cn("relative flex min-h-0 flex-1", isSplit ? "flex-row" : "flex-col")}
+      >
         <PullToRefreshIndicator pull={pull} />
 
         <div
           ref={pullScrollRef}
-          className="flex-1 overflow-y-auto overscroll-contain"
+          className={cn(
+            "overflow-y-auto overscroll-contain",
+            isSplit ? "shrink-0 border-r" : "flex-1",
+          )}
           style={{
+            width: isSplit ? listWidth.width : undefined,
             transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : undefined,
             transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
           }}
@@ -1798,8 +2000,10 @@ export function BranchFlowView({
               showClosed={showClosed}
               showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
               showAllPlannedIssues={allPlannedRepositories.has(repository.repositoryFullName)}
-              isOpen={openRepositories.has(repository.repositoryFullName)}
-              onToggle={() => toggleRepository(repository.repositoryFullName)}
+              isOpen={isRepositoryOpen(repository.repositoryFullName)}
+              selectionMode={isSplit}
+              detailHost={detailHost}
+              onToggle={() => handleRowClick(repository.repositoryFullName)}
               onShowAllVersions={() =>
                 setAllVersionsRepositories(
                   (prev) => new Set([...prev, repository.repositoryFullName]),
@@ -1823,6 +2027,28 @@ export function BranchFlowView({
 
           {footerSpacing && <div className="h-14" aria-hidden="true" />}
         </div>
+
+        {/* 右ペイン（#2157）。中身は`RepositorySection`がここへ送り込む */}
+        {isSplit && (
+          <>
+            <ResizeHandle onDragStart={listWidth.handleDragStart} className="block" />
+            <div id={DETAIL_PANE_ID} className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              {selectedRepository ? (
+                <>
+                  <RepositoryDetailHeader repository={selectedRepository} />
+                  <div ref={handleDetailHostRef} className="min-h-0 flex-1 overflow-y-auto" />
+                </>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+                  <GitBranch className="size-6 text-muted-foreground" aria-hidden="true" />
+                  <p className="text-sm text-muted-foreground">
+                    左の一覧からリポジトリを選ぶと、ここに流れを表示します。
+                  </p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
