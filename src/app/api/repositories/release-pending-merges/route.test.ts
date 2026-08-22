@@ -85,7 +85,8 @@ const RELEASE_PR = {
   number: 12,
   html_url: "https://github.com/owner/repo-a/pull/12",
   title: "release",
-  head: { ref: "develop" },
+  // リリースPRのheadは固定ブランチ`release-main/vX.Y.Z`（#2117）
+  head: { ref: "release-main/v1.2.3" },
 };
 const BUMP_PR = {
   number: 34,
@@ -141,8 +142,8 @@ describe("GET /api/repositories/release-pending-merges", () => {
         },
       },
     ]);
-    // リリースPRのheadはdevelopそのもののため、CI状態はdevelopに対して問い合わせる。
-    expect(fetchRefCiState).toHaveBeenCalledWith("owner", "repo-a", "develop", "token");
+    // CI状態はリリースPRのheadブランチ（凍結ブランチ）に対して問い合わせる。
+    expect(fetchRefCiState).toHaveBeenCalledWith("owner", "repo-a", "release-main/v1.2.3", "token");
   });
 
   it("リリースPRのCIが失敗していても一覧から外さず、ciStateにfailureを返す（#1059）", async () => {
@@ -328,6 +329,8 @@ describe("GET /api/repositories/release-pending-merges", () => {
               number: 3,
               html_url: "https://github.com/owner/repo-b/pull/3",
               title: "release",
+              // 共有ワークフローの参照タグが古いリポジトリのリリースPR（head=develop）も
+              // 従来どおり検出できること（#2117）
               head: { ref: "develop" },
             },
           ];

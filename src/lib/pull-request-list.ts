@@ -12,6 +12,25 @@ const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 const VERSION_BUMP_BRANCH_PREFIX = "release/v";
 
 /**
+ * リリースPR（→`main`）のheadブランチ（`release-develop-to-main.yml`が作る
+ * `release-main/vX.Y.Z`。#2117）。
+ *
+ * **`develop`そのものではなく固定したブランチをheadにする**のは、PRのheadが常にブランチの
+ * 先端を追うため、`develop`のままだとバンプ後にdevelopへ入った変更まで同じリリースで
+ * mainへ出てしまうから（更新履歴にも対象issueにも載らないまま出る）。
+ *
+ * `release/v`（バンプPR）と接頭辞が重ならない名前にしてある。ここを変えると
+ * `classifyPullRequest`がリリースPRを`other`と判定し、リリース画面・ブランチ画面から
+ * リリースPRが消える。
+ */
+export const RELEASE_BRANCH_PREFIX = "release-main/v";
+
+/** リリースPR（→`main`）のheadか。`develop`は`release-main/v`導入前の形式（#2117） */
+export function isReleaseHeadRef(headRef: string): boolean {
+  return headRef === "develop" || headRef.startsWith(RELEASE_BRANCH_PREFIX);
+}
+
+/**
  * 本番のリリース用ブランチ。`lib/branch-flow.ts`の`MAIN_BRANCH`と同じ値だが、あちらが
  * こちらをimportしているため定数の向きを逆にできず、ここでも持つ。
  */
@@ -24,16 +43,19 @@ const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
  * PRのbase/headブランチから種別を判定する。
  *
  * ブランチ名だけで判定できるのは、issue-deckのマルチエージェント運用がブランチ名の規約
- * （`issue-<番号>` / `release/vX.Y.Z` / `develop` / `main`）に依存しているため
- * （[docs/multi-agent/branching.md](../../docs/multi-agent/branching.md)）。規約から外れた
- * ブランチは`other`になるだけで、一覧からは落とさない。
+ * （`issue-<番号>` / `release/vX.Y.Z` / `release-main/vX.Y.Z` / `develop` / `main`）に
+ * 依存しているため（[docs/multi-agent/branching.md](../../docs/multi-agent/branching.md)）。
+ * 規約から外れたブランチは`other`になるだけで、一覧からは落とさない。
+ *
+ * **`main`宛のリリースPRはheadが2通りある。** `release-main/vX.Y.Z`（#2117以降）と`develop`
+ * （それ以前・共有ワークフローの参照タグが古いリポジトリ）で、どちらも`release`として扱う。
  */
 export function classifyPullRequest(pullRequest: {
   baseRef: string;
   headRef: string;
 }): PullRequestKind {
   const { baseRef, headRef } = pullRequest;
-  if (baseRef === MAIN_BRANCH && headRef === "develop") return "release";
+  if (baseRef === MAIN_BRANCH && isReleaseHeadRef(headRef)) return "release";
   if (headRef.startsWith(VERSION_BUMP_BRANCH_PREFIX)) return "version-bump";
   if (ISSUE_BRANCH_PATTERN.test(headRef)) return "issue";
   return "other";

@@ -7,6 +7,10 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 ## ブランチ・worktree運用
 
 - ブランチ名はラベルによる接頭辞分けをせず、単純に `issue-<Issue番号>`（例: `issue-123`）とする。
+- 幹に関わるブランチは3種類あり、**この命名にPRの種別判定（`src/lib/pull-request-list.ts`の`classifyPullRequest`）と進捗の遷移が乗っている**。名前を変えるときは[release.md](release.md)「ブランチ名を変えるときに揃える場所」を参照する。
+  - `issue-<番号>` → `develop`: 実装PR
+  - `release/vX.Y.Z` → `develop`: バージョンバンプPR（`release-develop-to-main.yml`が作る）
+  - `release-main/vX.Y.Z` → `main`: リリースPR（同上）。**headを`develop`にしないのは、PRのheadが常にブランチの先端を追い、PRを作った後にdevelopへ入った変更まで同じリリースでmainへ出てしまうため**（#2117）。リリース内容はこのブランチで凍結される
 - worktreeは本体リポジトリの外、`~/apps/issue-deck-worktrees/<ブランチ名>/` に作成する。本体 `~/apps/issue-deck` は常にレビュー・統合エージェント用の `develop` 最新チェックアウトとして空けておく。
 - worktree作成後に必要な準備:
   - `.env.local` を本体からコピーする（`.gitignore`対象でworktreeに複製されないため。symlinkではなくコピーとし、将来worktreeごとに値を変える余地を残す）

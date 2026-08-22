@@ -19,6 +19,7 @@ import {
   type ReleaseStatusSummaryInput,
 } from "@/lib/github/release-button-status";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
+import { isReleaseHeadRef } from "@/lib/pull-request-list";
 
 export type ReleasePendingMerge = {
   mergeTarget: ReleaseMergeTarget;
@@ -106,20 +107,21 @@ async function handleGET() {
           ]);
 
         // mainへのマージ待ち（develop→mainのPRがオープン中）を最優先で検出する。
-        const releasePr = mainBasePullRequests.find((pr) => pr.head.ref === "develop") ?? null;
+        // headは`release-main/vX.Y.Z`（#2117）。参照タグが古いリポジトリではまだ`develop`。
+        const releasePr = mainBasePullRequests.find((pr) => isReleaseHeadRef(pr.head.ref)) ?? null;
         const bumpPr =
           developBasePullRequests.find((pr) => pr.head.ref.startsWith("release/v")) ?? null;
 
         // CI状態は「今マージ待ちにあたるPR」の分だけ取る（1リポジトリにつき最大1回）。
         //
-        // リリースPRのheadは`develop`そのもののため、`develop`のチェックがそのままこのPRの
-        // 状態になる。**見るのはGitHubがPRのChecksとして数えるものだけ**で、`issues`や
+        // 見るのはリリースPRのheadブランチ（`release-main/vX.Y.Z`。#2117以前は`develop`）の
+        // チェック。**GitHubがPRのChecksとして数えるものだけ**で、`issues`や
         // `workflow_dispatch`で起動した無人実行のワークフローは入らない（#1578。
         // `lib/github/check-rollup.ts`）。ワークフロー名でCIを特定する方式はファイル名が
         // リポジトリごとに違う（asset-managerはtest.yml）ため採らず、集約値をそのまま使う。
         // 画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのはこのため。
         const releaseCiState = releasePr
-          ? await fetchRefCiState(repository.ownerLogin, repository.name, "develop", token)
+          ? await fetchRefCiState(repository.ownerLogin, repository.name, releasePr.head.ref, token)
           : null;
         const bumpCiState =
           !releasePr && bumpPr

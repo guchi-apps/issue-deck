@@ -12,10 +12,11 @@ name: Claude CI Fix
 # 他アプリはタグ固定(@workflows/vX)で参照する運用とし、issue-deck側が先に壊れて
 # 他アプリには波及しない「カナリア」構成にする（#934）。
 #
-# develop→mainのリリースPR（head=develop）のCI失敗は対象外（#812で別途検討）。リリースPRの
-# headはdevelop自体であり、develop直接pushが禁止のためこのワークフローと同じ「対象ブランチへ
-# 直接push」方式を適用できないこと、対応する単一のIssueが存在せずリトライ管理・報告先の前提が
-# 異なることが理由。
+# develop→mainのリリースPR（head=`release-main/vX.Y.Z`。#2117以前は`develop`）のCI失敗は
+# 対象外（#812で別途検討）。対応する単一のIssueが存在せずリトライ管理・報告先の前提が異なる
+# ことと、修正をheadブランチへ直接pushできない（`develop`は保護ブランチ、リリースブランチは
+# マージ時に削除されるため修正がdevelopから消える）ことが理由。こちらは
+# `claude-pr-repair.yml`が扱う。
 #
 # トリガー:
 # - workflow_run（CI, completed）: CIの結果が出るたびに検知する。ci.ymlはconcurrency設定で

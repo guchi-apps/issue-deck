@@ -30,11 +30,32 @@ developへの直接コミットを試みると`GH013: Repository rule violations
 
 ## 3. develop→mainのPRを作成する
 
-- `gh pr create --base main --head develop --title "vX.Y.Zをmainへリリースする"`
+**headは`develop`ではなく、リリース内容を凍結した固定ブランチ`release-main/vX.Y.Z`にする**（#2117）。
+
+```bash
+# バンプ用PRがdevelopへマージされたコミット（そのマージコミットの第2親＝バンプブランチの先端）で凍結する
+git push origin "<バンプブランチの先端SHA>:refs/heads/release-main/vX.Y.Z"
+gh pr create --base main --head "release-main/vX.Y.Z" --title "vX.Y.Zをmainへリリースする"
+```
+
 - PR本文には対象Issue・含まれる主な変更・注意点（Secrets/DBマイグレーション等の有無）・Test planを記載する
+- **`## 対象issue`の見出しに`- #<番号> <タイトル>`の形で列挙する。** マージ時にこの一覧を読んで
+  issueを`Done`にしてcloseする（`reusable-issue-labels.yml`の`main-pr-merged`）
 - **develop→mainのマージは自動マージ不可カテゴリに該当する**（CLAUDE.md記載）。CI通過後、必ずユーザーに確認を取ってからマージする（自己マージしない）
 
-バージョンbump前にこのPRを先に作ってしまっていた場合は、作り直す必要はない。1〜2のバージョンbump用PRがdevelopへマージされれば差分は自動的にこのPRへ反映されるので、マージ後にタイトルを`vX.Y.Zをmainへリリースする`へ更新すればよい。
+### なぜheadを`develop`にしないか
+
+PRのheadは常にそのブランチの先端を追う。`develop`をheadにすると、**PRを作った後にdevelopへ
+マージされた変更まで同じリリースでmainへ出る**。それらは更新履歴にも対象issue一覧にも載って
+いないため、「何が本番へ出たのか」がPRの内容と食い違う。固定ブランチにしておけば、リリースPRを
+作った後のdevelopへのマージは次のリリースへ回る。
+
+このPRのCIが落ちた場合、**`release-main/vX.Y.Z`を直接直さない。** そのブランチはマージ時に
+削除されるため、修正がmainにだけ残りdevelopから消える。developで直したうえで、このPRをcloseして
+リリースを起動し直す（新しい凍結ブランチが作られる）。
+
+なお1〜3は`.github/workflows/release-develop-to-main.yml`が自動化している。手で行うのは、
+その自動化が使えないときだけ。
 
 ## 4. マージ方式は「マージコミット」を使う（squash mergeは厳禁）
 
