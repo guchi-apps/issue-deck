@@ -139,10 +139,32 @@ export function LocalSessionApprovalNotice({
  */
 export function LocalSessionWaitingInputNotice({
   session,
+  planDecisionPending = false,
 }: {
   /** 対応するセッション。見つかっていなければ`null`（案内だけ出す） */
   session: DispatchSessionView | null;
+  /**
+   * 計画への返事を画面から送れる状態か（#2061）。
+   *
+   * **このとき「Remote Controlから伝えてください」と言わない。** 承認・修正の出口はこの画面の
+   * 上部（計画パネル）にあり、そちらを案内しないと**アプリで完結できること自体が画面から
+   * 読み取れない**。計画待ち以外（質問・スクリーンショットの確認など）は従来どおり。
+   */
+  planDecisionPending?: boolean;
 }) {
+  if (planDecisionPending) {
+    return (
+      <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">
+        計画の承認を待っています。
+        <strong className="font-medium">
+          上の「計画の承認を待っています」から承認・修正を送れます
+        </strong>
+        （このコメント欄へ書いても走っているセッションには届きません）。待ち時間が切れた後は
+        Remote Controlか端末から伝えてください。
+      </LocalSessionNotice>
+    );
+  }
+
   return (
     <LocalSessionNotice session={session}>
       走っているセッションが入力を待っています。

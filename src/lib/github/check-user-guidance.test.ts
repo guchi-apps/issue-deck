@@ -21,6 +21,45 @@ describe("resolveCheckUserGuidance", () => {
     expect(guidance?.buttons).toContain("下の「承認」");
   });
 
+  /**
+   * #2061: 計画の承認・修正を画面から送れるようになったので、行き先はRemote Controlではなく
+   * 同じ画面の計画パネル。ここを直さないと、アプリで承認できることが画面から読み取れない。
+   */
+  it("計画への返事を画面から送れるなら、計画パネルへ送る", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "plan",
+      placement: "status",
+      sessionWaitingInput: true,
+      localSession: true,
+      sessionAlive: true,
+      remoteControlUrl: "https://claude.ai/remote/abc",
+      planDecisionPending: true,
+    });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan" });
+    expect(guidance?.buttons).toContain("承認して実装へ進む");
+    expect(guidance?.description).not.toContain("Remote Control");
+  });
+
+  /** コメント欄の承認カードから見ても、目的地は上部のパネル（同じ場所ではない） */
+  it("承認カードの中からでも、計画パネルへの移動ボタンを出す", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "plan",
+      placement: "approval",
+      planDecisionPending: true,
+    });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan" });
+  });
+
+  /** マージは待っているものが別（GitHub側の操作）。計画パネルへ送ってはいけない */
+  it("マージ待ちは、計画の返事待ちがあっても対応PRへ送る", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "merge",
+      placement: "status",
+      planDecisionPending: true,
+    });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+  });
+
   it("マージは対応PRのセクションへ送る", () => {
     const guidance = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });

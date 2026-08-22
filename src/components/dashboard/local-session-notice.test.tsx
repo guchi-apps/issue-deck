@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
+  LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
@@ -85,5 +86,27 @@ describe("LocalSessionApprovalNotice", () => {
     render(<LocalSessionApprovalNotice session={null} />);
     expect(screen.getByText(/走っているセッションには届きません/)).toBeTruthy();
     expect(screen.queryByText(/終了しています/)).toBeNull();
+  });
+});
+
+/**
+ * #2061: 計画の承認・修正は同じ画面の上部（計画パネル）から送れる。ここで
+ * 「Remote Controlから伝えてください」と言い続けると、アプリで完結できることが読み取れない。
+ */
+describe("LocalSessionWaitingInputNotice", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("計画への返事を待っているときは、上のパネルへ案内する", () => {
+    render(<LocalSessionWaitingInputNotice session={session()} planDecisionPending />);
+
+    expect(screen.getByText(/上の「計画の承認を待っています」から承認・修正を送れます/)).toBeTruthy();
+  });
+
+  it("計画待ち以外は従来どおりRemote Controlへ案内する", () => {
+    render(<LocalSessionWaitingInputNotice session={session()} />);
+
+    expect(screen.getByText(/承認・修正はRemote Controlから伝えてください/)).toBeTruthy();
   });
 });

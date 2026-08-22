@@ -1,7 +1,7 @@
 import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/approval-labels";
 
 /** 画面内で「次の操作」をする場所（`check-user-focus.ts`がDOMのidへ対応付ける） */
-export type CheckUserScrollTarget = "approval" | "pull-requests";
+export type CheckUserScrollTarget = "approval" | "pull-requests" | "plan";
 
 /**
  * 次に押すものへの行き先。**`null`は「いま見ている場所が目的地」**（承認カードの中に出す
@@ -91,6 +91,19 @@ const REASON_GUIDE: Record<CheckUserReason, ReasonGuide> = {
 };
 
 /**
+ * 計画への返事を画面から送れるときの差し替え文（#2061）。
+ *
+ * **入力待ちの差し替え（下）より先に効く。** あちらは「画面のボタンはどこにも届かないので
+ * Remote Controlへ」と言うもので、計画パネルが出ている間はそれが当てはまらない——
+ * パネルの「承認して実装へ進む」「修正を送る」はセッションへ届く唯一の出口になっている。
+ * ここで直さないと、**アプリで承認できることが画面のどこからも読み取れない**。
+ */
+const PLAN_PENDING_DESCRIPTION =
+  "エージェントが実装前の計画（アプローチ・変更範囲・懸念点）を提示しました。この方針で実装してよいかを判断してください。";
+const PLAN_PENDING_BUTTONS =
+  "上の「承認して実装へ進む」で実装が始まります。方針を変えるなら「修正を送る」。";
+
+/**
  * 走っているセッションが入力待ちのときの差し替え文（#1417の判定をそのまま使う）。
  * 画面の承認・修正ボタンは`11.local`が付いている間どこにも届かないため、
  * **唯一効く出口であるRemote Controlだけを案内する。**
@@ -139,6 +152,13 @@ export type ResolveCheckUserGuidanceOptions = {
    */
   hasPullRequestSection?: boolean;
   /**
+   * 計画への返事を画面から送れる状態か（#2061。`findPlanRequestForIssue`が
+   * `WAITING`の行を返したかどうか）。
+   *
+   * **これがtrueの間、答える先はRemote Controlではなく同じ画面の計画パネル。**
+   */
+  planDecisionPending?: boolean;
+  /**
    * セッションの状態（`/api/dispatch`）がまだ届いていないか（#1810）。
    *
    * **`sessionWaitingInput`の`false`は「入力待ちではない」と「まだ分からない」の
@@ -169,6 +189,7 @@ export function resolveCheckUserGuidance({
   sessionAlive = false,
   remoteControlUrl = null,
   hasPullRequestSection = true,
+  planDecisionPending = false,
   sessionStatePending = false,
 }: ResolveCheckUserGuidanceOptions): CheckUserGuidance | null {
   if (reason === null) return null;
@@ -177,6 +198,23 @@ export function resolveCheckUserGuidance({
   if (sessionStatePending) return null;
   const guide = REASON_GUIDE[reason];
   const heading = CHECK_USER_REASON_HEADING[reason];
+
+  // 計画の返事を画面から送れる（#2061）。**入力待ち・ローカル担当の差し替えより先に効く**——
+  // どちらも「画面のボタンは届かないのでRemote Controlへ」と言うもので、計画パネルが出ている
+  // 間はそれが当てはまらない。マージだけは別（GitHub側の操作で、計画とは待っているものが違う）
+  if (planDecisionPending && reason !== "merge") {
+    return {
+      reason,
+      heading,
+      description: PLAN_PENDING_DESCRIPTION,
+      // **パネルはIssue詳細の上部にあり、承認カードの中ではない。** どちらの置き場所
+      // （上部のサマリーカード・コメント欄の承認カード）から見ても目的地は別の場所なので、
+      // 常に移動ボタンを出す
+      buttons: PLAN_PENDING_BUTTONS,
+      action: { kind: "scroll", target: "plan" },
+      agentState: guide.agentState,
+    };
+  }
 
   // マージはGitHub側の操作なので、`11.local`のセッションが入力待ちでも画面から実行できる
   // （`ApprovalActions`がマージ待ちを入力待ちより優先しているのと同じ理由）

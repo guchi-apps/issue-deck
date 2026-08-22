@@ -1378,7 +1378,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `lib/dispatch/session-plan-request.ts`、DBは`lib/dispatch/plan-requests.ts`、画面は
   `components/dashboard/plan-approval-panel.tsx`。**`send-keys`は使わない**ので
   `docs/multi-agent/gates.md`の禁止に触れず、返事が決まらなければ端末に従来どおりの承認
-  プロンプトが出る）。
+  プロンプトが出る）。**押す先の案内もアプリの中へ向ける**——一覧の行は「計画を承認」を出して
+  Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
+  `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
+  **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

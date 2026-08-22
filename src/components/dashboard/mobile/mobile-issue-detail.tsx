@@ -30,6 +30,7 @@ import {
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
+import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MobileIssuePropertiesSection } from "@/components/dashboard/mobile/mobile-issue-properties-section";
@@ -113,6 +114,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -261,6 +263,15 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画への返事待ち（#2061）。**PCの詳細と同じものを同じ位置（セッション表示の下）に出す**——
+  // 承認・修正の出口が片方の画面にしか無いと、スマホから見たときに従来どおり
+  // 「Remote Controlから答えてください」しか出ない
+  // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
+  const planRequest = findPlanRequestForIssue(
+    dispatch.planRequests ?? [],
+    issue.repositoryFullName,
+    issue.number,
+  );
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -345,6 +356,8 @@ export function MobileIssueDetail({
     sessionAlive,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
+    // 計画への返事を画面から送れる間は、行き先をRemote Controlではなく計画パネルにする（#2061）
+    planDecisionPending: planRequest?.status === "WAITING",
     sessionStatePending,
   });
 
@@ -727,6 +740,14 @@ export function MobileIssueDetail({
           planningSkipped={planningSkipped}
         />
 
+        {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
+            待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
+        {planRequest && (
+          <div {...checkUserTargetProps("plan")}>
+            <PlanApprovalPanel request={planRequest} session={issueSession} dispatch={dispatch} />
+          </div>
+        )}
+
         {showStartDialog && (
           <StartImplementationDialog
             issue={issue}
@@ -922,7 +943,10 @@ export function MobileIssueDetail({
             checkUserReason={checkUserReason(issue.labels)}
             localSessionNotice={
               executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
-                <LocalSessionWaitingInputNotice session={issueSession} />
+                <LocalSessionWaitingInputNotice
+                  session={issueSession}
+                  planDecisionPending={planRequest?.status === "WAITING"}
+                />
               ) : (
                 <LocalSessionApprovalNotice session={issueSession} />
               )

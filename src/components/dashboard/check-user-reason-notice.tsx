@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 const SCROLL_BUTTON_LABEL = {
   approval: "承認欄へ移動",
   "pull-requests": "対応PRへ移動",
+  // 計画の承認パネル（#2061）。Issue詳細の上部にあるので、他の2つと違って上へ動く
+  plan: "計画へ移動",
 } as const;
 
 /**
