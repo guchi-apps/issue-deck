@@ -47,6 +47,10 @@ export function isActiveManualStepRun(status: ManualStepRunStatus): boolean {
 /**
  * 進み具合の1行（#1882）。**止まっているときはその理由まで出す**——止まっていることに
  * 気づかないまま画面を見続けるのがいちばん困る状態で、次に何を押せばよいかも変わる。
+ *
+ * `FINISHED`・`STOPPED`の文言を出す画面は#2073で無くなった（`listManualStepRunViews`が
+ * 返すのは`RUNNING`と`PAUSED`だけ）。分岐は状態の網羅として残す——`stopManualStepRun`等が
+ * その場で返す1件はこの型のままで、状態が増えたときにここで気づけるようにしておく。
  */
 export function describeManualStepRun(run: ManualStepRunView): string {
   switch (run.status) {

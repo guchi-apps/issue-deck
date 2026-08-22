@@ -360,8 +360,9 @@ export const MERGE_JUDGEMENT_PENDING_LABEL = "判定中";
  * 判定のどの段階を待っているかを表す、画面のバッジの文言（#2059）。
  *
  * ジョブ名をそのまま出さないのは、待っている人が知りたいのが「いま何が動いているか」では
- * なく「あと何が終われば押せるのか」だから。とくに`claude-review`は数分かかるうえ、CIとは
- * 直列に走るため、「CI通過」が出た後もここだけが動いている窓ができる。
+ * なく「あと何が終われば押せるのか」だから。とくに`claude-review`は数分かかり、CIより長い
+ * ことが多いため、CIと並行して走るようにした後（#2066）も「CI通過」が出た後にここだけが
+ * 動いている窓は残る。
  */
 export const MERGE_JUDGEMENT_STEP_LABEL: Record<MergeJudgementStep, string> = {
   "wait-for-ci": "CIの完了待ち",

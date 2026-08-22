@@ -7,6 +7,7 @@ import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobi
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
   applyIssueFilters,
@@ -50,6 +51,10 @@ type MobileIssuesScreenProps = {
   onBack?: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
+  /** 最終取得時刻（ISO8601）。`MobileIssueListScreen`へそのまま渡す（#1797） */
+  fetchedAt?: string | null;
+  /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   /** 手作業アシスタント（#1826）を開く */
   onStartManualStepGuide: () => void;
   /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
@@ -79,6 +84,8 @@ export function MobileIssuesScreen({
   onAskCrossRepoQuestion,
   onBack,
   onRefresh,
+  fetchedAt,
+  autoRefreshIntervalMs,
   onStartManualStepGuide,
   onStartIssueOrder,
   issueOrderAutoStart,
@@ -149,6 +156,8 @@ export function MobileIssuesScreen({
       onBack={onBack}
       scrollKey={scrollKey}
       onRefresh={onRefresh}
+      fetchedAt={fetchedAt}
+      autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}

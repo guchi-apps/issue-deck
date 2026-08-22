@@ -170,6 +170,13 @@ jobs:
           echo "result=$result" >> "$GITHUB_OUTPUT"
           if [ "$lint_and_build" = "success" ]; then
             echo "jobs=lint-and-build" >> "$GITHUB_OUTPUT"
+          elif [ "$result" = "failure" ] && [ "${{ github.event_name }}" = "pull_request" ] \
+            && [ "${{ github.base_ref }}" = "develop" ] \
+            && printf '%s' "${{ github.head_ref }}" | grep -Eq '^issue-[0-9]+$'; then
+            # develop向けの`issue-<番号>`ブランチのCI失敗は、claude-ci-fix.ymlが人の操作なしに
+            # 直しにいく（docs/multi-agent/auto-repair.md）。それを通知に書かないと、受け取った
+            # 側は「自分が直さないと止まったまま」と読んでしまう（#2072）。
+            echo "jobs=lint-and-build: $lint_and_build（自動修正を試みます）" >> "$GITHUB_OUTPUT"
           else
             echo "jobs=lint-and-build: $lint_and_build" >> "$GITHUB_OUTPUT"
           fi

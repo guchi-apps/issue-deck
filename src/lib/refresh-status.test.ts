@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRefreshHint, describeRefreshStatus } from "@/lib/refresh-status";
+import { describeRefreshStatus } from "@/lib/refresh-status";
 
 /**
  * #1773・#1909。更新インジケーターの文言と配色（実行キューと通知ベルで共通）。
@@ -58,7 +58,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }),
-    ).toEqual({ label: "たった今更新・20秒ごと", tone: "normal" });
+    ).toEqual({ label: "たった今更新・20秒間隔", tone: "normal" });
   });
 
   it("1分未満は秒で出す", () => {
@@ -69,7 +69,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }).label,
-    ).toBe("12秒前に更新・20秒ごと");
+    ).toBe("12秒前に更新・20秒間隔");
   });
 
   it("1分以上は分で出す", () => {
@@ -80,7 +80,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }).label,
-    ).toBe("2分前に更新・20秒ごと");
+    ).toBe("2分前に更新・20秒間隔");
   });
 
   it("1時間以上は時間で出す", () => {
@@ -91,7 +91,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }).label,
-    ).toBe("3時間前に更新・20秒ごと");
+    ).toBe("3時間前に更新・20秒間隔");
   });
 
   /** 動いているジョブがある間は5秒間隔へ切り替わる。表示もその値に追従する */
@@ -103,7 +103,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: ACTIVE_INTERVAL_MS,
       }).label,
-    ).toBe("3秒前に更新・5秒ごと");
+    ).toBe("3秒前に更新・5秒間隔");
   });
 
   /** 1回や2回の取りこぼしは自動で追い付くので、3周ぶん落ちて初めて色を変える */
@@ -126,7 +126,7 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }),
-    ).toEqual({ label: "1分前に更新・20秒ごと", tone: "warn" });
+    ).toEqual({ label: "1分前に更新・20秒間隔", tone: "warn" });
   });
 
   /** 端末の時刻がずれて未来になっても「-3秒前」を出さない */
@@ -138,17 +138,6 @@ describe("describeRefreshStatus", () => {
         isFetching: false,
         pollIntervalMs: IDLE_INTERVAL_MS,
       }),
-    ).toEqual({ label: "たった今更新・20秒ごと", tone: "normal" });
-  });
-});
-
-describe("describeRefreshHint", () => {
-  it("押すと何が起きるかと、放っておいても更新されることの両方を出す", () => {
-    expect(describeRefreshHint(IDLE_INTERVAL_MS)).toBe(
-      "今すぐ更新（20秒ごとに自動更新）",
-    );
-    expect(describeRefreshHint(ACTIVE_INTERVAL_MS)).toBe(
-      "今すぐ更新（5秒ごとに自動更新）",
-    );
+    ).toEqual({ label: "たった今更新・20秒間隔", tone: "normal" });
   });
 });

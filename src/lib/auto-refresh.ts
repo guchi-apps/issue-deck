@@ -43,6 +43,16 @@ export const AUTO_REFRESH_INTERVAL_OPTIONS: AutoRefreshOption[] = [
  */
 export const PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * Issue一覧（`use-issue-polling.ts`）の自動更新間隔（#1797）。**この画面だけは常時有効**で、
+ * ユーザーが選ぶ対象でもない。
+ *
+ * 叩き先は`GET /api/issues`（DBの読み取りだけ）でGitHub APIを消費しないため、
+ * 冒頭の「1回の取得コストが重い画面ほど間隔を長くする」から見て最も軽い側にあたる。
+ * 値が同じでも`PULL_REQUEST_POLL_INTERVAL_MS`とは分けたままにする（そちらの注記を参照）。
+ */
+export const ISSUE_POLL_INTERVAL_MS = 10_000;
+
 /** 「1分間隔」のように画面へ出す文言にする。分で割り切れない値は秒で出す */
 export function autoRefreshIntervalLabel(intervalMs: number): string {
   if (intervalMs % 60_000 === 0) return `${intervalMs / 60_000}分間隔`;
@@ -75,4 +85,25 @@ export function shorterAutoRefreshInterval(
   if (a === null) return b;
   if (b === null) return a;
   return Math.min(a, b);
+}
+
+/**
+ * 画面のヘッダーに出す自動更新の状態（#1797）。PR一覧・Issue一覧・ブランチ画面で同じ文言を
+ * 使うため、ここ1か所から配る。
+ *
+ * **自動更新していないときも黙らない。** 「自動更新◯間隔」を出すか何も出さないかの2択だと、
+ * 何も出ていないのが「自動更新していない」なのか「そもそもこの画面は状態を出さない」なのかを
+ * 見分けられない（Issue一覧はまさに後者だった）。
+ */
+export function describeAutoRefreshState(intervalMs: AutoRefreshIntervalMs): string {
+  if (intervalMs === null) return "手動更新のみ";
+  return `自動更新${autoRefreshIntervalLabel(intervalMs)}`;
+}
+
+/**
+ * 手動更新ボタンのツールチップ（#1797）。押すと何が起きるかと、放っておいても更新されるのかの
+ * 両方を出す。ブランチ画面の「更新」・通知ベル・実行キューの更新インジケーターで共通に使う。
+ */
+export function describeRefreshButtonHint(intervalMs: AutoRefreshIntervalMs): string {
+  return `今すぐ更新（${describeAutoRefreshState(intervalMs)}）`;
 }

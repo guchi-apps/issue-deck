@@ -147,7 +147,7 @@ describe("MobileDispatchStatusButton（#1638）", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "実行状況" }));
-    expect(screen.getByText("12秒前に更新・20秒ごと")).toBeTruthy();
+    expect(screen.getByText("12秒前に更新・20秒間隔")).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("実行キューを今すぐ更新"));
     expect(refresh).toHaveBeenCalled();

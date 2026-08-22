@@ -73,6 +73,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
+    repairRun: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,

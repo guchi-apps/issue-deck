@@ -375,8 +375,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
-- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
+- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す
+  （間隔の定数は[`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`ISSUE_POLL_INTERVAL_MS`）。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。
+- **一覧のヘッダーに出す取得の状態は、3画面（Issue一覧・PR一覧・ブランチ）で同じ並び・同じ文言に
+  そろえる**（#1797）。`◯件 ・ HH:MM時点 ・ 自動更新10秒間隔`で、**自動更新していないときも黙らず
+  「手動更新のみ」と出す**——何も出さないと「自動更新していない」のか「この画面は状態を出さない」のかを
+  見分けられない。文言は`lib/auto-refresh.ts`の`describeAutoRefreshState`（ヘッダー）と
+  `describeRefreshButtonHint`（更新ボタンのツールチップ「今すぐ更新（自動更新10秒間隔）」）から
+  配り、通知ベル・実行キューの更新インジケーター（`lib/refresh-status.ts`）も同じ言い方を使う。
+- **Issue一覧の「HH:MM時点」の初期値は、サーバー側で描いた時刻をpropsで渡す**（#1797。
+  `app/dashboard/page.tsx`の`issuesFetchedAt` → `useIssuePolling`の第2引数）。一覧の初期値は
+  サーバー描画ぶんで、ポーリングが最初に取りに行くのは10秒後。クライアントで現在時刻を作ると
+  初期描画がサーバーと食い違ってハイドレーションが崩れ、effectの中で置くのは
+  `react-hooks/set-state-in-effect`（lint）が通さない。
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
 - **Issueの親子関係（GitHubネイティブのサブIssue）もキャッシュせず、詳細を開いたときだけ取得する**
   （`/api/issues/sub-issues`・[`lib/github/sub-issues-api.ts`](../src/lib/github/sub-issues-api.ts)）。
@@ -642,8 +654,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       [`lib/manual-step-run.ts`](../src/lib/manual-step-run.ts)・`ManualStepRun`）。
       **アシスタントを閉じても・ブラウザを閉じても続く**（次の1件を積むのは代行実行の結果報告を
       受けたサーバー）。画面は状態を読んで出すだけで、**次を積まない**（両方が積むと二重に走る）。
-      進み具合は実行キュー（PCのトップバー・スマホのヘッダー）に出す。Issueはまたがない
-      （次の手作業は承認し直す）
+      進み具合は「ユーザーの作業待ち」ビューの入口バッジとアシスタント本体で追う（#2073で
+      実行キューの節は撤去した）。Issueはまたがない（次の手作業は承認し直す）
     - **いつでも中断できる**（#1882）。次を積まないだけでなく走っている1件も止める——
       順番待ちは取り消し、走り出したものは`MANUAL_STEP_ABORT`のジョブでpollerが
       `systemctl --user stop`。**止められないpollerでは打ち切り（5分）まで待つことを画面に出す**
@@ -789,10 +801,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
   CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
   （`claude-review-develop.yml`）・コンフリクト自動解消・共有知識の提案なども同じheadコミットに
-  check-runを付ける。とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、
-  通ったらマージする**ワークフローなので、`wait-for-ci` → `risk-check` → `claude-review` →
-  `auto-merge`のいずれかがPRの開いている間ずっと実行中で、**自動マージされるPRは一度も
-  「CI通過」を表示できなかった**。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
+  check-runを付ける。とくに`claude-review-develop.yml`は**レビューして通ったらマージする**
+  ワークフローなので、`wait-for-ci`・`risk-check` → `claude-review` → `auto-merge`のいずれかが
+  PRの開いている間ずっと実行中で、**自動マージされるPRは一度も「CI通過」を表示できなかった**
+  （当時はCIの完了を待ってからレビューする直列構成だった。#2066でレビューはCIと並行になったが、
+  `auto-merge`が終わるまでcheck-runが残る点は変わらない）。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
   ままで、ボタンが効いていないように見えていた（#1799。PR #1798の実測では`lint-and-build`の
   完了が13:53:49・`ci.yml`のジョブが出揃ったのが13:53:55なのに対し、`review / auto-merge`の
   完了はマージ後の13:54:27）。同じ詰まりでマージボタンが押せなかった事例は
@@ -945,7 +958,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   10秒間隔なら毎時「360 × draft以外のopen PR数」ポイント（上限5,000ポイント/時）。共有
   ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に触れうるので、
   **PR1件ごとのGraphQLを1回へまとめる改善を#1962として分けてある。**
-  **値が同じでもIssue一覧のポーリング（`use-issue-polling.ts`の`POLL_INTERVAL_MS`）とは定数を
+  **値が同じでもIssue一覧のポーリング（`lib/auto-refresh.ts`の`ISSUE_POLL_INTERVAL_MS`）とは定数を
   分ける**——あちらは`GET /api/issues`（DBの読み取りだけ）で、`lib/auto-refresh.ts`冒頭の
   「1回の取得コストが重い画面ほど間隔を長くする」に従って片方だけ見直せるようにしておく。
   並び順は「すべてのPR」だけ更新が新しい順で、
@@ -1241,6 +1254,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
+  `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
+  修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは
+  なくデフォルトブランチを指し、**GitHub APIからは実行と対象PRを結び付けられない**。走っている
+  側が`POST /api/pull-requests/repair-runs`（認証は`PROGRESS_REPORT_SECRET`）で開始・終了を
+  報告する。PR一覧・PR詳細・リリース進捗はこれを`PullRequestSummary.repairRun`として受け取り、
+  `RepairRunBadge`（`components/dashboard/pull-request-badges.tsx`）と通知ベルへ出す。
+  終了の報告が届かなかった実行は開始から60分で失効させる。
 - **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
   詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、**モバイルの
   リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを

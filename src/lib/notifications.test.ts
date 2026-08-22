@@ -74,6 +74,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
+    repairRun: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -318,6 +319,26 @@ describe("buildNotifications Pull Request", () => {
 
     expect(items.map((item) => item.badgeLabel)).toEqual(["チェック失敗", "developへマージ待ち"]);
     expect(items[0].tone).toBe("error");
+  });
+
+  // CI失敗の自動修正は人の操作なしに走る。走っている最中に赤で通知すると、待てば片付くものと
+  // 人が手を動かす必要があるものが区別できない（#2072）。
+  it("自動修正が走っているあいだは赤を出さず「自動修正中」にする（#2072）", () => {
+    const items = build({
+      pullRequests: [
+        makePullRequest({
+          id: "owner/repo#2",
+          number: 2,
+          linkedIssueNumber: null,
+          ciState: "failure",
+          repairRun: { kind: "ci", startedAt: "2026-08-22T09:00:00.000Z", runUrl: null },
+        }),
+      ],
+    });
+
+    expect(items[0].badgeLabel).toBe("自動修正中");
+    expect(items[0].tone).toBe("info");
+    expect(hasErrorNotification(items)).toBe(false);
   });
 
   it("CI実行中・ドラフトは出さない（左メニューの「完了したPR」と同じ母集団）", () => {
