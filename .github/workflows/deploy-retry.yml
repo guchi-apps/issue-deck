@@ -1,0 +1,30 @@
+name: Deploy Retry
+
+# 本番デプロイ（`deploy.yml`）が一時的な失敗で落ちたとき、1回だけ自動で再実行する（#2134）。
+#
+# **トリガー定義のみ**を持ち、ジョブ本体はreusable-deploy-retry.ymlへ切り出してある。
+# 他リポジトリからも同じ実体を呼べるようにするため（方式は#934、先行例は#1066・#1293）。
+# issue-deck自身はローカルパス参照(./)を使い、他アプリはタグ固定(@workflows/vX)で参照する
+# カナリア構成にする。
+#
+# **自動検知だけで、画面からの手動起動は持たない。** 人が押す導線は既に「本番へ再デプロイ」
+# （`POST /api/repositories/deploy` → `deploy.yml`のworkflow_dispatch）があり、そちらは
+# 新しいrunを最初から流す。ここへ`workflow_dispatch`を足すと、同じことをする経路が2つになる。
+#
+# 注意: `workflow_run`は**デフォルトブランチ（develop）上のこのファイル**でのみ発火する。
+# また購読先は`deploy.yml`の`name:`（`Deploy to Production`）であって、ファイル名ではない。
+on:
+  workflow_run:
+    workflows: ["Deploy to Production"]
+    types:
+      - completed
+
+jobs:
+  deploy-retry:
+    uses: ./.github/workflows/reusable-deploy-retry.yml
+    with:
+      app-name: issue-deck
+    secrets: inherit
+    permissions:
+      actions: write
+      contents: read

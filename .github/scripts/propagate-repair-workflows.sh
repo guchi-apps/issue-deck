@@ -3,7 +3,8 @@
 #
 # propagate-repair-workflows.yml から1リポジトリずつ呼ばれる。配るのは
 # claude-conflict-resolve.yml / claude-ci-fix.yml / claude-pr-repair.yml の自動修復3種と、
-# develop向けPRの自動マージ可否を判定する claude-review-develop.yml で、
+# develop向けPRの自動マージ可否を判定する claude-review-develop.yml、
+# 本番デプロイの一時的な失敗を1回だけ再実行する deploy-retry.yml（#2134）で、
 # **どれを配るかは呼び出し元（issue-deckの画面）が決めて渡す**（ここで再検知すると画面の
 # 表示と実際の対象がずれる。propagate-workflow-tag.sh と同じ方針）。
 #
@@ -86,10 +87,32 @@ esac
 WITH_INPUTS="$WORK/with-inputs.txt"
 grep -E "^      ($COPIED_INPUTS):" "$DISPATCH_CALLER" > "$WITH_INPUTS"
 
+# 本番デプロイのワークフロー名。`deploy-retry.yml`の`workflow_run`の購読先に使う（#2134）。
+# CIと同じく**ワークフローの名前**で購読するため、実物から取る。CRLFのリポジトリがあるので
+# ここでも `tr -d '\r'` を通す。
+DEPLOY_WORKFLOW=""
+if [ -f .github/workflows/deploy.yml ]; then
+  DEPLOY_WORKFLOW="$(tr -d '\r' < .github/workflows/deploy.yml | grep -m1 -E '^name:' | sed -E 's/^name:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//')"
+fi
+case "$DEPLOY_WORKFLOW" in
+  *'"'*) fail "デプロイワークフロー名に\"が含まれています: $DEPLOY_WORKFLOW" ;;
+esac
+
+# Signalyの通知に出すアプリ名。リポジトリ名をそのまま使う（deploy.ymlのNOTIFY_APPと揃う）
+APP_NAME="${REPO#*/}"
+
 CREATED=""
 for FILE in $WORKFLOWS; do
   case "$FILE" in
     claude-ci-fix.yml | claude-conflict-resolve.yml | claude-pr-repair.yml | claude-review-develop.yml) ;;
+    deploy-retry.yml)
+      # **購読先の名前が取れないなら配らない。** 既定値で埋めると、名前の違うリポジトリで
+      # 「置いてあるのに一度も発火しない」ワークフローが残り、そのことに誰も気づけない。
+      if [ -z "$DEPLOY_WORKFLOW" ]; then
+        echo "  deploy.yml のワークフロー名を取得できません。スキップします"
+        continue
+      fi
+      ;;
     *)
       echo "  $FILE は配布対象外です。スキップします"
       continue
@@ -114,7 +137,8 @@ for FILE in $WORKFLOWS; do
     $0 ~ marker { printf "%s", block; next }
     { print }
   ' "$WITH_INPUTS" "$TEMPLATE_DIR/$FILE" \
-    | sed -e "s|__TAG__|$TAG|g" -e "s|__CI_WORKFLOW__|$CI_WORKFLOW|g" > "$TARGET" \
+    | sed -e "s|__TAG__|$TAG|g" -e "s|__CI_WORKFLOW__|$CI_WORKFLOW|g" \
+          -e "s|__DEPLOY_WORKFLOW__|$DEPLOY_WORKFLOW|g" -e "s|__APP_NAME__|$APP_NAME|g" > "$TARGET" \
     || fail "$FILE の生成に失敗しました"
 
   CREATED="$CREATED $FILE"
@@ -207,7 +231,7 @@ if ! git push --quiet -u origin "$BRANCH"; then
     || fail "pushに失敗しました"
 fi
 
-PR_BODY="$(printf '## 実装内容\n\nこのリポジトリに置かれていなかったワークフロー（caller）を追加した。\n\n追加: %s\n参照タグ: `%s`（`claude-issue-dispatch.yml` と同じ）\nCIワークフロー名: `%s`（`workflow_run` の購読先）\n\n`with:` の `runtime-setup`・`package-manager`・`node-version` は `claude-issue-dispatch.yml`\nから写している（自動修復の3種のみ。`claude-review-develop.yml` はこれらの入力を宣言して\nいないため写していない）。**`verify-commands`・`build-env` は入っていない**（リポジトリごとに\n違うため）。検証を強くしたい場合は、%s 本体の同名ファイルを参考に後から足す。\n\n### 自動マージの前提（`claude-review-develop.yml`を含む場合）\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、Actionsの一覧に追加したワークフローが出ること\n- issue-deckの画面で、詰まっているPRの「CI失敗を自動修正」「コンフリクトを自動解消」が\n  エラーにならずに起動すること（`workflow_dispatch` の受け口はデフォルトブランチの定義から\n  解決されるため、**マージするまでは起動できない**）\n- `claude-review-develop.yml` を含む場合: マージ後の次のdevelop向けPRで `Claude Code Review`\n  が走り、低リスクPRなら `00.check-user` が付かずに自動マージされること\n\n## 注意点\n\n- **`workflow_run` はワークフローの名前で購読する。** このリポジトリのCIの名前が `%s` から\n  変わったら、このファイルも直す（黙って発火しなくなる）\n- **`claude-review-develop.yml` の自動マージには `develop` のブランチ保護が要る。** 保護が\n  無いと `gh pr merge --auto` が「既にマージ可能」として断られ、毎回 `00.check-user` が付く\n  だけで終わる（上の「自動マージの前提」を参照）\n- **自動マージしない。** 新しいワークフローの追加はGitHub Actionsの変更にあたるため、\n  内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' "$CREATED" "$TAG" "$CI_WORKFLOW" "$SOURCE_REPO" "$PREREQ_NOTE" "$CI_WORKFLOW" "$SOURCE_REPO")"
+PR_BODY="$(printf '## 実装内容\n\nこのリポジトリに置かれていなかったワークフロー（caller）を追加した。\n\n追加: %s\n参照タグ: `%s`（`claude-issue-dispatch.yml` と同じ）\nCIワークフロー名: `%s`（`workflow_run` の購読先）\n\n`with:` の `runtime-setup`・`package-manager`・`node-version` は `claude-issue-dispatch.yml`\nから写している（自動修復の3種のみ。`claude-review-develop.yml` はこれらの入力を宣言して\nいないため写していない）。**`verify-commands`・`build-env` は入っていない**（リポジトリごとに\n違うため）。検証を強くしたい場合は、%s 本体の同名ファイルを参考に後から足す。\n\n### 自動マージの前提（`claude-review-develop.yml`を含む場合）\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、Actionsの一覧に追加したワークフローが出ること\n- issue-deckの画面で、詰まっているPRの「CI失敗を自動修正」「コンフリクトを自動解消」が\n  エラーにならずに起動すること（`workflow_dispatch` の受け口はデフォルトブランチの定義から\n  解決されるため、**マージするまでは起動できない**）\n- `claude-review-develop.yml` を含む場合: マージ後の次のdevelop向けPRで `Claude Code Review`\n  が走り、低リスクPRなら `00.check-user` が付かずに自動マージされること\n\n## 注意点\n\n- **`workflow_run` はワークフローの名前で購読する。** このリポジトリのCIの名前が `%s` から\n  変わったら、このファイルも直す（黙って発火しなくなる）。`deploy-retry.yml` を含む場合は\n  本番デプロイの名前（`%s`）も同じ扱い\n- **`deploy-retry.yml` が再実行するのは `build`・`deploy` ジョブの失敗だけ。** このリポジトリの\n  `deploy.yml` のジョブ名が違う場合は、`with:` に `retryable-jobs` を足して合わせる\n  （合っていないジョブだけが失敗したときは、安全側に倒れて再実行しない）\n- **`claude-review-develop.yml` の自動マージには `develop` のブランチ保護が要る。** 保護が\n  無いと `gh pr merge --auto` が「既にマージ可能」として断られ、毎回 `00.check-user` が付く\n  だけで終わる（上の「自動マージの前提」を参照）\n- **自動マージしない。** 新しいワークフローの追加はGitHub Actionsの変更にあたるため、\n  内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' "$CREATED" "$TAG" "$CI_WORKFLOW" "$SOURCE_REPO" "$PREREQ_NOTE" "$CI_WORKFLOW" "$DEPLOY_WORKFLOW" "$SOURCE_REPO")"
 
 PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
   --title "不足しているワークフローを追加する" \
