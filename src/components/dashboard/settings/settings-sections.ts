@@ -1,4 +1,4 @@
-import { Activity, Boxes, Eye, History, SlidersHorizontal, UserRound } from "lucide-react";
+import { Activity, Bell, Boxes, Eye, History, SlidersHorizontal, UserRound } from "lucide-react";
 
 /**
  * 設定の区分（#1539）。**唯一の定義がここ**で、PCの左タブとスマホの一覧が同じ配列を読む。
@@ -13,6 +13,10 @@ import { Activity, Boxes, Eye, History, SlidersHorizontal, UserRound } from "luc
  *
  * 「更新履歴」（#1764）は設定値を持たない読むだけの区分。バージョン表示（`AppVersionButton`）が
  * 区分の外に常設されており、そこから入る先でもある。
+ *
+ * 「通知」（#838）は**端末ごとに効く設定**で、他のどの区分とも性質が違う。保存を押すまで
+ * 効かない値でも、押した瞬間に走る操作でもなく、この端末のブラウザに許可と購読を作る。
+ * 見る場所は「表示」（ユーザーごとの見え方）に近いので、その隣に置く。
  */
 export const SETTINGS_SECTIONS = [
   { key: "account", label: "アカウント", icon: UserRound, description: "ログイン中のアカウント" },
@@ -21,6 +25,12 @@ export const SETTINGS_SECTIONS = [
     label: "表示",
     icon: Eye,
     description: "画面に出すリポジトリ",
+  },
+  {
+    key: "notification",
+    label: "通知",
+    icon: Bell,
+    description: "閉じているときのPush通知",
   },
   {
     key: "execution",

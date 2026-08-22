@@ -23,6 +23,7 @@ import {
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
 import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
+import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { AccountType, IssueState } from "@prisma/client";
 
@@ -530,6 +531,17 @@ async function handlePOST(request: NextRequest) {
     // 握りつぶさずエラーとして返す。
     console.error("[webhooks/github] failed to process event", event, error);
     return NextResponse.json({ error: "processing_failed" }, { status: 500 });
+  }
+
+  // 確認待ちのPush通知（#838）を1歩進める。主経路はサブPCのpollerが叩く
+  // `POST /api/dispatch/claim`だが、**GitHub Actionsの無人実行はサブPCを介さずに
+  // `00.check-user`を付ける**ため、サブPCが止まっているあいだの受け口としてここにも置く。
+  // **成否は応答に影響させない**——ここで失敗を返すとGitHubがWebhookを再送し、
+  // 本来の処理（Issueの取り込み）が二重に走る。
+  try {
+    await sweepCheckUserPushNotifications();
+  } catch (error) {
+    console.error("[webhooks/github] 確認待ちのPush通知を送れませんでした", error);
   }
 
   return NextResponse.json({ ok: true });

@@ -92,6 +92,17 @@ async function upsertIssueRow(
       ? existing?.checkUserLabeledAt ?? new Date()
       : new Date();
 
+  // Push通知（#838）の送信済み記録は、**`00.check-user`が付き直したら落とす**。
+  // ここが唯一の書き戻し口で、送る側（`notifications/check-user-push.ts`）は
+  // 「nullで、付与から待ち時間が過ぎたもの」だけを拾う。
+  // **この関数からは送らない。** 付いた瞬間はまだ理由ラベル（`01.check-*`）が揃っておらず、
+  // 早すぎる`00.check-user`（#1709）が自動マージで取り消される場合もあるため。
+  const checkUserPushSentAt =
+    checkUserLabeledAt !== null &&
+    existing?.checkUserLabeledAt?.getTime() === checkUserLabeledAt.getTime()
+      ? existing?.checkUserPushSentAt ?? null
+      : null;
+
   const data = {
     repositoryId,
     number: raw.number,
@@ -111,6 +122,7 @@ async function upsertIssueRow(
     githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
     checkUserLabeledAt,
+    checkUserPushSentAt,
     lastCommentAt,
   };
 

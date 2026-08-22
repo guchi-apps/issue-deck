@@ -11,6 +11,7 @@ import {
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
+import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -126,6 +127,7 @@ export function SettingsDialog({
                   onSetRepositoriesHidden={onSetRepositoriesHidden}
                 />
               )}
+              {section === "notification" && <NotificationSettingsSection />}
               {section === "execution" && (
                 <ExecutionSettingsSection
                   autoRetryLimit={autoRetryLimit}
