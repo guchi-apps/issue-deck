@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dispatchHostFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
 const dispatchSessionFindMany = vi.fn();
+// 計画への返事待ち（#2061）。`listDispatchState`が同じ応答へ載せるので、行が無くても
+// クエリ自体は必ず走る
+const sessionPlanRequestFindMany = vi.fn();
+const sessionPlanRequestUpdateMany = vi.fn();
 const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchJobFindUnique = vi.fn();
@@ -55,6 +59,14 @@ vi.mock("@/lib/db", () => ({
       },
       get findMany() {
         return dispatchSessionFindMany;
+      },
+    },
+    sessionPlanRequest: {
+      get findMany() {
+        return sessionPlanRequestFindMany;
+      },
+      get updateMany() {
+        return sessionPlanRequestUpdateMany;
       },
     },
     dispatchJob: {
@@ -154,6 +166,8 @@ beforeEach(() => {
   appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
   dispatchHostFindUnique.mockResolvedValue(host());
   dispatchSessionFindFirst.mockResolvedValue(null);
+  sessionPlanRequestFindMany.mockResolvedValue([]);
+  sessionPlanRequestUpdateMany.mockResolvedValue({ count: 0 });
   dispatchJobFindFirst.mockResolvedValue(null);
   dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
     id: "job-1",

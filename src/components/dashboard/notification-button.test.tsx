@@ -108,6 +108,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
+    repairRun: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -325,7 +326,7 @@ describe("NotificationButton 自動更新", () => {
 
     // 取得が終わって「いつ時点か」が出るまで待つ（取得中の重複呼び出しは弾かれるため）
     await waitFor(
-      () => expect(screen.getByLabelText("対応が必要なものを今すぐ更新").textContent).toContain("30秒ごと"),
+      () => expect(screen.getByLabelText("対応が必要なものを今すぐ更新").textContent).toContain("30秒間隔"),
       { timeout: 3_000 },
     );
 

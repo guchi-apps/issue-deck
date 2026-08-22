@@ -5,11 +5,11 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
+import { canRepairFromDeck, resolveRepairDispatch } from "@/lib/github/pull-request-repair";
 import {
-  canRepairFromDeck,
-  resolveRepairDispatch,
-  type RepairKind,
-} from "@/lib/github/pull-request-repair";
+  isRepairKind,
+  recordPullRequestRepairRun,
+} from "@/lib/github/pull-request-repair-run";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { dispatchWorkflow } from "@/lib/github/workflow-dispatch";
 import { previewModeGuard } from "@/lib/preview-mode";
@@ -22,10 +22,6 @@ async function findRepository(userId: string, owner: string, repo: string) {
     },
     include: { installation: true },
   });
-}
-
-function isRepairKind(value: unknown): value is RepairKind {
-  return value === "ci" || value === "conflict";
 }
 
 export function POST(request: NextRequest) {
@@ -97,6 +93,20 @@ async function handlePOST(request: NextRequest) {
       dispatch.inputs,
       token,
     );
+
+    // ワークフローが自分で「開始」を報告するのは、runが立ち上がって対象PRを再確認した後に
+    // なる（数十秒かかる）。押した直後から画面に「自動修正中」を出すため、起動できた時点で
+    // ここでも同じ行を記録する（実行ログのURLはまだ決まらないためnull）。
+    // 対象PRの状態を再確認して何もせず終わる場合でも、終了の報告か時間切れで消える。
+    await recordPullRequestRepairRun({
+      repositoryFullName: `${owner}/${repo}`,
+      pullRequestNumber: pullRequest.number,
+      kind,
+      status: "running",
+    }).catch((error: unknown) => {
+      // 記録できなくても起動自体は成功している。画面にバッジが出ないだけ。
+      console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
+    });
 
     return NextResponse.json({ ok: true, workflowFile: dispatch.workflowFile });
   } catch (error) {

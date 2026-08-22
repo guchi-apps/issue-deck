@@ -9,6 +9,7 @@ import {
   describeReleaseStatusBadge,
   releaseAttentionRank,
 } from "@/lib/github/release-button-status";
+import { REPAIR_KIND_RUNNING_SHORT_LABEL } from "@/lib/github/pull-request-repair";
 import { buildPullRequestId } from "@/lib/github-reference";
 import { computeManualStepReadiness } from "@/lib/manual-step-attention";
 import { filterPullRequestsByView } from "@/lib/pull-request-list";
@@ -236,13 +237,21 @@ function buildPullRequestNotifications(
     .filter((pullRequest) => !excludedIds.has(pullRequest.id))
     .filter((pullRequest) => !(pullRequest.autoMergeEnabled && pullRequest.ciState === "success"))
     .map((pullRequest) => {
-      const failed = pullRequest.ciState === "failure";
+      // 自動修復が走っているあいだは赤（`error`）を出さない（#2072）。CIは失敗したままだが、
+      // いま人が動けるものではないため、確認待ちの「CI実行中」と同じく`info`まで弱める。
+      // 直せなかった場合は対応Issueに`00.check-user`が付き、確認待ちとして改めて通知される。
+      const repairRun = pullRequest.repairRun;
+      const failed = pullRequest.ciState === "failure" && repairRun === null;
       return {
         id: `pull-request:${pullRequest.id}`,
         group: "pull-request",
-        tone: failed ? "error" : "action",
+        tone: repairRun ? "info" : failed ? "error" : "action",
         title: `#${pullRequest.number} ${pullRequest.title}`,
-        badgeLabel: failed ? "チェック失敗" : `${pullRequest.baseRef}へマージ待ち`,
+        badgeLabel: repairRun
+          ? REPAIR_KIND_RUNNING_SHORT_LABEL[repairRun.kind]
+          : failed
+            ? "チェック失敗"
+            : `${pullRequest.baseRef}へマージ待ち`,
         repositoryFullName: pullRequest.repositoryFullName,
         since: pullRequest.createdAt,
         target: { kind: "pull-request", pullRequestId: pullRequest.id },

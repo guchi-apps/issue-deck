@@ -19,7 +19,9 @@ const dispatchJobFindFirst = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchHostFindUnique = vi.fn();
 const repositoryFindFirst = vi.fn();
+const repositoryFindMany = vi.fn();
 const issueFindFirst = vi.fn();
+const issueFindMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -72,10 +74,16 @@ vi.mock("@/lib/db", () => ({
       get findFirst() {
         return repositoryFindFirst;
       },
+      get findMany() {
+        return repositoryFindMany;
+      },
     },
     issue: {
       get findFirst() {
         return issueFindFirst;
+      },
+      get findMany() {
+        return issueFindMany;
       },
     },
   },
@@ -189,6 +197,9 @@ beforeEach(() => {
     manualStepCapable: true,
     manualStepAbortCapable: true,
   });
+  repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+  // 既定は「closeされた手作業Issueは無い」（#2073の片付けが効かない状態）
+  issueFindMany.mockResolvedValue([]);
   dispatchJobFindMany.mockResolvedValue([]);
   dispatchJobFindFirst.mockResolvedValue(null);
   enqueueManualStepJob.mockResolvedValue({ ok: true, job: { id: "job-1" } });
@@ -493,6 +504,57 @@ describe("listManualStepRunViews", () => {
       currentLine: SECOND_LINE,
       issueId: "42",
     });
+  });
+
+  /** 終わった実行は返さない（#2073）。描く画面が無くなり、引くだけ無駄になったため */
+  it("走っている・止まっている実行だけを引く", async () => {
+    manualStepRunFindMany.mockResolvedValue([]);
+
+    await listManualStepRunViews(NOW);
+
+    expect(manualStepRunFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: { in: ["RUNNING", "PAUSED"] } } }),
+    );
+  });
+
+  /**
+   * 止まったままの実行の片付け（#2073）。**`PAUSED`は自分では終わらない**ので、Issueだけ
+   * closeされると居座り、開いている画面の自動更新が5秒間隔から戻らなくなる。
+   */
+  it("Issueがcloseされた`PAUSED`の実行は終わりにする", async () => {
+    manualStepRunFindMany.mockResolvedValue([run({ status: "PAUSED", pausedReason: "USER" })]);
+    issueFindMany.mockResolvedValue([{ repositoryId: "repo-1", number: 1876 }]);
+
+    const [view] = await listManualStepRunViews(NOW);
+
+    expect(manualStepRunUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["run-1"] } },
+      data: expect.objectContaining({ status: "STOPPED", pausedReason: null, finishedAt: NOW }),
+    });
+    expect(view).toMatchObject({ status: "STOPPED", pausedReason: null });
+    expect(view.message).toContain("クローズ");
+  });
+
+  it("Issueがopenなら`PAUSED`のままにする", async () => {
+    manualStepRunFindMany.mockResolvedValue([run({ status: "PAUSED", pausedReason: "USER" })]);
+
+    const [view] = await listManualStepRunViews(NOW);
+
+    expect(manualStepRunUpdateMany).not.toHaveBeenCalled();
+    expect(view).toMatchObject({ status: "PAUSED", pausedReason: "USER" });
+  });
+
+  /** 走っている1件を止める段取りは「中断する」の仕事で、ここでは触らない */
+  it("`RUNNING`はIssueがcloseされていても片付けない", async () => {
+    const running = run({ status: "RUNNING" });
+    manualStepRunFindMany.mockResolvedValue([running]);
+    applyUpdate(running);
+    issueFindMany.mockResolvedValue([{ repositoryId: "repo-1", number: 1876 }]);
+
+    const [view] = await listManualStepRunViews(NOW);
+
+    expect(manualStepRunUpdateMany).not.toHaveBeenCalled();
+    expect(view.status).toBe("RUNNING");
   });
 });
 

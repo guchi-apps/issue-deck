@@ -44,15 +44,17 @@ import { toggleTaskListLine } from "@/lib/markdown-task-list";
  * 次の2つだけで、どちらも同じ`syncManualStepRun`を通る。
  *
  * - 代行実行の結果報告（成功なら次を積み、失敗ならそこで止める）
- * - 画面が状態を読むとき（`listManualStepRunViews`）。取り消し・タイムアウトで終わったジョブを
- *   ここで拾う（報告が来ない終わり方なので、報告を契機にできない）
+ * - 画面が状態を読むとき（`listManualStepRunViews`）。取り消し・タイムアウトで終わったジョブと、
+ *   **Issueがcloseされて用済みになった`PAUSED`の実行**（#2073・`sweepClosedManualStepRuns`）を
+ *   ここで拾う（どちらも報告が来ない終わり方なので、報告を契機にできない）
  *
  * **最後まで流れてもクローズはしない。** 完了の確認は人が読み、クローズも人が押す（#1869の
  * 取り決めをそのまま守る）。
  */
 
-/** 終わった実行を画面へ返し続ける時間。結果（終わった・中断した）を見せてから消す */
-const FINISHED_RUN_RETENTION_MS = 30 * 60 * 1000;
+
+/** Issueがcloseされて片付けた実行に残す一文（#2073）。中断と区別が付くようにする */
+const CLOSED_ISSUE_STOP_MESSAGE = "手作業のIssueがクローズされたため、自動実行を終わりにしました。";
 
 export type ManualStepRunActionResult =
   | { ok: true; run: ManualStepRunView }
@@ -198,18 +200,23 @@ export async function advanceManualStepRun(params: {
  *
  * 走っている実行は**読むついでに1歩進める**。取り消し・タイムアウトで終わったジョブは報告が
  * 来ないため、報告を契機にした前進だけでは止まったことに誰も気づけない。
+ *
+ * **返すのは`RUNNING`と`PAUSED`だけ**（#2073）。#1882では終わった実行も30分は返していたが、
+ * それを描いていたのは実行キューの節だけで、その節を撤去した。残る読み手（アシスタントの
+ * `AutoRunBar`・一覧入口のバッジ）はどちらも`isActiveManualStepRun`で弾くため、窓を残すと
+ * **誰も描かない行に`toRunView`（Repository・Issue・DispatchHostの3クエリ＋実行計画の再構築）を
+ * 5〜20秒ごとに回すだけ**になる。中断・完了を押した直後の表示は`controlManualStepRun`が
+ * 応答をその場で状態へ反映する経路が持っているので、押した本人の体感は変わらない。
  */
 export async function listManualStepRunViews(now: Date = new Date()): Promise<ManualStepRunView[]> {
-  const runs = await db.manualStepRun.findMany({
-    where: {
-      OR: [
-        { status: { in: ["RUNNING", "PAUSED"] } },
-        { finishedAt: { gte: new Date(now.getTime() - FINISHED_RUN_RETENTION_MS) } },
-      ],
-    },
-    orderBy: { startedAt: "desc" },
-    take: 20,
-  });
+  const runs = await sweepClosedManualStepRuns(
+    await db.manualStepRun.findMany({
+      where: { status: { in: ["RUNNING", "PAUSED"] } },
+      orderBy: { startedAt: "desc" },
+      take: 20,
+    }),
+    now,
+  );
 
   const views: ManualStepRunView[] = [];
   for (const run of runs) {
@@ -217,6 +224,79 @@ export async function listManualStepRunViews(now: Date = new Date()): Promise<Ma
     views.push(await toRunView(synced, now));
   }
   return views;
+}
+
+/**
+ * 手作業Issueがcloseされた`PAUSED`の実行を終わりにする（#2073）。
+ *
+ * **`PAUSED`は自分では終わらない。** 人が手元で手順を実行して「実行した・次へ」を押すか、
+ * 「中断する」を押すまで残り続ける仕様で、押さずにIssueだけcloseすると実行の行が居座った。
+ * 居座った行は`hasActiveJob`（`use-dispatch-state.ts`）を立て続けるため、開いている画面の
+ * 自動更新が5秒間隔のまま戻らないという実害がある（表示だけの問題ではない）。
+ *
+ * **closeを契機にした常駐処理は置かない**（`syncManualStepRun`と同じ方針）。ここで一覧を
+ * 読むついでに片付ける。`RUNNING`は対象にしない——走っているジョブを止める段取りが要り、
+ * それは「中断する」（`stopManualStepRun`）の仕事だから。
+ *
+ * 問い合わせは件数によらず2本（リポジトリ→closeされたIssue）に抑える。
+ */
+async function sweepClosedManualStepRuns(
+  runs: ManualStepRun[],
+  now: Date,
+): Promise<ManualStepRun[]> {
+  const paused = runs.filter((run) => run.status === "PAUSED");
+  if (paused.length === 0) return runs;
+
+  const repositories = await db.repository.findMany({
+    where: { fullName: { in: [...new Set(paused.map((run) => run.repositoryFullName))] } },
+    select: { id: true, fullName: true },
+  });
+  const repositoryIdByName = new Map(repositories.map((repo) => [repo.fullName, repo.id]));
+
+  const targets = paused.flatMap((run) => {
+    const repositoryId = repositoryIdByName.get(run.repositoryFullName);
+    // Issueのキャッシュを引けないだけかもしれないので、消えている＝closeとは読まない
+    return repositoryId === undefined ? [] : [{ run, repositoryId }];
+  });
+  if (targets.length === 0) return runs;
+
+  const closed = await db.issue.findMany({
+    where: {
+      state: "CLOSED",
+      OR: targets.map(({ run, repositoryId }) => ({ repositoryId, number: run.issueNumber })),
+    },
+    select: { repositoryId: true, number: true },
+  });
+  const closedKeys = new Set(closed.map((issue) => `${issue.repositoryId}#${issue.number}`));
+
+  const stoppedIds = new Set(
+    targets
+      .filter(({ run, repositoryId }) => closedKeys.has(`${repositoryId}#${run.issueNumber}`))
+      .map(({ run }) => run.id),
+  );
+  if (stoppedIds.size === 0) return runs;
+
+  await db.manualStepRun.updateMany({
+    where: { id: { in: [...stoppedIds] } },
+    data: {
+      status: "STOPPED",
+      pausedReason: null,
+      message: CLOSED_ISSUE_STOP_MESSAGE,
+      finishedAt: now,
+    },
+  });
+
+  return runs.map((run) =>
+    stoppedIds.has(run.id)
+      ? {
+          ...run,
+          status: "STOPPED" as const,
+          pausedReason: null,
+          message: CLOSED_ISSUE_STOP_MESSAGE,
+          finishedAt: now,
+        }
+      : run,
+  );
 }
 
 /**

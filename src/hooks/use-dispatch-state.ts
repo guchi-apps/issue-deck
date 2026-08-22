@@ -7,11 +7,9 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import {
-  isActiveManualStepRun,
-  type ManualStepRunView,
-} from "@/lib/manual-step-run-view";
+import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
@@ -38,6 +36,11 @@ export type DispatchState = {
    * 進み具合を出すだけ。ダイアログを閉じても・ブラウザを閉じても実行は続く。
    */
   manualStepRuns: ManualStepRunView[];
+  /**
+   * 計画への返事待ち（#2061）。**待っている間セッションは止まっている**ので、押した結果が
+   * 画面へ返るまでの間隔は短い方（`ACTIVE_POLL_INTERVAL_MS`）に寄せる。
+   */
+  planRequests: SessionPlanRequestView[];
   concurrency: number;
 };
 
@@ -67,8 +70,15 @@ function hasActiveJob(state: DispatchState | null): boolean {
   // **走っている自動実行も「動いている」に数える**（#1882）。次の1件を積むのはサーバーで、
   // 積まれた瞬間は画面に何も無い（ジョブが現れるのは次の取得）。ここを数えないと、
   // 1件終わってから次が見えるまで最大20秒黙る
+  // **数えるのは`RUNNING`だけで、`PAUSED`は数えない**（#2073）。止まっている間はサーバー側で
+  // 何も進まないので速く取り直す意味が無く、`PAUSED`は人が手順を実行するまで無期限に残るため、
+  // 数えると開いている画面すべてが5秒間隔のまま戻らなくなる。再開・中断を押したときは
+  // `controlManualStepRun`が応答をその場で状態へ反映するので、押した本人の体感は変わらない
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「動いていない」として読む
-  if (state.manualStepRuns?.some((run) => isActiveManualStepRun(run.status))) return true;
+  if (state.manualStepRuns?.some((run) => run.status === "RUNNING")) return true;
+  // **計画の返事待ちも「動いている」に数える**（#2061）。押してからセッションが動き出す
+  // までを追うのに20秒間隔では遅い（フックのポーリングは数秒間隔で回っている）
+  if (state.planRequests?.some((request) => request.status === "WAITING")) return true;
   return state.jobs.some((job) => isActiveDispatchJobStatus(job.status));
 }
 
@@ -587,11 +597,45 @@ export function useDispatchState(enabled: boolean) {
     }
   }, [markChanged]);
 
+  /**
+   * 計画への返事を送る（#2061）。**押すのは人**で、ここは押された内容をサーバーへ渡すだけ。
+   * 端末へキーを送る経路は持たない（受け取るのは計画を出したフック）。
+   *
+   * 失敗の理由は`error`（共有）へ入れず戻り値で返す（`sendSessionControl`と同じ理由。
+   * 押した場所と表示が離れると話が通じない）。
+   */
+  const decidePlan = useCallback(
+    async (params: {
+      id: string;
+      decision: "approve" | "revise" | "defer";
+      /** `decision`が`revise`のときの本文。そのままClaudeへ渡る */
+      text?: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/plan-decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
     sessions: state?.sessions ?? [],
     manualStepRuns: state?.manualStepRuns ?? [],
+    planRequests: state?.planRequests ?? [],
     concurrency: state?.concurrency ?? null,
     isLoaded,
     fetchedAt,
@@ -614,5 +658,6 @@ export function useDispatchState(enabled: boolean) {
     cancel,
     dismiss,
     prioritize,
+    decidePlan,
   };
 }

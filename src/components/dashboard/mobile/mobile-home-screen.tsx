@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import { formatQuestionNavTitle } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
@@ -43,6 +44,11 @@ type MobileHomeScreenProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
+  /**
+   * 未確認（回答が届いていて未読）の質問の件数（#2070）。**行に出す数字は`navCounts`から
+   * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
+   */
+  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
@@ -78,6 +84,7 @@ export function MobileHomeScreen({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
+  unconfirmedQuestionCount,
   pullRequestNavCounts,
   onSelectQuickView,
   onSelectPullRequests,
@@ -218,15 +225,11 @@ export function MobileHomeScreen({
                 label={view.label}
                 icon={navViewIcons[view.id]}
                 onClick={() => onSelectQuickView(view.id)}
-                // 件数は未確認（回答が届いていて未読）の数で、確認待ち・作業待ちと同じく
-                // 「いま手を動かせる数」を出す（#1910・PCと同じ）
+                // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）。
+                // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
                 count={navCounts[view.id]}
-                emphasis={navCounts[view.id] > 0 ? "attention" : "none"}
-                title={
-                  navCounts[view.id] > 0
-                    ? `回答が届いていてまだ開いていない質問が${navCounts[view.id]}件あります`
-                    : undefined
-                }
+                emphasis={unconfirmedQuestionCount > 0 ? "attention" : "none"}
+                title={formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount)}
               />
             ))}
             <MobileNavRow label="ブランチ" icon={GitBranch} onClick={onSelectFlow} />

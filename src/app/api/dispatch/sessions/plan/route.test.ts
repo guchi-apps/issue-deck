@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const postSessionPlan = vi.fn();
+const createSessionPlanRequest = vi.fn();
 
 vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/dispatch/session-plan")>();
@@ -11,6 +12,14 @@ vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
     },
   };
 });
+
+// 画面からの返事待ち（#2061）。**投稿できたときだけ作る**ので、`postSessionPlan`の
+// 戻り値と対で確かめる
+vi.mock("@/lib/dispatch/plan-requests", () => ({
+  get createSessionPlanRequest() {
+    return createSessionPlanRequest;
+  },
+}));
 
 const { POST } = await import("./route");
 
@@ -35,6 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.DISPATCH_SECRET = "secret-value";
   postSessionPlan.mockResolvedValue(true);
+  createSessionPlanRequest.mockResolvedValue({ id: "plan-request-1" });
 });
 
 describe("POST /api/dispatch/sessions/plan", () => {
@@ -68,7 +78,7 @@ describe("POST /api/dispatch/sessions/plan", () => {
   it("受け付けた計画をそのまま渡す", async () => {
     const res = await POST(postRequest(validBody, "Bearer secret-value"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, posted: true });
+    expect(await res.json()).toEqual({ ok: true, posted: true, planRequestId: "plan-request-1" });
     expect(postSessionPlan).toHaveBeenCalledWith({
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1342,
@@ -107,6 +117,19 @@ describe("POST /api/dispatch/sessions/plan", () => {
     postSessionPlan.mockResolvedValue(false);
     const res = await POST(postRequest(validBody, "Bearer secret-value"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, posted: false });
+    // 投稿できていない＝画面に計画が出ないので、返事待ちも作らない（#2061）
+    expect(await res.json()).toEqual({ ok: true, posted: false, planRequestId: null });
+    expect(createSessionPlanRequest).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 返事待ちを作れなくても、計画の投稿そのものは成功として返す（#2061）。待てないだけで、
+   * 答える経路（端末・Remote Control）はそのまま残っている。
+   */
+  it("返事待ちを作れなくても計画の投稿は成功として返す", async () => {
+    createSessionPlanRequest.mockRejectedValue(new Error("db down"));
+    const res = await POST(postRequest(validBody, "Bearer secret-value"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, posted: true, planRequestId: null });
   });
 });
