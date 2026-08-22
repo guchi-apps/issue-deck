@@ -120,7 +120,8 @@ export function ManualStepAutoRunPanel({
         <strong className="font-semibold">
           進めるのはサーバーなので、この画面を閉じても続きます
         </strong>
-        （閉じた後の進み具合は「ユーザーの作業待ち」の一覧の入口に出ます。いつでも中断できます）。
+        （閉じた後の進み具合と中断は、この画面をもう一度開くと出ます。「ユーザーの作業待ち」の
+        一覧の入口にも「自動実行 n / m」が出ます）。
         完了の確認は実行して結果を出すだけで、チェックもクローズもしません。
         出力はこの画面にだけ表示し、GitHubのIssueには残しません。
         <strong className="font-semibold">出力にシークレットが混ざることがあります。</strong>
