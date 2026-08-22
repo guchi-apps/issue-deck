@@ -1020,6 +1020,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リクエストも消費する方が害が大きく、そこまで並べても画面では読めないため、打ち切ったことを
   `truncated`で伝えてGitHubの「Files changed」へ誘導する。**差分そのもの（`patch`）は受け取らない**。
   この画面が答えるのは「どこを触ったPRか」までで、行単位の差分はGitHubに任せる。
+- **mainへのPRのマージ確認ダイアログには「このリリースに含まれる変更」を並べる**（#2080。
+  [`pull-request-merge-changes.tsx`](../src/components/dashboard/pull-request-merge-changes.tsx)・
+  [`hooks/use-pull-request-changes.ts`](../src/hooks/use-pull-request-changes.ts)・
+  `GET /api/pull-requests/changes`）。押した瞬間に本番デプロイが走るマージなのに、ダイアログには
+  PR番号とブランチ名しか出ておらず、何を本番へ出そうとしているのかを確かめるにはGitHubのPRを
+  開くしかなかった。材料は`GET /pulls/{number}/commits`から拾ったマージコミット
+  （`Merge pull request #<番号> from <owner>/<ブランチ>`）で、ブランチ名`issue-<番号>`から対応Issueまで
+  辿り、**タイトルはDBキャッシュ（`Issue`テーブル）から解決する**ためIssueの件数ぶんのリクエストは
+  増えない（[`lib/pull-request-changes.ts`](../src/lib/pull-request-changes.ts)）。
+  **PR本文の`## 対象issue`は使わない**——あれはPRを作った時点の一覧で、PRが開いているあいだに
+  developへ入った変更が抜ける。出すのは`isProductionMerge`（`lib/pull-request-list.ts`。
+  `mergeWarnings`が本番デプロイの警告を返すのと同じ判定）が真のPRだけで、develop向けPRの
+  ダイアログでは取得もしない。100件（`PULL_REQUEST_COMMITS_PER_PAGE`）で打ち切る方針も、同じPRを
+  開き直すぶんがETagの304になる点も変更ファイル一覧と同じ。**取得できなくてもマージは止めない**
+  ——変更点は判断材料であって、マージの前提条件ではない。マージコミットが1件も無いリポジトリ
+  （squash運用）ではコミットの件名をそのまま並べる。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、

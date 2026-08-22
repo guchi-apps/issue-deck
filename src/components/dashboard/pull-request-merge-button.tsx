@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
   isMergeJudgementPending,
+  isProductionMerge,
   MERGE_JUDGEMENT_PENDING_LABEL,
   mergeJudgementReason,
   mergeWarnings,
@@ -43,6 +45,10 @@ type PullRequestMergeButtonProps = {
  * 一覧が入れ替わるまでの数秒はボタンが押せる状態で残り、そこを押すと2回目のマージ要求が飛ぶ
  * （GitHubは405で弾くが、画面にはエラーだけが出る）。
  *
+ * **mainへのPRでは、確認ダイアログに「このリリースに含まれる変更」を並べる**（#2080。
+ * `PullRequestMergeChanges`）。本番デプロイが走るマージなのに、ダイアログにはPR番号と
+ * ブランチ名しか出ておらず、何を出そうとしているのかがその場では分からなかった。
+ *
  * **自動マージ可否の判定中は「判定中」で無効にする**（#1968。`isMergeJudgementPending`）。
  * 判定のcheck-runはCI状態の集約から外れている（#1799）ため、そこを塞がないと判定より先に
  * 確認なしでマージできてしまう。
@@ -57,6 +63,8 @@ export function PullRequestMergeButton({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isMerged, setIsMerged] = useState(false);
   const warnings = mergeWarnings(pullRequest);
+  // 本番デプロイが走るマージだけ、何を出そうとしているのかをダイアログの中で出す（#2080）
+  const productionMerge = isProductionMerge(pullRequest);
   const judgementPending = isMergeJudgementPending(pullRequest.mergeJudgement);
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
 
@@ -90,7 +98,8 @@ export function PullRequestMergeButton({
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        {/* 変更点を並べるぶん、mainへのPRのときだけ広げる */}
+        <AlertDialogContent className={cn(productionMerge && "sm:max-w-lg")}>
           <AlertDialogHeader>
             <AlertDialogTitle>このPRをマージしますか？</AlertDialogTitle>
             <AlertDialogDescription>
@@ -103,6 +112,9 @@ export function PullRequestMergeButton({
               <li key={warning}>{warning}</li>
             ))}
           </ul>
+          {productionMerge && (
+            <PullRequestMergeChanges pullRequest={pullRequest} open={confirmOpen} />
+          )}
           <ApiErrorMessage message={error} />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isSubmitting}>キャンセル</AlertDialogCancel>
