@@ -547,6 +547,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
   本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・
   ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
+  **デバイスは手順ごとに持てる**（#2052。手順の文頭の`（サブPC）`。無ければ`## 前提条件`の
+  「実行するデバイス」が既定値で、そこに端末が複数書かれていれば既定値は決まらない）。
   - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
     Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
     手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
@@ -603,8 +605,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・
     `ManualStepVerificationCheck`）。全部が終了コード0で終わったIssueには「完了済みの可能性」の
     印（`Issue.manualStepVerifiedAt`）が付き、一覧の行と`ManualStepPanel`に出る。
-    **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスが
-    サブPCで、**確認コマンドが読み取りだけだと読める**Issueに限る
+    **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスの
+    既定値がサブPCに決まり、**確認コマンドが読み取りだけだと読める**Issueに限る
     （`isReadOnlyVerificationCommand`）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
     常駐プロセスは置かない。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。

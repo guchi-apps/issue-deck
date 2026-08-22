@@ -60,7 +60,7 @@ import {
   isSubpcManualStepDevice,
   MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
-import { parseManualStepGuide } from "@/lib/manual-step-guide";
+import { parseManualStepGuide, resolveManualStepDevice } from "@/lib/manual-step-guide";
 
 /**
  * ディスパッチのジョブキュー（#1179）のDB操作。
@@ -703,7 +703,12 @@ export async function enqueueManualStepJob(params: {
 
   const reject = (
     rejection: ManualStepExecutionRejection,
-    context: { interactiveCommand?: string | null; placeholder?: string | null } = {},
+    context: {
+      interactiveCommand?: string | null;
+      placeholder?: string | null;
+      /** 拒否の対象になった項目のデバイス（#2052。理由文に出す） */
+      device?: string | null;
+    } = {},
   ): EnqueueManualStepJobResult => ({
     ok: false,
     rejection,
@@ -721,7 +726,12 @@ export async function enqueueManualStepJob(params: {
   }
 
   const guide = parseManualStepGuide(issue.body);
-  if (!isSubpcManualStepDevice(guide.where.device)) return reject("device_not_subpc");
+  // **デバイスは手順ごとに見る**（#2052）。`stepLine`が手順を指していればその手順のデバイス、
+  // 完了の確認（節に手順が無い）なら手作業の既定値。判定の順は画面
+  // （`resolveManualStepExecutionRejection`）と同じで、コマンドの有無より先に見る
+  const targetStep = guide.steps.find((step) => step.line === params.stepLine) ?? null;
+  const device = resolveManualStepDevice(guide.where, targetStep);
+  if (!isSubpcManualStepDevice(device)) return reject("device_not_subpc", { device });
 
   // 手順（`## やること`）と完了の確認（`## 完了の確認方法`）の両方が対象（#1869）。
   // **画面と同じ関数で取り出す**ので、押せるのにAPIが拒否する組み合わせが生まれない

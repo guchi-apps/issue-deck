@@ -1,5 +1,9 @@
 import { FENCE_PATTERN, TASK_LINE_PATTERN } from "@/lib/markdown-task-list";
-import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-guide";
+import {
+  matchManualStepDeviceNames,
+  parseManualStepGuide,
+  type ManualStepGuide,
+} from "@/lib/manual-step-guide";
 
 /**
  * 手作業アシスタント（#1826）の手順を、サブPCで代行実行できる形へ取り出す（#1828）。
@@ -375,19 +379,19 @@ function interactivePattern(command: string): RegExp {
 }
 
 /**
- * `## 前提条件`の「実行するデバイス」がサブPCか。
+ * その手順を実行する端末がサブPCか。
  *
  * **サブPC以外は一律で代行しない。** VPS・1Password・GitHub App・ブラウザでの設定は
  * issue-deckから到達できず、pollerが居るのはサブPCだけ。表記の揺れ（`サブPC`・`sub pc`・
  * `subpc`）は吸収するが、**読み取れなければ代行しない側へ倒す**（`null`はfalse）。
+ *
+ * **端末名の定義は`manual-step-guide.ts`の1か所から引く**（#2052）。ここに独自の文字列一致を
+ * 持っていたために「ブラウザとサブPC」で真になり、ブラウザ作業まで代行対象になっていた。
+ * 1つに絞れないものはfalseにするので、**渡すのは`resolveManualStepDevice`で解決済みの値**。
  */
 export function isSubpcManualStepDevice(device: string | null): boolean {
-  if (device === null) return false;
-  const normalized = device
-    .toLowerCase()
-    .replace(/[\s　_-]/g, "")
-    .replace(/ｻﾌﾞ/g, "サブ");
-  return normalized.includes("サブpc") || normalized.includes("subpc");
+  const names = matchManualStepDeviceNames(device);
+  return names.length === 1 && names[0] === "サブPC";
 }
 
 /**
