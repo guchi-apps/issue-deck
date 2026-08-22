@@ -23,8 +23,14 @@ export type CheckUserGuidance = {
   /** **押すボタンの名前を含む1行。** 「承認」「マージ」など画面上の表記をそのまま書く */
   buttons: string;
   action: CheckUserAction | null;
-  /** エージェントが待っているのか止まっているのか（docs/multi-agent/labels.mdの表と同じ区分） */
-  agentState: { tag: string; note: string };
+  /**
+   * エージェントが待っているのか止まっているのか（docs/multi-agent/labels.mdの表と同じ区分）。
+   *
+   * **タグの一語だけ**（#2057）。以前は「マージするまで次の工程へ進みません」のような補足文を
+   * 添えていたが、どの理由でも`description`か`buttons`が同じことを既に言っており、案内パネルの
+   * 4行目が毎回その繰り返しになっていた。
+   */
+  agentState: string;
 };
 
 type ReasonGuide = {
@@ -33,7 +39,7 @@ type ReasonGuide = {
   buttonsAway: string;
   /** 目的地に居るときの案内 */
   buttonsHere: string;
-  agentState: { tag: string; note: string };
+  agentState: string;
 };
 
 /**
@@ -50,34 +56,37 @@ const REASON_GUIDE: Record<CheckUserReason, ReasonGuide> = {
       "エージェントが実装前の計画（アプローチ・変更範囲・懸念点）をコメントに投稿しました。この方針で実装してよいかを判断してください。",
     buttonsAway: "コメント欄の「承認」で実装が始まります。方針を変えるなら「修正」。",
     buttonsHere: "下の「承認」で実装が始まります。方針を変えるなら「修正」。",
-    agentState: { tag: "待機中", note: "承認するまで実装は始まりません" },
+    agentState: "待機中",
   },
   input: {
     description:
       "エージェントが自分では決められない点を質問しています。開発環境やスクリーンショットの確認をお願いしている場合もあります。",
     buttonsAway: "コメント欄で回答を書いて「承認」を押すと、内容がエージェントへ渡ります。",
     buttonsHere: "回答を書いて「承認」を押すと、内容がエージェントへ渡ります。",
-    agentState: { tag: "待機中", note: "回答するまで先へ進みません" },
+    agentState: "待機中",
   },
   merge: {
     description:
       "自動マージの条件を満たさなかったため、developへのマージはあなたが行う必要があります。",
-    buttonsAway: "対応PRの「マージ」を押します。直したい点があれば「修正を依頼する」。",
+    // **「修正を依頼する」は`buttonsHere`にしか書かない**（#2057）。あのボタンはコメント欄の
+    // 承認カード（`comment-thread.tsx`）にしか無く、`buttonsAway`の行き先である上部の
+    // 対応PRセクションには「マージ」しか置いていない。移動先に無いボタンを案内していた
+    buttonsAway: "対応PRの「マージ」を押します。",
     buttonsHere: "下の「マージ」を押します。直したい点があれば「修正を依頼する」。",
-    agentState: { tag: "待機中", note: "マージするまで次の工程へ進みません" },
+    agentState: "待機中",
   },
   blocked: {
     description:
       "エージェントが作業を続けられずに停止しました。理由（依存の追加・行き詰まり・すでに実装済みなど）は直近のコメントにあります。",
     buttonsAway: "コメント欄に続け方を書いて「修正」。対応不要なら「取り下げ」。",
     buttonsHere: "続け方を書いて「修正」。対応不要なら「取り下げ」。",
-    agentState: { tag: "停止中", note: "指示があるまで再開しません" },
+    agentState: "停止中",
   },
   answered: {
     description: "あなたの質問にエージェントが回答しました。読むだけで、実装は再開しません。",
     buttonsAway: "コメント欄の「承認」を押すと確認待ちが外れます。",
     buttonsHere: "読み終えたら「承認」を押すと確認待ちが外れます。",
-    agentState: { tag: "待っていません", note: "このIssueは実装フローに乗っていません" },
+    agentState: "待っていません",
   },
 };
 

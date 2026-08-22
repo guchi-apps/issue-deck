@@ -32,6 +32,25 @@ type ProgressProps = {
 type WorkflowStatusStepsProps = ProgressProps & {
   /** このIssueがどこで走っているか（#1262）。着手後もPC・スマホの詳細から実行先が分かるようにする */
   executionTarget?: IssueExecutionTarget;
+  /**
+   * 確認待ちのバッジ（「ユーザー確認待ち・PRのマージ」）を出すか（#2057）。
+   *
+   * **直下に案内パネル（`CheckUserReasonNotice`）が出ているときはfalseにする。**
+   * あちらの見出し（「Pull Requestのマージが必要です」）が同じ用件を書いており、バッジは
+   * その1行上で同じことを繰り返すだけになる。理由ラベル（`01.check-*`）が配られておらず
+   * 案内パネルを出せないリポジトリでは、従来どおりバッジが唯一の表示になる。
+   *
+   * **バッジを消しても現在ステップの琥珀色は残す**——確認待ちであること自体は形で読めるようにする。
+   */
+  showApprovalBadge?: boolean;
+  /**
+   * 実行先（「サブPCで実行中」）を出すか（#2057）。
+   *
+   * **セッションの行（`IssueSessionStatus`）が出ているときはfalseにする。** 同じホスト名を
+   * 2行で言っているうえ、こちらはProject Statusと`11.local`から組み立てているため
+   * セッションが終わった後も「実行中」のまま残り、「サブPC・応答を終えています」と食い違う。
+   */
+  showExecutionTarget?: boolean;
 };
 
 type WorkflowStepBadgeProps = ProgressProps & {
@@ -204,6 +223,8 @@ export function WorkflowStatusSteps({
   labels,
   projectStatus = null,
   executionTarget,
+  showApprovalBadge = true,
+  showExecutionTarget = true,
 }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -215,11 +236,13 @@ export function WorkflowStatusSteps({
   const approvalPendingText = reason
     ? `ユーザー確認待ち・${CHECK_USER_REASON_TEXT[reason]}`
     : "ユーザー確認待ち";
+  // バッジを出すかどうか（#2057）。状態そのもの（`approvalPending`）は色の判定に使い続ける
+  const showBadge = approvalPending && showApprovalBadge;
   const currentStep = WORKFLOW_STEPS[currentIndex];
   // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
   // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
   const targetLabel =
-    executionTarget && !executionTarget.expectsActionsRun
+    showExecutionTarget && executionTarget && !executionTarget.expectsActionsRun
       ? describeIssueExecutionTarget(executionTarget)
       : null;
 
@@ -230,7 +253,7 @@ export function WorkflowStatusSteps({
           {WORKFLOW_STEPS.map((step, index) => {
             const isDone = index < currentIndex;
             const isCurrent = index === currentIndex;
-            const showApprovalPending = isCurrent && approvalPending;
+            const showApprovalPending = isCurrent && showBadge;
             const StepIcon = step.icon;
             return (
               <div
@@ -302,7 +325,7 @@ export function WorkflowStatusSteps({
           </span>
           {targetLabel && <span className="ml-1.5 text-muted-foreground">{targetLabel}で実行中</span>}
         </p>
-        {approvalPending && (
+        {showBadge && (
           <span className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-500 dark:text-amber-400">
             {approvalPendingText}
           </span>

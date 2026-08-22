@@ -41,6 +41,48 @@ describe("WorkflowStatusSteps", () => {
     expect(screen.queryByText("ユーザー確認待ち")).toBeNull();
   });
 
+  /**
+   * #2057。バッジの真下に案内パネル（`CheckUserReasonNotice`）が出ているときは、その見出しが
+   * 同じ用件を書いている。**状態そのものは残す**ので、現在ステップの琥珀色は消えない。
+   */
+  it("showApprovalBadge=falseなら確認待ちのバッジを出さない（#2057）", () => {
+    render(
+      <WorkflowStatusSteps
+        labels={labels("00.check-user", "01.check-merge")}
+        projectStatus="Develop PR"
+        showApprovalBadge={false}
+      />,
+    );
+    expect(screen.queryByText(/ユーザー確認待ち/)).toBeNull();
+    // 段階のキャプションは残り、確認待ちであることは色（amber）で読める
+    expect(screen.getByText("developへマージ（3/6）").className).toContain("amber");
+  });
+
+  it("showExecutionTarget=falseなら「サブPCで実行中」を出さない（#2057）", () => {
+    render(
+      <WorkflowStatusSteps
+        labels={labels()}
+        projectStatus="Implementation"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        showExecutionTarget={false}
+      />,
+    );
+    expect(screen.queryByText(/で実行中/)).toBeNull();
+    expect(screen.getByText("実装中（2/6）")).not.toBeNull();
+  });
+
+  it("既定では従来どおりバッジも実行先も出す", () => {
+    render(
+      <WorkflowStatusSteps
+        labels={labels("00.check-user")}
+        projectStatus="Implementation"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+      />,
+    );
+    expect(screen.getAllByText("ユーザー確認待ち").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/で実行中/).length).toBeGreaterThan(0);
+  });
+
   it("各ステップの円にaria-currentが付き、完了済みステップと現在ステップが判別できる", () => {
     render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop PR" />);
     const items = screen.getAllByRole("listitem");

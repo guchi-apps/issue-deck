@@ -49,9 +49,15 @@ export function CheckUserReasonNotice({
         className,
       )}
     >
-      <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+      {/* エージェントの状態は見出しと同じ行へ寄せる（#2057）。以前はパネルの4行目に
+          「待機中 マージするまで次の工程へ進みません」として独立した段を持っていたが、
+          補足文はどの理由でも説明文かボタンの案内の言い換えだった（`check-user-guidance.ts`） */}
+      <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
         <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-        {guidance.heading}
+        <span className="min-w-0">{guidance.heading}</span>
+        <span className="ml-auto shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground ring-1 ring-inset ring-border">
+          {guidance.agentState}
+        </span>
       </p>
       <p className="text-[13px] leading-relaxed">{guidance.description}</p>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
@@ -76,12 +82,6 @@ export function CheckUserReasonNotice({
         )}
         <p className="text-xs text-muted-foreground">{guidance.buttons}</p>
       </div>
-      <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="rounded bg-background px-1.5 py-0.5 font-semibold text-foreground ring-1 ring-inset ring-border">
-          {guidance.agentState.tag}
-        </span>
-        {guidance.agentState.note}
-      </p>
       {children}
     </div>
   );

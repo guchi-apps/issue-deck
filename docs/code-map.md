@@ -222,6 +222,24 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
+  `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
+  `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
+  `resolveIssueExecutionTarget`）から独立に文言を組み立てる**ため、素直に並べると1つの用件が
+  4回出る（確認待ちのIssueで実際にそうなっていた: サマリーのバッジ・ラベルチップ
+  `00.check-user`/`01.check-merge`・ステッパー下のバッジ・案内パネルの見出し）。
+  子は「出せるかどうか」だけを知っていて「他に誰が言っているか」を知らないので、
+  **判断は並べる側に置き、子には`showApprovalBadge`・`showExecutionTarget`・
+  `excludeAttention`のような出し分けのpropを渡す。** 子の中で他の部品の有無を推測しない。
+  - 状態そのものを表す**形（現在ステップの琥珀色・確認待ちのバッジ色）は消さない**。
+    重複しているのは文字だけで、色は一目で読むための別経路。
+  - **文言が「押すボタン」を名指しする場合は、その行き先に実在するか確かめる**。
+    `01.check-merge`の上部案内は「直したい点があれば『修正を依頼する』」と書いていたが、
+    そのボタンはコメント欄の承認カード（`comment-thread.tsx`）にしか無く、案内が送る
+    上部の対応PRセクションには「マージ」しか無かった（`buttonsAway`と`buttonsHere`を
+    分けているのはこのため）。
+  - **押す先が無く、読んでも次の行動が変わらない表示は出さない。** 「実施順序 1
+    前提はそろっている」がその例で、`IssueOrderSection`は前提待ちか被依存があるときだけ描く。
 - **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
   （#1666・#1810）。[`use-dispatch-state.ts`](../src/hooks/use-dispatch-state.ts)の
   `hosts`・`sessions`・`jobs`は**取得前も`[]`を返す**ため、受け取る側からは「1台も無い」

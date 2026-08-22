@@ -41,7 +41,12 @@ export function MobileIssueSummaryCard({ issue, onSelectRepository }: MobileIssu
   const approvalPending = isApprovalPending(issue.labels);
   // 何を求められているかまで出す（#1490）。理由ラベルが配られていないリポジトリではnullになる
   const reason = checkUserReason(issue.labels);
-  const { visible: visibleLabels, hiddenCount } = selectSummaryLabels(issue.labels);
+  // 確認待ちのバッジを出しているあいだは、同じことを言う`00.check-user`・`01.check-*`を
+  // ラベル欄から外す（#2057）。上のバッジが日本語で言っているものを機械語で繰り返すために
+  // 上限3件の枠を2件使い、分類ラベルを「+N」の裏へ押し出していた
+  const { visible: visibleLabels, hiddenCount } = selectSummaryLabels(issue.labels, {
+    excludeAttention: approvalPending,
+  });
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
