@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import type { QuestionAttention } from "@/lib/question-attention";
 import { navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { getPullRequestView } from "@/lib/pull-request-views";
@@ -24,9 +25,11 @@ function renderSidebar(
   {
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
+    questionAttention = { total: navCounts.question, unconfirmed: 0 },
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
+    questionAttention?: QuestionAttention;
   } = {},
 ) {
   render(
@@ -40,6 +43,7 @@ function renderSidebar(
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
+      questionAttention={questionAttention}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -78,6 +82,7 @@ function renderSidebarWithRepositories(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
+      questionAttention={{ total: 0, unconfirmed: 0 }}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -195,24 +200,34 @@ describe("SidebarNav", () => {
     ).toBeNull();
   });
 
-  // 件数（`computeNavCountsForFilters`）は未確認の数で、確認待ち・作業待ちと同じ
-  // オレンジの丸で出す（#1910）
-  it("未確認の質問があれば件数をオレンジの丸で出す", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 1 });
+  // 数字は一覧に並ぶ件数で、オレンジの丸は未確認があるときだけ（#2070）。#1910のように
+  // 未確認の数を数字に出すと、読み終えた質問しか無いときに「質問は無い」と読めてしまう
+  it("未確認の質問があれば一覧の件数をオレンジの丸で出す", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { questionAttention: { total: 3, unconfirmed: 1 } },
+    );
 
     const button = screen.getByRole("button", { name: /質問/ });
-    expect(button.textContent).toContain("1");
+    expect(button.textContent).toContain("3");
     expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
-    // 丸の数字が何を数えているのかは行のラベルからは読めないため、吹き出しで補う
+    // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
+    expect(button.getAttribute("title")).toContain("3件");
     expect(button.getAttribute("title")).toContain("1件");
   });
 
-  it("未確認の質問が無ければ強調しない", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, question: 0 });
+  it("未確認の質問が無ければ強調しないが、件数は出す", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { questionAttention: { total: 3, unconfirmed: 0 } },
+    );
 
     const button = screen.getByRole("button", { name: /質問/ });
+    expect(button.textContent).toContain("3");
     expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
-    expect(button.getAttribute("title")).toBeNull();
+    expect(button.getAttribute("title")).toContain("3件");
   });
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。

@@ -104,6 +104,7 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
+import { computeQuestionAttention } from "@/lib/question-attention";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -671,6 +672,20 @@ export function IssueDeckShell({
       ),
     [issues, filters],
   );
+  // 「質問」の行の材料（#2070）。数字は一覧に並ぶ件数、オレンジの丸は未確認があるときだけ。
+  // こちらも絞り込みを適用しないビューなので、母集団は絞り込み前の全Issue。
+  const questionAttention = useMemo(
+    () =>
+      computeQuestionAttention(
+        filterIssuesByView(
+          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
+          "question",
+          currentUserLogin,
+          issues,
+        ),
+      ),
+    [issues, filters, currentUserLogin],
+  );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
@@ -1093,6 +1108,7 @@ export function IssueDeckShell({
                   navCounts={navCounts}
                   checkUserPullRequestCount={mergePendingPullRequests.length}
                   manualStepAttention={manualStepAttention}
+                  questionAttention={questionAttention}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
@@ -1288,6 +1304,7 @@ export function IssueDeckShell({
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
+                questionAttention={questionAttention}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  computeQuestionAttention,
   countUnconfirmedQuestions,
   formatQuestionListCount,
+  formatQuestionNavTitle,
   resolveQuestionState,
 } from "@/lib/question-attention";
 
@@ -61,6 +63,37 @@ describe("countUnconfirmedQuestions", () => {
 
   it("1件も無ければ0を返す", () => {
     expect(countUnconfirmedQuestions([])).toBe(0);
+  });
+});
+
+describe("computeQuestionAttention", () => {
+  // 未確認だけを数字に出すと、読み終えた質問しか無いときに「質問は無い」と読めてしまう（#2070）
+  it("総数は確認済み・回答待ちも含め、未確認は丸を点ける判定にだけ使う", () => {
+    expect(
+      computeQuestionAttention([
+        makeQuestion({ hasUnreadComments: true }),
+        makeQuestion(),
+        makeQuestion({ qaAnswerPendingAt: "2026-01-01T00:00:00.000Z" }),
+      ]),
+    ).toEqual({ total: 3, unconfirmed: 1 });
+  });
+
+  it("1件も無ければどちらも0", () => {
+    expect(computeQuestionAttention([])).toEqual({ total: 0, unconfirmed: 0 });
+  });
+});
+
+describe("formatQuestionNavTitle", () => {
+  it("未確認があれば内訳を添える", () => {
+    expect(formatQuestionNavTitle({ total: 3, unconfirmed: 1 })).toBe(
+      "開いている質問が3件（うち回答が届いていてまだ開いていないものが1件）あります",
+    );
+  });
+
+  it("未確認が無ければ総数だけを出す", () => {
+    expect(formatQuestionNavTitle({ total: 3, unconfirmed: 0 })).toBe(
+      "開いている質問が3件あります",
+    );
   });
 });
 
