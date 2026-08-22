@@ -4,27 +4,52 @@
 # 使い方:
 #   scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]
 #                                [--min-age-minutes <分>] [--keep-next]
+#                                [--repo <owner/repo> | --all-repos]
 #
 #   --dry-run       判定結果を表示するだけで削除しない
 #   --yes / -y      確認プロンプトを出さずに削除する
 #   --issue <番号>  対象を1つのIssueに絞る
-#   --no-fetch      origin/develop の最新化（git fetch）を行わない
+#   --no-fetch      マージ先ブランチの最新化（git fetch）を行わない
 #   --force         未コミットの変更・未pushのコミットを無視して削除する（--issue 必須）
 #   --size          削除対象のディスク使用量を測って表示する（既定では測らない）
 #   --min-age-minutes <分>
 #                   起動の準備からこの分数が経っていないworktreeは触らない（既定30・0で無効）。
 #                   --issue で1件に絞ったときは効かない（明示的な指定を優先する）
 #   --keep-next     残すworktreeの `.next` を削除しない
+#   --repo <owner/repo>
+#                   対象リポジトリ（既定 guchi-apps/issue-deck）。チェックアウト先は
+#                   `~/.config/issue-deck/local-repos.conf` から引く
+#   --all-repos     対応表に載っている全リポジトリを順に掃除する（--issue・--force とは併用不可）
+#
+# ## issue-deck専用ではない（#2123）
+#
+# 汎用ランチャー（scripts/generic-start-issue.sh）は`~/apps/<repo>-worktrees/issue-<番号>`へ
+# 他リポジトリのworktreeを作るのに、掃除はissue-deckの置き場しか見ていなかった。他リポジトリ側に
+# 掃除スクリプトを持つリポジトリは1つも無く、**起点がどこにも無いまま153本が溜まって**
+# サブPCのルートFSが91%に達した（#1716のissue-deck版がそのまま他リポジトリで再発した形）。
+#
+# 判定（未コミットの変更・未pushのコミット・セッション稼働中・経過時間）はリポジトリによらず
+# 同じなので、**リポジトリごとに変わるものだけを引数と設定から解決する**。
+#
+#   チェックアウト先    scripts/lib/local-repo-resolve.sh（`local-repos.conf`）
+#   worktreeの置き場    ~/apps/<repo>-worktrees（汎用ランチャーと同じ規約）
+#   マージ先のブランチ  実在する origin/develop・origin/main・origin/master（worktree_base_refs）
+#   マージ済みPRの取得  gh pr list --repo <owner/repo>
+#   開発サーバーのポート帯  scripts/local-repo-ports.conf
+#
+# `--all-repos` は自分自身を`--repo`付きで順に呼ぶ。**1リポジトリの失敗で残りを止めない**
+# （fetchできないcloneが1つあるだけで他が掃除されなくなる方が困る）。
 #
 # 次をすべて満たすworktreeだけを削除対象にする。1つでも欠けたら残す。
 #   - 未コミットの変更が無い
-#   - origin/develop に入っていないコミットが無い（未pushの作業が無い）
+#   - マージ先のブランチ（origin/develop・origin/main のうち実在するもの）に入っていない
+#     コミットが無い（未pushの作業が無い）
 #   - そのIssueのセッション・開発サーバーが動いていない
 #   - ブランチ issue-<番号> を開いていて、gitの作業ツリーとして壊れていない
 #   - このスクリプトを実行しているworktreeでない
 #
 # **「PRがマージ済みか」は判定に使わない**（#1192）。消して失われるものが無いことは上の2つで
-# 決まり、PRの有無はそこへ何も足さない（developに入っていないコミットが1つでもあれば必ず残る）。
+# 決まり、PRの有無はそこへ何も足さない（マージ先に入っていないコミットが1つでもあれば必ず残る）。
 # 逆にPRを条件にすると、PRが最初から作られないworktree（起動確認だけして終わった・実作業が
 # 別リポジトリだった・セッションが途中で落ちた・Issueが取り下げられた）が永久に消せなくなる。
 # マージ済みPRの番号は削除理由の表示にだけ使う。
@@ -54,16 +79,18 @@
 # まとめて1回で引けないか・進捗を出せるかを先に考える。
 #
 # 環境変数:
-#   ISSUE_DECK_WORKTREE_BASE           worktreeの置き場所（既定: ~/apps/issue-deck-worktrees）
+#   ISSUE_DECK_WORKTREE_BASE           issue-deckのworktreeの置き場所（既定: ~/apps/issue-deck-worktrees）
 #   ISSUE_DECK_GH_TIMEOUT              gh の1回の呼び出しに被せる制限時間・秒（既定: 60）
 #   ISSUE_DECK_CLEANUP_MIN_AGE_MINUTES --min-age-minutes の既定値（既定: 30）
+#   ISSUE_DECK_CLEANUP_FETCH_TIMEOUT   1リポジトリのfetchに被せる制限時間・秒（既定: 60）
 
 set -euo pipefail
 
+# **`ROOT` はこのスクリプトが置かれているチェックアウト（issue-deck）で、掃除の対象とは別**
+# （#2123）。対象リポジトリのチェックアウトは `REPO_ROOT` に入る。混ぜると、他リポジトリの
+# 掃除中に「このスクリプト自身が置かれているworktree」の判定が効かなくなる。
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
-PROMPT_DIR="$WORKTREE_BASE/.prompts"
-DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
+SELF="$ROOT/scripts/cleanup-worktrees.sh"
 
 # shellcheck source=scripts/lib/worktree-status.sh
 source "$ROOT/scripts/lib/worktree-status.sh"
@@ -71,10 +98,28 @@ source "$ROOT/scripts/lib/worktree-status.sh"
 # reap-dev-servers.sh と共有する。
 # shellcheck source=scripts/lib/dev-server.sh
 source "$ROOT/scripts/lib/dev-server.sh"
+# チェックアウト先・ポート帯の解決は起動側（start-local-session.sh・generic-start-issue.sh）と
+# 共有する（#2123）。**掃除だけが別の対応表を持つと、起こした場所と消す場所がずれる。**
+# shellcheck source=scripts/lib/local-repo-resolve.sh
+source "$ROOT/scripts/lib/local-repo-resolve.sh"
+
+DEFAULT_REPO="$ISSUE_DECK_REPO"
 
 usage() {
   echo "Usage: scripts/cleanup-worktrees.sh [--dry-run] [--yes] [--issue <番号>] [--no-fetch] [--force] [--size]"
   echo "                                    [--min-age-minutes <分>] [--keep-next]"
+  echo "                                    [--repo <owner/repo> | --all-repos]"
+}
+
+# 対象リポジトリのworktreeの置き場。**汎用ランチャーと同じ規約**（~/apps/<repo>-worktrees）で
+# 決める（#2123）。issue-deckだけは従来どおり ISSUE_DECK_WORKTREE_BASE で差し替えられる。
+worktree_base_for_repo() {
+  local full_name="$1" repo="${1#*/}"
+  if [[ "$full_name" == "$DEFAULT_REPO" && -n "${ISSUE_DECK_WORKTREE_BASE:-}" ]]; then
+    printf '%s' "$ISSUE_DECK_WORKTREE_BASE"
+    return 0
+  fi
+  printf '%s' "$HOME/apps/$repo-worktrees"
 }
 
 DRY_RUN=0
@@ -84,6 +129,8 @@ FORCE=0
 SHOW_SIZE=0
 PRUNE_NEXT=1
 TARGET_ISSUE=""
+TARGET_REPO=""
+ALL_REPOS=0
 MIN_AGE_MINUTES="${ISSUE_DECK_CLEANUP_MIN_AGE_MINUTES:-30}"
 
 while [[ $# -gt 0 ]]; do
@@ -98,6 +145,9 @@ while [[ $# -gt 0 ]]; do
     --min-age-minutes=*) MIN_AGE_MINUTES="${1#*=}" ;;
     --issue) shift; TARGET_ISSUE="${1:-}" ;;
     --issue=*) TARGET_ISSUE="${1#*=}" ;;
+    --repo) shift; TARGET_REPO="${1:-}" ;;
+    --repo=*) TARGET_REPO="${1#*=}" ;;
+    --all-repos) ALL_REPOS=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Error: 不明な引数です: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -107,6 +157,23 @@ done
 if [[ -n "$TARGET_ISSUE" && ! "$TARGET_ISSUE" =~ ^[0-9]+$ ]]; then
   echo "Error: --issue は数字で指定してください: $TARGET_ISSUE" >&2
   exit 1
+fi
+
+if [[ -n "$TARGET_REPO" && ! "$TARGET_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+  echo "Error: --repo は owner/repo の形式で指定してください: $TARGET_REPO" >&2
+  exit 1
+fi
+
+# `--all-repos` は「全リポジトリを順に回す」だけの指定で、1件を狙う指定とは意味が両立しない。
+if [[ "$ALL_REPOS" -eq 1 ]]; then
+  if [[ -n "$TARGET_REPO" ]]; then
+    echo "Error: --all-repos と --repo は同時に指定できません。" >&2
+    exit 1
+  fi
+  if [[ -n "$TARGET_ISSUE" || "$FORCE" -eq 1 ]]; then
+    echo "Error: --all-repos は --issue・--force と同時に指定できません（対象を1件に絞る指定と両立しません）。" >&2
+    exit 1
+  fi
 fi
 
 if [[ ! "$MIN_AGE_MINUTES" =~ ^(0|[1-9][0-9]*)$ ]]; then
@@ -133,9 +200,135 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ "$DO_FETCH" -eq 1 ]]; then
-  echo "origin/develop を最新化しています..."
-  git -C "$ROOT" fetch origin develop
+# --- 全リポジトリを順に掃除する（#2123）--------------------------------------
+# 自分自身を `--repo` 付きで呼ぶ。**判定のループを二重に持たない**（in-processで回すには
+# 判定結果を貯める配列を毎回リセットする必要があり、消し忘れが起きた側が単独で事故になる）。
+#
+# **1リポジトリの失敗で残りを止めない。** fetchできないclone・未認証の`gh`が1つあるだけで
+# 他のリポジトリが永久に掃除されなくなるのが、そもそもこのIssueの状態。
+if [[ "$ALL_REPOS" -eq 1 ]]; then
+  # **`[[ ... ]] && arr+=(...)` では書かない。** 条件が偽のときのAND-ORリストは `set -e` の
+  # 対象外なので今は動くが、並べ替えでブロックの末尾に来た瞬間に「1を返して抜ける」に化ける。
+  child_args=()
+  if [[ "$DRY_RUN" -eq 1 ]]; then child_args+=(--dry-run); fi
+  if [[ "$ASSUME_YES" -eq 1 ]]; then child_args+=(--yes); fi
+  if [[ "$DO_FETCH" -eq 0 ]]; then child_args+=(--no-fetch); fi
+  if [[ "$SHOW_SIZE" -eq 1 ]]; then child_args+=(--size); fi
+  if [[ "$PRUNE_NEXT" -eq 0 ]]; then child_args+=(--keep-next); fi
+  child_args+=(--min-age-minutes "$MIN_AGE_MINUTES")
+
+  all_failed=()
+  all_done=0
+  all_skipped=0
+  while IFS= read -r repo_name; do
+    [[ -n "$repo_name" ]] || continue
+    if ! repo_path="$(local_repo_resolve_path "$repo_name")"; then
+      all_skipped=$((all_skipped + 1))
+      continue
+    fi
+    if ! git -C "$repo_path" rev-parse --git-dir >/dev/null 2>&1; then
+      all_skipped=$((all_skipped + 1))
+      continue
+    fi
+    repo_base="$(worktree_base_for_repo "$repo_name")"
+    if [[ ! -d "$repo_base" ]]; then
+      # worktreeを1本も作ったことがないリポジトリ。掃除するものが無い。
+      all_skipped=$((all_skipped + 1))
+      continue
+    fi
+    echo ""
+    echo "########## $repo_name（$repo_base） ##########"
+    all_done=$((all_done + 1))
+    if ! bash "$SELF" --repo "$repo_name" "${child_args[@]}"; then
+      all_failed+=("$repo_name")
+    fi
+  done < <(local_repo_list_names)
+
+  echo ""
+  echo "=== 全リポジトリの掃除が終わりました ==="
+  echo "  走査: ${all_done}リポジトリ / 対象外: ${all_skipped}リポジトリ（チェックアウトかworktreeの置き場が無い）"
+  if [[ ${#all_failed[@]} -gt 0 ]]; then
+    echo "  失敗: ${all_failed[*]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# --- 対象リポジトリの解決 -----------------------------------------------------
+TARGET_REPO="${TARGET_REPO:-$DEFAULT_REPO}"
+
+# issue-deck自身は**このスクリプトが置かれているチェックアウト**を使う。対応表のパスへ
+# 寄せてしまうと、worktreeから実行したときに「自分の足元」の判定が効かなくなる。
+if [[ "$TARGET_REPO" == "$DEFAULT_REPO" ]]; then
+  REPO_ROOT="$ROOT"
+elif ! REPO_ROOT="$(local_repo_resolve_path "$TARGET_REPO")"; then
+  echo "Error: $TARGET_REPO のローカルチェックアウト先が分かりません（$(local_repos_config_file)）。" >&2
+  exit 1
+fi
+
+if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "Error: $TARGET_REPO のチェックアウトがgitリポジトリではありません: $REPO_ROOT" >&2
+  exit 1
+fi
+
+WORKTREE_BASE="$(worktree_base_for_repo "$TARGET_REPO")"
+PROMPT_DIR="$WORKTREE_BASE/.prompts"
+DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"
+SAFE_REPO="${TARGET_REPO#*/}"
+SAFE_REPO="${SAFE_REPO//[^A-Za-z0-9_-]/-}"
+
+# 開発サーバーのポート帯（#2123）。**引けなければ止めに行かない。** 既定値（issue-deckの4000）へ
+# 落ちると、他リポジトリの掃除で issue-deck の同じ番号のポートを撃ちに行くことになる
+# （`dev_server_stop_by_port` はcwdも見るので実害は出ないが、そもそも渡さないのが正しい）。
+DEV_PORT_BASE="$(local_repo_port_base "$TARGET_REPO" || true)"
+
+# --- マージ先のブランチ -------------------------------------------------------
+# リポジトリによって develop / main が混在する（#2123）。実在するものを全部拾い、
+# **どれか1つにでも入っていれば「失われるものは無い」**とする。
+BASE_REFS=()
+while IFS= read -r ref; do
+  [[ -n "$ref" ]] || continue
+  BASE_REFS+=("$ref")
+done < <(worktree_base_refs "$REPO_ROOT" || true)
+
+base_refs_label() {
+  if [[ ${#BASE_REFS[@]} -eq 0 ]]; then
+    printf '%s' "マージ先"
+    return 0
+  fi
+  local IFS='・'
+  printf '%s' "${BASE_REFS[*]}"
+}
+
+# 「最新化し直してください」の案内に載せるブランチ名。基準refが1つも無いときは`develop`を出す
+# （そのcloneではまだ何もfetchできていないので、まずは既定のブランチを取りに行かせる）。
+base_fetch_hint_branch() {
+  if [[ ${#BASE_REFS[@]} -eq 0 ]]; then
+    printf 'develop'
+    return 0
+  fi
+  printf '%s' "${BASE_REFS[0]#origin/}"
+}
+
+if [[ ${#BASE_REFS[@]} -eq 0 ]]; then
+  echo "警告: $TARGET_REPO にマージ先のブランチ（origin/develop・origin/main）が見つかりません。判定できないworktreeはすべて残します。" >&2
+fi
+
+if [[ "$DO_FETCH" -eq 1 && ${#BASE_REFS[@]} -gt 0 ]]; then
+  fetch_branches=()
+  for ref in "${BASE_REFS[@]}"; do
+    fetch_branches+=("${ref#origin/}")
+  done
+  echo "$TARGET_REPO の ${fetch_branches[*]} を最新化しています..."
+  # **fetchの失敗でスクリプトを落とさない**（#2123）。古いままでも判定は「入っていない」＝
+  # 残す側（安全側）へ倒れる。全リポジトリを回すときに1本の通信断で残りが止まる方が困る。
+  fetch_cmd=(git -C "$REPO_ROOT" fetch origin "${fetch_branches[@]}")
+  if command -v timeout >/dev/null 2>&1; then
+    fetch_cmd=(timeout "${ISSUE_DECK_CLEANUP_FETCH_TIMEOUT:-60}" "${fetch_cmd[@]}")
+  fi
+  if ! "${fetch_cmd[@]}"; then
+    echo "警告: $TARGET_REPO の最新化に失敗しました。判定は古い情報のまま（残す側）で続けます。" >&2
+  fi
 fi
 
 # 実行中のカレントディレクトリと、このスクリプトが置かれているチェックアウトは削除しない。
@@ -171,7 +364,7 @@ declare -A merged_pr_by_branch=()
 merged_pr_for() {
   local n="$1"
   if [[ -n "$TARGET_ISSUE" ]]; then
-    worktree_merged_pr "$n"
+    worktree_merged_pr "$n" "$TARGET_REPO"
   else
     echo "${merged_pr_by_branch[issue-$n]:-}"
   fi
@@ -216,17 +409,29 @@ mark_next_for_prune() {
   prune_next_numbers+=("$n")
 }
 
+# 自分自身を指す案内文の先頭部分。**対象リポジトリが既定でなければ `--repo` を付ける**
+# （#2123。付けずに案内すると、コピペした人はissue-deckを掃除しに行くことになる）。
+self_command() {
+  if [[ "$TARGET_REPO" == "$DEFAULT_REPO" ]]; then
+    printf 'bash %s' "$SELF"
+  else
+    printf 'bash %s --repo %s' "$SELF" "$TARGET_REPO"
+  fi
+}
+
 # --force の案内文。コピペでそのまま実行できるよう絶対パスで出す。
 force_hint() {
-  echo "残す必要が無ければ: bash $ROOT/scripts/cleanup-worktrees.sh --issue $1 --force"
+  echo "残す必要が無ければ: $(self_command) --issue $1 --force"
 }
 
 # 動いているセッションの止め方の案内。tmuxのセッション名は起動側（scripts/start-issue.sh の
 # tmux_session_name）が `<リポジトリ名>-issue-<番号>` の形で付けるが、名前を組み立て直すと
 # 起動側の変更に追随できないため、実際に動いているセッション名をtmuxから引く。
+# セッション名は`<リポジトリ名>-issue-<番号>`なので、**対象リポジトリのものだけを引く**
+# （#2123。番号だけで引くと、別リポジトリの同じ番号のセッションを止めるよう案内してしまう）。
 session_stop_hint() {
   local n="$1" name
-  name="$(tmux ls -F '#S' 2>/dev/null | grep -E -- "-issue-$n\$" | head -n 1 || true)"
+  name="$(tmux ls -F '#S' 2>/dev/null | grep -Fx -- "$SAFE_REPO-issue-$n" | head -n 1 || true)"
   if [[ -n "$name" ]]; then
     echo "先にセッションを終える: tmux kill-session -t $name"
   else
@@ -252,7 +457,7 @@ while IFS= read -r line; do
     continue
   fi
   managed_dirs+=("$dir")
-done < <(git -C "$ROOT" worktree list --porcelain)
+done < <(git -C "$REPO_ROOT" worktree list --porcelain)
 
 scan_total="${#managed_dirs[@]}"
 
@@ -262,7 +467,7 @@ if [[ -z "$TARGET_ISSUE" && "$scan_total" -gt 0 ]]; then
   while IFS=$'\t' read -r branch pr; do
     [[ -n "$branch" ]] || continue
     merged_pr_by_branch["$branch"]="$pr"
-  done < <(worktree_merged_pr_map)
+  done < <(worktree_merged_pr_map "$TARGET_REPO")
 fi
 
 for scan_index in "${!managed_dirs[@]}"; do
@@ -287,7 +492,7 @@ for scan_index in "${!managed_dirs[@]}"; do
 
   if ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     keep_worktree "#$n gitの作業ツリーとして壊れている" \
-      "中身を確認して手動で削除する: rm -rf $dir && git -C $ROOT worktree prune && git -C $ROOT branch -D issue-$n"
+      "中身を確認して手動で削除する: rm -rf $dir && git -C $REPO_ROOT worktree prune && git -C $REPO_ROOT branch -D issue-$n"
     continue
   fi
 
@@ -310,19 +515,19 @@ for scan_index in "${!managed_dirs[@]}"; do
     prepared_minutes="$(worktree_prepared_minutes "$dir" "$PROMPT_DIR/issue-$n.md")"
     if [[ -z "$prepared_minutes" ]]; then
       keep_worktree "#$n 起動の準備からの経過時間を判定できない" \
-        "対象だと分かっているなら: bash $ROOT/scripts/cleanup-worktrees.sh --issue $n"
+        "対象だと分かっているなら: $(self_command) --issue $n"
       continue
     fi
     if [[ "$prepared_minutes" -lt "$MIN_AGE_MINUTES" ]]; then
       keep_worktree "#$n 起動の準備から ${prepared_minutes}分（最小 ${MIN_AGE_MINUTES}分）しか経っていない" \
-        "今すぐ消すなら: bash $ROOT/scripts/cleanup-worktrees.sh --issue $n"
+        "今すぐ消すなら: $(self_command) --issue $n"
       continue
     fi
   fi
 
   dirty_count="$(worktree_dirty_count "$dir")"
   # 空文字は「判定できなかった」。0（＝失われるコミットが無い）と区別する（#1192）。
-  unpushed="$(worktree_commits_not_in_develop "$ROOT" "issue-$n")"
+  unpushed="$(worktree_commits_not_in_base "$REPO_ROOT" "issue-$n" ${BASE_REFS[@]+"${BASE_REFS[@]}"})"
 
   # --force は --issue で1件に絞ったときだけ来る。何が失われるかを表示に載せてから消す。
   if [[ "$FORCE" -eq 1 ]]; then
@@ -331,9 +536,9 @@ for scan_index in "${!managed_dirs[@]}"; do
       loss_text="未コミットの変更 $dirty_count 件"
     fi
     if [[ -z "$unpushed" ]]; then
-      loss_text="${loss_text:+$loss_text、}origin/develop との差分は判定不能"
+      loss_text="${loss_text:+$loss_text、}$(base_refs_label) との差分は判定不能"
     elif [[ "$unpushed" -gt 0 ]]; then
-      loss_text="${loss_text:+$loss_text、}origin/develop に入っていないコミット $unpushed 件"
+      loss_text="${loss_text:+$loss_text、}$(base_refs_label) に入っていないコミット $unpushed 件"
     fi
     loss_text="失われるもの: ${loss_text:-なし}"
     target_dirs+=("$dir")
@@ -352,14 +557,14 @@ for scan_index in "${!managed_dirs[@]}"; do
   fi
 
   if [[ -z "$unpushed" ]]; then
-    keep_worktree "#$n origin/develop との差分を判定できない（fetchに失敗している可能性）" \
-      "git -C $ROOT fetch origin develop を通してから再実行する"
+    keep_worktree "#$n マージ先との差分を判定できない（fetchに失敗している可能性）" \
+      "git -C $REPO_ROOT fetch origin $(base_fetch_hint_branch) を通してから再実行する"
     mark_next_for_prune "$n" "$dir"
     continue
   fi
 
   if [[ "$unpushed" -gt 0 ]]; then
-    keep_worktree "#$n origin/develop に入っていないコミットが $unpushed 件ある（未pushの作業）" \
+    keep_worktree "#$n $(base_refs_label) に入っていないコミットが $unpushed 件ある（未pushの作業）" \
       "$(force_hint "$n")"
     mark_next_for_prune "$n" "$dir"
     continue
@@ -371,7 +576,7 @@ for scan_index in "${!managed_dirs[@]}"; do
     reason="PR #$merged_pr マージ済み"
   else
     # gh が不通ならマージ済みでもここへ来るため、「作業実績が無い」とは言い切らない。
-    reason="developに未反映のコミットが0件（消しても失われるものが無い）"
+    reason="$(base_refs_label) に未反映のコミットが0件（消しても失われるものが無い）"
   fi
 
   target_dirs+=("$dir")
@@ -501,7 +706,12 @@ for ((i = 0; i < ${#target_dirs[@]}; i++)); do
   # プロセスしか見ていない。実装エージェントが手で起こし直した`pnpm dev`はどちらにも載らず、
   # worktreeを消してもcwdを失ったまま走り続ける（#1523の孤児）。ポートから引けば起動経路に
   # よらず止まる。
-  dev_port="$(dev_server_port_for_issue "$n" || true)"
+  # ポート帯が引けないリポジトリでは**止めに行かない**（#2123）。既定値へ落ちると、他リポジトリの
+  # 掃除でissue-deckのポートを撃ちに行くことになる。
+  dev_port=""
+  if [[ -n "$DEV_PORT_BASE" || "$TARGET_REPO" == "$DEFAULT_REPO" ]]; then
+    dev_port="$(dev_server_port_for_issue "$n" ${DEV_PORT_BASE:+"$DEV_PORT_BASE"} || true)"
+  fi
   if [[ -n "$dev_port" ]]; then
     dev_server_stop_by_port "$dev_port" "$dir" "$DEV_SERVER_DIR/issue-$n.log" "worktreeの削除" ||
       echo "警告: #$n: ポート $dev_port を掴んでいた開発サーバーを停止できませんでした。" >&2
@@ -513,7 +723,7 @@ for ((i = 0; i < ${#target_dirs[@]}; i++)); do
   if [[ "${target_forced[$i]}" -eq 1 ]]; then
     remove_args+=(--force)
   fi
-  if ! git -C "$ROOT" worktree remove "${remove_args[@]}" "$dir"; then
+  if ! git -C "$REPO_ROOT" worktree remove "${remove_args[@]}" "$dir"; then
     echo "警告: #$n のworktree削除に失敗しました。ブランチはそのまま残します。" >&2
     failed=$((failed + 1))
     continue
@@ -522,14 +732,14 @@ for ((i = 0; i < ${#target_dirs[@]}; i++)); do
   # 「現在のHEADにマージ済みか」を見るため、本体チェックアウトが別のIssueブランチを
   # 開いていると消せない。--force の対象は develop に入っていないコミットごと消すため、
   # ここは -D でなければ消せない。
-  if ! git -C "$ROOT" branch -D "issue-$n" >/dev/null; then
+  if ! git -C "$REPO_ROOT" branch -D "issue-$n" >/dev/null; then
     echo "警告: #$n のブランチ削除に失敗しました。" >&2
     failed=$((failed + 1))
   fi
   rm -f "$PROMPT_DIR/issue-$n.md" "$DEV_SERVER_DIR/issue-$n.log" "$DEV_SERVER_DIR/issue-$n.pid"
 done
 
-git -C "$ROOT" worktree prune
+git -C "$REPO_ROOT" worktree prune
 
 # 残すworktreeの `.next` を消す（#1716）。**worktreeの削除より後に行う**。消えるworktreeの
 # `.next` は削除で一緒に消えるため、ここへ積むのは残す側だけ。

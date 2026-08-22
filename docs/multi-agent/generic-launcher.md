@@ -351,9 +351,12 @@ worktreeだけで、本体チェックアウト（`~/apps/_docs`）は依然と�
   起動したセッションの中身を見る（`tmux attach`）にはLAN内かTailscaleが要る
 - 対象リポジトリを一切変更しない方式なので、**リポジトリ固有の知識（ポート帯・envの供給方法）は
   issue-deck側に集まる。** どこに何があるかはこのドキュメントと`scripts/local-repo-ports.conf`が持つ
-- ディスク・依存インストールの負荷はリポジトリ数に比例する。worktreeは自動では消えないため、
-  溜まったら各リポジトリの`~/apps/<repo>-worktrees`を掃除する
-  （`scripts/cleanup-worktrees.sh`はissue-deck専用。他リポジトリ向けの掃除は未対応）
+- ディスク・依存インストールの負荷はリポジトリ数に比例する。**掃除は
+  `scripts/cleanup-worktrees.sh --all-repos`が全リポジトリの`~/apps/<repo>-worktrees`を回す**
+  （#2123。サブPCではpollerが1時間ごとに`--all-repos --yes`で呼ぶ）。1リポジトリだけを見るには
+  `--repo <owner/repo>`を付ける。掃除の対象になるのは`local-repos.conf`に載っていて、
+  チェックアウトとworktreeの置き場が実在するリポジトリ。詳細は
+  [branching.md](branching.md)「掃除の範囲は全リポジトリ」
 
 ## 関連
 

@@ -5,6 +5,11 @@
 # 両方から source する。「消しても失われないか」の判定は、片方だけを緩めるとその側が単独で
 # 事故になるため1か所に置く。
 #
+# **リポジトリ名とマージ先のブランチは引数で受ける**（#2123）。掃除はissue-deck専用ではなく、
+# 汎用ランチャー（scripts/generic-start-issue.sh）で起こした他リポジトリのworktreeも見るため、
+# `guchi-apps/issue-deck` と `origin/develop` を決め打ちにできない。省略したときの既定だけを
+# issue-deck に寄せてあり、start-issue.sh は従来どおり引数なしで呼べる。
+#
 # このファイル自体は実行せず、source して使う。
 
 ISSUE_DECK_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
@@ -27,15 +32,15 @@ worktree_gh_run() {
 # gh の失敗（ネットワーク断・未認証・応答なし）も「マージ済みPRなし」として扱う。
 #
 # **これは「消してよいか」の判定には使わない**（#1192）。消して失われるものが無いことは
-# worktree_dirty_count と worktree_commits_not_in_develop だけで決まり、PRの有無はそこへ
+# worktree_dirty_count と worktree_commits_not_in_base だけで決まり、PRの有無はそこへ
 # 何も足さない。start-issue.sh は「マージ済みのブランチで再開していないか」の警告に、
 # cleanup-worktrees.sh は削除理由の表示に使う。
 #
 # **worktreeの数だけ繰り返し呼ばないこと**（#1680）。1件あたり0.5秒前後のAPI往復があり、
 # 100件を超えると走査だけで数分かかる。まとめて引くときは worktree_merged_pr_map を使う。
 worktree_merged_pr() {
-  local n="$1"
-  worktree_gh_run gh pr list --repo "$ISSUE_DECK_REPO" --head "issue-$n" --state merged \
+  local n="$1" repo="${2:-$ISSUE_DECK_REPO}"
+  worktree_gh_run gh pr list --repo "$repo" --head "issue-$n" --state merged \
     --json number --jq '.[0].number // empty' 2>/dev/null || true
 }
 
@@ -43,11 +48,12 @@ worktree_merged_pr() {
 # 出力は `issue-123<TAB>456` 形式の行で、head が `issue-` で始まるPRだけを含む。
 # gh の失敗は空出力（＝マージ済みPRなし）として扱う。
 #
-# $1 に取得件数の上限を渡せる（既定1000）。上限を超えて古いPRは落ちるが、番号は表示にしか
-# 使わないため、落ちたものは「developに未反映のコミットが0件」という一般的な理由で表示される。
+# $1 に対象リポジトリ（省略時はissue-deck）、$2 に取得件数の上限（既定1000）を渡せる。
+# 上限を超えて古いPRは落ちるが、番号は表示にしか使わないため、落ちたものは「マージ先に
+# 未反映のコミットが0件」という一般的な理由で表示される。
 worktree_merged_pr_map() {
-  local limit="${1:-1000}"
-  worktree_gh_run gh pr list --repo "$ISSUE_DECK_REPO" --state merged --limit "$limit" \
+  local repo="${1:-$ISSUE_DECK_REPO}" limit="${2:-1000}"
+  worktree_gh_run gh pr list --repo "$repo" --state merged --limit "$limit" \
     --json number,headRefName \
     --jq '.[] | select(.headRefName | startswith("issue-")) | "\(.headRefName)\t\(.number)"' \
     2>/dev/null || true
@@ -68,18 +74,57 @@ worktree_branch_in_develop() {
   git -C "$root" merge-base --is-ancestor "$branch" "origin/develop" 2>/dev/null
 }
 
-# origin/develop に入っていないコミットの件数を出力する（＝worktreeを消すと失われるコミットの数）。
-# 0 なら worktree を消しても失われるコミットは無い。**worktreeを作っただけで1コミットもしていない
-# 場合もここは0になる**（#1192）。
+# そのリポジトリで「作業のマージ先」になりうるremote-trackingのrefを列挙する（#2123）。
 #
-# 判定できなかった場合（origin/develop が無い・ブランチが無い等）は**何も出力しない**。
-# 呼び出し側は空を「判定不能」として残す側（安全側）へ倒すこと。0を返すと消す側へ倒れてしまう。
+# **マージ先は掃除する側からは1つに決められない。** issue-deckは`develop`だが、`develop`を
+# 持たないリポジトリ（guchi-apps/docs・claude-config）は`main`へ直接マージし、`subpc`・`vps`は
+# GitHubの既定ブランチが`main`である一方でPRの宛先は`develop`になる。**ここで挙げたrefの
+# どれか1つにでも入っていれば、そのコミットは公開済みで、worktreeを消しても失われない。**
+#
+# 実在するものだけを、確からしい順（develop → main → master）で出力する。1つも無ければ1を返す
+# （fetchできたことのないclone。呼び出し側は「判定不能」として消さない側へ倒すこと）。
+worktree_base_refs() {
+  local root="$1" ref found=0
+  for ref in origin/develop origin/main origin/master; do
+    if git -C "$root" rev-parse --verify --quiet "refs/remotes/$ref" >/dev/null 2>&1; then
+      printf '%s\n' "$ref"
+      found=1
+    fi
+  done
+  [[ "$found" -eq 1 ]]
+}
+
+# 基準ref（第3引数以降）のどれにも入っていないコミットの最小件数を出力する（#2123）。
+# 0 なら worktree を消しても失われるコミットは無い。**worktreeを作っただけで1コミットもして
+# いない場合もここは0になる**（#1192）。
+#
+# 複数のrefのうち**最も少ない件数**を採る。`develop`と`main`の両方がある場合、どちらか一方に
+# 入っていれば公開済みだからで、両方に入っていることまでは要求しない。
+#
+# 判定できなかった場合（基準refが無い・ブランチが無い等）は**何も出力しない**。呼び出し側は
+# 空を「判定不能」として残す側（安全側）へ倒すこと。0を返すと消す側へ倒れてしまう。
+worktree_commits_not_in_base() {
+  local root="$1" branch="$2"
+  shift 2
+  local ref count best=""
+  for ref in "$@"; do
+    count="$(git -C "$root" rev-list --count "$ref..$branch" 2>/dev/null || true)"
+    [[ "$count" =~ ^(0|[1-9][0-9]*)$ ]] || continue
+    if [[ -z "$best" || "$count" -lt "$best" ]]; then
+      best="$count"
+    fi
+  done
+  printf '%s' "$best"
+}
+
+# origin/develop に入っていないコミットの件数を出力する（＝worktreeを消すと失われるコミットの数）。
+# worktree_commits_not_in_base を origin/develop 固定で呼ぶだけの薄い包み。
 #
 # worktree_branch_in_develop と同じことを件数で見ている。件数は「何件失われるか」を表示に
 # 使えるぶん掃除側に向く。
 worktree_commits_not_in_develop() {
   local root="$1" branch="$2"
-  git -C "$root" rev-list --count "origin/develop..$branch" 2>/dev/null || true
+  worktree_commits_not_in_base "$root" "$branch" origin/develop
 }
 
 # そのworktreeで最後に「起動の準備」が行われてからの経過分数を出力する（#1716）。

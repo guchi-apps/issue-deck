@@ -281,7 +281,8 @@ if [[ -e "$WORKTREE_DIR" ]]; then
     --jq '.[0].number // empty' 2>/dev/null || true)"
   if [[ -n "$MERGED_PR" ]]; then
     echo "#$ISSUE_NUMBER: 警告: このIssueのPR #$MERGED_PR は既にマージ済みです。ブランチ $BRANCH は以降のベースブランチの変更を含みません。" >&2
-    echo "#$ISSUE_NUMBER: 　　　 作り直す場合は worktree を削除してから再実行してください（scripts/cleanup-worktrees.sh 相当の掃除は各リポジトリで行う）。" >&2
+    echo "#$ISSUE_NUMBER: 　　　 作り直す場合は次で worktree を削除してから再実行してください（#2123）:" >&2
+    echo "#$ISSUE_NUMBER: 　　　   bash $SCRIPT_DIR/cleanup-worktrees.sh --repo $FULL_NAME --issue $ISSUE_NUMBER" >&2
   fi
 fi
 
