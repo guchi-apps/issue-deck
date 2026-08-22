@@ -307,7 +307,7 @@ export function MobileIssueListScreen({
         prerequisiteReadiness={prerequisiteReadiness}
         onStartManualStepGuide={onStartManualStepGuide}
         onStartIssueOrder={onStartIssueOrder}
-      onStartCodeReview={onStartCodeReview}
+        onStartCodeReview={onStartCodeReview}
         issueOrderAutoStart={issueOrderAutoStart}
         issueOrderCount={issueOrderCount}
         onPullToRefresh={onRefresh ? handlePullToRefresh : undefined}
