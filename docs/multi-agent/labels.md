@@ -394,10 +394,8 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 #### `01.check-merge`の「なぜ」はコメントにしか無い（#1631）
 
 理由ラベルが表すのは**ユーザーに何を求めているか**（＝PRをマージすること）までで、
-**なぜ自動マージされなかったか**は表さない。その「なぜ」の記録は
-`reusable-claude-review-develop.yml`の`auto-merge`ジョブが投稿するIssueコメント
-（「⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。」＋箇条書き。
-末尾に`<!-- issue-deck-source:claude-review-develop -->`）**だけ**にある。
+**なぜ自動マージされなかったか**は表さない。その「なぜ」の記録は、`claude-review-develop`発の
+Issueコメント（末尾に`<!-- issue-deck-source:claude-review-develop -->`）**だけ**にある。
 
 issue-deckのIssue詳細は、マージ待ちのときこのコメントを読んでマージボタンと同じ枠の中へ理由を
 出す（`src/lib/merge-check-reasons.ts`の`resolveMergeCheckReasons`と
@@ -405,12 +403,35 @@ issue-deckのIssue詳細は、マージ待ちのときこのコメントを読�
 既にある判定結果を読んでいるだけ。** issue-deckはPRの差分を持っていないため、パスパターンに
 よるリスク判定をクライアントで再現するとワークフローの判定と食い違う表示ができてしまう。
 
-- **ワークフロー側の文面を変えるとこの表示が黙って落ちる。** 変えるときは
-  `src/lib/merge-check-reasons.test.ts`が持つ実文面の固定値もあわせて更新する。
-- 理由コメントは、そのpush開始時点で既に`00.check-user`が付いていると投稿されない（#594）。
-  その場合は`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`から
-  理由を組み立て、どれも無ければ「理由の記録が見つかりませんでした」と出す。
-  **理由を推測で埋めない。**
+**書き手は5つある。全員が同じ定型で書き、読む側は文面ではなく「形」を当てにする**（#2062）。
+
+| 書き手 | いつ書くか |
+| --- | --- |
+| `reusable-claude-review-develop.yml`の`auto-merge` | 一次判定（パスパターン）に該当した |
+| 同`claude-review-fallback` | 自動レビューが実行できなかった |
+| 同`auto-merge-fallback` | 自動マージの有効化に失敗した |
+| 無人実行のレビュー（`.github/prompts/review-develop.md`） | 二次判定（意味的）で該当した |
+| ローカルのレビュー・統合セッション（`scripts/prompts/review-agent.md`） | 同上 |
+
+- **定型は「⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。」
+  → 空行 → `- `の箇条書き」。** 箇条書きには**理由だけ**を並べ、補足はその後に段落で書く。
+  混ぜるとそのまま画面の理由に並ぶ（Issue #2042の自由文コメントは、1つ目が「変更内容自体は
+  挙動を変えていません」という該当しない側の補足だった）
+- 読み側（`resolveMergeCheckReasons`）は**定型文を全件見てから、1件も無いときだけ**自由文
+  （`自動マージ不可`を含む行）へ落ちる。箇条書きは**次の見出し（`##`）の手前まで**を読む。
+  この打ち切りが、レビュー本文（「### 総評」「### 気になった点」…）の箇条書きを理由として
+  誤表示しないための歯止め。判定より先にマージされていた場合の文面（#1968）も定型に含む
+- **Issueへ書く。** 画面が読むのはIssueコメントだけで、PRコメントに書いても理由は出ない
+- **ローカルセッションは`<!-- issue-deck-source:claude-review-develop -->`と
+  `<!-- issue-deck-agent:reviewer -->`を両方付ける**（前者が理由の読み取り、後者が発言者の
+  表示。#1346）。読み側は`extractCommentSourceId`でsourceマーカーを直接見る——
+  `resolveCommentSource`はagentマーカーを先に読むため、両方付いたコメントを弾いてしまう
+- **文面や形を変えるとこの表示が黙って落ちる。** ワークフロー・プロンプトのどちらを変える
+  ときも、`src/lib/merge-check-reasons.test.ts`が持つ実文面の固定値をあわせて更新する
+- 一次判定の理由コメントは、そのpush開始時点で既に`00.check-user`が付いていると投稿されない
+  （#594）。その場合は`22.merge-confirm-required`・`23.preview-required`・
+  `24.screenshot-required`から理由を組み立て、どれも無ければ「理由の記録が見つかりません
+  でした」と出す。**理由を推測で埋めない。**
 
 #### 画面は理由ごとに「次に押すもの」まで出す（#1663）
 

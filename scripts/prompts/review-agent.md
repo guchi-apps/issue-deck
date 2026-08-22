@@ -65,6 +65,14 @@
      （`gh label list --json name --jq '.[].name' --limit 200`で確認する）。
      画面が読むのはIssue側のラベルなので、PRだけに付けても確認待ちの理由は表示されない
    - 該当理由をPRコメントに記載する
+   - **同じ理由を対応Issueにもコメントする**（`gh issue comment <対応Issue番号> --body "..."`）。
+     画面（Issue詳細の「対応PR・マージ待ち」）が読むのはIssueコメントだけで、PRコメントに
+     書いても「自動マージされなかった理由」は出ない（#2062）。本文は次の定型に揃える。
+     1行目を「⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。」に
+     し、空行を挟んで**理由だけ**を`- `の箇条書きで並べる（補足は箇条書きの後に段落で書く）。
+     末尾に`<!-- issue-deck-source:claude-review-develop -->`と
+     `<!-- issue-deck-agent:reviewer -->`を**両方**付ける（前者が理由の読み取り、
+     後者が発言者の表示に使われる）
    - 次のPRの処理に進む
 5. 非該当の場合
    - `gh pr merge <PR番号> --merge --delete-branch` でdevelopへマージする
