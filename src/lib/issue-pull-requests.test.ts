@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   canMergeIssuePullRequest,
+  isIssuePullRequestSettling,
   issuePullRequestStateLabel,
   selectIssuePullRequests,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { IssuePullRequest } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRequest {
@@ -17,7 +19,9 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+    mergeable: true,
+    repairRun: null,
     linkedIssueNumber: 600,
     ...overrides,
   };
@@ -63,6 +67,43 @@ describe("canMergeIssuePullRequest", () => {
 
   it("クローズ済み（却下）はマージできない", () => {
     expect(canMergeIssuePullRequest(pullRequest({ state: "closed", merged: false }))).toBe(false);
+  });
+
+  it("コンフリクトしているPRはマージできない（#2145）", () => {
+    expect(canMergeIssuePullRequest(pullRequest({ mergeable: false }))).toBe(false);
+  });
+
+  it("コンフリクトの判定前（null）はマージボタンを出す（#2145）", () => {
+    expect(canMergeIssuePullRequest(pullRequest({ mergeable: null }))).toBe(true);
+  });
+});
+
+describe("isIssuePullRequestSettling", () => {
+  it("CI実行中はまだ動いている", () => {
+    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "in_progress" }))).toBe(true);
+  });
+
+  it("自動マージ可否の判定中はまだ動いている", () => {
+    expect(
+      isIssuePullRequestSettling(
+        pullRequest({ mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE } }),
+      ),
+    ).toBe(true);
+  });
+
+  it("CIが通っていても自動修復が走っていればまだ動いている（#2145）", () => {
+    expect(
+      isIssuePullRequestSettling(
+        pullRequest({
+          ciStatus: "success",
+          repairRun: { kind: "conflict", startedAt: "2026-08-22T00:00:00.000Z", runUrl: null },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("CIが確定して判定も修復も無ければ動いていない", () => {
+    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "failure" }))).toBe(false);
   });
 });
 

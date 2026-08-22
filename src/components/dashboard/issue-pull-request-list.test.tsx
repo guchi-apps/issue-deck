@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssuePullRequest } from "@/types/pull-request";
 
@@ -19,7 +20,9 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+    mergeable: true,
+    repairRun: null,
     linkedIssueNumber: 600,
     ...overrides,
   };
@@ -121,7 +124,7 @@ describe("IssuePullRequestList", () => {
         pullRequests={[
           pullRequest({
             ciStatus: "success",
-            mergeJudgement: { state: "pending", step: null, runUrl: null },
+            mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
           }),
         ]}
         mergeApprovalPending
@@ -143,6 +146,7 @@ describe("IssuePullRequestList", () => {
               state: "pending",
               step: "claude-review",
               runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
+              aiReview: AI_REVIEW_NONE,
             },
           }),
         ]}
@@ -151,6 +155,106 @@ describe("IssuePullRequestList", () => {
       />,
     );
     expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
+  });
+
+  it("Claudeのレビューが終わった行はバッジを出す（#2150）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeJudgement: {
+              state: "settled",
+              step: null,
+              runUrl: null,
+              aiReview: {
+                state: "passed",
+                runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
+              },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    const badge = screen.getByText("Claudeのレビュー完了");
+    // 実行ログへ行けるようリンクにする（他のバッジと同じ形）
+    expect(badge.closest("a")?.getAttribute("href")).toBe(
+      "https://github.com/owner/repo/actions/runs/1/job/2",
+    );
+  });
+
+  // 実行中の言い回しは「Claudeがレビュー中」が持っており、二重に出さない（#2150）。
+  it("Claudeのレビューが実行中の行には完了バッジを出さない（#2150）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    expect(screen.queryByText(/Claudeのレビュー/)).toBeNull();
+    expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
+  });
+
+  it("コンフリクトしている行はバッジを出し、マージボタンを出さない（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        // PR画面では「コンフリクトあり」が出ているのに、Issue画面はCI状態しか出していなかった
+        pullRequests={[pullRequest({ ciStatus: "success", mergeable: false })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+  });
+
+  it("自動修復が走っている行はその旨をバッジで出す（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeable: false,
+            repairRun: {
+              kind: "conflict",
+              startedAt: new Date().toISOString(),
+              runUrl: "https://github.com/owner/repo/actions/runs/1",
+            },
+          }),
+        ]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText(/自動解消中/)).toBeTruthy();
+  });
+
+  it("コンフリクトの判定前（null）はマージボタンを出したままにする（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest({ mergeable: null })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.queryByText("コンフリクトあり")).toBeNull();
+    expect(screen.getByRole("button", { name: /マージする/ })).toBeTruthy();
   });
 
   it("マージするとその行のPR番号でonMerge・onMergedを呼ぶ", async () => {

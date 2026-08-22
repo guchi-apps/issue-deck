@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
-import { selectIssuePullRequests } from "@/lib/issue-pull-requests";
+import { isIssuePullRequestSettling, selectIssuePullRequests } from "@/lib/issue-pull-requests";
 import type { IssuePullRequest, IssuePullRequestListResponse } from "@/types/pull-request";
 
 const POLL_INTERVAL_MS = 20_000;
@@ -20,9 +20,12 @@ type UseIssuePullRequestsResult = {
  * Issueの対応PRのタイトル・状態・CI状態を取得する（#1339。旧`usePullRequestCiStatus`）。
  *
  * 取得は対応PRの番号が変わったときの1回だけで、そのあとポーリングするのは
- * `pollWhileCiRunning`（＝マージ待ち）の間にCIが実行中のPRが残っているときに限る。
- * CIが確定したら自分でポーリングを止める。マージ待ちでないIssueを開いているだけの間は
- * GitHub APIを繰り返し消費しない。
+ * `pollWhileCiRunning`（＝マージ待ち）の間に**まだ状態が動きうるPR**が残っているときに限る
+ * （`isIssuePullRequestSettling`）。状態が確定したら自分でポーリングを止める。マージ待ちでない
+ * Issueを開いているだけの間はGitHub APIを繰り返し消費しない。
+ *
+ * **止める条件はCI実行中だけではない**（#2145）。コンフリクトの自動解消はCIが通過したまま
+ * 走るため、CIだけを見て止めると解消が終わってもバッジが「自動解消中」のまま固まる。
  */
 export function useIssuePullRequests(
   repositoryFullName: string | null,
@@ -63,7 +66,7 @@ export function useIssuePullRequests(
         if (cancelled) return;
         const selected = selectIssuePullRequests(data.pullRequests, targetIssueNumber);
         setPullRequests(selected);
-        if (intervalId && !selected.some((pr) => pr.ciStatus === "in_progress")) {
+        if (intervalId && !selected.some(isIssuePullRequestSettling)) {
           clearInterval(intervalId);
           intervalId = null;
         }

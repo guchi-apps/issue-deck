@@ -6,7 +6,12 @@ import { GitPullRequest } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
-import { MergeJudgementBadge } from "@/components/dashboard/pull-request-badges";
+import {
+  AiReviewBadge,
+  ConflictBadge,
+  MergeJudgementBadge,
+  RepairRunBadge,
+} from "@/components/dashboard/pull-request-badges";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
@@ -156,8 +161,8 @@ export function IssuePullRequestList({
           const detail = detailByNumber.get(link.number);
           const merged = Boolean(mergedNumbers?.has(link.number)) || Boolean(detail?.merged);
           // 詳細が取れていない行では判断材料が無いので、マージできる前提で出す
-          const mergeable = detail ? canMergeIssuePullRequest(detail) : true;
-          const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (mergeable || merged);
+          const canMerge = detail ? canMergeIssuePullRequest(detail) : true;
+          const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (canMerge || merged);
 
           return (
             <li key={link.number} className="flex min-w-0 flex-wrap items-center gap-2">
@@ -172,6 +177,12 @@ export function IssuePullRequestList({
               </GithubReferenceLink>
               {detail && <IssuePullRequestStateBadge pullRequest={detail} />}
               {detail && <PullRequestCiStatusBadge status={detail.ciStatus} />}
+              {/* Claudeのレビューが終わったかも、PR画面と同じ部品・同じ並び順で出す（#2150） */}
+              {detail && <AiReviewBadge aiReview={detail.mergeJudgement.aiReview} />}
+              {/* コンフリクトと自動修復の実行中は、PR画面と同じバッジ・同じ文言で出す（#2145）。
+                  CI状態だけを出していた頃は、コンフリクトしていても「CI通過」しか見えなかった */}
+              {detail && <ConflictBadge mergeable={detail.mergeable} />}
+              {detail && <RepairRunBadge run={detail.repairRun} compact />}
               {detail && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
               {showMergeButton && onMerge && (
                 <IssueMergeButton

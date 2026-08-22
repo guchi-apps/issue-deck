@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AI_REVIEW_NONE,
   fetchCheckRollup,
   fetchPullRequestRollup,
   fetchPullRequestRollups,
@@ -92,7 +93,7 @@ describe("fetchCheckRollup", () => {
         { status: "in_progress", conclusion: null },
         { status: "completed", conclusion: "cancelled" },
       ],
-      mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 
@@ -118,7 +119,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "failure" },
         { status: "pending", conclusion: null },
       ],
-      mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 
@@ -145,6 +146,7 @@ describe("fetchCheckRollup", () => {
         state: "pending",
         step: null,
         runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
+        aiReview: AI_REVIEW_NONE,
       },
     });
   });
@@ -174,6 +176,7 @@ describe("fetchCheckRollup", () => {
         state: "pending",
         step: null,
         runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
+        aiReview: AI_REVIEW_NONE,
       },
     });
   });
@@ -198,7 +201,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "skipped" },
       ],
-      mergeJudgement: { state: "settled", step: null, runUrl: null },
+      mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 
@@ -221,6 +224,99 @@ describe("fetchCheckRollup", () => {
     // CI状態は`success`のままで、判定の進み具合だけが別の軸として`pending`になる。
     expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
     expect(rollup?.mergeJudgement.state).toBe("pending");
+  });
+
+  /**
+   * Claudeのレビューが終わったか（#2150）。判定全体（`mergeJudgement.state`）とは別の軸で、
+   * `claude-review`ジョブのcheck-runだけを見る。
+   */
+  describe("aiReview", () => {
+    async function aiReviewOf(nodes: unknown[]) {
+      stubGraphql(
+        rollupResponse({ state: "SUCCESS", contexts: { totalCount: nodes.length, nodes } }),
+      );
+      const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+      return rollup?.mergeJudgement.aiReview;
+    }
+
+    it("レビューが成功していれば`passed`。実行ログのURLも返す", async () => {
+      expect(
+        await aiReviewOf([
+          checkRun("COMPLETED", "SUCCESS", "ci.yml"),
+          checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review"),
+          checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "auto-merge"),
+        ]),
+      ).toEqual({
+        state: "passed",
+        runUrl: "https://github.com/owner/repo/actions/runs/1/job/claude-review",
+      });
+    });
+
+    // 差分が小さいPRでは`risk-check`がレビューを飛ばす（#992）。GitHubは`if`で飛ばした
+    // ジョブも`skipped`のcheck-runとして出すため、「走らなかった」と言い切れる。
+    it("差分が小さくレビューが実行されなかった場合は`skipped`", async () => {
+      expect(
+        (
+          await aiReviewOf([
+            checkRun("COMPLETED", "SKIPPED", "claude-review-develop.yml", "claude-review"),
+          ])
+        )?.state,
+      ).toBe("skipped");
+    });
+
+    it("レビュー自体が落ちた場合は`failed`", async () => {
+      expect(
+        (
+          await aiReviewOf([
+            checkRun("COMPLETED", "FAILURE", "claude-review-develop.yml", "claude-review"),
+            // 肩代わりジョブは`00.check-user`を付けるだけで、レビューをやり直すわけではない
+            checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review-fallback"),
+          ])
+        )?.state,
+      ).toBe("failed");
+    });
+
+    it("レビューが実行中なら`pending`", async () => {
+      expect(
+        (
+          await aiReviewOf([
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+          ])
+        )?.state,
+      ).toBe("pending");
+    });
+
+    // ワークフローは配られているが、レビューのジョブがまだ現れていない場合。
+    it("レビューのcheck-runが1件も無ければ`none`", async () => {
+      expect(
+        await aiReviewOf([
+          checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "risk-check"),
+        ]),
+      ).toEqual(AI_REVIEW_NONE);
+    });
+
+    // 肩代わりジョブは名前が似ているだけで役割が違う。これだけでは「レビューが終わった」と言わない。
+    it("肩代わりジョブ（claude-review-fallback）だけでは`none`", async () => {
+      expect(
+        await aiReviewOf([
+          checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review-fallback"),
+        ]),
+      ).toEqual(AI_REVIEW_NONE);
+    });
+
+    it("チェックが多すぎて1件ずつ見られない場合は`none`", async () => {
+      stubGraphql(
+        rollupResponse({
+          state: "SUCCESS",
+          contexts: {
+            totalCount: 101,
+            nodes: [checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review")],
+          },
+        }),
+      );
+      const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+      expect(rollup?.mergeJudgement.aiReview).toEqual(AI_REVIEW_NONE);
+    });
   });
 
   it("判定のワークフローが配られていないリポジトリでは`unknown`（#1968）", async () => {
@@ -261,6 +357,10 @@ describe("fetchCheckRollup", () => {
       state: "pending",
       step: "claude-review",
       runUrl: "https://github.com/owner/repo/actions/runs/1/job/claude-review",
+      aiReview: {
+        state: "pending",
+        runUrl: "https://github.com/owner/repo/actions/runs/1/job/claude-review",
+      },
     });
   });
 
@@ -374,7 +474,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "success",
       checks: null,
-      mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 
@@ -384,7 +484,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: null,
       checks: [],
-      mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 
@@ -434,7 +534,7 @@ describe("fetchPullRequestRollup", () => {
       rollup: {
         state: "success",
         checks: [{ status: "completed", conclusion: "success" }],
-        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+        mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       },
       mergeable: false,
     });
@@ -453,7 +553,7 @@ describe("fetchPullRequestRollup", () => {
       rollup: {
         state: null,
         checks: [],
-        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+        mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       },
       mergeable: true,
     });
@@ -463,7 +563,7 @@ describe("fetchPullRequestRollup", () => {
       rollup: {
         state: null,
         checks: [],
-        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+        mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       },
       mergeable: null,
     });
@@ -476,7 +576,7 @@ describe("fetchPullRequestRollup", () => {
       rollup: {
         state: null,
         checks: [],
-        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+        mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       },
       mergeable: true,
     });
@@ -578,7 +678,7 @@ describe("fetchPullRequestRollups", () => {
     expect(rollups.get(pullRequestRollupKey("owner", "repo", 2))?.rollup).toEqual({
       state: "success",
       checks: [],
-      mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
   });
 

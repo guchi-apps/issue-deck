@@ -672,6 +672,26 @@ done
 main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`から`vX.Y.Z`タグを作るリポジトリ」だけ**
 で、無人実行を入れているかどうかとは独立している。
 
+**#2135で検査項目が増え、ジョブが2つになった。** `version-tag-check`（タグの重複）に加えて
+`deploy-config-check`が、`deploy.yml`のうち**mainへ入るまで露見しない設定漏れ**を見る。
+
+| ジョブ | 見るもの | 落ちると分かること |
+|---|---|---|
+| `version-tag-check` | `package.json`のバージョンと既存タグ | バージョンの上げ忘れ（#1367） |
+| `deploy-config-check` | `appleboy/ssh-action`の`env:`／`with.envs:`／リモートスクリプトの3者 | 環境変数を増やしたときの`envs:`への追記漏れ（**本番だけ値が空になる**） |
+| 〃 | 配布物を固める`tar`の対象 | 追跡されていないパス（`tar: public: Cannot stat`でビルドが落ちる） |
+| 〃 | `packageManager`のpnpmメジャー | VPSのNode 20で動かないpnpm 11（`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`） |
+
+**配り直しは要らない。** 検査は既存の`reusable-version-tag-check.yml`へジョブとして足してあり、
+callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`）を上げるだけで14リポジトリ全部で
+効き始める**。逆に、参照タグを上げるまではどのリポジトリでも効かない。
+
+`deploy-config-check`は`appleboy/ssh-action`を使わないリポジトリ（`myroom`・`signaly`は`rsync`、
+`solitaire`は`easingthemes/ssh-deploy`）ではその検査をスキップする。判定できない形（`cd`を挟む
+`run:`、GitHubの式や変数を含む`tar`の引数）も黙って通し、理由をログに残す——**誤検知でmain宛PRを
+止める方が、見逃すより高くつく**ため。配布前に14リポジトリすべての`deploy.yml`へ通して、
+誤検知が出ないことを確かめてある。
+
 配った14リポジトリ（#1459。`@workflows/v16`）は次のとおり。
 
 | リポジトリ | `with:`に渡す入力 |
@@ -704,6 +724,49 @@ for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-mana
   echo -n "$r: "
   gh api "repos/guchi-apps/$r/contents/.github/workflows/version-tag-check.yml" --jq .name \
     2>/dev/null || echo "未配置"
+done
+```
+
+## デプロイのヘルスチェックの実装状況（#2141）
+
+`guchi-apps/docs`の`standards/ci-deploy.md`は、デプロイ後のヘルスチェックを**「成功するまで2秒間隔で
+最大60秒くり返す」**形と定めている（guchi-apps/docs#29）。固定の`sleep`1回だと起動を待ちきれず、
+**本番へは反映済みなのにデプロイが赤くなる**。逆にヘルスチェックが無いと、アプリが起動に失敗しても
+`deploy`ジョブは緑で終わり、Signalyには「成功」の通知だけが飛ぶ。
+
+`deploy.yml`を持つ17リポジトリのうち、**#2141の時点で持っていなかったのは次の6件**。上の
+`deploy-config-check`（#2135）には含めていない——**これは検査ではなく実装の横展開**で、直せるまで
+毎回のmain宛PRで警告が出続けるため。
+
+| リポジトリ | デプロイの形 | 要るヘルスチェックの形 | 子Issue |
+|---|---|---|---|
+| `myroom` | SSH → pm2（uvicorn `127.0.0.1:8000`） | 標準どおり（`/api/health`） | myroom#205 |
+| `portfolio` | `appleboy/ssh-action` → pm2（Next.js `PORT=3105`） | 標準どおり | portfolio#133 |
+| `signaly` | SSH → `deploy/restart-service.sh` → user systemd（uvicorn `127.0.0.1:8002`） | 標準どおり（`/`はStaticFiles配信） | signaly#168 |
+| `solitaire` | rsyncのみ（プロセス無し・Apacheが静的配信） | **起動待ちが無いのでリトライループは過剰。** 公開URLへの短い確認 | solitaire#81 |
+| `subpc` | セルフホストランナー → `setup-apply.sh` | **HTTPの待受が無い。** `systemctl is-active`の確認 | subpc#52 |
+| `vps` | SSH → `scripts/apply.sh` | **Apache側は対応済み**（下記）。残るのはuser systemdユニットの起動失敗 | vps#112 |
+
+**`deploy.yml`だけをgrepすると`vps`を取りこぼす。** `vps`の疎通確認は`deploy.yml`ではなく
+`scripts/apply.sh`の中にあり、`apache2ctl configtest` → `systemctl reload apache2` →
+`scripts/check-https.sh`（SSLが有効な全vhostへ実際にHTTPS接続し、1つでも失敗すれば`exit 1`）を
+実行している。**他アプリの`curl -fsS http://127.0.0.1:${PORT}/`より広い。** 残っている穴は
+`deploy_user_unit`が`"${sc[@]}" start "$unit" && echo ... || echo "(警告) ..."`の形で書かれていて、
+**`|| echo`が`set -euo pipefail`の発火を止めてしまう**こと。ユニットが上がらなくても`apply.sh`は0で
+終わる。ヘルスチェックの有無を機械的に判定するなら、**`deploy.yml`から呼ばれるスクリプトまで
+追う必要がある**。
+
+残り11リポジトリは標準どおり実装済み（`for i in $(seq 1 30)` + `sleep 2`）。ただし**`aide`だけは
+`seq 1 15`で待ち時間が30秒**しかない（形は同じ）。
+
+```bash
+# 実装状況の確認。deploy.yml に health が無いリポジトリは、呼び出し先のスクリプトも見ること
+for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
+         portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
+         subpc vps issue-deck; do
+  printf '%-20s ' "$r"
+  gh api "repos/guchi-apps/$r/contents/.github/workflows/deploy.yml?ref=main" --jq .content \
+    2>/dev/null | base64 -d | grep -oiE 'seq 1 [0-9]+' | head -1 || echo "なし"
 done
 ```
 

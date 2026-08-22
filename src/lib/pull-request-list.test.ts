@@ -16,9 +16,11 @@ import {
   pullRequestsAwaitingUserMerge,
   pullRequestsWaitingForMergeChecks,
   requiresUserMerge,
+  resolvePullRequestHeader,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -43,7 +45,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
@@ -409,7 +411,7 @@ describe("pullRequestsAwaitingUserMerge", () => {
         releasePullRequest({ number: 1, ciState: "pending" }),
         releasePullRequest({
           number: 2,
-          mergeJudgement: { state: "pending", step: "claude-review", runUrl: null },
+          mergeJudgement: { state: "pending", step: "claude-review", runUrl: null, aiReview: AI_REVIEW_NONE },
         }),
         releasePullRequest({ number: 3 }),
       ],
@@ -458,7 +460,7 @@ describe("pullRequestsWaitingForMergeChecks", () => {
       releasePullRequest({ number: 1, ciState: "pending" }),
       releasePullRequest({
         number: 2,
-        mergeJudgement: { state: "pending", step: "risk-check", runUrl: null },
+        mergeJudgement: { state: "pending", step: "risk-check", runUrl: null, aiReview: AI_REVIEW_NONE },
       }),
       releasePullRequest({ number: 3 }),
       // マージ待ちですらないものは、どちらにも入らない
@@ -520,10 +522,10 @@ describe("canMergeFromDeck", () => {
 
 describe("isMergeJudgementPending", () => {
   it("判定が走っている間だけ真になる（#1968）", () => {
-    expect(isMergeJudgementPending({ state: "pending", step: null, runUrl: null })).toBe(true);
-    expect(isMergeJudgementPending({ state: "settled", step: null, runUrl: null })).toBe(false);
+    expect(isMergeJudgementPending({ state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(true);
+    expect(isMergeJudgementPending({ state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(false);
     // 判定のワークフローが配られていないリポジトリまで塞がない。
-    expect(isMergeJudgementPending({ state: "unknown", step: null, runUrl: null })).toBe(false);
+    expect(isMergeJudgementPending({ state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(false);
   });
 
   it("未取得（null・undefined）は押せる側として扱う（#2059）", () => {
@@ -543,7 +545,7 @@ describe("isMergeJudgementPending", () => {
   it("判定中でも`mergeWarnings`は増やさない（止め方はボタンの無効化。#1968）", () => {
     const judging = pullRequest({
       ciState: "success",
-      mergeJudgement: { state: "pending", step: null, runUrl: null },
+      mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
     expect(mergeWarnings(judging)).toEqual([]);
   });
@@ -731,5 +733,78 @@ describe("applyOptimisticMerges", () => {
   it("対象が無ければ配列をそのまま返す", () => {
     const pullRequests = [pullRequest()];
     expect(applyOptimisticMerges(pullRequests, [])).toBe(pullRequests);
+  });
+});
+
+describe("resolvePullRequestHeader", () => {
+  const summaryFromDetail = pullRequest({ title: "詳細から来たタイトル" });
+
+  function detail(fetchedAt: string, summary = summaryFromDetail) {
+    return { id: summary.id, summary, fetchedAt };
+  }
+
+  it("未選択ならnull", () => {
+    expect(
+      resolvePullRequestHeader(null, [pullRequest()], "2026-08-01T00:00:00Z", null),
+    ).toBeNull();
+  });
+
+  it("一覧に載っていればその項目を使う", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    expect(
+      resolvePullRequestHeader(listed.id, [listed], "2026-08-01T00:00:00Z", null),
+    ).toBe(listed);
+  });
+
+  it("一覧に載っていなければ詳細の`summary`で補う", () => {
+    expect(
+      resolvePullRequestHeader(
+        summaryFromDetail.id,
+        [],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:00:00Z"),
+      ),
+    ).toBe(summaryFromDetail);
+  });
+
+  it("一覧にも詳細にも無ければnull", () => {
+    expect(
+      resolvePullRequestHeader("guchi-apps/issue-deck#999", [], "2026-08-01T00:00:00Z", null),
+    ).toBeNull();
+  });
+
+  it("両方あるときは取得が新しい方を採る（#1578）", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    // 詳細ヘッダーの更新ボタンを押した直後＝詳細の方が新しい
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:05:00Z"),
+      ),
+    ).toBe(summaryFromDetail);
+    // 一覧のポーリングが後から回った＝一覧の方が新しい
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:10:00Z",
+        detail("2026-08-01T00:05:00Z"),
+      ),
+    ).toBe(listed);
+  });
+
+  it("別のPRの詳細が残っていても使わない", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    const other = pullRequest({ id: "guchi-apps/issue-deck#2", number: 2 });
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:05:00Z", other),
+      ),
+    ).toBe(listed);
   });
 });

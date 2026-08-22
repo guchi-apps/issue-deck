@@ -14,6 +14,7 @@ const baseFilters: IssueFilters = {
   pane: "issues",
   prview: "all",
   pr: null,
+  prmodal: null,
   issue: null,
   q: "",
   repos: [],

@@ -62,6 +62,16 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
     expect(urlOf(push.mock.calls[0])).not.toContain("issue=1001");
   });
 
+  // 重ね表示（`prmodal`）は下の画面を残したまま出るので、画面が変わったのに残ると閉じた先が
+  // 押したときの画面ではなくなる（#2149）。
+  it("画面遷移では、重ねて開いていたPR詳細も畳む", () => {
+    const { result } = renderMobileScreen("mscreen=issues&prmodal=owner%2Frepo%2312");
+
+    act(() => result.current.selectIssue(issues[0]));
+
+    expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
+  });
+
   it("絞り込みシート内の操作（silent）は履歴を積まない", () => {
     const { result } = renderMobileScreen("mscreen=issues");
 

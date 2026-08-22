@@ -74,6 +74,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **PR詳細の開き方は2つあり、入口ごとに決まっている**（#2149）。「ユーザーの確認待ち」に並ぶ
+  マージ待ちPRのカードだけが**その場に重ねて開く**（`prmodal`クエリ＋
+  [`pull-request-detail-dialog.tsx`](../src/components/dashboard/pull-request-detail-dialog.tsx)）。
+  確認待ちは上から順に片付ける場所で、1件開くたびにPR一覧画面へ移ると続きを見るのに毎回
+  戻る操作が要るため。左メニューのPull Request一覧・ブランチ画面・通知ベル・本文中の参照
+  リンクからは、従来どおりPRペイン（`pane=pull-requests`＋`pr`）へ遷移する。
+  - **重ね表示の開閉も`prmodal`クエリが正で、stateでは持たない。** 重ね表示の中にアプリ内
+    リンク（ヘッダーの「Issue #N」・本文とコメントの参照）があり、stateで持つと押したときに
+    下の画面だけが遷移して重ね表示が残る。クエリなら遷移側で`prmodal`を落とすだけで
+    「閉じて遷移」になり、戻る操作で重ね表示ごと戻ってくる。落とすのは
+    [`use-reference-navigation.ts`](../src/hooks/use-reference-navigation.ts)・
+    [`use-mobile-screen.ts`](../src/hooks/use-mobile-screen.ts)の`navigate`・
+    `use-issue-filters.ts`のビュー／ペイン切り替えの3か所で、**現在地を進める経路を足したら
+    ここでも落とす**。
+  - **`pr`クエリと共用しない。** `pr`はスマホのPR詳細画面（`mscreen=pull-requests`）が
+    使っており、共用すると「一覧の上に重ねる」と「画面を差し替える」の条件が重なる。
+  - ヘッダーの材料（`PullRequestSummary`）を一覧と詳細APIのどちらから採るかは
+    `resolvePullRequestHeader`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）
+    に集約してあり、PRペインと重ね表示で共用する。
 - **Issue一覧の上に並ぶ「〜が n件あります。」の入口バーは、`issue-list.tsx`の
   `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」・「まとめて実行」の
   3本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの
@@ -865,6 +884,43 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   表示と操作は一覧・詳細・確認待ち一覧・リリース進捗・ブランチ画面で揃え、コンフリクト中は
   **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
   GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **Issue画面の「対応PR」も、PR画面と同じ状態を出す**（#2145）。同じPRなのに取得口が2つに
+  分かれており（PR画面は`/api/pull-requests`＋`PullRequestSummary`、Issue画面は
+  `/api/issues/pull-requests`＋`IssuePullRequest`）、**PR側へ状態を足してもIssue側は
+  置いていかれる**。実際、PR画面が「コンフリクトあり」「コンフリクトを自動解消中」を出している
+  PRで、Issue画面には「CI通過」しか出ず、押しても入らないマージボタンが並んでいた。
+  Issue側もコンフリクト有無（`mergeable`）と修復状況（`repairRun`）を返し、バッジは
+  `pull-request-badges.tsx`の同じコンポーネント（`ConflictBadge`・`RepairRunBadge`）を使う。
+  **文言も揃える**——CI状態の言い回しがIssue側だけ「CI成功」だった。
+  マージボタンの出し分けも`canMergeIssuePullRequest`を`canMergeFromDeck`と同じ判定にする。
+  消費は増えない: `mergeable`は上のとおりCI状態と同じGraphQLに相乗りし（1件ずつの
+  `fetchRefCheckState`をやめ、`fetchPullRequestCiStates`のまとめ取りにしたので**むしろ減る**）、
+  `repairRun`はGitHubではなくDBを1回引くだけ。
+- **CI状態の呼び名と見た目を持つのは`CiStateBadge`の1か所だけ**（#2150。
+  [`components/dashboard/pull-request-badges.tsx`](../src/components/dashboard/pull-request-badges.tsx)）。
+  以前は同じラベル表と同じピルがPR画面・Issue画面（`pull-request-ci-status.tsx`）・リリース進捗
+  （`release-progress.tsx`）の3ファイルに複製されており、#2145で文言を「CI通過」へ揃えた後も
+  複製そのものは残っていた（揃える前はIssue画面だけ「CI成功」だった）。Issue画面が持つ型は
+  `PullRequestCiStatus`でPR画面の`CiState`と違うため、`PullRequestCiStatusBadge`は
+  **型を戻して`CiStateBadge`へ渡すだけの薄い層**にしてある。状態や文言を足すときはここだけを触る。
+- **「Claudeがレビューし終えたか」はCI状態とも判定全体とも別の軸として持つ**（#2150。
+  `check-rollup.ts`の`toAiReview`→ `MergeJudgement.aiReview`、画面は
+  `pull-request-badges.tsx`の`AiReviewBadge`）。判定ワークフローのcheck-runはCI状態の集約から
+  外してあり（#1799）、判定全体（`mergeJudgement.state`）が`settled`になるのは`auto-merge`まで
+  終わってから。そのため**CIが通った後にレビューだけが動いている窓**と、**差分が小さくて
+  レビューが走らなかったPR**が、どちらも画面では「何も出ていない」になっていた。
+  `claude-review`ジョブのcheck-runだけを見て、完了（`success`）・省略（`skipped`。
+  `risk-check`の`needs-review`が偽）・失敗の3つに分けて出す。**実行中は出さない**——その
+  言い回しは`MergeJudgementBadge`の「Claudeがレビュー中」が持っており、両方出すと同じことを
+  2回言うことになる。**肩代わりジョブ（`claude-review-fallback`）は数えない**（`00.check-user`を
+  付けるだけでレビューをやり直さないため）。取得は既存のGraphQLの応答から読むだけで、
+  **GitHub APIの消費は増えない**。
+- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145。
+  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)の
+  `isIssuePullRequestSettling`）。コンフリクトの自動解消と自動マージ可否の判定は**CIが通過した
+  まま**動くため、CI実行中だけを見て止めると、解消が終わってもバッジが「自動解消中」で固まり、
+  マージボタンも出てこない（Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものが
+  あるか**で判断する。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が

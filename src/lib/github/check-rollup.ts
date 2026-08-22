@@ -76,6 +76,31 @@ export type MergeJudgementState = "pending" | "settled" | "unknown";
  */
 export type MergeJudgementStep = "wait-for-ci" | "risk-check" | "claude-review" | "auto-merge";
 
+/**
+ * Claude（AI）によるレビューが終わったか（#2150）。`claude-review`ジョブのcheck-runだけを見る。
+ *
+ * - `pending` … まだ完了していない（実行中・後続待ち）
+ * - `passed` … レビューを実行し終えた
+ * - `skipped` … 差分が小さくリスクのあるパスも含まれず、そもそも実行されなかった
+ *   （`risk-check`の`needs-review`が`false`。GitHubは`if`で飛ばしたジョブも
+ *   `conclusion: skipped`のcheck-runとして出す）
+ * - `failed` … レビュー自体が落ちた・打ち切られた（`claude-review-fallback`が
+ *   `00.check-user`を付けにいく）
+ * - `none` … check-runが1件も無い。ワークフローが配られていないリポジトリ、起動前、
+ *   リリースPR、チェックが多すぎて1件ずつ見られなかった場合
+ */
+export type AiReviewState = "pending" | "passed" | "skipped" | "failed" | "none";
+
+/** Claudeのレビューの状態と、その実行ログURL（#2150） */
+export type AiReview = {
+  state: AiReviewState;
+  /** そのジョブの実行ログURL。取得できなければnull */
+  runUrl: string | null;
+};
+
+/** レビューのcheck-runを1件も見られなかったときの値。画面には何も出さない */
+export const AI_REVIEW_NONE: AiReview = { state: "none", runUrl: null };
+
 /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968・#2059） */
 export type MergeJudgement = {
   state: MergeJudgementState;
@@ -83,6 +108,16 @@ export type MergeJudgement = {
   step: MergeJudgementStep | null;
   /** 進行中のジョブの実行ログURL。`pending`以外・取得できなければnull（#2059） */
   runUrl: string | null;
+  /**
+   * Claudeのレビューが終わったか（#2150）。**判定全体（`state`）とは別の軸。**
+   *
+   * 判定は`identify-issue` → {`wait-for-ci` ‖ `risk-check` → `claude-review`} → `auto-merge`と
+   * 進み、`state`が`settled`になるのは`auto-merge`まで終わってから。「レビューは終わったが
+   * まだマージの判定が動いている」窓（実測で数分）を`state`だけでは表せないため、
+   * レビューのcheck-runだけをここへ取り出す。**同じ1回のGraphQLの応答から読むので、
+   * これを持つことでGitHub APIの消費は増えない。**
+   */
+  aiReview: AiReview;
 };
 
 /** 判定のcheck-runを1件も見られなかったときの値。従来どおり画面からマージできる側へ倒す */
@@ -90,6 +125,7 @@ export const MERGE_JUDGEMENT_UNKNOWN: MergeJudgement = {
   state: "unknown",
   step: null,
   runUrl: null,
+  aiReview: AI_REVIEW_NONE,
 };
 
 /**
@@ -120,6 +156,13 @@ const JUDGEMENT_STEP_BY_JOB: Record<string, MergeJudgementStep> = {
   "auto-merge": "auto-merge",
   "auto-merge-fallback": "auto-merge",
 };
+
+/**
+ * Claudeがレビューするジョブの名前（#2150）。**肩代わりジョブ（`claude-review-fallback`）は
+ * 含めない。** あれはレビューが落ちたときに`00.check-user`を付けるためのもので、レビューを
+ * やり直すわけではないため、「レビューが終わったか」の材料にはならない。
+ */
+const AI_REVIEW_JOB = "claude-review";
 
 /**
  * 未完了のジョブが複数あるときに、先に来る方を「いま待っているもの」として名乗らせる順（#2059）。
@@ -391,17 +434,46 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
     (node) => workflowFileOf(node) === MERGE_JUDGEMENT_WORKFLOW_FILE,
   );
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
+
+  const aiReview = toAiReview(judgementChecks);
   const pendingChecks = judgementChecks.filter(
     (node) => (node.status ?? "").toLowerCase() !== "completed",
   );
-  if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null };
+  if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview };
 
   const current = currentJudgementCheck(pendingChecks);
   return {
     state: "pending",
     step: current ? judgementStepOf(current) : null,
     runUrl: current?.detailsUrl ?? null,
+    aiReview,
   };
+}
+
+/**
+ * Claudeのレビューが終わったかを決める（#2150）。判定ワークフローの`claude-review`ジョブの
+ * check-runだけを見る。
+ *
+ * **完了したときの`conclusion`で3つに分ける。** `success`は実行し終えた、`skipped`・`neutral`は
+ * そもそも実行されなかった（差分が小さくレビュー不要と判定された）、それ以外（`failure`・
+ * `cancelled`・`timed_out`）は落ちた。「走らなかった」を「まだ終わっていない」と同じ扱いに
+ * すると、画面で見分けが付かないまま待ち続けることになるため分けている。
+ *
+ * check-runが複数ある（再実行した）ときは**最後のものを今の状態とする**。GraphQLは
+ * check-suiteの並び順で返し、後から作られたものが後ろに来る。
+ */
+function toAiReview(judgementChecks: RollupContextNode[]): AiReview {
+  const reviewChecks = judgementChecks.filter((node) => jobNameOf(node) === AI_REVIEW_JOB);
+  const check = reviewChecks[reviewChecks.length - 1];
+  if (!check) return AI_REVIEW_NONE;
+
+  const runUrl = check.detailsUrl ?? null;
+  if ((check.status ?? "").toLowerCase() !== "completed") return { state: "pending", runUrl };
+
+  const conclusion = (check.conclusion ?? "").toLowerCase();
+  if (conclusion === "success") return { state: "passed", runUrl };
+  if (conclusion === "skipped" || conclusion === "neutral") return { state: "skipped", runUrl };
+  return { state: "failed", runUrl };
 }
 
 function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {

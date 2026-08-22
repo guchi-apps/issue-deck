@@ -1,4 +1,9 @@
-import type { MergeJudgement, MergeJudgementStep } from "@/lib/github/check-rollup";
+import type {
+  AiReview,
+  AiReviewState,
+  MergeJudgement,
+  MergeJudgementStep,
+} from "@/lib/github/check-rollup";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -341,6 +346,42 @@ export function isMergeWaitingForChecks(pullRequest: PullRequestSummary): boolea
 }
 
 /**
+ * 詳細のヘッダーに出す`PullRequestSummary`を、一覧の項目と詳細APIの`summary`から選ぶ
+ * （#1578・#2149）。
+ *
+ * 一覧に載っていればそれを使う（CI状態まで揃っていて即座に描ける）。載っていない場合は
+ * 詳細APIが返す`summary`で補う——画面内のリンクからマージ済み・クローズ済みのPRを開いた
+ * 経路（#1260）。
+ *
+ * **両方あるときは取得が新しい方を採る**（#1578）。一覧はPR画面を開いている間しか自動更新
+ * されず、詳細ヘッダーの更新ボタンは詳細しか取り直さない。一覧を無条件に優先すると、更新を
+ * 押してCIが通ったことを取り直しても、一覧を開いた時点の「CI失敗」が出たまま消えなかった。
+ *
+ * 取得中・別のPRへ切り替えた直後に前のPRのヘッダーが残らないよう、`detail`はidの一致を
+ * 確認してから使う。
+ *
+ * @param pullRequestId 詳細を開いているPRのid（`<owner>/<repo>#<番号>`）。未選択はnull
+ * @param pullRequests 一覧の母集団
+ * @param pullRequestsFetchedAt 一覧の取得時刻（ISO8601）。未取得はnull
+ * @param detail 詳細APIの結果。取得前・取得失敗時はnull
+ */
+export function resolvePullRequestHeader(
+  pullRequestId: string | null,
+  pullRequests: readonly PullRequestSummary[],
+  pullRequestsFetchedAt: string | null,
+  detail: { id: string; summary: PullRequestSummary; fetchedAt: string } | null,
+): PullRequestSummary | null {
+  if (!pullRequestId) return null;
+  const fromList = pullRequests.find((pullRequest) => pullRequest.id === pullRequestId) ?? null;
+  const fromDetail = detail && detail.id === pullRequestId ? detail : null;
+  if (!fromDetail) return fromList;
+  if (!fromList) return fromDetail.summary;
+  return pullRequestsFetchedAt && pullRequestsFetchedAt > fromDetail.fetchedAt
+    ? fromList
+    : fromDetail.summary;
+}
+
+/**
  * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613・#2081）。
  *
  * 返すのは`pullRequestsRequiringUserMerge`のうち**いまマージを押せるもの**だけ。件数
@@ -410,6 +451,47 @@ export function mergeJudgementLabel(step: MergeJudgementStep | null): string {
  */
 export function mergeJudgementReason(step: MergeJudgementStep | null): string {
   return `${mergeJudgementLabel(step)}です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
+}
+
+/**
+ * バッジとして描く、Claudeのレビューの「終わった後」の状態（#2150）。
+ * `AiReviewState`から`pending`（実行中）と`none`（check-runが無い）を除いたもの。
+ */
+export type AiReviewSettledState = Exclude<AiReviewState, "pending" | "none">;
+
+/**
+ * Claudeのレビューの状態を表す、画面のバッジの文言（#2150）。
+ *
+ * **`pending`は入っていない。** 実行中の言い回しは`MERGE_JUDGEMENT_STEP_LABEL`の
+ * 「Claudeがレビュー中」が既に持っており、両方出すと同じことを2回言うことになる。
+ * このバッジが引き受けるのは「終わった後」の3状態だけ。
+ */
+export const AI_REVIEW_SETTLED_LABEL: Record<AiReviewSettledState, string> = {
+  passed: "Claudeのレビュー完了",
+  skipped: "Claudeのレビュー省略",
+  failed: "Claudeのレビュー失敗",
+};
+
+/** バッジの`title`に出す説明（#2150）。PCでマウスを載せたときに、その状態の意味まで読めるようにする */
+export const AI_REVIEW_SETTLED_REASON: Record<AiReviewSettledState, string> = {
+  passed: "Claude Codeによるレビューが終わっています（claude-review-develop）。",
+  skipped:
+    "差分が小さくリスクのあるパスも含まれないため、Claude Codeによるレビューは実行されていません（claude-review-develop / risk-check）。",
+  failed:
+    "Claude Codeによるレビューが失敗しました（claude-review-develop）。対応Issueへ00.check-userが付き、ユーザーの確認待ちになります。",
+};
+
+/**
+ * バッジを出す状態か（#2150）。**出すのは終わった3状態だけ。**
+ *
+ * `pending`は上のとおり「Claudeがレビュー中」が受け持ち、`none`（check-runが無い）は
+ * ワークフロー未配布・リリースPR・起動前のいずれかで、言えることが何も無いため出さない。
+ */
+export function aiReviewSettledState(
+  aiReview: AiReview | null | undefined,
+): AiReviewSettledState | null {
+  const state = aiReview?.state;
+  return state === "passed" || state === "skipped" || state === "failed" ? state : null;
 }
 
 /**

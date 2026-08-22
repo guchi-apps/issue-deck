@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { IssueComment } from "@/types/issue";
 
 const commentSummary: IssueCommentSummaries = {
@@ -374,7 +375,9 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
             draft: false,
             merged: false,
             ciStatus: pullRequestCiStatus,
-            mergeJudgement: { state: "unknown", step: null, runUrl: null },
+            mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+            mergeable: true,
+            repairRun: null,
             linkedIssueNumber: 1288,
           },
         ]}

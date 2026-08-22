@@ -10,6 +10,7 @@ import {
   resolveManualStepPrerequisites,
   summarizeManualStepPrerequisites,
 } from "@/lib/manual-step-prerequisites";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { Issue } from "@/types/issue";
 import type { IssuePullRequest } from "@/types/pull-request";
 
@@ -57,7 +58,9 @@ function makePullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRe
     draft: false,
     merged: false,
     ciStatus: null,
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+    mergeable: true,
+    repairRun: null,
     linkedIssueNumber: null,
     ...overrides,
   };

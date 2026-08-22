@@ -1,9 +1,15 @@
 name: Version tag check
 
-# バージョンを上げ忘れたままdevelop→mainをマージすると、mainへ入った後に deploy.yml の
-# タグ作成が失敗して本番デプロイが止まる。それをmain宛PRのCIで先に落とす（#1367）。
+# mainへ入った後にしか分からないデプロイの失敗を、main宛PRのCIで先に落とす。
 # **本体は reusable-version-tag-check.yml にあり、ここはトリガー定義だけの薄いcaller**。
 # issue-deck自身はローカルパス参照で常に最新を使い、カナリアとして先に問題を検知する。
+#
+# 呼ばれるジョブは2つ。**caller側は増やさなくてよい**（本体へジョブを足すだけで、他リポジトリ
+# へも参照タグの更新で届く）。
+#   - `version-tag-check` — バージョンを上げ忘れたままdevelop→mainをマージすると、
+#     deploy.yml のタグ作成が失敗して本番デプロイが止まる（#1367）
+#   - `deploy-config-check` — deploy.yml の設定漏れ（`appleboy/ssh-action` の envs: への
+#     追記漏れ・tar の対象に実在しないパス・packageManager のpnpmメジャー。#2135）
 #
 # 他リポジトリからは `uses: guchi-apps/issue-deck/.github/workflows/
 # reusable-version-tag-check.yml@workflows/vN` で参照する。
@@ -22,9 +28,10 @@ concurrency:
 jobs:
   version-tag-check:
     uses: ./.github/workflows/reusable-version-tag-check.yml
-    # issue-deckはルートのpackage.jsonにversionを持ち、リリースタグは`vX.Y.Z`形式のため
-    # inputsは全て既定値でよい（version-file: package.json / version-query: .version /
-    # tag-prefix: v）。
+    # issue-deckはルートのpackage.jsonにversionを持ち、リリースタグは`vX.Y.Z`形式で、
+    # デプロイは`.github/workflows/deploy.yml`にあるためinputsは全て既定値でよい
+    # （version-file: package.json / version-query: .version / tag-prefix: v /
+    # deploy-workflow: .github/workflows/deploy.yml / pnpm-major-max: 10）。
     #
     # **呼ばれる側の権限はcallerの付与範囲を超えられない**（#1181）。タグの確認しかしないため
     # contents: read だけを渡す。
