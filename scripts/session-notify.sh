@@ -96,6 +96,21 @@ fi
 # 通知を設定していないホストでもセッションが畳まれるようにするため、判定は送信の直前まで下げた。
 WEBHOOK_URL="${SESSION_NOTIFY_WEBHOOK_URL:-${SIGNALY_WEBHOOK_URL:-}}"
 
+# 計画を出したあと、issue-deckの画面からの返事を何秒まで待つか（#2061）。
+#
+# **待っている間、端末には承認プロンプトが出ない。** 待ち切ると（あるいはissue-deckが
+# 応答しなければ）何も返さずに終え、従来どおりのプロンプトが出る。`0`で待たない。
+# 上限・下限と既定はissue-deck側（`src/lib/dispatch/session-plan-request.ts`）が持っており、
+# ここで渡した値はそこで丸められる。
+PLAN_WAIT_SECONDS="${SESSION_PLAN_WAIT_SECONDS:-1800}"
+[[ "$PLAN_WAIT_SECONDS" =~ ^[0-9]+$ ]] || PLAN_WAIT_SECONDS=1800
+export NOTIFY_PLAN_WAIT_SECONDS="$PLAN_WAIT_SECONDS"
+# 返事を確かめる間隔（秒）。画面のポーリング（未完了があるときは5秒）より短くして、
+# 押してからセッションが動き出すまでの体感を短く保つ
+PLAN_POLL_INTERVAL_SECONDS="${SESSION_PLAN_POLL_INTERVAL_SECONDS:-3}"
+[[ "$PLAN_POLL_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] && ((PLAN_POLL_INTERVAL_SECONDS > 0)) ||
+  PLAN_POLL_INTERVAL_SECONDS=3
+
 # セッションの状態ファイル（#1256）。読み書きの作法は回収スクリプトと共有する。
 # **無くても通知は続ける**（このスクリプトはセッションを止めないことが最優先）。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
@@ -333,12 +348,101 @@ def resolve_plan_text(tool_input):
         return ""
 
 
+def signaly_link(text, url):
+    """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
+
+    Signalyがfieldsの値でリンクにできるのは `[text](url)` のマスクドリンク記法だけで、
+    生URLを置いても自動ではリンクにならない（Signalyの`docs/webhook.md`・
+    `frontend/app.js`の`renderFieldValue`）。
+
+    ただし`renderFieldValue`は `[text](url)` を
+    `<a href="..." target="_blank" rel="noopener noreferrer">` へ置換した**あとで**
+    `_..._` を `<em>` へ変換するため、生成後のHTMLに残る `_blank` のアンダースコアと
+    URL中のアンダースコアが対になり、hrefとtarget属性ごと壊れる（#1234で観測した
+    `</em>`の混入はこれ）。つまり1つの値に含まれるアンダースコアが2個以上あると壊れる。
+
+    URL中の `_` を `%5F` にしておけば値に残るアンダースコアは `_blank` の1個だけになり、
+    対にならないので壊れない。`%5F` は `_` のパーセントエンコードなので、URLとしての
+    指す先は変わらない。
+    """
+    return f"[{text}]({url.replace('_', '%5F')})"
+
+
+def build_signaly_payload(emoji, color, label, remote_url):
+    """Signalyへ送るpayloadを組み立てる（#2061でここだけ関数へ切り出した）。
+
+    計画の承認待ち（`plan`）も通知したいが、あちらは`decision`ブロックより手前で
+    確定するため、同じ組み立てを2箇所に持たずに済むようにしている。
+    """
+    title_parts = [emoji]
+    if repo_name and issue_number:
+        title_parts.append(f"[{repo_name} #{issue_number}]")
+    elif repo_name:
+        title_parts.append(f"[{repo_name}]")
+    title_parts.append(label)
+    if host_name:
+        title_parts.append(f"({host_display_name})")
+    title = " ".join(title_parts)
+
+    # **応答テキスト（hook の last_assistant_message）は載せない。**
+    # Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうるものを、外部サービスである
+    # Signalyへ出す経路を最初から作らない。中身はremote-controlのURLから見る。
+    #
+    # **リンクは1つのフィールドに1つだけ入れる。** マスクドリンク1つにつき `target="_blank"` 由来の
+    # アンダースコアが1個増えるため、同じ値に2つ並べると `_` が対になって両方壊れる
+    # （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
+    # `·`で連結していて、これに該当していた（#1247）。
+    fields = []
+    if repo_name:
+        fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
+    if issue_number:
+        issue_value = f"#{issue_number}"
+        if repo_slug:
+            issue_value = signaly_link(issue_value, f"https://github.com/{repo_slug}/issues/{issue_number}")
+        fields.append({"name": "Issue", "value": issue_value, "inline": True})
+    if host_name:
+        fields.append({"name": "Host", "value": host_name, "inline": True})
+    fields.append({"name": "Event", "value": label, "inline": True})
+    # 中断の引き上げ（#1971）に添える一文。**pollerが持つ固定の文言だけが入る**
+    # （セッションの画面や応答テキストは、他のイベントと同じくここへ載せない）。
+    interrupt_detail = hook.get("interrupt_detail", "")
+    if isinstance(interrupt_detail, str) and interrupt_detail.strip():
+        fields.append({"name": "詳細", "value": interrupt_detail.strip(), "inline": False})
+    if tmux_session:
+        fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
+    preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
+    if preview_url:
+        # 1フィールド1リンクを守る（`signaly_link`のコメント参照）
+        fields.append(
+            {"name": "開発環境", "value": signaly_link("画面を開く", preview_url), "inline": False}
+        )
+
+    if remote_url:
+        fields.append({
+            "name": "Remote Control",
+            "value": signaly_link("セッションを開く", remote_url),
+            "inline": False,
+        })
+        # 生URLも別フィールドで残す。**スマホのプッシュ通知の本文はSignaly側がMarkdownを
+        # 除去する**（`backend/push.py`の`_plain_text`）ので、マスクドリンクだけだと
+        # プッシュ通知には表示名しか出ずURLが消える。手でコピーする経路を残しておく。
+        # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
+        fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
+    return {"title": title, "color": color, "fields": fields}
+
+
 # 計画の提示（#1342）。**`ExitPlanMode`の`PreToolUse`は、承認プロンプトが出る前に飛ぶ。**
 # ここが計画をIssueへ残す唯一の機会で、`Notification`のJSONには計画に関する情報が何も無い。
 #
 # 送り先はSignalyではなくissue-deck。**計画本文を外部サービスへ出す経路は作らない**という
 # 方針（下の「応答テキストは載せない」と同じ理由）を守りつつ、Issueのコメントとしてなら
 # 残す価値がある（元々プロンプトが手で投稿するよう指示していたもの）。
+#
+# **Signalyへは「計画の承認待ち」だけを送る（#2061）。** 従来はここで送らず、直後に飛ぶ
+# 承認プロンプトの`Notification`に任せていた。画面から承認できるようになると、承認された
+# 場合は承認プロンプトが出ない＝`Notification`が飛ばないため、任せたままだと
+# **計画が出たことが誰にも通知されない。** 載せるのは他のイベントと同じ項目だけで、
+# 計画本文は入れない。
 if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
     plan = resolve_plan_text(hook.get("tool_input"))
     # 宛先が引けない・計画が読めないなら何もしない。issue-deck側もこれらは400で弾く。
@@ -355,7 +459,9 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
         "remoteControlUrl": remote_url or None,
         "planBaseSha": os.environ.get("NOTIFY_PLAN_BASE_SHA") or None,
         "hostName": host_name or None,
+        "waitSeconds": int(os.environ.get("NOTIFY_PLAN_WAIT_SECONDS") or 0),
     }))
+    print(json.dumps(build_signaly_payload("\U0001f5d2\ufe0f", "#faa61a", "計画の承認待ち", remote_url)))
     sys.exit(0)
 
 # 人が承認プロンプト・質問に答えて作業へ戻ったこと（#1357）。
@@ -423,83 +529,8 @@ else:
 remote_url = resolve_remote_url()
 
 
-def signaly_link(text, url):
-    """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
-
-    Signalyがfieldsの値でリンクにできるのは `[text](url)` のマスクドリンク記法だけで、
-    生URLを置いても自動ではリンクにならない（Signalyの`docs/webhook.md`・
-    `frontend/app.js`の`renderFieldValue`）。
-
-    ただし`renderFieldValue`は `[text](url)` を
-    `<a href="..." target="_blank" rel="noopener noreferrer">` へ置換した**あとで**
-    `_..._` を `<em>` へ変換するため、生成後のHTMLに残る `_blank` のアンダースコアと
-    URL中のアンダースコアが対になり、hrefとtarget属性ごと壊れる（#1234で観測した
-    `</em>`の混入はこれ）。つまり1つの値に含まれるアンダースコアが2個以上あると壊れる。
-
-    URL中の `_` を `%5F` にしておけば値に残るアンダースコアは `_blank` の1個だけになり、
-    対にならないので壊れない。`%5F` は `_` のパーセントエンコードなので、URLとしての
-    指す先は変わらない。
-    """
-    return f"[{text}]({url.replace('_', '%5F')})"
-
-
-title_parts = [emoji]
-if repo_name and issue_number:
-    title_parts.append(f"[{repo_name} #{issue_number}]")
-elif repo_name:
-    title_parts.append(f"[{repo_name}]")
-title_parts.append(label)
-if host_name:
-    title_parts.append(f"({host_display_name})")
-title = " ".join(title_parts)
-
-# **応答テキスト（hook の last_assistant_message）は載せない。**
-# Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうるものを、外部サービスである
-# Signalyへ出す経路を最初から作らない。中身はremote-controlのURLから見る。
-#
-# **リンクは1つのフィールドに1つだけ入れる。** マスクドリンク1つにつき `target="_blank"` 由来の
-# アンダースコアが1個増えるため、同じ値に2つ並べると `_` が対になって両方壊れる
-# （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
-# `·`で連結していて、これに該当していた（#1247）。
-fields = []
-if repo_name:
-    fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
-if issue_number:
-    issue_value = f"#{issue_number}"
-    if repo_slug:
-        issue_value = signaly_link(issue_value, f"https://github.com/{repo_slug}/issues/{issue_number}")
-    fields.append({"name": "Issue", "value": issue_value, "inline": True})
-if host_name:
-    fields.append({"name": "Host", "value": host_name, "inline": True})
-fields.append({"name": "Event", "value": label, "inline": True})
-# 中断の引き上げ（#1971）に添える一文。**pollerが持つ固定の文言だけが入る**
-# （セッションの画面や応答テキストは、他のイベントと同じくここへ載せない）。
-interrupt_detail = hook.get("interrupt_detail", "")
-if isinstance(interrupt_detail, str) and interrupt_detail.strip():
-    fields.append({"name": "詳細", "value": interrupt_detail.strip(), "inline": False})
-if tmux_session:
-    fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
-preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
-if preview_url:
-    # 1フィールド1リンクを守る（`signaly_link`のコメント参照）
-    fields.append(
-        {"name": "開発環境", "value": signaly_link("画面を開く", preview_url), "inline": False}
-    )
-
-if remote_url:
-    fields.append({
-        "name": "Remote Control",
-        "value": signaly_link("セッションを開く", remote_url),
-        "inline": False,
-    })
-    # 生URLも別フィールドで残す。**スマホのプッシュ通知の本文はSignaly側がMarkdownを
-    # 除去する**（`backend/push.py`の`_plain_text`）ので、マスクドリンクだけだと
-    # プッシュ通知には表示名しか出ずURLが消える。手でコピーする経路を残しておく。
-    # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
-    fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
-
 print(decision, state_event, activity, remote_url or "-")
-print(json.dumps({"title": title, "color": color, "fields": fields}))
+print(json.dumps(build_signaly_payload(emoji, color, label, remote_url)))
 PY
 )"
 
@@ -542,15 +573,144 @@ post_to_issue_deck() {
     "${app_base_url%/}$path" >/dev/null 2>&1
 }
 
-# 計画をIssueへ残す（#1342）。**Signalyへは送らない**（直後の承認プロンプトの通知と二重になる）。
+# issue-deckのAPIへJSONを1件投げ、**応答本文を標準出力へ返す**（#2061）。
+# 計画の投稿だけがこちらを使う（返ってくる`planRequestId`が、画面からの返事を待つ相手になる）。
+post_to_issue_deck_capture() {
+  local path="$1" body="$2" app_base_url dispatch_secret
+  [[ -n "$body" ]] || return 1
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 1
+  if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
+    printf '%s %s\n' "$path" "$body" >&2
+    return 0
+  fi
+  curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    -d "$body" \
+    "${app_base_url%/}$path" 2>/dev/null
+}
+
+# issue-deckのAPIをGETで1回引き、応答本文を標準出力へ返す（#2061）。
+get_from_issue_deck() {
+  local path="$1" app_base_url dispatch_secret
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 1
+  curl -fsS --max-time 10 \
+    -H "Authorization: Bearer $dispatch_secret" \
+    "${app_base_url%/}$path" 2>/dev/null
+}
+
+# JSONの応答から文字列のフィールドを1つ取り出す。**取れなければ空**（判定は呼び出し側）。
+json_field() {
+  local body="$1" key="$2"
+  [[ -n "$body" ]] || return 0
+  BODY="$body" KEY="$key" python3 -c '
+import json, os, sys
+try:
+    value = json.loads(os.environ["BODY"]).get(os.environ["KEY"])
+except Exception:
+    sys.exit(0)
+if isinstance(value, str):
+    sys.stdout.write(value)
+' 2>/dev/null || true
+}
+
+# Signalyへ通知を1件送る（#2061でここだけ関数へ切り出した）。webhookが未設定・payloadが空なら
+# 何もしない。**これはこのスクリプトの終端だけでなく、計画の承認待ち（`plan`）からも呼ばれる。**
+notify_signaly() {
+  local payload="$1"
+  # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。
+  [[ -n "$WEBHOOK_URL" && -n "$payload" ]] || return 0
+
+  if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
+    printf '%s\n' "$payload"
+    return 0
+  fi
+
+  # 応答が返らないwebhookで実装セッションを待たせないため、必ずタイムアウトを掛ける。
+  if ! curl -fsS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$WEBHOOK_URL" >/dev/null 2>&1; then
+    # 失敗理由をURLごと出すとwebhookのシークレットがセッションのログに残る。1行に留める。
+    echo "session-notify: Signalyへの通知に失敗しました（実装は続行します）" >&2
+  fi
+}
+
+# 計画をIssueへ残す（#1342）。**画面からの返事を待つ相手のid**（#2061）を標準出力へ返す。
+# 返らなければ待たずに終える＝端末に従来どおりの承認プロンプトが出る。
 report_plan_to_issue_deck() {
-  local body="$1"
-  if ! post_to_issue_deck /api/dispatch/sessions/plan "$body"; then
+  local body="$1" response=""
+  if ! response="$(post_to_issue_deck_capture /api/dispatch/sessions/plan "$body")"; then
     echo "session-notify: 計画のIssueへの投稿に失敗しました（実装は続行します）" >&2
     return 0
   fi
   [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
   mark_check_user_pending
+  json_field "$response" planRequestId
+}
+
+# 画面からの返事を待ち、Claude Codeの許可判定として標準出力へ返す（#2061）。
+#
+# **これは`send-keys`の例外ではない。** 端末へは何も送らず、`PreToolUse`フックの戻り値
+# （`hookSpecificOutput.permissionDecision`）としてClaude Code自身に判定させる。
+# 承認プロンプトの選択フォームに答えさせる操作はどこにも無い
+# （docs/multi-agent/gates.md）。
+#
+# **決まらなければ何も出力しない（フェイルオープン）。** 待ち切った・「端末で答える」を
+# 押された・issue-deckが応答しない、のいずれでも従来どおりの承認プロンプトが端末に出る。
+wait_for_plan_decision() {
+  local request_id="$1" deadline response status revision
+  [[ -n "$request_id" ]] || return 0
+  ((PLAN_WAIT_SECONDS > 0)) || return 0
+
+  deadline=$((SECONDS + PLAN_WAIT_SECONDS))
+  while ((SECONDS < deadline)); do
+    if ! response="$(get_from_issue_deck "/api/dispatch/sessions/plan/decision?id=$request_id")"; then
+      # issue-deckへ届かない＝返事を受け取る術が無い。**待ち続けない**（届かないまま
+      # 待ち切ると、その時間ぶんセッションが黙って止まる）
+      echo "session-notify: 計画の返事をissue-deckから取得できませんでした（端末で答えてください）" >&2
+      return 0
+    fi
+    status="$(json_field "$response" status)"
+    case "$status" in
+      APPROVED)
+        plan_decision_output allow "issue-deckの画面で承認されました"
+        return 0
+        ;;
+      REVISION_REQUESTED)
+        revision="$(json_field "$response" revisionText)"
+        # **`deny`の理由がそのまま次の指示になる。** 空で返すとClaudeは何を直せばよいか
+        # 分からないため、その場合も理由を明示する
+        plan_decision_output deny "${revision:-issue-deckの画面で計画の修正を求められました。}"
+        return 0
+        ;;
+      WAITING) ;;
+      *)
+        # DEFERRED・EXPIRED・GONE、および想定外の値。**何も返さずに終える**
+        return 0
+        ;;
+    esac
+    sleep "$PLAN_POLL_INTERVAL_SECONDS"
+  done
+}
+
+# `PreToolUse`フックの戻り値。**標準出力のJSONだけがClaude Codeに読まれる**ので、
+# ここ以外はすべて標準エラーへ出す約束になっている。
+plan_decision_output() {
+  local decision="$1" reason="$2"
+  DECISION="$decision" REASON="$reason" python3 -c '
+import json, os
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": os.environ["DECISION"],
+        "permissionDecisionReason": os.environ["REASON"],
+    }
+}))' 2>/dev/null || true
 }
 
 # **付けられたときだけ印を残す。** ラベルを外すのは印があるときだけなので、付けられて
@@ -569,7 +729,9 @@ decision_line="$(printf '%s' "$result" | head -1)"
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
-  report_plan_to_issue_deck "$(printf '%s' "$result" | tail -n +2)"
+  # 2行目が計画（issue-deck向け）、3行目が通知（Signaly向け）。**行を分けているのは、
+  # 計画本文を外部サービスへ出す経路を作らないため**（通知には計画が入らない）
+  PLAN_REQUEST_ID="$(report_plan_to_issue_deck "$(printf '%s' "$result" | sed -n '2p')")"
   # **計画を出した時点で、このセッションは人の答えを待っている**（#1438）。承認プロンプトの
   # `Notification`が飛ぶのを待たずにここで記録する。
   #
@@ -585,6 +747,14 @@ if [[ "$decision" == "plan" ]]; then
     session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
       echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
   fi
+
+  # **ここでSignalyへ通知する**（#2061）。画面から承認された場合は承認プロンプトが出ない＝
+  # `Notification`が飛ばないため、任せたままだと計画が出たことが誰にも届かない。
+  notify_signaly "$(printf '%s' "$result" | sed -n '3p')"
+
+  # 画面からの返事を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
+  # 承認プロンプトが出る）
+  wait_for_plan_decision "$PLAN_REQUEST_ID"
   exit 0
 fi
 
@@ -687,28 +857,6 @@ if [[ "$decision" == "quiet" ]]; then
   exit 0
 fi
 
-if [[ -z "$WEBHOOK_URL" ]]; then
-  # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。
-  exit 0
-fi
-
-payload="$(printf '%s' "$result" | tail -n +2)"
-if [[ -z "$payload" ]]; then
-  exit 0
-fi
-
-if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
-  printf '%s\n' "$payload"
-  exit 0
-fi
-
-# 応答が返らないwebhookで実装セッションを待たせないため、必ずタイムアウトを掛ける。
-if ! curl -fsS --max-time 10 \
-  -H "Content-Type: application/json" \
-  -d "$payload" \
-  "$WEBHOOK_URL" >/dev/null 2>&1; then
-  # 失敗理由をURLごと出すとwebhookのシークレットがセッションのログに残る。1行に留める。
-  echo "session-notify: Signalyへの通知に失敗しました（実装は続行します）" >&2
-fi
+notify_signaly "$(printf '%s' "$result" | tail -n +2)"
 
 exit 0

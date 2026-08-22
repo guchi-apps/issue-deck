@@ -32,6 +32,7 @@ import {
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
+import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
@@ -46,6 +47,7 @@ import {
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -521,6 +523,15 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画への返事待ち（#2061）。**待っている間、端末には承認プロンプトが出ていない**ので、
+  // ここが唯一の答える場所になる（切れると従来どおり端末のプロンプトへ戻る）
+  // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
+  // （`use-dispatch-state.ts`の`hasActiveJob`が`manualStepRuns`をこう扱っているのと同じ）
+  const planRequest = findPlanRequestForIssue(
+    dispatch.planRequests ?? [],
+    issue.repositoryFullName,
+    issue.number,
+  );
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -746,6 +757,16 @@ export function IssueDetail({
             checkUserGuidance={checkUserGuidance}
             planningSkipped={planningSkipped}
           />
+
+          {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
+              待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
+          {planRequest && (
+            <PlanApprovalPanel
+              request={planRequest}
+              session={issueSession}
+              dispatch={dispatch}
+            />
+          )}
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
               コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
