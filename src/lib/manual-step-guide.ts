@@ -97,7 +97,22 @@ const SECTION_MATCHERS = {
 
 type SectionKey = keyof typeof SECTION_MATCHERS;
 
-type Section = { key: SectionKey | null; lines: string[]; startLine: number };
+/**
+ * 見出しで区切った1節。
+ *
+ * `heading`は見出しの文言そのまま（本文の先頭など、見出しの下でない節は`null`）。
+ * `key`が`null`でも`heading`は残す——本文の書式検査（`manual-step-body-check.ts`）は
+ * `## 関連`のように`SECTION_MATCHERS`に無い見出しも見る必要があるため。
+ */
+export type ManualStepSection = {
+  key: SectionKey | null;
+  heading: string | null;
+  level: number;
+  lines: string[];
+  startLine: number;
+};
+
+type Section = ManualStepSection;
 
 /**
  * 本文を見出しで区切る。**コードフェンスの中の`#`は見出しにしない**——コピペ用コマンドの
@@ -105,10 +120,10 @@ type Section = { key: SectionKey | null; lines: string[]; startLine: number };
  *
  * @returns 各節。`startLine`はその節の1行目の本文中の行番号（1始まり）
  */
-function splitSections(body: string): Section[] {
+export function splitManualStepSections(body: string): Section[] {
   const lines = body.split("\n");
   const sections: Section[] = [];
-  let current: Section = { key: null, lines: [], startLine: 1 };
+  let current: Section = { key: null, heading: null, level: 0, lines: [], startLine: 1 };
   let openFence: string | null = null;
 
   lines.forEach((line, index) => {
@@ -132,7 +147,13 @@ function splitSections(body: string): Section[] {
     }
 
     sections.push(current);
-    current = { key: matchSectionKey(heading[2]), lines: [], startLine: index + 2 };
+    current = {
+      key: matchSectionKey(heading[2]),
+      heading: heading[2].trim(),
+      level: heading[1].length,
+      lines: [],
+      startLine: index + 2,
+    };
   });
 
   sections.push(current);
@@ -363,7 +384,7 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
   };
   if (!body || body.trim() === "") return empty;
 
-  const sections = splitSections(body);
+  const sections = splitManualStepSections(body);
   const todo = findSection(sections, "todo");
   const parsed = todo ? parseSteps(todo) : { intro: null, steps: [] };
   const verification = findSection(sections, "verification");

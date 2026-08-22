@@ -1378,6 +1378,100 @@ jobs:
             echo "::warning::ラベル '71.manual-step' がリポジトリに存在しないため付与をスキップします"
           fi
 
+  manual-step-body-check:
+    # 手作業Issueの本文が、issue-deckの手作業アシスタントが読む書式に合っているかを検査し、
+    # 外れていれば指摘をコメントする(#2048)。
+    #
+    # **書式の揺れは見た目の問題ではなく、機能が黙って落ちる問題である。** 起票するエージェントは
+    # 雛形を埋めるが、雛形どおりに書けたかを確かめる経路が無かった。実測でopenだった3件は
+    # 太字・インデント・参照の書き方が3通りに割れており、うち2件は`## 関連`の対応PRをURLで
+    # 書いていて実施順序の表示から丸ごと落ちていた。
+    #
+    # **判定はissue-deck側(`POST /api/manual-steps/body-check`)に置く。** 検査するのは画面の
+    # パーサーが読む書式なので、規則をここへ写すと「検査は通るが画面は読めない」食い違いが出る。
+    # ここが持つのは、呼んで・コメントを貼り直すところまで。
+    #
+    # **判定をタイトルに寄せるのはmanual-step-labelと同じ理由**(ラベル定義が無いリポジトリでも
+    # 書けるため)。ラベルの付与とは別ジョブにしてあるので、片方が落ちてももう片方は動く。
+    #
+    # **指摘してもラベルは付けず、起票も止めない。** 手作業Issueに`00.check-user`を付けない規約
+    # (docs/multi-agent/labels.md)があり、ここは書式の助言であってゲートではない。
+    #
+    # **issue-deckが落ちていてもワークフローを失敗させない**(進捗報告と同じ取り決め)。
+    if: |
+      github.event_name == 'issues' &&
+      (github.event.action == 'opened' || github.event.action == 'edited')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      # タイトルと本文はユーザー入力なので、run:本文へ展開せずenv経由でのみ参照する
+      # (script injection対策)。JSONの組み立ても jq --arg に通す
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+    steps:
+      - name: 本文の書式を検査して指摘コメントを貼り直す
+        run: |
+          set -uo pipefail
+
+          prefix='[手作業]'
+          if [ "${ISSUE_TITLE#"$prefix"}" = "$ISSUE_TITLE" ]; then
+            echo "タイトルが $prefix で始まらないため何もしません"
+            exit 0
+          fi
+
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、本文の書式検査をスキップします"
+            exit 0
+          fi
+
+          jq -n --arg repo "$GH_REPO" --arg body "$ISSUE_BODY" \
+            '{repository: $repo, body: $body}' > request.json
+
+          code="$(curl -sS -m 20 -o response.json -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/manual-steps/body-check" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @request.json)" || code=000
+          if [ "$code" != "200" ]; then
+            echo "::warning::本文の書式検査に失敗しました（HTTP $code）。指摘は投稿しません"
+            exit 0
+          fi
+
+          jq -r '.comment // ""' response.json > comment.md
+
+          # 前回の指摘コメント。マーカーは定数なので --jq へ直接書いてよい
+          existing="$(gh api "repos/$GH_REPO/issues/$ISSUE_NUMBER/comments?per_page=100" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- issue-deck-source:manual-step-body-check -->")) | .id' \
+            | head -n 1)"
+
+          if [ ! -s comment.md ]; then
+            if [ -n "$existing" ]; then
+              gh api --method DELETE "repos/$GH_REPO/issues/comments/$existing"
+              echo "指摘が解消したため、前回のコメントを削除しました"
+            else
+              echo "本文の書式に指摘はありません"
+            fi
+            exit 0
+          fi
+
+          if [ -n "$existing" ]; then
+            jq -n --rawfile body comment.md '{body: $body}' > patch.json
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" --input patch.json
+            echo "指摘コメントを更新しました"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body-file comment.md
+            echo "指摘コメントを投稿しました"
+          fi
+
   cleanup-on-close:
     # main-pr-mergedのDone遷移以外の経路でIssueがクローズされた場合(21.plan-requiredの
     # 計画を拒否してIssueを直接クローズした場合など)、`00.check-user`が残り続けないよう、

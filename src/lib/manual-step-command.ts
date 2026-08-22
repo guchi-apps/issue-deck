@@ -61,6 +61,21 @@ export const MANUAL_STEP_TIMEOUT_SECONDS = 300;
  * コマンドまで済んだことになる）。どちらも代行の対象から外し、人が手元で実行する。
  */
 export function extractShellBlock(markdown: string): string | null {
+  const blocks = collectShellBlocks(markdown);
+  if (blocks.length !== 1) return null;
+  const command = blocks[0];
+  if (command === "" || command.length > MANUAL_STEP_COMMAND_MAX_LENGTH) return null;
+  return command;
+}
+
+/**
+ * 手順のMarkdownに含まれるシェルのコードブロックをすべて取り出す。
+ *
+ * `extractShellBlock`が「ちょうど1つ」に絞る前の生の一覧。本文の書式検査
+ * （`manual-step-body-check.ts`）は**0個と2個以上を区別して伝える**必要があるため、
+ * 数え方を持つのはここ1か所にする。
+ */
+export function collectShellBlocks(markdown: string): string[] {
   const blocks: string[] = [];
   let openFence: string | null = null;
   let executable = false;
@@ -88,10 +103,7 @@ export function extractShellBlock(markdown: string): string | null {
     if (openFence !== null) current.push(line);
   }
 
-  if (blocks.length !== 1) return null;
-  const command = blocks[0];
-  if (command === "" || command.length > MANUAL_STEP_COMMAND_MAX_LENGTH) return null;
-  return command;
+  return blocks;
 }
 
 /**
