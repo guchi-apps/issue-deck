@@ -83,8 +83,9 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
 function renderScreen(
   issues: Issue[],
   options: {
-    view?: "all" | "check-user";
+    view?: "all" | "check-user" | "manual-step";
     mergePendingPullRequests?: PullRequestSummary[];
+    mergeCheckWaitingCount?: number;
   } = {},
 ) {
   render(
@@ -100,6 +101,7 @@ function renderScreen(
       assignee={null}
       sort="created"
       mergePendingPullRequests={options.mergePendingPullRequests ?? []}
+      mergeCheckWaitingCount={options.mergeCheckWaitingCount ?? 0}
       onSelectPullRequest={vi.fn()}
       onChangeView={vi.fn()}
       onChangeFilters={vi.fn()}
@@ -148,8 +150,10 @@ describe("MobileIssuesScreen の確認待ちに並ぶマージ待ちPR（#1713�
       ],
     });
 
+    // Issue以外も並ぶビューなので、見出しは「Issue」ではなくビュー名（#2081）
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("ユーザーの確認待ち");
     // ホーム画面の「要対応」と同じ2件になり、中身もその2件が並ぶ
-    expect(screen.getByText("ユーザーの確認待ち・2件")).toBeTruthy();
+    expect(screen.getByText("2件")).toBeTruthy();
     expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
     expect(screen.getByRole("button", { name: /v1.0.0をmainへリリースする/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("2");
@@ -158,7 +162,56 @@ describe("MobileIssuesScreen の確認待ちに並ぶマージ待ちPR（#1713�
   it("マージ待ちPRが無ければ枠ごと出さない", () => {
     renderScreen([], { view: "check-user" });
 
-    expect(screen.getByText("ユーザーの確認待ち・0件")).toBeTruthy();
+    expect(screen.getByText("0件")).toBeTruthy();
     expect(screen.queryByText("あなたのマージを待っているPull Request")).toBeNull();
+  });
+});
+
+describe("MobileIssuesScreen のCI・判定の完了待ち（#2081）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("押せるPRが無くても、完了待ちがあれば件数だけを1行出す", () => {
+    renderScreen([], { view: "check-user", mergeCheckWaitingCount: 3 });
+
+    expect(
+      screen.getByText(/CI・判定の完了待ちが3件あります/),
+    ).toBeTruthy();
+    // 件数には足さない（いま人が押せるものだけを数える）
+    expect(screen.getByText("0件")).toBeTruthy();
+    expect(screen.queryByText("あなたのマージを待っているPull Request")).toBeNull();
+  });
+
+  it("押せるPRがあるときは枠の中へ添える", () => {
+    renderScreen([], {
+      view: "check-user",
+      mergePendingPullRequests: [makePullRequest()],
+      mergeCheckWaitingCount: 2,
+    });
+
+    expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
+    expect(screen.getByText(/CI・判定の完了待ちが2件あります/)).toBeTruthy();
+    expect(screen.getByText("1件")).toBeTruthy();
+  });
+});
+
+describe("MobileIssuesScreen のヘッダーの見出し（#2081）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("Issue以外も並ぶビューでは見出しをビュー名にし、下の行では重ねない", () => {
+    renderScreen([], { view: "manual-step" });
+
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("ユーザーの作業待ち");
+    expect(screen.queryByText(/^ユーザーの作業待ち・/)).toBeNull();
+  });
+
+  it("Issueだけが並ぶビューでは見出しは「Issue」のまま", () => {
+    renderScreen([], { view: "all" });
+
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Issue");
+    expect(screen.getByText("すべてのIssue・0件")).toBeTruthy();
   });
 });

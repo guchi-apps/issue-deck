@@ -577,6 +577,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
   ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
   `pinnedSection`と`pinnedCount`が担う。
+  - **並べるのは「いま押せば入るPR」だけ**（#2081）。CI実行中（`ciState`が`pending`）と自動マージ
+    可否の判定中（`isMergeJudgementPending`）は`pullRequestsAwaitingUserMerge`が外す。前者は
+    GitHubがマージを弾き、後者は画面がマージボタンを無効化する（#1968）ので、並べても開いた先に
+    操作が無い。リリースPRを各リポジトリへ一斉に起票した直後は、この2つで一覧が埋まっていた。
+    **CI失敗・コンフリクト・CI状態不明（`unknown`）は外さない**——待っても解消せず人が動くしか
+    ないもので、`unknown`を外さないのは#1433のリリースボタンと同じ倒し方（状態が取れないことを
+    理由にマージの導線まで消さない）。
+  - **外したぶんは`pullRequestsWaitingForMergeChecks`が返し、枠の下の1行にだけ出す。**
+    件数（左メニュー・ホームの「要対応」）には足さない。完全に消すと、対応Issueを持たない
+    リリースPRはどこにも現れないまま数分後に突然6件現れる。件数から外して一覧の見出しへ
+    内訳を出す手作業待ち（#1763）と同じ扱い。
+  - **どちらの関数も母集団は`pullRequestsRequiringUserMerge`1つ**（`requiresUserMerge`＋二重表示の
+    除外）。2つの数を足したものが従来の件数と必ず一致するようにするため、判定を2か所に書かない。
 - **「ユーザーの作業待ち」（`71.manual-step`）は、いま実行できる件数だけを出す**
   （#1613で橙色の強調を、#1763で件数そのものを。
   [`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
@@ -848,6 +861,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`mobile-issue-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-issue-view-sheet.tsx)が
   全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
   ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
+  **ただしIssue以外も並ぶビューでは、見出し（1行目）そのものをビュー名にする**（#2081。判定は
+  [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`navViewIsUserActionList`＝「ユーザーの確認待ち」・
+  「ユーザーの作業待ち」）。確認待ちにはユーザーのマージを待つPull Requestが混ざり、作業待ちに
+  並ぶのは開発のIssueではなく人が実行する手順なので、見出しが「Issue」だと並んでいるものと
+  食い違う。**判定はビューの性質としてここに持つ**——画面側で書くと片方だけ直され続ける
+  （`ignoresIssueFilters`と同じ理由）。見出しをビュー名にしたぶん件数行からはビュー名が落ちる
+  （`MobileIssueListScreen`が見出しと同じ言葉を重ねない）。リポジトリ別一覧は見出しが
+  リポジトリ名のままなので、件数行のビュー名も今までどおり出る。
   一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃える。外しているのは
   「直近本番に反映した」だけで（「本番反映待ち」は左メニューへ戻した#1743にあわせてこちらにも出す）、
   **既存のURLからはそのビューでも開かれうる**ため、現在のビューが一覧に無いときだけ末尾へ足す
