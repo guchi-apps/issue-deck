@@ -54,15 +54,16 @@ export async function POST(request: NextRequest) {
     hostName,
   });
 
-  // 画面からの返事を待つ（#2061）。**投稿できたときだけ作る。** 投稿できていない＝画面に
-  // 計画が出ないので、待たせても押す材料が無い（フックは`planRequestId`が返らなければ
-  // 待たずに終え、端末に従来どおりの承認プロンプトが出る）。
+  // 画面からの返事を待つ（#2061）。**Issueコメントの投稿に成功したかどうかとは切り離す**
+  // （#2108）。パネルが描いているのはここで保存する`plan`そのもので、コメントの取得には
+  // 依存していない。コメントを書けなかったことを理由に待ちを作らないと、端末には計画が
+  // 出ているのに**画面からは承認も修正もできない**という、いちばん困る組み合わせになる。
   //
   // **待ち時間が`0`（ホスト側で無効にしている）なら作らない。** 作ると、フックは待たないのに
   // 画面には押しても誰も受け取らないパネルが残る。
   const waitSeconds = parseSessionPlanWaitSeconds(payload?.waitSeconds);
   let planRequestId: string | null = null;
-  if (posted && waitSeconds > 0) {
+  if (waitSeconds > 0) {
     try {
       const request = await createSessionPlanRequest({
         repositoryFullName: target.repositoryFullName,

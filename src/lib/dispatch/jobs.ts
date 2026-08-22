@@ -3,7 +3,11 @@ import type { DispatchHost, DispatchJob } from "@prisma/client";
 import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
-import type { DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+import {
+  parseDispatchHostLaunchHold,
+  type DispatchHostLaunchHold,
+  type DispatchHostMetrics,
+} from "@/lib/dispatch/host-metrics";
 import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
@@ -166,6 +170,14 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             swapUsedMb: host.swapTotalMb === null ? null : host.swapUsedMb,
             swapTotalMb: host.swapUsedMb === null ? null : host.swapTotalMb,
           },
+    // 起動の見送り（#2095）。**3列が揃っているときだけ見送り扱いにする**（使用率の5列と同じ向き。
+    // 1つでも`null`なら`parseDispatchHostLaunchHold`が全体を落とす）。理由だけが残った状態を
+    // 「0%で見送っている」と読ませない
+    launchHold: parseDispatchHostLaunchHold({
+      reason: host.launchHoldReason,
+      percent: host.launchHoldPercent,
+      thresholdPercent: host.launchHoldThresholdPercent,
+    }),
     // チェックアウトの版（#1612）。**`commit`が無ければ申告そのものが無かった扱い**で、
     // 残りの4列は「取れなかった項目」として個別にnullになりうる（`parseDispatchHostCheckout`
     // と同じ向き。使用率の5列のように「まとめて入るかまとめてnullか」にはしない）
@@ -1525,6 +1537,12 @@ export async function announceDispatchHost(params: {
    */
   metrics: DispatchHostMetrics | null;
   /**
+   * メモリ・SWAPの逼迫でpollerが起動ジョブを見送っているか（#2095）。**判定はpoller側**で、
+   * ここは受け取った結果を持つだけ。見送っていない巡・申告しない古いpollerでは`null`で、
+   * その場合は3列すべてを`null`へ戻す（前回の値を残すと、余力が戻った後も見送り中と出る）。
+   */
+  launchHold: DispatchHostLaunchHold | null;
+  /**
    * pollerが動かしているチェックアウトの版（#1612）。**画面へ出すための写しで、割り当ての
    * 判定には使わない**（`metrics`と同じ立場）。申告していない・読めなかった巡では`null`で、
    * その場合は5列すべてを`null`へ戻す（前回の値を残すと、取り込む前の版が現在の版として出る）。
@@ -1560,6 +1578,11 @@ export async function announceDispatchHost(params: {
     // 必要があるため、`??`で前回値を残さない
     swapUsedMb: params.metrics?.swapUsedMb ?? null,
     swapTotalMb: params.metrics?.swapTotalMb ?? null,
+    // 起動の見送りも毎回上書きする（#2095）。**前回の値を残さない。** 残すと、余力が戻って
+    // 起動を再開した後も「見送っています」が出続け、順番待ちが進まない理由を取り違える
+    launchHoldReason: params.launchHold?.reason ?? null,
+    launchHoldPercent: params.launchHold?.percent ?? null,
+    launchHoldThresholdPercent: params.launchHold?.thresholdPercent ?? null,
     // チェックアウトの版も毎回上書きする（#1612）。**前回の値を残さない。**
     // 残すと、取り込む前の版が現在の版として出続ける（この仕組みが防ぎたいことそのもの）
     checkoutCommit: params.checkout?.commit ?? null,

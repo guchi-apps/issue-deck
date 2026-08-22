@@ -74,6 +74,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **Issue一覧の上に並ぶ「〜が n件あります。」の入口バーは、`issue-list.tsx`の
+  `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」・「まとめて実行」の
+  3本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの
+  `basis-48`＋ボタン側の`ml-auto`）。**1行固定の`flex`へ戻さない**——中央カラムは手で狭められる
+  （#381）ため、縮められるものが`flex-1`のテキストしか無くなると幅0まで潰れ、1文字ずつ縦に
+  並ぶ。右が「自動実行 n / m」バッジとボタンの2つになる手作業のバーで最初に起きる。
+  **伸ばす指定は`flex-1`ではなく`grow`にする**——`flex-1`は`flex`ショートハンドなので
+  `basis-48`と同じ`flex-basis`を奪い合い、どちらが勝つかがTailwindのCSS出力順に依存する。
+  折り返しはjsdomでは再現できないため、指定が残っているかは`issue-list.test.tsx`が
+  クラスで見張っている。
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
@@ -1438,6 +1448,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
   `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
   **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
+  **返事を待つあいだの1回のHTTP失敗で降りない**（#2108）。降りるのは届かない状態が
+  `SESSION_PLAN_POLL_GRACE_SECONDS`（既定60秒）続いたときだけで、そのときは
+  `POST /api/dispatch/sessions/plan/decision`で画面の待ちも畳ませる（畳ませないと、押しても
+  誰も受け取らないボタンがカウントダウン付きで残る）。返事待ちを作るかどうかは
+  **Issueコメントを投稿できたかとは切り離す**（パネルはDBに保存した計画本文を描くため）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

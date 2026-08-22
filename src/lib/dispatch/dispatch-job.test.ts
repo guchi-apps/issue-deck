@@ -907,6 +907,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
+      launchHold: null,
       checkout: null,
       ...overrides,
     };
@@ -969,6 +970,7 @@ describe("横断質問（#1454）", () => {
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
+      launchHold: null,
       checkout: null,
       ...overrides,
     };
@@ -1138,6 +1140,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
+      launchHold: null,
       checkout: null,
       ...overrides,
     };

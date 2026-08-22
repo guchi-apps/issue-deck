@@ -16,6 +16,9 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 **インフラ設定・共有知識・個人設定のリポジトリ（`vps`・`subpc`・`docs`・`claude-config`）は、
 この表には載せない。** 無人実行は入れず、ローカルセッションとリリースフローだけを載せる、
 というのが#1697・#1741の判断（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。
+**ただし`vps`・`subpc`には#2103で`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せる**——コードを書かない読み取りだけのレビューで、無人実装を入れる判断とは
+別の軸にある（下記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」）。
 #1011が「順次導入する」としていた`vps`もこの扱いになる。`claude-config`（個人設定）は#1988で
 同じ枠へ加えた（下記「`claude-config`（個人設定）」）。
 
@@ -35,7 +38,7 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 | `guchi-apps/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
 | `guchi-apps/shopping-list` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #357, #723, #895, #942, #1129 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
 | `guchi-apps/dayspan` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #971, #1129 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
-| `guchi-apps/meisai-lab` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1051, guchi-apps/meisai-lab#69 | #1047の1周目。Next.js + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`は入れていない（無人実装はdispatchだけで成立するため1周目はスコープを絞った。必要になれば参照方式で追加できる）。導入前は旧世代のラベル体系で、`05.develop`が付いていた#66の進捗は削除前に控えて書き戻した |
+| `guchi-apps/meisai-lab` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1051, guchi-apps/meisai-lab#69 | #1047の1周目。Next.js + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`は入れていない（無人実装はdispatchだけで成立するため1周目はスコープを絞った。必要になれば参照方式で追加できる）。**この保留は#1475で解除した**（下記「12リポジトリすべてへ配ると決めた」）。導入前は旧世代のラベル体系で、`05.develop`が付いていた#66の進捗は削除前に控えて書き戻した |
 | `guchi-apps/car-care` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1050, guchi-apps/car-care#32 | #1047の2周目。Next.js + Prisma 7 + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。**`test`・`typecheck`のnpm scriptを持たない**が、ワークフローが呼ぶのは`db:migrate:deploy`・`db:seed:ci`（どちらも`24.screenshot-required`付きの実行のみ・`--if-present`で保護）だけのため実害は無く、scriptを足さずAGENTS.mdへ実際の検証コマンド（`lint`・`build:ci`）を書く形にした。`npm run build`は`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行は`build:ci`を使う点も明記 |
 | `guchi-apps/subscription-lists` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1052, guchi-apps/subscription-lists#45 | #1047の3周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`test`・`typecheck`・`db:migrate:deploy`・`build:ci`をすべて持ち、共有ワークフローと過不足なく噛み合う。**`/install-github-app`が生成した素の`claude.yml`・`claude-code-review.yml`を削除した**（前者は`claude-issue-dispatch.yml`と同じ`issue_comment`イベントで起動し二重起動していた。詳細は下記）。`CLAUDE.md`・`AGENTS.md`のどちらも無かったため新規作成 |
 | `guchi-apps/asset-manager` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1053, guchi-apps/asset-manager#155 | #1047の4周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`。**`node-version`は`"20"`**（CIが`ci.yml`ではなく`test.yml`で、そこが`'20'`。他リポジトリの`20.19`と違う）。**`build`系の命名が他アプリと逆**で、`npm run build`がラッパー無し（CI・無人実行向け）、`npm run build:local`がローカル用。`npm run check`は`build:local`を含むため無人実行では使えない。この点をCLAUDE.mdの冒頭に置いた。`.claude/settings.json`は権限許可リストのみで運用ルールは含まない |
@@ -45,7 +48,7 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 | `guchi-apps/signaly` | 対応済み | **参照**（2つとも`@workflows/v10`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1057, guchi-apps/signaly#113 | #1047の8周目（最終周）。**8リポジトリで唯一Nodeが一切無い**（`package.json`がルートにも`frontend/`にも無く、`frontend/`は素のHTML/JS、`scripts/`は全てPythonかbash）。そのため**`node-version`を指定しない唯一のリポジトリ**（他7件は全て指定）。`package-manager`は使わないが**既定値の`npm`のままにする**——`pnpm`にすると実装ステップで`node`が許可されなくなる（#1147）。**`workflows/v10`未満へ下げてはいけない。** v9までは許可ツールが`pnpm`固定で`python`・`pip`・`pytest`のいずれも実行できず、**検証手段がPythonのテストしか無い**（Lintも無い）このリポジトリでは検証が一切できなくなる。テストは`DB_NAME=ci_signaly python -m unittest discover -s backend -p 'test_*.py' -v`で、**`DB_NAME`を忘れると`backend/database.py`のimport時点で落ちる**（実際のDB接続はせず全てモック）。バージョンは`package.json`ではなく`version.json`で`scripts/bump_version.py`経由 |
 | `guchi-apps/clip-hive` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1376, #1591, guchi-apps/clip-hive#21, guchi-apps/clip-hive#31 | **#1011（Phase 6）の1周目で、privateリポジトリを載せた最初の例。** Next.js + Prisma + MariaDB/MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`（このリポジトリのCIはサービスコンテナを使わず、ビルド時の`DATABASE_URL`にプレースホルダを渡している）。`lint`・`typecheck`・`build:ci`・`db:migrate:deploy`をすべて持ち、共有ワークフローと過不足なく噛み合う唯一のリポジトリだったため1周目に選んだ。**`npm test`は`lint && typecheck`の別名**でテストランナーは動かず、`npm run dev`は`scripts/ensure-mysql.sh`とローカルの`.env.local`を要求して無人実行では使えない点をCLAUDE.mdに明記した。旧世代ラベルは`05.develop`が#15に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/clip-hive#31・#32）——`preversion`（`npm test`）を持つため、callerに`bump-command`で`--ignore-scripts`を渡している（後述「`release-develop-to-main.yml`の配布状況」） |
 | `guchi-apps/ops-dashboard` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1377, #1591, guchi-apps/ops-dashboard#64, guchi-apps/ops-dashboard#81 | #1011（Phase 6）の2周目。**`runtime-setup: node`をprivateで初めて使った周**（`prisma/`を持たずDBを使わない）。`package-manager: npm`・`node-version: "22.23.1"`。**`node-version`は`.nvmrc`から手で写す**——CIは`node-version-file`で`.nvmrc`を読むが、共有ワークフローはこの入力しか見ない。`test`・`typecheck`のnpm scriptを持たず、CIが`npx tsc --noEmit`を直接叩いているため、AGENTS.mdへ実際の検証コマンド（`lint`・`npx tsc --noEmit`・`build`）を書いた。**ブランチ命名が`feature/<番号>-<説明>`だった唯一のリポジトリ**で、この命名ではワークフローが対象Issueを特定できず進捗が一切遷移しないため、`issue-<番号>`へ揃えることをAGENTS.mdに明記した（既存の`feature/`ブランチ8本は、マージ済みかどうかの判断が要り作業中のものを巻き込む恐れがあるため触っていない）。旧世代ラベルは`07.m:marge`が#26に付いていたが、盤面では既に`Release`になっており書き戻しは不要だった。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/ops-dashboard#81・#84）——`preversion`を持たないためcallerの`with:`は`bump-kind`だけで済み、あわせて`"version"` lifecycleスクリプト（`scripts/version-changelog.mjs`）を新設して更新履歴（`src/data/changelog.ts`）がバンプPRに入るようにした |
-| `guchi-apps/db-console` | 対応済み | **参照**（3つとも`@workflows/v18`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`release-develop-to-main.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1378, #1551, guchi-apps/db-console#19, guchi-apps/db-console#28 | #1011（Phase 6）の3周目。**デフォルトブランチが`main`だった唯一のリポジトリ**で、`develop`へ変更した（`issues`・`issue_comment`はデフォルトブランチのワークフローしか起動しない）。変更前に`develop...main`のファイル差分が空であること——mainの内容はすべてdevelopに含まれ、コミット数の差8件はdevelop→mainのマージコミットだけであること——を実測した。`runtime-setup: node-db`・`package-manager: npm`・`node-version: "22.23.1"`（`.nvmrc`準拠）。**`prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、postinstallの`prisma generate`ごと`npm ci`が落ちていた**ため、未設定時は接続できないプレースホルダーへ倒す形へ直した（共有ワークフローの依存インストールはDATABASE_URLを渡さない。car-care・clip-hive・dayspanは元から未設定でも通る作りで、`env()`を必須にしていたのはここだけ）。`npm run build`は素だと`/auth/callback`で`ERR_INVALID_URL`になるため、CIと同じプレースホルダーを渡す実行例をAGENTS.mdに書いた。CIのDBは他アプリの`mysql:8.0`ではなく`mariadb:10.11`。旧世代ラベルは`05.develop`が#13に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1551で後から足した**（guchi-apps/db-console#28・#29）——導入の周では入れておらず、issue-deckの画面のリリースボタンが出ない唯一の対応済みリポジトリになっていた。callerに`with:`は渡していない（ルートの`package.json`の`.version`・npm・更新履歴ファイル無しで、3つのinputはすべて既定値でよい）。`claude-review-develop.yml`は今回も入れていない（develop向けPRの自動マージは、他アプリのDBを直接操作する管理コンソールという性質から保留のまま） |
+| `guchi-apps/db-console` | 対応済み | **参照**（3つとも`@workflows/v18`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`release-develop-to-main.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1378, #1551, guchi-apps/db-console#19, guchi-apps/db-console#28 | #1011（Phase 6）の3周目。**デフォルトブランチが`main`だった唯一のリポジトリ**で、`develop`へ変更した（`issues`・`issue_comment`はデフォルトブランチのワークフローしか起動しない）。変更前に`develop...main`のファイル差分が空であること——mainの内容はすべてdevelopに含まれ、コミット数の差8件はdevelop→mainのマージコミットだけであること——を実測した。`runtime-setup: node-db`・`package-manager: npm`・`node-version: "22.23.1"`（`.nvmrc`準拠）。**`prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、postinstallの`prisma generate`ごと`npm ci`が落ちていた**ため、未設定時は接続できないプレースホルダーへ倒す形へ直した（共有ワークフローの依存インストールはDATABASE_URLを渡さない。car-care・clip-hive・dayspanは元から未設定でも通る作りで、`env()`を必須にしていたのはここだけ）。`npm run build`は素だと`/auth/callback`で`ERR_INVALID_URL`になるため、CIと同じプレースホルダーを渡す実行例をAGENTS.mdに書いた。CIのDBは他アプリの`mysql:8.0`ではなく`mariadb:10.11`。旧世代ラベルは`05.develop`が#13に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1551で後から足した**（guchi-apps/db-console#28・#29）——導入の周では入れておらず、issue-deckの画面のリリースボタンが出ない唯一の対応済みリポジトリになっていた。callerに`with:`は渡していない（ルートの`package.json`の`.version`・npm・更新履歴ファイル無しで、3つのinputはすべて既定値でよい）。`claude-review-develop.yml`は今回も入れていない（develop向けPRの自動マージは、他アプリのDBを直接操作する管理コンソールという性質から保留のまま）。**この保留は#1475で解除した**（下記「12リポジトリすべてへ配ると決めた」） |
 | `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**フリートで唯一のNode 24**（`ci.yml`・`engines`とも。他は20〜22帯）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`はこの周では入れず、後からguchi-apps/aide#6（クローズ済み）で`@workflows/v18`参照のcallerが追加された（2026-08-15に実測） |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
@@ -150,11 +153,12 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 反映する（[multi-agent/labels.md](multi-agent/labels.md)「自動マージ可否の判定方法」）。
 
 **上の表の「導入済み自動化ワークフロー」列を見れば分かるとおり、このcallerを持つリポジトリは
-少数である。** 2026-08-15時点で持つのは次の3つだけ。
+少数である。** 2026-08-15時点で持つのは次の3つだけだった。
 
 | 配布済み | `issue-deck`（ローカルパス参照）・`dayspan`・`shopping-list` |
 |---|---|
-| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab` |
+| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab`（#1475で**12件すべてへ配ると決めた**。下記）・**`vps`・`subpc`**（#2103で**配ると決めた**。画面のボタンの対象外なので手で配る。下記「`vps`・`subpc`（#2103）」） |
+| **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
 
 **未配布のリポジトリでは、develop向けPRは一切自動マージされない。** #1470の時点では
 `00.check-user`も付かなかったため、13本のPRが判定されないまま開いたまま残っていた
@@ -171,8 +175,161 @@ done
 ```
 
 **リリースフロー（`release-develop-to-main.yml`）とは配布の軸が別。** 実際、`db-console`は#1551で
-リリースフローだけを足し、`claude-review-develop.yml`は未配布のままにしている（下記参照）。
-develop向けPRの自動マージを増やすかどうかは、リポジトリごとのリスクで別に判断する。
+リリースフローだけを足し、`claude-review-develop.yml`は未配布のままにしていた。
+
+### 12リポジトリすべてへ配ると決めた（#1475）
+
+**除外したリポジトリは無い。** 起票時の想定は「更新頻度が低いリポジトリでは手動マージのままで
+困らない」だったが、2026-08-22の実測ではそれに当たるリポジトリが1つも無かった。
+
+| リポジトリ | develop向けPR（直近8〜12日） | 機能PRのうち低リスク |
+|---|---|---|
+| `aide` | 62 | 8 / 20 |
+| `ops-dashboard` | 49 | 7 / 10 |
+| `car-care` | 41 | 3 / 9 |
+| `subscription-lists` | 41 | 2 / 5 |
+| `myroom` | 40 | 6 / 10 |
+| `asset-manager` | 37 | 3 / 6 |
+| `meisai-lab` | 36 | 5 / 7 |
+| `solitaire` | 32 | 4 / 5 |
+| `portfolio` | 32 | 1 / 5 |
+| `signaly` | 31 | 2 / 4 |
+| `db-console` | 28 | 1 / 6 |
+| `clip-hive` | 27 | 2 / 4 |
+
+「機能PRのうち低リスク」は、`issue-<番号>`ブランチのPRから**`.github/`だけを触ったPR**
+（フリート展開の波で一時的に増えているぶん）を除き、内蔵リスクパターンに当たらなかったものの
+割合。全体で **91件中44件（約45%）** が自動マージの取り分になる。
+
+過去に記録されていた2つの保留理由も、この回で解消した。
+
+- **`meisai-lab`** — 導入1周目で意図的にスコープを絞っていた（上の表の備考）。当時の記述自体が
+  「必要になれば参照方式で追加できる」であり、その後`claude-conflict-resolve.yml`・
+  `claude-ci-fix.yml`・`claude-pr-repair.yml`とリリースフローが入って前提が変わった。
+- **`db-console`** — 「他アプリのDBを直接操作する管理コンソールという性質から保留」（#1551）。
+  リスク判定は**入力でリスクを追加できるが削減はできない**設計で、内蔵パターン
+  （`.env*`・`**/auth/**`・`prisma/migrations/**`・`.github/workflows/**`）が当たれば
+  自動マージは止まる。実測でも機能PR6件中5件がリスク該当で、自動マージされるのは残り1件だけ。
+  **保留を続けても止まるPRの本数がほとんど変わらない**ため、他と揃えて配る。
+
+### 配る前に`develop`のブランチ保護が要る（#1475）
+
+**未配布12リポジトリすべてに、`develop`のブランチ保護が無かった**（配布済み3つはいずれも
+必須ステータスチェックを持つ。`issue-deck`・`dayspan`は`lint-and-build`、`shopping-list`は`lint`）。
+
+保護が無いと`auto-merge`ジョブの`gh pr merge --auto`が**「既にマージ可能」として断られる**。
+ジョブは失敗し、`auto-merge-fallback`が`00.check-user`を付ける——**callerを置いても
+自動マージは1本も成立せず、失敗したジョブのぶんノイズが増えるだけ**になる
+（[organization-migration-checklist.md](organization-migration-checklist.md)にも既知として記載）。
+
+**設定はGitHub Actionsからは変えられない。** `WORKFLOW_PAT`の権限は Contents / Issues /
+Pull requests / Actions / Workflows / Metadata だけで、**Administration を持たない**
+（[organization-migration.md](organization-migration.md)）。`PATCH /repos/{repo}`
+（`allow_auto_merge`）もブランチ保護APIも Administration: write が要る。実際
+`propagate-workflow-tag.sh`は配布のたびに`allow_auto_merge=true`を`|| true`付きで試して
+いたが、タグ配布PRが何度もマージされたリポジトリを含む**12件中8件が今も`false`**だった——
+握り潰していたため失敗が一度も表に出ていない。
+
+そのため次の順で行う。
+
+1. **前提を揃える**（org owner本人が一度だけ）: `scripts/setup-develop-auto-merge.sh`。
+   既定はdry-runで、`--apply`で`Allow auto-merge`の有効化と`develop`のブランチ保護作成を行う。
+   **必須チェック名はワークフローのジョブ名から推測せず**、直近のdevelop向けPRで実際に
+   成功したcheck runと突き合わせて一致したものだけを使う（実在しない名前を必須にすると
+   永久に埋まらずマージ不能になるため、突き合わせに失敗したら保護を作らない）。
+   CIのジョブ名はリポジトリごとに違う（実測: `lint-and-build`が4件、`test`が3件、
+   `verify`が2件、`typecheck-and-test`・`backend`が各1件、`myroom`だけ`backend`と`frontend`の2件）
+2. **callerを配る**: issue-deckの画面（設定＞フリート運用）の「不足しているワークフローを配る」
+   （[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「配布状況と、不足しているcallerの配布」）。
+   配布スクリプトは前提が揃っているかを**読んで警告するだけ**で、設定は変えない
+3. 各リポジトリで配布PRを確認してマージする（GitHub Actionsの変更なので自動マージしない）
+
+**同じ保護が`release-develop-to-main.yml`のバンプPRにも効く。** バンプPRも
+`gh pr merge --auto --merge`で自動マージを予約しており、保護が無いリポジトリでは同じ理由で
+失敗して警告だけ出し、実際には画面のリリース操作で手動マージされていた。
+
+### `vps`・`subpc`（#2103）
+
+**この2件へも配ると決めた**（起点は guchi-apps/question#26「すべてのリポジトリで、developへの
+マージ前に問題ないかをClaude Codeがチェックする機能はあるか。**特にVPSやsubPC**」）。#1475の
+12件とは別枠で、「無人実行は入れない」4件（下記「`subpc`・`vps`・`docs`」「`claude-config`」）
+のうち`develop`を持つ2つが対象。**無人実装（`claude-issue-dispatch.yml`）は入れないままで、#1741の
+判断は変えない**——レビュージョブの許可ツールは`Read`/`Grep`/`Glob`と`gh`の読み取り、および
+Issueへのコメント・ラベル付与だけで、コードを書かない。
+
+**#1475の12件と違い、配る前の前提はもう揃っている**（2026-08-22実測。`setup-develop-auto-merge.sh`
+を掛ける必要が無い）。
+
+| 項目 | `guchi-apps/vps` | `guchi-apps/subpc` |
+|---|---|---|
+| `Allow auto-merge` | 有効 | 有効 |
+| `develop`のブランチ保護 | ruleset `protect develop`（id=20909317） | 同（id=20909724） |
+| 必須ステータスチェック | `verify`（`ci.yml`の実ジョブ名） | `shell`（同左） |
+| CIのワークフロー名 | `CI`（`wait-for-ci`は`name == "CI"`で探す） | 同左 |
+| org secrets | `CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`とも到達済み（`release-develop-to-main.yml`が使用中） | 同左 |
+
+**自動マージの取り分は文書だけになる。** 直近のdevelop向けPR（vps 16本・subpc 14本）を内蔵
+パターンと下記`risk-paths`で判定すると、自動マージされるのは7本で、**すべてREADME.md・
+CLAUDE.md・docs/のみのPR**。`apache/`・`scripts/`・`setup.sh`・`configs/`・`.github/`を触るPRは
+全部止まる。**これは「レビューが要らない」ではなく「実配置の変更は全部レビュー対象になる」で、
+mainマージが即本番反映になるこの2件ではむしろ望ましい。** 得られるのは自動マージ本数ではなく、
+人がマージする前に読めるレビューコメントの方である。
+
+> **バンプPRではレビューだけが走る。** `release/vX.Y.Z`は`issue-<番号>`でないため
+> `identify-issue`が空になり、`auto-merge`はスキップされる一方、`risk-check`は
+> 「対応Issue番号を特定できないため（安全側でレビューを実行）」で`claude-review`を起動する
+> （issue-deck自身のバンプPRでも実際に走っている）。この2件はバンプPRの比率が高い
+> （vps 5/16・subpc 4/14）ため、callerの`on:`へ`paths-ignore: [version.json]`を入れて避ける。
+> バンプPRは`version.json`1ファイルなので、`paths-ignore`が全ファイルに当たり丸ごとスキップされる。
+
+#### `main`へ届くまでは「レビュー無しの自動マージ」だけが効く
+
+**この2件はデフォルトブランチが`main`のまま**（`drift-check.yml`のschedule実行がデフォルト
+ブランチを実機と突き合わせるため。下記「`subpc`・`vps`・`docs`」）。ここに次の食い違いがある。
+
+- `develop-pr-opened`の保険は**PRのbase（＝`develop`）側**のcallerの有無しか見ない
+  （`reusable-issue-labels.yml`の`repos/$GH_REPO/contents/.github/workflows?ref=$BASE_REF`）。
+  callerが`develop`へ入った瞬間に`00.check-user`を付けなくなる
+- 一方`claude-code-action`は**ワークフローファイルがデフォルトブランチ（＝`main`）の同ファイルと
+  一致しない限りClaudeを実行しない**。しかも**ステップもジョブも`success`で終わる**
+  （[multi-agent/labels.md](multi-agent/labels.md)「ワークフローファイルを変更するPRでは
+  claude-reviewが必ずスキップされる」）
+- `auto-merge`の条件は`claude-review`が`success`または`skipped`であることだけで、
+  レビューが実際に行われたかは見ない
+
+つまり**callerを`develop`へマージしてから`main`へ届くまでの間、低リスクPRはレビュー無しで
+自動マージされる。** 配るときは`develop`へのマージで止めず、続けてリリース（develop→main）を
+回して`main`へ入れ、その次のdevelop向けPRで`claude-review`の`execution_file`が出ている
+（＝Claudeが実際に走った）ことまで確認する。
+
+#### 画面の配布ボタンの対象外なので手で配る
+
+「不足しているワークフローを配る」（#1948・#1475）は`claude-review-develop.yml`の`requires`を
+`claude-issue-dispatch.yml`としており（[`lib/workflow-tags.ts`](../src/lib/workflow-tags.ts)の
+`REPAIR_WORKFLOW_SPECS`）、無人実行を入れないこの2件は永久に対象にならない。**`requires`は
+緩めない**——`issue-labels.yml`へ替えると`develop`を持たない`docs`まで対象に入り、置いても
+発火しないcallerを配ることになる。代わりに各リポジトリへIssueを立てて手で配る
+（guchi-apps/vps#108・guchi-apps/subpc#45）。
+
+雛形は`.github/templates/callers/claude-review-develop.yml`を写し、`__TAG__`（`uses:`と
+`prompts-ref`の2か所）を現行タグへ置換したうえで、共通の`risk-paths` 4行へリポジトリ固有の
+行を足す。**固有の行は`deploy.yml`の`paths`（＝実機へ反映される受け口）に合わせる。**
+
+**書式は`<正規表現> :: <理由>`（区切りは半角スペース2つのコロン）で、正規表現だけを書くと
+`risk-check`が`::error::`で落ちる。** 落ち方が静かなのが厄介で、`risk-check`が失敗すると
+`auto-merge`は条件（`needs.risk-check.result == 'success'`）を満たさずskip、
+`auto-merge-fallback`は`auto-merge`がfailureのときしか動かないのでこちらもskipになり、
+**`00.check-user`が付かないまま自動マージもされない**PRになる（PR作成時の保険は、callerの実在を
+見た時点で通り抜けている）。下の表は正規表現だけを載せているので、写すときに理由を足すこと。
+
+| | 足す`risk-paths`の正規表現 | 由来 |
+|---|---|---|
+| `vps` | `^(apache\|systemd\|cron\|scripts\|fail2ban)/`・`^\.github/scripts/` | `deploy.yml`の`paths`と同じ5つ。`mysql/`（記録用）・`.claude/`は`paths`外 |
+| `subpc` | `^(setup\.sh$\|scripts/\|configs/)`・`^\.github/scripts/` | 同じく`deploy.yml`の`paths`の3つ |
+
+**`dependency-check`は指定しない。** 判定はルートの`package.json`の変更しか見ず
+（`reusable-claude-review-develop.yml`の`grep -q '^package\.json$'`）、この2件はどちらも
+ルートに`package.json`を持たない方針のため、`any`・`none`のどちらでも結果が変わらない。
 
 ## `release-develop-to-main.yml`の配布状況（#1551）
 
@@ -201,6 +358,13 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 （#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80。**2026-08-16に完了**）。
 `docs`だけはリリースフローも入れない（後述）。
 
+**その後#2103で、`subpc`・`vps`には`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せると決めた**（`docs`は`develop`を持たないため対象外）。**「リリース
+フローだけ」ではなくなったが、無人実装（`claude-issue-dispatch.yml`）を入れない判断は
+変えていない**——レビュージョブはコードを書かず、Issueへのコメントとラベル付与だけを行う。
+判断・前提・配り方は上記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」を
+参照（作業は guchi-apps/vps#108・guchi-apps/subpc#45）。
+
 > **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
 > フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
 > 無人実行を入れていない2件でも、**この2件のIssueはサブPCのローカルセッションで回せる**
@@ -218,7 +382,8 @@ develop向けPRの自動マージを増やすかどうかは、リポジトリ�
 | `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
 | `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
 | ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
-| `issue-labels.yml` | `@workflows/v22`（guchi-apps/subpc#32で2026-08-18に追加） | **未配置**（#1901の残課題） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `issue-labels.yml` | `@workflows/v25`（guchi-apps/subpc#32で2026-08-18に追加） | `@workflows/v25`（#1901の残課題だったが配置済み。2026-08-22に実測） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `claude-review-develop.yml` | **#2103で配ると決定**（guchi-apps/subpc#45） | **#2103で配ると決定**（guchi-apps/vps#108） | 対象外（`develop`を持たない） |
 
 > **進捗を`Implementation`から先へ進める経路は`issue-labels.yml`が持っている。** 3件とも当初は
 > 持っておらず、ローカルセッションが起動時に付ける`Implementation`のまま、PRをマージしても
@@ -448,7 +613,7 @@ for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
 done
 ```
 
-## 自動修復ワークフローの配布状況（#1948）
+## 不足しているcallerの配布状況（#1948・#1475）
 
 **issue-deckの画面の「CI失敗を自動修正」「コンフリクトを自動解消」が実際に起動するかどうかは、
 配布先のcallerの実在だけで決まる**（`workflow_dispatch`の受け口はファイルの実在で解決される）。
@@ -474,11 +639,16 @@ for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
 done
 ```
 
+**この配布経路は自動修復専用ではない**（#1475）。上の
+「`claude-review-develop.yml`の配布状況」で配ると決めた`claude-review-develop.yml`も、
+同じ一覧・同じボタンから配る（画面の見出しは「不足しているワークフロー」）。
+
 **配布はissue-deckの画面（設定＞フリート運用＞共有ワークフローのバージョン）から行う。**
 不足しているcallerの検知は参照タグと同じGraphQL取得に相乗りしており、押すと
 `propagate-repair-workflows.yml`が配布先ごとにPRを作る。**自動マージはしない**ため、
 各リポジトリでPRを確認してマージするまでボタンは効かない。生成の仕組み・写す入力・
-`workflow_run`の購読先の決め方は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
+`workflow_run`の購読先の決め方・`claude-review-develop.yml`を配るときのリポジトリ設定は
+[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
 「配布状況と、不足しているcallerの配布」を参照。
 
 **この表は手動記録なので、正は各リポジトリの`.github/workflows/`と画面の「未配布」欄。**
@@ -515,8 +685,9 @@ main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`か�
 **新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
 配布（`propagate-workflow-tag.yml`）は既存ファイルのタグを書き換えるだけで、callerの新規追加は
 行わない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローのタグ運用」）。
-**新規追加まで自動化してあるのは自動修復の3つだけ**で、そちらは別の配布
-（`propagate-repair-workflows.yml`。#1948。上記「自動修復ワークフローの配布状況」）が受け持つ。
+**新規追加まで自動化してあるのは自動修復の3つと`claude-review-develop.yml`だけ**で、
+そちらは別の配布（`propagate-repair-workflows.yml`。#1948・#1475。上記
+「不足しているcallerの配布状況」）が受け持つ。
 
 ```bash
 # 配置状況の確認

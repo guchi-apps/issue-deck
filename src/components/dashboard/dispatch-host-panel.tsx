@@ -18,6 +18,7 @@ import {
 } from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
+  describeDispatchHostLaunchHold,
   describeDispatchHostMetrics,
   formatHostMetricPercent,
   type DispatchHostMetricRow,
@@ -177,6 +178,9 @@ function HostCard({
   onOpenDetail?: () => void;
 }) {
   const metrics = describeDispatchHostMetrics(host);
+  // メモリ・SWAPの逼迫で新しいセッションの起動を見送っているか（#2095）。**出さないと
+  // 「順番待ちのまま進まない」としか見えず、pollerが落ちている状態と区別が付かない**（#1394と同じ）
+  const launchHold = describeDispatchHostLaunchHold(host);
   // いま動いているスクリプトがどの版か（#1612）。**pollerは自分と同じチェックアウトの
   // 回収スクリプト・ランチャーを動かすため、developへマージしただけでは効かない。**
   // ここに出しておかないと、効いていないことに気付く手掛かりがどこにも無い
@@ -199,6 +203,7 @@ function HostCard({
         host={host}
         metrics={metrics}
         checkout={checkout}
+        launchHold={launchHold}
         atCapacity={atCapacity}
         hasSessionCount={hasSessionCount}
         waitingCount={countWaitingSessions(sessions)}
@@ -239,6 +244,10 @@ function HostCard({
           ))}
         </div>
       )}
+
+      {/* **使用率の直後に置く。** 見送りの理由はその数字そのものなので、離すと何を見て
+          止まっているのかが読み取れない（#2095） */}
+      {launchHold && <LaunchHoldRow message={launchHold} />}
 
       {sessions.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
@@ -402,6 +411,7 @@ function CompactHostCard({
   host,
   metrics,
   checkout,
+  launchHold,
   atCapacity,
   hasSessionCount,
   waitingCount,
@@ -410,6 +420,7 @@ function CompactHostCard({
   host: DispatchHostView;
   metrics: DispatchHostMetricRow[] | null;
   checkout: DispatchHostCheckoutRow | null;
+  launchHold: string | null;
   atCapacity: boolean;
   hasSessionCount: boolean;
   waitingCount: number;
@@ -453,6 +464,10 @@ function CompactHostCard({
           ))}
         </div>
       )}
+
+      {/* **縮めた版でも落とさない**（#2095）。ホームで「実行中」が増えないことに気付くのが
+          いちばん早く、そこに理由が無いと結局サブPCを見に行くことになる */}
+      {launchHold && <LaunchHoldRow message={launchHold} />}
     </>
   );
 
@@ -468,6 +483,16 @@ function CompactHostCard({
       {body}
     </button>
   );
+}
+
+/**
+ * 起動を見送っていることの1行（#2095）。**PCの実行キューとスマホのホームで同じものを使う。**
+ *
+ * 配色は使用率が振り切れたときと同じ`destructive`。セッション本数の上限（見出しの
+ * 「セッション 12/12」）と同じ重さで、どちらも「押しても今は起動しない」ことを指す。
+ */
+function LaunchHoldRow({ message }: { message: string }) {
+  return <p className="mt-1.5 text-[11px] text-destructive">{message}</p>;
 }
 
 /**
@@ -498,6 +523,8 @@ function CompactHostCard({
  *   `tone`を`normal`以外にするため、developが進んで「更新して再起動」を押すまでの間はこちら
  * - 応答していない: `describeDispatchHostMetrics`が`null`を返して使用率ごと消え、見出しだけの
  *   カードになる（約51px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
+ * - メモリ・SWAPの逼迫で起動を見送っている（#2095）: 使用率の下に1行増える。逼迫している
+ *   間だけなので、遅れているときと同じく差ぶんだけ動くのを許す
  */
 export function CompactHostCardSkeleton() {
   return (

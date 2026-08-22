@@ -146,7 +146,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * 自動修復のcallerが不足しているリポジトリの1行（#1948）。
+ * callerが不足しているリポジトリの1行（#1948・#1475）。
  *
  * 何が不足しているかまで出す。**リポジトリによって不足するものが違う**（リリースフローを
  * 持たないリポジトリには`claude-pr-repair.yml`を配らない）ため、件数だけでは何が配られるのか
@@ -290,7 +290,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
         // runが見えるまでのあいだも実行中として扱わせる（この間に押せると二重起動になる）
         markDispatched();
         setRepairMessage(
-          `${result.targets.length}件のリポジトリへ自動修復ワークフローを追加するPRを作成しています。GitHub Actionsの完了後、各リポジトリでPRを確認してマージしてください。`,
+          `${result.targets.length}件のリポジトリへ不足しているワークフローを追加するPRを作成しています。GitHub Actionsの完了後、各リポジトリでPRを確認してマージしてください。`,
         );
       } else {
         setRepairMessage(result.message ?? "不足しているリポジトリはありません。");
@@ -473,7 +473,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
 
       {(repairTargets.length > 0 || repairPending.length > 0) && (
         <div className="mt-2 flex flex-col gap-1.5 border-t pt-2">
-          <span className="text-sm font-medium">自動修復ワークフロー</span>
+          <span className="text-sm font-medium">不足しているワークフロー</span>
 
           {repairError && <p className="text-sm text-destructive">{repairError}</p>}
 
@@ -510,7 +510,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
               {isRepairDispatching || isRepairRunning ? <Loader2 className="animate-spin" /> : <Wrench />}
               {isRepairRunning
                 ? "配布を実行中..."
-                : `${repairTargets.length}件へ自動修復ワークフローを配る`}
+                : `${repairTargets.length}件へ不足しているワークフローを配る`}
             </Button>
           )}
 

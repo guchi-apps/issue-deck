@@ -5,7 +5,7 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { dispatchRepairPropagation } from "@/lib/github/workflow-tags";
 
 /**
- * 自動修復のcallerが無いリポジトリへ、それを追加するPRを一括作成する（#1948）。
+ * 置かれていないcallerが有るリポジトリへ、それを追加するPRを一括作成する（#1948・#1475）。
  *
  * **実行中なら409で断る**（タグ配布の`propagate/route.ts`と同じ理由）。起動は数秒で返るのに
  * PRが出来上がるまでは数分かかるため、画面のボタンを無効にするだけでは足りない

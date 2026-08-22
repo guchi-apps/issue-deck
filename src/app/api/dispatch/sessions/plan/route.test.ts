@@ -113,13 +113,15 @@ describe("POST /api/dispatch/sessions/plan", () => {
 
   // 呼び出し側（フック）は再送の判断ができる相手ではない。非0を返してもセッションのログに
   // エラーが増えるだけになる
-  it("投稿できなくても200で返す", async () => {
+  it("投稿できなくても200で返し、返事待ちは作る", async () => {
     postSessionPlan.mockResolvedValue(false);
     const res = await POST(postRequest(validBody, "Bearer secret-value"));
     expect(res.status).toBe(200);
-    // 投稿できていない＝画面に計画が出ないので、返事待ちも作らない（#2061）
-    expect(await res.json()).toEqual({ ok: true, posted: false, planRequestId: null });
-    expect(createSessionPlanRequest).not.toHaveBeenCalled();
+    // **コメントを書けたかどうかと返事待ちは切り離す**（#2108）。パネルが描いているのは
+    // ここで保存する計画本文で、コメントの取得には依存していない。作らないと、端末には
+    // 計画が出ているのに画面からは承認も修正もできない状態になる
+    expect(await res.json()).toEqual({ ok: true, posted: false, planRequestId: "plan-request-1" });
+    expect(createSessionPlanRequest).toHaveBeenCalled();
   });
 
   /**

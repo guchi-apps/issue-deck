@@ -449,7 +449,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `workflows/v23` | 上記 | #1901。`reusable-issue-labels.yml`に`main-direct-pr-opened`・`main-direct-merged`が入り、**developを経由せず`issue-<番号>` → `main`のPRしか作らないリポジトリ**（`guchi-apps/docs`）でも`Develop PR` → `Done`まで進んでissueがcloseされるようになった版。**タグの作成と`docs`へのcaller新規配置は人が行う。** develop運用の既存リポジトリは`base.ref`の条件に一致しないため、配っても挙動は変わらない |
 | `workflows/v24` | 上記 | #1999。`reusable-issue-labels.yml`の`develop-merge-sweep`が、**PRのマージとほぼ同時にpushされてdevelopへ入らないままのコミット**を検知して`00.check-user`＋`01.check-blocked`で人へ渡すようになった版（あわせて、developへ入っていないコミットが無ければ先端が違っても`Develop`へ進める）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリでは取り残しが15分おきに見送られ続けるだけで通知されない（`guchi-apps/subscription-lists#99`で実測） |
 | `workflows/v25` | 上記 | #2042（対応PRは#2043）。`reusable-release-develop-to-main.yml`が作るバンプPRの本文が、実際の挙動どおり「CI通過後にdevelopへ自動マージされる」と案内するようになった版。それまでは直後で`gh pr merge --auto --merge`を実行しているにもかかわらず「自動マージはされません」と書いており、PRを見た人が手動マージを待つか、逆に放置して意図せずdevelopへ入っていた。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリのバンプPRには誤った案内が出続ける（issue-deck自身はローカルパス参照のため配布前から直っている） |
-| `workflows/v26` | 上記 | #2049。`reusable-sync-secrets.yml`が、同期スクリプトの失敗時にもログ（`FAIL <KEY>（理由）`の行と集計）と件数・項目名を出すようになった版。`run:`の既定シェル`bash -e {0}`の下で終了コードを`|| rc=$?`で受けていなかったため、**失敗したときだけ`cat "$LOG"`にも集計にも到達せず**、Actionsには`##[error]Process completed with exit code 1.`しか、画面には`同期=0 スキップ=0 失敗=0`としか出なかった（`guchi-apps/car-care#99`の切り分けが手作業になった）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリではシークレット同期が失敗しても理由が分からないままになる（issue-deck自身はローカルパス参照のため配布前から直っている） |
+| `workflows/v26` | 上記 | #2049。`reusable-sync-secrets.yml`が、同期スクリプトの失敗時にもログ（`FAIL <KEY>（理由）`の行と集計）と件数・項目名を出すようになった版。`run:`の既定シェル`bash -e {0}`の下で終了コードを`|| rc=$?`で受けていなかったため、**失敗したときだけ`cat "$LOG"`にも集計にも到達せず**、Actionsには`##[error]Process completed with exit code 1.`しか、画面には`同期=0 スキップ=0 失敗=0`としか出なかった（`guchi-apps/car-care#99`の切り分けが手作業になった）。**タグの作成と画面からの配布は人が行う。** 配るまで、対象リポジトリではシークレット同期が失敗しても理由が分からないままになる（issue-deck自身はローカルパス参照のため配布前から直っている）<br>あわせて#2106。`reusable-issue-labels.yml`の`manual-step-body-check`が、指摘が1件も無いときに空本文のコメントを投稿しようとして`Body cannot be blank`で落ちていたのを直した版。**まだタグを切っていないため、この行に足している。** 配るまで、対象リポジトリでは書式どおりの手作業Issueを起票するたびにジョブが1本失敗し、前回の指摘コメントも消えない |
 
 > **新しく置くcallerは、既存callerの版に合わせず最新のタグで置く。** #1591で
 > `clip-hive`・`ops-dashboard`へ`release-develop-to-main.yml`を足したときは、同じリポジトリの
@@ -477,13 +477,23 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > やり直すことになる。
 >
 > **例外は自動修復の3つ**（`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・
-> `claude-pr-repair.yml`。#1948）。**対象の判定を機械で書けた**ため、別の配布
-> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——前2つは
-> `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
-> `release-develop-to-main.yml`を持つリポジトリが対象で、`with:`は同じリポジトリの
-> `claude-issue-dispatch.yml`から写す。**タグの配布とは別のボタン・別のワークフローで、
+> `claude-pr-repair.yml`。#1948）**と`claude-review-develop.yml`**（#1475）。
+> **対象の判定を機械で書けた**ため、別の配布
+> （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——自動修復の前2つと
+> `claude-review-develop.yml`は`claude-issue-dispatch.yml`を持つリポジトリ、
+> `claude-pr-repair.yml`は`release-develop-to-main.yml`を持つリポジトリが対象。`with:`は
+> 同じリポジトリの`claude-issue-dispatch.yml`から写す（**`claude-review-develop.yml`だけは
+> 写さない**。`reusable-claude-review-develop.yml`が`runtime-setup`等を宣言しておらず、
+> 渡すと読み込みごと失敗するため）。**タグの配布とは別のボタン・別のワークフローで、
 > こちらは自動マージしない。** 仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
 > 「配布状況と、不足しているcallerの配布」を参照。
+>
+> **`claude-review-develop.yml`を配る前に、リポジトリ設定（`Allow auto-merge`と`develop`の
+> ブランチ保護）を揃えておく**（#1475）。保護が無いと`gh pr merge --auto`が「既にマージ
+> 可能」として断られ、callerを置いても自動マージは1本も成立しない。**設定はワークフローから
+> は変えられない**（`WORKFLOW_PAT`がAdministrationを持たない）ため、
+> `scripts/setup-develop-auto-merge.sh`をorg owner本人の`gh`で一度だけ実行する。配布側は
+> 前提が揃っているかを読んで警告するだけ。下記「`develop`のブランチ保護は自動マージの前提」を参照。
 - **`permissions`はcaller側で付与する。** 呼ばれる側の権限はcallerの付与範囲を超えられない。
 - **`secrets: inherit`は不要**（`secrets.GITHUB_TOKEN`は再利用可能ワークフローでも自動的に利用可能）。ただしリポジトリ固有のsecretsを使うワークフローでは必要になる。その場合、渡るのは**caller側リポジトリのsecrets**であるため、各リポジトリに個別の設定が要る。`reusable-issue-labels.yml`は`inherit`ではなく`PROGRESS_REPORT_SECRET`だけを個別に渡す形にしている（呼ばれる側へ渡る秘密を最小限に保つため）。
 - **`vars`は`secrets`と違い、渡さなくても参照できる**（caller側リポジトリ・organizationの変数として解決される）。`APP_BASE_URL`はこの経路で届くため、caller側に`with:`も`secrets:`も要らない。
@@ -1302,6 +1312,39 @@ rm -rf .shared-context .shared-prompts
   gh api repos/guchi-apps/my-app --jq '"delete_branch_on_merge=\(.delete_branch_on_merge) default_branch=\(.default_branch)"'
   gh api --method PATCH repos/guchi-apps/my-app -F delete_branch_on_merge=false
   ```
+
+### `develop`のブランチ保護は自動マージの前提（#1475）
+
+**`claude-review-develop.yml`を置いても、`develop`にブランチ保護（必須ステータスチェック）が
+無ければ自動マージは1本も成立しない。** `auto-merge`ジョブが実行する`gh pr merge --auto`は、
+PRが既にマージ可能な状態だと**「既にマージ可能」として断られる**。必須チェックが無いPRは
+判定の時点で常にその状態なので、ジョブは毎回失敗し、`auto-merge-fallback`が`00.check-user`を
+付ける——**未配布のときと同じ「全て手動マージ」に、失敗したジョブのぶんノイズが加わるだけ**に
+なる。実測では、`claude-review-develop.yml`が未配布だった12リポジトリすべてに保護が無かった。
+
+同じ保護は`release-develop-to-main.yml`のバンプPR（同じく`gh pr merge --auto --merge`で予約する）
+にも効く。
+
+- **必須チェック名は対象リポジトリのCIのジョブ名に合わせる。** 実測でも`lint-and-build`・
+  `test`・`verify`・`typecheck-and-test`・`backend`と割れており、`myroom`のように2つ
+  （`backend`・`frontend`）あるリポジトリもある
+- **実在しない名前を必須にすると、永久に埋まらずマージ不能になる。** ワークフローのジョブ名を
+  そのまま信じず、**直近のdevelop向けPRで実際に成功したcheck runと突き合わせて**確かめる
+- `ci.yml`の`pull_request.branches`に`develop`が含まれていることも確認する
+
+**設定はGitHub Actionsからは変えられない。** `WORKFLOW_PAT`は Administration を持たないため、
+`PATCH /repos/{repo}`（`allow_auto_merge`）もブランチ保護APIも通らない。
+`propagate-workflow-tag.sh`が`|| true`付きで有効化を試し続けていたが、12リポジトリ中8件が
+`false`のままで**失敗が一度も表に出ていなかった**。org owner本人の`gh`で次を実行する
+（既定はdry-run）。
+
+```bash
+# 確認だけ（対象は claude-issue-dispatch.yml を持ちデフォルトブランチが develop のリポジトリ）
+scripts/setup-develop-auto-merge.sh
+
+# 適用（Allow auto-merge の有効化と develop のブランチ保護作成）
+scripts/setup-develop-auto-merge.sh --apply
+```
 
 ### `develop`を持たないリポジトリ（main直行）
 

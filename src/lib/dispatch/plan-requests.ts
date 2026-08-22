@@ -94,6 +94,31 @@ export async function pollSessionPlanRequest(
 }
 
 /**
+ * セッションが待つのをやめたことを書き込み、**そのうえで最後にもう一度結論を返す**（#2108）。
+ *
+ * 呼ぶのは`scripts/session-notify.sh`——issue-deckへ届かない状態が続いて待ちを降りるとき。
+ * 伝えないと画面は待ち時間いっぱい「計画の承認を待っています」を出し続け、**押しても誰も
+ * 受け取らないボタン**が残る（実際に、1回のHTTP失敗で降りたフックがこの状態を作った）。
+ *
+ * 畳むのは`WAITING`のときだけなので、降りると決める直前に押されていればその結論が返り、
+ * フックはそれを許可判定として使える（降りるかどうかの最後の確認を兼ねる）。
+ *
+ * 状態は`DEFERRED`（＝端末で答える）にする。人が「端末・Remote Controlで答える」を押した
+ * ときと**画面に出す結果は同じ**——どちらも「ここからは送れない。端末に承認プロンプトが
+ * 出ている」であり、状態を分けても画面の出し分けが増えるだけになる。
+ */
+export async function releaseSessionPlanRequest(
+  id: string,
+  now: Date = new Date(),
+): Promise<SessionPlanOutcome | null> {
+  await db.sessionPlanRequest.updateMany({
+    where: { id, status: "WAITING" },
+    data: { status: "DEFERRED", decidedAt: now, deliveredAt: now },
+  });
+  return pollSessionPlanRequest(id, now);
+}
+
+/**
  * 画面から押した結果を書き込む。**`WAITING`のときだけ通す**（1回で確定する）。
  *
  * 判定と書き込みを`updateMany`の`where`で同時に行い、同時に押された・待ち時間ちょうどに

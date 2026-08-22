@@ -36,6 +36,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     maxSessions: 12,
     liveSessions: 2,
     metrics: null,
+    launchHold: null,
     checkout: CHECKOUT,
     ...overrides,
   };

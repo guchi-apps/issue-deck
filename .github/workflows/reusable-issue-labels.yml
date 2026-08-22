@@ -1505,7 +1505,13 @@ jobs:
             --jq '.[] | select(.body | startswith("<!-- issue-deck-source:manual-step-body-check -->")) | .id' \
             | head -n 1)"
 
-          if [ ! -s comment.md ]; then
+          # **サイズではなく中身で判定する**(#2106)。指摘が無いときAPIは`comment: null`を返し、
+          # `jq -r '.comment // ""'`は空文字を出すが、jqが末尾に改行を付けるため comment.md は
+          # 改行1バイトのファイルになる。`[ -s ]`はサイズしか見ないのでここを素通りし、
+          # 空本文の投稿がGraphQLの`Body cannot be blank`で落ちてジョブごと赤くなっていた
+          # (書式どおりの手作業Issueを起票するたびに再現した)。**前回の指摘を消す経路も
+          # 同じ`if`の中にあるため、指摘を直しても古いコメントが残り続けていた。**
+          if [ -z "$(tr -d '[:space:]' < comment.md)" ]; then
             if [ -n "$existing" ]; then
               gh api --method DELETE "repos/$GH_REPO/issues/comments/$existing"
               echo "指摘が解消したため、前回のコメントを削除しました"

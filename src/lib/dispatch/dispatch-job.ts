@@ -4,7 +4,7 @@ import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 // 型だけのimport（コンパイル時に消える）。`host-metrics.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない
-import type { DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+import type { DispatchHostLaunchHold, DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
@@ -338,6 +338,15 @@ export type DispatchHostView = {
    * こちらは画面へ出すための写し。
    */
   metrics: DispatchHostMetrics | null;
+  /**
+   * メモリ・SWAPが逼迫しているため、pollerが起動ジョブを見送っている（#2095）。
+   * **見送っていない巡と、見送りを申告しない古いpollerでは`null`。**
+   *
+   * **`metrics`とは立場が違う。** あちらは画面へ出すためだけの写しだが、こちらは
+   * その巡のpollerの実際の動き（`maxJobs: 0`でclaimした）そのもの。ただし**判定は
+   * poller側のまま**で、issue-deckは閾値を持たない（`maxSessions`と同じ）。
+   */
+  launchHold: DispatchHostLaunchHold | null;
   /**
    * pollerが動かしているチェックアウトの版（#1612）。**申告していなければ`null`**
    * （古いpoller・gitが無い・読めなかった巡）。

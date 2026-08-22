@@ -112,8 +112,25 @@ ExitPlanMode（計画の提示）
   なり、端末に従来どおりの承認プロンプトが出る。画面には残り時間がカウントダウンで出る
 - **待っている間、端末には承認プロンプトが出ない。** 端末に座っているなら`Esc`で中断すれば
   すぐプロンプトへ戻せる。画面の「端末・Remote Controlで答える」を押しても同じ
+- **端末と画面の両方で同時に答えられるようにはできない。** 端末の承認プロンプトはフックが
+  返った後にしか出ず、出たあとにそれへ答えられるのは端末（とRemote Control）だけ——画面から
+  そこへ届かせる手段は`send-keys`しかなく、[gates.md](gates.md)で禁じている（選択フォームへ
+  組み立てた文字列を送って1問目が勝手に回答済みになった事故がある）。したがって
+  **「待っている間は画面が正、降りたら端末が正」を確実に切り替える**のが取れる最善で、
+  切り替わったことは画面（「端末に承認プロンプトを出しました」＋Remote Controlのリンク）に出す
 - **フェイルオープン。** issue-deckが応答しない・返事待ちを作れなかった・`planRequestId`が
   返らなかった、のいずれでも待たずに終える。**この機能が壊れてもセッションは詰まらない**
+- **ただし1回の失敗では降りない**（#2108）。宛先は本番のissue-deckで、30分待つあいだに
+  数百回引くため、瞬断や再起動で1回外すことは普通に起きる。**降りるのは届かない状態が
+  `SESSION_PLAN_POLL_GRACE_SECONDS`（既定60秒）続いたときだけ**
+- **降りるときは画面の待ちも畳ませる**（#2108。`POST /api/dispatch/sessions/plan/decision`）。
+  伝えないと画面は待ち時間いっぱいカウントダウンを出し続け、**押しても誰も受け取らない
+  ボタン**が残る。この往復の応答は最後の確認も兼ねていて、降りる直前に押されていれば
+  その結論をそのまま許可判定として使う
+- **返事待ちを作るかどうかは、Issueコメントを投稿できたかとは切り離す**（#2108）。パネルが
+  描いているのはDBに保存した計画本文で、コメントの取得には依存していない。コメントを
+  書けなかったことを理由に待ちを作らないと、**端末には計画が出ているのに画面からは承認も
+  修正もできない**という、いちばん困る組み合わせになる
 - 待ち時間は`~/.config/issue-deck/notify.env`の`SESSION_PLAN_WAIT_SECONDS`（秒。`0`で待たない。
   60〜3600の範囲へissue-deck側が丸める）。`ExitPlanMode`のフックだけ`timeout`を延ばして
   あるのはこのため（`scripts/run-issue-session.sh`。**打ち切られても壊れない**）
@@ -132,7 +149,32 @@ ExitPlanMode（計画の提示）
   一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
   `lib/github/check-user-guidance.ts`
 
-### 計画本文は`ExitPlanMode`の引数では渡ってこない
+### フックが何をしたかは転記の`hook_success`で追える
+
+**フックの標準出力・標準エラー・所要時間・終了コードは、転記（`~/.claude/projects/<スラッグ>/<セッションID>.jsonl`）に
+`{"type":"attachment","attachment":{"type":"hook_success",...}}`として残る**（#2108で判明）。フックは
+端末に何も出さないまま終わることがあり、Signalyにもissue-deckにも残らないため、**ここが唯一の記録**になる。
+
+```bash
+python3 -c '
+import json, sys
+for line in open(sys.argv[1]):
+    hook = (json.loads(line).get("attachment") or {})
+    if hook.get("type") == "hook_success":
+        print(hook["hookName"], hook["durationMs"], repr(hook["stderr"]))
+' <転記のパス>
+```
+
+「計画の返事待ちが108秒で降りていた」も、`durationMs: 107886`と
+`stderr: session-notify: 計画の返事をissue-deckから取得できませんでした`から確定させた。
+**フックの挙動を疑ったら、まずここを見る。**
+
+### 計画本文は`ExitPlanMode`の引数では渡ってこない（版による）
+
+**Claude Code 2.1.239の実測では`tool_input.plan`に本文が入っていた**（#2108）。下に書いた
+「渡ってこない」は当時の実測で、**版によって変わる**。引数にあればそれを使い、無ければ転記から
+探す二段構えはそのまま残す——どちらかに寄せると、寄せた側でない版に当たった時点で計画が
+載らなくなる。
 
 **計画は`~/.claude/plans/<スラッグ>.md`にある。** plan modeに入るとClaude Codeがそのパスを
 エージェントへ指示し、エージェントが`Write`／`Edit`で書く。`ExitPlanMode`は**そのファイルを

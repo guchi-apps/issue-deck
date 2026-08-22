@@ -64,7 +64,7 @@ export type WorkflowTagOverview = {
    */
   propagation: PropagationRun | null;
   /**
-   * 自動修復ワークフローの配布（`propagate-repair-workflows.yml`）の最新の実行（#1948）。
+   * 不足しているcallerの配布（`propagate-repair-workflows.yml`）の最新の実行（#1948・#1475）。
    *
    * タグ配布とは別のrunなので分けて持つ。**同時に走っても互いを妨げない**——タグ配布は
    * 既存callerのsed置換、こちらは新しいcallerの追加で、触るファイルが重ならない。
@@ -100,7 +100,7 @@ type RepositoryEntry = {
 type RepositoryRefs = {
   refs: WorkflowTagRef[];
   /**
-   * `.github/workflows/`直下のファイル名一覧（#1948）。自動修復のcallerが置かれているかは
+   * `.github/workflows/`直下のファイル名一覧（#1948）。配布対象のcallerが置かれているかは
    * **中身ではなくファイルの実在**で決まるため、参照タグの解析と同じ応答から拾える。
    */
   files: string[];
@@ -556,7 +556,7 @@ export type DispatchRepairPropagationResult = {
 };
 
 /**
- * 自動修復のcallerが無いリポジトリへ、それを追加するPRを作るワークフローを起動する（#1948）。
+ * 置かれていないcallerが有るリポジトリへ、それを追加するPRを作るワークフローを起動する（#1948・#1475）。
  *
  * **なぜ要るか。** 画面の「コンフリクトを自動解消」「CI失敗を自動修正」は
  * `workflow_dispatch`でcallerを起動するため、callerが無いリポジトリでは押しても

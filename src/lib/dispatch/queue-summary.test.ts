@@ -58,6 +58,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     maxSessions: 12,
     liveSessions: 3,
     metrics: null,
+    launchHold: null,
     checkout: null,
     ...overrides,
   };
@@ -305,6 +306,9 @@ describe("summarizeDispatchSessionCapacity", () => {
   });
 });
 
+/** メモリの逼迫でpollerが起動を見送っている申告（#2095） */
+const MEMORY_HOLD = { reason: "MEMORY", percent: 92.3, thresholdPercent: 85 } as const;
+
 describe("describeDispatchQueueStall", () => {
   const queued = summarizeDispatchQueue([job()], 2);
 
@@ -328,6 +332,27 @@ describe("describeDispatchQueueStall", () => {
 
   it("空きがあれば理由を出さない", () => {
     expect(describeDispatchQueueStall(queued, [host()])).toBeNull();
+  });
+
+  // 本数に空きがあってもメモリ・SWAPが逼迫していれば取りに来ない（#2095）。
+  // 出さないと「順番待ちのまま進まない」としか見えず、pollerが落ちている状態と区別が付かない
+  it("メモリ・SWAPの逼迫で見送っているホストがあれば理由を出す", () => {
+    const reason = describeDispatchQueueStall(queued, [host({ launchHold: MEMORY_HOLD })]);
+    expect(reason).toContain("サブPC（メモリ 92%（上限 85%））");
+    expect(reason).toContain("余力が戻ると自動で再開");
+  });
+
+  // 両方に当てはまるなら畳むのが先。待っている人にできることがそちらの方が具体的
+  it("本数の上限にも達していれば、そちらを理由に出す", () => {
+    expect(
+      describeDispatchQueueStall(queued, [host({ liveSessions: 12, launchHold: MEMORY_HOLD })]),
+    ).toContain("セッション本数の上限");
+  });
+
+  it("見送っていても応答していないホストは数えない", () => {
+    expect(
+      describeDispatchQueueStall(queued, [host({ launchHold: MEMORY_HOLD, online: false })]),
+    ).toBeNull();
   });
 });
 
@@ -363,6 +388,18 @@ describe("describeDispatchJobWaitReason", () => {
     expect(
       describeDispatchJobWaitReason(job({ targetHost: "other" }), [host({ liveSessions: 12 })]),
     ).toBeNull();
+  });
+
+  // 本数の上限とは待っている人にできることが違うため、別の文で説明する（#2095）
+  it("メモリ・SWAPの逼迫で見送っている場合はその理由を添える", () => {
+    const reason = describeDispatchJobWaitReason(job(), [host({ launchHold: MEMORY_HOLD })]);
+    expect(reason).toContain("サブPCのメモリ 92%（上限 85%）のため、まだ起動できません");
+  });
+
+  it("本数の上限にも達していれば、そちらを理由に添える", () => {
+    expect(
+      describeDispatchJobWaitReason(job(), [host({ liveSessions: 12, launchHold: MEMORY_HOLD })]),
+    ).toContain("上限（12/12本）");
   });
 });
 
