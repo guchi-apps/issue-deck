@@ -32,6 +32,7 @@ import {
   formatManualStepListCount,
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
+import { formatCheckUserListCount } from "@/lib/check-user-attention";
 import { formatQuestionListCount } from "@/lib/question-attention";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
@@ -90,6 +91,11 @@ type MobileIssueListScreenProps = {
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /**
+   * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
+   * ヘッダーの件数の内訳（`2件・実行中1件`）にだけ使い、行は今までどおり並べる。
+   */
+  checkUserRunningIssueIds?: ReadonlySet<string>;
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
   onStartManualStepGuide?: (startIssueId?: string) => void;
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
@@ -141,6 +147,7 @@ export function MobileIssueListScreen({
   onAskCrossRepoQuestion,
   pinned,
   prerequisiteReadiness,
+  checkUserRunningIssueIds,
   onStartManualStepGuide,
   onStartIssueOrder,
   onStartCodeReview,
@@ -163,11 +170,17 @@ export function MobileIssueListScreen({
   // 「ユーザーの作業待ち」だけは、メニューと同じ「いま実行できる件数」に前提待ちを添える
   // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ。
   // 「質問」の未確認の内訳（#1796）も同じ理由でここに出す（PCの一覧ヘッダーと同じ表記）
+  // 「ユーザーの確認待ち」も同じ形で、実行中のぶんを差として添える（#2174）
+  const checkUserRunningCount =
+    view === "check-user" && checkUserRunningIssueIds
+      ? issues.filter((issue) => checkUserRunningIssueIds.has(issue.id)).length
+      : 0;
   const countLabel =
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(issues, prerequisiteReadiness)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    formatCheckUserListCount(listedCount, checkUserRunningCount) ??
     `${listedCount}件`;
   const displayNavCounts = useMemo(() => {
     if (!pinned || pinned.count === 0) return navCounts;
@@ -305,6 +318,7 @@ export function MobileIssueListScreen({
         // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
         prerequisiteReadiness={prerequisiteReadiness}
+        checkUserRunningIssueIds={checkUserRunningIssueIds}
         onStartManualStepGuide={onStartManualStepGuide}
         onStartIssueOrder={onStartIssueOrder}
         onStartCodeReview={onStartCodeReview}

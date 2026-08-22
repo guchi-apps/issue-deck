@@ -168,9 +168,16 @@ jobs:
 
           # `key: value` 形式の行。値が無い（ブロックが続く）場合もここで拾う
           KEY_RE = re.compile(r"^(\s*)([A-Za-z0-9_.\-]+):(?:\s+(.*))?$")
-          # シェルの変数参照。GitHubの式 `${{ ... }}` は `{` が名前に含まれないため一致しない
+          # シェルの変数参照。GitHubの式（`EXPR_OPEN` で始まる形）は `{` が名前に
+          # 含まれないため一致しない
           VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|\$([A-Za-z_][A-Za-z0-9_]*)")
           BLOCK_SCALARS = {"|", "|-", "|+", ">", ">-", ">+"}
+          # GitHubの式の開始記号。**このYAMLへリテラルで書いてはいけない**（#2181）。
+          # GitHub Actions は `run:` の中も式テンプレートとして解釈するため、そのまま
+          # 書くと式として評価され、ファイルごと「Invalid workflow file」になる。すると
+          # pushのたびに失敗runが1件記録され、main宛PRではこのワークフロー自体が
+          # 起動しなくなる（実際に54件連続で失敗した）。連結して組み立てる。
+          EXPR_OPEN = "$" + "{{"
           TAR_FLAGS_RE = re.compile(r"^[cxtrujzvfJZa]+$")
 
           errors = []
@@ -395,9 +402,9 @@ jobs:
                   for command in logical_commands(body):
                       if not re.match(r"^\s*tar\b", command):
                           continue
-                      if "${{" in command:
-                          # GitHubの式は展開後の値が分からない。`${{` は shlex が3トークンへ割るため、
-                          # そのまま渡すと式の中身をパスとして誤検知する
+                      if EXPR_OPEN in command:
+                          # GitHubの式は展開後の値が分からない。開始記号を shlex が
+                          # 3トークンへ割るため、そのまま渡すと式の中身をパスとして誤検知する
                           notes.append(f"{workflow}: GitHubの式を含む tar は検査していません")
                           continue
                       try:

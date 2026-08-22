@@ -269,7 +269,13 @@ export type BranchFlowRepositorySummary = {
   activeLaneCount: number;
   /** CIが失敗しているopenなPRがある */
   hasCiFailure: boolean;
-  /** ユーザーがマージするしかないopenなPRがある（リリースPRを除く） */
+  /**
+   * ユーザーがマージするしかないopenなPRがある（リリースPRを除く）。
+   *
+   * **畳んだ1行には出さず、ヘッダーの「手が要るもの◯件」だけに使う**（#2172）。ピルとして
+   * 出していたころは文言が長く、スマホ幅でその行だけが2段に折り返していた。マージの導線は
+   * 開いたPR行とPR一覧画面が持っている。
+   */
   needsUserMerge: boolean;
   /**
    * このリポジトリに残っている未完了の手作業Issue（`71.manual-step`）の件数（#1586）。

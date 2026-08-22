@@ -42,6 +42,7 @@ import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
+import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
@@ -50,6 +51,7 @@ import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useIssueOrderGuide } from "@/hooks/use-issue-order-guide";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
@@ -67,6 +69,7 @@ import {
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
+import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
 import {
   isMergeCheckUser,
   resolveCheckUserToasts,
@@ -497,6 +500,17 @@ export function IssueDeckShell({
     pullRequestAutoRefreshIntervalMs,
   );
 
+  // サブPCのディスパッチ状態（#1262の取り決めどおり**親で1回だけ呼んで配る**）。
+  // ここで持つのは「確認待ちのIssueでエージェントがまだ動いているか」を判定するため（#2174）で、
+  // 同じものをIssue一覧へも渡す——一覧が自前で持つと、同じ画面のために取得が2本走る。
+  const dispatch = useDispatchState(true);
+  // セッションの報告がどれだけ古いかを見るための現在時刻（`isSessionActivelyWorking`）。
+  // **間隔は既定より粗い1分**——判定の境目は5分（`SESSION_ACTIVITY_STALE_MS`）なので分解能は
+  // これで足り、時計が進むたびにこの画面全体が描き直されるのを抑える。
+  // **`dispatch.fetchedAt`では代用しない。** 取得が失敗している間は進まないため、落ちた
+  // セッションのIssueが確認待ちの件数から外れたまま戻らなくなる（数え漏らす側へは倒さない）。
+  const now = useNow(60_000);
+
   const issuePolling = useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(issues, polledIssues);
 
@@ -531,6 +545,14 @@ export function IssueDeckShell({
         issues: reconciledIssues,
         pullRequests: openPullRequests.pullRequests,
         pullRequestsFetchedAt: openPullRequests.fetchedAt,
+        // エージェントがまだ動いている間は出さずに持つ（#2174）。左メニューの件数から
+        // 外しているのと同じ判定で、**この場で求める**——`useMemo`の結果はこの周回より
+        // 前の描画で作られたもので、いま届いた`reconciledIssues`を見ていない
+        runningIssueIds: selectCheckUserRunningIssueIds(reconciledIssues, {
+          pullRequests: openPullRequests.pullRequests,
+          sessions: dispatch.sessions,
+          now: detectedAt,
+        }),
         now: detectedAt,
       });
       if (ready.length > 0) {
@@ -683,12 +705,6 @@ export function IssueDeckShell({
     [filters],
   );
 
-  // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
-  // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
-  const navCounts = useMemo(
-    () => computeNavCountsForFilters(issues, filtersWithAiSearch, currentUserLogin),
-    [issues, filtersWithAiSearch, currentUserLogin],
-  );
   // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
   // どのビューを表示していても求める。絞り込みを適用しないビュー（#1750）なので、
   // 母集団は絞り込み前の全Issue。
@@ -820,6 +836,33 @@ export function IssueDeckShell({
     [openPullRequests.pullRequests, optimisticMerges],
   );
 
+  // 確認待ちのうち、まだエージェントが動いていて押せる操作が無いもの（#2174）。
+  // **左メニューの件数・一覧のヘッダー・ベルが同じ集合を読む**ので、ここで1回だけ求めて配る。
+  const checkUserRunningIssueIds = useMemo(
+    () =>
+      selectCheckUserRunningIssueIds(checkUserIssues, {
+        pullRequests: crossRepositoryPullRequests,
+        sessions: dispatch.sessions,
+        now,
+      }),
+    [checkUserIssues, crossRepositoryPullRequests, dispatch.sessions, now],
+  );
+
+  // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
+  // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
+  // 「ユーザーの確認待ち」だけは実行中のIssueを外した数にする（#2174）。
+  const navCounts = useMemo(
+    () =>
+      computeNavCountsForFilters(
+        issues,
+        filtersWithAiSearch,
+        currentUserLogin,
+        issues,
+        checkUserRunningIssueIds,
+      ),
+    [issues, filtersWithAiSearch, currentUserLogin, checkUserRunningIssueIds],
+  );
+
   const filteredPullRequests = useMemo(
     () => filterPullRequestsByView(visiblePullRequests, filters.prview),
     [visiblePullRequests, filters.prview],
@@ -847,6 +890,12 @@ export function IssueDeckShell({
     () => pullRequestsWaitingForMergeChecks(crossRepositoryPullRequests, checkUserIssues).length,
     [crossRepositoryPullRequests, checkUserIssues],
   );
+
+  // 「ユーザーの確認待ち」に並ぶマージ待ちPRの取り直し（#2175）。PCの「更新」ボタンと、
+  // スマホで一覧を下へ引っ張る操作が同じ入口を使う。**`refreshFromPull`を通す**のは、
+  // 飛んでいる取得の完了を待って返し、失敗を画面に出すのがこのフックではこれだけのため
+  // （#1947。`refresh`は同期の合図で、待っても取得の完了とは無関係に返る）。
+  const refreshCheckUserPullRequests = openPullRequests.refreshFromPull;
 
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
   // すぐ下に並ぶメニューの行と必ず同じ数字になる。
@@ -1113,6 +1162,8 @@ export function IssueDeckShell({
         repositories={repositories}
         issues={issues}
         pullRequests={crossRepositoryPullRequests}
+        /* 実行中の確認待ちは「実行中」として弱く出す（#2174）。左メニューの件数と同じ集合 */
+        checkUserRunningIssueIds={checkUserRunningIssueIds}
         onRefreshIssues={issuePolling.refresh}
         onRefreshPullRequests={openPullRequests.refreshInBackground}
         isRefreshingPullRequests={openPullRequests.isRefreshing}
@@ -1271,6 +1322,9 @@ export function IssueDeckShell({
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
+                  /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
+                     件数の内訳に使う（左メニュー・ホームの数字からは外してある） */
+                  checkUserRunningIssueIds={checkUserRunningIssueIds}
                   /* PR画面へ移らず、その場に重ねて開く（#2149）。戻る操作で閉じる */
                   onSelectPullRequest={(pullRequest) => selectPullRequestModal(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
@@ -1283,6 +1337,9 @@ export function IssueDeckShell({
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
                      経路（reconcileIssues・確認待ちトーストの判定）を通す */
                   onRefresh={issuePolling.refresh}
+                  /* 同じ操作で走らせるマージ待ちPRの取り直し（#2175）。呼ぶかどうかの
+                     判定（確認待ちを見ているときだけ）は受け取った側が持つ */
+                  onRefreshPullRequests={refreshCheckUserPullRequests}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                   onStartManualStepGuide={manualStepGuide.start}
@@ -1495,6 +1552,9 @@ export function IssueDeckShell({
                       onSelectPullRequest={(pullRequest) =>
                         selectPullRequestModal(pullRequest.id)
                       }
+                      /* PCは一覧を指で引けないため、ここから取り直す（#2175） */
+                      onRefresh={() => void refreshCheckUserPullRequests()}
+                      isRefreshing={openPullRequests.isRefreshing}
                     />
                   ) : undefined
                 }
@@ -1507,6 +1567,11 @@ export function IssueDeckShell({
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
+                // 確認待ちのうちエージェントがまだ動いているもの（#2174）。左メニューの件数から
+                // 外したぶんを、ヘッダーの内訳（`2件・実行中1件`）で説明する
+                checkUserRunningIssueIds={checkUserRunningIssueIds}
+                // ディスパッチの取得はこの画面で1本にまとめる（#1262の取り決め）
+                dispatch={dispatch}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
                 onStartManualStepGuide={manualStepGuide.start}
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）

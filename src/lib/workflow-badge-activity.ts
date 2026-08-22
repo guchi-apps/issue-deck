@@ -74,8 +74,14 @@ export function isWorkflowBadgeSpinning(params: {
  *
  * `isSessionWaitingInput`（`src/lib/dispatch/issue-session.ts`）の裏返しではない。あちらは
  * 入力待ちだけを見るが、こちらは終了・報告の途絶も除く必要がある。
+ *
+ * **確認待ちを数えるかどうかの判定（`lib/check-user-attention.ts`・#2174）からも呼ぶ。**
+ * バッジの回転と同じ材料で「いまエージェントが動いているか」を決めるため、判定はここ1か所に置く。
  */
-function isSessionActivelyWorking(session: WorkflowBadgeSession | null, now: number | null): boolean {
+export function isSessionActivelyWorking(
+  session: WorkflowBadgeSession | null,
+  now: number | null,
+): boolean {
   if (!session) return false;
   if (session.state !== "ALIVE") return false;
   if (session.activity === "WAITING_INPUT") return false;

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -240,6 +240,27 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
     renderList({ prerequisiteReadiness: readiness, view: "all" });
 
     expect(screen.getByText("3件")).toBeTruthy();
+  });
+});
+
+// #2174: 左メニューが実行中の確認待ちを件数から外すため、一覧の行数のままだと数が食い違う
+describe("「ユーザーの確認待ち」のヘッダーの件数（#2174）", () => {
+  it("実行中のIssueを引いた件数と、その内訳を出す", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set(["1"]) });
+
+    expect(screen.getByText("2件・実行中1件")).toBeTruthy();
+  });
+
+  it("実行中が無ければ今までどおり並んでいる件数を出す", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set<string>() });
+
+    expect(screen.getByText("3件")).toBeTruthy();
+  });
+
+  it("行は実行中でも一覧から消さない", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set(["1"]) });
+
+    expect(rowOf(1)).toBeTruthy();
   });
 });
 
@@ -765,5 +786,37 @@ describe("自動実行バッジの一覧（#2119）", () => {
     fireEvent.click(screen.getByRole("button", { name: "順番に進める" }));
 
     expect(onStartManualStepGuide).toHaveBeenCalledWith();
+  });
+});
+
+/**
+ * jsdomには`TouchEvent`のコンストラクタが無いため、フックが読む`touches`だけを持つ
+ * イベントを組み立ててdispatchする（`use-pull-to-refresh.test.tsx`と同じやり方）。
+ */
+function touchEvent(type: string, x: number, y: number) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+  return event;
+}
+
+describe("先頭に固定したセクションの引っ張って更新（#2175）", () => {
+  it("固定セクションの上から下へ引っ張っても更新が走る", async () => {
+    // 「ユーザーの確認待ち」の先頭に並ぶマージ待ちPR（#1613）は画面の上半分を占めることが
+    // あり、引っ張りのタッチを受ける枠の外に置くと、そこを下へなぞっても何も起きなかった。
+    const onPullToRefresh = vi.fn().mockResolvedValue(undefined);
+    renderList({
+      pinnedSection: <div data-testid="pinned">あなたのマージを待っているPull Request</div>,
+      onPullToRefresh,
+    });
+
+    const pinned = screen.getByTestId("pinned");
+    await act(async () => {
+      pinned.dispatchEvent(touchEvent("touchstart", 100, 100));
+      pinned.dispatchEvent(touchEvent("touchmove", 100, 140));
+      pinned.dispatchEvent(touchEvent("touchmove", 100, 300));
+      pinned.dispatchEvent(new Event("touchend", { bubbles: true }));
+    });
+
+    expect(onPullToRefresh).toHaveBeenCalledTimes(1);
   });
 });
